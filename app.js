@@ -409,56 +409,67 @@ function renderEditor(md, opts = {}) {
   editor.replaceChildren(frag);
 }
 
-// Read markdown back from editor DOM. Robust to whatever shape the browser
-// has left the contenteditable in (bare divs, BRs, foreign nodes).
+// Read markdown back from editor DOM. Each top-level block child of the
+// editor is exactly one source line; BRs and images inside a block are
+// treated as layout / non-source (they don't create new source lines).
 function readEditorMarkdown() {
   const lines = [];
-  let buf = '';
-  const flush = () => { lines.push(buf); buf = ''; };
   const isBlock = (n) => n.nodeName && ['DIV', 'P', 'LI', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6', 'PRE', 'BLOCKQUOTE'].includes(n.nodeName);
-  function walk(n) {
-    if (n.nodeType === 3) { buf += n.nodeValue; return; }
-    if (n.nodeName === 'BR') { flush(); return; }
-    if (n.classList && n.classList.contains('ed-trunc')) { buf += n.dataset.full; return; }
-    const block = isBlock(n);
-    if (block && buf.length > 0) flush();
-    for (const c of n.childNodes) walk(c);
-    if (block) flush();
+  function readInline(n) {
+    let s = '';
+    function w(x) {
+      if (x.nodeType === 3) { s += x.nodeValue; return; }
+      if (x.nodeName === 'BR' || x.nodeName === 'IMG') return;
+      if (x.classList && x.classList.contains('ed-trunc')) { s += x.dataset.full; return; }
+      for (const c of x.childNodes) w(c);
+    }
+    w(n);
+    return s;
   }
-  for (const c of editor.childNodes) walk(c);
-  if (buf.length > 0) lines.push(buf);
-  // Strip the spurious trailing empty produced by the final block flush.
-  if (lines.length > 1 && lines[lines.length - 1] === '') lines.pop();
+  let pending = '';
+  for (const child of editor.childNodes) {
+    if (child.nodeType === 3) {
+      pending += child.nodeValue;
+    } else if (child.nodeName === 'BR') {
+      lines.push(pending); pending = '';
+    } else if (isBlock(child)) {
+      if (pending.length > 0) { lines.push(pending); pending = ''; }
+      lines.push(readInline(child));
+    } else {
+      pending += readInline(child);
+    }
+  }
+  if (pending.length > 0) lines.push(pending);
   return lines.join('\n');
 }
 
 /* ----------------------------------------------------------------
    cursor — save/restore by (lineIndex, charOffset)
+   Uses sibling index (not data-line attr) so it works even when the
+   DOM is in a transient state between lazy re-renders.
 ---------------------------------------------------------------- */
 function getCursorPos() {
   const sel = window.getSelection();
-  if (!sel.rangeCount) return null;
+  if (!sel || !sel.rangeCount) return null;
   const range = sel.getRangeAt(0);
   let node = range.startContainer;
+  // Climb to the direct child of editor
   let line = node;
-  while (line && (!line.classList || !line.classList.contains('ed-line'))) line = line.parentNode;
-  if (!line || !editor.contains(line)) return null;
-  const lineIndex = parseInt(line.dataset.line, 10);
-  // Compute char offset within the line, taking truncated nodes' full text into account
+  while (line && line.parentNode !== editor) line = line.parentNode;
+  if (!line || line.parentNode !== editor) return null;
+  const blocks = [...editor.children];
+  const lineIndex = blocks.indexOf(line);
+  if (lineIndex < 0) return null;
   let offset = 0;
   function walk(n) {
     if (n === range.startContainer) {
       if (n.nodeType === 3) offset += range.startOffset;
-      else {
-        // ranged inside an element
-        for (let i = 0; i < range.startOffset; i++) walk(n.childNodes[i]);
-      }
+      else for (let i = 0; i < range.startOffset; i++) walk(n.childNodes[i]);
       return true;
     }
-    if (n.classList && n.classList.contains('ed-trunc')) {
-      offset += n.dataset.full.length; return false;
-    }
+    if (n.classList && n.classList.contains('ed-trunc')) { offset += n.dataset.full.length; return false; }
     if (n.nodeType === 3) { offset += n.nodeValue.length; return false; }
+    if (n.nodeName === 'BR' || n.nodeName === 'IMG') return false;
     for (const c of n.childNodes) if (walk(c)) return true;
     return false;
   }
@@ -468,8 +479,9 @@ function getCursorPos() {
 
 function setCursorPos(pos) {
   if (!pos) return;
-  const lines = editor.querySelectorAll('.ed-line');
-  const line = lines[Math.min(pos.lineIndex, lines.length - 1)];
+  const blocks = [...editor.children];
+  if (!blocks.length) return;
+  const line = blocks[Math.min(Math.max(0, pos.lineIndex), blocks.length - 1)];
   if (!line) return;
   let remaining = pos.offset;
   const sel = window.getSelection();
@@ -478,53 +490,86 @@ function setCursorPos(pos) {
     if (!n) return false;
     if (n.classList && n.classList.contains('ed-trunc')) {
       const len = n.dataset.full.length;
-      if (remaining <= len) {
-        range.setStartAfter(n); range.collapse(true); return true;
-      }
+      if (remaining <= len) { range.setStartAfter(n); range.collapse(true); return true; }
       remaining -= len; return false;
     }
     if (n.nodeType === 3) {
-      if (remaining <= n.nodeValue.length) {
-        range.setStart(n, remaining); range.collapse(true); return true;
-      }
+      if (remaining <= n.nodeValue.length) { range.setStart(n, remaining); range.collapse(true); return true; }
       remaining -= n.nodeValue.length; return false;
     }
-    if (n.nodeName === 'BR') return false;
+    if (n.nodeName === 'BR' || n.nodeName === 'IMG') return false;
     for (const c of n.childNodes) if (place(c)) return true;
     return false;
   }
   let placed = false;
   for (const c of line.childNodes) if (place(c)) { placed = true; break; }
-  if (!placed) {
-    range.selectNodeContents(line); range.collapse(false);
-  }
+  if (!placed) { range.selectNodeContents(line); range.collapse(false); }
   sel.removeAllRanges(); sel.addRange(range);
 }
 
 /* ----------------------------------------------------------------
    editor input handling
+
+   Hot path (each keystroke):
+     - quickStyleCurrentLine: just updates the data-type attr of the
+       current line (font-size / colour comes from CSS) — no DOM swap.
+     - readEditorMarkdown + schedulePreview: refresh preview.
+     - scheduleLazyEditorRender: full re-tokenization happens only
+       after the user pauses (debounced). This is what gives us
+       fast, smooth typing.
 ---------------------------------------------------------------- */
-let pendingRender = false;
 let lastMarkdown = '';
 
+function readCurrentEditorLine() {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return null;
+  let n = sel.getRangeAt(0).startContainer;
+  while (n && n.parentNode !== editor) n = n.parentNode;
+  if (!n || n.parentNode !== editor) return null;
+  let s = '';
+  function w(x) {
+    if (x.nodeType === 3) { s += x.nodeValue; return; }
+    if (x.nodeName === 'BR' || x.nodeName === 'IMG') return;
+    if (x.classList && x.classList.contains('ed-trunc')) { s += x.dataset.full; return; }
+    for (const c of x.childNodes) w(c);
+  }
+  w(n);
+  return { line: n, text: s };
+}
+
+function quickStyleCurrentLine() {
+  const cur = readCurrentEditorLine();
+  if (!cur) return;
+  const info = classifyLine(cur.text, { inFence: false });
+  if (cur.line.dataset.type !== info.type) cur.line.dataset.type = info.type;
+}
+
 function handleEditorInput() {
-  const pos = getCursorPos();
+  quickStyleCurrentLine();
   const md = readEditorMarkdown();
   if (md === lastMarkdown) return;
   lastMarkdown = md;
-  // Re-render with full pass (cheap enough for typical note size)
-  renderEditor(md);
-  setCursorPos(pos);
   schedulePreview(md);
+  scheduleLazyEditorRender();
   markDirty();
   scheduleSave();
   updateWordCount(md);
 }
 
+const scheduleLazyEditorRender = debounce(() => {
+  const isEditing = editor.contains(document.activeElement);
+  const pos = isEditing ? getCursorPos() : null;
+  renderEditor(lastMarkdown);
+  if (pos) setCursorPos(pos);
+  syncLineHeights();
+}, 450);
+
 const schedulePreview = debounce((md) => {
+  // Don't trample the user's cursor while they're typing inside preview
+  if ($('preview').contains(document.activeElement)) return;
   $('preview').innerHTML = renderPreview(md);
   syncLineHeights();
-}, 80);
+}, 120);
 
 function renderPreviewSoon() {
   schedulePreview(lastMarkdown);
@@ -1615,6 +1660,15 @@ function toggleTheme() {
 ---------------------------------------------------------------- */
 async function init() {
   await openDB();
+  // Ask the browser to persist our IndexedDB so it isn't evicted under
+  // pressure. On Chrome/Firefox this either auto-grants (PWA/bookmarked)
+  // or is silently ignored — no prompt for the user.
+  try {
+    if (navigator.storage && navigator.storage.persist) {
+      const already = await navigator.storage.persisted();
+      if (!already) await navigator.storage.persist();
+    }
+  } catch {}
 
   // Load all
   const [notes, folders, images, theme, expanded, view] = await Promise.all([

@@ -182,7 +182,7 @@ function renderInline(s) {
     if (resolved === null) {
       return `<span class="pv-img-missing">missing: ${escapeHtml(url.slice(0, 40))}…</span>`;
     }
-    return `<span class="pv-img-wrap"><img src="${resolved}" alt="${escapeHtml(alt)}"${t} loading="lazy" /></span>`;
+    return `<span class="pv-img-wrap" contenteditable="false"><img src="${resolved}" alt="${escapeHtml(alt)}"${t} loading="lazy" draggable="false" /></span>`;
   });
   // links [text](url)
   out = out.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, txt, url) =>
@@ -230,7 +230,7 @@ function renderPreview(md) {
       const m = /^(\s*)([-*+])\s+\[([ xX])\]\s+(.*)$/.exec(line);
       const checked = m[3].toLowerCase() === 'x';
       inner = `<div class="task" style="padding-left:${(m[1].length * 0.6) + 1.5}em">
-        <input type="checkbox" data-line="${i}" ${checked ? 'checked' : ''}/>
+        <input type="checkbox" data-line="${i}" contenteditable="false" ${checked ? 'checked' : ''}/>
         <span${checked ? ' style="text-decoration:line-through;color:var(--text-dim)"' : ''}>${renderInline(m[4])}</span>
       </div>`;
     } else if (info.type === 'ul') {
@@ -385,6 +385,22 @@ function renderEditor(md, opts = {}) {
         } else {
           const sp = el('span', t.cls ? { class: t.cls } : {}, t.text);
           lineDiv.append(sp);
+        }
+      }
+    }
+    // For image lines, also show the actual image thumbnail beneath the source
+    if (info.type === 'image') {
+      const m = /!\[([^\]]*)\]\(([^)]+)\)/.exec(line);
+      if (m) {
+        const resolved = resolveImageUrl(m[2]);
+        if (resolved !== null) {
+          const img = document.createElement('img');
+          img.className = 'ed-img-thumb';
+          img.src = resolved;
+          img.alt = m[1];
+          img.contentEditable = 'false';
+          img.draggable = false;
+          lineDiv.append(img);
         }
       }
     }
@@ -568,6 +584,236 @@ function syncScroll(source, target) {
   const tmax = target.scrollHeight - target.clientHeight;
   target.scrollTop = ratio * tmax;
   requestAnimationFrame(() => { scrollSyncing = false; });
+}
+
+/* ----------------------------------------------------------------
+   editable preview — user types in preview, source updates live
+---------------------------------------------------------------- */
+function getPreviewLineAtCursor() {
+  const sel = window.getSelection();
+  if (!sel.rangeCount) return null;
+  let n = sel.getRangeAt(0).startContainer;
+  if (n.nodeType === 3) n = n.parentNode;
+  return n.closest?.('.pv-line') || null;
+}
+
+function extractPreviewLineSource(pvLine, type, lineIndex) {
+  const oldLines = lastMarkdown.split('\n');
+  const oldLine = oldLines[lineIndex] || '';
+  if (['hr', 'image', 'fence', 'table'].includes(type)) return oldLine;
+
+  let body = '';
+  function walk(n) {
+    if (n.nodeType === 3) { body += n.nodeValue; return; }
+    if (n.nodeName === 'INPUT' || n.nodeName === 'IMG') return;
+    if (n.classList && n.classList.contains('pv-img-wrap')) return;
+    if (n.nodeName === 'BR') { body += '\n'; return; }
+    for (const c of n.childNodes) walk(c);
+  }
+  for (const c of pvLine.childNodes) walk(c);
+
+  if (type === 'ul') body = body.replace(/^\s*•\s*/, '');
+  else if (type === 'ol') body = body.replace(/^\s*\d+\.\s*/, '');
+
+  switch (type) {
+    case 'h1': return '# ' + body;
+    case 'h2': return '## ' + body;
+    case 'h3': return '### ' + body;
+    case 'h4': return '#### ' + body;
+    case 'h5': return '##### ' + body;
+    case 'h6': return '###### ' + body;
+    case 'quote': {
+      const m = /^(\s*>+\s*)/.exec(oldLine);
+      return (m ? m[1] : '> ') + body;
+    }
+    case 'ul': {
+      const m = /^(\s*[-*+]\s+)/.exec(oldLine);
+      return (m ? m[1] : '- ') + body;
+    }
+    case 'ol': {
+      const m = /^(\s*\d+\.\s+)/.exec(oldLine);
+      return (m ? m[1] : '1. ') + body;
+    }
+    case 'task': {
+      const m = /^(\s*[-*+]\s+\[[ xX]\]\s+)/.exec(oldLine);
+      return (m ? m[1] : '- [ ] ') + body;
+    }
+    case 'code': return pvLine.textContent;
+    case 'blank':
+    case 'p':
+    default:  return body;
+  }
+}
+
+function handlePreviewInput(e) {
+  const pvLine = e.target.closest('.pv-line');
+  if (!pvLine) return;
+  const lineIndex = parseInt(pvLine.dataset.line, 10);
+  if (isNaN(lineIndex)) return;
+  const type = pvLine.dataset.type;
+  const newSource = extractPreviewLineSource(pvLine, type, lineIndex);
+  const lines = lastMarkdown.split('\n');
+  if (lines[lineIndex] === newSource) return;
+  if (newSource.includes('\n')) {
+    const expanded = newSource.split('\n');
+    lines.splice(lineIndex, 1, ...expanded);
+  } else {
+    lines[lineIndex] = newSource;
+  }
+  lastMarkdown = lines.join('\n');
+  // Only re-render the editor; leave preview DOM alone so the cursor stays.
+  renderEditor(lastMarkdown);
+  markDirty();
+  scheduleSave();
+  updateWordCount(lastMarkdown);
+}
+
+function handlePreviewKey(e) {
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'b' || e.key === 'i')) {
+    e.preventDefault();
+    applyFormat(e.key === 'b' ? 'bold' : 'italic');
+    return;
+  }
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    const pvLine = getPreviewLineAtCursor();
+    if (!pvLine) return;
+    const lineIndex = parseInt(pvLine.dataset.line, 10);
+    const lines = lastMarkdown.split('\n');
+    const cur = lines[lineIndex] || '';
+    let prefix = '';
+    let m;
+    if ((m = /^(\s*)([-*+])\s+\[[ xX]\]\s+/.exec(cur))) prefix = m[1] + m[2] + ' [ ] ';
+    else if ((m = /^(\s*)([-*+])\s+/.exec(cur))) prefix = m[1] + m[2] + ' ';
+    else if ((m = /^(\s*)(\d+)\.\s+/.exec(cur))) prefix = m[1] + (parseInt(m[2], 10) + 1) + '. ';
+    else if (/^\s*>/.test(cur)) { const im = /^(\s*>\s*)/.exec(cur); prefix = im[1]; }
+
+    lines.splice(lineIndex + 1, 0, prefix);
+    lastMarkdown = lines.join('\n');
+    renderEditor(lastMarkdown);
+    $('preview').innerHTML = renderPreview(lastMarkdown);
+    syncLineHeights();
+    markDirty();
+    scheduleSave();
+    const newPv = $('preview').querySelector(`.pv-line[data-line="${lineIndex + 1}"]`);
+    if (newPv) {
+      const range = document.createRange();
+      range.selectNodeContents(newPv);
+      range.collapse(true);
+      const sel = window.getSelection();
+      sel.removeAllRanges();
+      sel.addRange(range);
+      $('preview').focus();
+    }
+  }
+}
+
+function setupEditablePreview() {
+  const pv = $('preview');
+  pv.contentEditable = 'true';
+  pv.spellcheck = true;
+  pv.addEventListener('input', handlePreviewInput);
+  pv.addEventListener('keydown', handlePreviewKey);
+  pv.addEventListener('focusout', () => {
+    // After cursor leaves, re-render to normalize (e.g., heading just typed)
+    setTimeout(() => {
+      if (!pv.contains(document.activeElement)) schedulePreview(lastMarkdown);
+    }, 50);
+  });
+  // Last-line catcher in preview pane
+  $('panePreview').addEventListener('mousedown', (e) => {
+    if (e.target.closest('.pv-line') || e.target.closest('img') || e.target.closest('input')) return;
+    e.preventDefault();
+    focusPreviewEnd();
+  });
+}
+
+function focusPreviewEnd() {
+  const pv = $('preview');
+  const lines = pv.querySelectorAll('.pv-line');
+  if (!lines.length) { pv.focus(); return; }
+  const last = lines[lines.length - 1];
+  const range = document.createRange();
+  range.selectNodeContents(last);
+  range.collapse(false);
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+  pv.focus();
+  last.scrollIntoView({ block: 'nearest' });
+}
+
+/* ----------------------------------------------------------------
+   floating format toolbar — appears on text selection
+---------------------------------------------------------------- */
+function setupFormatToolbar() {
+  const tb = $('formatToolbar');
+  if (!tb) return;
+  document.addEventListener('selectionchange', () => {
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount || sel.isCollapsed) { tb.hidden = true; return; }
+    const range = sel.getRangeAt(0);
+    const inEditor = editor.contains(range.startContainer);
+    const inPreview = $('preview').contains(range.startContainer);
+    if (!inEditor && !inPreview) { tb.hidden = true; return; }
+    const rect = range.getBoundingClientRect();
+    if (rect.width === 0 && rect.height === 0) { tb.hidden = true; return; }
+    tb.hidden = false;
+    requestAnimationFrame(() => {
+      const tw = tb.offsetWidth, th = tb.offsetHeight;
+      const x = Math.max(8, Math.min(window.innerWidth - tw - 8, rect.left + rect.width / 2 - tw / 2));
+      const y = Math.max(8, rect.top - th - 8);
+      tb.style.left = x + 'px';
+      tb.style.top = y + 'px';
+    });
+  });
+  // Prevent losing selection when clicking the toolbar
+  tb.addEventListener('mousedown', (e) => e.preventDefault());
+  tb.addEventListener('click', (e) => {
+    const btn = e.target.closest('button[data-fmt]');
+    if (!btn) return;
+    applyFormat(btn.dataset.fmt);
+  });
+}
+
+function applyFormat(fmt) {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return;
+  const text = sel.toString();
+  const wraps = { bold: '**', italic: '*', strike: '~~', code: '`' };
+  if (wraps[fmt]) {
+    if (!text) return;
+    document.execCommand('insertText', false, wraps[fmt] + text + wraps[fmt]);
+    return;
+  }
+  if (fmt === 'link') {
+    const url = prompt('URL:', 'https://');
+    if (!url) return;
+    document.execCommand('insertText', false, `[${text || 'link'}](${url})`);
+    return;
+  }
+  if (['h1', 'h2', 'h3', 'quote', 'ul', 'task'].includes(fmt)) applyLinePrefix(fmt);
+}
+
+function applyLinePrefix(fmt) {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return;
+  let n = sel.getRangeAt(0).startContainer;
+  if (n.nodeType === 3) n = n.parentNode;
+  const lineEl = n.closest?.('.ed-line') || n.closest?.('.pv-line');
+  if (!lineEl) return;
+  const lineIndex = parseInt(lineEl.dataset.line, 10);
+  const lines = lastMarkdown.split('\n');
+  let line = lines[lineIndex] || '';
+  line = line.replace(/^(\s*)(#{1,6}\s+|>\s*|[-*+]\s+\[[ xX]\]\s+|[-*+]\s+|\d+\.\s+)/, '$1');
+  const prefixes = { h1: '# ', h2: '## ', h3: '### ', quote: '> ', ul: '- ', task: '- [ ] ' };
+  lines[lineIndex] = (prefixes[fmt] || '') + line;
+  lastMarkdown = lines.join('\n');
+  renderEditor(lastMarkdown);
+  $('preview').innerHTML = renderPreview(lastMarkdown);
+  syncLineHeights();
+  markDirty();
+  scheduleSave();
 }
 
 /* ----------------------------------------------------------------
@@ -1222,40 +1468,60 @@ function openExportMenu(anchorBtn) {
   ]);
 }
 
-// Universal import: accepts .md / .markdown / .txt / .json
-async function importFiles(files) {
-  let importedNotes = 0, importedBundles = 0, failed = 0;
-  for (const file of files) {
+// Ensure a folder path (array of segment names) exists, return its id (or null).
+const _folderCache = new Map();
+async function ensureFolderPath(pathArr) {
+  if (!pathArr || pathArr.length === 0) return null;
+  const key = pathArr.join('/');
+  if (_folderCache.has(key)) return _folderCache.get(key);
+  let parentId = null;
+  let cum = '';
+  for (const seg of pathArr) {
+    cum += (cum ? '/' : '') + seg;
+    if (_folderCache.has(cum)) { parentId = _folderCache.get(cum); continue; }
+    const existing = [...state.folders.values()].find((f) => f.name === seg && f.parentId === parentId);
+    if (existing) { _folderCache.set(cum, existing.id); parentId = existing.id; continue; }
+    const f = { id: uid(), name: seg, parentId, created: Date.now() };
+    state.folders.set(f.id, f);
+    await store.folders.put(f);
+    state.expandedFolders.add(f.id);
+    _folderCache.set(cum, f.id);
+    parentId = f.id;
+  }
+  return parentId;
+}
+
+async function importBundleFile(file) {
+  const text = await file.text();
+  const data = JSON.parse(text);
+  if (!data.yanta) throw new Error('Not a YANTA bundle');
+  for (const f of data.folders || []) { state.folders.set(f.id, f); await store.folders.put(f); }
+  for (const n of data.notes || []) { state.notes.set(n.id, n); await store.notes.put(n); }
+  for (const im of data.images || []) {
+    const blob = await (await fetch(im.data)).blob();
+    const { data: _, ...meta } = im;
+    await store.images.put({ ...meta, blob });
+    state.imagesMeta.set(meta.id, meta);
+  }
+}
+
+// Import items with optional folder path; pathArr is the folder hierarchy
+// (folder names only, NOT including the file). Notes land in their folder;
+// JSON bundles merge globally; unknown files are skipped.
+async function importItems(items) {
+  _folderCache.clear();
+  let noteCount = 0, bundleCount = 0, failed = 0, skipped = 0;
+  for (const { file, pathArr } of items) {
     try {
       const lower = file.name.toLowerCase();
       if (lower.endsWith('.json')) {
-        const text = await file.text();
-        const data = JSON.parse(text);
-        if (!data.yanta) throw new Error('Not a YANTA bundle');
-        for (const f of data.folders || []) { state.folders.set(f.id, f); await store.folders.put(f); }
-        for (const n of data.notes || []) { state.notes.set(n.id, n); await store.notes.put(n); }
-        for (const im of data.images || []) {
-          const blob = await (await fetch(im.data)).blob();
-          const { data: _, ...meta } = im;
-          await store.images.put({ ...meta, blob });
-          state.imagesMeta.set(meta.id, meta);
-        }
-        importedBundles++;
-      } else {
-        // Treat as Markdown / text
+        await importBundleFile(file);
+        bundleCount++;
+      } else if (/\.(md|markdown|txt)$/i.test(file.name)) {
         const text = await file.text();
         const { meta, body } = parseFrontmatter(text);
-        let folderId = null;
-        if (meta.folder) {
-          const existing = [...state.folders.values()].find((f) => f.name === meta.folder);
-          if (existing) folderId = existing.id;
-          else {
-            const f = { id: uid(), name: meta.folder, parentId: null, created: Date.now() };
-            state.folders.set(f.id, f);
-            await store.folders.put(f);
-            folderId = f.id;
-          }
-        }
+        let folderId = await ensureFolderPath(pathArr);
+        if (!folderId && meta.folder) folderId = await ensureFolderPath([meta.folder]);
         const title = file.name.replace(/\.(md|markdown|txt)$/i, '');
         const note = {
           id: uid(),
@@ -1269,7 +1535,9 @@ async function importFiles(files) {
         };
         state.notes.set(note.id, note);
         await store.notes.put(note);
-        importedNotes++;
+        noteCount++;
+      } else {
+        skipped++;
       }
     } catch (e) {
       console.error('Import failed for', file.name, e);
@@ -1278,10 +1546,37 @@ async function importFiles(files) {
   }
   renderTree();
   const parts = [];
-  if (importedNotes) parts.push(`${importedNotes} note${importedNotes === 1 ? '' : 's'}`);
-  if (importedBundles) parts.push(`${importedBundles} bundle${importedBundles === 1 ? '' : 's'}`);
+  if (noteCount) parts.push(`${noteCount} note${noteCount === 1 ? '' : 's'}`);
+  if (bundleCount) parts.push(`${bundleCount} bundle${bundleCount === 1 ? '' : 's'}`);
+  if (skipped) parts.push(`${skipped} skipped`);
   if (failed) parts.push(`${failed} failed`);
   toast('Imported ' + (parts.join(', ') || 'nothing'), failed ? 'error' : 'success');
+}
+
+// Back-compat: flat list of files with no folder context
+async function importFiles(files) {
+  return importItems(files.map((f) => ({ file: f, pathArr: [] })));
+}
+
+/* Walk a webkitGetAsEntry tree (supports nested directories) */
+async function walkEntry(entry, pathArr = []) {
+  if (entry.isFile) {
+    const file = await new Promise((res, rej) => entry.file(res, rej));
+    return [{ file, pathArr }];
+  }
+  // Directory: include its own name in the path of its children
+  const childPath = [...pathArr, entry.name];
+  const reader = entry.createReader();
+  const all = [];
+  // readEntries returns at most 100 at a time; keep calling until empty
+  while (true) {
+    const batch = await new Promise((res, rej) => reader.readEntries(res, rej));
+    if (!batch.length) break;
+    for (const e of batch) {
+      all.push(...(await walkEntry(e, childPath)));
+    }
+  }
+  return all;
 }
 
 /* ----------------------------------------------------------------
@@ -1298,14 +1593,22 @@ async function updateStorageMeter() {
 }
 
 /* ----------------------------------------------------------------
-   theme
+   theme — auto / dark / light
 ---------------------------------------------------------------- */
+const THEMES = ['auto', 'dark', 'light'];
 function setTheme(t) {
+  if (!THEMES.includes(t)) t = 'auto';
   state.theme = t;
   document.documentElement.dataset.theme = t;
   store.settings.set('theme', t);
+  const btn = $('btn-theme');
+  if (btn) btn.title = `Theme: ${t} (click to cycle)`;
 }
-function toggleTheme() { setTheme(state.theme === 'dark' ? 'light' : 'dark'); }
+function toggleTheme() {
+  const i = THEMES.indexOf(state.theme);
+  setTheme(THEMES[(i + 1) % THEMES.length]);
+  toast(`Theme: ${state.theme}`);
+}
 
 /* ----------------------------------------------------------------
    wire-up
@@ -1318,7 +1621,7 @@ async function init() {
     store.notes.all(),
     store.folders.all(),
     store.images.all(),
-    store.settings.get('theme', 'dark'),
+    store.settings.get('theme', 'auto'),
     store.settings.get('expandedFolders', []),
     store.settings.get('view', 'split'),
   ]);
@@ -1360,13 +1663,14 @@ async function createWelcomeNote() {
 
 ## Features at a glance
 
-- Markdown editing with **live styled preview** on the right
-- Lines stay y-aligned across panels for distraction-free editing
+- Markdown editing with **live styled preview** on the right — and the preview is **editable too** (great on mobile)
+- Lines stay y-aligned across panels; inserted images are visible inline in both panels
+- Select text to get a **floating formatting toolbar** (bold · italic · headings · list · quote · link)
 - Drop, paste or upload **images** — choose **Base64** or library **references**
 - Image **compression** with side-by-side preview (size + dimensions)
-- **Folders** and **#tags** keep things organized
-- Pin important notes, search across everything, full offline use
-- Drop a \`.md\` / \`.json\` file anywhere on the window to import — or use **Export** for a single note or the full bundle
+- **Folders** (with sub-folders), **#tags**, pin, search, full offline use
+- Drop a whole **folder with sub-folders** onto the window to import — structure is preserved
+- **Auto theme** follows your system (or pick dark/light by clicking the moon)
 
 > Try pasting an image from your clipboard right now (\`Ctrl+V\`).
 
@@ -1411,6 +1715,13 @@ function bindEvents() {
   editor.addEventListener('paste', handleEditorPaste);
   editor.addEventListener('click', handleEditorClick);
 
+  // Click anywhere in the edit pane that isn't a real line → focus editor at end.
+  $('paneEdit').addEventListener('mousedown', (e) => {
+    if (e.target.closest('.ed-line') || e.target.closest('img')) return;
+    e.preventDefault();
+    focusEditorEnd();
+  });
+
   // title
   $('noteTitle').addEventListener('input', () => { markDirty(); scheduleSave(); });
   $('noteTitle').addEventListener('blur', () => saveCurrentNote().then(() => renderTree()));
@@ -1425,8 +1736,31 @@ function bindEvents() {
   $('btn-new-folder').addEventListener('click', () => newFolder(null));
   $('btn-theme').addEventListener('click', toggleTheme);
   $('btn-export').addEventListener('click', (e) => { e.stopPropagation(); openExportMenu(e.currentTarget); });
-  $('btn-import').addEventListener('click', () => $('importFile').click());
-  $('importFile').addEventListener('change', (e) => { if (e.target.files.length) importFiles([...e.target.files]); e.target.value = ''; });
+  $('btn-import').addEventListener('click', (e) => {
+    e.stopPropagation();
+    const r = e.currentTarget.getBoundingClientRect();
+    showMenu(r.left, r.bottom + 4, [
+      { label: 'Import files (.md / .json)…', action: () => $('importFile').click() },
+      { label: 'Import folder (with sub-folders)…', action: () => $('importFolder').click() },
+      'hr',
+      { label: 'Or drop files/folders anywhere on the window', action: () => toast('Drop files or a folder onto YANTA') },
+    ]);
+  });
+  $('importFile').addEventListener('change', (e) => {
+    if (e.target.files.length) importFiles([...e.target.files]);
+    e.target.value = '';
+  });
+  $('importFolder').addEventListener('change', async (e) => {
+    const files = [...e.target.files];
+    if (!files.length) { e.target.value = ''; return; }
+    const items = files.map((f) => {
+      const parts = (f.webkitRelativePath || f.name).split('/');
+      parts.pop(); // drop the filename
+      return { file: f, pathArr: parts };
+    });
+    await importItems(items);
+    e.target.value = '';
+  });
   $('btn-export-note').addEventListener('click', () => {
     const n = state.currentNoteId ? state.notes.get(state.currentNoteId) : null;
     if (n) exportNoteAsMd(n);
@@ -1500,8 +1834,12 @@ function bindEvents() {
   // global shortcuts
   window.addEventListener('keydown', handleGlobalKey);
 
-  // global drag-and-drop import of .md/.json files
+  // global drag-and-drop import of .md/.json files & folders
   setupGlobalDropImport();
+
+  // make the preview editable + floating format toolbar
+  setupEditablePreview();
+  setupFormatToolbar();
 
   // preview interactions (checkbox toggle, tag click)
   $('preview').addEventListener('click', (e) => {
@@ -1547,6 +1885,11 @@ function toggleTaskLine(lineIndex, checked) {
 }
 
 function handleEditorKey(e) {
+  if ((e.ctrlKey || e.metaKey) && (e.key === 'b' || e.key === 'i')) {
+    e.preventDefault();
+    applyFormat(e.key === 'b' ? 'bold' : 'italic');
+    return;
+  }
   if (e.key === 'Tab') {
     e.preventDefault();
     insertAtCursor('  ');
@@ -1613,21 +1956,55 @@ async function handleEditorPaste(e) {
   }
 }
 
-function handleEditorClick(e) {
-  // Click on a truncated base64 chip → temporarily expand it for editing
-  if (e.target.classList.contains('ed-trunc')) {
-    if (confirm('Remove this embedded image from the note?')) {
-      // Remove the entire image markdown on that line if it contains the truncated url
-      const span = e.target;
-      const line = span.closest('.ed-line');
-      const idx = parseInt(line.dataset.line, 10);
-      const lines = lastMarkdown.split('\n');
-      lines[idx] = lines[idx].replace(/!\[[^\]]*\]\(data:image\/[^)]+\)/, '');
-      lastMarkdown = lines.join('\n');
-      renderEditor(lastMarkdown);
-      schedulePreview(lastMarkdown);
-      markDirty(); scheduleSave();
+function focusEditorEnd() {
+  editor.focus();
+  const lines = editor.querySelectorAll('.ed-line');
+  if (!lines.length) return;
+  const last = lines[lines.length - 1];
+  const range = document.createRange();
+  // Place before any contenteditable=false children at the end (e.g., image thumbs)
+  let placed = false;
+  for (let i = last.childNodes.length - 1; i >= 0; i--) {
+    const n = last.childNodes[i];
+    if (n.nodeName === 'IMG' || (n.contentEditable === 'false')) continue;
+    if (n.nodeType === 3) {
+      range.setStart(n, n.nodeValue.length);
+      placed = true; break;
     }
+    range.selectNodeContents(n);
+    range.collapse(false);
+    placed = true; break;
+  }
+  if (!placed) { range.selectNodeContents(last); range.collapse(false); }
+  const sel = window.getSelection();
+  sel.removeAllRanges();
+  sel.addRange(range);
+  last.scrollIntoView({ block: 'nearest' });
+}
+
+function handleEditorClick(e) {
+  // Clicking the inline image thumbnail opens an action menu
+  const thumb = e.target.closest('.ed-img-thumb');
+  if (thumb) {
+    e.preventDefault();
+    const lineDiv = thumb.closest('.ed-line');
+    const idx = parseInt(lineDiv.dataset.line, 10);
+    showMenu(e.clientX, e.clientY, [
+      { label: 'Open in new tab', action: () => window.open(thumb.src, '_blank') },
+      { label: 'Copy markdown', action: () => {
+        navigator.clipboard?.writeText(lastMarkdown.split('\n')[idx] || '');
+        toast('Markdown copied');
+      } },
+      'hr',
+      { label: 'Remove image', danger: true, action: () => {
+        const lines = lastMarkdown.split('\n');
+        lines[idx] = lines[idx].replace(/!\[[^\]]*\]\([^)]+\)/, '');
+        lastMarkdown = lines.join('\n');
+        renderEditor(lastMarkdown);
+        schedulePreview(lastMarkdown);
+        markDirty(); scheduleSave();
+      } },
+    ]);
   }
 }
 
@@ -1648,42 +2025,58 @@ function handleGlobalKey(e) {
 
 function setupGlobalDropImport() {
   const overlay = $('dropOverlay');
-  let depth = 0;
+  let hideTimer = null;
   function isFileDrag(e) {
     return e.dataTransfer && [...(e.dataTransfer.types || [])].includes('Files');
   }
-  window.addEventListener('dragenter', (e) => {
-    if (!isFileDrag(e)) return;
-    depth++;
-    overlay.hidden = false;
-  });
+  // dragover fires continuously while a drag is in progress; if it stops
+  // firing for ~120ms, the drag has left the window — hide the overlay.
   window.addEventListener('dragover', (e) => {
     if (!isFileDrag(e)) return;
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
-  });
-  window.addEventListener('dragleave', (e) => {
-    if (!isFileDrag(e)) return;
-    depth--;
-    if (depth <= 0) { depth = 0; overlay.hidden = true; }
+    overlay.hidden = false;
+    clearTimeout(hideTimer);
+    hideTimer = setTimeout(() => { overlay.hidden = true; }, 120);
   });
   window.addEventListener('drop', async (e) => {
     if (!isFileDrag(e)) return;
     e.preventDefault();
-    depth = 0;
+    clearTimeout(hideTimer);
     overlay.hidden = true;
+
+    // Prefer the items API (so we can recurse into folders)
+    const items = e.dataTransfer.items ? [...e.dataTransfer.items] : [];
+    const entries = items.map((it) => it.webkitGetAsEntry?.()).filter(Boolean);
+    const hasDirectory = entries.some((en) => en && en.isDirectory);
+
+    if (hasDirectory) {
+      const collected = [];
+      for (const entry of entries) {
+        try {
+          collected.push(...(await walkEntry(entry, [])));
+        } catch (err) {
+          console.error('walkEntry failed', err);
+        }
+      }
+      if (collected.length) await importItems(collected);
+      else toast('Folder was empty', 'error');
+      return;
+    }
+
+    // No directories — flat list of files
     const files = [...e.dataTransfer.files];
     if (!files.length) return;
-    // If single image and editor was the drop target, the editor handler already took it
     if (files.length === 1 && files[0].type.startsWith('image/')) {
-      // route through image flow
       openImageModal();
       setTab('upload');
       await pickImageFile(files[0]);
       return;
     }
-    // .md / .json import
-    const importable = files.filter((f) => /\.(md|markdown|txt|json)$/i.test(f.name) || f.type === 'application/json' || f.type === 'text/markdown' || f.type === 'text/plain');
+    const importable = files.filter((f) =>
+      /\.(md|markdown|txt|json)$/i.test(f.name) ||
+      f.type === 'application/json' || f.type === 'text/markdown' || f.type === 'text/plain'
+    );
     if (importable.length) {
       await importFiles(importable);
     } else {

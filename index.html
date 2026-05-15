@@ -194,11 +194,29 @@
   </div>
 </div>
 
+<!-- Floating format toolbar -->
+<div class="format-toolbar" id="formatToolbar" hidden>
+  <button class="b" data-fmt="bold" title="Bold (Ctrl+B)">B</button>
+  <button class="i" data-fmt="italic" title="Italic (Ctrl+I)">I</button>
+  <button class="s" data-fmt="strike" title="Strikethrough">S</button>
+  <button class="code" data-fmt="code" title="Inline code">&lt;/&gt;</button>
+  <span class="sep"></span>
+  <button data-fmt="h1" title="Heading 1">H1</button>
+  <button data-fmt="h2" title="Heading 2">H2</button>
+  <button data-fmt="h3" title="Heading 3">H3</button>
+  <span class="sep"></span>
+  <button data-fmt="quote" title="Quote">&gt;</button>
+  <button data-fmt="ul" title="Bullet list">•</button>
+  <button data-fmt="task" title="Task">☐</button>
+  <button data-fmt="link" title="Link">🔗</button>
+</div>
+
 <!-- Toast -->
 <div class="toast" id="toast" hidden></div>
 
 <!-- Hidden file input for import -->
 <input id="importFile" type="file" accept=".md,.markdown,.txt,.json,application/json,text/markdown,text/plain" hidden multiple />
+<input id="importFolder" type="file" hidden webkitdirectory directory />
 
 <!-- Drop overlay for drag-and-drop import -->
 <div class="drop-overlay" id="dropOverlay" hidden>

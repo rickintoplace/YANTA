@@ -52,6 +52,24 @@
   --shadow: 0 8px 24px rgba(20,30,60,0.10);
 }
 
+/* "Auto" — follow the system. Defaults are dark; override for light OS. */
+@media (prefers-color-scheme: light) {
+  [data-theme="auto"] {
+    --bg: #ffffff;
+    --bg-elev: #f6f8fa;
+    --bg-elev-2: #eef1f5;
+    --bg-elev-3: #e3e7ee;
+    --border: #d8dde4;
+    --border-strong: #b9c0cb;
+    --text: #1f242c;
+    --text-dim: #5b6270;
+    --text-faint: #8a93a4;
+    --accent: #2563eb;
+    --accent-2: #7c3aed;
+    --shadow: 0 8px 24px rgba(20,30,60,0.10);
+  }
+}
+
 html, body { height: 100%; overflow: hidden; }
 body {
   background: var(--bg);
@@ -246,9 +264,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
   grid-template-columns: var(--split) 1fr;
   min-height: 0; position: relative;
 }
-.app[data-view="edit"] .panes { grid-template-columns: 1fr 0; }
+.app[data-view="edit"] .panes { grid-template-columns: 1fr; }
 .app[data-view="edit"] .pane-preview, .app[data-view="edit"] .divider { display: none; }
-.app[data-view="preview"] .panes { grid-template-columns: 0 1fr; }
+.app[data-view="preview"] .panes { grid-template-columns: 1fr; }
 .app[data-view="preview"] .pane-edit, .app[data-view="preview"] .divider { display: none; }
 
 .pane {
@@ -324,6 +342,14 @@ button, input, select, textarea { font: inherit; color: inherit; }
   user-select: none;
 }
 .ed-trunc::before { content: "📷 "; font-style: normal; }
+.ed-img-thumb {
+  display: block; max-height: 220px; max-width: 100%;
+  border-radius: var(--r-sm); border: 1px solid var(--border);
+  margin: 4px 0; cursor: zoom-in;
+}
+.ed-line-pad {
+  min-height: 30vh; cursor: text;
+}
 .ed-task-check { color: var(--green); }
 .ed-tag-ref { color: var(--accent-2); background: rgba(167,139,250,0.1); padding: 0 4px; border-radius: 4px; }
 
@@ -379,6 +405,30 @@ button, input, select, textarea { font: inherit; color: inherit; }
   display: inline-block; padding: 2px 8px; border: 1px dashed var(--red);
   color: var(--red); font-size: 12px; border-radius: 4px;
 }
+.preview .pv-img-wrap img { max-height: 220px; margin: 4px 0; }
+.pv-line:focus { outline: none; background: rgba(110,168,254,0.04); }
+
+/* ---------- Floating format toolbar ---------- */
+.format-toolbar {
+  position: fixed; z-index: 80;
+  display: flex; gap: 2px; padding: 4px;
+  background: var(--bg-elev-3); border: 1px solid var(--border);
+  border-radius: var(--r-sm); box-shadow: var(--shadow);
+  animation: fade-in 0.1s ease;
+}
+.format-toolbar button {
+  width: 30px; height: 28px; padding: 0;
+  background: transparent; border: 0; color: var(--text);
+  border-radius: 4px; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center;
+  font-size: 13px;
+}
+.format-toolbar button:hover { background: var(--bg-elev-2); color: var(--accent); }
+.format-toolbar button.b { font-weight: 700; }
+.format-toolbar button.i { font-style: italic; }
+.format-toolbar button.s { text-decoration: line-through; }
+.format-toolbar button.code { font-family: var(--font-mono); font-size: 12px; }
+.format-toolbar .sep { width: 1px; background: var(--border); margin: 4px 2px; }
 
 /* ---------- Status ---------- */
 .status {
@@ -394,6 +444,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .status #statSaved.saved { color: var(--green); }
 
 /* ---------- Modal ---------- */
+.modal[hidden], .drop-overlay[hidden] { display: none !important; }
 .modal {
   position: fixed; inset: 0;
   background: rgba(0,0,0,0.55);

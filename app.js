@@ -580,7 +580,7 @@ function handleEditorInput() {
     return;
   }
   lastMarkdown = md;
-  schedulePreview(md);
+  schedulePreview();
   scheduleLazyEditorRender();
   checkWikiAutocomplete();
   markDirty();
@@ -596,16 +596,15 @@ const scheduleLazyEditorRender = debounce(() => {
   syncLineHeights();
 }, 450);
 
-const schedulePreview = debounce((md) => {
-  if ($('preview').contains(document.activeElement)) return;
-  $('preview').innerHTML = renderPreview(md);
+// Always renders the *current* lastMarkdown — avoids stale renders after
+// switching notes (previously the debounced callback captured the old body).
+const schedulePreview = debounce(() => {
+  $('preview').innerHTML = renderPreview(lastMarkdown);
   if (typeof renderBacklinks === 'function') renderBacklinks();
   syncLineHeights();
-}, 120);
+}, 100);
 
-function renderPreviewSoon() {
-  schedulePreview(lastMarkdown);
-}
+function renderPreviewSoon() { schedulePreview(); }
 
 const scheduleSave = debounce(() => saveCurrentNote(), 700);
 
@@ -664,160 +663,12 @@ function syncScroll(source, target) {
 }
 
 /* ----------------------------------------------------------------
-   editable preview — user types in preview, source updates live
+   preview is read-only. You select text in it to format, but actual
+   editing happens in the editor pane on the left. This keeps things
+   simple and avoids the WYSIWYG-vs-source mismatch.
 ---------------------------------------------------------------- */
-function getPreviewLineAtCursor() {
-  const sel = window.getSelection();
-  if (!sel.rangeCount) return null;
-  let n = sel.getRangeAt(0).startContainer;
-  if (n.nodeType === 3) n = n.parentNode;
-  return n.closest?.('.pv-line') || null;
-}
-
-function extractPreviewLineSource(pvLine, type, lineIndex) {
-  const oldLines = lastMarkdown.split('\n');
-  const oldLine = oldLines[lineIndex] || '';
-  if (['hr', 'image', 'fence', 'table'].includes(type)) return oldLine;
-
-  let body = '';
-  function walk(n) {
-    if (n.nodeType === 3) { body += n.nodeValue; return; }
-    if (n.nodeName === 'INPUT' || n.nodeName === 'IMG') return;
-    if (n.classList && n.classList.contains('pv-img-wrap')) return;
-    if (n.nodeName === 'BR') { body += '\n'; return; }
-    for (const c of n.childNodes) walk(c);
-  }
-  for (const c of pvLine.childNodes) walk(c);
-
-  if (type === 'ul') body = body.replace(/^\s*•\s*/, '');
-  else if (type === 'ol') body = body.replace(/^\s*\d+\.\s*/, '');
-
-  switch (type) {
-    case 'h1': return '# ' + body;
-    case 'h2': return '## ' + body;
-    case 'h3': return '### ' + body;
-    case 'h4': return '#### ' + body;
-    case 'h5': return '##### ' + body;
-    case 'h6': return '###### ' + body;
-    case 'quote': {
-      const m = /^(\s*>+\s*)/.exec(oldLine);
-      return (m ? m[1] : '> ') + body;
-    }
-    case 'ul': {
-      const m = /^(\s*[-*+]\s+)/.exec(oldLine);
-      return (m ? m[1] : '- ') + body;
-    }
-    case 'ol': {
-      const m = /^(\s*\d+\.\s+)/.exec(oldLine);
-      return (m ? m[1] : '1. ') + body;
-    }
-    case 'task': {
-      const m = /^(\s*[-*+]\s+\[[ xX]\]\s+)/.exec(oldLine);
-      return (m ? m[1] : '- [ ] ') + body;
-    }
-    case 'code': return pvLine.textContent;
-    case 'blank':
-    case 'p':
-    default:  return body;
-  }
-}
-
-function handlePreviewInput(e) {
-  const pvLine = e.target.closest('.pv-line');
-  if (!pvLine) return;
-  const lineIndex = parseInt(pvLine.dataset.line, 10);
-  if (isNaN(lineIndex)) return;
-  const type = pvLine.dataset.type;
-  const newSource = extractPreviewLineSource(pvLine, type, lineIndex);
-  const lines = lastMarkdown.split('\n');
-  if (lines[lineIndex] === newSource) return;
-  if (newSource.includes('\n')) {
-    const expanded = newSource.split('\n');
-    lines.splice(lineIndex, 1, ...expanded);
-  } else {
-    lines[lineIndex] = newSource;
-  }
-  lastMarkdown = lines.join('\n');
-  // Only re-render the editor; leave preview DOM alone so the cursor stays.
-  renderEditor(lastMarkdown);
-  markDirty();
-  scheduleSave();
-  updateWordCount(lastMarkdown);
-}
-
-function handlePreviewKey(e) {
-  if ((e.ctrlKey || e.metaKey) && (e.key === 'b' || e.key === 'i')) {
-    e.preventDefault();
-    applyFormat(e.key === 'b' ? 'bold' : 'italic');
-    return;
-  }
-  if (e.key === 'Enter') {
-    e.preventDefault();
-    const pvLine = getPreviewLineAtCursor();
-    if (!pvLine) return;
-    const lineIndex = parseInt(pvLine.dataset.line, 10);
-    const lines = lastMarkdown.split('\n');
-    const cur = lines[lineIndex] || '';
-    let prefix = '';
-    let m;
-    if ((m = /^(\s*)([-*+])\s+\[[ xX]\]\s+/.exec(cur))) prefix = m[1] + m[2] + ' [ ] ';
-    else if ((m = /^(\s*)([-*+])\s+/.exec(cur))) prefix = m[1] + m[2] + ' ';
-    else if ((m = /^(\s*)(\d+)\.\s+/.exec(cur))) prefix = m[1] + (parseInt(m[2], 10) + 1) + '. ';
-    else if (/^\s*>/.test(cur)) { const im = /^(\s*>\s*)/.exec(cur); prefix = im[1]; }
-
-    lines.splice(lineIndex + 1, 0, prefix);
-    lastMarkdown = lines.join('\n');
-    renderEditor(lastMarkdown);
-    $('preview').innerHTML = renderPreview(lastMarkdown);
-    syncLineHeights();
-    markDirty();
-    scheduleSave();
-    const newPv = $('preview').querySelector(`.pv-line[data-line="${lineIndex + 1}"]`);
-    if (newPv) {
-      const range = document.createRange();
-      range.selectNodeContents(newPv);
-      range.collapse(true);
-      const sel = window.getSelection();
-      sel.removeAllRanges();
-      sel.addRange(range);
-      $('preview').focus();
-    }
-  }
-}
-
 function setupEditablePreview() {
-  const pv = $('preview');
-  pv.contentEditable = 'true';
-  pv.spellcheck = true;
-  pv.addEventListener('input', handlePreviewInput);
-  pv.addEventListener('keydown', handlePreviewKey);
-  pv.addEventListener('focusout', () => {
-    // After cursor leaves, re-render to normalize (e.g., heading just typed)
-    setTimeout(() => {
-      if (!pv.contains(document.activeElement)) schedulePreview(lastMarkdown);
-    }, 50);
-  });
-  // Last-line catcher in preview pane
-  $('panePreview').addEventListener('mousedown', (e) => {
-    if (e.target.closest('.pv-line') || e.target.closest('img') || e.target.closest('input')) return;
-    e.preventDefault();
-    focusPreviewEnd();
-  });
-}
-
-function focusPreviewEnd() {
-  const pv = $('preview');
-  const lines = pv.querySelectorAll('.pv-line');
-  if (!lines.length) { pv.focus(); return; }
-  const last = lines[lines.length - 1];
-  const range = document.createRange();
-  range.selectNodeContents(last);
-  range.collapse(false);
-  const sel = window.getSelection();
-  sel.removeAllRanges();
-  sel.addRange(range);
-  pv.focus();
-  last.scrollIntoView({ block: 'nearest' });
+  // No-op kept for backward compatibility with init() wiring.
 }
 
 /* ----------------------------------------------------------------
@@ -853,44 +704,86 @@ function setupFormatToolbar() {
   });
 }
 
+// Map a selection to (lineIndex, sourceLine).
+function lineIndexFromSelection() {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return -1;
+  let n = sel.getRangeAt(0).startContainer;
+  if (n.nodeType === 3) n = n.parentNode;
+  const ed = n.closest?.('.ed-line');
+  if (ed) return [...editor.children].indexOf(ed);
+  const pv = n.closest?.('.pv-line');
+  if (pv) return parseInt(pv.dataset.line, 10);
+  return -1;
+}
+
 function applyFormat(fmt) {
   const sel = window.getSelection();
   if (!sel || !sel.rangeCount) return;
   const text = sel.toString();
+  const range = sel.getRangeAt(0);
+  const inEditor = editor.contains(range.startContainer);
+
   const wraps = { bold: '**', italic: '*', strike: '~~', code: '`' };
   if (wraps[fmt]) {
     if (!text) return;
-    document.execCommand('insertText', false, wraps[fmt] + text + wraps[fmt]);
+    if (inEditor) {
+      // Editor is contenteditable — insertText also triggers our input
+      // handler, which updates lastMarkdown and schedules re-renders.
+      document.execCommand('insertText', false, wraps[fmt] + text + wraps[fmt]);
+    } else {
+      // Preview is read-only: edit the source directly.
+      wrapSelectionInSource(text, wraps[fmt], wraps[fmt]);
+    }
     return;
   }
   if (fmt === 'link') {
     const url = prompt('URL:', 'https://');
     if (!url) return;
-    document.execCommand('insertText', false, `[${text || 'link'}](${url})`);
+    const linkText = text || 'link';
+    if (inEditor) {
+      document.execCommand('insertText', false, `[${linkText}](${url})`);
+    } else {
+      wrapSelectionInSource(linkText, '[', `](${url})`);
+    }
     return;
   }
   if (['h1', 'h2', 'h3', 'quote', 'ul', 'task'].includes(fmt)) applyLinePrefix(fmt);
 }
 
-function applyLinePrefix(fmt) {
-  const sel = window.getSelection();
-  if (!sel || !sel.rangeCount) return;
-  let n = sel.getRangeAt(0).startContainer;
-  if (n.nodeType === 3) n = n.parentNode;
-  const lineEl = n.closest?.('.ed-line') || n.closest?.('.pv-line');
-  if (!lineEl) return;
-  const lineIndex = parseInt(lineEl.dataset.line, 10);
+// Wrap the selected text in source markdown (used when selection is in
+// the read-only preview). Finds the first occurrence of `text` in the
+// affected source line and surrounds it with the given markers.
+function wrapSelectionInSource(text, openMark, closeMark) {
+  const idx = lineIndexFromSelection();
+  if (idx < 0) return;
   const lines = lastMarkdown.split('\n');
-  let line = lines[lineIndex] || '';
-  line = line.replace(/^(\s*)(#{1,6}\s+|>\s*|[-*+]\s+\[[ xX]\]\s+|[-*+]\s+|\d+\.\s+)/, '$1');
-  const prefixes = { h1: '# ', h2: '## ', h3: '### ', quote: '> ', ul: '- ', task: '- [ ] ' };
-  lines[lineIndex] = (prefixes[fmt] || '') + line;
+  const line = lines[idx] || '';
+  const at = line.indexOf(text);
+  if (at < 0) return;
+  lines[idx] = line.slice(0, at) + openMark + text + closeMark + line.slice(at + text.length);
   lastMarkdown = lines.join('\n');
   renderEditor(lastMarkdown);
   $('preview').innerHTML = renderPreview(lastMarkdown);
+  renderBacklinks();
   syncLineHeights();
-  markDirty();
-  scheduleSave();
+  markDirty(); scheduleSave();
+}
+
+function applyLinePrefix(fmt) {
+  const idx = lineIndexFromSelection();
+  if (idx < 0) return;
+  const lines = lastMarkdown.split('\n');
+  let line = lines[idx] || '';
+  line = line.replace(/^(\s*)(#{1,6}\s+|>\s*|[-*+]\s+\[[ xX]\]\s+|[-*+]\s+|\d+\.\s+)/, '$1');
+  const prefixes = { h1: '# ', h2: '## ', h3: '### ', quote: '> ', ul: '- ', task: '- [ ] ' };
+  lines[idx] = (prefixes[fmt] || '') + line;
+  lastMarkdown = lines.join('\n');
+  renderEditor(lastMarkdown);
+  $('preview').innerHTML = renderPreview(lastMarkdown);
+  renderBacklinks();
+  syncLineHeights();
+  markDirty(); scheduleSave();
 }
 
 /* ----------------------------------------------------------------
@@ -963,7 +856,7 @@ async function saveCurrentNote() {
   await store.notes.put(note);
   if (titleChanged) {
     rebuildWikilinkIndex();
-    schedulePreview(lastMarkdown);
+    schedulePreview();
   }
   markSaved();
   renderTree();
@@ -1547,10 +1440,11 @@ function openExportMenu(anchorBtn) {
   const r = anchorBtn.getBoundingClientRect();
   const note = state.currentNoteId ? state.notes.get(state.currentNoteId) : null;
   showMenu(r.left, r.bottom + 4, [
+    { label: 'Export as folder ZIP (recommended)', action: exportAsZip },
+    'hr',
     { label: note ? `Export current note (.md)` : 'Export current note (.md)', action: () => note && exportNoteAsMd(note) },
     { label: 'Export every note as .md files', action: exportEveryNoteMd },
-    'hr',
-    { label: 'Export full bundle (.json)', action: exportBundle },
+    { label: 'Export full bundle (.json + base64 images)', action: exportBundle },
   ]);
 }
 
@@ -1596,11 +1490,14 @@ async function importBundleFile(file) {
 // JSON bundles merge globally; unknown files are skipped.
 async function importItems(items) {
   _folderCache.clear();
-  let noteCount = 0, bundleCount = 0, failed = 0, skipped = 0;
+  let noteCount = 0, bundleCount = 0, zipCount = 0, failed = 0, skipped = 0;
   for (const { file, pathArr } of items) {
     try {
       const lower = file.name.toLowerCase();
-      if (lower.endsWith('.json')) {
+      if (lower.endsWith('.zip')) {
+        await importZipBlob(file);
+        zipCount++;
+      } else if (lower.endsWith('.json')) {
         await importBundleFile(file);
         bundleCount++;
       } else if (/\.(md|markdown|txt)$/i.test(file.name)) {
@@ -1635,14 +1532,316 @@ async function importItems(items) {
   const parts = [];
   if (noteCount) parts.push(`${noteCount} note${noteCount === 1 ? '' : 's'}`);
   if (bundleCount) parts.push(`${bundleCount} bundle${bundleCount === 1 ? '' : 's'}`);
+  if (zipCount) parts.push(`${zipCount} ZIP${zipCount === 1 ? '' : 's'}`);
   if (skipped) parts.push(`${skipped} skipped`);
   if (failed) parts.push(`${failed} failed`);
-  toast('Imported ' + (parts.join(', ') || 'nothing'), failed ? 'error' : 'success');
+  // importZipBlob already emits its own toast; suppress the summary if zip-only
+  if (!(zipCount && !noteCount && !bundleCount)) {
+    toast('Imported ' + (parts.join(', ') || 'nothing'), failed ? 'error' : 'success');
+  }
 }
 
 // Back-compat: flat list of files with no folder context
 async function importFiles(files) {
   return importItems(files.map((f) => ({ file: f, pathArr: [] })));
+}
+
+/* ================================================================
+   Minimal ZIP writer + reader (STORED + DEFLATE)
+   Used for portable "folder-mirror" exports / imports.
+================================================================ */
+const CRC32_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) {
+    let c = i;
+    for (let j = 0; j < 8; j++) c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+    t[i] = c;
+  }
+  return t;
+})();
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  for (let i = 0; i < bytes.length; i++) crc = CRC32_TABLE[(crc ^ bytes[i]) & 0xff] ^ (crc >>> 8);
+  return (crc ^ 0xffffffff) >>> 0;
+}
+const _enc = new TextEncoder();
+const _dec = new TextDecoder();
+
+// entries: [{ path, data: Uint8Array }] — paths may contain '/' for folders
+function makeZip(entries) {
+  const now = new Date();
+  const dosTime = ((now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1)) & 0xffff;
+  const dosDate = (((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate()) & 0xffff;
+  const chunks = [];
+  const cd = [];
+  let offset = 0;
+  for (const e of entries) {
+    const name = _enc.encode(e.path);
+    const data = e.data;
+    const c = crc32(data);
+    const lfh = new Uint8Array(30 + name.length);
+    const dv = new DataView(lfh.buffer);
+    dv.setUint32(0, 0x04034b50, true);
+    dv.setUint16(4, 20, true);
+    dv.setUint16(6, 0x0800, true); // UTF-8 names
+    dv.setUint16(8, 0, true);      // method: stored
+    dv.setUint16(10, dosTime, true);
+    dv.setUint16(12, dosDate, true);
+    dv.setUint32(14, c, true);
+    dv.setUint32(18, data.length, true);
+    dv.setUint32(22, data.length, true);
+    dv.setUint16(26, name.length, true);
+    dv.setUint16(28, 0, true);
+    lfh.set(name, 30);
+    chunks.push(lfh, data);
+    cd.push({ name, dataLen: data.length, crc: c, offset });
+    offset += lfh.length + data.length;
+  }
+  const cdStart = offset;
+  for (const ent of cd) {
+    const h = new Uint8Array(46 + ent.name.length);
+    const dv = new DataView(h.buffer);
+    dv.setUint32(0, 0x02014b50, true);
+    dv.setUint16(4, 20, true);
+    dv.setUint16(6, 20, true);
+    dv.setUint16(8, 0x0800, true);
+    dv.setUint16(10, 0, true);
+    dv.setUint16(12, dosTime, true);
+    dv.setUint16(14, dosDate, true);
+    dv.setUint32(16, ent.crc, true);
+    dv.setUint32(20, ent.dataLen, true);
+    dv.setUint32(24, ent.dataLen, true);
+    dv.setUint16(28, ent.name.length, true);
+    dv.setUint32(42, ent.offset, true);
+    h.set(ent.name, 46);
+    chunks.push(h);
+    offset += h.length;
+  }
+  const eocd = new Uint8Array(22);
+  const dv = new DataView(eocd.buffer);
+  dv.setUint32(0, 0x06054b50, true);
+  dv.setUint16(8, cd.length, true);
+  dv.setUint16(10, cd.length, true);
+  dv.setUint32(12, offset - cdStart, true);
+  dv.setUint32(16, cdStart, true);
+  chunks.push(eocd);
+  return new Blob(chunks, { type: 'application/zip' });
+}
+
+async function inflateRaw(bytes) {
+  // DecompressionStream is available in Chromium-based + Firefox + Safari ≥17
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+  const chunks = [];
+  const reader = stream.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+  }
+  const total = chunks.reduce((s, c) => s + c.length, 0);
+  const out = new Uint8Array(total);
+  let o = 0;
+  for (const c of chunks) { out.set(c, o); o += c.length; }
+  return out;
+}
+
+async function readZip(blob) {
+  const buf = await blob.arrayBuffer();
+  const u8 = new Uint8Array(buf);
+  const dv = new DataView(buf);
+  // Locate EOCD by scanning backward
+  let eocd = -1;
+  for (let i = u8.length - 22; i >= Math.max(0, u8.length - 65557); i--) {
+    if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error('Not a valid ZIP');
+  const numEntries = dv.getUint16(eocd + 10, true);
+  const cdOffset = dv.getUint32(eocd + 16, true);
+  const entries = [];
+  let p = cdOffset;
+  for (let i = 0; i < numEntries; i++) {
+    if (dv.getUint32(p, true) !== 0x02014b50) throw new Error('Bad CD entry');
+    const method = dv.getUint16(p + 10, true);
+    const compSize = dv.getUint32(p + 20, true);
+    const nameLen = dv.getUint16(p + 28, true);
+    const extraLen = dv.getUint16(p + 30, true);
+    const commentLen = dv.getUint16(p + 32, true);
+    const lfhOffset = dv.getUint32(p + 42, true);
+    const name = _dec.decode(u8.subarray(p + 46, p + 46 + nameLen));
+    p += 46 + nameLen + extraLen + commentLen;
+    if (dv.getUint32(lfhOffset, true) !== 0x04034b50) throw new Error('Bad LFH');
+    const lfhNameLen = dv.getUint16(lfhOffset + 26, true);
+    const lfhExtraLen = dv.getUint16(lfhOffset + 28, true);
+    const dataStart = lfhOffset + 30 + lfhNameLen + lfhExtraLen;
+    const raw = u8.subarray(dataStart, dataStart + compSize);
+    let data;
+    if (method === 0) data = raw;
+    else if (method === 8) data = await inflateRaw(raw);
+    else throw new Error('Unsupported method ' + method);
+    entries.push({ path: name, data, isDir: name.endsWith('/') });
+  }
+  return entries;
+}
+
+/* ================================================================
+   Folder-mirror ZIP export
+   The ZIP layout mirrors the in-app folder hierarchy:
+       Top-level note.md
+       Some folder/Sub-folder/Nested note.md
+       _images/<id>.<ext>          (only images actually used)
+       _yanta-manifest.json         (versioning / round-trip aid)
+================================================================ */
+function folderPathSegments(folderId) {
+  if (!folderId) return [];
+  const parts = [];
+  let f = state.folders.get(folderId);
+  const seen = new Set();
+  while (f && !seen.has(f.id)) {
+    parts.unshift(f.name);
+    seen.add(f.id);
+    f = f.parentId ? state.folders.get(f.parentId) : null;
+  }
+  return parts;
+}
+
+function imageExt(meta) {
+  const t = (meta?.type || '').split('/')[1] || '';
+  if (t === 'jpeg') return 'jpg';
+  if (t === 'svg+xml') return 'svg';
+  return t || 'bin';
+}
+
+async function exportAsZip() {
+  // 1. Collect images that any note actually references
+  const used = new Set();
+  for (const note of state.notes.values()) {
+    const re = /yanta-img:\/\/([a-z0-9]+)/gi;
+    let m;
+    while ((m = re.exec(note.body || '')) !== null) used.add(m[1]);
+  }
+
+  // 2. Build entries
+  const entries = [];
+  const usedPaths = new Set();
+  function pickPath(folderSegs, baseName) {
+    let path = [...folderSegs, baseName].join('/');
+    if (!usedPaths.has(path)) { usedPaths.add(path); return path; }
+    // Disambiguate with a suffix
+    const dot = baseName.lastIndexOf('.');
+    const stem = dot > 0 ? baseName.slice(0, dot) : baseName;
+    const ext = dot > 0 ? baseName.slice(dot) : '';
+    for (let i = 2; i < 1000; i++) {
+      const p = [...folderSegs, `${stem} (${i})${ext}`].join('/');
+      if (!usedPaths.has(p)) { usedPaths.add(p); return p; }
+    }
+    return path;
+  }
+
+  for (const note of state.notes.values()) {
+    const segs = folderPathSegments(note.folderId);
+    const fname = safeFilename(note.title) + '.md';
+    const path = pickPath(segs, fname);
+    let body = note.body || '';
+    // Rewrite yanta-img://X → _images/X.ext (relative, resolves from any depth via "/")
+    body = body.replace(/yanta-img:\/\/([a-z0-9]+)/gi, (full, id) => {
+      const meta = state.imagesMeta.get(id);
+      if (!meta) return full;
+      const rel = '_images/' + id + '.' + imageExt(meta);
+      // Add ../ for nested folders
+      return (segs.length ? '../'.repeat(segs.length) : '') + rel;
+    });
+    const fm = noteToFrontmatter(note);
+    entries.push({ path, data: _enc.encode(fm + body) });
+  }
+
+  for (const id of used) {
+    const rec = await store.images.get(id);
+    if (!rec || !rec.blob) continue;
+    const meta = state.imagesMeta.get(id) || { type: rec.type };
+    const buf = new Uint8Array(await rec.blob.arrayBuffer());
+    entries.push({ path: '_images/' + id + '.' + imageExt(meta), data: buf });
+  }
+
+  const manifest = {
+    yanta: 1,
+    exported: new Date().toISOString(),
+    counts: { notes: state.notes.size, folders: state.folders.size, images: used.size },
+  };
+  entries.push({ path: '_yanta-manifest.json', data: _enc.encode(JSON.stringify(manifest, null, 2)) });
+
+  const zip = makeZip(entries);
+  downloadBlob(zip, `yanta-${new Date().toISOString().slice(0, 10)}.zip`);
+  toast(`Exported ${entries.length} files`, 'success');
+}
+
+/* ================================================================
+   ZIP import — accepts files we exported, or any folder-of-md ZIP
+================================================================ */
+const _imageExtToMime = {
+  jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp',
+  gif: 'image/gif', svg: 'image/svg+xml', bin: 'application/octet-stream',
+};
+async function importZipBlob(blob) {
+  let entries;
+  try { entries = await readZip(blob); }
+  catch (e) { toast('ZIP read failed: ' + e.message, 'error'); return; }
+
+  _folderCache.clear();
+  const imageIdRemap = new Map(); // original id (from filename) -> new id
+
+  // First pass: images
+  for (const ent of entries) {
+    if (ent.isDir) continue;
+    if (!ent.path.startsWith('_images/')) continue;
+    const filename = ent.path.slice('_images/'.length);
+    const dot = filename.lastIndexOf('.');
+    const origId = dot > 0 ? filename.slice(0, dot) : filename;
+    const ext = (dot > 0 ? filename.slice(dot + 1) : 'bin').toLowerCase();
+    const mime = _imageExtToMime[ext] || 'application/octet-stream';
+    const blob2 = new Blob([ent.data], { type: mime });
+    const newId = state.imagesMeta.has(origId) ? uid() : origId;
+    const meta = { id: newId, name: filename, size: blob2.size, type: mime, ts: Date.now() };
+    await store.images.put({ ...meta, blob: blob2 });
+    state.imagesMeta.set(newId, meta);
+    imageIdRemap.set(origId, newId);
+  }
+
+  // Second pass: notes
+  let noteCount = 0;
+  for (const ent of entries) {
+    if (ent.isDir) continue;
+    if (ent.path.startsWith('_images/')) continue;
+    if (ent.path.startsWith('_yanta-')) continue;
+    if (!/\.(md|markdown|txt)$/i.test(ent.path)) continue;
+    const parts = ent.path.split('/');
+    const filename = parts.pop();
+    const folderId = await ensureFolderPath(parts);
+    const text = _dec.decode(ent.data);
+    const { meta, body: rawBody } = parseFrontmatter(text);
+    // Resolve ../_images/X.ext → yanta-img://(remapped)X
+    const body = rawBody.replace(/(?:\.\.\/)*_images\/([a-z0-9]+)(?:\.[a-z0-9]+)?/gi, (_full, id) => {
+      const newId = imageIdRemap.get(id) || id;
+      return 'yanta-img://' + newId;
+    });
+    const title = filename.replace(/\.(md|markdown|txt)$/i, '');
+    const note = {
+      id: uid(),
+      title,
+      body,
+      folderId,
+      tags: Array.isArray(meta.tags) ? meta.tags : [],
+      pinned: !!meta.pinned,
+      created: meta.created ? Date.parse(meta.created) || Date.now() : Date.now(),
+      updated: Date.now(),
+    };
+    state.notes.set(note.id, note);
+    await store.notes.put(note);
+    noteCount++;
+  }
+
+  rebuildWikilinkIndex();
+  renderTree();
+  toast(`Imported ${noteCount} note${noteCount === 1 ? '' : 's'}${imageIdRemap.size ? ` + ${imageIdRemap.size} image${imageIdRemap.size === 1 ? '' : 's'}` : ''} from ZIP`, 'success');
 }
 
 /* Walk a webkitGetAsEntry tree (supports nested directories) */
@@ -1762,16 +1961,6 @@ function renderBacklinks() {
   }
   pv.append(wrap);
 }
-
-// Patch: re-render backlinks after preview renders
-const _origSchedulePreview = schedulePreview;
-function schedulePreviewWithBacklinks(md) {
-  _origSchedulePreview(md);
-  // backlinks render after preview content
-  setTimeout(renderBacklinks, 130);
-}
-// replace the binding (functions referencing schedulePreview keep old name)
-// We'll add explicit calls to renderBacklinks where needed.
 
 /* ================================================================
    Wikilink click / create flow
@@ -1902,7 +2091,7 @@ function replaceWikiTrigger(insertText) {
   renderEditor(lastMarkdown);
   const newOffset = open + 2 + insertText.length + 2;
   setCursorPos({ lineIndex: pos.lineIndex, offset: newOffset });
-  schedulePreview(lastMarkdown);
+  schedulePreview();
   setTimeout(renderBacklinks, 200);
   markDirty(); scheduleSave();
 }
@@ -2037,10 +2226,11 @@ function buildCommandList() {
     { label: 'Insert wikilink', icon: '↔', action: () => insertAtCursor('[[') },
     { label: 'Toggle pin', icon: '★', action: togglePin },
     { label: 'Cycle theme (auto/dark/light)', icon: '◑', hint: 'T', action: toggleTheme },
+    { label: 'Export as folder ZIP', icon: '⤓', action: exportAsZip },
     { label: 'Export current note (.md)', icon: '⤓', hint: 'Ctrl+E', action: () => { const n = state.currentNoteId ? state.notes.get(state.currentNoteId) : null; if (n) exportNoteAsMd(n); } },
     { label: 'Export full bundle (.json)', icon: '⤓', action: exportBundle },
     { label: 'Export every note as .md', icon: '⤓', action: exportEveryNoteMd },
-    { label: 'Import files…', icon: '⤒', action: () => $('importFile').click() },
+    { label: 'Import files (md/json/zip)…', icon: '⤒', action: () => $('importFile').click() },
     { label: 'Import folder…', icon: '⤒', action: () => $('importFolder').click() },
     { label: 'Delete current note', icon: '✕', action: deleteCurrentNote },
   ];
@@ -2389,7 +2579,7 @@ async function createWelcomeNote() {
 
 ## Features at a glance
 
-- Markdown editing with **live styled preview** on the right — and the preview is **editable too** (great on mobile)
+- Markdown editor on the left with **live styled preview** on the right (read-only — formatting is done in the editor)
 - **[[Wikilinks]]** between notes — type \`[[\` to get autocomplete; click a missing link to create that note
 - **Backlinks panel** below every note shows who references it
 - **Interactive graph view** — see your knowledge network (Ctrl+G)
@@ -2397,7 +2587,8 @@ async function createWelcomeNote() {
 - Select text → **floating formatting toolbar** (bold · italic · headings · list · quote · link)
 - Drop, paste or upload **images** — choose Base64 or library **references** · live compression preview
 - **Folders** with sub-folders, **#tags**, pin, search, full offline use
-- Drop a whole **folder tree** onto the window to import — structure is preserved
+- **Cross-device sync via export**: a single \`.zip\` mirrors your folder tree on disk. Drop it on any other device to restore the same setup
+- Also imports loose \`.md\` files or whole **folders** with sub-folders preserved
 - **Auto theme** follows your system
 
 > Try pasting an image from your clipboard right now (\`Ctrl+V\`).
@@ -2476,7 +2667,7 @@ function bindEvents() {
     e.stopPropagation();
     const r = e.currentTarget.getBoundingClientRect();
     showMenu(r.left, r.bottom + 4, [
-      { label: 'Import files (.md / .json)…', action: () => $('importFile').click() },
+      { label: 'Import files (.md / .json / .zip)…', action: () => $('importFile').click() },
       { label: 'Import folder (with sub-folders)…', action: () => $('importFolder').click() },
       'hr',
       { label: 'Or drop files/folders anywhere on the window', action: () => toast('Drop files or a folder onto YANTA') },
@@ -2724,7 +2915,7 @@ function replaceCurrentLine(text) {
   renderEditor(lastMarkdown);
   // move cursor to end of replaced line
   setCursorPos({ lineIndex: pos.lineIndex, offset: text.length });
-  schedulePreview(lastMarkdown);
+  schedulePreview();
   markDirty();
   scheduleSave();
 }
@@ -2796,7 +2987,7 @@ function handleEditorClick(e) {
         lines[idx] = lines[idx].replace(/!\[[^\]]*\]\([^)]+\)/, '');
         lastMarkdown = lines.join('\n');
         renderEditor(lastMarkdown);
-        schedulePreview(lastMarkdown);
+        schedulePreview();
         markDirty(); scheduleSave();
       } },
     ]);
@@ -2879,13 +3070,14 @@ function setupGlobalDropImport() {
       return;
     }
     const importable = files.filter((f) =>
-      /\.(md|markdown|txt|json)$/i.test(f.name) ||
-      f.type === 'application/json' || f.type === 'text/markdown' || f.type === 'text/plain'
+      /\.(md|markdown|txt|json|zip)$/i.test(f.name) ||
+      f.type === 'application/json' || f.type === 'application/zip' ||
+      f.type === 'text/markdown' || f.type === 'text/plain'
     );
     if (importable.length) {
       await importFiles(importable);
     } else {
-      toast('Drop .md, .markdown, .txt, or YANTA .json files', 'error');
+      toast('Drop .md, .markdown, .txt, .zip, or YANTA .json files', 'error');
     }
   });
 }

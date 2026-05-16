@@ -171,10 +171,20 @@ function classifyLine(line, ctx) {
 
 // Inline tokenizer for preview (HTML output)
 function renderInline(s) {
-  // Order: escape -> code -> images -> links -> bold -> italic -> strike -> tag refs
+  // Order matters: escape -> code -> wikilinks -> images -> md links -> bold -> ...
   let out = escapeHtml(s);
   // inline code
   out = out.replace(/`([^`\n]+)`/g, (_, c) => `<code>${c}</code>`);
+  // wikilinks [[Target]] or [[Target|alias]]
+  out = out.replace(/\[\[([^\]|\n]+)(?:\|([^\]\n]+))?\]\]/g, (_, target, alias) => {
+    const t = target.trim();
+    const key = t.toLowerCase();
+    const noteId = wikilinkIndex.get(key);
+    const text = (alias || t).trim();
+    const cls = noteId ? 'wiki-link' : 'wiki-link missing';
+    const id = noteId ? ` data-note-id="${noteId}"` : '';
+    return `<a class="${cls}" data-wiki="${escapeHtml(t)}"${id}>${escapeHtml(text)}</a>`;
+  });
   // images ![alt](url "title")
   out = out.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+"([^"]*)")?\)/g, (_, alt, url, title) => {
     const resolved = resolveImageUrl(url);
@@ -296,39 +306,57 @@ function tokenizeLine(line, info) {
   // strip leading markers for headings/quotes/lists but keep visible
   // Approach: walk through inline patterns and split
   // We handle inline tokens, but keep markers (** ** etc) visible.
-  const inlineRegex = /(`[^`\n]+`)|(!\[[^\]]*\]\([^)]+\))|(\[[^\]]+\]\([^)]+\))|(\*\*\*[^*\n]+\*\*\*)|(\*\*[^*\n]+\*\*)|(__[^_\n]+__)|(\*[^*\n]+\*)|(_[^_\n]+_)|(~~[^~\n]+~~)|(\s#[a-zA-Z][\w-]*)/g;
+  const inlineRegex = /(`[^`\n]+`)|(\[\[[^\]\n]+\]\])|(!\[[^\]]*\]\([^)]+\))|(\[[^\]]+\]\([^)]+\))|(\*\*\*[^*\n]+\*\*\*)|(\*\*[^*\n]+\*\*)|(__[^_\n]+__)|(\*[^*\n]+\*)|(_[^_\n]+_)|(~~[^~\n]+~~)|(\s#[a-zA-Z][\w-]*)/g;
   let last = 0; let m;
   while ((m = inlineRegex.exec(s)) !== null) {
     if (m.index > last) tokens.push({ text: s.slice(last, m.index) });
     const tok = m[0];
     if (m[1]) tokens.push({ text: tok, cls: 'ed-code' });
-    else if (m[2]) tokens.push(...tokenizeImage(tok));
-    else if (m[3]) {
+    else if (m[2]) {
+      // wikilink [[Target]] or [[Target|alias]]
+      const inner = tok.slice(2, -2);
+      const pipeIdx = inner.indexOf('|');
+      tokens.push({ text: '[[', cls: 'ed-mark' });
+      if (pipeIdx >= 0) {
+        const target = inner.slice(0, pipeIdx);
+        const alias = inner.slice(pipeIdx + 1);
+        const exists = wikilinkIndex.has(target.trim().toLowerCase());
+        tokens.push({ text: target, cls: exists ? 'ed-wiki' : 'ed-wiki-missing' });
+        tokens.push({ text: '|', cls: 'ed-mark' });
+        tokens.push({ text: alias, cls: exists ? 'ed-wiki' : 'ed-wiki-missing' });
+      } else {
+        const exists = wikilinkIndex.has(inner.trim().toLowerCase());
+        tokens.push({ text: inner, cls: exists ? 'ed-wiki' : 'ed-wiki-missing' });
+      }
+      tokens.push({ text: ']]', cls: 'ed-mark' });
+    }
+    else if (m[3]) tokens.push(...tokenizeImage(tok));
+    else if (m[4]) {
       const lm = /\[([^\]]+)\]\(([^)]+)\)/.exec(tok);
       tokens.push({ text: '[', cls: 'ed-mark' });
       tokens.push({ text: lm[1], cls: 'ed-link' });
       tokens.push({ text: '](', cls: 'ed-mark' });
       tokens.push({ text: lm[2], cls: 'ed-url' });
       tokens.push({ text: ')', cls: 'ed-mark' });
-    } else if (m[4]) {
+    } else if (m[5]) {
       tokens.push({ text: '***', cls: 'ed-mark' });
       tokens.push({ text: tok.slice(3, -3), cls: 'ed-bold ed-italic' });
       tokens.push({ text: '***', cls: 'ed-mark' });
-    } else if (m[5] || m[6]) {
+    } else if (m[6] || m[7]) {
       const mk = tok.slice(0, 2);
       tokens.push({ text: mk, cls: 'ed-mark' });
       tokens.push({ text: tok.slice(2, -2), cls: 'ed-bold' });
       tokens.push({ text: mk, cls: 'ed-mark' });
-    } else if (m[7] || m[8]) {
+    } else if (m[8] || m[9]) {
       const mk = tok[0];
       tokens.push({ text: mk, cls: 'ed-mark' });
       tokens.push({ text: tok.slice(1, -1), cls: 'ed-italic' });
       tokens.push({ text: mk, cls: 'ed-mark' });
-    } else if (m[9]) {
+    } else if (m[10]) {
       tokens.push({ text: '~~', cls: 'ed-mark' });
       tokens.push({ text: tok.slice(2, -2), cls: 'ed-strike' });
       tokens.push({ text: '~~', cls: 'ed-mark' });
-    } else if (m[10]) {
+    } else if (m[11]) {
       tokens.push({ text: tok, cls: 'ed-tag-ref' });
     }
     last = m.index + tok.length;
@@ -547,10 +575,14 @@ function quickStyleCurrentLine() {
 function handleEditorInput() {
   quickStyleCurrentLine();
   const md = readEditorMarkdown();
-  if (md === lastMarkdown) return;
+  if (md === lastMarkdown) {
+    checkWikiAutocomplete();
+    return;
+  }
   lastMarkdown = md;
   schedulePreview(md);
   scheduleLazyEditorRender();
+  checkWikiAutocomplete();
   markDirty();
   scheduleSave();
   updateWordCount(md);
@@ -565,9 +597,9 @@ const scheduleLazyEditorRender = debounce(() => {
 }, 450);
 
 const schedulePreview = debounce((md) => {
-  // Don't trample the user's cursor while they're typing inside preview
   if ($('preview').contains(document.activeElement)) return;
   $('preview').innerHTML = renderPreview(md);
+  if (typeof renderBacklinks === 'function') renderBacklinks();
   syncLineHeights();
 }, 120);
 
@@ -878,6 +910,7 @@ function newNote(folderId = null) {
   };
   state.notes.set(id, note);
   store.notes.put(note);
+  rebuildWikilinkIndex();
   openNote(id);
   renderTree();
   $('noteTitle').focus();
@@ -904,6 +937,7 @@ async function openNote(id) {
   lastMarkdown = note.body || '';
   renderEditor(lastMarkdown);
   $('preview').innerHTML = renderPreview(lastMarkdown);
+  renderBacklinks();
   renderChips();
   updatePinIcon();
   syncLineHeights();
@@ -922,10 +956,15 @@ async function saveCurrentNote() {
     markSaved();
     return;
   }
+  const titleChanged = note.title !== newTitle;
   note.title = newTitle;
   note.body = newBody;
   note.updated = Date.now();
   await store.notes.put(note);
+  if (titleChanged) {
+    rebuildWikilinkIndex();
+    schedulePreview(lastMarkdown);
+  }
   markSaved();
   renderTree();
 }
@@ -936,6 +975,7 @@ async function deleteCurrentNote() {
   if (!confirm(`Delete "${note.title}"? This cannot be undone.`)) return;
   await store.notes.del(note.id);
   state.notes.delete(note.id);
+  rebuildWikilinkIndex();
   state.currentNoteId = null;
   // pick another note
   const next = [...state.notes.values()].sort((a, b) => b.updated - a.updated)[0];
@@ -1205,6 +1245,7 @@ async function duplicateNote(src) {
   const n = { ...src, id: uid(), title: src.title + ' (copy)', created: Date.now(), updated: Date.now() };
   await store.notes.put(n);
   state.notes.set(n.id, n);
+  rebuildWikilinkIndex();
   renderTree();
   openNote(n.id);
 }
@@ -1589,6 +1630,7 @@ async function importItems(items) {
       failed++;
     }
   }
+  rebuildWikilinkIndex();
   renderTree();
   const parts = [];
   if (noteCount) parts.push(`${noteCount} note${noteCount === 1 ? '' : 's'}`);
@@ -1655,6 +1697,632 @@ function toggleTheme() {
   toast(`Theme: ${state.theme}`);
 }
 
+/* ================================================================
+   Wikilinks — [[Target]] / [[Target|alias]]
+================================================================ */
+const wikilinkIndex = new Map(); // titleLower -> noteId
+
+function rebuildWikilinkIndex() {
+  wikilinkIndex.clear();
+  for (const n of state.notes.values()) {
+    if (n.title) wikilinkIndex.set(n.title.toLowerCase(), n.id);
+  }
+}
+
+const WIKILINK_RE = /\[\[([^\]|\n]+)(?:\|[^\]\n]+)?\]\]/g;
+
+// All notes that link to `noteId`, with one example line each.
+function getBacklinks(noteId) {
+  const note = state.notes.get(noteId);
+  if (!note) return [];
+  const target = note.title.trim().toLowerCase();
+  const out = [];
+  for (const n of state.notes.values()) {
+    if (n.id === noteId) continue;
+    WIKILINK_RE.lastIndex = 0;
+    let m;
+    let foundLine = null;
+    while ((m = WIKILINK_RE.exec(n.body || '')) !== null) {
+      if (m[1].trim().toLowerCase() === target) {
+        const before = n.body.slice(0, m.index);
+        const lineIdx = before.split('\n').length - 1;
+        foundLine = (n.body.split('\n')[lineIdx] || '').trim();
+        break;
+      }
+    }
+    if (foundLine != null) out.push({ note: n, line: foundLine });
+  }
+  return out.sort((a, b) => b.note.updated - a.note.updated);
+}
+
+function renderBacklinks() {
+  const pv = $('preview');
+  const old = pv.querySelector('.backlinks');
+  if (old) old.remove();
+  if (!state.currentNoteId) return;
+  const back = getBacklinks(state.currentNoteId);
+  const wrap = el('div', { class: 'backlinks', contenteditable: 'false' });
+  const title = el('div', { class: 'backlinks-title' }, 'Linked from',
+    el('span', { class: 'badge' }, String(back.length)));
+  wrap.append(title);
+  if (!back.length) {
+    wrap.append(el('div', { class: 'backlinks-empty' }, 'No backlinks yet. Reference this note from another with [[' + (state.notes.get(state.currentNoteId)?.title || '') + ']].'));
+  } else {
+    for (const { note, line } of back) {
+      const item = el('div', { class: 'backlink', onclick: () => openNote(note.id) });
+      item.append(el('div', { class: 'bl-title' }, note.title || 'Untitled'));
+      // highlight the [[link]] in the context
+      const tname = state.notes.get(state.currentNoteId).title;
+      const ctx = line.replace(new RegExp('\\[\\[' + tname.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '(\\|[^\\]]+)?\\]\\]', 'gi'), `<span class="bl-mark">[[${escapeHtml(tname)}$1]]</span>`);
+      const ctxDiv = el('div', { class: 'bl-context' });
+      ctxDiv.innerHTML = ctx.length > 200 ? ctx.slice(0, 200) + '…' : ctx;
+      item.append(ctxDiv);
+      wrap.append(item);
+    }
+  }
+  pv.append(wrap);
+}
+
+// Patch: re-render backlinks after preview renders
+const _origSchedulePreview = schedulePreview;
+function schedulePreviewWithBacklinks(md) {
+  _origSchedulePreview(md);
+  // backlinks render after preview content
+  setTimeout(renderBacklinks, 130);
+}
+// replace the binding (functions referencing schedulePreview keep old name)
+// We'll add explicit calls to renderBacklinks where needed.
+
+/* ================================================================
+   Wikilink click / create flow
+================================================================ */
+function handleWikilinkClick(e) {
+  const a = e.target.closest('a.wiki-link');
+  if (!a) return;
+  e.preventDefault();
+  e.stopPropagation();
+  const target = a.dataset.wiki;
+  const id = a.dataset.noteId;
+  if (id && state.notes.get(id)) {
+    openNote(id);
+  } else {
+    if (confirm(`Note "${target}" doesn't exist yet. Create it?`)) {
+      createNoteWithTitle(target);
+    }
+  }
+}
+async function createNoteWithTitle(title) {
+  const note = {
+    id: uid(),
+    title: title.trim() || 'Untitled',
+    body: '',
+    folderId: state.currentNoteId ? state.notes.get(state.currentNoteId)?.folderId || null : null,
+    tags: [],
+    pinned: false,
+    created: Date.now(),
+    updated: Date.now(),
+  };
+  state.notes.set(note.id, note);
+  await store.notes.put(note);
+  rebuildWikilinkIndex();
+  openNote(note.id);
+  renderTree();
+}
+
+/* ================================================================
+   Autocomplete popup — used for [[ wikilinks
+================================================================ */
+const ac = {
+  el: null, items: [], active: 0,
+  triggerStart: -1, lineDiv: null, mode: 'wiki', // 'wiki'
+};
+function acHide() {
+  const e = $('autocomplete');
+  if (e) e.hidden = true;
+  ac.items = []; ac.triggerStart = -1; ac.active = 0;
+}
+function acShowWiki(query, anchorRect) {
+  const e = $('autocomplete');
+  if (!e) return;
+  const q = query.toLowerCase();
+  // Score notes by title containing query
+  const all = [...state.notes.values()]
+    .filter((n) => n.id !== state.currentNoteId)
+    .map((n) => ({ n, score: scoreMatch(n.title || '', q) }))
+    .filter((x) => x.score > 0)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 8);
+  ac.items = all.map(({ n }) => ({ kind: 'note', id: n.id, label: n.title || 'Untitled', meta: 'note' }));
+  // Always offer "Create" if query is non-empty and no exact match
+  if (query.trim() && !state.notes.has(wikilinkIndex.get(query.trim().toLowerCase()))) {
+    ac.items.push({ kind: 'create', label: 'Create "' + query.trim() + '"', meta: 'new', value: query.trim() });
+  }
+  if (!ac.items.length) { acHide(); return; }
+  ac.active = 0;
+  e.replaceChildren();
+  for (let i = 0; i < ac.items.length; i++) {
+    const it = ac.items[i];
+    const row = el('div', {
+      class: 'ac-item' + (i === ac.active ? ' active' : ''),
+      dataset: { i: String(i) },
+      onclick: () => acAccept(i),
+    });
+    if (it.kind === 'create') row.classList.add('create');
+    row.append(el('span', { class: 'ac-icon' }, it.kind === 'create' ? '+' : '◆'));
+    row.append(el('span', { class: 'ac-label' }, it.label));
+    row.append(el('span', { class: 'ac-meta' }, it.meta));
+    e.append(row);
+  }
+  e.hidden = false;
+  // position below the cursor; anchorRect is the caret bounding rect
+  const ew = e.offsetWidth || 240, eh = e.offsetHeight || 160;
+  let x = anchorRect.left;
+  let y = anchorRect.bottom + 4;
+  if (x + ew > window.innerWidth - 8) x = window.innerWidth - ew - 8;
+  if (y + eh > window.innerHeight - 8) y = anchorRect.top - eh - 4;
+  e.style.left = x + 'px';
+  e.style.top = y + 'px';
+}
+function acMove(delta) {
+  if (!ac.items.length) return;
+  ac.active = (ac.active + delta + ac.items.length) % ac.items.length;
+  const e = $('autocomplete');
+  for (const child of e.children) child.classList.toggle('active', parseInt(child.dataset.i, 10) === ac.active);
+  const sel = e.children[ac.active];
+  if (sel) sel.scrollIntoView({ block: 'nearest' });
+}
+async function acAccept(i) {
+  if (i == null) i = ac.active;
+  const item = ac.items[i];
+  if (!item) { acHide(); return; }
+  let inserted;
+  if (item.kind === 'create') {
+    inserted = item.value;
+  } else {
+    inserted = item.label;
+  }
+  // Replace the partial text from `[[<query>` with `[[<inserted>]]`
+  replaceWikiTrigger(inserted);
+  acHide();
+}
+function replaceWikiTrigger(insertText) {
+  const pos = getCursorPos();
+  if (!pos) return;
+  const lines = lastMarkdown.split('\n');
+  const line = lines[pos.lineIndex] || '';
+  // Find the `[[` to the left of cursor (within this line)
+  const before = line.slice(0, pos.offset);
+  const open = before.lastIndexOf('[[');
+  if (open < 0) return;
+  const after = line.slice(pos.offset);
+  // Replace from `[[` to cursor with [[insertText]]
+  const newLine = line.slice(0, open) + '[[' + insertText + ']]' + after;
+  lines[pos.lineIndex] = newLine;
+  lastMarkdown = lines.join('\n');
+  renderEditor(lastMarkdown);
+  const newOffset = open + 2 + insertText.length + 2;
+  setCursorPos({ lineIndex: pos.lineIndex, offset: newOffset });
+  schedulePreview(lastMarkdown);
+  setTimeout(renderBacklinks, 200);
+  markDirty(); scheduleSave();
+}
+
+// Detect [[ trigger after each input event in the editor.
+function checkWikiAutocomplete() {
+  const pos = getCursorPos();
+  if (!pos) { acHide(); return; }
+  const lines = lastMarkdown.split('\n');
+  const line = lines[pos.lineIndex] || '';
+  const before = line.slice(0, pos.offset);
+  const open = before.lastIndexOf('[[');
+  const close = before.lastIndexOf(']]');
+  if (open < 0 || close > open) { acHide(); return; }
+  // We're inside an unclosed [[
+  const query = before.slice(open + 2);
+  if (query.length > 40 || /\n/.test(query)) { acHide(); return; }
+  // Get caret rect
+  const sel = window.getSelection();
+  if (!sel.rangeCount) { acHide(); return; }
+  const rng = sel.getRangeAt(0).cloneRange();
+  let rect = rng.getBoundingClientRect();
+  if (rect.width === 0 && rect.height === 0) {
+    // collapsed at end — use the parent line's rect end
+    const blocks = [...editor.children];
+    const lineEl = blocks[pos.lineIndex];
+    if (lineEl) rect = lineEl.getBoundingClientRect();
+  }
+  acShowWiki(query, rect);
+}
+
+/* ================================================================
+   Command palette + Quick switcher
+================================================================ */
+const palette = {
+  mode: 'commands', // 'commands' | 'notes'
+  items: [],
+  active: 0,
+  filter: '',
+};
+function openPalette(mode = 'commands') {
+  palette.mode = mode;
+  palette.filter = '';
+  palette.active = 0;
+  $('paletteInput').value = '';
+  $('paletteInput').placeholder = mode === 'commands'
+    ? 'Type a command…'
+    : 'Type to switch to a note…';
+  $('paletteMode').textContent = mode === 'commands' ? 'Command palette' : 'Quick switcher';
+  buildPaletteItems();
+  $('palette').hidden = false;
+  $('paletteInput').focus();
+}
+function closePalette() {
+  $('palette').hidden = true;
+  palette.items = [];
+}
+function buildPaletteItems() {
+  const q = palette.filter.trim().toLowerCase();
+  if (palette.mode === 'commands') {
+    palette.items = commandList
+      .map((c) => ({ ...c, score: q ? scoreMatch(c.label, q) + (c.label.toLowerCase().startsWith(q) ? 50 : 0) : 1 }))
+      .filter((c) => !q || c.score > 0)
+      .sort((a, b) => b.score - a.score);
+  } else {
+    palette.items = [...state.notes.values()]
+      .map((n) => ({ id: n.id, label: n.title || 'Untitled', folder: state.folders.get(n.folderId)?.name || '', score: q ? scoreMatch(n.title || '', q) : (Date.now() - n.updated) * -1 / 1e9 + 1 }))
+      .filter((n) => !q || n.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 80);
+  }
+  palette.active = 0;
+  renderPaletteList();
+}
+function renderPaletteList() {
+  const list = $('paletteList');
+  list.replaceChildren();
+  if (!palette.items.length) {
+    list.append(el('div', { class: 'palette-empty' }, palette.mode === 'commands' ? 'No matching command' : 'No matching note'));
+    return;
+  }
+  for (let i = 0; i < palette.items.length; i++) {
+    const it = palette.items[i];
+    const row = el('div', {
+      class: 'palette-item' + (i === palette.active ? ' active' : ''),
+      dataset: { i: String(i) },
+      onclick: () => paletteAccept(i),
+      onmouseenter: () => { palette.active = i; for (const c of list.children) c.classList.toggle('active', parseInt(c.dataset.i, 10) === i); },
+    });
+    if (palette.mode === 'commands') {
+      row.append(el('span', { class: 'pi-icon' }, it.icon || '·'));
+      row.append(el('span', { class: 'pi-label' }, it.label));
+      if (it.hint) row.append(el('span', { class: 'pi-hint' }, it.hint));
+    } else {
+      row.append(el('span', { class: 'pi-icon' }, '◆'));
+      row.append(el('span', { class: 'pi-label' }, it.label));
+      if (it.folder) row.append(el('span', { class: 'pi-meta' }, it.folder));
+    }
+    list.append(row);
+  }
+  // ensure active is visible
+  const a = list.children[palette.active];
+  if (a) a.scrollIntoView({ block: 'nearest' });
+}
+function paletteMove(delta) {
+  if (!palette.items.length) return;
+  palette.active = (palette.active + delta + palette.items.length) % palette.items.length;
+  renderPaletteList();
+}
+function paletteAccept(i) {
+  if (i == null) i = palette.active;
+  const it = palette.items[i];
+  if (!it) return;
+  closePalette();
+  if (palette.mode === 'commands') {
+    if (it.action) it.action();
+  } else {
+    openNote(it.id);
+  }
+}
+
+let commandList = [];
+function buildCommandList() {
+  commandList = [
+    { label: 'New note', icon: '＋', hint: 'Ctrl+N', action: () => newNote(currentFolderForNew()) },
+    { label: 'New folder', icon: '▸', action: () => newFolder(null) },
+    { label: 'Quick switcher (jump to note)', icon: '◆', hint: 'Ctrl+O', action: () => openPalette('notes') },
+    { label: 'Open graph view', icon: '◌', hint: 'Ctrl+G', action: openGraph },
+    { label: 'Search notes', icon: '⌕', hint: 'Ctrl+K', action: () => $('search').focus() },
+    { label: 'Toggle preview/edit/split', icon: '◐', hint: 'Ctrl+/', action: () => setView(state.view === 'split' ? 'preview' : (state.view === 'preview' ? 'edit' : 'split')) },
+    { label: 'Insert image', icon: '▣', hint: 'Ctrl+I', action: openImageModal },
+    { label: 'Insert wikilink', icon: '↔', action: () => insertAtCursor('[[') },
+    { label: 'Toggle pin', icon: '★', action: togglePin },
+    { label: 'Cycle theme (auto/dark/light)', icon: '◑', hint: 'T', action: toggleTheme },
+    { label: 'Export current note (.md)', icon: '⤓', hint: 'Ctrl+E', action: () => { const n = state.currentNoteId ? state.notes.get(state.currentNoteId) : null; if (n) exportNoteAsMd(n); } },
+    { label: 'Export full bundle (.json)', icon: '⤓', action: exportBundle },
+    { label: 'Export every note as .md', icon: '⤓', action: exportEveryNoteMd },
+    { label: 'Import files…', icon: '⤒', action: () => $('importFile').click() },
+    { label: 'Import folder…', icon: '⤒', action: () => $('importFolder').click() },
+    { label: 'Delete current note', icon: '✕', action: deleteCurrentNote },
+  ];
+}
+
+// Simple fuzzy-ish scorer. Higher is better. 0 means no match.
+function scoreMatch(text, query) {
+  if (!query) return 1;
+  const t = text.toLowerCase();
+  let q = 0; let score = 0; let streak = 0;
+  for (let i = 0; i < t.length && q < query.length; i++) {
+    if (t[i] === query[q]) { q++; score += 1 + streak; streak += 1; }
+    else { streak = 0; }
+  }
+  if (q < query.length) return 0;
+  // prefer shorter matches
+  return score + 10 / (1 + t.length);
+}
+
+/* ================================================================
+   Graph view — force-directed, canvas-based
+================================================================ */
+const graph = {
+  nodes: [], links: [], idIndex: new Map(),
+  canvas: null, ctx: null, raf: 0,
+  scale: 1, ox: 0, oy: 0,           // pan/zoom
+  dragNode: null, dragMx: 0, dragMy: 0, panning: false,
+  hover: null, highlight: '',
+  running: false,
+};
+
+function buildGraph() {
+  graph.nodes = [];
+  graph.links = [];
+  graph.idIndex.clear();
+  const cx = graph.canvas ? graph.canvas.width / 2 : 600;
+  const cy = graph.canvas ? graph.canvas.height / 2 : 400;
+  let i = 0;
+  for (const n of state.notes.values()) {
+    const angle = i * 0.618 * Math.PI * 2;
+    const r = 30 + i * 4;
+    graph.idIndex.set(n.id, graph.nodes.length);
+    graph.nodes.push({
+      id: n.id,
+      title: n.title || 'Untitled',
+      tags: n.tags || [],
+      x: cx + Math.cos(angle) * r,
+      y: cy + Math.sin(angle) * r,
+      vx: 0, vy: 0,
+      degree: 0,
+    });
+    i++;
+  }
+  for (const n of state.notes.values()) {
+    const seen = new Set();
+    WIKILINK_RE.lastIndex = 0;
+    let m;
+    while ((m = WIKILINK_RE.exec(n.body || '')) !== null) {
+      const tid = wikilinkIndex.get(m[1].trim().toLowerCase());
+      if (!tid || tid === n.id || seen.has(tid)) continue;
+      seen.add(tid);
+      const a = graph.idIndex.get(n.id), b = graph.idIndex.get(tid);
+      if (a == null || b == null) continue;
+      graph.links.push({ a, b });
+      graph.nodes[a].degree++;
+      graph.nodes[b].degree++;
+    }
+  }
+}
+
+function stepGraph() {
+  const repulsion = 1200;
+  const attraction = 0.012;
+  const gravity = 0.006;
+  const damping = 0.82;
+  const cx = graph.canvas.width / 2, cy = graph.canvas.height / 2;
+  const ns = graph.nodes, ls = graph.links;
+  for (const n of ns) { n.fx = 0; n.fy = 0; }
+  for (let i = 0; i < ns.length; i++) {
+    for (let j = i + 1; j < ns.length; j++) {
+      const dx = ns[j].x - ns[i].x;
+      const dy = ns[j].y - ns[i].y;
+      const d2 = dx*dx + dy*dy + 25;
+      const f = repulsion / d2;
+      const d = Math.sqrt(d2);
+      const fx = (dx / d) * f;
+      const fy = (dy / d) * f;
+      ns[i].fx -= fx; ns[i].fy -= fy;
+      ns[j].fx += fx; ns[j].fy += fy;
+    }
+  }
+  for (const l of ls) {
+    const a = ns[l.a], b = ns[l.b];
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const fx = dx * attraction, fy = dy * attraction;
+    a.fx += fx; a.fy += fy;
+    b.fx -= fx; b.fy -= fy;
+  }
+  for (const n of ns) {
+    n.fx += (cx - n.x) * gravity;
+    n.fy += (cy - n.y) * gravity;
+    n.vx = (n.vx + n.fx) * damping;
+    n.vy = (n.vy + n.fy) * damping;
+    if (graph.dragNode !== n) { n.x += n.vx; n.y += n.vy; }
+  }
+}
+
+function drawGraph() {
+  const c = graph.canvas, ctx = graph.ctx;
+  const dpr = window.devicePixelRatio || 1;
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  ctx.clearRect(0, 0, c.width, c.height);
+  ctx.setTransform(graph.scale * dpr, 0, 0, graph.scale * dpr, graph.ox * dpr, graph.oy * dpr);
+
+  const styles = getComputedStyle(document.documentElement);
+  const accent = styles.getPropertyValue('--accent').trim() || '#6ea8fe';
+  const dim = styles.getPropertyValue('--text-faint').trim() || '#5b6270';
+  const border = styles.getPropertyValue('--border').trim() || '#2a313c';
+  const text = styles.getPropertyValue('--text').trim() || '#d8dee9';
+
+  // edges
+  ctx.lineWidth = 1 / graph.scale;
+  ctx.strokeStyle = border;
+  ctx.beginPath();
+  for (const l of graph.links) {
+    const a = graph.nodes[l.a], b = graph.nodes[l.b];
+    ctx.moveTo(a.x, a.y);
+    ctx.lineTo(b.x, b.y);
+  }
+  ctx.stroke();
+
+  // nodes
+  const hq = graph.highlight.trim().toLowerCase();
+  for (const n of graph.nodes) {
+    const r = 4 + Math.sqrt(n.degree) * 2;
+    const matched = hq && n.title.toLowerCase().includes(hq);
+    const isCurrent = n.id === state.currentNoteId;
+    const isHover = graph.hover === n;
+    ctx.beginPath();
+    ctx.arc(n.x, n.y, r, 0, Math.PI * 2);
+    ctx.fillStyle = isCurrent || matched ? accent : (n.degree ? text : dim);
+    if (isHover) {
+      ctx.shadowColor = accent;
+      ctx.shadowBlur = 12;
+    }
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    if (isCurrent) {
+      ctx.strokeStyle = accent;
+      ctx.lineWidth = 2 / graph.scale;
+      ctx.stroke();
+    }
+    // label when zoomed in enough or hovered or current
+    if (graph.scale > 0.7 || isHover || isCurrent || matched) {
+      ctx.fillStyle = text;
+      ctx.font = (11 / graph.scale).toFixed(2) + 'px ' + styles.fontFamily;
+      ctx.textAlign = 'left';
+      ctx.fillText(n.title.length > 30 ? n.title.slice(0, 30) + '…' : n.title, n.x + r + 4, n.y + 3);
+    }
+  }
+}
+
+function animateGraph() {
+  if (!graph.running) return;
+  stepGraph();
+  drawGraph();
+  graph.raf = requestAnimationFrame(animateGraph);
+}
+
+function nodeAt(x, y) {
+  // x,y in canvas coords (already accounting for pan/zoom)
+  for (let i = graph.nodes.length - 1; i >= 0; i--) {
+    const n = graph.nodes[i];
+    const r = 4 + Math.sqrt(n.degree) * 2 + 4;
+    if ((n.x - x) ** 2 + (n.y - y) ** 2 <= r * r) return n;
+  }
+  return null;
+}
+function canvasCoords(e) {
+  const r = graph.canvas.getBoundingClientRect();
+  const cx = (e.clientX - r.left - graph.ox) / graph.scale;
+  const cy = (e.clientY - r.top - graph.oy) / graph.scale;
+  return { x: cx, y: cy, mx: e.clientX - r.left, my: e.clientY - r.top };
+}
+
+function openGraph() {
+  $('graphOverlay').hidden = false;
+  const c = $('graphCanvas');
+  graph.canvas = c;
+  graph.ctx = c.getContext('2d');
+  resizeGraphCanvas();
+  // Default centering: identity
+  graph.scale = 1; graph.ox = 0; graph.oy = 0;
+  buildGraph();
+  $('graphLegend').innerHTML = `<div><strong>${graph.nodes.length}</strong> notes · <strong>${graph.links.length}</strong> links</div><div>Scroll: zoom · Drag: pan / move node</div>`;
+  graph.running = true;
+  animateGraph();
+}
+function closeGraph() {
+  graph.running = false;
+  cancelAnimationFrame(graph.raf);
+  $('graphOverlay').hidden = true;
+}
+function resizeGraphCanvas() {
+  if (!graph.canvas) return;
+  const wrap = $('graphCanvasWrap');
+  const r = wrap.getBoundingClientRect();
+  const dpr = window.devicePixelRatio || 1;
+  graph.canvas.width = r.width * dpr;
+  graph.canvas.height = r.height * dpr;
+  graph.canvas.style.width = r.width + 'px';
+  graph.canvas.style.height = r.height + 'px';
+  graph.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  // pan/zoom acts on top of the DPR transform — store dpr to apply
+  graph.scale = graph.scale || 1;
+}
+function setupGraphInteractions() {
+  const c = $('graphCanvas');
+  c.addEventListener('mousedown', (e) => {
+    const pos = canvasCoords(e);
+    const hit = nodeAt(pos.x, pos.y);
+    if (hit) {
+      graph.dragNode = hit;
+      graph.dragMx = pos.x - hit.x;
+      graph.dragMy = pos.y - hit.y;
+    } else {
+      graph.panning = true;
+      graph.dragMx = e.clientX;
+      graph.dragMy = e.clientY;
+      c.classList.add('dragging');
+    }
+  });
+  window.addEventListener('mousemove', (e) => {
+    if (!graph.canvas || graph.canvas.parentElement.parentElement.hidden) return;
+    if (graph.dragNode) {
+      const pos = canvasCoords(e);
+      graph.dragNode.x = pos.x - graph.dragMx;
+      graph.dragNode.y = pos.y - graph.dragMy;
+      graph.dragNode.vx = 0; graph.dragNode.vy = 0;
+    } else if (graph.panning) {
+      graph.ox += e.clientX - graph.dragMx;
+      graph.oy += e.clientY - graph.dragMy;
+      graph.dragMx = e.clientX;
+      graph.dragMy = e.clientY;
+    } else {
+      const pos = canvasCoords(e);
+      graph.hover = nodeAt(pos.x, pos.y);
+    }
+  });
+  window.addEventListener('mouseup', () => {
+    graph.dragNode = null;
+    graph.panning = false;
+    if (graph.canvas) graph.canvas.classList.remove('dragging');
+  });
+  c.addEventListener('click', (e) => {
+    if (graph.panning) return;
+    const pos = canvasCoords(e);
+    const hit = nodeAt(pos.x, pos.y);
+    if (hit) { closeGraph(); openNote(hit.id); }
+  });
+  c.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const r = c.getBoundingClientRect();
+    const mx = e.clientX - r.left;
+    const my = e.clientY - r.top;
+    const factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+    const newScale = Math.max(0.2, Math.min(4, graph.scale * factor));
+    // Zoom around mouse position
+    const wx = (mx - graph.ox) / graph.scale;
+    const wy = (my - graph.oy) / graph.scale;
+    graph.scale = newScale;
+    graph.ox = mx - wx * graph.scale;
+    graph.oy = my - wy * graph.scale;
+  }, { passive: false });
+  $('graphSearch').addEventListener('input', (e) => { graph.highlight = e.target.value; });
+  $('graphRecenter').addEventListener('click', () => {
+    graph.scale = 1; graph.ox = 0; graph.oy = 0;
+  });
+  $('graphClose').addEventListener('click', closeGraph);
+  window.addEventListener('resize', () => { if (graph.canvas && !$('graphOverlay').hidden) resizeGraphCanvas(); });
+}
+
 /* ----------------------------------------------------------------
    wire-up
 ---------------------------------------------------------------- */
@@ -1689,6 +2357,10 @@ async function init() {
   state.expandedFolders = new Set(expanded);
   setView(view);
 
+  rebuildWikilinkIndex();
+  buildCommandList();
+  setupGraphInteractions();
+
   renderTree();
 
   // Open most recent note, or create a welcome one
@@ -1718,13 +2390,15 @@ async function createWelcomeNote() {
 ## Features at a glance
 
 - Markdown editing with **live styled preview** on the right — and the preview is **editable too** (great on mobile)
-- Lines stay y-aligned across panels; inserted images are visible inline in both panels
-- Select text to get a **floating formatting toolbar** (bold · italic · headings · list · quote · link)
-- Drop, paste or upload **images** — choose **Base64** or library **references**
-- Image **compression** with side-by-side preview (size + dimensions)
-- **Folders** (with sub-folders), **#tags**, pin, search, full offline use
-- Drop a whole **folder with sub-folders** onto the window to import — structure is preserved
-- **Auto theme** follows your system (or pick dark/light by clicking the moon)
+- **[[Wikilinks]]** between notes — type \`[[\` to get autocomplete; click a missing link to create that note
+- **Backlinks panel** below every note shows who references it
+- **Interactive graph view** — see your knowledge network (Ctrl+G)
+- **Command palette** for everything (Ctrl+P) · **Quick switcher** to jump to any note (Ctrl+O)
+- Select text → **floating formatting toolbar** (bold · italic · headings · list · quote · link)
+- Drop, paste or upload **images** — choose Base64 or library **references** · live compression preview
+- **Folders** with sub-folders, **#tags**, pin, search, full offline use
+- Drop a whole **folder tree** onto the window to import — structure is preserved
+- **Auto theme** follows your system
 
 > Try pasting an image from your clipboard right now (\`Ctrl+V\`).
 
@@ -1732,12 +2406,19 @@ async function createWelcomeNote() {
 
 | Action | Shortcut |
 |---|---|
+| Command palette | \`Ctrl+P\` |
+| Quick switcher | \`Ctrl+O\` |
+| Graph view | \`Ctrl+G\` |
 | New note | \`Ctrl+N\` |
 | Search | \`Ctrl+K\` |
 | Insert image | \`Ctrl+I\` |
 | Save | \`Ctrl+S\` |
 | Export current note | \`Ctrl+E\` |
 | Toggle preview | \`Ctrl+/\` |
+
+### Try wikilinks
+
+This note links to [[Welcome to YANTA]] (itself) and to a non-existent note: [[My next idea]] — click it to create the note.
 
 ### Inline formatting examples
 
@@ -1758,6 +2439,7 @@ Happy writing!
   const note = { id, title: 'Welcome to YANTA', body, folderId: null, tags: ['welcome'], pinned: true, created: Date.now(), updated: Date.now() };
   state.notes.set(id, note);
   await store.notes.put(note);
+  rebuildWikilinkIndex();
   openNote(id);
   renderTree();
 }
@@ -1895,8 +2577,9 @@ function bindEvents() {
   setupEditablePreview();
   setupFormatToolbar();
 
-  // preview interactions (checkbox toggle, tag click)
+  // preview interactions (checkbox toggle, tag click, wikilinks, backlinks)
   $('preview').addEventListener('click', (e) => {
+    if (e.target.closest('a.wiki-link')) { handleWikilinkClick(e); return; }
     if (e.target.matches('input[type=checkbox][data-line]')) {
       const line = parseInt(e.target.dataset.line, 10);
       toggleTaskLine(line, e.target.checked);
@@ -1904,6 +2587,64 @@ function bindEvents() {
       state.activeTagFilter = e.target.dataset.tag;
       renderTree();
     }
+  });
+
+  // Editor wikilink follow: Ctrl/Cmd+click (single click stays in edit mode)
+  editor.addEventListener('click', (e) => {
+    const w = e.target.closest('.ed-wiki, .ed-wiki-missing');
+    if (!w) return;
+    if (!(e.ctrlKey || e.metaKey)) {
+      // Show a transient hint the first time
+      if (!editor.dataset.hintShown) {
+        toast('Tip: Ctrl/⌘+click a wikilink to follow it', '');
+        editor.dataset.hintShown = '1';
+      }
+      return;
+    }
+    e.preventDefault();
+    const lineDiv = w.closest('div');
+    if (!lineDiv) return;
+    const idx = [...editor.children].indexOf(lineDiv);
+    const line = lastMarkdown.split('\n')[idx] || '';
+    const m = /\[\[([^\]|\n]+)/.exec(line);
+    if (m) {
+      const target = m[1].trim();
+      const nid = wikilinkIndex.get(target.toLowerCase());
+      if (nid) openNote(nid);
+      else if (confirm(`Note "${target}" doesn't exist. Create it?`)) createNoteWithTitle(target);
+    }
+  });
+
+  // Editor key handling for autocomplete (must run before our other Enter handler)
+  editor.addEventListener('keydown', (e) => {
+    const acEl = $('autocomplete');
+    if (!acEl.hidden && ac.items.length) {
+      if (e.key === 'ArrowDown') { e.preventDefault(); acMove(1); return; }
+      if (e.key === 'ArrowUp')   { e.preventDefault(); acMove(-1); return; }
+      if (e.key === 'Enter' || e.key === 'Tab') { e.preventDefault(); acAccept(); return; }
+      if (e.key === 'Escape')    { e.preventDefault(); acHide(); return; }
+    }
+  }, true); // capture so we win over the other Enter handler
+
+  // Hide autocomplete on click anywhere
+  document.addEventListener('mousedown', (e) => {
+    if (!e.target.closest('#autocomplete') && !editor.contains(e.target)) acHide();
+  });
+
+  // Palette
+  $('btn-palette').addEventListener('click', () => openPalette('commands'));
+  $('btn-graph').addEventListener('click', openGraph);
+  const palEl = $('palette');
+  palEl.addEventListener('click', (e) => { if (e.target === palEl) closePalette(); });
+  $('paletteInput').addEventListener('input', (e) => {
+    palette.filter = e.target.value;
+    buildPaletteItems();
+  });
+  $('paletteInput').addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); paletteMove(1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); paletteMove(-1); }
+    else if (e.key === 'Enter')  { e.preventDefault(); paletteAccept(); }
+    else if (e.key === 'Escape') { e.preventDefault(); closePalette(); }
   });
 
   // resize -> re-sync heights
@@ -2068,13 +2809,23 @@ function handleGlobalKey(e) {
   else if (meta && e.key === 'k') { e.preventDefault(); $('search').focus(); }
   else if (meta && e.key === 's') { e.preventDefault(); saveCurrentNote(); toast('Saved', 'success'); }
   else if (meta && e.key === 'i') { e.preventDefault(); openImageModal(); }
+  else if (meta && e.key === 'o') { e.preventDefault(); openPalette('notes'); }
+  else if (meta && e.key === 'p') { e.preventDefault(); openPalette('commands'); }
+  else if (meta && e.key === 'g') { e.preventDefault(); openGraph(); }
   else if (meta && e.key === 'e') {
     e.preventDefault();
     const n = state.currentNoteId ? state.notes.get(state.currentNoteId) : null;
     if (n) exportNoteAsMd(n);
   }
   else if (meta && e.key === '/') { e.preventDefault(); setView(state.view === 'split' ? 'preview' : 'split'); }
-  else if (e.key === 'Escape') { closeImageModal(); closeMenu(); $('dropOverlay').hidden = true; }
+  else if (e.key === 'Escape') {
+    closeImageModal();
+    closeMenu();
+    closePalette();
+    if (!$('graphOverlay').hidden) closeGraph();
+    acHide();
+    $('dropOverlay').hidden = true;
+  }
 }
 
 function setupGlobalDropImport() {

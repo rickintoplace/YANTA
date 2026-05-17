@@ -449,6 +449,100 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .format-toolbar button.code { font-family: var(--font-mono); font-size: 12px; }
 .format-toolbar .sep { width: 1px; background: var(--border); margin: 4px 2px; }
 
+/* ---------- Admonitions ---------- */
+.pv-line.pv-adm { padding: 4px 14px; border-left: 4px solid var(--accent); background: rgba(110,168,254,0.06); }
+.pv-line.pv-adm blockquote { box-shadow: none !important; padding: 0 !important; }
+.pv-line.pv-adm-title { padding-top: 8px; border-top-left-radius: 6px; border-top-right-radius: 6px; }
+.pv-line.pv-adm-body { padding-bottom: 4px; }
+.pv-adm-title-row { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 0.92em; }
+.pv-adm-icon { width: 16px; height: 16px; display: inline-flex; }
+.pv-adm-title-text { line-height: 1.2; }
+.pv-line.pv-adm-note    { border-color: var(--accent); background: rgba(110,168,254,0.08); }
+.pv-line.pv-adm-note .pv-adm-icon { color: var(--accent); }
+.pv-line.pv-adm-info    { border-color: var(--accent-2); background: rgba(167,139,250,0.08); }
+.pv-line.pv-adm-info .pv-adm-icon { color: var(--accent-2); }
+.pv-line.pv-adm-tip     { border-color: var(--green); background: rgba(74,222,128,0.07); }
+.pv-line.pv-adm-tip .pv-adm-icon { color: var(--green); }
+.pv-line.pv-adm-warning { border-color: var(--yellow); background: rgba(251,191,36,0.08); }
+.pv-line.pv-adm-warning .pv-adm-icon { color: var(--yellow); }
+.pv-line.pv-adm-important { border-color: var(--accent-2); background: rgba(167,139,250,0.08); }
+.pv-line.pv-adm-important .pv-adm-icon { color: var(--accent-2); }
+.pv-line.pv-adm-caution { border-color: var(--red); background: rgba(248,113,113,0.08); }
+.pv-line.pv-adm-caution .pv-adm-icon { color: var(--red); }
+.pv-line.pv-adm-fold    { border-color: var(--text-faint); background: var(--bg-elev); }
+.pv-line.pv-adm-quote   { border-color: var(--text-faint); }
+.pv-line.pv-adm-quote .pv-adm-icon { color: var(--text-faint); }
+
+/* ---------- Transclusion ---------- */
+.pv-trans {
+  margin: 8px 0; padding: 8px 12px; border-radius: var(--r-sm);
+  background: var(--bg-elev); border: 1px solid var(--border); border-left: 3px solid var(--accent-2);
+}
+.pv-trans-head { font-size: 11px; color: var(--text-dim); margin-bottom: 6px; }
+.pv-trans-head a { color: var(--accent-2); }
+.pv-trans-body { font-size: 0.95em; }
+.pv-trans-body * { margin: 0.15em 0; }
+.pv-trans-missing { color: var(--text-faint); font-style: italic; padding: 4px 10px; border: 1px dashed var(--border); border-radius: 4px; }
+.pv-trans-loop { color: var(--yellow); font-size: 11px; padding: 4px 10px; }
+
+/* ---------- Video embed (YouTube / Vimeo) ---------- */
+.pv-embed-video { position: relative; padding-top: 56.25%; margin: 8px 0; border-radius: var(--r-sm); overflow: hidden; background: #000; }
+.pv-embed-video iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+
+/* ---------- Footnotes ---------- */
+sup.fn-ref { font-size: 0.7em; vertical-align: super; line-height: 0; }
+sup.fn-ref a { color: var(--accent-2); text-decoration: none; padding: 0 3px; border-radius: 3px; background: rgba(167,139,250,0.12); }
+sup.fn-ref a:hover { background: rgba(167,139,250,0.25); }
+.pv-line.pv-fn-def { font-size: 0.9em; color: var(--text-dim); padding: 2px 8px; border-left: 2px solid var(--accent-2); background: rgba(167,139,250,0.04); }
+
+/* ---------- Math (basic styling only — no full KaTeX) ---------- */
+.pv-math {
+  font-family: "Latin Modern Math", "STIX Two Math", "Cambria Math", "Times New Roman", serif;
+  font-style: italic; color: var(--text); background: rgba(167,139,250,0.06);
+  padding: 0 4px; border-radius: 3px;
+}
+.pv-math-block { display: block; text-align: center; padding: 6px 12px; margin: 6px 0; font-size: 1.1em; }
+
+/* ---------- DOI link ---------- */
+a.pv-doi { color: var(--accent-2); text-decoration: none; border-bottom: 1px dotted var(--accent-2); }
+
+/* ---------- Outline / TOC ---------- */
+.pv-outline {
+  margin: 0 0 18px; padding: 8px 12px;
+  background: var(--bg-elev); border: 1px solid var(--border); border-radius: var(--r-sm);
+  font-size: 12px;
+}
+.pv-outline-head {
+  display: flex; align-items: center; gap: 6px;
+  color: var(--text-dim); cursor: pointer; user-select: none;
+  text-transform: uppercase; letter-spacing: 0.08em; font-size: 11px;
+}
+.pv-outline-chev { display: inline-flex; transition: transform 0.1s; }
+.pv-outline.collapsed .pv-outline-chev { transform: rotate(-90deg); }
+.pv-outline.collapsed .pv-outline-list { display: none; }
+.pv-outline-list { margin-top: 6px; display: flex; flex-direction: column; }
+.pv-outline-item {
+  padding: 3px 8px; color: var(--text-dim);
+  border-radius: 3px; cursor: pointer; text-decoration: none;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.pv-outline-item:hover { color: var(--text); background: var(--bg-elev-2); }
+
+/* ---------- Hover preview popover ---------- */
+.hover-preview {
+  position: fixed; z-index: 95;
+  background: var(--bg-elev); border: 1px solid var(--border);
+  border-radius: var(--r-sm); box-shadow: var(--shadow);
+  width: 380px; max-height: 320px; overflow: hidden;
+  padding: 12px; font-size: 13px;
+  animation: fade-in 0.12s ease;
+}
+.hover-preview[hidden] { display: none !important; }
+.hover-preview .hp-title { font-weight: 700; font-size: 14px; margin-bottom: 6px; }
+.hover-preview .hp-body { font-size: 12px; color: var(--text-dim); max-height: 240px; overflow: hidden; }
+.hover-preview .hp-body img { max-height: 90px; }
+.hover-preview .hp-more { font-size: 11px; color: var(--text-faint); margin-top: 6px; font-style: italic; }
+
 /* ---------- Wikilinks ---------- */
 .ed-wiki, .ed-wiki-missing {
   cursor: pointer; border-radius: 3px; padding: 0 3px;

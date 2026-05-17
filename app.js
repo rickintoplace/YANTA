@@ -31,6 +31,7 @@ const debounce = (fn, ms) => {
   return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
 };
 const escapeHtml = (s) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const decodeEntities = (s) => s.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
 const fmtBytes = (n) => {
   if (!n) return '0 B';
   const u = ['B', 'KB', 'MB', 'GB'];
@@ -45,6 +46,55 @@ const fmtDate = (ms) => {
   if (now - d < 6 * 86400000) return d.toLocaleDateString([], { weekday: 'short' });
   return d.toLocaleDateString();
 };
+
+/* ----------------------------------------------------------------
+   Lucide icon helper — returns an inline SVG string for the given name.
+   We only inline the icons we actually use; keeps the bundle small.
+---------------------------------------------------------------- */
+const LUCIDE = {
+  plus:     '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
+  file:     '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>',
+  folder:   '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>',
+  'folder-plus': '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/>',
+  search:   '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
+  star:     '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
+  pin:      '<line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24z"/>',
+  trash:    '<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
+  image:    '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>',
+  upload:   '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>',
+  download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
+  eye:      '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>',
+  edit:     '<path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4z"/>',
+  share:    '<path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/><polyline points="16 6 12 2 8 6"/><line x1="12" y1="2" x2="12" y2="15"/>',
+  link:     '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
+  tag:      '<path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/>',
+  hash:     '<line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/><line x1="10" y1="3" x2="8" y2="21"/><line x1="16" y1="3" x2="14" y2="21"/>',
+  network:  '<circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="12" cy="19" r="2"/><path d="M7 7l5 10M17 7l-5 10"/>',
+  command:  '<path d="M18 3a3 3 0 0 0-3 3v12a3 3 0 0 0 3 3 3 3 0 0 0 3-3 3 3 0 0 0-3-3H6a3 3 0 0 0-3 3 3 3 0 0 0 3 3 3 3 0 0 0 3-3V6a3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3h12a3 3 0 0 0 3-3 3 3 0 0 0-3-3z"/>',
+  sun:      '<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>',
+  moon:     '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>',
+  settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
+  check:    '<polyline points="20 6 9 17 4 12"/>',
+  x:        '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
+  square:   '<rect x="3" y="3" width="18" height="18" rx="2"/>',
+  copy:     '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
+  quote:    '<path d="M3 21c3-4 3-7 3-7 0-3-3-4-3-4M11 21c3-4 3-7 3-7 0-3-3-4-3-4"/>',
+  list:     '<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>',
+  'check-square': '<polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
+  heading:  '<path d="M6 4v16M18 4v16M6 12h12"/>',
+  type:     '<polyline points="4 7 4 4 20 4 20 7"/><line x1="9" y1="20" x2="15" y2="20"/><line x1="12" y1="4" x2="12" y2="20"/>',
+  layers:   '<polygon points="12 2 2 7 12 12 22 7 12 2"/><polyline points="2 17 12 22 22 17"/><polyline points="2 12 12 17 22 12"/>',
+  info:     '<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>',
+  triangle: '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
+  bookmark: '<path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z"/>',
+  'chevron-right': '<polyline points="9 18 15 12 9 6"/>',
+  'chevron-down':  '<polyline points="6 9 12 15 18 9"/>',
+  menu:     '<line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/>',
+};
+function lucide(name, size = 14) {
+  const body = LUCIDE[name] || LUCIDE.square;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
+}
 
 function toast(msg, type = '') {
   const t = $('toast');
@@ -169,25 +219,72 @@ function classifyLine(line, ctx) {
   return { type: 'p' };
 }
 
-// Inline tokenizer for preview (HTML output)
+/* ----------------------------------------------------------------
+   YouTube / Vimeo URL detection
+---------------------------------------------------------------- */
+function videoEmbedUrl(url) {
+  let m;
+  if ((m = /(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{6,})/.exec(url))) {
+    return `https://www.youtube-nocookie.com/embed/${m[1]}`;
+  }
+  if ((m = /youtube\.com\/embed\/([a-zA-Z0-9_-]{6,})/.exec(url))) {
+    return `https://www.youtube-nocookie.com/embed/${m[1]}`;
+  }
+  if ((m = /vimeo\.com\/(\d+)/.exec(url))) {
+    return `https://player.vimeo.com/video/${m[1]}`;
+  }
+  return null;
+}
+
+/* ----------------------------------------------------------------
+   Inline tokenizer for preview (HTML output).
+   Order matters: escape -> code -> transclusion -> wikilinks ->
+   images -> md links -> bold -> ... -> footnotes -> math -> tags.
+---------------------------------------------------------------- */
 function renderInline(s) {
-  // Order matters: escape -> code -> wikilinks -> images -> md links -> bold -> ...
   let out = escapeHtml(s);
-  // inline code
+  // inline code (protect content from further pattern matches)
   out = out.replace(/`([^`\n]+)`/g, (_, c) => `<code>${c}</code>`);
+  // transclusion ![[Note]] or ![[Note#Section]] or ![[Note|alias]]
+  out = out.replace(/!\[\[([^\]\n#|]+)(?:#([^\]\n|]+))?(?:\|([^\]\n]+))?\]\]/g, (_, title, section, alias) => {
+    const decoded = decodeEntities(title.trim());
+    const nid = wikilinkIndex.get(decoded.toLowerCase());
+    if (!nid) {
+      return `<div class="pv-trans pv-trans-missing">↳ <strong>${title}</strong> · not found</div>`;
+    }
+    if (transcludeDepth >= 3) {
+      return `<div class="pv-trans pv-trans-loop">↳ ${title} · transclusion too deep</div>`;
+    }
+    const note = state.notes.get(nid);
+    if (!note) return '';
+    let body = note.body || '';
+    if (section) body = extractSection(body, decodeEntities(section.trim()));
+    transcludeDepth++;
+    const rendered = renderBlocksInline(body);
+    transcludeDepth--;
+    const label = alias ? alias.trim() : (title + (section ? ' › ' + section : ''));
+    return `<div class="pv-trans" contenteditable="false">
+      <div class="pv-trans-head">↳ <a class="wiki-link" data-wiki="${decoded}" data-note-id="${nid}">${label}</a></div>
+      <div class="pv-trans-body">${rendered}</div>
+    </div>`;
+  });
   // wikilinks [[Target]] or [[Target|alias]]
   out = out.replace(/\[\[([^\]|\n]+)(?:\|([^\]\n]+))?\]\]/g, (_, target, alias) => {
-    const t = target.trim();
-    const key = t.toLowerCase();
+    const decoded = decodeEntities(target.trim());
+    const key = decoded.toLowerCase();
     const noteId = wikilinkIndex.get(key);
-    const text = (alias || t).trim();
+    const text = (alias || target).trim();
     const cls = noteId ? 'wiki-link' : 'wiki-link missing';
     const id = noteId ? ` data-note-id="${noteId}"` : '';
-    return `<a class="${cls}" data-wiki="${escapeHtml(t)}"${id}>${escapeHtml(text)}</a>`;
+    return `<a class="${cls}" data-wiki="${target.trim()}"${id}>${text}</a>`;
   });
-  // images ![alt](url "title")
+  // images ![alt](url "title") — also: auto-embed YouTube/Vimeo URLs
   out = out.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+"([^"]*)")?\)/g, (_, alt, url, title) => {
-    const resolved = resolveImageUrl(url);
+    const embed = videoEmbedUrl(decodeEntities(url));
+    if (embed) {
+      return `<div class="pv-embed-video" contenteditable="false"><iframe src="${embed}" allowfullscreen frameborder="0" allow="autoplay; encrypted-media; picture-in-picture"></iframe></div>`;
+    }
+    const resolved = resolveImageUrl(decodeEntities(url));
     const t = title ? ` title="${escapeHtml(title)}"` : '';
     if (resolved === null) {
       return `<span class="pv-img-missing">missing: ${escapeHtml(url.slice(0, 40))}…</span>`;
@@ -196,7 +293,10 @@ function renderInline(s) {
   });
   // links [text](url)
   out = out.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, txt, url) =>
-    `<a href="${escapeHtml(url)}" target="_blank" rel="noopener">${txt}</a>`);
+    `<a href="${url}" target="_blank" rel="noopener">${txt}</a>`);
+  // DOI shortcut: doi:10.xxxx/yyyy
+  out = out.replace(/\bdoi:(10\.\d{4,9}\/[-._;()/:A-Z0-9]+)/gi, (_, d) =>
+    `<a href="https://doi.org/${d}" target="_blank" rel="noopener" class="pv-doi">doi:${d}</a>`);
   // bold + italic combined
   out = out.replace(/\*\*\*([^*\n]+)\*\*\*/g, '<strong><em>$1</em></strong>');
   out = out.replace(/___([^_\n]+)___/g, '<strong><em>$1</em></strong>');
@@ -204,22 +304,159 @@ function renderInline(s) {
   out = out.replace(/__([^_\n]+)__/g, '<strong>$1</strong>');
   out = out.replace(/(?<!\*)\*([^*\n]+)\*(?!\*)/g, '<em>$1</em>');
   out = out.replace(/(?<!_)_([^_\n]+)_(?!_)/g, '<em>$1</em>');
+  out = out.replace(/==([^=\n]+)==/g, '<mark>$1</mark>');
   out = out.replace(/~~([^~\n]+)~~/g, '<del>$1</del>');
+  // footnote references [^id]
+  out = out.replace(/\[\^([^\]\s]+)\]/g, (_, id) => {
+    return `<sup class="fn-ref"><a href="#fn-${id}" data-fn="${id}">${id}</a></sup>`;
+  });
+  // basic math placeholder — $...$ inline, $$...$$ display
+  out = out.replace(/\$\$([^$\n]+)\$\$/g, (_, expr) =>
+    `<span class="pv-math pv-math-block">${expr}</span>`);
+  out = out.replace(/(?<!\\)\$([^$\n]+)\$/g, (_, expr) =>
+    `<span class="pv-math">${expr}</span>`);
   // hashtag refs
   out = out.replace(/(^|\s)#([a-zA-Z][\w-]*)/g, (_, sp, t) => `${sp}<span class="tag-ref" data-tag="${escapeHtml(t)}">#${escapeHtml(t)}</span>`);
   return out;
+}
+
+let transcludeDepth = 0;
+
+// Extract a heading section from markdown source (used by transclusion).
+function extractSection(md, sectionName) {
+  const lines = md.split('\n');
+  const out = [];
+  let inSection = false;
+  let level = 0;
+  const target = sectionName.toLowerCase();
+  for (const line of lines) {
+    const m = /^(#{1,6})\s+(.*)$/.exec(line);
+    if (m) {
+      const lvl = m[1].length;
+      const title = m[2].trim().toLowerCase();
+      if (!inSection) {
+        if (title === target) { inSection = true; level = lvl; }
+      } else if (lvl <= level) {
+        break;
+      } else {
+        out.push(line);
+      }
+    } else if (inSection) {
+      out.push(line);
+    }
+  }
+  return out.join('\n');
+}
+
+// Render markdown as block-level HTML (used for transclusion); no .pv-line wrapping.
+function renderBlocksInline(md) {
+  const lines = md.split('\n');
+  const ctx = { inFence: false };
+  const out = [];
+  let codeBuf = [];
+  function flushCode() {
+    if (codeBuf.length) {
+      out.push(`<pre><code>${escapeHtml(codeBuf.join('\n'))}</code></pre>`);
+      codeBuf = [];
+    }
+  }
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const info = classifyLine(line, ctx);
+    if (info.type === 'fence') {
+      flushCode();
+      if (info.opens) ctx.inFence = true; else ctx.inFence = false;
+      continue;
+    }
+    if (info.type === 'code') { codeBuf.push(line); continue; }
+    flushCode();
+    if (info.type === 'blank') { out.push(''); continue; }
+    if (/^h[1-6]$/.test(info.type)) {
+      const lvl = parseInt(info.type[1], 10);
+      const txt = line.replace(/^#{1,6}\s+/, '');
+      out.push(`<h${Math.min(6, lvl + 1)}>${renderInline(txt)}</h${Math.min(6, lvl + 1)}>`);
+      continue;
+    }
+    if (info.type === 'hr') { out.push('<hr/>'); continue; }
+    if (info.type === 'quote') {
+      const txt = line.replace(/^\s*>\s?/, '');
+      out.push(`<blockquote>${renderInline(txt)}</blockquote>`);
+      continue;
+    }
+    if (info.type === 'ul' || info.type === 'task') {
+      const m = /^(\s*)([-*+])\s+(?:\[([ xX])\]\s+)?(.*)$/.exec(line);
+      const checked = m && m[3] && m[3].toLowerCase() === 'x';
+      const checkbox = m && m[3] != null ? `<input type="checkbox" disabled ${checked ? 'checked' : ''}/> ` : '';
+      out.push(`<div style="padding-left:${(m[1].length * 0.6) + 1.5}em;text-indent:-1.2em">• ${checkbox}${renderInline(m[4])}</div>`);
+      continue;
+    }
+    if (info.type === 'ol') {
+      const m = /^(\s*)(\d+)\.\s+(.*)$/.exec(line);
+      out.push(`<div style="padding-left:${(m[1].length * 0.6) + 1.8}em;text-indent:-1.5em">${m[2]}. ${renderInline(m[3])}</div>`);
+      continue;
+    }
+    if (info.type === 'image') { out.push(renderInline(line)); continue; }
+    out.push(`<p style="margin:0.2em 0">${renderInline(line)}</p>`);
+  }
+  flushCode();
+  return out.join('');
+}
+
+/* ----------------------------------------------------------------
+   Admonition pre-pass — recognises GitHub-style callouts:
+     > [!NOTE]    > [!WARNING]    > [!INFO]    > [!TIP]
+     > [!IMPORTANT]    > [!CAUTION]    > [!FOLD] (collapsible)
+   Each admonition spans the title line + all consecutive `>` lines
+   below it. Returns a per-line { type, role, title? } | null array.
+---------------------------------------------------------------- */
+const ADMONITION_TYPES = new Set(['note', 'warning', 'info', 'tip', 'important', 'caution', 'fold', 'quote']);
+function preprocessAdmonitions(lines) {
+  const out = new Array(lines.length).fill(null);
+  const ctx = { inFence: false };
+  let active = null;
+  for (let i = 0; i < lines.length; i++) {
+    const info = classifyLine(lines[i], ctx);
+    if (info.type === 'fence') {
+      if (info.opens) ctx.inFence = true; else ctx.inFence = false;
+      active = null; continue;
+    }
+    if (info.type !== 'quote') { active = null; continue; }
+    const m = /^\s*>\s*\[!(\w+)\]\s*(.*)$/.exec(lines[i]);
+    if (m && ADMONITION_TYPES.has(m[1].toLowerCase())) {
+      active = m[1].toLowerCase();
+      out[i] = { type: active, role: 'title', title: m[2].trim() };
+    } else if (active) {
+      out[i] = { type: active, role: 'body' };
+    }
+  }
+  return out;
+}
+
+// Collect footnote definitions [^id]: text — they can appear anywhere
+// and are rendered as a footnotes section at the bottom of the preview.
+function collectFootnotes(md) {
+  const defs = new Map();
+  for (const line of md.split('\n')) {
+    const m = /^\[\^([^\]\s]+)\]:\s*(.*)$/.exec(line);
+    if (m) defs.set(m[1], m[2]);
+  }
+  return defs;
 }
 
 // Render preview as one .pv-line per source line
 function renderPreview(md) {
   const lines = md.split('\n');
   const ctx = { inFence: false, fenceLang: '' };
+  const adm = preprocessAdmonitions(lines);
+  const footnotes = collectFootnotes(md);
   const pieces = [];
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const info = classifyLine(line, ctx);
     let inner = '';
     let dataType = info.type;
+    let extraClass = '';
+
     if (info.type === 'fence') {
       if (info.opens) { ctx.inFence = true; ctx.fenceLang = info.lang; inner = `<span style="font-family:var(--font-mono);font-size:0.9em;color:var(--text-faint)">\`\`\`${escapeHtml(info.lang)}</span>`; }
       else { ctx.inFence = false; ctx.fenceLang = ''; inner = `<span style="font-family:var(--font-mono);font-size:0.9em;color:var(--text-faint)">\`\`\`</span>`; }
@@ -232,10 +469,28 @@ function renderPreview(md) {
     } else if (info.type === 'h1' || info.type === 'h2' || info.type === 'h3' || info.type === 'h4' || info.type === 'h5' || info.type === 'h6') {
       const lvl = parseInt(info.type[1], 10);
       const txt = line.replace(/^#{1,6}\s+/, '');
-      inner = `<h${lvl}>${renderInline(txt)}</h${lvl}>`;
+      const slug = headingSlug(txt);
+      inner = `<h${lvl} id="h-${slug}">${renderInline(txt)}</h${lvl}>`;
     } else if (info.type === 'quote') {
-      const txt = line.replace(/^\s*>\s?/, '');
-      inner = `<blockquote>${renderInline(txt)}</blockquote>`;
+      // Footnote definition? render as small grey footnote entry
+      let fnMatch = /^\[\^([^\]\s]+)\]:\s*(.*)$/.exec(line);
+      const a = adm[i];
+      if (a) {
+        extraClass = `pv-adm pv-adm-${a.type} pv-adm-${a.role}`;
+        if (a.role === 'title') {
+          const titleText = a.title || a.type.toUpperCase();
+          inner = `<div class="pv-adm-title-row"><span class="pv-adm-icon">${admIcon(a.type)}</span><span class="pv-adm-title-text">${renderInline(titleText)}</span></div>`;
+        } else {
+          const txt = line.replace(/^\s*>\s?/, '');
+          inner = `<div>${renderInline(txt)}</div>`;
+        }
+      } else if (fnMatch) {
+        extraClass = 'pv-fn-def';
+        inner = `<div id="fn-${fnMatch[1]}"><strong>[${fnMatch[1]}]</strong> ${renderInline(fnMatch[2])}</div>`;
+      } else {
+        const txt = line.replace(/^\s*>\s?/, '');
+        inner = `<blockquote>${renderInline(txt)}</blockquote>`;
+      }
     } else if (info.type === 'task') {
       const m = /^(\s*)([-*+])\s+\[([ xX])\]\s+(.*)$/.exec(line);
       const checked = m[3].toLowerCase() === 'x';
@@ -252,14 +507,35 @@ function renderPreview(md) {
     } else if (info.type === 'image') {
       inner = renderInline(line);
     } else if (info.type === 'table') {
-      // Render as monospace row for line alignment (proper table rendering would break per-line sync)
       inner = `<pre style="margin:0;font-size:0.9em;color:var(--text-dim)"><code>${escapeHtml(line)}</code></pre>`;
     } else {
-      inner = renderInline(line) || '&nbsp;';
+      // p line — but also detect footnote definitions in case user
+      // didn't prefix with `>`
+      const fn = /^\[\^([^\]\s]+)\]:\s*(.*)$/.exec(line);
+      if (fn) {
+        extraClass = 'pv-fn-def';
+        inner = `<div id="fn-${fn[1]}"><strong>[${fn[1]}]</strong> ${renderInline(fn[2])}</div>`;
+      } else {
+        inner = renderInline(line) || '&nbsp;';
+      }
     }
-    pieces.push(`<div class="pv-line" data-line="${i}" data-type="${dataType}">${inner}</div>`);
+    pieces.push(`<div class="pv-line ${extraClass}" data-line="${i}" data-type="${dataType}">${inner}</div>`);
   }
   return pieces.join('');
+}
+
+function admIcon(type) {
+  const icons = {
+    note: 'info', info: 'info', tip: 'check', warning: 'star', important: 'star',
+    caution: 'x', fold: 'eye', quote: 'quote',
+  };
+  return lucide(icons[type] || 'info', 14);
+}
+
+const _slugCounts = new Map();
+function headingSlug(text) {
+  const base = text.toLowerCase().replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '-') || 'h';
+  return base;
 }
 
 /* ----------------------------------------------------------------
@@ -401,36 +677,42 @@ function renderEditor(md, opts = {}) {
       else if (info.closes) ctx.inFence = false;
     }
     const lineDiv = el('div', { class: 'ed-line', dataset: { line: String(i), type: info.type } });
-    const tokens = tokenizeLine(line, info);
-    if (tokens.length === 0 || line === '') {
-      lineDiv.append(document.createElement('br'));
-    } else {
-      for (const t of tokens) {
-        if (t.trunc) {
-          const span = el('span', { class: 'ed-trunc', dataset: { full: t.full } }, t.label);
-          span.contentEditable = 'false';
-          lineDiv.append(span);
-        } else {
-          const sp = el('span', t.cls ? { class: t.cls } : {}, t.text);
-          lineDiv.append(sp);
-        }
-      }
-    }
-    // For image lines, also show the actual image thumbnail beneath the source
+    // Image lines: render the actual image FIRST (so it sits at the top
+    // of the line, aligned with the preview's image), then the source
+    // markdown beneath as a small caption.
+    let imageEl = null;
     if (info.type === 'image') {
       const m = /!\[([^\]]*)\]\(([^)]+)\)/.exec(line);
       if (m) {
         const resolved = resolveImageUrl(m[2]);
         if (resolved !== null) {
-          const img = document.createElement('img');
-          img.className = 'ed-img-thumb';
-          img.src = resolved;
-          img.alt = m[1];
-          img.contentEditable = 'false';
-          img.draggable = false;
-          lineDiv.append(img);
+          imageEl = document.createElement('img');
+          imageEl.className = 'ed-img-thumb';
+          imageEl.src = resolved;
+          imageEl.alt = m[1];
+          imageEl.contentEditable = 'false';
+          imageEl.draggable = false;
+          lineDiv.append(imageEl);
         }
       }
+    }
+    const tokens = tokenizeLine(line, info);
+    if (tokens.length === 0 || line === '') {
+      lineDiv.append(document.createElement('br'));
+    } else {
+      // Group source tokens inside a small "caption" span on image lines
+      const host = imageEl ? el('span', { class: 'ed-img-caption' }) : lineDiv;
+      for (const t of tokens) {
+        if (t.trunc) {
+          const span = el('span', { class: 'ed-trunc', dataset: { full: t.full } }, t.label);
+          span.contentEditable = 'false';
+          host.append(span);
+        } else {
+          const sp = el('span', t.cls ? { class: t.cls } : {}, t.text);
+          host.append(sp);
+        }
+      }
+      if (imageEl) lineDiv.append(host);
     }
     frag.append(lineDiv);
   }
@@ -536,6 +818,51 @@ function setCursorPos(pos) {
 }
 
 /* ----------------------------------------------------------------
+   Undo / redo — captures snapshots of the markdown source whenever we
+   mutate the editor's DOM directly (image insert, image delete,
+   wikilink autocomplete accept, format-toolbar action, etc.).
+   For normal typing the browser's native undo on contenteditable works
+   fine; this stack covers the structural operations that bypass it.
+---------------------------------------------------------------- */
+const undoStack = [];
+const redoStack = [];
+const UNDO_MAX = 100;
+function pushUndo() {
+  if (!state.currentNoteId) return;
+  const top = undoStack[undoStack.length - 1];
+  if (top && top.id === state.currentNoteId && top.md === lastMarkdown) return;
+  undoStack.push({ id: state.currentNoteId, md: lastMarkdown });
+  if (undoStack.length > UNDO_MAX) undoStack.shift();
+  redoStack.length = 0;
+}
+function performUndo() {
+  if (!undoStack.length) return false;
+  const entry = undoStack.pop();
+  if (entry.id !== state.currentNoteId) return false;
+  redoStack.push({ id: state.currentNoteId, md: lastMarkdown });
+  lastMarkdown = entry.md;
+  renderEditor(lastMarkdown);
+  $('preview').innerHTML = renderPreview(lastMarkdown);
+  renderBacklinks();
+  syncLineHeights();
+  markDirty(); scheduleSave();
+  return true;
+}
+function performRedo() {
+  if (!redoStack.length) return false;
+  const entry = redoStack.pop();
+  if (entry.id !== state.currentNoteId) return false;
+  undoStack.push({ id: state.currentNoteId, md: lastMarkdown });
+  lastMarkdown = entry.md;
+  renderEditor(lastMarkdown);
+  $('preview').innerHTML = renderPreview(lastMarkdown);
+  renderBacklinks();
+  syncLineHeights();
+  markDirty(); scheduleSave();
+  return true;
+}
+
+/* ----------------------------------------------------------------
    editor input handling
 
    Hot path (each keystroke):
@@ -580,7 +907,7 @@ function handleEditorInput() {
     return;
   }
   lastMarkdown = md;
-  schedulePreview(md);
+  schedulePreview();
   scheduleLazyEditorRender();
   checkWikiAutocomplete();
   markDirty();
@@ -596,16 +923,16 @@ const scheduleLazyEditorRender = debounce(() => {
   syncLineHeights();
 }, 450);
 
-const schedulePreview = debounce((md) => {
-  if ($('preview').contains(document.activeElement)) return;
-  $('preview').innerHTML = renderPreview(md);
+// Always renders the *current* lastMarkdown — avoids stale renders after
+// switching notes (previously the debounced callback captured the old body).
+const schedulePreview = debounce(() => {
+  $('preview').innerHTML = renderPreview(lastMarkdown);
+  if (typeof renderOutline === 'function') renderOutline();
   if (typeof renderBacklinks === 'function') renderBacklinks();
   syncLineHeights();
-}, 120);
+}, 100);
 
-function renderPreviewSoon() {
-  schedulePreview(lastMarkdown);
-}
+function renderPreviewSoon() { schedulePreview(); }
 
 const scheduleSave = debounce(() => saveCurrentNote(), 700);
 
@@ -664,160 +991,12 @@ function syncScroll(source, target) {
 }
 
 /* ----------------------------------------------------------------
-   editable preview — user types in preview, source updates live
+   preview is read-only. You select text in it to format, but actual
+   editing happens in the editor pane on the left. This keeps things
+   simple and avoids the WYSIWYG-vs-source mismatch.
 ---------------------------------------------------------------- */
-function getPreviewLineAtCursor() {
-  const sel = window.getSelection();
-  if (!sel.rangeCount) return null;
-  let n = sel.getRangeAt(0).startContainer;
-  if (n.nodeType === 3) n = n.parentNode;
-  return n.closest?.('.pv-line') || null;
-}
-
-function extractPreviewLineSource(pvLine, type, lineIndex) {
-  const oldLines = lastMarkdown.split('\n');
-  const oldLine = oldLines[lineIndex] || '';
-  if (['hr', 'image', 'fence', 'table'].includes(type)) return oldLine;
-
-  let body = '';
-  function walk(n) {
-    if (n.nodeType === 3) { body += n.nodeValue; return; }
-    if (n.nodeName === 'INPUT' || n.nodeName === 'IMG') return;
-    if (n.classList && n.classList.contains('pv-img-wrap')) return;
-    if (n.nodeName === 'BR') { body += '\n'; return; }
-    for (const c of n.childNodes) walk(c);
-  }
-  for (const c of pvLine.childNodes) walk(c);
-
-  if (type === 'ul') body = body.replace(/^\s*•\s*/, '');
-  else if (type === 'ol') body = body.replace(/^\s*\d+\.\s*/, '');
-
-  switch (type) {
-    case 'h1': return '# ' + body;
-    case 'h2': return '## ' + body;
-    case 'h3': return '### ' + body;
-    case 'h4': return '#### ' + body;
-    case 'h5': return '##### ' + body;
-    case 'h6': return '###### ' + body;
-    case 'quote': {
-      const m = /^(\s*>+\s*)/.exec(oldLine);
-      return (m ? m[1] : '> ') + body;
-    }
-    case 'ul': {
-      const m = /^(\s*[-*+]\s+)/.exec(oldLine);
-      return (m ? m[1] : '- ') + body;
-    }
-    case 'ol': {
-      const m = /^(\s*\d+\.\s+)/.exec(oldLine);
-      return (m ? m[1] : '1. ') + body;
-    }
-    case 'task': {
-      const m = /^(\s*[-*+]\s+\[[ xX]\]\s+)/.exec(oldLine);
-      return (m ? m[1] : '- [ ] ') + body;
-    }
-    case 'code': return pvLine.textContent;
-    case 'blank':
-    case 'p':
-    default:  return body;
-  }
-}
-
-function handlePreviewInput(e) {
-  const pvLine = e.target.closest('.pv-line');
-  if (!pvLine) return;
-  const lineIndex = parseInt(pvLine.dataset.line, 10);
-  if (isNaN(lineIndex)) return;
-  const type = pvLine.dataset.type;
-  const newSource = extractPreviewLineSource(pvLine, type, lineIndex);
-  const lines = lastMarkdown.split('\n');
-  if (lines[lineIndex] === newSource) return;
-  if (newSource.includes('\n')) {
-    const expanded = newSource.split('\n');
-    lines.splice(lineIndex, 1, ...expanded);
-  } else {
-    lines[lineIndex] = newSource;
-  }
-  lastMarkdown = lines.join('\n');
-  // Only re-render the editor; leave preview DOM alone so the cursor stays.
-  renderEditor(lastMarkdown);
-  markDirty();
-  scheduleSave();
-  updateWordCount(lastMarkdown);
-}
-
-function handlePreviewKey(e) {
-  if ((e.ctrlKey || e.metaKey) && (e.key === 'b' || e.key === 'i')) {
-    e.preventDefault();
-    applyFormat(e.key === 'b' ? 'bold' : 'italic');
-    return;
-  }
-  if (e.key === 'Enter') {
-    e.preventDefault();
-    const pvLine = getPreviewLineAtCursor();
-    if (!pvLine) return;
-    const lineIndex = parseInt(pvLine.dataset.line, 10);
-    const lines = lastMarkdown.split('\n');
-    const cur = lines[lineIndex] || '';
-    let prefix = '';
-    let m;
-    if ((m = /^(\s*)([-*+])\s+\[[ xX]\]\s+/.exec(cur))) prefix = m[1] + m[2] + ' [ ] ';
-    else if ((m = /^(\s*)([-*+])\s+/.exec(cur))) prefix = m[1] + m[2] + ' ';
-    else if ((m = /^(\s*)(\d+)\.\s+/.exec(cur))) prefix = m[1] + (parseInt(m[2], 10) + 1) + '. ';
-    else if (/^\s*>/.test(cur)) { const im = /^(\s*>\s*)/.exec(cur); prefix = im[1]; }
-
-    lines.splice(lineIndex + 1, 0, prefix);
-    lastMarkdown = lines.join('\n');
-    renderEditor(lastMarkdown);
-    $('preview').innerHTML = renderPreview(lastMarkdown);
-    syncLineHeights();
-    markDirty();
-    scheduleSave();
-    const newPv = $('preview').querySelector(`.pv-line[data-line="${lineIndex + 1}"]`);
-    if (newPv) {
-      const range = document.createRange();
-      range.selectNodeContents(newPv);
-      range.collapse(true);
-      const sel = window.getSelection();
-      sel.removeAllRanges();
-      sel.addRange(range);
-      $('preview').focus();
-    }
-  }
-}
-
 function setupEditablePreview() {
-  const pv = $('preview');
-  pv.contentEditable = 'true';
-  pv.spellcheck = true;
-  pv.addEventListener('input', handlePreviewInput);
-  pv.addEventListener('keydown', handlePreviewKey);
-  pv.addEventListener('focusout', () => {
-    // After cursor leaves, re-render to normalize (e.g., heading just typed)
-    setTimeout(() => {
-      if (!pv.contains(document.activeElement)) schedulePreview(lastMarkdown);
-    }, 50);
-  });
-  // Last-line catcher in preview pane
-  $('panePreview').addEventListener('mousedown', (e) => {
-    if (e.target.closest('.pv-line') || e.target.closest('img') || e.target.closest('input')) return;
-    e.preventDefault();
-    focusPreviewEnd();
-  });
-}
-
-function focusPreviewEnd() {
-  const pv = $('preview');
-  const lines = pv.querySelectorAll('.pv-line');
-  if (!lines.length) { pv.focus(); return; }
-  const last = lines[lines.length - 1];
-  const range = document.createRange();
-  range.selectNodeContents(last);
-  range.collapse(false);
-  const sel = window.getSelection();
-  sel.removeAllRanges();
-  sel.addRange(range);
-  pv.focus();
-  last.scrollIntoView({ block: 'nearest' });
+  // No-op kept for backward compatibility with init() wiring.
 }
 
 /* ----------------------------------------------------------------
@@ -853,44 +1032,86 @@ function setupFormatToolbar() {
   });
 }
 
+// Map a selection to (lineIndex, sourceLine).
+function lineIndexFromSelection() {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return -1;
+  let n = sel.getRangeAt(0).startContainer;
+  if (n.nodeType === 3) n = n.parentNode;
+  const ed = n.closest?.('.ed-line');
+  if (ed) return [...editor.children].indexOf(ed);
+  const pv = n.closest?.('.pv-line');
+  if (pv) return parseInt(pv.dataset.line, 10);
+  return -1;
+}
+
 function applyFormat(fmt) {
   const sel = window.getSelection();
   if (!sel || !sel.rangeCount) return;
   const text = sel.toString();
+  const range = sel.getRangeAt(0);
+  const inEditor = editor.contains(range.startContainer);
+
   const wraps = { bold: '**', italic: '*', strike: '~~', code: '`' };
   if (wraps[fmt]) {
     if (!text) return;
-    document.execCommand('insertText', false, wraps[fmt] + text + wraps[fmt]);
+    if (inEditor) {
+      // Editor is contenteditable — insertText also triggers our input
+      // handler, which updates lastMarkdown and schedules re-renders.
+      document.execCommand('insertText', false, wraps[fmt] + text + wraps[fmt]);
+    } else {
+      // Preview is read-only: edit the source directly.
+      wrapSelectionInSource(text, wraps[fmt], wraps[fmt]);
+    }
     return;
   }
   if (fmt === 'link') {
     const url = prompt('URL:', 'https://');
     if (!url) return;
-    document.execCommand('insertText', false, `[${text || 'link'}](${url})`);
+    const linkText = text || 'link';
+    if (inEditor) {
+      document.execCommand('insertText', false, `[${linkText}](${url})`);
+    } else {
+      wrapSelectionInSource(linkText, '[', `](${url})`);
+    }
     return;
   }
   if (['h1', 'h2', 'h3', 'quote', 'ul', 'task'].includes(fmt)) applyLinePrefix(fmt);
 }
 
-function applyLinePrefix(fmt) {
-  const sel = window.getSelection();
-  if (!sel || !sel.rangeCount) return;
-  let n = sel.getRangeAt(0).startContainer;
-  if (n.nodeType === 3) n = n.parentNode;
-  const lineEl = n.closest?.('.ed-line') || n.closest?.('.pv-line');
-  if (!lineEl) return;
-  const lineIndex = parseInt(lineEl.dataset.line, 10);
+// Wrap the selected text in source markdown (used when selection is in
+// the read-only preview). Finds the first occurrence of `text` in the
+// affected source line and surrounds it with the given markers.
+function wrapSelectionInSource(text, openMark, closeMark) {
+  const idx = lineIndexFromSelection();
+  if (idx < 0) return;
   const lines = lastMarkdown.split('\n');
-  let line = lines[lineIndex] || '';
-  line = line.replace(/^(\s*)(#{1,6}\s+|>\s*|[-*+]\s+\[[ xX]\]\s+|[-*+]\s+|\d+\.\s+)/, '$1');
-  const prefixes = { h1: '# ', h2: '## ', h3: '### ', quote: '> ', ul: '- ', task: '- [ ] ' };
-  lines[lineIndex] = (prefixes[fmt] || '') + line;
+  const line = lines[idx] || '';
+  const at = line.indexOf(text);
+  if (at < 0) return;
+  lines[idx] = line.slice(0, at) + openMark + text + closeMark + line.slice(at + text.length);
   lastMarkdown = lines.join('\n');
   renderEditor(lastMarkdown);
   $('preview').innerHTML = renderPreview(lastMarkdown);
+  renderBacklinks();
   syncLineHeights();
-  markDirty();
-  scheduleSave();
+  markDirty(); scheduleSave();
+}
+
+function applyLinePrefix(fmt) {
+  const idx = lineIndexFromSelection();
+  if (idx < 0) return;
+  const lines = lastMarkdown.split('\n');
+  let line = lines[idx] || '';
+  line = line.replace(/^(\s*)(#{1,6}\s+|>\s*|[-*+]\s+\[[ xX]\]\s+|[-*+]\s+|\d+\.\s+)/, '$1');
+  const prefixes = { h1: '# ', h2: '## ', h3: '### ', quote: '> ', ul: '- ', task: '- [ ] ' };
+  lines[idx] = (prefixes[fmt] || '') + line;
+  lastMarkdown = lines.join('\n');
+  renderEditor(lastMarkdown);
+  $('preview').innerHTML = renderPreview(lastMarkdown);
+  renderBacklinks();
+  syncLineHeights();
+  markDirty(); scheduleSave();
 }
 
 /* ----------------------------------------------------------------
@@ -933,10 +1154,12 @@ async function openNote(id) {
   const note = state.notes.get(id);
   if (!note) return;
   state.currentNoteId = id;
+  store.settings.set('lastNoteId', id);
   $('noteTitle').value = note.title || '';
   lastMarkdown = note.body || '';
   renderEditor(lastMarkdown);
   $('preview').innerHTML = renderPreview(lastMarkdown);
+  renderOutline();
   renderBacklinks();
   renderChips();
   updatePinIcon();
@@ -944,6 +1167,34 @@ async function openNote(id) {
   updateWordCount(lastMarkdown);
   markSaved();
   renderTree();
+  // Pre-load any image blobs referenced by the note so they don't show
+  // as "broken" on a cold reload (object URLs from the previous session
+  // are gone after page load).
+  preloadImagesFor(lastMarkdown);
+}
+
+function preloadImagesFor(md) {
+  const re = /yanta-img:\/\/([a-z0-9]+)/gi;
+  let m;
+  const ids = [];
+  while ((m = re.exec(md || '')) !== null) ids.push(m[1]);
+  if (!ids.length) return;
+  let needsRerender = false;
+  Promise.all(ids.map(async (id) => {
+    if (state.imageBlobs.has(id)) return;
+    const rec = await store.images.get(id);
+    if (rec && rec.blob) {
+      state.imageBlobs.set(id, URL.createObjectURL(rec.blob));
+      needsRerender = true;
+    }
+  })).then(() => {
+    if (needsRerender) {
+      $('preview').innerHTML = renderPreview(lastMarkdown);
+      renderBacklinks();
+      renderEditor(lastMarkdown);
+      syncLineHeights();
+    }
+  });
 }
 
 async function saveCurrentNote() {
@@ -963,7 +1214,7 @@ async function saveCurrentNote() {
   await store.notes.put(note);
   if (titleChanged) {
     rebuildWikilinkIndex();
-    schedulePreview(lastMarkdown);
+    schedulePreview();
   }
   markSaved();
   renderTree();
@@ -1078,6 +1329,28 @@ function renderTree() {
   const folderSec = el('div', { class: 'tree-section' });
   const ftitle = el('div', { class: 'tree-section-title' }, 'Folders',
     el('button', { class: 'icon-btn', title: 'New folder', onclick: () => newFolder(null), style: { width: '20px', height: '20px' } }, '+'));
+  // Drop on the "Folders" header → move to root (out of any folder)
+  ftitle.addEventListener('dragover', (e) => {
+    if (![...(e.dataTransfer.types || [])].includes('text/yanta-note') &&
+        ![...(e.dataTransfer.types || [])].includes('text/yanta-folder')) return;
+    e.preventDefault();
+    ftitle.classList.add('drop-target');
+  });
+  ftitle.addEventListener('dragleave', () => ftitle.classList.remove('drop-target'));
+  ftitle.addEventListener('drop', async (e) => {
+    ftitle.classList.remove('drop-target');
+    const noteId = e.dataTransfer.getData('text/yanta-note');
+    const folderId = e.dataTransfer.getData('text/yanta-folder');
+    e.preventDefault();
+    if (noteId) {
+      const note = state.notes.get(noteId);
+      if (note) { note.folderId = null; note.updated = Date.now(); await store.notes.put(note); }
+    } else if (folderId) {
+      const folder = state.folders.get(folderId);
+      if (folder) { folder.parentId = null; await store.folders.put(folder); }
+    }
+    renderTree();
+  });
   folderSec.append(ftitle);
   // root-level pseudo: notes without folder
   const orphanNotes = visible.filter((n) => !n.folderId && !n.pinned).sort((a, b) => b.updated - a.updated);
@@ -1092,6 +1365,19 @@ function renderTree() {
 
   renderTagCloud();
   updateStorageMeter();
+}
+
+// True if `ancestorId` is an ancestor of `descendantId` (so we don't
+// allow a folder to be dropped into one of its own descendants).
+function isAncestor(ancestorId, descendantId) {
+  let cur = state.folders.get(descendantId);
+  const seen = new Set();
+  while (cur && !seen.has(cur.id)) {
+    if (cur.id === ancestorId) return true;
+    seen.add(cur.id);
+    cur = cur.parentId ? state.folders.get(cur.parentId) : null;
+  }
+  return false;
 }
 
 function folderRow(f, visibleNotes, depth) {
@@ -1109,6 +1395,39 @@ function folderRow(f, visibleNotes, depth) {
       renderTree();
     },
     oncontextmenu: (e) => { e.preventDefault(); folderMenu(e, f); },
+    ondragover: (e) => {
+      if (![...(e.dataTransfer.types || [])].includes('text/yanta-note') &&
+          ![...(e.dataTransfer.types || [])].includes('text/yanta-folder')) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      row.classList.add('drop-target');
+    },
+    ondragleave: () => row.classList.remove('drop-target'),
+    ondrop: async (e) => {
+      row.classList.remove('drop-target');
+      const noteId = e.dataTransfer.getData('text/yanta-note');
+      const folderId = e.dataTransfer.getData('text/yanta-folder');
+      e.preventDefault();
+      if (noteId) {
+        const note = state.notes.get(noteId);
+        if (!note) return;
+        note.folderId = f.id;
+        note.updated = Date.now();
+        await store.notes.put(note);
+      } else if (folderId && folderId !== f.id && !isAncestor(folderId, f.id)) {
+        const folder = state.folders.get(folderId);
+        if (!folder) return;
+        folder.parentId = f.id;
+        await store.folders.put(folder);
+      }
+      state.expandedFolders.add(f.id);
+      renderTree();
+    },
+  });
+  row.draggable = true;
+  row.addEventListener('dragstart', (e) => {
+    e.dataTransfer.setData('text/yanta-folder', f.id);
+    e.dataTransfer.effectAllowed = 'move';
   });
   row.append(el('span', { class: 'twist' }, expanded ? '▾' : '▸'));
   row.append(svgIcon('folder'));
@@ -1184,6 +1503,9 @@ function renderTagCloud() {
    context menus
 ---------------------------------------------------------------- */
 let activeMenu = null;
+function _menuOutsideClose(e) {
+  if (activeMenu && !activeMenu.contains(e.target)) closeMenu();
+}
 function showMenu(x, y, items) {
   closeMenu();
   const m = el('div', { class: 'ctx-menu', style: { left: x + 'px', top: y + 'px' } });
@@ -1193,13 +1515,22 @@ function showMenu(x, y, items) {
   }
   document.body.append(m);
   activeMenu = m;
+  // Install outside-click on next tick so the click that opened the menu
+  // doesn't immediately close it.
+  setTimeout(() => {
+    document.addEventListener('mousedown', _menuOutsideClose, true);
+  }, 0);
   // adjust if off screen
   const r = m.getBoundingClientRect();
   if (r.right > window.innerWidth) m.style.left = (x - r.width) + 'px';
   if (r.bottom > window.innerHeight) m.style.top = (y - r.height) + 'px';
 }
-function closeMenu() { if (activeMenu) { activeMenu.remove(); activeMenu = null; } }
-document.addEventListener('click', closeMenu);
+function closeMenu() {
+  if (!activeMenu) return;
+  document.removeEventListener('mousedown', _menuOutsideClose, true);
+  activeMenu.remove();
+  activeMenu = null;
+}
 
 function noteMenu(e, n) {
   showMenu(e.clientX, e.clientY, [
@@ -1260,7 +1591,12 @@ let imgCompressedBlob = null;    // result
 let imgCompressedDataUrl = null;
 let imgCompressedDims = null;
 
+// Cursor position captured before the modal opens — restored when
+// the user clicks Insert so the image lands where the caret was, not
+// at the start of the document.
+let _imageInsertAnchor = null;
 function openImageModal() {
+  _imageInsertAnchor = getCursorPos();
   imgModal.hidden = false;
   setTab('upload');
   imgWorkingBlob = null;
@@ -1354,36 +1690,102 @@ async function insertCompressedImage() {
     toast('Pick a save mode (Base64 or library reference)', 'error');
     return;
   }
+  // Restore the cursor to where the user was before the modal opened
+  // (paste / drag-drop / Ctrl+I) so the image lands at the caret.
+  if (_imageInsertAnchor) {
+    editor.focus();
+    setCursorPos(_imageInsertAnchor);
+  }
   insertAtCursor('\n' + md + '\n');
+  _imageInsertAnchor = null;
   closeImageModal();
   updateStorageMeter();
   toast('Image inserted', 'success');
 }
 
+// Returns the start/end positions of the current editor selection in
+// (lineIndex, offset) form. If selection is collapsed, start === end.
+function getSelectionRangePos() {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return null;
+  const r = sel.getRangeAt(0);
+  if (!editor.contains(r.startContainer)) return null;
+  const start = _posFor(r.startContainer, r.startOffset);
+  const end = _posFor(r.endContainer, r.endOffset);
+  if (!start || !end) return null;
+  // Normalize order
+  const cmp = start.lineIndex === end.lineIndex
+    ? start.offset - end.offset
+    : start.lineIndex - end.lineIndex;
+  return cmp <= 0 ? { start, end } : { start: end, end: start };
+}
+function _posFor(node, offset) {
+  let line = node;
+  while (line && line.parentNode !== editor) line = line.parentNode;
+  if (!line || line.parentNode !== editor) return null;
+  const blocks = [...editor.children];
+  const lineIndex = blocks.indexOf(line);
+  if (lineIndex < 0) return null;
+  let off = 0;
+  function walk(n) {
+    if (n === node) {
+      if (n.nodeType === 3) off += offset;
+      else for (let i = 0; i < offset; i++) walk(n.childNodes[i]);
+      return true;
+    }
+    if (n.classList && n.classList.contains('ed-trunc')) { off += n.dataset.full.length; return false; }
+    if (n.nodeType === 3) { off += n.nodeValue.length; return false; }
+    if (n.nodeName === 'BR' || n.nodeName === 'IMG') return false;
+    for (const c of n.childNodes) if (walk(c)) return true;
+    return false;
+  }
+  for (const c of line.childNodes) if (walk(c)) break;
+  return { lineIndex, offset: off };
+}
+
 function insertAtCursor(text) {
   editor.focus();
-  const pos = getCursorPos();
   let md = readEditorMarkdown();
-  let newPos;
   const inserts = text.split('\n');
-  if (!pos) {
+
+  // Delete any active selection first (so paste-over-selection works).
+  const selRange = getSelectionRangePos();
+  let startPos;
+  if (selRange && (selRange.start.lineIndex !== selRange.end.lineIndex || selRange.start.offset !== selRange.end.offset)) {
+    const lines = md.split('\n');
+    const startLine = lines[selRange.start.lineIndex] || '';
+    const endLine = lines[selRange.end.lineIndex] || '';
+    const before = startLine.slice(0, selRange.start.offset);
+    const after = endLine.slice(selRange.end.offset);
+    const merged = before + after;
+    lines.splice(selRange.start.lineIndex, selRange.end.lineIndex - selRange.start.lineIndex + 1, merged);
+    md = lines.join('\n');
+    startPos = { lineIndex: selRange.start.lineIndex, offset: selRange.start.offset };
+  } else {
+    startPos = getCursorPos();
+  }
+
+  let newPos;
+  if (!startPos) {
     md = md + text;
     const parts = md.split('\n');
     newPos = { lineIndex: parts.length - 1, offset: parts[parts.length - 1].length };
   } else {
     const lines = md.split('\n');
-    const line = lines[pos.lineIndex] || '';
-    const before = line.slice(0, pos.offset);
-    const after = line.slice(pos.offset);
+    const line = lines[startPos.lineIndex] || '';
+    const before = line.slice(0, startPos.offset);
+    const after = line.slice(startPos.offset);
     const insertedLines = (before + text + after).split('\n');
-    lines.splice(pos.lineIndex, 1, ...insertedLines);
+    lines.splice(startPos.lineIndex, 1, ...insertedLines);
     md = lines.join('\n');
-    const newLineIndex = pos.lineIndex + inserts.length - 1;
+    const newLineIndex = startPos.lineIndex + inserts.length - 1;
     const offset = inserts.length === 1
-      ? pos.offset + text.length
+      ? startPos.offset + text.length
       : inserts[inserts.length - 1].length;
     newPos = { lineIndex: newLineIndex, offset };
   }
+  // Push to undo stack BEFORE mutating lastMarkdown
+  pushUndo();
   lastMarkdown = md;
   renderEditor(md);
   setCursorPos(newPos);
@@ -1547,10 +1949,11 @@ function openExportMenu(anchorBtn) {
   const r = anchorBtn.getBoundingClientRect();
   const note = state.currentNoteId ? state.notes.get(state.currentNoteId) : null;
   showMenu(r.left, r.bottom + 4, [
+    { label: 'Export as folder ZIP (recommended)', action: exportAsZip },
+    'hr',
     { label: note ? `Export current note (.md)` : 'Export current note (.md)', action: () => note && exportNoteAsMd(note) },
     { label: 'Export every note as .md files', action: exportEveryNoteMd },
-    'hr',
-    { label: 'Export full bundle (.json)', action: exportBundle },
+    { label: 'Export full bundle (.json + base64 images)', action: exportBundle },
   ]);
 }
 
@@ -1596,11 +1999,14 @@ async function importBundleFile(file) {
 // JSON bundles merge globally; unknown files are skipped.
 async function importItems(items) {
   _folderCache.clear();
-  let noteCount = 0, bundleCount = 0, failed = 0, skipped = 0;
+  let noteCount = 0, bundleCount = 0, zipCount = 0, failed = 0, skipped = 0;
   for (const { file, pathArr } of items) {
     try {
       const lower = file.name.toLowerCase();
-      if (lower.endsWith('.json')) {
+      if (lower.endsWith('.zip')) {
+        await importZipBlob(file);
+        zipCount++;
+      } else if (lower.endsWith('.json')) {
         await importBundleFile(file);
         bundleCount++;
       } else if (/\.(md|markdown|txt)$/i.test(file.name)) {
@@ -1635,14 +2041,316 @@ async function importItems(items) {
   const parts = [];
   if (noteCount) parts.push(`${noteCount} note${noteCount === 1 ? '' : 's'}`);
   if (bundleCount) parts.push(`${bundleCount} bundle${bundleCount === 1 ? '' : 's'}`);
+  if (zipCount) parts.push(`${zipCount} ZIP${zipCount === 1 ? '' : 's'}`);
   if (skipped) parts.push(`${skipped} skipped`);
   if (failed) parts.push(`${failed} failed`);
-  toast('Imported ' + (parts.join(', ') || 'nothing'), failed ? 'error' : 'success');
+  // importZipBlob already emits its own toast; suppress the summary if zip-only
+  if (!(zipCount && !noteCount && !bundleCount)) {
+    toast('Imported ' + (parts.join(', ') || 'nothing'), failed ? 'error' : 'success');
+  }
 }
 
 // Back-compat: flat list of files with no folder context
 async function importFiles(files) {
   return importItems(files.map((f) => ({ file: f, pathArr: [] })));
+}
+
+/* ================================================================
+   Minimal ZIP writer + reader (STORED + DEFLATE)
+   Used for portable "folder-mirror" exports / imports.
+================================================================ */
+const CRC32_TABLE = (() => {
+  const t = new Uint32Array(256);
+  for (let i = 0; i < 256; i++) {
+    let c = i;
+    for (let j = 0; j < 8; j++) c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+    t[i] = c;
+  }
+  return t;
+})();
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  for (let i = 0; i < bytes.length; i++) crc = CRC32_TABLE[(crc ^ bytes[i]) & 0xff] ^ (crc >>> 8);
+  return (crc ^ 0xffffffff) >>> 0;
+}
+const _enc = new TextEncoder();
+const _dec = new TextDecoder();
+
+// entries: [{ path, data: Uint8Array }] — paths may contain '/' for folders
+function makeZip(entries) {
+  const now = new Date();
+  const dosTime = ((now.getHours() << 11) | (now.getMinutes() << 5) | (now.getSeconds() >> 1)) & 0xffff;
+  const dosDate = (((now.getFullYear() - 1980) << 9) | ((now.getMonth() + 1) << 5) | now.getDate()) & 0xffff;
+  const chunks = [];
+  const cd = [];
+  let offset = 0;
+  for (const e of entries) {
+    const name = _enc.encode(e.path);
+    const data = e.data;
+    const c = crc32(data);
+    const lfh = new Uint8Array(30 + name.length);
+    const dv = new DataView(lfh.buffer);
+    dv.setUint32(0, 0x04034b50, true);
+    dv.setUint16(4, 20, true);
+    dv.setUint16(6, 0x0800, true); // UTF-8 names
+    dv.setUint16(8, 0, true);      // method: stored
+    dv.setUint16(10, dosTime, true);
+    dv.setUint16(12, dosDate, true);
+    dv.setUint32(14, c, true);
+    dv.setUint32(18, data.length, true);
+    dv.setUint32(22, data.length, true);
+    dv.setUint16(26, name.length, true);
+    dv.setUint16(28, 0, true);
+    lfh.set(name, 30);
+    chunks.push(lfh, data);
+    cd.push({ name, dataLen: data.length, crc: c, offset });
+    offset += lfh.length + data.length;
+  }
+  const cdStart = offset;
+  for (const ent of cd) {
+    const h = new Uint8Array(46 + ent.name.length);
+    const dv = new DataView(h.buffer);
+    dv.setUint32(0, 0x02014b50, true);
+    dv.setUint16(4, 20, true);
+    dv.setUint16(6, 20, true);
+    dv.setUint16(8, 0x0800, true);
+    dv.setUint16(10, 0, true);
+    dv.setUint16(12, dosTime, true);
+    dv.setUint16(14, dosDate, true);
+    dv.setUint32(16, ent.crc, true);
+    dv.setUint32(20, ent.dataLen, true);
+    dv.setUint32(24, ent.dataLen, true);
+    dv.setUint16(28, ent.name.length, true);
+    dv.setUint32(42, ent.offset, true);
+    h.set(ent.name, 46);
+    chunks.push(h);
+    offset += h.length;
+  }
+  const eocd = new Uint8Array(22);
+  const dv = new DataView(eocd.buffer);
+  dv.setUint32(0, 0x06054b50, true);
+  dv.setUint16(8, cd.length, true);
+  dv.setUint16(10, cd.length, true);
+  dv.setUint32(12, offset - cdStart, true);
+  dv.setUint32(16, cdStart, true);
+  chunks.push(eocd);
+  return new Blob(chunks, { type: 'application/zip' });
+}
+
+async function inflateRaw(bytes) {
+  // DecompressionStream is available in Chromium-based + Firefox + Safari ≥17
+  const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+  const chunks = [];
+  const reader = stream.getReader();
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    chunks.push(value);
+  }
+  const total = chunks.reduce((s, c) => s + c.length, 0);
+  const out = new Uint8Array(total);
+  let o = 0;
+  for (const c of chunks) { out.set(c, o); o += c.length; }
+  return out;
+}
+
+async function readZip(blob) {
+  const buf = await blob.arrayBuffer();
+  const u8 = new Uint8Array(buf);
+  const dv = new DataView(buf);
+  // Locate EOCD by scanning backward
+  let eocd = -1;
+  for (let i = u8.length - 22; i >= Math.max(0, u8.length - 65557); i--) {
+    if (dv.getUint32(i, true) === 0x06054b50) { eocd = i; break; }
+  }
+  if (eocd < 0) throw new Error('Not a valid ZIP');
+  const numEntries = dv.getUint16(eocd + 10, true);
+  const cdOffset = dv.getUint32(eocd + 16, true);
+  const entries = [];
+  let p = cdOffset;
+  for (let i = 0; i < numEntries; i++) {
+    if (dv.getUint32(p, true) !== 0x02014b50) throw new Error('Bad CD entry');
+    const method = dv.getUint16(p + 10, true);
+    const compSize = dv.getUint32(p + 20, true);
+    const nameLen = dv.getUint16(p + 28, true);
+    const extraLen = dv.getUint16(p + 30, true);
+    const commentLen = dv.getUint16(p + 32, true);
+    const lfhOffset = dv.getUint32(p + 42, true);
+    const name = _dec.decode(u8.subarray(p + 46, p + 46 + nameLen));
+    p += 46 + nameLen + extraLen + commentLen;
+    if (dv.getUint32(lfhOffset, true) !== 0x04034b50) throw new Error('Bad LFH');
+    const lfhNameLen = dv.getUint16(lfhOffset + 26, true);
+    const lfhExtraLen = dv.getUint16(lfhOffset + 28, true);
+    const dataStart = lfhOffset + 30 + lfhNameLen + lfhExtraLen;
+    const raw = u8.subarray(dataStart, dataStart + compSize);
+    let data;
+    if (method === 0) data = raw;
+    else if (method === 8) data = await inflateRaw(raw);
+    else throw new Error('Unsupported method ' + method);
+    entries.push({ path: name, data, isDir: name.endsWith('/') });
+  }
+  return entries;
+}
+
+/* ================================================================
+   Folder-mirror ZIP export
+   The ZIP layout mirrors the in-app folder hierarchy:
+       Top-level note.md
+       Some folder/Sub-folder/Nested note.md
+       _images/<id>.<ext>          (only images actually used)
+       _yanta-manifest.json         (versioning / round-trip aid)
+================================================================ */
+function folderPathSegments(folderId) {
+  if (!folderId) return [];
+  const parts = [];
+  let f = state.folders.get(folderId);
+  const seen = new Set();
+  while (f && !seen.has(f.id)) {
+    parts.unshift(f.name);
+    seen.add(f.id);
+    f = f.parentId ? state.folders.get(f.parentId) : null;
+  }
+  return parts;
+}
+
+function imageExt(meta) {
+  const t = (meta?.type || '').split('/')[1] || '';
+  if (t === 'jpeg') return 'jpg';
+  if (t === 'svg+xml') return 'svg';
+  return t || 'bin';
+}
+
+async function exportAsZip() {
+  // 1. Collect images that any note actually references
+  const used = new Set();
+  for (const note of state.notes.values()) {
+    const re = /yanta-img:\/\/([a-z0-9]+)/gi;
+    let m;
+    while ((m = re.exec(note.body || '')) !== null) used.add(m[1]);
+  }
+
+  // 2. Build entries
+  const entries = [];
+  const usedPaths = new Set();
+  function pickPath(folderSegs, baseName) {
+    let path = [...folderSegs, baseName].join('/');
+    if (!usedPaths.has(path)) { usedPaths.add(path); return path; }
+    // Disambiguate with a suffix
+    const dot = baseName.lastIndexOf('.');
+    const stem = dot > 0 ? baseName.slice(0, dot) : baseName;
+    const ext = dot > 0 ? baseName.slice(dot) : '';
+    for (let i = 2; i < 1000; i++) {
+      const p = [...folderSegs, `${stem} (${i})${ext}`].join('/');
+      if (!usedPaths.has(p)) { usedPaths.add(p); return p; }
+    }
+    return path;
+  }
+
+  for (const note of state.notes.values()) {
+    const segs = folderPathSegments(note.folderId);
+    const fname = safeFilename(note.title) + '.md';
+    const path = pickPath(segs, fname);
+    let body = note.body || '';
+    // Rewrite yanta-img://X → _images/X.ext (relative, resolves from any depth via "/")
+    body = body.replace(/yanta-img:\/\/([a-z0-9]+)/gi, (full, id) => {
+      const meta = state.imagesMeta.get(id);
+      if (!meta) return full;
+      const rel = '_images/' + id + '.' + imageExt(meta);
+      // Add ../ for nested folders
+      return (segs.length ? '../'.repeat(segs.length) : '') + rel;
+    });
+    const fm = noteToFrontmatter(note);
+    entries.push({ path, data: _enc.encode(fm + body) });
+  }
+
+  for (const id of used) {
+    const rec = await store.images.get(id);
+    if (!rec || !rec.blob) continue;
+    const meta = state.imagesMeta.get(id) || { type: rec.type };
+    const buf = new Uint8Array(await rec.blob.arrayBuffer());
+    entries.push({ path: '_images/' + id + '.' + imageExt(meta), data: buf });
+  }
+
+  const manifest = {
+    yanta: 1,
+    exported: new Date().toISOString(),
+    counts: { notes: state.notes.size, folders: state.folders.size, images: used.size },
+  };
+  entries.push({ path: '_yanta-manifest.json', data: _enc.encode(JSON.stringify(manifest, null, 2)) });
+
+  const zip = makeZip(entries);
+  downloadBlob(zip, `yanta-${new Date().toISOString().slice(0, 10)}.zip`);
+  toast(`Exported ${entries.length} files`, 'success');
+}
+
+/* ================================================================
+   ZIP import — accepts files we exported, or any folder-of-md ZIP
+================================================================ */
+const _imageExtToMime = {
+  jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp',
+  gif: 'image/gif', svg: 'image/svg+xml', bin: 'application/octet-stream',
+};
+async function importZipBlob(blob) {
+  let entries;
+  try { entries = await readZip(blob); }
+  catch (e) { toast('ZIP read failed: ' + e.message, 'error'); return; }
+
+  _folderCache.clear();
+  const imageIdRemap = new Map(); // original id (from filename) -> new id
+
+  // First pass: images
+  for (const ent of entries) {
+    if (ent.isDir) continue;
+    if (!ent.path.startsWith('_images/')) continue;
+    const filename = ent.path.slice('_images/'.length);
+    const dot = filename.lastIndexOf('.');
+    const origId = dot > 0 ? filename.slice(0, dot) : filename;
+    const ext = (dot > 0 ? filename.slice(dot + 1) : 'bin').toLowerCase();
+    const mime = _imageExtToMime[ext] || 'application/octet-stream';
+    const blob2 = new Blob([ent.data], { type: mime });
+    const newId = state.imagesMeta.has(origId) ? uid() : origId;
+    const meta = { id: newId, name: filename, size: blob2.size, type: mime, ts: Date.now() };
+    await store.images.put({ ...meta, blob: blob2 });
+    state.imagesMeta.set(newId, meta);
+    imageIdRemap.set(origId, newId);
+  }
+
+  // Second pass: notes
+  let noteCount = 0;
+  for (const ent of entries) {
+    if (ent.isDir) continue;
+    if (ent.path.startsWith('_images/')) continue;
+    if (ent.path.startsWith('_yanta-')) continue;
+    if (!/\.(md|markdown|txt)$/i.test(ent.path)) continue;
+    const parts = ent.path.split('/');
+    const filename = parts.pop();
+    const folderId = await ensureFolderPath(parts);
+    const text = _dec.decode(ent.data);
+    const { meta, body: rawBody } = parseFrontmatter(text);
+    // Resolve ../_images/X.ext → yanta-img://(remapped)X
+    const body = rawBody.replace(/(?:\.\.\/)*_images\/([a-z0-9]+)(?:\.[a-z0-9]+)?/gi, (_full, id) => {
+      const newId = imageIdRemap.get(id) || id;
+      return 'yanta-img://' + newId;
+    });
+    const title = filename.replace(/\.(md|markdown|txt)$/i, '');
+    const note = {
+      id: uid(),
+      title,
+      body,
+      folderId,
+      tags: Array.isArray(meta.tags) ? meta.tags : [],
+      pinned: !!meta.pinned,
+      created: meta.created ? Date.parse(meta.created) || Date.now() : Date.now(),
+      updated: Date.now(),
+    };
+    state.notes.set(note.id, note);
+    await store.notes.put(note);
+    noteCount++;
+  }
+
+  rebuildWikilinkIndex();
+  renderTree();
+  toast(`Imported ${noteCount} note${noteCount === 1 ? '' : 's'}${imageIdRemap.size ? ` + ${imageIdRemap.size} image${imageIdRemap.size === 1 ? '' : 's'}` : ''} from ZIP`, 'success');
 }
 
 /* Walk a webkitGetAsEntry tree (supports nested directories) */
@@ -1735,6 +2443,47 @@ function getBacklinks(noteId) {
   return out.sort((a, b) => b.note.updated - a.note.updated);
 }
 
+// Render an Outline / Table of Contents at the top of preview when the
+// current note has 2+ headings. Clicking a heading scrolls to it.
+function renderOutline() {
+  const pv = $('preview');
+  const old = pv.querySelector('.pv-outline');
+  if (old) old.remove();
+  const lines = lastMarkdown.split('\n');
+  const headings = [];
+  const ctx = { inFence: false };
+  for (const line of lines) {
+    const info = classifyLine(line, ctx);
+    if (info.type === 'fence') { ctx.inFence = info.opens ? true : false; continue; }
+    const m = /^(#{1,6})\s+(.*)$/.exec(line);
+    if (m) headings.push({ level: m[1].length, text: m[2].trim(), slug: headingSlug(m[2].trim()) });
+  }
+  if (headings.length < 2) return;
+  const minLvl = Math.min(...headings.map((h) => h.level));
+  const wrap = el('div', { class: 'pv-outline', contenteditable: 'false' });
+  const head = el('div', { class: 'pv-outline-head', onclick: () => wrap.classList.toggle('collapsed') });
+  const chev = el('span', { class: 'pv-outline-chev' });
+  chev.innerHTML = lucide('chevron-down', 12);
+  head.append(chev, el('span', {}, `Outline · ${headings.length} headings`));
+  wrap.append(head);
+  const list = el('div', { class: 'pv-outline-list' });
+  for (const h of headings) {
+    const item = el('a', {
+      class: 'pv-outline-item',
+      style: { paddingLeft: (8 + (h.level - minLvl) * 14) + 'px' },
+      onclick: (e) => {
+        e.preventDefault();
+        const target = pv.querySelector(`#h-${CSS.escape(h.slug)}`);
+        if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      },
+    }, h.text);
+    list.append(item);
+  }
+  wrap.append(list);
+  // Insert as first preview child
+  pv.insertBefore(wrap, pv.firstChild);
+}
+
 function renderBacklinks() {
   const pv = $('preview');
   const old = pv.querySelector('.backlinks');
@@ -1763,15 +2512,55 @@ function renderBacklinks() {
   pv.append(wrap);
 }
 
-// Patch: re-render backlinks after preview renders
-const _origSchedulePreview = schedulePreview;
-function schedulePreviewWithBacklinks(md) {
-  _origSchedulePreview(md);
-  // backlinks render after preview content
-  setTimeout(renderBacklinks, 130);
+/* ================================================================
+   Wikilink hover preview — peek at the linked note without leaving.
+================================================================ */
+let _hoverShowTimer = null, _hoverHideTimer = null;
+function setupWikilinkHover() {
+  document.addEventListener('mouseover', (e) => {
+    const a = e.target.closest('a.wiki-link');
+    if (!a || a.classList.contains('missing')) return;
+    clearTimeout(_hoverHideTimer);
+    clearTimeout(_hoverShowTimer);
+    _hoverShowTimer = setTimeout(() => showHoverPreview(a), 280);
+  });
+  document.addEventListener('mouseout', (e) => {
+    const a = e.target.closest('a.wiki-link');
+    const hp = $('hoverPreview');
+    const toHp = e.relatedTarget && hp.contains(e.relatedTarget);
+    if (!a && !toHp) return;
+    clearTimeout(_hoverShowTimer);
+    _hoverHideTimer = setTimeout(hideHoverPreview, 250);
+  });
+  $('hoverPreview').addEventListener('mouseenter', () => clearTimeout(_hoverHideTimer));
+  $('hoverPreview').addEventListener('mouseleave', () => hideHoverPreview());
 }
-// replace the binding (functions referencing schedulePreview keep old name)
-// We'll add explicit calls to renderBacklinks where needed.
+function showHoverPreview(a) {
+  const id = a.dataset.noteId;
+  if (!id) return;
+  const note = state.notes.get(id);
+  if (!note) return;
+  const hp = $('hoverPreview');
+  // Render up to 600 chars of the body for context, plus title
+  const snippet = (note.body || '').slice(0, 600);
+  hp.innerHTML =
+    `<div class="hp-title">${escapeHtml(note.title || 'Untitled')}</div>` +
+    `<div class="hp-body">${renderBlocksInline(snippet)}</div>` +
+    ((note.body || '').length > 600 ? '<div class="hp-more">…click to open</div>' : '');
+  hp.hidden = false;
+  const r = a.getBoundingClientRect();
+  const hw = hp.offsetWidth || 380;
+  const hh = hp.offsetHeight || 120;
+  let x = r.left;
+  let y = r.bottom + 6;
+  if (x + hw > window.innerWidth - 8) x = window.innerWidth - hw - 8;
+  if (y + hh > window.innerHeight - 8) y = r.top - hh - 6;
+  hp.style.left = Math.max(8, x) + 'px';
+  hp.style.top = Math.max(8, y) + 'px';
+}
+function hideHoverPreview() {
+  $('hoverPreview').hidden = true;
+}
 
 /* ================================================================
    Wikilink click / create flow
@@ -1848,7 +2637,9 @@ function acShowWiki(query, anchorRect) {
       onclick: () => acAccept(i),
     });
     if (it.kind === 'create') row.classList.add('create');
-    row.append(el('span', { class: 'ac-icon' }, it.kind === 'create' ? '+' : '◆'));
+    const ico = el('span', { class: 'ac-icon' });
+    ico.innerHTML = lucide(it.kind === 'create' ? 'plus' : 'file', 14);
+    row.append(ico);
     row.append(el('span', { class: 'ac-label' }, it.label));
     row.append(el('span', { class: 'ac-meta' }, it.meta));
     e.append(row);
@@ -1902,7 +2693,7 @@ function replaceWikiTrigger(insertText) {
   renderEditor(lastMarkdown);
   const newOffset = open + 2 + insertText.length + 2;
   setCursorPos({ lineIndex: pos.lineIndex, offset: newOffset });
-  schedulePreview(lastMarkdown);
+  schedulePreview();
   setTimeout(renderBacklinks, 200);
   markDirty(); scheduleSave();
 }
@@ -1992,12 +2783,15 @@ function renderPaletteList() {
       onclick: () => paletteAccept(i),
       onmouseenter: () => { palette.active = i; for (const c of list.children) c.classList.toggle('active', parseInt(c.dataset.i, 10) === i); },
     });
+    const icoSpan = el('span', { class: 'pi-icon' });
     if (palette.mode === 'commands') {
-      row.append(el('span', { class: 'pi-icon' }, it.icon || '·'));
+      icoSpan.innerHTML = lucide(it.icon || 'square', 14);
+      row.append(icoSpan);
       row.append(el('span', { class: 'pi-label' }, it.label));
       if (it.hint) row.append(el('span', { class: 'pi-hint' }, it.hint));
     } else {
-      row.append(el('span', { class: 'pi-icon' }, '◆'));
+      icoSpan.innerHTML = lucide('file', 14);
+      row.append(icoSpan);
       row.append(el('span', { class: 'pi-label' }, it.label));
       if (it.folder) row.append(el('span', { class: 'pi-meta' }, it.folder));
     }
@@ -2027,22 +2821,23 @@ function paletteAccept(i) {
 let commandList = [];
 function buildCommandList() {
   commandList = [
-    { label: 'New note', icon: '＋', hint: 'Ctrl+N', action: () => newNote(currentFolderForNew()) },
-    { label: 'New folder', icon: '▸', action: () => newFolder(null) },
-    { label: 'Quick switcher (jump to note)', icon: '◆', hint: 'Ctrl+O', action: () => openPalette('notes') },
-    { label: 'Open graph view', icon: '◌', hint: 'Ctrl+G', action: openGraph },
-    { label: 'Search notes', icon: '⌕', hint: 'Ctrl+K', action: () => $('search').focus() },
-    { label: 'Toggle preview/edit/split', icon: '◐', hint: 'Ctrl+/', action: () => setView(state.view === 'split' ? 'preview' : (state.view === 'preview' ? 'edit' : 'split')) },
-    { label: 'Insert image', icon: '▣', hint: 'Ctrl+I', action: openImageModal },
-    { label: 'Insert wikilink', icon: '↔', action: () => insertAtCursor('[[') },
-    { label: 'Toggle pin', icon: '★', action: togglePin },
-    { label: 'Cycle theme (auto/dark/light)', icon: '◑', hint: 'T', action: toggleTheme },
-    { label: 'Export current note (.md)', icon: '⤓', hint: 'Ctrl+E', action: () => { const n = state.currentNoteId ? state.notes.get(state.currentNoteId) : null; if (n) exportNoteAsMd(n); } },
-    { label: 'Export full bundle (.json)', icon: '⤓', action: exportBundle },
-    { label: 'Export every note as .md', icon: '⤓', action: exportEveryNoteMd },
-    { label: 'Import files…', icon: '⤒', action: () => $('importFile').click() },
-    { label: 'Import folder…', icon: '⤒', action: () => $('importFolder').click() },
-    { label: 'Delete current note', icon: '✕', action: deleteCurrentNote },
+    { label: 'New note', icon: 'plus', hint: 'Ctrl+N', action: () => newNote(currentFolderForNew()) },
+    { label: 'New folder', icon: 'folder-plus', action: () => newFolder(null) },
+    { label: 'Quick switcher (jump to note)', icon: 'file', hint: 'Ctrl+O', action: () => openPalette('notes') },
+    { label: 'Open graph view', icon: 'network', hint: 'Ctrl+G', action: openGraph },
+    { label: 'Search notes', icon: 'search', hint: 'Ctrl+K', action: () => $('search').focus() },
+    { label: 'Toggle preview/edit/split', icon: 'eye', hint: 'Ctrl+/', action: () => setView(state.view === 'split' ? 'preview' : (state.view === 'preview' ? 'edit' : 'split')) },
+    { label: 'Insert image', icon: 'image', hint: 'Ctrl+I', action: openImageModal },
+    { label: 'Insert wikilink', icon: 'link', action: () => insertAtCursor('[[') },
+    { label: 'Toggle pin', icon: 'pin', action: togglePin },
+    { label: 'Cycle theme (auto/dark/light)', icon: 'moon', hint: 'T', action: toggleTheme },
+    { label: 'Export as folder ZIP', icon: 'download', action: exportAsZip },
+    { label: 'Export current note (.md)', icon: 'download', hint: 'Ctrl+E', action: () => { const n = state.currentNoteId ? state.notes.get(state.currentNoteId) : null; if (n) exportNoteAsMd(n); } },
+    { label: 'Export full bundle (.json)', icon: 'download', action: exportBundle },
+    { label: 'Export every note as .md', icon: 'download', action: exportEveryNoteMd },
+    { label: 'Import files (md/json/zip)…', icon: 'upload', action: () => $('importFile').click() },
+    { label: 'Import folder…', icon: 'upload', action: () => $('importFolder').click() },
+    { label: 'Delete current note', icon: 'trash', action: deleteCurrentNote },
   ];
 }
 
@@ -2259,7 +3054,9 @@ function resizeGraphCanvas() {
 }
 function setupGraphInteractions() {
   const c = $('graphCanvas');
+  let pressMx = 0, pressMy = 0, moved = 0; // for click-vs-drag detection
   c.addEventListener('mousedown', (e) => {
+    pressMx = e.clientX; pressMy = e.clientY; moved = 0;
     const pos = canvasCoords(e);
     const hit = nodeAt(pos.x, pos.y);
     if (hit) {
@@ -2275,6 +3072,7 @@ function setupGraphInteractions() {
   });
   window.addEventListener('mousemove', (e) => {
     if (!graph.canvas || graph.canvas.parentElement.parentElement.hidden) return;
+    moved = Math.max(moved, Math.hypot(e.clientX - pressMx, e.clientY - pressMy));
     if (graph.dragNode) {
       const pos = canvasCoords(e);
       graph.dragNode.x = pos.x - graph.dragMx;
@@ -2296,6 +3094,7 @@ function setupGraphInteractions() {
     if (graph.canvas) graph.canvas.classList.remove('dragging');
   });
   c.addEventListener('click', (e) => {
+    if (moved > 5) return;            // user dragged, not clicked
     if (graph.panning) return;
     const pos = canvasCoords(e);
     const hit = nodeAt(pos.x, pos.y);
@@ -2360,12 +3159,16 @@ async function init() {
   rebuildWikilinkIndex();
   buildCommandList();
   setupGraphInteractions();
+  setupWikilinkHover();
 
   renderTree();
 
-  // Open most recent note, or create a welcome one
-  const recent = [...state.notes.values()].sort((a, b) => b.updated - a.updated)[0];
-  if (recent) openNote(recent.id);
+  // Restore the last opened note; fall back to most recently updated,
+  // and finally create a welcome note if the vault is empty.
+  const lastId = await store.settings.get('lastNoteId', null);
+  let toOpen = lastId && state.notes.has(lastId) ? state.notes.get(lastId) : null;
+  if (!toOpen) toOpen = [...state.notes.values()].sort((a, b) => b.updated - a.updated)[0];
+  if (toOpen) openNote(toOpen.id);
   else createWelcomeNote();
 
   bindEvents();
@@ -2389,7 +3192,7 @@ async function createWelcomeNote() {
 
 ## Features at a glance
 
-- Markdown editing with **live styled preview** on the right — and the preview is **editable too** (great on mobile)
+- Markdown editor on the left with **live styled preview** on the right (read-only — formatting is done in the editor)
 - **[[Wikilinks]]** between notes — type \`[[\` to get autocomplete; click a missing link to create that note
 - **Backlinks panel** below every note shows who references it
 - **Interactive graph view** — see your knowledge network (Ctrl+G)
@@ -2397,7 +3200,8 @@ async function createWelcomeNote() {
 - Select text → **floating formatting toolbar** (bold · italic · headings · list · quote · link)
 - Drop, paste or upload **images** — choose Base64 or library **references** · live compression preview
 - **Folders** with sub-folders, **#tags**, pin, search, full offline use
-- Drop a whole **folder tree** onto the window to import — structure is preserved
+- **Cross-device sync via export**: a single \`.zip\` mirrors your folder tree on disk. Drop it on any other device to restore the same setup
+- Also imports loose \`.md\` files or whole **folders** with sub-folders preserved
 - **Auto theme** follows your system
 
 > Try pasting an image from your clipboard right now (\`Ctrl+V\`).
@@ -2416,13 +3220,34 @@ async function createWelcomeNote() {
 | Export current note | \`Ctrl+E\` |
 | Toggle preview | \`Ctrl+/\` |
 
-### Try wikilinks
+### Try wikilinks (hover them!)
 
-This note links to [[Welcome to YANTA]] (itself) and to a non-existent note: [[My next idea]] — click it to create the note.
+This note links to [[Welcome to YANTA]] (itself) and to a non-existent note: [[My next idea]] — click missing ones to create them.
+
+### Admonitions / callouts
+
+> [!NOTE]
+> Type \`> [!NOTE]\` (or \`tip\`, \`warning\`, \`info\`, \`important\`, \`caution\`) followed by indented \`>\` lines to get a coloured callout block.
+
+> [!TIP]
+> Wrap inline text with \`==text==\` for ==highlight==. Use \`$E=mc^2$\` for inline math and \`$$...$$\` for display math.
+
+> [!WARNING]
+> Embedded videos (YouTube / Vimeo) work too — just write \`![](https://www.youtube.com/watch?v=…)\` on its own line.
+
+### Footnotes & citations
+
+A scientific paper[^1] often uses DOI links like doi:10.1038/nature12373 — both are clickable.
+
+[^1]: This is a footnote. Drop \`[^1]\` anywhere and define it with \`[^1]: text\`.
+
+### Transclusion
+
+Embed another note's content with \`![[Note Title]]\` or a section with \`![[Note#Heading]]\`. Updates live as the source note changes.
 
 ### Inline formatting examples
 
-- **bold**, *italic*, ***bold italic***, ~~strike~~, \`code\`
+- **bold**, *italic*, ***bold italic***, ~~strike~~, ==highlight==, \`code\`
 - A [link](https://example.com) and a #tag
 - Task lists:
   - [x] Set up storage
@@ -2476,7 +3301,7 @@ function bindEvents() {
     e.stopPropagation();
     const r = e.currentTarget.getBoundingClientRect();
     showMenu(r.left, r.bottom + 4, [
-      { label: 'Import files (.md / .json)…', action: () => $('importFile').click() },
+      { label: 'Import files (.md / .json / .zip)…', action: () => $('importFile').click() },
       { label: 'Import folder (with sub-folders)…', action: () => $('importFolder').click() },
       'hr',
       { label: 'Or drop files/folders anywhere on the window', action: () => toast('Drop files or a folder onto YANTA') },
@@ -2690,6 +3515,29 @@ function handleEditorKey(e) {
     insertAtCursor('  ');
     return;
   }
+  // Backspace/Delete on an image line deletes the whole image line
+  // atomically — otherwise the user is left with the huge Base64 source.
+  if (e.key === 'Backspace' || e.key === 'Delete') {
+    const pos = getCursorPos();
+    if (pos) {
+      const blocks = [...editor.children];
+      const lineDiv = blocks[pos.lineIndex];
+      if (lineDiv && lineDiv.dataset.type === 'image') {
+        e.preventDefault();
+        pushUndo();
+        const lines = lastMarkdown.split('\n');
+        lines.splice(pos.lineIndex, 1);
+        lastMarkdown = lines.join('\n');
+        renderEditor(lastMarkdown);
+        const newIdx = Math.min(pos.lineIndex, lastMarkdown.split('\n').length - 1);
+        const endOff = (lastMarkdown.split('\n')[newIdx] || '').length;
+        setCursorPos({ lineIndex: newIdx, offset: e.key === 'Backspace' ? endOff : 0 });
+        schedulePreview();
+        markDirty(); scheduleSave();
+        return;
+      }
+    }
+  }
   if (e.key !== 'Enter') return;
   // Always intercept Enter so our line-per-div structure stays intact
   e.preventDefault();
@@ -2724,7 +3572,7 @@ function replaceCurrentLine(text) {
   renderEditor(lastMarkdown);
   // move cursor to end of replaced line
   setCursorPos({ lineIndex: pos.lineIndex, offset: text.length });
-  schedulePreview(lastMarkdown);
+  schedulePreview();
   markDirty();
   scheduleSave();
 }
@@ -2796,7 +3644,7 @@ function handleEditorClick(e) {
         lines[idx] = lines[idx].replace(/!\[[^\]]*\]\([^)]+\)/, '');
         lastMarkdown = lines.join('\n');
         renderEditor(lastMarkdown);
-        schedulePreview(lastMarkdown);
+        schedulePreview();
         markDirty(); scheduleSave();
       } },
     ]);
@@ -2805,6 +3653,20 @@ function handleEditorClick(e) {
 
 function handleGlobalKey(e) {
   const meta = e.ctrlKey || e.metaKey;
+  // Custom undo for structural operations (image insert/delete etc.) —
+  // only intercept when our stack actually has a snapshot for the
+  // current note; otherwise let the browser's native contenteditable
+  // undo handle plain typing.
+  if (meta && !e.shiftKey && e.key === 'z') {
+    if (undoStack.length && undoStack[undoStack.length - 1].id === state.currentNoteId) {
+      e.preventDefault(); performUndo(); return;
+    }
+  }
+  if (meta && ((e.shiftKey && e.key === 'Z') || e.key === 'y')) {
+    if (redoStack.length && redoStack[redoStack.length - 1].id === state.currentNoteId) {
+      e.preventDefault(); performRedo(); return;
+    }
+  }
   if (meta && e.key === 'n') { e.preventDefault(); newNote(currentFolderForNew()); }
   else if (meta && e.key === 'k') { e.preventDefault(); $('search').focus(); }
   else if (meta && e.key === 's') { e.preventDefault(); saveCurrentNote(); toast('Saved', 'success'); }
@@ -2879,13 +3741,14 @@ function setupGlobalDropImport() {
       return;
     }
     const importable = files.filter((f) =>
-      /\.(md|markdown|txt|json)$/i.test(f.name) ||
-      f.type === 'application/json' || f.type === 'text/markdown' || f.type === 'text/plain'
+      /\.(md|markdown|txt|json|zip)$/i.test(f.name) ||
+      f.type === 'application/json' || f.type === 'application/zip' ||
+      f.type === 'text/markdown' || f.type === 'text/plain'
     );
     if (importable.length) {
       await importFiles(importable);
     } else {
-      toast('Drop .md, .markdown, .txt, or YANTA .json files', 'error');
+      toast('Drop .md, .markdown, .txt, .zip, or YANTA .json files', 'error');
     }
   });
 }

@@ -184,6 +184,11 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .tree-row.note > .label { color: inherit; }
 .tree-row .ic { width: 14px; height: 14px; color: var(--text-faint); flex: none; }
 .tree-row.active .ic { color: var(--accent); }
+.tree-row.drop-target, .tree-section-title.drop-target {
+  background: rgba(110,168,254,0.18);
+  outline: 1px dashed var(--accent);
+  outline-offset: -1px;
+}
 .tree-row .pin { color: var(--yellow); font-size: 10px; }
 .tree-row .menu-trigger {
   visibility: hidden; padding: 0 4px; color: var(--text-faint);
@@ -341,12 +346,26 @@ button, input, select, textarea { font: inherit; color: inherit; }
   border: 1px solid var(--border); font-size: 0.85em;
   user-select: none;
 }
-.ed-trunc::before { content: "📷 "; font-style: normal; }
+/* image chip — small inline marker (no emoji; Lucide image glyph below) */
+.ed-trunc::before {
+  content: "";
+  display: inline-block; width: 12px; height: 12px;
+  vertical-align: -2px; margin-right: 4px;
+  background-color: currentColor;
+  -webkit-mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='3' width='18' height='18' rx='2'/><circle cx='8.5' cy='8.5' r='1.5'/><path d='M21 15l-5-5L5 21'/></svg>") center/contain no-repeat;
+          mask: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'><rect x='3' y='3' width='18' height='18' rx='2'/><circle cx='8.5' cy='8.5' r='1.5'/><path d='M21 15l-5-5L5 21'/></svg>") center/contain no-repeat;
+}
 .ed-img-thumb {
   display: block; max-height: 220px; max-width: 100%;
   border-radius: var(--r-sm); border: 1px solid var(--border);
   margin: 4px 0; cursor: zoom-in;
 }
+.ed-img-caption {
+  display: block; margin-top: 2px;
+  font-size: 0.78em; color: var(--text-faint); font-family: var(--font-mono);
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+}
+.ed-line[data-type="image"] { padding-bottom: 4px; }
 .ed-line-pad {
   min-height: 30vh; cursor: text;
 }

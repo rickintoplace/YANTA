@@ -7,7 +7,9 @@ import { $, state, store, openDB, setTheme, toggleTheme, toast } from './core.js
 import { openNote, newNote, newFolder, saveCurrentNote, deleteCurrentNote, togglePin, createWelcomeNote, rebuildWikilinkIndex, setNavSuppress, addTag, createNoteWithTitle } from './notes.js';
 import { renderTree, renderTagCloud, showMenu, closeMenu, currentFolderForNew } from './tree.js';
 import { renderBacklinks, renderOutline, setupWikilinkHover, handleWikilinkClick, openPalette, closePalette, buildCommandList, paletteMove, paletteAccept, paletteFilter } from './features.js';
-import { openImageModal, closeImageModal, setupImage, pickImageFile, cleanupUnusedImages } from './image.js';
+import { openImageModal, closeImageModal, setupImage, pickImageFile, cleanupUnusedImages, insertImageAsRef } from './image.js';
+import { focusEditorEnd } from './editor.js';
+import { setupFormatToolbar } from './format-menu.js';
 import { exportAsZip, exportNoteAsMd, exportBundle, exportEveryNoteMd, openExportMenu, importFiles, importItems, walkEntry } from './io.js';
 import { syncRestore, syncConnect, syncDisconnect, syncFull, openSyncSetup, closeSyncSetup, syncMenu } from './sync.js';
 import { openGraph, closeGraph, setupGraphInteractions } from './graph.js';
@@ -39,6 +41,10 @@ async function init() {
   state.expandedFolders = new Set(expanded);
   setView(view);
 
+  // Preload all referenced image blobs into URLs so widgets in the
+  // editor + preview can render them synchronously after a cold reload.
+  for (const im of images) state.imageBlobs.set(im.id, URL.createObjectURL(im.blob));
+
   rebuildWikilinkIndex();
   buildCommandList({
     openImageModal, openGraph, exportAsZip, exportNoteAsMd, exportBundle, exportEveryNoteMd,
@@ -49,6 +55,7 @@ async function init() {
   setupGraphInteractions();
   setupWikilinkHover();
   setupImage();
+  setupFormatToolbar();
   await syncRestore();
   if (window.location.hash.startsWith('#share=')) {
     const id = await handleShareUrl();
@@ -189,6 +196,38 @@ function bindEvents() {
 
   // Drop import
   setupGlobalDropImport();
+
+  // Click anywhere in the editor pane that is BELOW the last line of
+  // text (or in the gutter) → focus the end of the document. CM6 only
+  // catches clicks inside .cm-content; the empty area below it is
+  // .cm-scroller (or paneEdit padding), which we route here.
+  $('paneEdit').addEventListener('mousedown', (e) => {
+    if (e.target.closest('.cm-content')) return;            // CM handles it
+    if (e.target.closest('.format-toolbar')) return;        // toolbar swallows clicks
+    if (e.target.closest('.cm-tooltip')) return;            // autocomplete tooltip
+    e.preventDefault();
+    focusEditorEnd();
+  });
+
+  // Paste image inside editor → open the image insert modal with the file.
+  window.addEventListener('yanta-paste-image', async (e) => {
+    openImageModal();
+    await pickImageFile(e.detail.file);
+  });
+
+  // Files dropped directly on the editor:
+  //   - single image  → insert directly as a library ref (no modal)
+  //   - .md/.json/.zip → import as note(s)
+  window.addEventListener('yanta-editor-drop-files', async (e) => {
+    const { files } = e.detail;
+    for (const f of files) {
+      if (f.type.startsWith('image/')) {
+        await insertImageAsRef(f);
+      } else if (/\.(md|markdown|txt|json|zip)$/i.test(f.name)) {
+        await importFiles([f]);
+      }
+    }
+  });
 
   // Slash → image insert event from editor
   window.addEventListener('yanta-open-image-modal', () => openImageModal());

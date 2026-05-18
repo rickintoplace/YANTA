@@ -178,6 +178,8 @@ const tagPlugin = ViewPlugin.fromClass(class {
 
 // ============================================================
 // Inline image preview widget — rendered below image-only lines.
+// Resolves yanta-img:// references; if the blob isn't loaded yet,
+// pulls it from IndexedDB and re-decorates the line.
 // ============================================================
 class ImageWidget extends WidgetType {
   constructor(url, alt) { super(); this.url = url; this.alt = alt; }
@@ -186,8 +188,14 @@ class ImageWidget extends WidgetType {
     const img = document.createElement('img');
     img.className = 'yanta-img-thumb';
     img.alt = this.alt;
-    img.src = resolveImageForWidget(this.url) || '';
     img.draggable = false;
+    const resolved = resolveImageForWidget(this.url);
+    if (resolved) {
+      img.src = resolved;
+    } else if (this.url.startsWith('yanta-img://')) {
+      const id = this.url.slice('yanta-img://'.length);
+      ensureImageBlob(id).then((u) => { if (u) img.src = u; });
+    }
     return img;
   }
 }
@@ -197,6 +205,15 @@ function resolveImageForWidget(url) {
     return state.imageBlobs.get(id) || '';
   }
   return url;
+}
+async function ensureImageBlob(id) {
+  if (state.imageBlobs.has(id)) return state.imageBlobs.get(id);
+  const { store } = await import('./core.js');
+  const rec = await store.images.get(id);
+  if (!rec || !rec.blob) return null;
+  const u = URL.createObjectURL(rec.blob);
+  state.imageBlobs.set(id, u);
+  return u;
 }
 const imagePreviewField = StateField.define({
   create(s) { return buildImageDecos(s); },
@@ -208,12 +225,61 @@ function buildImageDecos(s) {
   for (let p = 0; p < s.doc.length;) {
     const line = s.doc.lineAt(p);
     const m = /^!\[([^\]]*)\]\(([^)\s]+)\)\s*$/.exec(line.text);
-    if (m) {
+    if (m && !videoEmbedUrl(m[2])) {
       b.add(line.to, line.to, Decoration.widget({
         widget: new ImageWidget(m[2], m[1]),
         side: 1,
         block: true,
       }));
+    }
+    p = line.to + 1;
+  }
+  return b.finish();
+}
+
+// ============================================================
+// Inline YouTube / Vimeo video preview widget.
+// Matches image-syntax lines whose URL is a recognised video host.
+// ============================================================
+function videoEmbedUrl(url) {
+  let m;
+  if ((m = /(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{6,})/.exec(url))) return `https://www.youtube-nocookie.com/embed/${m[1]}`;
+  if ((m = /youtube\.com\/embed\/([a-zA-Z0-9_-]{6,})/.exec(url))) return `https://www.youtube-nocookie.com/embed/${m[1]}`;
+  if ((m = /vimeo\.com\/(\d+)/.exec(url))) return `https://player.vimeo.com/video/${m[1]}`;
+  return null;
+}
+class VideoWidget extends WidgetType {
+  constructor(embed) { super(); this.embed = embed; }
+  eq(o) { return o.embed === this.embed; }
+  toDOM() {
+    const wrap = document.createElement('div');
+    wrap.className = 'yanta-video-embed';
+    const f = document.createElement('iframe');
+    f.src = this.embed;
+    f.setAttribute('allowfullscreen', '');
+    f.setAttribute('frameborder', '0');
+    f.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture');
+    wrap.append(f);
+    return wrap;
+  }
+}
+const videoPreviewField = StateField.define({
+  create(s) { return buildVideoDecos(s); },
+  update(d, tr) { return tr.docChanged ? buildVideoDecos(tr.state) : d; },
+  provide: (f) => EditorView.decorations.from(f),
+});
+function buildVideoDecos(s) {
+  const b = new RangeSetBuilder();
+  for (let p = 0; p < s.doc.length;) {
+    const line = s.doc.lineAt(p);
+    const m = /^!?\[[^\]]*\]\(([^)\s]+)\)\s*$/.exec(line.text);
+    if (m) {
+      const embed = videoEmbedUrl(m[1]);
+      if (embed) {
+        b.add(line.to, line.to, Decoration.widget({
+          widget: new VideoWidget(embed), side: 1, block: true,
+        }));
+      }
     }
     p = line.to + 1;
   }
@@ -332,6 +398,88 @@ function wikilinkClickHandler() {
 }
 
 // ============================================================
+// Paste handler — if the clipboard holds an image, open the image
+// modal pre-loaded with that file; otherwise let CM handle the paste.
+// ============================================================
+function pasteHandler() {
+  return EditorView.domEventHandlers({
+    paste(e) {
+      const items = e.clipboardData?.items || [];
+      for (const it of items) {
+        if (it.type && it.type.startsWith('image/')) {
+          e.preventDefault();
+          const file = it.getAsFile();
+          if (file) window.dispatchEvent(new CustomEvent('yanta-paste-image', { detail: { file } }));
+          return true;
+        }
+      }
+      return false;
+    },
+  });
+}
+
+// ============================================================
+// Drop handler — if a YANTA note is dropped, insert as wikilink.
+// If a URL is dropped, insert as markdown link (or image-embed).
+// If a file is dropped, route it (image → image modal; .md → import).
+// ============================================================
+function dropHandler() {
+  return EditorView.domEventHandlers({
+    dragover(e) {
+      const types = [...(e.dataTransfer.types || [])];
+      if (types.includes('text/yanta-note') || types.includes('Files') ||
+          types.includes('text/uri-list') || types.includes('text/x-moz-url') ||
+          types.includes('text/plain')) {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'copy';
+        return true;
+      }
+      return false;
+    },
+    drop(e, view) {
+      const types = [...(e.dataTransfer.types || [])];
+      // Find caret position for the drop.
+      const pos = view.posAtCoords({ x: e.clientX, y: e.clientY }) ?? view.state.doc.length;
+      // A YANTA note drag → insert [[Title]] at drop position.
+      const noteId = e.dataTransfer.getData('text/yanta-note');
+      if (noteId) {
+        e.preventDefault();
+        const title = e.dataTransfer.getData('text/plain') || 'Note';
+        const insert = `[[${title}]]`;
+        view.dispatch({ changes: { from: pos, to: pos, insert }, selection: { anchor: pos + insert.length } });
+        return true;
+      }
+      // Files: route via custom event so main.js can handle (image vs md).
+      const files = [...(e.dataTransfer.files || [])];
+      if (files.length) {
+        e.preventDefault();
+        window.dispatchEvent(new CustomEvent('yanta-editor-drop-files', { detail: { files, pos } }));
+        return true;
+      }
+      // URL drop (text/uri-list or text/plain that looks like a URL).
+      let url = e.dataTransfer.getData('text/uri-list') || '';
+      url = url.split('\n').find((l) => l && !l.startsWith('#')) || '';
+      if (!url) {
+        const text = e.dataTransfer.getData('text/plain') || '';
+        if (/^https?:\/\/\S+$/.test(text.trim())) url = text.trim();
+      }
+      if (url) {
+        e.preventDefault();
+        const isImage = /\.(png|jpe?g|gif|webp|svg|avif)(\?|#|$)/i.test(url);
+        const isVideo = /(?:youtube\.com\/watch|youtu\.be\/|vimeo\.com\/\d+)/.test(url);
+        const title = e.dataTransfer.getData('text/x-moz-url-title') || url;
+        const insert = isImage ? `![${title}](${url})`
+                     : isVideo ? `![](${url})`
+                     : `[${title}](${url})`;
+        view.dispatch({ changes: { from: pos, to: pos, insert }, selection: { anchor: pos + insert.length } });
+        return true;
+      }
+      return false;
+    },
+  });
+}
+
+// ============================================================
 // Public API — mount / swap / destroy editor.
 // ============================================================
 export function mountEditor(host, { noteId, awarenessUser }) {
@@ -362,7 +510,15 @@ export function mountEditor(host, { noteId, awarenessUser }) {
     tagPlugin,
     taskCheckboxField,
     imagePreviewField,
+    videoPreviewField,
     wikilinkClickHandler(),
+    pasteHandler(),
+    dropHandler(),
+    EditorView.updateListener.of((u) => {
+      if (u.selectionSet || u.focusChanged) {
+        window.dispatchEvent(new CustomEvent('yanta-selection-change'));
+      }
+    }),
     keymap.of([
       ...defaultKeymap,
       ...historyKeymap,
@@ -395,6 +551,22 @@ export function destroyEditor() {
 }
 
 export function focusEditor() { view?.focus(); }
+
+export function focusEditorEnd() {
+  if (!view) return;
+  view.focus();
+  const len = view.state.doc.length;
+  view.dispatch({ selection: { anchor: len }, scrollIntoView: true });
+}
+
+// Force CodeMirror to re-render image/video decorations (called after
+// an async image blob load completes so the widget can swap in the URL).
+export function refreshWidgets() {
+  if (!view) return;
+  // Trigger a no-op dispatch so StateFields recompute (they only rebuild
+  // on docChanged, so we nudge by an empty changes object).
+  view.requestMeasure();
+}
 
 export function insertAtCursor(text) {
   if (!view) return;

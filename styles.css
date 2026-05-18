@@ -919,11 +919,18 @@ button.link { background: 0; border: 0; color: var(--accent); cursor: pointer; p
    CodeMirror 6 + Yjs collab styles (override the legacy
    contenteditable rules above for the new editor container).
    ============================================================ */
-.editor { padding: 0; max-width: none; }
+.editor { padding: 0; max-width: none; height: 100%; }
 .cm-editor { height: 100%; }
 .cm-editor.cm-focused { outline: none !important; }
-.cm-scroller { font-family: var(--font, system-ui) !important; }
-.cm-content { max-width: 760px; margin: 0 auto; }
+.cm-scroller { font-family: var(--font, system-ui) !important; min-height: 100%; }
+.cm-content {
+  max-width: 760px; margin: 0 auto;
+  /* Leaves visible empty space below the last line and lets a click in
+     that space land on cm-content → CM puts cursor at end of last line.
+     This is the "click anywhere below and start typing" UX. */
+  min-height: 100%;
+  padding-bottom: 40vh !important;
+}
 .cm-tooltip-autocomplete { z-index: 60; }
 .cm-tooltip-autocomplete > ul { max-height: 260px; }
 
@@ -1029,3 +1036,83 @@ button.link { background: 0; border: 0; color: var(--accent); cursor: pointer; p
 .lib-card:hover { border-color: var(--accent); }
 .lib-card img { width: 100%; height: 80px; object-fit: cover; border-radius: 4px; }
 .lib-card .lib-meta { font-size: 11px; color: var(--text-dim); margin-top: 4px; }
+
+/* ============================================================
+   Format toolbar — floating, theme-aware, action chip style.
+   ============================================================ */
+.format-toolbar {
+  position: fixed;
+  z-index: 80;
+  display: flex;
+  gap: 2px;
+  padding: 4px;
+  background: var(--bg-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+  align-items: center;
+  font-family: var(--font);
+}
+.format-toolbar button {
+  background: transparent; border: 0;
+  padding: 4px 8px; min-width: 28px;
+  color: var(--text);
+  font-size: 12px; font-weight: 600;
+  border-radius: 4px; cursor: pointer;
+  line-height: 1.1;
+}
+.format-toolbar button:hover { background: var(--bg-elev-2); }
+.format-toolbar .sep {
+  width: 1px; height: 16px;
+  background: var(--border);
+  margin: 0 2px;
+}
+
+/* ============================================================
+   Inline video embed inside the editor.
+   ============================================================ */
+.yanta-video-embed {
+  position: relative;
+  width: min(560px, 100%);
+  aspect-ratio: 16 / 9;
+  margin: 6px 0;
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 0 0 1px var(--border);
+}
+.yanta-video-embed iframe { width: 100%; height: 100%; border: 0; }
+
+/* ============================================================
+   Theme-aware checkboxes — pick up the accent in both light + dark.
+   ============================================================ */
+.yanta-task-checkbox,
+.preview input[type=checkbox],
+.task input[type=checkbox] {
+  accent-color: var(--accent);
+}
+
+/* Tree-row drop target highlight (already styled in old CSS, here for
+   completeness when noteRow gets a drop-target class). */
+.tree-row.drop-target {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  background: var(--bg-elev-2);
+}
+
+/* ============================================================
+   Editor styling polish — make markdown look great in the editor
+   pane so it visually mirrors the preview.
+   ============================================================ */
+.cm-editor .tok-heading { letter-spacing: -0.01em; }
+.cm-editor .cm-line {
+  padding-top: 1px; padding-bottom: 1px;
+}
+/* Code blocks: a subtle background + monospace look. */
+.cm-editor .tok-monospace { color: var(--text-dim); }
+.cm-editor .cm-line:has(.tok-monospace) { background: var(--bg-elev); }
+/* Quote: bar on the left. */
+.cm-editor .cm-line:has(.tok-quote) {
+  box-shadow: inset 3px 0 var(--accent);
+  padding-left: 14px;
+  color: var(--text-dim);
+}

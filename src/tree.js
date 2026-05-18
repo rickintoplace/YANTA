@@ -146,7 +146,34 @@ function noteRow(n, depth = 0) {
     draggable: 'true',
     onclick: () => openNote(n.id),
     oncontextmenu: (e) => { e.preventDefault(); noteMenu(e, n); },
-    ondragstart: (e) => { e.dataTransfer.setData('text/yanta-note', n.id); },
+    ondragstart: (e) => {
+      // text/yanta-note enables intra-app folder moves & wikilink-on-drop;
+      // text/plain so a drop onto a foreign target still gets the title.
+      e.dataTransfer.setData('text/yanta-note', n.id);
+      e.dataTransfer.setData('text/plain', n.title || 'Untitled');
+      e.dataTransfer.effectAllowed = 'copyMove';
+    },
+    ondragover: (e) => {
+      const types = [...(e.dataTransfer.types || [])];
+      if (!types.includes('text/yanta-note')) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      row.classList.add('drop-target');
+    },
+    ondragleave: () => row.classList.remove('drop-target'),
+    ondrop: async (e) => {
+      row.classList.remove('drop-target');
+      const draggedId = e.dataTransfer.getData('text/yanta-note');
+      if (!draggedId || draggedId === n.id) return;
+      e.preventDefault();
+      // Dropping a note onto another note → move it into that note's folder.
+      const dropped = state.notes.get(draggedId);
+      if (!dropped) return;
+      dropped.folderId = n.folderId;
+      dropped.updated = Date.now();
+      await store.notes.put(dropped);
+      renderTree();
+    },
   });
   row.append(svgIcon(n.type === 'list' ? 'list' : 'doc'));
   row.append(el('span', { class: 'label' }, n.title || 'Untitled'));

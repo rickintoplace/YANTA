@@ -2,8 +2,8 @@
 // YANTA — Live-sync providers.
 //
 // A provider wires a note's Y.Doc to one or more peers over a transport.
-// Today: WebRTC (public signaling, E2EE via password).
-// Stubbed: WebSocket (y-websocket), Matrix (matrix-crdt).
+//   - WebRTC: peer-to-peer, public signaling, E2EE via room password.
+//   - WebSocket: optional self-hosted y-websocket relay.
 //
 // Provider interface:
 //   { connect(): Promise<void>, disconnect(): void, on(event, cb), awareness }
@@ -51,19 +51,6 @@ export function createWebSocketProvider({ noteId, room, url, password }) {
     provider: null,
     awareness: null,
     async connect() { throw new Error('WebSocket provider not yet wired — set a server URL first'); },
-    disconnect() {},
-    on() {}, off() {},
-    peers: [],
-  };
-}
-
-// Stub: Matrix-CRDT provider. Same shape, not yet implemented.
-export function createMatrixProvider({ noteId, room, homeserver, accessToken }) {
-  return {
-    kind: 'matrix',
-    provider: null,
-    awareness: null,
-    async connect() { throw new Error('Matrix provider not yet wired'); },
     disconnect() {},
     on() {}, off() {},
     peers: [],

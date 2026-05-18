@@ -67,6 +67,37 @@ function setTab(name) {
   if (name === 'library') renderLibrary();
 }
 
+// Drop-in helper: take a raw image File, compress it lightly and
+// insert as a library reference at the current cursor position.
+// Used by drag-drop directly onto the editor (no modal).
+export async function insertImageAsRef(file) {
+  if (!file || !file.type.startsWith('image/')) return;
+  let blob = file;
+  let dims = { w: 0, h: 0 };
+  if (file.type !== 'image/svg+xml') {
+    try {
+      const bmp = await createImageBitmap(file);
+      const ratio = Math.min(1, 1600 / bmp.width);
+      const w = Math.round(bmp.width * ratio);
+      const h = Math.round(bmp.height * ratio);
+      const c = document.createElement('canvas');
+      c.width = w; c.height = h;
+      c.getContext('2d').drawImage(bmp, 0, 0, w, h);
+      blob = await new Promise((r) => c.toBlob(r, 'image/webp', 0.85));
+      dims = { w, h };
+    } catch { blob = file; }
+  }
+  const id = uid();
+  const meta = { id, name: file.name || (id + '.img'), size: blob.size, type: blob.type, ts: Date.now() };
+  await store.images.put({ ...meta, blob });
+  state.imagesMeta.set(id, meta);
+  state.imageBlobs.set(id, URL.createObjectURL(blob));
+  const altBase = (file.name || 'image').replace(/\.[^.]+$/, '');
+  insertAtCursor(`\n![${altBase}](yanta-img://${id})\n`);
+  updateStorageMeter();
+  toast('Image inserted', 'success');
+}
+
 export async function pickImageFile(file) {
   if (!file || !file.type.startsWith('image/')) { toast('Not an image', 'error'); return; }
   imgWorkingBlob = file;

@@ -168,13 +168,14 @@
                 <input id="maxW" type="range" min="200" max="3200" step="100" value="1600" />
               </label>
               <label class="switch">
-                <input type="checkbox" id="asReference" />
-                <span>Save as library reference (smaller note file)</span>
+                <input type="checkbox" id="asReference" checked />
+                <span>Save as library reference <em style="color:var(--text-faint);font-style:normal">(recommended — sync-friendly)</em></span>
               </label>
               <label class="switch">
-                <input type="checkbox" id="asBase64" checked />
+                <input type="checkbox" id="asBase64" />
                 <span>Embed as Base64 in markdown</span>
               </label>
+              <div id="base64Warning" class="base64-warn" hidden></div>
             </div>
           </div>
           <div class="compress-actions">
@@ -248,6 +249,49 @@
   </div>
 </div>
 
+<!-- Sync setup wizard -->
+<div class="modal" id="syncSetupModal" hidden>
+  <div class="modal-card" style="width:min(560px,92vw)">
+    <header class="modal-head">
+      <h3>Set up sync</h3>
+      <button class="icon-btn" data-sync-close>&times;</button>
+    </header>
+    <div class="modal-body">
+      <p style="margin-bottom:12px">YANTA keeps your notes in a folder of your choice as plain <code>.md</code> files. Pick that folder once, then use any sync tool you already trust.</p>
+      <div class="sync-recommend">
+        <div class="sync-rec-head">Recommended: Syncthing</div>
+        <div class="sync-rec-body">Free · open-source · end-to-end encrypted · peer-to-peer · no cloud account.</div>
+      </div>
+      <ol class="sync-steps">
+        <li><strong>Install Syncthing</strong> on this device and any device you want to sync with. <a href="https://syncthing.net" target="_blank" rel="noopener">syncthing.net</a></li>
+        <li><strong>Add a folder</strong> in Syncthing — anywhere you like (e.g. <code>~/Documents/YANTA</code>) — and share it between your devices.</li>
+        <li><strong>Pick that same folder</strong> below. Repeat on each device.</li>
+      </ol>
+      <div class="sync-altmodes" style="margin-top:14px;font-size:12px;color:var(--text-dim)">
+        Other things that work just as well: Dropbox, iCloud Drive, Google Drive, an SMB share, a USB stick — anything that keeps the folder in sync.
+      </div>
+      <div class="compress-actions" style="margin-top:18px">
+        <button class="btn" data-sync-close>Maybe later</button>
+        <button class="btn primary" id="syncSetupPick">Pick folder</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Sync conflict resolution modal -->
+<div class="modal" id="conflictModal" hidden>
+  <div class="modal-card" style="width:min(720px,92vw);max-height:80vh">
+    <header class="modal-head">
+      <h3>Sync conflicts</h3>
+      <button class="icon-btn" data-conflict-close>&times;</button>
+    </header>
+    <div class="modal-body">
+      <p style="margin-bottom:14px;font-size:13px;color:var(--text-dim)">Your sync tool detected the same note edited on two devices simultaneously. Resolve each one:</p>
+      <div id="conflictList"></div>
+    </div>
+  </div>
+</div>
+
 <!-- Toast -->
 <div class="toast" id="toast" hidden></div>
 
@@ -276,7 +320,7 @@
 <script src="src/08-io.js"></script>
 <script src="src/09-features.js"></script>
 <script src="src/10-graph.js"></script>
-<script src="src/11-vault.js"></script>
+<script src="src/11-sync.js"></script>
 <script src="src/12-main.js"></script>
 </body>
 </html>

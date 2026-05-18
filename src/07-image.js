@@ -82,6 +82,18 @@ async function recompress() {
     `<span>${bmp.width}×${bmp.height} → <strong>${w}×${h}</strong></span>
      <span>${fmtBytes(orig)} → <strong>${fmtBytes(out)}</strong></span>
      <span class="${cls}">${pct >= 0 ? '−' : '+'}${Math.abs(pct).toFixed(1)}%</span>`;
+  updateBase64Warning(out);
+}
+
+function updateBase64Warning(size) {
+  const w = $('base64Warning'); if (!w) return;
+  if (!$('asBase64').checked) { w.hidden = true; return; }
+  if (size > 200 * 1024) {
+    w.hidden = false;
+    w.textContent = `Embedding ${fmtBytes(size)} as Base64 will bloat your .md file by ~${fmtBytes(size * 1.37 | 0)} and slow Syncthing / Git diffs. Library reference recommended.`;
+  } else {
+    w.hidden = true;
+  }
 }
 
 function blobToDataURL(blob) {
@@ -97,6 +109,24 @@ async function insertCompressedImage() {
   if (!imgCompressedBlob) { toast('Pick an image first', 'error'); return; }
   const asRef = $('asReference').checked;
   const asBase64 = $('asBase64').checked;
+  const size = imgCompressedBlob.size;
+  // Discourage Base64 for anything substantial — it bloats the .md
+  // and makes sync diffs ugly. Confirm above 200 KB, hard-block above 5 MB.
+  if (asBase64 && !asRef) {
+    if (size > 5 * 1024 * 1024) {
+      toast(`Base64 too large (${fmtBytes(size)}). Use library reference.`, 'error');
+      return;
+    }
+    if (size > 200 * 1024) {
+      if (!confirm(`Embedding ${fmtBytes(size)} as Base64 will bloat this note and slow sync. Use the library reference instead?\n\nOK = switch to library, Cancel = continue with Base64`)) {
+        // user cancelled the suggestion → continue with base64
+      } else {
+        $('asReference').checked = true;
+        $('asBase64').checked = false;
+        return insertCompressedImage();
+      }
+    }
+  }
   let md;
   if (asRef) {
     const id = uid();

@@ -109,8 +109,8 @@ async function saveCurrentNote() {
   note.body = newBody;
   note.updated = Date.now();
   await store.notes.put(note);
-  // Mirror to the connected vault folder, if any
-  if (typeof vaultWriteNote === 'function') vaultWriteNote(note);
+  // Mirror to the linked sync folder, if any
+  if (typeof syncWriteNote === 'function') syncWriteNote(note);
   if (titleChanged) {
     rebuildWikilinkIndex();
     schedulePreview();
@@ -125,6 +125,7 @@ async function deleteCurrentNote() {
   if (!confirm(`Delete "${note.title}"? This cannot be undone.`)) return;
   await store.notes.del(note.id);
   state.notes.delete(note.id);
+  if (typeof syncDeleteNoteFile === 'function') syncDeleteNoteFile(note);
   rebuildWikilinkIndex();
   state.currentNoteId = null;
   // pick another note

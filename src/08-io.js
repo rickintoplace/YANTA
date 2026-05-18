@@ -21,7 +21,8 @@ function downloadBlob(blob, filename) {
 }
 
 function noteToFrontmatter(n) {
-  const meta = {};
+  // ALWAYS include the stable id so files round-trip across devices.
+  const meta = { id: n.id };
   if (n.tags?.length) meta.tags = n.tags;
   if (n.pinned) meta.pinned = true;
   if (n.folderId) {
@@ -30,7 +31,6 @@ function noteToFrontmatter(n) {
   }
   meta.created = new Date(n.created).toISOString();
   meta.updated = new Date(n.updated).toISOString();
-  if (Object.keys(meta).length === 0) return '';
   const lines = ['---'];
   for (const [k, v] of Object.entries(meta)) {
     if (Array.isArray(v)) lines.push(`${k}: [${v.map((x) => JSON.stringify(x)).join(', ')}]`);
@@ -180,21 +180,41 @@ async function importItems(items) {
       } else if (/\.(md|markdown|txt)$/i.test(file.name)) {
         const text = await file.text();
         const { meta, body } = parseFrontmatter(text);
+        // Resolve _images/<id>.<ext> references back to internal yanta-img:// IDs
+        const resolvedBody = body.replace(/(?:\.\.\/)*_images\/([a-z0-9]+)(?:\.[a-z0-9]+)?/gi, (_, id) => 'yanta-img://' + id);
         let folderId = await ensureFolderPath(pathArr);
         if (!folderId && meta.folder) folderId = await ensureFolderPath([meta.folder]);
         const title = file.name.replace(/\.(md|markdown|txt)$/i, '');
-        const note = {
-          id: uid(),
-          title,
-          body,
-          folderId,
-          tags: Array.isArray(meta.tags) ? meta.tags : [],
-          pinned: !!meta.pinned,
-          created: meta.created ? Date.parse(meta.created) || Date.now() : Date.now(),
-          updated: Date.now(),
-        };
-        state.notes.set(note.id, note);
-        await store.notes.put(note);
+        const fileTime = file.lastModified || Date.now();
+        // Honor stable id: if the file's frontmatter has an id that
+        // matches an existing note, merge (newer wins); otherwise
+        // create a new note with that id (preserves cross-device link).
+        if (meta.id && state.notes.has(meta.id)) {
+          const existing = state.notes.get(meta.id);
+          const incomingTime = meta.updated ? Date.parse(meta.updated) || fileTime : fileTime;
+          if (incomingTime > existing.updated + 1000) {
+            existing.title = title;
+            existing.body = resolvedBody;
+            existing.folderId = folderId;
+            existing.tags = Array.isArray(meta.tags) ? meta.tags : existing.tags || [];
+            existing.pinned = !!meta.pinned;
+            existing.updated = incomingTime;
+            await store.notes.put(existing);
+          }
+        } else {
+          const note = {
+            id: meta.id || uid(),
+            title,
+            body: resolvedBody,
+            folderId,
+            tags: Array.isArray(meta.tags) ? meta.tags : [],
+            pinned: !!meta.pinned,
+            created: meta.created ? Date.parse(meta.created) || fileTime : fileTime,
+            updated: meta.updated ? Date.parse(meta.updated) || fileTime : fileTime,
+          };
+          state.notes.set(note.id, note);
+          await store.notes.put(note);
+        }
         noteCount++;
       } else {
         skipped++;

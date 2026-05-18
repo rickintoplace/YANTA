@@ -39,7 +39,10 @@ async function init() {
   buildCommandList();
   setupGraphInteractions();
   setupWikilinkHover();
-  await vaultRestore();
+  await syncRestore();
+  // If a folder is linked, do a quick pull on startup so we pick up
+  // any changes made on another device since last open.
+  if (sync.handle) syncFull(false).catch(() => {});
 
   renderTree();
 
@@ -140,7 +143,14 @@ function bindEvents() {
   $('btn-images').addEventListener('click', () => { openImageModal(); setTab('library'); });
 
   // Vault indicator → menu
-  $('vaultIndicator').addEventListener('click', (e) => { e.stopPropagation(); vaultMenu(e.currentTarget); });
+  $('vaultIndicator').addEventListener('click', (e) => { e.stopPropagation(); syncMenu(e.currentTarget); });
+  // Setup wizard
+  $('syncSetupPick')?.addEventListener('click', async () => { closeSyncSetup(); await syncConnect(); });
+  document.querySelectorAll('[data-sync-close]').forEach((b) => b.addEventListener('click', closeSyncSetup));
+  document.querySelectorAll('[data-conflict-close]').forEach((b) => b.addEventListener('click', closeConflictModal));
+  // Pull again when the window regains focus — typical Syncthing latency
+  // is a few seconds, so we re-check on every focus to feel "live".
+  window.addEventListener('focus', () => { if (sync.handle) syncFull(false).catch(() => {}); });
   $('btn-settings').addEventListener('click', () => {
     toast('Settings: theme & view persist automatically');
   });
@@ -186,8 +196,8 @@ function bindEvents() {
   $('quality').addEventListener('input', recompress);
   $('maxW').addEventListener('input', recompress);
   $('fmt').addEventListener('change', recompress);
-  $('asBase64').addEventListener('change', (e) => { if (e.target.checked) $('asReference').checked = false; });
-  $('asReference').addEventListener('change', (e) => { if (e.target.checked) $('asBase64').checked = false; });
+  $('asBase64').addEventListener('change', (e) => { if (e.target.checked) $('asReference').checked = false; updateBase64Warning(imgCompressedBlob?.size || 0); });
+  $('asReference').addEventListener('change', (e) => { if (e.target.checked) $('asBase64').checked = false; updateBase64Warning(imgCompressedBlob?.size || 0); });
   $('insertImage').addEventListener('click', insertCompressedImage);
   $('insertPath').addEventListener('click', () => {
     const path = $('pathInput').value.trim();

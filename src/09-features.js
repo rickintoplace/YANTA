@@ -437,10 +437,10 @@ function buildCommandList() {
     { label: 'Import files (md/json/zip)…', icon: 'upload', action: () => $('importFile').click() },
     { label: 'Import folder…', icon: 'upload', action: () => $('importFolder').click() },
     { label: 'Delete current note', icon: 'trash', action: deleteCurrentNote },
-    { label: 'Vault: connect folder…', icon: 'git-branch', action: () => vaultConnect() },
-    { label: 'Vault: sync everything now', icon: 'refresh', action: () => vaultSyncAll() },
-    { label: 'Vault: pull external changes', icon: 'download', action: () => vaultPull() },
-    { label: 'Vault: disconnect', icon: 'x', action: () => vaultDisconnect() },
+    { label: 'Sync: set up folder…', icon: 'refresh', action: () => openSyncSetup() },
+    { label: 'Sync: pull + push now', icon: 'refresh', action: () => syncFull(true) },
+    { label: 'Sync: disconnect folder', icon: 'x', action: () => syncDisconnect() },
+    { label: 'Find unused images…', icon: 'image', action: () => cleanupUnusedImages() },
   ];
 }
 

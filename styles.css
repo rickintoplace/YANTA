@@ -234,6 +234,37 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .vault-indicator.connected:hover { background: rgba(74,222,128,0.13); }
 .vault-indicator svg { display: inline-block; }
 
+/* ---------- Sync setup wizard ---------- */
+.sync-recommend {
+  background: rgba(74,222,128,0.07); border: 1px solid rgba(74,222,128,0.25);
+  padding: 10px 14px; border-radius: var(--r-sm); margin-bottom: 14px;
+}
+.sync-rec-head { font-weight: 700; color: var(--green); }
+.sync-rec-body { font-size: 12px; color: var(--text-dim); margin-top: 2px; }
+.sync-steps {
+  padding-left: 22px; font-size: 13px; line-height: 1.7;
+}
+.sync-steps li { margin: 4px 0; color: var(--text); }
+.sync-steps a { color: var(--accent); }
+
+/* ---------- Conflict cards ---------- */
+.conflict-card {
+  border: 1px solid var(--border); border-radius: var(--r-sm);
+  padding: 10px 14px; margin-bottom: 10px;
+  background: var(--bg-elev);
+}
+.conflict-head {
+  font-family: var(--font-mono); font-size: 12px; color: var(--text-dim);
+  margin-bottom: 8px; word-break: break-all;
+}
+.conflict-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+
+.base64-warn {
+  font-size: 11px; color: var(--yellow);
+  background: rgba(251,191,36,0.07); border: 1px solid rgba(251,191,36,0.25);
+  padding: 6px 9px; border-radius: 4px; margin-top: 6px;
+}
+
 /* ---------- Main ---------- */
 .main {
   display: grid; grid-template-rows: auto 1fr auto;

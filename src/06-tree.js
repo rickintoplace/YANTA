@@ -246,7 +246,7 @@ function noteMenu(e, n) {
     { label: 'Duplicate', action: () => duplicateNote(n) },
     { label: 'Export as .md', action: () => exportNoteAsMd(n) },
     'hr',
-    { label: 'Delete', danger: true, action: async () => { if (confirm(`Delete "${n.title}"?`)) { await store.notes.del(n.id); state.notes.delete(n.id); if (state.currentNoteId === n.id) clearEditor(); renderTree(); } } },
+    { label: 'Delete', danger: true, action: async () => { if (confirm(`Delete "${n.title}"?`)) { await store.notes.del(n.id); state.notes.delete(n.id); if (typeof syncDeleteNoteFile === 'function') syncDeleteNoteFile(n); rebuildWikilinkIndex(); if (state.currentNoteId === n.id) clearEditor(); renderTree(); } } },
   ]);
 }
 function folderMenu(e, f) {

@@ -80,6 +80,7 @@ export async function openNote(id) {
   renderChips();
   updatePinIcon();
   renderShareIndicator();
+  renderTree();
   schedulePreview();
 
   // Subscribe to Y.Doc updates → re-render preview, persist mirror.

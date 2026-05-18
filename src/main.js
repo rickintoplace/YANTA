@@ -8,7 +8,7 @@ import { openNote, newNote, newFolder, saveCurrentNote, deleteCurrentNote, toggl
 import { renderTree, renderTagCloud, showMenu, closeMenu, currentFolderForNew } from './tree.js';
 import { renderBacklinks, renderOutline, setupWikilinkHover, handleWikilinkClick, openPalette, closePalette, buildCommandList, paletteMove, paletteAccept, paletteFilter } from './features.js';
 import { openImageModal, closeImageModal, setupImage, pickImageFile, cleanupUnusedImages, insertImageAsRef } from './image.js';
-import { focusEditorEnd, getView, setEditorLineSpacers } from './editor.js';
+import { focusEditorEnd, getView } from './editor.js';
 import { setupFormatToolbar } from './format-menu.js';
 import { exportAsZip, exportNoteAsMd, exportBundle, exportEveryNoteMd, openExportMenu, importFiles, importItems, walkEntry } from './io.js';
 import { syncRestore, syncConnect, syncDisconnect, syncFull, openSyncSetup, closeSyncSetup, syncMenu } from './sync.js';
@@ -16,6 +16,8 @@ import { openGraph, closeGraph, setupGraphInteractions } from './graph.js';
 import { wikilinkIndex } from './features-state.js';
 import { getNoteDoc } from './yjs.js';
 import { openShareModal, closeShareModal, stopSharing, restoreSharedNotes, handleShareUrl } from './sharing.js';
+
+let sharePreviewLocked = false;
 
 async function init() {
   await openDB();
@@ -57,9 +59,20 @@ async function init() {
   setupImage();
   setupFormatToolbar();
   await syncRestore();
+  let sharedOpen = null;
+
   if (window.location.hash.startsWith('#share=')) {
-    const id = await handleShareUrl();
-    if (id) await openNote(id);
+    sharedOpen = await handleShareUrl();
+
+    if (sharedOpen?.noteId) {
+      if (sharedOpen.previewOnly) {
+        sharePreviewLocked = true;
+        $('app').dataset.shareMode = 'preview';
+      }
+
+      await openNote(sharedOpen.noteId);
+      setView(sharedOpen.view || 'preview');
+    }
   } else {
     await restoreSharedNotes();
   }
@@ -67,16 +80,21 @@ async function init() {
   renderTree();
 
   // Open last note / hash / most recent / welcome
-  const hashId = decodeURIComponent((window.location.hash || '').slice(1));
-  const lastId = await store.settings.get('lastNoteId', null);
-  let toOpen = null;
-  if (hashId && state.notes.has(hashId)) toOpen = state.notes.get(hashId);
-  if (!toOpen && lastId && state.notes.has(lastId)) toOpen = state.notes.get(lastId);
-  if (!toOpen) toOpen = [...state.notes.values()].sort((a, b) => b.updated - a.updated)[0];
-  setNavSuppress(true);
-  if (toOpen) await openNote(toOpen.id);
-  else await createWelcomeNote();
-  setNavSuppress(false);
+  // Nur ausführen, wenn nicht gerade ein Share-Link geöffnet wurde.
+  if (!sharedOpen?.noteId) {
+    const hashId = decodeURIComponent((window.location.hash || '').slice(1));
+    const lastId = await store.settings.get('lastNoteId', null);
+
+    let toOpen = null;
+    if (hashId && state.notes.has(hashId)) toOpen = state.notes.get(hashId);
+    if (!toOpen && lastId && state.notes.has(lastId)) toOpen = state.notes.get(lastId);
+    if (!toOpen) toOpen = [...state.notes.values()].sort((a, b) => b.updated - a.updated)[0];
+
+    setNavSuppress(true);
+    if (toOpen) await openNote(toOpen.id);
+    else await createWelcomeNote();
+    setNavSuppress(false);
+  }
 
   if (state.notes.size && state.currentNoteId) {
     // Trigger initial sync pull (if linked) — fire-and-forget.
@@ -97,6 +115,10 @@ async function init() {
 }
 
 function setView(v) {
+  if (sharePreviewLocked && v !== 'preview') {
+    v = 'preview';
+  }
+
   state.view = v;
   $('app').dataset.view = v;
   $('btn-view-edit').classList.toggle('active', v === 'edit');
@@ -177,8 +199,6 @@ function bindEvents() {
   document.querySelectorAll('[data-share-close]').forEach((b) => b.addEventListener('click', closeShareModal));
 
   // Divider
-  setupDivider();
-
   setupDivider();
   setupPaneScrollSync();
 
@@ -376,23 +396,163 @@ function setupPaneScrollSync() {
   if (!pvPane || !preview) return;
 
   const sync = {
-    syncing: false,
     raf: 0,
+
+    // Smooth follower
+    followRaf: 0,
+    followEl: null,
+    followTarget: 0,
+    followMax: 0,
+
+    // Nur Scroll-Events dieses Elements werden als programmatic ignoriert.
+    programmaticEl: null,
+    programmaticUntil: 0,
+    releaseTimer: 0,
+
+    // User möchte gerade selbst in einem Pane scrollen.
+    manualEl: null,
+    manualUntil: 0,
+
     measureTimer: 0,
+    measuring: false,
+    measureAgain: false,
+
     editorTops: [],
     previewTops: [],
     maxEditor: 1,
     maxPreview: 1,
   };
 
+  function editorScroller() {
+    return getView()?.scrollDOM || null;
+  }
+
+  function paneForTarget(target) {
+    const scroller = editorScroller();
+
+    if (scroller && (target === scroller || scroller.contains(target))) {
+      return scroller;
+    }
+
+    if (target === pvPane || pvPane.contains(target)) {
+      return pvPane;
+    }
+
+    return null;
+  }
+
+  function markProgrammatic(el) {
+    sync.programmaticEl = el;
+    sync.programmaticUntil = performance.now() + 120;
+
+    clearTimeout(sync.releaseTimer);
+    sync.releaseTimer = setTimeout(() => {
+      if (performance.now() >= sync.programmaticUntil) {
+        sync.programmaticEl = null;
+      }
+    }, 140);
+  }
+
+  function stopFollower() {
+    if (sync.followRaf) {
+      cancelAnimationFrame(sync.followRaf);
+      sync.followRaf = 0;
+    }
+
+    sync.followEl = null;
+    sync.programmaticEl = null;
+    sync.programmaticUntil = 0;
+  }
+
+  function noteManualIntent(el) {
+    if (!el) return;
+
+    sync.manualEl = el;
+    sync.manualUntil = performance.now() + 300;
+
+    // Wenn der User genau das Pane anfassen will, das gerade automatisch
+    // bewegt wird, muss die Automatik sofort loslassen.
+    if (el === sync.followEl) {
+      stopFollower();
+    }
+  }
+
+  document.addEventListener('wheel', (e) => {
+    noteManualIntent(paneForTarget(e.target));
+  }, { capture: true, passive: true });
+
+  document.addEventListener('touchstart', (e) => {
+    noteManualIntent(paneForTarget(e.target));
+  }, { capture: true, passive: true });
+
+  document.addEventListener('mousedown', (e) => {
+    noteManualIntent(paneForTarget(e.target));
+  }, { capture: true, passive: true });
+
+  const setProgrammaticScrollTop = (el, top, max) => {
+    if (!el) return;
+
+    const target = Math.max(0, Math.min(max || 0, top || 0));
+
+    sync.followEl = el;
+    sync.followTarget = target;
+    sync.followMax = max || 0;
+
+    if (!sync.followRaf) {
+      sync.followRaf = requestAnimationFrame(animateFollower);
+    }
+  };
+
+  function animateFollower() {
+    sync.followRaf = 0;
+
+    const el = sync.followEl;
+    if (!el) return;
+
+    if (state.view !== 'split') {
+      stopFollower();
+      return;
+    }
+
+    // Wenn der User gerade im Ziel-Pane selbst scrollen will: loslassen.
+    if (el === sync.manualEl && performance.now() < sync.manualUntil) {
+      stopFollower();
+      return;
+    }
+
+    const target = Math.max(0, Math.min(sync.followMax || 0, sync.followTarget || 0));
+    const current = el.scrollTop;
+    const diff = target - current;
+
+    if (Math.abs(diff) < 0.6) {
+      markProgrammatic(el);
+      el.scrollTop = target;
+      sync.followEl = null;
+      return;
+    }
+
+    // Höher = direkter, niedriger = weicher/träger.
+    const factor = 0.32;
+
+    markProgrammatic(el);
+    el.scrollTop = current + diff * factor;
+
+    sync.followRaf = requestAnimationFrame(animateFollower);
+  }
+
   const scheduleMeasure = () => {
+    if (sync.measuring) {
+      sync.measureAgain = true;
+      return;
+    }
+
     clearTimeout(sync.measureTimer);
     sync.measureTimer = setTimeout(() => {
       requestAnimationFrame(() => measureAndAlign(sync));
-    }, 40);
+    }, 120);
   };
 
-  function mapScroll(sourceTop, sourceTops, targetTops, fallbackRatio, targetMax) {
+  function mapScroll(sourceTop, sourceTops, targetTops, fallbackRatio, sourceMax, targetMax) {
     if (!sourceTops.length || !targetTops.length) {
       return fallbackRatio * targetMax;
     }
@@ -407,8 +567,9 @@ function setupPaneScrollSync() {
     }
 
     const i = lo;
+
     const a0 = sourceTops[i] ?? 0;
-    const a1 = sourceTops[i + 1] ?? sync.maxEditor;
+    const a1 = sourceTops[i + 1] ?? sourceMax;
     const b0 = targetTops[i] ?? 0;
     const b1 = targetTops[i + 1] ?? targetMax;
 
@@ -419,62 +580,54 @@ function setupPaneScrollSync() {
   }
 
   function editorToPreview() {
-    if (sync.syncing) return;
+    if (state.view !== 'split') return;
 
     const v = getView();
-    if (!v || state.view === 'preview') return;
+    if (!v) return;
 
     const scroller = v.scrollDOM;
     if (!scroller) return;
 
     cancelAnimationFrame(sync.raf);
     sync.raf = requestAnimationFrame(() => {
-      sync.syncing = true;
-
       const ratio = scroller.scrollTop / Math.max(1, sync.maxEditor);
+
       const target = mapScroll(
         scroller.scrollTop,
         sync.editorTops,
         sync.previewTops,
         ratio,
+        sync.maxEditor,
         sync.maxPreview
       );
 
-      pvPane.scrollTop = target;
-
-      requestAnimationFrame(() => {
-        sync.syncing = false;
-      });
+      setProgrammaticScrollTop(pvPane, target, sync.maxPreview);
     });
   }
 
   function previewToEditor() {
-    if (sync.syncing) return;
+    if (state.view !== 'split') return;
 
     const v = getView();
-    if (!v || state.view === 'edit') return;
+    if (!v) return;
 
     const scroller = v.scrollDOM;
     if (!scroller) return;
 
     cancelAnimationFrame(sync.raf);
     sync.raf = requestAnimationFrame(() => {
-      sync.syncing = true;
-
       const ratio = pvPane.scrollTop / Math.max(1, sync.maxPreview);
+
       const target = mapScroll(
         pvPane.scrollTop,
         sync.previewTops,
         sync.editorTops,
         ratio,
+        sync.maxPreview,
         sync.maxEditor
       );
 
-      scroller.scrollTop = target;
-
-      requestAnimationFrame(() => {
-        sync.syncing = false;
-      });
+      setProgrammaticScrollTop(scroller, target, sync.maxEditor);
     });
   }
 
@@ -482,15 +635,39 @@ function setupPaneScrollSync() {
     const v = getView();
     if (!v) return;
 
-    if (e.target === v.scrollDOM) editorToPreview();
-    else if (e.target === pvPane) previewToEditor();
+    const scroller = v.scrollDOM;
+    const target = e.target;
+    const now = performance.now();
+
+    // Nur Scroll-Events des automatisch bewegten Elements ignorieren.
+    // Scroll-Events des aktiven User-Panes müssen weiterhin durchkommen.
+    if (
+      target === sync.programmaticEl &&
+      now < sync.programmaticUntil &&
+      !(target === sync.manualEl && now < sync.manualUntil)
+    ) {
+      return;
+    }
+
+    if (target === scroller) {
+      editorToPreview();
+    } else if (target === pvPane) {
+      previewToEditor();
+    }
   }, { capture: true, passive: true });
 
   window.addEventListener('resize', scheduleMeasure);
   window.addEventListener('yanta-preview-rendered', scheduleMeasure);
-  window.addEventListener('yanta-editor-geometry-change', scheduleMeasure);
 
-  // Images/videos can change line heights after load.
+  window.addEventListener('yanta-editor-geometry-change', () => {
+    if (sync.measuring) {
+      sync.measureAgain = true;
+      return;
+    }
+
+    scheduleMeasure();
+  });
+
   preview.addEventListener('load', scheduleMeasure, true);
 
   scheduleMeasure();
@@ -503,61 +680,25 @@ function measureAndAlign(sync) {
 
   if (!v || !pvPane || !preview) return;
 
-  const scroller = v.scrollDOM;
-  const doc = v.state.doc;
-  const lineCount = doc.lines;
-
-  // Reset previous dynamic spacers before measuring natural heights.
-  setEditorLineSpacers([]);
-  preview.style.setProperty('--preview-sync-spacer', '0px');
-  v.dom.style.setProperty('--editor-sync-spacer', '0px');
-
-  for (const el of preview.querySelectorAll('.pv-line[data-line]')) {
-    el.style.minHeight = '';
+  if (sync.measuring) {
+    sync.measureAgain = true;
+    return;
   }
 
+  sync.measuring = true;
+
   requestAnimationFrame(() => {
-    const editorHeights = new Array(lineCount).fill(0);
-    const previewHeights = new Array(lineCount).fill(0);
-    const previewLines = new Array(lineCount).fill(null);
+    rebuildScrollMaps(sync);
 
-    for (let i = 1; i <= lineCount; i++) {
-      const line = doc.line(i);
-      const block = v.lineBlockAt(line.from);
-      editorHeights[i - 1] = Math.ceil(block.height || 0);
+    sync.measuring = false;
+
+    if (sync.measureAgain) {
+      sync.measureAgain = false;
+      clearTimeout(sync.measureTimer);
+      sync.measureTimer = setTimeout(() => {
+        requestAnimationFrame(() => measureAndAlign(sync));
+      }, 160);
     }
-
-    for (const el of preview.querySelectorAll('.pv-line[data-line]')) {
-      const i = parseInt(el.dataset.line, 10);
-      if (Number.isNaN(i) || i < 0 || i >= lineCount) continue;
-
-      previewLines[i] = el;
-      previewHeights[i] = Math.ceil(el.getBoundingClientRect().height || 0);
-    }
-
-    const editorExtra = new Array(lineCount).fill(0);
-
-    for (let i = 0; i < lineCount; i++) {
-      const target = Math.max(
-        editorHeights[i] || 0,
-        previewHeights[i] || 0,
-        parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--line-block')) || 0
-      );
-
-      const pvLine = previewLines[i];
-      if (pvLine) pvLine.style.minHeight = target + 'px';
-
-      editorExtra[i] = Math.max(0, target - (editorHeights[i] || 0));
-    }
-
-    setEditorLineSpacers(editorExtra);
-
-    // Wait until CodeMirror has applied spacer widgets, then cache maps.
-    requestAnimationFrame(() => {
-      rebuildScrollMaps(sync);
-      equalizeScrollHeights(sync);
-      rebuildScrollMaps(sync);
-    });
   });
 }
 
@@ -593,34 +734,6 @@ function rebuildScrollMaps(sync) {
 
   sync.editorTops = editorTops;
   sync.previewTops = previewTops;
-  sync.maxEditor = Math.max(1, scroller.scrollHeight - scroller.clientHeight);
-  sync.maxPreview = Math.max(1, pvPane.scrollHeight - pvPane.clientHeight);
-}
-
-function equalizeScrollHeights(sync) {
-  const v = getView();
-  const pvPane = $('panePreview');
-  const preview = $('preview');
-
-  if (!v || !pvPane || !preview) return;
-
-  const scroller = v.scrollDOM;
-
-  preview.style.setProperty('--preview-sync-spacer', '0px');
-  v.dom.style.setProperty('--editor-sync-spacer', '0px');
-
-  const editorMax = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
-  const previewMax = Math.max(0, pvPane.scrollHeight - pvPane.clientHeight);
-  const delta = Math.round(Math.abs(editorMax - previewMax));
-
-  if (delta < 2) return;
-
-  if (editorMax < previewMax) {
-    v.dom.style.setProperty('--editor-sync-spacer', delta + 'px');
-  } else {
-    preview.style.setProperty('--preview-sync-spacer', delta + 'px');
-  }
-
   sync.maxEditor = Math.max(1, scroller.scrollHeight - scroller.clientHeight);
   sync.maxPreview = Math.max(1, pvPane.scrollHeight - pvPane.clientHeight);
 }

@@ -690,7 +690,10 @@ export function mountEditor(host, { noteId, awarenessUser }) {
         window.dispatchEvent(new CustomEvent('yanta-selection-change'));
       }
 
-      if (u.docChanged || u.geometryChanged || u.viewportChanged) {
+      // viewportChanged feuert beim Scrollen sehr häufig.
+      // Das darf keine neue Layout-Messung triggern, sonst entsteht
+      // bei langen Notes ein Mess-/Spacer-/Scroll-Loop.
+      if (u.docChanged || u.geometryChanged) {
         window.dispatchEvent(new CustomEvent('yanta-editor-geometry-change'));
       }
     }),

@@ -1179,20 +1179,6 @@ button.link { background: 0; border: 0; color: var(--accent); cursor: pointer; p
   user-select: none;
 }
 
-.cm-content::after {
-  content: "";
-  display: block;
-  height: var(--editor-sync-spacer, 0px);
-  pointer-events: none;
-}
-
-.preview::after {
-  content: "";
-  display: block;
-  height: var(--preview-sync-spacer, 0px);
-  pointer-events: none;
-}
-
 /* TOC must not shift source-line Y positions */
 .pane-preview {
   position: relative;
@@ -1220,4 +1206,10 @@ button.link { background: 0; border: 0; color: var(--accent); cursor: pointer; p
 
 .pane-preview > .pv-outline:not(:hover) {
   opacity: 0.72;
+}
+
+.app[data-share-mode="preview"] #btn-view-edit,
+.app[data-share-mode="preview"] #btn-view-split,
+.app[data-share-mode="preview"] #btn-view-preview {
+  display: none;
 }

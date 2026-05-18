@@ -1179,33 +1179,191 @@ button.link { background: 0; border: 0; color: var(--accent); cursor: pointer; p
   user-select: none;
 }
 
-/* TOC must not shift source-line Y positions */
+/* TOC above article — does not overlay the article */
 .pane-preview {
   position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
 }
 
+/* Article */
+.pane-preview > .preview {
+  order: 2;
+  width: 100%;
+  max-width: 760px;
+  margin: 0;
+}
+
+/* Outline container */
 .pane-preview > .pv-outline {
-  position: absolute;
-  top: 12px;
-  right: 16px;
-  z-index: 20;
-  width: min(280px, calc(100% - 32px));
-  max-height: min(50vh, 420px);
-  overflow: auto;
-  opacity: 0.96;
-  backdrop-filter: blur(8px);
+  order: 1;
+
+  position: relative;
+  top: 0;
+  align-self: center;
+
+  width: 100%;
+  max-width: 760px;
+
+  height: auto;
+  max-height: none;
+  overflow: visible;
+
+  margin: 0 0 4em;
+  align-self: end;
+
+  opacity: 1;
+  backdrop-filter: none;
+
+  transition:
+    max-width 250ms ease,
+    width 250ms ease,
+    margin-bottom 250ms ease,
+    opacity 200ms ease;
 }
 
+/* Collapsed outline container */
 .pane-preview > .pv-outline.collapsed {
-  width: auto;
+    width: 260px;
+    max-width: 260px;
+    margin-bottom: -2em;
+    opacity: 0.7;
 }
 
+.pane-preview > .pv-outline.collapsed:hover {
+    opacity: 1;
+}
+
+.pv-outline-chev {
+    transition: 
+    scale 250ms ease,
+    opacity 200ms ease;
+}
+
+.pane-preview > .pv-outline.collapsed:hover .pv-outline-chev {
+    scale: -1 -1;
+}
+
+/* Expanded TOC list */
+.pane-preview > .pv-outline .pv-outline-list {
+  height: auto;
+  max-height: min(60vh, 520px);
+
+  opacity: 1;
+  visibility: visible;
+
+  overflow-x: hidden;
+  overflow-y: auto;
+
+  transform: translateY(0);
+
+  transition:
+    max-height 280ms ease,
+    opacity 180ms ease,
+    transform 220ms ease,
+    visibility 0s linear 0s;
+}
+
+/* Collapsed TOC list */
 .pane-preview > .pv-outline.collapsed .pv-outline-list {
-  display: none;
+  max-height: 0;
+
+  opacity: 0;
+  visibility: hidden;
+
+  overflow: hidden;
+
+  transform: translateY(-6px);
+
+  transition:
+    max-height 280ms ease,
+    opacity 140ms ease,
+    transform 220ms ease,
+    visibility 0s linear 280ms;
 }
 
-.pane-preview > .pv-outline:not(:hover) {
-  opacity: 0.72;
+@media (max-width: 1100px) {
+  .pane-preview {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+  }
+
+  .pane-preview > .pv-outline {
+    order: 1;
+
+    position: relative;
+
+    width: 100%;
+    max-width: 760px;
+
+    height: auto;
+    max-height: none;
+    overflow: visible;
+
+    margin: 0 0 18px;
+  }
+
+  .pane-preview > .pv-outline.collapsed {
+    width: 260px;
+    max-width: 260px;
+
+    margin-left: auto;
+    margin-right: calc((100% - min(100%, 760px)) / 2);
+    margin-bottom: 0;
+  }
+
+  .pane-preview > .preview {
+    order: 2;
+
+    width: 100%;
+    max-width: 760px;
+    margin: 0;
+  }
+}
+
+/* Falls die Outline innerhalb von .preview liegt */
+.preview > .pv-outline {
+  height: auto;
+  max-height: none;
+  overflow: visible;
+}
+
+.preview > .pv-outline .pv-outline-list {
+  height: auto;
+  max-height: min(60vh, 520px);
+
+  opacity: 1;
+  visibility: visible;
+
+  overflow-x: hidden;
+  overflow-y: auto;
+
+  transform: translateY(0);
+
+  transition:
+    max-height 280ms ease,
+    opacity 180ms ease,
+    transform 220ms ease,
+    visibility 0s linear 0s;
+}
+
+.preview > .pv-outline.collapsed .pv-outline-list {
+  max-height: 0;
+
+  opacity: 0;
+  visibility: hidden;
+
+  overflow: hidden;
+
+  transform: translateY(-6px);
+
+  transition:
+    max-height 280ms ease,
+    opacity 140ms ease,
+    transform 220ms ease,
+    visibility 0s linear 280ms;
 }
 
 .app[data-share-mode="preview"] #btn-view-edit,

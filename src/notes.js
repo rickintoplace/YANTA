@@ -97,6 +97,75 @@ export async function openNote(id) {
   preloadImagesFor(noteMarkdown(id));
 }
 
+function videoSrcIn(el) {
+  return el
+    ?.querySelector?.('.pv-embed-video iframe[src]')
+    ?.getAttribute('src') || '';
+}
+
+function syncAttrs(target, source) {
+  for (const attr of [...target.attributes]) {
+    if (!source.hasAttribute(attr.name)) {
+      target.removeAttribute(attr.name);
+    }
+  }
+
+  for (const attr of [...source.attributes]) {
+    target.setAttribute(attr.name, attr.value);
+  }
+}
+
+function setPreviewHtmlPreservingVideos(previewEl, html) {
+  if (!previewEl) return;
+
+  // Kein altes Video vorhanden → normaler schneller Pfad.
+  if (!previewEl.querySelector('.pv-embed-video iframe[src]')) {
+    previewEl.innerHTML = html;
+    return;
+  }
+
+  // Backlinks werden danach sowieso neu gerendert.
+  previewEl.querySelector('.backlinks')?.remove();
+
+  const tmp = document.createElement('div');
+  tmp.innerHTML = html;
+
+  const oldLines = [...previewEl.children].filter((el) =>
+    el.classList?.contains('pv-line')
+  );
+
+  const newLines = [...tmp.children];
+
+  const max = Math.max(oldLines.length, newLines.length);
+
+  for (let i = 0; i < max; i++) {
+    const oldLine = oldLines[i];
+    const newLine = newLines[i];
+
+    if (!newLine) {
+      oldLine?.remove();
+      continue;
+    }
+
+    if (!oldLine) {
+      previewEl.append(newLine);
+      continue;
+    }
+
+    const oldVideoSrc = videoSrcIn(oldLine);
+    const newVideoSrc = videoSrcIn(newLine);
+
+    // Wichtig: Wenn dieselbe Video-URL an derselben Source-Line steht,
+    // die alte DOM-Node behalten. Dadurch bleibt das iframe erhalten.
+    if (oldVideoSrc && oldVideoSrc === newVideoSrc) {
+      syncAttrs(oldLine, newLine);
+      continue;
+    }
+
+    oldLine.replaceWith(newLine);
+  }
+}
+
 export function clearEditor() {
   if (_unsubDoc) { _unsubDoc(); _unsubDoc = null; }
   state.currentNoteId = null;
@@ -203,7 +272,7 @@ export const schedulePreview = debounce(() => {
   if (!state.currentNoteId) return;
 
   const md = noteMarkdown(state.currentNoteId);
-  $('preview').innerHTML = renderPreview(md);
+  setPreviewHtmlPreservingVideos($('preview'), renderPreview(md));
   renderOutline(md);
   renderBacklinks(state.currentNoteId);
   updateWordCount(md);

@@ -72,8 +72,9 @@ export function renderOutline(md) {
   const pane = $('panePreview');
   if (!pv || !pane) return;
 
-  const old = pane.querySelector(':scope > .pv-outline');
-  if (old) old.remove();
+  // Alte TOCs entfernen — auch falls vorher einer ins article.preview gerutscht ist.
+  pane.querySelector(':scope > .pv-outline')?.remove();
+  pv.querySelector(':scope > .pv-outline')?.remove();
 
   const lines = md.split('\n');
   const headings = [];
@@ -128,9 +129,7 @@ export function renderOutline(md) {
 
   wrap.append(list);
 
-  // Important: append to panePreview, not into article.preview.
-  // This makes TOC an overlay and prevents it from shifting source lines.
-  pane.append(wrap);
+  pane.insertBefore(wrap, pv);
 }
 
 // -------- Wikilink click + hover preview -----------------------

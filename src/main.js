@@ -8,7 +8,7 @@ import { openNote, newNote, newFolder, saveCurrentNote, deleteCurrentNote, toggl
 import { renderTree, renderTagCloud, showMenu, closeMenu, currentFolderForNew } from './tree.js';
 import { renderBacklinks, renderOutline, setupWikilinkHover, handleWikilinkClick, openPalette, closePalette, buildCommandList, paletteMove, paletteAccept, paletteFilter } from './features.js';
 import { openImageModal, closeImageModal, setupImage, pickImageFile, cleanupUnusedImages, insertImageAsRef } from './image.js';
-import { focusEditorEnd } from './editor.js';
+import { focusEditorEnd, getView } from './editor.js';
 import { setupFormatToolbar } from './format-menu.js';
 import { exportAsZip, exportNoteAsMd, exportBundle, exportEveryNoteMd, openExportMenu, importFiles, importItems, walkEntry } from './io.js';
 import { syncRestore, syncConnect, syncDisconnect, syncFull, openSyncSetup, closeSyncSetup, syncMenu } from './sync.js';
@@ -178,6 +178,9 @@ function bindEvents() {
 
   // Divider
   setupDivider();
+
+  setupDivider();
+  setupPaneScrollSync();
 
   // Preview interactions
   $('preview').addEventListener('click', (e) => {
@@ -365,6 +368,98 @@ function setupDivider() {
     div.classList.remove('dragging');
     document.body.style.cursor = '';
   });
+}
+
+function setupPaneScrollSync() {
+  const pvPane = $('panePreview');
+  if (!pvPane) return;
+
+  let syncing = false;
+
+  function editorToPreview() {
+    if (syncing) return;
+
+    const v = getView();
+    if (!v || !pvPane || state.view === 'preview') return;
+
+    const scroller = v.scrollDOM;
+    if (!scroller) return;
+
+    syncing = true;
+
+    requestAnimationFrame(() => {
+      try {
+        const block = v.lineBlockAtHeight(scroller.scrollTop);
+        const lineNo = v.state.doc.lineAt(block.from).number - 1;
+        const lineEl = pvPane.querySelector(`.pv-line[data-line="${lineNo}"]`);
+
+        if (lineEl) {
+          const intra = Math.max(0, scroller.scrollTop - block.top);
+          pvPane.scrollTop = lineEl.offsetTop + intra;
+        } else {
+          const maxA = Math.max(1, scroller.scrollHeight - scroller.clientHeight);
+          const maxB = Math.max(1, pvPane.scrollHeight - pvPane.clientHeight);
+          pvPane.scrollTop = (scroller.scrollTop / maxA) * maxB;
+        }
+      } finally {
+        syncing = false;
+      }
+    });
+  }
+
+  function previewToEditor() {
+    if (syncing) return;
+
+    const v = getView();
+    if (!v || !pvPane || state.view === 'edit') return;
+
+    const scroller = v.scrollDOM;
+    if (!scroller) return;
+
+    syncing = true;
+
+    requestAnimationFrame(() => {
+      try {
+        const top = pvPane.scrollTop;
+        const lines = [...pvPane.querySelectorAll('.pv-line[data-line]')];
+
+        let chosen = lines[0];
+        for (const el of lines) {
+          if (el.offsetTop + el.offsetHeight > top + 1) {
+            chosen = el;
+            break;
+          }
+        }
+
+        if (chosen) {
+          const lineNo = Math.min(
+            v.state.doc.lines,
+            Math.max(1, parseInt(chosen.dataset.line, 10) + 1)
+          );
+
+          const line = v.state.doc.line(lineNo);
+          const block = v.lineBlockAt(line.from);
+          const intra = Math.max(0, top - chosen.offsetTop);
+
+          scroller.scrollTop = block.top + intra;
+        } else {
+          const maxA = Math.max(1, pvPane.scrollHeight - pvPane.clientHeight);
+          const maxB = Math.max(1, scroller.scrollHeight - scroller.clientHeight);
+          scroller.scrollTop = (pvPane.scrollTop / maxA) * maxB;
+        }
+      } finally {
+        syncing = false;
+      }
+    });
+  }
+
+  document.addEventListener('scroll', (e) => {
+    const v = getView();
+    if (!v) return;
+
+    if (e.target === v.scrollDOM) editorToPreview();
+    else if (e.target === pvPane) previewToEditor();
+  }, true);
 }
 
 init().catch((e) => {

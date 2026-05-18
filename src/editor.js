@@ -14,6 +14,7 @@ import { autocompletion, completionKeymap } from '@codemirror/autocomplete';
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { tags as t } from '@lezer/highlight';
 import { yCollab } from 'y-codemirror.next';
+import { classifyLine } from './markdown.js';
 
 import { state } from './core.js';
 import { getNoteDoc, getMarkdownText } from './yjs.js';
@@ -47,52 +48,105 @@ const yantaHighlight = HighlightStyle.define([
 // ----- Theme: minimal, inherits from YANTA CSS vars ---------------------
 const yantaTheme = EditorView.theme({
   '&': {
-    fontSize: 'var(--font-size, 15px)',
+    fontSize: 'var(--fs-base)',
     color: 'var(--text)',
     backgroundColor: 'transparent',
     height: '100%',
   },
   '.cm-scroller': {
-    fontFamily: 'var(--font, system-ui)',
-    lineHeight: '1.6',
-    padding: '12px 18px',
+    fontFamily: 'var(--font)',
+    lineHeight: 'var(--lh-base)',
+    padding: '28px 40px calc(28px + 40vh)',
+    overflow: 'auto',
   },
-  '.cm-content': { padding: '0', caretColor: 'var(--accent)' },
-  '.cm-line': { padding: '0 2px' },
-  '&.cm-focused': { outline: 'none' },
-  '.cm-cursor': { borderLeftColor: 'var(--accent)', borderLeftWidth: '2px' },
-  '.cm-selectionBackground, ::selection': { backgroundColor: 'var(--sel)' },
-  '.cm-activeLine': { backgroundColor: 'transparent' },
-  '.cm-gutters': { display: 'none' },
+  '.cm-content': {
+    maxWidth: '760px',
+    margin: '0 auto',
+    padding: '0',
+    caretColor: 'var(--accent)',
+    minHeight: '100%',
+  },
+  '.cm-line': {
+    padding: '0 2px',
+  },
+  '&.cm-focused': {
+    outline: 'none',
+  },
+  '.cm-cursor': {
+    borderLeftColor: 'var(--accent)',
+    borderLeftWidth: '2px',
+  },
+  '.cm-selectionBackground, ::selection': {
+    backgroundColor: 'var(--selection)',
+  },
+  '.cm-activeLine': {
+    backgroundColor: 'transparent',
+  },
+  '.cm-gutters': {
+    display: 'none',
+  },
   '.cm-tooltip': {
-    background: 'var(--bg-2)',
+    background: 'var(--bg-elev-3)',
     border: '1px solid var(--border)',
     borderRadius: '6px',
     color: 'var(--text)',
-    boxShadow: '0 6px 20px rgba(0,0,0,.25)',
+    boxShadow: 'var(--shadow)',
   },
   '.cm-tooltip-autocomplete ul li[aria-selected]': {
     background: 'var(--accent)',
     color: 'white',
   },
-  '.cm-tooltip-autocomplete ul li': { padding: '4px 8px' },
+  '.cm-tooltip-autocomplete ul li': {
+    padding: '4px 8px',
+  },
   '.yanta-task-checkbox': {
-    display: 'inline-block', verticalAlign: 'middle', marginRight: '6px',
-    width: '14px', height: '14px', cursor: 'pointer',
+    display: 'inline-block',
+    verticalAlign: 'middle',
+    marginRight: '6px',
+    width: '14px',
+    height: '14px',
+    cursor: 'pointer',
   },
-  '.yanta-wiki': { color: 'var(--accent)', textDecoration: 'none' },
-  '.yanta-wiki-missing': { color: 'var(--text-dim)', textDecoration: 'underline dotted' },
-  '.yanta-tag': { color: 'var(--accent-2, #8ab4f8)' },
+  '.yanta-wiki': {
+    color: 'var(--accent)',
+    textDecoration: 'none',
+    background: 'rgba(110,168,254,0.10)',
+    borderRadius: '3px',
+    padding: '0 3px',
+  },
+  '.yanta-wiki-missing': {
+    color: 'var(--text-dim)',
+    textDecoration: 'underline dotted',
+    background: 'rgba(138,147,164,0.08)',
+    borderRadius: '3px',
+    padding: '0 3px',
+  },
+  '.yanta-tag': {
+    color: 'var(--accent-2)',
+    background: 'rgba(167,139,250,0.10)',
+    borderRadius: '4px',
+    padding: '0 4px',
+  },
   '.yanta-img-thumb': {
-    display: 'block', maxWidth: '320px', maxHeight: '220px',
-    borderRadius: '6px', margin: '4px 0',
+    display: 'block',
+    maxWidth: '100%',
+    maxHeight: '220px',
+    borderRadius: '6px',
+    border: '1px solid var(--border)',
+    margin: '4px 0',
   },
-  // Yjs remote cursors
   '.cm-ySelectionInfo': {
-    position: 'absolute', top: '-1.4em', left: '-1px',
-    padding: '1px 4px', borderRadius: '3px',
-    fontSize: '11px', fontFamily: 'system-ui', color: 'white',
-    whiteSpace: 'nowrap', userSelect: 'none', pointerEvents: 'none',
+    position: 'absolute',
+    top: '-1.4em',
+    left: '-1px',
+    padding: '1px 4px',
+    borderRadius: '3px',
+    fontSize: '11px',
+    fontFamily: 'system-ui',
+    color: 'white',
+    whiteSpace: 'nowrap',
+    userSelect: 'none',
+    pointerEvents: 'none',
   },
 });
 
@@ -480,6 +534,44 @@ function dropHandler() {
 }
 
 // ============================================================
+// Markdown line classes — this is what makes pane-edit visually
+// mirror the preview. The old .ed-line CSS is legacy and does not
+// apply to CodeMirror.
+// ============================================================
+
+const markdownLineClassField = StateField.define({
+  create(state) {
+    return buildMarkdownLineClasses(state);
+  },
+  update(deco, tr) {
+    if (tr.docChanged || tr.viewportChanged) return buildMarkdownLineClasses(tr.state);
+    return deco;
+  },
+  provide: (field) => EditorView.decorations.from(field),
+});
+
+function buildMarkdownLineClasses(s) {
+  const b = new RangeSetBuilder();
+  const ctx = { inFence: false };
+
+  for (let p = 0; p <= s.doc.length;) {
+    const line = s.doc.lineAt(p);
+    const info = classifyLine(line.text, ctx);
+
+    let cls = 'cm-md-line cm-md-' + info.type;
+    if (/^h[1-6]$/.test(info.type)) cls += ' cm-md-heading';
+
+    b.add(line.from, line.from, Decoration.line({ class: cls }));
+
+    if (info.type === 'fence') ctx.inFence = !!info.opens;
+    if (line.to >= s.doc.length) break;
+    p = line.to + 1;
+  }
+
+  return b.finish();
+}
+
+// ============================================================
 // Public API — mount / swap / destroy editor.
 // ============================================================
 export function mountEditor(host, { noteId, awarenessUser }) {
@@ -498,6 +590,7 @@ export function mountEditor(host, { noteId, awarenessUser }) {
     markdown({ base: markdownLanguage }),
     syntaxHighlighting(yantaHighlight),
     syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
+    markdownLineClassField,
     indentOnInput(),
     bracketMatching(),
     highlightSelectionMatches(),

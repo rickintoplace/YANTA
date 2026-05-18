@@ -64,6 +64,7 @@
       <button class="icon-btn" id="btn-images" title="Image library (I)">
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
       </button>
+      <button class="storage-meter vault-indicator" id="vaultIndicator" hidden></button>
       <span class="storage-meter" id="storageMeter" title="Storage used"></span>
     </div>
   </aside>
@@ -263,6 +264,19 @@
   </div>
 </div>
 
-<script src="app.js"></script>
+<!-- YANTA is split into focused modules loaded in dependency order.
+     Each module declares its own globals; subsequent modules see them. -->
+<script src="src/01-core.js"></script>
+<script src="src/02-markdown.js"></script>
+<script src="src/03-editor.js"></script>
+<script src="src/04-format.js"></script>
+<script src="src/05-notes.js"></script>
+<script src="src/06-tree.js"></script>
+<script src="src/07-image.js"></script>
+<script src="src/08-io.js"></script>
+<script src="src/09-features.js"></script>
+<script src="src/10-graph.js"></script>
+<script src="src/11-vault.js"></script>
+<script src="src/12-main.js"></script>
 </body>
 </html>

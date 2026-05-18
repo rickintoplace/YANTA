@@ -235,9 +235,9 @@ export function renderPreview(md) {
     } else if (info.type === 'task') {
       const m = /^(\s*)([-*+])\s+\[([ xX])\]\s+(.*)$/.exec(line);
       const checked = m[3].toLowerCase() === 'x';
-      inner = `<div class="task" style="padding-left:${(m[1].length * 0.6) + 1.5}em">
+      inner = `<div class="task" data-line="${i}" style="padding-left:${(m[1].length * 0.6) + 1.5}em">
         <input type="checkbox" data-line="${i}" contenteditable="false" ${checked ? 'checked' : ''}/>
-        <span${checked ? ' style="text-decoration:line-through;color:var(--text-dim)"' : ''}>${renderInline(m[4])}</span>
+        <span class="task-label"${checked ? ' style="text-decoration:line-through;color:var(--text-dim)"' : ''}>${renderInline(m[4])}</span>
       </div>`;
     } else if (info.type === 'ul') {
       const m = /^(\s*)([-*+])\s+(.*)$/.exec(line);

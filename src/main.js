@@ -204,14 +204,35 @@ function bindEvents() {
 
   // Preview interactions
   $('preview').addEventListener('click', (e) => {
-    if (e.target.closest('a.wiki-link')) { handleWikilinkClick(e); return; }
-    if (e.target.matches('input[type=checkbox][data-line]')) {
-      const line = parseInt(e.target.dataset.line, 10);
-      toggleTaskLine(line, e.target.checked);
-    } else if (e.target.matches('.tag-ref')) {
-      state.activeTagFilter = e.target.dataset.tag;
-      renderTree();
+    if (e.target.closest('a.wiki-link')) {
+      handleWikilinkClick(e);
+      return;
     }
+
+    const tag = e.target.closest('.tag-ref');
+    if (tag) {
+      state.activeTagFilter = tag.dataset.tag;
+      renderTree();
+      return;
+    }
+
+    const task = e.target.closest('.task[data-line]');
+    if (!task) return;
+
+    // Normale Links in Tasks sollen weiterhin Links bleiben, nicht toggeln.
+    if (e.target.closest('a, button')) return;
+
+    const line = parseInt(task.dataset.line, 10);
+    if (Number.isNaN(line)) return;
+
+    const cb = task.querySelector('input[type=checkbox]');
+    if (!cb) return;
+
+    const checked = e.target.matches('input[type=checkbox]')
+      ? e.target.checked
+      : !cb.checked;
+
+    toggleTaskLine(line, checked);
   });
 
   // Global keyboard

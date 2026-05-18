@@ -1,0 +1,16 @@
+{
+  "name": "yanta-signaling",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Minimal y-webrtc compatible signaling server for YANTA",
+  "main": "server.cjs",
+  "scripts": {
+    "start": "node server.cjs"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

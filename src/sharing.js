@@ -74,6 +74,12 @@ export async function connectToShare(noteId, room, key) {
   state.liveShares.set(noteId, session);
   provider.awareness.on('change', () => {
     session.peers = Math.max(0, provider.awareness.getStates().size - 1);
+
+    const peerEl = $('sharePeers');
+    if (peerEl && !$('shareModal')?.hidden && state.currentNoteId === noteId) {
+      peerEl.textContent = String(session.peers);
+    }
+
     renderShareIndicator();
     renderTree();
   });

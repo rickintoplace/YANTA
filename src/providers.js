@@ -15,19 +15,26 @@ import { getNoteDoc } from './yjs.js';
 // Public signaling servers maintained by the y-webrtc project.
 // Users can override via settings (see core.js settings.signalingServers).
 const DEFAULT_SIGNALING = [
-  'wss://signaling.yjs.dev',
-  'wss://y-webrtc-signaling-eu.herokuapp.com',
-  'wss://y-webrtc-signaling-us.herokuapp.com',
+  'wss://yanta-signaling-932960946294.europe-west1.run.app/'
 ];
 
 export function createWebRTCProvider({ noteId, room, password, signaling }) {
   const { doc } = getNoteDoc(noteId);
+
   const provider = new WebrtcProvider(room, doc, {
     signaling: signaling && signaling.length ? signaling : DEFAULT_SIGNALING,
     password,
     maxConns: 20,
     filterBcConns: true,
+    peerOpts: {
+      config: {
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' }
+        ]
+      }
+    }
   });
+
   return {
     kind: 'webrtc',
     provider,

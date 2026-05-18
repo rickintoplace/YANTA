@@ -98,9 +98,18 @@ export async function openNote(id) {
 }
 
 function videoSrcIn(el) {
-  return el
+  const src = el
     ?.querySelector?.('.pv-embed-video iframe[src]')
     ?.getAttribute('src') || '';
+
+  if (!src) return '';
+
+  // URLs normalisieren, damit relative/absolute Varianten gleich verglichen werden.
+  try {
+    return new URL(src, location.href).href;
+  } catch {
+    return src;
+  }
 }
 
 function syncAttrs(target, source) {
@@ -118,13 +127,15 @@ function syncAttrs(target, source) {
 function setPreviewHtmlPreservingVideos(previewEl, html) {
   if (!previewEl) return;
 
-  // Kein altes Video vorhanden → normaler schneller Pfad.
-  if (!previewEl.querySelector('.pv-embed-video iframe[src]')) {
+  const hasOldVideo = !!previewEl.querySelector('.pv-embed-video iframe[src]');
+
+  // Kein Video im alten Preview: schneller Normalpfad.
+  if (!hasOldVideo) {
     previewEl.innerHTML = html;
     return;
   }
 
-  // Backlinks werden danach sowieso neu gerendert.
+  // Backlinks werden nachher wieder von renderBacklinks() erzeugt.
   previewEl.querySelector('.backlinks')?.remove();
 
   const tmp = document.createElement('div');
@@ -134,7 +145,9 @@ function setPreviewHtmlPreservingVideos(previewEl, html) {
     el.classList?.contains('pv-line')
   );
 
-  const newLines = [...tmp.children];
+  const newLines = [...tmp.children].filter((el) =>
+    el.classList?.contains('pv-line')
+  );
 
   const max = Math.max(oldLines.length, newLines.length);
 
@@ -155,9 +168,19 @@ function setPreviewHtmlPreservingVideos(previewEl, html) {
     const oldVideoSrc = videoSrcIn(oldLine);
     const newVideoSrc = videoSrcIn(newLine);
 
-    // Wichtig: Wenn dieselbe Video-URL an derselben Source-Line steht,
-    // die alte DOM-Node behalten. Dadurch bleibt das iframe erhalten.
-    if (oldVideoSrc && oldVideoSrc === newVideoSrc) {
+    const sameSourceLine =
+      oldLine.dataset.line === newLine.dataset.line;
+
+    const sameVideo =
+      oldVideoSrc &&
+      newVideoSrc &&
+      oldVideoSrc === newVideoSrc;
+
+    // Wichtig:
+    // Wenn auf derselben Source-Line derselbe Video-Embed steht,
+    // behalten wir die ALTE DOM-Node komplett.
+    // Dadurch bleibt das iframe leben und YouTube lädt nicht neu.
+    if (sameSourceLine && sameVideo) {
       syncAttrs(oldLine, newLine);
       continue;
     }

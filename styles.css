@@ -1283,46 +1283,6 @@ button.link { background: 0; border: 0; color: var(--accent); cursor: pointer; p
     visibility 0s linear 280ms;
 }
 
-@media (max-width: 1100px) {
-  .pane-preview {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-  }
-
-  .pane-preview > .pv-outline {
-    order: 1;
-
-    position: relative;
-
-    width: 100%;
-    max-width: 760px;
-
-    height: auto;
-    max-height: none;
-    overflow: visible;
-
-    margin: 0 0 18px;
-  }
-
-  .pane-preview > .pv-outline.collapsed {
-    width: 260px;
-    max-width: 260px;
-
-    margin-left: auto;
-    margin-right: calc((100% - min(100%, 760px)) / 2);
-    margin-bottom: 0;
-  }
-
-  .pane-preview > .preview {
-    order: 2;
-
-    width: 100%;
-    max-width: 760px;
-    margin: 0;
-  }
-}
-
 /* Falls die Outline innerhalb von .preview liegt */
 .preview > .pv-outline {
   height: auto;

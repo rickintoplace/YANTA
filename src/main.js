@@ -288,19 +288,31 @@ function bindEvents() {
 
 function toggleTaskLine(lineIndex, checked) {
   if (!state.currentNoteId) return;
-  const ytext = getNoteDoc(state.currentNoteId).doc.getText('markdown');
+
+  const { doc } = getNoteDoc(state.currentNoteId);
+  const ytext = doc.getText('markdown');
+
   const text = ytext.toString();
   const lines = text.split('\n');
   const line = lines[lineIndex];
   if (!line) return;
-  // Compute the absolute offset of the bracket char to flip.
+
   const m = /^(\s*[-*+]\s+\[)([ xX])(\])/.exec(line);
   if (!m) return;
+
   let lineStart = 0;
-  for (let i = 0; i < lineIndex; i++) lineStart += lines[i].length + 1;
+  for (let i = 0; i < lineIndex; i++) {
+    lineStart += lines[i].length + 1;
+  }
+
   const target = lineStart + m[1].length;
-  ytext.delete(target, 1);
-  ytext.insert(target, checked ? 'x' : ' ');
+  const newChar = checked ? 'x' : ' ';
+
+  // Wichtig: delete + insert als EIN Update, nicht zwei separate Updates.
+  doc.transact(() => {
+    ytext.delete(target, 1);
+    ytext.insert(target, newChar);
+  }, 'preview-task-toggle');
 }
 
 function handleGlobalKey(e) {

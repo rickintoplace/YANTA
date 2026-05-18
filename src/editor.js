@@ -5,7 +5,7 @@
 // widget, image preview widget, live cursors (when shared).
 // ============================================================
 
-import { EditorState, Compartment, RangeSetBuilder, StateField } from '@codemirror/state';
+import { EditorState, Compartment, RangeSetBuilder, StateField, StateEffect } from '@codemirror/state';
 import { EditorView, keymap, drawSelection, placeholder, ViewPlugin, Decoration, WidgetType, MatchDecorator } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
@@ -572,6 +572,83 @@ function buildMarkdownLineClasses(s) {
 }
 
 // ============================================================
+// Layout sync spacers.
+// The preview can naturally be taller than the editor for a source line
+// because rendered Markdown hides syntax or expands embeds/callouts.
+// These block widgets let us add invisible height after editor lines so
+// source-line Y positions can match the preview.
+// ============================================================
+
+const setEditorLineSpacersEffect = StateEffect.define();
+
+class LineSpacerWidget extends WidgetType {
+  constructor(height) {
+    super();
+    this.height = Math.max(0, Math.round(height || 0));
+  }
+
+  eq(other) {
+    return other.height === this.height;
+  }
+
+  toDOM() {
+    const n = document.createElement('div');
+    n.className = 'yanta-line-spacer';
+    n.style.height = this.height + 'px';
+    return n;
+  }
+
+  ignoreEvent() {
+    return true;
+  }
+}
+
+const editorLineSpacerField = StateField.define({
+  create() {
+    return Decoration.none;
+  },
+
+  update(deco, tr) {
+    deco = deco.map(tr.changes);
+
+    for (const e of tr.effects) {
+      if (e.is(setEditorLineSpacersEffect)) {
+        return buildEditorLineSpacers(tr.state, e.value || []);
+      }
+    }
+
+    return deco;
+  },
+
+  provide: (field) => EditorView.decorations.from(field),
+});
+
+function buildEditorLineSpacers(s, extraByLine) {
+  const b = new RangeSetBuilder();
+
+  for (let lineNo = 1; lineNo <= s.doc.lines; lineNo++) {
+    const extra = extraByLine[lineNo - 1] || 0;
+    if (extra < 1) continue;
+
+    const line = s.doc.line(lineNo);
+    b.add(line.to, line.to, Decoration.widget({
+      widget: new LineSpacerWidget(extra),
+      block: true,
+      side: 1,
+    }));
+  }
+
+  return b.finish();
+}
+
+export function setEditorLineSpacers(extraByLine) {
+  if (!view) return;
+  view.dispatch({
+    effects: setEditorLineSpacersEffect.of(extraByLine || []),
+  });
+}
+
+// ============================================================
 // Public API — mount / swap / destroy editor.
 // ============================================================
 export function mountEditor(host, { noteId, awarenessUser }) {
@@ -591,6 +668,7 @@ export function mountEditor(host, { noteId, awarenessUser }) {
     syntaxHighlighting(yantaHighlight),
     syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
     markdownLineClassField,
+    editorLineSpacerField,
     indentOnInput(),
     bracketMatching(),
     highlightSelectionMatches(),
@@ -610,6 +688,10 @@ export function mountEditor(host, { noteId, awarenessUser }) {
     EditorView.updateListener.of((u) => {
       if (u.selectionSet || u.focusChanged) {
         window.dispatchEvent(new CustomEvent('yanta-selection-change'));
+      }
+
+      if (u.docChanged || u.geometryChanged || u.viewportChanged) {
+        window.dispatchEvent(new CustomEvent('yanta-editor-geometry-change'));
       }
     }),
     keymap.of([

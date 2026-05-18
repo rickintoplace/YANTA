@@ -1169,3 +1169,55 @@ button.link { background: 0; border: 0; color: var(--accent); cursor: pointer; p
    ============================================================ */
 .cm-editor .cm-line { padding-top: 1px; padding-bottom: 1px; }
 .cm-editor .cm-line .ͼ-strong, .cm-editor .cm-line strong { font-weight: 700; }
+
+/* Source-line sync spacers */
+.yanta-line-spacer {
+  display: block;
+  width: 1px;
+  opacity: 0;
+  pointer-events: none;
+  user-select: none;
+}
+
+.cm-content::after {
+  content: "";
+  display: block;
+  height: var(--editor-sync-spacer, 0px);
+  pointer-events: none;
+}
+
+.preview::after {
+  content: "";
+  display: block;
+  height: var(--preview-sync-spacer, 0px);
+  pointer-events: none;
+}
+
+/* TOC must not shift source-line Y positions */
+.pane-preview {
+  position: relative;
+}
+
+.pane-preview > .pv-outline {
+  position: absolute;
+  top: 12px;
+  right: 16px;
+  z-index: 20;
+  width: min(280px, calc(100% - 32px));
+  max-height: min(50vh, 420px);
+  overflow: auto;
+  opacity: 0.96;
+  backdrop-filter: blur(8px);
+}
+
+.pane-preview > .pv-outline.collapsed {
+  width: auto;
+}
+
+.pane-preview > .pv-outline.collapsed .pv-outline-list {
+  display: none;
+}
+
+.pane-preview > .pv-outline:not(:hover) {
+  opacity: 0.72;
+}

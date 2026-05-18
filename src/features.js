@@ -69,27 +69,51 @@ export function renderBacklinks(noteId) {
 // -------- Outline ----------------------------------------------
 export function renderOutline(md) {
   const pv = $('preview');
-  if (!pv) return;
-  const old = pv.querySelector('.pv-outline');
+  const pane = $('panePreview');
+  if (!pv || !pane) return;
+
+  const old = pane.querySelector(':scope > .pv-outline');
   if (old) old.remove();
+
   const lines = md.split('\n');
   const headings = [];
   const ctx = { inFence: false };
+
   for (const line of lines) {
     const info = classifyLine(line, ctx);
-    if (info.type === 'fence') { ctx.inFence = !!info.opens; continue; }
+    if (info.type === 'fence') {
+      ctx.inFence = !!info.opens;
+      continue;
+    }
+
     const m = /^(#{1,6})\s+(.*)$/.exec(line);
-    if (m) headings.push({ level: m[1].length, text: m[2].trim(), slug: headingSlug(m[2].trim()) });
+    if (m) {
+      headings.push({
+        level: m[1].length,
+        text: m[2].trim(),
+        slug: headingSlug(m[2].trim()),
+      });
+    }
   }
+
   if (headings.length < 2) return;
+
   const minLvl = Math.min(...headings.map((h) => h.level));
   const wrap = el('div', { class: 'pv-outline', contenteditable: 'false' });
-  const head = el('div', { class: 'pv-outline-head', onclick: () => wrap.classList.toggle('collapsed') });
+
+  const head = el('div', {
+    class: 'pv-outline-head',
+    onclick: () => wrap.classList.toggle('collapsed'),
+  });
+
   const chev = el('span', { class: 'pv-outline-chev' });
   chev.innerHTML = lucide('chevron-down', 12);
+
   head.append(chev, el('span', {}, `Outline · ${headings.length} headings`));
   wrap.append(head);
+
   const list = el('div', { class: 'pv-outline-list' });
+
   for (const h of headings) {
     list.append(el('a', {
       class: 'pv-outline-item',
@@ -101,8 +125,12 @@ export function renderOutline(md) {
       },
     }, h.text));
   }
+
   wrap.append(list);
-  pv.insertBefore(wrap, pv.firstChild);
+
+  // Important: append to panePreview, not into article.preview.
+  // This makes TOC an overlay and prevents it from shifting source lines.
+  pane.append(wrap);
 }
 
 // -------- Wikilink click + hover preview -----------------------

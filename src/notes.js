@@ -200,11 +200,16 @@ export function rebuildWikilinkIndex() {
 // ---------------- preview + mirror ----------------------------
 export const schedulePreview = debounce(() => {
   if (!state.currentNoteId) return;
+
   const md = noteMarkdown(state.currentNoteId);
   $('preview').innerHTML = renderPreview(md);
   renderOutline(md);
   renderBacklinks(state.currentNoteId);
   updateWordCount(md);
+
+  requestAnimationFrame(() => {
+    window.dispatchEvent(new CustomEvent('yanta-preview-rendered'));
+  });
 }, 80);
 
 const scheduleMirror = debounce((note) => {

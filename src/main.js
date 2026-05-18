@@ -8,7 +8,7 @@ import { openNote, newNote, newFolder, saveCurrentNote, deleteCurrentNote, toggl
 import { renderTree, renderTagCloud, showMenu, closeMenu, currentFolderForNew } from './tree.js';
 import { renderBacklinks, renderOutline, setupWikilinkHover, handleWikilinkClick, openPalette, closePalette, buildCommandList, paletteMove, paletteAccept, paletteFilter } from './features.js';
 import { openImageModal, closeImageModal, setupImage, pickImageFile, cleanupUnusedImages, insertImageAsRef } from './image.js';
-import { focusEditorEnd, getView } from './editor.js';
+import { focusEditorEnd, getView, setEditorLineSpacers } from './editor.js';
 import { setupFormatToolbar } from './format-menu.js';
 import { exportAsZip, exportNoteAsMd, exportBundle, exportEveryNoteMd, openExportMenu, importFiles, importItems, walkEntry } from './io.js';
 import { syncRestore, syncConnect, syncDisconnect, syncFull, openSyncSetup, closeSyncSetup, syncMenu } from './sync.js';
@@ -372,84 +372,109 @@ function setupDivider() {
 
 function setupPaneScrollSync() {
   const pvPane = $('panePreview');
-  if (!pvPane) return;
+  const preview = $('preview');
+  if (!pvPane || !preview) return;
 
-  let syncing = false;
+  const sync = {
+    syncing: false,
+    raf: 0,
+    measureTimer: 0,
+    editorTops: [],
+    previewTops: [],
+    maxEditor: 1,
+    maxPreview: 1,
+  };
+
+  const scheduleMeasure = () => {
+    clearTimeout(sync.measureTimer);
+    sync.measureTimer = setTimeout(() => {
+      requestAnimationFrame(() => measureAndAlign(sync));
+    }, 40);
+  };
+
+  function mapScroll(sourceTop, sourceTops, targetTops, fallbackRatio, targetMax) {
+    if (!sourceTops.length || !targetTops.length) {
+      return fallbackRatio * targetMax;
+    }
+
+    let lo = 0;
+    let hi = sourceTops.length - 1;
+
+    while (lo < hi) {
+      const mid = Math.ceil((lo + hi) / 2);
+      if (sourceTops[mid] <= sourceTop) lo = mid;
+      else hi = mid - 1;
+    }
+
+    const i = lo;
+    const a0 = sourceTops[i] ?? 0;
+    const a1 = sourceTops[i + 1] ?? sync.maxEditor;
+    const b0 = targetTops[i] ?? 0;
+    const b1 = targetTops[i + 1] ?? targetMax;
+
+    const spanA = Math.max(1, a1 - a0);
+    const t = Math.max(0, Math.min(1, (sourceTop - a0) / spanA));
+
+    return b0 + t * (b1 - b0);
+  }
 
   function editorToPreview() {
-    if (syncing) return;
+    if (sync.syncing) return;
 
     const v = getView();
-    if (!v || !pvPane || state.view === 'preview') return;
+    if (!v || state.view === 'preview') return;
 
     const scroller = v.scrollDOM;
     if (!scroller) return;
 
-    syncing = true;
+    cancelAnimationFrame(sync.raf);
+    sync.raf = requestAnimationFrame(() => {
+      sync.syncing = true;
 
-    requestAnimationFrame(() => {
-      try {
-        const block = v.lineBlockAtHeight(scroller.scrollTop);
-        const lineNo = v.state.doc.lineAt(block.from).number - 1;
-        const lineEl = pvPane.querySelector(`.pv-line[data-line="${lineNo}"]`);
+      const ratio = scroller.scrollTop / Math.max(1, sync.maxEditor);
+      const target = mapScroll(
+        scroller.scrollTop,
+        sync.editorTops,
+        sync.previewTops,
+        ratio,
+        sync.maxPreview
+      );
 
-        if (lineEl) {
-          const intra = Math.max(0, scroller.scrollTop - block.top);
-          pvPane.scrollTop = lineEl.offsetTop + intra;
-        } else {
-          const maxA = Math.max(1, scroller.scrollHeight - scroller.clientHeight);
-          const maxB = Math.max(1, pvPane.scrollHeight - pvPane.clientHeight);
-          pvPane.scrollTop = (scroller.scrollTop / maxA) * maxB;
-        }
-      } finally {
-        syncing = false;
-      }
+      pvPane.scrollTop = target;
+
+      requestAnimationFrame(() => {
+        sync.syncing = false;
+      });
     });
   }
 
   function previewToEditor() {
-    if (syncing) return;
+    if (sync.syncing) return;
 
     const v = getView();
-    if (!v || !pvPane || state.view === 'edit') return;
+    if (!v || state.view === 'edit') return;
 
     const scroller = v.scrollDOM;
     if (!scroller) return;
 
-    syncing = true;
+    cancelAnimationFrame(sync.raf);
+    sync.raf = requestAnimationFrame(() => {
+      sync.syncing = true;
 
-    requestAnimationFrame(() => {
-      try {
-        const top = pvPane.scrollTop;
-        const lines = [...pvPane.querySelectorAll('.pv-line[data-line]')];
+      const ratio = pvPane.scrollTop / Math.max(1, sync.maxPreview);
+      const target = mapScroll(
+        pvPane.scrollTop,
+        sync.previewTops,
+        sync.editorTops,
+        ratio,
+        sync.maxEditor
+      );
 
-        let chosen = lines[0];
-        for (const el of lines) {
-          if (el.offsetTop + el.offsetHeight > top + 1) {
-            chosen = el;
-            break;
-          }
-        }
+      scroller.scrollTop = target;
 
-        if (chosen) {
-          const lineNo = Math.min(
-            v.state.doc.lines,
-            Math.max(1, parseInt(chosen.dataset.line, 10) + 1)
-          );
-
-          const line = v.state.doc.line(lineNo);
-          const block = v.lineBlockAt(line.from);
-          const intra = Math.max(0, top - chosen.offsetTop);
-
-          scroller.scrollTop = block.top + intra;
-        } else {
-          const maxA = Math.max(1, pvPane.scrollHeight - pvPane.clientHeight);
-          const maxB = Math.max(1, scroller.scrollHeight - scroller.clientHeight);
-          scroller.scrollTop = (pvPane.scrollTop / maxA) * maxB;
-        }
-      } finally {
-        syncing = false;
-      }
+      requestAnimationFrame(() => {
+        sync.syncing = false;
+      });
     });
   }
 
@@ -459,7 +484,145 @@ function setupPaneScrollSync() {
 
     if (e.target === v.scrollDOM) editorToPreview();
     else if (e.target === pvPane) previewToEditor();
-  }, true);
+  }, { capture: true, passive: true });
+
+  window.addEventListener('resize', scheduleMeasure);
+  window.addEventListener('yanta-preview-rendered', scheduleMeasure);
+  window.addEventListener('yanta-editor-geometry-change', scheduleMeasure);
+
+  // Images/videos can change line heights after load.
+  preview.addEventListener('load', scheduleMeasure, true);
+
+  scheduleMeasure();
+}
+
+function measureAndAlign(sync) {
+  const v = getView();
+  const pvPane = $('panePreview');
+  const preview = $('preview');
+
+  if (!v || !pvPane || !preview) return;
+
+  const scroller = v.scrollDOM;
+  const doc = v.state.doc;
+  const lineCount = doc.lines;
+
+  // Reset previous dynamic spacers before measuring natural heights.
+  setEditorLineSpacers([]);
+  preview.style.setProperty('--preview-sync-spacer', '0px');
+  v.dom.style.setProperty('--editor-sync-spacer', '0px');
+
+  for (const el of preview.querySelectorAll('.pv-line[data-line]')) {
+    el.style.minHeight = '';
+  }
+
+  requestAnimationFrame(() => {
+    const editorHeights = new Array(lineCount).fill(0);
+    const previewHeights = new Array(lineCount).fill(0);
+    const previewLines = new Array(lineCount).fill(null);
+
+    for (let i = 1; i <= lineCount; i++) {
+      const line = doc.line(i);
+      const block = v.lineBlockAt(line.from);
+      editorHeights[i - 1] = Math.ceil(block.height || 0);
+    }
+
+    for (const el of preview.querySelectorAll('.pv-line[data-line]')) {
+      const i = parseInt(el.dataset.line, 10);
+      if (Number.isNaN(i) || i < 0 || i >= lineCount) continue;
+
+      previewLines[i] = el;
+      previewHeights[i] = Math.ceil(el.getBoundingClientRect().height || 0);
+    }
+
+    const editorExtra = new Array(lineCount).fill(0);
+
+    for (let i = 0; i < lineCount; i++) {
+      const target = Math.max(
+        editorHeights[i] || 0,
+        previewHeights[i] || 0,
+        parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--line-block')) || 0
+      );
+
+      const pvLine = previewLines[i];
+      if (pvLine) pvLine.style.minHeight = target + 'px';
+
+      editorExtra[i] = Math.max(0, target - (editorHeights[i] || 0));
+    }
+
+    setEditorLineSpacers(editorExtra);
+
+    // Wait until CodeMirror has applied spacer widgets, then cache maps.
+    requestAnimationFrame(() => {
+      rebuildScrollMaps(sync);
+      equalizeScrollHeights(sync);
+      rebuildScrollMaps(sync);
+    });
+  });
+}
+
+function rebuildScrollMaps(sync) {
+  const v = getView();
+  const pvPane = $('panePreview');
+  const preview = $('preview');
+
+  if (!v || !pvPane || !preview) return;
+
+  const scroller = v.scrollDOM;
+  const doc = v.state.doc;
+  const lineCount = doc.lines;
+
+  const editorTops = new Array(lineCount).fill(0);
+  const previewTops = new Array(lineCount).fill(0);
+
+  for (let i = 1; i <= lineCount; i++) {
+    const line = doc.line(i);
+    const block = v.lineBlockAt(line.from);
+    editorTops[i - 1] = Math.round(block.top || 0);
+  }
+
+  const paneRect = pvPane.getBoundingClientRect();
+
+  for (const el of preview.querySelectorAll('.pv-line[data-line]')) {
+    const i = parseInt(el.dataset.line, 10);
+    if (Number.isNaN(i) || i < 0 || i >= lineCount) continue;
+
+    const r = el.getBoundingClientRect();
+    previewTops[i] = Math.round(r.top - paneRect.top + pvPane.scrollTop);
+  }
+
+  sync.editorTops = editorTops;
+  sync.previewTops = previewTops;
+  sync.maxEditor = Math.max(1, scroller.scrollHeight - scroller.clientHeight);
+  sync.maxPreview = Math.max(1, pvPane.scrollHeight - pvPane.clientHeight);
+}
+
+function equalizeScrollHeights(sync) {
+  const v = getView();
+  const pvPane = $('panePreview');
+  const preview = $('preview');
+
+  if (!v || !pvPane || !preview) return;
+
+  const scroller = v.scrollDOM;
+
+  preview.style.setProperty('--preview-sync-spacer', '0px');
+  v.dom.style.setProperty('--editor-sync-spacer', '0px');
+
+  const editorMax = Math.max(0, scroller.scrollHeight - scroller.clientHeight);
+  const previewMax = Math.max(0, pvPane.scrollHeight - pvPane.clientHeight);
+  const delta = Math.round(Math.abs(editorMax - previewMax));
+
+  if (delta < 2) return;
+
+  if (editorMax < previewMax) {
+    v.dom.style.setProperty('--editor-sync-spacer', delta + 'px');
+  } else {
+    preview.style.setProperty('--preview-sync-spacer', delta + 'px');
+  }
+
+  sync.maxEditor = Math.max(1, scroller.scrollHeight - scroller.clientHeight);
+  sync.maxPreview = Math.max(1, pvPane.scrollHeight - pvPane.clientHeight);
 }
 
 init().catch((e) => {

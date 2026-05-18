@@ -1101,18 +1101,8 @@ button.link { background: 0; border: 0; color: var(--accent); cursor: pointer; p
 
 /* ============================================================
    Editor styling polish — make markdown look great in the editor
-   pane so it visually mirrors the preview.
+   pane so it visually mirrors the preview. Heading sizes etc. are
+   driven by yantaHighlight in editor.js; this is just spacing.
    ============================================================ */
-.cm-editor .tok-heading { letter-spacing: -0.01em; }
-.cm-editor .cm-line {
-  padding-top: 1px; padding-bottom: 1px;
-}
-/* Code blocks: a subtle background + monospace look. */
-.cm-editor .tok-monospace { color: var(--text-dim); }
-.cm-editor .cm-line:has(.tok-monospace) { background: var(--bg-elev); }
-/* Quote: bar on the left. */
-.cm-editor .cm-line:has(.tok-quote) {
-  box-shadow: inset 3px 0 var(--accent);
-  padding-left: 14px;
-  color: var(--text-dim);
-}
+.cm-editor .cm-line { padding-top: 1px; padding-bottom: 1px; }
+.cm-editor .cm-line .ͼ-strong, .cm-editor .cm-line strong { font-weight: 700; }

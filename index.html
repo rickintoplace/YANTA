@@ -7,6 +7,30 @@
 <title>YANTA</title>
 <link rel="icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%236ea8fe'/><path d='M9 9l7 9 7-9M16 18v6' stroke='white' stroke-width='2.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>" />
 <link rel="stylesheet" href="styles.css" />
+<!--
+  Import map: pin every dependency to a single esm.sh URL so identity
+  checks (instanceof, ===) inside CodeMirror / Yjs don't fail because
+  two transitively-loaded copies disagree on the same class.
+-->
+<script type="importmap">
+{
+  "imports": {
+    "yjs": "https://esm.sh/yjs@13.6.21",
+    "y-indexeddb": "https://esm.sh/y-indexeddb@9.0.12?deps=yjs@13.6.21",
+    "y-webrtc": "https://esm.sh/y-webrtc@10.3.0?deps=yjs@13.6.21",
+    "y-codemirror.next": "https://esm.sh/y-codemirror.next@0.3.5?deps=yjs@13.6.21,@codemirror/state@6.4.1,@codemirror/view@6.26.3",
+    "@codemirror/state": "https://esm.sh/@codemirror/state@6.4.1",
+    "@codemirror/view": "https://esm.sh/@codemirror/view@6.26.3?deps=@codemirror/state@6.4.1",
+    "@codemirror/language": "https://esm.sh/@codemirror/language@6.10.2?deps=@codemirror/state@6.4.1,@codemirror/view@6.26.3,@lezer/highlight@1.2.0",
+    "@codemirror/commands": "https://esm.sh/@codemirror/commands@6.6.0?deps=@codemirror/state@6.4.1,@codemirror/view@6.26.3,@codemirror/language@6.10.2",
+    "@codemirror/lang-markdown": "https://esm.sh/@codemirror/lang-markdown@6.2.5?deps=@codemirror/state@6.4.1,@codemirror/view@6.26.3,@codemirror/language@6.10.2",
+    "@codemirror/autocomplete": "https://esm.sh/@codemirror/autocomplete@6.16.2?deps=@codemirror/state@6.4.1,@codemirror/view@6.26.3",
+    "@codemirror/search": "https://esm.sh/@codemirror/search@6.5.6?deps=@codemirror/state@6.4.1,@codemirror/view@6.26.3",
+    "@lezer/highlight": "https://esm.sh/@lezer/highlight@1.2.0",
+    "qrcode-generator": "https://esm.sh/qrcode-generator@1.4.4"
+  }
+}
+</script>
 </head>
 <body>
 <div class="app" id="app">
@@ -75,6 +99,9 @@
       <div class="chips" id="chips"></div>
       <input id="tagInput" class="tag-input" placeholder="+ tag" />
       <div class="head-actions">
+        <button class="icon-btn" id="btn-share" title="Share this note live">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/></svg>
+        </button>
         <button class="icon-btn" id="btn-pin" title="Pin">
           <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 17v5M5 9l7-7 7 7v6H5z"/></svg>
         </button>
@@ -101,12 +128,7 @@
 
     <section class="panes" id="panes">
       <div class="pane pane-edit" id="paneEdit">
-        <div class="editor"
-             id="editor"
-             contenteditable="true"
-             spellcheck="true"
-             autocorrect="off"
-             autocapitalize="off"></div>
+        <div class="editor" id="editor"></div>
       </div>
       <div class="divider" id="divider"></div>
       <div class="pane pane-preview" id="panePreview">
@@ -202,28 +224,8 @@
   </div>
 </div>
 
-<!-- Floating format toolbar -->
-<div class="format-toolbar" id="formatToolbar" hidden>
-  <button class="b" data-fmt="bold" title="Bold (Ctrl+B)">B</button>
-  <button class="i" data-fmt="italic" title="Italic (Ctrl+I)">I</button>
-  <button class="s" data-fmt="strike" title="Strikethrough">S</button>
-  <button class="code" data-fmt="code" title="Inline code">&lt;/&gt;</button>
-  <span class="sep"></span>
-  <button data-fmt="h1" title="Heading 1">H1</button>
-  <button data-fmt="h2" title="Heading 2">H2</button>
-  <button data-fmt="h3" title="Heading 3">H3</button>
-  <span class="sep"></span>
-  <button data-fmt="quote" title="Quote">&gt;</button>
-  <button data-fmt="ul" title="Bullet list">•</button>
-  <button data-fmt="task" title="Task">☐</button>
-  <button data-fmt="link" title="Link">🔗</button>
-</div>
-
 <!-- Hover preview for wikilinks -->
 <div class="hover-preview" id="hoverPreview" hidden></div>
-
-<!-- Wikilink / command autocomplete -->
-<div class="autocomplete" id="autocomplete" hidden></div>
 
 <!-- Command palette / quick switcher -->
 <div class="palette" id="palette" hidden>
@@ -257,22 +259,51 @@
       <button class="icon-btn" data-sync-close>&times;</button>
     </header>
     <div class="modal-body">
-      <p style="margin-bottom:12px">YANTA keeps your notes in a folder of your choice as plain <code>.md</code> files. Pick that folder once, then use any sync tool you already trust.</p>
+      <p style="margin-bottom:12px">YANTA keeps your notes in a folder on disk. Pick that folder once — then use any sync tool you trust to mirror it between your devices.</p>
       <div class="sync-recommend">
         <div class="sync-rec-head">Recommended: Syncthing</div>
         <div class="sync-rec-body">Free · open-source · end-to-end encrypted · peer-to-peer · no cloud account.</div>
       </div>
       <ol class="sync-steps">
         <li><strong>Install Syncthing</strong> on this device and any device you want to sync with. <a href="https://syncthing.net" target="_blank" rel="noopener">syncthing.net</a></li>
-        <li><strong>Add a folder</strong> in Syncthing — anywhere you like (e.g. <code>~/Documents/YANTA</code>) — and share it between your devices.</li>
+        <li><strong>Add a folder</strong> in Syncthing — anywhere you like (e.g. <code>~/Documents/YANTA-Sync</code>) — and share it between your devices.</li>
         <li><strong>Pick that same folder</strong> below. Repeat on each device.</li>
       </ol>
       <div class="sync-altmodes" style="margin-top:14px;font-size:12px;color:var(--text-dim)">
-        Other things that work just as well: Dropbox, iCloud Drive, Google Drive, an SMB share, a USB stick — anything that keeps the folder in sync.
+        Also works with: Dropbox, iCloud Drive, Google Drive, an SMB share, a USB stick — anything that keeps the folder in sync. Inside the folder YANTA writes plain <code>.md</code> files alongside a small <code>.yanta/</code> directory of conflict-free sync data.
       </div>
       <div class="compress-actions" style="margin-top:18px">
         <button class="btn" data-sync-close>Maybe later</button>
         <button class="btn primary" id="syncSetupPick">Pick folder</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Live sharing modal -->
+<div class="modal" id="shareModal" hidden>
+  <div class="modal-card" style="width:min(520px,92vw)">
+    <header class="modal-head">
+      <h3>Share live: <span id="shareNoteTitle"></span></h3>
+      <button class="icon-btn" data-share-close>&times;</button>
+    </header>
+    <div class="modal-body">
+      <p style="margin-bottom:10px;font-size:13px;color:var(--text-dim)">
+        Anyone with this link can join this note and edit it in real time.
+        The link itself contains an end-to-end encryption key — sync servers can't read your content.
+      </p>
+      <div class="share-qr-wrap" id="shareQr" style="display:flex;justify-content:center;margin:18px 0"></div>
+      <label style="display:block;font-size:12px;color:var(--text-dim);margin-bottom:4px">Share link</label>
+      <div style="display:flex;gap:8px">
+        <input id="shareLink" class="text-input" readonly style="flex:1" />
+        <button class="btn primary" id="btn-share-copy">Copy</button>
+      </div>
+      <div style="margin-top:14px;font-size:13px;color:var(--text-dim)">
+        Live peers: <strong id="sharePeers">0</strong>
+      </div>
+      <div class="compress-actions" style="margin-top:18px">
+        <button class="btn danger" id="btn-share-stop">Stop sharing</button>
+        <button class="btn" data-share-close>Done</button>
       </div>
     </div>
   </div>
@@ -308,19 +339,6 @@
   </div>
 </div>
 
-<!-- YANTA is split into focused modules loaded in dependency order.
-     Each module declares its own globals; subsequent modules see them. -->
-<script src="src/01-core.js"></script>
-<script src="src/02-markdown.js"></script>
-<script src="src/03-editor.js"></script>
-<script src="src/04-format.js"></script>
-<script src="src/05-notes.js"></script>
-<script src="src/06-tree.js"></script>
-<script src="src/07-image.js"></script>
-<script src="src/08-io.js"></script>
-<script src="src/09-features.js"></script>
-<script src="src/10-graph.js"></script>
-<script src="src/11-sync.js"></script>
-<script src="src/12-main.js"></script>
+<script type="module" src="src/main.js"></script>
 </body>
 </html>

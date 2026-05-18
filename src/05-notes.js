@@ -109,6 +109,8 @@ async function saveCurrentNote() {
   note.body = newBody;
   note.updated = Date.now();
   await store.notes.put(note);
+  // Mirror to the connected vault folder, if any
+  if (typeof vaultWriteNote === 'function') vaultWriteNote(note);
   if (titleChanged) {
     rebuildWikilinkIndex();
     schedulePreview();

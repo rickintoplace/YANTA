@@ -39,6 +39,7 @@ async function init() {
   buildCommandList();
   setupGraphInteractions();
   setupWikilinkHover();
+  await vaultRestore();
 
   renderTree();
 
@@ -137,6 +138,9 @@ function bindEvents() {
     if (n) exportNoteAsMd(n);
   });
   $('btn-images').addEventListener('click', () => { openImageModal(); setTab('library'); });
+
+  // Vault indicator → menu
+  $('vaultIndicator').addEventListener('click', (e) => { e.stopPropagation(); vaultMenu(e.currentTarget); });
   $('btn-settings').addEventListener('click', () => {
     toast('Settings: theme & view persist automatically');
   });

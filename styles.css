@@ -223,6 +223,16 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .storage-meter {
   margin-left: auto; font-size: 11px; color: var(--text-faint);
 }
+.vault-indicator {
+  margin-left: 0; background: transparent; border: 0; color: var(--text-faint);
+  display: inline-flex; align-items: center; gap: 4px; cursor: pointer;
+  padding: 3px 8px; border-radius: 999px;
+  font-size: 11px; line-height: 1;
+}
+.vault-indicator:hover { background: var(--bg-elev-2); color: var(--text); }
+.vault-indicator.connected { color: var(--green); background: rgba(74,222,128,0.07); }
+.vault-indicator.connected:hover { background: rgba(74,222,128,0.13); }
+.vault-indicator svg { display: inline-block; }
 
 /* ---------- Main ---------- */
 .main {

@@ -437,6 +437,10 @@ function buildCommandList() {
     { label: 'Import files (md/json/zip)…', icon: 'upload', action: () => $('importFile').click() },
     { label: 'Import folder…', icon: 'upload', action: () => $('importFolder').click() },
     { label: 'Delete current note', icon: 'trash', action: deleteCurrentNote },
+    { label: 'Vault: connect folder…', icon: 'git-branch', action: () => vaultConnect() },
+    { label: 'Vault: sync everything now', icon: 'refresh', action: () => vaultSyncAll() },
+    { label: 'Vault: pull external changes', icon: 'download', action: () => vaultPull() },
+    { label: 'Vault: disconnect', icon: 'x', action: () => vaultDisconnect() },
   ];
 }
 

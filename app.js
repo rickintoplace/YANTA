@@ -818,31 +818,67 @@ function setCursorPos(pos) {
 }
 
 /* ----------------------------------------------------------------
-   Undo / redo — captures snapshots of the markdown source whenever we
-   mutate the editor's DOM directly (image insert, image delete,
-   wikilink autocomplete accept, format-toolbar action, etc.).
-   For normal typing the browser's native undo on contenteditable works
-   fine; this stack covers the structural operations that bypass it.
+   Undo / redo
+
+   Model: undoStack holds checkpoint snapshots of lastMarkdown,
+   chronologically with the *current* state always on top. To undo,
+   pop the top (current) onto redoStack and apply the new top.
+
+   Two paths feed snapshots in:
+     · pushUndo()       — called immediately before any structural
+                          mutation (image insert/delete, paste, format).
+     · pushUndoDebounced() — called from the typing input handler;
+                             collapses a typing burst into one snapshot.
 ---------------------------------------------------------------- */
 const undoStack = [];
 const redoStack = [];
-const UNDO_MAX = 100;
-function pushUndo() {
+const UNDO_MAX = 200;
+let _lastSnapshotMd = '';
+let _lastSnapshotNote = null;
+
+function resetUndo() {
+  undoStack.length = 0;
+  redoStack.length = 0;
+  _lastSnapshotMd = lastMarkdown;
+  _lastSnapshotNote = state.currentNoteId;
+  // Seed with current state so first undo reverts to "empty state"
+  if (state.currentNoteId) {
+    undoStack.push({ id: state.currentNoteId, md: lastMarkdown });
+  }
+}
+
+function _snap() {
   if (!state.currentNoteId) return;
-  const top = undoStack[undoStack.length - 1];
-  if (top && top.id === state.currentNoteId && top.md === lastMarkdown) return;
+  if (lastMarkdown === _lastSnapshotMd && state.currentNoteId === _lastSnapshotNote) return;
+  // If we're snapshotting after the user moved on from a redo state,
+  // drop the redo stack — the redo timeline has diverged.
+  redoStack.length = 0;
   undoStack.push({ id: state.currentNoteId, md: lastMarkdown });
   if (undoStack.length > UNDO_MAX) undoStack.shift();
-  redoStack.length = 0;
+  _lastSnapshotMd = lastMarkdown;
+  _lastSnapshotNote = state.currentNoteId;
 }
+
+// Force an immediate snapshot. Use before structural mutations.
+function pushUndo() { _snap(); }
+
+// Debounced (~500ms) snapshot — used from the typing path so a burst
+// of keystrokes turns into a single undo step.
+const pushUndoDebounced = debounce(_snap, 500);
+
 function performUndo() {
-  if (!undoStack.length) return false;
-  const entry = undoStack.pop();
-  if (entry.id !== state.currentNoteId) return false;
-  redoStack.push({ id: state.currentNoteId, md: lastMarkdown });
-  lastMarkdown = entry.md;
+  // Make sure the current state is captured before we step back.
+  _snap();
+  if (undoStack.length < 2) return false;
+  const current = undoStack.pop();
+  const prev = undoStack[undoStack.length - 1];
+  if (prev.id !== state.currentNoteId) return false;
+  redoStack.push(current);
+  lastMarkdown = prev.md;
+  _lastSnapshotMd = lastMarkdown;
   renderEditor(lastMarkdown);
   $('preview').innerHTML = renderPreview(lastMarkdown);
+  renderOutline();
   renderBacklinks();
   syncLineHeights();
   markDirty(); scheduleSave();
@@ -850,12 +886,15 @@ function performUndo() {
 }
 function performRedo() {
   if (!redoStack.length) return false;
-  const entry = redoStack.pop();
-  if (entry.id !== state.currentNoteId) return false;
-  undoStack.push({ id: state.currentNoteId, md: lastMarkdown });
-  lastMarkdown = entry.md;
+  const next = redoStack[redoStack.length - 1];
+  if (next.id !== state.currentNoteId) return false;
+  redoStack.pop();
+  undoStack.push(next);
+  lastMarkdown = next.md;
+  _lastSnapshotMd = lastMarkdown;
   renderEditor(lastMarkdown);
   $('preview').innerHTML = renderPreview(lastMarkdown);
+  renderOutline();
   renderBacklinks();
   syncLineHeights();
   markDirty(); scheduleSave();
@@ -906,6 +945,10 @@ function handleEditorInput() {
     checkWikiAutocomplete();
     return;
   }
+  // The previous _lastSnapshotMd hasn't been captured into the undo
+  // stack yet — schedule a snapshot so the typing burst collapses into
+  // one undo step.
+  pushUndoDebounced();
   lastMarkdown = md;
   schedulePreview();
   scheduleLazyEditorRender();
@@ -1091,6 +1134,7 @@ function wrapSelectionInSource(text, openMark, closeMark) {
   if (at < 0) return;
   lines[idx] = line.slice(0, at) + openMark + text + closeMark + line.slice(at + text.length);
   lastMarkdown = lines.join('\n');
+  pushUndo();
   renderEditor(lastMarkdown);
   $('preview').innerHTML = renderPreview(lastMarkdown);
   renderBacklinks();
@@ -1107,6 +1151,7 @@ function applyLinePrefix(fmt) {
   const prefixes = { h1: '# ', h2: '## ', h3: '### ', quote: '> ', ul: '- ', task: '- [ ] ' };
   lines[idx] = (prefixes[fmt] || '') + line;
   lastMarkdown = lines.join('\n');
+  pushUndo();
   renderEditor(lastMarkdown);
   $('preview').innerHTML = renderPreview(lastMarkdown);
   renderBacklinks();
@@ -1148,6 +1193,9 @@ function newFolder(parentId = null) {
   renderTree();
 }
 
+// History entry shape: { noteId }. Set _navSuppressPush=true to skip
+// pushState (used when reacting to popstate or initial load).
+let _navSuppressPush = false;
 async function openNote(id) {
   if (state.currentNoteId === id) return;
   if (state.dirty) await saveCurrentNote();
@@ -1155,6 +1203,11 @@ async function openNote(id) {
   if (!note) return;
   state.currentNoteId = id;
   store.settings.set('lastNoteId', id);
+  if (!_navSuppressPush) {
+    history.pushState({ noteId: id }, '', '#' + encodeURIComponent(id));
+  }
+  // Reset undo stack per note — keeps things predictable.
+  resetUndo();
   $('noteTitle').value = note.title || '';
   lastMarkdown = note.body || '';
   renderEditor(lastMarkdown);
@@ -1784,12 +1837,13 @@ function insertAtCursor(text) {
       : inserts[inserts.length - 1].length;
     newPos = { lineIndex: newLineIndex, offset };
   }
-  // Push to undo stack BEFORE mutating lastMarkdown
-  pushUndo();
   lastMarkdown = md;
+  pushUndo();  // snapshot the post-insert state
   renderEditor(md);
   setCursorPos(newPos);
   $('preview').innerHTML = renderPreview(md);
+  renderOutline();
+  renderBacklinks();
   syncLineHeights();
   markDirty();
   scheduleSave();
@@ -3163,13 +3217,27 @@ async function init() {
 
   renderTree();
 
-  // Restore the last opened note; fall back to most recently updated,
-  // and finally create a welcome note if the vault is empty.
+  // Restore from URL hash, then last opened note, then most-recent,
+  // then create a welcome note if the vault is empty.
+  const hashId = decodeURIComponent((window.location.hash || '').slice(1));
   const lastId = await store.settings.get('lastNoteId', null);
-  let toOpen = lastId && state.notes.has(lastId) ? state.notes.get(lastId) : null;
+  let toOpen = null;
+  if (hashId && state.notes.has(hashId)) toOpen = state.notes.get(hashId);
+  if (!toOpen && lastId && state.notes.has(lastId)) toOpen = state.notes.get(lastId);
   if (!toOpen) toOpen = [...state.notes.values()].sort((a, b) => b.updated - a.updated)[0];
+  _navSuppressPush = true;
   if (toOpen) openNote(toOpen.id);
   else createWelcomeNote();
+  _navSuppressPush = false;
+
+  // popstate: user pressed back/forward
+  window.addEventListener('popstate', (e) => {
+    const id = (e.state && e.state.noteId) || decodeURIComponent((window.location.hash || '').slice(1));
+    if (id && state.notes.has(id) && id !== state.currentNoteId) {
+      _navSuppressPush = true;
+      openNote(id).finally(() => { _navSuppressPush = false; });
+    }
+  });
 
   bindEvents();
   editor.dataset.placeholder = 'Start writing in Markdown…';
@@ -3524,10 +3592,10 @@ function handleEditorKey(e) {
       const lineDiv = blocks[pos.lineIndex];
       if (lineDiv && lineDiv.dataset.type === 'image') {
         e.preventDefault();
-        pushUndo();
         const lines = lastMarkdown.split('\n');
         lines.splice(pos.lineIndex, 1);
         lastMarkdown = lines.join('\n');
+        pushUndo();
         renderEditor(lastMarkdown);
         const newIdx = Math.min(pos.lineIndex, lastMarkdown.split('\n').length - 1);
         const endOff = (lastMarkdown.split('\n')[newIdx] || '').length;
@@ -3653,19 +3721,13 @@ function handleEditorClick(e) {
 
 function handleGlobalKey(e) {
   const meta = e.ctrlKey || e.metaKey;
-  // Custom undo for structural operations (image insert/delete etc.) —
-  // only intercept when our stack actually has a snapshot for the
-  // current note; otherwise let the browser's native contenteditable
-  // undo handle plain typing.
-  if (meta && !e.shiftKey && e.key === 'z') {
-    if (undoStack.length && undoStack[undoStack.length - 1].id === state.currentNoteId) {
-      e.preventDefault(); performUndo(); return;
-    }
+  // Our undo covers BOTH typing (debounced snapshots) and structural
+  // operations, so always intercept and let performUndo decide.
+  if (meta && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
+    if (performUndo()) { e.preventDefault(); return; }
   }
-  if (meta && ((e.shiftKey && e.key === 'Z') || e.key === 'y')) {
-    if (redoStack.length && redoStack[redoStack.length - 1].id === state.currentNoteId) {
-      e.preventDefault(); performRedo(); return;
-    }
+  if (meta && ((e.shiftKey && (e.key === 'Z' || e.key === 'z')) || e.key === 'y' || e.key === 'Y')) {
+    if (performRedo()) { e.preventDefault(); return; }
   }
   if (meta && e.key === 'n') { e.preventDefault(); newNote(currentFolderForNew()); }
   else if (meta && e.key === 'k') { e.preventDefault(); $('search').focus(); }

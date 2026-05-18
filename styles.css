@@ -385,8 +385,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .pv-line[data-type="code"], .pv-line[data-type="fence"] {
   background: var(--bg-elev); padding-left: 8px; box-shadow: inset 3px 0 var(--accent-2);
 }
-.pv-line[data-type="quote"] { color: var(--text-dim); padding-left: 14px; box-shadow: inset 3px 0 var(--accent); }
-.pv-line[data-type="quote"] blockquote { padding: 0; box-shadow: none; }
+.pv-line[data-type="quote"]:not(.pv-adm) { color: var(--text-dim); padding-left: 14px; box-shadow: inset 3px 0 var(--accent); }
+.pv-line[data-type="quote"]:not(.pv-adm) blockquote { padding: 0; box-shadow: none; }
 .preview h1, .preview h2, .preview h3, .preview h4, .preview h5, .preview h6 {
   font-weight: 700;
 }

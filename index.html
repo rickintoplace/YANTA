@@ -263,6 +263,18 @@
   </div>
 </div>
 
-<script src="app.js"></script>
+<!-- YANTA is split into focused modules loaded in dependency order.
+     Each module declares its own globals; subsequent modules see them. -->
+<script src="src/01-core.js"></script>
+<script src="src/02-markdown.js"></script>
+<script src="src/03-editor.js"></script>
+<script src="src/04-format.js"></script>
+<script src="src/05-notes.js"></script>
+<script src="src/06-tree.js"></script>
+<script src="src/07-image.js"></script>
+<script src="src/08-io.js"></script>
+<script src="src/09-features.js"></script>
+<script src="src/10-graph.js"></script>
+<script src="src/11-main.js"></script>
 </body>
 </html>

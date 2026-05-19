@@ -8,16 +8,37 @@ import { openNote, newNote, newFolder, saveCurrentNote, deleteCurrentNote, toggl
 import { renderTree, renderTagCloud, showMenu, closeMenu, currentFolderForNew } from './tree.js';
 import { renderBacklinks, renderOutline, setupWikilinkHover, handleWikilinkClick, openPalette, closePalette, buildCommandList, paletteMove, paletteAccept, paletteFilter } from './features.js';
 import { openImageModal, closeImageModal, setupImage, pickImageFile, cleanupUnusedImages, insertImageAsRef } from './image.js';
+import { openIconInsertPicker } from './icon-picker.js';
 import { focusEditorEnd, getView } from './editor.js';
 import { setupFormatToolbar } from './format-menu.js';
 import { exportAsZip, exportNoteAsMd, exportBundle, exportEveryNoteMd, openExportMenu, importFiles, importItems, walkEntry } from './io.js';
 import { syncRestore, syncConnect, syncDisconnect, syncFull, openSyncSetup, closeSyncSetup, syncMenu } from './sync.js';
 import { openGraph, closeGraph, setupGraphInteractions } from './graph.js';
 import { wikilinkIndex } from './features-state.js';
-import { getNoteDoc } from './yjs.js';
+import { getNoteDoc, noteMarkdown } from './yjs.js';
 import { openShareModal, closeShareModal, stopSharing, restoreSharedNotes, handleShareUrl } from './sharing.js';
 
 let sharePreviewLocked = false;
+
+function searchHaystack(note, body = '') {
+  return [
+    note?.title || '',
+    (note?.tags || []).join(' '),
+    body || '',
+  ].join(' ').toLowerCase();
+}
+
+async function buildSearchIndex() {
+  for (const note of state.notes.values()) {
+    try {
+      const entry = getNoteDoc(note.id);
+      await entry.ready;
+      state.searchIndex.set(note.id, searchHaystack(note, noteMarkdown(note.id)));
+    } catch {
+      state.searchIndex.set(note.id, searchHaystack(note, ''));
+    }
+  }
+}
 
 async function init() {
   await openDB();
@@ -31,23 +52,21 @@ async function init() {
   const [notes, folders, images, theme, expanded, view] = await Promise.all([
     store.notes.all(),
     store.folders.all(),
-    store.images.all(),
+    store.images.allMeta(),
     store.settings.get('theme', 'auto'),
     store.settings.get('expandedFolders', []),
     store.settings.get('view', 'split'),
   ]);
   for (const n of notes) state.notes.set(n.id, n);
   for (const f of folders) state.folders.set(f.id, f);
-  for (const im of images) { const { blob, ...meta } = im; state.imagesMeta.set(meta.id, meta); }
+  for (const im of images) state.imagesMeta.set(im.id, im);
   setTheme(theme);
   state.expandedFolders = new Set(expanded);
   setView(view);
 
-  // Preload all referenced image blobs into URLs so widgets in the
-  // editor + preview can render them synchronously after a cold reload.
-  for (const im of images) state.imageBlobs.set(im.id, URL.createObjectURL(im.blob));
-
   rebuildWikilinkIndex();
+  await buildSearchIndex();
+
   buildCommandList({
     openImageModal, openGraph, exportAsZip, exportNoteAsMd, exportBundle, exportEveryNoteMd,
     openSyncSetup, syncFull, syncDisconnect, cleanupUnusedImages,
@@ -61,7 +80,7 @@ async function init() {
   await syncRestore();
   let sharedOpen = null;
 
-  if (window.location.hash.startsWith('#share=')) {
+  if (window.location.hash.startsWith('#share=') || window.location.hash.startsWith('#share2=')) {
     sharedOpen = await handleShareUrl();
 
     if (sharedOpen?.noteId) {
@@ -299,6 +318,8 @@ function bindEvents() {
     else if (e.key === 'Enter') { e.preventDefault(); paletteAccept(); }
     else if (e.key === 'Escape') { e.preventDefault(); closePalette(); }
   });
+
+  window.addEventListener('yanta-open-icon-insert', () => openIconInsertPicker());
 
   // Persist expanded folders
   setInterval(() => store.settings.set('expandedFolders', [...state.expandedFolders]), 5000);

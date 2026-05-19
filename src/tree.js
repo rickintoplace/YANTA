@@ -3,11 +3,33 @@
 // menus, drag-and-drop reorganisation.
 // ============================================================
 
-import { $, el, state, store, lucide } from './core.js';
+import { $, el, uid, state, store, lucide } from './core.js';
+import { openIconPicker } from './icon-picker.js';
 import { openNote, newNote, newFolder, deleteCurrentNote, togglePin, rebuildWikilinkIndex, clearEditor, createNoteWithTitle } from './notes.js';
 import { syncDeleteNoteFile } from './sync.js';
-import { destroyNoteDoc } from './yjs.js';
+import { getNoteDoc, noteMarkdown, destroyNoteDoc } from './yjs.js';
 import { updateStorageMeter } from './core.js';
+
+function safeItemColor(c) {
+  const s = String(c || '').trim();
+  return /^#[0-9a-f]{3,8}$/i.test(s) ? s : '';
+}
+
+function itemIcon(name, color) {
+  const span = el('span', { class: 'tree-item-icon' });
+  span.innerHTML = lucide(name || 'square', 14);
+  const c = safeItemColor(color);
+  if (c) span.style.color = c;
+  return span;
+}
+
+function applyItemColor(row, color) {
+  const c = safeItemColor(color);
+  if (!c) return;
+
+  row.classList.add('has-color');
+  row.style.setProperty('--item-color', c);
+}
 
 export function renderTree() {
   const root = $('tree');
@@ -18,10 +40,18 @@ export function renderTree() {
 
   const visible = [...state.notes.values()].filter((n) => {
     if (filterTag && !(n.tags || []).includes(filterTag)) return false;
+
     if (q) {
-      const hay = (n.title || '').toLowerCase() + ' ' + (n.tags || []).join(' ').toLowerCase();
+      const fallbackHay = [
+        n.title || '',
+        (n.tags || []).join(' '),
+      ].join(' ').toLowerCase();
+
+      const hay = state.searchIndex.get(n.id) || fallbackHay;
+
       if (!hay.includes(q)) return false;
     }
+
     return true;
   });
 
@@ -121,10 +151,11 @@ function folderRow(f, visibleNotes, depth) {
       renderTree();
     },
   });
+  applyItemColor(row, f.color);
   row.draggable = true;
   row.addEventListener('dragstart', (e) => { e.dataTransfer.setData('text/yanta-folder', f.id); e.dataTransfer.effectAllowed = 'move'; });
   row.append(el('span', { class: 'twist' }, expanded ? '▾' : '▸'));
-  row.append(svgIcon('folder'));
+  row.append(itemIcon(f.icon || 'folder', f.color));
   row.append(el('span', { class: 'label' }, f.name));
   row.append(el('span', { class: 'menu-trigger', title: 'Add note', onclick: (e) => { e.stopPropagation(); newNote(f.id); } }, '+'));
   wrap.append(row);
@@ -175,7 +206,8 @@ function noteRow(n, depth = 0) {
       renderTree();
     },
   });
-  row.append(svgIcon(n.type === 'list' ? 'list' : 'doc'));
+  applyItemColor(row, n.color);
+  row.append(itemIcon(n.icon || (n.type === 'list' ? 'list' : 'file'), n.color));
   row.append(el('span', { class: 'label' }, n.title || 'Untitled'));
   // Per-note sync status dot
   const status = state.noteSyncStatus.get(n.id);
@@ -254,6 +286,7 @@ export function closeMenu() {
 function noteMenu(e, n) {
   showMenu(e.clientX, e.clientY, [
     { label: n.pinned ? 'Unpin' : 'Pin', action: () => { n.pinned = !n.pinned; n.updated = Date.now(); store.notes.put(n); renderTree(); } },
+    { label: 'Icon & color…', action: () => editNoteIconColor(n) },
     { label: 'Rename…', action: () => { const t = prompt('Title:', n.title); if (t) { n.title = t; n.updated = Date.now(); store.notes.put(n); if (state.currentNoteId === n.id) $('noteTitle').value = t; rebuildWikilinkIndex(); renderTree(); } } },
     { label: 'Move to folder…', action: () => moveNoteDialog(n) },
     { label: 'Duplicate', action: () => duplicateNote(n) },
@@ -274,6 +307,7 @@ function folderMenu(e, f) {
   showMenu(e.clientX, e.clientY, [
     { label: 'New note here', action: () => newNote(f.id) },
     { label: 'New sub-folder', action: () => newFolder(f.id) },
+    { label: 'Icon & color…', action: () => editFolderIconColor(f) },
     { label: 'Rename…', action: () => { const t = prompt('Folder name:', f.name); if (t) { f.name = t; store.folders.put(f); renderTree(); } } },
     'hr',
     { label: 'Delete folder', danger: true, action: async () => {
@@ -300,14 +334,39 @@ function moveNoteDialog(n) {
   renderTree();
 }
 async function duplicateNote(src) {
-  // Duplicate metadata; user can later copy contents if needed.
-  // (We do not duplicate the Y.Doc — duplicates start blank.)
-  const id = (Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4));
-  const n = { ...src, id, title: src.title + ' (copy)', created: Date.now(), updated: Date.now() };
+  const id = uid();
+
+  const n = {
+    ...src,
+    id,
+    title: (src.title || 'Untitled') + ' (copy)',
+    created: Date.now(),
+    updated: Date.now(),
+  };
+
   delete n.body;
   delete n.bodyMigrated;
+
   await store.notes.put(n);
   state.notes.set(n.id, n);
+
+  // Ensure source Y.Doc is loaded before reading.
+  try {
+    const srcEntry = getNoteDoc(src.id);
+    await srcEntry.ready;
+
+    const dstEntry = getNoteDoc(id);
+    await dstEntry.ready;
+
+    const body = noteMarkdown(src.id);
+    if (body) dstEntry.doc.getText('markdown').insert(0, body);
+
+    state.searchIndex.set(
+      id,
+      [n.title || '', (n.tags || []).join(' '), body].join(' ').toLowerCase()
+    );
+  } catch {}
+
   rebuildWikilinkIndex();
   renderTree();
   openNote(n.id);
@@ -319,4 +378,45 @@ export function currentFolderForNew() {
     return n?.folderId || null;
   }
   return null;
+}
+
+function editNoteIconColor(n) {
+  openIconPicker({
+    title: `Icon & color: ${n.title || 'Untitled'}`,
+    initialIcon: n.icon || (n.type === 'list' ? 'list' : 'file'),
+    initialColor: n.color || '#6ea8fe',
+    onApply: async ({ icon, color }) => {
+      if (icon === null && color === null) {
+        delete n.icon;
+        delete n.color;
+      } else {
+        n.icon = icon;
+        n.color = color;
+      }
+
+      n.updated = Date.now();
+      await store.notes.put(n);
+      renderTree();
+    },
+  });
+}
+
+function editFolderIconColor(f) {
+  openIconPicker({
+    title: `Icon & color: ${f.name || 'Folder'}`,
+    initialIcon: f.icon || 'folder',
+    initialColor: f.color || '#6ea8fe',
+    onApply: async ({ icon, color }) => {
+      if (icon === null && color === null) {
+        delete f.icon;
+        delete f.color;
+      } else {
+        f.icon = icon;
+        f.color = color;
+      }
+
+      await store.folders.put(f);
+      renderTree();
+    },
+  });
 }

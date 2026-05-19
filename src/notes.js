@@ -24,6 +24,25 @@ let _unsubDoc = null;
 
 setMarkdownRerenderHook(() => { schedulePreview(); });
 
+function searchHaystack(note, body = '') {
+  return [
+    note?.title || '',
+    (note?.tags || []).join(' '),
+    body || '',
+  ].join(' ').toLowerCase();
+}
+
+function updateSearchIndexFor(note) {
+  if (!note) return;
+
+  let body = '';
+  try {
+    body = noteMarkdown(note.id);
+  } catch {}
+
+  state.searchIndex.set(note.id, searchHaystack(note, body));
+}
+
 // ---------------- factories -----------------------------------
 export async function newNote(folderId = null, type = 'markdown') {
   const id = uid();
@@ -39,6 +58,7 @@ export async function newNote(folderId = null, type = 'markdown') {
   };
   state.notes.set(id, note);
   await store.notes.put(note);
+  updateSearchIndexFor(note);
   rebuildWikilinkIndex();
   await openNote(id);
   renderTree();
@@ -84,12 +104,25 @@ export async function openNote(id) {
   schedulePreview();
 
   // Subscribe to Y.Doc updates → re-render preview, persist mirror.
-  _unsubDoc = onDocChange(id, () => {
+  _unsubDoc = onDocChange(id, (_update, origin) => {
+    schedulePreview();
+    updateSearchIndexFor(note);
+
+    // Updates from the sync folder are remote/imported changes.
+    // Do not immediately mirror them back as "local dirty" changes.
+    if (origin === 'sync-folder') {
+      markNoteSyncStatus(id, 'synced');
+      refreshGlobalSyncStatus();
+      return;
+    }
+
     markDirty();
+
     note.updated = Date.now();
     store.notes.put(note);
-    schedulePreview();
+
     scheduleMirror(note);
+
     markNoteSyncStatus(id, 'local');
     refreshGlobalSyncStatus();
   });
@@ -209,6 +242,7 @@ export async function saveCurrentNote() {
   note.title = newTitle;
   note.updated = Date.now();
   await store.notes.put(note);
+  updateSearchIndexFor(note);
   if (titleChanged) {
     rebuildWikilinkIndex();
     schedulePreview();
@@ -271,6 +305,7 @@ export function addTag(tag) {
     n.tags.push(tag);
     n.updated = Date.now();
     store.notes.put(n);
+    updateSearchIndexFor(n);
     renderChips();
     renderTagCloud();
   }
@@ -280,6 +315,7 @@ export function removeTag(tag) {
   n.tags = (n.tags || []).filter((t) => t !== tag);
   n.updated = Date.now();
   store.notes.put(n);
+  updateSearchIndexFor(n);
   renderChips();
   renderTagCloud();
 }
@@ -305,8 +341,13 @@ export const schedulePreview = debounce(() => {
   });
 }, 80);
 
-const scheduleMirror = debounce((note) => {
-  syncWriteNote(note).catch(() => {});
+const scheduleMirror = debounce(async (note) => {
+  try {
+    await syncWriteNote(note);
+    markSaved();
+  } catch {
+    // Keep dirty state if writing failed.
+  }
 }, 700);
 
 function preloadImagesFor(md) {
@@ -396,6 +437,7 @@ Happy writing!
   const entry = getNoteDoc(id);
   await entry.ready;
   entry.doc.getText('markdown').insert(0, body);
+  updateSearchIndexFor(note);
   rebuildWikilinkIndex();
   await openNote(id);
   renderTree();
@@ -409,6 +451,7 @@ export async function createNoteWithTitle(title) {
   const note = { id, title: title.trim() || 'Untitled', type: 'markdown', folderId: state.notes.get(state.currentNoteId)?.folderId || null, tags: [], pinned: false, created: Date.now(), updated: Date.now() };
   state.notes.set(id, note);
   await store.notes.put(note);
+  updateSearchIndexFor(note);
   rebuildWikilinkIndex();
   await openNote(id);
   renderTree();

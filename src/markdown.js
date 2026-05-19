@@ -6,9 +6,143 @@
 // YouTube/Vimeo embeds, image refs (yanta-img:// and external).
 // ============================================================
 
-import { state, store, escapeHtml, decodeEntities, lucide } from './core.js';
+import DOMPurify from 'dompurify';
+import { state, store, escapeHtml, escapeAttr, decodeEntities, safeUrl, lucide } from './core.js';
 import { wikilinkIndex } from './features-state.js';
 import { noteMarkdown } from './yjs.js';
+
+function sanitizeHtml(html) {
+  const clean = DOMPurify.sanitize(html, {
+    USE_PROFILES: {
+      html: true,
+      svg: true,
+      svgFilters: false,
+    },
+
+    ADD_TAGS: [
+      'iframe',
+      'input',
+
+      // SVG bleibt erlaubt, aber pv-adm Icons hydraten wir unten nochmal robust.
+      'svg',
+      'path',
+      'line',
+      'polyline',
+      'polygon',
+      'circle',
+      'rect',
+    ],
+
+    ADD_ATTR: [
+      // Allgemein
+      'class',
+      'id',
+      'style',
+      'title',
+      'target',
+      'rel',
+      'contenteditable',
+      'aria-hidden',
+      'role',
+
+      // YANTA data attrs
+      'data-wiki',
+      'data-note-id',
+      'data-tag',
+      'data-line',
+      'data-type',
+      'data-fn',
+      'data-adm-icon',
+
+      // Checkboxen
+      'type',
+      'checked',
+      'disabled',
+
+      // Images / embeds
+      'src',
+      'href',
+      'alt',
+      'loading',
+      'draggable',
+      'allow',
+      'allowfullscreen',
+      'frameborder',
+
+      // SVG/Lucide
+      'xmlns',
+      'viewBox',
+      'viewbox',
+      'width',
+      'height',
+      'fill',
+      'stroke',
+      'stroke-width',
+      'stroke-linecap',
+      'stroke-linejoin',
+      'stroke-dasharray',
+      'stroke-dashoffset',
+      'd',
+      'points',
+      'x',
+      'y',
+      'x1',
+      'x2',
+      'y1',
+      'y2',
+      'cx',
+      'cy',
+      'r',
+      'rx',
+      'ry',
+    ],
+
+    ALLOWED_URI_REGEXP: /^(?:(?:https?|mailto|tel|blob):|data:image\/|#|\/|\.)/i,
+  });
+
+  const tmp = document.createElement('template');
+  tmp.innerHTML = clean;
+
+  // Defensive repair: falls DOMPurify/Browser type entfernt oder verändert.
+  for (const input of tmp.content.querySelectorAll('.task input[data-line], input[type="checkbox"]')) {
+    input.setAttribute('type', 'checkbox');
+  }
+
+  // Robust: Admonition-Icons nach DOMPurify aus vertrauenswürdigem Code hydraten.
+  // Dadurch müssen die Lucide-SVGs nicht als Markdown-HTML durch den Sanitizer.
+  const allowedIcons = new Set([
+    'info',
+    'check',
+    'star',
+    'x',
+    'eye',
+    'quote',
+  ]);
+
+  for (const host of tmp.content.querySelectorAll('.pv-adm-icon[data-adm-icon]')) {
+    const name = host.getAttribute('data-adm-icon') || 'info';
+
+    if (!allowedIcons.has(name)) {
+      host.removeAttribute('data-adm-icon');
+      continue;
+    }
+
+    host.replaceChildren();
+
+    const iconTpl = document.createElement('template');
+    iconTpl.innerHTML = lucide(name, 14);
+
+    const svg = iconTpl.content.firstElementChild;
+    if (svg) {
+      svg.setAttribute('aria-hidden', 'true');
+      host.append(svg);
+    }
+
+    host.removeAttribute('data-adm-icon');
+  }
+
+  return tmp.innerHTML;
+}
 
 let transcludeDepth = 0;
 let rerenderHook = null;
@@ -78,45 +212,127 @@ function extractSection(md, sectionName) {
 
 export function renderInline(s) {
   let out = escapeHtml(s);
+
+  // Inline Lucide icon syntax:
+  // :lucide[atom]:
+  // :lucide[atom]{#6ea8fe}:
+  out = out.replace(
+    /:lucide\[([a-zA-Z0-9-_ ]+)\](?:\{(#[0-9a-fA-F]{3,8})\})?:/g,
+    (_, iconName, color) => {
+      const style = color ? ` style="color:${escapeAttr(color)}"` : '';
+      return `<span class="pv-inline-icon"${style} contenteditable="false">${lucide(iconName.trim(), 16)}</span>`;
+    }
+  );
+
+  // Inline code first.
   out = out.replace(/`([^`\n]+)`/g, (_, c) => `<code>${c}</code>`);
+
+  // Transclusion: ![[Note#Section|Alias]]
   out = out.replace(/!\[\[([^\]\n#|]+)(?:#([^\]\n|]+))?(?:\|([^\]\n]+))?\]\]/g, (_, title, section, alias) => {
-    const decoded = decodeEntities(title.trim());
-    const nid = wikilinkIndex.get(decoded.toLowerCase());
-    if (!nid) return `<div class="pv-trans pv-trans-missing">↳ <strong>${title}</strong> · not found</div>`;
-    if (transcludeDepth >= 3) return `<div class="pv-trans pv-trans-loop">↳ ${title} · transclusion too deep</div>`;
+    const decodedTitle = decodeEntities(title.trim());
+    const nid = wikilinkIndex.get(decodedTitle.toLowerCase());
+
+    if (!nid) {
+      return `<div class="pv-trans pv-trans-missing">↳ <strong>${escapeHtml(decodedTitle)}</strong> · not found</div>`;
+    }
+
+    if (transcludeDepth >= 3) {
+      return `<div class="pv-trans pv-trans-loop">↳ ${escapeHtml(decodedTitle)} · transclusion too deep</div>`;
+    }
+
     const note = state.notes.get(nid);
     if (!note) return '';
+
     let body = '';
-    try { body = noteMarkdown(nid); } catch { body = ''; }
-    if (section) body = extractSection(body, decodeEntities(section.trim()));
+    try {
+      body = noteMarkdown(nid);
+    } catch {
+      body = '';
+    }
+
+    const decodedSection = section ? decodeEntities(section.trim()) : '';
+    if (decodedSection) body = extractSection(body, decodedSection);
+
     transcludeDepth++;
     const rendered = renderBlocksInline(body);
     transcludeDepth--;
-    const label = alias ? alias.trim() : (title + (section ? ' › ' + section : ''));
+
+    const label = alias
+      ? decodeEntities(alias.trim())
+      : decodedTitle + (decodedSection ? ' › ' + decodedSection : '');
+
     return `<div class="pv-trans" contenteditable="false">
-      <div class="pv-trans-head">↳ <a class="wiki-link" data-wiki="${decoded}" data-note-id="${nid}">${label}</a></div>
+      <div class="pv-trans-head">↳ <a class="wiki-link" data-wiki="${escapeAttr(decodedTitle)}" data-note-id="${escapeAttr(nid)}">${escapeHtml(label)}</a></div>
       <div class="pv-trans-body">${rendered}</div>
     </div>`;
   });
+
+  // Wikilinks: [[Target|Alias]]
   out = out.replace(/\[\[([^\]|\n]+)(?:\|([^\]\n]+))?\]\]/g, (_, target, alias) => {
-    const decoded = decodeEntities(target.trim());
-    const key = decoded.toLowerCase();
+    const decodedTarget = decodeEntities(target.trim());
+    const key = decodedTarget.toLowerCase();
     const noteId = wikilinkIndex.get(key);
-    const text = (alias || target).trim();
+    const text = decodeEntities((alias || target).trim());
+
     const cls = noteId ? 'wiki-link' : 'wiki-link missing';
-    const id = noteId ? ` data-note-id="${noteId}"` : '';
-    return `<a class="${cls}" data-wiki="${target.trim()}"${id}>${text}</a>`;
+    const idAttr = noteId ? ` data-note-id="${escapeAttr(noteId)}"` : '';
+
+    return `<a class="${cls}" data-wiki="${escapeAttr(decodedTarget)}"${idAttr}>${escapeHtml(text)}</a>`;
   });
+
+  // Images + video embeds through image syntax.
   out = out.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+"([^"]*)")?\)/g, (_, alt, url, title) => {
-    const embed = videoEmbedUrl(decodeEntities(url));
-    if (embed) return `<div class="pv-embed-video" contenteditable="false"><iframe src="${embed}" allowfullscreen frameborder="0" allow="autoplay; encrypted-media; picture-in-picture"></iframe></div>`;
-    const resolved = resolveImageUrl(decodeEntities(url));
-    const t = title ? ` title="${escapeHtml(title)}"` : '';
-    if (resolved === null) return `<span class="pv-img-missing">missing: ${escapeHtml(url.slice(0, 40))}…</span>`;
-    return `<span class="pv-img-wrap" contenteditable="false"><img src="${resolved}" alt="${escapeHtml(alt)}"${t} loading="lazy" draggable="false" /></span>`;
+    const decodedUrl = decodeEntities(url);
+    const embed = videoEmbedUrl(decodedUrl);
+
+    if (embed) {
+      const safeEmbed = safeUrl(embed);
+      if (!safeEmbed) return `<span class="pv-img-missing">blocked video url</span>`;
+
+      return `<div class="pv-embed-video" contenteditable="false">
+        <iframe src="${escapeAttr(safeEmbed)}" allowfullscreen frameborder="0" allow="autoplay; encrypted-media; picture-in-picture"></iframe>
+      </div>`;
+    }
+
+    const resolved = resolveImageUrl(decodedUrl);
+
+    if (resolved === null) {
+      return `<span class="pv-img-missing">missing: ${escapeHtml(decodedUrl.slice(0, 40))}…</span>`;
+    }
+
+    const safeImg = safeUrl(resolved, { image: true });
+    if (!safeImg) {
+      return `<span class="pv-img-missing">blocked image url</span>`;
+    }
+
+    const titleAttr = title ? ` title="${escapeAttr(decodeEntities(title))}"` : '';
+
+    return `<span class="pv-img-wrap" contenteditable="false">
+      <img src="${escapeAttr(safeImg)}" alt="${escapeAttr(decodeEntities(alt))}"${titleAttr} loading="lazy" draggable="false" />
+    </span>`;
   });
-  out = out.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, txt, url) => `<a href="${url}" target="_blank" rel="noopener">${txt}</a>`);
-  out = out.replace(/\bdoi:(10\.\d{4,9}\/[-._;()/:A-Z0-9]+)/gi, (_, d) => `<a href="https://doi.org/${d}" target="_blank" rel="noopener" class="pv-doi">doi:${d}</a>`);
+
+  // Normal markdown links.
+  out = out.replace(/\[([^\]]+)\]\(([^)\s]+)\)/g, (_, txt, url) => {
+    const decodedUrl = decodeEntities(url);
+    const href = safeUrl(decodedUrl);
+
+    if (!href) {
+      return `<span>${escapeHtml(decodeEntities(txt))}</span>`;
+    }
+
+    return `<a href="${escapeAttr(href)}" target="_blank" rel="noopener noreferrer">${txt}</a>`;
+  });
+
+  // DOI.
+  out = out.replace(/\bdoi:(10\.\d{4,9}\/[-._;()/:A-Z0-9]+)/gi, (_, d) => {
+    const href = safeUrl(`https://doi.org/${d}`);
+    return href
+      ? `<a href="${escapeAttr(href)}" target="_blank" rel="noopener noreferrer" class="pv-doi">doi:${escapeHtml(d)}</a>`
+      : `doi:${escapeHtml(d)}`;
+  });
+
+  // Markdown inline styling.
   out = out.replace(/\*\*\*([^*\n]+)\*\*\*/g, '<strong><em>$1</em></strong>');
   out = out.replace(/___([^_\n]+)___/g, '<strong><em>$1</em></strong>');
   out = out.replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>');
@@ -125,10 +341,26 @@ export function renderInline(s) {
   out = out.replace(/(?<!_)_([^_\n]+)_(?!_)/g, '<em>$1</em>');
   out = out.replace(/==([^=\n]+)==/g, '<mark>$1</mark>');
   out = out.replace(/~~([^~\n]+)~~/g, '<del>$1</del>');
-  out = out.replace(/\[\^([^\]\s]+)\]/g, (_, id) => `<sup class="fn-ref"><a href="#fn-${id}" data-fn="${id}">${id}</a></sup>`);
-  out = out.replace(/\$\$([^$\n]+)\$\$/g, (_, expr) => `<span class="pv-math pv-math-block">${expr}</span>`);
-  out = out.replace(/(?<!\\)\$([^$\n]+)\$/g, (_, expr) => `<span class="pv-math">${expr}</span>`);
-  out = out.replace(/(^|\s)#([a-zA-Z][\w-]*)/g, (_, sp, t) => `${sp}<span class="tag-ref" data-tag="${escapeHtml(t)}">#${escapeHtml(t)}</span>`);
+
+  // Footnotes.
+  out = out.replace(/\[\^([^\]\s]+)\]/g, (_, id) =>
+    `<sup class="fn-ref"><a href="#fn-${escapeAttr(id)}" data-fn="${escapeAttr(id)}">${escapeHtml(id)}</a></sup>`
+  );
+
+  // Math placeholders.
+  out = out.replace(/\$\$([^$\n]+)\$\$/g, (_, expr) =>
+    `<span class="pv-math pv-math-block">${escapeHtml(decodeEntities(expr))}</span>`
+  );
+
+  out = out.replace(/(?<!\\)\$([^$\n]+)\$/g, (_, expr) =>
+    `<span class="pv-math">${escapeHtml(decodeEntities(expr))}</span>`
+  );
+
+  // Tags.
+  out = out.replace(/(^|\s)#([a-zA-Z][\w-]*)/g, (_, sp, tag) =>
+    `${sp}<span class="tag-ref" data-tag="${escapeAttr(tag)}">#${escapeHtml(tag)}</span>`
+  );
+
   return out;
 }
 
@@ -168,7 +400,7 @@ export function renderBlocksInline(md) {
     out.push(`<p style="margin:0.2em 0">${renderInline(line)}</p>`);
   }
   flush();
-  return out.join('');
+  return sanitizeHtml(out.join(''));
 }
 
 const ADMONITION_TYPES = new Set(['note', 'warning', 'info', 'tip', 'important', 'caution', 'fold', 'quote']);
@@ -194,8 +426,24 @@ export function headingSlug(text) {
 }
 
 function admIcon(type) {
-  const map = { note: 'info', info: 'info', tip: 'check', warning: 'star', important: 'star', caution: 'x', fold: 'eye', quote: 'quote' };
-  return lucide(map[type] || 'info', 14);
+  const map = {
+    note: 'info',
+    info: 'info',
+    tip: 'check',
+    warning: 'star',
+    important: 'star',
+    caution: 'x',
+    fold: 'eye',
+    quote: 'quote',
+  };
+
+  const icon = map[type] || 'info';
+
+  // Wichtig:
+  // Nicht direkt SVG hier zurückgeben. DOMPurify kann inline SVG je nach
+  // Build/Profil entfernen. Wir geben nur einen sicheren Placeholder zurück;
+  // sanitizeHtml() setzt danach aus vertrauenswürdigem Code das Lucide-SVG ein.
+  return `<span class="pv-adm-icon" data-adm-icon="${escapeAttr(icon)}" aria-hidden="true"></span>`;
 }
 
 export function renderPreview(md) {
@@ -226,8 +474,14 @@ export function renderPreview(md) {
         extraClass = `pv-adm pv-adm-${a.type} pv-adm-${a.role}`;
         if (a.role === 'title') {
           const titleText = a.title || a.type.toUpperCase();
-          inner = `<div class="pv-adm-title-row"><span class="pv-adm-icon">${admIcon(a.type)}</span><span class="pv-adm-title-text">${renderInline(titleText)}</span></div>`;
-        } else inner = `<div>${renderInline(line.replace(/^\s*>\s?/, ''))}</div>`;
+
+          inner = `<div class="pv-adm-title-row">
+            ${admIcon(a.type)}
+            <span class="pv-adm-title-text">${renderInline(titleText)}</span>
+          </div>`;
+        } else {
+          inner = `<div>${renderInline(line.replace(/^\s*>\s?/, ''))}</div>`;
+        }      
       } else if (fn) {
         extraClass = 'pv-fn-def';
         inner = `<div id="fn-${fn[1]}"><strong>[${fn[1]}]</strong> ${renderInline(fn[2])}</div>`;
@@ -254,5 +508,5 @@ export function renderPreview(md) {
     }
     pieces.push(`<div class="pv-line ${extraClass}" data-line="${i}" data-type="${info.type}">${inner}</div>`);
   }
-  return pieces.join('');
+  return sanitizeHtml(pieces.join(''));
 }

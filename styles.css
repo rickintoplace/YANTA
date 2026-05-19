@@ -1167,8 +1167,75 @@ button.link { background: 0; border: 0; color: var(--accent); cursor: pointer; p
    pane so it visually mirrors the preview. Heading sizes etc. are
    driven by yantaHighlight in editor.js; this is just spacing.
    ============================================================ */
-.cm-editor .cm-line { padding-top: 1px; padding-bottom: 1px; }
-.cm-editor .cm-line .ͼ-strong, .cm-editor .cm-line strong { font-weight: 700; }
+.cm-editor .cm-line {
+  padding-top: 1px;
+  padding-bottom: 1px;
+}
+
+/* Inline Markdown styling in CodeMirror.
+   These classes are added by markdownInlineClassField in editor.js. */
+.cm-editor .yanta-md-strong {
+  font-weight: 700 !important;
+  color: var(--text);
+}
+
+.cm-editor .yanta-md-em {
+  font-style: italic !important;
+}
+
+.cm-editor .yanta-md-strike {
+  text-decoration: line-through;
+  color: var(--text-dim);
+}
+
+.cm-editor .yanta-md-mark {
+  background: rgba(251, 191, 36, 0.22);
+  color: var(--text);
+  border-radius: 3px;
+  padding: 0 2px;
+}
+
+.cm-editor .yanta-md-inline-code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  background: var(--bg-elev);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 4px;
+}
+
+.cm-editor .yanta-md-link-text {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.cm-editor .yanta-md-link-url {
+  color: var(--text-faint);
+}
+
+.cm-editor .yanta-md-image {
+  color: var(--text-dim);
+  background: rgba(110, 168, 254, 0.08);
+  border-radius: 4px;
+  padding: 0 3px;
+}
+
+.cm-editor .yanta-md-doi {
+  color: var(--accent-2);
+  border-bottom: 1px dotted var(--accent-2);
+}
+
+.cm-editor .yanta-md-math {
+  font-family: "Latin Modern Math", "STIX Two Math", "Cambria Math", "Times New Roman", serif;
+  font-style: italic;
+  color: var(--text);
+  background: rgba(167, 139, 250, 0.08);
+  border-radius: 3px;
+  padding: 0 4px;
+}
 
 /* Source-line sync spacers */
 .yanta-line-spacer {
@@ -1371,5 +1438,144 @@ input.yanta-task-checkbox {
   width: 22px;
   height: 22px;
   min-width: 22px;
-  margin-right: 8px;
+  margin-right: 0;
+}
+
+/* ---------- Sidebar custom icons / colors ---------- */
+
+.tree-item-icon {
+  width: 14px;
+  height: 14px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+}
+
+.tree-item-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.tree-row.has-color .tree-item-icon {
+  color: var(--item-color);
+}
+
+.tree-row.has-color .label {
+  color: var(--item-color);
+}
+
+.tree-row.active.has-color .label {
+  color: var(--text);
+}
+
+.tree-row.active.has-color .tree-item-icon {
+  color: var(--item-color);
+}
+
+/* ---------- Inline Lucide icons in preview ---------- */
+
+.pv-inline-icon {
+  display: inline-flex;
+  width: 1.05em;
+  height: 1.05em;
+  vertical-align: -0.16em;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+}
+
+.pv-inline-icon svg {
+  width: 1em;
+  height: 1em;
+}
+
+/* ---------- Slim icon picker ---------- */
+
+.icon-picker-card {
+  width: min(760px, 94vw);
+  height: min(720px, 88vh);
+}
+
+.icon-picker-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.icon-picker-toolbar {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.icon-picker-search {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+.icon-picker-color {
+  width: 42px;
+  height: 36px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-elev-2);
+  cursor: pointer;
+}
+
+.icon-picker-swatches {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin: 10px 0 12px;
+}
+
+.icon-picker-swatch {
+  width: 24px;
+  height: 24px;
+  border-radius: 999px;
+  border: 1px solid rgba(255,255,255,0.25);
+  cursor: pointer;
+}
+
+.icon-picker-grid {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(42px, 1fr));
+  gap: 6px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--bg-elev-2);
+}
+
+.icon-picker-item {
+  height: 38px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--text-dim);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.icon-picker-item:hover {
+  background: var(--bg-elev-3);
+  color: var(--text);
+}
+
+.icon-picker-item.active {
+  border-color: currentColor;
+  background: rgba(110,168,254,0.12);
+}
+
+.icon-picker-item svg {
+  width: 18px;
+  height: 18px;
 }

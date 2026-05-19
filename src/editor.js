@@ -102,7 +102,6 @@ const yantaTheme = EditorView.theme({
   '.yanta-task-checkbox': {
     display: 'inline-block',
     verticalAlign: 'middle',
-    marginRight: '6px',
     width: '14px',
     height: '14px',
     cursor: 'pointer',
@@ -411,6 +410,7 @@ function slashCompletion(ctx) {
     { label: 'Math (block)', apply: '$$\n\n$$' },
     { label: 'Wikilink', apply: '[[' },
     { label: 'Image', apply: 'IMAGE_INSERT' }, // handled separately
+    { label: 'Icon', apply: 'ICON_INSERT' },
     { label: 'Shopping list link', apply: '[[' },
   ];
   // Skip the leading newline if present
@@ -425,6 +425,11 @@ function slashCompletion(ctx) {
         if (c.apply === 'IMAGE_INSERT') {
           view.dispatch({ changes: { from, to, insert: '' } });
           window.dispatchEvent(new CustomEvent('yanta-open-image-modal'));
+          return;
+        }
+        if (c.apply === 'ICON_INSERT') {
+          view.dispatch({ changes: { from, to, insert: '' } });
+          window.dispatchEvent(new CustomEvent('yanta-open-icon-insert'));
           return;
         }
         view.dispatch({ changes: { from, to, insert: c.apply } });
@@ -572,6 +577,205 @@ function buildMarkdownLineClasses(s) {
 }
 
 // ============================================================
+// Markdown inline classes — make inline Markdown in the editor
+// visually match the preview: bold, italic, strike, mark, code,
+// links, images, math, DOI.
+// We keep the Markdown source visible; only the affected spans are styled.
+// ============================================================
+
+const markdownInlineClassField = StateField.define({
+  create(state) {
+    return buildMarkdownInlineClasses(state);
+  },
+
+  update(deco, tr) {
+    if (tr.docChanged) return buildMarkdownInlineClasses(tr.state);
+    return deco.map(tr.changes);
+  },
+
+  provide: (field) => EditorView.decorations.from(field),
+});
+
+function buildMarkdownInlineClasses(s) {
+  const ranges = [];
+  const ctx = { inFence: false };
+
+  for (let p = 0; p <= s.doc.length;) {
+    const line = s.doc.lineAt(p);
+    const info = classifyLine(line.text, ctx);
+
+    // Do not apply inline markdown styling inside fenced code blocks or
+    // on fence delimiter lines.
+    if (info.type !== 'code' && info.type !== 'fence') {
+      collectMarkdownInlineRanges(line.text, line.from, ranges);
+    }
+
+    if (info.type === 'fence') ctx.inFence = !!info.opens;
+    if (line.to >= s.doc.length) break;
+    p = line.to + 1;
+  }
+
+  ranges.sort((a, b) => a.from - b.from || a.to - b.to);
+
+  const b = new RangeSetBuilder();
+  for (const r of ranges) {
+    if (r.to > r.from) {
+      b.add(r.from, r.to, Decoration.mark({ class: r.className }));
+    }
+  }
+
+  return b.finish();
+}
+
+function collectMarkdownInlineRanges(text, lineFrom, ranges) {
+  const protectedRanges = [];
+
+  const overlapsProtected = (from, to) =>
+    protectedRanges.some((r) => from < r.to && to > r.from);
+
+  const protect = (from, to) => {
+    if (to > from) protectedRanges.push({ from, to });
+  };
+
+  const add = (from, to, className, shouldProtect = false) => {
+    if (to <= from) return;
+    if (overlapsProtected(from, to)) return;
+
+    ranges.push({
+      from: lineFrom + from,
+      to: lineFrom + to,
+      className,
+    });
+
+    if (shouldProtect) protect(from, to);
+  };
+
+  let m;
+
+  // Inline code first; nothing inside code should be styled as Markdown.
+  const codeRe = /`([^`\n]+)`/g;
+  while ((m = codeRe.exec(text)) !== null) {
+    add(m.index, m.index + m[0].length, 'yanta-md-inline-code', true);
+  }
+
+  // Images and normal links.
+  const linkRe = /!?\[([^\]\n]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
+  while ((m = linkRe.exec(text)) !== null) {
+    const fullFrom = m.index;
+    const fullTo = m.index + m[0].length;
+    if (overlapsProtected(fullFrom, fullTo)) continue;
+
+    const isImage = m[0].startsWith('!');
+    const labelOffset = isImage ? 2 : 1;
+    const labelFrom = m.index + labelOffset;
+    const labelTo = labelFrom + m[1].length;
+
+    const urlMarker = m[0].indexOf('](');
+    const urlFrom = m.index + urlMarker + 2;
+    const urlTo = urlFrom + m[2].length;
+
+    if (isImage) {
+      add(fullFrom, fullTo, 'yanta-md-image', true);
+    } else {
+      add(labelFrom, labelTo, 'yanta-md-link-text');
+      add(urlFrom, urlTo, 'yanta-md-link-url');
+      protect(fullFrom, fullTo);
+    }
+  }
+
+  // DOI links.
+  const doiRe = /\bdoi:(10\.\d{4,9}\/[-._;()/:A-Z0-9]+)/gi;
+  while ((m = doiRe.exec(text)) !== null) {
+    add(m.index, m.index + m[0].length, 'yanta-md-doi', true);
+  }
+
+  // Display/inline math placeholders.
+  const displayMathRe = /\$\$([^$\n]+)\$\$/g;
+  while ((m = displayMathRe.exec(text)) !== null) {
+    add(m.index, m.index + m[0].length, 'yanta-md-math yanta-md-math-block', true);
+  }
+
+  const inlineMathRe = /(?<!\\)\$([^$\n]+)\$/g;
+  while ((m = inlineMathRe.exec(text)) !== null) {
+    add(m.index, m.index + m[0].length, 'yanta-md-math', true);
+  }
+
+  // Bold + italic combined.
+  const boldItalicRe = /(\*\*\*|___)(.+?)\1/g;
+  while ((m = boldItalicRe.exec(text)) !== null) {
+    const innerFrom = m.index + m[1].length;
+    const innerTo = innerFrom + m[2].length;
+    add(innerFrom, innerTo, 'yanta-md-strong yanta-md-em', true);
+    protect(m.index, m.index + m[0].length);
+  }
+
+  // Bold.
+  const boldRe = /(\*\*|__)(.+?)\1/g;
+  while ((m = boldRe.exec(text)) !== null) {
+    const fullFrom = m.index;
+    const fullTo = m.index + m[0].length;
+    if (overlapsProtected(fullFrom, fullTo)) continue;
+
+    const innerFrom = m.index + m[1].length;
+    const innerTo = innerFrom + m[2].length;
+    add(innerFrom, innerTo, 'yanta-md-strong', true);
+    protect(fullFrom, fullTo);
+  }
+
+  // Italic with *...*
+  const italicStarRe = /(?<!\*)\*([^*\n]+)\*(?!\*)/g;
+  while ((m = italicStarRe.exec(text)) !== null) {
+    const fullFrom = m.index;
+    const fullTo = m.index + m[0].length;
+    if (overlapsProtected(fullFrom, fullTo)) continue;
+
+    const innerFrom = m.index + 1;
+    const innerTo = innerFrom + m[1].length;
+    add(innerFrom, innerTo, 'yanta-md-em', true);
+    protect(fullFrom, fullTo);
+  }
+
+  // Italic with _..._
+  const italicUnderscoreRe = /(?<!_)_([^_\n]+)_(?!_)/g;
+  while ((m = italicUnderscoreRe.exec(text)) !== null) {
+    const fullFrom = m.index;
+    const fullTo = m.index + m[0].length;
+    if (overlapsProtected(fullFrom, fullTo)) continue;
+
+    const innerFrom = m.index + 1;
+    const innerTo = innerFrom + m[1].length;
+    add(innerFrom, innerTo, 'yanta-md-em', true);
+    protect(fullFrom, fullTo);
+  }
+
+  // Highlight ==...==
+  const markRe = /==([^=\n]+)==/g;
+  while ((m = markRe.exec(text)) !== null) {
+    const fullFrom = m.index;
+    const fullTo = m.index + m[0].length;
+    if (overlapsProtected(fullFrom, fullTo)) continue;
+
+    const innerFrom = m.index + 2;
+    const innerTo = innerFrom + m[1].length;
+    add(innerFrom, innerTo, 'yanta-md-mark', true);
+    protect(fullFrom, fullTo);
+  }
+
+  // Strikethrough ~~...~~
+  const strikeRe = /~~([^~\n]+)~~/g;
+  while ((m = strikeRe.exec(text)) !== null) {
+    const fullFrom = m.index;
+    const fullTo = m.index + m[0].length;
+    if (overlapsProtected(fullFrom, fullTo)) continue;
+
+    const innerFrom = m.index + 2;
+    const innerTo = innerFrom + m[1].length;
+    add(innerFrom, innerTo, 'yanta-md-strike', true);
+    protect(fullFrom, fullTo);
+  }
+}
+
+// ============================================================
 // Layout sync spacers.
 // The preview can naturally be taller than the editor for a source line
 // because rendered Markdown hides syntax or expands embeds/callouts.
@@ -668,6 +872,7 @@ export function mountEditor(host, { noteId, awarenessUser }) {
     syntaxHighlighting(yantaHighlight),
     syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
     markdownLineClassField,
+    markdownInlineClassField,
     editorLineSpacerField,
     indentOnInput(),
     bracketMatching(),

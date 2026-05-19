@@ -15,6 +15,7 @@
 <script type="importmap">
 {
   "imports": {
+    "lucide": "https://esm.sh/lucide@0.468.0",
     "yjs": "https://esm.sh/yjs@13.6.21",
     "y-indexeddb": "https://esm.sh/y-indexeddb@9.0.12?deps=yjs@13.6.21",
     "y-webrtc": "https://esm.sh/y-webrtc@10.3.0?deps=yjs@13.6.21",
@@ -27,7 +28,8 @@
     "@codemirror/autocomplete": "https://esm.sh/@codemirror/autocomplete@6.16.2?deps=@codemirror/state@6.4.1,@codemirror/view@6.26.3",
     "@codemirror/search": "https://esm.sh/@codemirror/search@6.5.6?deps=@codemirror/state@6.4.1,@codemirror/view@6.26.3",
     "@lezer/highlight": "https://esm.sh/@lezer/highlight@1.2.0",
-    "qrcode-generator": "https://esm.sh/qrcode-generator@1.4.4"
+    "qrcode-generator": "https://esm.sh/qrcode-generator@1.4.4",
+    "dompurify": "https://esm.sh/dompurify@3.2.6"
   }
 }
 </script>
@@ -70,6 +72,8 @@
 
     <div class="tag-cloud" id="tagCloud"></div>
 
+    <span class="storage-meter" id="storageMeter" title="Storage used"></span>
+
     <div class="sidebar-foot">
       <button class="btn" id="btn-export" title="Export…">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>
@@ -89,7 +93,6 @@
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
       </button>
       <button class="storage-meter vault-indicator" id="vaultIndicator" hidden></button>
-      <span class="storage-meter" id="storageMeter" title="Storage used"></span>
     </div>
   </aside>
 
@@ -298,7 +301,7 @@
       <div class="share-qr-wrap" id="shareQr" style="display:flex;justify-content:center;margin:18px 0"></div>
       <label class="switch" style="margin:10px 0 12px">
         <input type="checkbox" id="sharePreviewOnly" checked />
-        <span>Open Preview for reciever</span>
+        <span>Open preview for receiver</span>
       </label>
       <label style="display:block;font-size:12px;color:var(--text-dim);margin-bottom:4px">Share link</label>
       <div style="display:flex;gap:8px">

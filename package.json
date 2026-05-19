@@ -1,0 +1,35 @@
+{
+  "name": "yanta",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0",
+    "build": "vite build",
+    "preview": "vite preview",
+    "lint": "eslint src/**/*.js",
+    "format": "prettier --write ."
+  },
+  "dependencies": {
+    "lucide": "^0.468.0",
+    "@codemirror/autocomplete": "6.16.2",
+    "@codemirror/commands": "6.6.0",
+    "@codemirror/lang-markdown": "6.2.5",
+    "@codemirror/language": "6.10.2",
+    "@codemirror/search": "6.5.6",
+    "@codemirror/state": "6.4.1",
+    "@codemirror/view": "6.26.3",
+    "@lezer/highlight": "1.2.0",
+    "dompurify": "3.2.6",
+    "qrcode-generator": "1.4.4",
+    "y-codemirror.next": "0.3.5",
+    "y-indexeddb": "9.0.12",
+    "y-webrtc": "10.3.0",
+    "yjs": "13.6.21"
+  },
+  "devDependencies": {
+    "vite": "^6.0.0",
+    "eslint": "^9.0.0",
+    "prettier": "^3.0.0"
+  }
+}

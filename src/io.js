@@ -12,6 +12,8 @@ import { renderTree } from './tree.js';
 
 export function noteToFrontmatter(n) {
   const meta = { id: n.id };
+  if (n.icon) meta.icon = n.icon;
+  if (n.color) meta.color = n.color;
   if (n.type && n.type !== 'markdown') meta.type = n.type;
   if (n.tags?.length) meta.tags = n.tags;
   if (n.pinned) meta.pinned = true;
@@ -180,6 +182,8 @@ export async function importItems(items) {
           created: meta.created ? Date.parse(meta.created) || fileTime : fileTime,
           updated: meta.updated ? Date.parse(meta.updated) || fileTime : fileTime,
         };
+        if (meta.icon) note.icon = meta.icon;
+        if (meta.color) note.color = meta.color;
         state.notes.set(id, note);
         await store.notes.put(note);
         const entry = getNoteDoc(id);
@@ -324,7 +328,7 @@ export async function exportAsZip() {
   };
   for (const note of state.notes.values()) {
     const segs = folderPathSegments(note.folderId);
-    const fname = safeFilename(note.title) + '.md';
+    const fname = `${safeFilename(note.title)}__${note.id.slice(0, 8)}.md`;
     const path = pickPath(segs, fname);
     let body = ''; try { body = noteMarkdown(note.id); } catch {}
     body = body.replace(/yanta-img:\/\/([a-z0-9]+)/gi, (full, id) => {
@@ -376,9 +380,22 @@ export async function importZipBlob(blob) {
     const text = _dec.decode(ent.data);
     const { meta, body: raw } = parseFrontmatter(text);
     const body = raw.replace(/(?:\.\.\/)*_images\/([a-z0-9]+)(?:\.[a-z0-9]+)?/gi, (_full, id) => 'yanta-img://' + (remap.get(id) || id));
-    const title = fname.replace(/\.(md|markdown|txt)$/i, '');
+    const title = fname
+      .replace(/\.(md|markdown|txt)$/i, '')
+      .replace(/__[a-z0-9]{8}$/i, '');
     const id = uid();
-    const note = { id, title, type: meta.type || 'markdown', folderId, tags: Array.isArray(meta.tags) ? meta.tags : [], pinned: !!meta.pinned, created: meta.created ? Date.parse(meta.created) || Date.now() : Date.now(), updated: Date.now() };
+    const note = {
+      id,
+      title,
+      type: meta.type || 'markdown',
+      folderId,
+      tags: Array.isArray(meta.tags) ? meta.tags : [],
+      pinned: !!meta.pinned,
+      icon: meta.icon || undefined,
+      color: meta.color || undefined,
+      created: meta.created ? Date.parse(meta.created) || Date.now() : Date.now(),
+      updated: Date.now()
+    };
     state.notes.set(id, note);
     await store.notes.put(note);
     const entry = getNoteDoc(id);

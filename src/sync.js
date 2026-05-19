@@ -103,9 +103,21 @@ async function getDir(root, segs) {
   return dir;
 }
 
+function noteFilename(note) {
+  const title = safeFilename(note.title || 'Untitled');
+  const shortId = String(note.id || '').slice(0, 8) || uid().slice(0, 8);
+  return `${title}__${shortId}.md`;
+}
+
+function stripIdSuffix(filename) {
+  return filename
+    .replace(/\.(md|markdown)$/i, '')
+    .replace(/__[a-z0-9]{8}$/i, '');
+}
+
 function notePath(note) {
   const segs = ['notes', ...folderPathSegments(note.folderId)];
-  return [...segs, safeFilename(note.title) + '.md'].join('/');
+  return [...segs, noteFilename(note)].join('/');
 }
 
 // ---------------- write one note --------------------------------
@@ -114,7 +126,7 @@ export async function syncWriteNote(note) {
   try {
     const segs = ['notes', ...folderPathSegments(note.folderId)];
     const dir = await ensureDir(sync.handle, segs);
-    const filename = safeFilename(note.title) + '.md';
+    const filename = noteFilename(note);
     const newPath = [...segs, filename].join('/');
     const prevPath = sync.knownFiles.get(note.id);
     if (prevPath && prevPath !== newPath) {
@@ -283,7 +295,10 @@ async function syncPull() {
       const id = name.replace(/\.ysnap$/, '');
       const file = await h.getFile();
       const buf = new Uint8Array(await file.arrayBuffer());
-      try { applyNoteUpdate(id, buf); } catch {}
+      try {
+        applyNoteUpdate(id, buf);
+        markNoteSyncStatus(id, 'synced');
+      } catch {}
     }
   } catch {}
   // 2. Ingest assets folder.
@@ -327,7 +342,7 @@ async function ingestMdFile(file, path, segs, filename, result) {
   const resolvedBody = body.replace(/(?:\.\.\/)*assets\/([a-z0-9]+)(?:\.[a-z0-9]+)?/gi, (_, id) => 'yanta-img://' + id);
   const folderId = segs.length ? await ensureFolderPath(segs) : null;
   const fileTime = file.lastModified || Date.now();
-  const title = filename.replace(/\.(md|markdown)$/i, '');
+  const title = stripIdSuffix(filename);
 
   if (meta.id && sync.tombstones.has(meta.id)) {
     const t = sync.tombstones.get(meta.id);
@@ -349,6 +364,8 @@ async function ingestMdFile(file, path, segs, filename, result) {
     existing.tags = Array.isArray(meta.tags) ? meta.tags : existing.tags || [];
     existing.pinned = !!meta.pinned;
     existing.type = meta.type || existing.type || 'markdown';
+    existing.icon = meta.icon || existing.icon;
+    existing.color = meta.color || existing.color;
     existing.updated = Math.max(existing.updated || 0, meta.updated ? Date.parse(meta.updated) || fileTime : fileTime);
     await store.notes.put(existing);
     // If no Y.Doc snapshot existed for this note, seed from the .md body.
@@ -373,6 +390,8 @@ async function ingestMdFile(file, path, segs, filename, result) {
     folderId,
     tags: Array.isArray(meta.tags) ? meta.tags : [],
     pinned: !!meta.pinned,
+    icon: meta.icon || undefined,
+    color: meta.color || undefined,
     created: meta.created ? Date.parse(meta.created) || fileTime : fileTime,
     updated: meta.updated ? Date.parse(meta.updated) || fileTime : fileTime,
   };
@@ -439,7 +458,9 @@ async function adoptConflict(c) {
   const { meta, body } = parseFrontmatter(text);
   const resolvedBody = body.replace(/(?:\.\.\/)*assets\/([a-z0-9]+)(?:\.[a-z0-9]+)?/gi, (_, id) => 'yanta-img://' + id);
   const folderId = c.segs.length ? await ensureFolderPath(c.segs) : null;
-  const baseTitle = c.name.replace(/\.sync-conflict-[^.]+\.(md|markdown)$/i, '');
+  const baseTitle = stripIdSuffix(
+    c.name.replace(/\.sync-conflict-[^.]+\.(md|markdown)$/i, '.md')
+  );
   const id = uid();
   const note = { id, title: baseTitle + ' (from other device)', type: 'markdown', folderId, tags: Array.isArray(meta.tags) ? meta.tags : [], pinned: !!meta.pinned, created: Date.now(), updated: Date.now() };
   state.notes.set(id, note);
@@ -485,7 +506,7 @@ export function updateSyncIndicator() {
     e.title = `Sync folder: ${sync.handle.name} (${state.globalSyncStatus})`;
     e.hidden = false;
   } else if (sync.isAvailable) {
-    e.innerHTML = lucide('refresh', 12) + '<span>set up sync</span>';
+    e.innerHTML = lucide('refresh', 12);
     e.classList.remove('connected');
     e.title = 'Set up sync (works great with Syncthing)';
     e.hidden = false;

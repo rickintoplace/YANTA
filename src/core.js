@@ -4,6 +4,8 @@
 // stores only note METADATA, folders, image blobs and settings.
 // ============================================================
 
+import { icons as LUCIDE_ICONS } from 'lucide';
+
 export const $ = (id) => document.getElementById(id);
 
 export const el = (tag, attrs = {}, ...children) => {
@@ -30,8 +32,51 @@ export const debounce = (fn, ms) => {
   return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
 };
 
-export const escapeHtml = (s) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-export const decodeEntities = (s) => s.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'");
+export const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({
+  '&': '&amp;',
+  '<': '&lt;',
+  '>': '&gt;',
+  '"': '&quot;',
+  "'": '&#39;',
+}[c]));
+
+export const escapeAttr = escapeHtml;
+
+export const decodeEntities = (s) => String(s ?? '')
+  .replace(/&amp;/g, '&')
+  .replace(/&lt;/g, '<')
+  .replace(/&gt;/g, '>')
+  .replace(/&quot;/g, '"')
+  .replace(/&#39;/g, "'");
+
+/**
+ * URL allow-list for generated preview HTML.
+ * - Links: http(s), mailto, tel, same-page hash
+ * - Images: additionally blob: and data:image/*
+ */
+export function safeUrl(url, { image = false } = {}) {
+  const raw = decodeEntities(String(url ?? '')).trim();
+
+  if (!raw) return null;
+  if (/[\u0000-\u001f\u007f]/.test(raw)) return null;
+  if (raw.startsWith('#')) return raw;
+
+  try {
+    const u = new URL(raw, location.href);
+
+    if (u.protocol === 'http:' || u.protocol === 'https:') return u.href;
+    if (!image && (u.protocol === 'mailto:' || u.protocol === 'tel:')) return u.href;
+
+    if (image) {
+      if (u.protocol === 'blob:') return raw;
+      if (u.protocol === 'data:' && /^data:image\//i.test(raw)) return raw;
+    }
+
+    return null;
+  } catch {
+    return null;
+  }
+}
 
 export const fmtBytes = (n) => {
   if (!n) return '0 B';
@@ -61,49 +106,231 @@ export function downloadBlob(blob, filename) {
   a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
+// ----------------------------------------------------------------
+// Lucide icons — full icon set from lucide package
+// ----------------------------------------------------------------
 
-// Lucide-style icon strings
-const LUCIDE = {
-  plus:     '<line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/>',
-  file:     '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/>',
-  folder:   '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>',
-  'folder-plus': '<path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/>',
-  search:   '<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>',
-  star:     '<polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/>',
-  pin:      '<line x1="12" y1="17" x2="12" y2="22"/><path d="M5 17h14v-1.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6h1a2 2 0 0 0 0-4H8a2 2 0 0 0 0 4h1v4.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24z"/>',
-  trash:    '<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>',
-  image:    '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>',
-  upload:   '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>',
-  download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>',
-  eye:      '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>',
-  edit:     '<path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4z"/>',
-  share:    '<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><line x1="8.59" y1="13.51" x2="15.42" y2="17.49"/><line x1="15.41" y1="6.51" x2="8.59" y2="10.49"/>',
-  link:     '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>',
-  users:    '<path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>',
-  tag:      '<path d="M20.59 13.41 13.42 20.58a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/>',
-  hash:     '<line x1="4" y1="9" x2="20" y2="9"/><line x1="4" y1="15" x2="20" y2="15"/><line x1="10" y1="3" x2="8" y2="21"/><line x1="16" y1="3" x2="14" y2="21"/>',
-  network:  '<circle cx="5" cy="6" r="2"/><circle cx="19" cy="6" r="2"/><circle cx="12" cy="19" r="2"/><path d="M7 7l5 10M17 7l-5 10"/>',
-  command:  '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h2M11 10h2M15 10h2M7 14h10"/>',
-  sun:      '<circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/>',
-  moon:     '<path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/>',
-  check:    '<polyline points="20 6 9 17 4 12"/>',
-  x:        '<line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>',
-  square:   '<rect x="3" y="3" width="18" height="18" rx="2"/>',
-  copy:     '<rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/>',
-  quote:    '<path d="M3 21c3-4 3-7 3-7 0-3-3-4-3-4M11 21c3-4 3-7 3-7 0-3-3-4-3-4"/>',
-  list:     '<line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/>',
-  'check-square': '<polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/>',
-  'shopping-cart': '<circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/><path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>',
-  info:     '<circle cx="12" cy="12" r="10"/><line x1="12" y1="16" x2="12" y2="12"/><line x1="12" y1="8" x2="12.01" y2="8"/>',
-  triangle: '<path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/>',
-  refresh:  '<polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>',
-  settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>',
-  'chevron-down':  '<polyline points="6 9 12 15 18 9"/>',
-  'chevron-right': '<polyline points="9 18 15 12 9 6"/>',
-  qr:       '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><line x1="14" y1="14" x2="14" y2="21"/><line x1="14" y1="14" x2="21" y2="14"/><line x1="21" y1="14" x2="21" y2="21"/><line x1="14" y1="18" x2="18" y2="18"/><line x1="18" y1="14" x2="18" y2="18"/>',
+const ICON_ALIASES = {
+  doc: 'FileText',
+  file: 'File',
+  folder: 'Folder',
+  qr: 'QrCode',
+  x: 'X',
+  check: 'Check',
+  settings: 'Settings',
+  refresh: 'RefreshCw',
+  trash: 'Trash',
+  image: 'Image',
+  upload: 'Upload',
+  download: 'Download',
+  edit: 'Pencil',
+  share: 'Share2',
+  link: 'Link',
+  users: 'Users',
+  tag: 'Tag',
+  hash: 'Hash',
+  network: 'Network',
+  command: 'Command',
+  sun: 'Sun',
+  moon: 'Moon',
+  square: 'Square',
+  copy: 'Copy',
+  quote: 'Quote',
+  list: 'List',
+  pin: 'Pin',
+  star: 'Star',
+  plus: 'Plus',
+  search: 'Search',
+  eye: 'Eye',
+  info: 'Info',
+  triangle: 'TriangleAlert',
+  'folder-plus': 'FolderPlus',
+  'chevron-down': 'ChevronDown',
+  'chevron-right': 'ChevronRight',
+  'check-square': 'SquareCheck',
+  'shopping-cart': 'ShoppingCart',
 };
+
+function pascalToKebab(name) {
+  return String(name || '')
+    .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+    .replace(/([A-Z])([A-Z][a-z])/g, '$1-$2')
+    .toLowerCase();
+}
+
+function kebabToPascal(name) {
+  return String(name || '')
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
+    .join('');
+}
+
+function attrName(name) {
+  return String(name).replace(/[A-Z]/g, (m) => '-' + m.toLowerCase());
+}
+
+function escapeSvgAttr(v) {
+  return escapeAttr(String(v ?? ''));
+}
+
+const SVG_TAGS = new Set([
+  'path',
+  'line',
+  'polyline',
+  'polygon',
+  'circle',
+  'rect',
+  'ellipse',
+  'g',
+]);
+
+function keyToKebab(key) {
+  const s = String(key || '').trim();
+
+  if (!s) return '';
+
+  // lucide package may expose keys either as "AlertCircle" or "alert-circle".
+  if (s.includes('-')) return s.toLowerCase();
+
+  return pascalToKebab(s);
+}
+
+const LUCIDE_KEY_BY_KEBAB = new Map(
+  Object.keys(LUCIDE_ICONS || {}).map((key) => [keyToKebab(key), key])
+);
+
+function aliasToKebab(name) {
+  const alias = ICON_ALIASES[name];
+
+  if (!alias) return '';
+
+  return keyToKebab(alias);
+}
+
+function findLucideKey(name) {
+  const raw = String(name || '').trim();
+
+  const candidates = [
+    raw,
+    raw.toLowerCase(),
+    keyToKebab(raw),
+    keyToKebab(kebabToPascal(raw)),
+    aliasToKebab(raw),
+  ].filter(Boolean);
+
+  for (const c of candidates) {
+    const key = LUCIDE_KEY_BY_KEBAB.get(c);
+    if (key) return key;
+
+    // Also allow direct object access for unusual builds.
+    if (LUCIDE_ICONS[c]) return c;
+  }
+
+  return (
+    LUCIDE_KEY_BY_KEBAB.get('square') ||
+    LUCIDE_KEY_BY_KEBAB.get('box') ||
+    Object.keys(LUCIDE_ICONS || {})[0]
+  );
+}
+
+function getLucideDef(name) {
+  const key = findLucideKey(name);
+  return key ? LUCIDE_ICONS[key] : null;
+}
+
+function getLucideNode(def) {
+  if (!def) return [];
+
+  // Most lucide icon definitions:
+  // [['path', { d: '...' }], ['circle', {...}]]
+  if (Array.isArray(def)) return def;
+
+  // Some builds wrap nodes:
+  // { iconNode: [...] }
+  if (def && typeof def === 'object') {
+    if (Array.isArray(def.iconNode)) return def.iconNode;
+    if (Array.isArray(def.children)) return def.children;
+    if (Array.isArray(def.child)) return def.child;
+  }
+
+  return [];
+}
+
+function iconDefLooksValid(def) {
+  return getLucideNode(def).length > 0;
+}
+
+function renderIconNode(nodeOrDef) {
+  const nodes = getLucideNode(nodeOrDef);
+
+  return nodes
+    .map((entry) => {
+      let tag;
+      let attrs;
+      let children;
+
+      // Shape:
+      // ['path', { d: '...' }]
+      if (Array.isArray(entry)) {
+        [tag, attrs = {}, children] = entry;
+      }
+
+      // Shape:
+      // { tag: 'path', attrs: { d: '...' } }
+      else if (entry && typeof entry === 'object') {
+        tag = entry.tag || entry.name;
+        attrs = entry.attrs || entry.attributes || {};
+        children = entry.children || entry.child;
+      }
+
+      if (!SVG_TAGS.has(tag)) return '';
+
+      const attrText = Object.entries(attrs || {})
+        .filter(([k]) => k !== 'key')
+        .map(([k, v]) => `${attrName(k)}="${escapeSvgAttr(v)}"`)
+        .join(' ');
+
+      const childText = children ? renderIconNode(children) : '';
+
+      if (childText) {
+        return `<${tag}${attrText ? ' ' + attrText : ''}>${childText}</${tag}>`;
+      }
+
+      return `<${tag}${attrText ? ' ' + attrText : ''}/>`;
+    })
+    .join('');
+}
+
+export function lucideIconNames() {
+  return Object.keys(LUCIDE_ICONS || {})
+    .filter((key) => iconDefLooksValid(LUCIDE_ICONS[key]))
+    .map(keyToKebab)
+    .sort((a, b) => a.localeCompare(b));
+}
+
+export function normalizeLucideName(name) {
+  const raw = String(name || '').trim();
+
+  if (!raw) return 'square';
+
+  const key = findLucideKey(raw);
+
+  if (!key) return 'square';
+
+  return keyToKebab(key);
+}
+
+export function lucideExists(name) {
+  const key = findLucideKey(name);
+  return !!key && iconDefLooksValid(LUCIDE_ICONS[key]);
+}
+
 export function lucide(name, size = 14) {
-  const body = LUCIDE[name] || LUCIDE.square;
+  const normalized = normalizeLucideName(name);
+  const def = getLucideDef(normalized);
+  const body = renderIconNode(def);
+
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
 }
 
@@ -148,6 +375,27 @@ function req(r) {
   return new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
 }
 
+function cursorAllImageMeta() {
+  return new Promise((res, rej) => {
+    const out = [];
+    const r = tx('images').openCursor();
+
+    r.onsuccess = () => {
+      const cur = r.result;
+      if (!cur) {
+        res(out);
+        return;
+      }
+
+      const { blob, ...meta } = cur.value;
+      out.push(meta);
+      cur.continue();
+    };
+
+    r.onerror = () => rej(r.error);
+  });
+}
+
 export const store = {
   notes: {
     all: () => req(tx('notes').getAll()),
@@ -162,6 +410,7 @@ export const store = {
   },
   images: {
     all: () => req(tx('images').getAll()),
+    allMeta: () => cursorAllImageMeta(),
     get: (id) => req(tx('images').get(id)),
     put: (i) => req(tx('images', 'readwrite').put(i)),
     del: (id) => req(tx('images', 'readwrite').delete(id)),
@@ -186,6 +435,7 @@ export const state = {
   folders: new Map(),
   imagesMeta: new Map(),
   imageBlobs: new Map(),
+  searchIndex: new Map(),      // noteId -> lowercased title/tags/body
   currentNoteId: null,
   expandedFolders: new Set(),
   activeTagFilter: null,

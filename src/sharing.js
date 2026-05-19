@@ -24,22 +24,60 @@ import qrcode from 'qrcode-generator';
 
 const SHARE_VIEWS = new Set(['preview', 'split', 'edit']);
 
+function b64urlEncodeString(s) {
+  const bytes = new TextEncoder().encode(s);
+  let bin = '';
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+
+function b64urlDecodeString(s) {
+  s = s.replace(/-/g, '+').replace(/_/g, '/');
+  while (s.length % 4) s += '=';
+  const bin = atob(s);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new TextDecoder().decode(bytes);
+}
+
 function shareLinkFor({ noteId, room, key, title, view = 'preview' }) {
-  const safeView = SHARE_VIEWS.has(view) ? view : 'preview';
-  const slug = encodeURIComponent((title || '').slice(0, 60).replace(/\s+/g, '-'));
+  const payload = {
+    v: 2,
+    noteId,
+    room,
+    key,
+    view: SHARE_VIEWS.has(view) ? view : 'preview',
+    title: title || '',
+  };
 
-  const frag =
-    `share=${encodeURIComponent(noteId)}` +
-    `:${encodeURIComponent(room)}` +
-    `:${encodeURIComponent(key)}` +
-    `:${encodeURIComponent(safeView)}` +
-    `:${slug}`;
-
-  return location.origin + location.pathname + '#' + frag;
+  return location.origin + location.pathname + '#share2=' + b64urlEncodeString(JSON.stringify(payload));
 }
 
 export function parseShareFragment(hash) {
   const h = hash.startsWith('#') ? hash.slice(1) : hash;
+
+  // New robust format:
+  // #share2=<base64url-json>
+  if (h.startsWith('share2=')) {
+    try {
+      const obj = JSON.parse(b64urlDecodeString(h.slice('share2='.length)));
+
+      if (!obj || !obj.noteId || !obj.room || !obj.key) return null;
+
+      return {
+        noteId: String(obj.noteId),
+        room: String(obj.room),
+        key: String(obj.key),
+        view: SHARE_VIEWS.has(obj.view) ? obj.view : 'preview',
+        title: String(obj.title || ''),
+      };
+    } catch {
+      return null;
+    }
+  }
+
+  // Old format remains supported:
+  // #share=<noteId>:<room>:<key>:<view>:<title>
   if (!h.startsWith('share=')) return null;
 
   const raw = h.slice('share='.length);
@@ -55,18 +93,9 @@ export function parseShareFragment(hash) {
 
   const [noteId, room, key] = parts;
 
-  // Default: Empfänger sollen Markdown nicht sehen.
-  // Auch alte Links öffnen deshalb standardmäßig in Preview.
   let view = 'preview';
   let titleParts = parts.slice(3);
 
-  // Neue Form:
-  //   noteId:room:key:preview:title
-  //
-  // Alte Form:
-  //   noteId:room:key:title
-  //
-  // Wenn das 4. Segment ein bekannter View-Modus ist, ist es die View.
   if (titleParts[0] && SHARE_VIEWS.has(titleParts[0])) {
     view = titleParts[0];
     titleParts = titleParts.slice(1);

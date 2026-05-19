@@ -41,31 +41,43 @@ export function getBacklinks(noteId) {
 export function renderBacklinks(noteId) {
   const pv = $('preview');
   if (!pv) return;
+
   const old = pv.querySelector('.backlinks');
   if (old) old.remove();
+
   if (!noteId) return;
+
   const back = getBacklinks(noteId);
   const wrap = el('div', { class: 'backlinks', contenteditable: 'false' });
-  wrap.append(el('div', { class: 'backlinks-title' }, 'Linked from',
-    el('span', { class: 'badge' }, String(back.length))));
+
+  wrap.append(
+    el('div', { class: 'backlinks-title' },
+      'Linked from',
+      el('span', { class: 'badge' }, String(back.length))
+    )
+  );
+
   if (!back.length) {
     wrap.append(el('div', { class: 'backlinks-empty' }, 'No backlinks yet.'));
   } else {
     for (const { note, line } of back) {
-      const item = el('div', { class: 'backlink', onclick: () => openNote(note.id) });
+      const item = el('div', {
+        class: 'backlink',
+        onclick: () => openNote(note.id),
+      });
+
       item.append(el('div', { class: 'bl-title' }, note.title || 'Untitled'));
-      const tname = state.notes.get(noteId).title || '';
-      const safe = tname.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      const ctx = line.replace(new RegExp('\\[\\[' + safe + '(\\|[^\\]]+)?\\]\\]', 'gi'), `<span class="bl-mark">[[${escapeHtml(tname)}$1]]</span>`);
+
       const ctxDiv = el('div', { class: 'bl-context' });
-      ctxDiv.innerHTML = ctx.length > 200 ? ctx.slice(0, 200) + '…' : ctx;
+      ctxDiv.textContent = line.length > 200 ? line.slice(0, 200) + '…' : line;
+
       item.append(ctxDiv);
       wrap.append(item);
     }
   }
+
   pv.append(wrap);
 }
-
 // -------- Outline ----------------------------------------------
 export function renderOutline(md) {
   const pv = $('preview');
@@ -205,7 +217,7 @@ export function openPalette(mode = 'commands') {
 export function closePalette() { $('palette').hidden = true; palette.items = []; }
 
 let commandList = [];
-export function buildCommandList({ openImageModal, openGraph, exportAsZip, exportNoteAsMd, exportBundle, exportEveryNoteMd, openSyncSetup, syncFull, syncDisconnect, cleanupUnusedImages, openShareModal, stopSharing, importFiles, importFolder }) {
+  export function buildCommandList({ openImageModal, openIconInsertPicker, openGraph, exportAsZip, exportNoteAsMd, exportBundle, exportEveryNoteMd, openSyncSetup, syncFull, syncDisconnect, cleanupUnusedImages, openShareModal, stopSharing, importFiles, importFolder }) {
   commandList = [
     { label: 'New note', icon: 'plus', hint: 'Ctrl+N', action: () => newNote(currentFolderForNew()) },
     { label: 'New shopping/checklist (live-friendly)', icon: 'shopping-cart', action: () => newNote(currentFolderForNew(), 'list') },
@@ -215,6 +227,7 @@ export function buildCommandList({ openImageModal, openGraph, exportAsZip, expor
     { label: 'Search notes', icon: 'search', hint: 'Ctrl+K', action: () => $('search').focus() },
     { label: 'Toggle preview/edit/split', icon: 'eye', hint: 'Ctrl+/', action: () => window.dispatchEvent(new CustomEvent('yanta-cycle-view')) },
     { label: 'Insert image', icon: 'image', hint: 'Ctrl+I', action: openImageModal },
+    { label: 'Insert Lucide icon', icon: 'sparkles', action: openIconInsertPicker },
     { label: 'Insert wikilink', icon: 'link', action: () => insertAtCursor('[[') },
     { label: 'Toggle pin', icon: 'pin', action: togglePin },
     { label: 'Cycle theme (auto/dark/light)', icon: 'moon', hint: 'T', action: toggleTheme },

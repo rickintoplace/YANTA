@@ -43,10 +43,14 @@ export function noteMarkdown(noteId) {
 // Subscribe to any change in a note's Y.Doc (debounced upstream).
 export function onDocChange(noteId, fn) {
   const { doc } = getNoteDoc(noteId);
-  const handler = () => fn();
+
+  const handler = (update, origin) => fn(update, origin);
+
   doc.on('update', handler);
+
   if (!subscribers.has(noteId)) subscribers.set(noteId, new Set());
   subscribers.get(noteId).add(handler);
+
   return () => {
     doc.off('update', handler);
     subscribers.get(noteId)?.delete(handler);
@@ -92,10 +96,31 @@ export function encodeNoteUpdateFrom(noteId, stateVector) {
 // Release a doc when a note is deleted.
 export async function destroyNoteDoc(noteId) {
   const entry = docs.get(noteId);
-  if (!entry) return;
-  try { await entry.persistence.clearData(); } catch {}
-  entry.doc.destroy();
-  docs.delete(noteId);
+
+  // If the doc is open in memory, clear its y-indexeddb data directly.
+  if (entry) {
+    try {
+      await entry.persistence.clearData();
+    } catch {}
+
+    entry.doc.destroy();
+    docs.delete(noteId);
+    return;
+  }
+
+  // If the doc was never opened in this session, still clear its
+  // y-indexeddb database by opening a temporary doc/persistence pair.
+  const doc = new Y.Doc();
+  const persistence = new IndexeddbPersistence(docKey(noteId), doc);
+
+  try {
+    await new Promise((res) => persistence.once('synced', res));
+    await persistence.clearData();
+  } catch {
+    // ignore cleanup errors
+  } finally {
+    doc.destroy();
+  }
 }
 
 // Re-export Y for callers that need it.

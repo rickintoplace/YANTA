@@ -3,12 +3,12 @@
 // pane divider, history navigation, view modes.
 // ============================================================
 
-import { $, state, store, openDB, setTheme, toggleTheme, toast } from './core.js';
+import { $, state, store, openDB, setTheme, toggleTheme, toast, cssColorToHex, safeCssColor } from './core.js';
 import { openNote, newNote, newFolder, saveCurrentNote, deleteCurrentNote, togglePin, createWelcomeNote, rebuildWikilinkIndex, setNavSuppress, addTag, createNoteWithTitle } from './notes.js';
 import { renderTree, renderTagCloud, showMenu, closeMenu, currentFolderForNew } from './tree.js';
 import { renderBacklinks, renderOutline, setupWikilinkHover, handleWikilinkClick, openPalette, closePalette, buildCommandList, paletteMove, paletteAccept, paletteFilter } from './features.js';
 import { openImageModal, closeImageModal, setupImage, pickImageFile, cleanupUnusedImages, insertImageAsRef } from './image.js';
-import { openIconInsertPicker } from './icon-picker.js';
+import { openIconInsertPicker, openIconPicker } from './icon-picker.js';
 import { focusEditorEnd, getView } from './editor.js';
 import { setupFormatToolbar } from './format-menu.js';
 import { exportAsZip, exportNoteAsMd, exportBundle, exportEveryNoteMd, openExportMenu, importFiles, importItems, walkEntry } from './io.js';
@@ -68,7 +68,7 @@ async function init() {
   await buildSearchIndex();
 
   buildCommandList({
-    openImageModal, openGraph, exportAsZip, exportNoteAsMd, exportBundle, exportEveryNoteMd,
+    openImageModal, openIconInsertPicker, openGraph, exportAsZip, exportNoteAsMd, exportBundle, exportEveryNoteMd,
     openSyncSetup, syncFull, syncDisconnect, cleanupUnusedImages,
     openShareModal, stopSharing: () => stopSharing(state.currentNoteId),
     importFiles, importFolder: () => $('importFolder').click(),
@@ -321,11 +321,95 @@ function bindEvents() {
 
   window.addEventListener('yanta-open-icon-insert', () => openIconInsertPicker());
 
+  window.addEventListener('yanta-edit-inline-icon', (e) => {
+    const d = e.detail || {};
+    if (d.tokenFrom == null || d.tokenTo == null) return;
+
+    openIconPicker({
+      title: 'Edit Lucide icon',
+      initialIcon: d.icon || 'square',
+      initialColor: d.color || '#6ea8fe',
+      allowReset: false,
+      applyLabel: 'Update',
+      onApply: ({ icon, color }) => {
+        if (!icon) return;
+
+        const safeColor = safeCssColor(color);
+        const insert = `:lucide[${icon}]${safeColor ? `{${safeColor}}` : ''}:`;
+
+        replaceEditorRange(d.tokenFrom, d.tokenTo, insert);
+        toast('Icon updated', 'success');
+      },
+    });
+  });
+
+  window.addEventListener('yanta-edit-inline-icon-color', (e) => {
+    const d = e.detail || {};
+    if (d.colorFrom == null || d.colorTo == null) return;
+
+    openNativeColorPickerForRange({
+      from: d.colorFrom,
+      to: d.colorTo,
+      color: d.color || '#000000',
+    });
+  });
+
   // Persist expanded folders
   setInterval(() => store.settings.set('expandedFolders', [...state.expandedFolders]), 5000);
 
   // Unload
   window.addEventListener('beforeunload', () => { if (state.dirty) saveCurrentNote(); });
+}
+
+function replaceEditorRange(from, to, insert) {
+  const v = getView();
+  if (!v) return;
+
+  v.dispatch({
+    changes: { from, to, insert },
+    selection: { anchor: from + insert.length },
+    scrollIntoView: true,
+  });
+
+  v.focus();
+}
+
+let inlineColorInput = null;
+
+function openNativeColorPickerForRange({ from, to, color }) {
+  const v = getView();
+  if (!v) return;
+
+  if (!inlineColorInput) {
+    inlineColorInput = document.createElement('input');
+    inlineColorInput.type = 'color';
+    inlineColorInput.style.position = 'fixed';
+    inlineColorInput.style.left = '-1000px';
+    inlineColorInput.style.top = '-1000px';
+    inlineColorInput.style.width = '1px';
+    inlineColorInput.style.height = '1px';
+    inlineColorInput.style.opacity = '0';
+    inlineColorInput.tabIndex = -1;
+    document.body.append(inlineColorInput);
+  }
+
+  inlineColorInput.value = cssColorToHex(color) || '#000000';
+
+  inlineColorInput.onchange = () => {
+    const next = inlineColorInput.value;
+    replaceEditorRange(from, to, next);
+    toast('Color updated', 'success');
+  };
+
+  try {
+    inlineColorInput.showPicker?.();
+  } catch {
+    inlineColorInput.click();
+  }
+
+  if (!inlineColorInput.showPicker) {
+    inlineColorInput.click();
+  }
 }
 
 function toggleTaskLine(lineIndex, checked) {

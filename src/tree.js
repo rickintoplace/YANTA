@@ -3,7 +3,7 @@
 // menus, drag-and-drop reorganisation.
 // ============================================================
 
-import { $, el, uid, state, store, lucide } from './core.js';
+import { $, el, uid, state, store, lucide, safeCssColor } from './core.js';
 import { openIconPicker } from './icon-picker.js';
 import { openNote, newNote, newFolder, deleteCurrentNote, togglePin, rebuildWikilinkIndex, clearEditor, createNoteWithTitle } from './notes.js';
 import { syncDeleteNoteFile } from './sync.js';
@@ -11,8 +11,7 @@ import { getNoteDoc, noteMarkdown, destroyNoteDoc } from './yjs.js';
 import { updateStorageMeter } from './core.js';
 
 function safeItemColor(c) {
-  const s = String(c || '').trim();
-  return /^#[0-9a-f]{3,8}$/i.test(s) ? s : '';
+  return safeCssColor(c);
 }
 
 function itemIcon(name, color) {
@@ -29,6 +28,33 @@ function applyItemColor(row, color) {
 
   row.classList.add('has-color');
   row.style.setProperty('--item-color', c);
+}
+
+/**
+ * Aktiver Marker für Notes.
+ *
+ * Warum nicht der normale border-left?
+ * Der normale Border sitzt am linken Rand der kompletten .tree-row.
+ * Bei Notes in Ordnern/Subordnern ist aber der Inhalt eingerückt.
+ * Dadurch wirkt der Border auf der falschen Ebene.
+ *
+ * Dieser Marker sitzt relativ zur Note-Ebene kurz vor dem Icon/Text.
+ */
+function activeNoteMarker(depth = 0) {
+  return el('span', {
+    class: 'tree-active-note-marker',
+    'aria-hidden': 'true',
+    style: {
+      position: 'absolute',
+      left: (12 + depth * 14) + 'px',
+      top: '4px',
+      bottom: '4px',
+      width: '2px',
+      borderRadius: '999px',
+      background: 'var(--accent)',
+      pointerEvents: 'none',
+    },
+  });
 }
 
 export function renderTree() {
@@ -171,9 +197,23 @@ function folderRow(f, visibleNotes, depth) {
 
 function noteRow(n, depth = 0) {
   const isActive = state.currentNoteId === n.id;
+
+  const rowStyle = {
+    paddingLeft: (24 + depth * 14) + 'px',
+  };
+
+  // Wichtig:
+  // Der globale CSS-Border `.tree-row.active { border-left-color: ... }`
+  // sitzt bei verschachtelten Notes optisch auf der falschen Ebene.
+  // Für aktive Notes deaktivieren wir ihn inline und zeichnen stattdessen
+  // einen korrekt eingerückten Marker.
+  if (isActive) {
+    rowStyle.borderLeftColor = 'transparent';
+  }
+
   const row = el('div', {
     class: 'tree-row note' + (isActive ? ' active' : ''),
-    style: { paddingLeft: (24 + depth * 14) + 'px' },
+    style: rowStyle,
     draggable: 'true',
     onclick: () => openNote(n.id),
     oncontextmenu: (e) => { e.preventDefault(); noteMenu(e, n); },
@@ -206,15 +246,23 @@ function noteRow(n, depth = 0) {
       renderTree();
     },
   });
+
   applyItemColor(row, n.color);
+
+  if (isActive) {
+    row.append(activeNoteMarker(depth));
+  }
+
   row.append(itemIcon(n.icon || (n.type === 'list' ? 'list' : 'file'), n.color));
   row.append(el('span', { class: 'label' }, n.title || 'Untitled'));
+
   // Per-note sync status dot
   const status = state.noteSyncStatus.get(n.id);
   if (status && status !== 'synced') {
     const dot = el('span', { class: 'sync-dot sync-dot-' + status, title: statusLabel(status) });
     row.append(dot);
   }
+
   if (state.liveShares.has(n.id)) row.append(el('span', { class: 'live-dot', title: 'Live shared' }));
   if (n.pinned) row.append(el('span', { class: 'pin', title: 'Pinned' }, '●'));
   return row;
@@ -303,6 +351,7 @@ function noteMenu(e, n) {
     } },
   ]);
 }
+
 function folderMenu(e, f) {
   showMenu(e.clientX, e.clientY, [
     { label: 'New note here', action: () => newNote(f.id) },
@@ -321,6 +370,7 @@ function folderMenu(e, f) {
     } },
   ]);
 }
+
 function moveNoteDialog(n) {
   const folders = [...state.folders.values()];
   const opts = ['(no folder)', ...folders.map((f) => f.name)];
@@ -333,6 +383,7 @@ function moveNoteDialog(n) {
   store.notes.put(n);
   renderTree();
 }
+
 async function duplicateNote(src) {
   const id = uid();
 

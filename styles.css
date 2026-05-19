@@ -1579,3 +1579,36 @@ input.yanta-task-checkbox {
   width: 18px;
   height: 18px;
 }
+
+/* ---------- Editable inline Lucide syntax in CodeMirror ---------- */
+
+.cm-editor .yanta-lucide-key {
+  cursor: pointer;
+  color: var(--accent);
+  background: rgba(110,168,254,0.10);
+  border-radius: 3px;
+  padding: 0 2px;
+}
+
+.cm-editor .yanta-lucide-key:hover {
+  background: rgba(110,168,254,0.20);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.cm-editor .yanta-color-code {
+  cursor: pointer;
+  border-bottom: 2px solid currentColor;
+  border-radius: 3px;
+  padding: 0 2px;
+  background: rgba(255,255,255,0.04);
+}
+
+.cm-editor .yanta-color-code:hover {
+  background: rgba(255,255,255,0.10);
+}
+
+.icon-picker-color-text {
+  width: 150px;
+  margin-bottom: 0;
+}

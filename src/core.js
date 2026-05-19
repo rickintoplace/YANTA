@@ -78,6 +78,56 @@ export function safeUrl(url, { image = false } = {}) {
   }
 }
 
+export function safeCssColor(color) {
+  const s = String(color || '').trim();
+
+  if (!s) return '';
+
+  // Hex: #rgb, #rgba, #rrggbb, #rrggbbaa
+  if (/^#[0-9a-f]{3,8}$/i.test(s)) return s;
+
+  // CSS color names / system colors, e.g. black, white, rebeccapurple.
+  // Deliberately no functions like rgb(), hsl(), var(), ...
+  if (/^[a-zA-Z][a-zA-Z0-9-]*$/.test(s)) {
+    try {
+      if (typeof CSS !== 'undefined' && CSS.supports?.('color', s)) return s;
+    } catch {}
+  }
+
+  return '';
+}
+
+export function cssColorToHex(color) {
+  const safe = safeCssColor(color);
+  if (!safe) return '';
+
+  if (/^#[0-9a-f]{6}$/i.test(safe)) return safe;
+  if (/^#[0-9a-f]{3}$/i.test(safe)) {
+    return '#' + safe.slice(1).split('').map((c) => c + c).join('');
+  }
+
+  try {
+    const canvas = cssColorToHex._canvas || (cssColorToHex._canvas = document.createElement('canvas'));
+    const ctx = canvas.getContext('2d');
+
+    ctx.fillStyle = '#000000';
+    ctx.fillStyle = safe;
+
+    const normalized = ctx.fillStyle;
+
+    if (/^#[0-9a-f]{6}$/i.test(normalized)) return normalized;
+
+    const m = /^rgba?\((\d+),\s*(\d+),\s*(\d+)/i.exec(normalized);
+    if (m) {
+      return '#' + [m[1], m[2], m[3]]
+        .map((n) => Math.max(0, Math.min(255, parseInt(n, 10))).toString(16).padStart(2, '0'))
+        .join('');
+    }
+  } catch {}
+
+  return '';
+}
+
 export const fmtBytes = (n) => {
   if (!n) return '0 B';
   const u = ['B', 'KB', 'MB', 'GB'];
@@ -106,49 +156,50 @@ export function downloadBlob(blob, filename) {
   a.remove();
   setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
+
 // ----------------------------------------------------------------
 // Lucide icons — full icon set from lucide package
 // ----------------------------------------------------------------
 
 const ICON_ALIASES = {
-  doc: 'FileText',
-  file: 'File',
-  folder: 'Folder',
-  qr: 'QrCode',
-  x: 'X',
-  check: 'Check',
-  settings: 'Settings',
-  refresh: 'RefreshCw',
-  trash: 'Trash',
-  image: 'Image',
-  upload: 'Upload',
-  download: 'Download',
-  edit: 'Pencil',
-  share: 'Share2',
-  link: 'Link',
-  users: 'Users',
-  tag: 'Tag',
-  hash: 'Hash',
-  network: 'Network',
-  command: 'Command',
-  sun: 'Sun',
-  moon: 'Moon',
-  square: 'Square',
-  copy: 'Copy',
-  quote: 'Quote',
-  list: 'List',
-  pin: 'Pin',
-  star: 'Star',
-  plus: 'Plus',
-  search: 'Search',
-  eye: 'Eye',
-  info: 'Info',
-  triangle: 'TriangleAlert',
-  'folder-plus': 'FolderPlus',
-  'chevron-down': 'ChevronDown',
-  'chevron-right': 'ChevronRight',
-  'check-square': 'SquareCheck',
-  'shopping-cart': 'ShoppingCart',
+  doc: 'file-text',
+  file: 'file',
+  folder: 'folder',
+  qr: 'qr-code',
+  x: 'x',
+  check: 'check',
+  settings: 'settings',
+  refresh: 'refresh-cw',
+  trash: 'trash',
+  image: 'image',
+  upload: 'upload',
+  download: 'download',
+  edit: 'pencil',
+  share: 'share-2',
+  link: 'link',
+  users: 'users',
+  tag: 'tag',
+  hash: 'hash',
+  network: 'network',
+  command: 'command',
+  sun: 'sun',
+  moon: 'moon',
+  square: 'square',
+  copy: 'copy',
+  quote: 'quote',
+  list: 'list',
+  pin: 'pin',
+  star: 'star',
+  plus: 'plus',
+  search: 'search',
+  eye: 'eye',
+  info: 'info',
+  triangle: 'triangle-alert',
+  'folder-plus': 'folder-plus',
+  'chevron-down': 'chevron-down',
+  'chevron-right': 'chevron-right',
+  'check-square': 'square-check',
+  'shopping-cart': 'shopping-cart',
 };
 
 function pascalToKebab(name) {
@@ -166,7 +217,15 @@ function kebabToPascal(name) {
     .join('');
 }
 
+function keyToKebab(key) {
+  const s = String(key || '').trim();
+  if (!s) return '';
+  if (s.includes('-')) return s.toLowerCase();
+  return pascalToKebab(s);
+}
+
 function attrName(name) {
+  if (name === 'viewBox') return 'viewBox';
   return String(name).replace(/[A-Z]/g, (m) => '-' + m.toLowerCase());
 }
 
@@ -175,6 +234,8 @@ function escapeSvgAttr(v) {
 }
 
 const SVG_TAGS = new Set([
+  'svg',
+  'g',
   'path',
   'line',
   'polyline',
@@ -182,55 +243,74 @@ const SVG_TAGS = new Set([
   'circle',
   'rect',
   'ellipse',
-  'g',
 ]);
-
-function keyToKebab(key) {
-  const s = String(key || '').trim();
-
-  if (!s) return '';
-
-  // lucide package may expose keys either as "AlertCircle" or "alert-circle".
-  if (s.includes('-')) return s.toLowerCase();
-
-  return pascalToKebab(s);
-}
 
 const LUCIDE_KEY_BY_KEBAB = new Map(
   Object.keys(LUCIDE_ICONS || {}).map((key) => [keyToKebab(key), key])
 );
 
-function aliasToKebab(name) {
-  const alias = ICON_ALIASES[name];
+function isNodeTuple(v) {
+  return Array.isArray(v) && typeof v[0] === 'string';
+}
 
-  if (!alias) return '';
+function nodeList(v) {
+  if (!v) return [];
 
-  return keyToKebab(alias);
+  // Single lucide tuple:
+  // ['path', { d: '...' }]
+  if (isNodeTuple(v)) return [v];
+
+  // List of tuples / nodes.
+  if (Array.isArray(v)) return v;
+
+  if (typeof v === 'object') {
+    // Vanilla lucide package often uses:
+    // { name: '...', contents: [...] }
+    // or root svg-like objects. For icon definitions, we want only contents.
+    if (Array.isArray(v.contents)) return v.contents;
+
+    // Other possible builds:
+    if (Array.isArray(v.iconNode)) return v.iconNode;
+    if (Array.isArray(v.children)) return v.children;
+    if (Array.isArray(v.child)) return v.child;
+
+    // Single object node:
+    // { tag: 'path', attrs: {...} }
+    if (v.tag || v.name) return [v];
+  }
+
+  return [];
+}
+
+function iconDefLooksValid(def) {
+  return nodeList(def).length > 0;
 }
 
 function findLucideKey(name) {
   const raw = String(name || '').trim();
+  const alias = ICON_ALIASES[raw] || ICON_ALIASES[raw.toLowerCase()];
 
   const candidates = [
+    alias,
     raw,
     raw.toLowerCase(),
     keyToKebab(raw),
     keyToKebab(kebabToPascal(raw)),
-    aliasToKebab(raw),
   ].filter(Boolean);
 
   for (const c of candidates) {
-    const key = LUCIDE_KEY_BY_KEBAB.get(c);
-    if (key) return key;
+    const kebab = keyToKebab(c);
+    const key = LUCIDE_KEY_BY_KEBAB.get(kebab);
+    if (key && iconDefLooksValid(LUCIDE_ICONS[key])) return key;
 
-    // Also allow direct object access for unusual builds.
-    if (LUCIDE_ICONS[c]) return c;
+    if (LUCIDE_ICONS[c] && iconDefLooksValid(LUCIDE_ICONS[c])) return c;
   }
 
   return (
     LUCIDE_KEY_BY_KEBAB.get('square') ||
     LUCIDE_KEY_BY_KEBAB.get('box') ||
-    Object.keys(LUCIDE_ICONS || {})[0]
+    Object.keys(LUCIDE_ICONS || {}).find((k) => iconDefLooksValid(LUCIDE_ICONS[k])) ||
+    null
   );
 }
 
@@ -239,67 +319,47 @@ function getLucideDef(name) {
   return key ? LUCIDE_ICONS[key] : null;
 }
 
-function getLucideNode(def) {
-  if (!def) return [];
+function renderSvgEntry(entry) {
+  let tag;
+  let attrs = {};
+  let children;
 
-  // Most lucide icon definitions:
-  // [['path', { d: '...' }], ['circle', {...}]]
-  if (Array.isArray(def)) return def;
-
-  // Some builds wrap nodes:
-  // { iconNode: [...] }
-  if (def && typeof def === 'object') {
-    if (Array.isArray(def.iconNode)) return def.iconNode;
-    if (Array.isArray(def.children)) return def.children;
-    if (Array.isArray(def.child)) return def.child;
+  // Tuple shape:
+  // ['path', { d: '...' }]
+  if (isNodeTuple(entry)) {
+    [tag, attrs = {}, children] = entry;
   }
 
-  return [];
+  // Object shape:
+  // { tag: 'path', attrs: {...}, contents: [...] }
+  else if (entry && typeof entry === 'object') {
+    tag = entry.tag || entry.name;
+    attrs = entry.attrs || entry.attributes || {};
+    children = entry.contents || entry.children || entry.child;
+  }
+
+  if (tag === 'svg') {
+    return renderIconNode(children || entry.contents || entry.children || entry.child);
+  }
+
+  if (!SVG_TAGS.has(tag)) return '';
+
+  const attrText = Object.entries(attrs || {})
+    .filter(([k, v]) => k !== 'key' && v != null)
+    .map(([k, v]) => `${attrName(k)}="${escapeSvgAttr(v)}"`)
+    .join(' ');
+
+  const childText = children ? renderIconNode(children) : '';
+
+  if (childText) {
+    return `<${tag}${attrText ? ' ' + attrText : ''}>${childText}</${tag}>`;
+  }
+
+  return `<${tag}${attrText ? ' ' + attrText : ''}/>`;
 }
 
-function iconDefLooksValid(def) {
-  return getLucideNode(def).length > 0;
-}
-
-function renderIconNode(nodeOrDef) {
-  const nodes = getLucideNode(nodeOrDef);
-
-  return nodes
-    .map((entry) => {
-      let tag;
-      let attrs;
-      let children;
-
-      // Shape:
-      // ['path', { d: '...' }]
-      if (Array.isArray(entry)) {
-        [tag, attrs = {}, children] = entry;
-      }
-
-      // Shape:
-      // { tag: 'path', attrs: { d: '...' } }
-      else if (entry && typeof entry === 'object') {
-        tag = entry.tag || entry.name;
-        attrs = entry.attrs || entry.attributes || {};
-        children = entry.children || entry.child;
-      }
-
-      if (!SVG_TAGS.has(tag)) return '';
-
-      const attrText = Object.entries(attrs || {})
-        .filter(([k]) => k !== 'key')
-        .map(([k, v]) => `${attrName(k)}="${escapeSvgAttr(v)}"`)
-        .join(' ');
-
-      const childText = children ? renderIconNode(children) : '';
-
-      if (childText) {
-        return `<${tag}${attrText ? ' ' + attrText : ''}>${childText}</${tag}>`;
-      }
-
-      return `<${tag}${attrText ? ' ' + attrText : ''}/>`;
-    })
-    .join('');
+function renderIconNode(defOrNodes) {
+  return nodeList(defOrNodes).map(renderSvgEntry).join('');
 }
 
 export function lucideIconNames() {
@@ -311,14 +371,10 @@ export function lucideIconNames() {
 
 export function normalizeLucideName(name) {
   const raw = String(name || '').trim();
-
   if (!raw) return 'square';
 
   const key = findLucideKey(raw);
-
-  if (!key) return 'square';
-
-  return keyToKebab(key);
+  return key ? keyToKebab(key) : 'square';
 }
 
 export function lucideExists(name) {

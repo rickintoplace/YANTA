@@ -5,7 +5,7 @@
 // widget, image preview widget, live cursors (when shared).
 // ============================================================
 
-import { EditorState, Compartment, RangeSetBuilder, StateField, StateEffect } from '@codemirror/state';
+import { EditorState, Compartment, RangeSetBuilder, StateField, StateEffect, Transaction } from '@codemirror/state';
 import { EditorView, keymap, drawSelection, placeholder, ViewPlugin, Decoration, WidgetType, MatchDecorator } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
@@ -13,16 +13,17 @@ import { syntaxHighlighting, defaultHighlightStyle, HighlightStyle, indentOnInpu
 import { autocompletion, completionKeymap } from '@codemirror/autocomplete';
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { tags as t } from '@lezer/highlight';
-import { yCollab } from 'y-codemirror.next';
 import { classifyLine } from './markdown.js';
 
-import { state } from './core.js';
+import { state, safeCssColor } from './core.js';
 import { getNoteDoc, getMarkdownText } from './yjs.js';
 import { wikilinkIndex } from './features-state.js';
 
 let view = null;
 let currentNoteId = null;
-const collabCompartment = new Compartment();
+let currentYBinding = null;
+let applyingYUpdate = false;
+
 const themeCompartment = new Compartment();
 
 // ----- Custom highlight style (matches YANTA theme) ---------------------
@@ -776,6 +777,156 @@ function collectMarkdownInlineRanges(text, lineFrom, ranges) {
 }
 
 // ============================================================
+// Inline Lucide editor decorations.
+// Makes :lucide[cloud]{#4ade80}: editable by clicking:
+// - icon key  -> icon picker
+// - color     -> native color picker
+// Also supports color names like {black}.
+// ============================================================
+
+const LUCIDE_INLINE_RE = /:lucide\[([a-zA-Z0-9-_ ]+)\](?:\{([^}\n:]+)\})?:/g;
+
+const lucideInlineEditField = StateField.define({
+  create(state) {
+    return buildLucideInlineEditDecos(state);
+  },
+
+  update(deco, tr) {
+    if (tr.docChanged) return buildLucideInlineEditDecos(tr.state);
+    return deco.map(tr.changes);
+  },
+
+  provide: (field) => EditorView.decorations.from(field),
+});
+
+function buildLucideInlineEditDecos(s) {
+  const b = new RangeSetBuilder();
+
+  for (let p = 0; p <= s.doc.length;) {
+    const line = s.doc.lineAt(p);
+    const text = line.text;
+
+    LUCIDE_INLINE_RE.lastIndex = 0;
+
+    let m;
+    while ((m = LUCIDE_INLINE_RE.exec(text)) !== null) {
+      const tokenFrom = line.from + m.index;
+      const tokenTo = tokenFrom + m[0].length;
+
+      const iconFrom = tokenFrom + ':lucide['.length;
+      const iconTo = iconFrom + m[1].length;
+
+      const baseAttrs = {
+        'data-token-from': String(tokenFrom),
+        'data-token-to': String(tokenTo),
+        'data-icon': m[1].trim(),
+        'data-icon-from': String(iconFrom),
+        'data-icon-to': String(iconTo),
+      };
+
+      if (m[2]) {
+        const colorBrace = m[0].indexOf('{');
+        const colorFrom = tokenFrom + colorBrace + 1;
+        const colorTo = colorFrom + m[2].length;
+
+        baseAttrs['data-color'] = m[2].trim();
+        baseAttrs['data-color-from'] = String(colorFrom);
+        baseAttrs['data-color-to'] = String(colorTo);
+      }
+
+      b.add(
+        iconFrom,
+        iconTo,
+        Decoration.mark({
+          class: 'yanta-lucide-key',
+          attributes: baseAttrs,
+        })
+      );
+
+      if (m[2]) {
+        const colorBrace = m[0].indexOf('{');
+        const colorFrom = tokenFrom + colorBrace + 1;
+        const colorTo = colorFrom + m[2].length;
+        const safeColor = safeCssColor(m[2]);
+
+        b.add(
+          colorFrom,
+          colorTo,
+          Decoration.mark({
+            class: 'yanta-color-code',
+            attributes: {
+              ...baseAttrs,
+              'data-color': m[2].trim(),
+              'data-color-from': String(colorFrom),
+              'data-color-to': String(colorTo),
+              ...(safeColor ? { style: `color:${safeColor};border-bottom-color:${safeColor}` } : {}),
+            },
+          })
+        );
+      }
+    }
+
+    if (line.to >= s.doc.length) break;
+    p = line.to + 1;
+  }
+
+  return b.finish();
+}
+
+function readInlineEditDataset(node) {
+  const n = node instanceof Element ? node : null;
+  if (!n) return null;
+
+  const intAttr = (name) => {
+    const v = n.getAttribute(name);
+    const i = parseInt(v || '', 10);
+    return Number.isFinite(i) ? i : null;
+  };
+
+  return {
+    tokenFrom: intAttr('data-token-from'),
+    tokenTo: intAttr('data-token-to'),
+    iconFrom: intAttr('data-icon-from'),
+    iconTo: intAttr('data-icon-to'),
+    colorFrom: intAttr('data-color-from'),
+    colorTo: intAttr('data-color-to'),
+    icon: n.getAttribute('data-icon') || '',
+    color: n.getAttribute('data-color') || '',
+  };
+}
+
+function inlineLucideEditClickHandler() {
+  return EditorView.domEventHandlers({
+    click(e) {
+      const target = e.target instanceof Element ? e.target : null;
+      if (!target) return false;
+
+      const colorEl = target.closest('.yanta-color-code');
+      if (colorEl) {
+        const detail = readInlineEditDataset(colorEl);
+        if (!detail) return false;
+
+        window.dispatchEvent(new CustomEvent('yanta-edit-inline-icon-color', { detail }));
+        e.preventDefault();
+        return true;
+      }
+
+      const iconEl = target.closest('.yanta-lucide-key');
+      if (iconEl) {
+        const detail = readInlineEditDataset(iconEl);
+        if (!detail) return false;
+
+        window.dispatchEvent(new CustomEvent('yanta-edit-inline-icon', { detail }));
+        e.preventDefault();
+        return true;
+      }
+
+      return false;
+    },
+  });
+}
+
+// ============================================================
 // Layout sync spacers.
 // The preview can naturally be taller than the editor for a source line
 // because rendered Markdown hides syntax or expands embeds/callouts.
@@ -855,14 +1006,105 @@ export function setEditorLineSpacers(extraByLine) {
 // ============================================================
 // Public API — mount / swap / destroy editor.
 // ============================================================
+
+function cleanupYBinding() {
+  if (!currentYBinding) return;
+
+  try {
+    currentYBinding.ytext.unobserve(currentYBinding.observer);
+  } catch {}
+
+  currentYBinding = null;
+}
+
+function bindYTextToEditor(v, ytext) {
+  cleanupYBinding();
+
+  const observer = (event) => {
+    if (!view || view !== v) return;
+
+    // Updates, die wir selbst aus CodeMirror in Y.Text geschrieben haben,
+    // nicht wieder zurückspiegeln.
+    if (event.transaction.origin === 'codemirror') return;
+
+    const changes = [];
+    let pos = 0;
+
+    for (const op of event.changes.delta) {
+      if (op.retain) {
+        pos += op.retain;
+      }
+
+      if (op.delete) {
+        changes.push({
+          from: pos,
+          to: pos + op.delete,
+          insert: '',
+        });
+
+        // Delta-Positionen beziehen sich auf das alte Dokument.
+        pos += op.delete;
+      }
+
+      if (op.insert) {
+        changes.push({
+          from: pos,
+          to: pos,
+          insert: String(op.insert),
+        });
+
+        // Insert verbraucht keine Position im alten Dokument.
+      }
+    }
+
+    if (!changes.length) return;
+
+    applyingYUpdate = true;
+
+    try {
+      v.dispatch({
+        changes,
+        annotations: Transaction.addToHistory.of(false),
+      });
+    } finally {
+      applyingYUpdate = false;
+    }
+  };
+
+  ytext.observe(observer);
+  currentYBinding = { ytext, observer };
+}
+
+function applyCodeMirrorChangesToYText(update, ytext) {
+  if (!update.docChanged || applyingYUpdate) return;
+
+  let offset = 0;
+
+  ytext.doc?.transact(() => {
+    update.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
+      const from = fromA + offset;
+      const deleteLen = toA - fromA;
+      const insertText = inserted.toString();
+
+      if (deleteLen > 0) {
+        ytext.delete(from, deleteLen);
+      }
+
+      if (insertText) {
+        ytext.insert(from, insertText);
+      }
+
+      offset += insertText.length - deleteLen;
+    });
+  }, 'codemirror');
+}
+
 export function mountEditor(host, { noteId, awarenessUser }) {
+  cleanupYBinding();
   if (view) view.destroy();
   currentNoteId = noteId;
   const { doc } = getNoteDoc(noteId);
   const ytext = doc.getText('markdown');
-  const collabExt = awarenessUser
-    ? yCollab(ytext, awarenessUser.awareness, { undoManager: awarenessUser.undoManager })
-    : yCollab(ytext, null);
 
   const exts = [
     history(),
@@ -873,6 +1115,7 @@ export function mountEditor(host, { noteId, awarenessUser }) {
     syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
     markdownLineClassField,
     markdownInlineClassField,
+    lucideInlineEditField,
     editorLineSpacerField,
     indentOnInput(),
     bracketMatching(),
@@ -888,16 +1131,16 @@ export function mountEditor(host, { noteId, awarenessUser }) {
     imagePreviewField,
     videoPreviewField,
     wikilinkClickHandler(),
+    inlineLucideEditClickHandler(),
     pasteHandler(),
     dropHandler(),
     EditorView.updateListener.of((u) => {
+      applyCodeMirrorChangesToYText(u, ytext);
+
       if (u.selectionSet || u.focusChanged) {
         window.dispatchEvent(new CustomEvent('yanta-selection-change'));
       }
 
-      // viewportChanged feuert beim Scrollen sehr häufig.
-      // Das darf keine neue Layout-Messung triggern, sonst entsteht
-      // bei langen Notes ein Mess-/Spacer-/Scroll-Loop.
       if (u.docChanged || u.geometryChanged) {
         window.dispatchEvent(new CustomEvent('yanta-editor-geometry-change'));
       }
@@ -914,7 +1157,6 @@ export function mountEditor(host, { noteId, awarenessUser }) {
     ]),
     placeholder('Start writing in Markdown… (type / for commands, [[ for links)'),
     themeCompartment.of(yantaTheme),
-    collabCompartment.of(collabExt),
   ];
 
   // y-codemirror.next expects the initial editor doc to mirror the
@@ -923,13 +1165,22 @@ export function mountEditor(host, { noteId, awarenessUser }) {
     parent: host,
     state: EditorState.create({ doc: ytext.toString(), extensions: exts }),
   });
+
+  bindYTextToEditor(view, ytext);
+
   return view;
 }
 
 export function getView() { return view; }
 
 export function destroyEditor() {
-  if (view) { view.destroy(); view = null; }
+  cleanupYBinding();
+
+  if (view) {
+    view.destroy();
+    view = null;
+  }
+
   currentNoteId = null;
 }
 

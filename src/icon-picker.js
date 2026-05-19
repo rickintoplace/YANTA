@@ -9,6 +9,8 @@ import {
   lucide,
   lucideIconNames,
   normalizeLucideName,
+  safeCssColor,
+  cssColorToHex,
   toast,
 } from './core.js';
 import { insertAtCursor } from './editor.js';
@@ -28,6 +30,7 @@ const COLORS = [
 let modal;
 let searchInput;
 let colorInput;
+let colorTextInput;
 let grid;
 let titleEl;
 let applyBtn;
@@ -41,8 +44,7 @@ let pickerState = {
 };
 
 function safeColor(c) {
-  const s = String(c || '').trim();
-  return /^#[0-9a-f]{3,8}$/i.test(s) ? s : '';
+  return safeCssColor(c);
 }
 
 function ensurePicker() {
@@ -75,12 +77,32 @@ function ensurePicker() {
     oninput: () => renderGrid(),
   });
 
+  colorTextInput = el('input', {
+    class: 'text-input icon-picker-color-text',
+    type: 'text',
+    placeholder: '#4ade80 or black',
+    autocomplete: 'off',
+    oninput: () => {
+      const c = safeColor(colorTextInput.value);
+      if (!c) return;
+
+      pickerState.color = c;
+
+      const hex = cssColorToHex(c);
+      if (hex) colorInput.value = hex;
+
+      markSelection();
+    },
+  });
+
   colorInput = el('input', {
     type: 'color',
     class: 'icon-picker-color',
-    value: pickerState.color,
+    value: cssColorToHex(pickerState.color) || '#6ea8fe',
+
     oninput: () => {
       pickerState.color = colorInput.value;
+      colorTextInput.value = pickerState.color;
       markSelection();
     },
   });
@@ -96,6 +118,7 @@ function ensurePicker() {
         onclick: () => {
           pickerState.color = c;
           colorInput.value = c;
+          colorTextInput.value = c;
           markSelection();
         },
       })
@@ -134,7 +157,7 @@ function ensurePicker() {
   const body = el(
     'div',
     { class: 'modal-body icon-picker-body' },
-    el('div', { class: 'icon-picker-toolbar' }, searchInput, colorInput),
+    el('div', { class: 'icon-picker-toolbar' }, searchInput, colorTextInput, colorInput),
     swatches,
     grid,
     el('div', { class: 'compress-actions' }, resetBtn, applyBtn)
@@ -206,7 +229,8 @@ export function openIconPicker({
 
   titleEl.textContent = title;
   searchInput.value = '';
-  colorInput.value = pickerState.color;
+  colorTextInput.value = pickerState.color;
+  colorInput.value = cssColorToHex(pickerState.color) || '#6ea8fe';
   resetBtn.hidden = !allowReset;
   applyBtn.textContent = applyLabel;
 

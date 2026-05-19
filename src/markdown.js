@@ -7,9 +7,24 @@
 // ============================================================
 
 import DOMPurify from 'dompurify';
-import { state, store, escapeHtml, escapeAttr, decodeEntities, safeUrl, lucide } from './core.js';
+import { state, store, escapeHtml, escapeAttr, decodeEntities, safeUrl, lucide, safeCssColor } from './core.js';
 import { wikilinkIndex } from './features-state.js';
 import { noteMarkdown } from './yjs.js';
+
+function hydrateLucideHost(host, name, size = 16) {
+  host.replaceChildren();
+
+  const tpl = document.createElement('template');
+  tpl.innerHTML = lucide(name || 'square', size);
+
+  const svg = tpl.content.firstElementChild;
+
+  if (svg) {
+    svg.setAttribute('aria-hidden', 'true');
+    svg.setAttribute('focusable', 'false');
+    host.append(svg);
+  }
+}
 
 function sanitizeHtml(html) {
   const clean = DOMPurify.sanitize(html, {
@@ -23,7 +38,7 @@ function sanitizeHtml(html) {
       'iframe',
       'input',
 
-      // SVG bleibt erlaubt, aber pv-adm Icons hydraten wir unten nochmal robust.
+      // SVG bleibt erlaubt, aber Icons hydraten wir unten nochmal robust.
       'svg',
       'path',
       'line',
@@ -31,6 +46,7 @@ function sanitizeHtml(html) {
       'polygon',
       'circle',
       'rect',
+      'ellipse',
     ],
 
     ADD_ATTR: [
@@ -53,6 +69,10 @@ function sanitizeHtml(html) {
       'data-type',
       'data-fn',
       'data-adm-icon',
+
+      // Inline Lucide placeholders
+      'data-lucide-icon',
+      'data-lucide-color',
 
       // Checkboxen
       'type',
@@ -110,7 +130,7 @@ function sanitizeHtml(html) {
 
   // Robust: Admonition-Icons nach DOMPurify aus vertrauenswürdigem Code hydraten.
   // Dadurch müssen die Lucide-SVGs nicht als Markdown-HTML durch den Sanitizer.
-  const allowedIcons = new Set([
+  const allowedAdmIcons = new Set([
     'info',
     'check',
     'star',
@@ -122,23 +142,34 @@ function sanitizeHtml(html) {
   for (const host of tmp.content.querySelectorAll('.pv-adm-icon[data-adm-icon]')) {
     const name = host.getAttribute('data-adm-icon') || 'info';
 
-    if (!allowedIcons.has(name)) {
+    if (!allowedAdmIcons.has(name)) {
       host.removeAttribute('data-adm-icon');
       continue;
     }
 
-    host.replaceChildren();
+    hydrateLucideHost(host, name, 14);
+    host.removeAttribute('data-adm-icon');
+  }
 
-    const iconTpl = document.createElement('template');
-    iconTpl.innerHTML = lucide(name, 14);
+  // Robust: Inline-Lucide-Icons nach DOMPurify hydrieren.
+  // Wichtig: Die SVG-Attribute wie d/cx/cy/r/viewBox laufen dadurch NICHT
+  // durch DOMPurify und werden deshalb nicht entfernt.
+  for (const host of tmp.content.querySelectorAll('.pv-inline-icon[data-lucide-icon]')) {
+    const name = host.getAttribute('data-lucide-icon') || 'square';
+    const color = host.getAttribute('data-lucide-color') || '';
 
-    const svg = iconTpl.content.firstElementChild;
-    if (svg) {
-      svg.setAttribute('aria-hidden', 'true');
-      host.append(svg);
+    const safeColor = safeCssColor(color);
+
+    if (safeColor) {
+      host.style.color = safeColor;
+    } else {
+      host.style.removeProperty('color');
     }
 
-    host.removeAttribute('data-adm-icon');
+    hydrateLucideHost(host, name, 16);
+
+    host.removeAttribute('data-lucide-icon');
+    host.removeAttribute('data-lucide-color');
   }
 
   return tmp.innerHTML;
@@ -216,11 +247,21 @@ export function renderInline(s) {
   // Inline Lucide icon syntax:
   // :lucide[atom]:
   // :lucide[atom]{#6ea8fe}:
-  out = out.replace(
-    /:lucide\[([a-zA-Z0-9-_ ]+)\](?:\{(#[0-9a-fA-F]{3,8})\})?:/g,
+  //
+  // Wichtig:
+  // Wir setzen hier KEIN direktes SVG ein, sondern nur einen sicheren Placeholder.
+  // Das echte SVG wird nach DOMPurify in sanitizeHtml() hydriert.
+    out = out.replace(
+      /:lucide\[([a-zA-Z0-9-_ ]+)\](?:\{([^}\n:]+)\})?:/g,
     (_, iconName, color) => {
-      const style = color ? ` style="color:${escapeAttr(color)}"` : '';
-      return `<span class="pv-inline-icon"${style} contenteditable="false">${lucide(iconName.trim(), 16)}</span>`;
+      const cleanName = iconName.trim();
+      const cleanColor = safeCssColor(color);
+
+      const colorAttr = cleanColor
+        ? ` data-lucide-color="${escapeAttr(cleanColor)}" style="color:${escapeAttr(cleanColor)}"`
+      : '';
+
+      return `<span class="pv-inline-icon" data-lucide-icon="${escapeAttr(cleanName)}"${colorAttr} contenteditable="false" aria-hidden="true"></span>`;
     }
   );
 

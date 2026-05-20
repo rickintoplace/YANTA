@@ -289,9 +289,15 @@ function bindEvents() {
   // catches clicks inside .cm-content; the empty area below it is
   // .cm-scroller (or paneEdit padding), which we route here.
   $('paneEdit').addEventListener('mousedown', (e) => {
-    if (e.target.closest('.cm-content')) return;            // CM handles it
-    if (e.target.closest('.format-toolbar')) return;        // toolbar swallows clicks
-    if (e.target.closest('.cm-tooltip')) return;            // autocomplete tooltip
+    const v = getView();
+
+    // Alles, was innerhalb von CodeMirror passiert, soll CodeMirror selbst behandeln:
+    // Textauswahl, Klicks in Padding, Selection-Layer, Widgets, Scroller usw.
+    if (v?.dom?.contains(e.target)) return;
+
+    if (e.target.closest?.('.format-toolbar')) return;
+    if (e.target.closest?.('.cm-tooltip')) return;
+
     e.preventDefault();
     focusEditorEnd();
   });

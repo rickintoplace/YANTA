@@ -28,10 +28,10 @@ const themeCompartment = new Compartment();
 
 // ----- Custom highlight style (matches YANTA theme) ---------------------
 const yantaHighlight = HighlightStyle.define([
-  { tag: t.heading1, fontSize: '1.55em', fontWeight: '700', color: 'var(--text)' },
-  { tag: t.heading2, fontSize: '1.3em', fontWeight: '700', color: 'var(--text)' },
-  { tag: t.heading3, fontSize: '1.15em', fontWeight: '600', color: 'var(--text)' },
-  { tag: t.heading4, fontSize: '1.05em', fontWeight: '600', color: 'var(--text)' },
+  { tag: t.heading1, fontWeight: '700', color: 'var(--text)' },
+  { tag: t.heading2, fontWeight: '700', color: 'var(--text)' },
+  { tag: t.heading3, fontWeight: '600', color: 'var(--text)' },
+  { tag: t.heading4, fontWeight: '600', color: 'var(--text)' },
   { tag: t.heading5, fontWeight: '600' },
   { tag: t.heading6, fontWeight: '600' },
   { tag: t.strong, fontWeight: '700' },

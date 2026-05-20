@@ -2,7 +2,7 @@
 
 A **local-first** Markdown notes app with live collaboration.
 
-- **Editor**: CodeMirror 6 — slash commands, autocomplete, inline image & video previews
+- **Editor**: CodeMirror 6: slash commands, autocomplete, inline image & video previews
 - **Content**: each note is a Yjs document — robust, conflict-free, collab-ready
 - **Storage**: IndexedDB (notes + assets) — works fully offline, no account
 - **Device sync**: pick a folder, point Syncthing (or Dropbox / iCloud / SMB) at it. `.md` files live next to a small `.yanta/` directory of CRDT snapshots

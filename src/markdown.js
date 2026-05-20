@@ -408,11 +408,15 @@ export function renderInline(s) {
   });
 
   // DOI.
-  out = out.replace(/\bdoi:(10\.\d{4,9}\/[-._;()/:A-Z0-9]+)/gi, (_, d) => {
+  out = out.replace(/\bdoi:(10\.\d{4,9}\/[^\s<>"']+)/gi, (_, rawDoi) => {
+    const trailing = rawDoi.match(/[.,;:)]+$/)?.[0] || '';
+    const d = trailing ? rawDoi.slice(0, -trailing.length) : rawDoi;
+
     const href = safeUrl(`https://doi.org/${d}`);
+
     return href
-      ? `<a href="${escapeAttr(href)}" target="_blank" rel="noopener noreferrer" class="pv-doi">doi:${escapeHtml(d)}</a>`
-      : `doi:${escapeHtml(d)}`;
+      ? `<a href="${escapeAttr(href)}" target="_blank" rel="noopener noreferrer" class="pv-doi">doi:${escapeHtml(d)}</a>${escapeHtml(trailing)}`
+      : `doi:${escapeHtml(rawDoi)}`;
   });
 
   // Markdown inline styling.

@@ -29,6 +29,7 @@ import {
   $,
   state,
   lucide,
+  lucideIconNames,
   safeCssColor,
   uid,
   store,
@@ -3345,45 +3346,9 @@ function rebuildAndAnimateAfterMutation(alpha = 0.8) {
 // Appearance picker (custom: icon + color, dual-button apply)
 // ------------------------------------------------------------
 
-// Curated set of useful Lucide icons for notes/folders. Falls back to
-// 'square' if a name isn't in this build of lucide.
-const APPEARANCE_ICONS = [
-  // Notes / writing
-  'file', 'file-text', 'file-plus', 'notebook', 'notebook-pen', 'sticky-note',
-  'book', 'book-open', 'book-marked', 'bookmark', 'newspaper', 'scroll', 'feather',
-  'pen', 'pencil', 'edit-3', 'type', 'quote',
-  // Folders / structure
-  'folder', 'folder-open', 'folder-tree', 'folders', 'archive', 'box', 'package',
-  'inbox', 'list', 'list-checks', 'list-todo', 'kanban', 'columns',
-  // People / communication
-  'user', 'users', 'mail', 'message-circle', 'message-square', 'phone',
-  'at-sign', 'send',
-  // Time / calendar
-  'calendar', 'calendar-days', 'clock', 'timer', 'alarm-clock', 'hourglass',
-  // Status / decision
-  'check', 'check-circle', 'circle', 'square', 'star', 'heart', 'flag',
-  'bell', 'pin', 'tag', 'flame', 'sparkles', 'zap', 'thumbs-up',
-  // Knowledge / ideas
-  'lightbulb', 'brain', 'compass', 'map', 'target', 'crosshair',
-  'puzzle', 'graduation-cap', 'school', 'library', 'beaker', 'flask-conical',
-  // Code / tech
-  'code', 'terminal', 'cpu', 'database', 'server', 'cloud', 'wifi',
-  'git-branch', 'git-commit', 'git-merge', 'bug', 'wrench',
-  // Money / business
-  'briefcase', 'building', 'building-2', 'banknote', 'wallet', 'coins',
-  'credit-card', 'shopping-cart', 'shopping-bag', 'percent', 'trending-up', 'trending-down',
-  // Nature / hobbies
-  'leaf', 'tree-pine', 'tree-deciduous', 'flower', 'sun', 'moon', 'cloud-sun',
-  'mountain', 'tent', 'bike', 'car', 'plane', 'ship', 'train',
-  // Food / health
-  'coffee', 'utensils', 'pizza', 'apple', 'wine', 'dumbbell', 'pill',
-  'stethoscope', 'cross', 'syringe',
-  // Music / media
-  'music', 'headphones', 'film', 'image', 'camera', 'video', 'gamepad-2',
-  // Tools / misc
-  'settings', 'wrench', 'hammer', 'key', 'lock', 'unlock', 'shield',
-  'eye', 'eye-off', 'globe', 'home', 'house',
-];
+// Full Lucide icon set.
+// Used by the shared Graph/Tree appearance picker.
+const APPEARANCE_ICONS = lucideIconNames();
 
 const APPEARANCE_COLOR_SWATCHES = [
   // Blues
@@ -3643,7 +3608,7 @@ function openAppearancePicker(opts) {
   }
   window.addEventListener('keydown', onKey);
 
-  // Apply (self only, no scope prompt).
+  // Apply (self / selected only, no scope prompt).
   applyBtn.addEventListener('click', () => {
     const payload = buildPayload();
     closeAppearancePicker();
@@ -3654,10 +3619,13 @@ function openAppearancePicker(opts) {
   applyToBtn.addEventListener('click', () => {
     const payload = buildPayload();
     closeAppearancePicker();
+
     if (kind === 'note') {
       pickScopeForNote(target, payload);
-    } else {
+    } else if (kind === 'folder') {
       pickScopeForFolder(target, payload);
+    } else if (kind === 'targets') {
+      pickScopeForTargets(target?.keys || [], payload);
     }
   });
 
@@ -3696,8 +3664,17 @@ function openAppearancePicker(opts) {
 
   function applyToSelf(payload) {
     const targets = new Set();
-    if (kind === 'note') targets.add(`note:${target.id}`);
-    else targets.add(`folder:${target.id}`);
+
+    if (kind === 'note') {
+      targets.add(`note:${target.id}`);
+    } else if (kind === 'folder') {
+      targets.add(`folder:${target.id}`);
+    } else if (kind === 'targets') {
+      for (const key of normalizeAppearanceTargetKeys(target?.keys || [])) {
+        targets.add(key);
+      }
+    }
+
     applyAppearanceToTargets(targets, payload);
   }
 }
@@ -3738,6 +3715,117 @@ export function editNoteAppearance(note) {
 
 export function editFolderAppearance(folder) {
   editFolderAppearanceFromGraph(folder);
+}
+
+// Generic tree/bulk entry point.
+// Used by tree.js for multi-selection and for Tree-specific bulk scopes.
+export function editTreeAppearanceTargets(keys, { title } = {}) {
+  const targetKeys = normalizeAppearanceTargetKeys(keys);
+
+  if (!targetKeys.length) {
+    toast('Nothing selected', 'info');
+    return;
+  }
+
+  const first = firstAppearanceTarget(targetKeys);
+
+  if (!first) {
+    toast('Nothing selected', 'info');
+    return;
+  }
+
+  const initialIcon =
+    first.kind === 'folder'
+      ? (first.folder.icon || 'folder')
+      : (first.note.icon || (first.note.type === 'list' ? 'list' : 'file'));
+
+  const initialColor =
+    first.kind === 'folder'
+      ? (first.folder.color || '#6ea8fe')
+      : (first.note.color || '#6ea8fe');
+
+  const hasIcon = targetKeys.some((key) => {
+    const { kind, id } = parseAppearanceKey(key);
+    if (kind === 'note') return state.notes.get(id)?.icon != null;
+    if (kind === 'folder') return state.folders.get(id)?.icon != null;
+    return false;
+  });
+
+  const hasColor = targetKeys.some((key) => {
+    const { kind, id } = parseAppearanceKey(key);
+    if (kind === 'note') return state.notes.get(id)?.color != null;
+    if (kind === 'folder') return state.folders.get(id)?.color != null;
+    return false;
+  });
+
+  openAppearancePicker({
+    title: title || (
+      targetKeys.length === 1
+        ? `Icon & color: ${appearanceTargetLabel(first)}`
+        : `Icon & color for ${targetKeys.length} selected items`
+    ),
+    kind: 'targets',
+    target: { keys: targetKeys },
+    initialIcon,
+    initialColor,
+    hasIcon,
+    hasColor,
+  });
+}
+
+function parseAppearanceKey(key) {
+  const [kind, ...rest] = String(key || '').split(':');
+  return {
+    kind,
+    id: rest.join(':'),
+  };
+}
+
+function normalizeAppearanceTargetKeys(keys) {
+  const out = [];
+  const seen = new Set();
+
+  for (const key of keys || []) {
+    const { kind, id } = parseAppearanceKey(key);
+    let normalized = '';
+
+    if (kind === 'note' && state.notes.has(id)) {
+      normalized = `note:${id}`;
+    } else if (kind === 'folder' && state.folders.has(id)) {
+      normalized = `folder:${id}`;
+    }
+
+    if (normalized && !seen.has(normalized)) {
+      seen.add(normalized);
+      out.push(normalized);
+    }
+  }
+
+  return out;
+}
+
+function firstAppearanceTarget(keys) {
+  for (const key of normalizeAppearanceTargetKeys(keys)) {
+    const { kind, id } = parseAppearanceKey(key);
+
+    if (kind === 'note') {
+      const note = state.notes.get(id);
+      if (note) return { kind, id, note };
+    }
+
+    if (kind === 'folder') {
+      const folder = state.folders.get(id);
+      if (folder) return { kind, id, folder };
+    }
+  }
+
+  return null;
+}
+
+function appearanceTargetLabel(item) {
+  if (!item) return 'Item';
+  if (item.kind === 'folder') return item.folder?.name || 'Folder';
+  return item.note?.title || 'Untitled';
 }
 
 // Scope-picker modal: lets the user choose where to apply the change.
@@ -3877,6 +3965,165 @@ export function pickScopeForFolder(folder, payload) {
     ],
     onPick: (scope) => applyAppearanceToFolder(folder, payload, scope),
   });
+}
+
+export function pickScopeForTargets(keys, payload) {
+  const baseKeys = normalizeAppearanceTargetKeys(keys);
+
+  if (!baseKeys.length) {
+    toast('Nothing selected', 'info');
+    return;
+  }
+
+  const selectedTargets = collectAppearanceTargetsForScope(baseKeys, 'self');
+  const siblingTargets = collectAppearanceTargetsForScope(baseKeys, 'siblings');
+  const childTargets = collectAppearanceTargetsForScope(baseKeys, 'children');
+  const descendantTargets = collectAppearanceTargetsForScope(baseKeys, 'descendants');
+  const parentTargets = collectAppearanceTargetsForScope(baseKeys, 'parents');
+  const allTargets = collectAppearanceTargetsForScope(baseKeys, 'all');
+
+  const selectedOnlyCount = selectedTargets.size;
+  const siblingExtra = Math.max(0, siblingTargets.size - selectedOnlyCount);
+  const childExtra = Math.max(0, childTargets.size - selectedOnlyCount);
+  const descendantExtra = Math.max(0, descendantTargets.size - selectedOnlyCount);
+  const parentExtra = Math.max(0, parentTargets.size - selectedOnlyCount);
+
+  openScopePicker({
+    title: appearanceTitleFor(payload),
+    options: [
+      {
+        value: 'self',
+        icon: 'check',
+        label: baseKeys.length === 1 ? 'Just this item' : 'Selected items only',
+        meta: `${selectedTargets.size} item${selectedTargets.size === 1 ? '' : 's'}`,
+      },
+      {
+        value: 'siblings',
+        icon: 'folders',
+        label: 'Selected items and siblings',
+        meta: siblingExtra ? `+${siblingExtra} item${siblingExtra === 1 ? '' : 's'}` : '',
+        disabled: siblingExtra === 0,
+      },
+      {
+        value: 'children',
+        icon: 'corner-down-right',
+        label: 'Selected folders and direct children',
+        meta: childExtra ? `+${childExtra} item${childExtra === 1 ? '' : 's'}` : '',
+        disabled: childExtra === 0,
+      },
+      {
+        value: 'descendants',
+        icon: 'folder-tree',
+        label: 'Selected folders and everything inside',
+        meta: descendantExtra ? `+${descendantExtra} item${descendantExtra === 1 ? '' : 's'}` : '',
+        disabled: descendantExtra === 0,
+      },
+      {
+        value: 'parents',
+        icon: 'corner-up-left',
+        label: 'Selected items and parent folders',
+        meta: parentExtra ? `+${parentExtra} folder${parentExtra === 1 ? '' : 's'}` : '',
+        disabled: parentExtra === 0,
+      },
+      {
+        value: 'all',
+        icon: 'globe',
+        label: 'All notes and folders',
+        meta: `${allTargets.size} item${allTargets.size === 1 ? '' : 's'}`,
+      },
+    ],
+    onPick: async (scope) => {
+      const targets = collectAppearanceTargetsForScope(baseKeys, scope);
+      await applyAppearanceToTargets(targets, payload);
+    },
+  });
+}
+
+function collectAppearanceTargetsForScope(keys, scope) {
+  const baseKeys = normalizeAppearanceTargetKeys(keys);
+  const out = new Set(baseKeys);
+
+  if (scope === 'self') {
+    return out;
+  }
+
+  if (scope === 'all') {
+    for (const n of state.notes.values()) out.add(`note:${n.id}`);
+    for (const f of state.folders.values()) out.add(`folder:${f.id}`);
+    return out;
+  }
+
+  for (const key of baseKeys) {
+    const { kind, id } = parseAppearanceKey(key);
+
+    if (kind === 'note') {
+      const note = state.notes.get(id);
+      if (!note) continue;
+
+      const folderId = note.folderId || null;
+
+      if (scope === 'siblings') {
+        for (const n of state.notes.values()) {
+          if ((n.folderId || null) === folderId) out.add(`note:${n.id}`);
+        }
+      }
+
+      if (scope === 'parents') {
+        for (const f of collectAncestorFolders(note.folderId)) {
+          out.add(`folder:${f.id}`);
+        }
+      }
+
+      continue;
+    }
+
+    if (kind === 'folder') {
+      const folder = state.folders.get(id);
+      if (!folder) continue;
+
+      if (scope === 'siblings') {
+        for (const f of state.folders.values()) {
+          if ((f.parentId || null) === (folder.parentId || null)) {
+            out.add(`folder:${f.id}`);
+          }
+        }
+      }
+
+      if (scope === 'children') {
+        for (const f of childFoldersOf(folder.id)) out.add(`folder:${f.id}`);
+        for (const n of notesInFolder(folder.id)) out.add(`note:${n.id}`);
+      }
+
+      if (scope === 'descendants') {
+        const stack = [folder.id];
+
+        while (stack.length) {
+          const cur = stack.pop();
+
+          for (const f of state.folders.values()) {
+            if (f.parentId === cur && !out.has(`folder:${f.id}`)) {
+              out.add(`folder:${f.id}`);
+              stack.push(f.id);
+            }
+          }
+
+          for (const n of state.notes.values()) {
+            if (n.folderId === cur) {
+              out.add(`note:${n.id}`);
+            }
+          }
+        }
+      }
+
+      if (scope === 'parents') {
+        for (const f of collectAncestorFolders(folder.parentId)) {
+          out.add(`folder:${f.id}`);
+        }
+      }
+    }
+  }
+
+  return out;
 }
 
 function appearanceTitleFor(payload) {

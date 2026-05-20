@@ -6,6 +6,14 @@
 import { $, el, uid, state, store, toast, fmtBytes, lucide } from './core.js';
 import { insertAtCursor } from './editor.js';
 import { updateStorageMeter } from './core.js';
+import { listAllDrawings } from './yjs.js';
+import {
+  drawingThumbnailUrl,
+  importSvgFileAsDrawing,
+  listDrawLibraryItems,
+  drawLibraryItemThumbnailUrl,
+  insertDrawLibraryItemIntoCurrent,
+} from './draw.js';
 
 let imgModal, compressPanel;
 let imgWorkingBlob = null;
@@ -49,6 +57,12 @@ export function setupImage() {
     insertAtCursor(`\n![${alt}](${path})\n`);
     $('pathInput').value = ''; $('pathAlt').value = '';
     closeImageModal();
+  });
+  window.addEventListener('yanta-draw-library-updated', () => {
+    const libraryPane = imgModal?.querySelector('[data-pane="library"]');
+    if (imgModal && !imgModal.hidden && libraryPane && !libraryPane.hidden) {
+      renderLibrary();
+    }
   });
 }
 
@@ -177,27 +191,230 @@ async function insertCompressedImage() {
   toast('Image inserted', 'success');
 }
 
+function sectionTitle(text) {
+  return el('div', {
+    style: {
+      gridColumn: '1 / -1',
+      fontSize: '11px',
+      textTransform: 'uppercase',
+      letterSpacing: '0.08em',
+      color: 'var(--text-faint)',
+      margin: '8px 0 2px',
+    },
+  }, text);
+}
+
 function renderLibrary() {
   const g = $('libraryGrid');
   g.replaceChildren();
-  const items = [...state.imagesMeta.values()].sort((a, b) => b.ts - a.ts);
-  if (!items.length) {
-    g.append(el('div', { class: 'tree-empty' }, 'No images in library yet.'));
+
+  const drawLibraryItems = listDrawLibraryItems();
+  const drawings = listAllDrawings();
+  const images = [...state.imagesMeta.values()].sort((a, b) => b.ts - a.ts);
+
+  if (!images.length && !drawings.length && !drawLibraryItems.length) {
+    g.append(el('div', { class: 'tree-empty' }, 'No images or drawings in library yet.'));
     return;
   }
-  for (const meta of items) {
-    let url = state.imageBlobs.get(meta.id);
-    if (!url) {
-      store.images.get(meta.id).then((rec) => {
-        if (rec && rec.blob) { state.imageBlobs.set(meta.id, URL.createObjectURL(rec.blob)); renderLibrary(); }
+
+  if (images.length) {
+    g.append(sectionTitle('Images'));
+
+    for (const meta of images) {
+      let url = state.imageBlobs.get(meta.id);
+
+      if (!url) {
+        store.images.get(meta.id).then((rec) => {
+          if (rec && rec.blob) {
+            state.imageBlobs.set(meta.id, URL.createObjectURL(rec.blob));
+            renderLibrary();
+          }
+        });
+      }
+
+      const card = el('div', {
+        class: 'lib-card',
+        onclick: () => {
+          insertAtCursor(`\n![${meta.name || 'image'}](yanta-img://${meta.id})\n`);
+          closeImageModal();
+        },
       });
+
+      if (url) card.append(el('img', { src: url, alt: meta.name }));
+
+      card.append(el('div', { class: 'lib-meta' }, fmtBytes(meta.size)));
+      g.append(card);
     }
-    const card = el('div', { class: 'lib-card', onclick: () => {
-      insertAtCursor(`\n![${meta.name || 'image'}](yanta-img://${meta.id})\n`);
-      closeImageModal();
-    } });
-    if (url) card.append(el('img', { src: url, alt: meta.name }));
-    card.append(el('div', { class: 'lib-meta' }, fmtBytes(meta.size)));
+  }
+
+  if (drawLibraryItems.length) {
+    g.append(sectionTitle('Excalidraw Library'));
+
+    for (const item of drawLibraryItems) {
+      const card = el('div', {
+        class: 'lib-card',
+        title: `Insert library item: ${item.name || 'Library item'}`,
+        onclick: async () => {
+          await insertDrawLibraryItemIntoCurrent(item.id);
+          closeImageModal();
+        },
+      });
+
+      const thumb = el('div', {
+        style: {
+          width: '100%',
+          height: '80px',
+          borderRadius: '4px',
+          border: '1px solid var(--border)',
+          background: 'var(--bg)',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: 'var(--accent)',
+          overflow: 'hidden',
+        },
+      });
+
+      thumb.innerHTML = lucide('library', 26);
+
+      drawLibraryItemThumbnailUrl(item.id).then((url) => {
+        if (!url) return;
+
+        thumb.replaceChildren();
+        thumb.append(el('img', {
+          src: url,
+          alt: item.name || 'Library item',
+          style: {
+            width: '100%',
+            height: '100%',
+            objectFit: 'contain',
+            border: '0',
+          },
+        }));
+      });
+
+      card.append(
+        thumb,
+        el('div', {
+          class: 'lib-meta',
+          title: item.name || 'Library item',
+        }, item.name || 'Library item'),
+        el('div', {
+          class: 'lib-meta',
+          style: { color: 'var(--text-faint)' },
+        }, `${(item.elements || []).length} element${(item.elements || []).length === 1 ? '' : 's'}`)
+      );
+
+      g.append(card);
+    }
+  }
+  g.append(sectionTitle('Drawings'));
+
+  const importSvg = el('div', {
+    class: 'lib-card',
+    onclick: () => {
+      const input = document.createElement('input');
+      input.type = 'file';
+      input.accept = 'image/svg+xml,.svg';
+
+      input.onchange = async () => {
+        const file = input.files?.[0];
+        if (file) {
+          await importSvgFileAsDrawing(file);
+          closeImageModal();
+        }
+      };
+
+      input.click();
+    },
+  });
+
+  const svgImportBox = el('div', {
+    style: {
+      width: '100%',
+      height: '80px',
+      borderRadius: '4px',
+      border: '1px dashed var(--accent)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      color: 'var(--accent)',
+      background: 'rgba(110,168,254,0.08)',
+    },
+  });
+
+  svgImportBox.innerHTML = lucide('upload', 26);
+
+  importSvg.append(
+    svgImportBox,
+    el('div', { class: 'lib-meta' }, 'Import SVG')
+  );
+
+  g.append(importSvg);
+
+  if (!drawings.length) {
+    g.append(el('div', {
+      class: 'tree-empty',
+      style: { gridColumn: '1 / -1' },
+    }, 'No drawings yet.'));
+    return;
+  }
+
+  for (const d of drawings) {
+    const card = el('div', {
+      class: 'lib-card',
+      title: `Insert drawing: ${d.title || 'Drawing'}`,
+      onclick: () => {
+        insertAtCursor(`\n\ndraw://${d.id}\n\n`);
+        closeImageModal();
+        toast('Drawing inserted', 'success');
+      },
+    });
+
+    const thumb = el('div', {
+      style: {
+        width: '100%',
+        height: '80px',
+        borderRadius: '4px',
+        border: '1px solid var(--border)',
+        background: 'var(--bg)',
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: 'var(--accent)',
+        overflow: 'hidden',
+      },
+    });
+
+    thumb.innerHTML = lucide('pencil', 26);
+
+    drawingThumbnailUrl(d.noteId, d.id).then((url) => {
+      if (!url) return;
+      thumb.replaceChildren();
+      thumb.append(el('img', {
+        src: url,
+        alt: d.title || 'Drawing',
+        style: {
+          width: '100%',
+          height: '100%',
+          objectFit: 'contain',
+          border: '0',
+        },
+      }));
+    });
+
+    card.append(
+      thumb,
+      el('div', {
+        class: 'lib-meta',
+        title: d.title || 'Drawing',
+      }, d.title || 'Drawing'),
+      el('div', {
+        class: 'lib-meta',
+        style: { color: 'var(--text-faint)' },
+      }, d.noteTitle || state.notes.get(d.noteId)?.title || 'Note')
+    );
+
     g.append(card);
   }
 }

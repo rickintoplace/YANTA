@@ -517,6 +517,8 @@ export function setTheme(t) {
   store.settings.set('theme', t);
   const btn = $('btn-theme');
   if (btn) btn.title = `Theme: ${t} (click to cycle)`;
+
+  window.dispatchEvent(new CustomEvent('yanta-theme-change', { detail: { theme: t } }));
 }
 export function toggleTheme() {
   const i = THEMES.indexOf(state.theme);

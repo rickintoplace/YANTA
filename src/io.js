@@ -6,7 +6,7 @@
 // ============================================================
 
 import { $, uid, state, store, toast, safeFilename, downloadBlob } from './core.js';
-import { getNoteDoc, noteMarkdown } from './yjs.js';
+import { getNoteDoc, noteMarkdown, listDrawingsForNote, setDrawing, normalizeDrawingScene } from './yjs.js';
 import { rebuildWikilinkIndex } from './notes.js';
 import { renderTree } from './tree.js';
 
@@ -162,6 +162,11 @@ export async function importItems(items) {
     try {
       const lower = file.name.toLowerCase();
       if (lower.endsWith('.zip')) { await importZipBlob(file); zipCount++; }
+      else if (lower.endsWith('.excalidraw') || lower.endsWith('.excalidraw.json')) {
+        const { importExcalidrawFileAsNote } = await import('./draw.js');
+        await importExcalidrawFileAsNote(file);
+        noteCount++;
+      }
       else if (lower.endsWith('.json')) { await importBundleFile(file); bundleCount++; }
       else if (/\.(md|markdown|txt)$/i.test(file.name)) {
         const text = await file.text();
@@ -344,6 +349,29 @@ export async function exportAsZip() {
     const meta = state.imagesMeta.get(id) || { type: rec.type };
     entries.push({ path: '_images/' + id + '.' + imageExt(meta), data: new Uint8Array(await rec.blob.arrayBuffer()) });
   }
+  for (const note of state.notes.values()) {
+    for (const d of listDrawingsForNote(note.id)) {
+      const json = {
+        type: 'excalidraw',
+        version: 2,
+        source: 'https://yanta.local/draw',
+        elements: d.elements || [],
+        appState: d.appState || {},
+        files: d.files || {},
+
+        // YANTA extension: persisted visual canvas/container size.
+        yanta: {
+          canvas: d.canvas || { width: 760, height: 420 },
+          title: d.title || 'Drawing',
+        },
+      };
+
+      entries.push({
+        path: `drawings/${note.id}/${d.id}.excalidraw`,
+        data: _enc.encode(JSON.stringify(json, null, 2)),
+      });
+    }
+  }
   const manifest = { yanta: 2, exported: new Date().toISOString(), counts: { notes: state.notes.size, folders: state.folders.size, images: used.size } };
   entries.push({ path: '_yanta-manifest.json', data: _enc.encode(JSON.stringify(manifest, null, 2)) });
   downloadBlob(makeZip(entries), `yanta-${new Date().toISOString().slice(0, 10)}.zip`);
@@ -370,6 +398,42 @@ export async function importZipBlob(blob) {
     await store.images.put({ ...meta, blob: blob2 });
     state.imagesMeta.set(newId, meta);
     remap.set(origId, newId);
+  }
+  const drawingEntries = entries.filter((ent) =>
+    !ent.isDir &&
+    /^drawings\/[^/]+\/[^/]+\.excalidraw(\.json)?$/i.test(ent.path)
+  );
+
+  for (const ent of drawingEntries) {
+    try {
+      const parts = ent.path.split('/');
+      const noteId = parts[1];
+      const fileName = parts[2];
+      const drawingId = fileName.replace(/\.excalidraw(\.json)?$/i, '');
+
+      if (!state.notes.has(noteId)) continue;
+
+      const data = JSON.parse(_dec.decode(ent.data));
+      const scene = normalizeDrawingScene(data);
+
+      setDrawing(noteId, drawingId, {
+        id: drawingId,
+        title: drawingId,
+        ...scene,
+      }, 'draw-zip-import');
+
+      const entry = getNoteDoc(noteId);
+      await entry.ready;
+
+      const ytext = entry.doc.getText('markdown');
+      const md = ytext.toString();
+
+      if (!md.includes(`draw://${drawingId}`)) {
+        ytext.insert(ytext.length, `\n\ndraw://${drawingId}\n`);
+      }
+    } catch (e) {
+      console.warn('Drawing ZIP import failed', ent.path, e);
+    }
   }
   let noteCount = 0;
   for (const ent of entries) {

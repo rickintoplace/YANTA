@@ -3,7 +3,13 @@
 // pane divider, history navigation, view modes.
 // ============================================================
 
-import { $, state, store, openDB, setTheme, toggleTheme, toast, cssColorToHex, safeCssColor } from './core.js';
+import { $, state, store, openDB, toast, cssColorToHex, safeCssColor } from './core.js';
+import {
+  loadAppearance,
+  watchSystemTheme,
+  openSettings,
+  cycleAppearanceMode,
+} from './settings.js';
 import { openNote, newNote, newFolder, saveCurrentNote, deleteCurrentNote, togglePin, createWelcomeNote, rebuildWikilinkIndex, setNavSuppress, addTag, createNoteWithTitle } from './notes.js';
 import { renderTree, renderTagCloud, showMenu, closeMenu, currentFolderForNew } from './tree.js';
 import { renderBacklinks, renderOutline, setupWikilinkHover, handleWikilinkClick, openPalette, closePalette, buildCommandList, paletteMove, paletteAccept, paletteFilter } from './features.js';
@@ -15,8 +21,9 @@ import { exportAsZip, exportNoteAsMd, exportBundle, exportEveryNoteMd, openExpor
 import { syncRestore, syncConnect, syncDisconnect, syncFull, openSyncSetup, closeSyncSetup, syncMenu } from './sync.js';
 import { openGraph, closeGraph, setupGraphInteractions } from './graph.js';
 import { wikilinkIndex } from './features-state.js';
-import { getNoteDoc, noteMarkdown } from './yjs.js';
+import { getNoteDoc, noteMarkdown, drawingsTextForNote } from './yjs.js';
 import { openShareModal, closeShareModal, stopSharing, restoreSharedNotes, handleShareUrl } from './sharing.js';
+import { setupDraw, createDrawingAndInsert, importExcalidrawFileIntoCurrent } from './draw.js';
 
 let sharePreviewLocked = false;
 
@@ -25,6 +32,7 @@ function searchHaystack(note, body = '') {
     note?.title || '',
     (note?.tags || []).join(' '),
     body || '',
+    note?.id ? drawingsTextForNote(note.id) : '',
   ].join(' ').toLowerCase();
 }
 
@@ -49,18 +57,21 @@ async function init() {
     }
   } catch {}
 
-  const [notes, folders, images, theme, expanded, view] = await Promise.all([
+  const [notes, folders, images, expanded, view] = await Promise.all([
     store.notes.all(),
     store.folders.all(),
     store.images.allMeta(),
-    store.settings.get('theme', 'auto'),
     store.settings.get('expandedFolders', []),
     store.settings.get('view', 'split'),
   ]);
+
   for (const n of notes) state.notes.set(n.id, n);
   for (const f of folders) state.folders.set(f.id, f);
   for (const im of images) state.imagesMeta.set(im.id, im);
-  setTheme(theme);
+
+  await loadAppearance();
+  watchSystemTheme();
+
   state.expandedFolders = new Set(expanded);
   setView(view);
 
@@ -68,14 +79,27 @@ async function init() {
   await buildSearchIndex();
 
   buildCommandList({
-    openImageModal, openIconInsertPicker, openGraph, exportAsZip, exportNoteAsMd, exportBundle, exportEveryNoteMd,
-    openSyncSetup, syncFull, syncDisconnect, cleanupUnusedImages,
-    openShareModal, stopSharing: () => stopSharing(state.currentNoteId),
-    importFiles, importFolder: () => $('importFolder').click(),
+    openImageModal,
+    openIconInsertPicker,
+    openDraw: createDrawingAndInsert,
+    openGraph,
+    exportAsZip,
+    exportNoteAsMd,
+    exportBundle,
+    exportEveryNoteMd,
+    openSyncSetup,
+    syncFull,
+    syncDisconnect,
+    cleanupUnusedImages,
+    openShareModal,
+    stopSharing: () => stopSharing(state.currentNoteId),
+    importFiles,
+    importFolder: () => $('importFolder').click(),
   });
   setupGraphInteractions();
   setupWikilinkHover();
   setupImage();
+  setupDraw();
   setupFormatToolbar();
   await syncRestore();
   let sharedOpen = null;
@@ -155,7 +179,7 @@ function bindEvents() {
   // sidebar
   $('btn-new-note').addEventListener('click', () => newNote(currentFolderForNew()));
   $('btn-new-folder').addEventListener('click', () => newFolder(null));
-  $('btn-theme').addEventListener('click', toggleTheme);
+  $('btn-theme').addEventListener('click', cycleAppearanceMode);
   $('btn-export').addEventListener('click', (e) => { e.stopPropagation(); openExportMenu(e.currentTarget, showMenu); });
   $('btn-import').addEventListener('click', (e) => {
     e.stopPropagation();
@@ -193,7 +217,7 @@ function bindEvents() {
   window.addEventListener('focus', () => { syncFull(false).catch(() => {}); });
 
   // Settings (placeholder)
-  $('btn-settings').addEventListener('click', () => { toast('Settings: theme & view persist automatically'); });
+  $('btn-settings').addEventListener('click', openSettings);
 
   // Search
   $('search').addEventListener('input', (e) => { state.searchQuery = e.target.value; renderTree(); });
@@ -278,13 +302,19 @@ function bindEvents() {
     await pickImageFile(e.detail.file);
   });
 
-  // Files dropped directly on the editor:
-  //   - single image  → insert directly as a library ref (no modal)
-  //   - .md/.json/.zip → import as note(s)
+
   window.addEventListener('yanta-editor-drop-files', async (e) => {
     const { files } = e.detail;
+
     for (const f of files) {
-      if (f.type.startsWith('image/')) {
+      const lower = f.name.toLowerCase();
+
+      if (lower.endsWith('.excalidraw') || lower.endsWith('.excalidraw.json')) {
+        await importExcalidrawFileIntoCurrent(f);
+      } else if (lower.endsWith('.svg') || f.type === 'image/svg+xml') {
+        const { importSvgFileAsDrawing } = await import('./draw.js');
+        await importSvgFileAsDrawing(f);
+      } else if (f.type.startsWith('image/')) {
         await insertImageAsRef(f);
       } else if (/\.(md|markdown|txt|json|zip)$/i.test(f.name)) {
         await importFiles([f]);
@@ -295,12 +325,21 @@ function bindEvents() {
   // Slash → image insert event from editor
   window.addEventListener('yanta-open-image-modal', () => openImageModal());
   // Ctrl/Cmd+click wikilink from editor
-  window.addEventListener('yanta-follow-wiki', (e) => {
-    const target = e.detail.target;
-    const id = wikilinkIndex.get(target.toLowerCase());
-    if (id) openNote(id);
-    else if (confirm(`Note "${target}" doesn't exist. Create it?`)) createNoteWithTitle(target);
-  });
+window.addEventListener('yanta-follow-wiki', async (e) => {
+  const target = e.detail.target;
+  const id = wikilinkIndex.get(target.toLowerCase());
+
+  if (id) {
+    openNote(id);
+    return;
+  }
+
+  // Kein Browser-Confirm mehr.
+  // In Editor/Drawing gibt es keinen sinnvollen lokalen Anchor.
+  // Daher: bewusst direkte Aktion + Toast.
+  await createNoteWithTitle(target);
+  toast(`Created "${target}"`, 'success');
+});
   // Cycle view from command palette
   window.addEventListener('yanta-cycle-view', () => {
     setView(state.view === 'split' ? 'preview' : state.view === 'preview' ? 'edit' : 'split');
@@ -455,6 +494,16 @@ function handleGlobalKey(e) {
     const n = state.notes.get(state.currentNoteId);
     if (n) exportNoteAsMd(n);
   }
+  else if (!meta && e.key.toLowerCase() === 't') {
+    const tag = document.activeElement?.tagName?.toLowerCase();
+
+    if (tag === 'input' || tag === 'textarea' || document.activeElement?.isContentEditable) {
+      return;
+    }
+
+    e.preventDefault();
+    cycleAppearanceMode();
+  }
   else if (meta && e.key === '/') { e.preventDefault(); setView(state.view === 'split' ? 'preview' : 'split'); }
   else if (e.key === 'Escape') {
     closeImageModal();
@@ -501,9 +550,11 @@ function setupGlobalDropImport() {
       return;
     }
     const importable = files.filter((f) =>
-      /\.(md|markdown|txt|json|zip)$/i.test(f.name) ||
+      /\.(md|markdown|txt|json|zip|excalidraw|svg)$/i.test(f.name) ||
+      /\.excalidraw\.json$/i.test(f.name) ||
       f.type === 'application/json' || f.type === 'application/zip' ||
-      f.type === 'text/markdown' || f.type === 'text/plain'
+      f.type === 'text/markdown' || f.type === 'text/plain' ||
+      f.type === 'image/svg+xml'
     );
     if (importable.length) await importFiles(importable);
     else toast('Drop .md, .markdown, .txt, .zip, or YANTA .json files', 'error');

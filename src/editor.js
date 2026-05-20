@@ -13,9 +13,9 @@ import { syntaxHighlighting, defaultHighlightStyle, HighlightStyle, indentOnInpu
 import { autocompletion, completionKeymap } from '@codemirror/autocomplete';
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { tags as t } from '@lezer/highlight';
-import { classifyLine } from './markdown.js';
+import { classifyLine, renderDrawEmbedHtml } from './markdown.js';
 
-import { state, safeCssColor } from './core.js';
+import { state, safeCssColor, lucide } from './core.js';
 import { getNoteDoc, getMarkdownText } from './yjs.js';
 import { wikilinkIndex } from './features-state.js';
 
@@ -341,6 +341,79 @@ function buildVideoDecos(s) {
 }
 
 // ============================================================
+// Inline drawing preview widget for draw://<id> lines.
+// ============================================================
+
+class DrawWidget extends WidgetType {
+  constructor(id) {
+    super();
+    this.id = id;
+  }
+
+  eq(other) {
+    return other.id === this.id;
+  }
+
+  toDOM() {
+    const node = document.createElement('div');
+    node.className = 'yanta-draw-editor-embed';
+    node.innerHTML = renderDrawEmbedHtml(this.id, 'Drawing', 'editor');
+
+    requestAnimationFrame(() => {
+      window.dispatchEvent(new CustomEvent('yanta-draw-hydrate', {
+        detail: { root: node },
+      }));
+    });
+
+    return node;
+  }
+
+  destroy(dom) {
+    window.dispatchEvent(new CustomEvent('yanta-draw-unmount', {
+      detail: { root: dom },
+    }));
+  }
+
+  ignoreEvent(event) {
+    // Excalidraw muss Pointer/Drag/Drop selbst bekommen.
+    // Nur CodeMirror soll diese Events nicht als Text-Editing interpretieren.
+    return true;
+  }
+}
+const drawPreviewField = StateField.define({
+  create(s) {
+    return buildDrawDecos(s);
+  },
+
+  update(d, tr) {
+    return tr.docChanged ? buildDrawDecos(tr.state) : d.map(tr.changes);
+  },
+
+  provide: (f) => EditorView.decorations.from(f),
+});
+
+function buildDrawDecos(s) {
+  const b = new RangeSetBuilder();
+
+  for (let p = 0; p < s.doc.length;) {
+    const line = s.doc.lineAt(p);
+    const m = /^\s*draw:\/\/([a-z0-9_-]+)\s*$/i.exec(line.text);
+
+    if (m) {
+      b.add(line.to, line.to, Decoration.widget({
+        widget: new DrawWidget(m[1]),
+        side: 1,
+        block: true,
+      }));
+    }
+
+    p = line.to + 1;
+  }
+
+  return b.finish();
+}
+
+// ============================================================
 // Autocomplete: wikilinks, tags, slash commands.
 // ============================================================
 function wikiCompletion(ctx) {
@@ -411,6 +484,7 @@ function slashCompletion(ctx) {
     { label: 'Math (block)', apply: '$$\n\n$$' },
     { label: 'Wikilink', apply: '[[' },
     { label: 'Image', apply: 'IMAGE_INSERT' }, // handled separately
+    { label: 'Drawing', apply: 'DRAW_INSERT' },
     { label: 'Icon', apply: 'ICON_INSERT' },
     { label: 'Shopping list link', apply: '[[' },
   ];
@@ -426,6 +500,11 @@ function slashCompletion(ctx) {
         if (c.apply === 'IMAGE_INSERT') {
           view.dispatch({ changes: { from, to, insert: '' } });
           window.dispatchEvent(new CustomEvent('yanta-open-image-modal'));
+          return;
+        }
+        if (c.apply === 'DRAW_INSERT') {
+          view.dispatch({ changes: { from, to, insert: '' } });
+          window.dispatchEvent(new CustomEvent('yanta-create-drawing'));
           return;
         }
         if (c.apply === 'ICON_INSERT') {
@@ -1130,6 +1209,7 @@ export function mountEditor(host, { noteId, awarenessUser }) {
     taskCheckboxField,
     imagePreviewField,
     videoPreviewField,
+    drawPreviewField,
     wikilinkClickHandler(),
     inlineLucideEditClickHandler(),
     pasteHandler(),

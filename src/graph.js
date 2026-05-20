@@ -7,17 +7,22 @@
 //
 // Features:
 // - Stable, responsive physics with live rearrangement during drag.
-// - Click note node → clean Markdown preview popover.
+// - Click note node → clean Markdown preview popover (icon shows note color;
+//   clicking the icon opens the appearance editor).
 // - Double-click / preview button → open note.
 // - Right-click note OR folder node → context menu.
 // - Right-click empty space → create root-level note/folder.
 // - Middle mouse button anywhere → pan.
 // - Smooth animated transition when focusing a folder.
-// - Slim graph controls panel (collapsible).
+// - Slim graph controls panel (collapsible) with adjustable physics
+//   forces (repulsion, link length, gravity, folder pull) and reset.
 // - Deep search: matches title, folder, AND note body.
 // - Double wikilinks: rendered as parallel lines + stronger attraction.
-// - Icon/color editing for notes and folders from the graph.
-// - Bulk icon/color apply: this only · siblings · children · parents · all.
+// - Appearance picker for notes and folders, with selective icon-only
+//   or color-only edits. Two-button workflow: "Apply" (self, no prompt)
+//   and "Apply to..." (scope picker for siblings/children/parents/all).
+// - Optional "Show in side pane" mode persists across sessions
+//   (default ON; user can disable it by toggling off in controls).
 // ============================================================
 
 import {
@@ -35,7 +40,6 @@ import { openNote, rebuildWikilinkIndex } from './notes.js';
 import { renderTree } from './tree.js';
 import { noteMarkdown, getNoteDoc } from './yjs.js';
 import { renderPreview } from './markdown.js';
-import { openIconPicker } from './icon-picker.js';
 
 const WIKILINK_RE = /\[\[([^\]|\n]+)(?:\|[^\]\n]+)?\]\]/g;
 
@@ -56,6 +60,7 @@ const GRAPH_SEMANTIC_PREFS_KEY = 'yanta.graph.showSemantic';
 const GRAPH_PANE_PREFS_KEY = 'yanta.graph.preferPane';
 const GRAPH_CONTROLS_OPEN_KEY = 'yanta.graph.controlsOpen';
 const GRAPH_DEEP_SEARCH_KEY = 'yanta.graph.deepSearch';
+const GRAPH_PHYSICS_PREFS_KEY = 'yanta.graph.physics';
 
 // Semantic graph tuning.
 const SEMANTIC_MIN_SCORE = 0.23;
@@ -66,10 +71,12 @@ const SEMANTIC_MAX_BODY_CHARS = 16000;
 const VISUAL_EASE = 0.24;
 const VISUAL_EPS = 0.007;
 
-// Physics tuning.
-const PHYSICS = {
+// Physics tuning. PHYSICS_DEFAULTS holds the baseline values shipped with
+// the app; PHYSICS is the live, mutable config the user can adjust via the
+// graph controls panel. Adjustable fields are listed in PHYSICS_TUNABLES.
+const PHYSICS_DEFAULTS = Object.freeze({
   minAlpha: 0.004,
-  alphaDecay: 0.928,
+  alphaDecay: 0.975,
   dragAlphaDecay: 0.955,
 
   damping: 0.815,
@@ -85,9 +92,69 @@ const PHYSICS = {
   folderPull: 0.0034,
   dragFolderPull: 0.0018,
 
+  linkDistance: 135,
+  linkStrength: 0.010,
+
   maxSpeed: 14,
   settleSpeed: 0.012,
-};
+});
+
+const PHYSICS = { ...PHYSICS_DEFAULTS };
+
+// User-adjustable physics knobs surfaced in the controls panel.
+// `factor` is a multiplier applied to the default; the slider edits
+// the multiplier so the same UI works regardless of the underlying scale.
+const PHYSICS_TUNABLES = [
+  // { key: 'repulsion', label: 'Repulsion', icon: 'expand', min: 0.1, max: 3.0, step: 0.05, hint: 'How strongly nodes push each other apart.' },
+  { key: 'linkDistance', label: 'Link length', icon: 'ruler', min: 0.4, max: 2.5, step: 0.05, hint: 'Resting distance of links between notes.' },
+  { key: 'linkStrength', label: 'Link spring', icon: 'link', min: 0.2, max: 3.0, step: 0.05, hint: 'How strongly linked notes pull toward each other.' },
+  { key: 'centerGravity', label: 'Center gravity', icon: 'crosshair', min: 0.0, max: 3.5, step: 0.05, hint: 'Pull toward the canvas center (0 = drift freely).' },
+  { key: 'folderPull', label: 'Folder pull', icon: 'folder', min: 0.0, max: 3.0, step: 0.05, hint: 'How strongly notes cluster around their folder.' },
+  { key: 'damping', label: 'Damping', icon: 'wind', min: 0.6, max: 1.05, step: 0.01, hint: 'Resistance to motion (lower = more bouncy).', mode: 'absolute' },
+];
+
+function readPhysicsPrefs() {
+  try {
+    const raw = localStorage.getItem(GRAPH_PHYSICS_PREFS_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function writePhysicsPrefs(factors) {
+  try {
+    localStorage.setItem(GRAPH_PHYSICS_PREFS_KEY, JSON.stringify(factors));
+  } catch {}
+}
+
+const physicsFactors = (() => {
+  const stored = readPhysicsPrefs();
+  const out = {};
+  for (const knob of PHYSICS_TUNABLES) {
+    out[knob.key] = typeof stored[knob.key] === 'number'
+      ? stored[knob.key]
+      : (knob.mode === 'absolute' ? PHYSICS_DEFAULTS[knob.key] : 1);
+  }
+  return out;
+})();
+
+function applyPhysicsFactors() {
+  for (const knob of PHYSICS_TUNABLES) {
+    const v = physicsFactors[knob.key];
+    if (knob.mode === 'absolute') {
+      PHYSICS[knob.key] = v;
+    } else {
+      PHYSICS[knob.key] = PHYSICS_DEFAULTS[knob.key] * v;
+    }
+  }
+  // Damping caps just below 1 to avoid energy gain.
+  if (PHYSICS.damping > 0.999) PHYSICS.damping = 0.999;
+}
+
+applyPhysicsFactors();
 
 const DRAG_START_ALPHA = 0.32;
 const DRAG_MOVE_ALPHA = 0.42;
@@ -171,7 +238,7 @@ const graph = {
 
   showFolders: readBoolPref(GRAPH_PREFS_KEY, true),
   showSemantic: readBoolPref(GRAPH_SEMANTIC_PREFS_KEY, false),
-  preferPane: readBoolPref(GRAPH_PANE_PREFS_KEY, false),
+  preferPane: readBoolPref(GRAPH_PANE_PREFS_KEY, true),
   controlsOpen: readBoolPref(GRAPH_CONTROLS_OPEN_KEY, false),
   deepSearch: readBoolPref(GRAPH_DEEP_SEARCH_KEY, true),
 
@@ -366,16 +433,29 @@ function injectGraphCss() {
     }
 
     .yanta-graph-note-preview-icon {
-      width: 28px;
-      height: 28px;
+      width: 32px;
+      height: 32px;
       flex: 0 0 auto;
       border-radius: 999px;
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      color: var(--accent);
-      background: rgba(110,168,254,0.10);
-      box-shadow: 0 0 0 1px var(--border) inset;
+      color: var(--note-icon-color, var(--accent));
+      background: color-mix(in srgb, var(--note-icon-color, var(--accent)) 14%, transparent);
+      box-shadow: 0 0 0 1px color-mix(in srgb, var(--note-icon-color, var(--accent)) 35%, var(--border)) inset;
+      cursor: pointer;
+      transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+    }
+
+    .yanta-graph-note-preview-icon:hover {
+      transform: scale(1.08);
+      background: color-mix(in srgb, var(--note-icon-color, var(--accent)) 22%, transparent);
+      box-shadow: 0 0 0 1.5px var(--note-icon-color, var(--accent)) inset;
+    }
+
+    .yanta-graph-note-preview-icon[role="button"]:focus-visible {
+      outline: 2px solid var(--note-icon-color, var(--accent));
+      outline-offset: 2px;
     }
 
     .yanta-graph-note-preview-actions {
@@ -773,6 +853,371 @@ function injectGraphCss() {
     .yanta-scope-body .yanta-scope-opt .yanta-scope-icon {
       display: inline-flex;
       color: var(--accent);
+    }
+
+    /* Appearance picker (custom icon + color editor with dual apply) */
+    .yanta-appearance-modal {
+      position: fixed;
+      inset: 0;
+      z-index: 200;
+      background: rgba(0,0,0,0.45);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+    }
+
+    .yanta-appearance-card {
+      width: min(520px, 100%);
+      max-height: min(82vh, 720px);
+      background: var(--bg-elev);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      box-shadow: 0 24px 64px rgba(0,0,0,0.55);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    .yanta-appearance-head {
+      padding: 12px 14px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .yanta-appearance-head h3 {
+      margin: 0;
+      flex: 1;
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text);
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+
+    .yanta-appearance-body {
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      overflow: auto;
+      min-height: 0;
+    }
+
+    .yanta-appearance-section {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .yanta-appearance-section-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+    }
+
+    .yanta-appearance-section-head .yap-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 11px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: var(--text-faint);
+      font-weight: 600;
+    }
+
+    .yanta-appearance-toggle {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: var(--text-dim);
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .yanta-appearance-toggle input {
+      accent-color: var(--accent);
+    }
+
+    .yanta-appearance-section.disabled .yap-content {
+      opacity: 0.35;
+      pointer-events: none;
+    }
+
+    .yanta-appearance-preview {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 30px;
+      height: 30px;
+      border-radius: 999px;
+      box-shadow: 0 0 0 1.5px var(--yap-color, var(--accent)) inset;
+      background: color-mix(in srgb, var(--yap-color, var(--accent)) 15%, transparent);
+      color: var(--yap-color, var(--accent));
+    }
+
+    .yanta-appearance-search {
+      width: 100%;
+      background: var(--bg-elev-2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 7px;
+      padding: 6px 8px;
+      font-size: 12px;
+      outline: none;
+    }
+
+    .yanta-appearance-search:focus {
+      border-color: var(--accent);
+    }
+
+    .yanta-appearance-icon-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(36px, 1fr));
+      gap: 4px;
+      max-height: 220px;
+      overflow: auto;
+      padding: 4px;
+      background: var(--bg);
+      border-radius: 7px;
+      border: 1px solid var(--border);
+    }
+
+    .yanta-appearance-icon-grid button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      aspect-ratio: 1 / 1;
+      background: var(--bg-elev-2);
+      border: 1px solid transparent;
+      border-radius: 6px;
+      color: var(--text-dim);
+      cursor: pointer;
+      padding: 0;
+      transition: border-color 0.1s ease, background 0.1s ease, color 0.1s ease;
+    }
+
+    .yanta-appearance-icon-grid button:hover {
+      background: var(--bg-elev-3);
+      color: var(--text);
+    }
+
+    .yanta-appearance-icon-grid button.selected {
+      background: color-mix(in srgb, var(--yap-color, var(--accent)) 18%, transparent);
+      border-color: var(--yap-color, var(--accent));
+      color: var(--yap-color, var(--accent));
+    }
+
+    .yanta-appearance-colors {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      align-items: center;
+    }
+
+    .yanta-appearance-swatch {
+      width: 24px;
+      height: 24px;
+      border-radius: 999px;
+      border: 2px solid transparent;
+      box-shadow: 0 0 0 1px var(--border) inset;
+      cursor: pointer;
+      padding: 0;
+      transition: transform 0.12s ease, border-color 0.12s ease;
+    }
+
+    .yanta-appearance-swatch:hover {
+      transform: scale(1.1);
+    }
+
+    .yanta-appearance-swatch.selected {
+      border-color: var(--text);
+      transform: scale(1.12);
+    }
+
+    .yanta-appearance-color-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .yanta-appearance-color-row input[type="color"] {
+      width: 28px;
+      height: 28px;
+      padding: 0;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--bg-elev-2);
+      cursor: pointer;
+    }
+
+    .yanta-appearance-color-row input[type="text"] {
+      flex: 0 0 100px;
+      background: var(--bg-elev-2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: 6px;
+      padding: 5px 8px;
+      font-size: 12px;
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      outline: none;
+    }
+
+    .yanta-appearance-color-row input[type="text"]:focus {
+      border-color: var(--accent);
+    }
+
+    .yanta-appearance-reset {
+      background: transparent;
+      border: 1px dashed var(--border);
+      color: var(--text-dim);
+      border-radius: 6px;
+      padding: 4px 8px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+
+    .yanta-appearance-reset:hover {
+      border-color: var(--border-strong);
+      color: var(--text);
+    }
+
+    .yanta-appearance-foot {
+      padding: 10px 14px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      background: var(--bg-elev-2);
+    }
+
+    .yanta-appearance-foot .yap-spacer {
+      flex: 1;
+    }
+
+    .yanta-appearance-foot .yap-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 12px;
+      border-radius: 7px;
+      border: 1px solid var(--border);
+      background: var(--bg-elev);
+      color: var(--text);
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    .yanta-appearance-foot .yap-btn:hover {
+      background: var(--bg-elev-3);
+      border-color: var(--border-strong);
+    }
+
+    .yanta-appearance-foot .yap-btn.primary {
+      background: var(--accent);
+      color: var(--bg);
+      border-color: var(--accent);
+      font-weight: 600;
+    }
+
+    .yanta-appearance-foot .yap-btn.primary:hover {
+      filter: brightness(1.1);
+    }
+
+    .yanta-appearance-foot .yap-btn.secondary {
+      background: color-mix(in srgb, var(--accent) 16%, transparent);
+      border-color: var(--accent);
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    .yanta-appearance-foot .yap-btn.secondary:hover {
+      background: color-mix(in srgb, var(--accent) 25%, transparent);
+    }
+
+    .yanta-appearance-foot .yap-btn[disabled] {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
+    .yanta-appearance-foot .yap-btn.ghost {
+      background: transparent;
+      border-color: transparent;
+      color: var(--text-dim);
+    }
+
+    .yanta-appearance-foot .yap-btn.ghost:hover {
+      color: var(--text);
+      background: var(--bg-elev-3);
+    }
+
+    /* Physics knob sliders inside the controls panel */
+    .yanta-graph-controls .gc-physics {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+
+    .yanta-graph-controls .gc-physics-row {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding: 6px 8px;
+      border-radius: 7px;
+      background: var(--bg-elev-2);
+      border: 1px solid var(--border);
+    }
+
+    .yanta-graph-controls .gc-physics-row:hover {
+      border-color: var(--border-strong);
+    }
+
+    .yanta-graph-controls .gc-physics-row .gcp-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 6px;
+    }
+
+    .yanta-graph-controls .gc-physics-row .gcp-label {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      color: var(--text);
+    }
+
+    .yanta-graph-controls .gc-physics-row .gcp-value {
+      color: var(--text-dim);
+      font-family: ui-monospace, SFMono-Regular, monospace;
+      font-size: 11px;
+    }
+
+    .yanta-graph-controls .gc-physics-row input[type="range"] {
+      width: 100%;
+      accent-color: var(--accent);
+      cursor: pointer;
+    }
+
+    .yanta-graph-controls .gc-physics-reset {
+      align-self: flex-end;
+      background: transparent;
+      border: 1px dashed var(--border);
+      border-radius: 6px;
+      color: var(--text-faint);
+      padding: 3px 8px;
+      font-size: 11px;
+      cursor: pointer;
+    }
+
+    .yanta-graph-controls .gc-physics-reset:hover {
+      border-color: var(--border-strong);
+      color: var(--text);
     }
   `;
 
@@ -1544,6 +1989,12 @@ function stepGraph() {
   const repulsion = baseRepulsion * alpha;
   const damping = dragging ? PHYSICS.dragDamping : PHYSICS.damping;
 
+  // User-tunable link scaling. linkDistance / linkStrength are stored as
+  // scaled values in PHYSICS; convert to multiplicative factors against
+  // the default baselines used in the hard-coded kind-specific values.
+  const linkDistanceScale = PHYSICS.linkDistance / PHYSICS_DEFAULTS.linkDistance;
+  const linkStrengthScale = PHYSICS.linkStrength / PHYSICS_DEFAULTS.linkStrength;
+
   const { w, h } = canvasCssSize();
   const cx = w / 2;
   const cy = h / 2;
@@ -1591,6 +2042,10 @@ function stepGraph() {
         desired *= 0.88;
       }
     }
+
+    // Apply user-tunable global scales.
+    desired *= linkDistanceScale;
+    strength *= linkStrengthScale;
 
     strength *= l.weight || 1;
 
@@ -1713,7 +2168,7 @@ function animate() {
 
   const energy = stepGraph();
 
-  if (graph.simAlpha < PHYSICS.minAlpha || energy < 0.055) {
+  if (graph.simAlpha < PHYSICS.minAlpha && energy < 0.02) {
     stopSimulation({ keepDrag: !!graph.dragNode });
     return;
   }
@@ -2502,10 +2957,19 @@ function showNodePreview(node, clientX, clientY) {
     : `<div class="yanta-graph-empty-preview">Empty note.</div>`;
 
   const folder = noteFolderLabel(note);
+  const iconName = note.icon || (note.type === 'list' ? 'list' : 'file');
+  const themeNow = theme();
+  const noteColor = safeMetaColor(
+    note.color,
+    note.type === 'list' ? themeNow.accent2 : themeNow.accent
+  );
+  const iconColorStyle = noteColor ? `--note-icon-color:${escapeHtml(noteColor)};` : '';
 
   pop.innerHTML = `
     <div class="yanta-graph-note-preview-head">
-      <span class="yanta-graph-note-preview-icon">${lucide(note.icon || (note.type === 'list' ? 'list' : 'file'), 16)}</span>
+      <span class="yanta-graph-note-preview-icon" role="button" tabindex="0"
+            title="Edit icon &amp; color" data-graph-edit-appearance
+            style="${iconColorStyle}">${lucide(iconName, 18)}</span>
       <div style="min-width:0;flex:1">
         <div class="yanta-graph-note-preview-title">${escapeHtml(note.title || 'Untitled')}</div>
         <div class="yanta-graph-note-preview-meta">${escapeHtml(folder)}</div>
@@ -2527,6 +2991,20 @@ function showNodePreview(node, clientX, clientY) {
   });
 
   pop.querySelector('[data-graph-close-preview]')?.addEventListener('click', hideNodePreview);
+
+  const editIcon = pop.querySelector('[data-graph-edit-appearance]');
+  if (editIcon) {
+    const openEditor = (e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      hideNodePreview();
+      editNoteAppearanceFromGraph(note);
+    };
+    editIcon.addEventListener('click', openEditor);
+    editIcon.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') openEditor(e);
+    });
+  }
 
   positionFloatingElement(pop, clientX, clientY);
 }
@@ -2864,29 +3342,402 @@ function rebuildAndAnimateAfterMutation(alpha = 0.8) {
 }
 
 // ------------------------------------------------------------
-// Appearance editing from graph (with scope picker)
+// Appearance picker (custom: icon + color, dual-button apply)
+// ------------------------------------------------------------
+
+// Curated set of useful Lucide icons for notes/folders. Falls back to
+// 'square' if a name isn't in this build of lucide.
+const APPEARANCE_ICONS = [
+  // Notes / writing
+  'file', 'file-text', 'file-plus', 'notebook', 'notebook-pen', 'sticky-note',
+  'book', 'book-open', 'book-marked', 'bookmark', 'newspaper', 'scroll', 'feather',
+  'pen', 'pencil', 'edit-3', 'type', 'quote',
+  // Folders / structure
+  'folder', 'folder-open', 'folder-tree', 'folders', 'archive', 'box', 'package',
+  'inbox', 'list', 'list-checks', 'list-todo', 'kanban', 'columns',
+  // People / communication
+  'user', 'users', 'mail', 'message-circle', 'message-square', 'phone',
+  'at-sign', 'send',
+  // Time / calendar
+  'calendar', 'calendar-days', 'clock', 'timer', 'alarm-clock', 'hourglass',
+  // Status / decision
+  'check', 'check-circle', 'circle', 'square', 'star', 'heart', 'flag',
+  'bell', 'pin', 'tag', 'flame', 'sparkles', 'zap', 'thumbs-up',
+  // Knowledge / ideas
+  'lightbulb', 'brain', 'compass', 'map', 'target', 'crosshair',
+  'puzzle', 'graduation-cap', 'school', 'library', 'beaker', 'flask-conical',
+  // Code / tech
+  'code', 'terminal', 'cpu', 'database', 'server', 'cloud', 'wifi',
+  'git-branch', 'git-commit', 'git-merge', 'bug', 'wrench',
+  // Money / business
+  'briefcase', 'building', 'building-2', 'banknote', 'wallet', 'coins',
+  'credit-card', 'shopping-cart', 'shopping-bag', 'percent', 'trending-up', 'trending-down',
+  // Nature / hobbies
+  'leaf', 'tree-pine', 'tree-deciduous', 'flower', 'sun', 'moon', 'cloud-sun',
+  'mountain', 'tent', 'bike', 'car', 'plane', 'ship', 'train',
+  // Food / health
+  'coffee', 'utensils', 'pizza', 'apple', 'wine', 'dumbbell', 'pill',
+  'stethoscope', 'cross', 'syringe',
+  // Music / media
+  'music', 'headphones', 'film', 'image', 'camera', 'video', 'gamepad-2',
+  // Tools / misc
+  'settings', 'wrench', 'hammer', 'key', 'lock', 'unlock', 'shield',
+  'eye', 'eye-off', 'globe', 'home', 'house',
+];
+
+const APPEARANCE_COLOR_SWATCHES = [
+  // Blues
+  '#6ea8fe', '#3b82f6', '#0ea5e9', '#06b6d4',
+  // Purples / pinks
+  '#a78bfa', '#8b5cf6', '#d946ef', '#ec4899',
+  // Reds / oranges
+  '#f87171', '#ef4444', '#fb923c', '#f59e0b',
+  // Yellows
+  '#fbbf24', '#eab308',
+  // Greens
+  '#4ade80', '#22c55e', '#10b981', '#84cc16',
+  // Neutrals
+  '#94a3b8', '#64748b', '#a8a29e', '#d4d4d8',
+];
+
+let appearanceModalEl = null;
+
+function closeAppearancePicker() {
+  if (appearanceModalEl) {
+    appearanceModalEl.remove();
+    appearanceModalEl = null;
+  }
+}
+
+// opts: { title, kind: 'note'|'folder', target, initialIcon, initialColor, hasIcon, hasColor }
+function openAppearancePicker(opts) {
+  injectGraphCss();
+  closeAppearancePicker();
+
+  const {
+    title = 'Icon & color',
+    kind,
+    target,
+    initialIcon,
+    initialColor = '#6ea8fe',
+    hasIcon = false,
+    hasColor = false,
+  } = opts;
+
+  const defaultIcon = kind === 'folder' ? 'folder' : 'file';
+
+  // Live state of the editor.
+  const state_ = {
+    icon: initialIcon || defaultIcon,
+    color: safeMetaColor(initialColor, '#6ea8fe') || '#6ea8fe',
+    // "Change icon" toggle — on if the user already has a custom icon OR
+    // is making the first edit (default ON).
+    changeIcon: true,
+    changeColor: true,
+    iconSearch: '',
+  };
+
+  const overlay = document.createElement('div');
+  overlay.className = 'yanta-appearance-modal';
+
+  const card = document.createElement('div');
+  card.className = 'yanta-appearance-card';
+
+  card.innerHTML = `
+    <div class="yanta-appearance-head">
+      <span class="yanta-appearance-preview" data-yap-preview></span>
+      <h3>${escapeHtml(title)}</h3>
+      <button class="icon-btn" data-yap-close title="Close">✕</button>
+    </div>
+    <div class="yanta-appearance-body">
+      <div class="yanta-appearance-section" data-yap-section="icon">
+        <div class="yanta-appearance-section-head">
+          <label class="yanta-appearance-toggle">
+            <input type="checkbox" data-yap-toggle="icon" checked />
+            <span class="yap-title">${lucide('shapes', 12)} Icon</span>
+          </label>
+          ${hasIcon ? `<button class="yanta-appearance-reset" data-yap-reset="icon">${lucide('rotate-ccw', 11)} Reset to default</button>` : ''}
+        </div>
+        <div class="yap-content">
+          <input type="search" class="yanta-appearance-search" data-yap-search placeholder="Search icons…" />
+          <div class="yanta-appearance-icon-grid" data-yap-grid></div>
+        </div>
+      </div>
+
+      <div class="yanta-appearance-section" data-yap-section="color">
+        <div class="yanta-appearance-section-head">
+          <label class="yanta-appearance-toggle">
+            <input type="checkbox" data-yap-toggle="color" checked />
+            <span class="yap-title">${lucide('palette', 12)} Color</span>
+          </label>
+          ${hasColor ? `<button class="yanta-appearance-reset" data-yap-reset="color">${lucide('rotate-ccw', 11)} Reset to default</button>` : ''}
+        </div>
+        <div class="yap-content">
+          <div class="yanta-appearance-colors" data-yap-swatches></div>
+          <div class="yanta-appearance-color-row" style="margin-top:8px">
+            <input type="color" data-yap-color-picker value="${escapeHtml(state_.color)}" />
+            <input type="text" data-yap-color-hex value="${escapeHtml(state_.color)}" placeholder="#6ea8fe" maxlength="9" />
+            <span style="font-size:11px;color:var(--text-faint)">Custom</span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="yanta-appearance-foot">
+      <button class="yap-btn ghost" data-yap-cancel>Cancel</button>
+      <span class="yap-spacer"></span>
+      <button class="yap-btn secondary" data-yap-apply-to>${lucide('share-2', 13)} Apply to…</button>
+      <button class="yap-btn primary" data-yap-apply>${lucide('check', 13)} Apply</button>
+    </div>
+  `;
+
+  overlay.append(card);
+  document.body.append(overlay);
+  appearanceModalEl = overlay;
+
+  // ---- Wire up state syncing ----
+
+  const previewEl = card.querySelector('[data-yap-preview]');
+  const iconSearchEl = card.querySelector('[data-yap-search]');
+  const iconGridEl = card.querySelector('[data-yap-grid]');
+  const swatchesEl = card.querySelector('[data-yap-swatches]');
+  const colorPickerEl = card.querySelector('[data-yap-color-picker]');
+  const colorHexEl = card.querySelector('[data-yap-color-hex]');
+  const sectionIconEl = card.querySelector('[data-yap-section="icon"]');
+  const sectionColorEl = card.querySelector('[data-yap-section="color"]');
+  const toggleIconEl = card.querySelector('[data-yap-toggle="icon"]');
+  const toggleColorEl = card.querySelector('[data-yap-toggle="color"]');
+  const applyBtn = card.querySelector('[data-yap-apply]');
+  const applyToBtn = card.querySelector('[data-yap-apply-to]');
+
+  function syncSectionDisabled() {
+    sectionIconEl.classList.toggle('disabled', !state_.changeIcon);
+    sectionColorEl.classList.toggle('disabled', !state_.changeColor);
+    const noChange = !state_.changeIcon && !state_.changeColor;
+    applyBtn.disabled = noChange;
+    applyToBtn.disabled = noChange;
+  }
+
+  function refreshPreview() {
+    card.style.setProperty('--yap-color', state_.color);
+    previewEl.style.setProperty('--yap-color', state_.color);
+    previewEl.innerHTML = lucide(state_.icon || defaultIcon, 18);
+  }
+
+  function refreshSwatches() {
+    const seen = new Set();
+    const html = [];
+    const include = [state_.color, ...APPEARANCE_COLOR_SWATCHES];
+    for (const c of include) {
+      const lc = (c || '').toLowerCase();
+      if (!lc || seen.has(lc)) continue;
+      seen.add(lc);
+      const selected = lc === (state_.color || '').toLowerCase() ? ' selected' : '';
+      html.push(`<button type="button" class="yanta-appearance-swatch${selected}" data-yap-swatch="${escapeHtml(c)}" style="background:${escapeHtml(c)}" title="${escapeHtml(c)}"></button>`);
+    }
+    swatchesEl.innerHTML = html.join('');
+    for (const btn of swatchesEl.querySelectorAll('[data-yap-swatch]')) {
+      btn.addEventListener('click', () => {
+        state_.color = btn.dataset.yapSwatch;
+        colorPickerEl.value = state_.color;
+        colorHexEl.value = state_.color;
+        refreshPreview();
+        refreshSwatches();
+        refreshIconGrid();
+      });
+    }
+  }
+
+  function refreshIconGrid() {
+    const q = state_.iconSearch.trim().toLowerCase();
+    const list = q
+      ? APPEARANCE_ICONS.filter((name) => name.includes(q))
+      : APPEARANCE_ICONS;
+
+    // Always include "no icon" as the first option (uses default icon).
+    const html = [`<button type="button" class="${state_.icon === defaultIcon ? 'selected' : ''}" data-yap-icon="${escapeHtml(defaultIcon)}" title="Default (${escapeHtml(defaultIcon)})">${lucide(defaultIcon, 18)}</button>`];
+
+    for (const name of list) {
+      if (name === defaultIcon) continue;
+      const selected = name === state_.icon ? ' selected' : '';
+      html.push(`<button type="button" class="${selected.trim()}" data-yap-icon="${escapeHtml(name)}" title="${escapeHtml(name)}">${lucide(name, 18)}</button>`);
+    }
+
+    iconGridEl.innerHTML = html.join('');
+
+    for (const btn of iconGridEl.querySelectorAll('[data-yap-icon]')) {
+      btn.addEventListener('click', () => {
+        state_.icon = btn.dataset.yapIcon;
+        refreshIconGrid();
+        refreshPreview();
+      });
+    }
+  }
+
+  refreshPreview();
+  refreshSwatches();
+  refreshIconGrid();
+  syncSectionDisabled();
+
+  // ---- Event listeners ----
+
+  iconSearchEl.addEventListener('input', (e) => {
+    state_.iconSearch = e.target.value || '';
+    refreshIconGrid();
+  });
+
+  toggleIconEl.addEventListener('change', () => {
+    state_.changeIcon = toggleIconEl.checked;
+    syncSectionDisabled();
+  });
+
+  toggleColorEl.addEventListener('change', () => {
+    state_.changeColor = toggleColorEl.checked;
+    syncSectionDisabled();
+  });
+
+  colorPickerEl.addEventListener('input', () => {
+    state_.color = colorPickerEl.value || '#6ea8fe';
+    colorHexEl.value = state_.color;
+    refreshPreview();
+    refreshSwatches();
+    refreshIconGrid();
+  });
+
+  colorHexEl.addEventListener('input', () => {
+    const val = (colorHexEl.value || '').trim();
+    if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(val)) {
+      state_.color = val;
+      colorPickerEl.value = val.length >= 7 ? val.slice(0, 7) : val;
+      refreshPreview();
+      refreshSwatches();
+      refreshIconGrid();
+    }
+  });
+
+  for (const btn of card.querySelectorAll('[data-yap-reset]')) {
+    btn.addEventListener('click', () => {
+      const what = btn.dataset.yapReset;
+      const payload = buildPayload({ reset: what });
+      closeAppearancePicker();
+      applyToSelf(payload);
+    });
+  }
+
+  card.querySelector('[data-yap-cancel]').addEventListener('click', closeAppearancePicker);
+  card.querySelector('[data-yap-close]').addEventListener('click', closeAppearancePicker);
+
+  overlay.addEventListener('mousedown', (e) => {
+    if (e.target === overlay) closeAppearancePicker();
+  });
+
+  // Esc closes.
+  function onKey(e) {
+    if (!appearanceModalEl) {
+      window.removeEventListener('keydown', onKey);
+      return;
+    }
+    if (e.key === 'Escape') {
+      closeAppearancePicker();
+      window.removeEventListener('keydown', onKey);
+    }
+  }
+  window.addEventListener('keydown', onKey);
+
+  // Apply (self only, no scope prompt).
+  applyBtn.addEventListener('click', () => {
+    const payload = buildPayload();
+    closeAppearancePicker();
+    applyToSelf(payload);
+  });
+
+  // Apply to… (open scope picker first).
+  applyToBtn.addEventListener('click', () => {
+    const payload = buildPayload();
+    closeAppearancePicker();
+    if (kind === 'note') {
+      pickScopeForNote(target, payload);
+    } else {
+      pickScopeForFolder(target, payload);
+    }
+  });
+
+  // Build the payload from current state — including the boolean flags
+  // controlling whether icon/color should be touched.
+  function buildPayload({ reset } = {}) {
+    if (reset === 'icon') {
+      return {
+        icon: null,
+        color: state_.color,
+        applyIcon: false,
+        applyColor: false,
+        resetIcon: true,
+        resetColor: false,
+      };
+    }
+    if (reset === 'color') {
+      return {
+        icon: state_.icon,
+        color: null,
+        applyIcon: false,
+        applyColor: false,
+        resetIcon: false,
+        resetColor: true,
+      };
+    }
+    return {
+      icon: state_.icon,
+      color: state_.color,
+      applyIcon: state_.changeIcon,
+      applyColor: state_.changeColor,
+      resetIcon: false,
+      resetColor: false,
+    };
+  }
+
+  function applyToSelf(payload) {
+    const targets = new Set();
+    if (kind === 'note') targets.add(`note:${target.id}`);
+    else targets.add(`folder:${target.id}`);
+    applyAppearanceToTargets(targets, payload);
+  }
+}
+
+// ------------------------------------------------------------
+// Appearance editing entry points (from graph context menu / preview)
 // ------------------------------------------------------------
 
 function editNoteAppearanceFromGraph(note) {
-  openIconPicker({
+  openAppearancePicker({
     title: `Icon & color: ${note.title || 'Untitled'}`,
+    kind: 'note',
+    target: note,
     initialIcon: note.icon || (note.type === 'list' ? 'list' : 'file'),
     initialColor: note.color || '#6ea8fe',
-    onApply: ({ icon, color }) => {
-      pickScopeForNote(note, { icon, color });
-    },
+    hasIcon: note.icon != null,
+    hasColor: note.color != null,
   });
 }
 
 function editFolderAppearanceFromGraph(folder) {
-  openIconPicker({
+  openAppearancePicker({
     title: `Icon & color: ${folder.name || 'Folder'}`,
+    kind: 'folder',
+    target: folder,
     initialIcon: folder.icon || 'folder',
     initialColor: folder.color || '#6ea8fe',
-    onApply: ({ icon, color }) => {
-      pickScopeForFolder(folder, { icon, color });
-    },
+    hasIcon: folder.icon != null,
+    hasColor: folder.color != null,
   });
+}
+
+// Exported entry points so tree.js (and any other module) can use the
+// same appearance picker as the graph view.
+export function editNoteAppearance(note) {
+  editNoteAppearanceFromGraph(note);
+}
+
+export function editFolderAppearance(folder) {
+  editFolderAppearanceFromGraph(folder);
 }
 
 // Scope-picker modal: lets the user choose where to apply the change.
@@ -2938,8 +3789,8 @@ function openScopePicker({ title, options, onPick }) {
   });
 }
 
-function pickScopeForNote(note, { icon, color }) {
-  // For a note, scope options refer to its containing folder.
+export function pickScopeForNote(note, payload) {
+  // payload: { icon, color, applyIcon, applyColor }
   const folderId = note.folderId || null;
   const siblings = folderId
     ? [...state.notes.values()].filter((n) => n.folderId === folderId && n.id !== note.id)
@@ -2948,8 +3799,10 @@ function pickScopeForNote(note, { icon, color }) {
   const folder = folderId ? state.folders.get(folderId) : null;
   const parents = collectAncestorFolders(folderId);
 
+  const title = appearanceTitleFor(payload);
+
   openScopePicker({
-    title: 'Apply icon & color to…',
+    title,
     options: [
       {
         value: 'self',
@@ -2970,11 +3823,11 @@ function pickScopeForNote(note, { icon, color }) {
         disabled: parents.length === 0,
       },
     ],
-    onPick: (scope) => applyAppearanceToNote(note, { icon, color }, scope),
+    onPick: (scope) => applyAppearanceToNote(note, payload, scope),
   });
 }
 
-function pickScopeForFolder(folder, { icon, color }) {
+export function pickScopeForFolder(folder, payload) {
   const directChildren = childFoldersOf(folder.id).length + notesInFolder(folder.id).length;
   const allDescendants = countAllDescendants(folder.id);
   const parents = collectAncestorFolders(folder.parentId);
@@ -2982,8 +3835,10 @@ function pickScopeForFolder(folder, { icon, color }) {
     (f) => f.parentId === folder.parentId && f.id !== folder.id
   );
 
+  const title = appearanceTitleFor(payload);
+
   openScopePicker({
-    title: 'Apply icon & color to…',
+    title,
     options: [
       {
         value: 'self',
@@ -3020,8 +3875,17 @@ function pickScopeForFolder(folder, { icon, color }) {
         disabled: parents.length === 0,
       },
     ],
-    onPick: (scope) => applyAppearanceToFolder(folder, { icon, color }, scope),
+    onPick: (scope) => applyAppearanceToFolder(folder, payload, scope),
   });
+}
+
+function appearanceTitleFor(payload) {
+  if (!payload) return 'Apply to…';
+  const both = payload.applyIcon && payload.applyColor;
+  if (both) return 'Apply icon & color to…';
+  if (payload.applyIcon) return 'Apply icon to…';
+  if (payload.applyColor) return 'Apply color to…';
+  return 'Apply to…';
 }
 
 function collectAncestorFolders(startId) {
@@ -3065,7 +3929,7 @@ function countAllDescendants(folderId) {
   return folders.size + notes.size;
 }
 
-async function applyAppearanceToNote(note, { icon, color }, scope) {
+async function applyAppearanceToNote(note, payload, scope) {
   const applyTo = new Set();
   applyTo.add(`note:${note.id}`);
 
@@ -3079,10 +3943,10 @@ async function applyAppearanceToNote(note, { icon, color }, scope) {
     for (const f of parents) applyTo.add(`folder:${f.id}`);
   }
 
-  await applyAppearanceToTargets(applyTo, { icon, color });
+  await applyAppearanceToTargets(applyTo, payload);
 }
 
-async function applyAppearanceToFolder(folder, { icon, color }, scope) {
+async function applyAppearanceToFolder(folder, payload, scope) {
   const applyTo = new Set();
   applyTo.add(`folder:${folder.id}`);
 
@@ -3111,10 +3975,20 @@ async function applyAppearanceToFolder(folder, { icon, color }, scope) {
     for (const f of collectAncestorFolders(folder.parentId)) applyTo.add(`folder:${f.id}`);
   }
 
-  await applyAppearanceToTargets(applyTo, { icon, color });
+  await applyAppearanceToTargets(applyTo, payload);
 }
 
-async function applyAppearanceToTargets(targets, { icon, color }) {
+// payload: { icon, color, applyIcon, applyColor, resetIcon, resetColor }
+// - applyIcon/applyColor are required flags determining what to change
+// - resetIcon/resetColor cause those fields to be deleted (back to default)
+async function applyAppearanceToTargets(targets, payload) {
+  const { icon, color, applyIcon, applyColor, resetIcon, resetColor } = payload || {};
+
+  if (!applyIcon && !applyColor && !resetIcon && !resetColor) {
+    toast('Nothing to apply', 'info');
+    return;
+  }
+
   const writes = [];
 
   for (const key of targets) {
@@ -3124,13 +3998,11 @@ async function applyAppearanceToTargets(targets, { icon, color }) {
       const n = state.notes.get(id);
       if (!n) continue;
 
-      if (icon === null && color === null) {
-        delete n.icon;
-        delete n.color;
-      } else {
-        if (icon != null) n.icon = icon;
-        if (color != null) n.color = color;
-      }
+      if (resetIcon) delete n.icon;
+      else if (applyIcon && icon != null) n.icon = icon;
+
+      if (resetColor) delete n.color;
+      else if (applyColor && color != null) n.color = color;
 
       n.updated = Date.now();
       writes.push(store.notes.put(n));
@@ -3138,15 +4010,11 @@ async function applyAppearanceToTargets(targets, { icon, color }) {
       const f = state.folders.get(id);
       if (!f) continue;
 
-      if (icon === null && color === null) {
-        delete f.icon;
-        delete f.color;
-      } else {
-        // Folder still shows folder-shaped icons by default in tree,
-        // but in graph we honor any icon they choose.
-        if (icon != null) f.icon = icon;
-        if (color != null) f.color = color;
-      }
+      if (resetIcon) delete f.icon;
+      else if (applyIcon && icon != null) f.icon = icon;
+
+      if (resetColor) delete f.color;
+      else if (applyColor && color != null) f.color = color;
 
       writes.push(store.folders.put(f));
     }
@@ -3233,6 +4101,19 @@ function buildControlsPanel({ paneMode = false } = {}) {
   if (paneMode) wrap.setAttribute('data-graph-controls', '');
   else wrap.setAttribute('data-graph-controls-overlay', '');
 
+  const physicsRowsHtml = PHYSICS_TUNABLES.map((knob) => {
+    const value = physicsFactors[knob.key];
+    return `
+      <div class="gc-physics-row" data-physics-key="${escapeHtml(knob.key)}" title="${escapeHtml(knob.hint || '')}">
+        <div class="gcp-head">
+          <span class="gcp-label">${lucide(knob.icon || 'sliders-horizontal', 13)} ${escapeHtml(knob.label)}</span>
+          <span class="gcp-value" data-physics-value>${formatPhysicsValue(knob, value)}</span>
+        </div>
+        <input type="range" min="${knob.min}" max="${knob.max}" step="${knob.step}" value="${value}" data-physics-slider />
+      </div>
+    `;
+  }).join('');
+
   wrap.innerHTML = `
     <div class="yanta-graph-controls-head" data-controls-toggle>
       <span class="gc-chev">${lucide('sliders-horizontal', 14)}</span>
@@ -3264,10 +4145,16 @@ function buildControlsPanel({ paneMode = false } = {}) {
       <div class="gc-group">
         <div class="gc-group-title">View</div>
         <button class="gc-action" data-action="recenter">${lucide('crosshair', 13)} Recenter</button>
-        ${graph.mode === 'overlay'
-          ? `<div class="gc-toggle" data-toggle="pane"><span class="gc-label">${lucide('panel-right', 13)} Show in side pane</span><span class="gc-switch"></span></div>`
-          : `<button class="gc-action" data-action="exit-pane">${lucide('x', 13)} Exit pane mode</button>`
-        }
+        <div class="gc-toggle ${graph.preferPane ? 'on' : ''}" data-toggle="pane">
+          <span class="gc-label">${lucide('panel-right', 13)} Show in side pane</span>
+          <span class="gc-switch"></span>
+        </div>
+      </div>
+
+      <div class="gc-group">
+        <div class="gc-group-title">Forces</div>
+        <div class="gc-physics">${physicsRowsHtml}</div>
+        <button class="gc-physics-reset" data-action="reset-physics">${lucide('rotate-ccw', 11)} Reset forces to defaults</button>
       </div>
 
       <div class="gc-hint">
@@ -3328,19 +4215,72 @@ function buildControlsPanel({ paneMode = false } = {}) {
 
   wrap.querySelector('[data-action="recenter"]')?.addEventListener('click', recenterAll);
 
+  // Pane toggle: switches between overlay and pane mode, persisting choice.
   const paneToggle = wrap.querySelector('[data-toggle="pane"]');
   if (paneToggle) {
     paneToggle.addEventListener('click', () => {
-      openGraphPane();
+      if (graph.mode === 'pane') {
+        // Currently in pane → user wants to disable it.
+        closeGraphPane();
+        // Save preference: don't auto-open as pane next time.
+        graph.preferPane = false;
+        writeBoolPref(GRAPH_PANE_PREFS_KEY, false);
+      } else {
+        // Currently in overlay → user wants to switch to pane.
+        openGraphPane();
+        // openGraphPane sets preferPane=true internally.
+      }
     });
   }
 
-  const exitPane = wrap.querySelector('[data-action="exit-pane"]');
-  if (exitPane) {
-    exitPane.addEventListener('click', () => closeGraphPane());
+  // Force-tuning sliders.
+  for (const row of wrap.querySelectorAll('[data-physics-key]')) {
+    const key = row.dataset.physicsKey;
+    const knob = PHYSICS_TUNABLES.find((k) => k.key === key);
+    const slider = row.querySelector('[data-physics-slider]');
+    const valueEl = row.querySelector('[data-physics-value]');
+    if (!slider || !valueEl || !knob) continue;
+
+    slider.addEventListener('input', () => {
+      const v = parseFloat(slider.value);
+      physicsFactors[key] = v;
+      valueEl.textContent = formatPhysicsValue(knob, v);
+      applyPhysicsFactors();
+      writePhysicsPrefs(physicsFactors);
+      startSimulation(0.5);
+    });
   }
 
+  wrap.querySelector('[data-action="reset-physics"]')?.addEventListener('click', () => {
+    for (const knob of PHYSICS_TUNABLES) {
+      physicsFactors[knob.key] = knob.mode === 'absolute' ? PHYSICS_DEFAULTS[knob.key] : 1;
+    }
+    applyPhysicsFactors();
+    writePhysicsPrefs(physicsFactors);
+    // Update all slider DOM.
+    for (const row of wrap.querySelectorAll('[data-physics-key]')) {
+      const key = row.dataset.physicsKey;
+      const knob = PHYSICS_TUNABLES.find((k) => k.key === key);
+      const slider = row.querySelector('[data-physics-slider]');
+      const valueEl = row.querySelector('[data-physics-value]');
+      if (knob && slider && valueEl) {
+        slider.value = physicsFactors[key];
+        valueEl.textContent = formatPhysicsValue(knob, physicsFactors[key]);
+      }
+    }
+    startSimulation(0.7);
+    toast('Forces reset to defaults', 'success');
+  });
+
   return wrap;
+}
+
+function formatPhysicsValue(knob, v) {
+  if (knob.mode === 'absolute') {
+    return v.toFixed(2);
+  }
+  // Show as ×factor.
+  return `×${v.toFixed(2)}`;
 }
 
 // ------------------------------------------------------------

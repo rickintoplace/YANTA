@@ -33,3 +33,13 @@ The repo is a static site, so the deploy is trivial:
 The included `vercel.json` keeps caches honest and ensures `src/*.js` is served with the correct `Content-Type`.
 
 A Vercel deployment is the easiest way to make share links openable from a phone — scan the QR, the URL opens in mobile Safari/Chrome, and you're collaborating.
+
+## Drawings
+
+YANTA supports Excalidraw drawings locally and without accounts.
+
+- Insert via `/drawing` or Command Palette → “Insert drawing”
+- Drawings are stored inside the current note’s Yjs document
+- Markdown embeds use `draw://<id>`
+- Export ZIP includes `drawings/<noteId>/<drawingId>.excalidraw`
+- `.excalidraw` and `.excalidraw.json` files can be imported

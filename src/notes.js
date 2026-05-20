@@ -10,7 +10,7 @@
 // ============================================================
 
 import { $, el, uid, state, store, lucide, fmtDate, debounce, toast } from './core.js';
-import { getNoteDoc, getMarkdownText, migrateBodyIfNeeded, destroyNoteDoc, onDocChange, noteMarkdown } from './yjs.js';
+import { getNoteDoc, getMarkdownText, migrateBodyIfNeeded, destroyNoteDoc, onDocChange, noteMarkdown, drawingsTextForNote } from './yjs.js';
 import { mountEditor, destroyEditor, currentMarkdown, focusEditor } from './editor.js';
 import { renderPreview, setMarkdownRerenderHook } from './markdown.js';
 import { wikilinkIndex } from './features-state.js';
@@ -29,6 +29,7 @@ function searchHaystack(note, body = '') {
     note?.title || '',
     (note?.tags || []).join(' '),
     body || '',
+    note?.id ? drawingsTextForNote(note.id) : '',
   ].join(' ').toLowerCase();
 }
 
@@ -105,16 +106,38 @@ export async function openNote(id) {
 
   // Subscribe to Y.Doc updates → re-render preview, persist mirror.
   _unsubDoc = onDocChange(id, (_update, origin) => {
-    schedulePreview();
-    updateSearchIndexFor(note);
+    const isDrawUpdate =
+      typeof origin === 'string' &&
+      origin.startsWith('draw');
 
-    // Updates from the sync folder are remote/imported changes.
-    // Do not immediately mirror them back as "local dirty" changes.
     if (origin === 'sync-folder') {
+      schedulePreview();
+      updateSearchIndexFor(note);
       markNoteSyncStatus(id, 'synced');
       refreshGlobalSyncStatus();
+      markSaved();
       return;
     }
+
+    if (isDrawUpdate) {
+      window.dispatchEvent(new CustomEvent('yanta-drawing-updated', {
+        detail: { noteId: id },
+      }));
+
+      updateSearchIndexFor(note);
+
+      note.updated = Date.now();
+      store.notes.put(note);
+
+      // Yjs/y-indexeddb persistiert das Drawing sowieso.
+      // Optional Sync-Mirror/Snapshot anstoßen, aber Footer nicht dauernd auf dirty setzen.
+      scheduleMirror(note);
+
+      return;
+    }
+
+    schedulePreview();
+    updateSearchIndexFor(note);
 
     markDirty();
 

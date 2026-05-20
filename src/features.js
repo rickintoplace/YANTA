@@ -3,13 +3,15 @@
 // wikilink hover preview, wikilink click handler.
 // ============================================================
 
-import { $, el, state, escapeHtml, lucide, toast, toggleTheme } from './core.js';
+import { $, el, state, escapeHtml, lucide, toast } from './core.js';
+import { cycleAppearanceMode } from './settings.js';
 import { wikilinkIndex } from './features-state.js';
 import { openNote, createNoteWithTitle, deleteCurrentNote, newNote, newFolder, togglePin } from './notes.js';
 import { renderBlocksInline, classifyLine, headingSlug } from './markdown.js';
-import { noteMarkdown } from './yjs.js';
+import { noteMarkdown, drawingWikilinksForNote } from './yjs.js';
 import { currentFolderForNew } from './tree.js';
 import { insertAtCursor } from './editor.js';
+import { inlineConfirm } from './inline-ui.js';
 
 const WIKILINK_RE = /\[\[([^\]|\n]+)(?:\|[^\]\n]+)?\]\]/g;
 
@@ -17,14 +19,23 @@ const WIKILINK_RE = /\[\[([^\]|\n]+)(?:\|[^\]\n]+)?\]\]/g;
 export function getBacklinks(noteId) {
   const note = state.notes.get(noteId);
   if (!note) return [];
+
   const target = (note.title || '').trim().toLowerCase();
   const out = [];
+
   for (const n of state.notes.values()) {
     if (n.id === noteId) continue;
+
+    let found = null;
+
     let body = '';
-    try { body = noteMarkdown(n.id); } catch { continue; }
+    try {
+      body = noteMarkdown(n.id);
+    } catch {}
+
     WIKILINK_RE.lastIndex = 0;
-    let m, found = null;
+
+    let m;
     while ((m = WIKILINK_RE.exec(body)) !== null) {
       if (m[1].trim().toLowerCase() === target) {
         const before = body.slice(0, m.index);
@@ -33,8 +44,21 @@ export function getBacklinks(noteId) {
         break;
       }
     }
-    if (found != null) out.push({ note: n, line: found });
+
+    if (found == null) {
+      try {
+        const drawLinks = drawingWikilinksForNote(n.id);
+        if (drawLinks.some((x) => x.trim().toLowerCase() === target)) {
+          found = `Referenced inside drawing: [[${note.title || 'Untitled'}]]`;
+        }
+      } catch {}
+    }
+
+    if (found != null) {
+      out.push({ note: n, line: found });
+    }
   }
+
   return out.sort((a, b) => b.note.updated - a.note.updated);
 }
 
@@ -217,7 +241,7 @@ export function openPalette(mode = 'commands') {
 export function closePalette() { $('palette').hidden = true; palette.items = []; }
 
 let commandList = [];
-  export function buildCommandList({ openImageModal, openIconInsertPicker, openGraph, exportAsZip, exportNoteAsMd, exportBundle, exportEveryNoteMd, openSyncSetup, syncFull, syncDisconnect, cleanupUnusedImages, openShareModal, stopSharing, importFiles, importFolder }) {
+export function buildCommandList({ openImageModal, openIconInsertPicker, openDraw, openGraph, exportAsZip, exportNoteAsMd, exportBundle, exportEveryNoteMd, openSyncSetup, syncFull, syncDisconnect, cleanupUnusedImages, openShareModal, stopSharing, importFiles, importFolder }) {
   commandList = [
     { label: 'New note', icon: 'plus', hint: 'Ctrl+N', action: () => newNote(currentFolderForNew()) },
     { label: 'New shopping/checklist (live-friendly)', icon: 'shopping-cart', action: () => newNote(currentFolderForNew(), 'list') },
@@ -227,10 +251,11 @@ let commandList = [];
     { label: 'Search notes', icon: 'search', hint: 'Ctrl+K', action: () => $('search').focus() },
     { label: 'Toggle preview/edit/split', icon: 'eye', hint: 'Ctrl+/', action: () => window.dispatchEvent(new CustomEvent('yanta-cycle-view')) },
     { label: 'Insert image', icon: 'image', hint: 'Ctrl+I', action: openImageModal },
+    { label: 'Insert drawing', icon: 'pencil', hint: '/drawing', action: openDraw },
     { label: 'Insert Lucide icon', icon: 'sparkles', action: openIconInsertPicker },
     { label: 'Insert wikilink', icon: 'link', action: () => insertAtCursor('[[') },
     { label: 'Toggle pin', icon: 'pin', action: togglePin },
-    { label: 'Cycle theme (auto/dark/light)', icon: 'moon', hint: 'T', action: toggleTheme },
+    { label: 'Cycle theme (auto/dark/light)', icon: 'moon', hint: 'T', action: cycleAppearanceMode },
     'hr',
     { label: 'Share this note live…', icon: 'share', action: openShareModal },
     { label: 'Stop sharing this note', icon: 'x', action: stopSharing },

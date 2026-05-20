@@ -60,6 +60,11 @@ function sanitizeHtml(html) {
       'contenteditable',
       'aria-hidden',
       'role',
+      'data-draw-id',
+      'data-draw-title',
+      'data-draw-info',
+      'data-draw-action',
+     'data-draw-surface',
 
       // YANTA data attrs
       'data-wiki',
@@ -194,6 +199,7 @@ export function classifyLine(line, ctx) {
   if ((m = /^(\s*)([-*+])\s+/.exec(line))) return { type: 'ul', indent: m[1].length };
   if ((m = /^(\s*)(\d+)\.\s+/.exec(line))) return { type: 'ol', indent: m[1].length, num: parseInt(m[2], 10) };
   if (/^\|.*\|\s*$/.test(line)) return { type: 'table' };
+  if (/^\s*draw:\/\/[a-z0-9_-]+\s*$/i.test(line)) return { type: 'draw' };
   if (/^!\[[^\]]*\]\([^)]+\)\s*$/.test(line)) return { type: 'image' };
   return { type: 'p' };
 }
@@ -241,8 +247,44 @@ function extractSection(md, sectionName) {
   return out.join('\n');
 }
 
+export function renderDrawEmbedHtml(id, label = 'Drawing', surface = 'preview') {
+  const cleanId = String(id || '').trim();
+  const cleanSurface = surface === 'editor' ? 'editor' : 'preview';
+
+  return `<div class="yanta-draw-embed ${cleanSurface}-surface" data-draw-surface="${escapeAttr(cleanSurface)}" data-draw-id="${escapeAttr(cleanId)}" data-note-id="${escapeAttr(state.currentNoteId || '')}" contenteditable="false">
+    <div class="yanta-draw-embed-head">
+      <span class="yanta-draw-embed-icon" aria-hidden="true">${lucide('pencil', 13)}</span>
+      <div class="yanta-draw-embed-title" data-draw-title title="Rename drawing">${escapeHtml(label || 'Drawing')}</div>
+      <div class="yanta-draw-embed-meta" data-draw-info>draw://${escapeHtml(cleanId)}</div>
+      <div class="yanta-draw-embed-actions">
+        <button type="button" class="icon-btn" data-draw-action="link-note" title="Link selected element to note">${lucide('file-plus', 14)}</button>
+        <button type="button" class="icon-btn" data-draw-action="rename" title="Rename drawing">${lucide('pencil', 14)}</button>
+        <button type="button" class="icon-btn" data-draw-action="fullscreen" title="Open fullscreen">${lucide('maximize-2', 14)}</button>
+        <button type="button" class="icon-btn" data-draw-action="export" title="Export .excalidraw">${lucide('download', 14)}</button>
+        <button type="button" class="icon-btn danger" data-draw-action="delete" title="Delete drawing">${lucide('trash', 14)}</button>
+      </div>
+    </div>
+    <div class="yanta-draw-inline-host"></div>
+    <div class="yanta-draw-resize-handle" title="Resize drawing"></div>
+    <div class="yanta-draw-links"></div>
+  </div>`;
+}
+
 export function renderInline(s) {
   let out = escapeHtml(s);
+
+  // Excalidraw embeds:
+  //   draw://abc123
+  //   ![](draw://abc123)
+  out = out.replace(
+    /!\[([^\]]*)\]\(draw:\/\/([a-z0-9_-]+)\)/gi,
+    (_, alt, id) => renderDrawEmbedHtml(id, decodeEntities(alt || 'Drawing'))
+  );
+
+  out = out.replace(
+    /(^|[\s>])draw:\/\/([a-z0-9_-]+)/gi,
+    (_, prefix, id) => `${prefix}${renderDrawEmbedHtml(id, 'Drawing')}`
+  );
 
   // Inline Lucide icon syntax:
   // :lucide[atom]:

@@ -123,5 +123,329 @@ export async function destroyNoteDoc(noteId) {
   }
 }
 
+// ---------------- Excalidraw drawings inside note Y.Doc ---------
+
+export function getDrawingsMap(noteId) {
+  return getNoteDoc(noteId).doc.getMap('drawings');
+}
+
+function cloneJson(v) {
+  try {
+    return structuredClone(v);
+  } catch {
+    return JSON.parse(JSON.stringify(v ?? null));
+  }
+}
+
+function noteIdFromYantaLink(link = '') {
+  const s = String(link || '').trim();
+
+  if (s.startsWith('yanta-note://')) {
+    return s.slice('yanta-note://'.length);
+  }
+
+  if (s.startsWith('#note=')) {
+    try {
+      return decodeURIComponent(s.slice('#note='.length));
+    } catch {
+      return s.slice('#note='.length);
+    }
+  }
+
+  return null;
+}
+
+function wikiTargetFromDrawingElement(el) {
+  const custom = el?.customData?.yanta?.wikilink;
+
+  if (custom?.noteId && state.notes.has(custom.noteId)) {
+    return state.notes.get(custom.noteId)?.title || custom.target || '';
+  }
+
+  if (custom?.target) {
+    return custom.target;
+  }
+
+  const linkId = noteIdFromYantaLink(el?.link);
+
+  if (linkId && state.notes.has(linkId)) {
+    return state.notes.get(linkId)?.title || '';
+  }
+
+  return '';
+}
+
+function normalizeCanvasSize(raw = {}) {
+  const w = parseInt(raw.width ?? raw.w ?? raw.canvasWidth ?? 760, 10);
+  const h = parseInt(raw.height ?? raw.h ?? raw.canvasHeight ?? 420, 10);
+
+  return {
+    width: Math.max(240, Math.min(5000, Number.isFinite(w) ? w : 760)),
+    height: Math.max(180, Math.min(5000, Number.isFinite(h) ? h : 420)),
+  };
+}
+
+export function normalizeDrawingScene(raw = {}) {
+  const elements = Array.isArray(raw.elements) ? raw.elements : [];
+  const appState = raw.appState && typeof raw.appState === 'object' ? raw.appState : {};
+  const files = raw.files && typeof raw.files === 'object' ? raw.files : {};
+
+  return {
+    elements: cloneJson(elements),
+    appState: cloneJson(appState),
+    files: cloneJson(files),
+    canvas: normalizeCanvasSize(raw.canvas || raw.yanta?.canvas || raw),
+    text: extractTextFromDrawingScene({ elements }),
+  };
+}
+
+export function extractTextFromDrawingScene(scene = {}) {
+  const elements = Array.isArray(scene.elements) ? scene.elements : [];
+  const chunks = [];
+
+  for (const el of elements) {
+    if (!el || typeof el !== 'object') continue;
+
+    const wikiTarget = wikiTargetFromDrawingElement(el);
+    if (wikiTarget) chunks.push(wikiTarget, `[[${wikiTarget}]]`);
+
+    if (typeof el.text === 'string') chunks.push(el.text);
+    if (typeof el.originalText === 'string') chunks.push(el.originalText);
+    if (typeof el.rawText === 'string') chunks.push(el.rawText);
+    if (typeof el.link === 'string') chunks.push(el.link);
+
+    const customTarget = el.customData?.yanta?.wikilink?.target;
+    if (typeof customTarget === 'string') chunks.push(customTarget);
+  }
+
+  return chunks
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function getDrawing(noteId, drawingId) {
+  if (!noteId || !drawingId) return null;
+
+  const d = getDrawingsMap(noteId).get(drawingId);
+  return d ? cloneJson(d) : null;
+}
+
+/**
+ * Note-übergreifende Drawing-Auflösung.
+ *
+ * Wichtig für:
+ * - Note A enthält das Drawing.
+ * - Note B referenziert nur draw://<id>.
+ */
+export function findDrawing(drawingId, preferredNoteId = state.currentNoteId) {
+  if (!drawingId) return null;
+
+  const ids = [];
+
+  if (preferredNoteId) ids.push(preferredNoteId);
+
+  for (const noteId of state.notes.keys()) {
+    if (!ids.includes(noteId)) ids.push(noteId);
+  }
+
+  for (const noteId of ids) {
+    try {
+      const d = getDrawing(noteId, drawingId);
+      if (d) return { noteId, drawingId, drawing: d };
+    } catch {}
+  }
+
+  return null;
+}
+
+export function listDrawingsForNote(noteId) {
+  const map = getDrawingsMap(noteId);
+
+  return [...map.values()]
+    .filter(Boolean)
+    .map((d) => cloneJson(d))
+    .sort((a, b) => (b.updated || 0) - (a.updated || 0));
+}
+
+export function listAllDrawings() {
+  const out = [];
+
+  for (const note of state.notes.values()) {
+    try {
+      for (const d of listDrawingsForNote(note.id)) {
+        out.push({
+          ...d,
+          noteId: note.id,
+          noteTitle: note.title || 'Untitled',
+        });
+      }
+    } catch {}
+  }
+
+  return out.sort((a, b) => (b.updated || 0) - (a.updated || 0));
+}
+
+export function setDrawing(noteId, drawingId, scene, origin = 'draw') {
+  if (!noteId || !drawingId) return;
+
+  const { doc } = getNoteDoc(noteId);
+  const map = doc.getMap('drawings');
+  const prev = map.get(drawingId) || {};
+  const normalized = normalizeDrawingScene({
+    ...prev,
+    ...scene,
+    canvas: scene?.canvas || prev.canvas || scene,
+  });
+
+  doc.transact(() => {
+    map.set(drawingId, {
+      ...cloneJson(prev),
+      id: drawingId,
+      title: scene?.title ?? prev.title ?? 'Drawing',
+      version: 2,
+      updated: Date.now(),
+      ...normalized,
+    });
+  }, origin);
+}
+
+export function updateDrawingMeta(noteId, drawingId, patch = {}, origin = 'draw-meta') {
+  if (!noteId || !drawingId) return;
+
+  const { doc } = getNoteDoc(noteId);
+  const map = doc.getMap('drawings');
+  const prev = map.get(drawingId);
+
+  if (!prev) return;
+
+  const next = {
+    ...cloneJson(prev),
+    ...cloneJson(patch),
+    updated: Date.now(),
+  };
+
+  if (patch.canvas || patch.width || patch.height) {
+    next.canvas = normalizeCanvasSize(patch.canvas || {
+      width: patch.width ?? prev.canvas?.width,
+      height: patch.height ?? prev.canvas?.height,
+    });
+  }
+
+  doc.transact(() => {
+    map.set(drawingId, next);
+  }, origin);
+}
+
+export function deleteDrawing(noteId, drawingId, origin = 'draw-delete') {
+  if (!noteId || !drawingId) return;
+
+  const { doc } = getNoteDoc(noteId);
+  const map = doc.getMap('drawings');
+
+  doc.transact(() => {
+    map.delete(drawingId);
+  }, origin);
+}
+
+export function drawingsTextForNote(noteId) {
+  try {
+    return listDrawingsForNote(noteId)
+      .map((d) => [d.title || '', d.text || ''].join(' '))
+      .join(' ')
+      .toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+function noteIdFromDrawingLink(link = '') {
+  const s = String(link || '').trim();
+
+  if (s.startsWith('yanta-note://')) {
+    return s.slice('yanta-note://'.length);
+  }
+
+  if (s.startsWith('#note=')) {
+    try {
+      return decodeURIComponent(s.slice('#note='.length));
+    } catch {
+      return s.slice('#note='.length);
+    }
+  }
+
+  return null;
+}
+
+function addWikiTargetsFromText(text, out, seen) {
+  const re = /\[\[([^\]|\n]+)(?:\|[^\]\n]+)?\]\]/g;
+  let m;
+
+  while ((m = re.exec(String(text || ''))) !== null) {
+    const target = m[1].trim();
+    const key = target.toLowerCase();
+
+    if (target && !seen.has(key)) {
+      seen.add(key);
+      out.push(target);
+    }
+  }
+}
+
+function drawingElementTextSources(el) {
+  const sources = [];
+
+  // Aktuelle Felder bevorzugen.
+  if (typeof el?.text === 'string') sources.push(el.text);
+  if (typeof el?.rawText === 'string' && el.rawText !== el.text) sources.push(el.rawText);
+
+  // originalText nur als Fallback, weil es sonst alte Wikilinks konservieren kann.
+  if (!sources.length && typeof el?.originalText === 'string') {
+    sources.push(el.originalText);
+  }
+
+  return sources;
+}
+
+export function drawingWikilinksForNote(noteId) {
+  const out = [];
+  const seen = new Set();
+
+  const add = (target) => {
+    const clean = String(target || '').trim();
+    const key = clean.toLowerCase();
+
+    if (clean && !seen.has(key)) {
+      seen.add(key);
+      out.push(clean);
+    }
+  };
+
+  try {
+    for (const d of listDrawingsForNote(noteId)) {
+      for (const el of d.elements || []) {
+        if (!el || typeof el !== 'object' || el.isDeleted) continue;
+
+        // Aktiver Excalidraw-Link zählt.
+        const linkNoteId = noteIdFromDrawingLink(el.link);
+        if (linkNoteId && state.notes.has(linkNoteId)) {
+          add(state.notes.get(linkNoteId)?.title || 'Untitled');
+        }
+
+        // Aktuelle Textfelder zählen.
+        for (const text of drawingElementTextSources(el)) {
+          addWikiTargetsFromText(text, out, seen);
+        }
+
+        // customData NICHT blind zählen.
+        // Das war der stale-link-Bug: customData bleibt nach Link-Löschung
+        // manchmal erhalten.
+      }
+    }
+  } catch {}
+
+  return out;
+}
+
 // Re-export Y for callers that need it.
 export { Y };

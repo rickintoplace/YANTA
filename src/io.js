@@ -6,7 +6,7 @@
 // ============================================================
 
 import { $, uid, state, store, toast, safeFilename, downloadBlob } from './core.js';
-import { getNoteDoc, noteMarkdown, listDrawingsForNote, setDrawing, normalizeDrawingScene } from './yjs.js';
+import { getNoteDoc, noteMarkdown, listDrawingsForNote, listCitationsForNote, setDrawing, normalizeDrawingScene } from './yjs.js';
 import { rebuildWikilinkIndex } from './notes.js';
 import { renderTree } from './tree.js';
 
@@ -354,6 +354,26 @@ export async function exportAsZip() {
     const meta = state.imagesMeta.get(id) || { type: rec.type };
     entries.push({ path: '_images/' + id + '.' + imageExt(meta), data: new Uint8Array(await rec.blob.arrayBuffer()) });
   }
+  let totalCitationCount = 0;
+
+  for (const note of state.notes.values()) {
+    const citations = listCitationsForNote(note.id);
+
+    if (!citations.length) continue;
+
+    totalCitationCount += citations.length;
+
+    const csl = citations
+      .map((c) => c.csl)
+      .filter(Boolean);
+
+    if (!csl.length) continue;
+
+    entries.push({
+      path: `citations/${note.id}.csl.json`,
+      data: _enc.encode(JSON.stringify(csl, null, 2)),
+    });
+  }
   for (const note of state.notes.values()) {
     for (const d of listDrawingsForNote(note.id)) {
       const json = {
@@ -377,7 +397,16 @@ export async function exportAsZip() {
       });
     }
   }
-  const manifest = { yanta: 2, exported: new Date().toISOString(), counts: { notes: state.notes.size, folders: state.folders.size, images: used.size } };
+  const manifest = {
+    yanta: 2,
+    exported: new Date().toISOString(),
+    counts: {
+      notes: state.notes.size,
+      folders: state.folders.size,
+      images: used.size,
+      citations: totalCitationCount || 0,
+    },
+  };
   entries.push({ path: '_yanta-manifest.json', data: _enc.encode(JSON.stringify(manifest, null, 2)) });
   downloadBlob(makeZip(entries), `yanta-${new Date().toISOString().slice(0, 10)}.zip`);
   toast(`Exported ${entries.length} files`, 'success');

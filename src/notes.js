@@ -18,6 +18,7 @@ import {
   onDocChange,
   noteMarkdown,
   drawingsTextForNote,
+  citationsTextForNote,
   setDrawing,
 } from './yjs.js';
 import { mountEditor, destroyEditor, currentMarkdown, focusEditor, getView } from './editor.js';
@@ -260,6 +261,7 @@ function searchHaystack(note, body = '') {
     (note?.tags || []).join(' '),
     body || '',
     note?.id ? drawingsTextForNote(note.id) : '',
+    note?.id ? citationsTextForNote(note.id) : '',
   ].join(' ').toLowerCase();
 }
 

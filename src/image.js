@@ -14,6 +14,11 @@ import {
   drawLibraryItemThumbnailUrl,
   insertDrawLibraryItemIntoCurrent,
 } from './draw.js';
+import {
+  collectCitationLibrary,
+  insertSavedCitationIntoCurrentNote,
+  openCitationManager,
+} from './citations.js';
 
 let imgModal, compressPanel;
 let imgWorkingBlob = null;
@@ -204,16 +209,59 @@ function sectionTitle(text) {
   }, text);
 }
 
+function stripHtmlForLibrary(html) {
+  const tmp = document.createElement('div');
+  tmp.innerHTML = String(html || '');
+  return (tmp.textContent || tmp.innerText || '').replace(/\s+/g, ' ').trim();
+}
+
+function citationTitleForLibrary(c) {
+  return (
+    c?.csl?.title ||
+    c?.model?.title ||
+    stripHtmlForLibrary(c?.formatted || '') ||
+    c?.key ||
+    'Citation'
+  );
+}
+
+function citationMetaForLibrary(c) {
+  const csl = c?.csl || {};
+  const parts = [];
+
+  const year = c?.model?.year ||
+    csl.issued?.['date-parts']?.[0]?.[0] ||
+    '';
+
+  const doi = csl.DOI || c?.model?.doi || '';
+  const url = csl.URL || c?.model?.url || '';
+
+  if (year) parts.push(String(year));
+  if (doi) parts.push('DOI');
+  else if (url) parts.push('URL');
+
+  if (c?.sourceNoteTitle && !c.isFromCurrentNote) {
+    parts.push(c.sourceNoteTitle);
+  }
+
+  if (c?.isFromCurrentNote) {
+    parts.push('current note');
+  }
+
+  return parts.join(' · ');
+}
+
 function renderLibrary() {
   const g = $('libraryGrid');
   g.replaceChildren();
 
   const drawLibraryItems = listDrawLibraryItems();
   const drawings = listAllDrawings();
+  const citations = collectCitationLibrary({ currentFirst: true });
   const images = [...state.imagesMeta.values()].sort((a, b) => b.ts - a.ts);
 
-  if (!images.length && !drawings.length && !drawLibraryItems.length) {
-    g.append(el('div', { class: 'tree-empty' }, 'No images or drawings in library yet.'));
+  if (!images.length && !drawings.length && !drawLibraryItems.length && !citations.length) {
+    g.append(el('div', { class: 'tree-empty' }, 'No images, drawings or citations in library yet.'));
     return;
   }
 
@@ -247,6 +295,91 @@ function renderLibrary() {
     }
   }
 
+  if (citations.length) {
+    g.append(sectionTitle('Citations'));
+
+    for (const c of citations) {
+      const title = citationTitleForLibrary(c);
+      const meta = citationMetaForLibrary(c);
+      const formatted = stripHtmlForLibrary(c.formatted || '');
+
+      const card = el('div', {
+        class: 'lib-card yanta-citation-lib-card',
+        title: formatted || title,
+        onclick: () => {
+          insertSavedCitationIntoCurrentNote(c, { mode: 'footnote' });
+          closeImageModal();
+        },
+      });
+
+      const head = el('div', {
+        class: 'yanta-citation-lib-icon',
+      });
+
+      head.innerHTML = lucide('quote', 24);
+
+      const key = el('div', {
+        class: 'lib-meta yanta-citation-lib-key',
+        title: c.key || '',
+      }, `[^${c.key || 'citation'}]`);
+
+      const name = el('div', {
+        class: 'lib-meta yanta-citation-lib-title',
+        title,
+      }, title);
+
+      const metaEl = el('div', {
+        class: 'lib-meta yanta-citation-lib-meta',
+        title: meta,
+      }, meta || 'citation');
+
+      const actions = el('div', {
+        class: 'yanta-citation-lib-actions',
+      });
+
+      const citeBtn = el('button', {
+        class: 'btn',
+        title: 'Insert footnote citation',
+        onclick: (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+
+          insertSavedCitationIntoCurrentNote(c, { mode: 'footnote' });
+          closeImageModal();
+        },
+      }, 'Cite');
+
+      const bibBtn = el('button', {
+        class: 'btn',
+        title: 'Insert bibliography entry',
+        onclick: (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+
+          insertSavedCitationIntoCurrentNote(c, { mode: 'bibliography' });
+          closeImageModal();
+        },
+      }, 'Bib');
+
+      const editBtn = el('button', {
+        class: 'btn',
+        title: 'Open citation manager',
+        onclick: (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+
+          closeImageModal();
+          openCitationManager(c.csl?.DOI || c.csl?.URL || c.model?.doi || c.model?.url || c.key || '');
+        },
+      }, 'Edit');
+
+      actions.append(citeBtn, bibBtn, editBtn);
+
+      card.append(head, key, name, metaEl, actions);
+      g.append(card);
+    }
+  }
+  
   if (drawLibraryItems.length) {
     g.append(sectionTitle('Excalidraw Library'));
 

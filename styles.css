@@ -2328,6 +2328,12 @@ input.yanta-task-checkbox {
   pointer-events: auto;
 }
 
+@media (max-width: 880px) {
+  .sidebar {
+    will-change: transform;
+  }
+}
+
 @media (max-width: 760px) {
   html,
   body {
@@ -2380,6 +2386,7 @@ input.yanta-task-checkbox {
     padding-left: max(4px, env(safe-area-inset-left));
     padding-right: max(4px, env(safe-area-inset-right));
     padding-top: 4px;
+    padding-bottom: 4px;
   }
 
   .note-title {
@@ -3249,4 +3256,82 @@ input.yanta-task-checkbox {
 /* Während Folder-Animationen die normale active-row nicht transparent machen. */
 .tree.tree-folder-animating .tree-row.note.active:hover {
   background: var(--bg-elev-3) !important;
+}
+
+/* ============================================================
+   Citation cards inside Library tab
+   ============================================================ */
+
+.yanta-citation-lib-card {
+  min-height: 164px;
+  justify-content: flex-start;
+  gap: 4px;
+}
+
+.yanta-citation-lib-icon {
+  width: 100%;
+  height: 54px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  border-radius: 4px;
+  border: 1px solid var(--border);
+
+  color: var(--accent);
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--accent) 12%, transparent),
+      color-mix(in srgb, var(--accent-2) 10%, transparent)
+    ),
+    var(--bg);
+}
+
+.yanta-citation-lib-icon svg {
+  width: 24px;
+  height: 24px;
+}
+
+.yanta-citation-lib-key {
+  width: 100%;
+  font-family: var(--font-mono);
+  color: var(--accent) !important;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.yanta-citation-lib-title {
+  width: 100%;
+  color: var(--text) !important;
+  font-size: 11px;
+  line-height: 1.25;
+  max-height: 2.6em;
+  overflow: hidden;
+}
+
+.yanta-citation-lib-meta {
+  width: 100%;
+  color: var(--text-faint) !important;
+  font-size: 10px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.yanta-citation-lib-actions {
+  width: 100%;
+  display: flex;
+  gap: 4px;
+  margin-top: auto;
+}
+
+.yanta-citation-lib-actions .btn {
+  flex: 1;
+  justify-content: center;
+  padding: 3px 4px;
+  font-size: 10px;
+  min-width: 0;
 }

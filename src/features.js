@@ -336,7 +336,7 @@ export function openPalette(mode = 'commands') {
 export function closePalette() { $('palette').hidden = true; palette.items = []; }
 
 let commandList = [];
-export function buildCommandList({ openImageModal, openIconInsertPicker, openDraw, openGraph, exportAsZip, exportNoteAsMd, exportBundle, exportEveryNoteMd, openSyncSetup, syncFull, syncDisconnect, cleanupUnusedImages, openShareModal, stopSharing, importFiles, importFolder }) {
+export function buildCommandList({ openImageModal, openIconInsertPicker, openDraw, openGraph, openCitationManager, exportAsZip, exportNoteAsMd, exportBundle, exportEveryNoteMd, openSyncSetup, syncFull, syncDisconnect, cleanupUnusedImages, openShareModal, stopSharing, importFiles, importFolder }) {
   commandList = [
     { label: 'New note', icon: 'plus', hint: 'Ctrl+N', action: () => newNote(currentFolderForNew()) },
     { label: 'New shopping/checklist (live-friendly)', icon: 'shopping-cart', action: () => newNote(currentFolderForNew(), 'list') },
@@ -346,6 +346,7 @@ export function buildCommandList({ openImageModal, openIconInsertPicker, openDra
     { label: 'Search notes', icon: 'search', hint: 'Ctrl+K', action: () => $('search').focus() },
     { label: 'Toggle preview/edit/split', icon: 'eye', hint: 'Ctrl+/', action: () => window.dispatchEvent(new CustomEvent('yanta-cycle-view')) },
     { label: 'Insert image', icon: 'image', hint: 'Ctrl+I', action: openImageModal },
+    { label: 'Insert citation', icon: 'quote', hint: '/cite', action: openCitationManager },
     { label: 'Insert drawing', icon: 'pencil', hint: '/drawing', action: openDraw },
     { label: 'Insert Lucide icon', icon: 'sparkles', action: openIconInsertPicker },
     { label: 'Insert wikilink', icon: 'link', action: () => insertAtCursor('[[') },

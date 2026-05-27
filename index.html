@@ -93,7 +93,7 @@
   <main class="main">
   <header class="main-head">
     <button class="icon-btn mobile-sidebar-toggle" id="btn-sidebar-toggle" title="Notes" aria-label="Toggle sidebar">
-      <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M4 6h16M4 12h16M4 18h16"/>
       </svg>
     </button>
@@ -117,7 +117,13 @@
         <button class="icon-btn" id="btn-view-preview" title="Preview only">
           <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
         </button>
-        <button class="icon-btn" id="btn-insert-image" title="Insert image (Ctrl+I)">
+        <button class="icon-btn" id="btn-cite" title="Insert citation (/cite)">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 21c3 0 7-1 7-8V5H3v8h4c0 4-2 6-4 8z"/>
+            <path d="M14 21c3 0 7-1 7-8V5h-7v8h4c0 4-2 6-4 8z"/>
+          </svg>
+        </button>
+        <button class="icon-btn" id="btn-insert-image" title="Insert from library (Ctrl+I)">
           <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/></svg>
         </button>
         <button class="icon-btn" id="btn-export-note" title="Export this note as .md (Ctrl+E)">
@@ -152,14 +158,14 @@
 <div class="modal" id="imageModal" hidden>
   <div class="modal-card">
     <header class="modal-head">
-      <h3>Insert image</h3>
+      <h3>Library</h3>
       <button class="icon-btn" data-close>&times;</button>
     </header>
     <div class="modal-body">
       <div class="img-source-tabs">
         <button class="tab active" data-tab="upload">Upload / Paste</button>
         <button class="tab" data-tab="library">Library</button>
-        <button class="tab" data-tab="path">Local path</button>
+        <button class="tab" data-tab="path">External path</button>
       </div>
 
       <div class="tab-pane" data-pane="upload">

@@ -21,9 +21,10 @@ import { exportAsZip, exportNoteAsMd, exportBundle, exportEveryNoteMd, openExpor
 import { syncRestore, syncConnect, syncDisconnect, syncFull, openSyncSetup, closeSyncSetup, syncMenu } from './sync.js';
 import { openGraph, closeGraph, setupGraphInteractions } from './graph.js';
 import { wikilinkIndex } from './features-state.js';
-import { getNoteDoc, noteMarkdown, drawingsTextForNote } from './yjs.js';
+import { getNoteDoc, noteMarkdown, drawingsTextForNote, citationsTextForNote } from './yjs.js';
 import { openShareModal, closeShareModal, stopSharing, restoreSharedNotes, handleShareUrl } from './sharing.js';
 import { setupDraw, createDrawingAndInsert, importExcalidrawFileIntoCurrent } from './draw.js';
+import { setupCitations, openCitationManager } from './citations.js';
 import {
   installVaultStoreBridge,
   seedVaultFromLocalState,
@@ -46,7 +47,7 @@ import {
 
 let sharePreviewLocked = false;
 
-const MOBILE_MQ = window.matchMedia('(max-width: 760px)');
+const MOBILE_MQ = window.matchMedia('(max-width: 880px)');
 const DESKTOP_SIDEBAR_MQ = window.matchMedia('(min-width: 881px)');
 let sidebarCollapsedPref = false;
 
@@ -60,6 +61,7 @@ function searchHaystack(note, body = '') {
     (note?.tags || []).join(' '),
     body || '',
     note?.id ? drawingsTextForNote(note.id) : '',
+    note?.id ? citationsTextForNote(note.id) : '',
   ].join(' ').toLowerCase();
 }
 
@@ -181,6 +183,7 @@ async function init() {
     openIconInsertPicker,
     openDraw: createDrawingAndInsert,
     openGraph,
+    openCitationManager,
     exportAsZip,
     exportNoteAsMd,
     exportBundle,
@@ -198,6 +201,7 @@ async function init() {
   setupWikilinkHover();
   setupImage();
   setupDraw();
+  setupCitations();
   setupFormatToolbar();
   await syncRestore();
   let sharedOpen = null;
@@ -296,24 +300,106 @@ function setupMobileSidebar() {
     app.append(backdrop);
   }
 
+  const SIDEBAR_ANIM_MS = 200;
+  let animToken = 0;
+  let sidebarAnim = null;
+  let backdropAnim = null;
+
+  const prefersReducedMotion = () => {
+    try {
+      return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    } catch {
+      return false;
+    }
+  };
+
+  const cancelSidebarAnimations = () => {
+    try { sidebarAnim?.cancel(); } catch {}
+    try { backdropAnim?.cancel(); } catch {}
+    sidebarAnim = null;
+    backdropAnim = null;
+  };
+
   const open = () => {
     if (!isMobileViewport()) return;
 
-    app.classList.add('sidebar-open');
+    animToken++;
+    cancelSidebarAnimations();
+
     backdrop.hidden = false;
+    app.classList.add('sidebar-open');
     btn.setAttribute('aria-expanded', 'true');
+
+    if (prefersReducedMotion()) return;
+
+    sidebarAnim = sidebar.animate(
+      [
+        { transform: 'translateX(-104%)' },
+        { transform: 'translateX(0)' },
+      ],
+      {
+        duration: SIDEBAR_ANIM_MS,
+        easing: 'cubic-bezier(.2,.8,.2,1)',
+      }
+    );
+
+    backdropAnim = backdrop.animate(
+      [
+        { opacity: 0 },
+        { opacity: 1 },
+      ],
+      {
+        duration: SIDEBAR_ANIM_MS,
+        easing: 'ease',
+      }
+    );
   };
 
   const close = () => {
-    app.classList.remove('sidebar-open');
+    const token = ++animToken;
+
+    cancelSidebarAnimations();
     btn.setAttribute('aria-expanded', 'false');
 
-    // Erst nach Transition wirklich hidden, sonst sieht man kein Fade.
-    setTimeout(() => {
-      if (!app.classList.contains('sidebar-open')) {
-        backdrop.hidden = true;
+    if (prefersReducedMotion()) {
+      app.classList.remove('sidebar-open');
+      backdrop.hidden = true;
+      return;
+    }
+
+    // Wichtig: .sidebar-open bleibt während der Animation gesetzt.
+    // Sonst springt CSS sofort auf translateX(-104%).
+    sidebarAnim = sidebar.animate(
+      [
+        { transform: 'translateX(0)' },
+        { transform: 'translateX(-104%)' },
+      ],
+      {
+        duration: SIDEBAR_ANIM_MS,
+        easing: 'cubic-bezier(.2,.8,.2,1)',
       }
-    }, 180);
+    );
+
+    backdropAnim = backdrop.animate(
+      [
+        { opacity: 1 },
+        { opacity: 0 },
+      ],
+      {
+        duration: SIDEBAR_ANIM_MS,
+        easing: 'ease',
+      }
+    );
+
+    Promise.allSettled([
+      sidebarAnim.finished.catch(() => {}),
+      backdropAnim.finished.catch(() => {}),
+    ]).then(() => {
+      if (token !== animToken) return;
+
+      app.classList.remove('sidebar-open');
+      backdrop.hidden = true;
+    });
   };
 
   const toggle = () => {
@@ -508,6 +594,7 @@ function bindEvents() {
   $('btn-pin').addEventListener('click', togglePin);
   $('btn-delete').addEventListener('click', deleteCurrentNote);
   $('btn-insert-image').addEventListener('click', openImageModal);
+  $('btn-cite')?.addEventListener('click', () => openCitationManager());
   $('btn-share').addEventListener('click', openShareModal);
 
   // Share modal
@@ -644,6 +731,10 @@ function bindEvents() {
     else if (e.key === 'ArrowUp') { e.preventDefault(); paletteMove(-1); }
     else if (e.key === 'Enter') { e.preventDefault(); paletteAccept(); }
     else if (e.key === 'Escape') { e.preventDefault(); closePalette(); }
+  });
+
+  window.addEventListener('yanta-open-citation-manager', () => {
+    openCitationManager();
   });
 
   window.addEventListener('yanta-open-icon-insert', () => openIconInsertPicker());

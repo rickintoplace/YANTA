@@ -568,6 +568,8 @@ function slashCompletion(ctx) {
     { name: 'math-block', apply: '$$\n\n$$' },
     { name: 'wikilink', apply: '[[' },
     { name: 'image', apply: 'IMAGE_INSERT' },
+    { name: 'cite', apply: 'CITE_INSERT' },
+    { name: 'citation', apply: 'CITE_INSERT' },
     { name: 'drawing', apply: 'DRAW_INSERT' },
     { name: 'icon', apply: 'ICON_INSERT' },
     { name: 'shopping-list-link', apply: '[[' },
@@ -584,6 +586,12 @@ function slashCompletion(ctx) {
         if (c.apply === 'IMAGE_INSERT') {
           view.dispatch({ changes: { from, to, insert: '' } });
           window.dispatchEvent(new CustomEvent('yanta-open-image-modal'));
+          return;
+        }
+
+        if (c.apply === 'CITE_INSERT') {
+          view.dispatch({ changes: { from, to, insert: '' } });
+          window.dispatchEvent(new CustomEvent('yanta-open-citation-manager'));
           return;
         }
 

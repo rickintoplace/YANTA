@@ -438,13 +438,89 @@ export function drawingWikilinksForNote(noteId) {
         }
 
         // customData NICHT blind zählen.
-        // Das war der stale-link-Bug: customData bleibt nach Link-Löschung
-        // manchmal erhalten.
       }
     }
   } catch {}
 
   return out;
+}
+
+// ---------------- Citations inside note Y.Doc -------------------
+
+export function getCitationsMap(noteId) {
+  return getNoteDoc(noteId).doc.getMap('citations');
+}
+
+export function setCitation(noteId, key, citation, origin = 'citation') {
+  if (!noteId || !key || !citation) return;
+
+  const { doc } = getNoteDoc(noteId);
+  const map = doc.getMap('citations');
+
+  doc.transact(() => {
+    map.set(String(key), {
+      ...cloneJson(citation),
+      key: String(key),
+      updated: Date.now(),
+    });
+  }, origin);
+}
+
+export function getCitation(noteId, key) {
+  if (!noteId || !key) return null;
+
+  const c = getCitationsMap(noteId).get(String(key));
+  return c ? cloneJson(c) : null;
+}
+
+export function deleteCitation(noteId, key, origin = 'citation-delete') {
+  if (!noteId || !key) return;
+
+  const { doc } = getNoteDoc(noteId);
+  const map = doc.getMap('citations');
+
+  doc.transact(() => {
+    map.delete(String(key));
+  }, origin);
+}
+
+export function listCitationsForNote(noteId) {
+  try {
+    return [...getCitationsMap(noteId).values()]
+      .filter(Boolean)
+      .map((c) => cloneJson(c))
+      .sort((a, b) => String(a.key || '').localeCompare(String(b.key || '')));
+  } catch {
+    return [];
+  }
+}
+
+export function citationsTextForNote(noteId) {
+  try {
+    return listCitationsForNote(noteId)
+      .map((c) => {
+        const csl = c.csl || {};
+        const authors = (csl.author || [])
+          .map((a) => [a.family, a.given, a.literal].filter(Boolean).join(' '))
+          .join(' ');
+
+        return [
+          c.key,
+          c.formatted || '',
+          csl.title || '',
+          csl.DOI || '',
+          csl.URL || '',
+          csl.ISBN || '',
+          csl['container-title'] || '',
+          csl.publisher || '',
+          authors,
+        ].join(' ');
+      })
+      .join(' ')
+      .toLowerCase();
+  } catch {
+    return '';
+  }
 }
 
 // Re-export Y for callers that need it.

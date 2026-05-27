@@ -39,7 +39,8 @@ export const COLOR_TOKENS = [
   { key: 'red',    label: 'Danger',  group: 'Semantic' },
 
   // Selection
-  { key: 'selection', label: 'Text selection', group: 'Selection' },
+  { key: 'selection',      label: 'Text selection background', group: 'Selection' },
+  { key: 'selection-text', label: 'Selected text',             group: 'Selection' },
 ];
 
 // Neutral, AI-slop-free defaults.
@@ -61,7 +62,8 @@ export const DEFAULT_THEMES = {
     'green':         '#4ade80',
     'yellow':        '#fbbf24',
     'red':           '#f87171',
-    'selection':     'rgba(110, 168, 254, 0.28)',
+    'selection':     'rgba(148, 163, 184, 0.30)',
+    'selection-text':'#f8fafc',
   },
   light: {
     'bg':            '#fdfcfa',
@@ -78,8 +80,477 @@ export const DEFAULT_THEMES = {
     'green':         '#16a34a',
     'yellow':        '#d97706',
     'red':           '#dc2626',
-    'selection':     'rgba(37, 99, 235, 0.22)',
+    'selection':     'rgba(31, 30, 28, 0.14)',
+    'selection-text':'#111827',
   },
+};
+
+export const COLOR_PRESETS = {
+  light: [
+    {
+      id: 'marshmallow-meadow',
+      name: 'Marshmallow Meadow',
+      description: 'Soft pastel meadow tones with warm honey accents.',
+      colors: {
+        'bg': '#fff8ef',
+        'bg-elev': '#f7efd8',
+        'bg-elev-2': '#efe3c7',
+        'bg-elev-3': '#e5d6b6',
+        'border': '#d8c7a5',
+        'border-strong': '#bda982',
+        'text': '#29251d',
+        'text-dim': '#625a49',
+        'text-faint': '#95886f',
+        'accent': '#8FA31E',
+        'accent-2': '#FF9D23',
+        'green': '#306D29',
+        'yellow': '#D98A19',
+        'red': '#EA5252',
+        'selection': 'rgba(143, 163, 30, 0.22)',
+        'selection-text': '#1f2a18',
+      },
+    },
+    {
+      id: 'paper-boat-wash',
+      name: 'Paper Boat Wash',
+      description: 'Gentle paper neutrals with watercolor-blue edges.',
+      colors: {
+        'bg': '#F9F8F6',
+        'bg-elev': '#EFE9E3',
+        'bg-elev-2': '#E4DAD2',
+        'bg-elev-3': '#D9CFC7',
+        'border': '#C9B59C',
+        'border-strong': '#A99178',
+        'text': '#2E2924',
+        'text-dim': '#665D54',
+        'text-faint': '#94887B',
+        'accent': '#3B7597',
+        'accent-2': '#D86B65',
+        'green': '#4F7D46',
+        'yellow': '#C58B32',
+        'red': '#B8504C',
+        'selection': 'rgba(59, 117, 151, 0.20)',
+        'selection-text': '#172331',
+      },
+    },
+    {
+      id: 'moss-mug-clay',
+      name: 'Moss Mug & Clay',
+      description: 'Earthy greens, fired clay and notebook warmth.',
+      colors: {
+        'bg': '#F4EBDD',
+        'bg-elev': '#E8DDC8',
+        'bg-elev-2': '#DCCDAE',
+        'bg-elev-3': '#CFB990',
+        'border': '#BFA57C',
+        'border-strong': '#9C815F',
+        'text': '#2D261C',
+        'text-dim': '#655847',
+        'text-faint': '#95836A',
+        'accent': '#5B7E3C',
+        'accent-2': '#B96B3C',
+        'green': '#306D29',
+        'yellow': '#B8862B',
+        'red': '#A94D42',
+        'selection': 'rgba(91, 126, 60, 0.22)',
+        'selection-text': '#1f2718',
+      },
+    },
+    {
+      id: 'fernlight-butterglass',
+      name: 'Fernlight Butterglass',
+      description: 'Fresh green-gold light with a botanical note.',
+      colors: {
+        'bg': '#FBF5DD',
+        'bg-elev': '#EFE8C9',
+        'bg-elev-2': '#E7E1B1',
+        'bg-elev-3': '#D7D68E',
+        'border': '#C8C083',
+        'border-strong': '#A2A15E',
+        'text': '#1F2A18',
+        'text-dim': '#4F5E3E',
+        'text-faint': '#7E8A68',
+        'accent': '#306D29',
+        'accent-2': '#8FA31E',
+        'green': '#0D530E',
+        'yellow': '#D39A22',
+        'red': '#B74D42',
+        'selection': 'rgba(48, 109, 41, 0.22)',
+        'selection-text': '#142010',
+      },
+    },
+    {
+      id: 'lagoon-postcard',
+      name: 'Lagoon Postcard',
+      description: 'Cool aquatic paper tones with clean blue-cyan accents.',
+      colors: {
+        'bg': '#F3FBFA',
+        'bg-elev': '#E3F4F4',
+        'bg-elev-2': '#D1EAEA',
+        'bg-elev-3': '#BEE0E1',
+        'border': '#A5CACD',
+        'border-strong': '#7FAEB5',
+        'text': '#102C3D',
+        'text-dim': '#3F6575',
+        'text-faint': '#7896A1',
+        'accent': '#3B7597',
+        'accent-2': '#0EA5A8',
+        'green': '#2F8F72',
+        'yellow': '#D39B2C',
+        'red': '#D65A58',
+        'selection': 'rgba(59, 117, 151, 0.22)',
+        'selection-text': '#092638',
+      },
+    },
+    {
+      id: 'linen-sky-garden',
+      name: 'Linen Sky Garden',
+      description: 'Airy linen whites with soft sky-blue and garden-green accents.',
+      colors: {
+        'bg': '#FAF7EF',
+        'bg-elev': '#EEE8DA',
+        'bg-elev-2': '#E2D8C5',
+        'bg-elev-3': '#D5C8B0',
+        'border': '#C5B596',
+        'border-strong': '#A8906D',
+        'text': '#25231E',
+        'text-dim': '#5F5A4D',
+        'text-faint': '#928875',
+        'accent': '#4A8FB8',
+        'accent-2': '#6F9F4A',
+        'green': '#3E7A3A',
+        'yellow': '#C7922C',
+        'red': '#C95A52',
+        'selection': 'rgba(74, 143, 184, 0.20)',
+        'selection-text': '#102838',
+      },
+    },
+    {
+      id: 'peach-soda-paper',
+      name: 'Peach Soda Paper',
+      description: 'Warm peach paper with fizzy coral and apricot highlights.',
+      colors: {
+        'bg': '#FFF3EA',
+        'bg-elev': '#F5E3D6',
+        'bg-elev-2': '#EBCFBE',
+        'bg-elev-3': '#DEB8A3',
+        'border': '#CFA18A',
+        'border-strong': '#AF7D66',
+        'text': '#30231E',
+        'text-dim': '#6D5148',
+        'text-faint': '#9D7769',
+        'accent': '#E06F4F',
+        'accent-2': '#F5A33B',
+        'green': '#5E8A43',
+        'yellow': '#C98922',
+        'red': '#C94E4E',
+        'selection': 'rgba(224, 111, 79, 0.22)',
+        'selection-text': '#2A1711',
+      },
+    },
+    {
+      id: 'porcelain-lilac',
+      name: 'Porcelain Lilac',
+      description: 'Clean porcelain tones with muted lilac and blueberry accents.',
+      colors: {
+        'bg': '#F8F7FB',
+        'bg-elev': '#ECE8F3',
+        'bg-elev-2': '#DED7EA',
+        'bg-elev-3': '#CEC4DF',
+        'border': '#B9AACF',
+        'border-strong': '#9784B6',
+        'text': '#272331',
+        'text-dim': '#5E566F',
+        'text-faint': '#8E82A0',
+        'accent': '#7B61B8',
+        'accent-2': '#4F83C6',
+        'green': '#4F8A5A',
+        'yellow': '#C79534',
+        'red': '#C85868',
+        'selection': 'rgba(123, 97, 184, 0.22)',
+        'selection-text': '#1D1730',
+      },
+    },
+    {
+      id: 'sakura-milk-glass',
+      name: 'Sakura Milk Glass',
+      description: 'Delicate milky whites with soft sakura pink and plum accents.',
+      colors: {
+        'bg': '#FFF7FA',
+        'bg-elev': '#F6E8EE',
+        'bg-elev-2': '#ECD6E0',
+        'bg-elev-3': '#DFC0CF',
+        'border': '#CFA4B8',
+        'border-strong': '#AD7A94',
+        'text': '#302129',
+        'text-dim': '#6D5360',
+        'text-faint': '#9B7587',
+        'accent': '#D95C83',
+        'accent-2': '#8A6FB5',
+        'green': '#5D8F64',
+        'yellow': '#C99236',
+        'red': '#C94F66',
+        'selection': 'rgba(217, 92, 131, 0.22)',
+        'selection-text': '#2B1520',
+      },
+    },
+    {
+      id: 'cafe-crema-paper',
+      name: 'Café Crema Paper',
+      description: 'Creamy coffee-paper tones with roasted caramel accents.',
+      colors: {
+        'bg': '#FBF4EA',
+        'bg-elev': '#EFE2D1',
+        'bg-elev-2': '#E2CFB7',
+        'bg-elev-3': '#D4B99A',
+        'border': '#C19F7A',
+        'border-strong': '#9A7654',
+        'text': '#2D2118',
+        'text-dim': '#665142',
+        'text-faint': '#967762',
+        'accent': '#9B5E2E',
+        'accent-2': '#C8873A',
+        'green': '#5F7F3A',
+        'yellow': '#C58A2E',
+        'red': '#B85A4A',
+        'selection': 'rgba(155, 94, 46, 0.22)',
+        'selection-text': '#24170F',
+      },
+    },
+  ],
+
+  dark: [
+    {
+      id: 'amoled-starwell',
+      name: 'AMOLED Starwell',
+      description: 'True-black AMOLED theme with luminous cyan accents.',
+      colors: {
+        'bg': '#000000',
+        'bg-elev': '#050505',
+        'bg-elev-2': '#0A0A0A',
+        'bg-elev-3': '#111111',
+        'border': '#1F1F1F',
+        'border-strong': '#333333',
+        'text': '#F2F2F2',
+        'text-dim': '#A7A7A7',
+        'text-faint': '#6F6F6F',
+        'accent': '#5DF8D8',
+        'accent-2': '#6FD1D7',
+        'green': '#4ADE80',
+        'yellow': '#FFD65A',
+        'red': '#FF5A5A',
+        'selection': 'rgba(93, 248, 216, 0.28)',
+        'selection-text': '#000000',
+      },
+    },
+    {
+      id: 'ink-lagoon',
+      name: 'Ink Lagoon',
+      description: 'Deep blue-green ink with clear lagoon highlights.',
+      colors: {
+        'bg': '#06131B',
+        'bg-elev': '#092235',
+        'bg-elev-2': '#0D2F46',
+        'bg-elev-3': '#123B55',
+        'border': '#1E4B63',
+        'border-strong': '#3B7597',
+        'text': '#E7F7F8',
+        'text-dim': '#9ABDC7',
+        'text-faint': '#638894',
+        'accent': '#6FD1D7',
+        'accent-2': '#5DF8D8',
+        'green': '#62D18E',
+        'yellow': '#FFD65A',
+        'red': '#EA7070',
+        'selection': 'rgba(111, 209, 215, 0.26)',
+        'selection-text': '#031016',
+      },
+    },
+    {
+      id: 'hearth-fox',
+      name: 'Hearth Fox',
+      description: 'Warm dark reds, embers and candlelit cream text.',
+      colors: {
+        'bg': '#120302',
+        'bg-elev': '#160403',
+        'bg-elev-2': '#230603',
+        'bg-elev-3': '#46100A',
+        'border': '#521510',
+        'border-strong': '#720d06',
+        'text': '#FFF0C4',
+        'text-dim': '#D8B98A',
+        'text-faint': '#9B765D',
+        'accent': '#FF9D23',
+        'accent-2': '#FFD65A',
+        'green': '#9DBB62',
+        'yellow': '#FFD65A',
+        'red': '#EA5252',
+        'selection': 'rgba(255, 157, 35, 0.28)',
+        'selection-text': '#160403',
+      },
+    },
+    {
+      id: 'firefly-forest',
+      name: 'Firefly Forest',
+      description: 'Dark woodland greens with glowing firefly accents.',
+      colors: {
+        'bg': '#070B05',
+        'bg-elev': '#10170B',
+        'bg-elev-2': '#18210E',
+        'bg-elev-3': '#202C13',
+        'border': '#354520',
+        'border-strong': '#556B2F',
+        'text': '#EFF5D2',
+        'text-dim': '#C6D870',
+        'text-faint': '#87965A',
+        'accent': '#C6D870',
+        'accent-2': '#8FA31E',
+        'green': '#7EBF52',
+        'yellow': '#FFD65A',
+        'red': '#EA6A5F',
+        'selection': 'rgba(198, 216, 112, 0.25)',
+        'selection-text': '#080C05',
+      },
+    },
+    {
+      id: 'midnight-herbarium',
+      name: 'Midnight Herbarium',
+      description: 'Quiet earthy dark mode for long writing sessions.',
+      colors: {
+        'bg': '#0D1009',
+        'bg-elev': '#171B11',
+        'bg-elev-2': '#202719',
+        'bg-elev-3': '#2A3321',
+        'border': '#3B4630',
+        'border-strong': '#596647',
+        'text': '#E8E1D3',
+        'text-dim': '#AAA08D',
+        'text-faint': '#746B5B',
+        'accent': '#8FA31E',
+        'accent-2': '#C58B45',
+        'green': '#6FAE4F',
+        'yellow': '#D9A441',
+        'red': '#C45A4E',
+        'selection': 'rgba(143, 163, 30, 0.25)',
+        'selection-text': '#0D1009',
+      },
+    },
+    {
+      id: 'midnight-blood',
+      name: 'Midnight Blood',
+      description: 'Blackened crimson night tones with sharp blood-red accents.',
+      colors: {
+        'bg': '#080204',
+        'bg-elev': '#130407',
+        'bg-elev-2': '#21070B',
+        'bg-elev-3': '#310B12',
+        'border': '#4A121B',
+        'border-strong': '#7A1C2A',
+        'text': '#F7E7E4',
+        'text-dim': '#C9A2A0',
+        'text-faint': '#8B6668',
+        'accent': '#D7263D',
+        'accent-2': '#FFB45E',
+        'green': '#6FCF8F',
+        'yellow': '#FFD166',
+        'red': '#FF4D5E',
+        'selection': 'rgba(215, 38, 61, 0.28)',
+        'selection-text': '#080204',
+      },
+    },
+    {
+      id: 'violet-afterglow',
+      name: 'Violet Afterglow',
+      description: 'Deep violet dusk with electric lavender and blue highlights.',
+      colors: {
+        'bg': '#090714',
+        'bg-elev': '#121026',
+        'bg-elev-2': '#1B1836',
+        'bg-elev-3': '#262047',
+        'border': '#3B315F',
+        'border-strong': '#5D4A8F',
+        'text': '#F0ECFF',
+        'text-dim': '#B9AEDB',
+        'text-faint': '#80749F',
+        'accent': '#A78BFA',
+        'accent-2': '#6FD1D7',
+        'green': '#67D391',
+        'yellow': '#FFD65A',
+        'red': '#F06A7A',
+        'selection': 'rgba(167, 139, 250, 0.28)',
+        'selection-text': '#090714',
+      },
+    },
+    {
+      id: 'charcoal-amber',
+      name: 'Charcoal Amber',
+      description: 'Neutral charcoal surfaces with warm amber focus accents.',
+      colors: {
+        'bg': '#0B0B0A',
+        'bg-elev': '#161411',
+        'bg-elev-2': '#211E19',
+        'bg-elev-3': '#2C271F',
+        'border': '#42382B',
+        'border-strong': '#6A563B',
+        'text': '#F2EBDD',
+        'text-dim': '#B8AA95',
+        'text-faint': '#817363',
+        'accent': '#F0A83A',
+        'accent-2': '#D6C06A',
+        'green': '#78C06A',
+        'yellow': '#FFD166',
+        'red': '#E86B5F',
+        'selection': 'rgba(240, 168, 58, 0.26)',
+        'selection-text': '#0B0B0A',
+      },
+    },
+    {
+      id: 'deep-sea-terminal',
+      name: 'Deep Sea Terminal',
+      description: 'A moody blue-black terminal palette with aquatic neon accents.',
+      colors: {
+        'bg': '#030A0F',
+        'bg-elev': '#07141D',
+        'bg-elev-2': '#0B1F2B',
+        'bg-elev-3': '#102B39',
+        'border': '#1B4354',
+        'border-strong': '#2D6D83',
+        'text': '#E5F8FF',
+        'text-dim': '#9FC4D2',
+        'text-faint': '#668895',
+        'accent': '#28D7C4',
+        'accent-2': '#4AA3FF',
+        'green': '#5FE08B',
+        'yellow': '#F4CF5D',
+        'red': '#EF646E',
+        'selection': 'rgba(40, 215, 196, 0.26)',
+        'selection-text': '#030A0F',
+      },
+    },
+    {
+      id: 'mocha-chocolate',
+      name: 'Mocha Chocolate',
+      description: 'Dark mocha coffee tones with bittersweet chocolate depth and roasted warmth.',
+      colors: {
+        'bg': '#070302',
+        'bg-elev': '#100706',
+        'bg-elev-2': '#1A0D0A',
+        'bg-elev-3': '#26140F',
+        'border': '#3B2119',
+        'border-strong': '#654032',
+        'text': '#F3E7D8',
+        'text-dim': '#C2A895',
+        'text-faint': '#8B6E5E',
+        'accent': '#B47A4A',
+        'accent-2': '#D6A15F',
+        'green': '#8A9B58',
+        'yellow': '#D8A64A',
+        'red': '#C76052',
+        'selection': 'rgba(180, 122, 74, 0.28)',
+        'selection-text': '#070302',
+      },
+    },
+  ],
 };
 
 // Font stacks the user can pick from.
@@ -503,6 +974,93 @@ onclick: async () => {
 }
 
 // ---- Colors section ----
+
+function colorPresetPreviewSwatches(preset) {
+  const keys = ['bg', 'bg-elev-2', 'accent', 'accent-2', 'text'];
+
+  return el(
+    'div',
+    { class: 'yanta-settings-preset-swatches' },
+    keys.map((key) =>
+      el('span', {
+        class: 'yanta-settings-preset-swatch',
+        title: key,
+        style: {
+          background: preset.colors[key] || 'transparent',
+        },
+      })
+    )
+  );
+}
+
+function paletteMatchesPreset(palette = {}, presetColors = {}) {
+  for (const [key, value] of Object.entries(presetColors || {})) {
+    if ((palette?.[key] || '').toLowerCase() !== String(value || '').toLowerCase()) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+async function applyColorPreset(mode, preset) {
+  const a = getAppearance();
+
+  const colors = {
+    ...a.colors,
+    [mode]: {
+      ...preset.colors,
+    },
+  };
+
+  await saveAppearance({ colors }, {
+    reason: `color-preset:${mode}:${preset.id}`,
+  });
+
+  toast(`Applied "${preset.name}" to ${mode} mode`, 'success');
+  rerenderSettingsBody();
+}
+
+function renderColorPresetPicker(targetMode, appearanceSettings) {
+  const presets = COLOR_PRESETS[targetMode] || [];
+
+  const group = el('div', { class: 'yanta-settings-group yanta-settings-presets-group' });
+
+  group.append(
+    el('div', { class: 'yanta-settings-group-title' }, 'Presets'),
+    el('p', { class: 'yanta-settings-hint' },
+      `These presets only apply to ${targetMode} mode. Your other mode stays unchanged.`
+    )
+  );
+
+  const grid = el('div', { class: 'yanta-settings-preset-grid' });
+
+  for (const preset of presets) {
+    const active = paletteMatchesPreset(
+      appearanceSettings.colors?.[targetMode],
+      preset.colors
+    );
+
+    const card = el('button', {
+      class: 'yanta-settings-preset-card' + (active ? ' active' : ''),
+      type: 'button',
+      onclick: () => applyColorPreset(targetMode, preset),
+    });
+
+    card.append(
+      colorPresetPreviewSwatches(preset),
+      el('div', { class: 'yanta-settings-preset-name' }, preset.name),
+      el('div', { class: 'yanta-settings-preset-description' }, preset.description)
+    );
+
+    grid.append(card);
+  }
+
+  group.append(grid);
+
+  return group;
+}
+
 function renderColorsSection(host) {
   host.replaceChildren();
 
@@ -511,26 +1069,36 @@ function renderColorsSection(host) {
   host.append(sectionHeader('Colors', 'Customize the color palette. Dark and light modes are configured separately.'));
 
   // Sub-tabs: dark / light
-  const targetMode = host.dataset.colorMode || (resolveEffectiveMode());
+  const targetMode = host.dataset.colorMode || resolveEffectiveMode();
   host.dataset.colorMode = targetMode;
 
   const tabs = el('div', { class: 'yanta-settings-color-tabs' });
+
   for (const m of ['dark', 'light']) {
     tabs.append(el('button', {
       class: 'yanta-settings-color-tab' + (targetMode === m ? ' active' : ''),
-        onclick: () => {
+      onclick: () => {
         host.dataset.colorMode = m;
         rerenderSettingsBody();
-        },
+      },
     }, m === 'dark' ? '🌙 Dark mode' : '☀️ Light mode'));
   }
+
   host.append(tabs);
+
+  // Mode-specific presets
+  host.append(renderColorPresetPicker(targetMode, a));
 
   // Grouped color editors
   const grouped = {};
+
   for (const tok of COLOR_TOKENS) {
     if (!grouped[tok.group]) grouped[tok.group] = [];
-    grouped[tok.group].push(tok);
+
+    // Defensive de-duplication by key inside one group.
+    if (!grouped[tok.group].some((x) => x.key === tok.key)) {
+      grouped[tok.group].push(tok);
+    }
   }
 
   for (const [groupName, tokens] of Object.entries(grouped)) {
@@ -545,13 +1113,16 @@ function renderColorsSection(host) {
       const row = el('div', { class: 'yanta-settings-color-row' });
 
       const swatch = el('label', { class: 'yanta-settings-swatch' });
+
       const colorInput = el('input', {
         type: 'color',
         value: cssColorToHex(current) || '#000000',
       });
+
       colorInput.addEventListener('input', () => {
         updateColorToken(targetMode, tok.key, colorInput.value);
       });
+
       swatch.append(colorInput);
       swatch.style.background = current;
 
@@ -563,10 +1134,12 @@ function renderColorsSection(host) {
         class: 'text-input yanta-settings-color-text',
         value: current,
       });
+
       textInput.addEventListener('change', () => {
         const v = textInput.value.trim();
         if (v) updateColorToken(targetMode, tok.key, v);
       });
+
       meta.append(textInput);
 
       row.append(swatch, meta);
@@ -579,16 +1152,22 @@ function renderColorsSection(host) {
 
   // Reset colors for this mode
   const resetGroup = el('div', { class: 'yanta-settings-group' });
-  resetGroup.append(el('button', {
-    class: 'btn',
-    onclick: async () => {
-      const next = { colors: { ...a.colors } };
-      next.colors[targetMode] = { ...DEFAULT_THEMES[targetMode] };
-      await saveAppearance(next);
-      renderSettingsBody();
-      toast(`${targetMode} colors reset`, 'success');
-    },
-  }, `Reset ${targetMode} colors to defaults`));
+
+  resetGroup.append(
+    el('button', {
+      class: 'btn',
+      onclick: async () => {
+        const next = { colors: { ...a.colors } };
+        next.colors[targetMode] = { ...DEFAULT_THEMES[targetMode] };
+
+        await saveAppearance(next);
+
+        renderSettingsBody();
+        toast(`${targetMode} colors reset`, 'success');
+      },
+    }, `Reset ${targetMode} colors to defaults`)
+  );
+
   host.append(resetGroup);
 }
 
@@ -1057,6 +1636,81 @@ function injectSettingsCss() {
   color: var(--text-dim);
   margin-top: 2px;
   line-height: 1.5;
+}
+
+/* Color presets */
+.yanta-settings-presets-group {
+  margin-bottom: 24px;
+}
+
+.yanta-settings-preset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 10px;
+}
+
+.yanta-settings-preset-card {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+
+  width: 100%;
+  min-height: 120px;
+
+  padding: 12px;
+  border-radius: 10px;
+
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+
+  transition:
+    border-color 120ms ease,
+    background-color 120ms ease,
+    transform 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.yanta-settings-preset-card:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-elev-3);
+  transform: translateY(-1px);
+}
+
+.yanta-settings-preset-card.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-elev-2));
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent) inset;
+}
+
+.yanta-settings-preset-swatches {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.yanta-settings-preset-swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--border-strong) 70%, transparent);
+  box-shadow: 0 0 0 1px rgba(255,255,255,0.05) inset;
+}
+
+.yanta-settings-preset-name {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.yanta-settings-preset-description {
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--text-dim);
 }
 
 /* Colors */

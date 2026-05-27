@@ -23,7 +23,8 @@
   --yellow: #fbbf24;
   --red: #f87171;
   --shadow: 0 8px 24px rgba(0,0,0,0.4);
-  --selection: rgba(110, 168, 254, 0.28);
+  --selection: rgba(148, 163, 184, 0.30);
+  --selection-text: #f8fafc;
 
   --font: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace;
@@ -56,7 +57,18 @@
   --yellow: #d97706;
   --red: #dc2626;
   --shadow: 0 8px 24px rgba(20,30,60,0.10);
-  --selection: rgba(37, 99, 235, 0.22);
+  --selection: rgba(31, 30, 28, 0.14);
+  --selection-text: #111827;
+}
+
+::selection {
+  background: var(--selection);
+  color: var(--selection-text);
+}
+
+::-moz-selection {
+  background: var(--selection);
+  color: var(--selection-text);
 }
 
 /* "Auto" — follow the system. Defaults are dark; override for light OS. */

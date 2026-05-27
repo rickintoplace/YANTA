@@ -111,8 +111,13 @@ const yantaTheme = EditorView.theme({
     borderLeftWidth: '2px',
   },
 
-  '.cm-selectionBackground, ::selection': {
+  '.cm-selectionBackground, &.cm-focused .cm-selectionBackground': {
+    backgroundColor: 'var(--selection) !important',
+  },
+
+  '& ::selection': {
     backgroundColor: 'var(--selection)',
+    color: 'var(--selection-text)',
   },
 
   '.cm-activeLine': {

@@ -1,0 +1,13 @@
+{
+  "name": "yanta-sync-broker",
+  "version": "1.0.0",
+  "private": true,
+  "description": "YANTA Sync Broker — provider-independent encrypted object storage API",
+  "main": "server.cjs",
+  "scripts": {
+    "start": "node server.cjs"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

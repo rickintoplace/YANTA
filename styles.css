@@ -219,13 +219,13 @@ button, input, select, textarea { font: inherit; color: inherit; }
   padding: 5px 14px; cursor: pointer; user-select: none;
   font-size: 13px; color: var(--text-dim);
   white-space: nowrap; overflow: hidden;
-  border-left: 2px solid transparent;
+  /* border-left: 2px solid transparent; */
   position: relative;
 }
 .tree-row:hover { background: var(--bg-elev-2); color: var(--text); }
 .tree-row.active { background: var(--bg-elev-2); color: var(--text); border-left-color: var(--accent); }
 .tree-row .label { flex: 1; overflow: hidden; text-overflow: ellipsis; }
-.tree-row .twist { width: 14px; color: var(--text-faint); }
+.tree-row .twist { width: 14px; color: var(--text-faint); display: none; }
 .tree-row.folder > .label { font-weight: 600; color: var(--text); }
 .tree-row.note > .label { color: inherit; }
 .tree-row .ic { width: 14px; height: 14px; color: var(--text-faint); flex: none; }
@@ -240,7 +240,13 @@ button, input, select, textarea { font: inherit; color: inherit; }
   visibility: hidden; padding: 0 4px; color: var(--text-faint);
 }
 .tree-row:hover .menu-trigger { visibility: visible; }
-.tree-children { padding-left: 12px; }
+/* .tree-children { padding-left: 12px; } */
+
+.tree-children .tree-row {
+    padding-bottom: 0;
+    padding-top: 0;
+}
+
 .tree-empty { padding: 8px 18px; font-size: 12px; color: var(--text-faint); font-style: italic; }
 
 .tag-cloud {
@@ -1207,7 +1213,7 @@ button.link { background: 0; border: 0; color: var(--accent); cursor: pointer; p
 .cm-editor.cm-focused { outline: none !important; }
 .cm-scroller { font-family: var(--font, system-ui) !important; min-height: 100%; }
 .cm-content {
-  max-width: 760px; margin: 0 auto;
+  max-width: 100%; margin: 0 auto;
   /* Leaves visible empty space below the last line and lets a click in
      that space land on cm-content → CM puts cursor at end of last line.
      This is the "click anywhere below and start typing" UX. */
@@ -1513,7 +1519,7 @@ button.link { background: 0; border: 0; color: var(--accent); cursor: pointer; p
   align-self: center;
 
   width: 100%;
-  max-width: 760px;
+  max-width: 100%;
 
   height: auto;
   max-height: none;
@@ -1725,7 +1731,7 @@ input.yanta-task-checkbox {
   vertical-align: -0.16em;
   align-items: center;
   justify-content: center;
-  color: var(--accent);
+  /* color: var(--accent); */
 }
 
 .pv-inline-icon svg {
@@ -1736,7 +1742,7 @@ input.yanta-task-checkbox {
 /* ---------- Slim icon picker ---------- */
 
 .icon-picker-card {
-  width: min(760px, 94vw);
+  width: min(100%, 94vw);
   height: min(720px, 88vh);
 }
 
@@ -2002,34 +2008,36 @@ input.yanta-task-checkbox {
    ============================================================ */
 
 .tree-row.selected {
-  background:
+  /* background:
     linear-gradient(
       90deg,
       color-mix(in srgb, var(--accent) 18%, transparent),
       transparent 72%
     ),
-    var(--bg-elev-2);
+    var(--bg-elev-2); */
+  background: var(--bg-elev-2);
   color: var(--text);
 }
 
 .tree-row.selected:hover {
-  background:
+  /* background:
     linear-gradient(
       90deg,
       color-mix(in srgb, var(--accent) 24%, transparent),
       transparent 72%
     ),
-    var(--bg-elev-3);
+    var(--bg-elev-3); */
+  background: var(--bg-elev-3);
 }
 
-.tree-row.selected::after {
+/* .tree-row.selected::after {
   content: "";
   position: absolute;
   inset: 3px 6px;
   border: 1px solid color-mix(in srgb, var(--accent) 42%, transparent);
   border-radius: 6px;
   pointer-events: none;
-}
+} */
 
 .tree-row.selection-anchor::after {
   border-color: var(--accent);
@@ -2071,4 +2079,211 @@ input.yanta-task-checkbox {
 
 .ctx-menu button:disabled {
   opacity: 0.55;
+}
+
+/* ============================================================
+   Markdown edit pane: no horizontal scrolling + optional wide drawings
+   ------------------------------------------------------------
+   Default:
+   - Markdown text stays in the readable 760px column.
+   - Drawings also stay in that column.
+
+   Wide mode:
+   - Only drawings with .is-wide expand to the available pane width.
+   - Normal text remains 760px.
+   ============================================================ */
+
+#paneEdit,
+#editor,
+#editor .cm-editor {
+  min-width: 0 !important;
+  max-width: 100% !important;
+  overflow: hidden !important;
+}
+
+#editor .cm-scroller {
+  box-sizing: border-box !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+
+  overflow-y: auto !important;
+  overflow-x: hidden !important;
+
+  /*
+    Container für 100cqw im Editor.
+    100cqw entspricht hier der Breite des CodeMirror-Scrollers,
+    also effektiv der verfügbaren Editor-Pane-Breite inkl. Padding.
+  */
+  container-type: inline-size;
+
+  padding:
+    28px
+    clamp(14px, 5vw, 40px)
+    calc(28px + 40vh) !important;
+}
+
+#editor .cm-content {
+  box-sizing: border-box !important;
+
+  width: min(760px, 100%) !important;
+  max-width: 760px !important;
+  min-width: 0 !important;
+
+  margin-left: auto !important;
+  margin-right: auto !important;
+  padding: 0 !important;
+
+  white-space: pre-wrap !important;
+  overflow-wrap: anywhere !important;
+  word-break: break-word !important;
+}
+
+#editor .cm-line {
+  max-width: 100% !important;
+  min-width: 0 !important;
+
+  white-space: pre-wrap !important;
+  overflow-wrap: anywhere !important;
+  word-break: break-word !important;
+}
+
+#editor .cm-line * {
+  max-width: 100% !important;
+}
+
+/* Editor widgets must never force the pane wider. */
+#editor .yanta-img-thumb,
+#editor .yanta-video-embed,
+#editor .yanta-draw-embed,
+#editor .yanta-draw-inline-host {
+  max-width: 100% !important;
+  min-width: 0 !important;
+}
+
+#editor .yanta-video-embed {
+  width: min(560px, 100%) !important;
+}
+
+/*
+  Default editor drawing:
+  bleibt innerhalb der 760px-CodeMirror-Textspalte.
+*/
+#editor .yanta-draw-editor-embed {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+
+  transform: none !important;
+  overflow: hidden !important;
+}
+
+#editor .yanta-draw-editor-embed .yanta-draw-embed {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+
+  transform: none !important;
+}
+
+/* ============================================================
+   Preview pane: readable text column + optional wide drawings
+   ============================================================ */
+
+/*
+  Preview-Pane als Container für 100cqw.
+  Wichtig: nur Pane, nicht globale Popovers.
+*/
+.pane-preview {
+  container-type: inline-size;
+}
+
+/*
+  Preview article bleibt normale Lesebreite.
+  Falls du das schon an anderer Stelle hast, ist es hier absichtlich
+  nochmals explizit.
+*/
+#panePreview > .preview {
+  width: 100%;
+  max-width: 760px;
+}
+
+/*
+  Default preview drawing:
+  bleibt innerhalb der normalen 760px-Markdown-Textspalte.
+*/
+#panePreview > .preview .yanta-draw-embed {
+  width: 100% !important;
+  max-width: 100% !important;
+  min-width: 0 !important;
+
+  margin-left: 0 !important;
+  margin-right: 0 !important;
+
+  transform: none !important;
+}
+
+/* ============================================================
+   Wide drawings
+   ------------------------------------------------------------
+   Nur Drawings mit .is-wide fahren horizontal aus.
+   Die Klasse kommt aus draw.js per widthMode === 'wide'.
+   ============================================================ */
+
+@supports (width: 100cqw) {
+  /*
+    Preview: nur im echten Haupt-Preview-Pane.
+    Dadurch bleiben Drawings in Popovers, Hover-Previews, Graph-Previews
+    usw. normal breit.
+  */
+  #panePreview > .preview .yanta-draw-embed.is-wide {
+    width: 100cqw !important;
+    max-width: none !important;
+
+    margin-left: 50% !important;
+    margin-right: 0 !important;
+
+    transform: translateX(-50%) !important;
+  }
+
+  /*
+    Editor:
+    Der äußere CodeMirror-Drawing-Widget-Wrapper wird scroller-/pane-breit.
+  */
+  #editor .yanta-draw-editor-embed.is-wide {
+    width: 100cqw !important;
+    max-width: none !important;
+    min-width: 0 !important;
+
+    margin-left: 50% !important;
+    margin-right: 0 !important;
+
+    transform: translateX(-50%) !important;
+    overflow: hidden !important;
+  }
+
+  /*
+    Das eigentliche Drawing füllt dann den breiten Wrapper.
+  */
+  #editor .yanta-draw-editor-embed.is-wide .yanta-draw-embed {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+
+    transform: none !important;
+  }
+}
+
+/* Aktiver Breiten-Button */
+.yanta-draw-embed-actions [data-draw-action="toggle-width"][aria-pressed="true"] {
+  color: var(--accent);
+  background: rgba(110,168,254,0.12);
 }

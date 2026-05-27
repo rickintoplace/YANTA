@@ -27,9 +27,230 @@ import { renderTree, renderTagCloud } from './tree.js';
 import { renderBacklinks, renderOutline } from './features.js';
 import { renderShareIndicator } from './sharing.js';
 import { syncWriteNote, syncDeleteNoteFile, markNoteSyncStatus, refreshGlobalSyncStatus } from './sync.js';
+import {
+  getVaultDoc,
+  vaultNotesMap,
+  vaultFoldersMap,
+  vaultTombstonesMap,
+} from './sync2/vault-doc.js';
 
 let _navSuppress = false;
 let _unsubDoc = null;
+
+// ------------------------------------------------------------
+// Built-in Welcome Vault
+//
+// Important:
+// These IDs are intentionally stable.
+// If Welcome content is generated in a fresh browser and the user then
+// imports a Sync Capsule, we can detect and remove the untouched local
+// Welcome Vault before merging the capsule. This prevents duplicate
+// Welcome folders/notes without touching real user content.
+// ------------------------------------------------------------
+
+export const WELCOME_VERSION = 2;
+
+export const WELCOME_IDS = Object.freeze({
+  folders: Object.freeze({
+    welcome: 'welcome_folder_start',
+
+    // Legacy IDs from older Welcome Vaults.
+    // Kept so untouched old Welcome Vaults can still be detected/pruned.
+    guides: 'welcome_folder_guides',
+    examples: 'welcome_folder_examples',
+  }),
+
+  notes: Object.freeze({
+    welcome: 'welcome_note_welcome',
+    basics: 'welcome_note_feature_map',
+    canvas: 'welcome_note_drawings_visual_thinking',
+    shopping: 'welcome_note_tasks_workflows',
+    sharing: 'welcome_note_sync_live_sharing',
+
+    // Legacy IDs from older Welcome Vaults.
+    // Kept for pristine-welcome cleanup compatibility.
+    markdown: 'welcome_note_markdown_essentials',
+    graph: 'welcome_note_graph_wikilinks',
+    media: 'welcome_note_images_icons_media',
+    research: 'welcome_note_research_notes',
+  }),
+
+  drawing: 'welcome-drawing-feature-map',
+});
+
+const WELCOME_NOTE_IDS = new Set(Object.values(WELCOME_IDS.notes));
+const WELCOME_FOLDER_IDS = new Set(Object.values(WELCOME_IDS.folders));
+
+function isWelcomeNoteId(id) {
+  return WELCOME_NOTE_IDS.has(String(id));
+}
+
+function isWelcomeFolderId(id) {
+  return WELCOME_FOLDER_IDS.has(String(id));
+}
+
+function nearlySameTimestamp(a, b, toleranceMs = 1500) {
+  return Math.abs(Number(a || 0) - Number(b || 0)) <= toleranceMs;
+}
+
+function isPristineWelcomeNote(note) {
+  if (!note || !isWelcomeNoteId(note.id)) return false;
+
+  // createWelcomeNote() creates built-in notes with created === updated.
+  // Real edits update note.updated in the normal app flow.
+  return nearlySameTimestamp(note.created, note.updated);
+}
+
+function isPristineWelcomeFolder(folder) {
+  if (!folder || !isWelcomeFolderId(folder.id)) return false;
+
+  return nearlySameTimestamp(
+    folder.created,
+    folder.updated || folder.created
+  );
+}
+
+async function rawDeleteFromYantaStore(storeName, key) {
+  // Bypass core.store wrappers intentionally.
+  // We are deleting the auto-generated local Welcome cache, not creating
+  // a user-visible deletion/tombstone.
+  return new Promise((resolve, reject) => {
+    const openReq = indexedDB.open('yanta');
+
+    openReq.onerror = () => reject(openReq.error);
+
+    openReq.onsuccess = () => {
+      const db = openReq.result;
+
+      try {
+        const tx = db.transaction(storeName, 'readwrite');
+        tx.objectStore(storeName).delete(key);
+
+        tx.oncomplete = () => {
+          db.close();
+          resolve();
+        };
+
+        tx.onerror = () => {
+          const err = tx.error;
+          db.close();
+          reject(err);
+        };
+
+        tx.onabort = () => {
+          const err = tx.error || new Error('IndexedDB transaction aborted');
+          db.close();
+          reject(err);
+        };
+      } catch (err) {
+        try {
+          db.close();
+        } catch {}
+
+        reject(err);
+      }
+    };
+  });
+}
+
+/**
+ * Remove the untouched auto-generated Welcome Vault.
+ *
+ * This is used before importing a Sync Capsule so a fresh browser's
+ * generated Welcome content does not duplicate the Welcome content from
+ * the capsule.
+ *
+ * It only removes when the local vault contains exclusively pristine
+ * built-in Welcome notes/folders and no images.
+ */
+export async function removePristineWelcomeVaultIfPresent({ reason = 'unknown' } = {}) {
+  const noteIds = [...state.notes.keys()];
+  const folderIds = [...state.folders.keys()];
+
+  if (!noteIds.length && !folderIds.length) return false;
+
+  const onlyWelcomeNotes = noteIds.every(isWelcomeNoteId);
+  const onlyWelcomeFolders = folderIds.every(isWelcomeFolderId);
+
+  if (!onlyWelcomeNotes || !onlyWelcomeFolders) return false;
+
+  // Welcome vault has no images. If images exist, user has likely done
+  // something real; do not prune.
+  if (state.imagesMeta.size > 0) return false;
+
+  for (const noteId of noteIds) {
+    const note = state.notes.get(noteId);
+
+    if (!isPristineWelcomeNote(note)) {
+      return false;
+    }
+  }
+
+  for (const folderId of folderIds) {
+    const folder = state.folders.get(folderId);
+
+    if (!isPristineWelcomeFolder(folder)) {
+      return false;
+    }
+  }
+
+  const currentWasWelcome =
+    state.currentNoteId && isWelcomeNoteId(state.currentNoteId);
+
+  if (currentWasWelcome) {
+    clearEditor();
+  }
+
+  // Remove local app state + raw IndexedDB cache.
+  // Do NOT use store.notes.del / store.folders.del here because the
+  // store bridge would create tombstones for the built-in Welcome content.
+  for (const noteId of noteIds) {
+    state.notes.delete(noteId);
+    state.searchIndex.delete(noteId);
+
+    try {
+      await rawDeleteFromYantaStore('notes', noteId);
+    } catch {}
+
+    try {
+      await destroyNoteDoc(noteId);
+    } catch {}
+  }
+
+  for (const folderId of folderIds) {
+    state.folders.delete(folderId);
+    state.expandedFolders.delete(folderId);
+
+    try {
+      await rawDeleteFromYantaStore('folders', folderId);
+    } catch {}
+  }
+
+  // Remove Welcome metadata from VaultDoc without tombstones.
+  // If the incoming capsule contains Welcome with the same stable IDs,
+  // it can now merge cleanly. If it doesn't, Welcome stays gone.
+  try {
+    const doc = getVaultDoc();
+
+    doc.transact(() => {
+      for (const noteId of Object.values(WELCOME_IDS.notes)) {
+        vaultNotesMap().delete(noteId);
+        vaultTombstonesMap().delete(noteId);
+      }
+
+      for (const folderId of Object.values(WELCOME_IDS.folders)) {
+        vaultFoldersMap().delete(folderId);
+        vaultTombstonesMap().delete(folderId);
+      }
+    }, 'welcome-prune-before-' + reason);
+  } catch {}
+
+  renderTree();
+
+  console.info('[YANTA] Pruned pristine built-in Welcome Vault before', reason);
+
+  return true;
+}
 
 setMarkdownRerenderHook(() => { schedulePreview(); });
 
@@ -120,7 +341,7 @@ export async function openNote(id) {
       typeof origin === 'string' &&
       origin.startsWith('draw');
 
-    if (origin === 'sync-folder') {
+    if (origin === 'sync-folder' || origin === 'sync2-remote') {
       schedulePreview();
       updateSearchIndexFor(note);
       markNoteSyncStatus(id, 'synced');
@@ -435,698 +656,209 @@ function updateWordCount(md) {
 export async function createWelcomeNote() {
   const now = Date.now();
 
-  const folderIds = {
-    start: uid(),
-    guides: uid(),
-    examples: uid(),
-  };
-
-  const folders = [
-    {
-      id: folderIds.start,
-      name: 'Start here',
-      parentId: null,
-      created: now,
-      icon: 'sparkles',
-      color: '#6ea8fe',
-    },
-    {
-      id: folderIds.guides,
-      name: 'Guides',
-      parentId: null,
-      created: now,
-      icon: 'book-open',
-      color: '#a78bfa',
-    },
-    {
-      id: folderIds.examples,
-      name: 'Examples',
-      parentId: null,
-      created: now,
-      icon: 'flask-conical',
-      color: '#4ade80',
-    },
-  ];
-
-  for (const folder of folders) {
-    state.folders.set(folder.id, folder);
-    await store.folders.put(folder);
-    state.expandedFolders.add(folder.id);
+  // If the stable Welcome Vault already exists, just open it.
+  // We intentionally do not overwrite existing Welcome content because
+  // the user may already have edited it.
+  if (state.notes.has(WELCOME_IDS.notes.welcome)) {
+    await openNote(WELCOME_IDS.notes.welcome);
+    return;
   }
 
-  const ids = {
-    welcome: uid(),
-    map: uid(),
-    markdown: uid(),
-    drawing: uid(),
-    graph: uid(),
-    sync: uid(),
-    media: uid(),
-    tasks: uid(),
-    research: uid(),
+  const folderId = WELCOME_IDS.folders.welcome;
+
+  const welcomeFolder = {
+    id: folderId,
+    name: 'Welcome',
+    parentId: null,
+    created: now,
+    updated: now,
+    icon: 'sparkles',
+    color: '#6ea8fe',
   };
 
-  const drawingId = uid();
-
-const notes = [
-  {
-    id: ids.welcome,
-    title: 'Welcome to YANTA',
-    type: 'markdown',
-    folderId: folderIds.start,
-    tags: ['welcome', 'onboarding', 'start'],
-    pinned: true,
-    icon: 'sparkles',
-    color: '#2563eb',
-    body: `# Welcome to YANTA
-
-Welcome to **YANTA**, a local-first Markdown workspace for notes, drawings, tasks, graph navigation and sync.
-
-This vault is not just a feature demo. It is a guided starting point.
-
-> [!NOTE]
-> If you only read one note, read this one and follow the short tour below.
-
-## The 5-minute tour
-
-### 1. Write something
-
-Open [[Markdown Essentials]] when you want to learn how YANTA notes are written.
-
-You will see:
-
-- headings
-- lists
-- tasks
-- callouts
-- equations
-- Wikilinks
-
-### 2. Connect two ideas
-
-YANTA uses Wikilinks to connect notes.
-
-A useful link is not decorative. It should help you move from one idea to the next.
-
-Example:
-
-- this welcome note points to [[Markdown Essentials]]
-- the writing guide explains how links work
-- the graph guide explains what those links become
-
-### 3. Open the graph
-
-Press Ctrl/⌘+G after reading a few notes.
-
-The graph should feel like a map of meaningful relationships, not like a tangled ball of random lines.
-
-### 4. Try one visual note
-
-YANTA can embed drawings directly inside Markdown notes.
-
-You can try that later in the visual guide.
-
-### 5. Decide your next path
-
-Open [[Feature Map]] when you are ready to choose what to explore next.
-
-## First checklist
-
-- [ ] Read this note
-- [ ] Open [[Markdown Essentials]]
-- [ ] Create one new note
-- [ ] Add one meaningful Wikilink
-- [ ] Open the graph
-- [ ] Return to [[Feature Map]] and choose a path
-
-## Mental model
-
-Think of YANTA as three layers:
-
-:lucide[file-text]{#0891b2}: **Notes** are where you write.  
-:lucide[network]{#7c3aed}: **Links** are how ideas connect.  
-:lucide[folder-sync]{#d97706}: **Sync** is how your workspace stays portable.
-
-Start small. Add structure only when it helps.`,
-  },
-  {
-    id: ids.map,
-    title: 'Feature Map',
-    type: 'markdown',
-    folderId: folderIds.start,
-    tags: ['overview', 'navigation', 'guide'],
-    pinned: true,
-    icon: 'map',
-    color: '#1d4ed8',
-    body: `# Feature Map
-
-This is the main map of the welcome vault.
-
-Unlike normal notes, this note is allowed to link broadly because its job is orientation.
-
-## What do you want to do?
-
-### I want to write better notes
-
-Start here:
-
-1. [[Markdown Essentials]]
-2. [[Tasks & Workflows]]
-3. [[Research Notes]]
-
-Use this path if you want to learn formatting, structure, checkboxes, equations or reference-style notes.
-
-### I want to understand the graph
-
-Start here:
-
-1. [[Graph & Wikilinks]]
-2. [[Markdown Essentials]]
-3. [[Drawings & Visual Thinking]]
-
-Use this path if you want to understand why some notes are connected and how to keep the graph useful.
-
-### I want to think visually
-
-Start here:
-
-1. [[Drawings & Visual Thinking]]
-2. [[Images, Icons & Media]]
-3. [[Graph & Wikilinks]]
-
-Use this path if you like diagrams, sketches, concept maps or visual workflows.
-
-### I want to organize real work
-
-Start here:
-
-1. [[Tasks & Workflows]]
-2. [[Sync & Live Sharing]]
-3. [[Research Notes]]
-
-Use this path if you want a practical workspace for projects, reading, planning or recurring review.
-
-## All notes
-
-### Start
-
-- [[Welcome to YANTA]]
-
-### Guides
-
-- [[Markdown Essentials]]
-- [[Graph & Wikilinks]]
-- [[Drawings & Visual Thinking]]
-- [[Sync & Live Sharing]]
-
-### Examples
-
-- [[Images, Icons & Media]]
-- [[Tasks & Workflows]]
-- [[Research Notes]]
-
-## Structure principle
-
-This vault uses a simple rule:
-
-> [!TIP]
-> The map links to many notes. Normal notes link only to directly relevant next steps.
-
-That keeps the graph readable while still giving new users clear navigation.`,
-  },
-  {
-    id: ids.markdown,
-    title: 'Markdown Essentials',
-    type: 'markdown',
-    folderId: folderIds.guides,
-    tags: ['markdown', 'writing', 'syntax'],
-    pinned: false,
-    icon: 'file-text',
-    color: '#0891b2',
-    body: `# Markdown Essentials
-
-Markdown is the writing layer of YANTA.
-
-Use this note when you want to understand how to format text, structure notes and create links.
-
-## Start with plain structure
-
-A useful note usually starts with simple structure:
-
-# Title
-
-## Main idea
-
-Write the core idea in a few sentences.
-
-## Details
-
-- one supporting point
-- another supporting point
-- a question to answer later
-
-## Formatting
-
-Use common Markdown formatting:
-
-- **bold** for emphasis
-- *italic* for subtle emphasis
-- ==highlight== for important phrases
-- ~~strikethrough~~ for removed ideas
-- inline code for technical terms
-
-## Tasks
-
-Tasks are plain Markdown checkboxes:
-
-- [ ] Capture an idea
-- [ ] Clarify it
-- [ ] Decide whether it needs a link
-
-For a practical workflow built around checkboxes, continue with [[Tasks & Workflows]].
-
-## Wikilinks
-
-Wikilinks connect notes by title.
-
-Example:
-
-- [[Graph & Wikilinks]]
-
-Use a Wikilink when the target note is a useful next step or explanation.
-
-Do not link every possible keyword. That makes navigation worse.
-
-## Callouts
-
-> [!NOTE]
-> Callouts are readable in preview mode and still editable as Markdown.
-
-> [!TIP]
-> A good note is not the longest note. It is the note you can understand again later.
-
-## Math and references
-
-Inline math:
-
-$E=mc^2$
-
-Block-style math placeholder:
-
-$$\\nabla \\cdot E = \\rho / \\epsilon_0$$
-
-DOI example:
-
-doi:10.1038/nature12373
-
-For scientific note structure, see [[Research Notes]].
-
-## Next step
-
-If you understand Wikilinks, continue with [[Graph & Wikilinks]].`,
-  },
-  {
-    id: ids.graph,
-    title: 'Graph & Wikilinks',
-    type: 'markdown',
-    folderId: folderIds.guides,
-    tags: ['graph', 'wikilinks', 'navigation'],
-    pinned: false,
-    icon: 'network',
-    color: '#7c3aed',
-    body: `# Graph & Wikilinks
-
-The graph view turns your notes into a navigable network.
-
-The goal is not maximum connectivity. The goal is meaningful connectivity.
-
-## What creates graph structure?
-
-YANTA can use several signals:
-
-- Wikilinks in Markdown notes
-- links inside drawings
-- folder structure
-- optional semantic suggestions
-
-## A good link has a reason
-
-Before adding a Wikilink, ask:
-
-- Does the target note explain this idea?
-- Is it the next useful step?
-- Is it a concrete example?
-- Would I actually want to navigate there from here?
-
-If the answer is no, skip the link.
-
-## Example relationship
-
-Writing a Wikilink is part of Markdown, so the syntax belongs in [[Markdown Essentials]].
-
-Visual notes can also contain links, so drawing-based relationships are covered in [[Drawings & Visual Thinking]].
-
-## Try the graph
-
-Press Ctrl/⌘+G or open the graph from the sidebar.
-
-Then try this:
-
-- click a node to preview a note
-- double-click a node to open it
-- search for a note title
-- look for hubs
-- look for isolated notes
-- hide or show folders if the view gets too busy
-
-## Reading this vault
-
-In this welcome vault:
-
-- [[Feature Map]] is the main hub
-- guide notes form a learning path
-- examples connect to the guide they demonstrate
-
-That gives the graph structure without making every note point to every other note.`,
-  },
-  {
-    id: ids.drawing,
-    title: 'Drawings & Visual Thinking',
-    type: 'markdown',
-    folderId: folderIds.guides,
-    tags: ['drawing', 'excalidraw', 'visual'],
-    pinned: false,
-    icon: 'pencil',
-    color: '#16a34a',
-    body: `# Drawings & Visual Thinking
-
-Some ideas are easier to understand visually.
-
-YANTA can embed Excalidraw scenes directly inside Markdown notes.
-
-The line below is a real drawing reference:
+  state.folders.set(welcomeFolder.id, welcomeFolder);
+  await store.folders.put(welcomeFolder);
+  state.expandedFolders.add(welcomeFolder.id);
+
+  const ids = {
+    welcome: WELCOME_IDS.notes.welcome,
+    basics: WELCOME_IDS.notes.basics,
+    canvas: WELCOME_IDS.notes.canvas,
+    shopping: WELCOME_IDS.notes.shopping,
+    sharing: WELCOME_IDS.notes.sharing,
+  };
+
+  const drawingId = WELCOME_IDS.drawing;
+
+  const notes = [
+    {
+      id: ids.welcome,
+      title: 'Start here',
+      type: 'markdown',
+      folderId,
+      tags: ['welcome', 'start'],
+      pinned: true,
+      icon: 'sparkles',
+      color: '#2563eb',
+      body: `# Start here
+
+Welcome to **YANTA** — a calm, local-first workspace for notes, sketches, tasks and connected ideas.
+
+Start with a thought. Sketch it. Link it when it becomes useful.
 
 draw://${drawingId}
 
-## When drawings help
+## Try this
 
-Use drawings for:
+- [ ] Click into the canvas above
+- [ ] Move one element
+- [ ] Open [[Shopping List]]
+- [ ] Press Ctrl/⌘+G to see the graph
 
-- concept maps
-- system diagrams
-- workflows
-- research models
-- architecture sketches
-- quick visual explanations
+## A small map
+
+- [[First Canvas]] shows visual thinking
+- [[YANTA Basics]] shows the simplest commands
+- [[Shopping List]] is a practical checklist example
+- [[Sync & Sharing]] explains backup and collaboration briefly
+
+Your notes stay on this device unless you choose to sync, export or share them.`,
+    },
+    {
+      id: ids.canvas,
+      title: 'First Canvas',
+      type: 'markdown',
+      folderId,
+      tags: ['drawing', 'canvas', 'visual'],
+      pinned: false,
+      icon: 'pencil',
+      color: '#16a34a',
+      body: `# First Canvas
+
+Sketch before you organize.
+
+YANTA embeds Excalidraw directly inside Markdown notes, so visual thinking and writing can live together.
+
+draw://${drawingId}
 
 ## Try this
 
-- Click into the drawing in edit or split mode
-- Add a rectangle
-- Add an arrow
-- Add a text label
-- Drag a note from the sidebar into the drawing
-- Link a drawing element to a note
+- Click into the drawing
+- Add a box, arrow or text label
+- Drag a note from the sidebar into the canvas
+- Use linked text like [[Shopping List]] or [[Sync & Sharing]]
 
-## Drawings and links
+A useful drawing does not need to explain everything. It should make the next step obvious.`,
+    },
+    {
+      id: ids.basics,
+      title: 'YANTA Basics',
+      type: 'markdown',
+      folderId,
+      tags: ['basics', 'markdown', 'links'],
+      pinned: false,
+      icon: 'file-text',
+      color: '#0891b2',
+      body: `# YANTA Basics
 
-Drawings can contribute to the graph when they contain note references.
+YANTA is built around three simple actions:
 
-For how those relationships appear, see [[Graph & Wikilinks]].
+1. Write notes
+2. Draw ideas
+3. Connect related things
 
-## Reusing drawings
+## Useful gestures
 
-Drawings can also behave like reusable visual assets.
+- Type \`/\` for commands
+- Type \`[[\` to link notes
+- Press Ctrl/⌘+G for the graph
+- Press Ctrl/⌘+I to insert images
+- Use the Share button when someone should edit with you
 
-That workflow is shown in [[Images, Icons & Media]].
+## Links
 
-## Good practice
+A Wikilink connects one note to another:
 
-A useful drawing has a clear purpose.
+[[First Canvas]]
 
-It should usually link to the few notes it explains, not to the whole vault.`,
-  },
-  {
-    id: ids.sync,
-    title: 'Sync & Live Sharing',
-    type: 'markdown',
-    folderId: folderIds.guides,
-    tags: ['sync', 'sharing', 'backup'],
-    pinned: false,
-    icon: 'refresh-cw',
-    color: '#d97706',
-    body: `# Sync & Live Sharing
+Use links when they help you navigate, explain or continue an idea.
+
+## Local-first
+
+YANTA works offline. Your notes are stored locally in this browser unless you choose to sync, export or share them.
+
+For the short version, see [[Sync & Sharing]].`,
+    },
+    {
+      id: ids.shopping,
+      title: 'Shopping List',
+      type: 'markdown',
+      folderId,
+      tags: ['tasks', 'example', 'sharing'],
+      pinned: false,
+      icon: 'shopping-cart',
+      color: '#059669',
+      body: `# Shopping List
+
+A tiny checklist example.
+
+- [ ] Apples
+- [ ] Coffee
+- [ ] Pasta
+- [ ] Olive oil
+- [ ] Something for dinner
+- [ ] Check what is already at home
+
+## Hint
+
+Use **Share** to turn this into a live collaborative list.
+
+That is useful when someone else should add or check off items from their own device.
+
+For backup and collaboration basics, see [[Sync & Sharing]].`,
+    },
+    {
+      id: ids.sharing,
+      title: 'Sync & Sharing',
+      type: 'markdown',
+      folderId,
+      tags: ['sync', 'sharing', 'backup'],
+      pinned: false,
+      icon: 'refresh-cw',
+      color: '#d97706',
+      body: `# Sync & Sharing
 
 YANTA is local-first.
 
-That means your workspace should remain useful even before you think about cloud accounts or collaboration.
+That means your workspace works offline and stays on this device by default.
+
+## Backup
+
+Use **Export** to create a backup.
+
+For an encrypted portable backup, choose:
+
+**Export → Back up YANTA (.yanta, encrypted)**
+
+Keep the sync key private.
 
 ## Folder sync
 
-Use the sync indicator in the sidebar footer to select a folder.
+Advanced users can connect a sync folder and mirror it with tools like Syncthing, Dropbox, iCloud Drive or an external drive.
 
-YANTA can write:
-
-- human-readable Markdown mirrors
-- assets such as images
-- CRDT snapshots for robust conflict handling
-
-This works with normal folder sync tools such as:
-
-- Syncthing
-- Dropbox
-- iCloud Drive
-- SMB shares
-- external drives
-- regular backup folders
+You do not need to set this up immediately.
 
 ## Live sharing
 
-Use the Share button in the note toolbar when you want active collaboration.
+Use the **Share** button in a note when someone should edit with you in real time.
 
-A share link contains room credentials in the URL fragment. The transport uses WebRTC and an end-to-end encrypted room password.
-
-## Recommended setup
-
-- [ ] Choose a local sync folder
-- [ ] Let YANTA write Markdown mirrors
-- [ ] Back up that folder with your normal backup tool
-- [ ] Use live sharing only when someone should edit with you
-- [ ] Review your workspace regularly
-
-For recurring maintenance and review checklists, see [[Tasks & Workflows]].
+A good first test is [[Shopping List]].
 
 ## Simple rule
 
-Sync is not organization.
-
-First make your notes understandable. Then make them portable.`,
-  },
-  {
-    id: ids.media,
-    title: 'Images, Icons & Media',
-    type: 'markdown',
-    folderId: folderIds.examples,
-    tags: ['media', 'icons', 'images'],
-    pinned: false,
-    icon: 'image',
-    color: '#f97316',
-    body: `# Images, Icons & Media
-
-This note shows how YANTA can make Markdown richer without turning it into a messy document.
-
-Use media when it adds meaning.
-
-## Inline icons
-
-You can write Lucide icons directly in Markdown:
-
-:lucide[sparkles]{#2563eb}: start and orientation  
-:lucide[file-text]{#0891b2}: writing and Markdown  
-:lucide[network]{#7c3aed}: graph and structure  
-:lucide[pencil]{#16a34a}: visual thinking  
-:lucide[refresh-cw]{#d97706}: sync and backup  
-
-The colors follow the same visual language as this vault.
-
-## Images
-
-Use the image button or Ctrl/⌘+I.
-
-YANTA can store images as local library references instead of bloating Markdown with Base64.
-
-## Drawings as visual assets
-
-Drawings from [[Drawings & Visual Thinking]] can be reused as part of your visual library.
-
-## Media guidelines
-
-Good uses of media:
-
-- a diagram that explains a concept
-- a screenshot that documents a state
-- an image that serves as evidence
-- an icon that improves scanning
-
-Weak uses of media:
-
-- decoration without meaning
-- repeated screenshots without context
-- colorful elements that do not encode anything
-
-## Related basics
-
-For normal formatting and note structure, see [[Markdown Essentials]].`,
-  },
-  {
-    id: ids.tasks,
-    title: 'Tasks & Workflows',
-    type: 'markdown',
-    folderId: folderIds.examples,
-    tags: ['tasks', 'workflow', 'planning'],
-    pinned: false,
-    icon: 'list-checks',
-    color: '#059669',
-    body: `# Tasks & Workflows
-
-YANTA tasks are plain Markdown checkboxes.
-
-They work well for lightweight planning because they stay readable, portable and editable.
-
-## Daily capture
-
-Use this when you need a low-friction inbox:
-
-- [ ] Capture the idea
-- [ ] Add one sentence of context
-- [ ] Decide whether it needs action
-- [ ] Link it only if another note is directly useful
-- [ ] Review it later
-
-## A simple note workflow
-
-1. Capture quickly
-2. Clarify the title
-3. Add headings if the note grows
-4. Add tasks only when action is required
-5. Add Wikilinks only when navigation becomes useful
-6. Review unfinished items
-
-## Example project note
-
-### Goal
-
-What should be true when this project is done?
-
-### Next actions
-
-- [ ] Define the problem
-- [ ] Collect material
-- [ ] Write a first draft
-- [ ] Review open questions
-
-### Decisions
-
-- Decision 1
-- Decision 2
-
-### Open questions
-
-- What is still unclear?
-- Who needs to be involved?
-
-## Useful foundations
-
-Task syntax is part of Markdown, so the writing basics are covered in [[Markdown Essentials]].
-
-If your workflow spans multiple devices, combine it with [[Sync & Live Sharing]].
-
-For reading papers or technical material, see [[Research Notes]].`,
-  },
-  {
-    id: ids.research,
-    title: 'Research Notes',
-    type: 'markdown',
-    folderId: folderIds.examples,
-    tags: ['research', 'science', 'references'],
-    pinned: false,
-    icon: 'beaker',
-    color: '#e11d48',
-    body: `# Research Notes
-
-This note shows a structured pattern for scientific or technical reading.
-
-It is not a medical, legal or domain-specific recommendation. It is only a note-taking template.
-
-## What a research note should do
-
-A useful research note should help you answer:
-
-- What is the claim?
-- What evidence supports it?
-- What method was used?
-- What are the limitations?
-- What should I read or test next?
-
-## Example claim
-
-A research note can combine prose, DOI links, equations, tasks and footnotes.[^localfirst]
-
-DOI example:
-
-doi:10.1038/nature12373
-
-## Reading checklist
-
-- [ ] Extract the main claim
-- [ ] Note the method
-- [ ] Record assumptions
-- [ ] Save relevant references
-- [ ] Write down limitations
-- [ ] Add open questions
-- [ ] Create a visual model if the concept is easier to understand spatially
-
-## Equation placeholder
-
-Inline math:
-
-$p(x|y)$
-
-Block-style math placeholder:
-
-$$L(\\theta)=\\sum_i \\log p(x_i|\\theta)$$
-
-## Suggested structure
-
-### Summary
-
-What is the work about?
-
-### Method
-
-How was the result obtained?
-
-### Evidence
-
-Which data, experiment or argument supports the claim?
-
-### Limitations
-
-What remains uncertain?
-
-### Follow-up
-
-Which question should be investigated next?
-
-## Related notes
-
-For formatting, equations and DOI syntax, see [[Markdown Essentials]].
-
-For diagrams, models or concept sketches, see [[Drawings & Visual Thinking]].
-
-[^localfirst]: Local-first tools keep user data available offline and sync later when possible.`,
-  },
-];
+Write first. Organize later. Sync when you are ready.`,
+    },
+  ];
 
   for (const note of notes) {
     const { body, ...meta } = note;
@@ -1149,181 +881,717 @@ For diagrams, models or concept sketches, see [[Drawings & Visual Thinking]].
     updateSearchIndexFor(meta);
   }
 
-  const makeBox = (i, x, y, width, height, strokeColor, backgroundColor) => ({
-    id: uid(),
-    type: 'rectangle',
+  const parseCssColorToRgb = (color) => {
+    const s = String(color || '').trim();
+
+    if (/^#[0-9a-f]{3}$/i.test(s)) {
+      return {
+        r: parseInt(s[1] + s[1], 16),
+        g: parseInt(s[2] + s[2], 16),
+        b: parseInt(s[3] + s[3], 16),
+      };
+    }
+
+    if (/^#[0-9a-f]{6}$/i.test(s)) {
+      return {
+        r: parseInt(s.slice(1, 3), 16),
+        g: parseInt(s.slice(3, 5), 16),
+        b: parseInt(s.slice(5, 7), 16),
+      };
+    }
+
+    const rgb = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i.exec(s);
+    if (rgb) {
+      return {
+        r: parseInt(rgb[1], 10),
+        g: parseInt(rgb[2], 10),
+        b: parseInt(rgb[3], 10),
+      };
+    }
+
+    return null;
+  };
+
+  const relativeLuminance = (color) => {
+    const rgb = parseCssColorToRgb(color);
+    if (!rgb) return 0;
+
+    const channel = (v) => {
+      const x = v / 255;
+      return x <= 0.03928
+        ? x / 12.92
+        : Math.pow((x + 0.055) / 1.055, 2.4);
+    };
+
+    return (
+      0.2126 * channel(rgb.r) +
+      0.7152 * channel(rgb.g) +
+      0.0722 * channel(rgb.b)
+    );
+  };
+
+  // Build the Welcome canvas with normal Excalidraw-style elements.
+  //
+  // Wichtig:
+  // - Keine separate Light/Dark-Palette speichern.
+  // - Excalidraw selbst kümmert sich um Theme-Verhalten.
+  // - Farben sind normale Excalidraw-Palette-Farben, wie User sie wählen würden.
+  // - Nur die Box ist verlinkt, nicht Box + Text doppelt.
+  // - Text + Box sind gruppiert.
+  // - Arrows sind an Boxen gebunden.
+  let convertToExcalidrawElements = null;
+
+  try {
+    const excalidrawMod = await import('@excalidraw/excalidraw');
+    convertToExcalidrawElements = excalidrawMod.convertToExcalidrawElements;
+  } catch {}
+
+  const versionNonce = () => Math.floor(Math.random() * 2 ** 31);
+  const yantaNoteLink = (noteId) => `yanta-note://${noteId}`;
+
+  const yantaWikiData = (title, noteId) => ({
+    yanta: {
+      wikilink: {
+        noteId,
+        target: title,
+        alias: null,
+        href: yantaNoteLink(noteId),
+        updated: now,
+      },
+    },
+  });
+
+  // Excalidraw light-palette colors.
+  // These are intentionally not theme-conditional.
+  // Excalidraw's dark mode handles display/filtering like for user-created elements.
+  const XCOL = {
+    strokeDefault: '#1e1e1e',
+    textDefault: '#1e1e1e',
+    muted: '#868e96',
+
+    blueStroke: '#1971c2',
+    blueBg: '#d0ebff',
+
+    cyanStroke: '#0c8599',
+    cyanBg: '#c5f6fa',
+
+    greenStroke: '#2f9e44',
+    greenBg: '#d3f9d8',
+
+    orangeStroke: '#e8590c',
+    orangeBg: '#ffe8cc',
+
+    yellowStroke: '#f08c00',
+    yellowBg: '#fff3bf',
+
+    violetStroke: '#6741d9',
+    violetBg: '#e5dbff',
+  };
+
+  function estimateTextWidth(text, fontSize, maxWidth) {
+    const raw = String(text || '').length * fontSize * 0.58;
+    return Math.max(40, Math.min(maxWidth, Math.ceil(raw)));
+  }
+
+  function centeredTextBox({ text, boxX, boxY, boxW, yOffset, fontSize, maxInset = 24 }) {
+    const maxWidth = Math.max(40, boxW - maxInset * 2);
+    const width = estimateTextWidth(text, fontSize, maxWidth);
+
+    return {
+      x: boxX + (boxW - width) / 2,
+      y: boxY + yOffset,
+      width,
+    };
+  }
+
+  const fallbackExcalidrawElement = (def = {}) => {
+    const common = {
+      id: def.id || uid(),
+      type: def.type,
+      x: Number(def.x || 0),
+      y: Number(def.y || 0),
+      width: Number(def.width || 0),
+      height: Number(def.height || 0),
+      angle: 0,
+      strokeColor: def.strokeColor || XCOL.strokeDefault,
+      backgroundColor: def.backgroundColor || 'transparent',
+      fillStyle: def.fillStyle || 'solid',
+      strokeWidth: Number(def.strokeWidth || 2),
+      strokeStyle: def.strokeStyle || 'solid',
+      roughness: Number(def.roughness ?? 1),
+      opacity: Number(def.opacity ?? 100),
+      groupIds: def.groupIds || [],
+      frameId: null,
+      roundness: def.roundness ?? (def.type === 'rectangle' ? { type: 3 } : null),
+      seed: versionNonce(),
+      version: 1,
+      versionNonce: versionNonce(),
+      isDeleted: false,
+      boundElements: def.boundElements ?? null,
+      updated: now,
+      link: def.link ?? null,
+      locked: false,
+      customData: def.customData || {},
+    };
+
+    if (def.type === 'text') {
+      const fontSize = Number(def.fontSize || 22);
+      const text = String(def.text || '');
+
+      return {
+        ...common,
+        text,
+        rawText: text,
+        originalText: text,
+        fontSize,
+        fontFamily: 5,
+        textAlign: def.textAlign || 'center',
+        verticalAlign: 'middle',
+        baseline: Math.round(fontSize * 1.15),
+        containerId: null,
+        lineHeight: 1.25,
+        height: Math.max(28, Math.round(fontSize * 1.45)),
+      };
+    }
+
+    if (def.type === 'arrow' || def.type === 'line') {
+      return {
+        ...common,
+        type: 'arrow',
+        points: def.points || [
+          [0, 0],
+          [Number(def.width || 0), Number(def.height || 0)],
+        ],
+        startBinding: def.startBinding || null,
+        endBinding: def.endBinding || null,
+        startArrowhead: def.startArrowhead ?? null,
+        endArrowhead: def.endArrowhead ?? 'arrow',
+        roundness: { type: 2 },
+      };
+    }
+
+    return common;
+  };
+
+  const makeExcalidrawElement = (def = {}, patch = {}) => {
+    const {
+      id,
+      groupIds,
+      link,
+      customData,
+      boundElements,
+      startBinding,
+      endBinding,
+      startArrowhead,
+      endArrowhead,
+      points,
+      roundness,
+      ...convertDef
+    } = def;
+
+    let el = null;
+
+    if (typeof convertToExcalidrawElements === 'function') {
+      try {
+        [el] = convertToExcalidrawElements([convertDef]);
+      } catch {
+        el = null;
+      }
+    }
+
+    if (!el) {
+      el = fallbackExcalidrawElement(def);
+    }
+
+    const next = {
+      ...el,
+
+      id: id || el.id || uid(),
+      groupIds: groupIds || el.groupIds || [],
+      link: link ?? el.link ?? null,
+      customData: customData ?? el.customData ?? {},
+      boundElements: boundElements === undefined
+        ? (el.boundElements ?? null)
+        : boundElements,
+
+      version: 1,
+      versionNonce: versionNonce(),
+      updated: now,
+      isDeleted: false,
+      locked: false,
+
+      ...patch,
+    };
+
+    if (roundness !== undefined) next.roundness = roundness;
+    if (points !== undefined) next.points = points;
+
+    if (startBinding !== undefined) next.startBinding = startBinding;
+    if (endBinding !== undefined) next.endBinding = endBinding;
+    if (startArrowhead !== undefined) next.startArrowhead = startArrowhead;
+    if (endArrowhead !== undefined) next.endArrowhead = endArrowhead;
+
+    return next;
+  };
+
+  const makeText = ({
+    id = uid(),
+    groupIds = [],
+    text,
+    x,
+    y,
+    width,
+    fontSize = 22,
+    strokeColor = XCOL.textDefault,
+    textAlign = 'center',
+    noteId = null,
+    linkEnabled = false,
+  }) => {
+    const cleanText = String(text || '');
+
+    return makeExcalidrawElement(
+      {
+        id,
+        type: 'text',
+        x,
+        y,
+        width,
+        text: cleanText,
+        fontSize,
+        textAlign,
+        strokeColor,
+        groupIds,
+
+        // Usually false for card text to avoid duplicate links.
+        link: linkEnabled && noteId ? yantaNoteLink(noteId) : null,
+        customData: linkEnabled && noteId ? yantaWikiData(cleanText, noteId) : {},
+      },
+      {
+        x,
+        y,
+        width,
+        strokeColor,
+        textAlign,
+        fontSize,
+        fontFamily: 5,
+        verticalAlign: 'middle',
+        height: Math.max(28, Math.round(fontSize * 1.45)),
+        baseline: Math.round(fontSize * 1.15),
+      }
+    );
+  };
+
+  const makeRect = ({
+    id = uid(),
+    groupIds = [],
     x,
     y,
     width,
     height,
-    angle: 0,
-    strokeColor,
-    backgroundColor,
-    fillStyle: 'solid',
-    strokeWidth: 2,
-    strokeStyle: 'solid',
-    roughness: 1,
-    opacity: 100,
-    groupIds: [],
-    frameId: null,
-    roundness: { type: 3 },
-    seed: 1000 + i,
-    version: 1,
-    versionNonce: 2000 + i,
-    isDeleted: false,
-    boundElements: null,
-    updated: now,
-    link: null,
-    locked: false,
-  });
-
-  const makeLinkedText = (i, title, noteId, x, y, width, color = '#f8f9fa') => {
-    const text = `[[${title}]]`;
-
-    return {
-      id: uid(),
-      type: 'text',
+    strokeColor = XCOL.strokeDefault,
+    backgroundColor = 'transparent',
+    noteId = null,
+    title = '',
+    boundElements = null,
+  }) => makeExcalidrawElement(
+    {
+      id,
+      type: 'rectangle',
       x,
       y,
       width,
-      height: 34,
-      angle: 0,
-      strokeColor: color,
-      backgroundColor: 'transparent',
+      height,
+      strokeColor,
+      backgroundColor,
       fillStyle: 'solid',
-      strokeWidth: 1,
-      strokeStyle: 'solid',
+      strokeWidth: 2,
       roughness: 1,
-      opacity: 100,
-      groupIds: [],
-      frameId: null,
-      roundness: null,
-      seed: 3000 + i,
-      version: 1,
-      versionNonce: 4000 + i,
-      isDeleted: false,
-      boundElements: null,
-      updated: now,
-      link: `yanta-note://${noteId}`,
-      locked: false,
+      groupIds,
 
-      text,
-      rawText: text,
-      originalText: text,
-      fontSize: 20,
-      fontFamily: 5,
-      textAlign: 'center',
-      verticalAlign: 'middle',
-      baseline: 24,
-      containerId: null,
-      lineHeight: 1.25,
+      // Only the box carries the note link.
+      link: noteId ? yantaNoteLink(noteId) : null,
+      customData: noteId ? yantaWikiData(title, noteId) : {},
 
-      customData: {
-        yanta: {
-          wikilink: {
-            noteId,
-            target: title,
-            alias: null,
-            href: `yanta-note://${noteId}`,
-            updated: now,
-          },
+      boundElements,
+      roundness: { type: 3 },
+    },
+    {
+      x,
+      y,
+      width,
+      height,
+      strokeColor,
+      backgroundColor,
+      fillStyle: 'solid',
+      strokeWidth: 2,
+      roughness: 1,
+      roundness: { type: 3 },
+    }
+  );
+
+  const WELCOME_ARROW_GAP = 10;
+
+  const makeArrow = ({
+    id = uid(),
+    startBox,
+    endBox,
+    start,
+    end,
+    strokeColor = XCOL.muted,
+  }) => {
+    const width = end.x - start.x;
+    const height = end.y - start.y;
+
+    return makeExcalidrawElement(
+      {
+        id,
+        type: 'arrow',
+        x: start.x,
+        y: start.y,
+        width,
+        height,
+        strokeColor,
+        strokeWidth: 2,
+        roughness: 1,
+        points: [
+          [0, 0],
+          [width, height],
+        ],
+        startBinding: {
+          elementId: startBox.id,
+          focus: 0,
+          gap: WELCOME_ARROW_GAP,
         },
+        endBinding: {
+          elementId: endBox.id,
+          focus: 0,
+          gap: WELCOME_ARROW_GAP,
+        },
+        startArrowhead: null,
+        endArrowhead: 'arrow',
+        roundness: { type: 2 },
       },
+      {
+        x: start.x,
+        y: start.y,
+        width,
+        height,
+        strokeColor,
+        strokeWidth: 2,
+        opacity: 78,
+        roundness: { type: 2 },
+      }
+    );
+  };
+
+  const makeCard = ({
+    x,
+    y,
+    width = 240,
+    height = 92,
+    title,
+    subtitle,
+    noteId,
+    strokeColor,
+    backgroundColor,
+  }) => {
+    const groupId = uid();
+    const boxId = uid();
+
+    const box = makeRect({
+      id: boxId,
+      groupIds: [groupId],
+      x,
+      y,
+      width,
+      height,
+      strokeColor,
+      backgroundColor,
+      noteId,
+      title,
+      boundElements: [],
+    });
+
+    const titlePos = centeredTextBox({
+      text: title,
+      boxX: x,
+      boxY: y,
+      boxW: width,
+      yOffset: 18,
+      fontSize: 22,
+      maxInset: 20,
+    });
+
+    const subtitlePos = centeredTextBox({
+      text: subtitle,
+      boxX: x,
+      boxY: y,
+      boxW: width,
+      yOffset: 56,
+      fontSize: 15,
+      maxInset: 22,
+    });
+
+    const titleText = makeText({
+      groupIds: [groupId],
+      text: title,
+      x: titlePos.x,
+      y: titlePos.y,
+      width: titlePos.width,
+      fontSize: 22,
+      strokeColor,
+      textAlign: 'center',
+      noteId,
+      linkEnabled: false,
+    });
+
+    const subtitleText = makeText({
+      groupIds: [groupId],
+      text: subtitle,
+      x: subtitlePos.x,
+      y: subtitlePos.y,
+      width: subtitlePos.width,
+      fontSize: 15,
+      strokeColor: XCOL.muted,
+      textAlign: 'center',
+      noteId: null,
+      linkEnabled: false,
+    });
+
+    return {
+      groupId,
+      box,
+      elements: [box, titleText, subtitleText],
+      cx: x + width / 2,
+      cy: y + height / 2,
+      left: x,
+      right: x + width,
+      top: y,
+      bottom: y + height,
     };
   };
 
-  const makeLabel = (i, text, x, y, width, color = '#f8f9fa', fontSize = 22) => ({
-    id: uid(),
-    type: 'text',
-    x,
-    y,
-    width,
-    height: Math.max(34, fontSize * 1.4),
-    angle: 0,
-    strokeColor: color,
-    backgroundColor: 'transparent',
-    fillStyle: 'solid',
-    strokeWidth: 1,
-    strokeStyle: 'solid',
-    roughness: 1,
-    opacity: 100,
-    groupIds: [],
-    frameId: null,
-    roundness: null,
-    seed: 5000 + i,
-    version: 1,
-    versionNonce: 6000 + i,
-    isDeleted: false,
-    boundElements: null,
-    updated: now,
-    link: null,
-    locked: false,
+  const centerGroupId = uid();
 
-    text,
-    rawText: text,
-    originalText: text,
-    fontSize,
-    fontFamily: 5,
-    textAlign: 'center',
-    verticalAlign: 'middle',
-    baseline: Math.round(fontSize * 1.15),
-    containerId: null,
-    lineHeight: 1.25,
-    customData: {},
+  const centerBox = makeRect({
+    id: uid(),
+    groupIds: [centerGroupId],
+    x: 350,
+    y: 210,
+    width: 260,
+    height: 120,
+    strokeColor: XCOL.violetStroke,
+    backgroundColor: XCOL.violetBg,
+    boundElements: [],
   });
 
-  setDrawing(ids.drawing, drawingId, {
+  const centerTitlePos = centeredTextBox({
+    text: 'YANTA',
+    boxX: centerBox.x,
+    boxY: centerBox.y,
+    boxW: centerBox.width,
+    yOffset: 24,
+    fontSize: 40,
+    maxInset: 20,
+  });
+
+  const centerSubtitlePos = centeredTextBox({
+    text: 'write · draw · connect',
+    boxX: centerBox.x,
+    boxY: centerBox.y,
+    boxW: centerBox.width,
+    yOffset: 78,
+    fontSize: 17,
+    maxInset: 20,
+  });
+
+  const centerTitle = makeText({
+    groupIds: [centerGroupId],
+    text: 'YANTA',
+    x: centerTitlePos.x,
+    y: centerTitlePos.y,
+    width: centerTitlePos.width,
+    fontSize: 40,
+    strokeColor: XCOL.violetStroke,
+    textAlign: 'center',
+  });
+
+  const centerSubtitle = makeText({
+    groupIds: [centerGroupId],
+    text: 'write · draw · connect',
+    x: centerSubtitlePos.x,
+    y: centerSubtitlePos.y,
+    width: centerSubtitlePos.width,
+    fontSize: 17,
+    strokeColor: XCOL.muted,
+    textAlign: 'center',
+  });
+
+  const canvasCard = makeCard({
+    x: 72,
+    y: 70,
+    title: 'First Canvas',
+    subtitle: 'Sketch an idea',
+    noteId: ids.canvas,
+    strokeColor: XCOL.greenStroke,
+    backgroundColor: XCOL.greenBg,
+  });
+
+  const basicsCard = makeCard({
+    x: 648,
+    y: 70,
+    title: 'YANTA Basics',
+    subtitle: 'Slash, links, graph',
+    noteId: ids.basics,
+    strokeColor: XCOL.cyanStroke,
+    backgroundColor: XCOL.cyanBg,
+  });
+
+  const shoppingCard = makeCard({
+    x: 92,
+    y: 404,
+    title: 'Shopping List',
+    subtitle: 'Tasks + sharing',
+    noteId: ids.shopping,
+    strokeColor: XCOL.blueStroke,
+    backgroundColor: XCOL.blueBg,
+  });
+
+  const sharingCard = makeCard({
+    x: 628,
+    y: 404,
+    title: 'Sync & Sharing',
+    subtitle: 'Backup when ready',
+    noteId: ids.sharing,
+    strokeColor: XCOL.orangeStroke,
+    backgroundColor: XCOL.orangeBg,
+  });
+
+  const arrows = [
+    makeArrow({
+      startBox: canvasCard.box,
+      endBox: centerBox,
+      start: {
+        x: canvasCard.right + WELCOME_ARROW_GAP,
+        y: canvasCard.cy,
+      },
+      end: {
+        x: centerBox.x - WELCOME_ARROW_GAP,
+        y: centerBox.y + 44,
+      },
+    }),
+
+    makeArrow({
+      startBox: basicsCard.box,
+      endBox: centerBox,
+      start: {
+        x: basicsCard.left - WELCOME_ARROW_GAP,
+        y: basicsCard.cy,
+      },
+      end: {
+        x: centerBox.x + centerBox.width + WELCOME_ARROW_GAP,
+        y: centerBox.y + 44,
+      },
+    }),
+
+    makeArrow({
+      startBox: shoppingCard.box,
+      endBox: centerBox,
+      start: {
+        x: shoppingCard.right + WELCOME_ARROW_GAP,
+        y: shoppingCard.cy,
+      },
+      end: {
+        x: centerBox.x + 44,
+        y: centerBox.y + centerBox.height + WELCOME_ARROW_GAP,
+      },
+    }),
+
+    makeArrow({
+      startBox: sharingCard.box,
+      endBox: centerBox,
+      start: {
+        x: sharingCard.left - WELCOME_ARROW_GAP,
+        y: sharingCard.cy,
+      },
+      end: {
+        x: centerBox.x + centerBox.width - 44,
+        y: centerBox.y + centerBox.height + WELCOME_ARROW_GAP,
+      },
+    }),
+  ];
+
+  const attachArrowToBox = (box, arrow) => {
+    if (!box.boundElements) box.boundElements = [];
+
+    if (!box.boundElements.some((x) => x.id === arrow.id)) {
+      box.boundElements.push({
+        id: arrow.id,
+        type: 'arrow',
+      });
+    }
+  };
+
+  for (const arrow of arrows) {
+    const startCard = [
+      canvasCard,
+      basicsCard,
+      shoppingCard,
+      sharingCard,
+    ].find((card) => card.box.id === arrow.startBinding?.elementId);
+
+    if (startCard) attachArrowToBox(startCard.box, arrow);
+    attachArrowToBox(centerBox, arrow);
+  }
+
+  const hintText = 'Excalidraw is fully integrated!';
+
+  const hint = makeText({
+    text: hintText,
+    x: 190,
+    y: 528,
+    width: 580,
+    fontSize: 17,
+    strokeColor: XCOL.muted,
+    textAlign: 'center',
+  });
+
+  setDrawing(ids.welcome, drawingId, {
     id: drawingId,
-    title: 'YANTA Feature Map',
+    title: 'YANTA Welcome Canvas',
     canvas: {
       width: 960,
-      height: 560,
+      height: 610,
     },
     elements: [
-      makeBox(1, 350, 210, 260, 90, '#6ea8fe', '#1e293b'),
-      makeLabel(2, 'YANTA', 390, 232, 180, '#6ea8fe', 34),
+      ...arrows,
 
-      makeBox(3, 70, 60, 230, 70, '#a78bfa', '#2e1065'),
-      makeLinkedText(4, 'Feature Map', ids.map, 86, 80, 198),
+      centerBox,
+      centerTitle,
+      centerSubtitle,
 
-      makeBox(5, 365, 45, 230, 70, '#22d3ee', '#164e63'),
-      makeLinkedText(6, 'Markdown Essentials', ids.markdown, 382, 65, 198),
+      ...canvasCard.elements,
+      ...basicsCard.elements,
+      ...shoppingCard.elements,
+      ...sharingCard.elements,
 
-      makeBox(7, 660, 60, 230, 70, '#4ade80', '#14532d'),
-      makeLinkedText(8, 'Graph & Wikilinks', ids.graph, 676, 80, 198),
-
-      makeBox(9, 70, 395, 230, 70, '#fbbf24', '#713f12'),
-      makeLinkedText(10, 'Sync & Live Sharing', ids.sync, 86, 415, 198),
-
-      makeBox(11, 365, 430, 230, 70, '#fb923c', '#7c2d12'),
-      makeLinkedText(12, 'Images, Icons & Media', ids.media, 382, 450, 198),
-
-      makeBox(13, 660, 395, 230, 70, '#10b981', '#064e3b'),
-      makeLinkedText(14, 'Tasks & Workflows', ids.tasks, 676, 415, 198),
-
-      makeBox(15, 660, 230, 230, 70, '#f87171', '#7f1d1d'),
-      makeLinkedText(16, 'Research Notes', ids.research, 676, 250, 198),
-
-      makeLabel(
-        17,
-        'Tip: drag notes from the sidebar into a drawing, or type [[ to create linked drawing text.',
-        190,
-        525,
-        590,
-        '#94a3b8',
-        18
-      ),
+      hint,
     ],
+
+    // Kein theme, kein viewBackgroundColor.
+    // Excalidraw/draw.js steuert das aktuelle Theme.
     appState: {
-      theme: 'dark',
-      viewBackgroundColor: '#121212',
-      currentItemStrokeColor: '#f8f9fa',
-      currentItemBackgroundColor: 'transparent',
+      zoom: {
+        value: 0.82,
+      },
+      scrollX: -20,
+      scrollY: 80,
     },
+
     files: {},
   }, 'welcome-draw');
 
-  updateSearchIndexFor(state.notes.get(ids.drawing));
+  updateSearchIndexFor(state.notes.get(ids.welcome));
 
   rebuildWikilinkIndex();
 

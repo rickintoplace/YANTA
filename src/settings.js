@@ -250,7 +250,7 @@ export async function saveAppearance(next, { reason = 'user' } = {}) {
 // Apply settings to the document.
 // ----------------------------------------------------------------
 
-function resolveEffectiveMode() {
+export function resolveEffectiveMode() {
   const mode = appearance.mode || 'auto';
   if (mode === 'dark' || mode === 'light') return mode;
   // 'auto' and 'system-colors' both follow the OS for light/dark.
@@ -292,19 +292,19 @@ export function applyAppearance() {
   const root = document.documentElement;
   const mode = resolveEffectiveMode();
 
-  // Set theme attribute so any CSS that reads it still works.
-  root.dataset.theme = appearance.mode === 'auto' ? 'auto' : appearance.mode;
+  // WICHTIG:
+  // data-theme ist ab jetzt immer der EFFEKTIVE Modus: "dark" oder "light".
+  // Die ursprüngliche Einstellung bleibt separat in data-appearance-mode.
+  root.dataset.theme = mode;
+  root.dataset.appearanceMode = appearance.mode || 'auto';
 
-    // Für alte Module wie draw.js, die noch state.theme lesen.
-    state.theme =
-    appearance.mode === 'dark' || appearance.mode === 'light'
-        ? appearance.mode
-        : 'auto';
+  // Für Module wie draw.js: auch state.theme ist immer effektiv.
+  state.theme = mode;
 
-    const themeBtn = $('btn-theme');
-    if (themeBtn) {
-    themeBtn.title = `Theme: ${appearance.mode} (click to cycle)`;
-    }
+  const themeBtn = $('btn-theme');
+  if (themeBtn) {
+    themeBtn.title = `Theme: ${appearance.mode} → ${mode} (click to cycle)`;
+  }
 
   // Color tokens
   const palette = (appearance.colors && appearance.colors[mode]) || DEFAULT_THEMES[mode];
@@ -334,12 +334,13 @@ export function applyAppearance() {
   const lh = Number(appearance.lineHeight) || 1.7;
   root.style.setProperty('--lh-base', String(lh));
 
-    window.dispatchEvent(new CustomEvent('yanta-theme-change', {
+  window.dispatchEvent(new CustomEvent('yanta-theme-change', {
     detail: {
-        theme: state.theme,
-        appearance: getAppearance(),
+      theme: mode,                       // effektiv: "dark" | "light"
+      appearanceMode: appearance.mode,   // Einstellung: "auto" | "dark" | ...
+      appearance: getAppearance(),
     },
-    }));
+  }));
 }
 
 // React to OS theme changes when in 'auto' or 'system-colors' mode.
@@ -713,11 +714,74 @@ function renderSyncSection(host) {
   `;
   host.append(info);
 
+  // Sync Capsule
+  const capsuleGroup = el('div', { class: 'yanta-settings-group' });
+  capsuleGroup.append(el('div', { class: 'yanta-settings-group-title' }, 'Encrypted Sync Capsule'));
+  capsuleGroup.append(el('p', { class: 'yanta-settings-hint' },
+    'Create an encrypted .yanta file that contains your notes, folders, drawings, metadata, tombstones and image assets. Importing a capsule merges it into this vault instead of replacing everything.'));
+
+  const capsuleActions = el('div', {
+    class: 'compress-actions',
+    style: {
+      justifyContent: 'flex-start',
+      flexWrap: 'wrap',
+      marginTop: '10px',
+    },
+  });
+
+  capsuleActions.append(
+    el('button', {
+      class: 'btn primary',
+      onclick: async () => {
+        const { exportSyncCapsule } = await import('./sync2/capsule.js');
+        await exportSyncCapsule();
+      },
+    }, 'Back up now'),
+
+    el('button', {
+      class: 'btn',
+      onclick: async () => {
+        const { pickAndImportSyncCapsule } = await import('./sync2/capsule.js');
+        await pickAndImportSyncCapsule();
+      },
+    }, 'Restore from backup'),
+
+    el('button', {
+      class: 'btn',
+      onclick: async () => {
+        const { copySyncCapsuleRecoveryKey } = await import('./sync2/capsule.js');
+        await copySyncCapsuleRecoveryKey();
+      },
+    }, 'Copy sync key')
+  );
+
+  capsuleGroup.append(capsuleActions);
+
+  const capsuleNote = el('div', { class: 'yanta-settings-info', style: { marginTop: '10px' } });
+  capsuleNote.innerHTML = `
+    <p><strong>Private by default.</strong> The capsule encrypts note contents, drawings, folders, tags and image files before they leave this device.</p>
+    <p>The sync key is required to restore this capsule on another device. Keep it private.</p>
+  `;
+  capsuleGroup.append(capsuleNote);
+
+  host.append(capsuleGroup);
+
+  // Future Cloud Sync placeholder
+  const cloudGroup = el('div', { class: 'yanta-settings-group' });
+  cloudGroup.append(el('div', { class: 'yanta-settings-group-title' }, 'Cloud Sync'));
+  cloudGroup.append(el('p', { class: 'yanta-settings-hint' },
+    'Coming later: encrypted Cloud Sync through Google Drive, Dropbox, OneDrive or YANTA Cloud. No provider setup or OAuth client IDs will be required.'));
+  cloudGroup.append(el('button', {
+    class: 'btn',
+    disabled: true,
+  }, 'Cloud Sync coming soon'));
+  host.append(cloudGroup);
+
   // Sync folder shortcut
   const syncGroup = el('div', { class: 'yanta-settings-group' });
-  syncGroup.append(el('div', { class: 'yanta-settings-group-title' }, 'Sync folder'));
+  syncGroup.append(el('div', { class: 'yanta-settings-group-title' }, 'Advanced: Sync Folder'));
   syncGroup.append(el('p', { class: 'yanta-settings-hint' },
-    'YANTA can mirror your notes to a folder on disk that you sync with Syncthing, Dropbox, iCloud, etc.'));
+    'Advanced option: mirror your notes to a folder on disk and sync that folder with Syncthing, Dropbox, iCloud, SMB or your own backup tool.'));
   syncGroup.append(el('button', {
     class: 'btn',
     onclick: async () => {

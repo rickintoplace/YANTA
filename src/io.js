@@ -161,7 +161,12 @@ export async function importItems(items) {
   for (const { file, pathArr } of items) {
     try {
       const lower = file.name.toLowerCase();
-      if (lower.endsWith('.zip')) { await importZipBlob(file); zipCount++; }
+      if (lower.endsWith('.yanta')) {
+        const { importSyncCapsuleFile } = await import('./sync2/capsule.js');
+        await importSyncCapsuleFile(file);
+        bundleCount++;
+      }
+      else if (lower.endsWith('.zip')) { await importZipBlob(file); zipCount++; }
       else if (lower.endsWith('.excalidraw') || lower.endsWith('.excalidraw.json')) {
         const { importExcalidrawFileAsNote } = await import('./draw.js');
         await importExcalidrawFileAsNote(file);
@@ -491,11 +496,27 @@ export async function walkEntry(entry, pathArr = []) {
 export function openExportMenu(anchorBtn, showMenuFn) {
   const r = anchorBtn.getBoundingClientRect();
   const note = state.currentNoteId ? state.notes.get(state.currentNoteId) : null;
+
   showMenuFn(r.left, r.bottom + 4, [
-    { label: 'Export as folder ZIP (recommended)', action: exportAsZip },
+    {
+      label: 'Back up YANTA (.yanta, encrypted)',
+      action: async () => {
+        const { exportSyncCapsule } = await import('./sync2/capsule.js');
+        await exportSyncCapsule();
+      },
+    },
+    {
+      label: 'Save sync key…',
+      action: async () => {
+        const { copySyncCapsuleRecoveryKey } = await import('./sync2/capsule.js');
+        await copySyncCapsuleRecoveryKey();
+      },
+    },
+    'hr',
+    { label: 'Export readable folder ZIP (.zip)', action: exportAsZip },
     'hr',
     { label: 'Export current note (.md)', action: () => note && exportNoteAsMd(note) },
     { label: 'Export every note as .md files', action: exportEveryNoteMd },
-    { label: 'Export full bundle (.json + base64 images)', action: exportBundle },
+    { label: 'Export legacy full bundle (.json + base64 images)', action: exportBundle },
   ]);
 }

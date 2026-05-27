@@ -1,0 +1,10 @@
+{
+  "format": "yanta-sync",
+  "version": 1,
+  "vaultId": "vault_c4704a5060e543bd8e12f1f1",
+  "created": "2026-05-26T22:34:58.095Z",
+  "encryption": {
+    "alg": "AES-GCM",
+    "kdf": "raw-256"
+  }
+}

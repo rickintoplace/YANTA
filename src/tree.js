@@ -53,7 +53,7 @@ function activeNoteMarker(depth = 0) {
     'aria-hidden': 'true',
     style: {
       position: 'absolute',
-      left: (12 + depth * 14) + 'px',
+      left: (0 + depth * 12) + 'px',
       top: '4px',
       bottom: '4px',
       width: '2px',
@@ -285,7 +285,7 @@ export function renderTree() {
   const ftitle = el(
     'div',
     { class: 'tree-section-title' },
-    'Folders',
+    'Root',
     el('button', {
       class: 'icon-btn',
       title: 'New folder',
@@ -405,7 +405,7 @@ function folderRow(f, visibleNotes, depth) {
       'tree-row folder' +
       (selected ? ' selected' : '') +
       (isAnchor ? ' selection-anchor' : ''),
-    style: { paddingLeft: (12 + depth * 14) + 'px' },
+    style: { paddingLeft: (12 + depth * 12) + 'px' },
     onclick: (e) => handleTreeSelectionClick(e, key, () => {
       if (expanded) state.expandedFolders.delete(f.id);
       else state.expandedFolders.add(f.id);
@@ -517,7 +517,7 @@ function noteRow(n, depth = 0) {
   const isAnchor = selection.anchorKey === key;
 
   const rowStyle = {
-    paddingLeft: (24 + depth * 14) + 'px',
+    paddingLeft: (12 + depth * 14) + 'px',
   };
 
   // Wichtig:

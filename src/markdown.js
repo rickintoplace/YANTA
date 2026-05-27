@@ -78,6 +78,7 @@ function sanitizeHtml(html) {
       // Inline Lucide placeholders
       'data-lucide-icon',
       'data-lucide-color',
+      'data-lucide-size',
 
       // Checkboxen
       'type',
@@ -162,6 +163,8 @@ function sanitizeHtml(html) {
   for (const host of tmp.content.querySelectorAll('.pv-inline-icon[data-lucide-icon]')) {
     const name = host.getAttribute('data-lucide-icon') || 'square';
     const color = host.getAttribute('data-lucide-color') || '';
+    const sizeRaw = parseInt(host.getAttribute('data-lucide-size') || '16', 10);
+    const size = Number.isFinite(sizeRaw) ? sizeRaw : 16;
 
     const safeColor = safeCssColor(color);
 
@@ -171,10 +174,11 @@ function sanitizeHtml(html) {
       host.style.removeProperty('color');
     }
 
-    hydrateLucideHost(host, name, 16);
+    hydrateLucideHost(host, name, size);
 
     host.removeAttribute('data-lucide-icon');
     host.removeAttribute('data-lucide-color');
+    host.removeAttribute('data-lucide-size');
   }
 
   return tmp.innerHTML;
@@ -253,15 +257,22 @@ export function renderDrawEmbedHtml(id, label = 'Drawing', surface = 'preview') 
 
   return `<div class="yanta-draw-embed ${cleanSurface}-surface" data-draw-surface="${escapeAttr(cleanSurface)}" data-draw-id="${escapeAttr(cleanId)}" data-note-id="${escapeAttr(state.currentNoteId || '')}" contenteditable="false">
     <div class="yanta-draw-embed-head">
-      <span class="yanta-draw-embed-icon" aria-hidden="true">${lucide('pencil', 13)}</span>
+      <span class="yanta-draw-embed-icon" aria-hidden="true">${previewLucide('pencil', 13)}</span>
       <div class="yanta-draw-embed-title" data-draw-title title="Rename drawing">${escapeHtml(label || 'Drawing')}</div>
       <div class="yanta-draw-embed-meta" data-draw-info>draw://${escapeHtml(cleanId)}</div>
       <div class="yanta-draw-embed-actions">
-        <button type="button" class="icon-btn" data-draw-action="link-note" title="Link selected element to note">${lucide('file-plus', 14)}</button>
-        <button type="button" class="icon-btn" data-draw-action="rename" title="Rename drawing">${lucide('pencil', 14)}</button>
-        <button type="button" class="icon-btn" data-draw-action="fullscreen" title="Open fullscreen">${lucide('maximize-2', 14)}</button>
-        <button type="button" class="icon-btn" data-draw-action="export" title="Export .excalidraw">${lucide('download', 14)}</button>
-        <button type="button" class="icon-btn danger" data-draw-action="delete" title="Delete drawing">${lucide('trash', 14)}</button>
+        <button type="button" class="icon-btn" data-draw-action="export" title="Export .excalidraw">${previewLucide('download', 14)}</button>
+        <button type="button" class="icon-btn" data-draw-action="link-note" title="Link selected element to note">${previewLucide('file-plus', 14)}</button>
+        <button type="button" class="icon-btn" data-draw-action="toggle-width" title="Expand drawing width">${previewLucide('unfold-horizontal', 14)}</button>
+        <button type="button" class="icon-btn" data-draw-action="fullscreen" title="Open fullscreen">${previewLucide('expand', 14)}</button>
+        <div style="
+            border-right: 1px solid var(--text-dim);
+            width: 2px;
+            margin-right: 2px;
+            max-height: 22px;
+        ">
+        </div>
+        <button type="button" class="icon-btn danger" data-draw-action="delete" title="Delete drawing">${previewLucide('trash', 14)}</button>
       </div>
     </div>
     <div class="yanta-draw-inline-host"></div>
@@ -270,57 +281,96 @@ export function renderDrawEmbedHtml(id, label = 'Drawing', surface = 'preview') 
   </div>`;
 }
 
+function resolveWikilinkNoteId(target) {
+  const decoded = decodeEntities(String(target || '').trim());
+  const key = decoded.toLowerCase();
+
+  let noteId = wikilinkIndex.get(key);
+  if (noteId && state.notes.has(noteId)) return noteId;
+
+  // Fallback: robust gegen Entity-/Index-Timing-Probleme.
+  const hit = [...state.notes.values()].find((n) =>
+    (n.title || '').trim().toLowerCase() === key
+  );
+
+  return hit?.id || null;
+}
+
+function previewLucide(name, size = 14) {
+  return `<span class="pv-inline-icon"
+    data-lucide-icon="${escapeAttr(name)}"
+    data-lucide-size="${escapeAttr(size)}"
+    contenteditable="false"
+    aria-hidden="true">${lucide(name, size)}</span>`;
+}
+
 export function renderInline(s) {
   let out = escapeHtml(s);
+
+  // Wichtig:
+  // HTML-Fragmente werden als Platzhalter geparkt, damit spätere Markdown-
+  // Regeln wie _italic_ nicht in data-note-id / data-draw-id / href etc.
+  // hineinlaufen und das erzeugte HTML beschädigen.
+  const placeholders = [];
+
+  const stash = (html) => {
+    const token = `\uE000YANTA${placeholders.length}\uE001`;
+    placeholders.push({ token, html });
+    return token;
+  };
+
+  const restore = () => {
+    for (const { token, html } of placeholders) {
+      out = out.split(token).join(html);
+    }
+  };
 
   // Excalidraw embeds:
   //   draw://abc123
   //   ![](draw://abc123)
   out = out.replace(
     /!\[([^\]]*)\]\(draw:\/\/([a-z0-9_-]+)\)/gi,
-    (_, alt, id) => renderDrawEmbedHtml(id, decodeEntities(alt || 'Drawing'))
+    (_, alt, id) => stash(renderDrawEmbedHtml(id, decodeEntities(alt || 'Drawing')))
   );
 
   out = out.replace(
     /(^|[\s>])draw:\/\/([a-z0-9_-]+)/gi,
-    (_, prefix, id) => `${prefix}${renderDrawEmbedHtml(id, 'Drawing')}`
+    (_, prefix, id) => `${prefix}${stash(renderDrawEmbedHtml(id, 'Drawing'))}`
   );
 
   // Inline Lucide icon syntax:
   // :lucide[atom]:
   // :lucide[atom]{#6ea8fe}:
-  //
-  // Wichtig:
-  // Wir setzen hier KEIN direktes SVG ein, sondern nur einen sicheren Placeholder.
-  // Das echte SVG wird nach DOMPurify in sanitizeHtml() hydriert.
-    out = out.replace(
-      /:lucide\[([a-zA-Z0-9-_ ]+)\](?:\{([^}\n:]+)\})?:/g,
+  out = out.replace(
+    /:lucide\[([a-zA-Z0-9-_ ]+)\](?:\{([^}\n:]+)\})?:/g,
     (_, iconName, color) => {
       const cleanName = iconName.trim();
       const cleanColor = safeCssColor(color);
 
       const colorAttr = cleanColor
         ? ` data-lucide-color="${escapeAttr(cleanColor)}" style="color:${escapeAttr(cleanColor)}"`
-      : '';
+        : '';
 
-      return `<span class="pv-inline-icon" data-lucide-icon="${escapeAttr(cleanName)}"${colorAttr} contenteditable="false" aria-hidden="true"></span>`;
+      return stash(
+        `<span class="pv-inline-icon" data-lucide-icon="${escapeAttr(cleanName)}"${colorAttr} contenteditable="false" aria-hidden="true"></span>`
+      );
     }
   );
 
   // Inline code first.
-  out = out.replace(/`([^`\n]+)`/g, (_, c) => `<code>${c}</code>`);
+  out = out.replace(/`([^`\n]+)`/g, (_, c) => stash(`<code>${c}</code>`));
 
   // Transclusion: ![[Note#Section|Alias]]
   out = out.replace(/!\[\[([^\]\n#|]+)(?:#([^\]\n|]+))?(?:\|([^\]\n]+))?\]\]/g, (_, title, section, alias) => {
     const decodedTitle = decodeEntities(title.trim());
-    const nid = wikilinkIndex.get(decodedTitle.toLowerCase());
+    const nid = resolveWikilinkNoteId(decodedTitle);
 
     if (!nid) {
-      return `<div class="pv-trans pv-trans-missing">↳ <strong>${escapeHtml(decodedTitle)}</strong> · not found</div>`;
+      return stash(`<div class="pv-trans pv-trans-missing">↳ <strong>${escapeHtml(decodedTitle)}</strong> · not found</div>`);
     }
 
     if (transcludeDepth >= 3) {
-      return `<div class="pv-trans pv-trans-loop">↳ ${escapeHtml(decodedTitle)} · transclusion too deep</div>`;
+      return stash(`<div class="pv-trans pv-trans-loop">↳ ${escapeHtml(decodedTitle)} · transclusion too deep</div>`);
     }
 
     const note = state.notes.get(nid);
@@ -344,23 +394,22 @@ export function renderInline(s) {
       ? decodeEntities(alias.trim())
       : decodedTitle + (decodedSection ? ' › ' + decodedSection : '');
 
-    return `<div class="pv-trans" contenteditable="false">
+    return stash(`<div class="pv-trans" contenteditable="false">
       <div class="pv-trans-head">↳ <a class="wiki-link" data-wiki="${escapeAttr(decodedTitle)}" data-note-id="${escapeAttr(nid)}">${escapeHtml(label)}</a></div>
       <div class="pv-trans-body">${rendered}</div>
-    </div>`;
+    </div>`);
   });
 
   // Wikilinks: [[Target|Alias]]
   out = out.replace(/\[\[([^\]|\n]+)(?:\|([^\]\n]+))?\]\]/g, (_, target, alias) => {
     const decodedTarget = decodeEntities(target.trim());
-    const key = decodedTarget.toLowerCase();
-    const noteId = wikilinkIndex.get(key);
+    const noteId = resolveWikilinkNoteId(decodedTarget);
     const text = decodeEntities((alias || target).trim());
 
     const cls = noteId ? 'wiki-link' : 'wiki-link missing';
     const idAttr = noteId ? ` data-note-id="${escapeAttr(noteId)}"` : '';
 
-    return `<a class="${cls}" data-wiki="${escapeAttr(decodedTarget)}"${idAttr}>${escapeHtml(text)}</a>`;
+    return stash(`<a class="${cls}" data-wiki="${escapeAttr(decodedTarget)}"${idAttr}>${escapeHtml(text)}</a>`);
   });
 
   // Images + video embeds through image syntax.
@@ -370,29 +419,29 @@ export function renderInline(s) {
 
     if (embed) {
       const safeEmbed = safeUrl(embed);
-      if (!safeEmbed) return `<span class="pv-img-missing">blocked video url</span>`;
+      if (!safeEmbed) return stash(`<span class="pv-img-missing">blocked video url</span>`);
 
-      return `<div class="pv-embed-video" contenteditable="false">
+      return stash(`<div class="pv-embed-video" contenteditable="false">
         <iframe src="${escapeAttr(safeEmbed)}" allowfullscreen frameborder="0" allow="autoplay; encrypted-media; picture-in-picture"></iframe>
-      </div>`;
+      </div>`);
     }
 
     const resolved = resolveImageUrl(decodedUrl);
 
     if (resolved === null) {
-      return `<span class="pv-img-missing">missing: ${escapeHtml(decodedUrl.slice(0, 40))}…</span>`;
+      return stash(`<span class="pv-img-missing">missing: ${escapeHtml(decodedUrl.slice(0, 40))}…</span>`);
     }
 
     const safeImg = safeUrl(resolved, { image: true });
     if (!safeImg) {
-      return `<span class="pv-img-missing">blocked image url</span>`;
+      return stash(`<span class="pv-img-missing">blocked image url</span>`);
     }
 
     const titleAttr = title ? ` title="${escapeAttr(decodeEntities(title))}"` : '';
 
-    return `<span class="pv-img-wrap" contenteditable="false">
+    return stash(`<span class="pv-img-wrap" contenteditable="false">
       <img src="${escapeAttr(safeImg)}" alt="${escapeAttr(decodeEntities(alt))}"${titleAttr} loading="lazy" draggable="false" />
-    </span>`;
+    </span>`);
   });
 
   // Normal markdown links.
@@ -401,10 +450,10 @@ export function renderInline(s) {
     const href = safeUrl(decodedUrl);
 
     if (!href) {
-      return `<span>${escapeHtml(decodeEntities(txt))}</span>`;
+      return stash(`<span>${escapeHtml(decodeEntities(txt))}</span>`);
     }
 
-    return `<a href="${escapeAttr(href)}" target="_blank" rel="noopener noreferrer">${txt}</a>`;
+    return stash(`<a href="${escapeAttr(href)}" target="_blank" rel="noopener noreferrer">${txt}</a>`);
   });
 
   // DOI.
@@ -414,10 +463,26 @@ export function renderInline(s) {
 
     const href = safeUrl(`https://doi.org/${d}`);
 
-    return href
-      ? `<a href="${escapeAttr(href)}" target="_blank" rel="noopener noreferrer" class="pv-doi">doi:${escapeHtml(d)}</a>${escapeHtml(trailing)}`
-      : `doi:${escapeHtml(rawDoi)}`;
+    return stash(
+      href
+        ? `<a href="${escapeAttr(href)}" target="_blank" rel="noopener noreferrer" class="pv-doi">doi:${escapeHtml(d)}</a>${escapeHtml(trailing)}`
+        : `doi:${escapeHtml(rawDoi)}`
+    );
   });
+
+  // Footnotes.
+  out = out.replace(/\[\^([^\]\s]+)\]/g, (_, id) =>
+    stash(`<sup class="fn-ref"><a href="#fn-${escapeAttr(id)}" data-fn="${escapeAttr(id)}">${escapeHtml(id)}</a></sup>`)
+  );
+
+  // Math placeholders.
+  out = out.replace(/\$\$([^$\n]+)\$\$/g, (_, expr) =>
+    stash(`<span class="pv-math pv-math-block">${escapeHtml(decodeEntities(expr))}</span>`)
+  );
+
+  out = out.replace(/(?<!\\)\$([^$\n]+)\$/g, (_, expr) =>
+    stash(`<span class="pv-math">${escapeHtml(decodeEntities(expr))}</span>`)
+  );
 
   // Markdown inline styling.
   out = out.replace(/\*\*\*([^*\n]+)\*\*\*/g, '<strong><em>$1</em></strong>');
@@ -429,64 +494,139 @@ export function renderInline(s) {
   out = out.replace(/==([^=\n]+)==/g, '<mark>$1</mark>');
   out = out.replace(/~~([^~\n]+)~~/g, '<del>$1</del>');
 
-  // Footnotes.
-  out = out.replace(/\[\^([^\]\s]+)\]/g, (_, id) =>
-    `<sup class="fn-ref"><a href="#fn-${escapeAttr(id)}" data-fn="${escapeAttr(id)}">${escapeHtml(id)}</a></sup>`
-  );
-
-  // Math placeholders.
-  out = out.replace(/\$\$([^$\n]+)\$\$/g, (_, expr) =>
-    `<span class="pv-math pv-math-block">${escapeHtml(decodeEntities(expr))}</span>`
-  );
-
-  out = out.replace(/(?<!\\)\$([^$\n]+)\$/g, (_, expr) =>
-    `<span class="pv-math">${escapeHtml(decodeEntities(expr))}</span>`
-  );
-
-  // Tags.
+  // Tags after styling.
   out = out.replace(/(^|\s)#([a-zA-Z][\w-]*)/g, (_, sp, tag) =>
-    `${sp}<span class="tag-ref" data-tag="${escapeAttr(tag)}">#${escapeHtml(tag)}</span>`
+    `${sp}${stash(`<span class="tag-ref" data-tag="${escapeAttr(tag)}">#${escapeHtml(tag)}</span>`)}`
   );
+
+  restore();
 
   return out;
 }
 
 export function renderBlocksInline(md) {
-  const lines = md.split('\n');
+  const lines = String(md || '').split('\n');
   const ctx = { inFence: false };
   const out = [];
   let codeBuf = [];
-  const flush = () => { if (codeBuf.length) { out.push(`<pre><code>${escapeHtml(codeBuf.join('\n'))}</code></pre>`); codeBuf = []; } };
+
+  const flush = () => {
+    if (!codeBuf.length) return;
+
+    out.push(`<pre><code>${escapeHtml(codeBuf.join('\n'))}</code></pre>`);
+    codeBuf = [];
+  };
+
   for (const line of lines) {
     const info = classifyLine(line, ctx);
-    if (info.type === 'fence') { flush(); ctx.inFence = !!info.opens; continue; }
-    if (info.type === 'code') { codeBuf.push(line); continue; }
+
+    if (info.type === 'fence') {
+      flush();
+      ctx.inFence = !!info.opens;
+      continue;
+    }
+
+    if (info.type === 'code') {
+      codeBuf.push(line);
+      continue;
+    }
+
     flush();
-    if (info.type === 'blank') { out.push(''); continue; }
+
+    if (info.type === 'blank') {
+      out.push('');
+      continue;
+    }
+
     if (/^h[1-6]$/.test(info.type)) {
       const lvl = parseInt(info.type[1], 10);
       const txt = line.replace(/^#{1,6}\s+/, '');
-      out.push(`<h${Math.min(6, lvl + 1)}>${renderInline(txt)}</h${Math.min(6, lvl + 1)}>`);
+      const smallLvl = Math.min(6, lvl + 1);
+
+      out.push(`<h${smallLvl}>${renderInline(txt)}</h${smallLvl}>`);
       continue;
     }
-    if (info.type === 'hr') { out.push('<hr/>'); continue; }
-    if (info.type === 'quote') { out.push(`<blockquote>${renderInline(line.replace(/^\s*>\s?/, ''))}</blockquote>`); continue; }
-    if (info.type === 'ul' || info.type === 'task') {
-      const m = /^(\s*)([-*+])\s+(?:\[([ xX])\]\s+)?(.*)$/.exec(line);
-      const checked = m && m[3] && m[3].toLowerCase() === 'x';
-      const cb = m && m[3] != null ? `<input type="checkbox" disabled ${checked ? 'checked' : ''}/> ` : '';
-      out.push(`<div style="padding-left:${(m[1].length * 0.6) + 1.5}em;text-indent:-1.2em">• ${cb}${renderInline(m[4])}</div>`);
+
+    if (info.type === 'hr') {
+      out.push('<hr/>');
       continue;
     }
+
+    if (info.type === 'quote') {
+      out.push(`<blockquote>${renderInline(line.replace(/^\s*>\s?/, ''))}</blockquote>`);
+      continue;
+    }
+
+    // Tasks im Hover-Tooltip / Inline-Block sauber als Checkbox + Label rendern.
+    // Vorher wurden Tasks im kompakten Renderer wie normale Bullet-Listen behandelt,
+    // wodurch sie im Tooltip optisch kaputt bzw. uneinheitlich aussahen.
+    if (info.type === 'task') {
+      const m = /^(\s*)([-*+])\s+\[([ xX])\]\s+(.*)$/.exec(line);
+
+      if (!m) {
+        out.push(`<p style="margin:0.2em 0">${renderInline(line)}</p>`);
+        continue;
+      }
+
+      const indent = m[1].length;
+      const checked = m[3].toLowerCase() === 'x';
+      const label = m[4] || '';
+
+      out.push(`
+        <div class="task task-static"
+          style="display:flex;align-items:flex-start;gap:8px;min-height:24px;padding-left:${(indent * 0.6) + 0.25}em;margin:2px 0">
+          <input type="checkbox" disabled contenteditable="false" ${checked ? 'checked' : ''}
+            style="width:16px;height:16px;min-width:16px;margin:3px 0 0 0;accent-color:var(--accent)" />
+          <span class="task-label"
+            style="flex:1;${checked ? 'text-decoration:line-through;color:var(--text-dim)' : ''}">
+            ${renderInline(label)}
+          </span>
+        </div>
+      `);
+
+      continue;
+    }
+
+    if (info.type === 'ul') {
+      const m = /^(\s*)([-*+])\s+(.*)$/.exec(line);
+
+      if (!m) {
+        out.push(`<p style="margin:0.2em 0">${renderInline(line)}</p>`);
+        continue;
+      }
+
+      out.push(
+        `<div style="padding-left:${(m[1].length * 0.6) + 1.5}em;text-indent:-1.2em">• ${renderInline(m[3])}</div>`
+      );
+
+      continue;
+    }
+
     if (info.type === 'ol') {
       const m = /^(\s*)(\d+)\.\s+(.*)$/.exec(line);
-      out.push(`<div style="padding-left:${(m[1].length * 0.6) + 1.8}em;text-indent:-1.5em">${m[2]}. ${renderInline(m[3])}</div>`);
+
+      if (!m) {
+        out.push(`<p style="margin:0.2em 0">${renderInline(line)}</p>`);
+        continue;
+      }
+
+      out.push(
+        `<div style="padding-left:${(m[1].length * 0.6) + 1.8}em;text-indent:-1.5em">${m[2]}. ${renderInline(m[3])}</div>`
+      );
+
       continue;
     }
-    if (info.type === 'image') { out.push(renderInline(line)); continue; }
+
+    if (info.type === 'image') {
+      out.push(renderInline(line));
+      continue;
+    }
+
     out.push(`<p style="margin:0.2em 0">${renderInline(line)}</p>`);
   }
+
   flush();
+
   return sanitizeHtml(out.join(''));
 }
 
@@ -517,8 +657,8 @@ function admIcon(type) {
     note: 'info',
     info: 'info',
     tip: 'check',
-    warning: 'star',
-    important: 'star',
+    warning: 'circle-alert',
+    important: 'circle-alert',
     caution: 'x',
     fold: 'eye',
     quote: 'quote',

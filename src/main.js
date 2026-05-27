@@ -24,6 +24,25 @@ import { wikilinkIndex } from './features-state.js';
 import { getNoteDoc, noteMarkdown, drawingsTextForNote } from './yjs.js';
 import { openShareModal, closeShareModal, stopSharing, restoreSharedNotes, handleShareUrl } from './sharing.js';
 import { setupDraw, createDrawingAndInsert, importExcalidrawFileIntoCurrent } from './draw.js';
+import {
+  installVaultStoreBridge,
+  seedVaultFromLocalState,
+} from './sync2/store-bridge.js';
+
+import {
+  vaultJsonSnapshot,
+  getVaultDoc,
+} from './sync2/vault-doc.js';
+import {
+  createSync2DebugAppRuntime,
+  createSync2BrokerAppRuntime,
+} from './sync2/app-engine.js';
+import {
+  exportSyncCapsule,
+  pickAndImportSyncCapsule,
+  copySyncCapsuleRecoveryKey,
+  capsuleDebugSnapshot,
+} from './sync2/capsule.js';
 
 let sharePreviewLocked = false;
 
@@ -50,6 +69,9 @@ async function buildSearchIndex() {
 
 async function init() {
   await openDB();
+
+  await installVaultStoreBridge();
+
   try {
     if (navigator.storage?.persist) {
       const already = await navigator.storage.persisted();
@@ -69,7 +91,65 @@ async function init() {
   for (const f of folders) state.folders.set(f.id, f);
   for (const im of images) state.imagesMeta.set(im.id, im);
 
+  await seedVaultFromLocalState();
+
+  // Debug helper. Remove later if desired.
+  window.yantaVaultDebug = {
+    getVaultDoc,
+    vaultJsonSnapshot,
+  };
+
+  // Sync2 debug runtime: provider-independent encrypted sync against
+  // a persistent IndexedDB fake remote.
+  try {
+    window.yantaSync2 = await createSync2DebugAppRuntime();
+
+    console.info('[YANTA Sync2] debug runtime ready', {
+      deviceId: window.yantaSync2.deviceId,
+      syncKey: window.yantaSync2.syncKey,
+    });
+  } catch (err) {
+    console.warn('[YANTA Sync2] debug runtime failed to start', err);
+  }
+
+  window.yantaConnectSync2Broker = async ({
+    baseUrl = 'http://localhost:8787',
+    token = 'dev',
+    makeDefault = false,
+  } = {}) => {
+    const runtime = await createSync2BrokerAppRuntime({
+      baseUrl,
+      token,
+    });
+
+    window.yantaSync2Broker = runtime;
+
+    if (makeDefault) {
+      try {
+        window.yantaSync2?.engine?.stop?.();
+      } catch {}
+
+      window.yantaSync2 = runtime;
+    }
+
+    console.info('[YANTA Sync2] broker runtime ready', {
+      baseUrl,
+      deviceId: runtime.deviceId,
+      makeDefault,
+    });
+
+    return runtime;
+  };
+
+  window.yantaCapsule = {
+    exportSyncCapsule,
+    pickAndImportSyncCapsule,
+    copySyncCapsuleRecoveryKey,
+    capsuleDebugSnapshot,
+  };
+
   await loadAppearance();
+
   watchSystemTheme();
 
   state.expandedFolders = new Set(expanded);
@@ -185,8 +265,8 @@ function bindEvents() {
     e.stopPropagation();
     const r = e.currentTarget.getBoundingClientRect();
     showMenu(r.left, r.bottom + 4, [
-      { label: 'Import files (.md / .json / .zip)…', action: () => $('importFile').click() },
-      { label: 'Import folder (with sub-folders)…', action: () => $('importFolder').click() },
+      { label: 'Restore / import files (.yanta / .md / .json / .zip)…', action: () => $('importFile').click() },
+    { label: 'Import folder (with sub-folders)…', action: () => $('importFolder').click() },
       'hr',
       { label: 'Or drop files/folders anywhere on the window', action: () => toast('Drop files or a folder onto YANTA') },
     ]);
@@ -322,7 +402,7 @@ function bindEvents() {
         await importSvgFileAsDrawing(f);
       } else if (f.type.startsWith('image/')) {
         await insertImageAsRef(f);
-      } else if (/\.(md|markdown|txt|json|zip)$/i.test(f.name)) {
+      } else if (/\.(yanta|md|markdown|txt|json|zip)$/i.test(f.name)) {
         await importFiles([f]);
       }
     }
@@ -556,14 +636,14 @@ function setupGlobalDropImport() {
       return;
     }
     const importable = files.filter((f) =>
-      /\.(md|markdown|txt|json|zip|excalidraw|svg)$/i.test(f.name) ||
+      /\.(yanta|md|markdown|txt|json|zip|excalidraw|svg)$/i.test(f.name) ||
       /\.excalidraw\.json$/i.test(f.name) ||
       f.type === 'application/json' || f.type === 'application/zip' ||
       f.type === 'text/markdown' || f.type === 'text/plain' ||
       f.type === 'image/svg+xml'
     );
     if (importable.length) await importFiles(importable);
-    else toast('Drop .md, .markdown, .txt, .zip, or YANTA .json files', 'error');
+    else toast('Drop .yanta, .md, .markdown, .txt, .zip, or YANTA .json files', 'error');
   });
 }
 

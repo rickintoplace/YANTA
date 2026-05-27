@@ -22,6 +22,7 @@ import {
   store,
   lucide,
   debounce,
+  safeCssColor,
 } from './core.js';
 
 import { insertAtCursor } from './editor.js';
@@ -171,7 +172,6 @@ export async function insertDrawLibraryItemIntoCurrent(itemId) {
   }
 
   const drawingId = uid();
-  const theme = currentExcalidrawTheme();
 
   const elements = structuredCloneSafe(item.elements || []).map((el, i) => ({
     ...el,
@@ -190,10 +190,7 @@ export async function insertDrawLibraryItemIntoCurrent(itemId) {
     title: item.name || 'Library drawing',
     canvas: { width: 760, height: 420 },
     elements,
-    appState: {
-      theme,
-      viewBackgroundColor: theme === 'dark' ? '#121212' : '#ffffff',
-    },
+    appState: {},
     files: structuredCloneSafe(item.files || {}),
   }, 'draw-library-insert');
 
@@ -343,7 +340,10 @@ function injectDrawCss() {
   box-shadow: 0 1px 0 rgba(255,255,255,0.02) inset;
   display: flex;
   flex-direction: column;
+
+  width: 100%;
   max-width: 100%;
+  min-width: 0;
 }
 
 .yanta-draw-embed.missing {
@@ -389,6 +389,7 @@ function injectDrawCss() {
   color: var(--text-faint);
   margin-left: 6px;
   white-space: nowrap;
+  display: none;
 }
 
 .yanta-draw-embed-actions {
@@ -518,8 +519,10 @@ function injectDrawCss() {
 
 .yanta-draw-editor-embed {
   display: block;
-  max-width: none;
-  margin: 8px auto;
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  margin: 8px 0;
 }
 
 /* Note picker */
@@ -676,7 +679,7 @@ function injectDrawCss() {
 /* Drawing note preview popover */
 .yanta-draw-note-preview {
   position: fixed;
-  z-index: 270;
+  z-index: 980;
   width: min(620px, calc(100vw - 24px));
   max-height: min(72vh, 720px);
   display: flex;
@@ -693,6 +696,10 @@ function injectDrawCss() {
   display: none !important;
 }
 
+.yanta-draw-note-preview.is-dragging {
+  user-select: none;
+}
+
 .yanta-draw-note-preview-head {
   display: flex;
   align-items: center;
@@ -700,6 +707,16 @@ function injectDrawCss() {
   padding: 12px 14px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-elev-2);
+  cursor: move;
+  touch-action: none;
+}
+
+.yanta-draw-note-preview-head button,
+.yanta-draw-note-preview-head a,
+.yanta-draw-note-preview-head input,
+.yanta-draw-note-preview-head textarea,
+.yanta-draw-note-preview-head select {
+  cursor: pointer;
 }
 
 .yanta-draw-note-preview-title {
@@ -710,6 +727,7 @@ function injectDrawCss() {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+  pointer-events: none;
 }
 
 .yanta-draw-note-preview-body {
@@ -725,11 +743,23 @@ function injectDrawCss() {
   line-height: 1.65;
 }
 
+.yanta-draw-note-preview-body .preview .yanta-draw-embed {
+  margin: 12px 0;
+}
+
 .yanta-draw-note-preview-body .backlinks,
 .yanta-draw-note-preview-body .pv-outline {
   display: none !important;
 }
-  `;
+
+/*
+  Der normale Wiki-Hover-Tooltip muss über dem Drawing-Note-Preview liegen,
+  sonst wird er vom Popover verdeckt.
+*/
+body > .hover-preview {
+  z-index: 1200 !important;
+}
+`;
 
   document.head.append(style);
 }
@@ -773,6 +803,9 @@ function cleanAppState(appState = {}) {
     width,
     height,
     theme,
+    viewBackgroundColor,
+    currentItemStrokeColor,
+    currentItemBackgroundColor,
     openMenu,
     openPopup,
     contextMenu,
@@ -817,71 +850,10 @@ function drawingSignature(drawing) {
   );
 }
 
-function cssColorToRgb(color) {
-  const s = String(color || '').trim();
-
-  let m = /^#([0-9a-f]{3})$/i.exec(s);
-  if (m) {
-    const hex = m[1].split('').map((x) => x + x).join('');
-    return {
-      r: parseInt(hex.slice(0, 2), 16),
-      g: parseInt(hex.slice(2, 4), 16),
-      b: parseInt(hex.slice(4, 6), 16),
-    };
-  }
-
-  m = /^#([0-9a-f]{6})$/i.exec(s);
-  if (m) {
-    const hex = m[1];
-    return {
-      r: parseInt(hex.slice(0, 2), 16),
-      g: parseInt(hex.slice(2, 4), 16),
-      b: parseInt(hex.slice(4, 6), 16),
-    };
-  }
-
-  m = /^rgba?\((\d+),\s*(\d+),\s*(\d+)/i.exec(s);
-  if (m) {
-    return {
-      r: Math.max(0, Math.min(255, parseInt(m[1], 10))),
-      g: Math.max(0, Math.min(255, parseInt(m[2], 10))),
-      b: Math.max(0, Math.min(255, parseInt(m[3], 10))),
-    };
-  }
-
-  return null;
-}
-
-function relativeLuminance(r, g, b) {
-  const toLinear = (v) => {
-    const x = v / 255;
-    return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4);
-  };
-
-  return (
-    0.2126 * toLinear(r) +
-    0.7152 * toLinear(g) +
-    0.0722 * toLinear(b)
-  );
-}
-
 function currentExcalidrawTheme() {
-  if (state.theme === 'dark') return 'dark';
-  if (state.theme === 'light') return 'light';
-
-  try {
-    const bg = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim();
-    const rgb = cssColorToRgb(bg);
-    if (rgb) return relativeLuminance(rgb.r, rgb.g, rgb.b) < 0.5 ? 'dark' : 'light';
-  } catch {}
-
-  try {
-    return window.matchMedia?.('(prefers-color-scheme: dark)')?.matches
-      ? 'dark'
-      : 'light';
-  } catch {
-    return 'dark';
-  }
+  return document.documentElement.dataset.theme === 'dark'
+    ? 'dark'
+    : 'light';
 }
 
 function canvasSizeOf(drawing) {
@@ -894,19 +866,16 @@ function canvasSizeOf(drawing) {
   };
 }
 
-function initialDataForDrawing(drawing, extra = {}) {
-  const appState = cleanAppState(drawing?.appState || {});
-  const theme = currentExcalidrawTheme();
+function drawingWidthMode(drawing) {
+  return drawing?.widthMode === 'wide' || drawing?.wide === true
+    ? 'wide'
+    : 'normal';
+}
 
+function initialDataForDrawing(drawing, extra = {}) {
   return {
     elements: drawing?.elements || [],
-    appState: {
-      ...appState,
-      theme,
-      viewBackgroundColor:
-        appState.viewBackgroundColor ||
-        (theme === 'dark' ? '#121212' : '#ffffff'),
-    },
+    appState: cleanAppState(drawing?.appState || {}),
     files: drawing?.files || {},
     ...extra,
   };
@@ -1079,8 +1048,28 @@ function updateEmbedHeader(embed, drawing) {
       const count = (drawing.elements || []).filter((x) => !x?.isDeleted).length;
       const links = extractWikiTargetsFromScene(drawing).length;
       const { width, height } = canvasSizeOf(drawing);
-      info.textContent = `${width}×${height} · ${count} element${count === 1 ? '' : 's'}${links ? ` · ${links} wiki link${links === 1 ? '' : 's'}` : ''}`;
+      const wide = drawingWidthMode(drawing) === 'wide';
+
+      info.textContent =
+        `${width}×${height}` +
+        (wide ? ' · wide' : '') +
+        ` · ${count} element${count === 1 ? '' : 's'}` +
+        (links ? ` · ${links} wiki link${links === 1 ? '' : 's'}` : '');
     }
+  }
+
+  const widthBtn = embed.querySelector('[data-draw-action="toggle-width"]');
+
+  if (widthBtn) {
+    const wide = drawingWidthMode(drawing) === 'wide';
+
+    widthBtn.title = wide
+      ? 'Shrink drawing to text width'
+      : 'Expand drawing to pane width';
+
+    widthBtn.setAttribute('aria-pressed', wide ? 'true' : 'false');
+
+    widthBtn.innerHTML = lucide(wide ? 'fold-horizontal' : 'unfold-horizontal', 14);
   }
 }
 
@@ -1088,10 +1077,22 @@ function applyCanvasSize(embed, drawing) {
   const inlineHost = embed.querySelector('.yanta-draw-inline-host');
   if (!inlineHost || !drawing) return;
 
-  const { width, height } = canvasSizeOf(drawing);
+  const { height } = canvasSizeOf(drawing);
+  const wide = drawingWidthMode(drawing) === 'wide';
 
-  embed.style.width = width + 'px';
+  // Default: Drawing füllt nur die normale Textspalte.
+  // Wide mode: CSS bricht es aus der Textspalte heraus.
+  embed.style.width = '100%';
   embed.style.maxWidth = '100%';
+
+  embed.classList.toggle('is-wide', wide);
+
+  // Für Editor-Widget-Wrapper ebenfalls markieren.
+  const editorWrap = embed.closest('.yanta-draw-editor-embed');
+  if (editorWrap) {
+    editorWrap.classList.toggle('is-wide', wide);
+  }
+
   inlineHost.style.height = height + 'px';
 }
 
@@ -1138,19 +1139,56 @@ async function resolveDrawingRefAsync(drawingId, preferredNoteId = state.current
 }
 
 function sceneCoordsForClient(api, container, clientX, clientY) {
+  // Excalidraw API bevorzugen, falls verfügbar.
   try {
     if (api?.screenToSceneCoords) {
-      return api.screenToSceneCoords({ clientX, clientY });
+      const p = api.screenToSceneCoords({ clientX, clientY });
+
+      if (
+        p &&
+        Number.isFinite(Number(p.x)) &&
+        Number.isFinite(Number(p.y))
+      ) {
+        return {
+          x: Number(p.x),
+          y: Number(p.y),
+        };
+      }
+
+      // Kompatibilitätsfallback für Builds, die { x, y } erwarten.
+      const p2 = api.screenToSceneCoords({ x: clientX, y: clientY });
+
+      if (
+        p2 &&
+        Number.isFinite(Number(p2.x)) &&
+        Number.isFinite(Number(p2.y))
+      ) {
+        return {
+          x: Number(p2.x),
+          y: Number(p2.y),
+        };
+      }
     }
   } catch {}
 
-  const rect = container.getBoundingClientRect();
+  /*
+    Fallback:
+    Wichtig: appState.offsetLeft/offsetTop NICHT zusätzlich zu rect.left/top
+    abziehen. Bei Inline-Embeds entspricht offsetLeft/Top oft bereits der
+    Canvas-Position; doppeltes Abziehen verschiebt Drops nach oben links.
+  */
+  const rect =
+    container.querySelector?.('.excalidraw')?.getBoundingClientRect?.() ||
+    container.getBoundingClientRect();
+
   const appState = api?.getAppState?.() || {};
-  const zoom = appState.zoom?.value || appState.zoom || 1;
+  const zoom = Number(appState.zoom?.value ?? appState.zoom ?? 1) || 1;
+  const scrollX = Number(appState.scrollX || 0);
+  const scrollY = Number(appState.scrollY || 0);
 
   return {
-    x: (clientX - rect.left - (appState.offsetLeft || 0)) / zoom - (appState.scrollX || 0),
-    y: (clientY - rect.top - (appState.offsetTop || 0)) / zoom - (appState.scrollY || 0),
+    x: (clientX - rect.left) / zoom - scrollX,
+    y: (clientY - rect.top) / zoom - scrollY,
   };
 }
 
@@ -1306,7 +1344,7 @@ function patchElementWithWikiLink(el, note, {
     updated: Date.now(),
   };
 
-  if ((forceText || el.type === 'text') && !preserveText) {
+  if (forceText && !preserveText) {
     next.text = wikiText;
     next.rawText = wikiText;
     next.originalText = wikiText;
@@ -1378,6 +1416,237 @@ function structuredCloneSafe(v) {
   }
 }
 
+function addFilesToExcalidrawApi(api, files = {}) {
+  if (!api?.addFiles || !files) return;
+
+  const list = Array.isArray(files)
+    ? files
+    : Object.values(files);
+
+  const clean = list.filter(Boolean);
+
+  if (!clean.length) return;
+
+  try {
+    api.addFiles(clean);
+  } catch {}
+}
+
+function noteVisualColor(note) {
+  return safeCssColor(note?.color) ||
+    (note?.type === 'list' ? '#a78bfa' : '#6ea8fe');
+}
+
+function noteVisualIcon(note) {
+  return note?.icon || (note?.type === 'list' ? 'list' : 'file');
+}
+
+function svgToDataUrl(svg) {
+  return `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svg)))}`;
+}
+
+function lucideDataUrl(name, color, size = 24) {
+  let svg = lucide(name || 'file', size);
+
+  // SVG soll im Excalidraw-Image die Note-Farbe nutzen.
+  svg = svg.replace(
+    /<svg /,
+    `<svg color="${escapeAttr(color)}" `
+  );
+
+  return svgToDataUrl(svg);
+}
+
+function makeLinkedElementData(note) {
+  return {
+    link: noteLink(note.id),
+    customData: {
+      yanta: {
+        wikilink: wikiDataForNote(note),
+      },
+    },
+  };
+}
+
+function makeRectElement({
+  id = uid(),
+  x,
+  y,
+  width,
+  height,
+  strokeColor,
+  backgroundColor,
+  opacity = 18,
+  groupIds = [],
+  note = null,
+}) {
+  const linked = note ? makeLinkedElementData(note) : {};
+
+  return {
+    id,
+    type: 'rectangle',
+    x,
+    y,
+    width,
+    height,
+    angle: 0,
+    strokeColor,
+    backgroundColor,
+    fillStyle: 'solid',
+    strokeWidth: 2,
+    strokeStyle: 'solid',
+    roughness: 1,
+    opacity,
+    groupIds,
+    frameId: null,
+    roundness: { type: 3 },
+    seed: Math.floor(Math.random() * 2 ** 31),
+    version: 1,
+    versionNonce: Math.floor(Math.random() * 2 ** 31),
+    isDeleted: false,
+    boundElements: null,
+    updated: Date.now(),
+    locked: false,
+    ...linked,
+  };
+}
+
+function makeImageElement({
+  id = uid(),
+  fileId,
+  x,
+  y,
+  width,
+  height,
+  groupIds = [],
+}) {
+  return {
+    id,
+    type: 'image',
+    x,
+    y,
+    width,
+    height,
+    angle: 0,
+    strokeColor: 'transparent',
+    backgroundColor: 'transparent',
+    fillStyle: 'solid',
+    strokeWidth: 1,
+    strokeStyle: 'solid',
+    roughness: 0,
+    opacity: 100,
+    groupIds,
+    frameId: null,
+    roundness: null,
+    seed: Math.floor(Math.random() * 2 ** 31),
+    version: 1,
+    versionNonce: Math.floor(Math.random() * 2 ** 31),
+    isDeleted: false,
+    boundElements: null,
+    updated: Date.now(),
+    locked: false,
+    fileId,
+    scale: [1, 1],
+    status: 'saved',
+    link: null,
+    customData: {},
+  };
+}
+
+function makeLinkedTitleElement({
+  note,
+  text,
+  x,
+  y,
+  width,
+  color,
+  groupIds = [],
+}) {
+  const el = makeFallbackTextElement(text, x, y, null);
+
+  return {
+    ...el,
+    text,
+    rawText: text,
+    originalText: text,
+    width,
+    height: 30,
+    fontSize: 20,
+    strokeColor: color,
+    textAlign: 'left',
+    verticalAlign: 'top',
+    groupIds,
+
+    // Wichtig: Text selbst ist NICHT verlinkt.
+    link: null,
+    customData: {},
+  };
+}
+
+async function makeNoteCardElements(note, x, y) {
+  const title = note.title || 'Untitled';
+  const color = noteVisualColor(note);
+  const icon = noteVisualIcon(note);
+
+  const groupId = uid();
+  const fileId = uid();
+
+  const cardW = Math.max(180, Math.min(420, title.length * 12 + 86));
+  const cardH = 58;
+
+  const iconSize = 22;
+
+  const iconFile = {
+    id: fileId,
+    dataURL: lucideDataUrl(icon, color, 24),
+    mimeType: 'image/svg+xml',
+    created: Date.now(),
+    lastRetrieved: Date.now(),
+  };
+
+  const card = makeRectElement({
+    x,
+    y,
+    width: cardW,
+    height: cardH,
+    strokeColor: color,
+    backgroundColor: color,
+    opacity: 16,
+    groupIds: [groupId],
+    note,
+  });
+
+  const iconEl = makeImageElement({
+    fileId,
+    x: x + 16,
+    y: y + 18,
+    width: iconSize,
+    height: iconSize,
+    groupIds: [groupId],
+    note,
+  });
+
+  const titleEl = makeLinkedTitleElement({
+    note,
+    text: title,
+    x: x + 50,
+    y: y + 17,
+    width: cardW - 66,
+    color,
+    groupIds: [groupId],
+  });
+
+  return {
+    elements: [card, iconEl, titleEl],
+    files: {
+      [fileId]: iconFile,
+    },
+    selectedId: card.id,
+    groupId,
+    elementIds: [card.id, iconEl.id, titleEl.id],
+  };
+}
+
 async function makeWikiTextElement(note, x, y) {
   const title = note.title || 'Untitled';
   const text = `[[${title}]]`;
@@ -1410,7 +1679,7 @@ async function makeWikiTextElement(note, x, y) {
   );
 }
 
-function firstWikiTargetInElement(el) {
+function directWikiTargetInElement(el) {
   if (!el) return null;
 
   const directTarget = wikiTargetFromElement(el);
@@ -1425,6 +1694,36 @@ function firstWikiTargetInElement(el) {
   for (const text of texts) {
     const m = /\[\[([^\]|\n]+)(?:\|[^\]\n]+)?\]\]/.exec(text);
     if (m?.[1]) return m[1].trim();
+  }
+
+  return null;
+}
+
+function firstWikiTargetInElement(el, api = null) {
+  const direct = directWikiTargetInElement(el);
+  if (direct) return direct;
+
+  const gid = groupIdForElement(el);
+  if (!gid || !api) return null;
+
+  const elements =
+    api.getSceneElementsIncludingDeleted?.() ||
+    api.getSceneElements?.() ||
+    [];
+
+  // Wenn Text/Icon getroffen wurde, suche in derselben Gruppe nach dem
+  // eigentlichen Link-Träger, also normalerweise dem Hintergrund-Rectangle.
+  for (const candidate of elements) {
+    if (!candidate || candidate.isDeleted) continue;
+
+    const ids = Array.isArray(candidate.groupIds)
+      ? candidate.groupIds
+      : [];
+
+    if (!ids.includes(gid)) continue;
+
+    const target = directWikiTargetInElement(candidate);
+    if (target) return target;
   }
 
   return null;
@@ -1486,24 +1785,135 @@ function selectedElementAndGroupIds(api) {
   };
 }
 
-function selectionTargetElements(api, hitEl = null) {
+function elementFromLinkTarget(target) {
+  return target?.el || target;
+}
+
+function groupIdForElement(el) {
+  const ids = Array.isArray(el?.groupIds) ? el.groupIds : [];
+  if (!ids.length) return null;
+
+  // Bei verschachtelten Gruppen nehmen wir die äußerste/letzte Gruppe.
+  return ids[ids.length - 1];
+}
+
+function representativeElementForGroup(elements, groupId) {
+  const members = elements.filter((el) =>
+    el &&
+    !el.isDeleted &&
+    Array.isArray(el.groupIds) &&
+    el.groupIds.includes(groupId)
+  );
+
+  if (!members.length) return null;
+
+  // Topmost zuerst prüfen.
+  const topFirst = [...members].reverse();
+
+  // Bevorzugt ein „Container“-Element statt Text,
+  // damit Text nicht zu [[Note]] überschrieben wird.
+  const preferredTypes = new Set([
+    'rectangle',
+    'ellipse',
+    'diamond',
+    'image',
+    'frame',
+    'embeddable',
+    'freedraw',
+  ]);
+
+  return (
+    topFirst.find((el) => preferredTypes.has(el.type)) ||
+    topFirst.find((el) => el.type !== 'text') ||
+    topFirst[0]
+  );
+}
+
+/**
+ * Link-Targets sind gruppenbewusst:
+ * - einzelne Elemente -> das Element
+ * - ausgewählte Gruppe -> genau EIN Träger-Element der Gruppe
+ *
+ * Excalidraw hat kein echtes Group-Element, daher speichern wir den Link
+ * auf einem Repräsentanten der Gruppe.
+ */
+function selectionLinkTargets(api, hitEl = null) {
   const elements =
     api?.getSceneElementsIncludingDeleted?.() ||
     api?.getSceneElements?.() ||
     [];
 
-  const { elementIds, groupIds } = selectedElementAndGroupIds(api);
+  const byId = new Map(
+    elements
+      .filter((el) => el && !el.isDeleted)
+      .map((el) => [el.id, el])
+  );
 
+  const { elementIds, groupIds } = selectedElementAndGroupIds(api);
+  const out = new Map();
+
+  const add = (el, opts = {}) => {
+    if (!el || el.isDeleted) return;
+
+    const prev = out.get(el.id);
+
+    // Group-carrier gewinnt gegenüber normalem Elementtarget.
+    if (!prev || opts.isGroupCarrier) {
+      out.set(el.id, {
+        el,
+        isGroupCarrier: !!opts.isGroupCarrier,
+        groupId: opts.groupId || null,
+      });
+    }
+  };
+
+  // Keine aktive Selection: Hit-Element verwenden.
+  // Wenn das Hit-Element Teil einer Gruppe ist, linke die Gruppe über
+  // ein repräsentatives Element, nicht das konkrete Kind.
   if (!elementIds.size && !groupIds.size && hitEl) {
-    elementIds.add(hitEl.id);
+    const gid = groupIdForElement(hitEl);
+
+    if (gid) {
+      add(representativeElementForGroup(elements, gid), {
+        isGroupCarrier: true,
+        groupId: gid,
+      });
+    } else {
+      add(hitEl);
+    }
+
+    return [...out.values()];
   }
 
-  return elements.filter((el) => {
-    if (!el || el.isDeleted) return false;
-    if (elementIds.has(el.id)) return true;
-    if ((el.groupIds || []).some((gid) => groupIds.has(gid))) return true;
-    return false;
-  });
+  // Ausgewählte Gruppen: je Gruppe genau ein Träger-Element.
+  for (const gid of groupIds) {
+    add(representativeElementForGroup(elements, gid), {
+      isGroupCarrier: true,
+      groupId: gid,
+    });
+  }
+
+  // Einzelne ausgewählte Elemente, aber nicht nochmal Kinder bereits
+  // ausgewählter Gruppen aufnehmen.
+  for (const id of elementIds) {
+    const el = byId.get(id);
+    if (!el || el.isDeleted) continue;
+
+    const belongsToSelectedGroup =
+      Array.isArray(el.groupIds) &&
+      el.groupIds.some((gid) => groupIds.has(gid));
+
+    if (belongsToSelectedGroup) continue;
+
+    add(el);
+  }
+
+  return [...out.values()];
+}
+
+// Kompatibel halten für Stellen, die weiterhin reine Elemente brauchen.
+function selectionTargetElements(api, hitEl = null) {
+  return selectionLinkTargets(api, hitEl).map((target) => target.el);
 }
 
 function selectedElementIds(api) {
@@ -1521,24 +1931,56 @@ async function addOrLinkNoteAt(api, container, note, clientX, clientY) {
     [];
 
   const hit = elementAt(api, p.x, p.y);
-  const targets = selectionTargetElements(api, hit);
+  const targets = selectionLinkTargets(api, hit);
 
   let nextElements;
   let selectedId = null;
 
   if (targets.length) {
-    const targetIds = new Set(targets.map((el) => el.id));
-    selectedId = targets[0].id;
+    const targetById = new Map(targets.map((target) => [target.el.id, target]));
+    selectedId = targets[0].el.id;
 
-    nextElements = elements.map((el) =>
-      targetIds.has(el.id)
-        ? patchElementWithWikiLink(el, note)
-        : el
-    );
+    nextElements = elements.map((el) => {
+      const target = targetById.get(el.id);
+
+      return target
+        ? patchElementWithWikiLink(el, note, {
+            // Gruppen-Link niemals sichtbaren Text zu [[Note]] überschreiben.
+            preserveText: target.isGroupCarrier,
+          })
+        : el;
+    });
   } else {
-    const el = await makeWikiTextElement(note, p.x, p.y);
-    selectedId = el.id;
-    nextElements = [...elements, el];
+    const card = await makeNoteCardElements(note, p.x, p.y);
+
+    selectedId = card.selectedId;
+
+    addFilesToExcalidrawApi(api, card.files);
+
+    nextElements = [...elements, ...card.elements];
+
+    const existingFiles = api.getFiles?.() || {};
+
+    api.updateScene({
+      elements: nextElements,
+      files: {
+        ...existingFiles,
+        ...card.files,
+      },
+      appState: selectedId
+        ? {
+            selectedElementIds: Object.fromEntries(
+              (card.elementIds || [selectedId]).map((id) => [id, true])
+            ),
+            selectedGroupIds: card.groupId
+              ? { [card.groupId]: true }
+              : undefined,
+          }
+        : undefined,
+    });
+
+    api.refresh?.();
+    return true;
   }
 
   api.updateScene({
@@ -1562,19 +2004,32 @@ async function linkSelectedElementsToNote(api, note) {
     api.getSceneElements?.() ||
     [];
 
-  const targets = selectionTargetElements(api, null);
+  const targets = selectionLinkTargets(api, null);
 
   if (!targets.length) {
     const appState = api.getAppState?.() || {};
     const x = -(appState.scrollX || 0) + 40;
     const y = -(appState.scrollY || 0) + 40;
 
-    const el = await makeWikiTextElement(note, x, y);
+    const card = await makeNoteCardElements(note, x, y);
+
+    addFilesToExcalidrawApi(api, card.files);
+
+    const existingFiles = api.getFiles?.() || {};
 
     api.updateScene({
-      elements: [...elements, el],
+      elements: [...elements, ...card.elements],
+      files: {
+        ...existingFiles,
+        ...card.files,
+      },
       appState: {
-        selectedElementIds: { [el.id]: true },
+        selectedElementIds: Object.fromEntries(
+          (card.elementIds || [card.selectedId]).map((id) => [id, true])
+        ),
+        selectedGroupIds: card.groupId
+          ? { [card.groupId]: true }
+          : undefined,
       },
     });
 
@@ -1582,14 +2037,18 @@ async function linkSelectedElementsToNote(api, note) {
     return true;
   }
 
-  const targetIds = new Set(targets.map((el) => el.id));
+  const targetById = new Map(targets.map((target) => [target.el.id, target]));
 
   api.updateScene({
-    elements: elements.map((el) =>
-      targetIds.has(el.id)
-        ? patchElementWithWikiLink(el, note)
-        : el
-    ),
+    elements: elements.map((el) => {
+      const target = targetById.get(el.id);
+
+      return target
+        ? patchElementWithWikiLink(el, note, {
+            preserveText: target.isGroupCarrier,
+          })
+        : el;
+    }),
   });
 
   api.refresh?.();
@@ -1604,14 +2063,28 @@ function linkSpecificElementsToNote(api, targets, note) {
     api.getSceneElements?.() ||
     [];
 
-  const targetIds = new Set(targets.map((el) => el.id));
+  const targetById = new Map();
+
+  for (const target of targets) {
+    const el = elementFromLinkTarget(target);
+    if (!el) continue;
+
+    targetById.set(el.id, {
+      el,
+      isGroupCarrier: !!target?.isGroupCarrier,
+    });
+  }
 
   api.updateScene({
-    elements: elements.map((el) =>
-      targetIds.has(el.id)
-        ? patchElementWithWikiLink(el, note)
-        : el
-    ),
+    elements: elements.map((el) => {
+      const target = targetById.get(el.id);
+
+      return target
+        ? patchElementWithWikiLink(el, note, {
+            preserveText: target.isGroupCarrier,
+          })
+        : el;
+    }),
   });
 
   api.refresh?.();
@@ -1626,7 +2099,12 @@ function unlinkSpecificElements(api, targets) {
     api.getSceneElements?.() ||
     [];
 
-  const targetIds = new Set(targets.map((el) => el.id));
+  const targetIds = new Set(
+    targets
+      .map(elementFromLinkTarget)
+      .filter(Boolean)
+      .map((el) => el.id)
+  );
 
   api.updateScene({
     elements: elements.map((el) =>
@@ -1670,15 +2148,17 @@ function bindNoteDropToDrawing(container, apiRef, enabled = true) {
     const api = apiRef?.current || apiRef;
     const ok = await addOrLinkNoteAt(api, container, note, e.clientX, e.clientY);
 
-    if (ok) toast(`Linked [[${note.title || 'Untitled'}]]`, 'success');
+    if (ok) toast(`Linked ${note.title || 'Untitled'}`, 'success');
   }, true);
 }
 
 const drawNativeContextState = new WeakMap();
 
 function firstLinkedNoteId(targets = []) {
-  for (const el of targets) {
+  for (const target of targets) {
+    const el = elementFromLinkTarget(target);
     const id = noteIdFromElement(el);
+
     if (id && state.notes.has(id)) return id;
   }
 
@@ -1793,7 +2273,9 @@ function injectYantaItemsIntoNativeContextMenu(container) {
   separator.setAttribute('data-yanta-draw-context-item', '1');
 
   const linkedNoteId = firstLinkedNoteId(ctx.targets);
-  const hasAnyWikiLink = ctx.targets.some(elementHasWikiLink);
+  const hasAnyWikiLink = ctx.targets.some((target) =>
+    elementHasWikiLink(elementFromLinkTarget(target))
+  );
 
   const linkBtn = makeNativeContextButton({
     icon: 'link',
@@ -1803,7 +2285,7 @@ function injectYantaItemsIntoNativeContextMenu(container) {
       if (!note) return;
 
       if (linkSpecificElementsToNote(ctx.api, ctx.targets, note)) {
-        toast(`Linked [[${note.title || 'Untitled'}]]`, 'success');
+        toast(`Linked ${note.title || 'Untitled'}`, 'success');
       }
     },
   });
@@ -1860,7 +2342,7 @@ function bindNativeExcalidrawContextMenuPatch(container, apiRef, editable) {
 
     const p = sceneCoordsForClient(api, container, e.clientX, e.clientY);
     const hit = elementAt(api, p.x, p.y);
-    const targets = selectionTargetElements(api, hit);
+    const targets = selectionLinkTargets(api, hit);
 
     if (!targets.length) {
       ctx.api = null;
@@ -2154,7 +2636,7 @@ function bindWikiPreviewInteractions(container, apiRef, editable) {
 
     const p = sceneCoordsForClient(api, container, e.clientX, e.clientY);
     const el = elementAt(api, p.x, p.y);
-    const target = firstWikiTargetInElement(el);
+    const target = firstWikiTargetInElement(el, api);
 
     if (!target) return;
 
@@ -2175,6 +2657,144 @@ function bindWikiPreviewInteractions(container, apiRef, editable) {
 
 let notePreviewEl = null;
 
+function clampFixedPosition(elm, left, top) {
+  const r = elm.getBoundingClientRect();
+  const margin = 10;
+
+  const maxLeft = Math.max(margin, window.innerWidth - r.width - margin);
+  const maxTop = Math.max(margin, window.innerHeight - r.height - margin);
+
+  return {
+    left: Math.max(margin, Math.min(maxLeft, left)),
+    top: Math.max(margin, Math.min(maxTop, top)),
+  };
+}
+
+function hideNotePreviewPopover({ unmount = true } = {}) {
+  if (!notePreviewEl) return;
+
+  if (unmount) {
+    try {
+      unmountDrawEmbeds(notePreviewEl);
+    } catch {}
+  }
+
+  notePreviewEl.hidden = true;
+}
+
+function bindNotePreviewDrag(pop) {
+  if (!pop || pop.dataset.dragBound === '1') return;
+  pop.dataset.dragBound = '1';
+
+  let dragging = false;
+  let startX = 0;
+  let startY = 0;
+  let startLeft = 0;
+  let startTop = 0;
+  let pointerId = null;
+
+  const stopDrag = () => {
+    if (!dragging) return;
+
+    dragging = false;
+    pointerId = null;
+    pop.classList.remove('is-dragging');
+
+    document.removeEventListener('pointermove', onMove, true);
+    document.removeEventListener('pointerup', onUp, true);
+    document.removeEventListener('pointercancel', onUp, true);
+  };
+
+  const onMove = (e) => {
+    if (!dragging) return;
+    if (pointerId != null && e.pointerId !== pointerId) return;
+
+    e.preventDefault();
+
+    const next = clampFixedPosition(
+      pop,
+      startLeft + (e.clientX - startX),
+      startTop + (e.clientY - startY)
+    );
+
+    pop.style.left = next.left + 'px';
+    pop.style.top = next.top + 'px';
+  };
+
+  const onUp = (e) => {
+    if (pointerId != null && e.pointerId !== pointerId) return;
+    stopDrag();
+  };
+
+  pop.addEventListener('pointerdown', (e) => {
+    const head = e.target.closest?.('.yanta-draw-note-preview-head');
+    if (!head || !pop.contains(head)) return;
+
+    // Buttons/Inputs im Header sollen klickbar bleiben.
+    if (e.target.closest?.('button, a, input, textarea, select, [contenteditable="true"]')) {
+      return;
+    }
+
+    if (e.button != null && e.button !== 0) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const r = pop.getBoundingClientRect();
+
+    dragging = true;
+    pointerId = e.pointerId;
+    startX = e.clientX;
+    startY = e.clientY;
+    startLeft = r.left;
+    startTop = r.top;
+
+    pop.classList.add('is-dragging');
+
+    try {
+      pop.setPointerCapture?.(e.pointerId);
+    } catch {}
+
+    document.addEventListener('pointermove', onMove, true);
+    document.addEventListener('pointerup', onUp, true);
+    document.addEventListener('pointercancel', onUp, true);
+  }, true);
+}
+
+function bindNotePreviewContentInteractions(pop) {
+  if (!pop || pop.dataset.contentBound === '1') return;
+  pop.dataset.contentBound = '1';
+
+  pop.addEventListener('click', async (e) => {
+    const wiki = e.target.closest?.('a.wiki-link');
+
+    if (wiki && pop.contains(wiki)) {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const target = wiki.dataset.wiki || wiki.textContent || '';
+      const noteId = wiki.dataset.noteId || '';
+
+      hideNotePreviewPopover();
+
+      if (noteId && state.notes.has(noteId)) {
+        await openNote(noteId);
+        return;
+      }
+
+      if (target.trim()) {
+        window.dispatchEvent(new CustomEvent('yanta-follow-wiki', {
+          detail: { target: target.trim() },
+        }));
+      }
+
+      return;
+    }
+
+    // Normale externe Markdown-Links dürfen normal funktionieren.
+  }, true);
+}
+
 function ensureNotePreviewPopover() {
   injectDrawCss();
 
@@ -2185,11 +2805,33 @@ function ensureNotePreviewPopover() {
   notePreviewEl.hidden = true;
   document.body.append(notePreviewEl);
 
+  bindNotePreviewDrag(notePreviewEl);
+  bindNotePreviewContentInteractions(notePreviewEl);
+
   document.addEventListener('mousedown', (e) => {
-    if (notePreviewEl.hidden) return;
+    if (!notePreviewEl || notePreviewEl.hidden) return;
+
     if (notePreviewEl.contains(e.target)) return;
-    notePreviewEl.hidden = true;
+
+    // Der normale Wikilink-Hover-Tooltip soll benutzbar bleiben.
+    const hp = document.getElementById('hoverPreview');
+    if (hp && hp.contains(e.target)) return;
+
+    // Andere Drawing-UI nicht sofort schließen.
+    if (e.target.closest?.('.yanta-draw-note-picker, .yanta-draw-autocomplete')) return;
+
+    hideNotePreviewPopover();
   }, true);
+
+  window.addEventListener('resize', () => {
+    if (!notePreviewEl || notePreviewEl.hidden) return;
+
+    const r = notePreviewEl.getBoundingClientRect();
+    const next = clampFixedPosition(notePreviewEl, r.left, r.top);
+
+    notePreviewEl.style.left = next.left + 'px';
+    notePreviewEl.style.top = next.top + 'px';
+  });
 
   return notePreviewEl;
 }
@@ -2205,11 +2847,11 @@ function positionFloatingElement(elm, x, y) {
 
     if (left + r.width > window.innerWidth - 10) left = x - r.width - 14;
     if (top + r.height > window.innerHeight - 10) top = Math.max(10, window.innerHeight - r.height - 10);
-    if (left < 10) left = 10;
-    if (top < 10) top = 10;
 
-    elm.style.left = left + 'px';
-    elm.style.top = top + 'px';
+    const next = clampFixedPosition(elm, left, top);
+
+    elm.style.left = next.left + 'px';
+    elm.style.top = next.top + 'px';
   });
 }
 
@@ -2219,7 +2861,13 @@ function showNotePreview(noteId, clientX, clientY) {
 
   const pop = ensureNotePreviewPopover();
 
+  // Wichtig: vorherige React/Excalidraw-Embeds sauber entfernen.
+  try {
+    unmountDrawEmbeds(pop);
+  } catch {}
+
   let body = '';
+
   try {
     body = noteMarkdown(noteId) || '';
   } catch {}
@@ -2239,16 +2887,54 @@ function showNotePreview(noteId, clientX, clientY) {
     </div>
   `;
 
-  pop.querySelector('[data-close]')?.addEventListener('click', () => {
-    pop.hidden = true;
+  // Nach innerHTML erneut binden, weil DOM neu aufgebaut wurde.
+  bindNotePreviewDrag(pop);
+  bindNotePreviewContentInteractions(pop);
+
+  pop.querySelector('[data-close]')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    hideNotePreviewPopover();
   });
 
-  pop.querySelector('[data-open]')?.addEventListener('click', async () => {
-    pop.hidden = true;
+  pop.querySelector('[data-open]')?.addEventListener('click', async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    hideNotePreviewPopover();
+
     await openNote(noteId);
   });
 
+  /*
+    Kritisch:
+    renderPreview() erzeugt draw:// Embeds mit state.currentNoteId.
+    Im Note-Preview-Popover soll aber die angezeigte Note der Kontext sein.
+    Sonst werden Drawings aus der Preview-Note falsch oder gar nicht gefunden.
+  */
+  for (const embed of pop.querySelectorAll('.yanta-draw-embed[data-draw-id]')) {
+    embed.setAttribute('data-note-id', noteId);
+    embed.setAttribute('data-draw-surface', 'preview');
+    embed.classList.remove('editor-surface');
+    embed.classList.add('preview-surface');
+  }
+
   positionFloatingElement(pop, clientX, clientY);
+
+  /*
+    Drawings im Popover hydrieren.
+    Das muss nach dem Einfügen in den DOM passieren, sonst bleibt
+    .yanta-draw-inline-host leer bzw. Excalidraw misst falsche Größen.
+  */
+  requestAnimationFrame(() => {
+    hydrateDrawEmbeds(pop).then(() => {
+      requestAnimationFrame(() => {
+        refreshDrawEmbeds(pop);
+      });
+    }).catch((err) => {
+      console.warn('Could not hydrate drawings in note preview', err);
+    });
+  });
 }
 
 async function openNoteReferencePicker() {
@@ -2491,7 +3177,7 @@ titleEl.addEventListener('click', async (e) => {
     if (!note) return;
 
     if (await linkSelectedElementsToNote(active.api, note)) {
-    toast(`Linked [[${note.title || 'Untitled'}]]`, 'success');
+    toast(`Linked ${note.title || 'Untitled'}`, 'success');
     }
   });
 
@@ -2554,7 +3240,6 @@ export async function createDrawingAndInsert() {
 
   const noteId = state.currentNoteId;
   const drawingId = uid();
-  const theme = currentExcalidrawTheme();
 
   const emptyScene = {
     id: drawingId,
@@ -2564,12 +3249,7 @@ export async function createDrawingAndInsert() {
       height: 420,
     },
     elements: [],
-    appState: {
-      theme,
-      viewBackgroundColor: theme === 'dark' ? '#121212' : '#ffffff',
-      currentItemStrokeColor: theme === 'dark' ? '#f8f9fa' : '#1e1e1e',
-      currentItemBackgroundColor: 'transparent',
-    },
+    appState: {},
     files: {},
   };
 
@@ -2718,6 +3398,7 @@ async function mountInlineDrawing(embed, sourceNoteId, drawingId, drawing) {
         if (apiRef.current) {
           try {
             suppressChangeRef.current = true;
+            addFilesToExcalidrawApi(apiRef.current, next.files);
             apiRef.current.updateScene(initialDataForDrawing(next));
 
             requestAnimationFrame(() => {
@@ -2741,35 +3422,19 @@ async function mountInlineDrawing(embed, sourceNoteId, drawingId, drawing) {
 
     React.useEffect(() => {
       const update = () => {
-        const nextTheme = currentExcalidrawTheme();
-        setTheme(nextTheme);
+        setTheme(currentExcalidrawTheme());
 
-        try {
-          apiRef.current?.updateScene({
-            appState: {
-              ...cleanAppState(apiRef.current?.getAppState?.() || {}),
-              theme: nextTheme,
-            },
-          });
-          apiRef.current?.refresh?.();
-        } catch {}
+        requestAnimationFrame(() => {
+          try {
+            apiRef.current?.refresh?.();
+          } catch {}
+        });
       };
 
       window.addEventListener('yanta-theme-change', update);
 
-      const mq = window.matchMedia?.('(prefers-color-scheme: dark)');
-      mq?.addEventListener?.('change', update);
-
-      const mo = new MutationObserver(update);
-      mo.observe(document.documentElement, {
-        attributes: true,
-        attributeFilter: ['data-theme'],
-      });
-
       return () => {
         window.removeEventListener('yanta-theme-change', update);
-        mq?.removeEventListener?.('change', update);
-        mo.disconnect();
       };
     }, []);
 
@@ -2872,6 +3537,8 @@ async function mountInlineDrawing(embed, sourceNoteId, drawingId, drawing) {
       excalidrawAPI: (api) => {
         apiRef.current = api;
         inlineApis.set(embed, api);
+
+      + addFilesToExcalidrawApi(api, drawing.files);
 
         setTimeout(() => {
           try {
@@ -3048,7 +3715,7 @@ if (title && !btn) {
       }
 
 if (await linkSelectedElementsToNote(api, note)) {
-  toast(`Linked [[${note.title || 'Untitled'}]]`, 'success');
+  toast(`Linked ${note.title || 'Untitled'}`, 'success');
 }
 
       return;
@@ -3061,6 +3728,28 @@ if (action === 'rename') {
   });
   return;
 }
+
+    if (action === 'toggle-width') {
+      const current = hit.drawing;
+      const wide = drawingWidthMode(current) === 'wide';
+
+      updateDrawingMeta(hit.noteId, drawingId, {
+        widthMode: wide ? 'normal' : 'wide',
+      }, 'draw-width-mode');
+
+      window.dispatchEvent(new CustomEvent('yanta-drawing-updated', {
+        detail: { noteId: hit.noteId, drawingId },
+      }));
+
+      toast(
+        wide
+          ? 'Drawing width: text column'
+          : 'Drawing width: full pane',
+        'success'
+      );
+
+      return;
+    }
 
     if (action === 'fullscreen') {
       openDrawModal(drawingId, hit.noteId);
@@ -3158,6 +3847,7 @@ export async function openDrawModal(drawingId, noteId = state.currentNoteId) {
         if (apiRef.current) {
           try {
             suppressChangeRef.current = true;
+            addFilesToExcalidrawApi(apiRef.current, next.files);
             apiRef.current.updateScene(initialDataForDrawing(next));
 
             requestAnimationFrame(() => {
@@ -3187,44 +3877,28 @@ export async function openDrawModal(drawingId, noteId = state.currentNoteId) {
 
     React.useEffect(() => {
       const update = () => {
-        const nextTheme = currentExcalidrawTheme();
-        setTheme(nextTheme);
+        setTheme(currentExcalidrawTheme());
 
-        try {
-          apiRef.current?.updateScene({
-            appState: {
-              ...cleanAppState(apiRef.current?.getAppState?.() || {}),
-              theme: nextTheme,
-            },
-          });
-          apiRef.current?.refresh?.();
-        } catch {}
+        requestAnimationFrame(() => {
+          try {
+            apiRef.current?.refresh?.();
+          } catch {}
+        });
       };
 
       window.addEventListener('yanta-theme-change', update);
 
-      const mq = window.matchMedia?.('(prefers-color-scheme: dark)');
-      mq?.addEventListener?.('change', update);
-
-      const mo = new MutationObserver(update);
-      mo.observe(document.documentElement, {
-        attributes: true,
-        attributeFilter: ['data-theme'],
-      });
-
       return () => {
         window.removeEventListener('yanta-theme-change', update);
-        mq?.removeEventListener?.('change', update);
-        mo.disconnect();
       };
     }, []);
 
-React.useEffect(() => {
-  bindNoteDropToDrawing(fullscreenHost, apiRef, true);
-  bindWikiPreviewInteractions(fullscreenHost, apiRef, true);
-  bindNativeExcalidrawContextMenuPatch(fullscreenHost, apiRef, true);
-  bindDrawWikiAutocomplete(fullscreenHost, apiRef, true);
-}, []);
+    React.useEffect(() => {
+      bindNoteDropToDrawing(fullscreenHost, apiRef, true);
+      bindWikiPreviewInteractions(fullscreenHost, apiRef, true);
+      bindNativeExcalidrawContextMenuPatch(fullscreenHost, apiRef, true);
+      bindDrawWikiAutocomplete(fullscreenHost, apiRef, true);
+    }, []);
 
     React.useEffect(() => {
       const ro = new ResizeObserver(() => {
@@ -3316,6 +3990,8 @@ React.useEffect(() => {
         apiRef.current = api;
         active.api = api;
 
+        addFilesToExcalidrawApi(api, current.files);
+
         requestAnimationFrame(() => {
           try {
             api.refresh?.();
@@ -3353,6 +4029,8 @@ React.useEffect(() => {
 
 export function closeDrawModal() {
   if (!modal) return;
+
+  hideNotePreviewPopover();
 
   modal.hidden = true;
 
@@ -3446,8 +4124,7 @@ export async function drawingThumbnailUrl(noteId, drawingId) {
         ...cleanAppState(d.appState || {}),
         exportBackground: true,
         viewBackgroundColor:
-          d.appState?.viewBackgroundColor ||
-          (currentExcalidrawTheme() === 'dark' ? '#121212' : '#ffffff'),
+          currentExcalidrawTheme() === 'dark' ? '#121212' : '#ffffff',
       },
       files: d.files || {},
     });
@@ -3543,10 +4220,7 @@ export async function importSvgFileAsDrawing(file) {
     title: file.name.replace(/\.svg$/i, '') || 'SVG drawing',
     canvas: { width: 760, height: 420 },
     elements: [imageElement],
-    appState: {
-      theme: currentExcalidrawTheme(),
-      viewBackgroundColor: currentExcalidrawTheme() === 'dark' ? '#121212' : '#ffffff',
-    },
+    appState: {},
     files: {
       [fileId]: {
         id: fileId,

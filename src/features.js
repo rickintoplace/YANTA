@@ -172,57 +172,152 @@ export function renderOutline(md) {
 export function handleWikilinkClick(e) {
   const a = e.target.closest('a.wiki-link');
   if (!a) return;
+
   e.preventDefault();
   e.stopPropagation();
+
+  // Wichtig: Tooltip sofort schließen, bevor Note geöffnet / Confirm gezeigt wird.
+  hideHoverPreview();
+
   const target = a.dataset.wiki;
   const id = a.dataset.noteId;
-  if (id && state.notes.get(id)) openNote(id);
-  else if (confirm(`Note "${target}" doesn't exist yet. Create it?`)) createNoteWithTitle(target);
+
+  if (id && state.notes.get(id)) {
+    openNote(id);
+    return;
+  }
+
+  inlineConfirm(a, {
+    message: `Create "${target}"?`,
+    confirmLabel: 'Create',
+    cancelLabel: 'Cancel',
+    danger: false,
+    onConfirm: async () => {
+      await createNoteWithTitle(target);
+    },
+  });
 }
 
-let _hoverShowTimer, _hoverHideTimer;
-export function setupWikilinkHover() {
-  document.addEventListener('mouseover', (e) => {
-    const a = e.target.closest('a.wiki-link');
-    if (!a || a.classList.contains('missing')) return;
-    clearTimeout(_hoverHideTimer); clearTimeout(_hoverShowTimer);
-    _hoverShowTimer = setTimeout(() => showHoverPreview(a), 280);
-  });
-  document.addEventListener('mouseout', (e) => {
-    const a = e.target.closest('a.wiki-link');
-    const hp = $('hoverPreview');
-    const toHp = e.relatedTarget && hp.contains(e.relatedTarget);
-    if (!a && !toHp) return;
-    clearTimeout(_hoverShowTimer);
-    _hoverHideTimer = setTimeout(hideHoverPreview, 250);
-  });
-  $('hoverPreview').addEventListener('mouseenter', () => clearTimeout(_hoverHideTimer));
-  $('hoverPreview').addEventListener('mouseleave', () => hideHoverPreview());
+let _hoverShowTimer = 0;
+let _hoverHideTimer = 0;
+
+function clearHoverTimers() {
+  clearTimeout(_hoverShowTimer);
+  clearTimeout(_hoverHideTimer);
+  _hoverShowTimer = 0;
+  _hoverHideTimer = 0;
 }
+
+export function setupWikilinkHover() {
+  const hp = $('hoverPreview');
+  if (!hp) return;
+
+  document.addEventListener('mouseover', (e) => {
+    const a = e.target.closest?.('a.wiki-link');
+
+    if (!a || a.classList.contains('missing')) return;
+    if (!a.isConnected) return;
+
+    clearTimeout(_hoverHideTimer);
+    clearTimeout(_hoverShowTimer);
+
+    _hoverShowTimer = setTimeout(() => {
+      showHoverPreview(a);
+    }, 280);
+  });
+
+  document.addEventListener('mouseout', (e) => {
+    const a = e.target.closest?.('a.wiki-link');
+    const related = e.relatedTarget;
+
+    // Innerhalb desselben Links bewegen: nicht schließen.
+    if (a && related && a.contains(related)) return;
+
+    // Vom Link in den Tooltip bewegen: Tooltip offen lassen.
+    const toHp = related && hp.contains(related);
+
+    if (!a && !toHp) return;
+
+    clearTimeout(_hoverShowTimer);
+
+    _hoverHideTimer = setTimeout(() => {
+      hideHoverPreview();
+    }, 250);
+  });
+
+  // Kritisch: Wenn ein Wikilink geklickt wird, Tooltip sofort schließen.
+  // Capture=true sorgt dafür, dass der Tooltip verschwindet, bevor openNote()
+  // Preview/DOM neu rendert.
+  document.addEventListener('click', (e) => {
+    const a = e.target.closest?.('a.wiki-link');
+    if (!a) return;
+
+    hideHoverPreview();
+  }, true);
+
+  hp.addEventListener('mouseenter', () => {
+    clearTimeout(_hoverHideTimer);
+  });
+
+  hp.addEventListener('mouseleave', () => {
+    hideHoverPreview();
+  });
+}
+
 function showHoverPreview(a) {
+  if (!a || !a.isConnected) return;
+
   const id = a.dataset.noteId;
   if (!id) return;
+
   const note = state.notes.get(id);
   if (!note) return;
+
   const hp = $('hoverPreview');
+  if (!hp) return;
+
   let body = '';
-  try { body = noteMarkdown(id); } catch {}
+
+  try {
+    body = noteMarkdown(id);
+  } catch {}
+
   const snippet = body.slice(0, 600);
+
   hp.innerHTML =
     `<div class="hp-title">${escapeHtml(note.title || 'Untitled')}</div>` +
     `<div class="hp-body">${renderBlocksInline(snippet)}</div>` +
     (body.length > 600 ? '<div class="hp-more">…click to open</div>' : '');
+
   hp.hidden = false;
+
   const r = a.getBoundingClientRect();
   const hw = hp.offsetWidth || 380;
   const hh = hp.offsetHeight || 120;
-  let x = r.left, y = r.bottom + 6;
-  if (x + hw > window.innerWidth - 8) x = window.innerWidth - hw - 8;
-  if (y + hh > window.innerHeight - 8) y = r.top - hh - 6;
+
+  let x = r.left;
+  let y = r.bottom + 6;
+
+  if (x + hw > window.innerWidth - 8) {
+    x = window.innerWidth - hw - 8;
+  }
+
+  if (y + hh > window.innerHeight - 8) {
+    y = r.top - hh - 6;
+  }
+
   hp.style.left = Math.max(8, x) + 'px';
   hp.style.top = Math.max(8, y) + 'px';
 }
-function hideHoverPreview() { $('hoverPreview').hidden = true; }
+
+function hideHoverPreview() {
+  clearHoverTimers();
+
+  const hp = $('hoverPreview');
+  if (!hp) return;
+
+  hp.hidden = true;
+}
 
 // -------- Command palette + Quick switcher ---------------------
 const palette = { mode: 'commands', items: [], active: 0, filter: '' };

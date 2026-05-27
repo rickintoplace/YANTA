@@ -10,7 +10,7 @@ import { EditorView, keymap, drawSelection, placeholder, ViewPlugin, Decoration,
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 import { syntaxHighlighting, defaultHighlightStyle, HighlightStyle, indentOnInput, bracketMatching } from '@codemirror/language';
-import { autocompletion, completionKeymap } from '@codemirror/autocomplete';
+import { autocompletion, completionKeymap, acceptCompletion } from '@codemirror/autocomplete';
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { tags as t } from '@lezer/highlight';
 import { classifyLine, renderDrawEmbedHtml } from './markdown.js';
@@ -47,45 +47,82 @@ const yantaHighlight = HighlightStyle.define([
 ]);
 
 // ----- Theme: minimal, inherits from YANTA CSS vars ---------------------
+// ----- Theme: minimal, inherits from YANTA CSS vars ---------------------
 const yantaTheme = EditorView.theme({
   '&': {
     fontSize: 'var(--fs-base)',
     color: 'var(--text)',
     backgroundColor: 'transparent',
     height: '100%',
+    width: '100%',
+    minWidth: '0',
+    maxWidth: '100%',
+    overflow: 'hidden',
   },
+
   '.cm-scroller': {
     fontFamily: 'var(--font)',
     lineHeight: 'var(--lh-base)',
-    padding: '28px 40px calc(28px + 40vh)',
-    overflow: 'auto',
+
+    padding: '28px clamp(14px, 5vw, 40px) calc(28px + 40vh)',
+    overflowY: 'auto',
+    overflowX: 'hidden',
+
+    boxSizing: 'border-box',
+    minWidth: '0',
+    maxWidth: '100%',
   },
+
   '.cm-content': {
+    width: 'min(760px, 100%)',
     maxWidth: '760px',
+    minWidth: '0',
+
     margin: '0 auto',
     padding: '0',
     caretColor: 'var(--accent)',
     minHeight: '100%',
+
+    boxSizing: 'border-box',
+    whiteSpace: 'pre-wrap',
+    overflowWrap: 'anywhere',
+    wordBreak: 'break-word',
   },
+
   '.cm-line': {
     padding: '0 2px',
+    maxWidth: '100%',
+    minWidth: '0',
+    whiteSpace: 'pre-wrap',
+    overflowWrap: 'anywhere',
+    wordBreak: 'break-word',
   },
+
+  '.cm-line *': {
+    maxWidth: '100%',
+  },
+
   '&.cm-focused': {
     outline: 'none',
   },
+
   '.cm-cursor': {
     borderLeftColor: 'var(--accent)',
     borderLeftWidth: '2px',
   },
+
   '.cm-selectionBackground, ::selection': {
     backgroundColor: 'var(--selection)',
   },
+
   '.cm-activeLine': {
     backgroundColor: 'transparent',
   },
+
   '.cm-gutters': {
     display: 'none',
   },
+
   '.cm-tooltip': {
     background: 'var(--bg-elev-3)',
     border: '1px solid var(--border)',
@@ -93,13 +130,16 @@ const yantaTheme = EditorView.theme({
     color: 'var(--text)',
     boxShadow: 'var(--shadow)',
   },
+
   '.cm-tooltip-autocomplete ul li[aria-selected]': {
     background: 'var(--accent)',
     color: 'white',
   },
+
   '.cm-tooltip-autocomplete ul li': {
     padding: '4px 8px',
   },
+
   '.yanta-task-checkbox': {
     display: 'inline-block',
     verticalAlign: 'middle',
@@ -107,6 +147,7 @@ const yantaTheme = EditorView.theme({
     height: '14px',
     cursor: 'pointer',
   },
+
   '.yanta-wiki': {
     color: 'var(--accent)',
     textDecoration: 'none',
@@ -114,6 +155,7 @@ const yantaTheme = EditorView.theme({
     borderRadius: '3px',
     padding: '0 3px',
   },
+
   '.yanta-wiki-missing': {
     color: 'var(--text-dim)',
     textDecoration: 'underline dotted',
@@ -121,12 +163,14 @@ const yantaTheme = EditorView.theme({
     borderRadius: '3px',
     padding: '0 3px',
   },
+
   '.yanta-tag': {
     color: 'var(--accent-2)',
     background: 'rgba(167,139,250,0.10)',
     borderRadius: '4px',
     padding: '0 4px',
   },
+
   '.yanta-img-thumb': {
     display: 'block',
     maxWidth: '100%',
@@ -135,6 +179,23 @@ const yantaTheme = EditorView.theme({
     border: '1px solid var(--border)',
     margin: '4px 0',
   },
+
+  '.yanta-video-embed': {
+    maxWidth: '100%',
+  },
+
+  '.yanta-draw-editor-embed': {
+    width: '100%',
+    maxWidth: '100%',
+    minWidth: '0',
+    overflow: 'hidden',
+  },
+
+  '.yanta-draw-embed': {
+    maxWidth: '100%',
+    minWidth: '0',
+  },
+
   '.cm-ySelectionInfo': {
     position: 'absolute',
     top: '-1.4em',
@@ -466,55 +527,81 @@ function tagCompletion(ctx) {
   return { from: m.from + (m.text.startsWith(' ') ? 1 : 0), options: opts };
 }
 function slashCompletion(ctx) {
-  const m = ctx.matchBefore(/(^|\n)\/\w*/);
-  if (!m || (m.from === m.to && !ctx.explicit)) return null;
+  const line = ctx.state.doc.lineAt(ctx.pos);
+  const before = ctx.state.sliceDoc(line.from, ctx.pos);
+
+  // Slash command anywhere in the current line, but only as a token:
+  // erlaubt:
+  //   /task
+  //   Text /task
+  //   ( /task
+  //
+  // vermeidet eher unerwünschte Treffer in URLs/Pfaden wie https://...
+  const m = /(^|[\s([{'"“‘])\/[\w-]*$/.exec(before);
+
+  if (!m) return null;
+
+  const from = line.from + m.index + m[1].length;
+  const token = ctx.state.sliceDoc(from, ctx.pos);
+
+  if (!token.startsWith('/')) return null;
+  if (token === '' && !ctx.explicit) return null;
+
   const cmds = [
-    { label: 'Heading 1', apply: '# ' },
-    { label: 'Heading 2', apply: '## ' },
-    { label: 'Heading 3', apply: '### ' },
-    { label: 'Task', apply: '- [ ] ' },
-    { label: 'Bullet', apply: '- ' },
-    { label: 'Numbered', apply: '1. ' },
-    { label: 'Quote', apply: '> ' },
-    { label: 'Code block', apply: '```\n\n```' },
-    { label: 'Table', apply: '| col | col |\n| --- | --- |\n|     |     |' },
-    { label: 'Callout (Note)', apply: '> [!NOTE]\n> ' },
-    { label: 'Callout (Tip)', apply: '> [!TIP]\n> ' },
-    { label: 'Callout (Warning)', apply: '> [!WARNING]\n> ' },
-    { label: 'Math (block)', apply: '$$\n\n$$' },
-    { label: 'Wikilink', apply: '[[' },
-    { label: 'Image', apply: 'IMAGE_INSERT' }, // handled separately
-    { label: 'Drawing', apply: 'DRAW_INSERT' },
-    { label: 'Icon', apply: 'ICON_INSERT' },
-    { label: 'Shopping list link', apply: '[[' },
+    { name: 'heading-1', apply: '# ' },
+    { name: 'heading-2', apply: '## ' },
+    { name: 'heading-3', apply: '### ' },
+    { name: 'task', apply: '- [ ] ' },
+    { name: 'bullet', apply: '- ' },
+    { name: 'numbered', apply: '1. ' },
+    { name: 'quote', apply: '> ' },
+    { name: 'code-block', apply: '```\n\n```' },
+    { name: 'table', apply: '| col | col |\n| --- | --- |\n|     |     |' },
+    { name: 'callout-note', apply: '> [!NOTE]\n> ' },
+    { name: 'callout-tip', apply: '> [!TIP]\n> ' },
+    { name: 'callout-warning', apply: '> [!WARNING]\n> ' },
+    { name: 'math-block', apply: '$$\n\n$$' },
+    { name: 'wikilink', apply: '[[' },
+    { name: 'image', apply: 'IMAGE_INSERT' },
+    { name: 'drawing', apply: 'DRAW_INSERT' },
+    { name: 'icon', apply: 'ICON_INSERT' },
+    { name: 'shopping-list-link', apply: '[[' },
   ];
-  // Skip the leading newline if present
-  const from = m.from + (m.text.startsWith('\n') ? 1 : 0);
+
   return {
     from,
     options: cmds.map((c) => ({
-      label: '/' + c.label.toLowerCase().replace(/\s+/g, '-'),
-      detail: c.label,
+      label: '/' + c.name,
       type: 'slash',
+
+      // Kein detail mehr: /task erklärt sich selbst.
       apply: (view, completion, from, to) => {
         if (c.apply === 'IMAGE_INSERT') {
           view.dispatch({ changes: { from, to, insert: '' } });
           window.dispatchEvent(new CustomEvent('yanta-open-image-modal'));
           return;
         }
+
         if (c.apply === 'DRAW_INSERT') {
           view.dispatch({ changes: { from, to, insert: '' } });
           window.dispatchEvent(new CustomEvent('yanta-create-drawing'));
           return;
         }
+
         if (c.apply === 'ICON_INSERT') {
           view.dispatch({ changes: { from, to, insert: '' } });
           window.dispatchEvent(new CustomEvent('yanta-open-icon-insert'));
           return;
         }
-        view.dispatch({ changes: { from, to, insert: c.apply } });
+
+        view.dispatch({
+          changes: { from, to, insert: c.apply },
+          selection: { anchor: from + c.apply.length },
+        });
       },
     })),
+
+    validFor: /^\/[\w-]*$/,
   };
 }
 
@@ -1230,12 +1317,13 @@ export function mountEditor(host, { noteId, awarenessUser }) {
       ...historyKeymap,
       ...searchKeymap,
       ...completionKeymap,
+      { key: 'Tab', run: acceptCompletion },
       indentWithTab,
       { key: 'Mod-b', run: (v) => wrapSelection(v, '**', '**') },
       { key: 'Mod-i', run: (v) => wrapSelection(v, '*', '*') },
       { key: 'Mod-`', run: (v) => wrapSelection(v, '`', '`') },
     ]),
-    placeholder('Start writing in Markdown… (type / for commands, [[ for links)'),
+    placeholder('Start writing in Markdown… type / for commands, [[ for links'),
     themeCompartment.of(yantaTheme),
   ];
 

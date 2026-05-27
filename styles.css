@@ -3211,3 +3211,30 @@ input.yanta-task-checkbox {
 .expanded .tree-folder-count {
   display: none;
 }
+
+/* Während Folder-Animationen keinen externen Floater benutzen.
+   Die aktive Row rendert ihr Highlight selbst und wird dadurch sauber
+   mit dem animierenden Subtree bewegt/geclippt. */
+
+.tree.tree-folder-animating .tree-active-bg-floater,
+.tree.tree-folder-animating .tree-active-marker-floater {
+  display: none !important;
+}
+
+.tree-active-note-marker {
+  opacity: 0;
+}
+
+.tree.tree-folder-animating .tree-row.note.active {
+  background: var(--bg-elev-2) !important;
+  color: var(--text);
+}
+
+.tree.tree-folder-animating .tree-row.note.active .tree-active-note-marker {
+  opacity: 1 !important;
+}
+
+/* Während Folder-Animationen die normale active-row nicht transparent machen. */
+.tree.tree-folder-animating .tree-row.note.active:hover {
+  background: var(--bg-elev-3) !important;
+}

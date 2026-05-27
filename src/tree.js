@@ -198,7 +198,29 @@ function findFolderChildren(folderId) {
   return node?.querySelector(':scope > .tree-children') || null;
 }
 
+function removeActiveTreeFloaters(root) {
+  root?.querySelectorAll(
+    ':scope > .tree-active-bg-floater, :scope > .tree-active-marker-floater'
+  ).forEach((n) => n.remove());
+}
+
+function setTreeFolderAnimating(on) {
+  const root = $('tree');
+  if (!root) return;
+
+  root.classList.toggle('tree-folder-animating', !!on);
+
+  if (on) {
+    // Während Folder-Animationen darf der Floater nicht sichtbar sein.
+    // Die aktive Row rendert dann ihr eigenes Highlight und wird natürlich
+    // mit dem Subtree bewegt/geclippt.
+    removeActiveTreeFloaters(root);
+    lastActiveTreeIndicator = null;
+  }
+}
+
 function toggleFolderAnimated(folderId, wasExpanded) {
+  // Reduced motion: keine Animation.
   if (!treeMotionEnabled()) {
     if (wasExpanded) state.expandedFolders.delete(folderId);
     else state.expandedFolders.add(folderId);
@@ -207,7 +229,7 @@ function toggleFolderAnimated(folderId, wasExpanded) {
     return;
   }
 
-  // Collapse: erst vorhandene Children rausanimieren, dann State ändern.
+  // Collapse: vorhandene Children rausanimieren, danach State ändern.
   if (wasExpanded) {
     const kids = findFolderChildren(folderId);
 
@@ -216,6 +238,8 @@ function toggleFolderAnimated(folderId, wasExpanded) {
       renderTree();
       return;
     }
+
+    setTreeFolderAnimating(true);
 
     kids.style.maxHeight = kids.scrollHeight + 'px';
     kids.style.opacity = '1';
@@ -228,12 +252,22 @@ function toggleFolderAnimated(folderId, wasExpanded) {
     window.setTimeout(() => {
       state.expandedFolders.delete(folderId);
       renderTree();
+
+      // renderTree() scheduled selbst ein updateActiveTreeIndicator().
+      // Das soll wegen tree-folder-animating noch unterdrückt werden.
+      // Danach final sauber messen.
+      requestAnimationFrame(() => {
+        setTreeFolderAnimating(false);
+        updateActiveTreeIndicator($('tree'), { animate: false });
+      });
     }, TREE_ANIM_MS);
 
     return;
   }
 
-  // Expand: State ändern, neu rendern, neue Children bekommen is-expanding.
+  // Expand: State ändern, neu rendern, Children per CSS reinanimieren.
+  setTreeFolderAnimating(true);
+
   state.expandedFolders.add(folderId);
   pendingFolderAnimation = { id: folderId, action: 'expand' };
 
@@ -246,7 +280,12 @@ function toggleFolderAnimated(folderId, wasExpanded) {
     ) {
       pendingFolderAnimation = null;
     }
-  }, TREE_ANIM_MS + 80);
+
+    findFolderChildren(folderId)?.classList.remove('is-expanding');
+
+    setTreeFolderAnimating(false);
+    updateActiveTreeIndicator($('tree'), { animate: false });
+  }, TREE_ANIM_MS + 40);
 }
 
 function setFloaterRect(node, rect) {
@@ -257,8 +296,22 @@ function setFloaterRect(node, rect) {
   node.style.opacity = rect.opacity == null ? '1' : String(rect.opacity);
 }
 
-function updateActiveTreeIndicator(root) {
+function updateActiveTreeIndicator(root, { animate = true } = {}) {
   if (!root) return;
+
+  removeActiveTreeFloaters(root);
+
+  // Während Folder-Animationen übernimmt die aktive Row ihr Highlight selbst.
+  if (root.classList.contains('tree-folder-animating')) {
+    return;
+  }
+
+  const active = root.querySelector('.tree-row.note.active');
+
+  if (!active) {
+    lastActiveTreeIndicator = null;
+    return;
+  }
 
   const bg = el('div', {
     class: 'tree-active-bg-floater',
@@ -271,25 +324,6 @@ function updateActiveTreeIndicator(root) {
   });
 
   root.append(bg, marker);
-
-  const active = root.querySelector('.tree-row.note.active');
-
-  if (!active) {
-    if (lastActiveTreeIndicator) {
-      setFloaterRect(bg, {
-        ...lastActiveTreeIndicator.bg,
-        opacity: 0,
-      });
-
-      setFloaterRect(marker, {
-        ...lastActiveTreeIndicator.marker,
-        opacity: 0,
-      });
-    }
-
-    lastActiveTreeIndicator = null;
-    return;
-  }
 
   const rootRect = root.getBoundingClientRect();
   const rowRect = active.getBoundingClientRect();
@@ -331,10 +365,15 @@ function updateActiveTreeIndicator(root) {
     },
   };
 
-  const start = lastActiveTreeIndicator || next;
+  if (!animate || !lastActiveTreeIndicator) {
+    setFloaterRect(bg, next.bg);
+    setFloaterRect(marker, next.marker);
+    lastActiveTreeIndicator = next;
+    return;
+  }
 
-  setFloaterRect(bg, start.bg);
-  setFloaterRect(marker, start.marker);
+  setFloaterRect(bg, lastActiveTreeIndicator.bg);
+  setFloaterRect(marker, lastActiveTreeIndicator.marker);
 
   requestAnimationFrame(() => {
     bg.classList.add('is-live');
@@ -707,10 +746,7 @@ function folderRow(f, visibleNotes, depth) {
       (isCurrentPath ? ' current-path' : ''),
     style: { paddingLeft: (12 + depth * 12) + 'px' },
     onclick: (e) => handleTreeSelectionClick(e, key, () => {
-      if (expanded) state.expandedFolders.delete(f.id);
-      else state.expandedFolders.add(f.id);
-
-      renderTree();
+      toggleFolderAnimated(f.id, expanded);
     }),
     oncontextmenu: (e) => openTreeContextMenu(e, key, () => folderMenu(e, f)),
     ondragover: (e) => {
@@ -793,7 +829,7 @@ function folderRow(f, visibleNotes, depth) {
       title: `${childCount} item${childCount === 1 ? '' : 's'}`,
     }, String(childCount)));
   }
-  
+
   row.append(el('span', {
     class: 'menu-trigger',
     title: 'Add note',
@@ -925,9 +961,9 @@ function noteRow(n, depth = 0) {
   applyItemColor(row, n.color);
   applyCollapsedTreeDepth(row, depth);
 
-  // if (isActive) {
-  //   row.append(activeNoteMarker(depth));
-  // }
+  if (isActive) {
+    row.append(activeNoteMarker(depth));
+  }
 
   row.append(itemIcon(n.icon || (n.type === 'list' ? 'list' : 'file'), n.color));
   row.append(el('span', { class: 'label' }, n.title || 'Untitled'));

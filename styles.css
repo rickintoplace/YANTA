@@ -36,7 +36,7 @@
   --r: 8px;
   --r-lg: 12px;
 
-  --sidebar-w: 270px;
+  --sidebar-w: 250px;
   --split: 50%;
 }
 
@@ -137,6 +137,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 /* ---------- Sidebar ---------- */
 .sidebar {
+  min-width: 40px;
   background: var(--bg-elev);
   border-right: 1px solid var(--border);
   display: flex;
@@ -145,16 +146,20 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .sidebar-head {
   display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 14px 10px;
+  padding: 0 14px 10px 0;
+  padding-bottom: 0;
+  background: linear-gradient(90deg, var(--text) 2%, transparent 2%, transparent);
 }
 .brand {
-  display: flex; align-items: center; gap: 8px;
+  display: flex; align-items: center; gap: 4px;
   font-weight: 700; font-size: 14px; letter-spacing: 0.02em;
 }
 .brand-mark {
-  width: 18px; height: 18px; border-radius: 5px;
-  background: linear-gradient(135deg, var(--accent), var(--accent-2));
-  box-shadow: 0 0 0 1px rgba(255,255,255,0.05) inset;
+    width: 40px;
+    height: 40px;
+    border-radius: 0 12px;
+    /* background: linear-gradient(135deg, var(--accent), var(--accent-2)); */
+    /* box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.05) inset; */
 }
 .row-actions { display: flex; gap: 4px; }
 
@@ -247,7 +252,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
     padding-top: 0;
 }
 
-.tree-empty { padding: 8px 18px; font-size: 12px; color: var(--text-faint); font-style: italic; }
+.tree-empty { display:none; padding: 8px 18px; font-size: 12px; color: var(--text-faint); font-style: italic; }
 
 .tag-cloud {
   --tag-cloud-row-h: 34px;
@@ -2286,4 +2291,923 @@ input.yanta-task-checkbox {
 .yanta-draw-embed-actions [data-draw-action="toggle-width"][aria-pressed="true"] {
   color: var(--accent);
   background: rgba(110,168,254,0.12);
+}
+
+/* ------------------------------------------------------------
+   Mobile layout
+------------------------------------------------------------ */
+
+.mobile-sidebar-toggle {
+  display: none;
+}
+
+.sidebar-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 90;
+  background: rgba(0, 0, 0, 0.45);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.16s ease;
+}
+
+.app.sidebar-open .sidebar-backdrop {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+@media (max-width: 760px) {
+  html,
+  body {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+  }
+
+  .app {
+    height: 100dvh;
+    height: 100svh;
+    display: grid;
+    grid-template-columns: 1fr !important;
+    overflow: hidden;
+  }
+
+  .mobile-sidebar-toggle {
+    display: inline-flex;
+    flex: 0 0 auto;
+  }
+
+  .sidebar {
+    position: fixed !important;
+    z-index: 100;
+    inset: 0 auto 0 0;
+    width: min(86vw, 340px);
+    max-width: 340px;
+    height: 100dvh;
+    height: 100svh;
+    transform: translateX(-104%);
+    transition: transform 0.18s ease;
+    box-shadow: 18px 0 50px rgba(0, 0, 0, 0.35);
+    border-right: 1px solid var(--border);
+  }
+
+  .app.sidebar-open .sidebar {
+    transform: translateX(0);
+  }
+
+  .main {
+    min-width: 0;
+    width: 100%;
+    height: 100dvh;
+    height: 100svh;
+  }
+
+  .main-head {
+    min-width: 0;
+    gap: 6px;
+    padding-left: max(4px, env(safe-area-inset-left));
+    padding-right: max(4px, env(safe-area-inset-right));
+    padding-top: 4px;
+  }
+
+  .note-title {
+    min-width: 0;
+    /* flex: 1 1 auto; */
+    font-size: 16px; /* verhindert iOS Auto-Zoom bei Input-Fokus */
+  }
+
+  .tag-input {
+    display: none;
+  }
+
+  .chips {
+    display: none;
+  }
+
+  .head-actions {
+    flex: 0 0 auto;
+    max-width: 48vw;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .head-actions::-webkit-scrollbar {
+    display: none;
+  }
+
+  .panes {
+    display: grid;
+    grid-template-columns: 1fr !important;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .divider {
+    display: none !important;
+  }
+
+  /* Auf Mobile Split nicht als echtes Split rendern */
+  .app[data-view="split"] .pane-preview {
+    display: none !important;
+  }
+
+  .app[data-view="edit"] .pane-preview {
+    display: none !important;
+  }
+
+  .app[data-view="preview"] .pane-edit {
+    display: none !important;
+  }
+
+  .pane,
+  .pane-edit,
+  .pane-preview {
+    min-width: 0;
+    width: 100%;
+  }
+
+  .preview {
+    padding-left: clamp(14px, 5vw, 24px);
+    padding-right: clamp(14px, 5vw, 24px);
+  }
+
+  .cm-scroller {
+    padding-left: clamp(14px, 5vw, 24px) !important;
+    padding-right: clamp(14px, 5vw, 24px) !important;
+  }
+
+  #btn-view-split {
+    display: none;
+  }
+
+  .status {
+    padding-left: max(10px, env(safe-area-inset-left));
+    padding-right: max(10px, env(safe-area-inset-right));
+  }
+
+  .modal-card {
+    width: min(96vw, 560px);
+    max-height: 92svh;
+  }
+
+  .palette-card {
+    width: min(94vw, 620px);
+  }
+
+  .graph-overlay {
+    inset: 0;
+  }
+
+  .graph-head {
+    gap: 6px;
+    padding-left: max(8px, env(safe-area-inset-left));
+    padding-right: max(8px, env(safe-area-inset-right));
+  }
+
+  .graph-search {
+    display: none;
+  }
+}
+
+/* ============================================================
+   Desktop Sidebar Collapse
+   ============================================================ */
+
+:root {
+  --sidebar-expanded-w: 250px;
+  --sidebar-collapsed-w: 42px;
+}
+
+.app {
+  grid-template-columns: var(--sidebar-w, var(--sidebar-expanded-w)) 1fr;
+  transition: grid-template-columns 180ms ease;
+}
+
+.sidebar {
+  position: relative;
+  width: var(--sidebar-w, var(--sidebar-expanded-w));
+  transition:
+    width 180ms ease,
+    min-width 180ms ease,
+    border-color 160ms ease,
+    background-color 160ms ease;
+}
+
+/* ---------- Collapse toggle ---------- */
+
+.sidebar-collapse-toggle {
+  position: absolute;
+  top: 50%;
+  right: -13px;
+  z-index: 40;
+
+  width: 26px;
+  height: 64px;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  border: 1px solid var(--border);
+  border-left-color: color-mix(in srgb, var(--border) 70%, transparent);
+  border-radius: 999px;
+
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bg-elev-2) 94%, transparent),
+      color-mix(in srgb, var(--bg-elev) 96%, transparent)
+    );
+
+  color: var(--text-dim);
+  box-shadow:
+    0 10px 28px rgba(0,0,0,0.24),
+    0 0 0 1px rgba(255,255,255,0.02) inset;
+
+  cursor: pointer;
+
+  opacity: 0;
+  transform: translateY(-50%) translateX(-3px) scale(0.96);
+  pointer-events: none;
+
+  transition:
+    opacity 140ms ease,
+    transform 160ms ease,
+    color 120ms ease,
+    border-color 120ms ease,
+    background-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.sidebar:hover .sidebar-collapse-toggle,
+.sidebar-collapse-toggle:focus,
+.sidebar-collapse-toggle:focus-visible {
+  opacity: 1;
+  transform: translateY(-50%) translateX(0) scale(1);
+  pointer-events: auto;
+}
+
+.sidebar-collapse-toggle:hover {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent) 11%, var(--bg-elev-2));
+  box-shadow:
+    0 12px 32px rgba(0,0,0,0.30),
+    0 0 0 1px color-mix(in srgb, var(--accent) 28%, transparent) inset;
+}
+
+.sidebar-collapse-toggle:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---------- Collapsed shell ---------- */
+
+.app.sidebar-collapsed {
+  --sidebar-w: var(--sidebar-collapsed-w);
+}
+
+.app.sidebar-collapsed .sidebar {
+  min-width: var(--sidebar-collapsed-w);
+  overflow: visible;
+}
+
+.app.sidebar-collapsed .sidebar * {
+  min-width: 0;
+}
+
+/* ---------- Collapsed header / brand ---------- */
+
+.app.sidebar-collapsed .sidebar-head {
+    padding-right: 1px;
+}
+
+.app.sidebar-collapsed .brand {
+  width: 100%;
+  justify-content: center;
+  gap: 0;
+}
+
+.app.sidebar-collapsed .brand > span:not(.brand-mark),
+.app.sidebar-collapsed .sidebar-head .row-actions,
+.app.sidebar-collapsed .search-bar {
+  display: none;
+}
+
+.app.sidebar-collapsed .brand-mark {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+}
+
+/* ---------- Collapsed quick actions ---------- */
+
+.app.sidebar-collapsed .quick-actions {
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 8px 6px;
+}
+
+/* ---------- Shared collapsed icon-only controls ---------- */
+
+.app.sidebar-collapsed .quick-actions .btn,
+.app.sidebar-collapsed .sidebar-foot .btn {
+  width: 36px;
+  height: 34px;
+  justify-content: center;
+  padding: 0;
+  font-size: 0;
+  gap: 0;
+}
+
+.app.sidebar-collapsed .quick-actions .btn {
+  flex: 0 0 auto;
+}
+
+.app.sidebar-collapsed .sidebar-foot .btn {
+  flex: 0 0 36px;
+}
+
+.app.sidebar-collapsed .quick-actions .btn svg,
+.app.sidebar-collapsed .sidebar-foot .btn svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+}
+/* ============================================================
+   Collapsed tree: Icon-only + dynamische Hierarchie
+   ------------------------------------------------------------
+   Erwartet aus tree.js pro Row:
+   - data-tree-depth="0|1|2|..."
+   - --tree-indent-collapsed: <px>
+   - --tree-marker-collapsed: <px>
+   - --tree-guide-opacity: 0|1
+
+   Root-Icons bleiben mittig.
+   Root-Marker bleibt ganz links.
+   Tiefere Ebenen werden dynamisch komprimiert.
+   ============================================================ */
+
+.app.sidebar-collapsed .tree {
+  --collapsed-tree-icon-size: 18px;
+  --collapsed-tree-icon-svg-size: 17px;
+
+  /* 56px Sidebar, 18px Icon => 19px links für mittiges Root-Icon */
+  --collapsed-tree-root-icon-left:
+    calc((var(--sidebar-collapsed-w) - var(--collapsed-tree-icon-size)) / 2);
+
+  padding-top: 4px;
+  overflow-x: hidden;
+}
+
+.app.sidebar-collapsed .tree-section {
+  padding: 2px 0;
+}
+
+.app.sidebar-collapsed .tree-section-title,
+.app.sidebar-collapsed .tree-empty {
+  display: none !important;
+}
+
+.app.sidebar-collapsed .tree-children {
+  padding-left: 0 !important;
+}
+
+/* ---------- Rows ---------- */
+
+.app.sidebar-collapsed .tree .tree-row {
+  position: relative;
+
+  display: flex !important;
+  align-items: center !important;
+  justify-content: flex-start !important;
+
+  width: var(--sidebar-collapsed-w);
+  max-width: var(--sidebar-collapsed-w);
+  height: 32px;
+
+  /*
+    Fallback ist Root-Mitte.
+    Wenn JS die Variable setzt, wird dynamisch eingerückt.
+  */
+  padding-left: var(
+    --tree-indent-collapsed,
+    var(--collapsed-tree-root-icon-left)
+  ) !important;
+
+  padding-right: 0 !important;
+  gap: 0 !important;
+
+  overflow: hidden;
+  border-left-color: transparent !important;
+}
+
+/* Root-Level explizit mittig halten, selbst falls JS für root 0px setzen würde */
+.app.sidebar-collapsed .tree .tree-row[data-tree-depth="0"] {
+  padding-left: var(--collapsed-tree-root-icon-left) !important;
+}
+
+/* .app.sidebar-collapsed .tree .tree-row[data-tree-depth]:not([data-tree-depth="0"]) {
+  padding-left: max(var(--tree-indent-collapsed, 19px), 19px) !important;
+} */
+
+/* Nur Icons zeigen */
+.app.sidebar-collapsed .tree .tree-row .label,
+.app.sidebar-collapsed .tree .tree-row .twist,
+.app.sidebar-collapsed .tree .tree-row .menu-trigger,
+.app.sidebar-collapsed .tree .tree-row .pin {
+  display: none !important;
+}
+
+/* ---------- Icons ---------- */
+
+.app.sidebar-collapsed .tree .tree-row .tree-item-icon {
+  margin-left: 0 !important;
+
+  width: var(--collapsed-tree-icon-size) !important;
+  height: var(--collapsed-tree-icon-size) !important;
+  min-width: var(--collapsed-tree-icon-size) !important;
+  max-width: var(--collapsed-tree-icon-size) !important;
+  flex: 0 0 var(--collapsed-tree-icon-size) !important;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  overflow: hidden !important;
+}
+
+.app.sidebar-collapsed .tree .tree-row .tree-item-icon svg {
+  width: var(--collapsed-tree-icon-svg-size) !important;
+  height: var(--collapsed-tree-icon-svg-size) !important;
+  flex: 0 0 auto;
+}
+
+/* ---------- Hierarchie-Linie ---------- */
+
+.app.sidebar-collapsed .tree .tree-row::before {
+  content: "";
+  position: absolute;
+
+  left: calc(var(--tree-marker-collapsed, 0px) + 1px);
+  top: 1px;
+  bottom: 1px;
+
+  width: 1px;
+  border-radius: 999px;
+
+  background: color-mix(in srgb, var(--border-strong) 70%, transparent);
+  opacity: var(--tree-guide-opacity, 0);
+
+  pointer-events: none;
+}
+
+/* Root hat keine Guide-Line, nur ggf. Marker */
+.app.sidebar-collapsed .tree .tree-row[data-tree-depth="0"]::before {
+  opacity: 0 !important;
+}
+
+/* ---------- Current path marker: Ordner + Oberordner ---------- */
+
+.app.sidebar-collapsed .tree .tree-row .tree-path-marker {
+  position: absolute;
+
+  left: var(--tree-marker-collapsed, 0px);
+  top: 0px;
+  bottom: 0px;
+
+  width: 2px;
+  border-radius: 999px;
+
+  background: color-mix(in srgb, var(--accent) 62%, transparent);
+  /* opacity: 0.72; */
+
+  pointer-events: none;
+}
+
+/* ---------- Active note marker ---------- */
+
+.app.sidebar-collapsed .tree .tree-row .tree-active-note-marker {
+  position: absolute !important;
+
+  left: var(--tree-marker-collapsed, 0px) !important;
+  top: 0px !important;
+  bottom: 0px !important;
+
+  width: 2px !important;
+  border-radius: 999px !important;
+
+  background: var(--accent) !important;
+  opacity: 1 !important;
+
+  pointer-events: none !important;
+}
+
+/* Root-Level Marker exakt ganz links, Icon bleibt trotzdem mittig */
+.app.sidebar-collapsed .tree .tree-row[data-tree-depth="0"] .tree-active-note-marker,
+.app.sidebar-collapsed .tree .tree-row[data-tree-depth="0"] .tree-path-marker {
+  left: 0 !important;
+}
+
+/* ---------- Row states ---------- */
+
+.app.sidebar-collapsed .tree .tree-row:hover {
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--accent) 8%, transparent),
+      transparent 72%
+    ),
+    var(--bg-elev-2);
+}
+
+.app.sidebar-collapsed .tree .tree-row.current-path {
+  /* background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--accent) 10%, transparent),
+      transparent 78%
+    ); */
+  background: var(--bg-elev-2);
+}
+
+.app.sidebar-collapsed .tree .tree-row.current-path:hover {
+  /* background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--accent) 16%, transparent),
+      transparent 78%
+    ),
+    var(--bg-elev-2); */
+
+  background: var(--bg-elev-3);
+}
+
+.app.sidebar-collapsed .tree .tree-row.current-path:not(.has-color) .tree-item-icon {
+  color: var(--accent);
+}
+
+.app.sidebar-collapsed .tree .tree-row.active {
+  /* background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--accent) 20%, transparent),
+      transparent 82%
+    ),
+    var(--bg-elev-2); */
+
+  background: var(--bg-elev-2);
+}
+
+/* ---------- Statuspunkte ---------- */
+
+.app.sidebar-collapsed .tree .tree-row .sync-dot,
+.app.sidebar-collapsed .tree .tree-row .live-dot {
+  position: absolute;
+  right: 8px;
+  bottom: 6px;
+  margin: 0;
+}
+
+/* ============================================================
+   Collapsed tags
+   ============================================================ */
+
+.app.sidebar-collapsed .tag-cloud {
+  display: none !important;
+}
+
+/* ============================================================
+   Collapsed footer
+   ============================================================ */
+
+.app.sidebar-collapsed .sidebar-foot {
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 8px;
+}
+
+.app.sidebar-collapsed .sidebar-foot .btn {
+  width: 36px;
+  height: 34px;
+  flex: 0 0 36px;
+
+  justify-content: center;
+  padding: 0;
+
+  font-size: 0;
+  gap: 0;
+}
+
+.app.sidebar-collapsed .sidebar-foot .btn svg {
+  width: 16px;
+  height: 16px;
+}
+
+.app.sidebar-collapsed .sidebar-foot .icon-btn {
+  width: 36px;
+  height: 34px;
+  flex: 0 0 36px;
+}
+
+/* ============================================================
+   Collapsed storage / sync
+   ============================================================ */
+
+.app.sidebar-collapsed .sidebar-toe {
+  justify-content: center;
+  padding: 0 6px 6px;
+}
+
+.app.sidebar-collapsed #storageMeter {
+  display: none !important;
+}
+
+.app.sidebar-collapsed #vaultIndicator {
+  margin: 0;
+  width: 36px;
+  height: 26px;
+  justify-content: center;
+  padding: 0;
+}
+
+.app.sidebar-collapsed #vaultIndicator span:not(.sync-sym) {
+  display: none !important;
+}
+
+/* ============================================================
+   Mobile: Desktop-Collapse aus
+   ============================================================ */
+
+@media (max-width: 880px) {
+  .sidebar-collapse-toggle {
+    display: none !important;
+  }
+
+  .app.sidebar-collapsed {
+    --sidebar-w: var(--sidebar-expanded-w);
+  }
+
+  .app.sidebar-collapsed .sidebar {
+    width: min(86vw, 340px);
+    min-width: 0;
+  }
+}
+
+/* ============================================================
+   Reduced motion
+   ============================================================ */
+
+@media (prefers-reduced-motion: reduce) {
+  .app,
+  .sidebar,
+  .sidebar-collapse-toggle {
+    transition: none !important;
+  }
+}
+
+/* ============================================================
+   Tree animations: folder expand/collapse + sliding selection
+   ============================================================ */
+
+.tree {
+  position: relative;
+}
+
+.tree-section,
+.tree-node {
+  position: relative;
+  z-index: 1;
+}
+
+/* Aktiver Background als Floating-Layer */
+.tree-active-bg-floater {
+  position: absolute;
+  z-index: 0;
+  pointer-events: none;
+
+  /* border-radius: 7px; */
+
+  background:
+    linear-gradient(
+      90deg,
+      color-mix(in srgb, var(--accent) 11%, transparent),
+      transparent 78%
+    ),
+    var(--bg-elev-2);
+
+  opacity: 0;
+  will-change: top, height, opacity;
+}
+
+.tree-active-marker-floater {
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+
+  width: 2px;
+  border-radius: 999px;
+  background: var(--accent);
+
+  opacity: 0;
+  will-change: top, height, left, opacity;
+}
+
+.tree-active-bg-floater.is-live,
+.tree-active-marker-floater.is-live {
+  transition:
+    top 220ms cubic-bezier(.2, .8, .2, 1),
+    left 220ms cubic-bezier(.2, .8, .2, 1),
+    width 220ms cubic-bezier(.2, .8, .2, 1),
+    height 220ms cubic-bezier(.2, .8, .2, 1),
+    opacity 140ms ease;
+}
+
+/* Die aktive Row selbst darf keinen festen Background mehr haben,
+   sonst sieht man den gleitenden Layer darunter nicht. */
+.tree-row.note.active,
+.tree-row.note.active.selected,
+.tree-row.note.active:hover {
+  background: transparent;
+}
+
+.tree-row.note.active .label {
+  color: var(--text);
+}
+
+/* Damit Text/Icon über dem Floating-Background liegen */
+.tree-row {
+  position: relative;
+  z-index: 1;
+}
+
+/* Folder expansion */
+.tree-children.is-expanding {
+  overflow: hidden;
+  animation: yanta-tree-expand 220ms cubic-bezier(.2, .8, .2, 1);
+  transform-origin: top;
+}
+
+.tree-children.is-collapsing {
+  overflow: hidden !important;
+  max-height: 0 !important;
+  opacity: 0 !important;
+  transform: translateY(-4px);
+  transition:
+    max-height 220ms cubic-bezier(.2, .8, .2, 1),
+    opacity 160ms ease,
+    transform 220ms cubic-bezier(.2, .8, .2, 1);
+}
+
+@keyframes yanta-tree-expand {
+  from {
+    max-height: 0;
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+
+  to {
+    max-height: 1000px;
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Optional: Chevron etwas lebendiger, falls sichtbar */
+.tree-row.folder .twist {
+  transition: transform 180ms ease;
+}
+
+.tree-row.folder.expanded .twist {
+  transform: rotate(90deg);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tree-active-bg-floater.is-live,
+  .tree-active-marker-floater.is-live,
+  .tree-children.is-expanding,
+  .tree-children.is-collapsing,
+  .tree-row.folder .twist {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* ============================================================
+   Folder affordance
+   ------------------------------------------------------------
+   Custom folder icons bleiben frei wählbar, aber Ordner bekommen
+   immer eine subtile Container-Markierung.
+   ============================================================ */
+
+
+.tree-folder-icon {
+    position: relative;
+    width: 20px;
+    height: 17px;
+    flex-basis: 20px;
+    /* margin-right: 1px; */
+}
+
+/* kleine Folder-Tab-Silhouette hinter dem eigentlichen Custom Icon */
+.tree-folder-icon::before {
+  content: "";
+  position: absolute;
+
+  left: 0;
+  right: 0;
+  bottom: 1px;
+
+  height: 14px;
+
+  border: 1px solid color-mix(in srgb, currentColor 38%, var(--border));
+  border-radius: 3px;
+
+  background:
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, currentColor 10%, transparent),
+      color-mix(in srgb, currentColor 4%, transparent)
+    );
+
+  opacity: 0.75;
+}
+
+/* Folder-Tab */
+.tree-folder-icon::after {
+    content: "";
+    position: absolute;
+    left: 0px;
+    top: -1px;
+    width: 8px;
+    height: 3px;
+    border: 1px solid color-mix(in srgb, currentColor 38%, var(--border));
+    border-bottom: 0;
+    border-radius: 2px 3px 0 0;
+    background: color-mix(in srgb, currentColor 9%, var(--bg-elev));
+    opacity: 0.85;
+}
+
+/* Das eigentliche User-Icon bleibt sichtbar obenauf */
+.tree-folder-icon svg {
+  position: relative;
+  z-index: 1;
+
+  width: 13px;
+  height: 13px;
+
+  filter:
+    drop-shadow(0 0 2px var(--bg-elev))
+    drop-shadow(0 0 2px var(--bg-elev));
+}
+
+/* Bei Hover / aktiv etwas klarer */
+.tree-row.folder:hover .tree-folder-icon::before,
+.tree-row.folder:hover .tree-folder-icon::after,
+.tree-row.folder.current-path .tree-folder-icon::before,
+.tree-row.folder.current-path .tree-folder-icon::after {
+  opacity: 1;
+  border-color: color-mix(in srgb, currentColor 58%, var(--border));
+}
+
+/* Optionaler Child-Count */
+.tree-folder-count {
+  min-width: 16px;
+  height: 16px;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  padding: 0 5px;
+  border-radius: 999px;
+
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+
+  color: var(--text-faint);
+  font-size: 10px;
+  line-height: 1;
+
+  margin-left: 2px;
+}
+
+.tree-row.folder:hover .tree-folder-count {
+  color: var(--text-dim);
+  border-color: var(--border-strong);
+}
+
+.app.sidebar-collapsed .sidebar .tree-folder-count {
+    margin-left: -2px;
+    margin-top: -17px;
+    padding: 4px !important;
+    width: 8px;
+    height: 8px;
+}
+
+.expanded .tree-folder-count {
+  display: none;
 }

@@ -3,7 +3,7 @@
 // pane divider, history navigation, view modes.
 // ============================================================
 
-import { $, state, store, openDB, toast, cssColorToHex, safeCssColor } from './core.js';
+import { $, state, store, openDB, toast, cssColorToHex, safeCssColor, lucide } from './core.js';
 import {
   loadAppearance,
   watchSystemTheme,
@@ -46,6 +46,14 @@ import {
 
 let sharePreviewLocked = false;
 
+const MOBILE_MQ = window.matchMedia('(max-width: 760px)');
+const DESKTOP_SIDEBAR_MQ = window.matchMedia('(min-width: 881px)');
+let sidebarCollapsedPref = false;
+
+function isMobileViewport() {
+  return MOBILE_MQ.matches;
+}
+
 function searchHaystack(note, body = '') {
   return [
     note?.title || '',
@@ -78,13 +86,15 @@ async function init() {
       if (!already) await navigator.storage.persist();
     }
   } catch {}
-
-  const [notes, folders, images, expanded, view] = await Promise.all([
+    
+  const [notes, folders, images, expanded, view, mobileView, sidebarCollapsed] = await Promise.all([
     store.notes.all(),
     store.folders.all(),
     store.images.allMeta(),
     store.settings.get('expandedFolders', []),
     store.settings.get('view', 'split'),
+    store.settings.get('viewMobile', null),
+    store.settings.get('sidebarCollapsed', false),
   ]);
 
   for (const n of notes) state.notes.set(n.id, n);
@@ -153,7 +163,15 @@ async function init() {
   watchSystemTheme();
 
   state.expandedFolders = new Set(expanded);
-  setView(view);
+
+  sidebarCollapsedPref = !!sidebarCollapsed;
+  applySidebarCollapsed(sidebarCollapsedPref, { persist: false });
+
+  const initialView = isMobileViewport()
+    ? (mobileView || (view === 'split' ? 'edit' : view))
+    : view;
+
+  setView(initialView, { persist: false });
 
   rebuildWikilinkIndex();
   await buildSearchIndex();
@@ -237,17 +255,193 @@ async function init() {
   bindEvents();
 }
 
-function setView(v) {
+function setView(v, { persist = true } = {}) {
   if (sharePreviewLocked && v !== 'preview') {
     v = 'preview';
   }
 
+  // Auf Smartphones kein echtes Split-View.
+  if (isMobileViewport() && v === 'split') {
+    v = 'edit';
+  }
+
   state.view = v;
-  $('app').dataset.view = v;
-  $('btn-view-edit').classList.toggle('active', v === 'edit');
-  $('btn-view-split').classList.toggle('active', v === 'split');
-  $('btn-view-preview').classList.toggle('active', v === 'preview');
-  store.settings.set('view', v);
+
+  const app = $('app');
+  if (app) app.dataset.view = v;
+
+  $('btn-view-edit')?.classList.toggle('active', v === 'edit');
+  $('btn-view-split')?.classList.toggle('active', v === 'split');
+  $('btn-view-preview')?.classList.toggle('active', v === 'preview');
+
+  if (persist) {
+    store.settings.set(isMobileViewport() ? 'viewMobile' : 'view', v);
+  }
+}
+
+function setupMobileSidebar() {
+  const app = $('app');
+  const sidebar = $('sidebar');
+  const btn = $('btn-sidebar-toggle');
+
+  if (!app || !sidebar || !btn) return;
+
+  let backdrop = $('sidebarBackdrop');
+
+  if (!backdrop) {
+    backdrop = document.createElement('div');
+    backdrop.id = 'sidebarBackdrop';
+    backdrop.className = 'sidebar-backdrop';
+    backdrop.hidden = true;
+    app.append(backdrop);
+  }
+
+  const open = () => {
+    if (!isMobileViewport()) return;
+
+    app.classList.add('sidebar-open');
+    backdrop.hidden = false;
+    btn.setAttribute('aria-expanded', 'true');
+  };
+
+  const close = () => {
+    app.classList.remove('sidebar-open');
+    btn.setAttribute('aria-expanded', 'false');
+
+    // Erst nach Transition wirklich hidden, sonst sieht man kein Fade.
+    setTimeout(() => {
+      if (!app.classList.contains('sidebar-open')) {
+        backdrop.hidden = true;
+      }
+    }, 180);
+  };
+
+  const toggle = () => {
+    if (app.classList.contains('sidebar-open')) close();
+    else open();
+  };
+
+  btn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    toggle();
+  });
+
+  backdrop.addEventListener('click', close);
+
+  // Nach Note-Auswahl Sidebar schließen.
+  sidebar.addEventListener('click', (e) => {
+    if (!isMobileViewport()) return;
+
+    if (
+      e.target.closest('.tree-row.note') ||
+      e.target.closest('.tag-pill') ||
+      e.target.closest('#btn-new-note')
+    ) {
+      setTimeout(close, 80);
+    }
+  });
+
+  // Bei Resize sauber umschalten.
+  MOBILE_MQ.addEventListener?.('change', () => {
+    if (!isMobileViewport()) {
+      close();
+      return;
+    }
+
+    if (state.view === 'split') {
+      setView('edit', { persist: false });
+    }
+  });
+
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape' && app.classList.contains('sidebar-open')) {
+      close();
+    }
+  });
+}
+
+function applySidebarCollapsed(collapsed, { persist = true } = {}) {
+  const app = $('app');
+  const btn = $('btn-sidebar-collapse');
+
+  if (!app) return;
+
+  const effectiveCollapsed = !!collapsed && DESKTOP_SIDEBAR_MQ.matches;
+
+  app.classList.toggle('sidebar-collapsed', effectiveCollapsed);
+  app.dataset.sidebarCollapsed = effectiveCollapsed ? 'true' : 'false';
+
+  if (btn) {
+    btn.setAttribute('aria-expanded', effectiveCollapsed ? 'false' : 'true');
+    btn.setAttribute(
+      'aria-label',
+      effectiveCollapsed ? 'Expand sidebar' : 'Collapse sidebar'
+    );
+    btn.title = effectiveCollapsed ? 'Expand sidebar' : 'Collapse sidebar';
+
+    btn.innerHTML = lucide(
+      effectiveCollapsed ? 'panel-left-open' : 'panel-left-close',
+      16
+    );
+  }
+
+  if (persist) {
+    store.settings.set('sidebarCollapsed', !!collapsed);
+  }
+
+  // CodeMirror, Graph, Drawings etc. sollen nach Layoutwechsel sauber messen.
+  // Wichtig: Tree-Floater nach der Sidebar-Transition neu setzen.
+  const refreshLayout = () => {
+    window.dispatchEvent(new Event('resize'));
+    window.dispatchEvent(new CustomEvent('yanta-sidebar-resized', {
+      detail: { collapsed: effectiveCollapsed },
+    }));
+
+    // Active-Tree-Floater wird in renderTree() neu berechnet.
+    renderTree();
+  };
+
+  requestAnimationFrame(() => {
+    refreshLayout();
+
+    // Sidebar/Grid transition läuft 180ms; danach finale Breite messen.
+    window.setTimeout(refreshLayout, 220);
+  });
+}
+
+function setupDesktopSidebarCollapse() {
+  const app = $('app');
+  const sidebar = $('sidebar');
+  const btn = $('btn-sidebar-collapse');
+
+  if (!app || !sidebar || !btn) return;
+
+  btn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    sidebarCollapsedPref = !sidebarCollapsedPref;
+    applySidebarCollapsed(sidebarCollapsedPref);
+  });
+
+  // Tooltips für Icon-only Tree Items: Label bleibt im DOM, wird aber visuell versteckt.
+  sidebar.addEventListener('mouseover', (e) => {
+    if (!app.classList.contains('sidebar-collapsed')) return;
+
+    const row = e.target.closest?.('.tree-row');
+    if (!row || !sidebar.contains(row)) return;
+
+    const label = row.querySelector('.label')?.textContent?.trim();
+
+    if (label) {
+      row.title = label;
+    }
+  });
+
+  DESKTOP_SIDEBAR_MQ.addEventListener?.('change', () => {
+    applySidebarCollapsed(sidebarCollapsedPref, { persist: false });
+  });
 }
 
 function bindEvents() {
@@ -306,6 +500,9 @@ function bindEvents() {
   $('btn-view-edit').addEventListener('click', () => setView('edit'));
   $('btn-view-split').addEventListener('click', () => setView('split'));
   $('btn-view-preview').addEventListener('click', () => setView('preview'));
+
+  setupMobileSidebar();
+  setupDesktopSidebarCollapse();
 
   // Head actions
   $('btn-pin').addEventListener('click', togglePin);
@@ -411,23 +608,28 @@ function bindEvents() {
   // Slash → image insert event from editor
   window.addEventListener('yanta-open-image-modal', () => openImageModal());
   // Ctrl/Cmd+click wikilink from editor
-window.addEventListener('yanta-follow-wiki', async (e) => {
-  const target = e.detail.target;
-  const id = wikilinkIndex.get(target.toLowerCase());
+  window.addEventListener('yanta-follow-wiki', async (e) => {
+    const target = e.detail.target;
+    const id = wikilinkIndex.get(target.toLowerCase());
 
-  if (id) {
-    openNote(id);
-    return;
-  }
+    if (id) {
+      openNote(id);
+      return;
+    }
 
-  // Kein Browser-Confirm mehr.
-  // In Editor/Drawing gibt es keinen sinnvollen lokalen Anchor.
-  // Daher: bewusst direkte Aktion + Toast.
-  await createNoteWithTitle(target);
-  toast(`Created "${target}"`, 'success');
-});
+    // Kein Browser-Confirm mehr.
+    // In Editor/Drawing gibt es keinen sinnvollen lokalen Anchor.
+    // Daher: bewusst direkte Aktion + Toast.
+    await createNoteWithTitle(target);
+    toast(`Created "${target}"`, 'success');
+  });
   // Cycle view from command palette
   window.addEventListener('yanta-cycle-view', () => {
+    if (isMobileViewport()) {
+      setView(state.view === 'preview' ? 'edit' : 'preview');
+      return;
+    }
+
     setView(state.view === 'split' ? 'preview' : state.view === 'preview' ? 'edit' : 'split');
   });
 
@@ -590,7 +792,15 @@ function handleGlobalKey(e) {
     e.preventDefault();
     cycleAppearanceMode();
   }
-  else if (meta && e.key === '/') { e.preventDefault(); setView(state.view === 'split' ? 'preview' : 'split'); }
+  else if (meta && e.key === '/') {
+    e.preventDefault();
+
+    if (isMobileViewport()) {
+      setView(state.view === 'preview' ? 'edit' : 'preview');
+    } else {
+      setView(state.view === 'split' ? 'preview' : 'split');
+    }
+  }
   else if (e.key === 'Escape') {
     closeImageModal();
     closeShareModal();

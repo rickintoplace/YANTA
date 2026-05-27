@@ -64,6 +64,289 @@ function activeNoteMarker(depth = 0) {
   });
 }
 
+function applyCollapsedTreeDepth(row, depth = 0) {
+  if (!row) return;
+
+  const d = Math.max(0, Number(depth) || 0);
+
+  row.dataset.treeDepth = String(d);
+  row.style.setProperty('--tree-depth', String(d));
+
+  // Sicherer Fallback:
+  // 56px Sidebar, 18px Icon => (56 - 18) / 2 = 19px.
+  // Root-Icons sind damit mittig.
+  row.style.setProperty('--tree-indent-collapsed', '19px');
+
+  // Root-Marker ganz links, tiefere Marker später dynamisch.
+  row.style.setProperty('--tree-marker-collapsed', d === 0 ? '0px' : '8px');
+  row.style.setProperty('--tree-guide-opacity', d > 0 ? '1' : '0');
+}
+
+function normalizeCollapsedTreeIndents(root = $('tree')) {
+  if (!root) return;
+
+  const rows = [...root.querySelectorAll('.tree-row[data-tree-depth]')];
+  if (!rows.length) return;
+
+  const depths = rows.map((row) => {
+    const d = parseInt(row.dataset.treeDepth || '0', 10);
+    return Number.isFinite(d) ? Math.max(0, d) : 0;
+  });
+
+  const maxDepth = Math.max(0, ...depths);
+
+  // Hart und robust für collapsed Sidebar.
+  const sidebarW = 42;
+  const iconW = 18;
+  const rightSafety = 3;
+
+  // Root-Icon exakt mittig.
+  const rootIconLeft = Math.round((sidebarW - iconW) / 2); // 19
+
+  // Größter erlaubter Icon-Left-Wert:
+  // iconLeft + iconW + rightSafety <= sidebarW
+  const maxIconLeft = sidebarW - iconW - rightSafety; // 35
+
+  const available = maxIconLeft - rootIconLeft; // 16
+
+  /*
+    Dynamisch:
+    - Root bleibt immer 19px.
+    - Tiefste existierende Ebene landet maximal bei 35px.
+    - Dazwischen proportional.
+    - Bei sehr hoher maxDepth werden die Abstände kleiner, aber niemals negativ.
+  */
+  const indentStrength = 0.5; // 1 = volle Spreizung, 0.5 = halb so stark
+  const step = maxDepth > 0 ? (available / maxDepth) * indentStrength : 0;
+
+  for (const row of rows) {
+    const d = parseInt(row.dataset.treeDepth || '0', 10) || 0;
+
+    const iconLeft = Math.round(rootIconLeft + d * step);
+
+    /*
+      Marker:
+      - Root exakt 0.
+      - Unterebenen links vom Icon, ebenfalls komprimiert.
+    */
+    const markerLeft = d === 0
+      ? 0
+      : Math.max(4, Math.min(iconLeft - 7, maxIconLeft - 7));
+
+    row.style.setProperty('--tree-indent-collapsed', iconLeft + 'px');
+    row.style.setProperty('--tree-marker-collapsed', markerLeft + 'px');
+    row.style.setProperty('--tree-guide-opacity', d > 0 ? '1' : '0');
+  }
+}
+
+function treePathMarker() {
+  return el('span', {
+    class: 'tree-path-marker',
+    'aria-hidden': 'true',
+  });
+}
+
+function currentFolderTrailSet() {
+  const out = new Set();
+
+  const current = state.currentNoteId
+    ? state.notes.get(state.currentNoteId)
+    : null;
+
+  let folderId = current?.folderId || null;
+  const seen = new Set();
+
+  while (folderId && state.folders.has(folderId) && !seen.has(folderId)) {
+    seen.add(folderId);
+    out.add(folderId);
+
+    const f = state.folders.get(folderId);
+    folderId = f?.parentId || null;
+  }
+
+  return out;
+}
+
+// ============================================================
+// Tree animations
+// ============================================================
+
+const TREE_ANIM_MS = 220;
+
+let pendingFolderAnimation = null;
+
+// Letzte Position des aktiven Tree-Indicators.
+// Wichtig, weil renderTree() den Tree komplett neu baut.
+// Wir starten den neuen Floating-Indicator an der alten Position.
+let lastActiveTreeIndicator = null;
+
+function treeMotionEnabled() {
+  try {
+    return !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  } catch {
+    return true;
+  }
+}
+
+function findFolderChildren(folderId) {
+  const root = $('tree');
+  if (!root) return null;
+
+  const node = [...root.querySelectorAll('.tree-folder-node')]
+    .find((n) => n.dataset.folderId === folderId);
+
+  return node?.querySelector(':scope > .tree-children') || null;
+}
+
+function toggleFolderAnimated(folderId, wasExpanded) {
+  if (!treeMotionEnabled()) {
+    if (wasExpanded) state.expandedFolders.delete(folderId);
+    else state.expandedFolders.add(folderId);
+
+    renderTree();
+    return;
+  }
+
+  // Collapse: erst vorhandene Children rausanimieren, dann State ändern.
+  if (wasExpanded) {
+    const kids = findFolderChildren(folderId);
+
+    if (!kids) {
+      state.expandedFolders.delete(folderId);
+      renderTree();
+      return;
+    }
+
+    kids.style.maxHeight = kids.scrollHeight + 'px';
+    kids.style.opacity = '1';
+    kids.style.overflow = 'hidden';
+
+    requestAnimationFrame(() => {
+      kids.classList.add('is-collapsing');
+    });
+
+    window.setTimeout(() => {
+      state.expandedFolders.delete(folderId);
+      renderTree();
+    }, TREE_ANIM_MS);
+
+    return;
+  }
+
+  // Expand: State ändern, neu rendern, neue Children bekommen is-expanding.
+  state.expandedFolders.add(folderId);
+  pendingFolderAnimation = { id: folderId, action: 'expand' };
+
+  renderTree();
+
+  window.setTimeout(() => {
+    if (
+      pendingFolderAnimation?.id === folderId &&
+      pendingFolderAnimation?.action === 'expand'
+    ) {
+      pendingFolderAnimation = null;
+    }
+  }, TREE_ANIM_MS + 80);
+}
+
+function setFloaterRect(node, rect) {
+  node.style.left = rect.left + 'px';
+  node.style.top = rect.top + 'px';
+  node.style.width = rect.width + 'px';
+  node.style.height = rect.height + 'px';
+  node.style.opacity = rect.opacity == null ? '1' : String(rect.opacity);
+}
+
+function updateActiveTreeIndicator(root) {
+  if (!root) return;
+
+  const bg = el('div', {
+    class: 'tree-active-bg-floater',
+    'aria-hidden': 'true',
+  });
+
+  const marker = el('div', {
+    class: 'tree-active-marker-floater',
+    'aria-hidden': 'true',
+  });
+
+  root.append(bg, marker);
+
+  const active = root.querySelector('.tree-row.note.active');
+
+  if (!active) {
+    if (lastActiveTreeIndicator) {
+      setFloaterRect(bg, {
+        ...lastActiveTreeIndicator.bg,
+        opacity: 0,
+      });
+
+      setFloaterRect(marker, {
+        ...lastActiveTreeIndicator.marker,
+        opacity: 0,
+      });
+    }
+
+    lastActiveTreeIndicator = null;
+    return;
+  }
+
+  const rootRect = root.getBoundingClientRect();
+  const rowRect = active.getBoundingClientRect();
+
+  const top = rowRect.top - rootRect.top + root.scrollTop;
+  const left = rowRect.left - rootRect.left + root.scrollLeft;
+  const height = rowRect.height;
+
+  const depth = parseInt(active.dataset.treeDepth || '0', 10) || 0;
+  const collapsed = $('app')?.classList.contains('sidebar-collapsed');
+
+  const cs = getComputedStyle(active);
+  const collapsedMarkerLeft = parseFloat(
+    cs.getPropertyValue('--tree-marker-collapsed') || '0'
+  );
+
+  const markerInnerLeft = collapsed
+    ? collapsedMarkerLeft
+    : depth * 12;
+
+  const markerTopInset = collapsed ? 0 : 4;
+  const markerHeightInset = collapsed ? 0 : 8;
+
+  const next = {
+    bg: {
+      left: 0,
+      top,
+      width: root.clientWidth,
+      height,
+      opacity: 1,
+    },
+
+    marker: {
+      left: left + markerInnerLeft,
+      top: top + markerTopInset,
+      width: 2,
+      height: Math.max(2, height - markerHeightInset),
+      opacity: 1,
+    },
+  };
+
+  const start = lastActiveTreeIndicator || next;
+
+  setFloaterRect(bg, start.bg);
+  setFloaterRect(marker, start.marker);
+
+  requestAnimationFrame(() => {
+    bg.classList.add('is-live');
+    marker.classList.add('is-live');
+
+    setFloaterRect(bg, next.bg);
+    setFloaterRect(marker, next.marker);
+  });
+
+  lastActiveTreeIndicator = next;
+}
+
 // ============================================================
 // Multi-selection state
 // Keys:
@@ -365,6 +648,12 @@ export function renderTree() {
 
   root.append(folderSec);
 
+  normalizeCollapsedTreeIndents(root);
+
+  requestAnimationFrame(() => {
+    updateActiveTreeIndicator(root);
+  });
+
   renderTagCloud();
   updateStorageMeter();
 }
@@ -387,10 +676,19 @@ function folderRow(f, visibleNotes, depth) {
   const key = folderKey(f.id);
   visibleTreeOrder.push(key);
 
-  const wrap = el('div');
+  const wrap = el('div', {
+    class: 'tree-node tree-folder-node',
+    dataset: {
+      treeKey: key,
+      folderId: f.id,
+      treeDepth: String(depth),
+    },
+  });
   const expanded = state.expandedFolders.has(f.id);
   const selected = isSelected(key);
   const isAnchor = selection.anchorKey === key;
+
+  const isCurrentPath = currentFolderTrailSet().has(f.id);
 
   const childFolders = [...state.folders.values()]
     .filter((x) => x.parentId === f.id)
@@ -403,8 +701,10 @@ function folderRow(f, visibleNotes, depth) {
   const row = el('div', {
     class:
       'tree-row folder' +
+      (expanded ? ' expanded' : '') +
       (selected ? ' selected' : '') +
-      (isAnchor ? ' selection-anchor' : ''),
+      (isAnchor ? ' selection-anchor' : '') +
+      (isCurrentPath ? ' current-path' : ''),
     style: { paddingLeft: (12 + depth * 12) + 'px' },
     onclick: (e) => handleTreeSelectionClick(e, key, () => {
       if (expanded) state.expandedFolders.delete(f.id);
@@ -463,6 +763,7 @@ function folderRow(f, visibleNotes, depth) {
   });
 
   applyItemColor(row, f.color);
+  applyCollapsedTreeDepth(row, depth);
 
   row.draggable = true;
   row.addEventListener('dragstart', (e) => {
@@ -472,10 +773,27 @@ function folderRow(f, visibleNotes, depth) {
     e.dataTransfer.effectAllowed = 'move';
   });
 
+  if (isCurrentPath) {
+    row.append(treePathMarker());
+  }
+
   row.append(el('span', { class: 'twist' }, expanded ? '▾' : '▸'));
-  row.append(itemIcon(f.icon || 'folder', f.color));
+
+  const icon = itemIcon(f.icon || 'folder', f.color);
+  icon.classList.add('tree-folder-icon');
+  row.append(icon);
+
   row.append(el('span', { class: 'label' }, f.name || 'Folder'));
 
+    const childCount = childFolders.length + childNotes.length;
+
+  if (childCount > 0) {
+    row.append(el('span', {
+      class: 'tree-folder-count',
+      title: `${childCount} item${childCount === 1 ? '' : 's'}`,
+    }, String(childCount)));
+  }
+  
   row.append(el('span', {
     class: 'menu-trigger',
     title: 'Add note',
@@ -488,7 +806,16 @@ function folderRow(f, visibleNotes, depth) {
   wrap.append(row);
 
   if (expanded) {
-    const kids = el('div', { class: 'tree-children' });
+    const kids = el('div', {
+      class:
+        'tree-children' +
+        (
+          pendingFolderAnimation?.id === f.id &&
+          pendingFolderAnimation?.action === 'expand'
+            ? ' is-expanding'
+            : ''
+        ),
+    });
 
     for (const sf of childFolders) {
       kids.append(folderRow(sf, visibleNotes, depth + 1));
@@ -518,6 +845,12 @@ function noteRow(n, depth = 0) {
 
   const rowStyle = {
     paddingLeft: (12 + depth * 14) + 'px',
+
+    // Für collapsed Sidebar: Hierarchie sichtbar machen.
+    '--tree-depth': String(depth),
+    '--tree-indent-collapsed': (6 + depth * 10) + 'px',
+    '--tree-marker-collapsed': (depth * 10) + 'px',
+    '--tree-guide-opacity': depth > 0 ? '1' : '0',
   };
 
   // Wichtig:
@@ -535,6 +868,11 @@ function noteRow(n, depth = 0) {
       (isActive ? ' active' : '') +
       (selected ? ' selected' : '') +
       (isAnchor ? ' selection-anchor' : ''),
+    dataset: {
+      treeKey: key,
+      noteId: n.id,
+      treeDepth: String(depth),
+    },
     style: rowStyle,
     draggable: 'true',
     onclick: (e) => handleTreeSelectionClick(e, key, () => openNote(n.id)),
@@ -585,10 +923,11 @@ function noteRow(n, depth = 0) {
   });
 
   applyItemColor(row, n.color);
+  applyCollapsedTreeDepth(row, depth);
 
-  if (isActive) {
-    row.append(activeNoteMarker(depth));
-  }
+  // if (isActive) {
+  //   row.append(activeNoteMarker(depth));
+  // }
 
   row.append(itemIcon(n.icon || (n.type === 'list' ? 'list' : 'file'), n.color));
   row.append(el('span', { class: 'label' }, n.title || 'Untitled'));

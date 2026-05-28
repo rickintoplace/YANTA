@@ -204,7 +204,7 @@ export function classifyLine(line, ctx) {
   if ((m = /^(\s*)(\d+)\.\s+/.exec(line))) return { type: 'ol', indent: m[1].length, num: parseInt(m[2], 10) };
   if (/^\|.*\|\s*$/.test(line)) return { type: 'table' };
   if (/^\s*draw:\/\/[a-z0-9_-]+\s*$/i.test(line)) return { type: 'draw' };
-  if (/^!\[[^\]]*\]\([^)]+\)\s*$/.test(line)) return { type: 'image' };
+  if (/^!\[[^\]]*\]\([^)]+\)(?:\{[^}\n]*\})?\s*$/.test(line)) return { type: 'image' };
   return { type: 'p' };
 }
 
@@ -231,6 +231,59 @@ function resolveImageUrl(url) {
     return '';
   }
   return url;
+}
+
+function parseImageSizeAttrs(raw = '') {
+  const out = {};
+
+  const re = /(?:^|\s)(width|w|height|h)\s*=\s*["']?(\d{1,4})(?:px)?["']?/gi;
+  let m;
+
+  while ((m = re.exec(raw || '')) !== null) {
+    const key = m[1].toLowerCase();
+    const val = parseInt(m[2], 10);
+
+    if (!Number.isFinite(val)) continue;
+
+    if (key === 'width' || key === 'w') {
+      out.width = Math.max(80, Math.min(2400, val));
+    }
+
+    if (key === 'height' || key === 'h') {
+      out.height = Math.max(50, Math.min(5000, val));
+    }
+  }
+
+  return out;
+}
+
+function imageSizeHtml(rawAttrs = '') {
+  const attrs = parseImageSizeAttrs(rawAttrs);
+  const parts = [];
+
+  if (attrs.width) {
+    parts.push(`width:${attrs.width}px`);
+    parts.push('max-width:100%');
+  }
+
+  if (attrs.height) {
+    parts.push(`height:${attrs.height}px`);
+    parts.push('object-fit:contain');
+  } else if (attrs.width) {
+    parts.push('height:auto');
+  }
+
+  if (!parts.length) {
+    return {
+      wrapClass: '',
+      styleAttr: '',
+    };
+  }
+
+  return {
+    wrapClass: ' is-sized',
+    styleAttr: ` style="${escapeAttr(parts.join(';'))}"`,
+  };
 }
 
 function extractSection(md, sectionName) {
@@ -260,6 +313,11 @@ export function renderDrawEmbedHtml(id, label = 'Drawing', surface = 'preview') 
       <span class="yanta-draw-embed-icon" aria-hidden="true">${previewLucide('pencil', 13)}</span>
       <div class="yanta-draw-embed-title" data-draw-title title="Rename drawing">${escapeHtml(label || 'Drawing')}</div>
       <div class="yanta-draw-embed-meta" data-draw-info>draw://${escapeHtml(cleanId)}</div>
+
+      <button type="button" class="btn yanta-draw-mobile-done" data-draw-action="mobile-done" title="Leave drawing mode">
+        ${previewLucide('check', 14)} Done
+      </button>
+
       <div class="yanta-draw-embed-actions">
         <button type="button" class="icon-btn" data-draw-action="export" title="Export .excalidraw">${previewLucide('download', 14)}</button>
         <button type="button" class="icon-btn" data-draw-action="link-note" title="Link selected element to note">${previewLucide('file-plus', 14)}</button>
@@ -413,13 +471,20 @@ export function renderInline(s) {
   });
 
   // Images + video embeds through image syntax.
-  out = out.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+"([^"]*)")?\)/g, (_, alt, url, title) => {
+  // Supports optional size attrs:
+  //
+  //   ![alt](url){width=420}
+  //   ![alt](url){width=420 height=260}
+  out = out.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+"([^"]*)")?\)(?:\{([^}\n]*)\})?/g, (_, alt, url, title, rawAttrs) => {
     const decodedUrl = decodeEntities(url);
     const embed = videoEmbedUrl(decodedUrl);
 
     if (embed) {
       const safeEmbed = safeUrl(embed);
-      if (!safeEmbed) return stash(`<span class="pv-img-missing">blocked video url</span>`);
+
+      if (!safeEmbed) {
+        return stash(`<span class="pv-img-missing">blocked video url</span>`);
+      }
 
       return stash(`<div class="pv-embed-video" contenteditable="false">
         <iframe src="${escapeAttr(safeEmbed)}" allowfullscreen frameborder="0" allow="autoplay; encrypted-media; picture-in-picture"></iframe>
@@ -433,13 +498,18 @@ export function renderInline(s) {
     }
 
     const safeImg = safeUrl(resolved, { image: true });
+
     if (!safeImg) {
       return stash(`<span class="pv-img-missing">blocked image url</span>`);
     }
 
-    const titleAttr = title ? ` title="${escapeAttr(decodeEntities(title))}"` : '';
+    const titleAttr = title
+      ? ` title="${escapeAttr(decodeEntities(title))}"`
+      : '';
 
-    return stash(`<span class="pv-img-wrap" contenteditable="false">
+    const size = imageSizeHtml(rawAttrs || '');
+
+    return stash(`<span class="pv-img-wrap${size.wrapClass}"${size.styleAttr} contenteditable="false">
       <img src="${escapeAttr(safeImg)}" alt="${escapeAttr(decodeEntities(alt))}"${titleAttr} loading="lazy" draggable="false" />
     </span>`);
   });

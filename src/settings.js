@@ -1475,7 +1475,6 @@ function injectSettingsCss() {
   display: flex;
   align-items: center;
   gap: 8px;
-  width: 100%;
   padding: 8px 12px;
   border: 0;
   background: transparent;
@@ -1894,6 +1893,7 @@ function injectSettingsCss() {
     overflow-x: auto;
     padding: 8px;
     gap: 4px;
+    justify-content: space-around;
   }
 
   .yanta-settings-rail-btn {

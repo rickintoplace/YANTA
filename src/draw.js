@@ -66,6 +66,129 @@ const thumbnailCache = new Map();
 
 const DRAW_LIBRARY_SETTINGS_KEY = 'drawLibraryItems.v1';
 
+const DRAW_MOBILE_MQ = window.matchMedia?.('(pointer: coarse), (max-width: 760px)');
+
+function isMobileDrawUx() {
+  return !!DRAW_MOBILE_MQ?.matches;
+}
+
+function ensureInlineReactMount(inlineHost) {
+  let mount = inlineHost.querySelector(':scope > .yanta-draw-react-mount');
+
+  if (!mount) {
+    inlineHost.replaceChildren();
+
+    mount = document.createElement('div');
+    mount.className = 'yanta-draw-react-mount';
+
+    inlineHost.append(mount);
+  }
+
+  return mount;
+}
+
+function activateMobileDrawing(embed, { announce = true } = {}) {
+  if (!embed || !isMobileDrawUx()) return;
+
+  document.querySelectorAll('.yanta-draw-embed.is-mobile-interactive').forEach((n) => {
+    if (n !== embed) n.classList.remove('is-mobile-interactive');
+  });
+
+  embed.classList.add('is-active');
+  embed.classList.add('is-mobile-interactive');
+
+  const api = inlineApis.get(embed);
+
+  requestAnimationFrame(() => {
+    try {
+      api?.refresh?.();
+    } catch {}
+  });
+
+  if (announce) {
+    toast('Drawing edit mode · tap Done to scroll normally', 'success');
+  }
+}
+
+function deactivateMobileDrawing(embed) {
+  if (!embed) return;
+
+  embed.classList.remove('is-mobile-interactive');
+
+  const api = inlineApis.get(embed);
+
+  requestAnimationFrame(() => {
+    try {
+      api?.refresh?.();
+    } catch {}
+  });
+}
+
+function ensureMobileDrawingGate(embed, inlineHost, editable) {
+  if (!embed || !inlineHost || inlineHost.dataset.mobileGateBound === '1') return;
+
+  inlineHost.dataset.mobileGateBound = '1';
+
+  const shield = document.createElement('div');
+  shield.className = 'yanta-draw-mobile-shield';
+  shield.innerHTML = `
+    <div class="yanta-draw-mobile-shield-card">
+      <div class="yanta-draw-mobile-shield-icon">${lucide(editable ? 'pencil' : 'hand', 18)}</div>
+      <div class="yanta-draw-mobile-shield-title">
+        ${editable ? 'Tap to edit drawing' : 'Tap to interact'}
+      </div>
+      <div class="yanta-draw-mobile-shield-hint">
+        Swipe here to keep scrolling
+      </div>
+    </div>
+  `;
+
+  let downX = 0;
+  let downY = 0;
+  let downT = 0;
+  let pointerId = null;
+
+  shield.addEventListener('pointerdown', (e) => {
+    if (!isMobileDrawUx()) return;
+
+    downX = e.clientX;
+    downY = e.clientY;
+    downT = performance.now();
+    pointerId = e.pointerId;
+
+    // Wichtig:
+    // Kein preventDefault() hier.
+    // Dadurch bleibt normales vertikales Scrollen möglich.
+  }, { passive: true });
+
+  shield.addEventListener('pointerup', (e) => {
+    if (!isMobileDrawUx()) return;
+    if (pointerId != null && e.pointerId !== pointerId) return;
+
+    const dist = Math.hypot(e.clientX - downX, e.clientY - downY);
+    const dt = performance.now() - downT;
+
+    pointerId = null;
+
+    // Nur echter Tap aktiviert. Scroll-Gesten nicht.
+    if (dist > 8 || dt > 450) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    activateMobileDrawing(embed);
+  }, true);
+
+  shield.addEventListener('click', (e) => {
+    if (!isMobileDrawUx()) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+  }, true);
+
+  inlineHost.append(shield);
+}
+
 let drawLibraryItems = [];
 let drawLibraryLoaded = false;
 
@@ -414,6 +537,189 @@ function injectDrawCss() {
   background: var(--bg);
   overflow: hidden;
   position: relative;
+}
+
+.yanta-draw-react-mount {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+.yanta-draw-mobile-shield,
+.yanta-draw-mobile-done {
+  display: none;
+}
+
+.yanta-draw-is-resizing,
+.yanta-draw-is-resizing * {
+  cursor: ns-resize !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+@keyframes yanta-draw-mobile-hint {
+  0% {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+    visibility: visible;
+  }
+
+  12% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    visibility: visible;
+  }
+
+  72% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    visibility: visible;
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+    visibility: hidden;
+  }
+}
+
+@media (pointer: coarse), (max-width: 760px) {
+  .yanta-draw-inline-host {
+    position: relative;
+    touch-action: pan-y;
+  }
+
+  /*
+    Unsichtbare Tap-Schicht:
+    - blockiert nicht die Sicht
+    - erlaubt vertikales Scrollen
+    - erkennt Tap zum Aktivieren des Drawing-Modus
+  */
+  .yanta-draw-mobile-shield {
+    position: absolute;
+    inset: 0;
+    z-index: 8;
+
+    display: block;
+
+    background: transparent;
+    touch-action: pan-y;
+
+    user-select: none;
+    -webkit-user-select: none;
+  }
+
+  /*
+    Nur der Hinweis ist sichtbar — und nur kurz.
+    Danach bleibt die Shield-Fläche transparent aktiv.
+  */
+  .yanta-draw-mobile-shield-card {
+    position: absolute;
+    left: 50%;
+    bottom: 14px;
+
+    width: max-content;
+    max-width: calc(100% - 28px);
+
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    padding: 8px 11px;
+    border-radius: 999px;
+    border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--border));
+
+    background: color-mix(in srgb, var(--bg-elev) 92%, transparent);
+    color: var(--text);
+
+    box-shadow:
+      0 10px 28px rgba(0,0,0,0.28),
+      0 0 0 1px rgba(255,255,255,0.03) inset;
+
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+
+    text-align: left;
+    pointer-events: none;
+
+    animation: yanta-draw-mobile-hint 1.8s ease forwards;
+  }
+
+  .yanta-draw-mobile-shield-icon {
+    color: var(--accent);
+    width: 22px;
+    height: 22px;
+    flex: 0 0 22px;
+
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .yanta-draw-mobile-shield-title {
+    font-size: 12px;
+    font-weight: 700;
+    line-height: 1.15;
+    white-space: nowrap;
+  }
+
+  .yanta-draw-mobile-shield-hint {
+    display: none;
+  }
+
+  .yanta-draw-embed.is-mobile-interactive {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+
+  .yanta-draw-embed.is-mobile-interactive .yanta-draw-mobile-shield {
+    display: none;
+  }
+
+  .yanta-draw-embed.is-mobile-interactive .yanta-draw-inline-host {
+    touch-action: none;
+  }
+
+  .yanta-draw-mobile-done {
+    display: none;
+    min-height: 26px;
+    padding: 0 10px;
+    flex: 0 0 auto;
+  }
+
+  .yanta-draw-embed.is-mobile-interactive .yanta-draw-mobile-done {
+    display: inline-flex;
+  }
+
+  /*
+    Auf Mobile: Resize nur bewusst im aktiven Drawing-Modus.
+    Sonst bleibt Scrollen zuverlässig.
+  */
+  .yanta-draw-embed:not(.is-mobile-interactive) .yanta-draw-resize-handle {
+    display: none;
+  }
+
+  .yanta-draw-resize-handle {
+    height: 30px;
+    min-height: 30px;
+    touch-action: none;
+    user-select: none;
+    -webkit-user-select: none;
+    cursor: ns-resize;
+  }
+
+  .yanta-draw-resize-handle::before {
+    content: "";
+    display: block;
+    height: 100%;
+    margin: 0 auto;
+    width: 72px;
+    background:
+      radial-gradient(circle, var(--text-faint) 1.5px, transparent 2px)
+      center / 10px 10px repeat-x;
+    opacity: 0.75;
+  }
 }
 
 /* Preview: keine Excalidraw-Write-UI, aber Canvas bleibt pointerfähig für Pan/Zoom. */
@@ -3288,25 +3594,49 @@ function bindResizeHandle(embed, sourceNoteId, drawingId) {
   let startY = 0;
   let startH = 0;
   let dragging = false;
+  let pointerId = null;
+
+  const cleanupDrag = () => {
+    dragging = false;
+    pointerId = null;
+
+    document.documentElement.classList.remove('yanta-draw-is-resizing');
+
+    document.removeEventListener('pointermove', onMove, true);
+    document.removeEventListener('pointerup', onUp, true);
+    document.removeEventListener('pointercancel', onUp, true);
+  };
 
   const onMove = (e) => {
     if (!dragging) return;
+    if (pointerId != null && e.pointerId !== pointerId) return;
+
+    e.preventDefault();
+    e.stopPropagation();
 
     const nextH = Math.max(180, Math.min(5000, startH + (e.clientY - startY)));
+
     inlineHost.style.height = Math.round(nextH) + 'px';
 
     const api = inlineApis.get(embed);
+
     try {
       api?.refresh?.();
     } catch {}
   };
 
-  const onUp = () => {
+  const onUp = (e) => {
     if (!dragging) return;
-    dragging = false;
+    if (pointerId != null && e.pointerId !== pointerId) return;
 
-    document.removeEventListener('pointermove', onMove, true);
-    document.removeEventListener('pointerup', onUp, true);
+    e?.preventDefault?.();
+    e?.stopPropagation?.();
+
+    try {
+      handle.releasePointerCapture?.(pointerId);
+    } catch {}
+
+    cleanupDrag();
 
     const current = getDrawing(sourceNoteId, drawingId);
     if (!current) return;
@@ -3334,12 +3664,50 @@ function bindResizeHandle(embed, sourceNoteId, drawingId) {
     e.preventDefault();
     e.stopPropagation();
 
+    if (isMobileDrawUx()) {
+      activateMobileDrawing(embed, { announce: false });
+    }
+
     dragging = true;
+    pointerId = e.pointerId;
     startY = e.clientY;
     startH = inlineHost.getBoundingClientRect().height;
 
+    document.documentElement.classList.add('yanta-draw-is-resizing');
+
+    try {
+      handle.setPointerCapture?.(e.pointerId);
+    } catch {}
+
     document.addEventListener('pointermove', onMove, true);
     document.addEventListener('pointerup', onUp, true);
+    document.addEventListener('pointercancel', onUp, true);
+  }, true);
+
+  handle.addEventListener('dblclick', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const current = getDrawing(sourceNoteId, drawingId);
+    if (!current) return;
+
+    const oldSize = canvasSizeOf(current);
+    const nextHeight = 420;
+
+    inlineHost.style.height = nextHeight + 'px';
+
+    updateDrawingMeta(sourceNoteId, drawingId, {
+      canvas: {
+        width: oldSize.width,
+        height: nextHeight,
+      },
+    }, 'draw-resize-reset');
+
+    window.dispatchEvent(new CustomEvent('yanta-drawing-updated', {
+      detail: { noteId: sourceNoteId, drawingId },
+    }));
+
+    toast('Drawing height reset', 'success');
   });
 }
 
@@ -3349,8 +3717,12 @@ async function mountInlineDrawing(embed, sourceNoteId, drawingId, drawing) {
 
   if (!inlineHost) return;
 
+  const reactMount = ensureInlineReactMount(inlineHost);
+
   const surface = embed.getAttribute('data-draw-surface') || 'preview';
   const editable = surface === 'editor';
+
+  ensureMobileDrawingGate(embed, inlineHost, editable);
 
   embed.setAttribute('data-note-id', sourceNoteId);
 
@@ -3365,7 +3737,7 @@ async function mountInlineDrawing(embed, sourceNoteId, drawingId, drawing) {
     return;
   }
 
-  const root = ReactDOM.createRoot(inlineHost);
+  const root = ReactDOM.createRoot(reactMount);
   inlineRoots.set(inlineHost, root);
 
   function InlineDrawing() {
@@ -3672,15 +4044,37 @@ function bindEmbedActions(embed) {
 
     document.addEventListener('pointerdown', (e) => {
       document.querySelectorAll('.yanta-draw-embed.is-active').forEach((n) => {
-        if (!n.contains(e.target)) n.classList.remove('is-active');
+        if (!n.contains(e.target)) {
+          n.classList.remove('is-active');
+          n.classList.remove('is-mobile-interactive');
+        }
       });
     }, true);
+
+    window.addEventListener('keydown', (e) => {
+      if (e.key !== 'Escape') return;
+
+      document.querySelectorAll('.yanta-draw-embed.is-mobile-interactive').forEach((n) => {
+        deactivateMobileDrawing(n);
+      });
+    });
   }
 
   embed.addEventListener('click', async (e) => {
     const btn = e.target.closest?.('[data-draw-action]');
     const title = e.target.closest?.('[data-draw-title]');
+
     if (!btn && !title) return;
+
+    const action = btn?.getAttribute('data-draw-action') || '';
+
+    if (action === 'mobile-done') {
+      e.preventDefault();
+      e.stopPropagation();
+
+      deactivateMobileDrawing(embed);
+      return;
+    }
 
     e.preventDefault();
     e.stopPropagation();
@@ -3694,14 +4088,12 @@ function bindEmbedActions(embed) {
       return;
     }
 
-if (title && !btn) {
-  await renameDrawing(hit.noteId, drawingId, {
-    anchor: title,
-  });
-  return;
-}
-
-    const action = btn.getAttribute('data-draw-action');
+    if (title && !btn) {
+      await renameDrawing(hit.noteId, drawingId, {
+        anchor: title,
+      });
+      return;
+    }
 
     if (action === 'link-note') {
       const api = inlineApis.get(embed);
@@ -3714,20 +4106,22 @@ if (title && !btn) {
         return;
       }
 
-if (await linkSelectedElementsToNote(api, note)) {
-  toast(`Linked ${note.title || 'Untitled'}`, 'success');
-}
+      if (await linkSelectedElementsToNote(api, note)) {
+        toast(`Linked ${note.title || 'Untitled'}`, 'success');
+      }
 
       return;
     }
 
-if (action === 'rename') {
-  const titleAnchor = embed.querySelector('[data-draw-title]') || btn;
-  await renameDrawing(hit.noteId, drawingId, {
-    anchor: titleAnchor,
-  });
-  return;
-}
+    if (action === 'rename') {
+      const titleAnchor = embed.querySelector('[data-draw-title]') || btn;
+
+      await renameDrawing(hit.noteId, drawingId, {
+        anchor: titleAnchor,
+      });
+
+      return;
+    }
 
     if (action === 'toggle-width') {
       const current = hit.drawing;
@@ -3761,11 +4155,11 @@ if (action === 'rename') {
       return;
     }
 
-if (action === 'delete') {
-  confirmDeleteDrawing(hit.noteId, drawingId, {
-    anchor: btn,
-  });
-}
+    if (action === 'delete') {
+      confirmDeleteDrawing(hit.noteId, drawingId, {
+        anchor: btn,
+      });
+    }
   });
 }
 

@@ -298,62 +298,345 @@ const tagPlugin = ViewPlugin.fromClass(class {
 
 // ============================================================
 // Inline image preview widget — rendered below image-only lines.
-// Resolves yanta-img:// references; if the blob isn't loaded yet,
-// pulls it from IndexedDB and re-decorates the line.
+// Resizable in editor. Size is persisted as Markdown:
+//
+//   ![alt](url){width=420}
+//
+// Double-click resize handle resets width.
 // ============================================================
+
+const IMAGE_LINE_RE = /^!\[([^\]]*)\]\(([^)\s]+)(?:\s+"([^"]*)")?\)(?:\{([^}\n]*)\})?\s*$/;
+
+function clampImageWidth(n) {
+  const x = Math.round(Number(n) || 0);
+  return Math.max(80, Math.min(2400, x));
+}
+
+function parseImageSizeAttrs(raw = '') {
+  const out = {};
+
+  const re = /(?:^|\s)(width|w|height|h)\s*=\s*["']?(\d{1,4})(?:px)?["']?/gi;
+  let m;
+
+  while ((m = re.exec(raw || '')) !== null) {
+    const key = m[1].toLowerCase();
+    const val = parseInt(m[2], 10);
+
+    if (!Number.isFinite(val)) continue;
+
+    if (key === 'width' || key === 'w') {
+      out.width = clampImageWidth(val);
+    }
+
+    if (key === 'height' || key === 'h') {
+      out.height = Math.max(50, Math.min(5000, val));
+    }
+  }
+
+  return out;
+}
+
+function imageSizeAttrsToMarkdown(attrs = {}) {
+  const parts = [];
+
+  if (attrs.width) {
+    parts.push(`width=${clampImageWidth(attrs.width)}`);
+  }
+
+  if (attrs.height) {
+    parts.push(`height=${Math.max(50, Math.min(5000, Math.round(attrs.height)))}`);
+  }
+
+  return parts.length ? `{${parts.join(' ')}}` : '';
+}
+
+function clearActiveImageWidgets(except = null) {
+  document
+    .querySelectorAll('#editor .yanta-img-resizable.is-active')
+    .forEach((node) => {
+      if (node !== except) node.classList.remove('is-active');
+    });
+}
+
+function commitImageWidgetWidth(lineFrom, width) {
+  const v = view;
+  if (!v) return;
+
+  const line = v.state.doc.lineAt(lineFrom);
+  const m = IMAGE_LINE_RE.exec(line.text);
+
+  if (!m) return;
+
+  const [, alt, url, title, rawAttrs] = m;
+  const attrs = parseImageSizeAttrs(rawAttrs || '');
+
+  if (width == null) {
+    delete attrs.width;
+  } else {
+    attrs.width = clampImageWidth(width);
+  }
+
+  const titlePart = title ? ` "${title}"` : '';
+  const attrPart = imageSizeAttrsToMarkdown(attrs);
+
+  const next = `![${alt}](${url}${titlePart})${attrPart}`;
+
+  v.dispatch({
+    changes: {
+      from: line.from,
+      to: line.to,
+      insert: next,
+    },
+    selection: {
+      anchor: line.from + next.length,
+    },
+  });
+
+  v.focus();
+}
+
 class ImageWidget extends WidgetType {
-  constructor(url, alt) { super(); this.url = url; this.alt = alt; }
-  eq(o) { return o.url === this.url && o.alt === this.alt; }
+  constructor(url, alt, attrs = {}, lineFrom) {
+    super();
+
+    this.url = url;
+    this.alt = alt;
+    this.attrs = attrs;
+    this.lineFrom = lineFrom;
+  }
+
+  eq(other) {
+    return (
+      other.url === this.url &&
+      other.alt === this.alt &&
+      other.lineFrom === this.lineFrom &&
+      other.attrs?.width === this.attrs?.width &&
+      other.attrs?.height === this.attrs?.height
+    );
+  }
+
   toDOM() {
+    const wrap = document.createElement('div');
+    wrap.className = 'yanta-img-resizable';
+    wrap.tabIndex = 0;
+    wrap.setAttribute('role', 'button');
+    wrap.setAttribute('aria-label', 'Image preview. Tap to show resize handle.');
+
+    const width = this.attrs?.width
+      ? clampImageWidth(this.attrs.width)
+      : null;
+
+    if (width) {
+      wrap.classList.add('is-resized');
+      wrap.style.width = `min(${width}px, 100%)`;
+    }
+
     const img = document.createElement('img');
     img.className = 'yanta-img-thumb';
     img.alt = this.alt;
     img.draggable = false;
+
+    if (width) {
+      img.style.width = '100%';
+      img.style.height = 'auto';
+      img.style.maxHeight = 'none';
+    }
+
+    if (this.attrs?.height) {
+      img.style.height = `${this.attrs.height}px`;
+      img.style.objectFit = 'contain';
+    }
+
     const resolved = resolveImageForWidget(this.url);
+
     if (resolved) {
       img.src = resolved;
     } else if (this.url.startsWith('yanta-img://')) {
       const id = this.url.slice('yanta-img://'.length);
-      ensureImageBlob(id).then((u) => { if (u) img.src = u; });
+
+      ensureImageBlob(id).then((u) => {
+        if (u) img.src = u;
+      });
     }
-    return img;
+
+    const handle = document.createElement('div');
+    handle.className = 'yanta-img-resize-handle';
+    handle.title = 'Drag to resize image · double-click to reset';
+
+    const activate = () => {
+      clearActiveImageWidgets(wrap);
+      wrap.classList.add('is-active');
+    };
+
+    wrap.addEventListener('pointerdown', (e) => {
+      // Wenn der Handle selbst gedrückt wird, übernimmt dessen eigener Handler.
+      if (handle.contains(e.target)) return;
+
+      activate();
+    });
+
+    wrap.addEventListener('focus', activate);
+
+    wrap.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        wrap.classList.remove('is-active');
+        return;
+      }
+
+      // Tastatur-Resize als kleine Accessibility-Verbesserung.
+      if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') {
+        e.preventDefault();
+
+        const current = Math.round(wrap.getBoundingClientRect().width) || width || 320;
+        const step = e.shiftKey ? 50 : 20;
+        const next = e.key === 'ArrowLeft'
+          ? current - step
+          : current + step;
+
+        commitImageWidgetWidth(this.lineFrom, next);
+      }
+    });
+
+    let dragging = false;
+    let startX = 0;
+    let startWidth = 0;
+    let nextWidth = width || 0;
+
+    const onMove = (e) => {
+      if (!dragging) return;
+
+      e.preventDefault();
+
+      const parentWidth =
+        wrap.parentElement?.getBoundingClientRect?.().width ||
+        wrap.getBoundingClientRect().width ||
+        760;
+
+      nextWidth = clampImageWidth(startWidth + (e.clientX - startX));
+      nextWidth = Math.min(nextWidth, Math.round(parentWidth));
+
+      wrap.classList.add('is-resized');
+      wrap.classList.add('is-active');
+      wrap.style.width = `min(${nextWidth}px, 100%)`;
+
+      img.style.width = '100%';
+      img.style.height = 'auto';
+      img.style.maxHeight = 'none';
+    };
+
+    const onUp = (e) => {
+      if (!dragging) return;
+
+      e?.preventDefault?.();
+
+      dragging = false;
+
+      document.removeEventListener('pointermove', onMove, true);
+      document.removeEventListener('pointerup', onUp, true);
+      document.removeEventListener('pointercancel', onUp, true);
+
+      if (nextWidth) {
+        commitImageWidgetWidth(this.lineFrom, nextWidth);
+      }
+    };
+
+    handle.addEventListener('pointerdown', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      activate();
+
+      dragging = true;
+      startX = e.clientX;
+      startWidth = Math.round(wrap.getBoundingClientRect().width);
+      nextWidth = startWidth;
+
+      try {
+        handle.setPointerCapture?.(e.pointerId);
+      } catch {}
+
+      document.addEventListener('pointermove', onMove, true);
+      document.addEventListener('pointerup', onUp, true);
+      document.addEventListener('pointercancel', onUp, true);
+    });
+
+    handle.addEventListener('dblclick', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      commitImageWidgetWidth(this.lineFrom, null);
+    });
+
+    wrap.append(img, handle);
+
+    return wrap;
+  }
+
+  ignoreEvent() {
+    return true;
   }
 }
+
 function resolveImageForWidget(url) {
   if (url.startsWith('yanta-img://')) {
     const id = url.slice('yanta-img://'.length);
     return state.imageBlobs.get(id) || '';
   }
+
   return url;
 }
+
 async function ensureImageBlob(id) {
-  if (state.imageBlobs.has(id)) return state.imageBlobs.get(id);
+  if (state.imageBlobs.has(id)) {
+    return state.imageBlobs.get(id);
+  }
+
   const { store } = await import('./core.js');
   const rec = await store.images.get(id);
+
   if (!rec || !rec.blob) return null;
+
   const u = URL.createObjectURL(rec.blob);
   state.imageBlobs.set(id, u);
+
   return u;
 }
+
 const imagePreviewField = StateField.define({
-  create(s) { return buildImageDecos(s); },
-  update(d, tr) { return tr.docChanged ? buildImageDecos(tr.state) : d; },
+  create(s) {
+    return buildImageDecos(s);
+  },
+
+  update(d, tr) {
+    return tr.docChanged ? buildImageDecos(tr.state) : d.map(tr.changes);
+  },
+
   provide: (f) => EditorView.decorations.from(f),
 });
+
 function buildImageDecos(s) {
   const b = new RangeSetBuilder();
+
   for (let p = 0; p < s.doc.length;) {
     const line = s.doc.lineAt(p);
-    const m = /^!\[([^\]]*)\]\(([^)\s]+)\)\s*$/.exec(line.text);
+    const m = IMAGE_LINE_RE.exec(line.text);
+
     if (m && !videoEmbedUrl(m[2])) {
       b.add(line.to, line.to, Decoration.widget({
-        widget: new ImageWidget(m[2], m[1]),
+        widget: new ImageWidget(
+          m[2],
+          m[1],
+          parseImageSizeAttrs(m[4] || ''),
+          line.from
+        ),
         side: 1,
         block: true,
       }));
     }
+
     p = line.to + 1;
   }
+
   return b.finish();
 }
 
@@ -1314,6 +1597,17 @@ export function mountEditor(host, { noteId, awarenessUser }) {
     inlineLucideEditClickHandler(),
     pasteHandler(),
     dropHandler(),
+    EditorView.domEventHandlers({
+      pointerdown(e) {
+        const target = e.target instanceof Element ? e.target : null;
+
+        if (!target?.closest?.('.yanta-img-resizable')) {
+          clearActiveImageWidgets();
+        }
+
+        return false;
+      },
+    }),
     EditorView.updateListener.of((u) => {
       applyCodeMirrorChangesToYText(u, ytext);
 

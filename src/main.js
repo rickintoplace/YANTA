@@ -48,6 +48,7 @@ import {
   showDashboardFromNote,
   hideDashboard,
   isDashboardVisible,
+  showDashboardFolderFromHistory,
 } from './dashboard.js';
 
 import {
@@ -299,25 +300,44 @@ async function init() {
     syncFull(false).catch(() => {});
   }
 
-  window.addEventListener('popstate', (e) => {
+  window.addEventListener('popstate', async (e) => {
     const st = e.state || {};
     const hash = decodeURIComponent((window.location.hash || '').slice(1));
 
+    /*
+      Dashboard-History inklusive Folder-Zurücknavigation.
+
+      Wichtig:
+      Nicht showDashboardFromNote() direkt benutzen.
+      showDashboardFolderFromHistory() entscheidet selbst:
+
+      - Wenn Dashboard schon sichtbar ist:
+        Folder -> Parent/Home per navigateDashboardFolder(..., push:false)
+        => Folder-Zoom-Back funktioniert.
+
+      - Wenn gerade eine Note offen ist:
+        Note -> Dashboard per showDashboardFromNote()
+        => bestehende Note-Zoom-Back Transition bleibt erhalten.
+    */
     if (st.surface === 'dashboard' || hash === 'dashboard') {
-      showDashboardFromNote(state.currentNoteId, {
-        folderId: st.folderId || null,
-        replace: true,
-      });
+      await showDashboardFolderFromHistory(st.folderId || null);
       return;
     }
 
     const id = st.noteId || hash;
 
-    if (id && state.notes.has(id) && id !== state.currentNoteId) {
+    if (id && state.notes.has(id)) {
       setNavSuppress(true);
-      openNote(id)
-        .then(() => hideDashboard({ push: false }))
-        .finally(() => setNavSuppress(false));
+
+      try {
+        if (id !== state.currentNoteId) {
+          await openNote(id);
+        }
+
+        hideDashboard({ push: false });
+      } finally {
+        setNavSuppress(false);
+      }
     }
   });
 

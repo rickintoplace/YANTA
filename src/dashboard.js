@@ -34,18 +34,23 @@
   
   const DASH_ORDER_STEP = 1000;
   
-  const LONG_PRESS_MS = 430;
-  const HANDLE_LONG_PRESS_MS = 460;
+  const LONG_PRESS_MS = 300;
+  const HANDLE_LONG_PRESS_MS = 360;
   const MOVE_TOLERANCE = 8;
+
+  const DRAG_EDGE_SCROLL_PX = 76;
+  const DRAG_EDGE_SCROLL_MAX = 18;
+  const DRAG_DROP_ANIM_MS = 145;
 
   const GRID_ROW_PX = 8;
   const GRID_GAP_PX = 10;
-  
+
   const DEFAULT_NOTE_HEIGHT = 150;
   const DEFAULT_FOLDER_HEIGHT = 150;
   const MIN_CARD_HEIGHT = 76;
   const MAX_CARD_HEIGHT = 620;
   
+
   let root = null;
   let initialized = false;
   let previewObserver = null;
@@ -139,7 +144,30 @@
       ? DEFAULT_FOLDER_HEIGHT
       : DEFAULT_NOTE_HEIGHT;
   }
-  
+    
+  function maxResizeHeightForCard(card, key) {
+    const { kind } = parseItemKey(key);
+
+    if (kind === 'note') {
+      const fromPreview = Number(card?.dataset?.contentMaxHeight);
+
+      if (Number.isFinite(fromPreview) && fromPreview > 0) {
+        return Math.max(MIN_CARD_HEIGHT, Math.min(MAX_CARD_HEIGHT, fromPreview));
+      }
+
+      const host = card?.querySelector?.('.yanta-dash-preview');
+
+      if (host) {
+        const measured = Math.ceil(host.scrollHeight + 18);
+        if (measured > 0) {
+          return Math.max(MIN_CARD_HEIGHT, Math.min(MAX_CARD_HEIGHT, measured));
+        }
+      }
+    }
+
+    return MAX_CARD_HEIGHT;
+  }
+
   function noteHasCustomIcon(note) {
     const def = note.type === 'list' ? 'list' : 'file-text';
     return !!note.icon && note.icon !== def && note.icon !== 'file';
@@ -394,6 +422,46 @@
     }
   }
 
+export async function showDashboardFolderFromHistory(folderId = null) {
+  ensureDashboardRoot();
+
+  const targetFolderId = folderId || null;
+
+  /*
+    Wichtig:
+    Browser Back/Forward darf Dashboard-Folder nicht direkt per showDashboard()
+    oder renderDashboard() wechseln, sonst gibt es keine View Transition.
+    Stattdessen immer durch navigateDashboardFolder(..., { push:false }).
+  */
+  if (dashboard.visible) {
+    await navigateDashboardFolder(targetFolderId, {
+      sourceCard: null,
+      push: false,
+    });
+
+    return;
+  }
+
+  /*
+    Falls wir gerade aus einer Note zurück ins Dashboard kommen,
+    weiterhin die bestehende Note -> Card Transition benutzen.
+  */
+  if (state.currentNoteId && document.startViewTransition) {
+    await showDashboardFromNote(state.currentNoteId, {
+      folderId: targetFolderId,
+      replace: false,
+    });
+
+    return;
+  }
+
+  showDashboard({
+    folderId: targetFolderId,
+    push: false,
+    replace: false,
+  });
+}
+
   export async function showDashboardFromNote(noteId = state.currentNoteId, {
     folderId = dashboard.folderId || null,
     replace = true,
@@ -407,21 +475,24 @@
   
     const transitionName = transitionNameFor('note', noteId);
     const source = $('panes');
+    let targetCard = null;
   
     if (source) {
       source.style.viewTransitionName = transitionName;
       source.style.contain = 'layout paint';
+      source.classList.add('is-note-transition-source');
     }
   
     const vt = document.startViewTransition(() => {
       showDashboard({ folderId, replace: false, push: false });
   
-      const card = root?.querySelector(
+      targetCard = root?.querySelector(
         `.yanta-dash-card[data-note-id="${CSS.escape(noteId)}"]`
       );
   
-      if (card) {
-        card.style.viewTransitionName = transitionName;
+      if (targetCard) {
+        targetCard.style.viewTransitionName = transitionName;
+        targetCard.style.contain = 'layout paint';
       }
     });
   
@@ -430,14 +501,12 @@
     if (source) {
       source.style.viewTransitionName = '';
       source.style.contain = '';
+      source.classList.remove('is-note-transition-source');
     }
   
-    const card = root?.querySelector(
-      `.yanta-dash-card[data-note-id="${CSS.escape(noteId)}"]`
-    );
-  
-    if (card) {
-      card.style.viewTransitionName = transitionNameFor('note', noteId);
+    if (targetCard) {
+      targetCard.style.viewTransitionName = '';
+      targetCard.style.contain = '';
     }
   
     if (replace) {
@@ -475,8 +544,16 @@
     setupPreviewObserver();
   
     root.replaceChildren();
+
+    /*
+      Important:
+      Folder view transitions need a real surface that is replaced on each
+      dashboard render, similar to how Notes transition between panes <-> card.
+      Do not transition #dashboard itself; it is reused.
+    */
+    const page = el('div', { class: 'yanta-dashboard-page' });
   
-    root.append(renderDashboardHeader());
+    page.append(renderDashboardHeader());
   
     const { pinnedNotes, normalItems } = getDashboardItems();
   
@@ -497,9 +574,10 @@
       body.append(renderGrid(normalItems, { section: 'normal' }));
     }
   
-    root.append(body);
+    page.append(body);
+    root.append(page);
   }
-  
+
   function renderDashboardHeader() {
     const header = el('header', { class: 'yanta-dashboard-head' });
   
@@ -517,7 +595,7 @@
   
     const title = el('div', {
       class: 'yanta-dashboard-title',
-    }, dashboard.folderId ? (path.at(-1)?.name || 'Folder') : 'Dashboard');
+    }, dashboard.folderId ? (path.at(-1)?.name || 'Folder') : 'Notes');
   
     const crumb = el('div', { class: 'yanta-dashboard-breadcrumb' });
   
@@ -624,60 +702,85 @@
     return grid;
   }
   
-  function renderCard(item, { section }) {
-    const key = itemKey(item);
-    const color = itemColor(item);
-    const heightPx = itemDashboardHeightPx(item);
-    const rowSpan = heightToGridSpan(heightPx);
+function renderCard(item, { section }) {
+  const key = itemKey(item);
+  const color = itemColor(item);
+  const heightPx = itemDashboardHeightPx(item);
+  const rowSpan = heightToGridSpan(heightPx);
 
-    const card = el('article', {
-      class:
-        'yanta-dash-card' +
-        (color ? ' has-color' : '') +
-        (item.kind === 'folder' ? ' folder-card' : ' note-card') +
-        (dashboard.selectedKey === key ? ' selected' : ''),
-      dataset: {
-        key,
-        kind: item.kind,
-        id: item.id,
-        section,
-        noteId: item.kind === 'note' ? item.id : '',
-        folderId: item.kind === 'folder' ? item.id : '',
-      },
-    style: {
-    '--dash-row-span': String(rowSpan),
-    ...(color ? { '--card-color': color } : {}),
-    viewTransitionName: transitionNameFor(item.kind, item.id),
+  const card = el('article', {
+    class:
+      'yanta-dash-card' +
+      (color ? ' has-color' : '') +
+      (item.kind === 'folder' ? ' folder-card' : ' note-card') +
+      (dashboard.selectedKey === key ? ' selected' : ''),
+    dataset: {
+      key,
+      kind: item.kind,
+      id: item.id,
+      section,
+      noteId: item.kind === 'note' ? item.id : '',
+      folderId: item.kind === 'folder' ? item.id : '',
     },
-    });
-  
-    card.tabIndex = 0;
-  
-    if (item.kind === 'folder') {
-        card.append(renderCardHeader(item));
-        card.append(renderFolderBody(item.folder));
-      } else {
-        card.append(renderNoteCorner(item.note));
-      
-        const previewHost = el('div', {
-          class:
-            'yanta-dash-preview' +
-            ((noteHasCustomIcon(item.note) || item.note.pinned) ? ' has-corner' : ''),
-          dataset: { previewHost: '1' },
-        });
-      
-        previewHost.innerHTML = `<div class="yanta-dash-preview-skeleton"></div>`;
-        card.append(previewHost);
-        previewObserver?.observe(card);
-    }
-  
-    card.append(renderCardActions(item));
-    card.append(renderResizeHandle(key));
-    
-    bindCardPointerInteractions(card, item);
-    
-    return card;
+  });
+
+  // Wichtig: Custom Properties explizit setzen.
+  // Das macht Folder-Cards nach jedem Re-Render korrekt.
+  card.style.setProperty('--dash-row-span', String(rowSpan));
+
+  if (color) {
+    card.style.setProperty('--card-color', color);
   }
+
+  /*
+    View transition names must NOT be permanent.
+    They are assigned temporarily only during open/close transitions.
+    Permanent names cause duplicate-name conflicts when folder dashboards re-render.
+  */
+  card.style.viewTransitionName = '';
+
+  card.dataset.effectiveHeight = String(heightPx);
+  card.tabIndex = 0;
+
+  if (item.kind === 'folder') {
+    card.append(renderCardHeader(item));
+
+    // Gewünschte Reihenfolge:
+    // 1. Body
+    card.append(renderFolderBody(item.folder));
+
+    // 2. Actions
+    card.append(renderCardActions(item));
+
+    // 3. Meta außerhalb von yanta-dash-folder-body
+    const meta = renderFolderMeta(item.folder);
+    if (meta) {
+      card.append(meta);
+    }
+  } else {
+    card.append(renderNoteCorner(item.note));
+
+    const previewHost = el('div', {
+      class:
+        'yanta-dash-preview' +
+        ((noteHasCustomIcon(item.note) || item.note.pinned) ? ' has-corner' : ''),
+      dataset: { previewHost: '1' },
+    });
+
+    previewHost.innerHTML = `<div class="yanta-dash-preview-skeleton"></div>`;
+    card.append(previewHost);
+    previewObserver?.observe(card);
+
+    card.append(renderCardActions(item));
+  }
+
+  // 4. Resize handle immer zuletzt
+  card.append(renderResizeHandle(key));
+
+  bindCardPointerInteractions(card, item);
+
+  return card;
+}
 
   function renderNoteCorner(note) {
     const wrap = el('div', { class: 'yanta-dash-note-corner' });
@@ -975,25 +1078,397 @@
     return head;
   }
   
-  function renderFolderBody(folder) {
-    const body = el('div', { class: 'yanta-dash-folder-body' });
-  
-    const childFolders = [...state.folders.values()]
-      .filter((f) => f.parentId === folder.id).length;
-  
-    const childNotes = [...state.notes.values()]
-      .filter((n) => n.folderId === folder.id).length;
-  
+function folderPreviewItems(folderId) {
+  const folders = [...state.folders.values()]
+    .filter((f) => f.parentId === folderId)
+    .map((folder) => ({
+      kind: 'folder',
+      id: folder.id,
+      folder,
+      title: folder.name || 'Folder',
+      icon: defaultIconForFolder(folder),
+      color: safeCssColor(folder.color) || '',
+      order: fallbackOrderForFolder(folder),
+    }));
+
+  const notes = [...state.notes.values()]
+    .filter((n) => n.folderId === folderId)
+    .map((note) => ({
+      kind: 'note',
+      id: note.id,
+      note,
+      title: note.title || 'Untitled',
+      icon: defaultIconForNote(note),
+      color: safeCssColor(note.color) || '',
+      order: fallbackOrderForNote(note),
+    }));
+
+  return [...folders, ...notes].sort((a, b) =>
+    a.order - b.order ||
+    a.title.localeCompare(b.title)
+  );
+}
+
+function folderDirectBreakdown(folderId) {
+  let folders = 0;
+  let notes = 0;
+
+  for (const f of state.folders.values()) {
+    if (f.parentId === folderId) folders++;
+  }
+
+  for (const note of state.notes.values()) {
+    if (note.folderId === folderId) notes++;
+  }
+
+  return {
+    folders,
+    notes,
+    total: folders + notes,
+  };
+}
+
+function folderMetaText(folderCount, noteCount, emptyText = '') {
+  const parts = [];
+
+  if (folderCount > 0) {
+    parts.push(`${folderCount} folder${folderCount === 1 ? '' : 's'}`);
+  }
+
+  if (noteCount > 0) {
+    parts.push(`${noteCount} note${noteCount === 1 ? '' : 's'}`);
+  }
+
+  return parts.join(' · ') || emptyText;
+}
+
+function renderFolderBody(folder) {
+  const body = el('div', { class: 'yanta-dash-folder-body' });
+
+  const items = folderPreviewItems(folder.id);
+
+  if (!items.length) {
+    body.classList.add('is-empty');
+
     body.innerHTML = `
       <div class="yanta-dash-folder-big-icon">${lucide(defaultIconForFolder(folder), 36)}</div>
-      <div class="yanta-dash-folder-meta">
-        ${childFolders} folder${childFolders === 1 ? '' : 's'} · ${childNotes} note${childNotes === 1 ? '' : 's'}
-      </div>
     `;
-  
+
     return body;
   }
-  
+
+  const grid = el('div', { class: 'yanta-dash-folder-preview-grid' });
+
+  /*
+    Zwei Spalten.
+    Standardmäßig vier vollwertige Mini-Vorschauen.
+    Bei höheren Folder-Cards sieht man durch das Grid automatisch mehr Inhalt.
+  */
+  const visible = items.slice(0, 4);
+  const rest = items.length - visible.length;
+
+  for (const child of visible) {
+    grid.append(renderFolderPreviewCell(child));
+  }
+
+  if (rest > 0) {
+    const more = el('div', {
+      class: 'yanta-dash-folder-preview-cell more',
+      title: `${rest} more`,
+    });
+
+    more.append(el('span', {
+      class: 'yanta-dash-folder-preview-more',
+    }, `+${rest}`));
+
+    grid.append(more);
+  }
+
+  body.append(grid);
+
+  return body;
+}
+
+function renderFolderMeta(folder) {
+  const counts = folderDirectBreakdown(folder.id);
+  const meta = folderMetaText(counts.folders, counts.notes, 'Empty folder');
+
+  if (!meta) return null;
+
+  return el('div', {
+    class: 'yanta-dash-folder-meta',
+  }, meta);
+}
+
+function renderFolderMiniFolderPreview(folder) {
+  const wrap = el('div', {
+    class: 'yanta-dash-folder-mini-folder-preview',
+  });
+
+  const items = folderPreviewItems(folder.id).slice(0, 3);
+
+  if (!items.length) {
+    wrap.append(el('div', {
+      class: 'yanta-dash-folder-mini-empty',
+    }, 'Empty folder'));
+  } else {
+    for (const item of items) {
+      const row = el('div', {
+        class: 'yanta-dash-folder-mini-folder-row',
+        title: item.title,
+      });
+
+      row.innerHTML = `${lucide(item.kind === 'folder' ? defaultIconForFolder(item.folder) : defaultIconForNote(item.note), 11)}<span></span>`;
+      row.querySelector('span').textContent = item.title;
+
+      wrap.append(row);
+    }
+  }
+
+  const counts = folderDirectBreakdown(folder.id);
+  const meta = folderMetaText(counts.folders, counts.notes);
+
+  if (meta) {
+    wrap.append(el('div', {
+      class: 'yanta-dash-folder-mini-meta',
+    }, meta));
+  }
+
+  return wrap;
+}
+
+function renderFolderPreviewCell(child) {
+  const cell = el('div', {
+    class: 'yanta-dash-folder-preview-cell ' + child.kind,
+    title: child.title,
+    style: child.color ? { '--mini-color': child.color } : {},
+    dataset: {
+      miniKind: child.kind,
+      miniId: child.id,
+    },
+  });
+
+  const head = el('div', { class: 'yanta-dash-folder-preview-cell-head' });
+
+  const ico = el('span', { class: 'yanta-dash-folder-preview-icon' });
+  ico.innerHTML = lucide(child.icon, 13);
+
+  head.append(
+    ico,
+    el('span', { class: 'yanta-dash-folder-preview-title' }, child.title)
+  );
+
+  cell.append(head);
+
+  if (child.kind === 'folder') {
+    cell.append(renderFolderMiniFolderPreview(child.folder));
+    return cell;
+  }
+
+  const previewHost = el('div', {
+    class: 'yanta-dash-folder-note-preview',
+    dataset: {
+      miniNotePreview: child.id,
+    },
+  });
+
+  previewHost.innerHTML = `<div class="yanta-dash-folder-mini-skeleton"></div>`;
+
+  cell.append(previewHost);
+
+  /*
+    Wichtig:
+    Die Zelle hängt an dieser Stelle noch nicht sicher im DOM.
+    Deshalb Mini-Preview erst im nächsten Frame laden.
+  */
+  requestAnimationFrame(() => {
+    if (!previewHost.isConnected) return;
+
+    hydrateFolderNotePreviewCell(previewHost, child.id).catch((err) => {
+      console.warn('Folder mini note preview failed', child.id, err);
+
+      if (!previewHost.isConnected) return;
+
+      previewHost.replaceChildren(
+        el('div', {
+          class: 'yanta-dash-folder-mini-empty',
+        }, 'Preview unavailable')
+      );
+    });
+  });
+
+  return cell;
+}
+
+async function hydrateFolderNotePreviewCell(host, noteId) {
+  const note = state.notes.get(noteId);
+
+  if (!note || !host) return;
+
+  /*
+    Nicht vor dem await auf isConnected abbrechen:
+    Beim ersten Render hängt host ggf. noch nicht im DOM.
+    Nach dem Laden prüfen wir aber wieder, damit alte Render nicht schreiben.
+  */
+  const preview = await getDashboardPreview(note);
+
+  if (!host.isConnected) return;
+
+  host.replaceChildren();
+
+  if (!preview.blocks.length && !preview.badges.length) {
+    host.append(el('div', {
+      class: 'yanta-dash-folder-mini-empty',
+    }, 'Empty note'));
+
+    return;
+  }
+
+  let appended = 0;
+
+  for (const block of preview.blocks) {
+    if (appended >= 4) break;
+
+    const node = renderFolderMiniNoteBlock(noteId, block);
+
+    if (node) {
+      host.append(node);
+      appended++;
+    }
+  }
+
+  if (preview.badges.length) {
+    const badges = el('div', {
+      class: 'yanta-dash-folder-mini-badges',
+    });
+
+    for (const badge of preview.badges.slice(0, 3)) {
+      const pill = el('span', {
+        class: 'yanta-dash-folder-mini-badge',
+        title: badge.label,
+      });
+
+      pill.innerHTML = lucide(badge.icon, 9);
+      badges.append(pill);
+    }
+
+    host.append(badges);
+  }
+}
+
+function renderFolderMiniNoteBlock(noteId, block) {
+  if (block.type === 'heading') {
+    return el('div', {
+      class: 'yanta-dash-folder-mini-line is-heading',
+    }, block.text);
+  }
+
+  if (block.type === 'text') {
+    return el('div', {
+      class: 'yanta-dash-folder-mini-line',
+    }, block.text);
+  }
+
+  if (block.type === 'quote') {
+    return el('div', {
+      class: 'yanta-dash-folder-mini-line is-quote',
+    }, block.text);
+  }
+
+  if (block.type === 'list') {
+    return el('div', {
+      class: 'yanta-dash-folder-mini-line is-list',
+    }, block.text);
+  }
+
+  if (block.type === 'task') {
+    return el('div', {
+      class:
+        'yanta-dash-folder-mini-task' +
+        (block.checked ? ' is-checked' : ''),
+    }, [
+      el('span', { class: 'yanta-dash-folder-mini-task-box' }),
+      el('span', {}, block.text || 'Task'),
+    ]);
+  }
+
+  if (block.type === 'image') {
+    return renderFolderMiniImage(block);
+  }
+
+  if (block.type === 'video') {
+    const media = el('div', {
+      class: 'yanta-dash-folder-mini-media video',
+    });
+
+    media.innerHTML = `${lucide('play', 12)} <span>Video</span>`;
+
+    return media;
+  }
+
+  if (block.type === 'drawing') {
+    return renderFolderMiniDrawing(noteId, block);
+  }
+
+  return null;
+}
+
+function renderFolderMiniImage(block) {
+  const media = el('div', {
+    class: 'yanta-dash-folder-mini-media image',
+  });
+
+  media.innerHTML = `${lucide('image', 12)} <span>Image</span>`;
+
+  resolveDashboardImageUrl(block.url)
+    .then((src) => {
+      if (!src || !media.isConnected) return;
+
+      media.replaceChildren();
+
+      media.append(el('img', {
+        src,
+        alt: block.alt || '',
+        loading: 'lazy',
+        draggable: 'false',
+      }));
+    })
+    .catch(() => {});
+
+  return media;
+}
+
+function renderFolderMiniDrawing(noteId, block) {
+  const media = el('div', {
+    class: 'yanta-dash-folder-mini-media drawing',
+  });
+
+  media.innerHTML = `${lucide('pencil', 12)} <span>Drawing</span>`;
+
+  import('./draw.js')
+    .then(async ({ drawingThumbnailUrl }) => {
+      const hit = findDrawing(block.id, noteId);
+
+      if (!hit || !media.isConnected) return;
+
+      const url = await drawingThumbnailUrl(hit.noteId, block.id);
+
+      if (!url || !media.isConnected) return;
+
+      media.replaceChildren();
+
+      media.append(el('img', {
+        src: url,
+        alt: 'Drawing',
+        loading: 'lazy',
+        draggable: 'false',
+      }));
+    })
+    .catch(() => {});
+
+  return media;
+}
+
   function renderResizeHandle(key) {
     const handle = el('div', {
       class: 'yanta-dash-resize-handle',
@@ -1034,20 +1509,24 @@
     if (!host) return;
   
     const preview = await getDashboardPreview(note);
+
+    const contentMaxH = autoHeightForPreview(preview);
+    card.dataset.contentMaxHeight = String(contentMaxH);
   
     if (!card.isConnected) return;
   
     // Auto-size unless user manually resized.
     if (note.dashboardHeightPx == null && note.dashboardHeight == null) {
-      const autoH = autoHeightForPreview(preview);
+      const autoH = contentMaxH;
       card.style.setProperty('--dash-row-span', String(heightToGridSpan(autoH)));
       card.dataset.effectiveHeight = String(autoH);
     } else {
-      const h = itemDashboardHeightPx({ kind: 'note', note, id: note.id });
-      card.style.setProperty('--dash-row-span', String(heightToGridSpan(h)));
-      card.dataset.effectiveHeight = String(h);
+      const storedH = itemDashboardHeightPx({ kind: 'note', note, id: note.id });
+      const cappedH = Math.min(storedH, contentMaxH);
+
+      card.style.setProperty('--dash-row-span', String(heightToGridSpan(cappedH)));
+      card.dataset.effectiveHeight = String(cappedH);
     }
-  
     host.replaceChildren();
   
     if (!preview.blocks.length && !preview.badges.length) {
@@ -1493,31 +1972,314 @@
   // ============================================================
   // Card open/navigation
   // ============================================================
-  
-  function navigateDashboardFolder(folderId) {
-    dashboard.folderId = folderId || null;
-    dashboard.selectedKey = null;
-  
+  function pushDashboardFolderHistory() {
     history.pushState(
       { surface: 'dashboard', folderId: dashboard.folderId },
       '',
       '#dashboard'
     );
-  
+  }
+
+  function dashboardPage() {
+    return root?.querySelector('.yanta-dashboard-page') || null;
+  }
+
+  function setTemporaryViewTransitionElement(node, transitionName, className = '', {
+    viewportClip = false,
+  } = {}) {
+    if (!node || !transitionName) return null;
+
+    const token = {
+      node,
+      previousViewTransitionName: node.style.viewTransitionName,
+      previousContain: node.style.contain,
+      previousHeight: node.style.height,
+      previousOverflow: node.style.overflow,
+      previousBackground: node.style.background,
+      className,
+      active: true,
+    };
+
+    node.style.viewTransitionName = transitionName;
+    node.style.contain = 'layout paint';
+
+    /*
+      For folder page transitions we must snapshot the visible dashboard area,
+      not an arbitrarily tall content box. This makes it behave like panes.
+    */
+    if (viewportClip && root) {
+      const r = root.getBoundingClientRect();
+      node.style.height = `${Math.max(1, Math.round(r.height))}px`;
+      node.style.overflow = 'hidden';
+      node.style.background = 'var(--bg)';
+    }
+
+    if (className) {
+      node.classList.add(className);
+    }
+
+    return token;
+  }
+
+  function clearTemporaryViewTransitionElement(token) {
+    if (!token || !token.active) return;
+
+    token.active = false;
+
+    const node = token.node;
+
+    if (!node || !node.isConnected) return;
+
+    node.style.viewTransitionName = token.previousViewTransitionName || '';
+    node.style.contain = token.previousContain || '';
+    node.style.height = token.previousHeight || '';
+    node.style.overflow = token.previousOverflow || '';
+    node.style.background = token.previousBackground || '';
+
+    if (token.className) {
+      node.classList.remove(token.className);
+    }
+  }
+
+  function folderPathForId(folderId) {
+    const parts = [];
+    const seen = new Set();
+
+    let f = folderId ? state.folders.get(folderId) : null;
+
+    while (f && !seen.has(f.id)) {
+      seen.add(f.id);
+      parts.unshift(f);
+      f = f.parentId ? state.folders.get(f.parentId) : null;
+    }
+
+    return parts;
+  }
+
+  function visibleFolderCardIdForTargetView(fromFolderId, targetFolderId) {
+    if (!fromFolderId) return null;
+
+    const path = folderPathForId(fromFolderId);
+
+    if (!path.length) return fromFolderId;
+
+    /*
+      Home / A / B / C -> Home
+      In Home, A is visible.
+    */
+    if (!targetFolderId) {
+      return path[0]?.id || fromFolderId;
+    }
+
+    /*
+      Home / A / B / C -> A
+      In A, B is visible.
+    */
+    const idx = path.findIndex((f) => f.id === targetFolderId);
+
+    if (idx >= 0 && idx < path.length - 1) {
+      return path[idx + 1].id;
+    }
+
+    return fromFolderId;
+  }
+
+  function findDashboardFolderCard(folderId) {
+    if (!root || !folderId) return null;
+
+    return root.querySelector(
+      `.yanta-dash-card[data-kind="folder"][data-folder-id="${CSS.escape(folderId)}"]`
+    );
+  }
+
+  function scrollElementIntoDashboardView(node) {
+    if (!node) return;
+
+    try {
+      node.scrollIntoView({
+        block: 'center',
+        inline: 'nearest',
+        behavior: 'instant',
+      });
+    } catch {
+      try {
+        node.scrollIntoView({
+          block: 'center',
+          inline: 'nearest',
+        });
+      } catch {}
+    }
+  }
+
+  function commitDashboardFolderNavigation(folderId, { push = true } = {}) {
+    dashboard.folderId = folderId || null;
+    dashboard.selectedKey = null;
+
+    if (push) {
+      pushDashboardFolderHistory();
+    }
+
     renderDashboard();
-  
+  }
+
+async function navigateDashboardFolder(folderId, {
+  sourceCard = null,
+  push = true,
+} = {}) {
+  ensureDashboardRoot();
+
+  const fromFolderId = dashboard.folderId || null;
+  const targetFolderId = folderId || null;
+
+  if (fromFolderId === targetFolderId) return;
+  if (dashboard.dragging || dashboard.resize) return;
+
+  dashboard.suppressOpenUntil = performance.now() + 850;
+
+  const isOpeningFolder =
+    !!sourceCard &&
+    !!targetFolderId &&
+    sourceCard.dataset.folderId === targetFolderId;
+
+  /*
+    Same model as Notes:
+      Note open/back:
+        card <-> panes
+
+      Folder open/back:
+        folder-card <-> yanta-dashboard-page
+
+    Wichtig:
+    Im startViewTransition()-Update-Callback NICHT auf requestAnimationFrame()
+    warten. Das kann die Transition blockieren/hängen lassen.
+  */
+  const sharedFolderId = isOpeningFolder
+    ? targetFolderId
+    : visibleFolderCardIdForTargetView(fromFolderId, targetFolderId);
+
+  if (!document.startViewTransition || !sharedFolderId) {
+    commitDashboardFolderNavigation(targetFolderId, { push });
+
     root?.scrollTo?.({
       top: 0,
       behavior: 'smooth',
     });
+
+    dashboard.suppressOpenUntil = performance.now() + 350;
+    return;
   }
-  
+
+  const transitionName = transitionNameFor('folder', sharedFolderId);
+
+  const oldPage = dashboardPage();
+
+  const oldElement = isOpeningFolder
+    ? sourceCard
+    : oldPage;
+
+  if (!oldElement) {
+    commitDashboardFolderNavigation(targetFolderId, { push });
+    dashboard.suppressOpenUntil = performance.now() + 350;
+    return;
+  }
+
+  const oldToken = setTemporaryViewTransitionElement(
+    oldElement,
+    transitionName,
+    'is-folder-transition-source',
+    {
+      viewportClip: !isOpeningFolder,
+    }
+  );
+
+  let newToken = null;
+
+  const vt = document.startViewTransition(() => {
+    commitDashboardFolderNavigation(targetFolderId, { push });
+
+    if (isOpeningFolder) {
+      root.scrollTop = 0;
+
+      const newPage = dashboardPage();
+
+      newToken = setTemporaryViewTransitionElement(
+        newPage,
+        transitionName,
+        'is-folder-transition-target',
+        {
+          viewportClip: true,
+        }
+      );
+
+      return;
+    }
+
+    /*
+      Back/up:
+      old dashboard page -> folder card in new dashboard.
+
+      Kein await requestAnimationFrame() hier!
+      scrollIntoView({ behavior:'instant' }) reicht synchron aus.
+    */
+    let targetCard = findDashboardFolderCard(sharedFolderId);
+
+    if (targetCard) {
+      scrollElementIntoDashboardView(targetCard);
+
+      /*
+        Nach scrollIntoView erneut suchen, falls durch Render/Scroll/Layout
+        etwas aktualisiert wurde. Aber synchron bleiben.
+      */
+      targetCard = findDashboardFolderCard(sharedFolderId);
+    }
+
+    if (targetCard) {
+      newToken = setTemporaryViewTransitionElement(
+        targetCard,
+        transitionName,
+        'is-folder-transition-target'
+      );
+
+      return;
+    }
+
+    /*
+      Fallback if target card is not present.
+    */
+    root.scrollTop = 0;
+
+    const newPage = dashboardPage();
+
+    newToken = setTemporaryViewTransitionElement(
+      newPage,
+      transitionName,
+      'is-folder-transition-target',
+      {
+        viewportClip: true,
+      }
+    );
+  });
+
+  vt.ready.catch((err) => {
+    console.warn('Folder view transition skipped:', err);
+  });
+
+  await vt.finished.catch(() => {});
+
+  clearTemporaryViewTransitionElement(oldToken);
+  clearTemporaryViewTransitionElement(newToken);
+
+  dashboard.suppressOpenUntil = performance.now() + 350;
+}
+
   async function openItem(item, card) {
     if (performance.now() < (dashboard.suppressOpenUntil || 0)) return;
     if (dashboard.dragging || dashboard.resize) return;
   
     if (item.kind === 'folder') {
-      navigateDashboardFolder(item.id);
+      await navigateDashboardFolder(item.id, {
+        sourceCard: card,
+      });
       return;
     }
   
@@ -1532,30 +2294,35 @@
     try {
       if (document.startViewTransition && card) {
         card.style.viewTransitionName = transitionName;
+        card.style.contain = 'layout paint';
   
+        let target = null;
+
         const vt = document.startViewTransition(async () => {
           hideDashboard({ push: false });
   
           await openNote(noteId);
   
-          const target = $('panes');
+          target = $('panes');
   
           if (target) {
             target.style.viewTransitionName = transitionName;
             target.style.contain = 'layout paint';
+            target.classList.add('is-note-transition-target');
           }
         });
   
         await vt.finished.catch(() => {});
   
-        const target = $('panes');
-  
         if (target) {
           target.style.viewTransitionName = '';
           target.style.contain = '';
+          target.classList.remove('is-note-transition-target');
         }
   
-        card.style.viewTransitionName = transitionNameFor('note', noteId);
+        card.style.viewTransitionName = '';
+        card.style.contain = '';
+
         return;
       }
   
@@ -1621,530 +2388,913 @@
   // ============================================================
   // Long press, drag reorder, resize
   // ============================================================
-  
+
   function bindCardPointerInteractions(card, item) {
     let pressTimer = 0;
-    let downX = 0;
-    let downY = 0;
-    let moved = false;
-    let longPressed = false;
-    let draggingStarted = false;
-    let pointerId = null;
-  
+    let active = null;
+
     const key = itemKey(item);
-  
+
     const clearPress = () => {
       clearTimeout(pressTimer);
       pressTimer = 0;
     };
-  
+
     const selectInPlace = () => {
       dashboard.selectedKey = key;
-  
+
       root
         ?.querySelectorAll('.yanta-dash-card.selected')
-        ?.forEach((n) => {
-          if (n !== card) n.classList.remove('selected');
+        ?.forEach((node) => {
+          if (node !== card) node.classList.remove('selected');
         });
-  
+
       card.classList.add('selected');
-      navigator.vibrate?.(12);
     };
-  
+
+    const cleanupPending = () => {
+      clearPress();
+
+      document.removeEventListener('pointermove', onDocumentPendingMove, true);
+      document.removeEventListener('pointerup', onDocumentPendingUp, true);
+      document.removeEventListener('pointercancel', onDocumentPendingCancel, true);
+
+      root?.classList.remove('is-touch-scrolling');
+
+      active = null;
+    };
+
     card.addEventListener('contextmenu', (e) => {
-      // Prevent browser / emulated mobile long-press context menu.
+      if (!dashboard.visible) return;
       e.preventDefault();
       e.stopPropagation();
     });
-  
+
     card.addEventListener('pointerdown', (e) => {
       if (e.button != null && e.button !== 0) return;
-      if (e.target.closest?.('input, button, a, .yanta-dash-resize-handle')) return;
-  
-      pointerId = e.pointerId;
-      downX = e.clientX;
-      downY = e.clientY;
-      moved = false;
-      longPressed = false;
-      draggingStarted = false;
-  
+      if (e.target.closest?.('input, button, a, textarea, select, iframe, .yanta-dash-resize-handle')) return;
+      if (dashboard.resize || dashboard.dragging) return;
+
+      const pointerType = e.pointerType || 'mouse';
+
+      active = {
+        pointerId: e.pointerId,
+        pointerType,
+        downX: e.clientX,
+        downY: e.clientY,
+        lastScrollY: e.clientY,
+        moved: false,
+        longPressed: false,
+        dragStarted: false,
+        scrolling: false,
+      };
+
       clearPress();
-  
-      pressTimer = setTimeout(() => {
-        longPressed = true;
-        selectInPlace();
-      }, LONG_PRESS_MS);
-  
+
+      /*
+        CSS setzt touch-action:none auf Cards.
+        Deshalb verhindern wir native Gesten und scrollen bei Touch selbst,
+        solange der Long-Press noch nicht aktiv ist.
+      */
+      e.preventDefault();
+      e.stopPropagation();
+
       try {
         card.setPointerCapture?.(e.pointerId);
       } catch {}
-    }, { passive: true });
-  
-    card.addEventListener('pointermove', (e) => {
-      if (pointerId == null || e.pointerId !== pointerId) return;
-  
-      const dist = Math.hypot(e.clientX - downX, e.clientY - downY);
-  
-      if (dist > MOVE_TOLERANCE) {
-        moved = true;
-  
-        // User is scrolling before long-press: cancel gesture.
-        if (!longPressed) {
-          clearPress();
+
+      pressTimer = window.setTimeout(() => {
+        if (!active || active.pointerId !== e.pointerId) return;
+        if (active.scrolling || active.dragStarted) return;
+
+        active.longPressed = true;
+        selectInPlace();
+
+        dashboard.suppressOpenUntil = performance.now() + 600;
+      }, LONG_PRESS_MS);
+
+      document.addEventListener('pointermove', onDocumentPendingMove, true);
+      document.addEventListener('pointerup', onDocumentPendingUp, true);
+      document.addEventListener('pointercancel', onDocumentPendingCancel, true);
+    }, { passive: false });
+
+    function onDocumentPendingMove(e) {
+      if (!active || e.pointerId !== active.pointerId) return;
+
+      const dx = e.clientX - active.downX;
+      const dy = e.clientY - active.downY;
+      const dist = Math.hypot(dx, dy);
+
+      if (dashboard.dragging?.key === key) {
+        e.preventDefault();
+        e.stopPropagation();
+        moveCardDrag(e);
+        return;
+      }
+
+      /*
+        Touch-Scroll-Modus:
+        Wenn der User vor Long-Press vertikal bewegt, ist es Scrollen.
+        Da touch-action:none gesetzt ist, machen wir den Scroll manuell.
+      */
+      if (active.scrolling) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        if (root) {
+          const delta = active.lastScrollY - e.clientY;
+          root.scrollBy(0, delta);
+        }
+
+        active.lastScrollY = e.clientY;
+        active.moved = true;
+        return;
+      }
+
+      if (dist <= MOVE_TOLERANCE) {
+        if (active.longPressed) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+
+        return;
+      }
+
+      active.moved = true;
+
+      const canStartDrag =
+        active.pointerType !== 'touch' ||
+        active.longPressed ||
+        dashboard.selectedKey === key;
+
+      /*
+        Touch vor Long-Press bedeutet weiterhin: scrollen, nicht draggen.
+        Dadurch bleibt die UX natürlich, obwohl Cards touch-action:none haben.
+      */
+      if (!canStartDrag) {
+        clearPress();
+
+        active.scrolling = true;
+        active.lastScrollY = active.downY;
+
+        root?.classList.add('is-touch-scrolling');
+
+        e.preventDefault();
+        e.stopPropagation();
+
+        if (root) {
+          const delta = active.lastScrollY - e.clientY;
+          root.scrollBy(0, delta);
+        }
+
+        active.lastScrollY = e.clientY;
+        dashboard.suppressOpenUntil = performance.now() + 350;
+        return;
+      }
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      clearPress();
+
+      if (!active.longPressed) {
+        active.longPressed = true;
+        selectInPlace();
+      }
+
+      if (!active.dragStarted) {
+        active.dragStarted = true;
+
+        dashboard.suppressOpenUntil = performance.now() + 900;
+        startCardDrag(card, item, e);
+      }
+    }
+
+    async function onDocumentPendingUp(e) {
+      if (!active || e.pointerId !== active.pointerId) return;
+
+      const snapshot = active;
+      const wasDragging = dashboard.dragging?.key === key;
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      try {
+        card.releasePointerCapture?.(e.pointerId);
+      } catch {}
+
+      cleanupPending();
+
+      if (wasDragging) {
+        await finishCardDrag();
+        dashboard.suppressOpenUntil = performance.now() + 750;
+        return;
+      }
+
+      if (snapshot.scrolling) {
+        dashboard.suppressOpenUntil = performance.now() + 250;
+        return;
+      }
+
+      if (snapshot.longPressed && !snapshot.dragStarted) {
+        selectInPlace();
+        dashboard.suppressOpenUntil = performance.now() + 350;
+        return;
+      }
+
+      if (!snapshot.moved && !snapshot.longPressed) {
+        await openItem(item, card);
+      }
+    }
+
+    function onDocumentPendingCancel(e) {
+      if (!active || e.pointerId !== active.pointerId) return;
+
+      const wasDragging = dashboard.dragging?.key === key;
+
+      try {
+        card.releasePointerCapture?.(e.pointerId);
+      } catch {}
+
+      cleanupPending();
+
+      if (wasDragging) {
+        cancelCardDrag();
+      }
+    }
+
+    card.addEventListener('keydown', async (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        await openItem(item, card);
+        return;
+      }
+
+      if (e.key === 'Escape') {
+        e.preventDefault();
+
+        if (dashboard.dragging) {
+          await cancelCardDrag();
           return;
         }
-  
-        // Long-pressed and now moving: start reorder drag.
-        if (!draggingStarted) {
-          draggingStarted = true;
-          startCardDrag(card, item, e);
-        }
-      }
-    }, { passive: false });
-  
-    card.addEventListener('pointerup', async (e) => {
-      if (pointerId != null && e.pointerId !== pointerId) return;
-  
-      clearPress();
-  
-      const wasDragging = dashboard.dragging?.key === key;
-  
-      if (wasDragging) {
-        e.preventDefault();
-        pointerId = null;
-        return;
-      }
-  
-      // Long press without movement: keep resize handle visible.
-      if (longPressed && !draggingStarted) {
-        e.preventDefault();
-        selectInPlace();
-        pointerId = null;
-        return;
-      }
-  
-      // Normal tap.
-      if (!moved && !longPressed) {
-        e.preventDefault();
-        await openItem(item, card);
-      }
-  
-      pointerId = null;
-    });
-  
-    card.addEventListener('pointercancel', () => {
-      clearPress();
-      cancelCardDrag();
-      pointerId = null;
-    });
-  
-    card.addEventListener('keydown', async (e) => {
-      if (e.key === 'Enter') {
-        e.preventDefault();
-        await openItem(item, card);
-      }
-  
-      if (e.key === 'Escape') {
+
         dashboard.selectedKey = null;
         renderDashboard();
       }
     });
   }
 
-  function startCardDrag(card, item, e) {
-    if (dashboard.dragging) return;
-  
-    const key = itemKey(item);
-    const rect = card.getBoundingClientRect();
-  
-    try {
-      card.releasePointerCapture?.(e.pointerId);
-    } catch {}
-  
-    const clone = card.cloneNode(true);
-    clone.classList.add('drag-clone');
-    clone.style.position = 'fixed';
-    clone.style.left = rect.left + 'px';
-    clone.style.top = rect.top + 'px';
-    clone.style.width = rect.width + 'px';
-    clone.style.height = rect.height + 'px';
-    clone.style.zIndex = '260';
-    clone.style.pointerEvents = 'none';
-    clone.style.margin = '0';
-    clone.style.willChange = 'transform,left,top';
-  
-    document.body.append(clone);
-  
-    card.classList.add('drag-source');
-    card.style.visibility = 'hidden';
-  
-    dashboard.suppressOpenUntil = performance.now() + 900;
-  
-dashboard.dragging = {
-  key,
-  section: card.dataset.section,
-  source: card,
-  clone,
-  startX: e.clientX,
-  startY: e.clientY,
-  offsetX: e.clientX - rect.left,
-  offsetY: e.clientY - rect.top,
-  lastX: e.clientX,
-  lastY: e.clientY,
-  pointerId: e.pointerId,
-
-  sourceKind: item.kind,
-  sourceId: item.id,
-  dropFolderId: null,
-  lastPlacement: '',
-};
-  
-    document.addEventListener('pointermove', onDocumentCardDragMove, true);
-    document.addEventListener('pointerup', onDocumentCardDragUp, true);
-    document.addEventListener('pointercancel', onDocumentCardDragCancel, true);
-  
-    navigator.vibrate?.(18);
+  function clamp(n, min, max) {
+    return Math.max(min, Math.min(max, n));
   }
 
-  function onDocumentCardDragMove(e) {
-    if (!dashboard.dragging) return;
-  
-    e.preventDefault();
-    e.stopPropagation();
-  
-    moveCardDrag(e);
+  function prefersReducedMotion() {
+    return window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
   }
-  
-  async function onDocumentCardDragUp(e) {
-    if (!dashboard.dragging) return;
-  
-    e.preventDefault();
-    e.stopPropagation();
-  
-    cleanupDocumentDragListeners();
-  
-    await finishCardDrag();
-  
-    dashboard.suppressOpenUntil = performance.now() + 700;
-  }
-  
-  function onDocumentCardDragCancel(e) {
-    if (!dashboard.dragging) return;
-  
-    e.preventDefault();
-    e.stopPropagation();
-  
-    cleanupDocumentDragListeners();
-    cancelCardDrag();
-  
-    dashboard.suppressOpenUntil = performance.now() + 700;
-  }
-  
 
   function clearFolderDropTargets() {
     root
       ?.querySelectorAll('.yanta-dash-card.folder-drop-target')
-      ?.forEach((n) => n.classList.remove('folder-drop-target'));
+      ?.forEach((node) => node.classList.remove('folder-drop-target'));
   }
-  
+
   function clearInsertTargets() {
     root
       ?.querySelectorAll('.yanta-dash-card.insert-before, .yanta-dash-card.insert-after')
-      ?.forEach((n) => {
-        n.classList.remove('insert-before');
-        n.classList.remove('insert-after');
+      ?.forEach((node) => {
+        node.classList.remove('insert-before');
+        node.classList.remove('insert-after');
       });
   }
 
-  function cleanupDocumentDragListeners() {
-    document.removeEventListener('pointermove', onDocumentCardDragMove, true);
-    document.removeEventListener('pointerup', onDocumentCardDragUp, true);
-    document.removeEventListener('pointercancel', onDocumentCardDragCancel, true);
+  function clearDragVisuals() {
+    clearFolderDropTargets();
+    clearInsertTargets();
   }
 
-  function animateGridReorder(grid, mutate) {
-    if (!grid) {
+  function gridItemRowSpan(card) {
+    if (!card) return 18;
+
+    const inlineVar = String(card.style.getPropertyValue('--dash-row-span') || '').trim();
+
+    if (/^\d+$/.test(inlineVar)) {
+      return Number(inlineVar);
+    }
+
+    const computed = getComputedStyle(card);
+    const computedVar = String(computed.getPropertyValue('--dash-row-span') || '').trim();
+
+    if (/^\d+$/.test(computedVar)) {
+      return Number(computedVar);
+    }
+
+    const rowEnd = String(computed.gridRowEnd || '').trim();
+    const m = /span\s+(\d+)/i.exec(rowEnd);
+
+    if (m) {
+      return Number(m[1]);
+    }
+
+    const h =
+      Number(card.dataset.effectiveHeight) ||
+      card.getBoundingClientRect().height ||
+      DEFAULT_NOTE_HEIGHT;
+
+    return heightToGridSpan(h);
+  }
+
+  function createDragPlaceholder(card) {
+    const computed = getComputedStyle(card);
+    const span = gridItemRowSpan(card);
+
+    const placeholder = document.createElement('div');
+    placeholder.className = 'yanta-dash-placeholder';
+
+    placeholder.dataset.placeholderFor = card.dataset.key || '';
+    placeholder.style.setProperty('--dash-row-span', String(span));
+    placeholder.style.borderRadius = computed.borderRadius || '16px';
+
+    /*
+      Keine explizite height setzen.
+      Der Placeholder soll exakt den gleichen Grid-Span wie die Source haben.
+      Das verhindert Overlaps bei gap/row-span Kombinationen.
+    */
+
+    return placeholder;
+  }
+
+  function dragAnimElements(grid) {
+    return [...grid.children].filter((node) => {
+      if (!(node instanceof HTMLElement)) return false;
+      if (node.classList.contains('drag-clone')) return false;
+      if (node.classList.contains('drag-source')) return false;
+      if (node.classList.contains('yanta-dash-placeholder')) return false;
+
+      return node.classList.contains('yanta-dash-card');
+    });
+  }
+
+  function animateGridMutation(grid, mutate) {
+    if (!grid || prefersReducedMotion()) {
       mutate?.();
       return;
     }
-  
-    const cards = [...grid.querySelectorAll('.yanta-dash-card')]
-      .filter((card) => !card.classList.contains('drag-source'));
-  
-    const first = new Map();
-  
-    for (const card of cards) {
-      first.set(card, card.getBoundingClientRect());
+
+    const nodes = dragAnimElements(grid);
+    const before = new Map();
+
+    for (const node of nodes) {
+      node.__yantaDashFlipAnimation?.cancel?.();
+      node.__yantaDashFlipAnimation = null;
+      before.set(node, node.getBoundingClientRect());
     }
-  
+
     mutate?.();
-  
-    for (const card of cards) {
-      if (!card.isConnected) continue;
-  
-      const a = first.get(card);
-      const b = card.getBoundingClientRect();
-  
-      if (!a || !b) continue;
-  
+
+    const afterNodes = dragAnimElements(grid);
+
+    for (const node of afterNodes) {
+      const a = before.get(node);
+      if (!a) continue;
+
+      const b = node.getBoundingClientRect();
+
       const dx = a.left - b.left;
       const dy = a.top - b.top;
-  
-      if (Math.abs(dx) < 1 && Math.abs(dy) < 1) continue;
-  
-      card.animate(
+
+      if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) continue;
+
+      node.__yantaDashFlipAnimation = node.animate(
         [
           {
-            transform: `translate(${dx}px, ${dy}px)`,
+            transform: `translate3d(${dx}px, ${dy}px, 0)`,
           },
           {
-            transform: 'translate(0, 0)',
+            transform: 'translate3d(0, 0, 0)',
           },
         ],
         {
-          duration: 180,
+          duration: 150,
           easing: 'cubic-bezier(.2,.8,.2,1)',
+          fill: 'both',
         }
       );
+
+      node.__yantaDashFlipAnimation.addEventListener('finish', () => {
+        if (node.__yantaDashFlipAnimation) {
+          node.__yantaDashFlipAnimation = null;
+        }
+      }, { once: true });
     }
   }
-  
+
+  function startCardDrag(card, item, e) {
+    if (dashboard.dragging) return;
+
+    const grid = card.closest('.yanta-dashboard-grid');
+    if (!grid) return;
+
+    const key = itemKey(item);
+    const rect = card.getBoundingClientRect();
+
+    const placeholder = createDragPlaceholder(card);
+
+    grid.insertBefore(placeholder, card);
+
+    const clone = card.cloneNode(true);
+    clone.classList.add('drag-clone');
+    clone.classList.remove('selected');
+    clone.style.viewTransitionName = 'none';
+
+    Object.assign(clone.style, {
+      position: 'fixed',
+      left: rect.left + 'px',
+      top: rect.top + 'px',
+      width: rect.width + 'px',
+      height: rect.height + 'px',
+      margin: '0',
+      zIndex: '1000',
+      pointerEvents: 'none',
+    });
+
+    clone.style.setProperty('transform', 'translate3d(0,0,0)', 'important');
+
+    document.body.append(clone);
+
+    /*
+      display:none entfernt die Source aus dem Grid-Flow.
+      Der Placeholder übernimmt exakt ihren Slot.
+    */
+    card.classList.add('drag-source');
+    card.style.display = 'none';
+    card.style.viewTransitionName = 'none';
+
+    root?.classList.add('is-card-dragging');
+
+    dashboard.suppressOpenUntil = performance.now() + 900;
+
+    dashboard.dragging = {
+      key,
+      section: card.dataset.section || '',
+      grid,
+      source: card,
+      clone,
+      placeholder,
+
+      sourceKind: item.kind,
+      sourceId: item.id,
+
+      width: rect.width,
+      height: rect.height,
+
+      startLeft: rect.left,
+      startTop: rect.top,
+      offsetX: e.clientX - rect.left,
+      offsetY: e.clientY - rect.top,
+
+      lastX: e.clientX,
+      lastY: e.clientY,
+
+      raf: 0,
+      scrollRaf: 0,
+
+      dropFolderId: null,
+      lastInsertSignature: '',
+    };
+
+    moveCardDrag(e);
+  }
+
   function moveCardDrag(e) {
     const d = dashboard.dragging;
     if (!d) return;
-  
+
     d.lastX = e.clientX;
     d.lastY = e.clientY;
-  
-    d.clone.style.left = (e.clientX - d.offsetX) + 'px';
-    d.clone.style.top = (e.clientY - d.offsetY) + 'px';
-  
-    const below = document.elementFromPoint(e.clientX, e.clientY);
-    const target = below?.closest?.('.yanta-dash-card');
-  
-    clearFolderDropTargets();
-    clearInsertTargets();
-  
-    d.dropFolderId = null;
-    d.insertMode = null;
-  
-    if (!target || !target.dataset.key) return;
-    if (target === d.source) return;
-  
-    const targetRect = target.getBoundingClientRect();
-  
-    // Folder cards are dual-purpose:
-    // - top 25%    => insert before folder
-    // - bottom 25% => insert after folder
-    // - middle 50% => drop into folder
-    if (
-      d.sourceKind === 'note' &&
-      target.dataset.kind === 'folder' &&
-      target.dataset.folderId
-    ) {
-      const yRatio = (e.clientY - targetRect.top) / Math.max(1, targetRect.height);
-  
-      if (yRatio < 0.25 || yRatio > 0.75) {
-        // Reorder before/after folder.
-        if (target.dataset.section !== d.section) return;
-  
-        const grid = target.closest('.yanta-dashboard-grid');
-        if (!grid) return;
-  
-        const before = yRatio < 0.25;
-        const placement = `${target.dataset.key}:${before ? 'before' : 'after'}`;
-  
-        target.classList.add(before ? 'insert-before' : 'insert-after');
-  
-        if (d.lastPlacement === placement) return;
-        d.lastPlacement = placement;
-  
-        animateGridReorder(grid, () => {
-          if (before) {
-            grid.insertBefore(d.source, target);
-          } else {
-            grid.insertBefore(d.source, target.nextSibling);
-          }
-        });
-  
-        return;
-      }
-  
-      // Middle zone: drop into folder.
-      d.dropFolderId = target.dataset.folderId;
-      target.classList.add('folder-drop-target');
-      d.lastPlacement = `folder:${d.dropFolderId}`;
-      return;
-    }
-  
-    // Normal reorder.
-    if (target.dataset.section !== d.section) return;
-  
-    const grid = target.closest('.yanta-dashboard-grid');
-    if (!grid) return;
-  
-    const before =
-      e.clientY < targetRect.top + targetRect.height / 2 ||
-      (
-        Math.abs(e.clientY - (targetRect.top + targetRect.height / 2)) < 24 &&
-        e.clientX < targetRect.left + targetRect.width / 2
+
+    startDragAutoScroll();
+
+    if (d.raf) return;
+
+    d.raf = requestAnimationFrame(() => {
+      const cur = dashboard.dragging;
+      if (!cur) return;
+
+      cur.raf = 0;
+
+      const left = cur.lastX - cur.offsetX;
+      const top = cur.lastY - cur.offsetY;
+
+      cur.clone.style.setProperty(
+        'transform',
+        `translate3d(${left - cur.startLeft}px, ${top - cur.startTop}px, 0)`,
+        'important'
       );
-  
-    const placement = `${target.dataset.key}:${before ? 'before' : 'after'}`;
-  
-    target.classList.add(before ? 'insert-before' : 'insert-after');
-  
-    if (d.lastPlacement === placement) return;
-    d.lastPlacement = placement;
-  
-    animateGridReorder(grid, () => {
-      if (before) {
-        grid.insertBefore(d.source, target);
-      } else {
-        grid.insertBefore(d.source, target.nextSibling);
-      }
+
+      updateLiveDragPlacement(cur.lastX, cur.lastY);
     });
   }
-  
+
+  function updateLiveDragPlacement(clientX, clientY) {
+    const d = dashboard.dragging;
+    if (!d) return;
+
+    clearDragVisuals();
+    d.dropFolderId = null;
+
+    if (updateFolderDropTarget(clientX, clientY)) {
+      d.lastInsertSignature = 'folder:' + d.dropFolderId;
+      return;
+    }
+
+    updatePlaceholderPosition(clientX, clientY);
+  }
+
+  function updateFolderDropTarget(clientX, clientY) {
+    const d = dashboard.dragging;
+    if (!d) return false;
+
+    if (d.sourceKind !== 'note') return false;
+
+    const below = document.elementFromPoint(clientX, clientY);
+    const folderTarget = below?.closest?.('.yanta-dash-card[data-kind="folder"]');
+
+    if (!folderTarget) return false;
+    if (!folderTarget.isConnected) return false;
+    if (folderTarget.classList.contains('drag-source')) return false;
+
+    const folderId = folderTarget.dataset.folderId;
+    if (!folderId) return false;
+
+    const r = folderTarget.getBoundingClientRect();
+    const yRatio = (clientY - r.top) / Math.max(1, r.height);
+
+    /*
+      Middle zone = move into folder.
+      Top/bottom zones bleiben Reorder-Zonen.
+    */
+    if (yRatio < 0.28 || yRatio > 0.72) {
+      return false;
+    }
+
+    folderTarget.classList.add('folder-drop-target');
+    d.dropFolderId = folderId;
+
+    return true;
+  }
+
+  function updatePlaceholderPosition(clientX, clientY) {
+    const d = dashboard.dragging;
+    if (!d) return;
+
+    const pointerGrid = document
+      .elementFromPoint(clientX, clientY)
+      ?.closest?.('.yanta-dashboard-grid');
+
+    if (pointerGrid && pointerGrid !== d.grid) {
+      return;
+    }
+
+    const target = findBestInsertionTarget(d.grid, clientX, clientY);
+
+    if (!target) {
+      const signature = 'append';
+
+      if (d.lastInsertSignature === signature) return;
+      d.lastInsertSignature = signature;
+
+      if (d.placeholder.parentNode !== d.grid || d.placeholder.nextSibling) {
+        animateGridMutation(d.grid, () => {
+          d.grid.append(d.placeholder);
+        });
+      }
+
+      return;
+    }
+
+    const { card, place } = target;
+    const signature = `${card.dataset.key || ''}:${place}`;
+
+    card.classList.add(place === 'before' ? 'insert-before' : 'insert-after');
+
+    if (d.lastInsertSignature === signature) return;
+    d.lastInsertSignature = signature;
+
+    if (place === 'before') {
+      if (d.placeholder.nextSibling === card) return;
+
+      animateGridMutation(d.grid, () => {
+        d.grid.insertBefore(d.placeholder, card);
+      });
+
+      return;
+    }
+
+    const ref = card.nextSibling;
+
+    if (ref === d.placeholder) return;
+
+    animateGridMutation(d.grid, () => {
+      d.grid.insertBefore(d.placeholder, ref);
+    });
+  }
+
+  function findBestInsertionTarget(grid, clientX, clientY) {
+    const cards = [...grid.querySelectorAll('.yanta-dash-card[data-key]')]
+      .filter((card) => !card.classList.contains('drag-source'))
+      .filter((card) => card.offsetParent !== null);
+
+    if (!cards.length) return null;
+
+    const direct = document
+      .elementFromPoint(clientX, clientY)
+      ?.closest?.('.yanta-dash-card[data-key]');
+
+    if (direct && cards.includes(direct)) {
+      const r = direct.getBoundingClientRect();
+
+      return {
+        card: direct,
+        place: clientY < r.top + r.height / 2 ? 'before' : 'after',
+      };
+    }
+
+    let best = null;
+    let bestScore = Infinity;
+
+    for (const card of cards) {
+      const r = card.getBoundingClientRect();
+
+      const cx = r.left + r.width / 2;
+      const cy = r.top + r.height / 2;
+
+      const dx = clientX - cx;
+      const dy = clientY - cy;
+
+      /*
+        Y stärker gewichten, X aber berücksichtigen.
+        Das stabilisiert Bento/Masonry-artige Layouts.
+      */
+      const score = Math.abs(dy) * 1.35 + Math.abs(dx) * 0.75;
+
+      if (score < bestScore) {
+        bestScore = score;
+        best = {
+          card,
+          cy,
+        };
+      }
+    }
+
+    if (!best) return null;
+
+    return {
+      card: best.card,
+      place: clientY < best.cy ? 'before' : 'after',
+    };
+  }
+
+  function startDragAutoScroll() {
+    const d = dashboard.dragging;
+    if (!d || d.scrollRaf) return;
+
+    const tick = () => {
+      const cur = dashboard.dragging;
+
+      if (!cur || !root) return;
+
+      const r = root.getBoundingClientRect();
+      const y = cur.lastY;
+
+      let speed = 0;
+
+      if (y < r.top + DRAG_EDGE_SCROLL_PX) {
+        const t = 1 - clamp((y - r.top) / DRAG_EDGE_SCROLL_PX, 0, 1);
+        speed = -DRAG_EDGE_SCROLL_MAX * t;
+      } else if (y > r.bottom - DRAG_EDGE_SCROLL_PX) {
+        const t = 1 - clamp((r.bottom - y) / DRAG_EDGE_SCROLL_PX, 0, 1);
+        speed = DRAG_EDGE_SCROLL_MAX * t;
+      }
+
+      if (Math.abs(speed) > 0.25) {
+        root.scrollBy(0, speed);
+        updateLiveDragPlacement(cur.lastX, cur.lastY);
+        cur.scrollRaf = requestAnimationFrame(tick);
+      } else {
+        cur.scrollRaf = 0;
+      }
+    };
+
+    d.scrollRaf = requestAnimationFrame(tick);
+  }
+
+  function stopDragAutoScroll(d = dashboard.dragging) {
+    if (!d?.scrollRaf) return;
+
+    cancelAnimationFrame(d.scrollRaf);
+    d.scrollRaf = 0;
+  }
+
+  async function animateCloneToRect(clone, toRect) {
+    if (!clone || !toRect || prefersReducedMotion()) return;
+
+    const from = clone.getBoundingClientRect();
+
+    clone.style.setProperty('transform', 'none', 'important');
+    clone.style.left = from.left + 'px';
+    clone.style.top = from.top + 'px';
+    clone.style.width = from.width + 'px';
+    clone.style.height = from.height + 'px';
+
+    const anim = clone.animate(
+      [
+        {
+          left: from.left + 'px',
+          top: from.top + 'px',
+          width: from.width + 'px',
+          height: from.height + 'px',
+          opacity: '0.985',
+        },
+        {
+          left: toRect.left + 'px',
+          top: toRect.top + 'px',
+          width: toRect.width + 'px',
+          height: toRect.height + 'px',
+          opacity: '0.985',
+        },
+      ],
+      {
+        duration: DRAG_DROP_ANIM_MS,
+        easing: 'cubic-bezier(.2,.8,.2,1)',
+        fill: 'forwards',
+      }
+    );
+
+    await anim.finished.catch(() => {});
+  }
+
   async function finishCardDrag() {
     const d = dashboard.dragging;
     if (!d) return;
-  
-    cleanupDocumentDragListeners();
-    clearFolderDropTargets();
-    clearInsertTargets();
 
-    const section = d.section;
-    const grid = root.querySelector(`.yanta-dashboard-grid[data-section="${section}"]`);
-  
-    d.source.classList.remove('drag-source');
-    d.source.style.visibility = '';
-    d.clone?.remove();
-  
-    const dropFolderId = d.dropFolderId;
-    const sourceKind = d.sourceKind;
-    const sourceId = d.sourceId;
-  
+    if (d.raf) {
+      cancelAnimationFrame(d.raf);
+      d.raf = 0;
+    }
+
+    stopDragAutoScroll(d);
+    clearDragVisuals();
+
     dashboard.dragging = null;
-    dashboard.suppressOpenUntil = performance.now() + 800;
-  
-    // Move note into folder.
+    dashboard.suppressOpenUntil = performance.now() + 850;
+
+    const {
+      source,
+      clone,
+      grid,
+      placeholder,
+      sourceKind,
+      sourceId,
+      dropFolderId,
+    } = d;
+
+    // Drop note into folder.
     if (sourceKind === 'note' && dropFolderId) {
+      placeholder?.remove();
+
+      clone?.remove();
+
+      source.style.display = '';
+      source.classList.remove('drag-source');
+      source.style.viewTransitionName = '';
+
+      root?.classList.remove('is-card-dragging');
+
       const note = state.notes.get(sourceId);
-  
+
       if (note && note.folderId !== dropFolderId) {
         note.folderId = dropFolderId;
         note.pinned = false;
         note.updated = Date.now();
-  
+
         await store.notes.put(note);
-  
         previewCache.delete(sourceId);
-  
-        window.dispatchEvent(new CustomEvent('yanta-note-updated', {
-          detail: { noteId: sourceId },
-        }));
-  
+
         toast('Moved into folder', 'success');
       }
-  
+
       renderDashboard();
       return;
     }
-  
-    // Otherwise persist reorder.
-    if (grid) {
-      await persistGridOrder(grid, section);
-    }
-  
-    renderDashboard();
+
+    /*
+      Source an Placeholder-Position setzen, aber noch unsichtbar lassen.
+      So messen wir die finale Position korrekt, ohne visuellen Doppel-Effekt.
+    */
+    grid.insertBefore(source, placeholder);
+    source.style.display = '';
+
+    const finalRect = source.getBoundingClientRect();
+
+    placeholder?.remove();
+
+    await animateCloneToRect(clone, finalRect);
+
+    clone?.remove();
+
+    source.classList.remove('drag-source');
+    source.style.viewTransitionName = '';
+
+    root?.classList.remove('is-card-dragging');
+
+    await persistGridOrder(grid, grid.dataset.section || d.section);
   }
-  
-  function cancelCardDrag() {
+
+  async function cancelCardDrag() {
     const d = dashboard.dragging;
     if (!d) return;
-  
-    cleanupDocumentDragListeners();
-    clearFolderDropTargets();
-    clearInsertTargets();
 
-    d.source?.classList.remove('drag-source');
-  
-    if (d.source) {
-      d.source.style.visibility = '';
+    if (d.raf) {
+      cancelAnimationFrame(d.raf);
+      d.raf = 0;
     }
-  
-    d.clone?.remove();
-  
+
+    stopDragAutoScroll(d);
+    clearDragVisuals();
+
     dashboard.dragging = null;
     dashboard.suppressOpenUntil = performance.now() + 700;
-  
-    renderDashboard();
+
+    d.placeholder?.remove();
+
+    d.source.style.display = '';
+
+    const sourceRect = d.source.getBoundingClientRect();
+
+    await animateCloneToRect(d.clone, sourceRect);
+
+    d.clone?.remove();
+
+    d.source.classList.remove('drag-source');
+    d.source.style.viewTransitionName = '';
+
+    root?.classList.remove('is-card-dragging');
   }
-  
+
   async function persistGridOrder(grid, section) {
     const cards = [...grid.querySelectorAll('.yanta-dash-card[data-key]')];
-  
+
     let order = DASH_ORDER_STEP;
-  
+
     for (const card of cards) {
       const { kind, id } = parseItemKey(card.dataset.key);
-  
+
       if (kind === 'note') {
         const note = state.notes.get(id);
         if (!note) continue;
-  
+
         if (section === 'pinned') {
           note.dashboardPinnedOrder = order;
         } else {
           note.dashboardOrder = order;
         }
-  
+
         await store.notes.put(note);
       } else if (kind === 'folder') {
         const folder = state.folders.get(id);
         if (!folder) continue;
-  
+
         folder.dashboardOrder = order;
         await store.folders.put(folder);
       }
-  
+
       order += DASH_ORDER_STEP;
     }
-  
-    window.dispatchEvent(new CustomEvent('yanta-dashboard-refresh'));
   }
   
   function bindResizeHandle(handle, key) {
-    let timer = 0;
-  
-    const clear = () => {
-      clearTimeout(timer);
-      timer = 0;
-    };
-  
     const reset = async () => {
       dashboard.suppressOpenUntil = performance.now() + 700;
       await setItemHeightPx(key, null);
       dashboard.selectedKey = null;
       renderDashboard();
     };
-  
+
     handle.addEventListener('dblclick', async (e) => {
       e.preventDefault();
       e.stopPropagation();
       await reset();
     });
-  
+
     handle.addEventListener('pointerdown', (e) => {
       e.preventDefault();
       e.stopPropagation();
-  
+
       const card = handle.closest('.yanta-dash-card');
       if (!card) return;
-  
+
       const rect = card.getBoundingClientRect();
-  
+
       dashboard.resize = {
         key,
         card,
@@ -2154,93 +3304,104 @@ dashboard.dragging = {
         nextHeight: rect.height,
         active: false,
       };
-  
-      timer = setTimeout(async () => {
-        clear();
-        dashboard.resize = null;
-        await reset();
-      }, HANDLE_LONG_PRESS_MS);
-  
+
+      try {
+        handle.setPointerCapture?.(e.pointerId);
+      } catch {}
+
       document.addEventListener('pointermove', onDocumentResizeMove, true);
       document.addEventListener('pointerup', onDocumentResizeUp, true);
       document.addEventListener('pointercancel', onDocumentResizeCancel, true);
-    });
-  
+    }, { passive: false });
+
     function cleanupResizeListeners() {
       document.removeEventListener('pointermove', onDocumentResizeMove, true);
       document.removeEventListener('pointerup', onDocumentResizeUp, true);
       document.removeEventListener('pointercancel', onDocumentResizeCancel, true);
     }
-  
+
     function onDocumentResizeMove(e) {
       const r = dashboard.resize;
       if (!r || r.key !== key) return;
       if (r.pointerId != null && e.pointerId !== r.pointerId) return;
-  
+
       const dy = e.clientY - r.startY;
-  
+
       if (Math.abs(dy) > MOVE_TOLERANCE) {
-        clear();
         r.active = true;
       }
-  
+
       if (!r.active) return;
-  
+
       e.preventDefault();
       e.stopPropagation();
-  
+
+      const maxHeight = maxResizeHeightForCard(r.card, key);
+
       const nextHeight = Math.max(
         MIN_CARD_HEIGHT,
-        Math.min(MAX_CARD_HEIGHT, r.startHeight + dy)
+        Math.min(maxHeight, r.startHeight + dy)
       );
-  
+
       r.nextHeight = nextHeight;
-  
+
       r.card.style.setProperty('--dash-row-span', String(heightToGridSpan(nextHeight)));
       r.card.dataset.effectiveHeight = String(Math.round(nextHeight));
       r.card.classList.add('resizing');
-  
+
       dashboard.suppressOpenUntil = performance.now() + 700;
     }
-  
+
     async function onDocumentResizeUp(e) {
       const r = dashboard.resize;
       if (!r || r.key !== key) return;
       if (r.pointerId != null && e.pointerId !== r.pointerId) return;
-  
+
       e.preventDefault();
       e.stopPropagation();
-  
-      clear();
+
       cleanupResizeListeners();
-  
+
+      try {
+        handle.releasePointerCapture?.(e.pointerId);
+      } catch {}
+
       dashboard.suppressOpenUntil = performance.now() + 900;
-  
+
       if (r.active) {
         await setItemHeightPx(key, r.nextHeight);
         dashboard.selectedKey = key;
+
+        // Kein komplettes renderDashboard() hier:
+        // Das verhindert das sichtbare Flackern nach Resize.
+        r.card.classList.add('selected');
+      } else {
+        // Wenn nur geklickt wurde: Karte selektiert lassen.
+        dashboard.selectedKey = key;
+        r.card.classList.add('selected');
       }
-  
+
       r.card?.classList.remove('resizing');
-  
       dashboard.resize = null;
-  
-      renderDashboard();
     }
-  
+
     function onDocumentResizeCancel(e) {
       const r = dashboard.resize;
       if (!r || r.key !== key) return;
-  
-      clear();
+
       cleanupResizeListeners();
-  
+
+      try {
+        handle.releasePointerCapture?.(e.pointerId);
+      } catch {}
+
+      // Visuelle Änderung zurücksetzen, falls Resize abgebrochen wurde.
+      r.card.style.setProperty('--dash-row-span', String(heightToGridSpan(r.startHeight)));
+      r.card.dataset.effectiveHeight = String(Math.round(r.startHeight));
       r.card?.classList.remove('resizing');
-  
+
       dashboard.resize = null;
       dashboard.suppressOpenUntil = performance.now() + 700;
-  
-      renderDashboard();
     }
   }
   
@@ -2255,25 +3416,27 @@ dashboard.dragging = {
             Math.min(MAX_CARD_HEIGHT, Math.round(heightPx))
           );
   
-    if (kind === 'note') {
-      const note = state.notes.get(id);
-      if (!note) return;
-  
-      if (clean == null) {
-        delete note.dashboardHeightPx;
-        delete note.dashboardHeight;
-      } else {
-        note.dashboardHeightPx = clean;
-        delete note.dashboardHeight;
-      }
-  
-      await store.notes.put(note);
-    }
+        if (kind === 'note') {
+          const note = state.notes.get(id);
+          if (!note) return;
+
+          if (clean == null) {
+            delete note.dashboardHeightPx;
+            delete note.dashboardHeight;
+          } else {
+            note.dashboardHeightPx = clean;
+            delete note.dashboardHeight;
+          }
+
+          note.updated = Date.now();
+
+          await store.notes.put(note);
+        }
   
     if (kind === 'folder') {
       const folder = state.folders.get(id);
       if (!folder) return;
-  
+
       if (clean == null) {
         delete folder.dashboardHeightPx;
         delete folder.dashboardHeight;
@@ -2281,7 +3444,9 @@ dashboard.dragging = {
         folder.dashboardHeightPx = clean;
         delete folder.dashboardHeight;
       }
-  
+
+      folder.updated = Date.now();
+
       await store.folders.put(folder);
     }
   }

@@ -20,6 +20,7 @@ export function noteToFrontmatter(n) {
   if (n.dashboardOrder != null) meta.dashboardOrder = n.dashboardOrder;
   if (n.dashboardHeight != null) meta.dashboardHeight = n.dashboardHeight;
   if (n.dashboardPinnedOrder != null) meta.dashboardPinnedOrder = n.dashboardPinnedOrder;
+  if (n.dashboardHeightPx != null) meta.dashboardHeightPx = n.dashboardHeightPx;
   if (n.folderId) {
     const folder = state.folders.get(n.folderId);
     if (folder) meta.folder = folder.name;
@@ -197,6 +198,10 @@ export async function importItems(items) {
         };
         if (meta.dashboardOrder != null) note.dashboardOrder = Number(meta.dashboardOrder);
         if (meta.dashboardHeight != null) note.dashboardHeight = Number(meta.dashboardHeight);
+        if (meta.dashboardHeightPx != null) {
+          note.dashboardHeightPx = Number(meta.dashboardHeightPx);
+          delete note.dashboardHeight;
+        }
         if (meta.dashboardPinnedOrder != null) note.dashboardPinnedOrder = Number(meta.dashboardPinnedOrder);
         if (meta.icon) note.icon = meta.icon;
         if (meta.color) note.color = meta.color;
@@ -507,6 +512,11 @@ export async function importZipBlob(blob) {
     
     if (meta.dashboardHeight != null) {
       note.dashboardHeight = Number(meta.dashboardHeight);
+    }
+
+    if (meta.dashboardHeightPx != null) {
+      note.dashboardHeightPx = Number(meta.dashboardHeightPx);
+      delete note.dashboardHeight;
     }
     
     if (meta.dashboardPinnedOrder != null) {

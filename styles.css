@@ -3699,3 +3699,41 @@ input.yanta-task-checkbox {
       max(10px, env(safe-area-inset-left));
   }
 }
+
+.yanta-dash-placeholder {
+  grid-row: span var(--dash-row-span, 18);
+
+  min-width: 0;
+  min-height: 0;
+
+  border-radius: 16px;
+  border: 2px dashed color-mix(in srgb, var(--accent) 55%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+
+  pointer-events: none;
+  transform: translateZ(0);
+}
+
+.dashboard.is-card-dragging {
+  cursor: grabbing;
+}
+
+.dashboard.is-card-dragging .yanta-dash-card {
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.yanta-dash-card.drag-source {
+  opacity: 1;
+  visibility: hidden;
+}
+
+.yanta-dash-card.drag-clone {
+  opacity: 0.97;
+  transform: none !important;
+  box-shadow: 0 18px 45px rgba(0,0,0,0.28);
+  border-color: var(--accent);
+  pointer-events: none;
+  touch-action: none;
+  transition: none !important;
+}

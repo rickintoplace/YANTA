@@ -10,18 +10,50 @@ export const $ = (id) => document.getElementById(id);
 
 export const el = (tag, attrs = {}, ...children) => {
   const n = document.createElement(tag);
+
   for (const [k, v] of Object.entries(attrs)) {
-    if (k === 'class') n.className = v;
-    else if (k === 'style' && typeof v === 'object') Object.assign(n.style, v);
-    else if (k.startsWith('on') && typeof v === 'function') n.addEventListener(k.slice(2), v);
-    else if (k === 'dataset') for (const [dk, dv] of Object.entries(v)) n.dataset[dk] = dv;
-    else if (v === true) n.setAttribute(k, '');
-    else if (v !== false && v != null) n.setAttribute(k, v);
+    if (k === 'class') {
+      n.className = v;
+    }
+
+    else if (k === 'style' && v && typeof v === 'object') {
+      for (const [sk, sv] of Object.entries(v)) {
+        if (sv == null || sv === false) continue;
+
+        // Wichtig: CSS Custom Properties müssen per setProperty gesetzt werden.
+        // Object.assign(n.style, { '--foo': 'bar' }) ist nicht zuverlässig.
+        if (sk.startsWith('--')) {
+          n.style.setProperty(sk, String(sv));
+        } else {
+          n.style[sk] = sv;
+        }
+      }
+    }
+
+    else if (k.startsWith('on') && typeof v === 'function') {
+      n.addEventListener(k.slice(2), v);
+    }
+
+    else if (k === 'dataset') {
+      for (const [dk, dv] of Object.entries(v)) {
+        n.dataset[dk] = dv;
+      }
+    }
+
+    else if (v === true) {
+      n.setAttribute(k, '');
+    }
+
+    else if (v !== false && v != null) {
+      n.setAttribute(k, v);
+    }
   }
+
   for (const c of children.flat()) {
     if (c == null || c === false) continue;
     n.append(c.nodeType ? c : document.createTextNode(String(c)));
   }
+
   return n;
 };
 

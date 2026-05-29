@@ -7,6 +7,10 @@
 // ============================================================
 
 import { $, el, state, store, toast, lucide, safeCssColor, cssColorToHex } from './core.js';
+import {
+  getDashboardCardDisplayPrefs,
+  setDashboardCardDisplayPrefs,
+} from './dashboard.js';
 
 // ----------------------------------------------------------------
 // Theme tokens — these map 1:1 to CSS custom properties.
@@ -866,6 +870,7 @@ function ensureModal() {
     { id: 'appearance', label: 'Appearance', icon: 'palette' },
     { id: 'colors',     label: 'Colors',     icon: 'paintbrush' },
     { id: 'typography', label: 'Typography', icon: 'type' },
+    { id: 'dashboard',  label: 'Dashboard',  icon: 'layout-dashboard' },
     { id: 'sync',       label: 'Sync & Backup', icon: 'refresh-cw' },
     { id: 'about',      label: 'About',      icon: 'info' },
   ];
@@ -915,6 +920,7 @@ function renderSettingsBody() {
   if (activeSection === 'appearance') renderAppearanceSection(content);
   else if (activeSection === 'colors') renderColorsSection(content);
   else if (activeSection === 'typography') renderTypographySection(content);
+  else if (activeSection === 'dashboard') renderDashboardSection(content);
   else if (activeSection === 'sync') renderSyncSection(content);
   else if (activeSection === 'about') renderAboutSection(content);
 }
@@ -1276,6 +1282,84 @@ onclick: async () => {
   lhRow.append(lhSlider, lhValue);
   lhGroup.append(lhRow);
   host.append(lhGroup);
+}
+
+// ---- Dashboard section ----
+function renderDashboardSection(host) {
+  host.replaceChildren();
+
+  host.append(sectionHeader(
+    'Dashboard',
+    'Choose how note and folder cards are displayed.'
+  ));
+
+  const prefs = getDashboardCardDisplayPrefs();
+
+  const group = el('div', { class: 'yanta-settings-group' });
+
+  group.append(
+    el('div', { class: 'yanta-settings-group-title' }, 'Card labels')
+  );
+
+  group.append(
+    renderDashboardToggle({
+      checked: !!prefs.notesShowHeader,
+      label: 'Show note title and icon',
+      hint: 'Shows a compact header on note cards.',
+      onChange: async (checked) => {
+        await setDashboardCardDisplayPrefs({
+          notesShowHeader: checked,
+        });
+
+        toast('Dashboard setting saved', 'success');
+      },
+    }),
+
+    renderDashboardToggle({
+      checked: !!prefs.foldersShowHeader,
+      label: 'Show folder title and icon',
+      hint: 'Shows a compact header on folder cards.',
+      onChange: async (checked) => {
+        await setDashboardCardDisplayPrefs({
+          foldersShowHeader: checked,
+        });
+
+        toast('Dashboard setting saved', 'success');
+      },
+    }),
+  );
+
+  host.append(group);
+
+  const info = el('div', { class: 'yanta-settings-info' });
+
+  info.innerHTML = `
+    <p><strong>Rename UX:</strong> When headers are hidden, YANTA temporarily opens the card header only for renaming.</p>
+    <p>This keeps the dashboard clean by default, while Rename, F2 and keyboard workflows remain reliable.</p>
+  `;
+
+  host.append(info);
+}
+
+function renderDashboardToggle({ checked, label, hint, onChange }) {
+  const row = el('label', { class: 'yanta-settings-toggle' });
+
+  const cb = el('input', { type: 'checkbox' });
+  cb.checked = !!checked;
+
+  cb.addEventListener('change', async () => {
+    await onChange?.(cb.checked);
+  });
+
+  row.append(
+    cb,
+    el('div', { class: 'yanta-settings-toggle-meta' },
+      el('div', { class: 'yanta-settings-toggle-label' }, label),
+      el('div', { class: 'yanta-settings-toggle-hint' }, hint),
+    )
+  );
+
+  return row;
 }
 
 // ---- Sync section ----

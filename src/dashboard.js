@@ -1,9 +1,3 @@
-// ============================================================
-// YANTA — Dashboard
-// Mobile-first Bento dashboard inspired by Google Keep.
-// Parallel to the sidebar tree.
-// ============================================================
-
   import {
     $,
     el,
@@ -29,6 +23,17 @@
     findDrawing,
     destroyNoteDoc,
   } from './yjs.js';
+  import { inlineTextEdit } from './inline-ui.js';
+
+  import {
+    renameNoteById,
+    renameFolderById,
+  } from './item-actions.js';
+
+  import {
+    dashboardUrl,
+    dashboardState,
+  } from './navigation.js';
   
   const MOBILE_MQ = window.matchMedia('(max-width: 880px)');
   
@@ -49,7 +54,16 @@
   const DEFAULT_FOLDER_HEIGHT = 150;
   const MIN_CARD_HEIGHT = 76;
   const MAX_CARD_HEIGHT = 620;
-  
+
+  const DASHBOARD_CARD_DISPLAY_KEY = 'dashboard.cardDisplay.v1';
+
+  const DEFAULT_DASHBOARD_CARD_DISPLAY = {
+    notesShowHeader: false,
+    foldersShowHeader: false,
+  };
+
+  let dashboardCardDisplay = { ...DEFAULT_DASHBOARD_CARD_DISPLAY };
+  let dashboardCardDisplayLoaded = false;
 
   let root = null;
   let initialized = false;
@@ -67,6 +81,48 @@
   
   const previewCache = new Map();
   // noteId -> { updated, textLen, preview }
+
+
+  export function getDashboardCardDisplayPrefs() {
+    return { ...dashboardCardDisplay };
+  }
+
+  export async function loadDashboardCardDisplayPrefs() {
+    if (dashboardCardDisplayLoaded) return dashboardCardDisplay;
+
+    try {
+      dashboardCardDisplay = {
+        ...DEFAULT_DASHBOARD_CARD_DISPLAY,
+        ...(await store.settings.get(DASHBOARD_CARD_DISPLAY_KEY, {})),
+      };
+    } catch {
+      dashboardCardDisplay = { ...DEFAULT_DASHBOARD_CARD_DISPLAY };
+    }
+
+    dashboardCardDisplayLoaded = true;
+    return dashboardCardDisplay;
+  }
+
+  export async function setDashboardCardDisplayPrefs(patch = {}) {
+    dashboardCardDisplay = {
+      ...dashboardCardDisplay,
+      ...patch,
+    };
+
+    dashboardCardDisplayLoaded = true;
+
+    await store.settings.set(DASHBOARD_CARD_DISPLAY_KEY, dashboardCardDisplay);
+
+    window.dispatchEvent(new CustomEvent('yanta-dashboard-settings-changed', {
+      detail: { ...dashboardCardDisplay },
+    }));
+
+    if (dashboard.visible) {
+      renderDashboard();
+    }
+
+    return dashboardCardDisplay;
+  }
   
   function isMobile() {
     return MOBILE_MQ.matches;
@@ -79,6 +135,65 @@
   function parseItemKey(key) {
     const [kind, ...rest] = String(key || '').split(':');
     return { kind, id: rest.join(':') };
+  }
+
+  function isEditableDashboardKeyTarget(target) {
+    const node = target instanceof Element ? target : null;
+
+    return !!node?.closest?.(
+      'input, textarea, select, button, a, [contenteditable="true"], .yanta-inline-edit'
+    );
+  }
+
+  function focusedDashboardCard() {
+    const active = document.activeElement;
+
+    const card = active?.closest?.('.yanta-dash-card[data-key]');
+
+    if (card && root?.contains(card)) {
+      return card;
+    }
+
+    return null;
+  }
+
+  function findDashboardCardByKey(key) {
+    const { kind, id } = parseItemKey(key);
+
+    if (kind === 'note') {
+      return findDashboardNoteCard(id);
+    }
+
+    if (kind === 'folder') {
+      return findDashboardFolderCard(id);
+    }
+
+    return null;
+  }
+
+  function renameCurrentDashboardSelection() {
+    const focusedCard = focusedDashboardCard();
+    const key =
+      focusedCard?.dataset?.key ||
+      dashboard.selectedKey ||
+      '';
+
+    if (!key) return false;
+
+    const { kind, id } = parseItemKey(key);
+    const card = focusedCard || findDashboardCardByKey(key);
+
+    if (kind === 'note' && state.notes.has(id)) {
+      renameDashboardNote(id, card);
+      return true;
+    }
+
+    if (kind === 'folder' && state.folders.has(id)) {
+      renameDashboardFolder(id, card);
+      return true;
+    }
+
+    return false;
   }
   
   function defaultIconForNote(note) {
@@ -242,45 +357,63 @@
     return parts;
   }
   
-  function getDashboardItems() {
-    const folderId = dashboard.folderId || null;
-  
-    const pinnedNotes = [...state.notes.values()]
-      .filter((n) => n.pinned)
-      .sort(sortPinnedNotes)
-      .map((note) => ({
-        kind: 'note',
-        id: note.id,
-        note,
-        pinned: true,
-      }));
-  
-    const folders = [...state.folders.values()]
-      .filter((f) => (f.parentId || null) === folderId)
-      .map((folder) => ({
-        kind: 'folder',
-        id: folder.id,
-        folder,
-        pinned: false,
-      }));
-  
-    const notes = [...state.notes.values()]
-      .filter((n) => !n.pinned)
-      .filter((n) => (n.folderId || null) === folderId)
-      .map((note) => ({
-        kind: 'note',
-        id: note.id,
-        note,
-        pinned: false,
-      }));
-  
-    const normalItems = [...folders, ...notes].sort(sortByDashboardOrder);
-  
-    return {
-      pinnedNotes,
-      normalItems,
-    };
-  }
+function getDashboardItems() {
+  const folderId = dashboard.folderId || null;
+
+  /*
+    Pinning ist jetzt eine Shortcut-/Priority-Ebene, kein "Move".
+
+    Root/Home:
+      - zeigt ALLE gepinnten Notes aus dem ganzen Vault oben.
+      - diese Notes sind Shortcuts/Mirrors, bleiben aber in ihren Ordnern.
+
+    Folder:
+      - zeigt nur gepinnte Notes dieses Folders oben.
+      - gepinnte Notes aus anderen Foldern werden hier nicht angezeigt.
+  */
+  const pinnedNotes = [...state.notes.values()]
+    .filter((n) => n.pinned)
+    .filter((n) => {
+      if (!folderId) return true;
+      return (n.folderId || null) === folderId;
+    })
+    .sort(sortPinnedNotes)
+    .map((note) => ({
+      kind: 'note',
+      id: note.id,
+      note,
+      pinned: true,
+      mirrored: !folderId && !!note.folderId,
+    }));
+
+  const folders = [...state.folders.values()]
+    .filter((f) => (f.parentId || null) === folderId)
+    .map((folder) => ({
+      kind: 'folder',
+      id: folder.id,
+      folder,
+      pinned: false,
+      mirrored: false,
+    }));
+
+  const notes = [...state.notes.values()]
+    .filter((n) => !n.pinned)
+    .filter((n) => (n.folderId || null) === folderId)
+    .map((note) => ({
+      kind: 'note',
+      id: note.id,
+      note,
+      pinned: false,
+      mirrored: false,
+    }));
+
+  const normalItems = [...folders, ...notes].sort(sortByDashboardOrder);
+
+  return {
+    pinnedNotes,
+    normalItems,
+  };
+}
   
   function ensureDashboardRoot() {
     if (root) return root;
@@ -310,6 +443,14 @@
   
     ensureDashboardRoot();
     setupPreviewObserver();
+
+    loadDashboardCardDisplayPrefs().then(() => {
+      if (dashboard.visible) renderDashboard();
+    });
+
+    window.addEventListener('yanta-dashboard-settings-changed', () => {
+      if (dashboard.visible) renderDashboard();
+    });
   
     MOBILE_MQ.addEventListener?.('change', () => {
       if (isMobile() && !state.currentNoteId) {
@@ -359,7 +500,23 @@
   
     window.addEventListener('keydown', (e) => {
       if (!dashboard.visible) return;
-  
+
+      /*
+        F2 = Rename selected/focused dashboard card.
+      */
+      if (e.key === 'F2') {
+        if (isEditableDashboardKeyTarget(e.target)) return;
+
+        const handled = renameCurrentDashboardSelection();
+
+        if (handled) {
+          e.preventDefault();
+          e.stopPropagation();
+        }
+
+        return;
+      }
+
       if (e.key === 'Escape' && dashboard.folderId) {
         e.preventDefault();
         navigateDashboardFolder(null);
@@ -367,60 +524,71 @@
     });
   }
   
-  export function showDashboard({
-    folderId = dashboard.folderId || null,
-    push = false,
-    replace = false,
-  } = {}) {
-    ensureDashboardRoot();
-  
-    dashboard.folderId = folderId || null;
-    dashboard.visible = true;
-    dashboard.selectedKey = null;
-  
-    const app = $('app');
-    if (app) app.dataset.surface = 'dashboard';
-  
-    root.hidden = false;
-    
-    renderDashboard();
-  
-    if (replace) {
-      history.replaceState(
-        { surface: 'dashboard', folderId: dashboard.folderId },
-        '',
-        '#dashboard'
-      );
-    } else if (push) {
-      history.pushState(
-        { surface: 'dashboard', folderId: dashboard.folderId },
-        '',
-        '#dashboard'
-      );
-    }
+export function showDashboard({
+  folderId = dashboard.folderId || null,
+  push = false,
+  replace = false,
+} = {}) {
+  ensureDashboardRoot();
+
+  dashboard.folderId = folderId || null;
+  dashboard.visible = true;
+  dashboard.selectedKey = null;
+
+  state.surface = 'dashboard';
+  state.dashboardFolderId = dashboard.folderId;
+
+  const app = $('app');
+
+  if (app) {
+    app.dataset.surface = 'dashboard';
   }
-  
-  export function hideDashboard({ push = false } = {}) {
-    if (!root) return;
-  
-    dashboard.visible = false;
-    dashboard.selectedKey = null;
-    dashboard.dragging = null;
-    dashboard.resize = null;
-  
-    const app = $('app');
-    if (app) app.dataset.surface = 'note';
-  
-    root.hidden = true;
-  
-    if (push && state.currentNoteId) {
-      history.pushState(
-        { noteId: state.currentNoteId, surface: 'note' },
-        '',
-        '#' + encodeURIComponent(state.currentNoteId)
-      );
-    }
+
+  root.hidden = false;
+
+  renderDashboard();
+
+  if (replace) {
+    history.replaceState(
+      dashboardState(dashboard.folderId),
+      '',
+      dashboardUrl(dashboard.folderId)
+    );
+  } else if (push) {
+    history.pushState(
+      dashboardState(dashboard.folderId),
+      '',
+      dashboardUrl(dashboard.folderId)
+    );
   }
+}
+  
+export function hideDashboard({ push = false } = {}) {
+  if (!root) return;
+
+  dashboard.visible = false;
+  dashboard.selectedKey = null;
+  dashboard.dragging = null;
+  dashboard.resize = null;
+
+  state.surface = 'note';
+
+  const app = $('app');
+
+  if (app) {
+    app.dataset.surface = 'note';
+  }
+
+  root.hidden = true;
+
+  if (push && state.currentNoteId) {
+    history.pushState(
+      { surface: 'note', noteId: state.currentNoteId },
+      '',
+      '#' + encodeURIComponent(state.currentNoteId)
+    );
+  }
+}
 
 export async function showDashboardFolderFromHistory(folderId = null) {
   ensureDashboardRoot();
@@ -511,9 +679,9 @@ export async function showDashboardFolderFromHistory(folderId = null) {
   
     if (replace) {
       history.replaceState(
-        { surface: 'dashboard', folderId: dashboard.folderId },
+        dashboardState(dashboard.folderId),
         '',
-        '#dashboard'
+        dashboardUrl(dashboard.folderId)
       );
     }
   }
@@ -539,44 +707,53 @@ export async function showDashboardFolderFromHistory(folderId = null) {
     });
   }
   
-  function renderDashboard() {
-    ensureDashboardRoot();
-    setupPreviewObserver();
-  
-    root.replaceChildren();
+function renderDashboard() {
+  ensureDashboardRoot();
+  setupPreviewObserver();
 
-    /*
-      Important:
-      Folder view transitions need a real surface that is replaced on each
-      dashboard render, similar to how Notes transition between panes <-> card.
-      Do not transition #dashboard itself; it is reused.
-    */
-    const page = el('div', { class: 'yanta-dashboard-page' });
-  
-    page.append(renderDashboardHeader());
-  
-    const { pinnedNotes, normalItems } = getDashboardItems();
-  
-    const body = el('div', { class: 'yanta-dashboard-body' });
-  
+  root.replaceChildren();
+
+  /*
+    Folder view transitions need a real surface that is replaced on each
+    dashboard render, similar to how Notes transition between panes <-> card.
+    Do not transition #dashboard itself; it is reused.
+  */
+  const page = el('div', { class: 'yanta-dashboard-page' });
+
+  page.dataset.notesHeader = dashboardCardDisplay.notesShowHeader ? '1' : '0';
+  page.dataset.foldersHeader = dashboardCardDisplay.foldersShowHeader ? '1' : '0';
+
+  page.append(renderDashboardHeader());
+
+  const { pinnedNotes, normalItems } = getDashboardItems();
+
+  const body = el('div', { class: 'yanta-dashboard-body' });
+
+  /*
+    Keine sichtbaren Section-Titles mehr.
+    Gepinnte Items stehen einfach oben.
+    Im Root sind gepinnte Notes Shortcuts aus dem ganzen Vault.
+    In Foldern sind gepinnte Notes nur lokale Top-Items.
+  */
+  if (!pinnedNotes.length && !normalItems.length) {
+    body.append(
+      dashboard.folderId
+        ? renderEmptyFolderState()
+        : renderEmptyState()
+    );
+  } else {
     if (pinnedNotes.length) {
-      body.append(sectionTitle('Pinned'));
       body.append(renderGrid(pinnedNotes, { section: 'pinned' }));
     }
-  
-    body.append(sectionTitle(dashboard.folderId ? 'Folder' : 'Home'));
-  
-    if (!normalItems.length && !pinnedNotes.length) {
-      body.append(renderEmptyState());
-    } else if (!normalItems.length) {
-      body.append(renderEmptyFolderState());
-    } else {
+
+    if (normalItems.length) {
       body.append(renderGrid(normalItems, { section: 'normal' }));
     }
-  
-    page.append(body);
-    root.append(page);
   }
+
+  page.append(body);
+  root.append(page);
+}
 
   function renderDashboardHeader() {
     const header = el('header', { class: 'yanta-dashboard-head' });
@@ -639,10 +816,6 @@ export async function showDashboardFolderFromHistory(folderId = null) {
     header.append(menuBtn, titleWrap, searchBtn, newBtn);
   
     return header;
-  }
-  
-  function sectionTitle(text) {
-    return el('div', { class: 'yanta-dashboard-section-title' }, text);
   }
   
   function renderEmptyState() {
@@ -725,7 +898,6 @@ function renderCard(item, { section }) {
   });
 
   // Wichtig: Custom Properties explizit setzen.
-  // Das macht Folder-Cards nach jedem Re-Render korrekt.
   card.style.setProperty('--dash-row-span', String(rowSpan));
 
   if (color) {
@@ -735,7 +907,6 @@ function renderCard(item, { section }) {
   /*
     View transition names must NOT be permanent.
     They are assigned temporarily only during open/close transitions.
-    Permanent names cause duplicate-name conflicts when folder dashboards re-render.
   */
   card.style.viewTransitionName = '';
 
@@ -744,21 +915,20 @@ function renderCard(item, { section }) {
 
   if (item.kind === 'folder') {
     card.append(renderCardHeader(item));
-
-    // Gewünschte Reihenfolge:
-    // 1. Body
     card.append(renderFolderBody(item.folder));
-
-    // 2. Actions
     card.append(renderCardActions(item));
 
-    // 3. Meta außerhalb von yanta-dash-folder-body
     const meta = renderFolderMeta(item.folder);
+
     if (meta) {
       card.append(meta);
     }
   } else {
     card.append(renderNoteCorner(item.note));
+
+    // Notes bekommen jetzt ebenfalls einen Titel-Header.
+    // Dadurch kann man sie sauber im Dashboard umbenennen.
+    card.append(renderCardHeader(item));
 
     const previewHost = el('div', {
       class:
@@ -768,13 +938,14 @@ function renderCard(item, { section }) {
     });
 
     previewHost.innerHTML = `<div class="yanta-dash-preview-skeleton"></div>`;
+
     card.append(previewHost);
+
     previewObserver?.observe(card);
 
     card.append(renderCardActions(item));
   }
 
-  // 4. Resize handle immer zuletzt
   card.append(renderResizeHandle(key));
 
   bindCardPointerInteractions(card, item);
@@ -808,75 +979,102 @@ function renderCard(item, { section }) {
     return wrap;
   }
 
-  function renderCardActions(item) {
-    const actions = el('div', {
-      class: 'yanta-dash-card-actions',
-      onclick: (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-      },
-      onpointerdown: (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-      },
-    });
-  
-    if (item.kind !== 'note') {
-      const colorBtn = iconActionButton({
+function renderCardActions(item) {
+  const actions = el('div', {
+    class: 'yanta-dash-card-actions',
+    onclick: (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    },
+    onpointerdown: (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+    },
+  });
+
+  if (item.kind !== 'note') {
+    actions.append(
+      iconActionButton({
+        icon: 'folder-open',
+        title: 'Open',
+        onClick: () => navigateDashboardFolder(item.folder.id),
+      }),
+
+      iconActionButton({
+        icon: 'pencil',
+        title: 'Rename',
+        onClick: () => {
+          const card = findDashboardFolderCard(item.folder.id);
+          renameDashboardFolder(item.folder.id, card);
+        },
+      }),
+
+      iconActionButton({
         icon: 'palette',
         title: 'Icon & color',
         onClick: () => editDashboardFolderAppearance(item.folder),
-      });
-  
-      actions.append(colorBtn);
-      return actions;
-    }
-  
-    const note = item.note;
-  
-    actions.append(
-      iconActionButton({
-        icon: note.pinned ? 'pin-off' : 'pin',
-        title: note.pinned ? 'Unpin' : 'Pin',
-        onClick: () => toggleDashboardPin(note.id),
-      }),
-  
-      iconActionButton({
-        icon: 'palette',
-        title: 'Icon & color',
-        onClick: () => editDashboardNoteAppearance(note.id),
-      }),
-  
-      iconActionButton({
-        icon: 'copy',
-        title: 'Duplicate',
-        onClick: () => duplicateDashboardNote(note.id),
       }),
     );
-  
-    if (note.folderId) {
-      actions.append(
-        iconActionButton({
-          icon: 'folder-up',
-          title: 'Move out of folder',
-          onClick: () => moveDashboardNoteOutOfFolder(note.id),
-        })
-      );
-    }
-  
-    actions.append(
-      iconActionButton({
-        icon: 'trash',
-        title: 'Delete',
-        danger: true,
-        onClick: () => deleteDashboardNote(note.id),
-      })
-    );
-  
+
     return actions;
   }
-  
+
+  const note = item.note;
+
+  actions.append(
+    iconActionButton({
+      icon: note.pinned ? 'pin-off' : 'pin',
+      title: note.pinned ? 'Unpin' : 'Pin',
+      onClick: () => toggleDashboardPin(note.id),
+    }),
+
+    iconActionButton({
+      icon: 'pencil',
+      title: 'Rename',
+      onClick: () => {
+        const card = findDashboardNoteCard(note.id);
+        renameDashboardNote(note.id, card);
+      },
+    }),
+
+    iconActionButton({
+      icon: 'palette',
+      title: 'Icon & color',
+      onClick: () => editDashboardNoteAppearance(note.id),
+    }),
+
+    iconActionButton({
+      icon: 'copy',
+      title: 'Duplicate',
+      onClick: () => duplicateDashboardNote(note.id),
+    }),
+  );
+
+  if (note.folderId) {
+    actions.append(
+      iconActionButton({
+        icon: 'folder-up',
+        title: 'Move out of folder',
+        onClick: () => moveDashboardNoteOutOfFolder(note.id),
+      })
+    );
+  }
+
+  actions.append(
+    iconActionButton({
+      icon: 'trash',
+      title: 'Delete',
+      danger: true,
+      onClick: () => deleteDashboardNote(note.id),
+    })
+  );
+
+  return actions;
+}
+
   function iconActionButton({ icon, title, danger = false, onClick }) {
+    let ownPointerDownAt = 0;
+
     const btn = el('button', {
       type: 'button',
       class: 'yanta-dash-action-btn' + (danger ? ' danger' : ''),
@@ -885,6 +1083,18 @@ function renderCard(item, { section }) {
       onclick: async (e) => {
         e.preventDefault();
         e.stopPropagation();
+
+        /*
+          Verhindert Ghost-Clicks nach Long-Press:
+          Der Button darf nur reagieren, wenn er selbst vorher ein pointerdown
+          bekommen hat. Keyboard/Screenreader-Clicks haben meist detail === 0
+          und bleiben erlaubt.
+        */
+        const now = performance.now();
+        if (e.detail > 0 && (!ownPointerDownAt || now - ownPointerDownAt > 5000)) {
+          return;
+        }
+        ownPointerDownAt = 0;
   
         dashboard.suppressOpenUntil = performance.now() + 700;
   
@@ -896,8 +1106,12 @@ function renderCard(item, { section }) {
         }
       },
       onpointerdown: (e) => {
+        ownPointerDownAt = performance.now();
         e.preventDefault();
         e.stopPropagation();
+      },
+      onpointercancel: () => {
+        ownPointerDownAt = 0;
       },
     });
   
@@ -1050,33 +1264,161 @@ function renderCard(item, { section }) {
     renderDashboard();
   }
 
-  function renderCardHeader(item) {
-    const head = el('div', { class: 'yanta-dash-card-head' });
-  
-    const icon = el('span', { class: 'yanta-dash-card-icon' });
-    icon.innerHTML = lucide(itemIcon(item), 18);
-  
-    const title = el('div', { class: 'yanta-dash-card-title' }, itemTitle(item));
-  
-    head.append(icon, title);
-  
-    if (item.kind === 'note' && item.note.pinned) {
-      const pin = el('span', {
-        class: 'yanta-dash-pin',
-        title: 'Pinned',
-      });
-      pin.innerHTML = lucide('pin', 14);
-      head.append(pin);
-    }
-  
-    if (item.kind === 'folder') {
-      const count = folderDirectCount(item.id);
-      const badge = el('span', { class: 'yanta-dash-count' }, String(count));
-      head.append(badge);
-    }
-  
-    return head;
+function dashboardRenameTarget(cardOrAnchor, {
+  noteId = '',
+  folderId = '',
+} = {}) {
+  const card =
+    cardOrAnchor?.closest?.('.yanta-dash-card') ||
+    (noteId ? findDashboardNoteCard(noteId) : null) ||
+    (folderId ? findDashboardFolderCard(folderId) : null);
+
+  const anchor =
+    card?.querySelector('.yanta-dash-card-title') ||
+    cardOrAnchor;
+
+  return { card, anchor };
+}
+
+function beginDashboardRename(card) {
+  if (!card) return;
+
+  const key = card.dataset.key || '';
+
+  if (key) {
+    dashboard.selectedKey = key;
   }
+
+  card.classList.add('selected', 'is-renaming');
+
+  dashboard.suppressOpenUntil = performance.now() + 1200;
+}
+
+function endDashboardRename(card) {
+  if (!card) return;
+
+  requestAnimationFrame(() => {
+    if (!card.isConnected) return;
+
+    card.classList.remove('is-renaming');
+    dashboard.suppressOpenUntil = performance.now() + 350;
+  });
+}
+
+async function renameDashboardNote(noteId, cardOrAnchor) {
+  const note = state.notes.get(noteId);
+  if (!note) return;
+
+  const { card, anchor } = dashboardRenameTarget(cardOrAnchor, { noteId });
+  if (!anchor) return;
+
+  beginDashboardRename(card);
+
+  inlineTextEdit(anchor, {
+    initial: note.title || 'Untitled',
+    placeholder: 'Note title',
+    emptyFallback: 'Untitled',
+
+    onCancel: () => {
+      endDashboardRename(card);
+    },
+
+    onCommit: async (value) => {
+      previewCache.delete(note.id);
+
+      const result = await renameNoteById(noteId, value);
+
+      /*
+        renameNoteById() dispatcht yanta-note-updated/yanta-dashboard-refresh.
+        Dadurch wird das Dashboard meistens neu gerendert.
+        Falls nicht, klappen wir den temporären Header sauber wieder ein.
+      */
+      setTimeout(() => {
+        endDashboardRename(card);
+      }, 120);
+
+      return result;
+    },
+  });
+}
+
+async function renameDashboardFolder(folderId, cardOrAnchor) {
+  const folder = state.folders.get(folderId);
+  if (!folder) return;
+
+  const { card, anchor } = dashboardRenameTarget(cardOrAnchor, { folderId });
+  if (!anchor) return;
+
+  beginDashboardRename(card);
+
+  inlineTextEdit(anchor, {
+    initial: folder.name || 'Folder',
+    placeholder: 'Folder name',
+    emptyFallback: 'Folder',
+
+    onCancel: () => {
+      endDashboardRename(card);
+    },
+
+    onCommit: async (value) => {
+      const result = await renameFolderById(folderId, value);
+
+      setTimeout(() => {
+        endDashboardRename(card);
+      }, 120);
+
+      return result;
+    },
+  });
+}
+
+function findDashboardNoteCard(noteId) {
+  if (!root || !noteId) return null;
+
+  return root.querySelector(
+    `.yanta-dash-card[data-kind="note"][data-note-id="${CSS.escape(noteId)}"]`
+  );
+}
+
+function renderCardHeader(item) {
+  const head = el('div', { class: 'yanta-dash-card-head' });
+
+  const icon = el('span', { class: 'yanta-dash-card-icon' });
+  icon.innerHTML = lucide(itemIcon(item), 18);
+
+  const title = el('div', {
+    class: 'yanta-dash-card-title',
+    title: itemTitle(item),
+
+    ondblclick: (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const card = title.closest('.yanta-dash-card');
+
+      if (item.kind === 'note') {
+        renameDashboardNote(item.id, card || title);
+      } else {
+        renameDashboardFolder(item.id, card || title);
+      }
+    },
+  }, itemTitle(item));
+
+  head.append(icon, title);
+
+  if (item.kind === 'folder') {
+    const count = folderDirectCount(item.id);
+
+    const badge = el('span', {
+      class: 'yanta-dash-count',
+      title: `${count} item${count === 1 ? '' : 's'}`,
+    }, String(count));
+
+    head.append(badge);
+  }
+
+  return head;
+}
   
 function folderPreviewItems(folderId) {
   const folders = [...state.folders.values()]
@@ -2166,9 +2508,9 @@ function videoThumbnailUrl(url) {
   // ============================================================
   function pushDashboardFolderHistory() {
     history.pushState(
-      { surface: 'dashboard', folderId: dashboard.folderId },
+      dashboardState(dashboard.folderId),
       '',
-      '#dashboard'
+      dashboardUrl(dashboard.folderId)
     );
   }
 
@@ -2602,6 +2944,17 @@ async function navigateDashboardFolder(folderId, {
         });
 
       card.classList.add('selected');
+
+      /*
+        Wichtig:
+        Ohne echten Fokus bekommt die Card keine keydown-Events.
+        F2/F12/Enter funktionieren sonst nach Long-Press oft nicht.
+      */
+      try {
+        card.focus({ preventScroll: true });
+      } catch {
+        card.focus();
+      }
     };
 
     const cleanupPending = () => {
@@ -2816,6 +3169,19 @@ async function navigateDashboardFolder(folderId, {
     }
 
     card.addEventListener('keydown', async (e) => {
+      if (e.key === 'F2') {
+        e.preventDefault();
+        e.stopPropagation();
+
+        if (item.kind === 'note') {
+          renameDashboardNote(item.id, card);
+        } else {
+          renameDashboardFolder(item.id, card);
+        }
+
+        return;
+      }
+
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault();
         await openItem(item, card);

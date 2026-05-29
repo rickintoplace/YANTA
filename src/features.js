@@ -176,11 +176,21 @@ export function handleWikilinkClick(e) {
   e.preventDefault();
   e.stopPropagation();
 
-  // Wichtig: Tooltip sofort schließen, bevor Note geöffnet / Confirm gezeigt wird.
-  hideHoverPreview();
-
   const target = a.dataset.wiki;
   const id = a.dataset.noteId;
+
+  /*
+    Peek UX:
+    Alt/Option-Klick öffnet nur die Vorschau und erzeugt keinen History-Eintrag.
+    Das ist ideal für "nur kurz reinschauen".
+  */
+  if (e.altKey && id && state.notes.get(id)) {
+    showHoverPreview(a);
+    return;
+  }
+
+  // Normaler Klick navigiert.
+  hideHoverPreview();
 
   if (id && state.notes.get(id)) {
     openNote(id);
@@ -264,7 +274,7 @@ export function setupWikilinkHover() {
   });
 }
 
-function showHoverPreview(a) {
+export function showHoverPreview(a) {
   if (!a || !a.isConnected) return;
 
   const id = a.dataset.noteId;
@@ -310,7 +320,7 @@ function showHoverPreview(a) {
   hp.style.top = Math.max(8, y) + 'px';
 }
 
-function hideHoverPreview() {
+export function hideHoverPreview() {
   clearHoverTimers();
 
   const hp = $('hoverPreview');

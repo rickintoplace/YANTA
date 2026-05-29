@@ -14,6 +14,13 @@ import {
 import { syncDeleteNoteFile } from './sync.js';
 import { getNoteDoc, noteMarkdown, destroyNoteDoc } from './yjs.js';
 import { updateStorageMeter } from './core.js';
+import { inlineTextEdit } from './inline-ui.js';
+
+import {
+  openFolderInDashboard,
+  renameNoteById,
+  renameFolderById,
+} from './item-actions.js';
 
 function safeItemColor(c) {
   return safeCssColor(c);
@@ -399,6 +406,7 @@ const selection = {
 };
 
 let visibleTreeOrder = [];
+let lastTreeFocusKey = null;
 
 function noteKey(id) {
   return `note:${id}`;
@@ -414,6 +422,164 @@ function parseTreeKey(key) {
     kind,
     id: rest.join(':'),
   };
+}
+
+function isEditableTreeKeyTarget(target) {
+  const node = target instanceof Element ? target : null;
+
+  return !!node?.closest?.(
+    'input, textarea, select, button, a, [contenteditable="true"], .yanta-inline-edit'
+  );
+}
+
+function treeKeyFromDomTarget(target) {
+  const node = target instanceof Element ? target : null;
+  if (!node) return '';
+
+  const row = node.closest?.('.tree-row[data-tree-key]');
+
+  if (row?.dataset?.treeKey) {
+    return row.dataset.treeKey;
+  }
+
+  return '';
+}
+
+function focusedTreeKey() {
+  const key = treeKeyFromDomTarget(document.activeElement);
+  return key && treeKeyExists(key) ? key : '';
+}
+
+function primarySelectedTreeKey() {
+  if (lastTreeFocusKey && treeKeyExists(lastTreeFocusKey)) {
+    return lastTreeFocusKey;
+  }
+
+  if (selection.anchorKey && treeKeyExists(selection.anchorKey)) {
+    return selection.anchorKey;
+  }
+
+  if (selection.keys.size === 1) {
+    const [only] = selection.keys;
+    return treeKeyExists(only) ? only : '';
+  }
+
+  return '';
+}
+
+function renameTreeKey(key) {
+  const { kind, id } = parseTreeKey(key);
+
+  if (kind === 'note' && state.notes.has(id)) {
+    renameTreeNote(id);
+    return true;
+  }
+
+  if (kind === 'folder' && state.folders.has(id)) {
+    renameTreeFolder(id);
+    return true;
+  }
+
+  return false;
+}
+
+function renameFocusedOrSelectedTreeItem(target = document.activeElement) {
+  const fromTarget = treeKeyFromDomTarget(target);
+
+  const key =
+    (fromTarget && treeKeyExists(fromTarget) ? fromTarget : '') ||
+    focusedTreeKey() ||
+    primarySelectedTreeKey();
+
+  if (!key) return false;
+
+  return renameTreeKey(key);
+}
+
+function findTreeRowByKey(key) {
+  if (!key) return null;
+
+  const tree = $('tree');
+  if (!tree) return null;
+
+  /*
+    Prefer the real tree row over pinned mirrors.
+    If the real row is hidden inside a collapsed folder, fall back to any visible row.
+  */
+  return (
+    tree.querySelector(`.tree-row[data-tree-key="${CSS.escape(key)}"]:not([data-pinned-mirror="1"])`) ||
+    tree.querySelector(`.tree-row[data-tree-key="${CSS.escape(key)}"]`)
+  );
+}
+
+function focusTreeRowByKey(key, { preventScroll = true } = {}) {
+  const row = findTreeRowByKey(key);
+  if (!row) return false;
+
+  try {
+    row.focus({ preventScroll });
+  } catch {
+    row.focus();
+  }
+
+  return true;
+}
+
+function restoreTreeFocusSoon() {
+  const key =
+    (lastTreeFocusKey && treeKeyExists(lastTreeFocusKey) ? lastTreeFocusKey : '') ||
+    primarySelectedTreeKey();
+
+  if (!key) return;
+
+  requestAnimationFrame(() => {
+    /*
+      Nicht in ein laufendes Inline-Edit reinfunken.
+    */
+    if (isEditableTreeKeyTarget(document.activeElement)) return;
+
+    focusTreeRowByKey(key);
+  });
+}
+
+function handleTreeF2(e) {
+  if (e.key !== 'F2') return false;
+  if (isEditableTreeKeyTarget(e.target)) return false;
+
+  /*
+    Wenn Dashboard sichtbar ist, soll dessen eigener F2-Handler gewinnen.
+  */
+  if ($('app')?.dataset?.surface === 'dashboard') return false;
+
+  const handled = renameFocusedOrSelectedTreeItem(e.target);
+
+  if (!handled) return false;
+
+  e.preventDefault();
+  e.stopPropagation();
+
+  return true;
+}
+
+function bindTreeKeyboardShortcuts(root) {
+  if (!root) return;
+
+  if (root.dataset.treeKeyboardBound !== '1') {
+    root.dataset.treeKeyboardBound = '1';
+
+    root.addEventListener('keydown', (e) => {
+      handleTreeF2(e);
+    });
+  }
+
+  if (bindTreeKeyboardShortcuts._globalBound) return;
+  bindTreeKeyboardShortcuts._globalBound = true;
+
+  window.addEventListener('keydown', (e) => {
+    if (!$('tree')) return;
+
+    handleTreeF2(e);
+  }, true);
 }
 
 function treeKeyExists(key) {
@@ -508,6 +674,21 @@ function selectedFolders(items = getSelectedItems()) {
 }
 
 function handleTreeSelectionClick(e, key, normalAction) {
+  /*
+    Merken, welches Tree-Item zuletzt bewusst bedient wurde.
+    Wichtig, weil openNote()/Folder-Toggle renderTree() auslösen und dadurch
+    der DOM-Fokus sonst verloren geht.
+  */
+  lastTreeFocusKey = key;
+
+  const row = e.currentTarget?.closest?.('.tree-row') || e.currentTarget;
+
+  try {
+    row?.focus?.({ preventScroll: true });
+  } catch {
+    row?.focus?.();
+  }
+
   // Ctrl/Cmd toggles individual rows.
   if (e.ctrlKey || e.metaKey) {
     e.preventDefault();
@@ -534,6 +715,12 @@ function handleTreeSelectionClick(e, key, normalAction) {
   // select row + perform normal action.
   setOnlySelection(key);
   normalAction?.();
+
+  /*
+    Falls normalAction synchron oder async einen Tree-Render auslöst,
+    danach Fokus auf die neu erzeugte Row zurückholen.
+  */
+  restoreTreeFocusSoon();
 }
 
 function openTreeContextMenu(e, key, singleMenuFn) {
@@ -562,6 +749,8 @@ export function renderTree() {
   const root = $('tree');
   if (!root) return;
 
+  bindTreeKeyboardShortcuts(root);
+
   pruneDeadSelection();
 
   visibleTreeOrder = [];
@@ -587,20 +776,29 @@ export function renderTree() {
     return true;
   });
 
-  const pinned = visible
-    .filter((n) => n.pinned)
-    .sort((a, b) => b.updated - a.updated);
+const pinned = visible
+  .filter((n) => n.pinned)
+  .sort((a, b) => b.updated - a.updated);
 
-  if (pinned.length) {
-    const sec = el('div', { class: 'tree-section' });
-    sec.append(el('div', { class: 'tree-section-title' }, 'Pinned'));
+if (pinned.length) {
+  const sec = el('div', { class: 'tree-section tree-section-pinned' });
+  sec.append(el('div', { class: 'tree-section-title' }, 'Pinned'));
 
-    for (const n of pinned) {
-      sec.append(noteRow(n));
-    }
-
-    root.append(sec);
+  for (const n of pinned) {
+    /*
+      Pinned ist nur ein Shortcut/Mirror.
+      Die Note bleibt zusätzlich an ihrem echten Ort im Tree sichtbar.
+      registerOrder:false vermeidet doppelte Einträge in visibleTreeOrder
+      für Shift-Range-Selection.
+    */
+    sec.append(noteRow(n, 0, {
+      registerOrder: false,
+      pinnedMirror: true,
+    }));
   }
+
+  root.append(sec);
+}
 
   const folderSec = el('div', { class: 'tree-section' });
 
@@ -666,7 +864,7 @@ export function renderTree() {
   folderSec.append(ftitle);
 
   const orphanNotes = visible
-    .filter((n) => !n.folderId && !n.pinned)
+    .filter((n) => !n.folderId)
     .sort((a, b) => b.updated - a.updated);
 
   for (const n of orphanNotes) {
@@ -691,6 +889,7 @@ export function renderTree() {
 
   requestAnimationFrame(() => {
     updateActiveTreeIndicator(root);
+    restoreTreeFocusSoon();
   });
 
   renderTagCloud();
@@ -734,7 +933,7 @@ function folderRow(f, visibleNotes, depth) {
     .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
   const childNotes = visibleNotes
-    .filter((n) => n.folderId === f.id && !n.pinned)
+    .filter((n) => n.folderId === f.id)
     .sort((a, b) => b.updated - a.updated);
 
   const row = el('div', {
@@ -744,6 +943,12 @@ function folderRow(f, visibleNotes, depth) {
       (selected ? ' selected' : '') +
       (isAnchor ? ' selection-anchor' : '') +
       (isCurrentPath ? ' current-path' : ''),
+    dataset: {
+      treeKey: key,
+      folderId: f.id,
+      treeDepth: String(depth),
+    },
+    tabindex: '0',
     style: { paddingLeft: (12 + depth * 12) + 'px' },
     onclick: (e) => handleTreeSelectionClick(e, key, () => {
       toggleFolderAnimated(f.id, expanded);
@@ -871,9 +1076,15 @@ function folderRow(f, visibleNotes, depth) {
   return wrap;
 }
 
-function noteRow(n, depth = 0) {
+function noteRow(n, depth = 0, {
+  registerOrder = true,
+  pinnedMirror = false,
+} = {}) {
   const key = noteKey(n.id);
-  visibleTreeOrder.push(key);
+
+  if (registerOrder) {
+    visibleTreeOrder.push(key);
+  }
 
   const isActive = state.currentNoteId === n.id;
   const selected = isSelected(key);
@@ -889,11 +1100,13 @@ function noteRow(n, depth = 0) {
     '--tree-guide-opacity': depth > 0 ? '1' : '0',
   };
 
-  // Wichtig:
-  // Der globale CSS-Border `.tree-row.active { border-left-color: ... }`
-  // sitzt bei verschachtelten Notes optisch auf der falschen Ebene.
-  // Für aktive Notes deaktivieren wir ihn inline und zeichnen stattdessen
-  // einen korrekt eingerückten Marker.
+  /*
+    Wichtig:
+    Der globale CSS-Border `.tree-row.active { border-left-color: ... }`
+    sitzt bei verschachtelten Notes optisch auf der falschen Ebene.
+    Für aktive Notes deaktivieren wir ihn inline und zeichnen stattdessen
+    einen korrekt eingerückten Marker.
+  */
   if (isActive) {
     rowStyle.borderLeftColor = 'transparent';
   }
@@ -903,12 +1116,15 @@ function noteRow(n, depth = 0) {
       'tree-row note' +
       (isActive ? ' active' : '') +
       (selected ? ' selected' : '') +
-      (isAnchor ? ' selection-anchor' : ''),
+      (isAnchor ? ' selection-anchor' : '') +
+      (pinnedMirror ? ' pinned-mirror' : ''),
     dataset: {
       treeKey: key,
       noteId: n.id,
       treeDepth: String(depth),
+      pinnedMirror: pinnedMirror ? '1' : '',
     },
+    tabindex: '0',
     style: rowStyle,
     draggable: 'true',
     onclick: (e) => handleTreeSelectionClick(e, key, () => openNote(n.id)),
@@ -954,6 +1170,8 @@ function noteRow(n, depth = 0) {
         await store.notes.put(dropped);
       }
 
+      window.dispatchEvent(new CustomEvent('yanta-dashboard-refresh'));
+
       renderTree();
     },
   });
@@ -967,6 +1185,20 @@ function noteRow(n, depth = 0) {
 
   row.append(itemIcon(n.icon || (n.type === 'list' ? 'list' : 'file'), n.color));
   row.append(el('span', { class: 'label' }, n.title || 'Untitled'));
+
+  /*
+    In der Pinned-Section ist die Note nur ein Shortcut.
+    Wenn sie eigentlich in einem Folder liegt, zeigen wir optional den Folderpfad.
+  */
+  if (pinnedMirror && n.folderId) {
+    const path = folderPath(n.folderId);
+    const folder = state.folders.get(n.folderId);
+
+    row.append(el('span', {
+      class: 'tree-note-location',
+      title: path || folder?.name || 'Folder',
+    }, folder?.name || 'Folder'));
+  }
 
   // Per-note sync status dot
   const status = state.noteSyncStatus.get(n.id);
@@ -983,7 +1215,7 @@ function noteRow(n, depth = 0) {
     row.append(el('span', { class: 'live-dot', title: 'Live shared' }));
   }
 
-  if (n.pinned) {
+  if (n.pinned && !pinnedMirror) {
     row.append(el('span', { class: 'pin', title: 'Pinned' }, '●'));
   }
 
@@ -1052,6 +1284,60 @@ export function renderTagCloud() {
 
     c.append(p);
   }
+}
+
+// ============================================================
+// Inline rename helpers
+// ============================================================
+
+function findTreeNoteLabel(noteId) {
+  if (!noteId) return null;
+
+  return $('tree')?.querySelector(
+    `.tree-row.note[data-note-id="${CSS.escape(noteId)}"] .label`
+  ) || null;
+}
+
+function findTreeFolderLabel(folderId) {
+  if (!folderId) return null;
+
+  return $('tree')?.querySelector(
+    `.tree-folder-node[data-folder-id="${CSS.escape(folderId)}"] > .tree-row.folder .label`
+  ) || null;
+}
+
+function renameTreeNote(noteId) {
+  const note = state.notes.get(noteId);
+  const anchor = findTreeNoteLabel(noteId);
+
+  if (!note || !anchor) return;
+
+  inlineTextEdit(anchor, {
+    initial: note.title || 'Untitled',
+    placeholder: 'Note title',
+    emptyFallback: 'Untitled',
+
+    onCommit: async (value) => {
+      return await renameNoteById(noteId, value);
+    },
+  });
+}
+
+function renameTreeFolder(folderId) {
+  const folder = state.folders.get(folderId);
+  const anchor = findTreeFolderLabel(folderId);
+
+  if (!folder || !anchor) return;
+
+  inlineTextEdit(anchor, {
+    initial: folder.name || 'Folder',
+    placeholder: 'Folder name',
+    emptyFallback: 'Folder',
+
+    onCommit: async (value) => {
+      return await renameFolderById(folderId, value);
+    },
+  });
 }
 
 // ============================================================
@@ -1134,6 +1420,10 @@ function noteMenu(e, n) {
 
         await store.notes.put(n);
         renderTree();
+
+        window.dispatchEvent(new CustomEvent('yanta-note-updated', {
+          detail: { noteId: n.id },
+        }));
       },
     },
     {
@@ -1142,22 +1432,7 @@ function noteMenu(e, n) {
     },
     {
       label: 'Rename…',
-      action: async () => {
-        const t = prompt('Title:', n.title);
-        if (!t) return;
-
-        n.title = t.trim() || 'Untitled';
-        n.updated = Date.now();
-
-        await store.notes.put(n);
-
-        if (state.currentNoteId === n.id) {
-          $('noteTitle').value = n.title;
-        }
-
-        rebuildWikilinkIndex();
-        renderTree();
-      },
+      action: () => renameTreeNote(n.id),
     },
     {
       label: 'Move to folder…',
@@ -1187,6 +1462,11 @@ function noteMenu(e, n) {
 function folderMenu(e, f) {
   showMenu(e.clientX, e.clientY, [
     {
+      label: 'Open',
+      action: () => openFolderInDashboard(f.id, { push: true }),
+    },
+    'hr',
+    {
       label: 'New note here',
       action: () => newNote(f.id),
     },
@@ -1204,15 +1484,7 @@ function folderMenu(e, f) {
     },
     {
       label: 'Rename…',
-      action: async () => {
-        const t = prompt('Folder name:', f.name);
-        if (!t) return;
-
-        f.name = t.trim() || 'Folder';
-
-        await store.folders.put(f);
-        renderTree();
-      },
+      action: () => renameTreeFolder(f.id),
     },
     {
       label: 'Move to folder…',
@@ -1235,19 +1507,29 @@ function folderMenu(e, f) {
         for (const n of directNotes) {
           n.folderId = f.parentId || null;
           n.updated = Date.now();
+
           await store.notes.put(n);
+
+          window.dispatchEvent(new CustomEvent('yanta-note-updated', {
+            detail: { noteId: n.id },
+          }));
         }
 
         for (const child of directFolders) {
           child.parentId = f.parentId || null;
+          child.updated = Date.now();
+
           await store.folders.put(child);
         }
 
         await store.folders.del(f.id);
+
         state.folders.delete(f.id);
         state.expandedFolders.delete(f.id);
 
         selection.keys.delete(folderKey(f.id));
+
+        window.dispatchEvent(new CustomEvent('yanta-dashboard-refresh'));
 
         renderTree();
       },

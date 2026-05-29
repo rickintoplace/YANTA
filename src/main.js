@@ -65,6 +65,11 @@ import {
   copySyncCapsuleRecoveryKey,
   capsuleDebugSnapshot,
 } from './sync2/capsule.js';
+import {
+  parseAppHash,
+  pushNoteHistory,
+  replaceNoteHistory,
+} from './navigation.js';
 
 let sharePreviewLocked = false;
 
@@ -247,51 +252,62 @@ async function init() {
 
   renderTree();
 
-  // Open last note / hash / most recent / welcome.
-  // Mobile: Dashboard is the default surface unless a concrete note/share hash is requested.
-  if (!sharedOpen?.noteId) {
-    const rawHash = window.location.hash || '';
-    const hashId = decodeURIComponent(rawHash.slice(1));
-    const wantsDashboard = rawHash === '#dashboard';
+// Open initial route.
+// Dashboard is Home for normal app entry.
+// But direct note/share deep-links must respect browser Back:
+// Back should return to the previous website/history entry, not force Dashboard.
+if (!sharedOpen?.noteId) {
+  const route = parseAppHash();
 
-    const lastId = await store.settings.get('lastNoteId', null);
+  const explicitNoteId =
+    route.surface === 'note' &&
+    route.noteId &&
+    state.notes.has(route.noteId)
+      ? route.noteId
+      : null;
 
-    let toOpen = null;
+  if (explicitNoteId) {
+    /*
+      Direct note deep-link.
+      Wichtig:
+      Kein künstlicher Dashboard-Eintrag darunter.
+      Sonst wirkt YANTA wie ein "Back-Trap".
+    */
+    setNavSuppress(true);
 
-    if (hashId && hashId !== 'dashboard' && state.notes.has(hashId)) {
-      toOpen = state.notes.get(hashId);
+    try {
+      await openNote(explicitNoteId);
+    } finally {
+      setNavSuppress(false);
     }
 
-    if (toOpen) {
+    replaceNoteHistory(explicitNoteId);
+    hideDashboard({ push: false });
+  } else {
+    // Normal app entry => Dashboard/Home.
+    if (!state.notes.size) {
       setNavSuppress(true);
-      await openNote(toOpen.id);
-      hideDashboard({ push: false });
-      setNavSuppress(false);
-    } else if (isMobileViewport() || wantsDashboard) {
-      // Ensure there is at least welcome content on first launch.
-      if (!state.notes.size) {
-        setNavSuppress(true);
+
+      try {
         await createWelcomeNote();
+      } finally {
         setNavSuppress(false);
       }
-
-      showDashboard({ replace: true });
-    } else {
-      if (!toOpen && lastId && state.notes.has(lastId)) {
-        toOpen = state.notes.get(lastId);
-      }
-
-      if (!toOpen) {
-        toOpen = [...state.notes.values()].sort((a, b) => b.updated - a.updated)[0];
-      }
-
-      setNavSuppress(true);
-      if (toOpen) await openNote(toOpen.id);
-      else await createWelcomeNote();
-      hideDashboard({ push: false });
-      setNavSuppress(false);
     }
+
+    const folderId =
+      route.surface === 'dashboard' &&
+      route.folderId &&
+      state.folders.has(route.folderId)
+        ? route.folderId
+        : null;
+
+    showDashboard({
+      folderId,
+      replace: true,
+    });
   }
+}
 
   if (state.notes.size && state.currentNoteId) {
     // Trigger initial sync pull (if linked) — fire-and-forget.
@@ -300,46 +316,61 @@ async function init() {
     syncFull(false).catch(() => {});
   }
 
-  window.addEventListener('popstate', async (e) => {
-    const st = e.state || {};
-    const hash = decodeURIComponent((window.location.hash || '').slice(1));
+window.addEventListener('popstate', async (e) => {
+  const st = e.state || {};
+  const route = parseAppHash();
 
-    /*
-      Dashboard-History inklusive Folder-Zurücknavigation.
+  /*
+    Dashboard-History inklusive Folder-Zurücknavigation.
 
-      Wichtig:
-      Nicht showDashboardFromNote() direkt benutzen.
-      showDashboardFolderFromHistory() entscheidet selbst:
+    - Dashboard sichtbar + Folder zurück:
+      showDashboardFolderFromHistory() nutzt intern navigateDashboardFolder()
+      und erhält die Folder-Zoom-Transition.
 
-      - Wenn Dashboard schon sichtbar ist:
-        Folder -> Parent/Home per navigateDashboardFolder(..., push:false)
-        => Folder-Zoom-Back funktioniert.
+    - Note offen + Back:
+      Note -> Dashboard via showDashboardFromNote()
+      und erhält die Note-Zoom-Back-Transition.
+  */
+  if (st.surface === 'dashboard' || route.surface === 'dashboard') {
+    const folderId =
+      st.folderId !== undefined
+        ? st.folderId
+        : route.folderId;
 
-      - Wenn gerade eine Note offen ist:
-        Note -> Dashboard per showDashboardFromNote()
-        => bestehende Note-Zoom-Back Transition bleibt erhalten.
-    */
-    if (st.surface === 'dashboard' || hash === 'dashboard') {
-      await showDashboardFolderFromHistory(st.folderId || null);
-      return;
-    }
+    await showDashboardFolderFromHistory(
+      folderId && state.folders.has(folderId) ? folderId : null
+    );
 
-    const id = st.noteId || hash;
+    return;
+  }
 
-    if (id && state.notes.has(id)) {
-      setNavSuppress(true);
+  const id =
+    st.noteId ||
+    route.noteId ||
+    null;
 
-      try {
-        if (id !== state.currentNoteId) {
-          await openNote(id);
-        }
+  if (id && state.notes.has(id)) {
+    setNavSuppress(true);
 
-        hideDashboard({ push: false });
-      } finally {
-        setNavSuppress(false);
+    try {
+      if (id !== state.currentNoteId) {
+        await openNote(id);
       }
+
+      hideDashboard({ push: false });
+    } finally {
+      setNavSuppress(false);
     }
+
+    return;
+  }
+
+  // Defensive fallback: invalid route -> Home instead of blank state.
+  showDashboard({
+    folderId: null,
+    replace: true,
   });
+});
 
   bindEvents();
 }
@@ -653,6 +684,15 @@ function bindEvents() {
     if (n) exportNoteAsMd(n);
   });
   $('btn-images').addEventListener('click', () => { openImageModal(); });
+
+  document.querySelector('.brand')?.addEventListener('click', (e) => {
+    e.preventDefault();
+
+    showDashboard({
+      folderId: null,
+      push: true,
+    });
+  });
 
   // Sync
   $('vaultIndicator').addEventListener('click', (e) => { e.stopPropagation(); syncMenu(e.currentTarget, showMenu); });

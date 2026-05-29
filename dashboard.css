@@ -141,15 +141,12 @@
   margin: 0 auto;
 }
 
-.yanta-dashboard-section-title {
-  margin: 18px 2px 8px;
+.yanta-dashboard-body {
+  padding-top: 10px;
+}
 
-  color: var(--text-faint);
-
-  font-size: 11px;
-  font-weight: 800;
-  letter-spacing: 0.09em;
-  text-transform: uppercase;
+.yanta-dashboard-grid + .yanta-dashboard-grid {
+  margin-top: 10px;
 }
 
 /* Grid */
@@ -296,8 +293,51 @@
   align-items: center;
   gap: 8px;
 
+  min-height: 0;
+  max-height: 0;
+  padding: 0 11px;
+
+  opacity: 0;
+  overflow: hidden;
+  pointer-events: none;
+
+  transform: translateY(-4px);
+
+  transition:
+    max-height 180ms cubic-bezier(.2,.8,.2,1),
+    min-height 180ms cubic-bezier(.2,.8,.2,1),
+    padding 180ms cubic-bezier(.2,.8,.2,1),
+    opacity 140ms ease,
+    transform 180ms cubic-bezier(.2,.8,.2,1);
+}
+
+/* Dauerhaft sichtbare Header via Settings */
+.yanta-dashboard-page[data-notes-header="1"] .yanta-dash-card.note-card > .yanta-dash-card-head,
+.yanta-dashboard-page[data-folders-header="1"] .yanta-dash-card.folder-card > .yanta-dash-card-head,
+
+/* Temporär sichtbar während Rename */
+.yanta-dash-card.is-renaming > .yanta-dash-card-head {
   min-height: 40px;
+  max-height: 54px;
   padding: 10px 11px 5px;
+
+  opacity: 1;
+  pointer-events: auto;
+
+  transform: translateY(0);
+}
+
+.yanta-dash-card.is-renaming {
+  z-index: 8;
+  border-color: var(--accent);
+}
+
+.yanta-dash-card.is-renaming .yanta-dash-card-title {
+  overflow: visible;
+}
+
+.yanta-dash-card.is-renaming .yanta-inline-edit {
+  width: 100%;
 }
 
 .yanta-dash-card-icon {
@@ -543,7 +583,7 @@
   height: 100%;
   max-height: 160px;
 
-  object-fit: contain;
+  object-fit: cover;
 }
 
 /* Badges */
@@ -879,7 +919,7 @@
 }
 
 .yanta-dash-folder-mini-media.drawing img {
-  object-fit: contain;
+  object-fit: cover;
 }
 
 .yanta-dash-folder-mini-folder-row {

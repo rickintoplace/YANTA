@@ -1,0 +1,108 @@
+// ============================================================
+// YANTA — Navigation / History helpers
+// Central place for app routes:
+// - Dashboard/Home: #dashboard or #dashboard/<folderId>
+// - Note:          #<noteId>
+// ============================================================
+
+export function dashboardUrl(folderId = null) {
+  return folderId
+    ? `#dashboard/${encodeURIComponent(folderId)}`
+    : '#dashboard';
+}
+
+export function noteUrl(noteId) {
+  return '#' + encodeURIComponent(noteId);
+}
+
+export function dashboardState(folderId = null) {
+  return {
+    surface: 'dashboard',
+    folderId: folderId || null,
+  };
+}
+
+export function noteState(noteId) {
+  return {
+    surface: 'note',
+    noteId,
+  };
+}
+
+export function pushDashboardHistory(folderId = null) {
+  history.pushState(
+    dashboardState(folderId),
+    '',
+    dashboardUrl(folderId)
+  );
+}
+
+export function replaceDashboardHistory(folderId = null) {
+  history.replaceState(
+    dashboardState(folderId),
+    '',
+    dashboardUrl(folderId)
+  );
+}
+
+export function pushNoteHistory(noteId) {
+  history.pushState(
+    noteState(noteId),
+    '',
+    noteUrl(noteId)
+  );
+}
+
+export function replaceNoteHistory(noteId) {
+  history.replaceState(
+    noteState(noteId),
+    '',
+    noteUrl(noteId)
+  );
+}
+
+export function parseAppHash(hash = window.location.hash) {
+  const raw = decodeURIComponent(String(hash || '').replace(/^#/, ''));
+
+  if (!raw) {
+    return {
+      surface: null,
+      noteId: null,
+      folderId: null,
+    };
+  }
+
+  if (raw === 'dashboard') {
+    return {
+      surface: 'dashboard',
+      noteId: null,
+      folderId: null,
+    };
+  }
+
+  if (raw.startsWith('dashboard/')) {
+    return {
+      surface: 'dashboard',
+      noteId: null,
+      folderId: raw.slice('dashboard/'.length) || null,
+    };
+  }
+
+  if (raw.startsWith('share=') || raw.startsWith('share2=')) {
+    return {
+      surface: 'share',
+      noteId: null,
+      folderId: null,
+    };
+  }
+
+  return {
+    surface: 'note',
+    noteId: raw,
+    folderId: null,
+  };
+}
+
+export function currentHistorySurface() {
+  return history.state?.surface || parseAppHash().surface || null;
+}

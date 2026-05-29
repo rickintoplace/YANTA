@@ -165,6 +165,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .brand {
   display: flex; align-items: center; gap: 4px;
   font-weight: 700; font-size: 14px; letter-spacing: 0.02em;
+  cursor: pointer;
 }
 .brand-mark {
     width: 50px;
@@ -256,6 +257,55 @@ button, input, select, textarea { font: inherit; color: inherit; }
   outline-offset: -1px;
 }
 .tree-row .pin { color: var(--yellow); font-size: 10px; }
+
+/* Pinned tree rows are mirrors/shortcuts, not moved items */
+.tree-section-pinned {
+  border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+  margin-bottom: 3px;
+  padding-bottom: 5px;
+}
+
+.tree-row.pinned-mirror {
+  color: var(--text-dim);
+}
+
+.tree-row.pinned-mirror .tree-item-icon {
+  color: var(--item-color, var(--accent));
+}
+
+.tree-row.pinned-mirror .label {
+  color: var(--text);
+}
+
+.tree-note-location {
+  max-width: 82px;
+  flex: 0 1 auto;
+
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+
+  padding: 1px 6px;
+  border-radius: 999px;
+
+  border: 1px solid var(--border);
+  background: var(--bg-elev-2);
+
+  color: var(--text-faint);
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.tree-row.pinned-mirror:hover .tree-note-location {
+  color: var(--text-dim);
+  border-color: var(--border-strong);
+}
+
+/* In collapsed sidebar nur das Icon zeigen */
+.app.sidebar-collapsed .tree-row.pinned-mirror .tree-note-location {
+  display: none !important;
+}
+
 .tree-row .menu-trigger {
   visibility: hidden; padding: 0 4px; color: var(--text-faint);
 }
@@ -3698,42 +3748,4 @@ input.yanta-task-checkbox {
       8px
       max(10px, env(safe-area-inset-left));
   }
-}
-
-.yanta-dash-placeholder {
-  grid-row: span var(--dash-row-span, 18);
-
-  min-width: 0;
-  min-height: 0;
-
-  border-radius: 16px;
-  border: 2px dashed color-mix(in srgb, var(--accent) 55%, var(--border));
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
-
-  pointer-events: none;
-  transform: translateZ(0);
-}
-
-.dashboard.is-card-dragging {
-  cursor: grabbing;
-}
-
-.dashboard.is-card-dragging .yanta-dash-card {
-  user-select: none;
-  -webkit-user-select: none;
-}
-
-.yanta-dash-card.drag-source {
-  opacity: 1;
-  visibility: hidden;
-}
-
-.yanta-dash-card.drag-clone {
-  opacity: 0.97;
-  transform: none !important;
-  box-shadow: 0 18px 45px rgba(0,0,0,0.28);
-  border-color: var(--accent);
-  pointer-events: none;
-  touch-action: none;
-  transition: none !important;
 }

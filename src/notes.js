@@ -34,6 +34,10 @@ import {
   vaultFoldersMap,
   vaultTombstonesMap,
 } from './sync2/vault-doc.js';
+import {
+  pushNoteHistory,
+  currentHistorySurface,
+} from './navigation.js';
 
 let _navSuppress = false;
 let _unsubDoc = null;
@@ -311,25 +315,63 @@ export async function newFolder(parentId = null) {
 
 // ---------------- open / save / delete ------------------------
 export async function openNote(id) {
-  if (state.currentNoteId === id) return;
   const note = state.notes.get(id);
   if (!note) return;
+
+  /*
+    Auch wenn dieselbe Note schon im Speicher currentNoteId ist,
+    kann die aktuelle Surface "dashboard" sein.
+
+    Beispiel:
+    - App startet mit Dashboard
+    - currentNoteId ist noch Welcome/LastNote
+    - User öffnet genau diese Note vom Dashboard
+    -> Früher return; kein Note-History-State; Back verlässt App.
+    -> Jetzt wird trotzdem ein Note-State erzeugt.
+  */
+  if (state.currentNoteId === id) {
+    state.surface = 'note';
+
+    if (!_navSuppress && currentHistorySurface() !== 'note') {
+      pushNoteHistory(id);
+    }
+
+    window.dispatchEvent(new CustomEvent('yanta-note-opened', {
+      detail: { noteId: id },
+    }));
+
+    return;
+  }
+
   // Tear down previous subscription / editor
-  if (_unsubDoc) { _unsubDoc(); _unsubDoc = null; }
+  if (_unsubDoc) {
+    _unsubDoc();
+    _unsubDoc = null;
+  }
+
   state.currentNoteId = id;
+  state.surface = 'note';
+
   store.settings.set('lastNoteId', id);
-  if (!_navSuppress) history.pushState({ noteId: id }, '', '#' + encodeURIComponent(id));
+
+  if (!_navSuppress) {
+    pushNoteHistory(id);
+  }
 
   // Ensure Y.Doc + migration done before mount
   await migrateBodyIfNeeded(note);
+
   const entry = getNoteDoc(id);
   await entry.ready;
 
   $('noteTitle').value = note.title || '';
+
   // Mount editor (replaces previous instance)
   const host = $('editor');
   host.replaceChildren();
+
   mountEditor(host, { noteId: id });
+
   renderChips();
   updatePinIcon();
   renderShareIndicator();
@@ -362,8 +404,8 @@ export async function openNote(id) {
       note.updated = Date.now();
       store.notes.put(note);
 
-      // Yjs/y-indexeddb persistiert das Drawing sowieso.
-      // Optional Sync-Mirror/Snapshot anstoßen, aber Footer nicht dauernd auf dirty setzen.
+      // Yjs/y-indexeddb persists the drawing anyway.
+      // Optional sync mirror/snapshot trigger, but don't constantly dirty footer.
       scheduleMirror(note);
 
       return;

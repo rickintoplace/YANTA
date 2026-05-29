@@ -10,7 +10,20 @@ import {
   openSettings,
   cycleAppearanceMode,
 } from './settings.js';
-import { openNote, newNote, newFolder, saveCurrentNote, deleteCurrentNote, togglePin, createWelcomeNote, rebuildWikilinkIndex, setNavSuppress, addTag, createNoteWithTitle } from './notes.js';
+import {
+  openNote,
+  newNote,
+  newFolder,
+  saveCurrentNote,
+  deleteCurrentNote,
+  togglePin,
+  createWelcomeNote,
+  rebuildWikilinkIndex,
+  setNavSuppress,
+  addTag,
+  createNoteWithTitle,
+  toggleTaskLineInNote,
+} from './notes.js';
 import { renderTree, renderTagCloud, showMenu, closeMenu, currentFolderForNew } from './tree.js';
 import { renderBacklinks, renderOutline, setupWikilinkHover, handleWikilinkClick, openPalette, closePalette, buildCommandList, paletteMove, paletteAccept, paletteFilter } from './features.js';
 import { openImageModal, closeImageModal, setupImage, pickImageFile, cleanupUnusedImages, insertImageAsRef } from './image.js';
@@ -29,6 +42,13 @@ import {
   installVaultStoreBridge,
   seedVaultFromLocalState,
 } from './sync2/store-bridge.js';
+import {
+  setupDashboard,
+  showDashboard,
+  showDashboardFromNote,
+  hideDashboard,
+  isDashboardVisible,
+} from './dashboard.js';
 
 import {
   vaultJsonSnapshot,
@@ -183,6 +203,7 @@ async function init() {
     openIconInsertPicker,
     openDraw: createDrawingAndInsert,
     openGraph,
+    openDashboard: () => showDashboard({ push: true }),
     openCitationManager,
     exportAsZip,
     exportNoteAsMd,
@@ -203,6 +224,7 @@ async function init() {
   setupDraw();
   setupCitations();
   setupFormatToolbar();
+  setupDashboard();
   await syncRestore();
   let sharedOpen = null;
 
@@ -224,21 +246,50 @@ async function init() {
 
   renderTree();
 
-  // Open last note / hash / most recent / welcome
-  // Nur ausführen, wenn nicht gerade ein Share-Link geöffnet wurde.
+  // Open last note / hash / most recent / welcome.
+  // Mobile: Dashboard is the default surface unless a concrete note/share hash is requested.
   if (!sharedOpen?.noteId) {
-    const hashId = decodeURIComponent((window.location.hash || '').slice(1));
+    const rawHash = window.location.hash || '';
+    const hashId = decodeURIComponent(rawHash.slice(1));
+    const wantsDashboard = rawHash === '#dashboard';
+
     const lastId = await store.settings.get('lastNoteId', null);
 
     let toOpen = null;
-    if (hashId && state.notes.has(hashId)) toOpen = state.notes.get(hashId);
-    if (!toOpen && lastId && state.notes.has(lastId)) toOpen = state.notes.get(lastId);
-    if (!toOpen) toOpen = [...state.notes.values()].sort((a, b) => b.updated - a.updated)[0];
 
-    setNavSuppress(true);
-    if (toOpen) await openNote(toOpen.id);
-    else await createWelcomeNote();
-    setNavSuppress(false);
+    if (hashId && hashId !== 'dashboard' && state.notes.has(hashId)) {
+      toOpen = state.notes.get(hashId);
+    }
+
+    if (toOpen) {
+      setNavSuppress(true);
+      await openNote(toOpen.id);
+      hideDashboard({ push: false });
+      setNavSuppress(false);
+    } else if (isMobileViewport() || wantsDashboard) {
+      // Ensure there is at least welcome content on first launch.
+      if (!state.notes.size) {
+        setNavSuppress(true);
+        await createWelcomeNote();
+        setNavSuppress(false);
+      }
+
+      showDashboard({ replace: true });
+    } else {
+      if (!toOpen && lastId && state.notes.has(lastId)) {
+        toOpen = state.notes.get(lastId);
+      }
+
+      if (!toOpen) {
+        toOpen = [...state.notes.values()].sort((a, b) => b.updated - a.updated)[0];
+      }
+
+      setNavSuppress(true);
+      if (toOpen) await openNote(toOpen.id);
+      else await createWelcomeNote();
+      hideDashboard({ push: false });
+      setNavSuppress(false);
+    }
   }
 
   if (state.notes.size && state.currentNoteId) {
@@ -249,10 +300,24 @@ async function init() {
   }
 
   window.addEventListener('popstate', (e) => {
-    const id = (e.state && e.state.noteId) || decodeURIComponent((window.location.hash || '').slice(1));
+    const st = e.state || {};
+    const hash = decodeURIComponent((window.location.hash || '').slice(1));
+
+    if (st.surface === 'dashboard' || hash === 'dashboard') {
+      showDashboardFromNote(state.currentNoteId, {
+        folderId: st.folderId || null,
+        replace: true,
+      });
+      return;
+    }
+
+    const id = st.noteId || hash;
+
     if (id && state.notes.has(id) && id !== state.currentNoteId) {
       setNavSuppress(true);
-      openNote(id).finally(() => setNavSuppress(false));
+      openNote(id)
+        .then(() => hideDashboard({ push: false }))
+        .finally(() => setNavSuppress(false));
     }
   });
 
@@ -583,9 +648,20 @@ function bindEvents() {
   $('search').addEventListener('input', (e) => { state.searchQuery = e.target.value; renderTree(); });
 
   // View toggles
-  $('btn-view-edit').addEventListener('click', () => setView('edit'));
-  $('btn-view-split').addEventListener('click', () => setView('split'));
-  $('btn-view-preview').addEventListener('click', () => setView('preview'));
+  $('btn-view-edit').addEventListener('click', () => {
+    hideDashboard({ push: false });
+    setView('edit');
+  });
+
+  $('btn-view-split').addEventListener('click', () => {
+    hideDashboard({ push: false });
+    setView('split');
+  });
+
+  $('btn-view-preview').addEventListener('click', () => {
+    hideDashboard({ push: false });
+    setView('preview');
+  });
 
   setupMobileSidebar();
   setupDesktopSidebarCollapse();
@@ -639,7 +715,7 @@ function bindEvents() {
       ? e.target.checked
       : !cb.checked;
 
-    toggleTaskLine(line, checked);
+    toggleTaskLineInNote(state.currentNoteId, line, checked);
   });
 
   // Global keyboard
@@ -830,35 +906,6 @@ function openNativeColorPickerForRange({ from, to, color }) {
   }
 }
 
-function toggleTaskLine(lineIndex, checked) {
-  if (!state.currentNoteId) return;
-
-  const { doc } = getNoteDoc(state.currentNoteId);
-  const ytext = doc.getText('markdown');
-
-  const text = ytext.toString();
-  const lines = text.split('\n');
-  const line = lines[lineIndex];
-  if (!line) return;
-
-  const m = /^(\s*[-*+]\s+\[)([ xX])(\])/.exec(line);
-  if (!m) return;
-
-  let lineStart = 0;
-  for (let i = 0; i < lineIndex; i++) {
-    lineStart += lines[i].length + 1;
-  }
-
-  const target = lineStart + m[1].length;
-  const newChar = checked ? 'x' : ' ';
-
-  // Wichtig: delete + insert als EIN Update, nicht zwei separate Updates.
-  doc.transact(() => {
-    ytext.delete(target, 1);
-    ytext.insert(target, newChar);
-  }, 'preview-task-toggle');
-}
-
 function handleGlobalKey(e) {
   const meta = e.ctrlKey || e.metaKey;
   if (meta && e.key === 'n') { e.preventDefault(); newNote(currentFolderForNew()); }
@@ -868,6 +915,10 @@ function handleGlobalKey(e) {
   else if (meta && e.key === 'o') { e.preventDefault(); openPalette('notes'); }
   else if (meta && e.key === 'p') { e.preventDefault(); openPalette('commands'); }
   else if (meta && e.key === 'g') { e.preventDefault(); openGraph(); }
+  else if (meta && e.key.toLowerCase() === 'h') {
+    e.preventDefault();
+    showDashboard({ push: true });
+  }
   else if (meta && e.key === 'e') {
     e.preventDefault();
     const n = state.notes.get(state.currentNoteId);

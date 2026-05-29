@@ -336,12 +336,32 @@ export function openPalette(mode = 'commands') {
 export function closePalette() { $('palette').hidden = true; palette.items = []; }
 
 let commandList = [];
-export function buildCommandList({ openImageModal, openIconInsertPicker, openDraw, openGraph, openCitationManager, exportAsZip, exportNoteAsMd, exportBundle, exportEveryNoteMd, openSyncSetup, syncFull, syncDisconnect, cleanupUnusedImages, openShareModal, stopSharing, importFiles, importFolder }) {
+  export function buildCommandList({
+    openImageModal,
+    openIconInsertPicker,
+    openDraw,
+    openGraph,
+    openDashboard,
+    openCitationManager,
+    exportAsZip,
+    exportNoteAsMd,
+    exportBundle,
+    exportEveryNoteMd,
+    openSyncSetup,
+    syncFull,
+    syncDisconnect,
+    cleanupUnusedImages,
+    openShareModal,
+    stopSharing,
+    importFiles,
+    importFolder,
+  }) {
   commandList = [
     { label: 'New note', icon: 'plus', hint: 'Ctrl+N', action: () => newNote(currentFolderForNew()) },
     { label: 'New shopping/checklist (live-friendly)', icon: 'shopping-cart', action: () => newNote(currentFolderForNew(), 'list') },
     { label: 'New folder', icon: 'folder-plus', action: () => newFolder(null) },
     { label: 'Quick switcher (jump to note)', icon: 'file', hint: 'Ctrl+O', action: () => openPalette('notes') },
+    { label: 'Open dashboard', icon: 'layout-dashboard', hint: 'Ctrl+H', action: openDashboard },
     { label: 'Open graph view', icon: 'network', hint: 'Ctrl+G', action: openGraph },
     { label: 'Search notes', icon: 'search', hint: 'Ctrl+K', action: () => $('search').focus() },
     { label: 'Toggle preview/edit/split', icon: 'eye', hint: 'Ctrl+/', action: () => window.dispatchEvent(new CustomEvent('yanta-cycle-view')) },

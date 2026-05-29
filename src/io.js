@@ -17,6 +17,9 @@ export function noteToFrontmatter(n) {
   if (n.type && n.type !== 'markdown') meta.type = n.type;
   if (n.tags?.length) meta.tags = n.tags;
   if (n.pinned) meta.pinned = true;
+  if (n.dashboardOrder != null) meta.dashboardOrder = n.dashboardOrder;
+  if (n.dashboardHeight != null) meta.dashboardHeight = n.dashboardHeight;
+  if (n.dashboardPinnedOrder != null) meta.dashboardPinnedOrder = n.dashboardPinnedOrder;
   if (n.folderId) {
     const folder = state.folders.get(n.folderId);
     if (folder) meta.folder = folder.name;
@@ -192,6 +195,9 @@ export async function importItems(items) {
           created: meta.created ? Date.parse(meta.created) || fileTime : fileTime,
           updated: meta.updated ? Date.parse(meta.updated) || fileTime : fileTime,
         };
+        if (meta.dashboardOrder != null) note.dashboardOrder = Number(meta.dashboardOrder);
+        if (meta.dashboardHeight != null) note.dashboardHeight = Number(meta.dashboardHeight);
+        if (meta.dashboardPinnedOrder != null) note.dashboardPinnedOrder = Number(meta.dashboardPinnedOrder);
         if (meta.icon) note.icon = meta.icon;
         if (meta.color) note.color = meta.color;
         state.notes.set(id, note);
@@ -492,8 +498,21 @@ export async function importZipBlob(blob) {
       icon: meta.icon || undefined,
       color: meta.color || undefined,
       created: meta.created ? Date.parse(meta.created) || Date.now() : Date.now(),
-      updated: Date.now()
+      updated: Date.now(),
     };
+    
+    if (meta.dashboardOrder != null) {
+      note.dashboardOrder = Number(meta.dashboardOrder);
+    }
+    
+    if (meta.dashboardHeight != null) {
+      note.dashboardHeight = Number(meta.dashboardHeight);
+    }
+    
+    if (meta.dashboardPinnedOrder != null) {
+      note.dashboardPinnedOrder = Number(meta.dashboardPinnedOrder);
+    }
+    
     state.notes.set(id, note);
     await store.notes.put(note);
     const entry = getNoteDoc(id);

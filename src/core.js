@@ -497,6 +497,8 @@ export const state = {
   activeTagFilter: null,
   searchQuery: '',
   view: 'split',
+  surface: 'note',
+  dashboardFolderId: null,
   theme: 'auto',
   dirty: false,
   // Sync status per note: 'synced' | 'local' | 'remote' | 'syncing' | 'conflict'

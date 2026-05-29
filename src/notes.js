@@ -384,6 +384,10 @@ export async function openNote(id) {
   });
 
   preloadImagesFor(noteMarkdown(id));
+
+  window.dispatchEvent(new CustomEvent('yanta-note-opened', {
+    detail: { noteId: id },
+  }));
 }
 
 function scrollCurrentNoteToTop() {
@@ -521,6 +525,9 @@ export async function saveCurrentNote() {
   syncWriteNote(note).catch(() => {});
   markSaved();
   renderTree();
+  window.dispatchEvent(new CustomEvent('yanta-note-updated', {
+    detail: { noteId: note.id },
+  }));
 }
 
 export async function deleteCurrentNote() {
@@ -547,6 +554,9 @@ export function togglePin() {
   store.notes.put(n);
   updatePinIcon();
   renderTree();
+  window.dispatchEvent(new CustomEvent('yanta-note-updated', {
+    detail: { noteId: n.id },
+  }));
 }
 export function updatePinIcon() {
   const btn = $('btn-pin');
@@ -579,6 +589,9 @@ export function addTag(tag) {
     updateSearchIndexFor(n);
     renderChips();
     renderTagCloud();
+    window.dispatchEvent(new CustomEvent('yanta-note-updated', {
+      detail: { noteId: n.id },
+    }));
   }
 }
 export function removeTag(tag) {
@@ -589,6 +602,9 @@ export function removeTag(tag) {
   updateSearchIndexFor(n);
   renderChips();
   renderTagCloud();
+  window.dispatchEvent(new CustomEvent('yanta-note-updated', {
+    detail: { noteId: n.id },
+  }));
 }
 
 // ---------------- wikilink index ------------------------------
@@ -652,6 +668,50 @@ function updateWordCount(md) {
   const words = text ? text.split(/\s+/).length : 0;
   $('statWords').textContent = words + ' word' + (words === 1 ? '' : 's');
   $('statChars').textContent = md.length + ' char' + (md.length === 1 ? '' : 's');
+}
+
+export async function toggleTaskLineInNote(noteId, lineIndex, checked) {
+  if (!noteId) return false;
+
+  const note = state.notes.get(noteId);
+  if (!note) return false;
+
+  const { doc } = getNoteDoc(noteId);
+  const ytext = doc.getText('markdown');
+
+  const text = ytext.toString();
+  const lines = text.split('\n');
+
+  const line = lines[lineIndex];
+  if (line == null) return false;
+
+  const m = /^(\s*[-*+]\s+\[)([ xX])(\])/.exec(line);
+  if (!m) return false;
+
+  let lineStart = 0;
+
+  for (let i = 0; i < lineIndex; i++) {
+    lineStart += lines[i].length + 1;
+  }
+
+  const target = lineStart + m[1].length;
+  const newChar = checked ? 'x' : ' ';
+
+  doc.transact(() => {
+    ytext.delete(target, 1);
+    ytext.insert(target, newChar);
+  }, 'task-toggle');
+
+  note.updated = Date.now();
+  await store.notes.put(note);
+
+  updateSearchIndexFor(note);
+
+  window.dispatchEvent(new CustomEvent('yanta-note-updated', {
+    detail: { noteId },
+  }));
+
+  return true;
 }
 
 // ---------------- welcome -------------------------------------

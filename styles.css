@@ -2483,7 +2483,7 @@ input.yanta-task-checkbox {
     height: 100svh;
     transform: translateX(-104%);
     transition: transform 0.18s ease;
-    box-shadow: 18px 0 50px rgba(0, 0, 0, 0.35);
+    /* box-shadow: 18px 0 50px rgba(0, 0, 0, 0.35); */
     border-right: 1px solid var(--border);
   }
 

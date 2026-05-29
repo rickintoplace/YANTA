@@ -1510,6 +1510,8 @@ function renderFolderMiniDrawing(noteId, block) {
   
     const preview = await getDashboardPreview(note);
 
+    host.classList.toggle('is-media-only', !!preview.mediaOnly);
+
     const contentMaxH = autoHeightForPreview(preview);
     card.dataset.contentMaxHeight = String(contentMaxH);
   
@@ -1667,21 +1669,44 @@ function renderFolderMiniDrawing(noteId, block) {
     return wrap;
   }
   
-  function renderDashboardVideo(block) {
-    const wrap = el('div', { class: 'yanta-dash-media yanta-dash-video' });
-  
-    const iframe = el('iframe', {
-      src: block.embed,
-      allow: 'autoplay; encrypted-media; picture-in-picture',
-      allowfullscreen: true,
-      frameborder: '0',
+function renderDashboardVideo(block) {
+  const thumb =
+    block.thumb ||
+    videoThumbnailUrl(block.url || '') ||
+    videoThumbnailUrl(block.embed || '');
+
+  const wrap = el('div', {
+    class: 'yanta-dash-media yanta-dash-video-thumb',
+    title: block.title || 'Video',
+  });
+
+  if (thumb) {
+    const img = el('img', {
+      src: thumb,
+      alt: block.title || 'Video',
       loading: 'lazy',
+      draggable: 'false',
     });
-  
-    wrap.append(iframe);
-  
-    return wrap;
+
+    const play = el('div', {
+      class: 'yanta-dash-video-play',
+      'aria-hidden': 'true',
+    });
+
+    play.innerHTML = lucide('play', 22);
+
+    wrap.append(img, play);
+  } else {
+    wrap.innerHTML = `
+      <div class="yanta-dash-video-fallback">
+        ${lucide('play', 24)}
+        <span>${block.title || 'Video'}</span>
+      </div>
+    `;
   }
+
+  return wrap;
+}
   
   function renderDashboardDrawing(noteId, block) {
     const wrap = el('div', { class: 'yanta-dash-media yanta-dash-drawing-thumb' });
@@ -1770,28 +1795,62 @@ function renderFolderMiniDrawing(noteId, block) {
   
   function extractDashboardPreview(md, note) {
     const lines = String(md || '').split('\n');
-  
+
     const blocks = [];
     const badges = [];
-  
+
     let hasCitation = false;
     let hasLinks = false;
-    
+
     let inFence = false;
-  
+
+    let meaningfulCount = 0;
+    let nonMediaContent = false;
+    let firstMeaningfulType = '';
+
+    const pushBlock = (block) => {
+      if (blocks.length < 8) {
+        blocks.push(block);
+      }
+    };
+
+    const markMeaningful = (type) => {
+      meaningfulCount++;
+
+      if (!firstMeaningfulType) {
+        firstMeaningfulType = type;
+      }
+
+      if (!['image', 'video', 'drawing'].includes(type)) {
+        nonMediaContent = true;
+      }
+    };
+
     for (let i = 0; i < lines.length; i++) {
-      if (blocks.length >= 8) break;
-  
       const raw = lines[i] || '';
       const line = raw.trim();
-  
+
       if (/^```/.test(line)) {
         inFence = !inFence;
+        markMeaningful('text');
         continue;
       }
-  
-      if (inFence || !line) continue;
-  
+
+      if (inFence) {
+        if (line) {
+          markMeaningful('text');
+
+          pushBlock({
+            type: 'text',
+            text: cleanInlineText(line).slice(0, 220),
+          });
+        }
+
+        continue;
+      }
+
+      if (!line) continue;
+
       if (/\[\^([^\]\s]+)\]/.test(raw)) {
         hasCitation = true;
       }
@@ -1799,54 +1858,111 @@ function renderFolderMiniDrawing(noteId, block) {
       if (/\[\[[^\]]+\]\]/.test(raw)) {
         hasLinks = true;
       }
-  
+
       const drawing = /^\s*draw:\/\/([a-z0-9_-]+)\s*$/i.exec(raw);
+
       if (drawing) {
-        blocks.push({
+        markMeaningful('drawing');
+
+        pushBlock({
           type: 'drawing',
           id: drawing[1],
         });
+
         continue;
       }
-  
+
       const image = /^!\[([^\]]*)\]\(([^)\s]+)(?:\s+"[^"]*")?\)(?:\{[^}\n]*\})?\s*$/.exec(raw);
 
       if (image) {
         const embed = videoEmbedUrl(image[2]);
-  
+
         if (embed) {
-          blocks.push({
+          markMeaningful('video');
+
+          pushBlock({
             type: 'video',
             embed,
+            thumb: videoThumbnailUrl(image[2]),
+            title: cleanInlineText(image[1]) || 'Video',
+            url: image[2],
           });
         } else {
-          blocks.push({
+          markMeaningful('image');
+
+          pushBlock({
             type: 'image',
             alt: cleanInlineText(image[1]),
             url: image[2],
           });
         }
-  
+
         continue;
       }
-  
+
+      const videoLink = /^\[([^\]]*)\]\((https?:\/\/[^)\s]+)(?:\s+"[^"]*")?\)\s*$/.exec(raw);
+
+      if (videoLink) {
+        const embed = videoEmbedUrl(videoLink[2]);
+
+        if (embed) {
+          markMeaningful('video');
+
+          pushBlock({
+            type: 'video',
+            embed,
+            thumb: videoThumbnailUrl(videoLink[2]),
+            title: cleanInlineText(videoLink[1]) || 'Video',
+            url: videoLink[2],
+          });
+
+          continue;
+        }
+      }
+
+      /*
+        Optional: reine YouTube/Vimeo-URL als Video behandeln.
+        Dadurch zählt eine Note mit nur einer Video-URL ebenfalls als Media-only.
+      */
+      if (/^https?:\/\/\S+$/i.test(line)) {
+        const embed = videoEmbedUrl(line);
+
+        if (embed) {
+          markMeaningful('video');
+
+          pushBlock({
+            type: 'video',
+            embed,
+          });
+
+          continue;
+        }
+      }
+
       const task = /^(\s*[-*+]\s+\[)([ xX])(\]\s+)(.*)$/.exec(raw);
+
       if (task) {
-        blocks.push({
+        markMeaningful('task');
+
+        pushBlock({
           type: 'task',
           line: i,
           checked: task[2].toLowerCase() === 'x',
           text: cleanInlineText(task[4]).slice(0, 160),
         });
+
         continue;
       }
-  
+
       const heading = /^(#{1,6})\s+(.*)$/.exec(line);
+
       if (heading) {
         const text = cleanInlineText(heading[2]);
 
         if (text) {
-          blocks.push({
+          markMeaningful('heading');
+
+          pushBlock({
             type: 'heading',
             level: Math.min(6, heading[1].length),
             text,
@@ -1855,90 +1971,166 @@ function renderFolderMiniDrawing(noteId, block) {
 
         continue;
       }
-  
+
       const quote = /^\s*>\s?(.*)$/.exec(raw);
+
       if (quote) {
         const text = cleanInlineText(quote[1]);
-  
+
         if (text) {
-          blocks.push({
+          markMeaningful('quote');
+
+          pushBlock({
             type: 'quote',
             text: text.slice(0, 180),
           });
         }
-  
+
         continue;
       }
-  
+
       const ul = /^\s*[-*+]\s+(.*)$/.exec(raw);
+
       if (ul) {
         const text = cleanInlineText(ul[1]);
-  
+
         if (text) {
-          blocks.push({
+          markMeaningful('list');
+
+          pushBlock({
             type: 'list',
             text: text.slice(0, 140),
           });
         }
-  
+
         continue;
       }
-  
+
       const ol = /^\s*\d+\.\s+(.*)$/.exec(raw);
+
       if (ol) {
         const text = cleanInlineText(ol[1]);
-  
+
         if (text) {
-          blocks.push({
+          markMeaningful('list');
+
+          pushBlock({
             type: 'list',
             text: text.slice(0, 140),
           });
         }
-  
+
         continue;
       }
-  
-      if (/^\|.*\|$/.test(line)) continue;
-      if (/^\[\^[^\]]+\]:/.test(line)) continue;
-  
+
+      if (/^\|.*\|$/.test(line)) {
+        markMeaningful('text');
+        continue;
+      }
+
+      if (/^\[\^[^\]]+\]:/.test(line)) {
+        markMeaningful('text');
+        continue;
+      }
+
       const text = cleanInlineText(line);
-  
+
       if (text) {
-        blocks.push({
+        markMeaningful('text');
+
+        pushBlock({
           type: 'text',
           text: text.slice(0, 220),
         });
       }
     }
-  
+
     if (hasLinks) badges.push({ icon: 'link', label: 'Links' });
     if (hasCitation) badges.push({ icon: 'quote', label: 'Citation' });
-  
+
+    const mediaOnly =
+      meaningfulCount === 1 &&
+      !nonMediaContent &&
+      ['image', 'video', 'drawing'].includes(firstMeaningfulType);
+
     return {
       blocks,
       badges,
+      mediaOnly,
     };
   }
-  
-  function videoEmbedUrl(url) {
-    const s = String(url || '');
-  
-    let m;
-  
-    if ((m = /(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{6,})/.exec(s))) {
-      return `https://www.youtube-nocookie.com/embed/${m[1]}`;
+
+function youtubeVideoId(url) {
+  const s = String(url || '').trim();
+
+  try {
+    const u = new URL(s, location.href);
+    const host = u.hostname.replace(/^www\./, '');
+
+    if (
+      host === 'youtube.com' ||
+      host === 'm.youtube.com' ||
+      host === 'youtube-nocookie.com'
+    ) {
+      if (u.pathname === '/watch') {
+        return u.searchParams.get('v') || '';
+      }
+
+      const embed = /^\/embed\/([a-zA-Z0-9_-]{6,})/.exec(u.pathname);
+      if (embed) return embed[1];
+
+      const shorts = /^\/shorts\/([a-zA-Z0-9_-]{6,})/.exec(u.pathname);
+      if (shorts) return shorts[1];
     }
-  
-    if ((m = /youtube\.com\/embed\/([a-zA-Z0-9_-]{6,})/.exec(s))) {
-      return `https://www.youtube-nocookie.com/embed/${m[1]}`;
+
+    if (host === 'youtu.be') {
+      return u.pathname.replace(/^\//, '').split('/')[0] || '';
     }
-  
-    if ((m = /vimeo\.com\/(\d+)/.exec(s))) {
-      return `https://player.vimeo.com/video/${m[1]}`;
-    }
-  
-    return '';
+  } catch {}
+
+  let m;
+
+  if ((m = /(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{6,})/.exec(s))) {
+    return m[1];
   }
+
+  if ((m = /(?:youtube\.com|youtube-nocookie\.com)\/embed\/([a-zA-Z0-9_-]{6,})/.exec(s))) {
+    return m[1];
+  }
+
+  if ((m = /youtube\.com\/shorts\/([a-zA-Z0-9_-]{6,})/.exec(s))) {
+    return m[1];
+  }
+
+  return '';
+}
+
+function videoEmbedUrl(url) {
+  const s = String(url || '').trim();
+
+  const yt = youtubeVideoId(s);
+  if (yt) return `https://www.youtube-nocookie.com/embed/${yt}`;
+
+  let m;
+
+  if ((m = /vimeo\.com\/(\d+)/.exec(s))) {
+    return `https://player.vimeo.com/video/${m[1]}`;
+  }
+
+  return '';
+}
+
+function videoThumbnailUrl(url) {
+  const yt = youtubeVideoId(url);
+
+  if (yt) {
+    return `https://i.ytimg.com/vi/${yt}/hqdefault.jpg`;
+  }
+
+  // Vimeo-Thumbnails brauchen normalerweise einen API/oEmbed-Request.
+  // Daher für Vimeo erstmal kein Thumbnail.
+  return '';
+}
 
   function cleanInlineText(s) {
     return String(s || '')

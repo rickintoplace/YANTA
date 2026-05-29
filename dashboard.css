@@ -378,7 +378,12 @@
 
   overflow: hidden;
 
-  padding: 10px 11px 34px;
+  padding: 10px 11px 10px;
+}
+
+.yanta-dash-preview.is-media-only {
+  padding: 0;
+  gap: 0;
 }
 
 .yanta-dash-preview-line {
@@ -1078,8 +1083,104 @@
 .yanta-dash-card.resizing .yanta-dash-preview,
 .yanta-dash-card.selected .yanta-dash-folder-body,
 .yanta-dash-card.resizing .yanta-dash-folder-body {
-  padding-bottom: 78px;
+  padding-bottom: 10px;
 }
+
+.yanta-dash-video-thumb {
+  position: relative;
+
+  width: 100%;
+  aspect-ratio: 16 / 9;
+
+  overflow: hidden;
+
+  background: #000;
+}
+
+.yanta-dash-video-thumb img {
+  display: block;
+
+  width: 100%;
+  height: 100%;
+  max-height: none;
+
+  object-fit: cover;
+}
+
+.yanta-dash-video-play {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+
+  width: 48px;
+  height: 48px;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  border-radius: 999px;
+
+  background: rgba(0, 0, 0, 0.58);
+  color: white;
+
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+}
+
+.yanta-dash-video-play svg {
+  margin-left: 3px;
+  fill: currentColor;
+}
+
+.yanta-dash-video-fallback {
+  width: 100%;
+  min-height: 110px;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+
+  color: var(--text-dim);
+}
+
+.yanta-dash-card.selected .yanta-dash-preview.is-media-only,
+.yanta-dash-card.resizing .yanta-dash-preview.is-media-only {
+  padding: 0;
+}
+
+.yanta-dash-preview.is-media-only .yanta-dash-media {
+  flex: 1 1 auto;
+  height: 100%;
+  border: 0;
+  border-radius: 0;
+}
+
+.yanta-dash-preview.is-media-only .yanta-dash-media img {
+  height: 100%;
+  max-height: none;
+}
+
+.yanta-dash-preview.is-media-only .yanta-dash-video {
+  height: 100%;
+  aspect-ratio: auto;
+}
+
+.yanta-dash-preview.is-media-only .yanta-dash-drawing-thumb {
+  height: 100%;
+  max-height: none;
+}
+
+.yanta-dash-preview.is-media-only .yanta-dash-video-thumb {
+  flex: 1 1 auto;
+  height: 100%;
+  aspect-ratio: auto;
+  border: 0;
+  border-radius: 0;
+}
+
 
 /* Empty states */
 .yanta-dashboard-empty {

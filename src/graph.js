@@ -41,6 +41,11 @@ import { openNote, rebuildWikilinkIndex } from './notes.js';
 import { renderTree } from './tree.js';
 import { noteMarkdown, getNoteDoc } from './yjs.js';
 import { renderPreview } from './markdown.js';
+import {
+  openSidePane,
+  closeSidePane,
+  isSidePaneOpen,
+} from './side-pane.js';
 
 const WIKILINK_RE = /\[\[([^\]|\n]+)(?:\|[^\]\n]+)?\]\]/g;
 
@@ -4580,60 +4585,55 @@ function forceSplitViewForPane() {
   store.settings.set('view', 'split');
 }
 
-function openGraphPane() {
+export function openGraphPane() {
   if (window.innerWidth < WIDE_PANE_MIN_WIDTH) {
     toast('Graph pane is available on wider screens', 'error');
+    openGraph();
     return;
   }
 
   injectGraphCss();
 
-  const pane = $('panePreview');
-  if (!pane) return;
-
   closeGraph();
 
-  forceSplitViewForPane();
-  closeGraphPane({ silent: true });
+  const body = openSidePane({
+    kind: 'graph',
+    title: 'Graph',
+    icon: 'network',
+    className: 'yanta-graph-side-pane',
+    onClose: () => {
+      stopSimulation();
+      hideNodePreview();
+      hideContextMenu();
+
+      if (graph.mode === 'pane') {
+        graph.canvas = null;
+        graph.ctx = null;
+        graph.mode = 'overlay';
+      }
+
+      graph.paneHost = null;
+      graph.paneCanvas = null;
+    },
+  });
+
+  if (!body) return;
 
   graph.preferPane = true;
   writeBoolPref(GRAPH_PANE_PREFS_KEY, true);
 
-  graph.paneHiddenChildren = [...pane.children].map((child) => ({
-    child,
-    display: child.style.display,
-  }));
-
-  for (const { child } of graph.paneHiddenChildren) {
-    child.style.display = 'none';
-  }
-
-  pane.classList.add('yanta-graph-pane-active');
-
-  const host = document.createElement('div');
-  host.className = 'yanta-graph-pane-host';
-  host.innerHTML = `
-    <div class="graph-head">
-      <strong>Graph</strong>
-      <span class="grow"></span>
-      <button class="icon-btn" data-graph-pane-close title="Close pane graph">✕</button>
-    </div>
+  body.innerHTML = `
     <div class="graph-canvas-wrap">
       <canvas class="graph-canvas" data-graph-pane-canvas></canvas>
       <div class="yanta-graph-stats" data-graph-stats></div>
     </div>
   `;
 
-  pane.append(host);
+  graph.paneHost = body;
+  graph.paneCanvas = body.querySelector('[data-graph-pane-canvas]');
 
-  graph.paneHost = host;
-  graph.paneCanvas = host.querySelector('[data-graph-pane-canvas]');
-
-  // Mount the controls panel inside the canvas wrap.
-  const canvasWrap = host.querySelector('.graph-canvas-wrap');
+  const canvasWrap = body.querySelector('.graph-canvas-wrap');
   canvasWrap.append(buildControlsPanel({ paneMode: true }));
-
-  host.querySelector('[data-graph-pane-close]')?.addEventListener('click', () => closeGraphPane());
 
   activateCanvas(graph.paneCanvas, 'pane');
 
@@ -4653,36 +4653,12 @@ function openGraphPane() {
 }
 
 function closeGraphPane({ silent = false } = {}) {
-  if (!graph.paneHost) return;
+  if (!isSidePaneOpen('graph')) return;
 
-  stopSimulation();
-  hideNodePreview();
-  hideContextMenu();
+  closeSidePane({ silent });
 
-  const pane = $('panePreview');
-
-  for (const { child, display } of graph.paneHiddenChildren) {
-    child.style.display = display;
-  }
-
-  graph.paneHiddenChildren = [];
-
-  graph.paneHost.remove();
-  graph.paneHost = null;
-  graph.paneCanvas = null;
-
-  pane?.classList.remove('yanta-graph-pane-active');
-
-  if (graph.mode === 'pane') {
-    graph.canvas = null;
-    graph.ctx = null;
-    graph.mode = 'overlay';
-  }
-
-  if (!silent) {
-    graph.preferPane = false;
-    writeBoolPref(GRAPH_PANE_PREFS_KEY, false);
-  }
+  graph.preferPane = false;
+  writeBoolPref(GRAPH_PANE_PREFS_KEY, false);
 }
 
 // ------------------------------------------------------------

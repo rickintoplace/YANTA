@@ -32,7 +32,7 @@ import { focusEditorEnd, getView } from './editor.js';
 import { setupFormatToolbar } from './format-menu.js';
 import { exportAsZip, exportNoteAsMd, exportBundle, exportEveryNoteMd, openExportMenu, importFiles, importItems, walkEntry } from './io.js';
 import { syncRestore, syncConnect, syncDisconnect, syncFull, openSyncSetup, closeSyncSetup, syncMenu } from './sync.js';
-import { openGraph, closeGraph, setupGraphInteractions } from './graph.js';
+import { openGraph, closeGraph, setupGraphInteractions, openGraphPane } from './graph.js';
 import { wikilinkIndex } from './features-state.js';
 import { getNoteDoc, noteMarkdown, drawingsTextForNote, citationsTextForNote } from './yjs.js';
 import { openShareModal, closeShareModal, stopSharing, restoreSharedNotes, handleShareUrl } from './sharing.js';
@@ -45,6 +45,7 @@ import {
 import {
   setupDashboard,
   showDashboard,
+  showDashboardPane,
   showDashboardFromNote,
   hideDashboard,
   isDashboardVisible,
@@ -70,6 +71,17 @@ import {
   pushNoteHistory,
   replaceNoteHistory,
 } from './navigation.js';
+import {
+  openCalendar,
+  openCalendarFromHistory,
+  openCalendarPane,
+  closeCalendar,
+  closeCalendarPane,
+} from './calendar.js';
+
+import {
+  closeSidePane,
+} from './side-pane.js';
 
 let sharePreviewLocked = false;
 
@@ -210,6 +222,11 @@ async function init() {
     openDraw: createDrawingAndInsert,
     openGraph,
     openDashboard: () => showDashboard({ push: true }),
+    openDashboardPane: () => showDashboardPane({
+      folderId: state.dashboardFolderId || null,
+    }),
+    openCalendar,
+    openCalendarPane,
     openCitationManager,
     exportAsZip,
     exportNoteAsMd,
@@ -231,6 +248,7 @@ async function init() {
   setupCitations();
   setupFormatToolbar();
   setupDashboard();
+  // setupCalendar();
   await syncRestore();
   let sharedOpen = null;
 
@@ -258,6 +276,21 @@ async function init() {
 // Back should return to the previous website/history entry, not force Dashboard.
 if (!sharedOpen?.noteId) {
   const route = parseAppHash();
+
+  if (route.surface === 'calendar') {
+    openCalendar({
+      push: false,
+      replace: true,
+    });
+
+    history.replaceState(
+      { surface: 'calendar' },
+      '',
+      '#calendar'
+    );
+
+    return;
+  }
 
   const explicitNoteId =
     route.surface === 'note' &&
@@ -320,6 +353,16 @@ window.addEventListener('popstate', async (e) => {
   const st = e.state || {};
   const route = parseAppHash();
 
+  if (st.surface === 'calendar' || route.surface === 'calendar') {
+    closeGraph();
+    closeCalendarPane({ silent: true });
+    hideDashboard({ push: false });
+
+    openCalendarFromHistory();
+
+    return;
+  }
+
   /*
     Dashboard-History inklusive Folder-Zurücknavigation.
 
@@ -332,6 +375,12 @@ window.addEventListener('popstate', async (e) => {
       und erhält die Note-Zoom-Back-Transition.
   */
   if (st.surface === 'dashboard' || route.surface === 'dashboard') {
+    // Important:
+    // If we navigate back from #calendar to #dashboard, the URL changes first.
+    // We must explicitly close the fullscreen calendar surface here.
+    closeCalendar({ surface: 'dashboard' });
+    closeCalendarPane({ silent: true });
+
     const folderId =
       st.folderId !== undefined
         ? st.folderId
@@ -646,6 +695,118 @@ function setupDesktopSidebarCollapse() {
   });
 }
 
+function switchRightPane(kind) {
+  if (kind === 'preview') {
+    closeSidePane();
+    setView('split');
+
+    requestAnimationFrame(() => {
+      ensurePreviewPaneSwitcher();
+      window.dispatchEvent(new Event('resize'));
+    });
+
+    return;
+  }
+
+  if (kind === 'dashboard') {
+    showDashboardPane({
+      folderId: state.dashboardFolderId || null,
+    });
+    return;
+  }
+
+  if (kind === 'graph') {
+    openGraphPane();
+    return;
+  }
+
+  if (kind === 'calendar') {
+    openCalendarPane();
+  }
+}
+
+function ensurePreviewPaneSwitcher() {
+  const pane = $('panePreview');
+  if (!pane || pane.querySelector('[data-preview-pane-switcher]')) return;
+
+  const switcher = document.createElement('div');
+  switcher.className = 'yanta-preview-pane-switcher';
+  switcher.setAttribute('data-preview-pane-switcher', '');
+
+  switcher.innerHTML = `
+    <button class="icon-btn active" data-pane-kind="preview" title="Markdown preview">${lucide('eye', 15)}</button>
+    <button class="icon-btn" data-pane-kind="dashboard" title="Dashboard">${lucide('layout-dashboard', 15)}</button>
+    <button class="icon-btn" data-pane-kind="graph" title="Graph">${lucide('network', 15)}</button>
+    <button class="icon-btn" data-pane-kind="calendar" title="Calendar">${lucide('calendar-days', 15)}</button>
+
+    <span class="yanta-preview-pane-switcher-sep"></span>
+
+    <button class="icon-btn" data-pane-expand="preview" title="Expand preview">${lucide('maximize-2', 15)}</button>
+    <button class="icon-btn" data-pane-close="preview" title="Close right pane">${lucide('x', 15)}</button>
+  `;
+
+  for (const btn of switcher.querySelectorAll('[data-pane-kind]')) {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      switchRightPane(btn.dataset.paneKind);
+    });
+  }
+
+  switcher.querySelector('[data-pane-expand]')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    expandRightPane('preview');
+  });
+
+  switcher.querySelector('[data-pane-close]')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    closeRightPane('preview');
+  });
+
+  pane.append(switcher);
+}
+
+function expandRightPane(kind = 'preview') {
+  if (kind === 'preview') {
+    closeSidePane({ silent: true });
+    setView('preview');
+    return;
+  }
+
+  if (kind === 'calendar') {
+    closeSidePane({ silent: true });
+    openCalendar({ push: true });
+    return;
+  }
+
+  if (kind === 'dashboard') {
+    closeSidePane({ silent: true });
+    showDashboard({
+      folderId: state.dashboardFolderId || null,
+      push: true,
+    });
+    return;
+  }
+
+  if (kind === 'graph') {
+    closeSidePane({ silent: true });
+    openGraph();
+  }
+}
+
+function closeRightPane(kind = 'preview') {
+  if (kind !== 'preview') {
+    closeSidePane();
+  }
+
+  setView('edit');
+}
+
 function bindEvents() {
   // title + tags
   $('noteTitle').addEventListener('input', () => { saveCurrentNote(); });
@@ -683,7 +844,7 @@ function bindEvents() {
     const n = state.notes.get(state.currentNoteId);
     if (n) exportNoteAsMd(n);
   });
-  $('btn-images').addEventListener('click', () => { openImageModal(); });
+  // $('btn-images').addEventListener('click', () => { openImageModal(); });
 
   document.querySelector('.brand')?.addEventListener('click', (e) => {
     e.preventDefault();
@@ -715,7 +876,17 @@ function bindEvents() {
 
   $('btn-view-split').addEventListener('click', () => {
     hideDashboard({ push: false });
+
     setView('split');
+
+    // Split View means: left note/editor, right Markdown preview by default.
+    // If a companion app is open in the right pane, return to preview.
+    closeSidePane();
+
+    requestAnimationFrame(() => {
+      ensurePreviewPaneSwitcher();
+      window.dispatchEvent(new Event('resize'));
+    });
   });
 
   $('btn-view-preview').addEventListener('click', () => {
@@ -744,6 +915,20 @@ function bindEvents() {
   // Divider
   setupDivider();
   setupPaneScrollSync();
+
+  ensurePreviewPaneSwitcher();
+
+  window.addEventListener('yanta-side-pane-expand', (e) => {
+    expandRightPane(e.detail?.kind || 'preview');
+  });
+
+  window.addEventListener('yanta-side-pane-close-request', (e) => {
+    closeRightPane(e.detail?.kind || 'preview');
+  });
+
+  window.addEventListener('yanta-side-pane-switch', (e) => {
+    switchRightPane(e.detail?.kind || 'preview');
+  });
 
   // Preview interactions
   $('preview').addEventListener('click', (e) => {
@@ -859,6 +1044,22 @@ function bindEvents() {
   // Palette
   $('btn-palette').addEventListener('click', () => openPalette('commands'));
   $('btn-graph').addEventListener('click', openGraph);
+  $('btn-calendar')?.addEventListener('click', () => {
+    openCalendar({ push: true });
+  });
+  $('btn-calendar-close')?.addEventListener('click', () => {
+    if (history.state?.surface === 'calendar') {
+      history.back();
+      return;
+    }
+
+    closeCalendar({ surface: 'dashboard' });
+
+    showDashboard({
+      folderId: state.dashboardFolderId || null,
+      push: true,
+    });
+  });
   const palEl = $('palette');
   palEl.addEventListener('click', (e) => { if (e.target === palEl) closePalette(); });
   $('paletteInput').addEventListener('input', (e) => paletteFilter(e.target.value));
@@ -871,6 +1072,12 @@ function bindEvents() {
 
   window.addEventListener('yanta-open-citation-manager', () => {
     openCitationManager();
+  });
+
+  window.addEventListener('yanta-note-opened', () => {
+    // Fullscreen calendar should close when opening a note.
+    // Calendar side pane should stay open.
+    closeCalendar({ surface: 'note' });
   });
 
   window.addEventListener('yanta-open-icon-insert', () => openIconInsertPicker());
@@ -975,6 +1182,10 @@ function handleGlobalKey(e) {
   else if (meta && e.key === 'o') { e.preventDefault(); openPalette('notes'); }
   else if (meta && e.key === 'p') { e.preventDefault(); openPalette('commands'); }
   else if (meta && e.key === 'g') { e.preventDefault(); openGraph(); }
+  else if (meta && e.shiftKey && e.key.toLowerCase() === 'c') {
+    e.preventDefault();
+    openCalendar();
+  }
   else if (meta && e.key.toLowerCase() === 'h') {
     e.preventDefault();
     showDashboard({ push: true });
@@ -1008,7 +1219,23 @@ function handleGlobalKey(e) {
     closeShareModal();
     closeMenu();
     closePalette();
+
+    if (state.surface === 'calendar') {
+      if (history.state?.surface === 'calendar') {
+        history.back();
+      } else {
+        closeCalendar({ surface: 'dashboard' });
+        showDashboard({
+          folderId: state.dashboardFolderId || null,
+          push: true,
+        });
+      }
+
+      return;
+    }
+
     if (!$('graphOverlay').hidden) closeGraph();
+
     $('dropOverlay').hidden = true;
   }
 }

@@ -949,19 +949,77 @@ function dropHandler() {
   return EditorView.domEventHandlers({
     dragover(e) {
       const types = [...(e.dataTransfer.types || [])];
-      if (types.includes('text/yanta-note') || types.includes('Files') ||
-          types.includes('text/uri-list') || types.includes('text/x-moz-url') ||
-          types.includes('text/plain')) {
+
+      if (
+        types.includes('text/yanta-calendar-event') ||
+        types.includes('text/yanta-note') ||
+        types.includes('Files') ||
+        types.includes('text/uri-list') ||
+        types.includes('text/x-moz-url') ||
+        types.includes('text/plain')
+      ) {
         e.preventDefault();
         e.dataTransfer.dropEffect = 'copy';
         return true;
       }
+
       return false;
     },
     drop(e, view) {
       const types = [...(e.dataTransfer.types || [])];
       // Find caret position for the drop.
       const pos = view.posAtCoords({ x: e.clientX, y: e.clientY }) ?? view.state.doc.length;
+      const calendarEventJson = e.dataTransfer.getData('text/yanta-calendar-event');
+      const plainDropText = e.dataTransfer.getData('text/plain') || '';
+
+      const looksLikeCalendarMarkdown =
+        /@(due|date|event)\([^)]+\)(?:\{[^}\n]*\})?/i.test(plainDropText);
+
+      if (calendarEventJson || looksLikeCalendarMarkdown) {
+        e.preventDefault();
+        e.stopPropagation();
+
+        let insert = '';
+
+        if (calendarEventJson) {
+          try {
+            insert = JSON.parse(calendarEventJson)?.markdown || '';
+          } catch {}
+        }
+
+        if (!insert) {
+          insert = plainDropText;
+        }
+
+        insert = String(insert || '').trim();
+
+        if (!insert) return true;
+
+        const docText = view.state.doc.toString();
+        const before = docText.slice(Math.max(0, pos - 1), pos);
+        const after = docText.slice(pos, pos + 1);
+
+        const prefix = before && before !== '\n' ? '\n' : '';
+        const suffix = after && after !== '\n' ? '\n' : '';
+
+        const text = `${prefix}${insert}${suffix}`;
+
+        view.dispatch({
+          changes: {
+            from: pos,
+            to: pos,
+            insert: text,
+          },
+          selection: {
+            anchor: pos + text.length,
+          },
+        });
+
+        view.focus();
+
+        return true;
+      }
+
       // A YANTA note drag → insert [[Title]] at drop position.
       const noteId = e.dataTransfer.getData('text/yanta-note');
       if (noteId) {

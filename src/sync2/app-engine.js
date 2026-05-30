@@ -774,6 +774,8 @@ export class Sync2AppEngine {
     rebuildWikilinkIndex();
     renderTree();
 
+    window.dispatchEvent(new CustomEvent('yanta-vault-hydrated'));
+
     const current = state.currentNoteId
       ? state.notes.get(state.currentNoteId)
       : null;

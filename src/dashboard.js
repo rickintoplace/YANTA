@@ -1,40 +1,46 @@
-  import {
-    $,
-    el,
-    uid,
-    state,
-    store,
-    lucide,
-    safeCssColor,
-    toast,
-  } from './core.js';
-  
-  import {
-    openNote,
-    newNote,
-    toggleTaskLineInNote,
-    rebuildWikilinkIndex,
-    clearEditor,
-  } from './notes.js';
-  
-  import {
-    getNoteDoc,
-    noteMarkdown,
-    findDrawing,
-    destroyNoteDoc,
-  } from './yjs.js';
-  import { inlineTextEdit } from './inline-ui.js';
+import {
+  $,
+  el,
+  uid,
+  state,
+  store,
+  lucide,
+  safeCssColor,
+  toast,
+} from './core.js';
 
-  import {
-    renameNoteById,
-    renameFolderById,
-  } from './item-actions.js';
+import {
+  openNote,
+  newNote,
+  toggleTaskLineInNote,
+  rebuildWikilinkIndex,
+  clearEditor,
+} from './notes.js';
 
-  import {
-    dashboardUrl,
-    dashboardState,
-  } from './navigation.js';
-  
+import {
+  getNoteDoc,
+  noteMarkdown,
+  findDrawing,
+  destroyNoteDoc,
+} from './yjs.js';
+import { inlineTextEdit } from './inline-ui.js';
+
+import {
+  renameNoteById,
+  renameFolderById,
+} from './item-actions.js';
+
+import {
+  dashboardUrl,
+  dashboardState,
+} from './navigation.js';
+
+import {
+  openSidePane,
+  closeSidePane,
+  isSidePaneOpen,
+} from './side-pane.js';
+
   const MOBILE_MQ = window.matchMedia('(max-width: 880px)');
   
   const DASH_ORDER_STEP = 1000;
@@ -77,6 +83,7 @@
     dragging: null,
     resize: null,
     suppressOpenUntil: 0,
+    paneMode: false,
   };
   
   const previewCache = new Map();
@@ -432,6 +439,23 @@ function getDashboardItems() {
   
     return root;
   }
+
+  function attachDashboardToMain() {
+    ensureDashboardRoot();
+
+    const main = document.querySelector('main.main');
+    const panes = $('panes');
+
+    if (!main || !root) return;
+
+    if (root.parentElement !== main) {
+      if (panes && panes.parentElement === main) {
+        main.insertBefore(root, panes);
+      } else {
+        main.append(root);
+      }
+    }
+  }
   
   export function isDashboardVisible() {
     return dashboard.visible;
@@ -442,6 +466,15 @@ function getDashboardItems() {
     initialized = true;
   
     ensureDashboardRoot();
+
+    dashboard.paneMode = false;
+
+    if (isSidePaneOpen('dashboard')) {
+      closeSidePane({ silent: true });
+    }
+
+    attachDashboardToMain();
+
     setupPreviewObserver();
 
     loadDashboardCardDisplayPrefs().then(() => {
@@ -494,7 +527,10 @@ function getDashboardItems() {
     window.addEventListener('yanta-note-opened', () => {
       if (!dashboard.visible) return;
       if (dashboard.internalOpeningNote) return;
-  
+
+      // In pane mode dashboard is allowed to stay open next to the note.
+      if (dashboard.paneMode) return;
+
       hideDashboard({ push: false });
     });
   
@@ -563,8 +599,66 @@ export function showDashboard({
   }
 }
   
+export function showDashboardPane({
+  folderId = dashboard.folderId || null,
+} = {}) {
+  ensureDashboardRoot();
+
+  const body = openSidePane({
+    kind: 'dashboard',
+    title: folderId && state.folders.has(folderId)
+      ? state.folders.get(folderId).name || 'Dashboard'
+      : 'Dashboard',
+    icon: 'layout-dashboard',
+    className: 'yanta-dashboard-side-pane',
+    onClose: () => {
+      dashboard.paneMode = false;
+      dashboard.visible = false;
+
+      attachDashboardToMain();
+
+      if (root) {
+        root.hidden = true;
+      }
+    },
+  });
+
+  if (!body) return;
+
+  dashboard.folderId = folderId || null;
+  dashboard.visible = true;
+  dashboard.paneMode = true;
+  dashboard.selectedKey = null;
+
+  state.dashboardFolderId = dashboard.folderId;
+
+  body.append(root);
+
+  root.hidden = false;
+
+  // Important:
+  // Do not set state.surface = 'dashboard'.
+  // In pane mode the main surface stays note.
+  renderDashboard();
+
+  requestAnimationFrame(() => {
+    window.dispatchEvent(new CustomEvent('yanta-dashboard-pane-opened'));
+  });
+}
+
+export function closeDashboardPane({ silent = false } = {}) {
+  if (!isSidePaneOpen('dashboard')) return;
+
+  closeSidePane({ silent });
+}
+
 export function hideDashboard({ push = false } = {}) {
   if (!root) return;
+
+  if (dashboard.paneMode) {
+    closeDashboardPane({ silent: true });
+    return;
+  }
 
   dashboard.visible = false;
   dashboard.selectedKey = null;
@@ -592,6 +686,12 @@ export function hideDashboard({ push = false } = {}) {
 
 export async function showDashboardFolderFromHistory(folderId = null) {
   ensureDashboardRoot();
+
+  dashboard.paneMode = false;
+
+  if (isSidePaneOpen('dashboard')) {
+    closeSidePane({ silent: true });
+  }
 
   const targetFolderId = folderId || null;
 

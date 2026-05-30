@@ -3,6 +3,7 @@
 // Central place for app routes:
 // - Dashboard/Home: #dashboard or #dashboard/<folderId>
 // - Note:          #<noteId>
+// - Calendar:      #calendar
 // ============================================================
 
 export function dashboardUrl(folderId = null) {
@@ -13,6 +14,10 @@ export function dashboardUrl(folderId = null) {
 
 export function noteUrl(noteId) {
   return '#' + encodeURIComponent(noteId);
+}
+
+export function calendarUrl() {
+  return '#calendar';
 }
 
 export function dashboardState(folderId = null) {
@@ -26,6 +31,12 @@ export function noteState(noteId) {
   return {
     surface: 'note',
     noteId,
+  };
+}
+
+export function calendarState() {
+  return {
+    surface: 'calendar',
   };
 }
 
@@ -61,12 +72,36 @@ export function replaceNoteHistory(noteId) {
   );
 }
 
+export function pushCalendarHistory() {
+  history.pushState(
+    calendarState(),
+    '',
+    calendarUrl()
+  );
+}
+
+export function replaceCalendarHistory() {
+  history.replaceState(
+    calendarState(),
+    '',
+    calendarUrl()
+  );
+}
+
 export function parseAppHash(hash = window.location.hash) {
   const raw = decodeURIComponent(String(hash || '').replace(/^#/, ''));
 
   if (!raw) {
     return {
       surface: null,
+      noteId: null,
+      folderId: null,
+    };
+  }
+
+  if (raw === 'calendar') {
+    return {
+      surface: 'calendar',
       noteId: null,
       folderId: null,
     };

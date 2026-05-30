@@ -1,0 +1,1180 @@
+/* ============================================================
+   YANTA Calendar — Surface Layout
+   ============================================================ */
+
+.app[data-surface="calendar"] {
+  grid-template-columns: var(--sidebar-w, var(--sidebar-expanded-w)) 1fr;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.app[data-surface="calendar"] .main {
+  grid-template-rows: 1fr;
+  min-height: 0;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+.app[data-surface="calendar"] .main-head,
+.app[data-surface="calendar"] .panes,
+.app[data-surface="calendar"] .status,
+.app[data-surface="calendar"] .dashboard {
+  display: none !important;
+}
+
+.app:not([data-surface="calendar"]) .calendar-surface,
+.calendar-surface[hidden] {
+  display: none !important;
+}
+
+.calendar-surface {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+
+  display: flex;
+  flex: 1 1 auto;
+
+  overflow: hidden;
+  padding: 14px;
+
+  background: var(--bg);
+}
+
+.yanta-calendar-shell {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+
+  overflow: hidden;
+
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--border) 70%, transparent) inset;
+
+  background: var(--bg-elev);
+  color: var(--text);
+}
+
+.yanta-calendar-topbar {
+  flex: 0 0 auto;
+  min-height: 48px;
+
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+
+  background: var(--bg-elev-2);
+  color: var(--text);
+}
+
+.yanta-calendar-title {
+  color: var(--text);
+  font-weight: 800;
+}
+
+.yanta-calendar-host {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+
+  display: flex;
+
+  overflow: hidden;
+  padding: 10px;
+}
+
+#calendar {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+
+  flex: 1 1 auto;
+}
+
+/* ============================================================
+   FullCalendar Theme Bridge — YANTA Native
+   ============================================================ */
+
+.fc {
+  --fc-page-bg-color: var(--bg-elev);
+  --fc-neutral-bg-color: var(--bg-elev-2);
+  --fc-neutral-text-color: var(--text-dim);
+  --fc-border-color: var(--border);
+
+  --fc-button-bg-color: var(--bg-elev-2);
+  --fc-button-border-color: var(--border);
+  --fc-button-text-color: var(--text);
+  --fc-button-hover-bg-color: var(--bg-elev-3);
+  --fc-button-hover-border-color: var(--border-strong);
+  --fc-button-active-bg-color: var(--accent);
+  --fc-button-active-border-color: var(--accent);
+
+  --fc-event-bg-color: var(--accent);
+  --fc-event-border-color: var(--accent);
+  --fc-event-text-color: #fff;
+
+  --fc-today-bg-color: color-mix(in srgb, var(--accent) 13%, transparent);
+  --fc-now-indicator-color: var(--red);
+
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+
+  color: var(--text);
+  font-family: var(--font);
+}
+
+.fc,
+.fc * {
+  box-sizing: border-box;
+}
+
+/* Root containers */
+
+.fc .fc-view-harness,
+.fc .fc-view-harness-active {
+  min-height: 0;
+  background: var(--bg-elev);
+}
+
+.fc .fc-scrollgrid {
+  height: 100%;
+  border-color: var(--border);
+  background: var(--bg-elev);
+}
+
+.fc-theme-standard td,
+.fc-theme-standard th,
+.fc-theme-standard .fc-scrollgrid {
+  border-color: var(--border);
+}
+
+.fc .fc-scroller-harness,
+.fc .fc-scroller {
+  min-height: 0;
+}
+
+/* Toolbar */
+
+.fc .fc-toolbar {
+  gap: 8px;
+  flex-wrap: wrap;
+  color: var(--text);
+}
+
+.fc .fc-toolbar-title {
+  color: var(--text);
+  font-size: 18px;
+  font-weight: 800;
+  letter-spacing: -0.01em;
+}
+
+.fc .fc-button {
+  border-radius: 8px;
+  box-shadow: none !important;
+
+  font-size: 12px;
+  line-height: 1.2;
+
+  padding: 6px 9px;
+
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    color 120ms ease,
+    filter 120ms ease;
+}
+
+.fc .fc-button-primary {
+  border-color: var(--border);
+  background: var(--bg-elev-2);
+  color: var(--text);
+}
+
+.fc .fc-button-primary:hover {
+  border-color: var(--border-strong);
+  background: var(--bg-elev-3);
+  color: var(--text);
+}
+
+.fc .fc-button-primary:focus,
+.fc .fc-button-primary:focus-visible {
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 35%, transparent) !important;
+}
+
+.fc .fc-button-primary:disabled {
+  border-color: var(--border);
+  background: var(--bg-elev-2);
+  color: var(--text-faint);
+  opacity: 0.65;
+}
+
+.fc .fc-button-primary:not(:disabled).fc-button-active,
+.fc .fc-button-primary:not(:disabled):active {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: white;
+}
+
+/* Header dates */
+
+.fc .fc-col-header,
+.fc .fc-col-header-cell {
+  background: var(--bg-elev-2);
+}
+
+.fc .fc-col-header-cell {
+  border-color: var(--border);
+}
+
+.fc .fc-col-header-cell-cushion {
+  color: var(--text-dim);
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+/* Month/day grid */
+
+.fc .fc-daygrid,
+.fc .fc-daygrid-day {
+  background: var(--bg-elev);
+}
+
+.fc .fc-daygrid-day {
+  border-color: var(--border);
+}
+
+.fc .fc-daygrid-day-frame {
+  background: transparent;
+}
+
+.fc .fc-daygrid-day-number {
+  color: var(--text-dim);
+  text-decoration: none;
+  font-size: 12px;
+}
+
+.fc .fc-daygrid-day:hover {
+  background: color-mix(in srgb, var(--accent) 5%, var(--bg-elev));
+}
+
+.fc .fc-day-today {
+  background: color-mix(in srgb, var(--accent) 13%, var(--bg-elev)) !important;
+}
+
+.fc .fc-day-today .fc-daygrid-day-number {
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.fc .fc-day-other {
+  background: color-mix(in srgb, var(--bg-elev) 72%, var(--bg));
+}
+
+.fc .fc-day-other .fc-daygrid-day-number {
+  color: var(--text-faint);
+}
+
+/* Events */
+
+.fc .fc-event {
+  border-width: 1px;
+  border-radius: 7px;
+  box-shadow: none;
+
+  padding: 1px 4px;
+
+  cursor: pointer;
+
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.fc .fc-event:hover {
+  filter: brightness(1.06);
+}
+
+.fc .fc-event-title,
+.fc .fc-event-time {
+  color: inherit;
+}
+
+.fc .fc-daygrid-event {
+  margin-top: 2px;
+}
+
+.fc .fc-more-link {
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.fc .fc-popover {
+  border-color: var(--border);
+  box-shadow: var(--shadow);
+
+  background: var(--bg-elev-2);
+  color: var(--text);
+}
+
+.fc .fc-popover-header {
+  background: var(--bg-elev-3);
+  color: var(--text);
+}
+
+/* TimeGrid week/day */
+
+.fc .fc-timegrid {
+  background: var(--bg-elev);
+}
+
+.fc .fc-timegrid-axis,
+.fc .fc-timegrid-slot,
+.fc .fc-timegrid-divider,
+.fc .fc-timegrid-col,
+.fc .fc-timegrid-body,
+.fc .fc-timegrid-slots,
+.fc .fc-timegrid-cols {
+  border-color: var(--border);
+}
+
+.fc .fc-timegrid-slot {
+  background: var(--bg-elev);
+}
+
+.fc .fc-timegrid-slot-label {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.fc .fc-timegrid-slot-lane:hover {
+  background: color-mix(in srgb, var(--accent) 4%, transparent);
+}
+
+.fc .fc-timegrid-now-indicator-line {
+  border-color: var(--red);
+}
+
+.fc .fc-timegrid-now-indicator-arrow {
+  border-color: var(--red);
+  color: var(--red);
+}
+
+/* List view */
+
+.fc .fc-list,
+.fc .fc-list-table {
+  background: var(--bg-elev);
+}
+
+.fc .fc-list {
+  border-color: var(--border);
+}
+
+.fc .fc-list-day-cushion {
+  background: var(--bg-elev-2);
+  color: var(--text);
+}
+
+.fc .fc-list-day-text,
+.fc .fc-list-day-side-text {
+  color: var(--text);
+  text-decoration: none;
+  font-weight: 800;
+}
+
+.fc .fc-list-event td {
+  border-color: var(--border);
+  background: var(--bg-elev);
+  color: var(--text);
+}
+
+.fc .fc-list-event:hover td {
+  background: var(--bg-elev-3);
+}
+
+.fc .fc-list-event-time {
+  color: var(--text-faint);
+}
+
+.fc .fc-list-event-title a {
+  color: var(--text);
+  text-decoration: none;
+}
+
+.fc .fc-list-event-dot {
+  border-color: var(--accent);
+}
+
+.fc .fc-list-empty {
+  background: var(--bg-elev);
+  color: var(--text-dim);
+}
+
+/* Derived Markdown tasks */
+
+.fc .yanta-cal-derived-task {
+  opacity: 0.9;
+  border-style: dashed;
+}
+
+.fc .yanta-cal-derived-task.is-done {
+  opacity: 0.58;
+  text-decoration: line-through;
+}
+
+/* Scrollbars inside calendar */
+
+.fc .fc-scroller {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+
+.fc .fc-scroller::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.fc .fc-scroller::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: var(--border);
+}
+
+.fc .fc-scroller::-webkit-scrollbar-thumb:hover {
+  background: var(--border-strong);
+}
+
+/* ============================================================
+   Event Modal
+   ============================================================ */
+
+.yanta-calendar-event-card {
+  width: min(720px, 94vw);
+}
+
+.yanta-calendar-event-body label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+
+  margin-bottom: 10px;
+
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.yanta-calendar-event-body textarea {
+  min-height: 90px;
+  resize: vertical;
+}
+
+.yanta-calendar-date-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.yanta-calendar-switch {
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px !important;
+}
+
+.yanta-calendar-share-hint {
+  margin: 12px 0;
+  padding: 10px 12px;
+
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, var(--border));
+  border-radius: 8px;
+
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: var(--text-dim);
+
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.yanta-calendar-share-hint strong {
+  color: var(--text);
+}
+
+/* ============================================================
+   Categories Modal
+   ============================================================ */
+
+.yanta-calendar-categories-card {
+  width: min(840px, 96vw);
+}
+
+.yanta-calendar-cat-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+
+  margin-bottom: 14px;
+}
+
+.yanta-calendar-cat-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.yanta-calendar-cat-row {
+  display: grid;
+  grid-template-columns: 28px 42px 1fr 46px 32px 32px 32px;
+  align-items: center;
+  gap: 7px;
+
+  padding: 8px;
+
+  border: 1px solid var(--border);
+  border-radius: 9px;
+
+  background: var(--bg-elev-2);
+}
+
+.yanta-calendar-cat-row input[type="color"] {
+  width: 34px;
+  height: 30px;
+
+  padding: 0;
+
+  border: 1px solid var(--border);
+  border-radius: 6px;
+
+  background: var(--bg);
+}
+
+.yanta-calendar-cat-row .text-input {
+  margin-bottom: 0;
+}
+
+.yanta-calendar-cat-count {
+  color: var(--text-faint);
+  text-align: center;
+  font-size: 12px;
+}
+
+.yanta-calendar-cat-share {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+
+  margin: -3px 8px 5px 72px;
+
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.yanta-calendar-cat-share span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.yanta-calendar-cat-share small {
+  font-family: var(--font-mono);
+  opacity: 0.75;
+}
+
+/* ============================================================
+   Calendar Swipe / Snapshot Stage
+   ============================================================ */
+
+.fc .fc-view-harness.yanta-cal-animating,
+.fc .fc-view-harness-active.yanta-cal-animating {
+  position: relative !important;
+  overflow: hidden !important;
+}
+
+.yanta-cal-real-hidden {
+  visibility: hidden !important;
+}
+
+.yanta-cal-swipe-stage {
+  position: absolute !important;
+  inset: 0 !important;
+  z-index: 30 !important;
+
+  width: 100% !important;
+  height: 100%;
+
+  overflow: visible !important;
+
+  background: var(--bg-elev);
+  color: var(--text);
+
+  will-change: transform;
+  transform: translate3d(0, 0, 0);
+  backface-visibility: hidden;
+
+  pointer-events: none !important;
+  touch-action: none !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+
+  transition: none !important;
+}
+
+.yanta-cal-swipe-panel {
+  position: absolute !important;
+  top: 0 !important;
+  bottom: 0 !important;
+
+  width: 100% !important;
+  height: 100% !important;
+
+  overflow: hidden !important;
+
+  background: var(--bg-elev);
+  color: var(--text);
+
+  pointer-events: none !important;
+  touch-action: none !important;
+
+  backface-visibility: hidden;
+  transform: translateZ(0);
+
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--border) 55%, transparent) inset;
+}
+
+.yanta-cal-swipe-panel-prev {
+  left: -100% !important;
+}
+
+.yanta-cal-swipe-panel-current {
+  left: 0 !important;
+  z-index: 2;
+}
+
+.yanta-cal-swipe-panel-next {
+  left: 100% !important;
+}
+
+.yanta-cal-swipe-panel > .fc-view,
+.yanta-cal-swipe-panel .fc-view {
+  width: 100% !important;
+  height: 100% !important;
+}
+
+.yanta-cal-swipe-panel > .fc-view-harness,
+.yanta-cal-swipe-panel > .fc-view-harness-active,
+.yanta-cal-swipe-panel > .yanta-fc-harness-clone {
+  position: relative !important;
+
+  width: 100% !important;
+  height: 100% !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  max-width: 100% !important;
+
+  overflow: hidden !important;
+
+  background: var(--bg-elev);
+  color: var(--text);
+
+  pointer-events: none !important;
+  visibility: visible !important;
+
+  contain: layout paint;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+.yanta-cal-swipe-panel .fc-view-harness > .fc-view,
+.yanta-cal-swipe-panel .fc-view-harness-active > .fc-view,
+.yanta-cal-swipe-panel .yanta-fc-harness-clone > .fc-view {
+  position: absolute !important;
+  inset: 0 !important;
+
+  width: 100% !important;
+  height: 100% !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  max-width: 100% !important;
+
+  overflow: hidden !important;
+
+  pointer-events: none !important;
+  visibility: visible !important;
+
+  transform: translateZ(0);
+  backface-visibility: hidden;
+}
+
+.yanta-cal-swipe-panel .fc-scrollgrid {
+  width: 100% !important;
+  height: 100% !important;
+  max-width: 100% !important;
+
+  background: var(--bg-elev);
+}
+
+.yanta-cal-swipe-panel .fc-scroller-harness {
+  position: relative !important;
+  min-height: 0 !important;
+  overflow: hidden !important;
+}
+
+.yanta-cal-swipe-panel .fc-scroller,
+.yanta-cal-swipe-panel .fc-scroller-liquid {
+  min-height: 0 !important;
+}
+
+.yanta-cal-swipe-panel .fc-scroller-liquid-absolute {
+  position: absolute !important;
+  inset: 0 !important;
+  min-height: 0 !important;
+}
+
+.yanta-cal-swipe-panel .fc-daygrid,
+.yanta-cal-swipe-panel .fc-timegrid,
+.yanta-cal-swipe-panel .fc-daygrid-body,
+.yanta-cal-swipe-panel .fc-timegrid-body {
+  width: 100% !important;
+}
+
+.yanta-fc-harness-clone,
+.yanta-fc-harness-clone *,
+.yanta-fc-view-clone,
+.yanta-fc-view-clone * {
+  pointer-events: none !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+.yanta-fc-snapshot-host {
+  position: fixed !important;
+  left: -100000px !important;
+  top: 0 !important;
+  z-index: -1 !important;
+
+  visibility: hidden !important;
+  pointer-events: none !important;
+
+  overflow: hidden !important;
+
+  background: var(--bg-elev);
+  color: var(--text);
+
+  contain: layout style paint;
+}
+
+.yanta-cal-swipe-priming {
+  cursor: grabbing;
+}
+
+.yanta-cal-swipe-placeholder {
+  width: 100%;
+  height: 100%;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  background: var(--bg-elev);
+  color: var(--text-faint);
+}
+
+.yanta-cal-swipe-placeholder::after {
+  content: "";
+
+  width: 26px;
+  height: 26px;
+
+  border: 2px solid color-mix(in srgb, var(--text-faint) 35%, transparent);
+  border-top-color: var(--accent);
+  border-radius: 999px;
+
+  opacity: 0.65;
+
+  animation: yanta-cal-spin 800ms linear infinite;
+}
+
+@keyframes yanta-cal-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Swipe selection guard */
+
+#calendar.yanta-cal-swiping .fc-highlight,
+#calendar.yanta-cal-swiping .fc-select-helper {
+  display: none !important;
+}
+
+#calendar.yanta-cal-swiping .fc-daygrid-day.fc-day-selected,
+#calendar.yanta-cal-swiping .fc-timegrid-col.fc-day-selected {
+  background: inherit !important;
+}
+
+/* ============================================================
+   Custom Mobile Event Drag
+   ============================================================ */
+
+.yanta-cal-event-drag-ghost {
+  border-radius: 8px !important;
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.28) !important;
+
+  filter: brightness(1.06);
+  transform-origin: center center;
+
+  pointer-events: none !important;
+  touch-action: none !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+#calendar.yanta-cal-event-dragging,
+#calendar.yanta-cal-event-dragging * {
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+/* ============================================================
+   Responsive
+   ============================================================ */
+
+@media (max-width: 880px) {
+  .app[data-surface="calendar"] {
+    grid-template-columns: 1fr;
+  }
+
+  #calendar,
+  #calendar .fc {
+    touch-action: pan-y !important;
+  }
+
+  #calendar .fc-view-harness,
+  #calendar .fc-view-harness-active,
+  #calendar .fc-view,
+  #calendar .fc-view *,
+  #calendar .fc-scrollgrid,
+  #calendar .fc-scrollgrid *,
+  #calendar .fc-daygrid,
+  #calendar .fc-daygrid *,
+  #calendar .fc-timegrid,
+  #calendar .fc-timegrid * {
+    touch-action: none !important;
+  }
+
+  #calendar .fc-header-toolbar,
+  #calendar .fc-header-toolbar *,
+  #calendar button,
+  #calendar a,
+  #calendar input,
+  #calendar select,
+  #calendar textarea {
+    touch-action: manipulation !important;
+  }
+
+  .yanta-calendar-host {
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    overscroll-behavior-x: contain !important;
+  }
+
+  #calendar.yanta-cal-swiping,
+  #calendar.yanta-cal-swiping *,
+  #calendar.yanta-cal-manual-scrolling,
+  #calendar.yanta-cal-manual-scrolling *,
+  .yanta-cal-swipe-stage,
+  .yanta-cal-swipe-stage * {
+    touch-action: none !important;
+    user-select: none !important;
+    -webkit-user-select: none !important;
+  }
+
+  #calendar.yanta-cal-swiping .fc-highlight,
+  #calendar.yanta-cal-swiping .fc-select-helper,
+  #calendar.yanta-cal-manual-scrolling .fc-highlight,
+  #calendar.yanta-cal-manual-scrolling .fc-select-helper {
+    display: none !important;
+  }
+
+  .yanta-cal-swipe-panel-prev,
+  .yanta-cal-swipe-panel-next {
+    z-index: 1;
+  }
+
+  #calendar .fc-event {
+    touch-action: none !important;
+    -webkit-user-drag: none;
+  }
+
+  #calendar.yanta-cal-swiping .fc-event,
+  #calendar.yanta-cal-manual-scrolling .fc-event {
+    pointer-events: none !important;
+  }
+}
+
+@media (max-width: 760px) {
+  .calendar-surface {
+    padding: 0;
+  }
+
+  .yanta-calendar-shell {
+    border-right: 0;
+    border-left: 0;
+    border-radius: 0;
+  }
+
+  .yanta-calendar-date-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .fc .fc-toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    margin-bottom: 0.5em;
+  }
+
+  .fc .fc-toolbar-chunk {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 4px;
+  }
+
+  .fc .fc-toolbar-title {
+    text-align: center;
+    font-size: 16px;
+  }
+
+  .fc .fc-button {
+    font-size: 11px;
+    padding: 5px 7px;
+  }
+
+  .yanta-calendar-cat-row {
+    grid-template-columns: 28px 40px 1fr;
+  }
+
+  .yanta-calendar-cat-row .yanta-calendar-cat-count,
+  .yanta-calendar-cat-row [data-cat-export-ics],
+  .yanta-calendar-cat-row [data-cat-export-json],
+  .yanta-calendar-cat-row [data-cat-delete] {
+    grid-row: 2;
+  }
+
+  .yanta-calendar-cat-share {
+    margin-left: 8px;
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .yanta-cal-swipe-stage,
+  .yanta-cal-swipe-panel,
+  .yanta-fc-harness-clone,
+  .yanta-fc-view-clone,
+  .yanta-cal-swipe-placeholder::after {
+    transition: none !important;
+    animation: none !important;
+  }
+}
+
+/* ============================================================
+   YANTA Calendar — Native toolbar + pane mode
+   ============================================================ */
+
+.yanta-calendar-topbar .grow {
+  flex: 1;
+}
+
+.yanta-calendar-view-select {
+  width: auto;
+  min-width: 104px;
+  margin: 0;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+.yanta-cal-event-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.yanta-cal-event-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  line-height: 0;
+}
+
+.yanta-cal-event-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.fc .yanta-cal-markdown-event {
+  border-style: solid;
+}
+
+.yanta-calendar-pane-active {
+  position: relative;
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+
+.yanta-calendar-pane-host {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+
+  display: flex;
+  flex-direction: column;
+
+  background: var(--bg);
+  color: var(--text);
+}
+
+.yanta-calendar-pane-host .yanta-calendar-topbar {
+  min-height: 44px;
+  padding: 7px 9px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-elev-2);
+}
+
+.yanta-calendar-pane-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+
+  display: flex;
+  padding: 8px;
+  overflow: hidden;
+}
+
+.yanta-calendar-pane-body #calendar {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+}
+
+@media (max-width: 880px) {
+  .yanta-calendar-topbar {
+    min-height: 46px;
+    gap: 5px;
+    padding: 6px 7px;
+  }
+
+  .yanta-calendar-topbar .btn {
+    padding: 5px 7px;
+    font-size: 11px;
+  }
+
+  .yanta-calendar-view-select {
+    min-width: 86px;
+    max-width: 96px;
+    padding: 5px 6px;
+    font-size: 11px;
+  }
+
+  .yanta-calendar-title {
+    max-width: 34vw;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+    font-size: 13px;
+  }
+
+  .calendar-surface .mobile-sidebar-toggle {
+    display: none !important;
+  }
+}
+
+.yanta-cal-event-content {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+
+  overflow: hidden;
+  white-space: nowrap;
+}
+
+.yanta-cal-event-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  line-height: 0;
+}
+
+.yanta-cal-event-time {
+  flex: 0 0 auto;
+  font-weight: 700;
+  opacity: 0.9;
+}
+
+.yanta-cal-event-title {
+  flex: 1 1 auto;
+  min-width: 0;
+
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Dot-events in month view need normal text color handling */
+.fc .fc-daygrid-dot-event .yanta-cal-event-content {
+  color: var(--text);
+}
+
+.fc .fc-daygrid-dot-event .yanta-cal-event-time {
+  color: var(--text-faint);
+}
+
+.fc .fc-daygrid-dot-event .yanta-cal-event-title {
+  color: var(--text);
+}
+
+.yanta-calendar-side-pane .yanta-side-pane-body,
+.yanta-calendar-pane-body {
+  display: flex;
+  flex-direction: column;
+
+  min-width: 0;
+  min-height: 0;
+
+  overflow: hidden;
+  padding: 8px;
+}
+
+.yanta-calendar-side-pane #calendar {
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}

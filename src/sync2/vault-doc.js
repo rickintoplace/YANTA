@@ -69,6 +69,14 @@ export function vaultImagesMap() {
   return vaultMap('images');
 }
 
+export function vaultEventsMap() {
+  return vaultMap('events');
+}
+
+export function vaultCalendarCategoriesMap() {
+  return vaultMap('calendarCategories');
+}
+
 export function vaultSettingsMap() {
   return vaultMap('settings');
 }
@@ -167,6 +175,8 @@ export function vaultJsonSnapshot() {
   const notes = Object.fromEntries(vaultNotesMap());
   const folders = Object.fromEntries(vaultFoldersMap());
   const images = Object.fromEntries(vaultImagesMap());
+  const events = Object.fromEntries(vaultEventsMap());
+  const calendarCategories = Object.fromEntries(vaultCalendarCategoriesMap());
   const settings = Object.fromEntries(vaultSettingsMap());
   const tombstones = Object.fromEntries(vaultTombstonesMap());
 
@@ -174,6 +184,8 @@ export function vaultJsonSnapshot() {
     notes,
     folders,
     images,
+    events,
+    calendarCategories,
     settings,
     tombstones,
   });

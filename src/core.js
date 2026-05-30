@@ -531,6 +531,9 @@ export const state = {
   view: 'split',
   surface: 'note',
   dashboardFolderId: null,
+  calendarEvents: new Map(),
+  calendarCategories: new Map(),
+  currentCalendarView: 'dayGridMonth',
   theme: 'auto',
   dirty: false,
   // Sync status per note: 'synced' | 'local' | 'remote' | 'syncing' | 'conflict'

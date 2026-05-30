@@ -50,6 +50,8 @@ import {
   vaultNotesMap,
   vaultFoldersMap,
   vaultImagesMap,
+  vaultEventsMap,
+  vaultCalendarCategoriesMap,
   vaultTombstonesMap,
   vaultJsonSnapshot,
   safeJsonClone,
@@ -395,6 +397,8 @@ export async function exportSyncCapsule({
       notes: noteIds.size,
       folders: vaultFoldersMap().size,
       images: vaultImagesMap().size,
+      events: vaultEventsMap().size,
+      calendarCategories: vaultCalendarCategoriesMap().size,
       assetsIncluded: assetCount,
       assetBytes,
       tombstones: vaultTombstonesMap().size,
@@ -582,6 +586,8 @@ export async function importSyncCapsuleFile(file, {
 
   rebuildWikilinkIndex();
   renderTree();
+
+  window.dispatchEvent(new CustomEvent('yanta-vault-hydrated'));
 
   toast(
     `Sync Capsule imported: ${notesApplied} note snapshot${notesApplied === 1 ? '' : 's'}, ${assetsApplied} asset${assetsApplied === 1 ? '' : 's'}`,

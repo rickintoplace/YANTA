@@ -171,6 +171,16 @@ export async function importItems(items) {
         bundleCount++;
       }
       else if (lower.endsWith('.zip')) { await importZipBlob(file); zipCount++; }
+      else if (lower.endsWith('.ics')) {
+        const { importCalendarFile } = await import('./calendar.js');
+        await importCalendarFile(file);
+        bundleCount++;
+      }
+      else if (lower.endsWith('.calendar.json')) {
+        const { importCalendarFile } = await import('./calendar.js');
+        await importCalendarFile(file);
+        bundleCount++;
+      }
       else if (lower.endsWith('.excalidraw') || lower.endsWith('.excalidraw.json')) {
         const { importExcalidrawFileAsNote } = await import('./draw.js');
         await importExcalidrawFileAsNote(file);
@@ -408,6 +418,15 @@ export async function exportAsZip() {
       });
     }
   }
+  try {
+    const { exportCalendarZipEntries } = await import('./calendar.js');
+
+    for (const entry of exportCalendarZipEntries(_enc)) {
+      entries.push(entry);
+    }
+  } catch (err) {
+    console.warn('Calendar ZIP export skipped', err);
+  }
   const manifest = {
     yanta: 2,
     exported: new Date().toISOString(),
@@ -416,6 +435,8 @@ export async function exportAsZip() {
       folders: state.folders.size,
       images: used.size,
       citations: totalCitationCount || 0,
+      calendarEvents: state.calendarEvents?.size || 0,
+      calendarCategories: state.calendarCategories?.size || 0,
     },
   };
   entries.push({ path: '_yanta-manifest.json', data: _enc.encode(JSON.stringify(manifest, null, 2)) });

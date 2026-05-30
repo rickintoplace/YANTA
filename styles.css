@@ -3749,3 +3749,191 @@ input.yanta-task-checkbox {
       max(10px, env(safe-area-inset-left));
   }
 }
+
+/* ============================================================
+   YANTA Side Pane
+   ============================================================ */
+
+.pane-preview.yanta-side-pane-active {
+  position: relative;
+  padding: 0 !important;
+  overflow: hidden !important;
+}
+
+.yanta-side-pane-host {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+
+  display: flex;
+  flex-direction: column;
+
+  min-width: 0;
+  min-height: 0;
+
+  background: var(--bg);
+  color: var(--text);
+}
+
+.yanta-side-pane-head {
+  flex: 0 0 auto;
+  min-height: 44px;
+
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--border);
+
+  background: var(--bg-elev-2);
+}
+
+.yanta-side-pane-icon {
+  display: inline-flex;
+  color: var(--accent);
+}
+
+.yanta-side-pane-title {
+  min-width: 0;
+  max-width: 140px;
+
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+
+  font-size: 13px;
+}
+
+.yanta-side-pane-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+
+  overflow: hidden;
+  background: var(--bg);
+}
+
+.yanta-side-pane-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+
+  margin-left: 6px;
+  padding: 2px;
+
+  border: 1px solid var(--border);
+  border-radius: 9px;
+
+  background: var(--bg-elev);
+}
+
+.yanta-side-pane-tabs .icon-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+}
+
+.yanta-side-pane-tabs .icon-btn.active {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+/* Preview pane floating controls when native preview is visible */
+.yanta-preview-pane-switcher {
+  position: sticky;
+  top: 8px;
+  z-index: 15;
+
+  float: right;
+
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+
+  margin: 8px 10px 0 8px;
+  padding: 2px;
+
+  border: 1px solid var(--border);
+  border-radius: 9px;
+
+  background: color-mix(in srgb, var(--bg-elev) 94%, transparent);
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+
+  box-shadow: 0 8px 24px rgba(0,0,0,0.18);
+}
+
+.yanta-preview-pane-switcher .icon-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
+}
+
+.yanta-preview-pane-switcher .icon-btn.active {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.pane-preview.yanta-side-pane-active .yanta-preview-pane-switcher {
+  display: none !important;
+}
+
+/* Dashboard in side pane */
+.yanta-dashboard-side-pane .yanta-side-pane-body {
+  overflow: auto;
+}
+
+.yanta-dashboard-side-pane .dashboard {
+  display: block !important;
+  width: 100%;
+  height: 100%;
+  overflow: auto;
+  padding: 12px;
+}
+
+/* Calendar in side pane */
+.yanta-calendar-side-pane .yanta-side-pane-body {
+  display: flex;
+  flex-direction: column;
+
+  min-width: 0;
+  min-height: 0;
+
+  overflow: hidden;
+}
+
+.yanta-calendar-pane-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+
+  display: flex;
+  flex-direction: column;
+
+  overflow: hidden;
+  padding: 8px;
+}
+
+.yanta-calendar-pane-calendar-host {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+
+  display: flex;
+  overflow: hidden;
+}
+
+.yanta-calendar-pane-calendar-host #calendar {
+  flex: 1 1 auto;
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.yanta-preview-pane-switcher-sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 2px;
+  background: var(--border);
+}

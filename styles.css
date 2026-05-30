@@ -174,8 +174,8 @@ button, input, select, textarea { font: inherit; color: inherit; }
     /* background: linear-gradient(135deg, var(--accent), var(--accent-2)); */
     /* box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.05) inset; */
     display: flex;
-    padding-left: 2px;
-    padding-right: 2px;
+    padding: 6px;
+    transition: padding 0.25s;
 }
 .row-actions { display: flex; gap: 4px; }
 
@@ -2785,6 +2785,7 @@ input.yanta-task-checkbox {
   width: 40px;
   height: 40px;
   flex: 0 0 40px;
+  padding: 0;
 }
 
 /* ---------- Collapsed quick actions ---------- */
@@ -3901,39 +3902,4 @@ input.yanta-task-checkbox {
   min-height: 0;
 
   overflow: hidden;
-}
-
-.yanta-calendar-pane-body {
-  flex: 1 1 auto;
-  min-width: 0;
-  min-height: 0;
-
-  display: flex;
-  flex-direction: column;
-
-  overflow: hidden;
-  padding: 8px;
-}
-
-.yanta-calendar-pane-calendar-host {
-  flex: 1 1 auto;
-  min-width: 0;
-  min-height: 0;
-
-  display: flex;
-  overflow: hidden;
-}
-
-.yanta-calendar-pane-calendar-host #calendar {
-  flex: 1 1 auto;
-  width: 100%;
-  height: 100%;
-  min-height: 0;
-}
-
-.yanta-preview-pane-switcher-sep {
-  width: 1px;
-  height: 18px;
-  margin: 0 2px;
-  background: var(--border);
 }

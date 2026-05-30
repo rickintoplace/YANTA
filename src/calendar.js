@@ -9,6 +9,7 @@
 // ============================================================
 
 import { Calendar } from '@fullcalendar/core';
+import allLocales from '@fullcalendar/core/locales-all';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
 import listPlugin from '@fullcalendar/list';
@@ -77,11 +78,23 @@ import {
 } from './calendar-sources.js';
 
 import {
+  getCalendarPreferences,
+  fullCalendarLocale,
+  fullCalendarWeekText,
+  fullCalendarTimeFormat,
+  fullCalendarSlotLabelFormat,
+  formatCalendarDateTime,
+} from './calendar-preferences.js';
+
+import {
   openSidePane,
   closeSidePane,
-  sidePaneBody,
   isSidePaneOpen,
 } from './side-pane.js';
+
+import {
+  insertTextAtCoords,
+} from './editor.js';
 
 const ORIGIN = 'calendar';
 const DEFAULT_CATEGORY_ID = 'cal_default';
@@ -126,11 +139,10 @@ let initialized = false;
 let eventModal = null;
 let categoriesModal = null;
 let calendarSourcesModal = null;
+let calendarDateTimePickerModal = null;
 
 let calendarMode = 'surface'; // 'surface' | 'pane'
 let calendarOriginalParent = null;
-let calendarPaneHost = null;
-let calendarPaneHiddenChildren = [];
 
 let calendarHydrated = false;
 let renderScheduled = false;
@@ -151,6 +163,10 @@ let smoothCalendarNavInstalled = false;
 let calendarSwipeInstalled = false;
 let calendarNavAnimating = false;
 
+let calendarExternalEventDragInstalled = false;
+let calendarExternalEventDrag = null;
+let calendarExternalEventSuppressClickUntil = 0;
+
 let calendarSwipeCache = null;
 let calendarSwipeCacheBuilding = null;
 let calendarSwipePrewarmScheduled = false;
@@ -159,6 +175,8 @@ let calendarSwipeDataVersion = 0;
 let calendarSwipePointer = null;
 let calendarSwipeToken = 0;
 let calendarInteractiveSwipeState = null;
+
+let calendarReturnSurface = 'note';
 
 function calendarMobile() {
   return CALENDAR_MOBILE_MQ.matches;
@@ -231,12 +249,16 @@ function closeCalendarViaHistory() {
     return;
   }
 
+  const targetSurface = calendarReturnSurface || 'note';
+
+  closeCalendar({
+    surface: targetSurface,
+  });
+
   if (history.state?.surface === 'calendar') {
     history.back();
     return;
   }
-
-  closeCalendar({ surface: 'note' });
 }
 
 function renderCalendarTopbar() {
@@ -313,23 +335,6 @@ function renderCalendarTopbar() {
   });
 
   bar.querySelector('[data-cal-close]')?.addEventListener('click', closeCalendarViaHistory);
-}
-
-function forceSplitViewForCalendarPane() {
-  const app = $('app');
-
-  state.view = 'split';
-
-  if (app) {
-    app.dataset.view = 'split';
-    app.dataset.surface = 'note';
-  }
-
-  $('btn-view-edit')?.classList.toggle('active', false);
-  $('btn-view-split')?.classList.toggle('active', true);
-  $('btn-view-preview')?.classList.toggle('active', false);
-
-  store.settings.set('view', 'split');
 }
 
 export function openCalendarPane() {
@@ -1033,6 +1038,8 @@ async function createAdjacentCalendarViewSnapshot(dir, {
 
   applyCalendarThemeVarsTo(host);
 
+  const prefs = getCalendarPreferences();
+
   const snapshotCalendar = new Calendar(host, {
     plugins: [
       dayGridPlugin,
@@ -1040,6 +1047,15 @@ async function createAdjacentCalendarViewSnapshot(dir, {
       listPlugin,
       interactionPlugin,
     ],
+
+    locales: allLocales,
+    locale: fullCalendarLocale(prefs),
+    firstDay: Number(prefs.weekStart),
+    weekNumbers: !!prefs.weekNumbers,
+    weekNumberCalculation: 'ISO',
+    weekText: fullCalendarWeekText(prefs),
+    eventTimeFormat: fullCalendarTimeFormat(prefs),
+    slotLabelFormat: fullCalendarSlotLabelFormat(prefs),
 
     initialView: viewType,
     initialDate: calendarAdjacentDate(dir),
@@ -1049,7 +1065,7 @@ async function createAdjacentCalendarViewSnapshot(dir, {
 
     height: h,
     contentHeight: h,
-    expandRows: !calendarMobile(),
+    expandRows: true,
 
     stickyHeaderDates: true,
     handleWindowResize: false,
@@ -1073,7 +1089,6 @@ async function createAdjacentCalendarViewSnapshot(dir, {
     eventDidMount(info) {
       applyThemeToMountedEvent(info);
     },
-
   });
 
   try {
@@ -3006,7 +3021,7 @@ function setupCalendarSwipeNavigation() {
 
 function calendarSurfaceVisible() {
   if (calendarMode === 'pane') {
-    return !!calendarPaneHost?.isConnected;
+    return isSidePaneOpen('calendar') && !!$('calendar')?.isConnected;
   }
 
   const surface = $('calendarSurface');
@@ -3050,19 +3065,14 @@ function resizeCalendarNow({
   if (mobile) {
     if (lastCalendarMobileMode !== true) {
       lastCalendarMobileMode = true;
-      lastCalendarHeight = -1;
+      lastCalendarHeight = 0;
 
       try {
-        fc.setOption('height', 'auto');
-        fc.setOption('contentHeight', 'auto');
-        fc.setOption('expandRows', false);
-
         fc.setOption('selectable', true);
 
         /*
-          Mobile:
-          FullCalendar-DnD aus, damit keine FC-Drag-Mirror entstehen.
-          YANTA implementiert Mobile-DnD selbst nach kurzem Halten.
+          Mobile-DnD bleibt über YANTA custom logic,
+          FullCalendar-DnD bleibt aus.
         */
         fc.setOption('editable', false);
         fc.setOption('eventDragMinDistance', CALENDAR_MOBILE_EVENT_DRAG_MIN_DISTANCE_PX);
@@ -3071,6 +3081,23 @@ function resizeCalendarNow({
         fc.setOption('longPressDelay', 650);
         fc.setOption('selectLongPressDelay', 650);
         fc.setOption('eventLongPressDelay', CALENDAR_MOBILE_EVENT_LONG_PRESS_MS);
+
+        /*
+          Wichtig: nicht auto, sondern verfügbare Host-Höhe nutzen.
+        */
+        fc.setOption('expandRows', true);
+      } catch {}
+    }
+
+    const h = measuredCalendarHeight();
+
+    if (Math.abs(h - lastCalendarHeight) > 2) {
+      lastCalendarHeight = h;
+
+      try {
+        fc.setOption('height', h);
+        fc.setOption('contentHeight', h);
+        fc.setOption('expandRows', true);
       } catch {}
     }
 
@@ -3260,6 +3287,766 @@ function fromLocalInput(value, allDay = false) {
   }
 
   return new Date(value).toISOString();
+}
+
+function isDateOnlyString(value) {
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
+}
+
+function localDateOnlyToDate(value) {
+  if (!isDateOnlyString(value)) return null;
+
+  const [y, m, d] = value.split('-').map(Number);
+  const date = new Date(y, m - 1, d, 0, 0, 0, 0);
+
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function dateLikeToLocalDate(value) {
+  if (!value) return null;
+
+  if (isDateOnlyString(value)) {
+    return localDateOnlyToDate(value);
+  }
+
+  const d = value instanceof Date
+    ? value
+    : new Date(value);
+
+  return Number.isNaN(d.getTime()) ? null : d;
+}
+
+function sameLocalDay(a, b) {
+  const da = dateLikeToLocalDate(a);
+  const db = dateLikeToLocalDate(b);
+
+  if (!da || !db) return false;
+
+  return (
+    da.getFullYear() === db.getFullYear() &&
+    da.getMonth() === db.getMonth() &&
+    da.getDate() === db.getDate()
+  );
+}
+
+function normalizeCalendarEventEnd({ start, end, allDay }) {
+  if (!end) return null;
+
+  if (allDay && sameLocalDay(start, end)) {
+    return null;
+  }
+
+  return end;
+}
+
+function calendarEditorRangeIsValid({
+  start,
+  end,
+  allDay = false,
+}) {
+  if (!start) {
+    return {
+      ok: false,
+      message: 'Start date required',
+    };
+  }
+
+  // Empty end is valid.
+  if (!end) {
+    return {
+      ok: true,
+    };
+  }
+
+  const startDate = dateLikeToLocalDate(start);
+  const endDate = dateLikeToLocalDate(end);
+
+  if (!startDate || !endDate) {
+    return {
+      ok: false,
+      message: 'Invalid date range',
+    };
+  }
+
+  if (allDay) {
+    const s = startOfLocalDay(startDate).getTime();
+    const e = startOfLocalDay(endDate).getTime();
+
+    if (e < s) {
+      return {
+        ok: false,
+        message: 'End date must be on or after start date',
+      };
+    }
+
+    return {
+      ok: true,
+    };
+  }
+
+  if (endDate.getTime() <= startDate.getTime()) {
+    return {
+      ok: false,
+      message: 'End time must be after start time',
+    };
+  }
+
+  return {
+    ok: true,
+  };
+}
+
+function calendarEditorDatePlaceholder(allDay = false) {
+  const prefs = getCalendarPreferences();
+  const date = prefs.dateFormat || 'DD/MM/YYYY';
+
+  if (allDay) return date;
+
+  return prefs.timeFormat === '12'
+    ? `${date} 2:30 PM`
+    : `${date} 14:30`;
+}
+
+function formatCalendarEditorDatePart(date, prefs = getCalendarPreferences()) {
+  const d = dateLikeToLocalDate(date);
+  if (!d) return '';
+
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const year = String(d.getFullYear());
+
+  switch (prefs.dateFormat) {
+    case 'DD.MM.YYYY':
+      return `${day}.${month}.${year}`;
+
+    case 'YYYY-MM-DD':
+      return `${year}-${month}-${day}`;
+
+    case 'MM/DD/YYYY':
+      return `${month}/${day}/${year}`;
+
+    case 'DD/MM/YYYY':
+    default:
+      return `${day}/${month}/${year}`;
+  }
+}
+
+function formatCalendarEditorTimePart(date, prefs = getCalendarPreferences()) {
+  const d = dateLikeToLocalDate(date);
+  if (!d) return '';
+
+  const h = d.getHours();
+  const m = String(d.getMinutes()).padStart(2, '0');
+
+  if (prefs.timeFormat === '12') {
+    const suffix = h >= 12 ? 'PM' : 'AM';
+    const hour12 = h % 12 || 12;
+    return `${hour12}:${m} ${suffix}`;
+  }
+
+  return `${String(h).padStart(2, '0')}:${m}`;
+}
+
+function calendarEditorInputValue(iso, allDay = false) {
+  if (!iso) return '';
+
+  const d = dateLikeToLocalDate(iso);
+  if (!d) return '';
+
+  const datePart = formatCalendarEditorDatePart(d);
+
+  if (allDay) return datePart;
+
+  return `${datePart} ${formatCalendarEditorTimePart(d)}`;
+}
+
+function normalizeTwoDigitYear(y) {
+  const n = Number(y);
+  if (!Number.isFinite(n)) return NaN;
+
+  if (String(y).length <= 2) {
+    return n >= 70 ? 1900 + n : 2000 + n;
+  }
+
+  return n;
+}
+
+function parseCalendarEditorDatePart(raw, prefs = getCalendarPreferences()) {
+  let s = String(raw || '').trim();
+
+  if (!s) return null;
+
+  // Allows copy/paste like "Sunday, 30/05/2026"
+  // but deliberately does not attempt full natural-language month parsing.
+  s = s.replace(/^[^\d]+,\s*/, '').trim();
+
+  // Always accept ISO.
+  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+
+  if (m) {
+    const y = Number(m[1]);
+    const mo = Number(m[2]);
+    const d = Number(m[3]);
+
+    return validYmd(y, mo, d) ? { y, mo, d } : null;
+  }
+
+  // Accept numeric separators: 30/05/2026, 30.05.2026, 05-30-2026
+  m = s.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})$/);
+
+  if (!m) return null;
+
+  let a = Number(m[1]);
+  let b = Number(m[2]);
+  const y = normalizeTwoDigitYear(m[3]);
+
+  let d;
+  let mo;
+
+  if (prefs.dateFormat === 'MM/DD/YYYY') {
+    mo = a;
+    d = b;
+  } else {
+    // Default and ISO-ish European behavior:
+    // DD/MM/YYYY, DD.MM.YYYY
+    d = a;
+    mo = b;
+  }
+
+  // Safety: if the configured interpretation is impossible but the
+  // reverse is possible, accept the reverse. Example: 13/05 in MM/DD.
+  if (!validYmd(y, mo, d) && validYmd(y, d, mo)) {
+    const tmp = d;
+    d = mo;
+    mo = tmp;
+  }
+
+  return validYmd(y, mo, d) ? { y, mo, d } : null;
+}
+
+function validYmd(y, mo, d) {
+  if (!Number.isInteger(y) || !Number.isInteger(mo) || !Number.isInteger(d)) return false;
+  if (y < 1000 || y > 9999) return false;
+  if (mo < 1 || mo > 12) return false;
+  if (d < 1 || d > 31) return false;
+
+  const dt = new Date(y, mo - 1, d);
+
+  return (
+    dt.getFullYear() === y &&
+    dt.getMonth() === mo - 1 &&
+    dt.getDate() === d
+  );
+}
+
+function parseCalendarEditorTimePart(raw, prefs = getCalendarPreferences()) {
+  const s = String(raw || '').trim().toLowerCase();
+
+  if (!s) return null;
+
+  const m = s.match(/^(\d{1,2})(?::(\d{2}))?\s*([ap]\.?m\.?)?$/i);
+  if (!m) return null;
+
+  let h = Number(m[1]);
+  const min = m[2] == null ? 0 : Number(m[2]);
+  const ampm = (m[3] || '').replace(/\./g, '').toLowerCase();
+
+  if (!Number.isInteger(h) || !Number.isInteger(min)) return null;
+  if (min < 0 || min > 59) return null;
+
+  if (ampm) {
+    if (h < 1 || h > 12) return null;
+
+    if (ampm === 'pm' && h !== 12) h += 12;
+    if (ampm === 'am' && h === 12) h = 0;
+  } else {
+    if (h < 0 || h > 23) return null;
+  }
+
+  return {
+    h,
+    min,
+  };
+}
+
+function splitCalendarEditorDateTime(raw, allDay = false) {
+  const s = String(raw || '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .replace('T', ' ');
+
+  if (!s) {
+    return {
+      datePart: '',
+      timePart: '',
+    };
+  }
+
+  if (allDay) {
+    return {
+      datePart: s,
+      timePart: '',
+    };
+  }
+
+  // Match a time at the end:
+  // 30/05/2026 14:30
+  // 30/05/2026, 14:30
+  // 30/05/2026 2:30 PM
+  // 30/05/2026 2 PM
+  const m = s.match(/^(.*?)(?:,?\s+)(\d{1,2}(?::\d{2})?\s*(?:[ap]\.?m\.?)?)$/i);
+
+  if (!m) {
+    return {
+      datePart: s,
+      timePart: '',
+    };
+  }
+
+  return {
+    datePart: m[1].trim(),
+    timePart: m[2].trim(),
+  };
+}
+
+function parseCalendarEditorInput(value, allDay = false) {
+  const prefs = getCalendarPreferences();
+  const parts = splitCalendarEditorDateTime(value, allDay);
+
+  const date = parseCalendarEditorDatePart(parts.datePart, prefs);
+  if (!date) return null;
+
+  let time = {
+    h: 0,
+    min: 0,
+  };
+
+  if (!allDay) {
+    time = parseCalendarEditorTimePart(parts.timePart, prefs);
+
+    if (!time) {
+      return null;
+    }
+  }
+
+  const d = new Date(
+    date.y,
+    date.mo - 1,
+    date.d,
+    time.h,
+    time.min,
+    0,
+    0
+  );
+
+  if (Number.isNaN(d.getTime())) return null;
+
+  return d.toISOString();
+}
+
+// ============================================================
+// Modern YANTA Date/Time Picker
+// Mobile-first replacement for native browser date inputs.
+// ============================================================
+
+function localDateKeyFromDate(date) {
+  const d = date instanceof Date ? date : new Date(date);
+
+  if (Number.isNaN(d.getTime())) return '';
+
+  return [
+    d.getFullYear(),
+    String(d.getMonth() + 1).padStart(2, '0'),
+    String(d.getDate()).padStart(2, '0'),
+  ].join('-');
+}
+
+function cloneDate(d) {
+  return new Date(d.getTime());
+}
+
+function startOfLocalDay(d) {
+  const x = cloneDate(d);
+  x.setHours(0, 0, 0, 0);
+  return x;
+}
+
+function addLocalDays(d, days) {
+  const x = cloneDate(d);
+  x.setDate(x.getDate() + days);
+  return x;
+}
+
+function sameLocalDate(a, b) {
+  if (!a || !b) return false;
+
+  return (
+    a.getFullYear() === b.getFullYear() &&
+    a.getMonth() === b.getMonth() &&
+    a.getDate() === b.getDate()
+  );
+}
+
+function monthLabel(year, month) {
+  const prefs = getCalendarPreferences();
+
+  try {
+    return new Intl.DateTimeFormat(fullCalendarLocale(prefs), {
+      month: 'long',
+      year: 'numeric',
+    }).format(new Date(year, month, 1));
+  } catch {
+    return `${year}-${String(month + 1).padStart(2, '0')}`;
+  }
+}
+
+function weekdayLabelsForPicker() {
+  const prefs = getCalendarPreferences();
+  const weekStart = Number(prefs.weekStart ?? 1);
+  const base = new Date(2026, 4, 3); // Sunday 2026-05-03
+
+  const out = [];
+
+  for (let i = 0; i < 7; i++) {
+    const day = (weekStart + i) % 7;
+    const d = addLocalDays(base, day);
+
+    try {
+      out.push(new Intl.DateTimeFormat(fullCalendarLocale(prefs), {
+        weekday: 'short',
+      }).format(d));
+    } catch {
+      out.push(['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'][day]);
+    }
+  }
+
+  return out;
+}
+
+function ensureCalendarDateTimePickerModal() {
+  if (calendarDateTimePickerModal) return calendarDateTimePickerModal;
+
+  calendarDateTimePickerModal = document.createElement('div');
+  calendarDateTimePickerModal.className = 'modal yanta-calendar-datetime-picker-modal';
+  calendarDateTimePickerModal.hidden = true;
+
+  calendarDateTimePickerModal.addEventListener('click', (e) => {
+    if (e.target === calendarDateTimePickerModal) {
+      closeCalendarDateTimePicker();
+    }
+
+    if (e.target.closest?.('[data-ydtp-close]')) {
+      closeCalendarDateTimePicker();
+    }
+  });
+
+  document.body.append(calendarDateTimePickerModal);
+
+  return calendarDateTimePickerModal;
+}
+
+function closeCalendarDateTimePicker() {
+  if (calendarDateTimePickerModal) {
+    calendarDateTimePickerModal.hidden = true;
+  }
+}
+
+function openCalendarDateTimePicker({
+  title = 'Pick date',
+  value = null,
+  allDay = false,
+  allowClear = false,
+  onPick = null,
+} = {}) {
+  const modal = ensureCalendarDateTimePickerModal();
+
+  const prefs = getCalendarPreferences();
+
+  let selected =
+    dateLikeToLocalDate(value) ||
+    new Date();
+
+  selected = cloneDate(selected);
+  selected.setSeconds(0, 0);
+
+  if (allDay) {
+    selected.setHours(0, 0, 0, 0);
+  }
+
+  let viewYear = selected.getFullYear();
+  let viewMonth = selected.getMonth();
+
+  let mode = 'date'; // date | time
+
+  const render = () => {
+    const currentPrefs = getCalendarPreferences();
+    const hour12 = currentPrefs.timeFormat === '12';
+
+    const selectedHour = selected.getHours();
+    const selectedMinute = selected.getMinutes();
+
+    const hour12Value = selectedHour % 12 || 12;
+    const isPm = selectedHour >= 12;
+
+    const weekdays = weekdayLabelsForPicker();
+
+    const firstOfMonth = new Date(viewYear, viewMonth, 1);
+    const weekStart = Number(currentPrefs.weekStart ?? 1);
+    const offset = (firstOfMonth.getDay() - weekStart + 7) % 7;
+    const gridStart = addLocalDays(firstOfMonth, -offset);
+
+    const today = startOfLocalDay(new Date());
+
+    const daysHtml = [];
+
+    for (let i = 0; i < 42; i++) {
+      const d = addLocalDays(gridStart, i);
+      const inMonth = d.getMonth() === viewMonth;
+      const selectedDay = sameLocalDate(d, selected);
+      const todayDay = sameLocalDate(d, today);
+
+      daysHtml.push(`
+        <button
+          type="button"
+          class="yanta-dtp-day ${inMonth ? '' : 'is-out'} ${selectedDay ? 'selected' : ''} ${todayDay ? 'today' : ''}"
+          data-ydtp-day="${escapeAttr(localDateKeyFromDate(d))}">
+          <span>${d.getDate()}</span>
+        </button>
+      `);
+    }
+
+    const minuteSet = new Set();
+
+    for (let m = 0; m < 60; m += 5) {
+      minuteSet.add(m);
+    }
+
+    minuteSet.add(selectedMinute);
+
+    const minutes = [...minuteSet].sort((a, b) => a - b);
+
+    const hoursHtml = hour12
+      ? Array.from({ length: 12 }, (_, i) => i + 1).map((h) => `
+          <button
+            type="button"
+            class="yanta-dtp-wheel-item ${h === hour12Value ? 'selected' : ''}"
+            data-ydtp-hour12="${h}">
+            ${h}
+          </button>
+        `).join('')
+      : Array.from({ length: 24 }, (_, h) => `
+          <button
+            type="button"
+            class="yanta-dtp-wheel-item ${h === selectedHour ? 'selected' : ''}"
+            data-ydtp-hour="${h}">
+            ${String(h).padStart(2, '0')}
+          </button>
+        `).join('');
+
+    const minutesHtml = minutes.map((m) => `
+      <button
+        type="button"
+        class="yanta-dtp-wheel-item ${m === selectedMinute ? 'selected' : ''}"
+        data-ydtp-minute="${m}">
+        ${String(m).padStart(2, '0')}
+      </button>
+    `).join('');
+
+    modal.innerHTML = `
+      <div class="modal-card yanta-calendar-datetime-card">
+        <header class="yanta-dtp-head">
+          <div>
+            <div class="yanta-dtp-kicker">${escapeHtml(title)}</div>
+            <div class="yanta-dtp-value">
+              ${escapeHtml(formatCalendarDateTime(selected, {
+                allDay,
+                editor: true,
+                includeWeekday: true,
+              }))}
+            </div>
+          </div>
+
+          <button class="icon-btn" data-ydtp-close title="Close">${lucide('x', 16)}</button>
+        </header>
+
+        <div class="yanta-dtp-tabs">
+          <button class="${mode === 'date' ? 'active' : ''}" data-ydtp-mode="date">
+            ${lucide('calendar-days', 14)} Date
+          </button>
+          <button class="${mode === 'time' ? 'active' : ''}" data-ydtp-mode="time" ${allDay ? 'disabled' : ''}>
+            ${lucide('clock', 14)} Time
+          </button>
+        </div>
+
+        <div class="yanta-dtp-body">
+          <section class="yanta-dtp-panel ${mode === 'date' ? 'active' : ''}" data-ydtp-panel="date">
+            <div class="yanta-dtp-month-row">
+              <button type="button" class="icon-btn" data-ydtp-month="-1">${lucide('chevron-left', 17)}</button>
+              <strong>${escapeHtml(monthLabel(viewYear, viewMonth))}</strong>
+              <button type="button" class="icon-btn" data-ydtp-month="1">${lucide('chevron-right', 17)}</button>
+            </div>
+
+            <div class="yanta-dtp-weekdays">
+              ${weekdays.map((w) => `<span>${escapeHtml(w)}</span>`).join('')}
+            </div>
+
+            <div class="yanta-dtp-grid">
+              ${daysHtml.join('')}
+            </div>
+          </section>
+
+          <section class="yanta-dtp-panel ${mode === 'time' ? 'active' : ''}" data-ydtp-panel="time">
+            <div class="yanta-dtp-time-display">
+              ${escapeHtml(formatCalendarEditorTimePart(selected))}
+            </div>
+
+            <div class="yanta-dtp-time-wheels ${hour12 ? 'is-12h' : ''}">
+              <div class="yanta-dtp-wheel" data-wheel="hour">
+                <div class="yanta-dtp-wheel-label">Hour</div>
+                ${hoursHtml}
+              </div>
+
+              <div class="yanta-dtp-wheel" data-wheel="minute">
+                <div class="yanta-dtp-wheel-label">Minute</div>
+                ${minutesHtml}
+              </div>
+
+              ${hour12 ? `
+                <div class="yanta-dtp-ampm">
+                  <button type="button" class="${!isPm ? 'selected' : ''}" data-ydtp-ampm="am">AM</button>
+                  <button type="button" class="${isPm ? 'selected' : ''}" data-ydtp-ampm="pm">PM</button>
+                </div>
+              ` : ''}
+            </div>
+          </section>
+        </div>
+
+        <footer class="yanta-dtp-foot">
+          ${allowClear ? `<button type="button" class="btn" data-ydtp-clear>Clear</button>` : ''}
+          <button type="button" class="btn" data-ydtp-today>${allDay ? 'Today' : 'Now'}</button>
+          <span class="grow"></span>
+          <button type="button" class="btn" data-ydtp-close>Cancel</button>
+          <button type="button" class="btn primary" data-ydtp-ok>OK</button>
+        </footer>
+      </div>
+    `;
+
+    modal.querySelectorAll('[data-ydtp-mode]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        if (btn.disabled) return;
+        mode = btn.dataset.ydtpMode || 'date';
+        render();
+      });
+    });
+
+    modal.querySelectorAll('[data-ydtp-month]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const delta = Number(btn.dataset.ydtpMonth || 0);
+        const next = new Date(viewYear, viewMonth + delta, 1);
+
+        viewYear = next.getFullYear();
+        viewMonth = next.getMonth();
+
+        render();
+      });
+    });
+
+    modal.querySelectorAll('[data-ydtp-day]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const date = localDateOnlyToDate(btn.dataset.ydtpDay);
+        if (!date) return;
+
+        const h = selected.getHours();
+        const m = selected.getMinutes();
+
+        selected = date;
+        selected.setHours(allDay ? 0 : h, allDay ? 0 : m, 0, 0);
+
+        if (!allDay) {
+          mode = 'time';
+        }
+
+        render();
+      });
+    });
+
+    modal.querySelectorAll('[data-ydtp-hour]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        selected.setHours(Number(btn.dataset.ydtpHour || 0), selected.getMinutes(), 0, 0);
+        render();
+      });
+    });
+
+    modal.querySelectorAll('[data-ydtp-hour12]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const h12 = Number(btn.dataset.ydtpHour12 || 12);
+        const currentlyPm = selected.getHours() >= 12;
+
+        let h = h12 % 12;
+        if (currentlyPm) h += 12;
+
+        selected.setHours(h, selected.getMinutes(), 0, 0);
+        render();
+      });
+    });
+
+    modal.querySelectorAll('[data-ydtp-minute]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        selected.setMinutes(Number(btn.dataset.ydtpMinute || 0), 0, 0);
+        render();
+      });
+    });
+
+    modal.querySelectorAll('[data-ydtp-ampm]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const wantPm = btn.dataset.ydtpAmpm === 'pm';
+        let h = selected.getHours();
+
+        if (wantPm && h < 12) h += 12;
+        if (!wantPm && h >= 12) h -= 12;
+
+        selected.setHours(h, selected.getMinutes(), 0, 0);
+        render();
+      });
+    });
+
+    modal.querySelector('[data-ydtp-today]')?.addEventListener('click', () => {
+      const n = new Date();
+      selected = allDay ? startOfLocalDay(n) : n;
+      selected.setSeconds(0, 0);
+      viewYear = selected.getFullYear();
+      viewMonth = selected.getMonth();
+      render();
+    });
+
+    modal.querySelector('[data-ydtp-clear]')?.addEventListener('click', () => {
+      onPick?.(null);
+      closeCalendarDateTimePicker();
+    });
+
+    modal.querySelector('[data-ydtp-ok]')?.addEventListener('click', () => {
+      const picked = cloneDate(selected);
+
+      if (allDay) {
+        picked.setHours(0, 0, 0, 0);
+      }
+
+      onPick?.(picked.toISOString());
+      closeCalendarDateTimePicker();
+    });
+
+    requestAnimationFrame(() => {
+      modal
+        .querySelector('.yanta-dtp-wheel-item.selected')
+        ?.scrollIntoView({
+          block: 'center',
+          inline: 'nearest',
+        });
+    });
+  };
+
+  modal.hidden = false;
+  render();
 }
 
 function cleanUndefined(obj) {
@@ -3553,6 +4340,12 @@ export function putCalendarEvent(patch) {
 
   scheduleCalendarRender();
 
+  if (calendarMode === 'pane') {
+    requestAnimationFrame(() => {
+      renderCalendarEvents();
+    });
+  }
+
   window.dispatchEvent(new CustomEvent('yanta-calendar-updated', {
     detail: { eventId: ev.id },
   }));
@@ -3580,6 +4373,12 @@ export function deleteCalendarEvent(eventId) {
   state.calendarEvents.delete(id);
 
   scheduleCalendarRender();
+
+  if (calendarMode === 'pane') {
+    requestAnimationFrame(() => {
+      renderCalendarEvents();
+    });
+  }
 
   window.dispatchEvent(new CustomEvent('yanta-calendar-updated', {
     detail: { eventId: id, deleted: true },
@@ -3753,9 +4552,9 @@ function fullCalendarEventFromMarkdownEvent(ev) {
     borderColor: background,
     textColor: text,
 
-    editable: false,
-    startEditable: false,
-    durationEditable: false,
+    editable: !calendarMobile(),
+    startEditable: !calendarMobile(),
+    durationEditable: !calendarMobile(),
 
     classNames: [
       'yanta-cal-markdown-event',
@@ -3811,19 +4610,51 @@ function calendarEventContent(info) {
 }
 
 function markdownForCalendarEvent(raw, fcEvent = null) {
+  const allDay = !!(raw?.allDay ?? fcEvent?.allDay);
+
+  const start = allDay
+    ? (
+        raw?.start
+          ? localInputValue(raw.start, true)
+          : localInputValue(fcEvent?.start, true)
+      )
+    : (
+        raw?.start ||
+        fcEvent?.start?.toISOString?.() ||
+        new Date().toISOString()
+      );
+
+  const end = allDay
+    ? (
+        raw?.end
+          ? localInputValue(raw.end, true)
+          : null
+      )
+    : (
+        raw?.end ||
+        fcEvent?.end?.toISOString?.() ||
+        null
+      );
+
+  const normalizedEnd = normalizeCalendarEventEnd({
+    start,
+    end,
+    allDay,
+  });
+
   const ev = {
     id: raw?.id || fcEvent?.id || '',
     title: raw?.title || fcEvent?.title || 'Untitled event',
-    start: raw?.start || fcEvent?.start?.toISOString?.() || new Date().toISOString(),
-    end: raw?.end || fcEvent?.end?.toISOString?.() || null,
-    allDay: !!(raw?.allDay ?? fcEvent?.allDay),
+    start,
+    end: normalizedEnd,
+    allDay,
     categoryId: raw?.categoryId || DEFAULT_CATEGORY_ID,
     location: raw?.location || '',
     description: raw?.description || '',
     status: raw?.status || 'confirmed',
     recurrence: raw?.recurrence || null,
     reminders: raw?.reminders || [],
-    noteId: raw?.noteId || null,
+    noteId: null,
   };
 
   return markdownLineForCalendarEvent(ev);
@@ -3842,7 +4673,6 @@ function bindCalendarEventDragToMarkdown(info) {
   info.el.setAttribute('draggable', 'true');
 
   const startDrag = (e) => {
-    console.log('[calendar dragstart]', markdown);
     const raw = info.event.extendedProps?.raw || state.calendarEvents.get(id) || {
       id,
       title: info.event.title,
@@ -3937,6 +4767,349 @@ function installDelegatedCalendarEventDrag() {
   }, true);
 }
 
+function calendarEventRawForDrag(fcEvent) {
+  if (!fcEvent) return null;
+
+  return fcEvent.extendedProps?.raw ||
+    state.calendarEvents.get(fcEvent.id) ||
+    {
+      id: fcEvent.id,
+      title: fcEvent.title || 'Untitled event',
+      start: fcEvent.start?.toISOString?.() || new Date().toISOString(),
+      end: fcEvent.end?.toISOString?.() || null,
+      allDay: !!fcEvent.allDay,
+      categoryId: fcEvent.extendedProps?.categoryId || DEFAULT_CATEGORY_ID,
+      noteId: fcEvent.extendedProps?.noteId || null,
+      location: '',
+      description: '',
+      status: 'confirmed',
+      recurrence: null,
+      reminders: [],
+    };
+}
+
+function nearestCalendarEventElement(target) {
+  const el = target?.closest?.('.fc-event[data-yanta-event-id], .fc-event');
+
+  if (!el) return null;
+
+  // Ignore FullCalendar mirror/helper artifacts.
+  if (
+    el.classList.contains('fc-event-mirror') ||
+    el.classList.contains('fc-event-dragging') ||
+    el.closest('.fc-event-mirror')
+  ) {
+    return null;
+  }
+
+  return el;
+}
+
+function eventIdFromCalendarEventElement(eventEl) {
+  if (!eventEl) return '';
+
+  return (
+    eventEl.dataset?.yantaEventId ||
+    eventEl.getAttribute?.('data-yanta-event-id') ||
+    eventEl.querySelector?.('[data-yanta-event-id]')?.dataset?.yantaEventId ||
+    ''
+  );
+}
+
+function pointInsideRect(x, y, rect, pad = 0) {
+  return (
+    x >= rect.left - pad &&
+    x <= rect.right + pad &&
+    y >= rect.top - pad &&
+    y <= rect.bottom + pad
+  );
+}
+
+function pointOverEditor(clientX, clientY) {
+  const paneEdit = $('paneEdit');
+  if (!paneEdit) return false;
+
+  const hit = document.elementFromPoint(clientX, clientY);
+
+  return !!hit && paneEdit.contains(hit);
+}
+
+function createCalendarExternalDragGhost(d) {
+  const rect = d.eventEl.getBoundingClientRect();
+  const ghost = d.eventEl.cloneNode(true);
+
+  ghost.classList.add('yanta-cal-external-drag-ghost');
+  ghost.setAttribute('aria-hidden', 'true');
+
+  ghost.style.position = 'fixed';
+  ghost.style.left = '0';
+  ghost.style.top = '0';
+  ghost.style.width = `${Math.max(1, rect.width)}px`;
+  ghost.style.height = `${Math.max(1, rect.height)}px`;
+  ghost.style.margin = '0';
+  ghost.style.zIndex = '99999';
+  ghost.style.pointerEvents = 'none';
+  ghost.style.opacity = '0.94';
+  ghost.style.willChange = 'transform';
+  ghost.style.transform = `translate3d(${d.lastX - rect.width / 2}px, ${d.lastY - rect.height / 2}px, 0)`;
+
+  document.body.append(ghost);
+
+  d.ghost = ghost;
+  d.ghostWidth = Math.max(1, rect.width);
+  d.ghostHeight = Math.max(1, rect.height);
+}
+
+function updateCalendarExternalDragGhost(d, clientX, clientY) {
+  if (!d?.ghost) return;
+
+  const w = d.ghostWidth || 1;
+  const h = d.ghostHeight || 1;
+
+  d.ghost.style.transform = `translate3d(${clientX - w / 2}px, ${clientY - h / 2}px, 0)`;
+}
+
+function beginCalendarExternalEventDrag(d, originalEvent) {
+  if (!d || d.mode !== 'pending') return;
+
+  d.mode = 'external';
+
+  calendarExternalEventSuppressClickUntil = performance.now() + 1200;
+
+  // Hide original FullCalendar event while our external ghost is active.
+  // Otherwise users see the source event + our ghost + sometimes FC mirror.
+  try {
+    d.eventEl?.classList.add('yanta-cal-external-source');
+  } catch {}
+
+  cleanupFullCalendarDragArtifacts();
+
+  document.documentElement.classList.add('yanta-cal-external-dragging');
+
+  try {
+    fc?.unselect?.();
+  } catch {}
+
+  suppressCalendarSelectionFor(1200);
+
+  createCalendarExternalDragGhost(d);
+  updateCalendarExternalDragGhost(d, d.lastX, d.lastY);
+
+  if (originalEvent?.cancelable) {
+    originalEvent.preventDefault();
+  }
+
+  originalEvent?.stopPropagation?.();
+  originalEvent?.stopImmediatePropagation?.();
+}
+
+function finishCalendarExternalEventDrag(d, originalEvent, {
+  cancelled = false,
+} = {}) {
+  try {
+    if (d?.mode === 'external') {
+      if (originalEvent?.cancelable) {
+        originalEvent.preventDefault();
+      }
+
+      originalEvent?.stopPropagation?.();
+      originalEvent?.stopImmediatePropagation?.();
+
+      let inserted = false;
+
+      if (!cancelled && d.markdown) {
+        inserted = insertTextAtCoords(
+          d.markdown,
+          d.lastX,
+          d.lastY
+        );
+      }
+
+      if (inserted) {
+        const isStoredCalendarEvent =
+          d.fcEvent?.extendedProps?.yantaKind === 'event' &&
+          d.raw?.id &&
+          state.calendarEvents.has(d.raw.id);
+
+        // Default UX:
+        // dragging a stored calendar event into a note converts it into a
+        // markdown-owned calendar event to avoid duplicate events.
+        //
+        // Hold Alt/Option while dropping if you want to copy instead.
+        const copyInsteadOfConvert = !!originalEvent?.altKey;
+
+        if (isStoredCalendarEvent && !copyInsteadOfConvert) {
+          deleteCalendarEvent(d.raw.id);
+          toast('Calendar event linked to note', 'success');
+        } else {
+          toast('Calendar event inserted into note', 'success');
+        }
+
+        window.dispatchEvent(new CustomEvent('yanta-calendar-markdown-changed', {
+          detail: {
+            noteId: state.currentNoteId,
+            convertedEventId: isStoredCalendarEvent ? d.raw.id : null,
+          },
+        }));
+
+        scheduleCalendarRender();
+      }
+    }
+  } finally {
+    try {
+      d?.ghost?.remove();
+    } catch {}
+
+  try {
+      d?.eventEl?.classList.remove('yanta-cal-external-source');
+    } catch {}
+
+    document.documentElement.classList.remove('yanta-cal-external-dragging');
+
+    calendarExternalEventDrag = null;
+
+    cleanupFullCalendarDragArtifacts();
+
+    requestAnimationFrame(() => {
+      cleanupFullCalendarDragArtifacts();
+    });
+  }
+}
+
+function installPointerCalendarEventExternalDrag() {
+  const root = $('calendar');
+
+  if (!root || calendarExternalEventDragInstalled) return;
+
+  calendarExternalEventDragInstalled = true;
+
+  root.addEventListener('pointerdown', (e) => {
+    if (!fc) return;
+    if (e.button != null && e.button !== 0) return;
+
+    // This is desktop/mouse behavior. Touch has separate mobile calendar logic.
+    if (e.pointerType && e.pointerType !== 'mouse') return;
+
+    const eventEl = nearestCalendarEventElement(e.target);
+    if (!eventEl || !root.contains(eventEl)) return;
+
+    const eventId = eventIdFromCalendarEventElement(eventEl);
+    if (!eventId) return;
+
+    const fcEvent = fc.getEventById(eventId);
+    if (!fcEvent) return;
+
+    const raw = calendarEventRawForDrag(fcEvent);
+    if (!raw) return;
+
+    const markdown = markdownForCalendarEvent(raw, fcEvent);
+
+    if (!markdown) return;
+
+    calendarExternalEventDrag = {
+      pointerId: e.pointerId,
+      mode: 'pending',
+
+      eventEl,
+      eventId,
+      fcEvent,
+      raw,
+      markdown,
+
+      startX: e.clientX,
+      startY: e.clientY,
+      lastX: e.clientX,
+      lastY: e.clientY,
+
+      ghost: null,
+      ghostWidth: 0,
+      ghostHeight: 0,
+
+      startedAt: performance.now(),
+    };
+
+    // Do NOT preventDefault here.
+    // This allows normal click and FullCalendar internal drag to still work.
+  }, true);
+
+  document.addEventListener('pointermove', (e) => {
+    const d = calendarExternalEventDrag;
+    if (!d) return;
+    if (d.pointerId !== e.pointerId) return;
+
+    d.lastX = e.clientX;
+    d.lastY = e.clientY;
+
+    const moved = Math.hypot(
+      e.clientX - d.startX,
+      e.clientY - d.startY
+    );
+
+    if (d.mode === 'pending') {
+      if (moved < 7) return;
+
+      const rect = root.getBoundingClientRect();
+
+      const outsideCalendar = !pointInsideRect(e.clientX, e.clientY, rect, 4);
+      const overEditor = pointOverEditor(e.clientX, e.clientY);
+
+      // While still inside the calendar, let FullCalendar handle normal
+      // event drag/drop. YANTA only takes over once the user drags outward.
+      if (!outsideCalendar && !overEditor) {
+        return;
+      }
+
+      beginCalendarExternalEventDrag(d, e);
+    }
+
+    if (d.mode === 'external') {
+      if (e.cancelable) {
+        e.preventDefault();
+      }
+
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+
+      updateCalendarExternalDragGhost(d, e.clientX, e.clientY);
+    }
+  }, {
+    capture: true,
+    passive: false,
+  });
+
+  document.addEventListener('pointerup', (e) => {
+    const d = calendarExternalEventDrag;
+    if (!d) return;
+    if (d.pointerId !== e.pointerId) return;
+
+    d.lastX = e.clientX;
+    d.lastY = e.clientY;
+
+    if (d.mode === 'external') {
+      finishCalendarExternalEventDrag(d, e);
+      return;
+    }
+
+    calendarExternalEventDrag = null;
+  }, {
+    capture: true,
+    passive: false,
+  });
+
+  document.addEventListener('pointercancel', (e) => {
+    const d = calendarExternalEventDrag;
+    if (!d) return;
+    if (d.pointerId !== e.pointerId) return;
+
+    finishCalendarExternalEventDrag(d, e, {
+      cancelled: true,
+    });
+  }, {
+    capture: true,
+    passive: false,
+  });
+}
+
 // ============================================================
 // Derived calendar events from Markdown
 // ============================================================
@@ -3970,13 +5143,19 @@ export function derivedEventsFromTasksAndNotes() {
 function eventIntersectsRange(raw, rangeStart, rangeEnd) {
   if (!raw?.start) return false;
 
-  const startMs = new Date(raw.start).getTime();
+  const startDate = dateLikeToLocalDate(raw.start);
+  if (!startDate) return false;
 
-  if (!Number.isFinite(startMs)) return false;
+  const startMs = startDate.getTime();
 
-  let endMs = raw.end
-    ? new Date(raw.end).getTime()
-    : startMs + (raw.allDay ? 86400000 : 1);
+  let endMs;
+
+  if (raw.end) {
+    const endDate = dateLikeToLocalDate(raw.end);
+    endMs = endDate?.getTime();
+  } else {
+    endMs = startMs + (raw.allDay ? 86400000 : 1);
+  }
 
   if (!Number.isFinite(endMs)) {
     endMs = startMs + (raw.allDay ? 86400000 : 1);
@@ -3988,13 +5167,19 @@ function eventIntersectsRange(raw, rangeStart, rangeEnd) {
 function fcEventIntersectsRange(ev, rangeStart, rangeEnd) {
   if (!ev?.start) return false;
 
-  const startMs = new Date(ev.start).getTime();
+  const startDate = dateLikeToLocalDate(ev.start);
+  if (!startDate) return false;
 
-  if (!Number.isFinite(startMs)) return false;
+  const startMs = startDate.getTime();
 
-  let endMs = ev.end
-    ? new Date(ev.end).getTime()
-    : startMs + (ev.allDay ? 86400000 : 1);
+  let endMs;
+
+  if (ev.end) {
+    const endDate = dateLikeToLocalDate(ev.end);
+    endMs = endDate?.getTime();
+  } else {
+    endMs = startMs + (ev.allDay ? 86400000 : 1);
+  }
 
   if (!Number.isFinite(endMs)) {
     endMs = startMs + (ev.allDay ? 86400000 : 1);
@@ -4397,12 +5582,40 @@ function openEventEditor(input = {}) {
         <div class="yanta-calendar-date-grid">
           <label>
             Start
-            <input class="text-input" data-field="start" type="${ev.allDay ? 'date' : 'datetime-local'}" value="${escapeAttr(localInputValue(ev.start, ev.allDay))}" />
+            <div class="yanta-calendar-date-input-row">
+              <input
+                class="text-input"
+                data-field="start"
+                type="text"
+                inputmode="numeric"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="${escapeAttr(calendarEditorDatePlaceholder(ev.allDay))}"
+                value="${escapeAttr(calendarEditorInputValue(ev.start, ev.allDay))}" />
+              <button type="button" class="icon-btn" data-date-picker="start" title="Pick start date/time">
+                ${lucide('calendar-clock', 16)}
+              </button>
+            </div>
+            <div class="yanta-calendar-date-preview" data-date-preview="start"></div>
           </label>
 
           <label>
             End
-            <input class="text-input" data-field="end" type="${ev.allDay ? 'date' : 'datetime-local'}" value="${escapeAttr(localInputValue(ev.end, ev.allDay))}" />
+            <div class="yanta-calendar-date-input-row">
+              <input
+                class="text-input"
+                data-field="end"
+                type="text"
+                inputmode="numeric"
+                autocomplete="off"
+                spellcheck="false"
+                placeholder="${escapeAttr(calendarEditorDatePlaceholder(ev.allDay))}"
+                value="${escapeAttr(calendarEditorInputValue(ev.end, ev.allDay))}" />
+              <button type="button" class="icon-btn" data-date-picker="end" title="Pick end date/time">
+                ${lucide('calendar-clock', 16)}
+              </button>
+            </div>
+            <div class="yanta-calendar-date-preview" data-date-preview="end"></div>
           </label>
         </div>
 
@@ -4448,36 +5661,174 @@ function openEventEditor(input = {}) {
   const startInput = modal.querySelector('[data-field="start"]');
   const endInput = modal.querySelector('[data-field="end"]');
 
+  const updateDatePreviews = () => {
+    const allDay = !!allDayInput?.checked;
+
+    const startIso = parseCalendarEditorInput(startInput?.value, allDay);
+    const endIso = parseCalendarEditorInput(endInput?.value, allDay);
+
+    const startPreview = modal.querySelector('[data-date-preview="start"]');
+    const endPreview = modal.querySelector('[data-date-preview="end"]');
+
+    if (startPreview) {
+      startPreview.textContent = startInput?.value && !startIso
+        ? `Invalid date · expected ${calendarEditorDatePlaceholder(allDay)}`
+        : startIso
+          ? formatCalendarDateTime(startIso, {
+              allDay,
+              editor: true,
+              includeWeekday: true,
+            })
+          : '';
+    }
+
+    if (endPreview) {
+      endPreview.textContent = endInput?.value && !endIso
+        ? `Invalid date · expected ${calendarEditorDatePlaceholder(allDay)}`
+        : endIso
+          ? formatCalendarDateTime(endIso, {
+              allDay,
+              editor: true,
+              includeWeekday: true,
+            })
+          : '';
+    }
+
+    const rangeValidation = calendarEditorRangeIsValid({
+      start: startIso,
+      end: endIso,
+      allDay,
+    });
+
+    const endHasValue = !!endInput?.value?.trim();
+    const startInvalid = !!startInput?.value && !startIso;
+    const endInvalid = endHasValue && (!endIso || !rangeValidation.ok);
+
+    startPreview?.classList.toggle('invalid', startInvalid);
+    endPreview?.classList.toggle('invalid', endInvalid);
+
+    if (endPreview && endHasValue && endIso && !rangeValidation.ok) {
+      endPreview.textContent = rangeValidation.message || 'Invalid date range';
+    }
+  };
+
+  const openPickerForInput = (which) => {
+    const inputEl = which === 'start' ? startInput : endInput;
+    const allDay = !!allDayInput?.checked;
+
+    const parsed =
+      parseCalendarEditorInput(inputEl.value, allDay) ||
+      (which === 'start' ? ev.start : ev.end) ||
+      ev.start ||
+      new Date().toISOString();
+
+    openCalendarDateTimePicker({
+      title: which === 'start' ? 'Start' : 'End',
+      value: parsed,
+      allDay,
+      allowClear: which === 'end',
+      onPick: (iso) => {
+        inputEl.value = iso
+          ? calendarEditorInputValue(iso, allDay)
+          : '';
+
+        updateDatePreviews();
+      },
+    });
+  };
+
+  modal.querySelector('[data-date-picker="start"]')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    openPickerForInput('start');
+  });
+
+  modal.querySelector('[data-date-picker="end"]')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    openPickerForInput('end');
+  });
+
+  startInput?.addEventListener('input', updateDatePreviews);
+  startInput?.addEventListener('change', updateDatePreviews);
+  endInput?.addEventListener('input', updateDatePreviews);
+  endInput?.addEventListener('change', updateDatePreviews);
+
   allDayInput?.addEventListener('change', () => {
     const allDay = allDayInput.checked;
+    const wasAllDay = !allDay;
 
-    const startIso = fromLocalInput(startInput.value, !allDayInput.checked) || ev.start;
-    const endIso = fromLocalInput(endInput.value, !allDayInput.checked) || ev.end;
+    const startIso =
+      parseCalendarEditorInput(startInput.value, wasAllDay) ||
+      ev.start;
 
-    startInput.type = allDay ? 'date' : 'datetime-local';
-    endInput.type = allDay ? 'date' : 'datetime-local';
+    const endIso =
+      parseCalendarEditorInput(endInput.value, wasAllDay) ||
+      ev.end;
 
-    startInput.value = localInputValue(startIso, allDay);
-    endInput.value = localInputValue(endIso, allDay);
+    startInput.placeholder = calendarEditorDatePlaceholder(allDay);
+    endInput.placeholder = calendarEditorDatePlaceholder(allDay);
+
+    startInput.value = calendarEditorInputValue(startIso, allDay);
+    endInput.value = calendarEditorInputValue(endIso, allDay);
+
+    updateDatePreviews();
   });
+
+  updateDatePreviews();
 
   modal.querySelector('[data-action="save"]')?.addEventListener('click', async () => {
     const allDay = !!modal.querySelector('[data-field="allDay"]')?.checked;
+
+    const parsedStart = parseCalendarEditorInput(
+      modal.querySelector('[data-field="start"]').value,
+      allDay
+    );
+
+    const parsedEnd = parseCalendarEditorInput(
+      modal.querySelector('[data-field="end"]').value,
+      allDay
+    );
 
     const patch = {
       ...ev,
       title: modal.querySelector('[data-field="title"]').value.trim() || 'Untitled event',
       categoryId: modal.querySelector('[data-field="categoryId"]').value || DEFAULT_CATEGORY_ID,
       allDay,
-      start: fromLocalInput(modal.querySelector('[data-field="start"]').value, allDay),
-      end: fromLocalInput(modal.querySelector('[data-field="end"]').value, allDay),
+      start: parsedStart,
+      end: normalizeCalendarEventEnd({
+        start: parsedStart,
+        end: parsedEnd,
+        allDay,
+      }),
       location: modal.querySelector('[data-field="location"]').value.trim(),
       description: modal.querySelector('[data-field="description"]').value.trim(),
       noteId: modal.querySelector('[data-field="noteId"]').value.trim() || null,
     };
 
     if (!patch.start) {
-      toast('Start date required', 'error');
+      toast(`Start date required · expected ${calendarEditorDatePlaceholder(allDay)}`, 'error');
+      updateDatePreviews();
+      return;
+    }
+
+    const endInputRaw = modal.querySelector('[data-field="end"]').value.trim();
+
+    if (endInputRaw && !parsedEnd) {
+      toast(`End date invalid · expected ${calendarEditorDatePlaceholder(allDay)}`, 'error');
+      updateDatePreviews();
+      return;
+    }
+
+    const rangeValidation = calendarEditorRangeIsValid({
+      start: parsedStart,
+      end: parsedEnd,
+      allDay,
+    });
+
+    if (!rangeValidation.ok) {
+      toast(rangeValidation.message || 'Invalid date range', 'error');
+      updateDatePreviews();
       return;
     }
 
@@ -4500,6 +5851,14 @@ function openEventEditor(input = {}) {
 
       if (ok) {
         toast('Calendar link updated', 'success');
+
+        window.dispatchEvent(new CustomEvent('yanta-calendar-markdown-changed', {
+          detail: {
+            noteId: markdownRef.noteId,
+            eventId: ev.id,
+          },
+        }));
+
         scheduleCalendarRender();
       } else {
         toast('Could not update calendar link', 'error');
@@ -4530,6 +5889,15 @@ function openEventEditor(input = {}) {
 
       if (ok) {
         toast('Calendar link removed', 'success');
+
+        window.dispatchEvent(new CustomEvent('yanta-calendar-markdown-changed', {
+          detail: {
+            noteId: markdownRef.noteId,
+            eventId: ev.id,
+            deleted: true,
+          },
+        }));
+
         scheduleCalendarRender();
       } else {
         toast('Could not remove calendar link', 'error');
@@ -4982,12 +6350,42 @@ function renderCategoriesModal() {
 // Calendar surface
 // ============================================================
 
+function subtractOneDayKey(dateKey) {
+  const d = localDateOnlyToDate(dateKey);
+  if (!d) return dateKey;
+
+  d.setDate(d.getDate() - 1);
+
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+
+  return `${y}-${m}-${day}`;
+}
+
 function toNewEventInputFromSelect(info) {
+  if (info.allDay) {
+    const start = String(info.startStr || '').slice(0, 10);
+    const rawEnd = String(info.endStr || '').slice(0, 10);
+
+    const inclusiveEnd =
+      rawEnd && rawEnd !== start
+        ? subtractOneDayKey(rawEnd)
+        : null;
+
+    return {
+      title: '',
+      start,
+      end: inclusiveEnd && inclusiveEnd !== start ? inclusiveEnd : null,
+      allDay: true,
+    };
+  }
+
   return {
     title: '',
-    start: info.startStr,
-    end: info.endStr || null,
-    allDay: info.allDay,
+    start: info.start?.toISOString?.() || info.startStr,
+    end: info.end?.toISOString?.() || null,
+    allDay: false,
   };
 }
 
@@ -5036,7 +6434,7 @@ function toNewEventInputFromDateClick(info) {
 }
 
 export function closeCalendar({
-  surface = 'note',
+  surface = calendarReturnSurface || 'note',
 } = {}) {
   if (calendarMode === 'pane') {
     return;
@@ -5048,14 +6446,20 @@ export function closeCalendar({
     calendarSurface.hidden = true;
   }
 
-  if (state.surface === 'calendar') {
-    state.surface = surface;
-  }
+  const targetSurface = surface || 'note';
+
+  state.surface = targetSurface;
 
   const app = $('app');
 
-  if (app && app.dataset.surface === 'calendar') {
-    app.dataset.surface = surface;
+  if (app) {
+    app.dataset.surface = targetSurface;
+  }
+
+  const dash = $('dashboard');
+
+  if (dash) {
+    dash.hidden = targetSurface !== 'dashboard';
   }
 
   closeEventModal();
@@ -5082,12 +6486,19 @@ export function openCalendar({
     return;
   }
 
+  calendarReturnSurface =
+    state.surface && state.surface !== 'calendar'
+      ? state.surface
+      : location.hash === '#dashboard'
+        ? 'dashboard'
+        : 'note';
+        
+  state.surface = 'calendar';
+
   if (push) {
     const method = replace ? 'replaceState' : 'pushState';
     history[method](calendarState(), '', calendarUrl());
   }
-
-  state.surface = 'calendar';
 
   const app = $('app');
   if (app) app.dataset.surface = 'calendar';
@@ -5149,6 +6560,94 @@ export function openCalendarFromHistory() {
 // Setup
 // ============================================================
 
+function fcEventDateToStoredValue(date, allDay = false) {
+  if (!date) return null;
+
+  if (allDay) {
+    return localInputValue(date, true);
+  }
+
+  return date.toISOString();
+}
+
+function updateMarkdownEventFromFullCalendarInfo(info) {
+  const raw = info.event.extendedProps?.raw;
+  const markdownRef = raw?.markdownRef || info.event.extendedProps?.markdownRef;
+
+  if (!raw || !markdownRef) {
+    info.revert?.();
+    return false;
+  }
+
+  const next = {
+    ...raw,
+    start: fcEventDateToStoredValue(info.event.start, info.event.allDay),
+    end: raw.end || info.event.end
+      ? fcEventDateToStoredValue(info.event.end, info.event.allDay)
+      : null,
+    allDay: !!info.event.allDay,
+    markdownRef,
+  };
+
+  if (!next.start) {
+    info.revert?.();
+    return false;
+  }
+
+  const preferredKind =
+    markdownRef.kind === 'due' && !next.allDay
+      ? 'date'
+      : markdownRef.kind;
+
+  const nextToken = serializeMarkdownCalendarRef(
+    next,
+    preferredKind
+  );
+
+  const ok = updateMarkdownCalendarRef({
+    ...markdownRef,
+    nextToken,
+  });
+
+  if (!ok) {
+    info.revert?.();
+    toast('Could not update linked calendar event', 'error');
+    return false;
+  }
+
+  window.dispatchEvent(new CustomEvent('yanta-calendar-markdown-changed', {
+    detail: {
+      noteId: markdownRef.noteId,
+      eventId: raw.id,
+    },
+  }));
+
+  scheduleCalendarRender();
+
+  return true;
+}
+
+function applyCalendarPreferencesToFullCalendar() {
+  if (!fc) return;
+
+  const prefs = getCalendarPreferences();
+
+  try {
+    fc.setOption('locale', fullCalendarLocale(prefs));
+    fc.setOption('firstDay', Number(prefs.weekStart));
+    fc.setOption('weekNumbers', !!prefs.weekNumbers);
+    fc.setOption('weekNumberCalculation', 'ISO');
+    fc.setOption('weekText', fullCalendarWeekText(prefs));
+    fc.setOption('eventTimeFormat', fullCalendarTimeFormat(prefs));
+    fc.setOption('slotLabelFormat', fullCalendarSlotLabelFormat(prefs));
+  } catch (err) {
+    console.warn('[YANTA Calendar] Could not apply preferences', err);
+  }
+
+  renderCalendarTopbar();
+  scheduleCalendarResize({ render: true });
+}
+
 export function setupCalendar() {
   if (initialized) return;
   initialized = true;
@@ -5176,11 +6675,20 @@ export function setupCalendar() {
       interactionPlugin,
     ],
 
+    locales: allLocales,
+    locale: fullCalendarLocale(getCalendarPreferences()),
+    firstDay: Number(getCalendarPreferences().weekStart),
+    weekNumbers: !!getCalendarPreferences().weekNumbers,
+    weekNumberCalculation: 'ISO',
+    weekText: fullCalendarWeekText(getCalendarPreferences()),
+    eventTimeFormat: fullCalendarTimeFormat(getCalendarPreferences()),
+    slotLabelFormat: fullCalendarSlotLabelFormat(getCalendarPreferences()),
+
     initialView: state.currentCalendarView || 'dayGridMonth',
 
-    height: calendarMobile() ? 'auto' : measuredCalendarHeight(),
-    contentHeight: calendarMobile() ? 'auto' : measuredCalendarHeight(),
-    expandRows: !calendarMobile(),
+    height: measuredCalendarHeight(),
+    contentHeight: measuredCalendarHeight(),
+    expandRows: true,
     stickyHeaderDates: true,
     handleWindowResize: true,
     windowResizeDelay: 80,
@@ -5348,6 +6856,10 @@ export function setupCalendar() {
     },
 
     eventClick(info) {
+      if (performance.now() < calendarExternalEventSuppressClickUntil) {
+        info.jsEvent?.preventDefault?.();
+        return;
+      }
       /*
         Wenn gerade ein Swipe/Scroll geclaimed wurde, darf ein synthetischer
         Click danach nicht noch den Event-Editor öffnen.
@@ -5409,6 +6921,13 @@ export function setupCalendar() {
     },
 
     eventDrop(info) {
+      const kind = info.event.extendedProps?.yantaKind;
+
+      if (kind === 'markdown-event') {
+        updateMarkdownEventFromFullCalendarInfo(info);
+        return;
+      }
+
       const raw = info.event.extendedProps?.raw;
       if (!raw) return;
 
@@ -5426,6 +6945,13 @@ export function setupCalendar() {
     },
 
     eventResize(info) {
+      const kind = info.event.extendedProps?.yantaKind;
+
+      if (kind === 'markdown-event') {
+        updateMarkdownEventFromFullCalendarInfo(info);
+        return;
+      }
+
       const raw = info.event.extendedProps?.raw;
       if (!raw) return;
 
@@ -5449,6 +6975,7 @@ export function setupCalendar() {
   setupSmoothCalendarNavigation();
   setupCalendarSwipeNavigation();
   installDelegatedCalendarEventDrag();
+  installPointerCalendarEventExternalDrag();
 
   applyCalendarThemeToDom();
   applyMountedCalendarEventsTheme();
@@ -5474,6 +7001,14 @@ export function setupCalendar() {
 
   window.addEventListener('yanta-preview-rendered', () => {
     scheduleCalendarRender();
+  });
+
+  window.addEventListener('yanta-calendar-markdown-changed', () => {
+    scheduleCalendarRender();
+  });
+
+  window.addEventListener('yanta-calendar-preferences-changed', () => {
+    applyCalendarPreferencesToFullCalendar();
   });
 }
 

@@ -78,6 +78,9 @@ import {
   closeCalendar,
   closeCalendarPane,
 } from './calendar.js';
+import {
+  loadCalendarPreferences,
+} from './calendar-preferences.js';
 
 import {
   closeSidePane,
@@ -199,6 +202,7 @@ async function init() {
   };
 
   await loadAppearance();
+  await loadCalendarPreferences();
 
   watchSystemTheme();
 

@@ -12,6 +12,17 @@ import {
   setDashboardCardDisplayPrefs,
 } from './dashboard.js';
 
+import {
+  getCalendarPreferences,
+  saveCalendarPreferences,
+  resetCalendarPreferences,
+  CALENDAR_DATE_FORMATS,
+  CALENDAR_EDITOR_DATE_STYLES,
+  CALENDAR_LOCALES,
+  CALENDAR_TIME_FORMATS,
+  CALENDAR_WEEK_STARTS,
+} from './calendar-preferences.js';
+
 // ----------------------------------------------------------------
 // Theme tokens — these map 1:1 to CSS custom properties.
 // Each has a default for dark + light mode.
@@ -871,6 +882,7 @@ function ensureModal() {
     { id: 'colors',     label: 'Colors',     icon: 'paintbrush' },
     { id: 'typography', label: 'Typography', icon: 'type' },
     { id: 'dashboard',  label: 'Dashboard',  icon: 'layout-dashboard' },
+    { id: 'calendar',   label: 'Calendar',   icon: 'calendar-days' },
     { id: 'sync',       label: 'Sync & Backup', icon: 'refresh-cw' },
     { id: 'about',      label: 'About',      icon: 'info' },
   ];
@@ -921,6 +933,7 @@ function renderSettingsBody() {
   else if (activeSection === 'colors') renderColorsSection(content);
   else if (activeSection === 'typography') renderTypographySection(content);
   else if (activeSection === 'dashboard') renderDashboardSection(content);
+  else if (activeSection === 'calendar') renderCalendarSection(content);
   else if (activeSection === 'sync') renderSyncSection(content);
   else if (activeSection === 'about') renderAboutSection(content);
 }
@@ -1341,7 +1354,192 @@ function renderDashboardSection(host) {
   host.append(info);
 }
 
+function renderCalendarSection(host) {
+  host.replaceChildren();
+
+  const prefs = getCalendarPreferences();
+
+  host.append(sectionHeader(
+    'Calendar',
+    'Configure date display, time format, week start and calendar weeks.'
+  ));
+
+  const group = el('div', { class: 'yanta-settings-group' });
+  group.append(el('div', { class: 'yanta-settings-group-title' }, 'Regional format'));
+
+  group.append(
+    renderSettingsSelect({
+      label: 'Calendar language / locale',
+      hint: 'Controls month names, weekdays and FullCalendar labels.',
+      value: prefs.locale,
+      options: CALENDAR_LOCALES.map((x) => ({
+        value: x.id,
+        label: x.label,
+      })),
+      onChange: async (value) => {
+        await saveCalendarPreferences({ locale: value });
+        toast('Calendar setting saved', 'success');
+        renderSettingsBody();
+      },
+    }),
+
+    renderSettingsSelect({
+      label: 'Compact date format',
+      hint: 'Used for compact YANTA calendar date displays. Default is DD/MM/YYYY.',
+      value: prefs.dateFormat,
+      options: CALENDAR_DATE_FORMATS.map((x) => ({
+        value: x.id,
+        label: `${x.label} · ${x.example}`,
+      })),
+      onChange: async (value) => {
+        await saveCalendarPreferences({ dateFormat: value });
+        toast('Calendar setting saved', 'success');
+        renderSettingsBody();
+      },
+    }),
+
+    renderSettingsSelect({
+      label: 'Event editor date preview',
+      hint: 'Shown below the date/time inputs when adding or editing events.',
+      value: prefs.editorDateStyle,
+      options: CALENDAR_EDITOR_DATE_STYLES.map((x) => ({
+        value: x.id,
+        label: `${x.label} · ${x.exampleDe}`,
+      })),
+      onChange: async (value) => {
+        await saveCalendarPreferences({ editorDateStyle: value });
+        toast('Calendar setting saved', 'success');
+        renderSettingsBody();
+      },
+    }),
+
+    renderSettingsSelect({
+      label: 'Time format',
+      hint: 'Controls event times in calendar and editor previews.',
+      value: prefs.timeFormat,
+      options: CALENDAR_TIME_FORMATS.map((x) => ({
+        value: x.id,
+        label: `${x.label} · ${x.example}`,
+      })),
+      onChange: async (value) => {
+        await saveCalendarPreferences({ timeFormat: value });
+        toast('Calendar setting saved', 'success');
+        renderSettingsBody();
+      },
+    })
+  );
+
+  host.append(group);
+
+  const weekGroup = el('div', { class: 'yanta-settings-group' });
+  weekGroup.append(el('div', { class: 'yanta-settings-group-title' }, 'Weeks'));
+
+  weekGroup.append(
+    renderSettingsSelect({
+      label: 'Week starts on',
+      hint: 'ISO 8601 uses Monday.',
+      value: String(prefs.weekStart),
+      options: CALENDAR_WEEK_STARTS.map((x) => ({
+        value: String(x.id),
+        label: x.label,
+      })),
+      onChange: async (value) => {
+        await saveCalendarPreferences({ weekStart: Number(value) });
+        toast('Calendar setting saved', 'success');
+        renderSettingsBody();
+      },
+    }),
+
+    renderCalendarToggle({
+      checked: !!prefs.weekNumbers,
+      label: 'Show calendar weeks',
+      hint: 'Uses ISO week numbers.',
+      onChange: async (checked) => {
+        await saveCalendarPreferences({ weekNumbers: checked });
+        toast('Calendar setting saved', 'success');
+        renderSettingsBody();
+      },
+    })
+  );
+
+  host.append(weekGroup);
+
+  const resetGroup = el('div', { class: 'yanta-settings-group' });
+  resetGroup.append(el('div', { class: 'yanta-settings-group-title' }, 'Reset'));
+
+  resetGroup.append(el('button', {
+    class: 'btn',
+    onclick: async () => {
+      if (!confirm('Reset calendar settings to defaults?')) return;
+
+      await resetCalendarPreferences();
+      toast('Calendar settings reset', 'success');
+      renderSettingsBody();
+    },
+  }, 'Reset calendar settings'));
+
+  host.append(resetGroup);
+}
+
 function renderDashboardToggle({ checked, label, hint, onChange }) {
+  const row = el('label', { class: 'yanta-settings-toggle' });
+
+  const cb = el('input', { type: 'checkbox' });
+  cb.checked = !!checked;
+
+  cb.addEventListener('change', async () => {
+    await onChange?.(cb.checked);
+  });
+
+  row.append(
+    cb,
+    el('div', { class: 'yanta-settings-toggle-meta' },
+      el('div', { class: 'yanta-settings-toggle-label' }, label),
+      el('div', { class: 'yanta-settings-toggle-hint' }, hint),
+    )
+  );
+
+  return row;
+}
+
+function renderSettingsSelect({
+  label,
+  hint = '',
+  value,
+  options = [],
+  onChange,
+}) {
+  const wrap = el('label', { class: 'yanta-settings-field' });
+
+  const title = el('div', { class: 'yanta-settings-field-label' }, label);
+
+  const select = el('select', {
+    class: 'text-input',
+  });
+
+  for (const opt of options) {
+    const option = el('option', {
+      value: opt.value,
+    }, opt.label);
+
+    option.selected = String(opt.value) === String(value);
+    select.append(option);
+  }
+
+  select.addEventListener('change', async () => {
+    await onChange?.(select.value);
+  });
+
+  wrap.append(title, select);
+
+  if (hint) {
+    wrap.append(el('div', { class: 'yanta-settings-field-hint' }, hint));
+  }
+
+  return wrap;
+}
+
+function renderCalendarToggle({ checked, label, hint, onChange }) {
   const row = el('label', { class: 'yanta-settings-toggle' });
 
   const cb = el('input', { type: 'checkbox' });
@@ -1988,6 +2186,36 @@ function injectSettingsCss() {
   .yanta-settings-rail-btn span {
     display: none;
   }
+
+  .yanta-settings-field {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+
+    padding: 12px 14px;
+    margin-bottom: 8px;
+
+    background: var(--bg-elev-2);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+  }
+
+  .yanta-settings-field-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text);
+  }
+
+  .yanta-settings-field-hint {
+    font-size: 12px;
+    color: var(--text-dim);
+    line-height: 1.45;
+  }
+
+  .yanta-settings-field .text-input {
+    margin: 0;
+  }
+    
 }
   `;
 

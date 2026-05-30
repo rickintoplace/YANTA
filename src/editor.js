@@ -967,6 +967,7 @@ function dropHandler() {
     },
     drop(e, view) {
       const types = [...(e.dataTransfer.types || [])];
+      console.log('[editor dragover]', types);
       // Find caret position for the drop.
       const pos = view.posAtCoords({ x: e.clientX, y: e.clientY }) ?? view.state.doc.length;
       const calendarEventJson = e.dataTransfer.getData('text/yanta-calendar-event');
@@ -1743,6 +1744,74 @@ export function insertAtCursor(text) {
     selection: { anchor: sel.from + text.length },
   });
   view.focus();
+}
+
+export function insertTextAtCoords(text, clientX, clientY) {
+  if (!view) return false;
+
+  const raw = String(text || '').trim();
+  if (!raw) return false;
+
+  const paneEdit = document.getElementById('paneEdit');
+  const elementAtPoint = document.elementFromPoint(clientX, clientY);
+
+  const insideEditor =
+    view.dom.contains(elementAtPoint) ||
+    view.scrollDOM.contains(elementAtPoint) ||
+    paneEdit?.contains(elementAtPoint);
+
+  if (!insideEditor) {
+    return false;
+  }
+
+  let pos = view.posAtCoords({
+    x: clientX,
+    y: clientY,
+  });
+
+  if (pos == null) {
+    // Dropping into editor padding / below last line should append.
+    pos = view.state.doc.length;
+  }
+
+  const docText = view.state.doc.toString();
+
+  const before = docText.slice(Math.max(0, pos - 1), pos);
+  const after = docText.slice(pos, pos + 1);
+
+  const prefix = before && before !== '\n' ? '\n' : '';
+  const suffix = after && after !== '\n' ? '\n' : '';
+
+  const insert = `${prefix}${raw}${suffix}`;
+
+  view.dispatch({
+    changes: {
+      from: pos,
+      to: pos,
+      insert,
+    },
+    selection: {
+      anchor: pos + insert.length,
+    },
+    scrollIntoView: true,
+  });
+
+  view.focus();
+
+  window.dispatchEvent(new CustomEvent('yanta-note-updated', {
+    detail: {
+      noteId: state.currentNoteId,
+      reason: 'external-insert',
+    },
+  }));
+
+  window.dispatchEvent(new CustomEvent('yanta-calendar-markdown-changed', {
+    detail: {
+      noteId: state.currentNoteId,
+    },
+  }));
+
+  return true;
 }
 
 function wrapSelection(v, open, close) {

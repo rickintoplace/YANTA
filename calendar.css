@@ -93,7 +93,7 @@
   display: flex;
 
   overflow: hidden;
-  padding: 10px;
+  /* padding: 10px; */
 }
 
 #calendar {
@@ -889,10 +889,9 @@
   }
 
   .yanta-calendar-host {
-    overflow-x: hidden !important;
-    overflow-y: auto !important;
+    min-height: 0;
+    overflow: hidden !important;
 
-    -webkit-overflow-scrolling: touch;
     overscroll-behavior: contain;
     overscroll-behavior-x: contain !important;
   }
@@ -1066,19 +1065,37 @@
 
 .yanta-calendar-pane-body {
   flex: 1 1 auto;
-  min-height: 0;
   min-width: 0;
+  min-height: 0;
 
   display: flex;
-  padding: 8px;
+  flex-direction: column;
+
+  overflow: hidden;
+  /* padding: 8px; */
+}
+
+.yanta-calendar-pane-calendar-host {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+
+  display: flex;
   overflow: hidden;
 }
 
-.yanta-calendar-pane-body #calendar {
+.yanta-calendar-pane-calendar-host #calendar {
+  flex: 1 1 auto;
   width: 100%;
   height: 100%;
-  min-width: 0;
   min-height: 0;
+}
+
+.yanta-preview-pane-switcher-sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 2px;
+  background: var(--border);
 }
 
 @media (max-width: 880px) {
@@ -1169,7 +1186,7 @@
   min-height: 0;
 
   overflow: hidden;
-  padding: 8px;
+  /* padding: 8px; */
 }
 
 .yanta-calendar-side-pane #calendar {
@@ -1177,4 +1194,406 @@
   width: 100%;
   height: 100%;
   min-height: 0;
+}
+
+/* ============================================================
+   Calendar external event drag to note
+   ============================================================ */
+
+.yanta-cal-external-dragging,
+.yanta-cal-external-dragging * {
+  cursor: grabbing !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+.yanta-cal-external-drag-ghost {
+  border-radius: 8px !important;
+  box-shadow:
+    0 16px 36px rgba(0, 0, 0, 0.34),
+    0 0 0 1px color-mix(in srgb, var(--accent) 30%, transparent) inset !important;
+
+  filter: brightness(1.06);
+  transform-origin: center center;
+
+  pointer-events: none !important;
+  touch-action: none !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+
+/* While dragging an event out to a note, show only YANTA's ghost. */
+.yanta-cal-external-source {
+  visibility: hidden !important;
+}
+
+.yanta-cal-external-dragging .fc-event-mirror,
+.yanta-cal-external-dragging .fc-event.fc-event-mirror,
+.yanta-cal-external-dragging .fc-event-dragging,
+.yanta-cal-external-dragging .fc-dragging {
+  display: none !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+}
+
+.yanta-calendar-date-preview {
+  min-height: 18px;
+  margin-top: 2px;
+
+  color: var(--text-faint);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.yanta-calendar-date-preview.invalid {
+  color: var(--red);
+}
+
+/* ============================================================
+   YANTA Calendar Date/Time Picker
+   ============================================================ */
+
+.yanta-calendar-date-input-row {
+  display: grid;
+  grid-template-columns: 1fr 36px;
+  gap: 6px;
+  align-items: center;
+}
+
+.yanta-calendar-date-input-row .text-input {
+  margin: 0;
+}
+
+.yanta-calendar-date-input-row .icon-btn {
+  width: 36px;
+  height: 36px;
+}
+
+.yanta-calendar-datetime-picker-modal {
+  z-index: 260;
+}
+
+.yanta-calendar-datetime-card {
+  width: min(460px, 94vw);
+  max-height: min(760px, 92vh);
+
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.yanta-dtp-head {
+  flex: 0 0 auto;
+
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--border);
+
+  background: var(--bg-elev-2);
+}
+
+.yanta-dtp-head > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.yanta-dtp-kicker {
+  font-size: 11px;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 800;
+  margin-bottom: 4px;
+}
+
+.yanta-dtp-value {
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 800;
+  line-height: 1.25;
+}
+
+.yanta-dtp-tabs {
+  flex: 0 0 auto;
+
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+
+  background: var(--bg-elev);
+}
+
+.yanta-dtp-tabs button {
+  min-height: 36px;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+
+  border: 1px solid var(--border);
+  border-radius: 9px;
+
+  background: var(--bg-elev-2);
+  color: var(--text-dim);
+
+  cursor: pointer;
+}
+
+.yanta-dtp-tabs button.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+  font-weight: 800;
+}
+
+.yanta-dtp-tabs button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.yanta-dtp-body {
+  flex: 1 1 auto;
+  min-height: 0;
+
+  overflow: auto;
+  padding: 12px;
+
+  background: var(--bg);
+}
+
+.yanta-dtp-panel {
+  display: none;
+}
+
+.yanta-dtp-panel.active {
+  display: block;
+}
+
+.yanta-dtp-month-row {
+  display: grid;
+  grid-template-columns: 36px 1fr 36px;
+  align-items: center;
+  gap: 8px;
+
+  margin-bottom: 10px;
+}
+
+.yanta-dtp-month-row strong {
+  text-align: center;
+  color: var(--text);
+  font-size: 15px;
+}
+
+.yanta-dtp-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+
+  margin-bottom: 5px;
+}
+
+.yanta-dtp-weekdays span {
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.yanta-dtp-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+
+.yanta-dtp-day {
+  position: relative;
+
+  min-height: 42px;
+
+  border: 1px solid transparent;
+  border-radius: 999px;
+
+  background: transparent;
+  color: var(--text);
+
+  cursor: pointer;
+
+  font: inherit;
+}
+
+.yanta-dtp-day:hover {
+  background: var(--bg-elev-2);
+}
+
+.yanta-dtp-day.is-out {
+  color: var(--text-faint);
+  opacity: 0.55;
+}
+
+.yanta-dtp-day.today {
+  border-color: color-mix(in srgb, var(--accent) 42%, transparent);
+}
+
+.yanta-dtp-day.selected {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: white;
+  font-weight: 900;
+}
+
+.yanta-dtp-time-display {
+  margin: 4px 0 14px;
+
+  color: var(--text);
+  font-size: clamp(38px, 13vw, 58px);
+  font-weight: 900;
+  text-align: center;
+  letter-spacing: -0.04em;
+}
+
+.yanta-dtp-time-wheels {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+}
+
+.yanta-dtp-time-wheels.is-12h {
+  grid-template-columns: 1fr 1fr 74px;
+}
+
+.yanta-dtp-wheel {
+  max-height: 260px;
+
+  overflow: auto;
+  overscroll-behavior: contain;
+
+  padding: 6px;
+
+  border: 1px solid var(--border);
+  border-radius: 14px;
+
+  background: var(--bg-elev);
+  scrollbar-width: thin;
+}
+
+.yanta-dtp-wheel-label {
+  position: sticky;
+  top: -6px;
+  z-index: 1;
+
+  padding: 6px 4px 8px;
+
+  background: var(--bg-elev);
+  color: var(--text-faint);
+
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  text-align: center;
+}
+
+.yanta-dtp-wheel-item {
+  width: 100%;
+  min-height: 36px;
+
+  border: 0;
+  border-radius: 10px;
+
+  background: transparent;
+  color: var(--text);
+
+  font: inherit;
+  font-weight: 700;
+
+  cursor: pointer;
+}
+
+.yanta-dtp-wheel-item:hover {
+  background: var(--bg-elev-2);
+}
+
+.yanta-dtp-wheel-item.selected {
+  background: var(--accent);
+  color: white;
+}
+
+.yanta-dtp-ampm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.yanta-dtp-ampm button {
+  flex: 1 1 auto;
+
+  min-height: 48px;
+
+  border: 1px solid var(--border);
+  border-radius: 12px;
+
+  background: var(--bg-elev);
+  color: var(--text-dim);
+
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.yanta-dtp-ampm button.selected {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent);
+  color: var(--accent);
+}
+
+.yanta-dtp-foot {
+  flex: 0 0 auto;
+
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  padding: 10px 12px;
+  border-top: 1px solid var(--border);
+
+  background: var(--bg-elev-2);
+}
+
+.yanta-dtp-foot .grow {
+  flex: 1;
+}
+
+@media (max-width: 700px) {
+  .yanta-calendar-datetime-picker-modal {
+    align-items: flex-end;
+    padding: 0;
+    display: flex;
+    align-content: center;
+    flex-wrap: wrap;
+  }
+
+  .yanta-calendar-datetime-card {
+    width: 100vw;
+    max-width: 100vw;
+    max-height: 94vh;
+
+    border-radius: 18px 18px 0 0;
+    border-right: 0;
+    border-left: 0;
+    border-bottom: 0;
+  }
+
+  .yanta-dtp-day {
+    min-height: 44px;
+  }
+
+  .yanta-dtp-wheel {
+    max-height: 230px;
+  }
 }

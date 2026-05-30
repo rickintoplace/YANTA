@@ -40,12 +40,21 @@ function pad(n) {
 function localDateKey(value) {
   if (!value) return '';
 
+  // Only trust literal date-only strings.
+  // Do NOT slice ISO datetime strings like 2026-05-18T22:00:00Z,
+  // because for local all-day events that is often the previous UTC day.
   if (typeof value === 'string') {
-    const m = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
-    if (m) return `${m[1]}-${m[2]}-${m[3]}`;
+    const raw = value.trim();
+
+    if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+      return raw;
+    }
   }
 
-  const d = value instanceof Date ? value : new Date(value);
+  const d = value instanceof Date
+    ? value
+    : new Date(value);
+
   if (Number.isNaN(d.getTime())) return '';
 
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -163,20 +172,34 @@ function parseDateLike(raw) {
     };
   }
 
-  // start/end
-  m = s.match(/^(.+?)\s*\/\s*(.+)$/);
-  if (m) {
-    const startParsed = parseDateLike(m[1]);
-    const endParsed = parseDateLike(m[2]);
+// start/end
+m = s.match(/^(.+?)\s*\/\s*(.+)$/);
+if (m) {
+  const startParsed = parseDateLike(m[1]);
+  const endParsed = parseDateLike(m[2]);
 
-    if (!startParsed?.start) return null;
+  if (!startParsed?.start) return null;
+
+  // Same-day all-day ranges are single-day events.
+  // This repairs old/bad tokens like:
+  //   @date(2026-05-19/2026-05-19)
+  if (startParsed.allDay && endParsed?.allDay) {
+    const startKey = localDateKey(startParsed.start);
+    const endKey = localDateKey(endParsed.start);
 
     return {
-      start: startParsed.start,
-      end: endParsed?.start || null,
-      allDay: !!startParsed.allDay && !!endParsed?.allDay,
+      start: startKey,
+      end: endKey && endKey !== startKey ? endKey : null,
+      allDay: true,
     };
   }
+
+  return {
+    start: startParsed.start,
+    end: endParsed?.start || null,
+    allDay: !!startParsed.allDay && !!endParsed?.allDay,
+  };
+}
 
   // Date.parse fallback
   const d = new Date(s);
@@ -380,25 +403,41 @@ function serializeAttrs(attrs = {}) {
 
 export function serializeMarkdownCalendarRef(eventLike, preferredKind = null) {
   const ev = eventLike || {};
-  const kind = preferredKind || ev.markdownRef?.kind || (ev.allDay && !ev.end ? 'due' : 'date');
 
+  const allDay = !!ev.allDay;
+  const startKey = allDay ? localDateKey(ev.start) : '';
+  const endKey = allDay && ev.end ? localDateKey(ev.end) : '';
+
+  // For all-day events:
+  // - no end or same-day end => @due(YYYY-MM-DD)
+  // - real multi-day => @date(start/end)
+  if (allDay) {
+    const meaningfulEnd =
+      endKey && endKey !== startKey
+        ? endKey
+        : null;
+
+    const attrs = serializeAttrs(ev);
+
+    if (!meaningfulEnd) {
+      return `@due(${startKey})${attrs}`;
+    }
+
+    return `@date(${startKey}/${meaningfulEnd})${attrs}`;
+  }
+
+  const kind = preferredKind || ev.markdownRef?.kind || 'date';
   const attrs = serializeAttrs(ev);
 
   if (kind === 'due') {
     return `@due(${localDateKey(ev.start)})${attrs}`;
   }
 
-  const startIsAllDay = !!ev.allDay;
-  const start = startIsAllDay
-    ? localDateKey(ev.start)
-    : localDateTimeInput(ev.start);
-
+  const start = localDateTimeInput(ev.start);
   let value = start;
 
   if (ev.end) {
-    if (startIsAllDay) {
-      value = `${start}/${localDateKey(ev.end)}`;
-    } else if (localDateKey(ev.start) === localDateKey(ev.end)) {
+    if (localDateKey(ev.start) === localDateKey(ev.end)) {
       value = `${localDateTimeInput(ev.start)}-${localTimeKey(ev.end)}`;
     } else {
       value = `${localDateTimeInput(ev.start)}/${localDateTimeInput(ev.end)}`;

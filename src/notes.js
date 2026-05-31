@@ -712,7 +712,9 @@ function updateWordCount(md) {
   $('statChars').textContent = md.length + ' char' + (md.length === 1 ? '' : 's');
 }
 
-export async function toggleTaskLineInNote(noteId, lineIndex, checked) {
+export async function toggleTaskLineInNote(noteId, lineIndex, checked, {
+  source = '',
+} = {}) {
   if (!noteId) return false;
 
   const note = state.notes.get(noteId);
@@ -750,7 +752,11 @@ export async function toggleTaskLineInNote(noteId, lineIndex, checked) {
   updateSearchIndexFor(note);
 
   window.dispatchEvent(new CustomEvent('yanta-note-updated', {
-    detail: { noteId },
+    detail: {
+      noteId,
+      reason: 'task-toggle',
+      source,
+    },
   }));
 
   return true;

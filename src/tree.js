@@ -1127,7 +1127,11 @@ function noteRow(n, depth = 0, {
     tabindex: '0',
     style: rowStyle,
     draggable: 'true',
-    onclick: (e) => handleTreeSelectionClick(e, key, () => openNote(n.id)),
+    onclick: (e) => handleTreeSelectionClick(e, key, () => {
+      openNote(n.id);
+
+      window.dispatchEvent(new CustomEvent('yanta-close-mobile-sidebar'));
+    }),
     oncontextmenu: (e) => openTreeContextMenu(e, key, () => noteMenu(e, n)),
     ondragstart: (e) => {
       if (!isSelected(key)) setOnlySelection(key);
@@ -1279,6 +1283,8 @@ export function renderTagCloud() {
       onclick: () => {
         state.activeTagFilter = state.activeTagFilter === t ? null : t;
         renderTree();
+
+        window.dispatchEvent(new CustomEvent('yanta-close-mobile-sidebar'));
       },
     }, '#' + t, el('span', { class: 'count' }, String(n)));
 

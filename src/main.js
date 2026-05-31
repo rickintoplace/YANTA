@@ -50,7 +50,12 @@ import {
   hideDashboard,
   isDashboardVisible,
   showDashboardFolderFromHistory,
+  openNoteFromDashboardHistory,
 } from './dashboard.js';
+
+import {
+  setupFloatingCreate,
+} from './floating-create.js';
 
 import {
   vaultJsonSnapshot,
@@ -81,10 +86,13 @@ import {
 import {
   loadCalendarPreferences,
 } from './calendar-preferences.js';
-
 import {
   closeSidePane,
 } from './side-pane.js';
+import {
+  setupMobileSidebarController,
+  closeMobileSidebar,
+} from './mobile-sidebar.js';
 
 let sharePreviewLocked = false;
 
@@ -252,6 +260,8 @@ async function init() {
   setupCitations();
   setupFormatToolbar();
   setupDashboard();
+  setupFloatingCreate();
+
   // setupCalendar();
   await syncRestore();
   let sharedOpen = null;
@@ -406,11 +416,29 @@ window.addEventListener('popstate', async (e) => {
     setNavSuppress(true);
 
     try {
-      if (id !== state.currentNoteId) {
-        await openNote(id);
-      }
+      /*
+        Browser Back/Forward must use the same visual navigation path
+        as direct Dashboard card navigation.
 
-      hideDashboard({ push: false });
+        - Dashboard -> Note via history forward:
+          dashboard card/page -> panes transition.
+
+        - Already in note surface:
+          normal note swap/open.
+
+        Wichtig:
+        setNavSuppress(true) prevents openNote() from pushing a fresh
+        history entry while we are handling popstate.
+      */
+      if (isDashboardVisible()) {
+        await openNoteFromDashboardHistory(id);
+      } else {
+        if (id !== state.currentNoteId) {
+          await openNote(id);
+        }
+
+        hideDashboard({ push: false });
+      }
     } finally {
       setNavSuppress(false);
     }
@@ -450,170 +478,6 @@ function setView(v, { persist = true } = {}) {
   if (persist) {
     store.settings.set(isMobileViewport() ? 'viewMobile' : 'view', v);
   }
-}
-
-function setupMobileSidebar() {
-  const app = $('app');
-  const sidebar = $('sidebar');
-  const btn = $('btn-sidebar-toggle');
-
-  if (!app || !sidebar || !btn) return;
-
-  let backdrop = $('sidebarBackdrop');
-
-  if (!backdrop) {
-    backdrop = document.createElement('div');
-    backdrop.id = 'sidebarBackdrop';
-    backdrop.className = 'sidebar-backdrop';
-    backdrop.hidden = true;
-    app.append(backdrop);
-  }
-
-  const SIDEBAR_ANIM_MS = 200;
-  let animToken = 0;
-  let sidebarAnim = null;
-  let backdropAnim = null;
-
-  const prefersReducedMotion = () => {
-    try {
-      return window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    } catch {
-      return false;
-    }
-  };
-
-  const cancelSidebarAnimations = () => {
-    try { sidebarAnim?.cancel(); } catch {}
-    try { backdropAnim?.cancel(); } catch {}
-    sidebarAnim = null;
-    backdropAnim = null;
-  };
-
-  const open = () => {
-    if (!isMobileViewport()) return;
-
-    animToken++;
-    cancelSidebarAnimations();
-
-    backdrop.hidden = false;
-    app.classList.add('sidebar-open');
-    btn.setAttribute('aria-expanded', 'true');
-
-    if (prefersReducedMotion()) return;
-
-    sidebarAnim = sidebar.animate(
-      [
-        { transform: 'translateX(-104%)' },
-        { transform: 'translateX(0)' },
-      ],
-      {
-        duration: SIDEBAR_ANIM_MS,
-        easing: 'cubic-bezier(.2,.8,.2,1)',
-      }
-    );
-
-    backdropAnim = backdrop.animate(
-      [
-        { opacity: 0 },
-        { opacity: 1 },
-      ],
-      {
-        duration: SIDEBAR_ANIM_MS,
-        easing: 'ease',
-      }
-    );
-  };
-
-  const close = () => {
-    const token = ++animToken;
-
-    cancelSidebarAnimations();
-    btn.setAttribute('aria-expanded', 'false');
-
-    if (prefersReducedMotion()) {
-      app.classList.remove('sidebar-open');
-      backdrop.hidden = true;
-      return;
-    }
-
-    // Wichtig: .sidebar-open bleibt während der Animation gesetzt.
-    // Sonst springt CSS sofort auf translateX(-104%).
-    sidebarAnim = sidebar.animate(
-      [
-        { transform: 'translateX(0)' },
-        { transform: 'translateX(-104%)' },
-      ],
-      {
-        duration: SIDEBAR_ANIM_MS,
-        easing: 'cubic-bezier(.2,.8,.2,1)',
-      }
-    );
-
-    backdropAnim = backdrop.animate(
-      [
-        { opacity: 1 },
-        { opacity: 0 },
-      ],
-      {
-        duration: SIDEBAR_ANIM_MS,
-        easing: 'ease',
-      }
-    );
-
-    Promise.allSettled([
-      sidebarAnim.finished.catch(() => {}),
-      backdropAnim.finished.catch(() => {}),
-    ]).then(() => {
-      if (token !== animToken) return;
-
-      app.classList.remove('sidebar-open');
-      backdrop.hidden = true;
-    });
-  };
-
-  const toggle = () => {
-    if (app.classList.contains('sidebar-open')) close();
-    else open();
-  };
-
-  btn.addEventListener('click', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    toggle();
-  });
-
-  backdrop.addEventListener('click', close);
-
-  // Nach Note-Auswahl Sidebar schließen.
-  sidebar.addEventListener('click', (e) => {
-    if (!isMobileViewport()) return;
-
-    if (
-      e.target.closest('.tree-row.note') ||
-      e.target.closest('.tag-pill') ||
-      e.target.closest('#btn-new-note')
-    ) {
-      setTimeout(close, 80);
-    }
-  });
-
-  // Bei Resize sauber umschalten.
-  MOBILE_MQ.addEventListener?.('change', () => {
-    if (!isMobileViewport()) {
-      close();
-      return;
-    }
-
-    if (state.view === 'split') {
-      setView('edit', { persist: false });
-    }
-  });
-
-  window.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && app.classList.contains('sidebar-open')) {
-      close();
-    }
-  });
 }
 
 function applySidebarCollapsed(collapsed, { persist = true } = {}) {
@@ -818,7 +682,10 @@ function bindEvents() {
   $('tagInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { addTag(e.target.value); e.target.value = ''; } });
 
   // sidebar
-  $('btn-new-note').addEventListener('click', () => newNote(currentFolderForNew()));
+  $('btn-new-note').addEventListener('click', async () => {
+    await newNote(currentFolderForNew());
+    closeMobileSidebar();
+  });
   $('btn-new-folder').addEventListener('click', () => newFolder(null));
   $('btn-theme').addEventListener('click', cycleAppearanceMode);
   $('btn-export').addEventListener('click', (e) => { e.stopPropagation(); openExportMenu(e.currentTarget, showMenu); });
@@ -857,6 +724,8 @@ function bindEvents() {
       folderId: null,
       push: true,
     });
+
+    closeMobileSidebar();
   });
 
   // Sync
@@ -898,7 +767,13 @@ function bindEvents() {
     setView('preview');
   });
 
-  setupMobileSidebar();
+  setupMobileSidebarController({
+    onMobileLayoutChange: () => {
+      if (state.view === 'split') {
+        setView('edit', { persist: false });
+      }
+    },
+  });
   setupDesktopSidebarCollapse();
 
   // Head actions
@@ -1047,10 +922,17 @@ function bindEvents() {
 
   // Palette
   $('btn-palette').addEventListener('click', () => openPalette('commands'));
-  $('btn-graph').addEventListener('click', openGraph);
+
+  $('btn-graph').addEventListener('click', () => {
+    openGraph();
+    closeMobileSidebar();
+  });
+
   $('btn-calendar')?.addEventListener('click', () => {
     openCalendar({ push: true });
+    closeMobileSidebar();
   });
+
   $('btn-calendar-close')?.addEventListener('click', () => {
     if (history.state?.surface === 'calendar') {
       history.back();

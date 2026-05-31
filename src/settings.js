@@ -619,6 +619,8 @@ const DEFAULT_APPEARANCE = {
   },
 };
 
+const BOOT_APPEARANCE_KEY = 'yanta.appearance.boot.v1';
+
 function deepMerge(target, source) {
   const out = { ...target };
   for (const [k, v] of Object.entries(source || {})) {
@@ -650,6 +652,12 @@ function writeDeviceSettings(data) {
 function clearDeviceSettings() {
   try {
     localStorage.removeItem(DEVICE_KEY_PREFIX + 'appearance');
+  } catch {}
+}
+
+function writeBootAppearanceCache(data) {
+  try {
+    localStorage.setItem(BOOT_APPEARANCE_KEY, JSON.stringify(data));
   } catch {}
 }
 
@@ -776,54 +784,62 @@ export async function cycleAppearanceMode() {
 
 export function applyAppearance() {
   const root = document.documentElement;
+  const a = getAppearance();
   const mode = resolveEffectiveMode();
 
-  // WICHTIG:
-  // data-theme ist ab jetzt immer der EFFEKTIVE Modus: "dark" oder "light".
-  // Die ursprüngliche Einstellung bleibt separat in data-appearance-mode.
   root.dataset.theme = mode;
-  root.dataset.appearanceMode = appearance.mode || 'auto';
+  root.dataset.appearanceMode = a.mode || 'auto';
+  root.style.colorScheme = mode;
 
-  // Für Module wie draw.js: auch state.theme ist immer effektiv.
   state.theme = mode;
 
   const themeBtn = $('btn-theme');
   if (themeBtn) {
-    themeBtn.title = `Theme: ${appearance.mode} → ${mode} (click to cycle)`;
+    themeBtn.title = `Theme: ${a.mode} → ${mode} (click to cycle)`;
   }
 
-  // Color tokens
-  const palette = (appearance.colors && appearance.colors[mode]) || DEFAULT_THEMES[mode];
+  const palette = (a.colors && a.colors[mode]) || DEFAULT_THEMES[mode];
+
   for (const tok of COLOR_TOKENS) {
     const val = palette[tok.key] || DEFAULT_THEMES[mode][tok.key];
     const safe = tok.key === 'selection' ? val : (safeCssColor(val) || val);
     root.style.setProperty('--' + tok.key, safe);
   }
 
-  // System accent override
-  if (appearance.mode === 'system-colors') {
+  if (a.mode === 'system-colors') {
     const sys = tryReadSystemAccent();
     if (sys) {
       root.style.setProperty('--accent', sys);
     }
   }
 
-  // Fonts
-  const font = FONT_OPTIONS.find((f) => f.id === appearance.fontId) || FONT_OPTIONS[0];
-  const mono = MONO_OPTIONS.find((f) => f.id === appearance.monoId) || MONO_OPTIONS[0];
+  const font = FONT_OPTIONS.find((f) => f.id === a.fontId) || FONT_OPTIONS[0];
+  const mono = MONO_OPTIONS.find((f) => f.id === a.monoId) || MONO_OPTIONS[0];
+
   root.style.setProperty('--font', font.stack);
   root.style.setProperty('--font-mono', mono.stack);
 
-  const size = FONT_SIZES.find((s) => s.id === appearance.fontSizeId) || FONT_SIZES[1];
+  const size = FONT_SIZES.find((s) => s.id === a.fontSizeId) || FONT_SIZES[1];
   root.style.setProperty('--fs-base', size.px + 'px');
 
-  const lh = Number(appearance.lineHeight) || 1.7;
+  const lh = Number(a.lineHeight) || 1.7;
   root.style.setProperty('--lh-base', String(lh));
+
+  writeBootAppearanceCache({
+    v: 1,
+    appearanceMode: a.mode || 'auto',
+    colors: a.colors || DEFAULT_APPEARANCE.colors,
+    font: font.stack,
+    mono: mono.stack,
+    fontSize: size.px + 'px',
+    lineHeight: String(lh),
+    ts: Date.now(),
+  });
 
   window.dispatchEvent(new CustomEvent('yanta-theme-change', {
     detail: {
-      theme: mode,                       // effektiv: "dark" | "light"
-      appearanceMode: appearance.mode,   // Einstellung: "auto" | "dark" | ...
+      theme: mode,
+      appearanceMode: a.mode,
       appearance: getAppearance(),
     },
   }));

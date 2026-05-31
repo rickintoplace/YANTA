@@ -164,7 +164,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 }
 .brand {
   display: flex; align-items: center; gap: 4px;
-  font-weight: 700; font-size: 14px; letter-spacing: 0.02em;
+  font-weight: 700; font-size: 23px; letter-spacing: -2.5px;
   cursor: pointer;
 }
 .brand-mark {
@@ -3902,4 +3902,77 @@ input.yanta-task-checkbox {
   min-height: 0;
 
   overflow: hidden;
+}
+
+/* ============================================================
+   Mobile Sidebar — single source of truth for animation
+   ============================================================ */
+
+@media (max-width: 880px) {
+  .app .sidebar {
+    transform: translate3d(-104%, 0, 0) !important;
+    transition: transform 220ms cubic-bezier(.2, .8, .2, 1) !important;
+    will-change: transform;
+  }
+
+  .app.sidebar-open .sidebar {
+    transform: translate3d(0, 0, 0) !important;
+  }
+
+  .app .sidebar-backdrop {
+    display: block !important;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 180ms ease !important;
+  }
+
+  .app .sidebar-backdrop[hidden] {
+    display: none !important;
+  }
+
+  .app.sidebar-open .sidebar-backdrop {
+    opacity: 1;
+    pointer-events: auto;
+  }
+}
+
+@media (max-width: 880px) and (prefers-reduced-motion: reduce) {
+  .app .sidebar,
+  .app .sidebar-backdrop {
+    transition: none !important;
+  }
+}
+
+/* ============================================================
+   YANTA — Fast staggered load transitions
+   Dashboard cards only
+   ============================================================ */
+
+@keyframes yanta-stagger-fade-up {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 9px, 0) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+.dashboard .yanta-dash-card.yanta-stagger-item {
+  animation-name: yanta-stagger-fade-up;
+  animation-duration: 340ms;
+  animation-delay: var(--yanta-stagger-delay, 0ms);
+  animation-timing-function: cubic-bezier(.2, .8, .2, 1);
+  animation-fill-mode: both;
+  will-change: transform, opacity;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dashboard .yanta-dash-card.yanta-stagger-item {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
 }

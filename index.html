@@ -6,6 +6,41 @@
 <meta name="color-scheme" content="dark light" />
 <title>YANTA</title>
 <link rel="icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%236ea8fe'/><path d='M9 9l7 9 7-9M16 18v6' stroke='white' stroke-width='2.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>" />
+<script>
+(() => {
+  try {
+    const raw = localStorage.getItem('yanta.appearance.boot.v1');
+    if (!raw) return;
+
+    const boot = JSON.parse(raw);
+    const root = document.documentElement;
+
+    const pref = boot.appearanceMode || 'auto';
+    const effective =
+      pref === 'dark' || pref === 'light'
+        ? pref
+        : window.matchMedia?.('(prefers-color-scheme: dark)')?.matches
+          ? 'dark'
+          : 'light';
+
+    root.dataset.theme = effective;
+    root.dataset.appearanceMode = pref;
+    root.style.colorScheme = effective;
+
+    const palette = boot.colors?.[effective] || {};
+    for (const [key, value] of Object.entries(palette)) {
+      if (typeof value === 'string' && value) {
+        root.style.setProperty('--' + key, value);
+      }
+    }
+
+    if (boot.font) root.style.setProperty('--font', boot.font);
+    if (boot.mono) root.style.setProperty('--font-mono', boot.mono);
+    if (boot.fontSize) root.style.setProperty('--fs-base', boot.fontSize);
+    if (boot.lineHeight) root.style.setProperty('--lh-base', boot.lineHeight);
+  } catch {}
+})();
+</script>
 <link rel="stylesheet" href="styles.css" />
 <link rel="stylesheet" href="dashboard.css" />
 <link rel="stylesheet" href="calendar.css" />

@@ -5511,6 +5511,39 @@ function closeEventModal() {
   if (eventModal) eventModal.hidden = true;
 }
 
+export function openNewCalendarEvent(input = {}) {
+  if (!calendarHydrated) {
+    hydrateCalendarStateFromVault();
+  }
+
+  ensureDefaultCalendarCategory();
+
+  const start = input.start
+    ? new Date(input.start)
+    : new Date();
+
+  if (Number.isNaN(start.getTime())) {
+    start.setTime(Date.now());
+  }
+
+  start.setSeconds(0, 0);
+
+  const allDay = input.allDay === true;
+  const end = input.end
+    ? new Date(input.end)
+    : allDay
+      ? null
+      : new Date(start.getTime() + 60 * 60 * 1000);
+
+  openEventEditor({
+    title: '',
+    start: start.toISOString(),
+    end: end && !Number.isNaN(end.getTime()) ? end.toISOString() : null,
+    allDay,
+    ...input,
+  });
+}
+
 function categoryOptionsHtml(selectedId) {
   ensureDefaultCalendarCategory();
 
@@ -6475,10 +6508,6 @@ export function openCalendar({
   push = true,
   replace = false,
 } = {}) {
-  if (calendarMode === 'pane') {
-    closeCalendarPane({ silent: true });
-  }
-
   const surface = $('calendarSurface');
 
   if (!surface) {
@@ -6486,18 +6515,50 @@ export function openCalendar({
     return;
   }
 
-  calendarReturnSurface =
-    state.surface && state.surface !== 'calendar'
-      ? state.surface
-      : location.hash === '#dashboard'
-        ? 'dashboard'
-        : 'note';
-        
+  /*
+    Idempotenz:
+    Wenn der Kalender bereits als Fullscreen-Surface offen ist, darf ein
+    erneuter Klick nicht noch einmal einen History-Eintrag pushen.
+    Das war die Ursache für "Kalender mehrfach öffnen".
+  */
+  const alreadySurfaceOpen =
+    calendarMode === 'surface' &&
+    state.surface === 'calendar' &&
+    surface.hidden === false;
+
+  if (calendarMode === 'pane') {
+    closeCalendarPane({ silent: true });
+  }
+
+  const stillAlreadySurfaceOpen =
+    calendarMode === 'surface' &&
+    state.surface === 'calendar' &&
+    surface.hidden === false;
+
+  if (!stillAlreadySurfaceOpen) {
+    calendarReturnSurface =
+      state.surface && state.surface !== 'calendar'
+        ? state.surface
+        : location.hash === '#dashboard'
+          ? 'dashboard'
+          : 'note';
+  }
+
   state.surface = 'calendar';
 
-  if (push) {
+  /*
+    Nur beim ersten Öffnen pushen.
+    Wenn der Kalender schon offen ist, nur Layout/Render aktualisieren.
+  */
+  if (push && !stillAlreadySurfaceOpen) {
     const method = replace ? 'replaceState' : 'pushState';
     history[method](calendarState(), '', calendarUrl());
+  } else if (
+    push &&
+    replace &&
+    history.state?.surface !== 'calendar'
+  ) {
+    history.replaceState(calendarState(), '', calendarUrl());
   }
 
   const app = $('app');

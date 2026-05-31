@@ -84,7 +84,17 @@ import {
     resize: null,
     suppressOpenUntil: 0,
     paneMode: false,
+
+    // Disable entry stagger while a View Transition is taking snapshots.
+    // Otherwise target snapshots can be captured with opacity:0.
+    suppressStagger: false,
+
+    // Temporarily suppress stagger after drag/drop reorder.
+    // Otherwise a dashboard refresh after reordering replays the entry animation.
+    suppressStaggerUntil: 0,
   };
+
+  let dashboardStaggerIndex = 0;
   
   const previewCache = new Map();
   // noteId -> { updated, textLen, preview }
@@ -228,6 +238,44 @@ import {
   
   function transitionNameFor(kind, id) {
     return `dash-${kind}-${String(id || '').replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+  }
+
+  function suppressDashboardStaggerFor(ms = 900) {
+    dashboard.suppressStaggerUntil = Math.max(
+      dashboard.suppressStaggerUntil || 0,
+      performance.now() + ms
+    );
+  }
+
+  function applyDashboardStagger(node) {
+    if (!node) return;
+    if (dashboard.suppressStagger) return;
+    if ((dashboard.suppressStaggerUntil || 0) > performance.now()) return;
+    if (prefersReducedMotion()) return;
+
+    const i = dashboardStaggerIndex++;
+
+    /*
+      Smooth progressive stagger:
+      - frühe Items starten schnell und kurz
+      - spätere Items bekommen etwas mehr Delay UND längere Fade-Dauer
+      - alles gecappt, damit große Dashboards nicht träge werden
+    */
+    const cappedIndex = Math.min(i, 34);
+
+    const delay = cappedIndex * 24;
+    const duration = Math.min(1000, 680 + cappedIndex * 16);
+
+    /*
+      Spätere Items starten minimal tiefer.
+      Das unterstützt den smoothen "Wave"-Effekt, ohne zu stark zu springen.
+    */
+    const offset = Math.min(16, 8 + cappedIndex * 0.22);
+
+    node.classList.add('yanta-stagger-item');
+    node.style.setProperty('--yanta-stagger-delay', `${delay}ms`);
+    node.style.setProperty('--yanta-stagger-duration', `${duration}ms`);
+    node.style.setProperty('--yanta-stagger-offset', `${offset}px`);
   }
   
   function heightToGridSpan(px) {
@@ -508,17 +556,32 @@ function getDashboardItems() {
           ?.forEach((n) => n.classList.remove('selected'));
       }, true);
   
-    window.addEventListener('yanta-note-updated', (e) => {
-      const noteId = e.detail?.noteId;
-  
-      if (noteId) {
-        previewCache.delete(noteId);
-      }
-  
-      if (dashboard.visible) {
-        renderDashboard();
-      }
-    });
+      window.addEventListener('yanta-note-updated', (e) => {
+        const noteId = e.detail?.noteId;
+        const reason = e.detail?.reason || '';
+        const source = e.detail?.source || '';
+
+        if (noteId) {
+          previewCache.delete(noteId);
+        }
+
+        /*
+          Wenn der Task direkt im Dashboard angehakt wurde, rendert der
+          Checkbox-Handler nur die betroffene Card neu. Ein komplettes
+          renderDashboard() würde unnötig flackern und Stagger/Scroll resetten.
+        */
+        if (
+          dashboard.visible &&
+          reason === 'task-toggle' &&
+          source === 'dashboard'
+        ) {
+          return;
+        }
+
+        if (dashboard.visible) {
+          renderDashboard();
+        }
+      });
   
     window.addEventListener('yanta-dashboard-refresh', () => {
       if (dashboard.visible) renderDashboard();
@@ -730,61 +793,90 @@ export async function showDashboardFolderFromHistory(folderId = null) {
   });
 }
 
-  export async function showDashboardFromNote(noteId = state.currentNoteId, {
-    folderId = dashboard.folderId || null,
-    replace = true,
-  } = {}) {
-    ensureDashboardRoot();
-  
-    if (!noteId || !document.startViewTransition) {
-      showDashboard({ folderId, replace });
+export async function showDashboardFromNote(noteId = state.currentNoteId, {
+  folderId = dashboard.folderId || null,
+  replace = true,
+} = {}) {
+  ensureDashboardRoot();
+
+  if (!noteId || !document.startViewTransition || prefersReducedMotion()) {
+    showDashboard({ folderId, replace });
+    return;
+  }
+
+  const transitionName = transitionNameFor('note', noteId);
+  const source = $('panes');
+
+  let targetCard = null;
+  let targetPage = null;
+
+  if (source) {
+    source.style.viewTransitionName = transitionName;
+    source.style.contain = 'layout paint';
+    source.classList.add('is-note-transition-source');
+  }
+
+  dashboard.suppressStagger = true;
+
+  const vt = document.startViewTransition(() => {
+    showDashboard({ folderId, replace: false, push: false });
+
+    targetCard = root?.querySelector(
+      `.yanta-dash-card[data-note-id="${CSS.escape(noteId)}"]`
+    );
+
+    if (targetCard) {
+      targetCard.style.viewTransitionName = transitionName;
+      targetCard.style.contain = 'layout paint';
+      targetCard.classList.add('is-note-transition-target');
       return;
     }
-  
-    const transitionName = transitionNameFor('note', noteId);
-    const source = $('panes');
-    let targetCard = null;
-  
-    if (source) {
-      source.style.viewTransitionName = transitionName;
-      source.style.contain = 'layout paint';
-      source.classList.add('is-note-transition-source');
+
+    /*
+      Fallback:
+      If the note card is not visible in the target dashboard route
+      (e.g. note opened from tree, note lives elsewhere), still animate
+      panes -> dashboard page instead of doing no transition.
+    */
+    targetPage = dashboardPage();
+
+    if (targetPage) {
+      targetPage.style.viewTransitionName = transitionName;
+      targetPage.style.contain = 'layout paint';
+      targetPage.classList.add('is-note-transition-target');
     }
-  
-    const vt = document.startViewTransition(() => {
-      showDashboard({ folderId, replace: false, push: false });
-  
-      targetCard = root?.querySelector(
-        `.yanta-dash-card[data-note-id="${CSS.escape(noteId)}"]`
-      );
-  
-      if (targetCard) {
-        targetCard.style.viewTransitionName = transitionName;
-        targetCard.style.contain = 'layout paint';
-      }
-    });
-  
-    await vt.finished.catch(() => {});
-  
-    if (source) {
-      source.style.viewTransitionName = '';
-      source.style.contain = '';
-      source.classList.remove('is-note-transition-source');
-    }
-  
-    if (targetCard) {
-      targetCard.style.viewTransitionName = '';
-      targetCard.style.contain = '';
-    }
-  
-    if (replace) {
-      history.replaceState(
-        dashboardState(dashboard.folderId),
-        '',
-        dashboardUrl(dashboard.folderId)
-      );
-    }
+  });
+
+  await vt.finished.catch(() => {});
+
+  dashboard.suppressStagger = false;
+
+  if (source) {
+    source.style.viewTransitionName = '';
+    source.style.contain = '';
+    source.classList.remove('is-note-transition-source');
   }
+
+  if (targetCard) {
+    targetCard.style.viewTransitionName = '';
+    targetCard.style.contain = '';
+    targetCard.classList.remove('is-note-transition-target');
+  }
+
+  if (targetPage) {
+    targetPage.style.viewTransitionName = '';
+    targetPage.style.contain = '';
+    targetPage.classList.remove('is-note-transition-target');
+  }
+
+  if (replace) {
+    history.replaceState(
+      dashboardState(dashboard.folderId),
+      '',
+      dashboardUrl(dashboard.folderId)
+    );
+  }
+}
   
   function setupPreviewObserver() {
     previewObserver?.disconnect();
@@ -811,6 +903,7 @@ function renderDashboard() {
   ensureDashboardRoot();
   setupPreviewObserver();
 
+  dashboardStaggerIndex = 0;
   root.replaceChildren();
 
   /*
@@ -996,6 +1089,8 @@ function renderCard(item, { section }) {
       folderId: item.kind === 'folder' ? item.id : '',
     },
   });
+
+  applyDashboardStagger(card);
 
   // Wichtig: Custom Properties explizit setzen.
   card.style.setProperty('--dash-row-span', String(rowSpan));
@@ -2071,9 +2166,11 @@ function renderFolderMiniDrawing(noteId, block) {
   
     cb.addEventListener('change', async (e) => {
       e.stopPropagation();
-  
-      await toggleTaskLineInNote(noteId, task.line, cb.checked);
-  
+        
+      await toggleTaskLineInNote(noteId, task.line, cb.checked, {
+        source: 'dashboard',
+      });
+      
       previewCache.delete(noteId);
   
       const card = root?.querySelector(`.yanta-dash-card[data-note-id="${CSS.escape(noteId)}"]`);
@@ -2828,6 +2925,8 @@ async function navigateDashboardFolder(folderId, {
 
   let newToken = null;
 
+  dashboard.suppressStagger = true;
+
   const vt = document.startViewTransition(() => {
     commitDashboardFolderNavigation(targetFolderId, { push });
 
@@ -2903,6 +3002,7 @@ async function navigateDashboardFolder(folderId, {
   clearTemporaryViewTransitionElement(oldToken);
   clearTemporaryViewTransitionElement(newToken);
 
+  dashboard.suppressStagger = false;
   dashboard.suppressOpenUntil = performance.now() + 350;
 }
 
@@ -2966,6 +3066,79 @@ async function navigateDashboardFolder(folderId, {
       });
     } finally {
       dashboard.internalOpeningNote = false;
+    }
+  }
+
+  export async function openNoteFromDashboardHistory(noteId) {
+    ensureDashboardRoot();
+
+    if (!noteId || !state.notes.has(noteId)) return;
+
+    const card = findDashboardNoteCard(noteId);
+
+    if (!dashboard.visible || !document.startViewTransition || prefersReducedMotion()) {
+      hideDashboard({ push: false });
+      await openNote(noteId);
+      return;
+    }
+
+    /*
+      Best case:
+      visible dashboard card -> note panes.
+    */
+    if (card) {
+      await openNoteFromDashboard(noteId, card);
+      return;
+    }
+
+    /*
+      Fallback:
+      dashboard page -> note panes.
+      This covers history forward/back routes where the note is not visible
+      as a card in the current dashboard folder.
+    */
+    dashboard.internalOpeningNote = true;
+
+    const transitionName = transitionNameFor('note', noteId);
+    const sourcePage = dashboardPage();
+    let target = null;
+
+    try {
+      if (sourcePage) {
+        sourcePage.style.viewTransitionName = transitionName;
+        sourcePage.style.contain = 'layout paint';
+        sourcePage.classList.add('is-note-transition-source');
+      }
+
+      const vt = document.startViewTransition(async () => {
+        hideDashboard({ push: false });
+
+        await openNote(noteId);
+
+        target = $('panes');
+
+        if (target) {
+          target.style.viewTransitionName = transitionName;
+          target.style.contain = 'layout paint';
+          target.classList.add('is-note-transition-target');
+        }
+      });
+
+      await vt.finished.catch(() => {});
+    } finally {
+      dashboard.internalOpeningNote = false;
+
+      if (sourcePage) {
+        sourcePage.style.viewTransitionName = '';
+        sourcePage.style.contain = '';
+        sourcePage.classList.remove('is-note-transition-source');
+      }
+
+      if (target) {
+        target.style.viewTransitionName = '';
+        target.style.contain = '';
+        target.classList.remove('is-note-transition-target');
+      }
     }
   }
   
@@ -3490,6 +3663,7 @@ async function navigateDashboardFolder(folderId, {
     root?.classList.add('is-card-dragging');
 
     dashboard.suppressOpenUntil = performance.now() + 900;
+    suppressDashboardStaggerFor(1400);
 
     dashboard.dragging = {
       key,
@@ -3805,6 +3979,7 @@ async function navigateDashboardFolder(folderId, {
 
     dashboard.dragging = null;
     dashboard.suppressOpenUntil = performance.now() + 850;
+    suppressDashboardStaggerFor(1400);
 
     const {
       source,
@@ -3882,6 +4057,7 @@ async function navigateDashboardFolder(folderId, {
 
     dashboard.dragging = null;
     dashboard.suppressOpenUntil = performance.now() + 700;
+    suppressDashboardStaggerFor(900);
 
     d.placeholder?.remove();
 

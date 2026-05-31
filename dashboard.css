@@ -1275,7 +1275,7 @@
   line-height: 1.45;
 }
 
-/* Drag & Drop — stable animated grid reorder */
+/* Drag & Drop — Google-Keep-like live displacement, no placeholder */
 .dashboard.is-card-dragging {
   cursor: grabbing;
 }
@@ -1290,54 +1290,60 @@
   -webkit-user-select: none;
 }
 
-/* Originalkarte bleibt im DOM, wird beim Drag aber aus dem Grid-Flow genommen. */
+/*
+  Kein Placeholder:
+  Die Source bleibt im CSS-Grid-Flow und reserviert exakt ihren echten Slot.
+  Sie wird nur unsichtbar gemacht und live in der DOM-Reihenfolge verschoben.
+*/
 .yanta-dash-card.drag-source {
   opacity: 0;
   visibility: hidden;
   pointer-events: none;
 }
 
-/* Drag-Clone ist komplett außerhalb des Grids. */
+/* Drag-Clone ist der sichtbare Finger-/Maus-Follower. */
 .yanta-dash-card.drag-clone {
   position: fixed;
 
   opacity: 0.985;
 
   border-color: var(--accent);
-  box-shadow: 0 18px 45px rgba(0, 0, 0, 0.28);
+  box-shadow:
+    0 14px 34px rgba(0, 0, 0, 0.24),
+    0 0 0 1px color-mix(in srgb, var(--accent) 24%, transparent) inset;
 
   pointer-events: none;
   touch-action: none;
   user-select: none;
   -webkit-user-select: none;
 
-  transform: translate3d(0, 0, 0);
-  transform-origin: center center;
+  /*
+    transform wird komplett in JS gesetzt:
+      translate3d(...) scale(...)
+    Kein separates CSS scale mehr, sonst entsteht wieder Cursor-Versatz.
+  */
+  transform: translate3d(0, 0, 0) scale(1);
+  transform-origin: top left;
 
-  transition: none !important;
-  will-change: transform;
+  transition:
+    opacity 140ms ease,
+    filter 140ms ease,
+    border-radius 170ms cubic-bezier(.2, .8, .2, 1),
+    box-shadow 170ms ease !important;
+
+  will-change: transform, opacity;
 }
 
-/*
-  Placeholder reserviert ausschließlich per CSS-Grid span Platz.
-  Keine explizite height setzen — das war eine Ursache für ungenaue
-  Vorhersage/Überlappung bei Grid-Gap/Row-Span-Kombinationen.
-*/
-.yanta-dash-placeholder {
-  grid-row: span var(--dash-row-span, 18);
+.yanta-dash-card.drag-clone.folder-insert-preview {
+  opacity: 0.9;
+  filter: saturate(1.08) brightness(1.08);
 
-  min-width: 0;
-  min-height: 0;
+  border-color: var(--accent);
+  border-radius: 20px;
 
-  box-sizing: border-box;
-
-  border: 2px dashed color-mix(in srgb, var(--accent) 55%, var(--border));
-  border-radius: 16px;
-
-  background: color-mix(in srgb, var(--accent) 8%, transparent);
-
-  pointer-events: none;
-  transform: translateZ(0);
+  box-shadow:
+    0 18px 44px rgba(0, 0, 0, 0.30),
+    0 0 0 2px color-mix(in srgb, var(--accent) 42%, transparent) inset;
 }
 
 /* Insert markers while dragging */
@@ -1366,19 +1372,29 @@
   bottom: 5px;
 }
 
-/* Folder drop target while dragging a note */
+/* Folder drop target while dragging note/folder */
 .yanta-dash-card.folder-drop-target {
   border-color: var(--accent);
+
   background:
+    radial-gradient(
+      circle at center,
+      color-mix(in srgb, var(--accent) 20%, transparent),
+      transparent 58%
+    ),
     linear-gradient(
       180deg,
-      color-mix(in srgb, var(--accent) 12%, var(--bg-elev)),
+      color-mix(in srgb, var(--accent) 16%, var(--bg-elev)),
       var(--bg-elev)
     );
+
+  /* box-shadow:
+    0 0 0 2px color-mix(in srgb, var(--accent) 32%, transparent) inset,
+    0 16px 38px rgba(0, 0, 0, 0.18); */
 }
 
 .yanta-dash-card.folder-drop-target::after {
-  content: "Drop into folder";
+  content: "Release to add to folder";
 
   position: absolute;
   left: 10px;
@@ -1386,21 +1402,26 @@
   bottom: 10px;
   z-index: 8;
 
-  padding: 7px 10px;
+  padding: 8px 11px;
 
-  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
+  border: 1px solid color-mix(in srgb, var(--accent) 48%, var(--border));
   border-radius: 999px;
 
-  background: var(--bg-elev-2);
+  background:
+    color-mix(in srgb, var(--bg-elev-2) 94%, transparent);
   color: var(--accent);
 
+  box-shadow:
+    0 8px 22px rgba(0, 0, 0, 0.22),
+    0 0 0 1px color-mix(in srgb, var(--accent) 18%, transparent) inset;
+
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 900;
   letter-spacing: 0.02em;
   text-align: center;
 }
 
-/* When inserting before/after a folder, do not show folder drop label. */
+/* Wenn am Folder nur before/after einsortiert wird, keine Into-Folder-Bubble zeigen. */
 .yanta-dash-card.insert-before.folder-drop-target::after,
 .yanta-dash-card.insert-after.folder-drop-target::after {
   display: none;

@@ -389,20 +389,41 @@ window.addEventListener('popstate', async (e) => {
       und erhält die Note-Zoom-Back-Transition.
   */
   if (st.surface === 'dashboard' || route.surface === 'dashboard') {
-    // Important:
-    // If we navigate back from #calendar to #dashboard, the URL changes first.
-    // We must explicitly close the fullscreen calendar surface here.
-    closeCalendar({ surface: 'dashboard' });
-    closeCalendarPane({ silent: true });
-
     const folderId =
       st.folderId !== undefined
         ? st.folderId
         : route.folderId;
 
-    await showDashboardFolderFromHistory(
-      folderId && state.folders.has(folderId) ? folderId : null
-    );
+    const targetFolderId =
+      folderId && state.folders.has(folderId)
+        ? folderId
+        : null;
+
+    const calendarWasOpen =
+      state.surface === 'calendar' ||
+      $('calendarSurface')?.hidden === false;
+
+    closeCalendarPane({ silent: true });
+
+    /*
+      Wichtig:
+      Beim Back aus einer Note darf closeCalendar() NICHT vorher
+      app.dataset.surface = 'dashboard' setzen, sonst ist .panes vor
+      startViewTransition() schon display:none.
+    */
+    if (calendarWasOpen) {
+      closeCalendar({ surface: 'dashboard' });
+
+      showDashboard({
+        folderId: targetFolderId,
+        push: false,
+        replace: false,
+      });
+
+      return;
+    }
+
+    await showDashboardFolderFromHistory(targetFolderId);
 
     return;
   }

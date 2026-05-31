@@ -6475,10 +6475,18 @@ export function closeCalendar({
 
   const calendarSurface = $('calendarSurface');
 
+  // No-op, wenn der fullscreen calendar gar nicht offen ist.
+  // Verhindert unbeabsichtigte Surface-Mutationen durch defensive Aufrufe.
+  if (calendarSurface?.hidden !== false && state.surface !== 'calendar') {
+    closeEventModal();
+    closeCategoriesModal();
+    closeCalendarSourcesModal();
+    return;
+  }
+
   if (calendarSurface) {
     calendarSurface.hidden = true;
   }
-
   const targetSurface = surface || 'note';
 
   state.surface = targetSurface;

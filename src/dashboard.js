@@ -52,6 +52,16 @@ import {
   const DRAG_EDGE_SCROLL_PX = 76;
   const DRAG_EDGE_SCROLL_MAX = 18;
   const DRAG_DROP_ANIM_MS = 145;
+  const DRAG_FOLDER_INSERT_PREVIEW_SCALE = 0.56;
+
+  const DRAG_REORDER_COOLDOWN_MS = 120;
+  const DRAG_REORDER_MIN_MOVE_PX = 22;
+  const DRAG_REORDER_CANDIDATE_STABLE_MS = 130;
+  const DRAG_REORDER_CENTER_DEADZONE_PX = 18;
+
+  const DRAG_REORDER_LOCK_MS = 190;
+  const DRAG_REORDER_LOCK_MARGIN_PX = 24;
+  const DRAG_SPATIAL_ROW_TOLERANCE_PX = 28;
 
   const GRID_ROW_PX = 8;
   const GRID_GAP_PX = 10;
@@ -1211,6 +1221,25 @@ function renderCardActions(item) {
       }),
     );
 
+    if (item.folder.parentId) {
+      actions.append(
+        iconActionButton({
+          icon: 'folder-up',
+          title: 'Move folder up one level',
+          onClick: () => moveDashboardFolderOutOfFolder(item.folder.id),
+        })
+      );
+    }
+
+    actions.append(
+      iconActionButton({
+        icon: 'trash',
+        title: 'Delete folder',
+        danger: true,
+        onClick: () => deleteDashboardFolder(item.folder.id),
+      }),
+    );
+
     return actions;
   }
 
@@ -1439,7 +1468,105 @@ function renderCardActions(item) {
     toast('Note deleted', 'success');
     renderDashboard();
   }
-  
+    
+  function collectDashboardFolderIdsRecursive(folderId) {
+    const out = new Set();
+    const stack = [folderId];
+
+    while (stack.length) {
+      const id = stack.pop();
+
+      if (!id || out.has(id)) continue;
+
+      out.add(id);
+
+      for (const folder of state.folders.values()) {
+        if (folder.parentId === id) {
+          stack.push(folder.id);
+        }
+      }
+    }
+
+    return out;
+  }
+
+  function collectDashboardNoteIdsInsideFolders(folderIds) {
+    const out = new Set();
+
+    for (const note of state.notes.values()) {
+      if (note.folderId && folderIds.has(note.folderId)) {
+        out.add(note.id);
+      }
+    }
+
+    return out;
+  }
+
+  async function deleteDashboardFolder(folderId) {
+    const folder = state.folders.get(folderId);
+    if (!folder) return;
+
+    const folderIds = collectDashboardFolderIdsRecursive(folderId);
+    const noteIds = collectDashboardNoteIdsInsideFolders(folderIds);
+
+    const folderCount = folderIds.size;
+    const noteCount = noteIds.size;
+
+    const msg =
+      noteCount || folderCount > 1
+        ? `Delete "${folder.name || 'Folder'}" and everything inside?\n\nThis will delete ${folderCount} folder${folderCount === 1 ? '' : 's'} and ${noteCount} note${noteCount === 1 ? '' : 's'}.\n\nThis cannot be undone.`
+        : `Delete "${folder.name || 'Folder'}"? This cannot be undone.`;
+
+    if (!confirm(msg)) return;
+
+    const deletingCurrentNote =
+      state.currentNoteId &&
+      noteIds.has(state.currentNoteId);
+
+    for (const noteId of noteIds) {
+      await store.notes.del(noteId);
+
+      state.notes.delete(noteId);
+      state.searchIndex.delete(noteId);
+      previewCache.delete(noteId);
+
+      try {
+        await destroyNoteDoc(noteId);
+      } catch {}
+    }
+
+    for (const id of folderIds) {
+      await store.folders.del(id);
+
+      state.folders.delete(id);
+      state.expandedFolders.delete(id);
+    }
+
+    if (dashboard.folderId && folderIds.has(dashboard.folderId)) {
+      dashboard.folderId = null;
+      state.dashboardFolderId = null;
+    }
+
+    if (deletingCurrentNote) {
+      clearEditor();
+    }
+
+    rebuildWikilinkIndex();
+
+    window.dispatchEvent(new CustomEvent('yanta-folder-updated', {
+      detail: {
+        folderId,
+        deleted: true,
+      },
+    }));
+
+    window.dispatchEvent(new CustomEvent('yanta-dashboard-refresh'));
+
+    toast('Folder deleted', 'success');
+
+    renderDashboard();
+  }
+
   async function moveDashboardNoteOutOfFolder(noteId) {
     const note = state.notes.get(noteId);
     if (!note || !note.folderId) return;
@@ -1458,6 +1585,46 @@ function renderCardActions(item) {
     toast('Moved to root', 'success');
     renderDashboard();
   }
+
+async function moveDashboardFolderOutOfFolder(folderId) {
+  const folder = state.folders.get(folderId);
+  if (!folder || !folder.parentId) return;
+
+  const parent = state.folders.get(folder.parentId);
+  const nextParentId = parent?.parentId || null;
+
+  /*
+    Defensive cycle guard.
+    Normalerweise kann das beim "eine Ebene hoch" nicht passieren,
+    aber bei inkonsistenten Daten ist es besser, es abzufangen.
+  */
+  if (nextParentId && dashboardFolderIsAncestor(folder.id, nextParentId)) {
+    toast('Cannot move folder into itself', 'error');
+    return;
+  }
+
+  folder.parentId = nextParentId;
+  folder.updated = Date.now();
+
+  await store.folders.put(folder);
+
+  if (nextParentId) {
+    state.expandedFolders.add(nextParentId);
+  }
+
+  window.dispatchEvent(new CustomEvent('yanta-folder-updated', {
+    detail: {
+      folderId,
+      moved: true,
+    },
+  }));
+
+  window.dispatchEvent(new CustomEvent('yanta-dashboard-refresh'));
+
+  toast(nextParentId ? 'Folder moved up one level' : 'Folder moved to root', 'success');
+
+  renderDashboard();
+}
 
 function dashboardRenameTarget(cardOrAnchor, {
   noteId = '',
@@ -3192,817 +3359,1316 @@ async function navigateDashboardFolder(folderId, {
     clone.remove();
   }
   
-  // ============================================================
-  // Long press, drag reorder, resize
-  // ============================================================
+// ============================================================
+// Long press, robust live-displacement drag reorder, resize
+// ============================================================
 
-  function bindCardPointerInteractions(card, item) {
-    let pressTimer = 0;
-    let active = null;
+function bindCardPointerInteractions(card, item) {
+  let pressTimer = 0;
+  let active = null;
 
-    const key = itemKey(item);
+  const key = itemKey(item);
 
-    const clearPress = () => {
-      clearTimeout(pressTimer);
-      pressTimer = 0;
-    };
+  const clearPress = () => {
+    clearTimeout(pressTimer);
+    pressTimer = 0;
+  };
 
-    const selectInPlace = () => {
-      dashboard.selectedKey = key;
+  const selectInPlace = () => {
+    dashboard.selectedKey = key;
 
-      root
-        ?.querySelectorAll('.yanta-dash-card.selected')
-        ?.forEach((node) => {
-          if (node !== card) node.classList.remove('selected');
-        });
-
-      card.classList.add('selected');
-
-      /*
-        Wichtig:
-        Ohne echten Fokus bekommt die Card keine keydown-Events.
-        F2/F12/Enter funktionieren sonst nach Long-Press oft nicht.
-      */
-      try {
-        card.focus({ preventScroll: true });
-      } catch {
-        card.focus();
-      }
-    };
-
-    const cleanupPending = () => {
-      clearPress();
-
-      document.removeEventListener('pointermove', onDocumentPendingMove, true);
-      document.removeEventListener('pointerup', onDocumentPendingUp, true);
-      document.removeEventListener('pointercancel', onDocumentPendingCancel, true);
-
-      root?.classList.remove('is-touch-scrolling');
-
-      active = null;
-    };
-
-    card.addEventListener('contextmenu', (e) => {
-      if (!dashboard.visible) return;
-      e.preventDefault();
-      e.stopPropagation();
-    });
-
-    card.addEventListener('pointerdown', (e) => {
-      if (e.button != null && e.button !== 0) return;
-      if (e.target.closest?.('input, button, a, textarea, select, iframe, .yanta-dash-resize-handle')) return;
-      if (dashboard.resize || dashboard.dragging) return;
-
-      const pointerType = e.pointerType || 'mouse';
-
-      active = {
-        pointerId: e.pointerId,
-        pointerType,
-        downX: e.clientX,
-        downY: e.clientY,
-        lastScrollY: e.clientY,
-        moved: false,
-        longPressed: false,
-        dragStarted: false,
-        scrolling: false,
-      };
-
-      clearPress();
-
-      /*
-        CSS setzt touch-action:none auf Cards.
-        Deshalb verhindern wir native Gesten und scrollen bei Touch selbst,
-        solange der Long-Press noch nicht aktiv ist.
-      */
-      e.preventDefault();
-      e.stopPropagation();
-
-      try {
-        card.setPointerCapture?.(e.pointerId);
-      } catch {}
-
-      pressTimer = window.setTimeout(() => {
-        if (!active || active.pointerId !== e.pointerId) return;
-        if (active.scrolling || active.dragStarted) return;
-
-        active.longPressed = true;
-        selectInPlace();
-
-        dashboard.suppressOpenUntil = performance.now() + 600;
-      }, LONG_PRESS_MS);
-
-      document.addEventListener('pointermove', onDocumentPendingMove, true);
-      document.addEventListener('pointerup', onDocumentPendingUp, true);
-      document.addEventListener('pointercancel', onDocumentPendingCancel, true);
-    }, { passive: false });
-
-    function onDocumentPendingMove(e) {
-      if (!active || e.pointerId !== active.pointerId) return;
-
-      const dx = e.clientX - active.downX;
-      const dy = e.clientY - active.downY;
-      const dist = Math.hypot(dx, dy);
-
-      if (dashboard.dragging?.key === key) {
-        e.preventDefault();
-        e.stopPropagation();
-        moveCardDrag(e);
-        return;
-      }
-
-      /*
-        Touch-Scroll-Modus:
-        Wenn der User vor Long-Press vertikal bewegt, ist es Scrollen.
-        Da touch-action:none gesetzt ist, machen wir den Scroll manuell.
-      */
-      if (active.scrolling) {
-        e.preventDefault();
-        e.stopPropagation();
-
-        if (root) {
-          const delta = active.lastScrollY - e.clientY;
-          root.scrollBy(0, delta);
-        }
-
-        active.lastScrollY = e.clientY;
-        active.moved = true;
-        return;
-      }
-
-      if (dist <= MOVE_TOLERANCE) {
-        if (active.longPressed) {
-          e.preventDefault();
-          e.stopPropagation();
-        }
-
-        return;
-      }
-
-      active.moved = true;
-
-      const canStartDrag =
-        active.pointerType !== 'touch' ||
-        active.longPressed ||
-        dashboard.selectedKey === key;
-
-      /*
-        Touch vor Long-Press bedeutet weiterhin: scrollen, nicht draggen.
-        Dadurch bleibt die UX natürlich, obwohl Cards touch-action:none haben.
-      */
-      if (!canStartDrag) {
-        clearPress();
-
-        active.scrolling = true;
-        active.lastScrollY = active.downY;
-
-        root?.classList.add('is-touch-scrolling');
-
-        e.preventDefault();
-        e.stopPropagation();
-
-        if (root) {
-          const delta = active.lastScrollY - e.clientY;
-          root.scrollBy(0, delta);
-        }
-
-        active.lastScrollY = e.clientY;
-        dashboard.suppressOpenUntil = performance.now() + 350;
-        return;
-      }
-
-      e.preventDefault();
-      e.stopPropagation();
-
-      clearPress();
-
-      if (!active.longPressed) {
-        active.longPressed = true;
-        selectInPlace();
-      }
-
-      if (!active.dragStarted) {
-        active.dragStarted = true;
-
-        dashboard.suppressOpenUntil = performance.now() + 900;
-        startCardDrag(card, item, e);
-      }
-    }
-
-    async function onDocumentPendingUp(e) {
-      if (!active || e.pointerId !== active.pointerId) return;
-
-      const snapshot = active;
-      const wasDragging = dashboard.dragging?.key === key;
-
-      e.preventDefault();
-      e.stopPropagation();
-
-      try {
-        card.releasePointerCapture?.(e.pointerId);
-      } catch {}
-
-      cleanupPending();
-
-      if (wasDragging) {
-        await finishCardDrag();
-        dashboard.suppressOpenUntil = performance.now() + 750;
-        return;
-      }
-
-      if (snapshot.scrolling) {
-        dashboard.suppressOpenUntil = performance.now() + 250;
-        return;
-      }
-
-      if (snapshot.longPressed && !snapshot.dragStarted) {
-        selectInPlace();
-        dashboard.suppressOpenUntil = performance.now() + 350;
-        return;
-      }
-
-      if (!snapshot.moved && !snapshot.longPressed) {
-        await openItem(item, card);
-      }
-    }
-
-    function onDocumentPendingCancel(e) {
-      if (!active || e.pointerId !== active.pointerId) return;
-
-      const wasDragging = dashboard.dragging?.key === key;
-
-      try {
-        card.releasePointerCapture?.(e.pointerId);
-      } catch {}
-
-      cleanupPending();
-
-      if (wasDragging) {
-        cancelCardDrag();
-      }
-    }
-
-    card.addEventListener('keydown', async (e) => {
-      if (e.key === 'F2') {
-        e.preventDefault();
-        e.stopPropagation();
-
-        if (item.kind === 'note') {
-          renameDashboardNote(item.id, card);
-        } else {
-          renameDashboardFolder(item.id, card);
-        }
-
-        return;
-      }
-
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        await openItem(item, card);
-        return;
-      }
-
-      if (e.key === 'Escape') {
-        e.preventDefault();
-
-        if (dashboard.dragging) {
-          await cancelCardDrag();
-          return;
-        }
-
-        dashboard.selectedKey = null;
-        renderDashboard();
-      }
-    });
-  }
-
-  function clamp(n, min, max) {
-    return Math.max(min, Math.min(max, n));
-  }
-
-  function prefersReducedMotion() {
-    return window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
-  }
-
-  function clearFolderDropTargets() {
     root
-      ?.querySelectorAll('.yanta-dash-card.folder-drop-target')
-      ?.forEach((node) => node.classList.remove('folder-drop-target'));
-  }
-
-  function clearInsertTargets() {
-    root
-      ?.querySelectorAll('.yanta-dash-card.insert-before, .yanta-dash-card.insert-after')
+      ?.querySelectorAll('.yanta-dash-card.selected')
       ?.forEach((node) => {
-        node.classList.remove('insert-before');
-        node.classList.remove('insert-after');
-      });
-  }
-
-  function clearDragVisuals() {
-    clearFolderDropTargets();
-    clearInsertTargets();
-  }
-
-  function gridItemRowSpan(card) {
-    if (!card) return 18;
-
-    const inlineVar = String(card.style.getPropertyValue('--dash-row-span') || '').trim();
-
-    if (/^\d+$/.test(inlineVar)) {
-      return Number(inlineVar);
-    }
-
-    const computed = getComputedStyle(card);
-    const computedVar = String(computed.getPropertyValue('--dash-row-span') || '').trim();
-
-    if (/^\d+$/.test(computedVar)) {
-      return Number(computedVar);
-    }
-
-    const rowEnd = String(computed.gridRowEnd || '').trim();
-    const m = /span\s+(\d+)/i.exec(rowEnd);
-
-    if (m) {
-      return Number(m[1]);
-    }
-
-    const h =
-      Number(card.dataset.effectiveHeight) ||
-      card.getBoundingClientRect().height ||
-      DEFAULT_NOTE_HEIGHT;
-
-    return heightToGridSpan(h);
-  }
-
-  function createDragPlaceholder(card) {
-    const computed = getComputedStyle(card);
-    const span = gridItemRowSpan(card);
-
-    const placeholder = document.createElement('div');
-    placeholder.className = 'yanta-dash-placeholder';
-
-    placeholder.dataset.placeholderFor = card.dataset.key || '';
-    placeholder.style.setProperty('--dash-row-span', String(span));
-    placeholder.style.borderRadius = computed.borderRadius || '16px';
-
-    /*
-      Keine explizite height setzen.
-      Der Placeholder soll exakt den gleichen Grid-Span wie die Source haben.
-      Das verhindert Overlaps bei gap/row-span Kombinationen.
-    */
-
-    return placeholder;
-  }
-
-  function dragAnimElements(grid) {
-    return [...grid.children].filter((node) => {
-      if (!(node instanceof HTMLElement)) return false;
-      if (node.classList.contains('drag-clone')) return false;
-      if (node.classList.contains('drag-source')) return false;
-      if (node.classList.contains('yanta-dash-placeholder')) return false;
-
-      return node.classList.contains('yanta-dash-card');
-    });
-  }
-
-  function animateGridMutation(grid, mutate) {
-    if (!grid || prefersReducedMotion()) {
-      mutate?.();
-      return;
-    }
-
-    const nodes = dragAnimElements(grid);
-    const before = new Map();
-
-    for (const node of nodes) {
-      node.__yantaDashFlipAnimation?.cancel?.();
-      node.__yantaDashFlipAnimation = null;
-      before.set(node, node.getBoundingClientRect());
-    }
-
-    mutate?.();
-
-    const afterNodes = dragAnimElements(grid);
-
-    for (const node of afterNodes) {
-      const a = before.get(node);
-      if (!a) continue;
-
-      const b = node.getBoundingClientRect();
-
-      const dx = a.left - b.left;
-      const dy = a.top - b.top;
-
-      if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) continue;
-
-      node.__yantaDashFlipAnimation = node.animate(
-        [
-          {
-            transform: `translate3d(${dx}px, ${dy}px, 0)`,
-          },
-          {
-            transform: 'translate3d(0, 0, 0)',
-          },
-        ],
-        {
-          duration: 150,
-          easing: 'cubic-bezier(.2,.8,.2,1)',
-          fill: 'both',
-        }
-      );
-
-      node.__yantaDashFlipAnimation.addEventListener('finish', () => {
-        if (node.__yantaDashFlipAnimation) {
-          node.__yantaDashFlipAnimation = null;
-        }
-      }, { once: true });
-    }
-  }
-
-  function startCardDrag(card, item, e) {
-    if (dashboard.dragging) return;
-
-    const grid = card.closest('.yanta-dashboard-grid');
-    if (!grid) return;
-
-    const key = itemKey(item);
-    const rect = card.getBoundingClientRect();
-
-    const placeholder = createDragPlaceholder(card);
-
-    grid.insertBefore(placeholder, card);
-
-    const clone = card.cloneNode(true);
-    clone.classList.add('drag-clone');
-    clone.classList.remove('selected');
-    clone.style.viewTransitionName = 'none';
-
-    Object.assign(clone.style, {
-      position: 'fixed',
-      left: rect.left + 'px',
-      top: rect.top + 'px',
-      width: rect.width + 'px',
-      height: rect.height + 'px',
-      margin: '0',
-      zIndex: '1000',
-      pointerEvents: 'none',
-    });
-
-    clone.style.setProperty('transform', 'translate3d(0,0,0)', 'important');
-
-    document.body.append(clone);
-
-    /*
-      display:none entfernt die Source aus dem Grid-Flow.
-      Der Placeholder übernimmt exakt ihren Slot.
-    */
-    card.classList.add('drag-source');
-    card.style.display = 'none';
-    card.style.viewTransitionName = 'none';
-
-    root?.classList.add('is-card-dragging');
-
-    dashboard.suppressOpenUntil = performance.now() + 900;
-    suppressDashboardStaggerFor(1400);
-
-    dashboard.dragging = {
-      key,
-      section: card.dataset.section || '',
-      grid,
-      source: card,
-      clone,
-      placeholder,
-
-      sourceKind: item.kind,
-      sourceId: item.id,
-
-      width: rect.width,
-      height: rect.height,
-
-      startLeft: rect.left,
-      startTop: rect.top,
-      offsetX: e.clientX - rect.left,
-      offsetY: e.clientY - rect.top,
-
-      lastX: e.clientX,
-      lastY: e.clientY,
-
-      raf: 0,
-      scrollRaf: 0,
-
-      dropFolderId: null,
-      lastInsertSignature: '',
-    };
-
-    moveCardDrag(e);
-  }
-
-  function moveCardDrag(e) {
-    const d = dashboard.dragging;
-    if (!d) return;
-
-    d.lastX = e.clientX;
-    d.lastY = e.clientY;
-
-    startDragAutoScroll();
-
-    if (d.raf) return;
-
-    d.raf = requestAnimationFrame(() => {
-      const cur = dashboard.dragging;
-      if (!cur) return;
-
-      cur.raf = 0;
-
-      const left = cur.lastX - cur.offsetX;
-      const top = cur.lastY - cur.offsetY;
-
-      cur.clone.style.setProperty(
-        'transform',
-        `translate3d(${left - cur.startLeft}px, ${top - cur.startTop}px, 0)`,
-        'important'
-      );
-
-      updateLiveDragPlacement(cur.lastX, cur.lastY);
-    });
-  }
-
-  function updateLiveDragPlacement(clientX, clientY) {
-    const d = dashboard.dragging;
-    if (!d) return;
-
-    clearDragVisuals();
-    d.dropFolderId = null;
-
-    if (updateFolderDropTarget(clientX, clientY)) {
-      d.lastInsertSignature = 'folder:' + d.dropFolderId;
-      return;
-    }
-
-    updatePlaceholderPosition(clientX, clientY);
-  }
-
-  function updateFolderDropTarget(clientX, clientY) {
-    const d = dashboard.dragging;
-    if (!d) return false;
-
-    if (d.sourceKind !== 'note') return false;
-
-    const below = document.elementFromPoint(clientX, clientY);
-    const folderTarget = below?.closest?.('.yanta-dash-card[data-kind="folder"]');
-
-    if (!folderTarget) return false;
-    if (!folderTarget.isConnected) return false;
-    if (folderTarget.classList.contains('drag-source')) return false;
-
-    const folderId = folderTarget.dataset.folderId;
-    if (!folderId) return false;
-
-    const r = folderTarget.getBoundingClientRect();
-    const yRatio = (clientY - r.top) / Math.max(1, r.height);
-
-    /*
-      Middle zone = move into folder.
-      Top/bottom zones bleiben Reorder-Zonen.
-    */
-    if (yRatio < 0.28 || yRatio > 0.72) {
-      return false;
-    }
-
-    folderTarget.classList.add('folder-drop-target');
-    d.dropFolderId = folderId;
-
-    return true;
-  }
-
-  function updatePlaceholderPosition(clientX, clientY) {
-    const d = dashboard.dragging;
-    if (!d) return;
-
-    const pointerGrid = document
-      .elementFromPoint(clientX, clientY)
-      ?.closest?.('.yanta-dashboard-grid');
-
-    if (pointerGrid && pointerGrid !== d.grid) {
-      return;
-    }
-
-    const target = findBestInsertionTarget(d.grid, clientX, clientY);
-
-    if (!target) {
-      const signature = 'append';
-
-      if (d.lastInsertSignature === signature) return;
-      d.lastInsertSignature = signature;
-
-      if (d.placeholder.parentNode !== d.grid || d.placeholder.nextSibling) {
-        animateGridMutation(d.grid, () => {
-          d.grid.append(d.placeholder);
-        });
-      }
-
-      return;
-    }
-
-    const { card, place } = target;
-    const signature = `${card.dataset.key || ''}:${place}`;
-
-    card.classList.add(place === 'before' ? 'insert-before' : 'insert-after');
-
-    if (d.lastInsertSignature === signature) return;
-    d.lastInsertSignature = signature;
-
-    if (place === 'before') {
-      if (d.placeholder.nextSibling === card) return;
-
-      animateGridMutation(d.grid, () => {
-        d.grid.insertBefore(d.placeholder, card);
+        if (node !== card) node.classList.remove('selected');
       });
 
+    card.classList.add('selected');
+
+    try {
+      card.focus({ preventScroll: true });
+    } catch {
+      card.focus();
+    }
+  };
+
+  const cleanupPending = () => {
+    clearPress();
+
+    document.removeEventListener('pointermove', onDocumentPendingMove, true);
+    document.removeEventListener('pointerup', onDocumentPendingUp, true);
+    document.removeEventListener('pointercancel', onDocumentPendingCancel, true);
+
+    root?.classList.remove('is-touch-scrolling');
+
+    active = null;
+  };
+
+  card.addEventListener('contextmenu', (e) => {
+    if (!dashboard.visible) return;
+    e.preventDefault();
+    e.stopPropagation();
+  });
+
+  card.addEventListener('pointerdown', (e) => {
+    if (e.button != null && e.button !== 0) return;
+    if (e.target.closest?.('input, button, a, textarea, select, iframe, .yanta-dash-resize-handle')) return;
+    if (dashboard.resize || dashboard.dragging) return;
+
+    const pointerType = e.pointerType || 'mouse';
+
+    active = {
+      pointerId: e.pointerId,
+      pointerType,
+      downX: e.clientX,
+      downY: e.clientY,
+      lastScrollY: e.clientY,
+      moved: false,
+      longPressed: false,
+      dragStarted: false,
+      scrolling: false,
+    };
+
+    clearPress();
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    try {
+      card.setPointerCapture?.(e.pointerId);
+    } catch {}
+
+    pressTimer = window.setTimeout(() => {
+      if (!active || active.pointerId !== e.pointerId) return;
+      if (active.scrolling || active.dragStarted) return;
+
+      active.longPressed = true;
+      selectInPlace();
+
+      dashboard.suppressOpenUntil = performance.now() + 600;
+    }, LONG_PRESS_MS);
+
+    document.addEventListener('pointermove', onDocumentPendingMove, true);
+    document.addEventListener('pointerup', onDocumentPendingUp, true);
+    document.addEventListener('pointercancel', onDocumentPendingCancel, true);
+  }, { passive: false });
+
+  function onDocumentPendingMove(e) {
+    if (!active || e.pointerId !== active.pointerId) return;
+
+    const dx = e.clientX - active.downX;
+    const dy = e.clientY - active.downY;
+    const dist = Math.hypot(dx, dy);
+
+    if (dashboard.dragging?.key === key) {
+      e.preventDefault();
+      e.stopPropagation();
+      moveCardDrag(e);
       return;
     }
 
-    const ref = card.nextSibling;
+    if (active.scrolling) {
+      e.preventDefault();
+      e.stopPropagation();
 
-    if (ref === d.placeholder) return;
-
-    animateGridMutation(d.grid, () => {
-      d.grid.insertBefore(d.placeholder, ref);
-    });
-  }
-
-  function findBestInsertionTarget(grid, clientX, clientY) {
-    const cards = [...grid.querySelectorAll('.yanta-dash-card[data-key]')]
-      .filter((card) => !card.classList.contains('drag-source'))
-      .filter((card) => card.offsetParent !== null);
-
-    if (!cards.length) return null;
-
-    const direct = document
-      .elementFromPoint(clientX, clientY)
-      ?.closest?.('.yanta-dash-card[data-key]');
-
-    if (direct && cards.includes(direct)) {
-      const r = direct.getBoundingClientRect();
-
-      return {
-        card: direct,
-        place: clientY < r.top + r.height / 2 ? 'before' : 'after',
-      };
-    }
-
-    let best = null;
-    let bestScore = Infinity;
-
-    for (const card of cards) {
-      const r = card.getBoundingClientRect();
-
-      const cx = r.left + r.width / 2;
-      const cy = r.top + r.height / 2;
-
-      const dx = clientX - cx;
-      const dy = clientY - cy;
-
-      /*
-        Y stärker gewichten, X aber berücksichtigen.
-        Das stabilisiert Bento/Masonry-artige Layouts.
-      */
-      const score = Math.abs(dy) * 1.35 + Math.abs(dx) * 0.75;
-
-      if (score < bestScore) {
-        bestScore = score;
-        best = {
-          card,
-          cy,
-        };
-      }
-    }
-
-    if (!best) return null;
-
-    return {
-      card: best.card,
-      place: clientY < best.cy ? 'before' : 'after',
-    };
-  }
-
-  function startDragAutoScroll() {
-    const d = dashboard.dragging;
-    if (!d || d.scrollRaf) return;
-
-    const tick = () => {
-      const cur = dashboard.dragging;
-
-      if (!cur || !root) return;
-
-      const r = root.getBoundingClientRect();
-      const y = cur.lastY;
-
-      let speed = 0;
-
-      if (y < r.top + DRAG_EDGE_SCROLL_PX) {
-        const t = 1 - clamp((y - r.top) / DRAG_EDGE_SCROLL_PX, 0, 1);
-        speed = -DRAG_EDGE_SCROLL_MAX * t;
-      } else if (y > r.bottom - DRAG_EDGE_SCROLL_PX) {
-        const t = 1 - clamp((r.bottom - y) / DRAG_EDGE_SCROLL_PX, 0, 1);
-        speed = DRAG_EDGE_SCROLL_MAX * t;
+      if (root) {
+        const delta = active.lastScrollY - e.clientY;
+        root.scrollBy(0, delta);
       }
 
-      if (Math.abs(speed) > 0.25) {
-        root.scrollBy(0, speed);
-        updateLiveDragPlacement(cur.lastX, cur.lastY);
-        cur.scrollRaf = requestAnimationFrame(tick);
+      active.lastScrollY = e.clientY;
+      active.moved = true;
+      return;
+    }
+
+    if (dist <= MOVE_TOLERANCE) {
+      if (active.longPressed) {
+        e.preventDefault();
+        e.stopPropagation();
+      }
+
+      return;
+    }
+
+    active.moved = true;
+
+    const canStartDrag =
+      active.pointerType !== 'touch' ||
+      active.longPressed ||
+      dashboard.selectedKey === key;
+
+    if (!canStartDrag) {
+      clearPress();
+
+      active.scrolling = true;
+      active.lastScrollY = active.downY;
+
+      root?.classList.add('is-touch-scrolling');
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (root) {
+        const delta = active.lastScrollY - e.clientY;
+        root.scrollBy(0, delta);
+      }
+
+      active.lastScrollY = e.clientY;
+      dashboard.suppressOpenUntil = performance.now() + 350;
+      return;
+    }
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    clearPress();
+
+    if (!active.longPressed) {
+      active.longPressed = true;
+      selectInPlace();
+    }
+
+    if (!active.dragStarted) {
+      active.dragStarted = true;
+
+      dashboard.suppressOpenUntil = performance.now() + 900;
+      startCardDrag(card, item, e);
+    }
+  }
+
+  async function onDocumentPendingUp(e) {
+    if (!active || e.pointerId !== active.pointerId) return;
+
+    const snapshot = active;
+    const wasDragging = dashboard.dragging?.key === key;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    try {
+      card.releasePointerCapture?.(e.pointerId);
+    } catch {}
+
+    cleanupPending();
+
+    if (wasDragging) {
+      await finishCardDrag();
+      dashboard.suppressOpenUntil = performance.now() + 750;
+      return;
+    }
+
+    if (snapshot.scrolling) {
+      dashboard.suppressOpenUntil = performance.now() + 250;
+      return;
+    }
+
+    if (snapshot.longPressed && !snapshot.dragStarted) {
+      selectInPlace();
+      dashboard.suppressOpenUntil = performance.now() + 350;
+      return;
+    }
+
+    if (!snapshot.moved && !snapshot.longPressed) {
+      await openItem(item, card);
+    }
+  }
+
+  function onDocumentPendingCancel(e) {
+    if (!active || e.pointerId !== active.pointerId) return;
+
+    const wasDragging = dashboard.dragging?.key === key;
+
+    try {
+      card.releasePointerCapture?.(e.pointerId);
+    } catch {}
+
+    cleanupPending();
+
+    if (wasDragging) {
+      cancelCardDrag();
+    }
+  }
+
+  card.addEventListener('keydown', async (e) => {
+    if (e.key === 'F2') {
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (item.kind === 'note') {
+        renameDashboardNote(item.id, card);
       } else {
-        cur.scrollRaf = 0;
+        renameDashboardFolder(item.id, card);
       }
-    };
 
-    d.scrollRaf = requestAnimationFrame(tick);
+      return;
+    }
+
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      await openItem(item, card);
+      return;
+    }
+
+    if (e.key === 'Escape') {
+      e.preventDefault();
+
+      if (dashboard.dragging) {
+        await cancelCardDrag();
+        return;
+      }
+
+      dashboard.selectedKey = null;
+      renderDashboard();
+    }
+  });
+}
+
+function clamp(n, min, max) {
+  return Math.max(min, Math.min(max, n));
+}
+
+function prefersReducedMotion() {
+  return window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+}
+
+function clearFolderDropTargets() {
+  root
+    ?.querySelectorAll('.yanta-dash-card.folder-drop-target')
+    ?.forEach((node) => node.classList.remove('folder-drop-target'));
+}
+
+function clearInsertTargets() {
+  root
+    ?.querySelectorAll('.yanta-dash-card.insert-before, .yanta-dash-card.insert-after')
+    ?.forEach((node) => {
+      node.classList.remove('insert-before');
+      node.classList.remove('insert-after');
+    });
+}
+
+function clearDragVisuals() {
+  clearFolderDropTargets();
+  clearInsertTargets();
+}
+
+function dragCloneScale(d) {
+  const n = Number(d?.currentScale);
+
+  if (Number.isFinite(n) && n > 0) {
+    return n;
   }
 
-  function stopDragAutoScroll(d = dashboard.dragging) {
-    if (!d?.scrollRaf) return;
+  return d?.folderInsertPreview
+    ? DRAG_FOLDER_INSERT_PREVIEW_SCALE
+    : 1;
+}
 
-    cancelAnimationFrame(d.scrollRaf);
-    d.scrollRaf = 0;
+function dragScaleEase(t) {
+  /*
+    Smooth ease-out. Wir animieren bewusst in JS, weil CSS transition auf
+    transform auch die Pointer-Position verzögern würde.
+  */
+  const x = clamp(t, 0, 1);
+  return 1 - Math.pow(1 - x, 3);
+}
+
+function positionDragClone(d) {
+  if (!d?.clone) return;
+
+  const scale = dragCloneScale(d);
+
+  /*
+    Wichtig:
+    Bei scale < 1 muss der gegriffene Punkt mit dem AKTUELLEN Scale
+    mitgerechnet werden. Dadurch bleibt der Grabpunkt auch während der
+    Shrink-Animation exakt unter dem Cursor.
+  */
+  const left = d.lastX - d.offsetX * scale;
+  const top = d.lastY - d.offsetY * scale;
+
+  d.clone.style.setProperty(
+    'transform',
+    `translate3d(${left - d.startLeft}px, ${top - d.startTop}px, 0) scale(${scale})`,
+    'important'
+  );
+}
+
+function animateDragCloneScale(d, toScale) {
+  if (!d?.clone) return;
+
+  if (d.scaleRaf) {
+    cancelAnimationFrame(d.scaleRaf);
+    d.scaleRaf = 0;
   }
 
-  async function animateCloneToRect(clone, toRect) {
-    if (!clone || !toRect || prefersReducedMotion()) return;
+  const fromScale = dragCloneScale(d);
+  const targetScale = Number(toScale) || 1;
 
-    const from = clone.getBoundingClientRect();
+  d.targetScale = targetScale;
 
-    clone.style.setProperty('transform', 'none', 'important');
-    clone.style.left = from.left + 'px';
-    clone.style.top = from.top + 'px';
-    clone.style.width = from.width + 'px';
-    clone.style.height = from.height + 'px';
+  if (Math.abs(fromScale - targetScale) < 0.001) {
+    d.currentScale = targetScale;
+    positionDragClone(d);
+    return;
+  }
 
-    const anim = clone.animate(
+  const start = performance.now();
+  const duration = 170;
+
+  const tick = () => {
+    /*
+      Drag wurde beendet/abgebrochen.
+      Dann keine Scale-Animation mehr weiterlaufen lassen.
+    */
+    if (dashboard.dragging !== d) {
+      d.scaleRaf = 0;
+      return;
+    }
+
+    const t = clamp((performance.now() - start) / duration, 0, 1);
+    const eased = dragScaleEase(t);
+
+    d.currentScale = fromScale + (targetScale - fromScale) * eased;
+
+    positionDragClone(d);
+
+    if (t < 1) {
+      d.scaleRaf = requestAnimationFrame(tick);
+      return;
+    }
+
+    d.currentScale = targetScale;
+    d.targetScale = targetScale;
+    d.scaleRaf = 0;
+
+    positionDragClone(d);
+  };
+
+  d.scaleRaf = requestAnimationFrame(tick);
+}
+
+function setDragFolderInsertPreview(active) {
+  const d = dashboard.dragging;
+  if (!d?.clone) return;
+
+  const next = !!active;
+
+  if (d.folderInsertPreview === next) {
+    return;
+  }
+
+  d.folderInsertPreview = next;
+  d.clone.classList.toggle('folder-insert-preview', next);
+
+  animateDragCloneScale(
+    d,
+    next ? DRAG_FOLDER_INSERT_PREVIEW_SCALE : 1
+  );
+}
+
+function dashboardFolderIsAncestor(ancestorId, descendantId) {
+  if (!ancestorId || !descendantId) return false;
+
+  let cur = state.folders.get(descendantId);
+  const seen = new Set();
+
+  while (cur && !seen.has(cur.id)) {
+    if (cur.id === ancestorId) return true;
+
+    seen.add(cur.id);
+    cur = cur.parentId ? state.folders.get(cur.parentId) : null;
+  }
+
+  return false;
+}
+
+function dragAnimElements(grid) {
+  return [...grid.children].filter((node) => {
+    if (!(node instanceof HTMLElement)) return false;
+    if (node.classList.contains('drag-clone')) return false;
+
+    return node.classList.contains('yanta-dash-card');
+  });
+}
+
+function animateGridMutation(grid, mutate) {
+  if (!grid || prefersReducedMotion()) {
+    mutate?.();
+    return;
+  }
+
+  const nodes = dragAnimElements(grid);
+  const before = new Map();
+
+  for (const node of nodes) {
+    node.__yantaDashFlipAnimation?.cancel?.();
+    node.__yantaDashFlipAnimation = null;
+    before.set(node, node.getBoundingClientRect());
+  }
+
+  mutate?.();
+
+  const afterNodes = dragAnimElements(grid);
+
+  for (const node of afterNodes) {
+    const a = before.get(node);
+    if (!a) continue;
+
+    const b = node.getBoundingClientRect();
+
+    const dx = a.left - b.left;
+    const dy = a.top - b.top;
+
+    if (Math.abs(dx) < 0.5 && Math.abs(dy) < 0.5) continue;
+
+    node.__yantaDashFlipAnimation = node.animate(
       [
         {
-          left: from.left + 'px',
-          top: from.top + 'px',
-          width: from.width + 'px',
-          height: from.height + 'px',
-          opacity: '0.985',
+          transform: `translate3d(${dx}px, ${dy}px, 0)`,
         },
         {
-          left: toRect.left + 'px',
-          top: toRect.top + 'px',
-          width: toRect.width + 'px',
-          height: toRect.height + 'px',
-          opacity: '0.985',
+          transform: 'translate3d(0, 0, 0)',
         },
       ],
       {
-        duration: DRAG_DROP_ANIM_MS,
+        duration: 150,
         easing: 'cubic-bezier(.2,.8,.2,1)',
-        fill: 'forwards',
+        fill: 'both',
       }
     );
 
-    await anim.finished.catch(() => {});
+    node.__yantaDashFlipAnimation.addEventListener('finish', () => {
+      if (node.__yantaDashFlipAnimation) {
+        node.__yantaDashFlipAnimation = null;
+      }
+    }, { once: true });
+  }
+}
+
+function prepareDashboardGridForDragAnimation(grid) {
+  if (!grid) return;
+
+  const cards = [...grid.querySelectorAll('.yanta-dash-card')];
+
+  for (const card of cards) {
+    /*
+      Wichtig:
+      Nach Reload kann die progressive Dashboard-Stagger-Animation noch
+      als CSS Animation mit fill-mode "both" auf transform wirken.
+      Das blockiert/überlagert beim ersten Drag die FLIP-Animation.
+    */
+    card.classList.remove('yanta-stagger-item');
+
+    try {
+      card.getAnimations?.().forEach((anim) => {
+        try {
+          anim.cancel();
+        } catch {}
+      });
+    } catch {}
+
+    card.style.animation = 'none';
+    card.style.transform = '';
+    card.style.filter = '';
+    card.style.opacity = '';
+    card.style.willChange = 'transform';
   }
 
-  async function finishCardDrag() {
-    const d = dashboard.dragging;
-    if (!d) return;
+  /*
+    Layout einmal synchron messen, damit Browser/Style-Engine vor der ersten
+    FLIP-Mutation einen stabilen Ausgangszustand hat.
+  */
+  try {
+    grid.getBoundingClientRect();
+  } catch {}
 
-    if (d.raf) {
-      cancelAnimationFrame(d.raf);
-      d.raf = 0;
+  requestAnimationFrame(() => {
+    for (const card of cards) {
+      if (!card.isConnected) continue;
+
+      card.style.animation = '';
+      card.style.willChange = '';
+    }
+  });
+}
+
+function startCardDrag(card, item, e) {
+  if (dashboard.dragging) return;
+
+  const grid = card.closest('.yanta-dashboard-grid');
+  if (!grid) return;
+
+  prepareDashboardGridForDragAnimation(grid);
+
+  const key = itemKey(item);
+  const rect = card.getBoundingClientRect();
+
+  /*
+    Grabpunkt innerhalb der Karte.
+    Dieser Punkt soll auch bei folder-insert-preview direkt unter dem Cursor bleiben.
+  */
+  const grabX = clamp(e.clientX - rect.left, 0, rect.width);
+  const grabY = clamp(e.clientY - rect.top, 0, rect.height);
+
+  const clone = card.cloneNode(true);
+  clone.classList.add('drag-clone');
+  clone.classList.remove('selected');
+  clone.style.viewTransitionName = 'none';
+
+  Object.assign(clone.style, {
+    position: 'fixed',
+    left: rect.left + 'px',
+    top: rect.top + 'px',
+    width: rect.width + 'px',
+    height: rect.height + 'px',
+    margin: '0',
+    zIndex: '1000',
+    pointerEvents: 'none',
+
+    /*
+      Scale wird jetzt im JS-transform gerechnet.
+      top left macht die Formel eindeutig:
+        visibleGrabX = left + grabX * scale
+    */
+    transformOrigin: 'top left',
+  });
+
+  clone.style.setProperty(
+    'transform',
+    'translate3d(0,0,0) scale(1)',
+    'important'
+  );
+
+  document.body.append(clone);
+
+  /*
+    Kein Placeholder:
+    Die Source bleibt im Grid-Flow und wird live in der DOM-Reihenfolge verschoben.
+    Dadurch verdrängt sie exakt dort andere Items, wo der Drop später landet.
+  */
+  card.classList.add('drag-source');
+  card.classList.remove('selected');
+  card.style.viewTransitionName = 'none';
+
+  root?.classList.add('is-card-dragging');
+
+  dashboard.suppressOpenUntil = performance.now() + 900;
+  suppressDashboardStaggerFor(1400);
+
+  dashboard.dragging = {
+    key,
+    section: card.dataset.section || '',
+    grid,
+    source: card,
+    clone,
+
+    sourceKind: item.kind,
+    sourceId: item.id,
+
+    originalParentId:
+      item.kind === 'note'
+        ? (item.note.folderId || null)
+        : (item.folder.parentId || null),
+
+    width: rect.width,
+    height: rect.height,
+
+    startLeft: rect.left,
+    startTop: rect.top,
+
+    /*
+      Gegriffener Punkt innerhalb des Originals.
+      moveCardDrag()/positionDragClone() halten diesen Punkt unter dem Cursor.
+    */
+    offsetX: grabX,
+    offsetY: grabY,
+
+    lastX: e.clientX,
+    lastY: e.clientY,
+
+    raf: 0,
+    scrollRaf: 0,
+
+    dropFolderId: null,
+    folderInsertPreview: false,
+
+    currentScale: 1,
+    targetScale: 1,
+    scaleRaf: 0,
+
+    lastInsertSignature: '',
+    lastCandidateSignature: '',
+    candidateSince: 0,
+
+    lastAcceptedIndex: visualIndexOfSource(grid, card),
+
+    lastReorderAt: 0,
+    lastReorderX: e.clientX,
+    lastReorderY: e.clientY,
+
+    reorderLockUntil: 0,
+    reorderLockRect: null,
+  };
+
+  moveCardDrag(e);
+}
+
+function moveCardDrag(e) {
+  const d = dashboard.dragging;
+  if (!d) return;
+
+  d.lastX = e.clientX;
+  d.lastY = e.clientY;
+
+  startDragAutoScroll();
+
+  if (d.raf) return;
+
+  d.raf = requestAnimationFrame(() => {
+    const cur = dashboard.dragging;
+    if (!cur) return;
+
+    cur.raf = 0;
+
+    /*
+      Position + Scale müssen in EINEM transform sitzen.
+      CSS scale separat führt zu dem Links/Rechts-Versatz.
+    */
+    positionDragClone(cur);
+
+    updateLiveDragPlacement(cur.lastX, cur.lastY);
+  });
+}
+
+function updateLiveDragPlacement(clientX, clientY) {
+  const d = dashboard.dragging;
+  if (!d) return;
+
+  clearDragVisuals();
+  d.dropFolderId = null;
+
+  /*
+    Folder-Drop bleibt pointerbasiert:
+    Man will in den sichtbaren Folder droppen, nicht anhand des Clone-Zentrums.
+  */
+  if (updateFolderDropTarget(clientX, clientY)) {
+    setDragFolderInsertPreview(true);
+
+    d.lastInsertSignature = 'folder:' + d.dropFolderId;
+    return;
+  }
+
+  /*
+    Sobald kein Folder-Drop aktiv ist, den Clone wieder normal groß machen.
+  */
+  setDragFolderInsertPreview(false);
+
+  /*
+    Reorder bleibt clone-center-basiert.
+  */
+  updateSourcePosition(clientX, clientY);
+}
+
+function updateFolderDropTarget(clientX, clientY) {
+  const d = dashboard.dragging;
+  if (!d) return false;
+
+  const below = document.elementFromPoint(clientX, clientY);
+  const folderTarget = below?.closest?.('.yanta-dash-card[data-kind="folder"]');
+
+  if (!folderTarget) return false;
+  if (!folderTarget.isConnected) return false;
+  if (folderTarget.classList.contains('drag-source')) return false;
+
+  const folderId = folderTarget.dataset.folderId;
+  if (!folderId) return false;
+
+  /*
+    Folder in Folder:
+    - erlaubt für Notes und Folder
+    - blockiert self-drop und Zyklusbildung
+  */
+  if (d.sourceKind === 'folder') {
+    if (folderId === d.sourceId) return false;
+    if (dashboardFolderIsAncestor(d.sourceId, folderId)) return false;
+  }
+
+  const r = folderTarget.getBoundingClientRect();
+  const yRatio = (clientY - r.top) / Math.max(1, r.height);
+  const xRatio = (clientX - r.left) / Math.max(1, r.width);
+
+  /*
+    Google-Keep-artige Zonen:
+    Mitte = in Ordner droppen.
+    Randbereiche = normale Reorder-Zonen.
+  */
+  if (
+    yRatio < 0.34 ||
+    yRatio > 0.66 ||
+    xRatio < 0.20 ||
+    xRatio > 0.80
+  ) {
+    return false;
+  }
+
+  folderTarget.classList.add('folder-drop-target');
+  d.dropFolderId = folderId;
+
+  return true;
+}
+
+function updateSourcePosition(clientX, clientY) {
+  const d = dashboard.dragging;
+  if (!d) return;
+
+  const pointerGrid = document
+    .elementFromPoint(clientX, clientY)
+    ?.closest?.('.yanta-dashboard-grid');
+
+  /*
+    Keine Cross-Section-Sprünge.
+    Pinned / Normal bleiben getrennte Grid-Listen.
+  */
+  if (pointerGrid && pointerGrid !== d.grid) {
+    return;
+  }
+
+  const center = dragCloneCenter(d, clientX, clientY);
+  const target = findBestInsertionTarget(d.grid, center.x, center.y);
+
+  if (!target) return;
+
+  if (target.markerCard) {
+    target.markerCard.classList.add(
+      target.markerPlace === 'before'
+        ? 'insert-before'
+        : 'insert-after'
+    );
+  }
+
+  /*
+    Der Index entspricht bereits der visuellen 2D-Insertion-Position.
+    Wenn sich der Index nicht ändert, nichts tun.
+  */
+  if (target.index === target.currentIndex) {
+    d.lastInsertSignature = `idx:${target.index}`;
+    return;
+  }
+
+  const signature = `idx:${target.index}`;
+
+  if (!shouldAcceptDragReorder(d, signature, center.x, center.y, {
+    soft: target.soft,
+  })) {
+    return;
+  }
+
+  acceptDragReorder(d, signature, center.x, center.y, target.index);
+
+  animateGridMutation(d.grid, () => {
+    if (target.refCard) {
+      d.grid.insertBefore(d.source, target.refCard);
+    } else {
+      d.grid.append(d.source);
+    }
+  });
+
+  /*
+    Nach dem Layout-Commit den neuen unsichtbaren Source-Slot kurz locken.
+    Dadurch kann der nächste Frame nicht sofort denselben Move rückgängig machen.
+  */
+  requestAnimationFrame(() => {
+    if (!dashboard.dragging || dashboard.dragging !== d) return;
+
+    const r = d.source.getBoundingClientRect();
+
+    d.reorderLockRect = {
+      left: r.left,
+      top: r.top,
+      right: r.right,
+      bottom: r.bottom,
+    };
+
+    d.reorderLockUntil = performance.now() + DRAG_REORDER_LOCK_MS;
+    d.lastAcceptedIndex = visualIndexOfSource(d.grid, d.source);
+  });
+}
+
+function dragCloneCenter(d, clientX, clientY) {
+  /*
+    Wichtig:
+    Nicht den Pointer selbst als Sortierpunkt verwenden.
+    Bei Cards, die nicht exakt am Mittelpunkt gegriffen wurden, erzeugt das
+    sonst falsche 2D-Zielzonen.
+  */
+  const left = clientX - d.offsetX;
+  const top = clientY - d.offsetY;
+
+  return {
+    x: left + d.width / 2,
+    y: top + d.height / 2,
+  };
+}
+
+function pointInsideRectWithMargin(x, y, rect, margin = 0) {
+  if (!rect) return false;
+
+  return (
+    x >= rect.left - margin &&
+    x <= rect.right + margin &&
+    y >= rect.top - margin &&
+    y <= rect.bottom + margin
+  );
+}
+
+function shouldAcceptDragReorder(d, signature, centerX, centerY, {
+  soft = false,
+} = {}) {
+  const now = performance.now();
+
+  if (signature === d.lastInsertSignature) {
+    return false;
+  }
+
+  /*
+    Direkt nach einem Reorder liegt das Drag-Center oft noch über dem neuen
+    Source-Slot. Ohne Lock kippt CSS Grid gerne sofort zurück.
+  */
+  if (
+    d.reorderLockRect &&
+    now < (d.reorderLockUntil || 0) &&
+    pointInsideRectWithMargin(
+      centerX,
+      centerY,
+      d.reorderLockRect,
+      DRAG_REORDER_LOCK_MARGIN_PX
+    )
+  ) {
+    return false;
+  }
+
+  /*
+    Soft Candidate = Zentrum / unsichere Zone.
+    Muss kurz stabil bleiben.
+  */
+  if (soft) {
+    if (d.lastCandidateSignature !== signature) {
+      d.lastCandidateSignature = signature;
+      d.candidateSince = now;
+      return false;
     }
 
-    stopDragAutoScroll(d);
-    clearDragVisuals();
+    if (now - (d.candidateSince || 0) < DRAG_REORDER_CANDIDATE_STABLE_MS) {
+      return false;
+    }
+  } else {
+    d.lastCandidateSignature = signature;
+    d.candidateSince = now;
+  }
 
-    dashboard.dragging = null;
-    dashboard.suppressOpenUntil = performance.now() + 850;
-    suppressDashboardStaggerFor(1400);
+  const movedSinceLastReorder = Math.hypot(
+    centerX - (d.lastReorderX ?? centerX),
+    centerY - (d.lastReorderY ?? centerY)
+  );
 
-    const {
-      source,
-      clone,
-      grid,
-      placeholder,
-      sourceKind,
-      sourceId,
-      dropFolderId,
-    } = d;
+  if (
+    now - (d.lastReorderAt || 0) < DRAG_REORDER_COOLDOWN_MS &&
+    movedSinceLastReorder < DRAG_REORDER_MIN_MOVE_PX
+  ) {
+    return false;
+  }
 
-    // Drop note into folder.
-    if (sourceKind === 'note' && dropFolderId) {
-      placeholder?.remove();
+  return true;
+}
 
-      clone?.remove();
+function acceptDragReorder(d, signature, centerX, centerY, targetIndex) {
+  d.lastInsertSignature = signature;
+  d.lastAcceptedIndex = targetIndex;
 
-      source.style.display = '';
-      source.classList.remove('drag-source');
-      source.style.viewTransitionName = '';
+  d.lastReorderAt = performance.now();
+  d.lastReorderX = centerX;
+  d.lastReorderY = centerY;
 
-      root?.classList.remove('is-card-dragging');
+  d.reorderLockRect = null;
+  d.reorderLockUntil = 0;
+}
 
+function visualIndexOfSource(grid, source) {
+  const layout = buildDashboardVisualLayout(grid, {
+    includeSource: true,
+  });
+
+  return Math.max(0, layout.flat.indexOf(source));
+}
+
+function buildDashboardVisualLayout(grid, {
+  includeSource = true,
+} = {}) {
+  const d = dashboard.dragging;
+
+  const cards = [...grid.querySelectorAll('.yanta-dash-card[data-key]')]
+    .filter((card) => {
+      if (!(card instanceof HTMLElement)) return false;
+      if (card.classList.contains('drag-clone')) return false;
+      if (!includeSource && d?.source === card) return false;
+      if (card.offsetParent === null) return false;
+      return true;
+    })
+    .map((card) => {
+      const rect = card.getBoundingClientRect();
+
+      return {
+        card,
+        rect,
+        left: rect.left,
+        right: rect.right,
+        top: rect.top,
+        bottom: rect.bottom,
+        width: rect.width,
+        height: rect.height,
+        cx: rect.left + rect.width / 2,
+        cy: rect.top + rect.height / 2,
+      };
+    })
+    .filter((item) => item.width > 0 && item.height > 0)
+    .sort((a, b) => {
+      /*
+        Primär nach top, danach left.
+        Die spätere Row-Bildung korrigiert kleine top-Differenzen
+        durch unterschiedliche Card-Höhen.
+      */
+      return a.top - b.top || a.left - b.left;
+    });
+
+  const rows = [];
+
+  for (const item of cards) {
+    let bestRow = null;
+    let bestDistance = Infinity;
+
+    for (const row of rows) {
+      const overlap =
+        Math.min(item.bottom, row.bottom) -
+        Math.max(item.top, row.top);
+
+      const overlapRatio =
+        overlap > 0
+          ? overlap / Math.min(item.height, row.height || item.height)
+          : 0;
+
+      const centerDistance = Math.abs(item.cy - row.cy);
+
+      const sameRow =
+        overlapRatio >= 0.28 ||
+        centerDistance <= Math.max(
+          DRAG_SPATIAL_ROW_TOLERANCE_PX,
+          Math.min(item.height, row.height || item.height) * 0.38
+        );
+
+      if (!sameRow) continue;
+
+      if (centerDistance < bestDistance) {
+        bestDistance = centerDistance;
+        bestRow = row;
+      }
+    }
+
+    if (!bestRow) {
+      rows.push({
+        top: item.top,
+        bottom: item.bottom,
+        cy: item.cy,
+        height: item.height,
+        items: [item],
+      });
+
+      continue;
+    }
+
+    bestRow.items.push(item);
+
+    bestRow.top = Math.min(bestRow.top, item.top);
+    bestRow.bottom = Math.max(bestRow.bottom, item.bottom);
+    bestRow.height = Math.max(1, bestRow.bottom - bestRow.top);
+    bestRow.cy =
+      bestRow.items.reduce((sum, x) => sum + x.cy, 0) /
+      bestRow.items.length;
+  }
+
+  rows.sort((a, b) => a.cy - b.cy);
+
+  for (const row of rows) {
+    row.items.sort((a, b) => a.cx - b.cx);
+  }
+
+  return {
+    rows,
+    flat: rows.flatMap((row) => row.items.map((item) => item.card)),
+  };
+}
+
+function findBestInsertionTarget(grid, centerX, centerY) {
+  const d = dashboard.dragging;
+  if (!d) return null;
+
+  const withSource = buildDashboardVisualLayout(grid, {
+    includeSource: true,
+  });
+
+  const withoutSource = buildDashboardVisualLayout(grid, {
+    includeSource: false,
+  });
+
+  const currentIndex = Math.max(0, withSource.flat.indexOf(d.source));
+
+  if (!withoutSource.rows.length) {
+    return {
+      index: 0,
+      currentIndex,
+      refCard: null,
+      markerCard: null,
+      markerPlace: 'after',
+      soft: false,
+    };
+  }
+
+  const rows = withoutSource.rows;
+  const flat = withoutSource.flat;
+
+  let rowIndex = -1;
+  let bestRowDistance = Infinity;
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+
+    const inBand =
+      centerY >= row.top - DRAG_SPATIAL_ROW_TOLERANCE_PX &&
+      centerY <= row.bottom + DRAG_SPATIAL_ROW_TOLERANCE_PX;
+
+    const dist = Math.abs(centerY - row.cy);
+
+    if (inBand && dist < bestRowDistance) {
+      bestRowDistance = dist;
+      rowIndex = i;
+    }
+  }
+
+  if (rowIndex < 0) {
+    /*
+      Oberhalb aller Reihen -> ganz vorne.
+      Unterhalb aller Reihen -> ganz hinten.
+      Sonst nächste Reihe.
+    */
+    if (centerY < rows[0].top) {
+      rowIndex = 0;
+    } else if (centerY > rows[rows.length - 1].bottom) {
+      const last = flat[flat.length - 1] || null;
+
+      return {
+        index: flat.length,
+        currentIndex,
+        refCard: null,
+        markerCard: last,
+        markerPlace: 'after',
+        soft: false,
+      };
+    } else {
+      let nearest = 0;
+      let nearestDist = Infinity;
+
+      for (let i = 0; i < rows.length; i++) {
+        const dist = Math.abs(centerY - rows[i].cy);
+
+        if (dist < nearestDist) {
+          nearest = i;
+          nearestDist = dist;
+        }
+      }
+
+      rowIndex = nearest;
+    }
+  }
+
+  const row = rows[rowIndex];
+  const items = row.items;
+
+  let localIndex = items.length;
+  let soft = false;
+
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+
+    const deadzone = Math.max(
+      DRAG_REORDER_CENTER_DEADZONE_PX,
+      Math.min(26, item.width * 0.10)
+    );
+
+    if (centerX < item.cx - deadzone) {
+      localIndex = i;
+      soft = false;
+      break;
+    }
+
+    if (Math.abs(centerX - item.cx) <= deadzone) {
+      localIndex = centerX < item.cx ? i : i + 1;
+      soft = true;
+      break;
+    }
+  }
+
+  let index = 0;
+
+  for (let i = 0; i < rowIndex; i++) {
+    index += rows[i].items.length;
+  }
+
+  index += localIndex;
+  index = Math.max(0, Math.min(flat.length, index));
+
+  const refCard = flat[index] || null;
+
+  let markerCard = refCard;
+  let markerPlace = 'before';
+
+  if (!markerCard && flat.length) {
+    markerCard = flat[flat.length - 1];
+    markerPlace = 'after';
+  }
+
+  /*
+    Wenn der Marker rechnerisch vor einer Card steht, die visuell direkt
+    hinter der Source liegt, ist das okay. Die eigentliche No-op-Prüfung
+    läuft über currentIndex === index.
+  */
+  return {
+    index,
+    currentIndex,
+    refCard,
+    markerCard,
+    markerPlace,
+    soft,
+  };
+}
+
+function startDragAutoScroll() {
+  const d = dashboard.dragging;
+  if (!d || d.scrollRaf) return;
+
+  const tick = () => {
+    const cur = dashboard.dragging;
+
+    if (!cur || !root) return;
+
+    const r = root.getBoundingClientRect();
+    const y = cur.lastY;
+
+    let speed = 0;
+
+    if (y < r.top + DRAG_EDGE_SCROLL_PX) {
+      const t = 1 - clamp((y - r.top) / DRAG_EDGE_SCROLL_PX, 0, 1);
+      speed = -DRAG_EDGE_SCROLL_MAX * t;
+    } else if (y > r.bottom - DRAG_EDGE_SCROLL_PX) {
+      const t = 1 - clamp((r.bottom - y) / DRAG_EDGE_SCROLL_PX, 0, 1);
+      speed = DRAG_EDGE_SCROLL_MAX * t;
+    }
+
+    if (Math.abs(speed) > 0.25) {
+      root.scrollBy(0, speed);
+      updateLiveDragPlacement(cur.lastX, cur.lastY);
+      cur.scrollRaf = requestAnimationFrame(tick);
+    } else {
+      cur.scrollRaf = 0;
+    }
+  };
+
+  d.scrollRaf = requestAnimationFrame(tick);
+}
+
+function stopDragAutoScroll(d = dashboard.dragging) {
+  if (!d?.scrollRaf) return;
+
+  cancelAnimationFrame(d.scrollRaf);
+  d.scrollRaf = 0;
+}
+
+async function animateCloneToRect(clone, toRect) {
+  if (!clone || !toRect || prefersReducedMotion()) return;
+
+  const from = clone.getBoundingClientRect();
+
+  clone.style.setProperty('transform', 'none', 'important');
+  clone.style.left = from.left + 'px';
+  clone.style.top = from.top + 'px';
+  clone.style.width = from.width + 'px';
+  clone.style.height = from.height + 'px';
+
+  const anim = clone.animate(
+    [
+      {
+        left: from.left + 'px',
+        top: from.top + 'px',
+        width: from.width + 'px',
+        height: from.height + 'px',
+        opacity: '0.985',
+      },
+      {
+        left: toRect.left + 'px',
+        top: toRect.top + 'px',
+        width: toRect.width + 'px',
+        height: toRect.height + 'px',
+        opacity: '0.985',
+      },
+    ],
+    {
+      duration: DRAG_DROP_ANIM_MS,
+      easing: 'cubic-bezier(.2,.8,.2,1)',
+      fill: 'forwards',
+    }
+  );
+
+  await anim.finished.catch(() => {});
+}
+
+async function finishCardDrag() {
+  const d = dashboard.dragging;
+  if (!d) return;
+
+  if (d.raf) {
+    cancelAnimationFrame(d.raf);
+    d.raf = 0;
+  }
+
+  if (d.scaleRaf) {
+    cancelAnimationFrame(d.scaleRaf);
+    d.scaleRaf = 0;
+  }
+
+  stopDragAutoScroll(d);
+  clearDragVisuals();
+  setDragFolderInsertPreview(false);
+
+  dashboard.dragging = null;
+  dashboard.suppressOpenUntil = performance.now() + 850;
+  suppressDashboardStaggerFor(1400);
+
+  const {
+    source,
+    clone,
+    grid,
+    sourceKind,
+    sourceId,
+    dropFolderId,
+  } = d;
+
+  if (dropFolderId) {
+    clone?.remove();
+
+    source.classList.remove('drag-source');
+    source.style.viewTransitionName = '';
+
+    root?.classList.remove('is-card-dragging');
+
+    if (sourceKind === 'note') {
       const note = state.notes.get(sourceId);
 
       if (note && note.folderId !== dropFolderId) {
@@ -4013,99 +4679,135 @@ async function navigateDashboardFolder(folderId, {
         await store.notes.put(note);
         previewCache.delete(sourceId);
 
+        state.expandedFolders.add(dropFolderId);
+
         toast('Moved into folder', 'success');
       }
+    } else if (sourceKind === 'folder') {
+      const folder = state.folders.get(sourceId);
 
-      renderDashboard();
-      return;
-    }
+      if (
+        folder &&
+        folder.parentId !== dropFolderId &&
+        folder.id !== dropFolderId &&
+        !dashboardFolderIsAncestor(folder.id, dropFolderId)
+      ) {
+        folder.parentId = dropFolderId;
+        folder.updated = Date.now();
 
-    /*
-      Source an Placeholder-Position setzen, aber noch unsichtbar lassen.
-      So messen wir die finale Position korrekt, ohne visuellen Doppel-Effekt.
-    */
-    grid.insertBefore(source, placeholder);
-    source.style.display = '';
-
-    const finalRect = source.getBoundingClientRect();
-
-    placeholder?.remove();
-
-    await animateCloneToRect(clone, finalRect);
-
-    clone?.remove();
-
-    source.classList.remove('drag-source');
-    source.style.viewTransitionName = '';
-
-    root?.classList.remove('is-card-dragging');
-
-    await persistGridOrder(grid, grid.dataset.section || d.section);
-  }
-
-  async function cancelCardDrag() {
-    const d = dashboard.dragging;
-    if (!d) return;
-
-    if (d.raf) {
-      cancelAnimationFrame(d.raf);
-      d.raf = 0;
-    }
-
-    stopDragAutoScroll(d);
-    clearDragVisuals();
-
-    dashboard.dragging = null;
-    dashboard.suppressOpenUntil = performance.now() + 700;
-    suppressDashboardStaggerFor(900);
-
-    d.placeholder?.remove();
-
-    d.source.style.display = '';
-
-    const sourceRect = d.source.getBoundingClientRect();
-
-    await animateCloneToRect(d.clone, sourceRect);
-
-    d.clone?.remove();
-
-    d.source.classList.remove('drag-source');
-    d.source.style.viewTransitionName = '';
-
-    root?.classList.remove('is-card-dragging');
-  }
-
-  async function persistGridOrder(grid, section) {
-    const cards = [...grid.querySelectorAll('.yanta-dash-card[data-key]')];
-
-    let order = DASH_ORDER_STEP;
-
-    for (const card of cards) {
-      const { kind, id } = parseItemKey(card.dataset.key);
-
-      if (kind === 'note') {
-        const note = state.notes.get(id);
-        if (!note) continue;
-
-        if (section === 'pinned') {
-          note.dashboardPinnedOrder = order;
-        } else {
-          note.dashboardOrder = order;
-        }
-
-        await store.notes.put(note);
-      } else if (kind === 'folder') {
-        const folder = state.folders.get(id);
-        if (!folder) continue;
-
-        folder.dashboardOrder = order;
         await store.folders.put(folder);
+
+        state.expandedFolders.add(dropFolderId);
+
+        toast('Moved folder', 'success');
+      }
+    }
+
+    window.dispatchEvent(new CustomEvent('yanta-dashboard-refresh'));
+    renderDashboard();
+    return;
+  }
+
+  /*
+    Source sitzt bereits an der finalen DOM-Position.
+    Jetzt Clone zur echten Source-Position animieren, dann Source sichtbar machen.
+  */
+  const finalRect = source.getBoundingClientRect();
+
+  await animateCloneToRect(clone, finalRect);
+
+  clone?.remove();
+
+  source.classList.remove('drag-source');
+  source.style.viewTransitionName = '';
+
+  root?.classList.remove('is-card-dragging');
+
+  await persistGridOrder(grid, grid.dataset.section || d.section);
+
+  dashboard.selectedKey = source.dataset.key || d.key;
+  source.classList.add('selected');
+}
+
+async function cancelCardDrag() {
+  const d = dashboard.dragging;
+  if (!d) return;
+
+  if (d.raf) {
+    cancelAnimationFrame(d.raf);
+    d.raf = 0;
+  }
+
+  if (d.scaleRaf) {
+    cancelAnimationFrame(d.scaleRaf);
+    d.scaleRaf = 0;
+  }
+
+  stopDragAutoScroll(d);
+  clearDragVisuals();
+  setDragFolderInsertPreview(false);
+
+  dashboard.dragging = null;
+  dashboard.suppressOpenUntil = performance.now() + 700;
+  suppressDashboardStaggerFor(900);
+
+  /*
+    Source möglichst an ursprüngliche Position zurück:
+    Die Persistenz wurde noch nicht geschrieben, also reicht ein Render
+    nach Clone-Rückflug.
+  */
+  const sourceRect = d.source.getBoundingClientRect();
+
+  await animateCloneToRect(d.clone, sourceRect);
+
+  d.clone?.remove();
+
+  d.source.classList.remove('drag-source');
+  d.source.style.viewTransitionName = '';
+
+  root?.classList.remove('is-card-dragging');
+
+  renderDashboard();
+}
+
+async function persistGridOrder(grid, section) {
+  const cards = [...grid.querySelectorAll('.yanta-dash-card[data-key]')]
+    .filter((card) => !card.classList.contains('drag-clone'));
+
+  let order = DASH_ORDER_STEP;
+
+  for (const card of cards) {
+    const { kind, id } = parseItemKey(card.dataset.key);
+
+    if (kind === 'note') {
+      const note = state.notes.get(id);
+      if (!note) continue;
+
+      if (section === 'pinned') {
+        note.dashboardPinnedOrder = order;
+      } else {
+        note.dashboardOrder = order;
       }
 
-      order += DASH_ORDER_STEP;
+      note.updated = Date.now();
+
+      await store.notes.put(note);
+    } else if (kind === 'folder') {
+      const folder = state.folders.get(id);
+      if (!folder) continue;
+
+      folder.dashboardOrder = order;
+      folder.updated = Date.now();
+
+      await store.folders.put(folder);
     }
+
+    order += DASH_ORDER_STEP;
   }
-  
+
+  window.dispatchEvent(new CustomEvent('yanta-dashboard-refresh'));
+}
+
   function bindResizeHandle(handle, key) {
     const reset = async () => {
       dashboard.suppressOpenUntil = performance.now() + 700;

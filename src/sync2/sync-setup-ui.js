@@ -12,8 +12,11 @@ import {
   import {
     createSync2GoogleDriveAppRuntime,
     getSync2SyncKey,
-    setSync2SyncKey,
   } from './app-engine.js';
+  
+  import {
+    GoogleDriveObjectStore,
+  } from './google-drive-object-store.js';
   
   import {
     createSync2PairingPayload,
@@ -21,10 +24,6 @@ import {
     renderSync2QrSvg,
     scanQrWithCamera,
   } from './pairing.js';
-  
-  import {
-    syncKeyToBytes,
-  } from './crypto.js';
   
   import {
     removePristineWelcomeVaultIfPresent,
@@ -119,6 +118,10 @@ import {
   
     await store.settings.set('sync2.provider', 'google-drive');
   
+    try {
+      window.yantaSync2?.engine?.stop?.();
+    } catch {}
+  
     const runtime = await createSync2GoogleDriveAppRuntime({
       clientId: id,
       googlePrompt: prompt,
@@ -131,13 +134,74 @@ import {
     return runtime;
   }
   
+  async function deleteAllGoogleDriveSyncObjects() {
+    const id = clientId();
+  
+    if (!id) {
+      throw new Error('Google Client ID missing. Set VITE_GOOGLE_CLIENT_ID.');
+    }
+  
+    const remote = new GoogleDriveObjectStore({
+      clientId: id,
+      initialPrompt: 'consent',
+    });
+  
+    await remote.init();
+  
+    const entries = await remote.list('yanta-sync-v1');
+  
+    for (const entry of entries) {
+      await remote.delete(entry.path);
+    }
+  
+    return entries.length;
+  }
+  
+  function isWrongKeyError(err) {
+    const msg = String(err?.message || err || '');
+    return (
+      msg.includes('Wrong Sync Key') ||
+      msg.includes('OperationError') ||
+      msg.includes('decrypt') ||
+      err?.name === 'OperationError'
+    );
+  }
+  
   async function setupFirstDevice() {
     try {
       setStatus('Connecting to Google Drive…');
   
-      const runtime = await connectRuntime({
-        prompt: 'consent',
-      });
+      let runtime;
+  
+      try {
+        runtime = await connectRuntime({
+          prompt: 'consent',
+        });
+      } catch (err) {
+        if (!isWrongKeyError(err)) throw err;
+  
+        const ok = confirm(
+          'Google Drive already contains encrypted YANTA Sync data that cannot be decrypted with this local Sync Key.\n\n' +
+          'This usually means it was created by another browser/device or an old test.\n\n' +
+          'Do you want to delete the existing encrypted YANTA Sync data in Google Drive and create a new sync vault from this device?'
+        );
+  
+        if (!ok) {
+          throw new Error('Setup cancelled. Use "Additional device" and scan/paste the correct Sync QR from the existing device.');
+        }
+  
+        setStatus('Deleting old encrypted YANTA Sync data from Google Drive…');
+  
+        const deleted = await deleteAllGoogleDriveSyncObjects();
+  
+        console.info('[YANTA Sync2] deleted Google Drive sync objects', deleted);
+  
+        setStatus('Creating new encrypted Google Drive Sync…');
+  
+        runtime = await connectRuntime({
+          prompt: 'consent',
+        });
+      }
   
       setStatus('Uploading encrypted full snapshot…');
   
@@ -206,22 +270,35 @@ import {
     }
   }
   
-  async function setupExistingDeviceFromRawKey(rawKey) {
-    const key = String(rawKey || '').trim();
+  async function resetGoogleDriveSyncData() {
+    try {
+      const ok = confirm(
+        'Delete all encrypted YANTA Sync data from Google Drive appDataFolder?\n\n' +
+        'This does not delete your local notes. It only removes the cloud sync objects for this Google account/app.\n\n' +
+        'Continue?'
+      );
   
-    if (!key) {
-      throw new Error('Sync key missing');
+      if (!ok) return;
+  
+      setStatus('Deleting encrypted YANTA Sync data from Google Drive…');
+  
+      const count = await deleteAllGoogleDriveSyncObjects();
+  
+      await store.settings.set('sync2.provider', null);
+  
+      try {
+        window.yantaSync2?.engine?.stop?.();
+      } catch {}
+  
+      window.yantaSync2 = null;
+  
+      setStatus(`Deleted ${count} Google Drive sync object${count === 1 ? '' : 's'}.`, 'success');
+      toast('Google Drive Sync data reset', 'success');
+    } catch (err) {
+      console.error(err);
+      setStatus(err?.message || String(err), 'error');
+      toast('Reset failed', 'error');
     }
-  
-    syncKeyToBytes(key);
-  
-    await setSync2SyncKey(key);
-  
-    return setupExistingDeviceFromPayload(
-      'yanta-sync2:' + btoa(JSON.stringify({
-        kind: 'noop',
-      }))
-    );
   }
   
   function renderStartView() {
@@ -258,16 +335,24 @@ import {
   
           <section class="yanta-sync2-choice">
             <h4>Additional device</h4>
-            <p>Scan the QR from your first device, or paste the pairing text.</p>
+            <p>Scan or paste the Sync QR text from your first device.</p>
   
             <div class="compress-actions" style="justify-content:flex-start;flex-wrap:wrap">
               <button class="btn" data-action="scan">
                 ${lucide('qr-code', 14)} Scan QR
               </button>
               <button class="btn" data-action="paste">
-                ${lucide('clipboard', 14)} Paste pairing text/key
+                ${lucide('clipboard', 14)} Paste pairing text
               </button>
             </div>
+          </section>
+  
+          <section class="yanta-sync2-choice danger-zone">
+            <h4>Reset cloud sync data</h4>
+            <p>Use this if Google Drive contains old encrypted test data and setup fails with a wrong-key/decrypt error.</p>
+            <button class="btn danger" data-action="reset">
+              ${lucide('trash', 14)} Delete Google Drive Sync data
+            </button>
           </section>
   
           <div class="yanta-sync2-setup-status" data-status></div>
@@ -291,6 +376,7 @@ import {
     });
   
     m.querySelector('[data-action="paste"]')?.addEventListener('click', renderPasteView);
+    m.querySelector('[data-action="reset"]')?.addEventListener('click', resetGoogleDriveSyncData);
   
     m.hidden = false;
   }
@@ -511,6 +597,10 @@ import {
     color: var(--text-dim);
     font-size: 13px;
     line-height: 1.45;
+  }
+  
+  .yanta-sync2-choice.danger-zone {
+    border-color: color-mix(in srgb, var(--red) 32%, var(--border));
   }
   
   .yanta-sync2-warning {

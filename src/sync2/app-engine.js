@@ -314,18 +314,29 @@ export class Sync2AppEngine {
       return;
     }
   
-    const encrypted = await this.remote.get(path);
+    try {
+      const encrypted = await this.remote.get(path);
   
-    const plain = await decryptBytes(
-      this.keys.contentKey,
-      encrypted,
-      path
-    );
+      const plain = await decryptBytes(
+        this.keys.contentKey,
+        encrypted,
+        path
+      );
   
-    const text = new TextDecoder().decode(plain);
+      const text = new TextDecoder().decode(plain);
   
-    if (text !== 'yanta-sync-key-ok-v1') {
-      throw new Error('Wrong Sync Key');
+      if (text !== 'yanta-sync-key-ok-v1') {
+        throw new Error('Wrong Sync Key');
+      }
+    } catch (err) {
+      const e = new Error(
+        'Wrong Sync Key. Google Drive already contains encrypted YANTA Sync data that cannot be decrypted with this local key.'
+      );
+  
+      e.code = 'EWRONGKEY';
+      e.cause = err;
+  
+      throw e;
     }
   }
 

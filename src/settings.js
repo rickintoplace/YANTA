@@ -1650,14 +1650,14 @@ function renderSyncSection(host) {
     'Synchronize encrypted YANTA data through your hidden Google Drive app data folder. Google only receives encrypted blobs.'
   ));
   cloudGroup.append(el('button', {
-      class: 'btn primary',
-      onclick: async () => {
-        closeSettings();
-    
-        const { openGoogleDriveSyncSetup } = await import('./sync2/sync-setup-ui.js');
-        openGoogleDriveSyncSetup();
-      },
-    }, 'Set up Google Drive Sync'));
+    class: 'btn primary',
+    onclick: async () => {
+      closeSettings();
+  
+      const { openGoogleDriveSyncSetup } = await import('./sync2/sync-setup-ui.js');
+      openGoogleDriveSyncSetup();
+    },
+  }, 'Set up Google Drive Sync'));
   host.append(cloudGroup);
 
   // Sync folder shortcut

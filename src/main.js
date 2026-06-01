@@ -200,21 +200,28 @@ async function init() {
     vaultJsonSnapshot,
   };
 
-  // Sync2 debug runtime: provider-independent encrypted sync against
-  // a persistent IndexedDB fake remote.
   try {
     const provider = await store.settings.get('sync2.provider', null);
   
-    if (provider === 'google-drive') {
-      window.yantaSync2 = await createSync2GoogleDriveAppRuntime({
-        googlePrompt: '',
+    window.yantaStartGoogleDriveSync = async ({
+      prompt = 'consent',
+    } = {}) => {
+      const runtime = await createSync2GoogleDriveAppRuntime({
+        googlePrompt: prompt,
       });
   
-      startSync2AutoSync(window.yantaSync2.engine);
+      window.yantaSync2 = runtime;
+      startSync2AutoSync(runtime.engine);
   
       console.info('[YANTA Sync2] Google Drive runtime ready', {
-        deviceId: window.yantaSync2.deviceId,
+        deviceId: runtime.deviceId,
       });
+  
+      return runtime;
+    };
+  
+    if (provider === 'google-drive') {
+      console.info('[YANTA Sync2] Google Drive is configured. Runtime will start after user action.');
     } else if (import.meta.env.DEV) {
       window.yantaSync2 = await createSync2DebugAppRuntime();
   
@@ -224,7 +231,7 @@ async function init() {
       });
     }
   } catch (err) {
-    console.warn('[YANTA Sync2] runtime failed', err);
+    console.warn('[YANTA Sync2] runtime setup failed', err);
   }
 
   window.yantaConnectSync2Broker = async ({

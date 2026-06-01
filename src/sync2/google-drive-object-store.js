@@ -6,12 +6,6 @@
 //
 // Scope:
 //   https://www.googleapis.com/auth/drive.appdata
-//
-// Notes:
-// - OAuth Web Client ID is public and safe in frontend.
-// - No client secret in browser.
-// - Paths are encoded into Drive file names.
-// - Files live in hidden appDataFolder.
 // ============================================================
 
 import {
@@ -100,6 +94,12 @@ import {
     return err;
   }
   
+  function timeout(ms, message) {
+    return new Promise((_resolve, reject) => {
+      setTimeout(() => reject(new Error(message)), ms);
+    });
+  }
+  
   export class GoogleDriveObjectStore extends RemoteObjectStore {
     constructor({
       clientId,
@@ -168,7 +168,7 @@ import {
         });
       }
   
-      return new Promise((resolve, reject) => {
+      const tokenPromise = new Promise((resolve, reject) => {
         this.tokenClient.callback = (res) => {
           if (res?.error) {
             reject(new Error(res.error_description || res.error));
@@ -188,6 +188,11 @@ import {
           prompt,
         });
       });
+  
+      return Promise.race([
+        tokenPromise,
+        timeout(90_000, 'Google login timed out or was blocked by the browser.'),
+      ]);
     }
   
     async api(url, options = {}, retry = true) {
@@ -215,8 +220,8 @@ import {
       const name = driveFileNameForPath(p);
   
       return [
-        `name='${escapeDriveQueryString(name)}'`,
-        `trashed=false`,
+        `name = '${escapeDriveQueryString(name)}'`,
+        `trashed = false`,
         `appProperties has { key='yantaSync' and value='1' }`,
       ].join(' and ');
     }
@@ -267,7 +272,7 @@ import {
         url.searchParams.set('spaces', 'appDataFolder');
         url.searchParams.set(
           'q',
-          `trashed=false and appProperties has { key='yantaSync' and value='1' }`
+          `trashed = false and appProperties has { key='yantaSync' and value='1' }`
         );
         url.searchParams.set(
           'fields',

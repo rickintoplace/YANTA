@@ -8,6 +8,13 @@ import { icons as LUCIDE_ICONS } from 'lucide';
 
 export const $ = (id) => document.getElementById(id);
 
+export function isStandalonePwa() {
+  return (
+    window.matchMedia?.('(display-mode: standalone)')?.matches ||
+    window.navigator.standalone === true
+  );
+}
+
 export const el = (tag, attrs = {}, ...children) => {
   const n = document.createElement(tag);
 

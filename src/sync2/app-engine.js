@@ -340,40 +340,6 @@ export class Sync2AppEngine {
     }
   }
 
-  async ensureKeyCheck() {
-    const path = keyCheckPath();
-    const existing = await this.remote.stat(path);
-  
-    if (!existing) {
-      const encrypted = await encryptBytes(
-        this.keys.contentKey,
-        utf8Encode('yanta-sync-key-ok-v1'),
-        path
-      );
-  
-      try {
-        await this.remote.put(path, encrypted, { ifAbsent: true });
-      } catch (err) {
-        if (err?.code !== 'EEXIST') throw err;
-      }
-  
-      return;
-    }
-  
-    const encrypted = await this.remote.get(path);
-    const plain = await decryptBytes(
-      this.keys.contentKey,
-      encrypted,
-      path
-    );
-  
-    const text = new TextDecoder().decode(plain);
-  
-    if (text !== 'yanta-sync-key-ok-v1') {
-      throw new Error('Wrong Sync Key');
-    }
-  }
-
   observeVault() {
     if (this.unobserveVault) return;
 

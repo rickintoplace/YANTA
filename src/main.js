@@ -166,8 +166,28 @@ async function buildSearchIndex() {
   }
 }
 
+function registerServiceWorker() {
+  if (!('serviceWorker' in navigator)) return;
+
+  // In dev lieber nicht cachen, sonst debuggt man alte Bundles.
+  if (import.meta.env.DEV) return;
+
+  window.addEventListener('load', () => {
+    navigator.serviceWorker
+      .register('/sw.js')
+      .then((reg) => {
+        console.info('[YANTA PWA] Service worker registered', reg.scope);
+      })
+      .catch((err) => {
+        console.warn('[YANTA PWA] Service worker registration failed', err);
+      });
+  });
+}
+
 async function init() {
   await openDB();
+
+  registerServiceWorker();
 
   await installVaultStoreBridge();
 
@@ -274,6 +294,33 @@ async function init() {
     const { openGoogleDriveSyncSetup } = await import('./sync2/sync-setup-ui.js');
     openGoogleDriveSyncSetup();
   };
+
+  window.yantaOpenGoogleDriveSyncSetupWithPayload = async (payload) => {
+    const { openGoogleDriveSyncSetupWithPayload } = await import('./sync2/sync-setup-ui.js');
+    await openGoogleDriveSyncSetupWithPayload(payload);
+  };
+  
+  const sync2HashPayload = (() => {
+    const raw = String(location.hash || '').replace(/^#/, '');
+  
+    if (!raw.startsWith('sync2=')) return '';
+  
+    try {
+      return decodeURIComponent(raw.slice('sync2='.length));
+    } catch {
+      return raw.slice('sync2='.length);
+    }
+  })();
+  
+  if (sync2HashPayload) {
+    // Remove secret from browser URL/history as soon as possible.
+    history.replaceState({}, '', location.pathname + location.search);
+  
+    setTimeout(async () => {
+      const { openGoogleDriveSyncSetupWithPayload } = await import('./sync2/sync-setup-ui.js');
+      await openGoogleDriveSyncSetupWithPayload(sync2HashPayload);
+    }, 700);
+  }
 
   await loadAppearance();
   await loadCalendarPreferences();

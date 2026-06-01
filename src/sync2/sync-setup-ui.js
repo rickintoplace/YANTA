@@ -1,5 +1,11 @@
 // ============================================================
 // YANTA Sync2 — Google Drive setup UI
+//
+// Best-practice QR + PWA UX:
+// - First device shows QR as https://.../#sync2=...
+// - If opened in wrong browser, user gets copy/instructions.
+// - In-app scanner remains the most reliable PWA flow.
+// - Google OAuth starts only after explicit user click.
 // ============================================================
 
 import {
@@ -20,6 +26,7 @@ import {
   
   import {
     createSync2PairingPayload,
+    createSync2PairingUrl,
     importSync2PairingPayload,
     renderSync2QrSvg,
     scanQrWithCamera,
@@ -32,9 +39,17 @@ import {
   let modal = null;
   let statusEl = null;
   let autoSyncStarted = false;
+  let pendingPairingText = '';
   
   function clientId() {
     return import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
+  }
+  
+  function isStandalonePwa() {
+    return (
+      window.matchMedia?.('(display-mode: standalone)')?.matches ||
+      window.navigator.standalone === true
+    );
   }
   
   function setStatus(msg = '', type = '') {
@@ -159,11 +174,13 @@ import {
   
   function isWrongKeyError(err) {
     const msg = String(err?.message || err || '');
+  
     return (
+      err?.code === 'EWRONGKEY' ||
+      err?.name === 'OperationError' ||
       msg.includes('Wrong Sync Key') ||
       msg.includes('OperationError') ||
-      msg.includes('decrypt') ||
-      err?.name === 'OperationError'
+      msg.toLowerCase().includes('decrypt')
     );
   }
   
@@ -180,27 +197,8 @@ import {
       } catch (err) {
         if (!isWrongKeyError(err)) throw err;
   
-        const ok = confirm(
-          'Google Drive already contains encrypted YANTA Sync data that cannot be decrypted with this local Sync Key.\n\n' +
-          'This usually means it was created by another browser/device or an old test.\n\n' +
-          'Do you want to delete the existing encrypted YANTA Sync data in Google Drive and create a new sync vault from this device?'
-        );
-  
-        if (!ok) {
-          throw new Error('Setup cancelled. Use "Additional device" and scan/paste the correct Sync QR from the existing device.');
-        }
-  
-        setStatus('Deleting old encrypted YANTA Sync data from Google Drive…');
-  
-        const deleted = await deleteAllGoogleDriveSyncObjects();
-  
-        console.info('[YANTA Sync2] deleted Google Drive sync objects', deleted);
-  
-        setStatus('Creating new encrypted Google Drive Sync…');
-  
-        runtime = await connectRuntime({
-          prompt: 'consent',
-        });
+        renderWrongKeyResetView();
+        return;
       }
   
       setStatus('Uploading encrypted full snapshot…');
@@ -211,12 +209,17 @@ import {
   
       setStatus('Creating pairing QR…');
   
-      const payload = await createSync2PairingPayload({
+      const pairingUrl = await createSync2PairingUrl({
+        provider: 'google-drive',
+      });
+  
+      const rawPayload = await createSync2PairingPayload({
         provider: 'google-drive',
       });
   
       renderConnectedView({
-        payload,
+        pairingUrl,
+        rawPayload,
         syncKey: runtime.syncKey,
       });
   
@@ -228,12 +231,82 @@ import {
     }
   }
   
-  async function setupExistingDeviceFromPayload(payloadText) {
+  function renderWrongKeyResetView() {
+    const m = ensureModal();
+  
+    m.innerHTML = `
+      <div class="modal-card yanta-sync2-setup-card">
+        <header class="modal-head">
+          <h3>Existing encrypted sync data found</h3>
+          <button class="icon-btn" data-sync2-close>&times;</button>
+        </header>
+  
+        <div class="modal-body yanta-sync2-setup-body">
+          <div class="yanta-sync2-warning">
+            <strong>Wrong Sync Key:</strong>
+            Google Drive already contains encrypted YANTA Sync data that cannot be decrypted with this browser's local key.
+          </div>
+  
+          <section class="yanta-sync2-choice">
+            <h4>If this is an additional device</h4>
+            <p>Go back and scan/paste the Sync QR from your first device.</p>
+            <button class="btn" data-action="back">${lucide('arrow-left', 14)} Back</button>
+          </section>
+  
+          <section class="yanta-sync2-choice danger-zone">
+            <h4>If this is old test data</h4>
+            <p>Delete the encrypted YANTA Sync objects from Google Drive and create a new cloud sync vault from this device.</p>
+            <button class="btn danger" data-action="delete-create">
+              ${lucide('trash', 14)} Delete cloud sync data and create new
+            </button>
+          </section>
+  
+          <div class="yanta-sync2-setup-status" data-status></div>
+        </div>
+      </div>
+    `;
+  
+    statusEl = m.querySelector('[data-status]');
+  
+    m.querySelector('[data-action="back"]')?.addEventListener('click', renderStartView);
+  
+    m.querySelector('[data-action="delete-create"]')?.addEventListener('click', async () => {
+      try {
+        setStatus('Deleting encrypted YANTA Sync data from Google Drive…');
+  
+        const deleted = await deleteAllGoogleDriveSyncObjects();
+  
+        setStatus(`Deleted ${deleted} object${deleted === 1 ? '' : 's'}. Creating new sync…`);
+  
+        await setupFirstDevice();
+      } catch (err) {
+        console.error(err);
+        setStatus(err?.message || String(err), 'error');
+        toast('Reset failed', 'error');
+      }
+    });
+  }
+  
+  async function prepareExistingDeviceFromPayload(pairingText) {
     try {
-      setStatus('Reading Sync QR/key…');
+      setStatus('Reading Sync QR/link…');
   
-      await importSync2PairingPayload(payloadText);
+      pendingPairingText = pairingText;
   
+      await importSync2PairingPayload(pairingText);
+  
+      setStatus('Sync key imported. Continue with Google Drive.', 'success');
+  
+      renderContinueGoogleView(pairingText);
+    } catch (err) {
+      console.error(err);
+      setStatus(err?.message || String(err), 'error');
+      toast('Could not read Sync QR/link', 'error');
+    }
+  }
+  
+  async function connectExistingDeviceNow() {
+    try {
       setStatus('Removing untouched local Welcome vault if present…');
   
       await removePristineWelcomeVaultIfPresent({
@@ -253,34 +326,36 @@ import {
         pullSnapshots: true,
       });
   
-      const payload = await createSync2PairingPayload({
+      const pairingUrl = await createSync2PairingUrl({
+        provider: 'google-drive',
+      });
+  
+      const rawPayload = await createSync2PairingPayload({
         provider: 'google-drive',
       });
   
       renderConnectedView({
-        payload,
+        pairingUrl,
+        rawPayload,
         syncKey: runtime.syncKey,
       });
   
       toast('Google Drive Sync connected', 'success');
     } catch (err) {
       console.error(err);
-      setStatus(err?.message || String(err), 'error');
+  
+      const msg = isWrongKeyError(err)
+        ? 'Wrong Sync Key. This QR/link does not match the encrypted data in this Google Drive account.'
+        : err?.message || String(err);
+  
+      setStatus(msg, 'error');
       toast('Google Drive Sync connect failed', 'error');
     }
   }
   
   async function resetGoogleDriveSyncData() {
     try {
-      const ok = confirm(
-        'Delete all encrypted YANTA Sync data from Google Drive appDataFolder?\n\n' +
-        'This does not delete your local notes. It only removes the cloud sync objects for this Google account/app.\n\n' +
-        'Continue?'
-      );
-  
-      if (!ok) return;
-  
-      setStatus('Deleting encrypted YANTA Sync data from Google Drive…');
+      setStatus('Connecting to Google Drive to delete sync data…');
   
       const count = await deleteAllGoogleDriveSyncObjects();
   
@@ -321,13 +396,13 @@ import {
           </div>
   
           <div class="yanta-sync2-warning">
-            <strong>Important:</strong> The Sync QR contains your encryption key.
-            Anyone with this QR/key can decrypt your YANTA vault.
+            <strong>Important:</strong> The Sync QR/link contains your encryption key.
+            Anyone with it can decrypt your YANTA vault.
           </div>
   
           <section class="yanta-sync2-choice">
             <h4>First device</h4>
-            <p>Create encrypted sync data in Google Drive and show a QR code for adding more devices.</p>
+            <p>Create encrypted sync data in Google Drive and show a QR/link for adding more devices.</p>
             <button class="btn primary" data-action="first">
               ${lucide('cloud-upload', 14)} Create Google Drive Sync
             </button>
@@ -335,23 +410,23 @@ import {
   
           <section class="yanta-sync2-choice">
             <h4>Additional device</h4>
-            <p>Scan or paste the Sync QR text from your first device.</p>
+            <p>Best PWA flow: open the installed YANTA app, then scan this QR from inside YANTA.</p>
   
             <div class="compress-actions" style="justify-content:flex-start;flex-wrap:wrap">
               <button class="btn" data-action="scan">
                 ${lucide('qr-code', 14)} Scan QR
               </button>
               <button class="btn" data-action="paste">
-                ${lucide('clipboard', 14)} Paste pairing text
+                ${lucide('clipboard', 14)} Paste pairing link/text
               </button>
             </div>
           </section>
   
           <section class="yanta-sync2-choice danger-zone">
             <h4>Reset cloud sync data</h4>
-            <p>Use this if Google Drive contains old encrypted test data and setup fails with a wrong-key/decrypt error.</p>
+            <p>Connect to Google and delete encrypted YANTA Sync data from the hidden appDataFolder.</p>
             <button class="btn danger" data-action="reset">
-              ${lucide('trash', 14)} Delete Google Drive Sync data
+              ${lucide('trash', 14)} Connect and delete Google Drive Sync data
             </button>
           </section>
   
@@ -368,7 +443,7 @@ import {
       try {
         setStatus('Starting camera…');
         const text = await scanQrWithCamera();
-        await setupExistingDeviceFromPayload(text);
+        await prepareExistingDeviceFromPayload(text);
       } catch (err) {
         console.error(err);
         setStatus(err?.message || String(err), 'error');
@@ -393,15 +468,15 @@ import {
   
         <div class="modal-body yanta-sync2-setup-body">
           <p style="color:var(--text-dim);font-size:13px;line-height:1.5">
-            Paste the full QR pairing text from your first device.
+            Paste the Sync QR link or raw pairing text from your first device.
           </p>
   
-          <textarea class="text-input" data-pairing rows="7" placeholder="yanta-sync2:..."></textarea>
+          <textarea class="text-input" data-pairing rows="7" placeholder="https://yanta.page/#sync2=... or yanta-sync2:..."></textarea>
   
           <div class="compress-actions">
             <button class="btn" data-action="back">Back</button>
-            <button class="btn primary" data-action="connect">
-              ${lucide('link', 14)} Connect
+            <button class="btn primary" data-action="import">
+              ${lucide('key', 14)} Import key
             </button>
           </div>
   
@@ -414,14 +489,82 @@ import {
   
     m.querySelector('[data-action="back"]')?.addEventListener('click', renderStartView);
   
-    m.querySelector('[data-action="connect"]')?.addEventListener('click', async () => {
+    m.querySelector('[data-action="import"]')?.addEventListener('click', async () => {
       const text = m.querySelector('[data-pairing]')?.value || '';
-      await setupExistingDeviceFromPayload(text);
+      await prepareExistingDeviceFromPayload(text);
     });
   }
   
+  function renderContinueGoogleView(pairingText = pendingPairingText) {
+    const standalone = isStandalonePwa();
+    const m = ensureModal();
+  
+    m.innerHTML = `
+      <div class="modal-card yanta-sync2-setup-card">
+        <header class="modal-head">
+          <h3>Sync key imported</h3>
+          <button class="icon-btn" data-sync2-close>&times;</button>
+        </header>
+  
+        <div class="modal-body yanta-sync2-setup-body">
+          <div class="yanta-sync2-setup-hero">
+            <div class="yanta-sync2-setup-icon ok">${lucide('key', 28)}</div>
+            <div>
+              <strong>Sync key ready</strong>
+              <p>Now connect to the same Google Drive account that contains your encrypted YANTA Sync data.</p>
+            </div>
+          </div>
+  
+          ${
+            standalone
+              ? ''
+              : `
+                <div class="yanta-sync2-browser-warning">
+                  <strong>You are in a browser tab.</strong>
+                  If you installed YANTA as a PWA but this opened in the wrong browser,
+                  open the installed YANTA app and use Sync → Scan QR or paste this pairing link there.
+                </div>
+              `
+          }
+  
+          <label style="font-size:12px;color:var(--text-dim)">
+            Pairing link/text
+            <textarea class="text-input" data-pairing readonly rows="4"></textarea>
+          </label>
+  
+          <div class="compress-actions">
+            <button class="btn" data-action="back">Back</button>
+            <button class="btn" data-action="copy">
+              ${lucide('copy', 14)} Copy pairing
+            </button>
+            <button class="btn primary" data-action="google">
+              ${lucide('cloud', 14)} Continue with Google Drive
+            </button>
+          </div>
+  
+          <div class="yanta-sync2-setup-status" data-status></div>
+        </div>
+      </div>
+    `;
+  
+    statusEl = m.querySelector('[data-status]');
+  
+    const pairingEl = m.querySelector('[data-pairing]');
+    if (pairingEl) pairingEl.value = pairingText || '';
+  
+    m.querySelector('[data-action="back"]')?.addEventListener('click', renderStartView);
+  
+    m.querySelector('[data-action="copy"]')?.addEventListener('click', async () => {
+      await navigator.clipboard.writeText(pairingText || '');
+      toast('Pairing link copied', 'success');
+    });
+  
+    m.querySelector('[data-action="google"]')?.addEventListener('click', connectExistingDeviceNow);
+  }
+  
   async function renderConnectedView({
-    payload,
+    pairingUrl,
+    rawPayload,
     syncKey,
   }) {
     const m = ensureModal();
@@ -438,20 +581,25 @@ import {
             <div class="yanta-sync2-setup-icon ok">${lucide('check', 28)}</div>
             <div>
               <strong>Encrypted sync enabled</strong>
-              <p>Use this QR code to add your phone, laptop or another browser.</p>
+              <p>Scan this QR with another device. If it opens in the wrong browser, open the installed YANTA app and scan from inside the app.</p>
             </div>
           </div>
   
           <div class="yanta-sync2-qr" data-qr></div>
   
           <div class="yanta-sync2-warning">
-            <strong>Keep private:</strong> This QR code contains your Sync Key.
+            <strong>Keep private:</strong> This QR/link contains your Sync Key.
             Anyone with it can decrypt your YANTA vault.
           </div>
   
           <label style="font-size:12px;color:var(--text-dim)">
-            Pairing text
-            <textarea class="text-input" data-payload rows="4" readonly></textarea>
+            Pairing link
+            <textarea class="text-input" data-url rows="4" readonly></textarea>
+          </label>
+  
+          <label style="font-size:12px;color:var(--text-dim)">
+            Raw pairing text
+            <textarea class="text-input" data-raw rows="4" readonly></textarea>
           </label>
   
           <label style="font-size:12px;color:var(--text-dim)">
@@ -463,8 +611,11 @@ import {
             <button class="btn" data-action="sync-now">
               ${lucide('refresh-cw', 14)} Sync now
             </button>
-            <button class="btn" data-action="copy-pairing">
-              ${lucide('copy', 14)} Copy pairing
+            <button class="btn" data-action="copy-url">
+              ${lucide('copy', 14)} Copy link
+            </button>
+            <button class="btn" data-action="copy-raw">
+              ${lucide('copy', 14)} Copy raw
             </button>
             <button class="btn" data-action="copy-key">
               ${lucide('key', 14)} Copy key
@@ -479,13 +630,19 @@ import {
   
     statusEl = m.querySelector('[data-status]');
   
-    m.querySelector('[data-qr]')?.append(renderSync2QrSvg(payload, 240));
-    m.querySelector('[data-payload]').value = payload;
+    m.querySelector('[data-qr]')?.append(renderSync2QrSvg(pairingUrl, 240));
+    m.querySelector('[data-url]').value = pairingUrl || '';
+    m.querySelector('[data-raw]').value = rawPayload || '';
     m.querySelector('[data-key]').value = syncKey || await getSync2SyncKey();
   
-    m.querySelector('[data-action="copy-pairing"]')?.addEventListener('click', async () => {
-      await navigator.clipboard.writeText(payload);
-      toast('Pairing text copied', 'success');
+    m.querySelector('[data-action="copy-url"]')?.addEventListener('click', async () => {
+      await navigator.clipboard.writeText(pairingUrl || '');
+      toast('Pairing link copied', 'success');
+    });
+  
+    m.querySelector('[data-action="copy-raw"]')?.addEventListener('click', async () => {
+      await navigator.clipboard.writeText(rawPayload || '');
+      toast('Raw pairing text copied', 'success');
     });
   
     m.querySelector('[data-action="copy-key"]')?.addEventListener('click', async () => {
@@ -519,6 +676,12 @@ import {
     renderStartView();
   }
   
+  export async function openGoogleDriveSyncSetupWithPayload(pairingText) {
+    ensureModal();
+    modal.hidden = false;
+    await prepareExistingDeviceFromPayload(pairingText);
+  }
+  
   function injectCss() {
     if (document.getElementById('yanta-sync2-setup-css')) return;
   
@@ -526,7 +689,7 @@ import {
     style.id = 'yanta-sync2-setup-css';
     style.textContent = `
   .yanta-sync2-setup-card {
-    width: min(560px, 94vw);
+    width: min(590px, 94vw);
   }
   
   .yanta-sync2-setup-body {
@@ -603,20 +766,33 @@ import {
     border-color: color-mix(in srgb, var(--red) 32%, var(--border));
   }
   
-  .yanta-sync2-warning {
+  .yanta-sync2-warning,
+  .yanta-sync2-browser-warning {
     padding: 10px 12px;
-    border: 1px solid color-mix(in srgb, var(--yellow) 45%, var(--border));
     border-radius: 10px;
   
-    background: color-mix(in srgb, var(--yellow) 10%, transparent);
     color: var(--text-dim);
   
     font-size: 12px;
     line-height: 1.45;
   }
   
+  .yanta-sync2-warning {
+    border: 1px solid color-mix(in srgb, var(--yellow) 45%, var(--border));
+    background: color-mix(in srgb, var(--yellow) 10%, transparent);
+  }
+  
   .yanta-sync2-warning strong {
     color: var(--yellow);
+  }
+  
+  .yanta-sync2-browser-warning {
+    border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+    background: color-mix(in srgb, var(--accent) 9%, transparent);
+  }
+  
+  .yanta-sync2-browser-warning strong {
+    color: var(--accent);
   }
   
   .yanta-sync2-qr {

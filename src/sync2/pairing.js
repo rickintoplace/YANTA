@@ -1,5 +1,12 @@
 // ============================================================
 // YANTA Sync2 — Device pairing / QR payload
+//
+// Best-practice pairing model:
+// - QR contains a normal https URL:
+//     https://yanta.page/#sync2=<encoded-payload>
+// - The sync key is in the fragment (#...), so it is not sent to server logs.
+// - YANTA clears the fragment after import.
+// - Raw yanta-sync2:... payload is still supported for copy/paste.
 // ============================================================
 
 import qrcode from 'qrcode-generator';
@@ -22,6 +29,7 @@ import {
 } from './crypto.js';
 
 const PAIRING_PREFIX = 'yanta-sync2:';
+const URL_HASH_PREFIX = 'sync2=';
 
 export async function createSync2PairingPayload({
   provider = 'google-drive',
@@ -42,11 +50,57 @@ export async function createSync2PairingPayload({
   );
 }
 
-export function parseSync2PairingPayload(text) {
+export async function createSync2PairingUrl({
+  provider = 'google-drive',
+} = {}) {
+  const payload = await createSync2PairingPayload({
+    provider,
+  });
+
+  return (
+    location.origin +
+    location.pathname +
+    location.search +
+    '#sync2=' +
+    encodeURIComponent(payload)
+  );
+}
+
+function extractPairingPayload(text) {
   const raw = String(text || '').trim();
 
+  if (raw.startsWith(PAIRING_PREFIX)) {
+    return raw;
+  }
+
+  // Full URL:
+  // https://yanta.page/#sync2=yanta-sync2%3A...
+  try {
+    const url = new URL(raw);
+    const hash = String(url.hash || '').replace(/^#/, '');
+
+    if (hash.startsWith(URL_HASH_PREFIX)) {
+      return decodeURIComponent(hash.slice(URL_HASH_PREFIX.length));
+    }
+  } catch {}
+
+  // Current-page hash or copied hash:
+  // #sync2=...
+  // sync2=...
+  const noHash = raw.replace(/^#/, '');
+
+  if (noHash.startsWith(URL_HASH_PREFIX)) {
+    return decodeURIComponent(noHash.slice(URL_HASH_PREFIX.length));
+  }
+
+  return raw;
+}
+
+export function parseSync2PairingPayload(text) {
+  const raw = extractPairingPayload(text);
+
   if (!raw.startsWith(PAIRING_PREFIX)) {
-    throw new Error('Not a YANTA Sync QR');
+    throw new Error('Not a YANTA Sync QR or pairing link');
   }
 
   const json = JSON.parse(
@@ -115,7 +169,7 @@ export function renderSync2QrSvg(text, size = 220) {
 
 export async function scanQrWithCamera() {
   if (!('BarcodeDetector' in window)) {
-    throw new Error('QR scanning is not supported in this browser. Paste the sync key manually.');
+    throw new Error('QR scanning is not supported in this browser. Paste the pairing link manually.');
   }
 
   if (!navigator.mediaDevices?.getUserMedia) {

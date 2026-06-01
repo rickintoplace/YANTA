@@ -800,6 +800,14 @@ export function applyAppearance() {
 
   const palette = (a.colors && a.colors[mode]) || DEFAULT_THEMES[mode];
 
+  const metaTheme = document.querySelector('meta[name="theme-color"]');
+  if (metaTheme) {
+    metaTheme.setAttribute(
+      'content',
+      palette.bg || DEFAULT_THEMES[mode].bg || (mode === 'dark' ? '#141414' : '#fdfcfa')
+    );
+  }
+
   for (const tok of COLOR_TOKENS) {
     const val = palette[tok.key] || DEFAULT_THEMES[mode][tok.key];
     const safe = tok.key === 'selection' ? val : (safeCssColor(val) || val);

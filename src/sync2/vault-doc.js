@@ -24,6 +24,10 @@ export const VAULT_ORIGINS = {
   REMOTE: 'sync2-remote',
 };
 
+export function vaultDevicesMap() {
+  return vaultMap('devices');
+}
+
 export function getVaultEntry() {
   if (vaultEntry) return vaultEntry;
 
@@ -178,6 +182,7 @@ export function vaultJsonSnapshot() {
   const events = Object.fromEntries(vaultEventsMap());
   const calendarCategories = Object.fromEntries(vaultCalendarCategoriesMap());
   const settings = Object.fromEntries(vaultSettingsMap());
+  const devices = Object.fromEntries(vaultDevicesMap());
   const tombstones = Object.fromEntries(vaultTombstonesMap());
 
   return safeJsonClone({
@@ -187,6 +192,7 @@ export function vaultJsonSnapshot() {
     events,
     calendarCategories,
     settings,
+    devices,
     tombstones,
   });
 }

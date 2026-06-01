@@ -39,6 +39,7 @@ import {
   vaultNotesMap,
   vaultFoldersMap,
   vaultImagesMap,
+  vaultDevicesMap,
   vaultTombstonesMap,
   vaultJsonSnapshot,
   VAULT_ORIGINS,
@@ -112,7 +113,36 @@ export async function clearSync2SyncKeyForDebugOnly() {
   await store.settings.set(SYNC_KEY_SETTING, null);
   await store.settings.set(LEGACY_DEBUG_SYNC_KEY_SETTING, null);
 }
+function defaultDeviceName() {
+  const ua = navigator.userAgent || '';
+  const platform =
+    navigator.userAgentData?.platform ||
+    navigator.platform ||
+    'Device';
 
+  const mobile = /Android|iPhone|iPad|iPod/i.test(ua);
+
+  if (/iPhone/i.test(ua)) return 'iPhone';
+  if (/iPad/i.test(ua)) return 'iPad';
+  if (/Android/i.test(ua)) return mobile ? 'Android phone' : 'Android device';
+  if (/Mac/i.test(platform)) return 'Mac';
+  if (/Win/i.test(platform)) return 'Windows PC';
+  if (/Linux/i.test(platform)) return 'Linux PC';
+
+  return String(platform || 'Device');
+}
+
+async function getOrCreateDeviceName(deviceId) {
+  const key = 'sync2.deviceName';
+  let name = await store.settings.get(key, null);
+
+  if (!name) {
+    name = defaultDeviceName();
+    await store.settings.set(key, name);
+  }
+
+  return name || deviceId;
+}
 function nowIso() {
   return new Date().toISOString();
 }
@@ -262,12 +292,17 @@ export class Sync2AppEngine {
 
   async start() {
     if (this.started) return;
-
+  
     await this.init();
-
+  
     this.observeVault();
-
+  
     this.started = true;
+  
+    await this.updateDeviceRecord({
+      lastOpenedAt: Date.now(),
+      syncStatus: 'ready',
+    });
   }
 
   stop() {
@@ -292,6 +327,35 @@ export class Sync2AppEngine {
 
   async markSeen(path, extra = {}) {
     return this.localState.markSeen(path, extra);
+  }
+
+  async updateDeviceRecord(patch = {}) {
+    const doc = getVaultDoc();
+    const devices = vaultDevicesMap();
+  
+    const existing = devices.get(this.deviceId) || {};
+    const name = await getOrCreateDeviceName(this.deviceId);
+  
+    const next = cleanUndefined({
+      ...safeJsonClone(existing),
+      id: this.deviceId,
+      name,
+      current: true,
+      provider: this.remote?.constructor?.name || 'remote',
+      userAgent: navigator.userAgent || '',
+      platform: navigator.userAgentData?.platform || navigator.platform || '',
+      created: existing.created || Date.now(),
+      updated: Date.now(),
+      lastSeenAt: Date.now(),
+      seq: this.seq,
+      ...patch,
+    });
+  
+    doc.transact(() => {
+      devices.set(this.deviceId, next);
+    }, SYNC2_LOCAL_ORIGIN);
+  
+    return next;
   }
 
   async ensureKeyCheck() {
@@ -487,7 +551,7 @@ export class Sync2AppEngine {
     if (verbose) {
       toast('Sync2: full state snapshot pushed', 'success');
     }
-    
+
     return this.status();
   }
 
@@ -496,65 +560,150 @@ export class Sync2AppEngine {
     pullSnapshots = true,
   } = {}) {
     await this.start();
-
+  
     if (this.syncing) return this.status();
-
+  
     this.syncing = true;
     state.globalSyncStatus = 'syncing';
-
+  
+    let vaultUpdates = {
+      applied: 0,
+    };
+  
+    let noteUpdates = {
+      applied: 0,
+    };
+  
     try {
-      await this.uploadOutbox();
-
-      if (pullSnapshots) {
-        await downloadVaultSnapshots(this);
+      await this.updateDeviceRecord({
+        syncStatus: 'syncing',
+        lastSyncStartedAt: Date.now(),
+        lastSeenAt: Date.now(),
+        lastError: '',
+      });
+  
+      const firstPush = await this.uploadOutbox();
+  
+      if (firstPush.uploaded > 0) {
+        // Queue this info for the final upload. Do not immediately upload again.
+        await this.updateDeviceRecord({
+          lastPushAt: Date.now(),
+          lastPushCount: firstPush.uploaded,
+        });
       }
-
-      await this.downloadVaultUpdates();
-
+  
+      if (pullSnapshots) {
+        const vaultSnapshots = await downloadVaultSnapshots(this);
+  
+        if (vaultSnapshots.applied > 0) {
+          await this.updateDeviceRecord({
+            lastPullAt: Date.now(),
+            lastPullCount: vaultSnapshots.applied,
+          });
+        }
+      }
+  
+      vaultUpdates = await this.downloadVaultUpdates();
+  
+      if (vaultUpdates.applied > 0) {
+        await this.updateDeviceRecord({
+          lastPullAt: Date.now(),
+          lastPullCount: vaultUpdates.applied,
+        });
+      }
+  
       this.hydrateAppStateFromVault();
       await this.persistVaultMetadataToLocalCache();
-
+  
       await downloadMissingAssets(this);
-
+  
       await this.observeAllKnownNotes();
-
+  
       if (pullSnapshots) {
-        await this.downloadKnownNoteSnapshots();
+        const noteSnapshots = await this.downloadKnownNoteSnapshots();
+  
+        if (noteSnapshots.applied > 0) {
+          await this.updateDeviceRecord({
+            lastPullAt: Date.now(),
+            lastPullCount:
+              Number(vaultUpdates?.applied || 0) +
+              Number(noteSnapshots?.applied || 0),
+          });
+        }
       }
-
-      await this.downloadKnownNoteUpdates();
-
+  
+      noteUpdates = await this.downloadKnownNoteUpdates();
+  
+      if (noteUpdates.applied > 0) {
+        await this.updateDeviceRecord({
+          lastPullAt: Date.now(),
+          lastPullCount:
+            Number(vaultUpdates?.applied || 0) +
+            Number(noteUpdates?.applied || 0),
+        });
+      }
+  
       this.hydrateAppStateFromVault();
       await this.persistVaultMetadataToLocalCache();
-
+  
       await downloadMissingAssets(this);
-
-      await this.uploadOutbox();
+  
+      await this.updateDeviceRecord({
+        syncStatus: 'synced',
+        lastSyncAt: Date.now(),
+        lastSeenAt: Date.now(),
+        lastError: '',
+        lastErrorAt: null,
+      });
+  
+      const finalPush = await this.uploadOutbox();
+  
+      if (finalPush.uploaded > 0) {
+        // Do not call updateDeviceRecord here again, otherwise it would queue
+        // another vault update directly after the final upload.
+        // The next sync cycle will update lastPushCount again if needed.
+      }
+  
       await uploadMissingAssets(this);
-
+  
       state.globalSyncStatus = 'synced';
-
+  
       if (verbose) {
         toast('Sync2: sync complete', 'success');
       }
-
+  
       return this.status();
     } catch (err) {
       console.error('Sync2 sync failed', err);
-
+  
       state.globalSyncStatus = 'conflict';
-
+  
+      await this.updateDeviceRecord({
+        syncStatus: 'error',
+        lastError: err?.message || String(err),
+        lastErrorAt: Date.now(),
+        lastSeenAt: Date.now(),
+      }).catch(() => {});
+  
+      // Best effort: if the error happened after Drive connection was available,
+      // this uploads the error state on the next successful cycle.
+      try {
+        await this.uploadOutbox();
+      } catch {}
+  
       if (verbose) {
         toast('Sync2 failed: ' + (err?.message || String(err)), 'error');
       }
-
+  
       throw err;
     } finally {
       this.syncing = false;
     }
   }
 
+
   async uploadOutbox() {
+    let uploaded = 0;
     while (this.outbox.length) {
       const item = this.outbox.shift();
 
@@ -604,6 +753,7 @@ export class Sync2AppEngine {
 
       try {
         await this.remote.put(path, encrypted, { ifAbsent: true });
+        uploaded++;
       } catch (err) {
         if (err?.code === 'EEXIST') {
           await this.markSeen(path, {
@@ -622,6 +772,7 @@ export class Sync2AppEngine {
         own: true,
       });
     }
+    return { uploaded };
   }
 
   async downloadVaultUpdates() {

@@ -29,9 +29,48 @@ import {
   const SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
   
   const FILE_PREFIX = 'yantaobj_';
-  
+  const TOKEN_CACHE_KEY = 'yanta.googleDrive.accessToken.v1';
+  const TOKEN_EXPIRY_SKEW_MS = 60_000;
+
   let gisLoadPromise = null;
   
+  function readTokenCache(clientId) {
+    try {
+      const raw = localStorage.getItem(TOKEN_CACHE_KEY);
+      if (!raw) return null;
+  
+      const rec = JSON.parse(raw);
+  
+      if (rec.clientId !== clientId) return null;
+      if (!rec.accessToken) return null;
+      if (!rec.expiresAt) return null;
+      if (Date.now() + TOKEN_EXPIRY_SKEW_MS >= Number(rec.expiresAt)) return null;
+  
+      return rec.accessToken;
+    } catch {
+      return null;
+    }
+  }
+  
+  function writeTokenCache(clientId, accessToken, expiresInSeconds = 3600) {
+    try {
+      const ttl = Math.max(60, Number(expiresInSeconds || 3600) - 60);
+  
+      localStorage.setItem(TOKEN_CACHE_KEY, JSON.stringify({
+        clientId,
+        accessToken,
+        expiresAt: Date.now() + ttl * 1000,
+        storedAt: Date.now(),
+      }));
+    } catch {}
+  }
+  
+  function clearTokenCache() {
+    try {
+      localStorage.removeItem(TOKEN_CACHE_KEY);
+    } catch {}
+  }
+
   function loadScript(src) {
     if (gisLoadPromise) return gisLoadPromise;
   
@@ -152,48 +191,62 @@ import {
     }
   
     async ensureToken({ prompt = '' } = {}) {
-      if (this.accessToken) return this.accessToken;
-  
-      await loadScript(GIS_SRC);
-  
-      if (!globalThis.google?.accounts?.oauth2) {
-        throw new Error('Google Identity Services not available');
-      }
-  
-      if (!this.tokenClient) {
-        this.tokenClient = google.accounts.oauth2.initTokenClient({
-          client_id: this.clientId,
-          scope: SCOPE,
-          callback: () => {},
+        if (this.accessToken) return this.accessToken;
+      
+        const cached = readTokenCache(this.clientId);
+      
+        if (cached) {
+          this.accessToken = cached;
+          return cached;
+        }
+      
+        await loadScript(GIS_SRC);
+      
+        if (!globalThis.google?.accounts?.oauth2) {
+          throw new Error('Google Identity Services not available');
+        }
+      
+        if (!this.tokenClient) {
+          this.tokenClient = google.accounts.oauth2.initTokenClient({
+            client_id: this.clientId,
+            scope: SCOPE,
+            callback: () => {},
+          });
+        }
+      
+        const tokenPromise = new Promise((resolve, reject) => {
+          this.tokenClient.callback = (res) => {
+            if (res?.error) {
+              reject(new Error(res.error_description || res.error));
+              return;
+            }
+      
+            if (!res?.access_token) {
+              reject(new Error('Google access token missing'));
+              return;
+            }
+      
+            this.accessToken = res.access_token;
+      
+            writeTokenCache(
+              this.clientId,
+              res.access_token,
+              res.expires_in || 3600
+            );
+      
+            resolve(this.accessToken);
+          };
+      
+          this.tokenClient.requestAccessToken({
+            prompt,
+          });
         });
+      
+        return Promise.race([
+          tokenPromise,
+          timeout(90_000, 'Google login timed out or was blocked by the browser.'),
+        ]);
       }
-  
-      const tokenPromise = new Promise((resolve, reject) => {
-        this.tokenClient.callback = (res) => {
-          if (res?.error) {
-            reject(new Error(res.error_description || res.error));
-            return;
-          }
-  
-          if (!res?.access_token) {
-            reject(new Error('Google access token missing'));
-            return;
-          }
-  
-          this.accessToken = res.access_token;
-          resolve(this.accessToken);
-        };
-  
-        this.tokenClient.requestAccessToken({
-          prompt,
-        });
-      });
-  
-      return Promise.race([
-        tokenPromise,
-        timeout(90_000, 'Google login timed out or was blocked by the browser.'),
-      ]);
-    }
   
     async api(url, options = {}, retry = true) {
       await this.ensureToken();
@@ -208,11 +261,18 @@ import {
   
       if (res.status === 401 && retry) {
         this.accessToken = '';
+        clearTokenCache();
+      
         await this.ensureToken({ prompt: '' });
         return this.api(url, options, false);
       }
   
       return res;
+    }
+
+    clearCachedToken() {
+        this.accessToken = '';
+        clearTokenCache();
     }
   
     fileQueryForPath(path) {

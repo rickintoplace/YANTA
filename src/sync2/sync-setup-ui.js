@@ -21,6 +21,10 @@ import {
   } from './app-engine.js';
   
   import {
+    vaultDevicesMap,
+  } from './vault-doc.js';
+
+  import {
     GoogleDriveObjectStore,
   } from './google-drive-object-store.js';
   
@@ -45,6 +49,71 @@ import {
     return import.meta.env.VITE_GOOGLE_CLIENT_ID || '';
   }
   
+  function fmtTime(ts) {
+    if (!ts) return 'never';
+  
+    const d = new Date(ts);
+    if (Number.isNaN(d.getTime())) return 'never';
+  
+    return d.toLocaleString([], {
+      dateStyle: 'short',
+      timeStyle: 'short',
+    });
+  }
+  
+  function currentDeviceId() {
+    return window.yantaSync2?.deviceId || '';
+  }
+  
+  function collectSyncDevices() {
+    try {
+      return [...vaultDevicesMap().values()]
+        .filter(Boolean)
+        .sort((a, b) => Number(b.lastSeenAt || b.updated || 0) - Number(a.lastSeenAt || a.updated || 0));
+    } catch {
+      return [];
+    }
+  }
+  
+  function renderDevicesHtml() {
+    const devices = collectSyncDevices();
+    const current = currentDeviceId();
+  
+    if (!devices.length) {
+      return `<div class="yanta-sync2-empty">No device activity recorded yet.</div>`;
+    }
+  
+    return `
+      <div class="yanta-sync2-device-list">
+        ${devices.map((d) => `
+          <div class="yanta-sync2-device ${d.id === current ? 'current' : ''}">
+            <div class="yanta-sync2-device-head">
+              <strong>${escapeHtmlLocal(d.name || d.id || 'Device')}</strong>
+              ${d.id === current ? '<span>Current device</span>' : ''}
+            </div>
+            <div class="yanta-sync2-device-meta">
+              <div>Last seen: ${escapeHtmlLocal(fmtTime(d.lastSeenAt))}</div>
+              <div>Last sync: ${escapeHtmlLocal(fmtTime(d.lastSyncAt))}</div>
+              <div>Last push: ${escapeHtmlLocal(fmtTime(d.lastPushAt))}</div>
+              <div>Last pull: ${escapeHtmlLocal(fmtTime(d.lastPullAt))}</div>
+              <div>Status: ${escapeHtmlLocal(d.syncStatus || 'unknown')}</div>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }
+  
+  function escapeHtmlLocal(s) {
+    return String(s ?? '').replace(/[&<>"']/g, (c) => ({
+      '&': '&amp;',
+      '<': '&lt;',
+      '>': '&gt;',
+      '"': '&quot;',
+      "'": '&#39;',
+    }[c]));
+  }
+
   function isStandalonePwa() {
     return (
       window.matchMedia?.('(display-mode: standalone)')?.matches ||
@@ -602,6 +671,11 @@ import {
             <strong>Keep private:</strong> This QR/link contains your Sync Key.
             Anyone with it can decrypt your YANTA vault.
           </div>
+
+            <section class="yanta-sync2-choice">
+            <h4>Devices</h4>
+            ${renderDevicesHtml()}
+            </section>
   
           <label style="font-size:12px;color:var(--text-dim)">
             Pairing link
@@ -663,22 +737,29 @@ import {
     });
   
     m.querySelector('[data-action="sync-now"]')?.addEventListener('click', async () => {
-      try {
-        setStatus('Synchronizing…');
-  
-        await window.yantaSync2?.syncNow?.({
-          verbose: false,
-          pullSnapshots: true,
-        });
-  
-        setStatus('Sync complete', 'success');
-        toast('Sync complete', 'success');
-      } catch (err) {
-        console.error(err);
-        setStatus(err?.message || String(err), 'error');
-        toast('Sync failed', 'error');
-      }
-    });
+        try {
+          setStatus('Synchronizing…');
+      
+          if (typeof window.yantaSync2Now === 'function') {
+            await window.yantaSync2Now({
+              interactive: true,
+              catchUp: true,
+            });
+          } else {
+            await window.yantaSync2?.syncNow?.({
+              verbose: false,
+              pullSnapshots: true,
+            });
+          }
+      
+          setStatus('Sync complete', 'success');
+          toast('Sync complete', 'success');
+        } catch (err) {
+          console.error(err);
+          setStatus(err?.message || String(err), 'error');
+          toast('Sync failed', 'error');
+        }
+      });
   
     m.hidden = false;
   }
@@ -830,6 +911,56 @@ import {
   .yanta-sync2-setup-status.success {
     color: var(--green);
   }
+.yanta-sync2-device-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.yanta-sync2-device {
+  padding: 10px 11px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-elev-2);
+}
+
+.yanta-sync2-device.current {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg-elev-2));
+}
+
+.yanta-sync2-device-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+
+.yanta-sync2-device-head strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.yanta-sync2-device-head span {
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.yanta-sync2-device-meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 3px 10px;
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.yanta-sync2-empty {
+  color: var(--text-faint);
+  font-size: 12px;
+  font-style: italic;
+}
   `;
   
     document.head.append(style);

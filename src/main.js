@@ -101,6 +101,10 @@ const MOBILE_MQ = window.matchMedia('(max-width: 880px)');
 const DESKTOP_SIDEBAR_MQ = window.matchMedia('(min-width: 881px)');
 let sidebarCollapsedPref = false;
 
+function isMobileViewport() {
+  return MOBILE_MQ.matches;
+}
+
 let sync2Auto = {
   engine: null,
   timer: 0,

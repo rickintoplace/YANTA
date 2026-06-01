@@ -163,13 +163,13 @@ import {
   
     await remote.init();
   
-    const entries = await remote.list('yanta-sync-v1');
+    const result = await remote.deleteAllYantaFiles({
+      onProgress({ deleted, total }) {
+        setStatus(`Deleting encrypted YANTA Sync data… ${deleted}/${total}`);
+      },
+    });
   
-    for (const entry of entries) {
-      await remote.delete(entry.path);
-    }
-  
-    return entries.length;
+    return result.deleted;
   }
   
   function isWrongKeyError(err) {
@@ -345,8 +345,11 @@ import {
       console.error(err);
   
       const msg = isWrongKeyError(err)
-        ? 'Wrong Sync Key. This QR/link does not match the encrypted data in this Google Drive account.'
-        : err?.message || String(err);
+      ? (
+          'Wrong Sync Key. This QR/link does not match the encrypted data in this Google Drive account.\n\n' +
+          'Check that you selected the same Google account as on the first device. '
+        )
+      : err?.message || String(err);
   
       setStatus(msg, 'error');
       toast('Google Drive Sync connect failed', 'error');

@@ -300,6 +300,50 @@ async function init() {
     await openGoogleDriveSyncSetupWithPayload(payload);
   };
   
+  window.yantaGoogleDriveSyncDebug = async () => {
+    const { GoogleDriveObjectStore } = await import('./sync2/google-drive-object-store.js');
+  
+    const remote = new GoogleDriveObjectStore({
+      clientId: import.meta.env.VITE_GOOGLE_CLIENT_ID,
+      initialPrompt: 'consent',
+    });
+  
+    await remote.init();
+  
+    const files = await remote.listAllYantaFiles();
+  
+    console.table(files.map((f) => ({
+      id: f.id,
+      name: f.name,
+      path: f.path,
+      size: f.size,
+      updated: f.updated,
+    })));
+  
+    return files;
+  };
+  
+  window.yantaGoogleDriveSyncDeleteAll = async () => {
+    const { GoogleDriveObjectStore } = await import('./sync2/google-drive-object-store.js');
+  
+    const remote = new GoogleDriveObjectStore({
+      clientId: import.meta.env.VITE_GOOGLE_CLIENT_ID,
+      initialPrompt: 'consent',
+    });
+  
+    await remote.init();
+  
+    const result = await remote.deleteAllYantaFiles({
+      onProgress({ deleted, total, file }) {
+        console.log(`[YANTA Sync2] deleted ${deleted}/${total}`, file.path || file.name);
+      },
+    });
+  
+    console.info('[YANTA Sync2] Google Drive Sync objects deleted', result);
+  
+    return result;
+  };
+  
   const sync2HashPayload = (() => {
     const raw = String(location.hash || '').replace(/^#/, '');
   

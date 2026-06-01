@@ -1,15 +1,11 @@
 // ============================================================
-// YANTA Sync2 — IndexedDBObjectStore
+// YANTA Sync2 — GoogleDriveObjectStore
 //
-// Persistent fake-remote store backed by its own IndexedDB database.
-// This simulates a cloud object bucket in the browser without any provider.
+// Direct browser Google Drive backend using appDataFolder.
+// Google only sees encrypted object blobs.
 //
-// Good for:
-// - app-level Sync2 integration
-// - reload-safe fake remote
-// - future capsule/export tests
-//
-// It deliberately uses a separate DB so core.js DB migrations are not needed.
+// Scope:
+//   https://www.googleapis.com/auth/drive.appdata
 // ============================================================
 
 import {
@@ -20,100 +16,419 @@ import {
   remoteEntrySort,
 } from './object-store.js';
 
-function reqToPromise(req) {
-  return new Promise((resolve, reject) => {
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+import {
+  base64UrlEncode,
+  base64UrlDecode,
+  utf8Encode,
+  utf8Decode,
+} from './crypto.js';
+
+const GIS_SRC = 'https://accounts.google.com/gsi/client';
+const DRIVE_API = 'https://www.googleapis.com/drive/v3';
+const DRIVE_UPLOAD = 'https://www.googleapis.com/upload/drive/v3';
+const SCOPE = 'https://www.googleapis.com/auth/drive.appdata';
+
+const FILE_PREFIX = 'yantaobj_';
+
+let gisLoadPromise = null;
+
+function loadScript(src) {
+  if (gisLoadPromise) return gisLoadPromise;
+
+  gisLoadPromise = new Promise((resolve, reject) => {
+    if ([...document.scripts].some((s) => s.src === src)) {
+      resolve();
+      return;
+    }
+
+    const s = document.createElement('script');
+    s.src = src;
+    s.async = true;
+    s.onload = resolve;
+    s.onerror = () => reject(new Error(`Could not load script: ${src}`));
+    document.head.append(s);
+  });
+
+  return gisLoadPromise;
+}
+
+function driveFileNameForPath(path) {
+  return FILE_PREFIX + base64UrlEncode(utf8Encode(path));
+}
+
+function pathFromDriveFileName(name) {
+  if (!String(name || '').startsWith(FILE_PREFIX)) return null;
+
+  try {
+    return utf8Decode(base64UrlDecode(String(name).slice(FILE_PREFIX.length)));
+  } catch {
+    return null;
+  }
+}
+
+function escapeDriveQueryString(s) {
+  return String(s || '')
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'");
+}
+
+function makeEtag(file) {
+  return file.md5Checksum || `${file.size || 0}-${file.modifiedTime || ''}`;
+}
+
+async function responseError(res, fallback) {
+  let msg = fallback;
+
+  try {
+    const json = await res.json();
+    msg = json?.error?.message || json?.message || msg;
+  } catch {
+    try {
+      msg = await res.text();
+    } catch {}
+  }
+
+  const err = new Error(`${fallback}: ${res.status} ${msg}`);
+  err.status = res.status;
+
+  return err;
+}
+
+function timeout(ms, message) {
+  return new Promise((_resolve, reject) => {
+    setTimeout(() => reject(new Error(message)), ms);
   });
 }
 
-function txDone(tx) {
-  return new Promise((resolve, reject) => {
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error);
-    tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted'));
-  });
-}
-
-function makeEtag(bytes, updated) {
-  return `${bytes.byteLength}-${updated}`;
-}
-
-export class IndexedDBObjectStore extends RemoteObjectStore {
+export class GoogleDriveObjectStore extends RemoteObjectStore {
   constructor({
-    dbName = 'yanta-sync2-remote-debug',
-    dbVersion = 1,
-    storeName = 'objects',
+    clientId,
+    initialPrompt = '',
+    tokenClient = null,
   } = {}) {
     super();
 
-    this.dbName = dbName;
-    this.dbVersion = dbVersion;
-    this.storeName = storeName;
-    this.db = null;
+    if (!clientId) {
+      throw new Error('Google clientId required');
+    }
+
+    this.clientId = clientId;
+    this.initialPrompt = initialPrompt;
+    this.tokenClient = tokenClient;
+    this.accessToken = '';
+    this.ready = false;
   }
 
   async init() {
-    if (this.db) return this.db;
+    if (this.ready) return;
 
-    this.db = await new Promise((resolve, reject) => {
-      const req = indexedDB.open(this.dbName, this.dbVersion);
+    await loadScript(GIS_SRC);
 
-      req.onupgradeneeded = () => {
-        const db = req.result;
-
-        if (!db.objectStoreNames.contains(this.storeName)) {
-          db.createObjectStore(this.storeName, { keyPath: 'path' });
-        }
-      };
-
-      req.onsuccess = () => resolve(req.result);
-      req.onerror = () => reject(req.error);
-    });
-
-    return this.db;
-  }
-
-  objectStore(mode = 'readonly') {
-    if (!this.db) {
-      throw new Error('IndexedDBObjectStore not initialized');
+    if (!globalThis.google?.accounts?.oauth2) {
+      throw new Error('Google Identity Services not available');
     }
 
-    return this.db.transaction(this.storeName, mode).objectStore(this.storeName);
+    if (!this.tokenClient) {
+      this.tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: this.clientId,
+        scope: SCOPE,
+        callback: () => {},
+      });
+    }
+
+    await this.ensureToken({
+      prompt: this.initialPrompt,
+    });
+
+    this.ready = true;
+  }
+
+  async connectInteractive() {
+    this.accessToken = '';
+    await this.ensureToken({
+      prompt: 'consent',
+    });
+    this.ready = true;
+  }
+
+  async ensureToken({ prompt = '' } = {}) {
+    if (this.accessToken) return this.accessToken;
+
+    await loadScript(GIS_SRC);
+
+    if (!globalThis.google?.accounts?.oauth2) {
+      throw new Error('Google Identity Services not available');
+    }
+
+    if (!this.tokenClient) {
+      this.tokenClient = google.accounts.oauth2.initTokenClient({
+        client_id: this.clientId,
+        scope: SCOPE,
+        callback: () => {},
+      });
+    }
+
+    const tokenPromise = new Promise((resolve, reject) => {
+      this.tokenClient.callback = (res) => {
+        if (res?.error) {
+          reject(new Error(res.error_description || res.error));
+          return;
+        }
+
+        if (!res?.access_token) {
+          reject(new Error('Google access token missing'));
+          return;
+        }
+
+        this.accessToken = res.access_token;
+        resolve(this.accessToken);
+      };
+
+      this.tokenClient.requestAccessToken({
+        prompt,
+      });
+    });
+
+    return Promise.race([
+      tokenPromise,
+      timeout(90_000, 'Google login timed out or was blocked by the browser.'),
+    ]);
+  }
+
+  async api(url, options = {}, retry = true) {
+    await this.ensureToken();
+
+    const res = await fetch(url, {
+      ...options,
+      headers: {
+        ...(options.headers || {}),
+        authorization: `Bearer ${this.accessToken}`,
+      },
+    });
+
+    if (res.status === 401 && retry) {
+      this.accessToken = '';
+      await this.ensureToken({ prompt: '' });
+      return this.api(url, options, false);
+    }
+
+    return res;
+  }
+
+  fileQueryForPath(path) {
+    const p = assertSafeRemotePath(path);
+    const name = driveFileNameForPath(p);
+
+    return [
+      `name = '${escapeDriveQueryString(name)}'`,
+      `trashed = false`,
+      `appProperties has { key='yantaSync' and value='1' }`,
+    ].join(' and ');
+  }
+
+  async findFilesByPath(path) {
+    const q = this.fileQueryForPath(path);
+
+    const url = new URL(DRIVE_API + '/files');
+    url.searchParams.set('spaces', 'appDataFolder');
+    url.searchParams.set('q', q);
+    url.searchParams.set('fields', 'files(id,name,size,modifiedTime,md5Checksum)');
+    url.searchParams.set('pageSize', '10');
+
+    const res = await this.api(url.href);
+
+    if (!res.ok) {
+      throw await responseError(res, 'Google Drive query failed');
+    }
+
+    const json = await res.json();
+
+    return json.files || [];
+  }
+
+  async findFile(path) {
+    const files = await this.findFilesByPath(path);
+
+    if (!files.length) return null;
+
+    files.sort((a, b) =>
+      String(b.modifiedTime || '').localeCompare(String(a.modifiedTime || ''))
+    );
+
+    return files[0];
   }
 
   async list(prefix = '') {
     await this.init();
 
     const cleanPrefix = normalizeRemotePath(prefix);
-    const store = this.objectStore('readonly');
 
-    const all = await reqToPromise(store.getAll());
+    const out = [];
+    let pageToken = '';
 
-    return all
-      .filter((rec) => !cleanPrefix || rec.path.startsWith(cleanPrefix))
-      .map((rec) => ({
-        path: rec.path,
-        size: rec.size || rec.data?.byteLength || 0,
-        updated: rec.updated || 0,
-        etag: rec.etag,
-      }))
-      .sort(remoteEntrySort);
+    do {
+      const url = new URL(DRIVE_API + '/files');
+
+      url.searchParams.set('spaces', 'appDataFolder');
+      url.searchParams.set(
+        'q',
+        `trashed = false and appProperties has { key='yantaSync' and value='1' }`
+      );
+      url.searchParams.set(
+        'fields',
+        'nextPageToken,files(id,name,size,modifiedTime,md5Checksum)'
+      );
+      url.searchParams.set('pageSize', '1000');
+
+      if (pageToken) {
+        url.searchParams.set('pageToken', pageToken);
+      }
+
+      const res = await this.api(url.href);
+
+      if (!res.ok) {
+        throw await responseError(res, 'Google Drive list failed');
+      }
+
+      const json = await res.json();
+
+      for (const f of json.files || []) {
+        const path = pathFromDriveFileName(f.name);
+
+        if (!path) continue;
+        if (cleanPrefix && !path.startsWith(cleanPrefix)) continue;
+
+        out.push({
+          path,
+          size: Number(f.size || 0),
+          updated: f.modifiedTime ? Date.parse(f.modifiedTime) : 0,
+          etag: makeEtag(f),
+        });
+      }
+
+      pageToken = json.nextPageToken || '';
+    } while (pageToken);
+
+    return out.sort(remoteEntrySort);
+  }
+
+  /**
+   * Robust admin helper:
+   * lists all YANTA-created Drive files by appProperties, regardless of path decode.
+   */
+  async listAllYantaFiles() {
+    await this.init();
+
+    const out = [];
+    let pageToken = '';
+
+    do {
+      const url = new URL(DRIVE_API + '/files');
+
+      url.searchParams.set('spaces', 'appDataFolder');
+      url.searchParams.set(
+        'q',
+        `trashed = false and appProperties has { key='yantaSync' and value='1' }`
+      );
+      url.searchParams.set(
+        'fields',
+        'nextPageToken,files(id,name,size,modifiedTime,md5Checksum,appProperties)'
+      );
+      url.searchParams.set('pageSize', '1000');
+
+      if (pageToken) {
+        url.searchParams.set('pageToken', pageToken);
+      }
+
+      const res = await this.api(url.href);
+
+      if (!res.ok) {
+        throw await responseError(res, 'Google Drive list-all failed');
+      }
+
+      const json = await res.json();
+
+      for (const f of json.files || []) {
+        out.push({
+          id: f.id,
+          name: f.name,
+          path: pathFromDriveFileName(f.name),
+          size: Number(f.size || 0),
+          updated: f.modifiedTime ? Date.parse(f.modifiedTime) : 0,
+          etag: makeEtag(f),
+          appProperties: f.appProperties || {},
+        });
+      }
+
+      pageToken = json.nextPageToken || '';
+    } while (pageToken);
+
+    out.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+
+    return out;
+  }
+
+  async deleteFileId(fileId) {
+    await this.init();
+
+    if (!fileId) return;
+
+    const res = await this.api(
+      DRIVE_API + `/files/${encodeURIComponent(fileId)}`,
+      {
+        method: 'DELETE',
+      }
+    );
+
+    if (!res.ok && res.status !== 404) {
+      throw await responseError(res, 'Google Drive delete-by-id failed');
+    }
+  }
+
+  async deleteAllYantaFiles({ onProgress = null } = {}) {
+    const files = await this.listAllYantaFiles();
+
+    let deleted = 0;
+
+    for (const file of files) {
+      await this.deleteFileId(file.id);
+      deleted++;
+
+      onProgress?.({
+        deleted,
+        total: files.length,
+        file,
+      });
+    }
+
+    return {
+      total: files.length,
+      deleted,
+      files,
+    };
   }
 
   async get(path) {
     await this.init();
 
     const p = assertSafeRemotePath(path);
-    const rec = await reqToPromise(this.objectStore('readonly').get(p));
+    const file = await this.findFile(p);
 
-    if (!rec) {
+    if (!file) {
       const err = new Error(`Remote object not found: ${p}`);
       err.code = 'ENOENT';
       throw err;
     }
 
-    return new Uint8Array(rec.data);
+    const res = await this.api(
+      DRIVE_API + `/files/${encodeURIComponent(file.id)}?alt=media`
+    );
+
+    if (!res.ok) {
+      throw await responseError(res, 'Google Drive get failed');
+    }
+
+    return new Uint8Array(await res.arrayBuffer());
   }
 
   async put(path, data, options = {}) {
@@ -122,76 +437,94 @@ export class IndexedDBObjectStore extends RemoteObjectStore {
     const p = assertSafeRemotePath(path);
     const bytes = await bytesFromData(data);
 
-    const tx = this.db.transaction(this.storeName, 'readwrite');
-    const store = tx.objectStore(this.storeName);
+    const existing = await this.findFile(p);
 
-    if (options.ifAbsent) {
-      const existing = await reqToPromise(store.get(p));
-
-      if (existing) {
-        tx.abort();
-
-        const err = new Error(`Remote object already exists: ${p}`);
-        err.code = 'EEXIST';
-        throw err;
-      }
+    if (options.ifAbsent && existing) {
+      const err = new Error(`Remote object already exists: ${p}`);
+      err.code = 'EEXIST';
+      throw err;
     }
 
-    const updated = Date.now();
+    if (existing && !options.ifAbsent) {
+      const res = await this.api(
+        DRIVE_UPLOAD + `/files/${encodeURIComponent(existing.id)}?uploadType=media`,
+        {
+          method: 'PATCH',
+          headers: {
+            'content-type': 'application/octet-stream',
+          },
+          body: bytes,
+        }
+      );
 
-    store.put({
-      path: p,
-      data: new Uint8Array(bytes),
-      size: bytes.byteLength,
-      updated,
-      etag: makeEtag(bytes, updated),
-    });
+      if (!res.ok) {
+        throw await responseError(res, 'Google Drive update failed');
+      }
 
-    await txDone(tx);
+      return;
+    }
+
+    const metadata = {
+      name: driveFileNameForPath(p),
+      parents: ['appDataFolder'],
+      appProperties: {
+        yantaSync: '1',
+        yantaSyncVersion: '1',
+      },
+    };
+
+    const boundary = 'yanta_' + crypto.randomUUID().replace(/-/g, '');
+
+    const body = new Blob([
+      `--${boundary}\r\n`,
+      'Content-Type: application/json; charset=UTF-8\r\n\r\n',
+      JSON.stringify(metadata),
+      `\r\n--${boundary}\r\n`,
+      'Content-Type: application/octet-stream\r\n\r\n',
+      bytes,
+      `\r\n--${boundary}--`,
+    ]);
+
+    const res = await this.api(
+      DRIVE_UPLOAD + '/files?uploadType=multipart&fields=id,name,size,modifiedTime,md5Checksum',
+      {
+        method: 'POST',
+        headers: {
+          'content-type': `multipart/related; boundary=${boundary}`,
+        },
+        body,
+      }
+    );
+
+    if (!res.ok) {
+      throw await responseError(res, 'Google Drive create failed');
+    }
   }
 
   async delete(path) {
     await this.init();
 
     const p = assertSafeRemotePath(path);
-    const tx = this.db.transaction(this.storeName, 'readwrite');
+    const files = await this.findFilesByPath(p);
 
-    tx.objectStore(this.storeName).delete(p);
-
-    await txDone(tx);
+    for (const file of files) {
+      await this.deleteFileId(file.id);
+    }
   }
 
   async stat(path) {
     await this.init();
 
     const p = assertSafeRemotePath(path);
-    const rec = await reqToPromise(this.objectStore('readonly').get(p));
+    const file = await this.findFile(p);
 
-    if (!rec) return null;
+    if (!file) return null;
 
     return {
-      path: rec.path,
-      size: rec.size || rec.data?.byteLength || 0,
-      updated: rec.updated || 0,
-      etag: rec.etag,
+      path: p,
+      size: Number(file.size || 0),
+      updated: file.modifiedTime ? Date.parse(file.modifiedTime) : 0,
+      etag: makeEtag(file),
     };
-  }
-
-  async clear() {
-    await this.init();
-
-    const tx = this.db.transaction(this.storeName, 'readwrite');
-
-    tx.objectStore(this.storeName).clear();
-
-    await txDone(tx);
-  }
-
-  async dumpText() {
-    const entries = await this.list('');
-
-    return entries
-      .map((e) => `${e.path} (${e.size} bytes)`)
-      .join('\n');
   }
 }

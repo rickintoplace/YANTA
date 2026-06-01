@@ -434,6 +434,7 @@ export class Sync2AppEngine {
 
   async pushFullStateNow({
     includeSnapshots = true,
+    verbose = true,
   } = {}) {
     await this.start();
 
@@ -483,8 +484,10 @@ export class Sync2AppEngine {
       await uploadMissingAssets(this);
     }
 
-    toast('Sync2: full state snapshot pushed', 'success');
-
+    if (verbose) {
+      toast('Sync2: full state snapshot pushed', 'success');
+    }
+    
     return this.status();
   }
 

@@ -283,9 +283,10 @@ function updateSearchIndexFor(note) {
 // ---------------- factories -----------------------------------
 export async function newNote(folderId = null, type = 'markdown') {
   const id = uid();
+
   const note = {
     id,
-    title: type === 'list' ? 'Shopping list' : 'Untitled',
+    title: type === 'list' ? 'List' : 'Note',
     type,
     folderId,
     tags: [],
@@ -293,24 +294,65 @@ export async function newNote(folderId = null, type = 'markdown') {
     created: Date.now(),
     updated: Date.now(),
   };
+
   state.notes.set(id, note);
   await store.notes.put(note);
+
+  try {
+    await window.yantaSync2?.engine?.observeNote?.(id);
+  } catch {}
+
   updateSearchIndexFor(note);
   rebuildWikilinkIndex();
+
   await openNote(id);
+
   renderTree();
+
   $('noteTitle').focus();
   $('noteTitle').select();
+
+  window.dispatchEvent(new CustomEvent('yanta-note-updated', {
+    detail: {
+      noteId: id,
+      reason: 'note-created',
+    },
+  }));
+
+  try {
+    window.yantaSync2Now?.();
+  } catch {}
 }
 
 export async function newFolder(parentId = null) {
   const name = prompt('Folder name:');
   if (!name) return;
-  const f = { id: uid(), name: name.trim(), parentId, created: Date.now() };
+
+  const f = {
+    id: uid(),
+    name: name.trim(),
+    parentId,
+    created: Date.now(),
+    updated: Date.now(),
+  };
+
   state.folders.set(f.id, f);
   await store.folders.put(f);
+
   state.expandedFolders.add(f.id);
+
   renderTree();
+
+  window.dispatchEvent(new CustomEvent('yanta-folder-updated', {
+    detail: {
+      folderId: f.id,
+      reason: 'folder-created',
+    },
+  }));
+
+  try {
+    window.yantaSync2Now?.();
+  } catch {}
 }
 
 // ---------------- open / save / delete ------------------------
@@ -398,29 +440,41 @@ export async function openNote(id) {
       window.dispatchEvent(new CustomEvent('yanta-drawing-updated', {
         detail: { noteId: id },
       }));
-
+    
       updateSearchIndexFor(note);
-
+    
       note.updated = Date.now();
       store.notes.put(note);
-
-      // Yjs/y-indexeddb persists the drawing anyway.
-      // Optional sync mirror/snapshot trigger, but don't constantly dirty footer.
+    
+      window.dispatchEvent(new CustomEvent('yanta-note-updated', {
+        detail: {
+          noteId: id,
+          reason: 'drawing-change',
+        },
+      }));
+    
       scheduleMirror(note);
-
+    
       return;
     }
 
     schedulePreview();
     updateSearchIndexFor(note);
-
+    
     markDirty();
-
+    
     note.updated = Date.now();
     store.notes.put(note);
-
+    
+    window.dispatchEvent(new CustomEvent('yanta-note-updated', {
+      detail: {
+        noteId: id,
+        reason: 'body-change',
+      },
+    }));
+    
     scheduleMirror(note);
-
+    
     markNoteSyncStatus(id, 'local');
     refreshGlobalSyncStatus();
   });
@@ -570,6 +624,9 @@ export async function saveCurrentNote() {
   window.dispatchEvent(new CustomEvent('yanta-note-updated', {
     detail: { noteId: note.id },
   }));
+  try {
+    window.yantaSync2Now?.();
+  } catch {}
 }
 
 export async function deleteCurrentNote() {
@@ -586,6 +643,18 @@ export async function deleteCurrentNote() {
   if (next) openNote(next.id); else clearEditor();
   renderTree();
   toast('Note deleted');
+  
+  window.dispatchEvent(new CustomEvent('yanta-note-updated', {
+    detail: {
+      noteId: note.id,
+      reason: 'note-deleted',
+      deleted: true,
+    },
+  }));
+  
+  try {
+    window.yantaSync2Now?.();
+  } catch {}
 }
 
 export function togglePin() {

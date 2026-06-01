@@ -101,48 +101,234 @@ const MOBILE_MQ = window.matchMedia('(max-width: 880px)');
 const DESKTOP_SIDEBAR_MQ = window.matchMedia('(min-width: 881px)');
 let sidebarCollapsedPref = false;
 
-function startSync2AutoSync(engine) {
+let sync2Auto = {
+  engine: null,
+  timer: 0,
+  running: false,
+  started: false,
+
+  catchupTimer: 0,
+  catchupRunning: false,
+
+  silentResumeTimer: 0,
+  silentResumeRunning: false,
+};
+
+function requestSync2AutoSync(reason = 'manual', delay = 1200) {
+  const engine = sync2Auto.engine;
+
   if (!engine) return;
 
-  let timer = 0;
-  let running = false;
+  clearTimeout(sync2Auto.timer);
 
-  const request = (reason = 'manual', delay = 1200) => {
-    clearTimeout(timer);
+  sync2Auto.timer = window.setTimeout(async () => {
+    if (sync2Auto.running) return;
+    if (navigator.onLine === false) return;
 
-    timer = window.setTimeout(async () => {
-      if (running) return;
-      if (navigator.onLine === false) return;
+    sync2Auto.running = true;
 
-      running = true;
+    try {
+      console.debug('[YANTA Sync2] sync start:', reason);
 
-      try {
-        await engine.syncNow({ verbose: false });
-      } catch (err) {
-        console.warn('[YANTA Sync2] auto sync failed:', reason, err);
-      } finally {
-        running = false;
-      }
-    }, delay);
-  };
+      await engine.observeAllKnownNotes();
 
-  request('startup', 1500);
+      await engine.syncNow({
+        verbose: false,
+        pullSnapshots: true,
+      });
 
-  window.addEventListener('focus', () => request('focus', 300));
-  window.addEventListener('online', () => request('online', 300));
+      console.debug('[YANTA Sync2] sync done:', reason);
+    } catch (err) {
+      console.warn('[YANTA Sync2] auto sync failed:', reason, err);
+    } finally {
+      sync2Auto.running = false;
+    }
+  }, delay);
+}
 
-  window.addEventListener('yanta-note-updated', () => request('note-updated'));
-  window.addEventListener('yanta-calendar-updated', () => request('calendar-updated'));
-  window.addEventListener('yanta-vault-hydrated', () => request('vault-hydrated', 2500));
+/**
+ * Catch-up snapshot:
+ *
+ * Why this exists:
+ * If the app was edited while Google runtime was not active,
+ * the VaultDoc/Y.Docs contain local changes but the Sync2 outbox may not.
+ * A full snapshot after runtime start makes those local changes visible
+ * to other devices.
+ */
+function requestSync2CatchupSnapshot(reason = 'catchup', delay = 2500) {
+  const engine = sync2Auto.engine;
+
+  if (!engine) return;
+
+  clearTimeout(sync2Auto.catchupTimer);
+
+  sync2Auto.catchupTimer = window.setTimeout(async () => {
+    if (sync2Auto.catchupRunning) return;
+    if (navigator.onLine === false) return;
+
+    sync2Auto.catchupRunning = true;
+
+    try {
+      console.debug('[YANTA Sync2] catch-up start:', reason);
+
+      await engine.observeAllKnownNotes();
+
+      // First merge remote state.
+      await engine.syncNow({
+        verbose: false,
+        pullSnapshots: true,
+      });
+
+      // Then publish current merged local state as encrypted snapshots.
+      await engine.pushFullStateNow({
+        includeSnapshots: true,
+        verbose: false,
+      });
+
+      // Then pull once more in case something arrived while pushing.
+      await engine.syncNow({
+        verbose: false,
+        pullSnapshots: true,
+      });
+
+      await store.settings.set('sync2.lastCatchupSnapshotAt', Date.now());
+
+      console.debug('[YANTA Sync2] catch-up done:', reason);
+    } catch (err) {
+      console.warn('[YANTA Sync2] catch-up failed:', reason, err);
+    } finally {
+      sync2Auto.catchupRunning = false;
+    }
+  }, delay);
+}
+
+function startSync2AutoSync(engine, {
+  catchUp = true,
+} = {}) {
+  if (!engine) return;
+
+  sync2Auto.engine = engine;
+
+  if (sync2Auto.started) {
+    requestSync2AutoSync('runtime-replaced', 300);
+
+    if (catchUp) {
+      requestSync2CatchupSnapshot('runtime-replaced', 2500);
+    }
+
+    return;
+  }
+
+  sync2Auto.started = true;
+
+  requestSync2AutoSync('startup', 1000);
+
+  if (catchUp) {
+    requestSync2CatchupSnapshot('startup-catchup', 2500);
+  }
+
+  window.addEventListener('focus', () => {
+    requestSync2AutoSync('focus', 300);
+    ensureGoogleDriveSyncSilently('focus');
+  });
+
+  window.addEventListener('online', () => {
+    requestSync2AutoSync('online', 300);
+    ensureGoogleDriveSyncSilently('online');
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+      requestSync2AutoSync('visibility', 500);
+      ensureGoogleDriveSyncSilently('visibility');
+    }
+  });
+
+  window.addEventListener('yanta-note-updated', () => {
+    requestSync2AutoSync('note-updated', 1000);
+  });
+
+  window.addEventListener('yanta-folder-updated', () => {
+    requestSync2AutoSync('folder-updated', 1000);
+  });
+
+  window.addEventListener('yanta-dashboard-refresh', () => {
+    requestSync2AutoSync('dashboard-refresh', 1800);
+  });
+
+  window.addEventListener('yanta-calendar-updated', () => {
+    requestSync2AutoSync('calendar-updated', 1000);
+  });
+
+  window.addEventListener('yanta-vault-hydrated', () => {
+    requestSync2AutoSync('vault-hydrated', 2500);
+  });
 
   window.setInterval(() => {
-    if (!document.hidden) request('interval', 0);
-  }, 30_000);
+    if (!document.hidden) {
+      requestSync2AutoSync('interval', 0);
+      ensureGoogleDriveSyncSilently('interval');
+    }
+  }, 25_000);
+}
+
+window.yantaSync2Now = () => {
+  requestSync2AutoSync('manual-console', 0);
+};
+
+window.yantaSync2CatchupNow = () => {
+  requestSync2CatchupSnapshot('manual-console', 0);
+};
+
+async function ensureGoogleDriveSyncSilently(reason = 'silent') {
+  if (sync2Auto.engine) return;
+
+  if (navigator.onLine === false) return;
+
+  const provider = await store.settings.get('sync2.provider', null).catch(() => null);
+
+  if (provider !== 'google-drive') return;
+
+  if (sync2Auto.silentResumeRunning) return;
+
+  clearTimeout(sync2Auto.silentResumeTimer);
+
+  sync2Auto.silentResumeTimer = window.setTimeout(async () => {
+    if (sync2Auto.engine) return;
+    if (sync2Auto.silentResumeRunning) return;
+
+    sync2Auto.silentResumeRunning = true;
+
+    try {
+      console.info('[YANTA Sync2] trying silent Google Drive resume:', reason);
+
+      const runtime = await createSync2GoogleDriveAppRuntime({
+        googlePrompt: '',
+      });
+
+      window.yantaSync2 = runtime;
+
+      startSync2AutoSync(runtime.engine, {
+        catchUp: true,
+      });
+
+      console.info('[YANTA Sync2] silent Google Drive resume successful', {
+        deviceId: runtime.deviceId,
+      });
+    } catch (err) {
+      // Expected if Google cannot silently provide a token.
+      // Do not show modal/popup/toast here. This is deliberate UX.
+      console.info('[YANTA Sync2] silent Google Drive resume unavailable:', err?.message || err);
+    } finally {
+      sync2Auto.silentResumeRunning = false;
+    }
+  }, 600);
 }
 
 function isMobileViewport() {
   return MOBILE_MQ.matches;
 }
+
 
 function searchHaystack(note, body = '') {
   return [
@@ -225,26 +411,43 @@ async function init() {
   
     window.yantaStartGoogleDriveSync = async ({
       prompt = 'consent',
+      syncNow = true,
+      catchUp = true,
     } = {}) => {
       const runtime = await createSync2GoogleDriveAppRuntime({
         googlePrompt: prompt,
       });
-  
+    
       window.yantaSync2 = runtime;
-      startSync2AutoSync(runtime.engine);
-  
+    
+      startSync2AutoSync(runtime.engine, {
+        catchUp,
+      });
+    
       console.info('[YANTA Sync2] Google Drive runtime ready', {
         deviceId: runtime.deviceId,
       });
-  
+    
+      if (syncNow) {
+        requestSync2AutoSync('runtime-started', 200);
+      }
+    
+      if (catchUp) {
+        requestSync2CatchupSnapshot('runtime-started-catchup', 2500);
+      }
+    
       return runtime;
     };
   
     if (provider === 'google-drive') {
-      console.info('[YANTA Sync2] Google Drive is configured. Runtime will start after user action.');
+      console.info('[YANTA Sync2] Google Drive is configured. Trying silent resume.');
+    
+      // No popup. No consent UI. If Google cannot silently provide a token,
+      // this simply fails quietly and local changes remain queued in IndexedDB/Yjs.
+      ensureGoogleDriveSyncSilently('app-start');
     } else if (import.meta.env.DEV) {
       window.yantaSync2 = await createSync2DebugAppRuntime();
-  
+    
       console.info('[YANTA Sync2] debug runtime ready', {
         deviceId: window.yantaSync2.deviceId,
         syncKey: window.yantaSync2.syncKey,
@@ -343,7 +546,7 @@ async function init() {
   
     return result;
   };
-  
+
   const sync2HashPayload = (() => {
     const raw = String(location.hash || '').replace(/^#/, '');
   

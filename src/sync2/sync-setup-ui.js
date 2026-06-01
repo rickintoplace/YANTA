@@ -137,6 +137,14 @@ import {
       window.yantaSync2?.engine?.stop?.();
     } catch {}
   
+    if (typeof window.yantaStartGoogleDriveSync === 'function') {
+      return window.yantaStartGoogleDriveSync({
+        prompt,
+        syncNow: true,
+        catchUp: true,
+      });
+    }
+  
     const runtime = await createSync2GoogleDriveAppRuntime({
       clientId: id,
       googlePrompt: prompt,

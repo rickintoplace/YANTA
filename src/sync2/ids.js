@@ -7,6 +7,10 @@ import { hmacId } from './crypto.js';
 
 export const SYNC_ROOT = 'yanta-sync-v1';
 
+export function keyCheckPath() {
+  return joinRemotePath(SYNC_ROOT, 'keycheck.enc');
+}
+
 export function createDeviceId(prefix = 'dev') {
   const id = crypto.randomUUID
     ? crypto.randomUUID()

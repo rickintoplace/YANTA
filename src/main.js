@@ -64,6 +64,7 @@ import {
 import {
   createSync2DebugAppRuntime,
   createSync2BrokerAppRuntime,
+  createSync2GoogleDriveAppRuntime,
 } from './sync2/app-engine.js';
 import {
   exportSyncCapsule,
@@ -99,6 +100,45 @@ let sharePreviewLocked = false;
 const MOBILE_MQ = window.matchMedia('(max-width: 880px)');
 const DESKTOP_SIDEBAR_MQ = window.matchMedia('(min-width: 881px)');
 let sidebarCollapsedPref = false;
+
+function startSync2AutoSync(engine) {
+  if (!engine) return;
+
+  let timer = 0;
+  let running = false;
+
+  const request = (reason = 'manual', delay = 1200) => {
+    clearTimeout(timer);
+
+    timer = window.setTimeout(async () => {
+      if (running) return;
+      if (navigator.onLine === false) return;
+
+      running = true;
+
+      try {
+        await engine.syncNow({ verbose: false });
+      } catch (err) {
+        console.warn('[YANTA Sync2] auto sync failed:', reason, err);
+      } finally {
+        running = false;
+      }
+    }, delay);
+  };
+
+  request('startup', 1500);
+
+  window.addEventListener('focus', () => request('focus', 300));
+  window.addEventListener('online', () => request('online', 300));
+
+  window.addEventListener('yanta-note-updated', () => request('note-updated'));
+  window.addEventListener('yanta-calendar-updated', () => request('calendar-updated'));
+  window.addEventListener('yanta-vault-hydrated', () => request('vault-hydrated', 2500));
+
+  window.setInterval(() => {
+    if (!document.hidden) request('interval', 0);
+  }, 30_000);
+}
 
 function isMobileViewport() {
   return MOBILE_MQ.matches;
@@ -163,14 +203,28 @@ async function init() {
   // Sync2 debug runtime: provider-independent encrypted sync against
   // a persistent IndexedDB fake remote.
   try {
-    window.yantaSync2 = await createSync2DebugAppRuntime();
-
-    console.info('[YANTA Sync2] debug runtime ready', {
-      deviceId: window.yantaSync2.deviceId,
-      syncKey: window.yantaSync2.syncKey,
-    });
+    const provider = await store.settings.get('sync2.provider', null);
+  
+    if (provider === 'google-drive') {
+      window.yantaSync2 = await createSync2GoogleDriveAppRuntime({
+        googlePrompt: '',
+      });
+  
+      startSync2AutoSync(window.yantaSync2.engine);
+  
+      console.info('[YANTA Sync2] Google Drive runtime ready', {
+        deviceId: window.yantaSync2.deviceId,
+      });
+    } else if (import.meta.env.DEV) {
+      window.yantaSync2 = await createSync2DebugAppRuntime();
+  
+      console.info('[YANTA Sync2] debug runtime ready', {
+        deviceId: window.yantaSync2.deviceId,
+        syncKey: window.yantaSync2.syncKey,
+      });
+    }
   } catch (err) {
-    console.warn('[YANTA Sync2] debug runtime failed to start', err);
+    console.warn('[YANTA Sync2] runtime failed', err);
   }
 
   window.yantaConnectSync2Broker = async ({
@@ -207,6 +261,11 @@ async function init() {
     pickAndImportSyncCapsule,
     copySyncCapsuleRecoveryKey,
     capsuleDebugSnapshot,
+  };
+
+  window.yantaOpenGoogleDriveSyncSetup = async () => {
+    const { openGoogleDriveSyncSetup } = await import('./sync2/sync-setup-ui.js');
+    openGoogleDriveSyncSetup();
   };
 
   await loadAppearance();

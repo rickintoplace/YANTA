@@ -55,12 +55,14 @@ import {
   decryptBytes,
   generateSyncKey,
   utf8Encode,
+  syncKeyToBytes,
 } from './crypto.js';
 
 import {
   createDeviceId,
   createVaultId,
   bootstrapPath,
+  keyCheckPath,
   vaultUpdatePath,
   docUpdatePath,
   vaultUpdatesPrefix,
@@ -84,12 +86,32 @@ import {
   assetSyncDebugSnapshot,
 } from './assets.js';
 
+import { GoogleDriveObjectStore } from './google-drive-object-store.js';
+
 export const SYNC2_REMOTE_ORIGIN = 'sync2-remote';
 export const SYNC2_LOCAL_ORIGIN = 'sync2-local';
 
 const SYNC_KEY_SETTING = 'sync2.syncKey';
 const LEGACY_DEBUG_SYNC_KEY_SETTING = 'sync2.debug.syncKey';
 const DEVICE_ID_SETTING = 'sync2.deviceId';
+
+export async function getSync2SyncKey() {
+  return getOrCreateSyncKey();
+}
+
+export async function setSync2SyncKey(syncKey) {
+  syncKeyToBytes(syncKey);
+
+  await store.settings.set(SYNC_KEY_SETTING, syncKey);
+  await store.settings.set(LEGACY_DEBUG_SYNC_KEY_SETTING, syncKey);
+
+  return syncKey;
+}
+
+export async function clearSync2SyncKeyForDebugOnly() {
+  await store.settings.set(SYNC_KEY_SETTING, null);
+  await store.settings.set(LEGACY_DEBUG_SYNC_KEY_SETTING, null);
+}
 
 function nowIso() {
   return new Date().toISOString();
@@ -225,13 +247,14 @@ export class Sync2AppEngine {
   async init() {
     await this.remote.init();
     await this.localState.init();
-
+  
     this.keys = await deriveKeys(this.syncKey);
-
+  
     this.seq = Number(await this.localState.get('seq', 0)) || 0;
-
+  
     await this.ensureBootstrap();
-
+    await this.ensureKeyCheck();
+  
     if (this.autoObserveNotes) {
       await this.observeAllKnownNotes();
     }
@@ -269,6 +292,75 @@ export class Sync2AppEngine {
 
   async markSeen(path, extra = {}) {
     return this.localState.markSeen(path, extra);
+  }
+
+  async ensureKeyCheck() {
+    const path = keyCheckPath();
+    const existing = await this.remote.stat(path);
+  
+    if (!existing) {
+      const encrypted = await encryptBytes(
+        this.keys.contentKey,
+        utf8Encode('yanta-sync-key-ok-v1'),
+        path
+      );
+  
+      try {
+        await this.remote.put(path, encrypted, { ifAbsent: true });
+      } catch (err) {
+        if (err?.code !== 'EEXIST') throw err;
+      }
+  
+      return;
+    }
+  
+    const encrypted = await this.remote.get(path);
+  
+    const plain = await decryptBytes(
+      this.keys.contentKey,
+      encrypted,
+      path
+    );
+  
+    const text = new TextDecoder().decode(plain);
+  
+    if (text !== 'yanta-sync-key-ok-v1') {
+      throw new Error('Wrong Sync Key');
+    }
+  }
+
+  async ensureKeyCheck() {
+    const path = keyCheckPath();
+    const existing = await this.remote.stat(path);
+  
+    if (!existing) {
+      const encrypted = await encryptBytes(
+        this.keys.contentKey,
+        utf8Encode('yanta-sync-key-ok-v1'),
+        path
+      );
+  
+      try {
+        await this.remote.put(path, encrypted, { ifAbsent: true });
+      } catch (err) {
+        if (err?.code !== 'EEXIST') throw err;
+      }
+  
+      return;
+    }
+  
+    const encrypted = await this.remote.get(path);
+    const plain = await decryptBytes(
+      this.keys.contentKey,
+      encrypted,
+      path
+    );
+  
+    const text = new TextDecoder().decode(plain);
+  
+    if (text !== 'yanta-sync-key-ok-v1') {
+      throw new Error('Wrong Sync Key');
+    }
   }
 
   observeVault() {
@@ -414,7 +506,7 @@ export class Sync2AppEngine {
       await uploadMissingAssets(this);
     }
 
-    toast('Sync2: full state snapshot pushed to debug remote', 'success');
+    toast('Sync2: full state snapshot pushed', 'success');
 
     return this.status();
   }
@@ -440,6 +532,7 @@ export class Sync2AppEngine {
       await this.downloadVaultUpdates();
 
       this.hydrateAppStateFromVault();
+      await this.persistVaultMetadataToLocalCache();
 
       await downloadMissingAssets(this);
 
@@ -452,6 +545,7 @@ export class Sync2AppEngine {
       await this.downloadKnownNoteUpdates();
 
       this.hydrateAppStateFromVault();
+      await this.persistVaultMetadataToLocalCache();
 
       await downloadMissingAssets(this);
 
@@ -789,6 +883,83 @@ export class Sync2AppEngine {
     }
   }
 
+  async persistVaultMetadataToLocalCache() {
+    const tombstones = vaultTombstonesMap();
+  
+    for (const [id, t] of tombstones) {
+      if (t?.type === 'note') {
+        state.notes.delete(id);
+        state.searchIndex.delete(id);
+  
+        try {
+          await store.notes.del(id);
+        } catch {}
+      }
+  
+      if (t?.type === 'folder') {
+        state.folders.delete(id);
+        state.expandedFolders.delete(id);
+  
+        try {
+          await store.folders.del(id);
+        } catch {}
+      }
+  
+      if (t?.type === 'image') {
+        state.imagesMeta.delete(id);
+  
+        const url = state.imageBlobs.get(id);
+  
+        if (url) {
+          try {
+            URL.revokeObjectURL(url);
+          } catch {}
+        }
+  
+        state.imageBlobs.delete(id);
+  
+        try {
+          await store.images.del(id);
+        } catch {}
+      }
+    }
+  
+    for (const [id, raw] of vaultNotesMap()) {
+      if (tombstones.has(id)) continue;
+  
+      const incoming = sanitizeNoteMeta(raw);
+      if (!incoming?.id) continue;
+  
+      state.notes.set(id, safeJsonClone(incoming));
+  
+      try {
+        await store.notes.put(safeJsonClone(incoming));
+      } catch {}
+    }
+  
+    for (const [id, raw] of vaultFoldersMap()) {
+      if (tombstones.has(id)) continue;
+  
+      const incoming = sanitizeFolderMeta(raw);
+      if (!incoming?.id) continue;
+  
+      state.folders.set(id, safeJsonClone(incoming));
+  
+      try {
+        await store.folders.put(safeJsonClone(incoming));
+      } catch {}
+    }
+  
+    for (const [id, raw] of vaultImagesMap()) {
+      if (tombstones.has(id)) continue;
+  
+      const incoming = sanitizeImageMeta(raw);
+      if (!incoming?.id) continue;
+  
+      state.imagesMeta.set(id, safeJsonClone(incoming));
+    }
+  }
+
   async status() {
     return {
       deviceId: this.deviceId,
@@ -879,6 +1050,70 @@ export async function createSync2DebugAppRuntime() {
     async clearLocalSync2StateForDebugOnly() {
       await localState.clearAllForDebugOnly();
       toast('Sync2 local state cleared', 'success');
+    },
+
+    async status() {
+      return engine.status();
+    },
+  };
+}
+
+export async function createSync2GoogleDriveAppRuntime({
+  clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID,
+  googlePrompt = '',
+  stateDbName = 'yanta-sync2-state-google-drive',
+} = {}) {
+  if (!clientId) {
+    throw new Error('Google Drive clientId missing');
+  }
+
+  const syncKey = await getOrCreateSyncKey();
+  const deviceId = await getOrCreateDeviceId();
+
+  const remote = new GoogleDriveObjectStore({
+    clientId,
+    initialPrompt: googlePrompt,
+  });
+
+  const localState = new Sync2LocalStateStore({
+    dbName: stateDbName,
+  });
+
+  const engine = new Sync2AppEngine({
+    remote,
+    localState,
+    syncKey,
+    deviceId,
+  });
+
+  await engine.start();
+
+  return {
+    engine,
+    remote,
+    localState,
+    syncKey,
+    deviceId,
+    provider: 'google-drive',
+
+    async syncNow(options) {
+      return engine.syncNow(options);
+    },
+
+    async pushFullStateNow(options) {
+      return engine.pushFullStateNow(options);
+    },
+
+    async uploadAssetsNow() {
+      return uploadMissingAssets(engine);
+    },
+
+    async downloadAssetsNow() {
+      return downloadMissingAssets(engine);
+    },
+
+    async assetDebugSnapshot() {
+      return assetSyncDebugSnapshot(engine);
     },
 
     async status() {

@@ -1,50 +1,78 @@
 <!doctype html>
 <html lang="en">
 <head>
-<meta charset="utf-8" />
-<meta name="viewport" content="width=device-width,initial-scale=1" />
-<meta name="color-scheme" content="dark light" />
-<title>YANTA</title>
-<link rel="icon" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='7' fill='%236ea8fe'/><path d='M9 9l7 9 7-9M16 18v6' stroke='white' stroke-width='2.5' fill='none' stroke-linecap='round' stroke-linejoin='round'/></svg>" />
-<script>
-(() => {
-  try {
-    const raw = localStorage.getItem('yanta.appearance.boot.v1');
-    if (!raw) return;
-
-    const boot = JSON.parse(raw);
-    const root = document.documentElement;
-
-    const pref = boot.appearanceMode || 'auto';
-    const effective =
-      pref === 'dark' || pref === 'light'
-        ? pref
-        : window.matchMedia?.('(prefers-color-scheme: dark)')?.matches
-          ? 'dark'
-          : 'light';
-
-    root.dataset.theme = effective;
-    root.dataset.appearanceMode = pref;
-    root.style.colorScheme = effective;
-
-    const palette = boot.colors?.[effective] || {};
-    for (const [key, value] of Object.entries(palette)) {
-      if (typeof value === 'string' && value) {
-        root.style.setProperty('--' + key, value);
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="color-scheme" content="dark light" />
+  
+  <title>YANTA</title>
+  <meta name="application-name" content="YANTA" />
+  <meta name="apple-mobile-web-app-title" content="YANTA" />
+  <meta name="description" content="Encrypted local-first workspace for notes, drawings, tasks and calendar events." />
+  
+  <!-- PWA -->
+  <link rel="manifest" href="/site.webmanifest" />
+  <meta name="theme-color" content="#141414" id="meta-theme-color" />
+  <meta name="background-color" content="#141414" />
+  
+  <!-- iOS / Apple PWA -->
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png" />
+  
+  <!-- Favicons -->
+  <link rel="icon" href="/favicon.ico" />
+  <link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png" />
+  <link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png" />
+  
+  <!-- Windows tiles / generic -->
+  <meta name="msapplication-TileColor" content="#141414" />
+  
+  <script>
+  (() => {
+    try {
+      const raw = localStorage.getItem('yanta.appearance.boot.v1');
+      if (!raw) return;
+  
+      const boot = JSON.parse(raw);
+      const root = document.documentElement;
+  
+      const pref = boot.appearanceMode || 'auto';
+      const effective =
+        pref === 'dark' || pref === 'light'
+          ? pref
+          : window.matchMedia?.('(prefers-color-scheme: dark)')?.matches
+            ? 'dark'
+            : 'light';
+  
+      root.dataset.theme = effective;
+      root.dataset.appearanceMode = pref;
+      root.style.colorScheme = effective;
+  
+      const palette = boot.colors?.[effective] || {};
+      for (const [key, value] of Object.entries(palette)) {
+        if (typeof value === 'string' && value) {
+          root.style.setProperty('--' + key, value);
+        }
       }
-    }
-
-    if (boot.font) root.style.setProperty('--font', boot.font);
-    if (boot.mono) root.style.setProperty('--font-mono', boot.mono);
-    if (boot.fontSize) root.style.setProperty('--fs-base', boot.fontSize);
-    if (boot.lineHeight) root.style.setProperty('--lh-base', boot.lineHeight);
-  } catch {}
-})();
-</script>
-<link rel="stylesheet" href="styles.css" />
-<link rel="stylesheet" href="dashboard.css" />
-<link rel="stylesheet" href="calendar.css" />
-</head>
+  
+      const themeColor = palette.bg || (effective === 'dark' ? '#141414' : '#fdfcfa');
+      const metaTheme = document.getElementById('meta-theme-color');
+      if (metaTheme) metaTheme.setAttribute('content', themeColor);
+  
+      if (boot.font) root.style.setProperty('--font', boot.font);
+      if (boot.mono) root.style.setProperty('--font-mono', boot.mono);
+      if (boot.fontSize) root.style.setProperty('--fs-base', boot.fontSize);
+      if (boot.lineHeight) root.style.setProperty('--lh-base', boot.lineHeight);
+    } catch {}
+  })();
+  </script>
+  
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="stylesheet" href="/dashboard.css" />
+  <link rel="stylesheet" href="/calendar.css" />
+  </head>
 <body>
 <div class="app" id="app">
 

@@ -312,6 +312,102 @@ import {
       return out.sort(remoteEntrySort);
     }
   
+    /**
+     * Robust admin helper:
+     * lists all YANTA-created Drive files by appProperties, regardless of path decode.
+     */
+    async listAllYantaFiles() {
+      await this.init();
+  
+      const out = [];
+      let pageToken = '';
+  
+      do {
+        const url = new URL(DRIVE_API + '/files');
+  
+        url.searchParams.set('spaces', 'appDataFolder');
+        url.searchParams.set(
+          'q',
+          `trashed = false and appProperties has { key='yantaSync' and value='1' }`
+        );
+        url.searchParams.set(
+          'fields',
+          'nextPageToken,files(id,name,size,modifiedTime,md5Checksum,appProperties)'
+        );
+        url.searchParams.set('pageSize', '1000');
+  
+        if (pageToken) {
+          url.searchParams.set('pageToken', pageToken);
+        }
+  
+        const res = await this.api(url.href);
+  
+        if (!res.ok) {
+          throw await responseError(res, 'Google Drive list-all failed');
+        }
+  
+        const json = await res.json();
+  
+        for (const f of json.files || []) {
+          out.push({
+            id: f.id,
+            name: f.name,
+            path: pathFromDriveFileName(f.name),
+            size: Number(f.size || 0),
+            updated: f.modifiedTime ? Date.parse(f.modifiedTime) : 0,
+            etag: makeEtag(f),
+            appProperties: f.appProperties || {},
+          });
+        }
+  
+        pageToken = json.nextPageToken || '';
+      } while (pageToken);
+  
+      out.sort((a, b) => String(a.name).localeCompare(String(b.name)));
+  
+      return out;
+    }
+  
+    async deleteFileId(fileId) {
+      await this.init();
+  
+      if (!fileId) return;
+  
+      const res = await this.api(
+        DRIVE_API + `/files/${encodeURIComponent(fileId)}`,
+        {
+          method: 'DELETE',
+        }
+      );
+  
+      if (!res.ok && res.status !== 404) {
+        throw await responseError(res, 'Google Drive delete-by-id failed');
+      }
+    }
+  
+    async deleteAllYantaFiles({ onProgress = null } = {}) {
+      const files = await this.listAllYantaFiles();
+  
+      let deleted = 0;
+  
+      for (const file of files) {
+        await this.deleteFileId(file.id);
+        deleted++;
+  
+        onProgress?.({
+          deleted,
+          total: files.length,
+          file,
+        });
+      }
+  
+      return {
+        total: files.length,
+        deleted,
+        files,
+      };
+    }
+  
     async get(path) {
       await this.init();
   
@@ -412,16 +508,7 @@ import {
       const files = await this.findFilesByPath(p);
   
       for (const file of files) {
-        const res = await this.api(
-          DRIVE_API + `/files/${encodeURIComponent(file.id)}`,
-          {
-            method: 'DELETE',
-          }
-        );
-  
-        if (!res.ok && res.status !== 404) {
-          throw await responseError(res, 'Google Drive delete failed');
-        }
+        await this.deleteFileId(file.id);
       }
     }
   

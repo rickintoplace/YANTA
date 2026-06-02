@@ -29,6 +29,7 @@ import { insertAtCursor } from './editor.js';
 import { openNote } from './notes.js';
 import { renderPreview } from './markdown.js';
 import { inlineTextEdit, inlineConfirm } from './inline-ui.js';
+import { showMenu } from './tree.js';
 
 import {
   getNoteDoc,
@@ -70,6 +71,224 @@ const DRAW_MOBILE_MQ = window.matchMedia?.('(pointer: coarse), (max-width: 760px
 
 function isMobileDrawUx() {
   return !!DRAW_MOBILE_MQ?.matches;
+}
+
+function nextFrame() {
+  return new Promise((resolve) => requestAnimationFrame(resolve));
+}
+
+function prefersReducedMotion() {
+  try {
+    return window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+  } catch {
+    return false;
+  }
+}
+
+function drawTransitionName(drawingId) {
+  return `draw-${String(drawingId || '').replace(/[^a-zA-Z0-9_-]/g, '_')}`;
+}
+
+function drawSelector(drawingId) {
+  try {
+    return `.yanta-draw-embed[data-draw-id="${CSS.escape(drawingId)}"]`;
+  } catch {
+    return `.yanta-draw-embed[data-draw-id="${String(drawingId).replace(/"/g, '\\"')}"]`;
+  }
+}
+
+function findInlineDrawEmbed(drawingId) {
+  if (!drawingId) return null;
+
+  const nodes = [...document.querySelectorAll(drawSelector(drawingId))];
+
+  if (!nodes.length) return null;
+
+  // Bevorzugt sichtbare Editor-Embeds, weil die meistens die Quelle sind.
+  return (
+    nodes.find((node) => {
+      if (!node.isConnected) return false;
+      const r = node.getBoundingClientRect();
+      return r.width > 0 && r.height > 0 && node.classList.contains('editor-surface');
+    }) ||
+    nodes.find((node) => {
+      if (!node.isConnected) return false;
+      const r = node.getBoundingClientRect();
+      return r.width > 0 && r.height > 0;
+    }) ||
+    nodes[0]
+  );
+}
+
+function clearDrawingViewTransitionNames(drawingId, except = null) {
+  if (!drawingId) return;
+
+  const name = drawTransitionName(drawingId);
+
+  const candidates = [
+    ...document.querySelectorAll(drawSelector(drawingId)),
+    ...document.querySelectorAll('.yanta-draw-fullscreen-host'),
+  ];
+
+  for (const node of candidates) {
+    if (!node || node === except) continue;
+
+    if (node.style.viewTransitionName === name) {
+      node.style.viewTransitionName = '';
+    }
+
+    if (node.dataset?.yantaDrawVtName === name) {
+      node.style.viewTransitionName = '';
+      node.style.contain = '';
+      delete node.dataset.yantaDrawVtName;
+    }
+  }
+}
+
+function markDrawingTransitionElement(node, name) {
+  if (!node || !name) return null;
+
+  const token = {
+    node,
+    oldViewTransitionName: node.style.viewTransitionName || '',
+    oldContain: node.style.contain || '',
+    name,
+  };
+
+  node.style.viewTransitionName = name;
+  node.style.contain = 'layout paint';
+  node.dataset.yantaDrawVtName = name;
+
+  return token;
+}
+
+function restoreDrawingTransitionElement(token) {
+  if (!token?.node) return;
+
+  const node = token.node;
+
+  // Wichtig:
+  // Wenn vorher schon derselbe draw-* Name stale gesetzt war, NICHT wiederherstellen.
+  // Genau das erzeugt sonst später duplicate view-transition-name.
+  node.style.viewTransitionName =
+    token.oldViewTransitionName === token.name
+      ? ''
+      : token.oldViewTransitionName;
+
+  node.style.contain = token.oldContain || '';
+
+  if (node.dataset?.yantaDrawVtName === token.name) {
+    delete node.dataset.yantaDrawVtName;
+  }
+}
+
+async function withDrawingViewTransition(drawingId, mutate, {
+  source = null,
+  targetGetter = null,
+} = {}) {
+  if (
+    !drawingId ||
+    !document.startViewTransition ||
+    prefersReducedMotion()
+  ) {
+    await mutate?.();
+    return;
+  }
+
+  const name = drawTransitionName(drawingId);
+
+  // Vor jedem neuen Transition-Versuch stale Namen aufräumen.
+  clearDrawingViewTransitionNames(drawingId);
+
+  const sourceEl = source || findInlineDrawEmbed(drawingId);
+  const sourceToken = sourceEl
+    ? markDrawingTransitionElement(sourceEl, name)
+    : null;
+
+  let targetToken = null;
+  let mutatePromise = null;
+  let mutateError = null;
+
+  let vt = null;
+
+  try {
+    /*
+      Wichtig:
+      Die update-callback von startViewTransition MUSS synchron/kurz bleiben.
+      Nicht awaiten. Keine nextFrame() darin. Keine langen React-/Import-Promises.
+    */
+    vt = document.startViewTransition(() => {
+      try {
+        const result = mutate?.();
+
+        if (result && typeof result.then === 'function') {
+          mutatePromise = result.catch((err) => {
+            mutateError = err;
+            console.warn('[YANTA Draw] async transition mutation failed', err);
+          });
+        }
+      } catch (err) {
+        mutateError = err;
+        console.warn('[YANTA Draw] transition mutation failed', err);
+      }
+
+      /*
+        Kritisch:
+        Beim Öffnen des Fullscreens bleibt das Inline-Embed im DOM.
+        Für den NEUEN Snapshot darf aber nur das Target den Namen haben.
+      */
+      if (sourceEl?.isConnected) {
+        sourceEl.style.viewTransitionName = '';
+        sourceEl.style.contain = sourceToken?.oldContain || '';
+
+        if (sourceEl.dataset?.yantaDrawVtName === name) {
+          delete sourceEl.dataset.yantaDrawVtName;
+        }
+      }
+
+      const targetEl = targetGetter?.() || null;
+
+      if (targetEl) {
+        clearDrawingViewTransitionNames(drawingId, targetEl);
+        targetToken = markDrawingTransitionElement(targetEl, name);
+      }
+    });
+
+    /*
+      Alle Transition-Promises defensiv schlucken.
+      Browser können ready/updateCallbackDone/finished unterschiedlich rejecten,
+      z.B. bei Timeout, duplicate names, user navigation, display changes.
+    */
+    await Promise.allSettled([
+      vt.ready,
+      vt.updateCallbackDone,
+      vt.finished,
+    ].filter(Boolean));
+
+    if (mutatePromise) {
+      await mutatePromise.catch(() => {});
+    }
+
+    if (mutateError) {
+      throw mutateError;
+    }
+  } catch (err) {
+    console.warn('[YANTA Draw] view transition skipped', err);
+
+    /*
+      Fallback nur ausführen, wenn mutate noch nicht gestartet wurde.
+      Wenn mutatePromise existiert, lief mutate bereits.
+    */
+    if (!mutatePromise) {
+      await mutate?.();
+    }
+  } finally {
+    restoreDrawingTransitionElement(sourceToken);
+    restoreDrawingTransitionElement(targetToken);
+
+    // Finale Sicherheit: niemals draw-* transition names im DOM liegen lassen.
+    clearDrawingViewTransitionNames(drawingId);
+  }
 }
 
 function ensureInlineReactMount(inlineHost) {
@@ -1065,7 +1284,119 @@ function injectDrawCss() {
 body > .hover-preview {
   z-index: 1200 !important;
 }
-`;
+/* ============================================================
+   Drawing fullscreen toolbar — modern responsive
+   ============================================================ */
+
+.yanta-draw-head {
+  container-type: inline-size;
+}
+
+.yanta-draw-head-btn {
+  flex: 0 0 auto;
+  min-width: 0;
+}
+
+.yanta-draw-btn-label {
+  display: inline;
+}
+
+.yanta-draw-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  cursor: text;
+}
+
+@container (max-width: 560px) {
+  .yanta-draw-head {
+    gap: 6px;
+  }
+
+  .yanta-draw-head-btn {
+    width: 40px;
+    height: 40px;
+    padding: 0 !important;
+    justify-content: center;
+  }
+
+  .yanta-draw-btn-label {
+    display: none !important;
+  }
+
+  .yanta-draw-title {
+    font-size: 13px;
+  }
+}
+
+@media (max-width: 760px) {
+  .yanta-draw-modal {
+    inset: 0;
+    background: var(--bg);
+  }
+
+  .yanta-draw-head {
+    min-height: 52px;
+    height: auto;
+    gap: 6px;
+
+    padding:
+      max(6px, env(safe-area-inset-top))
+      max(8px, env(safe-area-inset-right))
+      6px
+      max(8px, env(safe-area-inset-left));
+
+    border-bottom: 1px solid var(--border);
+  }
+
+  .yanta-draw-head-btn {
+    width: 40px;
+    height: 40px;
+    padding: 0 !important;
+    justify-content: center;
+  }
+
+  .yanta-draw-btn-label {
+    display: none !important;
+  }
+
+  .yanta-draw-title {
+    font-size: 13px;
+    font-weight: 850;
+  }
+
+  .yanta-draw-body {
+    height: auto;
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+
+  .yanta-draw-fullscreen-host {
+    height: 100%;
+    min-height: 0;
+  }
+}
+/* Drawing export menu must appear above fullscreen drawing modal */
+.ctx-menu.yanta-draw-export-menu {
+  z-index: 420 !important;
+  min-width: 180px;
+}
+
+.ctx-menu.yanta-draw-export-menu button {
+  min-height: 34px;
+}
+
+@media (max-width: 760px) {
+  .ctx-menu.yanta-draw-export-menu {
+    z-index: 1000 !important;
+    min-width: 190px;
+  }
+
+  .ctx-menu.yanta-draw-export-menu button {
+    min-height: 42px;
+    font-size: 14px;
+  }
+}
+  `;
 
   document.head.append(style);
 }
@@ -1153,6 +1484,18 @@ function drawingSignature(drawing) {
     drawing?.elements || [],
     drawing?.appState || {},
     drawing?.files || {}
+  );
+}
+
+function liveDrawingElements(drawingOrElements) {
+  const elements = Array.isArray(drawingOrElements)
+    ? drawingOrElements
+    : drawingOrElements?.elements || [];
+
+  return elements.filter((el) =>
+    el &&
+    typeof el === 'object' &&
+    el.isDeleted !== true
   );
 }
 
@@ -3278,6 +3621,53 @@ async function openNoteReferencePicker() {
     let active = 0;
     let items = [];
 
+    let pointerDown = null;
+    let suppressPickerClickUntil = 0;
+
+    list.addEventListener('pointerdown', (e) => {
+      pointerDown = {
+        id: e.pointerId,
+        x: e.clientX,
+        y: e.clientY,
+        moved: false,
+      };
+    }, {
+      passive: true,
+    });
+
+    list.addEventListener('pointermove', (e) => {
+      if (!pointerDown || pointerDown.id !== e.pointerId) return;
+
+      const dist = Math.hypot(
+        e.clientX - pointerDown.x,
+        e.clientY - pointerDown.y
+      );
+
+      if (dist > 8) {
+        pointerDown.moved = true;
+        suppressPickerClickUntil = performance.now() + 450;
+      }
+    }, {
+      passive: true,
+    });
+
+    list.addEventListener('pointerup', (e) => {
+      if (!pointerDown || pointerDown.id !== e.pointerId) return;
+
+      const dist = Math.hypot(
+        e.clientX - pointerDown.x,
+        e.clientY - pointerDown.y
+      );
+
+      if (dist > 8 || pointerDown.moved) {
+        suppressPickerClickUntil = performance.now() + 450;
+      }
+
+      pointerDown = null;
+    }, {
+      passive: true,
+    });
+
     const render = () => {
       const q = search.value.trim().toLowerCase();
 
@@ -3300,6 +3690,8 @@ async function openNoteReferencePicker() {
       items.forEach((note, i) => {
         const btn = document.createElement('button');
         btn.className = 'yanta-draw-note-picker-item' + (i === active ? ' active' : '');
+        btn.dataset.index = String(i);
+
         btn.innerHTML = `
           ${lucide(note.icon || (note.type === 'list' ? 'list' : 'file'), 14)}
           <span>${escapeHtml(note.title || 'Untitled')}</span>
@@ -3307,6 +3699,12 @@ async function openNoteReferencePicker() {
         `;
 
         const accept = (e) => {
+          if (performance.now() < suppressPickerClickUntil) {
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+          }
+
           e.preventDefault();
           e.stopPropagation();
 
@@ -3327,38 +3725,49 @@ async function openNoteReferencePicker() {
           }
         });
 
-        btn.dataset.index = String(i);
-        btn.addEventListener('pointerdown', accept, true);
+        /*
+          Wichtig:
+          Kein pointerdown-accept mehr.
+          Sonst wird beim Touch-Scroll direkt eine Note ausgewählt.
+        */
         btn.addEventListener('click', accept, true);
 
         list.append(btn);
       });
     };
 
-    search.addEventListener('input', render);
+    search.addEventListener('input', () => {
+      active = 0;
+      render();
+    });
 
     search.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         e.preventDefault();
         overlay.remove();
         resolve(null);
+        return;
       }
 
       if (e.key === 'ArrowDown') {
         e.preventDefault();
         active = Math.min(items.length - 1, active + 1);
         render();
+        return;
       }
 
       if (e.key === 'ArrowUp') {
         e.preventDefault();
         active = Math.max(0, active - 1);
         render();
+        return;
       }
 
       if (e.key === 'Enter') {
         e.preventDefault();
+
         const note = items[active];
+
         overlay.remove();
         resolve(note || null);
       }
@@ -3376,13 +3785,19 @@ async function openNoteReferencePicker() {
     });
 
     render();
-    setTimeout(() => search.focus(), 0);
+
+    setTimeout(() => {
+      search.focus();
+    }, 0);
   });
 }
 
 function setModalDrawingTitle(drawingId, drawing) {
   if (!titleEl) return;
-  titleEl.textContent = `Drawing · ${drawing?.title || drawingId || 'Drawing'}`;
+
+  const title = drawing?.title || 'Drawing';
+
+  titleEl.textContent = title;
   titleEl.title = 'Click to rename drawing';
 }
 
@@ -3455,90 +3870,114 @@ function ensureModal() {
   const head = document.createElement('div');
   head.className = 'yanta-draw-head';
 
-titleEl = document.createElement('div');
-titleEl.className = 'yanta-draw-title';
-titleEl.textContent = 'Drawing';
-titleEl.title = 'Click to rename drawing';
-titleEl.addEventListener('click', async (e) => {
-  e.preventDefault();
-  e.stopPropagation();
+  titleEl = document.createElement('div');
+  titleEl.className = 'yanta-draw-title';
+  titleEl.textContent = 'Drawing';
+  titleEl.title = 'Click to rename drawing';
 
-  if (!active.noteId || !active.drawingId) return;
+  titleEl.addEventListener('click', async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
 
-  await renameDrawing(active.noteId, active.drawingId, {
-    anchor: titleEl,
-    prefix: 'Drawing · ',
+    if (!active.noteId || !active.drawingId) return;
+
+    await renameDrawing(active.noteId, active.drawingId, {
+      anchor: titleEl,
+    });
   });
-});
 
   const spacer = document.createElement('span');
   spacer.style.flex = '1';
 
   const linkNoteBtn = document.createElement('button');
-  linkNoteBtn.className = 'btn';
-  linkNoteBtn.innerHTML = `${lucide('file-plus', 14)} Link note`;
+  linkNoteBtn.className = 'btn yanta-draw-head-btn';
+  linkNoteBtn.title = 'Link selected element to note';
+  linkNoteBtn.innerHTML = `
+    ${lucide('file-plus', 14)}
+    <span class="yanta-draw-btn-label">Link note</span>
+  `;
+
   linkNoteBtn.addEventListener('click', async () => {
     if (!active.api) return;
+
     const note = await openNoteReferencePicker();
     if (!note) return;
 
     if (await linkSelectedElementsToNote(active.api, note)) {
-    toast(`Linked ${note.title || 'Untitled'}`, 'success');
+      toast(`Linked ${note.title || 'Untitled'}`, 'success');
     }
   });
 
-  const renameBtn = document.createElement('button');
-  renameBtn.className = 'btn';
-  renameBtn.innerHTML = `${lucide('pencil', 14)} Rename`;
-renameBtn.addEventListener('click', async () => {
-  if (!active.noteId || !active.drawingId) return;
-
-  await renameDrawing(active.noteId, active.drawingId, {
-    anchor: titleEl,
-    prefix: 'Drawing · ',
-  });
-});
-
   const exportBtn = document.createElement('button');
-  exportBtn.className = 'btn';
-  exportBtn.innerHTML = `${lucide('download', 14)} Export`;
-  exportBtn.addEventListener('click', () => {
-    if (active.noteId && active.drawingId) exportDrawing(active.noteId, active.drawingId);
+  exportBtn.className = 'btn yanta-draw-head-btn';
+  exportBtn.title = 'Download drawing';
+  exportBtn.innerHTML = `
+    ${lucide('download', 14)}
+    <span class="yanta-draw-btn-label">Download</span>
+  `;
+
+  exportBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (!active.noteId || !active.drawingId) return;
+
+    clearDrawingViewTransitionNames(active.drawingId);
+
+    openDrawingExportMenu(exportBtn, active.noteId, active.drawingId);
   });
 
   const deleteBtn = document.createElement('button');
-  deleteBtn.className = 'btn danger';
-  deleteBtn.innerHTML = `${lucide('trash', 14)} Delete`;
-deleteBtn.addEventListener('click', async () => {
-  if (!active.noteId || !active.drawingId) return;
+  deleteBtn.className = 'btn danger yanta-draw-head-btn';
+  deleteBtn.title = 'Delete drawing';
+  deleteBtn.innerHTML = `
+    ${lucide('trash', 14)}
+    <span class="yanta-draw-btn-label">Delete</span>
+  `;
 
-  confirmDeleteDrawing(active.noteId, active.drawingId, {
-    anchor: deleteBtn,
-    onDeleted: async () => {
-      closeDrawModal();
-    },
+  deleteBtn.addEventListener('click', async () => {
+    if (!active.noteId || !active.drawingId) return;
+
+    confirmDeleteDrawing(active.noteId, active.drawingId, {
+      anchor: deleteBtn,
+      onDeleted: async () => {
+        await closeDrawModal({
+          transition: true,
+        });
+      },
+    });
   });
-});
 
   const closeBtn = document.createElement('button');
   closeBtn.className = 'icon-btn';
   closeBtn.title = 'Close';
   closeBtn.innerHTML = lucide('x', 16);
-  closeBtn.addEventListener('click', closeDrawModal);
+
+  closeBtn.addEventListener('click', () => {
+    closeDrawModal({
+      transition: true,
+    });
+  });
 
   host = document.createElement('div');
   host.className = 'yanta-draw-body';
 
-  head.append(titleEl, spacer, linkNoteBtn, renameBtn, exportBtn, deleteBtn, closeBtn);
+  head.append(titleEl, spacer, linkNoteBtn, exportBtn, deleteBtn, closeBtn);
   modal.append(head, host);
   document.body.append(modal);
 
   window.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && modal && !modal.hidden) closeDrawModal();
+    if (e.key === 'Escape' && modal && !modal.hidden) {
+      closeDrawModal({
+        transition: true,
+      });
+    }
   });
 }
 
-export async function createDrawingAndInsert() {
+export async function createDrawingAndInsert({
+  openFullscreen = isMobileDrawUx(),
+} = {}) {
   if (!state.currentNoteId) {
     toast('Open a note first', 'error');
     return;
@@ -3569,6 +4008,24 @@ export async function createDrawingAndInsert() {
       detail: { noteId, drawingId },
     }));
   });
+
+  if (openFullscreen) {
+    await nextFrame();
+    await nextFrame();
+
+    await Promise.allSettled([
+      loadReact(),
+      loadExcalidraw(),
+    ]);
+
+    openDrawModal(drawingId, noteId, {
+      initialTool: 'freedraw',
+      transition: false,
+    }).catch((err) => {
+      console.error('[YANTA Draw] could not open new drawing fullscreen', err);
+      toast('Could not open drawing', 'error');
+    });
+  }
 }
 
 function updateEmbedFromDrawing(embed, drawing) {
@@ -4146,12 +4603,39 @@ function bindEmbedActions(embed) {
     }
 
     if (action === 'fullscreen') {
-      openDrawModal(drawingId, hit.noteId);
+      /*
+        Vorladen vor der Transition.
+        Dadurch ist openDrawModal() im Transition-Callback schnell
+        und kann den Fullscreen-Host synchron erzeugen.
+      */
+      await Promise.allSettled([
+        loadReact(),
+        loadExcalidraw(),
+        getNoteDoc(hit.noteId).ready,
+      ]);
+
+      await withDrawingViewTransition(
+        drawingId,
+        () => {
+          openDrawModal(drawingId, hit.noteId, {
+            transition: false,
+            preparedHit: hit,
+          }).catch((err) => {
+            console.error('[YANTA Draw] could not open fullscreen drawing', err);
+            toast('Could not open drawing', 'error');
+          });
+        },
+        {
+          source: embed,
+          targetGetter: () => document.querySelector('.yanta-draw-fullscreen-host'),
+        }
+      );
+
       return;
     }
 
     if (action === 'export') {
-      exportDrawing(hit.noteId, drawingId);
+      openDrawingExportMenu(btn, hit.noteId, drawingId);
       return;
     }
 
@@ -4163,12 +4647,27 @@ function bindEmbedActions(embed) {
   });
 }
 
-export async function openDrawModal(drawingId, noteId = state.currentNoteId) {
+export async function openDrawModal(
+  drawingId,
+  noteId = state.currentNoteId,
+  {
+    initialTool = null,
+    transition = true,
+    transitionFrom = null,
+    preparedHit = null,
+  } = {}
+) {
   if (!drawingId) return;
 
   ensureModal();
 
-  const hit = await resolveDrawingRefAsync(drawingId, noteId);
+  /*
+    Wichtig für View Transition:
+    Wenn preparedHit übergeben wird, darf hier vor dem Erzeugen des
+    Fullscreen-Hosts KEIN await passieren. Sonst existiert das Target
+    im startViewTransition-updateCallback noch nicht.
+  */
+  const hit = preparedHit || await resolveDrawingRefAsync(drawingId, noteId);
 
   if (!hit) {
     toast(`Drawing not found: draw://${drawingId}`, 'error');
@@ -4178,8 +4677,12 @@ export async function openDrawModal(drawingId, noteId = state.currentNoteId) {
   const sourceNoteId = hit.noteId;
   const current = hit.drawing;
 
+  const shouldSelectInitialTool =
+    initialTool &&
+    Array.isArray(current.elements) &&
+    current.elements.filter((el) => el && !el.isDeleted).length === 0;
+
   const entry = getNoteDoc(sourceNoteId);
-  await entry.ready;
 
   if (active.unobserve) {
     active.unobserve();
@@ -4190,6 +4693,7 @@ export async function openDrawModal(drawingId, noteId = state.currentNoteId) {
     try {
       reactRoot.unmount();
     } catch {}
+
     reactRoot = null;
   }
 
@@ -4208,12 +4712,30 @@ export async function openDrawModal(drawingId, noteId = state.currentNoteId) {
   setModalDrawingTitle(drawingId, current);
   modal.hidden = false;
 
-  const { React, ReactDOM } = await loadReact();
-  const { Excalidraw } = await loadExcalidraw();
-
+  /*
+    Fullscreen-Host SYNCHRON erzeugen.
+    Genau dieses Element braucht die View Transition als neues Target.
+  */
   const fullscreenHost = document.createElement('div');
   fullscreenHost.className = 'yanta-draw-fullscreen-host';
   host.append(fullscreenHost);
+
+  try {
+    fullscreenHost.getBoundingClientRect();
+  } catch {}
+
+  /*
+    Ab hier sind awaits okay, weil das Transition-Target bereits im DOM ist.
+  */
+  await entry.ready;
+
+  const [
+    { React, ReactDOM },
+    { Excalidraw },
+  ] = await Promise.all([
+    loadReact(),
+    loadExcalidraw(),
+  ]);
 
   const drawings = entry.doc.getMap('drawings');
 
@@ -4256,17 +4778,21 @@ export async function openDrawModal(drawingId, noteId = state.currentNoteId) {
 
       drawings.observe(observer);
 
-      active.unobserve = () => {
+      let unobserved = false;
+
+      const cleanupObserver = () => {
+        if (unobserved) return;
+
+        unobserved = true;
+
         try {
           drawings.unobserve(observer);
         } catch {}
       };
 
-      return () => {
-        try {
-          drawings.unobserve(observer);
-        } catch {}
-      };
+      active.unobserve = cleanupObserver;
+
+      return cleanupObserver;
     }, []);
 
     React.useEffect(() => {
@@ -4375,7 +4901,22 @@ export async function openDrawModal(drawingId, noteId = state.currentNoteId) {
     return React.createElement(Excalidraw, {
       initialData: initialDataForDrawing(
         current,
-        excalidrawLibraryInitialData()
+        {
+          ...excalidrawLibraryInitialData(),
+
+          appState: {
+            ...cleanAppState(current.appState || {}),
+
+            ...(shouldSelectInitialTool
+              ? {
+                  activeTool: {
+                    type: initialTool,
+                    locked: false,
+                  },
+                }
+              : {}),
+          },
+        }
       ),
       theme,
       name: current.title || 'Drawing',
@@ -4385,6 +4926,17 @@ export async function openDrawModal(drawingId, noteId = state.currentNoteId) {
         active.api = api;
 
         addFilesToExcalidrawApi(api, current.files);
+
+        if (shouldSelectInitialTool) {
+          requestAnimationFrame(() => {
+            try {
+              api.setActiveTool?.({
+                type: initialTool,
+                locked: false,
+              });
+            } catch {}
+          });
+        }
 
         requestAnimationFrame(() => {
           try {
@@ -4421,7 +4973,7 @@ export async function openDrawModal(drawingId, noteId = state.currentNoteId) {
   reactRoot.render(React.createElement(FullscreenDrawing));
 }
 
-export function closeDrawModal() {
+function closeDrawModalRaw() {
   if (!modal) return;
 
   hideNotePreviewPopover();
@@ -4429,14 +4981,16 @@ export function closeDrawModal() {
   modal.hidden = true;
 
   if (active.unobserve) {
-    active.unobserve();
+    const unobserve = active.unobserve;
     active.unobserve = null;
+    unobserve();
   }
 
   if (reactRoot) {
     try {
       reactRoot.unmount();
     } catch {}
+
     reactRoot = null;
   }
 
@@ -4453,6 +5007,44 @@ export function closeDrawModal() {
   };
 }
 
+export async function closeDrawModal({
+  transition = true,
+} = {}) {
+  if (!modal) return;
+
+  const drawingId = active.drawingId;
+  const source = document.querySelector('.yanta-draw-fullscreen-host');
+
+  if (!transition || !drawingId) {
+    clearDrawingViewTransitionNames(drawingId);
+    closeDrawModalRaw();
+    return;
+  }
+
+  /*
+    Wichtig:
+    Innerhalb der View-Transition nur synchron den DOM-Zustand wechseln.
+    Kein await nextFrame() im startViewTransition update callback.
+  */
+  await withDrawingViewTransition(
+    drawingId,
+    () => {
+      closeDrawModalRaw();
+    },
+    {
+      source,
+      targetGetter: () => findInlineDrawEmbed(drawingId),
+    }
+  );
+
+  /*
+    Async Nacharbeiten NACH der Transition.
+  */
+  await nextFrame();
+
+  refreshDrawEmbeds(document);
+  clearDrawingViewTransitionNames(drawingId);
+}
 export function drawingToExcalidrawJson(noteId, drawingId) {
   const d = getDrawing(noteId, drawingId);
   if (!d) return null;
@@ -4471,7 +5063,102 @@ export function drawingToExcalidrawJson(noteId, drawingId) {
   };
 }
 
-export function exportDrawing(noteId, drawingId) {
+function drawingExportBaseName(noteId, drawingId) {
+  const note = state.notes.get(noteId);
+  const d = getDrawing(noteId, drawingId);
+
+  return `${safeFilename(d?.title || note?.title || 'drawing')}-${drawingId}`;
+}
+
+function markLatestDrawingExportMenu() {
+  const menus = [...document.querySelectorAll('body > .ctx-menu')];
+  const menu = menus.at(-1);
+
+  if (!menu) return;
+
+  menu.classList.add('yanta-draw-export-menu');
+
+  /*
+    Inline-Fallback, falls CSS noch nicht geladen ist oder von anderer
+    Runtime-CSS-Reihenfolge überstimmt wird.
+  */
+  menu.style.zIndex = '1000';
+}
+
+function openDrawingExportMenu(anchor, noteId, drawingId) {
+  if (!anchor) return;
+
+  /*
+    Wichtig:
+    Der Download-Button selbst startet keine View Transition.
+    Wenn aber von einer vorherigen Drawing-Transition stale
+    view-transition-name Styles im DOM liegen, kann die nächste
+    startViewTransition irgendwo in der App mit duplicate-name crashen.
+    Daher hier defensiv bereinigen.
+  */
+  clearDrawingViewTransitionNames(drawingId);
+
+  const r = anchor.getBoundingClientRect();
+
+  showMenu(r.left, r.bottom + 6, [
+    {
+      label: 'Excalidraw',
+      action: () => {
+        clearDrawingViewTransitionNames(drawingId);
+
+        exportDrawing(noteId, drawingId, {
+          format: 'excalidraw',
+        });
+      },
+    },
+    {
+      label: 'WEBP',
+      action: () => {
+        clearDrawingViewTransitionNames(drawingId);
+
+        exportDrawing(noteId, drawingId, {
+          format: 'webp',
+        });
+      },
+    },
+    {
+      label: 'SVG',
+      action: () => {
+        clearDrawingViewTransitionNames(drawingId);
+
+        exportDrawing(noteId, drawingId, {
+          format: 'svg',
+        });
+      },
+    },
+    {
+      label: 'PDF',
+      action: () => {
+        clearDrawingViewTransitionNames(drawingId);
+
+        exportDrawing(noteId, drawingId, {
+          format: 'pdf',
+        });
+      },
+    },
+  ]);
+
+  /*
+    showMenu() kommt aus tree.js und gibt das Menü nicht zurück.
+    Deshalb markieren wir direkt danach das zuletzt erzeugte .ctx-menu.
+  */
+  markLatestDrawingExportMenu();
+
+  /*
+    showMenu() korrigiert die Position synchron, aber falls Layout/Fonts
+    minimal später messen, setzen wir die Klasse nochmal im nächsten Frame.
+  */
+  requestAnimationFrame(() => {
+    markLatestDrawingExportMenu();
+  });
+}
+
+function exportDrawingExcalidraw(noteId, drawingId) {
   const json = drawingToExcalidrawJson(noteId, drawingId);
 
   if (!json) {
@@ -4479,14 +5166,211 @@ export function exportDrawing(noteId, drawingId) {
     return;
   }
 
-  const note = state.notes.get(noteId);
-  const d = getDrawing(noteId, drawingId);
-  const name = `${safeFilename(d?.title || note?.title || 'drawing')}-${drawingId}.excalidraw`;
+  const name = `${drawingExportBaseName(noteId, drawingId)}.excalidraw`;
 
   downloadBlob(
-    new Blob([JSON.stringify(json, null, 2)], { type: 'application/json' }),
+    new Blob([JSON.stringify(json, null, 2)], {
+      type: 'application/json',
+    }),
     name
   );
+}
+
+async function exportDrawingSvg(noteId, drawingId) {
+  const d = getDrawing(noteId, drawingId);
+
+  if (!d) {
+    toast('Drawing not found', 'error');
+    return;
+  }
+
+  const { exportToSvg } = await loadExcalidraw();
+
+  if (typeof exportToSvg !== 'function') {
+    toast('SVG export unavailable in this Excalidraw build', 'error');
+    return;
+  }
+
+  const svg = await exportToSvg({
+    elements: liveDrawingElements(d),
+    appState: {
+      ...cleanAppState(d.appState || {}),
+      exportBackground: true,
+      viewBackgroundColor:
+        currentExcalidrawTheme() === 'dark'
+          ? '#121212'
+          : '#ffffff',
+    },
+    files: d.files || {},
+  });
+
+  const data = new XMLSerializer().serializeToString(svg);
+  const name = `${drawingExportBaseName(noteId, drawingId)}.svg`;
+
+  downloadBlob(
+    new Blob([data], {
+      type: 'image/svg+xml;charset=utf-8',
+    }),
+    name
+  );
+}
+
+async function exportDrawingWebp(noteId, drawingId) {
+  const d = getDrawing(noteId, drawingId);
+
+  if (!d) {
+    toast('Drawing not found', 'error');
+    return;
+  }
+
+  const { exportToBlob } = await loadExcalidraw();
+
+  if (typeof exportToBlob !== 'function') {
+    toast('WEBP export unavailable in this Excalidraw build', 'error');
+    return;
+  }
+
+  const elements = liveDrawingElements(d);
+
+  const blob = await exportToBlob({
+    /*
+      Wichtig:
+      Excalidraw behält gelöschte Elemente als { isDeleted: true } in der Scene.
+      exportToBlob() rendert diese in manchen Versionen trotzdem.
+      Deshalb hier explizit nur live/non-deleted elements exportieren.
+    */
+    elements,
+
+    appState: {
+      ...cleanAppState(d.appState || {}),
+      exportBackground: true,
+      viewBackgroundColor:
+        currentExcalidrawTheme() === 'dark'
+          ? '#121212'
+          : '#ffffff',
+    },
+
+    files: d.files || {},
+    mimeType: 'image/webp',
+    quality: 0.92,
+  });
+
+  const name = `${drawingExportBaseName(noteId, drawingId)}.webp`;
+
+  downloadBlob(blob, name);
+}
+
+async function exportDrawingPdf(noteId, drawingId) {
+  const d = getDrawing(noteId, drawingId);
+
+  if (!d) {
+    toast('Drawing not found', 'error');
+    return;
+  }
+
+  const { exportToSvg } = await loadExcalidraw();
+
+  if (typeof exportToSvg !== 'function') {
+    toast('PDF export unavailable because SVG export is unavailable', 'error');
+    return;
+  }
+
+  const svg = await exportToSvg({
+    elements: liveDrawingElements(d),
+    appState: {
+      ...cleanAppState(d.appState || {}),
+      exportBackground: true,
+      viewBackgroundColor: '#ffffff',
+    },
+    files: d.files || {},
+  });
+
+  const data = new XMLSerializer().serializeToString(svg);
+
+  const win = window.open('', '_blank');
+
+  if (!win) {
+    toast('Popup blocked · allow popups to print PDF', 'error');
+    return;
+  }
+
+  win.document.write(`
+    <!doctype html>
+    <html>
+      <head>
+        <meta charset="utf-8" />
+        <title>${escapeHtml(d.title || 'Drawing')}</title>
+        <style>
+          @page {
+            size: auto;
+            margin: 12mm;
+          }
+
+          html,
+          body {
+            margin: 0;
+            padding: 0;
+            background: white;
+          }
+
+          body {
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+          }
+
+          svg {
+            max-width: 100%;
+            max-height: 100vh;
+          }
+        </style>
+      </head>
+      <body>
+        ${data}
+        <script>
+          window.onload = () => {
+            setTimeout(() => window.print(), 150);
+          };
+        </script>
+      </body>
+    </html>
+  `);
+
+  win.document.close();
+
+  toast('Use print dialog to save as PDF', 'success');
+}
+
+export async function exportDrawing(noteId, drawingId, {
+  format = 'excalidraw',
+} = {}) {
+  try {
+    if (format === 'excalidraw') {
+      exportDrawingExcalidraw(noteId, drawingId);
+      return;
+    }
+
+    if (format === 'svg') {
+      await exportDrawingSvg(noteId, drawingId);
+      return;
+    }
+
+    if (format === 'webp') {
+      await exportDrawingWebp(noteId, drawingId);
+      return;
+    }
+
+    if (format === 'pdf') {
+      await exportDrawingPdf(noteId, drawingId);
+      return;
+    }
+
+    exportDrawingExcalidraw(noteId, drawingId);
+  } catch (err) {
+    console.error('[YANTA Draw] export failed', err);
+    toast('Drawing export failed', 'error');
+  }
 }
 
 export async function drawingThumbnailUrl(noteId, drawingId) {
@@ -4498,7 +5382,7 @@ export async function drawingThumbnailUrl(noteId, drawingId) {
 
   if (!d) return '';
 
-  if (!d.elements?.length) {
+  if (!liveDrawingElements(d).length) {
     const fallback = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(`
       <svg xmlns="http://www.w3.org/2000/svg" width="360" height="220" viewBox="0 0 360 220">
         <rect width="360" height="220" rx="14" fill="#121212"/>
@@ -4513,7 +5397,7 @@ export async function drawingThumbnailUrl(noteId, drawingId) {
     const { exportToSvg } = await loadExcalidraw();
 
     const svg = await exportToSvg({
-      elements: d.elements || [],
+      elements: liveDrawingElements(d),
       appState: {
         ...cleanAppState(d.appState || {}),
         exportBackground: true,

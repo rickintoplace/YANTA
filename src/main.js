@@ -333,6 +333,7 @@ async function ensureGoogleDriveSyncSilently(reason = 'silent') {
   sync2Auto.silentResumeTimer = window.setTimeout(async () => {
     if (sync2Auto.engine) return;
     if (sync2Auto.silentResumeRunning) return;
+    if (navigator.onLine === false) return;
 
     sync2Auto.silentResumeRunning = true;
 
@@ -351,8 +352,11 @@ async function ensureGoogleDriveSyncSilently(reason = 'silent') {
         });
       }
     } catch (err) {
-      // Expected if Google cannot silently provide a token.
-      // No modal. No popup. No toast.
+      if (err?.code === 'EAUTH_REQUIRED') {
+        console.info('[YANTA Sync2] Google sign-in required. Not opening popup automatically.');
+        return;
+      }
+
       console.info('[YANTA Sync2] silent Google Drive resume unavailable:', err?.message || err);
     } finally {
       sync2Auto.silentResumeRunning = false;
@@ -1378,7 +1382,7 @@ function bindEvents() {
       toast('Could not link calendar event to note', 'error');
     }
   });
-  
+
   // Slash → image insert event from editor
   window.addEventListener('yanta-open-image-modal', () => openImageModal());
   // Ctrl/Cmd+click wikilink from editor

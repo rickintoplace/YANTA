@@ -6,6 +6,10 @@
 //
 // Scope:
 //   https://www.googleapis.com/auth/drive.appdata
+//
+// Important UX rule:
+// - Google OAuth popup/token prompt is ONLY allowed from explicit user actions.
+// - App startup / focus / interval sync must never open accounts.google.com.
 // ============================================================
 
 import {
@@ -33,6 +37,14 @@ const TOKEN_CACHE_KEY = 'yanta.googleDrive.accessToken.v1';
 const TOKEN_EXPIRY_SKEW_MS = 60_000;
 
 let gisLoadPromise = null;
+
+export class GoogleAuthRequiredError extends Error {
+  constructor(message = 'Google sign-in required') {
+    super(message);
+    this.name = 'GoogleAuthRequiredError';
+    this.code = 'EAUTH_REQUIRED';
+  }
+}
 
 function readTokenCache(clientId) {
   try {
@@ -78,8 +90,16 @@ function loadScript(src) {
   if (gisLoadPromise) return gisLoadPromise;
 
   gisLoadPromise = new Promise((resolve, reject) => {
-    if ([...document.scripts].some((s) => s.src === src)) {
-      resolve();
+    const existing = [...document.scripts].find((s) => s.src === src);
+
+    if (existing) {
+      if (globalThis.google?.accounts?.oauth2) {
+        resolve();
+        return;
+      }
+
+      existing.addEventListener('load', () => resolve(), { once: true });
+      existing.addEventListener('error', () => reject(new Error(`Could not load script: ${src}`)), { once: true });
       return;
     }
 
@@ -207,10 +227,34 @@ export class GoogleDriveObjectStore extends RemoteObjectStore {
     this.tokenClient = tokenClient;
     this.accessToken = '';
     this.ready = false;
+    this.prepared = false;
   }
 
+  /**
+   * Prepare Google Identity Services.
+   *
+   * Important:
+   * - init() normally does NOT open a popup.
+   * - It only opens OAuth when initialPrompt is explicitly set, e.g. "consent".
+   *   That path is meant for explicit user-triggered setup buttons.
+   */
   async init() {
     if (this.ready) return;
+
+    await this.prepareAuthClient();
+
+    if (this.initialPrompt) {
+      await this.ensureToken({
+        interactive: true,
+        prompt: this.initialPrompt,
+      });
+    }
+
+    this.ready = true;
+  }
+
+  async prepareAuthClient() {
+    if (this.prepared && this.tokenClient) return;
 
     await loadScript(GIS_SRC);
 
@@ -226,25 +270,43 @@ export class GoogleDriveObjectStore extends RemoteObjectStore {
       });
     }
 
-    await this.ensureToken({
-      prompt: this.initialPrompt,
-    });
-
-    this.ready = true;
+    this.prepared = true;
   }
 
+  /**
+   * Explicit user-triggered login.
+   *
+   * Only call this from a click/tap handler such as:
+   * - Connect Google Drive
+   * - Reconnect Google Drive
+   * - Connect & Pull
+   */
   async connectInteractive() {
     this.accessToken = '';
     clearTokenCache();
 
-    await this.ensureToken({
+    await this.prepareAuthClient();
+
+    const token = await this.requestTokenInteractive({
       prompt: 'consent',
     });
 
     this.ready = true;
+
+    return token;
   }
 
-  async ensureToken({ prompt = '' } = {}) {
+  /**
+   * Token getter.
+   *
+   * Default mode is silent/cache-only.
+   * If no cached token exists, it throws EAUTH_REQUIRED instead of opening
+   * accounts.google.com automatically.
+   */
+  async ensureToken({
+    interactive = false,
+    prompt = '',
+  } = {}) {
     if (this.accessToken) return this.accessToken;
 
     const cached = readTokenCache(this.clientId);
@@ -254,56 +316,61 @@ export class GoogleDriveObjectStore extends RemoteObjectStore {
       return cached;
     }
 
-    await loadScript(GIS_SRC);
+    await this.prepareAuthClient();
 
-    if (!globalThis.google?.accounts?.oauth2) {
-      throw new Error('Google Identity Services not available');
+    if (!interactive) {
+      throw new GoogleAuthRequiredError(
+        'Google sign-in required. Please reconnect Google Drive Sync.'
+      );
     }
 
-    if (!this.tokenClient) {
-      this.tokenClient = google.accounts.oauth2.initTokenClient({
-        client_id: this.clientId,
-        scope: SCOPE,
-        callback: () => {},
-      });
-    }
-
-    const tokenPromise = new Promise((resolve, reject) => {
-      this.tokenClient.callback = (res) => {
-        if (res?.error) {
-          reject(new Error(res.error_description || res.error));
-          return;
-        }
-
-        if (!res?.access_token) {
-          reject(new Error('Google access token missing'));
-          return;
-        }
-
-        this.accessToken = res.access_token;
-
-        writeTokenCache(
-          this.clientId,
-          res.access_token,
-          res.expires_in || 3600
-        );
-
-        resolve(this.accessToken);
-      };
-
-      this.tokenClient.requestAccessToken({
-        prompt,
-      });
+    return this.requestTokenInteractive({
+      prompt: prompt || 'consent',
     });
+  }
 
+  requestTokenInteractive({
+    prompt = 'consent',
+  } = {}) {
     return Promise.race([
-      tokenPromise,
+      new Promise((resolve, reject) => {
+        this.tokenClient.callback = (res) => {
+          if (res?.error) {
+            reject(new Error(res.error_description || res.error));
+            return;
+          }
+
+          if (!res?.access_token) {
+            reject(new Error('Google access token missing'));
+            return;
+          }
+
+          this.accessToken = res.access_token;
+
+          writeTokenCache(
+            this.clientId,
+            res.access_token,
+            res.expires_in || 3600
+          );
+
+          resolve(this.accessToken);
+        };
+
+        this.tokenClient.requestAccessToken({
+          prompt,
+        });
+      }),
+
       timeout(45_000, 'Google login timed out or was blocked by the browser.'),
     ]);
   }
 
   async api(url, options = {}, retryAuth = true) {
-    await this.ensureToken();
+    await this.init();
+
+    await this.ensureToken({
+      interactive: false,
+    });
 
     let lastError = null;
 
@@ -326,12 +393,20 @@ export class GoogleDriveObjectStore extends RemoteObjectStore {
         continue;
       }
 
+      /**
+       * Important:
+       * Do NOT silently call requestAccessToken() here.
+       *
+       * A 401 can happen after token expiry/revocation. Background sync must
+       * fail with EAUTH_REQUIRED and let the UI show "Reconnect Google Drive".
+       */
       if (res.status === 401 && retryAuth) {
         this.accessToken = '';
         clearTokenCache();
 
-        await this.ensureToken({ prompt: '' });
-        return this.api(url, options, false);
+        throw new GoogleAuthRequiredError(
+          'Google session expired. Please reconnect Google Drive Sync.'
+        );
       }
 
       if (isRetryableStatus(res.status) && attempt < 3) {

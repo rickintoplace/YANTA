@@ -1357,6 +1357,28 @@ function bindEvents() {
     }
   });
 
+  window.addEventListener('yanta-calendar-event-drop-on-note', async (e) => {
+    const detail = e.detail || {};
+    const eventId = detail.eventId || '';
+    const noteId = detail.noteId || state.currentNoteId || '';
+
+    if (!eventId || !noteId) {
+      toast('Calendar event could not be linked here', 'error');
+      return;
+    }
+
+    try {
+      const calendar = await import('./calendar.js');
+
+      await calendar.linkCalendarEventToNote(eventId, noteId, {
+        ask: true,
+      });
+    } catch (err) {
+      console.error(err);
+      toast('Could not link calendar event to note', 'error');
+    }
+  });
+  
   // Slash → image insert event from editor
   window.addEventListener('yanta-open-image-modal', () => openImageModal());
   // Ctrl/Cmd+click wikilink from editor

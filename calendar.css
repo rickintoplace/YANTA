@@ -2232,3 +2232,84 @@
     display: none !important;
   }
 }
+
+
+/* ============================================================
+   Event editor shared icon-color picker
+   ============================================================ */
+
+.yanta-calendar-appearance-box {
+  margin: 0 0 12px;
+}
+
+.yanta-calendar-appearance-picker {
+  width: 100%;
+
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  padding: 10px 11px;
+
+  border: 1px solid color-mix(in srgb, var(--appearance-color, var(--accent)) 36%, var(--border));
+  border-radius: 11px;
+
+  background:
+      color-mix(in srgb, var(--appearance-color, var(--accent)) 12%, var(--bg-elev-2));
+
+  color: var(--text);
+  text-align: left;
+
+  cursor: pointer;
+}
+
+.yanta-calendar-appearance-picker:hover {
+  border-color: color-mix(in srgb, var(--appearance-color, var(--accent)) 62%, var(--border-strong));
+  background:
+      color-mix(in srgb, var(--appearance-color, var(--accent)) 16%, var(--bg-elev-2));
+}
+
+.yanta-calendar-appearance-picker-icon {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  border-radius: 12px;
+
+  background: color-mix(in srgb, var(--appearance-color, var(--accent)) 15%, transparent);
+  color: var(--appearance-color, var(--accent));
+
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--appearance-color, var(--accent)) 26%, transparent) inset;
+}
+
+.yanta-calendar-appearance-picker-icon svg {
+  width: 17px;
+  height: 17px;
+}
+
+.yanta-calendar-appearance-picker-text {
+  flex: 1;
+  min-width: 0;
+
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.yanta-calendar-appearance-picker-text strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.2;
+}
+
+.yanta-calendar-appearance-picker-text small {
+  color: var(--text-dim);
+  font-size: 11px;
+  line-height: 1.25;
+}

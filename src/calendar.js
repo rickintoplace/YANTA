@@ -25,6 +25,7 @@ import {
   escapeAttr,
   safeFilename,
   lucide,
+  cssColorToHex,
 } from './core.js';
 
 import {
@@ -96,10 +97,6 @@ import {
   closeSidePane,
   isSidePaneOpen,
 } from './side-pane.js';
-
-import {
-  insertTextAtCoords,
-} from './editor.js';
 
 const ORIGIN = 'calendar';
 const DEFAULT_CATEGORY_ID = 'cal_default';
@@ -543,9 +540,29 @@ function defaultEventColorForCategory(cat) {
   return cat.color || accent;
 }
 
+function linkedNoteForEvent(ev) {
+  return ev?.noteId ? state.notes.get(ev.noteId) : null;
+}
+
+function calendarIconForEvent(ev) {
+  const note = linkedNoteForEvent(ev);
+
+  return (
+    note?.icon ||
+    ev?.icon ||
+    'calendar-days'
+  );
+}
+
 function calendarEventColors(ev) {
+  const note = linkedNoteForEvent(ev);
   const cat = categoryForEvent(ev);
-  const rawColor = ev.color || defaultEventColorForCategory(cat);
+
+  const rawColor =
+    note?.color ||
+    ev?.color ||
+    defaultEventColorForCategory(cat);
+
   const background = resolveCssColor(rawColor, cssVar('--accent', '#6ea8fe'));
 
   return {
@@ -4301,6 +4318,7 @@ export function sanitizeCalendarEvent(raw) {
 
     categoryId: raw.categoryId || DEFAULT_CATEGORY_ID,
     color: raw.color || undefined,
+    icon: raw.icon || undefined,
 
     location: raw.location || '',
     description: raw.description || '',
@@ -4664,15 +4682,6 @@ function fullCalendarEventFromYanta(ev) {
     borderColor: colors.border,
     textColor: colors.text,
 
-    /*
-      Desktop:
-      FullCalendar-DnD bleibt aktiv.
-
-      Mobile:
-      FullCalendar-DnD muss aus sein, weil FC sonst schon vor unserem
-      Swipe-Claim Drag-Mirror erzeugt, die hängenbleiben können.
-      Mobile-DnD wird unten von YANTA selbst gehandhabt.
-    */
     editable: !calendarMobile(),
     startEditable: !calendarMobile(),
     durationEditable: !calendarMobile(),
@@ -4682,6 +4691,7 @@ function fullCalendarEventFromYanta(ev) {
       raw: ev,
       noteId: ev.noteId || null,
       categoryId: ev.categoryId,
+      eventIcon: calendarIconForEvent(ev),
     },
   };
 }
@@ -4803,8 +4813,6 @@ function calendarEventContent(info) {
 
   wrap.style.setProperty('--yanta-cal-dot-color', dotColor);
 
-  // Timed events are often rendered as transparent/dot-style events.
-  // Add our own stable color dot so the category/note color remains visible.
   if (!info.event.allDay) {
     const dot = document.createElement('span');
     dot.className = 'yanta-cal-event-color-dot';
@@ -4812,7 +4820,6 @@ function calendarEventContent(info) {
     wrap.append(dot);
   }
 
-  // Time text, e.g. "14:00"
   if (info.timeText) {
     const timeSpan = document.createElement('span');
     timeSpan.className = 'yanta-cal-event-time';
@@ -4820,9 +4827,11 @@ function calendarEventContent(info) {
     wrap.append(timeSpan);
   }
 
-  // Markdown-derived events get the source note icon.
-  if (kind === 'markdown-event') {
-    const icon = info.event.extendedProps?.noteIcon || 'file-text';
+  if (kind === 'event' || kind === 'markdown-event') {
+    const icon =
+      kind === 'event'
+        ? calendarIconForEvent(raw)
+        : info.event.extendedProps?.noteIcon || 'file-text';
 
     const iconSpan = document.createElement('span');
     iconSpan.className = 'yanta-cal-event-icon';
@@ -4897,12 +4906,11 @@ function bindCalendarEventDragToMarkdown(info) {
   if (!info?.el) return;
 
   const id = info.event?.id || '';
+
   if (id) {
     info.el.dataset.yantaEventId = id;
   }
 
-  // Native HTML drag is desktop-only in practice, but don't skip it based on
-  // viewport. Some tablets/laptops report coarse pointers inconsistently.
   info.el.setAttribute('draggable', 'true');
 
   const startDrag = (e) => {
@@ -4916,11 +4924,8 @@ function bindCalendarEventDragToMarkdown(info) {
       noteId: info.event.extendedProps?.noteId || null,
     };
 
-    const markdown = markdownForCalendarEvent(raw, info.event);
-
     try {
       e.dataTransfer.setData('text/yanta-calendar-event', JSON.stringify({
-        markdown,
         eventId: id,
         noteId: raw.noteId || info.event.extendedProps?.noteId || null,
         title: raw.title || info.event.title,
@@ -4929,8 +4934,12 @@ function bindCalendarEventDragToMarkdown(info) {
         allDay: !!(raw.allDay ?? info.event.allDay),
       }));
 
-      e.dataTransfer.setData('text/plain', markdown);
-      e.dataTransfer.effectAllowed = 'copy';
+      /*
+        Kein @due/@date Markdown mehr als text/plain.
+        Der Editor verlinkt über text/yanta-calendar-event.
+      */
+      e.dataTransfer.setData('text/plain', raw.title || info.event.title || 'Calendar event');
+      e.dataTransfer.effectAllowed = 'link';
     } catch (err) {
       console.warn('[YANTA Calendar] Could not prepare event drag', err);
     }
@@ -4979,11 +4988,8 @@ function installDelegatedCalendarEventDrag() {
       noteId: fcEvent.extendedProps?.noteId || null,
     };
 
-    const markdown = markdownForCalendarEvent(raw, fcEvent);
-
     try {
       e.dataTransfer.setData('text/yanta-calendar-event', JSON.stringify({
-        markdown,
         eventId: id,
         noteId: raw.noteId || fcEvent.extendedProps?.noteId || null,
         title: raw.title || fcEvent.title,
@@ -4992,8 +4998,8 @@ function installDelegatedCalendarEventDrag() {
         allDay: !!(raw.allDay ?? fcEvent.allDay),
       }));
 
-      e.dataTransfer.setData('text/plain', markdown);
-      e.dataTransfer.effectAllowed = 'copy';
+      e.dataTransfer.setData('text/plain', raw.title || fcEvent.title || 'Calendar event');
+      e.dataTransfer.effectAllowed = 'link';
     } catch (err) {
       console.warn('[YANTA Calendar] Could not start event drag', err);
     }
@@ -5136,7 +5142,7 @@ function beginCalendarExternalEventDrag(d, originalEvent) {
   originalEvent?.stopImmediatePropagation?.();
 }
 
-function finishCalendarExternalEventDrag(d, originalEvent, {
+async function finishCalendarExternalEventDrag(d, originalEvent, {
   cancelled = false,
 } = {}) {
   try {
@@ -5148,40 +5154,24 @@ function finishCalendarExternalEventDrag(d, originalEvent, {
       originalEvent?.stopPropagation?.();
       originalEvent?.stopImmediatePropagation?.();
 
-      let inserted = false;
+      let linked = false;
 
-      if (!cancelled && d.markdown) {
-        inserted = insertTextAtCoords(
-          d.markdown,
-          d.lastX,
-          d.lastY
-        );
+      if (
+        !cancelled &&
+        d.raw?.id &&
+        state.currentNoteId &&
+        pointOverEditor(d.lastX, d.lastY)
+      ) {
+        linked = await linkCalendarEventToNote(d.raw.id, state.currentNoteId, {
+          ask: true,
+        });
       }
 
-      if (inserted) {
-        const isStoredCalendarEvent =
-          d.fcEvent?.extendedProps?.yantaKind === 'event' &&
-          d.raw?.id &&
-          state.calendarEvents.has(d.raw.id);
-
-        // Default UX:
-        // dragging a stored calendar event into a note converts it into a
-        // markdown-owned calendar event to avoid duplicate events.
-        //
-        // Hold Alt/Option while dropping if you want to copy instead.
-        const copyInsteadOfConvert = !!originalEvent?.altKey;
-
-        if (isStoredCalendarEvent && !copyInsteadOfConvert) {
-          deleteCalendarEvent(d.raw.id);
-          toast('Calendar event linked to note', 'success');
-        } else {
-          toast('Calendar event inserted into note', 'success');
-        }
-
-        window.dispatchEvent(new CustomEvent('yanta-calendar-markdown-changed', {
+      if (linked) {
+        window.dispatchEvent(new CustomEvent('yanta-calendar-event-linked-to-note', {
           detail: {
+            eventId: d.raw.id,
             noteId: state.currentNoteId,
-            convertedEventId: isStoredCalendarEvent ? d.raw.id : null,
           },
         }));
 
@@ -5193,7 +5183,7 @@ function finishCalendarExternalEventDrag(d, originalEvent, {
       d?.ghost?.remove();
     } catch {}
 
-  try {
+    try {
       d?.eventEl?.classList.remove('yanta-cal-external-source');
     } catch {}
 
@@ -5232,12 +5222,10 @@ function installPointerCalendarEventExternalDrag() {
     const fcEvent = fc.getEventById(eventId);
     if (!fcEvent) return;
 
+    if (fcEvent.extendedProps?.yantaKind !== 'event') return;
+
     const raw = calendarEventRawForDrag(fcEvent);
-    if (!raw) return;
-
-    const markdown = markdownForCalendarEvent(raw, fcEvent);
-
-    if (!markdown) return;
+    if (!raw?.id) return;
 
     calendarExternalEventDrag = {
       pointerId: e.pointerId,
@@ -5247,7 +5235,6 @@ function installPointerCalendarEventExternalDrag() {
       eventId,
       fcEvent,
       raw,
-      markdown,
 
       startX: e.clientX,
       startY: e.clientY,
@@ -5792,7 +5779,7 @@ function createCalendarEventAttachmentNode(ev, {
 
   node.innerHTML = `
     <div class="yanta-event-note-card-icon">
-      ${lucide('calendar-days', 20)}
+      ${lucide(calendarIconForEvent(ev), 20)}
     </div>
 
     <div class="yanta-event-note-card-main">
@@ -5993,7 +5980,7 @@ export function createLinkedCalendarEventDashboardHeader(noteId, {
         show.icon
           ? `
             <span class="yanta-dash-event-header-icon">
-              ${lucide('calendar-days', 12)}
+              ${lucide(calendarIconForEvent(ev), 12)}
             </span>
           `
           : ''
@@ -6112,6 +6099,153 @@ export function unlinkEventNote(eventId) {
   return saved;
 }
 
+async function applyCalendarEventAppearanceSideEffects(patch) {
+  if (!patch?._appearanceTouched) return;
+
+  const noteId = patch.noteId || null;
+
+  /*
+    Wenn ein Event mit einer Note verlinkt ist, ist die Note die visuelle
+    Quelle für Icon/Farbe. Deshalb muss der Picker in diesem Fall die Note
+    ändern, nicht nur das Event.
+  */
+  if (!noteId) return;
+
+  const note = state.notes.get(noteId);
+  if (!note) return;
+
+  let changed = false;
+
+  if (patch.icon && note.icon !== patch.icon) {
+    note.icon = patch.icon;
+    changed = true;
+  }
+
+  if (patch.color && note.color !== patch.color) {
+    note.color = patch.color;
+    changed = true;
+  }
+
+  if (!changed) return;
+
+  note.updated = now();
+
+  await store.notes.put(note);
+
+  try {
+    renderTree();
+  } catch {}
+
+  window.dispatchEvent(new CustomEvent('yanta-note-updated', {
+    detail: {
+      noteId: note.id,
+      reason: 'appearance-change',
+      source: 'calendar',
+    },
+  }));
+
+  window.dispatchEvent(new CustomEvent('yanta-dashboard-refresh', {
+    detail: {
+      noteId: note.id,
+      reason: 'appearance-change',
+      source: 'calendar',
+    },
+  }));
+}
+
+function calendarEventForNoteIdExcept(noteId, exceptEventId = null) {
+  if (!noteId) return null;
+
+  if (!calendarHydrated || state.calendarEvents.size === 0) {
+    hydrateCalendarStateFromVault({
+      silent: true,
+    });
+  }
+
+  return [...state.calendarEvents.values()]
+    .find((ev) => ev.noteId === noteId && ev.id !== exceptEventId) || null;
+}
+
+export async function linkCalendarEventToNote(eventId, noteId, {
+  ask = true,
+} = {}) {
+  const event = state.calendarEvents.get(String(eventId || ''));
+  const note = state.notes.get(String(noteId || ''));
+
+  if (!event || !note) {
+    toast('Could not link event to note', 'error');
+    return false;
+  }
+
+  if (event.noteId === note.id) {
+    toast('Event is already linked to this note', 'success');
+    renderCalendarNoteAttachments(note.id);
+    return true;
+  }
+
+  const noteExistingEvent = calendarEventForNoteIdExcept(note.id, event.id);
+  const oldNote = event.noteId ? state.notes.get(event.noteId) : null;
+
+  if (ask && (noteExistingEvent || oldNote)) {
+    const parts = [];
+
+    if (oldNote) {
+      parts.push(`This event is currently linked to "${oldNote.title || 'Untitled'}".`);
+    }
+
+    if (noteExistingEvent) {
+      parts.push(`This note is already linked to "${noteExistingEvent.title || 'Untitled event'}".`);
+    }
+
+    parts.push(`Link "${event.title || 'Untitled event'}" to "${note.title || 'Untitled'}"?`);
+
+    const choice = await calendarChoiceDialog({
+      title: 'Link calendar event',
+      message: parts.join('\n\n'),
+      choices: [
+        {
+          id: 'replace',
+          label: noteExistingEvent ? 'Replace link' : 'Move link',
+          primary: true,
+          icon: 'link',
+        },
+        {
+          id: 'cancel',
+          label: 'Cancel',
+        },
+      ],
+    });
+
+    if (choice !== 'replace') {
+      return false;
+    }
+  }
+
+  if (noteExistingEvent) {
+    putCalendarEvent({
+      ...noteExistingEvent,
+      noteId: null,
+    });
+  }
+
+  putCalendarEvent({
+    ...event,
+    noteId: note.id,
+    color: event.color || note.color || undefined,
+    icon: event.icon || note.icon || 'calendar-days',
+  });
+
+  renderCalendarNoteAttachments(note.id);
+
+  if (oldNote?.id && oldNote.id !== note.id) {
+    renderCalendarNoteAttachments(oldNote.id);
+  }
+
+  toast('Calendar event linked to note', 'success');
+
+  return true;
+}
+
 async function deleteLinkedNoteById(noteId) {
   const note = state.notes.get(noteId);
   if (!note) return false;
@@ -6147,15 +6281,18 @@ async function deleteLinkedNoteById(noteId) {
 async function createLinkedNoteForEvent(ev) {
   const noteId = uid();
   const cat = categoryForEvent(ev);
-  const noteColor = ev.color || cat?.color || '#6ea8fe';
-
+  const noteColor =
+    ev.color ||
+    defaultEventColorForCategory(cat) ||
+    cssVar('--accent', '#6ea8fe');
+    
   const note = {
     id: noteId,
     title: ev.title || 'Event note',
     type: 'markdown',
     folderId: null,
     tags: ['calendar'],
-    icon: 'calendar-days',
+    icon: ev.icon || 'calendar-days',
     color: noteColor,
     pinned: false,
     created: now(),
@@ -6515,11 +6652,20 @@ function openEventEditor(input = {}) {
     end: existing?.end || input.end || null,
     allDay: existing?.allDay ?? input.allDay ?? false,
     categoryId: existing?.categoryId || input.categoryId || DEFAULT_CATEGORY_ID,
-    location: existing?.location || '',
-    description: existing?.description || '',
+
+    /*
+      Wichtig:
+      Bisher wurden color/icon hier verloren. Dadurch hatte der Picker
+      später scheinbar keinen Effekt bzw. alte Werte wurden überschrieben.
+    */
+    color: existing?.color || input.color || undefined,
+    icon: existing?.icon || input.icon || undefined,
+
+    location: existing?.location || input.location || '',
+    description: existing?.description || input.description || '',
     noteId: existing?.noteId || input.noteId || null,
-    status: existing?.status || 'confirmed',
-    recurrence: existing?.recurrence || null,
+    status: existing?.status || input.status || 'confirmed',
+    recurrence: existing?.recurrence || input.recurrence || null,
     created: existing?.created || now(),
     updated: existing?.updated || now(),
   });
@@ -6527,6 +6673,27 @@ function openEventEditor(input = {}) {
   if (!ev) return;
 
   let linkedNote = ev.noteId ? state.notes.get(ev.noteId) : null;
+
+  /*
+    Anzeige im Event-Editor:
+    - Wenn verlinkte Note existiert: Note-Appearance anzeigen.
+    - Sonst Event-Appearance.
+    - Sonst Kategorie/Accent-Fallback.
+  */
+  const initialAppearanceIcon =
+    linkedNote?.icon ||
+    ev.icon ||
+    'calendar-days';
+
+  const initialAppearanceColor =
+    cssColorToHex(
+      linkedNote?.color ||
+      ev.color ||
+      defaultEventColorForCategory(categoryForEvent(ev)) ||
+      cssVar('--accent', '#6ea8fe')
+    ) ||
+    cssColorToHex(cssVar('--accent', '#6ea8fe')) ||
+    '#6ea8fe';
 
   const modal = ensureEventModal();
 
@@ -6593,6 +6760,37 @@ function openEventEditor(input = {}) {
 
       const createCb = modal.querySelector('[data-field="createNote"]');
       if (createCb) createCb.checked = false;
+
+      /*
+        Wenn noch keine Appearance-Änderung im Event-Editor gemacht wurde,
+        zeigt der Picker ab jetzt die verlinkte Note als Quelle.
+      */
+      const touched =
+        modal.querySelector('[data-field="appearanceTouched"]')?.value === '1';
+
+      if (!touched) {
+        const previewIcon = modal.querySelector('[data-icon-preview]');
+        const previewText = modal.querySelector('[data-appearance-preview-text]');
+        const pickerButton = modal.querySelector('.yanta-calendar-appearance-picker');
+
+        const noteIcon = note.icon || 'calendar-days';
+        const noteColor =
+          cssColorToHex(note.color) ||
+          cssColorToHex(cssVar('--accent', '#6ea8fe')) ||
+          '#6ea8fe';
+
+        if (previewIcon) {
+          previewIcon.innerHTML = lucide(noteIcon, 17);
+        }
+
+        if (pickerButton) {
+          pickerButton.style.setProperty('--appearance-color', noteColor);
+        }
+
+        if (previewText) {
+          previewText.textContent = 'Uses linked note appearance';
+        }
+      }
 
       renderNoteSection();
     });
@@ -6682,6 +6880,35 @@ function openEventEditor(input = {}) {
           </select>
         </label>
 
+        <div class="yanta-calendar-appearance-box">
+          <input type="hidden" data-field="color" value="${escapeAttr(ev.color || '')}" />
+          <input type="hidden" data-field="icon" value="${escapeAttr(ev.icon || '')}" />
+          <input type="hidden" data-field="appearanceTouched" value="0" />
+
+          <button
+            type="button"
+            class="yanta-calendar-appearance-picker"
+            data-action="pick-icon"
+            style="--appearance-color:${escapeAttr(initialAppearanceColor)}">
+            <span class="yanta-calendar-appearance-picker-icon" data-icon-preview>
+              ${lucide(initialAppearanceIcon, 17)}
+            </span>
+
+            <span class="yanta-calendar-appearance-picker-text">
+              <strong>Icon & color</strong>
+              <small data-appearance-preview-text>
+                ${
+                  linkedNote
+                    ? 'Uses linked note appearance'
+                    : ev.icon || ev.color
+                      ? 'Custom event appearance'
+                      : 'Default event appearance'
+                }
+              </small>
+            </span>
+          </button>
+        </div>
+
         <label class="switch yanta-calendar-switch">
           <input type="checkbox" data-field="allDay" ${ev.allDay ? 'checked' : ''} />
           <span>All day</span>
@@ -6754,6 +6981,76 @@ function openEventEditor(input = {}) {
   const allDayInput = modal.querySelector('[data-field="allDay"]');
   const startInput = modal.querySelector('[data-field="start"]');
   const endInput = modal.querySelector('[data-field="end"]');
+
+  modal.querySelector('[data-action="pick-icon"]')?.addEventListener('click', async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const iconInput = modal.querySelector('[data-field="icon"]');
+    const colorInput = modal.querySelector('[data-field="color"]');
+    const touchedInput = modal.querySelector('[data-field="appearanceTouched"]');
+
+    const previewIcon = modal.querySelector('[data-icon-preview]');
+    const previewText = modal.querySelector('[data-appearance-preview-text]');
+    const pickerButton = modal.querySelector('.yanta-calendar-appearance-picker');
+
+    const linkedNoteId = modal.querySelector('[data-field="noteId"]')?.value || '';
+    const linked = linkedNoteId ? state.notes.get(linkedNoteId) : null;
+
+    const currentIcon =
+      iconInput?.value ||
+      linked?.icon ||
+      ev.icon ||
+      'calendar-days';
+
+    const currentColor =
+      cssColorToHex(
+        colorInput?.value ||
+        linked?.color ||
+        ev.color ||
+        defaultEventColorForCategory(categoryForEvent(ev)) ||
+        cssVar('--accent', '#6ea8fe')
+      ) ||
+      cssColorToHex(cssVar('--accent', '#6ea8fe')) ||
+      '#6ea8fe';
+
+    const { openIconPicker } = await import('./icon-picker.js');
+
+    openIconPicker({
+      title: linked
+        ? 'Icon & color for linked note'
+        : 'Icon & color for event',
+      initialIcon: currentIcon,
+      initialColor: currentColor,
+      allowReset: false,
+      applyLabel: 'Apply',
+      onApply: ({ icon, color }) => {
+        const nextIcon = icon || currentIcon;
+        const nextColor =
+          cssColorToHex(color) ||
+          cssColorToHex(currentColor) ||
+          currentColor;
+
+        if (iconInput) iconInput.value = nextIcon;
+        if (colorInput) colorInput.value = nextColor;
+        if (touchedInput) touchedInput.value = '1';
+
+        if (previewIcon) {
+          previewIcon.innerHTML = lucide(nextIcon, 17);
+        }
+
+        if (pickerButton) {
+          pickerButton.style.setProperty('--appearance-color', nextColor);
+        }
+
+        if (previewText) {
+          previewText.textContent = linked
+            ? 'Will update linked note appearance'
+            : 'Will update event appearance';
+        }
+      },
+    });
+  });
 
   let endTouched = !!endInput?.value?.trim();
 
@@ -6836,10 +7133,29 @@ function openEventEditor(input = {}) {
       allDay
     );
 
+    const appearanceTouched =
+      modal.querySelector('[data-field="appearanceTouched"]')?.value === '1';
+
+    const nextColor =
+      modal.querySelector('[data-field="color"]')?.value?.trim() || '';
+
+    const nextIcon =
+      modal.querySelector('[data-field="icon"]')?.value?.trim() || '';
+
     return {
       ...ev,
       title: modal.querySelector('[data-field="title"]').value.trim() || 'Untitled event',
       categoryId: modal.querySelector('[data-field="categoryId"]').value || DEFAULT_CATEGORY_ID,
+
+      /*
+        Nur explizit speichern, wenn der Picker benutzt wurde.
+        Sonst überschreiben wir nicht versehentlich Kategorie/Accent-Fallbacks
+        oder Linked-Note-Appearance.
+      */
+      color: appearanceTouched ? (nextColor || undefined) : (ev.color || undefined),
+      icon: appearanceTouched ? (nextIcon || undefined) : (ev.icon || undefined),
+      _appearanceTouched: appearanceTouched,
+
       allDay,
       start: parsedStart,
       end: normalizeCalendarEventEnd({
@@ -7021,6 +7337,8 @@ function openEventEditor(input = {}) {
 
       return;
     }
+
+    await applyCalendarEventAppearanceSideEffects(patch);
 
     const saved = putCalendarEvent(patch);
 
@@ -8232,8 +8550,16 @@ export function setupCalendar() {
     }
   });
 
-  window.addEventListener('yanta-note-updated', () => {
+  window.addEventListener('yanta-note-updated', (e) => {
     scheduleCalendarRender();
+
+    const noteId = e.detail?.noteId;
+
+    if (noteId && noteId === state.currentNoteId) {
+      requestAnimationFrame(() => {
+        renderCalendarNoteAttachments(noteId);
+      });
+    }
   });
 
   window.addEventListener('yanta-preview-rendered', () => {

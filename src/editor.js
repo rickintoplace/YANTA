@@ -980,43 +980,27 @@ function dropHandler() {
         e.preventDefault();
         e.stopPropagation();
 
-        let insert = '';
+        let payload = null;
 
         if (calendarEventJson) {
           try {
-            insert = JSON.parse(calendarEventJson)?.markdown || '';
+            payload = JSON.parse(calendarEventJson);
           } catch {}
         }
 
-        if (!insert) {
-          insert = plainDropText;
-        }
-
-        insert = String(insert || '').trim();
-
-        if (!insert) return true;
-
-        const docText = view.state.doc.toString();
-        const before = docText.slice(Math.max(0, pos - 1), pos);
-        const after = docText.slice(pos, pos + 1);
-
-        const prefix = before && before !== '\n' ? '\n' : '';
-        const suffix = after && after !== '\n' ? '\n' : '';
-
-        const text = `${prefix}${insert}${suffix}`;
-
-        view.dispatch({
-          changes: {
-            from: pos,
-            to: pos,
-            insert: text,
+        /*
+          Kein @due/@date Markdown mehr einfügen.
+          Stattdessen Event↔Note sauber über calendar.js verlinken.
+        */
+        window.dispatchEvent(new CustomEvent('yanta-calendar-event-drop-on-note', {
+          detail: {
+            ...(payload || {}),
+            noteId: state.currentNoteId,
+            clientX: e.clientX,
+            clientY: e.clientY,
+            rawText: plainDropText || '',
           },
-          selection: {
-            anchor: pos + text.length,
-          },
-        });
-
-        view.focus();
+        }));
 
         return true;
       }

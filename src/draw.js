@@ -3910,7 +3910,7 @@ async function mountInlineDrawing(embed, sourceNoteId, drawingId, drawing) {
         apiRef.current = api;
         inlineApis.set(embed, api);
 
-      + addFilesToExcalidrawApi(api, drawing.files);
+        addFilesToExcalidrawApi(api, drawing.files);
 
         setTimeout(() => {
           try {

@@ -1366,7 +1366,85 @@ function renderDashboardSection(host) {
     }),
   );
 
+  // Wichtig: Card labels zuerst anhängen.
   host.append(group);
+
+  const eventGroup = el('div', { class: 'yanta-settings-group' });
+
+  eventGroup.append(
+    el('div', { class: 'yanta-settings-group-title' }, 'Linked event card')
+  );
+
+  eventGroup.append(
+    renderDashboardToggle({
+      checked: prefs.linkedEventShow !== false,
+      label: 'Show linked event card on note cards',
+      hint: 'Shows a compact calendar event header on dashboard note cards when a note is linked to an event.',
+      onChange: async (checked) => {
+        await setDashboardCardDisplayPrefs({
+          linkedEventShow: checked,
+        });
+
+        toast('Dashboard setting saved', 'success');
+        renderSettingsBody();
+      },
+    })
+  );
+
+  const fieldPrefs = prefs.linkedEventFields || {};
+
+  const fields = [
+    {
+      key: 'icon',
+      label: 'Show icon',
+      hint: 'Shows a small calendar icon.',
+    },
+    {
+      key: 'title',
+      label: 'Show title',
+      hint: 'Shows the event title.',
+    },
+    {
+      key: 'time',
+      label: 'Show time/date',
+      hint: 'Shows the event date and time.',
+    },
+    {
+      key: 'location',
+      label: 'Show location',
+      hint: 'Shows the event location if present.',
+    },
+    {
+      key: 'description',
+      label: 'Show description',
+      hint: 'Shows the event description if present.',
+    },
+  ];
+
+  for (const field of fields) {
+    eventGroup.append(
+      renderDashboardToggle({
+        checked: fieldPrefs[field.key] !== false,
+        label: field.label,
+        hint: field.hint,
+        onChange: async (checked) => {
+          const current = getDashboardCardDisplayPrefs();
+
+          await setDashboardCardDisplayPrefs({
+            linkedEventFields: {
+              ...(current.linkedEventFields || {}),
+              [field.key]: checked,
+            },
+          });
+
+          toast('Dashboard setting saved', 'success');
+        },
+      })
+    );
+  }
+
+  // Danach Linked event card.
+  host.append(eventGroup);
 
   const info = el('div', { class: 'yanta-settings-info' });
 
@@ -1655,17 +1733,17 @@ function renderSyncSection(host) {
   const cloudGroup = el('div', { class: 'yanta-settings-group' });
   cloudGroup.append(el('div', { class: 'yanta-settings-group-title' }, 'Cloud Sync'));
   cloudGroup.append(el('p', { class: 'yanta-settings-hint' },
-    'Synchronize encrypted YANTA data through your hidden Google Drive app data folder. Google only receives encrypted blobs.'
+    'Synchronize encrypted YANTA data through a cloud provider. Google Drive is available now; Dropbox, OneDrive and others can be added later through the same provider-neutral sync layer.'
   ));
   cloudGroup.append(el('button', {
     class: 'btn primary',
     onclick: async () => {
       closeSettings();
-  
+
       const { openGoogleDriveSyncSetup } = await import('./sync2/sync-setup-ui.js');
       openGoogleDriveSyncSetup();
     },
-  }, 'Set up Google Drive Sync'));
+  }, 'Set up Cloud Sync'));
   host.append(cloudGroup);
 
   // Sync folder shortcut

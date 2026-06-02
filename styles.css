@@ -1696,23 +1696,22 @@ button.link { background: 0; border: 0; color: var(--accent); cursor: pointer; p
 }
 
 /* Outline container */
+
 .pane-preview > .pv-outline {
   order: 1;
 
   position: relative;
   top: 0;
-  align-self: center;
+  align-self: end;
+  margin-left: auto;
+  /* margin-right: auto; */
 
-  width: 100%;
+  width: min(760px, calc(100% - 28px));
   max-width: 100%;
 
   height: auto;
   max-height: none;
   overflow: visible;
-
-  /* margin: 0 0 4em; */
-  align-self: end;
-
   opacity: 1;
   backdrop-filter: none;
 
@@ -1720,14 +1719,16 @@ button.link { background: 0; border: 0; color: var(--accent); cursor: pointer; p
     max-width 250ms ease,
     width 250ms ease,
     margin-bottom 250ms ease,
+    margin-left 250ms ease,
+    margin-right 250ms ease,
     opacity 200ms ease;
 }
 
-/* Collapsed outline container */
 .pane-preview > .pv-outline.collapsed {
     width: 260px;
     max-width: 260px;
     opacity: 0.7;
+    margin-right: 0;
 }
 
 @media (min-width: 880px) {
@@ -1750,7 +1751,6 @@ button.link { background: 0; border: 0; color: var(--accent); cursor: pointer; p
     scale: -1 -1;
 }
 
-/* Expanded TOC list */
 .pane-preview > .pv-outline .pv-outline-list {
   height: auto;
   max-height: min(60vh, 520px);
@@ -1770,7 +1770,6 @@ button.link { background: 0; border: 0; color: var(--accent); cursor: pointer; p
     visibility 0s linear 0s;
 }
 
-/* Collapsed TOC list */
 .pane-preview > .pv-outline.collapsed .pv-outline-list {
   max-height: 0;
 
@@ -3940,39 +3939,5 @@ input.yanta-task-checkbox {
   .app .sidebar,
   .app .sidebar-backdrop {
     transition: none !important;
-  }
-}
-
-/* ============================================================
-   YANTA — Fast staggered load transitions
-   Dashboard cards only
-   ============================================================ */
-
-@keyframes yanta-stagger-fade-up {
-  from {
-    opacity: 0;
-    transform: translate3d(0, 9px, 0) scale(0.985);
-  }
-
-  to {
-    opacity: 1;
-    transform: translate3d(0, 0, 0) scale(1);
-  }
-}
-
-.dashboard .yanta-dash-card.yanta-stagger-item {
-  animation-name: yanta-stagger-fade-up;
-  animation-duration: 340ms;
-  animation-delay: var(--yanta-stagger-delay, 0ms);
-  animation-timing-function: cubic-bezier(.2, .8, .2, 1);
-  animation-fill-mode: both;
-  will-change: transform, opacity;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .dashboard .yanta-dash-card.yanta-stagger-item {
-    animation: none !important;
-    opacity: 1 !important;
-    transform: none !important;
   }
 }

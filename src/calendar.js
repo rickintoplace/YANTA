@@ -29,11 +29,15 @@ import {
 
 import {
   getNoteDoc,
+  getMarkdownText,
   noteMarkdown,
+  destroyNoteDoc,
 } from './yjs.js';
 
 import {
   openNote,
+  clearEditor,
+  rebuildWikilinkIndex,
 } from './notes.js';
 
 import {
@@ -84,6 +88,7 @@ import {
   fullCalendarTimeFormat,
   fullCalendarSlotLabelFormat,
   formatCalendarDateTime,
+  formatCalendarTime,
 } from './calendar-preferences.js';
 
 import {
@@ -136,10 +141,13 @@ let calendarSwipeSelectionSuppressed = false;
 
 let fc = null;
 let initialized = false;
+
 let eventModal = null;
 let categoriesModal = null;
 let calendarSourcesModal = null;
 let calendarDateTimePickerModal = null;
+let calendarDialogModal = null;
+let calendarNotePickerModal = null;
 
 let calendarMode = 'surface'; // 'surface' | 'pane'
 let calendarOriginalParent = null;
@@ -545,6 +553,33 @@ function calendarEventColors(ev) {
     border: background,
     text: readableTextColor(background),
   };
+}
+
+function calendarEventAttachmentColor(ev) {
+  const note = ev?.noteId
+    ? state.notes.get(ev.noteId)
+    : null;
+
+  const cat = categoryForEvent(ev);
+
+  /*
+    Virtuelle Event-Card in einer Note:
+    - Wenn die Note eine eigene Farbe hat, soll die Card zur Note passen.
+    - Sonst Event-Farbe.
+    - Sonst Kategorie-Farbe.
+    - Sonst Accent-Fallback.
+  */
+  const rawColor = String(
+    note?.color ||
+    ev?.color ||
+    cat?.color ||
+    ''
+  ).trim();
+
+  return resolveCssColor(
+    rawColor,
+    cssVar('--accent', '#6ea8fe')
+  );
 }
 
 function calendarThemeVars() {
@@ -4055,8 +4090,133 @@ function cleanUndefined(obj) {
   for (const [k, v] of Object.entries(obj || {})) {
     if (v !== undefined) out[k] = v;
   }
-
   return out;
+}
+
+// ============================================================
+// Calendar native dialogs + default time helpers
+// ============================================================
+
+export function calendarChoiceDialog({
+  title = 'Confirm',
+  message = '',
+  choices = [],
+} = {}) {
+  return new Promise((resolve) => {
+    if (!calendarDialogModal) {
+      calendarDialogModal = document.createElement('div');
+      calendarDialogModal.className = 'modal yanta-calendar-dialog-modal';
+      calendarDialogModal.hidden = true;
+      document.body.append(calendarDialogModal);
+    }
+
+    const safeChoices = choices.length
+      ? choices
+      : [
+          { id: 'ok', label: 'OK', primary: true },
+          { id: 'cancel', label: 'Cancel' },
+        ];
+
+    calendarDialogModal.innerHTML = `
+      <div class="modal-card yanta-calendar-dialog-card">
+        <header class="modal-head">
+          <h3>${escapeHtml(title)}</h3>
+          <button class="icon-btn" data-dialog-choice="cancel">&times;</button>
+        </header>
+
+        <div class="modal-body">
+          <div class="yanta-calendar-dialog-message">
+            ${escapeHtml(message).replace(/\n/g, '<br>')}
+          </div>
+
+          <div class="compress-actions yanta-calendar-dialog-actions">
+            <span class="grow"></span>
+            ${safeChoices.map((choice) => `
+              <button
+                class="btn ${choice.primary ? 'primary' : ''} ${choice.danger ? 'danger' : ''}"
+                data-dialog-choice="${escapeAttr(choice.id)}">
+                ${choice.icon ? lucide(choice.icon, 14) : ''}
+                ${escapeHtml(choice.label)}
+              </button>
+            `).join('')}
+          </div>
+        </div>
+      </div>
+    `;
+
+    const finish = (id) => {
+      calendarDialogModal.hidden = true;
+      resolve(id);
+    };
+
+    calendarDialogModal.querySelectorAll('[data-dialog-choice]').forEach((btn) => {
+      btn.addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        finish(btn.dataset.dialogChoice || 'cancel');
+      });
+    });
+
+    calendarDialogModal.addEventListener('click', function onBackdrop(e) {
+      if (e.target !== calendarDialogModal) return;
+      calendarDialogModal.removeEventListener('click', onBackdrop);
+      finish('cancel');
+    }, { once: true });
+
+    const onKey = (e) => {
+      if (calendarDialogModal.hidden) {
+        window.removeEventListener('keydown', onKey);
+        return;
+      }
+
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        window.removeEventListener('keydown', onKey);
+        finish('cancel');
+      }
+    };
+
+    window.addEventListener('keydown', onKey);
+
+    calendarDialogModal.hidden = false;
+
+    requestAnimationFrame(() => {
+      calendarDialogModal.querySelector('.btn.primary, .btn')?.focus?.();
+    });
+  });
+}
+
+function nextHalfHourDate(base = new Date()) {
+  const d = new Date(base);
+  d.setSeconds(0, 0);
+
+  const minutes = d.getMinutes();
+
+  if (minutes === 0) {
+    d.setMinutes(30);
+  } else if (minutes <= 30) {
+    d.setMinutes(30);
+  } else {
+    d.setHours(d.getHours() + 1, 0, 0, 0);
+  }
+
+  return d;
+}
+
+function applyCurrentDefaultTimeToDate(dateLike) {
+  const date = dateLikeToLocalDate(dateLike) || new Date();
+  const slot = nextHalfHourDate();
+
+  date.setHours(slot.getHours(), slot.getMinutes(), 0, 0);
+
+  return date.toISOString();
+}
+
+function addMinutesIso(iso, minutes) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+
+  return new Date(d.getTime() + minutes * 60000).toISOString();
 }
 
 // ============================================================
@@ -4188,7 +4348,9 @@ export function ensureDefaultCalendarCategory() {
   return cat;
 }
 
-export function hydrateCalendarStateFromVault() {
+export function hydrateCalendarStateFromVault({
+  silent = false,
+} = {}) {
   const tombstones = vaultTombstonesMap();
 
   state.calendarEvents.clear();
@@ -4226,9 +4388,16 @@ export function hydrateCalendarStateFromVault() {
 
   calendarHydrated = true;
 
-  scheduleCalendarRender();
+  if (!silent) {
+    scheduleCalendarRender();
 
-  window.dispatchEvent(new CustomEvent('yanta-calendar-updated'));
+    window.dispatchEvent(new CustomEvent('yanta-calendar-updated'));
+  }
+
+  return {
+    events: state.calendarEvents.size,
+    categories: state.calendarCategories.size,
+  };
 }
 
 // ============================================================
@@ -4338,6 +4507,22 @@ export function putCalendarEvent(patch) {
 
   state.calendarEvents.set(ev.id, safeJsonClone(ev));
 
+if (ev.noteId && state.notes.has(ev.noteId)) {
+  removeLegacyManagedEventBlocksFromNote(ev.noteId);
+
+  if (state.currentNoteId === ev.noteId) {
+    requestAnimationFrame(() => {
+      renderCalendarNoteAttachments(ev.noteId);
+    });
+  }
+}
+
+if (existing?.noteId && existing.noteId !== ev.noteId && state.currentNoteId === existing.noteId) {
+  requestAnimationFrame(() => {
+    renderCalendarNoteAttachments(existing.noteId);
+  });
+}
+
   scheduleCalendarRender();
 
   if (calendarMode === 'pane') {
@@ -4358,6 +4543,8 @@ export function deleteCalendarEvent(eventId) {
   if (!id) return;
 
   const existing = state.calendarEvents.get(id);
+  const oldNoteId = existing?.noteId || null;
+
   const doc = getVaultDoc();
 
   doc.transact(() => {
@@ -4371,6 +4558,12 @@ export function deleteCalendarEvent(eventId) {
   }, ORIGIN);
 
   state.calendarEvents.delete(id);
+
+  if (oldNoteId && state.currentNoteId === oldNoteId) {
+    requestAnimationFrame(() => {
+      renderCalendarNoteAttachments(oldNoteId);
+    });
+  }
 
   scheduleCalendarRender();
 
@@ -4575,9 +4768,49 @@ function fullCalendarEventFromMarkdownEvent(ev) {
 
 function calendarEventContent(info) {
   const kind = info.event.extendedProps?.yantaKind;
+  const raw = info.event.extendedProps?.raw;
 
   const wrap = document.createElement('span');
   wrap.className = 'yanta-cal-event-content';
+
+  let dotColor =
+    info.event.borderColor ||
+    info.event.backgroundColor ||
+    cssVar('--accent', '#6ea8fe');
+
+  if (
+    raw &&
+    (
+      kind === 'event' ||
+      kind === 'markdown-event' ||
+      kind === 'holiday' ||
+      kind === 'calendar-source'
+    )
+  ) {
+    if (kind === 'markdown-event') {
+      const note = raw.noteId ? state.notes.get(raw.noteId) : null;
+
+      dotColor =
+        note?.color ||
+        raw.color ||
+        defaultEventColorForCategory(categoryForEvent(raw));
+    } else {
+      dotColor = calendarEventColors(raw).background;
+    }
+  }
+
+  dotColor = resolveCssColor(dotColor, cssVar('--accent', '#6ea8fe'));
+
+  wrap.style.setProperty('--yanta-cal-dot-color', dotColor);
+
+  // Timed events are often rendered as transparent/dot-style events.
+  // Add our own stable color dot so the category/note color remains visible.
+  if (!info.event.allDay) {
+    const dot = document.createElement('span');
+    dot.className = 'yanta-cal-event-color-dot';
+    dot.setAttribute('aria-hidden', 'true');
+    wrap.append(dot);
+  }
 
   // Time text, e.g. "14:00"
   if (info.timeText) {
@@ -5439,18 +5672,491 @@ export function exportCalendarJson({
 }
 
 // ============================================================
-// Event notes
+// Event notes — virtual note attachments
 // ============================================================
+
+const LEGACY_EVENT_NOTE_BLOCK_RE =
+  /<!-- yanta:event-note v1 eventId=[^\n]* -->[\s\S]*?<!-- \/yanta:event-note -->/g;
+
+function formatEventRangeForAttachment(ev) {
+  if (!ev?.start) return '';
+
+  const start = formatCalendarDateTime(ev.start, {
+    allDay: !!ev.allDay,
+    editor: true,
+    includeWeekday: true,
+  });
+
+  if (!ev.end) return start;
+
+  const sameDay = sameLocalDay(ev.start, ev.end);
+
+  /*
+    Same day with explicit times:
+    Samstag, 30. Mai 2026 14:00 – 15:00
+  */
+  if (!ev.allDay && sameDay) {
+    return `${start} – ${formatCalendarTime(ev.end)}`;
+  }
+
+  const end = formatCalendarDateTime(ev.end, {
+    allDay: !!ev.allDay,
+    editor: true,
+    includeWeekday: true,
+  });
+
+  /*
+    Multi-day:
+    Samstag, 30. Mai 2026
+    Sonntag, 31. Mai 2026
+
+    Kein Gedankenstrich, damit es überall kompakter/lesbarer umbrechen kann.
+  */
+  return `${start}\n${end}`;
+}
+
+export function calendarEventForNoteId(noteId) {
+  if (!noteId) return null;
+
+  if (!calendarHydrated || state.calendarEvents.size === 0) {
+    hydrateCalendarStateFromVault({
+      silent: true,
+    });
+  }
+
+  return [...state.calendarEvents.values()]
+    .find((ev) => ev.noteId === noteId) || null;
+}
+
+export function removeLegacyManagedEventBlocksFromNote(noteId) {
+  if (!noteId) return false;
+
+  /*
+    Safety:
+    Alte Managed Blocks nur entfernen, wenn für diese Note auch wirklich
+    ein Calendar-Event existiert. Sonst würde ein Refresh alte Infos löschen,
+    ohne dass eine virtuelle Karte zurückkommt.
+  */
+  const linkedEvent = [...state.calendarEvents.values()]
+    .find((ev) => ev.noteId === noteId);
+
+  if (!linkedEvent) return false;
+
+  let removed = false;
+
+  try {
+    const ytext = getMarkdownText(noteId);
+    let md = ytext.toString();
+
+    while (true) {
+      LEGACY_EVENT_NOTE_BLOCK_RE.lastIndex = 0;
+      const m = LEGACY_EVENT_NOTE_BLOCK_RE.exec(md);
+
+      if (!m) break;
+
+      let from = m.index;
+      let to = m.index + m[0].length;
+
+      // Clean surrounding blank lines.
+      if (md.slice(to, to + 2) === '\n\n') {
+        to += 1;
+      } else if (from > 0 && md.slice(from - 2, from) === '\n\n') {
+        from -= 1;
+      }
+
+      ytext.delete(from, to - from);
+      removed = true;
+
+      md = ytext.toString();
+    }
+  } catch (err) {
+    console.warn('[YANTA Calendar] Could not remove legacy event note block', err);
+  }
+
+  return removed;
+}
+
+function createCalendarEventAttachmentNode(ev, {
+  surface = 'preview',
+} = {}) {
+  const node = document.createElement('div');
+  node.className = `yanta-event-note-card yanta-event-note-card-${surface}`;
+  node.dataset.calendarEventAttachment = ev.id;
+  node.contentEditable = 'false';
+
+  const cat = categoryForEvent(ev);
+  const eventColor = calendarEventAttachmentColor(ev);
+  const when = formatEventRangeForAttachment(ev);
+
+  node.style.setProperty('--event-color', eventColor);
+
+  node.innerHTML = `
+    <div class="yanta-event-note-card-icon">
+      ${lucide('calendar-days', 20)}
+    </div>
+
+    <div class="yanta-event-note-card-main">
+      <div class="yanta-event-note-card-title">
+        ${escapeHtml(ev.title || 'Untitled event')}
+      </div>
+
+      ${when ? `
+        <div class="yanta-event-note-card-meta">
+          ${escapeHtml(when).replace(/\n/g, '<br>')}
+        </div>
+      ` : ''}
+
+      ${ev.location ? `
+        <div class="yanta-event-note-card-location">
+          ${lucide('map-pin', 13)}
+          <span>${escapeHtml(ev.location)}</span>
+        </div>
+      ` : ''}
+
+      ${ev.description ? `
+        <div class="yanta-event-note-card-description">
+          ${escapeHtml(ev.description).replace(/\n/g, '<br>')}
+        </div>
+      ` : ''}
+
+      ${cat?.name ? `
+        <div class="yanta-event-note-card-calendar">
+          ${escapeHtml(cat.name)}
+        </div>
+      ` : ''}
+    </div>
+
+    <div class="yanta-event-note-card-actions">
+      <button class="btn ${surface === 'editor' ? 'primary' : ''}" data-event-attachment-action="open">
+        ${lucide('calendar-clock', 13)}
+        Open event
+      </button>
+
+      ${surface === 'editor' ? `
+        <button class="btn" data-event-attachment-action="unlink">
+          ${lucide('unlink', 13)}
+          Unlink
+        </button>
+      ` : ''}
+    </div>
+  `;
+
+  node.querySelector('[data-event-attachment-action="open"]')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    openCalendarEvent(ev.id, {
+      push: true,
+    });
+  });
+
+  node.querySelector('[data-event-attachment-action="unlink"]')?.addEventListener('click', async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const choice = await calendarChoiceDialog({
+      title: 'Unlink calendar event',
+      message: `Unlink this note from "${ev.title || 'Untitled event'}"?`,
+      choices: [
+        { id: 'unlink', label: 'Unlink', primary: true },
+        { id: 'cancel', label: 'Cancel' },
+      ],
+    });
+
+    if (choice !== 'unlink') return;
+
+    unlinkEventNote(ev.id);
+    toast('Event unlinked from note', 'success');
+  });
+
+  return node;
+}
+
+export function createLinkedCalendarEventDashboardHeader(noteId, {
+  fields = {},
+} = {}) {
+  if (!noteId) return null;
+
+  if (!calendarHydrated || state.calendarEvents.size === 0) {
+    hydrateCalendarStateFromVault({
+      silent: true,
+    });
+  }
+
+  const ev = calendarEventForNoteId(noteId);
+  if (!ev) return null;
+
+  const show = {
+    icon: true,
+    title: true,
+    time: true,
+    location: true,
+    description: true,
+    ...fields,
+  };
+
+  if (
+    !show.icon &&
+    !show.title &&
+    !show.time &&
+    !show.location &&
+    !show.description
+  ) {
+    return null;
+  }
+
+  const eventColor = calendarEventAttachmentColor(ev);
+  const when = formatEventRangeForAttachment(ev);
+
+  const titleHtml = show.title
+    ? `
+      <strong class="yanta-dash-event-header-title">
+        ${escapeHtml(ev.title || 'Untitled event')}
+      </strong>
+    `
+    : '';
+
+  const timeHtml = show.time && when
+    ? `
+      <span class="yanta-dash-event-header-time">
+        ${escapeHtml(when).replace(/\n/g, '<br>')}
+      </span>
+    `
+    : '';
+
+  const locationHtml = show.location && ev.location
+    ? `
+      <span class="yanta-dash-event-header-location">
+        ${lucide('map-pin', 11)}
+        <span>${escapeHtml(ev.location)}</span>
+      </span>
+    `
+    : '';
+
+  const descriptionHtml = show.description && ev.description
+    ? `
+      <span class="yanta-dash-event-header-description">
+        ${escapeHtml(ev.description).replace(/\n/g, '<br>')}
+      </span>
+    `
+    : '';
+
+  /*
+    Reihenfolge:
+    - Erste sichtbare Information kommt in die kompakte Topline neben das Icon.
+    - Weitere Informationen stehen darunter über die volle Breite.
+    Beispiele:
+      Icon + Titel
+      Time
+      Location
+      Description
+
+    Wenn Titel deaktiviert ist:
+      Icon + Time
+      Location
+      Description
+  */
+  const visibleParts = [
+    titleHtml,
+    timeHtml,
+    locationHtml,
+    descriptionHtml,
+  ].filter(Boolean);
+
+  if (!visibleParts.length && !show.icon) {
+    return null;
+  }
+
+  const primaryHtml =
+    visibleParts[0] ||
+    '<span class="yanta-dash-event-header-title">Calendar event</span>';
+
+  const secondaryHtml = visibleParts
+    .slice(1)
+    .join('');
+
+  const node = document.createElement('div');
+  node.setAttribute('role', 'button');
+  node.setAttribute('aria-label', `Open calendar event: ${ev.title || 'Untitled event'}`);
+  node.tabIndex = -1;
+
+  node.className =
+    'yanta-dash-event-header' +
+    (!show.icon ? ' no-icon' : '');
+
+  node.dataset.calendarEventId = ev.id;
+  node.style.setProperty('--event-color', eventColor);
+
+  node.innerHTML = `
+    <span class="yanta-dash-event-header-main">
+      ${
+        show.icon
+          ? `
+            <span class="yanta-dash-event-header-icon">
+              ${lucide('calendar-days', 12)}
+            </span>
+          `
+          : ''
+      }
+
+      ${primaryHtml}
+    </span>
+
+    ${secondaryHtml}
+  `;
+
+  return node;
+}
+
+function renderEditorEventAttachment(noteId) {
+  const pane = $('paneEdit');
+  const editor = $('editor');
+
+  if (!pane || !editor) return;
+
+  pane
+    .querySelectorAll(':scope > .yanta-event-note-card')
+    .forEach((n) => n.remove());
+
+  const ev = calendarEventForNoteId(noteId);
+  if (!ev) return;
+
+  const node = createCalendarEventAttachmentNode(ev, {
+    surface: 'editor',
+  });
+
+  pane.insertBefore(node, editor);
+}
+
+function renderPreviewEventAttachment(noteId) {
+  const pane = $('panePreview');
+  const preview = $('preview');
+
+  if (!pane || !preview) return;
+
+  pane
+    .querySelectorAll(':scope > .yanta-event-note-card')
+    .forEach((n) => n.remove());
+
+  const ev = calendarEventForNoteId(noteId);
+  if (!ev) return;
+
+  const node = createCalendarEventAttachmentNode(ev, {
+    surface: 'preview',
+  });
+
+  /*
+    Wichtig:
+    Der Preview-Pane-Switcher soll immer oberhalb der virtuellen Event-Card stehen.
+    Falls er existiert: Event-Card direkt danach einfügen.
+    Falls nicht: vor dem Preview-Article einfügen.
+  */
+  const switcher = pane.querySelector('[data-preview-pane-switcher]');
+
+  if (switcher) {
+    switcher.insertAdjacentElement('afterend', node);
+  } else {
+    pane.insertBefore(node, preview);
+  }
+}
+
+export function renderCalendarNoteAttachments(noteId = state.currentNoteId) {
+  if (!noteId) {
+    $('paneEdit')
+      ?.querySelectorAll(':scope > .yanta-event-note-card')
+      ?.forEach((n) => n.remove());
+
+    $('panePreview')
+      ?.querySelectorAll(':scope > .yanta-event-note-card')
+      ?.forEach((n) => n.remove());
+
+    return;
+  }
+
+  /*
+    Wichtig:
+    Nach Page Refresh ist state.calendarEvents leer, solange der Kalender
+    noch nicht geöffnet wurde. Die virtuellen Event-Attachments brauchen
+    aber die Event-Daten aus VaultDoc.
+  */
+  if (!calendarHydrated || state.calendarEvents.size === 0) {
+    hydrateCalendarStateFromVault({
+      silent: true,
+    });
+  }
+
+  // Migration cleanup from the earlier managed-Markdown-block approach.
+  // Erst NACH Hydration ausführen, damit die virtuelle Karte direkt wieder
+  // gerendert werden kann.
+  removeLegacyManagedEventBlocksFromNote(noteId);
+
+  renderEditorEventAttachment(noteId);
+  renderPreviewEventAttachment(noteId);
+}
+
+export function unlinkEventNote(eventId) {
+  const ev = state.calendarEvents.get(String(eventId || ''));
+  if (!ev) return null;
+
+  const saved = putCalendarEvent({
+    ...ev,
+    noteId: null,
+  });
+
+  if (state.currentNoteId === ev.noteId) {
+    requestAnimationFrame(() => {
+      renderCalendarNoteAttachments(state.currentNoteId);
+    });
+  }
+
+  return saved;
+}
+
+async function deleteLinkedNoteById(noteId) {
+  const note = state.notes.get(noteId);
+  if (!note) return false;
+
+  await store.notes.del(noteId);
+
+  state.notes.delete(noteId);
+  state.searchIndex.delete(noteId);
+
+  try {
+    await destroyNoteDoc(noteId);
+  } catch {}
+
+  if (state.currentNoteId === noteId) {
+    clearEditor();
+  }
+
+  rebuildWikilinkIndex();
+  renderTree();
+
+  window.dispatchEvent(new CustomEvent('yanta-note-updated', {
+    detail: {
+      noteId,
+      reason: 'note-deleted',
+      deleted: true,
+      source: 'calendar',
+    },
+  }));
+
+  return true;
+}
 
 async function createLinkedNoteForEvent(ev) {
   const noteId = uid();
+  const cat = categoryForEvent(ev);
+  const noteColor = ev.color || cat?.color || '#6ea8fe';
 
   const note = {
     id: noteId,
     title: ev.title || 'Event note',
     type: 'markdown',
     folderId: null,
-    tags: ['event'],
+    tags: ['calendar'],
+    icon: 'calendar-days',
+    color: noteColor,
     pinned: false,
     created: now(),
     updated: now(),
@@ -5462,28 +6168,251 @@ async function createLinkedNoteForEvent(ev) {
   const entry = getNoteDoc(noteId);
   await entry.ready;
 
-  const start = ev.start || '';
-  const end = ev.end ? ` – ${ev.end}` : '';
+  // Important:
+  // Event attachment is virtual. No event block is written to Markdown.
+  // The note body stays user-owned.
+  const ytext = entry.doc.getText('markdown');
+  if (ytext.length === 0) {
+    ytext.insert(0, '');
+  }
 
-  entry.doc.getText('markdown').insert(0, `# ${ev.title || 'Event note'}
+  state.searchIndex.set(
+    noteId,
+    [
+      note.title || '',
+      (note.tags || []).join(' '),
+    ].join(' ').toLowerCase()
+  );
 
-Date: ${start}${end}
-${ev.location ? `Location: ${ev.location}\n` : ''}
-
-## Agenda
-
-- 
-
-## Notes
-
-## Follow-up
-
-- [ ] 
-`);
-
+  rebuildWikilinkIndex();
   renderTree();
 
+  window.dispatchEvent(new CustomEvent('yanta-note-updated', {
+    detail: {
+      noteId,
+      reason: 'calendar-note-created',
+      source: 'calendar',
+    },
+  }));
+
   return noteId;
+}
+
+// ============================================================
+// Calendar note picker
+// ============================================================
+
+function noteFolderPathForPicker(folderId) {
+  if (!folderId) return '';
+
+  const parts = [];
+  const seen = new Set();
+  let f = state.folders.get(folderId);
+
+  while (f && !seen.has(f.id)) {
+    seen.add(f.id);
+    parts.unshift(f.name || 'Folder');
+    f = f.parentId ? state.folders.get(f.parentId) : null;
+  }
+
+  return parts.join(' / ');
+}
+
+function notesForPicker(query = '') {
+  const q = String(query || '').trim().toLowerCase();
+
+  return [...state.notes.values()]
+    .filter((note) => {
+      if (!q) return true;
+
+      const hay = [
+        note.title || '',
+        note.id,
+        noteFolderPathForPicker(note.folderId),
+        (note.tags || []).join(' '),
+      ].join(' ').toLowerCase();
+
+      return hay.includes(q);
+    })
+    .sort((a, b) => {
+      const at = (a.title || '').toLowerCase();
+      const bt = (b.title || '').toLowerCase();
+
+      const aStarts = q && at.startsWith(q) ? 1 : 0;
+      const bStarts = q && bt.startsWith(q) ? 1 : 0;
+
+      return bStarts - aStarts || (b.updated || 0) - (a.updated || 0);
+    });
+}
+
+function ensureCalendarNotePickerModal() {
+  if (calendarNotePickerModal) return calendarNotePickerModal;
+
+  calendarNotePickerModal = document.createElement('div');
+  calendarNotePickerModal.className = 'modal yanta-calendar-note-picker-modal';
+  calendarNotePickerModal.hidden = true;
+  document.body.append(calendarNotePickerModal);
+
+  return calendarNotePickerModal;
+}
+
+function openCalendarNotePicker({
+  title = 'Link existing note',
+} = {}) {
+  return new Promise((resolve) => {
+    const modal = ensureCalendarNotePickerModal();
+
+    let query = '';
+    let activeIndex = 0;
+
+    const close = (value) => {
+      modal.hidden = true;
+      resolve(value || null);
+    };
+
+    const render = () => {
+      const notes = notesForPicker(query);
+      activeIndex = Math.max(0, Math.min(activeIndex, Math.max(0, notes.length - 1)));
+
+      modal.innerHTML = `
+        <div class="modal-card yanta-calendar-note-picker-card">
+          <header class="modal-head">
+            <h3>${escapeHtml(title)}</h3>
+            <button class="icon-btn" data-picker-cancel>&times;</button>
+          </header>
+
+          <div class="modal-body yanta-calendar-note-picker-body">
+            <div class="yanta-calendar-note-picker-search-row">
+              ${lucide('search', 15)}
+              <input
+                class="text-input"
+                data-picker-search
+                value="${escapeAttr(query)}"
+                placeholder="Search notes by title, folder, tag…"
+                autocomplete="off"
+                spellcheck="false" />
+            </div>
+
+            <div class="yanta-calendar-note-picker-list">
+              ${
+                notes.length
+                  ? notes.map((note, index) => {
+                      const folder = noteFolderPathForPicker(note.folderId);
+                      const icon = note.icon || (note.type === 'list' ? 'list' : 'file-text');
+                      const color = safeNotePickerColor(note.color);
+
+                      return `
+                        <button
+                          class="yanta-calendar-note-picker-item ${index === activeIndex ? 'active' : ''}"
+                          data-note-id="${escapeAttr(note.id)}"
+                          data-index="${index}"
+                          type="button"
+                          style="${color ? `--note-color:${escapeAttr(color)}` : ''}">
+                          <span class="yanta-calendar-note-picker-icon">${lucide(icon, 15)}</span>
+                          <span class="yanta-calendar-note-picker-text">
+                            <strong>${escapeHtml(note.title || 'Untitled')}</strong>
+                            <small>${escapeHtml(folder || 'No folder')}</small>
+                          </span>
+                        </button>
+                      `;
+                    }).join('')
+                  : `<div class="tree-empty">No notes found.</div>`
+              }
+            </div>
+
+            <div class="compress-actions">
+              <button class="btn" data-picker-cancel>Cancel</button>
+              <button class="btn primary" data-picker-choose ${notes.length ? '' : 'disabled'}>
+                ${lucide('link', 14)}
+                Link selected note
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+
+      const input = modal.querySelector('[data-picker-search]');
+
+      input?.addEventListener('input', () => {
+        query = input.value || '';
+        activeIndex = 0;
+        render();
+      });
+
+      input?.addEventListener('keydown', (e) => {
+        if (e.key === 'Escape') {
+          e.preventDefault();
+          close(null);
+          return;
+        }
+
+        if (e.key === 'ArrowDown') {
+          e.preventDefault();
+          activeIndex = Math.min(notes.length - 1, activeIndex + 1);
+          render();
+          return;
+        }
+
+        if (e.key === 'ArrowUp') {
+          e.preventDefault();
+          activeIndex = Math.max(0, activeIndex - 1);
+          render();
+          return;
+        }
+
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          close(notes[activeIndex] || null);
+        }
+      });
+
+      modal.querySelectorAll('[data-picker-cancel]').forEach((btn) => {
+        btn.addEventListener('click', () => close(null));
+      });
+
+      modal.querySelectorAll('[data-note-id]').forEach((btn) => {
+        btn.addEventListener('mouseenter', () => {
+          activeIndex = Number(btn.dataset.index || 0);
+          modal.querySelectorAll('[data-note-id]').forEach((x) => {
+            x.classList.toggle('active', x === btn);
+          });
+        });
+
+        btn.addEventListener('click', () => {
+          const note = state.notes.get(btn.dataset.noteId);
+          close(note || null);
+        });
+      });
+
+      modal.querySelector('[data-picker-choose]')?.addEventListener('click', () => {
+        close(notes[activeIndex] || null);
+      });
+
+      requestAnimationFrame(() => {
+        input?.focus();
+        input?.setSelectionRange(query.length, query.length);
+      });
+    };
+
+    modal.addEventListener('click', function onBackdrop(e) {
+      if (e.target !== modal) return;
+      modal.removeEventListener('click', onBackdrop);
+      close(null);
+    }, { once: true });
+
+    modal.hidden = false;
+    render();
+  });
+}
+
+function safeNotePickerColor(color) {
+  const s = String(color || '').trim();
+
+  if (!s) return '';
+
+  if (/^#[0-9a-f]{3,8}$/i.test(s)) return s;
+
+  return '';
 }
 
 // ============================================================
@@ -5518,29 +6447,34 @@ export function openNewCalendarEvent(input = {}) {
 
   ensureDefaultCalendarCategory();
 
-  const start = input.start
+  const allDay = input.allDay === true;
+
+  let start = input.start
     ? new Date(input.start)
-    : new Date();
+    : allDay
+      ? new Date()
+      : nextHalfHourDate();
 
   if (Number.isNaN(start.getTime())) {
-    start.setTime(Date.now());
+    start = allDay ? new Date() : nextHalfHourDate();
   }
 
   start.setSeconds(0, 0);
 
-  const allDay = input.allDay === true;
   const end = input.end
     ? new Date(input.end)
     : allDay
       ? null
-      : new Date(start.getTime() + 60 * 60 * 1000);
+      : new Date(start.getTime() + 30 * 60 * 1000);
 
   openEventEditor({
-    title: '',
+    ...input,
+    title: input.title && input.title !== 'Untitled event'
+      ? input.title
+      : '',
     start: start.toISOString(),
     end: end && !Number.isNaN(end.getTime()) ? end.toISOString() : null,
     allDay,
-    ...input,
   });
 }
 
@@ -5567,9 +6501,16 @@ function openEventEditor(input = {}) {
 
   const editingExisting = !!existing || isMarkdownEvent;
 
+  const rawTitle =
+    existing
+      ? existing.title || ''
+      : input.title && input.title !== 'Untitled event'
+        ? input.title
+        : '';
+
   const ev = sanitizeCalendarEvent({
     id: existing?.id || input.id || 'evt_' + uid(),
-    title: existing?.title || input.title || '',
+    title: rawTitle || 'Untitled event',
     start: existing?.start || input.start || new Date().toISOString(),
     end: existing?.end || input.end || null,
     allDay: existing?.allDay ?? input.allDay ?? false,
@@ -5585,7 +6526,141 @@ function openEventEditor(input = {}) {
 
   if (!ev) return;
 
+  let linkedNote = ev.noteId ? state.notes.get(ev.noteId) : null;
+
   const modal = ensureEventModal();
+
+  const renderNoteSection = () => {
+    linkedNote = modal.querySelector('[data-field="noteId"]')?.value
+      ? state.notes.get(modal.querySelector('[data-field="noteId"]').value)
+      : null;
+
+    const host = modal.querySelector('[data-note-section]');
+    if (!host) return;
+
+    const creating = !editingExisting && !markdownRef;
+
+    host.innerHTML = `
+      <div class="yanta-calendar-note-link-head">
+        <strong>${lucide('file-text', 14)} Notes</strong>
+      </div>
+
+      ${
+        linkedNote
+          ? `
+            <div class="yanta-calendar-linked-note">
+              <span class="yanta-calendar-linked-note-icon">${lucide(linkedNote.icon || 'file-text', 15)}</span>
+              <span class="yanta-calendar-linked-note-title">${escapeHtml(linkedNote.title || 'Untitled')}</span>
+            </div>
+
+            <div class="compress-actions" style="justify-content:flex-start;margin-top:8px">
+              ${editingExisting ? `<button class="btn" data-action="open-note">${lucide('corner-down-right', 14)} Open note</button>` : ''}
+              <button class="btn" data-action="unlink-note">${lucide('unlink', 14)} Unlink</button>
+            </div>
+          `
+          : creating
+            ? `
+              <label class="switch yanta-calendar-switch" style="margin-bottom:8px">
+                <input type="checkbox" data-field="createNote" checked />
+                <span>Create linked note</span>
+              </label>
+
+              <div class="compress-actions" style="justify-content:flex-start">
+                <button class="btn" data-action="link-existing-note">${lucide('link', 14)} Link existing note…</button>
+              </div>
+            `
+            : `
+              <div class="hint" style="color:var(--text-dim);font-size:12px;margin-bottom:8px">
+                No note is linked to this event yet.
+              </div>
+
+              <div class="compress-actions" style="justify-content:flex-start">
+                <button class="btn primary" data-action="add-note">${lucide('calendar-plus', 14)} Add to notes</button>
+                <button class="btn" data-action="link-existing-note">${lucide('link', 14)} Link existing note…</button>
+              </div>
+            `
+      }
+    `;
+
+    host.querySelector('[data-action="link-existing-note"]')?.addEventListener('click', async () => {
+      const note = await openCalendarNotePicker({
+        title: 'Link existing note',
+      });
+
+      if (!note) return;
+
+      modal.querySelector('[data-field="noteId"]').value = note.id;
+
+      const createCb = modal.querySelector('[data-field="createNote"]');
+      if (createCb) createCb.checked = false;
+
+      renderNoteSection();
+    });
+
+    host.querySelector('[data-action="unlink-note"]')?.addEventListener('click', async () => {
+      const currentNoteId = modal.querySelector('[data-field="noteId"]').value || '';
+
+      const choice = await calendarChoiceDialog({
+        title: 'Unlink note',
+        message: currentNoteId && state.notes.has(currentNoteId)
+          ? `Unlink this event from "${state.notes.get(currentNoteId).title || 'Untitled'}"?`
+          : 'Unlink this event from the note?',
+        choices: [
+          { id: 'unlink', label: 'Unlink', primary: true },
+          { id: 'cancel', label: 'Cancel' },
+        ],
+      });
+
+      if (choice !== 'unlink') return;
+
+      modal.querySelector('[data-field="noteId"]').value = '';
+
+      if (editingExisting && existing) {
+        const patch = readPatchFromModal();
+        const saved = putCalendarEvent(patch);
+
+        if (saved) {
+          toast('Event unlinked from note', 'success');
+        }
+      }
+
+      renderNoteSection();
+    });
+
+    host.querySelector('[data-action="add-note"]')?.addEventListener('click', async () => {
+      if (!existing) return;
+
+      const patch = readPatchFromModal();
+      if (!validatePatch(patch)) return;
+
+      const noteId = await createLinkedNoteForEvent(patch);
+
+      const saved = putCalendarEvent({
+        ...patch,
+        noteId,
+      });
+
+      closeEventModal();
+
+      if (saved) {
+        toast('Event note created', 'success');
+      }
+    });
+
+    host.querySelector('[data-action="open-note"]')?.addEventListener('click', async () => {
+      const noteId = modal.querySelector('[data-field="noteId"]')?.value || '';
+
+      if (noteId && state.notes.has(noteId)) {
+        closeEventModal();
+
+        if (calendarMode === 'surface') {
+          leaveCalendarSurface();
+        }
+
+        await openNote(noteId);
+      }
+    });
+  };
 
   modal.innerHTML = `
     <div class="modal-card yanta-calendar-event-card">
@@ -5597,7 +6672,7 @@ function openEventEditor(input = {}) {
       <div class="modal-body yanta-calendar-event-body">
         <label>
           Title
-          <input class="text-input" data-field="title" value="${escapeAttr(ev.title)}" placeholder="Event title" />
+          <input class="text-input" data-field="title" value="${escapeAttr(rawTitle)}" placeholder="Event title" />
         </label>
 
         <label>
@@ -5662,26 +6737,12 @@ function openEventEditor(input = {}) {
           <textarea class="text-input" data-field="description" rows="4" placeholder="Description, agenda, notes…">${escapeHtml(ev.description || '')}</textarea>
         </label>
 
-        <label>
-          Linked note ID
-          <input class="text-input" data-field="noteId" value="${escapeAttr(ev.noteId || '')}" placeholder="Optional note id" />
-        </label>
+        <input type="hidden" data-field="noteId" value="${escapeAttr(ev.noteId || '')}" />
 
-        ${editingExisting ? '' : `
-          <label class="switch yanta-calendar-switch">
-            <input type="checkbox" data-field="createNote" checked />
-            <span>Create linked event note</span>
-          </label>
-        `}
-
-        <div class="yanta-calendar-share-hint">
-          <strong>Future sharing:</strong>
-          Events inherit the category they belong to. Category-level encrypted collaboration is planned for Cloud Sync, so categories already have stable IDs and share metadata.
-        </div>
+        <section class="yanta-calendar-note-link-box" data-note-section></section>
 
         <div class="compress-actions">
           ${editingExisting ? `<button class="btn danger" data-action="delete">${lucide('trash', 14)} Delete</button>` : ''}
-          ${ev.noteId && state.notes.has(ev.noteId) ? `<button class="btn" data-action="open-note">${lucide('corner-down-right', 14)} Jump to note</button>` : ''}
           <span class="grow"></span>
           <button class="btn" data-cal-close>Cancel</button>
           <button class="btn primary" data-action="save">${lucide('check', 14)} Save</button>
@@ -5693,6 +6754,8 @@ function openEventEditor(input = {}) {
   const allDayInput = modal.querySelector('[data-field="allDay"]');
   const startInput = modal.querySelector('[data-field="start"]');
   const endInput = modal.querySelector('[data-field="end"]');
+
+  let endTouched = !!endInput?.value?.trim();
 
   const updateDatePreviews = () => {
     const allDay = !!allDayInput?.checked;
@@ -5745,6 +6808,84 @@ function openEventEditor(input = {}) {
     }
   };
 
+  const autoFillEndFromStart = () => {
+    const allDay = !!allDayInput?.checked;
+    if (allDay) return;
+    if (endTouched) return;
+
+    const startIso = parseCalendarEditorInput(startInput.value, false);
+    if (!startIso) return;
+
+    const endIso = addMinutesIso(startIso, 30);
+    if (!endIso) return;
+
+    endInput.value = calendarEditorInputValue(endIso, false);
+    updateDatePreviews();
+  };
+
+  const readPatchFromModal = () => {
+    const allDay = !!modal.querySelector('[data-field="allDay"]')?.checked;
+
+    const parsedStart = parseCalendarEditorInput(
+      modal.querySelector('[data-field="start"]').value,
+      allDay
+    );
+
+    const parsedEnd = parseCalendarEditorInput(
+      modal.querySelector('[data-field="end"]').value,
+      allDay
+    );
+
+    return {
+      ...ev,
+      title: modal.querySelector('[data-field="title"]').value.trim() || 'Untitled event',
+      categoryId: modal.querySelector('[data-field="categoryId"]').value || DEFAULT_CATEGORY_ID,
+      allDay,
+      start: parsedStart,
+      end: normalizeCalendarEventEnd({
+        start: parsedStart,
+        end: parsedEnd,
+        allDay,
+      }),
+      location: modal.querySelector('[data-field="location"]').value.trim(),
+      description: modal.querySelector('[data-field="description"]').value.trim(),
+      noteId: modal.querySelector('[data-field="noteId"]').value.trim() || null,
+    };
+  };
+
+  const validatePatch = (patch) => {
+    const allDay = !!patch.allDay;
+
+    if (!patch.start) {
+      toast(`Start date required · expected ${calendarEditorDatePlaceholder(allDay)}`, 'error');
+      updateDatePreviews();
+      return false;
+    }
+
+    const endInputRaw = modal.querySelector('[data-field="end"]').value.trim();
+    const parsedEnd = parseCalendarEditorInput(endInputRaw, allDay);
+
+    if (endInputRaw && !parsedEnd) {
+      toast(`End date invalid · expected ${calendarEditorDatePlaceholder(allDay)}`, 'error');
+      updateDatePreviews();
+      return false;
+    }
+
+    const rangeValidation = calendarEditorRangeIsValid({
+      start: patch.start,
+      end: parsedEnd,
+      allDay,
+    });
+
+    if (!rangeValidation.ok) {
+      toast(rangeValidation.message || 'Invalid date range', 'error');
+      updateDatePreviews();
+      return false;
+    }
+
+    return true;
+  };
+
   const openPickerForInput = (which) => {
     const inputEl = which === 'start' ? startInput : endInput;
     const allDay = !!allDayInput?.checked;
@@ -5761,9 +6902,17 @@ function openEventEditor(input = {}) {
       allDay,
       allowClear: which === 'end',
       onPick: (iso) => {
+        if (which === 'end') {
+          endTouched = !!iso;
+        }
+
         inputEl.value = iso
           ? calendarEditorInputValue(iso, allDay)
           : '';
+
+        if (which === 'start') {
+          autoFillEndFromStart();
+        }
 
         updateDatePreviews();
       },
@@ -5783,90 +6932,63 @@ function openEventEditor(input = {}) {
   });
 
   startInput?.addEventListener('input', updateDatePreviews);
-  startInput?.addEventListener('change', updateDatePreviews);
-  endInput?.addEventListener('input', updateDatePreviews);
-  endInput?.addEventListener('change', updateDatePreviews);
+  startInput?.addEventListener('change', () => {
+    autoFillEndFromStart();
+    updateDatePreviews();
+  });
+
+  endInput?.addEventListener('input', () => {
+    endTouched = !!endInput.value.trim();
+    updateDatePreviews();
+  });
+
+  endInput?.addEventListener('change', () => {
+    endTouched = !!endInput.value.trim();
+    updateDatePreviews();
+  });
 
   allDayInput?.addEventListener('change', () => {
     const allDay = allDayInput.checked;
-    const wasAllDay = !allDay;
+    const previousAllDay = !allDay;
 
     const startIso =
-      parseCalendarEditorInput(startInput.value, wasAllDay) ||
+      parseCalendarEditorInput(startInput.value, previousAllDay) ||
       ev.start;
 
     const endIso =
-      parseCalendarEditorInput(endInput.value, wasAllDay) ||
+      parseCalendarEditorInput(endInput.value, previousAllDay) ||
       ev.end;
 
     startInput.placeholder = calendarEditorDatePlaceholder(allDay);
     endInput.placeholder = calendarEditorDatePlaceholder(allDay);
 
-    startInput.value = calendarEditorInputValue(startIso, allDay);
-    endInput.value = calendarEditorInputValue(endIso, allDay);
+    if (!allDay) {
+      const nextStartIso = applyCurrentDefaultTimeToDate(startIso);
+      const nextEndIso = addMinutesIso(nextStartIso, 30);
+
+      startInput.value = calendarEditorInputValue(nextStartIso, false);
+
+      if (!endTouched && nextEndIso) {
+        endInput.value = calendarEditorInputValue(nextEndIso, false);
+      }
+    } else {
+      startInput.value = calendarEditorInputValue(startIso, true);
+      endInput.value = endIso ? calendarEditorInputValue(endIso, true) : '';
+    }
 
     updateDatePreviews();
   });
 
-  updateDatePreviews();
-
   modal.querySelector('[data-action="save"]')?.addEventListener('click', async () => {
-    const allDay = !!modal.querySelector('[data-field="allDay"]')?.checked;
+    const patch = readPatchFromModal();
+    if (!validatePatch(patch)) return;
 
-    const parsedStart = parseCalendarEditorInput(
-      modal.querySelector('[data-field="start"]').value,
-      allDay
-    );
+    if (!editingExisting && !markdownRef) {
+      const createNote = !!modal.querySelector('[data-field="createNote"]')?.checked;
 
-    const parsedEnd = parseCalendarEditorInput(
-      modal.querySelector('[data-field="end"]').value,
-      allDay
-    );
-
-    const patch = {
-      ...ev,
-      title: modal.querySelector('[data-field="title"]').value.trim() || 'Untitled event',
-      categoryId: modal.querySelector('[data-field="categoryId"]').value || DEFAULT_CATEGORY_ID,
-      allDay,
-      start: parsedStart,
-      end: normalizeCalendarEventEnd({
-        start: parsedStart,
-        end: parsedEnd,
-        allDay,
-      }),
-      location: modal.querySelector('[data-field="location"]').value.trim(),
-      description: modal.querySelector('[data-field="description"]').value.trim(),
-      noteId: modal.querySelector('[data-field="noteId"]').value.trim() || null,
-    };
-
-    if (!patch.start) {
-      toast(`Start date required · expected ${calendarEditorDatePlaceholder(allDay)}`, 'error');
-      updateDatePreviews();
-      return;
-    }
-
-    const endInputRaw = modal.querySelector('[data-field="end"]').value.trim();
-
-    if (endInputRaw && !parsedEnd) {
-      toast(`End date invalid · expected ${calendarEditorDatePlaceholder(allDay)}`, 'error');
-      updateDatePreviews();
-      return;
-    }
-
-    const rangeValidation = calendarEditorRangeIsValid({
-      start: parsedStart,
-      end: parsedEnd,
-      allDay,
-    });
-
-    if (!rangeValidation.ok) {
-      toast(rangeValidation.message || 'Invalid date range', 'error');
-      updateDatePreviews();
-      return;
-    }
-
-    if (!existing && modal.querySelector('[data-field="createNote"]')?.checked) {
-      patch.noteId = await createLinkedNoteForEvent(patch);
+      if (!patch.noteId && createNote) {
+        patch.noteId = await createLinkedNoteForEvent(patch);
+      }
     }
 
     if (markdownRef) {
@@ -5909,53 +7031,43 @@ function openEventEditor(input = {}) {
     }
   });
 
-  modal.querySelector('[data-action="delete"]')?.addEventListener('click', () => {
-    if (!confirm(`Delete "${ev.title || 'Untitled event'}"?`)) return;
+  modal.querySelector('[data-action="delete"]')?.addEventListener('click', async () => {
+    const noteId = ev.noteId || '';
+    const note = noteId ? state.notes.get(noteId) : null;
 
-    if (markdownRef) {
-      const ok = updateMarkdownCalendarRef({
-        ...markdownRef,
-        nextToken: '',
-      });
+    const choice = await calendarChoiceDialog({
+      title: 'Delete event',
+      message: note
+        ? `This event is linked to the note "${note.title || 'Untitled'}".`
+        : `Delete "${ev.title || 'Untitled event'}"?`,
+      choices: note
+        ? [
+            { id: 'event-only', label: 'Delete event only', primary: true, danger: true },
+            { id: 'event-and-note', label: 'Delete event and note', danger: true },
+            { id: 'cancel', label: 'Cancel' },
+          ]
+        : [
+            { id: 'event-only', label: 'Delete event', primary: true, danger: true },
+            { id: 'cancel', label: 'Cancel' },
+          ],
+    });
 
-      closeEventModal();
+    if (choice === 'cancel') return;
 
-      if (ok) {
-        toast('Calendar link removed', 'success');
-
-        window.dispatchEvent(new CustomEvent('yanta-calendar-markdown-changed', {
-          detail: {
-            noteId: markdownRef.noteId,
-            eventId: ev.id,
-            deleted: true,
-          },
-        }));
-
-        scheduleCalendarRender();
-      } else {
-        toast('Could not remove calendar link', 'error');
-      }
-
-      return;
+    if (choice === 'event-and-note' && noteId) {
+      await deleteLinkedNoteById(noteId);
+      deleteCalendarEvent(ev.id);
+    } else {
+      deleteCalendarEvent(ev.id);
     }
 
-    deleteCalendarEvent(ev.id);
     closeEventModal();
 
     toast('Event deleted', 'success');
   });
 
-  modal.querySelector('[data-action="open-note"]')?.addEventListener('click', async () => {
-    if (ev.noteId && state.notes.has(ev.noteId)) {
-      closeEventModal();
-
-      if (calendarMode === 'surface') {
-        leaveCalendarSurface();
-      }
-
-      await openNote(ev.noteId);
-    }
-  });
+  renderNoteSection();
+  updateDatePreviews();
 
   modal.hidden = false;
 
@@ -6717,6 +7829,56 @@ function applyCalendarPreferencesToFullCalendar() {
   scheduleCalendarResize({ render: true });
 }
 
+export function openCalendarEvent(eventId, {
+  push = true,
+  replace = false,
+} = {}) {
+  const id = String(eventId || '').trim();
+  if (!id) {
+    openCalendar({ push, replace });
+    return;
+  }
+
+  if (push) {
+    const method = replace ? 'replaceState' : 'pushState';
+
+    history[method](
+      {
+        surface: 'calendar',
+        eventId: id,
+      },
+      '',
+      `#calendar/${encodeURIComponent(id)}`
+    );
+  }
+
+  openCalendar({
+    push: false,
+    replace: false,
+  });
+
+  requestAnimationFrame(() => {
+    if (!calendarHydrated) {
+      hydrateCalendarStateFromVault();
+    }
+
+    const ev = state.calendarEvents.get(id);
+
+    if (!ev) {
+      toast('Calendar event not found', 'error');
+      return;
+    }
+
+    try {
+      fc?.gotoDate?.(ev.start);
+    } catch {}
+
+    requestAnimationFrame(() => {
+      openEventEditor({ id });
+    });
+  });
+}
+
 export function setupCalendar() {
   if (initialized) return;
   initialized = true;
@@ -7062,6 +8224,12 @@ export function setupCalendar() {
 
   window.addEventListener('yanta-vault-hydrated', () => {
     hydrateCalendarStateFromVault();
+
+    if (state.currentNoteId) {
+      requestAnimationFrame(() => {
+        renderCalendarNoteAttachments(state.currentNoteId);
+      });
+    }
   });
 
   window.addEventListener('yanta-note-updated', () => {

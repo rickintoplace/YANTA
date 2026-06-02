@@ -76,7 +76,30 @@ import {
   const DEFAULT_DASHBOARD_CARD_DISPLAY = {
     notesShowHeader: false,
     foldersShowHeader: false,
+
+    linkedEventShow: true,
+    linkedEventFields: {
+      icon: true,
+      title: true,
+      time: true,
+      location: true,
+      description: true,
+    },
   };
+
+  function normalizeDashboardCardDisplayPrefs(raw = {}) {
+    return {
+      ...DEFAULT_DASHBOARD_CARD_DISPLAY,
+      ...(raw && typeof raw === 'object' ? raw : {}),
+
+      linkedEventFields: {
+        ...DEFAULT_DASHBOARD_CARD_DISPLAY.linkedEventFields,
+        ...(raw?.linkedEventFields && typeof raw.linkedEventFields === 'object'
+          ? raw.linkedEventFields
+          : {}),
+      },
+    };
+  }
 
   let dashboardCardDisplay = { ...DEFAULT_DASHBOARD_CARD_DISPLAY };
   let dashboardCardDisplayLoaded = false;
@@ -105,25 +128,68 @@ import {
   };
 
   let dashboardStaggerIndex = 0;
-  
+
   const previewCache = new Map();
   // noteId -> { updated, textLen, preview }
+    
+  let calendarModulePromise = null;
+
+  function calendarModule() {
+    calendarModulePromise ||= import('./calendar.js');
+    return calendarModulePromise;
+  }
+
+  async function dashboardLinkedEventHeader(noteId) {
+    const prefs = normalizeDashboardCardDisplayPrefs(dashboardCardDisplay);
+
+    if (!prefs.linkedEventShow) return null;
+
+    try {
+      const calendar = await calendarModule();
+
+      return calendar.createLinkedCalendarEventDashboardHeader?.(noteId, {
+        fields: prefs.linkedEventFields,
+      }) || null;
+    } catch (err) {
+      console.warn('[YANTA Dashboard] Could not render linked event header', err);
+      return null;
+    }
+  }
+
+  function estimatedDashboardEventHeaderHeight() {
+    const prefs = normalizeDashboardCardDisplayPrefs(dashboardCardDisplay);
+    if (!prefs.linkedEventShow) return 0;
+
+    const f = prefs.linkedEventFields || {};
+
+    if (!f.icon && !f.title && !f.time && !f.location && !f.description) {
+      return 0;
+    }
+
+    let h = 18;
+
+    if (f.title || f.icon) h += 16;
+    if (f.time) h += 18;
+    if (f.location) h += 18;
+    if (f.description) h += 34;
+
+    return Math.max(38, Math.min(110, h));
+  }
 
 
   export function getDashboardCardDisplayPrefs() {
-    return { ...dashboardCardDisplay };
+    return normalizeDashboardCardDisplayPrefs(dashboardCardDisplay);
   }
 
   export async function loadDashboardCardDisplayPrefs() {
     if (dashboardCardDisplayLoaded) return dashboardCardDisplay;
 
     try {
-      dashboardCardDisplay = {
-        ...DEFAULT_DASHBOARD_CARD_DISPLAY,
-        ...(await store.settings.get(DASHBOARD_CARD_DISPLAY_KEY, {})),
-      };
+      dashboardCardDisplay = normalizeDashboardCardDisplayPrefs(
+        await store.settings.get(DASHBOARD_CARD_DISPLAY_KEY, {})
+      );
     } catch {
-      dashboardCardDisplay = { ...DEFAULT_DASHBOARD_CARD_DISPLAY };
+      dashboardCardDisplay = normalizeDashboardCardDisplayPrefs();
     }
 
     dashboardCardDisplayLoaded = true;
@@ -131,10 +197,14 @@ import {
   }
 
   export async function setDashboardCardDisplayPrefs(patch = {}) {
-    dashboardCardDisplay = {
+    dashboardCardDisplay = normalizeDashboardCardDisplayPrefs({
       ...dashboardCardDisplay,
       ...patch,
-    };
+      linkedEventFields: {
+        ...dashboardCardDisplay.linkedEventFields,
+        ...(patch.linkedEventFields || {}),
+      },
+    });
 
     dashboardCardDisplayLoaded = true;
 
@@ -629,6 +699,17 @@ function getDashboardItems() {
       if (e.key === 'Escape' && dashboard.folderId) {
         e.preventDefault();
         navigateDashboardFolder(null);
+      }
+    });
+    window.addEventListener('yanta-calendar-updated', () => {
+      if (dashboard.visible) {
+        renderDashboard();
+      }
+    });
+
+    window.addEventListener('yanta-vault-hydrated', () => {
+      if (dashboard.visible) {
+        renderDashboard();
       }
     });
   }
@@ -2212,13 +2293,19 @@ function renderFolderMiniDrawing(noteId, block) {
     const host = card.querySelector('[data-preview-host]');
     if (!host) return;
   
-    const preview = await getDashboardPreview(note);
+    const [preview, eventHeader] = await Promise.all([
+      getDashboardPreview(note),
+      dashboardLinkedEventHeader(note.id),
+    ]);
 
-    host.classList.toggle('is-media-only', !!preview.mediaOnly);
+    host.classList.toggle('is-media-only', !!preview.mediaOnly && !eventHeader);
 
-    const contentMaxH = autoHeightForPreview(preview);
-    card.dataset.contentMaxHeight = String(contentMaxH);
-  
+    const contentMaxH =
+      autoHeightForPreview(preview) +
+      (eventHeader ? estimatedDashboardEventHeaderHeight() : 0);
+
+    card.dataset.contentMaxHeight = String(contentMaxH);  
+    
     if (!card.isConnected) return;
   
     // Auto-size unless user manually resized.
@@ -2233,9 +2320,14 @@ function renderFolderMiniDrawing(noteId, block) {
       card.style.setProperty('--dash-row-span', String(heightToGridSpan(cappedH)));
       card.dataset.effectiveHeight = String(cappedH);
     }
+
     host.replaceChildren();
-  
-    if (!preview.blocks.length && !preview.badges.length) {
+
+    if (eventHeader) {
+      host.append(eventHeader);
+    }
+
+    if (!preview.blocks.length && !preview.badges.length && !eventHeader) {
       host.append(el('div', {
         class: 'yanta-dash-empty-preview',
       }, 'Empty note'));
@@ -2765,6 +2857,28 @@ function renderDashboardVideo(block) {
       mediaOnly,
     };
   }
+
+async function openDashboardCalendarEventFromHeader(header) {
+  const eventId = header?.dataset?.calendarEventId || '';
+
+  if (!eventId) return false;
+
+  try {
+    dashboard.suppressOpenUntil = performance.now() + 800;
+
+    const calendar = await calendarModule();
+
+    calendar.openCalendarEvent?.(eventId, {
+      push: true,
+    });
+
+    return true;
+  } catch (err) {
+    console.warn('[YANTA Dashboard] Could not open calendar event', err);
+    toast('Could not open calendar event', 'error');
+    return false;
+  }
+}
 
 function youtubeVideoId(url) {
   const s = String(url || '').trim();
@@ -3412,7 +3526,23 @@ function bindCardPointerInteractions(card, item) {
 
   card.addEventListener('pointerdown', (e) => {
     if (e.button != null && e.button !== 0) return;
-    if (e.target.closest?.('input, button, a, textarea, select, iframe, .yanta-dash-resize-handle')) return;
+
+    const eventHeader = e.target.closest?.('.yanta-dash-event-header[data-calendar-event-id]');
+
+    /*
+      Normale Controls sollen Dashboard-Gesten nicht starten.
+      Die Event-Card ist aber eine Dashboard-interne Tap-Zone:
+      - Tap öffnet Event
+      - Long-Press selektiert Card
+      - Bewegung scrollt/draggt wie auf dem Rest der Card
+    */
+    if (
+      !eventHeader &&
+      e.target.closest?.('input, button, a, textarea, select, iframe, .yanta-dash-resize-handle')
+    ) {
+      return;
+    }
+
     if (dashboard.resize || dashboard.dragging) return;
 
     const pointerType = e.pointerType || 'mouse';
@@ -3427,6 +3557,7 @@ function bindCardPointerInteractions(card, item) {
       longPressed: false,
       dragStarted: false,
       scrolling: false,
+      eventHeader,
     };
 
     clearPress();
@@ -3569,6 +3700,11 @@ function bindCardPointerInteractions(card, item) {
     }
 
     if (!snapshot.moved && !snapshot.longPressed) {
+      if (snapshot.eventHeader?.isConnected) {
+        await openDashboardCalendarEventFromHeader(snapshot.eventHeader);
+        return;
+      }
+
       await openItem(item, card);
     }
   }

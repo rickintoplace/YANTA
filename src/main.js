@@ -79,10 +79,12 @@ import {
 } from './navigation.js';
 import {
   openCalendar,
+  openCalendarEvent,
   openCalendarFromHistory,
   openCalendarPane,
   closeCalendar,
   closeCalendarPane,
+  calendarChoiceDialog,
 } from './calendar.js';
 import {
   loadCalendarPreferences,
@@ -692,16 +694,32 @@ if (!sharedOpen?.noteId) {
   const route = parseAppHash();
 
   if (route.surface === 'calendar') {
-    openCalendar({
-      push: false,
-      replace: true,
-    });
+    if (route.eventId) {
+      openCalendarEvent(route.eventId, {
+        push: false,
+        replace: true,
+      });
 
-    history.replaceState(
-      { surface: 'calendar' },
-      '',
-      '#calendar'
-    );
+      history.replaceState(
+        {
+          surface: 'calendar',
+          eventId: route.eventId,
+        },
+        '',
+        `#calendar/${encodeURIComponent(route.eventId)}`
+      );
+    } else {
+      openCalendar({
+        push: false,
+        replace: true,
+      });
+
+      history.replaceState(
+        { surface: 'calendar' },
+        '',
+        '#calendar'
+      );
+    }
 
     return;
   }
@@ -772,7 +790,16 @@ window.addEventListener('popstate', async (e) => {
     closeCalendarPane({ silent: true });
     hideDashboard({ push: false });
 
-    openCalendarFromHistory();
+    const eventId = st.eventId || route.eventId || null;
+
+    if (eventId) {
+      openCalendarEvent(eventId, {
+        push: false,
+        replace: false,
+      });
+    } else {
+      openCalendarFromHistory();
+    }
 
     return;
   }
@@ -1232,6 +1259,23 @@ function bindEvents() {
 
   // Preview interactions
   $('preview').addEventListener('click', (e) => {
+    const calendarLink = e.target.closest?.('a[href^="#calendar/"]');
+
+    if (calendarLink) {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const href = calendarLink.getAttribute('href') || '';
+      const eventId = decodeURIComponent(href.replace(/^#calendar\//, ''));
+
+      if (eventId) {
+        openCalendarEvent(eventId, {
+          push: true,
+        });
+      }
+
+      return;
+    }
     if (e.target.closest('a.wiki-link')) {
       handleWikilinkClick(e);
       return;

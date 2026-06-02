@@ -280,6 +280,22 @@ function updateSearchIndexFor(note) {
   state.searchIndex.set(note.id, searchHaystack(note, body));
 }
 
+function renderCalendarAttachmentsSoon(noteId = state.currentNoteId) {
+  requestAnimationFrame(() => {
+    import('./calendar.js')
+      .then((calendar) => {
+        /*
+          renderCalendarNoteAttachments() hydratisiert Calendar-State jetzt
+          selbst aus VaultDoc, falls nötig.
+        */
+        calendar.renderCalendarNoteAttachments?.(noteId);
+      })
+      .catch((err) => {
+        console.warn('[YANTA Notes] Could not render calendar attachments', err);
+      });
+  });
+}
+
 // ---------------- factories -----------------------------------
 export async function newNote(folderId = null, type = 'markdown') {
   const id = uid();
@@ -419,6 +435,7 @@ export async function openNote(id) {
   renderShareIndicator();
   renderTree();
   schedulePreview();
+  renderCalendarAttachmentsSoon(id);
   scrollCurrentNoteToTop();
 
   // Subscribe to Y.Doc updates → re-render preview, persist mirror.
@@ -600,6 +617,13 @@ export function clearEditor() {
   destroyEditor();
   $('editor').replaceChildren();
   $('preview').innerHTML = '';
+  $('paneEdit')
+    ?.querySelectorAll(':scope > .yanta-event-note-card')
+    ?.forEach((n) => n.remove());
+
+  $('panePreview')
+    ?.querySelectorAll(':scope > .yanta-event-note-card')
+    ?.forEach((n) => n.remove());
   renderChips();
   markSaved();
 }
@@ -631,19 +655,72 @@ export async function saveCurrentNote() {
 
 export async function deleteCurrentNote() {
   if (!state.currentNoteId) return;
+
   const note = state.notes.get(state.currentNoteId);
-  if (!confirm(`Delete "${note.title}"? This cannot be undone.`)) return;
+  if (!note) return;
+
+  let calendar = null;
+  let linkedEvent = null;
+
+  try {
+    calendar = await import('./calendar.js');
+    linkedEvent = calendar.calendarEventForNoteId?.(note.id) || null;
+  } catch {}
+
+  if (linkedEvent && calendar?.calendarChoiceDialog) {
+    const choice = await calendar.calendarChoiceDialog({
+      title: 'Delete note',
+      message: `This note is linked to the calendar event "${linkedEvent.title || 'Untitled event'}".`,
+      choices: [
+        { id: 'note-only', label: 'Delete note only', primary: true, danger: true },
+        { id: 'note-and-event', label: 'Delete note and event', danger: true },
+        { id: 'cancel', label: 'Cancel' },
+      ],
+    });
+
+    if (choice === 'cancel') return;
+
+    if (choice === 'note-and-event') {
+      calendar.deleteCalendarEvent?.(linkedEvent.id);
+    } else {
+      calendar.unlinkEventNote?.(linkedEvent.id);
+    }
+  } else if (calendar?.calendarChoiceDialog) {
+    const choice = await calendar.calendarChoiceDialog({
+      title: 'Delete note',
+      message: `Delete "${note.title || 'Untitled'}"? This cannot be undone.`,
+      choices: [
+        { id: 'delete', label: 'Delete note', primary: true, danger: true },
+        { id: 'cancel', label: 'Cancel' },
+      ],
+    });
+
+    if (choice !== 'delete') return;
+  } else {
+    if (!confirm(`Delete "${note.title}"? This cannot be undone.`)) return;
+  }
+
   await store.notes.del(note.id);
+
   state.notes.delete(note.id);
+  state.searchIndex.delete(note.id);
+
   await destroyNoteDoc(note.id);
+
   syncDeleteNoteFile(note).catch(() => {});
+
   rebuildWikilinkIndex();
+
   state.currentNoteId = null;
+
   const next = [...state.notes.values()].sort((a, b) => b.updated - a.updated)[0];
-  if (next) openNote(next.id); else clearEditor();
+
+  if (next) openNote(next.id);
+  else clearEditor();
+
   renderTree();
   toast('Note deleted');
-  
+
   window.dispatchEvent(new CustomEvent('yanta-note-updated', {
     detail: {
       noteId: note.id,
@@ -651,7 +728,7 @@ export async function deleteCurrentNote() {
       deleted: true,
     },
   }));
-  
+
   try {
     window.yantaSync2Now?.();
   } catch {}
@@ -735,6 +812,7 @@ export const schedulePreview = debounce(() => {
   updateWordCount(md);
 
   requestAnimationFrame(() => {
+    renderCalendarAttachmentsSoon(state.currentNoteId);
     window.dispatchEvent(new CustomEvent('yanta-preview-rendered'));
   });
 }, 80);

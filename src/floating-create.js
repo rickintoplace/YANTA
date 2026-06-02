@@ -360,7 +360,7 @@ function injectCss() {
   right: max(18px, env(safe-area-inset-right));
   bottom: max(18px, env(safe-area-inset-bottom));
 
-  z-index: 185;
+  z-index: 80;
 
   width: 56px;
   height: 56px;

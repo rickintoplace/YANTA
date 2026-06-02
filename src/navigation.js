@@ -96,6 +96,7 @@ export function parseAppHash(hash = window.location.hash) {
       surface: null,
       noteId: null,
       folderId: null,
+      eventId: null,
     };
   }
 
@@ -104,6 +105,16 @@ export function parseAppHash(hash = window.location.hash) {
       surface: 'calendar',
       noteId: null,
       folderId: null,
+      eventId: null,
+    };
+  }
+
+  if (raw.startsWith('calendar/')) {
+    return {
+      surface: 'calendar',
+      noteId: null,
+      folderId: null,
+      eventId: raw.slice('calendar/'.length) || null,
     };
   }
 
@@ -112,6 +123,7 @@ export function parseAppHash(hash = window.location.hash) {
       surface: 'dashboard',
       noteId: null,
       folderId: null,
+      eventId: null,
     };
   }
 
@@ -120,6 +132,7 @@ export function parseAppHash(hash = window.location.hash) {
       surface: 'dashboard',
       noteId: null,
       folderId: raw.slice('dashboard/'.length) || null,
+      eventId: null,
     };
   }
 
@@ -128,6 +141,7 @@ export function parseAppHash(hash = window.location.hash) {
       surface: 'share',
       noteId: null,
       folderId: null,
+      eventId: null,
     };
   }
 
@@ -135,6 +149,7 @@ export function parseAppHash(hash = window.location.hash) {
     surface: 'note',
     noteId: raw,
     folderId: null,
+    eventId: null,
   };
 }
 

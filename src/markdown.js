@@ -195,6 +195,7 @@ export function classifyLine(line, ctx) {
   }
   if (/^```/.test(line)) return { type: 'fence', opens: true, lang: line.slice(3).trim() };
   if (/^\s*$/.test(line)) return { type: 'blank' };
+  if (/^\s*<!--[\s\S]*?-->\s*$/.test(line)) return { type: 'comment' };
   let m;
   if ((m = /^(#{1,6})\s/.exec(line))) return { type: 'h' + m[1].length };
   if (/^\s*>\s?/.test(line)) return { type: 'quote' };
@@ -608,6 +609,10 @@ export function renderBlocksInline(md) {
       continue;
     }
 
+    if (info.type === 'comment') {
+      continue;
+    }
+
     if (/^h[1-6]$/.test(info.type)) {
       const lvl = parseInt(info.type[1], 10);
       const txt = line.replace(/^#{1,6}\s+/, '');
@@ -759,6 +764,7 @@ export function renderPreview(md) {
     } else if (info.type === 'code') {
       inner = `<span style="font-family:var(--font-mono);font-size:0.9em">${escapeHtml(line) || '&nbsp;'}</span>`;
     } else if (info.type === 'blank') { inner = '&nbsp;'; }
+    else if (info.type === 'comment') { inner = ''; extraClass = 'pv-hidden-line'; }
     else if (info.type === 'hr') { inner = '<hr/>'; }
     else if (/^h[1-6]$/.test(info.type)) {
       const lvl = parseInt(info.type[1], 10);

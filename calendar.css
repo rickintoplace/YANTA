@@ -1597,3 +1597,638 @@
     max-height: 230px;
   }
 }
+/* ============================================================
+   Calendar event linked note UX
+   ============================================================ */
+
+.yanta-calendar-note-link-box {
+  margin: 12px 0;
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-elev-2);
+}
+
+.yanta-calendar-note-link-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 8px;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.yanta-calendar-note-link-head strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.yanta-calendar-linked-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 9px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elev);
+}
+
+.yanta-calendar-linked-note-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 26px;
+  width: 26px;
+  height: 26px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  color: var(--accent);
+}
+
+.yanta-calendar-linked-note-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ============================================================
+   Pane layout
+   ============================================================ */
+
+#panePreview,
+#paneEdit {
+  container-name: yanta-note-pane;
+  container-type: inline-size;
+}
+
+.pane-edit,
+#paneEdit {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.pane-edit > #editor,
+#paneEdit > #editor {
+  flex: 1 1 auto;
+  min-height: 0;
+}
+
+/* ============================================================
+   Virtual calendar event attachment cards
+   ============================================================ */
+
+.yanta-event-note-card {
+  display: grid !important;
+  grid-template-columns: 38px minmax(0, 1fr) auto !important;
+  grid-template-areas:
+    "icon title actions"
+    "icon meta actions"
+    "location location location"
+    "description description description"
+    "calendar calendar calendar" !important;
+  align-items: start !important;
+  column-gap: 12px !important;
+  row-gap: 4px !important;
+
+  width: min(760px, calc(100% - 28px)) !important;
+  margin: 12px auto 10px;
+  margin-inline: auto !important;
+  padding: 13px 14px !important;
+
+  border: 1px solid color-mix(in srgb, var(--event-color, var(--accent)) 34%, var(--border)) !important;
+  border-radius: 15px !important;
+
+  background: color-mix(in srgb, var(--event-color, var(--accent)) 10%, var(--bg-elev));
+  color: var(--text) !important;
+
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.025) inset,
+    0 0 0 1px color-mix(in srgb, var(--event-color, var(--accent)) 8%, transparent) inset !important;
+
+  user-select: none !important;
+}
+
+.yanta-event-note-card-preview,
+.yanta-event-note-card-editor {
+  flex: 0 0 auto;
+}
+
+.yanta-event-note-card-preview {
+  margin-top: 10px !important;
+  margin-bottom: 10px !important;
+}
+
+.yanta-event-note-card-editor {
+  margin-top: 12px !important;
+  margin-bottom: 0 !important;
+}
+
+.yanta-event-note-card-main {
+  display: contents !important;
+}
+
+.yanta-event-note-card-icon {
+  grid-area: icon !important;
+
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center;
+  align-self: start !important;
+  justify-self: start !important;
+
+  flex: 0 0 38px !important;
+  width: 38px !important;
+  height: 38px !important;
+  min-width: 38px !important;
+  min-height: 38px !important;
+
+  border-radius: 13px !important;
+
+  background: color-mix(in srgb, var(--event-color, var(--accent)) 15%, transparent) !important;
+  color: var(--event-color, var(--accent)) !important;
+
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--event-color, var(--accent)) 22%, transparent) inset !important;
+}
+
+.yanta-event-note-card-icon svg {
+  width: 18px !important;
+  height: 18px !important;
+}
+
+.yanta-event-note-card-title {
+  grid-area: title !important;
+
+  align-self: end !important;
+  min-width: 0 !important;
+  margin: 0 !important;
+
+  overflow: hidden !important;
+  color: var(--text) !important;
+
+  font-size: 14px !important;
+  font-weight: 900 !important;
+  line-height: 1.22 !important;
+  letter-spacing: -0.01em !important;
+
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.yanta-event-note-card-meta {
+  grid-area: meta !important;
+
+  min-width: 0 !important;
+  max-width: 100% !important;
+  margin: 2px 0 0 !important;
+
+  color: var(--text-dim) !important;
+
+  font-size: 12px !important;
+  line-height: 1.35 !important;
+
+  overflow-wrap: anywhere !important;
+}
+
+.yanta-event-note-card-location {
+  grid-area: location !important;
+
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+
+  max-width: 100% !important;
+  margin-top: 9px !important;
+  padding-top: 9px !important;
+
+  border-top: 1px solid color-mix(in srgb, var(--event-color, var(--accent)) 18%, var(--border)) !important;
+
+  color: var(--text-dim) !important;
+
+  font-size: 12px !important;
+  line-height: 1.35 !important;
+
+  overflow-wrap: anywhere !important;
+}
+
+.yanta-event-note-card-location svg {
+  flex: 0 0 auto !important;
+  width: 13px !important;
+  height: 13px !important;
+  color: var(--event-color, var(--accent)) !important;
+}
+
+.yanta-event-note-card-location span {
+  min-width: 0 !important;
+  overflow-wrap: anywhere !important;
+}
+
+.yanta-event-note-card-description {
+  grid-area: description !important;
+
+  max-width: 100% !important;
+  margin-top: 7px !important;
+
+  color: var(--text) !important;
+
+  font-size: 12.5px !important;
+  line-height: 1.45 !important;
+
+  overflow-wrap: anywhere !important;
+}
+
+.yanta-event-note-card-calendar {
+  grid-area: calendar !important;
+
+  display: inline-flex;
+  justify-self: start !important;
+
+  max-width: 100% !important;
+  margin-top: 8px !important;
+  padding: 3px 8px !important;
+
+  overflow: hidden !important;
+
+  border: 1px solid color-mix(in srgb, var(--event-color, var(--accent)) 34%, var(--border)) !important;
+  border-radius: 999px !important;
+
+  background: color-mix(in srgb, var(--event-color, var(--accent)) 8%, transparent) !important;
+  color: var(--event-color, var(--accent)) !important;
+
+  font-size: 10.5px !important;
+  font-weight: 850 !important;
+  line-height: 1.25 !important;
+
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+
+.yanta-event-note-card-actions {
+  grid-area: actions !important;
+
+  display: flex !important;
+  align-items: flex-start !important;
+  justify-content: flex-end !important;
+  justify-self: end !important;
+
+  flex-wrap: wrap !important;
+  gap: 5px !important;
+
+  min-width: max-content !important;
+  max-width: 220px !important;
+  margin: 0 !important;
+  padding: 0 !important;
+}
+
+.yanta-event-note-card-actions .btn,
+.yanta-event-note-card .btn {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center;
+  gap: 4px !important;
+
+  flex: 0 0 auto !important;
+  width: auto !important;
+  min-width: 0 !important;
+  max-width: 100% !important;
+  height: 27px !important;
+  min-height: 27px !important;
+  margin: 0;
+  padding: 4px 8px !important;
+
+  border-radius: 999px !important;
+
+  font-size: 11px !important;
+  font-weight: 750 !important;
+  line-height: 1 !important;
+
+  white-space: nowrap !important;
+}
+
+.yanta-event-note-card-actions .btn svg,
+.yanta-event-note-card .btn svg {
+  flex: 0 0 auto !important;
+  width: 12px !important;
+  height: 12px !important;
+}
+
+.yanta-event-note-card .btn {
+  border-color: color-mix(in srgb, var(--event-color, var(--accent)) 40%, var(--border)) !important;
+  background: color-mix(in srgb, var(--event-color, var(--accent)) 9%, transparent) !important;
+  color: var(--event-color, var(--accent)) !important;
+}
+
+.yanta-event-note-card .btn:hover {
+  border-color: var(--event-color, var(--accent)) !important;
+  background: color-mix(in srgb, var(--event-color, var(--accent)) 16%, transparent) !important;
+  color: var(--event-color, var(--accent)) !important;
+}
+
+.yanta-event-note-card .btn.primary {
+  border-color: var(--event-color, var(--accent)) !important;
+  background: var(--event-color, var(--accent)) !important;
+  color: white !important;
+}
+
+.yanta-event-note-card .btn.primary:hover {
+  filter: brightness(1.08);
+}
+
+/* ============================================================
+   Calendar note picker
+   ============================================================ */
+
+.yanta-calendar-note-picker-card {
+  display: flex;
+  flex-direction: column;
+  width: min(620px, 94vw);
+  max-height: min(760px, 90vh);
+  overflow: hidden;
+}
+
+.yanta-calendar-note-picker-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.yanta-calendar-note-picker-search-row {
+  display: grid;
+  grid-template-columns: 24px 1fr;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  color: var(--text-faint);
+}
+
+.yanta-calendar-note-picker-search-row .text-input {
+  margin: 0;
+}
+
+.yanta-calendar-note-picker-list {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 4px;
+
+  min-height: 220px;
+  max-height: 430px;
+  padding: 4px;
+  overflow: auto;
+
+  border: 1px solid var(--border);
+  border-radius: 10px;
+
+  background: var(--bg);
+}
+
+.yanta-calendar-note-picker-item {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+
+  width: 100%;
+  min-width: 0;
+  padding: 8px 9px;
+
+  border: 0;
+  border-radius: 8px;
+
+  background: transparent;
+  color: var(--text);
+
+  text-align: left;
+  cursor: pointer;
+}
+
+.yanta-calendar-note-picker-item:hover,
+.yanta-calendar-note-picker-item.active {
+  background: var(--bg-elev-2);
+}
+
+.yanta-calendar-note-picker-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  flex: 0 0 28px;
+  width: 28px;
+  height: 28px;
+
+  border-radius: 999px;
+
+  background: color-mix(in srgb, var(--note-color, var(--accent)) 13%, transparent);
+  color: var(--note-color, var(--accent));
+}
+
+.yanta-calendar-note-picker-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.yanta-calendar-note-picker-text strong,
+.yanta-calendar-note-picker-text small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.yanta-calendar-note-picker-text strong {
+  font-size: 13px;
+}
+
+.yanta-calendar-note-picker-text small {
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+/* ============================================================
+   Native calendar dialogs
+   ============================================================ */
+
+.yanta-calendar-dialog-card {
+  width: min(520px, 94vw);
+}
+
+.yanta-calendar-dialog-message {
+  margin-bottom: 14px;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.yanta-calendar-dialog-actions {
+  margin-top: 14px;
+}
+
+/* ============================================================
+   Timed event color dot
+   ============================================================ */
+
+.yanta-cal-event-color-dot {
+  display: inline-block;
+  flex: 0 0 7px;
+
+  width: 7px;
+  height: 7px;
+  min-width: 7px;
+
+  border-radius: 999px;
+
+  background: var(--yanta-cal-dot-color, var(--accent));
+
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--bg-elev) 65%, transparent),
+    0 0 0 2px color-mix(in srgb, var(--yanta-cal-dot-color, var(--accent)) 18%, transparent);
+}
+
+.fc .fc-daygrid-dot-event .yanta-cal-event-color-dot {
+  margin-right: 1px;
+}
+
+.fc .fc-timegrid-event .yanta-cal-event-color-dot {
+  margin-top: 1px;
+}
+
+.fc .fc-list-event .yanta-cal-event-color-dot {
+  margin-right: 2px;
+}
+
+/* ============================================================
+   Utilities
+   ============================================================ */
+
+.pv-hidden-line {
+  display: none !important;
+}
+
+/* ============================================================
+   Container-based responsiveness
+   ============================================================ */
+
+@container yanta-note-pane (max-width: 620px) {
+  .yanta-event-note-card {
+    grid-template-columns: 36px minmax(0, 1fr) !important;
+    grid-template-areas:
+      "icon title"
+      "icon meta"
+      "location location"
+      "description description"
+      "calendar calendar"
+      "actions actions" !important;
+
+    column-gap: 10px !important;
+    row-gap: 4px !important;
+
+    width: calc(100% - 22px) !important;
+    padding: 12px 13px !important;
+  }
+
+  .yanta-event-note-card-icon {
+    flex-basis: 36px !important;
+    width: 36px !important;
+    height: 36px !important;
+    min-width: 36px !important;
+    min-height: 36px !important;
+    border-radius: 12px !important;
+  }
+
+  .yanta-event-note-card-actions {
+    justify-content: flex-start !important;
+    justify-self: start !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    margin-top: 8px !important;
+  }
+}
+
+@container yanta-note-pane (max-width: 420px) {
+  .yanta-event-note-card {
+    width: calc(100% - 16px) !important;
+    padding: 11px !important;
+    column-gap: 9px !important;
+  }
+
+  .yanta-event-note-card-icon {
+    flex-basis: 32px !important;
+    width: 32px !important;
+    height: 32px !important;
+    min-width: 32px !important;
+    min-height: 32px !important;
+  }
+
+  .yanta-event-note-card-icon svg {
+    width: 16px !important;
+    height: 16px !important;
+  }
+
+  .yanta-event-note-card-title {
+    overflow: visible !important;
+    font-size: 13px !important;
+    text-overflow: clip !important;
+    white-space: normal !important;
+  }
+
+  .yanta-event-note-card-meta,
+  .yanta-event-note-card-location,
+  .yanta-event-note-card-description {
+    font-size: 11.5px !important;
+  }
+
+  .yanta-event-note-card-actions {
+    gap: 4px !important;
+  }
+
+  .yanta-event-note-card-actions .btn,
+  .yanta-event-note-card .btn {
+    height: 26px !important;
+    min-height: 26px !important;
+    padding: 4px 7px !important;
+    font-size: 10.5px !important;
+  }
+}
+
+/* Fallback for browsers without container queries */
+@media (max-width: 700px) {
+  .yanta-event-note-card {
+    grid-template-columns: 36px minmax(0, 1fr) !important;
+    grid-template-areas:
+      "icon title"
+      "icon meta"
+      "location location"
+      "description description"
+      "calendar calendar"
+      "actions actions" !important;
+  }
+
+  .yanta-event-note-card-actions {
+    justify-content: flex-start !important;
+    justify-self: start !important;
+    min-width: 0 !important;
+    max-width: 100% !important;
+    margin-top: 8px !important;
+  }
+}
+
+/* Print / PDF */
+@media print {
+  .yanta-event-note-card {
+    break-inside: avoid;
+    background: transparent !important;
+    box-shadow: none !important;
+  }
+
+  .yanta-event-note-card-actions {
+    display: none !important;
+  }
+}

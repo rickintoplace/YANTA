@@ -41,6 +41,10 @@ import {
   isSidePaneOpen,
 } from './side-pane.js';
 
+import {
+  shouldHideFromDashboard,
+} from './ai/brain.js';
+
   const MOBILE_MQ = window.matchMedia('(max-width: 880px)');
   
   const DASH_ORDER_STEP = 1000;
@@ -508,6 +512,7 @@ function getDashboardItems() {
   */
   const pinnedNotes = [...state.notes.values()]
     .filter((n) => n.pinned)
+    .filter((n) => !shouldHideFromDashboard(n))
     .filter((n) => {
       if (!folderId) return true;
       return (n.folderId || null) === folderId;
@@ -522,6 +527,7 @@ function getDashboardItems() {
     }));
 
   const folders = [...state.folders.values()]
+    .filter((f) => !shouldHideFromDashboard(f))
     .filter((f) => (f.parentId || null) === folderId)
     .map((folder) => ({
       kind: 'folder',
@@ -532,6 +538,7 @@ function getDashboardItems() {
     }));
 
   const notes = [...state.notes.values()]
+    .filter((n) => !shouldHideFromDashboard(n))
     .filter((n) => !n.pinned)
     .filter((n) => (n.folderId || null) === folderId)
     .map((note) => ({

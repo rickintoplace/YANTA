@@ -21,6 +21,12 @@ export function noteToFrontmatter(n) {
   if (n.dashboardHeight != null) meta.dashboardHeight = n.dashboardHeight;
   if (n.dashboardPinnedOrder != null) meta.dashboardPinnedOrder = n.dashboardPinnedOrder;
   if (n.dashboardHeightPx != null) meta.dashboardHeightPx = n.dashboardHeightPx;
+  if (n.hidden) meta.hidden = true;
+  if (n.archived) meta.archived = true;
+  if (n.system) meta.system = true;
+  if (n.aiBrain) meta.aiBrain = true;
+  if (n.dashboardHidden) meta.dashboardHidden = true;
+  if (n.hiddenFromDashboard) meta.hiddenFromDashboard = true;
   if (n.folderId) {
     const folder = state.folders.get(n.folderId);
     if (folder) meta.folder = folder.name;

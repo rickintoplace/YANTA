@@ -23,6 +23,17 @@ import {
   CALENDAR_WEEK_STARTS,
 } from './calendar-preferences.js';
 
+import {
+  FLOATING_CREATE_ACTION_CATALOG,
+  FLOATING_CREATE_MIN_DISTANCE,
+  FLOATING_CREATE_BOUNDS,
+  getFloatingCreateSettings,
+  saveFloatingCreateSettings,
+  resetFloatingCreateSettings,
+  constrainFloatingCreateLayout,
+  suggestFloatingCreatePosition,
+} from './floating-create-settings.js';
+
 // ----------------------------------------------------------------
 // Theme tokens — these map 1:1 to CSS custom properties.
 // Each has a default for dark + light mode.
@@ -906,6 +917,7 @@ function ensureModal() {
     { id: 'colors',     label: 'Colors',     icon: 'paintbrush' },
     { id: 'typography', label: 'Typography', icon: 'type' },
     { id: 'dashboard',  label: 'Dashboard',  icon: 'layout-dashboard' },
+    { id: 'quick-create', label: 'Quick Create', icon: 'circle-plus' },
     { id: 'calendar',   label: 'Calendar',   icon: 'calendar-days' },
     { id: 'sync',       label: 'Sync & Backup', icon: 'refresh-cw' },
     { id: 'about',      label: 'About',      icon: 'info' },
@@ -957,6 +969,7 @@ function renderSettingsBody() {
   else if (activeSection === 'colors') renderColorsSection(content);
   else if (activeSection === 'typography') renderTypographySection(content);
   else if (activeSection === 'dashboard') renderDashboardSection(content);
+  else if (activeSection === 'quick-create') renderQuickCreateSection(content);
   else if (activeSection === 'calendar') renderCalendarSection(content);
   else if (activeSection === 'sync') renderSyncSection(content);
   else if (activeSection === 'about') renderAboutSection(content);
@@ -1319,6 +1332,506 @@ onclick: async () => {
   lhRow.append(lhSlider, lhValue);
   lhGroup.append(lhRow);
   host.append(lhGroup);
+}
+
+// ---- Quick Create section ----
+
+function cloneQuickCreateSettings(settings) {
+  try {
+    return structuredClone(settings);
+  } catch {
+    return JSON.parse(JSON.stringify(settings ?? null));
+  }
+}
+
+function quickCreateCatalogItem(actionId) {
+  return FLOATING_CREATE_ACTION_CATALOG.find((a) => a.id === actionId) || null;
+}
+
+function quickCreateActionById(settings, actionId) {
+  return settings.actions.find((a) => a.id === actionId) || null;
+}
+
+function enabledQuickCreateActions(settings) {
+  return settings.actions
+    .filter((a) => a.enabled !== false)
+    .sort((a, b) => a.order - b.order);
+}
+
+function disabledQuickCreateCatalogItems(settings) {
+  const enabled = new Set(
+    settings.actions
+      .filter((a) => a.enabled !== false)
+      .map((a) => a.id)
+  );
+
+  return FLOATING_CREATE_ACTION_CATALOG.filter((a) => !enabled.has(a.id));
+}
+
+function persistQuickCreateSettings(settings, {
+  rerender = true,
+  toastMessage = '',
+} = {}) {
+  const saved = saveFloatingCreateSettings(settings);
+
+  if (toastMessage) {
+    toast(toastMessage, 'success');
+  }
+
+  if (rerender) {
+    renderSettingsBody();
+  }
+
+  return saved;
+}
+
+function renderQuickCreateSection(host) {
+  host.replaceChildren();
+
+  host.append(sectionHeader(
+    'Quick Create',
+    'Customize the floating create menu: actions, labels, icons and free bubble positions.'
+  ));
+
+  const settings = getFloatingCreateSettings();
+
+  const intro = el('div', { class: 'yanta-settings-info' });
+  intro.innerHTML = `
+    <p><strong>Free layout with guard rails.</strong> Drag bubbles in the preview. YANTA automatically keeps a minimum distance between bubbles, so the menu stays usable.</p>
+    <p>Coordinates are saved as relative positions, but users never have to type numbers.</p>
+  `;
+  host.append(intro);
+
+  host.append(renderQuickCreateActionsGroup(settings));
+  host.append(renderQuickCreateLayoutEditor(settings));
+
+  const resetGroup = el('div', { class: 'yanta-settings-group' });
+  resetGroup.append(el('div', { class: 'yanta-settings-group-title' }, 'Reset'));
+
+  resetGroup.append(
+    el('button', {
+      class: 'btn',
+      onclick: () => {
+        resetFloatingCreateSettings();
+        toast('Quick Create reset to default', 'success');
+        renderSettingsBody();
+      },
+    }, 'Reset Quick Create to default')
+  );
+
+  host.append(resetGroup);
+}
+
+function renderQuickCreateActionsGroup(settings) {
+  const group = el('div', { class: 'yanta-settings-group yanta-qc-settings-actions' });
+
+  group.append(el('div', { class: 'yanta-settings-group-title' }, 'Actions'));
+
+  const enabled = enabledQuickCreateActions(settings);
+
+  if (!enabled.length) {
+    group.append(el('div', { class: 'tree-empty' }, 'No actions enabled. Add one below.'));
+  }
+
+  for (const action of enabled) {
+    group.append(renderQuickCreateActionRow(settings, action));
+  }
+
+  const disabled = disabledQuickCreateCatalogItems(settings);
+
+  if (disabled.length) {
+    group.append(el('div', { class: 'yanta-qc-settings-add-title' }, 'Add action'));
+
+    const addRow = el('div', { class: 'yanta-qc-settings-add-row' });
+
+    for (const cat of disabled) {
+      const btn = el('button', {
+        type: 'button',
+        class: 'btn',
+        onclick: () => {
+          const next = cloneQuickCreateSettings(settings);
+          let action = quickCreateActionById(next, cat.id);
+
+          if (!action) {
+            action = {
+              id: cat.id,
+              enabled: false,
+              label: cat.defaultLabel,
+              icon: cat.defaultIcon,
+              x: -76,
+              y: 0,
+              order: next.actions.length,
+            };
+
+            next.actions.push(action);
+          }
+
+          const pos = suggestFloatingCreatePosition(next.actions);
+
+          action.enabled = true;
+          action.label = action.label || cat.defaultLabel;
+          action.icon = action.icon || cat.defaultIcon;
+          action.x = pos.x;
+          action.y = pos.y;
+          action.order = Math.max(0, ...next.actions.map((a) => Number(a.order || 0))) + 1;
+
+          next.actions = constrainFloatingCreateLayout(next.actions, {
+            activeId: action.id,
+            candidate: pos,
+          });
+
+          persistQuickCreateSettings(next, {
+            toastMessage: 'Quick Create action added',
+          });
+        },
+      });
+
+      btn.innerHTML = `${lucide(cat.defaultIcon, 14)} ${cat.defaultLabel}`;
+      addRow.append(btn);
+    }
+
+    group.append(addRow);
+  }
+
+  return group;
+}
+
+function renderQuickCreateActionRow(settings, action) {
+  const cat = quickCreateCatalogItem(action.id);
+  const label = action.label || cat?.defaultLabel || action.id;
+
+  const row = el('div', {
+    class: 'yanta-qc-settings-row',
+    dataset: {
+      actionId: action.id,
+    },
+  });
+
+  const iconPreview = el('button', {
+    type: 'button',
+    class: 'yanta-qc-settings-icon-btn',
+    title: 'Choose icon',
+    onclick: async () => {
+      const { openIconPicker } = await import('./icon-picker.js');
+
+      openIconPicker({
+        title: `Icon for ${label}`,
+        initialIcon: action.icon || cat?.defaultIcon || 'circle',
+        initialColor: '#6ea8fe',
+        allowReset: false,
+        applyLabel: 'Apply',
+        onApply: ({ icon }) => {
+          if (!icon) return;
+
+          const next = cloneQuickCreateSettings(settings);
+          const a = quickCreateActionById(next, action.id);
+          if (!a) return;
+
+          a.icon = icon;
+
+          persistQuickCreateSettings(next, {
+            toastMessage: 'Quick Create icon updated',
+          });
+        },
+      });
+    },
+  });
+
+  iconPreview.innerHTML = lucide(action.icon || cat?.defaultIcon || 'circle', 18);
+
+  const labelInput = el('input', {
+    class: 'text-input yanta-qc-settings-label',
+    value: label,
+    autocomplete: 'off',
+    spellcheck: 'false',
+    title: 'Action label',
+  });
+
+  labelInput.addEventListener('change', () => {
+    const next = cloneQuickCreateSettings(settings);
+    const a = quickCreateActionById(next, action.id);
+    if (!a) return;
+
+    a.label = labelInput.value.trim() || cat?.defaultLabel || action.id;
+
+    persistQuickCreateSettings(next, {
+      rerender: false,
+      toastMessage: 'Quick Create label saved',
+    });
+  });
+
+  const moveUp = el('button', {
+    type: 'button',
+    class: 'icon-btn',
+    title: 'Move up',
+    onclick: () => {
+      moveQuickCreateAction(settings, action.id, -1);
+    },
+  });
+
+  moveUp.innerHTML = lucide('chevron-up', 15);
+
+  const moveDown = el('button', {
+    type: 'button',
+    class: 'icon-btn',
+    title: 'Move down',
+    onclick: () => {
+      moveQuickCreateAction(settings, action.id, 1);
+    },
+  });
+
+  moveDown.innerHTML = lucide('chevron-down', 15);
+
+  const remove = el('button', {
+    type: 'button',
+    class: 'icon-btn danger',
+    title: 'Remove from Quick Create',
+    onclick: () => {
+      const next = cloneQuickCreateSettings(settings);
+      const a = quickCreateActionById(next, action.id);
+      if (!a) return;
+
+      a.enabled = false;
+
+      persistQuickCreateSettings(next, {
+        toastMessage: 'Quick Create action removed',
+      });
+    },
+  });
+
+  remove.innerHTML = lucide('minus', 15);
+
+  row.append(iconPreview, labelInput, moveUp, moveDown, remove);
+
+  return row;
+}
+
+function moveQuickCreateAction(settings, actionId, delta) {
+  const next = cloneQuickCreateSettings(settings);
+  const enabled = enabledQuickCreateActions(next);
+  const index = enabled.findIndex((a) => a.id === actionId);
+
+  if (index < 0) return;
+
+  const target = index + delta;
+
+  if (target < 0 || target >= enabled.length) return;
+
+  const a = enabled[index];
+  const b = enabled[target];
+
+  const old = a.order;
+  a.order = b.order;
+  b.order = old;
+
+  next.actions = next.actions
+    .sort((x, y) => Number(x.order || 0) - Number(y.order || 0))
+    .map((x, i) => ({
+      ...x,
+      order: i,
+    }));
+
+  persistQuickCreateSettings(next, {
+    toastMessage: 'Quick Create order updated',
+  });
+}
+
+function positionQuickCreatePreviewBubble(node, action) {
+  node.style.left = `calc(100% - 72px + ${Math.round(action.x)}px - 23px)`;
+  node.style.top = `calc(100% - 62px + ${Math.round(action.y)}px - 23px)`;
+}
+
+function updateQuickCreatePreviewPositions(stage, settings) {
+  for (const action of enabledQuickCreateActions(settings)) {
+    const node = stage.querySelector(`[data-qc-preview-action="${CSS.escape(action.id)}"]`);
+    if (node) {
+      positionQuickCreatePreviewBubble(node, action);
+    }
+  }
+}
+
+function renderQuickCreateLayoutEditor(settings) {
+  let working = cloneQuickCreateSettings(settings);
+  let activeId = enabledQuickCreateActions(working)[0]?.id || '';
+
+  const group = el('div', { class: 'yanta-settings-group yanta-qc-layout-group' });
+
+  group.append(el('div', { class: 'yanta-settings-group-title' }, 'Bubble layout'));
+
+  const hint = el('p', { class: 'yanta-settings-hint' },
+    `Drag bubbles freely. Minimum distance: ${FLOATING_CREATE_MIN_DISTANCE}px. Nearby bubbles move aside automatically.`
+  );
+
+  group.append(hint);
+
+  const toolbar = el('div', { class: 'yanta-qc-layout-toolbar' });
+
+  const activeLabel = el('span', { class: 'yanta-qc-layout-active-label' }, 'Drag a bubble');
+
+  toolbar.append(activeLabel);
+  group.append(toolbar);
+
+  const stage = el('div', { class: 'yanta-qc-layout-stage' });
+
+  function renderStage() {
+    stage.replaceChildren();
+
+    const origin = el('div', {
+      class: 'yanta-qc-layout-origin',
+      title: 'Quick Create button',
+    });
+
+    origin.innerHTML = lucide('plus', 20);
+    stage.append(origin);
+
+    const enabled = enabledQuickCreateActions(working);
+
+    if (!enabled.length) {
+      const empty = el('div', { class: 'yanta-qc-layout-empty' }, 'Enable or add an action first.');
+      stage.append(empty);
+      return;
+    }
+
+    for (const action of enabled) {
+      const bubble = el('button', {
+        type: 'button',
+        class:
+          'yanta-qc-layout-bubble' +
+          (action.id === activeId ? ' active' : ''),
+        title: action.label,
+        dataset: {
+          qcPreviewAction: action.id,
+        },
+      });
+
+      bubble.innerHTML = lucide(action.icon, 19);
+
+      positionQuickCreatePreviewBubble(bubble, action);
+
+      bubble.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+
+        activeId = action.id;
+        stage.classList.add('is-dragging');
+
+        for (const n of stage.querySelectorAll('.yanta-qc-layout-bubble')) {
+          n.classList.toggle('active', n.dataset.qcPreviewAction === activeId);
+        }
+
+        const label = quickCreateActionById(working, activeId)?.label || 'Bubble';
+        activeLabel.textContent = `Dragging: ${label}`;
+
+        try {
+          bubble.setPointerCapture?.(e.pointerId);
+        } catch {}
+
+        const onMove = (moveEvent) => {
+          if (moveEvent.pointerId !== e.pointerId) return;
+
+          moveEvent.preventDefault();
+          moveEvent.stopPropagation();
+
+          const rect = stage.getBoundingClientRect();
+
+          const originX = rect.right - 72;
+          const originY = rect.bottom - 62;
+
+          const raw = {
+            x: moveEvent.clientX - originX,
+            y: moveEvent.clientY - originY,
+          };
+
+          working.actions = constrainFloatingCreateLayout(working.actions, {
+            activeId,
+            candidate: raw,
+            minDistance: FLOATING_CREATE_MIN_DISTANCE,
+            bounds: FLOATING_CREATE_BOUNDS,
+          });
+
+          updateQuickCreatePreviewPositions(stage, working);
+        };
+
+        const onUp = (upEvent) => {
+          if (upEvent.pointerId !== e.pointerId) return;
+
+          upEvent.preventDefault();
+          upEvent.stopPropagation();
+
+          stage.classList.remove('is-dragging');
+          activeLabel.textContent = 'Layout saved';
+
+          document.removeEventListener('pointermove', onMove, true);
+          document.removeEventListener('pointerup', onUp, true);
+          document.removeEventListener('pointercancel', onCancel, true);
+
+          try {
+            bubble.releasePointerCapture?.(e.pointerId);
+          } catch {}
+
+          working = saveFloatingCreateSettings(working);
+        };
+
+        const onCancel = (cancelEvent) => {
+          if (cancelEvent.pointerId !== e.pointerId) return;
+
+          stage.classList.remove('is-dragging');
+          activeLabel.textContent = 'Drag a bubble';
+
+          document.removeEventListener('pointermove', onMove, true);
+          document.removeEventListener('pointerup', onUp, true);
+          document.removeEventListener('pointercancel', onCancel, true);
+        };
+
+        document.addEventListener('pointermove', onMove, {
+          capture: true,
+          passive: false,
+        });
+
+        document.addEventListener('pointerup', onUp, {
+          capture: true,
+          passive: false,
+        });
+
+        document.addEventListener('pointercancel', onCancel, {
+          capture: true,
+          passive: false,
+        });
+      });
+
+      stage.append(bubble);
+    }
+  }
+
+  renderStage();
+
+  group.append(stage);
+
+  const actions = el('div', { class: 'compress-actions yanta-qc-layout-actions' });
+
+  actions.append(
+    el('button', {
+      class: 'btn',
+      onclick: () => {
+        working = getFloatingCreateSettings();
+        renderStage();
+        activeLabel.textContent = 'Reloaded saved layout';
+      },
+    }, 'Reload saved layout'),
+
+    el('button', {
+      class: 'btn',
+      onclick: () => {
+        resetFloatingCreateSettings();
+        toast('Quick Create layout reset', 'success');
+        renderSettingsBody();
+      },
+    }, 'Reset layout')
+  );
+
+  group.append(actions);
+
+  return group;
 }
 
 // ---- Dashboard section ----
@@ -2268,6 +2781,228 @@ function injectSettingsCss() {
   color: var(--text-dim);
   min-width: 50px;
   text-align: right;
+}
+
+/* Quick Create settings */
+.yanta-qc-settings-actions {
+  margin-top: 18px;
+}
+
+.yanta-qc-settings-row {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) 30px 30px 30px;
+  gap: 8px;
+  align-items: center;
+
+  padding: 8px;
+  margin-bottom: 7px;
+
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-elev-2);
+}
+
+.yanta-qc-settings-icon-btn {
+  width: 36px;
+  height: 36px;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  border: 1px solid var(--border);
+  border-radius: 999px;
+
+  background: var(--bg-elev);
+  color: var(--accent);
+
+  cursor: pointer;
+}
+
+.yanta-qc-settings-icon-btn:hover {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-elev));
+}
+
+.yanta-qc-settings-label {
+  margin: 0;
+  min-width: 0;
+}
+
+.yanta-qc-settings-add-title {
+  margin: 14px 0 7px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+}
+
+.yanta-qc-settings-add-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.yanta-qc-layout-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+
+  margin-bottom: 8px;
+}
+
+.yanta-qc-layout-active-label {
+  color: var(--text-dim);
+  font-size: 12px;
+}
+
+.yanta-qc-layout-stage {
+  position: relative;
+
+  height: 330px;
+  min-height: 330px;
+
+  border: 1px solid var(--border);
+  border-radius: 16px;
+
+  background:
+    radial-gradient(circle at calc(100% - 72px) calc(100% - 62px),
+      color-mix(in srgb, var(--accent) 16%, transparent),
+      transparent 110px),
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--bg-elev-2) 94%, transparent),
+      var(--bg-elev)
+    );
+
+  overflow: hidden;
+  touch-action: none;
+  user-select: none;
+}
+
+.yanta-qc-layout-stage::before {
+  content: "";
+  position: absolute;
+  inset: 14px;
+
+  border: 1px dashed color-mix(in srgb, var(--border-strong) 70%, transparent);
+  border-radius: 14px;
+
+  pointer-events: none;
+  opacity: 0.55;
+}
+
+.yanta-qc-layout-origin {
+  position: absolute;
+  right: 45px;
+  bottom: 35px;
+
+  width: 54px;
+  height: 54px;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  border-radius: 999px;
+
+  background: var(--accent);
+  color: white;
+
+  box-shadow: 0 10px 28px rgba(0,0,0,0.22);
+  pointer-events: none;
+}
+
+.yanta-qc-layout-bubble {
+  position: absolute;
+
+  width: 46px;
+  height: 46px;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  border: 0;
+  border-radius: 999px;
+
+  background: var(--accent);
+  color: white;
+
+  box-shadow: 0 8px 24px rgba(0,0,0,0.20);
+
+  cursor: grab;
+  touch-action: none;
+
+  transition:
+    transform 120ms cubic-bezier(.2,.8,.2,1),
+    box-shadow 120ms ease,
+    outline-color 120ms ease;
+}
+
+.yanta-qc-layout-bubble:hover {
+  transform: scale(1.08);
+}
+
+.yanta-qc-layout-bubble:active,
+.yanta-qc-layout-stage.is-dragging .yanta-qc-layout-bubble.active {
+  cursor: grabbing;
+  transform: scale(1.12);
+  box-shadow: 0 12px 34px rgba(0,0,0,0.28);
+}
+
+.yanta-qc-layout-bubble.active {
+  outline: 3px solid color-mix(in srgb, var(--accent-2) 70%, transparent);
+  outline-offset: 4px;
+}
+
+.yanta-qc-layout-stage.is-dragging .yanta-qc-layout-bubble.active::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+
+  width: 58px;
+  height: 58px;
+
+  border-radius: 999px;
+  border: 1px dashed color-mix(in srgb, white 75%, transparent);
+
+  transform: translate(-50%, -50%);
+
+  pointer-events: none;
+  opacity: 0.7;
+}
+
+.yanta-qc-layout-empty {
+  position: absolute;
+  inset: 0;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  color: var(--text-faint);
+  font-size: 13px;
+  font-style: italic;
+}
+
+.yanta-qc-layout-actions {
+  margin-top: 10px;
+  justify-content: flex-start;
+}
+
+@media (max-width: 720px) {
+  .yanta-qc-settings-row {
+    grid-template-columns: 42px minmax(0, 1fr) 30px 30px 30px;
+  }
+
+  .yanta-qc-layout-stage {
+    height: 310px;
+    min-height: 310px;
+  }
 }
 
 /* Mobile */

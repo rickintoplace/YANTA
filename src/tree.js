@@ -22,6 +22,11 @@ import {
   renameFolderById,
 } from './item-actions.js';
 
+import {
+  AI_BRAIN_IDS,
+  isSystemItem,
+} from './ai/brain.js';
+
 function safeItemColor(c) {
   return safeCssColor(c);
 }
@@ -42,6 +47,34 @@ function applyItemColor(row, color) {
 
   row.classList.add('has-color');
   row.style.setProperty('--item-color', c);
+}
+
+function isArchivedItem(item) {
+  return !!item && item.archived === true;
+}
+
+function isMainTreeItem(item) {
+  return !isSystemItem(item) && !isArchivedItem(item);
+}
+
+function isSystemFolder(f) {
+  return isSystemItem(f);
+}
+
+function isArchivedFolder(f) {
+  return isArchivedItem(f);
+}
+
+function noteBelongsToSystem(note) {
+  return isSystemItem(note) || isSystemFolder(state.folders.get(note.folderId));
+}
+
+function noteBelongsToArchived(note) {
+  return isArchivedItem(note) || isArchivedFolder(state.folders.get(note.folderId));
+}
+
+function noteBelongsToMain(note) {
+  return !noteBelongsToSystem(note) && !noteBelongsToArchived(note);
 }
 
 /**
@@ -776,6 +809,10 @@ export function renderTree() {
     return true;
   });
 
+  const visibleMain = visible.filter(noteBelongsToMain);
+  const visibleSystem = visible.filter(noteBelongsToSystem);
+  const visibleArchived = visible.filter(noteBelongsToArchived);
+
 const pinned = visible
   .filter((n) => n.pinned)
   .sort((a, b) => b.updated - a.updated);
@@ -863,7 +900,7 @@ if (pinned.length) {
 
   folderSec.append(ftitle);
 
-  const orphanNotes = visible
+  const orphanNotes = visibleMain
     .filter((n) => !n.folderId)
     .sort((a, b) => b.updated - a.updated);
 
@@ -872,11 +909,12 @@ if (pinned.length) {
   }
 
   const topFolders = [...state.folders.values()]
+    .filter(isMainTreeItem)
     .filter((f) => !f.parentId || !state.folders.has(f.parentId))
     .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
   for (const f of topFolders) {
-    folderSec.append(folderRow(f, visible, 0));
+    folderSec.append(folderRow(f, visibleMain, 0));
   }
 
   if (!topFolders.length && !orphanNotes.length) {
@@ -884,6 +922,60 @@ if (pinned.length) {
   }
 
   root.append(folderSec);
+
+  root.append(folderSec);
+
+  const archivedFolders = [...state.folders.values()]
+    .filter(isArchivedFolder)
+    .filter((f) => !f.parentId || !isArchivedFolder(state.folders.get(f.parentId)))
+    .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+  const archivedRootNotes = visibleArchived
+    .filter((n) => !n.folderId || !isArchivedFolder(state.folders.get(n.folderId)))
+    .sort((a, b) => b.updated - a.updated);
+
+  if (archivedFolders.length || archivedRootNotes.length) {
+    const archivedSec = el('div', { class: 'tree-section tree-section-archived' });
+    archivedSec.append(el('div', { class: 'tree-section-title' }, 'Archived'));
+
+    for (const n of archivedRootNotes) {
+      archivedSec.append(noteRow(n));
+    }
+
+    for (const f of archivedFolders) {
+      archivedSec.append(folderRow(f, visibleArchived, 0));
+    }
+
+    root.append(archivedSec);
+  }
+
+  const systemFolders = [...state.folders.values()]
+    .filter(isSystemFolder)
+    .filter((f) => !f.parentId || !isSystemFolder(state.folders.get(f.parentId)))
+    .sort((a, b) => {
+      if (a.id === AI_BRAIN_IDS.rootFolder) return -1;
+      if (b.id === AI_BRAIN_IDS.rootFolder) return 1;
+      return (a.name || '').localeCompare(b.name || '');
+    });
+
+  const systemRootNotes = visibleSystem
+    .filter((n) => !n.folderId || !isSystemFolder(state.folders.get(n.folderId)))
+    .sort((a, b) => String(a.title || '').localeCompare(String(b.title || '')));
+
+  if (systemFolders.length || systemRootNotes.length) {
+    const systemSec = el('div', { class: 'tree-section tree-section-system' });
+    systemSec.append(el('div', { class: 'tree-section-title' }, 'System'));
+
+    for (const n of systemRootNotes) {
+      systemSec.append(noteRow(n));
+    }
+
+    for (const f of systemFolders) {
+      systemSec.append(folderRow(f, visibleSystem, 0));
+    }
+
+    root.append(systemSec);
+  }
 
   normalizeCollapsedTreeIndents(root);
 
@@ -1441,6 +1533,25 @@ function noteMenu(e, n) {
       action: () => renameTreeNote(n.id),
     },
     {
+      label: n.archived ? 'Unarchive' : 'Archive',
+      action: async () => {
+        n.archived = !n.archived;
+        n.updated = Date.now();
+
+        await store.notes.put(n);
+
+        renderTree();
+
+        window.dispatchEvent(new CustomEvent('yanta-dashboard-refresh'));
+        window.dispatchEvent(new CustomEvent('yanta-note-updated', {
+          detail: {
+            noteId: n.id,
+            reason: n.archived ? 'archived' : 'unarchived',
+          },
+        }));
+      },
+    },
+    {
       label: 'Move to folder…',
       action: () => moveSelectedToFolder([noteKey(n.id)]),
     },
@@ -1491,6 +1602,25 @@ function folderMenu(e, f) {
     {
       label: 'Rename…',
       action: () => renameTreeFolder(f.id),
+    },
+    {
+      label: f.archived ? 'Unarchive folder' : 'Archive folder',
+      action: async () => {
+        f.archived = !f.archived;
+        f.updated = Date.now();
+
+        await store.folders.put(f);
+
+        renderTree();
+
+        window.dispatchEvent(new CustomEvent('yanta-dashboard-refresh'));
+        window.dispatchEvent(new CustomEvent('yanta-folder-updated', {
+          detail: {
+            folderId: f.id,
+            reason: f.archived ? 'archived' : 'unarchived',
+          },
+        }));
+      },
     },
     {
       label: 'Move to folder…',

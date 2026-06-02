@@ -58,6 +58,13 @@ export function sanitizeNoteMeta(note) {
     created: Number(note.created || Date.now()),
     updated: Number(note.updated || Date.now()),
     bodyMigrated: note.bodyMigrated === true ? true : undefined,
+
+    hidden: note.hidden === true ? true : undefined,
+    archived: note.archived === true ? true : undefined,
+    system: note.system === true ? true : undefined,
+    aiBrain: note.aiBrain === true ? true : undefined,
+    dashboardHidden: note.dashboardHidden === true ? true : undefined,
+    hiddenFromDashboard: note.hiddenFromDashboard === true ? true : undefined,
   });
 }
 
@@ -72,6 +79,13 @@ export function sanitizeFolderMeta(folder) {
     color: folder.color || undefined,
     created: Number(folder.created || Date.now()),
     updated: Number(folder.updated || folder.created || Date.now()),
+
+    hidden: folder.hidden === true ? true : undefined,
+    archived: folder.archived === true ? true : undefined,
+    system: folder.system === true ? true : undefined,
+    aiBrain: folder.aiBrain === true ? true : undefined,
+    dashboardHidden: folder.dashboardHidden === true ? true : undefined,
+    hiddenFromDashboard: folder.hiddenFromDashboard === true ? true : undefined,
   });
 }
 

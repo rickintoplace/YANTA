@@ -1,11 +1,11 @@
 // ============================================================
 // YANTA — Floating Quick Create Button
 //
-// Shows on Dashboard, Calendar and Graph.
+// Shows on Dashboard, Calendar, Graph and Notes.
 // UX:
 // - tap/click "+" => staggered icon bubbles
 // - hold "+" => bubbles open, drag toward bubble, release executes action
-// - gooey visual blob layer for smooth merge effect
+// - bubble layout is user configurable via floating-create-settings.js
 // ============================================================
 
 import {
@@ -47,58 +47,21 @@ import {
   currentFolderForNew,
 } from './tree.js';
 
+import {
+  getFloatingCreateSettings,
+  floatingCreateActionsForRuntime,
+} from './floating-create-settings.js';
+
 let initialized = false;
 let root = null;
 let graphObserver = null;
+let actions = [];
+
+let globalKeyBound = false;
+let globalOutsidePointerBound = false;
 
 const HOLD_MS = 260;
 const DRAG_MOVE_PX = 4;
-
-const ACTIONS = [
-  {
-    id: 'note',
-    label: 'New text note',
-    icon: 'file-text',
-    x: -76,
-    y: 0,
-  },
-  {
-    id: 'list',
-    label: 'New list',
-    icon: 'list-checks',
-    x: -128,
-    y: -44,
-  },
-  {
-    id: 'drawing',
-    label: 'New drawing',
-    icon: 'pencil',
-    x: -142,
-    y: -104,
-  },
-  {
-    id: 'image',
-    label: 'New image',
-    icon: 'image',
-    x: -104,
-    y: -164,
-  },
-  {
-    id: 'event',
-    label: 'New calendar event',
-    icon: 'calendar-plus',
-    x: -36,
-    y: -192,
-  },
-];
-
-function prefersReducedMotion() {
-  try {
-    return window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
-  } catch {
-    return false;
-  }
-}
 
 function nextFrame() {
   return new Promise((resolve) => requestAnimationFrame(() => resolve()));
@@ -111,9 +74,16 @@ function isGraphVisible() {
 
 function shouldShowFloatingCreate() {
   return (
-    state.surface === 'dashboard' ||
-    state.surface === 'calendar' ||
-    isGraphVisible()
+    actions.length > 0 &&
+    (
+      state.surface === 'dashboard' ||
+      state.surface === 'calendar' ||
+      (
+        state.surface === 'note' &&
+        !!state.currentNoteId
+      ) ||
+      isGraphVisible()
+    )
   );
 }
 
@@ -123,6 +93,10 @@ function folderForNewNote() {
   }
 
   return currentFolderForNew?.() || null;
+}
+
+function loadActions() {
+  actions = floatingCreateActionsForRuntime(getFloatingCreateSettings());
 }
 
 function setOpen(open) {
@@ -142,6 +116,11 @@ function isOpen() {
 }
 
 function toggleOpen() {
+  if (!actions.length) {
+    toast('No Quick Create actions enabled', 'error');
+    return;
+  }
+
   setOpen(!isOpen());
 }
 
@@ -172,6 +151,14 @@ function setDragOffset(dx, dy) {
 function vibrate(ms = 8) {
   try {
     navigator.vibrate?.(ms);
+  } catch {}
+}
+
+async function closeGraphIfOpen() {
+  if (!isGraphVisible()) return;
+
+  try {
+    closeGraph();
   } catch {}
 }
 
@@ -236,14 +223,6 @@ async function createCalendarEvent() {
   openNewCalendarEvent();
 }
 
-async function closeGraphIfOpen() {
-  if (!isGraphVisible()) return;
-
-  try {
-    closeGraph();
-  } catch {}
-}
-
 async function runAction(id) {
   setOpen(false);
 
@@ -270,6 +249,11 @@ async function runAction(id) {
 
     if (id === 'event') {
       await createCalendarEvent();
+      return;
+    }
+
+    if (id === 'ai') {
+      window.dispatchEvent(new CustomEvent('yanta-open-ai-assistant'));
       return;
     }
   } catch (err) {
@@ -325,11 +309,6 @@ function updateHotBubble(clientX, clientY) {
       node.classList.toggle('is-hot', !!id && node.dataset.action === id);
     });
 
-  /*
-    Homogeneous gooey highlight:
-    the main blob must light up with the target blob, otherwise the
-    goo bridge visually looks like two different materials.
-  */
   const triggerBlob = root.querySelector('.yanta-qc-trigger-blob');
   triggerBlob?.classList.toggle('is-hot', !!id);
 
@@ -352,7 +331,7 @@ function injectCss() {
   const css = `
 /* ============================================================
    YANTA Floating Quick Create
-   refined flat gooey version v3
+   user-configurable free layout
    ============================================================ */
 
 .yanta-qc {
@@ -391,17 +370,13 @@ function injectCss() {
   pointer-events: none;
 }
 
-/*
-  Gooey layer:
-  same origin as buttons. The filter creates the merge.
-*/
 .yanta-qc-blob-layer {
   position: absolute;
   right: 0;
   bottom: 0;
 
-  width: 280px;
-  height: 280px;
+  width: 430px;
+  height: 430px;
 
   overflow: visible;
   pointer-events: none;
@@ -465,10 +440,6 @@ function injectCss() {
     scale(1);
 }
 
-/*
-  Homogeneous hot state:
-  target blob + main blob use the same material color.
-*/
 .yanta-qc-blob.is-hot {
   background: var(--qc-hot);
 }
@@ -509,10 +480,6 @@ function injectCss() {
     rotate(0deg)
     scale(1);
 
-  /*
-    Floating shadow on the interactive main button layer.
-    The blob itself stays clean for the gooey illusion.
-  */
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
 
   transition:
@@ -529,11 +496,6 @@ function injectCss() {
     scale(1.02);
 }
 
-/*
-  During drag/hold action picking:
-  - no X rotation
-  - plus icon disappears so it does not overlap bubble icons
-*/
 .yanta-qc.is-open.is-dragging .yanta-qc-trigger {
   transform:
     translate3d(var(--qc-drag-x), var(--qc-drag-y), 0)
@@ -568,10 +530,6 @@ function injectCss() {
 
   opacity: 0;
 
-  /*
-    Requested floating shadow for bubbles.
-    Applied to the icon/button layer, not the gooey material layer.
-  */
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
 
   transform:
@@ -623,10 +581,6 @@ function injectCss() {
     background-color 180ms ease !important;
 }
 
-/*
-  Avoid the occasional bright flash when entering drag mode:
-  background color keeps a real transition, but transform follows finger.
-*/
 .yanta-qc.is-dragging .yanta-qc-trigger-blob {
   transition:
     background-color 180ms ease,
@@ -642,9 +596,6 @@ function injectCss() {
   pointer-events: none;
 }
 
-/*
-  Close/retract should feel calmer than the snap-open action.
-*/
 .yanta-qc:not(.is-open) .yanta-qc-bubble,
 .yanta-qc:not(.is-open) .yanta-qc-bubble-blob {
   transition-duration: 460ms;
@@ -764,6 +715,8 @@ function createSvgFilter() {
 }
 
 function buildDom() {
+  if (root) return root;
+
   root = document.createElement('div');
   root.id = 'yantaQuickCreate';
   root.className = 'yanta-qc';
@@ -780,8 +733,8 @@ function buildDom() {
 
   blobLayer.append(triggerBlob);
 
-  for (let i = 0; i < ACTIONS.length; i++) {
-    const action = ACTIONS[i];
+  for (let i = 0; i < actions.length; i++) {
+    const action = actions[i];
 
     const blob = document.createElement('span');
     blob.className = 'yanta-qc-blob yanta-qc-bubble-blob';
@@ -809,8 +762,8 @@ function buildDom() {
 
   shell.append(blobLayer, trigger, tooltip);
 
-  for (let i = 0; i < ACTIONS.length; i++) {
-    const action = ACTIONS[i];
+  for (let i = 0; i < actions.length; i++) {
+    const action = actions[i];
 
     const bubble = document.createElement('button');
     bubble.type = 'button';
@@ -836,6 +789,26 @@ function buildDom() {
   document.body.append(root);
 
   bindPointerInteractions(trigger);
+
+  return root;
+}
+
+function rebuildDomFromSettings() {
+  const wasOpen = isOpen();
+
+  if (root) {
+    root.remove();
+    root = null;
+  }
+
+  loadActions();
+  buildDom();
+
+  if (wasOpen && actions.length) {
+    setOpen(true);
+  }
+
+  updateVisibility();
 }
 
 function bindPointerInteractions(trigger) {
@@ -856,19 +829,13 @@ function bindPointerInteractions(trigger) {
     pointer = null;
   };
 
-    const beginDragOpen = () => {
-    if (!pointer) return;
+  const beginDragOpen = () => {
+    if (!pointer || !actions.length || !root) return;
 
     pointer.openedByHold = true;
     pointer.draggingActive = true;
     pointer.hotAction = null;
 
-    /*
-        Important order:
-        - enter dragging state before opening
-        - clear hot state before first paint
-        This avoids the occasional bright flash on the main blob.
-    */
     root.classList.add('is-dragging');
     clearHotBubble();
     resetDragOffset();
@@ -876,14 +843,7 @@ function bindPointerInteractions(trigger) {
     setOpen(true);
 
     vibrate(8);
-
-    /*
-        Do not call updateHotBubble immediately here.
-        At hold start the pointer is still on the main blob, and depending on
-        layout timing this can briefly create a false hot color.
-        The hot state starts with the first actual pointermove.
-    */
-    };
+  };
 
   function onMove(e) {
     if (!pointer || e.pointerId !== pointer.pointerId) return;
@@ -899,7 +859,7 @@ function bindPointerInteractions(trigger) {
 
     if (isOpen() && pointer.moved) {
       pointer.draggingActive = true;
-      root.classList.add('is-dragging');
+      root?.classList.add('is-dragging');
 
       e.preventDefault();
       e.stopPropagation();
@@ -940,12 +900,6 @@ function bindPointerInteractions(trigger) {
         return;
       }
 
-      /*
-        Important:
-        If the user holds, drags toward a bubble, drags back and releases
-        without choosing anything, reset to a normal tappable state.
-        Before this fix, pointer was nulled before checking openedByHold.
-      */
       if (snapshot.openedByHold) {
         setOpen(false);
         return;
@@ -992,7 +946,6 @@ function bindPointerInteractions(trigger) {
     clearTimeout(holdTimer);
 
     if (isOpen()) {
-      // If already open, a movement can quickly become drag-to-action.
       holdTimer = window.setTimeout(beginDragOpen, 80);
     } else {
       holdTimer = window.setTimeout(beginDragOpen, HOLD_MS);
@@ -1029,21 +982,29 @@ function bindPointerInteractions(trigger) {
     toggleOpen();
   });
 
-  document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && isOpen()) {
+  if (!globalKeyBound) {
+    globalKeyBound = true;
+
+    document.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && isOpen()) {
+        setOpen(false);
+      }
+    });
+  }
+
+  if (!globalOutsidePointerBound) {
+    globalOutsidePointerBound = true;
+
+    document.addEventListener('pointerdown', (e) => {
+      if (!root || root.hidden || !isOpen()) return;
+      if (root.contains(e.target)) return;
+
       setOpen(false);
-    }
-  });
-
-  document.addEventListener('pointerdown', (e) => {
-    if (!root || root.hidden || !isOpen()) return;
-    if (root.contains(e.target)) return;
-
-    setOpen(false);
-  }, {
-    capture: true,
-    passive: true,
-  });
+    }, {
+      capture: true,
+      passive: true,
+    });
+  }
 }
 
 function bindVisibilityObservers() {
@@ -1062,6 +1023,7 @@ function bindVisibilityObservers() {
     'hashchange',
     'resize',
     'yanta-note-opened',
+    'yanta-note-updated',
     'yanta-dashboard-refresh',
     'yanta-calendar-updated',
     'yanta-side-pane-opened',
@@ -1076,7 +1038,6 @@ function bindVisibilityObservers() {
 
   document.addEventListener('visibilitychange', updateVisibility);
 
-  // Lightweight periodic fallback for graph open/close paths that do not emit events.
   window.setInterval(updateVisibility, 650);
 }
 
@@ -1084,9 +1045,14 @@ export function setupFloatingCreate() {
   if (initialized) return;
   initialized = true;
 
+  loadActions();
   injectCss();
   buildDom();
   bindVisibilityObservers();
+
+  window.addEventListener('yanta-floating-create-settings-changed', () => {
+    rebuildDomFromSettings();
+  });
 
   requestAnimationFrame(updateVisibility);
 }

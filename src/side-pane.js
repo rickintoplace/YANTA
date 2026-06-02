@@ -98,6 +98,7 @@ export function openSidePane({
         <button class="icon-btn ${kind === 'dashboard' ? 'active' : ''}" data-side-pane-tab="dashboard" title="Dashboard">${lucide('layout-dashboard', 15)}</button>
         <button class="icon-btn ${kind === 'graph' ? 'active' : ''}" data-side-pane-tab="graph" title="Graph">${lucide('network', 15)}</button>
         <button class="icon-btn ${kind === 'calendar' ? 'active' : ''}" data-side-pane-tab="calendar" title="Calendar">${lucide('calendar-days', 15)}</button>
+        <button class="icon-btn ${kind === 'ai' ? 'active' : ''}" data-side-pane-tab="ai" title="AI Assistant">${lucide('sparkles', 15)}</button>
       </div>
 
       <span class="grow"></span>

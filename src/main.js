@@ -96,6 +96,15 @@ import {
   setupMobileSidebarController,
   closeMobileSidebar,
 } from './mobile-sidebar.js';
+import {
+  setupAssistant,
+  openAssistantSmart,
+  openAssistantPane,
+  openAssistantFloating,
+} from './ai/assistant-ui.js';
+import {
+  ensureAiBrain,
+} from './ai/brain.js';
 
 let sharePreviewLocked = false;
 
@@ -353,7 +362,7 @@ async function ensureGoogleDriveSyncSilently(reason = 'silent') {
       }
     } catch (err) {
       if (err?.code === 'EAUTH_REQUIRED') {
-        console.info('[YANTA Sync2] Google sign-in required. Not opening popup automatically.');
+        console.info('[YANTA Sync2] Google sign-in required.');
         return;
       }
 
@@ -448,6 +457,8 @@ async function init() {
   for (const im of images) state.imagesMeta.set(im.id, im);
 
   await seedVaultFromLocalState();
+
+  await ensureAiBrain();
 
   // Debug helper. Remove later if desired.
   window.yantaVaultDebug = {
@@ -645,6 +656,8 @@ async function init() {
     }),
     openCalendar,
     openCalendarPane,
+    openAssistant: openAssistantSmart,
+    openAssistantFloating,
     openCitationManager,
     exportAsZip,
     exportNoteAsMd,
@@ -666,6 +679,8 @@ async function init() {
   setupCitations();
   setupFormatToolbar();
   setupDashboard();
+  setupDashboard();
+  setupAssistant();
   setupFloatingCreate();
 
   // setupCalendar();
@@ -1042,6 +1057,11 @@ function switchRightPane(kind) {
 
   if (kind === 'calendar') {
     openCalendarPane();
+    return;
+  }
+
+  if (kind === 'ai') {
+    openAssistantPane();
   }
 }
 
@@ -1058,6 +1078,7 @@ function ensurePreviewPaneSwitcher() {
     <button class="icon-btn" data-pane-kind="dashboard" title="Dashboard">${lucide('layout-dashboard', 15)}</button>
     <button class="icon-btn" data-pane-kind="graph" title="Graph">${lucide('network', 15)}</button>
     <button class="icon-btn" data-pane-kind="calendar" title="Calendar">${lucide('calendar-days', 15)}</button>
+    <button class="icon-btn" data-pane-kind="ai" title="AI Assistant">${lucide('sparkles', 15)}</button>
 
     <span class="yanta-preview-pane-switcher-sep"></span>
 
@@ -1581,6 +1602,10 @@ function handleGlobalKey(e) {
   else if (meta && e.key === 'i') { e.preventDefault(); openImageModal(); }
   else if (meta && e.key === 'o') { e.preventDefault(); openPalette('notes'); }
   else if (meta && e.key === 'p') { e.preventDefault(); openPalette('commands'); }
+  else if (meta && e.key.toLowerCase() === 'j') {
+    e.preventDefault();
+    openAssistantSmart();
+  }
   else if (meta && e.key === 'g') { e.preventDefault(); openGraph(); }
   else if (meta && e.shiftKey && e.key.toLowerCase() === 'c') {
     e.preventDefault();

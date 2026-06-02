@@ -47,6 +47,10 @@ import {
   isSidePaneOpen,
 } from './side-pane.js';
 
+import {
+  AI_BRAIN_IDS,
+} from './ai/brain.js';
+
 const WIKILINK_RE = /\[\[([^\]|\n]+)(?:\|[^\]\n]+)?\]\]/g;
 
 const NODE = {
@@ -66,6 +70,8 @@ const GRAPH_SEMANTIC_PREFS_KEY = 'yanta.graph.showSemantic';
 const GRAPH_PANE_PREFS_KEY = 'yanta.graph.preferPane';
 const GRAPH_CONTROLS_OPEN_KEY = 'yanta.graph.controlsOpen';
 const GRAPH_DEEP_SEARCH_KEY = 'yanta.graph.deepSearch';
+const GRAPH_SHOW_ARCHIVE_KEY = 'yanta.graph.showArchive';
+const GRAPH_SHOW_AI_BRAIN_KEY = 'yanta.graph.showAiBrain';
 const GRAPH_PHYSICS_PREFS_KEY = 'yanta.graph.physics';
 
 // Semantic graph tuning.
@@ -244,6 +250,8 @@ const graph = {
 
   showFolders: readBoolPref(GRAPH_PREFS_KEY, true),
   showSemantic: readBoolPref(GRAPH_SEMANTIC_PREFS_KEY, false),
+  showArchive: readBoolPref(GRAPH_SHOW_ARCHIVE_KEY, false),
+  showAiBrain: readBoolPref(GRAPH_SHOW_AI_BRAIN_KEY, false),
   preferPane: readBoolPref(GRAPH_PANE_PREFS_KEY, true),
   controlsOpen: readBoolPref(GRAPH_CONTROLS_OPEN_KEY, false),
   deepSearch: readBoolPref(GRAPH_DEEP_SEARCH_KEY, true),
@@ -385,6 +393,35 @@ function injectGraphCss() {
   const style = document.createElement('style');
   style.id = 'yanta-graph-runtime-css';
   style.textContent = `
+    .yanta-graph-side-pane .yanta-side-pane-body {
+      position: relative;
+      display: flex;
+      flex: 1 1 auto;
+      width: 100%;
+      height: 100%;
+      min-width: 0;
+      min-height: 0;
+      padding: 0 !important;
+      overflow: hidden !important;
+    }
+
+    .yanta-graph-side-pane .graph-canvas-wrap {
+      position: relative;
+      flex: 1 1 auto;
+      width: 100%;
+      height: 100%;
+      min-width: 0;
+      min-height: 0;
+      overflow: hidden;
+    }
+
+    .yanta-graph-side-pane .graph-canvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+      min-width: 0;
+      min-height: 0;
+    }
     .graph-head .btn.active {
       color: var(--accent);
       border-color: var(--accent);
@@ -1233,6 +1270,168 @@ function injectGraphCss() {
 // ------------------------------------------------------------
 // Folder / note metadata helpers
 // ------------------------------------------------------------
+function folderByIdOrSelf(folderOrId) {
+  return typeof folderOrId === 'string'
+    ? state.folders.get(folderOrId)
+    : folderOrId;
+}
+
+function folderIsAiBrain(folderOrId) {
+  const start = folderByIdOrSelf(folderOrId);
+  if (!start) return false;
+
+  const seen = new Set();
+  let f = start;
+
+  while (f && !seen.has(f.id)) {
+    seen.add(f.id);
+
+    if (
+      f.id === AI_BRAIN_IDS.rootFolder ||
+      f.aiBrain === true
+    ) {
+      return true;
+    }
+
+    f = f.parentId ? state.folders.get(f.parentId) : null;
+  }
+
+  return false;
+}
+
+function noteIsAiBrain(note) {
+  if (!note) return false;
+
+  return (
+    note.aiBrain === true ||
+    note.id === AI_BRAIN_IDS.soul ||
+    note.id === AI_BRAIN_IDS.user ||
+    note.id === AI_BRAIN_IDS.memory ||
+    note.id === AI_BRAIN_IDS.activity ||
+    note.id === AI_BRAIN_IDS.weatherSkill ||
+    folderIsAiBrain(note.folderId)
+  );
+}
+
+function folderIsArchived(folderOrId) {
+  const start = folderByIdOrSelf(folderOrId);
+  if (!start) return false;
+
+  const seen = new Set();
+  let f = start;
+
+  while (f && !seen.has(f.id)) {
+    seen.add(f.id);
+
+    if (f.archived === true) {
+      return true;
+    }
+
+    f = f.parentId ? state.folders.get(f.parentId) : null;
+  }
+
+  return false;
+}
+
+function noteIsArchived(note) {
+  if (!note) return false;
+
+  return (
+    note.archived === true ||
+    folderIsArchived(note.folderId)
+  );
+}
+
+function graphArchiveExists() {
+  for (const folder of state.folders.values()) {
+    if (folderIsArchived(folder)) return true;
+  }
+
+  for (const note of state.notes.values()) {
+    if (noteIsArchived(note)) return true;
+  }
+
+  return false;
+}
+
+function graphAiBrainExists() {
+  for (const folder of state.folders.values()) {
+    if (folderIsAiBrain(folder)) return true;
+  }
+
+  for (const note of state.notes.values()) {
+    if (noteIsAiBrain(note)) return true;
+  }
+
+  return false;
+}
+
+function folderIsGraphExcluded(folderOrId) {
+  const start = folderByIdOrSelf(folderOrId);
+  if (!start) return false;
+
+  if (folderIsArchived(start)) {
+    return !graph.showArchive;
+  }
+
+  if (folderIsAiBrain(start)) {
+    return !graph.showAiBrain;
+  }
+
+  const seen = new Set();
+  let f = start;
+
+  while (f && !seen.has(f.id)) {
+    seen.add(f.id);
+
+    /*
+      Generic System/hidden folders stay hidden.
+      AI Brain and Archive are handled above via explicit toggles.
+    */
+    if (f.system === true || f.hidden === true) {
+      return true;
+    }
+
+    if (f.dashboardHidden === true || f.hiddenFromDashboard === true) {
+      return true;
+    }
+
+    f = f.parentId ? state.folders.get(f.parentId) : null;
+  }
+
+  return false;
+}
+
+function noteIsGraphExcluded(note) {
+  if (!note) return true;
+
+  if (noteIsArchived(note)) {
+    return !graph.showArchive;
+  }
+
+  if (noteIsAiBrain(note)) {
+    return !graph.showAiBrain;
+  }
+
+  /*
+    Generic System/hidden notes stay hidden.
+    AI Brain and Archive are handled above via explicit toggles.
+  */
+  if (
+    note.system === true ||
+    note.hidden === true ||
+    note.dashboardHidden === true ||
+    note.hiddenFromDashboard === true
+  ) {
+    return true;
+  }
+
+  if (note.folderId && folderIsGraphExcluded(note.folderId)) {
+    return true;
+  }
+
+  return false;
+}
 
 function folderPath(folderId) {
   if (!folderId) return [];
@@ -1289,7 +1488,8 @@ function isTopLevelFolder(folder) {
 
 function topLevelFolderIds() {
   return [...state.folders.values()]
-    .filter((f) => !f.parentId || !state.folders.has(f.parentId))
+    .filter((folder) => !folderIsGraphExcluded(folder))
+    .filter((f) => !f.parentId || !state.folders.has(f.parentId) || folderIsGraphExcluded(f.parentId))
     .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
     .map((f) => f.id);
 }
@@ -1485,27 +1685,44 @@ function initialNotePosition(note, noteIndexByGroup, centers, folderNodeById) {
 function buildDescendantSets() {
   graph.descendantsByFolder.clear();
 
-  for (const f of state.folders.values()) {
-    graph.descendantsByFolder.set(f.id, new Set([graphIdForFolder(f.id)]));
+  const visibleFolderIds = new Set(
+    graph.nodes
+      .filter((n) => n.type === NODE.FOLDER)
+      .map((n) => n.id)
+  );
+
+  for (const folderId of visibleFolderIds) {
+    graph.descendantsByFolder.set(folderId, new Set([graphIdForFolder(folderId)]));
   }
 
-  for (const f of state.folders.values()) {
-    let cur = f;
+  for (const node of graph.nodes) {
+    if (node.type === NODE.FOLDER) {
+      let f = state.folders.get(node.id);
+      const seen = new Set();
 
-    while (cur?.parentId) {
-      graph.descendantsByFolder.get(cur.parentId)?.add(graphIdForFolder(f.id));
-      cur = state.folders.get(cur.parentId);
+      while (f?.parentId && !seen.has(f.id)) {
+        seen.add(f.id);
+
+        if (!visibleFolderIds.has(f.parentId)) break;
+
+        graph.descendantsByFolder.get(f.parentId)?.add(graphIdForFolder(node.id));
+        f = state.folders.get(f.parentId);
+      }
     }
-  }
 
-  for (const n of state.notes.values()) {
-    if (!n.folderId) continue;
+    if (node.type === NODE.NOTE && node.folderId) {
+      let f = state.folders.get(node.folderId);
+      const seen = new Set();
 
-    let f = state.folders.get(n.folderId);
+      while (f && !seen.has(f.id)) {
+        seen.add(f.id);
 
-    while (f) {
-      graph.descendantsByFolder.get(f.id)?.add(graphIdForNote(n.id));
-      f = f.parentId ? state.folders.get(f.parentId) : null;
+        if (visibleFolderIds.has(f.id)) {
+          graph.descendantsByFolder.get(f.id)?.add(graphIdForNote(node.id));
+        }
+
+        f = f.parentId ? state.folders.get(f.parentId) : null;
+      }
     }
   }
 }
@@ -1527,17 +1744,21 @@ function buildGraph() {
   const t = theme();
   const centers = groupCenters();
 
-  const folders = [...state.folders.values()].sort((a, b) => {
-    const da = folderDepth(a.id);
-    const db = folderDepth(b.id);
-    return da - db || (a.name || '').localeCompare(b.name || '');
-  });
+  const folders = [...state.folders.values()]
+    .filter((folder) => !folderIsGraphExcluded(folder))
+    .sort((a, b) => {
+      const da = folderDepth(a.id);
+      const db = folderDepth(b.id);
+      return da - db || (a.name || '').localeCompare(b.name || '');
+    });
 
-  const notes = [...state.notes.values()].sort((a, b) => {
-    const fa = folderPath(a.folderId).join('/');
-    const fb = folderPath(b.folderId).join('/');
-    return fa.localeCompare(fb) || (b.updated || 0) - (a.updated || 0);
-  });
+  const notes = [...state.notes.values()]
+    .filter((note) => !noteIsGraphExcluded(note))
+    .sort((a, b) => {
+      const fa = folderPath(a.folderId).join('/');
+      const fb = folderPath(b.folderId).join('/');
+      return fa.localeCompare(fb) || (b.updated || 0) - (a.updated || 0);
+    });
 
   const folderNodeById = new Map();
 
@@ -2833,6 +3054,179 @@ function canvasCoords(e) {
     x: (e.clientX - r.left - graph.ox) / graph.scale,
     y: (e.clientY - r.top - graph.oy) / graph.scale,
   };
+}
+
+function zoomGraphAtScreenPoint(clientX, clientY, nextScale) {
+  if (!graph.canvas) return;
+
+  const r = graph.canvas.getBoundingClientRect();
+
+  const mx = clientX - r.left;
+  const my = clientY - r.top;
+
+  const ns = Math.max(0.25, Math.min(4.5, Number(nextScale) || graph.scale));
+
+  const wx = (mx - graph.ox) / graph.scale;
+  const wy = (my - graph.oy) / graph.scale;
+
+  graph.scale = ns;
+  graph.ox = mx - wx * graph.scale;
+  graph.oy = my - wy * graph.scale;
+
+  startVisualLoop();
+}
+
+const graphPinchCanvases = new WeakSet();
+
+function installGraphPinchZoom(canvas) {
+  if (!canvas || graphPinchCanvases.has(canvas)) return;
+
+  graphPinchCanvases.add(canvas);
+
+  const pointers = new Map();
+  let pinch = null;
+
+  const isTouchLike = (e) =>
+    e.pointerType === 'touch' || e.pointerType === 'pen';
+
+  const distance = (a, b) =>
+    Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
+
+  const center = (a, b) => ({
+    clientX: (a.clientX + b.clientX) / 2,
+    clientY: (a.clientY + b.clientY) / 2,
+  });
+
+  function currentPair() {
+    const list = [...pointers.values()];
+    if (list.length < 2) return null;
+    return [list[0], list[1]];
+  }
+
+  function beginPinch(e) {
+    const pair = currentPair();
+    if (!pair || !graph.canvas) return;
+
+    const [a, b] = pair;
+    const c = center(a, b);
+    const rect = graph.canvas.getBoundingClientRect();
+
+    const startScale = graph.scale;
+    const worldX = (c.clientX - rect.left - graph.ox) / startScale;
+    const worldY = (c.clientY - rect.top - graph.oy) / startScale;
+
+    pinch = {
+      startDistance: Math.max(1, distance(a, b)),
+      startScale,
+      worldX,
+      worldY,
+    };
+
+    graph.viewTween = null;
+    graph.dragNode = null;
+    graph.panning = false;
+    graph.suppressNextClick = true;
+
+    clearLongPressTimer();
+
+    canvas.classList.add('dragging');
+
+    try {
+      canvas.setPointerCapture?.(e.pointerId);
+    } catch {}
+  }
+
+  function updatePinch(e) {
+    if (!pinch || !graph.canvas) return;
+
+    const pair = currentPair();
+
+    if (!pair) {
+      pinch = null;
+      canvas.classList.remove('dragging');
+      return;
+    }
+
+    const [a, b] = pair;
+    const c = center(a, b);
+    const rect = graph.canvas.getBoundingClientRect();
+
+    const d = Math.max(1, distance(a, b));
+    const nextScale = Math.max(
+      0.25,
+      Math.min(4.5, pinch.startScale * (d / pinch.startDistance))
+    );
+
+    graph.scale = nextScale;
+    graph.ox = (c.clientX - rect.left) - pinch.worldX * nextScale;
+    graph.oy = (c.clientY - rect.top) - pinch.worldY * nextScale;
+
+    startVisualLoop();
+
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation?.();
+  }
+
+  canvas.addEventListener('pointerdown', (e) => {
+    if (!isTouchLike(e)) return;
+    if (e.isPrimary === false && e.pointerType === 'mouse') return;
+
+    pointers.set(e.pointerId, {
+      clientX: e.clientX,
+      clientY: e.clientY,
+    });
+
+    if (pointers.size >= 2) {
+      beginPinch(e);
+
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation?.();
+    }
+  }, {
+    capture: true,
+    passive: false,
+  });
+
+  document.addEventListener('pointermove', (e) => {
+    if (!pointers.has(e.pointerId)) return;
+
+    pointers.set(e.pointerId, {
+      clientX: e.clientX,
+      clientY: e.clientY,
+    });
+
+    if (pinch) {
+      updatePinch(e);
+    }
+  }, {
+    capture: true,
+    passive: false,
+  });
+
+  const end = (e) => {
+    if (!pointers.has(e.pointerId)) return;
+
+    pointers.delete(e.pointerId);
+
+    if (pinch && pointers.size < 2) {
+      pinch = null;
+      graph.suppressNextClick = true;
+      canvas.classList.remove('dragging');
+      startVisualLoop();
+    }
+  };
+
+  document.addEventListener('pointerup', end, {
+    capture: true,
+    passive: false,
+  });
+
+  document.addEventListener('pointercancel', end, {
+    capture: true,
+    passive: false,
+  });
 }
 
 function centerOnNode(node, scale = Math.max(1.15, graph.scale), { animated = true } = {}) {
@@ -4338,15 +4732,38 @@ function refreshControlsUI() {
   const semanticToggle = el.querySelector('[data-toggle="semantic"]');
   if (semanticToggle) semanticToggle.classList.toggle('on', graph.showSemantic);
 
+  const archiveToggle = el.querySelector('[data-toggle="archive"]');
+  if (archiveToggle) archiveToggle.classList.toggle('on', graph.showArchive);
+
+  const aiBrainToggle = el.querySelector('[data-toggle="ai-brain"]');
+  if (aiBrainToggle) aiBrainToggle.classList.toggle('on', graph.showAiBrain);
+
   const deepToggle = el.querySelector('[data-toggle="deep"]');
   if (deepToggle) deepToggle.classList.toggle('on', graph.deepSearch);
-
   const paneToggle = el.querySelector('[data-toggle="pane"]');
   if (paneToggle) paneToggle.classList.toggle('on', graph.mode === 'pane');
 }
 
 function buildControlsPanel({ paneMode = false } = {}) {
   injectGraphCss();
+
+  const archiveToggleHtml = graphArchiveExists()
+    ? `
+        <div class="gc-toggle ${graph.showArchive ? 'on' : ''}" data-toggle="archive">
+          <span class="gc-label">${lucide('archive', 13)} Show archive</span>
+          <span class="gc-switch"></span>
+        </div>
+      `
+    : '';
+
+  const aiBrainToggleHtml = graphAiBrainExists()
+    ? `
+        <div class="gc-toggle ${graph.showAiBrain ? 'on' : ''}" data-toggle="ai-brain">
+          <span class="gc-label">${lucide('brain-circuit', 13)} Show AI Brain</span>
+          <span class="gc-switch"></span>
+        </div>
+      `
+    : '';
 
   const wrap = document.createElement('div');
   wrap.className = 'yanta-graph-controls' + (graph.controlsOpen ? '' : ' collapsed');
@@ -4388,6 +4805,8 @@ function buildControlsPanel({ paneMode = false } = {}) {
           <span class="gc-label">${lucide('folder', 13)} Show folders</span>
           <span class="gc-switch"></span>
         </div>
+        ${archiveToggleHtml}
+        ${aiBrainToggleHtml}
         <div class="gc-toggle ${graph.showSemantic ? 'on' : ''}" data-toggle="semantic">
           <span class="gc-label">${lucide('sparkles', 13)} Semantic suggestions</span>
           <span class="gc-switch"></span>
@@ -4453,6 +4872,32 @@ function buildControlsPanel({ paneMode = false } = {}) {
     startSimulation(BUILD_ALPHA);
   });
 
+  wrap.querySelector('[data-toggle="archive"]')?.addEventListener('click', () => {
+    graph.showArchive = !graph.showArchive;
+    writeBoolPref(GRAPH_SHOW_ARCHIVE_KEY, graph.showArchive);
+
+    graph.focusFolderId = null;
+    graph.hover = null;
+
+    refreshControlsUI();
+    buildGraph();
+    updateStats();
+    startSimulation(BUILD_ALPHA);
+  });
+
+  wrap.querySelector('[data-toggle="ai-brain"]')?.addEventListener('click', () => {
+    graph.showAiBrain = !graph.showAiBrain;
+    writeBoolPref(GRAPH_SHOW_AI_BRAIN_KEY, graph.showAiBrain);
+
+    graph.focusFolderId = null;
+    graph.hover = null;
+
+    refreshControlsUI();
+    buildGraph();
+    updateStats();
+    startSimulation(BUILD_ALPHA);
+  });
+  
   wrap.querySelector('[data-toggle="semantic"]').addEventListener('click', () => {
     graph.showSemantic = !graph.showSemantic;
     writeBoolPref(GRAPH_SEMANTIC_PREFS_KEY, graph.showSemantic);
@@ -4586,9 +5031,16 @@ function forceSplitViewForPane() {
 }
 
 export function openGraphPane() {
-  if (window.innerWidth < WIDE_PANE_MIN_WIDTH) {
-    toast('Graph pane is available on wider screens', 'error');
-    openGraph();
+  /*
+    Graph-Pane nur öffnen, wenn das echte rechte Preview-Pane sichtbar ist.
+    Aus Dashboard/Calendar/Note-Edit-only wäre das Pane unsichtbar oder falsch
+    gemessen. Dann verwenden wir bewusst das stabile Fullscreen-Overlay.
+  */
+  if (!canOpenGraphPaneNow()) {
+    openGraph({
+      forceOverlay: true,
+    });
+
     return;
   }
 
@@ -4650,20 +5102,53 @@ export function openGraphPane() {
 
   startSimulation(BUILD_ALPHA);
   startVisualLoop();
+
+  /*
+    Wichtig:
+    Side-Pane-Layout wird durch openSidePane() und CSS im nächsten Frame final.
+    Deshalb mehrfach messen, damit Canvas nicht mit halber/alter Höhe bleibt.
+  */
+  requestAnimationFrame(() => {
+    resizeGraphCanvas();
+    startSimulation(0.55);
+    startVisualLoop();
+
+    requestAnimationFrame(() => {
+      resizeGraphCanvas();
+      drawGraph();
+    });
+  });
 }
 
-function closeGraphPane({ silent = false } = {}) {
+function closeGraphPane({
+  silent = false,
+  preservePreference = false,
+} = {}) {
   if (!isSidePaneOpen('graph')) return;
 
   closeSidePane({ silent });
 
-  graph.preferPane = false;
-  writeBoolPref(GRAPH_PANE_PREFS_KEY, false);
+  if (!preservePreference) {
+    graph.preferPane = false;
+    writeBoolPref(GRAPH_PANE_PREFS_KEY, false);
+  }
 }
 
 // ------------------------------------------------------------
 // Public API
 // ------------------------------------------------------------
+
+function canOpenGraphPaneNow() {
+  const pane = $('panePreview');
+
+  return (
+    window.innerWidth >= WIDE_PANE_MIN_WIDTH &&
+    state.surface === 'note' &&
+    state.view === 'split' &&
+    !!pane &&
+    pane.offsetParent !== null
+  );
+}
 
 function ensureOverlayChrome() {
   injectGraphCss();
@@ -4693,15 +5178,26 @@ function ensureOverlayChrome() {
   if (legacySearch) legacySearch.style.display = 'none';
 }
 
-export function openGraph() {
+export function openGraph({
+  forceOverlay = false,
+} = {}) {
   injectGraphCss();
 
-  if (graph.preferPane && window.innerWidth >= WIDE_PANE_MIN_WIDTH) {
+  /*
+    Beste UX:
+    - In sichtbarem Note-Split darf Graph als Side-Pane öffnen.
+    - Aus Dashboard/Calendar/Edit-only öffnet Graph immer als Overlay.
+      Sonst landet er in einem versteckten oder falsch gemessenen Pane.
+  */
+  if (!forceOverlay && graph.preferPane && canOpenGraphPaneNow()) {
     openGraphPane();
     return;
   }
 
-  closeGraphPane({ silent: true });
+  closeGraphPane({
+    silent: true,
+    preservePreference: true,
+  });
 
   const overlay = $('graphOverlay');
   if (!overlay) return;
@@ -4728,6 +5224,12 @@ export function openGraph() {
 
   startSimulation(BUILD_ALPHA);
   startVisualLoop();
+
+  requestAnimationFrame(() => {
+    resizeGraphCanvas();
+    startSimulation(0.45);
+    startVisualLoop();
+  });
 }
 
 export function closeGraph() {
@@ -5033,6 +5535,8 @@ function bindGraphCanvas(c) {
 
     startVisualLoop();
   }, { passive: false });
+
+  installGraphPinchZoom(c);
 }
 
 export function setupGraphInteractions() {

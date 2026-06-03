@@ -919,6 +919,7 @@ function ensureModal() {
     { id: 'dashboard',  label: 'Dashboard',  icon: 'layout-dashboard' },
     { id: 'quick-create', label: 'Quick Create', icon: 'circle-plus' },
     { id: 'calendar',   label: 'Calendar',   icon: 'calendar-days' },
+    { id: 'ai',         label: 'AI',         icon: 'sparkles' },
     { id: 'sync',       label: 'Sync & Backup', icon: 'refresh-cw' },
     { id: 'about',      label: 'About',      icon: 'info' },
   ];
@@ -971,6 +972,7 @@ function renderSettingsBody() {
   else if (activeSection === 'dashboard') renderDashboardSection(content);
   else if (activeSection === 'quick-create') renderQuickCreateSection(content);
   else if (activeSection === 'calendar') renderCalendarSection(content);
+  else if (activeSection === 'ai') renderAiSection(content);
   else if (activeSection === 'sync') renderSyncSection(content);
   else if (activeSection === 'about') renderAboutSection(content);
 }
@@ -1398,7 +1400,6 @@ function renderQuickCreateSection(host) {
   const intro = el('div', { class: 'yanta-settings-info' });
   intro.innerHTML = `
     <p><strong>Free layout with guard rails.</strong> Drag bubbles in the preview. YANTA automatically keeps a minimum distance between bubbles, so the menu stays usable.</p>
-    <p>Coordinates are saved as relative positions, but users never have to type numbers.</p>
   `;
   host.append(intro);
 
@@ -2175,6 +2176,49 @@ function renderCalendarToggle({ checked, label, hint, onChange }) {
   return row;
 }
 
+function renderAiSection(host) {
+  host.replaceChildren();
+
+  host.append(sectionHeader(
+    'YANTA AI',
+    'Configure the YANTA AI assistant, OpenRouter API key, permissions, location context and external agent bridge.'
+  ));
+
+  const info = el('div', { class: 'yanta-settings-info' });
+  info.innerHTML = `
+    <p><strong>Mirrored AI settings.</strong> These are the same settings used inside the YANTA AI assistant panel.</p>
+    <p>Your API key is stored according to the selected storage mode. Prompts and included context are sent to OpenRouter/the chosen model.</p>
+  `;
+  host.append(info);
+
+  const mount = el('div', {
+    class: 'yanta-settings-group yanta-ai-main-settings-mirror',
+  });
+
+  mount.innerHTML = `
+    <div class="tree-empty" style="display:block;padding:14px">
+      Loading AI settings…
+    </div>
+  `;
+
+  host.append(mount);
+
+  import('./ai/ai-settings-panel.js')
+    .then(({ renderAiSettingsPanel }) => {
+      if (!mount.isConnected) return;
+      renderAiSettingsPanel(mount);
+    })
+    .catch((err) => {
+      console.error('[YANTA Settings] Could not load AI settings panel', err);
+
+      mount.innerHTML = `
+        <div class="yanta-settings-info">
+          Could not load AI settings.
+        </div>
+      `;
+    });
+}
+
 // ---- Sync section ----
 function renderSyncSection(host) {
   const a = getAppearance();
@@ -2372,6 +2416,7 @@ function injectSettingsCss() {
   flex-direction: column;
   gap: 2px;
   overflow-y: auto;
+  height: fit-content;
 }
 
 .yanta-settings-rail-btn {
@@ -3059,6 +3104,33 @@ function injectSettingsCss() {
     margin: 0;
   }
     
+}
+/* AI settings mirrored inside Main Settings */
+.yanta-ai-main-settings-mirror {
+  margin-top: 18px;
+}
+
+.yanta-ai-main-settings-mirror .yanta-ai-settings-panel {
+  padding: 0;
+}
+
+.yanta-ai-main-settings-mirror .compress-actions {
+  flex-wrap: wrap;
+}
+
+.yanta-ai-main-settings-mirror .btn.primary {
+  flex: 0 0 auto;
+}
+
+@media (max-width: 720px) {
+  .yanta-ai-main-settings-mirror .compress-actions {
+    justify-content: stretch;
+  }
+
+  .yanta-ai-main-settings-mirror .compress-actions .btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
 }
   `;
 

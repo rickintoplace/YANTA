@@ -23,26 +23,15 @@ import {
 
 import {
   getAiSettings,
-  saveAiSettings,
   getAiApiKey,
-  setAiApiKey,
-  clearAiApiKey,
-  resetAssistantPrompt,
-  DEFAULT_ASSISTANT_PROMPT,
 } from './ai-settings.js';
 
 import {
-  getExternalAgentSettings,
-  saveExternalAgentSettings,
-  regenerateExternalAgentToken,
-} from '../agent/agent-settings.js';
+  renderAiSettingsPanel,
+} from './ai-settings-panel.js';
 
 import {
   setupAgentBridge,
-  connectAgentBridge,
-  disconnectAgentBridge,
-  getAgentBridgeStatus,
-  buildAgentReadmeText,
 } from '../agent/agent-bridge-client.js';
 
 import {
@@ -71,13 +60,6 @@ import {
   noteMarkdown,
 } from '../yjs.js';
 
-import {
-  getApproxUserLocation,
-  clearApproxUserLocation,
-  setApproxUserLocationFromPlace,
-  searchApproxLocations,
-  setApproxUserLocationFromCandidate,
-} from './location.js';
 
 let initialized = false;
 
@@ -98,10 +80,6 @@ let settingsOpen = false;
 let assistantBusy = false;
 let assistantBusyLabel = 'Thinking…';
 let assistantBusySince = 0;
-
-let locationSearchResults = [];
-let locationSearchBusy = false;
-let locationSearchError = '';
 
 const VT_NAME = 'yanta-ai-assistant';
 
@@ -301,6 +279,12 @@ function ensureRoot() {
   });
 
   root.querySelector('[data-ai-close]')?.addEventListener('click', () => {
+    if (settingsOpen) {
+      settingsOpen = false;
+      renderSettings();
+      return;
+    }
+
     closeAssistant();
   });
 
@@ -329,6 +313,7 @@ function ensureRoot() {
   });
 
   renderMessages();
+  updateCloseButton();
 
   return root;
 }
@@ -343,6 +328,21 @@ function updateModeButton() {
   } else {
     btn.title = 'Detach assistant';
     btn.innerHTML = lucide('picture-in-picture-2', 16);
+  }
+}
+
+function updateCloseButton() {
+  const btn = root?.querySelector('[data-ai-close]');
+  if (!btn) return;
+
+  if (settingsOpen) {
+    btn.title = 'Back to chat';
+    btn.setAttribute('aria-label', 'Back to chat');
+    btn.innerHTML = lucide('arrow-left', 16);
+  } else {
+    btn.title = 'Close assistant';
+    btn.setAttribute('aria-label', 'Close assistant');
+    btn.innerHTML = lucide('x', 16);
   }
 }
 
@@ -1378,519 +1378,13 @@ function renderSettings() {
   if (!settingsPanel) return;
 
   settingsPanel.hidden = !settingsOpen;
+  root?.classList.toggle('settings-open', !!settingsOpen);
+
+  updateCloseButton();
 
   if (!settingsOpen) return;
 
-  const settings = getAiSettings();
-  const key = getAiApiKey();
-  const p = settings.permissions || {};
-
-  settingsPanel.innerHTML = `
-    <div class="yanta-ai-settings-grid">
-      <label>
-        Provider
-        <input class="text-input" value="OpenRouter" disabled />
-      </label>
-
-      <label>
-        Base URL
-        <input class="text-input" data-ai-base-url value="${escapeHtml(settings.baseUrl)}" />
-      </label>
-
-      <label>
-        Model
-        <input class="text-input" data-ai-model value="${escapeHtml(settings.model)}" />
-      </label>
-
-      <label>
-        Privacy
-        <select class="text-input" data-ai-privacy>
-          <option value="current-note" ${settings.privacyMode === 'current-note' ? 'selected' : ''}>Include current note</option>
-          <option value="metadata-only" ${settings.privacyMode === 'metadata-only' ? 'selected' : ''}>Metadata only</option>
-        </select>
-      </label>
-
-      <label>
-        API key storage
-        <select class="text-input" data-ai-key-storage>
-          <option value="session" ${settings.apiKeyStorage === 'session' ? 'selected' : ''}>Session only</option>
-          <option value="local" ${settings.apiKeyStorage === 'local' ? 'selected' : ''}>Persist in browser localStorage</option>
-          <option value="none" ${settings.apiKeyStorage === 'none' ? 'selected' : ''}>Do not store</option>
-        </select>
-      </label>
-
-      <label class="wide">
-        OpenRouter API key
-        <input class="text-input" data-ai-key type="password" value="${escapeHtml(key)}" placeholder="sk-or-..." />
-      </label>
-    </div>
-
-    <section class="yanta-ai-settings-section">
-      <h4>Permissions</h4>
-
-      ${permissionCheckboxHtml('allowReadNotes', 'Allow assistant to read notes', 'Recommended', p.allowReadNotes)}
-      ${permissionCheckboxHtml('allowCreateNotes', 'Allow assistant to create notes', 'Recommended', p.allowCreateNotes)}
-      ${permissionCheckboxHtml('allowEditNotes', 'Allow assistant to edit notes', 'Recommended', p.allowEditNotes)}
-      ${permissionCheckboxHtml('allowDeleteNotes', 'Allow assistant to delete notes', 'Not recommended', p.allowDeleteNotes)}
-      ${permissionCheckboxHtml('allowManageCalendar', 'Allow assistant to manage calendar events', 'Recommended', p.allowManageCalendar)}
-      ${permissionCheckboxHtml('allowReadAiBrain', 'Allow assistant to read AI Brain', 'Recommended', p.allowReadAiBrain)}
-      ${permissionCheckboxHtml('allowWriteAiBrain', 'Allow assistant to write AI Brain', 'Recommended', p.allowWriteAiBrain)}
-
-      ${permissionCheckboxHtml('allowWeather', 'Allow assistant to fetch weather via Open-Meteo', 'Recommended', p.allowWeather)}
-      ${permissionCheckboxHtml('allowApproxLocationContext', 'Allow assistant to receive approximate location context', 'Optional', p.allowApproxLocationContext)}
-    </section>
-
-    ${approxLocationSettingsHtml()}
-
-    ${externalAgentSettingsHtml()}
-
-    <section class="yanta-ai-settings-section">
-      <h4>Assistant prompt</h4>
-      <textarea class="text-input yanta-ai-prompt-editor" data-ai-prompt rows="10">${escapeHtml(settings.assistantPrompt)}</textarea>
-
-      <div class="compress-actions">
-        <button class="btn" data-ai-reset-prompt>
-          ${lucide('rotate-ccw', 14)}
-          Reset to default
-        </button>
-      </div>
-    </section>
-
-    <div class="yanta-ai-warning">
-      BYOK privacy note: your API key stays in this browser, but prompts and included context are sent to OpenRouter/the chosen model.
-      Persistent localStorage is convenient but less safe than session-only.
-    </div>
-
-    <div class="compress-actions">
-      <button class="btn" data-ai-clear-key>Clear key</button>
-      <span class="grow"></span>
-      <button class="btn primary" data-ai-save-settings>Save AI settings</button>
-    </div>
-  `;
-
-  settingsPanel.querySelector('[data-ai-save-settings]')?.addEventListener('click', () => {
-    const baseUrl = settingsPanel.querySelector('[data-ai-base-url]')?.value || '';
-    const model = settingsPanel.querySelector('[data-ai-model]')?.value || '';
-    const privacyMode = settingsPanel.querySelector('[data-ai-privacy]')?.value || 'current-note';
-    const apiKeyStorage = settingsPanel.querySelector('[data-ai-key-storage]')?.value || 'session';
-    const apiKey = settingsPanel.querySelector('[data-ai-key]')?.value || '';
-    const prompt = settingsPanel.querySelector('[data-ai-prompt]')?.value || DEFAULT_ASSISTANT_PROMPT;
-
-    const permissions = {
-      allowReadNotes: checkboxValue('allowReadNotes'),
-      allowCreateNotes: checkboxValue('allowCreateNotes'),
-      allowEditNotes: checkboxValue('allowEditNotes'),
-      allowDeleteNotes: checkboxValue('allowDeleteNotes'),
-      allowManageCalendar: checkboxValue('allowManageCalendar'),
-      allowReadAiBrain: checkboxValue('allowReadAiBrain'),
-      allowWriteAiBrain: checkboxValue('allowWriteAiBrain'),
-      allowWeather: checkboxValue('allowWeather'),
-      allowApproxLocationContext: checkboxValue('allowApproxLocationContext'),
-    };
-
-    saveAiSettings({
-      baseUrl: baseUrl.trim() || 'https://openrouter.ai/api/v1',
-      model: model.trim() || 'openai/tencent/hy3-preview',
-      privacyMode,
-      apiKeyStorage,
-      assistantPrompt: prompt.trim() || DEFAULT_ASSISTANT_PROMPT,
-      permissions,
-    });
-
-    setAiApiKey(apiKey, apiKeyStorage);
-
-    saveExternalAgentSettings(readExternalAgentSettingsFromPanel(settingsPanel));
-
-    toast('AI settings saved', 'success');
-    renderSettings();
-  });
-
-  settingsPanel.querySelector('[data-ai-clear-key]')?.addEventListener('click', () => {
-    clearAiApiKey();
-    toast('AI key cleared', 'success');
-    renderSettings();
-  });
-
-  settingsPanel.querySelector('[data-ai-reset-prompt]')?.addEventListener('click', () => {
-    resetAssistantPrompt();
-    toast('Assistant prompt reset', 'success');
-    renderSettings();
-  });
-
-async function runLocationSearch({ saveFirst = false } = {}) {
-  const placeInput = settingsPanel.querySelector('[data-ai-location-place]');
-  const countryInput = settingsPanel.querySelector('[data-ai-location-country]');
-
-  const query = placeInput?.value?.trim() || '';
-  const countryCode = countryInput?.value?.trim().toUpperCase() || '';
-
-  if (!query) {
-    toast('Enter a city, region or postcode', 'error');
-    return;
-  }
-
-  locationSearchBusy = true;
-  locationSearchError = '';
-  locationSearchResults = [];
-  renderSettings();
-
-  try {
-    const results = await searchApproxLocations(query, {
-      countryCode,
-      limit: 6,
-    });
-
-    locationSearchResults = results;
-    locationSearchError = '';
-
-    if (saveFirst && results[0]) {
-      setApproxUserLocationFromCandidate(results[0]);
-      locationSearchResults = [];
-      toast('Approximate location saved', 'success');
-    }
-  } catch (err) {
-    console.warn('[YANTA AI] location search failed', err);
-    locationSearchError = err?.message || 'Could not find location';
-    locationSearchResults = [];
-  } finally {
-    locationSearchBusy = false;
-    renderSettings();
-  }
-}
-
-settingsPanel.querySelector('[data-ai-location-search]')?.addEventListener('click', async () => {
-  await runLocationSearch();
-});
-
-settingsPanel.querySelector('[data-ai-location-save-best]')?.addEventListener('click', async () => {
-  await runLocationSearch({
-    saveFirst: true,
-  });
-});
-
-settingsPanel.querySelector('[data-ai-location-place]')?.addEventListener('keydown', async (e) => {
-  if (e.key !== 'Enter') return;
-
-  e.preventDefault();
-
-  await runLocationSearch();
-});
-
-settingsPanel.querySelectorAll('[data-ai-location-pick]')?.forEach((btn) => {
-  btn.addEventListener('click', () => {
-    const idx = Number(btn.dataset.aiLocationPick);
-    const candidate = locationSearchResults[idx];
-
-    if (!candidate) return;
-
-    try {
-      setApproxUserLocationFromCandidate(candidate);
-      locationSearchResults = [];
-      locationSearchError = '';
-
-      toast('Approximate location saved', 'success');
-      renderSettings();
-    } catch (err) {
-      toast(err?.message || 'Could not save location', 'error');
-    }
-  });
-});
-
-  settingsPanel.querySelector('[data-ai-location-clear]')?.addEventListener('click', () => {
-    clearApproxUserLocation();
-    toast('Approximate location cleared', 'success');
-    renderSettings();
-  });
-
-  wireExternalAgentSettingsPanel(settingsPanel);
-}
-
-function checkboxValue(key) {
-  return !!settingsPanel?.querySelector(`[data-ai-permission="${CSS.escape(key)}"]`)?.checked;
-}
-
-function permissionCheckboxHtml(key, label, badge, checked) {
-  const recommended = /recommended/i.test(badge) && !/not/i.test(badge);
-
-  return `
-    <label class="yanta-ai-permission">
-      <input type="checkbox" data-ai-permission="${escapeHtml(key)}" ${checked ? 'checked' : ''} />
-      <span>
-        <strong>${escapeHtml(label)}</strong>
-        <small class="${recommended ? 'good' : 'warn'}">${escapeHtml(badge)}</small>
-      </span>
-    </label>
-  `;
-}
-
-function approxLocationSettingsHtml() {
-  const loc = getApproxUserLocation();
-
-  const resultsHtml = locationSearchBusy
-    ? `
-      <div class="yanta-ai-location-state">
-        <span class="yanta-ai-spinner small"></span>
-        Searching locations…
-      </div>
-    `
-    : locationSearchError
-      ? `
-        <div class="yanta-ai-location-state error">
-          ${escapeHtml(locationSearchError)}
-        </div>
-      `
-      : locationSearchResults.length
-        ? `
-          <div class="yanta-ai-location-results">
-            ${locationSearchResults.map((r, i) => `
-              <button
-                type="button"
-                class="yanta-ai-location-result"
-                data-ai-location-pick="${i}">
-                <span class="yanta-ai-location-result-main">
-                  <strong>${escapeHtml(r.label || 'Location')}</strong>
-                  <small>
-                    ${escapeHtml(String(r.latitude))}, ${escapeHtml(String(r.longitude))}
-                    ${r.countryCode ? ` · ${escapeHtml(r.countryCode)}` : ''}
-                    ${r.source ? ` · ${escapeHtml(r.source)}` : ''}
-                  </small>
-                </span>
-                ${lucide('check', 14)}
-              </button>
-            `).join('')}
-          </div>
-        `
-        : '';
-
-  return `
-    <section class="yanta-ai-settings-section">
-      <h4>Approximate location</h4>
-
-      <div class="yanta-ai-warning">
-        Used for weather questions like “weather here”.
-        Enter a city, region or postcode instead.
-        ${loc
-          ? `<br><br>Stored:
-             ${loc.label ? `${escapeHtml(loc.label)} · ` : ''}
-             ${escapeHtml(String(loc.latitude))}, ${escapeHtml(String(loc.longitude))}
-             ${loc.timezone ? ` · ${escapeHtml(loc.timezone)}` : ''}
-             ${loc.updatedAt ? ` · ${escapeHtml(loc.updatedAt)}` : ''}`
-          : '<br><br>No approximate location stored.'}
-      </div>
-
-      <div class="yanta-ai-location-grid">
-        <label class="wide">
-          City, region or postcode
-          <input
-            class="text-input"
-            data-ai-location-place
-            value=""
-            placeholder="e.g. Göttingen, 37073, 10001, SW1A 1AA"
-            autocomplete="postal-code"
-            spellcheck="false" />
-        </label>
-
-        <label>
-          Country code optional
-          <input
-            class="text-input"
-            data-ai-location-country
-            value=""
-            maxlength="2"
-            placeholder="DE, US, GB…" />
-        </label>
-      </div>
-
-      <div class="compress-actions">
-        <button class="btn" data-ai-location-search>
-          ${lucide('search', 14)}
-          Find matches
-        </button>
-
-        <button class="btn primary" data-ai-location-save-best>
-          ${lucide('map-pin', 14)}
-          Save best match
-        </button>
-
-        <button class="btn" data-ai-location-clear>
-          ${lucide('trash', 14)}
-          Clear location
-        </button>
-      </div>
-
-      ${resultsHtml}
-    </section>
-  `;
-}
-
-function externalAgentPermissionHtml(key, label, badge, checked) {
-  const recommended = /recommended/i.test(badge) && !/not/i.test(badge);
-
-  return `
-    <label class="yanta-ai-permission compact">
-      <input type="checkbox" data-agent-permission="${escapeHtml(key)}" ${checked ? 'checked' : ''} />
-      <span>
-        <strong>${escapeHtml(label)}</strong>
-        <small class="${recommended ? 'good' : 'warn'}">${escapeHtml(badge)}</small>
-      </span>
-    </label>
-  `;
-}
-
-function agentPermissionValue(key) {
-  return !!settingsPanel?.querySelector(`[data-agent-permission="${CSS.escape(key)}"]`)?.checked;
-}
-
-function externalAgentSettingsHtml() {
-  const s = getExternalAgentSettings();
-  const p = s.permissions || {};
-  const status = getAgentBridgeStatus();
-
-  const enabled = !!s.enabled;
-
-  return `
-    <section class="yanta-ai-settings-section yanta-ai-external-agent">
-      <h4>External Agents</h4>
-
-      <label class="yanta-ai-permission">
-        <input type="checkbox" data-agent-enabled ${enabled ? 'checked' : ''} />
-        <span>
-          <strong>Allow external AI agents to connect</strong>
-          <small class="${enabled ? 'good' : 'warn'}">${enabled ? 'Enabled' : 'Disabled'}</small>
-        </span>
-      </label>
-
-      ${
-        enabled
-          ? `
-            <div class="yanta-ai-settings-grid">
-              <label class="wide">
-                Local bridge URL
-                <input class="text-input" data-agent-url value="${escapeHtml(s.bridgeUrl)}" />
-              </label>
-
-              <label class="wide">
-                Session token
-                <input class="text-input" data-agent-token value="${escapeHtml(s.token)}" readonly />
-              </label>
-            </div>
-
-            <div class="yanta-ai-agent-status ${status.connected ? 'connected' : ''}">
-              ${status.connected ? 'Connected to local bridge' : 'Not connected'}
-              ${status.lastError ? ` · ${escapeHtml(status.lastError)}` : ''}
-            </div>
-
-            <div class="yanta-ai-settings-section-sub">
-              ${externalAgentPermissionHtml('allowReadNotes', 'Allow external agents to read notes', 'Recommended', p.allowReadNotes)}
-              ${externalAgentPermissionHtml('allowCreateNotes', 'Allow external agents to create notes', 'Recommended', p.allowCreateNotes)}
-              ${externalAgentPermissionHtml('allowEditNotes', 'Allow external agents to edit notes', 'Recommended', p.allowEditNotes)}
-              ${externalAgentPermissionHtml('allowDeleteNotes', 'Allow external agents to delete notes', 'Not recommended', p.allowDeleteNotes)}
-              ${externalAgentPermissionHtml('allowManageCalendar', 'Allow external agents to manage calendar events', 'Recommended', p.allowManageCalendar)}
-            </div>
-
-            <textarea class="text-input yanta-ai-agent-readme" data-agent-readme rows="8" readonly>${escapeHtml(buildAgentReadmeText())}</textarea>
-
-            <div class="compress-actions">
-              <button class="btn" data-agent-copy-readme>${lucide('copy', 14)} Copy setup text</button>
-              <button class="btn" data-agent-regenerate-token>${lucide('rotate-ccw', 14)} Regenerate token</button>
-              <span class="grow"></span>
-              <button class="btn" data-agent-disconnect>Disconnect</button>
-              <button class="btn primary" data-agent-connect>Connect</button>
-            </div>
-          `
-          : `
-            <div class="yanta-ai-warning">
-              External agent bridge settings are hidden while external agent access is disabled.
-              Enable this option to show bridge URL, token, permissions and setup text.
-            </div>
-          `
-      }
-    </section>
-  `;
-}
-
-function wireExternalAgentSettingsPanel(panel) {
-  panel.querySelector('[data-agent-enabled]')?.addEventListener('change', async () => {
-    const next = readExternalAgentSettingsFromPanel(panel);
-
-    saveExternalAgentSettings(next);
-
-    if (!next.enabled) {
-      disconnectAgentBridge();
-    }
-
-    renderSettings();
-  });
-
-  panel.querySelector('[data-agent-copy-readme]')?.addEventListener('click', async () => {
-    try {
-      await navigator.clipboard.writeText(buildAgentReadmeText());
-      toast('External agent setup text copied', 'success');
-    } catch {
-      toast('Copy failed', 'error');
-    }
-  });
-
-  panel.querySelector('[data-agent-regenerate-token]')?.addEventListener('click', () => {
-    regenerateExternalAgentToken();
-    toast('External agent token regenerated', 'success');
-    renderSettings();
-  });
-
-  panel.querySelector('[data-agent-connect]')?.addEventListener('click', async () => {
-    saveExternalAgentSettings(readExternalAgentSettingsFromPanel(panel));
-
-    try {
-      await connectAgentBridge();
-      toast('External agent bridge connected', 'success');
-    } catch (err) {
-      toast(err?.message || 'Could not connect bridge', 'error');
-    }
-
-    renderSettings();
-  });
-
-  panel.querySelector('[data-agent-disconnect]')?.addEventListener('click', () => {
-    disconnectAgentBridge();
-    toast('External agent disconnected', 'success');
-    renderSettings();
-  });
-}
-
-function readExternalAgentSettingsFromPanel(panel) {
-  const current = getExternalAgentSettings();
-  const currentPermissions = current.permissions || {};
-
-  const enabled = !!panel.querySelector('[data-agent-enabled]')?.checked;
-
-  const permissionValue = (key) => {
-    const input = panel.querySelector(`[data-agent-permission="${CSS.escape(key)}"]`);
-
-    // If the detailed settings are hidden, preserve the existing permission.
-    if (!input) {
-      return currentPermissions[key] === true;
-    }
-
-    return !!input.checked;
-  };
-
-  return {
-    enabled,
-
-    // If the detailed settings are hidden, preserve the existing bridge URL.
-    bridgeUrl:
-      panel.querySelector('[data-agent-url]')?.value?.trim() ||
-      current.bridgeUrl ||
-      'ws://127.0.0.1:18791',
-
-    permissions: {
-      allowReadNotes: permissionValue('allowReadNotes'),
-      allowCreateNotes: permissionValue('allowCreateNotes'),
-      allowEditNotes: permissionValue('allowEditNotes'),
-      allowDeleteNotes: permissionValue('allowDeleteNotes'),
-      allowManageCalendar: permissionValue('allowManageCalendar'),
-    },
-  };
+  renderAiSettingsPanel(settingsPanel);
 }
 
 async function runAssistant(userText) {
@@ -1952,7 +1446,10 @@ async function runAssistant(userText) {
           content: JSON.stringify(executed.result),
         });
 
-        addMessage('tool', JSON.stringify(executed.result, null, 2), {
+        addMessage('tool', JSON.stringify({
+          args: executed.args,
+          result: executed.result,
+        }, null, 2), {
           toolName: executed.name,
         });
       } catch (err) {
@@ -2102,10 +1599,25 @@ function injectCss() {
 .yanta-ai-settings {
   flex: 0 0 auto;
   max-height: min(62vh, 720px);
+  min-height: 0;
   overflow: auto;
   padding: 12px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-elev);
+}
+
+/* When AI settings are open, they become the active assistant view.
+   This prevents messages/footer from being visible underneath. */
+.yanta-ai-settings:not([hidden]) {
+  flex: 1 1 auto;
+  max-height: none;
+  min-height: 0;
+  overflow: auto;
+}
+
+.yanta-ai-settings:not([hidden]) ~ .yanta-ai-messages,
+.yanta-ai-settings:not([hidden]) ~ .yanta-ai-foot {
+  display: none !important;
 }
 
 .yanta-ai-settings-grid {
@@ -2277,9 +1789,9 @@ function injectCss() {
   position: fixed;
   z-index: 260;
   width: min(680px, calc(100vw - 20px));
-  height: min(760px, calc(100vh - 20px));
-  min-width: 360px;
-  min-height: 420px;
+  height: min(760px, calc(100dvh - 20px));
+  min-width: min(360px, calc(100vw - 20px));
+  min-height: min(420px, calc(100dvh - 20px));
   resize: both;
   overflow: hidden;
 
@@ -2321,7 +1833,22 @@ function injectCss() {
   animation-timing-function: cubic-bezier(.2,.8,.2,1);
 }
 
-@media (max-width: 720px) {
+@media (max-width: 880px) {
+  .yanta-ai-root {
+    height: 100%;
+    max-height: 100%;
+    min-height: 0;
+  }
+
+  .yanta-ai-head {
+    min-height: 48px;
+    padding:
+      max(8px, env(safe-area-inset-top))
+      max(10px, env(safe-area-inset-right))
+      8px
+      max(10px, env(safe-area-inset-left));
+  }
+
   .yanta-ai-settings-grid {
     grid-template-columns: 1fr;
   }
@@ -2332,17 +1859,52 @@ function injectCss() {
 
   .yanta-ai-foot {
     grid-template-columns: 1fr;
+    padding:
+      10px
+      max(10px, env(safe-area-inset-right))
+      max(10px, env(safe-area-inset-bottom))
+      max(10px, env(safe-area-inset-left));
+  }
+
+  .yanta-ai-foot textarea {
+    min-height: 74px;
+    max-height: 32dvh;
   }
 
   .yanta-ai-floating {
-    left: 8px !important;
-    top: 8px !important;
-    width: calc(100vw - 16px);
-    height: calc(100vh - 16px);
-    min-width: 0;
+    left: 0 !important;
+    top: 0 !important;
+    right: auto !important;
+    bottom: auto !important;
+
+    width: 100vw !important;
+    height: 100dvh !important;
+    max-width: 100vw !important;
+    max-height: 100dvh !important;
+
+    min-width: 0 !important;
+    min-height: 0 !important;
+
+    resize: none !important;
+
+    border-radius: 0;
+    border-left: 0;
+    border-right: 0;
+  }
+
+  @supports (height: 100svh) {
+    .yanta-ai-floating {
+      height: 100svh !important;
+      max-height: 100svh !important;
+    }
+  }
+
+  .yanta-ai-floating-body {
+    height: 100%;
     min-height: 0;
   }
 }
+
 .yanta-ai-settings-section-sub {
   display: flex;
   flex-direction: column;
@@ -3019,7 +2581,7 @@ function injectCss() {
   overflow-wrap: anywhere;
 }
 
-@media (max-width: 720px) {
+@media (max-width: 880px) {
   .yanta-ai-location-grid {
     grid-template-columns: 1fr;
   }

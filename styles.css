@@ -204,7 +204,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .btn.danger:hover { background: rgba(248,113,113,0.1); }
 .btn.primary {
   background: var(--accent); color: white; border-color: transparent; font-weight: 600;
-  flex: 1; justify-content: center;
+  justify-content: center;
 }
 .btn.primary:hover { filter: brightness(1.08); }
 

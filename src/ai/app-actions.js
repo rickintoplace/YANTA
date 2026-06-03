@@ -1001,10 +1001,36 @@ export async function getWeatherAction({
 } = {}) {
   let resolved = null;
 
+  const loc = String(location || '').trim();
   const lat = numberOrNull(latitude);
   const lon = numberOrNull(longitude);
 
-  if (lat != null && lon != null) {
+  // City/place names have priority over coordinates.
+  //
+  // This is critical because LLMs sometimes fill optional numeric parameters
+  // with 0. Previously, latitude=0 and longitude=0 overrode location="Rostock",
+  // resulting in weather for Null Island instead of Rostock.
+  if (loc) {
+    resolved = await geocodeOpenMeteoLocation(loc);
+  } else if (lat != null || lon != null) {
+    if (lat == null || lon == null) {
+      throw new Error(
+        'Invalid weather coordinates: both latitude and longitude are required. Pass a city/place name instead.'
+      );
+    }
+
+    if (lat === 0 && lon === 0) {
+      throw new Error(
+        'Invalid weather coordinates: 0,0 looks like an accidental default value. Pass a city/place name instead.'
+      );
+    }
+
+    if (lat < -90 || lat > 90 || lon < -180 || lon > 180) {
+      throw new Error(
+        `Invalid weather coordinates: latitude=${lat}, longitude=${lon}.`
+      );
+    }
+
     resolved = {
       latitude: lat,
       longitude: lon,
@@ -1012,8 +1038,6 @@ export async function getWeatherAction({
       source: 'tool-arguments',
       timezone: '',
     };
-  } else if (String(location || '').trim()) {
-    resolved = await geocodeOpenMeteoLocation(location);
   } else {
     const stored = getApproxUserLocation();
 
@@ -1026,7 +1050,7 @@ export async function getWeatherAction({
     resolved = {
       latitude: Number(stored.latitude),
       longitude: Number(stored.longitude),
-      label: 'approximate user location',
+      label: stored.label || 'approximate user location',
       source: stored.source || 'stored-approx-location',
       timezone: stored.timezone || '',
       roundedToDecimals: stored.roundedToDecimals ?? null,
@@ -1036,6 +1060,12 @@ export async function getWeatherAction({
 
   if (!Number.isFinite(resolved.latitude) || !Number.isFinite(resolved.longitude)) {
     throw new Error('Invalid weather coordinates.');
+  }
+
+  if (resolved.latitude === 0 && resolved.longitude === 0) {
+    throw new Error(
+      'Invalid weather coordinates: 0,0 looks like an accidental default value.'
+    );
   }
 
   const forecastDays = Math.max(1, Math.min(7, Number(days || 3)));

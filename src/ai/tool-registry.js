@@ -300,29 +300,25 @@ export const TOOL_REGISTRY = [
   risk: 'read',
   description: [
     'Get current weather and a short forecast using the free Open-Meteo API.',
-    'Use this whenever the user asks about weather, rain, temperature, forecast, or weather at their location.',
+    'Use this whenever the user asks about weather, rain, temperature, forecast, or weather at a place.',
     '',
     'Location resolution:',
-    '- If the user names a city/place, pass location.',
-    '- If the user asks for weather "here", "bei mir", "in my area", omit location and coordinates; the tool will use the stored approximate user location if available.',
+    '- If the user names a city/place, pass location exactly as a place name, e.g. "Göttingen", "Tokyo".',
+    '- If the user asks for weather "here", "bei mir", "in my area", omit location; the tool will use the stored approximate user location if available.',
     '- If no approximate user location is stored, the tool returns an error and you should ask the user for a city or to enable approximate location.',
     '',
-    'Do not invent weather data.',
+    'Important:',
+    '- Do not pass coordinates.',
+    '- Do not invent weather data.',
+    '- After receiving the result, verify that the returned location matches the requested place. If it does not, say so and retry with the explicit city/place name.',
   ].join('\n'),
   parameters: {
     type: 'object',
+    additionalProperties: false,
     properties: {
       location: {
         type: 'string',
-        description: 'Optional city/place name, e.g. "Göttingen" or "Tokyo".',
-      },
-      latitude: {
-        type: ['number', 'null'],
-        description: 'Optional latitude. Usually omit unless explicitly known.',
-      },
-      longitude: {
-        type: ['number', 'null'],
-        description: 'Optional longitude. Usually omit unless explicitly known.',
+        description: 'Optional city/place name, e.g. "Rostock", "Göttingen" or "Tokyo". Omit only for weather at the stored approximate user location.',
       },
       days: {
         type: 'number',
@@ -553,6 +549,30 @@ export async function executeToolCall(toolCall, {
     args = JSON.parse(toolCall.function.arguments || '{}');
   } catch {
     throw new Error(`Invalid JSON arguments for tool: ${name}`);
+  }
+
+  // Defensive cleanup for weather calls.
+  //
+  // The public get_weather schema no longer exposes coordinates.
+  // Still, some models may send extra fields from previous context or by
+  // hallucination. Never let accidental coordinates override a city name.
+  if (name === 'get_weather') {
+    const location = String(args.location || '').trim();
+
+    args = {
+      location,
+      days: args.days,
+    };
+
+    if (!location) {
+      delete args.location;
+    }
+
+    const days = Number(args.days);
+
+    if (!Number.isFinite(days)) {
+      delete args.days;
+    }
   }
 
   const result = await tool.execute(args, {

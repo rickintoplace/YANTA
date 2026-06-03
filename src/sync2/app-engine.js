@@ -176,6 +176,11 @@ function cleanUndefined(obj) {
   return out;
 }
 
+function finiteNumberOrUndefined(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : undefined;
+}
+
 function seqFromRemoteObjectPath(path, deviceId) {
   const safeDevice = String(deviceId || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -205,8 +210,15 @@ function sanitizeNoteMeta(note) {
     updated: Number(note.updated || Date.now()),
     bodyMigrated: note.bodyMigrated === true ? true : undefined,
 
-    hidden: note.hidden === true ? true : undefined,
-    archived: note.archived === true ? true : undefined,
+    // Dashboard layout/user preferences.
+    dashboardOrder: finiteNumberOrUndefined(note.dashboardOrder),
+    dashboardPinnedOrder: finiteNumberOrUndefined(note.dashboardPinnedOrder),
+    dashboardHeightPx: finiteNumberOrUndefined(note.dashboardHeightPx),
+
+    // Legacy compatibility. New code should prefer dashboardHeightPx.
+    dashboardHeight: finiteNumberOrUndefined(note.dashboardHeight),
+
+    hidden: note.hidden === true ? true : undefined,    archived: note.archived === true ? true : undefined,
     system: note.system === true ? true : undefined,
     aiBrain: note.aiBrain === true ? true : undefined,
     dashboardHidden: note.dashboardHidden === true ? true : undefined,
@@ -226,8 +238,14 @@ function sanitizeFolderMeta(folder) {
     created: Number(folder.created || Date.now()),
     updated: Number(folder.updated || folder.created || Date.now()),
 
-    hidden: folder.hidden === true ? true : undefined,
-    archived: folder.archived === true ? true : undefined,
+    // Dashboard layout/user preferences.
+    dashboardOrder: finiteNumberOrUndefined(folder.dashboardOrder),
+    dashboardHeightPx: finiteNumberOrUndefined(folder.dashboardHeightPx),
+
+    // Legacy compatibility. New code should prefer dashboardHeightPx.
+    dashboardHeight: finiteNumberOrUndefined(folder.dashboardHeight),
+
+    hidden: folder.hidden === true ? true : undefined,    archived: folder.archived === true ? true : undefined,
     system: folder.system === true ? true : undefined,
     aiBrain: folder.aiBrain === true ? true : undefined,
     dashboardHidden: folder.dashboardHidden === true ? true : undefined,

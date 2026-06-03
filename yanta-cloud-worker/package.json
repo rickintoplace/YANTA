@@ -1,0 +1,14 @@
+{
+  "name": "yanta-cloud-worker",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "npx -y wrangler@4 dev",
+    "deploy": "npx -y wrangler@4 deploy",
+    "db:migrate:local": "npx -y wrangler@4 d1 execute yanta-cloud-db --local --file=./schema.sql",
+    "db:migrate:remote": "npx -y wrangler@4 d1 execute yanta-cloud-db --remote --file=./schema.sql",
+    "r2:list": "npx -y wrangler@4 r2 bucket list"
+  },
+  "devDependencies": {}
+}

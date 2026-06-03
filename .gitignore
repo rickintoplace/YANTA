@@ -1,6 +1,8 @@
 # Dependencies
 node_modules/
 signaling/node_modules/
+sync-broker/node_modules/
+yanta-cloud-worker/node_modules/
 
 # Build output
 dist/
@@ -9,6 +11,19 @@ build/
 
 # Vercel / deployment
 .vercel/
+
+# Cloudflare / Wrangler
+.wrangler/
+yanta-cloud-worker/.wrangler/
+.dev.vars
+yanta-cloud-worker/.dev.vars
+.mf/
+yanta-cloud-worker/.mf/
+
+# Local R2 / D1 / Worker data
+yanta-cloud-worker/.data/
+yanta-cloud-worker/.local/
+yanta-cloud-worker/.tmp/
 
 # Environment / secrets
 .env

@@ -1,6 +1,12 @@
 {
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
+  "rewrites": [
+    {
+      "source": "/cloud-api/:path*",
+      "destination": "https://yanta-cloud.rickintoplace.workers.dev/:path*"
+    }
+  ],
   "headers": [
     {
       "source": "/",

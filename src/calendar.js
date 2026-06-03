@@ -8540,8 +8540,18 @@ export function setupCalendar() {
     scheduleCalendarRender();
   });
 
-  window.addEventListener('yanta-vault-hydrated', () => {
-    hydrateCalendarStateFromVault();
+  window.addEventListener('yanta-vault-hydrated', (e) => {
+    /*
+      Wenn Sync sagt "nichts geändert", darf Calendar nicht indirekt
+      yanta-calendar-updated feuern, sonst rendert das Dashboard trotzdem.
+    */
+    if (e.detail?.source === 'sync' && e.detail?.changed === false) {
+      return;
+    }
+
+    hydrateCalendarStateFromVault({
+      silent: e.detail?.source === 'sync',
+    });
 
     if (state.currentNoteId) {
       requestAnimationFrame(() => {

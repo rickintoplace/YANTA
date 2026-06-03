@@ -3,8 +3,10 @@
 //
 // Frontend RemoteObjectStore implementation for managed YANTA Cloud.
 //
-// The app talks to:
-//   VITE_YANTA_CLOUD_API_BASE_URL
+// Best-practice performance path:
+// - index(): one metadata request for all encrypted objects in the vault
+// - Sync2AppEngine filters this index locally instead of doing hundreds of
+//   per-note list(prefix) calls.
 //
 // Recommended production setup without moving DNS to Cloudflare:
 //   VITE_YANTA_CLOUD_API_BASE_URL=/cloud-api
@@ -29,6 +31,41 @@ import {
 import {
   YANTA_CLOUD_BASE_URL,
 } from '../cloud/cloud-api.js';
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function retryAfterMs(res) {
+  const raw = res.headers?.get?.('retry-after');
+  if (!raw) return 0;
+
+  const seconds = Number(raw);
+
+  if (Number.isFinite(seconds) && seconds >= 0) {
+    return seconds * 1000;
+  }
+
+  const date = Date.parse(raw);
+
+  if (Number.isFinite(date)) {
+    return Math.max(0, date - Date.now());
+  }
+
+  return 0;
+}
+
+function retryableStatus(status) {
+  return (
+    status === 408 ||
+    status === 425 ||
+    status === 429 ||
+    status === 500 ||
+    status === 502 ||
+    status === 503 ||
+    status === 504
+  );
+}
 
 export class YantaCloudObjectStore extends RemoteObjectStore {
   constructor({
@@ -57,10 +94,16 @@ export class YantaCloudObjectStore extends RemoteObjectStore {
       throw new Error('YANTA Cloud deviceId missing');
     }
 
-    const res = await this.fetchImpl(this.url('/api/me'), {
-      method: 'GET',
-      credentials: 'include',
-    });
+    const res = await this.fetchWithRetry(
+      this.url('/api/me'),
+      {
+        method: 'GET',
+        credentials: 'include',
+      },
+      {
+        label: 'YANTA Cloud login check',
+      }
+    );
 
     if (!res.ok) {
       throw await this.errorFromResponse(res, 'YANTA Cloud login required');
@@ -99,10 +142,76 @@ export class YantaCloudObjectStore extends RemoteObjectStore {
     return url.href;
   }
 
+  async fetchWithRetry(url, options = {}, {
+    attempts = 4,
+    label = 'YANTA Cloud request',
+  } = {}) {
+    let lastRes = null;
+    let lastErr = null;
+
+    for (let attempt = 0; attempt < attempts; attempt++) {
+      try {
+        const res = await this.fetchImpl(url, options);
+
+        if (!retryableStatus(res.status) || attempt === attempts - 1) {
+          return res;
+        }
+
+        lastRes = res;
+
+        const fromHeader = retryAfterMs(res);
+        const backoff =
+          fromHeader ||
+          (500 * Math.pow(2, attempt) + Math.random() * 350);
+
+        await sleep(Math.min(backoff, 8000));
+      } catch (err) {
+        lastErr = err;
+
+        if (attempt === attempts - 1) {
+          throw err;
+        }
+
+        const backoff = 500 * Math.pow(2, attempt) + Math.random() * 350;
+        await sleep(Math.min(backoff, 8000));
+      }
+    }
+
+    if (lastRes) return lastRes;
+    throw lastErr || new Error(label);
+  }
+
+  /**
+   * Full remote metadata index for the current vault.
+   *
+   * This is the fast path used by Sync2AppEngine.
+   */
+  async index() {
+    const res = await this.fetchWithRetry(
+      this.url('/api/storage/index'),
+      {
+        method: 'GET',
+        credentials: 'include',
+        headers: this.headers(),
+      },
+      {
+        label: 'YANTA Cloud index',
+      }
+    );
+
+    if (!res.ok) {
+      throw await this.errorFromResponse(res, 'YANTA Cloud index failed');
+    }
+
+    const json = await res.json();
+
+    return (json.entries || []).sort(remoteEntrySort);
+  }
+
   async list(prefix = '') {
     const cleanPrefix = normalizeRemotePath(prefix);
 
-    const res = await this.fetchImpl(
+    const res = await this.fetchWithRetry(
       this.url('/api/storage/list', {
         prefix: cleanPrefix,
       }),
@@ -110,6 +219,9 @@ export class YantaCloudObjectStore extends RemoteObjectStore {
         method: 'GET',
         credentials: 'include',
         headers: this.headers(),
+      },
+      {
+        label: 'YANTA Cloud list',
       }
     );
 
@@ -125,7 +237,7 @@ export class YantaCloudObjectStore extends RemoteObjectStore {
   async get(path) {
     const p = assertSafeRemotePath(path);
 
-    const res = await this.fetchImpl(
+    const res = await this.fetchWithRetry(
       this.url('/api/storage/object', {
         path: p,
       }),
@@ -133,6 +245,9 @@ export class YantaCloudObjectStore extends RemoteObjectStore {
         method: 'GET',
         credentials: 'include',
         headers: this.headers(),
+      },
+      {
+        label: 'YANTA Cloud get',
       }
     );
 
@@ -153,7 +268,7 @@ export class YantaCloudObjectStore extends RemoteObjectStore {
     const p = assertSafeRemotePath(path);
     const bytes = await bytesFromData(data);
 
-    const res = await this.fetchImpl(
+    const res = await this.fetchWithRetry(
       this.url('/api/storage/object', {
         path: p,
         ifAbsent: options.ifAbsent ? '1' : '',
@@ -165,6 +280,9 @@ export class YantaCloudObjectStore extends RemoteObjectStore {
           'content-type': 'application/octet-stream',
         }),
         body: bytes,
+      },
+      {
+        label: 'YANTA Cloud put',
       }
     );
 
@@ -182,7 +300,7 @@ export class YantaCloudObjectStore extends RemoteObjectStore {
   async delete(path) {
     const p = assertSafeRemotePath(path);
 
-    const res = await this.fetchImpl(
+    const res = await this.fetchWithRetry(
       this.url('/api/storage/object', {
         path: p,
       }),
@@ -190,6 +308,9 @@ export class YantaCloudObjectStore extends RemoteObjectStore {
         method: 'DELETE',
         credentials: 'include',
         headers: this.headers(),
+      },
+      {
+        label: 'YANTA Cloud delete',
       }
     );
 
@@ -201,7 +322,7 @@ export class YantaCloudObjectStore extends RemoteObjectStore {
   async stat(path) {
     const p = assertSafeRemotePath(path);
 
-    const res = await this.fetchImpl(
+    const res = await this.fetchWithRetry(
       this.url('/api/storage/stat', {
         path: p,
       }),
@@ -209,6 +330,9 @@ export class YantaCloudObjectStore extends RemoteObjectStore {
         method: 'GET',
         credentials: 'include',
         headers: this.headers(),
+      },
+      {
+        label: 'YANTA Cloud stat',
       }
     );
 
@@ -223,27 +347,29 @@ export class YantaCloudObjectStore extends RemoteObjectStore {
 
   async errorFromResponse(res, fallback) {
     let message = fallback;
-    let payload = null;
 
     try {
-      payload = await res.json();
-
-      message =
-        payload?.message ||
-        payload?.error?.message ||
-        payload?.error ||
-        message;
+      const json = await res.json();
+      message = json.message || json.error?.message || json.error || message;
     } catch {
       try {
-        const text = await res.text();
-        if (text) message = text;
+        message = await res.text();
       } catch {}
     }
 
     const err = new Error(`${fallback}: ${res.status} ${message}`);
 
     err.status = res.status;
-    err.response = payload || null;
+
+    if (res.status === 429) {
+      err.code = 'ERATE_LIMIT';
+
+      const retryAfter = Number(res.headers.get('retry-after') || 0);
+
+      err.retryAfterMs = Number.isFinite(retryAfter) && retryAfter > 0
+        ? retryAfter * 1000
+        : 5 * 60 * 1000;
+    }
 
     return err;
   }

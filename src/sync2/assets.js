@@ -118,7 +118,10 @@ export async function uploadMissingAssets(engine) {
     }
 
     const path = await assetBlobPath(engine.keys.nameKey, assetId);
-    const remoteStat = await engine.remote.stat(path);
+    const remoteStat =
+      typeof engine.statRemote === 'function'
+        ? await engine.statRemote(path)
+        : await engine.remote.stat(path);
 
     if (remoteStat) {
       await engine.markSeen(path, {
@@ -149,6 +152,7 @@ export async function uploadMissingAssets(engine) {
     );
 
     await engine.remote.put(path, encrypted, { ifAbsent: true });
+    engine.clearRemoteIndex?.();
 
     await engine.markSeen(path, {
       type: 'asset-blob',
@@ -208,7 +212,10 @@ export async function downloadMissingAssets(engine) {
     }
 
     const path = await assetBlobPath(engine.keys.nameKey, assetId);
-    const stat = await engine.remote.stat(path);
+    const stat =
+      typeof engine.statRemote === 'function'
+        ? await engine.statRemote(path)
+        : await engine.remote.stat(path);
 
     if (!stat) {
       missingRemote++;

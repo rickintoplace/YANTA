@@ -651,6 +651,14 @@ export function renderAiSettingsPanel(panel) {
         </label>
 
         <label>
+          AI access
+          <select class="text-input" data-ai-billing-mode>
+            <option value="byok" ${settings.billingMode !== 'included' ? 'selected' : ''}>BYOK: my OpenRouter key</option>
+            <option value="included" ${settings.billingMode === 'included' ? 'selected' : ''}>Included AI: YANTA Cloud credits</option>
+          </select>
+        </label>
+
+        <label>
           Base URL
           <input class="text-input" data-ai-base-url value="${escapeHtml(settings.baseUrl)}" />
         </label>
@@ -733,7 +741,7 @@ export function renderAiSettingsPanel(panel) {
     const apiKeyStorage = panel.querySelector('[data-ai-key-storage]')?.value || 'session';
     const apiKey = panel.querySelector('[data-ai-key]')?.value || '';
     const prompt = panel.querySelector('[data-ai-prompt]')?.value || DEFAULT_ASSISTANT_PROMPT;
-
+    const billingMode = panel.querySelector('[data-ai-billing-mode]')?.value || 'byok';
     const permissions = {
       allowReadNotes: checkboxValue(panel, 'allowReadNotes'),
       allowCreateNotes: checkboxValue(panel, 'allowCreateNotes'),
@@ -753,6 +761,7 @@ export function renderAiSettingsPanel(panel) {
       apiKeyStorage,
       assistantPrompt: prompt.trim() || DEFAULT_ASSISTANT_PROMPT,
       permissions,
+      billingMode,
     });
 
     setAiApiKey(apiKey, apiKeyStorage);

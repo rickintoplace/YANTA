@@ -1,5 +1,8 @@
 // ============================================================
-// YANTA AI — OpenRouter client, OpenAI-compatible chat + tools
+// YANTA AI — OpenRouter client
+// Modes:
+// - BYOK: direct browser request with user key
+// - Included: YANTA Cloud AI proxy, server-side OpenRouter key
 // ============================================================
 
 import {
@@ -7,12 +10,74 @@ import {
   getAiApiKey,
 } from './ai-settings.js';
 
+import {
+  YANTA_CLOUD_BASE_URL,
+} from '../cloud/cloud-api.js';
+
+function apiUrl(path) {
+  return new URL(path, YANTA_CLOUD_BASE_URL).href;
+}
+
+async function parseErrorResponse(res, fallback) {
+  let msg = fallback;
+
+  try {
+    const json = await res.json();
+    msg = json?.error?.message || json?.message || json?.error || msg;
+  } catch {
+    try {
+      msg = await res.text();
+    } catch {}
+  }
+
+  return msg;
+}
+
 export async function openRouterChatCompletion({
   messages,
   tools = [],
   signal = null,
 } = {}) {
   const settings = getAiSettings();
+
+  if (settings.billingMode === 'included') {
+    const body = {
+      model: settings.model,
+      messages,
+      temperature: Number(settings.temperature ?? 0.2),
+      tools: tools.length ? tools : undefined,
+      max_tokens: 2048,
+    };
+
+    const res = await fetch(apiUrl('/api/ai/chat/completions'), {
+      method: 'POST',
+      signal,
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const msg = await parseErrorResponse(
+        res,
+        `YANTA Included AI request failed: HTTP ${res.status}`
+      );
+
+      throw new Error(msg);
+    }
+
+    const json = await res.json();
+    const message = json?.choices?.[0]?.message;
+
+    if (!message) {
+      throw new Error('YANTA Included AI returned no assistant message.');
+    }
+
+    return message;
+  }
+
   const apiKey = getAiApiKey();
 
   if (!apiKey) {
@@ -42,16 +107,10 @@ export async function openRouterChatCompletion({
   });
 
   if (!res.ok) {
-    let msg = `OpenRouter request failed: HTTP ${res.status}`;
-
-    try {
-      const json = await res.json();
-      msg = json?.error?.message || json?.message || msg;
-    } catch {
-      try {
-        msg = await res.text();
-      } catch {}
-    }
+    const msg = await parseErrorResponse(
+      res,
+      `OpenRouter request failed: HTTP ${res.status}`
+    );
 
     throw new Error(msg);
   }

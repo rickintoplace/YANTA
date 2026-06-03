@@ -51,6 +51,7 @@ import {
   isDashboardVisible,
   showDashboardFolderFromHistory,
   openNoteFromDashboardHistory,
+  suppressDashboardAnimationsFor,
 } from './dashboard.js';
 
 import {
@@ -65,6 +66,7 @@ import {
   createSync2DebugAppRuntime,
   createSync2BrokerAppRuntime,
   createSync2GoogleDriveAppRuntime,
+  createSync2YantaCloudAppRuntime,
 } from './sync2/app-engine.js';
 import {
   exportSyncCapsule,
@@ -105,6 +107,9 @@ import {
 import {
   ensureAiBrain,
 } from './ai/brain.js';
+import {
+  setupSync2ProgressUi,
+} from './sync2/sync-progress-ui.js';
 
 let sharePreviewLocked = false;
 
@@ -128,6 +133,44 @@ let sync2Auto = {
   silentResumeTimer: 0,
   silentResumeRunning: false,
 };
+
+async function tryStartYantaCloudRuntime({
+  syncNow = false,
+  catchUp = false,
+} = {}) {
+  const provider = await store.settings.get('sync2.provider', null).catch(() => null);
+
+  if (provider !== 'yanta-cloud') {
+    return null;
+  }
+
+  const vaultId = await store.settings.get('sync2.yantaCloud.vaultId', null);
+  const baseUrl = await store.settings.get('sync2.yantaCloud.baseUrl', '');
+
+  if (!vaultId) {
+    return null;
+  }
+
+  const runtime = await createSync2YantaCloudAppRuntime({
+    baseUrl,
+    vaultId,
+  });
+
+  window.yantaSync2 = runtime;
+
+  startSync2AutoSync(runtime.engine, {
+    catchUp,
+  });
+
+  if (syncNow) {
+    await runSync2Now('yanta-cloud-runtime-started', {
+      interactive: false,
+      catchUp,
+    });
+  }
+
+  return runtime;
+}
 
 async function tryStartGoogleDriveRuntime({
   prompt = '',
@@ -167,21 +210,28 @@ async function runSync2Now(reason = 'manual', {
   if (!sync2Auto.engine) {
     const provider = await store.settings.get('sync2.provider', null).catch(() => null);
 
-    if (provider === 'google-drive') {
-      try {
+    try {
+      if (provider === 'google-drive') {
         await tryStartGoogleDriveRuntime({
           prompt: interactive ? 'consent' : '',
           syncNow: false,
           catchUp: false,
         });
-      } catch (err) {
-        if (interactive) {
-          throw err;
-        }
-
-        console.info('[YANTA Sync2] runtime unavailable for sync:', reason, err?.message || err);
-        return null;
       }
+
+      if (provider === 'yanta-cloud') {
+        await tryStartYantaCloudRuntime({
+          syncNow: false,
+          catchUp: false,
+        });
+      }
+    } catch (err) {
+      if (interactive) {
+        throw err;
+      }
+
+      console.info('[YANTA Sync2] runtime unavailable for sync:', reason, err?.message || err);
+      return null;
     }
   }
 
@@ -191,7 +241,18 @@ async function runSync2Now(reason = 'manual', {
 
   if (navigator.onLine === false) return null;
 
+  if (engine.uploadBlockedUntil && engine.uploadBlockedUntil > Date.now()) {
+    console.info('[YANTA Sync2] upload currently rate-limited; skipping sync:', reason);
+
+    return engine.status?.();
+  }
+
   if (sync2Auto.running) {
+    return engine.status?.();
+  }
+
+  if (engine.uploading) {
+    console.info('[YANTA Sync2] upload already running; skipping sync:', reason);
     return engine.status?.();
   }
 
@@ -202,9 +263,18 @@ async function runSync2Now(reason = 'manual', {
 
     await engine.observeAllKnownNotes();
 
+    suppressDashboardAnimationsFor(2500);
+
     await engine.syncNow({
       verbose: false,
-      pullSnapshots: true,
+
+      /*
+        Routine sync:
+        - Updates prüfen reicht.
+        - Snapshot-Scan pro Note ist teuer und laut.
+        - Full snapshot/pullSnapshots nur bei explizitem catchUp/Repair/Erst-Pull.
+      */
+      pullSnapshots: catchUp === true,
     });
 
     if (catchUp) {
@@ -237,6 +307,12 @@ async function runSync2Now(reason = 'manual', {
 }
 
 function requestSync2AutoSync(reason = 'manual', delay = 1200) {
+  const blockedUntil = sync2Auto.engine?.uploadBlockedUntil || 0;
+
+  if (blockedUntil > Date.now()) {
+    delay = Math.max(delay, blockedUntil - Date.now() + 1500);
+  }
+
   clearTimeout(sync2Auto.timer);
 
   sync2Auto.timer = window.setTimeout(() => {
@@ -308,24 +384,36 @@ function startSync2AutoSync(engine, {
     requestSync2AutoSync('folder-updated', 1000);
   });
 
-  window.addEventListener('yanta-dashboard-refresh', () => {
-    requestSync2AutoSync('dashboard-refresh', 1800);
-  });
+  /*
+    Dashboard refresh is mostly UI. Do not sync from it.
+    Real data changes emit yanta-note-updated / yanta-folder-updated.
+  */
+  // window.addEventListener('yanta-dashboard-refresh', () => {
+  //   requestSync2AutoSync('dashboard-refresh', 1800);
+  // });
 
   window.addEventListener('yanta-calendar-updated', () => {
-    requestSync2AutoSync('calendar-updated', 1000);
+    requestSync2AutoSync('calendar-updated', 3000);
   });
 
-  window.addEventListener('yanta-vault-hydrated', () => {
-    requestSync2AutoSync('vault-hydrated', 2500);
-  });
+  /*
+    Wichtig:
+    Nicht auf yanta-vault-hydrated automatisch wieder syncen.
+
+    syncNow() hydratisiert nach einem Pull selbst den Vault und dispatcht
+    yanta-vault-hydrated. Wenn wir darauf direkt den nächsten Sync planen,
+    entsteht ein permanenter Pull/Push-Loop.
+  */
+  // window.addEventListener('yanta-vault-hydrated', () => {
+  //   requestSync2AutoSync('vault-hydrated', 2500);
+  // });
 
   window.setInterval(() => {
     if (!document.hidden) {
       requestSync2AutoSync('interval', 0);
       ensureGoogleDriveSyncSilently('interval');
     }
-  }, 25_000);
+  }, 300_000);
 }
 
 async function ensureGoogleDriveSyncSilently(reason = 'silent') {
@@ -497,8 +585,24 @@ async function init() {
     
       return runtime;
     };
-  
-    if (provider === 'google-drive') {
+      
+    if (provider === 'yanta-cloud') {
+      console.info('[YANTA Sync2] YANTA Cloud is configured. Trying resume.');
+
+      /*
+        Wichtig:
+        Für YANTA Cloud beim normalen App-Start KEIN catchUp.
+        catchUp macht pushFullStateNow() und erzeugt neue Snapshots.
+        Das ist nur für explizite Reparatur-/Debug-Aktionen sinnvoll.
+      */
+      tryStartYantaCloudRuntime({
+        syncNow: false,
+        catchUp: false,
+      }).catch((err) => {
+        console.info('[YANTA Sync2] YANTA Cloud resume unavailable:', err?.message || err);
+      });
+    }
+    else if (provider === 'google-drive') {
       console.info('[YANTA Sync2] Google Drive is configured. Trying silent resume.');
     
       ensureGoogleDriveSyncSilently('app-start');
@@ -679,9 +783,9 @@ async function init() {
   setupCitations();
   setupFormatToolbar();
   setupDashboard();
-  setupDashboard();
   setupAssistant();
   setupFloatingCreate();
+  setupSync2ProgressUi();
 
   // setupCalendar();
   await syncRestore();

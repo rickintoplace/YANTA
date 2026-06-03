@@ -2292,15 +2292,36 @@ function renderSyncSection(host) {
   cloudGroup.append(el('p', { class: 'yanta-settings-hint' },
     'Synchronize encrypted YANTA data through a cloud provider. Google Drive is available now; Dropbox, OneDrive and others can be added later through the same provider-neutral sync layer.'
   ));
-  cloudGroup.append(el('button', {
-    class: 'btn primary',
-    onclick: async () => {
-      closeSettings();
-
-      const { openGoogleDriveSyncSetup } = await import('./sync2/sync-setup-ui.js');
-      openGoogleDriveSyncSetup();
+  cloudGroup.append(
+    el('div', {
+      class: 'compress-actions',
+      style: {
+        justifyContent: 'flex-start',
+        flexWrap: 'wrap',
+        marginTop: '10px',
+      },
     },
-  }, 'Set up Cloud Sync'));
+      el('button', {
+        class: 'btn primary',
+        onclick: async () => {
+          closeSettings();
+
+          const { openYantaCloudSetup } = await import('./sync2/yanta-cloud-setup-ui.js');
+          await openYantaCloudSetup();
+        },
+      }, 'Set up YANTA Cloud'),
+
+      el('button', {
+        class: 'btn',
+        onclick: async () => {
+          closeSettings();
+
+          const { openGoogleDriveSyncSetup } = await import('./sync2/sync-setup-ui.js');
+          openGoogleDriveSyncSetup();
+        },
+      }, 'Advanced: Google Drive')
+    )
+  );
   host.append(cloudGroup);
 
   // Sync folder shortcut

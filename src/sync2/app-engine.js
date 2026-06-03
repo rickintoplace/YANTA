@@ -67,6 +67,7 @@ import {
   vaultUpdatePath,
   docUpdatePath,
   vaultUpdatesPrefix,
+  vaultSnapshotsPrefix,
   docUpdatesPrefix,
 } from './ids.js';
 
@@ -89,8 +90,26 @@ import {
 
 import { GoogleDriveObjectStore } from './google-drive-object-store.js';
 
+import { YantaCloudObjectStore } from './yanta-cloud-object-store.js';
+
 export const SYNC2_REMOTE_ORIGIN = 'sync2-remote';
 export const SYNC2_LOCAL_ORIGIN = 'sync2-local';
+
+// Local-only device presence/status updates.
+// These should NOT create remote update packs on every sync cycle.
+export const SYNC2_DEVICE_PRESENCE_ORIGIN = 'sync2-device-presence';
+
+function emitSync2Progress(detail = {}) {
+  try {
+    window.dispatchEvent(new CustomEvent('yanta-sync2-progress', {
+      detail: {
+        ts: Date.now(),
+        provider: detail.provider || 'YANTA Cloud Sync',
+        ...detail,
+      },
+    }));
+  } catch {}
+}
 
 const SYNC_KEY_SETTING = 'sync2.syncKey';
 const LEGACY_DEBUG_SYNC_KEY_SETTING = 'sync2.debug.syncKey';
@@ -155,6 +174,19 @@ function cleanUndefined(obj) {
   }
 
   return out;
+}
+
+function seqFromRemoteObjectPath(path, deviceId) {
+  const safeDevice = String(deviceId || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  const re = new RegExp(`${safeDevice}-(\\d{8,})\\.(?:ypack|ysnap)\\.enc$`);
+  const m = String(path || '').match(re);
+
+  if (!m) return 0;
+
+  const n = Number(m[1]);
+
+  return Number.isFinite(n) ? n : 0;
 }
 
 function sanitizeNoteMeta(note) {
@@ -227,6 +259,32 @@ function preferIncoming(existing, incoming) {
   return inUpdated >= exUpdated;
 }
 
+function stableJsonStringifyForSync2(value) {
+  if (value == null) return String(value);
+
+  if (typeof value !== 'object') {
+    return JSON.stringify(value);
+  }
+
+  if (Array.isArray(value)) {
+    return '[' + value.map(stableJsonStringifyForSync2).join(',') + ']';
+  }
+
+  const keys = Object.keys(value).sort();
+
+  return '{' + keys
+    .map((key) => JSON.stringify(key) + ':' + stableJsonStringifyForSync2(value[key]))
+    .join(',') + '}';
+}
+
+function jsonEqualForSync2(a, b) {
+  try {
+    return stableJsonStringifyForSync2(a) === stableJsonStringifyForSync2(b);
+  } catch {
+    return false;
+  }
+}
+
 async function getOrCreateSyncKey() {
   let key = await store.settings.get(SYNC_KEY_SETTING, null);
 
@@ -280,12 +338,185 @@ export class Sync2AppEngine {
 
     this.started = false;
     this.syncing = false;
+    this.uploadBlockedUntil = 0;
+    this.uploading = false;
+    this.remoteSeqCatchupDone = false;
+    this.suppressVaultOutboxDepth = 0;
+    this.remoteIndex = null;
 
     this.seq = 0;
     this.outbox = [];
 
     this.unobserveVault = null;
     this.noteObservers = new Map();
+  }
+
+  progress(detail = {}) {
+    emitSync2Progress({
+      vaultId: this.vaultId,
+      deviceId: this.deviceId,
+      provider: this.remote?.constructor?.name || 'Sync',
+      ...detail,
+    });
+  }
+
+  async withVaultOutboxSuppressed(fn) {
+    this.suppressVaultOutboxDepth++;
+
+    try {
+      return await fn();
+    } finally {
+      this.suppressVaultOutboxDepth = Math.max(
+        0,
+        this.suppressVaultOutboxDepth - 1
+      );
+    }
+  }
+
+  clearRemoteIndex() {
+    this.remoteIndex = null;
+  }
+
+  async loadRemoteIndex({
+    force = false,
+  } = {}) {
+    if (!force && this.remoteIndex) {
+      return this.remoteIndex;
+    }
+
+    if (typeof this.remote?.index === 'function') {
+      const entries = await this.remote.index();
+
+      this.remoteIndex = Array.isArray(entries)
+        ? entries
+        : [];
+
+      return this.remoteIndex;
+    }
+
+    this.remoteIndex = null;
+    return null;
+  }
+
+  async listRemote(prefix = '') {
+    const index = await this.loadRemoteIndex();
+
+    if (index) {
+      const cleanPrefix = String(prefix || '')
+        .replace(/\\/g, '/')
+        .replace(/^\/+/, '')
+        .replace(/\/+/g, '/');
+
+      return index
+        .filter((entry) =>
+          !cleanPrefix ||
+          String(entry.path || '').startsWith(cleanPrefix)
+        )
+        .sort((a, b) => String(a.path).localeCompare(String(b.path)));
+    }
+
+    return this.remote.list(prefix);
+  }
+
+  async statRemote(path) {
+    const index = await this.loadRemoteIndex();
+
+    if (index) {
+      const cleanPath = String(path || '')
+        .replace(/\\/g, '/')
+        .replace(/^\/+/, '')
+        .replace(/\/+/g, '/');
+
+      return index.find((entry) => entry.path === cleanPath) || null;
+    }
+
+    return this.remote.stat(path);
+  }
+
+  async commitSeq(seq) {
+    this.seq = seq;
+    await this.localState.set('seq', this.seq);
+    await store.settings.set('sync2.seq', this.seq);
+    return this.seq;
+  }
+
+  async catchUpSeqFromRemoteOwnObjects({
+    force = false,
+  } = {}) {
+    if (this.remoteSeqCatchupDone && !force) return this.seq;
+
+    let maxRemoteSeq = 0;
+
+    try {
+      const vaultUpdates = await this.listRemote(vaultUpdatesPrefix());
+
+      for (const entry of vaultUpdates || []) {
+        maxRemoteSeq = Math.max(
+          maxRemoteSeq,
+          seqFromRemoteObjectPath(entry.path, this.deviceId)
+        );
+      }
+    } catch (err) {
+      console.warn('[YANTA Sync2] could not list vault update seq', err);
+    }
+
+    try {
+      const vaultSnapshots = await this.listRemote(vaultSnapshotsPrefix());
+
+      for (const entry of vaultSnapshots || []) {
+        maxRemoteSeq = Math.max(
+          maxRemoteSeq,
+          seqFromRemoteObjectPath(entry.path, this.deviceId)
+        );
+      }
+    } catch (err) {
+      console.warn('[YANTA Sync2] could not list vault snapshot seq', err);
+    }
+
+    if (maxRemoteSeq > this.seq) {
+      await this.commitSeq(maxRemoteSeq);
+    }
+
+    this.remoteSeqCatchupDone = true;
+
+    return this.seq;
+  }
+
+  markUploadRateLimited(err) {
+    const retryMs =
+      Number(err?.retryAfterMs || 0) > 0
+        ? Number(err.retryAfterMs)
+        : 5 * 60 * 1000;
+
+    this.uploadBlockedUntil = Date.now() + retryMs;
+
+    this.progress({
+      phase: 'error',
+      status: 'error',
+      direction: 'up',
+      message: `Upload rate limited. Retrying in ${Math.ceil(retryMs / 1000)}s.`,
+    });
+  }
+
+  assertUploadNotBlocked() {
+    if (!this.uploadBlockedUntil) return;
+
+    const waitMs = this.uploadBlockedUntil - Date.now();
+
+    if (waitMs <= 0) {
+      this.uploadBlockedUntil = 0;
+      return;
+    }
+
+    const err = new Error(
+      `Cloud upload is rate limited. Retrying in ${Math.ceil(waitMs / 1000)}s.`
+    );
+
+    err.code = 'ERATE_LIMIT';
+    err.status = 429;
+    err.retryAfterMs = waitMs;
+
+    throw err;
   }
 
   async init() {
@@ -298,6 +529,8 @@ export class Sync2AppEngine {
   
     await this.ensureBootstrap();
     await this.ensureKeyCheck();
+
+    await this.catchUpSeqFromRemoteOwnObjects();
   
     if (this.autoObserveNotes) {
       await this.observeAllKnownNotes();
@@ -332,7 +565,16 @@ export class Sync2AppEngine {
     }
 
     this.noteObservers.clear();
+
+    /*
+      stop() cannot abort already running fetches, but it must make the
+      engine reusable after a reload/debug stop. Existing in-flight promises
+      may still settle, so normal production code should prefer page reload
+      after manual stop during debugging.
+    */
     this.started = false;
+    this.syncing = false;
+    this.uploading = false;
   }
 
   async hasSeen(path) {
@@ -343,13 +585,15 @@ export class Sync2AppEngine {
     return this.localState.markSeen(path, extra);
   }
 
-  async updateDeviceRecord(patch = {}) {
+  async updateDeviceRecord(patch = {}, {
+    queue = false,
+  } = {}) {
     const doc = getVaultDoc();
     const devices = vaultDevicesMap();
-  
+
     const existing = devices.get(this.deviceId) || {};
     const name = await getOrCreateDeviceName(this.deviceId);
-  
+
     const next = cleanUndefined({
       ...safeJsonClone(existing),
       id: this.deviceId,
@@ -364,11 +608,20 @@ export class Sync2AppEngine {
       seq: this.seq,
       ...patch,
     });
-  
+
+    /*
+      Default queue=false:
+      Sync status / heartbeat / lastSeenAt must not cause remote writes.
+      They are useful locally for UI, but if they are queued, each sync
+      creates a new Vault update and therefore another sync cycle.
+      
+      Full snapshots still include this local device record because it is
+      stored in the VaultDoc before encodeVaultState().
+    */
     doc.transact(() => {
       devices.set(this.deviceId, next);
-    }, SYNC2_LOCAL_ORIGIN);
-  
+    }, queue ? SYNC2_LOCAL_ORIGIN : SYNC2_DEVICE_PRESENCE_ORIGIN);
+
     return next;
   }
 
@@ -424,6 +677,19 @@ export class Sync2AppEngine {
     this.unobserveVault = onVaultUpdate((update, origin) => {
       if (origin === SYNC2_REMOTE_ORIGIN) return;
       if (origin === VAULT_ORIGINS.REMOTE) return;
+
+      // Device heartbeat/status changes are local presence, not durable
+      // user content. If we queue them, every sync creates another sync.
+      if (origin === SYNC2_DEVICE_PRESENCE_ORIGIN) return;
+
+      /*
+        Wichtig:
+        Während Remote-Hydration/Persistenz schreiben wir lokale IndexedDB-
+        Caches neu. Der Store-Bridge kann daraus VaultDoc-Updates mit
+        origin sync2-store-bridge erzeugen. Diese Updates sind aber nur
+        Nebenwirkungen des Pulls und dürfen NICHT wieder hochgeladen werden.
+      */
+      if (this.suppressVaultOutboxDepth > 0) return;
 
       this.outbox.push({
         kind: 'vault',
@@ -516,20 +782,61 @@ export class Sync2AppEngine {
   } = {}) {
     await this.start();
 
+    this.progress({
+      phase: 'start',
+      direction: 'up',
+      detailed: true,
+      message: 'Preparing full encrypted snapshot…',
+    });
+
+    const ids = new Set();
+
+    for (const id of state.notes.keys()) ids.add(id);
+    for (const id of vaultNotesMap().keys()) ids.add(id);
+
+    const noteIds = [...ids].filter((noteId) => !vaultTombstonesMap().has(noteId));
+
     if (includeSnapshots) {
+      this.progress({
+        phase: 'uploadVaultSnapshot',
+        direction: 'up',
+        current: 0,
+        total: 1,
+      });
+
       await uploadVaultSnapshot(this);
 
-      const ids = new Set();
+      this.progress({
+        phase: 'uploadVaultSnapshot',
+        direction: 'up',
+        current: 1,
+        total: 1,
+      });
 
-      for (const id of state.notes.keys()) ids.add(id);
-      for (const id of vaultNotesMap().keys()) ids.add(id);
+      let i = 0;
 
-      for (const noteId of ids) {
-        if (vaultTombstonesMap().has(noteId)) continue;
+      for (const noteId of noteIds) {
+        i++;
+
+        this.progress({
+          phase: 'uploadNoteSnapshots',
+          direction: 'up',
+          current: i,
+          total: noteIds.length,
+          noteId,
+        });
 
         await this.observeNote(noteId);
         await uploadNoteSnapshot(this, noteId);
       }
+
+      this.progress({
+        phase: 'uploadAssets',
+        direction: 'up',
+        detailed: true,
+        message: 'Checking image and drawing assets…',
+      });
+
       await uploadMissingAssets(this);
     } else {
       this.outbox.push({
@@ -539,13 +846,18 @@ export class Sync2AppEngine {
         full: true,
       });
 
-      const ids = new Set();
+      let i = 0;
 
-      for (const id of state.notes.keys()) ids.add(id);
-      for (const id of vaultNotesMap().keys()) ids.add(id);
+      for (const noteId of noteIds) {
+        i++;
 
-      for (const noteId of ids) {
-        if (vaultTombstonesMap().has(noteId)) continue;
+        this.progress({
+          phase: 'uploadNoteSnapshots',
+          direction: 'up',
+          current: i,
+          total: noteIds.length,
+          noteId,
+        });
 
         await this.observeNote(noteId);
 
@@ -559,8 +871,31 @@ export class Sync2AppEngine {
       }
 
       await this.uploadOutbox();
+
+      this.progress({
+        phase: 'uploadAssets',
+        direction: 'up',
+        detailed: true,
+        message: 'Checking image and drawing assets…',
+      });
+
       await uploadMissingAssets(this);
     }
+
+    this.progress({
+      phase: 'finalize',
+      direction: 'up',
+      message: 'Uploading final device state…',
+    });
+
+    await this.uploadOutbox();
+
+    this.progress({
+      phase: 'complete',
+      status: 'done',
+      direction: 'up',
+      message: 'Full encrypted snapshot uploaded.',
+    });
 
     if (verbose) {
       toast('Sync2: full state snapshot pushed', 'success');
@@ -575,6 +910,22 @@ export class Sync2AppEngine {
   } = {}) {
     await this.start();
   
+    this.clearRemoteIndex();
+
+    this.progress({
+      phase: 'init',
+      message: 'Loading remote index…',
+    });
+
+    await this.loadRemoteIndex({
+      force: true,
+    });
+
+    this.progress({
+      phase: 'start',
+      message: 'Starting sync…',
+    });
+
     if (this.syncing) return this.status();
   
     this.syncing = true;
@@ -595,6 +946,12 @@ export class Sync2AppEngine {
         lastSeenAt: Date.now(),
         lastError: '',
       });
+
+      this.progress({
+        phase: 'uploadOutbox',
+        direction: 'up',
+        message: 'Uploading queued changes…',
+      });
   
       const firstPush = await this.uploadOutbox();
   
@@ -607,6 +964,13 @@ export class Sync2AppEngine {
       }
   
       if (pullSnapshots) {
+
+        this.progress({
+          phase: 'downloadVaultSnapshots',
+          direction: 'down',
+          message: 'Checking vault snapshots…',
+        });
+
         const vaultSnapshots = await downloadVaultSnapshots(this);
   
         if (vaultSnapshots.applied > 0) {
@@ -617,6 +981,12 @@ export class Sync2AppEngine {
         }
       }
   
+      this.progress({
+        phase: 'downloadVaultUpdates',
+        direction: 'down',
+        message: 'Checking vault updates…',
+      });
+
       vaultUpdates = await this.downloadVaultUpdates();
   
       if (vaultUpdates.applied > 0) {
@@ -626,14 +996,29 @@ export class Sync2AppEngine {
         });
       }
   
-      this.hydrateAppStateFromVault();
-      await this.persistVaultMetadataToLocalCache();
-  
-      await downloadMissingAssets(this);
+      await this.withVaultOutboxSuppressed(async () => {
+        this.hydrateAppStateFromVault();
+        await this.persistVaultMetadataToLocalCache();
+
+        this.progress({
+          phase: 'downloadAssets',
+          direction: 'down',
+          message: 'Checking missing assets…',
+        });
+
+        await downloadMissingAssets(this);
+      });
   
       await this.observeAllKnownNotes();
   
       if (pullSnapshots) {
+
+        this.progress({
+          phase: 'downloadNoteSnapshots',
+          direction: 'down',
+          message: 'Checking note snapshots…',
+        });
+
         const noteSnapshots = await this.downloadKnownNoteSnapshots();
   
         if (noteSnapshots.applied > 0) {
@@ -646,6 +1031,12 @@ export class Sync2AppEngine {
         }
       }
   
+      this.progress({
+        phase: 'downloadNoteUpdates',
+        direction: 'down',
+        message: 'Checking note updates…',
+      });
+
       noteUpdates = await this.downloadKnownNoteUpdates();
   
       if (noteUpdates.applied > 0) {
@@ -657,10 +1048,18 @@ export class Sync2AppEngine {
         });
       }
   
-      this.hydrateAppStateFromVault();
-      await this.persistVaultMetadataToLocalCache();
-  
-      await downloadMissingAssets(this);
+      await this.withVaultOutboxSuppressed(async () => {
+        this.hydrateAppStateFromVault();
+        await this.persistVaultMetadataToLocalCache();
+
+        this.progress({
+          phase: 'downloadAssets',
+          direction: 'down',
+          message: 'Checking missing assets…',
+        });
+
+        await downloadMissingAssets(this);
+      });
   
       await this.updateDeviceRecord({
         syncStatus: 'synced',
@@ -686,9 +1085,21 @@ export class Sync2AppEngine {
         toast('Sync2: sync complete', 'success');
       }
   
+      this.progress({
+        phase: 'complete',
+        status: 'done',
+        message: 'Sync complete.',
+      });
+
       return this.status();
     } catch (err) {
       console.error('Sync2 sync failed', err);
+
+      this.progress({
+        phase: 'error',
+        status: 'error',
+        message: err?.message || String(err),
+      });
   
       state.globalSyncStatus = 'conflict';
   
@@ -699,11 +1110,16 @@ export class Sync2AppEngine {
         lastSeenAt: Date.now(),
       }).catch(() => {});
   
-      // Best effort: if the error happened after Drive connection was available,
-      // this uploads the error state on the next successful cycle.
-      try {
-        await this.uploadOutbox();
-      } catch {}
+      /*
+        Kein best-effort uploadOutbox bei Rate Limit.
+        Sonst hämmert der Client nach einem 429 direkt weiter und erzeugt
+        object?path=...00001202, 00001203, ...
+      */
+      if (err?.status !== 429 && err?.code !== 'ERATE_LIMIT') {
+        try {
+          await this.uploadOutbox();
+        } catch {}
+      }
   
       if (verbose) {
         toast('Sync2 failed: ' + (err?.message || String(err)), 'error');
@@ -717,85 +1133,200 @@ export class Sync2AppEngine {
 
 
   async uploadOutbox() {
-    let uploaded = 0;
-    while (this.outbox.length) {
-      const item = this.outbox.shift();
+    if (this.uploading) {
+      return {
+        uploaded: 0,
+        busy: true,
+      };
+    }
 
-      // Drop note updates if tombstoned before upload.
-      if (item.kind === 'note' && vaultTombstonesMap().has(item.noteId)) {
-        continue;
+    this.assertUploadNotBlocked();
+
+    this.uploading = true;
+
+    try {
+      await this.catchUpSeqFromRemoteOwnObjects();
+
+      let uploaded = 0;
+      const total = this.outbox.length;
+      let processed = 0;
+
+      if (total > 0) {
+        this.progress({
+          phase: 'uploadOutbox',
+          direction: 'up',
+          current: 0,
+          total,
+        });
       }
 
-      const seq = await this.nextSeq();
+      while (this.outbox.length) {
+        this.assertUploadNotBlocked();
 
-      let path;
-      let docId;
+        /*
+          Nicht shift() bevor der Upload erfolgreich war.
+          Bei 429/Netzwerkfehler bleibt das Item in der Outbox.
+        */
+        const item = this.outbox[0];
+        processed++;
 
-      if (item.kind === 'vault') {
-        path = vaultUpdatePath(this.deviceId, seq);
-        docId = 'vault';
-      } else if (item.kind === 'note') {
-        path = await docUpdatePath(
-          this.keys.nameKey,
-          item.noteId,
-          this.deviceId,
-          seq
-        );
+        if (item.kind === 'note' && vaultTombstonesMap().has(item.noteId)) {
+          this.outbox.shift();
 
-        docId = item.noteId;
-      } else {
-        throw new Error(`Unknown outbox item kind: ${item.kind}`);
-      }
-
-      const packBytes = createAndEncodeUpdatePack({
-        kind: item.kind,
-        deviceId: this.deviceId,
-        seq,
-        docId,
-        updates: [item.update],
-        meta: {
-          full: !!item.full,
-          app: true,
-        },
-      });
-
-      const encrypted = await encryptBytes(
-        this.keys.contentKey,
-        packBytes,
-        path
-      );
-
-      try {
-        await this.remote.put(path, encrypted, { ifAbsent: true });
-        uploaded++;
-      } catch (err) {
-        if (err?.code === 'EEXIST') {
-          await this.markSeen(path, {
-            type: item.kind + '-update',
-            own: true,
+          this.progress({
+            phase: 'uploadOutbox',
+            direction: 'up',
+            current: Math.min(processed, total),
+            total,
+            noteId: item.noteId || null,
+            message: 'Skipped tombstoned note update.',
           });
 
           continue;
         }
 
-        throw err;
+        const seq = this.seq + 1;
+
+        let path;
+        let docId;
+
+        if (item.kind === 'vault') {
+          path = vaultUpdatePath(this.deviceId, seq);
+          docId = 'vault';
+        } else if (item.kind === 'note') {
+          path = await docUpdatePath(
+            this.keys.nameKey,
+            item.noteId,
+            this.deviceId,
+            seq
+          );
+
+          docId = item.noteId;
+        } else {
+          this.outbox.shift();
+          throw new Error(`Unknown outbox item kind: ${item.kind}`);
+        }
+
+        this.progress({
+          phase: 'uploadOutbox',
+          direction: 'up',
+          current: Math.min(processed, total),
+          total,
+          noteId: item.noteId || null,
+          message: item.kind === 'vault'
+            ? 'Uploading vault update…'
+            : 'Uploading note update…',
+        });
+
+        const packBytes = createAndEncodeUpdatePack({
+          kind: item.kind,
+          deviceId: this.deviceId,
+          seq,
+          docId,
+          updates: [item.update],
+          meta: {
+            full: !!item.full,
+            app: true,
+          },
+        });
+
+        const encrypted = await encryptBytes(
+          this.keys.contentKey,
+          packBytes,
+          path
+        );
+
+        try {
+          await this.remote.put(path, encrypted, { ifAbsent: true });
+          this.clearRemoteIndex();
+
+          await this.commitSeq(seq);
+
+          await this.markSeen(path, {
+            type: item.kind + '-update',
+            own: true,
+          });
+
+          this.outbox.shift();
+          uploaded++;
+        } catch (err) {
+          if (err?.code === 'EEXIST') {
+            /*
+              Remote hat diese Sequenz schon. Das passiert nach alten
+              fehlgeschlagenen/retry-lastigen Sessions. Seq committen,
+              Item aus Outbox entfernen und weiter.
+            */
+            await this.commitSeq(seq);
+
+            await this.markSeen(path, {
+              type: item.kind + '-update',
+              own: true,
+              existedRemote: true,
+            });
+
+            this.outbox.shift();
+            continue;
+          }
+
+          if (err?.status === 429 || err?.code === 'ERATE_LIMIT') {
+            this.markUploadRateLimited(err);
+          }
+
+          throw err;
+        }
       }
 
-      await this.markSeen(path, {
-        type: item.kind + '-update',
-        own: true,
-      });
+      if (total > 0) {
+        this.progress({
+          phase: 'uploadOutbox',
+          direction: 'up',
+          current: total,
+          total,
+          message: `${uploaded} update${uploaded === 1 ? '' : 's'} uploaded.`,
+        });
+      }
+
+      return { uploaded };
+    } finally {
+      this.uploading = false;
     }
-    return { uploaded };
   }
 
   async downloadVaultUpdates() {
-    const entries = await this.remote.list(vaultUpdatesPrefix());
+    const entries = await this.listRemote(vaultUpdatesPrefix());
 
     let applied = 0;
+    let processed = 0;
+
+    this.progress({
+      phase: 'downloadVaultUpdates',
+      direction: 'down',
+      current: 0,
+      total: entries.length,
+    });
 
     for (const entry of entries) {
-      if (await this.hasSeen(entry.path)) continue;
+      processed++;
+
+      if (await this.hasSeen(entry.path)) {
+        this.progress({
+          phase: 'downloadVaultUpdates',
+          direction: 'down',
+          current: processed,
+          total: entries.length,
+          message: 'Already seen.',
+        });
+
+        continue;
+      }
+
+      this.progress({
+        phase: 'downloadVaultUpdates',
+        direction: 'down',
+        current: processed,
+        total: entries.length,
+        message: 'Downloading vault update…',
+      });
 
       const encrypted = await this.remote.get(entry.path);
 
@@ -840,10 +1371,28 @@ export class Sync2AppEngine {
     for (const id of state.notes.keys()) ids.add(id);
     for (const id of vaultNotesMap().keys()) ids.add(id);
 
-    let applied = 0;
+    const noteIds = [...ids].filter((noteId) => !vaultTombstonesMap().has(noteId));
 
-    for (const noteId of ids) {
-      if (vaultTombstonesMap().has(noteId)) continue;
+    let applied = 0;
+    let processed = 0;
+
+    this.progress({
+      phase: 'downloadNoteSnapshots',
+      direction: 'down',
+      current: 0,
+      total: noteIds.length,
+    });
+
+    for (const noteId of noteIds) {
+      processed++;
+
+      this.progress({
+        phase: 'downloadNoteSnapshots',
+        direction: 'down',
+        current: processed,
+        total: noteIds.length,
+        noteId,
+      });
 
       const res = await downloadNoteSnapshots(this, noteId);
       applied += res.applied;
@@ -858,10 +1407,28 @@ export class Sync2AppEngine {
     for (const id of state.notes.keys()) ids.add(id);
     for (const id of vaultNotesMap().keys()) ids.add(id);
 
-    let applied = 0;
+    const noteIds = [...ids].filter((noteId) => !vaultTombstonesMap().has(noteId));
 
-    for (const noteId of ids) {
-      if (vaultTombstonesMap().has(noteId)) continue;
+    let applied = 0;
+    let processed = 0;
+
+    this.progress({
+      phase: 'downloadNoteUpdates',
+      direction: 'down',
+      current: 0,
+      total: noteIds.length,
+    });
+
+    for (const noteId of noteIds) {
+      processed++;
+
+      this.progress({
+        phase: 'downloadNoteUpdates',
+        direction: 'down',
+        current: processed,
+        total: noteIds.length,
+        noteId,
+      });
 
       const res = await this.downloadNoteUpdates(noteId);
       applied += res.applied;
@@ -872,7 +1439,15 @@ export class Sync2AppEngine {
 
   async downloadNoteUpdates(noteId) {
     const prefix = await docUpdatesPrefix(this.keys.nameKey, noteId);
-    const entries = await this.remote.list(prefix);
+    const entries = await this.listRemote(prefix);
+
+    this.progress({
+      phase: 'downloadNoteUpdates',
+      direction: 'down',
+      noteId,
+      total: entries.length,
+      current: 0,
+    });
 
     let applied = 0;
 
@@ -888,7 +1463,18 @@ export class Sync2AppEngine {
 
     const { doc } = getNoteDoc(noteId);
 
+    let processed = 0;
+
     for (const entry of entries) {
+      processed++;
+
+      this.progress({
+        phase: 'downloadNoteUpdates',
+        direction: 'down',
+        noteId,
+        current: processed,
+        total: entries.length,
+      });
       if (await this.hasSeen(entry.path)) continue;
 
       if (vaultTombstonesMap().has(noteId)) {
@@ -943,17 +1529,31 @@ export class Sync2AppEngine {
   hydrateAppStateFromVault() {
     const tombstones = vaultTombstonesMap();
 
+    let changed = false;
+
     // Tombstones first.
     for (const [id, t] of tombstones) {
       const type = t?.type;
 
       if (type === 'note') {
+        if (state.notes.has(id) || state.searchIndex.has(id)) {
+          changed = true;
+        }
+
         state.notes.delete(id);
         state.searchIndex.delete(id);
       } else if (type === 'folder') {
+        if (state.folders.has(id) || state.expandedFolders.has(id)) {
+          changed = true;
+        }
+
         state.folders.delete(id);
         state.expandedFolders.delete(id);
       } else if (type === 'image') {
+        if (state.imagesMeta.has(id) || state.imageBlobs.has(id)) {
+          changed = true;
+        }
+
         state.imagesMeta.delete(id);
 
         const url = state.imageBlobs.get(id);
@@ -978,7 +1578,13 @@ export class Sync2AppEngine {
       const existing = state.notes.get(id);
 
       if (preferIncoming(existing, incoming)) {
-        state.notes.set(id, safeJsonClone(incoming));
+        const next = safeJsonClone(incoming);
+
+        if (!jsonEqualForSync2(existing, next)) {
+          changed = true;
+        }
+
+        state.notes.set(id, next);
       }
     }
 
@@ -992,11 +1598,17 @@ export class Sync2AppEngine {
       const existing = state.folders.get(id);
 
       if (preferIncoming(existing, incoming)) {
-        state.folders.set(id, safeJsonClone(incoming));
+        const next = safeJsonClone(incoming);
+
+        if (!jsonEqualForSync2(existing, next)) {
+          changed = true;
+        }
+
+        state.folders.set(id, next);
       }
     }
 
-    // Images metadata only; blobs come later in PR 4b.
+    // Images metadata only; blobs come later through asset sync.
     for (const [id, raw] of vaultImagesMap()) {
       if (tombstones.has(id)) continue;
 
@@ -1006,14 +1618,27 @@ export class Sync2AppEngine {
       const existing = state.imagesMeta.get(id);
 
       if (preferIncoming(existing, incoming)) {
-        state.imagesMeta.set(id, safeJsonClone(incoming));
+        const next = safeJsonClone(incoming);
+
+        if (!jsonEqualForSync2(existing, next)) {
+          changed = true;
+        }
+
+        state.imagesMeta.set(id, next);
       }
     }
 
-    rebuildWikilinkIndex();
-    renderTree();
+    if (changed) {
+      rebuildWikilinkIndex();
+      renderTree();
+    }
 
-    window.dispatchEvent(new CustomEvent('yanta-vault-hydrated'));
+    window.dispatchEvent(new CustomEvent('yanta-vault-hydrated', {
+      detail: {
+        source: 'sync',
+        changed,
+      },
+    }));
 
     const current = state.currentNoteId
       ? state.notes.get(state.currentNoteId)
@@ -1026,6 +1651,10 @@ export class Sync2AppEngine {
         titleEl.value = current.title || '';
       }
     }
+
+    return {
+      changed,
+    };
   }
 
   async persistVaultMetadataToLocalCache() {
@@ -1075,11 +1704,16 @@ export class Sync2AppEngine {
       const incoming = sanitizeNoteMeta(raw);
       if (!incoming?.id) continue;
   
-      state.notes.set(id, safeJsonClone(incoming));
-  
-      try {
-        await store.notes.put(safeJsonClone(incoming));
-      } catch {}
+      const existingState = state.notes.get(id);
+      const nextNote = safeJsonClone(incoming);
+
+      state.notes.set(id, nextNote);
+
+      if (!jsonEqualForSync2(existingState, nextNote)) {
+        try {
+          await store.notes.put(safeJsonClone(nextNote));
+        } catch {}
+      }
     }
   
     for (const [id, raw] of vaultFoldersMap()) {
@@ -1088,11 +1722,16 @@ export class Sync2AppEngine {
       const incoming = sanitizeFolderMeta(raw);
       if (!incoming?.id) continue;
   
-      state.folders.set(id, safeJsonClone(incoming));
-  
-      try {
-        await store.folders.put(safeJsonClone(incoming));
-      } catch {}
+      const existingState = state.folders.get(id);
+      const nextFolder = safeJsonClone(incoming);
+
+      state.folders.set(id, nextFolder);
+
+      if (!jsonEqualForSync2(existingState, nextFolder)) {
+        try {
+          await store.folders.put(safeJsonClone(nextFolder));
+        } catch {}
+      }
     }
   
     for (const [id, raw] of vaultImagesMap()) {
@@ -1329,6 +1968,72 @@ export async function createSync2BrokerAppRuntime({
     async clearSeenForDebugOnly() {
       await localState.clearSeen();
       toast('Sync2 broker seen-state cleared', 'success');
+    },
+
+    async status() {
+      return engine.status();
+    },
+  };
+}
+
+export async function createSync2YantaCloudAppRuntime({
+  baseUrl = '',
+  vaultId = '',
+  stateDbName = 'yanta-sync2-state-yanta-cloud',
+} = {}) {
+  if (!vaultId) {
+    throw new Error('YANTA Cloud vaultId missing');
+  }
+
+  const syncKey = await getOrCreateSyncKey();
+  const deviceId = await getOrCreateDeviceId();
+
+  const remote = new YantaCloudObjectStore({
+    baseUrl,
+    vaultId,
+    deviceId,
+  });
+
+  const localState = new Sync2LocalStateStore({
+    dbName: stateDbName,
+  });
+
+  const engine = new Sync2AppEngine({
+    remote,
+    localState,
+    syncKey,
+    deviceId,
+  });
+
+  await engine.start();
+
+  return {
+    engine,
+    remote,
+    localState,
+    syncKey,
+    deviceId,
+    vaultId,
+    provider: 'yanta-cloud',
+
+    async syncNow(options) {
+      return engine.syncNow(options);
+    },
+
+    async pushFullStateNow(options) {
+      return engine.pushFullStateNow(options);
+    },
+
+    async uploadAssetsNow() {
+      return uploadMissingAssets(engine);
+    },
+
+    async downloadAssetsNow() {
+      return downloadMissingAssets(engine);
+    },
+
+    async assetDebugSnapshot() {
+      return assetSyncDebugSnapshot(engine);
     },
 
     async status() {

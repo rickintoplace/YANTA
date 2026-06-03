@@ -1486,7 +1486,9 @@ async function submitUserText(text) {
     return;
   }
 
-  if (!getAiApiKey()) {
+  const aiSettings = getAiSettings();
+
+  if (aiSettings.billingMode !== 'included' && !getAiApiKey()) {
     settingsOpen = true;
     renderSettings();
     toast('Add your OpenRouter API key first', 'error');

@@ -5,9 +5,14 @@ const PLAN_LIMITS = {
     devices: 2,
     objects: 2000,
     objectSizeBytes: 2 * 1024 * 1024,
-    uploadBytesDay: 50 * 1024 * 1024,
+  // Backend-internal object transfer.
+  // Needs headroom for first sync, retries, snapshots.
+    uploadBytesDay: 250 * 1024 * 1024,
+  // Real download abuse remains capped.
     downloadBytesMonth: 100 * 1024 * 1024,
-    writesDay: 200,
+  // Internal encrypted object writes.
+  // Product/UI can still say "200 app writes/day" if we enforce that separately later.
+    writesDay: 8000,
     includedAi: false,
     aiRequestsDay: 0,
     aiSpendMicrosMonth: 0
@@ -165,12 +170,30 @@ function clearCookieHeader(env) {
   return `${name}=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Lax${domain}`;
 }
 
+function allowedOrigins(env) {
+  const raw = [
+    env.APP_ORIGIN || '',
+    env.ALLOWED_ORIGINS || '',
+  ].filter(Boolean).join(',');
+
+  return new Set(
+    raw
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .map((s) => s.replace(/\/+$/, ''))
+  );
+}
+
 function corsHeaders(env, req) {
-  const origin = req.headers.get('origin') || '';
-  const allowed = env.APP_ORIGIN || '';
+  const origin = (req.headers.get('origin') || '').replace(/\/+$/, '');
+  const allowed = allowedOrigins(env);
 
   if (!origin) return {};
-  if (allowed && origin !== allowed) return {};
+
+  if (allowed.size && !allowed.has(origin)) {
+    return {};
+  }
 
   return {
     'access-control-allow-origin': origin,
@@ -183,9 +206,14 @@ function corsHeaders(env, req) {
 }
 
 function originAllowed(env, req) {
-  const origin = req.headers.get('origin') || '';
+  const origin = (req.headers.get('origin') || '').replace(/\/+$/, '');
   if (!origin) return true;
-  return !env.APP_ORIGIN || origin === env.APP_ORIGIN;
+
+  const allowed = allowedOrigins(env);
+
+  if (!allowed.size) return true;
+
+  return allowed.has(origin);
 }
 
 async function bodyJson(req) {
@@ -394,17 +422,22 @@ async function ensureUsageRow(env, userId) {
 function effectiveLimits(user, createdAt = 0) {
   const base = PLAN_LIMITS[user.plan] || PLAN_LIMITS.free;
 
-  const accountAgeMs = createdAt ? now() - createdAt : Infinity;
+  /*
+    Wichtig:
+    Beim ersten Cloud-Sync erzeugt YANTA viele kleine verschlüsselte Objekte:
+    - Vault snapshot
+    - Note snapshots
+    - ggf. Asset blobs
+    - Device/vault update packs
 
-  if (user.plan === 'free' && accountAgeMs < 60 * 60 * 1000) {
-    return {
-      ...base,
-      storageBytes: Math.min(base.storageBytes, 5 * 1024 * 1024),
-      uploadBytesDay: Math.min(base.uploadBytesDay, 10 * 1024 * 1024),
-      writesDay: Math.min(base.writesDay, 40)
-    };
-  }
-
+    Ein zu hartes "new account write throttle" blockiert legitime Nutzer direkt
+    beim Onboarding. Abuse-Schutz passiert hier sinnvoller über:
+    - Storage limit
+    - Object size limit
+    - Upload/day
+    - Auth rate limits
+    - Turnstile
+  */
   return base;
 }
 
@@ -437,6 +470,54 @@ function normalizeRemotePath(raw) {
 
   if (!p.startsWith('yanta-sync-v1/')) {
     throw new Error('Path outside YANTA sync namespace');
+  }
+
+  return p;
+}
+
+function normalizeRemotePrefix(raw) {
+  const s = String(raw || '').trim();
+
+  if (!s) {
+    return 'yanta-sync-v1/';
+  }
+
+  let p = s
+    .replace(/\\/g, '/')
+    .replace(/^\/+/, '')
+    .replace(/\/+/g, '/')
+    .trim();
+
+  const hadTrailingSlash = p.endsWith('/');
+
+  const parts = [];
+
+  for (const part of p.split('/')) {
+    if (!part || part === '.') continue;
+
+    if (part === '..') {
+      throw new Error('Prefix must not contain ..');
+    }
+
+    if (part.includes('\0')) {
+      throw new Error('Prefix contains NUL');
+    }
+
+    parts.push(part);
+  }
+
+  p = parts.join('/');
+
+  if (!p) {
+    return 'yanta-sync-v1/';
+  }
+
+  if (!p.startsWith('yanta-sync-v1')) {
+    throw new Error('Prefix outside YANTA sync namespace');
+  }
+
+  if (hadTrailingSlash && !p.endsWith('/')) {
+    p += '/';
   }
 
   return p;
@@ -583,8 +664,8 @@ async function handleSendCode(env, req, headers) {
     now()
   ).run();
 
-const workerOrigin = new URL(req.url).origin;
-const magicUrl = `${workerOrigin}/api/auth/magic?token=${encodeURIComponent(magicToken)}`;
+  const workerOrigin = new URL(req.url).origin;
+  const magicUrl = `${workerOrigin}/api/auth/magic?token=${encodeURIComponent(magicToken)}`;
 
   await sendLoginEmail(env, { email, code, magicUrl });
 
@@ -856,20 +937,36 @@ async function handleStorageList(env, req, url, headers) {
   const { vaultId } = await vaultAndDeviceFromHeaders(env, req, user);
 
   const prefixRaw = url.searchParams.get('prefix') || '';
-  const prefix = prefixRaw ? normalizeRemotePath(prefixRaw) : 'yanta-sync-v1/';
+  const prefix = normalizeRemotePrefix(prefixRaw);
+
+  /*
+    Range-Query statt LIKE:
+    - vermeidet LIKE-Sonderzeichen-Probleme
+    - ist indexfreundlicher
+    - funktioniert gut für prefix-listing
+  */
+  const upper = prefix + '\uf8ff';
 
   const rows = await env.DB.prepare(
     `SELECT path,size,etag,updated_at FROM objects
-     WHERE user_id = ? AND vault_id = ? AND path LIKE ?
+     WHERE user_id = ?
+       AND vault_id = ?
+       AND path >= ?
+       AND path < ?
      ORDER BY path ASC`
-  ).bind(user.userId, vaultId, `${prefix}%`).all();
+  ).bind(
+    user.userId,
+    vaultId,
+    prefix,
+    upper
+  ).all();
 
   return json({
     entries: (rows.results || []).map((r) => ({
       path: r.path,
-      size: r.size,
-      etag: r.etag,
-      updated: r.updated_at
+      size: Number(r.size || 0),
+      etag: r.etag || '',
+      updated: Number(r.updated_at || 0)
     }))
   }, 200, headers);
 }
@@ -944,6 +1041,31 @@ async function handleStoragePut(env, req, url, headers) {
   const user = await requireUser(env, req);
   const { vaultId } = await vaultAndDeviceFromHeaders(env, req, user);
 
+  const putBurst = await rateLimit(
+    env,
+    `storage:put:user:${user.userId}`,
+    5000,
+    10 * 60 * 1000
+  );
+
+  if (!putBurst.ok) {
+    return json({
+      error: 'write_rate_limited',
+      message: 'Too many upload requests. Please wait a few minutes and try again.',
+      retryAfterSeconds: 300
+    }, 429, {
+      ...headers,
+      'retry-after': '300'
+    });
+  }
+
+  if (!putBurst.ok) {
+    return json({
+      error: 'write_rate_limited',
+      message: 'Too many upload requests. Please wait a few minutes and try again.'
+    }, 429, headers);
+  }
+
   const path = normalizeRemotePath(url.searchParams.get('path') || '');
   const ifAbsent = url.searchParams.get('ifAbsent') === '1';
 
@@ -987,42 +1109,112 @@ async function handleStoragePut(env, req, url, headers) {
     return json({ error: 'writes_day_quota_exceeded', maxWrites: limits.writesDay }, 403, headers);
   }
 
-  const etag = `"${size}-${now()}-${randomToken(6)}"`;
-  const updatedAt = now();
+const objectKey = r2Key(user.userId, vaultId, path);
 
-  await env.OBJECTS.put(r2Key(user.userId, vaultId, path), body, {
-    httpMetadata: {
-      contentType: 'application/octet-stream'
-    },
-    customMetadata: {
-      userId: user.userId,
-      vaultId,
-      path
-    }
-  });
+if (ifAbsent) {
+  const existingR2 = await env.OBJECTS.head(objectKey);
 
-  if (existing) {
-    await env.DB.prepare(
-      `UPDATE objects SET size = ?, etag = ?, updated_at = ?
-       WHERE id = ?`
-    ).bind(size, etag, updatedAt, existing.id).run();
-  } else {
+  if (existingR2) {
+    return json({ error: 'already_exists' }, 409, headers);
+  }
+}
+
+const etag = `"${size}-${now()}-${randomToken(6)}"`;
+const updatedAt = now();
+
+await env.OBJECTS.put(objectKey, body, {
+  httpMetadata: {
+    contentType: 'application/octet-stream'
+  },
+  customMetadata: {
+    userId: user.userId,
+    vaultId,
+    path
+  }
+});
+
+let actuallyCreated = false;
+let actualDeltaStorage = deltaStorage;
+let actualDeltaObjects = deltaObjects;
+
+if (existing) {
+  await env.DB.prepare(
+    `UPDATE objects SET size = ?, etag = ?, updated_at = ?
+     WHERE id = ?`
+  ).bind(size, etag, updatedAt, existing.id).run();
+} else {
+  try {
     await env.DB.prepare(
       `INSERT INTO objects
        (id,user_id,vault_id,path,size,etag,updated_at,created_at)
        VALUES (?,?,?,?,?,?,?,?)`
-    ).bind(id('obj'), user.userId, vaultId, path, size, etag, updatedAt, updatedAt).run();
-  }
+    ).bind(
+      id('obj'),
+      user.userId,
+      vaultId,
+      path,
+      size,
+      etag,
+      updatedAt,
+      updatedAt
+    ).run();
 
-  await env.DB.prepare(
-    `UPDATE usage_current
-     SET storage_bytes = storage_bytes + ?,
-         object_count = object_count + ?,
-         upload_bytes_day = upload_bytes_day + ?,
-         upload_bytes_month = upload_bytes_month + ?,
-         writes_today = writes_today + 1
-     WHERE user_id = ?`
-  ).bind(deltaStorage, deltaObjects, size, size, user.userId).run();
+    actuallyCreated = true;
+  } catch (err) {
+    const msg = String(err?.message || err || '');
+
+    /*
+      Race/idempotency case:
+      Another request created the metadata row after our existing-check.
+      For ifAbsent this should be a normal 409, not a 500.
+    */
+    if (
+      msg.includes('UNIQUE') ||
+      msg.includes('constraint') ||
+      msg.includes('objects.vault_id') ||
+      msg.includes('objects.path')
+    ) {
+      if (ifAbsent) {
+        return json({ error: 'already_exists' }, 409, headers);
+      }
+
+      const current = await env.DB.prepare(
+        `SELECT id,size FROM objects
+         WHERE user_id = ? AND vault_id = ? AND path = ?`
+      ).bind(user.userId, vaultId, path).first();
+
+      if (!current) {
+        throw err;
+      }
+
+      actualDeltaStorage = size - Number(current.size || 0);
+      actualDeltaObjects = 0;
+
+      await env.DB.prepare(
+        `UPDATE objects SET size = ?, etag = ?, updated_at = ?
+         WHERE id = ?`
+      ).bind(size, etag, updatedAt, current.id).run();
+    } else {
+      throw err;
+    }
+  }
+}
+
+await env.DB.prepare(
+  `UPDATE usage_current
+   SET storage_bytes = storage_bytes + ?,
+       object_count = object_count + ?,
+       upload_bytes_day = upload_bytes_day + ?,
+       upload_bytes_month = upload_bytes_month + ?,
+       writes_today = writes_today + 1
+   WHERE user_id = ?`
+).bind(
+  actualDeltaStorage,
+  actualDeltaObjects,
+  size,
+  size,
+  user.userId
+).run();
 
   await env.DB.prepare(
     `UPDATE vaults SET last_sync_at = ? WHERE id = ?`
@@ -1269,10 +1461,16 @@ async function route(req, env) {
 
     return json({ error: 'not_found' }, 404, headers);
   } catch (err) {
-    console.error(err);
+    console.error('[YANTA Cloud Worker]', {
+      message: err?.message || String(err),
+      stack: err?.stack || '',
+      status: err?.status || 500
+    });
 
     return json({
-      error: err.message || String(err)
+      error: 'internal_error',
+      message: err?.message || String(err),
+      status: err?.status || 500
     }, err.status || 500, headers);
   }
 }

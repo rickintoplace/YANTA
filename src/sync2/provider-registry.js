@@ -9,6 +9,7 @@
 
 import { GoogleDriveObjectStore } from './google-drive-object-store.js';
 import { BrokerObjectStore } from './broker-object-store.js';
+import { YantaCloudObjectStore } from './yanta-cloud-object-store.js';
 
 export const SYNC2_PROVIDERS = {
   'google-drive': {
@@ -43,6 +44,26 @@ export const SYNC2_PROVIDERS = {
       return new BrokerObjectStore({
         baseUrl,
         token,
+      });
+    },
+  },
+
+    'yanta-cloud': {
+    id: 'yanta-cloud',
+    label: 'YANTA Cloud',
+    description: 'Encrypted zero-knowledge sync through your YANTA account.',
+    requiresOAuth: false,
+    stable: true,
+
+    createRemote({
+      baseUrl = '',
+      vaultId = '',
+      deviceId = '',
+    } = {}) {
+      return new YantaCloudObjectStore({
+        baseUrl,
+        vaultId,
+        deviceId,
       });
     },
   },

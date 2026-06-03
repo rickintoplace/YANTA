@@ -324,11 +324,15 @@ import {
     return `dash-${kind}-${String(id || '').replace(/[^a-zA-Z0-9_-]/g, '_')}`;
   }
 
-  function suppressDashboardStaggerFor(ms = 900) {
+  export function suppressDashboardAnimationsFor(ms = 900) {
     dashboard.suppressStaggerUntil = Math.max(
       dashboard.suppressStaggerUntil || 0,
       performance.now() + ms
     );
+  }
+
+  function suppressDashboardStaggerFor(ms = 900) {
+    suppressDashboardAnimationsFor(ms);
   }
 
   function applyDashboardStagger(node) {
@@ -670,9 +674,17 @@ function getDashboardItems() {
         }
       });
   
-    window.addEventListener('yanta-dashboard-refresh', () => {
-      if (dashboard.visible) renderDashboard();
-    });
+      window.addEventListener('yanta-dashboard-refresh', (e) => {
+        if (!dashboard.visible) return;
+
+        if (e.detail?.source === 'sync' && e.detail?.changed === false) {
+          return;
+        }
+
+        renderDashboard({
+          animate: e.detail?.source !== 'sync',
+        });
+      });
   
     window.addEventListener('yanta-note-opened', () => {
       if (!dashboard.visible) return;
@@ -708,16 +720,32 @@ function getDashboardItems() {
         navigateDashboardFolder(null);
       }
     });
-    window.addEventListener('yanta-calendar-updated', () => {
-      if (dashboard.visible) {
-        renderDashboard();
+    window.addEventListener('yanta-calendar-updated', (e) => {
+      if (!dashboard.visible) return;
+
+      if (e.detail?.source === 'sync' && e.detail?.changed === false) {
+        return;
       }
+
+      renderDashboard({
+        animate: e.detail?.source !== 'sync',
+      });
     });
 
-    window.addEventListener('yanta-vault-hydrated', () => {
-      if (dashboard.visible) {
-        renderDashboard();
+    window.addEventListener('yanta-vault-hydrated', (e) => {
+      if (!dashboard.visible) return;
+
+      /*
+        Hintergrund-Sync ohne echte Metadata-Änderung darf Dashboard nicht neu
+        rendern. Sonst flackern Cards wegen root.replaceChildren().
+      */
+      if (e.detail?.source === 'sync' && e.detail?.changed === false) {
+        return;
       }
+
+      renderDashboard({
+        animate: e.detail?.source !== 'sync',
+      });
     });
   }
   
@@ -997,9 +1025,13 @@ export async function showDashboardFromNote(noteId = state.currentNoteId, {
     });
   }
   
-function renderDashboard() {
+function renderDashboard({ animate = true } = {}) {
   ensureDashboardRoot();
   setupPreviewObserver();
+
+  if (!animate) {
+    suppressDashboardAnimationsFor(1200);
+  }
 
   dashboardStaggerIndex = 0;
   root.replaceChildren();

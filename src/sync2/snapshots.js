@@ -4,9 +4,9 @@
 // Snapshots are full Yjs state-as-update payloads.
 // They are stored encrypted in the same provider-independent object store.
 //
-// Remote paths:
-//   yanta-sync-v1/vault/snapshots/<deviceId>-<seq>.ysnap.enc
-//   yanta-sync-v1/docs/<remoteDocId>/snapshots/<deviceId>-<seq>.ysnap.enc
+// Performance note:
+// Download/list operations use engine.listRemote(prefix), which can use a
+// cached remote index from YANTA Cloud instead of per-note network list calls.
 // ============================================================
 
 import * as Y from 'yjs';
@@ -45,7 +45,9 @@ function sortEntriesOldestFirst(entries) {
 export async function uploadVaultSnapshot(engine, {
   full = true,
 } = {}) {
-  const seq = await engine.nextSeq();
+  await engine.catchUpSeqFromRemoteOwnObjects?.();
+
+  const seq = engine.seq + 1;
   const path = vaultSnapshotPath(engine.deviceId, seq);
   const plain = encodeVaultState();
 
@@ -55,8 +57,23 @@ export async function uploadVaultSnapshot(engine, {
     path
   );
 
-  await engine.remote.put(path, encrypted, { ifAbsent: true });
-  await engine.markSeen(path, { type: 'vault-snapshot', own: true });
+  try {
+    await engine.remote.put(path, encrypted, { ifAbsent: true });
+    engine.clearRemoteIndex?.();
+  } catch (err) {
+    if (err?.code !== 'EEXIST') throw err;
+  }
+
+  if (typeof engine.commitSeq === 'function') {
+    await engine.commitSeq(seq);
+  } else {
+    await engine.nextSeq();
+  }
+
+  await engine.markSeen(path, {
+    type: 'vault-snapshot',
+    own: true,
+  });
 
   return {
     path,
@@ -72,7 +89,9 @@ export async function uploadNoteSnapshot(engine, noteId, {
   const entry = getNoteDoc(noteId);
   await entry.ready;
 
-  const seq = await engine.nextSeq();
+  await engine.catchUpSeqFromRemoteOwnObjects?.();
+
+  const seq = engine.seq + 1;
 
   const path = await docSnapshotPath(
     engine.keys.nameKey,
@@ -89,8 +108,24 @@ export async function uploadNoteSnapshot(engine, noteId, {
     path
   );
 
-  await engine.remote.put(path, encrypted, { ifAbsent: true });
-  await engine.markSeen(path, { type: 'note-snapshot', noteId, own: true });
+  try {
+    await engine.remote.put(path, encrypted, { ifAbsent: true });
+    engine.clearRemoteIndex?.();
+  } catch (err) {
+    if (err?.code !== 'EEXIST') throw err;
+  }
+
+  if (typeof engine.commitSeq === 'function') {
+    await engine.commitSeq(seq);
+  } else {
+    await engine.nextSeq();
+  }
+
+  await engine.markSeen(path, {
+    type: 'note-snapshot',
+    noteId,
+    own: true,
+  });
 
   return {
     path,
@@ -103,7 +138,7 @@ export async function uploadNoteSnapshot(engine, noteId, {
 
 export async function downloadVaultSnapshots(engine) {
   const entries = sortEntriesOldestFirst(
-    await engine.remote.list(vaultSnapshotsPrefix())
+    await engine.listRemote(vaultSnapshotsPrefix())
   );
 
   let applied = 0;
@@ -140,7 +175,7 @@ export async function downloadNoteSnapshots(engine, noteId) {
   const prefix = await docSnapshotsPrefix(engine.keys.nameKey, noteId);
 
   const entries = sortEntriesOldestFirst(
-    await engine.remote.list(prefix)
+    await engine.listRemote(prefix)
   );
 
   let applied = 0;

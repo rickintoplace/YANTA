@@ -42,6 +42,7 @@ export const DEFAULT_ASSISTANT_PROMPT = [
 
 export const DEFAULT_AI_SETTINGS = {
   provider: 'openrouter',
+  billingMode: 'byok', // byok | included
   baseUrl: 'https://openrouter.ai/api/v1',
   model: 'tencent/hy3-preview',
   temperature: 0.2,

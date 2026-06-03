@@ -104,6 +104,32 @@ export function sanitizeImageMeta(image) {
   });
 }
 
+function stableJsonStringify(value) {
+  if (value == null) return String(value);
+
+  if (typeof value !== 'object') {
+    return JSON.stringify(value);
+  }
+
+  if (Array.isArray(value)) {
+    return '[' + value.map(stableJsonStringify).join(',') + ']';
+  }
+
+  const keys = Object.keys(value).sort();
+
+  return '{' + keys
+    .map((key) => JSON.stringify(key) + ':' + stableJsonStringify(value[key]))
+    .join(',') + '}';
+}
+
+function jsonEqual(a, b) {
+  try {
+    return stableJsonStringify(a) === stableJsonStringify(b);
+  } catch {
+    return false;
+  }
+}
+
 function shouldKeepExistingByUpdated(existing, incoming) {
   if (!existing) return false;
 
@@ -123,6 +149,7 @@ export function putVaultNoteMeta(note, origin = VAULT_ORIGINS.STORE_BRIDGE) {
   doc.transact(() => {
     const existing = notes.get(meta.id);
 
+    if (jsonEqual(existing, meta)) return;
     if (shouldKeepExistingByUpdated(existing, meta)) return;
 
     notes.set(meta.id, safeJsonClone(meta));
@@ -140,6 +167,7 @@ export function putVaultFolderMeta(folder, origin = VAULT_ORIGINS.STORE_BRIDGE) 
   doc.transact(() => {
     const existing = folders.get(meta.id);
 
+    if (jsonEqual(existing, meta)) return;
     if (shouldKeepExistingByUpdated(existing, meta)) return;
 
     folders.set(meta.id, safeJsonClone(meta));
@@ -157,6 +185,7 @@ export function putVaultImageMeta(image, origin = VAULT_ORIGINS.STORE_BRIDGE) {
   doc.transact(() => {
     const existing = images.get(meta.id);
 
+    if (jsonEqual(existing, meta)) return;
     if (shouldKeepExistingByUpdated(existing, meta)) return;
 
     images.set(meta.id, safeJsonClone(meta));

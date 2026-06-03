@@ -3,7 +3,7 @@ const PLAN_LIMITS = {
     storageBytes: 25 * 1024 * 1024,
     vaults: 1,
     devices: 2,
-    objects: 2000,
+    objects: 10000,
     objectSizeBytes: 2 * 1024 * 1024,
   // Backend-internal object transfer.
   // Needs headroom for first sync, retries, snapshots.
@@ -664,8 +664,11 @@ async function handleSendCode(env, req, headers) {
     now()
   ).run();
 
-  const workerOrigin = new URL(req.url).origin;
-  const magicUrl = `${workerOrigin}/api/auth/magic?token=${encodeURIComponent(magicToken)}`;
+const publicApiBaseUrl =
+  String(env.PUBLIC_API_BASE_URL || new URL(req.url).origin).replace(/\/+$/, '');
+
+const magicUrl =
+  `${publicApiBaseUrl}/api/auth/magic?token=${encodeURIComponent(magicToken)}`;
 
   await sendLoginEmail(env, { email, code, magicUrl });
 
@@ -971,6 +974,49 @@ async function handleStorageList(env, req, url, headers) {
   }, 200, headers);
 }
 
+async function handleStorageIndex(env, req, url, headers) {
+  const user = await requireUser(env, req);
+  const { vaultId } = await vaultAndDeviceFromHeaders(env, req, user);
+
+  /*
+    Full remote object index for this vault.
+
+    Why:
+    The client can replace hundreds of per-note list(prefix) calls with one
+    indexed metadata call, then filter locally.
+
+    Security:
+    This returns only encrypted object paths, sizes, etags and timestamps.
+    Object paths are provider/internal sync paths. Note/doc/asset ids are
+    already HMAC-derived in Sync2.
+  */
+  const rows = await env.DB.prepare(
+    `SELECT path,size,etag,updated_at FROM objects
+     WHERE user_id = ?
+       AND vault_id = ?
+       AND path >= ?
+       AND path < ?
+     ORDER BY path ASC`
+  ).bind(
+    user.userId,
+    vaultId,
+    'yanta-sync-v1/',
+    'yanta-sync-v1/\uf8ff'
+  ).all();
+
+  return json({
+    entries: (rows.results || []).map((r) => ({
+      path: r.path,
+      size: Number(r.size || 0),
+      etag: r.etag || '',
+      updated: Number(r.updated_at || 0)
+    }))
+  }, 200, {
+    ...headers,
+    'cache-control': 'no-store'
+  });
+}
+
 async function handleStorageStat(env, req, url, headers) {
   const user = await requireUser(env, req);
   const { vaultId } = await vaultAndDeviceFromHeaders(env, req, user);
@@ -1057,13 +1103,6 @@ async function handleStoragePut(env, req, url, headers) {
       ...headers,
       'retry-after': '300'
     });
-  }
-
-  if (!putBurst.ok) {
-    return json({
-      error: 'write_rate_limited',
-      message: 'Too many upload requests. Please wait a few minutes and try again.'
-    }, 429, headers);
   }
 
   const path = normalizeRemotePath(url.searchParams.get('path') || '');
@@ -1433,6 +1472,10 @@ async function route(req, env) {
 
     if (url.pathname === '/api/usage' && req.method === 'GET') {
       return handleUsage(env, req, headers);
+    }
+
+    if (url.pathname === '/api/storage/index' && req.method === 'GET') {
+      return handleStorageIndex(env, req, url, headers);
     }
 
     if (url.pathname === '/api/storage/list' && req.method === 'GET') {

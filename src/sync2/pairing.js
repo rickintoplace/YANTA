@@ -7,6 +7,10 @@
 // - The sync key is in the fragment (#...), so it is not sent to server logs.
 // - YANTA clears the fragment after import.
 // - Raw yanta-sync2:... payload is still supported for copy/paste.
+//
+// v2 payload supports YANTA Cloud:
+//   provider: "yanta-cloud"
+//   cloud: { baseUrl, vaultId }
 // ============================================================
 
 import qrcode from 'qrcode-generator';
@@ -28,22 +32,44 @@ import {
   syncKeyToBytes,
 } from './crypto.js';
 
+import {
+  YANTA_CLOUD_BASE_URL,
+} from '../cloud/cloud-api.js';
+
 const PAIRING_PREFIX = 'yanta-sync2:';
 const URL_HASH_PREFIX = 'sync2=';
 
 export async function createSync2PairingPayload({
   provider = 'google-drive',
+  cloud = null,
 } = {}) {
   const syncKey = await getSync2SyncKey();
 
+  let payloadProvider = provider || await store.settings.get('sync2.provider', 'google-drive');
+
   const payload = {
-    v: 1,
+    v: 2,
     app: 'YANTA',
     kind: 'sync2-pairing',
-    provider,
+    provider: payloadProvider,
     syncKey,
     created: new Date().toISOString(),
   };
+
+  if (payloadProvider === 'yanta-cloud') {
+    const vaultId =
+      cloud?.vaultId ||
+      await store.settings.get('sync2.yantaCloud.vaultId', '');
+
+    const baseUrl =
+      cloud?.baseUrl ||
+      await store.settings.get('sync2.yantaCloud.baseUrl', YANTA_CLOUD_BASE_URL);
+
+    payload.cloud = {
+      baseUrl,
+      vaultId,
+    };
+  }
 
   return PAIRING_PREFIX + base64UrlEncode(
     utf8Encode(JSON.stringify(payload))
@@ -52,9 +78,11 @@ export async function createSync2PairingPayload({
 
 export async function createSync2PairingUrl({
   provider = 'google-drive',
+  cloud = null,
 } = {}) {
   const payload = await createSync2PairingPayload({
     provider,
+    cloud,
   });
 
   return (
@@ -117,6 +145,12 @@ export function parseSync2PairingPayload(text) {
 
   syncKeyToBytes(json.syncKey);
 
+  if (json.provider === 'yanta-cloud') {
+    if (!json.cloud?.vaultId) {
+      throw new Error('YANTA Cloud vault id missing in pairing payload');
+    }
+  }
+
   return json;
 }
 
@@ -125,6 +159,15 @@ export async function importSync2PairingPayload(text) {
 
   await setSync2SyncKey(payload.syncKey);
   await store.settings.set('sync2.provider', payload.provider || 'google-drive');
+
+  if (payload.provider === 'yanta-cloud') {
+    await store.settings.set('sync2.yantaCloud.vaultId', payload.cloud.vaultId);
+
+    await store.settings.set(
+      'sync2.yantaCloud.baseUrl',
+      payload.cloud.baseUrl || YANTA_CLOUD_BASE_URL
+    );
+  }
 
   return payload;
 }

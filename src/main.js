@@ -723,10 +723,33 @@ async function init() {
   if (sync2HashPayload) {
     // Remove secret from browser URL/history as soon as possible.
     history.replaceState({}, '', location.pathname + location.search);
-  
+
     setTimeout(async () => {
-      const { openGoogleDriveSyncSetupWithPayload } = await import('./sync2/sync-setup-ui.js');
-      await openGoogleDriveSyncSetupWithPayload(sync2HashPayload);
+      try {
+        const {
+          parseSync2PairingPayload,
+        } = await import('./sync2/pairing.js');
+
+        const parsed = parseSync2PairingPayload(sync2HashPayload);
+
+        if (parsed.provider === 'yanta-cloud') {
+          const {
+            openYantaCloudSetupWithPayload,
+          } = await import('./sync2/yanta-cloud-setup-ui.js');
+
+          await openYantaCloudSetupWithPayload(sync2HashPayload);
+          return;
+        }
+
+        const {
+          openGoogleDriveSyncSetupWithPayload,
+        } = await import('./sync2/sync-setup-ui.js');
+
+        await openGoogleDriveSyncSetupWithPayload(sync2HashPayload);
+      } catch (err) {
+        console.error('[YANTA Sync2] pairing payload failed', err);
+        toast(err?.message || 'Could not read pairing link', 'error');
+      }
     }, 700);
   }
 
@@ -1306,7 +1329,25 @@ function bindEvents() {
   });
 
   // Sync
-  $('vaultIndicator').addEventListener('click', (e) => { e.stopPropagation(); syncMenu(e.currentTarget, showMenu); });
+  $('vaultIndicator').addEventListener('click', async (e) => {
+    e.stopPropagation();
+
+    const provider = await store.settings.get('sync2.provider', null).catch(() => null);
+
+    if (provider === 'yanta-cloud') {
+      const { openYantaCloudSetup } = await import('./sync2/yanta-cloud-setup-ui.js');
+      await openYantaCloudSetup();
+      return;
+    }
+
+    if (provider === 'google-drive') {
+      const { openGoogleDriveSyncSetup } = await import('./sync2/sync-setup-ui.js');
+      openGoogleDriveSyncSetup();
+      return;
+    }
+
+    syncMenu(e.currentTarget, showMenu);
+  });
   $('syncSetupPick')?.addEventListener('click', async () => { closeSyncSetup(); await syncConnect(); });
   document.querySelectorAll('[data-sync-close]').forEach((b) => b.addEventListener('click', closeSyncSetup));
   document.querySelectorAll('[data-conflict-close]').forEach((b) => b.addEventListener('click', () => { $('conflictModal').hidden = true; }));

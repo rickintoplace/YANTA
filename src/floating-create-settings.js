@@ -39,7 +39,7 @@ export const FLOATING_CREATE_ACTION_CATALOG = [
   {
     id: 'drawing',
     defaultLabel: 'New drawing',
-    defaultIcon: 'pencil',
+    defaultIcon: 'line-squiggle',
   },
   {
     id: 'image',
@@ -84,7 +84,7 @@ export const DEFAULT_FLOATING_CREATE_SETTINGS = {
       id: 'drawing',
       enabled: true,
       label: 'New drawing',
-      icon: 'pencil',
+      icon: 'line-squiggle',
       x: -140,
       y: -111,
       order: 2,

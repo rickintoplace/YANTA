@@ -15,37 +15,9 @@ import {
 } from './core.js';
 
 import {
-  newNote,
-} from './notes.js';
-
-import {
-  insertAtCursor,
-} from './editor.js';
-
-import {
-  getMarkdownText,
-} from './yjs.js';
-
-import {
-  createDrawingAndInsert,
-} from './draw.js';
-
-import {
-  openImageModal,
-} from './image.js';
-
-import {
-  openCalendar,
-  openNewCalendarEvent,
-} from './calendar.js';
-
-import {
-  closeGraph,
-} from './graph.js';
-
-import {
-  currentFolderForNew,
-} from './tree.js';
+  defaultCreateFolderId,
+  runCreateAction,
+} from './create-actions.js';
 
 import {
   getFloatingCreateSettings,
@@ -87,13 +59,12 @@ function shouldShowFloatingCreate() {
   );
 }
 
-function folderForNewNote() {
-  if (state.surface === 'dashboard') {
-    return state.dashboardFolderId || null;
-  }
-
-  return currentFolderForNew?.() || null;
-}
+/**
+ * Best UX rule:
+ * - If Dashboard is the active surface or open in the side pane, create inside
+ *   the currently opened dashboard folder.
+ * - Otherwise create in the current note's folder.
+ */
 
 function loadActions() {
   actions = floatingCreateActionsForRuntime(getFloatingCreateSettings());
@@ -154,108 +125,14 @@ function vibrate(ms = 8) {
   } catch {}
 }
 
-async function closeGraphIfOpen() {
-  if (!isGraphVisible()) return;
-
-  try {
-    closeGraph();
-  } catch {}
-}
-
-async function createTextNote() {
-  await closeGraphIfOpen();
-  await newNote(folderForNewNote(), 'markdown');
-}
-
-async function createListNote() {
-  await closeGraphIfOpen();
-
-  await newNote(folderForNewNote(), 'list');
-
-  await nextFrame();
-
-  const noteId = state.currentNoteId;
-  if (!noteId) return;
-
-  try {
-    const ytext = getMarkdownText(noteId);
-
-    if (ytext.length === 0) {
-      insertAtCursor('- [ ] ');
-    }
-  } catch {
-    insertAtCursor('- [ ] ');
-  }
-}
-
-async function createDrawingNote() {
-  await closeGraphIfOpen();
-
-  await newNote(folderForNewNote(), 'markdown');
-
-  await nextFrame();
-
-  await createDrawingAndInsert();
-}
-
-async function createImageNote() {
-  await closeGraphIfOpen();
-
-  await newNote(folderForNewNote(), 'markdown');
-
-  await nextFrame();
-
-  openImageModal();
-}
-
-async function createCalendarEvent() {
-  await closeGraphIfOpen();
-
-  if (state.surface !== 'calendar') {
-    openCalendar({
-      push: true,
-    });
-
-    await nextFrame();
-    await nextFrame();
-  }
-
-  openNewCalendarEvent();
-}
-
 async function runAction(id) {
   setOpen(false);
 
   try {
-    if (id === 'note') {
-      await createTextNote();
-      return;
-    }
-
-    if (id === 'list') {
-      await createListNote();
-      return;
-    }
-
-    if (id === 'drawing') {
-      await createDrawingNote();
-      return;
-    }
-
-    if (id === 'image') {
-      await createImageNote();
-      return;
-    }
-
-    if (id === 'event') {
-      await createCalendarEvent();
-      return;
-    }
-
-    if (id === 'ai') {
-      window.dispatchEvent(new CustomEvent('yanta-open-ai-assistant'));
-      return;
-    }
+    await runCreateAction(id, {
+      folderId: defaultCreateFolderId(),
+      source: 'floating-create',
+    });
   } catch (err) {
     console.error('[YANTA Quick Create] action failed', err);
     toast('Quick create failed', 'error');
@@ -1024,6 +901,7 @@ function bindVisibilityObservers() {
     'resize',
     'yanta-note-opened',
     'yanta-note-updated',
+    'yanta-folder-updated',
     'yanta-dashboard-refresh',
     'yanta-calendar-updated',
     'yanta-side-pane-opened',

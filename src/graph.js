@@ -3641,16 +3641,15 @@ async function createNoteFromGraph(sourceNode, folderId) {
 }
 
 async function createFolderFromGraph(sourceNode, parentId) {
-  const name = prompt('Folder name:', 'New folder');
-  if (name === null) return;
-
   const id = uid();
+  const now = Date.now();
 
   const folder = {
     id,
-    name: name.trim() || 'New folder',
+    name: 'New folder',
     parentId: parentId || null,
-    created: Date.now(),
+    created: now,
+    updated: now,
   };
 
   state.folders.set(id, folder);
@@ -3663,6 +3662,15 @@ async function createFolderFromGraph(sourceNode, parentId) {
 
   renderTree();
   rebuildAndAnimateAfterMutation(1.0);
+
+  window.dispatchEvent(new CustomEvent('yanta-folder-created', {
+    detail: {
+      folderId: id,
+      parentId: parentId || null,
+      focusRename: true,
+      source: 'graph',
+    },
+  }));
 
   toast('Folder created', 'success');
 }
@@ -3705,27 +3713,36 @@ async function createRootEntity(kind, clientX, clientY) {
   }
 
   if (kind === 'folder') {
-    const name = prompt('Folder name:', 'New folder');
-    if (name === null) return;
-
     const id = uid();
+    const now = Date.now();
+  
     const folder = {
       id,
-      name: name.trim() || 'New folder',
+      name: 'New folder',
       parentId: null,
-      created: Date.now(),
+      created: now,
+      updated: now,
     };
-
+  
     state.folders.set(id, folder);
     await store.folders.put(folder);
-
+  
     state.expandedFolders.add(id);
-
+  
     spawnAtClient(graphIdForFolder(id), clientX, clientY);
-
+  
     renderTree();
     rebuildAndAnimateAfterMutation(1.0);
-
+  
+    window.dispatchEvent(new CustomEvent('yanta-folder-created', {
+      detail: {
+        folderId: id,
+        parentId: null,
+        focusRename: true,
+        source: 'graph',
+      },
+    }));
+  
     toast('Folder created', 'success');
   }
 }

@@ -45,6 +45,10 @@ import {
   shouldHideFromDashboard,
 } from './ai/brain.js';
 
+import {
+  openCreateMenu,
+} from './create-actions.js';
+
   const MOBILE_MQ = window.matchMedia('(max-width: 880px)');
   
   const DASH_ORDER_STEP = 1000;
@@ -244,6 +248,73 @@ import {
     return !!node?.closest?.(
       'input, textarea, select, button, a, [contenteditable="true"], .yanta-inline-edit'
     );
+  }
+
+  function isDashboardBlankAreaTarget(target) {
+    const node = target instanceof Element ? target : null;
+    if (!node || !root?.contains(node)) return false;
+  
+    if (dashboard.dragging || dashboard.resize) return false;
+  
+    /*
+      Nicht leeren, wenn man auf eine Card, Control, Popover,
+      Inline-Edit oder Header-Control tippt.
+    */
+    if (
+      node.closest?.(
+        [
+          '.yanta-dash-card',
+          '.yanta-dash-card-clone',
+          '.drag-clone',
+          '.yanta-inline-edit',
+          '.yanta-dashboard-selection-tray',
+          '.yanta-dashboard-popover',
+          'button',
+          'input',
+          'textarea',
+          'select',
+          'a',
+          'iframe',
+          '[contenteditable="true"]',
+        ].join(',')
+      )
+    ) {
+      return false;
+    }
+  
+    /*
+      Header nicht als "Leere" behandeln.
+      Wenn du auch Header-Leerflächen zum Deselect nutzen willst,
+      diese Zeile entfernen.
+    */
+    if (node.closest?.('.yanta-dashboard-head')) {
+      return false;
+    }
+  
+    return !!node.closest?.(
+      [
+        '.yanta-dashboard-body',
+        '.yanta-dashboard-grid',
+        '.yanta-dashboard-page',
+        '#dashboard',
+      ].join(',')
+    );
+  }
+  
+  function clearDashboardItemSelectionFromBlankTap() {
+    dashboard.selectedKey = null;
+  
+    root
+      ?.querySelectorAll('.yanta-dash-card.selected')
+      ?.forEach((node) => {
+        node.classList.remove('selected');
+      });
+  
+    window.dispatchEvent(new CustomEvent('yanta-dashboard-clear-selection', {
+      detail: {
+        source: 'dashboard-blank-tap',
+      },
+    }));
   }
 
   function focusedDashboardCard() {
@@ -620,6 +691,17 @@ function getDashboardItems() {
       if (dashboard.visible) renderDashboard();
     });
 
+    window.addEventListener('yanta-folder-updated', (e) => {
+      if (!dashboard.visible) return;
+    
+      const folderId = e.detail?.folderId;
+      if (!folderId) return;
+    
+      if (e.detail?.refreshDashboard === false) {
+        syncDashboardFolderLabels(folderId);
+      }
+    });
+
     window.addEventListener('yanta-dashboard-settings-changed', () => {
       if (dashboard.visible) renderDashboard();
     });
@@ -630,22 +712,70 @@ function getDashboardItems() {
       }
     });
 
+    let pendingBlankTap = null;
+
     document.addEventListener('pointerdown', (e) => {
-        if (!dashboard.visible) return;
-        if (!dashboard.selectedKey) return;
-      
-        const selected = root?.querySelector(`.yanta-dash-card.selected`);
-      
-        if (selected && selected.contains(e.target)) return;
-      
-        if (e.target.closest?.('.yanta-dash-card-clone, .yanta-dash-card.drag-clone')) return;
-      
-        dashboard.selectedKey = null;
-      
-        root
-          ?.querySelectorAll('.yanta-dash-card.selected')
-          ?.forEach((n) => n.classList.remove('selected'));
-      }, true);
+      if (!dashboard.visible) return;
+      if (e.button != null && e.button !== 0) return;
+    
+      /*
+        Modifier nicht anfassen:
+        Ctrl/Cmd/Shift gehören Selection/Rectangle-Workflows.
+      */
+      if (e.ctrlKey || e.metaKey || e.shiftKey || e.altKey) return;
+    
+      if (!isDashboardBlankAreaTarget(e.target)) return;
+    
+      pendingBlankTap = {
+        pointerId: e.pointerId,
+        startX: e.clientX,
+        startY: e.clientY,
+      };
+    }, true);
+    
+    document.addEventListener('pointermove', (e) => {
+      if (!pendingBlankTap) return;
+      if (e.pointerId !== pendingBlankTap.pointerId) return;
+    
+      const moved = Math.hypot(
+        e.clientX - pendingBlankTap.startX,
+        e.clientY - pendingBlankTap.startY
+      );
+    
+      /*
+        Bewegung => kein Tap.
+        Rectangle Select darf weiterlaufen.
+      */
+      if (moved > 5) {
+        pendingBlankTap = null;
+      }
+    }, true);
+    
+    document.addEventListener('pointerup', (e) => {
+      if (!pendingBlankTap) return;
+      if (e.pointerId !== pendingBlankTap.pointerId) return;
+    
+      const moved = Math.hypot(
+        e.clientX - pendingBlankTap.startX,
+        e.clientY - pendingBlankTap.startY
+      );
+    
+      pendingBlankTap = null;
+    
+      if (moved > 5) return;
+    
+      /*
+        Jetzt erst ist es wirklich ein gezielter Tap ins Leere.
+      */
+      clearDashboardItemSelectionFromBlankTap();
+    }, true);
+    
+    document.addEventListener('pointercancel', (e) => {
+      if (!pendingBlankTap) return;
+      if (e.pointerId !== pendingBlankTap.pointerId) return;
+    
+      pendingBlankTap = null;
+    }, true);
   
       window.addEventListener('yanta-note-updated', (e) => {
         const noteId = e.detail?.noteId;
@@ -674,6 +804,45 @@ function getDashboardItems() {
         }
       });
   
+      window.addEventListener('yanta-dashboard-rename-folder', (e) => {
+        if (!dashboard.visible) return;
+      
+        const folderId = e.detail?.folderId;
+      
+        if (!folderId || !state.folders.has(folderId)) return;
+      
+        requestAnimationFrame(() => {
+          const card = findDashboardFolderCard(folderId);
+      
+          if (card) {
+            renameDashboardFolder(folderId, card);
+            return;
+          }
+      
+          // Fallback: falls der Folder-Titel der aktuellen Dashboard-Route gemeint ist.
+          if (dashboard.folderId === folderId) {
+            const title = root?.querySelector('.yanta-dashboard-title');
+            if (title) renameDashboardCurrentFolderTitle(title);
+          }
+        });
+      });
+
+      window.addEventListener('yanta-dashboard-rename-note', (e) => {
+        if (!dashboard.visible) return;
+      
+        const noteId = e.detail?.noteId;
+      
+        if (!noteId || !state.notes.has(noteId)) return;
+      
+        requestAnimationFrame(() => {
+          const card = findDashboardNoteCard(noteId);
+      
+          if (card) {
+            renameDashboardNote(noteId, card);
+          }
+        });
+      });
+
       window.addEventListener('yanta-dashboard-refresh', (e) => {
         if (!dashboard.visible) return;
 
@@ -1078,68 +1247,112 @@ function renderDashboard({ animate = true } = {}) {
   root.append(page);
 }
 
-  function renderDashboardHeader() {
-    const header = el('header', { class: 'yanta-dashboard-head' });
+function renderDashboardHeader() {
+  const header = el('header', { class: 'yanta-dashboard-head' });
+
+  const menuBtn = el('button', {
+    class: 'icon-btn yanta-dashboard-icon-btn yanta-dashboard-menu-btn',
+    title: 'Open sidebar',
+    onclick: () => {
+      window.dispatchEvent(new CustomEvent('yanta-open-mobile-sidebar'));
+    },
+  });
+
+  menuBtn.innerHTML = lucide('menu', 21);
+
+  const titleWrap = el('div', { class: 'yanta-dashboard-title-wrap' });
+
+  const path = currentFolderPath();
+
+  const title = el('div', {
+    class:
+      'yanta-dashboard-title' +
+      (dashboard.folderId ? ' can-rename' : ''),
+    role: dashboard.folderId ? 'button' : null,
+    tabindex: dashboard.folderId ? '0' : null,
+    title: dashboard.folderId
+      ? 'Tap to rename folder'
+      : 'Notes',
   
-    const menuBtn = el('button', {
-      class: 'icon-btn yanta-dashboard-icon-btn',
-      title: 'Open sidebar',
-      onclick: () => $('btn-sidebar-toggle')?.click(),
-    });
+    onclick: (e) => {
+      if (!dashboard.folderId) return;
   
-    menuBtn.innerHTML = lucide('menu', 21);
+      e.preventDefault();
+      e.stopPropagation();
   
-    const titleWrap = el('div', { class: 'yanta-dashboard-title-wrap' });
+      renameDashboardCurrentFolderTitle(e.currentTarget);
+    },
   
-    const path = currentFolderPath();
+    onkeydown: (e) => {
+      if (!dashboard.folderId) return;
   
-    const title = el('div', {
-      class: 'yanta-dashboard-title',
-    }, dashboard.folderId ? (path.at(-1)?.name || 'Folder') : 'Notes');
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        e.stopPropagation();
   
-    const crumb = el('div', { class: 'yanta-dashboard-breadcrumb' });
-  
-    const home = el('button', {
+        renameDashboardCurrentFolderTitle(e.currentTarget);
+      }
+    },
+  }, dashboard.folderId ? (path.at(-1)?.name || 'Folder') : 'Notes');
+
+  const crumb = el('div', { class: 'yanta-dashboard-breadcrumb' });
+
+  const home = el('button', {
+    type: 'button',
+    onclick: () => navigateDashboardFolder(null),
+  }, 'Home');
+
+  crumb.append(home);
+
+  for (const f of path) {
+    crumb.append(el('span', {}, '/'));
+    crumb.append(el('button', {
       type: 'button',
-      onclick: () => navigateDashboardFolder(null),
-    }, 'Home');
-  
-    crumb.append(home);
-  
-    for (const f of path) {
-      crumb.append(el('span', {}, '/'));
-      crumb.append(el('button', {
-        type: 'button',
-        onclick: () => navigateDashboardFolder(f.id),
-      }, f.name || 'Folder'));
-    }
-  
-    titleWrap.append(title, crumb);
-  
-    const searchBtn = el('button', {
-      class: 'icon-btn yanta-dashboard-icon-btn',
-      title: 'Search',
-      onclick: () => {
-        $('btn-sidebar-toggle')?.click();
-        setTimeout(() => $('search')?.focus(), 120);
-      },
-    });
-    searchBtn.innerHTML = lucide('search', 21);
-  
-    const newBtn = el('button', {
-      class: 'btn primary yanta-dashboard-new-btn',
-      title: 'New note',
-      onclick: async () => {
-        await newNote(dashboard.folderId || null);
-        hideDashboard({ push: false });
-      },
-    });
-    newBtn.innerHTML = `${lucide('plus', 17)} <span>New</span>`;
-  
-    header.append(menuBtn, titleWrap, searchBtn, newBtn);
-  
-    return header;
+      'data-dashboard-folder-crumb': f.id,
+      onclick: () => navigateDashboardFolder(f.id),
+    }, f.name || 'Folder'));
   }
+
+  titleWrap.append(title, crumb);
+
+  const searchBtn = el('button', {
+    class: 'icon-btn yanta-dashboard-icon-btn',
+    title: 'Search',
+    onclick: () => {
+      window.dispatchEvent(new CustomEvent('yanta-expand-sidebar-search'));
+    },
+  });
+
+  searchBtn.innerHTML = lucide('search', 21);
+
+  const newBtn = el('button', {
+    class: 'btn primary yanta-dashboard-new-btn',
+    title: 'Create',
+    onclick: (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      openCreateMenu(e.currentTarget, {
+        folderId: dashboard.folderId || null,
+        source: 'dashboard',
+        align: 'end',
+        onAfterAction: (result) => {
+          if (result?.type === 'note') {
+            hideDashboard({
+              push: false,
+            });
+          }
+        },
+      });
+    },
+  });
+
+  newBtn.innerHTML = `${lucide('plus', 17)} <span>New</span>`;
+
+  header.append(menuBtn, titleWrap, searchBtn, newBtn);
+
+  return header;
+}
   
   function renderEmptyState() {
     const box = el('div', { class: 'yanta-dashboard-empty' });
@@ -1843,7 +2056,9 @@ async function renameDashboardFolder(folderId, cardOrAnchor) {
     },
 
     onCommit: async (value) => {
-      const result = await renameFolderById(folderId, value);
+      const result = await renameFolderById(folderId, value, {
+        refreshDashboard: false,
+      });
 
       setTimeout(() => {
         endDashboardRename(card);
@@ -1852,6 +2067,62 @@ async function renameDashboardFolder(folderId, cardOrAnchor) {
       return result;
     },
   });
+}
+
+function renameDashboardCurrentFolderTitle(anchor) {
+  const folder = currentFolder();
+
+  if (!folder || !anchor) return;
+
+  dashboard.suppressOpenUntil = performance.now() + 1200;
+
+  inlineTextEdit(anchor, {
+    initial: folder.name || 'Folder',
+    placeholder: 'Folder name',
+    emptyFallback: 'Folder',
+
+    onCommit: async (value) => {
+      return await renameFolderById(folder.id, value, {
+        refreshDashboard: false,
+      });
+    },
+  });
+}
+function syncDashboardFolderLabels(folderId) {
+  if (!root || !folderId) return;
+
+  const folder = state.folders.get(folderId);
+  if (!folder) return;
+
+  const name = folder.name || 'Folder';
+
+  if (dashboard.folderId === folderId) {
+    const title = root.querySelector('.yanta-dashboard-title');
+
+    if (title && title.dataset.inlineEditing !== '1') {
+      title.textContent = name;
+      title.title = 'Tap to rename folder';
+    }
+  }
+
+  root
+    .querySelectorAll(
+      `.yanta-dash-card[data-kind="folder"][data-folder-id="${CSS.escape(folderId)}"] .yanta-dash-card-title`
+    )
+    .forEach((node) => {
+      if (node.dataset.inlineEditing === '1') return;
+
+      node.textContent = name;
+      node.title = name;
+    });
+
+  root
+    .querySelectorAll(
+      `[data-dashboard-folder-crumb="${CSS.escape(folderId)}"]`
+    )
+    .forEach((node) => {
+      node.textContent = name;
+    });
 }
 
 function findDashboardNoteCard(noteId) {
@@ -2267,7 +2538,7 @@ function renderFolderMiniDrawing(noteId, block) {
     class: 'yanta-dash-folder-mini-media drawing',
   });
 
-  media.innerHTML = `${lucide('pencil', 12)} <span>Drawing</span>`;
+  media.innerHTML = `${lucide('line-squiggle', 12)} <span>Drawing</span>`;
 
   import('./draw.js')
     .then(async ({ drawingThumbnailUrl }) => {
@@ -2548,7 +2819,7 @@ function renderDashboardVideo(block) {
   function renderDashboardDrawing(noteId, block) {
     const wrap = el('div', { class: 'yanta-dash-media yanta-dash-drawing-thumb' });
   
-    wrap.innerHTML = `${lucide('pencil', 24)} <span style="margin-left:8px">Drawing</span>`;
+    wrap.innerHTML = `${lucide('line-squiggle', 24)} <span style="margin-left:8px">Drawing</span>`;
   
     import('./draw.js')
       .then(async ({ drawingThumbnailUrl }) => {
@@ -3765,6 +4036,9 @@ function bindCardPointerInteractions(card, item) {
   }
 
   card.addEventListener('keydown', async (e) => {
+    if (isEditableDashboardKeyTarget(e.target)) {
+      return;
+    }
     if (e.key === 'F2') {
       e.preventDefault();
       e.stopPropagation();

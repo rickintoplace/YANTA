@@ -311,7 +311,7 @@ export function renderDrawEmbedHtml(id, label = 'Drawing', surface = 'preview') 
 
   return `<div class="yanta-draw-embed ${cleanSurface}-surface" data-draw-surface="${escapeAttr(cleanSurface)}" data-draw-id="${escapeAttr(cleanId)}" data-note-id="${escapeAttr(state.currentNoteId || '')}" contenteditable="false">
     <div class="yanta-draw-embed-head">
-      <span class="yanta-draw-embed-icon" aria-hidden="true">${previewLucide('pencil', 13)}</span>
+      <span class="yanta-draw-embed-icon" aria-hidden="true">${previewLucide('line-squiggle', 13)}</span>
       <div class="yanta-draw-embed-title" data-draw-title title="Rename drawing">${escapeHtml(label || 'Drawing')}</div>
       <div class="yanta-draw-embed-meta" data-draw-info>draw://${escapeHtml(cleanId)}</div>
 

@@ -27,6 +27,11 @@ export const FLOATING_CREATE_ACTION_CATALOG = [
     defaultIcon: 'file-text',
   },
   {
+    id: 'folder',
+    defaultLabel: 'New folder',
+    defaultIcon: 'folder-plus',
+  },
+  {
     id: 'list',
     defaultLabel: 'New list',
     defaultIcon: 'list-checks',
@@ -55,15 +60,15 @@ export const FLOATING_CREATE_ACTION_CATALOG = [
 
 export const DEFAULT_FLOATING_CREATE_SETTINGS = {
   version: 2,
-  minDistance: FLOATING_CREATE_MIN_DISTANCE,
+  minDistance: 58,
   actions: [
     {
       id: 'note',
       enabled: true,
       label: 'New text note',
       icon: 'file-text',
-      x: -76,
-      y: 0,
+      x: -68,
+      y: -19,
       order: 0,
     },
     {
@@ -71,8 +76,8 @@ export const DEFAULT_FLOATING_CREATE_SETTINGS = {
       enabled: true,
       label: 'New list',
       icon: 'list-checks',
-      x: -128,
-      y: -44,
+      x: -119,
+      y: -53,
       order: 1,
     },
     {
@@ -80,36 +85,45 @@ export const DEFAULT_FLOATING_CREATE_SETTINGS = {
       enabled: true,
       label: 'New drawing',
       icon: 'pencil',
-      x: -142,
-      y: -104,
+      x: -140,
+      y: -111,
       order: 2,
-    },
-    {
-      id: 'image',
-      enabled: true,
-      label: 'New image',
-      icon: 'image',
-      x: -104,
-      y: -164,
-      order: 3,
     },
     {
       id: 'event',
       enabled: true,
       label: 'New calendar event',
       icon: 'calendar-plus',
-      x: -36,
-      y: -192,
-      order: 4,
+      x: -137,
+      y: -176,
+      order: 3,
     },
     {
       id: 'ai',
       enabled: true,
       label: 'AI assistant',
       icon: 'sparkles',
-      x: 22,
-      y: -214,
+      x: 0,
+      y: -73,
+      order: 4,
+    },
+    {
+      id: 'folder',
+      enabled: false,
+      label: 'New folder',
+      icon: 'folder-plus',
+      x: -136,
+      y: -24,
       order: 5,
+    },
+    {
+      id: 'image',
+      enabled: false,
+      label: 'New image',
+      icon: 'image',
+      x: -214,
+      y: -96,
+      order: 6,
     },
   ],
 };
@@ -171,7 +185,10 @@ function deterministicAngle(id) {
 }
 
 function distance(a, b) {
-  return Math.hypot(Number(a.x || 0) - Number(b.x || 0), Number(a.y || 0) - Number(b.y || 0));
+  return Math.hypot(
+    Number(a.x || 0) - Number(b.x || 0),
+    Number(a.y || 0) - Number(b.y || 0)
+  );
 }
 
 function clampPoint(point, bounds = FLOATING_CREATE_BOUNDS) {
@@ -381,7 +398,9 @@ export function normalizeFloatingCreateSettings(raw = {}) {
 
     actions.push({
       id: cat.id,
-      enabled: saved.enabled !== false,
+      enabled: Object.prototype.hasOwnProperty.call(saved, 'enabled')
+      ? saved.enabled !== false
+      : def.enabled !== false,
       label: typeof saved.label === 'string' && saved.label.trim()
         ? saved.label.trim()
         : cat.defaultLabel,

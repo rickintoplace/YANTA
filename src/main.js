@@ -55,6 +55,14 @@ import {
 } from './dashboard.js';
 
 import {
+  setupDashboardMultiSelect,
+} from './dashboard-multiselect.js';
+
+import {
+  setupDashboardContextMenu,
+} from './dashboard-context-menu.js';
+
+import {
   setupFloatingCreate,
 } from './floating-create.js';
 
@@ -97,7 +105,11 @@ import {
 import {
   setupMobileSidebarController,
   closeMobileSidebar,
+  openMobileSidebar,
 } from './mobile-sidebar.js';
+import {
+  openCreateMenu,
+} from './create-actions.js';
 import {
   setupAssistant,
   openAssistantSmart,
@@ -806,6 +818,8 @@ async function init() {
   setupCitations();
   setupFormatToolbar();
   setupDashboard();
+  setupDashboardMultiSelect();
+  setupDashboardContextMenu();
   setupAssistant();
   setupFloatingCreate();
   setupSync2ProgressUi();
@@ -1123,6 +1137,37 @@ function applySidebarCollapsed(collapsed, { persist = true } = {}) {
   });
 }
 
+function expandSidebarForSearch({
+  focus = true,
+} = {}) {
+  if (DESKTOP_SIDEBAR_MQ.matches) {
+    if (sidebarCollapsedPref) {
+      sidebarCollapsedPref = false;
+      applySidebarCollapsed(false);
+    }
+
+    if (focus) {
+      window.setTimeout(() => {
+        $('search')?.focus();
+        $('search')?.select?.();
+      }, 240);
+    }
+
+    return;
+  }
+
+  if (isMobileViewport()) {
+    openMobileSidebar();
+
+    if (focus) {
+      window.setTimeout(() => {
+        $('search')?.focus();
+        $('search')?.select?.();
+      }, 240);
+    }
+  }
+}
+
 function setupDesktopSidebarCollapse() {
   const app = $('app');
   const sidebar = $('sidebar');
@@ -1282,9 +1327,15 @@ function bindEvents() {
   $('tagInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { addTag(e.target.value); e.target.value = ''; } });
 
   // sidebar
-  $('btn-new-note').addEventListener('click', async () => {
-    await newNote(currentFolderForNew());
-    closeMobileSidebar();
+  $('btn-new-note').addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  
+    openCreateMenu(e.currentTarget, {
+      folderId: currentFolderForNew(),
+      source: 'sidebar',
+      closeMobile: true,
+    });
   });
   $('btn-new-folder').addEventListener('click', () => newFolder(null));
   $('btn-theme').addEventListener('click', cycleAppearanceMode);
@@ -1358,6 +1409,10 @@ function bindEvents() {
 
   // Search
   $('search').addEventListener('input', (e) => { state.searchQuery = e.target.value; renderTree(); });
+
+  window.addEventListener('yanta-expand-sidebar-search', () => {
+    expandSidebarForSearch();
+  });
 
   // View toggles
   $('btn-view-edit').addEventListener('click', () => {
@@ -1719,7 +1774,10 @@ function openNativeColorPickerForRange({ from, to, color }) {
 function handleGlobalKey(e) {
   const meta = e.ctrlKey || e.metaKey;
   if (meta && e.key === 'n') { e.preventDefault(); newNote(currentFolderForNew()); }
-  else if (meta && e.key === 'k') { e.preventDefault(); $('search').focus(); }
+  else if (meta && e.key === 'k') {
+    e.preventDefault();
+    expandSidebarForSearch();
+  }
   else if (meta && e.key === 's') {
     e.preventDefault();
   

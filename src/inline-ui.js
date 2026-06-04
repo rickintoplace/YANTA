@@ -123,12 +123,23 @@ export function inlineTextEdit(anchor, {
       restore();
       return;
     }
-
+  
     // Optional: Ctrl/Cmd+Enter speichert explizit.
     if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
       stop(e);
       form.requestSubmit();
+      return;
     }
+  
+    /*
+      Wichtig:
+      Keydowns aus dem Inline-Editor dürfen nicht bis zu Cards,
+      Tree-Rows oder globalen Shortcuts bubbelen.
+  
+      Bei normalem Enter NICHT preventDefault() aufrufen,
+      damit der native Form-Submit weiterhin speichern kann.
+    */
+    e.stopPropagation();
   });
 
   anchor.replaceChildren(form);

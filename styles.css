@@ -71,6 +71,11 @@
   color: var(--selection-text);
 }
 
+*:focus-visible {
+  outline: 2px dashed var(--accent-2);
+  outline-offset: 2px;
+}
+
 /* "Auto" — follow the system. Defaults are dark; override for light OS. */
 @media (prefers-color-scheme: light) {
   [data-theme="auto"] {
@@ -1210,7 +1215,7 @@ button.link { background: 0; border: 0; color: var(--accent); cursor: pointer; p
 }
 .ctx-menu button {
   display: flex; align-items: center; gap: 8px;
-  width: 100%; padding: 6px 10px;
+  width: 100%; padding: 4px 6px;
   background: transparent; border: 0; text-align: left;
   border-radius: 4px; cursor: pointer; color: var(--text);
   font-size: 13px;
@@ -1218,6 +1223,53 @@ button.link { background: 0; border: 0; color: var(--accent); cursor: pointer; p
 .ctx-menu button:hover { background: var(--bg-elev-2); }
 .ctx-menu button.danger { color: var(--red); }
 .ctx-menu hr { border: 0; border-top: 1px solid var(--border); margin: 4px 0; }
+
+.ctx-menu button.has-icon {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  column-gap: 8px;
+}
+
+.ctx-menu .ctx-menu-icon {
+  width: 18px;
+  height: 18px;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  color: var(--text-faint);
+}
+
+.ctx-menu .ctx-menu-icon svg {
+  width: 18px;
+  height: 18px;
+}
+
+.ctx-menu button:hover .ctx-menu-icon {
+  color: var(--accent);
+}
+
+.ctx-menu button.danger .ctx-menu-icon {
+  color: var(--red);
+}
+
+.ctx-menu .ctx-menu-label {
+  min-width: 0;
+
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.ctx-menu button.meta.has-icon {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.ctx-menu button.meta .ctx-menu-icon {
+  display: none;
+}
 
 /* ---------- Responsive: mobile sidebar overlay ---------- */
 @media (max-width: 880px) {

@@ -241,6 +241,42 @@ const ICON_ALIASES = {
   'shopping-cart': 'shopping-cart',
 };
 
+// ----------------------------------------------------------------
+// YANTA custom Lucide-compatible icons
+//
+// Why:
+// Some Lucide icons exist only in newer package versions.
+// YANTA can still use stable semantic icon names everywhere.
+// If the installed lucide package does not contain these names,
+// these fallback icon nodes are rendered by the same lucide() pipeline.
+// ----------------------------------------------------------------
+
+const CUSTOM_LUCIDE_ICONS = {
+  'line-squiggle': [
+    ['path', {
+      d: 'M7 3.5c5-2 7 2.5 3 4C1.5 10 2 15 5 16c5 2 9-10 14-7s.5 13.5-4 12c-5-2.5.5-11 6-2',
+    }],
+  ],
+
+  'scan-check': [
+    ['path', {
+      d: 'M7 3H5a2 2 0 0 0-2 2v2',
+    }],
+    ['path', {
+      d: 'M17 3h2a2 2 0 0 1 2 2v2',
+    }],
+    ['path', {
+      d: 'M21 17v2a2 2 0 0 1-2 2h-2',
+    }],
+    ['path', {
+      d: 'M7 21H5a2 2 0 0 1-2-2v-2',
+    }],
+    ['path', {
+      d: 'm8 12 2.5 2.5L16 9',
+    }],
+  ],
+};
+
 function pascalToKebab(name) {
   return String(name || '')
     .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
@@ -284,9 +320,22 @@ const SVG_TAGS = new Set([
   'ellipse',
 ]);
 
-const LUCIDE_KEY_BY_KEBAB = new Map(
-  Object.keys(LUCIDE_ICONS || {}).map((key) => [keyToKebab(key), key])
-);
+const LUCIDE_KEY_BY_KEBAB = new Map([
+  ...Object.keys(LUCIDE_ICONS || {}).map((key) => [keyToKebab(key), key]),
+
+  // Custom icons use kebab-case keys directly.
+  ...Object.keys(CUSTOM_LUCIDE_ICONS).map((key) => [keyToKebab(key), key]),
+]);
+
+function lucideDefByKey(key) {
+  const kebab = keyToKebab(key);
+
+  if (CUSTOM_LUCIDE_ICONS[kebab]) {
+    return CUSTOM_LUCIDE_ICONS[kebab];
+  }
+
+  return LUCIDE_ICONS?.[key] || null;
+}
 
 function isNodeTuple(v) {
   return Array.isArray(v) && typeof v[0] === 'string';
@@ -340,22 +389,28 @@ function findLucideKey(name) {
   for (const c of candidates) {
     const kebab = keyToKebab(c);
     const key = LUCIDE_KEY_BY_KEBAB.get(kebab);
-    if (key && iconDefLooksValid(LUCIDE_ICONS[key])) return key;
 
-    if (LUCIDE_ICONS[c] && iconDefLooksValid(LUCIDE_ICONS[c])) return c;
+    if (key && iconDefLooksValid(lucideDefByKey(key))) {
+      return key;
+    }
+
+    if (lucideDefByKey(c) && iconDefLooksValid(lucideDefByKey(c))) {
+      return c;
+    }
   }
 
   return (
     LUCIDE_KEY_BY_KEBAB.get('square') ||
     LUCIDE_KEY_BY_KEBAB.get('box') ||
     Object.keys(LUCIDE_ICONS || {}).find((k) => iconDefLooksValid(LUCIDE_ICONS[k])) ||
+    Object.keys(CUSTOM_LUCIDE_ICONS).find((k) => iconDefLooksValid(CUSTOM_LUCIDE_ICONS[k])) ||
     null
   );
 }
 
 function getLucideDef(name) {
   const key = findLucideKey(name);
-  return key ? LUCIDE_ICONS[key] : null;
+  return key ? lucideDefByKey(key) : null;
 }
 
 function renderSvgEntry(entry) {
@@ -402,10 +457,17 @@ function renderIconNode(defOrNodes) {
 }
 
 export function lucideIconNames() {
-  return Object.keys(LUCIDE_ICONS || {})
-    .filter((key) => iconDefLooksValid(LUCIDE_ICONS[key]))
-    .map(keyToKebab)
-    .sort((a, b) => a.localeCompare(b));
+  const names = [
+    ...Object.keys(LUCIDE_ICONS || {})
+      .filter((key) => iconDefLooksValid(LUCIDE_ICONS[key]))
+      .map(keyToKebab),
+
+    ...Object.keys(CUSTOM_LUCIDE_ICONS)
+      .filter((key) => iconDefLooksValid(CUSTOM_LUCIDE_ICONS[key]))
+      .map(keyToKebab),
+  ];
+
+  return [...new Set(names)].sort((a, b) => a.localeCompare(b));
 }
 
 export function normalizeLucideName(name) {

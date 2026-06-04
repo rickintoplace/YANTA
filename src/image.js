@@ -519,7 +519,7 @@ function renderLibrary() {
       },
     });
 
-    thumb.innerHTML = lucide('pencil', 26);
+    thumb.innerHTML = lucide('line-squiggle', 26);
 
     drawingThumbnailUrl(d.noteId, d.id).then((url) => {
       if (!url) return;

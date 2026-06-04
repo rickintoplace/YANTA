@@ -23,6 +23,10 @@ import {
 } from './item-actions.js';
 
 import {
+  iconForContextMenuItem,
+} from './context-menu-icons.js';
+
+import {
   AI_BRAIN_IDS,
   isSystemItem,
 } from './ai/brain.js';
@@ -774,6 +778,26 @@ function openTreeContextMenu(e, key, singleMenuFn) {
   }
 }
 
+let folderCreatedRenameBound = false;
+
+function bindFolderCreatedRenameRequest() {
+  if (folderCreatedRenameBound) return;
+  folderCreatedRenameBound = true;
+
+  window.addEventListener('yanta-folder-created', (e) => {
+    const folderId = e.detail?.folderId;
+    const focusRename = e.detail?.focusRename !== false;
+
+    if (!folderId || !focusRename) return;
+
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        renameTreeFolder(folderId);
+      });
+    });
+  });
+}
+
 // ============================================================
 // Render
 // ============================================================
@@ -782,6 +806,7 @@ export function renderTree() {
   const root = $('tree');
   if (!root) return;
 
+  bindFolderCreatedRenameRequest();
   bindTreeKeyboardShortcuts(root);
 
   pruneDeadSelection();
@@ -1448,7 +1473,10 @@ function _menuOutsideClose(e) {
   if (activeMenu && !activeMenu.contains(e.target)) closeMenu();
 }
 
-export function showMenu(x, y, items) {
+export function showMenu(x, y, items, {
+  align = 'start',
+  margin = 8,
+} = {}) {
   closeMenu();
 
   const m = el('div', {
@@ -1465,19 +1493,40 @@ export function showMenu(x, y, items) {
       continue;
     }
 
+    const iconName = iconForContextMenuItem(it);
+
     const btn = el('button', {
       class: [
         it.danger ? 'danger' : '',
         it.disabled ? 'disabled' : '',
         it.meta ? 'meta' : '',
+        iconName ? 'has-icon' : '',
       ].filter(Boolean).join(' '),
       disabled: !!it.disabled,
+      title: it.title || '',
       onclick: () => {
         if (it.disabled) return;
         closeMenu();
         it.action?.();
       },
-    }, it.label);
+    });
+
+    if (iconName) {
+      const icon = el('span', {
+        class: 'ctx-menu-icon',
+        'aria-hidden': 'true',
+      });
+
+      icon.innerHTML = lucide(iconName, 14);
+
+      const label = el('span', {
+        class: 'ctx-menu-label',
+      }, it.label);
+
+      btn.append(icon, label);
+    } else {
+      btn.textContent = it.label;
+    }
 
     m.append(btn);
   }
@@ -1491,13 +1540,32 @@ export function showMenu(x, y, items) {
 
   const r = m.getBoundingClientRect();
 
-  if (r.right > window.innerWidth) {
-    m.style.left = (x - r.width) + 'px';
+  let left = align === 'end'
+    ? x - r.width
+    : x;
+
+  let top = y;
+
+  if (left + r.width > window.innerWidth - margin) {
+    left = window.innerWidth - r.width - margin;
   }
 
-  if (r.bottom > window.innerHeight) {
-    m.style.top = (y - r.height) + 'px';
+  if (left < margin) {
+    left = margin;
   }
+
+  if (top + r.height > window.innerHeight - margin) {
+    top = y - r.height - 6;
+  }
+
+  if (top < margin) {
+    top = margin;
+  }
+
+  m.style.left = `${Math.round(left)}px`;
+  m.style.top = `${Math.round(top)}px`;
+
+  return m;
 }
 
 export function closeMenu() {

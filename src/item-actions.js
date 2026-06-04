@@ -111,6 +111,8 @@ export async function renameNoteById(noteId, value, {
 
 export async function renameFolderById(folderId, value, {
   silent = false,
+  refreshTree = true,
+  refreshDashboard = true,
 } = {}) {
   const folder = state.folders.get(folderId);
   if (!folder) return false;
@@ -126,16 +128,30 @@ export async function renameFolderById(folderId, value, {
 
   await store.folders.put(folder);
 
-  try {
-    const { renderTree } = await import('./tree.js');
-    renderTree();
-  } catch {}
-
+  if (refreshTree) {
+    try {
+      const { renderTree } = await import('./tree.js');
+      renderTree();
+    } catch {}
+  }
+  
   window.dispatchEvent(new CustomEvent('yanta-folder-updated', {
-    detail: { folderId: folder.id },
+    detail: {
+      folderId: folder.id,
+      name: folder.name,
+      refreshDashboard,
+    },
   }));
-
-  window.dispatchEvent(new CustomEvent('yanta-dashboard-refresh'));
+  
+  if (refreshDashboard) {
+    window.dispatchEvent(new CustomEvent('yanta-dashboard-refresh', {
+      detail: {
+        reason: 'folder-renamed',
+        folderId: folder.id,
+        source: 'item-actions',
+      },
+    }));
+  }
 
   if (!silent) {
     toast('Folder renamed', 'success');

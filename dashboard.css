@@ -1820,3 +1820,68 @@
   flex: 1 1 auto;
   min-width: 0;
 }
+
+/* ============================================================
+   Dashboard header desktop/mobile behavior
+   ============================================================ */
+
+   .yanta-dashboard-menu-btn {
+    display: inline-flex;
+  }
+  
+  /*
+    Desktop:
+    Sidebar is already visible, so Hamburger makes no sense.
+  */
+  @media (min-width: 881px) {
+    .yanta-dashboard-menu-btn {
+      display: none !important;
+    }
+  
+    .yanta-dashboard-head {
+      width: min(1120px, 100%);
+      margin: 0 auto;
+    }
+  }
+  
+  /*
+    Mobile:
+    Keep Hamburger for sidebar overlay.
+  */
+  @media (max-width: 880px) {
+    .yanta-dashboard-menu-btn {
+      display: inline-flex;
+    }
+  }
+
+  .yanta-dashboard-title.can-rename {
+    cursor: text;
+    border-radius: 8px;
+    padding: 2px 4px;
+    margin-left: -4px;
+  
+    transition:
+      color 120ms ease,
+      background-color 120ms ease;
+  }
+  
+  .yanta-dashboard-title.can-rename:hover {
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+  }
+  
+  .yanta-dashboard-title.can-rename .yanta-inline-edit {
+    width: min(100%, 420px);
+  }
+  
+  .yanta-dashboard-title.can-rename .yanta-inline-edit-input {
+    font-size: 22px;
+    font-weight: 800;
+    line-height: 1.1;
+  }
+  
+  @media (min-width: 881px) {
+    .yanta-dashboard-title.can-rename .yanta-inline-edit-input {
+      font-size: 26px;
+    }
+  }

@@ -340,20 +340,27 @@ export async function newNote(folderId = null, type = 'markdown') {
   } catch {}
 }
 
-export async function newFolder(parentId = null) {
-  const name = prompt('Folder name:');
-  if (!name) return;
+export async function newFolder(parentId = null, {
+  name = 'New folder',
+  focusRename = true,
+  source = 'unknown',
+} = {}) {
+  const now = Date.now();
 
   const f = {
     id: uid(),
-    name: name.trim(),
-    parentId,
-    created: Date.now(),
-    updated: Date.now(),
+    name: String(name || '').trim() || 'New folder',
+    parentId: parentId || null,
+    created: now,
+    updated: now,
   };
 
   state.folders.set(f.id, f);
   await store.folders.put(f);
+
+  if (parentId) {
+    state.expandedFolders.add(parentId);
+  }
 
   state.expandedFolders.add(f.id);
 
@@ -362,13 +369,26 @@ export async function newFolder(parentId = null) {
   window.dispatchEvent(new CustomEvent('yanta-folder-updated', {
     detail: {
       folderId: f.id,
+      parentId: f.parentId,
       reason: 'folder-created',
+      source,
+    },
+  }));
+
+  window.dispatchEvent(new CustomEvent('yanta-folder-created', {
+    detail: {
+      folderId: f.id,
+      parentId: f.parentId,
+      focusRename,
+      source,
     },
   }));
 
   try {
     window.yantaSync2Now?.();
   } catch {}
+
+  return f;
 }
 
 // ---------------- open / save / delete ------------------------
@@ -988,7 +1008,7 @@ Your notes stay on this device unless you choose to sync, export or share them.`
       folderId,
       tags: ['drawing', 'canvas', 'visual'],
       pinned: false,
-      icon: 'pencil',
+      icon: 'line-squiggle',
       color: '#16a34a',
       body: `# First Canvas
 

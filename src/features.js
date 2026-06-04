@@ -387,7 +387,7 @@ let commandList = [];
     { label: 'Toggle preview/edit/split', icon: 'eye', hint: 'Ctrl+/', action: () => window.dispatchEvent(new CustomEvent('yanta-cycle-view')) },
     { label: 'Insert image', icon: 'image', hint: 'Ctrl+I', action: openImageModal },
     { label: 'Insert citation', icon: 'quote', hint: '/cite', action: openCitationManager },
-    { label: 'Insert drawing', icon: 'pencil', hint: '/drawing', action: openDraw },
+    { label: 'Insert drawing', icon: 'line-squiggle', hint: '/drawing', action: openDraw },
     { label: 'Insert Lucide icon', icon: 'sparkles', action: openIconInsertPicker },
     { label: 'Insert wikilink', icon: 'link', action: () => insertAtCursor('[[') },
     { label: 'Toggle pin', icon: 'pin', action: togglePin },

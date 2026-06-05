@@ -4058,3 +4058,86 @@ input.yanta-task-checkbox {
     max-height: 100svh;
   }
 }
+
+/* ============================================================
+   Trash in Tree — virtual collapsible folder
+   ============================================================ */
+
+   .tree-section-trash {
+    border-top: 1px solid color-mix(in srgb, var(--red) 22%, var(--border));
+    margin-top: 3px;
+    padding-top: 4px;
+  }
+  
+  .tree-row.trash-root-row {
+    color: color-mix(in srgb, var(--red) 76%, var(--text-dim));
+  }
+  
+  .tree-row.trash-root-row .label {
+    color: color-mix(in srgb, var(--red) 72%, var(--text));
+    font-weight: 700;
+  }
+  
+  .tree-row.trash-root-row .tree-item-icon {
+    color: var(--red);
+  }
+  
+  .tree-row.trash-root-row:hover {
+    background: color-mix(in srgb, var(--red) 8%, var(--bg-elev-2));
+  }
+  
+  .tree-row.trash-root-row.drop-target {
+    background: color-mix(in srgb, var(--red) 16%, var(--bg-elev-2));
+    outline: 1px dashed var(--red);
+    outline-offset: -1px;
+  }
+  
+  .tree-trash-root-icon::before,
+  .tree-trash-root-icon::after {
+    display: none !important;
+  }
+  
+  .tree-trash-children {
+    padding-left: 0;
+  }
+  
+  .tree-row.trash-row {
+    color: color-mix(in srgb, var(--text-dim) 78%, var(--red));
+  }
+  
+  .tree-row.trash-row .tree-item-icon {
+    opacity: 0.82;
+  }
+  
+  .tree-row.trash-row .label {
+    color: color-mix(in srgb, var(--text-dim) 82%, var(--text));
+  }
+  
+  .tree-row.trash-row:hover {
+    background: color-mix(in srgb, var(--red) 8%, var(--bg-elev-2));
+  }
+  
+  .tree-row.trash-row.active {
+    background: color-mix(in srgb, var(--red) 10%, var(--bg-elev-2));
+  }
+  
+  .tree-trash-meta {
+    max-width: 112px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  
+    color: color-mix(in srgb, var(--red) 56%, var(--text-faint));
+    font-size: 10px;
+    line-height: 1.2;
+  
+    margin-left: 4px;
+  }
+  
+  .app.sidebar-collapsed .tree-trash-meta {
+    display: none !important;
+  }
+  
+  .app.sidebar-collapsed .tree-row.trash-root-row .tree-folder-count {
+    display: inline-flex;
+  }

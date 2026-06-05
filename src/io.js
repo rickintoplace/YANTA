@@ -9,6 +9,13 @@ import { $, uid, state, store, toast, safeFilename, downloadBlob } from './core.
 import { getNoteDoc, noteMarkdown, listDrawingsForNote, listCitationsForNote, setDrawing, normalizeDrawingScene } from './yjs.js';
 import { rebuildWikilinkIndex } from './notes.js';
 import { renderTree } from './tree.js';
+import {
+  yantaConfirm,
+} from './dialogs.js';
+import {
+  isNoteInTrash,
+  isFolderInTrash,
+} from './trash.js';
 
 export function noteToFrontmatter(n) {
   const meta = { id: n.id };
@@ -31,6 +38,11 @@ export function noteToFrontmatter(n) {
     const folder = state.folders.get(n.folderId);
     if (folder) meta.folder = folder.name;
   }
+  if (n.trashed) meta.trashed = true;
+  if (n.deletedAt) meta.deletedAt = n.deletedAt;
+  if (n.deletedBy) meta.deletedBy = n.deletedBy;
+  if (n.trashOriginalFolderId) meta.trashOriginalFolderId = n.trashOriginalFolderId;
+  if (Array.isArray(n.trashOriginalFolderPath)) meta.trashOriginalFolderPath = n.trashOriginalFolderPath;
   meta.created = new Date(n.created).toISOString();
   meta.updated = new Date(n.updated).toISOString();
   const lines = ['---'];
@@ -87,16 +99,40 @@ export async function exportBundle() {
 }
 
 export async function exportEveryNoteMd() {
-  const notes = [...state.notes.values()];
-  if (!notes.length) { toast('Nothing to export', 'error'); return; }
-  if (!confirm(`Download ${notes.length} .md file(s)?`)) return;
+  const notes = [...state.notes.values()]
+    .filter((n) => !isNoteInTrash(n));
+
+  if (!notes.length) {
+    toast('Nothing to export', 'error');
+    return;
+  }
+
+  const ok = await yantaConfirm({
+    title: 'Export all notes?',
+    message: `Download ${notes.length} Markdown file${notes.length === 1 ? '' : 's'}?\n\nYour notes are not changed.`,
+    confirmLabel: 'Download files',
+    icon: 'download',
+  });
+
+  if (!ok) return;
+
   for (const n of notes) {
     let body = '';
-    try { body = noteMarkdown(n.id); } catch {}
+
+    try {
+      body = noteMarkdown(n.id);
+    } catch {}
+
     const md = noteToFrontmatter(n) + body;
-    downloadBlob(new Blob([md], { type: 'text/markdown' }), safeFilename(n.title) + '.md');
+
+    downloadBlob(
+      new Blob([md], { type: 'text/markdown' }),
+      safeFilename(n.title) + '.md'
+    );
+
     await new Promise((r) => setTimeout(r, 80));
   }
+
   toast('Exported ' + notes.length + ' note(s)', 'success');
 }
 
@@ -143,25 +179,148 @@ export function imageExt(meta) {
 // ----------------- Bundle import --------------------------------
 export async function importBundleFile(file) {
   const data = JSON.parse(await file.text());
-  if (!data.yanta) throw new Error('Not a YANTA bundle');
-  for (const f of data.folders || []) { state.folders.set(f.id, f); await store.folders.put(f); }
+
+  if (!data.yanta) {
+    throw new Error('Not a YANTA bundle');
+  }
+
+  for (const f of data.folders || []) {
+    state.folders.set(f.id, f);
+    await store.folders.put(f);
+  }
+
   for (const n of data.notes || []) {
     const { body = '', ...meta } = n;
-    state.notes.set(n.id, meta);
+
+    state.notes.set(meta.id, meta);
     await store.notes.put(meta);
+
     if (body) {
-      const entry = getNoteDoc(n.id);
+      const entry = getNoteDoc(meta.id);
       await entry.ready;
+
       const ytext = entry.doc.getText('markdown');
-      if (ytext.length === 0) ytext.insert(0, body);
+
+      if (ytext.length === 0) {
+        ytext.insert(0, body);
+      }
     }
+
+    updateImportedNoteSearchIndex(meta);
   }
+
   for (const im of data.images || []) {
     const blob = await (await fetch(im.data)).blob();
     const { data: _, ...meta } = im;
-    await store.images.put({ ...meta, blob });
+
+    await store.images.put({
+      ...meta,
+      blob,
+    });
+
     state.imagesMeta.set(meta.id, meta);
   }
+}
+
+function applyNoteMetaFromFrontmatter(note, meta = {}) {
+  if (!note || !meta) return note;
+
+  if (meta.dashboardOrder != null) {
+    note.dashboardOrder = Number(meta.dashboardOrder);
+  }
+
+  if (meta.dashboardHeight != null) {
+    note.dashboardHeight = Number(meta.dashboardHeight);
+  }
+
+  if (meta.dashboardHeightPx != null) {
+    note.dashboardHeightPx = Number(meta.dashboardHeightPx);
+    delete note.dashboardHeight;
+  }
+
+  if (meta.dashboardPinnedOrder != null) {
+    note.dashboardPinnedOrder = Number(meta.dashboardPinnedOrder);
+  }
+
+  if (meta.icon) {
+    note.icon = meta.icon;
+  }
+
+  if (meta.color) {
+    note.color = meta.color;
+  }
+
+  if (meta.hidden) note.hidden = true;
+  else delete note.hidden;
+
+  if (meta.archived) note.archived = true;
+  else delete note.archived;
+
+  if (meta.system) note.system = true;
+  else delete note.system;
+
+  if (meta.aiBrain) note.aiBrain = true;
+  else delete note.aiBrain;
+
+  if (meta.dashboardHidden) note.dashboardHidden = true;
+  else delete note.dashboardHidden;
+
+  if (meta.hiddenFromDashboard) note.hiddenFromDashboard = true;
+  else delete note.hiddenFromDashboard;
+
+  if (meta.trashed) {
+    note.trashed = true;
+
+    if (meta.deletedAt != null) {
+      note.deletedAt = Number(meta.deletedAt);
+    }
+
+    if (meta.deletedBy) {
+      note.deletedBy = String(meta.deletedBy);
+    }
+
+    if (meta.trashOriginalFolderId) {
+      note.trashOriginalFolderId = meta.trashOriginalFolderId;
+    }
+
+    if (Array.isArray(meta.trashOriginalFolderPath)) {
+      note.trashOriginalFolderPath = meta.trashOriginalFolderPath.map(String);
+    }
+  } else {
+    // Wichtig bei Import über existierende ID:
+    // Wenn Frontmatter nicht trashed ist, alte Trash-Felder entfernen.
+    delete note.trashed;
+    delete note.deletedAt;
+    delete note.deletedBy;
+    delete note.trashOriginalFolderId;
+    delete note.trashOriginalFolderPath;
+  }
+
+  return note;
+}
+
+function updateImportedNoteSearchIndex(note) {
+  if (!note) return;
+
+  if (isNoteInTrash(note)) {
+    state.searchIndex.delete(note.id);
+    return;
+  }
+
+  let body = '';
+
+  try {
+    body = noteMarkdown(note.id);
+  } catch {}
+
+  state.searchIndex.set(
+    note.id,
+    [
+      note.title || '',
+      (note.tags || []).join(' '),
+      body || '',
+    ].join(' ').toLowerCase()
+  );
 }
 
 // ----------------- Generic file import --------------------------
@@ -196,37 +355,54 @@ export async function importItems(items) {
       else if (/\.(md|markdown|txt)$/i.test(file.name)) {
         const text = await file.text();
         const { meta, body } = parseFrontmatter(text);
-        const resolvedBody = body.replace(/(?:\.\.\/)*_images\/([a-z0-9]+)(?:\.[a-z0-9]+)?/gi, (_, id) => 'yanta-img://' + id);
+
+        const resolvedBody = body.replace(
+          /(?:\.\.\/)*_images\/([a-z0-9]+)(?:\.[a-z0-9]+)?/gi,
+          (_, id) => 'yanta-img://' + id
+        );
+
         let folderId = await ensureFolderPath(pathArr);
-        if (!folderId && meta.folder) folderId = await ensureFolderPath([meta.folder]);
+
+        if (!folderId && meta.folder) {
+          folderId = await ensureFolderPath([meta.folder]);
+        }
+
         const title = file.name.replace(/\.(md|markdown|txt)$/i, '');
         const fileTime = file.lastModified || Date.now();
         const id = meta.id || uid();
+
         const note = state.notes.get(id) || {
           id,
-          title,
-          type: meta.type || 'markdown',
-          folderId,
-          tags: Array.isArray(meta.tags) ? meta.tags : [],
-          pinned: !!meta.pinned,
-          created: meta.created ? Date.parse(meta.created) || fileTime : fileTime,
-          updated: meta.updated ? Date.parse(meta.updated) || fileTime : fileTime,
+          created: meta.created
+            ? Date.parse(meta.created) || fileTime
+            : fileTime,
         };
-        if (meta.dashboardOrder != null) note.dashboardOrder = Number(meta.dashboardOrder);
-        if (meta.dashboardHeight != null) note.dashboardHeight = Number(meta.dashboardHeight);
-        if (meta.dashboardHeightPx != null) {
-          note.dashboardHeightPx = Number(meta.dashboardHeightPx);
-          delete note.dashboardHeight;
-        }
-        if (meta.dashboardPinnedOrder != null) note.dashboardPinnedOrder = Number(meta.dashboardPinnedOrder);
-        if (meta.icon) note.icon = meta.icon;
-        if (meta.color) note.color = meta.color;
+
+        note.title = title || note.title || 'Untitled';
+        note.type = meta.type || note.type || 'markdown';
+        note.folderId = folderId || null;
+        note.tags = Array.isArray(meta.tags) ? meta.tags : note.tags || [];
+        note.pinned = !!meta.pinned;
+        note.updated = meta.updated
+          ? Date.parse(meta.updated) || fileTime
+          : fileTime;
+
+        applyNoteMetaFromFrontmatter(note, meta);
+
         state.notes.set(id, note);
         await store.notes.put(note);
+
         const entry = getNoteDoc(id);
         await entry.ready;
+
         const ytext = entry.doc.getText('markdown');
-        if (ytext.length === 0) ytext.insert(0, resolvedBody);
+
+        if (ytext.length === 0) {
+          ytext.insert(0, resolvedBody);
+        }
+
+        updateImportedNoteSearchIndex(note);
+
         noteCount++;
       } else skipped++;
     } catch (e) {
@@ -345,6 +521,8 @@ async function readZip(blob) {
 export async function exportAsZip() {
   const used = new Set();
   for (const note of state.notes.values()) {
+    if (isNoteInTrash(note)) continue;
+
     let body = ''; try { body = noteMarkdown(note.id); } catch {}
     const re = /yanta-img:\/\/([a-z0-9]+)/gi; let m;
     while ((m = re.exec(body)) !== null) used.add(m[1]);
@@ -364,6 +542,7 @@ export async function exportAsZip() {
     return p;
   };
   for (const note of state.notes.values()) {
+    if (isNoteInTrash(note)) continue;
     const segs = folderPathSegments(note.folderId);
     const fname = `${safeFilename(note.title)}__${note.id.slice(0, 8)}.md`;
     const path = pickPath(segs, fname);
@@ -384,6 +563,7 @@ export async function exportAsZip() {
   let totalCitationCount = 0;
 
   for (const note of state.notes.values()) {
+    if (isNoteInTrash(note)) continue;
     const citations = listCitationsForNote(note.id);
 
     if (!citations.length) continue;
@@ -402,6 +582,7 @@ export async function exportAsZip() {
     });
   }
   for (const note of state.notes.values()) {
+    if (isNoteInTrash(note)) continue;
     for (const d of listDrawingsForNote(note.id)) {
       const json = {
         type: 'excalidraw',
@@ -433,12 +614,14 @@ export async function exportAsZip() {
   } catch (err) {
     console.warn('Calendar ZIP export skipped', err);
   }
+
   const manifest = {
     yanta: 2,
     exported: new Date().toISOString(),
     counts: {
-      notes: state.notes.size,
-      folders: state.folders.size,
+      notes: [...state.notes.values()].filter((n) => !isNoteInTrash(n)).length,
+      trashNotesExcluded: [...state.notes.values()].filter(isNoteInTrash).length,
+      folders: [...state.folders.values()].filter((folder) => !isFolderInTrash(folder)).length,
       images: used.size,
       citations: totalCitationCount || 0,
       calendarEvents: state.calendarEvents?.size || 0,
@@ -454,47 +637,160 @@ const _imageExtToMime = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png
 
 export async function importZipBlob(blob) {
   let entries;
-  try { entries = await readZip(blob); } catch (e) { toast('ZIP read failed: ' + e.message, 'error'); return; }
+
+  try {
+    entries = await readZip(blob);
+  } catch (e) {
+    toast('ZIP read failed: ' + e.message, 'error');
+    return;
+  }
+
   _folderCache.clear();
-  const remap = new Map();
+
+  const remap = new Map();       // image old id -> new id
+  const noteIdMap = new Map();   // exported note id -> imported note id
+
+  // 1. Import images first.
   for (const ent of entries) {
     if (ent.isDir || !ent.path.startsWith('_images/')) continue;
+
     const fname = ent.path.slice('_images/'.length);
     const dot = fname.lastIndexOf('.');
     const origId = dot > 0 ? fname.slice(0, dot) : fname;
     const ext = (dot > 0 ? fname.slice(dot + 1) : 'bin').toLowerCase();
     const mime = _imageExtToMime[ext] || 'application/octet-stream';
-    const blob2 = new Blob([ent.data], { type: mime });
+
+    const blob2 = new Blob([ent.data], {
+      type: mime,
+    });
+
     const newId = state.imagesMeta.has(origId) ? uid() : origId;
-    const meta = { id: newId, name: fname, size: blob2.size, type: mime, ts: Date.now() };
-    await store.images.put({ ...meta, blob: blob2 });
+
+    const meta = {
+      id: newId,
+      name: fname,
+      size: blob2.size,
+      type: mime,
+      ts: Date.now(),
+    };
+
+    await store.images.put({
+      ...meta,
+      blob: blob2,
+    });
+
     state.imagesMeta.set(newId, meta);
     remap.set(origId, newId);
   }
+
+  // 2. Import Markdown notes before drawings.
+  let noteCount = 0;
+
+  const noteEntries = entries.filter((ent) =>
+    !ent.isDir &&
+    !ent.path.startsWith('_images/') &&
+    !ent.path.startsWith('_yanta-') &&
+    !ent.path.startsWith('drawings/') &&
+    !ent.path.startsWith('citations/') &&
+    /\.(md|markdown|txt)$/i.test(ent.path)
+  );
+
+  for (const ent of noteEntries) {
+    const parts = ent.path.split('/');
+    const fname = parts.pop();
+    const folderId = await ensureFolderPath(parts);
+
+    const text = _dec.decode(ent.data);
+    const { meta, body: raw } = parseFrontmatter(text);
+
+    const body = raw.replace(
+      /(?:\.\.\/)*_images\/([a-z0-9]+)(?:\.[a-z0-9]+)?/gi,
+      (_full, id) => 'yanta-img://' + (remap.get(id) || id)
+    );
+
+    const title = fname
+      .replace(/\.(md|markdown|txt)$/i, '')
+      .replace(/__[a-z0-9]{8}$/i, '');
+
+    const exportedId = meta.id || '';
+    const importedId =
+      exportedId && !state.notes.has(exportedId)
+        ? exportedId
+        : uid();
+
+    if (exportedId) {
+      noteIdMap.set(exportedId, importedId);
+    }
+
+    const note = {
+      id: importedId,
+      title,
+      type: meta.type || 'markdown',
+      folderId,
+      tags: Array.isArray(meta.tags) ? meta.tags : [],
+      pinned: !!meta.pinned,
+      icon: meta.icon || undefined,
+      color: meta.color || undefined,
+      created: meta.created
+        ? Date.parse(meta.created) || Date.now()
+        : Date.now(),
+      updated: meta.updated
+        ? Date.parse(meta.updated) || Date.now()
+        : Date.now(),
+    };
+
+    applyNoteMetaFromFrontmatter(note, meta);
+
+    state.notes.set(importedId, note);
+    await store.notes.put(note);
+
+    const entry = getNoteDoc(importedId);
+    await entry.ready;
+
+    const ytext = entry.doc.getText('markdown');
+
+    if (ytext.length === 0) {
+      ytext.insert(0, body);
+    }
+
+    updateImportedNoteSearchIndex(note);
+
+    noteCount++;
+  }
+
+  // 3. Import drawings after notes and map exported note IDs.
   const drawingEntries = entries.filter((ent) =>
     !ent.isDir &&
     /^drawings\/[^/]+\/[^/]+\.excalidraw(\.json)?$/i.test(ent.path)
   );
 
+  let drawingCount = 0;
+
   for (const ent of drawingEntries) {
     try {
       const parts = ent.path.split('/');
-      const noteId = parts[1];
+      const exportedNoteId = parts[1];
       const fileName = parts[2];
+
+      const targetNoteId =
+        noteIdMap.get(exportedNoteId) ||
+        (state.notes.has(exportedNoteId) ? exportedNoteId : '');
+
+      if (!targetNoteId || !state.notes.has(targetNoteId)) {
+        continue;
+      }
+
       const drawingId = fileName.replace(/\.excalidraw(\.json)?$/i, '');
-
-      if (!state.notes.has(noteId)) continue;
-
       const data = JSON.parse(_dec.decode(ent.data));
       const scene = normalizeDrawingScene(data);
 
-      setDrawing(noteId, drawingId, {
+      setDrawing(targetNoteId, drawingId, {
         id: drawingId,
-        title: drawingId,
+        title: data?.yanta?.title || drawingId,
         ...scene,
       }, 'draw-zip-import');
 
-      const entry = getNoteDoc(noteId);
+      const entry = getNoteDoc(targetNoteId);
       await entry.ready;
 
       const ytext = entry.doc.getText('markdown');
@@ -503,63 +799,23 @@ export async function importZipBlob(blob) {
       if (!md.includes(`draw://${drawingId}`)) {
         ytext.insert(ytext.length, `\n\ndraw://${drawingId}\n`);
       }
+
+      drawingCount++;
     } catch (e) {
       console.warn('Drawing ZIP import failed', ent.path, e);
     }
   }
-  let noteCount = 0;
-  for (const ent of entries) {
-    if (ent.isDir || ent.path.startsWith('_images/') || ent.path.startsWith('_yanta-') || !/\.(md|markdown|txt)$/i.test(ent.path)) continue;
-    const parts = ent.path.split('/');
-    const fname = parts.pop();
-    const folderId = await ensureFolderPath(parts);
-    const text = _dec.decode(ent.data);
-    const { meta, body: raw } = parseFrontmatter(text);
-    const body = raw.replace(/(?:\.\.\/)*_images\/([a-z0-9]+)(?:\.[a-z0-9]+)?/gi, (_full, id) => 'yanta-img://' + (remap.get(id) || id));
-    const title = fname
-      .replace(/\.(md|markdown|txt)$/i, '')
-      .replace(/__[a-z0-9]{8}$/i, '');
-    const id = uid();
-    const note = {
-      id,
-      title,
-      type: meta.type || 'markdown',
-      folderId,
-      tags: Array.isArray(meta.tags) ? meta.tags : [],
-      pinned: !!meta.pinned,
-      icon: meta.icon || undefined,
-      color: meta.color || undefined,
-      created: meta.created ? Date.parse(meta.created) || Date.now() : Date.now(),
-      updated: Date.now(),
-    };
-    
-    if (meta.dashboardOrder != null) {
-      note.dashboardOrder = Number(meta.dashboardOrder);
-    }
-    
-    if (meta.dashboardHeight != null) {
-      note.dashboardHeight = Number(meta.dashboardHeight);
-    }
 
-    if (meta.dashboardHeightPx != null) {
-      note.dashboardHeightPx = Number(meta.dashboardHeightPx);
-      delete note.dashboardHeight;
-    }
-    
-    if (meta.dashboardPinnedOrder != null) {
-      note.dashboardPinnedOrder = Number(meta.dashboardPinnedOrder);
-    }
-    
-    state.notes.set(id, note);
-    await store.notes.put(note);
-    const entry = getNoteDoc(id);
-    await entry.ready;
-    entry.doc.getText('markdown').insert(0, body);
-    noteCount++;
-  }
   rebuildWikilinkIndex();
   renderTree();
-  toast(`Imported ${noteCount} note(s)${remap.size ? ` + ${remap.size} image(s)` : ''} from ZIP`, 'success');
+
+  toast(
+    `Imported ${noteCount} note${noteCount === 1 ? '' : 's'}` +
+      (drawingCount ? ` + ${drawingCount} drawing${drawingCount === 1 ? '' : 's'}` : '') +
+      (remap.size ? ` + ${remap.size} image${remap.size === 1 ? '' : 's'}` : '') +
+      ' from ZIP',
+    'success'
+  );
 }
 
 export async function walkEntry(entry, pathArr = []) {

@@ -56,6 +56,10 @@ import {
     selectAllVisibleDashboardItems,
   } from './dashboard-multiselect.js';
   
+  import {
+    moveItemsToTrash,
+  } from './trash.js';
+
   let initialized = false;
   
   function dashboardRoot() {
@@ -698,84 +702,76 @@ import {
   }
   
   async function deleteKeys(keys) {
-    const plan = collectDeletePlan(keys);
-  
+    const directNoteIds = new Set();
+    const directFolderIds = new Set();
+
+    for (const key of keys) {
+      const { kind, id } = parseKey(key);
+
+      if (kind === 'note' && state.notes.has(id)) {
+        directNoteIds.add(id);
+      }
+
+      if (kind === 'folder' && state.folders.has(id)) {
+        directFolderIds.add(id);
+      }
+    }
+
+    if (!directNoteIds.size && !directFolderIds.size) return;
+
+    let descendantFolderCount = 0;
+    let descendantNoteCount = 0;
+
+    for (const folderId of directFolderIds) {
+      const folderIds = collectFolderIdsRecursive(folderId);
+
+      descendantFolderCount += Math.max(0, folderIds.size - 1);
+
+      for (const note of state.notes.values()) {
+        if (note.folderId && folderIds.has(note.folderId)) {
+          descendantNoteCount++;
+        }
+      }
+    }
+
     const parts = [
-      plan.noteIds.size
-        ? `${plan.noteIds.size} note${plan.noteIds.size === 1 ? '' : 's'}`
+      directNoteIds.size
+        ? `${directNoteIds.size} note${directNoteIds.size === 1 ? '' : 's'}`
         : '',
-      plan.folderIds.size
-        ? `${plan.folderIds.size} folder${plan.folderIds.size === 1 ? '' : 's'}`
+      directFolderIds.size
+        ? `${directFolderIds.size} folder${directFolderIds.size === 1 ? '' : 's'}`
         : '',
     ].filter(Boolean);
-  
-    if (!parts.length) return;
-  
+
+    const extra =
+      descendantFolderCount || descendantNoteCount
+        ? `\n\nSelected folders include ${descendantFolderCount} sub-folder${descendantFolderCount === 1 ? '' : 's'} and ${descendantNoteCount} note${descendantNoteCount === 1 ? '' : 's'}.`
+        : '';
+
     const ok = await confirmPopover({
-      title: 'Delete selected items',
-      message:
-        `Delete ${parts.join(' and ')}? This cannot be undone.` +
-        (
-          plan.folderIds.size
-            ? '\n\nFolders are deleted together with all notes and sub-folders inside them.'
-            : ''
-        ),
-      confirmLabel: 'Delete',
+      title: 'Move selected items to Trash',
+      message: `Move ${parts.join(' and ')} to Trash?${extra}\n\nYou can restore them later from Trash.`,
+      confirmLabel: 'Move to Trash',
       danger: true,
     });
-  
+
     if (!ok) return;
-  
-    const deletedCurrent =
-      state.currentNoteId &&
-      plan.noteIds.has(state.currentNoteId);
-  
-    for (const noteId of plan.noteIds) {
-      state.notes.delete(noteId);
-      state.searchIndex.delete(noteId);
-  
-      try {
-        await store.notes.del(noteId);
-      } catch {}
-  
-      try {
-        await destroyNoteDoc(noteId);
-      } catch {}
-    }
-  
-    for (const folderId of plan.folderIds) {
-      state.folders.delete(folderId);
-      state.expandedFolders.delete(folderId);
-  
-      try {
-        await store.folders.del(folderId);
-      } catch {}
-    }
-  
-    if (deletedCurrent) {
-      clearEditor();
-    }
-  
+
+    await moveItemsToTrash({
+      noteIds: [...directNoteIds],
+      folderIds: [...directFolderIds],
+      source: 'dashboard-context-menu',
+    });
+
     clearDashboardSelection({
       sync: false,
     });
-  
-    rebuildWikilinkIndex();
+
     renderTree();
-  
+
     emitDashboardRefresh({
-      reason: 'context-delete',
+      reason: 'context-trash',
     });
-  
-    window.dispatchEvent(new CustomEvent('yanta-note-updated', {
-      detail: {
-        reason: 'context-delete',
-        deleted: true,
-        source: 'dashboard-context-menu',
-      },
-    }));
-  
-    toast('Deleted selected items', 'success');
   }
   
   async function editAppearance(keys) {
@@ -935,7 +931,7 @@ import {
         }),
       },
       {
-        label: 'New list here',
+        label: 'New checklist here',
         action: () => runCreateAction('list', {
           folderId: folder.id,
           source: 'dashboard-context-menu',
@@ -1018,7 +1014,7 @@ import {
         }),
       },
       {
-        label: folderId ? 'New list in this folder' : 'New list',
+        label: folderId ? 'New checklist in this folder' : 'New checklist',
         action: () => runCreateAction('list', {
           folderId,
           source: 'dashboard-context-menu-empty',
@@ -1039,7 +1035,7 @@ import {
         }),
       },
       {
-        label: 'New calendar event',
+        label: 'New event',
         action: () => runCreateAction('event', {
           folderId,
           source: 'dashboard-context-menu-empty',

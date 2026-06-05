@@ -34,6 +34,10 @@ import {
   suggestFloatingCreatePosition,
 } from './floating-create-settings.js';
 
+import {
+  yantaConfirm,
+} from './dialogs.js';
+
 // ----------------------------------------------------------------
 // Theme tokens — these map 1:1 to CSS custom properties.
 // Each has a default for dark + light mode.
@@ -1021,7 +1025,14 @@ onclick: async () => {
   reset.append(el('button', {
     class: 'btn',
     onclick: async () => {
-      if (!confirm('Reset appearance, colors, and typography to defaults?')) return;
+      const ok = await yantaConfirm({
+        title: 'Reset appearance?',
+        message: 'Reset appearance, colors and typography to defaults?\n\nYour notes are not affected.',
+        confirmLabel: 'Reset appearance',
+        danger: true,
+      });
+      
+      if (!ok) return;
       appearance = deepMerge(DEFAULT_APPEARANCE, { deviceOnly: a.deviceOnly });
       await saveAppearance({}, { reason: 'reset' });
       renderSettingsBody();
@@ -2086,7 +2097,14 @@ function renderCalendarSection(host) {
   resetGroup.append(el('button', {
     class: 'btn',
     onclick: async () => {
-      if (!confirm('Reset calendar settings to defaults?')) return;
+      const ok = await yantaConfirm({
+        title: 'Reset calendar settings?',
+        message: 'Reset all calendar preferences to their defaults?',
+        confirmLabel: 'Reset calendar settings',
+        danger: true,
+      });
+      
+      if (!ok) return;
 
       await resetCalendarPreferences();
       toast('Calendar settings reset', 'success');
@@ -2359,7 +2377,14 @@ function renderAboutSection(host) {
   danger.append(el('button', {
     class: 'btn danger',
     onclick: async () => {
-      if (!confirm('Reset all settings to defaults? Your notes are not affected.')) return;
+      const ok = await yantaConfirm({
+        title: 'Reset all settings?',
+        message: 'Reset all settings to defaults?\n\nYour notes are not affected.',
+        confirmLabel: 'Reset settings',
+        danger: true,
+      });
+      
+      if (!ok) return;
       clearDeviceSettings();
       await clearSyncedSettings();
       appearance = deepMerge(DEFAULT_APPEARANCE, {});

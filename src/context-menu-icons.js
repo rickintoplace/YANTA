@@ -61,11 +61,11 @@ function cleanLabel(label = '') {
     // ----------------------------------------------------------------
     if (startsAny(label, ['new note'])) return 'file-plus';
     if (startsAny(label, ['new text note'])) return 'file-plus';
-    if (startsAny(label, ['new list'])) return 'list-checks';
+    if (startsAny(label, ['New checklist'])) return 'list-checks';
     if (startsAny(label, ['new drawing'])) return 'line-squiggle';
     if (startsAny(label, ['new image'])) return 'image-plus';
     if (startsAny(label, ['new folder', 'new subfolder', 'new sub-folder'])) return 'folder-plus';
-    if (startsAny(label, ['new calendar event'])) return 'calendar-plus';
+    if (startsAny(label, ['New event'])) return 'calendar-plus';
     if (startsAny(label, ['create event'])) return 'calendar-plus';
     if (startsAny(label, ['create'])) return 'plus';
   

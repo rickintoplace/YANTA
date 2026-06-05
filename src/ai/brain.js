@@ -546,6 +546,7 @@ export function shouldHideFromDashboard(item) {
     item.system === true ||
     item.aiBrain === true ||
     item.archived === true ||
+    item.trashed === true ||
     item.hidden === true
   );
 }

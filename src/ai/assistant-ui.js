@@ -721,7 +721,7 @@ function summarizeToolResult(name, data, rawContent = '') {
   }
 
   if (name === 'delete_note') {
-    return `Deleted note: ${data.title || data.deletedNoteId || 'Untitled'}.`;
+    return `Moved note to Trash: ${data.title || data.trashedNoteId || 'Untitled'}.`;
   }
 
   if (name === 'create_event') {

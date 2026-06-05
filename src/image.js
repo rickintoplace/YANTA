@@ -19,6 +19,9 @@ import {
   insertSavedCitationIntoCurrentNote,
   openCitationManager,
 } from './citations.js';
+import {
+  yantaConfirm,
+} from './dialogs.js';
 
 let imgModal, compressPanel;
 let imgWorkingBlob = null;
@@ -554,22 +557,53 @@ function renderLibrary() {
 
 export async function cleanupUnusedImages() {
   const used = new Set();
+
   const { noteMarkdown } = await import('./yjs.js');
+
   for (const n of state.notes.values()) {
     let body = '';
-    try { body = noteMarkdown(n.id); } catch {}
+
+    try {
+      body = noteMarkdown(n.id);
+    } catch {}
+
     const re = /yanta-img:\/\/([a-z0-9]+)/gi;
+
     let m;
-    while ((m = re.exec(body)) !== null) used.add(m[1]);
+    while ((m = re.exec(body)) !== null) {
+      used.add(m[1]);
+    }
   }
-  const unused = [...state.imagesMeta.values()].filter((meta) => !used.has(meta.id));
-  if (!unused.length) { toast('No unused images', 'success'); return; }
+
+  const unused = [...state.imagesMeta.values()]
+    .filter((meta) => !used.has(meta.id));
+
+  if (!unused.length) {
+    toast('No unused images', 'success');
+    return;
+  }
+
   const total = unused.reduce((s, m) => s + (m.size || 0), 0);
-  if (!confirm(`Delete ${unused.length} unused image(s) (${fmtBytes(total)})?`)) return;
+
+  const ok = await yantaConfirm({
+    title: 'Delete unused images?',
+    message: `Delete ${unused.length} unused image${unused.length === 1 ? '' : 's'} (${fmtBytes(total)})?\n\nThis cannot be undone.`,
+    confirmLabel: 'Delete images',
+    danger: true,
+  });
+
+  if (!ok) return;
+
   for (const meta of unused) {
     await store.images.del(meta.id);
+
     state.imagesMeta.delete(meta.id);
-    if (state.imageBlobs.has(meta.id)) { URL.revokeObjectURL(state.imageBlobs.get(meta.id)); state.imageBlobs.delete(meta.id); }
+
+    if (state.imageBlobs.has(meta.id)) {
+      URL.revokeObjectURL(state.imageBlobs.get(meta.id));
+      state.imageBlobs.delete(meta.id);
+    }
   }
+
   toast(`Cleaned up ${unused.length} image(s)`, 'success');
 }

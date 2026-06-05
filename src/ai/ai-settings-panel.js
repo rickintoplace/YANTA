@@ -680,7 +680,7 @@ export function renderAiSettingsPanel(panel) {
           API key storage
           <select class="text-input" data-ai-key-storage>
             <option value="session" ${settings.apiKeyStorage === 'session' ? 'selected' : ''}>Session only</option>
-            <option value="local" ${settings.apiKeyStorage === 'local' ? 'selected' : ''}>Persist in browser localStorage</option>
+            <option value="local" ${settings.apiKeyStorage === 'local' ? 'selected' : ''}>Remember on this device (localStorage)</option>
             <option value="none" ${settings.apiKeyStorage === 'none' ? 'selected' : ''}>Do not store</option>
           </select>
         </label>

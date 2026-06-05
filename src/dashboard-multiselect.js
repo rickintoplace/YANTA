@@ -41,8 +41,12 @@ import {
   import {
     openFolderInDashboard,
   } from './item-actions.js';
+
+  import {
+    moveItemsToTrash,
+  } from './trash.js';
   
-  const DESKTOP_MQ = window.matchMedia('(min-width: 881px)');
+  const DESKTOP_MQ = window.matchMedia('(min-width: 901px)');
   
   const TOUCH_LONG_PRESS_MS = 430;
   const ACTION_TOOLTIP_MS = 520;
@@ -700,19 +704,27 @@ import {
   
   function onCardPointerUp(e) {
     if (!pendingCardPointer || e.pointerId !== pendingCardPointer.pointerId) return;
-  
+
     e.preventDefault();
     e.stopPropagation();
     e.stopImmediatePropagation?.();
-  
+
     const snap = pendingCardPointer;
-  
+
+    /*
+      Wenn kurz vorher ein Longpress gefeuert hat, darf pointerup
+      NICHT nochmal toggeln. Sonst verliert man bei Bulk-Selection
+      die Mehrfachauswahl oder reduziert auf eine einzelne Card.
+    */
+    const longPressAlreadyHandled =
+      performance.now() < suppressClickUntil;
+
     cleanupCardPointer();
-  
-    if (!snap.moved) {
+
+    if (!longPressAlreadyHandled && !snap.moved) {
       selectionGestureSelect(snap.key, snap);
     }
-  
+
     suppressClickUntil = performance.now() + 350;
   }
   
@@ -725,12 +737,12 @@ import {
   function armTouchLongPress(e, card) {
     if (!card || isInteractiveTarget(e.target)) return;
     if (e.pointerType !== 'touch' && e.pointerType !== 'pen') return;
-  
+
     const key = keyFromCard(card);
     if (!key) return;
-  
+
     clearTouchLongPress();
-  
+
     pendingTouchLongPress = {
       pointerId: e.pointerId,
       key,
@@ -739,23 +751,42 @@ import {
       fired: false,
       timer: window.setTimeout(() => {
         if (!pendingTouchLongPress || pendingTouchLongPress.pointerId !== e.pointerId) return;
-  
+
         pendingTouchLongPress.fired = true;
-  
-        if (selectedKeys.has(key)) {
-          toggleSelection(key);
+
+        /*
+          Mobile UX:
+          - Erster Longpress ohne Auswahl: Selection starten.
+          - Longpress innerhalb bestehender Multiselection:
+              NICHT toggeln / NICHT auf eine Note reduzieren.
+              Selection erhalten, ggf. unselektierte Note ergänzen.
+            Danach darf das contextmenu-Event Bulk-Actions öffnen.
+        */
+        if (selectedKeys.size > 0) {
+          if (!selectedKeys.has(key)) {
+            selectedKeys.add(key);
+          }
+
+          anchorKey ||= key;
+          focusKey = key;
+
+          scheduleSyncUi();
         } else {
           addSelection(key);
         }
-  
-        suppressClickUntil = performance.now() + 700;
-  
+
+        /*
+          Verhindert, dass der anschließende pointerup/click die gerade
+          erhaltene Bulk-Selection wieder toggelt.
+        */
+        suppressClickUntil = performance.now() + 900;
+
         try {
           navigator.vibrate?.(10);
         } catch {}
       }, TOUCH_LONG_PRESS_MS),
     };
-  
+
     document.addEventListener('pointermove', onTouchLongPressMove, true);
     document.addEventListener('pointerup', onTouchLongPressEnd, true);
     document.addEventListener('pointercancel', onTouchLongPressEnd, true);
@@ -1179,99 +1210,64 @@ import {
         .filter((item) => item.kind === 'folder')
         .map((item) => item.id)
     );
-  
-    const folderIds = new Set();
-  
-    for (const folderId of directFolderIds) {
-      for (const id of collectFolderIdsRecursive(folderId)) {
-        folderIds.add(id);
-      }
-    }
-  
-    const noteIds = new Set(
+
+    const directNoteIds = new Set(
       items
         .filter((item) => item.kind === 'note')
         .map((item) => item.id)
     );
-  
-    for (const note of state.notes.values()) {
-      if (note.folderId && folderIds.has(note.folderId)) {
-        noteIds.add(note.id);
+
+    if (!directFolderIds.size && !directNoteIds.size) return;
+
+    let descendantFolderCount = 0;
+    let descendantNoteCount = 0;
+
+    for (const folderId of directFolderIds) {
+      const folderIds = collectFolderIdsRecursive(folderId);
+      descendantFolderCount += Math.max(0, folderIds.size - 1);
+
+      for (const note of state.notes.values()) {
+        if (note.folderId && folderIds.has(note.folderId)) {
+          descendantNoteCount++;
+        }
       }
     }
-  
+
     const what = [
-      noteIds.size ? `${noteIds.size} note${noteIds.size === 1 ? '' : 's'}` : '',
-      folderIds.size ? `${folderIds.size} folder${folderIds.size === 1 ? '' : 's'}` : '',
+      directNoteIds.size ? `${directNoteIds.size} note${directNoteIds.size === 1 ? '' : 's'}` : '',
+      directFolderIds.size ? `${directFolderIds.size} folder${directFolderIds.size === 1 ? '' : 's'}` : '',
     ].filter(Boolean).join(' and ');
-  
+
+    const extra =
+      descendantFolderCount || descendantNoteCount
+        ? `\n\nSelected folders include ${descendantFolderCount} sub-folder${descendantFolderCount === 1 ? '' : 's'} and ${descendantNoteCount} note${descendantNoteCount === 1 ? '' : 's'}.`
+        : '';
+
     const ok = await confirmPopover({
-      title: 'Delete selected items',
-      message:
-        `Delete ${what}? This cannot be undone.` +
-        (folderIds.size
-          ? '\n\nFolders are deleted together with all notes and sub-folders inside them.'
-          : ''),
-      confirmLabel: 'Delete',
+      title: 'Move selected items to Trash',
+      message: `Move ${what} to Trash?${extra}\n\nYou can restore them later from Trash.`,
+      confirmLabel: 'Move to Trash',
       danger: true,
     });
-  
+
     if (!ok) return;
-  
-    const deletedCurrent =
-      state.currentNoteId &&
-      noteIds.has(state.currentNoteId);
-  
-    for (const noteId of noteIds) {
-      const note = state.notes.get(noteId);
-  
-      state.notes.delete(noteId);
-      state.searchIndex.delete(noteId);
-      selectedKeys.delete(noteKey(noteId));
-  
-      try {
-        await store.notes.del(noteId);
-      } catch {}
-  
-      try {
-        await destroyNoteDoc(noteId);
-      } catch {}
-  
-      if (note) {
-        // Legacy sync-folder cleanup can be added here if desired.
-      }
-    }
-  
-    for (const folderId of folderIds) {
-      state.folders.delete(folderId);
-      state.expandedFolders.delete(folderId);
-      selectedKeys.delete(folderKey(folderId));
-  
-      try {
-        await store.folders.del(folderId);
-      } catch {}
-    }
-  
-    if (deletedCurrent) {
-      clearEditor();
-    }
-  
+
+    await moveItemsToTrash({
+      noteIds: [...directNoteIds],
+      folderIds: [...directFolderIds],
+      source: 'dashboard-multiselect',
+    });
+
     clearSelection({ sync: false });
-  
-    rebuildWikilinkIndex();
+
     renderTree();
-  
-    toast('Deleted selected items', 'success');
-  
-    window.dispatchEvent(new CustomEvent('yanta-note-updated', {
+
+    window.dispatchEvent(new CustomEvent('yanta-dashboard-refresh', {
       detail: {
-        reason: 'bulk-delete',
-        source: 'dashboard',
-        deleted: true,
+        reason: 'trash-selected',
+        source: 'dashboard-multiselect',
       },
     }));
-  
-    window.dispatchEvent(new CustomEvent('yanta-dashboard-refresh'));
   }
   
   // ============================================================
@@ -1735,12 +1731,7 @@ import {
     border: 1px solid color-mix(in srgb, var(--accent) 36%, var(--border));
     border-radius: 999px;
   
-    background:
-      linear-gradient(
-        135deg,
-        color-mix(in srgb, var(--accent) 10%, var(--bg-elev)),
-        color-mix(in srgb, var(--bg-elev) 94%, transparent)
-      );
+    background: color-mix(in srgb, var(--accent) 10%, var(--bg-elev));
   
     box-shadow:
       0 20px 60px rgba(0,0,0,0.32),
@@ -1814,6 +1805,9 @@ import {
     font-weight: 760;
   
     cursor: pointer;
+
+    width: auto;
+    padding: 0 8px;
   }
   
   .yanta-dashboard-tray-btn:hover:not(:disabled) {
@@ -1879,7 +1873,7 @@ import {
     background: var(--bg-elev);
     color: var(--text);
   
-    box-shadow: 0 24px 72px rgba(0,0,0,0.42);
+    box-shadow: 0px 10px 36px rgb(0 0 0 / 22%);
     animation: yanta-pop-in 120ms cubic-bezier(.2,.8,.2,1);
   }
   
@@ -2012,7 +2006,7 @@ import {
      Mobile
      ============================================================ */
   
-  @media (max-width: 760px) {
+  @media (max-width: 900px) {
     .yanta-dashboard-selection-tray {
       bottom: max(14px, env(safe-area-inset-bottom));
       width: min(560px, calc(100vw - 18px));

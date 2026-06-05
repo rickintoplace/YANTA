@@ -49,6 +49,24 @@ import {
   openCreateMenu,
 } from './create-actions.js';
 
+import {
+  yantaConfirm,
+} from './dialogs.js';
+
+import {
+  isNoteInTrash,
+  isFolderInTrash,
+  moveNoteToTrash,
+  moveFolderToTrash,
+} from './trash.js';
+
+import {
+  showTrashDropTarget,
+  hideTrashDropTarget,
+  isPointOverTrashDropTarget,
+  setTrashDropTargetHot,
+} from './trash-drop-target.js';
+
   const MOBILE_MQ = window.matchMedia('(max-width: 880px)');
   
   const DASH_ORDER_STEP = 1000;
@@ -78,6 +96,15 @@ import {
   const DEFAULT_FOLDER_HEIGHT = 150;
   const MIN_CARD_HEIGHT = 76;
   const MAX_CARD_HEIGHT = 620;
+  const DASHBOARD_PREVIEW_MAX_BLOCKS = 20;
+
+  /*
+    draw.js erzeugt Dashboard-Thumbnails effektiv als 360×220 SVG.
+    Diese Ratio reservieren wir sofort, damit die Card-Höhe nach Reload
+    nicht erst klein misst und später beim Thumbnail-Load springt.
+  */
+  const DASHBOARD_DRAWING_THUMB_W = 360;
+  const DASHBOARD_DRAWING_THUMB_H = 220;
 
   const DASHBOARD_CARD_DISPLAY_KEY = 'dashboard.cardDisplay.v1';
 
@@ -163,27 +190,6 @@ import {
       return null;
     }
   }
-
-  function estimatedDashboardEventHeaderHeight() {
-    const prefs = normalizeDashboardCardDisplayPrefs(dashboardCardDisplay);
-    if (!prefs.linkedEventShow) return 0;
-
-    const f = prefs.linkedEventFields || {};
-
-    if (!f.icon && !f.title && !f.time && !f.location && !f.description) {
-      return 0;
-    }
-
-    let h = 18;
-
-    if (f.title || f.icon) h += 16;
-    if (f.time) h += 18;
-    if (f.location) h += 18;
-    if (f.description) h += 34;
-
-    return Math.max(38, Math.min(110, h));
-  }
-
 
   export function getDashboardCardDisplayPrefs() {
     return normalizeDashboardCardDisplayPrefs(dashboardCardDisplay);
@@ -437,18 +443,77 @@ import {
     node.style.setProperty('--yanta-stagger-offset', `${offset}px`);
   }
   
-  function heightToGridSpan(px) {
+  function cancelDashboardCardStagger(card) {
+    if (!card) return;
+
+    card.classList.remove('yanta-stagger-item');
+
+    try {
+      card.getAnimations?.().forEach((anim) => {
+        try {
+          anim.cancel();
+        } catch {}
+      });
+    } catch {}
+
+    card.style.animation = '';
+    card.style.opacity = '';
+    card.style.transform = '';
+    card.style.filter = '';
+  }
+
+  function dashboardGridMetricsForCard(card = null) {
+    const grid =
+      card?.closest?.('.yanta-dashboard-grid') ||
+      root?.querySelector?.('.yanta-dashboard-grid') ||
+      null;
+
+    if (!grid) {
+      return {
+        row: GRID_ROW_PX,
+        gap: GRID_GAP_PX,
+      };
+    }
+
+    const style = getComputedStyle(grid);
+
+    const row =
+      parseFloat(style.gridAutoRows || '') ||
+      GRID_ROW_PX;
+
+    const gap =
+      parseFloat(style.rowGap || '') ||
+      parseFloat(style.gap || '') ||
+      GRID_GAP_PX;
+
+    return {
+      row: Number.isFinite(row) && row > 0 ? row : GRID_ROW_PX,
+      gap: Number.isFinite(gap) && gap >= 0 ? gap : GRID_GAP_PX,
+    };
+  }
+
+  function heightToGridSpan(px, card = null) {
     const h = Math.max(
       MIN_CARD_HEIGHT,
       Math.min(MAX_CARD_HEIGHT, Number(px) || DEFAULT_NOTE_HEIGHT)
     );
-  
-    // CSS Grid item height:
-    // span * rowHeight + (span - 1) * gap
-    // => span = ceil((height + gap) / (rowHeight + gap))
+
+    const { row, gap } = dashboardGridMetricsForCard(card);
+
+    /*
+      CSS Grid item height:
+        span * rowHeight + (span - 1) * rowGap
+
+      Umgestellt:
+        span = ceil((height + rowGap) / (rowHeight + rowGap))
+
+      Wichtig:
+      rowGap muss aus CSS kommen, weil dashboard.css je nach Breakpoint
+      andere Gaps verwenden kann.
+    */
     return Math.max(
       5,
-      Math.ceil((h + GRID_GAP_PX) / (GRID_ROW_PX + GRID_GAP_PX))
+      Math.ceil((h + gap) / (row + gap))
     );
   }
   
@@ -473,51 +538,409 @@ import {
       ? DEFAULT_FOLDER_HEIGHT
       : DEFAULT_NOTE_HEIGHT;
   }
-    
+
+  const dashboardAutofitObservers = new WeakMap();
+
+  function hasManualDashboardHeight(note) {
+    return note.dashboardHeightPx != null || note.dashboardHeight != null;
+  }
+
+  function applyDashboardCardHeight(card, heightPx) {
+    const h = Math.max(
+      MIN_CARD_HEIGHT,
+      Math.min(MAX_CARD_HEIGHT, Math.ceil(Number(heightPx) || MIN_CARD_HEIGHT))
+    );
+
+    card.style.setProperty('--dash-row-span', String(heightToGridSpan(h, card)));
+    card.dataset.effectiveHeight = String(h);
+  }
+
+  function dashboardNumericStyle(node, prop) {
+    if (!node) return 0;
+
+    const value = parseFloat(
+      getComputedStyle(node).getPropertyValue(prop) || '0'
+    );
+
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  function dashboardVerticalMargins(node) {
+    if (!node) return 0;
+
+    return (
+      dashboardNumericStyle(node, 'margin-top') +
+      dashboardNumericStyle(node, 'margin-bottom')
+    );
+  }
+
+  function dashboardVisibleInLayout(node) {
+    if (!node) return false;
+
+    const style = getComputedStyle(node);
+
+    return (
+      style.display !== 'none' &&
+      style.visibility !== 'hidden' &&
+      style.position !== 'absolute' &&
+      style.position !== 'fixed'
+    );
+  }
+
+  function measureDashboardPreviewContentHeight(card, host) {
+    if (!card || !host) return DEFAULT_NOTE_HEIGHT;
+    if (!card.isConnected || !host.isConnected) return DEFAULT_NOTE_HEIGHT;
+
+    const cardRect = card.getBoundingClientRect();
+    const hostRect = host.getBoundingClientRect();
+
+    const cardWidth = Math.max(
+      120,
+      Math.ceil(cardRect.width || card.offsetWidth || 0)
+    );
+
+    const hostWidth = Math.max(
+      80,
+      Math.ceil(hostRect.width || host.clientWidth || cardWidth || 0)
+    );
+
+    if (!cardWidth || !hostWidth) return DEFAULT_NOTE_HEIGHT;
+
+    /*
+      Wichtig:
+      Der Preview-Clone braucht denselben CSS-Kontext wie die echte Preview:
+        .yanta-dashboard-page
+          .yanta-dash-card.note-card
+            .yanta-dash-preview
+
+      Wir messen aber NICHT die Card-Höhe, sondern nur den Preview-Inhalt.
+    */
+    const sandbox = document.createElement('div');
+    sandbox.className = 'yanta-dashboard-measure-sandbox';
+
+    Object.assign(sandbox.style, {
+      position: 'fixed',
+      left: '-100000px',
+      top: '0',
+      width: `${cardWidth}px`,
+      height: 'auto',
+      minHeight: '0',
+      maxHeight: 'none',
+      overflow: 'visible',
+      visibility: 'hidden',
+      pointerEvents: 'none',
+      opacity: '0',
+      zIndex: '-1',
+      contain: 'layout style paint',
+    });
+
+    const realPage = card.closest('.yanta-dashboard-page');
+
+    const page = document.createElement('div');
+    page.className = 'yanta-dashboard-page';
+
+    if (realPage) {
+      for (const [key, value] of Object.entries(realPage.dataset || {})) {
+        page.dataset[key] = value;
+      }
+    }
+
+    const cardShell = document.createElement('article');
+    cardShell.className = card.className;
+
+    cardShell.classList.remove(
+      'selected',
+      'bulk-selected',
+      'bulk-focus',
+      'resizing',
+      'drag-source',
+      'yanta-stagger-item'
+    );
+
+    Object.assign(cardShell.style, {
+      width: `${cardWidth}px`,
+      height: 'auto',
+      minHeight: '0',
+      maxHeight: 'none',
+      margin: '0',
+      transform: 'none',
+      animation: 'none',
+      gridRow: 'auto',
+      position: 'relative',
+      overflow: 'visible',
+      contain: 'layout style paint',
+    });
+
+    cardShell.style.setProperty('--dash-row-span', 'auto');
+
+    const previewClone = host.cloneNode(false);
+    previewClone.className = host.className;
+
+    /*
+      Preview-Host bekommt exakt die echte Breite.
+      Keine echte Höhe, kein Grid-Stretch.
+    */
+    Object.assign(previewClone.style, {
+      width: `${hostWidth}px`,
+      height: 'auto',
+      minHeight: '0',
+      maxHeight: 'none',
+      overflow: 'visible',
+      flex: '0 0 auto',
+      alignSelf: 'stretch',
+    });
+
+    for (const child of [...host.children]) {
+      if (!dashboardVisibleInLayout(child)) continue;
+
+      previewClone.append(child.cloneNode(true));
+    }
+
+    cardShell.append(previewClone);
+    page.append(cardShell);
+    sandbox.append(page);
+    document.body.append(sandbox);
+
+    let measured = 0;
+
+    try {
+      const children = [...previewClone.children];
+
+      if (children.length) {
+        let h = 0;
+
+        /*
+          Host-eigene Padding/Border mitmessen.
+          Children-Messung allein verpasst sonst Preview-Innenabstände.
+        */
+        h += dashboardNumericStyle(previewClone, 'padding-top');
+        h += dashboardNumericStyle(previewClone, 'padding-bottom');
+        h += dashboardNumericStyle(previewClone, 'border-top-width');
+        h += dashboardNumericStyle(previewClone, 'border-bottom-width');
+
+        for (const child of children) {
+          const rect = child.getBoundingClientRect();
+
+          h += rect.height + dashboardVerticalMargins(child);
+        }
+
+        const hostStyle = getComputedStyle(previewClone);
+        const rowGap =
+          parseFloat(hostStyle.rowGap || hostStyle.gap || '0') || 0;
+
+        if (rowGap && children.length > 1) {
+          h += rowGap * (children.length - 1);
+        }
+
+        measured = Math.ceil(h);
+      } else {
+        measured = Math.ceil(
+          previewClone.scrollHeight ||
+          previewClone.offsetHeight ||
+          0
+        );
+      }
+    } finally {
+      sandbox.remove();
+    }
+
+    return Math.max(0, measured || 0);
+  }
+
+  function measureDashboardCardChromeHeight(card, host) {
+    if (!card || !host) return 0;
+
+    let h = 0;
+
+    /*
+      Card padding/border.
+    */
+    h += dashboardNumericStyle(card, 'padding-top');
+    h += dashboardNumericStyle(card, 'padding-bottom');
+    h += dashboardNumericStyle(card, 'border-top-width');
+    h += dashboardNumericStyle(card, 'border-bottom-width');
+
+    /*
+      Nur echte Layout-Chrome-Elemente zählen.
+      Bewusst NICHT:
+      - Preview selbst
+      - Note-Corner
+      - Actions
+      - Resize-Handle
+    */
+    const header = card.querySelector(':scope > .yanta-dash-card-head');
+
+    if (header && dashboardVisibleInLayout(header)) {
+      const rect = header.getBoundingClientRect();
+      h += rect.height + dashboardVerticalMargins(header);
+    }
+
+    return Math.ceil(h);
+  }
+
+  function measureDashboardNoteCardNaturalHeight(card, host) {
+    if (!card || !host) return DEFAULT_NOTE_HEIGHT;
+
+    const previewH = measureDashboardPreviewContentHeight(card, host);
+    const chromeH = measureDashboardCardChromeHeight(card, host);
+
+    /*
+      Kleine Reserve gegen Subpixel/Grid-Rounding.
+      Keine breitenabhängige Magic-Zahl.
+    */
+    const reserve = 4;
+
+    return Math.max(
+      MIN_CARD_HEIGHT,
+      Math.min(
+        MAX_CARD_HEIGHT,
+        Math.ceil(previewH + chromeH + reserve)
+      )
+    );
+  }
+
+  function fitDashboardNoteCardToRenderedPreview(card, note, host) {
+    if (!card || !note || !host) return;
+
+    try {
+      dashboardAutofitObservers.get(card)?.disconnect();
+    } catch {}
+
+    dashboardAutofitObservers.delete(card);
+
+    let raf = 0;
+    let lastAppliedHeight = Number(card.dataset.effectiveHeight || 0) || 0;
+
+    const apply = () => {
+      raf = 0;
+
+      if (!card.isConnected || !host.isConnected) {
+        try {
+          dashboardAutofitObservers.get(card)?.disconnect();
+        } catch {}
+
+        dashboardAutofitObservers.delete(card);
+        return;
+      }
+
+      const contentHeight = measureDashboardNoteCardNaturalHeight(card, host);
+
+      card.dataset.contentMaxHeight = String(contentHeight);
+
+      const finalHeight = hasManualDashboardHeight(note)
+        ? Math.min(
+            itemDashboardHeightPx({ kind: 'note', note, id: note.id }),
+            contentHeight
+          )
+        : contentHeight;
+
+      if (Math.abs(finalHeight - lastAppliedHeight) < 1) {
+        return;
+      }
+
+      lastAppliedHeight = finalHeight;
+      applyDashboardCardHeight(card, finalHeight);
+    };
+
+    const scheduleApply = () => {
+      if (raf) return;
+
+      raf = requestAnimationFrame(() => {
+        requestAnimationFrame(apply);
+      });
+    };
+
+    requestAnimationFrame(() => {
+      apply();
+
+      host.querySelectorAll('img').forEach((img) => {
+        if (img.complete) return;
+
+        img.addEventListener('load', scheduleApply, { once: true });
+        img.addEventListener('error', scheduleApply, { once: true });
+      });
+
+      if (typeof ResizeObserver !== 'undefined') {
+        const ro = new ResizeObserver(() => {
+          scheduleApply();
+        });
+
+        ro.observe(card);
+        ro.observe(host);
+
+        for (const child of host.children) {
+          ro.observe(child);
+        }
+
+        dashboardAutofitObservers.set(card, ro);
+      }
+    });
+  }
+
+  let dashboardAutofitTimer = 0;
+
+  function scheduleDashboardVisibleNoteAutofit({
+    delay = 120,
+  } = {}) {
+    clearTimeout(dashboardAutofitTimer);
+
+    dashboardAutofitTimer = window.setTimeout(() => {
+      if (!dashboard.visible || !root) return;
+
+      const cards = [
+        ...root.querySelectorAll('.yanta-dash-card.note-card[data-note-id]'),
+      ];
+
+      for (const card of cards) {
+        const noteId = card.dataset.noteId;
+        const note = state.notes.get(noteId);
+
+        if (!note) continue;
+
+        /*
+          Manuelle Höhen respektieren.
+          Doppelklick auf Resize-Handle löscht dashboardHeightPx/dashboardHeight.
+        */
+        if (hasManualDashboardHeight(note)) {
+          continue;
+        }
+
+        const host = card.querySelector('[data-preview-host]');
+        if (!host) continue;
+
+        fitDashboardNoteCardToRenderedPreview(card, note, host);
+      }
+    }, delay);
+  }
+
   function maxResizeHeightForCard(card, key) {
-    const { kind } = parseItemKey(key);
+    const { kind, id } = parseItemKey(key);
 
     if (kind === 'note') {
+      const note = state.notes.get(id);
+      const host = card?.querySelector?.('[data-preview-host]');
+
+      if (note && host) {
+        const measured = measureDashboardNoteCardNaturalHeight(card, host);
+
+        if (measured > 0) {
+          return Math.max(MIN_CARD_HEIGHT, Math.min(MAX_CARD_HEIGHT, measured));
+        }
+      }
+
       const fromPreview = Number(card?.dataset?.contentMaxHeight);
 
       if (Number.isFinite(fromPreview) && fromPreview > 0) {
         return Math.max(MIN_CARD_HEIGHT, Math.min(MAX_CARD_HEIGHT, fromPreview));
       }
-
-      const host = card?.querySelector?.('.yanta-dash-preview');
-
-      if (host) {
-        const measured = Math.ceil(host.scrollHeight + 18);
-        if (measured > 0) {
-          return Math.max(MIN_CARD_HEIGHT, Math.min(MAX_CARD_HEIGHT, measured));
-        }
-      }
     }
 
     return MAX_CARD_HEIGHT;
   }
-
+  
   function noteHasCustomIcon(note) {
     const def = note.type === 'list' ? 'list' : 'file-text';
     return !!note.icon && note.icon !== def && note.icon !== 'file';
-  }
-  
-  function autoHeightForPreview(preview) {
-    let h = 82;
-  
-    for (const block of preview.blocks || []) {
-      if (block.type === 'heading') h += block.level === 1 ? 30 : 25;
-      else if (block.type === 'task') h += 28;
-      else if (block.type === 'text') h += Math.min(80, 18 + Math.ceil((block.text || '').length / 36) * 16);
-      else if (block.type === 'quote') h += 42;
-      else if (block.type === 'image') h += 120;
-      else if (block.type === 'video') h += 132;
-      else if (block.type === 'drawing') h += 118;
-    }
-  
-    if (preview.badges?.length) h += 28;
-  
-    return Math.max(MIN_CARD_HEIGHT, Math.min(MAX_CARD_HEIGHT, h));
   }
 
   function fallbackOrderForNote(note) {
@@ -587,6 +1010,7 @@ function getDashboardItems() {
   */
   const pinnedNotes = [...state.notes.values()]
     .filter((n) => n.pinned)
+    .filter((n) => !isNoteInTrash(n))
     .filter((n) => !shouldHideFromDashboard(n))
     .filter((n) => {
       if (!folderId) return true;
@@ -602,6 +1026,7 @@ function getDashboardItems() {
     }));
 
   const folders = [...state.folders.values()]
+    .filter((f) => !isFolderInTrash(f))
     .filter((f) => !shouldHideFromDashboard(f))
     .filter((f) => (f.parentId || null) === folderId)
     .map((folder) => ({
@@ -613,6 +1038,7 @@ function getDashboardItems() {
     }));
 
   const notes = [...state.notes.values()]
+    .filter((n) => !isNoteInTrash(n))
     .filter((n) => !shouldHideFromDashboard(n))
     .filter((n) => !n.pinned)
     .filter((n) => (n.folderId || null) === folderId)
@@ -710,6 +1136,30 @@ function getDashboardItems() {
       if (isMobile() && !state.currentNoteId) {
         showDashboard({ replace: true });
       }
+    });
+
+    window.addEventListener('resize', () => {
+      scheduleDashboardVisibleNoteAutofit({
+        delay: 180,
+      });
+    });
+
+    window.addEventListener('yanta-sidebar-resized', () => {
+      scheduleDashboardVisibleNoteAutofit({
+        delay: 240,
+      });
+    });
+
+    window.addEventListener('yanta-side-pane-opened', () => {
+      scheduleDashboardVisibleNoteAutofit({
+        delay: 240,
+      });
+    });
+
+    window.addEventListener('yanta-side-pane-closed', () => {
+      scheduleDashboardVisibleNoteAutofit({
+        delay: 240,
+      });
     });
 
     let pendingBlankTap = null;
@@ -1245,6 +1695,10 @@ function renderDashboard({ animate = true } = {}) {
 
   page.append(body);
   root.append(page);
+
+  scheduleDashboardVisibleNoteAutofit({
+    delay: 220,
+  });
 }
 
 function renderDashboardHeader() {
@@ -1773,35 +2227,20 @@ function renderCardActions(item) {
   async function deleteDashboardNote(noteId) {
     const note = state.notes.get(noteId);
     if (!note) return;
-  
-    if (!confirm(`Delete "${note.title || 'Untitled'}"? This cannot be undone.`)) {
-      return;
-    }
-  
-    await store.notes.del(noteId);
-  
-    state.notes.delete(noteId);
-    state.searchIndex.delete(noteId);
+
+    await moveNoteToTrash(noteId, {
+      source: 'dashboard',
+      toastMessage: 'Moved note to Trash',
+    });
+
     previewCache.delete(noteId);
-  
-    try {
-      await destroyNoteDoc(noteId);
-    } catch {}
-  
-    if (state.currentNoteId === noteId) {
-      clearEditor();
-    }
-  
-    rebuildWikilinkIndex();
-  
-    window.dispatchEvent(new CustomEvent('yanta-note-updated', {
-      detail: { noteId },
-    }));
-  
-    toast('Note deleted', 'success');
-    renderDashboard();
+
+    renderDashboard({
+      animate: false,
+    });
   }
     
+
   function collectDashboardFolderIdsRecursive(folderId) {
     const out = new Set();
     const stack = [folderId];
@@ -1839,65 +2278,19 @@ function renderCardActions(item) {
     const folder = state.folders.get(folderId);
     if (!folder) return;
 
-    const folderIds = collectDashboardFolderIdsRecursive(folderId);
-    const noteIds = collectDashboardNoteIdsInsideFolders(folderIds);
+    await moveFolderToTrash(folderId, {
+      source: 'dashboard',
+      toastMessage: 'Moved folder to Trash',
+    });
 
-    const folderCount = folderIds.size;
-    const noteCount = noteIds.size;
-
-    const msg =
-      noteCount || folderCount > 1
-        ? `Delete "${folder.name || 'Folder'}" and everything inside?\n\nThis will delete ${folderCount} folder${folderCount === 1 ? '' : 's'} and ${noteCount} note${noteCount === 1 ? '' : 's'}.\n\nThis cannot be undone.`
-        : `Delete "${folder.name || 'Folder'}"? This cannot be undone.`;
-
-    if (!confirm(msg)) return;
-
-    const deletingCurrentNote =
-      state.currentNoteId &&
-      noteIds.has(state.currentNoteId);
-
-    for (const noteId of noteIds) {
-      await store.notes.del(noteId);
-
-      state.notes.delete(noteId);
-      state.searchIndex.delete(noteId);
-      previewCache.delete(noteId);
-
-      try {
-        await destroyNoteDoc(noteId);
-      } catch {}
-    }
-
-    for (const id of folderIds) {
-      await store.folders.del(id);
-
-      state.folders.delete(id);
-      state.expandedFolders.delete(id);
-    }
-
-    if (dashboard.folderId && folderIds.has(dashboard.folderId)) {
+    if (dashboard.folderId === folderId || dashboardFolderIsAncestor(folderId, dashboard.folderId)) {
       dashboard.folderId = null;
       state.dashboardFolderId = null;
     }
 
-    if (deletingCurrentNote) {
-      clearEditor();
-    }
-
-    rebuildWikilinkIndex();
-
-    window.dispatchEvent(new CustomEvent('yanta-folder-updated', {
-      detail: {
-        folderId,
-        deleted: true,
-      },
-    }));
-
-    window.dispatchEvent(new CustomEvent('yanta-dashboard-refresh'));
-
-    toast('Folder deleted', 'success');
-
-    renderDashboard();
+    renderDashboard({
+      animate: false,
+    });
   }
 
   async function moveDashboardNoteOutOfFolder(noteId) {
@@ -2610,27 +3003,6 @@ function renderFolderMiniDrawing(noteId, block) {
 
     host.classList.toggle('is-media-only', !!preview.mediaOnly && !eventHeader);
 
-    const contentMaxH =
-      autoHeightForPreview(preview) +
-      (eventHeader ? estimatedDashboardEventHeaderHeight() : 0);
-
-    card.dataset.contentMaxHeight = String(contentMaxH);  
-    
-    if (!card.isConnected) return;
-  
-    // Auto-size unless user manually resized.
-    if (note.dashboardHeightPx == null && note.dashboardHeight == null) {
-      const autoH = contentMaxH;
-      card.style.setProperty('--dash-row-span', String(heightToGridSpan(autoH)));
-      card.dataset.effectiveHeight = String(autoH);
-    } else {
-      const storedH = itemDashboardHeightPx({ kind: 'note', note, id: note.id });
-      const cappedH = Math.min(storedH, contentMaxH);
-
-      card.style.setProperty('--dash-row-span', String(heightToGridSpan(cappedH)));
-      card.dataset.effectiveHeight = String(cappedH);
-    }
-
     host.replaceChildren();
 
     if (eventHeader) {
@@ -2641,6 +3013,8 @@ function renderFolderMiniDrawing(noteId, block) {
       host.append(el('div', {
         class: 'yanta-dash-empty-preview',
       }, 'Empty note'));
+
+      fitDashboardNoteCardToRenderedPreview(card, note, host);
       return;
     }
   
@@ -2709,6 +3083,8 @@ function renderFolderMiniDrawing(noteId, block) {
   
       host.append(badges);
     }
+
+    fitDashboardNoteCardToRenderedPreview(card, note, host);
   }
 
   function renderDashboardTask(noteId, task) {
@@ -2815,33 +3191,128 @@ function renderDashboardVideo(block) {
 
   return wrap;
 }
-  
-  function renderDashboardDrawing(noteId, block) {
-    const wrap = el('div', { class: 'yanta-dash-media yanta-dash-drawing-thumb' });
-  
-    wrap.innerHTML = `${lucide('line-squiggle', 24)} <span style="margin-left:8px">Drawing</span>`;
-  
-    import('./draw.js')
-      .then(async ({ drawingThumbnailUrl }) => {
-        const hit = findDrawing(block.id, noteId);
-        if (!hit || !wrap.isConnected) return;
-  
-        const url = await drawingThumbnailUrl(hit.noteId, block.id);
-        if (!url || !wrap.isConnected) return;
-  
-        wrap.replaceChildren();
-  
-        wrap.append(el('img', {
-          src: url,
-          alt: 'Drawing',
-          loading: 'lazy',
-          draggable: 'false',
-        }));
-      })
-      .catch(() => {});
-  
-    return wrap;
+
+function reserveDashboardDrawingPreviewSpace(wrap) {
+  if (!wrap) return;
+
+  wrap.style.aspectRatio = `${DASHBOARD_DRAWING_THUMB_W} / ${DASHBOARD_DRAWING_THUMB_H}`;
+  wrap.style.minHeight = '118px';
+  wrap.style.overflow = 'hidden';
+
+  wrap.style.display = 'flex';
+  wrap.style.alignItems = 'center';
+  wrap.style.justifyContent = 'center';
+}
+
+async function replaceWithFadeInImage(wrap, img) {
+  if (!wrap || !img) return;
+  if (!wrap.isConnected) return;
+
+  /*
+    Wichtig:
+    Wenn das Bild noch nicht dekodiert ist, läuft die Opacity-Transition
+    sonst oft ins Leere und das Bild ploppt danach abrupt auf.
+  */
+  try {
+    if (typeof img.decode === 'function') {
+      await img.decode();
+    }
+  } catch {
+    /*
+      decode() kann bei SVG/Data-URLs je nach Browser fehlschlagen.
+      Dann trotzdem weiter.
+    */
   }
+
+  if (!wrap.isConnected) return;
+
+  img.style.opacity = '0';
+  img.style.transition = 'opacity 180ms ease';
+  img.style.willChange = 'opacity';
+
+  wrap.replaceChildren(img);
+  wrap.classList.remove('is-loading');
+
+  /*
+    Layout-Flush: Browser muss opacity:0 wirklich gesehen haben,
+    bevor wir auf opacity:1 wechseln.
+  */
+  img.getBoundingClientRect();
+
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      if (!img.isConnected) return;
+
+      img.style.opacity = '1';
+
+      window.setTimeout(() => {
+        if (!img.isConnected) return;
+
+        img.style.willChange = '';
+      }, 220);
+    });
+  });
+}
+
+function renderDashboardDrawing(noteId, block) {
+  const wrap = el('div', {
+    class: 'yanta-dash-media yanta-dash-drawing-thumb is-loading',
+  });
+
+  reserveDashboardDrawingPreviewSpace(wrap);
+
+  /*
+    Dezenter leerer Placeholder:
+    Fläche ist reserviert, aber kein sichtbarer Text/Icon.
+  */
+  wrap.append(el('div', {
+    class: 'yanta-dash-drawing-placeholder',
+    'aria-hidden': 'true',
+  }));
+
+  import('./draw.js')
+    .then(async ({ drawingThumbnailUrl }) => {
+      const hit = findDrawing(block.id, noteId);
+
+      if (!hit || !wrap.isConnected) return;
+
+      const url = await drawingThumbnailUrl(hit.noteId, block.id);
+
+      if (!url || !wrap.isConnected) return;
+
+      const img = el('img', {
+        src: url,
+        alt: 'Drawing',
+        loading: 'eager',
+        draggable: 'false',
+        class: 'yanta-dash-drawing-img',
+        style: {
+          width: '100%',
+          height: '100%',
+          objectFit: 'contain',
+          display: 'block',
+          border: '0',
+        },
+      });
+
+      await replaceWithFadeInImage(wrap, img);
+    })
+    .catch((err) => {
+      console.warn('[YANTA Dashboard] Drawing thumbnail failed', err);
+
+      if (!wrap.isConnected) return;
+
+      wrap.classList.remove('is-loading');
+
+      wrap.replaceChildren(
+        el('div', {
+          class: 'yanta-dash-drawing-placeholder is-error',
+        }, 'Drawing')
+      );
+    });
+
+  return wrap;
+}
   
   async function resolveDashboardImageUrl(url) {
     const raw = String(url || '');
@@ -2917,7 +3388,7 @@ function renderDashboardVideo(block) {
     let firstMeaningfulType = '';
 
     const pushBlock = (block) => {
-      if (blocks.length < 8) {
+      if (blocks.length < DASHBOARD_PREVIEW_MAX_BLOCKS) {
         blocks.push(block);
       }
     };
@@ -4400,6 +4871,7 @@ function startCardDrag(card, item, e) {
   card.style.viewTransitionName = 'none';
 
   root?.classList.add('is-card-dragging');
+  showTrashDropTarget();
 
   dashboard.suppressOpenUntil = performance.now() + 900;
   suppressDashboardStaggerFor(1400);
@@ -4440,6 +4912,8 @@ function startCardDrag(card, item, e) {
 
     dropFolderId: null,
     folderInsertPreview: false,
+
+    dropToTrash: false,
 
     currentScale: 1,
     targetScale: 1,
@@ -4495,6 +4969,18 @@ function updateLiveDragPlacement(clientX, clientY) {
 
   clearDragVisuals();
   d.dropFolderId = null;
+
+  const overTrash = isPointOverTrashDropTarget(clientX, clientY);
+
+  setTrashDropTargetHot(overTrash);
+
+  if (overTrash) {
+    d.dropToTrash = true;
+    setDragFolderInsertPreview(false);
+    return;
+  }
+
+  d.dropToTrash = false;
 
   /*
     Folder-Drop bleibt pointerbasiert:
@@ -5094,6 +5580,51 @@ async function finishCardDrag() {
 
   stopDragAutoScroll(d);
   clearDragVisuals();
+
+  const shouldDropToTrash =
+    d.dropToTrash ||
+    isPointOverTrashDropTarget(d.lastX, d.lastY);
+
+  hideTrashDropTarget();
+
+  if (shouldDropToTrash) {
+    if (d.scaleRaf) {
+      cancelAnimationFrame(d.scaleRaf);
+      d.scaleRaf = 0;
+    }
+
+    dashboard.dragging = null;
+    dashboard.suppressOpenUntil = performance.now() + 850;
+    suppressDashboardStaggerFor(1400);
+
+    d.clone?.remove();
+
+    d.source.classList.remove('drag-source');
+    d.source.style.viewTransitionName = '';
+
+    root?.classList.remove('is-card-dragging');
+
+    if (d.sourceKind === 'note') {
+      await moveNoteToTrash(d.sourceId, {
+        source: 'dashboard-drag',
+        toastMessage: 'Moved note to Trash',
+      });
+
+      previewCache.delete(d.sourceId);
+    } else if (d.sourceKind === 'folder') {
+      await moveFolderToTrash(d.sourceId, {
+        source: 'dashboard-drag',
+        toastMessage: 'Moved folder to Trash',
+      });
+    }
+
+    renderDashboard({
+      animate: false,
+    });
+
+    return;
+  }
+
   setDragFolderInsertPreview(false);
 
   dashboard.dragging = null;
@@ -5152,9 +5683,17 @@ async function finishCardDrag() {
       }
     }
 
-    window.dispatchEvent(new CustomEvent('yanta-dashboard-refresh'));
-    renderDashboard();
-    return;
+    /*
+      Hier ist ein Render sinnvoll, weil das Item in einen Folder gewandert ist.
+      Aber kein zusätzlicher dashboard-refresh-Event, sonst rendern wir doppelt.
+    */
+      suppressDashboardStaggerFor(1400);
+
+      renderDashboard({
+        animate: false,
+      });
+  
+      return;
   }
 
   /*
@@ -5194,6 +5733,7 @@ async function cancelCardDrag() {
 
   stopDragAutoScroll(d);
   clearDragVisuals();
+  hideTrashDropTarget();
   setDragFolderInsertPreview(false);
 
   dashboard.dragging = null;
@@ -5238,6 +5778,12 @@ async function persistGridOrder(grid, section) {
         note.dashboardOrder = order;
       }
 
+      /*
+        Wichtig:
+        Kein yanta-dashboard-refresh hier.
+        Die DOM-Reihenfolge ist nach dem Drag bereits korrekt.
+        Ein kompletter renderDashboard() würde nur flickern.
+      */
       note.updated = Date.now();
 
       await store.notes.put(note);
@@ -5254,141 +5800,317 @@ async function persistGridOrder(grid, section) {
     order += DASH_ORDER_STEP;
   }
 
-  window.dispatchEvent(new CustomEvent('yanta-dashboard-refresh'));
+  /*
+    Absichtlich KEIN:
+      window.dispatchEvent(new CustomEvent('yanta-dashboard-refresh'));
+    
+    Reorder ist bereits visuell abgeschlossen.
+    Die neue Reihenfolge ist persisted.
+  */
 }
 
-  function bindResizeHandle(handle, key) {
-    const reset = async () => {
-      dashboard.suppressOpenUntil = performance.now() + 700;
+function bindResizeHandle(handle, key) {
+  let handleLongPressTimer = 0;
+  let handleLongPressFired = false;
+
+  /*
+    Mobile Safari/Chrome feuern bei Long-Press oft ein contextmenu.
+    Auf dem Resize-Handle ist das nie erwünscht:
+    - Long-Press soll Reset auslösen
+    - Drag soll Resize auslösen
+    - kein Dashboard-/Browser-Kontextmenü
+  */
+    handle.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation?.();
+    }, true);
+
+  const clearHandleLongPressTimer = () => {
+    clearTimeout(handleLongPressTimer);
+    handleLongPressTimer = 0;
+  };
+
+  const reset = async () => {
+    dashboard.suppressOpenUntil = performance.now() + 700;
+    suppressDashboardStaggerFor(1400);
+
+    const card = handle.closest('.yanta-dash-card');
+
+    if (!card) {
       await setItemHeightPx(key, null);
-      dashboard.selectedKey = null;
-      renderDashboard();
+      return;
+    }
+
+    cancelDashboardCardStagger(card);
+
+    await setItemHeightPx(key, null);
+
+    dashboard.selectedKey = key;
+    card.classList.add('selected');
+
+    const { kind, id } = parseItemKey(key);
+
+    if (kind === 'note') {
+      const note = state.notes.get(id);
+      const host = card.querySelector('[data-preview-host]');
+
+      if (note && host) {
+        /*
+          Kein renderDashboard().
+          Nur diese eine Card wieder auf natürliche Preview-Höhe fitten.
+        */
+        fitDashboardNoteCardToRenderedPreview(card, note, host);
+      }
+
+      return;
+    }
+
+    if (kind === 'folder') {
+      /*
+        Folder haben keine Preview-Hydration wie Notes.
+        Reset bedeutet hier: zurück auf Default-Folder-Höhe.
+      */
+      applyDashboardCardHeight(card, DEFAULT_FOLDER_HEIGHT);
+      card.dataset.contentMaxHeight = String(DEFAULT_FOLDER_HEIGHT);
+    }
+  };
+
+  handle.addEventListener('dblclick', async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    await reset();
+  });
+
+  handle.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    clearHandleLongPressTimer();
+    handleLongPressFired = false;
+
+    const card = handle.closest('.yanta-dash-card');
+    if (!card) return;
+
+    /*
+      Wichtig:
+      Falls die Card noch eine Entry-Stagger-Animation/Füllzustand hat,
+      beim Resize sofort entfernen. Sonst kann Grid-Row-Änderung optisch
+      wie ein erneutes Fade-In wirken.
+    */
+    cancelDashboardCardStagger(card);
+    suppressDashboardStaggerFor(1400);
+
+    const rect = card.getBoundingClientRect();
+
+    dashboard.resize = {
+      key,
+      card,
+      pointerId: e.pointerId,
+      pointerType: e.pointerType || '',
+      startX: e.clientX,
+      startY: e.clientY,
+      startHeight: rect.height,
+      nextHeight: rect.height,
+      active: false,
     };
 
-    handle.addEventListener('dblclick', async (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      await reset();
-    });
+    try {
+      handle.setPointerCapture?.(e.pointerId);
+    } catch {}
 
-    handle.addEventListener('pointerdown', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
+    /*
+      Mobile / Pen:
+      Long-Press auf Resize-Handle macht dasselbe wie Doppelklick:
+      gespeicherte Höhe löschen und Auto-Fit wieder aktivieren.
 
-      const card = handle.closest('.yanta-dash-card');
-      if (!card) return;
+      Bewegung > MOVE_TOLERANCE bricht den Long-Press ab und startet Resize.
+    */
+    const canLongPressReset =
+      e.pointerType === 'touch' ||
+      e.pointerType === 'pen' ||
+      isMobile();
 
-      const rect = card.getBoundingClientRect();
+    if (canLongPressReset) {
+      handleLongPressTimer = window.setTimeout(async () => {
+        const r = dashboard.resize;
 
-      dashboard.resize = {
-        key,
-        card,
-        pointerId: e.pointerId,
-        startY: e.clientY,
-        startHeight: rect.height,
-        nextHeight: rect.height,
-        active: false,
-      };
+        if (!r || r.key !== key) return;
+        if (r.pointerId !== e.pointerId) return;
+        if (r.active) return;
 
-      try {
-        handle.setPointerCapture?.(e.pointerId);
-      } catch {}
+        handleLongPressFired = true;
 
-      document.addEventListener('pointermove', onDocumentResizeMove, true);
-      document.addEventListener('pointerup', onDocumentResizeUp, true);
-      document.addEventListener('pointercancel', onDocumentResizeCancel, true);
-    }, { passive: false });
+        cleanupResizeListeners();
 
-    function cleanupResizeListeners() {
-      document.removeEventListener('pointermove', onDocumentResizeMove, true);
-      document.removeEventListener('pointerup', onDocumentResizeUp, true);
-      document.removeEventListener('pointercancel', onDocumentResizeCancel, true);
+        try {
+          handle.releasePointerCapture?.(e.pointerId);
+        } catch {}
+
+        dashboard.resize = null;
+        dashboard.suppressOpenUntil = performance.now() + 900;
+
+        try {
+          navigator.vibrate?.(12);
+        } catch {}
+
+        await reset();
+      }, HANDLE_LONG_PRESS_MS);
     }
 
-    function onDocumentResizeMove(e) {
-      const r = dashboard.resize;
-      if (!r || r.key !== key) return;
-      if (r.pointerId != null && e.pointerId !== r.pointerId) return;
+    document.addEventListener('pointermove', onDocumentResizeMove, true);
+    document.addEventListener('pointerup', onDocumentResizeUp, true);
+    document.addEventListener('pointercancel', onDocumentResizeCancel, true);
+  }, { passive: false });
 
-      const dy = e.clientY - r.startY;
+  function cleanupResizeListeners() {
+    document.removeEventListener('pointermove', onDocumentResizeMove, true);
+    document.removeEventListener('pointerup', onDocumentResizeUp, true);
+    document.removeEventListener('pointercancel', onDocumentResizeCancel, true);
 
-      if (Math.abs(dy) > MOVE_TOLERANCE) {
-        r.active = true;
-      }
-
-      if (!r.active) return;
-
-      e.preventDefault();
-      e.stopPropagation();
-
-      const maxHeight = maxResizeHeightForCard(r.card, key);
-
-      const nextHeight = Math.max(
-        MIN_CARD_HEIGHT,
-        Math.min(maxHeight, r.startHeight + dy)
-      );
-
-      r.nextHeight = nextHeight;
-
-      r.card.style.setProperty('--dash-row-span', String(heightToGridSpan(nextHeight)));
-      r.card.dataset.effectiveHeight = String(Math.round(nextHeight));
-      r.card.classList.add('resizing');
-
-      dashboard.suppressOpenUntil = performance.now() + 700;
-    }
-
-    async function onDocumentResizeUp(e) {
-      const r = dashboard.resize;
-      if (!r || r.key !== key) return;
-      if (r.pointerId != null && e.pointerId !== r.pointerId) return;
-
-      e.preventDefault();
-      e.stopPropagation();
-
-      cleanupResizeListeners();
-
-      try {
-        handle.releasePointerCapture?.(e.pointerId);
-      } catch {}
-
-      dashboard.suppressOpenUntil = performance.now() + 900;
-
-      if (r.active) {
-        await setItemHeightPx(key, r.nextHeight);
-        dashboard.selectedKey = key;
-
-        // Kein komplettes renderDashboard() hier:
-        // Das verhindert das sichtbare Flackern nach Resize.
-        r.card.classList.add('selected');
-      } else {
-        // Wenn nur geklickt wurde: Karte selektiert lassen.
-        dashboard.selectedKey = key;
-        r.card.classList.add('selected');
-      }
-
-      r.card?.classList.remove('resizing');
-      dashboard.resize = null;
-    }
-
-    function onDocumentResizeCancel(e) {
-      const r = dashboard.resize;
-      if (!r || r.key !== key) return;
-
-      cleanupResizeListeners();
-
-      try {
-        handle.releasePointerCapture?.(e.pointerId);
-      } catch {}
-
-      // Visuelle Änderung zurücksetzen, falls Resize abgebrochen wurde.
-      r.card.style.setProperty('--dash-row-span', String(heightToGridSpan(r.startHeight)));
-      r.card.dataset.effectiveHeight = String(Math.round(r.startHeight));
-      r.card?.classList.remove('resizing');
-
-      dashboard.resize = null;
-      dashboard.suppressOpenUntil = performance.now() + 700;
-    }
+    clearHandleLongPressTimer();
   }
+
+  function onDocumentResizeMove(e) {
+    const r = dashboard.resize;
+    if (!r || r.key !== key) return;
+    if (r.pointerId != null && e.pointerId !== r.pointerId) return;
+
+    if (handleLongPressFired) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
+
+    const dx = e.clientX - (r.startX ?? e.clientX);
+    const dy = e.clientY - r.startY;
+    const moved = Math.hypot(dx, dy);
+
+    /*
+      Bewegung bricht den Long-Press-Reset ab.
+    */
+    if (moved > MOVE_TOLERANCE) {
+      clearHandleLongPressTimer();
+    }
+
+    if (Math.abs(dy) > MOVE_TOLERANCE) {
+      r.active = true;
+    }
+
+    if (!r.active) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    cancelDashboardCardStagger(r.card);
+    suppressDashboardStaggerFor(1400);
+
+    const maxHeight = maxResizeHeightForCard(r.card, key);
+
+    const nextHeight = Math.max(
+      MIN_CARD_HEIGHT,
+      Math.min(maxHeight, r.startHeight + dy)
+    );
+
+    r.nextHeight = nextHeight;
+
+    r.card.style.setProperty(
+      '--dash-row-span',
+      String(heightToGridSpan(nextHeight, r.card))
+    );
+
+    r.card.dataset.effectiveHeight = String(Math.round(nextHeight));
+    r.card.classList.add('resizing');
+
+    dashboard.suppressOpenUntil = performance.now() + 700;
+  }
+
+  async function onDocumentResizeUp(e) {
+    const r = dashboard.resize;
+    if (!r || r.key !== key) return;
+    if (r.pointerId != null && e.pointerId !== r.pointerId) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    cleanupResizeListeners();
+
+    try {
+      handle.releasePointerCapture?.(e.pointerId);
+    } catch {}
+
+    /*
+      Wenn der Long-Press bereits den Reset ausgeführt hat,
+      darf pointerup nichts mehr speichern.
+    */
+    if (handleLongPressFired) {
+      handleLongPressFired = false;
+      dashboard.resize = null;
+      return;
+    }
+
+    dashboard.suppressOpenUntil = performance.now() + 900;
+    suppressDashboardStaggerFor(1400);
+
+    if (r.active) {
+      cancelDashboardCardStagger(r.card);
+
+      await setItemHeightPx(key, r.nextHeight);
+
+      dashboard.selectedKey = key;
+
+      /*
+        Kein komplettes renderDashboard() hier:
+        Das verhindert sichtbares Flackern nach Resize.
+      */
+      r.card.classList.add('selected');
+    } else {
+      dashboard.selectedKey = key;
+      r.card.classList.add('selected');
+    }
+
+    r.card?.classList.remove('resizing');
+    cancelDashboardCardStagger(r.card);
+
+    dashboard.resize = null;
+  }
+
+  function onDocumentResizeCancel(e) {
+    const r = dashboard.resize;
+    if (!r || r.key !== key) return;
+
+    cleanupResizeListeners();
+
+    try {
+      handle.releasePointerCapture?.(e.pointerId);
+    } catch {}
+
+    if (handleLongPressFired) {
+      handleLongPressFired = false;
+      dashboard.resize = null;
+      return;
+    }
+
+    suppressDashboardStaggerFor(900);
+
+    /*
+      Visuelle Änderung zurücksetzen, falls Resize abgebrochen wurde.
+    */
+    r.card.style.setProperty(
+      '--dash-row-span',
+      String(heightToGridSpan(r.startHeight, r.card))
+    );
+
+    r.card.dataset.effectiveHeight = String(Math.round(r.startHeight));
+    r.card?.classList.remove('resizing');
+
+    cancelDashboardCardStagger(r.card);
+
+    dashboard.resize = null;
+    dashboard.suppressOpenUntil = performance.now() + 700;
+  }
+}
   
   async function setItemHeightPx(key, heightPx) {
     const { kind, id } = parseItemKey(key);

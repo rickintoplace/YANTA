@@ -635,7 +635,7 @@ function buildDom() {
 
   const tooltip = document.createElement('div');
   tooltip.className = 'yanta-qc-tooltip';
-  tooltip.textContent = 'Quick create';
+  tooltip.textContent = 'Tap or hold';
 
   shell.append(blobLayer, trigger, tooltip);
 

@@ -31,6 +31,26 @@ import {
   isSystemItem,
 } from './ai/brain.js';
 
+import {
+  isNoteInTrash,
+  isFolderInTrash,
+  folderHasTrashedAncestor,
+  collectTrashedRootItems,
+  trashCount,
+  moveNoteToTrash,
+  moveFolderToTrash,
+  moveItemsToTrash,
+  restoreNoteFromTrash,
+  restoreFolderFromTrash,
+  permanentlyDeleteNote,
+  permanentlyDeleteFolder,
+  emptyTrash,
+} from './trash.js';
+
+import {
+  formatCalendarDateTime,
+} from './calendar-preferences.js';
+
 function safeItemColor(c) {
   return safeCssColor(c);
 }
@@ -58,28 +78,49 @@ function isArchivedItem(item) {
 }
 
 function isMainTreeItem(item) {
-  return !isSystemItem(item) && !isArchivedItem(item);
+  return !isSystemItem(item) && !isArchivedItem(item) && !isFolderInTrash(item);
 }
 
 function isSystemFolder(f) {
-  return isSystemItem(f);
+  return !!f && isSystemItem(f) && !isFolderInTrash(f);
 }
 
 function isArchivedFolder(f) {
-  return isArchivedItem(f);
+  return !!f && isArchivedItem(f) && !isFolderInTrash(f);
 }
 
 function noteBelongsToSystem(note) {
-  return isSystemItem(note) || isSystemFolder(state.folders.get(note.folderId));
+  return (
+    !isNoteInTrash(note) &&
+    (
+      isSystemItem(note) ||
+      isSystemFolder(state.folders.get(note.folderId))
+    )
+  );
 }
 
 function noteBelongsToArchived(note) {
-  return isArchivedItem(note) || isArchivedFolder(state.folders.get(note.folderId));
+  return (
+    !isNoteInTrash(note) &&
+    (
+      isArchivedItem(note) ||
+      isArchivedFolder(state.folders.get(note.folderId))
+    )
+  );
 }
 
 function noteBelongsToMain(note) {
-  return !noteBelongsToSystem(note) && !noteBelongsToArchived(note);
+  return (
+    !isNoteInTrash(note) &&
+    !noteBelongsToSystem(note) &&
+    !noteBelongsToArchived(note)
+  );
 }
+
+import {
+  yantaConfirm,
+  yantaFolderPicker,
+} from './dialogs.js';
 
 /**
  * Aktiver Marker für Notes.
@@ -106,6 +147,27 @@ function activeNoteMarker(depth = 0) {
       pointerEvents: 'none',
     },
   });
+}
+
+const TREE_TRASH_EXPANDED_KEY = 'yanta.tree.trashExpanded.v1';
+
+function isTrashExpanded() {
+  try {
+    return localStorage.getItem(TREE_TRASH_EXPANDED_KEY) === 'true';
+  } catch {
+    return false;
+  }
+}
+
+function setTrashExpanded(value) {
+  try {
+    localStorage.setItem(TREE_TRASH_EXPANDED_KEY, value ? 'true' : 'false');
+  } catch {}
+}
+
+function toggleTrashExpanded() {
+  setTrashExpanded(!isTrashExpanded());
+  renderTree();
 }
 
 function applyCollapsedTreeDepth(row, depth = 0) {
@@ -818,6 +880,8 @@ export function renderTree() {
   const filterTag = state.activeTagFilter;
 
   const visible = [...state.notes.values()].filter((n) => {
+    if (isNoteInTrash(n)) return false;
+
     if (filterTag && !(n.tags || []).includes(filterTag)) return false;
 
     if (q) {
@@ -893,6 +957,49 @@ if (pinned.length) {
     e.preventDefault();
 
     const noteId = e.dataTransfer.getData('text/yanta-note');
+
+    if (noteId) {
+      const noteIds = draggedNoteIds(noteId);
+
+      for (const id of noteIds) {
+        const note = state.notes.get(id);
+        if (!note) continue;
+
+        if (isNoteInTrash(note)) {
+          await restoreNoteFromTrash(id, {
+            targetFolderId: null,
+            source: 'tree-drop-root',
+          });
+        } else {
+          note.folderId = null;
+          note.updated = Date.now();
+
+          await store.notes.put(note);
+        }
+      }
+    } else if (folderId) {
+      const folderIds = draggedFolderIds(folderId);
+
+      for (const id of folderIds) {
+        const folder = state.folders.get(id);
+        if (!folder) continue;
+
+        if (isFolderInTrash(folder)) {
+          await restoreFolderFromTrash(id, {
+            targetParentId: null,
+            source: 'tree-drop-root',
+          });
+        } else {
+          folder.parentId = null;
+          folder.updated = Date.now();
+
+          await store.folders.put(folder);
+        }
+      }
+    }
+
+    renderTree();
+
     const folderId = e.dataTransfer.getData('text/yanta-folder');
 
     if (noteId) {
@@ -972,6 +1079,13 @@ if (pinned.length) {
     }
 
     root.append(archivedSec);
+  }
+
+  const trashItems = collectTrashedRootItems();
+  const totalTrashCount = trashCount();
+
+  if (totalTrashCount > 0) {
+    root.append(trashRootFolderRow(trashItems, totalTrashCount));
   }
 
   const systemFolders = [...state.folders.values()]
@@ -1094,10 +1208,17 @@ function folderRow(f, visibleNotes, depth) {
           const note = state.notes.get(id);
           if (!note) continue;
 
-          note.folderId = f.id;
-          note.updated = Date.now();
+          if (isNoteInTrash(note)) {
+            await restoreNoteFromTrash(id, {
+              targetFolderId: f.id,
+              source: 'tree-drop-folder',
+            });
+          } else {
+            note.folderId = f.id;
+            note.updated = Date.now();
 
-          await store.notes.put(note);
+            await store.notes.put(note);
+          }
         }
       } else if (folderId) {
         const folderIds = draggedFolderIds(folderId);
@@ -1109,9 +1230,17 @@ function folderRow(f, visibleNotes, depth) {
           const folder = state.folders.get(id);
           if (!folder) continue;
 
-          folder.parentId = f.id;
+          if (isFolderInTrash(folder)) {
+            await restoreFolderFromTrash(id, {
+              targetParentId: f.id,
+              source: 'tree-drop-folder',
+            });
+          } else {
+            folder.parentId = f.id;
+            folder.updated = Date.now();
 
-          await store.folders.put(folder);
+            await store.folders.put(folder);
+          }
         }
       }
 
@@ -1181,6 +1310,420 @@ function folderRow(f, visibleNotes, depth) {
 
     for (const n of childNotes) {
       kids.append(noteRow(n, depth + 1));
+    }
+
+    if (!childFolders.length && !childNotes.length) {
+      kids.append(el('div', { class: 'tree-empty' }, 'Empty'));
+    }
+
+    wrap.append(kids);
+  }
+
+  return wrap;
+}
+
+function trashItemDeletedLabel(item) {
+  const ts = Number(item?.deletedAt || 0);
+
+  if (!ts) return 'In Trash';
+
+  try {
+    return formatCalendarDateTime(ts, {
+      allDay: false,
+      editor: false,
+      includeWeekday: false,
+    });
+  } catch {
+    return new Date(ts).toLocaleString();
+  }
+}
+
+function trashRootFolderRow(trashItems, totalTrashCount) {
+  const expanded = isTrashExpanded();
+
+  const wrap = el('div', {
+    class: 'tree-section tree-section-trash tree-folder-node trash-root-node',
+    dataset: {
+      treeKey: 'trash:root',
+      folderId: 'trash',
+      treeDepth: '0',
+    },
+  });
+
+  const row = el('div', {
+    class:
+      'tree-row folder trash-root-row' +
+      (expanded ? ' expanded' : ''),
+    dataset: {
+      treeKey: 'trash:root',
+      folderId: 'trash',
+      treeDepth: '0',
+    },
+    tabindex: '0',
+    style: {
+      paddingLeft: '12px',
+    },
+    onclick: (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleTrashExpanded();
+    },
+    onkeydown: (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        toggleTrashExpanded();
+      }
+    },
+    oncontextmenu: (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      showMenu(e.clientX, e.clientY, [
+        {
+          label: expanded ? 'Collapse Trash' : 'Expand Trash',
+          icon: expanded ? 'chevron-up' : 'chevron-down',
+          action: toggleTrashExpanded,
+        },
+        'hr',
+        {
+          label: 'Empty trash…',
+          danger: true,
+          action: async () => {
+            const ok = await yantaConfirm({
+              title: 'Empty trash?',
+              message: `Permanently delete ${totalTrashCount} item${totalTrashCount === 1 ? '' : 's'}?\n\nThis cannot be undone.`,
+              confirmLabel: 'Empty trash',
+              danger: true,
+            });
+
+            if (ok) {
+              await emptyTrash();
+            }
+          },
+        },
+      ]);
+    },
+    ondragover: (e) => {
+      const types = [...(e.dataTransfer?.types || [])];
+
+      if (!types.includes('text/yanta-note') && !types.includes('text/yanta-folder')) {
+        return;
+      }
+
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      row.classList.add('drop-target');
+    },
+    ondragleave: () => {
+      row.classList.remove('drop-target');
+    },
+    ondrop: async (e) => {
+      row.classList.remove('drop-target');
+      e.preventDefault();
+      e.stopPropagation();
+
+      const noteId = e.dataTransfer.getData('text/yanta-note');
+      const folderId = e.dataTransfer.getData('text/yanta-folder');
+
+      if (noteId) {
+        for (const id of draggedNoteIds(noteId)) {
+          await moveNoteToTrash(id, {
+            source: 'tree-drop-trash',
+          });
+        }
+      } else if (folderId) {
+        for (const id of draggedFolderIds(folderId)) {
+          await moveFolderToTrash(id, {
+            source: 'tree-drop-trash',
+          });
+        }
+      }
+
+      renderTree();
+    },
+  });
+
+  applyCollapsedTreeDepth(row, 0);
+
+  row.append(el('span', { class: 'twist' }, expanded ? '▾' : '▸'));
+
+  const icon = itemIcon('trash', '');
+  icon.classList.add('tree-folder-icon', 'tree-trash-root-icon');
+  row.append(icon);
+
+  row.append(el('span', { class: 'label' }, 'Trash'));
+
+  row.append(el('span', {
+    class: 'tree-folder-count',
+    title: `${totalTrashCount} item${totalTrashCount === 1 ? '' : 's'} in Trash`,
+  }, String(totalTrashCount)));
+
+  wrap.append(row);
+
+  if (expanded) {
+    const kids = el('div', { class: 'tree-children tree-trash-children' });
+
+    for (const folder of trashItems.folders) {
+      kids.append(trashFolderRow(folder, 1));
+    }
+
+    for (const note of trashItems.notes) {
+      kids.append(trashNoteRow(note, 1));
+    }
+
+    if (!trashItems.folders.length && !trashItems.notes.length) {
+      kids.append(el('div', { class: 'tree-empty' }, 'Trash is empty'));
+    }
+
+    wrap.append(kids);
+  }
+
+  return wrap;
+}
+
+function trashNoteRow(note, depth = 0) {
+  const key = noteKey(note.id);
+  visibleTreeOrder.push(key);
+
+  const selected = isSelected(key);
+  const isAnchor = selection.anchorKey === key;
+  const isActive = state.currentNoteId === note.id;
+
+  const row = el('div', {
+    class:
+      'tree-row note trash-row' +
+      (isActive ? ' active' : '') +
+      (selected ? ' selected' : '') +
+      (isAnchor ? ' selection-anchor' : ''),
+    dataset: {
+      treeKey: key,
+      noteId: note.id,
+      treeDepth: String(depth),
+      trashed: '1',
+    },
+    tabindex: '0',
+    draggable: 'true',
+    style: {
+      paddingLeft: (12 + depth * 14) + 'px',
+    },
+    onclick: (e) => handleTreeSelectionClick(e, key, () => {
+      openNote(note.id);
+      window.dispatchEvent(new CustomEvent('yanta-close-mobile-sidebar'));
+    }),
+    oncontextmenu: (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (!isSelected(key)) {
+        setOnlySelection(key);
+        renderTree();
+      }
+
+      showMenu(e.clientX, e.clientY, [
+        {
+          label: 'Restore',
+          icon: 'undo-2',
+          action: () => restoreNoteFromTrash(note.id),
+        },
+        {
+          label: 'Restore to folder…',
+          icon: 'folder-input',
+          action: async () => {
+            const folderId = await yantaFolderPicker({
+              title: 'Restore note to folder',
+              allowNone: true,
+              noneLabel: 'Home / no folder',
+              isDisabled(folder) {
+                return isFolderInTrash(folder);
+              },
+              disabledHint: 'Folder is in Trash',
+            });
+
+            if (folderId !== undefined) {
+              await restoreNoteFromTrash(note.id, {
+                targetFolderId: folderId,
+              });
+            }
+          },
+        },
+        'hr',
+        {
+          label: 'Delete permanently…',
+          danger: true,
+          action: async () => {
+            const ok = await yantaConfirm({
+              title: 'Delete permanently?',
+              message: `Permanently delete "${note.title || 'Untitled'}"?\n\nThis cannot be undone.`,
+              confirmLabel: 'Delete permanently',
+              danger: true,
+            });
+
+            if (ok) {
+              await permanentlyDeleteNote(note.id);
+            }
+          },
+        },
+      ]);
+    },
+    ondragstart: (e) => {
+      if (!isSelected(key)) setOnlySelection(key);
+
+      e.dataTransfer.setData('text/yanta-note', note.id);
+      e.dataTransfer.setData('text/plain', note.title || 'Untitled');
+      e.dataTransfer.effectAllowed = 'move';
+    },
+  });
+
+  applyItemColor(row, note.color);
+  applyCollapsedTreeDepth(row, depth);
+
+  if (isActive) {
+    row.append(activeNoteMarker(depth));
+  }
+
+  row.append(itemIcon(note.icon || (note.type === 'list' ? 'list' : 'file'), note.color));
+  row.append(el('span', { class: 'label' }, note.title || 'Untitled'));
+  row.append(el('span', { class: 'tree-trash-meta' }, trashItemDeletedLabel(note)));
+
+  return row;
+}
+
+function trashFolderRow(folder, depth = 0) {
+  const key = folderKey(folder.id);
+  visibleTreeOrder.push(key);
+
+  const expanded = state.expandedFolders.has(folder.id);
+  const selected = isSelected(key);
+  const isAnchor = selection.anchorKey === key;
+
+  const wrap = el('div', {
+    class: 'tree-node tree-folder-node trash-folder-node',
+    dataset: {
+      treeKey: key,
+      folderId: folder.id,
+      treeDepth: String(depth),
+      trashed: '1',
+    },
+  });
+
+  const row = el('div', {
+    class:
+      'tree-row folder trash-row' +
+      (expanded ? ' expanded' : '') +
+      (selected ? ' selected' : '') +
+      (isAnchor ? ' selection-anchor' : ''),
+    dataset: {
+      treeKey: key,
+      folderId: folder.id,
+      treeDepth: String(depth),
+      trashed: '1',
+    },
+    tabindex: '0',
+    draggable: 'true',
+    style: {
+      paddingLeft: (12 + depth * 12) + 'px',
+    },
+    onclick: (e) => handleTreeSelectionClick(e, key, () => {
+      toggleFolderAnimated(folder.id, expanded);
+    }),
+    oncontextmenu: (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (!isSelected(key)) {
+        setOnlySelection(key);
+        renderTree();
+      }
+
+      showMenu(e.clientX, e.clientY, [
+        {
+          label: 'Restore folder',
+          icon: 'undo-2',
+          action: () => restoreFolderFromTrash(folder.id),
+        },
+        {
+          label: 'Restore to folder…',
+          icon: 'folder-input',
+          action: async () => {
+            const parentId = await yantaFolderPicker({
+              title: 'Restore folder to',
+              allowNone: true,
+              noneLabel: 'Home / root',
+              isDisabled(target) {
+                return (
+                  isFolderInTrash(target) ||
+                  target.id === folder.id ||
+                  isAncestor(folder.id, target.id)
+                );
+              },
+              disabledHint: 'Invalid restore target',
+            });
+
+            if (parentId !== undefined) {
+              await restoreFolderFromTrash(folder.id, {
+                targetParentId: parentId,
+              });
+            }
+          },
+        },
+        'hr',
+        {
+          label: 'Delete permanently…',
+          danger: true,
+          action: async () => {
+            const ok = await yantaConfirm({
+              title: 'Delete folder permanently?',
+              message: `Permanently delete "${folder.name || 'Folder'}" and everything inside?\n\nThis cannot be undone.`,
+              confirmLabel: 'Delete permanently',
+              danger: true,
+            });
+
+            if (ok) {
+              await permanentlyDeleteFolder(folder.id);
+            }
+          },
+        },
+      ]);
+    },
+    ondragstart: (e) => {
+      if (!isSelected(key)) setOnlySelection(key);
+
+      e.dataTransfer.setData('text/yanta-folder', folder.id);
+      e.dataTransfer.effectAllowed = 'move';
+    },
+  });
+
+  applyItemColor(row, folder.color);
+  applyCollapsedTreeDepth(row, depth);
+
+  row.append(el('span', { class: 'twist' }, expanded ? '▾' : '▸'));
+
+  const icon = itemIcon(folder.icon || 'folder', folder.color);
+  icon.classList.add('tree-folder-icon');
+  row.append(icon);
+
+  row.append(el('span', { class: 'label' }, folder.name || 'Folder'));
+  row.append(el('span', { class: 'tree-trash-meta' }, trashItemDeletedLabel(folder)));
+
+  wrap.append(row);
+
+  if (expanded) {
+    const kids = el('div', { class: 'tree-children' });
+
+    const childFolders = [...state.folders.values()]
+      .filter((f) => f.parentId === folder.id)
+      .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+
+    const childNotes = [...state.notes.values()]
+      .filter((n) => n.folderId === folder.id)
+      .sort((a, b) => String(a.title || '').localeCompare(String(b.title || '')));
+
+    for (const child of childFolders) {
+      kids.append(trashFolderRow(child, depth + 1));
+    }
+
+    for (const note of childNotes) {
+      kids.append(trashNoteRow(note, depth + 1));
     }
 
     if (!childFolders.length && !childNotes.length) {
@@ -1470,7 +2013,25 @@ function renameTreeFolder(folderId) {
 let activeMenu = null;
 
 function _menuOutsideClose(e) {
-  if (activeMenu && !activeMenu.contains(e.target)) closeMenu();
+  if (!activeMenu) return;
+
+  if (activeMenu.contains(e.target)) {
+    return;
+  }
+
+  closeMenu();
+}
+
+function bindMenuOutsideClose() {
+  document.addEventListener('pointerdown', _menuOutsideClose, true);
+  document.addEventListener('mousedown', _menuOutsideClose, true);
+  document.addEventListener('touchstart', _menuOutsideClose, true);
+}
+
+function unbindMenuOutsideClose() {
+  document.removeEventListener('pointerdown', _menuOutsideClose, true);
+  document.removeEventListener('mousedown', _menuOutsideClose, true);
+  document.removeEventListener('touchstart', _menuOutsideClose, true);
 }
 
 export function showMenu(x, y, items, {
@@ -1535,7 +2096,7 @@ export function showMenu(x, y, items, {
   activeMenu = m;
 
   setTimeout(() => {
-    document.addEventListener('mousedown', _menuOutsideClose, true);
+    bindMenuOutsideClose();
   }, 0);
 
   const r = m.getBoundingClientRect();
@@ -1571,7 +2132,8 @@ export function showMenu(x, y, items, {
 export function closeMenu() {
   if (!activeMenu) return;
 
-  document.removeEventListener('mousedown', _menuOutsideClose, true);
+  unbindMenuOutsideClose();
+
   activeMenu.remove();
   activeMenu = null;
 }
@@ -1629,15 +2191,12 @@ function noteMenu(e, n) {
     },
     'hr',
     {
-      label: 'Delete',
+      label: 'Move to Trash',
       danger: true,
       action: async () => {
-        if (!confirm(`Delete "${n.title || 'Untitled'}"?`)) return;
-
-        await deleteNotesAndFolders({
-          noteIds: new Set([n.id]),
-          folderIds: new Set(),
-          recursiveFolders: false,
+        await moveNoteToTrash(n.id, {
+          source: 'tree-menu',
+          toastMessage: 'Moved note to Trash',
         });
       },
     },
@@ -1696,46 +2255,13 @@ function folderMenu(e, f) {
     },
     'hr',
     {
-      label: 'Delete folder',
+      label: 'Move folder to Trash',
       danger: true,
       action: async () => {
-        const directNotes = [...state.notes.values()].filter((n) => n.folderId === f.id);
-        const directFolders = [...state.folders.values()].filter((x) => x.parentId === f.id);
-
-        const msg = directNotes.length || directFolders.length
-          ? `Delete "${f.name || 'Folder'}" and move ${directNotes.length} note(s), ${directFolders.length} sub-folder(s) out of it?`
-          : `Delete "${f.name || 'Folder'}"?`;
-
-        if (!confirm(msg)) return;
-
-        for (const n of directNotes) {
-          n.folderId = f.parentId || null;
-          n.updated = Date.now();
-
-          await store.notes.put(n);
-
-          window.dispatchEvent(new CustomEvent('yanta-note-updated', {
-            detail: { noteId: n.id },
-          }));
-        }
-
-        for (const child of directFolders) {
-          child.parentId = f.parentId || null;
-          child.updated = Date.now();
-
-          await store.folders.put(child);
-        }
-
-        await store.folders.del(f.id);
-
-        state.folders.delete(f.id);
-        state.expandedFolders.delete(f.id);
-
-        selection.keys.delete(folderKey(f.id));
-
-        window.dispatchEvent(new CustomEvent('yanta-dashboard-refresh'));
-
-        renderTree();
+        await moveFolderToTrash(f.id, {
+          source: 'tree-menu',
+          toastMessage: 'Moved folder to Trash',
+        });
       },
     },
   ]);
@@ -1895,30 +2421,37 @@ function folderPath(folderId) {
   return parts.join(' / ');
 }
 
-function chooseFolderPrompt({ title = 'Move to folder:' } = {}) {
-  const folders = [...state.folders.values()]
-    .sort((a, b) => folderPath(a.id).localeCompare(folderPath(b.id)));
+async function chooseFolderPrompt({
+  title = 'Move to folder',
+  keys = [],
+} = {}) {
+  const folderKeys = keys
+    .map(parseTreeKey)
+    .filter((x) => x.kind === 'folder')
+    .map((x) => x.id);
 
-  const opts = ['(no folder)', ...folders.map((f) => folderPath(f.id) || f.name || 'Folder')];
+  return await yantaFolderPicker({
+    title,
+    allowNone: true,
+    noneLabel: 'No folder / Home',
+    isDisabled(folder) {
+      for (const selectedFolderId of folderKeys) {
+        if (folder.id === selectedFolderId) return true;
+        if (isAncestor(selectedFolderId, folder.id)) return true;
+      }
 
-  const choice = prompt(
-    `${title}\n\n${opts.map((o, i) => `${i}. ${o}`).join('\n')}\n\nEnter number:`
-  );
-
-  if (choice === null) return undefined;
-
-  const idx = parseInt(choice, 10);
-
-  if (Number.isNaN(idx) || idx < 0 || idx >= opts.length) {
-    toast('Invalid folder selection', 'error');
-    return undefined;
-  }
-
-  return idx === 0 ? null : folders[idx - 1].id;
+      return false;
+    },
+    disabledHint: 'Would create a folder loop',
+  });
 }
 
 async function moveSelectedToFolder(keys = [...selection.keys]) {
-  const targetFolderId = chooseFolderPrompt();
+  const targetFolderId = await chooseFolderPrompt({
+    title: 'Move selected items',
+    keys,
+  });
+
   if (targetFolderId === undefined) return;
 
   let moved = 0;
@@ -2067,108 +2600,77 @@ function collectFolderIdsRecursive(rootId) {
 }
 
 async function deleteSelectedItems(items = getSelectedItems()) {
-  const selectedFolderIds = new Set(
+  const folderIds = new Set(
     selectedFolders(items).map((f) => f.id)
   );
 
-  const selectedNoteIds = new Set(
+  const noteIds = new Set(
     selectedNotes(items).map((n) => n.id)
   );
 
-  const allFolderIds = new Set();
+  if (!folderIds.size && !noteIds.size) return;
 
-  for (const folderId of selectedFolderIds) {
-    for (const id of collectFolderIdsRecursive(folderId)) {
-      allFolderIds.add(id);
+  const descendantStats = {
+    folders: 0,
+    notes: 0,
+  };
+
+  for (const folderId of folderIds) {
+    const all = collectFolderIdsRecursive(folderId);
+
+    descendantStats.folders += Math.max(0, all.size - 1);
+
+    for (const note of state.notes.values()) {
+      if (note.folderId && all.has(note.folderId)) {
+        descendantStats.notes++;
+      }
     }
   }
 
-  const allNoteIds = new Set(selectedNoteIds);
+  const parts = [];
 
-  for (const n of state.notes.values()) {
-    if (n.folderId && allFolderIds.has(n.folderId)) {
-      allNoteIds.add(n.id);
-    }
+  if (noteIds.size) {
+    parts.push(`${noteIds.size} note${noteIds.size === 1 ? '' : 's'}`);
   }
 
-  const msgParts = [];
-
-  if (allNoteIds.size) {
-    msgParts.push(`${allNoteIds.size} note${allNoteIds.size === 1 ? '' : 's'}`);
+  if (folderIds.size) {
+    parts.push(`${folderIds.size} folder${folderIds.size === 1 ? '' : 's'}`);
   }
 
-  if (allFolderIds.size) {
-    msgParts.push(`${allFolderIds.size} folder${allFolderIds.size === 1 ? '' : 's'}`);
-  }
+  const extra =
+    descendantStats.folders || descendantStats.notes
+      ? `\n\nSelected folders include ${descendantStats.folders} sub-folder${descendantStats.folders === 1 ? '' : 's'} and ${descendantStats.notes} note${descendantStats.notes === 1 ? '' : 's'}.`
+      : '';
 
-  if (!msgParts.length) return;
-
-  const recursiveWarning = allFolderIds.size
-    ? '\n\nFolders are deleted together with all notes and sub-folders inside them.'
-    : '';
-
-  if (!confirm(`Delete ${msgParts.join(' and ')}? This cannot be undone.${recursiveWarning}`)) {
-    return;
-  }
-
-  await deleteNotesAndFolders({
-    noteIds: allNoteIds,
-    folderIds: allFolderIds,
-    recursiveFolders: true,
+  const ok = await yantaConfirm({
+    title: 'Move selected items to Trash?',
+    message: `Move ${parts.join(' and ')} to Trash?${extra}\n\nYou can restore them later from Trash.`,
+    confirmLabel: 'Move to Trash',
+    danger: true,
   });
-}
 
-async function deleteNotesAndFolders({ noteIds, folderIds, recursiveFolders = true }) {
-  const deletedCurrent = noteIds.has(state.currentNoteId);
+  if (!ok) return;
 
-  for (const noteId of noteIds) {
-    const n = state.notes.get(noteId);
-    if (!n) continue;
+  await moveItemsToTrash({
+    noteIds: [...noteIds],
+    folderIds: [...folderIds],
+    source: 'tree-bulk',
+  });
 
-    await store.notes.del(noteId);
-    state.notes.delete(noteId);
-    state.searchIndex.delete(noteId);
-
-    await destroyNoteDoc(noteId);
-
-    syncDeleteNoteFile(n).catch(() => {});
-  }
-
-  if (recursiveFolders) {
-    for (const folderId of folderIds) {
-      await store.folders.del(folderId);
-      state.folders.delete(folderId);
-      state.expandedFolders.delete(folderId);
-    }
-  }
-
-  for (const key of [...selection.keys]) {
-    if (!treeKeyExists(key)) {
-      selection.keys.delete(key);
-    }
-  }
-
-  if (selection.anchorKey && !treeKeyExists(selection.anchorKey)) {
-    selection.anchorKey = selection.keys.values().next().value || null;
-  }
-
-  rebuildWikilinkIndex();
-
-  if (deletedCurrent) {
-    state.currentNoteId = null;
-
-    const next = [...state.notes.values()].sort((a, b) => b.updated - a.updated)[0];
-
-    if (next) {
-      await openNote(next.id);
-    } else {
-      clearEditor();
-    }
-  }
+  selection.keys.clear();
+  selection.anchorKey = null;
 
   renderTree();
+}
 
-  toast('Deleted selected item(s)', 'success');
+async function deleteNotesAndFolders({ noteIds, folderIds }) {
+  await moveItemsToTrash({
+    noteIds: [...(noteIds || [])],
+    folderIds: [...(folderIds || [])],
+    source: 'tree-delete-helper',
+  });
+
+  renderTree();
 }
 
 // ============================================================

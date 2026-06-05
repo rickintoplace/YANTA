@@ -10,7 +10,7 @@ import {
   toast,
 } from './core.js';
 
-async function refreshSearchIndexForNote(note) {
+export async function refreshSearchIndexForNote(note) {
   if (!note) return;
 
   try {

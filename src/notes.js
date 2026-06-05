@@ -39,6 +39,10 @@ import {
   currentHistorySurface,
 } from './navigation.js';
 
+import {
+  moveNoteToTrash,
+} from './trash.js';
+
 let _navSuppress = false;
 let _unsubDoc = null;
 
@@ -720,34 +724,10 @@ export async function deleteCurrentNote() {
     if (!confirm(`Delete "${note.title}"? This cannot be undone.`)) return;
   }
 
-  await store.notes.del(note.id);
-
-  state.notes.delete(note.id);
-  state.searchIndex.delete(note.id);
-
-  await destroyNoteDoc(note.id);
-
-  syncDeleteNoteFile(note).catch(() => {});
-
-  rebuildWikilinkIndex();
-
-  state.currentNoteId = null;
-
-  const next = [...state.notes.values()].sort((a, b) => b.updated - a.updated)[0];
-
-  if (next) openNote(next.id);
-  else clearEditor();
-
-  renderTree();
-  toast('Note deleted');
-
-  window.dispatchEvent(new CustomEvent('yanta-note-updated', {
-    detail: {
-      noteId: note.id,
-      reason: 'note-deleted',
-      deleted: true,
-    },
-  }));
+  await moveNoteToTrash(note.id, {
+    source: 'note-delete-button',
+    toastMessage: 'Moved note to Trash',
+  });
 
   try {
     window.yantaSync2Now?.();

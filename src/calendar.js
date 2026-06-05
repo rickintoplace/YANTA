@@ -98,6 +98,14 @@ import {
   isSidePaneOpen,
 } from './side-pane.js';
 
+import {
+  yantaConfirm,
+} from './dialogs.js';
+
+import {
+  moveNoteToTrash,
+} from './trash.js';
+
 const ORIGIN = 'calendar';
 const DEFAULT_CATEGORY_ID = 'cal_default';
 
@@ -5512,10 +5520,13 @@ export async function importCalendarFile(file, {
     }
 
     if (imported.length > 2000) {
-      const ok = confirm(
-        `This ICS contains ${imported.length} events.\n\nImporting many events can take a while. Continue?`
-      );
-
+      const ok = await yantaConfirm({
+        title: 'Import large calendar?',
+        message: `This ICS contains ${imported.length} events.\n\nImporting many events can take a while.`,
+        confirmLabel: 'Import events',
+        icon: 'calendar-plus',
+      });
+    
       if (!ok) return;
     }
 
@@ -6250,30 +6261,10 @@ async function deleteLinkedNoteById(noteId) {
   const note = state.notes.get(noteId);
   if (!note) return false;
 
-  await store.notes.del(noteId);
-
-  state.notes.delete(noteId);
-  state.searchIndex.delete(noteId);
-
-  try {
-    await destroyNoteDoc(noteId);
-  } catch {}
-
-  if (state.currentNoteId === noteId) {
-    clearEditor();
-  }
-
-  rebuildWikilinkIndex();
-  renderTree();
-
-  window.dispatchEvent(new CustomEvent('yanta-note-updated', {
-    detail: {
-      noteId,
-      reason: 'note-deleted',
-      deleted: true,
-      source: 'calendar',
-    },
-  }));
+  await moveNoteToTrash(noteId, {
+    source: 'calendar',
+    toastMessage: 'Moved linked note to Trash',
+  });
 
   return true;
 }
@@ -7795,12 +7786,19 @@ function renderCategoriesModal() {
       });
     });
 
-    row.querySelector('[data-cat-delete]')?.addEventListener('click', () => {
+    row.querySelector('[data-cat-delete]')?.addEventListener('click', async () => {
       const cat = state.calendarCategories.get(catId);
       if (!cat || cat.id === DEFAULT_CATEGORY_ID) return;
-
-      if (!confirm(`Delete category "${cat.name}"? Events will move to General.`)) return;
-
+    
+      const ok = await yantaConfirm({
+        title: 'Delete calendar category?',
+        message: `Delete "${cat.name || 'Calendar'}"?\n\nEvents in this category will move to General.`,
+        confirmLabel: 'Delete category',
+        danger: true,
+      });
+    
+      if (!ok) return;
+    
       deleteCalendarCategory(catId);
       renderCategoriesModal();
     });

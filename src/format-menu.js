@@ -4,6 +4,7 @@
 // ============================================================
 
 import { $ } from './core.js';
+import { yantaPrompt } from './dialogs.js';
 import { getView } from './editor.js';
 
 let tb;
@@ -17,14 +18,16 @@ export function setupFormatToolbar() {
   // Do not let toolbar clicks steal the CodeMirror selection.
   tb.addEventListener('mousedown', (e) => e.preventDefault());
 
-  tb.addEventListener('click', (e) => {
+  tb.addEventListener('click', async (e) => {
     const btn = e.target.closest('button[data-fmt]');
     if (!btn) return;
-
+  
     applying = true;
-    applyFormat(btn.dataset.fmt);
+  
+    await applyFormat(btn.dataset.fmt);
+  
     hide();
-
+  
     // Avoid immediate re-open from the selectionchange fired by CM/browser.
     setTimeout(() => {
       applying = false;
@@ -159,7 +162,7 @@ function hide() {
   if (tb) tb.hidden = true;
 }
 
-function applyFormat(fmt) {
+async function applyFormat(fmt) {
   const v = getView();
   if (!v) return;
 
@@ -181,16 +184,36 @@ function applyFormat(fmt) {
   }
 
   if (fmt === 'link') {
-    const url = prompt('URL:', 'https://');
+    const url = await yantaPrompt({
+      title: 'Insert link',
+      label: 'URL',
+      initial: 'https://',
+      placeholder: 'https://example.com',
+      required: true,
+      confirmLabel: 'Insert link',
+      icon: 'link',
+      validate(value) {
+        try {
+          const u = new URL(value);
+          if (u.protocol === 'http:' || u.protocol === 'https:' || u.protocol === 'mailto:' || u.protocol === 'tel:') {
+            return true;
+          }
+        } catch {}
+  
+        return 'Enter a valid URL.';
+      },
+    });
+  
     if (!url) return;
-
+  
     const text = v.state.sliceDoc(sel.from, sel.to) || 'link';
     const insert = `[${text}](${url})`;
-
+  
     v.dispatch({
       changes: { from: sel.from, to: sel.to, insert },
       selection: { anchor: sel.from + insert.length },
     });
+  
     v.focus();
     return;
   }

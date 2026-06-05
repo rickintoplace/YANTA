@@ -1468,7 +1468,7 @@
 /* Desktop / large-screen friendliness */
 @media (min-width: 881px) {
   .dashboard {
-    padding: 18px 24px 80px;
+    padding: 0 24px 80px;
   }
 
   .yanta-dashboard-head {
@@ -1885,3 +1885,76 @@
       font-size: 26px;
     }
   }
+
+  .yanta-dash-drawing-placeholder {
+    width: 100%;
+    height: 100%;
+    min-height: 118px;
+  }
+  
+  .yanta-dash-drawing-placeholder.is-error {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  
+    color: var(--text-faint);
+    font-size: 12px;
+  }
+  
+  .yanta-dash-drawing-img {
+    width: 100%;
+    height: 100%;
+    display: block;
+    object-fit: contain;
+    border: 0;
+  }
+
+/* ============================================================
+   Dashboard note-card autofit
+   ============================================================ */
+
+   .yanta-dash-card.note-card {
+    min-height: 0 !important;
+  }
+  
+  .yanta-dash-card.note-card .yanta-dash-preview {
+    min-height: 0 !important;
+    height: auto !important;
+    max-height: none !important;
+  
+    /*
+      Wichtig:
+      Preview darf die Card nicht künstlich füllen.
+      Die Card-Höhe kommt aus --dash-row-span.
+    */
+    flex: 0 0 auto !important;
+    align-self: stretch;
+  }
+  
+  .yanta-dash-card.note-card .yanta-dash-card-actions {
+    /*
+      Actions sollen nie in Auto-Höhenmessung / Layout-Höhe wirken.
+      Falls deine bestehende CSS sie ohnehin absolute macht, schadet das nicht.
+    */
+    position: absolute;
+  }
+  
+  .yanta-dash-card.note-card .yanta-dash-resize-handle {
+    /*
+      Resize-Handle hängt unten an der Card.
+      Er darf die Auto-Höhe nicht aufblasen.
+    */
+    position: absolute;
+  }
+
+/* ============================================================
+   Dashboard Trash drag affordance
+   ============================================================ */
+
+.dashboard.is-card-dragging .yanta-dash-card.folder-drop-target::after {
+  content: "Release to add to folder";
+}
+
+.yanta-dash-card.drag-clone {
+  cursor: grabbing;
+}

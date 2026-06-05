@@ -60,13 +60,13 @@ import {
     },
     {
       id: 'note',
-      label: 'New text note',
+      label: 'New note',
       icon: 'file-text',
       resultType: 'note',
     },
     {
       id: 'list',
-      label: 'New list',
+      label: 'New checklist',
       icon: 'list-checks',
       resultType: 'note',
     },
@@ -84,7 +84,7 @@ import {
     },
     {
       id: 'event',
-      label: 'New calendar event',
+      label: 'New event',
       icon: 'calendar-plus',
       resultType: 'calendar-event',
     },

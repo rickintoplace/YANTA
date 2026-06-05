@@ -34,6 +34,12 @@ import {
   getApproxUserLocation,
 } from './location.js';
 
+import {
+  isNoteInTrash,
+  isFolderInTrash,
+  trashCount,
+} from '../trash.js';
+
 const WIKILINK_RE = /\[\[([^\]|\n]+)(?:\|([^\]\n]+))?\]\]/g;
 const IMAGE_RE = /!\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)(?:\{[^}\n]*\})?/g;
 const YANTA_IMAGE_RE = /yanta-img:\/\/([a-z0-9]+)/gi;
@@ -182,6 +188,7 @@ async function noteTreeMeta(note) {
 
 export async function buildFileTreeContext() {
   const folders = [...state.folders.values()]
+    .filter((f) => !isFolderInTrash(f))
     .sort((a, b) => folderPath(a.id).localeCompare(folderPath(b.id)))
     .map((f) => ({
       id: f.id,
@@ -196,16 +203,22 @@ export async function buildFileTreeContext() {
 
   const notes = [];
 
-  for (const note of [...state.notes.values()].sort((a, b) =>
-    folderPath(a.folderId).localeCompare(folderPath(b.folderId)) ||
-    String(a.title || '').localeCompare(String(b.title || ''))
-  )) {
+  for (const note of [...state.notes.values()]
+    .filter((n) => !isNoteInTrash(n))
+    .sort((a, b) =>
+      folderPath(a.folderId).localeCompare(folderPath(b.folderId)) ||
+      String(a.title || '').localeCompare(String(b.title || ''))
+    )) {
     notes.push(await noteTreeMeta(note));
   }
 
   return {
     folders,
     notes,
+    trash: {
+      count: trashCount(),
+      note: 'Trash contents are intentionally excluded from normal AI context.',
+    },
   };
 }
 

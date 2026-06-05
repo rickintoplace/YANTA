@@ -30,6 +30,10 @@ import {
   getApproxUserLocation,
 } from './location.js';
 
+import {
+  moveNoteToTrash,
+} from '../trash.js';
+
 function now() {
   return Date.now();
 }
@@ -422,40 +426,13 @@ export async function deleteNoteAction({ noteId } = {}) {
     throw new Error('Note not found');
   }
 
-  await store.notes.del(id);
-
-  state.notes.delete(id);
-  state.searchIndex.delete(id);
-
-  try {
-    await destroyNoteDoc(id);
-  } catch {}
-
-  try {
-    const { rebuildWikilinkIndex, clearEditor } = await import('../notes.js');
-    rebuildWikilinkIndex();
-
-    if (state.currentNoteId === id) {
-      clearEditor();
-    }
-  } catch {}
-
-  renderTree();
-
-  window.dispatchEvent(new CustomEvent('yanta-note-updated', {
-    detail: {
-      noteId: id,
-      reason: 'ai-delete-note',
-      deleted: true,
-      source: 'ai',
-    },
-  }));
-
-  window.dispatchEvent(new CustomEvent('yanta-dashboard-refresh'));
+  await moveNoteToTrash(id, {
+    source: 'ai',
+  });
 
   return {
     ok: true,
-    deletedNoteId: id,
+    trashedNoteId: id,
     title: note.title || 'Untitled',
   };
 }

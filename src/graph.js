@@ -51,6 +51,15 @@ import {
   AI_BRAIN_IDS,
 } from './ai/brain.js';
 
+import {
+  yantaPrompt,
+} from './dialogs.js';
+
+import {
+  isNoteInTrash,
+  isFolderInTrash,
+} from './trash.js';
+
 const WIKILINK_RE = /\[\[([^\]|\n]+)(?:\|[^\]\n]+)?\]\]/g;
 
 const NODE = {
@@ -1370,6 +1379,8 @@ function folderIsGraphExcluded(folderOrId) {
   const start = folderByIdOrSelf(folderOrId);
   if (!start) return false;
 
+  if (isFolderInTrash(start)) return true;
+
   if (folderIsArchived(start)) {
     return !graph.showArchive;
   }
@@ -1404,6 +1415,8 @@ function folderIsGraphExcluded(folderOrId) {
 
 function noteIsGraphExcluded(note) {
   if (!note) return true;
+  
+  if (isNoteInTrash(note)) return true;
 
   if (noteIsArchived(note)) {
     return !graph.showArchive;
@@ -3602,7 +3615,19 @@ function spawnAtClient(gid, clientX, clientY) {
 }
 
 async function createNoteFromGraph(sourceNode, folderId) {
-  const title = prompt('Note title:', 'Untitled');
+  const title = await yantaPrompt({
+    title: 'New note',
+    message: folderId
+      ? 'Create a new note in this folder.'
+      : 'Create a new root note.',
+    label: 'Note title',
+    initial: 'Untitled',
+    placeholder: 'Untitled',
+    required: true,
+    confirmLabel: 'Create note',
+    icon: 'file-plus',
+  });
+
   if (title === null) return;
 
   const id = uid();
@@ -3677,10 +3702,20 @@ async function createFolderFromGraph(sourceNode, parentId) {
 
 async function createRootEntity(kind, clientX, clientY) {
   if (kind === 'note') {
-    const title = prompt('Note title:', 'Untitled');
+    const title = await yantaPrompt({
+      title: 'New root note',
+      label: 'Note title',
+      initial: 'Untitled',
+      placeholder: 'Untitled',
+      required: true,
+      confirmLabel: 'Create note',
+      icon: 'file-plus',
+    });
+
     if (title === null) return;
 
     const id = uid();
+
     const note = {
       id,
       title: title.trim() || 'Untitled',

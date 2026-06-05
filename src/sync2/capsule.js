@@ -30,6 +30,10 @@ import {
 } from '../core.js';
 
 import {
+  yantaPrompt,
+} from '../dialogs.js';
+
+import {
   getNoteDoc,
   encodeNoteState,
 } from '../yjs.js';
@@ -138,6 +142,14 @@ function sanitizeNoteMeta(note) {
     aiBrain: note.aiBrain === true ? true : undefined,
     dashboardHidden: note.dashboardHidden === true ? true : undefined,
     hiddenFromDashboard: note.hiddenFromDashboard === true ? true : undefined,
+
+    trashed: note.trashed === true ? true : undefined,
+    deletedAt: finiteNumberOrUndefined(note.deletedAt),
+    deletedBy: note.deletedBy ? String(note.deletedBy) : undefined,
+    trashOriginalFolderId: note.trashOriginalFolderId || undefined,
+    trashOriginalFolderPath: Array.isArray(note.trashOriginalFolderPath)
+      ? note.trashOriginalFolderPath.map(String)
+      : undefined,
   });
 }
 
@@ -165,6 +177,14 @@ function sanitizeFolderMeta(folder) {
     aiBrain: folder.aiBrain === true ? true : undefined,
     dashboardHidden: folder.dashboardHidden === true ? true : undefined,
     hiddenFromDashboard: folder.hiddenFromDashboard === true ? true : undefined,
+
+    trashed: folder.trashed === true ? true : undefined,
+    deletedAt: finiteNumberOrUndefined(folder.deletedAt),
+    deletedBy: folder.deletedBy ? String(folder.deletedBy) : undefined,
+    trashOriginalParentId: folder.trashOriginalParentId || undefined,
+    trashOriginalParentPath: Array.isArray(folder.trashOriginalParentPath)
+      ? folder.trashOriginalParentPath.map(String)
+      : undefined,
   });
 }
 
@@ -496,14 +516,21 @@ export async function importSyncCapsuleFile(file, {
   } catch (err) {
     if (!askForKey) throw err;
 
-    const entered = prompt(
-      'This Sync Capsule was encrypted with a different Sync Key.\n\nPaste the recovery/sync key for this capsule:'
-    );
-
+    const entered = await yantaPrompt({
+      title: 'Recovery key required',
+      message: 'This encrypted backup was created with a different Sync Key.\n\nPaste the Recovery Key for this backup.',
+      label: 'Recovery Key',
+      placeholder: 'Paste Recovery Key…',
+      required: true,
+      multiline: true,
+      confirmLabel: 'Unlock backup',
+      icon: 'key-round',
+    });
+    
     if (!entered) {
       throw new Error('Import cancelled: sync key required');
     }
-
+    
     key = entered.trim();
     keys = await deriveKeys(key);
 

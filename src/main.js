@@ -117,9 +117,6 @@ import {
   openAssistantFloating,
 } from './ai/assistant-ui.js';
 import {
-  ensureAiBrain,
-} from './ai/brain.js';
-import {
   setupSync2ProgressUi,
 } from './sync2/sync-progress-ui.js';
 
@@ -557,8 +554,6 @@ async function init() {
   for (const im of images) state.imagesMeta.set(im.id, im);
 
   await seedVaultFromLocalState();
-
-  await ensureAiBrain();
 
   // Debug helper. Remove later if desired.
   window.yantaVaultDebug = {

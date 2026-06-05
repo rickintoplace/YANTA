@@ -175,7 +175,7 @@ export const TOOL_REGISTRY = [
     name: 'delete_note',
     permission: 'allowDeleteNotes',
     risk: 'destructive',
-    description: 'Delete a note. Only use when explicitly requested.',
+    description: 'Move a note to Trash.',
     parameters: {
       type: 'object',
       properties: {

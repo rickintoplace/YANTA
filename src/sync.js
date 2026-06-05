@@ -24,6 +24,10 @@ import { $, el, state, store, toast, lucide, uid, safeFilename, escapeHtml } fro
 import { getNoteDoc, encodeNoteState, applyNoteUpdate, noteMarkdown } from './yjs.js';
 import * as Y from 'yjs';
 import { folderPathSegments, ensureFolderPath, parseFrontmatter, noteToFrontmatter, imageExt } from './io.js';
+import {
+  yantaConfirm,
+  yantaAlert,
+} from './dialogs.js';
 
 export const sync = {
   handle: null,
@@ -252,7 +256,14 @@ export async function syncFull(verbose = false) {
       if (!res.seenPaths.has(path)) externallyDeleted.push({ id, path });
     }
     if (externallyDeleted.length && verbose) {
-      if (confirm(`${externallyDeleted.length} note file(s) were removed from the sync folder.\nDelete the matching notes in YANTA too?`)) {
+      const ok = await yantaConfirm({
+        title: 'Delete missing synced notes?',
+        message: `${externallyDeleted.length} note file${externallyDeleted.length === 1 ? '' : 's'} were removed from the sync folder.\n\nDelete the matching notes in YANTA too?`,
+        confirmLabel: 'Delete matching notes',
+        danger: true,
+      });
+      
+      if (ok) {
         const { renderTree } = await import('./tree.js');
         const { clearEditor, rebuildWikilinkIndex } = await import('./notes.js');
         const { destroyNoteDoc } = await import('./yjs.js');
@@ -446,12 +457,20 @@ function showSyncConflictsModal(conflicts) {
 async function viewConflictFile(c) {
   const text = await c.file.text();
   const win = window.open('', '_blank');
+
   if (win) {
     win.document.body.style.fontFamily = 'monospace';
     win.document.body.style.whiteSpace = 'pre-wrap';
     win.document.body.style.padding = '20px';
     win.document.body.textContent = text;
-  } else alert(text.slice(0, 4000));
+  } else {
+    await yantaAlert({
+      title: 'Conflict file',
+      message: text.slice(0, 4000),
+      icon: 'file-warning',
+      confirmLabel: 'Close',
+    });
+  }
 }
 async function adoptConflict(c) {
   const text = await c.file.text();

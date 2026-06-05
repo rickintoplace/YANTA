@@ -23,7 +23,7 @@ export const FLOATING_CREATE_BOUNDS = Object.freeze({
 export const FLOATING_CREATE_ACTION_CATALOG = [
   {
     id: 'note',
-    defaultLabel: 'New text note',
+    defaultLabel: 'New note',
     defaultIcon: 'file-text',
   },
   {
@@ -33,7 +33,7 @@ export const FLOATING_CREATE_ACTION_CATALOG = [
   },
   {
     id: 'list',
-    defaultLabel: 'New list',
+    defaultLabel: 'New checklist',
     defaultIcon: 'list-checks',
   },
   {
@@ -48,12 +48,12 @@ export const FLOATING_CREATE_ACTION_CATALOG = [
   },
   {
     id: 'event',
-    defaultLabel: 'New calendar event',
+    defaultLabel: 'New event',
     defaultIcon: 'calendar-plus',
   },
   {
     id: 'ai',
-    defaultLabel: 'AI assistant',
+    defaultLabel: 'AI',
     defaultIcon: 'sparkles',
   },
 ];
@@ -65,7 +65,7 @@ export const DEFAULT_FLOATING_CREATE_SETTINGS = {
     {
       id: 'note',
       enabled: true,
-      label: 'New text note',
+      label: 'New note',
       icon: 'file-text',
       x: -68,
       y: -19,
@@ -74,7 +74,7 @@ export const DEFAULT_FLOATING_CREATE_SETTINGS = {
     {
       id: 'list',
       enabled: true,
-      label: 'New list',
+      label: 'New checklist',
       icon: 'list-checks',
       x: -119,
       y: -53,
@@ -92,7 +92,7 @@ export const DEFAULT_FLOATING_CREATE_SETTINGS = {
     {
       id: 'event',
       enabled: true,
-      label: 'New calendar event',
+      label: 'New event',
       icon: 'calendar-plus',
       x: -137,
       y: -176,
@@ -101,7 +101,7 @@ export const DEFAULT_FLOATING_CREATE_SETTINGS = {
     {
       id: 'ai',
       enabled: true,
-      label: 'AI assistant',
+      label: 'AI',
       icon: 'sparkles',
       x: 0,
       y: -73,

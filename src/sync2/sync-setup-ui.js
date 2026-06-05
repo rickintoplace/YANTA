@@ -684,7 +684,7 @@ function renderConnectExistingView(initialText = pendingPairingText) {
 
         <label class="yanta-sync2-copy-field">
           <span>Sync Key or pairing link</span>
-          <textarea class="text-input" data-pairing rows="7" placeholder="Paste Sync Key, https://.../#sync2=..., or yanta-sync2:...">${escapeHtmlLocal(initialText || '')}</textarea>
+          <textarea class="text-input" data-pairing rows="7" placeholder="Paste Sync Key, https://.../#sync2=..., or yanta-sync:...">${escapeHtmlLocal(initialText || '')}</textarea>
         </label>
 
         <div class="compress-actions">

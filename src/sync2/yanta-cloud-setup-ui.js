@@ -756,7 +756,7 @@ function renderExistingVaultStep(vaultId) {
 
     <section class="yanta-cloud-section">
       <h4>Recovery Key or pairing payload</h4>
-      <textarea class="text-input" data-recovery rows="6" placeholder="Paste Recovery Key or yanta-sync2:..."></textarea>
+      <textarea class="text-input" data-recovery rows="6" placeholder="Paste Recovery Key or yanta-sync:..."></textarea>
       <div class="compress-actions" style="margin-top:10px">
         <button class="btn" data-back>Back</button>
         <span class="grow"></span>

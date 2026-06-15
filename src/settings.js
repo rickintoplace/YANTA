@@ -923,6 +923,7 @@ function ensureModal() {
     { id: 'dashboard',  label: 'Dashboard',  icon: 'layout-dashboard' },
     { id: 'quick-create', label: 'Quick Create', icon: 'circle-plus' },
     { id: 'calendar',   label: 'Calendar',   icon: 'calendar-days' },
+    { id: 'sources',    label: 'Sources',    icon: 'rss' },
     { id: 'ai',         label: 'AI',         icon: 'sparkles' },
     { id: 'sync',       label: 'Sync & Backup', icon: 'refresh-cw' },
     { id: 'about',      label: 'About',      icon: 'info' },
@@ -976,6 +977,7 @@ function renderSettingsBody() {
   else if (activeSection === 'dashboard') renderDashboardSection(content);
   else if (activeSection === 'quick-create') renderQuickCreateSection(content);
   else if (activeSection === 'calendar') renderCalendarSection(content);
+  else if (activeSection === 'sources') renderSourcesSection(content);
   else if (activeSection === 'ai') renderAiSection(content);
   else if (activeSection === 'sync') renderSyncSection(content);
   else if (activeSection === 'about') renderAboutSection(content);
@@ -2115,6 +2117,39 @@ function renderCalendarSection(host) {
   host.append(resetGroup);
 }
 
+function renderSourcesSection(host) {
+  host.replaceChildren();
+
+  host.append(sectionHeader(
+    'Sources',
+    'Follow RSS, Atom and JSON feeds. Feed items are cached locally; only saved items become YANTA notes.'
+  ));
+
+  const info = el('div', { class: 'yanta-settings-info' });
+  info.innerHTML = `
+    <p><strong>Cloud-storage friendly:</strong> Source items and images are cached locally and do not consume your encrypted YANTA Cloud vault storage.</p>
+    <p>Images are stored as URLs and loaded through a privacy-protected proxy by default.</p>
+  `;
+  host.append(info);
+
+  const mount = el('div', {
+    class: 'yanta-settings-group',
+  });
+
+  mount.innerHTML = `<div class="tree-empty">Loading Sources settings…</div>`;
+  host.append(mount);
+
+  import('./rss/rss-settings-panel.js')
+    .then(({ renderRssSettingsPanel }) => {
+      if (!mount.isConnected) return;
+      renderRssSettingsPanel(mount);
+    })
+    .catch((err) => {
+      console.error('[YANTA Settings] Could not load Sources settings', err);
+      mount.innerHTML = `<div class="yanta-settings-info">Could not load Sources settings.</div>`;
+    });
+}
+
 function renderDashboardToggle({ checked, label, hint, onChange }) {
   const row = el('label', { class: 'yanta-settings-toggle' });
 
@@ -2239,123 +2274,318 @@ function renderAiSection(host) {
 
 // ---- Sync section ----
 function renderSyncSection(host) {
-  const a = getAppearance();
+  host.replaceChildren();
 
-  host.append(sectionHeader('Sync & Backup', 'Control how your settings travel between devices.'));
+  host.append(sectionHeader(
+    'Sync',
+    'Keep YANTA up to date across your devices.'
+  ));
 
-  host.append(renderDeviceOnlyToggle(a));
+  host.append(renderYantaCloudSyncPrimaryCard());
+  host.append(renderEncryptedBackupCard());
+  host.append(renderAdvancedSyncMethods());
+}
 
-  const info = el('div', { class: 'yanta-settings-info' });
-  info.innerHTML = `
-    <p><strong>Synced settings</strong> live in your YANTA database and travel with your notes — through the sync folder, exports, and bundle backups.</p>
-    <p><strong>Device-only</strong> settings stay in this browser's localStorage. Useful if you prefer a different theme on your phone vs your desktop, for example.</p>
+function renderYantaCloudSyncPrimaryCard() {
+  const group = el('div', { class: 'yanta-settings-group yanta-sync-primary-card' });
+
+  group.innerHTML = `
+    <div class="yanta-sync-card yanta-sync-card-primary">
+      <div class="yanta-sync-card-head">
+        <div class="yanta-sync-card-icon">
+          ${lucide('cloud', 24)}
+        </div>
+
+        <div class="yanta-sync-card-title">
+          <span class="yanta-sync-card-kicker">Recommended</span>
+          <strong>YANTA Cloud Sync</strong>
+          <p>
+            Sync notes, drawings, images and calendar events across your devices.
+            YANTA encrypts your data before upload.
+          </p>
+        </div>
+      </div>
+
+      <div class="yanta-sync-card-points">
+        <span>${lucide('check', 13)} No Google Drive setup required</span>
+        <span>${lucide('check', 13)} Encrypted before leaving this device</span>
+        <span>${lucide('check', 13)} Use your Sync Key or QR code to connect devices</span>
+      </div>
+
+      <div class="yanta-sync-status-line" data-yanta-cloud-sync-status>
+        Checking sync status…
+      </div>
+
+      <div class="compress-actions yanta-sync-card-actions">
+        <button class="btn primary" data-yanta-cloud-open>
+          ${lucide('cloud', 14)}
+          Set up YANTA Cloud Sync
+        </button>
+
+        <button class="btn" data-yanta-cloud-sync-now hidden>
+          ${lucide('refresh-cw', 14)}
+          Sync now
+        </button>
+      </div>
+    </div>
   `;
-  host.append(info);
 
-  // Sync Capsule
-  const capsuleGroup = el('div', { class: 'yanta-settings-group' });
-  capsuleGroup.append(el('div', { class: 'yanta-settings-group-title' }, 'Encrypted Sync Capsule'));
-  capsuleGroup.append(el('p', { class: 'yanta-settings-hint' },
-    'Create an encrypted .yanta file that contains your notes, folders, drawings, metadata, tombstones and image assets. Importing a capsule merges it into this vault instead of replacing everything.'));
+  const openBtn = group.querySelector('[data-yanta-cloud-open]');
+  const syncNowBtn = group.querySelector('[data-yanta-cloud-sync-now]');
+  const statusEl = group.querySelector('[data-yanta-cloud-sync-status]');
 
-  const capsuleActions = el('div', {
-    class: 'compress-actions',
-    style: {
-      justifyContent: 'flex-start',
-      flexWrap: 'wrap',
-      marginTop: '10px',
-    },
+  openBtn?.addEventListener('click', async () => {
+    closeSettings();
+
+    const { openYantaCloudSetup } = await import('./sync2/yanta-cloud-setup-ui.js');
+    await openYantaCloudSetup();
   });
 
-  capsuleActions.append(
-    el('button', {
-      class: 'btn primary',
-      onclick: async () => {
-        const { exportSyncCapsule } = await import('./sync2/capsule.js');
-        await exportSyncCapsule();
-      },
-    }, 'Back up now'),
+  syncNowBtn?.addEventListener('click', async () => {
+    try {
+      statusEl.textContent = 'Synchronizing…';
 
-    el('button', {
-      class: 'btn',
-      onclick: async () => {
-        const { pickAndImportSyncCapsule } = await import('./sync2/capsule.js');
-        await pickAndImportSyncCapsule();
-      },
-    }, 'Restore from backup'),
+      if (typeof window.yantaSync2Now === 'function') {
+        await window.yantaSync2Now({
+          interactive: true,
+          catchUp: false,
+        });
+      } else {
+        await window.yantaSync2?.syncNow?.({
+          verbose: false,
+          pullSnapshots: false,
+        });
+      }
 
-    el('button', {
-      class: 'btn',
-      onclick: async () => {
-        const { copySyncCapsuleRecoveryKey } = await import('./sync2/capsule.js');
-        await copySyncCapsuleRecoveryKey();
-      },
-    }, 'Copy sync key')
-  );
+      statusEl.textContent = 'Sync complete.';
+      toast('Sync complete', 'success');
+    } catch (err) {
+      statusEl.textContent = err?.message || 'Sync failed.';
+      toast('Sync failed', 'error');
+    }
+  });
 
-  capsuleGroup.append(capsuleActions);
+  updateYantaCloudSyncPrimaryCard(group).catch(() => {});
 
-  const capsuleNote = el('div', { class: 'yanta-settings-info', style: { marginTop: '10px' } });
-  capsuleNote.innerHTML = `
-    <p><strong>Private by default.</strong> The capsule encrypts note contents, drawings, folders, tags and image files before they leave this device.</p>
-    <p>The sync key is required to restore this capsule on another device. Keep it private.</p>
+  return group;
+}
+
+async function updateYantaCloudSyncPrimaryCard(group) {
+  const provider = await store.settings.get('sync2.provider', null).catch(() => null);
+  const vaultId = await store.settings.get('sync2.yantaCloud.vaultId', '').catch(() => '');
+
+  const statusEl = group.querySelector('[data-yanta-cloud-sync-status]');
+  const openBtn = group.querySelector('[data-yanta-cloud-open]');
+  const syncNowBtn = group.querySelector('[data-yanta-cloud-sync-now]');
+
+  if (!statusEl || !openBtn || !syncNowBtn) return;
+
+  if (provider === 'yanta-cloud' && vaultId) {
+    statusEl.innerHTML = `
+      <strong style="color:var(--green)">Active.</strong>
+      This device is connected to YANTA Cloud Sync.
+    `;
+
+    openBtn.innerHTML = `${lucide('settings', 14)} Manage YANTA Cloud Sync`;
+    syncNowBtn.hidden = false;
+    return;
+  }
+
+  if (provider === 'google-drive') {
+    statusEl.innerHTML = `
+      <strong style="color:var(--yellow)">Google Drive Sync is active.</strong>
+      YANTA Cloud is still the recommended managed sync option for most users.
+    `;
+
+    openBtn.innerHTML = `${lucide('cloud', 14)} Set up YANTA Cloud Sync`;
+    syncNowBtn.hidden = true;
+    return;
+  }
+
+  statusEl.innerHTML = `
+    <strong>No cloud sync is active yet.</strong>
+    Set up sync or download encrypted backups so you do not lose your data.
   `;
-  capsuleGroup.append(capsuleNote);
 
-  host.append(capsuleGroup);
+  openBtn.innerHTML = `${lucide('cloud', 14)} Set up YANTA Cloud Sync`;
+  syncNowBtn.hidden = true;
+}
 
-  // Future Cloud Sync placeholder
-  const cloudGroup = el('div', { class: 'yanta-settings-group' });
-  cloudGroup.append(el('div', { class: 'yanta-settings-group-title' }, 'Cloud Sync'));
-  cloudGroup.append(el('p', { class: 'yanta-settings-hint' },
-    'Synchronize encrypted YANTA data through a cloud provider. Google Drive is available now; Dropbox, OneDrive and others can be added later through the same provider-neutral sync layer.'
-  ));
-  cloudGroup.append(
-    el('div', {
-      class: 'compress-actions',
-      style: {
-        justifyContent: 'flex-start',
-        flexWrap: 'wrap',
-        marginTop: '10px',
-      },
-    },
-      el('button', {
-        class: 'btn primary',
-        onclick: async () => {
-          closeSettings();
+function renderEncryptedBackupCard() {
+  const group = el('div', { class: 'yanta-settings-group yanta-sync-backup-card' });
 
-          const { openYantaCloudSetup } = await import('./sync2/yanta-cloud-setup-ui.js');
-          await openYantaCloudSetup();
-        },
-      }, 'Set up YANTA Cloud'),
+  group.innerHTML = `
+    <div class="yanta-sync-card">
+      <div class="yanta-sync-card-head">
+        <div class="yanta-sync-card-icon secondary">
+          ${lucide('download', 22)}
+        </div>
 
-      el('button', {
-        class: 'btn',
-        onclick: async () => {
-          closeSettings();
+        <div class="yanta-sync-card-title">
+          <strong>Encrypted backup</strong>
+          <p>
+            Download a private <code>.yanta</code> backup file you can store anywhere.
+            You need your Sync Key to restore it.
+          </p>
+        </div>
+      </div>
 
-          const { openGoogleDriveSyncSetup } = await import('./sync2/sync-setup-ui.js');
-          openGoogleDriveSyncSetup();
-        },
-      }, 'Advanced: Google Drive')
-    )
+      <div class="compress-actions yanta-sync-card-actions">
+        <button class="btn primary" data-yanta-backup-now>
+          ${lucide('download', 14)}
+          Create encrypted backup
+        </button>
+
+        <button class="btn" data-yanta-restore-backup>
+          ${lucide('upload', 14)}
+          Restore from backup
+        </button>
+
+        <button class="btn" data-yanta-copy-sync-key>
+          ${lucide('key-round', 14)}
+          Copy Sync Key
+        </button>
+      </div>
+    </div>
+  `;
+
+  group.querySelector('[data-yanta-backup-now]')?.addEventListener('click', async () => {
+    const { exportSyncCapsule } = await import('./sync2/capsule.js');
+
+    await exportSyncCapsule();
+
+    try {
+      const { markSyncReminderBackupCreated } = await import('./sync2/sync-reminder-ui.js');
+      markSyncReminderBackupCreated();
+    } catch {}
+  });
+
+  group.querySelector('[data-yanta-restore-backup]')?.addEventListener('click', async () => {
+    closeSettings();
+
+    const { pickAndImportSyncCapsule } = await import('./sync2/capsule.js');
+    await pickAndImportSyncCapsule();
+  });
+
+  group.querySelector('[data-yanta-copy-sync-key]')?.addEventListener('click', async () => {
+    const { copySyncCapsuleRecoveryKey } = await import('./sync2/capsule.js');
+    await copySyncCapsuleRecoveryKey();
+  });
+
+  return group;
+}
+
+function renderAdvancedSyncMethods() {
+  const group = el('div', { class: 'yanta-settings-group yanta-sync-advanced-group' });
+
+  const details = el('details', { class: 'yanta-sync-advanced-details' });
+
+  const summary = el('summary', {}, 'Advanced sync methods');
+
+  const body = el('div', { class: 'yanta-sync-advanced-body' });
+
+  body.innerHTML = `
+    <p class="yanta-settings-hint">
+      Most users should use YANTA Cloud Sync. These options remain available
+      for technical users who want to manage storage, folders or backend endpoints themselves.
+    </p>
+
+    <div class="yanta-sync-advanced-grid">
+      <div class="yanta-sync-advanced-card">
+        <strong>${lucide('hard-drive', 14)} Google Drive Sync</strong>
+        <p>
+          Stores encrypted YANTA sync objects in your hidden Google Drive app data folder.
+          Requires Google OAuth and manual Sync Key handling.
+        </p>
+        <button class="btn" data-advanced-google-drive>
+          ${lucide('settings', 14)}
+          Open Google Drive Sync
+        </button>
+      </div>
+
+      <div class="yanta-sync-advanced-card">
+        <strong>${lucide('folder-sync', 14)} Sync Folder / Syncthing</strong>
+        <p>
+          Mirrors readable Markdown files plus YANTA sync metadata to a folder you choose.
+          Useful with Syncthing, iCloud Drive, Dropbox, SMB or an external drive.
+        </p>
+        <button class="btn" data-advanced-sync-folder>
+          ${lucide('folder', 14)}
+          Set up sync folder
+        </button>
+      </div>
+
+      <div class="yanta-sync-advanced-card">
+        <strong>${lucide('server', 14)} Custom Sync Broker</strong>
+        <p>
+          Developer/advanced option for provider-neutral encrypted object storage.
+          The broker feature remains available through the existing runtime/API.
+        </p>
+        <button class="btn" data-advanced-broker-info>
+          ${lucide('terminal', 14)}
+          Show hint
+        </button>
+      </div>
+
+      <div class="yanta-sync-advanced-card">
+        <strong>${lucide('key-round', 14)} Sync Key</strong>
+        <p>
+          The Sync Key unlocks encrypted YANTA sync data and can be used to connect devices manually.
+          Keep it private.
+        </p>
+        <button class="btn" data-advanced-copy-sync-key>
+          ${lucide('copy', 14)}
+          Copy Sync Key
+        </button>
+      </div>
+    </div>
+  `;
+
+  body.querySelector('[data-advanced-google-drive]')?.addEventListener('click', async () => {
+    closeSettings();
+
+    const { openGoogleDriveSyncSetup } = await import('./sync2/sync-setup-ui.js');
+    openGoogleDriveSyncSetup();
+  });
+
+  body.querySelector('[data-advanced-sync-folder]')?.addEventListener('click', async () => {
+    closeSettings();
+
+    const { openSyncSetup } = await import('./sync.js');
+    openSyncSetup();
+  });
+
+  body.querySelector('[data-advanced-broker-info]')?.addEventListener('click', () => {
+    toast('Custom broker can be started via yantaConnectSync2Broker(...) in the console.', 'success');
+  });
+
+  body.querySelector('[data-advanced-copy-sync-key]')?.addEventListener('click', async () => {
+    const { copySyncCapsuleRecoveryKey } = await import('./sync2/capsule.js');
+    await copySyncCapsuleRecoveryKey();
+  });
+
+  details.append(summary, body);
+
+  group.append(details);
+
+  /*
+    Keep the existing setting-scope feature.
+    It is not removed, only moved below the main sync UX.
+  */
+  const a = getAppearance();
+
+  const scopeDetails = el('details', {
+    class: 'yanta-sync-advanced-details yanta-sync-settings-scope-details',
+  });
+
+  scopeDetails.append(
+    el('summary', {}, 'Advanced: settings sync scope'),
+    renderDeviceOnlyToggle(a)
   );
-  host.append(cloudGroup);
 
-  // Sync folder shortcut
-  const syncGroup = el('div', { class: 'yanta-settings-group' });
-  syncGroup.append(el('div', { class: 'yanta-settings-group-title' }, 'Advanced: Sync Folder'));
-  syncGroup.append(el('p', { class: 'yanta-settings-hint' },
-    'Advanced option: mirror your notes to a folder on disk and sync that folder with Syncthing, Dropbox, iCloud, SMB or your own backup tool.'));
-  syncGroup.append(el('button', {
-    class: 'btn',
-    onclick: async () => {
-      closeSettings();
-      const { openSyncSetup } = await import('./sync.js');
-      openSyncSetup();
-    },
-  }, 'Set up sync folder…'));
-  host.append(syncGroup);
+  group.append(scopeDetails);
+
+  return group;
 }
 
 // ---- About section ----
@@ -3094,6 +3324,208 @@ function injectSettingsCss() {
     height: 310px;
     min-height: 310px;
   }
+}
+
+/* Sync settings SaaS UX */
+.yanta-sync-card {
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg-elev-2);
+}
+
+.yanta-sync-card-primary {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(in srgb, var(--accent) 11%, var(--bg-elev-2)),
+      var(--bg-elev-2)
+    );
+}
+
+.yanta-sync-card-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 13px;
+}
+
+.yanta-sync-card-icon {
+  width: 46px;
+  height: 46px;
+  flex: 0 0 46px;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  border-radius: 16px;
+
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 15%, transparent);
+}
+
+.yanta-sync-card-icon.secondary {
+  color: var(--accent-2);
+  background: color-mix(in srgb, var(--accent-2) 15%, transparent);
+}
+
+.yanta-sync-card-title {
+  flex: 1;
+  min-width: 0;
+}
+
+.yanta-sync-card-kicker {
+  display: inline-flex;
+  width: fit-content;
+
+  margin-bottom: 5px;
+  padding: 2px 8px;
+
+  border-radius: 999px;
+
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+
+  font-size: 10px;
+  font-weight: 850;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.yanta-sync-card-title strong {
+  display: block;
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.25;
+}
+
+.yanta-sync-card-title p {
+  margin: 5px 0 0;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.yanta-sync-card-points {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+
+  margin-top: 13px;
+}
+
+.yanta-sync-card-points span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+
+  padding: 4px 8px;
+  border-radius: 999px;
+
+  color: var(--text-dim);
+  background: var(--bg-elev);
+
+  border: 1px solid var(--border);
+
+  font-size: 11px;
+}
+
+.yanta-sync-card-points svg {
+  color: var(--green);
+}
+
+.yanta-sync-status-line {
+  margin-top: 13px;
+  padding: 9px 10px;
+
+  border: 1px solid var(--border);
+  border-radius: 10px;
+
+  background: var(--bg-elev);
+  color: var(--text-dim);
+
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.yanta-sync-status-line strong {
+  color: var(--text);
+}
+
+.yanta-sync-card-actions {
+  margin-top: 13px;
+  justify-content: flex-start;
+  flex-wrap: wrap;
+}
+
+.yanta-sync-advanced-details {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-elev-2);
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+
+.yanta-sync-advanced-details summary {
+  cursor: pointer;
+  user-select: none;
+
+  padding: 12px 14px;
+
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 800;
+
+  background: var(--bg-elev-2);
+}
+
+.yanta-sync-advanced-details summary:hover {
+  color: var(--accent);
+}
+
+.yanta-sync-advanced-body {
+  padding: 0 14px 14px;
+}
+
+.yanta-sync-advanced-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+  gap: 10px;
+}
+
+.yanta-sync-advanced-card {
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--bg-elev);
+}
+
+.yanta-sync-advanced-card strong {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+
+  color: var(--text);
+  font-size: 13px;
+}
+
+.yanta-sync-advanced-card strong svg {
+  color: var(--accent);
+}
+
+.yanta-sync-advanced-card p {
+  min-height: 64px;
+  margin: 7px 0 11px;
+
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.yanta-sync-settings-scope-details .yanta-settings-group {
+  margin: 0;
+  padding: 0 14px 14px;
 }
 
 /* Mobile */

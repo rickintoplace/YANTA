@@ -5,7 +5,7 @@
 // User data is in IndexedDB/Yjs, not in this cache.
 // ============================================================
 
-const CACHE_VERSION = 'yanta-app-v4';
+const CACHE_VERSION = 'yanta-app-v5';
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -51,6 +51,18 @@ self.addEventListener('fetch', (event) => {
   if (req.method !== 'GET') return;
 
   const url = new URL(req.url);
+
+  // Never cache YANTA Cloud API / backend endpoints.
+  // Important when /cloud-api is same-origin via Vercel/Cloudflare rewrite.
+  if (
+    url.origin === location.origin &&
+    (
+      url.pathname.startsWith('/cloud-api/') ||
+      url.pathname.startsWith('/api/')
+    )
+  ) {
+    return;
+  }
 
   // Never cache Google OAuth / Drive API / remote APIs.
   if (

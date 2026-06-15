@@ -12,7 +12,10 @@ export const YANTA_CLOUD_BASE_URL =
     : (location.origin + RAW_YANTA_CLOUD_BASE_URL).replace(/\/+$/, '');
 
 function apiUrl(path) {
-  return `${YANTA_CLOUD_BASE_URL}/${String(path || '').replace(/^\/+/, '')}`;
+  const base = String(YANTA_CLOUD_BASE_URL || '/cloud-api').replace(/\/+$/, '');
+  const cleanPath = String(path || '').replace(/^\/+/, '');
+
+  return `${base}/${cleanPath}`;
 }
 
 async function apiFetch(path, {

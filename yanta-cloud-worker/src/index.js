@@ -15,7 +15,10 @@ const PLAN_LIMITS = {
     writesDay: 8000,
     includedAi: false,
     aiRequestsDay: 0,
-    aiSpendMicrosMonth: 0
+    aiSpendMicrosMonth: 0,
+    rssFetchesDay: 200,
+    rssImageBytesDay: 50 * 1024 * 1024,
+    rssImageBytesMax: 2 * 1024 * 1024,
   },
 
   premium: {
@@ -29,7 +32,10 @@ const PLAN_LIMITS = {
     writesDay: 20000,
     includedAi: true,
     aiRequestsDay: 500,
-    aiSpendMicrosMonth: 5000000
+    aiSpendMicrosMonth: 5000000,
+    rssFetchesDay: 5000,
+    rssImageBytesDay: 2 * 1024 * 1024 * 1024,
+    rssImageBytesMax: 5 * 1024 * 1024,
   }
 };
 
@@ -1733,6 +1739,421 @@ async function handleAiCompletions(env, req, headers) {
   return json(jsonResponse, 200, headers);
 }
 
+function isPrivateIpLiteral(hostname) {
+  const h = String(hostname || '').toLowerCase();
+
+  if (
+    h === 'localhost' ||
+    h === '0.0.0.0' ||
+    h === '127.0.0.1' ||
+    h === '::1' ||
+    h === '[::1]'
+  ) {
+    return true;
+  }
+
+  const m = h.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (!m) return false;
+
+  const a = Number(m[1]);
+  const b = Number(m[2]);
+
+  if (a === 10) return true;
+  if (a === 127) return true;
+  if (a === 169 && b === 254) return true;
+  if (a === 172 && b >= 16 && b <= 31) return true;
+  if (a === 192 && b === 168) return true;
+
+  return false;
+}
+
+function safeExternalRssUrl(raw) {
+  let url;
+
+  try {
+    url = new URL(String(raw || '').trim());
+  } catch {
+    const err = new Error('Invalid URL');
+    err.status = 400;
+    throw err;
+  }
+
+  if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+    const err = new Error('Only http/https URLs are allowed');
+    err.status = 400;
+    throw err;
+  }
+
+  if (isPrivateIpLiteral(url.hostname)) {
+    const err = new Error('This host is not allowed');
+    err.status = 400;
+    throw err;
+  }
+
+  url.username = '';
+  url.password = '';
+
+  return url.href;
+}
+
+async function readResponseWithLimit(res, maxBytes) {
+  const len = Number(res.headers.get('content-length') || 0);
+
+  if (len && len > maxBytes) {
+    const err = new Error('Response too large');
+    err.status = 413;
+    throw err;
+  }
+
+  if (!res.body) {
+    const buf = await res.arrayBuffer();
+    if (buf.byteLength > maxBytes) {
+      const err = new Error('Response too large');
+      err.status = 413;
+      throw err;
+    }
+    return new Uint8Array(buf);
+  }
+
+  const reader = res.body.getReader();
+  const chunks = [];
+  let total = 0;
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    total += value.byteLength;
+
+    if (total > maxBytes) {
+      try { await reader.cancel(); } catch {}
+      const err = new Error('Response too large');
+      err.status = 413;
+      throw err;
+    }
+
+    chunks.push(value);
+  }
+
+  const out = new Uint8Array(total);
+  let offset = 0;
+
+  for (const chunk of chunks) {
+    out.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  return out;
+}
+
+function decodeUtf8(bytes) {
+  return new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+}
+
+function looksLikeFeedText(text) {
+  const s = String(text || '').trim().slice(0, 300).toLowerCase();
+
+  return (
+    s.startsWith('<?xml') ||
+    s.startsWith('<rss') ||
+    s.startsWith('<feed') ||
+    s.startsWith('{') ||
+    s.includes('<rss') ||
+    s.includes('<feed')
+  );
+}
+
+async function fetchExternal(url, {
+  accept = '*/*',
+  etag = '',
+  lastModified = '',
+  maxBytes = 2 * 1024 * 1024,
+  timeoutMs = 12000,
+  maxRedirects = 3,
+} = {}) {
+  let currentUrl = safeExternalRssUrl(url);
+
+  for (let redirectCount = 0; redirectCount <= maxRedirects; redirectCount++) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const headers = {
+        accept,
+        'user-agent': 'YANTA Sources/1.0 (+https://yanta.page)',
+      };
+
+      if (etag && redirectCount === 0) {
+        headers['if-none-match'] = etag;
+      }
+
+      if (lastModified && redirectCount === 0) {
+        headers['if-modified-since'] = lastModified;
+      }
+
+      const res = await fetch(currentUrl, {
+        method: 'GET',
+        redirect: 'manual',
+        signal: controller.signal,
+        headers,
+      });
+
+      if (
+        res.status >= 300 &&
+        res.status < 400 &&
+        res.headers.get('location')
+      ) {
+        const nextUrl = new URL(res.headers.get('location'), currentUrl).href;
+        currentUrl = safeExternalRssUrl(nextUrl);
+        continue;
+      }
+
+      if (res.status === 304) {
+        return {
+          status: 304,
+          headers: res.headers,
+          bytes: new Uint8Array(),
+          finalUrl: currentUrl,
+        };
+      }
+
+      const bytes = await readResponseWithLimit(res, maxBytes);
+
+      return {
+        status: res.status,
+        headers: res.headers,
+        bytes,
+        finalUrl: currentUrl,
+      };
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
+  const err = new Error('Too many redirects');
+  err.status = 400;
+  throw err;
+}
+
+function extractFeedsFromHtml(html, baseUrl) {
+  const feeds = [];
+  const seen = new Set();
+
+  const add = (feedUrl, title = '') => {
+    if (!feedUrl) return;
+
+    let href = '';
+
+    try {
+      href = new URL(feedUrl, baseUrl).href;
+    } catch {
+      return;
+    }
+
+    const key = href.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+
+    feeds.push({
+      title: title || href,
+      feedUrl: href,
+      siteUrl: baseUrl,
+    });
+  };
+
+  const linkRe = /<link\b[^>]*>/gi;
+  let m;
+
+  while ((m = linkRe.exec(html)) !== null) {
+    const tag = m[0];
+
+    const rel = tag.match(/\brel=["']?([^"'>\s]+)/i)?.[1] || '';
+    const type = tag.match(/\btype=["']?([^"'>\s]+)/i)?.[1] || '';
+    const href = tag.match(/\bhref=["']([^"']+)["']/i)?.[1] ||
+      tag.match(/\bhref=([^\s>]+)/i)?.[1] ||
+      '';
+
+    const title = tag.match(/\btitle=["']([^"']+)["']/i)?.[1] || '';
+
+    const isAlternate = rel.toLowerCase().includes('alternate');
+    const isFeedType =
+      /rss|atom|feed\+json|json/i.test(type);
+
+    if (href && isAlternate && isFeedType) {
+      add(href, title);
+    }
+  }
+
+  // Common fallback paths.
+  for (const path of ['/feed', '/feed.xml', '/rss.xml', '/atom.xml']) {
+    add(path, '');
+  }
+
+  return feeds.slice(0, 12);
+}
+
+async function handleRssDiscover(env, req, url, headers) {
+  const user = await requireUser(env, req);
+  const limits = effectiveLimits(user, await getUserCreatedAt(env, user.userId));
+
+  const rl = await rateLimit(
+    env,
+    `rss:discover:${user.userId}`,
+    Math.min(200, limits.rssFetchesDay || 200),
+    24 * 60 * 60 * 1000
+  );
+
+  if (!rl.ok) {
+    return json({ error: 'rss_rate_limited', message: 'RSS discovery limit reached.' }, 429, headers);
+  }
+
+  const targetUrl = safeExternalRssUrl(url.searchParams.get('url') || '');
+
+  const fetched = await fetchExternal(targetUrl, {
+    accept: 'text/html, application/rss+xml, application/atom+xml, application/feed+json, application/json, application/xml, text/xml, */*',
+    maxBytes: 1024 * 1024,
+    timeoutMs: 10000,
+  });
+
+  if (fetched.status < 200 || fetched.status >= 400) {
+    return json({ error: 'fetch_failed', status: fetched.status }, 502, headers);
+  }
+
+  const contentType = fetched.headers.get('content-type') || '';
+  const textBody = decodeUtf8(fetched.bytes);
+
+  if (looksLikeFeedText(textBody) && !contentType.includes('html')) {
+    return json({
+      feeds: [
+        {
+          title: targetUrl,
+          feedUrl: fetched.finalUrl || targetUrl,
+          siteUrl: targetUrl,
+        },
+      ],
+    }, 200, headers);
+  }
+
+  const feeds = extractFeedsFromHtml(textBody, fetched.finalUrl || targetUrl);
+
+  return json({ feeds }, 200, headers);
+}
+
+async function handleRssFetch(env, req, url, headers) {
+  const user = await requireUser(env, req);
+  const limits = effectiveLimits(user, await getUserCreatedAt(env, user.userId));
+
+  const rl = await rateLimit(
+    env,
+    `rss:fetch:${user.userId}`,
+    limits.rssFetchesDay || 200,
+    24 * 60 * 60 * 1000
+  );
+
+  if (!rl.ok) {
+    return json({ error: 'rss_rate_limited', message: 'RSS fetch limit reached.' }, 429, headers);
+  }
+
+  const targetUrl = safeExternalRssUrl(url.searchParams.get('url') || '');
+
+  const fetched = await fetchExternal(targetUrl, {
+    accept: 'application/rss+xml, application/atom+xml, application/feed+json, application/json, application/xml, text/xml, */*',
+    etag: url.searchParams.get('etag') || '',
+    lastModified: url.searchParams.get('lastModified') || '',
+    maxBytes: 2 * 1024 * 1024,
+    timeoutMs: 12000,
+  });
+
+  if (fetched.status === 304) {
+    return json({ notModified: true }, 200, headers);
+  }
+
+  if (fetched.status < 200 || fetched.status >= 400) {
+    return json({ error: 'fetch_failed', status: fetched.status }, 502, headers);
+  }
+
+  const body = decodeUtf8(fetched.bytes);
+
+  if (!looksLikeFeedText(body)) {
+    return json({ error: 'not_a_feed', message: 'URL did not return a supported RSS/Atom/JSON feed.' }, 400, headers);
+  }
+
+  return json({
+    body,
+    contentType: fetched.headers.get('content-type') || '',
+    etag: fetched.headers.get('etag') || '',
+    lastModified: fetched.headers.get('last-modified') || '',
+    finalUrl: fetched.finalUrl || targetUrl,
+  }, 200, {
+    ...headers,
+    'cache-control': 'no-store',
+  });
+}
+
+async function handleRssImage(env, req, url, headers) {
+  const user = await requireUser(env, req);
+  const limits = effectiveLimits(user, await getUserCreatedAt(env, user.userId));
+
+  const targetUrl = safeExternalRssUrl(url.searchParams.get('url') || '');
+  const cacheKey = new Request(`https://yanta-rss-image-cache.local/?url=${encodeURIComponent(targetUrl)}`);
+  const cache = caches.default;
+
+  const cached = await cache.match(cacheKey);
+  if (cached) {
+    return new Response(cached.body, {
+      status: cached.status,
+      headers: {
+        ...headers,
+        'content-type': cached.headers.get('content-type') || 'image/jpeg',
+        'cache-control': 'public, max-age=21600',
+      },
+    });
+  }
+
+  const rl = await rateLimit(
+    env,
+    `rss:image:${user.userId}`,
+    2000,
+    24 * 60 * 60 * 1000
+  );
+
+  if (!rl.ok) {
+    return json({ error: 'rss_image_rate_limited' }, 429, headers);
+  }
+
+  const fetched = await fetchExternal(targetUrl, {
+    accept: 'image/avif,image/webp,image/png,image/jpeg,image/gif,image/svg+xml,image/*,*/*',
+    maxBytes: limits.rssImageBytesMax || 2 * 1024 * 1024,
+    timeoutMs: 10000,
+  });
+
+  if (fetched.status < 200 || fetched.status >= 400) {
+    return json({ error: 'image_fetch_failed', status: fetched.status }, 502, headers);
+  }
+
+  const type = fetched.headers.get('content-type') || '';
+
+  if (!type.toLowerCase().startsWith('image/')) {
+    return json({ error: 'not_an_image' }, 400, headers);
+  }
+
+  const res = new Response(fetched.bytes, {
+    status: 200,
+    headers: {
+      ...headers,
+      'content-type': type,
+      'cache-control': 'public, max-age=21600',
+      'x-content-type-options': 'nosniff',
+    },
+  });
+
+  try {
+    await cache.put(cacheKey, res.clone());
+  } catch {}
+
+  return res;
+}
+
 async function route(req, env) {
   const headers = corsHeaders(env, req);
 
@@ -1817,6 +2238,18 @@ async function route(req, env) {
 
     if (url.pathname === '/api/ai/chat/completions' && req.method === 'POST') {
       return handleAiCompletions(env, req, headers);
+    }
+
+    if (url.pathname === '/api/rss/discover' && req.method === 'GET') {
+      return handleRssDiscover(env, req, url, headers);
+    }
+    
+    if (url.pathname === '/api/rss/fetch' && req.method === 'GET') {
+      return handleRssFetch(env, req, url, headers);
+    }
+    
+    if (url.pathname === '/api/rss/image' && req.method === 'GET') {
+      return handleRssImage(env, req, url, headers);
     }
 
     return json({ error: 'not_found' }, 404, headers);

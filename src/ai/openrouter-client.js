@@ -15,7 +15,10 @@ import {
 } from '../cloud/cloud-api.js';
 
 function apiUrl(path) {
-  return new URL(path, YANTA_CLOUD_BASE_URL).href;
+  const base = String(YANTA_CLOUD_BASE_URL || '/cloud-api').replace(/\/+$/, '');
+  const cleanPath = String(path || '').replace(/^\/+/, '');
+
+  return `${base}/${cleanPath}`;
 }
 
 async function parseErrorResponse(res, fallback) {

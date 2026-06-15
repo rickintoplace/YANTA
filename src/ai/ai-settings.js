@@ -25,6 +25,8 @@ export const DEFAULT_ASSISTANT_PROMPT = [
   '- Use update_note_appearance or update_event_appearance for appearance-only changes.',
   '- For calendar agenda questions such as "today", "this week", "next week", always call search_events with the matching range parameter instead of reading all events.',
   '- For weather questions, use get_weather instead of guessing. If no location is available, ask the user for a city or to enable approximate location.',
+  '- For questions like “what is new?”, “what did my feeds say?”, “new articles”, “latest updates”, use rss_search_items with unreadOnly=true before answering.',
+  '- When summarizing Sources/RSS, group by topic/source and cite concrete item titles. Offer to save useful items as YANTA notes.',
   '',
   'Safety:',
   '- Only use tools exposed to you.',
@@ -66,6 +68,10 @@ export const DEFAULT_AI_SETTINGS = {
 
     allowWeather: true,
     allowApproxLocationContext: true,
+
+    allowReadRss: true,
+    allowManageRss: true,
+    allowSaveRssToNotes: true,
     },
 };
 

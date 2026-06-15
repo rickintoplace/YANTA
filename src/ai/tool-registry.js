@@ -24,6 +24,13 @@ import {
 } from './app-actions.js';
 
 import {
+  rssSearchItemsAction,
+  rssReadItemAction,
+  rssSaveItemAsNoteAction,
+  rssMarkItemReadAction,
+} from '../rss/rss-actions.js';
+
+import {
   aiBrainListAction,
   aiBrainReadAction,
   aiBrainSearchAction,
@@ -293,6 +300,76 @@ export const TOOL_REGISTRY = [
       required: ['body'],
     },
     execute: aiBrainWriteAction,
+  },
+  {
+    name: 'rss_search_items',
+    permission: 'allowReadRss',
+    risk: 'read',
+    description: [
+      'Search YANTA Sources/RSS items by title, source, URL and excerpt.',
+      'Use this when the user asks what is new, asks for unread sources, feed updates, articles, posts, releases, or research updates.',
+      'For “what is new?”, prefer unreadOnly=true and limit around 20.',
+      'BYOK users can summarize these results with their own AI key. Included AI cost is controlled by YANTA Cloud plan limits.',
+    ].join('\n'),
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string' },
+        unreadOnly: { type: 'boolean', default: true },
+        starredOnly: { type: 'boolean', default: false },
+        includeArchived: { type: 'boolean', default: false },
+        since: { type: 'string', description: 'Optional ISO date/time lower bound.' },
+        limit: { type: 'number', default: 20 },
+      },
+    },
+    execute: rssSearchItemsAction,
+  },
+  
+  {
+    name: 'rss_read_item',
+    permission: 'allowReadRss',
+    risk: 'read',
+    description: 'Read one Sources/RSS item including excerpt/content text.',
+    parameters: {
+      type: 'object',
+      properties: {
+        itemId: { type: 'string' },
+      },
+      required: ['itemId'],
+    },
+    execute: rssReadItemAction,
+  },
+  
+  {
+    name: 'rss_save_item_as_note',
+    permission: 'allowSaveRssToNotes',
+    risk: 'write',
+    description: 'Save one Sources/RSS item as a normal YANTA Markdown note.',
+    parameters: {
+      type: 'object',
+      properties: {
+        itemId: { type: 'string' },
+        folderId: { type: ['string', 'null'] },
+      },
+      required: ['itemId'],
+    },
+    execute: rssSaveItemAsNoteAction,
+  },
+  
+  {
+    name: 'rss_mark_item_read',
+    permission: 'allowManageRss',
+    risk: 'write',
+    description: 'Mark one Sources/RSS item as read or unread.',
+    parameters: {
+      type: 'object',
+      properties: {
+        itemId: { type: 'string' },
+        read: { type: 'boolean', default: true },
+      },
+      required: ['itemId'],
+    },
+    execute: rssMarkItemReadAction,
   },
 {
   name: 'get_weather',

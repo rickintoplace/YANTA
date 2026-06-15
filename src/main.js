@@ -125,6 +125,13 @@ import {
 import {
   setupSync2ProgressUi,
 } from './sync2/sync-progress-ui.js';
+import {
+  setupSyncReminderUi,
+} from './sync2/sync-reminder-ui.js';
+import {
+  setupRss,
+  openRssInbox,
+} from './rss/rss-ui.js';
 
 let sharePreviewLocked = false;
 
@@ -1074,6 +1081,7 @@ async function init() {
     openCalendarPane,
     openAssistant: openAssistantSmart,
     openAssistantFloating,
+    openSources: openRssInbox,
     openCitationManager,
     exportAsZip,
     exportNoteAsMd,
@@ -1099,7 +1107,9 @@ async function init() {
   setupDashboardContextMenu();
   setupAssistant();
   setupFloatingCreate();
+  setupRss();
   setupSync2ProgressUi();
+  setupSyncReminderUi();
 
   // setupCalendar();
   await syncRestore();
@@ -1674,7 +1684,18 @@ function bindEvents() {
       return;
     }
 
-    syncMenu(e.currentTarget, showMenu);
+    /*
+      SaaS UX:
+      Normal click promotes YANTA Cloud Sync as the recommended path.
+      Advanced legacy sync menu remains available via Shift/Alt-click.
+    */
+    if (e.shiftKey || e.altKey) {
+      syncMenu(e.currentTarget, showMenu);
+      return;
+    }
+
+    const { openYantaCloudSetup } = await import('./sync2/yanta-cloud-setup-ui.js');
+    await openYantaCloudSetup();
   });
   $('syncSetupPick')?.addEventListener('click', async () => { closeSyncSetup(); await syncConnect(); });
   document.querySelectorAll('[data-sync-close]').forEach((b) => b.addEventListener('click', closeSyncSetup));

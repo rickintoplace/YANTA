@@ -570,7 +570,7 @@ function renderStartView() {
   m.innerHTML = `
     <div class="modal-card yanta-sync2-setup-card">
       <header class="modal-head">
-        <h3>Cloud Sync</h3>
+        <h3>Advanced: Google Drive Sync</h3>
         <button class="icon-btn" data-sync2-close>&times;</button>
       </header>
 
@@ -578,8 +578,11 @@ function renderStartView() {
         <div class="yanta-sync2-setup-hero">
           <div class="yanta-sync2-setup-icon">${lucide('cloud', 28)}</div>
           <div>
-            <strong>Encrypted sync via Google Drive</strong>
-            <p>YANTA stores only encrypted objects in your hidden Google Drive app data folder.</p>
+            <strong>Advanced encrypted sync via Google Drive</strong>
+            <p>
+              Use this if you want to store encrypted YANTA sync data in your own Google Drive app data folder.
+              Most users should use YANTA Cloud Sync instead.
+            </p>
           </div>
         </div>
 

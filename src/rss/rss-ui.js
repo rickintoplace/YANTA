@@ -34,7 +34,6 @@ import {
 } from './rss-fetcher.js';
 
 import {
-  addRssFeedFromUniversalInput,
   refreshAllRssFeeds,
   refreshRssFeed,
   markRssItemRead,
@@ -43,6 +42,12 @@ import {
   saveRssItemAsNote,
   appendRssItemToCurrentNote,
 } from './rss-actions.js';
+
+import {
+  addBestRssSourceFromInput,
+  attachRssSourcePicker,
+  openRssSourceBrowser,
+} from './rss-source-picker.js';
 
 import {
   getRssCloudAuthState,
@@ -657,6 +662,17 @@ async function renderShell() {
   const addBtn = el('button', { class: 'btn primary' });
   addBtn.innerHTML = `${lucide('plus', 14)} Add`;
 
+  const browseBtn = el('button', { class: 'btn' });
+  browseBtn.innerHTML = `${lucide('layout-grid', 14)} Browse`;
+
+  browseBtn.addEventListener('click', async () => {
+    await openRssSourceBrowser({
+      onAdded: async () => {
+        await renderShell();
+      },
+    });
+  });
+
   const runAdd = async () => {
     const input = addInput.value.trim();
 
@@ -666,10 +682,12 @@ async function renderShell() {
     addInput.disabled = true;
 
     try {
-      await addRssFeedFromUniversalInput(input);
+      await addBestRssSourceFromInput(input, {
+        onAdded: async () => {
+          addInput.value = '';
+        },
+      });
 
-      addInput.value = '';
-      toast('Source added', 'success');
       await renderShell();
     } catch (err) {
       toast(err?.message || 'Could not add source', 'error');
@@ -686,6 +704,13 @@ async function renderShell() {
 
     e.preventDefault();
     runAdd();
+  });
+
+  attachRssSourcePicker(addInput, {
+    onAdded: async () => {
+      addInput.value = '';
+      await renderShell();
+    },
   });
 
   const refresh = el('button', { class: 'btn' });
@@ -706,7 +731,7 @@ async function renderShell() {
     }
   });
 
-  toolbar.append(addInput, addBtn, refresh);
+  toolbar.append(addInput, addBtn, browseBtn, refresh);
 
   const feeds = await getRssFeeds();
   const tabs = el('div', { class: 'yanta-rss-tabs' });

@@ -8,7 +8,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "lint": "eslint src/**/*.js",
-    "format": "prettier --write ."
+    "format": "prettier --write .",
+    "build:rss-catalog": "node scripts/build-rss-catalog-from-plenary.mjs vendor/awesome-rss-feeds src/rss/rss-catalog.js"
   },
   "dependencies": {
     "@codemirror/autocomplete": "6.16.2",

@@ -18,8 +18,10 @@ import {
 } from './rss-settings.js';
 
 import {
-  addRssFeedFromUniversalInput,
-} from './rss-actions.js';
+  addBestRssSourceFromInput,
+  attachRssSourcePicker,
+  openRssSourceBrowser,
+} from './rss-source-picker.js';
 
 import {
   getRssCloudAuthState,
@@ -216,6 +218,17 @@ export async function renderRssSettingsPanel(host) {
   const addBtn = el('button', { class: 'btn primary' });
   addBtn.innerHTML = `${lucide('rss', 14)} Add Source`;
 
+  const browseBtn = el('button', { class: 'btn' });
+  browseBtn.innerHTML = `${lucide('layout-grid', 14)} Browse`;
+
+  browseBtn.addEventListener('click', async () => {
+    await openRssSourceBrowser({
+      onAdded: async () => {
+        await renderRssSettingsPanel(host);
+      },
+    });
+  });
+
   const runAdd = async () => {
     const value = input.value.trim();
 
@@ -225,9 +238,12 @@ export async function renderRssSettingsPanel(host) {
     input.disabled = true;
 
     try {
-      await addRssFeedFromUniversalInput(value);
+      await addBestRssSourceFromInput(value, {
+        onAdded: async () => {
+          input.value = '';
+        },
+      });
 
-      toast('Source added', 'success');
       await renderRssSettingsPanel(host);
     } catch (err) {
       toast(err?.message || 'Could not add source', 'error');
@@ -246,6 +262,13 @@ export async function renderRssSettingsPanel(host) {
     runAdd();
   });
 
+  attachRssSourcePicker(input, {
+    onAdded: async () => {
+      input.value = '';
+      await renderRssSettingsPanel(host);
+    },
+  });
+
   const row = el('div', {
     class: 'compress-actions',
     style: {
@@ -253,7 +276,7 @@ export async function renderRssSettingsPanel(host) {
     },
   });
 
-  row.append(input, addBtn);
+  row.append(input, addBtn, browseBtn);
   addBox.append(row);
   host.append(addBox);
 

@@ -100,15 +100,64 @@ export function cloudUsage() {
   return apiFetch('/api/usage');
 }
 
-export function cloudListVaultDevices(vaultId) {
-  return apiFetch(`/api/devices?vaultId=${encodeURIComponent(vaultId)}`);
+function currentYantaCloudDeviceId() {
+  try {
+    return (
+      window.yantaSync2?.deviceId ||
+      window.yantaSync2?.engine?.deviceId ||
+      ''
+    );
+  } catch {
+    return '';
+  }
 }
 
-export function cloudRemoveVaultDevice(vaultId, deviceId) {
+function currentPlatformHint() {
+  try {
+    return (
+      navigator.userAgentData?.platform ||
+      navigator.platform ||
+      ''
+    );
+  } catch {
+    return '';
+  }
+}
+
+function cloudDeviceHeaders(deviceId = currentYantaCloudDeviceId()) {
+  const headers = {};
+
+  const id = String(deviceId || '').trim();
+  const platform = String(currentPlatformHint() || '').trim();
+
+  if (id) {
+    headers['x-yanta-device-id'] = id;
+  }
+
+  if (platform) {
+    headers['x-yanta-platform'] = platform;
+  }
+
+  return headers;
+}
+
+export function cloudListVaultDevices(vaultId, {
+  deviceId = '',
+} = {}) {
+  return apiFetch(`/api/devices?vaultId=${encodeURIComponent(vaultId)}`, {
+    headers: cloudDeviceHeaders(deviceId),
+  });
+}
+
+
+export function cloudRemoveVaultDevice(vaultId, deviceId, {
+  currentDeviceId = '',
+} = {}) {
   return apiFetch(
     `/api/devices?vaultId=${encodeURIComponent(vaultId)}&deviceId=${encodeURIComponent(deviceId)}`,
     {
       method: 'DELETE',
+      headers: cloudDeviceHeaders(currentDeviceId),
     }
   );
 }

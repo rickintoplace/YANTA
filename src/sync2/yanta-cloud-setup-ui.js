@@ -376,8 +376,11 @@ function publishYantaCloudRuntime(runtime, {
         syncNow,
         reason,
       });
+
       return runtime;
-    } catch {}
+    } catch (err) {
+      console.warn('[YANTA Cloud] direct runtime registration failed', err);
+    }
   }
 
   window.dispatchEvent(new CustomEvent('yanta-sync2-runtime-ready', {
@@ -659,6 +662,84 @@ async function configuredYantaCloudBaseUrl() {
   }
 }
 
+async function prepareFreshYantaCloudDeviceIdentity({
+  reason = 'reconnect',
+} = {}) {
+  /*
+    Wenn ein Gerät aus dem Vault entfernt wurde, ist seine bisherige
+    sync2.deviceId serverseitig revoked.
+
+    Reconnect darf NICHT dieselbe deviceId wiederverwenden, sonst würde
+    der Worker korrekt "Device revoked" werfen.
+
+    Deshalb erzeugen wir beim expliziten Connect/Reconnect eine neue lokale
+    Cloud-Device-Identität. Die alte bleibt revoked.
+  */
+
+  try {
+    window.yantaSync2?.engine?.stop?.();
+  } catch {}
+
+  try {
+    await store.settings.set('sync2.deviceId', null);
+  } catch {}
+
+  /*
+    Optional aber sinnvoll:
+    Der Seq-State ist an sich provider-lokal und nicht deviceId-spezifisch.
+    Wir lassen ihn absichtlich stehen. Neue deviceId + alte seq ist okay:
+    Pfade enthalten deviceId + seq und kollidieren dadurch nicht.
+  */
+
+  console.info('[YANTA Cloud] prepared fresh cloud device identity', {
+    reason,
+  });
+}
+
+function currentCloudDeviceId() {
+  return (
+    window.yantaSync2?.deviceId ||
+    window.yantaSync2?.engine?.deviceId ||
+    ''
+  );
+}
+
+function hasActiveCloudDevices(devices = []) {
+  return devices.some((d) => d.active !== false);
+}
+
+async function loadVaultDevicesForHome(vaultId, currentDeviceId) {
+  if (!vaultId) {
+    return {
+      devices: [],
+      accessError: '',
+    };
+  }
+
+  if (!currentDeviceId) {
+    return {
+      devices: [],
+      accessError: 'This browser has no active YANTA Cloud device session for this vault.',
+    };
+  }
+
+  try {
+    const res = await cloudListVaultDevices(vaultId, {
+      deviceId: currentDeviceId,
+    });
+
+    return {
+      devices: res.devices || [],
+      accessError: '',
+    };
+  } catch (err) {
+    return {
+      devices: [],
+      accessError: err?.message || 'Device access denied.',
+    };
+  }
+}
+
 async function isLocalYantaCloudVault(vaultId) {
   const provider = await store.settings.get('sync2.provider', '').catch(() => '');
   const configuredVaultId = await configuredYantaCloudVaultId();
@@ -678,7 +759,53 @@ function fmtDeviceTime(ts) {
   });
 }
 
-function cloudDevicesHtml(devices = [], limits = {}, currentDeviceId = '') {
+function deviceInfoLine(d = {}) {
+  return [
+    d.deviceType || '',
+    d.browser || '',
+    d.os || d.platform || '',
+  ]
+    .map((x) => String(x || '').trim())
+    .filter(Boolean)
+    .filter((x, i, arr) => arr.indexOf(x) === i)
+    .join(' · ') || 'Unknown device';
+}
+
+function cloudDevicesHtml({
+  devices = [],
+  limits = {},
+  currentDeviceId = '',
+  accessError = '',
+  vaultId = '',
+} = {}) {
+  if (accessError) {
+    return `
+      <section class="yanta-cloud-section">
+        <h4>Connected devices</h4>
+
+        <div class="yanta-cloud-warning">
+          <strong>This device no longer has access to this cloud vault.</strong><br>
+          ${escapeHtml(accessError)}
+          <br><br>
+          Cloud sync and device management are blocked on this device until it is connected again with the Recovery Key or a pairing QR.
+        </div>
+
+        ${
+          vaultId
+            ? `
+              <div class="compress-actions" style="margin-top:10px;justify-content:flex-start;flex-wrap:wrap">
+                <button class="btn primary" data-reconnect-current-device="${escapeHtml(vaultId)}">
+                  ${lucide('key-round', 14)}
+                  Reconnect this device
+                </button>
+              </div>
+            `
+            : ''
+        }
+      </section>
+    `;
+  }
+
   const active = devices.filter((d) => d.active !== false);
   const max = Number(limits.devices || 0);
 
@@ -686,7 +813,26 @@ function cloudDevicesHtml(devices = [], limits = {}, currentDeviceId = '') {
     return `
       <section class="yanta-cloud-section">
         <h4>Connected devices</h4>
+
         <p>No devices recorded for this vault yet.</p>
+
+        ${
+          vaultId
+            ? `
+              <div class="yanta-cloud-warning" style="margin-top:10px">
+                <strong>No active cloud device is registered for this vault.</strong><br>
+                To use this vault on this browser, reconnect this device with the Recovery Key or scan a pairing QR.
+              </div>
+
+              <div class="compress-actions" style="margin-top:10px;justify-content:flex-start;flex-wrap:wrap">
+                <button class="btn primary" data-reconnect-current-device="${escapeHtml(vaultId)}">
+                  ${lucide('key-round', 14)}
+                  Reconnect this device
+                </button>
+              </div>
+            `
+            : ''
+        }
       </section>
     `;
   }
@@ -707,8 +853,9 @@ function cloudDevicesHtml(devices = [], limits = {}, currentDeviceId = '') {
           return `
             <div class="yanta-cloud-device-row ${current ? 'current' : ''} ${revoked ? 'revoked' : ''}">
               <div>
-                <strong>${escapeHtml(d.name || d.deviceId || 'Device')}</strong>
-                <small>${escapeHtml(d.deviceId || '')}</small>
+                <strong>${escapeHtml(d.name || deviceInfoLine(d) || d.deviceId || 'Device')}</strong>
+                <small>${escapeHtml(deviceInfoLine(d))}</small>
+                <small>ID: ${escapeHtml(d.deviceId || '')}</small>
                 <small>Last seen: ${escapeHtml(fmtDeviceTime(d.lastSeenAt))}</small>
                 ${revoked ? '<small class="warn">Removed</small>' : ''}
               </div>
@@ -733,23 +880,62 @@ function cloudDevicesHtml(devices = [], limits = {}, currentDeviceId = '') {
   `;
 }
 
-async function loadVaultDevicesForHome(vaultId) {
-  if (!vaultId) return [];
-
+async function runRepairCloudSync() {
   try {
-    const res = await cloudListVaultDevices(vaultId);
-    return res.devices || [];
+    const ok = await yantaConfirm({
+      title: 'Repair cloud sync?',
+      message: [
+        'Run a full encrypted snapshot catch-up?',
+        '',
+        'This can take longer, but it is useful if another device missed recently created notes or note-body updates.',
+      ].join('\n'),
+      confirmLabel: 'Repair sync',
+      cancelLabel: 'Cancel',
+      icon: 'wrench',
+    });
+
+    if (!ok) return;
+
+    setStatus('Running full sync repair…');
+
+    if (typeof window.yantaSync2CatchupNow === 'function') {
+      await window.yantaSync2CatchupNow({
+        interactive: true,
+      });
+    } else {
+      await window.yantaSync2?.pushFullStateNow?.({
+        includeSnapshots: true,
+        verbose: false,
+      });
+
+      await window.yantaSync2?.syncNow?.({
+        verbose: false,
+        pullSnapshots: true,
+      });
+    }
+
+    setStatus('Sync repair complete', 'success');
+    toast('Sync repair complete', 'success');
   } catch (err) {
-    console.warn('[YANTA Cloud] could not load devices', err);
-    return [];
+    console.error(err);
+    setStatus(err?.message || 'Sync repair failed', 'error');
   }
 }
 
 async function renderCloudHome(me) {
   const vaults = me.vaults || [];
   const configuredVaultId = await configuredYantaCloudVaultId();
-  const currentDeviceId = window.yantaSync2?.deviceId || '';
-  const devices = await loadVaultDevicesForHome(configuredVaultId);
+  const currentDeviceId = window.yantaSync2?.deviceId || window.yantaSync2?.engine?.deviceId || '';
+
+  const {
+    devices: activeDevices,
+    accessError: deviceAccessError,
+  } = await loadVaultDevicesForHome(configuredVaultId, currentDeviceId);
+
+  const canManageActiveVault =
+    !!configuredVaultId &&
+    !!currentDeviceId &&
+    !deviceAccessError;
 
   renderShell('YANTA Cloud', `
     <div class="yanta-cloud-hero">
@@ -782,6 +968,7 @@ async function renderCloudHome(me) {
         ${
           vaults.map((v) => {
             const active = v.id === configuredVaultId;
+            const activeButBlocked = active && !canManageActiveVault;
 
             return `
               <div class="yanta-cloud-vault-card" data-vault-card="${escapeHtml(v.id)}"
@@ -803,7 +990,9 @@ async function renderCloudHome(me) {
                   </strong>
                   ${
                     active
-                      ? `<span style="font-size:11px;color:var(--accent);font-weight:800">Active</span>`
+                      ? `<span style="font-size:11px;color:${activeButBlocked ? 'var(--yellow)' : 'var(--accent)'};font-weight:800">
+                          ${activeButBlocked ? 'Access blocked' : 'Active'}
+                        </span>`
                       : ''
                   }
                 </div>
@@ -814,24 +1003,41 @@ async function renderCloudHome(me) {
 
                 <div class="compress-actions" style="justify-content:flex-start;flex-wrap:wrap">
                   ${
-                    active
-                      ? `
-                        <button class="btn primary" data-vault-action="connect-device" data-vault-id="${escapeHtml(v.id)}">
-                          ${lucide('qr-code', 14)}
-                          Connect another device
-                        </button>
+                  active && canManageActiveVault
+                    ? `
+                      <button class="btn primary" data-vault-action="connect-device" data-vault-id="${escapeHtml(v.id)}">
+                        ${lucide('qr-code', 14)}
+                        Connect another device
+                      </button>
 
-                        <button class="btn" data-vault-action="sync-now" data-vault-id="${escapeHtml(v.id)}">
-                          ${lucide('refresh-cw', 14)}
-                          Sync now
-                        </button>
-                      `
-                      : `
-                        <button class="btn primary" data-vault-action="connect-this-device" data-vault-id="${escapeHtml(v.id)}">
-                          ${lucide('key', 14)}
-                          Connect this device
-                        </button>
-                      `
+                      <button class="btn" data-vault-action="sync-now" data-vault-id="${escapeHtml(v.id)}">
+                        ${lucide('refresh-cw', 14)}
+                        Sync now
+                      </button>
+
+                      <button class="btn" data-vault-action="repair-sync" data-vault-id="${escapeHtml(v.id)}">
+                        ${lucide('wrench', 14)}
+                        Repair cloud sync
+                      </button>
+                    `
+                      : active && activeButBlocked
+                        ? `
+                          <button class="btn" disabled>
+                            ${lucide('ban', 14)}
+                            Device removed
+                          </button>
+
+                          <button class="btn primary" data-vault-action="connect-this-device" data-vault-id="${escapeHtml(v.id)}">
+                            ${lucide('key', 14)}
+                            Reconnect this device
+                          </button>
+                        `
+                        : `
+                          <button class="btn primary" data-vault-action="connect-this-device" data-vault-id="${escapeHtml(v.id)}">
+                            ${lucide('key', 14)}
+                            Connect this device
+                          </button>
+                        `
                   }
                 </div>
               </div>
@@ -846,7 +1052,17 @@ async function renderCloudHome(me) {
       </div>
     </section>
 
-    ${configuredVaultId ? cloudDevicesHtml(devices, me.limits || {}, currentDeviceId) : ''}
+    ${
+      configuredVaultId
+        ? cloudDevicesHtml({
+            devices: activeDevices,
+            limits: me.limits || {},
+            currentDeviceId,
+            accessError: deviceAccessError,
+            vaultId: configuredVaultId,
+          })
+        : ''
+    }
   `);
 
   statusEl = modal.querySelector('[data-status]');
@@ -904,6 +1120,12 @@ async function renderCloudHome(me) {
     });
   });
 
+  modal.querySelectorAll('[data-vault-action="repair-sync"]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      await runRepairCloudSync();
+    });
+  });
+
   modal.querySelectorAll('[data-remove-cloud-device]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const deviceId = btn.dataset.removeCloudDevice || '';
@@ -917,7 +1139,7 @@ async function renderCloudHome(me) {
           '',
           `Device ID: ${deviceId}`,
           '',
-          'The removed device can no longer access this cloud vault until it is connected again with the Recovery Key or pairing QR.',
+          'The removed device can no longer sync this cloud vault or manage its connected devices unless it is connected again with the Recovery Key or pairing QR.',
         ].join('\n'),
         confirmLabel: 'Remove device',
         cancelLabel: 'Cancel',
@@ -930,7 +1152,9 @@ async function renderCloudHome(me) {
       try {
         setStatus('Removing device…');
 
-        await cloudRemoveVaultDevice(configuredVaultId, deviceId);
+        await cloudRemoveVaultDevice(configuredVaultId, deviceId, {
+          currentDeviceId,
+        });
 
         setStatus('Device removed', 'success');
         toast('Device removed', 'success');
@@ -940,6 +1164,20 @@ async function renderCloudHome(me) {
         console.error(err);
         setStatus(err?.message || 'Could not remove device', 'error');
       }
+    });
+  });
+  modal.querySelectorAll('[data-reconnect-current-device]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const vaultId = btn.dataset.reconnectCurrentDevice || configuredVaultId;
+  
+      if (!vaultId) {
+        setStatus('No cloud vault selected.', 'error');
+        return;
+      }
+  
+      renderExistingVaultStep(vaultId, {
+        reconnect: true,
+      });
     });
   });
 }
@@ -971,40 +1209,66 @@ async function connectThisDeviceToVault(vaultId) {
     return;
   }
 
-  renderExistingVaultStep(vaultId);
+  renderExistingVaultStep(vaultId, {
+    reconnect: false,
+  });
 }
 
-function renderExistingVaultStep(vaultId) {
-  renderShell('Connect existing cloud vault', `
-    <div class="yanta-cloud-hero">
-      <div class="yanta-cloud-hero-icon">${lucide('key', 28)}</div>
-      <div>
-        <strong>Recovery Key required</strong>
-        <p>Enter your Recovery Key, paste a YANTA pairing payload, or scan the QR code from another device.</p>
+function renderExistingVaultStep(vaultId, {
+  reconnect = false,
+} = {}) {
+  renderShell(
+    reconnect ? 'Reconnect this device' : 'Connect existing cloud vault',
+    `
+      <div class="yanta-cloud-hero">
+        <div class="yanta-cloud-hero-icon">${lucide(reconnect ? 'rotate-ccw-key' : 'key', 28)}</div>
+        <div>
+          <strong>${reconnect ? 'Reconnect this browser to the cloud vault' : 'Recovery Key required'}</strong>
+          <p>
+            Enter your Recovery Key, paste a YANTA pairing payload, or scan the QR code from another device.
+            ${
+              reconnect
+                ? ' YANTA will register this browser as a new active device for this vault.'
+                : ''
+            }
+          </p>
+        </div>
       </div>
-    </div>
 
-    <section class="yanta-cloud-section">
-      <h4>Recovery Key or pairing payload</h4>
-      <textarea class="text-input" data-recovery rows="6" placeholder="Paste Recovery Key, pairing link, or yanta-sync2:..."></textarea>
+      ${
+        reconnect
+          ? `
+            <div class="yanta-cloud-warning">
+              <strong>Why this is needed:</strong>
+              This browser's previous device entry was removed or is missing.
+              Reconnecting creates a new device entry. The old removed entry stays invalid.
+            </div>
+          `
+          : ''
+      }
 
-      <div class="compress-actions" style="margin-top:10px;flex-wrap:wrap">
-        <button class="btn" data-back>Back</button>
+      <section class="yanta-cloud-section">
+        <h4>Recovery Key or pairing payload</h4>
+        <textarea class="text-input" data-recovery rows="6" placeholder="Paste Recovery Key, pairing link, or yanta-sync2:..."></textarea>
 
-        <button class="btn" data-scan-qr>
-          ${lucide('qr-code', 14)}
-          Scan QR
-        </button>
+        <div class="compress-actions" style="margin-top:10px;flex-wrap:wrap">
+          <button class="btn" data-back>Back</button>
 
-        <span class="grow"></span>
+          <button class="btn" data-scan-qr>
+            ${lucide('qr-code', 14)}
+            Scan QR
+          </button>
 
-        <button class="btn primary" data-connect>
-          ${lucide('cloud-download', 14)}
-          Connect & Pull
-        </button>
-      </div>
-    </section>
-  `);
+          <span class="grow"></span>
+
+          <button class="btn primary" data-connect>
+            ${lucide('cloud-download', 14)}
+            ${reconnect ? 'Reconnect & Pull' : 'Connect & Pull'}
+          </button>
+        </div>
+      </section>
+    `
+  );
 
   modal.querySelector('[data-back]')?.addEventListener('click', async () => {
     await renderCloudHome(await cloudMe());
@@ -1037,8 +1301,10 @@ function renderExistingVaultStep(vaultId) {
     try {
       setStatus('Importing key…');
 
+      let payload = null;
+
       if (raw.startsWith('yanta-sync2:') || raw.includes('#sync2=')) {
-        const payload = await importSync2PairingPayload(raw);
+        payload = await importSync2PairingPayload(raw);
 
         if (payload.provider !== 'yanta-cloud') {
           throw new Error('This pairing payload is not for YANTA Cloud.');
@@ -1052,27 +1318,46 @@ function renderExistingVaultStep(vaultId) {
         await setSync2SyncKey(raw);
       }
 
+      const baseUrl =
+        payload?.cloud?.baseUrl ||
+        YANTA_CLOUD_BASE_URL;
+
       await store.settings.set('sync2.provider', 'yanta-cloud');
       await store.settings.set('sync2.yantaCloud.vaultId', vaultId);
-      await store.settings.set('sync2.yantaCloud.baseUrl', YANTA_CLOUD_BASE_URL);
+      await store.settings.set('sync2.yantaCloud.baseUrl', baseUrl);
+
+      /*
+        This is the key part:
+        If this browser/device was removed before, the old sync2.deviceId
+        is revoked on the server. Reconnect must use a new device id.
+      */
+      await prepareFreshYantaCloudDeviceIdentity({
+        reason: reconnect
+          ? 'reconnect-existing-vault'
+          : 'connect-existing-vault',
+      });
 
       setStatus('Removing untouched local Welcome vault if present…');
 
       await removePristineWelcomeVaultIfPresent({
-        reason: 'yanta-cloud-connect-existing',
+        reason: reconnect
+          ? 'yanta-cloud-reconnect'
+          : 'yanta-cloud-connect-existing',
       });
 
       setStatus('Connecting to YANTA Cloud…');
 
       const runtime = await createSync2YantaCloudAppRuntime({
-        baseUrl: YANTA_CLOUD_BASE_URL,
+        baseUrl,
         vaultId,
       });
 
       publishYantaCloudRuntime(runtime, {
         catchUp: false,
         syncNow: false,
-        reason: 'yanta-cloud-connect-existing',
+        reason: reconnect
+          ? 'yanta-cloud-reconnect'
+          : 'yanta-cloud-connect-existing',
       });
 
       setStatus('Pulling encrypted vault…');
@@ -1082,13 +1367,25 @@ function renderExistingVaultStep(vaultId) {
         pullSnapshots: true,
       });
 
-      toast('YANTA Cloud connected', 'success');
+      toast(
+        reconnect
+          ? 'Device reconnected to YANTA Cloud'
+          : 'YANTA Cloud connected',
+        'success'
+      );
 
       renderConnected(vaultId, runtime.syncKey);
     } catch (err) {
       console.error(err);
-      setStatus(err?.message || 'Could not connect vault', 'error');
-      toast('Cloud vault connect failed', 'error');
+      setStatus(
+        err?.message ||
+          (reconnect ? 'Could not reconnect device' : 'Could not connect vault'),
+        'error'
+      );
+      toast(
+        reconnect ? 'Cloud reconnect failed' : 'Cloud vault connect failed',
+        'error'
+      );
     }
   });
 }
@@ -1247,7 +1544,7 @@ async function renderConnected(vaultId, syncKey) {
         <button class="btn" data-copy-link>${lucide('copy', 14)} Copy pairing link</button>
         <button class="btn" data-copy-pairing>${lucide('copy', 14)} Copy raw text</button>
         <button class="btn" data-sync-now>${lucide('refresh-cw', 14)} Sync now</button>
-        <button class="btn" data-repair-sync>${lucide('wrench', 14)} Repair sync</button>
+        <button class="btn" data-repair-sync>${lucide('wrench', 14)} Repair cloud sync</button>
         <span class="grow"></span>
         <button class="btn" data-back-cloud-home>Back</button>
         <button class="btn primary" data-yanta-cloud-close>Done</button>
@@ -1301,45 +1598,7 @@ async function renderConnected(vaultId, syncKey) {
   });
 
   modal.querySelector('[data-repair-sync]')?.addEventListener('click', async () => {
-    try {
-      const ok = await yantaConfirm({
-        title: 'Repair cloud sync?',
-        message: [
-          'Run a full encrypted snapshot catch-up?',
-          '',
-          'This can take longer, but it is useful if another device missed recently created notes or note-body updates.',
-        ].join('\n'),
-        confirmLabel: 'Repair sync',
-        cancelLabel: 'Cancel',
-        icon: 'wrench',
-      });
-
-      if (!ok) return;
-
-      setStatus('Running full sync repair…');
-
-      if (typeof window.yantaSync2CatchupNow === 'function') {
-        await window.yantaSync2CatchupNow({
-          interactive: true,
-        });
-      } else {
-        await window.yantaSync2?.pushFullStateNow?.({
-          includeSnapshots: true,
-          verbose: false,
-        });
-
-        await window.yantaSync2?.syncNow?.({
-          verbose: false,
-          pullSnapshots: true,
-        });
-      }
-
-      setStatus('Sync repair complete', 'success');
-      toast('Sync repair complete', 'success');
-    } catch (err) {
-      console.error(err);
-      setStatus(err?.message || 'Sync repair failed', 'error');
-    }
+    await runRepairCloudSync();
   });
 
   modal.querySelector('[data-back-cloud-home]')?.addEventListener('click', async () => {

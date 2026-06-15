@@ -198,7 +198,7 @@ function corsHeaders(env, req) {
   return {
     'access-control-allow-origin': origin,
     'access-control-allow-methods': 'GET,POST,PUT,DELETE,OPTIONS',
-    'access-control-allow-headers': 'content-type,x-yanta-vault-id,x-yanta-device-id,x-csrf-token',
+    'access-control-allow-headers': 'content-type,x-yanta-vault-id,x-yanta-device-id,x-yanta-platform,x-csrf-token',
     'access-control-allow-credentials': 'true',
     'access-control-max-age': '86400',
     vary: 'Origin'
@@ -541,15 +541,161 @@ async function requireVault(env, user, vaultId) {
   return v;
 }
 
-async function ensureDevice(env, user, vaultId, deviceId) {
+function cleanHeaderValue(value = '') {
+  return String(value || '')
+    .trim()
+    .replace(/^"|"$/g, '')
+    .slice(0, 300);
+}
+
+function parseUserAgentInfo(userAgent = '', platformHint = '') {
+  const ua = String(userAgent || '');
+  const platform = cleanHeaderValue(platformHint);
+
+  let browser = 'Unknown browser';
+
+  if (/Edg\//i.test(ua)) browser = 'Microsoft Edge';
+  else if (/OPR\//i.test(ua) || /Opera/i.test(ua)) browser = 'Opera';
+  else if (/Firefox\//i.test(ua)) browser = 'Firefox';
+  else if (/Chrome\//i.test(ua) && !/Chromium/i.test(ua)) browser = 'Chrome';
+  else if (/CriOS\//i.test(ua)) browser = 'Chrome iOS';
+  else if (/Safari\//i.test(ua) && /Version\//i.test(ua)) browser = 'Safari';
+
+  let os = platform || 'Unknown OS';
+
+  if (/iPhone|iPad|iPod/i.test(ua)) os = 'iOS';
+  else if (/Android/i.test(ua)) os = 'Android';
+  else if (/Windows NT/i.test(ua)) os = 'Windows';
+  else if (/Mac OS X|Macintosh/i.test(ua)) os = 'macOS';
+  else if (/Linux/i.test(ua)) os = 'Linux';
+
+  let deviceType = 'Desktop';
+
+  if (/iPad|Tablet/i.test(ua)) {
+    deviceType = 'Tablet';
+  } else if (/Mobile|iPhone|Android/i.test(ua)) {
+    deviceType = 'Phone';
+  }
+
+  return {
+    browser,
+    os,
+    deviceType,
+    platform: platform || os,
+  };
+}
+
+function deviceInfoFromRequest(req) {
+  const userAgent = cleanHeaderValue(req.headers.get('user-agent') || '');
+  const platformHint = cleanHeaderValue(
+    req.headers.get('sec-ch-ua-platform') ||
+    req.headers.get('x-yanta-platform') ||
+    ''
+  );
+
+  return {
+    userAgent,
+    ...parseUserAgentInfo(userAgent, platformHint),
+  };
+}
+
+function deviceDisplayName(deviceId, info = {}) {
+  const parts = [
+    info.deviceType,
+    info.browser,
+    info.os,
+  ].filter(Boolean).filter((x) => !/^Unknown/i.test(x));
+
+  return parts.length
+    ? parts.join(' · ')
+    : String(deviceId || 'Device');
+}
+
+async function requireActiveVaultDevice(env, user, vaultId, deviceId, req = null) {
+  if (!deviceId) {
+    const err = new Error('Current device id missing');
+    err.status = 400;
+    throw err;
+  }
+
+  const row = await env.DB.prepare(
+    `SELECT *
+     FROM devices
+     WHERE user_id = ?
+       AND vault_id = ?
+       AND device_id = ?`
+  ).bind(user.userId, vaultId, deviceId).first();
+
+  if (!row) {
+    const err = new Error('Current device is not registered for this vault');
+    err.status = 403;
+    throw err;
+  }
+
+  if (row.revoked_at) {
+    const err = new Error('This device was removed from this vault');
+    err.status = 403;
+    throw err;
+  }
+
+  if (req) {
+    const info = deviceInfoFromRequest(req);
+
+    await env.DB.prepare(
+      `UPDATE devices
+       SET last_seen_at = ?,
+           user_agent = COALESCE(NULLIF(?, ''), user_agent),
+           platform = COALESCE(NULLIF(?, ''), platform),
+           browser = COALESCE(NULLIF(?, ''), browser),
+           os = COALESCE(NULLIF(?, ''), os),
+           device_type = COALESCE(NULLIF(?, ''), device_type),
+           name = CASE
+             WHEN name IS NULL OR name = '' OR name = device_id THEN ?
+             ELSE name
+           END
+       WHERE id = ?`
+    ).bind(
+      now(),
+      info.userAgent || '',
+      info.platform || '',
+      info.browser || '',
+      info.os || '',
+      info.deviceType || '',
+      deviceDisplayName(deviceId, info),
+      row.id
+    ).run();
+  } else {
+    await env.DB.prepare(
+      `UPDATE devices SET last_seen_at = ? WHERE id = ?`
+    ).bind(now(), row.id).run();
+  }
+
+  return row;
+}
+
+async function ensureDevice(env, user, vaultId, deviceId, req = null) {
   if (!deviceId) {
     const err = new Error('Device id missing');
     err.status = 400;
     throw err;
   }
 
+  const info = req
+    ? deviceInfoFromRequest(req)
+    : {
+        userAgent: '',
+        platform: '',
+        browser: '',
+        os: '',
+        deviceType: '',
+      };
+
   const existing = await env.DB.prepare(
-    `SELECT * FROM devices WHERE user_id = ? AND vault_id = ? AND device_id = ?`
+    `SELECT *
+     FROM devices
+     WHERE user_id = ?
+       AND vault_id = ?
+       AND device_id = ?`
   ).bind(user.userId, vaultId, deviceId).first();
 
   if (existing) {
@@ -560,8 +706,28 @@ async function ensureDevice(env, user, vaultId, deviceId) {
     }
 
     await env.DB.prepare(
-      `UPDATE devices SET last_seen_at = ? WHERE id = ?`
-    ).bind(now(), existing.id).run();
+      `UPDATE devices
+       SET last_seen_at = ?,
+           user_agent = COALESCE(NULLIF(?, ''), user_agent),
+           platform = COALESCE(NULLIF(?, ''), platform),
+           browser = COALESCE(NULLIF(?, ''), browser),
+           os = COALESCE(NULLIF(?, ''), os),
+           device_type = COALESCE(NULLIF(?, ''), device_type),
+           name = CASE
+             WHEN name IS NULL OR name = '' OR name = device_id THEN ?
+             ELSE name
+           END
+       WHERE id = ?`
+    ).bind(
+      now(),
+      info.userAgent || '',
+      info.platform || '',
+      info.browser || '',
+      info.os || '',
+      info.deviceType || '',
+      deviceDisplayName(deviceId, info),
+      existing.id
+    ).run();
 
     return existing;
   }
@@ -570,7 +736,10 @@ async function ensureDevice(env, user, vaultId, deviceId) {
   const limits = effectiveLimits(user, createdAt);
 
   const count = await env.DB.prepare(
-    `SELECT COUNT(*) AS n FROM devices WHERE vault_id = ? AND revoked_at IS NULL`
+    `SELECT COUNT(*) AS n
+     FROM devices
+     WHERE vault_id = ?
+       AND revoked_at IS NULL`
   ).bind(vaultId).first();
 
   if ((count?.n || 0) >= limits.devices) {
@@ -584,14 +753,15 @@ async function ensureDevice(env, user, vaultId, deviceId) {
     user_id: user.userId,
     vault_id: vaultId,
     device_id: deviceId,
-    name: deviceId,
+    name: deviceDisplayName(deviceId, info),
     created_at: now(),
-    last_seen_at: now()
+    last_seen_at: now(),
   };
 
   await env.DB.prepare(
-    `INSERT INTO devices (id,user_id,vault_id,device_id,name,created_at,last_seen_at)
-     VALUES (?,?,?,?,?,?,?)`
+    `INSERT INTO devices
+     (id,user_id,vault_id,device_id,name,created_at,last_seen_at,user_agent,platform,browser,os,device_type)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`
   ).bind(
     rec.id,
     rec.user_id,
@@ -599,7 +769,12 @@ async function ensureDevice(env, user, vaultId, deviceId) {
     rec.device_id,
     rec.name,
     rec.created_at,
-    rec.last_seen_at
+    rec.last_seen_at,
+    info.userAgent || '',
+    info.platform || '',
+    info.browser || '',
+    info.os || '',
+    info.deviceType || ''
   ).run();
 
   return rec;
@@ -933,25 +1108,57 @@ async function handleListDevices(env, req, url, headers) {
     req.headers.get('x-yanta-vault-id') ||
     '';
 
+  const currentDeviceId = req.headers.get('x-yanta-device-id') || '';
+
   await requireVault(env, user, vaultId);
 
+  /*
+    Security:
+    Device management is vault-device scoped.
+    A removed device must not be able to list devices.
+  */
+  await requireActiveVaultDevice(env, user, vaultId, currentDeviceId, req);
+
   const rows = await env.DB.prepare(
-    `SELECT id, device_id, name, created_at, last_seen_at, revoked_at
+    `SELECT id, device_id, name, created_at, last_seen_at, revoked_at,
+            user_agent, platform, browser, os, device_type
      FROM devices
-     WHERE user_id = ? AND vault_id = ?
+     WHERE user_id = ?
+       AND vault_id = ?
      ORDER BY revoked_at ASC, last_seen_at DESC, created_at DESC`
   ).bind(user.userId, vaultId).all();
 
   return json({
-    devices: (rows.results || []).map((d) => ({
-      id: d.id,
-      deviceId: d.device_id,
-      name: d.name || d.device_id,
-      createdAt: Number(d.created_at || 0),
-      lastSeenAt: Number(d.last_seen_at || 0),
-      revokedAt: d.revoked_at ? Number(d.revoked_at) : null,
-      active: !d.revoked_at,
-    })),
+    currentDeviceId,
+    devices: (rows.results || []).map((d) => {
+      const parsed = parseUserAgentInfo(d.user_agent || '', d.platform || '');
+
+      const browser = d.browser || parsed.browser;
+      const os = d.os || parsed.os;
+      const deviceType = d.device_type || parsed.deviceType;
+      const platform = d.platform || parsed.platform;
+
+      return {
+        id: d.id,
+        deviceId: d.device_id,
+        name: d.name || deviceDisplayName(d.device_id, {
+          browser,
+          os,
+          deviceType,
+        }),
+        createdAt: Number(d.created_at || 0),
+        lastSeenAt: Number(d.last_seen_at || 0),
+        revokedAt: d.revoked_at ? Number(d.revoked_at) : null,
+        active: !d.revoked_at,
+
+        browser,
+        os,
+        platform,
+        deviceType,
+
+        userAgent: d.user_agent || '',
+      };
+    }),
   }, 200, headers);
 }
 
@@ -963,9 +1170,10 @@ async function handleRevokeDevice(env, req, url, headers) {
     req.headers.get('x-yanta-vault-id') ||
     '';
 
-  const deviceId = url.searchParams.get('deviceId') || '';
+  const targetDeviceId = url.searchParams.get('deviceId') || '';
+  const currentDeviceId = req.headers.get('x-yanta-device-id') || '';
 
-  if (!vaultId || !deviceId) {
+  if (!vaultId || !targetDeviceId) {
     return json({
       ok: false,
       message: 'vaultId and deviceId are required',
@@ -974,15 +1182,53 @@ async function handleRevokeDevice(env, req, url, headers) {
 
   await requireVault(env, user, vaultId);
 
+  /*
+    Security rule:
+    A removed/currently unauthorized device cannot remove others.
+  */
+  await requireActiveVaultDevice(env, user, vaultId, currentDeviceId, req);
+
+  if (targetDeviceId === currentDeviceId) {
+    return json({
+      ok: false,
+      message: 'You cannot remove the current device from this screen.',
+    }, 400, headers);
+  }
+
+  const target = await env.DB.prepare(
+    `SELECT *
+     FROM devices
+     WHERE user_id = ?
+       AND vault_id = ?
+       AND device_id = ?`
+  ).bind(user.userId, vaultId, targetDeviceId).first();
+
+  if (!target) {
+    return json({
+      ok: false,
+      message: 'Device not found',
+    }, 404, headers);
+  }
+
   await env.DB.prepare(
     `UPDATE devices
-     SET revoked_at = COALESCE(revoked_at, ?)
-     WHERE user_id = ? AND vault_id = ? AND device_id = ?`
-  ).bind(now(), user.userId, vaultId, deviceId).run();
+     SET revoked_at = COALESCE(revoked_at, ?),
+         revoked_by_device_id = COALESCE(revoked_by_device_id, ?)
+     WHERE user_id = ?
+       AND vault_id = ?
+       AND device_id = ?`
+  ).bind(
+    now(),
+    currentDeviceId,
+    user.userId,
+    vaultId,
+    targetDeviceId
+  ).run();
 
   await audit(env, req, 'device_revoked', user.userId, {
     vaultId,
-    deviceId,
+    targetDeviceId,
+    currentDeviceId,
   });
 
   return json({ ok: true }, 200, headers);
@@ -993,7 +1239,7 @@ async function vaultAndDeviceFromHeaders(env, req, user) {
   const deviceId = req.headers.get('x-yanta-device-id') || '';
 
   await requireVault(env, user, vaultId);
-  await ensureDevice(env, user, vaultId, deviceId);
+  await ensureDevice(env, user, vaultId, deviceId, req);
 
   return { vaultId, deviceId };
 }

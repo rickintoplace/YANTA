@@ -8,6 +8,7 @@ workers_dev = true
 APP_ORIGIN = "https://yanta.page"
 APP_NAME = "YANTA"
 FROM_EMAIL = "YANTA <login@mail.yanta.page>"
+PUBLIC_API_BASE_URL = "https://yanta.page/cloud-api"
 COOKIE_NAME = "yanta_cloud_session"
 COOKIE_DOMAIN = ""
 OPENROUTER_SITE_URL = "https://yanta.page"

@@ -9,7 +9,6 @@ import {
   escapeHtml,
   lucide,
   toast,
-  state,
 } from '../core.js';
 
 import {
@@ -35,7 +34,7 @@ import {
 } from './rss-fetcher.js';
 
 import {
-  addRssFeedFromUrl,
+  addRssFeedFromUniversalInput,
   refreshAllRssFeeds,
   refreshRssFeed,
   markRssItemRead,
@@ -44,9 +43,11 @@ import {
   saveRssItemAsNote,
   appendRssItemToCurrentNote,
 } from './rss-actions.js';
+
 import {
-    cloudMe,
-} from '../cloud/cloud-api.js';
+  getRssCloudAuthState,
+  openYantaCloudLoginForSources,
+} from './rss-cloud-auth.js';
 
 let initialized = false;
 let currentMode = 'unread';
@@ -57,6 +58,7 @@ function fmtDate(ms) {
   if (!ms) return '';
 
   const d = new Date(ms);
+
   if (Number.isNaN(d.getTime())) return '';
 
   return d.toLocaleString([], {
@@ -67,7 +69,9 @@ function fmtDate(ms) {
 
 function sanitizeItemHtml(html = '') {
   return DOMPurify.sanitize(String(html || ''), {
-    USE_PROFILES: { html: true },
+    USE_PROFILES: {
+      html: true,
+    },
     FORBID_TAGS: ['script', 'iframe', 'form', 'object', 'embed'],
     ADD_ATTR: ['target', 'rel', 'loading', 'referrerpolicy'],
   });
@@ -75,6 +79,7 @@ function sanitizeItemHtml(html = '') {
 
 async function imageSrc(url) {
   const settings = await getRssSettings();
+
   if (!settings.showImages || !url) return '';
 
   return rssImageProxyUrl(url);
@@ -85,6 +90,7 @@ function injectCss() {
 
   const style = document.createElement('style');
   style.id = 'yanta-rss-css';
+
   style.textContent = `
 .yanta-rss-root {
   height: 100%;
@@ -103,6 +109,11 @@ function injectCss() {
   padding: 10px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-elev-2);
+}
+
+.yanta-rss-toolbar input {
+  flex: 1;
+  min-width: 0;
 }
 
 .yanta-rss-tabs {
@@ -249,26 +260,6 @@ function injectCss() {
   border-radius: 10px;
 }
 
-.yanta-rss-add-row {
-  display: flex;
-  gap: 8px;
-  padding: 10px;
-}
-
-.yanta-rss-add-row input {
-  flex: 1;
-}
-
-@media (max-width: 640px) {
-  .yanta-rss-item {
-    grid-template-columns: 58px minmax(0, 1fr);
-  }
-
-  .yanta-rss-thumb {
-    width: 58px;
-    height: 48px;
-  }
-}
 .yanta-rss-cloud-notice {
   display: flex;
   align-items: flex-start;
@@ -326,6 +317,23 @@ function injectCss() {
 }
 
 @media (max-width: 640px) {
+  .yanta-rss-toolbar {
+    flex-wrap: wrap;
+  }
+
+  .yanta-rss-toolbar input {
+    flex: 1 1 100%;
+  }
+
+  .yanta-rss-item {
+    grid-template-columns: 58px minmax(0, 1fr);
+  }
+
+  .yanta-rss-thumb {
+    width: 58px;
+    height: 48px;
+  }
+
   .yanta-rss-cloud-notice {
     flex-direction: column;
   }
@@ -335,7 +343,8 @@ function injectCss() {
     justify-content: center;
   }
 }
-`;
+  `;
+
   document.head.append(style);
 }
 
@@ -345,7 +354,12 @@ async function renderItemCard(item) {
     class: 'yanta-rss-item' + (item.read ? ' read' : ''),
   });
 
-  btn.addEventListener('click', () => renderReader(item.id));
+  btn.addEventListener('click', () => {
+    renderReader(item.id).catch((err) => {
+      console.error(err);
+      toast('Could not open source item', 'error');
+    });
+  });
 
   const thumb = el('div', { class: 'yanta-rss-thumb' });
   const src = await imageSrc(item.imageUrl);
@@ -383,31 +397,48 @@ async function renderItemCard(item) {
   const actions = el('div', { class: 'yanta-rss-actions' });
 
   const star = el('button', { class: 'btn', type: 'button' });
-  star.innerHTML = `${lucide(item.starred ? 'star' : 'star', 13)} ${item.starred ? 'Starred' : 'Star'}`;
+  star.innerHTML = `${lucide('star', 13)} ${item.starred ? 'Starred' : 'Star'}`;
+
   star.addEventListener('click', async (e) => {
     e.preventDefault();
     e.stopPropagation();
-    await toggleRssItemStar(item.id);
-    await renderInbox();
+
+    try {
+      await toggleRssItemStar(item.id);
+      await renderInbox();
+    } catch (err) {
+      toast(err?.message || 'Could not update item', 'error');
+    }
   });
 
   const save = el('button', { class: 'btn primary', type: 'button' });
   save.innerHTML = `${lucide('file-plus', 13)} Save`;
+
   save.addEventListener('click', async (e) => {
     e.preventDefault();
     e.stopPropagation();
 
-    const note = await saveRssItemAsNote(item.id);
-    if (note?.id) await openNote(note.id);
+    try {
+      const note = await saveRssItemAsNote(item.id);
+      if (note?.id) await openNote(note.id);
+    } catch (err) {
+      toast(err?.message || 'Could not save item', 'error');
+    }
   });
 
   const archive = el('button', { class: 'btn', type: 'button' });
   archive.innerHTML = `${lucide('archive', 13)} Archive`;
+
   archive.addEventListener('click', async (e) => {
     e.preventDefault();
     e.stopPropagation();
-    await archiveRssItem(item.id, true);
-    await renderInbox();
+
+    try {
+      await archiveRssItem(item.id, true);
+      await renderInbox();
+    } catch (err) {
+      toast(err?.message || 'Could not archive item', 'error');
+    }
   });
 
   actions.append(star, save, archive);
@@ -440,6 +471,7 @@ async function renderInbox() {
         ? 'No unread source items.'
         : 'No source items.'
     ));
+
     return;
   }
 
@@ -462,7 +494,6 @@ async function renderReader(itemId) {
   body.replaceChildren();
 
   const wrap = el('div', { class: 'yanta-rss-reader' });
-
   const head = el('div', { class: 'yanta-rss-reader-head' });
 
   head.innerHTML = `
@@ -474,11 +505,20 @@ async function renderReader(itemId) {
     ].filter(Boolean).join(' · '))}</div>
   `;
 
-  const actions = el('div', { class: 'compress-actions', style: { justifyContent: 'flex-start', flexWrap: 'wrap', marginTop: '10px' } });
+  const actions = el('div', {
+    class: 'compress-actions',
+    style: {
+      justifyContent: 'flex-start',
+      flexWrap: 'wrap',
+      marginTop: '10px',
+    },
+  });
 
   const back = el('button', { class: 'btn' });
   back.innerHTML = `${lucide('arrow-left', 14)} Back`;
-  back.addEventListener('click', renderInbox);
+  back.addEventListener('click', () => {
+    renderInbox().catch(() => {});
+  });
 
   const original = el('a', {
     class: 'btn',
@@ -490,13 +530,19 @@ async function renderReader(itemId) {
 
   const save = el('button', { class: 'btn primary' });
   save.innerHTML = `${lucide('file-plus', 14)} Save as note`;
+
   save.addEventListener('click', async () => {
-    const note = await saveRssItemAsNote(item.id);
-    if (note?.id) await openNote(note.id);
+    try {
+      const note = await saveRssItemAsNote(item.id);
+      if (note?.id) await openNote(note.id);
+    } catch (err) {
+      toast(err?.message || 'Could not save item', 'error');
+    }
   });
 
   const append = el('button', { class: 'btn' });
   append.innerHTML = `${lucide('list-plus', 14)} Append to current note`;
+
   append.addEventListener('click', async () => {
     try {
       await appendRssItemToCurrentNote(item.id);
@@ -507,7 +553,6 @@ async function renderReader(itemId) {
 
   actions.append(back, original, save, append);
   head.append(actions);
-
   wrap.append(head);
 
   const content = el('div', { class: 'yanta-rss-reader-content' });
@@ -523,72 +568,50 @@ async function renderReader(itemId) {
   body.append(wrap);
 }
 
-async function rssCloudAuthState() {
+function renderRssCloudLoginNotice({
+  error = '',
+} = {}) {
+  const box = el('div', {
+    class: 'yanta-rss-cloud-notice',
+  });
+
+  box.innerHTML = `
+    <div class="yanta-rss-cloud-notice-icon">
+      ${lucide('cloud', 20)}
+    </div>
+
+    <div class="yanta-rss-cloud-notice-main">
+      <strong>Sign in to YANTA Cloud to use Sources</strong>
+      <p>
+        YANTA fetches RSS/Atom feeds through a privacy-protected cloud proxy.
+        This avoids browser CORS problems, strips request credentials, and protects the proxy from abuse.
+      </p>
+      ${
+        error
+          ? `<small>${escapeHtml(error)}</small>`
+          : ''
+      }
+    </div>
+
+    <button class="btn primary" data-rss-cloud-login>
+      ${lucide('log-in', 14)}
+      Sign in
+    </button>
+  `;
+
+  box.querySelector('[data-rss-cloud-login]')?.addEventListener('click', async () => {
     try {
-      const me = await cloudMe();
-  
-      return {
-        authenticated: !!me?.authenticated,
-        me,
-        error: '',
-      };
-    } catch (err) {
-      return {
-        authenticated: false,
-        me: null,
-        error: err?.message || String(err),
-      };
-    }
-  }
-  
-  async function openYantaCloudLoginForSources() {
-    try {
-      const mod = await import('../sync2/yanta-cloud-setup-ui.js');
-      await mod.openYantaCloudSetup();
+      await openYantaCloudLoginForSources();
+      await renderShell();
     } catch (err) {
       console.error('[YANTA RSS] Could not open YANTA Cloud setup', err);
       toast('Could not open YANTA Cloud login', 'error');
     }
-  }
-  
-  function renderRssCloudLoginNotice({
-    error = '',
-  } = {}) {
-    const box = el('div', {
-      class: 'yanta-rss-cloud-notice',
-    });
-  
-    box.innerHTML = `
-      <div class="yanta-rss-cloud-notice-icon">
-        ${lucide('cloud', 20)}
-      </div>
-  
-      <div class="yanta-rss-cloud-notice-main">
-        <strong>Sign in to YANTA Cloud to use Sources</strong>
-        <p>
-          YANTA fetches RSS/Atom feeds through a privacy-protected cloud proxy.
-          This avoids browser CORS problems, strips request credentials, and protects the proxy from abuse.
-        </p>
-        ${
-          error
-            ? `<small>${escapeHtml(error)}</small>`
-            : ''
-        }
-      </div>
-  
-      <button class="btn primary" data-rss-cloud-login>
-        ${lucide('log-in', 14)}
-        Sign in
-      </button>
-    `;
-  
-    box.querySelector('[data-rss-cloud-login]')?.addEventListener('click', () => {
-      openYantaCloudLoginForSources();
-    });
-  
-    return box;
-  }
-  
+  });
+
+  return box;
+}
+
 async function renderShell() {
   injectCss();
 
@@ -604,24 +627,47 @@ async function renderShell() {
   body.innerHTML = '';
   root = el('div', { class: 'yanta-rss-root' });
 
+  const settings = await getRssSettings();
+  const cloudAuth = settings.fetchProvider === 'yanta-cloud'
+    ? await getRssCloudAuthState()
+    : {
+        authenticated: true,
+        me: null,
+        error: '',
+      };
+
+  if (settings.fetchProvider === 'yanta-cloud' && !cloudAuth.authenticated) {
+    root.append(renderRssCloudLoginNotice({
+      error: cloudAuth.error,
+    }));
+
+    body.append(root);
+    return;
+  }
+
   const toolbar = el('div', { class: 'yanta-rss-toolbar' });
 
   const addInput = el('input', {
     class: 'text-input',
-    placeholder: 'Add website or feed URL…',
+    placeholder: 'Search or paste website/feed URL…',
+    autocomplete: 'off',
+    spellcheck: 'false',
   });
 
   const addBtn = el('button', { class: 'btn primary' });
   addBtn.innerHTML = `${lucide('plus', 14)} Add`;
 
-  addBtn.addEventListener('click', async () => {
-    const url = addInput.value.trim();
-    if (!url) return;
+  const runAdd = async () => {
+    const input = addInput.value.trim();
+
+    if (!input) return;
 
     addBtn.disabled = true;
+    addInput.disabled = true;
 
     try {
-      await addRssFeedFromUrl(url);
+      await addRssFeedFromUniversalInput(input);
+
       addInput.value = '';
       toast('Source added', 'success');
       await renderShell();
@@ -629,17 +675,29 @@ async function renderShell() {
       toast(err?.message || 'Could not add source', 'error');
     } finally {
       addBtn.disabled = false;
+      addInput.disabled = false;
     }
+  };
+
+  addBtn.addEventListener('click', runAdd);
+
+  addInput.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+
+    e.preventDefault();
+    runAdd();
   });
 
   const refresh = el('button', { class: 'btn' });
   refresh.innerHTML = `${lucide('refresh-cw', 14)} Refresh`;
+
   refresh.addEventListener('click', async () => {
     refresh.disabled = true;
 
     try {
       await refreshAllRssFeeds({ force: true });
       await renderInbox();
+
       toast('Sources refreshed', 'success');
     } catch (err) {
       toast(err?.message || 'Refresh failed', 'error');
@@ -650,18 +708,8 @@ async function renderShell() {
 
   toolbar.append(addInput, addBtn, refresh);
 
-  const tabs = el('div', { class: 'yanta-rss-tabs' });
-
   const feeds = await getRssFeeds();
-
-  const settings = await getRssSettings();
-  const cloudAuth = settings.fetchProvider === 'yanta-cloud'
-    ? await rssCloudAuthState()
-    : {
-        authenticated: true,
-        me: null,
-        error: '',
-      };
+  const tabs = el('div', { class: 'yanta-rss-tabs' });
 
   const tabDefs = [
     { id: 'unread', label: 'Inbox' },
@@ -711,20 +759,7 @@ async function renderShell() {
     },
   });
 
-  root.append(toolbar);
-
-  if (settings.fetchProvider === 'yanta-cloud' && !cloudAuth.authenticated) {
-    root.append(renderRssCloudLoginNotice({
-      error: cloudAuth.error,
-    }));
-  
-    addBtn.disabled = true;
-    refresh.disabled = true;
-    addInput.disabled = true;
-    addInput.placeholder = 'Sign in to YANTA Cloud first…';
-  }
-  
-  root.append(tabs, listBody);
+  root.append(toolbar, tabs, listBody);
   body.append(root);
 
   await renderInbox();
@@ -736,6 +771,7 @@ export async function openRssInbox() {
 
 export function setupRss() {
   if (initialized) return;
+
   initialized = true;
 
   window.yantaRss = {
@@ -756,15 +792,23 @@ export function setupRss() {
     }
   });
 
-  // Startup refresh, cheap and interval-limited.
   window.setTimeout(async () => {
     try {
       const settings = await getRssSettings();
-      if (settings.enabled && settings.refreshOnStartup) {
-        await refreshAllRssFeeds({ force: false });
+
+      if (!settings.enabled || !settings.refreshOnStartup) return;
+
+      if (settings.fetchProvider === 'yanta-cloud') {
+        const auth = await getRssCloudAuthState();
+
+        if (!auth.authenticated) return;
       }
+
+      await refreshAllRssFeeds({
+        force: false,
+      });
     } catch {
-      // silent
+      // silent startup refresh
     }
   }, 3500);
 }

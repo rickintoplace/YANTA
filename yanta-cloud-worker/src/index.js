@@ -1457,6 +1457,194 @@ function safeExternalRssUrl(raw) {
   return url.href;
 }
 __name(safeExternalRssUrl, "safeExternalRssUrl");
+function looksLikeDomainQuery(q) {
+  return /^[a-z0-9.-]+\.[a-z]{2,}(?:\/\S*)?$/i.test(String(q || '').trim());
+}
+
+function dedupeFeedCandidates(candidates = []) {
+  const out = [];
+  const seen = new Set();
+
+  for (const raw of candidates) {
+    const feedUrl = String(raw.feedUrl || raw.url || '').trim();
+
+    if (!feedUrl) continue;
+
+    let key = '';
+
+    try {
+      key = new URL(feedUrl).href.toLowerCase();
+    } catch {
+      continue;
+    }
+
+    if (seen.has(key)) continue;
+    seen.add(key);
+
+    out.push({
+      title: String(raw.title || raw.name || feedUrl).slice(0, 180),
+      feedUrl,
+      siteUrl: raw.siteUrl || raw.homeUrl || raw.website || '',
+      description: String(raw.description || '').slice(0, 500),
+      source: raw.source || 'search',
+    });
+  }
+
+  return out;
+}
+
+async function discoverFeedsForUrl(targetUrl) {
+  const fetched = await fetchExternal(targetUrl, {
+    accept: "text/html, application/rss+xml, application/atom+xml, application/feed+json, application/json, application/xml, text/xml, */*",
+    maxBytes: 1024 * 1024,
+    timeoutMs: 10000
+  });
+
+  if (fetched.status < 200 || fetched.status >= 400) {
+    return [];
+  }
+
+  const contentType = fetched.headers.get("content-type") || "";
+  const body = decodeUtf8(fetched.bytes);
+
+  if (looksLikeFeedText(body) && !contentType.includes("html")) {
+    return [{
+      title: fetched.finalUrl || targetUrl,
+      feedUrl: fetched.finalUrl || targetUrl,
+      siteUrl: targetUrl,
+      source: "direct-discovery"
+    }];
+  }
+
+  return extractFeedsFromHtml(body, fetched.finalUrl || targetUrl)
+    .map((x) => ({
+      ...x,
+      source: "html-discovery",
+    }));
+}
+
+async function searchFeedsearchDev(query, limit) {
+  const endpoint =
+    `https://feedsearch.dev/api/v1/search?search=${encodeURIComponent(query)}`;
+
+  const fetched = await fetchExternal(endpoint, {
+    accept: "application/json",
+    maxBytes: 512 * 1024,
+    timeoutMs: 10000,
+  });
+
+  if (fetched.status < 200 || fetched.status >= 400) return [];
+
+  let data = null;
+
+  try {
+    data = JSON.parse(decodeUtf8(fetched.bytes));
+  } catch {
+    return [];
+  }
+
+  const list = Array.isArray(data)
+    ? data
+    : Array.isArray(data?.feeds)
+      ? data.feeds
+      : Array.isArray(data?.results)
+        ? data.results
+        : [];
+
+  return list.slice(0, limit).map((item) => ({
+    title: item.title || item.name || item.feedUrl || item.url,
+    feedUrl: item.feedUrl || item.url,
+    siteUrl: item.siteUrl || item.site_url || item.website || '',
+    description: item.description || '',
+    source: 'feedsearch.dev',
+  }));
+}
+
+async function searchItunesPodcasts(query, limit) {
+  const endpoint =
+    `https://itunes.apple.com/search?media=podcast&limit=${Math.max(1, Math.min(20, limit))}&term=${encodeURIComponent(query)}`;
+
+  const fetched = await fetchExternal(endpoint, {
+    accept: "application/json",
+    maxBytes: 512 * 1024,
+    timeoutMs: 10000,
+  });
+
+  if (fetched.status < 200 || fetched.status >= 400) return [];
+
+  let data = null;
+
+  try {
+    data = JSON.parse(decodeUtf8(fetched.bytes));
+  } catch {
+    return [];
+  }
+
+  return (data?.results || [])
+    .filter((item) => item.feedUrl)
+    .map((item) => ({
+      title: item.collectionName || item.trackName || item.feedUrl,
+      feedUrl: item.feedUrl,
+      siteUrl: item.collectionViewUrl || item.artistViewUrl || '',
+      description: item.artistName || '',
+      source: 'itunes-podcast-search',
+    }));
+}
+
+async function handleRssSearch(env, req, url, headers) {
+  const user = await requireUser(env, req);
+
+  const limits = effectiveLimits(user, await getUserCreatedAt(env, user.userId));
+
+  const rl = await rateLimit(
+    env,
+    `rss:search:${user.userId}`,
+    Math.min(300, limits.rssFetchesDay || 200),
+    24 * 60 * 60 * 1000
+  );
+
+  if (!rl.ok) {
+    return json({
+      error: "rss_rate_limited",
+      message: "RSS search limit reached."
+    }, 429, headers);
+  }
+
+  const q = String(url.searchParams.get("q") || "").trim().slice(0, 180);
+  const limit = Math.max(1, Math.min(20, Number(url.searchParams.get("limit") || 8)));
+
+  if (!q) {
+    return json({
+      feeds: [],
+    }, 200, headers);
+  }
+
+  const candidates = [];
+
+  if (/^https?:\/\//i.test(q) || looksLikeDomainQuery(q)) {
+    const target = /^https?:\/\//i.test(q) ? q : `https://${q}`;
+
+    try {
+      candidates.push(...await discoverFeedsForUrl(target));
+    } catch {}
+  }
+
+  const settled = await Promise.allSettled([
+    searchFeedsearchDev(q, limit),
+    searchItunesPodcasts(q, limit),
+  ]);
+
+  for (const res of settled) {
+    if (res.status === "fulfilled") {
+      candidates.push(...res.value);
+    }
+  }
+
+  return json({
+    feeds: dedupeFeedCandidates(candidates).slice(0, limit),
+  }, 200, headers);
+}
+__name(handleRssSearch, "handleRssSearch");
 async function readResponseWithLimit(res, maxBytes) {
   const len = Number(res.headers.get("content-length") || 0);
   if (len && len > maxBytes) {
@@ -1813,6 +2001,9 @@ async function route(req, env) {
     }
     if (url.pathname === "/api/rss/image" && req.method === "GET") {
       return handleRssImage(env, req, url, headers);
+    }
+    if (url.pathname === "/api/rss/search" && req.method === "GET") {
+      return handleRssSearch(env, req, url, headers);
     }
     return json({ error: "not_found" }, 404, headers);
   } catch (err) {

@@ -69,7 +69,13 @@ import {
 import {
   vaultJsonSnapshot,
   getVaultDoc,
+  vaultNotesMap,
+  vaultFoldersMap,
+  vaultImagesMap,
+  vaultTombstonesMap,
+  safeJsonClone,
 } from './sync2/vault-doc.js';
+
 import {
   createSync2DebugAppRuntime,
   createSync2BrokerAppRuntime,
@@ -541,6 +547,246 @@ async function buildSearchIndex() {
   }
 }
 
+function cleanUndefinedForStartupHydrate(obj = {}) {
+  const out = {};
+
+  for (const [key, value] of Object.entries(obj || {})) {
+    if (value !== undefined) out[key] = value;
+  }
+
+  return out;
+}
+
+function finiteNumberOrUndefinedForStartupHydrate(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : undefined;
+}
+
+function sanitizeStartupNoteMeta(note) {
+  if (!note || typeof note !== 'object') return null;
+
+  return cleanUndefinedForStartupHydrate({
+    id: String(note.id || ''),
+    title: String(note.title || 'Untitled'),
+    type: String(note.type || 'markdown'),
+    folderId: note.folderId || null,
+    tags: Array.isArray(note.tags) ? note.tags.map(String) : [],
+    pinned: !!note.pinned,
+    icon: note.icon || undefined,
+    color: note.color || undefined,
+    created: Number(note.created || Date.now()),
+    updated: Number(note.updated || Date.now()),
+    bodyMigrated: note.bodyMigrated === true ? true : undefined,
+
+    dashboardOrder: finiteNumberOrUndefinedForStartupHydrate(note.dashboardOrder),
+    dashboardPinnedOrder: finiteNumberOrUndefinedForStartupHydrate(note.dashboardPinnedOrder),
+    dashboardHeightPx: finiteNumberOrUndefinedForStartupHydrate(note.dashboardHeightPx),
+    dashboardHeight: finiteNumberOrUndefinedForStartupHydrate(note.dashboardHeight),
+
+    hidden: note.hidden === true ? true : undefined,
+    archived: note.archived === true ? true : undefined,
+    system: note.system === true ? true : undefined,
+    aiBrain: note.aiBrain === true ? true : undefined,
+    dashboardHidden: note.dashboardHidden === true ? true : undefined,
+    hiddenFromDashboard: note.hiddenFromDashboard === true ? true : undefined,
+
+    trashed: note.trashed === true ? true : undefined,
+    deletedAt: finiteNumberOrUndefinedForStartupHydrate(note.deletedAt),
+    deletedBy: note.deletedBy ? String(note.deletedBy) : undefined,
+    trashOriginalFolderId: note.trashOriginalFolderId || undefined,
+    trashOriginalFolderPath: Array.isArray(note.trashOriginalFolderPath)
+      ? note.trashOriginalFolderPath.map(String)
+      : undefined,
+  });
+}
+
+function sanitizeStartupFolderMeta(folder) {
+  if (!folder || typeof folder !== 'object') return null;
+
+  return cleanUndefinedForStartupHydrate({
+    id: String(folder.id || ''),
+    name: String(folder.name || 'Folder'),
+    parentId: folder.parentId || null,
+    icon: folder.icon || undefined,
+    color: folder.color || undefined,
+    created: Number(folder.created || Date.now()),
+    updated: Number(folder.updated || folder.created || Date.now()),
+
+    dashboardOrder: finiteNumberOrUndefinedForStartupHydrate(folder.dashboardOrder),
+    dashboardHeightPx: finiteNumberOrUndefinedForStartupHydrate(folder.dashboardHeightPx),
+    dashboardHeight: finiteNumberOrUndefinedForStartupHydrate(folder.dashboardHeight),
+
+    hidden: folder.hidden === true ? true : undefined,
+    archived: folder.archived === true ? true : undefined,
+    system: folder.system === true ? true : undefined,
+    aiBrain: folder.aiBrain === true ? true : undefined,
+    dashboardHidden: folder.dashboardHidden === true ? true : undefined,
+    hiddenFromDashboard: folder.hiddenFromDashboard === true ? true : undefined,
+
+    trashed: folder.trashed === true ? true : undefined,
+    deletedAt: finiteNumberOrUndefinedForStartupHydrate(folder.deletedAt),
+    deletedBy: folder.deletedBy ? String(folder.deletedBy) : undefined,
+    trashOriginalParentId: folder.trashOriginalParentId || undefined,
+    trashOriginalParentPath: Array.isArray(folder.trashOriginalParentPath)
+      ? folder.trashOriginalParentPath.map(String)
+      : undefined,
+  });
+}
+
+function sanitizeStartupImageMeta(image) {
+  if (!image || typeof image !== 'object') return null;
+
+  const {
+    blob,
+    data,
+    ...rest
+  } = image;
+
+  return cleanUndefinedForStartupHydrate({
+    id: String(rest.id || ''),
+    name: rest.name ? String(rest.name) : undefined,
+    size: Number(rest.size || 0),
+    type: rest.type ? String(rest.type) : undefined,
+    ts: Number(rest.ts || rest.updated || Date.now()),
+    updated: Number(rest.updated || rest.ts || Date.now()),
+  });
+}
+
+function jsonEqualForStartupHydrate(a, b) {
+  try {
+    return JSON.stringify(a || null) === JSON.stringify(b || null);
+  } catch {
+    return false;
+  }
+}
+
+async function hydrateLocalMetadataFromVaultDocOnStartup() {
+  /*
+    Critical startup path:
+    store.notes may not yet contain metadata for notes created on another device.
+    VaultDoc is persisted locally by y-indexeddb and is available before cloud sync.
+    Hydrate state/store from VaultDoc now, before route/dashboard render.
+  */
+
+  const tombstones = vaultTombstonesMap();
+
+  let changed = false;
+
+  for (const [id, t] of tombstones) {
+    if (t?.type === 'note') {
+      if (state.notes.has(id) || state.searchIndex.has(id)) {
+        changed = true;
+      }
+
+      state.notes.delete(id);
+      state.searchIndex.delete(id);
+
+      try {
+        await store.notes.del(id);
+      } catch {}
+    }
+
+    if (t?.type === 'folder') {
+      if (state.folders.has(id) || state.expandedFolders.has(id)) {
+        changed = true;
+      }
+
+      state.folders.delete(id);
+      state.expandedFolders.delete(id);
+
+      try {
+        await store.folders.del(id);
+      } catch {}
+    }
+
+    if (t?.type === 'image') {
+      if (state.imagesMeta.has(id) || state.imageBlobs.has(id)) {
+        changed = true;
+      }
+
+      state.imagesMeta.delete(id);
+
+      const url = state.imageBlobs.get(id);
+
+      if (url) {
+        try {
+          URL.revokeObjectURL(url);
+        } catch {}
+      }
+
+      state.imageBlobs.delete(id);
+
+      try {
+        await store.images.del(id);
+      } catch {}
+    }
+  }
+
+  for (const [id, raw] of vaultFoldersMap()) {
+    if (tombstones.has(id)) continue;
+
+    const incoming = sanitizeStartupFolderMeta(raw);
+    if (!incoming?.id) continue;
+
+    const existing = state.folders.get(id);
+    const next = safeJsonClone(incoming);
+
+    if (!jsonEqualForStartupHydrate(existing, next)) {
+      changed = true;
+      state.folders.set(id, next);
+
+      try {
+        await store.folders.put(safeJsonClone(next));
+      } catch {}
+    }
+  }
+
+  for (const [id, raw] of vaultNotesMap()) {
+    if (tombstones.has(id)) continue;
+
+    const incoming = sanitizeStartupNoteMeta(raw);
+    if (!incoming?.id) continue;
+
+    const existing = state.notes.get(id);
+    const next = safeJsonClone(incoming);
+
+    if (!jsonEqualForStartupHydrate(existing, next)) {
+      changed = true;
+      state.notes.set(id, next);
+
+      try {
+        await store.notes.put(safeJsonClone(next));
+      } catch {}
+    }
+  }
+
+  for (const [id, raw] of vaultImagesMap()) {
+    if (tombstones.has(id)) continue;
+
+    const incoming = sanitizeStartupImageMeta(raw);
+    if (!incoming?.id) continue;
+
+    const existing = state.imagesMeta.get(id);
+    const next = safeJsonClone(incoming);
+
+    if (!jsonEqualForStartupHydrate(existing, next)) {
+      changed = true;
+      state.imagesMeta.set(id, next);
+    }
+  }
+
+  if (changed) {
+    rebuildWikilinkIndex();
+  }
+
+  return {
+    changed,
+    notes: state.notes.size,
+    folders: state.folders.size,
+    images: state.imagesMeta.size,
+  };
+}
+
 function registerServiceWorker() {
   if (!('serviceWorker' in navigator)) return;
 
@@ -589,7 +835,9 @@ async function init() {
 
   await seedVaultFromLocalState();
 
-  // Debug helper. Remove later if desired.
+  await hydrateLocalMetadataFromVaultDocOnStartup();
+
+  // Debug helper. Maybe remove later.
   window.yantaVaultDebug = {
     getVaultDoc,
     vaultJsonSnapshot,

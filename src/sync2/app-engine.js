@@ -29,6 +29,7 @@ import { renderTree } from '../tree.js';
 import {
   getNoteDoc,
   encodeNoteState,
+  noteMarkdown,
 } from '../yjs.js';
 
 import {
@@ -1178,6 +1179,8 @@ export class Sync2AppEngine {
     let noteUpdates = {
       applied: 0,
     };
+
+    const appliedRemoteNoteBodyIds = new Set();
   
     try {
       await this.updateDeviceRecord({
@@ -1264,6 +1267,10 @@ export class Sync2AppEngine {
         });
 
         const noteSnapshots = await this.downloadKnownNoteSnapshots();
+
+        for (const noteId of noteSnapshots.noteIds || []) {
+          appliedRemoteNoteBodyIds.add(noteId);
+        }
   
         if (noteSnapshots.applied > 0) {
           await this.updateDeviceRecord({
@@ -1282,6 +1289,10 @@ export class Sync2AppEngine {
       });
 
       noteUpdates = await this.downloadKnownNoteUpdates();
+
+      for (const noteId of noteUpdates.noteIds || []) {
+        appliedRemoteNoteBodyIds.add(noteId);
+      }
   
       if (noteUpdates.applied > 0) {
         await this.updateDeviceRecord({
@@ -1304,6 +1315,12 @@ export class Sync2AppEngine {
 
         await downloadMissingAssets(this);
       });
+
+      if (appliedRemoteNoteBodyIds.size > 0) {
+        await this.notifyRemoteNoteBodiesApplied(appliedRemoteNoteBodyIds, {
+          reason: 'sync2-note-bodies-pulled',
+        });
+      }
   
       await this.updateDeviceRecord({
         syncStatus: 'synced',
@@ -1623,6 +1640,7 @@ export class Sync2AppEngine {
 
     let applied = 0;
     let processed = 0;
+    const appliedNoteIds = new Set();
 
     this.progress({
       phase: 'downloadNoteSnapshots',
@@ -1643,10 +1661,18 @@ export class Sync2AppEngine {
       });
 
       const res = await downloadNoteSnapshots(this, noteId);
+
       applied += res.applied;
+
+      if (res.applied > 0) {
+        appliedNoteIds.add(noteId);
+      }
     }
 
-    return { applied };
+    return {
+      applied,
+      noteIds: [...appliedNoteIds],
+    };
   }
 
   async downloadKnownNoteUpdates() {
@@ -1659,6 +1685,7 @@ export class Sync2AppEngine {
 
     let applied = 0;
     let processed = 0;
+    const appliedNoteIds = new Set();
 
     this.progress({
       phase: 'downloadNoteUpdates',
@@ -1679,10 +1706,18 @@ export class Sync2AppEngine {
       });
 
       const res = await this.downloadNoteUpdates(noteId);
+
       applied += res.applied;
+
+      if (res.applied > 0) {
+        appliedNoteIds.add(noteId);
+      }
     }
 
-    return { applied };
+    return {
+      applied,
+      noteIds: [...appliedNoteIds],
+    };
   }
 
   async downloadNoteUpdates(noteId) {
@@ -1772,6 +1807,70 @@ export class Sync2AppEngine {
       applied,
       entries: entries.length,
     };
+  }
+
+  async notifyRemoteNoteBodiesApplied(noteIds, {
+    reason = 'sync2-note-bodies-applied',
+  } = {}) {
+    const ids = [...new Set([...noteIds || []].map(String))]
+      .filter((id) => id && state.notes.has(id));
+
+    if (!ids.length) return;
+
+    for (const noteId of ids) {
+      const note = state.notes.get(noteId);
+      if (!note) continue;
+
+      let md = '';
+
+      try {
+        md = noteMarkdown(noteId);
+      } catch {}
+
+      state.searchIndex.set(
+        noteId,
+        [
+          note.title || '',
+          (note.tags || []).join(' '),
+          md || '',
+        ].join(' ').toLowerCase()
+      );
+    }
+
+    try {
+      rebuildWikilinkIndex();
+    } catch {}
+
+    try {
+      renderTree();
+    } catch {}
+
+    for (const noteId of ids) {
+      window.dispatchEvent(new CustomEvent('yanta-note-updated', {
+        detail: {
+          noteId,
+          reason,
+          source: 'sync2',
+        },
+      }));
+
+      window.dispatchEvent(new CustomEvent('yanta-calendar-markdown-changed', {
+        detail: {
+          noteId,
+          reason,
+          source: 'sync2',
+        },
+      }));
+    }
+
+    window.dispatchEvent(new CustomEvent('yanta-dashboard-refresh', {
+      detail: {
+        reason,
+        source: 'sync2',
+        changed: true,
+        noteIds: ids,
+      },
+    }));
   }
 
   hydrateAppStateFromVault() {

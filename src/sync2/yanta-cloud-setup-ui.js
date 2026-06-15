@@ -1132,13 +1132,7 @@ ${
         </details>
       `
       : `
-        <div class="yanta-cloud-limit-note">
-          ${lucide('info', 14)}
-          <span>
-            Your ${escapeHtml(plan)} plan includes ${maxVaults} cloud vault${maxVaults === 1 ? '' : 's'}.
-            Most users only need one.
-          </span>
-        </div>
+
       `
 }
       </div>

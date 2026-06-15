@@ -315,6 +315,60 @@ function ensureCss() {
     justify-content: center;
   }
 }
+.yanta-cloud-advanced {
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-elev-2);
+}
+
+.yanta-cloud-advanced summary {
+  cursor: pointer;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 700;
+  user-select: none;
+}
+
+.yanta-cloud-advanced summary:hover {
+  color: var(--text);
+}
+
+.yanta-cloud-advanced-body {
+  margin-top: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.yanta-cloud-advanced-body p {
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.yanta-cloud-limit-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+
+  background: var(--bg-elev-2);
+  color: var(--text-dim);
+
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.yanta-cloud-limit-note svg {
+  flex: 0 0 auto;
+  color: var(--accent);
+  margin-top: 1px;
+}
 `;
   document.head.append(style);
 }
@@ -937,6 +991,12 @@ async function renderCloudHome(me) {
     !!currentDeviceId &&
     !deviceAccessError;
 
+    const plan = me.user?.plan || 'free';
+    const limits = me.limits || {};
+    const maxVaults = Number(limits.vaults || 1);
+    const canCreateAnotherVault = vaults.length < maxVaults;
+    const hasAnyVault = vaults.length > 0;
+
   renderShell('YANTA Cloud', `
     <div class="yanta-cloud-hero">
       <div class="yanta-cloud-hero-icon">${lucide('cloud-check', 28)}</div>
@@ -1045,10 +1105,42 @@ async function renderCloudHome(me) {
           }).join('')
         }
 
-        <button class="btn primary" data-create-vault>
-          ${lucide('plus', 14)}
-          Create new cloud vault
-        </button>
+${
+  !hasAnyVault
+    ? `
+      <button class="btn primary" data-create-vault>
+        ${lucide('plus', 14)}
+        Create cloud vault
+      </button>
+    `
+    : canCreateAnotherVault
+      ? `
+        <details class="yanta-cloud-advanced">
+          <summary>Advanced</summary>
+
+          <div class="yanta-cloud-advanced-body">
+            <p>
+              Create a separate encrypted sync vault with its own Recovery Key.
+              Most users only need one cloud vault.
+            </p>
+
+            <button class="btn" data-create-vault>
+              ${lucide('plus', 14)}
+              Create another cloud vault
+            </button>
+          </div>
+        </details>
+      `
+      : `
+        <div class="yanta-cloud-limit-note">
+          ${lucide('info', 14)}
+          <span>
+            Your ${escapeHtml(plan)} plan includes ${maxVaults} cloud vault${maxVaults === 1 ? '' : 's'}.
+            Most users only need one.
+          </span>
+        </div>
+      `
+}
       </div>
     </section>
 

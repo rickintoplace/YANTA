@@ -319,6 +319,67 @@ function jsonEqualForSync2(a, b) {
   }
 }
 
+function sync2ObjectVersion(obj) {
+  if (!obj || typeof obj !== 'object') return 0;
+
+  return Math.max(
+    Number(obj.updated || 0),
+    Number(obj.created || 0),
+    Number(obj.ts || 0),
+    Number(obj.deletedAt || 0)
+  ) || 0;
+}
+
+function sync2LocalVaultContentVersion() {
+  let max = 0;
+
+  for (const note of state.notes.values()) {
+    max = Math.max(max, sync2ObjectVersion(note));
+  }
+
+  for (const folder of state.folders.values()) {
+    max = Math.max(max, sync2ObjectVersion(folder));
+  }
+
+  for (const image of state.imagesMeta.values()) {
+    max = Math.max(max, sync2ObjectVersion(image));
+  }
+
+  /*
+    Calendar events/categories live in VaultDoc too.
+    state.calendarEvents may be empty if calendar has not hydrated yet,
+    but when calendar changes, the event objects are in state.
+  */
+  try {
+    for (const ev of state.calendarEvents?.values?.() || []) {
+      max = Math.max(max, sync2ObjectVersion(ev));
+    }
+
+    for (const cat of state.calendarCategories?.values?.() || []) {
+      max = Math.max(max, sync2ObjectVersion(cat));
+    }
+  } catch {}
+
+  try {
+    for (const t of vaultTombstonesMap().values()) {
+      max = Math.max(max, sync2ObjectVersion(t));
+    }
+  } catch {}
+
+  return max;
+}
+
+function outboxHasUploadMarker(outbox, markerKey, markerValue) {
+  return outbox.some((item) =>
+    Array.isArray(item.afterUploadLocalStateSet) &&
+    item.afterUploadLocalStateSet.some((m) =>
+      m &&
+      m.key === markerKey &&
+      Number(m.value || 0) === Number(markerValue || 0)
+    )
+  );
+}
+
 async function getOrCreateSyncKey() {
   let key = await store.settings.get(SYNC_KEY_SETTING, null);
 
@@ -810,6 +871,151 @@ export class Sync2AppEngine {
     return this.seq;
   }
 
+  async applyOutboxUploadMarkers(item) {
+    const markers = Array.isArray(item?.afterUploadLocalStateSet)
+      ? item.afterUploadLocalStateSet
+      : [];
+
+    if (!markers.length) return;
+
+    for (const marker of markers) {
+      if (!marker?.key) continue;
+
+      try {
+        await this.localState.set(marker.key, marker.value);
+      } catch (err) {
+        console.warn('[YANTA Sync2] could not apply upload marker', marker, err);
+      }
+    }
+  }
+
+  async queueChangedLocalStateUpdates({
+    reason = 'sync',
+    maxNoteFullUpdates = 120,
+  } = {}) {
+    /*
+      Reliability layer:
+      Observers only capture updates that happen after observeVault()/observeNote()
+      are installed. If a note or vault metadata changed before the engine was
+      observing it, the delta may never enter outbox.
+
+      Therefore, before each sync, queue full update packs for local content whose
+      local version is newer than the last successfully uploaded full-update marker.
+
+      These are NOT snapshots. They go through the normal update-pack path, so
+      remote routine sync with pullSnapshots=false still receives them via
+      downloadNoteUpdates()/downloadVaultUpdates().
+    */
+
+    await this.observeAllKnownNotes();
+
+    const vaultVersion = sync2LocalVaultContentVersion();
+    const vaultMarkerKey = 'sync2.fullUpdateUploaded.vault.version';
+    const lastVaultVersion =
+      Number(await this.localState.get(vaultMarkerKey, 0)) || 0;
+
+    if (
+      vaultVersion > lastVaultVersion &&
+      !outboxHasUploadMarker(this.outbox, vaultMarkerKey, vaultVersion)
+    ) {
+      this.outbox.push({
+        kind: 'vault',
+        update: encodeVaultState(),
+        created: Date.now(),
+        full: true,
+        reason,
+        afterUploadLocalStateSet: [
+          {
+            key: vaultMarkerKey,
+            value: vaultVersion,
+          },
+        ],
+      });
+
+      this.progress({
+        phase: 'uploadOutbox',
+        direction: 'up',
+        message: 'Queued full vault metadata update.',
+      });
+    }
+
+    const noteIds = new Set();
+
+    for (const id of state.notes.keys()) noteIds.add(id);
+    for (const id of vaultNotesMap().keys()) noteIds.add(id);
+
+    let queuedNotes = 0;
+
+    for (const noteId of noteIds) {
+      if (!noteId) continue;
+      if (vaultTombstonesMap().has(noteId)) continue;
+
+      const note =
+        state.notes.get(noteId) ||
+        vaultNotesMap().get(noteId);
+
+      const version = sync2ObjectVersion(note);
+
+      if (!version) continue;
+
+      const markerKey = `sync2.fullUpdateUploaded.note.${noteId}.version`;
+      const lastVersion =
+        Number(await this.localState.get(markerKey, 0)) || 0;
+
+      if (version <= lastVersion) continue;
+
+      if (outboxHasUploadMarker(this.outbox, markerKey, version)) {
+        continue;
+      }
+
+      if (queuedNotes >= maxNoteFullUpdates) {
+        this.progress({
+          phase: 'uploadOutbox',
+          direction: 'up',
+          message: `Queued ${queuedNotes} changed note full updates. Remaining notes will be queued on next sync.`,
+        });
+
+        break;
+      }
+
+      try {
+        await this.observeNote(noteId);
+
+        this.outbox.push({
+          kind: 'note',
+          noteId,
+          update: encodeNoteState(noteId),
+          created: Date.now(),
+          full: true,
+          reason,
+          afterUploadLocalStateSet: [
+            {
+              key: markerKey,
+              value: version,
+            },
+          ],
+        });
+
+        queuedNotes++;
+      } catch (err) {
+        console.warn('[YANTA Sync2] could not queue full note update', noteId, err);
+      }
+    }
+
+    if (queuedNotes > 0) {
+      this.progress({
+        phase: 'uploadOutbox',
+        direction: 'up',
+        message: `Queued ${queuedNotes} changed note update${queuedNotes === 1 ? '' : 's'}.`,
+      });
+    }
+
+    return {
+      vaultQueued: vaultVersion > lastVaultVersion,
+      noteQueued: queuedNotes,
+    };
+  }
+
   async pushFullStateNow({
     includeSnapshots = true,
     verbose = true,
@@ -979,6 +1185,10 @@ export class Sync2AppEngine {
         lastSyncStartedAt: Date.now(),
         lastSeenAt: Date.now(),
         lastError: '',
+      });
+
+      await this.queueChangedLocalStateUpdates({
+        reason: 'syncNow',
       });
 
       this.progress({
@@ -1281,6 +1491,8 @@ export class Sync2AppEngine {
             own: true,
           });
 
+          await this.applyOutboxUploadMarkers(item);
+
           this.outbox.shift();
           uploaded++;
         } catch (err) {
@@ -1297,6 +1509,8 @@ export class Sync2AppEngine {
               own: true,
               existedRemote: true,
             });
+
+            await this.applyOutboxUploadMarkers(item);
 
             this.outbox.shift();
             continue;

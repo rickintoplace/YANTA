@@ -52,6 +52,11 @@ export const FLOATING_CREATE_ACTION_CATALOG = [
     defaultIcon: 'calendar-plus',
   },
   {
+    id: 'rss',
+    defaultLabel: 'Sources',
+    defaultIcon: 'rss',
+  },
+  {
     id: 'ai',
     defaultLabel: 'AI',
     defaultIcon: 'sparkles',
@@ -124,6 +129,15 @@ export const DEFAULT_FLOATING_CREATE_SETTINGS = {
       x: -214,
       y: -96,
       order: 6,
+    },
+    {
+      id: 'rss',
+      enabled: false,
+      label: 'Sources',
+      icon: 'rss',
+      x: -204,
+      y: -166,
+      order: 7,
     },
   ],
 };
@@ -198,13 +212,6 @@ function clampPoint(point, bounds = FLOATING_CREATE_BOUNDS) {
   };
 }
 
-/**
- * Constraint solver:
- * - activeId may be fixed to candidate.
- * - enabled bubbles maintain minimum center distance.
- * - nearby bubbles are pushed aside smoothly.
- * - all points remain inside bounds.
- */
 export function constrainFloatingCreateLayout(actions, {
   activeId = '',
   candidate = null,
@@ -303,10 +310,6 @@ export function constrainFloatingCreateLayout(actions, {
   }));
 }
 
-/**
- * Finds a pleasant free position in a left/up fan around the trigger.
- * Used when adding an action back.
- */
 export function suggestFloatingCreatePosition(actions, {
   minDistance = FLOATING_CREATE_MIN_DISTANCE,
   bounds = FLOATING_CREATE_BOUNDS,
@@ -320,7 +323,6 @@ export function suggestFloatingCreatePosition(actions, {
 
   const radii = [76, 112, 148, 184, 220, 256, 292];
 
-  // Mostly left/up fan; enough freedom but avoids off-screen positive area.
   const degrees = [
     180, 195, 210, 225, 240, 255, 270, 285,
     168, 202, 236, 270, 304,
@@ -399,8 +401,8 @@ export function normalizeFloatingCreateSettings(raw = {}) {
     actions.push({
       id: cat.id,
       enabled: Object.prototype.hasOwnProperty.call(saved, 'enabled')
-      ? saved.enabled !== false
-      : def.enabled !== false,
+        ? saved.enabled !== false
+        : def.enabled !== false,
       label: typeof saved.label === 'string' && saved.label.trim()
         ? saved.label.trim()
         : cat.defaultLabel,

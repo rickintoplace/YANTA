@@ -1591,6 +1591,709 @@ async function searchItunesPodcasts(query, limit) {
     }));
 }
 
+function youtubeApiKey(env) {
+  const key = String(env.YOUTUBE_API_KEY || '').trim();
+
+  if (!key) {
+    const err = new Error('YouTube API key is not configured.');
+    err.status = 503;
+    throw err;
+  }
+
+  return key;
+}
+__name(youtubeApiKey, "youtubeApiKey");
+
+function cleanYoutubeInput(value = '') {
+  return String(value || '')
+    .trim()
+    .slice(0, 300);
+}
+__name(cleanYoutubeInput, "cleanYoutubeInput");
+
+function isYoutubeHost(hostname = '') {
+  const h = String(hostname || '').replace(/^www\./, '').toLowerCase();
+
+  return (
+    h === 'youtube.com' ||
+    h === 'm.youtube.com' ||
+    h === 'youtu.be' ||
+    h === 'youtube-nocookie.com'
+  );
+}
+__name(isYoutubeHost, "isYoutubeHost");
+
+function parseYoutubeInput(input = '') {
+  const raw = cleanYoutubeInput(input);
+
+  if (!raw) {
+    return {
+      kind: 'empty',
+      value: '',
+      raw,
+    };
+  }
+
+  if (/^UC[a-zA-Z0-9_-]{20,}$/.test(raw)) {
+    return {
+      kind: 'channelId',
+      value: raw,
+      raw,
+    };
+  }
+
+  if (/^@[\w.-]{2,}$/.test(raw)) {
+    return {
+      kind: 'handle',
+      value: raw.startsWith('@') ? raw : `@${raw}`,
+      raw,
+    };
+  }
+
+  try {
+    const url = new URL(raw);
+
+    if (!isYoutubeHost(url.hostname)) {
+      return {
+        kind: 'query',
+        value: raw,
+        raw,
+      };
+    }
+
+    if (url.pathname === '/feeds/videos.xml') {
+      const channelId = url.searchParams.get('channel_id') || '';
+
+      if (channelId) {
+        return {
+          kind: 'channelId',
+          value: channelId,
+          raw,
+        };
+      }
+    }
+
+    const channel = url.pathname.match(/^\/channel\/(UC[a-zA-Z0-9_-]{20,})/);
+
+    if (channel) {
+      return {
+        kind: 'channelId',
+        value: channel[1],
+        raw,
+      };
+    }
+
+    const handle = url.pathname.match(/^\/@([^/?#]+)/);
+
+    if (handle) {
+      return {
+        kind: 'handle',
+        value: `@${handle[1]}`,
+        raw,
+      };
+    }
+
+    const user = url.pathname.match(/^\/user\/([^/?#]+)/);
+
+    if (user) {
+      return {
+        kind: 'username',
+        value: user[1],
+        raw,
+      };
+    }
+
+    const custom = url.pathname.match(/^\/c\/([^/?#]+)/);
+
+    if (custom) {
+      return {
+        kind: 'query',
+        value: custom[1],
+        raw,
+      };
+    }
+
+    return {
+      kind: 'query',
+      value: raw,
+      raw,
+    };
+  } catch {}
+
+  return {
+    kind: 'query',
+    value: raw.replace(/^@/, ''),
+    raw,
+  };
+}
+__name(parseYoutubeInput, "parseYoutubeInput");
+
+function youtubeThumb(thumbnails = {}) {
+  return (
+    thumbnails.maxres?.url ||
+    thumbnails.standard?.url ||
+    thumbnails.high?.url ||
+    thumbnails.medium?.url ||
+    thumbnails.default?.url ||
+    ''
+  );
+}
+__name(youtubeThumb, "youtubeThumb");
+
+function youtubeChannelCandidate(channel = {}) {
+  const id = channel.id || channel.snippet?.channelId || '';
+  const snippet = channel.snippet || {};
+  const cd = channel.contentDetails || {};
+  const uploadsPlaylistId = cd.relatedPlaylists?.uploads || '';
+
+  return {
+    id,
+    channelId: id,
+    title: snippet.title || id || 'YouTube Channel',
+    description: snippet.description || '',
+    thumbnail: youtubeThumb(snippet.thumbnails || {}),
+    customUrl: snippet.customUrl || '',
+    handle: snippet.customUrl || '',
+    publishedAt: snippet.publishedAt || '',
+    uploadsPlaylistId,
+    siteUrl: id ? `https://www.youtube.com/channel/${id}` : '',
+    feedUrl: id ? `https://www.youtube.com/feeds/videos.xml?channel_id=${encodeURIComponent(id)}` : '',
+    source: 'youtube-data-api',
+  };
+}
+__name(youtubeChannelCandidate, "youtubeChannelCandidate");
+
+function youtubeVideoFromPlaylistItem(item = {}) {
+  const snippet = item.snippet || {};
+  const contentDetails = item.contentDetails || {};
+  const resourceId = snippet.resourceId || {};
+
+  const videoId =
+    contentDetails.videoId ||
+    resourceId.videoId ||
+    '';
+
+  if (!videoId) return null;
+
+  return {
+    id: videoId,
+    videoId,
+    title: snippet.title || 'YouTube video',
+    description: snippet.description || '',
+    publishedAt: contentDetails.videoPublishedAt || snippet.publishedAt || '',
+    thumbnail: youtubeThumb(snippet.thumbnails || {}),
+    channelId: snippet.channelId || '',
+    channelTitle: snippet.channelTitle || '',
+    url: `https://www.youtube.com/watch?v=${videoId}`,
+    embedUrl: `https://www.youtube-nocookie.com/embed/${videoId}`,
+  };
+}
+__name(youtubeVideoFromPlaylistItem, "youtubeVideoFromPlaylistItem");
+
+function youtubeVideoFromSearchItem(item = {}) {
+  const snippet = item.snippet || {};
+  const videoId = item.id?.videoId || '';
+
+  if (!videoId) return null;
+
+  return {
+    id: videoId,
+    videoId,
+    title: snippet.title || 'YouTube video',
+    description: snippet.description || '',
+    publishedAt: snippet.publishedAt || '',
+    thumbnail: youtubeThumb(snippet.thumbnails || {}),
+    channelId: snippet.channelId || '',
+    channelTitle: snippet.channelTitle || '',
+    url: `https://www.youtube.com/watch?v=${videoId}`,
+    embedUrl: `https://www.youtube-nocookie.com/embed/${videoId}`,
+  };
+}
+__name(youtubeVideoFromSearchItem, "youtubeVideoFromSearchItem");
+
+async function youtubeApiFetch(env, path, params = {}) {
+  const apiKey = youtubeApiKey(env);
+  const url = new URL(`https://www.googleapis.com/youtube/v3/${path}`);
+
+  for (const [key, value] of Object.entries(params || {})) {
+    if (value == null || value === '') continue;
+    url.searchParams.set(key, String(value));
+  }
+
+  url.searchParams.set('key', apiKey);
+
+  const res = await fetch(url.href, {
+    headers: {
+      accept: 'application/json',
+    },
+  });
+
+  let data = null;
+
+  try {
+    data = await res.json();
+  } catch {}
+
+  if (!res.ok) {
+    const err = new Error(
+      data?.error?.message ||
+      `YouTube API failed: HTTP ${res.status}`
+    );
+
+    err.status = res.status;
+    err.response = data;
+
+    throw err;
+  }
+
+  return data || {};
+}
+__name(youtubeApiFetch, "youtubeApiFetch");
+
+async function youtubeChannelById(env, channelId) {
+  const data = await youtubeApiFetch(env, 'channels', {
+    part: 'snippet,contentDetails',
+    id: channelId,
+    maxResults: 1,
+  });
+
+  return data.items?.[0] || null;
+}
+__name(youtubeChannelById, "youtubeChannelById");
+
+async function youtubeChannelByHandle(env, handle) {
+  const clean = String(handle || '').trim();
+  const withAt = clean.startsWith('@') ? clean : `@${clean}`;
+
+  const data = await youtubeApiFetch(env, 'channels', {
+    part: 'snippet,contentDetails',
+    forHandle: withAt,
+    maxResults: 1,
+  });
+
+  return data.items?.[0] || null;
+}
+__name(youtubeChannelByHandle, "youtubeChannelByHandle");
+
+async function youtubeChannelByUsername(env, username) {
+  const data = await youtubeApiFetch(env, 'channels', {
+    part: 'snippet,contentDetails',
+    forUsername: username,
+    maxResults: 1,
+  });
+
+  return data.items?.[0] || null;
+}
+__name(youtubeChannelByUsername, "youtubeChannelByUsername");
+
+async function youtubeSearchChannels(env, query, limit = 6) {
+  const data = await youtubeApiFetch(env, 'search', {
+    part: 'snippet',
+    type: 'channel',
+    q: query,
+    maxResults: Math.max(1, Math.min(12, Number(limit || 6))),
+  });
+
+  const ids = (data.items || [])
+    .map((item) => item.snippet?.channelId || item.id?.channelId || '')
+    .filter(Boolean);
+
+  if (!ids.length) return [];
+
+  const details = await youtubeApiFetch(env, 'channels', {
+    part: 'snippet,contentDetails',
+    id: ids.join(','),
+    maxResults: ids.length,
+  });
+
+  return (details.items || []).map(youtubeChannelCandidate);
+}
+__name(youtubeSearchChannels, "youtubeSearchChannels");
+
+async function youtubeLatestVideos(env, channel, limit = 12) {
+  const candidate = youtubeChannelCandidate(channel);
+  const playlistId = candidate.uploadsPlaylistId;
+
+  const maxResults = Math.max(1, Math.min(24, Number(limit || 12)));
+
+  if (playlistId) {
+    const data = await youtubeApiFetch(env, 'playlistItems', {
+      part: 'snippet,contentDetails',
+      playlistId,
+      maxResults,
+    });
+
+    return (data.items || [])
+      .map(youtubeVideoFromPlaylistItem)
+      .filter(Boolean);
+  }
+
+  if (!candidate.channelId) return [];
+
+  const data = await youtubeApiFetch(env, 'search', {
+    part: 'snippet',
+    channelId: candidate.channelId,
+    type: 'video',
+    order: 'date',
+    maxResults,
+  });
+
+  return (data.items || [])
+    .map(youtubeVideoFromSearchItem)
+    .filter(Boolean);
+}
+__name(youtubeLatestVideos, "youtubeLatestVideos");
+
+async function resolveYoutubeChannel(env, input) {
+  const parsed = parseYoutubeInput(input);
+
+  if (!parsed.value) return null;
+
+  if (parsed.kind === 'channelId') {
+    return youtubeChannelById(env, parsed.value);
+  }
+
+  if (parsed.kind === 'handle') {
+    const byHandle = await youtubeChannelByHandle(env, parsed.value).catch(() => null);
+    if (byHandle) return byHandle;
+
+    return null;
+  }
+
+  if (parsed.kind === 'username') {
+    const byUser = await youtubeChannelByUsername(env, parsed.value).catch(() => null);
+    if (byUser) return byUser;
+
+    return null;
+  }
+
+  const [first] = await youtubeSearchChannels(env, parsed.value, 1);
+  if (!first?.channelId) return null;
+
+  return youtubeChannelById(env, first.channelId);
+}
+__name(resolveYoutubeChannel, "resolveYoutubeChannel");
+
+async function handleYoutubeResolve(env, req, url, headers) {
+  const user = await requireUser(env, req);
+  const limits = effectiveLimits(user, await getUserCreatedAt(env, user.userId));
+
+  const rl = await rateLimit(
+    env,
+    `youtube:resolve:${user.userId}`,
+    Math.min(180, limits.rssFetchesDay || 200),
+    24 * 60 * 60 * 1000
+  );
+
+  if (!rl.ok) {
+    return json({
+      error: 'youtube_rate_limited',
+      message: 'YouTube lookup limit reached.',
+    }, 429, headers);
+  }
+
+  const q =
+    url.searchParams.get('q') ||
+    url.searchParams.get('url') ||
+    url.searchParams.get('channel') ||
+    '';
+
+  if (!q.trim()) {
+    return json({
+      error: 'missing_query',
+      message: 'q, url or channel is required.',
+    }, 400, headers);
+  }
+
+  const includeVideos = url.searchParams.get('includeVideos') !== '0';
+  const limit = Math.max(1, Math.min(24, Number(url.searchParams.get('limit') || 12)));
+
+  const channel = await resolveYoutubeChannel(env, q);
+
+  if (!channel) {
+    return json({
+      error: 'youtube_channel_not_found',
+      message: 'YouTube channel not found.',
+    }, 404, headers);
+  }
+
+  const candidate = youtubeChannelCandidate(channel);
+  const videos = includeVideos
+    ? await youtubeLatestVideos(env, channel, limit).catch(() => [])
+    : [];
+
+  return json({
+    ok: true,
+    channel: candidate,
+    videos,
+    feed: {
+      title: candidate.title,
+      feedUrl: candidate.feedUrl,
+      siteUrl: candidate.siteUrl,
+      description: candidate.description,
+      imageUrl: candidate.thumbnail,
+      source: 'youtube-data-api',
+    },
+  }, 200, {
+    ...headers,
+    'cache-control': 'private, max-age=300',
+  });
+}
+__name(handleYoutubeResolve, "handleYoutubeResolve");
+
+async function handleYoutubeSearch(env, req, url, headers) {
+  const user = await requireUser(env, req);
+  const limits = effectiveLimits(user, await getUserCreatedAt(env, user.userId));
+
+  const rl = await rateLimit(
+    env,
+    `youtube:search:${user.userId}`,
+    Math.min(180, limits.rssFetchesDay || 200),
+    24 * 60 * 60 * 1000
+  );
+
+  if (!rl.ok) {
+    return json({
+      error: 'youtube_rate_limited',
+      message: 'YouTube search limit reached.',
+    }, 429, headers);
+  }
+
+  const q = String(url.searchParams.get('q') || '').trim().slice(0, 160);
+  const limit = Math.max(1, Math.min(12, Number(url.searchParams.get('limit') || 6)));
+
+  if (!q) {
+    return json({
+      channels: [],
+    }, 200, headers);
+  }
+
+  const channels = await youtubeSearchChannels(env, q, limit);
+
+  return json({
+    channels,
+  }, 200, {
+    ...headers,
+    'cache-control': 'private, max-age=300',
+  });
+}
+__name(handleYoutubeSearch, "handleYoutubeSearch");
+
+function parseIso8601DurationSeconds(value = '') {
+  const s = String(value || '').trim();
+
+  const m = s.match(/^P(?:(\d+)D)?T?(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?$/i);
+
+  if (!m) return 0;
+
+  const days = Number(m[1] || 0);
+  const hours = Number(m[2] || 0);
+  const minutes = Number(m[3] || 0);
+  const seconds = Number(m[4] || 0);
+
+  return days * 86400 + hours * 3600 + minutes * 60 + seconds;
+}
+__name(parseIso8601DurationSeconds, "parseIso8601DurationSeconds");
+
+function youtubeVideoInfoFromVideoItem(item = {}) {
+  const snippet = item.snippet || {};
+  const contentDetails = item.contentDetails || {};
+  const status = item.status || {};
+  const videoId = item.id || '';
+
+  const durationSeconds = parseIso8601DurationSeconds(contentDetails.duration || '');
+
+  const text = [
+    snippet.title || '',
+    snippet.description || '',
+  ].join('\n').toLowerCase();
+
+  const probablyShort =
+    durationSeconds > 0 &&
+    durationSeconds <= 61 &&
+    (
+      text.includes('#shorts') ||
+      text.includes('#short') ||
+      text.includes('youtube shorts') ||
+      true
+    );
+
+  return {
+    id: videoId,
+    videoId,
+    title: snippet.title || '',
+    description: snippet.description || '',
+    publishedAt: snippet.publishedAt || '',
+    thumbnail: youtubeThumb(snippet.thumbnails || {}),
+    channelId: snippet.channelId || '',
+    channelTitle: snippet.channelTitle || '',
+    duration: contentDetails.duration || '',
+    durationSeconds,
+    privacyStatus: status.privacyStatus || '',
+    embeddable: status.embeddable !== false,
+    uploadStatus: status.uploadStatus || '',
+    probablyShort,
+    url: videoId ? `https://www.youtube.com/watch?v=${videoId}` : '',
+    embedUrl: videoId ? `https://www.youtube-nocookie.com/embed/${videoId}` : '',
+  };
+}
+__name(youtubeVideoInfoFromVideoItem, "youtubeVideoInfoFromVideoItem");
+
+async function youtubeVideosInfo(env, videoIds = []) {
+  const ids = [...new Set(
+    (Array.isArray(videoIds) ? videoIds : [])
+      .map((x) => String(x || '').trim())
+      .filter(Boolean)
+  )].slice(0, 50);
+
+  if (!ids.length) return [];
+
+  const data = await youtubeApiFetch(env, 'videos', {
+    part: 'snippet,contentDetails,status',
+    id: ids.join(','),
+    maxResults: ids.length,
+  });
+
+  return (data.items || []).map(youtubeVideoInfoFromVideoItem);
+}
+__name(youtubeVideosInfo, "youtubeVideosInfo");
+
+async function youtubeLatestVideosPage(env, channelId, {
+  pageToken = '',
+  limit = 12,
+} = {}) {
+  const channel = await youtubeChannelById(env, channelId);
+
+  if (!channel) {
+    const err = new Error('YouTube channel not found.');
+    err.status = 404;
+    throw err;
+  }
+
+  const candidate = youtubeChannelCandidate(channel);
+  const playlistId = candidate.uploadsPlaylistId;
+
+  const maxResults = Math.max(1, Math.min(24, Number(limit || 12)));
+
+  if (!playlistId) {
+    return {
+      channel: candidate,
+      videos: [],
+      nextPageToken: '',
+    };
+  }
+
+  const page = await youtubeApiFetch(env, 'playlistItems', {
+    part: 'snippet,contentDetails',
+    playlistId,
+    maxResults,
+    pageToken,
+  });
+
+  const baseVideos = (page.items || [])
+    .map(youtubeVideoFromPlaylistItem)
+    .filter(Boolean);
+
+  const infos = await youtubeVideosInfo(
+    env,
+    baseVideos.map((v) => v.videoId)
+  ).catch(() => []);
+
+  const infoById = new Map(infos.map((x) => [x.videoId, x]));
+
+  const videos = baseVideos.map((v) => ({
+    ...v,
+    ...(infoById.get(v.videoId) || {}),
+    title: infoById.get(v.videoId)?.title || v.title,
+    description: infoById.get(v.videoId)?.description || v.description,
+    thumbnail: infoById.get(v.videoId)?.thumbnail || v.thumbnail,
+    publishedAt: infoById.get(v.videoId)?.publishedAt || v.publishedAt,
+  }));
+
+  return {
+    channel: candidate,
+    videos,
+    nextPageToken: page.nextPageToken || '',
+    prevPageToken: page.prevPageToken || '',
+  };
+}
+__name(youtubeLatestVideosPage, "youtubeLatestVideosPage");
+
+async function handleYoutubeVideosInfo(env, req, url, headers) {
+  const user = await requireUser(env, req);
+  const limits = effectiveLimits(user, await getUserCreatedAt(env, user.userId));
+
+  const rl = await rateLimit(
+    env,
+    `youtube:videos-info:${user.userId}`,
+    Math.min(400, limits.rssFetchesDay || 200),
+    24 * 60 * 60 * 1000
+  );
+
+  if (!rl.ok) {
+    return json({
+      error: 'youtube_rate_limited',
+      message: 'YouTube lookup limit reached.',
+    }, 429, headers);
+  }
+
+  const ids = String(url.searchParams.get('ids') || '')
+    .split(',')
+    .map((x) => x.trim())
+    .filter(Boolean);
+
+  const videos = await youtubeVideosInfo(env, ids);
+
+  return json({
+    videos,
+  }, 200, {
+    ...headers,
+    'cache-control': 'private, max-age=600',
+  });
+}
+__name(handleYoutubeVideosInfo, "handleYoutubeVideosInfo");
+
+async function handleYoutubeChannelVideos(env, req, url, headers) {
+  const user = await requireUser(env, req);
+  const limits = effectiveLimits(user, await getUserCreatedAt(env, user.userId));
+
+  const rl = await rateLimit(
+    env,
+    `youtube:channel-videos:${user.userId}`,
+    Math.min(240, limits.rssFetchesDay || 200),
+    24 * 60 * 60 * 1000
+  );
+
+  if (!rl.ok) {
+    return json({
+      error: 'youtube_rate_limited',
+      message: 'YouTube video load limit reached.',
+    }, 429, headers);
+  }
+
+  const channelId = String(url.searchParams.get('channelId') || '').trim();
+  const pageToken = String(url.searchParams.get('pageToken') || '').trim();
+  const limit = Math.max(1, Math.min(24, Number(url.searchParams.get('limit') || 12)));
+
+  if (!channelId) {
+    return json({
+      error: 'missing_channel_id',
+      message: 'channelId is required.',
+    }, 400, headers);
+  }
+
+  const result = await youtubeLatestVideosPage(env, channelId, {
+    pageToken,
+    limit,
+  });
+
+  return json(result, 200, {
+    ...headers,
+    'cache-control': 'private, max-age=300',
+  });
+}
+__name(handleYoutubeChannelVideos, "handleYoutubeChannelVideos");
+
 async function handleRssSearch(env, req, url, headers) {
   const user = await requireUser(env, req);
 
@@ -2004,6 +2707,18 @@ async function route(req, env) {
     }
     if (url.pathname === "/api/rss/search" && req.method === "GET") {
       return handleRssSearch(env, req, url, headers);
+    }
+    if (url.pathname === "/api/youtube/resolve" && req.method === "GET") {
+      return handleYoutubeResolve(env, req, url, headers);
+    }
+    if (url.pathname === "/api/youtube/search" && req.method === "GET") {
+      return handleYoutubeSearch(env, req, url, headers);
+    }
+    if (url.pathname === "/api/youtube/videos-info" && req.method === "GET") {
+      return handleYoutubeVideosInfo(env, req, url, headers);
+    }
+    if (url.pathname === "/api/youtube/channel-videos" && req.method === "GET") {
+      return handleYoutubeChannelVideos(env, req, url, headers);
     }
     return json({ error: "not_found" }, 404, headers);
   } catch (err) {

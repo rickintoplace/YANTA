@@ -1607,6 +1607,121 @@ function closeRightPane(kind = 'preview') {
   setView('edit');
 }
 
+function previousPlayableMediaForTimestamp(timestampEl) {
+  const preview = $('preview');
+
+  if (!preview || !timestampEl) return null;
+
+  const mediaNodes = [
+    ...preview.querySelectorAll(
+      [
+        '.pv-embed-video iframe',
+        '.pv-embed-video video',
+        '.pv-embed-audio audio',
+        'iframe[src*="youtube"]',
+        'iframe[src*="vimeo"]',
+        'video',
+        'audio',
+      ].join(',')
+    ),
+  ];
+
+  let best = null;
+
+  for (const node of mediaNodes) {
+    const pos = node.compareDocumentPosition(timestampEl);
+
+    // timestampEl is after node in document order.
+    if (pos & Node.DOCUMENT_POSITION_FOLLOWING) {
+      best = node;
+    }
+  }
+
+  return best;
+}
+
+function jumpIframeToTimestamp(iframe, seconds) {
+  if (!iframe?.src) return false;
+
+  try {
+    const url = new URL(iframe.src, location.href);
+    const host = url.hostname.replace(/^www\./, '').toLowerCase();
+
+    if (
+      host.includes('youtube.com') ||
+      host.includes('youtube-nocookie.com')
+    ) {
+      url.searchParams.set('start', String(seconds));
+      url.searchParams.set('autoplay', '1');
+
+      // If the iframe was already at that timestamp, force reload anyway.
+      iframe.src = url.href;
+
+      return true;
+    }
+
+    if (host.includes('vimeo.com')) {
+      url.searchParams.set('autoplay', '1');
+      url.hash = `t=${Math.floor(seconds)}s`;
+
+      iframe.src = url.href;
+
+      return true;
+    }
+
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+function jumpHtmlMediaToTimestamp(media, seconds) {
+  if (!(media instanceof HTMLMediaElement)) return false;
+
+  try {
+    media.currentTime = Math.max(0, Number(seconds || 0));
+    media.play?.().catch?.(() => {});
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function handlePreviewTimestampClick(timestampEl) {
+  const seconds = Number(timestampEl?.dataset?.timestampSeconds);
+
+  if (!Number.isFinite(seconds)) return false;
+
+  const media = previousPlayableMediaForTimestamp(timestampEl);
+
+  if (!media) {
+    toast('No video or audio above this timestamp', 'error');
+    return true;
+  }
+
+  if (media instanceof HTMLIFrameElement) {
+    const ok = jumpIframeToTimestamp(media, seconds);
+
+    if (!ok) {
+      toast('Could not jump this embedded player', 'error');
+    }
+
+    return true;
+  }
+
+  if (media instanceof HTMLMediaElement) {
+    const ok = jumpHtmlMediaToTimestamp(media, seconds);
+
+    if (!ok) {
+      toast('Could not jump this media player', 'error');
+    }
+
+    return true;
+  }
+
+  return false;
+}
+
 function bindEvents() {
   // title + tags
   $('noteTitle').addEventListener('input', () => { saveCurrentNote(); });
@@ -1782,6 +1897,16 @@ function bindEvents() {
 
   // Preview interactions
   $('preview').addEventListener('click', (e) => {
+    const timestamp = e.target.closest?.('.yanta-video-timestamp');
+
+    if (timestamp) {
+      e.preventDefault();
+      e.stopPropagation();
+
+      handlePreviewTimestampClick(timestamp);
+      return;
+    }
+    
     const calendarLink = e.target.closest?.('a[href^="#calendar/"]');
 
     if (calendarLink) {

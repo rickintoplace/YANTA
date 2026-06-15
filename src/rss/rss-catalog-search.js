@@ -373,7 +373,12 @@ export function isProbablyUrlOrDomain(value = '') {
     /^https?:\/\//i.test(raw) ||
     (/^[a-z0-9.-]+\.[a-z]{2,}(?:\/\S*)?$/i.test(raw) && !/\s/.test(raw)) ||
     /^@?[a-z0-9_]+@[a-z0-9.-]+\.[a-z]{2,}$/i.test(raw) ||
-    /^@?[a-z0-9-]+\.substack$/i.test(raw)
+    /^@?[a-z0-9-]+\.substack$/i.test(raw) ||
+
+    // YouTube native sources
+    /^UC[a-zA-Z0-9_-]{20,}$/.test(raw) ||
+    /^@[\w.-]{2,}$/.test(raw) ||
+    /^https?:\/\/(www\.)?(youtube\.com|m\.youtube\.com)\/(@[^/?#]+|channel\/UC[a-zA-Z0-9_-]{20,}|user\/[^/?#]+|c\/[^/?#]+|feeds\/videos\.xml)/i.test(raw)
   );
 }
 

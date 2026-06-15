@@ -37,6 +37,9 @@ function sanitizeHtml(html) {
     ADD_TAGS: [
       'iframe',
       'input',
+      'audio',
+      'video',
+      'source',
 
       // SVG bleibt erlaubt, aber Icons hydraten wir unten nochmal robust.
       'svg',
@@ -94,6 +97,10 @@ function sanitizeHtml(html) {
       'allow',
       'allowfullscreen',
       'frameborder',
+      'controls',
+      'preload',
+      'type',
+      'poster',
 
       // SVG/Lucide
       'xmlns',
@@ -215,6 +222,56 @@ function videoEmbedUrl(url) {
   if ((m = /youtube\.com\/embed\/([a-zA-Z0-9_-]{6,})/.exec(url))) return `https://www.youtube-nocookie.com/embed/${m[1]}`;
   if ((m = /vimeo\.com\/(\d+)/.exec(url))) return `https://player.vimeo.com/video/${m[1]}`;
   return null;
+}
+
+function timestampToSeconds(raw = '') {
+  const parts = String(raw || '')
+    .trim()
+    .split(':')
+    .map((x) => Number(x));
+
+  if (parts.length === 2) {
+    const [m, s] = parts;
+
+    if (
+      Number.isInteger(m) &&
+      Number.isInteger(s) &&
+      m >= 0 &&
+      s >= 0 &&
+      s < 60
+    ) {
+      return m * 60 + s;
+    }
+  }
+
+  if (parts.length === 3) {
+    const [h, m, s] = parts;
+
+    if (
+      Number.isInteger(h) &&
+      Number.isInteger(m) &&
+      Number.isInteger(s) &&
+      h >= 0 &&
+      m >= 0 &&
+      m < 60 &&
+      s >= 0 &&
+      s < 60
+    ) {
+      return h * 3600 + m * 60 + s;
+    }
+  }
+
+  return null;
+}
+
+function audioEmbedUrl(url) {
+  const s = String(url || '').trim();
+
+  if (/\.(mp3|m4a|aac|ogg|oga|opus|wav)(?:$|[?#])/i.test(s)) {
+    return s;
+  }
+
+  return '';
 }
 
 function resolveImageUrl(url) {
@@ -477,20 +534,33 @@ export function renderInline(s) {
   //   ![alt](url){width=420}
   //   ![alt](url){width=420 height=260}
   out = out.replace(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+"([^"]*)")?\)(?:\{([^}\n]*)\})?/g, (_, alt, url, title, rawAttrs) => {
-    const decodedUrl = decodeEntities(url);
-    const embed = videoEmbedUrl(decodedUrl);
+  const decodedUrl = decodeEntities(url);
+  const audio = audioEmbedUrl(decodedUrl);
+  const embed = videoEmbedUrl(decodedUrl);
 
-    if (embed) {
-      const safeEmbed = safeUrl(embed);
+  if (audio) {
+    const safeAudio = safeUrl(audio);
 
-      if (!safeEmbed) {
-        return stash(`<span class="pv-img-missing">blocked video url</span>`);
-      }
-
-      return stash(`<div class="pv-embed-video" contenteditable="false">
-        <iframe src="${escapeAttr(safeEmbed)}" allowfullscreen frameborder="0" allow="autoplay; encrypted-media; picture-in-picture"></iframe>
-      </div>`);
+    if (!safeAudio) {
+      return stash(`<span class="pv-img-missing">blocked audio url</span>`);
     }
+
+    return stash(`<div class="pv-embed-audio" contenteditable="false">
+      <audio controls preload="metadata" src="${escapeAttr(safeAudio)}"></audio>
+    </div>`);
+  }
+
+  if (embed) {
+    const safeEmbed = safeUrl(embed);
+
+    if (!safeEmbed) {
+      return stash(`<span class="pv-img-missing">blocked video url</span>`);
+    }
+
+    return stash(`<div class="pv-embed-video" contenteditable="false">
+      <iframe src="${escapeAttr(safeEmbed)}" allowfullscreen frameborder="0" allow="autoplay; encrypted-media; picture-in-picture"></iframe>
+    </div>`);
+  }
 
     const resolved = resolveImageUrl(decodedUrl);
 
@@ -564,6 +634,30 @@ export function renderInline(s) {
   out = out.replace(/(?<!_)_([^_\n]+)_(?!_)/g, '<em>$1</em>');
   out = out.replace(/==([^=\n]+)==/g, '<mark>$1</mark>');
   out = out.replace(/~~([^~\n]+)~~/g, '<del>$1</del>');
+
+  // Clickable media timestamps.
+  // Examples:
+  //   0:42
+  //   12:34
+  //   1:02:03
+  //
+  // They jump to the nearest video/audio embed above them in the preview.
+  // Links/code/images are protected by placeholders at this point, so we
+  // don't accidentally rewrite URLs or Markdown links.
+  out = out.replace(
+    /(^|[^\w:/])((?:(?:\d{1,2}:)?[0-5]?\d:[0-5]\d))(?![\w:/])/g,
+    (_full, prefix, ts) => {
+      const seconds = timestampToSeconds(ts);
+
+      if (seconds == null) {
+        return `${prefix}${ts}`;
+      }
+
+      return `${prefix}${stash(
+        `<button type="button" class="yanta-video-timestamp" data-timestamp-seconds="${escapeAttr(seconds)}">${escapeHtml(ts)}</button>`
+      )}`;
+    }
+  );
 
   // Tags after styling.
   out = out.replace(/(^|\s)#([a-zA-Z][\w-]*)/g, (_, sp, tag) =>

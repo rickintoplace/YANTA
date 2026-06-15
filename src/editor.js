@@ -651,6 +651,44 @@ function videoEmbedUrl(url) {
   if ((m = /vimeo\.com\/(\d+)/.exec(url))) return `https://player.vimeo.com/video/${m[1]}`;
   return null;
 }
+function audioEmbedUrl(url) {
+  const s = String(url || '').trim();
+
+  if (/\.(mp3|m4a|aac|ogg|oga|opus|wav)(?:$|[?#])/i.test(s)) {
+    return s;
+  }
+
+  return '';
+}
+
+class AudioWidget extends WidgetType {
+  constructor(src) {
+    super();
+    this.src = src;
+  }
+
+  eq(o) {
+    return o.src === this.src;
+  }
+
+  toDOM() {
+    const wrap = document.createElement('div');
+    wrap.className = 'yanta-audio-embed';
+
+    const audio = document.createElement('audio');
+    audio.src = this.src;
+    audio.controls = true;
+    audio.preload = 'metadata';
+
+    wrap.append(audio);
+
+    return wrap;
+  }
+
+  ignoreEvent() {
+    return false;
+  }
+}
 class VideoWidget extends WidgetType {
   constructor(embed) { super(); this.embed = embed; }
   eq(o) { return o.embed === this.embed; }
@@ -673,19 +711,33 @@ const videoPreviewField = StateField.define({
 });
 function buildVideoDecos(s) {
   const b = new RangeSetBuilder();
+
   for (let p = 0; p < s.doc.length;) {
     const line = s.doc.lineAt(p);
     const m = /^!?\[[^\]]*\]\(([^)\s]+)\)\s*$/.exec(line.text);
+
     if (m) {
+      const audio = audioEmbedUrl(m[1]);
       const embed = videoEmbedUrl(m[1]);
-      if (embed) {
+
+      if (audio) {
         b.add(line.to, line.to, Decoration.widget({
-          widget: new VideoWidget(embed), side: 1, block: true,
+          widget: new AudioWidget(audio),
+          side: 1,
+          block: true,
+        }));
+      } else if (embed) {
+        b.add(line.to, line.to, Decoration.widget({
+          widget: new VideoWidget(embed),
+          side: 1,
+          block: true,
         }));
       }
     }
+
     p = line.to + 1;
   }
+
   return b.finish();
 }
 

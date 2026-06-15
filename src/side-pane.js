@@ -3,7 +3,7 @@
 //
 // Central host for "right-pane apps":
 // - preview is the default native content
-// - graph/calendar/dashboard can temporarily occupy the preview pane
+// - graph/calendar/dashboard/ai/rss can temporarily occupy the preview pane
 // ============================================================
 
 import {
@@ -34,7 +34,10 @@ function forceSplitView() {
   if (app) {
     app.dataset.view = 'split';
 
-    if (app.dataset.surface !== 'calendar' && app.dataset.surface !== 'dashboard') {
+    if (
+      app.dataset.surface !== 'calendar' &&
+      app.dataset.surface !== 'dashboard'
+    ) {
       app.dataset.surface = 'note';
     }
   }
@@ -98,6 +101,7 @@ export function openSidePane({
         <button class="icon-btn ${kind === 'dashboard' ? 'active' : ''}" data-side-pane-tab="dashboard" title="Dashboard">${lucide('layout-dashboard', 15)}</button>
         <button class="icon-btn ${kind === 'graph' ? 'active' : ''}" data-side-pane-tab="graph" title="Graph">${lucide('network', 15)}</button>
         <button class="icon-btn ${kind === 'calendar' ? 'active' : ''}" data-side-pane-tab="calendar" title="Calendar">${lucide('calendar-days', 15)}</button>
+        <button class="icon-btn ${kind === 'rss' ? 'active' : ''}" data-side-pane-tab="rss" title="Sources">${lucide('rss', 15)}</button>
         <button class="icon-btn ${kind === 'ai' ? 'active' : ''}" data-side-pane-tab="ai" title="AI">${lucide('sparkles', 15)}</button>
       </div>
 

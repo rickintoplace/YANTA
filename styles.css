@@ -4141,3 +4141,76 @@ input.yanta-task-checkbox {
   .app.sidebar-collapsed .tree-row.trash-root-row .tree-folder-count {
     display: inline-flex;
   }
+
+  .pv-embed-audio,
+  .yanta-audio-embed {
+    width: 100%;
+    margin: 10px 0;
+    padding: 10px;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--bg-elev-2);
+  }
+
+  .pv-embed-audio audio,
+  .yanta-audio-embed audio {
+    width: 100%;
+    display: block;
+  }
+
+/* ============================================================
+   Media timestamps in Markdown preview
+   ============================================================ */
+
+.yanta-video-timestamp {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  margin: 0 2px;
+  padding: 1px 6px;
+
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
+  border-radius: 999px;
+
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+  color: var(--accent);
+
+  font: inherit;
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  font-weight: 750;
+  line-height: 1.45;
+
+  cursor: pointer;
+
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    transform 120ms ease;
+}
+
+.yanta-video-timestamp:hover {
+  transform: translateY(-1px);
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
+.pv-embed-audio,
+.yanta-audio-embed {
+  width: 100%;
+
+  margin: 10px 0;
+  padding: 10px;
+
+  border: 1px solid var(--border);
+  border-radius: 12px;
+
+  background: var(--bg-elev-2);
+}
+
+.pv-embed-audio audio,
+.yanta-audio-embed audio {
+  width: 100%;
+  display: block;
+}

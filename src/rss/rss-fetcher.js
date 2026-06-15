@@ -7,9 +7,8 @@
 // - It enables privacy-protected RSS image loading.
 // - Direct browser fetch remains as fallback for CORS-friendly feeds.
 //
-// Important:
-// Do NOT build API URLs with new URL('/api/..', base),
-// because that would drop '/cloud-api' from same-origin proxy bases.
+// YouTube:
+// - Cloud resolves @handles/custom URLs with YouTube Data API v3.
 // ============================================================
 
 import {
@@ -213,6 +212,86 @@ export async function searchRssSources(query, {
   return Array.isArray(json.feeds) ? json.feeds : [];
 }
 
+export async function resolveYoutubeChannel(input, {
+  includeVideos = true,
+  limit = 12,
+} = {}) {
+  const q = String(input || '').trim();
+
+  if (!q) {
+    throw new Error('Enter a YouTube channel URL, handle or channel ID.');
+  }
+
+  const endpoint = new URL(apiUrl('/api/youtube/resolve'));
+
+  endpoint.searchParams.set('q', q);
+  endpoint.searchParams.set('includeVideos', includeVideos ? '1' : '0');
+  endpoint.searchParams.set('limit', String(Math.max(1, Math.min(24, Number(limit || 12)))));
+
+  const res = await fetch(endpoint.href, {
+    method: 'GET',
+    credentials: 'include',
+    headers: {
+      Accept: 'application/json',
+    },
+  });
+
+  assertCloudAuthError(res);
+
+  if (!res.ok) {
+    throw new Error(
+      await parseJsonError(
+        res,
+        `YouTube channel lookup failed: HTTP ${res.status}`
+      )
+    );
+  }
+
+  return readJsonResponse(
+    res,
+    `YouTube channel lookup failed: HTTP ${res.status}`
+  );
+}
+
+export async function searchYoutubeChannels(query, {
+  limit = 6,
+} = {}) {
+  const q = String(query || '').trim();
+
+  if (!q) return [];
+
+  const endpoint = new URL(apiUrl('/api/youtube/search'));
+
+  endpoint.searchParams.set('q', q);
+  endpoint.searchParams.set('limit', String(Math.max(1, Math.min(12, Number(limit || 6)))));
+
+  const res = await fetch(endpoint.href, {
+    method: 'GET',
+    credentials: 'include',
+    headers: {
+      Accept: 'application/json',
+    },
+  });
+
+  assertCloudAuthError(res);
+
+  if (!res.ok) {
+    throw new Error(
+      await parseJsonError(
+        res,
+        `YouTube search failed: HTTP ${res.status}`
+      )
+    );
+  }
+
+  const json = await readJsonResponse(
+    res,
+    `YouTube search failed: HTTP ${res.status}`
+  );
+
+  return Array.isArray(json.channels) ? json.channels : [];
+}
+
 async function fetchFeedDirect(feed) {
   const feedUrl = cleanUrl(feed?.feedUrl);
 
@@ -346,4 +425,88 @@ export async function rssImageProxyUrl(rawUrl) {
   endpoint.searchParams.set('url', url);
 
   return endpoint.href;
+}
+
+export async function getYoutubeVideosInfo(videoIds = []) {
+  const ids = [...new Set(
+    (Array.isArray(videoIds) ? videoIds : [])
+      .map((x) => String(x || '').trim())
+      .filter(Boolean)
+  )].slice(0, 50);
+
+  if (!ids.length) return [];
+
+  const endpoint = new URL(apiUrl('/api/youtube/videos-info'));
+  endpoint.searchParams.set('ids', ids.join(','));
+
+  const res = await fetch(endpoint.href, {
+    method: 'GET',
+    credentials: 'include',
+    headers: {
+      Accept: 'application/json',
+    },
+  });
+
+  assertCloudAuthError(res);
+
+  if (!res.ok) {
+    throw new Error(
+      await parseJsonError(
+        res,
+        `YouTube video metadata failed: HTTP ${res.status}`
+      )
+    );
+  }
+
+  const json = await readJsonResponse(
+    res,
+    `YouTube video metadata failed: HTTP ${res.status}`
+  );
+
+  return Array.isArray(json.videos) ? json.videos : [];
+}
+
+export async function fetchYoutubeChannelVideos({
+  channelId = '',
+  pageToken = '',
+  limit = 12,
+} = {}) {
+  const id = String(channelId || '').trim();
+
+  if (!id) {
+    throw new Error('YouTube channel id missing.');
+  }
+
+  const endpoint = new URL(apiUrl('/api/youtube/channel-videos'));
+
+  endpoint.searchParams.set('channelId', id);
+  endpoint.searchParams.set('limit', String(Math.max(1, Math.min(24, Number(limit || 12)))));
+
+  if (pageToken) {
+    endpoint.searchParams.set('pageToken', String(pageToken));
+  }
+
+  const res = await fetch(endpoint.href, {
+    method: 'GET',
+    credentials: 'include',
+    headers: {
+      Accept: 'application/json',
+    },
+  });
+
+  assertCloudAuthError(res);
+
+  if (!res.ok) {
+    throw new Error(
+      await parseJsonError(
+        res,
+        `YouTube videos load failed: HTTP ${res.status}`
+      )
+    );
+  }
+
+  return readJsonResponse(
+    res,
+    `YouTube videos load failed: HTTP ${res.status}`
+  );
 }

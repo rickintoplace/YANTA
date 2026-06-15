@@ -99,3 +99,16 @@ export function cloudCreateVault({ name = 'My YANTA Vault' } = {}) {
 export function cloudUsage() {
   return apiFetch('/api/usage');
 }
+
+export function cloudListVaultDevices(vaultId) {
+  return apiFetch(`/api/devices?vaultId=${encodeURIComponent(vaultId)}`);
+}
+
+export function cloudRemoveVaultDevice(vaultId, deviceId) {
+  return apiFetch(
+    `/api/devices?vaultId=${encodeURIComponent(vaultId)}&deviceId=${encodeURIComponent(deviceId)}`,
+    {
+      method: 'DELETE',
+    }
+  );
+}

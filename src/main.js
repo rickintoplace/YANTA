@@ -470,6 +470,40 @@ async function ensureGoogleDriveSyncSilently(reason = 'silent') {
   }, 600);
 }
 
+function registerSync2Runtime(runtime, {
+  catchUp = false,
+  syncNow = false,
+  reason = 'runtime-registered',
+} = {}) {
+  if (!runtime?.engine) return null;
+
+  window.yantaSync2 = runtime;
+
+  startSync2AutoSync(runtime.engine, {
+    catchUp,
+  });
+
+  if (syncNow) {
+    requestSync2AutoSync(reason, 300);
+  }
+
+  return runtime;
+}
+
+window.yantaRegisterSync2Runtime = registerSync2Runtime;
+
+window.addEventListener('yanta-sync2-runtime-ready', (e) => {
+  const runtime = e.detail?.runtime;
+
+  if (!runtime?.engine) return;
+
+  registerSync2Runtime(runtime, {
+    catchUp: e.detail?.catchUp === true,
+    syncNow: e.detail?.syncNow !== false,
+    reason: e.detail?.reason || 'runtime-event',
+  });
+});
+
 window.yantaSync2Now = async (options = {}) => {
   return runSync2Now('manual-console', {
     interactive: !!options.interactive,

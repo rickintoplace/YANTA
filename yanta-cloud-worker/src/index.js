@@ -2,7 +2,7 @@ const PLAN_LIMITS = {
   free: {
     storageBytes: 25 * 1024 * 1024,
     vaults: 1,
-    devices: 2,
+    devices: 5,
     objects: 10000,
     objectSizeBytes: 2 * 1024 * 1024,
   // Backend-internal object transfer.
@@ -549,8 +549,8 @@ async function ensureDevice(env, user, vaultId, deviceId) {
   }
 
   const existing = await env.DB.prepare(
-    `SELECT * FROM devices WHERE vault_id = ? AND device_id = ?`
-  ).bind(vaultId, deviceId).first();
+    `SELECT * FROM devices WHERE user_id = ? AND vault_id = ? AND device_id = ?`
+  ).bind(user.userId, vaultId, deviceId).first();
 
   if (existing) {
     if (existing.revoked_at) {
@@ -923,6 +923,69 @@ async function handleCreateVault(env, req, headers) {
       created_at: now()
     }
   }, 200, headers);
+}
+
+async function handleListDevices(env, req, url, headers) {
+  const user = await requireUser(env, req);
+
+  const vaultId =
+    url.searchParams.get('vaultId') ||
+    req.headers.get('x-yanta-vault-id') ||
+    '';
+
+  await requireVault(env, user, vaultId);
+
+  const rows = await env.DB.prepare(
+    `SELECT id, device_id, name, created_at, last_seen_at, revoked_at
+     FROM devices
+     WHERE user_id = ? AND vault_id = ?
+     ORDER BY revoked_at ASC, last_seen_at DESC, created_at DESC`
+  ).bind(user.userId, vaultId).all();
+
+  return json({
+    devices: (rows.results || []).map((d) => ({
+      id: d.id,
+      deviceId: d.device_id,
+      name: d.name || d.device_id,
+      createdAt: Number(d.created_at || 0),
+      lastSeenAt: Number(d.last_seen_at || 0),
+      revokedAt: d.revoked_at ? Number(d.revoked_at) : null,
+      active: !d.revoked_at,
+    })),
+  }, 200, headers);
+}
+
+async function handleRevokeDevice(env, req, url, headers) {
+  const user = await requireUser(env, req);
+
+  const vaultId =
+    url.searchParams.get('vaultId') ||
+    req.headers.get('x-yanta-vault-id') ||
+    '';
+
+  const deviceId = url.searchParams.get('deviceId') || '';
+
+  if (!vaultId || !deviceId) {
+    return json({
+      ok: false,
+      message: 'vaultId and deviceId are required',
+    }, 400, headers);
+  }
+
+  await requireVault(env, user, vaultId);
+
+  await env.DB.prepare(
+    `UPDATE devices
+     SET revoked_at = COALESCE(revoked_at, ?)
+     WHERE user_id = ? AND vault_id = ? AND device_id = ?`
+  ).bind(now(), user.userId, vaultId, deviceId).run();
+
+  await audit(env, req, 'device_revoked', user.userId, {
+    vaultId,
+    deviceId,
+  });
+
+  return json({ ok: true }, 200, headers);
 }
 
 async function vaultAndDeviceFromHeaders(env, req, user) {
@@ -1468,6 +1531,14 @@ async function route(req, env) {
 
     if (url.pathname === '/api/vaults' && req.method === 'POST') {
       return handleCreateVault(env, req, headers);
+    }
+
+    if (url.pathname === '/api/devices' && req.method === 'GET') {
+      return handleListDevices(env, req, url, headers);
+    }
+
+    if (url.pathname === '/api/devices' && req.method === 'DELETE') {
+      return handleRevokeDevice(env, req, url, headers);
     }
 
     if (url.pathname === '/api/usage' && req.method === 'GET') {

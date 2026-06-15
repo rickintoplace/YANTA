@@ -15,6 +15,8 @@ import {
   cloudSendCode,
   cloudVerifyCode,
   cloudCreateVault,
+  cloudListVaultDevices,
+  cloudRemoveVaultDevice,
   YANTA_CLOUD_BASE_URL,
 } from '../cloud/cloud-api.js';
 
@@ -30,6 +32,7 @@ import {
   renderSync2QrSvg,
   importSync2PairingPayload,
   parseSync2PairingPayload,
+  scanQrWithCamera,
 } from './pairing.js';
 
 import {
@@ -39,6 +42,10 @@ import {
 import {
   removePristineWelcomeVaultIfPresent,
 } from '../notes.js';
+
+import {
+  yantaConfirm,
+} from '../dialogs.js';
 
 let modal = null;
 let statusEl = null;
@@ -50,6 +57,7 @@ const TURNSTILE_SITE_KEY =
 
 function setStatus(msg = '', type = '') {
   if (!statusEl) return;
+
   statusEl.textContent = msg;
   statusEl.className = 'yanta-cloud-status' + (type ? ` ${type}` : '');
 }
@@ -65,7 +73,7 @@ function ensureCss() {
   style.id = 'yanta-cloud-setup-css';
   style.textContent = `
 .yanta-cloud-card {
-  width: min(640px, 94vw);
+  width: min(680px, 94vw);
 }
 
 .yanta-cloud-body {
@@ -190,7 +198,6 @@ function ensureCss() {
   align-items: baseline;
   justify-content: space-between;
   gap: 10px;
-
   font-size: 12px;
 }
 
@@ -209,22 +216,17 @@ function ensureCss() {
 .yanta-cloud-usage-bar {
   position: relative;
   height: 7px;
-
   overflow: hidden;
   border-radius: 999px;
-
   background: color-mix(in srgb, var(--text-faint) 16%, transparent);
 }
 
 .yanta-cloud-usage-bar > span {
   position: absolute;
   inset: 0 auto 0 0;
-
   width: var(--usage-pct, 0%);
   min-width: var(--usage-min, 0px);
-
   border-radius: inherit;
-
   background: linear-gradient(
     90deg,
     var(--accent),
@@ -244,6 +246,74 @@ function ensureCss() {
   color: var(--text-faint);
   font-size: 11px;
   line-height: 1.35;
+}
+
+/* Devices */
+.yanta-cloud-device-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.yanta-cloud-device-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+
+  padding: 10px 11px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+
+  background: var(--bg-elev-2);
+}
+
+.yanta-cloud-device-row.current {
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 8%, var(--bg-elev-2));
+}
+
+.yanta-cloud-device-row.revoked {
+  opacity: 0.58;
+}
+
+.yanta-cloud-device-row > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.yanta-cloud-device-row strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.yanta-cloud-device-row small {
+  color: var(--text-faint);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.yanta-cloud-device-row small.warn {
+  color: var(--yellow);
+}
+
+.yanta-cloud-device-current {
+  color: var(--accent);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+@media (max-width: 680px) {
+  .yanta-cloud-device-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .yanta-cloud-device-row .btn {
+    justify-content: center;
+  }
 }
 `;
   document.head.append(style);
@@ -278,6 +348,7 @@ function renderShell(title, bodyHtml) {
         <h3>${escapeHtml(title)}</h3>
         <button class="icon-btn" data-yanta-cloud-close>&times;</button>
       </header>
+
       <div class="modal-body yanta-cloud-body">
         ${bodyHtml}
         <div class="yanta-cloud-status" data-status></div>
@@ -289,12 +360,42 @@ function renderShell(title, bodyHtml) {
   m.hidden = false;
 }
 
+function publishYantaCloudRuntime(runtime, {
+  catchUp = false,
+  syncNow = false,
+  reason = 'yanta-cloud-setup',
+} = {}) {
+  if (!runtime?.engine) return null;
+
+  window.yantaSync2 = runtime;
+
+  if (typeof window.yantaRegisterSync2Runtime === 'function') {
+    try {
+      window.yantaRegisterSync2Runtime(runtime, {
+        catchUp,
+        syncNow,
+        reason,
+      });
+      return runtime;
+    } catch {}
+  }
+
+  window.dispatchEvent(new CustomEvent('yanta-sync2-runtime-ready', {
+    detail: {
+      runtime,
+      catchUp,
+      syncNow,
+      reason,
+    },
+  }));
+
+  return runtime;
+}
+
 function renderTurnstile(container) {
   turnstileToken = '';
 
-  if (!TURNSTILE_SITE_KEY) {
-    return;
-  }
+  if (!TURNSTILE_SITE_KEY) return;
 
   const host = document.createElement('div');
   host.className = 'yanta-cloud-turnstile';
@@ -307,6 +408,7 @@ function renderTurnstile(container) {
     }
 
     const existing = document.querySelector('script[src*="challenges.cloudflare.com/turnstile"]');
+
     if (existing) {
       existing.addEventListener('load', resolve, { once: true });
       existing.addEventListener('error', reject, { once: true });
@@ -338,11 +440,11 @@ export async function openYantaCloudSetup() {
   try {
     const me = await cloudMe();
 
-if (me.authenticated) {
-  await renderCloudHome(me);
-} else {
-  renderLogin();
-}
+    if (me.authenticated) {
+      await renderCloudHome(me);
+    } else {
+      renderLogin();
+    }
   } catch {
     renderLogin();
   }
@@ -432,8 +534,8 @@ function renderCode(email) {
 
       await cloudVerifyCode(email, code);
 
-        const me = await cloudMe();
-        await renderCloudHome(me);
+      const me = await cloudMe();
+      await renderCloudHome(me);
     } catch (err) {
       setStatus(err?.message || 'Login failed', 'error');
     }
@@ -495,7 +597,6 @@ function usageBarsHtml(me) {
   const usage = me.usage || {};
   const limits = me.limits || {};
   const plan = me.user?.plan || 'free';
-
   const countFmt = (n) => String(Number(n || 0).toLocaleString());
 
   return `
@@ -565,39 +666,90 @@ async function isLocalYantaCloudVault(vaultId) {
   return provider === 'yanta-cloud' && configuredVaultId === vaultId;
 }
 
-async function openConnectAnotherDeviceForVault(vaultId) {
-  if (!vaultId) {
-    setStatus('No cloud vault selected.', 'error');
-    return;
-  }
+function fmtDeviceTime(ts) {
+  if (!ts) return 'never';
 
-  const local = await isLocalYantaCloudVault(vaultId);
+  const d = new Date(Number(ts));
+  if (Number.isNaN(d.getTime())) return 'never';
 
-  if (!local) {
-    setStatus(
-      'This desktop is not locally connected to that vault yet. Connect this device first, then create a pairing QR.',
-      'error'
-    );
-    return;
-  }
-
-  const syncKey = await getSync2SyncKey();
-
-  renderConnected(vaultId, syncKey);
+  return d.toLocaleString([], {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  });
 }
 
-async function connectThisDeviceToVault(vaultId) {
-  if (!vaultId) {
-    setStatus('No cloud vault selected.', 'error');
-    return;
+function cloudDevicesHtml(devices = [], limits = {}, currentDeviceId = '') {
+  const active = devices.filter((d) => d.active !== false);
+  const max = Number(limits.devices || 0);
+
+  if (!devices.length) {
+    return `
+      <section class="yanta-cloud-section">
+        <h4>Connected devices</h4>
+        <p>No devices recorded for this vault yet.</p>
+      </section>
+    `;
   }
 
-  renderExistingVaultStep(vaultId);
+  return `
+    <section class="yanta-cloud-section">
+      <h4>Connected devices</h4>
+      <p>
+        ${active.length}${max ? ` / ${max}` : ''} active device${active.length === 1 ? '' : 's'}
+        for this cloud vault.
+      </p>
+
+      <div class="yanta-cloud-device-list">
+        ${devices.map((d) => {
+          const current = d.deviceId === currentDeviceId;
+          const revoked = d.active === false;
+
+          return `
+            <div class="yanta-cloud-device-row ${current ? 'current' : ''} ${revoked ? 'revoked' : ''}">
+              <div>
+                <strong>${escapeHtml(d.name || d.deviceId || 'Device')}</strong>
+                <small>${escapeHtml(d.deviceId || '')}</small>
+                <small>Last seen: ${escapeHtml(fmtDeviceTime(d.lastSeenAt))}</small>
+                ${revoked ? '<small class="warn">Removed</small>' : ''}
+              </div>
+
+              ${
+                current
+                  ? '<span class="yanta-cloud-device-current">Current device</span>'
+                  : revoked
+                    ? ''
+                    : `
+                      <button class="btn danger" data-remove-cloud-device="${escapeHtml(d.deviceId)}">
+                        ${lucide('trash', 14)}
+                        Remove
+                      </button>
+                    `
+              }
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </section>
+  `;
+}
+
+async function loadVaultDevicesForHome(vaultId) {
+  if (!vaultId) return [];
+
+  try {
+    const res = await cloudListVaultDevices(vaultId);
+    return res.devices || [];
+  } catch (err) {
+    console.warn('[YANTA Cloud] could not load devices', err);
+    return [];
+  }
 }
 
 async function renderCloudHome(me) {
   const vaults = me.vaults || [];
   const configuredVaultId = await configuredYantaCloudVaultId();
+  const currentDeviceId = window.yantaSync2?.deviceId || '';
+  const devices = await loadVaultDevicesForHome(configuredVaultId);
 
   renderShell('YANTA Cloud', `
     <div class="yanta-cloud-hero">
@@ -614,8 +766,8 @@ async function renderCloudHome(me) {
     </div>
 
     <section class="yanta-cloud-section">
-        <h4>Usage</h4>
-        ${usageBarsHtml(me)}
+      <h4>Usage</h4>
+      ${usageBarsHtml(me)}
     </section>
 
     <section class="yanta-cloud-section">
@@ -693,6 +845,8 @@ async function renderCloudHome(me) {
         </button>
       </div>
     </section>
+
+    ${configuredVaultId ? cloudDevicesHtml(devices, me.limits || {}, currentDeviceId) : ''}
   `);
 
   statusEl = modal.querySelector('[data-status]');
@@ -730,10 +884,17 @@ async function renderCloudHome(me) {
       try {
         setStatus('Synchronizing…');
 
-        await window.yantaSync2?.syncNow?.({
-          verbose: false,
-          pullSnapshots: false,
-        });
+        if (typeof window.yantaSync2Now === 'function') {
+          await window.yantaSync2Now({
+            interactive: true,
+            catchUp: false,
+          });
+        } else {
+          await window.yantaSync2?.syncNow?.({
+            verbose: false,
+            pullSnapshots: false,
+          });
+        }
 
         setStatus('Sync complete', 'success');
         toast('Sync complete', 'success');
@@ -742,6 +903,75 @@ async function renderCloudHome(me) {
       }
     });
   });
+
+  modal.querySelectorAll('[data-remove-cloud-device]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const deviceId = btn.dataset.removeCloudDevice || '';
+
+      if (!configuredVaultId || !deviceId) return;
+
+      const ok = await yantaConfirm({
+        title: 'Remove device?',
+        message: [
+          'Remove this device from the selected YANTA Cloud vault?',
+          '',
+          `Device ID: ${deviceId}`,
+          '',
+          'The removed device can no longer access this cloud vault until it is connected again with the Recovery Key or pairing QR.',
+        ].join('\n'),
+        confirmLabel: 'Remove device',
+        cancelLabel: 'Cancel',
+        danger: true,
+        icon: 'trash',
+      });
+
+      if (!ok) return;
+
+      try {
+        setStatus('Removing device…');
+
+        await cloudRemoveVaultDevice(configuredVaultId, deviceId);
+
+        setStatus('Device removed', 'success');
+        toast('Device removed', 'success');
+
+        await renderCloudHome(await cloudMe());
+      } catch (err) {
+        console.error(err);
+        setStatus(err?.message || 'Could not remove device', 'error');
+      }
+    });
+  });
+}
+
+async function openConnectAnotherDeviceForVault(vaultId) {
+  if (!vaultId) {
+    setStatus('No cloud vault selected.', 'error');
+    return;
+  }
+
+  const local = await isLocalYantaCloudVault(vaultId);
+
+  if (!local) {
+    setStatus(
+      'This desktop is not locally connected to that vault yet. Connect this device first, then create a pairing QR.',
+      'error'
+    );
+    return;
+  }
+
+  const syncKey = await getSync2SyncKey();
+
+  renderConnected(vaultId, syncKey);
+}
+
+async function connectThisDeviceToVault(vaultId) {
+  if (!vaultId) {
+    setStatus('No cloud vault selected.', 'error');
+    return;
+  }
+
+  renderExistingVaultStep(vaultId);
 }
 
 function renderExistingVaultStep(vaultId) {
@@ -750,17 +980,28 @@ function renderExistingVaultStep(vaultId) {
       <div class="yanta-cloud-hero-icon">${lucide('key', 28)}</div>
       <div>
         <strong>Recovery Key required</strong>
-        <p>Enter your Recovery Key or paste a YANTA pairing payload from another device.</p>
+        <p>Enter your Recovery Key, paste a YANTA pairing payload, or scan the QR code from another device.</p>
       </div>
     </div>
 
     <section class="yanta-cloud-section">
       <h4>Recovery Key or pairing payload</h4>
-      <textarea class="text-input" data-recovery rows="6" placeholder="Paste Recovery Key or yanta-sync:..."></textarea>
-      <div class="compress-actions" style="margin-top:10px">
+      <textarea class="text-input" data-recovery rows="6" placeholder="Paste Recovery Key, pairing link, or yanta-sync2:..."></textarea>
+
+      <div class="compress-actions" style="margin-top:10px;flex-wrap:wrap">
         <button class="btn" data-back>Back</button>
+
+        <button class="btn" data-scan-qr>
+          ${lucide('qr-code', 14)}
+          Scan QR
+        </button>
+
         <span class="grow"></span>
-        <button class="btn primary" data-connect>${lucide('cloud-download', 14)} Connect & Pull</button>
+
+        <button class="btn primary" data-connect>
+          ${lucide('cloud-download', 14)}
+          Connect & Pull
+        </button>
       </div>
     </section>
   `);
@@ -769,11 +1010,27 @@ function renderExistingVaultStep(vaultId) {
     await renderCloudHome(await cloudMe());
   });
 
+  modal.querySelector('[data-scan-qr]')?.addEventListener('click', async () => {
+    try {
+      setStatus('Opening camera…');
+
+      const text = await scanQrWithCamera();
+
+      const input = modal.querySelector('[data-recovery]');
+      if (input) input.value = text || '';
+
+      setStatus('QR code scanned. Tap Connect & Pull.', 'success');
+    } catch (err) {
+      console.error(err);
+      setStatus(err?.message || 'Could not scan QR code', 'error');
+    }
+  });
+
   modal.querySelector('[data-connect]')?.addEventListener('click', async () => {
     const raw = modal.querySelector('[data-recovery]')?.value?.trim();
 
     if (!raw) {
-      setStatus('Paste your Recovery Key or pairing payload.', 'error');
+      setStatus('Paste your Recovery Key, pairing link or scanned QR payload.', 'error');
       return;
     }
 
@@ -781,7 +1038,15 @@ function renderExistingVaultStep(vaultId) {
       setStatus('Importing key…');
 
       if (raw.startsWith('yanta-sync2:') || raw.includes('#sync2=')) {
-        await importSync2PairingPayload(raw);
+        const payload = await importSync2PairingPayload(raw);
+
+        if (payload.provider !== 'yanta-cloud') {
+          throw new Error('This pairing payload is not for YANTA Cloud.');
+        }
+
+        if (payload.cloud?.vaultId && payload.cloud.vaultId !== vaultId) {
+          throw new Error('This QR code belongs to a different cloud vault.');
+        }
       } else {
         syncKeyToBytes(raw);
         await setSync2SyncKey(raw);
@@ -791,14 +1056,26 @@ function renderExistingVaultStep(vaultId) {
       await store.settings.set('sync2.yantaCloud.vaultId', vaultId);
       await store.settings.set('sync2.yantaCloud.baseUrl', YANTA_CLOUD_BASE_URL);
 
-      setStatus('Connecting and pulling encrypted vault…');
+      setStatus('Removing untouched local Welcome vault if present…');
+
+      await removePristineWelcomeVaultIfPresent({
+        reason: 'yanta-cloud-connect-existing',
+      });
+
+      setStatus('Connecting to YANTA Cloud…');
 
       const runtime = await createSync2YantaCloudAppRuntime({
         baseUrl: YANTA_CLOUD_BASE_URL,
         vaultId,
       });
 
-      window.yantaSync2 = runtime;
+      publishYantaCloudRuntime(runtime, {
+        catchUp: false,
+        syncNow: false,
+        reason: 'yanta-cloud-connect-existing',
+      });
+
+      setStatus('Pulling encrypted vault…');
 
       await runtime.syncNow({
         verbose: false,
@@ -806,10 +1083,12 @@ function renderExistingVaultStep(vaultId) {
       });
 
       toast('YANTA Cloud connected', 'success');
+
       renderConnected(vaultId, runtime.syncKey);
     } catch (err) {
       console.error(err);
       setStatus(err?.message || 'Could not connect vault', 'error');
+      toast('Cloud vault connect failed', 'error');
     }
   });
 }
@@ -895,31 +1174,26 @@ async function renderRecoveryStep(vaultId, { mode = 'new' } = {}) {
         vaultId,
       });
 
-      window.yantaSync2 = runtime;
+      publishYantaCloudRuntime(runtime, {
+        catchUp: false,
+        syncNow: false,
+        reason: 'yanta-cloud-create-vault',
+      });
 
-    setStatus('Uploading encrypted snapshot…');
+      setStatus('Uploading encrypted snapshot…');
 
-    await runtime.pushFullStateNow({
-    includeSnapshots: true,
-    verbose: false,
-    });
+      await runtime.pushFullStateNow({
+        includeSnapshots: true,
+        verbose: false,
+      });
 
-    /*
-    Neuer Cloud-Vault:
-    Wir haben gerade den vollständigen verschlüsselten Zustand hochgeladen.
-    Ein direkter Full Pull würde pro Note Snapshot-Listen erzeugen und ist
-    für Onboarding unnötig langsam/teuer.
+      setStatus('Finalizing cloud sync…');
 
-    uploadOutbox lädt nur kleine Vault/Device-Metadaten nach, die beim
-    engine.start() in die Outbox gekommen sind.
-    */
-    setStatus('Finalizing cloud sync…');
+      await runtime.engine?.uploadOutbox?.();
 
-    await runtime.engine?.uploadOutbox?.();
+      toast('YANTA Cloud Sync enabled', 'success');
 
-    toast('YANTA Cloud Sync enabled', 'success');
-
-    renderConnected(vaultId, syncKey);
+      renderConnected(vaultId, syncKey);
     } catch (err) {
       console.error(err);
       setStatus(err?.message || 'Could not enable sync', 'error');
@@ -973,6 +1247,7 @@ async function renderConnected(vaultId, syncKey) {
         <button class="btn" data-copy-link>${lucide('copy', 14)} Copy pairing link</button>
         <button class="btn" data-copy-pairing>${lucide('copy', 14)} Copy raw text</button>
         <button class="btn" data-sync-now>${lucide('refresh-cw', 14)} Sync now</button>
+        <button class="btn" data-repair-sync>${lucide('wrench', 14)} Repair sync</button>
         <span class="grow"></span>
         <button class="btn" data-back-cloud-home>Back</button>
         <button class="btn primary" data-yanta-cloud-close>Done</button>
@@ -1006,15 +1281,64 @@ async function renderConnected(vaultId, syncKey) {
     try {
       setStatus('Synchronizing…');
 
-      await window.yantaSync2?.syncNow?.({
-        verbose: false,
-        pullSnapshots: false,
-      });
+      if (typeof window.yantaSync2Now === 'function') {
+        await window.yantaSync2Now({
+          interactive: true,
+          catchUp: false,
+        });
+      } else {
+        await window.yantaSync2?.syncNow?.({
+          verbose: false,
+          pullSnapshots: false,
+        });
+      }
 
       setStatus('Sync complete', 'success');
       toast('Sync complete', 'success');
     } catch (err) {
       setStatus(err?.message || 'Sync failed', 'error');
+    }
+  });
+
+  modal.querySelector('[data-repair-sync]')?.addEventListener('click', async () => {
+    try {
+      const ok = await yantaConfirm({
+        title: 'Repair cloud sync?',
+        message: [
+          'Run a full encrypted snapshot catch-up?',
+          '',
+          'This can take longer, but it is useful if another device missed recently created notes or note-body updates.',
+        ].join('\n'),
+        confirmLabel: 'Repair sync',
+        cancelLabel: 'Cancel',
+        icon: 'wrench',
+      });
+
+      if (!ok) return;
+
+      setStatus('Running full sync repair…');
+
+      if (typeof window.yantaSync2CatchupNow === 'function') {
+        await window.yantaSync2CatchupNow({
+          interactive: true,
+        });
+      } else {
+        await window.yantaSync2?.pushFullStateNow?.({
+          includeSnapshots: true,
+          verbose: false,
+        });
+
+        await window.yantaSync2?.syncNow?.({
+          verbose: false,
+          pullSnapshots: true,
+        });
+      }
+
+      setStatus('Sync repair complete', 'success');
+      toast('Sync repair complete', 'success');
+    } catch (err) {
+      console.error(err);
+      setStatus(err?.message || 'Sync repair failed', 'error');
     }
   });
 
@@ -1173,7 +1497,7 @@ async function connectYantaCloudFromPairing(pairingText) {
     setStatus('Removing untouched local Welcome vault if present…');
 
     await removePristineWelcomeVaultIfPresent({
-        reason: 'yanta-cloud-pairing',
+      reason: 'yanta-cloud-pairing',
     });
 
     setStatus('Connecting to YANTA Cloud…');
@@ -1183,7 +1507,11 @@ async function connectYantaCloudFromPairing(pairingText) {
       vaultId,
     });
 
-    window.yantaSync2 = runtime;
+    publishYantaCloudRuntime(runtime, {
+      catchUp: false,
+      syncNow: false,
+      reason: 'yanta-cloud-pairing',
+    });
 
     setStatus('Pulling encrypted vault…');
 

@@ -235,7 +235,7 @@ function externalAgentSettingsHtml() {
               ${externalAgentPermissionHtml('allowReadNotes', 'Allow external agents to read notes', 'Recommended', p.allowReadNotes)}
               ${externalAgentPermissionHtml('allowCreateNotes', 'Allow external agents to create notes', 'Recommended', p.allowCreateNotes)}
               ${externalAgentPermissionHtml('allowEditNotes', 'Allow external agents to edit notes', 'Recommended', p.allowEditNotes)}
-              ${externalAgentPermissionHtml('allowDeleteNotes', 'Allow external agents to delete notes', 'Not recommended', p.allowDeleteNotes)}
+              ${externalAgentPermissionHtml('allowDeleteNotes', 'Allow external agents to delete notes', 'Recommended', p.allowDeleteNotes)}
               ${externalAgentPermissionHtml('allowManageCalendar', 'Allow external agents to manage calendar events', 'Recommended', p.allowManageCalendar)}
             </div>
 

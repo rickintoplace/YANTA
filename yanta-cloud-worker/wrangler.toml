@@ -7,7 +7,7 @@ workers_dev = true
 [vars]
 APP_ORIGIN = "https://yanta.page"
 APP_NAME = "YANTA"
-FROM_EMAIL = "YANTA <login@yanta.page>"
+FROM_EMAIL = "YANTA <login@mail.yanta.page>"
 COOKIE_NAME = "yanta_cloud_session"
 COOKIE_DOMAIN = ""
 OPENROUTER_SITE_URL = "https://yanta.page"

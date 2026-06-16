@@ -1088,6 +1088,65 @@ async function handleStorageIndex(env, req, url, headers) {
   });
 }
 __name(handleStorageIndex, "handleStorageIndex");
+async function handleStorageBreakdown(env, req, url, headers) {
+  const user = await requireUser(env, req);
+
+  const vaultId =
+    url.searchParams.get("vaultId") ||
+    req.headers.get("x-yanta-vault-id") ||
+    "";
+
+  const currentDeviceId = req.headers.get("x-yanta-device-id") || "";
+
+  await requireVault(env, user, vaultId);
+  await requireActiveVaultDevice(env, user, vaultId, currentDeviceId, req);
+
+  const rows = await env.DB.prepare(
+    `SELECT
+       CASE
+         WHEN path LIKE 'yanta-sync-v1/vault/updates/%' THEN 'vault updates'
+         WHEN path LIKE 'yanta-sync-v1/vault/snapshots/%' THEN 'vault snapshots'
+         WHEN path LIKE 'yanta-sync-v1/docs/%/updates/%' THEN 'note updates'
+         WHEN path LIKE 'yanta-sync-v1/docs/%/snapshots/%' THEN 'note snapshots'
+         WHEN path LIKE 'yanta-sync-v1/assets/%' THEN 'assets'
+         ELSE 'other'
+       END AS group_name,
+       COUNT(*) AS object_count,
+       COALESCE(SUM(size), 0) AS bytes
+     FROM objects
+     WHERE user_id = ?
+       AND vault_id = ?
+       AND path >= ?
+       AND path < ?
+     GROUP BY group_name
+     ORDER BY bytes DESC`
+  ).bind(
+    user.userId,
+    vaultId,
+    "yanta-sync-v1/",
+    "yanta-sync-v1/\uF8FF"
+  ).all();
+
+  const groups = (rows.results || []).map((row) => ({
+    group: row.group_name,
+    count: Number(row.object_count || 0),
+    bytes: Number(row.bytes || 0),
+  }));
+
+  const total = groups.reduce((sum, group) => sum + Number(group.bytes || 0), 0);
+  const objectCount = groups.reduce((sum, group) => sum + Number(group.count || 0), 0);
+
+  return json({
+    vaultId,
+    totalBytes: total,
+    objectCount,
+    groups,
+  }, 200, {
+    ...headers,
+    "cache-control": "no-store",
+  });
+}
+
 async function handleStorageStat(env, req, url, headers) {
   const user = await requireUser(env, req);
   const { vaultId } = await vaultAndDeviceFromHeaders(env, req, user);
@@ -2677,6 +2736,9 @@ async function route(req, env) {
     }
     if (url.pathname === "/api/storage/index" && req.method === "GET") {
       return handleStorageIndex(env, req, url, headers);
+    }
+    if (url.pathname === "/api/storage/breakdown" && req.method === "GET") {
+      return handleStorageBreakdown(env, req, url, headers);
     }
     if (url.pathname === "/api/storage/list" && req.method === "GET") {
       return handleStorageList(env, req, url, headers);

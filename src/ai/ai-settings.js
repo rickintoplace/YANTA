@@ -46,7 +46,7 @@ export const DEFAULT_AI_SETTINGS = {
   provider: 'openrouter',
   billingMode: 'byok', // byok | included
   baseUrl: 'https://openrouter.ai/api/v1',
-  model: 'tencent/hy3-preview',
+  model: 'deepseek/deepseek-v4-flash',
   temperature: 0.2,
   maxToolRounds: 6,
   maxContextChars: 30000,

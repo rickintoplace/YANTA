@@ -347,10 +347,15 @@ export class YantaCloudObjectStore extends RemoteObjectStore {
 
   async errorFromResponse(res, fallback) {
     let message = fallback;
+    let parsed = null;
 
     try {
-      const json = await res.json();
-      message = json.message || json.error?.message || json.error || message;
+      parsed = await res.json();
+      message =
+        parsed?.message ||
+        parsed?.error?.message ||
+        parsed?.error ||
+        message;
     } catch {
       try {
         message = await res.text();
@@ -360,6 +365,18 @@ export class YantaCloudObjectStore extends RemoteObjectStore {
     const err = new Error(`${fallback}: ${res.status} ${message}`);
 
     err.status = res.status;
+    err.response = parsed;
+
+    const errorCode =
+      typeof parsed?.error === 'string'
+        ? parsed.error
+        : parsed?.error?.code ||
+          parsed?.code ||
+          '';
+
+    if (errorCode) {
+      err.serverCode = errorCode;
+    }
 
     if (res.status === 429) {
       err.code = 'ERATE_LIMIT';
@@ -369,6 +386,20 @@ export class YantaCloudObjectStore extends RemoteObjectStore {
       err.retryAfterMs = Number.isFinite(retryAfter) && retryAfter > 0
         ? retryAfter * 1000
         : 5 * 60 * 1000;
+    }
+
+    if (
+      res.status === 403 &&
+      [
+        'storage_quota_exceeded',
+        'object_quota_exceeded',
+        'upload_day_quota_exceeded',
+        'writes_day_quota_exceeded',
+        'download_quota_exceeded',
+      ].includes(errorCode)
+    ) {
+      err.code = 'EQUOTA';
+      err.retryAfterMs = 60 * 60 * 1000;
     }
 
     return err;

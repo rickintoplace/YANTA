@@ -17,6 +17,7 @@ import {
   cloudCreateVault,
   cloudListVaultDevices,
   cloudRemoveVaultDevice,
+  cloudStorageBreakdown,
   YANTA_CLOUD_BASE_URL,
 } from '../cloud/cloud-api.js';
 
@@ -700,6 +701,116 @@ function usageBarsHtml(me) {
   `;
 }
 
+function storageBreakdownLabel(group) {
+  const map = {
+    'vault updates': 'Vault update history',
+    'vault snapshots': 'Vault snapshots',
+    'note updates': 'Note update history',
+    'note snapshots': 'Note snapshots',
+    assets: 'Assets',
+    other: 'Other',
+  };
+
+  return map[group] || group || 'Other';
+}
+
+function storageBreakdownCaption(group) {
+  const map = {
+    'vault updates': 'Historical metadata updates. These are safe to compact after a fresh snapshot.',
+    'vault snapshots': 'Full encrypted vault metadata snapshots.',
+    'note updates': 'Historical note-body updates.',
+    'note snapshots': 'Full encrypted note-body snapshots.',
+    assets: 'Encrypted image/drawing asset blobs.',
+    other: 'Bootstrap/keycheck or unknown sync objects.',
+  };
+
+  return map[group] || '';
+}
+
+function storageBreakdownHtml(breakdown) {
+  const groups = breakdown?.groups || [];
+  const total = Number(breakdown?.totalBytes || 0);
+
+  if (!groups.length) {
+    return `
+      <div class="yanta-cloud-limit-note">
+        ${lucide('info', 14)}
+        <span>No cloud storage objects found for this vault.</span>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="yanta-cloud-usage-list">
+      ${groups.map((group) => {
+        const bytes = Number(group.bytes || 0);
+        const pct = total > 0
+          ? Math.max(0, Math.min(100, Math.round((bytes / total) * 100)))
+          : 0;
+
+        return `
+          <div class="yanta-cloud-usage-row ${pctClass(pct)}">
+            <div class="yanta-cloud-usage-head">
+              <span class="yanta-cloud-usage-label">${escapeHtml(storageBreakdownLabel(group.group))}</span>
+              <span class="yanta-cloud-usage-value">
+                ${escapeHtml(fmtBytesCompact(bytes))}
+                · ${escapeHtml(String(group.count || 0))} object${group.count === 1 ? '' : 's'}
+              </span>
+            </div>
+
+            <div class="yanta-cloud-usage-bar" style="--usage-pct:${pct}%;--usage-min:${bytes > 0 ? '4px' : '0px'}">
+              <span></span>
+            </div>
+
+            <div class="yanta-cloud-usage-caption">
+              ${escapeHtml(storageBreakdownCaption(group.group))}
+            </div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
+}
+
+async function hydrateStorageBreakdown({
+  vaultId,
+  currentDeviceId,
+} = {}) {
+  const host = modal?.querySelector('[data-storage-breakdown]');
+  if (!host) return;
+
+  if (!vaultId || !currentDeviceId) {
+    host.innerHTML = `
+      <div class="yanta-cloud-limit-note">
+        ${lucide('info', 14)}
+        <span>Connect this device to a cloud vault to see storage breakdown.</span>
+      </div>
+    `;
+    return;
+  }
+
+  try {
+    host.innerHTML = `
+      <div class="tree-empty">Loading storage breakdown…</div>
+    `;
+
+    const breakdown = await cloudStorageBreakdown(vaultId, {
+      deviceId: currentDeviceId,
+    });
+
+    if (!host.isConnected) return;
+
+    host.innerHTML = storageBreakdownHtml(breakdown);
+  } catch (err) {
+    host.innerHTML = `
+      <div class="yanta-cloud-warning">
+        <strong>Could not load storage breakdown.</strong><br>
+        ${escapeHtml(err?.message || String(err))}
+      </div>
+    `;
+  }
+}
+
 async function configuredYantaCloudVaultId() {
   try {
     return await store.settings.get('sync2.yantaCloud.vaultId', '');
@@ -1017,6 +1128,13 @@ async function renderCloudHome(me) {
     </section>
 
     <section class="yanta-cloud-section">
+      <h4>Storage breakdown</h4>
+      <div data-storage-breakdown>
+        <div class="tree-empty">Loading storage breakdown…</div>
+      </div>
+    </section>
+
+    <section class="yanta-cloud-section">
       <h4>Cloud vaults</h4>
       <p>${
         vaults.length
@@ -1079,6 +1197,12 @@ async function renderCloudHome(me) {
                         ${lucide('wrench', 14)}
                         Repair cloud sync
                       </button>
+
+                      <button class="btn" data-vault-action="compact-sync" data-vault-id="${escapeHtml(v.id)}">
+                        ${lucide('archive', 14)}
+                        Compact cloud storage
+                      </button>
+
                     `
                       : active && activeButBlocked
                         ? `
@@ -1153,6 +1277,11 @@ ${
 
   statusEl = modal.querySelector('[data-status]');
 
+  hydrateStorageBreakdown({
+    vaultId: configuredVaultId,
+    currentDeviceId,
+  }).catch(() => {});
+
   modal.querySelector('[data-create-vault]')?.addEventListener('click', async () => {
     try {
       setStatus('Creating cloud vault…');
@@ -1209,6 +1338,48 @@ ${
   modal.querySelectorAll('[data-vault-action="repair-sync"]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       await runRepairCloudSync();
+    });
+  });
+
+  modal.querySelectorAll('[data-vault-action="compact-sync"]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      try {
+        const ok = await yantaConfirm({
+          title: 'Compact cloud storage?',
+          message: [
+            'YANTA will upload fresh encrypted snapshots and delete old sync update history that is covered by those snapshots.',
+            '',
+            'This reduces cloud storage usage. If your vault is already full, YANTA may first delete old vault update objects to create upload headroom.',
+            '',
+            'Continue?',
+          ].join('\n'),
+          confirmLabel: 'Compact storage',
+          cancelLabel: 'Cancel',
+          icon: 'archive',
+        });
+
+        if (!ok) return;
+
+        setStatus('Compacting cloud storage…');
+
+        const result = await window.yantaSync2CompactNow?.({
+          emergencyHeadroom: true,
+          keepSnapshotsPerDoc: 2,
+        });
+
+        setStatus(
+          `Compaction complete. Freed ${(Number(result?.freedBytes || 0) / 1024 / 1024).toFixed(2)} MB.`,
+          'success'
+        );
+
+        toast('Cloud storage compacted', 'success');
+
+        await renderCloudHome(await cloudMe());
+      } catch (err) {
+        console.error(err);
+        setStatus(err?.message || 'Cloud storage compaction failed', 'error');
+        toast('Cloud storage compaction failed', 'error');
+      }
     });
   });
 
@@ -1631,6 +1802,7 @@ async function renderConnected(vaultId, syncKey) {
         <button class="btn" data-copy-pairing>${lucide('copy', 14)} Copy raw text</button>
         <button class="btn" data-sync-now>${lucide('refresh-cw', 14)} Sync now</button>
         <button class="btn" data-repair-sync>${lucide('wrench', 14)} Repair cloud sync</button>
+        <button class="btn" data-compact-sync>${lucide('archive', 14)} Compact cloud storage</button>
         <span class="grow"></span>
         <button class="btn" data-back-cloud-home>Back</button>
         <button class="btn primary" data-yanta-cloud-close>Done</button>
@@ -1685,6 +1857,44 @@ async function renderConnected(vaultId, syncKey) {
 
   modal.querySelector('[data-repair-sync]')?.addEventListener('click', async () => {
     await runRepairCloudSync();
+  });
+
+  modal.querySelector('[data-compact-sync]')?.addEventListener('click', async () => {
+    try {
+      const ok = await yantaConfirm({
+        title: 'Compact cloud storage?',
+        message: [
+          'YANTA will upload fresh encrypted snapshots and delete old sync update history that is covered by those snapshots.',
+          '',
+          'This reduces cloud storage usage.',
+          '',
+          'Continue?',
+        ].join('\n'),
+        confirmLabel: 'Compact storage',
+        cancelLabel: 'Cancel',
+        icon: 'archive',
+      });
+
+      if (!ok) return;
+
+      setStatus('Compacting cloud storage…');
+
+      const result = await window.yantaSync2CompactNow?.({
+        emergencyHeadroom: true,
+        keepSnapshotsPerDoc: 2,
+      });
+
+      setStatus(
+        `Compaction complete. Freed ${(Number(result?.freedBytes || 0) / 1024 / 1024).toFixed(2)} MB.`,
+        'success'
+      );
+
+      toast('Cloud storage compacted', 'success');
+    } catch (err) {
+      console.error(err);
+      setStatus(err?.message || 'Cloud storage compaction failed', 'error');
+      toast('Cloud storage compaction failed', 'error');
+    }
   });
 
   modal.querySelector('[data-back-cloud-home]')?.addEventListener('click', async () => {

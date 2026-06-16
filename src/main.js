@@ -531,6 +531,34 @@ window.yantaSync2CatchupNow = async (options = {}) => {
   });
 };
 
+window.yantaSync2CompactNow = async (options = {}) => {
+  const engine =
+    sync2Auto.engine ||
+    window.yantaSync2?.engine ||
+    null;
+
+  if (!engine) {
+    throw new Error('YANTA Cloud Sync engine is not running.');
+  }
+
+  const {
+    compactYantaCloudStorage,
+  } = await import('./sync2/cloud-compaction.js');
+
+  const result = await compactYantaCloudStorage(engine, {
+    emergencyHeadroom: options.emergencyHeadroom !== false,
+    minHeadroomBytes: options.minHeadroomBytes,
+    keepSnapshotsPerDoc: options.keepSnapshotsPerDoc,
+    dropCoveredLocalOutbox: options.dropCoveredLocalOutbox !== false,
+  });
+
+  toast(
+    `Cloud storage compacted · freed ${(result.freedBytes / 1024 / 1024).toFixed(2)} MB`,
+    'success'
+  );
+
+  return result;
+};
 
 function searchHaystack(note, body = '') {
   return [

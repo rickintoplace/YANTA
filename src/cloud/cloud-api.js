@@ -103,6 +103,18 @@ export function cloudUsage() {
   return apiFetch('/api/usage');
 }
 
+export function cloudStorageBreakdown(vaultId, {
+  deviceId = '',
+} = {}) {
+  const q = vaultId
+    ? `?vaultId=${encodeURIComponent(vaultId)}`
+    : '';
+
+  return apiFetch(`/api/storage/breakdown${q}`, {
+    headers: cloudDeviceHeaders(deviceId),
+  });
+}
+
 function currentYantaCloudDeviceId() {
   try {
     return (

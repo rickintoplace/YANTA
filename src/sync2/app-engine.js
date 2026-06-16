@@ -594,6 +594,33 @@ export class Sync2AppEngine {
     });
   }
 
+  markUploadBlocked(err) {
+    if (err?.status === 429 || err?.code === 'ERATE_LIMIT') {
+      this.markUploadRateLimited(err);
+      return;
+    }
+
+    if (err?.code === 'EQUOTA') {
+      const retryMs =
+        Number(err?.retryAfterMs || 0) > 0
+          ? Number(err.retryAfterMs)
+          : 60 * 60 * 1000;
+
+      this.uploadBlockedUntil = Date.now() + retryMs;
+
+      this.progress({
+        phase: 'error',
+        status: 'error',
+        direction: 'up',
+        message: 'Cloud storage quota exceeded. Run cloud storage compaction or upgrade storage.',
+      });
+
+      return;
+    }
+
+    this.uploadBlockedUntil = 0;
+  }
+
   assertUploadNotBlocked() {
     if (!this.uploadBlockedUntil) return;
 
@@ -1376,7 +1403,11 @@ export class Sync2AppEngine {
         Sonst hämmert der Client nach einem 429 direkt weiter und erzeugt
         object?path=...00001202, 00001203, ...
       */
-      if (err?.status !== 429 && err?.code !== 'ERATE_LIMIT') {
+      if (
+        err?.status !== 429 &&
+        err?.code !== 'ERATE_LIMIT' &&
+        err?.code !== 'EQUOTA'
+      ) {
         try {
           await this.uploadOutbox();
         } catch {}
@@ -1533,8 +1564,12 @@ export class Sync2AppEngine {
             continue;
           }
 
-          if (err?.status === 429 || err?.code === 'ERATE_LIMIT') {
-            this.markUploadRateLimited(err);
+          if (
+            err?.status === 429 ||
+            err?.code === 'ERATE_LIMIT' ||
+            err?.code === 'EQUOTA'
+          ) {
+            this.markUploadBlocked(err);
           }
 
           throw err;

@@ -5,7 +5,7 @@
 // User data is in IndexedDB/Yjs, not in this cache.
 // ============================================================
 
-const CACHE_VERSION = 'yanta-app-v5';
+const CACHE_VERSION = 'yanta-app-v6';
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -18,7 +18,8 @@ const APP_SHELL = [
   '/favicon-32x32.png',
   '/apple-touch-icon.png',
   '/android-chrome-192x192.png',
-  '/android-chrome-512x512.png'
+  '/android-chrome-512x512.png',
+  '/boot-appearance.js',
 ];
 
 self.addEventListener('install', (event) => {

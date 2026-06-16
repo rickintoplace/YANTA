@@ -5328,16 +5328,18 @@ async function exportDrawingPdf(noteId, drawingId) {
       </head>
       <body>
         ${data}
-        <script>
-          window.onload = () => {
-            setTimeout(() => window.print(), 150);
-          };
-        </script>
       </body>
     </html>
   `);
 
   win.document.close();
+
+  window.setTimeout(() => {
+    try {
+      win.focus();
+      win.print();
+    } catch {}
+  }, 200);
 
   toast('Use print dialog to save as PDF', 'success');
 }

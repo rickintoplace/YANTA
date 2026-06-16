@@ -53,6 +53,148 @@ let statusEl = null;
 let turnstileToken = '';
 let turnstileWidgetId = null;
 
+let cloudUsageTooltipEl = null;
+
+function ensureCloudUsageTooltip() {
+  if (cloudUsageTooltipEl) return cloudUsageTooltipEl;
+
+  cloudUsageTooltipEl = document.createElement('div');
+  cloudUsageTooltipEl.className = 'yanta-cloud-usage-floating-tooltip';
+  cloudUsageTooltipEl.hidden = true;
+
+  document.body.append(cloudUsageTooltipEl);
+
+  return cloudUsageTooltipEl;
+}
+
+function hideCloudUsageTooltip() {
+  if (!cloudUsageTooltipEl) return;
+
+  cloudUsageTooltipEl.hidden = true;
+  cloudUsageTooltipEl.textContent = '';
+}
+
+function positionCloudUsageTooltip(anchor, {
+  clientX = null,
+  clientY = null,
+} = {}) {
+  const tooltip = ensureCloudUsageTooltip();
+
+  if (!anchor || tooltip.hidden) return;
+
+  const anchorRect = anchor.getBoundingClientRect();
+
+  const preferredX =
+    Number.isFinite(clientX)
+      ? clientX
+      : anchorRect.left + anchorRect.width / 2;
+
+  const preferredY =
+    Number.isFinite(clientY)
+      ? clientY
+      : anchorRect.top;
+
+  const margin = 10;
+  const gap = 10;
+
+  const tooltipRect = tooltip.getBoundingClientRect();
+
+  let left = preferredX - tooltipRect.width / 2;
+  let top = preferredY - tooltipRect.height - gap;
+
+  if (top < margin) {
+    top = anchorRect.bottom + gap;
+  }
+
+  if (left < margin) {
+    left = margin;
+  }
+
+  if (left + tooltipRect.width > window.innerWidth - margin) {
+    left = window.innerWidth - tooltipRect.width - margin;
+  }
+
+  if (top + tooltipRect.height > window.innerHeight - margin) {
+    top = Math.max(margin, window.innerHeight - tooltipRect.height - margin);
+  }
+
+  tooltip.style.left = `${Math.round(left)}px`;
+  tooltip.style.top = `${Math.round(top)}px`;
+}
+
+function showCloudUsageTooltip(anchor, {
+  clientX = null,
+  clientY = null,
+} = {}) {
+  const text =
+    anchor?.dataset?.cloudUsageTip ||
+    anchor?.dataset?.tip ||
+    anchor?.getAttribute?.('title') ||
+    '';
+
+  if (!text) return;
+
+  const tooltip = ensureCloudUsageTooltip();
+
+  tooltip.textContent = text;
+  tooltip.hidden = false;
+
+  positionCloudUsageTooltip(anchor, {
+    clientX,
+    clientY,
+  });
+}
+
+function bindCloudUsageTooltips(root = modal) {
+  if (!root || root.dataset.cloudUsageTooltipBound === '1') return;
+
+  root.dataset.cloudUsageTooltipBound = '1';
+
+  root.addEventListener('pointerenter', (e) => {
+    const target = e.target?.closest?.('[data-cloud-usage-tip]');
+    if (!target || !root.contains(target)) return;
+
+    showCloudUsageTooltip(target, {
+      clientX: e.clientX,
+      clientY: e.clientY,
+    });
+  }, true);
+
+  root.addEventListener('pointermove', (e) => {
+    const target = e.target?.closest?.('[data-cloud-usage-tip]');
+    if (!target || !root.contains(target)) return;
+
+    positionCloudUsageTooltip(target, {
+      clientX: e.clientX,
+      clientY: e.clientY,
+    });
+  }, true);
+
+  root.addEventListener('pointerleave', (e) => {
+    const target = e.target?.closest?.('[data-cloud-usage-tip]');
+    if (!target || !root.contains(target)) return;
+
+    hideCloudUsageTooltip();
+  }, true);
+
+  root.addEventListener('focusin', (e) => {
+    const target = e.target?.closest?.('[data-cloud-usage-tip]');
+    if (!target || !root.contains(target)) return;
+
+    showCloudUsageTooltip(target);
+  });
+
+  root.addEventListener('focusout', (e) => {
+    const target = e.target?.closest?.('[data-cloud-usage-tip]');
+    if (!target || !root.contains(target)) return;
+
+    hideCloudUsageTooltip();
+  });
+
+  window.addEventListener('scroll', hideCloudUsageTooltip, true);
+  window.addEventListener('resize', hideCloudUsageTooltip);
+}
+
 const TURNSTILE_SITE_KEY =
   import.meta.env.VITE_TURNSTILE_SITE_KEY || '';
 
@@ -64,6 +206,8 @@ function setStatus(msg = '', type = '') {
 }
 
 function close() {
+  hideCloudUsageTooltip();
+
   if (modal) modal.hidden = true;
 }
 
@@ -370,6 +514,150 @@ function ensureCss() {
   color: var(--accent);
   margin-top: 1px;
 }
+
+.yanta-cloud-usage-bar.segmented {
+  display: flex;
+  align-items: stretch;
+  overflow: visible;
+  height: 9px;
+}
+
+.yanta-cloud-usage-bar.segmented > span {
+  position: relative;
+  inset: auto;
+  min-width: 0;
+  width: var(--segment-pct, 0%);
+  height: 100%;
+  flex: 0 0 var(--segment-pct, 0%);
+  background: var(--segment-color, var(--accent));
+  border-radius: 0;
+}
+
+.yanta-cloud-usage-bar.segmented > span:first-child {
+  border-top-left-radius: 999px;
+  border-bottom-left-radius: 999px;
+}
+
+.yanta-cloud-usage-bar.segmented > span:last-child {
+  border-top-right-radius: 999px;
+  border-bottom-right-radius: 999px;
+}
+
+.yanta-cloud-usage-segment {
+  cursor: help;
+}
+
+.yanta-cloud-usage-segment::before {
+  content: "";
+
+  position: absolute;
+  inset: -5px 0;
+
+  border-radius: 999px;
+
+  opacity: 0;
+  background: color-mix(in srgb, white 24%, transparent);
+
+  transition: opacity 100ms ease;
+}
+
+.yanta-cloud-usage-segment:hover::before {
+  opacity: 1;
+}
+
+@media (hover: none), (pointer: coarse) {
+  .yanta-cloud-usage-segment::after {
+    display: none;
+  }
+}
+
+/* Old in-bar pseudo tooltip disabled.
+   Tooltips are rendered in document.body so they are not clipped by modal overflow. */
+.yanta-cloud-usage-segment::after {
+  display: none !important;
+}
+
+.yanta-cloud-usage-segment {
+  cursor: help;
+  outline: none;
+}
+
+.yanta-cloud-usage-segment::before {
+  content: "";
+
+  position: absolute;
+  inset: -5px 0;
+
+  border-radius: 999px;
+
+  opacity: 0;
+  background: color-mix(in srgb, white 24%, transparent);
+
+  transition: opacity 100ms ease;
+}
+
+.yanta-cloud-usage-segment:hover::before,
+.yanta-cloud-usage-segment:focus-visible::before {
+  opacity: 1;
+}
+
+.yanta-cloud-usage-segment:focus-visible {
+  box-shadow:
+    0 0 0 2px var(--bg-elev),
+    0 0 0 4px var(--accent);
+  z-index: 2;
+}
+
+.yanta-cloud-usage-floating-tooltip {
+  position: fixed;
+  z-index: 2000;
+
+  max-width: min(340px, calc(100vw - 24px));
+  padding: 8px 10px;
+
+  border: 1px solid var(--border);
+  border-radius: 10px;
+
+  background: var(--bg-elev-3);
+  color: var(--text);
+
+  box-shadow:
+    0 16px 48px rgba(0,0,0,0.42),
+    0 1px 0 rgba(255,255,255,0.05) inset;
+
+  font-size: 11px;
+  line-height: 1.4;
+  white-space: normal;
+
+  pointer-events: none;
+
+  opacity: 1;
+  transform: translateZ(0);
+
+  animation: yanta-cloud-usage-tooltip-in 100ms ease;
+}
+
+.yanta-cloud-usage-floating-tooltip[hidden] {
+  display: none !important;
+}
+
+@keyframes yanta-cloud-usage-tooltip-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (hover: none), (pointer: coarse) {
+  .yanta-cloud-usage-floating-tooltip {
+    display: none;
+  }
+}
 `;
   document.head.append(style);
 }
@@ -618,16 +906,119 @@ function pctClass(pct) {
   return '';
 }
 
+function storageBreakdownLabel(group) {
+  const map = {
+    'vault updates': 'Vault update history',
+    'vault snapshots': 'Vault snapshots',
+    'note updates': 'Note update history',
+    'note snapshots': 'Note snapshots',
+    assets: 'Assets',
+    other: 'Other',
+  };
+
+  return map[group] || group || 'Other';
+}
+
+function storageBreakdownCaption(group) {
+  const map = {
+    'vault updates': 'Historical metadata updates covered by snapshots after compaction.',
+    'vault snapshots': 'Full encrypted vault metadata snapshots.',
+    'note updates': 'Historical encrypted note-body updates.',
+    'note snapshots': 'Full encrypted note-body snapshots.',
+    assets: 'Encrypted images/drawing assets.',
+    other: 'Bootstrap/keycheck or unknown sync objects.',
+  };
+
+  return map[group] || '';
+}
+
+function storageBreakdownColor(group) {
+  const map = {
+    'vault updates': 'var(--yellow)',
+    'vault snapshots': 'var(--accent)',
+    'note updates': 'var(--accent-2)',
+    'note snapshots': 'var(--green)',
+    assets: 'var(--red)',
+    other: 'var(--text-faint)',
+  };
+
+  return map[group] || 'var(--text-faint)';
+}
+
+function normalizedStorageBreakdownSegments(breakdown, storageLimitBytes) {
+  const groups = Array.isArray(breakdown?.groups)
+    ? breakdown.groups
+    : [];
+
+  const limit = Number(storageLimitBytes || 0);
+
+  if (!groups.length || limit <= 0) return [];
+
+  return groups
+    .filter((group) => Number(group.bytes || 0) > 0)
+    .map((group) => {
+      const bytes = Number(group.bytes || 0);
+      const count = Number(group.count || 0);
+      const pct = Math.max(0, Math.min(100, (bytes / limit) * 100));
+
+      return {
+        group: group.group || 'other',
+        label: storageBreakdownLabel(group.group),
+        caption: storageBreakdownCaption(group.group),
+        bytes,
+        count,
+        pct,
+        color: storageBreakdownColor(group.group),
+      };
+    })
+    .sort((a, b) => b.bytes - a.bytes);
+}
+
 function usageBarHtml({
   label,
   used,
   limit,
   formatter = fmtBytesCompact,
   caption = '',
+  segments = null,
 }) {
   const u = Number(used || 0);
   const l = Number(limit || 0);
   const pct = l > 0 ? Math.max(0, Math.min(100, Math.round((u / l) * 100))) : 0;
+
+  const hasSegments = Array.isArray(segments) && segments.length > 0;
+
+  const barHtml = hasSegments
+    ? `
+      <div
+        class="yanta-cloud-usage-bar segmented"
+        style="--usage-pct:${pct}%;--usage-min:${u > 0 ? '4px' : '0px'}"
+        aria-label="${escapeHtml(label)} breakdown">
+        ${segments.map((segment) => {
+          const title = [
+            segment.label,
+            `${formatter(segment.bytes)} · ${segment.count} object${segment.count === 1 ? '' : 's'}`,
+            segment.caption,
+          ].filter(Boolean).join('\n');
+
+          return `
+            <span
+              class="yanta-cloud-usage-segment"
+              tabindex="0"
+              role="img"
+              aria-label="${escapeHtml(`${segment.label}: ${formatter(segment.bytes)} · ${segment.count} object${segment.count === 1 ? '' : 's'}`)}"
+              style="--segment-pct:${segment.pct}%;--segment-color:${segment.color}"
+              data-cloud-usage-tip="${escapeHtml(`${segment.label}: ${formatter(segment.bytes)} · ${segment.count} object${segment.count === 1 ? '' : 's'}${segment.caption ? ` · ${segment.caption}` : ''}`)}">
+            </span>
+          `;
+        }).join('')}
+      </div>
+    `
+    : `
+      <div class="yanta-cloud-usage-bar" style="--usage-pct:${pct}%;--usage-min:${u > 0 ? '4px' : '0px'}">
+        <span></span>
+      </div>
+    `;
 
   return `
     <div class="yanta-cloud-usage-row ${pctClass(pct)}">
@@ -638,9 +1029,7 @@ function usageBarHtml({
         </span>
       </div>
 
-      <div class="yanta-cloud-usage-bar" style="--usage-pct:${pct}%;--usage-min:${u > 0 ? '4px' : '0px'}">
-        <span></span>
-      </div>
+      ${barHtml}
 
       ${
         caption
@@ -651,11 +1040,20 @@ function usageBarHtml({
   `;
 }
 
-function usageBarsHtml(me) {
+function usageBarsHtml(me, storageBreakdown = null) {
   const usage = me.usage || {};
   const limits = me.limits || {};
   const plan = me.user?.plan || 'free';
   const countFmt = (n) => String(Number(n || 0).toLocaleString());
+
+  const storageSegments = normalizedStorageBreakdownSegments(
+    storageBreakdown,
+    limits.storageBytes
+  );
+
+  const storageCaption = storageSegments.length
+    ? 'Hover the colored sections to see what uses storage. Compaction mainly reduces update history.'
+    : 'Encrypted vault objects stored in YANTA Cloud. Breakdown loads after device/vault verification.';
 
   return `
     <div class="yanta-cloud-usage-list">
@@ -668,7 +1066,8 @@ function usageBarsHtml(me) {
         label: 'Storage',
         used: usage.storage_bytes,
         limit: limits.storageBytes,
-        caption: 'Encrypted vault objects stored in YANTA Cloud.',
+        caption: storageCaption,
+        segments: storageSegments,
       })}
 
       ${usageBarHtml({
@@ -701,30 +1100,34 @@ function usageBarsHtml(me) {
   `;
 }
 
-function storageBreakdownLabel(group) {
-  const map = {
-    'vault updates': 'Vault update history',
-    'vault snapshots': 'Vault snapshots',
-    'note updates': 'Note update history',
-    'note snapshots': 'Note snapshots',
-    assets: 'Assets',
-    other: 'Other',
-  };
+async function hydrateUsageWithStorageBreakdown({
+  me,
+  vaultId,
+  currentDeviceId,
+} = {}) {
+  const host = modal?.querySelector('[data-cloud-usage-section]');
+  if (!host) return;
 
-  return map[group] || group || 'Other';
-}
+  if (!vaultId || !currentDeviceId) {
+    host.innerHTML = usageBarsHtml(me, null);
+    return;
+  }
 
-function storageBreakdownCaption(group) {
-  const map = {
-    'vault updates': 'Historical metadata updates. These are safe to compact after a fresh snapshot.',
-    'vault snapshots': 'Full encrypted vault metadata snapshots.',
-    'note updates': 'Historical note-body updates.',
-    'note snapshots': 'Full encrypted note-body snapshots.',
-    assets: 'Encrypted image/drawing asset blobs.',
-    other: 'Bootstrap/keycheck or unknown sync objects.',
-  };
+  try {
+    const breakdown = await cloudStorageBreakdown(vaultId, {
+      deviceId: currentDeviceId,
+    });
 
-  return map[group] || '';
+    if (!host.isConnected) return;
+
+    host.innerHTML = usageBarsHtml(me, breakdown);
+  } catch (err) {
+    console.warn('[YANTA Cloud] storage breakdown failed', err);
+
+    if (!host.isConnected) return;
+
+    host.innerHTML = usageBarsHtml(me, null);
+  }
 }
 
 function storageBreakdownHtml(breakdown) {
@@ -1124,13 +1527,8 @@ async function renderCloudHome(me) {
 
     <section class="yanta-cloud-section">
       <h4>Usage</h4>
-      ${usageBarsHtml(me)}
-    </section>
-
-    <section class="yanta-cloud-section">
-      <h4>Storage breakdown</h4>
-      <div data-storage-breakdown>
-        <div class="tree-empty">Loading storage breakdown…</div>
+      <div data-cloud-usage-section>
+        ${usageBarsHtml(me)}
       </div>
     </section>
 
@@ -1277,7 +1675,10 @@ ${
 
   statusEl = modal.querySelector('[data-status]');
 
-  hydrateStorageBreakdown({
+  bindCloudUsageTooltips(modal);
+
+  hydrateUsageWithStorageBreakdown({
+    me,
     vaultId: configuredVaultId,
     currentDeviceId,
   }).catch(() => {});

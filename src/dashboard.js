@@ -4269,7 +4269,9 @@ function bindCardPointerInteractions(card, item) {
     pressTimer = 0;
   };
 
-  const selectInPlace = () => {
+  const selectInPlace = ({
+    syncMultiSelect = false,
+  } = {}) => {
     dashboard.selectedKey = key;
 
     root
@@ -4284,6 +4286,16 @@ function bindCardPointerInteractions(card, item) {
       card.focus({ preventScroll: true });
     } catch {
       card.focus();
+    }
+
+    if (syncMultiSelect) {
+      window.dispatchEvent(new CustomEvent('yanta-dashboard-select-key', {
+        detail: {
+          key,
+          mode: 'only',
+          source: 'dashboard-longpress',
+        },
+      }));
     }
   };
 
@@ -4341,23 +4353,57 @@ function bindCardPointerInteractions(card, item) {
       eventHeader,
     };
 
+    const isTouchLike =
+      pointerType === 'touch' ||
+      pointerType === 'pen';
+
     clearPress();
 
-    e.preventDefault();
-    e.stopPropagation();
+    /*
+      Desktop: wir übernehmen die Geste sofort.
+      Mobile/Touch: NICHT preventDefault(), NICHT capture.
+      Sonst kann der Browser kein natives Scrollen starten.
+    */
+    if (!isTouchLike) {
+      e.preventDefault();
+      e.stopPropagation();
 
-    try {
-      card.setPointerCapture?.(e.pointerId);
-    } catch {}
+      try {
+        card.setPointerCapture?.(e.pointerId);
+      } catch {}
+    } else {
+      /*
+        StopPropagation ist optional.
+        Wichtig ist: kein preventDefault und kein pointer capture.
+      */
+      e.stopPropagation();
+    }
 
     pressTimer = window.setTimeout(() => {
       if (!active || active.pointerId !== e.pointerId) return;
       if (active.scrolling || active.dragStarted) return;
 
       active.longPressed = true;
-      selectInPlace();
+
+      selectInPlace({
+        syncMultiSelect:
+          pointerType === 'mouse' &&
+          !isMobile(),
+      });
 
       dashboard.suppressOpenUntil = performance.now() + 600;
+
+      /*
+        Ab jetzt ist es keine Scroll-Geste mehr, sondern Selection/Drag.
+        Jetzt darf YANTA die Pointer-Geste übernehmen.
+      */
+      try {
+        card.setPointerCapture?.(e.pointerId);
+      } catch {}
+
+      try {
+        navigator.vibrate?.(10);
+      } catch {}
     }, LONG_PRESS_MS);
 
     document.addEventListener('pointermove', onDocumentPendingMove, true);
@@ -4412,21 +4458,15 @@ function bindCardPointerInteractions(card, item) {
     if (!canStartDrag) {
       clearPress();
 
-      active.scrolling = true;
-      active.lastScrollY = active.downY;
+      /*
+        Mobile SaaS-UX:
+        Finger bewegt sich vor Long-Press => das ist Scrollen.
+        YANTA gibt die Geste vollständig frei.
+      */
+      dashboard.suppressOpenUntil = performance.now() + 250;
 
-      root?.classList.add('is-touch-scrolling');
+      cleanupPending();
 
-      e.preventDefault();
-      e.stopPropagation();
-
-      if (root) {
-        const delta = active.lastScrollY - e.clientY;
-        root.scrollBy(0, delta);
-      }
-
-      active.lastScrollY = e.clientY;
-      dashboard.suppressOpenUntil = performance.now() + 350;
       return;
     }
 
@@ -4814,6 +4854,8 @@ function prepareDashboardGridForDragAnimation(grid) {
 
 function startCardDrag(card, item, e) {
   if (dashboard.dragging) return;
+
+  window.dispatchEvent(new CustomEvent('yanta-close-dashboard-context-menu'));
 
   const grid = card.closest('.yanta-dashboard-grid');
   if (!grid) return;

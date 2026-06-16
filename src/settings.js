@@ -1033,7 +1033,7 @@ onclick: async () => {
         confirmLabel: 'Reset appearance',
         danger: true,
       });
-      
+
       if (!ok) return;
       appearance = deepMerge(DEFAULT_APPEARANCE, { deviceOnly: a.deviceOnly });
       await saveAppearance({}, { reason: 'reset' });
@@ -2105,7 +2105,7 @@ function renderCalendarSection(host) {
         confirmLabel: 'Reset calendar settings',
         danger: true,
       });
-      
+
       if (!ok) return;
 
       await resetCalendarPreferences();
@@ -2307,7 +2307,6 @@ function renderYantaCloudSyncPrimaryCard() {
       </div>
 
       <div class="yanta-sync-card-points">
-        <span>${lucide('check', 13)} No Google Drive setup required</span>
         <span>${lucide('check', 13)} Encrypted before leaving this device</span>
         <span>${lucide('check', 13)} Use your Sync Key or QR code to connect devices</span>
       </div>
@@ -2613,7 +2612,7 @@ function renderAboutSection(host) {
         confirmLabel: 'Reset settings',
         danger: true,
       });
-      
+
       if (!ok) return;
       clearDeviceSettings();
       await clearSyncedSettings();
@@ -2670,8 +2669,8 @@ function injectSettingsCss() {
   style.textContent = `
 .yanta-settings-modal .yanta-settings-card {
   width: min(880px, 96vw);
-  height: min(720px, 92vh);
-  max-height: 92vh;
+  // height: min(720px, 92vh);
+  // max-height: 92vh;
   display: flex;
   flex-direction: column;
 }
@@ -3581,7 +3580,7 @@ function injectSettingsCss() {
   .yanta-settings-field .text-input {
     margin: 0;
   }
-    
+
 }
 /* AI settings mirrored inside Main Settings */
 .yanta-ai-main-settings-mirror {

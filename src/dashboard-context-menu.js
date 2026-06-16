@@ -38,6 +38,7 @@ import {
   import {
     renderTree,
     showMenu,
+    closeMenu,
   } from './tree.js';
   
   import {
@@ -62,6 +63,103 @@ import {
 
   let initialized = false;
   
+  const MOBILE_CONTEXT_MOVE_DISMISS_PX = 10;
+  const MOBILE_MQ = window.matchMedia('(max-width: 880px)');
+
+  let lastCardPointerDown = null;
+  let activeContextMenuGesture = null;
+
+  function isMobileViewport() {
+    return MOBILE_MQ.matches;
+  }
+
+  function rememberCardPointerDown(e) {
+    if (!dashboardVisible()) return;
+
+    const target = e.target instanceof Element ? e.target : null;
+    if (!target) return;
+
+    const root = dashboardRoot();
+    if (!root || !root.contains(target)) return;
+
+    const card = cardFromTarget(target);
+    if (!card) return;
+
+    if (interactiveTarget(target)) return;
+
+    const key = card.dataset.key || '';
+    if (!key) return;
+
+    lastCardPointerDown = {
+      pointerId: e.pointerId,
+      pointerType: e.pointerType || '',
+      key,
+      x: e.clientX,
+      y: e.clientY,
+      t: performance.now(),
+    };
+  }
+
+  function armContextMenuDragDismiss(key) {
+    if (!isMobileViewport()) return;
+
+    const p = lastCardPointerDown;
+
+    if (!p) return;
+    if (p.key !== key) return;
+    if (p.pointerType !== 'touch' && p.pointerType !== 'pen') return;
+    if (performance.now() - p.t > 1800) return;
+
+    disarmContextMenuDragDismiss();
+
+    activeContextMenuGesture = {
+      ...p,
+    };
+
+    document.addEventListener('pointermove', onContextMenuGestureMove, {
+      capture: true,
+      passive: true,
+    });
+
+    document.addEventListener('pointerup', disarmContextMenuDragDismiss, true);
+    document.addEventListener('pointercancel', disarmContextMenuDragDismiss, true);
+  }
+
+  function disarmContextMenuDragDismiss() {
+    document.removeEventListener('pointermove', onContextMenuGestureMove, true);
+    document.removeEventListener('pointerup', disarmContextMenuDragDismiss, true);
+    document.removeEventListener('pointercancel', disarmContextMenuDragDismiss, true);
+
+    activeContextMenuGesture = null;
+  }
+
+  function onContextMenuGestureMove(e) {
+    const g = activeContextMenuGesture;
+    if (!g) return;
+    if (e.pointerId !== g.pointerId) return;
+
+    const moved = Math.hypot(
+      e.clientX - g.x,
+      e.clientY - g.y
+    );
+
+    if (moved < MOBILE_CONTEXT_MOVE_DISMISS_PX) return;
+
+    closeMenu();
+    disarmContextMenuDragDismiss();
+
+    window.dispatchEvent(new CustomEvent('yanta-dashboard-context-menu-dismissed-for-drag', {
+      detail: {
+        key: g.key,
+      },
+    }));
+  }
+
+  function closeDashboardContextMenuForDrag() {
+    closeMenu();
+    disarmContextMenuDragDismiss();
+  }
+
   function dashboardRoot() {
     return document.getElementById('dashboard');
   }
@@ -1154,6 +1252,7 @@ import {
         isDashboardKeySelected(key)
       ) {
         menuAt(e, buildBulkMenu(selectedKeys));
+        armContextMenuDragDismiss(key);
         return;
       }
   
@@ -1166,6 +1265,7 @@ import {
         if (!note) return;
   
         menuAt(e, await buildNoteMenu(note));
+        armContextMenuDragDismiss(key);
         return;
       }
   
@@ -1174,6 +1274,7 @@ import {
         if (!folder) return;
   
         menuAt(e, buildFolderMenu(folder));
+        armContextMenuDragDismiss(key);
         return;
       }
   
@@ -1186,6 +1287,11 @@ import {
   export function setupDashboardContextMenu() {
     if (initialized) return;
     initialized = true;
+
+    document.addEventListener('pointerdown', rememberCardPointerDown, {
+      capture: true,
+      passive: true,
+    });
   
     document.addEventListener('contextmenu', (e) => {
       handleDashboardContextMenu(e).catch((err) => {
@@ -1193,4 +1299,8 @@ import {
         toast('Context menu failed', 'error');
       });
     }, true);
+
+    window.addEventListener('yanta-close-dashboard-context-menu', () => {
+      closeDashboardContextMenuForDrag();
+    });
   }

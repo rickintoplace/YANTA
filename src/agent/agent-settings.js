@@ -17,7 +17,7 @@ const DEFAULT_AGENT_SETTINGS = {
     allowReadNotes: true,
     allowCreateNotes: true,
     allowEditNotes: true,
-    allowDeleteNotes: false,
+    allowDeleteNotes: true,
     allowManageCalendar: true,
   },
 

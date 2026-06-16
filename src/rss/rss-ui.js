@@ -1871,7 +1871,6 @@ function injectCss() {
 }
 
 .yanta-rss-tab:hover {
-  transform: translateY(-1px);
   color: var(--text);
   border-color: var(--border-strong);
 }
@@ -1923,7 +1922,7 @@ function injectCss() {
   padding: 10px;
   margin-bottom: 8px;
 
-  border: 1px solid var(--border);
+  border: none;
   border-radius: 13px;
 
   background: var(--bg-elev-2);
@@ -1937,6 +1936,8 @@ function injectCss() {
   background: transparent;
   padding: 0;
 
+  transform: translateY(0px);
+
   animation: yanta-rss-card-in 150ms cubic-bezier(.2,.8,.2,1);
 
   transition:
@@ -1947,7 +1948,6 @@ function injectCss() {
 }
 
 .yanta-rss-item:hover {
-  transform: translateY(-1px);
   border-color: var(--border-strong);
   background: var(--bg-elev-3);
 }

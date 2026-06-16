@@ -697,7 +697,7 @@ export function renderAiSettingsPanel(panel) {
         ${permissionCheckboxHtml('allowReadNotes', 'Allow assistant to read notes', 'Recommended', p.allowReadNotes)}
         ${permissionCheckboxHtml('allowCreateNotes', 'Allow assistant to create notes', 'Recommended', p.allowCreateNotes)}
         ${permissionCheckboxHtml('allowEditNotes', 'Allow assistant to edit notes', 'Recommended', p.allowEditNotes)}
-        ${permissionCheckboxHtml('allowDeleteNotes', 'Allow assistant to delete notes', 'Not recommended', p.allowDeleteNotes)}
+        ${permissionCheckboxHtml('allowDeleteNotes', 'Allow assistant to delete notes', 'Recommended', p.allowDeleteNotes)}
         ${permissionCheckboxHtml('allowManageCalendar', 'Allow assistant to manage calendar events', 'Recommended', p.allowManageCalendar)}
         ${permissionCheckboxHtml('allowReadAiBrain', 'Allow assistant to read AI Brain', 'Recommended', p.allowReadAiBrain)}
         ${permissionCheckboxHtml('allowWriteAiBrain', 'Allow assistant to write AI Brain', 'Recommended', p.allowWriteAiBrain)}

@@ -162,7 +162,34 @@
     Dann kommt nach Long-Press + vertikalem Ziehen oft kein Drag mehr an.
     Wir setzen hier none und implementieren Scroll während Pending-Touch in JS.
   */
+  /* touch-action: none; */
+}
+
+.dashboard {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior-y: contain;
+}
+
+.yanta-dashboard-grid .yanta-dash-card,
+.yanta-dash-card {
+  touch-action: pan-y;
+  -webkit-touch-callout: none;
+}
+
+/* Nur echte Gesture-Zonen blockieren natives Scrollen */
+.yanta-dash-resize-handle,
+.yanta-dash-card.drag-clone {
   touch-action: none;
+}
+
+/* Interaktive Buttons sollen schnell klicken, aber nicht Scroll blockieren */
+.yanta-dash-action-btn {
+  touch-action: manipulation;
+}
+
+/* Event-Header sollte ebenfalls Scroll erlauben */
+.yanta-dash-event-header {
+  touch-action: pan-y;
 }
 
 @media (min-width: 720px) {
@@ -1957,4 +1984,21 @@
 
 .yanta-dash-card.drag-clone {
   cursor: grabbing;
+}
+
+/* ============================================================
+   Mobile dashboard UX:
+   In-card action bars are desktop affordances.
+   On mobile they are redundant with context menu / bulk tray and
+   too cramped for narrow cards.
+   ============================================================ */
+
+@media (max-width: 880px) {
+  #dashboard .yanta-dash-card .yanta-dash-card-actions,
+  #dashboard .yanta-dash-card.selected .yanta-dash-card-actions,
+  #dashboard .yanta-dash-card.resizing .yanta-dash-card-actions {
+    display: none !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
+  }
 }

@@ -64,6 +64,7 @@ import {
   
   let pendingCardPointer = null;
   let pendingTouchLongPress = null;
+  let pendingBlankSelectionTap = null;
   let pendingRectStart = null;
   let activeRect = null;
   
@@ -189,6 +190,64 @@ import {
         '.yanta-dash-card-actions',
         '.yanta-dashboard-selection-tray',
         '.yanta-dashboard-popover',
+      ].join(',')
+    );
+  }
+
+  function isBlankDashboardAreaTarget(target) {
+    const node = target instanceof Element ? target : null;
+    const r = root();
+
+    if (!node || !r || !r.contains(node)) return false;
+
+    /*
+      Nicht als "blank" behandeln:
+      - Cards
+      - Controls
+      - Popovers / Menüs / Trays
+      - Inline editing
+      - Modals
+    */
+    if (
+      node.closest?.(
+        [
+          '.yanta-dash-card',
+          '.yanta-dash-card-clone',
+          '.drag-clone',
+          '.yanta-inline-edit',
+          '.yanta-dashboard-selection-tray',
+          '.yanta-dashboard-popover',
+          '.ctx-menu',
+          '.modal',
+          'button',
+          'input',
+          'textarea',
+          'select',
+          'a',
+          'iframe',
+          '[contenteditable="true"]',
+        ].join(',')
+      )
+    ) {
+      return false;
+    }
+
+    /*
+      Header nicht als blank tap behandeln.
+      Dort liegen Navigation, Breadcrumbs, Search/Create etc.
+    */
+    if (node.closest?.('.yanta-dashboard-head')) {
+      return false;
+    }
+
+    return !!node.closest?.(
+      [
+        '#dashboard',
+        '.dashboard',
+        '.yanta-dashboard-page',
+        '.yanta-dashboard-body',
+        '.yanta-dashboard-grid',
+        '.yanta-side-pane-body',
       ].join(',')
     );
   }
@@ -657,6 +716,88 @@ import {
     cleanupActiveRect({ revert: true });
   }
   
+  // ============================================================
+  // Blank tap clears selection
+  // ============================================================
+
+  function beginBlankSelectionTap(e) {
+    pendingBlankSelectionTap = {
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      pointerType: e.pointerType || '',
+    };
+
+    document.addEventListener('pointermove', onBlankSelectionTapMove, true);
+    document.addEventListener('pointerup', onBlankSelectionTapUp, true);
+    document.addEventListener('pointercancel', onBlankSelectionTapCancel, true);
+  }
+
+  function cleanupBlankSelectionTap() {
+    document.removeEventListener('pointermove', onBlankSelectionTapMove, true);
+    document.removeEventListener('pointerup', onBlankSelectionTapUp, true);
+    document.removeEventListener('pointercancel', onBlankSelectionTapCancel, true);
+
+    pendingBlankSelectionTap = null;
+  }
+
+  function onBlankSelectionTapMove(e) {
+    if (!pendingBlankSelectionTap) return;
+    if (e.pointerId !== pendingBlankSelectionTap.pointerId) return;
+
+    const moved = Math.hypot(
+      e.clientX - pendingBlankSelectionTap.startX,
+      e.clientY - pendingBlankSelectionTap.startY
+    );
+
+    /*
+      Bewegung bedeutet Scroll/Pan, kein intentionaler blank tap.
+      Wichtig: kein preventDefault, damit Mobile-Scroll nativ bleibt.
+    */
+    if (moved > MOVE_CANCEL_PX) {
+      cleanupBlankSelectionTap();
+    }
+  }
+
+  function onBlankSelectionTapUp(e) {
+    if (!pendingBlankSelectionTap) return;
+    if (e.pointerId !== pendingBlankSelectionTap.pointerId) return;
+
+    const snap = pendingBlankSelectionTap;
+
+    cleanupBlankSelectionTap();
+
+    const moved = Math.hypot(
+      e.clientX - snap.startX,
+      e.clientY - snap.startY
+    );
+
+    if (moved > MOVE_CANCEL_PX) return;
+    if (!selectedKeys.size) return;
+    if (!isBlankDashboardAreaTarget(e.target)) return;
+
+    /*
+      Intentionaler Tap ins Leere:
+      Auswahl aufheben.
+      Wir verhindern den anschließenden Click nur, damit keine darunterliegende
+      Blank-Action / Context-Action nachläuft.
+    */
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation?.();
+
+    clearSelection();
+
+    suppressClickUntil = performance.now() + 250;
+  }
+
+  function onBlankSelectionTapCancel(e) {
+    if (!pendingBlankSelectionTap) return;
+    if (e.pointerId !== pendingBlankSelectionTap.pointerId) return;
+
+    cleanupBlankSelectionTap();
+  }
+
   // ============================================================
   // Card selection gestures
   // ============================================================
@@ -2033,6 +2174,15 @@ import {
     .yanta-dashboard-tray-btn span {
       display: none;
     }
+
+    #dashboard .yanta-dash-card .yanta-dash-card-actions,
+    #dashboard.dashboard-selection-one .yanta-dash-card.bulk-selected .yanta-dash-card-actions,
+    #dashboard.dashboard-selection-one .yanta-dash-card:not(.bulk-selected) .yanta-dash-card-actions,
+    #dashboard.dashboard-selection-many .yanta-dash-card .yanta-dash-card-actions {
+      display: none !important;
+      opacity: 0 !important;
+      pointer-events: none !important;
+    }
   }
   
   @media (prefers-reduced-motion: reduce) {
@@ -2054,6 +2204,21 @@ import {
   function bindSelectionEvents() {
     document.addEventListener('pointerdown', (e) => {
       if (!dashboardVisible()) return;
+
+      /*
+        Mobile / Touch UX:
+        Wenn eine Dashboard-Auswahl existiert und der User bewusst ins Leere tippt,
+        wird die Auswahl aufgehoben.
+        Kein preventDefault hier, damit Scrollen weiterhin nativ funktioniert.
+      */
+      if (
+        selectedKeys.size > 0 &&
+        (e.pointerType === 'touch' || e.pointerType === 'pen' || !isDesktop()) &&
+        isBlankDashboardAreaTarget(e.target)
+      ) {
+        beginBlankSelectionTap(e);
+        return;
+      }
   
       if (canStartRect(e)) {
         beginPendingRect(e);
@@ -2149,6 +2314,7 @@ import {
       removeStaleRectangles();
       clearTouchLongPress();
       cleanupCardPointer();
+      cleanupBlankSelectionTap();
     });
   
     document.addEventListener('visibilitychange', () => {
@@ -2158,6 +2324,7 @@ import {
         removeStaleRectangles();
         clearTouchLongPress();
         cleanupCardPointer();
+        cleanupBlankSelectionTap();
       }
     });
   }
@@ -2252,10 +2419,25 @@ export function selectAllVisibleDashboardItems() {
       });
     });
 
-    window.addEventListener('yanta-dashboard-clear-selection', () => {
+    window.addEventListener('yanta-dashboard-select-key', (e) => {
       if (!dashboardVisible()) return;
-    
-      clearSelection();
+
+      const key = String(e.detail?.key || '');
+      if (!key || !keyExists(key)) return;
+
+      const mode = e.detail?.mode || 'only';
+
+      if (mode === 'toggle') {
+        toggleSelection(key);
+        return;
+      }
+
+      if (mode === 'add') {
+        addSelection(key);
+        return;
+      }
+
+      setOnlySelection(key);
     });
   
     window.addEventListener('resize', () => {

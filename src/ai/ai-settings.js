@@ -60,7 +60,7 @@ export const DEFAULT_AI_SETTINGS = {
     allowReadNotes: true,
     allowCreateNotes: true,
     allowEditNotes: true,
-    allowDeleteNotes: false,
+    allowDeleteNotes: true,
     allowManageCalendar: true,
     allowReadAiBrain: true,
     allowWriteAiBrain: true,

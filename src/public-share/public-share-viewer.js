@@ -37,7 +37,14 @@ import {
   yantaAlert,
 } from '../dialogs.js';
 
-const PUBLIC_THEME_KEY = 'yanta.publicShare.theme.v1';
+import {
+  setupPublicShareAppearance,
+  togglePublicShareAppearance,
+  updatePublicShareThemeButtons,
+  sharePublicPage,
+  renderPublicShareCalendarSectionHtml,
+  bindPublicShareCalendarActions,
+} from './public-share-viewer-enhancements.js';
 
 let currentPayload = null;
 let currentImageResolver = null;
@@ -65,39 +72,15 @@ function addPublicSharePageClasses() {
 }
 
 function readPublicTheme() {
-  try {
-    const stored = localStorage.getItem(PUBLIC_THEME_KEY);
-    if (stored === 'light' || stored === 'dark') return stored;
-  } catch {}
-
-  try {
-    return window.matchMedia?.('(prefers-color-scheme: light)')?.matches
-      ? 'light'
-      : 'dark';
-  } catch {
-    return 'dark';
-  }
+  return document.documentElement.dataset.theme || 'dark';
 }
 
-function applyPublicTheme(theme = readPublicTheme()) {
-  const clean = theme === 'light' ? 'light' : 'dark';
-
-  document.documentElement.dataset.theme = clean;
-  document.documentElement.dataset.publicShareTheme = clean;
-
-  try {
-    localStorage.setItem(PUBLIC_THEME_KEY, clean);
-  } catch {}
-
-  return clean;
+function applyPublicTheme() {
+  return document.documentElement.dataset.theme || 'dark';
 }
 
-function togglePublicTheme() {
-  const current = document.documentElement.dataset.publicShareTheme || readPublicTheme();
-  const next = current === 'light' ? 'dark' : 'light';
-
-  applyPublicTheme(next);
-  updateThemeButtons();
+async function togglePublicTheme() {
+  await togglePublicShareAppearance();
 }
 
 function applyPublicAccent(color) {
@@ -121,14 +104,7 @@ function applyPublicAccent(color) {
 }
 
 function updateThemeButtons() {
-  const theme = document.documentElement.dataset.publicShareTheme || readPublicTheme();
-  const icon = theme === 'light' ? 'moon' : 'sun';
-  const label = theme === 'light' ? 'Dark mode' : 'Light mode';
-
-  document.querySelectorAll('[data-yps-theme-toggle]').forEach((btn) => {
-    btn.innerHTML = `${lucide(icon, 15)} <span>${escapeHtml(label)}</span>`;
-    btn.title = label;
-  });
+  updatePublicShareThemeButtons(document);
 }
 
 function injectCss() {
@@ -981,27 +957,10 @@ async function shareCurrentPage() {
   const url = location.href;
   const title = currentPayload?.note?.title || 'YANTA Public Share';
 
-  if (navigator.share) {
-    try {
-      await navigator.share({
-        title,
-        text: title,
-        url,
-      });
-
-      return;
-    } catch (err) {
-      if (err?.name === 'AbortError') return;
-    }
-  }
-
-  await navigator.clipboard.writeText(url);
-
-  await yantaAlert({
-    title: 'Link copied',
-    message: 'The full public share link was copied to your clipboard.',
-    icon: 'copy',
-    confirmLabel: 'Done',
+  await sharePublicPage({
+    url,
+    title,
+    text: title,
   });
 }
 
@@ -1034,12 +993,15 @@ function toggleMenu() {
 function renderMenu() {
   return `
     <div class="yps-menu" data-yps-menu hidden>
-      <button type="button" data-yps-save-menu>${lucide('file-plus', 15)} Save as note</button>
-      <button type="button" data-yps-share-menu>${lucide('share-2', 15)} Share</button>
-      <button type="button" data-yps-theme-toggle>${lucide('sun', 15)} <span>Light mode</span></button>
-      <hr>
-      <button type="button" data-yps-about>${lucide('info', 15)} About YANTA</button>
-      <a href="${escapeAttr(location.origin)}">${lucide('external-link', 15)} Open yanta.page</a>
+        <button type="button" data-yps-save-menu>${lucide('file-plus', 15)} Save as note</button>
+        <button type="button" data-yps-share-menu>${lucide('share-2', 15)} Share</button>
+        <button type="button" data-yps-theme-toggle>
+            ${lucide('sun', 15)}
+            <span data-yps-theme-label>Light mode</span>
+        </button>
+        <hr>
+        <button type="button" data-yps-about>${lucide('info', 15)} About YANTA</button>
+        <a href="${escapeAttr(location.origin)}">${lucide('external-link', 15)} Open yanta.page</a>
     </div>
   `;
 }
@@ -1106,8 +1068,8 @@ function bindHeaderActions() {
   document.querySelector('[data-yps-menu-button]')?.addEventListener('click', toggleMenu);
 
   document.querySelectorAll('[data-yps-theme-toggle]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      togglePublicTheme();
+    btn.addEventListener('click', async () => {
+      await togglePublicTheme();
       closeMenu();
     });
   });
@@ -1214,6 +1176,8 @@ function renderPage(payload, imageResolver) {
           ${html}
         </article>
 
+        ${renderPublicShareCalendarSectionHtml(payload)}
+
         <footer class="yps-footer">
           Shared through <a href="${escapeAttr(location.origin)}">YANTA</a>.
           The private decryption key stayed in the link fragment and was not sent to the server.
@@ -1225,11 +1189,12 @@ function renderPage(payload, imageResolver) {
   `;
 
   bindHeaderActions();
+  bindPublicShareCalendarActions(document, payload);
 }
 
 export async function mountPublicShareViewer() {
   addPublicSharePageClasses();
-  applyPublicTheme(readPublicTheme());
+  await setupPublicShareAppearance();
   injectCss();
 
   document.body.innerHTML = `

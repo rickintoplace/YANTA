@@ -107,6 +107,7 @@ import {
   openCalendarEvent,
   openCalendarFromHistory,
   openCalendarPane,
+  openNewCalendarEvent,
   closeCalendar,
   closeCalendarPane,
   calendarChoiceDialog,
@@ -855,6 +856,46 @@ function registerServiceWorker() {
   });
 }
 
+const PUBLIC_SHARE_PENDING_EVENT_KEY = 'yanta.publicShare.pendingCalendarEvent.v1';
+
+function consumePendingPublicShareCalendarEvent() {
+  let raw = '';
+
+  try {
+    raw = sessionStorage.getItem(PUBLIC_SHARE_PENDING_EVENT_KEY) || '';
+    sessionStorage.removeItem(PUBLIC_SHARE_PENDING_EVENT_KEY);
+  } catch {}
+
+  if (!raw) return false;
+
+  let event = null;
+
+  try {
+    event = JSON.parse(raw);
+  } catch {
+    return false;
+  }
+
+  if (!event?.start) return false;
+
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      openCalendar({
+        push: false,
+        replace: false,
+      });
+
+      openNewCalendarEvent({
+        ...event,
+        id: undefined,
+        title: event.title || '',
+      });
+    });
+  });
+
+  return true;
+}
+
 async function init() {
   await openDB();
 
@@ -1211,6 +1252,8 @@ if (!sharedOpen?.noteId) {
         '#calendar'
       );
     }
+
+    consumePendingPublicShareCalendarEvent();
 
     return;
   }

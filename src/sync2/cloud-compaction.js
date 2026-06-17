@@ -99,31 +99,36 @@ function sync2ObjectVersion(obj) {
 }
 
 function localVaultContentVersion() {
+  /*
+    Version for Vault metadata snapshots/markers only.
+
+    Do not use state.notes.updated here. Body edits update that value
+    frequently, but note bodies are covered by note snapshots/updates,
+    not by Vault metadata snapshots.
+  */
   let max = 0;
 
-  for (const note of state.notes.values()) {
-    max = Math.max(max, sync2ObjectVersion(note));
-  }
-
-  for (const folder of state.folders.values()) {
-    max = Math.max(max, sync2ObjectVersion(folder));
-  }
-
-  for (const image of state.imagesMeta.values()) {
-    max = Math.max(max, sync2ObjectVersion(image));
-  }
-
   try {
-    for (const ev of state.calendarEvents?.values?.() || []) {
+    for (const note of vaultNotesMap().values()) {
+      max = Math.max(max, sync2ObjectVersion(note));
+    }
+
+    for (const folder of vaultFoldersMap().values()) {
+      max = Math.max(max, sync2ObjectVersion(folder));
+    }
+
+    for (const image of vaultImagesMap().values()) {
+      max = Math.max(max, sync2ObjectVersion(image));
+    }
+
+    for (const ev of vaultEventsMap().values()) {
       max = Math.max(max, sync2ObjectVersion(ev));
     }
 
-    for (const cat of state.calendarCategories?.values?.() || []) {
+    for (const cat of vaultCalendarCategoriesMap().values()) {
       max = Math.max(max, sync2ObjectVersion(cat));
     }
-  } catch {}
 
-  try {
     for (const tombstone of vaultTombstonesMap().values()) {
       max = Math.max(max, sync2ObjectVersion(tombstone));
     }

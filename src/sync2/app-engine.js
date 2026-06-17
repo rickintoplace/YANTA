@@ -40,6 +40,8 @@ import {
   vaultNotesMap,
   vaultFoldersMap,
   vaultImagesMap,
+  vaultEventsMap,
+  vaultCalendarCategoriesMap,
   vaultDevicesMap,
   vaultTombstonesMap,
   vaultJsonSnapshot,
@@ -342,36 +344,41 @@ function sync2ObjectVersion(obj) {
 }
 
 function sync2LocalVaultContentVersion() {
+  /*
+    This version is for VaultDoc metadata reliability only.
+
+    Do NOT derive it from state.notes.updated:
+    - state.notes.updated changes on note-body edits.
+    - note bodies sync via per-note Y.Doc updates.
+    - using note.updated here turns ordinary typing into full Vault metadata
+      updates and causes massive "Vault Update History" growth.
+
+    Instead, inspect the actual VaultDoc maps that represent durable
+    vault-wide metadata.
+  */
   let max = 0;
 
-  for (const note of state.notes.values()) {
-    max = Math.max(max, sync2ObjectVersion(note));
-  }
-
-  for (const folder of state.folders.values()) {
-    max = Math.max(max, sync2ObjectVersion(folder));
-  }
-
-  for (const image of state.imagesMeta.values()) {
-    max = Math.max(max, sync2ObjectVersion(image));
-  }
-
-  /*
-    Calendar events/categories live in VaultDoc too.
-    state.calendarEvents may be empty if calendar has not hydrated yet,
-    but when calendar changes, the event objects are in state.
-  */
   try {
-    for (const ev of state.calendarEvents?.values?.() || []) {
+    for (const note of vaultNotesMap().values()) {
+      max = Math.max(max, sync2ObjectVersion(note));
+    }
+
+    for (const folder of vaultFoldersMap().values()) {
+      max = Math.max(max, sync2ObjectVersion(folder));
+    }
+
+    for (const image of vaultImagesMap().values()) {
+      max = Math.max(max, sync2ObjectVersion(image));
+    }
+
+    for (const ev of vaultEventsMap().values()) {
       max = Math.max(max, sync2ObjectVersion(ev));
     }
 
-    for (const cat of state.calendarCategories?.values?.() || []) {
+    for (const cat of vaultCalendarCategoriesMap().values()) {
       max = Math.max(max, sync2ObjectVersion(cat));
     }
-  } catch {}
 
-  try {
     for (const t of vaultTombstonesMap().values()) {
       max = Math.max(max, sync2ObjectVersion(t));
     }
@@ -1433,6 +1440,148 @@ export class Sync2AppEngine {
     }
   }
 
+  compactOutboxForUpload() {
+    /*
+      storage optimization:
+      During editing, observers may queue many small Yjs updates. Uploading
+      each as its own encrypted object creates unnecessary object count and
+      history growth.
+
+      Yjs updates for the same document are commutative and can be merged
+      safely. We merge:
+      - all queued Vault updates into one Vault update pack
+      - all queued Note updates per noteId into one Note update pack
+
+      This does NOT drop changes. It only reduces transport/object overhead.
+    */
+
+    if (!Array.isArray(this.outbox) || this.outbox.length < 2) {
+      return {
+        before: this.outbox?.length || 0,
+        after: this.outbox?.length || 0,
+        compacted: 0,
+      };
+    }
+
+    const groups = new Map();
+    const passthrough = [];
+
+    const groupKeyFor = (item) => {
+      if (item?.kind === 'vault') return 'vault';
+      if (item?.kind === 'note' && item.noteId) return `note:${item.noteId}`;
+      return '';
+    };
+
+    this.outbox.forEach((item, index) => {
+      const key = groupKeyFor(item);
+
+      if (!key) {
+        passthrough.push({
+          index,
+          item,
+        });
+        return;
+      }
+
+      let group = groups.get(key);
+
+      if (!group) {
+        group = {
+          key,
+          firstIndex: index,
+          kind: item.kind,
+          noteId: item.noteId || null,
+          items: [],
+        };
+
+        groups.set(key, group);
+      }
+
+      group.items.push(item);
+    });
+
+    const compactedEntries = [];
+
+    for (const group of groups.values()) {
+      if (group.items.length === 1) {
+        compactedEntries.push({
+          index: group.firstIndex,
+          item: group.items[0],
+        });
+
+        continue;
+      }
+
+      const updates = group.items
+        .map((item) => item.update)
+        .filter((update) => update && update.byteLength);
+
+      if (!updates.length) continue;
+
+      const markers = [];
+
+      for (const item of group.items) {
+        if (Array.isArray(item.afterUploadLocalStateSet)) {
+          markers.push(...item.afterUploadLocalStateSet);
+        }
+      }
+
+      const reasons = [
+        ...new Set(
+          group.items
+            .map((item) => item.reason)
+            .filter(Boolean)
+            .map(String)
+        ),
+      ];
+
+      const mergedUpdate =
+        updates.length === 1
+          ? updates[0]
+          : Y.mergeUpdates(updates);
+
+      compactedEntries.push({
+        index: group.firstIndex,
+        item: {
+          kind: group.kind,
+          noteId: group.noteId || undefined,
+          update: mergedUpdate,
+          created: Math.min(...group.items.map((item) => Number(item.created || Date.now()))),
+          full: group.items.some((item) => item.full === true),
+          reason: reasons.length ? reasons.join('+') : undefined,
+          afterUploadLocalStateSet: markers.length ? markers : undefined,
+          coalesced: group.items.length,
+        },
+      });
+    }
+
+    const next = [
+      ...compactedEntries,
+      ...passthrough,
+    ]
+      .sort((a, b) => a.index - b.index)
+      .map((entry) => entry.item);
+
+    const before = this.outbox.length;
+    const after = next.length;
+
+    this.outbox = next;
+
+    if (before !== after) {
+      this.progress?.({
+        phase: 'uploadOutbox',
+        direction: 'up',
+        detailed: false,
+        message: `Coalesced ${before} queued changes into ${after} upload pack${after === 1 ? '' : 's'}.`,
+      });
+    }
+
+    return {
+      before,
+      after,
+      compacted: before - after,
+    };
+  }
 
   async uploadOutbox() {
     if (this.uploading) {
@@ -1448,6 +1597,8 @@ export class Sync2AppEngine {
 
     try {
       await this.catchUpSeqFromRemoteOwnObjects();
+
+      this.compactOutboxForUpload();
 
       let uploaded = 0;
       const total = this.outbox.length;
@@ -1888,6 +2039,9 @@ export class Sync2AppEngine {
 
     if (!ids.length) return;
 
+    const remoteBodyAppliedAt = Date.now();
+    const localMetadataWrites = [];
+
     for (const noteId of ids) {
       const note = state.notes.get(noteId);
       if (!note) continue;
@@ -1906,6 +2060,30 @@ export class Sync2AppEngine {
           md || '',
         ].join(' ').toLowerCase()
       );
+
+      /*
+        Keep local UI/cache freshness on devices that pulled remote body
+        changes. This updated-only store write is safe because store-bridge
+        now ignores volatile-only VaultDoc changes.
+      */
+      const nextUpdated = Math.max(
+        Number(note.updated || 0),
+        remoteBodyAppliedAt
+      );
+
+      if (nextUpdated !== Number(note.updated || 0)) {
+        note.updated = nextUpdated;
+
+        localMetadataWrites.push(
+          store.notes.put(safeJsonClone(note)).catch((err) => {
+            console.warn('[YANTA Sync2] could not update pulled note timestamp', noteId, err);
+          })
+        );
+      }
+    }
+
+    if (localMetadataWrites.length) {
+      await Promise.all(localMetadataWrites);
     }
 
     try {

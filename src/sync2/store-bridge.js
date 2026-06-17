@@ -175,6 +175,38 @@ function jsonEqual(a, b) {
   }
 }
 
+// Fields that are useful for local UI/cache freshness but must not create
+// durable VaultDoc history by themselves.
+//
+// Note body edits update note.updated very frequently. The note body itself is
+// synced through the per-note Y.Doc update stream. If we mirror updated-only
+// changes into VaultDoc, every keystroke can become Vault update history.
+const VAULT_META_VOLATILE_KEYS = new Set([
+  'updated',
+]);
+
+function omitVolatileVaultMetaKeys(value = {}) {
+  if (!value || typeof value !== 'object') return value;
+
+  const out = {};
+
+  for (const [key, val] of Object.entries(value || {})) {
+    if (VAULT_META_VOLATILE_KEYS.has(key)) continue;
+    out[key] = val;
+  }
+
+  return out;
+}
+
+function onlyVolatileVaultMetaChanged(existing, incoming) {
+  if (!existing || !incoming) return false;
+
+  return jsonEqual(
+    omitVolatileVaultMetaKeys(existing),
+    omitVolatileVaultMetaKeys(incoming)
+  );
+}
+
 function shouldKeepExistingByUpdated(existing, incoming) {
   if (!existing) return false;
 
@@ -195,6 +227,15 @@ export function putVaultNoteMeta(note, origin = VAULT_ORIGINS.STORE_BRIDGE) {
     const existing = notes.get(meta.id);
 
     if (jsonEqual(existing, meta)) return;
+
+    /*
+      Critical storage fix:
+      Body edits update note.updated, but note bodies sync via per-note Y.Doc
+      updates. Do not mirror updated-only changes into VaultDoc, otherwise
+      ordinary typing creates append-only Vault update history.
+    */
+    if (onlyVolatileVaultMetaChanged(existing, meta)) return;
+
     if (shouldKeepExistingByUpdated(existing, meta)) return;
 
     notes.set(meta.id, safeJsonClone(meta));
@@ -213,6 +254,14 @@ export function putVaultFolderMeta(folder, origin = VAULT_ORIGINS.STORE_BRIDGE) 
     const existing = folders.get(meta.id);
 
     if (jsonEqual(existing, meta)) return;
+
+    /*
+      updated-only folder cache refreshes should not create Vault history.
+      Real folder changes still sync because fields like name, parentId,
+      dashboardOrder, color, icon, trash flags, etc. differ.
+    */
+    if (onlyVolatileVaultMetaChanged(existing, meta)) return;
+
     if (shouldKeepExistingByUpdated(existing, meta)) return;
 
     folders.set(meta.id, safeJsonClone(meta));
@@ -231,6 +280,13 @@ export function putVaultImageMeta(image, origin = VAULT_ORIGINS.STORE_BRIDGE) {
     const existing = images.get(meta.id);
 
     if (jsonEqual(existing, meta)) return;
+
+    /*
+      Asset metadata changes such as objectPath/encryptedAssetKeyForVault still
+      sync. updated-only cache refreshes do not need durable Vault history.
+    */
+    if (onlyVolatileVaultMetaChanged(existing, meta)) return;
+
     if (shouldKeepExistingByUpdated(existing, meta)) return;
 
     images.set(meta.id, safeJsonClone(meta));

@@ -174,37 +174,23 @@ function ensureCss() {
   padding-top: 12px;
 }
 
-/* Optimierter Copy-Button mit flüssigem Übergang */
-.yanta-public-share-link-row .btn[data-copy-public-share] {
-  transition: background-color 200ms ease, border-color 200ms ease, color 200ms ease, transform 150ms ease;
-}
-
 .yanta-public-share-link-row .btn.success {
-  color: white !important;
-  background: var(--green) !important;
-  border-color: var(--green) !important;
-  animation: yanta-public-share-btn-bounce 300ms cubic-bezier(0.34, 1.56, 0.64, 1);
+  color: white;
+  background: var(--green);
+  border-color: var(--green);
 }
 
 .yanta-public-share-link-row .btn.success svg {
-  animation: yanta-public-share-copy-pop 350ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  animation: yanta-public-share-copy-pop 360ms cubic-bezier(.2,.8,.2,1);
 }
 
-/* Sanfter Bounce für den ganzen Button beim Klicken */
-@keyframes yanta-public-share-btn-bounce {
-  0% { transform: scale(1); }
-  40% { transform: scale(0.96); }
-  100% { transform: scale(1); }
-}
-
-/* Knackiges Aufpoppen des neuen Hakens */
 @keyframes yanta-public-share-copy-pop {
   0% {
-    transform: scale(0.4) rotate(-15deg);
+    transform: scale(0.62) rotate(-18deg);
     opacity: 0;
   }
-  70% {
-    transform: scale(1.15) rotate(5deg);
+  55% {
+    transform: scale(1.18) rotate(4deg);
     opacity: 1;
   }
   100% {
@@ -367,14 +353,13 @@ async function renderPublicTab(noteId) {
     try {
       await navigator.clipboard.writeText(url);
 
-      // Entfernt temporär das 'primary'-Styling, damit das Success-Grün greift
-      btn.classList.remove('primary');
+      btn.disabled = true;
       btn.classList.add('success');
       btn.innerHTML = `${lucide('check', 14)} Copied`;
 
       window.setTimeout(() => {
+        btn.disabled = false;
         btn.classList.remove('success');
-        btn.classList.add('primary');
         btn.innerHTML = originalHtml;
         btn.style.minWidth = previousMinWidth;
       }, 1300);

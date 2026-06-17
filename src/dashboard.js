@@ -1967,7 +1967,17 @@ function renderCard(item, { section }) {
       pin.innerHTML = lucide('pin', 13);
       wrap.append(pin);
     }
-  
+
+    if (note.publicShare?.enabled === true) {
+      const pub = el('span', {
+        class: 'yanta-dash-note-corner-public',
+        title: 'Public link active',
+      });
+
+      pub.innerHTML = lucide('globe', 13);
+      wrap.append(pub);
+    }
+    
     return wrap;
   }
 

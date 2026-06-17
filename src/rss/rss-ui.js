@@ -70,6 +70,10 @@ import {
   openYantaCloudLoginForSources,
 } from './rss-cloud-auth.js';
 
+import {
+  yantaConfirm,
+} from '../dialogs.js';
+
 let initialized = false;
 
 let mode = 'pane'; // pane | fullscreen
@@ -1405,9 +1409,16 @@ async function openRssSourcesManager() {
 
       if (!feed) return;
 
-      if (!confirm(`Delete source "${feed.title || 'Source'}"?\n\nCached items may remain locally until cache cleanup.`)) {
-        return;
-      }
+      const ok = await yantaConfirm({
+        title: 'Delete source?',
+        message: `Delete source "${feed.title || 'Source'}"?\n\nCached items may remain locally until cache cleanup.`,
+        confirmLabel: 'Delete source',
+        cancelLabel: 'Cancel',
+        danger: true,
+        icon: 'trash',
+      });
+
+      if (!ok) return;
 
       await deleteRssFeed(feedId);
 

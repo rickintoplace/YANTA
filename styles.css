@@ -4214,3 +4214,18 @@ input.yanta-task-checkbox {
   width: 100%;
   display: block;
 }
+
+.public-share-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 16px;
+  height: 16px;
+  margin-left: auto;
+
+  border-radius: 999px;
+
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}

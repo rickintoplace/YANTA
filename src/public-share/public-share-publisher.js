@@ -95,6 +95,31 @@ async function saveNotePublicShareCache(noteId, patch) {
   await store.notes.put(note);
 }
 
+function emitPublicShareChanged(noteId, status = '') {
+  window.dispatchEvent(new CustomEvent('yanta-public-share-status', {
+    detail: {
+      noteId,
+      status,
+    },
+  }));
+
+  window.dispatchEvent(new CustomEvent('yanta-note-updated', {
+    detail: {
+      noteId,
+      reason: 'public-share-status',
+      source: 'public-share',
+    },
+  }));
+
+  window.dispatchEvent(new CustomEvent('yanta-dashboard-refresh', {
+    detail: {
+      noteId,
+      reason: 'public-share-status',
+      source: 'public-share',
+    },
+  }));
+}
+
 async function assertPublicSharePrereqs() {
   const me = await cloudMe();
 
@@ -175,6 +200,8 @@ export async function createOrGetPublicShare(noteId, {
     lastPublishedAt: null,
   });
 
+  emitPublicShareChanged(noteId, 'pending');
+
   return patch;
 }
 
@@ -250,6 +277,8 @@ export async function publishPublicShareNow(noteId, {
       expiresAt: share.expiresAt || expiresAt || null,
       lastPublishedAt,
     });
+
+    emitPublicShareChanged(noteId, 'up-to-date');
 
     window.dispatchEvent(new CustomEvent('yanta-public-share-status', {
       detail: {
@@ -337,6 +366,7 @@ export async function stopPublicShare(noteId) {
 
     note.updated = now();
     await store.notes.put(note);
+    emitPublicShareChanged(noteId, 'revoked');
   }
 
   toast('Public sharing stopped', 'success');

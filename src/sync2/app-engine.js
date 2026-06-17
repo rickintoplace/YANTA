@@ -1777,12 +1777,10 @@ export class Sync2AppEngine {
       current: 0,
     });
 
-    let applied = 0;
-
     if (!entries.length) {
       return {
         noteId,
-        applied,
+        applied: 0,
         entries: 0,
       };
     }
@@ -1792,6 +1790,10 @@ export class Sync2AppEngine {
     const { doc } = getNoteDoc(noteId);
 
     let processed = 0;
+    let appliedPacks = 0;
+
+    const updatesToApply = [];
+    const seenToMark = [];
 
     for (const entry of entries) {
       processed++;
@@ -1803,6 +1805,7 @@ export class Sync2AppEngine {
         current: processed,
         total: entries.length,
       });
+
       if (await this.hasSeen(entry.path)) continue;
 
       if (vaultTombstonesMap().has(noteId)) {
@@ -1833,23 +1836,46 @@ export class Sync2AppEngine {
         continue;
       }
 
-      for (const update of pack.updates) {
-        Y.applyUpdate(doc, update, SYNC2_REMOTE_ORIGIN);
+      for (const update of pack.updates || []) {
+        if (update?.byteLength) {
+          updatesToApply.push(update);
+        }
       }
 
-      await this.markSeen(entry.path, {
-        type: 'note-update',
-        noteId,
-        size: entry.size,
-        etag: entry.etag,
+      seenToMark.push({
+        path: entry.path,
+        entry,
       });
 
-      applied++;
+      appliedPacks++;
+    }
+
+    /*
+      UX/performance:
+      Apply all unseen note updates as ONE merged Yjs update.
+      This prevents the remote UI from visibly replaying individual
+      keystrokes after sync.
+    */
+    if (updatesToApply.length) {
+      const merged = updatesToApply.length === 1
+        ? updatesToApply[0]
+        : Y.mergeUpdates(updatesToApply);
+
+      Y.applyUpdate(doc, merged, SYNC2_REMOTE_ORIGIN);
+    }
+
+    for (const item of seenToMark) {
+      await this.markSeen(item.path, {
+        type: 'note-update',
+        noteId,
+        size: item.entry.size,
+        etag: item.entry.etag,
+      });
     }
 
     return {
       noteId,
-      applied,
+      applied: appliedPacks,
       entries: entries.length,
     };
   }

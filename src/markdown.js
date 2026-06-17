@@ -195,6 +195,40 @@ let transcludeDepth = 0;
 let rerenderHook = null;
 export function setMarkdownRerenderHook(fn) { rerenderHook = fn; }
 
+// ============================================================
+// Render context
+//
+// Normal app rendering uses local state/store.
+// Public share rendering injects resolvers for:
+// - yanta-img://...
+// - draw://...
+// without initializing/opening the private vault.
+// ============================================================
+
+const renderContextStack = [{}];
+
+function currentRenderContext() {
+  return renderContextStack[renderContextStack.length - 1] || {};
+}
+
+export function withMarkdownRenderContext(ctx, fn) {
+  renderContextStack.push(ctx || {});
+
+  try {
+    return fn();
+  } finally {
+    renderContextStack.pop();
+  }
+}
+
+export function renderPreviewWithContext(md, ctx = {}) {
+  return withMarkdownRenderContext(ctx, () => renderPreview(md));
+}
+
+export function renderBlocksInlineWithContext(md, ctx = {}) {
+  return withMarkdownRenderContext(ctx, () => renderBlocksInline(md));
+}
+
 export function classifyLine(line, ctx) {
   if (ctx.inFence) {
     if (/^```/.test(line)) return { type: 'fence', closes: true };
@@ -275,10 +309,17 @@ function audioEmbedUrl(url) {
 }
 
 function resolveImageUrl(url) {
+  const ctx = currentRenderContext();
+
+  if (typeof ctx.resolveImageUrl === 'function') {
+    return ctx.resolveImageUrl(url);
+  }
+
   if (url.startsWith('yanta-img://')) {
     const id = url.slice('yanta-img://'.length);
     if (state.imageBlobs.has(id)) return state.imageBlobs.get(id);
     if (!state.imagesMeta.has(id)) return null;
+
     store.images.get(id).then((rec) => {
       if (rec && rec.blob) {
         const u = URL.createObjectURL(rec.blob);
@@ -286,8 +327,10 @@ function resolveImageUrl(url) {
         rerenderHook?.();
       }
     });
+
     return '';
   }
+
   return url;
 }
 
@@ -363,6 +406,12 @@ function extractSection(md, sectionName) {
 }
 
 export function renderDrawEmbedHtml(id, label = 'Drawing', surface = 'preview') {
+  const ctx = currentRenderContext();
+
+  if (typeof ctx.renderDrawEmbedHtml === 'function') {
+    return ctx.renderDrawEmbedHtml(id, label, surface);
+  }
+
   const cleanId = String(id || '').trim();
   const cleanSurface = surface === 'editor' ? 'editor' : 'preview';
 

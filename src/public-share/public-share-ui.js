@@ -27,6 +27,10 @@ import {
   openYantaCloudSetup,
 } from '../sync2/yanta-cloud-setup-ui.js';
 
+import {
+  yantaConfirm,
+} from '../dialogs.js';
+
 let modal = null;
 
 function renderQrSvg(text, size = 220) {
@@ -361,8 +365,22 @@ async function renderPublicTab(noteId) {
   });
 
   body.querySelector('[data-stop-public-share]')?.addEventListener('click', async () => {
-    if (!confirm('Stop public sharing for this note?')) return;
+    const ok = await yantaConfirm({
+    title: 'Stop public sharing?',
+    message: [
+        'Stop public sharing for this note?',
+        '',
+        'Future access through this public link will be blocked.',
+        'Copies already downloaded cannot be removed.'
+    ].join('\n'),
+    confirmLabel: 'Stop sharing',
+    cancelLabel: 'Cancel',
+    danger: true,
+    icon: 'trash',
+    });
 
+    if (!ok) return;
+    
     try {
       await stopPublicShare(noteId);
       await renderPublicTab(noteId);

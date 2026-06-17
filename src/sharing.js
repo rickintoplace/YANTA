@@ -293,13 +293,19 @@ export function renderShareIndicator() {
 
   const id = state.currentNoteId;
   const sess = id ? state.liveShares.get(id) : null;
+  const note = id ? state.notes.get(id) : null;
+  const publicActive = note?.publicShare?.enabled === true;
 
-  btn.classList.toggle('active', !!sess);
+  btn.classList.toggle('active', !!sess || publicActive);
 
-  if (sess) {
-    btn.title = `Sharing live · ${sess.peers} peer${sess.peers === 1 ? '' : 's'}`;
+  if (sess && publicActive) {
+    btn.title = `Public link active · Live sharing active · ${sess.peers} peer${sess.peers === 1 ? '' : 's'}`;
+  } else if (publicActive) {
+    btn.title = 'Public link active';
+  } else if (sess) {
+    btn.title = `Live sharing · ${sess.peers} peer${sess.peers === 1 ? '' : 's'}`;
   } else {
-    btn.title = 'Share this note live';
+    btn.title = 'Share this note';
   }
 }
 

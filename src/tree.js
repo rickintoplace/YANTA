@@ -1879,6 +1879,16 @@ function noteRow(n, depth = 0, {
     row.append(el('span', { class: 'live-dot', title: 'Live shared' }));
   }
 
+  if (n.publicShare?.enabled === true) {
+    const publicDot = el('span', {
+      class: 'public-share-dot',
+      title: 'Public link active',
+    });
+
+    publicDot.innerHTML = lucide('globe', 11);
+    row.append(publicDot);
+  }
+  
   if (n.pinned && !pinnedMirror) {
     row.append(el('span', { class: 'pin', title: 'Pinned' }, '●'));
   }

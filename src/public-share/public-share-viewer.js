@@ -14,11 +14,12 @@ import {
 } from '../sync2/assets.js';
 
 import {
-  renderPublicShareMarkdown,
-} from './public-share-renderer.js';
+  renderPreviewWithContext,
+} from '../markdown.js';
 
 import {
   escapeHtml,
+  escapeAttr,
   lucide,
 } from '../core.js';
 
@@ -32,6 +33,7 @@ function injectCss() {
 
   const style = document.createElement('style');
   style.id = 'yanta-public-viewer-css';
+
   style.textContent = `
 html, body {
   min-height: 100%;
@@ -39,6 +41,23 @@ html, body {
   background: #141414;
   color: #e8e6e3;
   font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+
+  --bg: #141414;
+  --bg-elev: #1c1c1c;
+  --bg-elev-2: #242424;
+  --bg-elev-3: #2e2e2e;
+  --border: #333333;
+  --border-strong: #454545;
+  --text: #e8e6e3;
+  --text-dim: #9a9794;
+  --text-faint: #6b6864;
+  --accent: #6ea8fe;
+  --accent-2: #a78bfa;
+  --green: #4ade80;
+  --yellow: #fbbf24;
+  --red: #f87171;
+  --font: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
 
 .yps-shell {
@@ -59,7 +78,7 @@ html, body {
   min-height: 54px;
   padding: 10px 18px;
 
-  border-bottom: 1px solid #333;
+  border-bottom: 1px solid var(--border);
   background: rgba(28,28,28,0.88);
   backdrop-filter: blur(12px);
 }
@@ -68,7 +87,7 @@ html, body {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  color: #6ea8fe;
+  color: var(--accent);
   font-weight: 850;
 }
 
@@ -85,12 +104,16 @@ html, body {
 .yps-note-icon {
   width: 48px;
   height: 48px;
+
   display: inline-flex;
   align-items: center;
   justify-content: center;
+
   border-radius: 999px;
-  color: var(--note-color, #6ea8fe);
-  background: color-mix(in srgb, var(--note-color, #6ea8fe) 15%, transparent);
+
+  color: var(--note-color, var(--accent));
+  background: color-mix(in srgb, var(--note-color, var(--accent)) 15%, transparent);
+
   margin-bottom: 12px;
 }
 
@@ -103,122 +126,90 @@ html, body {
 
 .yps-updated {
   margin-top: 9px;
-  color: #9a9794;
+  color: var(--text-dim);
   font-size: 13px;
 }
 
-.yps-content {
+.yps-content.preview {
+  max-width: none;
+  margin: 0;
   font-size: 17px;
   line-height: 1.72;
 }
 
-.yps-content h1,
-.yps-content h2,
-.yps-content h3 {
+.yps-content.preview .pv-line {
+  min-height: 1.25em;
+}
+
+.yps-content.preview h1,
+.yps-content.preview h2,
+.yps-content.preview h3 {
   line-height: 1.18;
   margin: 1.35em 0 0.45em;
 }
 
-.yps-content p {
-  margin: 0.7em 0;
+.yps-content.preview a {
+  color: var(--accent);
 }
 
-.yps-content a {
-  color: #6ea8fe;
+.yps-content.preview img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 14px;
+  border: 1px solid var(--border);
 }
 
-.yps-content code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+.yps-content.preview code {
+  font-family: var(--font-mono);
   font-size: 0.92em;
-  background: #242424;
-  border: 1px solid #333;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
   border-radius: 5px;
   padding: 0.08em 0.32em;
 }
 
-.yps-content pre {
-  overflow: auto;
-  padding: 14px;
-  border-radius: 12px;
-  background: #1c1c1c;
-  border: 1px solid #333;
-}
-
-.yps-content figure {
-  margin: 1em 0;
-}
-
-.yps-content img {
-  max-width: 100%;
-  height: auto;
-  border-radius: 14px;
-  border: 1px solid #333;
-}
-
-.yps-task {
-  display: flex;
-  align-items: flex-start;
-  gap: 8px;
-  margin: 0.35em 0;
-}
-
-.yps-task input {
-  margin-top: 5px;
-  accent-color: #6ea8fe;
-}
-
-.yps-task.checked span {
-  color: #9a9794;
-  text-decoration: line-through;
-}
-
-.yps-list {
-  margin: 0.25em 0 0.25em 1.1em;
-}
-
-.yps-wiki-missing {
-  color: #9a9794;
-  border-bottom: 1px dotted #9a9794;
-}
-
-.yps-inline-icon {
-  display: inline-flex;
-  vertical-align: -0.18em;
-}
-
-.yps-missing {
-  padding: 10px 12px;
-  border: 1px dashed #454545;
-  border-radius: 10px;
-  color: #9a9794;
-  background: #1c1c1c;
-}
-
-.yps-drawing {
-  margin: 1em 0;
-  border: 1px solid #333;
+.yps-public-draw {
+  margin: 12px 0;
+  border: 1px solid var(--border);
   border-radius: 14px;
   overflow: hidden;
-  background: #1c1c1c;
+  background: var(--bg-elev);
 }
 
-.yps-drawing-head {
+.yps-public-draw-head {
+  min-height: 40px;
+  padding: 9px 11px;
+
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 12px;
-  border-bottom: 1px solid #333;
-  background: #242424;
-  color: #6ea8fe;
+
+  color: var(--accent);
+  background: var(--bg-elev-2);
+  border-bottom: 1px solid var(--border);
+}
+
+.yps-public-draw-body {
+  min-height: 180px;
+  padding: 10px;
+  overflow: auto;
+  background: var(--bg);
+}
+
+.yps-public-draw-body svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
 }
 
 .yps-state {
   max-width: 520px;
   margin: 20vh auto;
   padding: 24px;
-  border: 1px solid #333;
+  border: 1px solid var(--border);
   border-radius: 16px;
-  background: #1c1c1c;
+  background: var(--bg-elev);
   text-align: center;
 }
 
@@ -227,9 +218,10 @@ html, body {
 }
 
 .yps-state p {
-  color: #9a9794;
+  color: var(--text-dim);
 }
   `;
+
   document.head.append(style);
 }
 
@@ -237,35 +229,92 @@ async function resolveImageUrlFactory(shareId, shareKey, assets) {
   const byLogicalId = new Map(assets.map((a) => [a.logicalId, a]));
   const cache = new Map();
 
-  return async function resolveImageUrl(logicalId) {
-    if (cache.has(logicalId)) return cache.get(logicalId);
+  return {
+    cache,
 
-    const asset = byLogicalId.get(logicalId);
+    async load(logicalId) {
+      if (cache.has(logicalId)) return cache.get(logicalId);
 
-    if (!asset) return '';
+      const asset = byLogicalId.get(logicalId);
+      if (!asset) return '';
 
-    const encryptedBytes = await getPublicShareAssetBytes(shareId, asset.objectId);
-    const assetKeyBytes = await unwrapAssetKeyForShare(
-      shareKey,
-      asset.logicalId,
-      asset.encryptedAssetKeyForShare
-    );
+      const encryptedBytes = await getPublicShareAssetBytes(shareId, asset.objectId);
 
-    const plain = await decryptAssetBlobWithRawKey(
-      assetKeyBytes,
-      encryptedBytes,
-      asset.objectPath || ''
-    );
+      const assetKeyBytes = await unwrapAssetKeyForShare(
+        shareKey,
+        asset.logicalId,
+        asset.encryptedAssetKeyForShare
+      );
 
-    const blob = new Blob([plain], {
-      type: asset.mime || 'application/octet-stream',
-    });
+      const plain = await decryptAssetBlobWithRawKey(
+        assetKeyBytes,
+        encryptedBytes,
+        asset.objectPath || ''
+      );
 
-    const url = URL.createObjectURL(blob);
-    cache.set(logicalId, url);
+      const blob = new Blob([plain], {
+        type: asset.mime || 'application/octet-stream',
+      });
 
-    return url;
+      const url = URL.createObjectURL(blob);
+      cache.set(logicalId, url);
+
+      return url;
+    },
   };
+}
+
+async function publicDrawingSvg(drawing) {
+  const mod = await import('@excalidraw/excalidraw');
+
+  if (typeof mod.exportToSvg !== 'function') {
+    throw new Error('Excalidraw SVG export unavailable.');
+  }
+
+  const svg = await mod.exportToSvg({
+    elements: Array.isArray(drawing.elements)
+      ? drawing.elements.filter((el) => el && !el.isDeleted)
+      : [],
+    appState: {
+      ...(drawing.appState || {}),
+      exportBackground: true,
+      viewBackgroundColor: '#ffffff',
+    },
+    files: drawing.files || {},
+  });
+
+  svg.setAttribute('width', '100%');
+  svg.setAttribute('height', 'auto');
+
+  return svg;
+}
+
+async function hydratePublicDrawings(drawingsById) {
+  const nodes = [...document.querySelectorAll('[data-public-draw-id]')];
+
+  for (const node of nodes) {
+    const id = node.dataset.publicDrawId || '';
+    const drawing = drawingsById.get(id);
+
+    const body = node.querySelector('[data-public-draw-body]');
+    if (!body) continue;
+
+    if (!drawing) {
+      body.textContent = `Drawing unavailable: ${id}`;
+      continue;
+    }
+
+    try {
+      body.textContent = 'Rendering drawing…';
+
+      const svg = await publicDrawingSvg(drawing);
+
+      body.replaceChildren(svg);
+    } catch (err) {
+      console.warn('[YANTA Public Share] drawing render failed', err);
+      body.innerHTML = `<pre>${escapeHtml(JSON.stringify(drawing.elements || [], null, 2)).slice(0, 4000)}</pre>`;
+    }
+  }
 }
 
 function renderState(title, message) {
@@ -277,6 +326,12 @@ function renderState(title, message) {
       </main>
     </div>
   `;
+}
+
+function imageIdsFromMarkdown(markdown = '') {
+  return [...String(markdown || '').matchAll(/yanta-img:\/\/([a-z0-9_:-]+)/gi)]
+    .map((m) => m[1])
+    .filter(Boolean);
 }
 
 export async function mountPublicShareViewer() {
@@ -306,17 +361,34 @@ export async function mountPublicShareViewer() {
     const drawings = Array.isArray(payload.drawings) ? payload.drawings : [];
     const drawingsById = new Map(drawings.map((d) => [d.id, d]));
 
-    const resolveImageUrlAsync = await resolveImageUrlFactory(shareId, shareKey, assets);
-    const imageUrlCache = new Map();
+    const imageResolver = await resolveImageUrlFactory(shareId, shareKey, assets);
 
     const render = () => {
       const note = payload.note || {};
       const color = note.color || '#6ea8fe';
 
-      const html = renderPublicShareMarkdown(note.markdown || '', {
-        drawingsById,
-        resolveImageUrl(id) {
-          return imageUrlCache.get(id) || '';
+      const html = renderPreviewWithContext(note.markdown || '', {
+        resolveImageUrl(url) {
+          if (String(url || '').startsWith('yanta-img://')) {
+            const id = String(url).slice('yanta-img://'.length);
+            return imageResolver.cache.get(id) || '';
+          }
+
+          return url;
+        },
+
+        renderDrawEmbedHtml(id, label = 'Drawing') {
+          return `
+            <section class="yps-public-draw" data-public-draw-id="${escapeAttr(id)}" contenteditable="false">
+              <div class="yps-public-draw-head">
+                ${lucide('line-squiggle', 15)}
+                <strong>${escapeHtml(label || drawingsById.get(id)?.title || 'Drawing')}</strong>
+              </div>
+              <div class="yps-public-draw-body" data-public-draw-body>
+                Drawing loading…
+              </div>
+            </section>
+          `;
         },
       });
 
@@ -337,7 +409,7 @@ export async function mountPublicShareViewer() {
               }
             </header>
 
-            <article class="yps-content">
+            <article class="yps-content preview">
               ${html}
             </article>
           </main>
@@ -347,18 +419,14 @@ export async function mountPublicShareViewer() {
 
     render();
 
-    // Lazy decrypt all assets referenced in markdown, then rerender.
-    const imageIds = [...String(payload.note?.markdown || '').matchAll(/yanta-img:\/\/([a-z0-9_:-]+)/gi)]
-      .map((m) => m[1]);
-
     await Promise.allSettled(
-      [...new Set(imageIds)].map(async (id) => {
-        const url = await resolveImageUrlAsync(id);
-        if (url) imageUrlCache.set(id, url);
-      })
+      [...new Set(imageIdsFromMarkdown(payload.note?.markdown || ''))].map((id) =>
+        imageResolver.load(id)
+      )
     );
 
     render();
+    await hydratePublicDrawings(drawingsById);
   } catch (err) {
     console.error('[YANTA Public Share] viewer failed', err);
     renderState('Could not open shared note', err?.message || String(err));

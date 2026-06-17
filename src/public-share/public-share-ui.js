@@ -173,6 +173,45 @@ function ensureCss() {
   border-top: 1px solid var(--border);
   padding-top: 12px;
 }
+
+/* Optimierter Copy-Button mit flüssigem Übergang */
+.yanta-public-share-link-row .btn[data-copy-public-share] {
+  transition: background-color 200ms ease, border-color 200ms ease, color 200ms ease, transform 150ms ease;
+}
+
+.yanta-public-share-link-row .btn.success {
+  color: white !important;
+  background: var(--green) !important;
+  border-color: var(--green) !important;
+  animation: yanta-public-share-btn-bounce 300ms cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+
+.yanta-public-share-link-row .btn.success svg {
+  animation: yanta-public-share-copy-pop 350ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+
+/* Sanfter Bounce für den ganzen Button beim Klicken */
+@keyframes yanta-public-share-btn-bounce {
+  0% { transform: scale(1); }
+  40% { transform: scale(0.96); }
+  100% { transform: scale(1); }
+}
+
+/* Knackiges Aufpoppen des neuen Hakens */
+@keyframes yanta-public-share-copy-pop {
+  0% {
+    transform: scale(0.4) rotate(-15deg);
+    opacity: 0;
+  }
+  70% {
+    transform: scale(1.15) rotate(5deg);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1) rotate(0);
+    opacity: 1;
+  }
+}
   `;
   document.head.append(style);
 }
@@ -315,12 +354,33 @@ async function renderPublicTab(noteId) {
     body.querySelector('[data-public-share-qr]')?.append(renderQrSvg(url, 220));
   }
 
-  body.querySelector('[data-copy-public-share]')?.addEventListener('click', async () => {
+  body.querySelector('[data-copy-public-share]')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    const originalHtml = btn.dataset.originalHtml || btn.innerHTML;
+    btn.dataset.originalHtml = originalHtml;
+
+    const width = Math.ceil(btn.getBoundingClientRect().width || 0);
+    const previousMinWidth = btn.style.minWidth;
+
+    if (width) btn.style.minWidth = `${width}px`;
+
     try {
       await navigator.clipboard.writeText(url);
-      toast('Public link copied', 'success');
+
+      // Entfernt temporär das 'primary'-Styling, damit das Success-Grün greift
+      btn.classList.remove('primary');
+      btn.classList.add('success');
+      btn.innerHTML = `${lucide('check', 14)} Copied`;
+
+      window.setTimeout(() => {
+        btn.classList.remove('success');
+        btn.classList.add('primary');
+        btn.innerHTML = originalHtml;
+        btn.style.minWidth = previousMinWidth;
+      }, 1300);
     } catch {
       toast('Copy failed', 'error');
+      btn.style.minWidth = previousMinWidth;
     }
   });
 
@@ -380,7 +440,7 @@ async function renderPublicTab(noteId) {
     });
 
     if (!ok) return;
-    
+
     try {
       await stopPublicShare(noteId);
       await renderPublicTab(noteId);

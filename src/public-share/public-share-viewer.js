@@ -46,6 +46,7 @@ import {
   bindPublicShareCalendarActions,
 } from './public-share-viewer-enhancements.js';
 
+
 let currentPayload = null;
 let currentImageResolver = null;
 let currentShareState = null;
@@ -1030,8 +1031,9 @@ function renderHeader() {
           <span>Share</span>
         </button>
 
-        <button class="yps-icon-btn desktop-only" type="button" data-yps-theme-toggle title="Toggle theme">
+        <button type="button" data-yps-theme-toggle>
           ${lucide('sun', 15)}
+          <span data-yps-theme-label>Light mode</span>
         </button>
 
         <button class="yps-icon-btn" type="button" data-yps-menu-button title="Menu">

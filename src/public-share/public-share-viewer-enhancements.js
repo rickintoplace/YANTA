@@ -28,6 +28,7 @@ import {
 const PENDING_YANTA_EVENT_KEY = 'yanta.publicShare.pendingCalendarEvent.v1';
 
 let shareModal = null;
+let outsideMenuBound = false;
 
 function injectEnhancementCss() {
   if (document.getElementById('yanta-public-share-enhancements-css')) return;
@@ -118,6 +119,33 @@ function injectEnhancementCss() {
   font: 12px var(--font-mono);
 }
 
+.yps-btn.is-copied,
+.yps-icon-btn.is-copied {
+  color: white;
+  background: var(--green);
+  border-color: var(--green);
+}
+
+.yps-btn.is-copied svg,
+.yps-icon-btn.is-copied svg {
+  animation: yps-copy-check-pop 360ms cubic-bezier(.2,.8,.2,1);
+}
+
+@keyframes yps-copy-check-pop {
+  0% {
+    transform: scale(0.62) rotate(-18deg);
+    opacity: 0;
+  }
+  55% {
+    transform: scale(1.18) rotate(4deg);
+    opacity: 1;
+  }
+  100% {
+    transform: scale(1) rotate(0);
+    opacity: 1;
+  }
+}
+
 .yps-calendar-section {
   margin: 22px 0 0;
   display: flex;
@@ -126,8 +154,9 @@ function injectEnhancementCss() {
 }
 
 .yps-calendar-section-head {
-  display: flex;
-  align-items: center;
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center !important;
   gap: 8px;
   color: var(--text);
 }
@@ -135,23 +164,32 @@ function injectEnhancementCss() {
 .yps-calendar-section-head h2 {
   margin: 0;
   font-size: 18px;
+  line-height: 1.2;
   letter-spacing: -0.02em;
 }
 
+.yps-calendar-section-head svg {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
 .yps-event-card {
+  position: relative;
   border: 1px solid var(--border);
   border-radius: 15px;
   background: var(--bg-elev);
-  overflow: hidden;
+  overflow: visible;
 }
 
 .yps-event-card-head {
   padding: 13px 14px;
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   gap: 11px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-elev-2);
+  border-top-left-radius: 15px;
+  border-top-right-radius: 15px;
 }
 
 .yps-event-card-icon {
@@ -222,35 +260,89 @@ function injectEnhancementCss() {
 }
 
 .yps-event-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
   gap: 7px;
+  align-items: center;
 }
 
-.yps-event-secondary-actions {
+.yps-event-actions .yps-btn {
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.yps-event-more-wrap {
+  position: relative;
+  display: inline-flex;
+  justify-content: flex-end;
+}
+
+.yps-event-more-menu {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 6px);
+  z-index: 40;
+  min-width: 190px;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--bg-elev-3);
+  color: var(--text);
+  box-shadow: 0 16px 48px rgba(0,0,0,0.28);
+}
+
+.yps-event-more-menu[hidden] {
+  display: none !important;
+}
+
+.yps-event-more-menu a {
+  width: 100%;
+  min-height: 35px;
   display: flex;
   align-items: center;
-  flex-wrap: wrap;
-  gap: 6px;
-  padding-top: 8px;
-  border-top: 1px solid var(--border);
+  gap: 8px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  text-decoration: none;
+  font-size: 13px;
+  cursor: pointer;
 }
 
-.yps-event-secondary-actions .yps-btn {
-  font-size: 11px;
-  min-height: 30px;
-  padding: 0 9px;
+.yps-event-more-menu a:hover {
+  background: var(--bg-elev-2);
 }
 
-@media (max-width: 560px) {
+@media (max-width: 680px) {
   .yps-share-link-row {
     grid-template-columns: 1fr;
   }
 
-  .yps-event-actions .yps-btn,
-  .yps-event-secondary-actions .yps-btn {
-    flex: 1 1 auto;
+  .yps-event-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .yps-event-more-wrap {
+    justify-content: stretch;
+  }
+
+  .yps-event-more-wrap > .yps-icon-btn {
+    width: 100%;
+  }
+
+  .yps-event-more-menu {
+    left: 0;
+    right: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .yps-btn.is-copied svg,
+  .yps-icon-btn.is-copied svg {
+    animation: none !important;
   }
 }
   `;
@@ -261,8 +353,7 @@ function injectEnhancementCss() {
 export async function setupPublicShareAppearance() {
   /*
     Reuse the normal YANTA appearance stack.
-    This intentionally avoids local public-share theme state or duplicated
-    light/dark logic.
+    No duplicated public-share theme state.
   */
   try {
     await openDB();
@@ -364,22 +455,52 @@ function closeShareFallbackModal() {
   if (shareModal) shareModal.hidden = true;
 }
 
-async function copyText(text) {
+function setButtonCopied(btn, {
+  copiedLabel = 'Copied',
+  duration = 1300,
+} = {}) {
+  if (!btn) return;
+
+  const originalHtml = btn.dataset.ypsOriginalHtml || btn.innerHTML;
+  btn.dataset.ypsOriginalHtml = originalHtml;
+
+  const rect = btn.getBoundingClientRect();
+  const previousMinWidth = btn.style.minWidth;
+
+  if (rect.width > 0) {
+    btn.style.minWidth = `${Math.ceil(rect.width)}px`;
+  }
+
+  btn.classList.add('is-copied');
+  btn.disabled = true;
+  btn.innerHTML = `${lucide('check', 14)} <span>${escapeHtml(copiedLabel)}</span>`;
+
+  clearTimeout(btn._ypsCopiedTimer);
+
+  btn._ypsCopiedTimer = window.setTimeout(() => {
+    btn.classList.remove('is-copied');
+    btn.disabled = false;
+    btn.innerHTML = originalHtml;
+    btn.style.minWidth = previousMinWidth;
+  }, duration);
+}
+
+async function copyTextWithButtonFeedback(text, btn) {
   try {
     await navigator.clipboard.writeText(text);
-    await yantaAlert({
-      title: 'Copied',
-      message: 'The public share link was copied to your clipboard.',
-      icon: 'copy',
-      confirmLabel: 'Done',
-    });
-  } catch {
+    setButtonCopied(btn);
+    return true;
+  } catch (err) {
+    console.warn('[YANTA Public Share] copy failed', err);
+
     await yantaAlert({
       title: 'Copy failed',
       message: text,
       icon: 'copy',
       confirmLabel: 'Close',
     });
+
+    return false;
   }
 }
 
@@ -414,8 +535,8 @@ export async function openShareFallbackModal({
 
   modal.querySelector('[data-yps-share-qr]')?.append(renderQrSvg(url, 224));
 
-  modal.querySelector('[data-yps-copy-share-link]')?.addEventListener('click', async () => {
-    await copyText(url);
+  modal.querySelector('[data-yps-copy-share-link]')?.addEventListener('click', async (e) => {
+    await copyTextWithButtonFeedback(url, e.currentTarget);
   });
 
   modal.hidden = false;
@@ -813,35 +934,41 @@ export function renderPublicShareCalendarSectionHtml(payload = {}) {
 
                 <button class="yps-btn" type="button" data-yps-event-action="edit-yanta">
                   ${lucide('pencil', 14)}
-                  <span>Edit and add to Calendar</span>
+                  <span>Edit and add</span>
                 </button>
-              </div>
 
-              <div class="yps-event-secondary-actions">
                 <button class="yps-btn" type="button" data-yps-event-action="download-ics">
-                  ${lucide('download', 13)}
+                  ${lucide('download', 14)}
                   <span>Download .ics</span>
                 </button>
 
-                <a class="yps-btn" href="${escapeAttr(googleCalendarUrl(ev))}" target="_blank" rel="noopener noreferrer">
-                  ${lucide('external-link', 13)}
-                  <span>Google Calendar</span>
-                </a>
+                <span class="yps-event-more-wrap">
+                  <button class="yps-icon-btn" type="button" data-yps-event-more title="More calendar options" aria-label="More calendar options">
+                    ${lucide('ellipsis', 17)}
+                  </button>
 
-                <a class="yps-btn" href="${escapeAttr(outlookCalendarUrl(ev, 'https://outlook.live.com'))}" target="_blank" rel="noopener noreferrer">
-                  ${lucide('external-link', 13)}
-                  <span>Outlook</span>
-                </a>
+                  <span class="yps-event-more-menu" data-yps-event-more-menu hidden>
+                    <a href="${escapeAttr(googleCalendarUrl(ev))}" target="_blank" rel="noopener noreferrer">
+                      ${lucide('external-link', 13)}
+                      <span>Google Calendar</span>
+                    </a>
 
-                <a class="yps-btn" href="${escapeAttr(outlookCalendarUrl(ev, 'https://outlook.office.com'))}" target="_blank" rel="noopener noreferrer">
-                  ${lucide('external-link', 13)}
-                  <span>Office 365</span>
-                </a>
+                    <a href="${escapeAttr(outlookCalendarUrl(ev, 'https://outlook.live.com'))}" target="_blank" rel="noopener noreferrer">
+                      ${lucide('external-link', 13)}
+                      <span>Outlook</span>
+                    </a>
 
-                <a class="yps-btn" href="${escapeAttr(yahooCalendarUrl(ev))}" target="_blank" rel="noopener noreferrer">
-                  ${lucide('external-link', 13)}
-                  <span>Yahoo</span>
-                </a>
+                    <a href="${escapeAttr(outlookCalendarUrl(ev, 'https://outlook.office.com'))}" target="_blank" rel="noopener noreferrer">
+                      ${lucide('external-link', 13)}
+                      <span>Office 365</span>
+                    </a>
+
+                    <a href="${escapeAttr(yahooCalendarUrl(ev))}" target="_blank" rel="noopener noreferrer">
+                      ${lucide('external-link', 13)}
+                      <span>Yahoo</span>
+                    </a>
+                  </span>
+                </span>
               </div>
             </div>
           </article>
@@ -851,7 +978,15 @@ export function renderPublicShareCalendarSectionHtml(payload = {}) {
   `;
 }
 
+function closeAllEventMoreMenus(root = document, except = null) {
+  root.querySelectorAll('[data-yps-event-more-menu]').forEach((menu) => {
+    if (menu !== except) menu.hidden = true;
+  });
+}
+
 export function bindPublicShareCalendarActions(root = document, payload = {}) {
+  injectEnhancementCss();
+
   const events = publicShareCalendarEvents(payload);
 
   root.querySelectorAll('[data-yps-event-index]').forEach((card) => {
@@ -859,6 +994,18 @@ export function bindPublicShareCalendarActions(root = document, payload = {}) {
     const ev = events[index];
 
     if (!ev) return;
+
+    const moreBtn = card.querySelector('[data-yps-event-more]');
+    const moreMenu = card.querySelector('[data-yps-event-more-menu]');
+
+    moreBtn?.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const nextHidden = !moreMenu.hidden;
+      closeAllEventMoreMenus(document, moreMenu);
+      moreMenu.hidden = nextHidden;
+    });
 
     card.querySelectorAll('[data-yps-event-action]').forEach((btn) => {
       btn.addEventListener('click', async (e) => {
@@ -883,4 +1030,22 @@ export function bindPublicShareCalendarActions(root = document, payload = {}) {
       });
     });
   });
+
+  if (!outsideMenuBound) {
+    outsideMenuBound = true;
+
+    document.addEventListener('pointerdown', (e) => {
+      if (e.target.closest?.('[data-yps-event-more], [data-yps-event-more-menu]')) {
+        return;
+      }
+
+      closeAllEventMoreMenus(document);
+    }, true);
+
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        closeAllEventMoreMenus(document);
+      }
+    });
+  }
 }

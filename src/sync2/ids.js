@@ -107,3 +107,27 @@ export function vaultUpdatesPrefix() {
 export function vaultSnapshotsPrefix() {
   return joinRemotePath(SYNC_ROOT, 'vault', 'snapshots') + '/';
 }
+
+export function createAssetObjectId() {
+  const raw = crypto.randomUUID
+    ? crypto.randomUUID().replace(/-/g, '')
+    : Math.random().toString(36).slice(2) + Date.now().toString(36);
+
+  return `asset_obj_${raw.slice(0, 28)}`;
+}
+
+/**
+ * Object path for v2 asset blobs.
+ * assetObjectId is already opaque and random.
+ */
+export function assetObjectBlobPath(assetObjectId) {
+  const clean = String(assetObjectId || '')
+    .replace(/[^a-zA-Z0-9_-]/g, '')
+    .slice(0, 80);
+
+  if (!clean) {
+    throw new Error('assetObjectId required');
+  }
+
+  return joinRemotePath(SYNC_ROOT, 'assets', `${clean}.blob.enc`);
+}

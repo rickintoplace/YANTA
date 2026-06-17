@@ -246,3 +246,39 @@ export async function decryptJson(contentKey, envelopeBytes, aad = '') {
   const plain = await decryptBytes(contentKey, envelopeBytes, aad);
   return JSON.parse(utf8Decode(plain));
 }
+
+// ============================================================
+// Generic raw AES-GCM helpers for Asset Keys / Share Keys
+// ============================================================
+
+export async function importAesGcmKey(rawKeyBytes, usages = ['encrypt', 'decrypt']) {
+  const raw =
+    rawKeyBytes instanceof Uint8Array
+      ? rawKeyBytes
+      : new Uint8Array(rawKeyBytes);
+
+  if (raw.byteLength !== 32) {
+    throw new Error('AES-256 key must be 32 bytes');
+  }
+
+  return crypto.subtle.importKey(
+    'raw',
+    raw,
+    { name: 'AES-GCM' },
+    false,
+    usages
+  );
+}
+
+export async function exportRawKeyBytes(cryptoKey) {
+  const raw = await crypto.subtle.exportKey('raw', cryptoKey);
+  return new Uint8Array(raw);
+}
+
+export function encryptedEnvelopeToString(envelopeBytes) {
+  return utf8Decode(envelopeBytes);
+}
+
+export function encryptedEnvelopeFromString(envelopeString) {
+  return utf8Encode(String(envelopeString || ''));
+}

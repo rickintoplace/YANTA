@@ -200,6 +200,16 @@ function sanitizeImageMeta(image) {
     type: rest.type ? String(rest.type) : undefined,
     ts: Number(rest.ts || rest.updated || Date.now()),
     updated: Number(rest.updated || rest.ts || Date.now()),
+
+    // Asset-key architecture v2.
+    encryptionVersion: Number(rest.encryptionVersion || 1),
+    objectId: rest.objectId ? String(rest.objectId) : undefined,
+    objectPath: rest.objectPath ? String(rest.objectPath) : undefined,
+    keyVersion: Number(rest.keyVersion || 1),
+    keyAlg: rest.keyAlg ? String(rest.keyAlg) : undefined,
+    encryptedAssetKeyForVault: rest.encryptedAssetKeyForVault
+      ? String(rest.encryptedAssetKeyForVault)
+      : undefined,
   });
 }
 

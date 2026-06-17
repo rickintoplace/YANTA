@@ -2691,6 +2691,421 @@ async function handleRssImage(env, req, url, headers) {
   return res;
 }
 __name(handleRssImage, "handleRssImage");
+
+// ============================================================
+// Public Shares
+// ============================================================
+
+function publicSharePayloadKey(shareId) {
+  return `public-shares/${shareId}/payload.enc`;
+}
+
+function isShareActive(row) {
+  if (!row) return false;
+  if (row.status !== 'active') return false;
+  if (row.revoked_at) return false;
+  if (row.expires_at && Number(row.expires_at) <= now()) return false;
+  return true;
+}
+
+function publicShareId() {
+  return `s_${randomToken(9)}`;
+}
+
+async function requireOwnedPublicShare(env, user, shareId) {
+  const row = await env.DB.prepare(
+    `SELECT *
+     FROM public_shares
+     WHERE id = ? AND owner_user_id = ?`
+  ).bind(shareId, user.userId).first();
+
+  if (!row) {
+    const err = new Error('Public share not found');
+    err.status = 404;
+    throw err;
+  }
+
+  return row;
+}
+
+async function handleCreatePublicShare(env, req, headers) {
+  const user = await requireUser(env, req);
+  const body = await bodyJson(req);
+
+  const vaultId = String(body.vaultId || '').trim();
+  const sourceType = String(body.sourceType || 'note').trim();
+  const sourceId = String(body.sourceId || '').trim();
+  const expiresAt = body.expiresAt ? Number(body.expiresAt) : null;
+
+  if (!sourceId) {
+    return json({ ok: false, message: 'sourceId required' }, 400, headers);
+  }
+
+  if (vaultId) {
+    await requireVault(env, user, vaultId);
+  }
+
+  const shareId = publicShareId();
+  const t = now();
+
+  await env.DB.prepare(
+    `INSERT INTO public_shares
+     (id, owner_user_id, vault_id, source_type, source_id, status, expires_at, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?)`
+  ).bind(
+    shareId,
+    user.userId,
+    vaultId || null,
+    sourceType,
+    sourceId,
+    expiresAt,
+    t,
+    t
+  ).run();
+
+  await audit(env, req, 'public_share_created', user.userId, {
+    shareId,
+    vaultId,
+    sourceType,
+    sourceId,
+  });
+
+  return json({
+    ok: true,
+    share: {
+      id: shareId,
+      shareId,
+      vaultId: vaultId || null,
+      sourceType,
+      sourceId,
+      expiresAt,
+      status: 'active',
+      createdAt: t,
+      updatedAt: t,
+    },
+  }, 200, headers);
+}
+
+async function handleListPublicShares(env, req, headers) {
+  const user = await requireUser(env, req);
+
+  const rows = await env.DB.prepare(
+    `SELECT id, vault_id, source_type, source_id, status, expires_at, revoked_at,
+            created_at, updated_at, last_published_at, payload_size_bytes
+     FROM public_shares
+     WHERE owner_user_id = ?
+     ORDER BY updated_at DESC`
+  ).bind(user.userId).all();
+
+  return json({
+    shares: (rows.results || []).map((r) => ({
+      id: r.id,
+      shareId: r.id,
+      vaultId: r.vault_id || null,
+      sourceType: r.source_type,
+      sourceId: r.source_id,
+      status: r.status,
+      expiresAt: r.expires_at || null,
+      revokedAt: r.revoked_at || null,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at,
+      lastPublishedAt: r.last_published_at || null,
+      payloadSizeBytes: r.payload_size_bytes || 0,
+    })),
+  }, 200, headers);
+}
+
+async function handlePutPublicSharePayload(env, req, url, headers) {
+  const user = await requireUser(env, req);
+
+  const m = url.pathname.match(/^\/api\/public-shares\/([^/]+)\/payload$/);
+  const shareId = m?.[1] || '';
+
+  if (!shareId) {
+    return json({ ok: false, message: 'shareId required' }, 400, headers);
+  }
+
+  const share = await requireOwnedPublicShare(env, user, shareId);
+
+  if (share.status !== 'active' || share.revoked_at) {
+    return json({ ok: false, message: 'Share is revoked' }, 409, headers);
+  }
+
+  const body = await bodyJson(req);
+
+  const encryptedPayload = String(body.encryptedPayload || '');
+  const payloadBytes = new TextEncoder().encode(encryptedPayload);
+  const assetGrants = Array.isArray(body.assetGrants) ? body.assetGrants : [];
+  const etag = String(body.etag || `"${payloadBytes.byteLength}-${now()}"`);
+
+  if (!encryptedPayload) {
+    return json({ ok: false, message: 'encryptedPayload required' }, 400, headers);
+  }
+
+  if (payloadBytes.byteLength > 4 * 1024 * 1024) {
+    return json({ ok: false, message: 'Public share payload too large' }, 413, headers);
+  }
+
+  const objectKey = publicSharePayloadKey(shareId);
+
+  await env.OBJECTS.put(objectKey, payloadBytes, {
+    httpMetadata: {
+      contentType: 'application/octet-stream',
+    },
+    customMetadata: {
+      shareId,
+      ownerUserId: user.userId,
+    },
+  });
+
+  const t = now();
+
+  await env.DB.prepare(
+    `UPDATE public_shares
+     SET payload_object_key = ?,
+         payload_etag = ?,
+         payload_size_bytes = ?,
+         updated_at = ?,
+         last_published_at = ?
+     WHERE id = ? AND owner_user_id = ?`
+  ).bind(
+    objectKey,
+    etag,
+    payloadBytes.byteLength,
+    t,
+    t,
+    shareId,
+    user.userId
+  ).run();
+
+  await env.DB.prepare(
+    `DELETE FROM public_share_assets WHERE share_id = ?`
+  ).bind(shareId).run();
+
+  const insert = env.DB.prepare(
+    `INSERT INTO public_share_assets
+     (share_id, asset_object_id, object_path, size_bytes, mime, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  );
+
+  for (const raw of assetGrants) {
+    const assetObjectId = String(raw.assetObjectId || raw.objectId || '').trim();
+    const objectPath = normalizeRemotePath(String(raw.objectPath || '').trim());
+
+    if (!assetObjectId || !objectPath.startsWith('yanta-sync-v1/assets/')) {
+      continue;
+    }
+
+    await insert.bind(
+      shareId,
+      assetObjectId,
+      objectPath,
+      Number(raw.sizeBytes || raw.size || 0) || 0,
+      String(raw.mime || '').slice(0, 120),
+      t
+    ).run();
+  }
+
+  await audit(env, req, 'public_share_published', user.userId, {
+    shareId,
+    assetGrantCount: assetGrants.length,
+  });
+
+  return json({
+    ok: true,
+    shareId,
+    etag,
+    updatedAt: t,
+  }, 200, headers);
+}
+
+async function handlePatchPublicShare(env, req, url, headers) {
+  const user = await requireUser(env, req);
+
+  const m = url.pathname.match(/^\/api\/public-shares\/([^/]+)$/);
+  const shareId = m?.[1] || '';
+
+  const share = await requireOwnedPublicShare(env, user, shareId);
+  const body = await bodyJson(req);
+
+  const patch = {};
+  const params = [];
+
+  if (Object.prototype.hasOwnProperty.call(body, 'expiresAt')) {
+    patch.expires_at = body.expiresAt ? Number(body.expiresAt) : null;
+  }
+
+  if (body.status === 'revoked') {
+    patch.status = 'revoked';
+    patch.revoked_at = now();
+  }
+
+  if (!Object.keys(patch).length) {
+    return json({ ok: true }, 200, headers);
+  }
+
+  patch.updated_at = now();
+
+  const sets = Object.keys(patch).map((k) => {
+    params.push(patch[k]);
+    return `${k} = ?`;
+  });
+
+  params.push(share.id, user.userId);
+
+  await env.DB.prepare(
+    `UPDATE public_shares
+     SET ${sets.join(', ')}
+     WHERE id = ? AND owner_user_id = ?`
+  ).bind(...params).run();
+
+  return json({ ok: true }, 200, headers);
+}
+
+async function handleDeletePublicShare(env, req, url, headers) {
+  const user = await requireUser(env, req);
+
+  const m = url.pathname.match(/^\/api\/public-shares\/([^/]+)$/);
+  const shareId = m?.[1] || '';
+
+  const share = await requireOwnedPublicShare(env, user, shareId);
+  const t = now();
+
+  await env.DB.prepare(
+    `UPDATE public_shares
+     SET status = 'revoked',
+         revoked_at = COALESCE(revoked_at, ?),
+         updated_at = ?
+     WHERE id = ? AND owner_user_id = ?`
+  ).bind(t, t, share.id, user.userId).run();
+
+  await env.DB.prepare(
+    `DELETE FROM public_share_assets WHERE share_id = ?`
+  ).bind(share.id).run();
+
+  if (share.payload_object_key) {
+    await env.OBJECTS.delete(share.payload_object_key).catch(() => {});
+  }
+
+  await audit(env, req, 'public_share_revoked', user.userId, { shareId });
+
+  return json({ ok: true }, 200, headers);
+}
+
+async function handleGetPublicShare(env, req, url, headers) {
+  const m = url.pathname.match(/^\/api\/public-shares\/([^/]+)$/);
+  const shareId = m?.[1] || '';
+
+  const row = await env.DB.prepare(
+    `SELECT id, status, expires_at, revoked_at, updated_at, last_published_at,
+            payload_object_key, payload_etag, payload_size_bytes
+     FROM public_shares
+     WHERE id = ?`
+  ).bind(shareId).first();
+
+  if (!isShareActive(row)) {
+    return json({ error: 'not_found' }, 404, {
+      ...headers,
+      'cache-control': 'no-store',
+    });
+  }
+
+  if (!row.payload_object_key) {
+    return json({ error: 'not_published' }, 404, {
+      ...headers,
+      'cache-control': 'no-store',
+    });
+  }
+
+  const obj = await env.OBJECTS.get(row.payload_object_key);
+
+  if (!obj) {
+    return json({ error: 'payload_missing' }, 404, {
+      ...headers,
+      'cache-control': 'no-store',
+    });
+  }
+
+  const payload = await obj.text();
+
+  return json({
+    shareId: row.id,
+    status: row.status,
+    expiresAt: row.expires_at || null,
+    updatedAt: row.updated_at,
+    lastPublishedAt: row.last_published_at || null,
+    etag: row.payload_etag || '',
+    payloadSizeBytes: row.payload_size_bytes || 0,
+    encryptedPayload: payload,
+  }, 200, {
+    ...headers,
+    'cache-control': 'no-store',
+  });
+}
+
+async function handleGetPublicShareAsset(env, req, url, headers) {
+  const m = url.pathname.match(/^\/api\/public-shares\/([^/]+)\/assets\/([^/]+)$/);
+  const shareId = m?.[1] || '';
+  const assetObjectId = decodeURIComponent(m?.[2] || '');
+
+  const share = await env.DB.prepare(
+    `SELECT id, status, expires_at, revoked_at
+     FROM public_shares
+     WHERE id = ?`
+  ).bind(shareId).first();
+
+  if (!isShareActive(share)) {
+    return json({ error: 'not_found' }, 404, {
+      ...headers,
+      'cache-control': 'no-store',
+    });
+  }
+
+  const grant = await env.DB.prepare(
+    `SELECT object_path, size_bytes, mime
+     FROM public_share_assets
+     WHERE share_id = ? AND asset_object_id = ?`
+  ).bind(shareId, assetObjectId).first();
+
+  if (!grant) {
+    return json({ error: 'not_found' }, 404, {
+      ...headers,
+      'cache-control': 'no-store',
+    });
+  }
+
+  const ownerRow = await env.DB.prepare(
+    `SELECT owner_user_id, vault_id
+     FROM public_shares
+     WHERE id = ?`
+  ).bind(shareId).first();
+
+  if (!ownerRow?.owner_user_id || !ownerRow?.vault_id) {
+    return json({ error: 'not_found' }, 404, headers);
+  }
+
+  const obj = await env.OBJECTS.get(
+    r2Key(ownerRow.owner_user_id, ownerRow.vault_id, grant.object_path)
+  );
+
+  if (!obj) {
+    return json({ error: 'object_missing' }, 404, {
+      ...headers,
+      'cache-control': 'no-store',
+    });
+  }
+
+  return new Response(obj.body, {
+    status: 200,
+    headers: {
+      ...headers,
+      'content-type': 'application/octet-stream',
+      'cache-control': 'no-store',
+      'content-length': grant.size_bytes ? String(grant.size_bytes) : undefined,
+    },
+  });
+}
+
 async function route(req, env) {
   const headers = corsHeaders(env, req);
   if (!originAllowed(env, req)) {
@@ -2781,6 +3196,36 @@ async function route(req, env) {
     }
     if (url.pathname === "/api/youtube/channel-videos" && req.method === "GET") {
       return handleYoutubeChannelVideos(env, req, url, headers);
+    }
+
+    // Owner Public Share APIs
+    if (url.pathname === "/api/public-shares" && req.method === "GET") {
+      return handleListPublicShares(env, req, headers);
+    }
+
+    if (url.pathname === "/api/public-shares" && req.method === "POST") {
+      return handleCreatePublicShare(env, req, headers);
+    }
+
+    if (/^\/api\/public-shares\/[^/]+\/payload$/.test(url.pathname) && req.method === "PUT") {
+      return handlePutPublicSharePayload(env, req, url, headers);
+    }
+
+    if (/^\/api\/public-shares\/[^/]+$/.test(url.pathname) && req.method === "PATCH") {
+      return handlePatchPublicShare(env, req, url, headers);
+    }
+
+    if (/^\/api\/public-shares\/[^/]+$/.test(url.pathname) && req.method === "DELETE") {
+      return handleDeletePublicShare(env, req, url, headers);
+    }
+
+    // Public APIs, no auth
+    if (/^\/api\/public-shares\/[^/]+$/.test(url.pathname) && req.method === "GET") {
+      return handleGetPublicShare(env, req, url, headers);
+    }
+
+    if (/^\/api\/public-shares\/[^/]+\/assets\/[^/]+$/.test(url.pathname) && req.method === "GET") {
+      return handleGetPublicShareAsset(env, req, url, headers);
     }
     return json({ error: "not_found" }, 404, headers);
   } catch (err) {

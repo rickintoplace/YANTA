@@ -5,6 +5,10 @@
     {
       "source": "/cloud-api/:path*",
       "destination": "https://yanta-cloud.rickintoplace.workers.dev/:path*"
+    },
+    {
+      "source": "/share/:path*",
+      "destination": "/index.html"
     }
   ],
   "headers": [
@@ -38,34 +42,16 @@
       ]
     },
     {
-      "source": "/",
-      "headers": [
-        {
-          "key": "Cache-Control",
-          "value": "public, max-age=0, must-revalidate"
-        }
-      ]
-    },
-    {
-      "source": "/index.html",
-      "headers": [
-        {
-          "key": "Cache-Control",
-          "value": "public, max-age=0, must-revalidate"
-        }
-      ]
-    },
-    {
-      "source": "/assets/(.*)",
-      "headers": [
-        {
-          "key": "Cache-Control",
-          "value": "public, max-age=31536000, immutable"
-        }
-      ]
-    },
-    {
       "source": "/cloud-api/:path*",
+      "headers": [
+        {
+          "key": "Cache-Control",
+          "value": "no-store"
+        }
+      ]
+    },
+    {
+      "source": "/share/:path*",
       "headers": [
         {
           "key": "Cache-Control",

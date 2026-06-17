@@ -35,7 +35,16 @@ import { syncRestore, syncConnect, syncDisconnect, syncFull, openSyncSetup, clos
 import { openGraph, closeGraph, setupGraphInteractions, openGraphPane } from './graph.js';
 import { wikilinkIndex } from './features-state.js';
 import { getNoteDoc, noteMarkdown, drawingsTextForNote, citationsTextForNote } from './yjs.js';
-import { openShareModal, closeShareModal, stopSharing, restoreSharedNotes, handleShareUrl } from './sharing.js';
+import { closeShareModal, stopSharing, restoreSharedNotes, handleShareUrl } from './sharing.js';
+
+import {
+  openUnifiedShareModal,
+  closeUnifiedShareModal,
+} from './public-share/public-share-ui.js';
+
+import {
+  setupPublicShareAutoPublisher,
+} from './public-share/public-share-publisher.js';
 import { setupDraw, createDrawingAndInsert, importExcalidrawFileIntoCurrent } from './draw.js';
 import { setupCitations, openCitationManager } from './citations.js';
 import {
@@ -671,11 +680,7 @@ function sanitizeStartupFolderMeta(folder) {
 function sanitizeStartupImageMeta(image) {
   if (!image || typeof image !== 'object') return null;
 
-  const {
-    blob,
-    data,
-    ...rest
-  } = image;
+  const { blob, data, ...rest } = image;
 
   return cleanUndefinedForStartupHydrate({
     id: String(rest.id || ''),
@@ -684,6 +689,16 @@ function sanitizeStartupImageMeta(image) {
     type: rest.type ? String(rest.type) : undefined,
     ts: Number(rest.ts || rest.updated || Date.now()),
     updated: Number(rest.updated || rest.ts || Date.now()),
+
+    // Asset-key architecture v2.
+    encryptionVersion: Number(rest.encryptionVersion || 1),
+    objectId: rest.objectId ? String(rest.objectId) : undefined,
+    objectPath: rest.objectPath ? String(rest.objectPath) : undefined,
+    keyVersion: Number(rest.keyVersion || 1),
+    keyAlg: rest.keyAlg ? String(rest.keyAlg) : undefined,
+    encryptedAssetKeyForVault: rest.encryptedAssetKeyForVault
+      ? String(rest.encryptedAssetKeyForVault)
+      : undefined,
   });
 }
 
@@ -1119,7 +1134,7 @@ async function init() {
     syncFull,
     syncDisconnect,
     cleanupUnusedImages,
-    openShareModal,
+    openShareModal: openUnifiedShareModal,
     stopSharing: () => stopSharing(state.currentNoteId),
     importFiles,
     importFolder: () => $('importFolder').click(),
@@ -1136,6 +1151,7 @@ async function init() {
   setupAssistant();
   setupFloatingCreate();
   setupRss();
+  setupPublicShareAutoPublisher();
   setupSync2ProgressUi();
   setupSyncReminderUi();
 
@@ -1895,7 +1911,7 @@ function bindEvents() {
   $('btn-delete').addEventListener('click', deleteCurrentNote);
   $('btn-insert-image').addEventListener('click', openImageModal);
   $('btn-cite')?.addEventListener('click', () => openCitationManager());
-  $('btn-share').addEventListener('click', openShareModal);
+  $('btn-share').addEventListener('click', openUnifiedShareModal);
 
   // Share modal
   $('btn-share-copy').addEventListener('click', async () => {
@@ -2296,6 +2312,7 @@ function handleGlobalKey(e) {
   else if (e.key === 'Escape') {
     closeImageModal();
     closeShareModal();
+    closeUnifiedShareModal();
     closeMenu();
     closePalette();
 
@@ -2731,7 +2748,16 @@ function rebuildScrollMaps(sync) {
   sync.maxPreview = Math.max(1, pvPane.scrollHeight - pvPane.clientHeight);
 }
 
-init().catch((e) => {
-  console.error(e);
-  toast('Failed to start: ' + e.message, 'error');
-});
+if (location.pathname.startsWith('/share/')) {
+  import('./public-share/public-share-viewer.js')
+    .then((m) => m.mountPublicShareViewer())
+    .catch((e) => {
+      console.error(e);
+      document.body.innerHTML = '<main style="padding:24px;font-family:system-ui">Could not load share viewer.</main>';
+    });
+} else {
+  init().catch((e) => {
+    console.error(e);
+    toast('Failed to start: ' + e.message, 'error');
+  });
+}

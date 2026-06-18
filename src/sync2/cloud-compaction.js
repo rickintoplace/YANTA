@@ -40,6 +40,7 @@ import {
 
 import {
   sync2LocalVaultContentFingerprint,
+  sync2NoteContentFingerprint,
 } from './app-engine.js';
 
 const DEFAULT_MIN_HEADROOM_BYTES = 3 * 1024 * 1024;
@@ -189,12 +190,21 @@ async function markLocalFullUpdateMarkersCovered(engine, noteIds = []) {
 
     const version = sync2ObjectVersion(note);
 
-    if (!version) continue;
+    if (version > 0) {
+      await engine.localState.set(
+        `sync2.fullUpdateUploaded.note.${noteId}.version`,
+        version
+      );
+    }
 
-    await engine.localState.set(
-      `sync2.fullUpdateUploaded.note.${noteId}.version`,
-      version
-    );
+    const noteFingerprint = await sync2NoteContentFingerprint(noteId);
+
+    if (noteFingerprint) {
+      await engine.localState.set(
+        `sync2.fullUpdateUploaded.note.${noteId}.fingerprint`,
+        noteFingerprint
+      );
+    }
   }
 }
 

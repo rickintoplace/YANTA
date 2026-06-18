@@ -479,6 +479,69 @@ export async function sync2LocalVaultContentFingerprint() {
   return `sha256:${base64UrlEncode(digest)}`;
 }
 
+export async function sync2NoteContentFingerprint(noteId) {
+  if (!noteId) return '';
+
+  try {
+    const entry = getNoteDoc(noteId);
+    await entry.ready;
+
+    const update = encodeNoteState(noteId);
+    const digest = await sha256(update);
+
+    return `sha256:${base64UrlEncode(digest)}`;
+  } catch {
+    return '';
+  }
+}
+
+function noteFingerprintMarkerKey(noteId) {
+  return `sync2.fullUpdateUploaded.note.${noteId}.fingerprint`;
+}
+
+function legacyNoteVersionMarkerKey(noteId) {
+  return `sync2.fullUpdateUploaded.note.${noteId}.version`;
+}
+
+async function currentNoteFingerprintMarker(localState, noteId) {
+  const fingerprint = await sync2NoteContentFingerprint(noteId);
+  const markerKey = noteFingerprintMarkerKey(noteId);
+
+  let lastFingerprint =
+    String(await localState.get(markerKey, '') || '');
+
+  /*
+    Migration compatibility:
+    Older builds used note.updated timestamps as full-update markers.
+    If that marker already covers the current metadata version, initialize
+    the content fingerprint marker without uploading a redundant full note.
+  */
+  if (!lastFingerprint) {
+    const note =
+      state.notes.get(noteId) ||
+      vaultNotesMap().get(noteId);
+
+    const currentVersion = sync2ObjectVersion(note);
+    const legacyVersion =
+      Number(await localState.get(legacyNoteVersionMarkerKey(noteId), 0)) || 0;
+
+    if (
+      fingerprint &&
+      currentVersion > 0 &&
+      legacyVersion >= currentVersion
+    ) {
+      await localState.set(markerKey, fingerprint);
+      lastFingerprint = fingerprint;
+    }
+  }
+
+  return {
+    markerKey,
+    fingerprint,
+    lastFingerprint,
+  };
+}
+
 const SYNC2_VAULT_FINGERPRINT_MARKER_KEY =
   'sync2.fullUpdateUploaded.vault.fingerprint';
 
@@ -1154,21 +1217,17 @@ export class Sync2AppEngine {
       if (!noteId) continue;
       if (vaultTombstonesMap().has(noteId)) continue;
 
-      const note =
-        state.notes.get(noteId) ||
-        vaultNotesMap().get(noteId);
+      const {
+        markerKey,
+        fingerprint,
+        lastFingerprint,
+      } = await currentNoteFingerprintMarker(this.localState, noteId);
 
-      const version = sync2ObjectVersion(note);
+      if (!fingerprint) continue;
 
-      if (!version) continue;
+      if (fingerprint === lastFingerprint) continue;
 
-      const markerKey = `sync2.fullUpdateUploaded.note.${noteId}.version`;
-      const lastVersion =
-        Number(await this.localState.get(markerKey, 0)) || 0;
-
-      if (version <= lastVersion) continue;
-
-      if (outboxHasUploadMarker(this.outbox, markerKey, version)) {
+      if (outboxHasUploadMarker(this.outbox, markerKey, fingerprint)) {
         continue;
       }
 
@@ -1195,7 +1254,7 @@ export class Sync2AppEngine {
           afterUploadLocalStateSet: [
             {
               key: markerKey,
-              value: version,
+              value: fingerprint,
             },
           ],
         });
@@ -1680,6 +1739,105 @@ export class Sync2AppEngine {
     }
   }
 
+  async dropRedundantNoteOutboxUpdates() {
+    /*
+      Critical loop guard:
+      If a note update is queued but the current note Y.Doc fingerprint is
+      already marked as uploaded, the queued update is redundant.
+
+      This can happen after remote apply / hydration side effects or after
+      observer updates that were already covered by a snapshot/full update.
+    */
+
+    if (!Array.isArray(this.outbox) || !this.outbox.some((item) => item?.kind === 'note')) {
+      return {
+        dropped: 0,
+      };
+    }
+
+    const next = [];
+    let dropped = 0;
+
+    for (const item of this.outbox) {
+      if (item?.kind !== 'note' || !item.noteId) {
+        next.push(item);
+        continue;
+      }
+
+      const {
+        fingerprint,
+        lastFingerprint,
+      } = await currentNoteFingerprintMarker(this.localState, item.noteId);
+
+      if (fingerprint && fingerprint === lastFingerprint) {
+        dropped++;
+        continue;
+      }
+
+      next.push(item);
+    }
+
+    this.outbox = next;
+
+    if (dropped > 0) {
+      this.progress?.({
+        phase: 'uploadOutbox',
+        direction: 'up',
+        detailed: false,
+        message: `Dropped ${dropped} redundant note update${dropped === 1 ? '' : 's'}.`,
+      });
+    }
+
+    return {
+      dropped,
+    };
+  }
+
+  async tagNoteOutboxUpdatesWithCurrentFingerprints() {
+    /*
+      Direct note observer updates normally do not carry full-update markers.
+      If we upload them successfully, mark the current Y.Doc fingerprint as
+      covered so the next routine sync does not upload a redundant full note.
+    */
+
+    if (!Array.isArray(this.outbox) || !this.outbox.some((item) => item?.kind === 'note')) {
+      return;
+    }
+
+    const noteIds = [
+      ...new Set(
+        this.outbox
+          .filter((item) => item?.kind === 'note' && item.noteId)
+          .map((item) => String(item.noteId))
+      ),
+    ];
+
+    const markersByNoteId = new Map();
+
+    for (const noteId of noteIds) {
+      const {
+        markerKey,
+        fingerprint,
+      } = await currentNoteFingerprintMarker(this.localState, noteId);
+
+      if (!fingerprint) continue;
+
+      markersByNoteId.set(noteId, {
+        markerKey,
+        fingerprint,
+      });
+    }
+
+    for (const item of this.outbox) {
+      if (item?.kind !== 'note' || !item.noteId) continue;
+
+      const marker = markersByNoteId.get(String(item.noteId));
+      if (!marker) continue;
+
+      ensureOutboxMarker(item, marker.markerKey, marker.fingerprint);
+    }
+  }
+
   compactOutboxForUpload() {
     /*
       storage optimization:
@@ -1845,14 +2003,16 @@ export class Sync2AppEngine {
         fingerprint did not change.
       */
       await this.dropRedundantVaultOutboxUpdates();
+      await this.dropRedundantNoteOutboxUpdates();
 
       this.compactOutboxForUpload();
 
       /*
-        If a real Vault update remains, tag it with the current semantic
-        fingerprint so future routine syncs know this Vault state is covered.
+        If real updates remain, tag them with current semantic/content
+        fingerprints so future routine syncs know this state is covered.
       */
       await this.tagVaultOutboxUpdatesWithCurrentFingerprint();
+      await this.tagNoteOutboxUpdatesWithCurrentFingerprints();
 
       let uploaded = 0;
 
@@ -1907,20 +2067,32 @@ export class Sync2AppEngine {
             ensureOutboxMarker(item, markerKey, fingerprint);
           }
         }
-        
-        if (item.kind === 'note' && vaultTombstonesMap().has(item.noteId)) {
-          this.outbox.shift();
 
-          this.progress({
-            phase: 'uploadOutbox',
-            direction: 'up',
-            current: Math.min(processed, total),
-            total,
-            noteId: item.noteId || null,
-            message: 'Skipped tombstoned note update.',
-          });
+        if (item.kind === 'note' && item.noteId) {
+          const {
+            markerKey,
+            fingerprint,
+            lastFingerprint,
+          } = await currentNoteFingerprintMarker(this.localState, item.noteId);
 
-          continue;
+          if (fingerprint && fingerprint === lastFingerprint) {
+            this.outbox.shift();
+
+            this.progress({
+              phase: 'uploadOutbox',
+              direction: 'up',
+              current: Math.min(processed, total),
+              total,
+              noteId: item.noteId || null,
+              message: 'Skipped redundant note update.',
+            });
+
+            continue;
+          }
+
+          if (fingerprint) {
+            ensureOutboxMarker(item, markerKey, fingerprint);
+          }
         }
 
         const seq = this.seq + 1;
@@ -2324,9 +2496,6 @@ export class Sync2AppEngine {
 
     if (!ids.length) return;
 
-    const remoteBodyAppliedAt = Date.now();
-    const localMetadataWrites = [];
-
     for (const noteId of ids) {
       const note = state.notes.get(noteId);
       if (!note) continue;
@@ -2347,30 +2516,19 @@ export class Sync2AppEngine {
       );
 
       /*
-        Keep local UI/cache freshness on devices that pulled remote body
-        changes. This updated-only store write is safe because store-bridge
-        now ignores volatile-only VaultDoc changes.
+        Important:
+        Do NOT update note.updated here.
+        
+        This function runs after remote note body updates were applied.
+        If we set note.updated = Date.now() and persist it, the reliability
+        layer may interpret that as a local change and upload a redundant
+        full note update. With multiple devices this becomes a ping-pong loop.
+        
+        The body itself is already updated in the Y.Doc. Search/UI can refresh
+        without writing local metadata.
       */
-      const nextUpdated = Math.max(
-        Number(note.updated || 0),
-        remoteBodyAppliedAt
-      );
-
-      if (nextUpdated !== Number(note.updated || 0)) {
-        note.updated = nextUpdated;
-
-        localMetadataWrites.push(
-          store.notes.put(safeJsonClone(note)).catch((err) => {
-            console.warn('[YANTA Sync2] could not update pulled note timestamp', noteId, err);
-          })
-        );
-      }
     }
-
-    if (localMetadataWrites.length) {
-      await Promise.all(localMetadataWrites);
-    }
-
+    
     try {
       rebuildWikilinkIndex();
     } catch {}

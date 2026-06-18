@@ -18,6 +18,7 @@
 
 import {
   state,
+  store,
 } from '../core.js';
 
 import {
@@ -45,6 +46,22 @@ import {
 
 const DEFAULT_MIN_HEADROOM_BYTES = 3 * 1024 * 1024;
 const DEFAULT_KEEP_SNAPSHOTS_PER_DOC = 2;
+
+async function markCoveredBoth(engine, key, value) {
+  if (!key) return;
+
+  try {
+    await engine.localState?.set?.(key, value);
+  } catch (err) {
+    console.warn('[YANTA Sync2] could not write compaction local marker', key, err);
+  }
+
+  try {
+    await store.settings.set(key, value);
+  } catch (err) {
+    console.warn('[YANTA Sync2] could not write compaction settings marker', key, err);
+  }
+}
 
 function objectKind(path = '') {
   const p = String(path || '');
@@ -163,21 +180,27 @@ async function markLocalFullUpdateMarkersCovered(engine, noteIds = []) {
     Vault metadata state.
 
     Critical:
-    Routine sync now uses the semantic fingerprint marker, not just a timestamp.
-    Keeping the legacy version marker too is harmless and helps older clients.
+    Routine sync uses the semantic fingerprint marker, not just a timestamp.
+    We mirror markers into both:
+    - engine.localState
+    - store.settings
+
+    This makes compaction stable across reload/provider runtime state.
   */
   const vaultVersion = localVaultContentVersion();
   const vaultFingerprint = await sync2LocalVaultContentFingerprint();
 
   if (vaultVersion > 0) {
-    await engine.localState.set(
+    await markCoveredBoth(
+      engine,
       'sync2.fullUpdateUploaded.vault.version',
       vaultVersion
     );
   }
 
   if (vaultFingerprint) {
-    await engine.localState.set(
+    await markCoveredBoth(
+      engine,
       'sync2.fullUpdateUploaded.vault.fingerprint',
       vaultFingerprint
     );
@@ -191,7 +214,8 @@ async function markLocalFullUpdateMarkersCovered(engine, noteIds = []) {
     const version = sync2ObjectVersion(note);
 
     if (version > 0) {
-      await engine.localState.set(
+      await markCoveredBoth(
+        engine,
         `sync2.fullUpdateUploaded.note.${noteId}.version`,
         version
       );
@@ -200,7 +224,8 @@ async function markLocalFullUpdateMarkersCovered(engine, noteIds = []) {
     const noteFingerprint = await sync2NoteContentFingerprint(noteId);
 
     if (noteFingerprint) {
-      await engine.localState.set(
+      await markCoveredBoth(
+        engine,
         `sync2.fullUpdateUploaded.note.${noteId}.fingerprint`,
         noteFingerprint
       );

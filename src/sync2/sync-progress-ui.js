@@ -22,6 +22,10 @@ let syncDelayTimer = 0;
 
 const DETAILED_TOTAL_THRESHOLD = 50;
 
+function isCompactionPhase(phase = '') {
+  return String(phase || '').startsWith('compact');
+}
+
 /*
   Nur Phasen, die eindeutig für einen großen/initialen Sync stehen.
   Asset-"Checking" passiert auch bei Routine-Syncs und darf NICHT automatisch
@@ -30,6 +34,15 @@ const DETAILED_TOTAL_THRESHOLD = 50;
 const DETAILED_PHASES = new Set([
   'uploadVaultSnapshot',
   'uploadNoteSnapshots',
+
+  // Cloud compaction is an explicit maintenance operation.
+  'compactStart',
+  'compactHeadroom',
+  'compactSnapshots',
+  'compactAssets',
+  'compactDelete',
+  'compactOutbox',
+  'compactComplete',
 ]);
 
 function escapeHtmlLocal(s) {
@@ -548,8 +561,17 @@ function phaseLabel(phase = '') {
 
     hydrate: 'Updating local vault…',
     finalize: 'Finalizing sync…',
+
     compact: 'Compacting database…',
     compacting: 'Compacting database…',
+    compactStart: 'Starting compaction…',
+    compactHeadroom: 'Creating upload headroom…',
+    compactSnapshots: 'Uploading compacted snapshots…',
+    compactAssets: 'Checking encrypted assets…',
+    compactDelete: 'Deleting covered history…',
+    compactOutbox: 'Cleaning local queue…',
+    compactComplete: 'Compaction complete',
+
     complete: 'Sync complete',
     error: 'Sync failed',
   };
@@ -558,12 +580,27 @@ function phaseLabel(phase = '') {
 }
 
 function directionIcon(detail) {
-  if (detail?.status === 'error' || detail?.phase === 'error') return 'cloud-alert';
-  if (detail?.status === 'done' || detail?.phase === 'complete') return 'cloud-check';
+  const phase = String(detail?.phase || '');
 
-  if (detail?.phase === 'compact' || detail?.phase === 'compacting') return 'cloud-cog';
-  if (detail?.phase === 'hydrate' || detail?.phase === 'finalize') return 'cloud-cog';
-  if (detail?.phase === 'backup') return 'cloud-backup';
+  if (detail?.status === 'error' || phase === 'error') return 'cloud-alert';
+  if (detail?.status === 'done' || phase === 'complete' || phase === 'compactComplete') return 'cloud-check';
+
+  /*
+    Compaction has its own visual language.
+    Do this BEFORE generic direction handling, otherwise compaction steps with
+    direction:"up" look like normal upload sync and flicker.
+  */
+  if (isCompactionPhase(phase)) {
+    if (phase === 'compactSnapshots') return 'cloud-backup';
+    if (phase === 'compactAssets') return 'cloud-cog';
+    if (phase === 'compactDelete') return 'cloud-cog';
+    if (phase === 'compactHeadroom') return 'cloud-alert';
+    return 'cloud-cog';
+  }
+
+  if (phase === 'compact' || phase === 'compacting') return 'cloud-cog';
+  if (phase === 'hydrate' || phase === 'finalize') return 'cloud-cog';
+  if (phase === 'backup') return 'cloud-backup';
 
   if (detail?.direction === 'up') return 'cloud-upload';
   if (detail?.direction === 'down') return 'cloud-download';
@@ -572,11 +609,26 @@ function directionIcon(detail) {
 }
 
 function compactLabel(detail) {
-  if (detail?.status === 'error' || detail?.phase === 'error') return 'Sync error';
-  if (detail?.status === 'done' || detail?.phase === 'complete') return 'Synced';
-  if (detail?.phase === 'compact' || detail?.phase === 'compacting') return 'Compacting…';
+  const phase = String(detail?.phase || '');
+
+  if (detail?.status === 'error' || phase === 'error') return 'Sync error';
+
+  if (
+    detail?.status === 'done' ||
+    phase === 'complete'
+  ) {
+    return 'Synced';
+  }
+
+  if (phase === 'compactComplete') return 'Compacted';
+
+  if (isCompactionPhase(phase) || phase === 'compact' || phase === 'compacting') {
+    return 'Compacting…';
+  }
+
   if (detail?.direction === 'up') return 'Syncing…';
   if (detail?.direction === 'down') return 'Checking…';
+
   return 'Syncing…';
 }
 
@@ -652,6 +704,10 @@ function shouldShowDetailed(detail = {}) {
     Diese sind immer user-relevant und dürfen Platz einnehmen.
   */
   if (DETAILED_PHASES.has(phase)) {
+    return true;
+  }
+
+  if (isCompactionPhase(phase)) {
     return true;
   }
 

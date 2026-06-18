@@ -389,25 +389,53 @@ function sync2LocalVaultContentVersion() {
 }
 
 const SYNC2_VAULT_FINGERPRINT_VOLATILE_KEYS = new Set([
-  // note.updated changes on body edits, but note bodies sync via note docs.
-  // Therefore updated-only changes must not create Vault metadata history.
+  /*
+    Timestamps must not define durable Vault metadata equality.
+
+    Why:
+    - note.updated changes on note body edits, but note bodies sync via note docs.
+    - created/ts/deletedAt can be regenerated/imported/migrated without changing
+      the durable meaning of the object.
+    - If any timestamp is included here, routine sync can create infinite
+      append-only Vault update history.
+  */
+  'created',
   'updated',
+  'ts',
+  'deletedAt',
+
+  /*
+    Public share / publish state is not Vault metadata content.
+    It is either local UI state or server-side publication state.
+  */
   'publicShare',
+  'share',
+  'shareId',
+  'shareKey',
+  'url',
   'lastPublishedAt',
   'lastPayloadHash',
-  'status',
+  'missingAssets',
 
-  // Device/presence/status fields must never make the durable vault dirty.
+  /*
+    Device/presence/status fields must never make the durable vault dirty.
+  */
   'lastSeenAt',
   'lastOpenedAt',
   'lastSyncStartedAt',
   'lastSyncAt',
   'lastPushAt',
   'lastPullAt',
+  'lastPushCount',
+  'lastPullCount',
   'lastError',
   'lastErrorAt',
   'syncStatus',
   'seq',
+  'provider',
+  'userAgent',
+  'platform',
+  'current',
 ]);
 
 function stripVolatileVaultFingerprintFields(value) {
@@ -507,12 +535,71 @@ function legacyNoteVersionMarkerKey(noteId) {
   return `sync2.fullUpdateUploaded.note.${noteId}.version`;
 }
 
+async function readSync2Marker(localState, key, fallback = '') {
+  let value = '';
+
+  try {
+    value = String(await localState.get(key, '') || '');
+  } catch {}
+
+  if (value) return value;
+
+  /*
+    Durable fallback:
+    localState lives in the provider-specific Sync2 IndexedDB.
+    store.settings lives in YANTA's normal DB and survives a wider range of
+    runtime/provider state resets.
+
+    For SaaS reliability, important upload coverage markers are mirrored.
+  */
+  try {
+    value = String(await store.settings.get(key, '') || '');
+  } catch {}
+
+  if (value) {
+    try {
+      await localState.set(key, value);
+    } catch {}
+
+    return value;
+  }
+
+  return String(fallback || '');
+}
+
+async function writeSync2Marker(localState, key, value) {
+  const clean = String(value ?? '');
+
+  try {
+    await localState.set(key, clean);
+  } catch (err) {
+    console.warn('[YANTA Sync2] could not write local marker', key, err);
+  }
+
+  try {
+    await store.settings.set(key, clean);
+  } catch (err) {
+    console.warn('[YANTA Sync2] could not write settings marker', key, err);
+  }
+
+  return clean;
+}
+
+async function deleteSync2Marker(localState, key) {
+  try {
+    await localState.delete(key);
+  } catch {}
+
+  try {
+    await store.settings.set(key, null);
+  } catch {}
+}
+
 async function currentNoteFingerprintMarker(localState, noteId) {
   const fingerprint = await sync2NoteContentFingerprint(noteId);
   const markerKey = noteFingerprintMarkerKey(noteId);
 
-  let lastFingerprint =
-    String(await localState.get(markerKey, '') || '');
+  let lastFingerprint = await readSync2Marker(localState, markerKey, '');
 
   /*
     Migration compatibility:
@@ -526,15 +613,22 @@ async function currentNoteFingerprintMarker(localState, noteId) {
       vaultNotesMap().get(noteId);
 
     const currentVersion = sync2ObjectVersion(note);
+
     const legacyVersion =
-      Number(await localState.get(legacyNoteVersionMarkerKey(noteId), 0)) || 0;
+      Number(
+        await readSync2Marker(
+          localState,
+          legacyNoteVersionMarkerKey(noteId),
+          0
+        )
+      ) || 0;
 
     if (
       fingerprint &&
       currentVersion > 0 &&
       legacyVersion >= currentVersion
     ) {
-      await localState.set(markerKey, fingerprint);
+      await writeSync2Marker(localState, markerKey, fingerprint);
       lastFingerprint = fingerprint;
     }
   }
@@ -556,7 +650,11 @@ async function currentVaultFingerprintMarker(localState) {
   const fingerprint = await sync2LocalVaultContentFingerprint();
 
   let lastFingerprint =
-    String(await localState.get(SYNC2_VAULT_FINGERPRINT_MARKER_KEY, '') || '');
+    await readSync2Marker(
+      localState,
+      SYNC2_VAULT_FINGERPRINT_MARKER_KEY,
+      ''
+    );
 
   /*
     Migration compatibility:
@@ -565,7 +663,13 @@ async function currentVaultFingerprintMarker(localState) {
   */
   if (!lastFingerprint) {
     const legacyLastVaultVersion =
-      Number(await localState.get(SYNC2_LEGACY_VAULT_VERSION_MARKER_KEY, 0)) || 0;
+      Number(
+        await readSync2Marker(
+          localState,
+          SYNC2_LEGACY_VAULT_VERSION_MARKER_KEY,
+          0
+        )
+      ) || 0;
 
     const currentVaultVersion = sync2LocalVaultContentVersion();
 
@@ -574,7 +678,12 @@ async function currentVaultFingerprintMarker(localState) {
       currentVaultVersion > 0 &&
       legacyLastVaultVersion >= currentVaultVersion
     ) {
-      await localState.set(SYNC2_VAULT_FINGERPRINT_MARKER_KEY, fingerprint);
+      await writeSync2Marker(
+        localState,
+        SYNC2_VAULT_FINGERPRINT_MARKER_KEY,
+        fingerprint
+      );
+
       lastFingerprint = fingerprint;
     }
   }
@@ -905,6 +1014,14 @@ export class Sync2AppEngine {
     this.observeVault();
   
     this.started = true;
+
+    /*
+      Defensive startup guard:
+      Old builds may have left redundant Vault updates in memory before all
+      observers/markers were fully stable. Drop them as soon as the engine starts.
+    */
+    await this.dropRedundantVaultOutboxUpdates().catch(() => {});
+    await this.dropRedundantNoteOutboxUpdates().catch(() => {});
   
     await this.updateDeviceRecord({
       lastOpenedAt: Date.now(),
@@ -1146,12 +1263,57 @@ export class Sync2AppEngine {
     for (const marker of markers) {
       if (!marker?.key) continue;
 
-      try {
-        await this.localState.set(marker.key, marker.value);
-      } catch (err) {
-        console.warn('[YANTA Sync2] could not apply upload marker', marker, err);
-      }
+      await writeSync2Marker(
+        this.localState,
+        marker.key,
+        marker.value
+      );
     }
+  }
+
+  async markCurrentVaultFingerprintCovered({
+    reason = 'sync-complete',
+    verbose = false,
+  } = {}) {
+    const {
+      markerKey,
+      fingerprint,
+      lastFingerprint,
+    } = await currentVaultFingerprintMarker(this.localState);
+
+    if (!fingerprint) {
+      return {
+        changed: false,
+        fingerprint: '',
+      };
+    }
+
+    if (fingerprint === lastFingerprint) {
+      return {
+        changed: false,
+        fingerprint,
+      };
+    }
+
+    await writeSync2Marker(
+      this.localState,
+      markerKey,
+      fingerprint
+    );
+
+    if (verbose) {
+      this.progress?.({
+        phase: 'finalize',
+        direction: 'sync',
+        message: 'Marked current vault metadata as synchronized.',
+        reason,
+      });
+    }
+
+    return {
+      changed: true,
+      fingerprint,
+    };
   }
 
   async queueChangedLocalStateUpdates({
@@ -1604,21 +1766,34 @@ export class Sync2AppEngine {
         // The next sync cycle will update lastPushCount again if needed.
       }
   
-      await uploadMissingAssets(this);
-  
-      state.globalSyncStatus = 'synced';
-  
-      if (verbose) {
-        toast('Sync complete', 'success');
-      }
-  
-      this.progress({
-        phase: 'complete',
-        status: 'done',
-        message: 'Sync complete.',
-      });
+    await uploadMissingAssets(this);
 
-      return this.status();
+    /*
+      storage guard:
+      If a sync completed successfully, the current semantic Vault metadata
+      fingerprint is considered covered.
+
+      This prevents routine sync from uploading a redundant full Vault update
+      on every reload/manual sync when the marker was missing, migrated or stale.
+    */
+    await this.markCurrentVaultFingerprintCovered({
+      reason: 'syncNow-complete',
+    });
+
+    state.globalSyncStatus = 'synced';
+
+    if (verbose) {
+      toast('Sync complete', 'success');
+    }
+
+    this.progress({
+      phase: 'complete',
+      status: 'done',
+      message: 'Sync complete.',
+    });
+
+    return this.status();
+
     } catch (err) {
       console.error('Sync2 sync failed', err);
 

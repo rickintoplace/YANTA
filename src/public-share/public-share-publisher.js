@@ -90,8 +90,8 @@ async function saveNotePublicShareCache(noteId, patch) {
     ...patch,
   };
 
-  note.updated = now();
-
+  // Kein note.updated hier.
+  // Public-share cache/status ist keine Note-Änderung.
   await store.notes.put(note);
 }
 
@@ -103,10 +103,10 @@ function emitPublicShareChanged(noteId, status = '') {
     },
   }));
 
-  window.dispatchEvent(new CustomEvent('yanta-note-updated', {
+  window.dispatchEvent(new CustomEvent('yanta-public-share-changed', {
     detail: {
       noteId,
-      reason: 'public-share-status',
+      status,
       source: 'public-share',
     },
   }));
@@ -158,7 +158,17 @@ export async function createOrGetPublicShare(noteId, {
 } = {}) {
   const existing = publicShareStateForNote(noteId);
 
-  if (existing.shareId && existing.shareKey) {
+  /*
+    A revoked share must never be reused.
+    Old local state intentionally keeps shareId/shareKey for status/history,
+    but re-sharing must create a fresh cloud share + fresh key.
+  */
+  if (
+    existing.shareId &&
+    existing.shareKey &&
+    existing.status !== 'revoked' &&
+    existing.enabled !== false
+  ) {
     return existing;
   }
 
@@ -364,7 +374,9 @@ export async function stopPublicShare(noteId) {
       revokedAt: now(),
     };
 
-    note.updated = now();
+    // Für Sync-Speicher ist besser: nicht setzen
+    // note.updated = now();
+
     await store.notes.put(note);
     emitPublicShareChanged(noteId, 'revoked');
   }
@@ -380,8 +392,16 @@ export async function stopPublicShare(noteId) {
 }
 
 export function setupPublicShareAutoPublisher() {
-  window.addEventListener('yanta-note-updated', (e) => {
-    const noteId = e.detail?.noteId || state.currentNoteId;
+window.addEventListener('yanta-note-updated', (e) => {
+  const detail = e.detail || {};
+  const source = String(detail.source || '');
+  const reason = String(detail.reason || '');
+
+  // Eigene Public-Share-Statusupdates nie wieder als Note-Änderung behandeln.
+  if (source === 'public-share') return;
+  if (reason === 'public-share-status') return;
+
+  const noteId = detail.noteId || state.currentNoteId;
     if (!noteId) return;
 
     const share = publicShareStateForNote(noteId);

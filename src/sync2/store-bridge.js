@@ -183,6 +183,7 @@ function jsonEqual(a, b) {
 // changes into VaultDoc, every keystroke can become Vault update history.
 const VAULT_META_VOLATILE_KEYS = new Set([
   'updated',
+  'publicShare',
 ]);
 
 function omitVolatileVaultMetaKeys(value = {}) {

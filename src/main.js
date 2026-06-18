@@ -426,13 +426,11 @@ function startSync2AutoSync(engine, {
     const source = String(detail.source || '');
     const reason = String(detail.reason || '');
 
-    /*
-      Remote sync application must not schedule another sync.
-      Otherwise we get:
-        sync -> apply remote update -> yanta-note-updated -> sync -> ...
-    */
     if (source === 'sync2' || source === 'sync') return;
+    if (source === 'public-share') return;
+
     if (reason.startsWith('sync2-') || reason.includes('sync2')) return;
+    if (reason === 'public-share-status') return;
 
     requestSync2AutoSync('note-updated', 1000);
   });

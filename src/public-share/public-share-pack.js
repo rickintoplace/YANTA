@@ -351,7 +351,24 @@ export async function packPublicNoteShare({
     },
   };
 
-  const payloadHash = await sha256B64url(stableStringify(payload));
+  function publicShareHashMaterial(payload) {
+    const copy = JSON.parse(JSON.stringify(payload));
+
+    // Exportzeit darf den Content-Hash nicht verändern.
+    delete copy.exportedAt;
+
+    // note.updated ist oft nur lokale Cache-/Status-Frische.
+    // Markdown, Titel, Tags etc. entscheiden bereits über echte Änderungen.
+    if (copy.note) {
+      delete copy.note.updated;
+    }
+
+    return copy;
+  }
+
+  const payloadHash = await sha256B64url(
+    stableStringify(publicShareHashMaterial(payload))
+  );
 
   return {
     payload,

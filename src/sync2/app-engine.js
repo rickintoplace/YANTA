@@ -392,6 +392,10 @@ const SYNC2_VAULT_FINGERPRINT_VOLATILE_KEYS = new Set([
   // note.updated changes on body edits, but note bodies sync via note docs.
   // Therefore updated-only changes must not create Vault metadata history.
   'updated',
+  'publicShare',
+  'lastPublishedAt',
+  'lastPayloadHash',
+  'status',
 
   // Device/presence/status fields must never make the durable vault dirty.
   'lastSeenAt',
@@ -2528,7 +2532,7 @@ export class Sync2AppEngine {
         without writing local metadata.
       */
     }
-    
+
     try {
       rebuildWikilinkIndex();
     } catch {}

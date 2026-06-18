@@ -88,10 +88,6 @@ function ensureCss() {
   background: color-mix(in srgb, var(--accent) 9%, transparent);
 }
 
-.vault-indicator.yanta-sync2-compact.is-syncing .yanta-sync2-compact-icon {
-  animation: yanta-sync2-spin 0.9s linear infinite;
-}
-
 .vault-indicator.yanta-sync2-compact.is-uploading {
   color: var(--accent);
 }
@@ -112,10 +108,94 @@ function ensureCss() {
   background: color-mix(in srgb, var(--red) 9%, transparent);
 }
 
-@keyframes yanta-sync2-spin {
+/* ============================================================
+   Subtle SVG inner-arrow and group animations
+   ============================================================ */
+
+@keyframes yanta-arrow-upload {
+  0% {
+    transform: translateY(3px);
+    opacity: 0;
+  }
+  30% {
+    opacity: 1;
+  }
+  75% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(-3px);
+    opacity: 0;
+  }
+}
+
+@keyframes yanta-arrow-download {
+  0% {
+    transform: translateY(-3px);
+    opacity: 0;
+  }
+  30% {
+    opacity: 1;
+  }
+  75% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(3px);
+    opacity: 0;
+  }
+}
+
+@keyframes yanta-spin-sync {
+  from {
+    transform: rotate(0deg);
+  }
   to {
     transform: rotate(360deg);
   }
+}
+
+@keyframes yanta-spin-cog {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes yanta-spin-backup {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(-360deg);
+  }
+}
+
+.yanta-anim-upload-arrow {
+  animation: yanta-arrow-upload 1.6s infinite cubic-bezier(0.4, 0, 0.2, 1);
+  transform-origin: center;
+}
+
+.yanta-anim-download-arrow {
+  animation: yanta-arrow-download 1.6s infinite cubic-bezier(0.4, 0, 0.2, 1);
+  transform-origin: center;
+}
+
+.yanta-anim-sync-arrows {
+  animation: yanta-spin-sync 2.2s linear infinite;
+  transform-origin: 12px 16px;
+}
+
+.yanta-anim-cog {
+  animation: yanta-spin-cog 3.5s linear infinite;
+  transform-origin: 12px 17px;
+}
+
+.yanta-anim-backup-arrow {
+  animation: yanta-spin-backup 2.8s linear infinite;
+  transform-origin: 12px 15px;
 }
 
 /* Collapsed sidebar: compact remains icon-like */
@@ -328,6 +408,100 @@ function ensureCss() {
   document.head.append(style);
 }
 
+/**
+ * Returns the requested cloud SVGs tailored with class hooks for precise,
+ * modern internal transitions instead of rotating the whole element.
+ */
+function getIconSvg(name, size = 24) {
+  const icons = {
+    'cloud': `
+      <svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-cloud-icon lucide-cloud">
+        <path d="M17.5 19H9a7 7 0 1 1 6.71-9h1.79a4.5 4.5 0 1 1 0 9Z"/>
+      </svg>
+    `,
+    'cloud-upload': `
+      <svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-cloud-upload-icon lucide-cloud-upload">
+        <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242"/>
+        <g class="yanta-anim-upload-arrow">
+          <path d="M12 13v8"/>
+          <path d="m8 17 4-4 4 4"/>
+        </g>
+      </svg>
+    `,
+    'cloud-download': `
+      <svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-cloud-download-icon lucide-cloud-download">
+        <path d="M4.393 15.269A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.436 8.284"/>
+        <g class="yanta-anim-download-arrow">
+          <path d="M12 13v8l-4-4"/>
+          <path d="m12 21 4-4"/>
+        </g>
+      </svg>
+    `,
+    'cloud-check': `
+      <svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-cloud-check-icon lucide-cloud-check">
+        <path d="m17 15-5.5 5.5L9 18"/>
+        <path d="M5.516 16.07A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 3.501 7.327"/>
+      </svg>
+    `,
+    'cloud-sync': `
+      <svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-cloud-sync-icon lucide-cloud-sync">
+        <path d="M20.996 15.251A4.5 4.5 0 0 0 17.495 8h-1.79a7 7 0 1 0-12.709 5.607"/>
+        <g class="yanta-anim-sync-arrows">
+          <path d="m17 18-1.535 1.605a5 5 0 0 1-8-1.5"/>
+          <path d="M17 22v-4h-4"/>
+          <path d="M7 10v4h4"/>
+          <path d="m7 14 1.535-1.605a5 5 0 0 1 8 1.5"/>
+        </g>
+      </svg>
+    `,
+    'cloud-alert': `
+      <svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-cloud-alert-icon lucide-cloud-alert">
+        <path d="M12 12v4"/>
+        <path d="M12 20h.01"/>
+        <path d="M8.128 16.949A7 7 0 1 1 15.71 8h1.79a1 1 0 0 1 0 9h-1.642"/>
+      </svg>
+    `,
+    'cloud-cog': `
+      <svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-cloud-cog-icon lucide-cloud-cog">
+        <path d="M4.2 15.1a7 7 0 1 1 9.93-9.858A7 7 0 0 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.2"/>
+        <g class="yanta-anim-cog">
+          <path d="m10.852 19.772-.383.924"/>
+          <path d="m13.148 14.228.383-.923"/>
+          <path d="M13.148 19.772a3 3 0 1 0-2.296-5.544l-.383-.923"/>
+          <path d="m13.53 20.696-.382-.924a3 3 0 1 1-2.296-5.544"/>
+          <path d="m14.772 15.852.923-.383"/>
+          <path d="m14.772 18.148.923.383"/>
+          <path d="m9.228 15.852-.923-.383"/>
+          <path d="m9.228 18.148-.923.383"/>
+        </g>
+      </svg>
+    `,
+    'cloud-off': `
+      <svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-cloud-off-icon lucide-cloud-off">
+        <path d="M10.94 5.274A7 7 0 0 1 15.71 10h1.79a4.5 4.5 0 0 1 4.222 6.057"/>
+        <path d="M18.796 18.81A4.5 4.5 0 0 1 17.5 19H9A7 7 0 0 1 5.79 5.78"/>
+        <path d="m2 2 20 20"/>
+      </svg>
+    `,
+    'cloud-backup': `
+      <svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-cloud-backup-icon lucide-cloud-backup">
+        <path d="M21 15.251A4.5 4.5 0 0 0 17.5 8h-1.79A7 7 0 1 0 3 13.607"/>
+        <g class="yanta-anim-backup-arrow">
+          <path d="M7 11v4h4"/>
+          <path d="M8 19a5 5 0 0 0 9-3 4.5 4.5 0 0 0-4.5-4.5 4.82 4.82 0 0 0-3.41 1.41L7 15"/>
+        </g>
+      </svg>
+    `
+  };
+
+  if (icons[name]) {
+    return icons[name];
+  }
+
+  // Fallback to primary Lucide renderer for non-cloud-specific helper requests
+  return lucide(name, size);
+}
+
 function vaultIndicator() {
   return document.getElementById('vaultIndicator');
 }
@@ -381,13 +555,16 @@ function phaseLabel(phase = '') {
 }
 
 function directionIcon(detail) {
-  if (detail?.status === 'error') return 'triangle-alert';
-  if (detail?.status === 'done' || detail?.phase === 'complete') return 'check';
+  if (detail?.status === 'error' || detail?.phase === 'error') return 'cloud-alert';
+  if (detail?.status === 'done' || detail?.phase === 'complete') return 'cloud-check';
 
   if (detail?.direction === 'up') return 'cloud-upload';
   if (detail?.direction === 'down') return 'cloud-download';
 
-  return 'refresh-cw';
+  if (detail?.phase === 'hydrate' || detail?.phase === 'finalize') return 'cloud-cog';
+  if (detail?.phase === 'backup') return 'cloud-backup';
+
+  return 'cloud-sync';
 }
 
 function compactLabel(detail) {
@@ -441,7 +618,6 @@ function shouldShowDetailed(detail = {}) {
   const direction = detail.direction || '';
   const status = detail.status || '';
   const total = Number(detail.total || 0);
-  const msg = String(detail.message || '').toLowerCase();
 
   /*
     Fehler immer sichtbar machen.
@@ -548,7 +724,7 @@ function updateCompact(detail = {}) {
 
   indicator.innerHTML = `
     <span class="yanta-sync2-compact-icon">
-      ${lucide(icon, 13)}
+      ${getIconSvg(icon, 13)}
     </span>
     <span class="yanta-sync2-compact-label">
       ${escapeHtmlLocal(label)}
@@ -616,7 +792,7 @@ function showDetailed(detail = {}) {
   node.innerHTML = `
     <div class="yanta-sync2-progress-row">
       <span class="yanta-sync2-progress-icon">
-        ${lucide(directionIcon(detail), 15)}
+        ${getIconSvg(directionIcon(detail), 15)}
       </span>
 
       <span class="yanta-sync2-progress-main">

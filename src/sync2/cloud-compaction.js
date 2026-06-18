@@ -38,6 +38,10 @@ import {
   uploadMissingAssets,
 } from './assets.js';
 
+import {
+  sync2LocalVaultContentFingerprint,
+} from './app-engine.js';
+
 const DEFAULT_MIN_HEADROOM_BYTES = 3 * 1024 * 1024;
 const DEFAULT_KEEP_SNAPSHOTS_PER_DOC = 2;
 
@@ -153,12 +157,28 @@ function knownNoteIdsForSnapshots() {
 async function markLocalFullUpdateMarkersCovered(engine, noteIds = []) {
   if (!engine?.localState) return;
 
+  /*
+    Mark the fresh compacted snapshots as covering the current durable
+    Vault metadata state.
+
+    Critical:
+    Routine sync now uses the semantic fingerprint marker, not just a timestamp.
+    Keeping the legacy version marker too is harmless and helps older clients.
+  */
   const vaultVersion = localVaultContentVersion();
+  const vaultFingerprint = await sync2LocalVaultContentFingerprint();
 
   if (vaultVersion > 0) {
     await engine.localState.set(
       'sync2.fullUpdateUploaded.vault.version',
       vaultVersion
+    );
+  }
+
+  if (vaultFingerprint) {
+    await engine.localState.set(
+      'sync2.fullUpdateUploaded.vault.fingerprint',
+      vaultFingerprint
     );
   }
 

@@ -60,8 +60,9 @@ import {
   generateSyncKey,
   utf8Encode,
   syncKeyToBytes,
+  sha256,
+  base64UrlEncode,
 } from './crypto.js';
-
 import {
   createDeviceId,
   createVaultId,
@@ -387,13 +388,104 @@ function sync2LocalVaultContentVersion() {
   return max;
 }
 
+const SYNC2_VAULT_FINGERPRINT_VOLATILE_KEYS = new Set([
+  // note.updated changes on body edits, but note bodies sync via note docs.
+  // Therefore updated-only changes must not create Vault metadata history.
+  'updated',
+
+  // Device/presence/status fields must never make the durable vault dirty.
+  'lastSeenAt',
+  'lastOpenedAt',
+  'lastSyncStartedAt',
+  'lastSyncAt',
+  'lastPushAt',
+  'lastPullAt',
+  'lastError',
+  'lastErrorAt',
+  'syncStatus',
+  'seq',
+]);
+
+function stripVolatileVaultFingerprintFields(value) {
+  if (value == null || typeof value !== 'object') {
+    return value;
+  }
+
+  if (Array.isArray(value)) {
+    return value.map(stripVolatileVaultFingerprintFields);
+  }
+
+  const out = {};
+
+  for (const [key, val] of Object.entries(value || {})) {
+    if (SYNC2_VAULT_FINGERPRINT_VOLATILE_KEYS.has(key)) continue;
+
+    out[key] = stripVolatileVaultFingerprintFields(val);
+  }
+
+  return out;
+}
+
+/**
+ * Semantic fingerprint of durable Vault metadata.
+ *
+ * Critical:
+ * - Devices are intentionally excluded.
+ * - updated-only metadata changes are ignored.
+ * - Note bodies are intentionally excluded; they sync via per-note Y.Doc updates.
+ *
+ * This is used to decide whether a full Vault metadata update is actually
+ * needed during routine sync.
+ */
+export async function sync2LocalVaultContentFingerprint() {
+  const snapshot = {
+    notes: {},
+    folders: {},
+    images: {},
+    events: {},
+    calendarCategories: {},
+    tombstones: {},
+  };
+
+  try {
+    for (const [id, note] of vaultNotesMap()) {
+      snapshot.notes[id] = stripVolatileVaultFingerprintFields(note);
+    }
+
+    for (const [id, folder] of vaultFoldersMap()) {
+      snapshot.folders[id] = stripVolatileVaultFingerprintFields(folder);
+    }
+
+    for (const [id, image] of vaultImagesMap()) {
+      snapshot.images[id] = stripVolatileVaultFingerprintFields(image);
+    }
+
+    for (const [id, ev] of vaultEventsMap()) {
+      snapshot.events[id] = stripVolatileVaultFingerprintFields(ev);
+    }
+
+    for (const [id, cat] of vaultCalendarCategoriesMap()) {
+      snapshot.calendarCategories[id] = stripVolatileVaultFingerprintFields(cat);
+    }
+
+    for (const [id, tombstone] of vaultTombstonesMap()) {
+      snapshot.tombstones[id] = stripVolatileVaultFingerprintFields(tombstone);
+    }
+  } catch {}
+
+  const stable = stableJsonStringifyForSync2(snapshot);
+  const digest = await sha256(utf8Encode(stable));
+
+  return `sha256:${base64UrlEncode(digest)}`;
+}
+
 function outboxHasUploadMarker(outbox, markerKey, markerValue) {
   return outbox.some((item) =>
     Array.isArray(item.afterUploadLocalStateSet) &&
     item.afterUploadLocalStateSet.some((m) =>
       m &&
       m.key === markerKey &&
-      Number(m.value || 0) === Number(markerValue || 0)
+      String(m.value ?? '') === String(markerValue ?? '')
     )
   );
 }
@@ -954,14 +1046,43 @@ export class Sync2AppEngine {
 
     await this.observeAllKnownNotes();
 
-    const vaultVersion = sync2LocalVaultContentVersion();
-    const vaultMarkerKey = 'sync2.fullUpdateUploaded.vault.version';
-    const lastVaultVersion =
-      Number(await this.localState.get(vaultMarkerKey, 0)) || 0;
+    const vaultFingerprint = await sync2LocalVaultContentFingerprint();
+    const vaultMarkerKey = 'sync2.fullUpdateUploaded.vault.fingerprint';
+
+    let lastVaultFingerprint =
+      String(await this.localState.get(vaultMarkerKey, '') || '');
+
+    /*
+      Migration compatibility:
+      Older builds stored a timestamp marker:
+        sync2.fullUpdateUploaded.vault.version
+
+      If that legacy marker already covers the current semantic vault version,
+      initialize the new fingerprint marker without uploading a redundant
+      Vault update pack.
+    */
+    if (!lastVaultFingerprint) {
+      const legacyVaultMarkerKey = 'sync2.fullUpdateUploaded.vault.version';
+      const legacyLastVaultVersion =
+        Number(await this.localState.get(legacyVaultMarkerKey, 0)) || 0;
+
+      const currentVaultVersion = sync2LocalVaultContentVersion();
+
+      if (
+        currentVaultVersion > 0 &&
+        legacyLastVaultVersion >= currentVaultVersion
+      ) {
+        await this.localState.set(vaultMarkerKey, vaultFingerprint);
+        lastVaultFingerprint = vaultFingerprint;
+      }
+    }
+
+    let vaultQueued = false;
 
     if (
-      vaultVersion > lastVaultVersion &&
-      !outboxHasUploadMarker(this.outbox, vaultMarkerKey, vaultVersion)
+      vaultFingerprint &&
+      vaultFingerprint !== lastVaultFingerprint &&
+      !outboxHasUploadMarker(this.outbox, vaultMarkerKey, vaultFingerprint)
     ) {
       this.outbox.push({
         kind: 'vault',
@@ -972,10 +1093,12 @@ export class Sync2AppEngine {
         afterUploadLocalStateSet: [
           {
             key: vaultMarkerKey,
-            value: vaultVersion,
+            value: vaultFingerprint,
           },
         ],
       });
+
+      vaultQueued = true;
 
       this.progress({
         phase: 'uploadOutbox',
@@ -1056,7 +1179,7 @@ export class Sync2AppEngine {
     }
 
     return {
-      vaultQueued: vaultVersion > lastVaultVersion,
+      vaultQueued,
       noteQueued: queuedNotes,
     };
   }

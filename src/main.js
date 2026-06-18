@@ -391,8 +391,21 @@ function startSync2AutoSync(engine, {
     requestSync2CatchupSnapshot('startup-catchup', 2500);
   }
 
+  let lastFocusSyncRequestAt = 0;
+
   window.addEventListener('focus', () => {
-    requestSync2AutoSync('focus', 300);
+    const t = Date.now();
+
+    /*
+      Focus can fire repeatedly when switching windows, closing dialogs,
+      devtools, browser chrome, etc. Routine sync is useful, but not more
+      often than every 20s from focus alone.
+    */
+    if (t - lastFocusSyncRequestAt > 20_000) {
+      lastFocusSyncRequestAt = t;
+      requestSync2AutoSync('focus', 1200);
+    }
+
     ensureGoogleDriveSyncSilently('focus');
   });
 

@@ -35,7 +35,13 @@ import { syncRestore, syncConnect, syncDisconnect, syncFull, openSyncSetup, clos
 import { openGraph, closeGraph, setupGraphInteractions, openGraphPane } from './graph.js';
 import { wikilinkIndex } from './features-state.js';
 import { getNoteDoc, noteMarkdown, drawingsTextForNote, citationsTextForNote } from './yjs.js';
-import { closeShareModal, stopSharing, restoreSharedNotes, handleShareUrl } from './sharing.js';
+import {
+  closeShareModal,
+  stopSharing,
+  restoreSharedNotes,
+  handleShareUrl,
+  renderShareIndicator,
+} from './sharing.js';
 
 import {
   openUnifiedShareModal,

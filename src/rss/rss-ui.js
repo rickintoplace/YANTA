@@ -2575,7 +2575,7 @@ color-mix(in srgb, var(--bg-elev-3) 90%, transparent); */
 .yanta-rss-fullscreen {
   position: fixed;
   inset: 0;
-  z-index: 250;
+  z-index: 50;
 
   background: var(--bg);
   color: var(--text);

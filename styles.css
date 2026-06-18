@@ -107,6 +107,9 @@ body {
   line-height: var(--lh-base);
   -webkit-font-smoothing: antialiased;
   text-rendering: optimizeLegibility;
+
+  /* scrollbar-width: thin; */
+  scrollbar-color: var(--border) transparent;
 }
 button, input, select, textarea { font: inherit; color: inherit; }
 
@@ -2356,6 +2359,9 @@ input.yanta-task-checkbox {
     28px
     clamp(14px, 5vw, 40px)
     calc(28px + 40vh) !important;
+
+    display: flex;
+    flex-direction: column !important;
 }
 
 #editor .cm-content {
@@ -4228,4 +4234,62 @@ input.yanta-task-checkbox {
 
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+/* Public share indicators */
+.public-share-dot,
+.live-dot {
+  flex: 0 0 auto;
+}
+
+.public-share-dot {
+  width: 17px;
+  height: 17px;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  border-radius: 999px;
+
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--border));
+}
+
+.public-share-dot svg {
+  width: 11px;
+  height: 11px;
+  stroke-width: 2.5;
+}
+
+.yanta-dash-note-corner-public {
+  width: 19px;
+  height: 19px;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  border-radius: 999px;
+
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 13%, var(--bg-elev));
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
+
+  box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+}
+
+.yanta-dash-note-corner-public svg {
+  width: 13px;
+  height: 13px;
+  stroke-width: 2.4;
+}
+
+.tree-row .public-share-dot {
+  margin-left: auto;
+}
+
+.tree-row .live-dot + .public-share-dot {
+  margin-left: 4px;
 }

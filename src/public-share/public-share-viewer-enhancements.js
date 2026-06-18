@@ -949,22 +949,22 @@ export function renderPublicShareCalendarSectionHtml(payload = {}) {
 
                   <span class="yps-event-more-menu" data-yps-event-more-menu hidden>
                     <a href="${escapeAttr(googleCalendarUrl(ev))}" target="_blank" rel="noopener noreferrer">
-                      ${lucide('external-link', 13)}
+                      ${lucide('calendar-plus', 13)}
                       <span>Google Calendar</span>
                     </a>
 
                     <a href="${escapeAttr(outlookCalendarUrl(ev, 'https://outlook.live.com'))}" target="_blank" rel="noopener noreferrer">
-                      ${lucide('external-link', 13)}
+                      ${lucide('calendar-plus', 13)}
                       <span>Outlook</span>
                     </a>
 
                     <a href="${escapeAttr(outlookCalendarUrl(ev, 'https://outlook.office.com'))}" target="_blank" rel="noopener noreferrer">
-                      ${lucide('external-link', 13)}
+                      ${lucide('calendar-plus', 13)}
                       <span>Office 365</span>
                     </a>
 
                     <a href="${escapeAttr(yahooCalendarUrl(ev))}" target="_blank" rel="noopener noreferrer">
-                      ${lucide('external-link', 13)}
+                      ${lucide('calendar-plus', 13)}
                       <span>Yahoo</span>
                     </a>
                   </span>

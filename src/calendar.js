@@ -6012,8 +6012,13 @@ function renderEditorEventAttachment(noteId) {
 
   if (!pane || !editor) return;
 
+  // Alte/überflüssige Karten sowohl aus dem Pane als auch aus dem Scroller entfernen
   pane
     .querySelectorAll(':scope > .yanta-event-note-card')
+    .forEach((n) => n.remove());
+
+  editor
+    .querySelectorAll('.cm-scroller > .yanta-event-note-card')
     .forEach((n) => n.remove());
 
   const ev = calendarEventForNoteId(noteId);
@@ -6023,7 +6028,14 @@ function renderEditorEventAttachment(noteId) {
     surface: 'editor',
   });
 
-  pane.insertBefore(node, editor);
+  const scroller = editor.querySelector('.cm-scroller');
+  if (scroller) {
+    // Fügt die Karte ganz oben im Scroller ein, vor dem restlichen Inhalt
+    scroller.prepend(node);
+  } else {
+    // Fallback, falls der CodeMirror-Scroller noch nicht bereit ist
+    pane.insertBefore(node, editor);
+  }
 }
 
 function renderPreviewEventAttachment(noteId) {
@@ -6062,6 +6074,10 @@ export function renderCalendarNoteAttachments(noteId = state.currentNoteId) {
   if (!noteId) {
     $('paneEdit')
       ?.querySelectorAll(':scope > .yanta-event-note-card')
+      ?.forEach((n) => n.remove());
+
+    $('editor')
+      ?.querySelectorAll('.cm-scroller > .yanta-event-note-card')
       ?.forEach((n) => n.remove());
 
     $('panePreview')

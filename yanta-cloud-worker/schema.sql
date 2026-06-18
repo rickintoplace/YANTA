@@ -131,3 +131,86 @@ CREATE TABLE IF NOT EXISTS ai_usage_events (
   cost_micros INTEGER NOT NULL,
   created_at INTEGER NOT NULL
 );
+
+-- ============================================================
+-- Public Shares
+-- Zero-knowledge latest-only public note shares.
+-- Server stores encrypted payload and grants to encrypted asset blobs.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS public_shares (
+  id TEXT PRIMARY KEY,
+  owner_user_id TEXT NOT NULL,
+  vault_id TEXT,
+  source_type TEXT NOT NULL DEFAULT 'note',
+  source_id TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  expires_at INTEGER,
+  revoked_at INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  last_published_at INTEGER,
+  payload_object_key TEXT,
+  payload_etag TEXT,
+  payload_size_bytes INTEGER,
+  FOREIGN KEY(owner_user_id) REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_public_shares_owner
+ON public_shares(owner_user_id, updated_at);
+
+CREATE INDEX IF NOT EXISTS idx_public_shares_source
+ON public_shares(owner_user_id, vault_id, source_type, source_id);
+
+CREATE TABLE IF NOT EXISTS public_share_assets (
+  share_id TEXT NOT NULL,
+  asset_object_id TEXT NOT NULL,
+  object_path TEXT NOT NULL,
+  size_bytes INTEGER,
+  mime TEXT,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (share_id, asset_object_id),
+  FOREIGN KEY(share_id) REFERENCES public_shares(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_public_share_assets_share
+ON public_share_assets(share_id);
+
+CREATE TABLE IF NOT EXISTS public_shares (
+  id TEXT PRIMARY KEY,
+  owner_user_id TEXT NOT NULL,
+  vault_id TEXT,
+  source_type TEXT NOT NULL DEFAULT 'note',
+  source_id TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  expires_at INTEGER,
+  revoked_at INTEGER,
+  payload_object_key TEXT,
+  payload_etag TEXT,
+  payload_size_bytes INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  last_published_at INTEGER,
+  FOREIGN KEY(owner_user_id) REFERENCES users(id),
+  FOREIGN KEY(vault_id) REFERENCES vaults(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_public_shares_owner
+ON public_shares(owner_user_id, updated_at);
+
+CREATE INDEX IF NOT EXISTS idx_public_shares_source
+ON public_shares(owner_user_id, source_type, source_id);
+
+CREATE TABLE IF NOT EXISTS public_share_assets (
+  share_id TEXT NOT NULL,
+  asset_object_id TEXT NOT NULL,
+  object_path TEXT NOT NULL,
+  size_bytes INTEGER NOT NULL DEFAULT 0,
+  mime TEXT,
+  created_at INTEGER NOT NULL,
+  PRIMARY KEY (share_id, asset_object_id),
+  FOREIGN KEY(share_id) REFERENCES public_shares(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_public_share_assets_share
+ON public_share_assets(share_id);

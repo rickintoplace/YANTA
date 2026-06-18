@@ -51,6 +51,11 @@ import {
   formatCalendarDateTime,
 } from './calendar-preferences.js';
 
+import {
+  publicShareStateForNote,
+  isPublicShareActive,
+} from './public-share/public-share-publisher.js';
+
 function safeItemColor(c) {
   return safeCssColor(c);
 }
@@ -1879,7 +1884,7 @@ function noteRow(n, depth = 0, {
     row.append(el('span', { class: 'live-dot', title: 'Live shared' }));
   }
 
-  if (n.publicShare?.enabled === true) {
+  if (isPublicShareActive(publicShareStateForNote(n.id))) {
     const publicDot = el('span', {
       class: 'public-share-dot',
       title: 'Public link active',

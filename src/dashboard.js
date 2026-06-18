@@ -67,6 +67,11 @@ import {
   setTrashDropTargetHot,
 } from './trash-drop-target.js';
 
+import {
+  publicShareStateForNote,
+  isPublicShareActive,
+} from './public-share/public-share-publisher.js';
+
   const MOBILE_MQ = window.matchMedia('(max-width: 880px)');
   
   const DASH_ORDER_STEP = 1000;
@@ -1968,7 +1973,7 @@ function renderCard(item, { section }) {
       wrap.append(pin);
     }
 
-    if (note.publicShare?.enabled === true) {
+    if (isPublicShareActive(publicShareStateForNote(note.id))) {
       const pub = el('span', {
         class: 'yanta-dash-note-corner-public',
         title: 'Public link active',

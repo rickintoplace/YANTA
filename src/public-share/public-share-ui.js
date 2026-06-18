@@ -17,7 +17,14 @@ import {
   publishPublicShareNow,
   publicShareStateForNote,
   stopPublicShare,
+  stopPublicShareById,
+  stopAllPublicShares,
+  isPublicShareActive,
 } from './public-share-publisher.js';
+
+import {
+  listOwnPublicShares,
+} from './public-share-api.js';
 
 import {
   makePublicShareUrl,
@@ -198,6 +205,79 @@ function ensureCss() {
     opacity: 1;
   }
 }
+
+.yanta-public-shares-manager-card {
+  width: min(760px, 94vw);
+}
+
+.yanta-public-shares-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.yanta-public-share-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+
+  padding: 11px 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+
+  background: var(--bg-elev-2);
+}
+
+.yanta-public-share-row-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.yanta-public-share-row-main strong {
+  color: var(--text);
+  font-size: 13px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.yanta-public-share-row-main small {
+  color: var(--text-faint);
+  font-size: 11px;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.yanta-public-share-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.yanta-public-shares-empty {
+  padding: 18px;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  color: var(--text-faint);
+  text-align: center;
+  font-size: 13px;
+}
+
+@media (max-width: 680px) {
+  .yanta-public-share-row {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .yanta-public-share-row-actions .btn {
+    width: 100%;
+    justify-content: center;
+  }
+}
   `;
   document.head.append(style);
 }
@@ -299,6 +379,10 @@ async function renderPublicTab(noteId) {
                 ${share.status === 'failed' ? 'Retry publish' : 'Publish pending changes'}
               </button>
               <span class="grow"></span>
+              <button class="btn" data-open-public-shares-manager>
+                ${lucide('list', 14)}
+                Manage public links
+              </button>
               <button class="btn danger" data-stop-public-share>
                 ${lucide('trash', 14)}
                 Stop sharing
@@ -325,6 +409,10 @@ async function renderPublicTab(noteId) {
               <button class="btn primary" data-create-public-share>
                 ${lucide('link', 14)}
                 Create public link
+              </button>
+              <button class="btn" data-open-public-shares-manager>
+                ${lucide('list', 14)}
+                Manage public links
               </button>
               <button class="btn" data-open-cloud-setup>
                 ${lucide('cloud', 14)}
@@ -438,6 +526,10 @@ async function renderPublicTab(noteId) {
   body.querySelector('[data-open-cloud-setup]')?.addEventListener('click', async () => {
     await openYantaCloudSetup();
   });
+
+  body.querySelector('[data-open-public-shares-manager]')?.addEventListener('click', async () => {
+    await openPublicSharesManager();
+  });
 }
 
 function renderLiveTab() {
@@ -467,6 +559,319 @@ function renderLiveTab() {
   body.querySelector('[data-stop-live-share]')?.addEventListener('click', async () => {
     await stopLiveSharing(state.currentNoteId);
   });
+}
+
+let managerModal = null;
+
+function ensureManagerModal() {
+  ensureCss();
+
+  if (managerModal) return managerModal;
+
+  managerModal = document.createElement('div');
+  managerModal.className = 'modal yanta-public-shares-manager-modal';
+  managerModal.hidden = true;
+
+  managerModal.addEventListener('click', (e) => {
+    if (e.target === managerModal) {
+      closePublicSharesManager();
+    }
+
+    if (e.target.closest?.('[data-public-shares-manager-close]')) {
+      closePublicSharesManager();
+    }
+  });
+
+  document.body.append(managerModal);
+
+  return managerModal;
+}
+
+export function closePublicSharesManager() {
+  if (managerModal) {
+    managerModal.hidden = true;
+  }
+}
+
+function cloudShareActive(raw = {}) {
+  return isPublicShareActive({
+    shareId: raw.shareId || raw.id,
+    status: raw.status,
+    expiresAt: raw.expiresAt || raw.expires_at,
+    revokedAt: raw.revokedAt || raw.revoked_at,
+  });
+}
+
+async function loadPublicShareRows() {
+  const rows = new Map();
+
+  for (const note of state.notes.values()) {
+    const share = publicShareStateForNote(note.id);
+
+    if (!isPublicShareActive(share)) continue;
+
+    const shareId = share.shareId || share.id || '';
+
+    rows.set(shareId || `note:${note.id}`, {
+      noteId: note.id,
+      note,
+      shareId,
+      share,
+      local: true,
+      cloud: false,
+    });
+  }
+
+  try {
+    const res = await listOwnPublicShares();
+
+    for (const raw of res?.shares || []) {
+      const sourceType = raw.sourceType || raw.source_type || 'note';
+      if (sourceType !== 'note') continue;
+      if (!cloudShareActive(raw)) continue;
+
+      const shareId = String(raw.shareId || raw.id || '').trim();
+      const noteId = String(raw.sourceId || raw.source_id || '').trim();
+
+      if (!shareId || !noteId) continue;
+
+      const key = shareId || `note:${noteId}`;
+      const existing = rows.get(key);
+
+      if (existing) {
+        existing.cloud = true;
+        existing.cloudStatus = raw.status || 'active';
+        existing.lastPublishedAt =
+          raw.lastPublishedAt ||
+          raw.last_published_at ||
+          existing.share?.lastPublishedAt ||
+          null;
+        continue;
+      }
+
+      rows.set(key, {
+        noteId,
+        note: state.notes.get(noteId) || null,
+        shareId,
+        share: {
+          shareId,
+          enabled: true,
+          status: raw.status || 'active',
+          expiresAt: raw.expiresAt || raw.expires_at || null,
+          lastPublishedAt: raw.lastPublishedAt || raw.last_published_at || null,
+          cloudOnly: true,
+        },
+        local: false,
+        cloud: true,
+      });
+    }
+  } catch (err) {
+    console.info('[YANTA Public Share] could not load cloud share list', err?.message || err);
+  }
+
+  return [...rows.values()].sort((a, b) => {
+    const at = a.note?.title || a.noteId || '';
+    const bt = b.note?.title || b.noteId || '';
+
+    return at.localeCompare(bt);
+  });
+}
+
+function formatPublicShareTime(ts) {
+  if (!ts) return '';
+
+  const d = new Date(Number(ts));
+  if (Number.isNaN(d.getTime())) return '';
+
+  return d.toLocaleString([], {
+    dateStyle: 'short',
+    timeStyle: 'short',
+  });
+}
+
+function publicShareRowStatus(row) {
+  const parts = [];
+
+  const status = row.share?.status || row.cloudStatus || 'active';
+
+  if (status === 'up-to-date') {
+    parts.push('up to date');
+  } else if (status === 'pending') {
+    parts.push('changes pending');
+  } else if (status === 'publishing') {
+    parts.push('publishing');
+  } else if (status === 'failed') {
+    parts.push('publish failed');
+  } else {
+    parts.push('active');
+  }
+
+  if (row.share?.cloudOnly) {
+    parts.push('cloud-only on this device');
+  }
+
+  const published = row.lastPublishedAt || row.share?.lastPublishedAt;
+  if (published) {
+    parts.push(`published ${formatPublicShareTime(published)}`);
+  }
+
+  return parts.join(' · ');
+}
+
+async function renderPublicSharesManager() {
+  const m = ensureManagerModal();
+
+  m.innerHTML = `
+    <div class="modal-card yanta-public-shares-manager-card">
+      <header class="modal-head">
+        <h3>Shared public notes</h3>
+        <button class="icon-btn" data-public-shares-manager-close>&times;</button>
+      </header>
+
+      <div class="modal-body">
+        <div class="yanta-public-share-info">
+          Notes listed here have an active public read-only link.
+          You can stop sharing individual notes or revoke all public links.
+        </div>
+
+        <div class="compress-actions" style="margin:12px 0;flex-wrap:wrap">
+          <button class="btn" data-refresh-public-shares-manager>
+            ${lucide('refresh-cw', 14)}
+            Refresh
+          </button>
+
+          <span class="grow"></span>
+
+          <button class="btn danger" data-stop-all-public-shares>
+            ${lucide('trash', 14)}
+            Stop sharing for all notes
+          </button>
+        </div>
+
+        <div data-public-shares-manager-body>
+          <div class="tree-empty">Loading shared notes…</div>
+        </div>
+      </div>
+    </div>
+  `;
+
+  const body = m.querySelector('[data-public-shares-manager-body]');
+  const rows = await loadPublicShareRows();
+
+  if (!rows.length) {
+    body.innerHTML = `
+      <div class="yanta-public-shares-empty">
+        No active public shares.
+      </div>
+    `;
+  } else {
+    body.innerHTML = `
+      <div class="yanta-public-shares-list">
+        ${rows.map((row) => {
+          const title =
+            row.note?.title ||
+            `Missing local note (${row.noteId})`;
+
+          const status = publicShareRowStatus(row);
+          const shareId = row.shareId || row.share?.shareId || '';
+
+          return `
+            <div class="yanta-public-share-row" data-share-id="${escapeHtml(shareId)}" data-note-id="${escapeHtml(row.noteId)}">
+              <div class="yanta-public-share-row-main">
+                <strong>${escapeHtml(title)}</strong>
+                <small>${escapeHtml(status)}</small>
+                <small>${escapeHtml(shareId)}</small>
+              </div>
+
+              <div class="yanta-public-share-row-actions">
+                <button class="btn danger" data-stop-public-share-row>
+                  ${lucide('trash', 14)}
+                  Stop sharing
+                </button>
+              </div>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    `;
+  }
+
+  m.querySelector('[data-refresh-public-shares-manager]')?.addEventListener('click', async () => {
+    await renderPublicSharesManager();
+  });
+
+  m.querySelector('[data-stop-all-public-shares]')?.addEventListener('click', async () => {
+    const ok = await yantaConfirm({
+      title: 'Stop sharing all notes?',
+      message: [
+        'Stop public sharing for all notes?',
+        '',
+        'All active public links will be revoked.',
+        'Future access through these links will be blocked.',
+        '',
+        'Copies already downloaded cannot be removed.',
+      ].join('\n'),
+      confirmLabel: 'Stop sharing all',
+      cancelLabel: 'Cancel',
+      danger: true,
+      icon: 'trash',
+    });
+
+    if (!ok) return;
+
+    try {
+      await stopAllPublicShares();
+      await renderPublicSharesManager();
+    } catch (err) {
+      console.error(err);
+      toast(err?.message || 'Could not stop all public sharing', 'error');
+    }
+  });
+
+  m.querySelectorAll('[data-stop-public-share-row]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const row = btn.closest('.yanta-public-share-row');
+      const shareId = row?.dataset?.shareId || '';
+      const noteId = row?.dataset?.noteId || '';
+
+      if (!shareId) return;
+
+      const note = state.notes.get(noteId);
+
+      const ok = await yantaConfirm({
+        title: 'Stop public sharing?',
+        message: [
+          `Stop public sharing for "${note?.title || noteId || 'this note'}"?`,
+          '',
+          'Future access through this public link will be blocked.',
+          'Copies already downloaded cannot be removed.',
+        ].join('\n'),
+        confirmLabel: 'Stop sharing',
+        cancelLabel: 'Cancel',
+        danger: true,
+        icon: 'trash',
+      });
+
+      if (!ok) return;
+
+      try {
+        await stopPublicShareById(shareId, {
+          noteId,
+        });
+
+        await renderPublicSharesManager();
+      } catch (err) {
+        console.error(err);
+        toast(err?.message || 'Could not stop sharing', 'error');
+      }
+    });
+  });
+}
+
+export async function openPublicSharesManager() {
+  const m = ensureManagerModal();
+  m.hidden = false;
+  await renderPublicSharesManager();
 }
 
 export async function openUnifiedShareModal() {

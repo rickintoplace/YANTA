@@ -47,7 +47,6 @@ const yantaHighlight = HighlightStyle.define([
 ]);
 
 // ----- Theme: minimal, inherits from YANTA CSS vars ---------------------
-// ----- Theme: minimal, inherits from YANTA CSS vars ---------------------
 const yantaTheme = EditorView.theme({
   '&': {
     fontSize: 'var(--fs-base)',

@@ -21,6 +21,10 @@ import { $, state, store, toast } from './core.js';
 import { createWebRTCProvider, generateShareCredentials } from './providers.js';
 import { renderTree } from './tree.js';
 import qrcode from 'qrcode-generator';
+import {
+  publicShareStateForNote,
+  isPublicShareActive,
+} from './public-share/public-share-publisher.js';
 
 const SHARE_VIEWS = new Set(['preview', 'split', 'edit']);
 
@@ -294,7 +298,9 @@ export function renderShareIndicator() {
   const id = state.currentNoteId;
   const sess = id ? state.liveShares.get(id) : null;
   const note = id ? state.notes.get(id) : null;
-  const publicActive = note?.publicShare?.enabled === true;
+  const publicActive = note
+    ? isPublicShareActive(publicShareStateForNote(note.id))
+    : false;
 
   btn.classList.toggle('active', !!sess || publicActive);
 

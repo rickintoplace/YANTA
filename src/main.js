@@ -40,6 +40,7 @@ import { closeShareModal, stopSharing, restoreSharedNotes, handleShareUrl } from
 import {
   openUnifiedShareModal,
   closeUnifiedShareModal,
+  openPublicSharesManager,
 } from './public-share/public-share-ui.js';
 
 import {
@@ -1207,6 +1208,7 @@ async function init() {
     cleanupUnusedImages,
     openShareModal: openUnifiedShareModal,
     stopSharing: () => stopSharing(state.currentNoteId),
+    openPublicSharesManager,
     importFiles,
     importFolder: () => $('importFolder').click(),
   });
@@ -1223,6 +1225,17 @@ async function init() {
   setupFloatingCreate();
   setupRss();
   setupPublicShareAutoPublisher();
+  window.addEventListener('yanta-public-share-changed', () => {
+    renderShareIndicator();
+    renderTree();
+
+    window.dispatchEvent(new CustomEvent('yanta-dashboard-refresh', {
+      detail: {
+        reason: 'public-share-status',
+        source: 'public-share',
+      },
+    }));
+  });
   setupSync2ProgressUi();
   setupSyncReminderUi();
 

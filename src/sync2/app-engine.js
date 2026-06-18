@@ -479,6 +479,67 @@ export async function sync2LocalVaultContentFingerprint() {
   return `sha256:${base64UrlEncode(digest)}`;
 }
 
+const SYNC2_VAULT_FINGERPRINT_MARKER_KEY =
+  'sync2.fullUpdateUploaded.vault.fingerprint';
+
+const SYNC2_LEGACY_VAULT_VERSION_MARKER_KEY =
+  'sync2.fullUpdateUploaded.vault.version';
+
+async function currentVaultFingerprintMarker(localState) {
+  const fingerprint = await sync2LocalVaultContentFingerprint();
+
+  let lastFingerprint =
+    String(await localState.get(SYNC2_VAULT_FINGERPRINT_MARKER_KEY, '') || '');
+
+  /*
+    Migration compatibility:
+    If an older timestamp marker already covers the current semantic vault
+    version, initialize the new fingerprint marker without uploading anything.
+  */
+  if (!lastFingerprint) {
+    const legacyLastVaultVersion =
+      Number(await localState.get(SYNC2_LEGACY_VAULT_VERSION_MARKER_KEY, 0)) || 0;
+
+    const currentVaultVersion = sync2LocalVaultContentVersion();
+
+    if (
+      fingerprint &&
+      currentVaultVersion > 0 &&
+      legacyLastVaultVersion >= currentVaultVersion
+    ) {
+      await localState.set(SYNC2_VAULT_FINGERPRINT_MARKER_KEY, fingerprint);
+      lastFingerprint = fingerprint;
+    }
+  }
+
+  return {
+    markerKey: SYNC2_VAULT_FINGERPRINT_MARKER_KEY,
+    fingerprint,
+    lastFingerprint,
+  };
+}
+
+function ensureOutboxMarker(item, markerKey, markerValue) {
+  if (!item || !markerKey) return;
+
+  if (!Array.isArray(item.afterUploadLocalStateSet)) {
+    item.afterUploadLocalStateSet = [];
+  }
+
+  const exists = item.afterUploadLocalStateSet.some((m) =>
+    m &&
+    m.key === markerKey &&
+    String(m.value ?? '') === String(markerValue ?? '')
+  );
+
+  if (!exists) {
+    item.afterUploadLocalStateSet.push({
+      key: markerKey,
+      value: markerValue,
+    });
+  }
+}
+
 function outboxHasUploadMarker(outbox, markerKey, markerValue) {
   return outbox.some((item) =>
     Array.isArray(item.afterUploadLocalStateSet) &&
@@ -1046,36 +1107,11 @@ export class Sync2AppEngine {
 
     await this.observeAllKnownNotes();
 
-    const vaultFingerprint = await sync2LocalVaultContentFingerprint();
-    const vaultMarkerKey = 'sync2.fullUpdateUploaded.vault.fingerprint';
-
-    let lastVaultFingerprint =
-      String(await this.localState.get(vaultMarkerKey, '') || '');
-
-    /*
-      Migration compatibility:
-      Older builds stored a timestamp marker:
-        sync2.fullUpdateUploaded.vault.version
-
-      If that legacy marker already covers the current semantic vault version,
-      initialize the new fingerprint marker without uploading a redundant
-      Vault update pack.
-    */
-    if (!lastVaultFingerprint) {
-      const legacyVaultMarkerKey = 'sync2.fullUpdateUploaded.vault.version';
-      const legacyLastVaultVersion =
-        Number(await this.localState.get(legacyVaultMarkerKey, 0)) || 0;
-
-      const currentVaultVersion = sync2LocalVaultContentVersion();
-
-      if (
-        currentVaultVersion > 0 &&
-        legacyLastVaultVersion >= currentVaultVersion
-      ) {
-        await this.localState.set(vaultMarkerKey, vaultFingerprint);
-        lastVaultFingerprint = vaultFingerprint;
-      }
-    }
+    const {
+      markerKey: vaultMarkerKey,
+      fingerprint: vaultFingerprint,
+      lastFingerprint: lastVaultFingerprint,
+    } = await currentVaultFingerprintMarker(this.localState);
 
     let vaultQueued = false;
 
@@ -1563,6 +1599,87 @@ export class Sync2AppEngine {
     }
   }
 
+  async dropRedundantVaultOutboxUpdates() {
+    /*
+      Critical SaaS storage guard:
+      VaultDoc can receive local no-op / volatile updates through observers
+      before the routine sync fingerprint check runs.
+      
+      Example sources:
+      - dashboard render/cache writes
+      - note.updated-only body freshness
+      - focus/sync status side effects
+      - hydration side effects
+
+      If the semantic durable Vault fingerprint is unchanged, queued Vault
+      updates do not represent user data and must not be uploaded.
+    */
+
+    if (!Array.isArray(this.outbox) || !this.outbox.some((item) => item?.kind === 'vault')) {
+      return {
+        dropped: 0,
+      };
+    }
+
+    const {
+      fingerprint,
+      lastFingerprint,
+    } = await currentVaultFingerprintMarker(this.localState);
+
+    if (!fingerprint || fingerprint !== lastFingerprint) {
+      return {
+        dropped: 0,
+      };
+    }
+
+    const before = this.outbox.length;
+
+    this.outbox = this.outbox.filter((item) => item?.kind !== 'vault');
+
+    const dropped = before - this.outbox.length;
+
+    if (dropped > 0) {
+      this.progress?.({
+        phase: 'uploadOutbox',
+        direction: 'up',
+        detailed: false,
+        message: `Dropped ${dropped} redundant vault metadata update${dropped === 1 ? '' : 's'}.`,
+      });
+    }
+
+    return {
+      dropped,
+    };
+  }
+
+  async tagVaultOutboxUpdatesWithCurrentFingerprint() {
+    /*
+      Direct VaultDoc observer updates do not necessarily carry the marker
+      that queueChangedLocalStateUpdates() adds to full updates.
+
+      If we upload a real Vault metadata update, mark the current semantic
+      fingerprint as covered after upload. Otherwise the next routine sync
+      may upload another full Vault update for the same state.
+    */
+
+    if (!Array.isArray(this.outbox) || !this.outbox.some((item) => item?.kind === 'vault')) {
+      return;
+    }
+
+    const {
+      markerKey,
+      fingerprint,
+    } = await currentVaultFingerprintMarker(this.localState);
+
+    if (!fingerprint) return;
+
+    for (const item of this.outbox) {
+      if (item?.kind !== 'vault') continue;
+
+      ensureOutboxMarker(item, markerKey, fingerprint);
+    }
+  }
+
   compactOutboxForUpload() {
     /*
       storage optimization:
@@ -1721,9 +1838,24 @@ export class Sync2AppEngine {
     try {
       await this.catchUpSeqFromRemoteOwnObjects();
 
+      /*
+        Important:
+        Some code paths can still create VaultDoc updates for volatile/no-op
+        metadata changes. Drop them right before upload if the durable Vault
+        fingerprint did not change.
+      */
+      await this.dropRedundantVaultOutboxUpdates();
+
       this.compactOutboxForUpload();
 
+      /*
+        If a real Vault update remains, tag it with the current semantic
+        fingerprint so future routine syncs know this Vault state is covered.
+      */
+      await this.tagVaultOutboxUpdatesWithCurrentFingerprint();
+
       let uploaded = 0;
+
       const total = this.outbox.length;
       let processed = 0;
 
@@ -1746,6 +1878,36 @@ export class Sync2AppEngine {
         const item = this.outbox[0];
         processed++;
 
+        /*
+          New vault items may have been appended while uploadOutbox() is
+          already running. Apply the same redundant-update guard per item.
+        */
+        if (item.kind === 'vault') {
+          const {
+            markerKey,
+            fingerprint,
+            lastFingerprint,
+          } = await currentVaultFingerprintMarker(this.localState);
+
+          if (fingerprint && fingerprint === lastFingerprint) {
+            this.outbox.shift();
+
+            this.progress({
+              phase: 'uploadOutbox',
+              direction: 'up',
+              current: Math.min(processed, total),
+              total,
+              message: 'Skipped redundant vault metadata update.',
+            });
+
+            continue;
+          }
+
+          if (fingerprint) {
+            ensureOutboxMarker(item, markerKey, fingerprint);
+          }
+        }
+        
         if (item.kind === 'note' && vaultTombstonesMap().has(item.noteId)) {
           this.outbox.shift();
 

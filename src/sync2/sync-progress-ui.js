@@ -17,6 +17,8 @@ let detailRoot = null;
 let hideTimer = 0;
 let hadVisibleDetailedActivity = false;
 let compactResetTimer = 0;
+let lastSyncStart = 0;
+let syncDelayTimer = 0;
 
 const DETAILED_TOTAL_THRESHOLD = 50;
 
@@ -114,35 +116,35 @@ function ensureCss() {
 
 @keyframes yanta-arrow-upload {
   0% {
-    transform: translateY(3px);
-    opacity: 0;
+    transform: translateY(2px);
+    opacity: 0.3;
   }
-  30% {
+  35% {
     opacity: 1;
   }
-  75% {
+  65% {
     opacity: 1;
   }
   100% {
-    transform: translateY(-3px);
-    opacity: 0;
+    transform: translateY(-2px);
+    opacity: 0.3;
   }
 }
 
 @keyframes yanta-arrow-download {
   0% {
-    transform: translateY(-3px);
-    opacity: 0;
+    transform: translateY(-2px);
+    opacity: 0.3;
   }
-  30% {
+  35% {
     opacity: 1;
   }
-  75% {
+  65% {
     opacity: 1;
   }
   100% {
-    transform: translateY(3px);
-    opacity: 0;
+    transform: translateY(2px);
+    opacity: 0.3;
   }
 }
 
@@ -174,27 +176,27 @@ function ensureCss() {
 }
 
 .yanta-anim-upload-arrow {
-  animation: yanta-arrow-upload 1.6s infinite cubic-bezier(0.4, 0, 0.2, 1);
+  animation: yanta-arrow-upload 1.8s infinite cubic-bezier(0.4, 0, 0.2, 1);
   transform-origin: center;
 }
 
 .yanta-anim-download-arrow {
-  animation: yanta-arrow-download 1.6s infinite cubic-bezier(0.4, 0, 0.2, 1);
+  animation: yanta-arrow-download 1.8s infinite cubic-bezier(0.4, 0, 0.2, 1);
   transform-origin: center;
 }
 
 .yanta-anim-sync-arrows {
-  animation: yanta-spin-sync 2.2s linear infinite;
+  animation: yanta-spin-sync 2.5s linear infinite;
   transform-origin: 12px 16px;
 }
 
 .yanta-anim-cog {
-  animation: yanta-spin-cog 3.5s linear infinite;
+  animation: yanta-spin-cog 4s linear infinite;
   transform-origin: 12px 17px;
 }
 
 .yanta-anim-backup-arrow {
-  animation: yanta-spin-backup 2.8s linear infinite;
+  animation: yanta-spin-backup 3s linear infinite;
   transform-origin: 12px 15px;
 }
 
@@ -409,8 +411,8 @@ function ensureCss() {
 }
 
 /**
- * Returns the requested cloud SVGs tailored with class hooks for precise,
- * modern internal transitions instead of rotating the whole element.
+ * Returns requested cloud SVGs tailored with specific class hooks for
+ * internal path animations instead of rotating the outer containers.
  */
 function getIconSvg(name, size = 24) {
   const icons = {
@@ -498,7 +500,6 @@ function getIconSvg(name, size = 24) {
     return icons[name];
   }
 
-  // Fallback to primary Lucide renderer for non-cloud-specific helper requests
   return lucide(name, size);
 }
 
@@ -547,6 +548,8 @@ function phaseLabel(phase = '') {
 
     hydrate: 'Updating local vault…',
     finalize: 'Finalizing sync…',
+    compact: 'Compacting database…',
+    compacting: 'Compacting database…',
     complete: 'Sync complete',
     error: 'Sync failed',
   };
@@ -558,11 +561,12 @@ function directionIcon(detail) {
   if (detail?.status === 'error' || detail?.phase === 'error') return 'cloud-alert';
   if (detail?.status === 'done' || detail?.phase === 'complete') return 'cloud-check';
 
-  if (detail?.direction === 'up') return 'cloud-upload';
-  if (detail?.direction === 'down') return 'cloud-download';
-
+  if (detail?.phase === 'compact' || detail?.phase === 'compacting') return 'cloud-cog';
   if (detail?.phase === 'hydrate' || detail?.phase === 'finalize') return 'cloud-cog';
   if (detail?.phase === 'backup') return 'cloud-backup';
+
+  if (detail?.direction === 'up') return 'cloud-upload';
+  if (detail?.direction === 'down') return 'cloud-download';
 
   return 'cloud-sync';
 }
@@ -570,6 +574,7 @@ function directionIcon(detail) {
 function compactLabel(detail) {
   if (detail?.status === 'error' || detail?.phase === 'error') return 'Sync error';
   if (detail?.status === 'done' || detail?.phase === 'complete') return 'Synced';
+  if (detail?.phase === 'compact' || detail?.phase === 'compacting') return 'Compacting…';
   if (detail?.direction === 'up') return 'Syncing…';
   if (detail?.direction === 'down') return 'Checking…';
   return 'Syncing…';
@@ -696,6 +701,7 @@ function updateCompact(detail = {}) {
 
   ensureCss();
 
+  clearTimeout(syncDelayTimer);
   clearTimeout(compactResetTimer);
 
   const isDone = detail.status === 'done' || detail.phase === 'complete';
@@ -703,6 +709,28 @@ function updateCompact(detail = {}) {
   const isUp = detail.direction === 'up';
   const isDown = detail.direction === 'down';
   const isSyncing = !isDone && !isError;
+
+  /*
+    Mitigate rapid visual state changes to prevent the UI from flickering.
+    If visual syncing started, make sure the active indication stays on-screen
+    for at least 800 milliseconds before transitioning to the finished state.
+  */
+  if (isSyncing && lastSyncStart === 0) {
+    lastSyncStart = Date.now();
+  }
+
+  if ((isDone || isError) && lastSyncStart > 0) {
+    const elapsed = Date.now() - lastSyncStart;
+    const minActiveDuration = 800;
+    if (elapsed < minActiveDuration) {
+      syncDelayTimer = window.setTimeout(() => {
+        lastSyncStart = 0;
+        updateCompact(detail);
+      }, minActiveDuration - elapsed);
+      return;
+    }
+    lastSyncStart = 0;
+  }
 
   indicator.hidden = false;
   indicator.classList.add('yanta-sync2-compact');
@@ -752,11 +780,13 @@ function resetCompact() {
   );
 
   /*
-    Restore neutral vault indicator content.
-    If another module later renders richer provider status, it can overwrite.
+    Restore static vault indicator markup with a clean, standard cloud icon
+    instead of the hardcoded text checkmark.
   */
   indicator.innerHTML = `
-    <span class="sync-sym sync-synced">✓</span>
+    <span class="sync-sym sync-synced" style="display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px;">
+      ${getIconSvg('cloud', 13)}
+    </span>
     <span>Cloud</span>
   `;
 

@@ -527,7 +527,7 @@ export function updateSyncIndicator() {
   } else if (sync.isAvailable) {
     e.innerHTML = lucide('refresh', 12);
     e.classList.remove('connected');
-    e.title = 'Set up sync (works great with Syncthing)';
+    e.title = 'Set up sync';
     e.hidden = false;
   } else e.hidden = true;
 }

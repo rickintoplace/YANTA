@@ -29,6 +29,7 @@ const LOCAL_PUBLIC_SHARE_STATUS_KEY = 'yanta.publicShares.local.v1';
 
 let timers = new Map();
 let publishing = new Map();
+let lastOwnPublicShareCloudRefreshAt = 0;
 
 function now() {
   return Date.now();
@@ -142,8 +143,10 @@ export async function refreshOwnPublicShareStatusFromCloud() {
   } catch (err) {
     // Not signed in / offline / not configured: harmless for local indicators.
     console.info('[YANTA Public Share] cloud status refresh skipped', err?.message || err);
+
     return {
       refreshed: false,
+      changed: 0,
       reason: err?.message || String(err),
     };
   }
@@ -152,6 +155,31 @@ export async function refreshOwnPublicShareStatusFromCloud() {
   const all = readLocalState();
 
   let changed = 0;
+
+  const comparableState = (share = {}) => ({
+    enabled: share.enabled !== false,
+    shareId: String(share.shareId || share.id || ''),
+    status: String(share.status || ''),
+    expiresAt: share.expiresAt || share.expires_at || null,
+    revokedAt: share.revokedAt || share.revoked_at || null,
+    lastPublishedAt: share.lastPublishedAt || share.last_published_at || null,
+    cloudOnly: !!share.cloudOnly,
+  });
+
+  const sameComparableState = (a, b) => {
+    const aa = comparableState(a);
+    const bb = comparableState(b);
+
+    return (
+      aa.enabled === bb.enabled &&
+      aa.shareId === bb.shareId &&
+      aa.status === bb.status &&
+      aa.expiresAt === bb.expiresAt &&
+      aa.revokedAt === bb.revokedAt &&
+      aa.lastPublishedAt === bb.lastPublishedAt &&
+      aa.cloudOnly === bb.cloudOnly
+    );
+  };
 
   for (const raw of shares) {
     const sourceType = raw.sourceType || raw.source_type || 'note';
@@ -172,7 +200,7 @@ export async function refreshOwnPublicShareStatusFromCloud() {
     const prev = all[noteId] || {};
 
     if (active) {
-      all[noteId] = {
+      const next = {
         ...prev,
 
         enabled: true,
@@ -185,8 +213,18 @@ export async function refreshOwnPublicShareStatusFromCloud() {
         */
         cloudOnly: !prev.shareKey,
 
+        /*
+          Lokale Publish-Zustände nicht unnötig überschreiben.
+          Wichtig: Dadurch wird aus "pending"/"failed" nicht bei jedem
+          Cloud-Refresh wieder "up-to-date".
+        */
         status: prev.shareKey
-          ? (prev.status && prev.status !== 'active' ? prev.status : 'up-to-date')
+          ? (
+              prev.status &&
+              !['active', 'revoked', 'deleted'].includes(String(prev.status))
+                ? prev.status
+                : 'up-to-date'
+            )
           : 'active',
 
         expiresAt: raw.expiresAt || raw.expires_at || prev.expiresAt || null,
@@ -195,16 +233,30 @@ export async function refreshOwnPublicShareStatusFromCloud() {
           raw.last_published_at ||
           prev.lastPublishedAt ||
           null,
-
-        updatedAt: now(),
       };
 
-      changed++;
-      emitPublicShareChanged(noteId, all[noteId].status);
+      if (!sameComparableState(prev, next)) {
+        all[noteId] = {
+          ...next,
+          updatedAt: now(),
+        };
+
+        changed++;
+        emitPublicShareChanged(noteId, all[noteId].status);
+      }
+
       continue;
     }
 
-    if (String(prev.shareId || '') === shareId && prev.status !== 'revoked') {
+    /*
+      Cloud sagt: diese Share ist nicht mehr aktiv.
+      Nur dann lokalen Zustand ändern/emittieren, wenn sie lokal noch
+      als aktiv bekannt war.
+    */
+    if (
+      String(prev.shareId || '') === shareId &&
+      isPublicShareActive(prev)
+    ) {
       all[noteId] = {
         ...prev,
         enabled: false,
@@ -699,9 +751,25 @@ window.addEventListener('yanta-note-updated', (e) => {
       }
     }
   });
-  refreshOwnPublicShareStatusFromCloud().catch(() => {});
+  const refreshOwnPublicSharesThrottled = ({
+    force = false,
+  } = {}) => {
+    const t = now();
+
+    if (!force && t - lastOwnPublicShareCloudRefreshAt < 60_000) {
+      return;
+    }
+
+    lastOwnPublicShareCloudRefreshAt = t;
+
+    refreshOwnPublicShareStatusFromCloud().catch(() => {});
+  };
+
+  refreshOwnPublicSharesThrottled({
+    force: true,
+  });
 
   window.addEventListener('focus', () => {
-    refreshOwnPublicShareStatusFromCloud().catch(() => {});
+    refreshOwnPublicSharesThrottled();
   });
 }

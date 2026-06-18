@@ -1234,13 +1234,6 @@ async function init() {
   window.addEventListener('yanta-public-share-changed', () => {
     renderShareIndicator();
     renderTree();
-
-    window.dispatchEvent(new CustomEvent('yanta-dashboard-refresh', {
-      detail: {
-        reason: 'public-share-status',
-        source: 'public-share',
-      },
-    }));
   });
   setupSync2ProgressUi();
   setupSyncReminderUi();

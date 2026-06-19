@@ -149,6 +149,7 @@ import {
   setupRss,
   openRssInbox,
 } from './rss/rss-ui.js';
+import { setupOverlayHistoryRouter, pushOverlayState, closeTopOverlay } from './overlay-history.js';
 
 let sharePreviewLocked = false;
 
@@ -937,6 +938,9 @@ async function init() {
   await openDB();
 
   registerServiceWorker();
+
+  // Initialize the native browser navigation router
+  setupOverlayHistoryRouter();
 
   await installVaultStoreBridge();
 

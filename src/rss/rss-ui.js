@@ -37,6 +37,8 @@ import {
   saveRssSettings,
   getRssFeeds,
   deleteRssFeed,
+  setRssFeedTags,
+  rssTagCountsFromFeeds,
 } from './rss-settings.js';
 
 import {
@@ -79,9 +81,11 @@ let initialized = false;
 let mode = 'pane'; // pane | fullscreen
 let currentMode = 'unread';
 let currentFeedId = '';
+let currentSourceTag = '';
 let searchQuery = '';
 let layoutMode = 'grid';
 let activeReaderItemId = '';
+let addToolbarOpen = false;
 
 let root = null;
 let fullscreenHost = null;
@@ -423,19 +427,100 @@ function mediaBadge(item) {
 }
 
 async function renderItemCard(item) {
-  const btn = el('button', {
-    type: 'button',
+  const btn = el('div', {
+    role: 'button',
+    tabindex: '0',
     class:
       'yanta-rss-item' +
       (item.read ? ' read' : '') +
       (item.starred ? ' starred' : ''),
   });
 
-  btn.addEventListener('click', () => {
+  let touchTimer = null;
+  let isLongPress = false;
+  let startX = 0;
+  let startY = 0;
+
+  btn.addEventListener('touchstart', (e) => {
+    isLongPress = false;
+    const touch = e.touches[0];
+    startX = touch.clientX;
+    startY = touch.clientY;
+
+    touchTimer = setTimeout(() => {
+      isLongPress = true;
+
+      document.querySelectorAll('.yanta-rss-item.actions-open').forEach((other) => {
+        if (other !== btn) {
+          other.classList.remove('actions-open');
+        }
+      });
+
+      btn.classList.add('actions-open');
+
+      if (navigator.vibrate) {
+        try {
+          navigator.vibrate(40);
+        } catch (_) {}
+      }
+    }, 600);
+  }, { passive: true });
+
+  btn.addEventListener('touchmove', (e) => {
+    if (!touchTimer) return;
+    const touch = e.touches[0];
+    const diffX = Math.abs(touch.clientX - startX);
+    const diffY = Math.abs(touch.clientY - startY);
+
+    if (diffX > 10 || diffY > 10) {
+      clearTimeout(touchTimer);
+      touchTimer = null;
+    }
+  }, { passive: true });
+
+  btn.addEventListener('touchend', (e) => {
+    if (touchTimer) {
+      clearTimeout(touchTimer);
+      touchTimer = null;
+    }
+    if (isLongPress) {
+      e.preventDefault();
+    }
+  });
+
+  btn.addEventListener('touchcancel', () => {
+    if (touchTimer) {
+      clearTimeout(touchTimer);
+      touchTimer = null;
+    }
+  });
+
+  btn.addEventListener('click', (e) => {
+    if (isLongPress) {
+      e.preventDefault();
+      e.stopPropagation();
+      isLongPress = false;
+      return;
+    }
+
+    if (btn.classList.contains('actions-open')) {
+      e.preventDefault();
+      e.stopPropagation();
+      btn.classList.remove('actions-open');
+      return;
+    }
+
     renderReader(item.id).catch((err) => {
       console.error(err);
       toast('Could not open source item', 'error');
     });
+  });
+
+  btn.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      btn.click();
+    }
   });
 
   const thumb = el('div', { class: 'yanta-rss-thumb' });
@@ -539,7 +624,31 @@ async function renderItemCard(item) {
     }
   });
 
-  actions.append(star, save, archive);
+const closeActions = el('button', {
+    class: 'btn iconish yanta-rss-mobile-close-actions',
+    type: 'button',
+    title: 'Close actions',
+  });
+
+  closeActions.innerHTML = lucide('x', 13);
+
+  const handleClose = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    btn.classList.remove('actions-open');
+  };
+
+  // Click- und Touch-Events für sofortige Reaktion auf Mobilgeräten binden
+  closeActions.addEventListener('click', handleClose);
+  closeActions.addEventListener('touchend', handleClose);
+
+  // Verhindert, dass Gesten auf der Aktionsleiste die Karten-Events auslösen
+  actions.addEventListener('touchstart', (e) => e.stopPropagation(), { passive: true });
+  actions.addEventListener('touchmove', (e) => e.stopPropagation(), { passive: true });
+  actions.addEventListener('touchend', (e) => e.stopPropagation());
+  actions.addEventListener('click', (e) => e.stopPropagation());
+
+  actions.append(star, save, archive, closeActions);
   main.append(actions);
 
   btn.append(thumb, main);
@@ -626,7 +735,16 @@ function dedupeRssItemsForDisplay(items = []) {
 }
 
 async function loadVisibleItems() {
+  const feeds = await getRssFeeds();
   const archivedMode = currentMode === 'archived';
+
+  const tagFeedIds = currentSourceTag
+    ? new Set(
+        feeds
+          .filter((feed) => (feed.tags || []).includes(currentSourceTag))
+          .map((feed) => feed.id)
+      )
+    : null;
 
   const items = await listRssItems({
     feedId: currentFeedId,
@@ -637,9 +755,12 @@ async function loadVisibleItems() {
     limit: 500,
   });
 
-  const filtered = archivedMode
-    ? items.filter((item) => item.archived === true)
-    : items;
+  const filtered = items.filter((item) => {
+    if (archivedMode && item.archived !== true) return false;
+    if (tagFeedIds && !tagFeedIds.has(item.feedId)) return false;
+
+    return true;
+  });
 
   return dedupeRssItemsForDisplay(filtered);
 }
@@ -777,7 +898,7 @@ function readerHtml(item) {
 function textToReaderHtml(text = '') {
   const safe = escapeHtml(String(text || '').trim());
 
-  if (!safe) return '<p>No preview content available.</p>';
+  if (!safe) return ' ';
 
   return safe
     .split(/\n{2,}/)
@@ -897,12 +1018,29 @@ async function renderMediaBlock(item) {
         <audio preload="metadata" src="${escapeAttr(mediaUrl)}"></audio>
 
         <div class="yanta-rss-audio-controls">
-          <button class="icon-btn" data-audio-back title="Back 15 seconds">${lucide('rotate-ccw', 16)}</button>
-          <button class="icon-btn primary-round" data-audio-play title="Play">${lucide('play', 16)}</button>
-          <button class="icon-btn" data-audio-fwd title="Forward 30 seconds">${lucide('rotate-cw', 16)}</button>
-          <span data-audio-current>0:00</span>
-          <input type="range" min="0" max="0" value="0" step="0.1" data-audio-range />
-          <span data-audio-duration>0:00</span>
+          <!-- Playback controls group -->
+          <div class="yanta-rss-controls-group">
+            <button class="icon-btn" data-audio-back="" title="Back 15 seconds">
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>
+            </button>
+            
+            <button class="icon-btn primary-round" data-audio-play="" title="Play">
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"></polygon></svg>
+            </button>
+            
+            <button class="icon-btn" data-audio-fwd="" title="Forward 30 seconds">
+              <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg>
+            </button>
+          </div>
+
+          <!-- Timeline group -->
+          <div class="yanta-rss-timeline-group">
+            <span data-audio-current="">0:00</span>
+            <div class="range-container">
+              <input type="range" min="0" max="3068.839125" value="0" step="0.1" data-audio-range="">
+            </div>
+            <span data-audio-duration="">51:08</span>
+          </div>
         </div>
       </div>
     `;
@@ -918,7 +1056,7 @@ async function renderMediaBlock(item) {
     const box = el('div', { class: 'yanta-rss-media-player video' });
 
     box.innerHTML = `
-      <div class="yanta-rss-media-player-head">
+      <div class="yanta-rss-media-player-head" style="display:none;">
         ${lucide('play', 15)}
         <strong>Video</strong>
       </div>
@@ -1274,12 +1412,14 @@ function tabButton(id, label, icon = '') {
   btn.addEventListener('click', async () => {
     currentMode = id;
     currentFeedId = '';
+
     await renderShell();
   });
 
   return btn;
 }
 
+// Check if source is YouTube
 function isYoutubeFeed(feed = {}) {
   return (
     feed.sourceKind === 'youtube' ||
@@ -1292,6 +1432,164 @@ function activeFeedFromList(feeds = []) {
   return currentFeedId
     ? feeds.find((f) => f.id === currentFeedId) || null
     : null;
+}
+
+function normalizeSourceTagInput(value = '') {
+  return String(value || '')
+    .trim()
+    .replace(/^#/, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9äöüß._-]+/gi, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40);
+}
+
+function sourceTagButton({ tag, count }) {
+  const btn = el('button', {
+    class: 'yanta-rss-tab yanta-rss-tag-tab' + (currentSourceTag === tag ? ' active' : ''),
+    type: 'button',
+    title: `Filter sources tagged #${tag}`,
+  });
+
+  btn.innerHTML = `
+    ${lucide('tag', 12)}
+    <span>#${escapeHtml(tag)}</span>
+    <small>${count}</small>
+  `;
+
+  btn.addEventListener('click', async () => {
+    currentSourceTag = currentSourceTag === tag ? '' : tag;
+    currentFeedId = '';
+
+    await renderShell();
+  });
+
+  return btn;
+}
+
+function renderSourceTagsEditor(feed, {
+  knownTags = [],
+  onSaved,
+} = {}) {
+  let tags = [...new Set(feed.tags || [])];
+
+  const wrap = el('div', { class: 'yanta-rss-source-tags-editor' });
+  const chips = el('div', { class: 'yanta-rss-source-tags-chips' });
+
+  const input = el('input', {
+    class: 'yanta-rss-source-tags-input',
+    placeholder: '+ tag',
+    list: `rss-tags-${feed.id}`,
+    autocomplete: 'off',
+    spellcheck: 'false',
+  });
+
+  const datalist = el('datalist', {
+    id: `rss-tags-${feed.id}`,
+  });
+
+  for (const tag of knownTags) {
+    datalist.append(el('option', {
+      value: tag,
+    }));
+  }
+
+  const save = async () => {
+    const clean = [...new Set(
+      tags
+        .map(normalizeSourceTagInput)
+        .filter(Boolean)
+    )];
+
+    await setRssFeedTags(feed.id, clean);
+
+    tags = clean;
+
+    window.dispatchEvent(new CustomEvent('yanta-rss-updated', {
+      detail: {
+        feedId: feed.id,
+        localOnly: true,
+        reason: 'source-tags',
+      },
+    }));
+
+    await onSaved?.();
+  };
+
+  const renderChips = () => {
+    chips.replaceChildren();
+
+    for (const tag of tags) {
+      const chip = el('button', {
+        type: 'button',
+        class: 'yanta-rss-source-tag-chip',
+        title: `Remove #${tag}`,
+      });
+
+      chip.innerHTML = `#${escapeHtml(tag)} ${lucide('x', 11)}`;
+
+      chip.addEventListener('click', async () => {
+        tags = tags.filter((x) => x !== tag);
+        renderChips();
+
+        try {
+          await save();
+        } catch (err) {
+          toast(err?.message || 'Could not save source tags', 'error');
+        }
+      });
+
+      chips.append(chip);
+    }
+  };
+
+  const addCurrentInputTag = async () => {
+    const tag = normalizeSourceTagInput(input.value);
+
+    if (!tag) return;
+
+    if (!tags.includes(tag)) {
+      tags.push(tag);
+      renderChips();
+
+      try {
+        await save();
+      } catch (err) {
+        toast(err?.message || 'Could not save source tags', 'error');
+      }
+    }
+
+    input.value = '';
+  };
+
+  input.addEventListener('keydown', async (e) => {
+    if (e.key === 'Enter' || e.key === ',' || e.key === 'Tab') {
+      e.preventDefault();
+      await addCurrentInputTag();
+      return;
+    }
+
+    if (e.key === 'Backspace' && !input.value && tags.length) {
+      tags.pop();
+      renderChips();
+
+      try {
+        await save();
+      } catch (err) {
+        toast(err?.message || 'Could not save source tags', 'error');
+      }
+    }
+  });
+
+  input.addEventListener('blur', () => {
+    addCurrentInputTag().catch(() => {});
+  });
+
+  renderChips();
+
+  wrap.append(chips, input, datalist);
+
+  return wrap;
 }
 
 function ensureSourcesModal() {
@@ -1324,6 +1622,8 @@ async function openRssSourcesManager() {
     getRssSettings(),
   ]);
 
+  const knownTags = rssTagCountsFromFeeds(feeds).map((x) => x.tag);
+
   modal.innerHTML = `
     <div class="modal-card yanta-rss-sources-card">
       <header class="modal-head">
@@ -1355,6 +1655,9 @@ async function openRssSourcesManager() {
                     <span class="yanta-rss-source-row-main">
                       <strong>${escapeHtml(feed.title || 'Source')}</strong>
                       <small>${escapeHtml(feed.feedUrl || '')}</small>
+
+                      <div data-source-tags-host="${escapeAttr(feed.id)}"></div>
+
                       ${
                         feed.lastError
                           ? `<em>${escapeHtml(feed.lastError)}</em>`
@@ -1388,6 +1691,23 @@ async function openRssSourcesManager() {
       </div>
     </div>
   `;
+
+  for (const feed of feeds) {
+    const host = modal.querySelector(
+      `[data-source-tags-host="${CSS.escape(feed.id)}"]`
+    );
+
+    if (!host) continue;
+
+    host.replaceChildren(
+      renderSourceTagsEditor(feed, {
+        knownTags,
+        onSaved: async () => {
+          await renderShell();
+        },
+      })
+    );
+  }
 
   modal.querySelector('[data-youtube-hide-shorts]')?.addEventListener('change', async (e) => {
     await saveRssSettings({
@@ -1469,6 +1789,7 @@ async function renderShell() {
   injectCss();
 
   const node = ensureRoot();
+
   node.replaceChildren();
 
   const settings = await getRssSettings();
@@ -1480,21 +1801,30 @@ async function renderShell() {
         error: '',
       };
 
-  const head = el('header', { class: 'yanta-rss-head' });
+  const inSidePane = mode === 'pane';
 
-  const title = el('div', { class: 'yanta-rss-head-title' });
-  title.innerHTML = `
-    ${lucide('rss', 17)}
-    <span>
-      <strong>Sources</strong>
-      <small>RSS, Atom, Podcasts and Videos</small>
-    </span>
-  `;
+  const head = el('header', {
+    class: 'yanta-rss-head' + (inSidePane ? ' compact' : ''),
+  });
+
+  if (!inSidePane) {
+    const title = el('div', { class: 'yanta-rss-head-title' });
+
+    title.innerHTML = `
+      ${lucide('rss', 17)}
+      <span>
+        <strong>YANTA Sources</strong>
+        <small>RSS, Atom, Podcasts and Videos</small>
+      </span>
+    `;
+
+    head.append(title);
+  }
 
   const search = el('input', {
     class: 'text-input yanta-rss-search',
     type: 'search',
-    placeholder: 'Search items…',
+    placeholder: 'Search in your Sources…',
     value: searchQuery,
   });
 
@@ -1503,7 +1833,11 @@ async function renderShell() {
     renderInbox().catch(() => {});
   });
 
-  const refresh = el('button', { class: 'btn iconish', title: 'Refresh sources' });
+  const refresh = el('button', {
+    class: 'btn iconish',
+    title: 'Refresh sources',
+  });
+
   refresh.innerHTML = lucide('refresh-cw', 15);
 
   refresh.addEventListener('click', async () => {
@@ -1521,34 +1855,74 @@ async function renderShell() {
     }
   });
 
-  const expand = el('button', {
-    class: 'icon-btn',
-    title: mode === 'fullscreen' ? 'Dock to side pane' : 'Open fullscreen',
+  const manageBtn = el('button', {
+    class: 'btn compact yanta-rss-manage-btn',
+    title: 'Manage sources',
   });
 
-  expand.innerHTML = lucide(mode === 'fullscreen' ? 'panel-right' : 'maximize-2', 16);
+  manageBtn.innerHTML = `${lucide('settings-2', 14)} <span>Manage Sources</span>`;
 
-  expand.addEventListener('click', async () => {
-    if (mode === 'fullscreen') {
-      await openRssPane();
-    } else {
-      await openRssFullscreen();
+  manageBtn.addEventListener('click', () => {
+    openRssSourcesManager().catch((err) => {
+      console.error(err);
+      toast('Could not open source manager', 'error');
+    });
+  });
+
+  const toggleAddBtn = el('button', {
+    class: 'btn primary compact yanta-rss-add-toggle',
+    title: addToolbarOpen ? 'Close add source' : 'Add source',
+  });
+
+  toggleAddBtn.innerHTML = addToolbarOpen
+    ? `${lucide('x', 14)} <span>Add</span>`
+    : `${lucide('plus', 14)} <span>Add</span>`;
+
+  toggleAddBtn.addEventListener('click', async () => {
+    addToolbarOpen = !addToolbarOpen;
+
+    await renderShell();
+
+    if (addToolbarOpen) {
+      requestAnimationFrame(() => {
+        root?.querySelector('[data-rss-add-input]')?.focus();
+      });
     }
   });
 
-  const close = el('button', {
-    class: 'icon-btn',
-    title: mode === 'fullscreen' ? 'Close Sources' : 'Close side pane',
-  });
+  head.append(search, refresh, manageBtn, toggleAddBtn);
 
-  close.innerHTML = lucide('x', 16);
+  if (!inSidePane) {
+    const expand = el('button', {
+      class: 'icon-btn',
+      title: mode === 'fullscreen' ? 'Dock to side pane' : 'Open fullscreen',
+    });
 
-  close.addEventListener('click', () => {
-    if (mode === 'fullscreen') closeRssFullscreen();
-    else closeSidePane();
-  });
+    expand.innerHTML = lucide(mode === 'fullscreen' ? 'panel-right' : 'maximize-2', 16);
 
-  head.append(title, search, refresh, expand, close);
+    expand.addEventListener('click', async () => {
+      if (mode === 'fullscreen') {
+        await openRssPane();
+      } else {
+        await openRssFullscreen();
+      }
+    });
+
+    const close = el('button', {
+      class: 'icon-btn',
+      title: mode === 'fullscreen' ? 'Close Sources' : 'Close side pane',
+    });
+
+    close.innerHTML = lucide('x', 16);
+
+    close.addEventListener('click', () => {
+      if (mode === 'fullscreen') closeRssFullscreen();
+      else closeSidePane();
+    });
+
+    head.append(expand, close);
+  }
+
   node.append(head);
 
   if (settings.fetchProvider === 'yanta-cloud' && !cloudAuth.authenticated) {
@@ -1559,90 +1933,92 @@ async function renderShell() {
     return;
   }
 
-  // Wichtig:
-  // feeds / activeFeed müssen VOR loadMoreBtn initialisiert werden.
   const feeds = await getRssFeeds();
   const activeFeed = activeFeedFromList(feeds);
 
-  const toolbar = el('div', { class: 'yanta-rss-toolbar' });
+  if (addToolbarOpen) {
+    const toolbar = el('div', { class: 'yanta-rss-toolbar' });
 
-  const addInput = el('input', {
-    class: 'text-input',
-    placeholder: 'Search or paste website/feed/YouTube channel URL…',
-    autocomplete: 'off',
-    spellcheck: 'false',
-  });
+    const addInput = el('input', {
+      class: 'text-input',
+      placeholder: 'Browse curated Sources or paste a feed / YouTube URL…',
+      autocomplete: 'off',
+      spellcheck: 'false',
+      dataset: {
+        rssAddInput: '1',
+      },
+    });
 
-  const addBtn = el('button', { class: 'btn primary compact' });
-  addBtn.innerHTML = `${lucide('plus', 14)} Add`;
+    const addBtn = el('button', { class: 'btn primary compact' });
+    addBtn.innerHTML = `${lucide('plus', 14)} Add`;
 
-  const browseBtn = el('button', { class: 'btn iconish', title: 'Browse curated sources' });
-  browseBtn.innerHTML = lucide('layout-grid', 15);
+    const browseBtn = el('button', {
+      class: 'btn yanta-rss-browse-btn',
+      title: 'Browse curated sources',
+    });
 
-  browseBtn.addEventListener('click', async () => {
-    await openRssSourceBrowser({
+    browseBtn.innerHTML = `${lucide('layout-grid', 14)} <span>Browse curated Sources</span>`;
+
+    browseBtn.addEventListener('click', async () => {
+      await openRssSourceBrowser({
+        onAdded: async () => {
+          addToolbarOpen = false;
+          await renderShell();
+        },
+      });
+    });
+
+    const runAdd = async () => {
+      const input = addInput.value.trim();
+
+      if (!input) return;
+
+      addBtn.disabled = true;
+      addInput.disabled = true;
+
+      try {
+        await addBestRssSourceFromInput(input, {
+          onAdded: async () => {
+            addInput.value = '';
+          },
+        });
+
+        addToolbarOpen = false;
+        await renderShell();
+      } catch (err) {
+        toast(err?.message || 'Could not add source', 'error');
+      } finally {
+        addBtn.disabled = false;
+        addInput.disabled = false;
+      }
+    };
+
+    addBtn.addEventListener('click', runAdd);
+
+    addInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        addToolbarOpen = false;
+        renderShell().catch(() => {});
+        return;
+      }
+
+      if (e.key !== 'Enter') return;
+
+      e.preventDefault();
+      runAdd();
+    });
+
+    attachRssSourcePicker(addInput, {
       onAdded: async () => {
+        addInput.value = '';
+        addToolbarOpen = false;
         await renderShell();
       },
     });
-  });
 
-  const manageBtn = el('button', {
-    class: 'btn iconish',
-    title: 'Manage sources',
-  });
-
-  manageBtn.innerHTML = lucide('settings-2', 15);
-
-  manageBtn.addEventListener('click', () => {
-    openRssSourcesManager().catch((err) => {
-      console.error(err);
-      toast('Could not open source manager', 'error');
-    });
-  });
-
-  const runAdd = async () => {
-    const input = addInput.value.trim();
-
-    if (!input) return;
-
-    addBtn.disabled = true;
-    addInput.disabled = true;
-
-    try {
-      await addBestRssSourceFromInput(input, {
-        onAdded: async () => {
-          addInput.value = '';
-        },
-      });
-
-      await renderShell();
-    } catch (err) {
-      toast(err?.message || 'Could not add source', 'error');
-    } finally {
-      addBtn.disabled = false;
-      addInput.disabled = false;
-    }
-  };
-
-  addBtn.addEventListener('click', runAdd);
-
-  addInput.addEventListener('keydown', (e) => {
-    if (e.key !== 'Enter') return;
-
-    e.preventDefault();
-    runAdd();
-  });
-
-  attachRssSourcePicker(addInput, {
-    onAdded: async () => {
-      addInput.value = '';
-      await renderShell();
-    },
-  });
-
-toolbar.append(addInput, addBtn, browseBtn, manageBtn);
-  node.append(toolbar);
+    toolbar.append(addInput, browseBtn);
+    node.append(toolbar);
+  }
 
   const tabs = el('div', { class: 'yanta-rss-tabs' });
 
@@ -1653,25 +2029,45 @@ toolbar.append(addInput, addBtn, browseBtn, manageBtn);
     tabButton('archived', 'Archived', 'archive')
   );
 
-  for (const feed of feeds) {
-    const btn = el('button', {
-      class: 'yanta-rss-tab' + (currentFeedId === feed.id ? ' active' : ''),
-      title: feed.feedUrl,
-      type: 'button',
-    }, feed.title);
+  const tagCounts = rssTagCountsFromFeeds(feeds);
 
-    btn.addEventListener('click', async () => {
-      currentFeedId = feed.id;
-      currentMode = 'all';
+  if (tagCounts.length) {
+    tabs.append(el('span', { class: 'yanta-rss-tabs-divider' }));
 
-      try {
-        await refreshRssFeed(feed.id);
-      } catch {}
+    for (const tagInfo of tagCounts.slice(0, inSidePane ? 12 : 32)) {
+      tabs.append(sourceTagButton(tagInfo));
+    }
+  }
 
-      await renderShell();
-    });
+  if (!inSidePane && feeds.length) {
+    tabs.append(el('span', { class: 'yanta-rss-tabs-divider' }));
 
-    tabs.append(btn);
+    for (const feed of feeds) {
+      const btn = el('button', {
+        class: 'yanta-rss-tab' + (currentFeedId === feed.id ? ' active' : ''),
+        title: feed.feedUrl,
+        type: 'button',
+      });
+
+      btn.innerHTML = `
+        ${lucide(isYoutubeFeed(feed) ? 'youtube' : 'rss', 12)}
+        <span>${escapeHtml(feed.title || 'Source')}</span>
+      `;
+
+      btn.addEventListener('click', async () => {
+        currentFeedId = feed.id;
+        currentSourceTag = '';
+        currentMode = 'all';
+
+        try {
+          await refreshRssFeed(feed.id);
+        } catch {}
+
+        await renderShell();
+      });
+
+      tabs.append(btn);
+    }
   }
 
   const listBody = el('div', {
@@ -1712,6 +2108,8 @@ export async function openRssPane() {
     mode = 'pane';
     body.replaceChildren(root);
   });
+
+  addToolbarOpen = false;
 
   await renderShell();
 }
@@ -1924,6 +2322,7 @@ function injectCss() {
 }
 
 .yanta-rss-item {
+  position: relative;
   width: 100%;
 
   display: grid;
@@ -2013,6 +2412,7 @@ function injectCss() {
 
   display: flex;
   align-items: flex-start;
+  flex-direction: column;
   gap: 7px;
 }
 
@@ -2207,7 +2607,7 @@ color-mix(in srgb, var(--bg-elev-3) 90%, transparent); */
 .yanta-rss-reader-content {
   padding: clamp(16px, 4vw, 34px);
 
-  border: 1px solid var(--border);
+  // border: 1px solid var(--border);
   border-radius: 18px;
 
   background: var(--bg);
@@ -2286,9 +2686,12 @@ color-mix(in srgb, var(--bg-elev-3) 90%, transparent); */
   background: #000;
 }
 
-.yanta-rss-media-player video {
-  width: 100%;
-  border-radius: 12px;
+.yanta-rss-media-player.video {
+    width: 100%;
+    border-radius: 12px;
+    padding: 0;
+    background: none;
+    border: none;
 }
 
 .yanta-rss-media-player.audio.rich {
@@ -2320,7 +2723,7 @@ color-mix(in srgb, var(--bg-elev-3) 90%, transparent); */
   background: var(--bg);
   color: var(--accent);
 
-  box-shadow: 0 12px 34px rgba(0,0,0,0.25);
+  // box-shadow: 0 12px 34px rgba(0,0,0,0.25);
 }
 
 .yanta-rss-audio-cover img {
@@ -2359,44 +2762,154 @@ color-mix(in srgb, var(--bg-elev-3) 90%, transparent); */
 }
 
 .yanta-rss-audio-controls {
-  display: grid;
-  grid-template-columns: 34px 42px 34px auto minmax(120px, 1fr) auto;
-  align-items: center;
-  gap: 8px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    padding: 12px 2px;
+    /* background: var(--bg-elev); */
+    /* border: 1px solid var(--border); */
+    border-radius: 12px;
+    margin-top: 10px;
+}
 
-  margin-top: 10px;
+/* Control Buttons Styling */
+.yanta-rss-controls-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-shrink: 0;
+}
+
+.icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: transparent;
+  border: none;
+  color: var(--text-faint);
+  cursor: pointer;
+  padding: 8px;
+  border-radius: 50%;
+  transition: color 0.2s ease, transform 0.1s ease, background-color 0.2s ease;
+}
+
+.icon-btn:hover {
+  color: var(--text);
+  background-color: rgba(0, 0, 0, 0.04);
+}
+
+.icon-btn:active {
+  transform: scale(0.95);
 }
 
 .yanta-rss-audio-controls .primary-round {
-  width: 42px;
-  height: 42px;
-
-  border-radius: 999px;
-
-  color: white;
+  width: 40px;
+  height: 40px;
   background: var(--accent);
-  border-color: var(--accent);
+  color: #fff;
+  border-radius: 50%;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
-.yanta-rss-audio-controls span {
+.yanta-rss-audio-controls .primary-round:hover {
+  background: var(--accent); /* Keep accent color */
+  transform: scale(1.04);
+  filter: brightness(1.05);
+}
+
+.yanta-rss-audio-controls .primary-round:active {
+  transform: scale(0.95);
+}
+
+/* Timeline Layout */
+.yanta-rss-timeline-group {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-grow: 1;
+}
+
+.yanta-rss-timeline-group span {
   color: var(--text-faint);
   font-size: 11px;
-  font-family: var(--font-mono);
+  font-family: var(--font-mono), monospace;
+  min-width: 38px;
+  user-select: none;
 }
 
+.yanta-rss-timeline-group span[data-audio-duration] {
+  text-align: right;
+}
+
+.range-container {
+  position: relative;
+  flex-grow: 1;
+  display: flex;
+  align-items: center;
+}
+
+/* Custom Styled Range Slider */
 .yanta-rss-audio-controls input[type="range"] {
+  -webkit-appearance: none;
+  appearance: none;
   width: 100%;
-  accent-color: var(--accent);
+  background: transparent;
+  margin: 0;
+  height: 16px; /* Larger hit target */
+  cursor: pointer;
 }
 
-.yanta-rss-description-details {
-  margin-top: 18px;
+.yanta-rss-audio-controls input[type="range"]:focus {
+  outline: none;
+}
 
-  border: 1px solid var(--border);
-  border-radius: 12px;
+/* Webkit (Chrome, Safari, Edge) */
+.yanta-rss-audio-controls input[type="range"]::-webkit-slider-runnable-track {
+  width: 100%;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+  transition: background 0.2s ease;
+}
 
-  background: var(--bg-elev);
-  overflow: hidden;
+.yanta-rss-audio-controls input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  height: 12px;
+  width: 12px;
+  border-radius: 50%;
+  background: var(--accent);
+  margin-top: -4px; /* Centering math: (track height/2) - (thumb height/2) */
+  opacity: 0;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+/* Firefox */
+.yanta-rss-audio-controls input[type="range"]::-moz-range-track {
+  width: 100%;
+  height: 4px;
+  background: var(--border);
+  border-radius: 2px;
+}
+
+.yanta-rss-audio-controls input[type="range"]::-moz-range-thumb {
+  height: 12px;
+  width: 12px;
+  border: none;
+  border-radius: 50%;
+  background: var(--accent);
+  opacity: 0;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+/* Reveal slider thumb on hover, similar to modern media players */
+.yanta-rss-timeline-group:hover input[type="range"]::-webkit-slider-thumb,
+.yanta-rss-timeline-group:hover input[type="range"]::-moz-range-thumb {
+  opacity: 1;
+}
+
+.yanta-rss-timeline-group:hover input[type="range"]::-webkit-slider-runnable-track {
+  background: rgba(0, 0, 0, 0.15); /* Slightly darken track on hover */
 }
 
 .yanta-rss-description-details summary {
@@ -2413,6 +2926,8 @@ color-mix(in srgb, var(--bg-elev-3) 90%, transparent); */
   font-weight: 800;
 
   background: var(--bg-elev-2);
+
+  border-radius: 12px;
 }
 
 .yanta-rss-description-details > div {
@@ -2806,7 +3321,8 @@ color-mix(in srgb, var(--bg-elev-3) 90%, transparent); */
 
 @media (max-width: 760px) {
   .yanta-rss-head {
-    grid-template-columns: 1fr auto auto auto auto;
+    // grid-template-columns: 1fr auto auto auto auto;
+    display: flex;
   }
 
   .yanta-rss-head-title small,
@@ -2872,12 +3388,38 @@ color-mix(in srgb, var(--bg-elev-3) 90%, transparent); */
   }
 
   .yanta-rss-audio-controls {
-    grid-template-columns: 34px 42px 34px;
+    flex-direction: column;
+    gap: 14px;
+    // padding: 16px;
+    align-items: stretch;
   }
 
-  .yanta-rss-audio-controls input[type="range"],
-  .yanta-rss-audio-controls span {
-    grid-column: 1 / -1;
+  /* Places timeline at the top */
+  .yanta-rss-timeline-group {
+    order: 1;
+    width: 100%;
+  }
+
+  /* Places main controls below the timeline */
+  .yanta-rss-controls-group {
+    order: 2;
+    justify-content: center;
+    width: 100%;
+    gap: 20px; /* Gives buttons more breathing room on mobile */
+  }
+
+  /* Make sure the slider thumb is permanently visible on mobile devices */
+  .yanta-rss-audio-controls input[type="range"]::-webkit-slider-thumb {
+    opacity: 1;
+    height: 14px;
+    width: 14px;
+    margin-top: -5px;
+  }
+  
+  .yanta-rss-audio-controls input[type="range"]::-moz-range-thumb {
+    opacity: 1;
+    height: 14px;
+    width: 14px;
   }
 
   .yanta-rss-source-row {
@@ -2902,14 +3444,18 @@ color-mix(in srgb, var(--bg-elev-3) 90%, transparent); */
 
 @media (hover: none), (pointer: coarse) {
   .yanta-rss-actions {
+    opacity: 0;
+    transform: translateY(-4px) scale(0.98);
+    pointer-events: none;
+
+    // background: color-mix(in srgb, var(--bg-elev-3) 82%, transparent);
+    transition: opacity 130ms ease, transform 150ms cubic-bezier(.2, .8, .2, 1);
+  }
+
+  .yanta-rss-item.actions-open .yanta-rss-actions {
     opacity: 1;
-    transform: none;
+    transform: translateY(0) scale(1);
     pointer-events: auto;
-
-    top: 7px;
-    right: 7px;
-
-    background: color-mix(in srgb, var(--bg-elev-3) 82%, transparent);
   }
 
   .yanta-rss-actions .btn {
@@ -2931,6 +3477,151 @@ color-mix(in srgb, var(--bg-elev-3) 90%, transparent); */
   .yanta-rss-tab {
     animation: none !important;
     transition: none !important;
+  }
+}
+
+/* ============================================================
+   RSS head compact mode for side pane
+   ============================================================ */
+
+.yanta-rss-head:not(.compact) {
+  grid-template-columns: minmax(150px, auto) minmax(120px, 1fr) auto auto auto auto auto;
+}
+
+.yanta-rss-head.compact {
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
+}
+
+.yanta-rss-head.compact .yanta-rss-search {
+  display: block;
+}
+
+.yanta-rss-manage-btn,
+.yanta-rss-add-toggle,
+.yanta-rss-browse-btn {
+  white-space: nowrap;
+}
+
+.yanta-rss-tabs-divider {
+  width: 1px;
+  min-width: 1px;
+  height: 22px;
+  margin: 0 4px;
+
+  background: var(--border);
+}
+
+.yanta-rss-tag-tab small {
+  margin-left: 2px;
+  color: var(--text-faint);
+  font-size: 10px;
+}
+
+.yanta-rss-tab.active small {
+  color: color-mix(in srgb, var(--accent) 72%, var(--text-faint));
+}
+
+/* ============================================================
+   RSS source tags editor
+   ============================================================ */
+
+.yanta-rss-source-tags-editor {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 5px;
+
+  margin-top: 6px;
+}
+
+.yanta-rss-source-tags-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.yanta-rss-source-tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+
+  min-height: 22px;
+  padding: 2px 7px;
+
+  border: 1px solid var(--border);
+  border-radius: 999px;
+
+  background: var(--bg-elev);
+  color: var(--text-dim);
+
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.yanta-rss-source-tag-chip:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.yanta-rss-source-tags-input {
+  width: 86px;
+  min-height: 24px;
+
+  border: 1px dashed var(--border);
+  border-radius: 999px;
+
+  background: transparent;
+  color: var(--text);
+
+  padding: 2px 8px;
+
+  font-size: 11px;
+  outline: none;
+}
+
+.yanta-rss-source-tags-input:focus {
+  border-style: solid;
+  border-color: var(--accent);
+  background: var(--bg-elev);
+}
+
+@media (max-width: 760px) {
+  .yanta-rss-head.compact {
+    grid-template-columns: minmax(0, 1fr) auto auto auto;
+  }
+
+  .yanta-rss-head.compact .yanta-rss-search {
+    display: block;
+  }
+
+  .yanta-rss-manage-btn span,
+  .yanta-rss-browse-btn span {
+    display: none;
+  }
+
+  .yanta-rss-toolbar {
+    padding: 8px;
+  }
+
+  .yanta-rss-toolbar .btn {
+    flex: 0 0 auto;
+  }
+}
+
+.yanta-rss-mobile-close-actions {
+  display: none !important;
+}
+
+@media (hover: none), (pointer: coarse) {
+  .yanta-rss-mobile-close-actions {
+    display: inline-flex !important;
+    color: var(--text-dim) !important;
+    opacity: 0.85;
+  }
+  .yanta-rss-mobile-close-actions:active {
+    color: var(--text) !important;
+    opacity: 1;
   }
 }
   `;
@@ -2996,6 +3687,14 @@ export function setupRss() {
       closeRssFullscreen();
     }
   });
+
+  window.addEventListener('touchstart', (e) => {
+    if (!e.target.closest('.yanta-rss-actions')) {
+      document.querySelectorAll('.yanta-rss-item.actions-open').forEach((node) => {
+        node.classList.remove('actions-open');
+      });
+    }
+  }, { passive: true });
 
   window.addEventListener('yanta-rss-updated', (e) => {
     if (!root?.isConnected) return;

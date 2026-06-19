@@ -637,8 +637,9 @@ function renderDropdown(input, {
 
     const empty = el('div', { class: 'yanta-rss-source-empty' });
     empty.innerHTML = `
-      Search for topics like <strong>tech</strong>, <strong>programming</strong>, <strong>science</strong>,
-      or paste a website like <strong>tagesschau.de</strong>.
+      <strong>Tip:</strong> Simply paste a YouTube Channel URL or search for topics.
+      <br>
+      Examples:
       <div class="yanta-rss-source-examples">
         ${examples.map((x) => `<button class="yanta-rss-source-chip" data-example="${escapeAttr(x)}">${escapeHtml(x)}</button>`).join('')}
       </div>

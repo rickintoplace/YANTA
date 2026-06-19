@@ -250,3 +250,58 @@ export async function deleteRssFeed(feedId) {
 
   return saveRssFeeds(feeds.filter((f) => f.id !== id));
 }
+
+export async function patchRssFeed(feedId, patch = {}) {
+  const id = String(feedId || '');
+  const feeds = await getRssFeeds();
+
+  const idx = feeds.findIndex((feed) => feed.id === id);
+
+  if (idx < 0) {
+    throw new Error('Source not found.');
+  }
+
+  const next = normalizeRssFeed({
+    ...feeds[idx],
+    ...patch,
+    id: feeds[idx].id,
+    created: feeds[idx].created,
+    updated: now(),
+  });
+
+  if (!next) {
+    throw new Error('Invalid source.');
+  }
+
+  feeds[idx] = next;
+
+  await saveRssFeeds(feeds);
+
+  return next;
+}
+
+export async function setRssFeedTags(feedId, tags = []) {
+  return patchRssFeed(feedId, {
+    tags,
+  });
+}
+
+export function rssTagCountsFromFeeds(feeds = []) {
+  const counts = new Map();
+
+  for (const feed of feeds || []) {
+    for (const tag of feed.tags || []) {
+      counts.set(tag, (counts.get(tag) || 0) + 1);
+    }
+  }
+
+  return [...counts.entries()]
+    .map(([tag, count]) => ({
+      tag,
+      count,
+    }))
+    .sort((a, b) =>
+      b.count - a.count ||
+      a.tag.localeCompare(b.tag)
+    );
+}

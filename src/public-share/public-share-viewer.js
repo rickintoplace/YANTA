@@ -44,6 +44,7 @@ import {
   sharePublicPage,
   renderPublicShareCalendarSectionHtml,
   bindPublicShareCalendarActions,
+  bindThemeToggleEvents,
 } from './public-share-viewer-enhancements.js';
 
 
@@ -59,10 +60,10 @@ function shareIdFromPath(pathname = location.pathname) {
 
 function brandLogoSvg() {
   return `
-    <svg xmlns="http://www.w3.org/2000/svg" viewBox="478 496 272 205" aria-hidden="true">
-      <path d="M489.3 496.7c-6.2.2-11.3.7-11.3 1.1 0 1.8 7.4 17.2 32.3 67.3l26.8 53.9-1.7 3.2c-.9 1.8-5.9 10.6-11 19.5l-9.4 16.2 10.2 20.6c5.7 11.3 10.7 20.5 11.3 20.5.5 0 2.3-2.4 3.9-5.3 1.7-2.8 22.5-38.5 46.5-79.2 23.9-40.7 43.4-74.8 43.3-75.7-.1-2.7-19.6-41.3-20.7-41.2-.5.1-9.5 14.9-20.1 33-10.5 18-19.6 33-20.2 33.2s-8.6-14.9-17.9-33.5l-16.8-33.8h-17c-9.3-.1-22.1.1-28.2.2"/>
-      <path d="M623 497.5c0 .2 4.3 9.3 9.5 20.1 5.2 10.9 9.5 20.3 9.5 21 0 1.7-14.2 26.5-58.3 101.9-19 32.4-34.3 59.4-34 59.9.8 1.2 29.6-.1 34.5-1.6 5.9-1.8 10.3-7.3 24.2-31l13.1-22.3 4.5-.7c2.5-.3 15-.7 27.8-.7 17.9-.1 23.2-.4 23.2-1.4 0-.6-2.8-6.8-6.3-13.7l-6.2-12.5-12.2-.3c-6.8-.1-12.3-.7-12.3-1.1 0-1 16.6-30 17.9-31.4 1.2-1.2 2.4.8 8.4 13.8 3 6.6 10.3 22.3 16.2 35 5.9 12.6 13.5 29.5 17 37.5 9.9 22.7 12.2 27.5 13.9 28.9 1.2 1 5.5 1.1 19.1.6 9.6-.4 17.5-.9 17.5-1.2 0-.2-3.3-7.6-7.4-16.6-12.2-26.8-44.8-98.8-54.2-119.7-4.8-10.7-13.3-29.6-18.9-42l-10.2-22.5-18.1-.3c-10-.1-18.2 0-18.2.3"/>
-      <path d="M629.8 654.7c-1.5 1.8-9.8 16.1-9.8 16.9 0 .2 16 .4 35.5.4 24.5 0 35.5-.3 35.5-1.1 0-1.8-7-16.3-8.3-17.1-.7-.4-12.5-.8-26.3-.8-22.7 0-25.2.2-26.6 1.7"/>
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="478 462.5 272 272" style="fill: var(--text);">
+      <path d="M489.3 496.7c-6.2.2-11.3.7-11.3 1.1 0 1.8 7.4 17.2 32.3 67.3l26.8 53.9-1.7 3.2c-.9 1.8-5.9 10.6-11 19.5l-9.4 16.2 10.2 20.6c5.7 11.3 10.7 20.5 11.3 20.5.5 0 2.3-2.4 3.9-5.3 1.7-2.8 22.5-38.5 46.5-79.2 23.9-40.7 43.4-74.8 43.3-75.7-.1-2.7-19.6-41.3-20.7-41.2-.5.1-9.5 14.9-20.1 33-10.5 18-19.6 33-20.2 33.2s-8.6-14.9-17.9-33.5l-16.8-33.8h-17c-9.3-.1-22.1.1-28.2.2"></path>
+      <path d="M623 497.5c0 .2 4.3 9.3 9.5 20.1 5.2 10.9 9.5 20.3 9.5 21 0 1.7-14.2 26.5-58.3 101.9-19 32.4-34.3 59.4-34 59.9.8 1.2 29.6-.1 34.5-1.6 5.9-1.8 10.3-7.3 24.2-31l13.1-22.3 4.5-.7c2.5-.3 15-.7 27.8-.7 17.9-.1 23.2-.4 23.2-1.4 0-.6-2.8-6.8-6.3-13.7l-6.2-12.5-12.2-.3c-6.8-.1-12.3-.7-12.3-1.1 0-1 16.6-30 17.9-31.4 1.2-1.2 2.4.8 8.4 13.8 3 6.6 10.3 22.3 16.2 35 5.9 12.6 13.5 29.5 17 37.5 9.9 22.7 12.2 27.5 13.9 28.9 1.2 1 5.5 1.1 19.1.6 9.6-.4 17.5-.9 17.5-1.2 0-.2-3.3-7.6-7.4-16.6-12.2-26.8-44.8-98.8-54.2-119.7-4.8-10.7-13.3-29.6-18.9-42l-10.2-22.5-18.1-.3c-10-.1-18.2 0-18.2.3"></path>
+      <path d="M629.8 654.7c-1.5 1.8-9.8 16.1-9.8 16.9 0 .2 16 .4 35.5.4 24.5 0 35.5-.3 35.5-1.1 0-1.8-7-16.3-8.3-17.1-.7-.4-12.5-.8-26.3-.8-22.7 0-25.2.2-26.6 1.7"></path>
     </svg>
   `;
 }
@@ -227,10 +228,10 @@ html.yanta-public-share-page[data-public-share-theme="light"] {
   gap: 10px;
 
   padding:
-    max(8px, env(safe-area-inset-top))
+    max(2px, env(safe-area-inset-top))
     max(12px, env(safe-area-inset-right))
-    8px
-    max(12px, env(safe-area-inset-left));
+    2px
+    max(2px, env(safe-area-inset-left));
 
   border-bottom: 1px solid var(--border);
   background: color-mix(in srgb, var(--bg-elev) 94%, transparent);
@@ -242,32 +243,11 @@ html.yanta-public-share-page[data-public-share-theme="light"] {
 .yps-brand-link {
   display: inline-flex;
   align-items: center;
-  gap: 9px;
 
   min-width: 0;
 
   color: var(--text);
   text-decoration: none;
-}
-
-.yps-brand-logo {
-  width: 30px;
-  height: 30px;
-
-  flex: 0 0 30px;
-
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-
-  color: var(--text);
-}
-
-.yps-brand-logo svg {
-  width: 30px;
-  height: 23px;
-  display: block;
-  fill: currentColor;
 }
 
 .yps-brand-title {
@@ -472,7 +452,7 @@ html.yanta-public-share-page[data-public-share-theme="light"] {
 
   color: var(--text);
 
-  font-size: clamp(32px, 6vw, 54px);
+  font-size: clamp(15px, 5vw, 42px)
   line-height: 1.06;
   letter-spacing: -0.045em;
 }
@@ -1001,8 +981,8 @@ function renderMenu() {
             <span data-yps-theme-label>Light mode</span>
         </button>
         <hr>
+        <a href="${escapeAttr(location.origin)}">${lucide('external-link', 15)} Open your YANTA</a>
         <button type="button" data-yps-about>${lucide('info', 15)} About YANTA</button>
-        <a href="${escapeAttr(location.origin)}">${lucide('external-link', 15)} Open yanta.page</a>
     </div>
   `;
 }
@@ -1011,7 +991,7 @@ function renderHeader() {
   return `
     <header class="yps-top">
       <a class="yps-brand-link" href="${escapeAttr(location.origin)}" title="Open YANTA">
-        <span class="yps-brand-logo">${brandLogoSvg()}</span>
+        <span class="brand-mark">${brandLogoSvg()}</span>
         <span class="yps-brand-title">
           <strong>YANTA</strong>
           <span>Public Share</span>
@@ -1031,9 +1011,8 @@ function renderHeader() {
           <span>Share</span>
         </button>
 
-        <button type="button" data-yps-theme-toggle>
+        <button class="yps-icon-btn" type="button" data-yps-theme-toggle>
           ${lucide('sun', 15)}
-          <span data-yps-theme-label>Light mode</span>
         </button>
 
         <button class="yps-icon-btn" type="button" data-yps-menu-button title="Menu">
@@ -1069,12 +1048,7 @@ function bindHeaderActions() {
   document.querySelector('[data-yps-share]')?.addEventListener('click', shareCurrentPage);
   document.querySelector('[data-yps-menu-button]')?.addEventListener('click', toggleMenu);
 
-  document.querySelectorAll('[data-yps-theme-toggle]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      await togglePublicTheme();
-      closeMenu();
-    });
-  });
+  bindThemeToggleEvents(document);
 
   menuEl = document.querySelector('[data-yps-menu]');
 

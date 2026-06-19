@@ -15,6 +15,8 @@ import {
   watchSystemTheme,
   cycleAppearanceMode,
   resolveEffectiveMode,
+  getAppearance,
+  saveAppearance,
 } from '../settings.js';
 
 import {
@@ -29,6 +31,28 @@ const PENDING_YANTA_EVENT_KEY = 'yanta.publicShare.pendingCalendarEvent.v1';
 
 let shareModal = null;
 let outsideMenuBound = false;
+
+let themeDropdownEl = null;
+let themeDropdownTimeout = null;
+let themeEventsBound = false;
+
+function safeGetAppearanceMode() {
+  try {
+    const app = getAppearance();
+    return app.mode || 'auto';
+  } catch {
+    return 'auto';
+  }
+}
+
+async function safeSetAppearanceMode(mode) {
+  try {
+    await saveAppearance({ mode });
+  } catch (err) {
+    console.warn('[YANTA Public Share] could not save appearance via settings', err);
+  }
+  updatePublicShareThemeButtons(document);
+}
 
 function injectEnhancementCss() {
   if (document.getElementById('yanta-public-share-enhancements-css')) return;
@@ -316,6 +340,66 @@ function injectEnhancementCss() {
   background: var(--bg-elev-2);
 }
 
+.yps-theme-menu {
+  position: fixed;
+  z-index: 300;
+  min-width: 150px;
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-elev-3);
+  color: var(--text);
+  box-shadow: 0 10px 30px rgba(0,0,0,0.3);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.yps-theme-menu[hidden] {
+  display: none !important;
+}
+
+.yps-theme-menu-item {
+  width: 100%;
+  min-height: 36px;
+  padding: 6px 10px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font-size: 13px;
+  font-family: var(--font);
+  cursor: pointer;
+  text-align: left;
+  transition: background 120ms ease;
+}
+
+.yps-theme-menu-item:hover {
+  background: var(--bg-elev-2);
+}
+
+.yps-theme-menu-item.is-active {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.yps-theme-menu-item .radio-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 2px solid var(--text-faint);
+  display: inline-block;
+  flex-shrink: 0;
+}
+
+.yps-theme-menu-item.is-active .radio-dot {
+  border-color: var(--accent);
+  background: var(--accent);
+}
+
 @media (max-width: 680px) {
   .yps-share-link-row {
     grid-template-columns: 1fr;
@@ -371,17 +455,30 @@ export async function setupPublicShareAppearance() {
 
 export function updatePublicShareThemeButtons(root = document) {
   const mode = resolveEffectiveMode();
-  const nextLabel = mode === 'light' ? 'Dark mode' : 'Light mode';
-  const icon = mode === 'light' ? 'moon' : 'sun';
+  const configMode = safeGetAppearanceMode();
+
+  document.documentElement.setAttribute('data-public-share-theme', mode);
+
+  let icon = 'monitor';
+  let label = 'System theme';
+  if (configMode === 'light') {
+    icon = 'sun';
+    label = 'Light theme';
+  } else if (configMode === 'dark') {
+    icon = 'moon';
+    label = 'Dark theme';
+  }
 
   root.querySelectorAll('[data-yps-theme-toggle]').forEach((btn) => {
-    btn.innerHTML = lucide(icon, 15);
-    btn.title = nextLabel;
-    btn.setAttribute('aria-label', nextLabel);
-
     const visibleLabel = btn.querySelector('[data-yps-theme-label]');
+
+    btn.title = `Theme: ${label}`;
+    btn.setAttribute('aria-label', `Theme: ${label}`);
+
     if (visibleLabel) {
-      visibleLabel.textContent = nextLabel;
+      btn.innerHTML = `${lucide(icon, 15)} <span data-yps-theme-label>${label}</span>`;
+    } else {
+      btn.innerHTML = lucide(icon, 16);
     }
   });
 }
@@ -389,6 +486,138 @@ export function updatePublicShareThemeButtons(root = document) {
 export async function togglePublicShareAppearance() {
   await cycleAppearanceMode();
   updatePublicShareThemeButtons(document);
+}
+
+function ensureThemeDropdown() {
+  injectEnhancementCss();
+  if (themeDropdownEl) return themeDropdownEl;
+
+  themeDropdownEl = document.createElement('div');
+  themeDropdownEl.className = 'yps-theme-menu';
+  themeDropdownEl.hidden = true;
+
+  themeDropdownEl.addEventListener('mouseenter', () => {
+    clearTimeout(themeDropdownTimeout);
+  });
+
+  themeDropdownEl.addEventListener('mouseleave', () => {
+    hideThemeDropdownWithDelay();
+  });
+
+  document.body.appendChild(themeDropdownEl);
+  return themeDropdownEl;
+}
+
+function hideThemeDropdownWithDelay() {
+  clearTimeout(themeDropdownTimeout);
+  themeDropdownTimeout = setTimeout(() => {
+    if (themeDropdownEl) themeDropdownEl.hidden = true;
+  }, 300);
+}
+
+function hideThemeDropdownImmediately() {
+  clearTimeout(themeDropdownTimeout);
+  if (themeDropdownEl) themeDropdownEl.hidden = true;
+}
+
+export function showThemeDropdown(buttonEl) {
+  const menu = ensureThemeDropdown();
+  clearTimeout(themeDropdownTimeout);
+
+  const currentMode = safeGetAppearanceMode();
+
+  const options = [
+    { value: 'light', label: 'Light', icon: 'sun' },
+    { value: 'dark', label: 'Dark', icon: 'moon' },
+    { value: 'auto', label: 'System', icon: 'monitor' },
+  ];
+
+  menu.innerHTML = options.map((opt) => {
+    const isActive = currentMode === opt.value;
+    return `
+      <button type="button" class="yps-theme-menu-item ${isActive ? 'is-active' : ''}" data-yps-theme-set="${opt.value}">
+        <span class="radio-dot"></span>
+        ${lucide(opt.icon, 14)}
+        <span>${opt.label}</span>
+      </button>
+    `;
+  }).join('');
+
+  menu.querySelectorAll('[data-yps-theme-set]').forEach((item) => {
+    item.addEventListener('click', async (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      const newMode = item.dataset.ypsThemeSet;
+      await safeSetAppearanceMode(newMode);
+      hideThemeDropdownImmediately();
+    });
+  });
+
+  const rect = buttonEl.getBoundingClientRect();
+  menu.hidden = false;
+
+  const menuWidth = 150;
+  let left = rect.right - menuWidth;
+  if (left < 10) left = rect.left;
+
+  let top = rect.bottom + window.scrollY + 6;
+  if (top + 120 > window.innerHeight + window.scrollY) {
+    top = rect.top + window.scrollY - menu.offsetHeight - 6;
+  }
+
+  menu.style.top = `${top}px`;
+  menu.style.left = `${left}px`;
+}
+
+export function toggleThemeDropdown(buttonEl) {
+  const menu = ensureThemeDropdown();
+  if (!menu.hidden && menu.triggerBtn === buttonEl) {
+    hideThemeDropdownImmediately();
+  } else {
+    showThemeDropdown(buttonEl);
+    menu.triggerBtn = buttonEl;
+  }
+}
+
+function bindGlobalThemeEvents() {
+  if (themeEventsBound) return;
+  themeEventsBound = true;
+
+  document.addEventListener('pointerdown', (e) => {
+    if (!themeDropdownEl || themeDropdownEl.hidden) return;
+    if (themeDropdownEl.contains(e.target)) return;
+    if (e.target.closest?.('[data-yps-theme-toggle]')) return;
+    hideThemeDropdownImmediately();
+  }, true);
+
+  window.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      hideThemeDropdownImmediately();
+    }
+  });
+}
+
+export function bindThemeToggleEvents(root = document) {
+  bindGlobalThemeEvents();
+
+  root.querySelectorAll('[data-yps-theme-toggle]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      toggleThemeDropdown(btn);
+    });
+
+    btn.addEventListener('mouseenter', () => {
+      showThemeDropdown(btn);
+      if (themeDropdownEl) {
+        themeDropdownEl.triggerBtn = btn;
+      }
+    });
+
+    btn.addEventListener('mouseleave', () => {
+      hideThemeDropdownWithDelay();
+    });
+  });
 }
 
 function renderQrSvg(text, size = 224) {
@@ -564,7 +793,6 @@ export async function sharePublicPage({
 
   await openShareFallbackModal({
     url,
-    title,
   });
 }
 

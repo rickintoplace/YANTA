@@ -171,19 +171,18 @@ button, input, select, textarea { font: inherit; color: inherit; }
   /* background: linear-gradient(90deg, var(--text) 2%, transparent 2%, transparent); */
 }
 .brand {
-  display: flex; align-items: center; gap: 4px;
+  display: flex; align-items: center; gap: 0px;
   font-weight: 700; font-size: 23px; letter-spacing: -2.5px;
   cursor: pointer;
 }
 .brand-mark {
-    width: 50px;
+    width: 40px;
     height: 40px;
-    border-radius: 0 12px;
-    /* background: linear-gradient(135deg, var(--accent), var(--accent-2)); */
-    /* box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.05) inset; */
+    clip-path: circle(34% at 50% 50%);
     display: flex;
-    padding: 6px;
-    transition: padding 0.25s;
+    align-items: center;
+    justify-content: center;
+    padding: 2px;
 }
 .row-actions { display: flex; gap: 4px; }
 
@@ -2842,7 +2841,7 @@ input.yanta-task-checkbox {
   width: 40px;
   height: 40px;
   flex: 0 0 40px;
-  padding: 0;
+  padding: 2px;
 }
 
 /* ---------- Collapsed quick actions ---------- */
@@ -4272,7 +4271,7 @@ input.yanta-task-checkbox {
 }
 
 /* ============================================================
-   Calendar import SaaS UX
+   Calendar import
    ============================================================ */
 
 .yanta-calendar-import-card,

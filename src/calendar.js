@@ -100,6 +100,7 @@ import {
 
 import {
   yantaConfirm,
+  yantaPrompt,
 } from './dialogs.js';
 
 import {
@@ -150,6 +151,8 @@ let initialized = false;
 let eventModal = null;
 let categoriesModal = null;
 let calendarSourcesModal = null;
+let calendarImportModal = null;
+let calendarCategoryDeleteModal = null;
 let calendarDateTimePickerModal = null;
 let calendarDialogModal = null;
 let calendarNotePickerModal = null;
@@ -4461,27 +4464,53 @@ export function putCalendarCategory(patch) {
   return cat;
 }
 
-export function deleteCalendarCategory(categoryId) {
+export function deleteCalendarCategory(categoryId, {
+  eventAction = 'move',
+  targetCategoryId = DEFAULT_CATEGORY_ID,
+} = {}) {
   const id = String(categoryId || '');
+
   if (!id || id === DEFAULT_CATEGORY_ID) return;
 
   const existing = state.calendarCategories.get(id);
   if (!existing) return;
 
+  const eventsInCategory = [...state.calendarEvents.values()]
+    .filter((ev) => ev.categoryId === id);
+
+  const safeTargetId =
+    targetCategoryId &&
+    targetCategoryId !== id &&
+    state.calendarCategories.has(targetCategoryId)
+      ? targetCategoryId
+      : DEFAULT_CATEGORY_ID;
+
   const doc = getVaultDoc();
 
   doc.transact(() => {
-    for (const [eventId, raw] of vaultEventsMap()) {
-      if (raw?.categoryId === id) {
-        vaultEventsMap().set(eventId, {
-          ...safeJsonClone(raw),
-          categoryId: DEFAULT_CATEGORY_ID,
+    if (eventAction === 'delete') {
+      for (const ev of eventsInCategory) {
+        vaultEventsMap().delete(ev.id);
+
+        vaultTombstonesMap().set(ev.id, {
+          id: ev.id,
+          type: 'calendar-event',
+          title: ev.title || '',
+          deletedAt: now(),
+        });
+      }
+    } else {
+      for (const ev of eventsInCategory) {
+        vaultEventsMap().set(ev.id, {
+          ...safeJsonClone(ev),
+          categoryId: safeTargetId,
           updated: now(),
         });
       }
     }
 
     vaultCalendarCategoriesMap().delete(id);
+
     vaultTombstonesMap().set(id, {
       id,
       type: 'calendar-category',
@@ -4492,16 +4521,191 @@ export function deleteCalendarCategory(categoryId) {
 
   state.calendarCategories.delete(id);
 
-  for (const ev of state.calendarEvents.values()) {
-    if (ev.categoryId === id) {
-      ev.categoryId = DEFAULT_CATEGORY_ID;
+  if (eventAction === 'delete') {
+    for (const ev of eventsInCategory) {
+      state.calendarEvents.delete(ev.id);
+    }
+  } else {
+    for (const ev of eventsInCategory) {
+      ev.categoryId = safeTargetId;
       ev.updated = now();
+      state.calendarEvents.set(ev.id, safeJsonClone(ev));
     }
   }
 
   scheduleCalendarRender();
 
-  window.dispatchEvent(new CustomEvent('yanta-calendar-updated'));
+  window.dispatchEvent(new CustomEvent('yanta-calendar-updated', {
+    detail: {
+      categoryId: id,
+      categoryDeleted: true,
+      eventAction,
+      movedToCategoryId: eventAction === 'move' ? safeTargetId : null,
+      count: eventsInCategory.length,
+    },
+  }));
+}
+
+function ensureCalendarCategoryDeleteModal() {
+  if (calendarCategoryDeleteModal) return calendarCategoryDeleteModal;
+
+  calendarCategoryDeleteModal = document.createElement('div');
+  calendarCategoryDeleteModal.className = 'modal yanta-calendar-category-delete-modal';
+  calendarCategoryDeleteModal.hidden = true;
+
+  calendarCategoryDeleteModal.addEventListener('click', (e) => {
+    if (e.target === calendarCategoryDeleteModal) {
+      calendarCategoryDeleteModal.hidden = true;
+    }
+
+    if (e.target.closest?.('[data-category-delete-cancel]')) {
+      calendarCategoryDeleteModal.hidden = true;
+    }
+  });
+
+  document.body.append(calendarCategoryDeleteModal);
+
+  return calendarCategoryDeleteModal;
+}
+
+function categoryMoveTargetOptionsHtml(deletedCategoryId, selectedId = DEFAULT_CATEGORY_ID) {
+  return [...state.calendarCategories.values()]
+    .filter((cat) => cat.id !== deletedCategoryId)
+    .sort((a, b) => {
+      if (a.id === DEFAULT_CATEGORY_ID) return -1;
+      if (b.id === DEFAULT_CATEGORY_ID) return 1;
+      return String(a.name || '').localeCompare(String(b.name || ''));
+    })
+    .map((cat) => `
+      <option value="${escapeAttr(cat.id)}" ${cat.id === selectedId ? 'selected' : ''}>
+        ${escapeHtml(cat.name || 'Calendar')}
+      </option>
+    `)
+    .join('');
+}
+
+function openDeleteCalendarCategoryDialog(categoryId) {
+  const cat = state.calendarCategories.get(categoryId);
+
+  if (!cat || cat.id === DEFAULT_CATEGORY_ID) return Promise.resolve(null);
+
+  const count = [...state.calendarEvents.values()]
+    .filter((ev) => ev.categoryId === categoryId)
+    .length;
+
+  const fallbackTarget =
+    state.calendarCategories.has(DEFAULT_CATEGORY_ID)
+      ? DEFAULT_CATEGORY_ID
+      : [...state.calendarCategories.keys()].find((id) => id !== categoryId) || '';
+
+  let mode = count ? 'move' : 'delete';
+  let targetCategoryId = fallbackTarget;
+
+  const modal = ensureCalendarCategoryDeleteModal();
+
+  return new Promise((resolve) => {
+    const close = (value = null) => {
+      modal.hidden = true;
+      resolve(value);
+    };
+
+    const render = () => {
+      const hasMoveTarget =
+        [...state.calendarCategories.keys()].some((id) => id !== categoryId);
+
+      modal.innerHTML = `
+        <div class="modal-card yanta-calendar-category-delete-card">
+          <header class="modal-head">
+            <h3>Delete category</h3>
+            <button class="icon-btn" data-category-delete-cancel>&times;</button>
+          </header>
+
+          <div class="modal-body yanta-calendar-category-delete-body">
+            <div class="yanta-calendar-delete-warning">
+              <strong>${escapeHtml(cat.name || 'Calendar')}</strong>
+              contains ${count} event${count === 1 ? '' : 's'}.
+            </div>
+
+            ${
+              count
+                ? `
+                  <label class="yanta-calendar-delete-choice">
+                    <input
+                      type="radio"
+                      name="category-delete-mode"
+                      value="move"
+                      ${mode === 'move' ? 'checked' : ''}
+                      ${hasMoveTarget ? '' : 'disabled'} />
+                    <span>
+                      <strong>Move events to another category</strong>
+                      <small>Recommended. Events stay in your calendar.</small>
+                    </span>
+                  </label>
+
+                  <label class="yanta-calendar-delete-choice">
+                    <input
+                      type="radio"
+                      name="category-delete-mode"
+                      value="delete"
+                      ${mode === 'delete' ? 'checked' : ''} />
+                    <span>
+                      <strong>Delete all events in this category</strong>
+                      <small>This moves the category’s events into calendar tombstones for sync.</small>
+                    </span>
+                  </label>
+
+                  <label class="yanta-calendar-import-field ${mode !== 'move' ? 'is-disabled' : ''}">
+                    <span>Target category</span>
+                    <select
+                      class="text-input"
+                      data-category-delete-target
+                      ${mode === 'move' && hasMoveTarget ? '' : 'disabled'}>
+                      ${categoryMoveTargetOptionsHtml(categoryId, targetCategoryId)}
+                    </select>
+                  </label>
+                `
+                : `
+                  <div class="yanta-calendar-import-note">
+                    This category has no events. It can be deleted safely.
+                  </div>
+                `
+            }
+
+            <div class="compress-actions">
+              <button class="btn" data-category-delete-cancel>Cancel</button>
+
+              <button class="btn danger" data-category-delete-confirm>
+                ${lucide('trash', 14)}
+                Delete category
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+
+      modal.hidden = false;
+
+      modal.querySelectorAll('input[name="category-delete-mode"]').forEach((radio) => {
+        radio.addEventListener('change', () => {
+          mode = radio.value === 'delete' ? 'delete' : 'move';
+          render();
+        });
+      });
+
+      modal.querySelector('[data-category-delete-target]')?.addEventListener('change', (e) => {
+        targetCategoryId = e.target.value || DEFAULT_CATEGORY_ID;
+      });
+
+      modal.querySelector('[data-category-delete-confirm]')?.addEventListener('click', () => {
+        close({
+          eventAction: count ? mode : 'delete',
+          targetCategoryId,
+        });
+      });
+    };
+
+    render();
+  });
 }
 
 // ============================================================
@@ -5479,6 +5683,683 @@ function currentEventsForCategory(categoryId = null) {
 // Import / Export
 // ============================================================
 
+// ============================================================
+// Calendar import UX — category selection, date filter, storage estimate,
+// dedupe into existing category.
+// ============================================================
+
+const CALENDAR_IMPORT_DEFAULT_COLOR = '#6ea8fe';
+
+function calendarJsonEventsFromPayload(json) {
+  return Array.isArray(json)
+    ? json
+    : Array.isArray(json?.events)
+      ? json.events
+      : [];
+}
+
+function calendarImportEventStartMs(ev) {
+  if (!ev?.start) return NaN;
+
+  const d = dateLikeToLocalDate(ev.start);
+  return d ? d.getTime() : NaN;
+}
+
+function parseCalendarImportCutoffInput(value) {
+  const raw = String(value || '').trim();
+
+  if (!raw) return null;
+
+  // datetime-local gives YYYY-MM-DDTHH:mm
+  // text fallback also accepts YYYY-MM-DD HH:mm
+  const normalized = raw.replace(
+    /^(\d{4}-\d{2}-\d{2})\s+(\d{1,2}:\d{2})$/,
+    '$1T$2'
+  );
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(normalized)) {
+    const d = new Date(`${normalized}T00:00:00`);
+    const t = d.getTime();
+    return Number.isFinite(t) ? t : NaN;
+  }
+
+  const d = new Date(normalized);
+  const t = d.getTime();
+
+  return Number.isFinite(t) ? t : NaN;
+}
+
+function filterCalendarEventsByImportCutoff(events, cutoffMs) {
+  if (cutoffMs == null) return events || [];
+
+  return (events || []).filter((ev) => {
+    const startMs = calendarImportEventStartMs(ev);
+    return Number.isFinite(startMs) && startMs >= cutoffMs;
+  });
+}
+
+function formatCalendarImportBytes(bytes) {
+  const n = Number(bytes || 0);
+
+  if (n < 1024) return `${Math.round(n)} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(2)} MB`;
+
+  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+function estimateCalendarImportBytes(events = [], {
+  category = null,
+} = {}) {
+  /*
+    Approximation:
+    - JSON representation is close to VaultDoc metadata size.
+    - Add a small overhead factor for Yjs update encoding/encryption/sync metadata.
+    - This intentionally errs slightly high for SaaS UX.
+  */
+  const payload = {
+    events,
+    category,
+  };
+
+  const raw = new TextEncoder().encode(JSON.stringify(payload)).byteLength;
+
+  return Math.ceil(raw * 1.35 + 2048);
+}
+
+async function getCalendarImportStorageInfo() {
+  let browser = null;
+
+  try {
+    const est = await navigator.storage?.estimate?.();
+
+    if (est?.quota) {
+      const quota = Number(est.quota || 0);
+      const used = Number(est.usage || 0);
+      browser = {
+        source: 'Browser storage',
+        quota,
+        used,
+        available: Math.max(0, quota - used),
+      };
+    }
+  } catch {}
+
+  let cloud = null;
+
+  try {
+    const provider = await store.settings.get('sync2.provider', null);
+
+    if (provider === 'yanta-cloud') {
+      const { cloudMe } = await import('./cloud/cloud-api.js');
+      const me = await cloudMe();
+
+      const used = Number(me?.usage?.storage_bytes || 0);
+      const quota = Number(me?.limits?.storageBytes || 0);
+
+      if (quota > 0) {
+        cloud = {
+          source: 'YANTA Cloud storage',
+          quota,
+          used,
+          available: Math.max(0, quota - used),
+        };
+      }
+    }
+  } catch {}
+
+  /*
+    If YANTA Cloud is active, the cloud plan is usually the stricter quota.
+    If both exist, enforce the smaller free space.
+  */
+  if (browser && cloud) {
+    return cloud.available <= browser.available ? cloud : browser;
+  }
+
+  return cloud || browser || {
+    source: 'Storage',
+    quota: 0,
+    used: 0,
+    available: Infinity,
+  };
+}
+
+function storageBarHtml({ used = 0, quota = 0, importBytes = 0 } = {}) {
+  const q = Number(quota || 0);
+  const u = Math.max(0, Number(used || 0));
+  const imp = Math.max(0, Number(importBytes || 0));
+
+  if (!q || !Number.isFinite(q)) {
+    return `
+      <div class="yanta-calendar-import-storage-unknown">
+        Storage quota unavailable in this browser.
+      </div>
+    `;
+  }
+
+  const usedPct = Math.max(0, Math.min(100, (u / q) * 100));
+  const importPct = Math.max(0, Math.min(100, (imp / q) * 100));
+  const overPct = Math.max(0, usedPct + importPct - 100);
+  const remainingPct = Math.max(0, 100 - usedPct - importPct);
+
+  return `
+    <div
+      class="yanta-calendar-import-storage-bar ${overPct > 0 ? 'over' : ''}"
+      aria-label="Storage usage">
+      <span
+        class="used"
+        style="--segment-pct:${usedPct}%"
+        title="Currently used: ${escapeAttr(formatCalendarImportBytes(u))}">
+      </span>
+
+      <span
+        class="import"
+        style="--segment-pct:${Math.max(0, importPct - overPct)}%"
+        title="Estimated import: ${escapeAttr(formatCalendarImportBytes(imp))}">
+      </span>
+
+      ${
+        overPct > 0
+          ? `
+            <span
+              class="over"
+              style="--segment-pct:${overPct}%"
+              title="Exceeds available storage">
+            </span>
+          `
+          : ''
+      }
+
+      <span
+        class="remaining"
+        style="--segment-pct:${remainingPct}%"
+        title="Remaining after import">
+      </span>
+    </div>
+  `;
+}
+
+function calendarImportDedupeKey(ev) {
+  const uid = String(ev?.externalUid || '').trim().toLowerCase();
+
+  if (uid) {
+    return `uid:${uid}`;
+  }
+
+  const title = String(ev?.title || '').trim().toLowerCase();
+  const start = String(ev?.start || '').trim();
+  const end = String(ev?.end || '').trim();
+  const allDay = ev?.allDay ? '1' : '0';
+  const location = String(ev?.location || '').trim().toLowerCase();
+
+  return [
+    'sig',
+    title,
+    start,
+    end,
+    allDay,
+    location,
+  ].join('|');
+}
+
+function dedupeCalendarImportEvents(events, categoryId) {
+  const existingKeys = new Set();
+
+  for (const ev of state.calendarEvents.values()) {
+    if (!ev || ev.status === 'cancelled') continue;
+    if (categoryId && ev.categoryId !== categoryId) continue;
+
+    existingKeys.add(calendarImportDedupeKey(ev));
+  }
+
+  const batchKeys = new Set();
+  const out = [];
+
+  let skippedExisting = 0;
+  let skippedBatch = 0;
+
+  for (const raw of events || []) {
+    const key = calendarImportDedupeKey(raw);
+
+    if (existingKeys.has(key)) {
+      skippedExisting++;
+      continue;
+    }
+
+    if (batchKeys.has(key)) {
+      skippedBatch++;
+      continue;
+    }
+
+    batchKeys.add(key);
+    out.push(raw);
+  }
+
+  return {
+    events: out,
+    skippedExisting,
+    skippedBatch,
+    skippedTotal: skippedExisting + skippedBatch,
+  };
+}
+
+function findCalendarCategoryByName(name) {
+  const clean = String(name || '').trim().toLowerCase();
+  if (!clean) return null;
+
+  return [...state.calendarCategories.values()]
+    .find((cat) => String(cat.name || '').trim().toLowerCase() === clean) || null;
+}
+
+function categoryOptionsHtmlForImport(selectedId) {
+  ensureDefaultCalendarCategory();
+
+  return [...state.calendarCategories.values()]
+    .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))
+    .map((cat) => `
+      <option value="${escapeAttr(cat.id)}" ${cat.id === selectedId ? 'selected' : ''}>
+        ${escapeHtml(cat.name || 'Calendar')}
+      </option>
+    `)
+    .join('');
+}
+
+function ensureCalendarImportModal() {
+  if (calendarImportModal) return calendarImportModal;
+
+  calendarImportModal = document.createElement('div');
+  calendarImportModal.className = 'modal yanta-calendar-import-modal';
+  calendarImportModal.hidden = true;
+
+  calendarImportModal.addEventListener('click', (e) => {
+    if (e.target === calendarImportModal) {
+      calendarImportModal.hidden = true;
+    }
+
+    if (e.target.closest?.('[data-calendar-import-cancel]')) {
+      calendarImportModal.hidden = true;
+    }
+  });
+
+  document.body.append(calendarImportModal);
+
+  return calendarImportModal;
+}
+
+function localTodayDateInputValue() {
+  const d = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+async function openCalendarImportOptions({
+  filename = '',
+  fileSize = 0,
+  rawEvents = [],
+  forcedCategoryId = null,
+} = {}) {
+  ensureDefaultCalendarCategory();
+
+  const modal = ensureCalendarImportModal();
+  const storage = await getCalendarImportStorageInfo();
+
+  const initialCategoryId =
+    forcedCategoryId ||
+    state.calendarCategories.get(DEFAULT_CATEGORY_ID)?.id ||
+    [...state.calendarCategories.keys()][0] ||
+    DEFAULT_CATEGORY_ID;
+
+  const importName = filename
+    .replace(/\.calendar\.json$/i, '')
+    .replace(/\.(ics|json)$/i, '')
+    .trim() || 'Imported calendar';
+
+  let ui = {
+    categoryMode: forcedCategoryId ? 'existing' : 'existing',
+    categoryId: initialCategoryId,
+    newCategoryName: importName,
+    newCategoryColor: CALENDAR_IMPORT_DEFAULT_COLOR,
+    cutoffValue: '',
+  };
+
+  return new Promise((resolve) => {
+    const close = (value = null) => {
+      modal.hidden = true;
+      resolve(value);
+    };
+
+    const computePlan = () => {
+      const cutoffMs = parseCalendarImportCutoffInput(ui.cutoffValue);
+
+      const cutoffInvalid =
+        String(ui.cutoffValue || '').trim() &&
+        !Number.isFinite(cutoffMs);
+
+      const filtered = cutoffInvalid
+        ? []
+        : filterCalendarEventsByImportCutoff(
+            rawEvents,
+            cutoffMs == null ? null : cutoffMs
+          );
+
+      let targetCategoryId = ui.categoryId || DEFAULT_CATEGORY_ID;
+      let categoryPatch = null;
+      let sameNameCategory = null;
+
+      if (ui.categoryMode === 'new') {
+        sameNameCategory = findCalendarCategoryByName(ui.newCategoryName);
+
+        if (sameNameCategory) {
+          targetCategoryId = sameNameCategory.id;
+        } else {
+          targetCategoryId = '';
+          categoryPatch = {
+            name: String(ui.newCategoryName || '').trim() || importName || 'Imported calendar',
+            color: ui.newCategoryColor || CALENDAR_IMPORT_DEFAULT_COLOR,
+            visible: true,
+          };
+        }
+      }
+
+      const dedupeTargetId = targetCategoryId || null;
+
+      const deduped = dedupeTargetId
+        ? dedupeCalendarImportEvents(filtered, dedupeTargetId)
+        : dedupeCalendarImportEvents(filtered, null);
+
+      const estimatedBytes = estimateCalendarImportBytes(deduped.events, {
+        category: categoryPatch,
+      });
+
+      const exceedsStorage =
+        Number.isFinite(storage.available) &&
+        estimatedBytes > storage.available;
+
+      const canImport =
+        !cutoffInvalid &&
+        deduped.events.length > 0 &&
+        !exceedsStorage;
+
+      return {
+        cutoffMs,
+        cutoffInvalid,
+        filtered,
+        deduped,
+        targetCategoryId,
+        categoryPatch,
+        sameNameCategory,
+        estimatedBytes,
+        exceedsStorage,
+        canImport,
+      };
+    };
+
+    const render = () => {
+      const plan = computePlan();
+
+      const quotaKnown =
+        storage.quota &&
+        Number.isFinite(storage.quota);
+
+      modal.innerHTML = `
+        <div class="modal-card yanta-calendar-import-card">
+          <header class="modal-head">
+            <h3>Import calendar</h3>
+            <button class="icon-btn" data-calendar-import-cancel>&times;</button>
+          </header>
+
+          <div class="modal-body yanta-calendar-import-body">
+            <div class="yanta-calendar-import-hero">
+              <span class="yanta-calendar-import-hero-icon">
+                ${lucide('calendar-plus', 24)}
+              </span>
+
+              <div>
+                <strong>${escapeHtml(filename || 'Calendar file')}</strong>
+                <p>
+                  ${rawEvents.length} event${rawEvents.length === 1 ? '' : 's'} found
+                  ${fileSize ? ` · source file ${escapeHtml(formatCalendarImportBytes(fileSize))}` : ''}
+                </p>
+              </div>
+            </div>
+
+            <section class="yanta-calendar-import-section">
+              <h4>Import range</h4>
+
+              <label class="yanta-calendar-import-field">
+                <span>Only import events from</span>
+
+                <div class="yanta-calendar-import-date-row">
+                  <input
+                    class="text-input"
+                    data-import-cutoff
+                    type="datetime-local"
+                    value="${escapeAttr(ui.cutoffValue)}" />
+
+                  <button class="btn" type="button" data-import-today>
+                    Today
+                  </button>
+
+                  <button class="btn" type="button" data-import-clear-date>
+                    All
+                  </button>
+                </div>
+
+                <small>
+                  Leave empty to import all events. Events before this date/time are skipped.
+                </small>
+
+                ${
+                  plan.cutoffInvalid
+                    ? `<div class="yanta-calendar-import-error">Invalid date/time.</div>`
+                    : ''
+                }
+              </label>
+            </section>
+
+            <section class="yanta-calendar-import-section">
+              <h4>Category</h4>
+
+              <div class="yanta-calendar-import-tabs" role="tablist">
+                <button
+                  type="button"
+                  class="${ui.categoryMode === 'existing' ? 'active' : ''}"
+                  data-import-category-mode="existing">
+                  Existing category
+                </button>
+
+                <button
+                  type="button"
+                  class="${ui.categoryMode === 'new' ? 'active' : ''}"
+                  data-import-category-mode="new">
+                  New category
+                </button>
+              </div>
+
+              ${
+                ui.categoryMode === 'existing'
+                  ? `
+                    <label class="yanta-calendar-import-field">
+                      <span>Import into</span>
+                      <select class="text-input" data-import-category>
+                        ${categoryOptionsHtmlForImport(ui.categoryId)}
+                      </select>
+                      <small>Matching events already in this category are skipped.</small>
+                    </label>
+                  `
+                  : `
+                    <div class="yanta-calendar-import-new-category">
+                      <label class="yanta-calendar-import-field">
+                        <span>Category name</span>
+                        <input
+                          class="text-input"
+                          data-import-new-category-name
+                          value="${escapeAttr(ui.newCategoryName)}"
+                          placeholder="Imported calendar" />
+                      </label>
+
+                      <label class="yanta-calendar-import-color-field">
+                        <span>Color</span>
+                        <input
+                          type="color"
+                          data-import-new-category-color
+                          value="${escapeAttr(ui.newCategoryColor || CALENDAR_IMPORT_DEFAULT_COLOR)}" />
+                      </label>
+                    </div>
+
+                    ${
+                      plan.sameNameCategory
+                        ? `
+                          <div class="yanta-calendar-import-note">
+                            A category named “${escapeHtml(plan.sameNameCategory.name)}” already exists.
+                            YANTA will import into that existing category and deduplicate there.
+                          </div>
+                        `
+                        : ''
+                    }
+                  `
+              }
+            </section>
+
+            <section class="yanta-calendar-import-section">
+              <h4>Storage estimate</h4>
+
+              <div class="yanta-calendar-import-storage-head">
+                <span>
+                  Estimated import:
+                  <strong>${escapeHtml(formatCalendarImportBytes(plan.estimatedBytes))}</strong>
+                </span>
+
+                <span>
+                  ${escapeHtml(storage.source)}
+                  ${
+                    quotaKnown
+                      ? ` · free ${escapeHtml(formatCalendarImportBytes(storage.available))}`
+                      : ''
+                  }
+                </span>
+              </div>
+
+              ${storageBarHtml({
+                used: storage.used,
+                quota: storage.quota,
+                importBytes: plan.estimatedBytes,
+              })}
+
+              <div class="yanta-calendar-import-summary">
+                <span>
+                  ${plan.filtered.length}/${rawEvents.length}
+                  event${plan.filtered.length === 1 ? '' : 's'} after date filter
+                </span>
+
+                <span>
+                  ${plan.deduped.skippedTotal}
+                  duplicate${plan.deduped.skippedTotal === 1 ? '' : 's'} skipped
+                </span>
+
+                <span>
+                  <strong>${plan.deduped.events.length}</strong>
+                  will be imported
+                </span>
+              </div>
+
+              ${
+                plan.exceedsStorage
+                  ? `
+                    <div class="yanta-calendar-import-error">
+                      Import is larger than available ${escapeHtml(storage.source.toLowerCase())}.
+                      Free up storage or choose a later import date.
+                    </div>
+                  `
+                  : ''
+              }
+            </section>
+
+            <div class="compress-actions yanta-calendar-import-actions">
+              <button class="btn" data-calendar-import-cancel>Cancel</button>
+
+              <button
+                class="btn primary"
+                data-calendar-import-confirm
+                ${plan.canImport ? '' : 'disabled'}>
+                ${lucide('upload', 14)}
+                Import ${plan.deduped.events.length} event${plan.deduped.events.length === 1 ? '' : 's'}
+              </button>
+            </div>
+          </div>
+        </div>
+      `;
+
+      modal.hidden = false;
+
+      modal.querySelector('[data-import-cutoff]')?.addEventListener('change', (e) => {
+        ui.cutoffValue = e.target.value || '';
+        render();
+      });
+
+      modal.querySelector('[data-import-today]')?.addEventListener('click', () => {
+        ui.cutoffValue = `${localTodayDateInputValue()}T00:00`;
+        render();
+      });
+
+      modal.querySelector('[data-import-clear-date]')?.addEventListener('click', () => {
+        ui.cutoffValue = '';
+        render();
+      });
+
+      modal.querySelectorAll('[data-import-category-mode]').forEach((btn) => {
+        btn.addEventListener('click', () => {
+          ui.categoryMode = btn.dataset.importCategoryMode || 'existing';
+          render();
+        });
+      });
+
+      modal.querySelector('[data-import-category]')?.addEventListener('change', (e) => {
+        ui.categoryId = e.target.value || DEFAULT_CATEGORY_ID;
+        render();
+      });
+
+      modal.querySelector('[data-import-new-category-name]')?.addEventListener('input', (e) => {
+        ui.newCategoryName = e.target.value || '';
+        render();
+      });
+
+      modal.querySelector('[data-import-new-category-color]')?.addEventListener('input', (e) => {
+        ui.newCategoryColor = e.target.value || CALENDAR_IMPORT_DEFAULT_COLOR;
+        render();
+      });
+
+      modal.querySelector('[data-calendar-import-confirm]')?.addEventListener('click', () => {
+        const finalPlan = computePlan();
+
+        if (!finalPlan.canImport) return;
+
+        let categoryId = finalPlan.targetCategoryId;
+
+        if (!categoryId && finalPlan.categoryPatch) {
+          const cat = putCalendarCategory(finalPlan.categoryPatch);
+          categoryId = cat?.id || DEFAULT_CATEGORY_ID;
+        }
+
+        const eventsToImport = finalPlan.deduped.events.map((ev) => ({
+          ...ev,
+          categoryId,
+        }));
+
+        close({
+          categoryId,
+          eventsToImport,
+          skippedDuplicates: finalPlan.deduped.skippedTotal,
+          estimatedBytes: finalPlan.estimatedBytes,
+        });
+      });
+    };
+
+    render();
+  });
+}
+
 function openCalendarImportPicker() {
   const input = document.createElement('input');
   input.type = 'file';
@@ -5512,68 +6393,52 @@ export async function importCalendarFile(file, {
     toast('Reading ICS…');
 
     const text = await file.text();
-    const imported = parseIcsEvents(text);
+    const parsedEvents = parseIcsEvents(text);
 
-    if (!imported.length) {
+    if (!parsedEvents.length) {
       toast('No VEVENT entries found', 'error');
       return;
     }
 
-    if (imported.length > 2000) {
-      const ok = await yantaConfirm({
-        title: 'Import large calendar?',
-        message: `This ICS contains ${imported.length} events.\n\nImporting many events can take a while.`,
-        confirmLabel: 'Import events',
-        icon: 'calendar-plus',
-      });
-    
-      if (!ok) return;
-    }
+    const plan = await openCalendarImportOptions({
+      filename: file.name,
+      fileSize: file.size || text.length || 0,
+      rawEvents: parsedEvents,
+      forcedCategoryId: categoryId,
+    });
 
-    let catId = categoryId;
+    if (!plan) return;
 
-    if (!catId) {
-      const name = prompt(
-        `Import ${imported.length} event(s) into category:`,
-        file.name.replace(/\.ics$/i, '')
-      );
-
-      if (name === null) return;
-
-      const cat = putCalendarCategory({
-        name: name.trim() || file.name.replace(/\.ics$/i, ''),
-        color: '#6ea8fe',
-        visible: true,
-      });
-
-      catId = cat.id;
-    }
-
-    let lastToastAt = 0;
-
-    const count = await putCalendarEventsBulk(imported, {
-      categoryId: catId,
+    const count = await putCalendarEventsBulk(plan.eventsToImport, {
+      categoryId: plan.categoryId,
       chunkSize: 300,
       onProgress: ({ done, total }) => {
-        const t = Date.now();
-
-        if (t - lastToastAt > 900 || done === total) {
-          lastToastAt = t;
+        if (done === total || done % 900 === 0) {
           toast(`Importing calendar… ${done}/${total}`, 'success');
         }
       },
     });
 
-    toast(`Imported ${count} event${count === 1 ? '' : 's'}`, 'success');
+    toast(
+      `Imported ${count} event${count === 1 ? '' : 's'}${
+        plan.skippedDuplicates
+          ? ` · ${plan.skippedDuplicates} duplicate${plan.skippedDuplicates === 1 ? '' : 's'} skipped`
+          : ''
+      }`,
+      'success'
+    );
+
     return;
   }
 
   if (lower.endsWith('.json')) {
-    const json = JSON.parse(await file.text());
+    const text = await file.text();
+    const json = JSON.parse(text);
 
     await importCalendarJson(json, {
       categoryId,
       filename: file.name,
+      fileSize: file.size || text.length || 0,
     });
 
     return;
@@ -5585,66 +6450,37 @@ export async function importCalendarFile(file, {
 export async function importCalendarJson(json, {
   categoryId = null,
   filename = 'calendar.json',
+  fileSize = 0,
 } = {}) {
-  const events = Array.isArray(json)
-    ? json
-    : Array.isArray(json.events)
-      ? json.events
-      : [];
+  const events = calendarJsonEventsFromPayload(json);
 
-  const categories = Array.isArray(json.categories)
-    ? json.categories
-    : Array.isArray(json.calendarCategories)
-      ? json.calendarCategories
-      : [];
-
-  const categoryMap = new Map();
-
-  for (const rawCat of categories) {
-    const cat = putCalendarCategory({
-      ...rawCat,
-      id: rawCat.id || 'cal_' + uid(),
-    });
-
-    if (cat) {
-      categoryMap.set(rawCat.id, cat.id);
-    }
+  if (!events.length) {
+    toast('No calendar events found in JSON', 'error');
+    return;
   }
 
-  let fallbackCategoryId = categoryId;
+  const plan = await openCalendarImportOptions({
+    filename,
+    fileSize,
+    rawEvents: events,
+    forcedCategoryId: categoryId,
+  });
 
-  if (!fallbackCategoryId && !categories.length) {
-    const name = prompt(
-      `Import ${events.length} event(s) into category:`,
-      filename.replace(/\.calendar\.json$/i, '').replace(/\.json$/i, '')
-    );
+  if (!plan) return;
 
-    if (name === null) return;
-
-    const cat = putCalendarCategory({
-      name: name.trim() || 'Imported',
-      color: '#6ea8fe',
-      visible: true,
-    });
-
-    fallbackCategoryId = cat.id;
-  }
-
-  const mappedEvents = events.map((raw) => ({
-    ...raw,
-    categoryId:
-      categoryMap.get(raw.categoryId) ||
-      raw.categoryId ||
-      fallbackCategoryId ||
-      DEFAULT_CATEGORY_ID,
-  }));
-
-  const count = await putCalendarEventsBulk(mappedEvents, {
-    categoryId: fallbackCategoryId || DEFAULT_CATEGORY_ID,
+  const count = await putCalendarEventsBulk(plan.eventsToImport, {
+    categoryId: plan.categoryId,
     chunkSize: 300,
   });
 
-  toast(`Imported ${count} event${count === 1 ? '' : 's'}`, 'success');
+  toast(
+    `Imported ${count} event${count === 1 ? '' : 's'}${
+      plan.skippedDuplicates
+        ? ` · ${plan.skippedDuplicates} duplicate${plan.skippedDuplicates === 1 ? '' : 's'} skipped`
+        : ''
+    }`,
+    'success'
+  );
 }
 
 export function exportCalendarJson({
@@ -7688,7 +8524,7 @@ function renderCategoriesModal() {
           <span class="yanta-calendar-cat-count" title="${escapeAttr(sourceDesc || `${count} stored event(s)`)}">
             ${sourceDesc ? 'source' : count}
           </span>
-          <button class="icon-btn" data-cat-export-ics title="Export category as .ics">${lucide('calendar-down', 15)}</button>
+          <button class="icon-btn" data-cat-export-ics title="Export category as .ics">${lucide('calendar-arrow-down', 15)}</button>
           <button class="icon-btn" data-cat-export-json title="Export category as JSON">${lucide('download', 15)}</button>
           <button class="icon-btn danger" data-cat-delete title="Delete category" ${cat.id === DEFAULT_CATEGORY_ID ? 'disabled' : ''}>${lucide('trash', 15)}</button>
         </div>
@@ -7719,17 +8555,12 @@ function renderCategoriesModal() {
           <button class="btn primary" data-action="add-category">${lucide('plus', 14)} Add category</button>
           <button class="btn" data-action="sources">${lucide('calendar-plus', 14)} Add data source</button>
           <button class="btn" data-action="import">${lucide('upload', 14)} Import .ics / JSON</button>
-          <button class="btn" data-action="export-all-ics">${lucide('calendar-down', 14)} Export all .ics</button>
+          <button class="btn" data-action="export-all-ics">${lucide('calendar-arrow-down', 14)} Export all .ics</button>
           <button class="btn" data-action="export-all-json">${lucide('download', 14)} Export all JSON</button>
         </div>
 
         <div class="yanta-calendar-cat-list">
           ${rows || '<div class="tree-empty">No categories yet.</div>'}
-        </div>
-
-        <div class="yanta-calendar-share-hint">
-          <strong>Sharing later:</strong>
-          Categories are the future sharing boundary. A shared category can later be encrypted and edited by multiple people without changing the event model.
         </div>
       </div>
     </div>
@@ -7805,18 +8636,24 @@ function renderCategoriesModal() {
     row.querySelector('[data-cat-delete]')?.addEventListener('click', async () => {
       const cat = state.calendarCategories.get(catId);
       if (!cat || cat.id === DEFAULT_CATEGORY_ID) return;
-    
-      const ok = await yantaConfirm({
-        title: 'Delete calendar category?',
-        message: `Delete "${cat.name || 'Calendar'}"?\n\nEvents in this category will move to General.`,
-        confirmLabel: 'Delete category',
-        danger: true,
+
+      const choice = await openDeleteCalendarCategoryDialog(catId);
+
+      if (!choice) return;
+
+      deleteCalendarCategory(catId, {
+        eventAction: choice.eventAction,
+        targetCategoryId: choice.targetCategoryId,
       });
-    
-      if (!ok) return;
-    
-      deleteCalendarCategory(catId);
+
       renderCategoriesModal();
+
+      toast(
+        choice.eventAction === 'delete'
+          ? 'Category and events deleted'
+          : 'Category deleted and events moved',
+        'success'
+      );
     });
   }
 

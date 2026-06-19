@@ -1890,7 +1890,7 @@ function noteRow(n, depth = 0, {
       title: 'Public link active',
     });
 
-    publicDot.innerHTML = lucide('globe', 11);
+    publicDot.innerHTML = lucide('share-2', 11);
     row.append(publicDot);
   }
   

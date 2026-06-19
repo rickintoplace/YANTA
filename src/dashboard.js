@@ -1979,7 +1979,7 @@ function renderCard(item, { section }) {
         title: 'Public link active',
       });
 
-      pub.innerHTML = lucide('globe', 13);
+      pub.innerHTML = lucide('share-2', 14);
       wrap.append(pub);
     }
     

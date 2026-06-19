@@ -551,15 +551,26 @@
 }
 
 .yanta-calendar-cat-row input[type="color"] {
-  width: 34px;
-  height: 30px;
+  height: 100%;
+  width: auto;
 
   padding: 0;
 
-  border: 1px solid var(--border);
+  /* border: 1px solid var(--border); */
+  border: none;
   border-radius: 6px;
 
-  background: var(--bg);
+  /* background: var(--bg); */
+  background: transparent
+}
+
+.yanta-calendar-cat-row input[type="color"]::-webkit-color-swatch {
+    border: none;
+    border-radius: 50%;
+}
+.yanta-calendar-cat-row input[type="color"]::-moz-color-swatch {
+  border: none;
+  border-radius: 50%;
 }
 
 .yanta-calendar-cat-row .text-input {

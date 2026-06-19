@@ -2004,16 +2004,18 @@
 }
 
 .yanta-dash-note-corner-public {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-
-  width: 19px;
-  height: 19px;
-
-  border-radius: 999px;
-
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-  border: 1px solid color-mix(in srgb, var(--accent) 36%, transparent);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 19px;
+    height: 19px;
+    border-radius: 999px;
+    color: var(--accent);
+    background: 
+color-mix(in srgb, var(--accent) 14%, transparent);
+    border: 1px solid 
+color-mix(in srgb, var(--accent) 36%, transparent);
+    transform: translate(4px, -6px);
+    /* backdrop-filter: blur(12px); */
+    margin-left: -8px;
 }

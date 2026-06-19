@@ -1412,7 +1412,15 @@ async function loadReact() {
   return reactLibPromise;
 }
 
+function ensureExcalidrawAssetPath() {
+  if (!window.EXCALIDRAW_ASSET_PATH) {
+    window.EXCALIDRAW_ASSET_PATH = '/excalidraw-assets/';
+  }
+}
+
 async function loadExcalidraw() {
+  ensureExcalidrawAssetPath();
+
   if (!excalidrawLibPromise) {
     excalidrawLibPromise = Promise.all([
       import('@excalidraw/excalidraw'),

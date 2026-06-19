@@ -747,7 +747,15 @@ async function resolveImageUrlFactory(shareId, shareKey, assets) {
   };
 }
 
+function ensureExcalidrawAssetPath() {
+  if (!window.EXCALIDRAW_ASSET_PATH) {
+    window.EXCALIDRAW_ASSET_PATH = '/excalidraw-assets/';
+  }
+}
+
 async function publicDrawingSvg(drawing) {
+  ensureExcalidrawAssetPath();
+
   const mod = await import('@excalidraw/excalidraw');
 
   if (typeof mod.exportToSvg !== 'function') {

@@ -72,6 +72,10 @@ import {
   isPublicShareActive,
 } from './public-share/public-share-publisher.js';
 
+import {
+  createDashboardCrumpleController,
+} from './dashboard-crumple.js';
+
   const MOBILE_MQ = window.matchMedia('(max-width: 880px)');
   
   const DASH_ORDER_STEP = 1000;
@@ -84,6 +88,7 @@ import {
   const DRAG_EDGE_SCROLL_MAX = 18;
   const DRAG_DROP_ANIM_MS = 145;
   const DRAG_FOLDER_INSERT_PREVIEW_SCALE = 0.56;
+  const DRAG_TRASH_PREVIEW_SCALE = 0.90;
 
   const DRAG_REORDER_COOLDOWN_MS = 120;
   const DRAG_REORDER_MIN_MOVE_PX = 22;
@@ -1371,6 +1376,35 @@ function getDashboardItems() {
         animate: e.detail?.source !== 'sync',
       });
     });
+    
+    window.addEventListener('blur', () => {
+      if (dashboard.dragging) {
+        forceCancelDashboardDrag('window-blur');
+      }
+    });
+
+    window.addEventListener('pagehide', () => {
+      if (dashboard.dragging) {
+        forceCancelDashboardDrag('pagehide');
+      }
+    });
+
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState !== 'visible' && dashboard.dragging) {
+        forceCancelDashboardDrag('visibilitychange');
+      }
+    });
+
+    document.addEventListener('pointerdown', () => {
+      repairDashboardDragInvariants();
+    }, true);
+
+    document.addEventListener('touchstart', () => {
+      repairDashboardDragInvariants();
+    }, {
+      capture: true,
+      passive: true,
+    });
   }
   
 export function showDashboard({
@@ -1467,6 +1501,10 @@ export function closeDashboardPane({ silent = false } = {}) {
 
 export function hideDashboard({ push = false } = {}) {
   if (!root) return;
+
+  if (dashboard.dragging) {
+    forceCancelDashboardDrag('hide-dashboard');
+  }
 
   if (dashboard.paneMode) {
     closeDashboardPane({ silent: true });
@@ -1650,6 +1688,10 @@ export async function showDashboardFromNote(noteId = state.currentNoteId, {
   }
   
 function renderDashboard({ animate = true } = {}) {
+  if (dashboard.dragging) {
+    forceCancelDashboardDrag('render-dashboard');
+  }
+
   ensureDashboardRoot();
   setupPreviewObserver();
 
@@ -4273,13 +4315,132 @@ async function navigateDashboardFolder(folderId, {
 // Long press, robust live-displacement drag reorder, resize
 // ============================================================
 
+function preventIfCancelable(e) {
+  if (e?.cancelable) {
+    e.preventDefault();
+  }
+}
+
+function isTouchPointerType(pointerType) {
+  return pointerType === 'touch';
+}
+
+function gesturePoint(clientX, clientY, {
+  pointerId = null,
+  pointerType = '',
+} = {}) {
+  return {
+    clientX,
+    clientY,
+    pointerId,
+    pointerType,
+  };
+}
+
+function primaryChangedTouch(e) {
+  return e.changedTouches?.[0] || null;
+}
+
+function findTouchById(list, id) {
+  if (!list) return null;
+
+  for (const touch of list) {
+    if (touch.identifier === id) {
+      return touch;
+    }
+  }
+
+  return null;
+}
+
+function dashboardGestureTargetIsControl(target, eventHeader = null) {
+  if (eventHeader) return false;
+
+  return !!target?.closest?.(
+    'input, button, a, textarea, select, iframe, .yanta-dash-resize-handle'
+  );
+}
+
+function cleanupDashboardDragDom(d = dashboard.dragging) {
+  if (d) {
+    if (d.raf) {
+      cancelAnimationFrame(d.raf);
+      d.raf = 0;
+    }
+
+    if (d.scrollRaf) {
+      cancelAnimationFrame(d.scrollRaf);
+      d.scrollRaf = 0;
+    }
+
+    if (d.scaleRaf) {
+      cancelAnimationFrame(d.scaleRaf);
+      d.scaleRaf = 0;
+    }
+
+    d.crumple?.destroy?.();
+    d.clone?.remove();
+
+    d.source?.classList.remove('drag-source');
+    if (d.source) {
+      d.source.style.viewTransitionName = '';
+    }
+  }
+
+  clearDragVisuals();
+  hideTrashDropTarget();
+  setTrashDropTargetHot(false);
+
+  root?.classList.remove('is-card-dragging');
+
+  document
+    .querySelectorAll('.yanta-dash-card.drag-clone')
+    .forEach((node) => node.remove());
+
+  root
+    ?.querySelectorAll('.yanta-dash-card.drag-source')
+    ?.forEach((node) => {
+      node.classList.remove('drag-source');
+      node.style.viewTransitionName = '';
+    });
+}
+
+function forceCancelDashboardDrag(reason = 'unknown') {
+  if (!dashboard.dragging) {
+    cleanupDashboardDragDom(null);
+    return;
+  }
+
+  const d = dashboard.dragging;
+  dashboard.dragging = null;
+
+  cleanupDashboardDragDom(d);
+
+  dashboard.suppressOpenUntil = performance.now() + 650;
+
+  if (reason !== 'silent') {
+    console.warn('[YANTA Dashboard] Drag force-cancelled:', reason);
+  }
+}
+
+function repairDashboardDragInvariants() {
+  if (dashboard.dragging) return;
+
+  cleanupDashboardDragDom(null);
+}
+
+function shouldIgnoreSyntheticMouseAfterTouch() {
+  return performance.now() < (dashboard.suppressOpenUntil || 0);
+}
+
 function bindCardPointerInteractions(card, item) {
   let pressTimer = 0;
-  let active = null;
+  let mouseGesture = null;
+  let touchGesture = null;
 
   const key = itemKey(item);
 
-  const clearPress = () => {
+  const clearPressTimer = () => {
     clearTimeout(pressTimer);
     pressTimer = 0;
   };
@@ -4314,91 +4475,22 @@ function bindCardPointerInteractions(card, item) {
     }
   };
 
-  const cleanupPending = () => {
-    clearPress();
-
-    document.removeEventListener('pointermove', onDocumentPendingMove, true);
-    document.removeEventListener('pointerup', onDocumentPendingUp, true);
-    document.removeEventListener('pointercancel', onDocumentPendingCancel, true);
-
-    root?.classList.remove('is-touch-scrolling');
-
-    active = null;
-  };
-
-  card.addEventListener('contextmenu', (e) => {
-    if (!dashboard.visible) return;
-    e.preventDefault();
-    e.stopPropagation();
-  });
-
-  card.addEventListener('pointerdown', (e) => {
-    if (e.button != null && e.button !== 0) return;
-
-    const eventHeader = e.target.closest?.('.yanta-dash-event-header[data-calendar-event-id]');
-
-    /*
-      Normale Controls sollen Dashboard-Gesten nicht starten.
-      Die Event-Card ist aber eine Dashboard-interne Tap-Zone:
-      - Tap öffnet Event
-      - Long-Press selektiert Card
-      - Bewegung scrollt/draggt wie auf dem Rest der Card
-    */
-    if (
-      !eventHeader &&
-      e.target.closest?.('input, button, a, textarea, select, iframe, .yanta-dash-resize-handle')
-    ) {
-      return;
-    }
-
-    if (dashboard.resize || dashboard.dragging) return;
-
-    const pointerType = e.pointerType || 'mouse';
-
-    active = {
-      pointerId: e.pointerId,
-      pointerType,
-      downX: e.clientX,
-      downY: e.clientY,
-      lastScrollY: e.clientY,
-      moved: false,
-      longPressed: false,
-      dragStarted: false,
-      scrolling: false,
-      eventHeader,
-    };
-
-    const isTouchLike =
-      pointerType === 'touch' ||
-      pointerType === 'pen';
-
-    clearPress();
-
-    /*
-      Desktop: wir übernehmen die Geste sofort.
-      Mobile/Touch: NICHT preventDefault(), NICHT capture.
-      Sonst kann der Browser kein natives Scrollen starten.
-    */
-    if (!isTouchLike) {
-      e.preventDefault();
-      e.stopPropagation();
-
-      try {
-        card.setPointerCapture?.(e.pointerId);
-      } catch {}
-    } else {
-      /*
-        StopPropagation ist optional.
-        Wichtig ist: kein preventDefault und kein pointer capture.
-      */
-      e.stopPropagation();
-    }
+  const startLongPressTimer = ({
+    pointerId,
+    pointerType,
+    isTouch,
+  }) => {
+    clearPressTimer();
 
     pressTimer = window.setTimeout(() => {
-      if (!active || active.pointerId !== e.pointerId) return;
-      if (active.scrolling || active.dragStarted) return;
+      const gesture = isTouch ? touchGesture : mouseGesture;
 
-      active.longPressed = true;
+      if (!gesture) return;
+      if (gesture.pointerId !== pointerId) return;
+      if (gesture.dragStarted) return;
+      if (gesture.scrolledAway) return;
+
+      gesture.longPressed = true;
 
       selectInPlace({
         syncMultiSelect:
@@ -4408,124 +4500,144 @@ function bindCardPointerInteractions(card, item) {
 
       dashboard.suppressOpenUntil = performance.now() + 600;
 
-      /*
-        Ab jetzt ist es keine Scroll-Geste mehr, sondern Selection/Drag.
-        Jetzt darf YANTA die Pointer-Geste übernehmen.
-      */
-      try {
-        card.setPointerCapture?.(e.pointerId);
-      } catch {}
-
       try {
         navigator.vibrate?.(10);
       } catch {}
     }, LONG_PRESS_MS);
+  };
 
-    document.addEventListener('pointermove', onDocumentPendingMove, true);
-    document.addEventListener('pointerup', onDocumentPendingUp, true);
-    document.addEventListener('pointercancel', onDocumentPendingCancel, true);
+  const cleanupMouseGesture = () => {
+    clearPressTimer();
+
+    document.removeEventListener('pointermove', onMouseMove, true);
+    document.removeEventListener('pointerup', onMouseUp, true);
+    document.removeEventListener('pointercancel', onMouseCancel, true);
+
+    mouseGesture = null;
+  };
+
+  const cleanupTouchGesture = () => {
+    clearPressTimer();
+
+    document.removeEventListener('touchmove', onTouchMove, true);
+    document.removeEventListener('touchend', onTouchEnd, true);
+    document.removeEventListener('touchcancel', onTouchCancel, true);
+
+    touchGesture = null;
+  };
+
+  card.addEventListener('contextmenu', (e) => {
+    if (!dashboard.visible) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+  }, true);
+
+  /*
+    Desktop / Mouse / non-touch pointer.
+    Touch wird bewusst NICHT hier behandelt, sondern über Touch Events.
+  */
+  card.addEventListener('pointerdown', (e) => {
+    if (!dashboard.visible) return;
+    if (e.button != null && e.button !== 0) return;
+    if (dashboard.resize || dashboard.dragging) return;
+    if (isTouchPointerType(e.pointerType)) return;
+    if (shouldIgnoreSyntheticMouseAfterTouch()) return;
+
+    const eventHeader = e.target.closest?.(
+      '.yanta-dash-event-header[data-calendar-event-id]'
+    );
+
+    if (dashboardGestureTargetIsControl(e.target, eventHeader)) {
+      return;
+    }
+
+    preventIfCancelable(e);
+    e.stopPropagation();
+
+    mouseGesture = {
+      pointerId: e.pointerId,
+      pointerType: e.pointerType || 'mouse',
+      downX: e.clientX,
+      downY: e.clientY,
+      moved: false,
+      longPressed: false,
+      dragStarted: false,
+      scrolledAway: false,
+      eventHeader,
+    };
+
+    startLongPressTimer({
+      pointerId: e.pointerId,
+      pointerType: mouseGesture.pointerType,
+      isTouch: false,
+    });
+
+    document.addEventListener('pointermove', onMouseMove, true);
+    document.addEventListener('pointerup', onMouseUp, true);
+    document.addEventListener('pointercancel', onMouseCancel, true);
   }, { passive: false });
 
-  function onDocumentPendingMove(e) {
-    if (!active || e.pointerId !== active.pointerId) return;
+  function onMouseMove(e) {
+    const g = mouseGesture;
+    if (!g || e.pointerId !== g.pointerId) return;
 
-    const dx = e.clientX - active.downX;
-    const dy = e.clientY - active.downY;
+    const dx = e.clientX - g.downX;
+    const dy = e.clientY - g.downY;
     const dist = Math.hypot(dx, dy);
 
     if (dashboard.dragging?.key === key) {
-      e.preventDefault();
+      preventIfCancelable(e);
       e.stopPropagation();
+
       moveCardDrag(e);
       return;
     }
 
-    if (active.scrolling) {
-      e.preventDefault();
-      e.stopPropagation();
-
-      if (root) {
-        const delta = active.lastScrollY - e.clientY;
-        root.scrollBy(0, delta);
-      }
-
-      active.lastScrollY = e.clientY;
-      active.moved = true;
-      return;
-    }
-
     if (dist <= MOVE_TOLERANCE) {
-      if (active.longPressed) {
-        e.preventDefault();
-        e.stopPropagation();
-      }
-
       return;
     }
 
-    active.moved = true;
+    g.moved = true;
 
-    const canStartDrag =
-      active.pointerType !== 'touch' ||
-      active.longPressed ||
-      dashboard.selectedKey === key;
-
-    if (!canStartDrag) {
-      clearPress();
-
-      /*
-        Mobile SaaS-UX:
-        Finger bewegt sich vor Long-Press => das ist Scrollen.
-        YANTA gibt die Geste vollständig frei.
-      */
-      dashboard.suppressOpenUntil = performance.now() + 250;
-
-      cleanupPending();
-
-      return;
-    }
-
-    e.preventDefault();
+    preventIfCancelable(e);
     e.stopPropagation();
 
-    clearPress();
+    clearPressTimer();
 
-    if (!active.longPressed) {
-      active.longPressed = true;
+    if (!g.longPressed) {
+      g.longPressed = true;
       selectInPlace();
     }
 
-    if (!active.dragStarted) {
-      active.dragStarted = true;
-
+    if (!g.dragStarted) {
+      g.dragStarted = true;
       dashboard.suppressOpenUntil = performance.now() + 900;
-      startCardDrag(card, item, e);
+
+      startCardDrag(card, item, gesturePoint(e.clientX, e.clientY, {
+        pointerId: e.pointerId,
+        pointerType: g.pointerType,
+      }));
     }
   }
 
-  async function onDocumentPendingUp(e) {
-    if (!active || e.pointerId !== active.pointerId) return;
+  async function onMouseUp(e) {
+    const g = mouseGesture;
+    if (!g || e.pointerId !== g.pointerId) return;
 
-    const snapshot = active;
     const wasDragging = dashboard.dragging?.key === key;
+    const snapshot = { ...g };
 
-    e.preventDefault();
-    e.stopPropagation();
+    if (wasDragging) {
+      preventIfCancelable(e);
+      e.stopPropagation();
+    }
 
-    try {
-      card.releasePointerCapture?.(e.pointerId);
-    } catch {}
-
-    cleanupPending();
+    cleanupMouseGesture();
 
     if (wasDragging) {
       await finishCardDrag();
       dashboard.suppressOpenUntil = performance.now() + 750;
-      return;
-    }
-
-    if (snapshot.scrolling) {
-      dashboard.suppressOpenUntil = performance.now() + 250;
       return;
     }
 
@@ -4545,19 +4657,252 @@ function bindCardPointerInteractions(card, item) {
     }
   }
 
-  function onDocumentPendingCancel(e) {
-    if (!active || e.pointerId !== active.pointerId) return;
+  function onMouseCancel(e) {
+    const g = mouseGesture;
+    if (!g || e.pointerId !== g.pointerId) return;
 
     const wasDragging = dashboard.dragging?.key === key;
 
-    try {
-      card.releasePointerCapture?.(e.pointerId);
-    } catch {}
-
-    cleanupPending();
+    cleanupMouseGesture();
 
     if (wasDragging) {
-      cancelCardDrag();
+      forceCancelDashboardDrag('mouse-pointercancel');
+    }
+  }
+
+  /*
+    Mobile Touch.
+    Native Scroll bleibt vor Longpress vollständig beim Browser.
+    Nach Longpress wird die nächste Bewegung als intentionaler Drag behandelt.
+  */
+  card.addEventListener('touchstart', (e) => {
+    if (!dashboard.visible) return;
+    if (dashboard.resize || dashboard.dragging) return;
+    if (e.touches.length !== 1) return;
+
+    const touch = e.changedTouches?.[0];
+    if (!touch) return;
+
+    const target =
+      document.elementFromPoint(touch.clientX, touch.clientY) ||
+      e.target;
+
+    const eventHeader = target.closest?.(
+      '.yanta-dash-event-header[data-calendar-event-id]'
+    );
+
+    if (dashboardGestureTargetIsControl(target, eventHeader)) {
+      return;
+    }
+
+    /*
+      Kein preventDefault:
+      Vor Longpress soll Scrollen 100% nativ und flüssig bleiben.
+    */
+    e.stopPropagation();
+
+    touchGesture = {
+      pointerId: touch.identifier,
+      pointerType: 'touch',
+      downX: touch.clientX,
+      downY: touch.clientY,
+      moved: false,
+      longPressed: false,
+      dragStarted: false,
+      scrolledAway: false,
+      eventHeader,
+    };
+
+    startLongPressTimer({
+      pointerId: touch.identifier,
+      pointerType: 'touch',
+      isTouch: true,
+    });
+
+    document.addEventListener('touchmove', onTouchMove, {
+      capture: true,
+      passive: false,
+    });
+
+    document.addEventListener('touchend', onTouchEnd, {
+      capture: true,
+      passive: false,
+    });
+
+    document.addEventListener('touchcancel', onTouchCancel, {
+      capture: true,
+      passive: false,
+    });
+  }, { passive: true });
+
+  function onTouchMove(e) {
+    const g = touchGesture;
+    if (!g) return;
+
+    const touch =
+      findTouchById(e.touches, g.pointerId) ||
+      findTouchById(e.changedTouches, g.pointerId);
+
+    if (!touch) return;
+
+    const dx = touch.clientX - g.downX;
+    const dy = touch.clientY - g.downY;
+    const dist = Math.hypot(dx, dy);
+
+    if (dashboard.dragging?.key === key) {
+      if (!e.cancelable) {
+        forceCancelDashboardDrag('touchmove-not-cancelable-during-drag');
+        cleanupTouchGesture();
+        return;
+      }
+
+      e.preventDefault();
+      e.stopPropagation();
+
+      moveCardDrag(gesturePoint(touch.clientX, touch.clientY, {
+        pointerId: g.pointerId,
+        pointerType: 'touch',
+      }));
+
+      return;
+    }
+
+    if (dist <= MOVE_TOLERANCE) {
+      /*
+        Nach Longpress kleine Bewegungen blocken, damit der Browser nicht
+        verspätet noch eine Scroll-Geste übernimmt.
+      */
+      if (g.longPressed) {
+        if (!e.cancelable) {
+          g.scrolledAway = true;
+          cleanupTouchGesture();
+          return;
+        }
+
+        e.preventDefault();
+        e.stopPropagation();
+      }
+
+      return;
+    }
+
+    g.moved = true;
+
+    /*
+      Bewegung VOR Longpress = native Scroll.
+      Wir geben die Geste komplett frei.
+    */
+    if (!g.longPressed) {
+      g.scrolledAway = true;
+      dashboard.suppressOpenUntil = performance.now() + 250;
+      cleanupTouchGesture();
+      return;
+    }
+
+    /*
+      Bewegung NACH Longpress = intentionaler Drag.
+      Wenn der Browser sie nicht mehr cancelbar macht, starten wir keinen Drag.
+    */
+    if (!e.cancelable) {
+      g.scrolledAway = true;
+      dashboard.suppressOpenUntil = performance.now() + 250;
+      cleanupTouchGesture();
+      return;
+    }
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    clearPressTimer();
+
+    if (!g.dragStarted) {
+      g.dragStarted = true;
+      dashboard.suppressOpenUntil = performance.now() + 900;
+
+      const started = startCardDrag(card, item, gesturePoint(touch.clientX, touch.clientY, {
+        pointerId: g.pointerId,
+        pointerType: 'touch',
+      }));
+
+      if (!started) {
+        g.dragStarted = false;
+        cleanupTouchGesture();
+      }
+    }
+  }
+
+  async function onTouchEnd(e) {
+    const g = touchGesture;
+    if (!g) return;
+
+    const touch = findTouchById(e.changedTouches, g.pointerId);
+    if (!touch) return;
+
+    const wasDragging = dashboard.dragging?.key === key;
+    const snapshot = { ...g };
+
+    if (wasDragging) {
+      preventIfCancelable(e);
+      e.stopPropagation();
+
+      moveCardDrag(gesturePoint(touch.clientX, touch.clientY, {
+        pointerId: g.pointerId,
+        pointerType: 'touch',
+      }));
+    }
+
+    cleanupTouchGesture();
+
+    /*
+      Suppress synthetic mouse/click after touch.
+    */
+    dashboard.suppressOpenUntil = Math.max(
+      dashboard.suppressOpenUntil || 0,
+      performance.now() + 450
+    );
+
+    if (wasDragging) {
+      await finishCardDrag();
+      dashboard.suppressOpenUntil = performance.now() + 750;
+      return;
+    }
+
+    if (snapshot.scrolledAway) {
+      return;
+    }
+
+    if (snapshot.longPressed && !snapshot.dragStarted) {
+      selectInPlace();
+      dashboard.suppressOpenUntil = performance.now() + 350;
+      return;
+    }
+
+    if (!snapshot.moved && !snapshot.longPressed) {
+      if (snapshot.eventHeader?.isConnected) {
+        await openDashboardCalendarEventFromHeader(snapshot.eventHeader);
+        return;
+      }
+
+      await openItem(item, card);
+    }
+  }
+
+  function onTouchCancel(e) {
+    const g = touchGesture;
+    if (!g) return;
+
+    const touch =
+      findTouchById(e.changedTouches, g.pointerId) ||
+      primaryChangedTouch(e);
+
+    if (!touch) return;
+
+    const wasDragging = dashboard.dragging?.key === key;
+
+    cleanupTouchGesture();
+
+    if (wasDragging) {
+      forceCancelDashboardDrag('touchcancel');
     }
   }
 
@@ -4565,6 +4910,7 @@ function bindCardPointerInteractions(card, item) {
     if (isEditableDashboardKeyTarget(e.target)) {
       return;
     }
+
     if (e.key === 'F2') {
       e.preventDefault();
       e.stopPropagation();
@@ -4633,9 +4979,15 @@ function dragCloneScale(d) {
     return n;
   }
 
-  return d?.folderInsertPreview
-    ? DRAG_FOLDER_INSERT_PREVIEW_SCALE
-    : 1;
+  if (d?.trashCrumplePreview) {
+    return DRAG_TRASH_PREVIEW_SCALE;
+  }
+
+  if (d?.folderInsertPreview) {
+    return DRAG_FOLDER_INSERT_PREVIEW_SCALE;
+  }
+
+  return 1;
 }
 
 function dragScaleEase(t) {
@@ -4739,6 +5091,114 @@ function setDragFolderInsertPreview(active) {
     d,
     next ? DRAG_FOLDER_INSERT_PREVIEW_SCALE : 1
   );
+}
+
+function ensureDragCrumpleController(d) {
+  if (!d?.clone) return null;
+
+  if (d.crumple) {
+    return d.crumple;
+  }
+
+  d.crumple = createDashboardCrumpleController(d.clone, {
+    maxProgress: 0.42,
+  });
+
+  return d.crumple;
+}
+
+function destroyDragCrumpleController(d) {
+  if (!d) return;
+
+  d.crumple?.destroy?.();
+  d.crumple = null;
+}
+
+function setDragTrashCrumplePreview(active, {
+  immediate = false,
+} = {}) {
+  const d = dashboard.dragging;
+  if (!d?.clone) return;
+
+  const next = !!active;
+
+  if (d.trashCrumplePreview === next && !immediate && (!next || d.crumple)) {
+    return;
+  }
+
+  d.trashCrumplePreview = next;
+
+  if (next) {
+    ensureDragCrumpleController(d);
+    d.clone.classList.add('is-trash-crumple-preview');
+  }
+
+  d.crumple?.setActive?.(next, {
+    immediate,
+  });
+
+  animateDragCloneScale(
+    d,
+    next ? DRAG_TRASH_PREVIEW_SCALE : 1
+  );
+
+  if (!next) {
+    window.setTimeout(() => {
+      if (dashboard.dragging !== d) return;
+      if (d.trashCrumplePreview) return;
+
+      destroyDragCrumpleController(d);
+      d.clone?.classList.remove('is-trash-crumple-preview');
+    }, 180);
+  }
+}
+
+async function animateTrashDropCrumple(d) {
+  if (!d?.clone || prefersReducedMotion()) return;
+
+  const clone = d.clone;
+
+  ensureDragCrumpleController(d);
+
+  d.crumple?.setActive?.(true, {
+    immediate: true,
+  });
+
+  clone.classList.add('is-trash-crumple-preview');
+
+  const rect = clone.getBoundingClientRect();
+
+  clone.style.setProperty('transform', 'none', 'important');
+  clone.style.left = `${rect.left}px`;
+  clone.style.top = `${rect.top}px`;
+  clone.style.width = `${rect.width}px`;
+  clone.style.height = `${rect.height}px`;
+  clone.style.transformOrigin = 'center center';
+
+  const anim = clone.animate(
+    [
+      {
+        transform: 'scale(1) translate3d(0, 0, 0)',
+        opacity: '0.96',
+        filter: 'saturate(.96) brightness(.98) blur(0)',
+      },
+      {
+        transform: 'scale(.72) translate3d(0, 12px, 0)',
+        opacity: '0',
+        filter: 'saturate(.72) brightness(.82) blur(1.2px)',
+      },
+    ],
+    {
+      duration: 170,
+      easing: 'cubic-bezier(.2,.8,.2,1)',
+      fill: 'forwards',
+    }
+  );
+
+  await Promise.race([
+    anim.finished.catch(() => {}),
+    delay(230),
+  ]);
 }
 
 function dashboardFolderIsAncestor(ancestorId, descendantId) {
@@ -4867,25 +5327,30 @@ function prepareDashboardGridForDragAnimation(grid) {
   });
 }
 
-function startCardDrag(card, item, e) {
-  if (dashboard.dragging) return;
+function startCardDrag(card, item, point) {
+  if (dashboard.dragging) {
+    forceCancelDashboardDrag('new-drag-start');
+  }
 
   window.dispatchEvent(new CustomEvent('yanta-close-dashboard-context-menu'));
 
+  document
+    .querySelectorAll('.yanta-dash-card.drag-clone')
+    .forEach((node) => node.remove());
+
+  hideTrashDropTarget();
+  setTrashDropTargetHot(false);
+
   const grid = card.closest('.yanta-dashboard-grid');
-  if (!grid) return;
+  if (!grid) return false;
 
   prepareDashboardGridForDragAnimation(grid);
 
   const key = itemKey(item);
   const rect = card.getBoundingClientRect();
 
-  /*
-    Grabpunkt innerhalb der Karte.
-    Dieser Punkt soll auch bei folder-insert-preview direkt unter dem Cursor bleiben.
-  */
-  const grabX = clamp(e.clientX - rect.left, 0, rect.width);
-  const grabY = clamp(e.clientY - rect.top, 0, rect.height);
+  const grabX = clamp(point.clientX - rect.left, 0, rect.width);
+  const grabY = clamp(point.clientY - rect.top, 0, rect.height);
 
   const clone = card.cloneNode(true);
   clone.classList.add('drag-clone');
@@ -4901,12 +5366,6 @@ function startCardDrag(card, item, e) {
     margin: '0',
     zIndex: '1000',
     pointerEvents: 'none',
-
-    /*
-      Scale wird jetzt im JS-transform gerechnet.
-      top left macht die Formel eindeutig:
-        visibleGrabX = left + grabX * scale
-    */
     transformOrigin: 'top left',
   });
 
@@ -4918,11 +5377,6 @@ function startCardDrag(card, item, e) {
 
   document.body.append(clone);
 
-  /*
-    Kein Placeholder:
-    Die Source bleibt im Grid-Flow und wird live in der DOM-Reihenfolge verschoben.
-    Dadurch verdrängt sie exakt dort andere Items, wo der Drop später landet.
-  */
   card.classList.add('drag-source');
   card.classList.remove('selected');
   card.style.viewTransitionName = 'none';
@@ -4935,6 +5389,8 @@ function startCardDrag(card, item, e) {
 
   dashboard.dragging = {
     key,
+    pointerId: point.pointerId,
+    pointerType: point.pointerType || '',
     section: card.dataset.section || '',
     grid,
     source: card,
@@ -4954,23 +5410,20 @@ function startCardDrag(card, item, e) {
     startLeft: rect.left,
     startTop: rect.top,
 
-    /*
-      Gegriffener Punkt innerhalb des Originals.
-      moveCardDrag()/positionDragClone() halten diesen Punkt unter dem Cursor.
-    */
     offsetX: grabX,
     offsetY: grabY,
 
-    lastX: e.clientX,
-    lastY: e.clientY,
+    lastX: point.clientX,
+    lastY: point.clientY,
 
     raf: 0,
     scrollRaf: 0,
 
     dropFolderId: null,
     folderInsertPreview: false,
-
     dropToTrash: false,
+    crumple: null,
+    trashCrumplePreview: false,
 
     currentScale: 1,
     targetScale: 1,
@@ -4983,14 +5436,15 @@ function startCardDrag(card, item, e) {
     lastAcceptedIndex: visualIndexOfSource(grid, card),
 
     lastReorderAt: 0,
-    lastReorderX: e.clientX,
-    lastReorderY: e.clientY,
+    lastReorderX: point.clientX,
+    lastReorderY: point.clientY,
 
     reorderLockUntil: 0,
     reorderLockRect: null,
   };
 
-  moveCardDrag(e);
+  moveCardDrag(point);
+  return true;
 }
 
 function moveCardDrag(e) {
@@ -5033,11 +5487,25 @@ function updateLiveDragPlacement(clientX, clientY) {
 
   if (overTrash) {
     d.dropToTrash = true;
+
+    /*
+      Trash hat Priorität:
+      - kein Folder-Preview
+      - Crumple aktiv
+      - gleiche Scale wie Folder-Drop
+    */
     setDragFolderInsertPreview(false);
+    setDragTrashCrumplePreview(true);
+
+    d.clone.classList.add('is-over-trash');
+
     return;
   }
 
   d.dropToTrash = false;
+  setDragTrashCrumplePreview(false);
+
+  d.clone.classList.remove('is-over-trash');
 
   /*
     Folder-Drop bleibt pointerbasiert:
@@ -5583,6 +6051,10 @@ function stopDragAutoScroll(d = dashboard.dragging) {
   d.scrollRaf = 0;
 }
 
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
 async function animateCloneToRect(clone, toRect) {
   if (!clone || !toRect || prefersReducedMotion()) return;
 
@@ -5618,12 +6090,19 @@ async function animateCloneToRect(clone, toRect) {
     }
   );
 
-  await anim.finished.catch(() => {});
+  await Promise.race([
+    anim.finished.catch(() => {}),
+    delay(DRAG_DROP_ANIM_MS + 90),
+  ]);
 }
 
 async function finishCardDrag() {
   const d = dashboard.dragging;
   if (!d) return;
+
+  dashboard.dragging = null;
+  dashboard.suppressOpenUntil = performance.now() + 850;
+  suppressDashboardStaggerFor(1400);
 
   if (d.raf) {
     cancelAnimationFrame(d.raf);
@@ -5637,56 +6116,6 @@ async function finishCardDrag() {
 
   stopDragAutoScroll(d);
   clearDragVisuals();
-
-  const shouldDropToTrash =
-    d.dropToTrash ||
-    isPointOverTrashDropTarget(d.lastX, d.lastY);
-
-  hideTrashDropTarget();
-
-  if (shouldDropToTrash) {
-    if (d.scaleRaf) {
-      cancelAnimationFrame(d.scaleRaf);
-      d.scaleRaf = 0;
-    }
-
-    dashboard.dragging = null;
-    dashboard.suppressOpenUntil = performance.now() + 850;
-    suppressDashboardStaggerFor(1400);
-
-    d.clone?.remove();
-
-    d.source.classList.remove('drag-source');
-    d.source.style.viewTransitionName = '';
-
-    root?.classList.remove('is-card-dragging');
-
-    if (d.sourceKind === 'note') {
-      await moveNoteToTrash(d.sourceId, {
-        source: 'dashboard-drag',
-        toastMessage: 'Moved note to Trash',
-      });
-
-      previewCache.delete(d.sourceId);
-    } else if (d.sourceKind === 'folder') {
-      await moveFolderToTrash(d.sourceId, {
-        source: 'dashboard-drag',
-        toastMessage: 'Moved folder to Trash',
-      });
-    }
-
-    renderDashboard({
-      animate: false,
-    });
-
-    return;
-  }
-
-  setDragFolderInsertPreview(false);
-
-  dashboard.dragging = null;
-  dashboard.suppressOpenUntil = performance.now() + 850;
-  suppressDashboardStaggerFor(1400);
 
   const {
     source,
@@ -5697,86 +6126,103 @@ async function finishCardDrag() {
     dropFolderId,
   } = d;
 
-  if (dropFolderId) {
-    clone?.remove();
+  const shouldDropToTrash =
+    d.dropToTrash ||
+    isPointOverTrashDropTarget(d.lastX, d.lastY);
 
-    source.classList.remove('drag-source');
-    source.style.viewTransitionName = '';
+  try {
+    if (shouldDropToTrash) {
+      await animateTrashDropCrumple(d);
 
-    root?.classList.remove('is-card-dragging');
+      if (sourceKind === 'note') {
+        await moveNoteToTrash(sourceId, {
+          source: 'dashboard-drag',
+          toastMessage: 'Moved note to Trash',
+        });
 
-    if (sourceKind === 'note') {
-      const note = state.notes.get(sourceId);
-
-      if (note && note.folderId !== dropFolderId) {
-        note.folderId = dropFolderId;
-        note.pinned = false;
-        note.updated = Date.now();
-
-        await store.notes.put(note);
         previewCache.delete(sourceId);
-
-        state.expandedFolders.add(dropFolderId);
-
-        toast('Moved into folder', 'success');
+      } else if (sourceKind === 'folder') {
+        await moveFolderToTrash(sourceId, {
+          source: 'dashboard-drag',
+          toastMessage: 'Moved folder to Trash',
+        });
       }
-    } else if (sourceKind === 'folder') {
-      const folder = state.folders.get(sourceId);
-
-      if (
-        folder &&
-        folder.parentId !== dropFolderId &&
-        folder.id !== dropFolderId &&
-        !dashboardFolderIsAncestor(folder.id, dropFolderId)
-      ) {
-        folder.parentId = dropFolderId;
-        folder.updated = Date.now();
-
-        await store.folders.put(folder);
-
-        state.expandedFolders.add(dropFolderId);
-
-        toast('Moved folder', 'success');
-      }
-    }
-
-    /*
-      Hier ist ein Render sinnvoll, weil das Item in einen Folder gewandert ist.
-      Aber kein zusätzlicher dashboard-refresh-Event, sonst rendern wir doppelt.
-    */
-      suppressDashboardStaggerFor(1400);
 
       renderDashboard({
         animate: false,
       });
-  
+
       return;
+    }
+
+    if (dropFolderId) {
+      if (sourceKind === 'note') {
+        const note = state.notes.get(sourceId);
+
+        if (note && note.folderId !== dropFolderId) {
+          note.folderId = dropFolderId;
+          note.pinned = false;
+          note.updated = Date.now();
+
+          await store.notes.put(note);
+          previewCache.delete(sourceId);
+
+          state.expandedFolders.add(dropFolderId);
+          toast('Moved into folder', 'success');
+        }
+      } else if (sourceKind === 'folder') {
+        const folder = state.folders.get(sourceId);
+
+        if (
+          folder &&
+          folder.parentId !== dropFolderId &&
+          folder.id !== dropFolderId &&
+          !dashboardFolderIsAncestor(folder.id, dropFolderId)
+        ) {
+          folder.parentId = dropFolderId;
+          folder.updated = Date.now();
+
+          await store.folders.put(folder);
+
+          state.expandedFolders.add(dropFolderId);
+          toast('Moved folder', 'success');
+        }
+      }
+
+      renderDashboard({
+        animate: false,
+      });
+
+      return;
+    }
+
+    const finalRect = source.getBoundingClientRect();
+
+    await animateCloneToRect(clone, finalRect);
+
+    await persistGridOrder(grid, grid.dataset.section || d.section);
+
+    dashboard.selectedKey = source.dataset.key || d.key;
+    source.classList.add('selected');
+  } catch (err) {
+    console.error('[YANTA Dashboard] Could not finish drag', err);
+    toast('Could not complete drag', 'error');
+
+    renderDashboard({
+      animate: false,
+    });
+  } finally {
+    cleanupDashboardDragDom(d);
   }
-
-  /*
-    Source sitzt bereits an der finalen DOM-Position.
-    Jetzt Clone zur echten Source-Position animieren, dann Source sichtbar machen.
-  */
-  const finalRect = source.getBoundingClientRect();
-
-  await animateCloneToRect(clone, finalRect);
-
-  clone?.remove();
-
-  source.classList.remove('drag-source');
-  source.style.viewTransitionName = '';
-
-  root?.classList.remove('is-card-dragging');
-
-  await persistGridOrder(grid, grid.dataset.section || d.section);
-
-  dashboard.selectedKey = source.dataset.key || d.key;
-  source.classList.add('selected');
 }
 
 async function cancelCardDrag() {
   const d = dashboard.dragging;
   if (!d) return;
+
+  dashboard.dragging = null;
+  dashboard.suppressOpenUntil = performance.now() + 700;
+  suppressDashboardStaggerFor(900);
 
   if (d.raf) {
     cancelAnimationFrame(d.raf);
@@ -5790,30 +6236,22 @@ async function cancelCardDrag() {
 
   stopDragAutoScroll(d);
   clearDragVisuals();
-  hideTrashDropTarget();
-  setDragFolderInsertPreview(false);
 
-  dashboard.dragging = null;
-  dashboard.suppressOpenUntil = performance.now() + 700;
-  suppressDashboardStaggerFor(900);
+  try {
+    const sourceRect = d.source?.getBoundingClientRect?.();
 
-  /*
-    Source möglichst an ursprüngliche Position zurück:
-    Die Persistenz wurde noch nicht geschrieben, also reicht ein Render
-    nach Clone-Rückflug.
-  */
-  const sourceRect = d.source.getBoundingClientRect();
+    if (sourceRect) {
+      await animateCloneToRect(d.clone, sourceRect);
+    }
+  } catch (err) {
+    console.warn('[YANTA Dashboard] Drag cancel animation failed', err);
+  } finally {
+    cleanupDashboardDragDom(d);
 
-  await animateCloneToRect(d.clone, sourceRect);
-
-  d.clone?.remove();
-
-  d.source.classList.remove('drag-source');
-  d.source.style.viewTransitionName = '';
-
-  root?.classList.remove('is-card-dragging');
-
-  renderDashboard();
+    renderDashboard({
+      animate: false,
+    });
+  }
 }
 
 async function persistGridOrder(grid, section) {

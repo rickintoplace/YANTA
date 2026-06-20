@@ -42,6 +42,15 @@ import {
   setApproxUserLocationFromCandidate,
 } from './location.js';
 
+import {
+  INCLUDED_AI_CLIENT_POLICY,
+  INCLUDED_AI_MODELS,
+  OPENROUTER_ZDR_POLICY,
+  isIncludedAiMode,
+  canUseIncludedAi,
+  normalizeIncludedAiModel,
+} from './ai-access-policy.js';
+
 let locationSearchResults = [];
 let locationSearchBusy = false;
 let locationSearchError = '';
@@ -384,6 +393,166 @@ async function runLocationSearch(panel, rerender, { saveFirst = false } = {}) {
   }
 }
 
+function includedAiModelOptionsHtml(selectedModel) {
+  const selected = normalizeIncludedAiModel(selectedModel);
+
+  return INCLUDED_AI_MODELS.map((model) => `
+    <option value="${escapeHtml(model.id)}" ${model.id === selected ? 'selected' : ''}>
+      ${escapeHtml(model.label)} · ${escapeHtml(model.id)}
+    </option>
+  `).join('');
+}
+
+function aiAccessSettingsHtml(settings, apiKey) {
+  const includedMode = isIncludedAiMode(settings);
+
+  if (includedMode) {
+    return `
+      <div class="yanta-ai-settings-grid">
+        <label class="wide">
+          AI access
+          <select class="text-input" data-ai-billing-mode>
+            <option value="included" selected>Included AI: YANTA Cloud credits</option>
+            <option value="byok">BYOK: my OpenRouter key</option>
+          </select>
+        </label>
+
+        <label class="wide">
+          Included AI model
+          <select class="text-input" data-ai-included-model>
+            ${includedAiModelOptionsHtml(settings.includedModel || settings.model)}
+          </select>
+        </label>
+
+        <label class="wide">
+          Privacy
+          <select class="text-input" data-ai-privacy>
+            <option value="current-note" ${settings.privacyMode === 'current-note' ? 'selected' : ''}>Include current note</option>
+            <option value="metadata-only" ${settings.privacyMode === 'metadata-only' ? 'selected' : ''}>Metadata only</option>
+          </select>
+        </label>
+      </div>
+
+      <section class="yanta-ai-settings-section">
+        <h4>Included AI limits</h4>
+        <div class="yanta-ai-warning">
+          Included AI uses managed YANTA Cloud credits.
+          You can choose one of the YANTA-approved models.
+          Context size, output size, daily credits and rate limits are controlled by YANTA Cloud for abuse protection.
+          <br><br>
+          Current client-side limits:
+          ${Number(INCLUDED_AI_CLIENT_POLICY.maxContextChars).toLocaleString()} context chars,
+          ${Number(INCLUDED_AI_CLIENT_POLICY.maxToolRounds).toLocaleString()} tool rounds,
+          ${Number(INCLUDED_AI_CLIENT_POLICY.maxOutputTokens).toLocaleString()} max output tokens.
+        </div>
+      </section>
+    `;
+  }
+
+  return `
+    <div class="yanta-ai-settings-grid">
+      <label>
+        AI access
+        <select class="text-input" data-ai-billing-mode>
+          <option value="included">Included AI: YANTA Cloud credits</option>
+          <option value="byok" selected>BYOK: my OpenRouter key</option>
+        </select>
+      </label>
+
+      <label>
+        Provider
+        <input class="text-input" value="OpenRouter" disabled />
+      </label>
+
+      <label>
+        Base URL
+        <input class="text-input" data-ai-base-url value="${escapeHtml(settings.baseUrl)}" />
+      </label>
+
+      <label>
+        Model
+        <input class="text-input" data-ai-model value="${escapeHtml(settings.model)}" />
+      </label>
+
+      <label>
+        Privacy
+        <select class="text-input" data-ai-privacy>
+          <option value="current-note" ${settings.privacyMode === 'current-note' ? 'selected' : ''}>Include current note</option>
+          <option value="metadata-only" ${settings.privacyMode === 'metadata-only' ? 'selected' : ''}>Metadata only</option>
+        </select>
+      </label>
+
+      <label>
+        API key storage
+        <select class="text-input" data-ai-key-storage>
+          <option value="session" ${settings.apiKeyStorage === 'session' ? 'selected' : ''}>Session only</option>
+          <option value="local" ${settings.apiKeyStorage === 'local' ? 'selected' : ''}>Remember on this device (localStorage)</option>
+          <option value="none" ${settings.apiKeyStorage === 'none' ? 'selected' : ''}>Do not store</option>
+        </select>
+      </label>
+
+      <label class="wide">
+        OpenRouter API key
+        <div class="yanta-ai-key-row">
+          <input class="text-input" data-ai-key type="password" value="${escapeHtml(apiKey)}" placeholder="sk-or-..." />
+          <button class="btn" type="button" data-ai-clear-key>
+            ${lucide('trash', 14)}
+            Clear key
+          </button>
+        </div>
+      </label>
+    </div>
+
+    <section class="yanta-ai-settings-section">
+      <h4>BYOK advanced limits</h4>
+
+      <div class="yanta-ai-settings-grid">
+        <label>
+          Max context characters
+          <input class="text-input" data-ai-max-context value="${escapeHtml(settings.maxContextChars)}" inputmode="numeric" />
+        </label>
+
+        <label>
+          Max tool rounds
+          <input class="text-input" data-ai-max-tool-rounds value="${escapeHtml(settings.maxToolRounds)}" inputmode="numeric" />
+        </label>
+      </div>
+
+      <div class="yanta-ai-warning">
+        BYOK uses your own OpenRouter key.
+        Model, base URL and limits are freely configurable.
+      </div>
+    </section>
+  `;
+}
+
+function advancedAiOptionsHtml(settings) {
+  return `
+    <details class="yanta-ai-advanced-options">
+      <summary>
+        ${lucide('sliders-horizontal', 14)}
+        Advanced options
+      </summary>
+
+      <div class="yanta-ai-advanced-body">
+        ${externalAgentSettingsHtml()}
+
+        <section class="yanta-ai-settings-section">
+          <h4>Assistant prompt</h4>
+          <textarea class="text-input yanta-ai-prompt-editor" data-ai-prompt rows="10">${escapeHtml(settings.assistantPrompt)}</textarea>
+
+          <div class="compress-actions">
+            <button class="btn" data-ai-reset-prompt>
+              ${lucide('rotate-ccw', 14)}
+              Reset to default
+            </button>
+          </div>
+        </section>
+      </div>
+    </details>
+  `;
+}
+
 function injectAiSettingsPanelCss() {
   if (document.getElementById('yanta-ai-settings-panel-css')) return;
 
@@ -626,6 +795,65 @@ function injectAiSettingsPanelCss() {
     grid-column: auto;
   }
 }
+
+.yanta-ai-key-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.yanta-ai-key-row .text-input {
+  margin: 0;
+}
+
+.yanta-ai-advanced-options {
+  margin-top: 14px;
+  padding: 0;
+
+  border: 1px solid var(--border);
+  border-radius: 10px;
+
+  background: var(--bg-elev-2);
+  overflow: hidden;
+}
+
+.yanta-ai-advanced-options summary {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  padding: 11px 12px;
+
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 800;
+
+  cursor: pointer;
+  user-select: none;
+}
+
+.yanta-ai-advanced-options summary:hover {
+  color: var(--accent);
+}
+
+.yanta-ai-advanced-body {
+  padding: 0 12px 12px;
+}
+
+.yanta-ai-advanced-body > .yanta-ai-settings-section:first-child {
+  margin-top: 0;
+}
+
+@media (max-width: 880px) {
+  .yanta-ai-key-row {
+    grid-template-columns: 1fr;
+  }
+
+  .yanta-ai-key-row .btn {
+    justify-content: center;
+  }
+}
   `;
 
   document.head.append(style);
@@ -641,55 +869,12 @@ export function renderAiSettingsPanel(panel) {
   const settings = getAiSettings();
   const key = getAiApiKey();
   const p = settings.permissions || {};
+  const includedMode = isIncludedAiMode(settings);
 
   panel.innerHTML = `
     <div class="yanta-ai-settings-panel">
-      <div class="yanta-ai-settings-grid">
-        <label>
-          Provider
-          <input class="text-input" value="OpenRouter" disabled />
-        </label>
 
-        <label>
-          AI access
-          <select class="text-input" data-ai-billing-mode>
-            <option value="byok" ${settings.billingMode !== 'included' ? 'selected' : ''}>BYOK: my OpenRouter key</option>
-            <option value="included" ${settings.billingMode === 'included' ? 'selected' : ''}>Included AI: YANTA Cloud credits</option>
-          </select>
-        </label>
-
-        <label>
-          Base URL
-          <input class="text-input" data-ai-base-url value="${escapeHtml(settings.baseUrl)}" />
-        </label>
-
-        <label>
-          Model
-          <input class="text-input" data-ai-model value="${escapeHtml(settings.model)}" />
-        </label>
-
-        <label>
-          Privacy
-          <select class="text-input" data-ai-privacy>
-            <option value="current-note" ${settings.privacyMode === 'current-note' ? 'selected' : ''}>Include current note</option>
-            <option value="metadata-only" ${settings.privacyMode === 'metadata-only' ? 'selected' : ''}>Metadata only</option>
-          </select>
-        </label>
-
-        <label>
-          API key storage
-          <select class="text-input" data-ai-key-storage>
-            <option value="session" ${settings.apiKeyStorage === 'session' ? 'selected' : ''}>Session only</option>
-            <option value="local" ${settings.apiKeyStorage === 'local' ? 'selected' : ''}>Remember on this device (localStorage)</option>
-            <option value="none" ${settings.apiKeyStorage === 'none' ? 'selected' : ''}>Do not store</option>
-          </select>
-        </label>
-
-        <label class="wide">
-          OpenRouter API key
-          <input class="text-input" data-ai-key type="password" value="${escapeHtml(key)}" placeholder="sk-or-..." />
-        </label>
-      </div>
+      ${aiAccessSettingsHtml(settings, key)}
 
       <section class="yanta-ai-settings-section">
         <h4>Permissions</h4>
@@ -710,28 +895,32 @@ export function renderAiSettingsPanel(panel) {
       </section>
 
       ${approxLocationSettingsHtml()}
+    
+      ${advancedAiOptionsHtml(settings)}
 
-      ${externalAgentSettingsHtml()}
-
-      <section class="yanta-ai-settings-section">
-        <h4>Assistant prompt</h4>
-        <textarea class="text-input yanta-ai-prompt-editor" data-ai-prompt rows="10">${escapeHtml(settings.assistantPrompt)}</textarea>
-
-        <div class="compress-actions">
-          <button class="btn" data-ai-reset-prompt>
-            ${lucide('rotate-ccw', 14)}
-            Reset to default
-          </button>
-        </div>
-      </section>
 
       <div class="yanta-ai-warning">
-        BYOK privacy note: your API key stays in this browser, but prompts and included context are sent to OpenRouter/the chosen model.
-        Persistent localStorage is convenient but less safe than session-only.
+        <strong>${escapeHtml(OPENROUTER_ZDR_POLICY.label)} enabled.</strong>
+        ${escapeHtml(OPENROUTER_ZDR_POLICY.description)}
+        <br><br>
+        ${
+          includedMode
+            ? `
+              Included AI privacy note:
+              Prompts and selected context are processed transiently by YANTA Cloud only to forward them to OpenRouter with ZDR enabled.
+              YANTA does not store prompts, completions or tool results on the server.
+              Your encrypted sync vault remains zero-knowledge.
+            `
+            : `
+              BYOK privacy note:
+              Your API key stays in this browser.
+              Prompts and selected context are sent directly to OpenRouter with ZDR enabled.
+              Persistent localStorage is convenient but less safe than session-only.
+            `
+        }
       </div>
 
       <div class="compress-actions yanta-ai-settings-actions">
-        <button class="btn" data-ai-clear-key>Clear key</button>
         <span class="grow"></span>
         <button class="btn primary" data-ai-save-settings>Save AI settings</button>
       </div>
@@ -739,13 +928,46 @@ export function renderAiSettingsPanel(panel) {
   `;
 
   panel.querySelector('[data-ai-save-settings]')?.addEventListener('click', () => {
-    const baseUrl = panel.querySelector('[data-ai-base-url]')?.value || '';
-    const model = panel.querySelector('[data-ai-model]')?.value || '';
+    const currentSettings = getAiSettings();
+
+    const billingMode = panel.querySelector('[data-ai-billing-mode]')?.value || 'included';
+    const includedModeNext = billingMode === 'included';
+
+    const baseUrl = includedModeNext
+      ? currentSettings.baseUrl
+      : panel.querySelector('[data-ai-base-url]')?.value || '';
+
+    const model = includedModeNext
+      ? currentSettings.model
+      : panel.querySelector('[data-ai-model]')?.value || '';
+
+    const includedModel = includedModeNext
+      ? normalizeIncludedAiModel(panel.querySelector('[data-ai-included-model]')?.value || currentSettings.includedModel)
+      : currentSettings.includedModel;
+
     const privacyMode = panel.querySelector('[data-ai-privacy]')?.value || 'current-note';
-    const apiKeyStorage = panel.querySelector('[data-ai-key-storage]')?.value || 'session';
-    const apiKey = panel.querySelector('[data-ai-key]')?.value || '';
-    const prompt = panel.querySelector('[data-ai-prompt]')?.value || DEFAULT_ASSISTANT_PROMPT;
-    const billingMode = panel.querySelector('[data-ai-billing-mode]')?.value || 'byok';
+
+    const apiKeyStorage = includedModeNext
+      ? currentSettings.apiKeyStorage
+      : panel.querySelector('[data-ai-key-storage]')?.value || 'session';
+
+    const apiKey = includedModeNext
+      ? ''
+      : panel.querySelector('[data-ai-key]')?.value || '';
+
+    const prompt =
+      panel.querySelector('[data-ai-prompt]')?.value ||
+      currentSettings.assistantPrompt ||
+      DEFAULT_ASSISTANT_PROMPT;
+
+    const maxContextChars = includedModeNext
+      ? currentSettings.maxContextChars
+      : Number(panel.querySelector('[data-ai-max-context]')?.value || DEFAULT_AI_SETTINGS.maxContextChars);
+
+    const maxToolRounds = includedModeNext
+      ? currentSettings.maxToolRounds
+      : Number(panel.querySelector('[data-ai-max-tool-rounds]')?.value || DEFAULT_AI_SETTINGS.maxToolRounds);
+
     const permissions = {
       allowReadNotes: checkboxValue(panel, 'allowReadNotes'),
       allowCreateNotes: checkboxValue(panel, 'allowCreateNotes'),
@@ -764,14 +986,19 @@ export function renderAiSettingsPanel(panel) {
     saveAiSettings({
       baseUrl: baseUrl.trim() || DEFAULT_AI_SETTINGS.baseUrl,
       model: model.trim() || DEFAULT_AI_SETTINGS.model,
+      includedModel,
       privacyMode,
       apiKeyStorage,
       assistantPrompt: prompt.trim() || DEFAULT_ASSISTANT_PROMPT,
       permissions,
       billingMode,
+      maxContextChars,
+      maxToolRounds,
     });
 
-    setAiApiKey(apiKey, apiKeyStorage);
+    if (!includedModeNext) {
+      setAiApiKey(apiKey, apiKeyStorage);
+    }
 
     saveExternalAgentSettings(readExternalAgentSettingsFromPanel(panel));
 
@@ -832,6 +1059,37 @@ export function renderAiSettingsPanel(panel) {
   panel.querySelector('[data-ai-location-clear]')?.addEventListener('click', () => {
     clearApproxUserLocation();
     toast('Approximate location cleared', 'success');
+    rerender();
+  });
+
+  panel.querySelector('[data-ai-billing-mode]')?.addEventListener('change', async (e) => {
+    const nextMode = e.target.value || 'included';
+
+    if (nextMode !== 'included') {
+      saveAiSettings({
+        billingMode: 'byok',
+      });
+
+      rerender();
+      return;
+    }
+
+    const check = await canUseIncludedAi();
+
+    if (!check.ok) {
+      e.target.value = 'byok';
+      toast(check.reason, 'error');
+      return;
+    }
+
+    saveAiSettings({
+      billingMode: 'included',
+      includedModel: normalizeIncludedAiModel(
+        panel.querySelector('[data-ai-included-model]')?.value || getAiSettings().includedModel
+      ),
+    });
+
+    toast('Included AI enabled with YANTA Cloud credits', 'success');
     rerender();
   });
 

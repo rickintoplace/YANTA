@@ -2,6 +2,11 @@
 // YANTA AI — Settings / BYOK / permissions / user prompt
 // ============================================================
 
+import {
+  DEFAULT_INCLUDED_AI_MODEL,
+  normalizeIncludedAiModel,
+} from './ai-access-policy.js';
+
 const AI_SETTINGS_KEY = 'yanta.ai.settings.v2';
 const AI_KEY_SESSION_KEY = 'yanta.ai.openrouter.key.session';
 const AI_KEY_LOCAL_KEY = 'yanta.ai.openrouter.key.local';
@@ -44,7 +49,8 @@ export const DEFAULT_ASSISTANT_PROMPT = [
 
 export const DEFAULT_AI_SETTINGS = {
   provider: 'openrouter',
-  billingMode: 'byok', // byok | included
+  billingMode: 'included', // byok | included
+  includedModel: DEFAULT_INCLUDED_AI_MODEL,
   baseUrl: 'https://openrouter.ai/api/v1',
   model: 'deepseek/deepseek-v4-flash',
   temperature: 0.2,
@@ -84,7 +90,7 @@ function safeJsonParse(raw, fallback) {
 }
 
 function normalizeSettings(raw = {}) {
-  return {
+  const normalized = {
     ...DEFAULT_AI_SETTINGS,
     ...(raw && typeof raw === 'object' ? raw : {}),
 
@@ -100,6 +106,17 @@ function normalizeSettings(raw = {}) {
         ? raw.assistantPrompt
         : DEFAULT_AI_SETTINGS.assistantPrompt,
   };
+
+  normalized.billingMode =
+    normalized.billingMode === 'byok'
+      ? 'byok'
+      : 'included';
+
+  normalized.includedModel = normalizeIncludedAiModel(
+    normalized.includedModel || normalized.model || DEFAULT_INCLUDED_AI_MODEL
+  );
+
+  return normalized;
 }
 
 export function getAiSettings() {

@@ -17,9 +17,9 @@ var PLAN_LIMITS = {
     // Internal encrypted object writes.
     // Product/UI can still say "200 app writes/day" if we enforce that separately later.
     writesDay: 8e3,
-    includedAi: false,
-    aiRequestsDay: 0,
-    aiSpendMicrosMonth: 0,
+    includedAi: true,
+    aiRequestsDay: 25,
+    aiSpendMicrosMonth: 1_000_000,
     rssFetchesDay: 200,
     rssImageBytesDay: 50 * 1024 * 1024,
     rssImageBytesMax: 2 * 1024 * 1024
@@ -35,17 +35,141 @@ var PLAN_LIMITS = {
     writesDay: 2e4,
     includedAi: true,
     aiRequestsDay: 500,
+    aiSpendMicrosMonth: 20_000_000,
     aiSpendMicrosMonth: 5e6,
     rssFetchesDay: 5e3,
     rssImageBytesDay: 2 * 1024 * 1024 * 1024,
     rssImageBytesMax: 5 * 1024 * 1024
   }
 };
+const INCLUDED_AI_POLICY = {
+  free: {
+    includedAi: true,
+
+    // Server-authoritative model.
+    // Must support OpenRouter ZDR routing.
+    model: "deepseek/deepseek-v4-flash",
+    modelLabel: "YANTA Cloud Fast (deepseek-v4-flash)",
+
+    aiRequestsDay: 25,
+    aiSpendMicrosDay: 150_000,
+    aiSpendMicrosMonth: 1_000_000,
+
+    maxPromptChars: 60_000,
+    maxToolsChars: 45_000,
+    maxMessages: 40,
+    maxTokens: 768,
+
+    userBurstPerMinute: 4,
+    ipBurstPerMinute: 20
+  },
+
+  premium: {
+    includedAi: true,
+
+    model: "deepseek/deepseek-v4-flash",
+    modelLabel: "YANTA Cloud Fast (deepseek-v4-flash)",
+
+    aiRequestsDay: 500,
+    aiSpendMicrosDay: 2_000_000,
+    aiSpendMicrosMonth: 20_000_000,
+
+    maxPromptChars: 180_000,
+    maxToolsChars: 80_000,
+    maxMessages: 80,
+    maxTokens: 2048,
+
+    userBurstPerMinute: 20,
+    ipBurstPerMinute: 100
+  }
+};
+
+function includedAiPolicyForPlan(plan = "free") {
+  return INCLUDED_AI_POLICY[plan] || INCLUDED_AI_POLICY.free;
+}
+
+function jsonSize(value) {
+  try {
+    return JSON.stringify(value ?? null).length;
+  } catch {
+    return Infinity;
+  }
+}
+
+function sanitizeIncludedAiMessages(messages, policy) {
+  if (!Array.isArray(messages)) {
+    const err = new Error("messages must be an array");
+    err.status = 400;
+    throw err;
+  }
+
+  if (messages.length > policy.maxMessages) {
+    const err = new Error("Too many chat messages.");
+    err.status = 413;
+    throw err;
+  }
+
+  const size = jsonSize(messages);
+
+  if (size > policy.maxPromptChars) {
+    const err = new Error("Prompt/context too large for Included AI.");
+    err.status = 413;
+    throw err;
+  }
+
+  return messages.map((m) => {
+    const role = ["system", "user", "assistant", "tool"].includes(m?.role)
+      ? m.role
+      : "user";
+
+    const out = {
+      role,
+      content:
+        typeof m?.content === "string" || m?.content == null
+          ? m?.content ?? ""
+          : String(m.content)
+    };
+
+    if (m?.tool_call_id) {
+      out.tool_call_id = String(m.tool_call_id).slice(0, 160);
+    }
+
+    if (m?.name) {
+      out.name = String(m.name).slice(0, 160);
+    }
+
+    if (Array.isArray(m?.tool_calls)) {
+      out.tool_calls = m.tool_calls.slice(0, 16);
+    }
+
+    return out;
+  });
+}
+
+function sanitizeIncludedAiTools(tools, policy) {
+  if (!Array.isArray(tools) || !tools.length) return undefined;
+
+  const size = jsonSize(tools);
+
+  if (size > policy.maxToolsChars) {
+    const err = new Error("Tool schema too large for Included AI.");
+    err.status = 413;
+    throw err;
+  }
+
+  return tools.slice(0, 32);
+}
+
+function openRouterZdrProviderPreferences() {
+  return {
+    zdr: true
+  };
+}
 var AI_MODEL_ALLOWLIST = /* @__PURE__ */ new Set([
-  "openai/gpt-4o-mini",
-  "google/gemini-2.0-flash-001",
-  "anthropic/claude-3.5-haiku",
-  "meta-llama/llama-3.1-8b-instruct"
+  "google/gemini-2.5-flash-lite",
+  "deepseek-v4-flash",
+  "tencent/hy3-preview",
+  "openai/gpt-oss-20b"
 ]);
 var DISPOSABLE_DOMAINS = /* @__PURE__ */ new Set([
   "mailinator.com",
@@ -60,6 +184,14 @@ function now() {
   return Date.now();
 }
 __name(now, "now");
+function safeErrorForLog(err) {
+  return {
+    message: err?.message || String(err),
+    status: err?.status || 500,
+    code: err?.code || err?.serverCode || "",
+    stack: err?.stack || ""
+  };
+}
 function monthKey(ts = now()) {
   return new Date(ts).toISOString().slice(0, 7);
 }
@@ -379,8 +511,10 @@ async function ensureUsageRow(env, userId) {
   if (existing.ai_day_key !== d) {
     await env.DB.prepare(
       `UPDATE usage_current
-       SET ai_day_key = ?, ai_requests_day = 0
-       WHERE user_id = ?`
+      SET ai_day_key = ?,
+          ai_requests_day = 0,
+          ai_spend_micros_day = 0
+      WHERE user_id = ?`
     ).bind(d, userId).run();
   }
   return await env.DB.prepare(
@@ -867,7 +1001,13 @@ async function handleMe(env, req, headers) {
     },
     usage,
     vaults: vaults.results || [],
-    limits: PLAN_LIMITS[user.plan] || PLAN_LIMITS.free
+    limits: {
+      ...(PLAN_LIMITS[user.plan] || PLAN_LIMITS.free),
+      includedAi: includedAiPolicyForPlan(user.plan).includedAi,
+      aiRequestsDay: includedAiPolicyForPlan(user.plan).aiRequestsDay,
+      aiSpendMicrosDay: includedAiPolicyForPlan(user.plan).aiSpendMicrosDay,
+      aiSpendMicrosMonth: includedAiPolicyForPlan(user.plan).aiSpendMicrosMonth,
+    }
   }, 200, headers);
 }
 __name(handleMe, "handleMe");
@@ -1381,51 +1521,165 @@ async function handleUsage(env, req, headers) {
 __name(handleUsage, "handleUsage");
 function estimateAiCostMicros(openRouterJson) {
   const usage = openRouterJson?.usage || {};
-  const total = Number(usage.total_tokens || usage.prompt_tokens + usage.completion_tokens || 0);
+
+  const total = Number(
+    usage.total_tokens ||
+    Number(usage.prompt_tokens || 0) + Number(usage.completion_tokens || 0) ||
+    0
+  );
+
   if (!Number.isFinite(total) || total <= 0) {
-    return 1e3;
+    return 1_000;
   }
-  return Math.max(1e3, Math.ceil(total * 5));
+
+  // Conservative internal credit accounting.
+  // This is not exact OpenRouter billing; it is an abuse-control credit meter.
+  return Math.max(1_000, Math.ceil(total * 5));
 }
 __name(estimateAiCostMicros, "estimateAiCostMicros");
 async function handleAiCompletions(env, req, headers) {
   const user = await requireUser(env, req);
   const usage = await ensureUsageRow(env, user.userId);
-  const limits = PLAN_LIMITS[user.plan] || PLAN_LIMITS.free;
-  if (!limits.includedAi) {
+
+  const policy = includedAiPolicyForPlan(user.plan);
+
+  if (!policy.includedAi) {
     return json({
       error: {
         message: "Included AI is not available on this plan. Use BYOK or upgrade."
       }
     }, 403, headers);
   }
-  if (usage.ai_requests_day + 1 > limits.aiRequestsDay) {
-    return json({ error: { message: "Daily AI request limit reached." } }, 403, headers);
+
+  if (!env.OPENROUTER_API_KEY) {
+    return json({
+      error: {
+        message: "Included AI is temporarily unavailable."
+      }
+    }, 503, headers);
   }
-  if (usage.ai_spend_micros_month >= limits.aiSpendMicrosMonth) {
-    return json({ error: { message: "Monthly included AI limit reached." } }, 403, headers);
-  }
+
   const body = await bodyJson(req);
-  const model = String(body.model || "").trim();
-  if (!AI_MODEL_ALLOWLIST.has(model)) {
-    return json({ error: { message: "Model is not allowed for Included AI." } }, 400, headers);
+
+  const requestedModel = String(body.model || policy.model || "").trim();
+  const selectedModel = AI_MODEL_ALLOWLIST.has(requestedModel)
+    ? requestedModel
+    : "";
+
+  if (!selectedModel) {
+    return json({
+      error: {
+        message: "Model is not allowed for Included AI."
+      }
+    }, 400, headers);
   }
-  const messagesJson = JSON.stringify(body.messages || []);
-  if (messagesJson.length > 12e4) {
-    return json({ error: { message: "Prompt/context too large." } }, 413, headers);
+
+  const ipH = await ipHash(env, req);
+
+  const userBurst = await rateLimit(
+    env,
+    `ai:burst:user:${user.userId}`,
+    policy.userBurstPerMinute,
+    60 * 1000
+  );
+
+  if (!userBurst.ok) {
+    return json({
+      error: {
+        message: "Included AI is being used too quickly. Please wait a moment."
+      }
+    }, 429, {
+      ...headers,
+      "retry-after": "60"
+    });
   }
+
+  const ipBurst = await rateLimit(
+    env,
+    `ai:burst:ip:${ipH}`,
+    policy.ipBurstPerMinute,
+    60 * 1000
+  );
+
+  if (!ipBurst.ok) {
+    return json({
+      error: {
+        message: "Too many AI requests from this network. Please wait a moment."
+      }
+    }, 429, {
+      ...headers,
+      "retry-after": "60"
+    });
+  }
+
+  if (Number(usage.ai_requests_day || 0) + 1 > policy.aiRequestsDay) {
+    return json({
+      error: {
+        message: "Daily Included AI request limit reached."
+      }
+    }, 403, headers);
+  }
+
+  if (Number(usage.ai_spend_micros_day || 0) >= policy.aiSpendMicrosDay) {
+    return json({
+      error: {
+        message: "Daily Included AI credits reached."
+      }
+    }, 403, headers);
+  }
+
+  if (Number(usage.ai_spend_micros_month || 0) >= policy.aiSpendMicrosMonth) {
+    return json({
+      error: {
+        message: "Monthly Included AI credits reached."
+      }
+    }, 403, headers);
+  }
+
+  let messages;
+  let tools;
+
+  try {
+    messages = sanitizeIncludedAiMessages(body.messages || [], policy);
+    tools = sanitizeIncludedAiTools(body.tools, policy);
+  } catch (err) {
+    return json({
+      error: {
+        message: err?.message || "Invalid Included AI request."
+      }
+    }, err?.status || 400, headers);
+  }
+
   const forwardBody = {
-    model,
-    messages: body.messages || [],
-    temperature: Number(body.temperature ?? 0.2),
-    tools: Array.isArray(body.tools) ? body.tools : void 0,
-    tool_choice: Array.isArray(body.tools) && body.tools.length ? "auto" : void 0,
-    max_tokens: Math.min(2048, Number(body.max_tokens || 2048))
+    // Authoritative server-side model.
+    // Client model is intentionally ignored.
+    model: selectedModel,
+
+    messages,
+
+    temperature: Math.max(
+      0,
+      Math.min(1, Number(body.temperature ?? 0.2))
+    ),
+
+    tools,
+    tool_choice: Array.isArray(tools) && tools.length ? "auto" : undefined,
+
+    max_tokens: Math.min(
+      policy.maxTokens,
+      Math.max(1, Number(body.max_tokens || policy.maxTokens))
+    ),
+
+    // OpenRouter Zero Data Retention routing.
+    provider: openRouterZdrProviderPreferences()
   };
+
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 6e4);
+  const timeout = setTimeout(() => controller.abort(), 60_000);
+
   let res;
   let jsonResponse;
+
   try {
     res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
       method: "POST",
@@ -1438,26 +1692,48 @@ async function handleAiCompletions(env, req, headers) {
       },
       body: JSON.stringify(forwardBody)
     });
+
     jsonResponse = await res.json().catch(async () => ({
-      error: { message: await res.text().catch(() => `HTTP ${res.status}`) }
+      error: {
+        message: await res.text().catch(() => `HTTP ${res.status}`)
+      }
     }));
   } finally {
     clearTimeout(timeout);
   }
+
   if (!res.ok) {
+    // Do not add request payload to logs or audit events.
     return json(jsonResponse, res.status, headers);
   }
+
   const costMicros = estimateAiCostMicros(jsonResponse);
-  if (usage.ai_spend_micros_month + costMicros > limits.aiSpendMicrosMonth) {
-    return json({ error: { message: "This request would exceed your included AI budget." } }, 403, headers);
+
+  if (
+    Number(usage.ai_spend_micros_day || 0) + costMicros > policy.aiSpendMicrosDay ||
+    Number(usage.ai_spend_micros_month || 0) + costMicros > policy.aiSpendMicrosMonth
+  ) {
+    return json({
+      error: {
+        message: "This request would exceed your Included AI credits."
+      }
+    }, 403, headers);
   }
+
   const u = jsonResponse.usage || {};
+
   await env.DB.prepare(
     `UPDATE usage_current
      SET ai_requests_day = ai_requests_day + 1,
+         ai_spend_micros_day = ai_spend_micros_day + ?,
          ai_spend_micros_month = ai_spend_micros_month + ?
      WHERE user_id = ?`
-  ).bind(costMicros, user.userId).run();
+  ).bind(
+    costMicros,
+    costMicros,
+    user.userId
+  ).run();
+
   await env.DB.prepare(
     `INSERT INTO ai_usage_events
      (id,user_id,model,prompt_tokens,completion_tokens,total_tokens,cost_micros,created_at)
@@ -1465,14 +1741,42 @@ async function handleAiCompletions(env, req, headers) {
   ).bind(
     id("aiu"),
     user.userId,
-    model,
+    selectedModel,
     Number(u.prompt_tokens || 0),
     Number(u.completion_tokens || 0),
     Number(u.total_tokens || 0),
     costMicros,
     now()
   ).run();
-  return json(jsonResponse, 200, headers);
+
+  return json({
+    ...jsonResponse,
+
+    yanta: {
+      includedAi: true,
+      privacy: {
+        promptsStoredByYanta: false,
+        completionsStoredByYanta: false,
+        openRouterZdrRequested: true
+      },
+      modelLabel: selectedModel,
+      model: selectedModel,
+      limits: {
+        requestsDay: policy.aiRequestsDay,
+        maxPromptChars: policy.maxPromptChars,
+        maxTokens: policy.maxTokens
+      },
+      usage: {
+        costMicros,
+        aiRequestsDayUsedAfter: Number(usage.ai_requests_day || 0) + 1,
+        aiSpendMicrosDayUsedAfter: Number(usage.ai_spend_micros_day || 0) + costMicros,
+        aiSpendMicrosMonthUsedAfter: Number(usage.ai_spend_micros_month || 0) + costMicros
+      }
+    }
+  }, 200, {
+    ...headers,
+    "cache-control": "no-store"
+  });
 }
 __name(handleAiCompletions, "handleAiCompletions");
 function isPrivateIpLiteral(hostname) {
@@ -3229,11 +3533,7 @@ async function route(req, env) {
     }
     return json({ error: "not_found" }, 404, headers);
   } catch (err) {
-    console.error("[YANTA Cloud Worker]", {
-      message: err?.message || String(err),
-      stack: err?.stack || "",
-      status: err?.status || 500
-    });
+    console.error("[YANTA Cloud Worker]", safeErrorForLog(err));
     return json({
       error: "internal_error",
       message: err?.message || String(err),
@@ -3247,11 +3547,7 @@ var index_default = {
     try {
       return await route(req, env);
     } catch (err) {
-      console.error("[YANTA Cloud Worker FATAL]", {
-        message: err?.message || String(err),
-        stack: err?.stack || "",
-        status: err?.status || 500
-      });
+      console.error("[YANTA Cloud Worker FATAL]", safeErrorForLog(err));
 
       let headers = {};
 

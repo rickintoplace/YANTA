@@ -102,6 +102,7 @@ CREATE TABLE IF NOT EXISTS usage_current (
 
   ai_day_key TEXT NOT NULL,
   ai_requests_day INTEGER NOT NULL DEFAULT 0,
+  ai_spend_micros_day INTEGER NOT NULL DEFAULT 0,
 
   ai_credits_micros INTEGER NOT NULL DEFAULT 0
 );

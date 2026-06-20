@@ -3,16 +3,24 @@
 // Modes:
 // - BYOK: direct browser request with user key
 // - Included: YANTA Cloud AI proxy, server-side OpenRouter key
+//
+// Privacy:
+// - OpenRouter ZDR is requested for all OpenRouter calls.
+// - Included AI server also enforces ZDR and does not store prompts.
 // ============================================================
 
 import {
-  getAiSettings,
   getAiApiKey,
 } from './ai-settings.js';
 
 import {
   YANTA_CLOUD_BASE_URL,
 } from '../cloud/cloud-api.js';
+
+import {
+  getEffectiveAiRuntimeSettings,
+  isIncludedAiMode,
+} from './ai-access-policy.js';
 
 function apiUrl(path) {
   const base = String(YANTA_CLOUD_BASE_URL || '/cloud-api').replace(/\/+$/, '');
@@ -36,20 +44,36 @@ async function parseErrorResponse(res, fallback) {
   return msg;
 }
 
+function openRouterProviderPreferences() {
+  return {
+    // OpenRouter ZDR:
+    // https://openrouter.ai/docs/guides/features/zdr
+    //
+    // When true, OpenRouter routes only to provider endpoints with
+    // Zero Data Retention policy.
+    zdr: true,
+  };
+}
+
 export async function openRouterChatCompletion({
   messages,
   tools = [],
   signal = null,
 } = {}) {
-  const settings = getAiSettings();
+  const settings = getEffectiveAiRuntimeSettings();
 
-  if (settings.billingMode === 'included') {
+  if (isIncludedAiMode(settings)) {
     const body = {
-      model: settings.model,
+      // Included AI model is selected from a server-side allowlist.
+      // Server validates and enforces this again.
+      model: settings.includedModel || settings.model,
       messages,
       temperature: Number(settings.temperature ?? 0.2),
       tools: tools.length ? tools : undefined,
-      max_tokens: 2048,
+      max_tokens: Number(settings.maxOutputTokens || 768),
+
+      // UI clarity only. Server also injects/enforces this.
+      provider: openRouterProviderPreferences(),
     };
 
     const res = await fetch(apiUrl('/api/ai/chat/completions'), {
@@ -95,6 +119,9 @@ export async function openRouterChatCompletion({
     temperature: Number(settings.temperature ?? 0.2),
     tools: tools.length ? tools : undefined,
     tool_choice: tools.length ? 'auto' : undefined,
+
+    // OpenRouter ZDR enforcement for BYOK too.
+    provider: openRouterProviderPreferences(),
   };
 
   const res = await fetch(`${baseUrl}/chat/completions`, {

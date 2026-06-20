@@ -27,6 +27,12 @@ import {
 } from './ai-settings.js';
 
 import {
+  getEffectiveAiRuntimeSettings,
+  isIncludedAiMode,
+  canUseIncludedAi,
+} from './ai-access-policy.js';
+
+import {
   renderAiSettingsPanel,
 } from './ai-settings-panel.js';
 
@@ -1405,7 +1411,15 @@ async function runAssistant(userText) {
 
   setAssistantBusy(true, 'Thinking…');
 
-  const maxRounds = Math.max(1, Math.min(10, Number(getAiSettings().maxToolRounds || 6)));
+  const runtimeSettings = getEffectiveAiRuntimeSettings();
+
+  const maxRounds = Math.max(
+    1,
+    Math.min(
+      isIncludedAiMode(runtimeSettings) ? runtimeSettings.maxToolRounds : 50,
+      Number(runtimeSettings.maxToolRounds || 6)
+    )
+  );
 
   for (let round = 0; round < maxRounds; round++) {
     setAssistantBusy(true, round === 0 ? 'Thinking…' : 'Reading tool results…');
@@ -1488,7 +1502,16 @@ async function submitUserText(text) {
 
   const aiSettings = getAiSettings();
 
-  if (aiSettings.billingMode !== 'included' && !getAiApiKey()) {
+  if (aiSettings.billingMode === 'included') {
+    const check = await canUseIncludedAi();
+
+    if (!check.ok) {
+      settingsOpen = true;
+      renderSettings();
+      toast(check.reason, 'error');
+      return;
+    }
+  } else if (!getAiApiKey()) {
     settingsOpen = true;
     renderSettings();
     toast('Add your OpenRouter API key first', 'error');
@@ -1860,7 +1883,6 @@ function injectCss() {
   }
 
   .yanta-ai-foot {
-    grid-template-columns: 1fr;
     padding:
       10px
       max(10px, env(safe-area-inset-right))

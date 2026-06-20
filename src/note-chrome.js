@@ -504,43 +504,43 @@ function openInsertMenu(anchor, deps) {
 
   showMenu(r.left, r.top - 6, [
     {
-      label: 'Listeneintrag hinzufügen',
+      label: 'Add List Entry',
       icon: 'list-plus',
       action: insertListItem,
     },
     {
-      label: 'Bild hinzufügen',
+      label: 'Add Image',
       icon: 'image-plus',
       action: deps.openImage,
     },
     {
-      label: 'Zeichnung hinzufügen',
+      label: 'Add Drawing',
       icon: 'line-squiggle',
       action: deps.createDrawing,
     },
     {
-      label: 'Note verlinken',
+      label: 'Link Note',
       icon: 'brackets',
       action: () => openNoteLinkPicker(anchor),
     },
     {
-      label: 'Citation hinzufügen',
+      label: 'Add Citation',
       icon: 'quote',
       action: deps.openCitation,
     },
     {
-      label: 'Event verlinken',
+      label: 'Link Event',
       icon: 'calendar-plus',
       action: insertEventTextOnly,
     },
     {
-      label: 'Source verlinken',
+      label: 'Link Source',
       icon: 'rss',
       action: insertSourceLink,
     },
     {
-      label: 'Icon hinzufügen',
-      icon: 'sparkles',
+      label: 'Add Icon',
+      icon: 'shapes',
       action: deps.openIcon,
     },
   ], {

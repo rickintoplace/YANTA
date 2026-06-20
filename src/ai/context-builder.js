@@ -20,6 +20,10 @@ import {
 } from './ai-settings.js';
 
 import {
+  getEffectiveAiRuntimeSettings,
+} from './ai-access-policy.js';
+
+import {
   getCurrentSelectionText,
 } from './app-actions.js';
 
@@ -293,7 +297,7 @@ export async function buildSystemMessage() {
 }
 
 export async function buildContextMessage() {
-  const settings = getAiSettings();
+  const settings = getEffectiveAiRuntimeSettings();
   const max = Number(settings.maxContextChars || 30000);
 
   const currentNote = state.surface === 'note' && state.currentNoteId

@@ -398,7 +398,7 @@ function includedAiModelOptionsHtml(selectedModel) {
 
   return INCLUDED_AI_MODELS.map((model) => `
     <option value="${escapeHtml(model.id)}" ${model.id === selected ? 'selected' : ''}>
-      ${escapeHtml(model.label)} · ${escapeHtml(model.id)}
+      ${escapeHtml(model.label)} · ${escapeHtml(model.hint)}
     </option>
   `).join('');
 }

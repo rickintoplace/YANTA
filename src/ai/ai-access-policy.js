@@ -24,7 +24,7 @@ export const AI_BILLING_MODES = Object.freeze({
 
 export const INCLUDED_AI_MODELS = Object.freeze([
   {
-    id: 'deepseek-v4-flash',
+    id: 'deepseek/deepseek-v4-flash',
     label: 'DeepSeek V4 Flash',
     hint: 'Ultra-Efficient Workhorse',
   },
@@ -45,7 +45,7 @@ export const INCLUDED_AI_MODELS = Object.freeze([
   },
 ]);
 
-export const DEFAULT_INCLUDED_AI_MODEL = 'google/gemini-2.5-flash-lite';
+export const DEFAULT_INCLUDED_AI_MODEL = 'deepseek/deepseek-v4-flash';
 
 export const INCLUDED_AI_CLIENT_POLICY = Object.freeze({
   modelLabel: 'YANTA Cloud credits',

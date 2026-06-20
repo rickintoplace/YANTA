@@ -4922,10 +4922,11 @@ input.yanta-task-checkbox {
   color: var(--text);
 
   font-family: var(--font);
-  font-size: clamp(30px, 7vw, 44px);
+  font-size: clamp(1rem, 7cqw, 3rem);
   line-height: 1.08;
   font-weight: 850;
   letter-spacing: -0.04em;
+  text-overflow: ellipsis;
 
   padding: 0;
 }

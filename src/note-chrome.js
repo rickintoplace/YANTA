@@ -322,6 +322,89 @@ function ensureNoteChromeNodes() {
   };
 }
 
+function createNoteBindingFields({
+  noteTitle,
+  chips,
+  tagInput,
+  includeTitle = false,
+} = {}) {
+  const fields = el('div', {
+    class: 'yanta-note-binding-fields',
+    hidden: true,
+    'aria-hidden': 'true',
+  });
+
+  if (includeTitle && noteTitle) {
+    fields.append(noteTitle);
+  }
+
+  if (chips) {
+    fields.append(chips);
+  }
+
+  if (tagInput) {
+    fields.append(tagInput);
+  }
+
+  return fields;
+}
+
+function syncMirrorInputFromCanonical(input, canonical) {
+  if (!input || !canonical) return;
+  if (input === document.activeElement) return;
+
+  input.value = canonical.value || '';
+}
+
+function ensurePaneTitleRow({
+  parent,
+  surface,
+  before = null,
+}) {
+  if (!parent) return null;
+
+  let row = parent.querySelector(`:scope > [data-note-pane-title="${surface}"]`);
+
+  if (!row) {
+    row = createPaneTitleRow(surface);
+
+    if (before && before.parentElement === parent) {
+      parent.insertBefore(row, before);
+    } else {
+      parent.prepend(row);
+    }
+  }
+
+  return row;
+}
+
+function removeDuplicatePaneTitleRows({
+  surface,
+  keep,
+}) {
+  document
+    .querySelectorAll(`[data-note-pane-title="${surface}"]`)
+    .forEach((row) => {
+      if (row !== keep) {
+        row.remove();
+      }
+    });
+}
+
+function renderPaneTitleRowsSoon() {
+  const render = () => {
+    renderPaneTitleRows();
+    syncTitleMirrorValue();
+  };
+
+  requestAnimationFrame(() => {
+    render();
+
+    // CodeMirror / mobile layout can settle one frame later after view switches.
+    window.setTimeout(render, 80);
+  });
+}
+
 function hasEditorSelection() {
   const v = getView();
   if (!v) return false;
@@ -693,15 +776,6 @@ function buildHeader(deps) {
 
   noteTitle.classList.add('yanta-canonical-note-title');
 
-  // Legacy nodes stay in DOM for notes.js renderChips()/old bindings,
-  // but are not visible in the header anymore.
-  const legacyTags = el('div', {
-    class: 'yanta-note-tags-legacy',
-    hidden: true,
-  });
-
-  legacyTags.append(chips, tagInput);
-
   const back = iconButton({
     icon: 'arrow-left',
     title: 'Back',
@@ -712,7 +786,16 @@ function buildHeader(deps) {
   const tagsBtn = buildTagsButton();
 
   if (isMobile()) {
-    const spacer = el('span', { class: 'grow yanta-note-head-grow' });
+    const bindingFields = createNoteBindingFields({
+      noteTitle,
+      chips,
+      tagInput,
+      includeTitle: true,
+    });
+
+    const spacer = el('span', {
+      class: 'grow yanta-note-head-grow',
+    });
 
     const group = el('div', {
       class: 'yanta-note-head-group',
@@ -746,13 +829,25 @@ function buildHeader(deps) {
     });
 
     group.append(pin, event, share);
-    header.append(back, tagsBtn, spacer, group);
+    header.append(back, tagsBtn, spacer, group, bindingFields);
   } else {
-    header.append(back, noteTitle, legacyTags, buildDesktopActions(deps));
+    const bindingFields = createNoteBindingFields({
+      chips,
+      tagInput,
+      includeTitle: false,
+    });
+
+    header.append(
+      back,
+      noteTitle,
+      bindingFields,
+      buildDesktopActions(deps)
+    );
   }
 
   refreshHeaderButtons();
   updateFormatButtonState();
+  renderPaneTitleRowsSoon();
 }
 
 function syncTitleMirrorValue() {
@@ -831,39 +926,36 @@ function renderPaneTitleRows() {
   const canonical = $('noteTitle');
   if (!canonical) return;
 
-  // Preview pane: scrollt mit panePreview.
   const panePreview = $('panePreview');
   const preview = $('preview');
 
   if (panePreview && preview) {
-    let row = panePreview.querySelector(':scope > [data-note-pane-title="preview"]');
+    const previewRow = ensurePaneTitleRow({
+      parent: panePreview,
+      surface: 'preview',
+      before: preview,
+    });
 
-    if (!row) {
-      row = createPaneTitleRow('preview');
-      panePreview.insertBefore(row, preview);
-    }
-
-    const input = row.querySelector('.yanta-note-title-mirror');
-    if (input && input !== document.activeElement) {
-      input.value = canonical.value || '';
-    }
+    const previewInput = previewRow?.querySelector('.yanta-note-title-mirror');
+    syncMirrorInputFromCanonical(previewInput, canonical);
   }
 
-  // Edit pane: direkt in CodeMirror-Scroller einhängen, damit es mitscrollt.
   const v = getView();
+  const editScroller = v?.scrollDOM;
 
-  if (v?.scrollDOM) {
-    let row = v.scrollDOM.querySelector(':scope > [data-note-pane-title="edit"]');
+  if (editScroller) {
+    const editRow = ensurePaneTitleRow({
+      parent: editScroller,
+      surface: 'edit',
+    });
 
-    if (!row) {
-      row = createPaneTitleRow('edit');
-      v.scrollDOM.prepend(row);
-    }
+    removeDuplicatePaneTitleRows({
+      surface: 'edit',
+      keep: editRow,
+    });
 
-    const input = row.querySelector('.yanta-note-title-mirror');
-    if (input && input !== document.activeElement) {
-      input.value = canonical.value || '';
-    }
+    const editInput = editRow?.querySelector('.yanta-note-title-mirror');
+    syncMirrorInputFromCanonical(editInput, canonical);
   }
 }
 
@@ -1061,48 +1153,48 @@ export function setupNoteChrome(deps = {}) {
 
   buildHeader(deps);
   buildFooter(deps);
-  renderPaneTitleRows();
+  renderPaneTitleRowsSoon();
 
   window.addEventListener('yanta-selection-change', updateFormatButtonState);
 
-window.addEventListener('yanta-note-opened', () => {
-  buildHeader(deps);
-  buildFooter(deps);
-  refreshHeaderButtons();
-
-  requestAnimationFrame(() => {
-    renderPaneTitleRows();
-    syncTitleMirrorValue();
+  window.addEventListener('yanta-note-opened', () => {
+    buildHeader(deps);
+    buildFooter(deps);
+    refreshHeaderButtons();
+    renderPaneTitleRowsSoon();
   });
-});
 
-window.addEventListener('yanta-note-updated', () => {
-  refreshHeaderButtons();
-  syncTitleMirrorValue();
+  window.addEventListener('yanta-note-updated', () => {
+    refreshHeaderButtons();
+    renderPaneTitleRowsSoon();
 
-  if (tagsPopover) {
-    const body = tagsPopover.querySelector('.yanta-tags-popover-body');
-    if (body) renderTagsPopoverBody(body);
-  }
-});
+    if (tagsPopover) {
+      const body = tagsPopover.querySelector('.yanta-tags-popover-body');
+      if (body) renderTagsPopoverBody(body);
+    }
+  });
 
-window.addEventListener('yanta-set-view', () => {
-  requestAnimationFrame(refreshHeaderButtons);
-});
+  window.addEventListener('yanta-set-view', () => {
+    requestAnimationFrame(refreshHeaderButtons);
+    renderPaneTitleRowsSoon();
+  });
 
-window.addEventListener('yanta-cycle-view', () => {
-  requestAnimationFrame(refreshHeaderButtons);
-});
+  window.addEventListener('yanta-cycle-view', () => {
+    requestAnimationFrame(refreshHeaderButtons);
+    renderPaneTitleRowsSoon();
+  });
 
   window.addEventListener('resize', () => {
     if (notePicker && document.activeElement) {
       positionPopover(document.activeElement, notePicker);
     }
+
+    renderPaneTitleRowsSoon();
   });
 
   MOBILE_MQ.addEventListener?.('change', () => {
     buildHeader(deps);
     buildFooter(deps);
-    renderPaneTitleRows();
+    renderPaneTitleRowsSoon();
   });
 }

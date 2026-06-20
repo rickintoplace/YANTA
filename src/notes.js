@@ -446,7 +446,11 @@ export async function openNote(id) {
   const entry = getNoteDoc(id);
   await entry.ready;
 
-  $('noteTitle').value = note.title || '';
+  const titleInput = $('noteTitle');
+
+  if (titleInput) {
+    titleInput.value = note.title || '';
+  }
 
   // Mount editor (replaces previous instance)
   const host = $('editor');
@@ -637,7 +641,11 @@ function setPreviewHtmlPreservingVideos(previewEl, html) {
 export function clearEditor() {
   if (_unsubDoc) { _unsubDoc(); _unsubDoc = null; }
   state.currentNoteId = null;
-  $('noteTitle').value = '';
+  const titleInput = $('noteTitle');
+
+  if (titleInput) {
+    titleInput.value = '';
+  }
   destroyEditor();
   $('editor').replaceChildren();
   $('preview').innerHTML = '';
@@ -656,7 +664,8 @@ export async function saveCurrentNote() {
   if (!state.currentNoteId) return;
   const note = state.notes.get(state.currentNoteId);
   if (!note) return;
-  const newTitle = $('noteTitle').value.trim() || 'Untitled';
+  const titleInput = $('noteTitle');
+  const newTitle = titleInput?.value?.trim() || note.title || 'Untitled';
   const titleChanged = note.title !== newTitle;
   note.title = newTitle;
   note.updated = Date.now();
@@ -712,16 +721,16 @@ export async function deleteCurrentNote() {
   } else if (calendar?.calendarChoiceDialog) {
     const choice = await calendar.calendarChoiceDialog({
       title: 'Delete note',
-      message: `Delete "${note.title || 'Untitled'}"? This cannot be undone.`,
+      message: `Move "${note.title || 'Untitled'}" to Trash?.`,
       choices: [
-        { id: 'delete', label: 'Delete note', primary: true, danger: true },
+        { id: 'delete', label: 'Move to Trash', primary: true, danger: true },
         { id: 'cancel', label: 'Cancel' },
       ],
     });
 
     if (choice !== 'delete') return;
   } else {
-    if (!confirm(`Delete "${note.title}"? This cannot be undone.`)) return;
+    if (!confirm(`Move "${note.title || 'Untitled'}" to Trash?`)) return;
   }
 
   await moveNoteToTrash(note.id, {
@@ -748,7 +757,13 @@ export function togglePin() {
 }
 export function updatePinIcon() {
   const btn = $('btn-pin');
-  if (!state.currentNoteId) { btn.classList.remove('active'); return; }
+  if (!btn) return;
+
+  if (!state.currentNoteId) {
+    btn.classList.remove('active');
+    return;
+  }
+
   const n = state.notes.get(state.currentNoteId);
   btn.classList.toggle('active', !!n?.pinned);
 }
@@ -756,12 +771,23 @@ export function updatePinIcon() {
 // ---------------- tags ----------------------------------------
 export function renderChips() {
   const c = $('chips');
+  if (!c) return;
+
   c.replaceChildren();
+
   if (!state.currentNoteId) return;
+
   const n = state.notes.get(state.currentNoteId);
+  if (!n) return;
+
   for (const tag of n.tags || []) {
     const chip = el('span', { class: 'chip' }, '#' + tag,
-      el('button', { title: 'Remove tag', onclick: () => removeTag(tag) }, '×'));
+      el('button', {
+        title: 'Remove tag',
+        onclick: () => removeTag(tag),
+      }, '×')
+    );
+
     c.append(chip);
   }
 }

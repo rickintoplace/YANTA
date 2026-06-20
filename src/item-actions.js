@@ -159,3 +159,100 @@ export async function renameFolderById(folderId, value, {
 
   return folder.name;
 }
+
+export async function duplicateNoteById(noteId, {
+  openCreated = false,
+  toastMessage = 'Note duplicated',
+} = {}) {
+  const src = state.notes.get(noteId);
+  if (!src) return null;
+
+  const { uid } = await import('./core.js');
+  const {
+    getNoteDoc,
+    noteMarkdown,
+  } = await import('./yjs.js');
+
+  const id = uid();
+  const now = Date.now();
+
+  const copy = {
+    ...src,
+    id,
+    title: `${src.title || 'Untitled'} (copy)`,
+    pinned: false,
+    dashboardPinnedOrder: undefined,
+    created: now,
+    updated: now,
+  };
+
+  delete copy.body;
+  delete copy.bodyMigrated;
+
+  state.notes.set(id, copy);
+  await store.notes.put(copy);
+
+  let body = '';
+
+  try {
+    const srcEntry = getNoteDoc(src.id);
+    await srcEntry.ready;
+
+    const dstEntry = getNoteDoc(id);
+    await dstEntry.ready;
+
+    body = noteMarkdown(src.id) || '';
+
+    if (body) {
+      dstEntry.doc.getText('markdown').insert(0, body);
+    }
+
+    state.searchIndex.set(
+      id,
+      [
+        copy.title || '',
+        (copy.tags || []).join(' '),
+        body,
+      ].join(' ').toLowerCase()
+    );
+  } catch {}
+
+  try {
+    const { rebuildWikilinkIndex } = await import('./notes.js');
+    rebuildWikilinkIndex();
+  } catch {}
+
+  try {
+    const { renderTree } = await import('./tree.js');
+    renderTree();
+  } catch {}
+
+  window.dispatchEvent(new CustomEvent('yanta-note-updated', {
+    detail: {
+      noteId: id,
+      reason: 'note-duplicated',
+      source: 'item-actions',
+    },
+  }));
+
+  window.dispatchEvent(new CustomEvent('yanta-dashboard-refresh', {
+    detail: {
+      reason: 'note-duplicated',
+      noteId: id,
+      source: 'item-actions',
+    },
+  }));
+
+  if (openCreated) {
+    try {
+      const { openNote } = await import('./notes.js');
+      await openNote(id);
+    } catch {}
+  }
+
+  if (toastMessage) {
+    toast(toastMessage, 'success');
+  }
+
+  return copy;
+}

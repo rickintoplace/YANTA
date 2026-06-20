@@ -4125,8 +4125,10 @@ async function navigateDashboardFolder(folderId, {
   dashboard.suppressOpenUntil = performance.now() + 350;
 }
 
-  async function openItem(item, card) {
-    if (performance.now() < (dashboard.suppressOpenUntil || 0)) return;
+  async function openItem(item, card, {
+    ignoreSuppress = false,
+  } = {}) {
+    if (!ignoreSuppress && performance.now() < (dashboard.suppressOpenUntil || 0)) return;
     if (dashboard.dragging || dashboard.resize) return;
   
     if (item.kind === 'folder') {
@@ -4883,7 +4885,9 @@ function bindCardPointerInteractions(card, item) {
         return;
       }
 
-      await openItem(item, card);
+      await openItem(item, card, {
+        ignoreSuppress: true,
+      });
     }
   }
 

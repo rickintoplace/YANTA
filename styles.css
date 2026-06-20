@@ -1314,7 +1314,7 @@ button.link { background: 0; border: 0; color: var(--accent); cursor: pointer; p
 
   .pane-edit {
     border-right: 0;
-    border-bottom: 1px solid var(--border);
+    /* border-bottom: 1px solid var(--border); */
   }
 
   .divider { display: none; }
@@ -3568,7 +3568,7 @@ input.yanta-task-checkbox {
 @media (max-width: 760px) {
   :root {
     --mobile-touch: 44px;
-    --mobile-toolbar-h: 64px;
+    --mobile-toolbar-h: 60px;
     --mobile-radius: 10px;
   }
 
@@ -3624,32 +3624,24 @@ input.yanta-task-checkbox {
   }
 
   .head-actions {
-    position: fixed;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    z-index: 85;
+      position: fixed;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      z-index: 90;
+      display: flex;
+      flex-direction: row;
+      justify-content: space-between;
+      gap: 8px;
+      width: 100%;
+      max-width: none;
+      padding: 8px max(10px, env(safe-area-inset-right)) calc(8px + env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+  }
 
-    width: 100%;
-    max-width: none;
-
-    display: flex;
-    justify-content: flex-start;
-    gap: 6px;
-
-    padding:
-      8px
-      max(8px, env(safe-area-inset-right))
-      calc(8px + env(safe-area-inset-bottom))
-      max(8px, env(safe-area-inset-left));
-
-    overflow-x: auto;
-    scrollbar-width: none;
-
-    background: color-mix(in srgb, var(--bg-elev) 96%, transparent);
-    border-top: 1px solid var(--border);
-    backdrop-filter: blur(10px);
-    -webkit-backdrop-filter: blur(10px);
+  .bottom-actions-left, .bottom-actions-right {
+      display: flex;
+      flex-direction: row;
+      gap: 6px;
   }
 
   .head-actions::-webkit-scrollbar {
@@ -4661,5 +4653,584 @@ input.yanta-task-checkbox {
   .yanta-calendar-import-actions .btn {
     flex: 1 1 auto;
     justify-content: center;
+  }
+}
+
+/* ============================================================
+   Note Chrome: SaaS/mobile header + bottom action bar
+   ============================================================ */
+
+.main-head {
+  min-height: 52px;
+}
+
+.yanta-note-head-grow {
+  flex: 1 1 auto;
+}
+
+.yanta-note-head-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+
+  background: var(--bg-elev);
+}
+
+.yanta-note-back-btn {
+  color: var(--text);
+}
+
+.yanta-note-title-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  padding: 8px 14px 10px;
+
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+
+  min-width: 0;
+}
+
+.yanta-note-title-row .note-title {
+  width: 100%;
+  flex: 1 1 auto;
+
+  font-size: clamp(22px, 5vw, 38px);
+  line-height: 1.12;
+  letter-spacing: -0.035em;
+  font-weight: 850;
+}
+
+.yanta-note-title-row .chips {
+  flex: 0 1 auto;
+}
+
+.yanta-note-title-row .tag-input {
+  flex: 0 0 auto;
+}
+
+.head-actions .icon-btn.primary-ish {
+  color: white;
+  background: var(--accent);
+}
+
+.head-actions .icon-btn.primary-ish:hover {
+  filter: brightness(1.06);
+}
+
+.head-actions .icon-btn.is-disabled,
+.head-actions .icon-btn:disabled,
+.yanta-note-head-group .icon-btn.is-disabled,
+.yanta-note-head-group .icon-btn:disabled {
+  opacity: 0.38;
+  pointer-events: none;
+}
+
+/* Accent based ==highlight== */
+.preview mark,
+.cm-editor .yanta-md-mark {
+  background: color-mix(in srgb, var(--accent) 24%, transparent) !important;
+  color: var(--text);
+  border-radius: 4px;
+  padding: 0 3px;
+}
+
+/* Live note-link picker */
+.yanta-note-link-picker {
+  position: fixed;
+  z-index: 180;
+
+  width: min(320px, calc(100vw - 16px));
+  max-height: min(420px, 72vh);
+
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+
+  padding: 8px;
+
+  border: 1px solid var(--border);
+  border-radius: 14px;
+
+  background: color-mix(in srgb, var(--bg-elev-3) 96%, transparent);
+  color: var(--text);
+
+  box-shadow: var(--shadow);
+
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+
+  animation: fade-in 120ms ease;
+}
+
+.yanta-note-link-picker .text-input {
+  margin: 0;
+}
+
+.yanta-note-link-picker-list {
+  overflow: auto;
+
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+
+  max-height: 320px;
+}
+
+.yanta-note-link-option {
+  width: 100%;
+
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+
+  padding: 8px 9px;
+
+  border: 0;
+  border-radius: 9px;
+
+  background: transparent;
+  color: var(--text);
+
+  text-align: left;
+  cursor: pointer;
+}
+
+.yanta-note-link-option:hover,
+.yanta-note-link-option:focus-visible {
+  background: var(--bg-elev-2);
+}
+
+.yanta-note-link-option span {
+  display: inline-flex;
+  color: var(--accent);
+}
+
+.yanta-note-link-option strong {
+  min-width: 0;
+
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+
+  font-size: 13px;
+}
+
+.yanta-note-link-empty {
+  padding: 12px;
+  color: var(--text-faint);
+  font-size: 12px;
+  text-align: center;
+}
+
+/* Desktop: head-actions no longer sits in the title header visually */
+@media (min-width: 761px) {
+  .head-actions {
+    display: none;
+  }
+}
+
+/* Note chrome only belongs to note surface */
+.app:not([data-surface="note"]) .main-head,
+.app:not([data-surface="note"]) .yanta-note-title-row,
+.app:not([data-surface="note"]) .head-actions {
+  display: none !important;
+}
+
+/* ============================================================
+   Note Chrome v2: Header tags + scrollable pane titles
+   ============================================================ */
+
+.yanta-canonical-note-title {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  min-width: 1px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  overflow: hidden !important;
+}
+
+.yanta-note-tagsbar {
+  min-width: 0;
+  flex: 1 1 auto;
+
+  display: flex;
+  align-items: center;
+  gap: 6px;
+
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+.yanta-note-tagsbar::-webkit-scrollbar {
+  display: none;
+}
+
+.yanta-note-tagsbar .chips {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 4px;
+  min-width: 0;
+}
+
+.yanta-note-tagsbar .tag-input {
+  flex: 0 0 86px;
+  width: 86px;
+}
+
+.yanta-note-head-group {
+  flex: 0 0 auto;
+}
+
+/* Pane title rows */
+.yanta-pane-title-row {
+  width: min(760px, 100%);
+  max-width: 760px;
+
+  margin-left: auto;
+  margin-right: auto;
+  margin-bottom: 18px;
+
+  padding: 0 2px;
+}
+
+.yanta-pane-title-row.preview {
+  order: 0;
+}
+
+.yanta-pane-title-row.edit {
+  flex: 0 0 auto;
+}
+
+.yanta-note-title-mirror {
+  width: 100%;
+
+  border: 0;
+  outline: 0;
+  background: transparent;
+
+  color: var(--text);
+
+  font-family: var(--font);
+  font-size: clamp(30px, 7vw, 44px);
+  line-height: 1.08;
+  font-weight: 850;
+  letter-spacing: -0.04em;
+
+  padding: 0;
+}
+
+.yanta-note-title-mirror::placeholder {
+  color: var(--text-faint);
+}
+
+.yanta-note-title-mirror:focus {
+  color: var(--text);
+}
+
+/* Wichtig: alte sticky title row deaktivieren, falls noch vorhanden */
+.yanta-note-title-row {
+  display: none !important;
+}
+
+/* Note chrome nur auf Note-Surface */
+.app:not([data-surface="note"]) .main-head,
+.app:not([data-surface="note"]) .head-actions,
+.app:not([data-surface="note"]) .yanta-pane-title-row {
+  display: none !important;
+}
+
+/* Mobile */
+@media (max-width: 760px) {
+  .main-head {
+    position: sticky;
+    top: 0;
+    z-index: 70;
+
+    min-height: 54px;
+
+    display: flex;
+    align-items: center;
+    gap: 6px;
+
+    padding:
+      max(6px, env(safe-area-inset-top))
+      max(8px, env(safe-area-inset-right))
+      6px
+      max(8px, env(safe-area-inset-left));
+
+    background: color-mix(in srgb, var(--bg) 94%, transparent);
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+  }
+
+  .yanta-note-tagsbar {
+    flex: 1 1 auto;
+    max-width: none;
+  }
+
+  .yanta-note-tagsbar .chips {
+    display: flex !important;
+  }
+
+  .yanta-note-tagsbar .tag-input {
+    display: inline-flex !important;
+    width: 74px;
+    flex-basis: 74px;
+  }
+
+  .yanta-note-head-group {
+    gap: 2px;
+    padding: 2px;
+    border-radius: 13px;
+  }
+
+  .yanta-note-head-group .icon-btn,
+  .yanta-note-back-btn {
+    width: 42px;
+    height: 42px;
+    border-radius: 11px;
+  }
+
+  .yanta-pane-title-row {
+    width: 100%;
+    max-width: 100%;
+
+    margin-bottom: 18px;
+
+    padding-left: clamp(16px, 5vw, 24px);
+    padding-right: clamp(16px, 5vw, 24px);
+  }
+
+  .yanta-pane-title-row.edit {
+    padding-left: 0;
+    padding-right: 0;
+  }
+
+  .yanta-note-title-mirror {
+    font-size: clamp(30px, 9vw, 42px);
+  }
+
+
+
+  .head-actions .icon-btn {
+    width: 40px;
+    height: 40px;
+    border-radius: 14px;
+    background: var(--bg-elev-2);
+  }
+}
+
+/* ============================================================
+   Note header desktop actions + tags manager
+   ============================================================ */
+
+.yanta-desktop-note-actions {
+    display: inline-flex;
+    /* align-items: center; */
+    /* gap: 8px; */
+    /* flex: 0 0 auto; */
+    justify-content: space-between;
+    width: 100%;
+}
+
+.yanta-desktop-note-actions .yanta-note-head-group {
+  background: color-mix(in srgb, var(--bg-elev) 92%, transparent);
+  border-color: color-mix(in srgb, var(--border) 82%, transparent);
+}
+
+.yanta-note-head-supergroup.align-left {
+    display: inline-flex;
+    gap: 8px;
+    align-items: center;
+    justify-content: flex-start;
+    flex-direction: row;
+}
+
+.yanta-tags-button {
+  width: auto;
+  min-width: 0;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  color: var(--text-dim);
+}
+
+.yanta-tags-button:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+  background: var(--bg-elev-2);
+}
+
+.yanta-tags-button-label {
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.yanta-note-tags-legacy[hidden] {
+  display: none !important;
+}
+
+.yanta-tags-popover {
+  position: fixed;
+  z-index: 190;
+
+  width: min(340px, calc(100vw - 16px));
+  max-height: min(520px, calc(100vh - 24px));
+
+  display: flex;
+  flex-direction: column;
+
+  border: 1px solid var(--border);
+  border-radius: 16px;
+
+  background: color-mix(in srgb, var(--bg-elev-3) 96%, transparent);
+  color: var(--text);
+
+  box-shadow: var(--shadow);
+
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+
+  overflow: hidden;
+  animation: fade-in 120ms ease;
+}
+
+.yanta-tags-popover-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.yanta-tags-popover-head strong {
+  font-size: 13px;
+  font-weight: 850;
+}
+
+.yanta-tags-popover-body {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+
+  padding: 12px;
+  overflow: auto;
+}
+
+.yanta-tags-section {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.yanta-tags-section-title {
+  color: var(--text-faint);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+}
+
+.yanta-tags-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.yanta-tags-pill {
+  min-height: 28px;
+
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+
+  padding: 0 9px;
+
+  border: 1px solid var(--border);
+  border-radius: 999px;
+
+  background: var(--bg-elev-2);
+  color: var(--text-dim);
+
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.yanta-tags-pill:hover {
+  color: var(--text);
+  border-color: var(--border-strong);
+  background: var(--bg-elev-3);
+}
+
+.yanta-tags-pill.active {
+  color: white;
+  background: var(--accent);
+  border-color: transparent;
+}
+
+.yanta-tags-input {
+  margin: 0;
+}
+
+.yanta-tags-empty {
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+/* Desktop keeps bottom mobile bar hidden; actions live in main-head */
+@media (min-width: 761px) {
+  .head-actions {
+    display: none !important;
+  }
+
+  .main-head {
+    flex-wrap: nowrap;
+  }
+
+  .yanta-canonical-note-title {
+    flex: 0 1 260px;
+  }
+}
+
+@media (max-width: 760px) {
+  .yanta-desktop-note-actions {
+    display: none !important;
+  }
+
+  .yanta-tags-button {
+    max-width: 104px;
+    height: 42px;
+    border-radius: 12px;
+  }
+
+  .yanta-tags-button-label {
+    max-width: 58px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .yanta-tags-popover {
+    left: 8px !important;
+    right: 8px;
+    top: 62px !important;
+    width: auto;
+    max-height: min(520px, calc(100svh - 76px));
   }
 }

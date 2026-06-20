@@ -24,7 +24,7 @@ export function setupFormatToolbar() {
   
     applying = true;
   
-    await applyFormat(btn.dataset.fmt);
+    await applyEditorFormat(btn.dataset.fmt);
   
     hide();
   
@@ -162,12 +162,18 @@ function hide() {
   if (tb) tb.hidden = true;
 }
 
-async function applyFormat(fmt) {
+export async function applyEditorFormat(fmt) {
   const v = getView();
   if (!v) return;
 
   const sel = v.state.selection.main;
-  const wraps = { bold: '**', italic: '*', strike: '~~', code: '`' };
+  const wraps = {
+    bold: '**',
+    italic: '*',
+    strike: '~~',
+    code: '`',
+    highlight: '==',
+  };
 
   if (wraps[fmt]) {
     const text = v.state.sliceDoc(sel.from, sel.to);
@@ -239,6 +245,7 @@ async function applyFormat(fmt) {
     if (fmt === 'to-bullets') return convertTo(line, 'bullet');
     if (fmt === 'to-numbered') return convertTo(line, 'ordered', idx);
     if (fmt === 'tasks-toggle') return toggleTaskLine(line);
+    if (fmt === 'clear-heading') return clearHeading(line);
     return line;
   });
 }
@@ -293,4 +300,8 @@ function toggleTaskLine(line) {
     /(^\s*[-*+]\s+\[)([ xX])(\])/,
     (_, a, c, d) => a + (c.toLowerCase() === 'x' ? ' ' : 'x') + d
   );
+}
+
+function clearHeading(line) {
+  return line.replace(/^(\s*)#{1,6}\s+/, '$1');
 }

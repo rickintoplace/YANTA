@@ -150,6 +150,9 @@ import {
   openRssInbox,
 } from './rss/rss-ui.js';
 import { setupOverlayHistoryRouter, pushOverlayState, closeTopOverlay } from './overlay-history.js';
+import {
+  setupNoteChrome,
+} from './note-chrome.js';
 
 let sharePreviewLocked = false;
 
@@ -159,6 +162,42 @@ let sidebarCollapsedPref = false;
 
 function isMobileViewport() {
   return MOBILE_MQ.matches;
+}
+
+function ensureSidebarBackdropVisible(visible) {
+  const backdrop = $('sidebarBackdrop') || document.querySelector('.sidebar-backdrop');
+
+  if (!backdrop) return;
+
+  backdrop.hidden = !visible;
+}
+
+function openMobileSidebarSafe() {
+  if (!isMobileViewport()) return;
+
+  ensureSidebarBackdropVisible(true);
+
+  const app = $('app');
+  app?.classList.add('sidebar-open');
+
+  try {
+    openMobileSidebar();
+  } catch {}
+}
+
+function closeMobileSidebarSafe() {
+  const app = $('app');
+  app?.classList.remove('sidebar-open');
+
+  try {
+    closeMobileSidebar();
+  } catch {}
+
+  window.setTimeout(() => {
+    if (!$('app')?.classList.contains('sidebar-open')) {
+      ensureSidebarBackdropVisible(false);
+    }
+  }, 220);
 }
 
 let sync2Auto = {
@@ -1262,6 +1301,19 @@ async function init() {
     await restoreSharedNotes();
   }
 
+  setupNoteChrome({
+    openShare: openUnifiedShareModal,
+    openImage: openImageModal,
+    openCitation: openCitationManager,
+    openIcon: openIconInsertPicker,
+    createDrawing: createDrawingAndInsert,
+    deleteNote: deleteCurrentNote,
+    exportNote: (note) => {
+      const n = note || state.notes.get(state.currentNoteId);
+      if (n) exportNoteAsMd(n);
+    },
+  });
+
   renderTree();
 
 // Open initial route.
@@ -1577,7 +1629,7 @@ function expandSidebarForSearch({
   }
 
   if (isMobileViewport()) {
-    openMobileSidebar();
+    openMobileSidebarSafe();
 
     if (focus) {
       window.setTimeout(() => {
@@ -1856,13 +1908,36 @@ function handlePreviewTimestampClick(timestampEl) {
 }
 
 function bindEvents() {
-  // title + tags
-  $('noteTitle').addEventListener('input', () => { saveCurrentNote(); });
-  $('noteTitle').addEventListener('blur', () => saveCurrentNote().then(() => renderTree()));
-  $('tagInput').addEventListener('keydown', (e) => { if (e.key === 'Enter') { addTag(e.target.value); e.target.value = ''; } });
+  setupNoteChrome({
+    openShare: openUnifiedShareModal,
+    openImage: openImageModal,
+    openCitation: openCitationManager,
+    openIcon: openIconInsertPicker,
+    createDrawing: createDrawingAndInsert,
+    deleteNote: deleteCurrentNote,
+    exportNote: (note) => {
+      const n = note || state.notes.get(state.currentNoteId);
+      if (n) exportNoteAsMd(n);
+    },
+  });
 
+  // title + tags
+  $('noteTitle')?.addEventListener('input', () => {
+    saveCurrentNote();
+  });
+
+  $('noteTitle')?.addEventListener('blur', () => {
+    saveCurrentNote().then(() => renderTree());
+  });
+
+  $('tagInput')?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      addTag(e.target.value);
+      e.target.value = '';
+    }
+  });
   // sidebar
-  $('btn-new-note').addEventListener('click', (e) => {
+  $('btn-new-note')?.addEventListener('click', (e) => {
     e.preventDefault();
     e.stopPropagation();
   
@@ -1872,10 +1947,10 @@ function bindEvents() {
       closeMobile: true,
     });
   });
-  $('btn-new-folder').addEventListener('click', () => newFolder(null));
-  $('btn-theme').addEventListener('click', cycleAppearanceMode);
-  $('btn-export').addEventListener('click', (e) => { e.stopPropagation(); openExportMenu(e.currentTarget, showMenu); });
-  $('btn-import').addEventListener('click', (e) => {
+  $('btn-new-folder')?.addEventListener('click', () => newFolder(null));
+  $('btn-theme')?.addEventListener('click', cycleAppearanceMode);
+  $('btn-export')?.addEventListener('click', (e) => { e.stopPropagation(); openExportMenu(e.currentTarget, showMenu); });
+  $('btn-import')?.addEventListener('click', (e) => {
     e.stopPropagation();
     const r = e.currentTarget.getBoundingClientRect();
     showMenu(r.left, r.bottom + 4, [
@@ -1885,8 +1960,8 @@ function bindEvents() {
       { label: 'Or drop files/folders anywhere on the window', action: () => toast('Drop files or a folder onto YANTA') },
     ]);
   });
-  $('importFile').addEventListener('change', (e) => { if (e.target.files.length) importFiles([...e.target.files]); e.target.value = ''; });
-  $('importFolder').addEventListener('change', async (e) => {
+  $('importFile')?.addEventListener('change', (e) => { if (e.target.files.length) importFiles([...e.target.files]); e.target.value = ''; });
+  $('importFolder')?.addEventListener('change', async (e) => {
     const files = [...e.target.files];
     if (!files.length) { e.target.value = ''; return; }
     const items = files.map((f) => {
@@ -1897,7 +1972,7 @@ function bindEvents() {
     await importItems(items);
     e.target.value = '';
   });
-  $('btn-export-note').addEventListener('click', () => {
+  $('btn-export-note')?.addEventListener('click', () => {
     const n = state.notes.get(state.currentNoteId);
     if (n) exportNoteAsMd(n);
   });
@@ -1911,7 +1986,7 @@ function bindEvents() {
       push: true,
     });
 
-    closeMobileSidebar();
+    closeMobileSidebarSafe();
   });
 
   // Sync
@@ -1960,19 +2035,28 @@ function bindEvents() {
     expandSidebarForSearch();
   });
 
+  window.addEventListener('yanta-open-mobile-sidebar', () => {
+    openMobileSidebarSafe();
+  });
+
+  window.addEventListener('yanta-close-mobile-sidebar', () => {
+    closeMobileSidebarSafe();
+  });
+
+  $('sidebarBackdrop')?.addEventListener('click', () => {
+    closeMobileSidebarSafe();
+  });
+
   // View toggles
-  $('btn-view-edit').addEventListener('click', () => {
+  $('btn-view-edit')?.addEventListener('click', () => {
     hideDashboard({ push: false });
     setView('edit');
   });
 
-  $('btn-view-split').addEventListener('click', () => {
+  $('btn-view-split')?.addEventListener('click', () => {
     hideDashboard({ push: false });
 
     setView('split');
-
-    // Split View means: left note/editor, right Markdown preview by default.
-    // If a companion app is open in the right pane, return to preview.
     closeSidePane();
 
     requestAnimationFrame(() => {
@@ -1981,7 +2065,7 @@ function bindEvents() {
     });
   });
 
-  $('btn-view-preview').addEventListener('click', () => {
+  $('btn-view-preview')?.addEventListener('click', () => {
     hideDashboard({ push: false });
     setView('preview');
   });
@@ -1994,13 +2078,6 @@ function bindEvents() {
     },
   });
   setupDesktopSidebarCollapse();
-
-  // Head actions
-  $('btn-pin').addEventListener('click', togglePin);
-  $('btn-delete').addEventListener('click', deleteCurrentNote);
-  $('btn-insert-image').addEventListener('click', openImageModal);
-  $('btn-cite')?.addEventListener('click', () => openCitationManager());
-  $('btn-share').addEventListener('click', openUnifiedShareModal);
 
   // Share modal
   $('btn-share-copy').addEventListener('click', async () => {
@@ -2188,17 +2265,38 @@ function bindEvents() {
     setView(state.view === 'split' ? 'preview' : state.view === 'preview' ? 'edit' : 'split');
   });
 
+  window.addEventListener('yanta-set-view', (e) => {
+    const view = e.detail?.view;
+
+    if (!['edit', 'split', 'preview'].includes(view)) return;
+
+    hideDashboard({ push: false });
+
+    if (view === 'split') {
+      closeSidePane();
+    }
+
+    setView(view);
+
+    if (view === 'split') {
+      requestAnimationFrame(() => {
+        ensurePreviewPaneSwitcher();
+        window.dispatchEvent(new Event('resize'));
+      });
+    }
+  });
+
   // Palette
   $('btn-palette').addEventListener('click', () => openPalette('commands'));
 
   $('btn-graph').addEventListener('click', () => {
     openGraph();
-    closeMobileSidebar();
+    closeMobileSidebarSafe();
   });
 
   $('btn-calendar')?.addEventListener('click', () => {
     openCalendar({ push: true });
-    closeMobileSidebar();
+    closeMobileSidebarSafe();
   });
 
   $('btn-calendar-close')?.addEventListener('click', () => {

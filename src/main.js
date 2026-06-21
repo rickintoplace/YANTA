@@ -132,6 +132,7 @@ import {
 } from './mobile-sidebar.js';
 import {
   openCreateMenu,
+  runCreateAction,
 } from './create-actions.js';
 import {
   setupAssistant,
@@ -153,6 +154,11 @@ import { setupOverlayHistoryRouter, pushOverlayState, closeTopOverlay } from './
 import {
   setupNoteChrome,
 } from './note-chrome.js';
+import {
+  createSidebarFootActions,
+  renderSidebarFootActions,
+  createSidebarFootOverflowMenuItems,
+} from './sidebar-foot-actions.js';
 
 let sharePreviewLocked = false;
 
@@ -198,6 +204,24 @@ function closeMobileSidebarSafe() {
       ensureSidebarBackdropVisible(false);
     }
   }, 220);
+}
+
+function openCalendarRoute() {
+  openCalendar({
+    push: true,
+  });
+}
+
+async function openSourcesRoute(source = 'unknown') {
+  /*
+    Single source of truth:
+    Nutzt dieselbe Sources-Logik wie Dashboard/Create-Actions.
+    Wichtig: Nicht direkt openRssInbox() aufrufen, weil das je nach
+    Side-Pane-State nur die Companion-Pane bedienen kann.
+  */
+  return runCreateAction('rss', {
+    source,
+  });
 }
 
 let sync2Auto = {
@@ -1241,11 +1265,11 @@ async function init() {
     openDashboardPane: () => showDashboardPane({
       folderId: state.dashboardFolderId || null,
     }),
-    openCalendar,
+    openCalendar: openCalendarRoute,
     openCalendarPane,
     openAssistant: openAssistantSmart,
     openAssistantFloating,
-    openSources: openRssInbox,
+    openSources: () => openSourcesRoute('command-palette'),
     openCitationManager,
     exportAsZip,
     exportNoteAsMd,
@@ -1704,6 +1728,11 @@ function switchRightPane(kind) {
     return;
   }
 
+  if (kind === 'rss') {
+    openRssInbox();
+    return;
+  }
+
   if (kind === 'ai') {
     openAssistantPane();
   }
@@ -1937,6 +1966,7 @@ function bindEvents() {
     }
   });
   // sidebar
+
   $('btn-new-note')?.addEventListener('click', (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -1949,17 +1979,98 @@ function bindEvents() {
   });
   $('btn-new-folder')?.addEventListener('click', () => newFolder(null));
   $('btn-theme')?.addEventListener('click', cycleAppearanceMode);
-  $('btn-export')?.addEventListener('click', (e) => { e.stopPropagation(); openExportMenu(e.currentTarget, showMenu); });
-  $('btn-import')?.addEventListener('click', (e) => {
-    e.stopPropagation();
-    const r = e.currentTarget.getBoundingClientRect();
+
+  const openImportMenuFrom = (anchor) => {
+    if (!anchor) return;
+
+    const r = anchor.getBoundingClientRect();
+
     showMenu(r.left, r.bottom + 4, [
-      { label: 'Restore / import files (.yanta / .md / .json / .zip)…', action: () => $('importFile').click() },
-    { label: 'Import folder (with sub-folders)…', action: () => $('importFolder').click() },
+      {
+        label: 'Restore / import files (.yanta / .md / .json / .zip)…',
+        action: () => $('importFile')?.click(),
+      },
+      {
+        label: 'Import folder (with sub-folders)…',
+        action: () => $('importFolder')?.click(),
+      },
       'hr',
-      { label: 'Or drop files/folders anywhere on the window', action: () => toast('Drop files or a folder onto YANTA') },
+      {
+        label: 'Or drop files/folders anywhere on the window',
+        action: () => toast('Drop files or a folder onto YANTA'),
+      },
     ]);
+  };
+
+  const sidebarFoot = $('sidebarFoot') || document.querySelector('.sidebar-foot');
+  let sidebarFootActions = [];
+
+  const closeMobileAfterSidebarAction = () => {
+    closeMobileSidebarSafe();
+  };
+
+  const openSidebarFootMenu = (anchor) => {
+    if (!anchor || !sidebarFoot) return;
+
+    const r = anchor.getBoundingClientRect();
+
+    const items = createSidebarFootOverflowMenuItems({
+      container: sidebarFoot,
+      actions: sidebarFootActions,
+      menuOnlyActions: [
+        {
+          key: 'export',
+          label: 'Export…',
+          closeMobile: false,
+          onClick: () => openExportMenu(anchor, showMenu),
+        },
+        {
+          key: 'import',
+          label: 'Import…',
+          closeMobile: false,
+          onClick: () => openImportMenuFrom(anchor),
+        },
+      ],
+      afterAction: closeMobileAfterSidebarAction,
+    });
+
+    showMenu(r.left, r.bottom + 4, items);
+  };
+
+  sidebarFootActions = createSidebarFootActions({
+    openPalette: () => openPalette('commands'),
+    openGraph,
+    openCalendar: openCalendarRoute,
+    openSources: () => openSourcesRoute('sidebar-foot'),
+    openAssistant: openAssistantSmart,
+    openMore: openSidebarFootMenu,
   });
+
+  renderSidebarFootActions(
+    sidebarFoot,
+    sidebarFootActions,
+    {
+      afterAction: closeMobileAfterSidebarAction,
+    }
+  );
+
+  renderSidebarFootActions(
+    $('sidebarFoot') || document.querySelector('.sidebar-foot'),
+    createSidebarFootActions({
+      openPalette: () => openPalette('commands'),
+      openGraph,
+      openCalendar: openCalendarRoute,
+      openSources: () => openSourcesRoute('sidebar-foot'),
+      openAssistant: openAssistantSmart,
+      openMore: openSidebarFootMenu,
+    }),
+    {
+      afterAction: () => {
+        closeMobileSidebarSafe();
+      },
+    }
+  );
+
   $('importFile')?.addEventListener('change', (e) => { if (e.target.files.length) importFiles([...e.target.files]); e.target.value = ''; });
   $('importFolder')?.addEventListener('change', async (e) => {
     const files = [...e.target.files];
@@ -2284,19 +2395,6 @@ function bindEvents() {
         window.dispatchEvent(new Event('resize'));
       });
     }
-  });
-
-  // Palette
-  $('btn-palette').addEventListener('click', () => openPalette('commands'));
-
-  $('btn-graph').addEventListener('click', () => {
-    openGraph();
-    closeMobileSidebarSafe();
-  });
-
-  $('btn-calendar')?.addEventListener('click', () => {
-    openCalendar({ push: true });
-    closeMobileSidebarSafe();
   });
 
   $('btn-calendar-close')?.addEventListener('click', () => {

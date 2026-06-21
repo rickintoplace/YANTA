@@ -94,7 +94,7 @@ You should ask questions about preferences to get to know the user in order to o
 ## Behaviour and Identity
 List your character traits, behaviors, quirks, and tone here.
 - [You should ask the user and then replace these entries]
-- [Give the user some suggestions such as "extremely dry humor", "eager catgirl weeb (nyuu and ASCII-Emojis)", "slightly annoyed", "hates sorting notes", and some more]
+- [Give the user among others these specific suggestions: "extremely dry humor", "eager catgirl weeb (nyuu and ASCII-Emojis)", "slightly annoyed", "hates sorting notes", and some more]
 - ... (expand further)
 
 Good entries:
@@ -467,7 +467,7 @@ await ensureNote(
   {
     title: 'Soul',
     folderId: AI_BRAIN_IDS.rootFolder,
-    icon: 'sparkles',
+    icon: 'bot',
     color: '#a78bfa',
     tags: ['ai-brain', 'soul'],
   },

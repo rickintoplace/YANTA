@@ -102,7 +102,7 @@ export function openSidePane({
         <button class="icon-btn ${kind === 'graph' ? 'active' : ''}" data-side-pane-tab="graph" title="Graph">${lucide('network', 15)}</button>
         <button class="icon-btn ${kind === 'calendar' ? 'active' : ''}" data-side-pane-tab="calendar" title="Calendar">${lucide('calendar-days', 15)}</button>
         <button class="icon-btn ${kind === 'rss' ? 'active' : ''}" data-side-pane-tab="rss" title="Sources">${lucide('rss', 15)}</button>
-        <button class="icon-btn ${kind === 'ai' ? 'active' : ''}" data-side-pane-tab="ai" title="AI">${lucide('sparkles', 15)}</button>
+        <button class="icon-btn ${kind === 'ai' ? 'active' : ''}" data-side-pane-tab="ai" title="AI">${lucide('bot', 15)}</button>
       </div>
 
       <span class="grow"></span>

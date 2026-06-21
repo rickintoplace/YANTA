@@ -93,6 +93,7 @@ let root = null;
 let fullscreenHost = null;
 let sourcesModal = null;
 let renderInboxSeq = 0;
+let renderInboxTimer = 0;
 
 const VT_NAME = 'yanta-rss-sources';
 
@@ -281,13 +282,23 @@ function cleanFeedHtml(html = '') {
   return tpl.innerHTML;
 }
 
-async function imageSrc(url) {
-  const settings = await getRssSettings();
+async function imageSrc(url, settingsOverride = null) {
+  const settings = settingsOverride || await getRssSettings();
 
   if (!settings.showImages || !url) return '';
   if (isLikelyTrackingImageUrl(url)) return '';
 
-  return rssImageProxyUrl(url);
+  return rssImageProxyUrl(url, settings);
+}
+
+function scheduleRenderInbox() {
+  window.clearTimeout(renderInboxTimer);
+
+  renderInboxTimer = window.setTimeout(() => {
+    renderInbox().catch((err) => {
+      console.error('[YANTA RSS] Could not render inbox', err);
+    });
+  }, 80);
 }
 
 function ensureFullscreenHost() {
@@ -769,49 +780,56 @@ async function renderInbox() {
   const body = root.querySelector('[data-rss-body]');
   if (!body) return;
 
-  body.replaceChildren();
+  const hadContent = body.childElementCount > 0;
+
   body.classList.toggle('grid', layoutMode === 'grid');
+  body.classList.toggle('is-refreshing', hadContent);
 
-  const feeds = await getRssFeeds();
-
-  if (seq !== renderInboxSeq || !body.isConnected) return;
-
-  const activeFeed = activeFeedFromList(feeds);
-  const items = await loadVisibleItems();
-
-  if (seq !== renderInboxSeq || !body.isConnected) return;
-
-  if (!items.length) {
-    body.append(el('div', { class: 'yanta-rss-empty' },
-      currentMode === 'unread'
-        ? 'No unread source items.'
-        : searchQuery
-          ? 'No source items match your search.'
-          : 'No source items.'
-    ));
-  } else {
-    const cards = await Promise.all(items.map((item) => renderItemCard(item)));
+  try {
+    const feeds = await getRssFeeds();
 
     if (seq !== renderInboxSeq || !body.isConnected) return;
 
-    const frag = document.createDocumentFragment();
+    const activeFeed = activeFeedFromList(feeds);
+    const items = await loadVisibleItems();
 
-    for (const card of cards) {
-      frag.append(card);
+    if (seq !== renderInboxSeq || !body.isConnected) return;
+
+    const fragment = document.createDocumentFragment();
+
+    if (!items.length) {
+      fragment.append(el('div', { class: 'yanta-rss-empty' },
+        currentMode === 'unread'
+          ? 'No unread source items.'
+          : searchQuery
+            ? 'No source items match your search.'
+            : 'No source items.'
+      ));
+    } else {
+      const cards = await Promise.all(items.map((item) => renderItemCard(item)));
+
+      if (seq !== renderInboxSeq || !body.isConnected) return;
+
+      for (const card of cards) {
+        fragment.append(card);
+      }
     }
 
-    body.append(frag);
-  }
+    if (activeFeed && isYoutubeFeed(activeFeed)) {
+      const footer = await renderLoadMoreFooter(activeFeed);
 
-  if (seq !== renderInboxSeq || !body.isConnected) return;
+      if (seq !== renderInboxSeq || !body.isConnected) return;
 
-  if (activeFeed && isYoutubeFeed(activeFeed)) {
-    const footer = await renderLoadMoreFooter(activeFeed);
+      fragment.append(footer);
+    }
 
     if (seq !== renderInboxSeq || !body.isConnected) return;
 
-    body.querySelectorAll('.yanta-rss-load-more-footer').forEach((node) => node.remove());
-    body.append(footer);
+    body.replaceChildren(fragment);
+  } finally {
+    if (seq === renderInboxSeq && body.isConnected) {
+      body.classList.remove('is-refreshing');
+    }
   }
 }
 
@@ -3714,6 +3732,14 @@ function injectCss() {
     opacity: 1;
   }
 }
+
+.yanta-rss-body.is-refreshing {
+  opacity: 0.96;
+}
+
+.yanta-rss-body.is-refreshing .yanta-rss-item {
+  animation: none;
+}
   `;
 
   document.head.append(style);
@@ -3831,7 +3857,7 @@ export function setupRss() {
       if (itemId && itemId === activeReaderItemId) return;
     }
 
-    renderInbox().catch(() => {});
+    scheduleRenderInbox();
   });
 
   window.setTimeout(async () => {

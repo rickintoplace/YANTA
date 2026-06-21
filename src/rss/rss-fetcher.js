@@ -411,8 +411,8 @@ export async function fetchRssFeed(feed) {
   }
 }
 
-export async function rssImageProxyUrl(rawUrl) {
-  const settings = await getRssSettings();
+export async function rssImageProxyUrl(rawUrl, settingsOverride = null) {
+  const settings = settingsOverride || await getRssSettings();
   const url = cleanUrl(rawUrl);
 
   if (!url) return '';

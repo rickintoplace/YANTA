@@ -480,6 +480,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
   display: flex; align-items: center; gap: 4px;
   padding: 8px 10px;
   border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: row;
+  justify-content: flex-end;
 }
 .sidebar-toe {
     display: flex;
@@ -2879,6 +2882,39 @@ input.yanta-task-checkbox {
   height: 16px;
   flex: 0 0 auto;
 }
+
+
+.sidebar-foot-menu-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+/* Das Kontextmenü im Footer */
+#sidebarFootMenu {
+  position: absolute;
+  bottom: 100%; /* Öffnet sich nach oben */
+  left: 50%;
+  transform: translateX(-50%) translateY(-8px); /* Zentriert und leicht Abstand */
+  min-width: 140px;
+  z-index: 100;
+  
+  padding: 4px;
+  
+  background: var(--bg-elev-3);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  box-shadow: var(--shadow);
+  
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+#sidebarFootMenu[hidden] {
+  display: none !important;
+}
+
 /* ============================================================
    Collapsed tree: Icon-only + dynamische Hierarchie
    ------------------------------------------------------------
@@ -3178,9 +3214,9 @@ input.yanta-task-checkbox {
   padding: 0;
 }
 
-.app.sidebar-collapsed #vaultIndicator span:not(.sync-sym) {
+/* .app.sidebar-collapsed #vaultIndicator span:not(.sync-sym) {
   display: none !important;
-}
+} */
 
 /* ============================================================
    Mobile: Desktop-Collapse aus
@@ -4041,11 +4077,6 @@ input.yanta-task-checkbox {
   z-index: 3;
 
   background: var(--bg-elev);
-}
-
-/* Optional: subtle separation when content scrolls behind */
-.sidebar-foot {
-  border-top: 1px solid var(--border);
 }
 
 /* Mobile/PWA viewport safety */

@@ -232,15 +232,18 @@ function openCalendarMenu(anchor) {
   showMenu(r.left, r.bottom + 6, [
     {
       label: 'Categories',
+      icon: 'calendar-fold',
       action: renderCategoriesModal,
     },
     {
       label: 'Import .ics / JSON',
+      icon: 'calendar-arrow-up',
       action: openCalendarImportPicker,
     },
     'hr',
     {
       label: 'Export all .ics',
+      icon: 'calendar-arrow-down',
       action: () => {
         exportEventsAsIcs(currentEventsForCategory(null), {
           filename: 'yanta-calendar.ics',
@@ -250,6 +253,7 @@ function openCalendarMenu(anchor) {
     },
     {
       label: 'Export all JSON',
+      icon: 'calendar-arrow-down',
       action: () => {
         exportCalendarJson({
           filename: 'yanta-calendar.calendar.json',
@@ -8554,7 +8558,7 @@ function renderCategoriesModal() {
         <div class="yanta-calendar-cat-toolbar">
           <button class="btn primary" data-action="add-category">${lucide('plus', 14)} Add category</button>
           <button class="btn" data-action="sources">${lucide('calendar-plus', 14)} Add data source</button>
-          <button class="btn" data-action="import">${lucide('upload', 14)} Import .ics / JSON</button>
+          <button class="btn" data-action="import">${lucide('calendar-arrow-up', 14)} Import .ics / JSON</button>
           <button class="btn" data-action="export-all-ics">${lucide('calendar-arrow-down', 14)} Export all .ics</button>
           <button class="btn" data-action="export-all-json">${lucide('download', 14)} Export all JSON</button>
         </div>

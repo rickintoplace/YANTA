@@ -13,7 +13,7 @@ const DEFAULT_OPTIONS = {
   maxProgress: 1,
   cols: 10,
   rows: 14,
-  durationMs: 250,
+  durationMs: 180,
 };
 
 const CRUMPLE_FOLDS = [

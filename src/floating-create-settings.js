@@ -59,7 +59,7 @@ export const FLOATING_CREATE_ACTION_CATALOG = [
   {
     id: 'ai',
     defaultLabel: 'AI',
-    defaultIcon: 'sparkles',
+    defaultIcon: 'bot',
   },
 ];
 
@@ -107,7 +107,7 @@ export const DEFAULT_FLOATING_CREATE_SETTINGS = {
       id: 'ai',
       enabled: true,
       label: 'AI',
-      icon: 'sparkles',
+      icon: 'bot',
       x: 0,
       y: -73,
       order: 4,

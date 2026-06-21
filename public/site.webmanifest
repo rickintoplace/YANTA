@@ -7,11 +7,10 @@
     "scope": "/",
     "display": "standalone",
     "display_override": ["standalone", "minimal-ui", "browser"],
-    "orientation": "any",
     "lang": "en",
     "dir": "ltr",
-    "theme_color": "#141414",
-    "background_color": "#141414",
+    "theme_color": "#fdfcfa",
+    "background_color": "#fdfcfa",
     "categories": ["productivity", "utilities"],
     "launch_handler": {
       "client_mode": "navigate-existing"

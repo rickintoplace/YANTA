@@ -2,7 +2,7 @@
 // YANTA — Central context menu icon mapping
 //
 // Goal:
-// - Minimal invasive: existing showMenu({ label }) calls get icons automatically.
+// - Existing showMenu({ label }) calls get icons automatically.
 // - Explicit item.icon always wins.
 // - Label heuristics cover dynamic labels like "Pin / Unpin",
 //   "Archive / Unarchive", "New note here", "Delete folder…".
@@ -123,7 +123,7 @@ function cleanLabel(label = '') {
     // ----------------------------------------------------------------
     // AI
     // ----------------------------------------------------------------
-    if (includesAny(label, ['ai', 'assistant'])) return 'sparkles';
+    if (includesAny(label, ['ai', 'assistant'])) return 'bot';
   
     // ----------------------------------------------------------------
     // Settings / misc

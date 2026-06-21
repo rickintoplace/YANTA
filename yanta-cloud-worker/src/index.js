@@ -167,7 +167,7 @@ function openRouterZdrProviderPreferences() {
 }
 var AI_MODEL_ALLOWLIST = /* @__PURE__ */ new Set([
   "google/gemini-2.5-flash-lite",
-  "deepseek-v4-flash",
+  "deepseek/deepseek-v4-flash",
   "tencent/hy3-preview",
   "openai/gpt-oss-20b"
 ]);
@@ -178,7 +178,21 @@ var DISPOSABLE_DOMAINS = /* @__PURE__ */ new Set([
   "tempmail.com",
   "temp-mail.org",
   "yopmail.com",
-  "trashmail.com"
+  "trashmail.com",
+  "emailondeck.com",
+  "fakeinbox.com",
+  "maildrop.cc",
+  "tempemail.cc",
+  "throwaway.email",
+  "tempail.email",
+  "dispostable.com",
+  "sharklasers.com",
+  "guerrillamailblock.com",
+  "grr.la",
+  "mailnesia.com",
+  "tempinbox.com",
+  "getnada.com",
+  "mohmal.com"
 ]);
 function now() {
   return Date.now();

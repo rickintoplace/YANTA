@@ -247,7 +247,7 @@ export function closeIconPicker() {
 export function openIconInsertPicker() {
   openIconPicker({
     title: 'Insert Lucide icon',
-    initialIcon: 'sparkles',
+    initialIcon: 'shapes',
     initialColor: '#6ea8fe',
     allowReset: false,
     applyLabel: 'Insert',

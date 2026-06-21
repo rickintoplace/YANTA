@@ -56,6 +56,14 @@ import {
   isPublicShareActive,
 } from './public-share/public-share-publisher.js';
 
+import {
+  setAiContextDragData,
+} from './ai/context-dnd.js';
+
+import {
+  isAiSessionNote,
+} from './ai/ai-sessions.js';
+
 function safeItemColor(c) {
   return safeCssColor(c);
 }
@@ -1061,8 +1069,6 @@ if (pinned.length) {
 
   root.append(folderSec);
 
-  root.append(folderSec);
-
   const archivedFolders = [...state.folders.values()]
     .filter(isArchivedFolder)
     .filter((f) => !f.parentId || !isArchivedFolder(state.folders.get(f.parentId)))
@@ -1261,6 +1267,15 @@ function folderRow(f, visibleNotes, depth) {
   row.draggable = true;
   row.addEventListener('dragstart', (e) => {
     if (!isSelected(key)) setOnlySelection(key);
+
+    const selected = getSelectedItems();
+
+    setAiContextDragData(
+      e.dataTransfer,
+      selected.length > 1 && selected.some((item) => item.key === key)
+        ? selected.map((item) => ({ kind: item.kind, id: item.id }))
+        : [{ kind: 'folder', id: f.id }]
+    );
 
     e.dataTransfer.setData('text/yanta-folder', f.id);
     e.dataTransfer.effectAllowed = 'move';
@@ -1796,6 +1811,17 @@ function noteRow(n, depth = 0, {
     style: rowStyle,
     draggable: 'true',
     onclick: (e) => handleTreeSelectionClick(e, key, () => {
+      if (isAiSessionNote(n)) {
+        window.dispatchEvent(new CustomEvent('yanta-open-ai-session', {
+          detail: {
+            sessionId: n.id,
+          },
+        }));
+
+        window.dispatchEvent(new CustomEvent('yanta-close-mobile-sidebar'));
+        return;
+      }
+
       openNote(n.id);
 
       window.dispatchEvent(new CustomEvent('yanta-close-mobile-sidebar'));
@@ -1803,6 +1829,15 @@ function noteRow(n, depth = 0, {
     oncontextmenu: (e) => openTreeContextMenu(e, key, () => noteMenu(e, n)),
     ondragstart: (e) => {
       if (!isSelected(key)) setOnlySelection(key);
+
+      const selected = getSelectedItems();
+
+      setAiContextDragData(
+        e.dataTransfer,
+        selected.length > 1 && selected.some((item) => item.key === key)
+          ? selected.map((item) => ({ kind: item.kind, id: item.id }))
+          : [{ kind: 'note', id: n.id }]
+      );
 
       // text/yanta-note enables intra-app folder moves & wikilink-on-drop;
       // text/plain so a drop onto a foreign target still gets the title.

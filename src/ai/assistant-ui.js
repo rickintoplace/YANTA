@@ -70,7 +70,35 @@ import {
   pushOverlayState,
   closeTopOverlay,
   registerOverlayRoute,
+  overlayIdFromState,
 } from '../overlay-history.js';
+
+import {
+  createAiContextItemsFromRefs,
+  createAiContextItemsFromFiles,
+  aiContextTotals,
+  formatContextStats,
+  modelSupportsImages,
+} from './context-attachments.js';
+
+import {
+  readAiContextDragData,
+  dataTransferHasAiContext,
+} from './context-dnd.js';
+
+import {
+  openAiContextPicker,
+} from './context-picker-ui.js';
+
+import {
+  createAiSession,
+  saveAiSession,
+  loadAiSession,
+} from './ai-sessions.js';
+
+import {
+  pushCalendarEventHistory,
+} from '../navigation.js';
 
 let initialized = false;
 let aiOverlayRegistered = false;
@@ -79,6 +107,7 @@ let mode = 'pane'; // pane | floating
 let root = null;
 let messagesEl = null;
 let inputEl = null;
+let inputShellEl = null;
 let sendBtn = null;
 let settingsPanel = null;
 
@@ -86,6 +115,11 @@ let floatingShell = null;
 let floatingBody = null;
 
 let conversation = [];
+let activeContextItems = [];
+let contextTrayEl = null;
+let currentSessionId = '';
+let sessionSaveTimer = 0;
+
 let abortController = null;
 let settingsOpen = false;
 
@@ -94,6 +128,9 @@ let assistantBusyLabel = 'Thinking…';
 let assistantBusySince = 0;
 
 const VT_NAME = 'yanta-ai-assistant';
+
+const AI_FULLSCREEN_OVERLAY_ID = 'ai-fullscreen';
+const AI_SETTINGS_OVERLAY_ID = 'ai-settings';
 
 const AI_CHAT_TRANSIENT_KEY = 'yanta.ai.chat.transient.v1';
 const AI_CHAT_TRANSIENT_TTL_MS = 3 * 24 * 60 * 60 * 1000;
@@ -118,12 +155,67 @@ function aiFullscreenOverlayIsOpen() {
   );
 }
 
+function assistantUiIsOpen() {
+  if (mode === 'pane') {
+    return isSidePaneOpen('ai') && !!root?.isConnected;
+  }
+
+  return !!(
+    floatingShell &&
+    floatingShell.hidden === false &&
+    root?.isConnected
+  );
+}
+
+function aiSettingsOverlayIsOpen() {
+  return settingsOpen && assistantUiIsOpen();
+}
+
+function openAiSettings({
+  fromHistory = false,
+} = {}) {
+  settingsOpen = true;
+  renderSettings();
+
+  /*
+    Mobile AI is a fullscreen overlay. Settings inside it must become a
+    child overlay so Android/browser Back returns to the chat instead of
+    closing the whole assistant.
+  */
+  if (
+    aiFullscreenOverlayIsOpen() &&
+    !fromHistory &&
+    overlayIdFromState() !== AI_SETTINGS_OVERLAY_ID
+  ) {
+    pushOverlayState(AI_SETTINGS_OVERLAY_ID);
+  }
+}
+
+function closeAiSettings({
+  fromHistory = false,
+} = {}) {
+  if (
+    !fromHistory &&
+    overlayIdFromState() === AI_SETTINGS_OVERLAY_ID
+  ) {
+    closeTopOverlay(() => {
+      settingsOpen = false;
+      renderSettings();
+    });
+
+    return;
+  }
+
+  settingsOpen = false;
+  renderSettings();
+}
+
 function registerAiOverlayRoute() {
   if (aiOverlayRegistered) return;
 
   aiOverlayRegistered = true;
 
-  registerOverlayRoute('ai-fullscreen', {
+  registerOverlayRoute(AI_FULLSCREEN_OVERLAY_ID, {
     open: () => {
       openAssistantFloating({
         fromHistory: true,
@@ -137,6 +229,26 @@ function registerAiOverlayRoute() {
     },
 
     isOpen: aiFullscreenOverlayIsOpen,
+  });
+
+  registerOverlayRoute(AI_SETTINGS_OVERLAY_ID, {
+    open: async () => {
+      await openAssistantFloating({
+        fromHistory: true,
+      });
+
+      openAiSettings({
+        fromHistory: true,
+      });
+    },
+
+    close: () => {
+      closeAiSettings({
+        fromHistory: true,
+      });
+    },
+
+    isOpen: aiSettingsOverlayIsOpen,
   });
 }
 
@@ -261,11 +373,12 @@ function ensureRoot() {
   root = document.createElement('div');
   root.className = 'yanta-ai-root';
   root.dataset.aiRoot = '1';
+  root.dataset.aiContextDropTarget = '1';
 
   root.innerHTML = `
     <header class="yanta-ai-head" data-ai-drag-handle>
       <div class="yanta-ai-title">
-        ${lucide('sparkles', 17)}
+        ${lucide('bot', 17)}
         <strong>YANTA AI</strong>
       </div>
 
@@ -291,40 +404,54 @@ function ensureRoot() {
     <main class="yanta-ai-messages" data-ai-messages></main>
 
     <footer class="yanta-ai-foot">
-      <textarea
-        class="text-input"
-        data-ai-input
-        rows="3"
-        placeholder="Ask about your notes, files, drawings or calendar…"></textarea>
+      <div class="yanta-ai-context-tray" data-ai-context-tray hidden></div>
 
-      <button class="btn primary" data-ai-send>
-        ${lucide('send', 14)}
-        Send
-      </button>
+      <div class="yanta-ai-input-shell" data-ai-input-shell>
+        <button class="yanta-ai-input-btn yanta-ai-plus" data-ai-add-context title="Add context" aria-label="Add context">
+          ${lucide('plus', 18)}
+        </button>
+
+        <textarea
+          class="yanta-ai-input"
+          data-ai-input
+          rows="1"
+          placeholder="Ask about your notes, files, drawings or calendar…"
+          enterkeyhint="send"></textarea>
+
+        <button class="yanta-ai-input-btn yanta-ai-send" data-ai-send title="Send" aria-label="Send message" disabled>
+          ${lucide('arrow-up', 18)}
+        </button>
+      </div>
     </footer>
   `;
 
   messagesEl = root.querySelector('[data-ai-messages]');
+  contextTrayEl = root.querySelector('[data-ai-context-tray]');
   inputEl = root.querySelector('[data-ai-input]');
+  inputShellEl = root.querySelector('[data-ai-input-shell]');
   sendBtn = root.querySelector('[data-ai-send]');
-  sendBtn?.classList.add('yanta-ai-send');
   settingsPanel = root.querySelector('[data-ai-settings-panel]');
 
   root.querySelector('[data-ai-settings]')?.addEventListener('click', () => {
-    settingsOpen = !settingsOpen;
-    renderSettings();
+    if (settingsOpen) {
+      closeAiSettings();
+    } else {
+      openAiSettings();
+    }
   });
 
   root.querySelector('[data-ai-clear]')?.addEventListener('click', () => {
     conversation = [];
+    currentSessionId = '';
+    activeContextItems = [];
     clearTransientConversation();
     renderMessages();
+    renderContextTray();
   });
 
   root.querySelector('[data-ai-close]')?.addEventListener('click', () => {
     if (settingsOpen) {
-      settingsOpen = false;
-      renderSettings();
+      closeAiSettings();
       return;
     }
 
@@ -339,7 +466,83 @@ function ensureRoot() {
     }
   });
 
-  sendBtn?.addEventListener('click', () => sendCurrentInput());
+  sendBtn?.addEventListener('click', () => {
+    if (assistantBusy && abortController) {
+      try { abortController.abort(); } catch {}
+      return;
+    }
+    sendCurrentInput();
+  });
+
+  root.querySelector('[data-ai-add-context]')?.addEventListener('click', () => {
+    openAiContextPicker({
+      onPickRefs: addAiContextRefs,
+      onPickFiles: addAiContextFiles,
+    });
+  });
+
+  root.addEventListener('dragover', (e) => {
+    const hasFiles = [...(e.dataTransfer?.types || [])].includes('Files');
+
+    if (!dataTransferHasAiContext(e.dataTransfer) && !hasFiles) return;
+
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+    root.classList.add('is-ai-context-dragover');
+  });
+
+  root.addEventListener('dragleave', (e) => {
+    if (root.contains(e.relatedTarget)) return;
+    root.classList.remove('is-ai-context-dragover');
+  });
+
+  root.addEventListener('drop', async (e) => {
+    const hasFiles = [...(e.dataTransfer?.types || [])].includes('Files');
+
+    if (!dataTransferHasAiContext(e.dataTransfer) && !hasFiles) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    root.classList.remove('is-ai-context-dragover');
+
+    const refs = readAiContextDragData(e.dataTransfer);
+
+    if (refs.length) {
+      await addAiContextRefs(refs);
+      return;
+    }
+
+    const files = [...(e.dataTransfer.files || [])];
+
+    if (files.length) {
+      await addAiContextFiles(files);
+    }
+  });
+
+  window.addEventListener('yanta-ai-add-context-refs', async (e) => {
+    const refs = Array.isArray(e.detail?.refs) ? e.detail.refs : [];
+    if (refs.length) await addAiContextRefs(refs);
+  });
+
+  window.addEventListener('yanta-open-ai-session', async (e) => {
+    const sessionId = e.detail?.sessionId;
+    if (!sessionId) return;
+
+    await openAiSession(sessionId);
+  });
+
+  window.addEventListener('yanta-ai-context-drag-position', (e) => {
+    if (!root) return;
+
+    const over = !!e.detail?.over;
+
+    root.classList.toggle('is-ai-context-dragover', over);
+  });
+
+  window.addEventListener('yanta-ai-context-drag-end', () => {
+    root?.classList.remove('is-ai-context-dragover');
+  });
 
   root.addEventListener('click', (e) => {
     handleAiMessageClick(e).catch((err) => {
@@ -348,8 +551,13 @@ function ensureRoot() {
     });
   });
 
+  inputEl?.addEventListener('input', () => {
+    autoResizeInput();
+    updateSendButtonState();
+  });
+
   inputEl?.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
       e.preventDefault();
       sendCurrentInput();
     }
@@ -357,6 +565,7 @@ function ensureRoot() {
 
   renderMessages();
   updateCloseButton();
+  updateSendButtonState();
 
   return root;
 }
@@ -580,7 +789,7 @@ export async function openAssistantFloating({
     !fromHistory &&
     wasClosed
   ) {
-    pushOverlayState('ai-fullscreen');
+    pushOverlayState(AI_FULLSCREEN_OVERLAY_ID);
   }
 
   setTimeout(() => inputEl?.focus(), 0);
@@ -622,6 +831,222 @@ export function closeAssistant({
   closeAssistantUI();
 }
 
+function scheduleAiSessionSave() {
+  clearTimeout(sessionSaveTimer);
+
+  sessionSaveTimer = window.setTimeout(() => {
+    saveCurrentAiSession().catch((err) => {
+      console.warn('[YANTA AI] session save failed', err);
+    });
+  }, 700);
+}
+
+async function saveCurrentAiSession() {
+  if (!conversation.length && !activeContextItems.length) return;
+
+  const model = getAiSettings().model || '';
+
+  if (!currentSessionId) {
+    currentSessionId = await createAiSession({
+      messages: conversation,
+      contextItems: activeContextItems,
+      model,
+    });
+  }
+
+  await saveAiSession(currentSessionId, {
+    messages: conversation,
+    contextItems: activeContextItems,
+    model,
+  });
+}
+
+async function openAiSession(sessionId) {
+  const session = await loadAiSession(sessionId);
+
+  currentSessionId = session.id;
+  conversation = session.messages || [];
+  activeContextItems = session.contextItems || [];
+
+  await openAssistantSmart();
+
+  renderMessages();
+  renderContextTray();
+
+  toast('AI session opened', 'success');
+}
+
+async function addAiContextRefs(refs = []) {
+  const items = await createAiContextItemsFromRefs(refs);
+
+  activeContextItems = mergeContextItems(activeContextItems, items);
+
+  renderContextTray();
+  scheduleAiSessionSave();
+
+  const totals = aiContextTotals(items);
+  toast(
+    `Added ${items.length} context item${items.length === 1 ? '' : 's'} · ${totals.words.toLocaleString()} words`,
+    'success'
+  );
+}
+
+async function addAiContextFiles(files = []) {
+  const items = await createAiContextItemsFromFiles(files);
+
+  activeContextItems = mergeContextItems(activeContextItems, items);
+
+  renderContextTray();
+  scheduleAiSessionSave();
+
+  const totals = aiContextTotals(items);
+  toast(
+    `Added ${items.length} upload${items.length === 1 ? '' : 's'} · ${totals.words.toLocaleString()} words`,
+    'success'
+  );
+}
+
+function mergeContextItems(existing = [], incoming = []) {
+  const out = [...existing];
+  const seen = new Set(
+    existing.map((item) => [
+      item.kind,
+      item.sourceId,
+      item.title,
+      item.mime,
+    ].join('|'))
+  );
+
+  for (const item of incoming) {
+    const key = [
+      item.kind,
+      item.sourceId,
+      item.title,
+      item.mime,
+    ].join('|');
+
+    if (seen.has(key)) continue;
+
+    seen.add(key);
+    out.push(item);
+  }
+
+  return out;
+}
+
+function removeAiContextItem(id) {
+  activeContextItems = activeContextItems.filter((item) => item.id !== id);
+  renderContextTray();
+  scheduleAiSessionSave();
+}
+
+function clearAiContextItems() {
+  activeContextItems = [];
+  renderContextTray();
+  scheduleAiSessionSave();
+}
+
+function renderContextTray() {
+  if (!contextTrayEl) return;
+
+  const totals = aiContextTotals(activeContextItems);
+
+  contextTrayEl.hidden = !activeContextItems.length;
+  contextTrayEl.replaceChildren();
+
+  if (!activeContextItems.length) return;
+
+  const head = document.createElement('div');
+  head.className = 'yanta-ai-context-tray-head';
+
+  const nonMultimodalImages =
+    totals.images > 0 && !modelSupportsImages(getEffectiveAiRuntimeSettings().model);
+
+  head.innerHTML = `
+    <span>
+      ${lucide('paperclip', 13)}
+      <strong>${totals.items}</strong> item${totals.items === 1 ? '' : 's'}
+      · ${totals.words.toLocaleString()} words
+      · ${totals.chars.toLocaleString()} chars
+    </span>
+
+    <button type="button" class="yanta-ai-context-clear" data-ai-clear-context>
+      Clear
+    </button>
+  `;
+
+  contextTrayEl.append(head);
+
+  if (nonMultimodalImages) {
+    const warn = document.createElement('div');
+    warn.className = 'yanta-ai-context-warning';
+    warn.textContent = 'Images are attached, but the selected model may not be multimodal. Non-multimodal models may ignore images.';
+    contextTrayEl.append(warn);
+  }
+
+  const list = document.createElement('div');
+  list.className = 'yanta-ai-context-list';
+
+  for (const item of activeContextItems) {
+    const row = document.createElement('div');
+    row.className = `yanta-ai-context-chip ${item.error ? 'is-error' : ''} ${item.meta?.unsupported ? 'is-warn' : ''}`;
+    row.dataset.contextItemId = item.id;
+
+    const icon =
+      item.kind === 'folder'
+        ? 'folder'
+        : item.kind === 'event'
+          ? 'calendar-days'
+          : item.kind === 'image'
+            ? 'image'
+            : item.kind === 'pdf'
+              ? 'file-type'
+              : 'file-text';
+
+    row.innerHTML = `
+      <span class="yanta-ai-context-chip-icon">${lucide(icon, 13)}</span>
+
+      <span class="yanta-ai-context-chip-main">
+        <strong>${escapeHtml(item.title || 'Context item')}</strong>
+        <small>${escapeHtml(contextItemStatsLabel(item))}</small>
+      </span>
+
+      <button type="button" class="icon-btn" data-ai-remove-context="${escapeHtml(item.id)}" title="Remove">
+        ${lucide('x', 13)}
+      </button>
+    `;
+
+    list.append(row);
+  }
+
+  contextTrayEl.append(list);
+
+  contextTrayEl.querySelector('[data-ai-clear-context]')?.addEventListener('click', clearAiContextItems);
+
+  contextTrayEl.querySelectorAll('[data-ai-remove-context]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      removeAiContextItem(btn.dataset.aiRemoveContext);
+    });
+  });
+}
+
+function contextItemStatsLabel(item) {
+  const base = formatContextStats(item.stats || {});
+
+  if (item.kind === 'folder') {
+    const count =
+      Array.isArray(item.meta?.includedNoteIds)
+        ? item.meta.includedNoteIds.length
+        : Number(item.meta?.includedNoteCount || 0);
+
+    if (count > 0) {
+      return `${count.toLocaleString()} note${count === 1 ? '' : 's'} · ${base}`;
+    }
+  }
+
+  return base;
+}
+
 function addMessage(role, content, extra = {}) {
   conversation.push({
     role,
@@ -631,6 +1056,7 @@ function addMessage(role, content, extra = {}) {
   });
 
   saveTransientConversation();
+  scheduleAiSessionSave();
   renderMessages();
 }
 
@@ -1412,15 +1838,23 @@ async function handleAiMessageClick(e) {
     e.preventDefault();
     e.stopPropagation();
 
-    const eventId = eventCard.dataset.aiOpenEvent;
+    const eventId = String(eventCard.dataset.aiOpenEvent || '').trim();
 
     if (!eventId) return;
 
     try {
       const calendar = await import('../calendar.js');
-      calendar.openCalendarEvent?.(eventId, {
-        push: true,
+
+      if (typeof calendar.openCalendarEvent !== 'function') {
+        throw new Error('Calendar event navigation is not available.');
+      }
+
+      calendar.openCalendarEvent(eventId, {
+        push: false,
+        replace: false,
       });
+
+      pushCalendarEventHistory(eventId);
     } catch {
       toast('Could not open calendar event', 'error');
     }
@@ -1462,7 +1896,9 @@ async function runAssistant(userText) {
 
   const messages = [
     await buildSystemMessage(),
-    await buildContextMessage(),
+    await buildContextMessage({
+      attachments: activeContextItems,
+    }),
     ...conversation
       .filter((m) => m.role === 'user' || m.role === 'assistant')
       .map((m) => ({
@@ -1586,25 +2022,82 @@ async function submitUserText(text) {
 
   setAssistantBusy(true, 'Thinking…');
 
-  sendBtn.disabled = true;
+  sendBtn.disabled = false;
   sendBtn.classList.add('is-working');
-  sendBtn.innerHTML = `<span class="yanta-ai-spinner small"></span> Working…`;
+  sendBtn.title = 'Stop generating';
+  sendBtn.setAttribute('aria-label', 'Stop generating');
+  sendBtn.innerHTML = lucide('square', 16);
 
   try {
     await runAssistant(clean);
   } catch (err) {
-    console.error(err);
-    addMessage('assistant', `Error: ${err?.message || String(err)}`, {
-      model: getAiSettings().model,
-    });
+    if (err?.name === 'AbortError') {
+      // User clicked stop — no error toast needed
+    } else {
+      console.error(err);
+      addMessage('assistant', `Error: ${err?.message || String(err)}`, {
+        model: getAiSettings().model,
+      });
+    }
   } finally {
     setAssistantBusy(false);
 
-    sendBtn.disabled = false;
     sendBtn.classList.remove('is-working');
-    sendBtn.innerHTML = `${lucide('send', 14)} Send`;
+    sendBtn.title = 'Send';
+    sendBtn.setAttribute('aria-label', 'Send message');
+    sendBtn.innerHTML = lucide('arrow-up', 18);
+    updateSendButtonState();
     abortController = null;
   }
+}
+
+let singleLineHeight = 36; // Fallback, wird dynamisch gemessen
+
+function autoResizeInput() {
+  if (!inputEl) return;
+
+  inputEl.style.height = 'auto';
+
+  const cssMax = parseInt(getComputedStyle(inputEl).maxHeight, 10) || 220;
+
+  // Wenn das Feld leer ist, setze alles auf eine Zeile zurück
+  if (inputEl.value === '') {
+    // Fange die echte Höhe einer einzelnen Zeile ab
+    singleLineHeight = inputEl.scrollHeight;
+    inputEl.style.height = singleLineHeight + 'px';
+    
+    if (inputShellEl) {
+      inputShellEl.classList.remove('is-multiline');
+    }
+    return;
+  }
+
+  // Berechne die aktuell benötigte Höhe basierend auf der AKTUELLEN Breite
+  let needed = inputEl.scrollHeight;
+
+  // Layout-Wechsel steuern
+  if (inputShellEl) {
+    const isCurrentlyMultiline = inputShellEl.classList.contains('is-multiline');
+    
+    // Nur in den Multiline-Modus wechseln, wenn die benötigte Höhe 
+    // signifikant größer ist als EINE Zeile (+5px Toleranz)
+    if (!isCurrentlyMultiline && needed > singleLineHeight + 5) {
+      inputShellEl.classList.add('is-multiline');
+      
+      // DURCHBRUCH: Da das Textarea durch den Layout-Wechsel jetzt die volle 
+      // Breite hat, passt der Text evtl. wieder in weniger Zeilen. 
+      // Wir müssen die benötigte Höhe hier NEU berechnen!
+      needed = inputEl.scrollHeight;
+    }
+  }
+
+  // Setze die finale Höhe (schrumpft und wächst ab jetzt Zeile für Zeile mit)
+  inputEl.style.height = Math.min(needed, cssMax) + 'px';
+}
+
+function updateSendButtonState() {
+  if (!sendBtn || !inputEl || assistantBusy) return;
+  sendBtn.disabled = !inputEl.value.trim();
 }
 
 async function sendCurrentInput() {
@@ -1613,6 +2106,8 @@ async function sendCurrentInput() {
   if (!text) return;
 
   inputEl.value = '';
+  autoResizeInput(); // <-- Setzt Höhe und Multiline-Klasse automatisch zurück
+  updateSendButtonState();
 
   await submitUserText(text);
 }
@@ -1644,7 +2139,11 @@ export function setupAssistant() {
     }
 
     if (e.key === 'Escape' && mode === 'floating' && floatingShell && !floatingShell.hidden) {
-      closeAssistant();
+      if (overlayIdFromState()) {
+        closeTopOverlay();
+      } else {
+        closeAssistant();
+      }
     }
   });
 }
@@ -1656,6 +2155,7 @@ function injectCss() {
   style.id = 'yanta-ai-css';
   style.textContent = `
 .yanta-ai-root {
+  position: relative;
   height: 100%;
   min-height: 0;
   display: flex;
@@ -1862,19 +2362,12 @@ function injectCss() {
 
 .yanta-ai-foot {
   flex: 0 0 auto;
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
   padding: 12px;
   border-top: 1px solid var(--border);
   background: var(--bg-elev-2);
-}
-
-.yanta-ai-foot textarea {
-  resize: vertical;
-  min-height: 54px;
-  max-height: 180px;
-  margin: 0;
 }
 
 .yanta-ai-floating {
@@ -1957,8 +2450,7 @@ function injectCss() {
       max(10px, env(safe-area-inset-left));
   }
 
-  .yanta-ai-foot textarea {
-    min-height: 74px;
+  .yanta-ai-input {
     max-height: 32dvh;
   }
 
@@ -2349,10 +2841,6 @@ function injectCss() {
   animation: yanta-ai-bar 1.35s cubic-bezier(.2,.8,.2,1) infinite;
 }
 
-.yanta-ai-send.is-working,
-.yanta-ai-foot .btn.is-working {
-  opacity: 0.92;
-}
 
 .yanta-ai-tool-box {
   border: 1px solid var(--border);
@@ -2676,6 +3164,290 @@ function injectCss() {
   .yanta-ai-location-grid {
     grid-template-columns: 1fr;
   }
+}
+
+.yanta-ai-root.is-ai-context-dragover {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.yanta-ai-root.is-ai-context-dragover::after {
+  content: "Drop to add as AI context";
+
+  position: absolute;
+  inset: 54px 12px 86px;
+  z-index: 20;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  border: 2px dashed var(--accent);
+  border-radius: 16px;
+
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-elev));
+  color: var(--accent);
+
+  font-size: 14px;
+  font-weight: 850;
+
+  pointer-events: none;
+}
+
+.yanta-ai-foot {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.yanta-ai-input-shell {
+  display: grid;
+  align-items: end;
+  gap: 4px;
+
+  /* Standard: 1-Zeilen Modus (Buttons links/rechts, Text in der Mitte) */
+  grid-template: 
+    "leading-actions text-input trailing-actions" 1fr 
+    / auto 1fr auto;
+
+  border: 1px solid var(--border);
+  border-radius: 26px;
+  background: var(--bg-elev);
+  padding: 6px;
+
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+
+/* Multiline: Text nimmt die erste Row komplett ein, Buttons in der zweiten Row */
+.yanta-ai-input-shell.is-multiline {
+  grid-template: 
+    "text-input text-input text-input" auto 
+    "leading-actions leading-actions trailing-actions" 1fr 
+    / 1fr 1fr auto;
+}
+
+.yanta-ai-input-shell:focus-within {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.yanta-ai-input-btn {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-dim);
+
+  cursor: pointer;
+  user-select: none;
+
+  transition:
+    background-color 120ms ease,
+    color 120ms ease,
+    transform 120ms ease,
+    box-shadow 120ms ease;
+}
+
+.yanta-ai-plus {
+  grid-area: leading-actions;
+  justify-self: start;
+}
+
+.yanta-ai-plus:hover {
+  background: var(--bg-elev-2);
+  color: var(--text);
+}
+
+.yanta-ai-plus:active {
+  transform: scale(0.94);
+}
+
+.yanta-ai-send {
+  grid-area: trailing-actions;
+  justify-self: end;
+  background: var(--accent);
+  color: #fff;
+}
+
+.yanta-ai-send:hover:not(:disabled):not(.is-working) {
+  background: color-mix(in srgb, var(--accent) 88%, white);
+  transform: scale(1.04);
+}
+
+.yanta-ai-send:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.yanta-ai-send:disabled {
+  background: color-mix(in srgb, var(--text-faint) 22%, transparent);
+  color: var(--text-faint);
+  cursor: default;
+}
+
+.yanta-ai-send.is-working {
+  background: var(--bg-elev-2);
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+
+.yanta-ai-send.is-working:hover {
+  background: color-mix(in srgb, var(--red) 14%, var(--bg-elev-2));
+  color: var(--red);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--red) 40%, var(--border));
+}
+
+.yanta-ai-input {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1.5;
+
+  padding: 8px 6px;
+  resize: none;
+  outline: none;
+
+  min-height: 36px;
+  max-height: 220px;
+  overflow-y: auto;
+
+  grid-area: text-input;
+}
+
+.yanta-ai-input::placeholder {
+  color: var(--text-faint);
+}
+
+.yanta-ai-context-tray {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+
+  background: var(--bg-elev);
+}
+
+.yanta-ai-context-tray[hidden] {
+  display: none !important;
+}
+
+.yanta-ai-context-tray-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+
+  color: var(--text-dim);
+  font-size: 11px;
+}
+
+.yanta-ai-context-tray-head span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.yanta-ai-context-tray-head strong {
+  color: var(--text);
+}
+
+.yanta-ai-context-clear {
+  border: 0;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.yanta-ai-context-clear:hover {
+  color: var(--red);
+}
+
+.yanta-ai-context-warning {
+  padding: 6px 8px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--yellow) 40%, var(--border));
+  background: color-mix(in srgb, var(--yellow) 8%, transparent);
+  color: var(--yellow);
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.yanta-ai-context-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.yanta-ai-context-chip {
+  min-width: min(220px, 100%);
+  max-width: 100%;
+  max-width: 24em;
+
+  display: inline-grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 7px;
+
+  padding: 6px 6px 6px 8px;
+
+  border: 1px solid var(--border);
+  border-radius: 999px;
+
+  background: var(--bg-elev-2);
+  color: var(--text);
+}
+
+.yanta-ai-context-chip.is-error {
+  border-color: color-mix(in srgb, var(--red) 45%, var(--border));
+}
+
+.yanta-ai-context-chip.is-warn {
+  border-color: color-mix(in srgb, var(--yellow) 45%, var(--border));
+}
+
+.yanta-ai-context-chip-icon {
+  display: inline-flex;
+  color: var(--accent);
+}
+
+.yanta-ai-context-chip-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.yanta-ai-context-chip-main strong {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+
+  font-size: 11px;
+  line-height: 1.1;
+}
+
+.yanta-ai-context-chip-main small {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+
+  color: var(--text-faint);
+  font-size: 10px;
+  line-height: 1.1;
 }
 `;
 

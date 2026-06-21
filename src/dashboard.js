@@ -76,6 +76,10 @@ import {
   createDashboardCrumpleController,
 } from './dashboard-crumple.js';
 
+import {
+  getDashboardSelectedKeys,
+} from './dashboard-multiselect.js';
+
   const MOBILE_MQ = window.matchMedia('(max-width: 880px)');
   
   const DASH_ORDER_STEP = 1000;
@@ -199,6 +203,167 @@ import {
       console.warn('[YANTA Dashboard] Could not render linked event header', err);
       return null;
     }
+  }
+
+  function dashboardItemFromKey(key) {
+    const { kind, id } = parseItemKey(key);
+
+    if (kind === 'note') {
+      const note = state.notes.get(id);
+      return note
+        ? {
+            kind: 'note',
+            id,
+            note,
+          }
+        : null;
+    }
+
+    if (kind === 'folder') {
+      const folder = state.folders.get(id);
+      return folder
+        ? {
+            kind: 'folder',
+            id,
+            folder,
+          }
+        : null;
+    }
+
+    return null;
+  }
+
+  function dashboardSelectedDragKeys(sourceKey) {
+    const selected = getDashboardSelectedKeys();
+
+    if (
+      selected.length > 1 &&
+      selected.includes(sourceKey)
+    ) {
+      return selected;
+    }
+
+    return [sourceKey];
+  }
+
+  function dashboardKeyToAiRef(key) {
+    const { kind, id } = parseItemKey(key);
+
+    if (kind === 'note') return { kind: 'note', id };
+    if (kind === 'folder') return { kind: 'folder', id };
+
+    return null;
+  }
+
+  function aiContextDropTargetAtPoint(x, y) {
+    return document
+      .elementFromPoint(x, y)
+      ?.closest?.('[data-ai-context-drop-target]');
+  }
+
+  function emitAiContextDashboardDragHover(d, x, y) {
+    const over = !!aiContextDropTargetAtPoint(x, y);
+
+    const refs = d
+      ? dashboardSelectedDragKeys(d.key)
+          .map(dashboardKeyToAiRef)
+          .filter(Boolean)
+      : [];
+
+    window.dispatchEvent(new CustomEvent('yanta-ai-context-drag-position', {
+      detail: {
+        over,
+        clientX: x,
+        clientY: y,
+        refs,
+      },
+    }));
+  }
+
+  function endAiContextDashboardDragHover() {
+    window.dispatchEvent(new CustomEvent('yanta-ai-context-drag-end'));
+  }
+
+  async function moveDashboardKeysToFolder(keys = [], folderId) {
+    let moved = 0;
+
+    for (const key of keys) {
+      const { kind, id } = parseItemKey(key);
+
+      if (kind === 'note') {
+        const note = state.notes.get(id);
+        if (!note) continue;
+
+        note.folderId = folderId || null;
+        note.pinned = false;
+        note.updated = Date.now();
+
+        await store.notes.put(note);
+        previewCache.delete(id);
+
+        moved++;
+        continue;
+      }
+
+      if (kind === 'folder') {
+        const folder = state.folders.get(id);
+        if (!folder) continue;
+
+        if (
+          folderId &&
+          (
+            folderId === folder.id ||
+            dashboardFolderIsAncestor(folder.id, folderId)
+          )
+        ) {
+          continue;
+        }
+
+        folder.parentId = folderId || null;
+        folder.updated = Date.now();
+
+        await store.folders.put(folder);
+
+        moved++;
+      }
+    }
+
+    if (folderId) {
+      state.expandedFolders.add(folderId);
+    }
+
+    return moved;
+  }
+
+  async function moveDashboardKeysToTrash(keys = []) {
+    const noteIds = [];
+    const folderIds = [];
+
+    for (const key of keys) {
+      const { kind, id } = parseItemKey(key);
+
+      if (kind === 'note' && state.notes.has(id)) {
+        noteIds.push(id);
+      }
+
+      if (kind === 'folder' && state.folders.has(id)) {
+        folderIds.push(id);
+      }
+    }
+
+    if (!noteIds.length && !folderIds.length) return 0;
+
+    await moveItemsToTrash({
+      noteIds,
+      folderIds,
+      source: 'dashboard-drag-multi',
+    });
+
+    for (const id of noteIds) {
+      previewCache.delete(id);
+    }
+
+    return noteIds.length + folderIds.length;
   }
 
   export function getDashboardCardDisplayPrefs() {
@@ -1170,6 +1335,61 @@ function getDashboardItems() {
       scheduleDashboardVisibleNoteAutofit({
         delay: 240,
       });
+    });
+
+    window.addEventListener('yanta-dashboard-external-drag-start', (e) => {
+      if (!dashboard.visible) return;
+      if (dashboard.dragging || dashboard.resize) return;
+
+      const detail = e.detail || {};
+      const key = detail.key || '';
+      const item = dashboardItemFromKey(key);
+      const card = findDashboardCardByKey(key);
+
+      if (!item || !card) return;
+
+      startCardDrag(card, item, gesturePoint(detail.clientX, detail.clientY, {
+        pointerId: detail.pointerId,
+        pointerType: detail.pointerType || 'mouse',
+      }));
+    });
+
+    window.addEventListener('yanta-dashboard-external-drag-move', (e) => {
+      const d = dashboard.dragging;
+      const detail = e.detail || {};
+
+      if (!d) return;
+      if (d.pointerId != null && detail.pointerId !== d.pointerId) return;
+
+      moveCardDrag(gesturePoint(detail.clientX, detail.clientY, {
+        pointerId: detail.pointerId,
+        pointerType: detail.pointerType || d.pointerType || 'mouse',
+      }));
+    });
+
+    window.addEventListener('yanta-dashboard-external-drag-end', async (e) => {
+      const d = dashboard.dragging;
+      const detail = e.detail || {};
+
+      if (!d) return;
+      if (d.pointerId != null && detail.pointerId !== d.pointerId) return;
+
+      moveCardDrag(gesturePoint(detail.clientX, detail.clientY, {
+        pointerId: detail.pointerId,
+        pointerType: detail.pointerType || d.pointerType || 'mouse',
+      }));
+
+      await finishCardDrag();
+    });
+
+    window.addEventListener('yanta-dashboard-external-drag-cancel', (e) => {
+      const d = dashboard.dragging;
+      const detail = e.detail || {};
+
+      if (!d) return;
+      if (d.pointerId != null && detail.pointerId !== d.pointerId) return;
+
+      forceCancelDashboardDrag('external-dashboard-drag-cancel');
     });
 
     let pendingBlankTap = null;
@@ -4364,6 +4584,8 @@ function dashboardGestureTargetIsControl(target, eventHeader = null) {
 }
 
 function cleanupDashboardDragDom(d = dashboard.dragging) {
+  endAiContextDashboardDragHover();
+
   if (d) {
     if (d.raf) {
       cancelAnimationFrame(d.raf);
@@ -5481,6 +5703,7 @@ function moveCardDrag(e) {
 function updateLiveDragPlacement(clientX, clientY) {
   const d = dashboard.dragging;
   if (!d) return;
+  emitAiContextDashboardDragHover(d, clientX, clientY);
 
   clearDragVisuals();
   d.dropFolderId = null;
@@ -6100,6 +6323,23 @@ async function animateCloneToRect(clone, toRect) {
   ]);
 }
 
+function addDashboardDragKeysToAiContext(keys = []) {
+  const refs = keys
+    .map(dashboardKeyToAiRef)
+    .filter(Boolean);
+
+  if (!refs.length) return false;
+
+  window.dispatchEvent(new CustomEvent('yanta-ai-add-context-refs', {
+    detail: {
+      refs,
+      source: 'dashboard-drag',
+    },
+  }));
+
+  return true;
+}
+
 async function finishCardDrag() {
   const d = dashboard.dragging;
   if (!d) return;
@@ -6125,32 +6365,41 @@ async function finishCardDrag() {
     source,
     clone,
     grid,
-    sourceKind,
-    sourceId,
     dropFolderId,
   } = d;
 
-  const shouldDropToTrash =
-    d.dropToTrash ||
-    isPointOverTrashDropTarget(d.lastX, d.lastY);
+  const dragKeys = dashboardSelectedDragKeys(d.key);
 
   try {
+    /*
+      Wichtig:
+      AI-Drop muss innerhalb dieses try/finally liegen.
+      Sonst läuft cleanupDashboardDragDom(d) nicht und Clone/Trash/Drop-Zone
+      bleiben sichtbar hängen.
+    */
+    if (aiContextDropTargetAtPoint(d.lastX, d.lastY)) {
+      const added = addDashboardDragKeysToAiContext(dragKeys);
+
+      if (!added) {
+        toast('Could not add item to AI context', 'error');
+      }
+
+      return;
+    }
+
+    const shouldDropToTrash =
+      d.dropToTrash ||
+      isPointOverTrashDropTarget(d.lastX, d.lastY);
+
     if (shouldDropToTrash) {
       await animateTrashDropCrumple(d);
 
-      if (sourceKind === 'note') {
-        await moveNoteToTrash(sourceId, {
-          source: 'dashboard-drag',
-          toastMessage: 'Moved note to Trash',
-        });
+      const count = await moveDashboardKeysToTrash(dragKeys);
 
-        previewCache.delete(sourceId);
-      } else if (sourceKind === 'folder') {
-        await moveFolderToTrash(sourceId, {
-          source: 'dashboard-drag',
-          toastMessage: 'Moved folder to Trash',
-        });
-      }
+      toast(
+        `Moved ${count} item${count === 1 ? '' : 's'} to Trash`,
+        'success'
+      );
 
       renderDashboard({
         animate: false,
@@ -6160,37 +6409,15 @@ async function finishCardDrag() {
     }
 
     if (dropFolderId) {
-      if (sourceKind === 'note') {
-        const note = state.notes.get(sourceId);
+      const moved = await moveDashboardKeysToFolder(dragKeys, dropFolderId);
 
-        if (note && note.folderId !== dropFolderId) {
-          note.folderId = dropFolderId;
-          note.pinned = false;
-          note.updated = Date.now();
-
-          await store.notes.put(note);
-          previewCache.delete(sourceId);
-
-          state.expandedFolders.add(dropFolderId);
-          toast('Moved into folder', 'success');
-        }
-      } else if (sourceKind === 'folder') {
-        const folder = state.folders.get(sourceId);
-
-        if (
-          folder &&
-          folder.parentId !== dropFolderId &&
-          folder.id !== dropFolderId &&
-          !dashboardFolderIsAncestor(folder.id, dropFolderId)
-        ) {
-          folder.parentId = dropFolderId;
-          folder.updated = Date.now();
-
-          await store.folders.put(folder);
-
-          state.expandedFolders.add(dropFolderId);
-          toast('Moved folder', 'success');
-        }
+      if (moved) {
+        toast(
+          moved === 1
+            ? 'Moved into folder'
+            : `Moved ${moved} items into folder`,
+          'success'
+        );
       }
 
       renderDashboard({

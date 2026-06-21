@@ -4,6 +4,7 @@
 // - Dashboard/Home: #dashboard or #dashboard/<folderId>
 // - Note:          #<noteId>
 // - Calendar:      #calendar
+// - Calendar Event:#calendar/<eventId>
 // ============================================================
 
 export function dashboardUrl(folderId = null) {
@@ -38,6 +39,53 @@ export function calendarState() {
   return {
     surface: 'calendar',
   };
+}
+
+export function calendarEventUrl(eventId) {
+  const id = String(eventId || '').trim();
+
+  return id
+    ? `#calendar/${encodeURIComponent(id)}`
+    : calendarUrl();
+}
+
+export function calendarEventState(eventId) {
+  const id = String(eventId || '').trim();
+
+  return {
+    surface: 'calendar',
+    eventId: id || null,
+  };
+}
+
+export function pushCalendarEventHistory(eventId) {
+  const id = String(eventId || '').trim();
+
+  if (!id) {
+    pushCalendarHistory();
+    return;
+  }
+
+  history.pushState(
+    calendarEventState(id),
+    '',
+    calendarEventUrl(id)
+  );
+}
+
+export function replaceCalendarEventHistory(eventId) {
+  const id = String(eventId || '').trim();
+
+  if (!id) {
+    replaceCalendarHistory();
+    return;
+  }
+
+  history.replaceState(
+    calendarEventState(id),
+    '',
+    calendarEventUrl(id)
+  );
 }
 
 export function pushDashboardHistory(folderId = null) {

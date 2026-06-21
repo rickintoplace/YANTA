@@ -39,6 +39,10 @@ import {
   showDashboardFromNote,
 } from './dashboard.js';
 
+import {
+  calendarEventUrl,
+} from './navigation.js';
+
 const MOBILE_MQ = window.matchMedia('(max-width: 760px)');
 
 let initialized = false;
@@ -460,7 +464,9 @@ function insertEventTextOnly() {
     dort direkt angebunden werden.
   */
   const eventId = uid();
-  insertAtCursor(`[Event](#calendar/${eventId})`);
+
+  insertAtCursor(`[Event](${calendarEventUrl(eventId)})`);
+
   toast('Event text link inserted', 'success');
 }
 

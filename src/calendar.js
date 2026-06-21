@@ -49,6 +49,10 @@ import {
 import {
   calendarState,
   calendarUrl,
+  pushCalendarHistory,
+  replaceCalendarHistory,
+  pushCalendarEventHistory,
+  replaceCalendarEventHistory,
 } from './navigation.js';
 
 import {
@@ -108,6 +112,7 @@ import {
   pushOverlayState,
   closeTopOverlay,
   registerOverlayRoute,
+  overlayIdFromState,
 } from './overlay-history.js';
 
 import {
@@ -164,6 +169,248 @@ let calendarCategoryDeleteModal = null;
 let calendarDateTimePickerModal = null;
 let calendarNotePickerModal = null;
 
+const CALENDAR_OVERLAY_IDS = Object.freeze({
+  EVENT_EDITOR: 'calendar-event-editor',
+  DATETIME_PICKER: 'calendar-datetime-picker',
+  CATEGORIES: 'calendar-categories',
+  SOURCES: 'calendar-sources',
+  APPEARANCE_PICKER: 'calendar-event-appearance-picker',
+});
+
+let calendarFullscreenOverlaysRegistered = false;
+let calendarModalInputGuardUntil = 0;
+
+let lastCalendarDateTimePickerOptions = null;
+let lastCalendarAppearancePickerOptions = null;
+
+function calendarNodeIsOpen(node) {
+  return !!node && node.hidden === false;
+}
+
+function openCalendarOverlayState(id, data = {}, {
+  fromHistory = false,
+  replace = false,
+} = {}) {
+  if (fromHistory) return;
+
+  if (overlayIdFromState() !== id) {
+    pushOverlayState(id, data, {
+      replace,
+    });
+  }
+}
+
+function closeCalendarOverlayBackedModal(id, hideFn, {
+  fromHistory = false,
+} = {}) {
+  if (
+    !fromHistory &&
+    overlayIdFromState() === id
+  ) {
+    closeTopOverlay(() => {
+      hideFn?.();
+    });
+
+    return;
+  }
+
+  hideFn?.();
+}
+
+/*
+  Mobile tap bleed-through guard.
+
+  Problem:
+  - pointerup opens modal
+  - browser then dispatches synthetic click at same screen position
+  - click hits the just-created modal button/input
+
+  Solution:
+  - for a very short window, swallow pointer/click events inside calendar modals
+*/
+function installCalendarModalInputGuard() {
+  if (installCalendarModalInputGuard.installed) return;
+  installCalendarModalInputGuard.installed = true;
+
+  const guardedEvents = [
+    'pointerdown',
+    'pointerup',
+    'click',
+    'mousedown',
+    'mouseup',
+    'touchend',
+  ];
+
+  const isGuardedCalendarModalTarget = (target) => {
+    return !!target?.closest?.([
+      '.yanta-calendar-event-modal',
+      '.yanta-calendar-datetime-picker-modal',
+      '.yanta-calendar-categories-modal',
+      '.yanta-calendar-sources-modal',
+      '.yanta-calendar-category-delete-modal',
+      '.yanta-calendar-import-modal',
+      '.yanta-calendar-note-picker-modal',
+    ].join(','));
+  };
+
+  const block = (e) => {
+    if (performance.now() > calendarModalInputGuardUntil) return;
+    if (!isGuardedCalendarModalTarget(e.target)) return;
+
+    e.preventDefault?.();
+    e.stopPropagation?.();
+    e.stopImmediatePropagation?.();
+  };
+
+  for (const type of guardedEvents) {
+    document.addEventListener(type, block, {
+      capture: true,
+      passive: false,
+    });
+  }
+}
+
+function armCalendarModalInputGuard(ms = 260) {
+  calendarModalInputGuardUntil = Math.max(
+    calendarModalInputGuardUntil,
+    performance.now() + ms
+  );
+}
+
+function closeKnownIconPickerModal() {
+  /*
+    Best effort for the shared IconPicker.
+    If your icon-picker.js exposes a dedicated close function/event,
+    this event gives it a clean integration point.
+  */
+  window.dispatchEvent(new CustomEvent('yanta-close-icon-picker'));
+
+  try {
+    window.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Escape',
+      bubbles: true,
+      cancelable: true,
+    }));
+  } catch {}
+
+  /*
+    Fallback for common modal class names.
+    Keep this deliberately narrow so we do not hide the calendar event editor.
+  */
+  document
+    .querySelectorAll([
+      '.yanta-icon-picker-modal',
+      '.icon-picker-modal',
+      '[data-icon-picker-modal]',
+      '[data-lucide-icon-picker-modal]',
+    ].join(','))
+    .forEach((node) => {
+      if ('hidden' in node) node.hidden = true;
+      else node.style.display = 'none';
+    });
+}
+
+async function openCalendarAppearancePicker(options = {}, {
+  fromHistory = false,
+} = {}) {
+  lastCalendarAppearancePickerOptions = options;
+
+  registerCalendarFullscreenModalRoutes();
+
+  openCalendarOverlayState(
+    CALENDAR_OVERLAY_IDS.APPEARANCE_PICKER,
+    {},
+    {
+      fromHistory,
+    }
+  );
+
+  const { openIconPicker } = await import('./icon-picker.js');
+
+  openIconPicker(options);
+
+  armCalendarModalInputGuard();
+}
+
+function registerCalendarFullscreenModalRoutes() {
+  if (calendarFullscreenOverlaysRegistered) return;
+  calendarFullscreenOverlaysRegistered = true;
+
+  registerOverlayRoute(CALENDAR_OVERLAY_IDS.DATETIME_PICKER, {
+    open: () => {
+      if (!lastCalendarDateTimePickerOptions) return;
+
+      openCalendarDateTimePicker({
+        ...lastCalendarDateTimePickerOptions,
+        fromHistory: true,
+      });
+    },
+
+    close: () => {
+      closeCalendarDateTimePicker({
+        fromHistory: true,
+      });
+    },
+
+    isOpen: () => calendarNodeIsOpen(calendarDateTimePickerModal),
+  });
+
+  registerOverlayRoute(CALENDAR_OVERLAY_IDS.CATEGORIES, {
+    open: () => {
+      renderCategoriesModal({
+        fromHistory: true,
+      });
+    },
+
+    close: () => {
+      closeCategoriesModal({
+        fromHistory: true,
+      });
+    },
+
+    isOpen: () => calendarNodeIsOpen(categoriesModal),
+  });
+
+  registerOverlayRoute(CALENDAR_OVERLAY_IDS.SOURCES, {
+    open: () => {
+      renderCalendarSourcesModal({
+        fromHistory: true,
+      });
+    },
+
+    close: () => {
+      closeCalendarSourcesModal({
+        fromHistory: true,
+      });
+    },
+
+    isOpen: () => calendarNodeIsOpen(calendarSourcesModal),
+  });
+
+  registerOverlayRoute(CALENDAR_OVERLAY_IDS.APPEARANCE_PICKER, {
+    open: async () => {
+      if (!lastCalendarAppearancePickerOptions) return;
+
+      await openCalendarAppearancePicker(lastCalendarAppearancePickerOptions, {
+        fromHistory: true,
+      });
+    },
+
+    close: () => {
+      closeKnownIconPickerModal();
+    },
+
+    isOpen: () => {
+      return !!document.querySelector([
+        '.yanta-icon-picker-modal:not([hidden])',
+        '.icon-picker-modal:not([hidden])',
+        '[data-icon-picker-modal]:not([hidden])',
+        '[data-lucide-icon-picker-modal]:not([hidden])',
+      ].join(','));
+    },
+  });
+}
+
 function calendarEventEditorIsOpen() {
   return !!eventModal && eventModal.hidden === false;
 }
@@ -173,7 +420,7 @@ function registerCalendarEventOverlayRoute() {
 
   calendarEventOverlayRegistered = true;
 
-  registerOverlayRoute('calendar-event-editor', {
+  registerOverlayRoute(CALENDAR_OVERLAY_IDS.EVENT_EDITOR, {
     open: ({ data, state } = {}) => {
       const eventId =
         data?.eventId ||
@@ -3867,10 +4114,20 @@ function ensureCalendarDateTimePickerModal() {
   return calendarDateTimePickerModal;
 }
 
-function closeCalendarDateTimePicker() {
-  if (calendarDateTimePickerModal) {
-    calendarDateTimePickerModal.hidden = true;
-  }
+function closeCalendarDateTimePicker({
+  fromHistory = false,
+} = {}) {
+  closeCalendarOverlayBackedModal(
+    CALENDAR_OVERLAY_IDS.DATETIME_PICKER,
+    () => {
+      if (calendarDateTimePickerModal) {
+        calendarDateTimePickerModal.hidden = true;
+      }
+    },
+    {
+      fromHistory,
+    }
+  );
 }
 
 function openCalendarDateTimePicker({
@@ -3879,8 +4136,29 @@ function openCalendarDateTimePicker({
   allDay = false,
   allowClear = false,
   onPick = null,
+  fromHistory = false,
 } = {}) {
   const modal = ensureCalendarDateTimePickerModal();
+
+  registerCalendarFullscreenModalRoutes();
+
+  lastCalendarDateTimePickerOptions = {
+    title,
+    value,
+    allDay,
+    allowClear,
+    onPick,
+  };
+
+  openCalendarOverlayState(
+    CALENDAR_OVERLAY_IDS.DATETIME_PICKER,
+    {
+      title,
+    },
+    {
+      fromHistory,
+    }
+  );
 
   const prefs = getCalendarPreferences();
 
@@ -4168,6 +4446,7 @@ function openCalendarDateTimePicker({
   };
 
   modal.hidden = false;
+  armCalendarModalInputGuard();
   render();
 }
 
@@ -7442,17 +7721,15 @@ function closeEventModal({
 } = {}) {
   if (!eventModal) return;
 
-  if (!fromHistory && eventModal.hidden === false) {
-    closeTopOverlay(() => {
-      closeEventModal({
-        fromHistory: true,
-      });
-    });
-
-    return;
-  }
-
-  eventModal.hidden = true;
+  closeCalendarOverlayBackedModal(
+    CALENDAR_OVERLAY_IDS.EVENT_EDITOR,
+    () => {
+      eventModal.hidden = true;
+    },
+    {
+      fromHistory,
+    }
+  );
 }
 
 export function openNewCalendarEvent(input = {}) {
@@ -7897,9 +8174,7 @@ function openEventEditor(input = {}) {
       cssColorToHex(cssVar('--accent', '#6ea8fe')) ||
       '#6ea8fe';
 
-    const { openIconPicker } = await import('./icon-picker.js');
-
-    openIconPicker({
+    await openCalendarAppearancePicker({
       title: linked
         ? 'Icon & color for linked note'
         : 'Icon & color for event',
@@ -8273,6 +8548,7 @@ function openEventEditor(input = {}) {
   const wasClosed = modal.hidden !== false;
 
   modal.hidden = false;
+  armCalendarModalInputGuard();
 
   if (!fromHistory && shouldPushOverlay && wasClosed) {
     const overlayData =
@@ -8293,7 +8569,13 @@ function openEventEditor(input = {}) {
             },
           };
 
-    pushOverlayState('calendar-event-editor', overlayData);
+    openCalendarOverlayState(
+      CALENDAR_OVERLAY_IDS.EVENT_EDITOR,
+      overlayData,
+      {
+        fromHistory,
+      }
+    );
   }
 
   setTimeout(() => {
@@ -8323,10 +8605,20 @@ function categoryWithSourceExists(source) {
   );
 }
 
-function closeCalendarSourcesModal() {
-  if (calendarSourcesModal) {
-    calendarSourcesModal.hidden = true;
-  }
+function closeCalendarSourcesModal({
+  fromHistory = false,
+} = {}) {
+  closeCalendarOverlayBackedModal(
+    CALENDAR_OVERLAY_IDS.SOURCES,
+    () => {
+      if (calendarSourcesModal) {
+        calendarSourcesModal.hidden = true;
+      }
+    },
+    {
+      fromHistory,
+    }
+  );
 }
 
 function ensureCalendarSourcesModal() {
@@ -8376,8 +8668,20 @@ function addHolidaySourceCategory(source) {
   };
 }
 
-function renderCalendarSourcesModal() {
+function renderCalendarSourcesModal({
+  fromHistory = false,
+} = {}) {
   const modal = ensureCalendarSourcesModal();
+
+  registerCalendarFullscreenModalRoutes();
+
+  openCalendarOverlayState(
+    CALENDAR_OVERLAY_IDS.SOURCES,
+    {},
+    {
+      fromHistory,
+    }
+  );
 
   const sourceButtons = DE_HOLIDAY_SOURCES
     .map((source, index) => {
@@ -8540,6 +8844,7 @@ function renderCalendarSourcesModal() {
   });
 
   modal.hidden = false;
+  armCalendarModalInputGuard();
 }
 
 // ============================================================
@@ -8563,12 +8868,34 @@ function ensureCategoriesModal() {
   return categoriesModal;
 }
 
-function closeCategoriesModal() {
-  if (categoriesModal) categoriesModal.hidden = true;
+function closeCategoriesModal({
+  fromHistory = false,
+} = {}) {
+  closeCalendarOverlayBackedModal(
+    CALENDAR_OVERLAY_IDS.CATEGORIES,
+    () => {
+      if (categoriesModal) categoriesModal.hidden = true;
+    },
+    {
+      fromHistory,
+    }
+  );
 }
 
-function renderCategoriesModal() {
+function renderCategoriesModal({
+  fromHistory = false,
+} = {}) {
   const modal = ensureCategoriesModal();
+
+  registerCalendarFullscreenModalRoutes();
+
+  openCalendarOverlayState(
+    CALENDAR_OVERLAY_IDS.CATEGORIES,
+    {},
+    {
+      fromHistory,
+    }
+  );
 
   ensureDefaultCalendarCategory();
 
@@ -8722,6 +9049,7 @@ function renderCategoriesModal() {
   }
 
   modal.hidden = false;
+  armCalendarModalInputGuard();
 }
 
 // ============================================================
@@ -8823,9 +9151,23 @@ export function closeCalendar({
   // No-op, wenn der fullscreen calendar gar nicht offen ist.
   // Verhindert unbeabsichtigte Surface-Mutationen durch defensive Aufrufe.
   if (calendarSurface?.hidden !== false && state.surface !== 'calendar') {
-    closeEventModal();
-    closeCategoriesModal();
-    closeCalendarSourcesModal();
+    closeEventModal({
+      fromHistory: true,
+    });
+
+    closeCategoriesModal({
+      fromHistory: true,
+    });
+
+    closeCalendarSourcesModal({
+      fromHistory: true,
+    });
+
+    closeCalendarDateTimePicker({
+      fromHistory: true,
+    });
+
+    closeKnownIconPickerModal();
     return;
   }
 
@@ -8904,14 +9246,17 @@ export function openCalendar({
     Wenn der Kalender schon offen ist, nur Layout/Render aktualisieren.
   */
   if (push && !stillAlreadySurfaceOpen) {
-    const method = replace ? 'replaceState' : 'pushState';
-    history[method](calendarState(), '', calendarUrl());
+    if (replace) {
+      replaceCalendarHistory();
+    } else {
+      pushCalendarHistory();
+    }
   } else if (
     push &&
     replace &&
     history.state?.surface !== 'calendar'
   ) {
-    history.replaceState(calendarState(), '', calendarUrl());
+    replaceCalendarHistory();
   }
 
   const app = $('app');
@@ -9073,16 +9418,11 @@ export function openCalendarEvent(eventId, {
   }
 
   if (push) {
-    const method = replace ? 'replaceState' : 'pushState';
-
-    history[method](
-      {
-        surface: 'calendar',
-        eventId: id,
-      },
-      '',
-      `#calendar/${encodeURIComponent(id)}`
-    );
+    if (replace) {
+      replaceCalendarEventHistory(id);
+    } else {
+      pushCalendarEventHistory(id);
+    }
   }
 
   openCalendar({
@@ -9118,6 +9458,9 @@ export function openCalendarEvent(eventId, {
 export function setupCalendar() {
   if (initialized) return;
   initialized = true;
+
+  installCalendarModalInputGuard();
+  registerCalendarFullscreenModalRoutes();
 
   ensureDefaultCalendarCategory();
 

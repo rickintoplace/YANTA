@@ -96,6 +96,67 @@ function jsonSize(value) {
   }
 }
 
+function sanitizeIncludedAiMessageContent(content, policy) {
+  if (typeof content === "string" || content == null) {
+    return content ?? "";
+  }
+
+  if (!Array.isArray(content)) {
+    return String(content);
+  }
+
+  const parts = [];
+  let textChars = 0;
+  let imageBytesApprox = 0;
+
+  for (const raw of content.slice(0, 24)) {
+    if (!raw || typeof raw !== "object") continue;
+
+    if (raw.type === "text") {
+      const text = String(raw.text || "");
+      textChars += text.length;
+
+      if (textChars > policy.maxPromptChars) {
+        const err = new Error("Prompt/context too large for Included AI.");
+        err.status = 413;
+        throw err;
+      }
+
+      parts.push({
+        type: "text",
+        text,
+      });
+
+      continue;
+    }
+
+    if (raw.type === "image_url") {
+      const imageUrl = String(raw.image_url?.url || "");
+
+      if (!/^data:image\/(png|jpeg|jpg|webp);base64,/i.test(imageUrl)) {
+        continue;
+      }
+
+      imageBytesApprox += imageUrl.length;
+
+      if (imageBytesApprox > 7 * 1024 * 1024) {
+        const err = new Error("Attached images are too large for Included AI.");
+        err.status = 413;
+        throw err;
+      }
+
+      parts.push({
+        type: "image_url",
+        image_url: {
+          url: imageUrl,
+        },
+      });
+    }
+  }
+
+  return parts.length ? parts : "";
+}
+
 function sanitizeIncludedAiMessages(messages, policy) {
   if (!Array.isArray(messages)) {
     const err = new Error("messages must be an array");
@@ -124,10 +185,7 @@ function sanitizeIncludedAiMessages(messages, policy) {
 
     const out = {
       role,
-      content:
-        typeof m?.content === "string" || m?.content == null
-          ? m?.content ?? ""
-          : String(m.content)
+      content: sanitizeIncludedAiMessageContent(m?.content, policy)
     };
 
     if (m?.tool_call_id) {

@@ -459,7 +459,7 @@ export function updatePublicShareThemeButtons(root = document) {
 
   document.documentElement.setAttribute('data-public-share-theme', mode);
 
-  let icon = 'monitor';
+  let icon = 'laptop';
   let label = 'System theme';
   if (configMode === 'light') {
     icon = 'sun';
@@ -529,7 +529,7 @@ export function showThemeDropdown(buttonEl) {
   const options = [
     { value: 'light', label: 'Light', icon: 'sun' },
     { value: 'dark', label: 'Dark', icon: 'moon' },
-    { value: 'auto', label: 'System', icon: 'monitor' },
+    { value: 'auto', label: 'System', icon: 'laptop' },
   ];
 
   menu.innerHTML = options.map((opt) => {

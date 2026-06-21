@@ -22,30 +22,19 @@ export const AI_BILLING_MODES = Object.freeze({
   INCLUDED: 'included',
 });
 
-export const INCLUDED_AI_MODELS = Object.freeze([
-  {
-    id: 'deepseek/deepseek-v4-flash',
-    label: 'DeepSeek V4 Flash',
-    hint: 'Ultra-Efficient Workhorse',
-  },
-  {
-    id: 'tencent/hy3-preview',
-    label: 'Tencent Hunyuan Preview',
-    hint: 'Deep-Thinking Agent & Coder. Good with tools',
-  },
-  {
-    id: 'google/gemini-2.5-flash-lite',
-    label: 'Gemini 2.5 Flash Lite',
-    hint: 'The ADHD Golden Retriever',
-  },
-  {
-    id: 'openai/gpt-oss-20b',
-    label: 'GPT OSS 20B',
-    hint: 'Probably fails a lot',
-  },
-]);
+import {
+  INCLUDED_AI_MODELS,
+  DEFAULT_INCLUDED_AI_MODEL,
+  normalizeIncludedAiModel,
+  includedAiModelLabel,
+} from './ai-models.js';
 
-export const DEFAULT_INCLUDED_AI_MODEL = 'deepseek/deepseek-v4-flash';
+export {
+  INCLUDED_AI_MODELS,
+  DEFAULT_INCLUDED_AI_MODEL,
+  normalizeIncludedAiModel,
+  includedAiModelLabel,
+};
 
 export const INCLUDED_AI_CLIENT_POLICY = Object.freeze({
   modelLabel: 'YANTA Cloud credits',
@@ -63,21 +52,6 @@ export const OPENROUTER_ZDR_POLICY = Object.freeze({
   description:
     'YANTA requests Zero Data Retention routing from OpenRouter. Prompts are routed only to endpoints with a Zero Data Retention policy.',
 });
-
-export function normalizeIncludedAiModel(model) {
-  const clean = String(model || '').trim();
-
-  if (INCLUDED_AI_MODELS.some((m) => m.id === clean)) {
-    return clean;
-  }
-
-  return DEFAULT_INCLUDED_AI_MODEL;
-}
-
-export function includedAiModelLabel(model) {
-  const clean = normalizeIncludedAiModel(model);
-  return INCLUDED_AI_MODELS.find((m) => m.id === clean)?.label || clean;
-}
 
 export function isIncludedAiMode(settings = getAiSettings()) {
   return settings.billingMode === AI_BILLING_MODES.INCLUDED;

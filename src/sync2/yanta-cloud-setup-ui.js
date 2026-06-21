@@ -48,10 +48,68 @@ import {
   yantaConfirm,
 } from '../dialogs.js';
 
+import {
+  registerOverlayRoute,
+  pushOverlayState,
+  closeTopOverlay,
+  overlayIdFromState,
+} from '../overlay-history.js';
+
 let modal = null;
 let statusEl = null;
 let turnstileToken = '';
 let turnstileWidgetId = null;
+
+const YANTA_CLOUD_SETUP_OVERLAY_ID = 'yanta-cloud-setup';
+
+let yantaCloudOverlayRegistered = false;
+let lastPairingTextForHistory = '';
+
+function yantaCloudSetupIsOpen() {
+  return !!modal && modal.hidden === false;
+}
+
+function registerYantaCloudSetupOverlayRoute() {
+  if (yantaCloudOverlayRegistered) return;
+
+  yantaCloudOverlayRegistered = true;
+
+  registerOverlayRoute(YANTA_CLOUD_SETUP_OVERLAY_ID, {
+    open: async () => {
+      if (lastPairingTextForHistory) {
+        await openYantaCloudSetupWithPayload(lastPairingTextForHistory, {
+          fromHistory: true,
+        });
+        return;
+      }
+
+      await openYantaCloudSetup({
+        fromHistory: true,
+      });
+    },
+
+    close: () => {
+      close({
+        fromHistory: true,
+      });
+    },
+
+    isOpen: yantaCloudSetupIsOpen,
+  });
+}
+
+function markYantaCloudSetupOverlayOpen({
+  fromHistory = false,
+} = {}) {
+  registerYantaCloudSetupOverlayRoute();
+
+  if (
+    !fromHistory &&
+    overlayIdFromState() !== YANTA_CLOUD_SETUP_OVERLAY_ID
+  ) {
+    pushOverlayState(YANTA_CLOUD_SETUP_OVERLAY_ID);
+  }
+}
 
 let cloudUsageTooltipEl = null;
 
@@ -205,8 +263,21 @@ function setStatus(msg = '', type = '') {
   statusEl.className = 'yanta-cloud-status' + (type ? ` ${type}` : '');
 }
 
-function close() {
+function close({
+  fromHistory = false,
+} = {}) {
   hideCloudUsageTooltip();
+
+  if (
+    !fromHistory &&
+    overlayIdFromState() === YANTA_CLOUD_SETUP_OVERLAY_ID
+  ) {
+    closeTopOverlay(() => {
+      if (modal) modal.hidden = true;
+    });
+
+    return;
+  }
 
   if (modal) modal.hidden = true;
 }
@@ -782,7 +853,15 @@ function renderTurnstile(container) {
   });
 }
 
-export async function openYantaCloudSetup() {
+export async function openYantaCloudSetup({
+  fromHistory = false,
+} = {}) {
+  lastPairingTextForHistory = '';
+
+  markYantaCloudSetupOverlayOpen({
+    fromHistory,
+  });
+
   try {
     const me = await cloudMe();
 
@@ -910,6 +989,7 @@ function storageBreakdownLabel(group) {
   const map = {
     'vault updates': 'Vault update history',
     'vault snapshots': 'Vault snapshots',
+    'ai sessions': 'AI Sessions',
     'note updates': 'Note update history',
     'note snapshots': 'Note snapshots',
     assets: 'Assets',
@@ -923,6 +1003,7 @@ function storageBreakdownCaption(group) {
   const map = {
     'vault updates': 'Historical metadata updates covered by snapshots after compaction.',
     'vault snapshots': 'Full encrypted vault metadata snapshots.',
+    'ai sessions': 'Estimated encrypted AI chat/session note content. Exact server split is unavailable because sessions are stored zero-knowledge inside encrypted note objects.',
     'note updates': 'Historical encrypted note-body updates.',
     'note snapshots': 'Full encrypted note-body snapshots.',
     assets: 'Encrypted images/drawing assets.',
@@ -936,6 +1017,7 @@ function storageBreakdownColor(group) {
   const map = {
     'vault updates': 'var(--yellow)',
     'vault snapshots': 'var(--accent)',
+    'ai sessions': 'var(--accent-2)',
     'note updates': 'var(--accent-2)',
     'note snapshots': 'var(--green)',
     assets: 'var(--red)',
@@ -945,7 +1027,10 @@ function storageBreakdownColor(group) {
   return map[group] || 'var(--text-faint)';
 }
 
-function normalizedStorageBreakdownSegments(breakdown, storageLimitBytes) {
+function normalizedStorageBreakdownSegments(breakdown, storageLimitBytes, {
+  aiSessionsBytes = 0,
+  aiSessionsCount = 0,
+} = {}) {
   const groups = Array.isArray(breakdown?.groups)
     ? breakdown.groups
     : [];
@@ -954,7 +1039,17 @@ function normalizedStorageBreakdownSegments(breakdown, storageLimitBytes) {
 
   if (!groups.length || limit <= 0) return [];
 
-  return groups
+  const extra = [];
+
+  if (Number(aiSessionsBytes || 0) > 0 && limit > 0) {
+    extra.push({
+      group: 'ai sessions',
+      count: Number(aiSessionsCount || 0),
+      bytes: Number(aiSessionsBytes || 0),
+    });
+  }
+
+  return [...groups, ...extra]
     .filter((group) => Number(group.bytes || 0) > 0)
     .map((group) => {
       const bytes = Number(group.bytes || 0);
@@ -1040,7 +1135,10 @@ function usageBarHtml({
   `;
 }
 
-function usageBarsHtml(me, storageBreakdown = null) {
+function usageBarsHtml(me, storageBreakdown = null, {
+  aiSessionsBytes = 0,
+  aiSessionsCount = 0,
+} = {}) {
   const usage = me.usage || {};
   const limits = me.limits || {};
   const plan = me.user?.plan || 'free';
@@ -1048,7 +1146,11 @@ function usageBarsHtml(me, storageBreakdown = null) {
 
   const storageSegments = normalizedStorageBreakdownSegments(
     storageBreakdown,
-    limits.storageBytes
+    limits.storageBytes,
+    {
+      aiSessionsBytes,
+      aiSessionsCount,
+    }
   );
 
   const storageCaption = storageSegments.length
@@ -1118,9 +1220,22 @@ async function hydrateUsageWithStorageBreakdown({
       deviceId: currentDeviceId,
     });
 
+    let aiSessionsEstimate = {
+      bytes: 0,
+      count: 0,
+    };
+
+    try {
+      const mod = await import('../ai/ai-sessions.js');
+      aiSessionsEstimate = await mod.estimateAiSessionsStorageBytes();
+    } catch {}
+
     if (!host.isConnected) return;
 
-    host.innerHTML = usageBarsHtml(me, breakdown);
+    host.innerHTML = usageBarsHtml(me, breakdown, {
+      aiSessionsBytes: aiSessionsEstimate.bytes,
+      aiSessionsCount: aiSessionsEstimate.count,
+    });
   } catch (err) {
     console.warn('[YANTA Cloud] storage breakdown failed', err);
 
@@ -2303,7 +2418,15 @@ async function renderConnected(vaultId, syncKey) {
   });
 }
 
-export async function openYantaCloudSetupWithPayload(pairingText) {
+export async function openYantaCloudSetupWithPayload(pairingText, {
+  fromHistory = false,
+} = {}) {
+  lastPairingTextForHistory = String(pairingText || '');
+
+  markYantaCloudSetupOverlayOpen({
+    fromHistory,
+  });
+
   ensureModal();
   modal.hidden = false;
 

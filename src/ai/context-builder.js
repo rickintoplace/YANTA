@@ -44,6 +44,10 @@ import {
   trashCount,
 } from '../trash.js';
 
+import {
+  buildAiContextPromptParts,
+} from './context-attachments.js';
+
 const WIKILINK_RE = /\[\[([^\]|\n]+)(?:\|([^\]\n]+))?\]\]/g;
 const IMAGE_RE = /!\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)(?:\{[^}\n]*\})?/g;
 const YANTA_IMAGE_RE = /yanta-img:\/\/([a-z0-9]+)/gi;
@@ -290,7 +294,9 @@ export async function buildSystemMessage() {
   };
 }
 
-export async function buildContextMessage() {
+export async function buildContextMessage({
+  attachments = [],
+} = {}) {
   const settings = getEffectiveAiRuntimeSettings();
   const max = Number(settings.maxContextChars || 30000);
 
@@ -301,6 +307,7 @@ export async function buildContextMessage() {
   const selection = state.surface === 'note'
     ? getCurrentSelectionText()
     : '';
+
   const fileTree = await buildFileTreeContext();
 
   let currentNoteMarkdown = '';
@@ -322,12 +329,16 @@ export async function buildContextMessage() {
   if (settings.permissions.allowReadAiBrain !== false) {
     try {
       aiBrainContext = await buildAiBrainContextBlock({
-        maxChars: Math.min(16000, Math.max(6000, Math.floor(max * 0.45))),
+        maxChars: Math.min(16000, Math.max(6000, Math.floor(max * 0.35))),
       });
     } catch {
       aiBrainContext = '';
     }
   }
+
+  const attached = await buildAiContextPromptParts(attachments, {
+    maxChars: Math.min(28000, Math.max(8000, Math.floor(max * 0.60))),
+  });
 
   const approxLocation =
     settings.permissions.allowApproxLocationContext !== false
@@ -350,6 +361,14 @@ export async function buildContextMessage() {
     fileTree,
     privacyMode: settings.privacyMode,
     noteBodyIncluded: !!currentNoteMarkdown,
+    attachedContext: {
+      count: attached.totals.items,
+      words: attached.totals.words,
+      chars: attached.totals.chars,
+      images: attached.totals.images,
+      unsupported: attached.totals.unsupported,
+      note: 'Attached context was explicitly selected or uploaded by the user.',
+    },
     approxLocation: approxLocation
       ? {
           available: true,
@@ -366,10 +385,12 @@ export async function buildContextMessage() {
         },
   };
 
-  const text = [
+  const baseText = [
     aiBrainContext
       ? aiBrainContext
       : 'YANTA AI Brain: [not available]',
+    '',
+    attached.text || 'User-attached context: [none]',
     '',
     'YANTA context:',
     JSON.stringify(payload, null, 2),
@@ -379,8 +400,23 @@ export async function buildContextMessage() {
       : 'Current note markdown: [not included]',
   ].join('\n');
 
+  const text = truncateMiddle(baseText, max + 16000);
+
+  if (attached.imageParts.length) {
+    return {
+      role: 'user',
+      content: [
+        {
+          type: 'text',
+          text,
+        },
+        ...attached.imageParts,
+      ],
+    };
+  }
+
   return {
     role: 'user',
-    content: truncateMiddle(text, max + 12000),
+    content: text,
   };
 }

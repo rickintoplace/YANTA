@@ -114,6 +114,10 @@ import {
   noteState,
   calendarUrl,
   calendarState,
+  pushCalendarHistory,
+  replaceCalendarHistory,
+  pushCalendarEventHistory,
+  replaceCalendarEventHistory,
 } from './navigation.js';
 import {
   openCalendar,
@@ -167,6 +171,9 @@ import {
   renderSidebarFootActions,
   createSidebarFootOverflowMenuItems,
 } from './sidebar-foot-actions.js';
+import {
+  ensureAiSessionsFolder,
+} from './ai/ai-sessions.js';
 
 let sharePreviewLocked = false;
 
@@ -247,7 +254,9 @@ function replaceMobileSidebarOverlayWithCurrentRoute() {
   );
 }
 
-function openCalendarRoute() {
+function openCalendarRoute({
+  replace = false,
+} = {}) {
   /*
     If Calendar is launched from the mobile sidebar, remove the sidebar
     overlay entry first. Otherwise Back from Calendar would reopen the
@@ -256,8 +265,41 @@ function openCalendarRoute() {
   replaceMobileSidebarOverlayWithCurrentRoute();
 
   openCalendar({
-    push: true,
+    push: false,
+    replace: false,
   });
+
+  if (replace) {
+    replaceCalendarHistory();
+  } else {
+    pushCalendarHistory();
+  }
+}
+
+function openCalendarEventRoute(eventId, {
+  replace = false,
+} = {}) {
+  const id = String(eventId || '').trim();
+
+  if (!id) {
+    openCalendarRoute({
+      replace,
+    });
+    return;
+  }
+
+  replaceMobileSidebarOverlayWithCurrentRoute();
+
+  openCalendarEvent(id, {
+    push: false,
+    replace: false,
+  });
+
+  if (replace) {
+    replaceCalendarEventHistory(id);
+  } else {
+    pushCalendarEventHistory(id);
+  }
 }
 
 async function openSourcesRoute(source = 'unknown') {
@@ -1345,6 +1387,7 @@ async function init() {
   setupAssistant();
   setupFloatingCreate();
   setupRss();
+  await ensureAiSessionsFolder();
   setupPublicShareAutoPublisher();
   window.addEventListener('yanta-public-share-changed', () => {
     renderShareIndicator();
@@ -1397,30 +1440,13 @@ if (!sharedOpen?.noteId) {
 
   if (route.surface === 'calendar') {
     if (route.eventId) {
-      openCalendarEvent(route.eventId, {
-        push: false,
+      openCalendarEventRoute(route.eventId, {
         replace: true,
       });
-
-      history.replaceState(
-        {
-          surface: 'calendar',
-          eventId: route.eventId,
-        },
-        '',
-        `#calendar/${encodeURIComponent(route.eventId)}`
-      );
     } else {
-      openCalendar({
-        push: false,
+      openCalendarRoute({
         replace: true,
       });
-
-      history.replaceState(
-        { surface: 'calendar' },
-        '',
-        '#calendar'
-      );
     }
 
     consumePendingPublicShareCalendarEvent();
@@ -1848,7 +1874,7 @@ function expandRightPane(kind = 'preview') {
 
   if (kind === 'calendar') {
     closeSidePane({ silent: true });
-    openCalendar({ push: true });
+    openCalendarRoute();
     return;
   }
 
@@ -2307,9 +2333,7 @@ function bindEvents() {
       const eventId = decodeURIComponent(href.replace(/^#calendar\//, ''));
 
       if (eventId) {
-        openCalendarEvent(eventId, {
-          push: true,
-        });
+        openCalendarEventRoute(eventId);
       }
 
       return;
@@ -2633,7 +2657,7 @@ function handleGlobalKey(e) {
   else if (meta && e.key === 'g') { e.preventDefault(); openGraph(); }
   else if (meta && e.shiftKey && e.key.toLowerCase() === 'c') {
     e.preventDefault();
-    openCalendar();
+    openCalendarRoute();
   }
   else if (meta && e.key.toLowerCase() === 'h') {
     e.preventDefault();

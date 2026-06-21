@@ -63,6 +63,7 @@ import {
   let focusKey = '';
   
   let pendingCardPointer = null;
+  let externalDashboardDragStarted = false;
   let pendingTouchLongPress = null;
   let pendingBlankSelectionTap = null;
   let pendingRectStart = null;
@@ -192,6 +193,24 @@ import {
         '.yanta-dashboard-popover',
       ].join(',')
     );
+  }
+
+  function shouldStartExternalDashboardDragForKey(key) {
+    /*
+      Dashboard.js owns the real card drag/drop implementation.
+      dashboard-multiselect owns click/toggle semantics while selection is active.
+      For selected cards, movement should become a real dashboard drag.
+    */
+    return (
+      selectedKeys.size > 0 &&
+      selectedKeys.has(String(key || ''))
+    );
+  }
+
+  function emitDashboardExternalDrag(type, detail = {}) {
+    window.dispatchEvent(new CustomEvent(`yanta-dashboard-external-drag-${type}`, {
+      detail,
+    }));
   }
 
   function isBlankDashboardAreaTarget(target) {
@@ -806,11 +825,16 @@ import {
     const key = keyFromCard(card);
     if (!key) return;
   
+    externalDashboardDragStarted = false;
+
     pendingCardPointer = {
       pointerId: e.pointerId,
+      pointerType: e.pointerType || '',
       key,
       startX: e.clientX,
       startY: e.clientY,
+      lastX: e.clientX,
+      lastY: e.clientY,
       moved: false,
       shiftKey: e.shiftKey,
       ctrlKey: e.ctrlKey,
@@ -828,18 +852,50 @@ import {
     document.removeEventListener('pointercancel', onCardPointerCancel, true);
   
     pendingCardPointer = null;
+    externalDashboardDragStarted = false;
   }
   
   function onCardPointerMove(e) {
     if (!pendingCardPointer || e.pointerId !== pendingCardPointer.pointerId) return;
-  
+
+    pendingCardPointer.lastX = e.clientX;
+    pendingCardPointer.lastY = e.clientY;
+
     const dist = Math.hypot(
       e.clientX - pendingCardPointer.startX,
       e.clientY - pendingCardPointer.startY
     );
-  
-    if (dist > MOVE_CANCEL_PX) {
-      pendingCardPointer.moved = true;
+
+    if (dist <= MOVE_CANCEL_PX) return;
+
+    pendingCardPointer.moved = true;
+
+    if (!shouldStartExternalDashboardDragForKey(pendingCardPointer.key)) {
+      return;
+    }
+
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation?.();
+
+    if (!externalDashboardDragStarted) {
+      externalDashboardDragStarted = true;
+
+      emitDashboardExternalDrag('start', {
+        key: pendingCardPointer.key,
+        pointerId: pendingCardPointer.pointerId,
+        pointerType: pendingCardPointer.pointerType,
+        clientX: e.clientX,
+        clientY: e.clientY,
+      });
+    } else {
+      emitDashboardExternalDrag('move', {
+        key: pendingCardPointer.key,
+        pointerId: pendingCardPointer.pointerId,
+        pointerType: pendingCardPointer.pointerType,
+        clientX: e.clientX,
+        clientY: e.clientY,
+      });
     }
   }
   
@@ -851,14 +907,25 @@ import {
     e.stopImmediatePropagation?.();
 
     const snap = pendingCardPointer;
+    const dragWasStarted = externalDashboardDragStarted;
 
-    /*
-      Wenn kurz vorher ein Longpress gefeuert hat, darf pointerup
-      NICHT nochmal toggeln. Sonst verliert man bei Bulk-Selection
-      die Mehrfachauswahl oder reduziert auf eine einzelne Card.
-    */
     const longPressAlreadyHandled =
       performance.now() < suppressClickUntil;
+
+    if (dragWasStarted) {
+      emitDashboardExternalDrag('end', {
+        key: snap.key,
+        pointerId: snap.pointerId,
+        pointerType: snap.pointerType,
+        clientX: e.clientX,
+        clientY: e.clientY,
+      });
+
+      cleanupCardPointer();
+
+      suppressClickUntil = performance.now() + 500;
+      return;
+    }
 
     cleanupCardPointer();
 
@@ -871,7 +938,17 @@ import {
   
   function onCardPointerCancel(e) {
     if (!pendingCardPointer || e.pointerId !== pendingCardPointer.pointerId) return;
-  
+
+    if (externalDashboardDragStarted) {
+      emitDashboardExternalDrag('cancel', {
+        key: pendingCardPointer.key,
+        pointerId: pendingCardPointer.pointerId,
+        pointerType: pendingCardPointer.pointerType,
+        clientX: e.clientX,
+        clientY: e.clientY,
+      });
+    }
+
     cleanupCardPointer();
   }
   

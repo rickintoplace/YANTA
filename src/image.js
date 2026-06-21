@@ -27,6 +27,10 @@ import {
 import {
   yantaConfirm,
 } from './dialogs.js';
+import {
+  compressImageFile,
+  blobToDataURL,
+} from './media/image-compression.js';
 
 let imgModal, compressPanel;
 let imageOverlayRegistered = false;
@@ -156,28 +160,42 @@ function setTab(name) {
 // Used by drag-drop directly onto the editor (no modal).
 export async function insertImageAsRef(file) {
   if (!file || !file.type.startsWith('image/')) return;
-  let blob = file;
-  let dims = { w: 0, h: 0 };
-  if (file.type !== 'image/svg+xml') {
-    try {
-      const bmp = await createImageBitmap(file);
-      const ratio = Math.min(1, 1600 / bmp.width);
-      const w = Math.round(bmp.width * ratio);
-      const h = Math.round(bmp.height * ratio);
-      const c = document.createElement('canvas');
-      c.width = w; c.height = h;
-      c.getContext('2d').drawImage(bmp, 0, 0, w, h);
-      blob = await new Promise((r) => c.toBlob(r, 'image/webp', 0.85));
-      dims = { w, h };
-    } catch { blob = file; }
+
+  let compressed;
+
+  try {
+    compressed = await compressImageFile(file, {
+      maxWidth: 1600,
+      quality: 0.85,
+      mime: file.type === 'image/svg+xml' ? file.type : 'image/webp',
+    });
+  } catch {
+    compressed = {
+      blob: file,
+      mime: file.type,
+      compressedSize: file.size,
+    };
   }
+
+  const blob = compressed.blob || file;
   const id = uid();
-  const meta = { id, name: file.name || (id + '.img'), size: blob.size, type: blob.type, ts: Date.now() };
+
+  const meta = {
+    id,
+    name: file.name || (id + '.img'),
+    size: blob.size,
+    type: blob.type || compressed.mime || file.type,
+    ts: Date.now(),
+  };
+
   await store.images.put({ ...meta, blob });
   state.imagesMeta.set(id, meta);
   state.imageBlobs.set(id, URL.createObjectURL(blob));
+
   const altBase = (file.name || 'image').replace(/\.[^.]+$/, '');
+
   insertAtCursor(`\n![${altBase}](yanta-img://${id})\n`);
+
   updateStorageMeter();
   toast('Image inserted', 'success');
 }
@@ -234,10 +252,6 @@ function updateBase64Warning(size) {
     w.hidden = false;
     w.textContent = `Embedding ${fmtBytes(size)} as Base64 will bloat your .md file. Library reference recommended.`;
   } else w.hidden = true;
-}
-
-function blobToDataURL(blob) {
-  return new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(r.result); r.onerror = () => rej(r.error); r.readAsDataURL(blob); });
 }
 
 async function insertCompressedImage() {

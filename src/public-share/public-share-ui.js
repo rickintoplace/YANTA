@@ -38,7 +38,71 @@ import {
   yantaConfirm,
 } from '../dialogs.js';
 
+import {
+  pushOverlayState,
+  closeTopOverlay,
+  registerOverlayRoute,
+  overlayIdFromState,
+} from '../overlay-history.js';
+
 let modal = null;
+let shareOverlayRegistered = false;
+
+function unifiedShareModalIsOpen() {
+  return !!modal && modal.hidden === false;
+}
+
+function publicSharesManagerIsOpen() {
+  return !!managerModal && managerModal.hidden === false;
+}
+
+function registerShareOverlayRoutes() {
+  if (shareOverlayRegistered) return;
+
+  shareOverlayRegistered = true;
+
+  registerOverlayRoute('share-note', {
+    open: ({ data, state: historyState } = {}) => {
+      const noteId =
+        data?.noteId ||
+        historyState?.noteId ||
+        state.currentNoteId ||
+        '';
+
+      if (noteId && state.notes.has(noteId)) {
+        state.currentNoteId = noteId;
+      }
+
+      return openUnifiedShareModal({
+        fromHistory: true,
+      });
+    },
+
+    close: () => {
+      closeUnifiedShareModal({
+        fromHistory: true,
+      });
+    },
+
+    isOpen: unifiedShareModalIsOpen,
+  });
+
+  registerOverlayRoute('public-shares-manager', {
+    open: () => {
+      return openPublicSharesManager({
+        fromHistory: true,
+      });
+    },
+
+    close: () => {
+      closePublicSharesManager({
+        fromHistory: true,
+      });
+    },
+
+    isOpen: publicSharesManagerIsOpen,
+  });
+}
 
 function renderQrSvg(text, size = 220) {
   const qr = qrcode(0, 'Q');
@@ -267,6 +331,15 @@ function ensureCss() {
   font-size: 13px;
 }
 
+.compress-actions.sharing-options {
+    flex-direction: row;
+    flex-wrap: wrap;
+}
+
+.compress-actions.sharing-options button.btn.primary {
+    flex: auto;
+}
+
 @media (max-width: 680px) {
   .yanta-public-share-row {
     grid-template-columns: 1fr;
@@ -283,6 +356,8 @@ function ensureCss() {
 }
 
 function ensureModal() {
+  registerShareOverlayRoutes();
+
   if (modal) return modal;
 
   ensureCss();
@@ -301,8 +376,30 @@ function ensureModal() {
   return modal;
 }
 
-export function closeUnifiedShareModal() {
-  if (modal) modal.hidden = true;
+export function closeUnifiedShareModal({
+  fromHistory = false,
+} = {}) {
+  if (!modal) return;
+
+  /*
+    Only consume history if the current overlay is actually share-note.
+    This prevents closing a parent overlay accidentally.
+  */
+  if (
+    !fromHistory &&
+    modal.hidden === false &&
+    overlayIdFromState() === 'share-note'
+  ) {
+    closeTopOverlay(() => {
+      closeUnifiedShareModal({
+        fromHistory: true,
+      });
+    });
+
+    return;
+  }
+
+  modal.hidden = true;
 }
 
 function statusText(status) {
@@ -405,7 +502,7 @@ async function renderPublicTab(noteId) {
               </select>
             </label>
 
-            <div class="compress-actions">
+            <div class="compress-actions sharing-options">
               <button class="btn primary" data-create-public-share>
                 ${lucide('link', 14)}
                 Create public link
@@ -552,7 +649,10 @@ function renderLiveTab() {
   `;
 
   body.querySelector('[data-open-live-share]')?.addEventListener('click', async () => {
-    closeUnifiedShareModal();
+    closeUnifiedShareModal({
+      fromHistory: true,
+    });
+
     await openLiveShareModal();
   });
 
@@ -564,6 +664,7 @@ function renderLiveTab() {
 let managerModal = null;
 
 function ensureManagerModal() {
+  registerShareOverlayRoutes();
   ensureCss();
 
   if (managerModal) return managerModal;
@@ -587,10 +688,26 @@ function ensureManagerModal() {
   return managerModal;
 }
 
-export function closePublicSharesManager() {
-  if (managerModal) {
-    managerModal.hidden = true;
+export function closePublicSharesManager({
+  fromHistory = false,
+} = {}) {
+  if (!managerModal) return;
+
+  if (
+    !fromHistory &&
+    managerModal.hidden === false &&
+    overlayIdFromState() === 'public-shares-manager'
+  ) {
+    closeTopOverlay(() => {
+      closePublicSharesManager({
+        fromHistory: true,
+      });
+    });
+
+    return;
   }
+
+  managerModal.hidden = true;
 }
 
 function cloudShareActive(raw = {}) {
@@ -868,13 +985,27 @@ async function renderPublicSharesManager() {
   });
 }
 
-export async function openPublicSharesManager() {
+export async function openPublicSharesManager({
+  fromHistory = false,
+} = {}) {
   const m = ensureManagerModal();
+
+  const wasClosed = m.hidden !== false;
+
   m.hidden = false;
+
+  if (!fromHistory && wasClosed) {
+    pushOverlayState('public-shares-manager');
+  }
+
   await renderPublicSharesManager();
 }
 
-export async function openUnifiedShareModal() {
+export async function openUnifiedShareModal({
+  fromHistory = false,
+} = {}) {
+  registerShareOverlayRoutes();
+
   const noteId = state.currentNoteId;
 
   if (!noteId || !state.notes.has(noteId)) {
@@ -915,6 +1046,15 @@ export async function openUnifiedShareModal() {
     renderLiveTab();
   });
 
+  const wasClosed = m.hidden !== false;
+
   m.hidden = false;
+
+  if (!fromHistory && wasClosed) {
+    pushOverlayState('share-note', {
+      noteId,
+    });
+  }
+
   await renderPublicTab(noteId);
 }

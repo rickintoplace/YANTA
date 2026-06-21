@@ -126,6 +126,7 @@ import {
   yantaConfirm,
   yantaFolderPicker,
 } from './dialogs.js';
+import { Shredder } from 'lucide';
 
 /**
  * Aktiver Marker für Notes.
@@ -1391,7 +1392,8 @@ function trashRootFolderRow(trashItems, totalTrashCount) {
         },
         'hr',
         {
-          label: 'Empty trash…',
+          label: 'Empty trash',
+          icon: 'shredder',
           danger: true,
           action: async () => {
             const ok = await yantaConfirm({
@@ -1553,7 +1555,8 @@ function trashNoteRow(note, depth = 0) {
         },
         'hr',
         {
-          label: 'Delete permanently…',
+          label: 'Delete permanently',
+          icon: 'shredder',
           danger: true,
           action: async () => {
             const ok = await yantaConfirm({

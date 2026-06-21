@@ -101,7 +101,14 @@ import {
 import {
   yantaConfirm,
   yantaPrompt,
+  yantaChoice,
 } from './dialogs.js';
+
+import {
+  pushOverlayState,
+  closeTopOverlay,
+  registerOverlayRoute,
+} from './overlay-history.js';
 
 import {
   moveNoteToTrash,
@@ -149,13 +156,61 @@ let fc = null;
 let initialized = false;
 
 let eventModal = null;
+let calendarEventOverlayRegistered = false;
 let categoriesModal = null;
 let calendarSourcesModal = null;
 let calendarImportModal = null;
 let calendarCategoryDeleteModal = null;
 let calendarDateTimePickerModal = null;
-let calendarDialogModal = null;
 let calendarNotePickerModal = null;
+
+function calendarEventEditorIsOpen() {
+  return !!eventModal && eventModal.hidden === false;
+}
+
+function registerCalendarEventOverlayRoute() {
+  if (calendarEventOverlayRegistered) return;
+
+  calendarEventOverlayRegistered = true;
+
+  registerOverlayRoute('calendar-event-editor', {
+    open: ({ data, state } = {}) => {
+      const eventId =
+        data?.eventId ||
+        state?.eventId ||
+        '';
+
+      const input =
+        data?.input ||
+        state?.input ||
+        null;
+
+      if (eventId) {
+        openEventEditor({
+          id: eventId,
+          _fromHistory: true,
+        });
+
+        return;
+      }
+
+      if (input && typeof input === 'object') {
+        openEventEditor({
+          ...input,
+          _fromHistory: true,
+        });
+      }
+    },
+
+    close: () => {
+      closeEventModal({
+        fromHistory: true,
+      });
+    },
+
+    isOpen: calendarEventEditorIsOpen,
+  });
+}
 
 let calendarMode = 'surface'; // 'surface' | 'pane'
 let calendarOriginalParent = null;
@@ -4134,87 +4189,47 @@ export function calendarChoiceDialog({
   message = '',
   choices = [],
 } = {}) {
-  return new Promise((resolve) => {
-    if (!calendarDialogModal) {
-      calendarDialogModal = document.createElement('div');
-      calendarDialogModal.className = 'modal yanta-calendar-dialog-modal';
-      calendarDialogModal.hidden = true;
-      document.body.append(calendarDialogModal);
-    }
+  const safeChoices = choices.length
+    ? choices
+    : [
+        {
+          id: 'ok',
+          label: 'OK',
+          primary: true,
+          icon: 'check',
+        },
+        {
+          id: 'cancel',
+          label: 'Cancel',
+          icon: 'x',
+        },
+      ];
 
-    const safeChoices = choices.length
-      ? choices
-      : [
-          { id: 'ok', label: 'OK', primary: true },
-          { id: 'cancel', label: 'Cancel' },
-        ];
-
-    calendarDialogModal.innerHTML = `
-      <div class="modal-card yanta-calendar-dialog-card">
-        <header class="modal-head">
-          <h3>${escapeHtml(title)}</h3>
-          <button class="icon-btn" data-dialog-choice="cancel">&times;</button>
-        </header>
-
-        <div class="modal-body">
-          <div class="yanta-calendar-dialog-message">
-            ${escapeHtml(message).replace(/\n/g, '<br>')}
-          </div>
-
-          <div class="compress-actions yanta-calendar-dialog-actions">
-            <span class="grow"></span>
-            ${safeChoices.map((choice) => `
-              <button
-                class="btn ${choice.primary ? 'primary' : ''} ${choice.danger ? 'danger' : ''}"
-                data-dialog-choice="${escapeAttr(choice.id)}">
-                ${choice.icon ? lucide(choice.icon, 14) : ''}
-                ${escapeHtml(choice.label)}
-              </button>
-            `).join('')}
-          </div>
-        </div>
-      </div>
-    `;
-
-    const finish = (id) => {
-      calendarDialogModal.hidden = true;
-      resolve(id);
-    };
-
-    calendarDialogModal.querySelectorAll('[data-dialog-choice]').forEach((btn) => {
-      btn.addEventListener('click', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        finish(btn.dataset.dialogChoice || 'cancel');
-      });
-    });
-
-    calendarDialogModal.addEventListener('click', function onBackdrop(e) {
-      if (e.target !== calendarDialogModal) return;
-      calendarDialogModal.removeEventListener('click', onBackdrop);
-      finish('cancel');
-    }, { once: true });
-
-    const onKey = (e) => {
-      if (calendarDialogModal.hidden) {
-        window.removeEventListener('keydown', onKey);
-        return;
-      }
-
-      if (e.key === 'Escape') {
-        e.preventDefault();
-        window.removeEventListener('keydown', onKey);
-        finish('cancel');
-      }
-    };
-
-    window.addEventListener('keydown', onKey);
-
-    calendarDialogModal.hidden = false;
-
-    requestAnimationFrame(() => {
-      calendarDialogModal.querySelector('.btn.primary, .btn')?.focus?.();
-    });
+  return yantaChoice({
+    title,
+    message,
+    icon: safeChoices.some((choice) => choice.danger)
+      ? 'triangle-alert'
+      : 'calendar-days',
+    danger: safeChoices.some((choice) => choice.danger),
+    choices: safeChoices.map((choice) => ({
+      id: choice.id,
+      label: choice.label,
+      hint: choice.hint || '',
+      icon:
+        choice.icon ||
+        (
+          choice.danger
+            ? 'triangle-alert'
+            : choice.primary
+              ? 'check'
+              : 'circle'
+        ),
+      primary: !!choice.primary,
+      danger: !!choice.danger,
+      disabled: !!choice.disabled,
+    })),
+    cancelLabel: 'Cancel',
   });
 }
 
@@ -7404,6 +7419,8 @@ function safeNotePickerColor(color) {
 // ============================================================
 
 function ensureEventModal() {
+  registerCalendarEventOverlayRoute();
+
   if (eventModal) return eventModal;
 
   eventModal = document.createElement('div');
@@ -7420,8 +7437,22 @@ function ensureEventModal() {
   return eventModal;
 }
 
-function closeEventModal() {
-  if (eventModal) eventModal.hidden = true;
+function closeEventModal({
+  fromHistory = false,
+} = {}) {
+  if (!eventModal) return;
+
+  if (!fromHistory && eventModal.hidden === false) {
+    closeTopOverlay(() => {
+      closeEventModal({
+        fromHistory: true,
+      });
+    });
+
+    return;
+  }
+
+  eventModal.hidden = true;
 }
 
 export function openNewCalendarEvent(input = {}) {
@@ -7476,6 +7507,11 @@ function categoryOptionsHtml(selectedId) {
 }
 
 function openEventEditor(input = {}) {
+  registerCalendarEventOverlayRoute();
+
+  const fromHistory = input._fromHistory === true;
+  const shouldPushOverlay = input._pushOverlay !== false;
+
   const markdownRef = input.markdownRef || null;
   const isMarkdownEvent = !!markdownRef;
 
@@ -8234,7 +8270,31 @@ function openEventEditor(input = {}) {
   renderNoteSection();
   updateDatePreviews();
 
+  const wasClosed = modal.hidden !== false;
+
   modal.hidden = false;
+
+  if (!fromHistory && shouldPushOverlay && wasClosed) {
+    const overlayData =
+      editingExisting && !isMarkdownEvent
+        ? {
+            eventId: ev.id,
+          }
+        : {
+            input: {
+              title: rawTitle || '',
+              start: ev.start,
+              end: ev.end || null,
+              allDay: !!ev.allDay,
+              categoryId: ev.categoryId || DEFAULT_CATEGORY_ID,
+              noteId: ev.noteId || null,
+              location: ev.location || '',
+              description: ev.description || '',
+            },
+          };
+
+    pushOverlayState('calendar-event-editor', overlayData);
+  }
 
   setTimeout(() => {
     modal.querySelector('[data-field="title"]')?.focus();
@@ -9047,7 +9107,10 @@ export function openCalendarEvent(eventId, {
     } catch {}
 
     requestAnimationFrame(() => {
-      openEventEditor({ id });
+      openEventEditor({
+        id,
+        _fromHistory: !push,
+      });
     });
   });
 }

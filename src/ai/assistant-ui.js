@@ -66,8 +66,14 @@ import {
   noteMarkdown,
 } from '../yjs.js';
 
+import {
+  pushOverlayState,
+  closeTopOverlay,
+  registerOverlayRoute,
+} from '../overlay-history.js';
 
 let initialized = false;
+let aiOverlayRegistered = false;
 
 let mode = 'pane'; // pane | floating
 let root = null;
@@ -101,6 +107,37 @@ function supportsViewTransition() {
 
 function isMobileAssistantViewport() {
   return window.matchMedia?.('(max-width: 880px)')?.matches;
+}
+
+function aiFullscreenOverlayIsOpen() {
+  return (
+    mode === 'floating' &&
+    isMobileAssistantViewport() &&
+    floatingShell &&
+    floatingShell.hidden === false
+  );
+}
+
+function registerAiOverlayRoute() {
+  if (aiOverlayRegistered) return;
+
+  aiOverlayRegistered = true;
+
+  registerOverlayRoute('ai-fullscreen', {
+    open: () => {
+      openAssistantFloating({
+        fromHistory: true,
+      });
+    },
+
+    close: () => {
+      closeAssistant({
+        fromHistory: true,
+      });
+    },
+
+    isOpen: aiFullscreenOverlayIsOpen,
+  });
 }
 
 function shouldOpenAssistantFloatingInsteadOfPane() {
@@ -513,9 +550,14 @@ export async function openAssistantPane() {
   setTimeout(() => inputEl?.focus(), 0);
 }
 
-export async function openAssistantFloating() {
+export async function openAssistantFloating({
+  fromHistory = false,
+} = {}) {
   ensureRoot();
   createFloatingShell();
+  registerAiOverlayRoute();
+
+  const wasClosed = !aiFullscreenOverlayIsOpen();
 
   await withAiViewTransition(() => {
     if (isSidePaneOpen('ai')) {
@@ -533,6 +575,14 @@ export async function openAssistantFloating() {
   renderSettings();
   renderMessages();
 
+  if (
+    isMobileAssistantViewport() &&
+    !fromHistory &&
+    wasClosed
+  ) {
+    pushOverlayState('ai-fullscreen');
+  }
+
   setTimeout(() => inputEl?.focus(), 0);
 }
 
@@ -540,7 +590,7 @@ export function openAssistant() {
   return openAssistantSmart();
 }
 
-export function closeAssistant() {
+function closeAssistantUI() {
   if (abortController) {
     try {
       abortController.abort();
@@ -556,6 +606,20 @@ export function closeAssistant() {
     floatingShell.hidden = true;
     floatingShell.classList.remove('active');
   }
+}
+
+export function closeAssistant({
+  fromHistory = false,
+} = {}) {
+  if (!fromHistory && aiFullscreenOverlayIsOpen()) {
+    closeTopOverlay(() => {
+      closeAssistantUI();
+    });
+
+    return;
+  }
+
+  closeAssistantUI();
 }
 
 function addMessage(role, content, extra = {}) {
@@ -1552,9 +1616,12 @@ async function sendCurrentInput() {
 
   await submitUserText(text);
 }
+
 export function setupAssistant() {
   if (initialized) return;
   initialized = true;
+
+  registerAiOverlayRoute();
 
   ensureRoot();
   createFloatingShell();

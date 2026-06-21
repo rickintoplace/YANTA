@@ -721,10 +721,10 @@ export async function deleteCurrentNote() {
   } else if (calendar?.calendarChoiceDialog) {
     const choice = await calendar.calendarChoiceDialog({
       title: 'Delete note',
-      message: `Move "${note.title || 'Untitled'}" to Trash?.`,
+      message: `Move "${note.title || 'Untitled'}" to Trash?`,
       choices: [
-        { id: 'delete', label: 'Move to Trash', primary: true, danger: true },
-        { id: 'cancel', label: 'Cancel' },
+        { id: 'delete', label: 'Move to Trash', primary: true, danger: true, icon: 'trash' },
+        { id: 'cancel', label: `No, keep ${note.title || 'Untitled'}`, icon: 'FileText' },
       ],
     });
 
@@ -980,7 +980,7 @@ export async function createWelcomeNote() {
       type: 'markdown',
       folderId,
       tags: ['welcome', 'start'],
-      pinned: true,
+      pinned: false,
       icon: 'sparkles',
       color: '#2563eb',
       body: `# Start here

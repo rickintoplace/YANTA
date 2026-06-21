@@ -20,15 +20,48 @@
 // ============================================================
 
 import {
-    state,
-    escapeHtml,
-    escapeAttr,
-    lucide,
-  } from './core.js';
+  state,
+  escapeHtml,
+  escapeAttr,
+  lucide,
+} from './core.js';
+
+import {
+  pushOverlayState,
+  closeTopOverlay,
+  registerOverlayRoute,
+  overlayIdFromState,
+} from './overlay-history.js';
   
-  let cssInjected = false;
-  let activeDialog = null;
+let cssInjected = false;
+let activeDialog = null;
+let dialogOverlayRegistered = false;
   
+function dialogIsOpen() {
+  return !!activeDialog?.modal?.isConnected;
+}
+
+function registerDialogOverlayRoute() {
+  if (dialogOverlayRegistered) return;
+
+  dialogOverlayRegistered = true;
+
+  registerOverlayRoute('yanta-dialog', {
+    // Generic promise dialogs cannot be meaningfully restored on Forward,
+    // because their original Promise resolver no longer exists.
+    // So open is intentionally a no-op.
+    open: () => {},
+
+    close: () => {
+      activeDialog?.complete?.(null, {
+        fromHistory: true,
+      });
+    },
+
+    isOpen: dialogIsOpen,
+  });
+}
+
   function injectCss() {
     if (cssInjected) return;
     cssInjected = true;
@@ -514,127 +547,195 @@ import {
     return escapeHtml(String(message || '')).replace(/\n/g, '<br>');
   }
   
-  function closeActiveDialog() {
-    if (!activeDialog) return;
+function closeActiveDialog() {
+  if (!activeDialog) return;
+
+  activeDialog.complete?.(null, {
+    fromHistory: true,
+  });
+}
+  
+function makeModal({
+  title = 'YANTA',
+  message = '',
+  icon = 'info',
+  danger = false,
+  kicker = '',
+  closeOnBackdrop = true,
+} = {}) {
+  injectCss();
+  registerDialogOverlayRoute();
+
+  // If another YANTA dialog is currently open, cancel it directly.
+  // Do not history.back() here; we are replacing the active dialog.
+  closeActiveDialog();
+
+  const modal = document.createElement('div');
+  modal.className = 'yanta-dialog-modal';
+
+  const card = document.createElement('div');
+  card.className = 'yanta-dialog-card' + (danger ? ' danger' : '');
+  card.setAttribute('role', 'dialog');
+  card.setAttribute('aria-modal', 'true');
+  card.setAttribute('aria-label', title || 'Dialog');
+
+  card.innerHTML = `
+    <header class="yanta-dialog-head">
+      <span class="yanta-dialog-icon">${lucide(danger ? 'triangle-alert' : icon, 18)}</span>
+
+      <div class="yanta-dialog-title-wrap">
+        <h3 class="yanta-dialog-title">${escapeHtml(title)}</h3>
+        ${kicker ? `<div class="yanta-dialog-kicker">${escapeHtml(kicker)}</div>` : ''}
+      </div>
+
+      <button type="button" class="icon-btn" data-dialog-x title="Close">${lucide('x', 16)}</button>
+    </header>
+
+    <main class="yanta-dialog-body">
+      ${message ? `<div class="yanta-dialog-message">${messageHtml(message)}</div>` : ''}
+    </main>
+
+    <footer class="yanta-dialog-actions"></footer>
+  `;
+
+  modal.append(card);
+  document.body.append(modal);
+
+  const body = card.querySelector('.yanta-dialog-body');
+  const actions = card.querySelector('.yanta-dialog-actions');
+
+  let finishHandler = () => {};
+  let closing = false;
+  let pendingHistoryClose = false;
+  let pendingHistoryValue = null;
+
+  const cleanup = () => {
+    window.removeEventListener('keydown', onKey, true);
+
+    if (activeDialog?.modal === modal) {
+      activeDialog = null;
+    }
+
     try {
-      activeDialog.remove();
-    } catch {}
-    activeDialog = null;
-  }
-  
-  function makeModal({
-    title = 'YANTA',
-    message = '',
-    icon = 'info',
-    danger = false,
-    kicker = '',
-    closeOnBackdrop = true,
-  } = {}) {
-    injectCss();
-    closeActiveDialog();
-  
-    const modal = document.createElement('div');
-    modal.className = 'yanta-dialog-modal';
-  
-    const card = document.createElement('div');
-    card.className = 'yanta-dialog-card' + (danger ? ' danger' : '');
-    card.setAttribute('role', 'dialog');
-    card.setAttribute('aria-modal', 'true');
-    card.setAttribute('aria-label', title || 'Dialog');
-  
-    card.innerHTML = `
-      <header class="yanta-dialog-head">
-        <span class="yanta-dialog-icon">${lucide(danger ? 'triangle-alert' : icon, 18)}</span>
-  
-        <div class="yanta-dialog-title-wrap">
-          <h3 class="yanta-dialog-title">${escapeHtml(title)}</h3>
-          ${kicker ? `<div class="yanta-dialog-kicker">${escapeHtml(kicker)}</div>` : ''}
-        </div>
-  
-        <button type="button" class="icon-btn" data-dialog-x title="Close">${lucide('x', 16)}</button>
-      </header>
-  
-      <main class="yanta-dialog-body">
-        ${message ? `<div class="yanta-dialog-message">${messageHtml(message)}</div>` : ''}
-      </main>
-  
-      <footer class="yanta-dialog-actions"></footer>
-    `;
-  
-    modal.append(card);
-    document.body.append(modal);
-    activeDialog = modal;
-  
-    const body = card.querySelector('.yanta-dialog-body');
-    const actions = card.querySelector('.yanta-dialog-actions');
-  
-    const cleanup = () => {
-      window.removeEventListener('keydown', onKey, true);
-      if (activeDialog === modal) activeDialog = null;
       modal.remove();
-    };
-  
-    let finish = () => cleanup();
-  
-    function onKey(e) {
-      if (!modal.isConnected) {
-        window.removeEventListener('keydown', onKey, true);
-        return;
-      }
-  
-      if (e.key === 'Escape') {
+    } catch {}
+  };
+
+  const complete = (value = null, {
+    fromHistory = false,
+  } = {}) => {
+    if (closing) return;
+
+    /*
+      User-initiated close:
+      If this dialog owns the current overlay state, let browser history
+      drive the actual close. Store the intended result so the Promise
+      resolves correctly when popstate closes the dialog.
+    */
+    if (
+      !fromHistory &&
+      modal.isConnected &&
+      overlayIdFromState() === 'yanta-dialog'
+    ) {
+      pendingHistoryClose = true;
+      pendingHistoryValue = value;
+
+      closeTopOverlay(() => {
+        complete(value, {
+          fromHistory: true,
+        });
+      });
+
+      return;
+    }
+
+    closing = true;
+
+    const finalValue = pendingHistoryClose
+      ? pendingHistoryValue
+      : value;
+
+    cleanup();
+    finishHandler?.(finalValue);
+  };
+
+  activeDialog = {
+    modal,
+    complete,
+  };
+
+  /*
+    Push a dialog overlay state.
+    If another dialog state is already current, replace it instead of
+    stacking duplicate generic dialog states.
+  */
+  pushOverlayState('yanta-dialog', {}, {
+    replace: overlayIdFromState() === 'yanta-dialog',
+  });
+
+  function onKey(e) {
+    if (!modal.isConnected) {
+      window.removeEventListener('keydown', onKey, true);
+      return;
+    }
+
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation?.();
+
+      complete(null);
+      return;
+    }
+
+    if (e.key === 'Tab') {
+      const items = focusablesIn(card);
+      if (!items.length) return;
+
+      const first = items[0];
+      const last = items[items.length - 1];
+
+      if (e.shiftKey && document.activeElement === first) {
         e.preventDefault();
-        finish(null);
-        return;
-      }
-  
-      if (e.key === 'Tab') {
-        const items = focusablesIn(card);
-        if (!items.length) return;
-  
-        const first = items[0];
-        const last = items[items.length - 1];
-  
-        if (e.shiftKey && document.activeElement === first) {
-          e.preventDefault();
-          last.focus();
-        } else if (!e.shiftKey && document.activeElement === last) {
-          e.preventDefault();
-          first.focus();
-        }
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
       }
     }
-  
-    window.addEventListener('keydown', onKey, true);
-  
-    modal.addEventListener('mousedown', (e) => {
-      if (!closeOnBackdrop) return;
-      if (e.target === modal) {
-        e.preventDefault();
-        finish(null);
-      }
-    });
-  
-    card.querySelector('[data-dialog-x]')?.addEventListener('click', () => {
-      finish(null);
-    });
-  
-    return {
-      modal,
-      card,
-      body,
-      actions,
-  
-      setFinish(fn) {
-        finish = (value) => {
-          cleanup();
-          fn?.(value);
-        };
-      },
-  
-      cleanup,
-    };
   }
+
+  window.addEventListener('keydown', onKey, true);
+
+  modal.addEventListener('mousedown', (e) => {
+    if (!closeOnBackdrop) return;
+
+    if (e.target === modal) {
+      e.preventDefault();
+      complete(null);
+    }
+  });
+
+  card.querySelector('[data-dialog-x]')?.addEventListener('click', () => {
+    complete(null);
+  });
+
+  return {
+    modal,
+    card,
+    body,
+    actions,
+
+    setFinish(fn) {
+      finishHandler = fn || (() => {});
+    },
+
+    close: complete,
+
+    // Raw cleanup for emergency use only.
+    cleanup,
+  };
+}
   
   function button({
     label,
@@ -690,18 +791,16 @@ import {
   
       dlg.actions.append(cancel, confirm);
   
-      dlg.setFinish(() => {
-        resolve(false);
+      dlg.setFinish((value) => {
+        resolve(value === true);
       });
-  
+
       cancel.addEventListener('click', () => {
-        dlg.cleanup();
-        resolve(false);
+        dlg.close(false);
       }, { once: true });
-  
+
       confirm.addEventListener('click', () => {
-        dlg.cleanup();
-        resolve(true);
+        dlg.close(true);
       }, { once: true });
   
       requestAnimationFrame(() => {
@@ -733,10 +832,9 @@ import {
       dlg.actions.append(ok);
   
       dlg.setFinish(() => resolve());
-  
+
       ok.addEventListener('click', () => {
-        dlg.cleanup();
-        resolve();
+        dlg.close(true);
       }, { once: true });
   
       requestAnimationFrame(() => ok.focus());
@@ -836,15 +934,15 @@ import {
           }
         }
   
-        dlg.cleanup();
-        resolve(value);
+        dlg.close(value);
       };
   
-      dlg.setFinish(() => resolve(null));
-  
+      dlg.setFinish((value) => {
+        resolve(typeof value === 'string' ? value : null);
+      });
+
       cancel.addEventListener('click', () => {
-        dlg.cleanup();
-        resolve(null);
+        dlg.close(null);
       }, { once: true });
   
       form.addEventListener('submit', (e) => {
@@ -917,8 +1015,7 @@ import {
   
         btn.addEventListener('click', () => {
           if (choice.disabled) return;
-          dlg.cleanup();
-          resolve(choice.id);
+          dlg.close(choice.id);
         });
   
         list.append(btn);
@@ -934,11 +1031,12 @@ import {
   
       dlg.actions.append(cancel);
   
-      dlg.setFinish(() => resolve(null));
-  
+      dlg.setFinish((value) => {
+        resolve(value || null);
+      });
+
       cancel.addEventListener('click', () => {
-        dlg.cleanup();
-        resolve(null);
+        dlg.close(null);
       }, { once: true });
   
       requestAnimationFrame(() => {
@@ -1059,8 +1157,7 @@ import {
         input?.addEventListener('keydown', (e) => {
           if (e.key === 'Escape') {
             e.preventDefault();
-            dlg.cleanup();
-            resolve(undefined);
+            dlg.close(undefined);
           }
   
           if (e.key === 'Enter') {
@@ -1078,8 +1175,7 @@ import {
   
             const value = btn.dataset.folderId || null;
   
-            dlg.cleanup();
-            resolve(value);
+            dlg.close(value);
           });
         });
   
@@ -1097,11 +1193,12 @@ import {
   
       dlg.actions.append(cancel);
   
-      dlg.setFinish(() => resolve(undefined));
-  
+      dlg.setFinish((value) => {
+        resolve(value);
+      });
+
       cancel.addEventListener('click', () => {
-        dlg.cleanup();
-        resolve(undefined);
+        dlg.close(undefined);
       }, { once: true });
   
       render();

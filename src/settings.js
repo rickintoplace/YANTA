@@ -38,6 +38,12 @@ import {
   yantaConfirm,
 } from './dialogs.js';
 
+import {
+  pushOverlayState,
+  closeTopOverlay,
+  registerOverlayRoute,
+} from './overlay-history.js';
+
 // ----------------------------------------------------------------
 // Theme tokens — these map 1:1 to CSS custom properties.
 // Each has a default for dark + light mode.
@@ -1026,15 +1032,66 @@ export function watchSystemTheme() {
 
 let modal = null;
 let activeSection = 'appearance';
+let settingsOverlayRegistered = false;
 
-export function openSettings() {
-  ensureModal();
-  modal.hidden = false;
-  renderSettingsBody();
+function settingsIsOpen() {
+  return !!modal && modal.hidden === false;
 }
 
-export function closeSettings() {
-  if (modal) modal.hidden = true;
+function registerSettingsOverlayRoute() {
+  if (settingsOverlayRegistered) return;
+
+  settingsOverlayRegistered = true;
+
+  registerOverlayRoute('settings', {
+    open: () => {
+      openSettings({
+        fromHistory: true,
+      });
+    },
+
+    close: () => {
+      closeSettings({
+        fromHistory: true,
+      });
+    },
+
+    isOpen: settingsIsOpen,
+  });
+}
+
+export function openSettings({
+  fromHistory = false,
+} = {}) {
+  ensureModal();
+  registerSettingsOverlayRoute();
+
+  const wasClosed = modal.hidden !== false;
+
+  modal.hidden = false;
+  renderSettingsBody();
+
+  if (!fromHistory && wasClosed) {
+    pushOverlayState('settings');
+  }
+}
+
+export function closeSettings({
+  fromHistory = false,
+} = {}) {
+  if (!modal) return;
+
+  if (!fromHistory && modal.hidden === false) {
+    closeTopOverlay(() => {
+      closeSettings({
+        fromHistory: true,
+      });
+    });
+
+    return;
+  }
+
+  modal.hidden = true;
 }
 
 function ensureModal() {
@@ -1092,6 +1149,8 @@ function ensureModal() {
   });
 
   document.body.append(modal);
+
+  registerSettingsOverlayRoute();
 }
 
 function rerenderSettingsBody() {

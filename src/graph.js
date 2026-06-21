@@ -60,6 +60,12 @@ import {
   isFolderInTrash,
 } from './trash.js';
 
+import {
+  pushOverlayState,
+  closeTopOverlay,
+  registerOverlayRoute,
+} from './overlay-history.js';
+
 const WIKILINK_RE = /\[\[([^\]|\n]+)(?:\|[^\]\n]+)?\]\]/g;
 
 const NODE = {
@@ -283,6 +289,34 @@ const boundCanvases = new WeakSet();
 let previewEl = null;
 let menuEl = null;
 let injectedCss = false;
+let graphOverlayRegistered = false;
+
+function graphOverlayIsOpen() {
+  return graph.mode === 'overlay' && $('graphOverlay')?.hidden === false;
+}
+
+function registerGraphOverlayRoute() {
+  if (graphOverlayRegistered) return;
+
+  graphOverlayRegistered = true;
+
+  registerOverlayRoute('graph', {
+    open: () => {
+      openGraph({
+        forceOverlay: true,
+        fromHistory: true,
+      });
+    },
+
+    close: () => {
+      closeGraph({
+        fromHistory: true,
+      });
+    },
+
+    isOpen: graphOverlayIsOpen,
+  });
+}
 
 // ------------------------------------------------------------
 // Preferences / theme / utility
@@ -5232,6 +5266,7 @@ function ensureOverlayChrome() {
 
 export function openGraph({
   forceOverlay = false,
+  fromHistory = false,
 } = {}) {
   injectGraphCss();
 
@@ -5254,7 +5289,15 @@ export function openGraph({
   const overlay = $('graphOverlay');
   if (!overlay) return;
 
+  const wasClosed = overlay.hidden !== false;
+
   overlay.hidden = false;
+
+  registerGraphOverlayRoute();
+
+  if (!fromHistory && wasClosed) {
+    pushOverlayState('graph');
+  }
 
   ensureOverlayChrome();
 
@@ -5284,7 +5327,7 @@ export function openGraph({
   });
 }
 
-export function closeGraph() {
+function closeGraphUI() {
   if (graph.mode !== 'overlay') return;
 
   stopSimulation();
@@ -5301,6 +5344,20 @@ export function closeGraph() {
 
   graph.canvas = null;
   graph.ctx = null;
+}
+
+export function closeGraph({
+  fromHistory = false,
+} = {}) {
+  if (!fromHistory && graphOverlayIsOpen()) {
+    closeTopOverlay(() => {
+      closeGraphUI();
+    });
+
+    return;
+  }
+
+  closeGraphUI();
 }
 
 // ------------------------------------------------------------
@@ -5593,6 +5650,7 @@ function bindGraphCanvas(c) {
 
 export function setupGraphInteractions() {
   injectGraphCss();
+  registerGraphOverlayRoute();
   ensureContextMenuCloseHandlers();
 
   const c = $('graphCanvas');

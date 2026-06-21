@@ -29,6 +29,12 @@ import {
 } from './yjs.js';
 
 import {
+  pushOverlayState,
+  closeTopOverlay,
+  registerOverlayRoute,
+} from './overlay-history.js';
+
+import {
   resolveCitation,
   modelToCSL,
   cslToModel,
@@ -44,6 +50,7 @@ import {
 } from './citation-resolvers.js';
 
 let modal = null;
+let citationOverlayRegistered = false;
 let selectedStyle = 'apa';
 let currentModel = null;
 let currentKey = '';
@@ -51,6 +58,32 @@ let currentFormatted = '';
 let fetching = false;
 
 const STYLE_KEY = 'yanta.citations.style';
+
+function citationManagerIsOpen() {
+  return !!modal && modal.hidden === false;
+}
+
+function registerCitationOverlayRoute() {
+  if (citationOverlayRegistered) return;
+
+  citationOverlayRegistered = true;
+
+  registerOverlayRoute('citations', {
+    open: ({ data } = {}) => {
+      openCitationManager(data?.seed || '', {
+        fromHistory: true,
+      });
+    },
+
+    close: () => {
+      closeCitationManager({
+        fromHistory: true,
+      });
+    },
+
+    isOpen: citationManagerIsOpen,
+  });
+}
 
 function loadStylePref() {
   try {
@@ -361,6 +394,8 @@ function copyRich(html) {
 }
 
 function ensureModal() {
+  registerCitationOverlayRoute();
+
   if (modal) return modal;
 
   injectCitationCss();
@@ -871,14 +906,24 @@ function insertCurrentCitation({ mode = 'footnote' } = {}) {
   closeCitationManager();
 }
 
-export function openCitationManager(seed = '') {
+export function openCitationManager(seed = '', {
+  fromHistory = false,
+} = {}) {
   loadStylePref();
   ensureModal();
   updateStyleButtons();
 
   const autoSeed = seed || findCitationSeed();
 
+  const wasClosed = modal.hidden !== false;
+
   modal.hidden = false;
+
+  if (!fromHistory && wasClosed) {
+    pushOverlayState('citations', {
+      seed: seed || '',
+    });
+  }
   modal.querySelector('[data-cite-input]').value = autoSeed || '';
   modal.querySelector('[data-cite-preview]').textContent = 'No citation yet.';
   setStatus('');
@@ -899,8 +944,22 @@ export function openCitationManager(seed = '') {
   }
 }
 
-export function closeCitationManager() {
-  if (modal) modal.hidden = true;
+export function closeCitationManager({
+  fromHistory = false,
+} = {}) {
+  if (!modal) return;
+
+  if (!fromHistory && modal.hidden === false) {
+    closeTopOverlay(() => {
+      closeCitationManager({
+        fromHistory: true,
+      });
+    });
+
+    return;
+  }
+
+  modal.hidden = true;
 }
 
 export function setupCitations() {

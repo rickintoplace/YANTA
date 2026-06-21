@@ -44,6 +44,12 @@ import {
   noteMarkdown,
 } from './yjs.js';
 
+import {
+  pushOverlayState,
+  closeTopOverlay,
+  registerOverlayRoute,
+} from './overlay-history.js';
+
 let modal = null;
 let host = null;
 let titleEl = null;
@@ -60,6 +66,47 @@ let excalidrawLibPromise = null;
 let reactLibPromise = null;
 let injectedCss = false;
 let activeEmbedCloseBound = false;
+let drawOverlayRegistered = false;
+
+function drawFullscreenIsOpen() {
+  return !!modal && modal.hidden === false && !!active.drawingId;
+}
+
+function registerDrawOverlayRoute() {
+  if (drawOverlayRegistered) return;
+
+  drawOverlayRegistered = true;
+
+  registerOverlayRoute('draw-fullscreen', {
+    open: ({ data, state } = {}) => {
+      const drawingId =
+        data?.drawingId ||
+        state?.drawingId ||
+        '';
+
+      const noteId =
+        data?.noteId ||
+        state?.noteId ||
+        undefined;
+
+      if (!drawingId) return;
+
+      return openDrawModal(drawingId, noteId, {
+        fromHistory: true,
+        transition: false,
+      });
+    },
+
+    close: () => {
+      return closeDrawModal({
+        fromHistory: true,
+        transition: true,
+      });
+    },
+
+    isOpen: drawFullscreenIsOpen,
+  });
+}
 
 const inlineRoots = new WeakMap();
 const inlineApis = new WeakMap();
@@ -4663,6 +4710,7 @@ export async function openDrawModal(
     transition = true,
     transitionFrom = null,
     preparedHit = null,
+    fromHistory = false,
   } = {}
 ) {
   if (!drawingId) return;
@@ -4718,7 +4766,19 @@ export async function openDrawModal(
   };
 
   setModalDrawingTitle(drawingId, current);
+
+  const wasClosed = modal.hidden !== false;
+
   modal.hidden = false;
+
+  registerDrawOverlayRoute();
+
+  if (!fromHistory && wasClosed) {
+    pushOverlayState('draw-fullscreen', {
+      drawingId,
+      noteId: sourceNoteId,
+    });
+  }
 
   /*
     Fullscreen-Host SYNCHRON erzeugen.
@@ -5017,8 +5077,20 @@ function closeDrawModalRaw() {
 
 export async function closeDrawModal({
   transition = true,
+  fromHistory = false,
 } = {}) {
   if (!modal) return;
+
+  if (!fromHistory && drawFullscreenIsOpen()) {
+    closeTopOverlay(() => {
+      closeDrawModal({
+        transition,
+        fromHistory: true,
+      });
+    });
+
+    return;
+  }
 
   const drawingId = active.drawingId;
   const source = document.querySelector('.yanta-draw-fullscreen-host');
@@ -5577,6 +5649,7 @@ export async function importExcalidrawDataAsNote(data, title = 'Drawing') {
 
 export function setupDraw() {
   injectDrawCss();
+  registerDrawOverlayRoute();
   loadDrawLibraryItemsFromSettings().catch(() => {});
 
   window.addEventListener('yanta-create-drawing', () => createDrawingAndInsert());

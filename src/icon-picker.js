@@ -6,6 +6,7 @@
 import {
   $,
   el,
+  state,
   lucide,
   lucideIconNames,
   normalizeLucideName,
@@ -14,6 +15,13 @@ import {
   toast,
 } from './core.js';
 import { insertAtCursor } from './editor.js';
+
+import {
+  pushOverlayState,
+  closeTopOverlay,
+  registerOverlayRoute,
+  overlayIdFromState,
+} from './overlay-history.js';
 
 const COLORS = [
   '#6ea8fe',
@@ -28,6 +36,7 @@ const COLORS = [
 ];
 
 let modal;
+let iconInsertOverlayRegistered = false;
 let searchInput;
 let colorInput;
 let colorTextInput;
@@ -43,14 +52,48 @@ let pickerState = {
   allowReset: true,
 };
 
+function iconPickerIsOpen() {
+  return !!modal && modal.hidden === false;
+}
+
+function registerIconInsertOverlayRoute() {
+  if (iconInsertOverlayRegistered) return;
+
+  iconInsertOverlayRegistered = true;
+
+  registerOverlayRoute('icon-insert', {
+    open: () => {
+      openIconInsertPicker({
+        fromHistory: true,
+      });
+    },
+
+    close: () => {
+      closeIconPicker({
+        fromHistory: true,
+      });
+    },
+
+    isOpen: iconPickerIsOpen,
+  });
+}
+
 function safeColor(c) {
   return safeCssColor(c);
 }
 
 function ensurePicker() {
+  registerIconInsertOverlayRoute();
+
   if (modal) return;
 
-  modal = el('div', { class: 'modal icon-picker-modal', hidden: true });
+  modal = el('div', {
+    class: 'modal icon-picker-modal',
+    hidden: true,
+    dataset: {
+      iconPickerModal: '1',
+    },
+  });
 
   const card = el('div', { class: 'modal-card icon-picker-card' });
 
@@ -62,8 +105,12 @@ function ensurePicker() {
       'button',
       {
         class: 'icon-btn',
+        dataset: {
+          iconPickerClose: '1',
+        },
         onclick: closeIconPicker,
         title: 'Close',
+        'aria-label': 'Close',
       },
       '×'
     )
@@ -240,11 +287,41 @@ export function openIconPicker({
   setTimeout(() => searchInput.focus(), 0);
 }
 
-export function closeIconPicker() {
-  if (modal) modal.hidden = true;
+export function closeIconPicker({
+  fromHistory = false,
+} = {}) {
+  if (!modal) return;
+
+  /*
+    Only consume browser history for the insert-icon overlay itself.
+    Important:
+    openIconPicker() is also used inside Settings/Graph/Calendar/etc.
+    Closing those appearance pickers must not close the parent overlay.
+  */
+  if (
+    !fromHistory &&
+    modal.hidden === false &&
+    overlayIdFromState() === 'icon-insert'
+  ) {
+    closeTopOverlay(() => {
+      closeIconPicker({
+        fromHistory: true,
+      });
+    });
+
+    return;
+  }
+
+  modal.hidden = true;
 }
 
-export function openIconInsertPicker() {
+export function openIconInsertPicker({
+  fromHistory = false,
+} = {}) {
+  registerIconInsertOverlayRoute();
+
+  const wasClosed = !modal || modal.hidden !== false;
+
   openIconPicker({
     title: 'Insert Lucide icon',
     initialIcon: 'shapes',
@@ -253,9 +330,17 @@ export function openIconInsertPicker() {
     applyLabel: 'Insert',
     onApply: ({ icon, color }) => {
       if (!icon) return;
+
       const colorPart = color ? `{${color}}` : '';
+
       insertAtCursor(`:lucide[${icon}]${colorPart}:`);
       toast('Icon inserted', 'success');
     },
   });
+
+  if (!fromHistory && wasClosed) {
+    pushOverlayState('icon-insert', {
+      noteId: state.currentNoteId || null,
+    });
+  }
 }

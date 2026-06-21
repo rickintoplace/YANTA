@@ -1,20 +1,21 @@
 // ============================================================
 // YANTA — Mobile Sidebar Controller
 //
-// Single responsibility:
-// - open / close mobile sidebar
-// - expose small event/API contract for other modules
-//
-// Animation policy:
-// - CSS owns animations.
-// - JS only toggles .sidebar-open and delays backdrop hiding until
-//   the close transition has finished.
-// - Never close on pointerdown of action buttons.
+// History-aware:
+// - opening mobile sidebar pushes overlay state
+// - browser/Android Back closes sidebar
+// - CSS owns animation
 // ============================================================
 
 import {
   $,
 } from './core.js';
+
+import {
+  pushOverlayState,
+  closeTopOverlay,
+  registerOverlayRoute,
+} from './overlay-history.js';
 
 const MOBILE_MQ = window.matchMedia('(max-width: 880px)');
 const SIDEBAR_ANIM_MS = 220;
@@ -24,6 +25,7 @@ let initialized = false;
 let closeTimer = 0;
 let transitionToken = 0;
 let onMobileLayout = null;
+let mobileSidebarOverlayRegistered = false;
 
 function isMobileViewport() {
   return MOBILE_MQ.matches;
@@ -40,9 +42,8 @@ function prefersReducedMotion() {
 function elements() {
   const app = $('app');
   const sidebar = $('sidebar');
-  const toggle = $('btn-sidebar-toggle');
 
-  if (!app || !sidebar || !toggle) {
+  if (!app || !sidebar) {
     return {
       app: null,
       sidebar: null,
@@ -50,6 +51,11 @@ function elements() {
       backdrop: null,
     };
   }
+
+  const toggle =
+    $('btn-sidebar-toggle') ||
+    document.querySelector('[data-mobile-sidebar-toggle]') ||
+    null;
 
   let backdrop = $('sidebarBackdrop');
 
@@ -79,8 +85,34 @@ export function isMobileSidebarOpen() {
   return !!app?.classList.contains('sidebar-open');
 }
 
-export function openMobileSidebar() {
+function registerMobileSidebarOverlayRoute() {
+  if (mobileSidebarOverlayRegistered) return;
+
+  mobileSidebarOverlayRegistered = true;
+
+  registerOverlayRoute('mobile-sidebar', {
+    open: () => {
+      openMobileSidebar({
+        fromHistory: true,
+      });
+    },
+
+    close: () => {
+      closeMobileSidebar({
+        fromHistory: true,
+      });
+    },
+
+    isOpen: isMobileSidebarOpen,
+  });
+}
+
+export function openMobileSidebar({
+  fromHistory = false,
+} = {}) {
   if (!isMobileViewport()) return;
+
+  registerMobileSidebarOverlayRoute();
 
   const {
     app,
@@ -89,16 +121,21 @@ export function openMobileSidebar() {
     backdrop,
   } = elements();
 
-  if (!app || !sidebar || !toggle || !backdrop) return;
+  if (!app || !sidebar || !backdrop) return;
 
   clearCloseTimer();
 
   const token = ++transitionToken;
+  const wasClosed = !app.classList.contains('sidebar-open');
 
   backdrop.hidden = false;
-  toggle.setAttribute('aria-expanded', 'true');
+  toggle?.setAttribute('aria-expanded', 'true');
 
-  if (app.classList.contains('sidebar-open')) return;
+  if (!fromHistory && wasClosed) {
+    pushOverlayState('mobile-sidebar');
+  }
+
+  if (!wasClosed) return;
 
   /*
     Force layout with backdrop visible and sidebar closed.
@@ -117,6 +154,7 @@ export function openMobileSidebar() {
 
 export function closeMobileSidebar({
   animated = true,
+  fromHistory = false,
 } = {}) {
   const {
     app,
@@ -125,13 +163,28 @@ export function closeMobileSidebar({
     backdrop,
   } = elements();
 
-  if (!app || !sidebar || !toggle || !backdrop) return;
+  if (!app || !sidebar || !backdrop) return;
+
+  if (
+    !fromHistory &&
+    app.classList.contains('sidebar-open') &&
+    history.state?.yantaOverlay === 'mobile-sidebar'
+  ) {
+    closeTopOverlay(() => {
+      closeMobileSidebar({
+        animated,
+        fromHistory: true,
+      });
+    });
+
+    return;
+  }
 
   clearCloseTimer();
 
   const token = ++transitionToken;
 
-  toggle.setAttribute('aria-expanded', 'false');
+  toggle?.setAttribute('aria-expanded', 'false');
 
   if (!app.classList.contains('sidebar-open')) {
     backdrop.hidden = true;
@@ -192,6 +245,8 @@ export function setupMobileSidebarController({
 } = {}) {
   onMobileLayout = onMobileLayoutChange;
 
+  registerMobileSidebarOverlayRoute();
+
   if (initialized) return;
   initialized = true;
 
@@ -202,14 +257,16 @@ export function setupMobileSidebarController({
     backdrop,
   } = elements();
 
-  if (!app || !sidebar || !toggle || !backdrop) return;
+  if (!app || !sidebar || !backdrop) return;
 
-  toggle.addEventListener('click', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
+  if (toggle) {
+    toggle.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
 
-    toggleMobileSidebar();
-  });
+      toggleMobileSidebar();
+    });
+  }
 
   backdrop.addEventListener('click', () => {
     closeMobileSidebar();
@@ -246,7 +303,7 @@ export function setupMobileSidebarController({
     if (!target) return;
 
     if (sidebar.contains(target)) return;
-    if (toggle.contains(target)) return;
+    if (toggle?.contains?.(target)) return;
 
     closeMobileSidebar();
   }, {
@@ -258,6 +315,7 @@ export function setupMobileSidebarController({
     if (!isMobileViewport()) {
       closeMobileSidebar({
         animated: false,
+        fromHistory: true,
       });
       return;
     }

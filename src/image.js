@@ -4,6 +4,11 @@
 // ============================================================
 
 import { $, el, uid, state, store, toast, fmtBytes, lucide } from './core.js';
+import {
+  pushOverlayState,
+  closeTopOverlay,
+  registerOverlayRoute,
+} from './overlay-history.js';
 import { insertAtCursor } from './editor.js';
 import { updateStorageMeter } from './core.js';
 import { listAllDrawings } from './yjs.js';
@@ -24,11 +29,40 @@ import {
 } from './dialogs.js';
 
 let imgModal, compressPanel;
+let imageOverlayRegistered = false;
 let imgWorkingBlob = null;
 let imgCompressedBlob = null;
 let imgCompressedDataUrl = null;
 
+function imageModalIsOpen() {
+  return !!imgModal && imgModal.hidden === false;
+}
+
+function registerImageOverlayRoute() {
+  if (imageOverlayRegistered) return;
+
+  imageOverlayRegistered = true;
+
+  registerOverlayRoute('image-library', {
+    open: () => {
+      openImageModal({
+        fromHistory: true,
+      });
+    },
+
+    close: () => {
+      closeImageModal({
+        fromHistory: true,
+      });
+    },
+
+    isOpen: imageModalIsOpen,
+  });
+}
+
 export function setupImage() {
+  registerImageOverlayRoute();
+
   imgModal = $('imageModal');
   compressPanel = $('compressPanel');
   imgModal.addEventListener('click', (e) => {
@@ -74,14 +108,42 @@ export function setupImage() {
   });
 }
 
-export function openImageModal() {
+export function openImageModal({
+  fromHistory = false,
+} = {}) {
+  registerImageOverlayRoute();
+
+  const wasClosed = imgModal.hidden !== false;
+
   imgModal.hidden = false;
   setTab('upload');
   imgWorkingBlob = null;
   imgCompressedBlob = null;
+  imgCompressedDataUrl = null;
   compressPanel.hidden = true;
+
+  if (!fromHistory && wasClosed) {
+    pushOverlayState('image-library');
+  }
 }
-export function closeImageModal() { imgModal.hidden = true; }
+
+export function closeImageModal({
+  fromHistory = false,
+} = {}) {
+  if (!imgModal) return;
+
+  if (!fromHistory && imgModal.hidden === false) {
+    closeTopOverlay(() => {
+      closeImageModal({
+        fromHistory: true,
+      });
+    });
+
+    return;
+  }
+
+  imgModal.hidden = true;
+}
 
 function setTab(name) {
   for (const b of imgModal.querySelectorAll('.tab')) b.classList.toggle('active', b.dataset.tab === name);

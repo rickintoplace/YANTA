@@ -108,6 +108,12 @@ import {
   parseAppHash,
   pushNoteHistory,
   replaceNoteHistory,
+  dashboardUrl,
+  dashboardState,
+  noteUrl,
+  noteState,
+  calendarUrl,
+  calendarState,
 } from './navigation.js';
 import {
   openCalendar,
@@ -150,7 +156,9 @@ import {
   setupRss,
   openRssInbox,
 } from './rss/rss-ui.js';
-import { setupOverlayHistoryRouter, pushOverlayState, closeTopOverlay } from './overlay-history.js';
+import {
+  setupOverlayHistoryRouter,
+} from './overlay-history.js';
 import {
   setupNoteChrome,
 } from './note-chrome.js';
@@ -181,32 +189,72 @@ function ensureSidebarBackdropVisible(visible) {
 function openMobileSidebarSafe() {
   if (!isMobileViewport()) return;
 
-  ensureSidebarBackdropVisible(true);
-
-  const app = $('app');
-  app?.classList.add('sidebar-open');
-
   try {
     openMobileSidebar();
   } catch {}
 }
 
 function closeMobileSidebarSafe() {
-  const app = $('app');
-  app?.classList.remove('sidebar-open');
-
   try {
-    closeMobileSidebar();
-  } catch {}
+    /*
+      Sidebar action cleanup must be UI-only.
 
-  window.setTimeout(() => {
-    if (!$('app')?.classList.contains('sidebar-open')) {
-      ensureSidebarBackdropVisible(false);
-    }
-  }, 220);
+      If this used the normal closeMobileSidebar(), it could call
+      history.back() and accidentally close the overlay/route that was
+      just opened from the sidebar.
+    */
+    closeMobileSidebar({
+      fromHistory: true,
+    });
+  } catch {}
+}
+
+function replaceMobileSidebarOverlayWithCurrentRoute() {
+  if (history.state?.yantaOverlay !== 'mobile-sidebar') return;
+
+  const appSurface =
+    state.surface ||
+    $('app')?.dataset?.surface ||
+    'dashboard';
+
+  if (
+    appSurface === 'calendar' ||
+    $('calendarSurface')?.hidden === false
+  ) {
+    history.replaceState(
+      calendarState(),
+      '',
+      calendarUrl()
+    );
+
+    return;
+  }
+
+  if (appSurface === 'note' && state.currentNoteId) {
+    history.replaceState(
+      noteState(state.currentNoteId),
+      '',
+      noteUrl(state.currentNoteId)
+    );
+
+    return;
+  }
+
+  history.replaceState(
+    dashboardState(state.dashboardFolderId || null),
+    '',
+    dashboardUrl(state.dashboardFolderId || null)
+  );
 }
 
 function openCalendarRoute() {
+  /*
+    If Calendar is launched from the mobile sidebar, remove the sidebar
+    overlay entry first. Otherwise Back from Calendar would reopen the
+    sidebar instead of returning to Dashboard/Note.
+  */
+  replaceMobileSidebarOverlayWithCurrentRoute();
+
   openCalendar({
     push: true,
   });
@@ -214,10 +262,10 @@ function openCalendarRoute() {
 
 async function openSourcesRoute(source = 'unknown') {
   /*
-    Single source of truth:
-    Nutzt dieselbe Sources-Logik wie Dashboard/Create-Actions.
-    Wichtig: Nicht direkt openRssInbox() aufrufen, weil das je nach
-    Side-Pane-State nur die Companion-Pane bedienen kann.
+    If Sources is launched from the mobile sidebar, let the upcoming
+    rss-fullscreen overlay replace the sidebar overlay entry.
+    pushOverlayState() does that centrally.
+    We only make sure the sidebar cleanup afterwards is UI-only.
   */
   return runCreateAction('rss', {
     source,
@@ -1438,6 +1486,12 @@ if (!sharedOpen?.noteId) {
   }
 
 window.addEventListener('popstate', async (e) => {
+  // Overlay states are handled by overlay-history.js.
+  // Do not let the main app router interpret them as Dashboard/Note routes.
+  if (e.state?.yantaOverlay) {
+    return;
+  }
+
   const st = e.state || {};
   const route = parseAppHash();
 
@@ -2092,6 +2146,8 @@ function bindEvents() {
   document.querySelector('.brand')?.addEventListener('click', (e) => {
     e.preventDefault();
 
+    replaceMobileSidebarOverlayWithCurrentRoute();
+
     showDashboard({
       folderId: null,
       push: true,
@@ -2136,8 +2192,19 @@ function bindEvents() {
   document.querySelectorAll('[data-conflict-close]').forEach((b) => b.addEventListener('click', () => { $('conflictModal').hidden = true; }));
   window.addEventListener('focus', () => { syncFull(false).catch(() => {}); });
 
-  // Settings (placeholder)
-  $('btn-settings').addEventListener('click', openSettings);
+  // Settings
+  $('btn-settings').addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    /*
+      On mobile this button lives inside the sidebar. Opening Settings
+      should replace the sidebar overlay history entry and then close
+      the sidebar visually only.
+    */
+    openSettings();
+    closeMobileSidebarSafe();
+  });
 
   // Search
   $('search').addEventListener('input', (e) => { state.searchQuery = e.target.value; renderTree(); });
@@ -2196,7 +2263,9 @@ function bindEvents() {
     try { await navigator.clipboard.writeText(v); toast('Link copied', 'success'); } catch { toast('Copy failed', 'error'); }
   });
   $('btn-share-stop').addEventListener('click', async () => { await stopSharing(state.currentNoteId); closeShareModal(); });
-  document.querySelectorAll('[data-share-close]').forEach((b) => b.addEventListener('click', closeShareModal));
+  document.querySelectorAll('[data-share-close]').forEach((b) => {
+    b.addEventListener('click', closeShareModal);
+  });
 
   // Divider
   setupDivider();

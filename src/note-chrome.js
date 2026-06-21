@@ -615,7 +615,7 @@ function openMoreMenu(anchor, deps) {
     },
     {
       label: 'Duplicate',
-      icon: 'copy',
+      icon: 'sticky-notes',
       action: () => duplicateNoteById(note.id),
     },
     {

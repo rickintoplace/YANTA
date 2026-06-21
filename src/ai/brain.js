@@ -469,7 +469,7 @@ await ensureNote(
     folderId: AI_BRAIN_IDS.rootFolder,
     icon: 'bot',
     color: '#a78bfa',
-    tags: ['ai-brain', 'soul'],
+    tags: ['ai-brain'],
   },
   DEFAULT_AI_BRAIN_SOUL
 );
@@ -481,7 +481,7 @@ await ensureNote(
     folderId: AI_BRAIN_IDS.rootFolder,
     icon: 'user-round',
     color: '#4ade80',
-    tags: ['ai-brain', 'user'],
+    tags: ['ai-brain'],
   },
   DEFAULT_AI_BRAIN_USER_PROFILE
 );
@@ -493,7 +493,7 @@ await ensureNote(
     folderId: AI_BRAIN_IDS.rootFolder,
     icon: 'database',
     color: '#6ea8fe',
-    tags: ['ai-brain', 'memory'],
+    tags: ['ai-brain'],
   },
   DEFAULT_AI_BRAIN_MEMORY
 );
@@ -505,7 +505,7 @@ await ensureNote(
     folderId: AI_BRAIN_IDS.rootFolder,
     icon: 'activity',
     color: '#94a3b8',
-    tags: ['ai-brain', 'log'],
+    tags: ['ai-brain'],
   },
   DEFAULT_AI_BRAIN_ACTIVITY_LOG
 );
@@ -517,7 +517,7 @@ await ensureNote(
     folderId: AI_BRAIN_IDS.skillsFolder,
     icon: 'cloud-sun',
     color: '#38bdf8',
-    tags: ['ai-brain', 'skill', 'weather'],
+    tags: ['ai-brain'],
   },
   DEFAULT_AI_BRAIN_WEATHER_SKILL
 );

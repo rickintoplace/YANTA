@@ -415,7 +415,7 @@ function ensureRoot() {
           class="yanta-ai-input"
           data-ai-input
           rows="1"
-          placeholder="Ask about your notes, files, drawings or calendar…"
+          placeholder="Write something…"
           enterkeyhint="send"></textarea>
 
         <button class="yanta-ai-input-btn yanta-ai-send" data-ai-send title="Send" aria-label="Send message" disabled>
@@ -1535,7 +1535,7 @@ function renderMessages() {
       node.append(renderAssistantMessageNode(msg));
     } else {
       node.innerHTML = `
-        <div class="yanta-ai-msg-role">${escapeHtml(roleLabel)}</div>
+        <div class="yanta-ai-msg-role" style="display:none">${escapeHtml(roleLabel)}</div>
         <div class="yanta-ai-msg-content">${escapeHtml(msg.content).replace(/\n/g, '<br>')}</div>
       `;
     }
@@ -2330,8 +2330,22 @@ function injectCss() {
 }
 
 .yanta-ai-msg.user {
-  border-color: color-mix(in srgb, var(--accent) 38%, var(--border));
-  background: color-mix(in srgb, var(--accent) 8%, var(--bg-elev-2));
+    border-color: 
+      color-mix(in srgb, var(--accent) 38%, var(--border));
+    background: 
+      color-mix(in srgb, var(--accent) 8%, var(--bg-elev-2));
+    width: -moz-fit-content;
+    width: fit-content;
+    /* align-self: flex-end; */
+    margin-left: auto;
+    border-radius: 24px 4px 24px 24px;
+}
+
+.yanta-ai-msg.assistant {
+    width: -moz-fit-content;
+    width: fit-content;
+    margin-right: auto;
+    border-radius: 4px 24px 24px 24px;
 }
 
 .yanta-ai-msg.tool {

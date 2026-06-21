@@ -13,7 +13,9 @@
 //   cloud: { baseUrl, vaultId }
 // ============================================================
 
-import qrcode from 'qrcode-generator';
+import { renderBrandedQrSvg } from '../qr.js';
+import { BRAND_LOGO_SVG } from '../brand-logo.js';
+
 
 import {
   store,
@@ -173,41 +175,10 @@ export async function importSync2PairingPayload(text) {
 }
 
 export function renderSync2QrSvg(text, size = 220) {
-  const qr = qrcode(0, 'M');
-  qr.addData(text);
-  qr.make();
-
-  const n = qr.getModuleCount();
-  const ns = 'http://www.w3.org/2000/svg';
-
-  const svg = document.createElementNS(ns, 'svg');
-  svg.setAttribute('viewBox', `0 0 ${n} ${n}`);
-  svg.setAttribute('width', size);
-  svg.setAttribute('height', size);
-  svg.setAttribute('shape-rendering', 'crispEdges');
-
-  const bg = document.createElementNS(ns, 'rect');
-  bg.setAttribute('width', n);
-  bg.setAttribute('height', n);
-  bg.setAttribute('fill', 'white');
-  svg.append(bg);
-
-  let path = '';
-
-  for (let y = 0; y < n; y++) {
-    for (let x = 0; x < n; x++) {
-      if (qr.isDark(y, x)) {
-        path += `M${x} ${y}h1v1h-1z`;
-      }
-    }
-  }
-
-  const p = document.createElementNS(ns, 'path');
-  p.setAttribute('d', path);
-  p.setAttribute('fill', 'black');
-  svg.append(p);
-
-  return svg;
+  return renderBrandedQrSvg(text, {
+    size,
+    logo: BRAND_LOGO_SVG
+  });
 }
 
 export async function scanQrWithCamera() {

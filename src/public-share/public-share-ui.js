@@ -1,4 +1,5 @@
-import qrcode from 'qrcode-generator';
+import { renderBrandedQrSvg } from '../qr.js';
+import { BRAND_LOGO_SVG } from '../brand-logo.js';
 
 import {
   state,
@@ -104,45 +105,6 @@ function registerShareOverlayRoutes() {
   });
 }
 
-function renderQrSvg(text, size = 220) {
-  const qr = qrcode(0, 'Q');
-  qr.addData(text);
-  qr.make();
-
-  const n = qr.getModuleCount();
-  const ns = 'http://www.w3.org/2000/svg';
-
-  const svg = document.createElementNS(ns, 'svg');
-
-  svg.setAttribute('viewBox', `0 0 ${n} ${n}`);
-  svg.setAttribute('width', size);
-  svg.setAttribute('height', size);
-  svg.setAttribute('shape-rendering', 'crispEdges');
-
-  const bg = document.createElementNS(ns, 'rect');
-  bg.setAttribute('width', n);
-  bg.setAttribute('height', n);
-  bg.setAttribute('fill', 'white');
-  svg.append(bg);
-
-  let path = '';
-
-  for (let y = 0; y < n; y++) {
-    for (let x = 0; x < n; x++) {
-      if (qr.isDark(y, x)) {
-        path += `M${x} ${y}h1v1h-1z`;
-      }
-    }
-  }
-
-  const p = document.createElementNS(ns, 'path');
-  p.setAttribute('d', path);
-  p.setAttribute('fill', 'black');
-  svg.append(p);
-
-  return svg;
-}
-
 function ensureCss() {
   if (document.getElementById('yanta-public-share-css')) return;
 
@@ -231,14 +193,23 @@ function ensureCss() {
   font-size: 12px;
 }
 
-.yanta-public-share-qr {
-  display: flex;
-  justify-content: center;
-  padding: 14px;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: white;
-}
+  .yanta-public-share-qr {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 18px;
+    border-radius: 18px;
+    background: white;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.08);
+    overflow: hidden;
+  }
+
+  .yanta-public-share-qr svg {
+    display: block;
+    max-width: 100%;
+    height: auto;
+  }
+
 
 .yanta-public-share-danger {
   border-top: 1px solid var(--border);
@@ -481,7 +452,7 @@ async function renderPublicTab(noteId) {
                 Manage public links
               </button>
               <button class="btn danger" data-stop-public-share>
-                ${lucide('trash', 14)}
+                ${lucide('globe-off', 14)}
                 Stop sharing
               </button>
             </div>
@@ -522,7 +493,10 @@ async function renderPublicTab(noteId) {
   `;
 
   if (hasShare) {
-    body.querySelector('[data-public-share-qr]')?.append(renderQrSvg(url, 220));
+    body.querySelector('[data-public-share-qr]')?.append(renderBrandedQrSvg(url, {
+      size: 220,
+      logo: BRAND_LOGO_SVG
+    }));
   }
 
   body.querySelector('[data-copy-public-share]')?.addEventListener('click', async (e) => {
@@ -604,7 +578,7 @@ async function renderPublicTab(noteId) {
         'Copies already downloaded cannot be removed.'
     ].join('\n'),
     confirmLabel: 'Stop sharing',
-    cancelLabel: 'Cancel',
+    cancelLabel: 'globe-off',
     danger: true,
     icon: 'trash',
     });

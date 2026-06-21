@@ -340,7 +340,7 @@ export async function openAiContextPicker({
     m.innerHTML = `
       <div class="modal-card yanta-ai-context-picker-card">
         <header class="modal-head">
-          <h3>Add AI context</h3>
+          <h3>Add to AI Context</h3>
           <button class="icon-btn" data-ai-context-close>&times;</button>
         </header>
 

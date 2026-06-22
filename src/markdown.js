@@ -308,6 +308,57 @@ function audioEmbedUrl(url) {
   return '';
 }
 
+function markdownHasPlayableMedia(md = '') {
+  const text = String(md || '');
+
+  /*
+    Only YANTA's media embed syntax should enable timestamp rendering.
+
+    Supported:
+      ![](https://youtu.be/...)
+      ![](https://youtube.com/watch?v=...)
+      ![](https://vimeo.com/...)
+      ![](https://example.com/audio.mp3)
+
+    Not enough:
+      normal clock-like text such as "Max um 12:34 abholen"
+  */
+  const re = /!\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g;
+
+  let m;
+
+  while ((m = re.exec(text)) !== null) {
+    const url = decodeEntities(m[1] || '');
+
+    if (videoEmbedUrl(url) || audioEmbedUrl(url)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function withMediaTimestampRenderFlag(md, fn) {
+  const ctx = currentRenderContext();
+  const hadOwnFlag = Object.prototype.hasOwnProperty.call(ctx, 'mediaTimestampsEnabled');
+  const previous = ctx.mediaTimestampsEnabled;
+
+  if (!hadOwnFlag) {
+    ctx.mediaTimestampsEnabled = markdownHasPlayableMedia(md);
+  }
+
+  try {
+    return fn();
+  } finally {
+    if (hadOwnFlag) {
+      ctx.mediaTimestampsEnabled = previous;
+    } else {
+      delete ctx.mediaTimestampsEnabled;
+    }
+  }
+}
+
+
 function resolveImageUrl(url) {
   const ctx = currentRenderContext();
 
@@ -684,29 +735,33 @@ export function renderInline(s) {
   out = out.replace(/==([^=\n]+)==/g, '<mark>$1</mark>');
   out = out.replace(/~~([^~\n]+)~~/g, '<del>$1</del>');
 
-  // Clickable media timestamps.
-  // Examples:
-  //   0:42
-  //   12:34
-  //   1:02:03
-  //
-  // They jump to the nearest video/audio embed above them in the preview.
-  // Links/code/images are protected by placeholders at this point, so we
-  // don't accidentally rewrite URLs or Markdown links.
-  out = out.replace(
-    /(^|[^\w:/])((?:(?:\d{1,2}:)?[0-5]?\d:[0-5]\d))(?![\w:/])/g,
-    (_full, prefix, ts) => {
-      const seconds = timestampToSeconds(ts);
+  /*
+    Clickable media timestamps.
 
-      if (seconds == null) {
-        return `${prefix}${ts}`;
+    Important UX rule:
+    A clock-like value such as "12:34" must stay normal text unless the note
+    contains at least one compatible audio/video embed. This prevents everyday
+    times from becoming misleading buttons.
+
+    If a note has compatible media, timestamps can appear before or after the
+    media. The click handler resolves the nearest media above, then below.
+  */
+  if (currentRenderContext().mediaTimestampsEnabled === true) {
+    out = out.replace(
+      /(^|[^\w:/])((?:(?:\d{1,2}:)?[0-5]?\d:[0-5]\d))(?![\w:/])/g,
+      (_full, prefix, ts) => {
+        const seconds = timestampToSeconds(ts);
+
+        if (seconds == null) {
+          return `${prefix}${ts}`;
+        }
+
+        return `${prefix}${stash(
+          `<button type="button" class="yanta-video-timestamp" data-timestamp-seconds="${escapeAttr(seconds)}">${escapeHtml(ts)}</button>`
+        )}`;
       }
-
-      return `${prefix}${stash(
-        `<button type="button" class="yanta-video-timestamp" data-timestamp-seconds="${escapeAttr(seconds)}">${escapeHtml(ts)}</button>`
-      )}`;
-    }
-  );
+    );
+  }
 
   // Tags after styling.
   out = out.replace(/(^|\s)#([a-zA-Z][\w-]*)/g, (_, sp, tag) =>
@@ -719,10 +774,11 @@ export function renderInline(s) {
 }
 
 export function renderBlocksInline(md) {
-  const lines = String(md || '').split('\n');
-  const ctx = { inFence: false };
-  const out = [];
-  let codeBuf = [];
+  return withMediaTimestampRenderFlag(md, () => {
+    const lines = String(md || '').split('\n');
+    const ctx = { inFence: false };
+    const out = [];
+    let codeBuf = [];
 
   const flush = () => {
     if (!codeBuf.length) return;
@@ -845,7 +901,8 @@ export function renderBlocksInline(md) {
 
   flush();
 
-  return sanitizeHtml(out.join(''));
+    return sanitizeHtml(out.join(''));
+  });
 }
 
 const ADMONITION_TYPES = new Set(['note', 'warning', 'info', 'tip', 'important', 'caution', 'fold', 'quote']);
@@ -892,67 +949,69 @@ function admIcon(type) {
 }
 
 export function renderPreview(md) {
-  const lines = md.split('\n');
-  const ctx = { inFence: false, fenceLang: '' };
-  const adm = preprocessAdmonitions(lines);
-  const pieces = [];
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const info = classifyLine(line, ctx);
-    let inner = '', extraClass = '';
-    if (info.type === 'fence') {
-      ctx.inFence = !!info.opens;
-      ctx.fenceLang = info.opens ? info.lang : '';
-      inner = `<span style="font-family:var(--font-mono);font-size:0.9em;color:var(--text-faint)">\`\`\`${escapeHtml(info.lang || '')}</span>`;
-    } else if (info.type === 'code') {
-      inner = `<span style="font-family:var(--font-mono);font-size:0.9em">${escapeHtml(line) || '&nbsp;'}</span>`;
-    } else if (info.type === 'blank') { inner = '&nbsp;'; }
-    else if (info.type === 'comment') { inner = ''; extraClass = 'pv-hidden-line'; }
-    else if (info.type === 'hr') { inner = '<hr/>'; }
-    else if (/^h[1-6]$/.test(info.type)) {
-      const lvl = parseInt(info.type[1], 10);
-      const txt = line.replace(/^#{1,6}\s+/, '');
-      inner = `<h${lvl} id="h-${headingSlug(txt)}">${renderInline(txt)}</h${lvl}>`;
-    } else if (info.type === 'quote') {
-      const fn = /^\[\^([^\]\s]+)\]:\s*(.*)$/.exec(line);
-      const a = adm[i];
-      if (a) {
-        extraClass = `pv-adm pv-adm-${a.type} pv-adm-${a.role}`;
-        if (a.role === 'title') {
-          const titleText = a.title || a.type.toUpperCase();
+  return withMediaTimestampRenderFlag(md, () => {
+    const lines = String(md || '').split('\n');
+    const ctx = { inFence: false, fenceLang: '' };
+    const adm = preprocessAdmonitions(lines);
+    const pieces = [];
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const info = classifyLine(line, ctx);
+      let inner = '', extraClass = '';
+      if (info.type === 'fence') {
+        ctx.inFence = !!info.opens;
+        ctx.fenceLang = info.opens ? info.lang : '';
+        inner = `<span style="font-family:var(--font-mono);font-size:0.9em;color:var(--text-faint)">\`\`\`${escapeHtml(info.lang || '')}</span>`;
+      } else if (info.type === 'code') {
+        inner = `<span style="font-family:var(--font-mono);font-size:0.9em">${escapeHtml(line) || '&nbsp;'}</span>`;
+      } else if (info.type === 'blank') { inner = '&nbsp;'; }
+      else if (info.type === 'comment') { inner = ''; extraClass = 'pv-hidden-line'; }
+      else if (info.type === 'hr') { inner = '<hr/>'; }
+      else if (/^h[1-6]$/.test(info.type)) {
+        const lvl = parseInt(info.type[1], 10);
+        const txt = line.replace(/^#{1,6}\s+/, '');
+        inner = `<h${lvl} id="h-${headingSlug(txt)}">${renderInline(txt)}</h${lvl}>`;
+      } else if (info.type === 'quote') {
+        const fn = /^\[\^([^\]\s]+)\]:\s*(.*)$/.exec(line);
+        const a = adm[i];
+        if (a) {
+          extraClass = `pv-adm pv-adm-${a.type} pv-adm-${a.role}`;
+          if (a.role === 'title') {
+            const titleText = a.title || a.type.toUpperCase();
 
-          inner = `<div class="pv-adm-title-row">
-            ${admIcon(a.type)}
-            <span class="pv-adm-title-text">${renderInline(titleText)}</span>
-          </div>`;
-        } else {
-          inner = `<div>${renderInline(line.replace(/^\s*>\s?/, ''))}</div>`;
-        }      
-      } else if (fn) {
-        extraClass = 'pv-fn-def';
-        inner = `<div id="fn-${fn[1]}"><strong>[${fn[1]}]</strong> ${renderInline(fn[2])}</div>`;
-      } else inner = `<blockquote>${renderInline(line.replace(/^\s*>\s?/, ''))}</blockquote>`;
-    } else if (info.type === 'task') {
-      const m = /^(\s*)([-*+])\s+\[([ xX])\]\s+(.*)$/.exec(line);
-      const checked = m[3].toLowerCase() === 'x';
-      inner = `<div class="task" data-line="${i}" style="padding-left:${(m[1].length * 0.6) + 1.5}em">
-        <input type="checkbox" data-line="${i}" contenteditable="false" ${checked ? 'checked' : ''}/>
-        <span class="task-label"${checked ? ' style="text-decoration:line-through;color:var(--text-dim)"' : ''}>${renderInline(m[4])}</span>
-      </div>`;
-    } else if (info.type === 'ul') {
-      const m = /^(\s*)([-*+])\s+(.*)$/.exec(line);
-      inner = `<div style="padding-left:${(m[1].length * 0.6) + 1.5}em;text-indent:-1.2em">• ${renderInline(m[3])}</div>`;
-    } else if (info.type === 'ol') {
-      const m = /^(\s*)(\d+)\.\s+(.*)$/.exec(line);
-      inner = `<div style="padding-left:${(m[1].length * 0.6) + 1.8}em;text-indent:-1.5em">${m[2]}. ${renderInline(m[3])}</div>`;
-    } else if (info.type === 'image') { inner = renderInline(line); }
-    else if (info.type === 'table') { inner = `<pre style="margin:0;font-size:0.9em;color:var(--text-dim)"><code>${escapeHtml(line)}</code></pre>`; }
-    else {
-      const fn = /^\[\^([^\]\s]+)\]:\s*(.*)$/.exec(line);
-      if (fn) { extraClass = 'pv-fn-def'; inner = `<div id="fn-${fn[1]}"><strong>[${fn[1]}]</strong> ${renderInline(fn[2])}</div>`; }
-      else inner = renderInline(line) || '&nbsp;';
+            inner = `<div class="pv-adm-title-row">
+              ${admIcon(a.type)}
+              <span class="pv-adm-title-text">${renderInline(titleText)}</span>
+            </div>`;
+          } else {
+            inner = `<div>${renderInline(line.replace(/^\s*>\s?/, ''))}</div>`;
+          }      
+        } else if (fn) {
+          extraClass = 'pv-fn-def';
+          inner = `<div id="fn-${fn[1]}"><strong>[${fn[1]}]</strong> ${renderInline(fn[2])}</div>`;
+        } else inner = `<blockquote>${renderInline(line.replace(/^\s*>\s?/, ''))}</blockquote>`;
+      } else if (info.type === 'task') {
+        const m = /^(\s*)([-*+])\s+\[([ xX])\]\s+(.*)$/.exec(line);
+        const checked = m[3].toLowerCase() === 'x';
+        inner = `<div class="task" data-line="${i}" style="padding-left:${(m[1].length * 0.6) + 1.5}em">
+          <input type="checkbox" data-line="${i}" contenteditable="false" ${checked ? 'checked' : ''}/>
+          <span class="task-label"${checked ? ' style="text-decoration:line-through;color:var(--text-dim)"' : ''}>${renderInline(m[4])}</span>
+        </div>`;
+      } else if (info.type === 'ul') {
+        const m = /^(\s*)([-*+])\s+(.*)$/.exec(line);
+        inner = `<div style="padding-left:${(m[1].length * 0.6) + 1.5}em;text-indent:-1.2em">• ${renderInline(m[3])}</div>`;
+      } else if (info.type === 'ol') {
+        const m = /^(\s*)(\d+)\.\s+(.*)$/.exec(line);
+        inner = `<div style="padding-left:${(m[1].length * 0.6) + 1.8}em;text-indent:-1.5em">${m[2]}. ${renderInline(m[3])}</div>`;
+      } else if (info.type === 'image') { inner = renderInline(line); }
+      else if (info.type === 'table') { inner = `<pre style="margin:0;font-size:0.9em;color:var(--text-dim)"><code>${escapeHtml(line)}</code></pre>`; }
+      else {
+        const fn = /^\[\^([^\]\s]+)\]:\s*(.*)$/.exec(line);
+        if (fn) { extraClass = 'pv-fn-def'; inner = `<div id="fn-${fn[1]}"><strong>[${fn[1]}]</strong> ${renderInline(fn[2])}</div>`; }
+        else inner = renderInline(line) || '&nbsp;';
+      }
+      pieces.push(`<div class="pv-line ${extraClass}" data-line="${i}" data-type="${info.type}">${inner}</div>`);
     }
-    pieces.push(`<div class="pv-line ${extraClass}" data-line="${i}" data-type="${info.type}">${inner}</div>`);
-  }
-  return sanitizeHtml(pieces.join(''));
+    return sanitizeHtml(pieces.join(''));
+  });
 }

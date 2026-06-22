@@ -63,11 +63,17 @@ function writeLocalState(next) {
 
 export function publicShareStateForNote(noteId) {
   const note = state.notes.get(noteId);
+  const noteShare = note?.publicShare || {};
   const local = readLocalState()[noteId] || {};
 
-  return {
-    ...(note?.publicShare || {}),
+  const merged = {
+    ...noteShare,
     ...local,
+  };
+
+  return {
+    ...merged,
+    cloudOnly: !!(merged.shareId || merged.id) && !merged.shareKey,
   };
 }
 
@@ -197,7 +203,10 @@ export async function refreshOwnPublicShareStatusFromCloud() {
       revokedAt: raw.revokedAt || raw.revoked_at,
     });
 
-    const prev = all[noteId] || {};
+    const prev = {
+      ...(state.notes.get(noteId)?.publicShare || {}),
+      ...(all[noteId] || {}),
+    };
 
     if (active) {
       const next = {
@@ -316,9 +325,10 @@ export async function stopPublicShareById(shareId, {
         ...(note.publicShare || {}),
         shareId: cleanShareId,
         enabled: false,
+        status: 'revoked',
         revokedAt,
       };
-
+      
       await store.notes.put(note);
     }
 
@@ -559,8 +569,12 @@ export async function createOrGetPublicShare(noteId, {
   await saveNotePublicShareCache(noteId, {
     enabled: true,
     shareId,
+    shareKey,
+    url,
+    status: 'pending',
     expiresAt,
     lastPublishedAt: null,
+    lastPayloadHash: '',
   });
 
   emitPublicShareChanged(noteId, 'pending');
@@ -637,8 +651,12 @@ export async function publishPublicShareNow(noteId, {
     await saveNotePublicShareCache(noteId, {
       enabled: true,
       shareId: share.shareId,
+      shareKey: share.shareKey,
+      url: share.url || makePublicShareUrl(share.shareId, share.shareKey),
+      status: 'up-to-date',
       expiresAt: share.expiresAt || expiresAt || null,
       lastPublishedAt,
+      lastPayloadHash: packed.payloadHash,
     });
 
     emitPublicShareChanged(noteId, 'up-to-date');

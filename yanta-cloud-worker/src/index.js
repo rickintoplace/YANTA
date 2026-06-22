@@ -13,7 +13,7 @@ var PLAN_LIMITS = {
     // Needs headroom for first sync, retries, snapshots.
     uploadBytesDay: 250 * 1024 * 1024,
     // Real download abuse remains capped.
-    downloadBytesMonth: 100 * 1024 * 1024,
+    downloadBytesMonth: 250 * 1024 * 1024,
     // Internal encrypted object writes.
     // Product/UI can still say "200 app writes/day" if we enforce that separately later.
     writesDay: 8e3,
@@ -3119,6 +3119,52 @@ async function handleCreatePublicShare(env, req, headers) {
 
   if (vaultId) {
     await requireVault(env, user, vaultId);
+  }
+
+  /*
+    Idempotent SaaS behavior:
+    If the same owner already has an active public share for this source,
+    return it instead of creating duplicate public links.
+
+    This protects users when another device knows "sharing is active" but
+    does not yet have the private share key locally.
+  */
+  const existing = await env.DB.prepare(
+    `SELECT id, vault_id, source_type, source_id, status, expires_at,
+            revoked_at, created_at, updated_at, last_published_at
+     FROM public_shares
+     WHERE owner_user_id = ?
+       AND COALESCE(vault_id, '') = ?
+       AND source_type = ?
+       AND source_id = ?
+       AND status = 'active'
+       AND revoked_at IS NULL
+     ORDER BY created_at DESC
+     LIMIT 1`
+  ).bind(
+    user.userId,
+    vaultId || '',
+    sourceType,
+    sourceId
+  ).first();
+
+  if (isShareActive(existing)) {
+    return json({
+      ok: true,
+      share: {
+        id: existing.id,
+        shareId: existing.id,
+        vaultId: existing.vault_id || null,
+        sourceType: existing.source_type,
+        sourceId: existing.source_id,
+        expiresAt: existing.expires_at || null,
+        status: existing.status,
+        createdAt: existing.created_at,
+        updatedAt: existing.updated_at,
+        lastPublishedAt: existing.last_published_at || null,
+        existing: true,
+      },
+    }, 200, headers);
   }
 
   const shareId = publicShareId();

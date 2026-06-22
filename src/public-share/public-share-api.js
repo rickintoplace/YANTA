@@ -38,7 +38,9 @@ async function fetchJson(path, {
   });
 
   if (!res.ok) {
-    throw new Error(await parseJsonError(res, `HTTP ${res.status}`));
+    const err = new Error(await parseJsonError(res, `HTTP ${res.status}`));
+    err.status = res.status;
+    throw err;
   }
 
   return res.json();

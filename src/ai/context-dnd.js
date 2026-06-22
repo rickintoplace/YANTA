@@ -10,7 +10,7 @@ export function normalizeAiContextRef(ref = {}) {
 
   if (!kind || !id) return null;
 
-  if (!['note', 'folder', 'event'].includes(kind)) return null;
+  if (!['note', 'folder', 'event', 'ai-session'].includes(kind)) return null;
 
   return {
     kind,
@@ -49,18 +49,41 @@ export function setAiContextDragData(dataTransfer, refs = []) {
 export function readAiContextDragData(dataTransfer) {
   if (!dataTransfer) return [];
 
-  const out = [];
+  const dedupe = (items = []) => {
+    const seen = new Set();
 
+    return items.filter((item) => {
+      const normalized = normalizeAiContextRef(item);
+      if (!normalized) return false;
+
+      const key = `${normalized.kind}:${normalized.id}`;
+      if (seen.has(key)) return false;
+
+      seen.add(key);
+      item.kind = normalized.kind;
+      item.id = normalized.id;
+
+      return true;
+    });
+  };
+
+  // Prefer the explicit YANTA AI payload. This prevents AI Sessions from
+  // falling back to text/yanta-note and being treated as normal note context.
   try {
     const raw = dataTransfer.getData(YANTA_AI_CONTEXT_MIME);
 
     if (raw) {
       const parsed = JSON.parse(raw);
       const items = Array.isArray(parsed?.items) ? parsed.items : [];
+      const explicit = dedupe(items.map(normalizeAiContextRef).filter(Boolean));
 
-      out.push(...items.map(normalizeAiContextRef).filter(Boolean));
+      if (explicit.length) {
+        return explicit;
+      }
     }
   } catch {}
+
+  const out = [];
 
   // Fallbacks for older/internal drags.
   try {
@@ -83,16 +106,8 @@ export function readAiContextDragData(dataTransfer) {
     }
   } catch {}
 
-  const seen = new Set();
-
-  return out.filter((item) => {
-    const key = `${item.kind}:${item.id}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
+  return dedupe(out);
 }
-
 export function dataTransferHasAiContext(dataTransfer) {
   const types = [...(dataTransfer?.types || [])];
 

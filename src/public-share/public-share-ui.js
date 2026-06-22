@@ -21,6 +21,7 @@ import {
   stopPublicShareById,
   stopAllPublicShares,
   isPublicShareActive,
+  refreshOwnPublicShareStatusFromCloud,
 } from './public-share-publisher.js';
 
 import {
@@ -375,6 +376,7 @@ export function closeUnifiedShareModal({
 
 function statusText(status) {
   const map = {
+    active: 'Shared · active',
     pending: 'Shared · changes pending',
     publishing: 'Shared · publishing…',
     'up-to-date': 'Shared · up to date',
@@ -393,11 +395,11 @@ function statusClass(status) {
 }
 
 async function renderPublicTab(noteId) {
-  const note = state.notes.get(noteId);
   const share = publicShareStateForNote(noteId);
-  const hasShare = !!share?.shareId && !!share?.shareKey && share.status !== 'revoked';
+  const hasShare = isPublicShareActive(share);
+  const hasPrivateKey = !!share?.shareKey;
 
-  const url = hasShare
+  const url = hasShare && hasPrivateKey
     ? share.url || makePublicShareUrl(share.shareId, share.shareKey)
     : '';
 
@@ -416,7 +418,11 @@ async function renderPublicTab(noteId) {
         hasShare
           ? `
             <div class="yanta-public-share-status ${statusClass(share.status)}">
-              ${escapeHtml(statusText(share.status))}
+              ${escapeHtml(
+                hasPrivateKey
+                  ? statusText(share.status)
+                  : 'Shared · private link key not available on this device'
+              )}
               ${
                 share.lastError
                   ? `<br>${escapeHtml(share.lastError)}`
@@ -424,38 +430,62 @@ async function renderPublicTab(noteId) {
               }
             </div>
 
-            <div class="yanta-public-share-link-row">
-              <input class="text-input" data-public-share-link readonly value="${escapeHtml(url)}">
-              <button class="btn primary" data-copy-public-share>${lucide('copy', 14)} Copy</button>
-            </div>
-
-            <div class="yanta-public-share-qr" data-public-share-qr></div>
-
             ${
-              Array.isArray(share.missingAssets) && share.missingAssets.length
+              hasPrivateKey
                 ? `
-                  <div class="yanta-public-share-status warn">
-                    ${share.missingAssets.length} asset${share.missingAssets.length === 1 ? '' : 's'} missing and not included.
+                  <div class="yanta-public-share-link-row">
+                    <input class="text-input" data-public-share-link readonly value="${escapeHtml(url)}">
+                    <button class="btn primary" data-copy-public-share>${lucide('copy', 14)} Copy</button>
+                  </div>
+
+                  <div class="yanta-public-share-qr" data-public-share-qr></div>
+
+                  ${
+                    Array.isArray(share.missingAssets) && share.missingAssets.length
+                      ? `
+                        <div class="yanta-public-share-status warn">
+                          ${share.missingAssets.length} asset${share.missingAssets.length === 1 ? '' : 's'} missing and not included.
+                        </div>
+                      `
+                      : ''
+                  }
+
+                  <div class="compress-actions">
+                    <button class="btn" data-publish-public-share>
+                      ${lucide('refresh-cw', 14)}
+                      ${share.status === 'failed' ? 'Retry publish' : 'Publish pending changes'}
+                    </button>
+                    <span class="grow"></span>
+                    <button class="btn" data-open-public-shares-manager>
+                      ${lucide('list', 14)}
+                      Manage public links
+                    </button>
+                    <button class="btn danger" data-stop-public-share>
+                      ${lucide('globe-off', 14)}
+                      Stop sharing
+                    </button>
                   </div>
                 `
-                : ''
-            }
+                : `
+                  <div class="yanta-public-share-info">
+                    This note already has an active public link, created on another device.
+                    This device does not have the private link key yet, so it cannot copy or republish
+                    the exact link. You can still stop sharing immediately.
+                  </div>
 
-            <div class="compress-actions">
-              <button class="btn" data-publish-public-share>
-                ${lucide('refresh-cw', 14)}
-                ${share.status === 'failed' ? 'Retry publish' : 'Publish pending changes'}
-              </button>
-              <span class="grow"></span>
-              <button class="btn" data-open-public-shares-manager>
-                ${lucide('list', 14)}
-                Manage public links
-              </button>
-              <button class="btn danger" data-stop-public-share>
-                ${lucide('globe-off', 14)}
-                Stop sharing
-              </button>
-            </div>
+                  <div class="compress-actions">
+                    <button class="btn" data-open-public-shares-manager>
+                      ${lucide('list', 14)}
+                      Manage public links
+                    </button>
+                    <span class="grow"></span>
+                    <button class="btn danger" data-stop-public-share>
+                      ${lucide('globe-off', 14)}
+                      Stop sharing
+                    </button>
+                  </div>
+                `
+            }
 
             <div class="yanta-public-share-danger">
               <small style="color:var(--text-faint)">
@@ -492,14 +522,19 @@ async function renderPublicTab(noteId) {
     </div>
   `;
 
-  if (hasShare) {
+  if (hasShare && hasPrivateKey) {
     body.querySelector('[data-public-share-qr]')?.append(renderBrandedQrSvg(url, {
       size: 220,
-      logo: BRAND_LOGO_SVG
+      logo: BRAND_LOGO_SVG,
     }));
   }
 
   body.querySelector('[data-copy-public-share]')?.addEventListener('click', async (e) => {
+    if (!url) {
+      toast('Private share key is not available on this device', 'error');
+      return;
+    }
+
     const btn = e.currentTarget;
     const originalHtml = btn.dataset.originalHtml || btn.innerHTML;
     btn.dataset.originalHtml = originalHtml;
@@ -570,17 +605,17 @@ async function renderPublicTab(noteId) {
 
   body.querySelector('[data-stop-public-share]')?.addEventListener('click', async () => {
     const ok = await yantaConfirm({
-    title: 'Stop public sharing?',
-    message: [
+      title: 'Stop public sharing?',
+      message: [
         'Stop public sharing for this note?',
         '',
         'Future access through this public link will be blocked.',
-        'Copies already downloaded cannot be removed.'
-    ].join('\n'),
-    confirmLabel: 'Stop sharing',
-    cancelLabel: 'globe-off',
-    danger: true,
-    icon: 'trash',
+        'Copies already downloaded cannot be removed.',
+      ].join('\n'),
+      confirmLabel: 'Stop sharing',
+      cancelLabel: 'Cancel',
+      danger: true,
+      icon: 'globe-off',
     });
 
     if (!ok) return;
@@ -972,6 +1007,7 @@ export async function openPublicSharesManager({
     pushOverlayState('public-shares-manager');
   }
 
+  await refreshOwnPublicShareStatusFromCloud().catch(() => {});
   await renderPublicSharesManager();
 }
 
@@ -1011,6 +1047,7 @@ export async function openUnifiedShareModal({
   m.querySelector('[data-share-tab="public"]')?.addEventListener('click', async () => {
     m.querySelectorAll('[data-share-tab]').forEach((b) => b.classList.remove('active'));
     m.querySelector('[data-share-tab="public"]').classList.add('active');
+    await refreshOwnPublicShareStatusFromCloud().catch(() => {});
     await renderPublicTab(noteId);
   });
 

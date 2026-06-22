@@ -49,6 +49,10 @@ import {
 
 import { BRAND_LOGO_SVG } from '../brand-logo.js';
 
+import {
+  bindMediaTimestampClicks,
+} from '../media/media-timestamps.js';
+
 let currentPayload = null;
 let currentImageResolver = null;
 let currentShareState = null;
@@ -1169,6 +1173,17 @@ function renderPage(payload, imageResolver) {
 
   bindHeaderActions();
   bindPublicShareCalendarActions(document, payload);
+
+  bindMediaTimestampClicks(document.querySelector('.yps-content'), {
+    onError: async (message) => {
+      await yantaAlert({
+        title: 'Media timestamp',
+        message,
+        icon: 'circle-alert',
+        confirmLabel: 'OK',
+      });
+    },
+  });
 }
 
 export async function mountPublicShareViewer() {

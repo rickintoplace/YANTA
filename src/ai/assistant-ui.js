@@ -82,6 +82,12 @@ import {
 } from './context-attachments.js';
 
 import {
+  computeAiContextMeterStats,
+  formatAiContextMeterStats,
+  aiContextMeterTitle,
+} from './context-stats.js';
+
+import {
   readAiContextDragData,
   dataTransferHasAiContext,
 } from './context-dnd.js';
@@ -117,8 +123,19 @@ let floatingBody = null;
 let conversation = [];
 let activeContextItems = [];
 let contextTrayEl = null;
+let contextMeterEl = null;
+
 let currentSessionId = '';
 let sessionSaveTimer = 0;
+
+// Prevent duplicate AI Session notes caused by overlapping async saves.
+let sessionSavePromise = null;
+let sessionSaveRequested = false;
+let creatingSession = null;
+
+// Incremented whenever the visible chat/session identity is replaced.
+// Async session creates from older generations are ignored.
+let sessionGeneration = 0;
 
 let abortController = null;
 let settingsOpen = false;
@@ -401,7 +418,11 @@ function ensureRoot() {
 
     <section class="yanta-ai-settings" data-ai-settings-panel hidden></section>
 
-    <main class="yanta-ai-messages" data-ai-messages></main>
+    <main class="yanta-ai-messages" data-ai-messages>
+
+      <div class="yanta-ai-context-meter" data-ai-context-meter hidden></div>
+    </main>
+
 
     <footer class="yanta-ai-foot">
       <div class="yanta-ai-context-tray" data-ai-context-tray hidden></div>
@@ -427,6 +448,7 @@ function ensureRoot() {
 
   messagesEl = root.querySelector('[data-ai-messages]');
   contextTrayEl = root.querySelector('[data-ai-context-tray]');
+  contextMeterEl = root.querySelector('[data-ai-context-meter]');
   inputEl = root.querySelector('[data-ai-input]');
   inputShellEl = root.querySelector('[data-ai-input-shell]');
   sendBtn = root.querySelector('[data-ai-send]');
@@ -441,12 +463,21 @@ function ensureRoot() {
   });
 
   root.querySelector('[data-ai-clear]')?.addEventListener('click', () => {
-    conversation = [];
+    sessionGeneration++;
     currentSessionId = '';
+    creatingSession = null;
+    sessionSaveRequested = false;
+
+    clearTimeout(sessionSaveTimer);
+
+    conversation = [];
     activeContextItems = [];
+
     clearTransientConversation();
+
     renderMessages();
     renderContextTray();
+    renderContextMeter();
   });
 
   root.querySelector('[data-ai-close]')?.addEventListener('click', () => {
@@ -831,47 +862,161 @@ export function closeAssistant({
   closeAssistantUI();
 }
 
+function snapshotMessagesForSessionSave() {
+  return conversation.map((msg) => ({
+    ...msg,
+    content: String(msg.content || ''),
+    ts: Number(msg.ts || Date.now()),
+  }));
+}
+
+function snapshotContextItemsForSessionSave() {
+  return activeContextItems.map((item) => ({
+    ...item,
+    stats: {
+      ...(item.stats || {}),
+    },
+    meta: {
+      ...(item.meta || {}),
+    },
+  }));
+}
+
+function effectiveSessionModelLabel() {
+  const runtime = getEffectiveAiRuntimeSettings();
+
+  return (
+    runtime.includedModel ||
+    runtime.model ||
+    getAiSettings().model ||
+    ''
+  );
+}
+
+async function ensureCurrentSessionForSave({
+  generation,
+  messages,
+  contextItems,
+  model,
+} = {}) {
+  if (currentSessionId) {
+    return currentSessionId;
+  }
+
+  if (
+    !creatingSession ||
+    creatingSession.generation !== generation
+  ) {
+    creatingSession = {
+      generation,
+      promise: createAiSession({
+        messages,
+        contextItems,
+        model,
+      }),
+    };
+  }
+
+  try {
+    const id = await creatingSession.promise;
+
+    // The visible chat was replaced while creation was in flight.
+    // Do not attach the old newly-created session to the new chat.
+    if (generation !== sessionGeneration) {
+      return '';
+    }
+
+    currentSessionId = id;
+
+    return currentSessionId;
+  } finally {
+    if (creatingSession?.generation === generation) {
+      creatingSession = null;
+    }
+  }
+}
+
+async function saveCurrentAiSessionOnce() {
+  const generation = sessionGeneration;
+
+  const messages = snapshotMessagesForSessionSave();
+  const contextItems = snapshotContextItemsForSessionSave();
+
+  if (!messages.length && !contextItems.length) return;
+
+  const model = effectiveSessionModelLabel();
+
+  const sessionId = await ensureCurrentSessionForSave({
+    generation,
+    messages,
+    contextItems,
+    model,
+  });
+
+  if (!sessionId) return;
+  if (generation !== sessionGeneration) return;
+
+  await saveAiSession(sessionId, {
+    messages,
+    contextItems,
+    model,
+  });
+}
+
+async function saveCurrentAiSessionQueued() {
+  if (sessionSavePromise) {
+    sessionSaveRequested = true;
+    return sessionSavePromise;
+  }
+
+  sessionSavePromise = (async () => {
+    do {
+      sessionSaveRequested = false;
+      await saveCurrentAiSessionOnce();
+    } while (sessionSaveRequested);
+  })().finally(() => {
+    sessionSavePromise = null;
+  });
+
+  return sessionSavePromise;
+}
+
 function scheduleAiSessionSave() {
   clearTimeout(sessionSaveTimer);
 
   sessionSaveTimer = window.setTimeout(() => {
-    saveCurrentAiSession().catch((err) => {
+    saveCurrentAiSessionQueued().catch((err) => {
       console.warn('[YANTA AI] session save failed', err);
     });
   }, 700);
 }
 
-async function saveCurrentAiSession() {
-  if (!conversation.length && !activeContextItems.length) return;
-
-  const model = getAiSettings().model || '';
-
-  if (!currentSessionId) {
-    currentSessionId = await createAiSession({
-      messages: conversation,
-      contextItems: activeContextItems,
-      model,
-    });
+async function openAiSession(sessionId) {
+  if (assistantBusy && abortController) {
+    try {
+      abortController.abort();
+    } catch {}
   }
 
-  await saveAiSession(currentSessionId, {
-    messages: conversation,
-    contextItems: activeContextItems,
-    model,
-  });
-}
-
-async function openAiSession(sessionId) {
   const session = await loadAiSession(sessionId);
 
+  sessionGeneration++;
+  creatingSession = null;
+  sessionSaveRequested = false;
+
+  clearTimeout(sessionSaveTimer);
+
   currentSessionId = session.id;
-  conversation = session.messages || [];
-  activeContextItems = session.contextItems || [];
+  conversation = Array.isArray(session.messages) ? session.messages : [];
+  activeContextItems = Array.isArray(session.contextItems) ? session.contextItems : [];
+
+  saveTransientConversation();
 
   await openAssistantSmart();
 
   renderMessages();
   renderContextTray();
+  renderContextMeter();
 
   toast('AI session opened', 'success');
 }
@@ -946,8 +1091,37 @@ function clearAiContextItems() {
   scheduleAiSessionSave();
 }
 
+function renderContextMeter() {
+  if (!contextMeterEl) return;
+
+  const stats = computeAiContextMeterStats({
+    messages: conversation,
+    contextItems: activeContextItems,
+  });
+
+  const hasAnything =
+    stats.history.messages > 0 ||
+    stats.context.items > 0 ||
+    stats.total.chars > 0 ||
+    stats.total.images > 0 ||
+    stats.total.audio > 0;
+
+  contextMeterEl.hidden = !hasAnything;
+
+  if (!hasAnything) {
+    contextMeterEl.textContent = '';
+    contextMeterEl.removeAttribute('title');
+    return;
+  }
+
+  contextMeterEl.textContent = formatAiContextMeterStats(stats);
+  contextMeterEl.title = aiContextMeterTitle(stats);
+}
+
 function renderContextTray() {
   if (!contextTrayEl) return;
+
+  renderContextMeter();
 
   const totals = aiContextTotals(activeContextItems);
 
@@ -962,12 +1136,18 @@ function renderContextTray() {
   const nonMultimodalImages =
     totals.images > 0 && !modelSupportsImages(getEffectiveAiRuntimeSettings().model);
 
+  const mediaBits = [
+    totals.images ? `${totals.images.toLocaleString()} image${totals.images === 1 ? '' : 's'}` : '',
+    totals.audio ? `${totals.audio.toLocaleString()} audio` : '',
+  ].filter(Boolean);
+
   head.innerHTML = `
     <span>
       ${lucide('paperclip', 13)}
       <strong>${totals.items}</strong> item${totals.items === 1 ? '' : 's'}
       · ${totals.words.toLocaleString()} words
       · ${totals.chars.toLocaleString()} chars
+      ${mediaBits.length ? ` · ${escapeHtml(mediaBits.join(' · '))}` : ''}
     </span>
 
     <button type="button" class="yanta-ai-context-clear" data-ai-clear-context>
@@ -1057,7 +1237,9 @@ function addMessage(role, content, extra = {}) {
 
   saveTransientConversation();
   scheduleAiSessionSave();
+
   renderMessages();
+  renderContextMeter();
 }
 
 function setAssistantBusy(next, label = 'Thinking…') {
@@ -1510,6 +1692,8 @@ function renderToolBrainRow(hit) {
 function renderMessages() {
   if (!messagesEl) return;
 
+  renderContextMeter();
+
   messagesEl.replaceChildren();
 
   if (!conversation.length) {
@@ -1545,6 +1729,10 @@ function renderMessages() {
 
   if (assistantBusy) {
     messagesEl.append(renderAssistantWorkingNode());
+  }
+
+  if (contextMeterEl) {
+    messagesEl.append(contextMeterEl);
   }
 
   messagesEl.scrollTop = messagesEl.scrollHeight;
@@ -3462,6 +3650,31 @@ function injectCss() {
   color: var(--text-faint);
   font-size: 10px;
   line-height: 1.1;
+}
+
+.yanta-ai-context-meter {
+  min-height: 15px;
+  padding: 0 8px 1px;
+  margin-top: auto;
+
+  color: var(--text-faint);
+  font-size: 10.5px;
+  line-height: 1.35;
+  text-align: end;
+
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+
+  user-select: none;
+}
+
+.yanta-ai-context-meter[hidden] {
+  display: none !important;
+}
+
+.yanta-ai-context-meter:hover {
+  color: var(--text-dim);
 }
 `;
 

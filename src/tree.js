@@ -4,15 +4,19 @@
 // ============================================================
 
 import { $, el, uid, state, store, lucide, safeCssColor, toast } from './core.js';
+
 import {
   openNote,
   newNote,
   newFolder,
   rebuildWikilinkIndex,
-  clearEditor,
 } from './notes.js';
-import { syncDeleteNoteFile } from './sync.js';
-import { getNoteDoc, noteMarkdown, destroyNoteDoc } from './yjs.js';
+
+import {
+  getNoteDoc,
+  noteMarkdown,
+} from './yjs.js';
+
 import { updateStorageMeter } from './core.js';
 import { inlineTextEdit } from './inline-ui.js';
 
@@ -34,7 +38,6 @@ import {
 import {
   isNoteInTrash,
   isFolderInTrash,
-  folderHasTrashedAncestor,
   collectTrashedRootItems,
   trashCount,
   moveNoteToTrash,
@@ -63,6 +66,11 @@ import {
 import {
   isAiSessionNote,
 } from './ai/ai-sessions.js';
+
+import {
+  yantaConfirm,
+  yantaFolderPicker,
+} from './dialogs.js';
 
 function safeItemColor(c) {
   return safeCssColor(c);
@@ -129,12 +137,6 @@ function noteBelongsToMain(note) {
     !noteBelongsToArchived(note)
   );
 }
-
-import {
-  yantaConfirm,
-  yantaFolderPicker,
-} from './dialogs.js';
-import { Shredder } from 'lucide';
 
 /**
  * Aktiver Marker für Notes.
@@ -890,7 +892,7 @@ export function renderTree() {
   visibleTreeOrder = [];
   root.replaceChildren();
 
-  const q = state.searchQuery.toLowerCase();
+  const q = String(state.searchQuery || '').toLowerCase();
   const filterTag = state.activeTagFilter;
 
   const visible = [...state.notes.values()].filter((n) => {
@@ -968,80 +970,11 @@ if (pinned.length) {
 
   ftitle.addEventListener('drop', async (e) => {
     ftitle.classList.remove('drop-target');
-    e.preventDefault();
 
-    const noteId = e.dataTransfer.getData('text/yanta-note');
-
-    if (noteId) {
-      const noteIds = draggedNoteIds(noteId);
-
-      for (const id of noteIds) {
-        const note = state.notes.get(id);
-        if (!note) continue;
-
-        if (isNoteInTrash(note)) {
-          await restoreNoteFromTrash(id, {
-            targetFolderId: null,
-            source: 'tree-drop-root',
-          });
-        } else {
-          note.folderId = null;
-          note.updated = Date.now();
-
-          await store.notes.put(note);
-        }
-      }
-    } else if (folderId) {
-      const folderIds = draggedFolderIds(folderId);
-
-      for (const id of folderIds) {
-        const folder = state.folders.get(id);
-        if (!folder) continue;
-
-        if (isFolderInTrash(folder)) {
-          await restoreFolderFromTrash(id, {
-            targetParentId: null,
-            source: 'tree-drop-root',
-          });
-        } else {
-          folder.parentId = null;
-          folder.updated = Date.now();
-
-          await store.folders.put(folder);
-        }
-      }
-    }
-
-    renderTree();
-
-    const folderId = e.dataTransfer.getData('text/yanta-folder');
-
-    if (noteId) {
-      const noteIds = draggedNoteIds(noteId);
-
-      for (const id of noteIds) {
-        const note = state.notes.get(id);
-        if (!note) continue;
-
-        note.folderId = null;
-        note.updated = Date.now();
-
-        await store.notes.put(note);
-      }
-    } else if (folderId) {
-      const folderIds = draggedFolderIds(folderId);
-
-      for (const id of folderIds) {
-        const folder = state.folders.get(id);
-        if (!folder) continue;
-
-        folder.parentId = null;
-
-        await store.folders.put(folder);
-      }
-    }
-
-    renderTree();
+    await handleTreeDropToFolder(e, {
+      targetFolderId: null,
+      source: 'tree-drop-root',
+    });
   });
 
   folderSec.append(ftitle);
@@ -1060,7 +993,9 @@ if (pinned.length) {
     .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
   for (const f of topFolders) {
-    folderSec.append(folderRow(f, visibleMain, 0));
+    folderSec.append(folderRow(f, visibleMain, 0, {
+      folderFilter: isMainTreeItem,
+    }));
   }
 
   if (!topFolders.length && !orphanNotes.length) {
@@ -1087,7 +1022,9 @@ if (pinned.length) {
     }
 
     for (const f of archivedFolders) {
-      archivedSec.append(folderRow(f, visibleArchived, 0));
+      archivedSec.append(folderRow(f, visibleArchived, 0, {
+        folderFilter: isArchivedFolder,
+      }));
     }
 
     root.append(archivedSec);
@@ -1122,7 +1059,9 @@ if (pinned.length) {
     }
 
     for (const f of systemFolders) {
-      systemSec.append(folderRow(f, visibleSystem, 0));
+      systemSec.append(folderRow(f, visibleSystem, 0, {
+        folderFilter: isSystemFolder,
+      }));
     }
 
     root.append(systemSec);
@@ -1153,7 +1092,203 @@ function isAncestor(ancestorId, descendantId) {
   return false;
 }
 
-function folderRow(f, visibleNotes, depth) {
+function uniqueNonEmptyStrings(values = []) {
+  return [...new Set(
+    [...values]
+      .map((value) => String(value || ''))
+      .filter(Boolean)
+  )];
+}
+
+function clearTreeSelection() {
+  selection.keys.clear();
+  selection.anchorKey = null;
+  lastTreeFocusKey = null;
+}
+
+function topLevelFolderIds(folderIds = []) {
+  const ids = uniqueNonEmptyStrings(folderIds);
+
+  return ids.filter((folderId) => {
+    if (!state.folders.has(folderId)) return false;
+
+    for (const otherId of ids) {
+      if (otherId !== folderId && isAncestor(otherId, folderId)) {
+        return false;
+      }
+    }
+
+    return true;
+  });
+}
+
+function noteIsInsideAnyFolder(note, folderIds = []) {
+  if (!note?.folderId) return false;
+
+  for (const folderId of folderIds) {
+    if (
+      note.folderId === folderId ||
+      isAncestor(folderId, note.folderId)
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function canMoveFolderToParent(folderId, targetParentId) {
+  if (!folderId || !state.folders.has(folderId)) return false;
+  if (!targetParentId) return true;
+  if (!state.folders.has(targetParentId)) return false;
+  if (targetParentId === folderId) return false;
+  if (isAncestor(folderId, targetParentId)) return false;
+
+  return true;
+}
+
+function emitTreeStructureChanged(reason, detail = {}) {
+  window.dispatchEvent(new CustomEvent('yanta-dashboard-refresh', {
+    detail: {
+      reason,
+      source: 'tree',
+      ...detail,
+    },
+  }));
+}
+
+async function moveNotesToFolder(noteIds = [], targetFolderId = null, source = 'tree-drop') {
+  const target = targetFolderId || null;
+  let moved = 0;
+
+  for (const noteId of uniqueNonEmptyStrings(noteIds)) {
+    const note = state.notes.get(noteId);
+    if (!note) continue;
+
+    if (isNoteInTrash(note)) {
+      if (await restoreNoteFromTrash(noteId, {
+        targetFolderId: target,
+        source,
+      })) {
+        moved++;
+      }
+
+      continue;
+    }
+
+    if ((note.folderId || null) === target) {
+      continue;
+    }
+
+    note.folderId = target;
+    note.updated = Date.now();
+
+    await store.notes.put(note);
+    moved++;
+  }
+
+  return moved;
+}
+
+async function moveFoldersToParent(folderIds = [], targetParentId = null, source = 'tree-drop') {
+  const target = targetParentId || null;
+  let moved = 0;
+  let skipped = 0;
+
+  for (const folderId of topLevelFolderIds(folderIds)) {
+    const folder = state.folders.get(folderId);
+    if (!folder) continue;
+
+    if (!canMoveFolderToParent(folderId, target)) {
+      skipped++;
+      continue;
+    }
+
+    if (isFolderInTrash(folder)) {
+      if (await restoreFolderFromTrash(folderId, {
+        targetParentId: target,
+        source,
+      })) {
+        moved++;
+      }
+
+      continue;
+    }
+
+    if ((folder.parentId || null) === target) {
+      continue;
+    }
+
+    folder.parentId = target;
+    folder.updated = Date.now();
+
+    await store.folders.put(folder);
+    moved++;
+  }
+
+  if (target && moved) {
+    state.expandedFolders.add(target);
+  }
+
+  return {
+    moved,
+    skipped,
+  };
+}
+
+async function handleTreeDropToFolder(e, {
+  targetFolderId = null,
+  source = 'tree-drop',
+} = {}) {
+  e.preventDefault();
+  e.stopPropagation();
+
+  const noteId = e.dataTransfer.getData('text/yanta-note');
+  const folderId = e.dataTransfer.getData('text/yanta-folder');
+
+  let moved = 0;
+  let skipped = 0;
+
+  if (noteId) {
+    moved = await moveNotesToFolder(
+      draggedNoteIds(noteId),
+      targetFolderId,
+      source
+    );
+  } else if (folderId) {
+    const result = await moveFoldersToParent(
+      draggedFolderIds(folderId),
+      targetFolderId,
+      source
+    );
+
+    moved = result.moved;
+    skipped = result.skipped;
+  }
+
+  if (!moved && !skipped) {
+    return;
+  }
+
+  emitTreeStructureChanged(source, {
+    targetFolderId: targetFolderId || null,
+    moved,
+    skipped,
+  });
+
+  renderTree();
+
+  if (skipped) {
+    toast(
+      `Moved ${moved}; skipped ${skipped} invalid folder move${skipped === 1 ? '' : 's'}`,
+      'error'
+    );
+  }
+}
+
+function folderRow(f, visibleNotes, depth, {
+  folderFilter = isMainTreeItem,
+} = {}) {
   const key = folderKey(f.id);
   visibleTreeOrder.push(key);
 
@@ -1173,6 +1308,7 @@ function folderRow(f, visibleNotes, depth) {
 
   const childFolders = [...state.folders.values()]
     .filter((x) => x.parentId === f.id)
+    .filter(folderFilter)
     .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
   const childNotes = visibleNotes
@@ -1208,56 +1344,11 @@ function folderRow(f, visibleNotes, depth) {
     ondragleave: () => row.classList.remove('drop-target'),
     ondrop: async (e) => {
       row.classList.remove('drop-target');
-      e.preventDefault();
 
-      const noteId = e.dataTransfer.getData('text/yanta-note');
-      const folderId = e.dataTransfer.getData('text/yanta-folder');
-
-      if (noteId) {
-        const noteIds = draggedNoteIds(noteId);
-
-        for (const id of noteIds) {
-          const note = state.notes.get(id);
-          if (!note) continue;
-
-          if (isNoteInTrash(note)) {
-            await restoreNoteFromTrash(id, {
-              targetFolderId: f.id,
-              source: 'tree-drop-folder',
-            });
-          } else {
-            note.folderId = f.id;
-            note.updated = Date.now();
-
-            await store.notes.put(note);
-          }
-        }
-      } else if (folderId) {
-        const folderIds = draggedFolderIds(folderId);
-
-        for (const id of folderIds) {
-          if (id === f.id) continue;
-          if (isAncestor(id, f.id)) continue;
-
-          const folder = state.folders.get(id);
-          if (!folder) continue;
-
-          if (isFolderInTrash(folder)) {
-            await restoreFolderFromTrash(id, {
-              targetParentId: f.id,
-              source: 'tree-drop-folder',
-            });
-          } else {
-            folder.parentId = f.id;
-            folder.updated = Date.now();
-
-            await store.folders.put(folder);
-          }
-        }
-      }
-
-      state.expandedFolders.add(f.id);
-      renderTree();
+      await handleTreeDropToFolder(e, {
+        targetFolderId: f.id,
+        source: 'tree-drop-folder',
+      });
     },
   });
 
@@ -1326,7 +1417,9 @@ function folderRow(f, visibleNotes, depth) {
     });
 
     for (const sf of childFolders) {
-      kids.append(folderRow(sf, visibleNotes, depth + 1));
+      kids.append(folderRow(sf, visibleNotes, depth + 1, {
+        folderFilter,
+      }));
     }
 
     for (const n of childNotes) {
@@ -1447,20 +1540,23 @@ function trashRootFolderRow(trashItems, totalTrashCount) {
       const noteId = e.dataTransfer.getData('text/yanta-note');
       const folderId = e.dataTransfer.getData('text/yanta-folder');
 
-      if (noteId) {
-        for (const id of draggedNoteIds(noteId)) {
-          await moveNoteToTrash(id, {
-            source: 'tree-drop-trash',
-          });
-        }
-      } else if (folderId) {
-        for (const id of draggedFolderIds(folderId)) {
-          await moveFolderToTrash(id, {
-            source: 'tree-drop-trash',
-          });
-        }
-      }
+      const noteIds = noteId
+        ? draggedNoteIds(noteId)
+        : [];
 
+      const folderIds = folderId
+        ? draggedFolderIds(folderId)
+        : [];
+
+      const moved = await moveItemsToTrash({
+        noteIds,
+        folderIds,
+        source: 'tree-drop-trash',
+      });
+
+      if (!moved) return;
+
+      clearTreeSelection();
       renderTree();
     },
   });
@@ -1832,11 +1928,29 @@ function noteRow(n, depth = 0, {
 
       const selected = getSelectedItems();
 
+      const aiContextRefs =
+        selected.length > 1 && selected.some((item) => item.key === key)
+          ? selected.map((item) => {
+              if (item.kind === 'note' && isAiSessionNote(item.note)) {
+                return {
+                  kind: 'ai-session',
+                  id: item.id,
+                };
+              }
+
+              return {
+                kind: item.kind,
+                id: item.id,
+              };
+            })
+          : [{
+              kind: isAiSessionNote(n) ? 'ai-session' : 'note',
+              id: n.id,
+            }];
+
       setAiContextDragData(
         e.dataTransfer,
-        selected.length > 1 && selected.some((item) => item.key === key)
-          ? selected.map((item) => ({ kind: item.kind, id: item.id }))
-          : [{ kind: 'note', id: n.id }]
+        aiContextRefs
       );
 
       // text/yanta-note enables intra-app folder moves & wikilink-on-drop;
@@ -1861,23 +1975,25 @@ function noteRow(n, depth = 0, {
       if (!draggedId) return;
 
       e.preventDefault();
+      e.stopPropagation();
 
-      const ids = draggedNoteIds(draggedId);
+      const targetFolderId = n.folderId || null;
 
-      // Dropping note(s) onto another note → move into that note's folder.
-      for (const id of ids) {
-        if (id === n.id) continue;
+      const noteIds = draggedNoteIds(draggedId)
+        .filter((id) => id !== n.id);
 
-        const dropped = state.notes.get(id);
-        if (!dropped) continue;
+      const moved = await moveNotesToFolder(
+        noteIds,
+        targetFolderId,
+        'tree-drop-note'
+      );
 
-        dropped.folderId = n.folderId || null;
-        dropped.updated = Date.now();
+      if (!moved) return;
 
-        await store.notes.put(dropped);
-      }
-
-      window.dispatchEvent(new CustomEvent('yanta-dashboard-refresh'));
+      emitTreeStructureChanged('tree-drop-note', {
+        targetFolderId,
+        moved,
+      });
 
       renderTree();
     },
@@ -1983,6 +2099,8 @@ export function renderTagCloud() {
   const counts = new Map();
 
   for (const n of state.notes.values()) {
+    if (isNoteInTrash(n) || noteBelongsToSystem(n) || noteBelongsToArchived(n)) continue;
+
     for (const t of n.tags || []) {
       counts.set(t, (counts.get(t) || 0) + 1);
     }
@@ -2405,6 +2523,20 @@ async function bulkSetPinned(notes, pinned) {
 
   renderTree();
 
+  window.dispatchEvent(new CustomEvent('yanta-note-updated', {
+    detail: {
+      reason: pinned ? 'tree-bulk-pin' : 'tree-bulk-unpin',
+      source: 'tree',
+    },
+  }));
+
+  window.dispatchEvent(new CustomEvent('yanta-dashboard-refresh', {
+    detail: {
+      reason: pinned ? 'tree-bulk-pin' : 'tree-bulk-unpin',
+      source: 'tree',
+    },
+  }));
+
   toast(
     `${pinned ? 'Pinned' : 'Unpinned'} ${notes.length} note${notes.length === 1 ? '' : 's'}`,
     'success'
@@ -2488,6 +2620,8 @@ async function chooseFolderPrompt({
     allowNone: true,
     noneLabel: 'No folder / Home',
     isDisabled(folder) {
+      if (isFolderInTrash(folder)) return true;
+
       for (const selectedFolderId of folderKeys) {
         if (folder.id === selectedFolderId) return true;
         if (isAncestor(selectedFolderId, folder.id)) return true;
@@ -2500,53 +2634,74 @@ async function chooseFolderPrompt({
 }
 
 async function moveSelectedToFolder(keys = [...selection.keys]) {
+  const cleanKeys = uniqueNonEmptyStrings(keys);
+
   const targetFolderId = await chooseFolderPrompt({
     title: 'Move selected items',
-    keys,
+    keys: cleanKeys,
   });
 
   if (targetFolderId === undefined) return;
 
-  let moved = 0;
-  let skipped = 0;
+  const directFolderIds = cleanKeys
+    .map(parseTreeKey)
+    .filter((x) => x.kind === 'folder')
+    .map((x) => x.id);
 
-  for (const key of keys) {
-    const { kind, id } = parseTreeKey(key);
+  const topFolderIds = topLevelFolderIds(directFolderIds);
 
-    if (kind === 'note') {
-      const n = state.notes.get(id);
-      if (!n) continue;
+  const directNoteIds = cleanKeys
+    .map(parseTreeKey)
+    .filter((x) => x.kind === 'note')
+    .map((x) => x.id);
 
-      n.folderId = targetFolderId || null;
-      n.updated = Date.now();
+  /*
+    Wichtig:
+    Wenn eine Note bereits in einem ausgewählten Folder/Subfolder liegt,
+    darf sie nicht zusätzlich separat bewegt werden.
+    Sonst würde ein Bulk-Move die interne Folder-Struktur kaputtmachen.
+  */
+  const effectiveNoteIds = directNoteIds.filter((noteId) => {
+    const note = state.notes.get(noteId);
+    if (!note) return false;
 
-      await store.notes.put(n);
-      moved++;
-    } else if (kind === 'folder') {
-      const f = state.folders.get(id);
-      if (!f) continue;
+    return !noteIsInsideAnyFolder(note, topFolderIds);
+  });
 
-      // Avoid cycles.
-      if (targetFolderId && (targetFolderId === f.id || isAncestor(f.id, targetFolderId))) {
-        skipped++;
-        continue;
-      }
+  const movedNotes = await moveNotesToFolder(
+    effectiveNoteIds,
+    targetFolderId || null,
+    'tree-bulk-move'
+  );
 
-      f.parentId = targetFolderId || null;
+  const folderResult = await moveFoldersToParent(
+    topFolderIds,
+    targetFolderId || null,
+    'tree-bulk-move'
+  );
 
-      await store.folders.put(f);
-      moved++;
-    }
-  }
+  const moved = movedNotes + folderResult.moved;
+  const skipped = folderResult.skipped;
 
-  if (targetFolderId) {
+  if (targetFolderId && moved) {
     state.expandedFolders.add(targetFolderId);
   }
 
-  renderTree();
+  if (moved || skipped) {
+    emitTreeStructureChanged('tree-bulk-move', {
+      targetFolderId: targetFolderId || null,
+      moved,
+      skipped,
+    });
+
+    renderTree();
+  }
 
   if (skipped) {
-    toast(`Moved ${moved}; skipped ${skipped} invalid folder move${skipped === 1 ? '' : 's'}`, 'error');
+    toast(
+      `Moved ${moved}; skipped ${skipped} invalid folder move${skipped === 1 ? '' : 's'}`,
+      'error'
+    );
   } else {
     toast(`Moved ${moved} item${moved === 1 ? '' : 's'}`, 'success');
   }
@@ -2712,16 +2867,6 @@ async function deleteSelectedItems(items = getSelectedItems()) {
 
   selection.keys.clear();
   selection.anchorKey = null;
-
-  renderTree();
-}
-
-async function deleteNotesAndFolders({ noteIds, folderIds }) {
-  await moveItemsToTrash({
-    noteIds: [...(noteIds || [])],
-    folderIds: [...(folderIds || [])],
-    source: 'tree-delete-helper',
-  });
 
   renderTree();
 }

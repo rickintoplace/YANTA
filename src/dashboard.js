@@ -58,6 +58,7 @@ import {
   isFolderInTrash,
   moveNoteToTrash,
   moveFolderToTrash,
+  moveItemsToTrash,
 } from './trash.js';
 
 import {
@@ -344,6 +345,7 @@ import {
 
       if (kind === 'note' && state.notes.has(id)) {
         noteIds.push(id);
+        continue;
       }
 
       if (kind === 'folder' && state.folders.has(id)) {
@@ -351,9 +353,11 @@ import {
       }
     }
 
-    if (!noteIds.length && !folderIds.length) return 0;
+    if (!noteIds.length && !folderIds.length) {
+      return 0;
+    }
 
-    await moveItemsToTrash({
+    const movedCount = await moveItemsToTrash({
       noteIds,
       folderIds,
       source: 'dashboard-drag-multi',
@@ -363,7 +367,7 @@ import {
       previewCache.delete(id);
     }
 
-    return noteIds.length + folderIds.length;
+    return movedCount;
   }
 
   export function getDashboardCardDisplayPrefs() {
@@ -6391,22 +6395,17 @@ async function finishCardDrag() {
       d.dropToTrash ||
       isPointOverTrashDropTarget(d.lastX, d.lastY);
 
-    if (shouldDropToTrash) {
-      await animateTrashDropCrumple(d);
+      if (shouldDropToTrash) {
+        await animateTrashDropCrumple(d);
 
-      const count = await moveDashboardKeysToTrash(dragKeys);
+        await moveDashboardKeysToTrash(dragKeys);
 
-      toast(
-        `Moved ${count} item${count === 1 ? '' : 's'} to Trash`,
-        'success'
-      );
+        renderDashboard({
+          animate: false,
+        });
 
-      renderDashboard({
-        animate: false,
-      });
-
-      return;
-    }
+        return;
+      }
 
     if (dropFolderId) {
       const moved = await moveDashboardKeysToFolder(dragKeys, dropFolderId);

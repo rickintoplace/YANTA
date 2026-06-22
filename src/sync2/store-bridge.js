@@ -48,6 +48,27 @@ function finiteNumberOrUndefined(value) {
   return Number.isFinite(n) ? n : undefined;
 }
 
+function sanitizePublicShareMeta(share) {
+  if (!share || typeof share !== 'object') return undefined;
+
+  const shareId = String(share.shareId || share.id || '').trim();
+  if (!shareId) return undefined;
+
+  return cleanUndefined({
+    enabled: share.enabled !== false,
+    shareId,
+    shareKey: share.shareKey ? String(share.shareKey) : undefined,
+    url: share.url ? String(share.url) : undefined,
+
+    status: share.status ? String(share.status) : undefined,
+    expiresAt: share.expiresAt || share.expires_at || null,
+    revokedAt: share.revokedAt || share.revoked_at || null,
+
+    lastPublishedAt: share.lastPublishedAt || share.last_published_at || null,
+    lastPayloadHash: share.lastPayloadHash || undefined,
+  });
+}
+
 export function sanitizeNoteMeta(note) {
   if (!note || typeof note !== 'object') return null;
 
@@ -60,6 +81,7 @@ export function sanitizeNoteMeta(note) {
     pinned: !!note.pinned,
     icon: note.icon || undefined,
     color: note.color || undefined,
+    publicShare: sanitizePublicShareMeta(note.publicShare),
     created: Number(note.created || Date.now()),
     updated: Number(note.updated || Date.now()),
     bodyMigrated: note.bodyMigrated === true ? true : undefined,
@@ -183,7 +205,6 @@ function jsonEqual(a, b) {
 // changes into VaultDoc, every keystroke can become Vault update history.
 const VAULT_META_VOLATILE_KEYS = new Set([
   'updated',
-  'publicShare',
 ]);
 
 function omitVolatileVaultMetaKeys(value = {}) {

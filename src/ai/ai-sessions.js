@@ -84,8 +84,8 @@ function deriveTitleFromMessages(messages = []) {
   if (!text) return 'AI Session';
 
   return text.length > 52
-    ? `Chat: ${text.slice(0, 52)}…`
-    : `Chat: ${text}`;
+    ? `${text.slice(0, 52)}…`
+    : `${text}`;
 }
 
 export function isAiSessionNote(note) {

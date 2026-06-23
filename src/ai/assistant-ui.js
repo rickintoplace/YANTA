@@ -407,8 +407,8 @@ function ensureRoot() {
         ${lucide('picture-in-picture-2', 16)}
       </button>
 
-      <button class="icon-btn" data-ai-clear title="Clear chat">
-        ${lucide('trash', 16)}
+      <button class="icon-btn" data-ai-clear title="New Chat">
+        ${lucide('message-circle-plus', 16)}
       </button>
 
       <button class="icon-btn" data-ai-close title="Close assistant">
@@ -2538,7 +2538,9 @@ function injectCss() {
 
 .yanta-ai-msg.tool {
   background: var(--bg);
+  background: transparent;
   color: var(--text-dim);
+  padding: 0px 12px 0 0;
 }
 
 .yanta-ai-msg-role {
@@ -3515,7 +3517,7 @@ function injectCss() {
   font-size: 14px;
   line-height: 1.5;
 
-  padding: 8px 6px;
+  padding: 6px 6px;
   resize: none;
   outline: none;
 
@@ -3524,6 +3526,7 @@ function injectCss() {
   overflow-y: auto;
 
   grid-area: text-input;
+  align-content: center;
 }
 
 .yanta-ai-input::placeholder {

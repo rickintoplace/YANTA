@@ -424,7 +424,7 @@ function aiAccessSettingsHtml(settings, apiKey) {
           </select>
         </label>
 
-        <label class="wide">
+        <label class="wide" style="display:none;">
           Privacy
           <select class="text-input" data-ai-privacy>
             <option value="current-note" ${settings.privacyMode === 'current-note' ? 'selected' : ''}>Include current note</option>
@@ -474,7 +474,7 @@ function aiAccessSettingsHtml(settings, apiKey) {
         <input class="text-input" data-ai-model value="${escapeHtml(settings.model)}" />
       </label>
 
-      <label>
+      <label style="display:none;">
         Privacy
         <select class="text-input" data-ai-privacy>
           <option value="current-note" ${settings.privacyMode === 'current-note' ? 'selected' : ''}>Include current note</option>

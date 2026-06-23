@@ -1500,14 +1500,15 @@ function trashRootFolderRow(trashItems, totalTrashCount) {
         },
         'hr',
         {
-          label: 'Empty trash',
+          label: 'Empty Trash',
           icon: 'shredder',
           danger: true,
           action: async () => {
             const ok = await yantaConfirm({
-              title: 'Empty trash?',
+              title: 'Empty Trash?',
               message: `Permanently delete ${totalTrashCount} item${totalTrashCount === 1 ? '' : 's'}?\n\nThis cannot be undone.`,
-              confirmLabel: 'Empty trash',
+              confirmLabel: 'Empty Trash',
+              icon: 'shredder',
               danger: true,
             });
 

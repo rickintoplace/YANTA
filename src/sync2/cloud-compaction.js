@@ -44,6 +44,12 @@ import {
   sync2NoteContentFingerprint,
 } from './app-engine.js';
 
+import {
+  uploadVaultHead,
+  uploadNoteHead,
+  pruneSeenUpdatesCoveredByHeads,
+} from './heads.js';
+
 const DEFAULT_MIN_HEADROOM_BYTES = 3 * 1024 * 1024;
 const DEFAULT_KEEP_SNAPSHOTS_PER_DOC = 2;
 
@@ -66,10 +72,14 @@ async function markCoveredBoth(engine, key, value) {
 function objectKind(path = '') {
   const p = String(path || '');
 
+  if (p.includes('/vault/heads/')) return 'vault-head';
   if (p.includes('/vault/updates/')) return 'vault-update';
   if (p.includes('/vault/snapshots/')) return 'vault-snapshot';
+
+  if (p.includes('/docs/') && p.includes('/heads/')) return 'note-head';
   if (p.includes('/docs/') && p.includes('/updates/')) return 'note-update';
   if (p.includes('/docs/') && p.includes('/snapshots/')) return 'note-snapshot';
+
   if (p.includes('/assets/')) return 'asset';
 
   return 'other';
@@ -278,6 +288,72 @@ async function deleteRemoteEntries(engine, entries = [], {
   };
 }
 
+function existingSnapshotCoveredUpdateEntriesFromIndex(index = []) {
+  const entries = index || [];
+  const deleteEntries = [];
+
+  const vaultSnapshots = sortNewestFirst(
+    entries.filter((entry) => objectKind(entry.path) === 'vault-snapshot')
+  );
+
+  const latestVaultSnapshotUpdated = entryUpdated(vaultSnapshots[0]);
+
+  if (latestVaultSnapshotUpdated > 0) {
+    for (const entry of entries) {
+      if (
+        objectKind(entry.path) === 'vault-update' &&
+        entryUpdated(entry) <= latestVaultSnapshotUpdated
+      ) {
+        deleteEntries.push(entry);
+      }
+    }
+  }
+
+  const snapshotsByDoc = new Map();
+
+  for (const entry of entries) {
+    if (objectKind(entry.path) !== 'note-snapshot') continue;
+
+    const group = docSnapshotGroup(entry.path);
+    if (!group) continue;
+
+    if (!snapshotsByDoc.has(group)) {
+      snapshotsByDoc.set(group, []);
+    }
+
+    snapshotsByDoc.get(group).push(entry);
+  }
+
+  const latestSnapshotUpdatedByDoc = new Map();
+
+  for (const [group, list] of snapshotsByDoc) {
+    const sorted = sortNewestFirst(list);
+
+    latestSnapshotUpdatedByDoc.set(group, entryUpdated(sorted[0]));
+  }
+
+  for (const entry of entries) {
+    if (objectKind(entry.path) !== 'note-update') continue;
+
+    const group = docUpdateGroup(entry.path);
+    const latestSnapshotUpdated = latestSnapshotUpdatedByDoc.get(group) || 0;
+
+    if (latestSnapshotUpdated > 0 && entryUpdated(entry) <= latestSnapshotUpdated) {
+      deleteEntries.push(entry);
+    }
+  }
+
+  const seen = new Set();
+
+  return sortOldestFirst(deleteEntries).filter((entry) => {
+    if (!entry?.path) return false;
+    if (seen.has(entry.path)) return false;
+
+    seen.add(entry.path);
+    return true;
+  });
+}
+
 async function createEmergencyHeadroom(engine, {
   minHeadroomBytes = DEFAULT_MIN_HEADROOM_BYTES,
 } = {}) {
@@ -285,14 +361,12 @@ async function createEmergencyHeadroom(engine, {
     force: true,
   });
 
-  const vaultUpdates = sortOldestFirst(
-    (index || []).filter((entry) => objectKind(entry.path) === 'vault-update')
-  );
+  const coveredUpdates = existingSnapshotCoveredUpdateEntriesFromIndex(index || []);
 
-  let selected = [];
+  const selected = [];
   let selectedBytes = 0;
 
-  for (const entry of vaultUpdates) {
+  for (const entry of coveredUpdates) {
     selected.push(entry);
     selectedBytes += entrySize(entry);
 
@@ -310,12 +384,12 @@ async function createEmergencyHeadroom(engine, {
     phase: 'compactHeadroom',
     direction: 'up',
     detailed: true,
-    message: `Creating upload headroom by pruning old vault updates…`,
+    message: 'Creating safe upload headroom by pruning history already covered by snapshots…',
   });
 
   return deleteRemoteEntries(engine, selected, {
     phase: 'compactHeadroom',
-    message: 'Creating headroom…',
+    message: 'Creating safe headroom…',
   });
 }
 
@@ -414,13 +488,17 @@ export async function compactYantaCloudStorage(engine, {
     phase: 'compactStart',
     direction: 'up',
     detailed: true,
-    message: 'Starting cloud storage compaction…',
+    message: 'Starting cloud storage optimization…',
   });
 
   await engine.loadRemoteIndex({
     force: true,
   });
 
+  /*
+    First create room only by deleting update history that is already covered
+    by existing snapshots. Never delete unseen arbitrary note updates.
+  */
   let headroom = {
     deleted: 0,
     bytes: 0,
@@ -434,18 +512,67 @@ export async function compactYantaCloudStorage(engine, {
 
   const snapshotStartedAt = Date.now();
 
+  /*
+    Assets first. Asset migration may update Vault metadata.
+    Therefore the Vault head/snapshot must be written after assets.
+  */
+  engine.progress?.({
+    phase: 'compactAssets',
+    direction: 'up',
+    detailed: true,
+    message: 'Ensuring encrypted assets are present…',
+  });
+
+  const assets = await uploadMissingAssets(engine);
+
+  const noteIds = knownNoteIdsForSnapshots();
+
+  /*
+    Upload overwriteable latest heads.
+    These are the SaaS-quality canonical latest states.
+  */
+  engine.progress?.({
+    phase: 'compactHeads',
+    direction: 'up',
+    detailed: true,
+    message: 'Uploading latest encrypted vault head…',
+  });
+
+  await uploadVaultHead(engine);
+
+  let i = 0;
+
+  for (const noteId of noteIds) {
+    i++;
+
+    engine.progress?.({
+      phase: 'compactHeads',
+      direction: 'up',
+      detailed: true,
+      current: i,
+      total: noteIds.length,
+      noteId,
+      message: 'Uploading latest encrypted note heads…',
+    });
+
+    await engine.observeNote(noteId);
+    await uploadNoteHead(engine, noteId);
+  }
+
+  /*
+    Keep legacy snapshots for migration/repair compatibility.
+    These are also used by older cleanup logic.
+  */
   engine.progress?.({
     phase: 'compactSnapshots',
     direction: 'up',
     detailed: true,
-    message: 'Uploading fresh encrypted vault snapshot…',
+    message: 'Uploading encrypted compatibility snapshots…',
   });
 
   await uploadVaultSnapshot(engine);
 
-  const noteIds = knownNoteIdsForSnapshots();
-
-  let i = 0;
+  i = 0;
 
   for (const noteId of noteIds) {
     i++;
@@ -457,21 +584,12 @@ export async function compactYantaCloudStorage(engine, {
       current: i,
       total: noteIds.length,
       noteId,
-      message: 'Uploading fresh encrypted note snapshots…',
+      message: 'Uploading compatibility note snapshots…',
     });
 
     await engine.observeNote(noteId);
     await uploadNoteSnapshot(engine, noteId);
   }
-
-  engine.progress?.({
-    phase: 'compactAssets',
-    direction: 'up',
-    detailed: true,
-    message: 'Ensuring encrypted assets are present…',
-  });
-
-  const assets = await uploadMissingAssets(engine);
 
   await markLocalFullUpdateMarkersCovered(engine, noteIds);
 
@@ -489,11 +607,25 @@ export async function compactYantaCloudStorage(engine, {
         phase: 'compactOutbox',
         direction: 'up',
         detailed: true,
-        message: `Dropped ${removed} local queued update${removed === 1 ? '' : 's'} covered by fresh snapshots.`,
+        message: `Dropped ${removed} local queued update${removed === 1 ? '' : 's'} covered by fresh heads.`,
       });
     }
   }
 
+  /*
+    Delete all already-seen update journal entries covered by the heads we just
+    uploaded. This is the important part for Note update history.
+  */
+  const journalCleanup = await pruneSeenUpdatesCoveredByHeads(engine, {
+    noteIdsWithHeads: noteIds,
+    vaultHeadUploaded: true,
+    maxDeletes: 5000,
+  });
+
+  /*
+    Also clean old legacy snapshots/updates using timestamp-based compatibility
+    cleanup for objects covered by snapshots.
+  */
   const indexAfterSnapshots = await engine.loadRemoteIndex({
     force: true,
   });
@@ -516,18 +648,32 @@ export async function compactYantaCloudStorage(engine, {
     status: 'done',
     direction: 'up',
     detailed: true,
-    message: 'Cloud storage compaction complete.',
+    message: 'Cloud storage optimization complete.',
   });
 
   return {
     ok: true,
+
     headroom,
+
+    heads: {
+      vault: 1,
+      notes: noteIds.length,
+    },
+
     snapshots: {
       vault: 1,
       notes: noteIds.length,
     },
+
     assets,
+
+    journalCleanup,
     cleanup,
-    freedBytes: Number(headroom.bytes || 0) + Number(cleanup.bytes || 0),
+
+    freedBytes:
+      Number(headroom.bytes || 0) +
+      Number(journalCleanup.bytes || 0) +
+      Number(cleanup.bytes || 0),
   };
 }

@@ -1316,8 +1316,10 @@ async function handleStorageBreakdown(env, req, url, headers) {
   const rows = await env.DB.prepare(
     `SELECT
        CASE
+         WHEN path LIKE 'yanta-sync-v1/vault/heads/%' THEN 'vault heads'
          WHEN path LIKE 'yanta-sync-v1/vault/updates/%' THEN 'vault updates'
          WHEN path LIKE 'yanta-sync-v1/vault/snapshots/%' THEN 'vault snapshots'
+         WHEN path LIKE 'yanta-sync-v1/docs/%/heads/%' THEN 'note heads'
          WHEN path LIKE 'yanta-sync-v1/docs/%/updates/%' THEN 'note updates'
          WHEN path LIKE 'yanta-sync-v1/docs/%/snapshots/%' THEN 'note snapshots'
          WHEN path LIKE 'yanta-sync-v1/assets/%' THEN 'assets'

@@ -96,6 +96,14 @@ import { GoogleDriveObjectStore } from './google-drive-object-store.js';
 
 import { YantaCloudObjectStore } from './yanta-cloud-object-store.js';
 
+import {
+  uploadVaultHead,
+  uploadNoteHead,
+  downloadVaultHeads,
+  downloadKnownNoteHeads,
+  pruneSeenUpdatesCoveredByHeads,
+} from './heads.js';
+
 export const SYNC2_REMOTE_ORIGIN = 'sync2-remote';
 export const SYNC2_LOCAL_ORIGIN = 'sync2-local';
 
@@ -645,6 +653,13 @@ const SYNC2_VAULT_FINGERPRINT_MARKER_KEY =
 
 const SYNC2_LEGACY_VAULT_VERSION_MARKER_KEY =
   'sync2.fullUpdateUploaded.vault.version';
+
+const SYNC2_VAULT_HEAD_FINGERPRINT_MARKER_KEY =
+  'sync2.headUploaded.vault.fingerprint';
+
+function noteHeadFingerprintMarkerKey(noteId) {
+  return `sync2.headUploaded.note.${noteId}.fingerprint`;
+}
 
 async function currentVaultFingerprintMarker(localState) {
   const fingerprint = await sync2LocalVaultContentFingerprint();
@@ -1316,6 +1331,163 @@ export class Sync2AppEngine {
     };
   }
 
+  async uploadChangedHeadsNow({
+    reason = 'sync',
+    maxNoteHeads = 80,
+    pruneCoveredUpdates = true,
+  } = {}) {
+    /*
+      Latest-head maintenance:
+      - Upload overwriteable full-state heads for changed docs.
+      - Heads do not increase object count over time.
+      - After a head is uploaded, update packs already seen/applied by this
+        device are safely covered and can be pruned.
+    */
+
+    await this.observeAllKnownNotes();
+
+    let vaultHeadUploaded = false;
+    const noteIdsWithHeads = [];
+
+    const vaultFingerprint = await sync2LocalVaultContentFingerprint();
+    const lastVaultHeadFingerprint = await readSync2Marker(
+      this.localState,
+      SYNC2_VAULT_HEAD_FINGERPRINT_MARKER_KEY,
+      ''
+    );
+
+    if (vaultFingerprint && vaultFingerprint !== lastVaultHeadFingerprint) {
+      this.progress({
+        phase: 'uploadVaultHead',
+        direction: 'up',
+        detailed: true,
+        message: 'Uploading latest encrypted vault head…',
+        reason,
+      });
+
+      await uploadVaultHead(this);
+
+      await writeSync2Marker(
+        this.localState,
+        SYNC2_VAULT_HEAD_FINGERPRINT_MARKER_KEY,
+        vaultFingerprint
+      );
+
+      /*
+        The latest head also covers the current full-update reliability marker.
+        This prevents a redundant full vault update on the next sync.
+      */
+      await writeSync2Marker(
+        this.localState,
+        SYNC2_VAULT_FINGERPRINT_MARKER_KEY,
+        vaultFingerprint
+      );
+
+      vaultHeadUploaded = true;
+    }
+
+    const noteIds = new Set();
+
+    for (const id of state.notes.keys()) noteIds.add(id);
+    for (const id of vaultNotesMap().keys()) noteIds.add(id);
+
+    let uploadedNotes = 0;
+
+    for (const noteId of noteIds) {
+      if (!noteId) continue;
+      if (vaultTombstonesMap().has(noteId)) continue;
+      if (uploadedNotes >= maxNoteHeads) break;
+
+      const fingerprint = await sync2NoteContentFingerprint(noteId);
+      if (!fingerprint) continue;
+
+      const markerKey = noteHeadFingerprintMarkerKey(noteId);
+
+      const lastHeadFingerprint = await readSync2Marker(
+        this.localState,
+        markerKey,
+        ''
+      );
+
+      if (fingerprint === lastHeadFingerprint) continue;
+
+      this.progress({
+        phase: 'uploadNoteHead',
+        direction: 'up',
+        detailed: uploadedNotes === 0,
+        current: uploadedNotes + 1,
+        total: Math.min(maxNoteHeads, noteIds.size),
+        noteId,
+        message: 'Uploading latest encrypted note head…',
+        reason,
+      });
+
+      await uploadNoteHead(this, noteId);
+
+      await writeSync2Marker(
+        this.localState,
+        markerKey,
+        fingerprint
+      );
+
+      /*
+        The latest head also covers the current full-note reliability marker.
+        This prevents redundant full note update packs.
+      */
+      await writeSync2Marker(
+        this.localState,
+        noteFingerprintMarkerKey(noteId),
+        fingerprint
+      );
+
+      noteIdsWithHeads.push(noteId);
+      uploadedNotes++;
+    }
+
+    let prune = {
+      deleted: 0,
+      bytes: 0,
+    };
+
+    if (
+      pruneCoveredUpdates &&
+      (
+        vaultHeadUploaded ||
+        noteIdsWithHeads.length > 0
+      )
+    ) {
+      prune = await pruneSeenUpdatesCoveredByHeads(this, {
+        noteIdsWithHeads,
+        vaultHeadUploaded,
+      });
+    }
+
+    if (
+      vaultHeadUploaded ||
+      noteIdsWithHeads.length ||
+      prune.deleted
+    ) {
+      this.progress({
+        phase: 'headsComplete',
+        status: 'done',
+        direction: 'up',
+        detailed: false,
+        message:
+          `Latest heads updated` +
+          `${noteIdsWithHeads.length ? ` · ${noteIdsWithHeads.length} note${noteIdsWithHeads.length === 1 ? '' : 's'}` : ''}` +
+          `${prune.deleted ? ` · pruned ${prune.deleted} covered update${prune.deleted === 1 ? '' : 's'}` : ''}.`,
+        reason,
+      });
+    }
+
+    return {
+      vaultHeadUploaded,
+      noteHeadsUploaded: noteIdsWithHeads.length,
+      noteIdsWithHeads,
+      prune,
+    };
+  }
+
   async queueChangedLocalStateUpdates({
     reason = 'sync',
     maxNoteFullUpdates = 120,
@@ -1629,6 +1801,21 @@ export class Sync2AppEngine {
       });
   
       const firstPush = await this.uploadOutbox();
+
+      this.progress({
+        phase: 'downloadVaultHeads',
+        direction: 'down',
+        message: 'Checking latest vault heads…',
+      });
+
+      const vaultHeads = await downloadVaultHeads(this);
+
+      if (vaultHeads.applied > 0) {
+        await this.updateDeviceRecord({
+          lastPullAt: Date.now(),
+          lastPullCount: vaultHeads.applied,
+        });
+      }
   
       if (firstPush.uploaded > 0) {
         // Queue this info for the final upload. Do not immediately upload again.
@@ -1685,6 +1872,38 @@ export class Sync2AppEngine {
       });
   
       await this.observeAllKnownNotes();
+
+      this.progress({
+        phase: 'downloadNoteHeads',
+        direction: 'down',
+        message: 'Checking latest note heads…',
+      });
+
+      {
+        const ids = new Set();
+
+        for (const id of state.notes.keys()) ids.add(id);
+        for (const id of vaultNotesMap().keys()) ids.add(id);
+
+        const noteIds = [...ids].filter((noteId) =>
+          !vaultTombstonesMap().has(noteId)
+        );
+
+        const noteHeads = await downloadKnownNoteHeads(this, noteIds);
+
+        for (const noteId of noteHeads.noteIds || []) {
+          appliedRemoteNoteBodyIds.add(noteId);
+        }
+
+        if (noteHeads.applied > 0) {
+          await this.updateDeviceRecord({
+            lastPullAt: Date.now(),
+            lastPullCount:
+              Number(vaultUpdates?.applied || 0) +
+              Number(noteHeads?.applied || 0),
+          });
+        }
+      }
   
       if (pullSnapshots) {
 
@@ -1769,12 +1988,19 @@ export class Sync2AppEngine {
     await uploadMissingAssets(this);
 
     /*
-      storage guard:
-      If a sync completed successfully, the current semantic Vault metadata
-      fingerprint is considered covered.
+      Latest-head storage model:
+      Upload overwriteable encrypted full-state heads after a successful
+      pull/push cycle. Then prune update packs this device has already seen,
+      because the new heads cover them.
+    */
+    await this.uploadChangedHeadsNow({
+      reason: 'syncNow-complete',
+      maxNoteHeads: 80,
+      pruneCoveredUpdates: true,
+    });
 
-      This prevents routine sync from uploading a redundant full Vault update
-      on every reload/manual sync when the marker was missing, migrated or stale.
+    /*
+      Compatibility guard for the existing reliability marker.
     */
     await this.markCurrentVaultFingerprintCovered({
       reason: 'syncNow-complete',
@@ -2331,10 +2557,11 @@ export class Sync2AppEngine {
 
           await this.commitSeq(seq);
 
-          await this.markSeen(path, {
+          await this.markSeen(path, cleanUndefined({
             type: item.kind + '-update',
             own: true,
-          });
+            noteId: item.kind === 'note' ? item.noteId : undefined,
+          }));
 
           await this.applyOutboxUploadMarkers(item);
 
@@ -2349,11 +2576,12 @@ export class Sync2AppEngine {
             */
             await this.commitSeq(seq);
 
-            await this.markSeen(path, {
+            await this.markSeen(path, cleanUndefined({
               type: item.kind + '-update',
               own: true,
               existedRemote: true,
-            });
+              noteId: item.kind === 'note' ? item.noteId : undefined,
+            }));
 
             await this.applyOutboxUploadMarkers(item);
 

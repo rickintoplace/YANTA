@@ -987,11 +987,15 @@ function pctClass(pct) {
 
 function storageBreakdownLabel(group) {
   const map = {
-    'vault updates': 'Vault update history',
-    'vault snapshots': 'Vault snapshots',
+    'vault heads': 'Latest vault state',
+    'vault updates': 'Vault sync journal',
+    'vault snapshots': 'Vault compatibility snapshots',
+
+    'note heads': 'Latest note states',
+    'note updates': 'Note sync journal',
+    'note snapshots': 'Note compatibility snapshots',
+
     'ai sessions': 'AI Sessions',
-    'note updates': 'Note update history',
-    'note snapshots': 'Note snapshots',
     assets: 'Assets',
     other: 'Other',
   };
@@ -1001,13 +1005,32 @@ function storageBreakdownLabel(group) {
 
 function storageBreakdownCaption(group) {
   const map = {
-    'vault updates': 'Historical metadata updates covered by snapshots after compaction.',
-    'vault snapshots': 'Full encrypted vault metadata snapshots.',
-    'ai sessions': 'Estimated encrypted AI chat/session note content. Exact server split is unavailable because sessions are stored zero-knowledge inside encrypted note objects.',
-    'note updates': 'Historical encrypted note-body updates.',
-    'note snapshots': 'Full encrypted note-body snapshots.',
-    assets: 'Encrypted images/drawing assets.',
-    other: 'Bootstrap/keycheck or unknown sync objects.',
+    'vault heads':
+      'Small latest-state objects. One per device. This is the compact canonical vault metadata state.',
+
+    'vault updates':
+      'Temporary metadata sync journal. YANTA prunes entries after latest-state heads cover them.',
+
+    'vault snapshots':
+      'Compatibility snapshots kept for migration and repair.',
+
+    'note heads':
+      'Latest encrypted full note states. Usually one per note per device. These prevent note history from growing forever.',
+
+    'note updates':
+      'Temporary encrypted note-body sync journal. It may grow while devices are offline, then shrinks after they sync.',
+
+    'note snapshots':
+      'Compatibility snapshots kept for migration and repair.',
+
+    'ai sessions':
+      'Estimated encrypted AI chat/session note content. Exact server split is unavailable because sessions are stored zero-knowledge inside encrypted note objects.',
+
+    assets:
+      'Encrypted images and drawing assets.',
+
+    other:
+      'Bootstrap, key check or unknown sync objects.',
   };
 
   return map[group] || '';
@@ -1015,11 +1038,15 @@ function storageBreakdownCaption(group) {
 
 function storageBreakdownColor(group) {
   const map = {
+    'vault heads': 'var(--green)',
     'vault updates': 'var(--yellow)',
     'vault snapshots': 'var(--accent)',
-    'ai sessions': 'var(--accent-2)',
+
+    'note heads': 'var(--green)',
     'note updates': 'var(--accent-2)',
     'note snapshots': 'var(--green)',
+
+    'ai sessions': 'var(--accent-2)',
     assets: 'var(--red)',
     other: 'var(--text-faint)',
   };
@@ -1648,6 +1675,21 @@ async function renderCloudHome(me) {
     </section>
 
     <section class="yanta-cloud-section">
+      <h4>How sync storage works</h4>
+
+      <div class="yanta-cloud-limit-note">
+        ${lucide('info', 14)}
+        <span>
+          YANTA keeps a latest encrypted state for each device and a short sync journal for recent changes.
+          When all known changes are covered by latest states, YANTA automatically prunes old journal objects.
+          <br><br>
+          More devices can briefly use more storage because each device keeps its own latest state and may be offline.
+          After devices come online and sync, storage is optimized automatically.
+        </span>
+      </div>
+    </section>
+
+    <section class="yanta-cloud-section">
       <h4>Cloud vaults</h4>
       <p>${
         vaults.length
@@ -1713,7 +1755,7 @@ async function renderCloudHome(me) {
 
                       <button class="btn" data-vault-action="compact-sync" data-vault-id="${escapeHtml(v.id)}">
                         ${lucide('archive', 14)}
-                        Compact cloud storage
+                        Optimize cloud storage
                       </button>
 
                     `
@@ -1861,15 +1903,15 @@ ${
     btn.addEventListener('click', async () => {
       try {
         const ok = await yantaConfirm({
-          title: 'Compact cloud storage?',
+          title: 'Optimize cloud storage?',
           message: [
-            'YANTA will upload fresh encrypted snapshots and delete old sync update history that is covered by those snapshots.',
+            'YANTA will upload latest encrypted states and prune old sync journal entries that are already covered.',
             '',
-            'This reduces cloud storage usage. If your vault is already full, YANTA may first delete old vault update objects to create upload headroom.',
+            'This keeps cloud storage compact without decrypting your notes.',
             '',
             'Continue?',
           ].join('\n'),
-          confirmLabel: 'Compact storage',
+          confirmLabel: 'Optimize storage',
           cancelLabel: 'Cancel',
           icon: 'archive',
         });
@@ -2378,7 +2420,7 @@ async function renderConnected(vaultId, syncKey) {
   modal.querySelector('[data-compact-sync]')?.addEventListener('click', async () => {
     try {
       const ok = await yantaConfirm({
-        title: 'Compact cloud storage?',
+        title: 'Optimize cloud storage?',
         message: [
           'YANTA will upload fresh encrypted snapshots and delete old sync update history that is covered by those snapshots.',
           '',

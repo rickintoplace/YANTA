@@ -559,6 +559,14 @@ function phaseLabel(phase = '') {
     downloadNoteUpdates: 'Checking note updates…',
     downloadAssets: 'Downloading assets…',
 
+    downloadVaultHeads: 'Checking latest vault state…',
+    downloadNoteHeads: 'Checking latest note states…',
+    uploadVaultHead: 'Uploading latest vault state…',
+    uploadNoteHead: 'Uploading latest note state…',
+    headsComplete: 'Latest states updated',
+    pruneCoveredUpdates: 'Optimizing sync journal…',
+    compactHeads: 'Uploading latest states…',
+
     hydrate: 'Updating local vault…',
     finalize: 'Finalizing sync…',
 

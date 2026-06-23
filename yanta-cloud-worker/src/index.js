@@ -3113,6 +3113,14 @@ async function handleCreatePublicShare(env, req, headers) {
   const sourceId = String(body.sourceId || '').trim();
   const expiresAt = body.expiresAt ? Number(body.expiresAt) : null;
 
+  /*
+    Zero-knowledge critical:
+    Reusing an existing cloud share is only safe if the client explicitly asks
+    for it AND already has the matching private shareKey locally.
+    The server never knows the private shareKey after #k=.
+  */
+  const reuseActive = body.reuseActive === true;
+
   if (!sourceId) {
     return json({ ok: false, message: 'sourceId required' }, 400, headers);
   }
@@ -3121,50 +3129,44 @@ async function handleCreatePublicShare(env, req, headers) {
     await requireVault(env, user, vaultId);
   }
 
-  /*
-    Idempotent SaaS behavior:
-    If the same owner already has an active public share for this source,
-    return it instead of creating duplicate public links.
+  if (reuseActive) {
+    const existing = await env.DB.prepare(
+      `SELECT id, vault_id, source_type, source_id, status, expires_at,
+              revoked_at, created_at, updated_at, last_published_at
+       FROM public_shares
+       WHERE owner_user_id = ?
+         AND COALESCE(vault_id, '') = ?
+         AND source_type = ?
+         AND source_id = ?
+         AND status = 'active'
+         AND revoked_at IS NULL
+       ORDER BY created_at DESC
+       LIMIT 1`
+    ).bind(
+      user.userId,
+      vaultId || '',
+      sourceType,
+      sourceId
+    ).first();
 
-    This protects users when another device knows "sharing is active" but
-    does not yet have the private share key locally.
-  */
-  const existing = await env.DB.prepare(
-    `SELECT id, vault_id, source_type, source_id, status, expires_at,
-            revoked_at, created_at, updated_at, last_published_at
-     FROM public_shares
-     WHERE owner_user_id = ?
-       AND COALESCE(vault_id, '') = ?
-       AND source_type = ?
-       AND source_id = ?
-       AND status = 'active'
-       AND revoked_at IS NULL
-     ORDER BY created_at DESC
-     LIMIT 1`
-  ).bind(
-    user.userId,
-    vaultId || '',
-    sourceType,
-    sourceId
-  ).first();
-
-  if (isShareActive(existing)) {
-    return json({
-      ok: true,
-      share: {
-        id: existing.id,
-        shareId: existing.id,
-        vaultId: existing.vault_id || null,
-        sourceType: existing.source_type,
-        sourceId: existing.source_id,
-        expiresAt: existing.expires_at || null,
-        status: existing.status,
-        createdAt: existing.created_at,
-        updatedAt: existing.updated_at,
-        lastPublishedAt: existing.last_published_at || null,
-        existing: true,
-      },
-    }, 200, headers);
+    if (isShareActive(existing)) {
+      return json({
+        ok: true,
+        share: {
+          id: existing.id,
+          shareId: existing.id,
+          vaultId: existing.vault_id || null,
+          sourceType: existing.source_type,
+          sourceId: existing.source_id,
+          expiresAt: existing.expires_at || null,
+          status: existing.status,
+          createdAt: existing.created_at,
+          updatedAt: existing.updated_at,
+          lastPublishedAt: existing.last_published_at || null,
+          existing: true,
+        },
+      }, 200, headers);
+    }
   }
 
   const shareId = publicShareId();
@@ -3190,6 +3192,7 @@ async function handleCreatePublicShare(env, req, headers) {
     vaultId,
     sourceType,
     sourceId,
+    reuseActive: false,
   });
 
   return json({
@@ -3204,6 +3207,7 @@ async function handleCreatePublicShare(env, req, headers) {
       status: 'active',
       createdAt: t,
       updatedAt: t,
+      existing: false,
     },
   }, 200, headers);
 }

@@ -43,6 +43,10 @@ import {
   calendarEventUrl,
 } from './navigation.js';
 
+import {
+  renderShareIndicator,
+} from './sharing.js';
+
 const MOBILE_MQ = window.matchMedia('(max-width: 760px)');
 
 let initialized = false;
@@ -1044,6 +1048,14 @@ function refreshHeaderButtons() {
   document.querySelectorAll('.yanta-tags-button-label').forEach((label) => {
     label.textContent = tagSummaryLabel();
   });
+
+  /*
+    buildHeader() ersetzt #btn-share beim Note-Wechsel.
+    Danach muss der neue Button sofort aus Live-Share + Public-Share-State
+    synchronisiert werden. Sonst ist der Button nach Navigation visuell inaktiv,
+    obwohl die Note öffentlich geteilt ist.
+  */
+  renderShareIndicator();
 }
 
 function positionPopover(anchor, popover) {

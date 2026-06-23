@@ -168,6 +168,7 @@ export async function refreshOwnPublicShareStatusFromCloud() {
     status: String(share.status || ''),
     expiresAt: share.expiresAt || share.expires_at || null,
     revokedAt: share.revokedAt || share.revoked_at || null,
+    deletedAt: share.deletedAt || share.deleted_at || null,
     lastPublishedAt: share.lastPublishedAt || share.last_published_at || null,
     cloudOnly: !!share.cloudOnly,
   });
@@ -182,6 +183,7 @@ export async function refreshOwnPublicShareStatusFromCloud() {
       aa.status === bb.status &&
       aa.expiresAt === bb.expiresAt &&
       aa.revokedAt === bb.revokedAt &&
+      aa.deletedAt === bb.deletedAt &&
       aa.lastPublishedAt === bb.lastPublishedAt &&
       aa.cloudOnly === bb.cloudOnly
     );
@@ -242,6 +244,16 @@ export async function refreshOwnPublicShareStatusFromCloud() {
           raw.last_published_at ||
           prev.lastPublishedAt ||
           null,
+
+        /*
+          Cloud sagt: aktiv.
+          Also dürfen alte lokale terminal flags aus einem früheren Share-Lifecycle
+          den aktuellen Share nicht mehr als inaktiv markieren.
+        */
+        revokedAt: null,
+        revoked_at: null,
+        deletedAt: null,
+        deleted_at: null,
       };
 
       if (!sameComparableState(prev, next)) {
@@ -432,11 +444,13 @@ export async function stopAllPublicShares({
   };
 }
 
-async function saveLocalPublicShareState(noteId, patch) {
+async function saveLocalPublicShareState(noteId, patch, {
+  replace = false,
+} = {}) {
   const all = readLocalState();
 
   all[noteId] = {
-    ...(all[noteId] || {}),
+    ...(replace ? {} : (all[noteId] || {})),
     ...patch,
     updatedAt: now(),
   };
@@ -444,12 +458,14 @@ async function saveLocalPublicShareState(noteId, patch) {
   writeLocalState(all);
 }
 
-async function saveNotePublicShareCache(noteId, patch) {
+async function saveNotePublicShareCache(noteId, patch, {
+  replace = false,
+} = {}) {
   const note = state.notes.get(noteId);
   if (!note) return;
 
   note.publicShare = {
-    ...(note.publicShare || {}),
+    ...(replace ? {} : (note.publicShare || {})),
     ...patch,
   };
 
@@ -522,15 +538,17 @@ export async function createOrGetPublicShare(noteId, {
   const existing = publicShareStateForNote(noteId);
 
   /*
-    A revoked share must never be reused.
-    Old local state intentionally keeps shareId/shareKey for status/history,
-    but re-sharing must create a fresh cloud share + fresh key.
+    Nur wirklich aktive Shares mit lokal verfügbarem private shareKey wiederverwenden.
+
+    Wichtig:
+    Ein Share mit altem revokedAt/deletedAt darf nie wiederverwendet werden.
+    Sonst erstellt die Cloud zwar ggf. etwas, aber die lokale UI hält den Share
+    wegen revokedAt weiterhin für inaktiv.
   */
   if (
     existing.shareId &&
     existing.shareKey &&
-    existing.status !== 'revoked' &&
-    existing.enabled !== false
+    isPublicShareActive(existing)
   ) {
     return existing;
   }
@@ -544,7 +562,27 @@ export async function createOrGetPublicShare(noteId, {
     sourceType: 'note',
     sourceId: noteId,
     expiresAt,
+
+    /*
+      Zero-knowledge:
+      Der Server kennt den alten private shareKey nicht. Deshalb darf Create
+      nicht still einen bestehenden Cloud-Share wiederverwenden.
+    */
+    reuseActive: false,
   });
+
+  /*
+    Defensive guard for older/unpatched backends:
+    Alte Worker-Versionen konnten trotz neuem shareKey einen bestehenden
+    shareId zurückgeben. Würden wir damit publishen, würden alte Links mit
+    altem #k= brechen. Also lieber hart abbrechen statt Zero-Knowledge-Link
+    zu beschädigen.
+  */
+  if (created.share?.existing === true) {
+    throw new Error(
+      'Cloud returned an existing public link without the original private key. Please update YANTA Cloud and try again.'
+    );
+  }
 
   const shareId = created.share?.shareId || created.share?.id;
 
@@ -563,18 +601,27 @@ export async function createOrGetPublicShare(noteId, {
     expiresAt,
     lastPublishedAt: null,
     lastPayloadHash: '',
+    lastError: '',
+    missingAssets: [],
+    cloudOnly: false,
+
+    /*
+      Wichtig:
+      Re-sharing ist ein neuer Lifecycle. Alte revoked/deleted Flags müssen
+      vollständig verschwinden, sonst bleibt isPublicShareActive() false.
+    */
+    revokedAt: null,
+    revoked_at: null,
+    deletedAt: null,
+    deleted_at: null,
   };
 
-  await saveLocalPublicShareState(noteId, patch);
-  await saveNotePublicShareCache(noteId, {
-    enabled: true,
-    shareId,
-    shareKey,
-    url,
-    status: 'pending',
-    expiresAt,
-    lastPublishedAt: null,
-    lastPayloadHash: '',
+  await saveLocalPublicShareState(noteId, patch, {
+    replace: true,
+  });
+
+  await saveNotePublicShareCache(noteId, patch, {
+    replace: true,
   });
 
   emitPublicShareChanged(noteId, 'pending');
@@ -640,6 +687,15 @@ export async function publishPublicShareNow(noteId, {
 
     const next = {
       ...share,
+
+      enabled: true,
+      cloudOnly: false,
+
+      revokedAt: null,
+      revoked_at: null,
+      deletedAt: null,
+      deleted_at: null,
+
       status: 'up-to-date',
       lastPublishedAt,
       lastPayloadHash: packed.payloadHash,
@@ -657,6 +713,12 @@ export async function publishPublicShareNow(noteId, {
       expiresAt: share.expiresAt || expiresAt || null,
       lastPublishedAt,
       lastPayloadHash: packed.payloadHash,
+
+      cloudOnly: false,
+      revokedAt: null,
+      revoked_at: null,
+      deletedAt: null,
+      deleted_at: null,
     });
 
     emitPublicShareChanged(noteId, 'up-to-date');

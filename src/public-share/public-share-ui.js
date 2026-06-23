@@ -1067,5 +1067,18 @@ export async function openUnifiedShareModal({
     });
   }
 
-  await renderPublicTab(noteId);
+await renderPublicTab(noteId);
+
+/*
+  Fast first paint, then reconcile with cloud.
+  This catches cloud-only shares and repairs stale local status without making
+  the dialog feel slow.
+*/
+refreshOwnPublicShareStatusFromCloud()
+  .then(() => {
+    if (modal?.hidden === false && state.currentNoteId === noteId) {
+      return renderPublicTab(noteId);
+    }
+  })
+  .catch(() => {});
 }

@@ -51,6 +51,7 @@ export function createPublicShare({
   sourceType = 'note',
   sourceId,
   expiresAt = null,
+  reuseActive = false,
 }) {
   return fetchJson('/api/public-shares', {
     method: 'POST',
@@ -59,6 +60,13 @@ export function createPublicShare({
       sourceType,
       sourceId,
       expiresAt,
+
+      /*
+        Zero-knowledge important:
+        A reused cloud share would need the exact original private shareKey.
+        The server never has that key. Therefore reuse must be explicit.
+      */
+      reuseActive,
     },
   });
 }

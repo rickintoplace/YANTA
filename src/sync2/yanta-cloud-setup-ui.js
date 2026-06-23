@@ -2356,11 +2356,11 @@ async function renderConnected(vaultId, syncKey) {
       <textarea class="text-input" data-pairing rows="4" readonly>${escapeHtml(rawPayload)}</textarea>
 
       <div class="compress-actions" style="margin-top:10px;flex-wrap:wrap">
-        <button class="btn" data-copy-link>${lucide('copy', 14)} Copy pairing link</button>
-        <button class="btn" data-copy-pairing>${lucide('copy', 14)} Copy raw text</button>
+        <button class="btn" data-copy-link>${lucide('copy', 14)} Copy Pairing Link</button>
+        <button class="btn" data-copy-pairing>${lucide('copy', 14)} Copy raw Text</button>
         <button class="btn" data-sync-now>${lucide('refresh-cw', 14)} Sync now</button>
-        <button class="btn" data-repair-sync>${lucide('wrench', 14)} Repair cloud sync</button>
-        <button class="btn" data-compact-sync>${lucide('archive', 14)} Compact cloud storage</button>
+        <button class="btn" data-repair-sync>${lucide('wrench', 14)} Repair Cloud Sync</button>
+        <button class="btn" data-compact-sync>${lucide('archive', 14)} Optimize Cloud Storage</button>
         <span class="grow"></span>
         <button class="btn" data-back-cloud-home>Back</button>
         <button class="btn primary" data-yanta-cloud-close>Done</button>
@@ -2375,7 +2375,7 @@ async function renderConnected(vaultId, syncKey) {
   modal.querySelector('[data-copy-link]')?.addEventListener('click', async () => {
     try {
       await navigator.clipboard.writeText(pairingUrl);
-      toast('Pairing link copied', 'success');
+      toast('Pairing Link copied', 'success');
     } catch {
       toast('Copy failed', 'error');
     }

@@ -525,3 +525,34 @@ export function citationsTextForNote(noteId) {
 
 // Re-export Y for callers that need it.
 export { Y };
+
+export function vaultHeadPath(deviceId) {
+  return joinRemotePath(
+    SYNC_ROOT,
+    'vault',
+    'heads',
+    `${deviceId}.yhead.enc`
+  );
+}
+
+export function vaultHeadsPrefix() {
+  return joinRemotePath(SYNC_ROOT, 'vault', 'heads') + '/';
+}
+
+export async function docHeadPath(nameKey, noteId, deviceId) {
+  const id = await remoteDocId(nameKey, noteId);
+
+  return joinRemotePath(
+    SYNC_ROOT,
+    'docs',
+    id,
+    'heads',
+    `${deviceId}.yhead.enc`
+  );
+}
+
+export async function docHeadsPrefix(nameKey, noteId) {
+  const id = await remoteDocId(nameKey, noteId);
+
+  return joinRemotePath(SYNC_ROOT, 'docs', id, 'heads') + '/';
+}

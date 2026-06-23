@@ -131,3 +131,34 @@ export function assetObjectBlobPath(assetObjectId) {
 
   return joinRemotePath(SYNC_ROOT, 'assets', `${clean}.blob.enc`);
 }
+
+export function vaultHeadPath(deviceId) {
+  return joinRemotePath(
+    SYNC_ROOT,
+    'vault',
+    'heads',
+    `${deviceId}.yhead.enc`
+  );
+}
+
+export function vaultHeadsPrefix() {
+  return joinRemotePath(SYNC_ROOT, 'vault', 'heads') + '/';
+}
+
+export async function docHeadPath(nameKey, noteId, deviceId) {
+  const id = await remoteDocId(nameKey, noteId);
+
+  return joinRemotePath(
+    SYNC_ROOT,
+    'docs',
+    id,
+    'heads',
+    `${deviceId}.yhead.enc`
+  );
+}
+
+export async function docHeadsPrefix(nameKey, noteId) {
+  const id = await remoteDocId(nameKey, noteId);
+
+  return joinRemotePath(SYNC_ROOT, 'docs', id, 'heads') + '/';
+}

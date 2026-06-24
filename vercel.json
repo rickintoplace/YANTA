@@ -54,42 +54,6 @@
         {
           "key": "X-Frame-Options",
           "value": "DENY"
-        },
-        {
-          "source": "/pricing",
-          "headers": [
-            {
-              "key": "Cache-Control",
-              "value": "no-store"
-            }
-          ]
-        },
-        {
-          "source": "/terms",
-          "headers": [
-            {
-              "key": "Cache-Control",
-              "value": "no-store"
-            }
-          ]
-        },
-        {
-          "source": "/privacy",
-          "headers": [
-            {
-              "key": "Cache-Control",
-              "value": "no-store"
-            }
-          ]
-        },
-        {
-          "source": "/refund",
-          "headers": [
-            {
-              "key": "Cache-Control",
-              "value": "no-store"
-            }
-          ]
         }
       ]
     },

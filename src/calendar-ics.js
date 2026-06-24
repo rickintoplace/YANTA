@@ -67,6 +67,36 @@ export function toIcsDate(value, allDay = false) {
     .replace(/\.\d{3}Z$/, 'Z');
 }
 
+function pad(n) {
+  return String(n).padStart(2, '0');
+}
+
+function localDateKey(value) {
+  if (!value) return '';
+
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.trim())) {
+    return value.trim();
+  }
+
+  const d = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(d.getTime())) return '';
+
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+}
+
+function addDaysKey(dateKey, days) {
+  const d = new Date(`${dateKey}T00:00:00`);
+  if (Number.isNaN(d.getTime())) return dateKey;
+
+  d.setDate(d.getDate() + days);
+
+  return localDateKey(d);
+}
+
+function subtractOneDayKey(dateKey) {
+  return addDaysKey(dateKey, -1);
+}
+
 function parseIcsDate(value, params = {}) {
   const raw = String(value || '').trim();
 
@@ -180,6 +210,37 @@ function parseProperty(line) {
   };
 }
 
+function firstProp(value) {
+  return Array.isArray(value) ? value[0] : value;
+}
+
+function parseIcsExdates(values = [], allDay = false) {
+  const list = Array.isArray(values)
+    ? values
+    : values
+      ? [values]
+      : [];
+
+  const out = [];
+
+  for (const prop of list) {
+    const rawValues = String(prop?.value || '')
+      .split(',')
+      .map((x) => x.trim())
+      .filter(Boolean);
+
+    for (const raw of rawValues) {
+      const parsed = parseIcsDate(raw, prop?.params || {});
+
+      if (!parsed?.iso) continue;
+
+      out.push(allDay ? localDateKey(parsed.iso) : parsed.iso);
+    }
+  }
+
+  return out;
+}
+
 export function parseIcsEvents(text) {
   const lines = unfoldIcs(text);
   const events = [];
@@ -196,27 +257,50 @@ export function parseIcsEvents(text) {
 
     if (prop.name === 'END' && prop.value.toUpperCase() === 'VEVENT') {
       if (current) {
-        const start = current.DTSTART
-          ? parseIcsDate(current.DTSTART.value, current.DTSTART.params)
+        const startProp = firstProp(current.DTSTART);
+        const endProp = firstProp(current.DTEND);
+
+        const start = startProp
+          ? parseIcsDate(startProp.value, startProp.params)
           : null;
 
-        const end = current.DTEND
-          ? parseIcsDate(current.DTEND.value, current.DTEND.params)
+        const end = endProp
+          ? parseIcsDate(endProp.value, endProp.params)
           : null;
 
         if (start?.iso) {
+          let storedEnd = end?.iso || null;
+
+          // ICS all-day DTEND is exclusive. YANTA stores inclusive.
+          if (start.allDay && storedEnd) {
+            storedEnd = subtractOneDayKey(localDateKey(storedEnd));
+
+            if (storedEnd === localDateKey(start.iso)) {
+              storedEnd = null;
+            }
+          }
+
+          const rruleProp = firstProp(current.RRULE);
+          const uidProp = firstProp(current.UID);
+          const summaryProp = firstProp(current.SUMMARY);
+          const descriptionProp = firstProp(current.DESCRIPTION);
+          const locationProp = firstProp(current.LOCATION);
+          const statusProp = firstProp(current.STATUS);
+
           events.push({
-            externalUid: current.UID?.value || '',
-            title: unescapeIcsText(current.SUMMARY?.value || 'Imported event'),
-            description: unescapeIcsText(current.DESCRIPTION?.value || ''),
-            location: unescapeIcsText(current.LOCATION?.value || ''),
-            status: String(current.STATUS?.value || 'confirmed').toLowerCase(),
+            externalUid: uidProp?.value || '',
+            title: unescapeIcsText(summaryProp?.value || 'Imported event'),
+            description: unescapeIcsText(descriptionProp?.value || ''),
+            location: unescapeIcsText(locationProp?.value || ''),
+            status: String(statusProp?.value || 'confirmed').toLowerCase(),
             start: start.iso,
-            end: end?.iso || null,
+            end: storedEnd,
             allDay: !!start.allDay,
-            recurrence: current.RRULE?.value
-              ? { rrule: current.RRULE.value }
+            recurrence: rruleProp?.value
+              ? { rrule: rruleProp.value }
               : null,
+            recurrenceExceptions: parseIcsExdates(current.EXDATE || [], !!start.allDay),
+            recurrenceOverrides: {},
           });
         }
       }
@@ -227,10 +311,21 @@ export function parseIcsEvents(text) {
 
     if (!current) continue;
 
-    current[prop.name] = {
-      value: prop.value,
-      params: prop.params,
-    };
+    if (prop.name === 'EXDATE') {
+      if (!current.EXDATE) current.EXDATE = [];
+      current.EXDATE.push({
+        value: prop.value,
+        params: prop.params,
+      });
+      continue;
+    }
+
+    if (!current[prop.name]) {
+      current[prop.name] = {
+        value: prop.value,
+        params: prop.params,
+      };
+    }
   }
 
   return events;
@@ -260,7 +355,8 @@ export function eventsToIcs(events, {
       lines.push(`DTSTART;VALUE=DATE:${toIcsDate(e.start, true)}`);
 
       if (e.end) {
-        lines.push(`DTEND;VALUE=DATE:${toIcsDate(e.end, true)}`);
+        // ICS all-day DTEND is exclusive. YANTA stores inclusive.
+        lines.push(`DTEND;VALUE=DATE:${toIcsDate(addDaysKey(localDateKey(e.end), 1), true)}`);
       }
     } else {
       lines.push(`DTSTART:${toIcsDate(e.start)}`);
@@ -284,6 +380,10 @@ export function eventsToIcs(events, {
 
     if (e.recurrence?.rrule) {
       lines.push(`RRULE:${e.recurrence.rrule}`);
+    }
+
+    for (const ex of e.recurrenceExceptions || []) {
+      lines.push(`EXDATE${e.allDay ? ';VALUE=DATE' : ''}:${toIcsDate(ex, !!e.allDay)}`);
     }
 
     lines.push(`DTSTAMP:${toIcsDate(Date.now())}`);

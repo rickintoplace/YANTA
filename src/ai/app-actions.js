@@ -585,17 +585,23 @@ function eventEndMs(ev) {
   if (ev.end) {
     if (typeof ev.end === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(ev.end)) {
       const d = new Date(ev.end + 'T00:00:00');
-      if (!Number.isNaN(d.getTime())) return d.getTime();
+
+      if (!Number.isNaN(d.getTime())) {
+        // YANTA stored/markdown all-day end is inclusive.
+        // Dynamic source events are already exclusive.
+        return d.getTime() + (ev.allDay && ev.source !== 'source' ? 86400000 : 0);
+      }
     }
 
     const d = new Date(ev.end);
-    if (!Number.isNaN(d.getTime())) return d.getTime();
+
+    if (!Number.isNaN(d.getTime())) {
+      return d.getTime() + (ev.allDay && ev.source !== 'source' ? 86400000 : 0);
+    }
   }
 
-  // Full-day events without end last one day.
   if (ev.allDay) return start + 86400000;
 
-  // Timed events without explicit end: treat as a point event, but make it searchable.
   return start + 1;
 }
 
@@ -676,6 +682,7 @@ export async function searchEventsAction({
 } = {}) {
   const {
     hydrateCalendarStateFromVault,
+    expandedCalendarRawEventsForRange,
   } = await import('../calendar.js');
 
   hydrateCalendarStateFromVault({ silent: true });
@@ -689,27 +696,26 @@ export async function searchEventsAction({
     end,
   });
 
-  const all = [];
+  const rangeStartForExpansion = resolvedRange.startMs != null
+    ? new Date(resolvedRange.startMs)
+    : addDaysDate(startOfLocalDayDate(new Date()), -365);
 
-  if (includeStored !== false) {
-    for (const ev of state.calendarEvents.values()) {
-      all.push({
-        ...ev,
-        source: 'stored',
-      });
+  const rangeEndForExpansion = resolvedRange.endMs != null
+    ? new Date(resolvedRange.endMs)
+    : addDaysDate(startOfLocalDayDate(new Date()), 365);
+
+  const all = expandedCalendarRawEventsForRange(
+    rangeStartForExpansion,
+    rangeEndForExpansion,
+    {
+      includeStored,
+      includeMarkdownDerived,
+      includeSources: true,
     }
-  }
-
-  if (includeMarkdownDerived !== false) {
-    const derived = await collectMarkdownDerivedCalendarEventsForAi();
-
-    for (const ev of derived) {
-      all.push({
-        ...ev,
-        source: 'markdown',
-      });
-    }
-  }
+  ).map((ev) => ({
+    ...ev,
+    source: ev.markdownDerived ? 'markdown' : ev.source?.type ? 'source' : 'stored',
+  }));
 
   const filtered = all
     .filter((ev) => {
@@ -783,6 +789,11 @@ export async function createEventAction(args = {}) {
     categoryId: args.categoryId || undefined,
     icon: appearance.icon || undefined,
     color: appearance.color || undefined,
+    recurrence: args.recurrence || null,
+    recurrenceExceptions: Array.isArray(args.recurrenceExceptions)
+      ? args.recurrenceExceptions
+      : [],
+    recurrenceOverrides: args.recurrenceOverrides || {},
   });
 
   if (!ev) {

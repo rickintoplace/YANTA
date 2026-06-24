@@ -87,6 +87,18 @@ import {
 } from './calendar-sources.js';
 
 import {
+  hasRecurrence,
+  normalizeRecurrence,
+  expandRecurringEvent,
+  parseOccurrenceId,
+  occurrenceId,
+  addOccurrenceException,
+  addOccurrenceOverride,
+  buildRRuleString,
+  dateLikeToDate as recurrenceDateLikeToDate,
+} from './calendar-recurrence.js';
+
+import {
   getCalendarPreferences,
   fullCalendarLocale,
   fullCalendarWeekText,
@@ -3698,6 +3710,54 @@ function sameLocalDay(a, b) {
   );
 }
 
+function addDaysToStoredAllDayValue(value, days) {
+  const d = dateLikeToLocalDate(value);
+  if (!d) return value || null;
+
+  d.setDate(d.getDate() + days);
+
+  return localDateKeyFromDate(d);
+}
+
+/**
+ * YANTA stores all-day end dates as user-facing inclusive dates.
+ * FullCalendar expects all-day end dates as exclusive dates.
+ */
+function calendarEndForFullCalendar(ev) {
+  if (!ev?.end) return undefined;
+
+  if (!ev.allDay) {
+    return ev.end;
+  }
+
+  return addDaysToStoredAllDayValue(ev.end, 1);
+}
+
+/**
+ * FullCalendar gives all-day end dates as exclusive dates.
+ * YANTA stores them as inclusive dates in the editor/data model.
+ */
+function fcExclusiveAllDayEndToStoredInclusive(value) {
+  if (!value) return null;
+
+  const d = value instanceof Date ? new Date(value) : new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+
+  d.setDate(d.getDate() - 1);
+
+  return localInputValue(d, true);
+}
+
+function calendarEventSpansMultipleLocalDays({
+  start,
+  end,
+  allDay = false,
+} = {}) {
+  if (!start || !end) return false;
+
+  return !sameLocalDay(start, end);
+}
+
 function normalizeCalendarEventEnd({ start, end, allDay }) {
   if (!end) return null;
 
@@ -4450,6 +4510,811 @@ function openCalendarDateTimePicker({
   render();
 }
 
+// ============================================================
+// Recurrence UX helpers
+// ============================================================
+
+const RECURRENCE_WEEKDAYS = [
+  { code: 'MO', label: 'Mon', longLabel: 'Monday' },
+  { code: 'TU', label: 'Tue', longLabel: 'Tuesday' },
+  { code: 'WE', label: 'Wed', longLabel: 'Wednesday' },
+  { code: 'TH', label: 'Thu', longLabel: 'Thursday' },
+  { code: 'FR', label: 'Fri', longLabel: 'Friday' },
+  { code: 'SA', label: 'Sat', longLabel: 'Saturday' },
+  { code: 'SU', label: 'Sun', longLabel: 'Sunday' },
+];
+
+const RECURRENCE_UNIT_LABELS = {
+  DAILY: 'day',
+  WEEKLY: 'week',
+  MONTHLY: 'month',
+  YEARLY: 'year',
+};
+
+const RECURRENCE_CUSTOM_UNIT_TO_FREQ = {
+  days: 'DAILY',
+  weeks: 'WEEKLY',
+  months: 'MONTHLY',
+  years: 'YEARLY',
+};
+
+function parseRRuleParts(rrule = '') {
+  const out = {};
+
+  for (const part of String(rrule || '').split(';')) {
+    const idx = part.indexOf('=');
+    if (idx < 0) continue;
+
+    const key = part.slice(0, idx).trim().toUpperCase();
+    const value = part.slice(idx + 1).trim();
+
+    if (key) out[key] = value;
+  }
+
+  return out;
+}
+
+function pluralUnit(unit, n) {
+  return Number(n) === 1 ? unit : `${unit}s`;
+}
+
+function weekdayCodeForDate(value) {
+  const d = dateLikeToLocalDate(value);
+  if (!d) return '';
+
+  return ['SU', 'MO', 'TU', 'WE', 'TH', 'FR', 'SA'][d.getDay()] || '';
+}
+
+function weekdayLongLabel(code) {
+  return RECURRENCE_WEEKDAYS.find((d) => d.code === code)?.longLabel || code;
+}
+
+function ordinal(n) {
+  const num = Number(n);
+
+  if (num === -1) return 'last';
+
+  const abs = Math.abs(num);
+  const suffix =
+    abs % 10 === 1 && abs % 100 !== 11
+      ? 'st'
+      : abs % 10 === 2 && abs % 100 !== 12
+        ? 'nd'
+        : abs % 10 === 3 && abs % 100 !== 13
+          ? 'rd'
+          : 'th';
+
+  return `${abs}${suffix}`;
+}
+
+function ordinalInMonth(dateLike) {
+  const d = dateLikeToLocalDate(dateLike);
+  if (!d) return 1;
+
+  return Math.floor((d.getDate() - 1) / 7) + 1;
+}
+
+function monthDayLabel(dateLike) {
+  const d = dateLikeToLocalDate(dateLike);
+  return d ? d.getDate() : 1;
+}
+
+function monthNameDayLabel(dateLike) {
+  const d = dateLikeToLocalDate(dateLike);
+  if (!d) return 'this date';
+
+  try {
+    return new Intl.DateTimeFormat(fullCalendarLocale(getCalendarPreferences()), {
+      month: 'long',
+      day: 'numeric',
+    }).format(d);
+  } catch {
+    return `${d.getMonth() + 1}/${d.getDate()}`;
+  }
+}
+
+function rruleUntilToEditorInput(value = '') {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+
+  let d = null;
+
+  let m = raw.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})Z$/);
+
+  if (m) {
+    d = new Date(Date.UTC(
+      Number(m[1]),
+      Number(m[2]) - 1,
+      Number(m[3]),
+      Number(m[4]),
+      Number(m[5]),
+      Number(m[6])
+    ));
+  }
+
+  if (!d) {
+    m = raw.match(/^(\d{4})(\d{2})(\d{2})$/);
+
+    if (m) {
+      d = new Date(
+        Number(m[1]),
+        Number(m[2]) - 1,
+        Number(m[3]),
+        0,
+        0,
+        0,
+        0
+      );
+    }
+  }
+
+  if (!d || Number.isNaN(d.getTime())) return '';
+
+  return calendarEditorInputValue(d.toISOString(), true);
+}
+
+function recurrenceUiFromEvent(ev = {}) {
+  const rrule = ev.recurrence?.rrule || '';
+  const parts = parseRRuleParts(rrule);
+  const freq = parts.FREQ || '';
+  const byday = parts.BYDAY
+    ? parts.BYDAY.split(',').map((x) => x.trim().toUpperCase()).filter(Boolean)
+    : [];
+
+  return {
+    enabled: !!freq,
+    freq: freq || 'WEEKLY',
+    interval: parts.INTERVAL || '1',
+    byday,
+    bymonthday: parts.BYMONTHDAY || '',
+    bysetpos: parts.BYSETPOS || '',
+    count: parts.COUNT || '',
+    until: parts.UNTIL || '',
+    untilInput: rruleUntilToEditorInput(parts.UNTIL || ''),
+    endMode: parts.COUNT
+      ? 'count'
+      : parts.UNTIL
+        ? 'until'
+        : 'never',
+  };
+}
+
+function recurrenceStartForUi(ev = {}) {
+  return ev.start || new Date().toISOString();
+}
+
+function quickPresetDefinitions(ev = {}) {
+  const start = recurrenceStartForUi(ev);
+  const weekday = weekdayCodeForDate(start) || 'MO';
+  const weekdayName = weekdayLongLabel(weekday);
+  const dayOfMonth = monthDayLabel(start);
+  const nth = ordinalInMonth(start);
+  const nthText = ordinal(nth);
+  const monthDay = monthNameDayLabel(start);
+
+  return [
+    {
+      id: 'daily',
+      title: 'Daily',
+      hint: 'Repeats every day',
+      rrule: ({ count, until } = {}) => buildRRuleString({
+        freq: 'DAILY',
+        count,
+        until,
+      }),
+    },
+    {
+      id: 'weekdays',
+      title: 'On weekdays',
+      hint: 'Monday to Friday',
+      rrule: ({ count, until } = {}) => buildRRuleString({
+        freq: 'WEEKLY',
+        byday: ['MO', 'TU', 'WE', 'TH', 'FR'],
+        count,
+        until,
+      }),
+    },
+    {
+      id: 'weekly-on-day',
+      title: `Weekly on ${weekdayName}`,
+      hint: `Repeats every ${weekdayName}`,
+      rrule: ({ count, until } = {}) => buildRRuleString({
+        freq: 'WEEKLY',
+        byday: [weekday],
+        count,
+        until,
+      }),
+    },
+    {
+      id: 'monthly-by-date',
+      title: `Monthly on day ${dayOfMonth}`,
+      hint: `Repeats on the ${dayOfMonth}${ordinal(dayOfMonth).replace(String(dayOfMonth), '')} day`,
+      rrule: ({ count, until } = {}) => buildRRuleString({
+        freq: 'MONTHLY',
+        bymonthday: dayOfMonth,
+        count,
+        until,
+      }),
+    },
+    {
+      id: 'monthly-by-nth-weekday',
+      title: `Monthly on the ${nthText} ${weekdayName}`,
+      hint: `Repeats on the ${nthText} ${weekdayName}`,
+      rrule: ({ count, until } = {}) => buildRRuleString({
+        freq: 'MONTHLY',
+        byday: [weekday],
+        bysetpos: nth,
+        count,
+        until,
+      }),
+    },
+    {
+      id: 'yearly',
+      title: 'Yearly',
+      hint: `Repeats every year on ${monthDay}`,
+      rrule: ({ count, until } = {}) => buildRRuleString({
+        freq: 'YEARLY',
+        count,
+        until,
+      }),
+    },
+  ];
+}
+
+function sameStringSet(a = [], b = []) {
+  const aa = [...a].map(String).sort().join(',');
+  const bb = [...b].map(String).sort().join(',');
+
+  return aa === bb;
+}
+
+function matchingQuickPresetId(ev = {}) {
+  const recurrence = normalizeRecurrence(ev.recurrence);
+  if (!recurrence?.rrule) return 'weekly-on-day';
+
+  const ui = recurrenceUiFromEvent(ev);
+  const weekday = weekdayCodeForDate(ev.start) || 'MO';
+  const dayOfMonth = String(monthDayLabel(ev.start));
+  const nth = String(ordinalInMonth(ev.start));
+
+  if (ui.freq === 'DAILY' && ui.interval === '1' && !ui.byday.length) {
+    return 'daily';
+  }
+
+  if (
+    ui.freq === 'WEEKLY' &&
+    ui.interval === '1' &&
+    sameStringSet(ui.byday, ['MO', 'TU', 'WE', 'TH', 'FR'])
+  ) {
+    return 'weekdays';
+  }
+
+  if (
+    ui.freq === 'WEEKLY' &&
+    ui.interval === '1' &&
+    sameStringSet(ui.byday, [weekday])
+  ) {
+    return 'weekly-on-day';
+  }
+
+  if (
+    ui.freq === 'MONTHLY' &&
+    ui.interval === '1' &&
+    String(ui.bymonthday) === dayOfMonth
+  ) {
+    return 'monthly-by-date';
+  }
+
+  if (
+    ui.freq === 'MONTHLY' &&
+    ui.interval === '1' &&
+    sameStringSet(ui.byday, [weekday]) &&
+    String(ui.bysetpos) === nth
+  ) {
+    return 'monthly-by-nth-weekday';
+  }
+
+  if (ui.freq === 'YEARLY' && ui.interval === '1') {
+    return 'yearly';
+  }
+
+  return 'custom';
+}
+
+function customUnitFromUi(ui = {}) {
+  if (ui.freq === 'DAILY') return 'days';
+  if (ui.freq === 'WEEKLY') return 'weeks';
+  if (ui.freq === 'MONTHLY') return 'months';
+  if (ui.freq === 'YEARLY') return 'years';
+
+  return 'weeks';
+}
+
+function customMonthModeFromUi(ui = {}) {
+  if (ui.freq === 'MONTHLY' && ui.byday.length && ui.bysetpos) {
+    return 'nth-weekday';
+  }
+
+  return 'date';
+}
+
+function humanRecurrenceSummary(ev = {}) {
+  const recurrence = normalizeRecurrence(ev.recurrence);
+
+  if (!recurrence?.rrule) {
+    return 'This event happens once.';
+  }
+
+  const parts = parseRRuleParts(recurrence.rrule);
+  const freq = parts.FREQ || 'WEEKLY';
+  const interval = Math.max(1, Number(parts.INTERVAL || 1));
+  const unit = RECURRENCE_UNIT_LABELS[freq] || 'period';
+
+  const intro =
+    interval === 1
+      ? `Repeats every ${unit}`
+      : `Repeats every ${interval} ${pluralUnit(unit, interval)}`;
+
+  const byday = parts.BYDAY
+    ? parts.BYDAY.split(',').map((x) => x.trim()).filter(Boolean)
+    : [];
+
+  let detail = '';
+
+  if (freq === 'WEEKLY' && byday.length) {
+    detail = ` on ${byday.map(weekdayLongLabel).join(', ')}`;
+  }
+
+  if (freq === 'MONTHLY' && parts.BYMONTHDAY) {
+    detail = ` on day ${parts.BYMONTHDAY}`;
+  }
+
+  if (freq === 'MONTHLY' && parts.BYDAY && parts.BYSETPOS) {
+    detail = ` on the ${ordinal(parts.BYSETPOS)} ${weekdayLongLabel(parts.BYDAY)}`;
+  }
+
+  const endText =
+    parts.COUNT
+      ? ` · ends after ${parts.COUNT} time${Number(parts.COUNT) === 1 ? '' : 's'}`
+      : parts.UNTIL
+        ? ' · ends on the selected date'
+        : ' · never ends';
+
+  return `${intro}${detail}${endText}`;
+}
+
+function recurrenceEditorHtml(ev = {}) {
+  const ui = recurrenceUiFromEvent(ev);
+  const selectedPreset = ui.enabled ? matchingQuickPresetId(ev) : 'weekly-on-day';
+
+  const customUnit = customUnitFromUi(ui);
+  const customMonthMode = customMonthModeFromUi(ui);
+
+  const presets = quickPresetDefinitions(ev);
+  const start = recurrenceStartForUi(ev);
+  const weekday = weekdayCodeForDate(start) || 'MO';
+  const weekdayName = weekdayLongLabel(weekday);
+  const dayOfMonth = monthDayLabel(start);
+  const nth = ordinalInMonth(start);
+
+  return `
+    <section class="yanta-calendar-recurrence-box" data-recurrence-box>
+      <label class="switch yanta-calendar-switch yanta-calendar-repeat-toggle">
+        <input type="checkbox" data-field="recurrenceEnabled" ${ui.enabled ? 'checked' : ''} />
+        <span>
+          <strong>Repeat</strong>
+          <small>Turn this into a recurring event.</small>
+        </span>
+      </label>
+
+      <div class="yanta-calendar-recurrence-details" data-recurrence-details ${ui.enabled ? '' : 'hidden'}>
+        <input type="hidden" data-field="recurrencePreset" value="${escapeAttr(selectedPreset)}" />
+
+        <div class="yanta-calendar-recurrence-section-title">Quick presets</div>
+
+        <div class="yanta-calendar-preset-grid" data-recurrence-presets>
+          ${presets.map((preset) => `
+            <button
+              type="button"
+              class="yanta-calendar-preset ${selectedPreset === preset.id ? 'active' : ''}"
+              data-preset="${escapeAttr(preset.id)}">
+              <strong>${escapeHtml(preset.title)}</strong>
+              <small>${escapeHtml(preset.hint)}</small>
+            </button>
+          `).join('')}
+
+          <button
+            type="button"
+            class="yanta-calendar-preset yanta-calendar-preset-custom ${selectedPreset === 'custom' ? 'active' : ''}"
+            data-preset="custom">
+            <strong>Custom…</strong>
+            <small>Choose interval, days and end behavior</small>
+          </button>
+        </div>
+
+        <div class="yanta-calendar-custom-repeat" data-custom-repeat ${selectedPreset === 'custom' ? '' : 'hidden'}>
+          <div class="yanta-calendar-recurrence-section-title">Custom repeat</div>
+
+          <label class="yanta-calendar-recurrence-field">
+            <span>Repeats every</span>
+
+            <div class="yanta-calendar-custom-every-row">
+              <input
+                class="text-input"
+                data-field="recurrenceInterval"
+                type="number"
+                inputmode="numeric"
+                min="1"
+                max="999"
+                value="${escapeAttr(ui.interval || '1')}" />
+
+              <select class="text-input" data-field="recurrenceCustomUnit">
+                <option value="days" ${customUnit === 'days' ? 'selected' : ''}>Days</option>
+                <option value="weeks" ${customUnit === 'weeks' ? 'selected' : ''}>Weeks</option>
+                <option value="months" ${customUnit === 'months' ? 'selected' : ''}>Months</option>
+                <option value="years" ${customUnit === 'years' ? 'selected' : ''}>Years</option>
+              </select>
+            </div>
+          </label>
+
+          <div class="yanta-calendar-weekday-wrap" data-recurrence-weekday-wrap ${customUnit === 'weeks' ? '' : 'hidden'}>
+            <div class="yanta-calendar-recurrence-subtitle">Repeats on</div>
+
+            <div class="yanta-calendar-weekday-row" data-recurrence-weekdays>
+              ${RECURRENCE_WEEKDAYS.map((day) => `
+                <button
+                  type="button"
+                  class="${ui.byday.includes(day.code) || (!ui.byday.length && day.code === weekday) ? 'active' : ''}"
+                  data-byday="${escapeAttr(day.code)}"
+                  title="${escapeAttr(day.longLabel)}">
+                  ${escapeHtml(day.label)}
+                </button>
+              `).join('')}
+            </div>
+          </div>
+
+          <label class="yanta-calendar-recurrence-field yanta-calendar-month-mode" data-recurrence-month-mode-wrap ${customUnit === 'months' ? '' : 'hidden'}>
+            <span>Monthly pattern</span>
+
+            <select class="text-input" data-field="recurrenceMonthMode">
+              <option value="date" ${customMonthMode === 'date' ? 'selected' : ''}>
+                Monthly on day ${escapeHtml(dayOfMonth)}
+              </option>
+              <option value="nth-weekday" ${customMonthMode === 'nth-weekday' ? 'selected' : ''}>
+                Monthly on the ${escapeHtml(ordinal(nth))} ${escapeHtml(weekdayName)}
+              </option>
+            </select>
+          </label>
+        </div>
+
+        <div class="yanta-calendar-recurrence-end-box">
+          <div class="yanta-calendar-recurrence-section-title">Ends</div>
+
+          <label class="yanta-calendar-radio-row">
+            <input type="radio" name="recurrenceEndMode" value="never" ${ui.endMode === 'never' ? 'checked' : ''} />
+            <span>Never</span>
+          </label>
+
+          <label class="yanta-calendar-radio-row">
+            <input type="radio" name="recurrenceEndMode" value="until" ${ui.endMode === 'until' ? 'checked' : ''} />
+            <span>On</span>
+            <input
+              class="text-input"
+              data-field="recurrenceUntil"
+              type="text"
+              inputmode="numeric"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="${escapeAttr(calendarEditorDatePlaceholder(true))}"
+              value="${escapeAttr(ui.untilInput || '')}" />
+          </label>
+
+          <label class="yanta-calendar-radio-row">
+            <input type="radio" name="recurrenceEndMode" value="count" ${ui.endMode === 'count' ? 'checked' : ''} />
+            <span>After</span>
+            <input
+              class="text-input"
+              data-field="recurrenceCount"
+              type="number"
+              inputmode="numeric"
+              min="1"
+              max="9999"
+              value="${escapeAttr(ui.count || '10')}" />
+            <span>events</span>
+          </label>
+        </div>
+
+        <div class="yanta-calendar-recurrence-summary" data-recurrence-summary>
+          ${escapeHtml(humanRecurrenceSummary(ev))}
+        </div>
+      </div>
+    </section>
+  `;
+}
+
+function recurrenceEndOptionsFromModal(modal) {
+  const mode =
+    modal.querySelector('input[name="recurrenceEndMode"]:checked')?.value ||
+    'never';
+
+  let count = null;
+  let until = null;
+
+  if (mode === 'count') {
+    count = Number(modal.querySelector('[data-field="recurrenceCount"]')?.value || 0);
+  }
+
+  if (mode === 'until') {
+    until = parseCalendarEditorInput(
+      modal.querySelector('[data-field="recurrenceUntil"]')?.value || '',
+      true
+    );
+
+    if (until) {
+      const d = new Date(until);
+
+      if (!Number.isNaN(d.getTime())) {
+        d.setHours(23, 59, 59, 999);
+        until = d.toISOString();
+      }
+    }
+  }
+
+  return {
+    mode,
+    count,
+    until,
+  };
+}
+
+function setupRecurrenceEditor(modal, ev = {}) {
+  const enabledEl = modal.querySelector('[data-field="recurrenceEnabled"]');
+  const detailsEl = modal.querySelector('[data-recurrence-details]');
+  const presetInput = modal.querySelector('[data-field="recurrencePreset"]');
+  const customEl = modal.querySelector('[data-custom-repeat]');
+  const customUnitEl = modal.querySelector('[data-field="recurrenceCustomUnit"]');
+  const weekdayWrapEl = modal.querySelector('[data-recurrence-weekday-wrap]');
+  const monthModeWrapEl = modal.querySelector('[data-recurrence-month-mode-wrap]');
+  const summaryEl = modal.querySelector('[data-recurrence-summary]');
+  const intervalEl = modal.querySelector('[data-field="recurrenceInterval"]');
+  const startEl = modal.querySelector('[data-field="start"]');
+  const allDayEl = modal.querySelector('[data-field="allDay"]');
+
+  if (!enabledEl || !detailsEl || !presetInput) return;
+
+  const ensureDefaultWeekday = () => {
+    const unit = customUnitEl?.value || 'weeks';
+    if (unit !== 'weeks') return;
+
+    const activeDays = [...modal.querySelectorAll('[data-byday].active')];
+    if (activeDays.length) return;
+
+    const startIso = parseCalendarEditorInput(
+      startEl?.value || '',
+      !!allDayEl?.checked
+    );
+
+    const code =
+      weekdayCodeForDate(startIso || ev.start) ||
+      'MO';
+
+    modal
+      .querySelector(`[data-byday="${code}"]`)
+      ?.classList.add('active');
+  };
+
+  const refresh = () => {
+    const enabled = !!enabledEl.checked;
+    const preset = presetInput.value || 'weekly-on-day';
+    const custom = preset === 'custom';
+    const unit = customUnitEl?.value || 'weeks';
+
+    detailsEl.hidden = !enabled;
+
+    if (customEl) customEl.hidden = !enabled || !custom;
+    if (weekdayWrapEl) weekdayWrapEl.hidden = !enabled || !custom || unit !== 'weeks';
+    if (monthModeWrapEl) monthModeWrapEl.hidden = !enabled || !custom || unit !== 'months';
+
+    modal.querySelectorAll('[data-preset]').forEach((btn) => {
+      btn.classList.toggle('active', btn.dataset.preset === preset);
+    });
+
+    if (enabled && custom && unit === 'weeks') {
+      ensureDefaultWeekday();
+    }
+
+    if (summaryEl) {
+      summaryEl.textContent = humanRecurrenceSummary({
+        ...ev,
+        recurrence: readRecurrenceFromModal(modal),
+      });
+    }
+  };
+
+  enabledEl.addEventListener('change', () => {
+    if (enabledEl.checked && !presetInput.value) {
+      presetInput.value = 'weekly-on-day';
+    }
+
+    refresh();
+  });
+
+  modal.querySelectorAll('[data-preset]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      presetInput.value = btn.dataset.preset || 'weekly-on-day';
+      refresh();
+    });
+  });
+
+  customUnitEl?.addEventListener('change', refresh);
+  intervalEl?.addEventListener('input', refresh);
+
+  modal
+    .querySelector('[data-field="recurrenceMonthMode"]')
+    ?.addEventListener('change', refresh);
+
+  modal
+    .querySelector('[data-field="recurrenceUntil"]')
+    ?.addEventListener('input', refresh);
+
+  modal
+    .querySelector('[data-field="recurrenceCount"]')
+    ?.addEventListener('input', refresh);
+
+  modal.querySelectorAll('input[name="recurrenceEndMode"]').forEach((radio) => {
+    radio.addEventListener('change', refresh);
+  });
+
+  startEl?.addEventListener('change', refresh);
+  allDayEl?.addEventListener('change', refresh);
+
+  modal.querySelectorAll('[data-byday]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      btn.classList.toggle('active');
+
+      const active = [...modal.querySelectorAll('[data-byday].active')];
+
+      if (!active.length) {
+        btn.classList.add('active');
+      }
+
+      refresh();
+    });
+  });
+
+  refresh();
+}
+
+function readRecurrenceFromModal(modal) {
+  const enabled = !!modal.querySelector('[data-field="recurrenceEnabled"]')?.checked;
+
+  if (!enabled) return null;
+
+  const preset =
+    modal.querySelector('[data-field="recurrencePreset"]')?.value ||
+    'weekly-on-day';
+
+  const end = recurrenceEndOptionsFromModal(modal);
+
+  if (preset !== 'custom') {
+    const evLike = {
+      start: parseCalendarEditorInput(
+        modal.querySelector('[data-field="start"]')?.value || '',
+        !!modal.querySelector('[data-field="allDay"]')?.checked
+      ),
+    };
+
+    const presetDef = quickPresetDefinitions(evLike)
+      .find((item) => item.id === preset);
+
+    const rrule = presetDef?.rrule?.({
+      count: end.mode === 'count' ? end.count : null,
+      until: end.mode === 'until' ? end.until : null,
+    });
+
+    return rrule ? { rrule } : null;
+  }
+
+  const interval = Number(
+    modal.querySelector('[data-field="recurrenceInterval"]')?.value || 1
+  );
+
+  const unit = modal.querySelector('[data-field="recurrenceCustomUnit"]')?.value || 'weeks';
+  const freq = RECURRENCE_CUSTOM_UNIT_TO_FREQ[unit] || 'WEEKLY';
+
+  let byday = [];
+  let bymonthday = null;
+  let bysetpos = null;
+
+  const startIso = parseCalendarEditorInput(
+    modal.querySelector('[data-field="start"]')?.value || '',
+    !!modal.querySelector('[data-field="allDay"]')?.checked
+  );
+
+  if (unit === 'weeks') {
+    byday = [...modal.querySelectorAll('[data-byday].active')]
+      .map((btn) => btn.dataset.byday)
+      .filter(Boolean);
+
+    if (!byday.length) {
+      byday = [weekdayCodeForDate(startIso) || 'MO'];
+    }
+  }
+
+  if (unit === 'months') {
+    const mode = modal.querySelector('[data-field="recurrenceMonthMode"]')?.value || 'date';
+
+    if (mode === 'nth-weekday') {
+      byday = [weekdayCodeForDate(startIso) || 'MO'];
+      bysetpos = ordinalInMonth(startIso);
+    } else {
+      bymonthday = monthDayLabel(startIso);
+    }
+  }
+
+  const rrule = buildRRuleString({
+    freq,
+    interval,
+    byday,
+    bymonthday,
+    bysetpos,
+    count: end.mode === 'count' ? end.count : null,
+    until: end.mode === 'until' ? end.until : null,
+  });
+
+  return rrule ? { rrule } : null;
+}
+
+function recurrenceValidationMessageForPatch(patch, modal) {
+  if (!patch?.recurrence) return '';
+
+  const preset =
+    modal.querySelector('[data-field="recurrencePreset"]')?.value ||
+    'weekly-on-day';
+
+  const custom = preset === 'custom';
+
+  if (custom) {
+    const interval = Number(
+      modal.querySelector('[data-field="recurrenceInterval"]')?.value || 1
+    );
+
+    if (!Number.isFinite(interval) || interval < 1) {
+      return 'Repeat interval must be at least 1.';
+    }
+  }
+
+  const end = recurrenceEndOptionsFromModal(modal);
+
+  if (end.mode === 'count') {
+    if (!Number.isFinite(end.count) || end.count < 1) {
+      return 'Number of events must be at least 1.';
+    }
+  }
+
+  if (end.mode === 'until') {
+    const raw = modal.querySelector('[data-field="recurrenceUntil"]')?.value || '';
+    const parsed = parseCalendarEditorInput(raw, true);
+
+    if (!raw.trim() || !parsed) {
+      return `End date required · expected ${calendarEditorDatePlaceholder(true)}`;
+    }
+
+    const untilDate = dateLikeToLocalDate(parsed);
+    const startDate = dateLikeToLocalDate(patch.start);
+
+    if (untilDate && startDate && untilDate.getTime() < startOfLocalDay(startDate).getTime()) {
+      return 'Repeat end date must be on or after the start date.';
+    }
+  }
+
+  if (patch.end && calendarEventSpansMultipleLocalDays(patch)) {
+    return 'Repeating multi-day events are not supported yet. Create a one-time multi-day event, or repeat a single-day event.';
+  }
+
+  return '';
+}
+
 function cleanUndefined(obj) {
   const out = {};
 
@@ -4642,7 +5507,17 @@ export function sanitizeCalendarEvent(raw) {
       : [],
 
     status: raw.status || 'confirmed',
-    recurrence: raw.recurrence || null,
+    recurrence: normalizeRecurrence(raw.recurrence),
+
+    recurrenceExceptions: Array.isArray(raw.recurrenceExceptions)
+      ? raw.recurrenceExceptions.map(String)
+      : [],
+
+    recurrenceOverrides:
+      raw.recurrenceOverrides &&
+      typeof raw.recurrenceOverrides === 'object'
+        ? raw.recurrenceOverrides
+        : {},
 
     reminders: Array.isArray(raw.reminders)
       ? raw.reminders
@@ -5106,6 +5981,326 @@ export function deleteCalendarEvent(eventId) {
   }));
 }
 
+async function chooseRecurringEditScope({
+  action = 'edit',
+  title = '',
+} = {}) {
+  return calendarChoiceDialog({
+    title: action === 'delete'
+      ? 'Delete recurring event'
+      : 'Edit recurring event',
+    message: title
+      ? `"${title}" is part of a recurring series.`
+      : 'This event is part of a recurring series.',
+    choices: [
+      {
+        id: 'one',
+        label: action === 'delete' ? 'Only this event' : 'Only this event',
+        primary: true,
+        icon: 'calendar',
+      },
+      {
+        id: 'future',
+        label: 'This and following events',
+        icon: 'calendar-range',
+      },
+      {
+        id: 'all',
+        label: 'All events in the series',
+        icon: 'calendar-days',
+      },
+      {
+        id: 'cancel',
+        label: 'Cancel',
+        icon: 'x',
+      },
+    ],
+  });
+}
+
+function withRRuleUntil(rrule, untilIso) {
+  const until = new Date(untilIso);
+
+  if (Number.isNaN(until.getTime())) {
+    return rrule;
+  }
+
+  const untilText = until
+    .toISOString()
+    .replace(/[-:]/g, '')
+    .replace(/\.\d{3}Z$/, 'Z');
+
+  const parts = String(rrule || '')
+    .split(';')
+    .filter((part) => {
+      const upper = part.toUpperCase();
+      return !upper.startsWith('UNTIL=') && !upper.startsWith('COUNT=');
+    });
+
+  parts.push(`UNTIL=${untilText}`);
+
+  return parts.join(';');
+}
+
+function untilBeforeOccurrence(occurrenceRaw) {
+  const start = recurrenceDateLikeToDate(occurrenceRaw.start, {
+    allDay: !!occurrenceRaw.allDay,
+  });
+
+  if (!start) return null;
+
+  return new Date(start.getTime() - 1000).toISOString();
+}
+
+function truncateRecurringSeriesBeforeOccurrence(master, occurrenceRaw) {
+  const recurrence = normalizeRecurrence(master.recurrence);
+  const until = untilBeforeOccurrence(occurrenceRaw);
+
+  if (!recurrence?.rrule || !until) return null;
+
+  return putCalendarEvent({
+    ...master,
+    recurrence: {
+      rrule: withRRuleUntil(recurrence.rrule, until),
+    },
+  });
+}
+
+async function splitRecurringSeriesFromOccurrence(master, occurrenceRaw, patch) {
+  const recurrence = normalizeRecurrence(master.recurrence);
+  const until = untilBeforeOccurrence(occurrenceRaw);
+
+  if (!recurrence?.rrule || !until) {
+    toast('Could not split recurring series', 'error');
+    return null;
+  }
+
+  const oldMaster = sanitizeCalendarEvent({
+    ...master,
+    recurrence: {
+      rrule: withRRuleUntil(recurrence.rrule, until),
+    },
+    updated: now(),
+  });
+
+  const newSeries = sanitizeCalendarEvent({
+    ...master,
+    ...patch,
+    id: 'evt_' + uid(),
+    start: patch.start || occurrenceRaw.start,
+    end: patch.end || occurrenceRaw.end || null,
+    recurrence: patch.recurrence || master.recurrence,
+    recurrenceExceptions: [],
+    recurrenceOverrides: {},
+    created: now(),
+    updated: now(),
+  });
+
+  if (!oldMaster || !newSeries) return null;
+
+  const doc = getVaultDoc();
+
+  doc.transact(() => {
+    vaultEventsMap().set(oldMaster.id, safeJsonClone(oldMaster));
+    vaultEventsMap().set(newSeries.id, safeJsonClone(newSeries));
+    vaultTombstonesMap().delete(oldMaster.id);
+    vaultTombstonesMap().delete(newSeries.id);
+  }, ORIGIN);
+
+  state.calendarEvents.set(oldMaster.id, safeJsonClone(oldMaster));
+  state.calendarEvents.set(newSeries.id, safeJsonClone(newSeries));
+
+  scheduleCalendarRender();
+
+  window.dispatchEvent(new CustomEvent('yanta-calendar-updated', {
+    detail: {
+      recurrenceSplit: true,
+      oldSeriesId: oldMaster.id,
+      newSeriesId: newSeries.id,
+    },
+  }));
+
+  return newSeries;
+}
+
+function localDateAndTimeParts(value, {
+  allDay = false,
+} = {}) {
+  const d = dateLikeToLocalDate(value);
+
+  if (!d) {
+    return {
+      date: '',
+      time: '',
+    };
+  }
+
+  return {
+    date: localDateKeyFromDate(d),
+    time: allDay
+      ? ''
+      : `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`,
+  };
+}
+
+function combineDateFromMasterWithTimeFromPatch(masterValue, patchValue, {
+  allDay = false,
+} = {}) {
+  if (allDay) {
+    return masterValue;
+  }
+
+  const master = dateLikeToLocalDate(masterValue);
+  const patch = dateLikeToLocalDate(patchValue);
+
+  if (!master || !patch) return masterValue;
+
+  master.setHours(
+    patch.getHours(),
+    patch.getMinutes(),
+    patch.getSeconds(),
+    patch.getMilliseconds()
+  );
+
+  return master.toISOString();
+}
+
+function wholeSeriesPatchFromOccurrencePatch(master, occurrenceRaw, patch) {
+  const occurrenceStart = localDateAndTimeParts(occurrenceRaw.start, {
+    allDay: !!occurrenceRaw.allDay,
+  });
+
+  const patchStart = localDateAndTimeParts(patch.start, {
+    allDay: !!patch.allDay,
+  });
+
+  const startWasChanged =
+    patchStart.date !== occurrenceStart.date ||
+    patchStart.time !== occurrenceStart.time;
+
+  const occurrenceEnd = localDateAndTimeParts(occurrenceRaw.end, {
+    allDay: !!occurrenceRaw.allDay,
+  });
+
+  const patchEnd = localDateAndTimeParts(patch.end, {
+    allDay: !!patch.allDay,
+  });
+
+  const endWasChanged =
+    !!patch.end !== !!occurrenceRaw.end ||
+    patchEnd.date !== occurrenceEnd.date ||
+    patchEnd.time !== occurrenceEnd.time;
+
+  const next = {
+    ...master,
+    ...patch,
+    id: master.id,
+
+    recurrence: patch.recurrence || master.recurrence,
+    recurrenceExceptions: master.recurrenceExceptions || [],
+    recurrenceOverrides: master.recurrenceOverrides || {},
+  };
+
+  // Critical UX rule:
+  // If the user opens the 5th occurrence, changes nothing, and saves
+  // "All events", the series must keep its original master start.
+  if (!startWasChanged) {
+    next.start = master.start;
+  } else if (!patch.allDay) {
+    next.start = combineDateFromMasterWithTimeFromPatch(master.start, patch.start, {
+      allDay: false,
+    });
+  }
+
+  if (!endWasChanged) {
+    next.end = master.end || null;
+  } else if (!patch.allDay && master.end && patch.end) {
+    next.end = combineDateFromMasterWithTimeFromPatch(master.end, patch.end, {
+      allDay: false,
+    });
+  }
+
+  return next;
+}
+
+async function saveRecurringOccurrencePatch(occurrenceRaw, patch) {
+  const masterId = occurrenceRaw.recurrenceMasterId;
+  const occurrenceKey = occurrenceRaw.occurrenceKey;
+  const master = state.calendarEvents.get(masterId);
+
+  if (!master || !occurrenceKey) {
+    toast('Recurring event master not found', 'error');
+    return null;
+  }
+
+  const scope = await chooseRecurringEditScope({
+    action: 'edit',
+    title: master.title || patch.title || '',
+  });
+
+  if (!scope || scope === 'cancel') {
+    return null;
+  }
+
+  if (scope === 'one') {
+    return putCalendarEvent(
+      addOccurrenceOverride(master, occurrenceKey, patch)
+    );
+  }
+
+  if (scope === 'all') {
+    return putCalendarEvent(
+      wholeSeriesPatchFromOccurrencePatch(master, occurrenceRaw, patch)
+    );
+  }
+
+  if (scope === 'future') {
+    return splitRecurringSeriesFromOccurrence(master, occurrenceRaw, patch);
+  }
+
+  return null;
+}
+
+async function deleteRecurringOccurrence(occurrenceRaw) {
+  const masterId = occurrenceRaw.recurrenceMasterId;
+  const occurrenceKey = occurrenceRaw.occurrenceKey;
+  const master = state.calendarEvents.get(masterId);
+
+  if (!master || !occurrenceKey) {
+    toast('Recurring event master not found', 'error');
+    return false;
+  }
+
+  const scope = await chooseRecurringEditScope({
+    action: 'delete',
+    title: master.title || '',
+  });
+
+  if (!scope || scope === 'cancel') {
+    return false;
+  }
+
+  if (scope === 'one') {
+    putCalendarEvent(
+      addOccurrenceException(master, occurrenceKey)
+    );
+
+    return true;
+  }
+
+  if (scope === 'all') {
+    deleteCalendarEvent(master.id);
+    return true;
+  }
+
+  if (scope === 'future') {
+    truncateRecurringSeriesBeforeOccurrence(master, occurrenceRaw);
+    return true;
+  }
+
+  return false;
+}
+
 export async function putCalendarEventsBulk(rawEvents, {
   categoryId = DEFAULT_CATEGORY_ID,
   chunkSize = 300,
@@ -5180,12 +6375,14 @@ function categoryForEvent(ev) {
 
 function fullCalendarEventFromYanta(ev) {
   const colors = calendarEventColors(ev);
+  const isOccurrence = ev.recurrenceOccurrence === true;
+  const isRecurringMaster = hasRecurrence(ev) && !isOccurrence;
 
   return {
     id: ev.id,
     title: ev.title,
     start: ev.start,
-    end: ev.end || undefined,
+    end: calendarEndForFullCalendar(ev),
     allDay: !!ev.allDay,
 
     backgroundColor: colors.background,
@@ -5196,12 +6393,22 @@ function fullCalendarEventFromYanta(ev) {
     startEditable: !calendarMobile(),
     durationEditable: !calendarMobile(),
 
+    classNames: [
+      isOccurrence ? 'yanta-cal-recurring-occurrence' : '',
+      isRecurringMaster ? 'yanta-cal-recurring-master' : '',
+    ].filter(Boolean),
+
     extendedProps: {
       yantaKind: 'event',
       raw: ev,
       noteId: ev.noteId || null,
       categoryId: ev.categoryId,
       eventIcon: calendarIconForEvent(ev),
+
+      recurrenceMasterId: ev.recurrenceMasterId || null,
+      occurrenceKey: ev.occurrenceKey || '',
+      recurrenceOccurrence: isOccurrence,
+      recurrenceRule: ev.recurrence?.rrule || '',
     },
   };
 }
@@ -5258,7 +6465,7 @@ function fullCalendarEventFromMarkdownEvent(ev) {
     id: ev.id,
     title: ev.title,
     start: ev.start,
-    end: ev.end || undefined,
+    end: calendarEndForFullCalendar(ev),
     allDay: !!ev.allDay,
 
     backgroundColor: background,
@@ -5348,6 +6555,15 @@ function calendarEventContent(info) {
     iconSpan.innerHTML = lucide(icon, 12);
 
     wrap.append(iconSpan);
+
+    if (raw?.recurrence?.rrule || raw?.recurrenceOccurrence) {
+      const repeatSpan = document.createElement('span');
+      repeatSpan.className = 'yanta-cal-event-repeat';
+      repeatSpan.title = humanRecurrenceSummary(raw);
+      repeatSpan.innerHTML = lucide('repeat-2', 11);
+
+      wrap.append(repeatSpan);
+    }
   }
 
   const titleSpan = document.createElement('span');
@@ -5844,7 +7060,7 @@ function installPointerCalendarEventExternalDrag() {
 // Derived calendar events from Markdown
 // ============================================================
 
-export function derivedEventsFromTasksAndNotes() {
+function rawMarkdownCalendarEventsFromTasksAndNotes() {
   const out = [];
 
   for (const note of state.notes.values()) {
@@ -5859,11 +7075,16 @@ export function derivedEventsFromTasksAndNotes() {
     const refs = parseMarkdownCalendarRefs(md, note);
 
     for (const ev of refs) {
-      out.push(fullCalendarEventFromMarkdownEvent(ev));
+      out.push(ev);
     }
   }
 
   return out;
+}
+
+export function derivedEventsFromTasksAndNotes() {
+  return rawMarkdownCalendarEventsFromTasksAndNotes()
+    .map((ev) => fullCalendarEventFromMarkdownEvent(ev));
 }
 
 // ============================================================
@@ -5882,7 +7103,10 @@ function eventIntersectsRange(raw, rangeStart, rangeEnd) {
 
   if (raw.end) {
     const endDate = dateLikeToLocalDate(raw.end);
-    endMs = endDate?.getTime();
+
+    if (endDate) {
+      endMs = endDate.getTime() + (raw.allDay ? 86400000 : 0);
+    }
   } else {
     endMs = startMs + (raw.allDay ? 86400000 : 1);
   }
@@ -5906,7 +7130,10 @@ function fcEventIntersectsRange(ev, rangeStart, rangeEnd) {
 
   if (ev.end) {
     const endDate = dateLikeToLocalDate(ev.end);
-    endMs = endDate?.getTime();
+
+    if (endDate) {
+      endMs = endDate.getTime() + (ev.allDay ? 86400000 : 0);
+    }
   } else {
     endMs = startMs + (ev.allDay ? 86400000 : 1);
   }
@@ -5934,6 +7161,15 @@ function buildFullCalendarEventsForRange(start, end) {
 
     if (cat.visible === false) continue;
     if (ev.status === 'cancelled') continue;
+
+    if (hasRecurrence(ev)) {
+      for (const occurrence of expandRecurringEvent(ev, start, end)) {
+        out.push(fullCalendarEventFromYanta(occurrence));
+      }
+
+      continue;
+    }
+
     if (!eventIntersectsRange(ev, rangeStart, rangeEnd)) continue;
 
     out.push(fullCalendarEventFromYanta(ev));
@@ -5947,10 +7183,66 @@ function buildFullCalendarEventsForRange(start, end) {
     out.push(fullCalendarEventFromSourceEvent(ev));
   }
 
-  for (const ev of derivedEventsFromTasksAndNotes()) {
-    if (!fcEventIntersectsRange(ev, rangeStart, rangeEnd)) continue;
+  for (const ev of rawMarkdownCalendarEventsFromTasksAndNotes()) {
+    if (hasRecurrence(ev)) {
+      for (const occurrence of expandRecurringEvent(ev, start, end)) {
+        if (!eventIntersectsRange(occurrence, rangeStart, rangeEnd)) continue;
 
-    out.push(ev);
+        out.push(fullCalendarEventFromMarkdownEvent(occurrence));
+      }
+
+      continue;
+    }
+
+    if (!eventIntersectsRange(ev, rangeStart, rangeEnd)) continue;
+
+    out.push(fullCalendarEventFromMarkdownEvent(ev));
+  }
+
+  return out;
+}
+
+export function expandedCalendarRawEventsForRange(start, end, {
+  includeStored = true,
+  includeMarkdownDerived = true,
+  includeSources = true,
+} = {}) {
+  hydrateCalendarStateFromVault({
+    silent: true,
+  });
+
+  const out = [];
+
+  if (includeStored !== false) {
+    for (const ev of state.calendarEvents.values()) {
+      if (ev.status === 'cancelled') continue;
+
+      if (hasRecurrence(ev)) {
+        out.push(...expandRecurringEvent(ev, start, end));
+      } else {
+        out.push(ev);
+      }
+    }
+  }
+
+  if (includeSources !== false) {
+    out.push(...sourceEventsForRange(
+      [...state.calendarCategories.values()],
+      start,
+      end
+    ));
+  }
+
+  if (includeMarkdownDerived !== false) {
+    for (const ev of rawMarkdownCalendarEventsFromTasksAndNotes()) {
+      if (ev.status === 'cancelled') continue;
+
+      if (hasRecurrence(ev)) {
+        out.push(...expandRecurringEvent(ev, start, end));
+      } else {
+        out.push(ev);
+      }
+    }
   }
 
   return out;
@@ -7792,45 +9084,85 @@ function openEventEditor(input = {}) {
   const markdownRef = input.markdownRef || null;
   const isMarkdownEvent = !!markdownRef;
 
+  const parsedOccurrence = parseOccurrenceId(input.id || '');
+  const recurrenceMasterId =
+    input.recurrenceMasterId ||
+    (parsedOccurrence.isOccurrence ? parsedOccurrence.masterId : '');
+
+  const occurrenceKey =
+    input.occurrenceKey ||
+    parsedOccurrence.occurrenceKey ||
+    '';
+
+  const recurrenceMaster =
+    recurrenceMasterId
+      ? state.calendarEvents.get(recurrenceMasterId)
+      : null;
+
+  const isRecurringOccurrence =
+    !!recurrenceMaster &&
+    !!occurrenceKey;
+
   const existing = !isMarkdownEvent && input.id
-    ? state.calendarEvents.get(input.id)
+    ? (
+        state.calendarEvents.get(input.id) ||
+        recurrenceMaster ||
+        null
+      )
     : null;
 
-  const editingExisting = !!existing || isMarkdownEvent;
+  const sourceForEditor = isRecurringOccurrence
+    ? {
+        ...recurrenceMaster,
+        ...input,
+        id: input.id || occurrenceId(recurrenceMaster.id, occurrenceKey),
+        recurrenceMasterId: recurrenceMaster.id,
+        occurrenceKey,
+        recurrenceOccurrence: true,
+        recurrence: input.recurrence || recurrenceMaster.recurrence,
+      }
+    : existing || input;
+
+  const editingExisting = !!existing || isMarkdownEvent || isRecurringOccurrence;
 
   const rawTitle =
-    existing
-      ? existing.title || ''
+    sourceForEditor
+      ? sourceForEditor.title || ''
       : input.title && input.title !== 'Untitled event'
         ? input.title
         : '';
 
   const ev = sanitizeCalendarEvent({
-    id: existing?.id || input.id || 'evt_' + uid(),
+    id: sourceForEditor?.id || input.id || 'evt_' + uid(),
     title: rawTitle || 'Untitled event',
-    start: existing?.start || input.start || new Date().toISOString(),
-    end: existing?.end || input.end || null,
-    allDay: existing?.allDay ?? input.allDay ?? false,
-    categoryId: existing?.categoryId || input.categoryId || DEFAULT_CATEGORY_ID,
+    start: sourceForEditor?.start || input.start || new Date().toISOString(),
+    end: sourceForEditor?.end || input.end || null,
+    allDay: sourceForEditor?.allDay ?? input.allDay ?? false,
+    categoryId: sourceForEditor?.categoryId || input.categoryId || DEFAULT_CATEGORY_ID,
 
-    /*
-      Wichtig:
-      Bisher wurden color/icon hier verloren. Dadurch hatte der Picker
-      später scheinbar keinen Effekt bzw. alte Werte wurden überschrieben.
-    */
-    color: existing?.color || input.color || undefined,
-    icon: existing?.icon || input.icon || undefined,
+    color: sourceForEditor?.color || input.color || undefined,
+    icon: sourceForEditor?.icon || input.icon || undefined,
 
-    location: existing?.location || input.location || '',
-    description: existing?.description || input.description || '',
-    noteId: existing?.noteId || input.noteId || null,
-    status: existing?.status || input.status || 'confirmed',
-    recurrence: existing?.recurrence || input.recurrence || null,
-    created: existing?.created || now(),
-    updated: existing?.updated || now(),
+    location: sourceForEditor?.location || input.location || '',
+    description: sourceForEditor?.description || input.description || '',
+    noteId: sourceForEditor?.noteId || input.noteId || null,
+    status: sourceForEditor?.status || input.status || 'confirmed',
+
+    recurrence: sourceForEditor?.recurrence || input.recurrence || null,
+    recurrenceExceptions: sourceForEditor?.recurrenceExceptions || [],
+    recurrenceOverrides: sourceForEditor?.recurrenceOverrides || {},
+
+    created: sourceForEditor?.created || now(),
+    updated: sourceForEditor?.updated || now(),
   });
 
   if (!ev) return;
+
+  if (isRecurringOccurrence) {
+    ev.recurrenceMasterId = recurrenceMaster.id;
+    ev.occurrenceKey = occurrenceKey;
+    ev.recurrenceOccurrence = true;
+  }
 
   let linkedNote = ev.noteId ? state.notes.get(ev.noteId) : null;
 
@@ -8114,6 +9446,8 @@ function openEventEditor(input = {}) {
           </label>
         </div>
 
+        ${recurrenceEditorHtml(ev)}
+
         <label>
           Location
           <input class="text-input" data-field="location" value="${escapeAttr(ev.location || '')}" placeholder="Room, address, link…" />
@@ -8280,6 +9614,7 @@ function openEventEditor(input = {}) {
 
   const readPatchFromModal = () => {
     const allDay = !!modal.querySelector('[data-field="allDay"]')?.checked;
+    const nextRecurrence = readRecurrenceFromModal(modal);
 
     const parsedStart = parseCalendarEditorInput(
       modal.querySelector('[data-field="start"]').value,
@@ -8314,6 +9649,13 @@ function openEventEditor(input = {}) {
       icon: appearanceTouched ? (nextIcon || undefined) : (ev.icon || undefined),
       _appearanceTouched: appearanceTouched,
 
+      recurrence: nextRecurrence,
+      recurrenceExceptions: nextRecurrence
+        ? (ev.recurrenceExceptions || [])
+        : [],
+      recurrenceOverrides: nextRecurrence
+        ? (ev.recurrenceOverrides || {})
+        : {},
       allDay,
       start: parsedStart,
       end: normalizeCalendarEventEnd({
@@ -8354,6 +9696,13 @@ function openEventEditor(input = {}) {
     if (!rangeValidation.ok) {
       toast(rangeValidation.message || 'Invalid date range', 'error');
       updateDatePreviews();
+      return false;
+    }
+
+    const recurrenceMessage = recurrenceValidationMessageForPatch(patch, modal);
+
+    if (recurrenceMessage) {
+      toast(recurrenceMessage, 'error');
       return false;
     }
 
@@ -8457,6 +9806,20 @@ function openEventEditor(input = {}) {
     const patch = readPatchFromModal();
     if (!validatePatch(patch)) return;
 
+    if (isRecurringOccurrence && !markdownRef) {
+      await applyCalendarEventAppearanceSideEffects(patch);
+
+      const saved = await saveRecurringOccurrencePatch(ev, patch);
+
+      closeEventModal();
+
+      if (saved) {
+        toast('Recurring event updated', 'success');
+      }
+
+      return;
+    }
+
     if (!editingExisting && !markdownRef) {
       const createNote = !!modal.querySelector('[data-field="createNote"]')?.checked;
 
@@ -8508,6 +9871,17 @@ function openEventEditor(input = {}) {
   });
 
   modal.querySelector('[data-action="delete"]')?.addEventListener('click', async () => {
+    if (isRecurringOccurrence) {
+      const deleted = await deleteRecurringOccurrence(ev);
+
+      if (deleted) {
+        closeEventModal();
+        toast('Recurring event deleted', 'success');
+      }
+
+      return;
+    }
+
     const noteId = ev.noteId || '';
     const note = noteId ? state.notes.get(noteId) : null;
 
@@ -8542,6 +9916,7 @@ function openEventEditor(input = {}) {
     toast('Event deleted', 'success');
   });
 
+  setupRecurrenceEditor(modal, ev);
   renderNoteSection();
   updateDatePreviews();
 
@@ -9329,6 +10704,16 @@ function fcEventDateToStoredValue(date, allDay = false) {
   return date.toISOString();
 }
 
+function fcEventEndDateToStoredValue(date, allDay = false) {
+  if (!date) return null;
+
+  if (allDay) {
+    return fcExclusiveAllDayEndToStoredInclusive(date);
+  }
+
+  return date.toISOString();
+}
+
 function updateMarkdownEventFromFullCalendarInfo(info) {
   const raw = info.event.extendedProps?.raw;
   const markdownRef = raw?.markdownRef || info.event.extendedProps?.markdownRef;
@@ -9725,12 +11110,18 @@ export function setupCalendar() {
         return;
       }
 
-      openEventEditor({
-        id: info.event.id,
-      });
+      const raw = info.event.extendedProps?.raw;
+
+      if (raw?.recurrenceOccurrence) {
+        openEventEditor(raw);
+      } else {
+        openEventEditor({
+          id: info.event.id,
+        });
+      }
     },
 
-    eventDrop(info) {
+    async eventDrop(info) {
       const kind = info.event.extendedProps?.yantaKind;
 
       if (kind === 'markdown-event') {
@@ -9746,15 +11137,29 @@ export function setupCalendar() {
         return;
       }
 
-      putCalendarEvent({
+      const patch = {
         ...raw,
-        start: info.event.start?.toISOString(),
-        end: info.event.end?.toISOString() || null,
+        start: fcEventDateToStoredValue(info.event.start, info.event.allDay),
+        end: raw.end || info.event.end
+          ? fcEventEndDateToStoredValue(info.event.end, info.event.allDay)
+          : null,
         allDay: info.event.allDay,
-      });
+      };
+
+      if (raw.recurrenceOccurrence) {
+        const saved = await saveRecurringOccurrencePatch(raw, patch);
+
+        if (!saved) {
+          info.revert?.();
+        }
+
+        return;
+      }
+
+      putCalendarEvent(patch);
     },
 
-    eventResize(info) {
+    async eventResize(info) {
       const kind = info.event.extendedProps?.yantaKind;
 
       if (kind === 'markdown-event') {
@@ -9770,12 +11175,26 @@ export function setupCalendar() {
         return;
       }
 
-      putCalendarEvent({
+      const patch = {
         ...raw,
-        start: info.event.start?.toISOString(),
-        end: info.event.end?.toISOString() || null,
+        start: fcEventDateToStoredValue(info.event.start, info.event.allDay),
+        end: raw.end || info.event.end
+          ? fcEventEndDateToStoredValue(info.event.end, info.event.allDay)
+          : null,
         allDay: info.event.allDay,
-      });
+      };
+
+      if (raw.recurrenceOccurrence) {
+        const saved = await saveRecurringOccurrencePatch(raw, patch);
+
+        if (!saved) {
+          info.revert?.();
+        }
+
+        return;
+      }
+
+      putCalendarEvent(patch);
     },
 
   });

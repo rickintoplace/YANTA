@@ -1427,6 +1427,16 @@ async function init() {
   setupSync2ProgressUi();
   setupSyncReminderUi();
 
+  window.addEventListener('yanta-cloud-quota-blocked', async (e) => {
+    try {
+      const { showCloudQuotaDialog } = await import('./billing/billing-ui.js');
+
+      showCloudQuotaDialog(e.detail || {});
+    } catch (err) {
+      console.error('[YANTA Billing] Could not show quota dialog', err);
+    }
+  });
+  
   // setupCalendar();
   await syncRestore();
   let sharedOpen = null;

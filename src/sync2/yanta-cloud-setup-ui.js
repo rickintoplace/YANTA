@@ -1229,6 +1229,66 @@ function usageBarsHtml(me, storageBreakdown = null, {
   `;
 }
 
+function cloudPlanSectionHtml(me = {}) {
+  const plan = me.user?.plan || 'free';
+  const billing = me.billing || null;
+
+  const isPlus = plan === 'premium';
+
+  const periodEnd = billing?.subscription?.currentPeriodEndsAt
+    ? new Date(billing.subscription.currentPeriodEndsAt).toLocaleDateString()
+    : '';
+
+  const statusLine = isPlus
+    ? `
+      <strong style="color:var(--green)">YANTA Plus is active.</strong>
+      ${periodEnd ? `Current period ends ${escapeHtml(periodEnd)}.` : 'Thank you for supporting YANTA.'}
+    `
+    : `
+      <strong>Free plan.</strong>
+      Upgrade when you need more encrypted cloud storage, more devices, or higher Included AI limits.
+    `;
+
+  return `
+    <section class="yanta-cloud-section">
+      <h4>Plan</h4>
+
+      <div class="yanta-cloud-limit-note">
+        ${lucide(isPlus ? 'sparkles' : 'info', 14)}
+        <span>${statusLine}</span>
+      </div>
+
+      <div class="compress-actions" style="margin-top:10px;justify-content:flex-start;flex-wrap:wrap">
+        ${
+          isPlus
+            ? `
+              <button class="btn" data-yanta-plus-manage>
+                ${lucide('credit-card', 14)}
+                Manage billing
+              </button>
+            `
+            : `
+              <button class="btn primary" data-yanta-plus-upgrade>
+                ${lucide('sparkles', 14)}
+                Upgrade to YANTA Plus
+              </button>
+
+              <button class="btn" data-yanta-plus-manage>
+                ${lucide('credit-card', 14)}
+                Manage billing
+              </button>
+            `
+        }
+
+        <a class="btn" href="/pricing" target="_blank" rel="noopener">
+          ${lucide('external-link', 14)}
+          Pricing
+        </a>
+      </div>
+    </section>
+  `;
+}
+
 async function hydrateUsageWithStorageBreakdown({
   me,
   vaultId,
@@ -1674,6 +1734,8 @@ async function renderCloudHome(me) {
       </div>
     </section>
 
+    ${cloudPlanSectionHtml(me)}
+
     <section class="yanta-cloud-section">
       <h4>How sync storage works</h4>
 
@@ -1853,6 +1915,34 @@ ${
       });
     } catch (err) {
       setStatus(err?.message || 'Could not create vault', 'error');
+    }
+  });
+
+  modal.querySelector('[data-yanta-plus-upgrade]')?.addEventListener('click', async () => {
+    try {
+      setStatus('Opening checkout…');
+
+      const { openYantaPlusUpgrade } = await import('../billing/billing-ui.js');
+
+      await openYantaPlusUpgrade({
+        interval: 'yearly',
+      });
+    } catch (err) {
+      console.error(err);
+      setStatus(err?.message || 'Could not open checkout', 'error');
+    }
+  });
+
+  modal.querySelector('[data-yanta-plus-manage]')?.addEventListener('click', async () => {
+    try {
+      setStatus('Opening billing portal…');
+
+      const { openYantaBillingPortal } = await import('../billing/billing-ui.js');
+
+      await openYantaBillingPortal();
+    } catch (err) {
+      console.error(err);
+      setStatus(err?.message || 'Could not open billing portal', 'error');
     }
   });
 
@@ -2428,7 +2518,7 @@ async function renderConnected(vaultId, syncKey) {
           '',
           'Continue?',
         ].join('\n'),
-        confirmLabel: 'Compact storage',
+        confirmLabel: 'Optimize Storage',
         cancelLabel: 'Cancel',
         icon: 'archive',
       });

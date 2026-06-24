@@ -961,23 +961,41 @@ export class Sync2AppEngine {
       return;
     }
 
-    if (err?.code === 'EQUOTA') {
-      const retryMs =
-        Number(err?.retryAfterMs || 0) > 0
-          ? Number(err.retryAfterMs)
-          : 60 * 60 * 1000;
+  if (err?.code === 'EQUOTA') {
+    const retryMs =
+      Number(err?.retryAfterMs || 0) > 0
+        ? Number(err.retryAfterMs)
+        : 60 * 60 * 1000;
 
-      this.uploadBlockedUntil = Date.now() + retryMs;
+    this.uploadBlockedUntil = Date.now() + retryMs;
 
-      this.progress({
-        phase: 'error',
-        status: 'error',
-        direction: 'up',
-        message: 'Cloud storage limit reached. Optimize cloud storage or upgrade to YANTA Plus.',
-      });
+    const message =
+      'Cloud storage limit reached. Optimize cloud storage or upgrade to YANTA Plus.';
 
-      return;
-    }
+    this.progress({
+      phase: 'error',
+      status: 'error',
+      direction: 'up',
+      message,
+    });
+
+    try {
+      window.dispatchEvent(new CustomEvent('yanta-cloud-quota-blocked', {
+        detail: {
+          message,
+          status: err?.status || 403,
+          code: err?.code || '',
+          serverCode: err?.serverCode || '',
+          response: err?.response || null,
+          maxBytes: err?.response?.maxBytes || 0,
+          maxObjects: err?.response?.maxObjects || 0,
+          retryAfterMs: retryMs,
+        },
+      }));
+    } catch {}
+
+    return;
+  }
 
     this.uploadBlockedUntil = 0;
   }

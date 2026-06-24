@@ -88,6 +88,17 @@ function injectCss() {
   color-scheme: dark light;
 }
 
+html.yanta-site-page,
+body.yanta-site-page {
+  height: auto !important;
+  min-height: 100% !important;
+  overflow: auto !important;
+}
+
+body.yanta-site-page {
+  position: static !important;
+}
+
 body {
   margin: 0;
   background: var(--bg, #fff8ef);
@@ -366,6 +377,22 @@ body {
     padding-top: 34px;
   }
 }
+
+.yanta-billing-banner {
+  margin: 0 0 22px;
+}
+
+.yanta-billing-banner.success {
+  border-color: color-mix(in srgb, var(--green, #306D29) 45%, var(--border, #d8c7a5));
+}
+
+html.yanta-site-page .app {
+  display: none !important;
+}
+
+html.yanta-site-page * {
+  box-sizing: border-box;
+}
 `;
   document.head.append(style);
 }
@@ -374,6 +401,9 @@ function shell(content) {
   injectCss();
 
   document.title = 'YANTA';
+
+  document.documentElement.classList.add('yanta-site-page');
+  document.body.classList.add('yanta-site-page');
 
   document.body.innerHTML = `
     <div class="yanta-site">
@@ -410,10 +440,38 @@ function shell(content) {
   `;
 }
 
+function billingBannerHtml() {
+  const params = new URLSearchParams(location.search);
+  const state = params.get('billing') || '';
+
+  if (state === 'success') {
+    return `
+      <section class="yanta-note-box yanta-billing-banner success">
+        <p>
+          <strong>Thank you.</strong>
+          Paddle is confirming your YANTA Plus subscription. Open YANTA Cloud Sync settings to see your updated plan.
+        </p>
+      </section>
+    `;
+  }
+
+  if (state === 'cancel') {
+    return `
+      <section class="yanta-note-box yanta-billing-banner">
+        <p>
+          Checkout was cancelled. Nothing changed.
+        </p>
+      </section>
+    `;
+  }
+
+  return '';
+}
+
 function pricingContent() {
   const ids = priceIds();
 
-  return `
+return `
     <section class="yanta-site-hero">
       <div class="yanta-site-kicker">YANTA Cloud</div>
       <h1>Simple plans for encrypted sync.</h1>
@@ -422,6 +480,8 @@ function pricingContent() {
         more devices, and higher Included AI limits.
       </p>
     </section>
+
+    ${billingBannerHtml()}
 
     <section class="yanta-pricing-grid">
       <article class="yanta-price-card">
@@ -528,15 +588,14 @@ function legalContent(kind) {
         <h1>Terms of Service</h1>
         <p><strong>Last updated:</strong> ${updated}</p>
 
-        <p>
-          These Terms are a draft for review by a qualified legal professional.
-          They are written to describe how YANTA currently works.
-        </p>
-
         <h2>1. Provider</h2>
         <p>
-          YANTA is provided by <strong>[LEGAL NAME]</strong>,
-          <strong>[ADDRESS, LOWER SAXONY, GERMANY]</strong>.
+          YANTA is provided by <strong>Eirik Heilmann,</strong>
+          <br>
+          <strong>Neustädter Ring 4, 37154 Northeim,
+          <br>
+          LOWER SAXONY, GERMANY</strong>.
+          <br>
           Contact: <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>.
         </p>
 
@@ -556,7 +615,7 @@ function legalContent(kind) {
         <h2>4. Encryption and Recovery Key</h2>
         <p>
           YANTA Cloud is designed so that note contents and sync objects are encrypted before upload.
-          Your Recovery Key is required to decrypt your vault. YANTA does not guarantee that it can
+          Your Recovery Key is required to decrypt your vault. YANTA is technically NOT able to
           restore encrypted content if your Recovery Key is lost.
         </p>
 
@@ -638,14 +697,14 @@ function legalContent(kind) {
         <h1>Privacy Policy</h1>
         <p><strong>Last updated:</strong> ${updated}</p>
 
-        <p>
-          This Privacy Policy is a draft for legal review. It describes YANTA’s intended data processing.
-        </p>
-
         <h2>1. Controller</h2>
         <p>
-          Controller: <strong>[LEGAL NAME]</strong>,
-          <strong>[ADDRESS, LOWER SAXONY, GERMANY]</strong>.
+          Controller: <strong>Eirik Heilmann,</strong>
+          <br>
+          <strong>Neustädter Ring 4, 37154 Northeim,
+          <br>
+          LOWER SAXONY, GERMANY</strong>.
+          <br>
           Contact: <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>.
         </p>
 
@@ -745,7 +804,7 @@ function legalContent(kind) {
       <p><strong>Last updated:</strong> ${updated}</p>
 
       <p>
-        This Refund Policy is a draft for legal review. Paddle acts as Merchant of Record for paid subscriptions.
+       Paddle acts as Merchant of Record for paid subscriptions.
       </p>
 
       <h2>1. Customer-friendly first purchase refund</h2>

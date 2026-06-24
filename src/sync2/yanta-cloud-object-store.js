@@ -367,6 +367,14 @@ export class YantaCloudObjectStore extends RemoteObjectStore {
     err.status = res.status;
     err.response = parsed;
 
+    if (parsed?.maxBytes != null) {
+      err.maxBytes = Number(parsed.maxBytes || 0);
+    }
+
+    if (parsed?.maxObjects != null) {
+      err.maxObjects = Number(parsed.maxObjects || 0);
+    }
+
     const errorCode =
       typeof parsed?.error === 'string'
         ? parsed.error
@@ -400,6 +408,15 @@ export class YantaCloudObjectStore extends RemoteObjectStore {
     ) {
       err.code = 'EQUOTA';
       err.retryAfterMs = 60 * 60 * 1000;
+      err.serverCode = errorCode;
+
+      if (parsed?.maxBytes != null) {
+        err.maxBytes = Number(parsed.maxBytes || 0);
+      }
+
+      if (parsed?.maxObjects != null) {
+        err.maxObjects = Number(parsed.maxObjects || 0);
+      }
     }
 
     return err;

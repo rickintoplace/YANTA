@@ -2691,7 +2691,7 @@ function renderYantaPlusBillingCard() {
 
         <a class="btn" href="/pricing" target="_blank" rel="noopener">
           ${lucide('external-link', 14)}
-          Pricing page
+          Pricing
         </a>
       </div>
     </div>
@@ -2701,31 +2701,31 @@ function renderYantaPlusBillingCard() {
   const upgrade = group.querySelector('[data-yanta-plus-upgrade]');
   const manage = group.querySelector('[data-yanta-plus-manage]');
 
-  import('./cloud/cloud-api.js')
-    .then(({ cloudMe }) => cloudMe())
-    .then((me) => {
-      const plan = me?.user?.plan || 'free';
-      const billing = me?.billing || null;
-
+  import('./billing/billing-ui.js')
+    .then(({ currentBillingSummary }) => currentBillingSummary())
+    .then(({ plan, billing }) => {
       if (plan === 'premium') {
         status.innerHTML = `
           <strong style="color:var(--green)">YANTA Plus is active.</strong>
-          ${billing?.subscription?.currentPeriodEndsAt
-            ? `Current period ends ${new Date(billing.subscription.currentPeriodEndsAt).toLocaleDateString()}.`
-            : 'Thanks for supporting YANTA.'}
+          ${
+            billing?.subscription?.currentPeriodEndsAt
+              ? `Current period ends ${new Date(billing.subscription.currentPeriodEndsAt).toLocaleDateString()}.`
+              : 'Thank you for supporting YANTA.'
+          }
         `;
 
         upgrade.hidden = true;
         manage.hidden = false;
-      } else {
-        status.innerHTML = `
-          <strong>Free plan.</strong>
-          Upgrade when you need more cloud storage, more devices, or higher AI limits.
-        `;
-
-        upgrade.hidden = false;
-        manage.hidden = false;
+        return;
       }
+
+      status.innerHTML = `
+        <strong>Free plan.</strong>
+        Upgrade when you need more encrypted cloud storage, more devices, or higher Included AI limits.
+      `;
+
+      upgrade.hidden = false;
+      manage.hidden = false;
     })
     .catch(() => {
       status.innerHTML = `
@@ -2736,16 +2736,11 @@ function renderYantaPlusBillingCard() {
 
   upgrade?.addEventListener('click', async () => {
     try {
-      const priceId = yantaPlusPreferredPriceId();
+      const { openYantaPlusUpgrade } = await import('./billing/billing-ui.js');
 
-      if (!priceId) {
-        toast('YANTA Plus price is not configured yet.', 'error');
-        return;
-      }
-
-      const { openBillingCheckout } = await import('./billing/billing-api.js');
-
-      await openBillingCheckout(priceId);
+      await openYantaPlusUpgrade({
+        interval: 'yearly',
+      });
     } catch (err) {
       console.error(err);
       toast(err?.message || 'Could not open checkout', 'error');
@@ -2754,9 +2749,9 @@ function renderYantaPlusBillingCard() {
 
   manage?.addEventListener('click', async () => {
     try {
-      const { openBillingPortal } = await import('./billing/billing-api.js');
+      const { openYantaBillingPortal } = await import('./billing/billing-ui.js');
 
-      await openBillingPortal();
+      await openYantaBillingPortal();
     } catch (err) {
       console.error(err);
       toast(err?.message || 'Could not open billing portal', 'error');

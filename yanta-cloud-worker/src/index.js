@@ -1998,6 +1998,46 @@ function looksLikeDomainQuery(q) {
   return /^[a-z0-9.-]+\.[a-z]{2,}(?:\/\S*)?$/i.test(String(q || '').trim());
 }
 
+function isLikelyDirectFeedUrl(raw = '') {
+  try {
+    const url = new URL(String(raw || '').trim());
+    const host = url.hostname.toLowerCase();
+    const path = url.pathname.toLowerCase();
+
+    return (
+      /\.(rss|xml|atom|json)(?:$|[?#])/i.test(url.href) ||
+      path.endsWith('/rss') ||
+      path.endsWith('/feed') ||
+      path.includes('/feed/') ||
+      path.includes('/rss/') ||
+      host.includes('libsyn.com') ||
+      host.includes('feeds.') ||
+      host.includes('feedburner.com') ||
+      host.includes('anchor.fm') ||
+      host.includes('simplecast.com') ||
+      host.includes('megaphone.fm') ||
+      host.includes('podbean.com') ||
+      host.includes('buzzsprout.com')
+    );
+  } catch {
+    return false;
+  }
+}
+__name(isLikelyDirectFeedUrl, "isLikelyDirectFeedUrl");
+
+function directFeedDiscoveryCandidate(raw = '') {
+  const feedUrl = safeExternalRssUrl(raw);
+
+  return {
+    title: feedUrl,
+    feedUrl,
+    siteUrl: '',
+    description: '',
+    source: 'direct-feed-url',
+  };
+}
+__name(directFeedDiscoveryCandidate, "directFeedDiscoveryCandidate");
+
 function dedupeFeedCandidates(candidates = []) {
   const out = [];
   const seen = new Set();
@@ -3038,38 +3078,94 @@ __name(extractFeedsFromHtml, "extractFeedsFromHtml");
 async function handleRssDiscover(env, req, url, headers) {
   const user = await requireUser(env, req);
   const limits = effectiveLimits(user, await getUserCreatedAt(env, user.userId));
+
   const rl = await rateLimit(
     env,
     `rss:discover:${user.userId}`,
     Math.min(200, limits.rssFetchesDay || 200),
     24 * 60 * 60 * 1e3
   );
+
   if (!rl.ok) {
     return json({ error: "rss_rate_limited", message: "RSS discovery limit reached." }, 429, headers);
   }
+
   const targetUrl = safeExternalRssUrl(url.searchParams.get("url") || "");
-  const fetched = await fetchExternal(targetUrl, {
-    accept: "text/html, application/rss+xml, application/atom+xml, application/feed+json, application/json, application/xml, text/xml, */*",
-    maxBytes: 1024 * 1024,
-    timeoutMs: 1e4
-  });
+
+  /*
+    Fast path:
+    If the user/AI already gives us something that looks like a direct feed URL,
+    return it as candidate immediately. Do not require fetching the whole feed
+    just to prove it is a feed. Huge podcast feeds would otherwise fail here.
+  */
+  if (isLikelyDirectFeedUrl(targetUrl)) {
+    return json({
+      feeds: [
+        directFeedDiscoveryCandidate(targetUrl),
+      ],
+      direct: true,
+    }, 200, headers);
+  }
+
+  const maxDiscoverBytes = Math.max(
+    1024 * 1024,
+    Math.min(
+      6 * 1024 * 1024,
+      Number(env.RSS_DISCOVER_MAX_BYTES || 2 * 1024 * 1024)
+    )
+  );
+
+  let fetched;
+
+  try {
+    fetched = await fetchExternal(targetUrl, {
+      accept: "text/html, application/rss+xml, application/atom+xml, application/feed+json, application/json, application/xml, text/xml, */*",
+      maxBytes: maxDiscoverBytes,
+      timeoutMs: 1e4
+    });
+  } catch (err) {
+    /*
+      If fetching for discovery fails due to size but the URL still looks like
+      a possible feed, return it. Source add can persist it and refresh later
+      through /api/rss/fetch, which has feed-trimming.
+    */
+    if (/response too large/i.test(err?.message || '') || err?.status === 413) {
+      if (isLikelyDirectFeedUrl(targetUrl)) {
+        return json({
+          feeds: [
+            directFeedDiscoveryCandidate(targetUrl),
+          ],
+          direct: true,
+          warning: 'Feed was too large to inspect during discovery.',
+        }, 200, headers);
+      }
+    }
+
+    throw err;
+  }
+
   if (fetched.status < 200 || fetched.status >= 400) {
     return json({ error: "fetch_failed", status: fetched.status }, 502, headers);
   }
+
   const contentType = fetched.headers.get("content-type") || "";
   const textBody = decodeUtf8(fetched.bytes);
+
   if (looksLikeFeedText(textBody) && !contentType.includes("html")) {
     return json({
       feeds: [
         {
-          title: targetUrl,
+          title: fetched.finalUrl || targetUrl,
           feedUrl: fetched.finalUrl || targetUrl,
-          siteUrl: targetUrl
+          siteUrl: targetUrl,
+          source: 'direct-discovery',
         }
       ]
     }, 200, headers);
   }
+
   const feeds = extractFeedsFromHtml(textBody, fetched.finalUrl || targetUrl);
+
   return json({ feeds }, 200, headers);
 }
 __name(handleRssDiscover, "handleRssDiscover");

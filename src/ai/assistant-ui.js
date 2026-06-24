@@ -4637,13 +4637,6 @@ function injectCss() {
   transform: scale(0.88);
 }
 
-.yanta-ai-inline-code-wrap:hover .yanta-ai-copy-btn.inline,
-.yanta-ai-inline-code-wrap:focus-within .yanta-ai-copy-btn.inline,
-.yanta-ai-copy-btn.inline.is-copied {
-  opacity: 1;
-  transform: scale(1);
-}
-
 .yanta-ai-copy-icon {
   position: absolute;
   inset: 0;
@@ -4749,7 +4742,7 @@ function injectCss() {
 .yanta-ai-inline-code-wrap:focus-within .yanta-ai-copy-btn.inline,
 .yanta-ai-copy-btn.inline.is-copied {
   opacity: 1;
-  transform: translateY(-50%) scale(1);
+  translateY(-50%) translateX(40%) scale(1)
 }
 
 /* Avoid the button being visually buried by following text. */
@@ -4763,6 +4756,7 @@ function injectCss() {
   .yanta-ai-copy-btn.inline {
     opacity: 0.9;
     transform: translateY(-50%) scale(1);
+    display: none;
   }
 }
 

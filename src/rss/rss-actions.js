@@ -760,6 +760,55 @@ function cleanUniversalSourceInput(input = '') {
   };
 }
 
+function isLikelyDirectFeedUrl(input = '') {
+  const raw = String(input || '').trim();
+
+  try {
+    const url = new URL(raw, location.href);
+    const path = url.pathname.toLowerCase();
+    const host = url.hostname.toLowerCase();
+
+    return (
+      /\.(rss|xml|atom|json)(?:$|[?#])/i.test(url.href) ||
+      path.endsWith('/rss') ||
+      path.endsWith('/feed') ||
+      path.includes('/feed/') ||
+      path.includes('/rss/') ||
+      path.includes('/podcast') ||
+      host.includes('libsyn.com') ||
+      host.includes('feeds.') ||
+      host.includes('feedburner.com') ||
+      host.includes('anchor.fm') ||
+      host.includes('simplecast.com') ||
+      host.includes('megaphone.fm') ||
+      host.includes('podbean.com') ||
+      host.includes('buzzsprout.com')
+    );
+  } catch {
+    return false;
+  }
+}
+
+function directFeedCandidateFromUrl(input = '') {
+  const raw = String(input || '').trim();
+
+  if (!isLikelyDirectFeedUrl(raw)) return null;
+
+  let href = raw;
+
+  try {
+    href = new URL(raw, location.href).href;
+  } catch {}
+
+  return {
+    title: href,
+    feedUrl: href,
+    siteUrl: '',
+    description: '',
+    source: 'direct-feed-url',
+  };
+}
+
 async function addRssFeedCandidate(candidate, {
   originalInput = '',
   folderId = null,
@@ -841,6 +890,12 @@ export async function findRssSourceCandidates(input, {
     throw new Error('Enter a source name, website, domain, YouTube channel or feed URL.');
   }
 
+  const directFeed = directFeedCandidateFromUrl(normalized.value);
+
+  if (directFeed) {
+    return [directFeed];
+  }
+
   const youtubeExact = await resolveYoutubeCandidate(input).catch(() => null);
 
   if (youtubeExact) {
@@ -893,6 +948,18 @@ export async function addRssFeedFromUniversalInput(input, {
   folderId = null,
   tags = [],
 } = {}) {
+  const normalized = cleanUniversalSourceInput(input);
+
+  const directFeed = directFeedCandidateFromUrl(normalized.value);
+
+  if (directFeed) {
+    return addRssFeedCandidate(directFeed, {
+      originalInput: input,
+      folderId,
+      tags,
+    });
+  }
+
   const youtubeExact = await resolveYoutubeCandidate(input).catch(() => null);
 
   if (youtubeExact) {
@@ -933,6 +1000,16 @@ export async function addRssFeedFromUrl(inputUrl, {
       originalInput: inputUrl,
       folderId,
       tags: [...tags, 'youtube', 'video'],
+    });
+  }
+
+  const directFeed = directFeedCandidateFromUrl(inputUrl);
+
+  if (directFeed) {
+    return addRssFeedCandidate(directFeed, {
+      originalInput: inputUrl,
+      folderId,
+      tags,
     });
   }
 

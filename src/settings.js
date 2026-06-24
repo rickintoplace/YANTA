@@ -2480,6 +2480,7 @@ function renderSyncSection(host) {
   ));
 
   host.append(renderYantaCloudSyncPrimaryCard());
+  host.append(renderYantaPlusBillingCard());
   host.append(renderEncryptedBackupCard());
   host.append(renderAdvancedSyncMethods());
 }
@@ -2606,6 +2607,163 @@ async function updateYantaCloudSyncPrimaryCard(group) {
 
   openBtn.innerHTML = `${lucide('cloud', 14)} Set up YANTA Cloud Sync`;
   syncNowBtn.hidden = true;
+}
+
+function yantaPlusPreferredPriceId() {
+  const lang = navigator.language || '';
+  const wantsEur =
+    lang.startsWith('de') ||
+    lang.startsWith('fr') ||
+    lang.startsWith('es') ||
+    lang.startsWith('it') ||
+    lang.startsWith('nl') ||
+    lang.startsWith('pt') ||
+    lang.startsWith('fi') ||
+    lang.startsWith('sv') ||
+    lang.startsWith('da') ||
+    lang.startsWith('pl') ||
+    lang.startsWith('cs') ||
+    lang.startsWith('sk') ||
+    lang.startsWith('sl') ||
+    lang.startsWith('et') ||
+    lang.startsWith('lv') ||
+    lang.startsWith('lt') ||
+    lang.startsWith('el');
+
+  if (wantsEur) {
+    return (
+      import.meta.env.VITE_PADDLE_PLUS_YEARLY_EUR_PRICE_ID ||
+      import.meta.env.VITE_PADDLE_PLUS_MONTHLY_EUR_PRICE_ID ||
+      import.meta.env.VITE_PADDLE_PLUS_YEARLY_USD_PRICE_ID ||
+      import.meta.env.VITE_PADDLE_PLUS_MONTHLY_USD_PRICE_ID ||
+      ''
+    );
+  }
+
+  return (
+    import.meta.env.VITE_PADDLE_PLUS_YEARLY_USD_PRICE_ID ||
+    import.meta.env.VITE_PADDLE_PLUS_MONTHLY_USD_PRICE_ID ||
+    import.meta.env.VITE_PADDLE_PLUS_YEARLY_EUR_PRICE_ID ||
+    import.meta.env.VITE_PADDLE_PLUS_MONTHLY_EUR_PRICE_ID ||
+    ''
+  );
+}
+
+function renderYantaPlusBillingCard() {
+  const group = el('div', { class: 'yanta-settings-group yanta-sync-billing-card' });
+
+  group.innerHTML = `
+    <div class="yanta-sync-card">
+      <div class="yanta-sync-card-head">
+        <div class="yanta-sync-card-icon secondary">
+          ${lucide('sparkles', 22)}
+        </div>
+
+        <div class="yanta-sync-card-title">
+          <strong>YANTA Plus</strong>
+          <p>
+            More encrypted cloud storage, more devices, and higher Included AI limits.
+            No extra features are locked behind Plus right now.
+          </p>
+        </div>
+      </div>
+
+      <div class="yanta-sync-card-points">
+        <span>${lucide('database', 13)} 5 GB encrypted storage</span>
+        <span>${lucide('smartphone', 13)} 8 devices</span>
+        <span>${lucide('bot', 13)} 500 Included AI requests/day</span>
+      </div>
+
+      <div class="yanta-sync-status-line" data-yanta-plus-status>
+        Checking billing status…
+      </div>
+
+      <div class="compress-actions yanta-sync-card-actions">
+        <button class="btn primary" data-yanta-plus-upgrade>
+          ${lucide('sparkles', 14)}
+          Upgrade to YANTA Plus
+        </button>
+
+        <button class="btn" data-yanta-plus-manage>
+          ${lucide('credit-card', 14)}
+          Manage billing
+        </button>
+
+        <a class="btn" href="/pricing" target="_blank" rel="noopener">
+          ${lucide('external-link', 14)}
+          Pricing page
+        </a>
+      </div>
+    </div>
+  `;
+
+  const status = group.querySelector('[data-yanta-plus-status]');
+  const upgrade = group.querySelector('[data-yanta-plus-upgrade]');
+  const manage = group.querySelector('[data-yanta-plus-manage]');
+
+  import('./cloud/cloud-api.js')
+    .then(({ cloudMe }) => cloudMe())
+    .then((me) => {
+      const plan = me?.user?.plan || 'free';
+      const billing = me?.billing || null;
+
+      if (plan === 'premium') {
+        status.innerHTML = `
+          <strong style="color:var(--green)">YANTA Plus is active.</strong>
+          ${billing?.subscription?.currentPeriodEndsAt
+            ? `Current period ends ${new Date(billing.subscription.currentPeriodEndsAt).toLocaleDateString()}.`
+            : 'Thanks for supporting YANTA.'}
+        `;
+
+        upgrade.hidden = true;
+        manage.hidden = false;
+      } else {
+        status.innerHTML = `
+          <strong>Free plan.</strong>
+          Upgrade when you need more cloud storage, more devices, or higher AI limits.
+        `;
+
+        upgrade.hidden = false;
+        manage.hidden = false;
+      }
+    })
+    .catch(() => {
+      status.innerHTML = `
+        <strong>Billing status unavailable.</strong>
+        Sign in to YANTA Cloud to upgrade or manage billing.
+      `;
+    });
+
+  upgrade?.addEventListener('click', async () => {
+    try {
+      const priceId = yantaPlusPreferredPriceId();
+
+      if (!priceId) {
+        toast('YANTA Plus price is not configured yet.', 'error');
+        return;
+      }
+
+      const { openBillingCheckout } = await import('./billing/billing-api.js');
+
+      await openBillingCheckout(priceId);
+    } catch (err) {
+      console.error(err);
+      toast(err?.message || 'Could not open checkout', 'error');
+    }
+  });
+
+  manage?.addEventListener('click', async () => {
+    try {
+      const { openBillingPortal } = await import('./billing/billing-api.js');
+
+      await openBillingPortal();
+    } catch (err) {
+      console.error(err);
+      toast(err?.message || 'Could not open billing portal', 'error');
+    }
+  });
+
+  return group;
 }
 
 function renderEncryptedBackupCard() {

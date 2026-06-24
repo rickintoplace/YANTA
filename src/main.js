@@ -3041,7 +3041,23 @@ function rebuildScrollMaps(sync) {
   sync.maxPreview = Math.max(1, pvPane.scrollHeight - pvPane.clientHeight);
 }
 
-if (location.pathname.startsWith('/share/')) {
+const SITE_PAGE_PATHS = new Set([
+  '/pricing',
+  '/terms',
+  '/privacy',
+  '/refund',
+]);
+
+const normalizedPath = location.pathname.replace(/\/+$/, '') || '/';
+
+if (SITE_PAGE_PATHS.has(normalizedPath)) {
+  import('./site/site-pages.js')
+    .then((m) => m.mountSitePage())
+    .catch((e) => {
+      console.error(e);
+      document.body.innerHTML = '<main style="padding:24px;font-family:system-ui">Could not load page.</main>';
+    });
+} else if (location.pathname.startsWith('/share/')) {
   import('./public-share/public-share-viewer.js')
     .then((m) => m.mountPublicShareViewer())
     .catch((e) => {

@@ -6,59 +6,59 @@ var PLAN_LIMITS = {
   free: {
     storageBytes: 25 * 1024 * 1024,
     vaults: 1,
-    devices: 5,
-    objects: 1e4,
+    devices: 3,
+    objects: 10_000,
     objectSizeBytes: 2 * 1024 * 1024,
-    // Backend-internal object transfer.
-    // Needs headroom for first sync, retries, snapshots.
+
     uploadBytesDay: 250 * 1024 * 1024,
-    // Real download abuse remains capped.
     downloadBytesMonth: 250 * 1024 * 1024,
-    // Internal encrypted object writes.
-    // Product/UI can still say "200 app writes/day" if we enforce that separately later.
-    writesDay: 8e3,
+    writesDay: 8_000,
+
     includedAi: true,
     aiRequestsDay: 25,
     aiSpendMicrosMonth: 1_000_000,
+
     rssFetchesDay: 200,
     rssImageBytesDay: 50 * 1024 * 1024,
     rssImageBytesMax: 2 * 1024 * 1024
   },
+
+  // Internal name. User-facing label is "YANTA Plus".
   premium: {
-    storageBytes: 2 * 1024 * 1024 * 1024,
-    vaults: 10,
-    devices: 20,
-    objects: 2e5,
-    objectSizeBytes: 100 * 1024 * 1024,
-    uploadBytesDay: 5 * 1024 * 1024 * 1024,
-    downloadBytesMonth: 50 * 1024 * 1024 * 1024,
-    writesDay: 2e4,
+    storageBytes: 5 * 1024 * 1024 * 1024,
+    vaults: 5,
+    devices: 8,
+    objects: 500_000,
+    objectSizeBytes: 250 * 1024 * 1024,
+
+    uploadBytesDay: 10 * 1024 * 1024 * 1024,
+    downloadBytesMonth: 100 * 1024 * 1024 * 1024,
+    writesDay: 50_000,
+
     includedAi: true,
     aiRequestsDay: 500,
-    aiSpendMicrosMonth: 20_000_000,
-    aiSpendMicrosMonth: 5e6,
-    rssFetchesDay: 5e3,
-    rssImageBytesDay: 2 * 1024 * 1024 * 1024,
-    rssImageBytesMax: 5 * 1024 * 1024
+    aiSpendMicrosMonth: 50_000_000,
+
+    rssFetchesDay: 10_000,
+    rssImageBytesDay: 5 * 1024 * 1024 * 1024,
+    rssImageBytesMax: 10 * 1024 * 1024
   }
 };
 const INCLUDED_AI_POLICY = {
   free: {
     includedAi: true,
 
-    // Server-authoritative model.
-    // Must support OpenRouter ZDR routing.
     model: "deepseek/deepseek-v4-flash",
     modelLabel: "YANTA Cloud Fast (deepseek-v4-flash)",
 
     aiRequestsDay: 25,
-    aiSpendMicrosDay: 150_000,
+    aiSpendMicrosDay: 180_000,
     aiSpendMicrosMonth: 1_000_000,
 
-    maxPromptChars: 60_000,
+    maxPromptChars: 70_000,
     maxToolsChars: 45_000,
     maxMessages: 40,
-    maxTokens: 768,
+    maxTokens: 1024,
 
     userBurstPerMinute: 4,
     ipBurstPerMinute: 20
@@ -71,16 +71,16 @@ const INCLUDED_AI_POLICY = {
     modelLabel: "YANTA Cloud Fast (deepseek-v4-flash)",
 
     aiRequestsDay: 500,
-    aiSpendMicrosDay: 2_000_000,
-    aiSpendMicrosMonth: 20_000_000,
+    aiSpendMicrosDay: 3_000_000,
+    aiSpendMicrosMonth: 50_000_000,
 
-    maxPromptChars: 180_000,
-    maxToolsChars: 80_000,
-    maxMessages: 80,
-    maxTokens: 2048,
+    maxPromptChars: 220_000,
+    maxToolsChars: 120_000,
+    maxMessages: 100,
+    maxTokens: 4096,
 
-    userBurstPerMinute: 20,
-    ipBurstPerMinute: 100
+    userBurstPerMinute: 24,
+    ipBurstPerMinute: 120
   }
 };
 
@@ -328,6 +328,395 @@ function emailDomain(email) {
   return normalizeEmail(email).split("@")[1] || "";
 }
 __name(emailDomain, "emailDomain");
+
+// ============================================================
+// Billing / Paddle
+// ============================================================
+
+const YANTA_PLUS_INTERNAL_PLAN = "premium";
+const YANTA_FREE_INTERNAL_PLAN = "free";
+
+function plusPriceIds(env) {
+  return new Set(
+    String(env.PADDLE_PLUS_PRICE_IDS || "")
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+  );
+}
+
+function planForPaddlePriceId(env, priceId) {
+  const id = String(priceId || "").trim();
+
+  if (plusPriceIds(env).has(id)) {
+    return YANTA_PLUS_INTERNAL_PLAN;
+  }
+
+  return "";
+}
+
+function paddleApiBase(env) {
+  const environment = String(env.PADDLE_ENVIRONMENT || "sandbox").toLowerCase();
+
+  return environment === "live"
+    ? "https://api.paddle.com"
+    : "https://sandbox-api.paddle.com";
+}
+
+async function paddleApi(env, path, {
+  method = "GET",
+  body = null
+} = {}) {
+  if (!env.PADDLE_API_KEY) {
+    const err = new Error("Paddle API key missing");
+    err.status = 500;
+    throw err;
+  }
+
+  const res = await fetch(`${paddleApiBase(env)}${path}`, {
+    method,
+    headers: {
+      authorization: `Bearer ${env.PADDLE_API_KEY}`,
+      "content-type": "application/json",
+      accept: "application/json"
+    },
+    body: body ? JSON.stringify(body) : null
+  });
+
+  let data = null;
+
+  try {
+    data = await res.json();
+  } catch {}
+
+  if (!res.ok) {
+    const err = new Error(
+      data?.error?.detail ||
+      data?.error?.message ||
+      data?.message ||
+      `Paddle API failed: HTTP ${res.status}`
+    );
+
+    err.status = res.status;
+    err.response = data;
+
+    throw err;
+  }
+
+  return data;
+}
+
+function isoToMs(value) {
+  if (!value) return null;
+
+  const t = Date.parse(value);
+
+  return Number.isFinite(t) ? t : null;
+}
+
+function billingGraceMs(env) {
+  const days = Number(env.BILLING_GRACE_DAYS || 7);
+
+  return Math.max(0, Math.min(30, Number.isFinite(days) ? days : 7)) * 24 * 60 * 60 * 1000;
+}
+
+function subscriptionGrantsPlus(row, env) {
+  if (!row) return false;
+
+  const status = String(row.status || "").toLowerCase();
+  const periodEnd = Number(row.current_period_ends_at || 0);
+  const t = now();
+
+  if (status === "active" || status === "trialing") {
+    return true;
+  }
+
+  // Customer-friendly grace period for payment issues.
+  if (status === "past_due") {
+    if (!periodEnd) return true;
+    return t <= periodEnd + billingGraceMs(env);
+  }
+
+  // Canceled subscriptions remain valid until the paid period ends.
+  if (status === "canceled") {
+    return periodEnd && t <= periodEnd;
+  }
+
+  return false;
+}
+
+async function resolveBillingPlan(env, userId, fallbackPlan = "free") {
+  const row = await env.DB.prepare(
+    `SELECT *
+     FROM billing_subscriptions
+     WHERE user_id = ?
+       AND plan = ?
+     ORDER BY updated_at DESC
+     LIMIT 1`
+  ).bind(userId, YANTA_PLUS_INTERNAL_PLAN).first();
+
+  if (subscriptionGrantsPlus(row, env)) {
+    return YANTA_PLUS_INTERNAL_PLAN;
+  }
+
+  // Allow manual/admin plan while you are still early.
+  if (fallbackPlan === YANTA_PLUS_INTERNAL_PLAN) {
+    return YANTA_PLUS_INTERNAL_PLAN;
+  }
+
+  return YANTA_FREE_INTERNAL_PLAN;
+}
+
+async function refreshUserPlanFromBilling(env, userId) {
+  const user = await env.DB.prepare(
+    `SELECT plan FROM users WHERE id = ?`
+  ).bind(userId).first();
+
+  if (!user) return YANTA_FREE_INTERNAL_PLAN;
+
+  const plan = await resolveBillingPlan(env, userId, user.plan || YANTA_FREE_INTERNAL_PLAN);
+
+  await env.DB.prepare(
+    `UPDATE users SET plan = ? WHERE id = ?`
+  ).bind(plan, userId).run();
+
+  return plan;
+}
+
+async function getBillingSummary(env, userId) {
+  const row = await env.DB.prepare(
+    `SELECT *
+     FROM billing_subscriptions
+     WHERE user_id = ?
+     ORDER BY updated_at DESC
+     LIMIT 1`
+  ).bind(userId).first();
+
+  const user = await env.DB.prepare(
+    `SELECT plan FROM users WHERE id = ?`
+  ).bind(userId).first();
+
+  const plan = await resolveBillingPlan(env, userId, user?.plan || "free");
+
+  return {
+    plan,
+    label: plan === YANTA_PLUS_INTERNAL_PLAN ? "YANTA Plus" : "Free",
+    subscription: row ? {
+      id: row.id,
+      paddleSubscriptionId: row.paddle_subscription_id,
+      status: row.status,
+      plan: row.plan,
+      priceId: row.price_id,
+      currentPeriodStartsAt: row.current_period_starts_at || null,
+      currentPeriodEndsAt: row.current_period_ends_at || null,
+      cancelAtPeriodEnd: !!row.cancel_at_period_end
+    } : null,
+    grace: row?.status === "past_due" ? {
+      active: subscriptionGrantsPlus(row, env),
+      graceDays: Number(env.BILLING_GRACE_DAYS || 7)
+    } : null
+  };
+}
+
+async function getOrCreateBillingCustomer(env, user) {
+  const existing = await env.DB.prepare(
+    `SELECT * FROM billing_customers WHERE user_id = ?`
+  ).bind(user.userId).first();
+
+  if (existing?.paddle_customer_id) {
+    return existing.paddle_customer_id;
+  }
+
+  const created = await paddleApi(env, "/customers", {
+    method: "POST",
+    body: {
+      email: user.email,
+      custom_data: {
+        userId: user.userId,
+        app: "YANTA"
+      }
+    }
+  });
+
+  const customerId = created?.data?.id;
+
+  if (!customerId) {
+    const err = new Error("Paddle customer creation failed");
+    err.status = 502;
+    throw err;
+  }
+
+  const t = now();
+
+  await env.DB.prepare(
+    `INSERT OR REPLACE INTO billing_customers
+     (user_id, paddle_customer_id, created_at, updated_at)
+     VALUES (?, ?, COALESCE((SELECT created_at FROM billing_customers WHERE user_id = ?), ?), ?)`
+  ).bind(
+    user.userId,
+    customerId,
+    user.userId,
+    t,
+    t
+  ).run();
+
+  return customerId;
+}
+
+function cleanRedirectUrl(raw, fallback) {
+  try {
+    const url = new URL(String(raw || fallback));
+
+    // Keep redirects on your app domain only.
+    const allowed = new URL(fallback).origin;
+
+    if (url.origin !== allowed) return fallback;
+
+    return url.href;
+  } catch {
+    return fallback;
+  }
+}
+
+function paddleSignatureParts(header = "") {
+  const out = {};
+
+  for (const part of String(header || "").split(";")) {
+    const [k, v] = part.split("=");
+    if (!k || !v) continue;
+    out[k.trim()] = v.trim();
+  }
+
+  return out;
+}
+
+function timingSafeEqualHex(a = "", b = "") {
+  const aa = String(a || "").toLowerCase();
+  const bb = String(b || "").toLowerCase();
+
+  if (aa.length !== bb.length) return false;
+
+  let diff = 0;
+
+  for (let i = 0; i < aa.length; i++) {
+    diff |= aa.charCodeAt(i) ^ bb.charCodeAt(i);
+  }
+
+  return diff === 0;
+}
+
+async function verifyPaddleWebhookSignature(env, req, rawBody) {
+  if (!env.PADDLE_WEBHOOK_SECRET) {
+    const err = new Error("Paddle webhook secret missing");
+    err.status = 500;
+    throw err;
+  }
+
+  const header = req.headers.get("paddle-signature") || "";
+  const parts = paddleSignatureParts(header);
+
+  const ts = parts.ts;
+  const h1 = parts.h1;
+
+  if (!ts || !h1) {
+    const err = new Error("Invalid Paddle signature header");
+    err.status = 401;
+    throw err;
+  }
+
+  const signedPayload = `${ts}:${rawBody}`;
+  const expected = await hmacHex(env.PADDLE_WEBHOOK_SECRET, signedPayload);
+
+  if (!timingSafeEqualHex(expected, h1)) {
+    const err = new Error("Invalid Paddle webhook signature");
+    err.status = 401;
+    throw err;
+  }
+
+  const ageMs = Math.abs(now() - Number(ts) * 1000);
+
+  if (ageMs > 10 * 60 * 1000) {
+    const err = new Error("Stale Paddle webhook signature");
+    err.status = 401;
+    throw err;
+  }
+
+  return true;
+}
+
+function paddleSubscriptionPeriod(data = {}) {
+  const p =
+    data.current_billing_period ||
+    data.billing_period ||
+    data.currentBillingPeriod ||
+    {};
+
+  return {
+    startsAt: isoToMs(p.starts_at || p.startsAt),
+    endsAt: isoToMs(p.ends_at || p.endsAt)
+  };
+}
+
+function paddleSubscriptionCancelAtPeriodEnd(data = {}) {
+  const scheduled = data.scheduled_change || data.scheduledChange || null;
+
+  if (!scheduled) return false;
+
+  return String(scheduled.action || "").toLowerCase() === "cancel";
+}
+
+function paddleFirstPriceId(data = {}) {
+  const item = Array.isArray(data.items)
+    ? data.items[0]
+    : null;
+
+  return (
+    item?.price?.id ||
+    item?.price_id ||
+    data.price_id ||
+    ""
+  );
+}
+
+async function findUserIdForPaddleEvent(env, data = {}) {
+  const customUserId =
+    data.custom_data?.userId ||
+    data.customData?.userId ||
+    data.custom_data?.user_id ||
+    "";
+
+  if (customUserId) {
+    return String(customUserId);
+  }
+
+  const customerId = data.customer_id || data.customerId || "";
+
+  if (customerId) {
+    const row = await env.DB.prepare(
+      `SELECT user_id FROM billing_customers WHERE paddle_customer_id = ?`
+    ).bind(customerId).first();
+
+    if (row?.user_id) return row.user_id;
+  }
+
+  const email = normalizeEmail(
+    data.customer?.email ||
+    data.customer_email ||
+    data.billing_details?.email ||
+    ""
+  );
+
+  if (email) {
+    const user = await env.DB.prepare(
+      `SELECT id FROM users WHERE email = ?`
+    ).bind(email).first();
+
+    if (user?.id) return user.id;
+  }
+
+  return "";
+}
+
 function validEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
@@ -536,11 +925,13 @@ async function getSession(env, req) {
   await env.DB.prepare(
     `UPDATE users SET last_seen_at = ? WHERE id = ?`
   ).bind(now(), row.user_id).run();
+  const plan = await resolveBillingPlan(env, row.user_id, row.plan || "free");
+
   return {
     sessionId: row.session_id,
     userId: row.user_id,
     email: row.email,
-    plan: row.plan || "free"
+    plan
   };
 }
 __name(getSession, "getSession");
@@ -1075,21 +1466,26 @@ async function handleMe(env, req, headers) {
      WHERE user_id = ? AND archived_at IS NULL
      ORDER BY created_at ASC`
   ).bind(user.userId).all();
+  const billing = await getBillingSummary(env, user.userId);
+  const effectivePlan = billing.plan || user.plan || "free";
+
   return json({
     authenticated: true,
     user: {
       id: user.userId,
       email: user.email,
-      plan: user.plan
+      plan: effectivePlan,
+      planLabel: billing.label
     },
+    billing,
     usage,
     vaults: vaults.results || [],
     limits: {
-      ...(PLAN_LIMITS[user.plan] || PLAN_LIMITS.free),
-      includedAi: includedAiPolicyForPlan(user.plan).includedAi,
-      aiRequestsDay: includedAiPolicyForPlan(user.plan).aiRequestsDay,
-      aiSpendMicrosDay: includedAiPolicyForPlan(user.plan).aiSpendMicrosDay,
-      aiSpendMicrosMonth: includedAiPolicyForPlan(user.plan).aiSpendMicrosMonth,
+      ...(PLAN_LIMITS[effectivePlan] || PLAN_LIMITS.free),
+    includedAi: includedAiPolicyForPlan(effectivePlan).includedAi,
+    aiRequestsDay: includedAiPolicyForPlan(effectivePlan).aiRequestsDay,
+    aiSpendMicrosDay: includedAiPolicyForPlan(effectivePlan).aiSpendMicrosDay,
+    aiSpendMicrosMonth: includedAiPolicyForPlan(effectivePlan).aiSpendMicrosMonth,
     }
   }, 200, headers);
 }
@@ -1604,6 +2000,316 @@ async function handleUsage(env, req, headers) {
   return json({ usage, limits }, 200, headers);
 }
 __name(handleUsage, "handleUsage");
+
+async function handleBillingCheckout(env, req, headers) {
+  const user = await requireUser(env, req);
+  const body = await bodyJson(req);
+
+  const priceId = String(body.priceId || "").trim();
+  const plan = planForPaddlePriceId(env, priceId);
+
+  if (plan !== YANTA_PLUS_INTERNAL_PLAN) {
+    return json({
+      ok: false,
+      message: "Invalid YANTA Plus price."
+    }, 400, headers);
+  }
+
+  const appOrigin = env.APP_ORIGIN || "https://yanta.page";
+
+  const successUrl = cleanRedirectUrl(
+    body.successUrl,
+    `${appOrigin}/pricing?billing=success`
+  );
+
+  const cancelUrl = cleanRedirectUrl(
+    body.cancelUrl,
+    `${appOrigin}/pricing?billing=cancel`
+  );
+
+  const customerId = await getOrCreateBillingCustomer(env, user);
+
+  const tx = await paddleApi(env, "/transactions", {
+    method: "POST",
+    body: {
+      items: [
+        {
+          price_id: priceId,
+          quantity: 1
+        }
+      ],
+      customer_id: customerId,
+      custom_data: {
+        userId: user.userId,
+        plan,
+        app: "YANTA"
+      },
+      checkout: {
+        success_url: successUrl,
+        cancel_url: cancelUrl
+      }
+    }
+  });
+
+  const checkoutUrl =
+    tx?.data?.checkout?.url ||
+    tx?.data?.checkout_url ||
+    "";
+
+  if (!checkoutUrl) {
+    return json({
+      ok: false,
+      message: "Paddle did not return a checkout URL."
+    }, 502, headers);
+  }
+
+  await audit(env, req, "billing_checkout_created", user.userId, {
+    priceId,
+    plan
+  });
+
+  return json({
+    ok: true,
+    checkoutUrl
+  }, 200, headers);
+}
+
+async function handleBillingPortal(env, req, headers) {
+  const user = await requireUser(env, req);
+
+  const customer = await env.DB.prepare(
+    `SELECT paddle_customer_id FROM billing_customers WHERE user_id = ?`
+  ).bind(user.userId).first();
+
+  if (!customer?.paddle_customer_id) {
+    return json({
+      ok: false,
+      message: "No billing customer exists yet."
+    }, 404, headers);
+  }
+
+  const session = await paddleApi(env, "/customer-portal-sessions", {
+    method: "POST",
+    body: {
+      customer_id: customer.paddle_customer_id
+    }
+  });
+
+  const url =
+    session?.data?.urls?.general?.overview ||
+    session?.data?.urls?.subscriptions ||
+    session?.data?.url ||
+    "";
+
+  if (!url) {
+    return json({
+      ok: false,
+      message: "Paddle did not return a customer portal URL."
+    }, 502, headers);
+  }
+
+  return json({
+    ok: true,
+    portalUrl: url
+  }, 200, headers);
+}
+
+async function handleBillingStatus(env, req, headers) {
+  const user = await requireUser(env, req);
+  const billing = await getBillingSummary(env, user.userId);
+
+  return json({
+    ok: true,
+    billing,
+    limits: PLAN_LIMITS[billing.plan] || PLAN_LIMITS.free
+  }, 200, headers);
+}
+
+async function upsertBillingSubscriptionFromPaddle(env, data = {}) {
+  const userId = await findUserIdForPaddleEvent(env, data);
+
+  if (!userId) {
+    return {
+      ok: false,
+      reason: "user_not_found"
+    };
+  }
+
+  const paddleCustomerId = data.customer_id || data.customerId || "";
+  const paddleSubscriptionId = data.id || data.subscription_id || data.subscriptionId || "";
+
+  if (!paddleSubscriptionId) {
+    return {
+      ok: false,
+      reason: "subscription_id_missing"
+    };
+  }
+
+  const priceId = paddleFirstPriceId(data);
+  const plan = planForPaddlePriceId(env, priceId) || YANTA_PLUS_INTERNAL_PLAN;
+  const period = paddleSubscriptionPeriod(data);
+  const t = now();
+
+  if (paddleCustomerId) {
+    await env.DB.prepare(
+      `INSERT OR REPLACE INTO billing_customers
+       (user_id, paddle_customer_id, created_at, updated_at)
+       VALUES (
+         ?,
+         ?,
+         COALESCE((SELECT created_at FROM billing_customers WHERE user_id = ?), ?),
+         ?
+       )`
+    ).bind(userId, paddleCustomerId, userId, t, t).run();
+  }
+
+  await env.DB.prepare(
+    `INSERT INTO billing_subscriptions
+     (id, user_id, paddle_subscription_id, paddle_customer_id, status, plan, price_id,
+      current_period_starts_at, current_period_ends_at, cancel_at_period_end,
+      created_at, updated_at, raw_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(paddle_subscription_id) DO UPDATE SET
+       paddle_customer_id = excluded.paddle_customer_id,
+       status = excluded.status,
+       plan = excluded.plan,
+       price_id = excluded.price_id,
+       current_period_starts_at = excluded.current_period_starts_at,
+       current_period_ends_at = excluded.current_period_ends_at,
+       cancel_at_period_end = excluded.cancel_at_period_end,
+       updated_at = excluded.updated_at,
+       raw_json = excluded.raw_json`
+  ).bind(
+    id("sub"),
+    userId,
+    paddleSubscriptionId,
+    paddleCustomerId || null,
+    String(data.status || "unknown"),
+    plan,
+    priceId || null,
+    period.startsAt,
+    period.endsAt,
+    paddleSubscriptionCancelAtPeriodEnd(data) ? 1 : 0,
+    t,
+    t,
+    JSON.stringify(data || {})
+  ).run();
+
+  await refreshUserPlanFromBilling(env, userId);
+
+  return {
+    ok: true,
+    userId,
+    plan
+  };
+}
+
+async function upsertBillingTransactionFromPaddle(env, data = {}) {
+  const userId = await findUserIdForPaddleEvent(env, data);
+
+  const paddleTransactionId = data.id || "";
+  if (!paddleTransactionId) return { ok: false };
+
+  const paddleCustomerId = data.customer_id || "";
+  const paddleSubscriptionId = data.subscription_id || "";
+
+  const amount =
+    Number(data.details?.totals?.total || data.totals?.total || 0) || 0;
+
+  const currency =
+    data.currency_code ||
+    data.currency ||
+    data.details?.totals?.currency_code ||
+    "";
+
+  const t = now();
+
+  await env.DB.prepare(
+    `INSERT INTO billing_transactions
+     (id, user_id, paddle_transaction_id, paddle_subscription_id, paddle_customer_id,
+      status, amount, currency, created_at, raw_json)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT(paddle_transaction_id) DO UPDATE SET
+       status = excluded.status,
+       amount = excluded.amount,
+       currency = excluded.currency,
+       raw_json = excluded.raw_json`
+  ).bind(
+    id("btx"),
+    userId || null,
+    paddleTransactionId,
+    paddleSubscriptionId || null,
+    paddleCustomerId || null,
+    String(data.status || "unknown"),
+    amount,
+    currency,
+    t,
+    JSON.stringify(data || {})
+  ).run();
+
+  return {
+    ok: true,
+    userId
+  };
+}
+
+async function handlePaddleWebhook(env, req, headers) {
+  const rawBody = await req.text();
+
+  await verifyPaddleWebhookSignature(env, req, rawBody);
+
+  const event = JSON.parse(rawBody);
+  const eventId = String(event.event_id || event.id || "");
+  const eventType = String(event.event_type || event.type || "");
+
+  if (!eventId || !eventType) {
+    return json({
+      ok: false,
+      message: "Invalid Paddle event"
+    }, 400, headers);
+  }
+
+  const existing = await env.DB.prepare(
+    `SELECT id FROM billing_events WHERE paddle_event_id = ?`
+  ).bind(eventId).first();
+
+  if (existing) {
+    return json({
+      ok: true,
+      duplicate: true
+    }, 200, headers);
+  }
+
+  await env.DB.prepare(
+    `INSERT INTO billing_events
+     (id, paddle_event_id, event_type, processed_at, raw_json)
+     VALUES (?, ?, ?, ?, ?)`
+  ).bind(
+    id("bev"),
+    eventId,
+    eventType,
+    now(),
+    rawBody
+  ).run();
+
+  const data = event.data || {};
+
+  if (eventType.startsWith("subscription.")) {
+    await upsertBillingSubscriptionFromPaddle(env, data);
+  }
+
+  if (eventType.startsWith("transaction.")) {
+    await upsertBillingTransactionFromPaddle(env, data);
+
+    // Paddle transaction may include subscription_id but not full subscription details.
+    // Subscription webhook is still the authoritative entitlement update.
+  }
+
+  return json({
+    ok: true
+  }, 200, headers);
+}
+
 function estimateAiCostMicros(openRouterJson) {
   const usage = openRouterJson?.usage || {};
 
@@ -4309,6 +5015,22 @@ async function route(req, env) {
 
     if (/^\/api\/public-shares\/[^/]+\/assets\/[^/]+$/.test(url.pathname) && req.method === "GET") {
       return handleGetPublicShareAsset(env, req, url, headers);
+    }
+    // Billing
+    if (url.pathname === "/api/billing/checkout" && req.method === "POST") {
+      return handleBillingCheckout(env, req, headers);
+    }
+
+    if (url.pathname === "/api/billing/portal" && req.method === "POST") {
+      return handleBillingPortal(env, req, headers);
+    }
+
+    if (url.pathname === "/api/billing/status" && req.method === "GET") {
+      return handleBillingStatus(env, req, headers);
+    }
+
+    if (url.pathname === "/api/paddle/webhook" && req.method === "POST") {
+      return handlePaddleWebhook(env, req, headers);
     }
     return json({ error: "not_found" }, 404, headers);
   } catch (err) {

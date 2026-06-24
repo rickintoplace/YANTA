@@ -41,9 +41,9 @@ export const INCLUDED_AI_CLIENT_POLICY = Object.freeze({
 
   // Client-side UX/safety clamp.
   // Server enforces authoritative limits.
-  maxContextChars: 10000,
-  maxToolRounds: 3,
-  maxOutputTokens: 768,
+  maxContextChars: 50000,
+  maxToolRounds: 5,
+  maxOutputTokens: 10768,
 });
 
 export const OPENROUTER_ZDR_POLICY = Object.freeze({

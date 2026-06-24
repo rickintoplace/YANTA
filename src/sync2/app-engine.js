@@ -973,7 +973,7 @@ export class Sync2AppEngine {
         phase: 'error',
         status: 'error',
         direction: 'up',
-        message: 'Cloud storage quota exceeded. Run cloud storage compaction or upgrade storage.',
+        message: 'Cloud storage limit reached. Optimize cloud storage or upgrade to YANTA Plus.',
       });
 
       return;

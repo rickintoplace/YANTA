@@ -155,6 +155,7 @@ const EXTERNAL_SOURCE_TOOL_NAMES = new Set([
   'web_read',
   'rss_search_items',
   'rss_read_item',
+  'add_rss_source',
 ]);
 
 function toolCallArgsForUi(call) {
@@ -1451,6 +1452,8 @@ function toolDisplayName(name) {
     update_event_appearance: 'Update event appearance',
     link_event_to_note: 'Link event to note',
 
+    add_rss_source: 'Add Source',
+
     ai_brain_list: 'List AI Brain',
     ai_brain_read: 'Read AI Brain',
     ai_brain_search: 'Search AI Brain',
@@ -1580,6 +1583,14 @@ function summarizeToolResult(name, data, rawContent = '') {
     const chars = Number(data?.textChars || String(data?.text || '').length || 0);
 
     return `Read web page: ${title}${chars ? ` · ${chars.toLocaleString()} chars` : ''}.`;
+  }
+
+  if (name === 'add_rss_source') {
+    const source = data?.source || data?.feed || data;
+
+    return source?.title || source?.feedUrl
+      ? `Added source: ${source.title || source.feedUrl}.`
+      : data?.message || 'Source added.';
   }
 
   const count = toolResultCount(data);
@@ -1712,10 +1723,32 @@ function renderToolRichContent(name, data) {
 
     if (!results.length) return null;
 
-    const list = document.createElement('div');
-    list.className = 'yanta-ai-tool-list';
+    const details = document.createElement('details');
+    details.className = 'yanta-ai-tool-expandable-results yanta-ai-web-results';
 
-    for (const result of results.slice(0, 6)) {
+    const summary = document.createElement('summary');
+
+    const chips = results.slice(0, 8).map((result) => `
+      <span class="yanta-ai-result-chip" title="${escapeHtml(result.title || result.url || 'Result')}">
+        ${escapeHtml(result.title || result.url || 'Result')}
+      </span>
+    `).join('');
+
+    summary.innerHTML = `
+      <span class="yanta-ai-results-summary-label">
+        ${lucide('list-collapse', 13)}
+        ${results.length} result${results.length === 1 ? '' : 's'}
+      </span>
+
+      <span class="yanta-ai-result-chips">
+        ${chips}
+      </span>
+    `;
+
+    const list = document.createElement('div');
+    list.className = 'yanta-ai-tool-list yanta-ai-expanded-result-list';
+
+    for (const result of results.slice(0, 10)) {
       const row = document.createElement('a');
       row.className = 'yanta-ai-tool-row';
       row.href = result.url || '#';
@@ -1734,7 +1767,9 @@ function renderToolRichContent(name, data) {
       list.append(row);
     }
 
-    return list;
+    details.append(summary, list);
+
+    return details;
   }
 
   if (name === 'web_read') {
@@ -1820,6 +1855,33 @@ function renderToolRichContent(name, data) {
       list.append(renderToolBrainRow(hit));
     }
 
+    return list;
+  }
+
+  if (name === 'add_rss_source') {
+    const source = data?.source || data?.feed || data;
+
+    if (!source) return null;
+
+    const list = document.createElement('div');
+    list.className = 'yanta-ai-tool-list';
+
+    const row = document.createElement('a');
+    row.className = 'yanta-ai-tool-row';
+    row.href = source.siteUrl || source.feedUrl || '#';
+    row.target = '_blank';
+    row.rel = 'noopener noreferrer';
+
+    row.innerHTML = `
+      <span class="yanta-ai-tool-row-icon">${lucide(source.sourceKind === 'youtube' ? 'youtube' : 'rss', 14)}</span>
+      <span class="yanta-ai-tool-row-main">
+        <strong>${escapeHtml(source.title || 'Source')}</strong>
+        ${source.description ? `<small>${escapeHtml(String(source.description).slice(0, 220))}</small>` : ''}
+        ${source.feedUrl ? `<em>${escapeHtml(source.feedUrl)}</em>` : ''}
+      </span>
+    `;
+
+    list.append(row);
     return list;
   }
 
@@ -1986,6 +2048,92 @@ function extractAssistantUiTokens(content) {
   };
 }
 
+function aiCopyButtonHtml(size = 13) {
+  return `
+    <span class="yanta-ai-copy-icon copy">${lucide('copy', size)}</span>
+    <span class="yanta-ai-copy-icon check">${lucide('copy-check', size)}</span>
+  `;
+}
+
+function createAiCopyButton(getText, {
+  className = '',
+  label = 'Copy',
+} = {}) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = `yanta-ai-copy-btn ${className}`.trim();
+  btn.title = label;
+  btn.setAttribute('aria-label', label);
+  btn.innerHTML = aiCopyButtonHtml();
+
+  btn.addEventListener('click', async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    const text = String(getText?.() || '');
+
+    if (!text) return;
+
+    try {
+      await navigator.clipboard.writeText(text);
+
+      btn.classList.remove('is-copied');
+      // restart animation reliably
+      void btn.offsetWidth;
+      btn.classList.add('is-copied');
+
+      window.setTimeout(() => {
+        btn.classList.remove('is-copied');
+      }, 1250);
+    } catch {
+      toast('Copy failed', 'error');
+    }
+  });
+
+  return btn;
+}
+
+function enhanceAiCodeCopy(rootEl) {
+  if (!rootEl) return;
+
+  for (const pre of rootEl.querySelectorAll('pre')) {
+    if (pre.dataset.aiCopyEnhanced === '1') continue;
+
+    pre.dataset.aiCopyEnhanced = '1';
+    pre.classList.add('yanta-ai-codeblock');
+
+    const code = pre.querySelector('code');
+    const btn = createAiCopyButton(
+      () => code?.textContent || pre.textContent || '',
+      {
+        className: 'block',
+        label: 'Copy code',
+      }
+    );
+
+    pre.append(btn);
+  }
+
+  for (const code of rootEl.querySelectorAll('code')) {
+    if (code.closest('pre')) continue;
+    if (code.closest('.yanta-ai-inline-code-wrap')) continue;
+
+    const wrap = document.createElement('span');
+    wrap.className = 'yanta-ai-inline-code-wrap';
+
+    const btn = createAiCopyButton(
+      () => code.textContent || '',
+      {
+        className: 'inline',
+        label: 'Copy inline code',
+      }
+    );
+
+    code.replaceWith(wrap);
+    wrap.append(code, btn);
+  }
+}
+
 function renderAssistantMessageNode(msg) {
   const wrap = document.createElement('div');
 
@@ -2020,6 +2168,7 @@ function renderAssistantMessageNode(msg) {
 
   if (parsed.text) {
     content.innerHTML = renderBlocksInline(parsed.text);
+    enhanceAiCodeCopy(content);
   } else if (!parsed.notes.length && !parsed.events.length && !parsed.chips.length) {
     content.textContent = '[No response]';
   }
@@ -4321,6 +4470,218 @@ function injectCss() {
 
 .yanta-ai-approval-actions {
   margin-top: 14px;
+}
+
+/* Compact expandable web/search results */
+.yanta-ai-tool-expandable-results {
+  margin: 0 9px 9px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-elev);
+  overflow: hidden;
+}
+
+.yanta-ai-tool-expandable-results summary {
+  min-height: 38px;
+  padding: 7px 9px;
+
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+}
+
+.yanta-ai-tool-expandable-results summary::-webkit-details-marker {
+  display: none;
+}
+
+.yanta-ai-tool-expandable-results summary:hover {
+  background: var(--bg-elev-2);
+}
+
+.yanta-ai-results-summary-label {
+  flex: 0 0 auto;
+
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.yanta-ai-result-chips {
+  flex: 1;
+  min-width: 0;
+
+  display: flex;
+  align-items: center;
+  gap: 6px;
+
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+
+.yanta-ai-result-chips::-webkit-scrollbar {
+  display: none;
+}
+
+.yanta-ai-result-chip {
+  max-width: 220px;
+  flex: 0 0 auto;
+
+  padding: 4px 8px;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
+  border-radius: 999px;
+
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+  color: var(--text-dim);
+
+  font-size: 11px;
+  line-height: 1.25;
+
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.yanta-ai-tool-expandable-results[open] summary {
+  border-bottom: 1px solid var(--border);
+}
+
+.yanta-ai-expanded-result-list {
+  padding-top: 9px;
+}
+
+/* AI code copy UX */
+.yanta-ai-codeblock {
+  position: relative;
+}
+
+.yanta-ai-copy-btn {
+  position: relative;
+
+  width: 26px;
+  height: 26px;
+  flex: 0 0 26px;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  border: 1px solid var(--border);
+  border-radius: 8px;
+
+  background: color-mix(in srgb, var(--bg-elev-2) 92%, transparent);
+  color: var(--text-faint);
+
+  cursor: pointer;
+
+  transition:
+    transform 140ms ease,
+    color 140ms ease,
+    border-color 140ms ease,
+    background-color 140ms ease;
+}
+
+.yanta-ai-copy-btn:hover {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg-elev-2));
+  transform: translateY(-1px);
+}
+
+.yanta-ai-copy-btn:active {
+  transform: scale(0.94);
+}
+
+.yanta-ai-copy-btn.block {
+  position: absolute;
+  top: 7px;
+  right: 7px;
+  z-index: 2;
+
+  opacity: 0;
+  transform: translateY(-2px) scale(0.98);
+}
+
+.yanta-ai-codeblock:hover .yanta-ai-copy-btn.block,
+.yanta-ai-codeblock:focus-within .yanta-ai-copy-btn.block,
+.yanta-ai-copy-btn.block.is-copied {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+}
+
+.yanta-ai-inline-code-wrap {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  vertical-align: baseline;
+}
+
+.yanta-ai-copy-btn.inline {
+  width: 20px;
+  height: 20px;
+  border-radius: 6px;
+
+  opacity: 0;
+  transform: scale(0.88);
+}
+
+.yanta-ai-inline-code-wrap:hover .yanta-ai-copy-btn.inline,
+.yanta-ai-inline-code-wrap:focus-within .yanta-ai-copy-btn.inline,
+.yanta-ai-copy-btn.inline.is-copied {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.yanta-ai-copy-icon {
+  position: absolute;
+  inset: 0;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  transition:
+    opacity 140ms ease,
+    transform 180ms cubic-bezier(.2,.9,.2,1);
+}
+
+.yanta-ai-copy-icon.check {
+  opacity: 0;
+  color: var(--green);
+  transform: scale(0.45) rotate(-18deg);
+}
+
+.yanta-ai-copy-btn.is-copied {
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 55%, var(--border));
+  background: color-mix(in srgb, var(--green) 11%, var(--bg-elev-2));
+}
+
+.yanta-ai-copy-btn.is-copied .yanta-ai-copy-icon.copy {
+  opacity: 0;
+  transform: scale(0.5) rotate(18deg);
+}
+
+.yanta-ai-copy-btn.is-copied .yanta-ai-copy-icon.check {
+  opacity: 1;
+  transform: scale(1) rotate(0deg);
+}
+
+@media (hover: none) {
+  .yanta-ai-copy-btn.block,
+  .yanta-ai-copy-btn.inline {
+    opacity: 1;
+    transform: none;
+  }
 }
 `;
 

@@ -31,6 +31,8 @@ export const DEFAULT_ASSISTANT_PROMPT = [
   '- For weather questions, use get_weather. If no location is available, ask the user for a city or to enable approximate location in the settings.',
   '- For questions like “what is new?”, “what did my feeds say?”, “new articles”, “latest updates”, use rss_search_items with unreadOnly=true before answering.',
   '- When summarizing Sources/RSS, group by topic/source and cite concrete item titles. Offer to save useful items as YANTA notes.',
+  '- When the user asks to add/follow/subscribe to an RSS feed, website, newsletter source, podcast feed, YouTube channel, @handle or channel ID, use add_rss_source.',
+  '- For YouTube channels, add_rss_source accepts channel URLs, @handles and channel IDs. Do not manually construct feed URLs unless needed.',
   '- For current external information or web questions, use web_search when available. Cite concrete result titles/URLs.',
   '- When the user asks you to draw, prefer creating a YANTA drawing with create_drawing_note. Simple icons/diagrams can be SVG.',
   '',
@@ -79,6 +81,7 @@ export const DEFAULT_AI_SETTINGS = {
 
     allowReadRss: true,
     allowManageRss: true,
+    allowAddRssSources: true,
     allowSaveRssToNotes: true,
     },
 };

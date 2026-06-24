@@ -784,7 +784,7 @@ async function addRssFeedCandidate(candidate, {
     description: candidate.description || '',
     folderId,
     tags: isYoutube ? [...new Set([...tags, 'youtube', 'video'])] : tags,
-    icon: isYoutube ? 'youtube' : 'rss',
+    icon: isYoutube ? 'play' : 'rss',
     color: isYoutube ? '#ef4444' : '#f59e0b',
     sourceKind: isYoutube ? 'youtube' : 'rss',
     channelId: candidate.channelId || '',
@@ -1312,7 +1312,7 @@ export async function saveRssItemAsNote(itemId, {
       ...(feed?.tags || []),
     ])],
     pinned: false,
-    icon: isYoutube ? 'youtube' : String(item.mediaType || '').startsWith('audio/') ? 'podcast' : feed?.icon || 'rss',
+    icon: isYoutube ? 'play' : String(item.mediaType || '').startsWith('audio/') ? 'podcast' : feed?.icon || 'rss',
     color: isYoutube ? '#ef4444' : String(item.mediaType || '').startsWith('audio/') ? '#22c55e' : feed?.color || '#f59e0b',
     created: now(),
     updated: now(),
@@ -1419,6 +1419,54 @@ export async function appendRssItemToCurrentNote(itemId) {
 }
 
 // AI action wrappers
+
+function compactRssFeedForAi(feed) {
+  if (!feed) return null;
+
+  return {
+    id: feed.id,
+    title: feed.title,
+    feedUrl: feed.feedUrl,
+    siteUrl: feed.siteUrl || '',
+    description: feed.description || '',
+    sourceKind: feed.sourceKind || '',
+    channelId: feed.channelId || '',
+    tags: feed.tags || [],
+    icon: feed.icon || '',
+    color: feed.color || '',
+    enabled: feed.enabled !== false,
+    lastFetchedAt: feed.lastFetchedAt ? new Date(feed.lastFetchedAt).toISOString() : null,
+    lastError: feed.lastError || '',
+  };
+}
+
+export async function rssAddSourceAction({
+  input = '',
+  url = '',
+  query = '',
+  channel = '',
+  folderId = null,
+  tags = [],
+} = {}) {
+  const sourceInput = String(input || url || channel || query || '').trim();
+
+  if (!sourceInput) {
+    throw new Error('Source input is required. Provide a website URL, feed URL, YouTube channel URL, @handle, channel ID or search query.');
+  }
+
+  const feed = await addRssFeedFromUniversalInput(sourceInput, {
+    folderId,
+    tags: Array.isArray(tags) ? tags.map(String) : [],
+  });
+
+  return {
+    ok: true,
+    source: compactRssFeedForAi(feed),
+    message: feed
+      ? `Added source: ${feed.title || feed.feedUrl}`
+      : 'Source added.',
+  };
+}
 
 export async function rssSearchItemsAction(args = {}) {
   const items = await listRssItems({

@@ -891,6 +891,7 @@ export function renderAiSettingsPanel(panel) {
         ${permissionCheckboxHtml('allowApproxLocationContext', 'Allow assistant to receive approximate location context', 'Optional', p.allowApproxLocationContext)}
         ${permissionCheckboxHtml('allowReadRss', 'Allow assistant to read Sources/RSS items', 'Recommended', p.allowReadRss)}
         ${permissionCheckboxHtml('allowManageRss', 'Allow assistant to refresh/manage Sources', 'Optional', p.allowManageRss)}
+        ${permissionCheckboxHtml('allowAddRssSources', 'Allow assistant to add RSS feeds and YouTube channels to Sources', 'Recommended', p.allowAddRssSources)}
         ${permissionCheckboxHtml('allowSaveRssToNotes', 'Allow assistant to save Sources items as notes', 'Recommended', p.allowSaveRssToNotes)}
 
       </section>
@@ -982,6 +983,7 @@ export function renderAiSettingsPanel(panel) {
       allowApproxLocationContext: checkboxValue(panel, 'allowApproxLocationContext'),
       allowReadRss: checkboxValue(panel, 'allowReadRss'),
       allowManageRss: checkboxValue(panel, 'allowManageRss'),
+      allowAddRssSources: checkboxValue(panel, 'allowAddRssSources'),
       allowSaveRssToNotes: checkboxValue(panel, 'allowSaveRssToNotes'),
     };
 

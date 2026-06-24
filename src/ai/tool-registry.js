@@ -31,6 +31,7 @@ import {
   rssReadItemAction,
   rssSaveItemAsNoteAction,
   rssMarkItemReadAction,
+  rssAddSourceAction,
 } from '../rss/rss-actions.js';
 
 import {
@@ -352,6 +353,45 @@ export const TOOL_REGISTRY = [
     execute: aiBrainWriteAction,
   },
   {
+    name: 'add_rss_source',
+    permission: 'allowAddRssSources',
+    risk: 'write',
+    description: [
+      'Add a new source to YANTA Sources.',
+      'Supports RSS/Atom/JSON feed URLs, website URLs with feed discovery, domains, newsletters, podcast feeds, YouTube channel URLs, YouTube @handles and YouTube channel IDs.',
+      '',
+      'Use when the user asks to add, follow, subscribe to, track or monitor a source/channel/feed.',
+      '',
+      'Examples:',
+      '- input: "https://example.com/feed.xml"',
+      '- input: "https://example.com"',
+      '- input: "https://www.youtube.com/@SomeChannel"',
+      '- input: "@SomeChannel"',
+      '- input: "UCxxxxxxxxxxxxxxxxxxxxxx"',
+    ].join('\n'),
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        input: {
+          type: 'string',
+          description: 'Website URL, feed URL, domain, YouTube channel URL, YouTube @handle, channel ID or source search query.',
+        },
+        folderId: {
+          type: ['string', 'null'],
+          description: 'Optional folder id for notes saved from this source.',
+        },
+        tags: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional tags for the source.',
+        },
+      },
+      required: ['input'],
+    },
+    execute: rssAddSourceAction,
+  },
+  {
     name: 'rss_search_items',
     permission: 'allowReadRss',
     risk: 'read',
@@ -496,7 +536,7 @@ export const TOOL_REGISTRY = [
     },
     execute: webReadAction,
   },
-  
+
 {
   name: 'get_weather',
   permission: 'allowWeather',
@@ -716,7 +756,14 @@ export function getTool(name) {
 function assertPermission(tool, permissions) {
   if (!tool.permission) return;
 
-  if (permissions?.[tool.permission] !== true) {
+  const allowed =
+    permissions?.[tool.permission] === true ||
+    (
+      tool.permission === 'allowAddRssSources' &&
+      permissions?.allowManageRss === true
+    );
+
+  if (!allowed) {
     const err = new Error(
       `Tool "${tool.name}" is blocked by YANTA settings. Missing permission: ${tool.permission}`
     );

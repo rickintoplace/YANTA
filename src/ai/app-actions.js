@@ -50,6 +50,34 @@ function cloudApiUrl(path) {
   return `${base}/${cleanPath}`;
 }
 
+const WEB_SEARCH_CACHE = new Map();
+const WEB_READ_CACHE = new Map();
+
+function cachedJsonKey(prefix, obj = {}) {
+  return `${prefix}:${JSON.stringify(obj, Object.keys(obj).sort())}`;
+}
+
+function getFreshCache(map, key, ttlMs) {
+  const hit = map.get(key);
+
+  if (!hit) return null;
+  if (Date.now() - hit.ts > ttlMs) {
+    map.delete(key);
+    return null;
+  }
+
+  return hit.value;
+}
+
+function setFreshCache(map, key, value) {
+  map.set(key, {
+    ts: Date.now(),
+    value,
+  });
+
+  return value;
+}
+
 function compactNote(note) {
   if (!note) return null;
 
@@ -1338,12 +1366,29 @@ export async function webSearchAction({
     throw new Error('Search query is required.');
   }
 
-  const url = new URL(cloudApiUrl('/api/search/brave'));
-  url.searchParams.set('q', q);
-  url.searchParams.set('limit', String(Math.max(1, Math.min(10, Number(limit || 6)))));
+  const args = {
+    query: q,
+    limit: Math.max(1, Math.min(10, Number(limit || 6))),
+    country: String(country || '').trim(),
+    freshness: String(freshness || '').trim(),
+  };
 
-  if (country) url.searchParams.set('country', String(country).slice(0, 8));
-  if (freshness) url.searchParams.set('freshness', String(freshness).slice(0, 20));
+  const cacheKey = cachedJsonKey('web-search', args);
+  const cached = getFreshCache(WEB_SEARCH_CACHE, cacheKey, 10 * 60 * 1000);
+
+  if (cached) {
+    return {
+      ...cached,
+      cached: true,
+    };
+  }
+
+  const url = new URL(cloudApiUrl('/api/search/brave'));
+  url.searchParams.set('q', args.query);
+  url.searchParams.set('limit', String(args.limit));
+
+  if (args.country) url.searchParams.set('country', args.country.slice(0, 8));
+  if (args.freshness) url.searchParams.set('freshness', args.freshness.slice(0, 20));
 
   const res = await fetch(url.href, {
     credentials: 'include',
@@ -1363,9 +1408,63 @@ export async function webSearchAction({
       json?.message ||
       json?.error?.message ||
       json?.error ||
-      `Web search failed: HTTP ${res.status}`
+      `Brave Search failed: HTTP ${res.status}`
     );
   }
 
-  return json;
+  return setFreshCache(WEB_SEARCH_CACHE, cacheKey, json);
+}
+
+export async function webReadAction({
+  url = '',
+  maxChars = 12000,
+} = {}) {
+  const cleanUrl = String(url || '').trim();
+
+  if (!cleanUrl) {
+    throw new Error('URL is required.');
+  }
+
+  const args = {
+    url: cleanUrl,
+    maxChars: Math.max(1000, Math.min(30000, Number(maxChars || 12000))),
+  };
+
+  const cacheKey = cachedJsonKey('web-read', args);
+  const cached = getFreshCache(WEB_READ_CACHE, cacheKey, 10 * 60 * 1000);
+
+  if (cached) {
+    return {
+      ...cached,
+      cached: true,
+    };
+  }
+
+  const api = new URL(cloudApiUrl('/api/search/read'));
+  api.searchParams.set('url', cleanUrl);
+  api.searchParams.set('maxChars', String(args.maxChars));
+
+  const res = await fetch(api.href, {
+    credentials: 'include',
+    headers: {
+      Accept: 'application/json',
+    },
+  });
+
+  let json = null;
+
+  try {
+    json = await res.json();
+  } catch {}
+
+  if (!res.ok) {
+    throw new Error(
+      json?.message ||
+      json?.error?.message ||
+      json?.error ||
+      `Web page read failed: HTTP ${res.status}`
+    );
+  }
+
+  return setFreshCache(WEB_READ_CACHE, cacheKey, json);
 }

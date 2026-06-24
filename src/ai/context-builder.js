@@ -252,6 +252,9 @@ export async function buildCurrentNoteContext({ includeMarkdown = true } = {}) {
 export async function buildSystemMessage() {
   const settings = getAiSettings();
 
+  const runtimeSettings = getEffectiveAiRuntimeSettings();
+  const maxToolRounds = Math.max(1, Number(runtimeSettings.maxToolRounds || settings.maxToolRounds || 3));
+
   let soul = '';
 
   try {
@@ -280,6 +283,17 @@ export async function buildSystemMessage() {
     '- Put something in Soul if it should change how you behave in almost every future chat.',
   ].join('\n');
 
+  const toolBudgetRules = [
+    '# Tool budget',
+    '',
+    `You have at most ${maxToolRounds} tool round${maxToolRounds === 1 ? '' : 's'} for this response.`,
+    '- Plan tool use before calling tools.',
+    '- Prefer broad, high-signal tool calls over many narrow searches.',
+    '- For web_search, usually use 1 broad query first, then at most 1 targeted follow-up or web_read if needed.',
+    '- Do not keep searching after enough evidence is available. Summarize and cite results.',
+    '- If you are close to the tool-round limit, answer with what you have and say what is uncertain.',
+  ].join('\n');
+
   return {
     role: 'system',
     content: [
@@ -290,6 +304,8 @@ export async function buildSystemMessage() {
         : '',
       '',
       brainRules,
+      '',
+      toolBudgetRules,
     ].filter(Boolean).join('\n\n'),
   };
 }

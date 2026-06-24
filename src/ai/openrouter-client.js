@@ -174,22 +174,36 @@ function mergeToolCallDelta(target, delta = {}) {
 }
 
 function normalizeReasoningDelta(delta = {}) {
-  const parts = [
+  /*
+    Providers/OpenRouter can expose reasoning under multiple fields.
+    Some models send the same delta duplicated across aliases.
+    Prefer the first explicit string field instead of concatenating aliases.
+  */
+  const direct = [
     delta.reasoning,
     delta.reasoning_content,
     delta.thinking,
     delta.thinking_content,
-  ].filter((x) => typeof x === 'string' && x);
+  ].find((x) => typeof x === 'string' && x);
+
+  if (direct) return direct;
 
   if (Array.isArray(delta.reasoning_details)) {
-    for (const detail of delta.reasoning_details) {
-      if (typeof detail?.text === 'string') parts.push(detail.text);
-      if (typeof detail?.content === 'string') parts.push(detail.content);
-      if (typeof detail?.summary === 'string') parts.push(detail.summary);
-    }
+    const first = delta.reasoning_details.find((detail) =>
+      typeof detail?.text === 'string' ||
+      typeof detail?.content === 'string' ||
+      typeof detail?.summary === 'string'
+    );
+
+    return (
+      first?.text ||
+      first?.content ||
+      first?.summary ||
+      ''
+    );
   }
 
-  return parts.join('');
+  return '';
 }
 
 async function readSseStream(res, {

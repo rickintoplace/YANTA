@@ -4492,6 +4492,9 @@ function injectCss() {
   cursor: pointer;
   user-select: none;
   list-style: none;
+
+  mask-image: linear-gradient(to right, black 90%, transparent);
+  -webkit-mask-image: linear-gradient(to right, black 90%, transparent);
 }
 
 .yanta-ai-tool-expandable-results summary::-webkit-details-marker {
@@ -4682,6 +4685,95 @@ function injectCss() {
     opacity: 1;
     transform: none;
   }
+}
+
+/* ============================================================
+   AI inline code copy — overlay, no text reflow
+   ============================================================ */
+
+/* Code should not be visually smaller than surrounding answer text. */
+.yanta-ai-rich code {
+  font-size: 1em;
+  line-height: inherit;
+}
+
+/*
+  Override previous inline-flex behavior:
+  The copy button is now an overlay pinned to the end of the code span.
+  It does not participate in text layout and therefore does not push text.
+*/
+.yanta-ai-inline-code-wrap {
+  position: relative;
+  display: inline;
+  vertical-align: baseline;
+}
+
+/* Make the wrapped inline code a stable positioning surface. */
+.yanta-ai-inline-code-wrap > code {
+  position: relative;
+  display: inline;
+}
+
+/* The inline copy button floats over the end of the code token. */
+.yanta-ai-copy-btn.inline {
+  position: absolute;
+  right: -7px;
+  top: 50%;
+  z-index: 3;
+
+  width: 20px;
+  height: 20px;
+  min-width: 20px;
+
+  padding: 0;
+  margin: 0;
+
+  border-radius: 999px;
+
+  opacity: 0;
+  transform: translateY(-50%) scale(0.82);
+
+  box-shadow:
+    0 4px 14px rgba(0,0,0,0.28),
+    0 0 0 1px rgba(255,255,255,0.03) inset;
+
+  backdrop-filter: blur(7px);
+  -webkit-backdrop-filter: blur(7px);
+}
+
+/*
+  No layout shift:
+  hover/focus changes only opacity/transform, not dimensions or display.
+*/
+.yanta-ai-inline-code-wrap:hover .yanta-ai-copy-btn.inline,
+.yanta-ai-inline-code-wrap:focus-within .yanta-ai-copy-btn.inline,
+.yanta-ai-copy-btn.inline.is-copied {
+  opacity: 1;
+  transform: translateY(-50%) scale(1);
+}
+
+/* Avoid the button being visually buried by following text. */
+.yanta-ai-inline-code-wrap:hover,
+.yanta-ai-inline-code-wrap:focus-within {
+  z-index: 4;
+}
+
+/* On touch devices the button is visible but still overlay-only. */
+@media (hover: none) {
+  .yanta-ai-copy-btn.inline {
+    opacity: 0.9;
+    transform: translateY(-50%) scale(1);
+  }
+}
+
+.yanta-ai-copy-btn.block {
+  opacity: 0;
+}
+
+.yanta-ai-codeblock:hover .yanta-ai-copy-btn.block,
+.yanta-ai-codeblock:focus-within .yanta-ai-copy-btn.block,
+.yanta-ai-copy-btn.block.is-copied {
+  opacity: 1;
 }
 `;
 

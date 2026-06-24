@@ -2300,6 +2300,10 @@ function bindEvents() {
     if (e.target.closest?.('.format-toolbar')) return;
     if (e.target.closest?.('.cm-tooltip')) return;
 
+    // Die eigene Titelzeile liegt jetzt außerhalb von CodeMirror.
+    // Klicks dort dürfen NICHT ans Dokumentende fokussieren.
+    if (e.target.closest?.('.yanta-pane-title-row')) return;
+
     e.preventDefault();
     focusEditorEnd();
   });

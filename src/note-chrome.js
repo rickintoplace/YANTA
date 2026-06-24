@@ -950,23 +950,21 @@ function renderPaneTitleRows() {
     syncMirrorInputFromCanonical(previewInput, canonical);
   }
 
-  const v = getView();
-  const editScroller = v?.scrollDOM;
+  /*
+    Edit-Titelzeile:
+    Nicht mehr manuell ins DOM von #paneEdit oder CodeMirror einfügen.
+    Sie wird jetzt sauber als CodeMirror Block Widget gerendert.
+    Alte externe Reste entfernen wir defensiv.
+  */
+  document
+    .querySelectorAll('#paneEdit > [data-note-pane-title="edit"]')
+    .forEach((row) => row.remove());
 
-  if (editScroller) {
-    const editRow = ensurePaneTitleRow({
-      parent: editScroller,
-      surface: 'edit',
-    });
+  syncTitleMirrorValue();
 
-    removeDuplicatePaneTitleRows({
-      surface: 'edit',
-      keep: editRow,
-    });
-
-    const editInput = editRow?.querySelector('.yanta-note-title-mirror');
-    syncMirrorInputFromCanonical(editInput, canonical);
-  }
+  requestAnimationFrame(() => {
+    getView()?.requestMeasure?.();
+  });
 }
 
 function buildFooter(deps) {

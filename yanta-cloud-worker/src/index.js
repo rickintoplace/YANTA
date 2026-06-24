@@ -3073,42 +3073,245 @@ async function handleRssDiscover(env, req, url, headers) {
   return json({ feeds }, 200, headers);
 }
 __name(handleRssDiscover, "handleRssDiscover");
+function trimLargeRssXmlFeed(body = '', {
+  maxItems = 120,
+} = {}) {
+  const text = String(body || '');
+
+  const itemRe = /<item\b[\s\S]*?<\/item>/gi;
+  const items = text.match(itemRe) || [];
+
+  if (items.length <= maxItems) {
+    return {
+      body: text,
+      truncated: false,
+      originalItemCount: items.length,
+      returnedItemCount: items.length,
+    };
+  }
+
+  const kept = items.slice(0, maxItems);
+  const withoutItems = text.replace(itemRe, '');
+
+  const closeChannel = withoutItems.match(/<\/channel\s*>/i);
+
+  if (!closeChannel) {
+    return {
+      body: text,
+      truncated: false,
+      originalItemCount: items.length,
+      returnedItemCount: items.length,
+    };
+  }
+
+  const idx = closeChannel.index;
+
+  return {
+    body: [
+      withoutItems.slice(0, idx),
+      '\n',
+      kept.join('\n'),
+      '\n',
+      withoutItems.slice(idx),
+    ].join(''),
+    truncated: true,
+    originalItemCount: items.length,
+    returnedItemCount: kept.length,
+  };
+}
+__name(trimLargeRssXmlFeed, "trimLargeRssXmlFeed");
+
+function trimLargeAtomFeed(body = '', {
+  maxItems = 120,
+} = {}) {
+  const text = String(body || '');
+
+  const entryRe = /<entry\b[\s\S]*?<\/entry>/gi;
+  const entries = text.match(entryRe) || [];
+
+  if (entries.length <= maxItems) {
+    return {
+      body: text,
+      truncated: false,
+      originalItemCount: entries.length,
+      returnedItemCount: entries.length,
+    };
+  }
+
+  const kept = entries.slice(0, maxItems);
+  const withoutEntries = text.replace(entryRe, '');
+
+  const closeFeed = withoutEntries.match(/<\/feed\s*>/i);
+
+  if (!closeFeed) {
+    return {
+      body: text,
+      truncated: false,
+      originalItemCount: entries.length,
+      returnedItemCount: entries.length,
+    };
+  }
+
+  const idx = closeFeed.index;
+
+  return {
+    body: [
+      withoutEntries.slice(0, idx),
+      '\n',
+      kept.join('\n'),
+      '\n',
+      withoutEntries.slice(idx),
+    ].join(''),
+    truncated: true,
+    originalItemCount: entries.length,
+    returnedItemCount: kept.length,
+  };
+}
+__name(trimLargeAtomFeed, "trimLargeAtomFeed");
+
+function trimLargeJsonFeed(body = '', {
+  maxItems = 120,
+} = {}) {
+  try {
+    const jsonFeed = JSON.parse(String(body || ''));
+
+    if (!Array.isArray(jsonFeed.items) || jsonFeed.items.length <= maxItems) {
+      return {
+        body,
+        truncated: false,
+        originalItemCount: Array.isArray(jsonFeed.items) ? jsonFeed.items.length : 0,
+        returnedItemCount: Array.isArray(jsonFeed.items) ? jsonFeed.items.length : 0,
+      };
+    }
+
+    const originalItemCount = jsonFeed.items.length;
+
+    jsonFeed.items = jsonFeed.items.slice(0, maxItems);
+
+    return {
+      body: JSON.stringify(jsonFeed),
+      truncated: true,
+      originalItemCount,
+      returnedItemCount: jsonFeed.items.length,
+    };
+  } catch {
+    return {
+      body,
+      truncated: false,
+      originalItemCount: 0,
+      returnedItemCount: 0,
+    };
+  }
+}
+__name(trimLargeJsonFeed, "trimLargeJsonFeed");
+
+function trimLargeFeedBody(body = '', {
+  maxItems = 120,
+} = {}) {
+  const text = String(body || '').trim();
+  const head = text.slice(0, 500).toLowerCase();
+
+  if (head.startsWith('{')) {
+    return trimLargeJsonFeed(text, {
+      maxItems,
+    });
+  }
+
+  if (head.includes('<feed') || /<feed\b/i.test(text.slice(0, 2000))) {
+    return trimLargeAtomFeed(text, {
+      maxItems,
+    });
+  }
+
+  if (head.includes('<rss') || head.includes('<rdf') || /<channel\b/i.test(text.slice(0, 4000))) {
+    return trimLargeRssXmlFeed(text, {
+      maxItems,
+    });
+  }
+
+  return {
+    body: text,
+    truncated: false,
+    originalItemCount: 0,
+    returnedItemCount: 0,
+  };
+}
+__name(trimLargeFeedBody, "trimLargeFeedBody");
 async function handleRssFetch(env, req, url, headers) {
   const user = await requireUser(env, req);
   const limits = effectiveLimits(user, await getUserCreatedAt(env, user.userId));
+
   const rl = await rateLimit(
     env,
     `rss:fetch:${user.userId}`,
     limits.rssFetchesDay || 200,
     24 * 60 * 60 * 1e3
   );
+
   if (!rl.ok) {
     return json({ error: "rss_rate_limited", message: "RSS fetch limit reached." }, 429, headers);
   }
+
   const targetUrl = safeExternalRssUrl(url.searchParams.get("url") || "");
+
+  /*
+    Some podcast feeds are very large because they include hundreds of
+    episodes with full show notes. Fetch larger bodies server-side, then
+    trim to the latest N items before returning to the browser.
+  */
+  const maxFeedBytes = Math.max(
+    2 * 1024 * 1024,
+    Math.min(
+      24 * 1024 * 1024,
+      Number(env.RSS_FEED_MAX_BYTES || 12 * 1024 * 1024)
+    )
+  );
+
+  const maxItems = Math.max(
+    20,
+    Math.min(
+      500,
+      Number(url.searchParams.get("maxItems") || env.RSS_FEED_MAX_ITEMS || 120)
+    )
+  );
+
   const fetched = await fetchExternal(targetUrl, {
     accept: "application/rss+xml, application/atom+xml, application/feed+json, application/json, application/xml, text/xml, */*",
     etag: url.searchParams.get("etag") || "",
     lastModified: url.searchParams.get("lastModified") || "",
-    maxBytes: 2 * 1024 * 1024,
-    timeoutMs: 12e3
+    maxBytes: maxFeedBytes,
+    timeoutMs: 18e3
   });
+
   if (fetched.status === 304) {
     return json({ notModified: true }, 200, headers);
   }
+
   if (fetched.status < 200 || fetched.status >= 400) {
     return json({ error: "fetch_failed", status: fetched.status }, 502, headers);
   }
-  const body = decodeUtf8(fetched.bytes);
-  if (!looksLikeFeedText(body)) {
+
+  const rawBody = decodeUtf8(fetched.bytes);
+
+  if (!looksLikeFeedText(rawBody)) {
     return json({ error: "not_a_feed", message: "URL did not return a supported RSS/Atom/JSON feed." }, 400, headers);
   }
+
+  const trimmed = trimLargeFeedBody(rawBody, {
+    maxItems,
+  });
+
   return json({
-    body,
+    body: trimmed.body,
     contentType: fetched.headers.get("content-type") || "",
     etag: fetched.headers.get("etag") || "",
     lastModified: fetched.headers.get("last-modified") || "",
-    finalUrl: fetched.finalUrl || targetUrl
+    finalUrl: fetched.finalUrl || targetUrl,
+
+    truncated: trimmed.truncated,
+    originalItemCount: trimmed.originalItemCount,
+    returnedItemCount: trimmed.returnedItemCount,
+    maxItems,
   }, 200, {
     ...headers,
     "cache-control": "no-store"

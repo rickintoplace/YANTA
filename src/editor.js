@@ -15,7 +15,7 @@ import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { tags as t } from '@lezer/highlight';
 import { classifyLine, renderDrawEmbedHtml } from './markdown.js';
 
-import { state, safeCssColor, lucide } from './core.js';
+import { $, state, safeCssColor, lucide } from './core.js';
 import { getNoteDoc, getMarkdownText } from './yjs.js';
 import { wikilinkIndex } from './features-state.js';
 
@@ -1560,6 +1560,129 @@ export function setEditorLineSpacers(extraByLine) {
 }
 
 // ============================================================
+// Editor title row as CodeMirror block widget
+// ------------------------------------------------------------
+// Die Titelzeile soll im Editor mitscrollen, darf aber nicht als
+// fremdes DOM-Kind direkt in .cm-scroller eingefügt werden.
+// Deshalb wird sie als offizielles CodeMirror Block Widget bei pos 0
+// gerendert. So bleibt CodeMirrors Virtualisierung/Layout sauber.
+// ============================================================
+
+class EditorTitleWidget extends WidgetType {
+  constructor(noteId) {
+    super();
+    this.noteId = noteId || '';
+  }
+
+  eq(other) {
+    // Absichtlich nur noteId vergleichen:
+    // Der Input-Wert wird über syncTitleMirrorValue() / DOM synchronisiert.
+    // So wird das Widget beim Tippen im Titel nicht ständig ersetzt.
+    return other.noteId === this.noteId;
+  }
+
+  toDOM() {
+    const row = document.createElement('div');
+    row.className = 'yanta-pane-title-row edit yanta-cm-title-widget';
+    row.dataset.notePaneTitle = 'edit';
+
+    const canonical = $('noteTitle');
+    const note = this.noteId ? state.notes.get(this.noteId) : null;
+
+    const input = document.createElement('input');
+    input.className = 'yanta-note-title-mirror';
+    input.value = canonical?.value || note?.title || '';
+    input.placeholder = 'Untitled note';
+    input.autocomplete = 'off';
+    input.spellcheck = false;
+
+    const commitInput = () => {
+      const c = $('noteTitle');
+      if (!c) return;
+
+      c.value = input.value || '';
+
+      c.dispatchEvent(new Event('input', {
+        bubbles: true,
+      }));
+    };
+
+    const commitBlur = () => {
+      const c = $('noteTitle');
+      if (!c) return;
+
+      c.value = input.value || '';
+
+      c.dispatchEvent(new Event('blur', {
+        bubbles: true,
+      }));
+    };
+
+    input.addEventListener('input', commitInput);
+    input.addEventListener('blur', commitBlur);
+
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        input.blur();
+      }
+    });
+
+    /*
+      Wichtig:
+      Diese Events nicht an CodeMirror durchreichen, sonst setzt CM ggf.
+      Cursor/Selection im Dokument statt den Titel-Input normal zu bedienen.
+    */
+    for (const type of ['mousedown', 'pointerdown', 'click', 'dblclick']) {
+      row.addEventListener(type, (e) => {
+        e.stopPropagation();
+      });
+    }
+
+    row.append(input);
+
+    return row;
+  }
+
+  ignoreEvent(event) {
+    /*
+      false = Browser/Input darf Events normal behandeln.
+      Wir stoppen oben nur die Pointer-Bubbling-Kette Richtung CM.
+    */
+    return false;
+  }
+}
+
+const editorTitleWidgetField = StateField.define({
+  create() {
+    return buildEditorTitleWidgetDeco();
+  },
+
+  update(deco, tr) {
+    deco = deco.map(tr.changes);
+    return deco;
+  },
+
+  provide: (field) => EditorView.decorations.from(field),
+});
+
+function buildEditorTitleWidgetDeco() {
+  if (!currentNoteId) {
+    return Decoration.none;
+  }
+
+  const b = new RangeSetBuilder();
+
+  b.add(0, 0, Decoration.widget({
+    widget: new EditorTitleWidget(currentNoteId),
+    block: true,
+    side: -1,
+  }));
+
+  return b.finish();
+}
+
+// ============================================================
 // Public API — mount / swap / destroy editor.
 // ============================================================
 
@@ -1666,6 +1789,9 @@ export function mountEditor(host, { noteId, awarenessUser }) {
     history(),
     drawSelection(),
     EditorView.lineWrapping,
+
+    editorTitleWidgetField,
+
     markdown({ base: markdownLanguage }),
     syntaxHighlighting(yantaHighlight),
     syntaxHighlighting(defaultHighlightStyle, { fallback: true }),

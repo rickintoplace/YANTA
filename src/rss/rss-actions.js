@@ -796,12 +796,38 @@ async function addRssFeedCandidate(candidate, {
   );
 
   if (feed) {
-    await refreshRssFeed(feed.id, {
-      force: true,
-    });
+    try {
+      await refreshRssFeed(feed.id, {
+        force: true,
+      });
+    } catch (err) {
+      /*
+        Important UX:
+        Adding a source should be durable even if the first fetch fails
+        because the feed is temporarily unavailable, huge, rate-limited,
+        or malformed. The source stays in the subscription list with
+        lastError so the user/AI can retry later.
+      */
+      feed.lastError = err?.message || String(err);
+      feed.updated = now();
+
+      const feedsAfterError = await getRssFeeds();
+      const idx = feedsAfterError.findIndex((f) => f.id === feed.id);
+
+      if (idx >= 0) {
+        feedsAfterError[idx] = {
+          ...feedsAfterError[idx],
+          lastError: feed.lastError,
+          updated: feed.updated,
+        };
+
+        await saveRssFeeds(feedsAfterError);
+      }
+    }
   }
 
-  return feed || null;
+  const latestFeeds = await getRssFeeds();
+  return latestFeeds.find((f) => f.id === feed?.id) || feed || null;
 }
 
 export async function findRssSourceCandidates(input, {

@@ -19,8 +19,7 @@ const LEGAL = {
   providerName: 'Eirik Heilmann',
   street: 'Neustädter Ring 4',
   city: '37154 Northeim',
-  country: '${escapeHtml(LEGAL.country)}.',
-  region: 'Lower Saxony, ${escapeHtml(LEGAL.country)}.',
+  country: 'Germany',
   portfolioUrl: 'https://rickinto.place',
 };
 
@@ -660,7 +659,7 @@ function pricingContent() {
 }
 
 function legalContent(kind) {
-  const updated = '2026-01-01';
+  const updated = '2026-06-24';
 
   if (kind === 'imprint') {
     document.title = 'Imprint · YANTA';
@@ -706,11 +705,11 @@ function legalContent(kind) {
 
         <h2>1. Provider</h2>
         <p>
-          YANTA is provided by <strong>${escapeHtml(LEGAL.providerName)},,</strong>
+          YANTA is provided by <strong>${escapeHtml(LEGAL.providerName)},</strong>
           <br>
-          <strong>${escapeHtml(LEGAL.street)},, ${escapeHtml(LEGAL.city)},,
+          <strong>${escapeHtml(LEGAL.street)}, ${escapeHtml(LEGAL.city)},
           <br>
-          LOWER SAXONY, ${escapeHtml(LEGAL.country)}.</strong>.
+          ${escapeHtml(LEGAL.country)}.</strong>.
           <br>
           Contact: <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>.
         </p>
@@ -815,11 +814,11 @@ function legalContent(kind) {
 
         <h2>1. Controller</h2>
         <p>
-          Controller: <strong>${escapeHtml(LEGAL.providerName)},,</strong>
+          Controller: <strong>${escapeHtml(LEGAL.providerName)},</strong>
           <br>
-          <strong>${escapeHtml(LEGAL.street)},, ${escapeHtml(LEGAL.city)},,
+          <strong>${escapeHtml(LEGAL.street)}, ${escapeHtml(LEGAL.city)},
           <br>
-          LOWER SAXONY, ${escapeHtml(LEGAL.country)}.</strong>.
+          ${escapeHtml(LEGAL.country)}.</strong>.
           <br>
           Contact: <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>.
         </p>

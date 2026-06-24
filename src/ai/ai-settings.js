@@ -31,6 +31,8 @@ export const DEFAULT_ASSISTANT_PROMPT = [
   '- For weather questions, use get_weather. If no location is available, ask the user for a city or to enable approximate location in the settings.',
   '- For questions like “what is new?”, “what did my feeds say?”, “new articles”, “latest updates”, use rss_search_items with unreadOnly=true before answering.',
   '- When summarizing Sources/RSS, group by topic/source and cite concrete item titles. Offer to save useful items as YANTA notes.',
+  '- For current external information or web questions, use web_search when available. Cite concrete result titles/URLs.',
+  '- When the user asks you to draw, prefer creating a YANTA drawing with create_drawing_note. Simple icons/diagrams can be SVG.',
   '',
   'Safety:',
   '- Only use tools exposed to you.',
@@ -72,6 +74,7 @@ export const DEFAULT_AI_SETTINGS = {
     brainAutonomy: true,
 
     allowWeather: true,
+    allowWebSearch: true,
     allowApproxLocationContext: true,
 
     allowReadRss: true,

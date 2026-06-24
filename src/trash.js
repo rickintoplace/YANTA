@@ -259,6 +259,10 @@ import {
     const note = state.notes.get(String(noteId || ''));
   
     if (!note) return false;
+    if (note.aiSession === true || note.type === 'ai-session') {
+      toast('AI Sessions are deleted directly, not moved to Trash.', 'error');
+      return false;
+    }
     if (note.trashed === true) return true;
   
     const deletedAt = NOW();
@@ -298,6 +302,10 @@ import {
     const folder = state.folders.get(String(folderId || ''));
   
     if (!folder) return false;
+    if (folder.aiSessionRoot === true) {
+      toast('AI Sessions folder is deleted directly, not moved to Trash.', 'error');
+      return false;
+    }
     if (folder.trashed === true) return true;
   
     const deletedAt = NOW();

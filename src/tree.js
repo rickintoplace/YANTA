@@ -64,6 +64,7 @@ import {
 } from './ai/context-dnd.js';
 
 import {
+  AI_SESSION_IDS,
   isAiSessionNote,
 } from './ai/ai-sessions.js';
 
@@ -96,6 +97,13 @@ function applyItemColor(row, color) {
 
 function isArchivedItem(item) {
   return !!item && item.archived === true;
+}
+
+function isAiSessionsRootFolder(folder) {
+  return !!folder && (
+    folder.id === AI_SESSION_IDS.rootFolder ||
+    folder.aiSessionRoot === true
+  );
 }
 
 function isMainTreeItem(item) {
@@ -1197,6 +1205,10 @@ async function moveFoldersToParent(folderIds = [], targetParentId = null, source
 
   for (const folderId of topLevelFolderIds(folderIds)) {
     const folder = state.folders.get(folderId);
+      if (isAiSessionsRootFolder(folder)) {
+      skipped++;
+      continue;
+    }
     if (!folder) continue;
 
     if (!canMoveFolderToParent(folderId, target)) {
@@ -1242,6 +1254,11 @@ async function handleTreeDropToFolder(e, {
 } = {}) {
   e.preventDefault();
   e.stopPropagation();
+
+  if (targetFolderId === AI_SESSION_IDS.rootFolder) {
+    toast('AI Sessions cannot contain manually moved items.', 'error');
+    return;
+  }
 
   const noteId = e.dataTransfer.getData('text/yanta-note');
   const folderId = e.dataTransfer.getData('text/yanta-folder');
@@ -1305,6 +1322,7 @@ function folderRow(f, visibleNotes, depth, {
   const isAnchor = selection.anchorKey === key;
 
   const isCurrentPath = currentFolderTrailSet().has(f.id);
+  const lockedAiSessionsFolder = isAiSessionsRootFolder(f);
 
   const childFolders = [...state.folders.values()]
     .filter((x) => x.parentId === f.id)
@@ -1334,6 +1352,8 @@ function folderRow(f, visibleNotes, depth, {
     }),
     oncontextmenu: (e) => openTreeContextMenu(e, key, () => folderMenu(e, f)),
     ondragover: (e) => {
+      if (lockedAiSessionsFolder) return;
+
       const types = [...(e.dataTransfer.types || [])];
       if (!types.includes('text/yanta-note') && !types.includes('text/yanta-folder')) return;
 
@@ -1345,6 +1365,13 @@ function folderRow(f, visibleNotes, depth, {
     ondrop: async (e) => {
       row.classList.remove('drop-target');
 
+      if (lockedAiSessionsFolder) {
+        e.preventDefault();
+        e.stopPropagation();
+        toast('AI Sessions cannot contain manually moved items.', 'error');
+        return;
+      }
+
       await handleTreeDropToFolder(e, {
         targetFolderId: f.id,
         source: 'tree-drop-folder',
@@ -1355,8 +1382,13 @@ function folderRow(f, visibleNotes, depth, {
   applyItemColor(row, f.color);
   applyCollapsedTreeDepth(row, depth);
 
-  row.draggable = true;
+  row.draggable = !lockedAiSessionsFolder;
   row.addEventListener('dragstart', (e) => {
+    if (lockedAiSessionsFolder) {
+      e.preventDefault();
+      e.stopPropagation();
+      return;
+    }
     if (!isSelected(key)) setOnlySelection(key);
 
     const selected = getSelectedItems();
@@ -1393,14 +1425,16 @@ function folderRow(f, visibleNotes, depth, {
     }, String(childCount)));
   }
 
-  row.append(el('span', {
-    class: 'menu-trigger',
-    title: 'Add note',
-    onclick: (e) => {
-      e.stopPropagation();
-      newNote(f.id);
-    },
-  }, '+'));
+  if (!lockedAiSessionsFolder) {
+    row.append(el('span', {
+      class: 'menu-trigger',
+      title: 'Add note',
+      onclick: (e) => {
+        e.stopPropagation();
+        newNote(f.id);
+      },
+    }, '+'));
+  }
 
   wrap.append(row);
 
@@ -2311,6 +2345,50 @@ export function closeMenu() {
 }
 
 function noteMenu(e, n) {
+
+  if (isAiSessionNote(n)) {
+    showMenu(e.clientX, e.clientY, [
+      {
+        label: 'Open AI session',
+        icon: 'messages-square',
+        action: () => {
+          window.dispatchEvent(new CustomEvent('yanta-open-ai-session', {
+            detail: {
+              sessionId: n.id,
+            },
+          }));
+        },
+      },
+      {
+        label: 'Rename…',
+        icon: 'pencil',
+        action: () => renameTreeNote(n.id),
+      },
+      'hr',
+      {
+        label: 'Delete AI session permanently',
+        icon: 'shredder',
+        danger: true,
+        action: async () => {
+          const ok = await yantaConfirm({
+            title: 'Delete AI session?',
+            message: `Permanently delete "${n.title || 'AI Session'}"?\n\nThis will not go to Trash.`,
+            confirmLabel: 'Delete permanently',
+            danger: true,
+          });
+
+          if (!ok) return;
+
+          await permanentlyDeleteNote(n.id, {
+            source: 'ai-session-direct-delete',
+          });
+        },
+      },
+    ]);
+
+    return;
+  }
+  
   showMenu(e.clientX, e.clientY, [
     {
       label: n.pinned ? 'Unpin' : 'Pin',
@@ -2376,6 +2454,33 @@ function noteMenu(e, n) {
 }
 
 function folderMenu(e, f) {
+
+  if (isAiSessionsRootFolder(f)) {
+    showMenu(e.clientX, e.clientY, [
+      {
+        label: 'Delete AI Sessions permanently',
+        icon: 'shredder',
+        danger: true,
+        action: async () => {
+          const ok = await yantaConfirm({
+            title: 'Delete AI Sessions?',
+            message: 'Permanently delete the AI Sessions folder and all saved AI chats?\n\nThis will not go to Trash. A fresh AI Sessions folder will be recreated automatically when needed.',
+            confirmLabel: 'Delete permanently',
+            danger: true,
+          });
+
+          if (!ok) return;
+
+          await permanentlyDeleteFolder(f.id, {
+            source: 'ai-sessions-folder-direct-delete',
+          });
+        },
+      },
+    ]);
+
+    return;
+  }
+
   showMenu(e.clientX, e.clientY, [
     {
       label: 'Open',

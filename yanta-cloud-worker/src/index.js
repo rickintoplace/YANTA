@@ -223,6 +223,17 @@ function openRouterZdrProviderPreferences() {
     zdr: true
   };
 }
+function estimatePreflightAiCostMicros(messages = [], maxTokens = 768) {
+  const promptChars = jsonSize(messages);
+  const promptTokensApprox = Math.ceil(promptChars / 4);
+  const outputTokensApprox = Math.max(1, Number(maxTokens || 768));
+
+  return Math.max(
+    1000,
+    Math.ceil((promptTokensApprox + outputTokensApprox) * 5)
+  );
+}
+__name(estimatePreflightAiCostMicros, "estimatePreflightAiCostMicros");
 var AI_MODEL_ALLOWLIST = /* @__PURE__ */ new Set([
   "google/gemini-2.5-flash-lite",
   "deepseek/deepseek-v4-flash",
@@ -1747,6 +1758,95 @@ async function handleAiCompletions(env, req, headers) {
     // OpenRouter Zero Data Retention routing.
     provider: openRouterZdrProviderPreferences()
   };
+
+  if (body.stream === true) {
+    const maxTokens = forwardBody.max_tokens || policy.maxTokens;
+    const preflightCostMicros = estimatePreflightAiCostMicros(messages, maxTokens);
+
+    if (
+      Number(usage.ai_spend_micros_day || 0) + preflightCostMicros > policy.aiSpendMicrosDay ||
+      Number(usage.ai_spend_micros_month || 0) + preflightCostMicros > policy.aiSpendMicrosMonth
+    ) {
+      return json({
+        error: {
+          message: "This request would exceed your Included AI credits."
+        }
+      }, 403, headers);
+    }
+
+    const streamBody = {
+      ...forwardBody,
+      stream: true,
+    };
+
+    const streamController = new AbortController();
+    const streamTimeout = setTimeout(() => streamController.abort(), 60_000);
+
+    let streamRes;
+
+    try {
+      streamRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        signal: streamController.signal,
+        headers: {
+          authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
+          "content-type": "application/json",
+          "HTTP-Referer": env.OPENROUTER_SITE_URL || env.APP_ORIGIN || "",
+          "X-Title": env.OPENROUTER_APP_TITLE || "YANTA"
+        },
+        body: JSON.stringify(streamBody)
+      });
+    } finally {
+      clearTimeout(streamTimeout);
+    }
+
+    if (!streamRes.ok) {
+      const errJson = await streamRes.json().catch(async () => ({
+        error: {
+          message: await streamRes.text().catch(() => `HTTP ${streamRes.status}`)
+        }
+      }));
+
+      return json(errJson, streamRes.status, headers);
+    }
+
+    await env.DB.prepare(
+      `UPDATE usage_current
+       SET ai_requests_day = ai_requests_day + 1,
+           ai_spend_micros_day = ai_spend_micros_day + ?,
+           ai_spend_micros_month = ai_spend_micros_month + ?
+       WHERE user_id = ?`
+    ).bind(
+      preflightCostMicros,
+      preflightCostMicros,
+      user.userId
+    ).run();
+
+    await env.DB.prepare(
+      `INSERT INTO ai_usage_events
+       (id,user_id,model,prompt_tokens,completion_tokens,total_tokens,cost_micros,created_at)
+       VALUES (?,?,?,?,?,?,?,?)`
+    ).bind(
+      id("aiu"),
+      user.userId,
+      selectedModel,
+      0,
+      0,
+      0,
+      preflightCostMicros,
+      now()
+    ).run();
+
+    return new Response(streamRes.body, {
+      status: 200,
+      headers: {
+        ...headers,
+        "content-type": "text/event-stream; charset=utf-8",
+        "cache-control": "no-store, no-transform",
+        "x-accel-buffering": "no",
+      }
+    });
+  }
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 60_000);
@@ -3534,6 +3634,94 @@ async function handleGetPublicShareAsset(env, req, url, headers) {
   });
 }
 
+async function handleBraveSearch(env, req, url, headers) {
+  const user = await requireUser(env, req);
+
+  if (!env.BRAVE_SEARCH_API_KEY) {
+    return json({
+      error: 'brave_search_unavailable',
+      message: 'Brave Search API key is not configured.',
+    }, 503, headers);
+  }
+
+  const limits = effectiveLimits(user, await getUserCreatedAt(env, user.userId));
+
+  const rl = await rateLimit(
+    env,
+    `web:brave:${user.userId}`,
+    Math.min(200, limits.rssFetchesDay || 200),
+    24 * 60 * 60 * 1000
+  );
+
+  if (!rl.ok) {
+    return json({
+      error: 'web_search_rate_limited',
+      message: 'Web search limit reached.',
+    }, 429, headers);
+  }
+
+  const q = String(url.searchParams.get('q') || '').trim().slice(0, 300);
+  const limit = Math.max(1, Math.min(10, Number(url.searchParams.get('limit') || 6)));
+  const country = String(url.searchParams.get('country') || '').trim().slice(0, 8);
+  const freshness = String(url.searchParams.get('freshness') || '').trim().slice(0, 20);
+
+  if (!q) {
+    return json({
+      error: 'missing_query',
+      message: 'q is required.',
+    }, 400, headers);
+  }
+
+  const braveUrl = new URL('https://api.search.brave.com/res/v1/web/search');
+  braveUrl.searchParams.set('q', q);
+  braveUrl.searchParams.set('count', String(limit));
+  braveUrl.searchParams.set('text_decorations', 'false');
+  braveUrl.searchParams.set('spellcheck', 'true');
+
+  if (country) braveUrl.searchParams.set('country', country);
+  if (freshness) braveUrl.searchParams.set('freshness', freshness);
+
+  const res = await fetch(braveUrl.href, {
+    headers: {
+      accept: 'application/json',
+      'x-subscription-token': env.BRAVE_SEARCH_API_KEY,
+    },
+  });
+
+  const data = await res.json().catch(() => null);
+
+  if (!res.ok) {
+    return json({
+      error: 'brave_search_failed',
+      message: data?.message || `Brave Search failed: HTTP ${res.status}`,
+      status: res.status,
+    }, res.status, headers);
+  }
+
+  const results = (data?.web?.results || [])
+    .slice(0, limit)
+    .map((item) => ({
+      title: item.title || '',
+      url: item.url || '',
+      description: item.description || '',
+      age: item.age || '',
+      language: item.language || '',
+      familyFriendly: item.family_friendly ?? null,
+    }))
+    .filter((item) => item.title && item.url);
+
+  return json({
+    provider: 'Brave Search',
+    query: q,
+    count: results.length,
+    results,
+  }, 200, {
+    ...headers,
+    'cache-control': 'no-store',
+  });
+}
+__name(handleBraveSearch, "handleBraveSearch");
+
 async function route(req, env) {
   const headers = corsHeaders(env, req);
   if (!originAllowed(env, req)) {
@@ -3600,6 +3788,9 @@ async function route(req, env) {
     }
     if (url.pathname === "/api/ai/chat/completions" && req.method === "POST") {
       return handleAiCompletions(env, req, headers);
+    }
+    if (url.pathname === "/api/search/brave" && req.method === "GET") {
+      return handleBraveSearch(env, req, url, headers);
     }
     if (url.pathname === "/api/rss/discover" && req.method === "GET") {
       return handleRssDiscover(env, req, url, headers);

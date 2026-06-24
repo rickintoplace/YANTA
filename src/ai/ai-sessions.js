@@ -30,6 +30,21 @@ export const AI_SESSION_IDS = Object.freeze({
 
 const NOW = () => Date.now();
 
+function withoutTrashFields(item = {}) {
+  const {
+    trashed,
+    deletedAt,
+    deletedBy,
+    trashOriginalFolderId,
+    trashOriginalFolderPath,
+    trashOriginalParentId,
+    trashOriginalParentPath,
+    ...rest
+  } = item || {};
+
+  return rest;
+}
+
 function systemFolderPatch(extra = {}) {
   return {
     system: true,
@@ -56,7 +71,8 @@ function systemSessionNotePatch(extra = {}) {
 }
 
 export async function ensureAiSessionsFolder() {
-  const existing = state.folders.get(AI_SESSION_IDS.rootFolder);
+  const existingRaw = state.folders.get(AI_SESSION_IDS.rootFolder);
+  const existing = existingRaw ? withoutTrashFields(existingRaw) : null;
 
   const folder = {
     ...(existing || {}),
@@ -67,6 +83,13 @@ export async function ensureAiSessionsFolder() {
     updated: NOW(),
     ...systemFolderPatch(existing || {}),
   };
+
+  // Extra hardening: this system folder must never stay in Trash.
+  delete folder.trashed;
+  delete folder.deletedAt;
+  delete folder.deletedBy;
+  delete folder.trashOriginalParentId;
+  delete folder.trashOriginalParentPath;
 
   state.folders.set(folder.id, folder);
   await store.folders.put(folder);
@@ -143,6 +166,7 @@ function compactMessage(msg) {
   return {
     role,
     content: String(msg.content || ''),
+    reasoning: msg.reasoning ? String(msg.reasoning || '') : undefined,
     toolName: msg.toolName || undefined,
     model: msg.model || undefined,
     ts: Number(msg.ts || Date.now()),

@@ -887,6 +887,7 @@ export function renderAiSettingsPanel(panel) {
         ${permissionCheckboxHtml('allowReadAiBrain', 'Allow assistant to read AI Brain', 'Recommended', p.allowReadAiBrain)}
         ${permissionCheckboxHtml('allowWriteAiBrain', 'Allow assistant to write AI Brain', 'Recommended', p.allowWriteAiBrain)}
         ${permissionCheckboxHtml('allowWeather', 'Allow assistant to fetch weather via Open-Meteo', 'Recommended', p.allowWeather)}
+        ${permissionCheckboxHtml('allowWebSearch', 'Allow assistant to search the web', 'Optional', p.allowWebSearch)}
         ${permissionCheckboxHtml('allowApproxLocationContext', 'Allow assistant to receive approximate location context', 'Optional', p.allowApproxLocationContext)}
         ${permissionCheckboxHtml('allowReadRss', 'Allow assistant to read Sources/RSS items', 'Recommended', p.allowReadRss)}
         ${permissionCheckboxHtml('allowManageRss', 'Allow assistant to refresh/manage Sources', 'Optional', p.allowManageRss)}
@@ -977,6 +978,7 @@ export function renderAiSettingsPanel(panel) {
       allowReadAiBrain: checkboxValue(panel, 'allowReadAiBrain'),
       allowWriteAiBrain: checkboxValue(panel, 'allowWriteAiBrain'),
       allowWeather: checkboxValue(panel, 'allowWeather'),
+      allowWebSearch: checkboxValue(panel, 'allowWebSearch'),
       allowApproxLocationContext: checkboxValue(panel, 'allowApproxLocationContext'),
       allowReadRss: checkboxValue(panel, 'allowReadRss'),
       allowManageRss: checkboxValue(panel, 'allowManageRss'),

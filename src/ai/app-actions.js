@@ -16,6 +16,7 @@ import {
   getMarkdownText,
   noteMarkdown,
   destroyNoteDoc,
+  setDrawing,
 } from '../yjs.js';
 
 import {
@@ -34,8 +35,19 @@ import {
   moveNoteToTrash,
 } from '../trash.js';
 
+import {
+  YANTA_CLOUD_BASE_URL,
+} from '../cloud/cloud-api.js';
+
 function now() {
   return Date.now();
+}
+
+function cloudApiUrl(path) {
+  const base = String(YANTA_CLOUD_BASE_URL || '/cloud-api').replace(/\/+$/, '');
+  const cleanPath = String(path || '').replace(/^\/+/, '');
+
+  return `${base}/${cleanPath}`;
 }
 
 function compactNote(note) {
@@ -1138,4 +1150,222 @@ export async function getWeatherAction({
     daily,
     note: 'Weather data from Open-Meteo. Coordinates may be approximate.',
   };
+}
+
+function sanitizeSvgForDrawing(rawSvg = '') {
+  const raw = String(rawSvg || '').trim();
+
+  if (!raw) {
+    throw new Error('SVG is required.');
+  }
+
+  if (!/^<svg[\s>]/i.test(raw)) {
+    throw new Error('Only inline SVG starting with <svg> is supported.');
+  }
+
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(raw, 'image/svg+xml');
+
+  if (doc.querySelector('parsererror')) {
+    throw new Error('Invalid SVG.');
+  }
+
+  const svg = doc.documentElement;
+
+  if (!svg || svg.tagName.toLowerCase() !== 'svg') {
+    throw new Error('Invalid SVG root.');
+  }
+
+  for (const node of [...svg.querySelectorAll('script, foreignObject, iframe, object, embed')]) {
+    node.remove();
+  }
+
+  for (const el of [svg, ...svg.querySelectorAll('*')]) {
+    for (const attr of [...el.attributes]) {
+      const name = attr.name.toLowerCase();
+      const value = String(attr.value || '').trim().toLowerCase();
+
+      if (name.startsWith('on')) {
+        el.removeAttribute(attr.name);
+        continue;
+      }
+
+      if (
+        (name === 'href' || name.endsWith(':href')) &&
+        value.startsWith('javascript:')
+      ) {
+        el.removeAttribute(attr.name);
+      }
+    }
+  }
+
+  if (!svg.getAttribute('xmlns')) {
+    svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
+  }
+
+  return new XMLSerializer().serializeToString(svg);
+}
+
+function svgToDataUrl(svg) {
+  return `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svg)))}`;
+}
+
+function svgSize(svgText = '') {
+  const width = Number(svgText.match(/\bwidth=["']?(\d+(?:\.\d+)?)/i)?.[1] || 0);
+  const height = Number(svgText.match(/\bheight=["']?(\d+(?:\.\d+)?)/i)?.[1] || 0);
+
+  const viewBox = svgText.match(/\bviewBox=["']([^"']+)["']/i)?.[1] || '';
+  const vb = viewBox
+    .split(/\s+/)
+    .map(Number)
+    .filter(Number.isFinite);
+
+  return {
+    width: Math.max(24, Math.min(2000, width || vb[2] || 320)),
+    height: Math.max(24, Math.min(2000, height || vb[3] || 240)),
+  };
+}
+
+export async function createDrawingNoteAction({
+  title = 'Drawing',
+  body = '',
+  svg = '',
+  folderId = null,
+  tags = [],
+  icon = 'line-squiggle',
+  color = '#38bdf8',
+} = {}) {
+  const safeSvg = sanitizeSvgForDrawing(svg);
+  const size = svgSize(safeSvg);
+
+  const note = await createNoteAction({
+    title,
+    body: [
+      String(body || '').trim(),
+      '',
+      '',
+    ].join('\n').trim(),
+    folderId,
+    tags: Array.isArray(tags) ? tags : [],
+    icon,
+    color,
+  });
+
+  const drawingId = `ai_draw_${uid()}`;
+  const fileId = `svg_${uid()}`;
+
+  const imageElement = {
+    id: uid(),
+    type: 'image',
+    x: 40,
+    y: 40,
+    width: size.width,
+    height: size.height,
+    angle: 0,
+    strokeColor: 'transparent',
+    backgroundColor: 'transparent',
+    fillStyle: 'solid',
+    strokeWidth: 1,
+    strokeStyle: 'solid',
+    roughness: 0,
+    opacity: 100,
+    groupIds: [],
+    frameId: null,
+    roundness: null,
+    seed: Math.floor(Math.random() * 2 ** 31),
+    version: 1,
+    versionNonce: Math.floor(Math.random() * 2 ** 31),
+    isDeleted: false,
+    boundElements: null,
+    updated: now(),
+    link: null,
+    locked: false,
+    fileId,
+    scale: [1, 1],
+    status: 'saved',
+    customData: {
+      yanta: {
+        generatedBy: 'ai',
+        source: 'svg',
+      },
+    },
+  };
+
+  setDrawing(note.id, drawingId, {
+    id: drawingId,
+    title: title || 'AI Drawing',
+    canvas: {
+      width: Math.max(420, size.width + 80),
+      height: Math.max(260, size.height + 80),
+    },
+    elements: [imageElement],
+    appState: {},
+    files: {
+      [fileId]: {
+        id: fileId,
+        dataURL: svgToDataUrl(safeSvg),
+        mimeType: 'image/svg+xml',
+        created: now(),
+        lastRetrieved: now(),
+      },
+    },
+  }, 'ai-create-drawing');
+
+  await appendToNoteAction({
+    noteId: note.id,
+    text: `draw://${drawingId}`,
+  });
+
+  await notifyNoteChanged(note.id, 'ai-create-drawing-note');
+
+  return {
+    ok: true,
+    note,
+    drawingId,
+    svgBytes: new TextEncoder().encode(safeSvg).byteLength,
+  };
+}
+
+export async function webSearchAction({
+  query = '',
+  limit = 6,
+  country = '',
+  freshness = '',
+} = {}) {
+  const q = String(query || '').trim();
+
+  if (!q) {
+    throw new Error('Search query is required.');
+  }
+
+  const url = new URL(cloudApiUrl('/api/search/brave'));
+  url.searchParams.set('q', q);
+  url.searchParams.set('limit', String(Math.max(1, Math.min(10, Number(limit || 6)))));
+
+  if (country) url.searchParams.set('country', String(country).slice(0, 8));
+  if (freshness) url.searchParams.set('freshness', String(freshness).slice(0, 20));
+
+  const res = await fetch(url.href, {
+    credentials: 'include',
+    headers: {
+      Accept: 'application/json',
+    },
+  });
+
+  let json = null;
+
+  try {
+    json = await res.json();
+  } catch {}
+
+  if (!res.ok) {
+    throw new Error(
+      json?.message ||
+      json?.error?.message ||
+      json?.error ||
+      `Web search failed: HTTP ${res.status}`
+    );
+  }
+
+  return json;
 }

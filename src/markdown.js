@@ -438,6 +438,141 @@ function imageSizeHtml(rawAttrs = '') {
   };
 }
 
+function splitMarkdownTableRow(line = '') {
+  let s = String(line || '').trim();
+
+  if (!s.includes('|')) return [];
+
+  if (s.startsWith('|')) s = s.slice(1);
+  if (s.endsWith('|')) s = s.slice(0, -1);
+
+  const cells = [];
+  let cur = '';
+  let escaped = false;
+
+  for (const ch of s) {
+    if (escaped) {
+      cur += ch;
+      escaped = false;
+      continue;
+    }
+
+    if (ch === '\\') {
+      escaped = true;
+      cur += ch;
+      continue;
+    }
+
+    if (ch === '|') {
+      cells.push(cur.trim());
+      cur = '';
+      continue;
+    }
+
+    cur += ch;
+  }
+
+  cells.push(cur.trim());
+
+  return cells;
+}
+
+function isMarkdownTableSeparatorLine(line = '') {
+  const cells = splitMarkdownTableRow(line);
+
+  if (cells.length < 2) return false;
+
+  return cells.every((cell) =>
+    /^:?-{3,}:?$/.test(String(cell || '').replace(/\s+/g, ''))
+  );
+}
+
+function markdownTableAlignments(separatorLine = '') {
+  return splitMarkdownTableRow(separatorLine).map((cell) => {
+    const s = String(cell || '').replace(/\s+/g, '');
+
+    if (s.startsWith(':') && s.endsWith(':')) return 'center';
+    if (s.endsWith(':')) return 'right';
+
+    return 'left';
+  });
+}
+
+function tryParseMarkdownTable(lines = [], start = 0) {
+  const headerLine = lines[start] || '';
+  const separatorLine = lines[start + 1] || '';
+
+  if (!/^\s*\|.*\|\s*$/.test(headerLine)) return null;
+  if (!isMarkdownTableSeparatorLine(separatorLine)) return null;
+
+  const headers = splitMarkdownTableRow(headerLine);
+  const align = markdownTableAlignments(separatorLine);
+
+  if (headers.length < 2) return null;
+
+  const rows = [];
+  let end = start + 1;
+
+  for (let i = start + 2; i < lines.length; i++) {
+    const line = lines[i];
+
+    if (!/^\s*\|.*\|\s*$/.test(line)) break;
+
+    const cells = splitMarkdownTableRow(line);
+
+    if (!cells.length) break;
+
+    rows.push(cells);
+    end = i;
+  }
+
+  return {
+    start,
+    end,
+    headers,
+    align,
+    rows,
+  };
+}
+
+function renderMarkdownTableHtml(table) {
+  const cols = table.headers.length;
+
+  const alignAttr = (idx) => {
+    const value = table.align[idx] || 'left';
+
+    return value === 'left'
+      ? ''
+      : ` style="text-align:${escapeAttr(value)}"`;
+  };
+
+  const normalizeCells = (cells = []) =>
+    Array.from({ length: cols }, (_, i) => cells[i] || '');
+
+  return `
+    <div class="md-table-wrap" contenteditable="false">
+      <table class="md-table">
+        <thead>
+          <tr>
+            ${normalizeCells(table.headers).map((cell, i) =>
+              `<th${alignAttr(i)}>${renderInline(cell)}</th>`
+            ).join('')}
+          </tr>
+        </thead>
+        <tbody>
+          ${table.rows.map((row) => `
+            <tr>
+              ${normalizeCells(row).map((cell, i) =>
+                `<td${alignAttr(i)}>${renderInline(cell)}</td>`
+              ).join('')}
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
 function extractSection(md, sectionName) {
   const lines = md.split('\n');
   const out = [];
@@ -780,126 +915,132 @@ export function renderBlocksInline(md) {
     const out = [];
     let codeBuf = [];
 
-  const flush = () => {
-    if (!codeBuf.length) return;
+    const flush = () => {
+      if (!codeBuf.length) return;
 
-    out.push(`<pre><code>${escapeHtml(codeBuf.join('\n'))}</code></pre>`);
-    codeBuf = [];
-  };
+      out.push(`<pre><code>${escapeHtml(codeBuf.join('\n'))}</code></pre>`);
+      codeBuf = [];
+    };
 
-  for (const line of lines) {
-    const info = classifyLine(line, ctx);
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const info = classifyLine(line, ctx);
 
-    if (info.type === 'fence') {
+      if (info.type === 'fence') {
+        flush();
+        ctx.inFence = !!info.opens;
+        continue;
+      }
+
+      if (info.type === 'code') {
+        codeBuf.push(line);
+        continue;
+      }
+
       flush();
-      ctx.inFence = !!info.opens;
-      continue;
-    }
 
-    if (info.type === 'code') {
-      codeBuf.push(line);
-      continue;
+      const table = tryParseMarkdownTable(lines, i);
+
+      if (table) {
+        out.push(renderMarkdownTableHtml(table));
+        i = table.end;
+        continue;
+      }
+
+      if (info.type === 'blank') {
+        out.push('');
+        continue;
+      }
+
+      if (info.type === 'comment') {
+        continue;
+      }
+
+      if (/^h[1-6]$/.test(info.type)) {
+        const lvl = parseInt(info.type[1], 10);
+        const txt = line.replace(/^#{1,6}\s+/, '');
+        const smallLvl = Math.min(6, lvl + 1);
+
+        out.push(`<h${smallLvl}>${renderInline(txt)}</h${smallLvl}>`);
+        continue;
+      }
+
+      if (info.type === 'hr') {
+        out.push('<hr/>');
+        continue;
+      }
+
+      if (info.type === 'quote') {
+        out.push(`<blockquote>${renderInline(line.replace(/^\s*>\s?/, ''))}</blockquote>`);
+        continue;
+      }
+
+      if (info.type === 'task') {
+        const m = /^(\s*)([-*+])\s+\[([ xX])\]\s+(.*)$/.exec(line);
+
+        if (!m) {
+          out.push(`<p style="margin:0.2em 0">${renderInline(line)}</p>`);
+          continue;
+        }
+
+        const indent = m[1].length;
+        const checked = m[3].toLowerCase() === 'x';
+        const label = m[4] || '';
+
+        out.push(`
+          <div class="task task-static"
+            style="display:flex;align-items:flex-start;gap:8px;min-height:24px;padding-left:${(indent * 0.6) + 0.25}em;margin:2px 0">
+            <input type="checkbox" disabled contenteditable="false" ${checked ? 'checked' : ''}
+              style="width:16px;height:16px;min-width:16px;margin:3px 0 0 0;accent-color:var(--accent)" />
+            <span class="task-label"
+              style="flex:1;${checked ? 'text-decoration:line-through;color:var(--text-dim)' : ''}">
+              ${renderInline(label)}
+            </span>
+          </div>
+        `);
+
+        continue;
+      }
+
+      if (info.type === 'ul') {
+        const m = /^(\s*)([-*+])\s+(.*)$/.exec(line);
+
+        if (!m) {
+          out.push(`<p style="margin:0.2em 0">${renderInline(line)}</p>`);
+          continue;
+        }
+
+        out.push(
+          `<div style="padding-left:${(m[1].length * 0.6) + 1.5}em;text-indent:-1.2em">• ${renderInline(m[3])}</div>`
+        );
+
+        continue;
+      }
+
+      if (info.type === 'ol') {
+        const m = /^(\s*)(\d+)\.\s+(.*)$/.exec(line);
+
+        if (!m) {
+          out.push(`<p style="margin:0.2em 0">${renderInline(line)}</p>`);
+          continue;
+        }
+
+        out.push(
+          `<div style="padding-left:${(m[1].length * 0.6) + 1.8}em;text-indent:-1.5em">${m[2]}. ${renderInline(m[3])}</div>`
+        );
+
+        continue;
+      }
+
+      if (info.type === 'image') {
+        out.push(renderInline(line));
+        continue;
+      }
+
+      out.push(`<p style="margin:0.2em 0">${renderInline(line)}</p>`);
     }
 
     flush();
-
-    if (info.type === 'blank') {
-      out.push('');
-      continue;
-    }
-
-    if (info.type === 'comment') {
-      continue;
-    }
-
-    if (/^h[1-6]$/.test(info.type)) {
-      const lvl = parseInt(info.type[1], 10);
-      const txt = line.replace(/^#{1,6}\s+/, '');
-      const smallLvl = Math.min(6, lvl + 1);
-
-      out.push(`<h${smallLvl}>${renderInline(txt)}</h${smallLvl}>`);
-      continue;
-    }
-
-    if (info.type === 'hr') {
-      out.push('<hr/>');
-      continue;
-    }
-
-    if (info.type === 'quote') {
-      out.push(`<blockquote>${renderInline(line.replace(/^\s*>\s?/, ''))}</blockquote>`);
-      continue;
-    }
-
-    // Tasks im Hover-Tooltip / Inline-Block sauber als Checkbox + Label rendern.
-    // Vorher wurden Tasks im kompakten Renderer wie normale Bullet-Listen behandelt,
-    // wodurch sie im Tooltip optisch kaputt bzw. uneinheitlich aussahen.
-    if (info.type === 'task') {
-      const m = /^(\s*)([-*+])\s+\[([ xX])\]\s+(.*)$/.exec(line);
-
-      if (!m) {
-        out.push(`<p style="margin:0.2em 0">${renderInline(line)}</p>`);
-        continue;
-      }
-
-      const indent = m[1].length;
-      const checked = m[3].toLowerCase() === 'x';
-      const label = m[4] || '';
-
-      out.push(`
-        <div class="task task-static"
-          style="display:flex;align-items:flex-start;gap:8px;min-height:24px;padding-left:${(indent * 0.6) + 0.25}em;margin:2px 0">
-          <input type="checkbox" disabled contenteditable="false" ${checked ? 'checked' : ''}
-            style="width:16px;height:16px;min-width:16px;margin:3px 0 0 0;accent-color:var(--accent)" />
-          <span class="task-label"
-            style="flex:1;${checked ? 'text-decoration:line-through;color:var(--text-dim)' : ''}">
-            ${renderInline(label)}
-          </span>
-        </div>
-      `);
-
-      continue;
-    }
-
-    if (info.type === 'ul') {
-      const m = /^(\s*)([-*+])\s+(.*)$/.exec(line);
-
-      if (!m) {
-        out.push(`<p style="margin:0.2em 0">${renderInline(line)}</p>`);
-        continue;
-      }
-
-      out.push(
-        `<div style="padding-left:${(m[1].length * 0.6) + 1.5}em;text-indent:-1.2em">• ${renderInline(m[3])}</div>`
-      );
-
-      continue;
-    }
-
-    if (info.type === 'ol') {
-      const m = /^(\s*)(\d+)\.\s+(.*)$/.exec(line);
-
-      if (!m) {
-        out.push(`<p style="margin:0.2em 0">${renderInline(line)}</p>`);
-        continue;
-      }
-
-      out.push(
-        `<div style="padding-left:${(m[1].length * 0.6) + 1.8}em;text-indent:-1.5em">${m[2]}. ${renderInline(m[3])}</div>`
-      );
-
-      continue;
-    }
-
-    if (info.type === 'image') {
-      out.push(renderInline(line));
-      continue;
-    }
-
-    out.push(`<p style="margin:0.2em 0">${renderInline(line)}</p>`);
-  }
-
-  flush();
 
     return sanitizeHtml(out.join(''));
   });
@@ -957,6 +1098,18 @@ export function renderPreview(md) {
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i];
       const info = classifyLine(line, ctx);
+      const table = !ctx.inFence ? tryParseMarkdownTable(lines, i) : null;
+
+      if (table) {
+        pieces.push(`<div class="pv-line" data-line="${i}" data-type="table">${renderMarkdownTableHtml(table)}</div>`);
+
+        for (let j = i + 1; j <= table.end; j++) {
+          pieces.push(`<div class="pv-line pv-hidden-line" data-line="${j}" data-type="table"></div>`);
+        }
+
+        i = table.end;
+        continue;
+      }
       let inner = '', extraClass = '';
       if (info.type === 'fence') {
         ctx.inFence = !!info.opens;

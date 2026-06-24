@@ -11,6 +11,8 @@ import {
   readNoteAction,
   readNotesAction,
   createNoteAction,
+  createDrawingNoteAction,
+  webSearchAction,
   updateNoteAppearanceAction,
   appendToNoteAction,
   replaceCurrentSelectionAction,
@@ -114,6 +116,53 @@ export const TOOL_REGISTRY = [
       required: ['title'],
     },
     execute: createNoteAction,
+  },
+
+  {
+    name: 'create_drawing_note',
+    permission: 'allowCreateNotes',
+    risk: 'write',
+    description: [
+      'Create a new Markdown note containing a YANTA Excalidraw drawing from inline SVG.',
+      'Use this when the user asks you to draw something, sketch a simple diagram, create an icon-like illustration, or create a note and drawing together.',
+      'The SVG becomes a visible drawing inside the note.',
+      'Keep SVG simple, safe, self-contained and without scripts/external resources.',
+    ].join('\n'),
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        title: {
+          type: 'string',
+          description: 'Title for the new note.',
+        },
+        body: {
+          type: 'string',
+          description: 'Optional Markdown body before the drawing.',
+        },
+        svg: {
+          type: 'string',
+          description: 'Complete inline SVG markup starting with <svg>. No scripts, no external resources.',
+        },
+        folderId: {
+          type: ['string', 'null'],
+        },
+        tags: {
+          type: 'array',
+          items: { type: 'string' },
+        },
+        icon: {
+          type: 'string',
+          description: 'Optional Lucide icon for the created note.',
+        },
+        color: {
+          type: 'string',
+          description: 'Optional safe CSS color, preferably hex.',
+        },
+      },
+      required: ['title', 'svg'],
+    },
+    execute: createDrawingNoteAction,
   },
 
   {
@@ -371,6 +420,41 @@ export const TOOL_REGISTRY = [
     },
     execute: rssMarkItemReadAction,
   },
+
+  {
+    name: 'web_search',
+    permission: 'allowWebSearch',
+    risk: 'read',
+    description: [
+      'Search the public web via Brave Search.',
+      'Use for current facts, recent information, documentation lookup, product/company pages, news, or anything likely outside the user vault.',
+      'Return concise summaries and cite result titles/URLs.',
+    ].join('\n'),
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        query: {
+          type: 'string',
+        },
+        limit: {
+          type: 'number',
+          default: 6,
+        },
+        country: {
+          type: 'string',
+          description: 'Optional Brave country code, e.g. DE, US.',
+        },
+        freshness: {
+          type: 'string',
+          description: 'Optional freshness filter supported by Brave, e.g. pd, pw, pm, py.',
+        },
+      },
+      required: ['query'],
+    },
+    execute: webSearchAction,
+  },
+  
 {
   name: 'get_weather',
   permission: 'allowWeather',

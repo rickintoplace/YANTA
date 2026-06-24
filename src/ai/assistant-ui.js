@@ -42,6 +42,7 @@ import {
 
 import {
   openRouterChatCompletion,
+  openRouterChatCompletionStream,
 } from './openrouter-client.js';
 
 import {
@@ -315,6 +316,7 @@ function compactStoredMessage(msg) {
   return {
     role,
     content: String(msg.content || ''),
+    reasoning: msg.reasoning ? String(msg.reasoning || '') : undefined,
     toolName: msg.toolName || undefined,
     model: msg.model || undefined,
     ts: Number(msg.ts || Date.now()),
@@ -1242,6 +1244,60 @@ function addMessage(role, content, extra = {}) {
   renderContextMeter();
 }
 
+let streamRenderRaf = 0;
+
+function scheduleStreamRender() {
+  if (streamRenderRaf) return;
+
+  streamRenderRaf = requestAnimationFrame(() => {
+    streamRenderRaf = 0;
+    saveTransientConversation();
+    renderMessages();
+    renderContextMeter();
+  });
+}
+
+function pushAssistantStreamMessage(extra = {}) {
+  const msg = {
+    role: 'assistant',
+    content: '',
+    reasoning: '',
+    ts: Date.now(),
+    model: getAiSettings().model,
+    ...extra,
+  };
+
+  conversation.push(msg);
+  saveTransientConversation();
+  scheduleAiSessionSave();
+  renderMessages();
+
+  return msg;
+}
+
+function removeConversationMessageObject(target) {
+  const idx = conversation.indexOf(target);
+
+  if (idx >= 0) {
+    conversation.splice(idx, 1);
+    saveTransientConversation();
+    scheduleAiSessionSave();
+    renderMessages();
+  }
+}
+
+function finalizeAssistantStreamMessage(msg) {
+  if (!msg) return;
+
+  msg.content = String(msg.content || '').trim() || '[No response]';
+  msg.reasoning = String(msg.reasoning || '').trim();
+
+  saveTransientConversation();
+  scheduleAiSessionSave();
+  renderMessages();
+  renderContextMeter();
+}
+
 function setAssistantBusy(next, label = 'Thinking…') {
   assistantBusy = !!next;
   assistantBusyLabel = String(label || 'Thinking…');
@@ -1791,6 +1847,25 @@ function renderAssistantMessageNode(msg) {
   role.textContent = messageRoleLabel(msg);
   wrap.append(role);
 
+  const reasoning = String(msg.reasoning || '').trim();
+
+  if (reasoning) {
+    const details = document.createElement('details');
+    details.className = 'yanta-ai-thinking';
+
+    const summary = document.createElement('summary');
+    summary.innerHTML = `
+      ${lucide('brain-circuit', 13)}
+      <span>Thinking</span>
+    `;
+
+    const pre = document.createElement('pre');
+    pre.textContent = reasoning;
+
+    details.append(summary, pre);
+    wrap.append(details);
+  }
+
   const parsed = extractAssistantUiTokens(msg.content);
 
   const content = document.createElement('div');
@@ -2111,20 +2186,44 @@ async function runAssistant(userText) {
 
   for (let round = 0; round < maxRounds; round++) {
     setAssistantBusy(true, round === 0 ? 'Thinking…' : 'Reading tool results…');
-    const assistantMessage = await openRouterChatCompletion({
+
+    const streamedMsg = pushAssistantStreamMessage({
+      model: runtimeSettings.includedModel || runtimeSettings.model || getAiSettings().model,
+    });
+
+    const assistantMessage = await openRouterChatCompletionStream({
       messages,
       tools,
       signal: abortController.signal,
+      onDelta: (delta) => {
+        if (delta.type === 'content') {
+          streamedMsg.content += delta.text || '';
+        }
+
+        if (delta.type === 'reasoning') {
+          streamedMsg.reasoning += delta.text || '';
+        }
+
+        scheduleStreamRender();
+      },
     });
+
+    streamedMsg.content = assistantMessage.content || streamedMsg.content || '';
+    streamedMsg.reasoning = assistantMessage.reasoning || streamedMsg.reasoning || '';
 
     const toolCalls = assistantMessage.tool_calls || [];
 
     if (!toolCalls.length) {
-      const content = assistantMessage.content || '';
-      addMessage('assistant', content || '[No response]', {
-        model: getAiSettings().model,
-      });
+      finalizeAssistantStreamMessage(streamedMsg);
       return;
+    }
+
+    // If the model only emitted tool calls with no visible text/reasoning,
+    // do not leave an empty assistant bubble in the chat.
+    if (!streamedMsg.content.trim() && !streamedMsg.reasoning.trim()) {
+      removeConversationMessageObject(streamedMsg);
+    } else {
+      finalizeAssistantStreamMessage(streamedMsg);
     }
 
     messages.push({
@@ -3678,6 +3777,57 @@ function injectCss() {
 
 .yanta-ai-context-meter:hover {
   color: var(--text-dim);
+}
+
+.yanta-ai-thinking {
+  margin: 0 0 9px;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  overflow: hidden;
+}
+
+.yanta-ai-thinking summary {
+  min-height: 32px;
+  padding: 7px 9px;
+
+  display: flex;
+  align-items: center;
+  gap: 7px;
+
+  color: var(--text-dim);
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+  user-select: none;
+}
+
+.yanta-ai-thinking summary:hover {
+  color: var(--accent);
+}
+
+.yanta-ai-thinking pre {
+  max-height: 260px;
+  overflow: auto;
+  margin: 0;
+  padding: 9px 10px;
+  border-top: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text-dim);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Markdown tables inside AI chat */
+.yanta-ai-rich .md-table-wrap {
+  max-width: min(100%, calc(100vw - 48px));
+}
+
+.yanta-ai-rich .md-table {
+  font-size: 12px;
 }
 `;
 

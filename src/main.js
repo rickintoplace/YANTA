@@ -1436,7 +1436,7 @@ async function init() {
       console.error('[YANTA Billing] Could not show quota dialog', err);
     }
   });
-  
+
   // setupCalendar();
   await syncRestore();
   let sharedOpen = null;
@@ -3056,6 +3056,7 @@ const SITE_PAGE_PATHS = new Set([
   '/terms',
   '/privacy',
   '/refund',
+  '/imprint',
 ]);
 
 const normalizedPath = location.pathname.replace(/\/+$/, '') || '/';

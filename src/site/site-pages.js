@@ -3,6 +3,10 @@ import {
   openBillingPortal,
 } from '../billing/billing-api.js';
 
+import {
+  cloudMe,
+} from '../cloud/cloud-api.js';
+
 const CONTACT_EMAIL = 'rickintoplace@proton.me';
 
 const PLUS_MONTHLY_EUR =
@@ -19,6 +23,12 @@ const PLUS_YEARLY_USD =
 
 function userCurrency() {
   const lang = navigator.language || '';
+
+const YANTA_APP_ORIGIN =
+  (import.meta.env.VITE_APP_ORIGIN || location.origin).replace(/\/+$/, '');
+
+const BILLING_PUBLIC_ORIGIN =
+  (import.meta.env.VITE_BILLING_PUBLIC_ORIGIN || location.origin).replace(/\/+$/, '');
 
   if (
     lang.startsWith('de') ||
@@ -409,14 +419,15 @@ function shell(content) {
     <div class="yanta-site">
       <header class="yanta-site-header">
         <nav class="yanta-site-nav">
-          <a class="yanta-site-brand" href="/">YANTA</a>
+          <a class="yanta-site-brand" href="${escapeHtml(BILLING_PUBLIC_ORIGIN)}/pricing">YANTA</a>
 
           <div class="yanta-site-nav-links">
-            <a href="/pricing">Pricing</a>
-            <a href="/terms">Terms</a>
-            <a href="/privacy">Privacy</a>
-            <a href="/refund">Refunds</a>
-            <a href="/">Open app</a>
+            <a href="${escapeHtml(BILLING_PUBLIC_ORIGIN)}/pricing">Pricing</a>
+            <a href="${escapeHtml(BILLING_PUBLIC_ORIGIN)}/terms">Terms</a>
+            <a href="${escapeHtml(BILLING_PUBLIC_ORIGIN)}/privacy">Privacy</a>
+            <a href="${escapeHtml(BILLING_PUBLIC_ORIGIN)}/refund">Refunds</a>
+            <a href="${escapeHtml(BILLING_PUBLIC_ORIGIN)}/imprint">Imprint</a>
+            <a href="${escapeHtml(YANTA_APP_ORIGIN)}">Open app</a>
           </div>
         </nav>
       </header>
@@ -429,9 +440,10 @@ function shell(content) {
         <div class="yanta-site-footer-inner">
           <span>© ${new Date().getFullYear()} YANTA</span>
           <span>·</span>
-          <a href="/terms">Terms</a>
-          <a href="/privacy">Privacy</a>
-          <a href="/refund">Refunds</a>
+          <a href="${escapeHtml(BILLING_PUBLIC_ORIGIN)}/terms">Terms</a>
+          <a href="${escapeHtml(BILLING_PUBLIC_ORIGIN)}/privacy">Privacy</a>
+          <a href="${escapeHtml(BILLING_PUBLIC_ORIGIN)}/refund">Refunds</a>
+          <a href="${escapeHtml(BILLING_PUBLIC_ORIGIN)}/imprint">Imprint</a>
           <span>·</span>
           <a href="mailto:${escapeHtml(CONTACT_EMAIL)}">${escapeHtml(CONTACT_EMAIL)}</a>
         </div>
@@ -549,6 +561,15 @@ return `
       </p>
     </section>
 
+    <section class="yanta-note-box">
+      <p>
+        <strong>How to upgrade:</strong>
+        If you already use YANTA, open the app, sign in to YANTA Cloud, then choose
+        <strong>Settings → Sync → YANTA Plus</strong>.
+        This connects your subscription to the correct YANTA Cloud account.
+      </p>
+    </section>
+
     <section class="yanta-faq">
       <h2>Questions</h2>
 
@@ -579,6 +600,39 @@ return `
 
 function legalContent(kind) {
   const updated = '2026-01-01';
+
+  if (kind === 'imprint') {
+    document.title = 'Imprint · YANTA';
+
+    return `
+      <article class="yanta-legal-doc">
+        <h1>Imprint</h1>
+
+        <p>
+          <strong>Provider:</strong><br>
+          Eirik Heilmann<br>
+          Neustädter Ring 4<br>
+          37154 Northeim<br>
+          Germany
+        </p>
+
+        <p>
+          <strong>Contact:</strong><br>
+          <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>
+        </p>
+
+        <p>
+          <strong>Responsible for content:</strong><br>
+          Eirik Heilmann, address as above.
+        </p>
+
+        <p>
+          <strong>Project portfolio:</strong><br>
+          <a href="https://rickinto.place" target="_blank" rel="noopener">rickinto.place</a>
+        </p>
+      </article>
+    `;
+  }
 
   if (kind === 'terms') {
     document.title = 'Terms of Service · YANTA';
@@ -867,13 +921,34 @@ export function mountSitePage() {
     shell(legalContent('refund'));
     return;
   }
+
+  if (path === '/imprint') {
+    shell(legalContent('imprint'));
+    return;
+  }
 }
 
-function wirePricingButtons() {
-  document.querySelectorAll('[data-checkout]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const priceId = btn.getAttribute('data-checkout') || '';
+async function wirePricingButtons() {
+  const me = await cloudMe().catch(() => ({
+    authenticated: false,
+  }));
 
+  const isAuthenticated = !!me?.authenticated;
+
+  document.querySelectorAll('[data-checkout]').forEach((btn) => {
+    const priceId = btn.getAttribute('data-checkout') || '';
+
+    if (!isAuthenticated) {
+      btn.textContent = 'Open YANTA to upgrade';
+
+      btn.addEventListener('click', () => {
+        location.href = YANTA_APP_ORIGIN;
+      });
+
+      return;
+    }
+
+    btn.addEventListener('click', async () => {
       if (!priceId) {
         alert('YANTA Plus checkout is not configured yet.');
         return;
@@ -889,10 +964,19 @@ function wirePricingButtons() {
         console.error(err);
 
         if (err.status === 401) {
-          alert('Please open YANTA, sign in to YANTA Cloud, then try upgrading again.');
-        } else {
-          alert(err?.message || 'Could not open checkout.');
+          alert(
+            [
+              'Please sign in to YANTA Cloud first.',
+              '',
+              'Open the YANTA app, sign in to YANTA Cloud, then upgrade from Settings → Sync.',
+            ].join('\n')
+          );
+
+          location.href = YANTA_APP_ORIGIN;
+          return;
         }
+
+        alert(err?.message || 'Could not open checkout.');
 
         btn.disabled = false;
         btn.textContent = old;
@@ -900,17 +984,30 @@ function wirePricingButtons() {
     });
   });
 
-  document.querySelector('[data-portal]')?.addEventListener('click', async () => {
-    try {
-      await openBillingPortal();
-    } catch (err) {
-      console.error(err);
+  const portalBtn = document.querySelector('[data-portal]');
 
-      if (err.status === 401) {
-        alert('Please open YANTA and sign in to YANTA Cloud first.');
-      } else {
-        alert(err?.message || 'Could not open billing portal.');
-      }
+  if (portalBtn) {
+    if (!isAuthenticated) {
+      portalBtn.textContent = 'Open YANTA to manage billing';
+
+      portalBtn.addEventListener('click', () => {
+        location.href = YANTA_APP_ORIGIN;
+      });
+    } else {
+      portalBtn.addEventListener('click', async () => {
+        try {
+          await openBillingPortal();
+        } catch (err) {
+          console.error(err);
+
+          if (err.status === 401) {
+            alert('Please sign in to YANTA Cloud first.');
+            location.href = YANTA_APP_ORIGIN;
+          } else {
+            alert(err?.message || 'Could not open billing portal.');
+          }
+        }
+      });
     }
-  });
+  }
 }

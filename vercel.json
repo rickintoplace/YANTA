@@ -25,6 +25,10 @@
     {
       "source": "/refund",
       "destination": "/index.html"
+    },
+    {
+      "source": "/imprint",
+      "destination": "/index.html"
     }
   ],
   "headers": [

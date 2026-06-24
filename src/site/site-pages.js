@@ -7,7 +7,22 @@ import {
   cloudMe,
 } from '../cloud/cloud-api.js';
 
+const YANTA_APP_ORIGIN =
+  (import.meta.env.VITE_APP_ORIGIN || 'https://yanta.page').replace(/\/+$/, '');
+
+const BILLING_PUBLIC_ORIGIN =
+  (import.meta.env.VITE_BILLING_PUBLIC_ORIGIN || YANTA_APP_ORIGIN).replace(/\/+$/, '');
+
 const CONTACT_EMAIL = 'rickintoplace@proton.me';
+
+const LEGAL = {
+  providerName: 'Eirik Heilmann',
+  street: 'Neustädter Ring 4',
+  city: '37154 Northeim',
+  country: '${escapeHtml(LEGAL.country)}.',
+  region: 'Lower Saxony, ${escapeHtml(LEGAL.country)}.',
+  portfolioUrl: 'https://rickinto.place',
+};
 
 const PLUS_MONTHLY_EUR =
   import.meta.env.VITE_PADDLE_PLUS_MONTHLY_EUR_PRICE_ID || '';
@@ -109,6 +124,10 @@ body.yanta-site-page {
   position: static !important;
 }
 
+html.yanta-site-page * {
+  box-sizing: border-box;
+}
+
 body {
   margin: 0;
   background: var(--bg, #fff8ef);
@@ -203,6 +222,7 @@ body {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
   align-items: stretch;
+  margin-top: 24px;
 }
 
 .yanta-price-card {
@@ -483,13 +503,14 @@ function billingBannerHtml() {
 function pricingContent() {
   const ids = priceIds();
 
-return `
+  return `
     <section class="yanta-site-hero">
       <div class="yanta-site-kicker">YANTA Cloud</div>
-      <h1>Simple plans for encrypted sync.</h1>
+      <h1>A calm workspace for notes, drawings and encrypted sync.</h1>
       <p>
-        Start free. Upgrade when you need more encrypted cloud storage,
-        more devices, and higher Included AI limits.
+        YANTA is a personal knowledge workspace for Markdown notes, drawings,
+        tasks, calendar events, sources and cross-device sync. Start free.
+        Upgrade to YANTA Plus when you need more storage and higher usage limits.
       </p>
     </section>
 
@@ -498,7 +519,9 @@ return `
     <section class="yanta-pricing-grid">
       <article class="yanta-price-card">
         <h2>Free</h2>
-        <p class="yanta-price-sub">For trying YANTA Cloud or keeping a small encrypted vault in sync.</p>
+        <p class="yanta-price-sub">
+          For trying YANTA Cloud or syncing a small personal encrypted vault.
+        </p>
 
         <div class="yanta-price">
           <strong>€0</strong>
@@ -506,22 +529,24 @@ return `
         </div>
 
         <ul class="yanta-feature-list">
-          <li>25 MB encrypted cloud storage</li>
+          <li>25 MB encrypted cloud sync storage</li>
           <li>1 cloud vault</li>
           <li>3 connected devices</li>
           <li>Included AI: 25 requests/day</li>
           <li>Encrypted backup export</li>
-          <li>Public sharing with encrypted payloads</li>
+          <li>Local-first browser storage</li>
         </ul>
 
         <div class="yanta-btn-row">
-          <a class="yanta-site-btn" href="/">Open YANTA</a>
+          <a class="yanta-site-btn" href="${escapeHtml(YANTA_APP_ORIGIN)}">Open YANTA</a>
         </div>
       </article>
 
       <article class="yanta-price-card featured">
         <h2>YANTA Plus</h2>
-        <p class="yanta-price-sub">For larger vaults, more devices, and regular Included AI use.</p>
+        <p class="yanta-price-sub">
+          For larger personal vaults, more devices, regular sync and higher Included AI limits.
+        </p>
 
         <div class="yanta-price">
           <strong>${escapeHtml(money(true))}</strong>
@@ -529,7 +554,7 @@ return `
         </div>
 
         <ul class="yanta-feature-list">
-          <li>5 GB encrypted cloud storage</li>
+          <li>5 GB encrypted cloud sync storage</li>
           <li>5 cloud vaults</li>
           <li>8 connected devices</li>
           <li>Included AI: 500 requests/day</li>
@@ -555,18 +580,28 @@ return `
 
     <section class="yanta-note-box">
       <p>
-        <strong>Privacy note:</strong>
-        YANTA Cloud stores encrypted sync objects. Your notes, drawings and assets are encrypted before upload.
-        Your Recovery Key stays on your devices. YANTA cannot recover encrypted notes without it.
+        <strong>How to upgrade:</strong>
+        Open YANTA, sign in to YANTA Cloud, then choose
+        <strong>Settings → Sync → YANTA Plus</strong>. This connects your subscription
+        to the correct YANTA Cloud account.
       </p>
     </section>
 
     <section class="yanta-note-box">
       <p>
-        <strong>How to upgrade:</strong>
-        If you already use YANTA, open the app, sign in to YANTA Cloud, then choose
-        <strong>Settings → Sync → YANTA Plus</strong>.
-        This connects your subscription to the correct YANTA Cloud account.
+        <strong>Privacy note:</strong>
+        YANTA Cloud stores encrypted sync objects for your personal vault.
+        Notes, drawings and assets are encrypted before upload. Your Recovery Key
+        stays on your devices. YANTA cannot recover encrypted notes without it.
+      </p>
+    </section>
+
+    <section class="yanta-note-box">
+      <p>
+        <strong>Billing:</strong>
+        YANTA Plus subscriptions are processed by Paddle as Merchant of Record.
+        Paddle handles payment methods, invoices and applicable taxes.
+        YANTA is operated by <a class="yanta-site-link" href="${escapeHtml(LEGAL.portfolioUrl)}" target="_blank" rel="noopener">rickintoplace</a>.
       </p>
     </section>
 
@@ -576,22 +611,48 @@ return `
       <div class="yanta-faq-grid">
         <div class="yanta-faq-item">
           <h3>Can YANTA read my notes?</h3>
-          <p>No. YANTA Cloud stores encrypted sync objects. The Recovery Key is needed to decrypt your vault.</p>
+          <p>
+            YANTA Cloud is designed around client-side encryption for sync data.
+            The server stores encrypted sync objects and operational metadata, not plaintext note contents.
+          </p>
+        </div>
+
+        <div class="yanta-faq-item">
+          <h3>What is YANTA Plus?</h3>
+          <p>
+            Plus increases usage limits: encrypted cloud storage, devices, cloud vaults,
+            Included AI requests and Sources/RSS limits. It does not unlock exclusive features for now.
+          </p>
         </div>
 
         <div class="yanta-faq-item">
           <h3>What happens if I cancel?</h3>
-          <p>You keep Plus until the paid period ends. Afterwards the account returns to Free limits.</p>
+          <p>
+            You keep Plus until the end of the paid period. Afterwards your account returns to Free limits.
+          </p>
         </div>
 
         <div class="yanta-faq-item">
           <h3>What if I exceed Free limits after cancellation?</h3>
-          <p>Your existing encrypted data is not deleted automatically. New uploads may be blocked until you reduce usage or upgrade again.</p>
+          <p>
+            Existing encrypted data is not automatically deleted. New cloud uploads may be blocked
+            until you reduce usage or subscribe again.
+          </p>
         </div>
 
         <div class="yanta-faq-item">
           <h3>Can I export my data?</h3>
-          <p>Yes. YANTA supports encrypted .yanta backups and readable Markdown exports.</p>
+          <p>
+            Yes. YANTA supports encrypted .yanta backups and readable Markdown exports.
+          </p>
+        </div>
+
+        <div class="yanta-faq-item">
+          <h3>Is YANTA a file hosting service?</h3>
+          <p>
+            No. YANTA Cloud is for encrypted sync of YANTA workspace data such as notes,
+            drawings, calendar metadata and related assets.
+          </p>
         </div>
       </div>
     </section>
@@ -610,10 +671,10 @@ function legalContent(kind) {
 
         <p>
           <strong>Provider:</strong><br>
-          Eirik Heilmann<br>
-          Neustädter Ring 4<br>
-          37154 Northeim<br>
-          Germany
+          ${escapeHtml(LEGAL.providerName)}<br>
+          ${escapeHtml(LEGAL.street)}<br>
+          ${escapeHtml(LEGAL.city)}<br>
+          ${escapeHtml(LEGAL.country)}
         </p>
 
         <p>
@@ -623,13 +684,14 @@ function legalContent(kind) {
 
         <p>
           <strong>Responsible for content:</strong><br>
-          Eirik Heilmann, address as above.
+          ${escapeHtml(LEGAL.providerName)}, address as above.
         </p>
 
         <p>
           <strong>Project portfolio:</strong><br>
-          <a href="https://rickinto.place" target="_blank" rel="noopener">rickinto.place</a>
+          <a href="${escapeHtml(LEGAL.portfolioUrl)}" target="_blank" rel="noopener">${escapeHtml(LEGAL.portfolioUrl)}</a>
         </p>
+
       </article>
     `;
   }
@@ -644,11 +706,11 @@ function legalContent(kind) {
 
         <h2>1. Provider</h2>
         <p>
-          YANTA is provided by <strong>Eirik Heilmann,</strong>
+          YANTA is provided by <strong>${escapeHtml(LEGAL.providerName)},,</strong>
           <br>
-          <strong>Neustädter Ring 4, 37154 Northeim,
+          <strong>${escapeHtml(LEGAL.street)},, ${escapeHtml(LEGAL.city)},,
           <br>
-          LOWER SAXONY, GERMANY</strong>.
+          LOWER SAXONY, ${escapeHtml(LEGAL.country)}.</strong>.
           <br>
           Contact: <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>.
         </p>
@@ -736,7 +798,7 @@ function legalContent(kind) {
 
         <h2>14. Governing Law</h2>
         <p>
-          These Terms are intended to be governed by the laws of Germany, unless mandatory consumer protection
+          These Terms are intended to be governed by the laws of ${escapeHtml(LEGAL.country)}., unless mandatory consumer protection
           rules require otherwise.
         </p>
       </article>
@@ -753,11 +815,11 @@ function legalContent(kind) {
 
         <h2>1. Controller</h2>
         <p>
-          Controller: <strong>Eirik Heilmann,</strong>
+          Controller: <strong>${escapeHtml(LEGAL.providerName)},,</strong>
           <br>
-          <strong>Neustädter Ring 4, 37154 Northeim,
+          <strong>${escapeHtml(LEGAL.street)},, ${escapeHtml(LEGAL.city)},,
           <br>
-          LOWER SAXONY, GERMANY</strong>.
+          LOWER SAXONY, ${escapeHtml(LEGAL.country)}.</strong>.
           <br>
           Contact: <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>.
         </p>
@@ -929,6 +991,27 @@ export function mountSitePage() {
 }
 
 async function wirePricingButtons() {
+  const checkoutDisabledByReview =
+    import.meta.env.VITE_PADDLE_CHECKOUT_ENABLED === 'false';
+
+  if (checkoutDisabledByReview) {
+    document.querySelectorAll('[data-checkout]').forEach((btn) => {
+      btn.textContent = 'Available after Paddle approval';
+      btn.disabled = true;
+      btn.title = 'YANTA Plus checkout is awaiting payment provider approval.';
+    });
+
+    const portalBtn = document.querySelector('[data-portal]');
+    if (portalBtn) {
+      portalBtn.textContent = 'Open YANTA';
+      portalBtn.addEventListener('click', () => {
+        location.href = YANTA_APP_ORIGIN;
+      });
+    }
+
+    return;
+  }
+
   const me = await cloudMe().catch(() => ({
     authenticated: false,
   }));

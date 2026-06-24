@@ -2016,15 +2016,16 @@ async function handleBillingCheckout(env, req, headers) {
   }
 
   const appOrigin = env.APP_ORIGIN || "https://yanta.page";
+  const billingOrigin = env.BILLING_PUBLIC_ORIGIN || appOrigin;
 
   const successUrl = cleanRedirectUrl(
     body.successUrl,
-    `${appOrigin}/pricing?billing=success`
+    `${billingOrigin}/pricing?billing=success`
   );
 
   const cancelUrl = cleanRedirectUrl(
     body.cancelUrl,
-    `${appOrigin}/pricing?billing=cancel`
+    `${billingOrigin}/pricing?billing=cancel`
   );
 
   const customerId = await getOrCreateBillingCustomer(env, user);

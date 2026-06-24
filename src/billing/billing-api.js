@@ -51,8 +51,8 @@ export function billingStatus() {
 
 export async function createBillingCheckout({
   priceId,
-successUrl = `${BILLING_PUBLIC_ORIGIN}/pricing?billing=success`,
-cancelUrl = `${BILLING_PUBLIC_ORIGIN}/pricing?billing=cancel`,
+  successUrl = `${BILLING_PUBLIC_ORIGIN}/pricing?billing=success`,
+  cancelUrl = `${BILLING_PUBLIC_ORIGIN}/pricing?billing=cancel`,
 } = {}) {
   if (!priceId) {
     throw new Error('YANTA Plus price id is missing.');
@@ -93,7 +93,15 @@ export async function openBillingPortal() {
 }
 
 export const YANTA_APP_ORIGIN =
-  (import.meta.env.VITE_APP_ORIGIN || location.origin).replace(/\/+$/, '');
+  (import.meta.env.VITE_APP_ORIGIN || 'https://yanta.page').replace(/\/+$/, '');
 
 export const BILLING_PUBLIC_ORIGIN =
-  (import.meta.env.VITE_BILLING_PUBLIC_ORIGIN || location.origin).replace(/\/+$/, '');
+  (import.meta.env.VITE_BILLING_PUBLIC_ORIGIN || YANTA_APP_ORIGIN).replace(/\/+$/, '');
+
+export function billingPageUrl(path = '/pricing') {
+  const clean = String(path || '/pricing').startsWith('/')
+    ? String(path || '/pricing')
+    : `/${path}`;
+
+  return `${BILLING_PUBLIC_ORIGIN}${clean}`;
+}

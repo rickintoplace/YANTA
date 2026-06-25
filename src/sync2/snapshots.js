@@ -25,6 +25,7 @@ import {
 
 import {
   encodeVaultState,
+  encodeCompactVaultState,
   applyVaultUpdate,
 } from './vault-doc.js';
 
@@ -49,7 +50,7 @@ export async function uploadVaultSnapshot(engine, {
 
   const seq = engine.seq + 1;
   const path = vaultSnapshotPath(engine.deviceId, seq);
-  const plain = encodeVaultState();
+  const plain = encodeCompactVaultState();
 
   const encrypted = await encryptBytes(
     engine.keys.contentKey,

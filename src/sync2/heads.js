@@ -29,6 +29,7 @@ import {
 
 import {
   encodeVaultState,
+  encodeCompactVaultState,
   applyVaultUpdate,
 } from './vault-doc.js';
 
@@ -82,7 +83,7 @@ function entrySize(entry) {
 
 export async function uploadVaultHead(engine) {
   const path = vaultHeadPath(engine.deviceId);
-  const plain = encodeVaultState();
+  const plain = encodeCompactVaultState();
 
   const encrypted = await encryptBytes(
     engine.keys.contentKey,

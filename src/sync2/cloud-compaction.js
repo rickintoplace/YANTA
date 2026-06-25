@@ -97,6 +97,82 @@ function docUpdateGroup(path = '') {
   return m ? `doc:${m[1]}` : '';
 }
 
+function docHeadGroup(path = '') {
+  const m = String(path || '').match(/^yanta-sync-v1\/docs\/([^/]+)\/heads\//);
+
+  return m ? `doc:${m[1]}` : '';
+}
+
+function headCoveredUpdateEntriesFromIndex(index = [], {
+  safetyDelayMs = 30_000,
+} = {}) {
+  const entries = index || [];
+  const cutoffNow = Date.now() - Math.max(0, Number(safetyDelayMs || 0));
+
+  const deleteEntries = [];
+
+  const vaultHeads = sortNewestFirst(
+    entries.filter((entry) => objectKind(entry.path) === 'vault-head')
+  );
+
+  const latestVaultHeadUpdated = Math.min(
+    entryUpdated(vaultHeads[0]) || 0,
+    cutoffNow
+  );
+
+  if (latestVaultHeadUpdated > 0) {
+    for (const entry of entries) {
+      if (
+        objectKind(entry.path) === 'vault-update' &&
+        entryUpdated(entry) <= latestVaultHeadUpdated
+      ) {
+        deleteEntries.push(entry);
+      }
+    }
+  }
+
+  const latestNoteHeadUpdatedByDoc = new Map();
+
+  for (const entry of entries) {
+    if (objectKind(entry.path) !== 'note-head') continue;
+
+    const group = docHeadGroup(entry.path);
+    if (!group) continue;
+
+    latestNoteHeadUpdatedByDoc.set(
+      group,
+      Math.max(
+        latestNoteHeadUpdatedByDoc.get(group) || 0,
+        entryUpdated(entry)
+      )
+    );
+  }
+
+  for (const entry of entries) {
+    if (objectKind(entry.path) !== 'note-update') continue;
+
+    const group = docUpdateGroup(entry.path);
+    const latestHeadUpdated = Math.min(
+      latestNoteHeadUpdatedByDoc.get(group) || 0,
+      cutoffNow
+    );
+
+    if (latestHeadUpdated > 0 && entryUpdated(entry) <= latestHeadUpdated) {
+      deleteEntries.push(entry);
+    }
+  }
+
+  const seen = new Set();
+
+  return sortOldestFirst(deleteEntries).filter((entry) => {
+    if (!entry?.path) return false;
+    if (seen.has(entry.path)) return false;
+
+    seen.add(entry.path);
+    return true;
+  });
+}
+
 function entryUpdated(entry) {
   return Number(entry?.updated || 0) || 0;
 }
@@ -491,6 +567,27 @@ export async function compactYantaCloudStorage(engine, {
     message: 'Starting cloud storage optimization…',
   });
 
+  /*
+    Old local builds may have queued huge VaultDoc full updates.
+    They are superseded by the fresh compact heads/snapshots created below.
+  */
+  if (Array.isArray(engine.outbox) && engine.outbox.some((item) => item?.kind === 'vault')) {
+    const before = engine.outbox.length;
+
+    engine.outbox = engine.outbox.filter((item) => item?.kind !== 'vault');
+
+    const dropped = before - engine.outbox.length;
+
+    if (dropped > 0) {
+      engine.progress?.({
+        phase: 'compactOutbox',
+        direction: 'up',
+        detailed: true,
+        message: `Dropped ${dropped} oversized/stale local vault metadata update${dropped === 1 ? '' : 's'} before compaction.`,
+      });
+    }
+  }
+
   await engine.loadRemoteIndex({
     force: true,
   });
@@ -623,6 +720,25 @@ export async function compactYantaCloudStorage(engine, {
   });
 
   /*
+    Strong cleanup:
+    After fresh latest-state heads are uploaded, older update-journal entries
+    are redundant for normal clients. They can be removed even if this device
+    did not individually mark every historical update as seen.
+  */
+  const indexAfterHeads = await engine.loadRemoteIndex({
+    force: true,
+  });
+
+  const headCoveredPlan = headCoveredUpdateEntriesFromIndex(indexAfterHeads, {
+    safetyDelayMs: 30_000,
+  });
+
+  const headCoveredCleanup = await deleteRemoteEntries(engine, headCoveredPlan, {
+    phase: 'compactDelete',
+    message: 'Deleting sync journal covered by latest states…',
+  });
+
+  /*
     Also clean old legacy snapshots/updates using timestamp-based compatibility
     cleanup for objects covered by snapshots.
   */
@@ -669,11 +785,13 @@ export async function compactYantaCloudStorage(engine, {
     assets,
 
     journalCleanup,
+    headCoveredCleanup,
     cleanup,
 
     freedBytes:
       Number(headroom.bytes || 0) +
       Number(journalCleanup.bytes || 0) +
+      Number(headCoveredCleanup.bytes || 0) +
       Number(cleanup.bytes || 0),
   };
 }

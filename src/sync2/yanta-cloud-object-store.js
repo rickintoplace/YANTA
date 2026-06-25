@@ -386,6 +386,19 @@ export class YantaCloudObjectStore extends RemoteObjectStore {
       err.serverCode = errorCode;
     }
 
+    if (res.status === 413 && errorCode === 'object_too_large') {
+      err.code = 'EOBJECT_TOO_LARGE';
+      err.serverCode = errorCode;
+
+      if (parsed?.maxBytes != null) {
+        err.maxBytes = Number(parsed.maxBytes || 0);
+      }
+    }
+
+    if (res.status === 413 && !err.code) {
+      err.code = 'EOBJECT_TOO_LARGE';
+    }
+
     if (res.status === 429) {
       err.code = 'ERATE_LIMIT';
 

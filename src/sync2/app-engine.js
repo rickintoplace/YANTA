@@ -35,6 +35,7 @@ import {
 import {
   getVaultDoc,
   encodeVaultState,
+  encodeCompactVaultState,
   applyVaultUpdate,
   onVaultUpdate,
   vaultNotesMap,
@@ -204,6 +205,15 @@ function seqFromRemoteObjectPath(path, deviceId) {
   const n = Number(m[1]);
 
   return Number.isFinite(n) ? n : 0;
+}
+
+function isObjectTooLargeError(err) {
+  return (
+    err?.status === 413 ||
+    err?.code === 'EOBJECT_TOO_LARGE' ||
+    err?.serverCode === 'object_too_large' ||
+    /object_too_large|object too large|content too large/i.test(err?.message || '')
+  );
 }
 
 function sanitizeNoteMeta(note) {
@@ -1541,7 +1551,7 @@ export class Sync2AppEngine {
     ) {
       this.outbox.push({
         kind: 'vault',
-        update: encodeVaultState(),
+        update: encodeCompactVaultState(),
         created: Date.now(),
         full: true,
         reason,
@@ -1700,9 +1710,10 @@ export class Sync2AppEngine {
     } else {
       this.outbox.push({
         kind: 'vault',
-        update: encodeVaultState(),
+        update: encodeCompactVaultState(),
         created: Date.now(),
         full: true,
+        compact: true,
       });
 
       let i = 0;
@@ -1818,7 +1829,26 @@ export class Sync2AppEngine {
         message: 'Uploading queued changes…',
       });
   
-      const firstPush = await this.uploadOutbox();
+      let firstPush = {
+        uploaded: 0,
+      };
+
+      try {
+        firstPush = await this.uploadOutbox();
+      } catch (err) {
+        if (!isObjectTooLargeError(err)) {
+          throw err;
+        }
+
+        console.warn('[YANTA Sync2] upload skipped because one object is too large; continuing pull', err);
+
+        this.progress({
+          phase: 'uploadOutbox',
+          status: 'error',
+          direction: 'up',
+          message: 'One local sync object is too large. Continuing download first…',
+        });
+      }
 
       this.progress({
         phase: 'downloadVaultHeads',
@@ -1995,8 +2025,27 @@ export class Sync2AppEngine {
         lastErrorAt: null,
       });
   
-      const finalPush = await this.uploadOutbox();
-  
+      let finalPush = {
+        uploaded: 0,
+      };
+
+      try {
+        finalPush = await this.uploadOutbox();
+      } catch (err) {
+        if (!isObjectTooLargeError(err)) {
+          throw err;
+        }
+
+        console.warn('[YANTA Sync2] final upload skipped because one object is too large', err);
+
+        this.progress({
+          phase: 'uploadOutbox',
+          status: 'error',
+          direction: 'up',
+          message: 'Local upload still has an oversized object. Download completed; upload will retry after compaction.',
+        });
+      }
+
       if (finalPush.uploaded > 0) {
         // Do not call updateDeviceRecord here again, otherwise it would queue
         // another vault update directly after the final upload.
@@ -2613,6 +2662,32 @@ export class Sync2AppEngine {
             await this.applyOutboxUploadMarkers(item);
 
             this.outbox.shift();
+            continue;
+          }
+
+          if (
+            isObjectTooLargeError(err) &&
+            item.kind === 'vault' &&
+            item.compactRetry !== true
+          ) {
+            console.warn('[YANTA Sync2] vault update too large; retrying with compact vault state', {
+              path,
+              seq,
+              bytes: encrypted?.byteLength || 0,
+            });
+
+            item.update = encodeCompactVaultState();
+            item.full = true;
+            item.compact = true;
+            item.compactRetry = true;
+            item.reason = [item.reason, 'compact-vault-retry']
+              .filter(Boolean)
+              .join('+');
+
+            /*
+              Do not consume seq. Do not shift item.
+              Retry the same outbox item with compact data.
+            */
             continue;
           }
 

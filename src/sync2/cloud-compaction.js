@@ -182,6 +182,66 @@ function headCoveredUpdateEntriesFromIndex(index = [], {
   });
 }
 
+function orphanNoteUpdateEntriesFromIndex(index = [], {
+  safetyDelayMs = 60_000,
+} = {}) {
+  /*
+    Explicit compaction cleanup for deleted/old note-doc journals.
+    
+    If a docs/<hash>/updates group has no corresponding docs/<hash>/heads
+    and no docs/<hash>/snapshots object, then no active known note state is
+    represented for that doc group anymore.
+
+    After pre-compaction sync + fresh heads/snapshots for all active notes,
+    those orphan update groups are stale history and can be removed.
+  */
+  const entries = index || [];
+  const cutoff = Date.now() - Math.max(0, Number(safetyDelayMs || 0));
+
+  const docGroupsWithCanonicalState = new Set();
+
+  for (const entry of entries) {
+    const kind = objectKind(entry.path);
+
+    if (kind === 'note-head') {
+      const group = docHeadGroup(entry.path);
+      if (group) docGroupsWithCanonicalState.add(group);
+      continue;
+    }
+
+    if (kind === 'note-snapshot') {
+      const group = docSnapshotGroup(entry.path);
+      if (group) docGroupsWithCanonicalState.add(group);
+      continue;
+    }
+  }
+
+  const deleteEntries = [];
+
+  for (const entry of entries) {
+    if (objectKind(entry.path) !== 'note-update') continue;
+    if (entryUpdated(entry) > cutoff) continue;
+
+    const group = docUpdateGroup(entry.path);
+
+    if (!group) continue;
+
+    if (!docGroupsWithCanonicalState.has(group)) {
+      deleteEntries.push(entry);
+    }
+  }
+
+  const seen = new Set();
+
+  return sortOldestFirst(deleteEntries).filter((entry) => {
+    if (!entry?.path) return false;
+    if (seen.has(entry.path)) return false;
+
+    seen.add(entry.path);
+    return true;
+  });
+}
+
 function entryUpdated(entry) {
   return Number(entry?.updated || 0) || 0;
 }
@@ -812,6 +872,24 @@ export async function compactYantaCloudStorage(engine, {
     message: 'Deleting sync history covered by snapshots…',
   });
 
+  /*
+    Final explicit compaction pass:
+    remove stale note-update journals for doc groups that no longer have
+    any head or snapshot after this fresh compaction run.
+  */
+  const indexAfterCleanup = await engine.loadRemoteIndex({
+    force: true,
+  });
+
+  const orphanPlan = orphanNoteUpdateEntriesFromIndex(indexAfterCleanup, {
+    safetyDelayMs: 60_000,
+  });
+
+  const orphanCleanup = await deleteRemoteEntries(engine, orphanPlan, {
+    phase: 'compactDelete',
+    message: 'Deleting orphaned note sync journal…',
+  });
+
   await engine.loadRemoteIndex({
     force: true,
   });
@@ -844,11 +922,13 @@ export async function compactYantaCloudStorage(engine, {
     journalCleanup,
     headCoveredCleanup,
     cleanup,
+    orphanCleanup,
 
     freedBytes:
       Number(headroom.bytes || 0) +
       Number(journalCleanup.bytes || 0) +
       Number(headCoveredCleanup.bytes || 0) +
-      Number(cleanup.bytes || 0),
+      Number(cleanup.bytes || 0) +
+      Number(orphanCleanup.bytes || 0),
   };
 }

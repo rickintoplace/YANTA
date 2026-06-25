@@ -91,11 +91,13 @@ export async function uploadVaultHead(engine) {
     path
   );
 
-  await engine.remote.put(path, encrypted, {
-    ifAbsent: false,
-  });
-
+  await engine.remote.put(path, encrypted);
   engine.clearRemoteIndex?.();
+
+  await engine.markSeen(path, {
+    type: 'vault-head',
+    own: true,
+  });
 
   return {
     path,
@@ -104,9 +106,6 @@ export async function uploadVaultHead(engine) {
 }
 
 export async function uploadNoteHead(engine, noteId) {
-  const entry = getNoteDoc(noteId);
-  await entry.ready;
-
   const path = await docHeadPath(
     engine.keys.nameKey,
     noteId,
@@ -121,11 +120,14 @@ export async function uploadNoteHead(engine, noteId) {
     path
   );
 
-  await engine.remote.put(path, encrypted, {
-    ifAbsent: false,
-  });
-
+  await engine.remote.put(path, encrypted);
   engine.clearRemoteIndex?.();
+
+  await engine.markSeen(path, {
+    type: 'note-head',
+    noteId,
+    own: true,
+  });
 
   return {
     path,

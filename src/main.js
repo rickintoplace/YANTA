@@ -831,9 +831,16 @@ window.yantaSync2Debug = async () => {
 
   let status = null;
   let breakdown = null;
+  let index = [];
 
   try {
     status = await engine?.status?.();
+  } catch {}
+
+  try {
+    index = await engine?.loadRemoteIndex?.({
+      force: true,
+    }) || [];
   } catch {}
 
   try {
@@ -858,6 +865,105 @@ window.yantaSync2Debug = async () => {
     };
   }
 
+  const kindOf = (path = '') => {
+    const p = String(path || '');
+
+    if (p.includes('/vault/heads/')) return 'vault-head';
+    if (p.includes('/vault/updates/')) return 'vault-update';
+    if (p.includes('/vault/snapshots/')) return 'vault-snapshot';
+
+    if (p.includes('/docs/') && p.includes('/heads/')) return 'note-head';
+    if (p.includes('/docs/') && p.includes('/updates/')) return 'note-update';
+    if (p.includes('/docs/') && p.includes('/snapshots/')) return 'note-snapshot';
+
+    if (p.includes('/assets/')) return 'asset';
+
+    return 'other';
+  };
+
+  const docGroup = (path = '') => {
+    const m = String(path || '').match(/^yanta-sync-v1\/docs\/([^/]+)\//);
+    return m ? m[1] : '';
+  };
+
+  const byKind = new Map();
+
+  for (const entry of index) {
+    const kind = kindOf(entry.path);
+    const prev = byKind.get(kind) || {
+      kind,
+      count: 0,
+      bytes: 0,
+    };
+
+    prev.count += 1;
+    prev.bytes += Number(entry.size || 0);
+
+    byKind.set(kind, prev);
+  }
+
+  const docs = new Map();
+
+  for (const entry of index) {
+    const group = docGroup(entry.path);
+    if (!group) continue;
+
+    const rec = docs.get(group) || {
+      docGroup: group,
+      heads: 0,
+      headBytes: 0,
+      headLatest: 0,
+      snapshots: 0,
+      snapshotBytes: 0,
+      snapshotLatest: 0,
+      updates: 0,
+      updateBytes: 0,
+      updateLatest: 0,
+      updateOldest: Infinity,
+    };
+
+    const kind = kindOf(entry.path);
+    const size = Number(entry.size || 0);
+    const updated = Number(entry.updated || 0);
+
+    if (kind === 'note-head') {
+      rec.heads++;
+      rec.headBytes += size;
+      rec.headLatest = Math.max(rec.headLatest, updated);
+    }
+
+    if (kind === 'note-snapshot') {
+      rec.snapshots++;
+      rec.snapshotBytes += size;
+      rec.snapshotLatest = Math.max(rec.snapshotLatest, updated);
+    }
+
+    if (kind === 'note-update') {
+      rec.updates++;
+      rec.updateBytes += size;
+      rec.updateLatest = Math.max(rec.updateLatest, updated);
+      rec.updateOldest = Math.min(rec.updateOldest, updated);
+    }
+
+    docs.set(group, rec);
+  }
+
+  const docGroups = [...docs.values()]
+    .map((rec) => ({
+      ...rec,
+      updateOldest: Number.isFinite(rec.updateOldest) ? rec.updateOldest : 0,
+      orphanUpdates: rec.updates > 0 && rec.heads === 0 && rec.snapshots === 0,
+      updatesCoveredByHead:
+        rec.updates > 0 &&
+        rec.headLatest > 0 &&
+        rec.updateLatest <= rec.headLatest,
+      updatesCoveredBySnapshot:
+        rec.updates > 0 &&
+        rec.snapshotLatest > 0 &&
+        rec.updateLatest <= rec.snapshotLatest,
+    }))
+    .sort((a, b) => b.updateBytes - a.updateBytes);
+
   const outbox = Array.isArray(engine?.outbox)
     ? engine.outbox.map((item) => ({
         kind: item.kind,
@@ -869,12 +975,28 @@ window.yantaSync2Debug = async () => {
       }))
     : [];
 
-  return {
+  const result = {
     compactVaultBytes,
     status,
     outbox,
     breakdown,
+    groups: [...byKind.values()].sort((a, b) => b.bytes - a.bytes),
+    largestDocJournals: docGroups.slice(0, 20),
+    orphanNoteUpdateBytes: docGroups
+      .filter((x) => x.orphanUpdates)
+      .reduce((sum, x) => sum + x.updateBytes, 0),
+    headCoveredNoteUpdateBytes: docGroups
+      .filter((x) => x.updatesCoveredByHead)
+      .reduce((sum, x) => sum + x.updateBytes, 0),
+    snapshotCoveredNoteUpdateBytes: docGroups
+      .filter((x) => x.updatesCoveredBySnapshot)
+      .reduce((sum, x) => sum + x.updateBytes, 0),
   };
+
+  console.table(result.groups);
+  console.table(result.largestDocJournals);
+
+  return result;
 };
 
 function searchHaystack(note, body = '') {

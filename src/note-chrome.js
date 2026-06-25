@@ -878,6 +878,13 @@ function commitMirrorTitleInput(input) {
 
   canonical.value = input.value || '';
 
+  const note = currentNote();
+
+  if (note) {
+    note.title = input.value.trim() || note.title || 'Untitled';
+    note.updated = Date.now();
+  }
+
   canonical.dispatchEvent(new Event('input', {
     bubbles: true,
   }));
@@ -888,6 +895,13 @@ function blurMirrorTitleInput(input) {
   if (!canonical || !input) return;
 
   canonical.value = input.value || '';
+
+  const note = currentNote();
+
+  if (note) {
+    note.title = input.value.trim() || 'Untitled';
+    note.updated = Date.now();
+  }
 
   canonical.dispatchEvent(new Event('blur', {
     bubbles: true,
@@ -912,19 +926,35 @@ function createPaneTitleRow(surface) {
     spellcheck: 'false',
   });
 
-  input.addEventListener('input', () => {
+  input.addEventListener('input', (e) => {
+    e.stopPropagation();
     commitMirrorTitleInput(input);
   });
 
-  input.addEventListener('blur', () => {
+  input.addEventListener('blur', (e) => {
+    e.stopPropagation();
     blurMirrorTitleInput(input);
   });
 
   input.addEventListener('keydown', (e) => {
+    e.stopPropagation();
+
     if (e.key === 'Enter') {
       e.preventDefault();
       input.blur();
     }
+  });
+
+  input.addEventListener('keyup', (e) => {
+    e.stopPropagation();
+  });
+
+  input.addEventListener('keypress', (e) => {
+    e.stopPropagation();
+  });
+
+  input.addEventListener('beforeinput', (e) => {
+    e.stopPropagation();
   });
 
   row.append(input);

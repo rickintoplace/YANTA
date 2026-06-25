@@ -1602,6 +1602,13 @@ class EditorTitleWidget extends WidgetType {
 
       c.value = input.value || '';
 
+      const note = this.noteId ? state.notes.get(this.noteId) : null;
+
+      if (note) {
+        note.title = input.value.trim() || note.title || 'Untitled';
+        note.updated = Date.now();
+      }
+
       c.dispatchEvent(new Event('input', {
         bubbles: true,
       }));
@@ -1613,19 +1620,53 @@ class EditorTitleWidget extends WidgetType {
 
       c.value = input.value || '';
 
+      const note = this.noteId ? state.notes.get(this.noteId) : null;
+
+      if (note) {
+        note.title = input.value.trim() || 'Untitled';
+        note.updated = Date.now();
+      }
+
       c.dispatchEvent(new Event('blur', {
         bubbles: true,
       }));
     };
 
-    input.addEventListener('input', commitInput);
-    input.addEventListener('blur', commitBlur);
+    input.addEventListener('input', (e) => {
+      e.stopPropagation();
+      commitInput();
+    });
+
+    input.addEventListener('blur', (e) => {
+      e.stopPropagation();
+      commitBlur();
+    });
 
     input.addEventListener('keydown', (e) => {
+      /*
+        Critical:
+        This input lives inside a CodeMirror block widget.
+        If keydown bubbles, CodeMirror may consume ArrowLeft/ArrowRight,
+        Home/End, Backspace, shortcuts, etc. Native input editing must win.
+      */
+      e.stopPropagation();
+
       if (e.key === 'Enter') {
         e.preventDefault();
         input.blur();
       }
+    });
+
+    input.addEventListener('keyup', (e) => {
+      e.stopPropagation();
+    });
+
+    input.addEventListener('keypress', (e) => {
+      e.stopPropagation();
+    });
+
+    input.addEventListener('beforeinput', (e) => {
+      e.stopPropagation();
     });
 
     /*
@@ -1644,12 +1685,12 @@ class EditorTitleWidget extends WidgetType {
     return row;
   }
 
-  ignoreEvent(event) {
+  ignoreEvent() {
     /*
-      false = Browser/Input darf Events normal behandeln.
-      Wir stoppen oben nur die Pointer-Bubbling-Kette Richtung CM.
+      true = CodeMirror ignores events inside this widget.
+      The native input can handle cursor movement, selection, typing, etc.
     */
-    return false;
+    return true;
   }
 }
 

@@ -670,11 +670,20 @@ export function clearEditor() {
 }
 
 export async function saveCurrentNote() {
-  if (!state.currentNoteId) return;
-  const note = state.notes.get(state.currentNoteId);
+  const noteId = state.currentNoteId;
+  if (!noteId) return;
+
+  const note = state.notes.get(noteId);
   if (!note) return;
+
   const titleInput = $('noteTitle');
   const newTitle = titleInput?.value?.trim() || note.title || 'Untitled';
+
+  /*
+    If a debounced title save fires after navigation, never write the old
+    title input into the newly opened note or vice versa.
+  */
+  if (state.currentNoteId !== noteId) return;
   const titleChanged = note.title !== newTitle;
   note.title = newTitle;
   note.updated = Date.now();

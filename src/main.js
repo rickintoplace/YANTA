@@ -183,6 +183,25 @@ import {
 
 let sharePreviewLocked = false;
 
+let noteTitleSaveTimer = 0;
+
+function scheduleCurrentNoteTitleSave() {
+  clearTimeout(noteTitleSaveTimer);
+
+  noteTitleSaveTimer = window.setTimeout(() => {
+    saveCurrentNote().catch((err) => {
+      console.warn('[YANTA] title autosave failed', err);
+    });
+  }, 450);
+}
+
+async function flushCurrentNoteTitleSave() {
+  clearTimeout(noteTitleSaveTimer);
+  noteTitleSaveTimer = 0;
+
+  await saveCurrentNote();
+}
+
 const MOBILE_MQ = window.matchMedia('(max-width: 880px)');
 const DESKTOP_SIDEBAR_MQ = window.matchMedia('(min-width: 881px)');
 let sidebarCollapsedPref = false;
@@ -2194,11 +2213,15 @@ function bindEvents() {
 
   // title + tags
   $('noteTitle')?.addEventListener('input', () => {
-    saveCurrentNote();
+    scheduleCurrentNoteTitleSave();
   });
 
   $('noteTitle')?.addEventListener('blur', () => {
-    saveCurrentNote().then(() => renderTree());
+    flushCurrentNoteTitleSave()
+      .then(() => renderTree())
+      .catch((err) => {
+        console.warn('[YANTA] title blur save failed', err);
+      });
   });
 
   $('tagInput')?.addEventListener('keydown', (e) => {

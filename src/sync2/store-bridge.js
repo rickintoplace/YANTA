@@ -258,8 +258,13 @@ export function putVaultNoteMeta(note, origin = VAULT_ORIGINS.STORE_BRIDGE) {
     */
     if (onlyVolatileVaultMetaChanged(existing, meta)) return;
 
-    if (shouldKeepExistingByUpdated(existing, meta)) return;
-
+    /*
+      Important:
+      Do NOT reject real local semantic metadata changes because existing.updated
+      is newer. Device clocks can differ and body edits used to bump updated.
+      If title/folder/tags/icon/color/etc. actually changed, the explicit local
+      store write must reach VaultDoc.
+    */
     notes.set(meta.id, safeJsonClone(meta));
     vaultTombstonesMap().delete(meta.id);
   }, origin);
@@ -284,8 +289,10 @@ export function putVaultFolderMeta(folder, origin = VAULT_ORIGINS.STORE_BRIDGE) 
     */
     if (onlyVolatileVaultMetaChanged(existing, meta)) return;
 
-    if (shouldKeepExistingByUpdated(existing, meta)) return;
-
+    /*
+      Same reasoning as notes: explicit local semantic folder changes should
+      not be blocked by a newer timestamp from another device.
+    */
     folders.set(meta.id, safeJsonClone(meta));
     vaultTombstonesMap().delete(meta.id);
   }, origin);

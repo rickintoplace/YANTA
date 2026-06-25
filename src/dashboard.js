@@ -121,6 +121,232 @@ import {
   const DASHBOARD_DRAWING_THUMB_W = 360;
   const DASHBOARD_DRAWING_THUMB_H = 220;
 
+  const DASHBOARD_EMPTY_PENDING_MS = 12_000;
+
+  function injectDashboardPreviewLoadingCss() {
+    if (document.getElementById('yanta-dashboard-preview-loading-css')) return;
+
+    const style = document.createElement('style');
+    style.id = 'yanta-dashboard-preview-loading-css';
+    style.textContent = `
+.yanta-dash-preview-loading {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 2px 0;
+  opacity: 1;
+  animation: yantaDashPreviewLoadingIn 160ms ease both;
+}
+
+.yanta-dash-preview-loading.media {
+  min-height: 112px;
+}
+
+.yanta-dash-preview-loading.event {
+  min-height: 70px;
+}
+
+.yanta-dash-skeleton-line,
+.yanta-dash-skeleton-media,
+.yanta-dash-skeleton-event {
+  position: relative;
+  overflow: hidden;
+  border-radius: 999px;
+  background:
+    color-mix(
+      in srgb,
+      var(--card-color, var(--note-color, var(--accent))) 18%,
+      var(--bg-elev-2)
+    );
+}
+
+.yanta-dash-skeleton-line {
+  height: 10px;
+}
+
+.yanta-dash-skeleton-line.long {
+  width: 88%;
+}
+
+.yanta-dash-skeleton-line.mid {
+  width: 72%;
+}
+
+.yanta-dash-skeleton-line.short {
+  width: 42%;
+}
+
+.yanta-dash-skeleton-media {
+  height: 104px;
+  border-radius: 12px;
+}
+
+.yanta-dash-skeleton-event {
+  height: 54px;
+  border-radius: 12px;
+}
+
+.yanta-dash-skeleton-line::after,
+.yanta-dash-skeleton-media::after,
+.yanta-dash-skeleton-event::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  transform: translateX(-120%);
+  background:
+    linear-gradient(
+      90deg,
+      transparent,
+      color-mix(in srgb, white 18%, transparent),
+      transparent
+    );
+  animation: yantaDashSkeletonSweep 1.7s ease-in-out infinite;
+}
+
+.yanta-dash-folder-mini-loading {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding-top: 2px;
+}
+
+.yanta-dash-folder-mini-loading span {
+  height: 5px;
+  border-radius: 999px;
+  background:
+    color-mix(
+      in srgb,
+      var(--mini-color, var(--accent)) 18%,
+      var(--bg-elev-2)
+    );
+  opacity: 0.92;
+}
+
+.yanta-dash-folder-mini-loading span:nth-child(1) {
+  width: 84%;
+}
+
+.yanta-dash-folder-mini-loading span:nth-child(2) {
+  width: 66%;
+}
+
+.yanta-dash-folder-mini-loading span:nth-child(3) {
+  width: 42%;
+}
+
+@keyframes yantaDashSkeletonSweep {
+  0% {
+    transform: translateX(-120%);
+  }
+
+  55% {
+    transform: translateX(120%);
+  }
+
+  100% {
+    transform: translateX(120%);
+  }
+}
+
+@keyframes yantaDashPreviewLoadingIn {
+  from {
+    opacity: 0;
+    transform: translateY(2px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .yanta-dash-skeleton-line::after,
+  .yanta-dash-skeleton-media::after,
+  .yanta-dash-skeleton-event::after,
+  .yanta-dash-preview-loading {
+    animation: none !important;
+  }
+}
+`;
+    document.head.append(style);
+  }
+
+  function dashboardNoteLooksTemporarilyEmpty(note, {
+    preview = null,
+    eventHeader = null,
+  } = {}) {
+    if (!note) return false;
+    if (eventHeader) return false;
+    if (preview?.blocks?.length || preview?.badges?.length) return false;
+
+    const status = state.noteSyncStatus.get(note.id);
+    const fresh =
+      Date.now() - Number(note.updated || note.created || 0) < DASHBOARD_EMPTY_PENDING_MS;
+
+    return (
+      fresh ||
+      status === 'remote' ||
+      status === 'syncing' ||
+      state.globalSyncStatus === 'syncing'
+    );
+  }
+
+  function dashboardPreviewMayContainMedia(note) {
+    const icon = String(note?.icon || '').toLowerCase();
+    const type = String(note?.type || '').toLowerCase();
+
+    return (
+      type === 'drawing' ||
+      icon.includes('image') ||
+      icon.includes('play') ||
+      icon.includes('video') ||
+      icon.includes('podcast') ||
+      icon.includes('line-squiggle')
+    );
+  }
+
+  function renderDashboardPreviewSkeleton(note, {
+    media = false,
+    event = false,
+  } = {}) {
+    const wrap = el('div', {
+      class:
+        'yanta-dash-preview-loading' +
+        (media ? ' media' : '') +
+        (event ? ' event' : ''),
+      'aria-label': 'Loading note preview',
+    });
+
+    if (event) {
+      wrap.append(el('div', { class: 'yanta-dash-skeleton-event' }));
+    }
+
+    if (media) {
+      wrap.append(el('div', { class: 'yanta-dash-skeleton-media' }));
+    }
+
+    wrap.append(
+      el('div', { class: 'yanta-dash-skeleton-line long' }),
+      el('div', { class: 'yanta-dash-skeleton-line mid' }),
+      el('div', { class: 'yanta-dash-skeleton-line short' })
+    );
+
+    return wrap;
+  }
+
+  function renderDashboardFolderMiniSkeleton() {
+    return el('div', {
+      class: 'yanta-dash-folder-mini-loading',
+      'aria-label': 'Loading note preview',
+    },
+      el('span'),
+      el('span'),
+      el('span')
+    );
+  }
+
   const DASHBOARD_CARD_DISPLAY_KEY = 'dashboard.cardDisplay.v1';
 
   const DEFAULT_DASHBOARD_CARD_DISPLAY = {
@@ -1279,6 +1505,8 @@ function getDashboardItems() {
   export function setupDashboard() {
     if (initialized) return;
     initialized = true;
+
+    injectDashboardPreviewLoadingCss();
   
     ensureDashboardRoot();
 
@@ -2200,7 +2428,11 @@ function renderCard(item, { section }) {
       dataset: { previewHost: '1' },
     });
 
-    previewHost.innerHTML = `<div class="yanta-dash-preview-skeleton"></div>`;
+    previewHost.replaceChildren(
+      renderDashboardPreviewSkeleton(item.note, {
+        media: dashboardPreviewMayContainMedia(item.note),
+      })
+    );
 
     card.append(previewHost);
 
@@ -3041,7 +3273,7 @@ function renderFolderPreviewCell(child) {
     },
   });
 
-  previewHost.innerHTML = `<div class="yanta-dash-folder-mini-skeleton"></div>`;
+  previewHost.replaceChildren(renderDashboardFolderMiniSkeleton());
 
   cell.append(previewHost);
 
@@ -3086,9 +3318,16 @@ async function hydrateFolderNotePreviewCell(host, noteId) {
   host.replaceChildren();
 
   if (!preview.blocks.length && !preview.badges.length) {
-    host.append(el('div', {
-      class: 'yanta-dash-folder-mini-empty',
-    }, 'Empty note'));
+    if (dashboardNoteLooksTemporarilyEmpty(note, {
+      preview,
+      eventHeader: null,
+    })) {
+      host.append(renderDashboardFolderMiniSkeleton());
+    } else {
+      host.append(el('div', {
+        class: 'yanta-dash-folder-mini-empty',
+      }, 'Empty note'));
+    }
 
     return;
   }
@@ -3291,9 +3530,20 @@ function renderFolderMiniDrawing(noteId, block) {
     }
 
     if (!preview.blocks.length && !preview.badges.length && !eventHeader) {
-      host.append(el('div', {
-        class: 'yanta-dash-empty-preview',
-      }, 'Empty note'));
+      if (dashboardNoteLooksTemporarilyEmpty(note, {
+        preview,
+        eventHeader,
+      })) {
+        host.append(
+          renderDashboardPreviewSkeleton(note, {
+            media: dashboardPreviewMayContainMedia(note),
+          })
+        );
+      } else {
+        host.append(el('div', {
+          class: 'yanta-dash-empty-preview',
+        }, 'Empty note'));
+      }
 
       fitDashboardNoteCardToRenderedPreview(card, note, host);
       return;

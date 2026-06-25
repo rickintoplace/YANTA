@@ -128,6 +128,7 @@ import {
   closeCalendar,
   closeCalendarPane,
   calendarChoiceDialog,
+  setupCalendarVaultBridge,
 } from './calendar.js';
 import {
   loadCalendarPreferences,
@@ -329,6 +330,53 @@ let sync2Auto = {
   silentResumeTimer: 0,
   silentResumeRunning: false,
 };
+
+const SYNC2_NOTE_BODY_IDLE_MS = 4_000;
+const SYNC2_NOTE_META_IDLE_MS = 1_500;
+const SYNC2_CALENDAR_IDLE_MS = 3_000;
+const SYNC2_FOCUS_MIN_INTERVAL_MS = 20_000;
+
+function isRemoteOrInternalSyncEvent(detail = {}) {
+  const source = String(detail.source || '');
+  const reason = String(detail.reason || '');
+
+  return (
+    source === 'sync' ||
+    source === 'sync2' ||
+    source === 'public-share' ||
+    reason.startsWith('sync2-') ||
+    reason.includes('sync2') ||
+    reason === 'public-share-status'
+  );
+}
+
+function isHighFrequencyNoteEdit(detail = {}) {
+  const reason = String(detail.reason || '');
+
+  return (
+    reason === 'body-change' ||
+    reason === 'drawing-change' ||
+    reason === 'task-toggle' ||
+    reason === 'external-insert'
+  );
+}
+
+function clearPendingSync2AutoSync() {
+  clearTimeout(sync2Auto.timer);
+  sync2Auto.timer = 0;
+}
+
+async function flushSync2AutoSync(reason = 'flush', {
+  interactive = false,
+  catchUp = false,
+} = {}) {
+  clearPendingSync2AutoSync();
+
+  return runSync2Now(reason, {
+    interactive,
+    catchUp,
+  });
+}
 
 async function tryStartYantaCloudRuntime({
   syncNow = false,
@@ -560,13 +608,9 @@ function startSync2AutoSync(engine, {
   window.addEventListener('focus', () => {
     const t = Date.now();
 
-    /*
-      Focus can fire repeatedly when switching windows, closing dialogs,
-      devtools, browser chrome, etc. Routine sync is useful, but not more
-      often than every 20s from focus alone.
-    */
-    if (t - lastFocusSyncRequestAt > 20_000) {
+    if (t - lastFocusSyncRequestAt > SYNC2_FOCUS_MIN_INTERVAL_MS) {
       lastFocusSyncRequestAt = t;
+
       requestSync2AutoSync('focus', 1200);
     }
 
@@ -579,60 +623,63 @@ function startSync2AutoSync(engine, {
   });
 
   document.addEventListener('visibilitychange', () => {
-    if (!document.hidden) {
-      requestSync2AutoSync('visibility', 500);
-      ensureGoogleDriveSyncSilently('visibility');
+    if (document.hidden) {
+      flushSync2AutoSync('visibility-hidden', {
+        interactive: false,
+        catchUp: false,
+      }).catch(() => {});
+
+      return;
     }
+
+    requestSync2AutoSync('visibility', 500);
+    ensureGoogleDriveSyncSilently('visibility');
+  });
+
+  window.addEventListener('yanta-note-closing', () => {
+    requestSync2AutoSync('note-closing', 0);
   });
 
   window.addEventListener('yanta-note-updated', (e) => {
     const detail = e.detail || {};
-    const source = String(detail.source || '');
-    const reason = String(detail.reason || '');
 
-    if (source === 'sync2' || source === 'sync') return;
-    if (source === 'public-share') return;
+    if (isRemoteOrInternalSyncEvent(detail)) return;
 
-    if (reason.startsWith('sync2-') || reason.includes('sync2')) return;
-    if (reason === 'public-share-status') return;
+    const reason = String(detail.reason || 'note-updated');
 
-    requestSync2AutoSync('note-updated', 1000);
+    requestSync2AutoSync(
+      `note-updated:${reason}`,
+      isHighFrequencyNoteEdit(detail)
+        ? SYNC2_NOTE_BODY_IDLE_MS
+        : SYNC2_NOTE_META_IDLE_MS
+    );
   });
 
   window.addEventListener('yanta-folder-updated', (e) => {
     const detail = e.detail || {};
-    const source = String(detail.source || '');
-    const reason = String(detail.reason || '');
 
-    if (source === 'sync2' || source === 'sync') return;
-    if (reason.startsWith('sync2-') || reason.includes('sync2')) return;
+    if (isRemoteOrInternalSyncEvent(detail)) return;
 
-    requestSync2AutoSync('folder-updated', 1000);
+    requestSync2AutoSync('folder-updated', SYNC2_NOTE_META_IDLE_MS);
   });
 
   /*
-    Dashboard refresh is mostly UI. Do not sync from it.
-    Real data changes emit yanta-note-updated / yanta-folder-updated.
+    Dashboard refresh is UI-only. Real data changes emit note/folder/calendar events.
   */
-  // window.addEventListener('yanta-dashboard-refresh', () => {
-  //   requestSync2AutoSync('dashboard-refresh', 1800);
-  // });
 
-  window.addEventListener('yanta-calendar-updated', () => {
-    requestSync2AutoSync('calendar-updated', 3000);
+  window.addEventListener('yanta-calendar-updated', (e) => {
+    const detail = e.detail || {};
+
+    if (isRemoteOrInternalSyncEvent(detail)) return;
+
+    requestSync2AutoSync('calendar-updated', SYNC2_CALENDAR_IDLE_MS);
   });
 
   /*
-    Wichtig:
-    Nicht auf yanta-vault-hydrated automatisch wieder syncen.
-
-    syncNow() hydratisiert nach einem Pull selbst den Vault und dispatcht
-    yanta-vault-hydrated. Wenn wir darauf direkt den nächsten Sync planen,
-    entsteht ein permanenter Pull/Push-Loop.
+    Do not sync from yanta-vault-hydrated.
+    syncNow() hydrates the vault after pull. Syncing again from that event
+    can create a loop.
   */
-  // window.addEventListener('yanta-vault-hydrated', () => {
-  //   requestSync2AutoSync('vault-hydrated', 2500);
-  // });
 
   window.setInterval(() => {
     if (!document.hidden) {
@@ -1404,6 +1451,7 @@ async function init() {
   setupWikilinkHover();
   setupImage();
   setupDraw();
+  setupCalendarVaultBridge();
   setupCitations();
   setupFormatToolbar();
   setupDashboard();
@@ -2550,21 +2598,21 @@ function handleGlobalKey(e) {
   }
   else if (meta && e.key === 's') {
     e.preventDefault();
-  
+
     saveCurrentNote()
       .then(async () => {
         toast('Saved', 'success');
-  
+
         try {
-          await window.yantaSync2Now?.({
+          await flushSync2AutoSync('manual-save', {
             interactive: true,
             catchUp: !sync2Auto.engine,
           });
-  
+
           toast('Saved and synced', 'success');
         } catch (err) {
           console.warn('[YANTA Sync2] manual save sync failed', err);
-          toast('Saved locally · Google sign-in needed for sync', 'error');
+          toast('Saved locally · Cloud sign-in needed for sync', 'error');
         }
       })
       .catch((err) => {

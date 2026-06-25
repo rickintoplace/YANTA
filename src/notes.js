@@ -336,12 +336,9 @@ export async function newNote(folderId = null, type = 'markdown') {
     detail: {
       noteId: id,
       reason: 'note-created',
+      source: 'notes',
     },
   }));
-
-  try {
-    window.yantaSync2Now?.();
-  } catch {}
 }
 
 export async function newFolder(parentId = null, {
@@ -399,6 +396,18 @@ export async function newFolder(parentId = null, {
 export async function openNote(id) {
   const note = state.notes.get(id);
   if (!note) return;
+
+  const previousNoteId = state.currentNoteId;
+
+  if (previousNoteId && previousNoteId !== id) {
+    window.dispatchEvent(new CustomEvent('yanta-note-closing', {
+      detail: {
+        noteId: previousNoteId,
+        nextNoteId: id,
+        reason: 'open-note',
+      },
+    }));
+  }
 
   /*
     Auch wenn dieselbe Note schon im Speicher currentNoteId ist,
@@ -679,11 +688,12 @@ export async function saveCurrentNote() {
   markSaved();
   renderTree();
   window.dispatchEvent(new CustomEvent('yanta-note-updated', {
-    detail: { noteId: note.id },
+    detail: {
+      noteId: note.id,
+      reason: titleChanged ? 'title-change' : 'metadata-save',
+      source: 'notes',
+    },
   }));
-  try {
-    window.yantaSync2Now?.();
-  } catch {}
 }
 
 export async function deleteCurrentNote() {
@@ -752,7 +762,11 @@ export function togglePin() {
   updatePinIcon();
   renderTree();
   window.dispatchEvent(new CustomEvent('yanta-note-updated', {
-    detail: { noteId: n.id },
+    detail: {
+      noteId: n.id,
+      reason: 'pin-toggle',
+      source: 'notes',
+    },
   }));
 }
 export function updatePinIcon() {

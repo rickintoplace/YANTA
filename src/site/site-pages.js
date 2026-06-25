@@ -709,7 +709,7 @@ function legalContent(kind) {
           <br>
           <strong>${escapeHtml(LEGAL.street)}, ${escapeHtml(LEGAL.city)},
           <br>
-          ${escapeHtml(LEGAL.country)}.</strong>.
+          ${escapeHtml(LEGAL.country)}.</strong>
           <br>
           Contact: <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>.
         </p>

@@ -2455,6 +2455,15 @@ export class Sync2AppEngine {
         this.assertUploadNotBlocked();
 
         /*
+          New local updates can arrive while uploadOutbox() is already running.
+          Coalesce again before taking the next item so continued typing does
+          not become one remote object per keystroke / short pause.
+        */
+        if (this.outbox.length > 1) {
+          this.compactOutboxForUpload();
+        }
+
+        /*
           Nicht shift() bevor der Upload erfolgreich war.
           Bei 429/Netzwerkfehler bleibt das Item in der Outbox.
         */

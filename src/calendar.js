@@ -873,6 +873,58 @@ function linkedNoteForEvent(ev) {
   return ev?.noteId ? state.notes.get(ev.noteId) : null;
 }
 
+function linkedNoteMetaForId(noteId) {
+  if (!noteId) return null;
+
+  return (
+    state.notes.get(noteId) ||
+    vaultNotesMap().get(noteId) ||
+    null
+  );
+}
+
+async function ensureLinkedNoteAvailable(noteId) {
+  const id = String(noteId || '').trim();
+  if (!id) return null;
+
+  const existing = state.notes.get(id);
+  if (existing) return existing;
+
+  const raw = vaultNotesMap().get(id);
+
+  if (!raw || typeof raw !== 'object') {
+    return null;
+  }
+
+  const note = safeJsonClone({
+    ...raw,
+    id: raw.id || id,
+    title: raw.title || 'Untitled',
+    type: raw.type || 'markdown',
+    folderId: raw.folderId || null,
+    tags: Array.isArray(raw.tags) ? raw.tags.map(String) : [],
+    pinned: !!raw.pinned,
+    created: Number(raw.created || Date.now()),
+    updated: Number(raw.updated || raw.created || Date.now()),
+  });
+
+  state.notes.set(id, note);
+
+  try {
+    await store.notes.put(safeJsonClone(note));
+  } catch {}
+
+  try {
+    rebuildWikilinkIndex();
+  } catch {}
+
+  try {
+    renderTree();
+  } catch {}
+
+  return note;
+}
+
 function calendarIconForEvent(ev) {
   const note = linkedNoteForEvent(ev);
 
@@ -9190,12 +9242,17 @@ function openEventEditor(input = {}) {
   const modal = ensureEventModal();
 
   const renderNoteSection = () => {
-    linkedNote = modal.querySelector('[data-field="noteId"]')?.value
-      ? state.notes.get(modal.querySelector('[data-field="noteId"]').value)
+    const linkedNoteId = modal.querySelector('[data-field="noteId"]')?.value || '';
+
+    linkedNote = linkedNoteId
+      ? state.notes.get(linkedNoteId)
       : null;
 
-    const host = modal.querySelector('[data-note-section]');
-    if (!host) return;
+    const linkedNoteMeta = linkedNoteId
+      ? linkedNoteMetaForId(linkedNoteId)
+      : null;
+
+    const host = modal.querySelector('[data-note-section]');    if (!host) return;
 
     const creating = !editingExisting && !markdownRef;
 
@@ -9205,11 +9262,11 @@ function openEventEditor(input = {}) {
       </div>
 
       ${
-        linkedNote
+        linkedNoteMeta
           ? `
             <div class="yanta-calendar-linked-note">
-              <span class="yanta-calendar-linked-note-icon">${lucide(linkedNote.icon || 'file-text', 15)}</span>
-              <span class="yanta-calendar-linked-note-title">${escapeHtml(linkedNote.title || 'Untitled')}</span>
+              <span class="yanta-calendar-linked-note-icon">${lucide(linkedNoteMeta.icon || 'file-text', 15)}</span>
+              <span class="yanta-calendar-linked-note-title">${escapeHtml(linkedNoteMeta.title || 'Untitled')}</span>
             </div>
 
             <div class="compress-actions" style="justify-content:flex-start;margin-top:8px">
@@ -9340,15 +9397,20 @@ function openEventEditor(input = {}) {
     host.querySelector('[data-action="open-note"]')?.addEventListener('click', async () => {
       const noteId = modal.querySelector('[data-field="noteId"]')?.value || '';
 
-      if (noteId && state.notes.has(noteId)) {
-        closeEventModal();
+      const note = await ensureLinkedNoteAvailable(noteId);
 
-        if (calendarMode === 'surface') {
-          leaveCalendarSurface();
-        }
-
-        await openNote(noteId);
+      if (!note) {
+        toast('Linked note is not available on this device yet. Sync again or run Repair cloud sync.', 'error');
+        return;
       }
+
+      closeEventModal();
+
+      if (calendarMode === 'surface') {
+        leaveCalendarSurface();
+      }
+
+      await openNote(note.id);
     });
   };
 
@@ -10840,6 +10902,56 @@ export function openCalendarEvent(eventId, {
   });
 }
 
+let calendarVaultBridgeInstalled = false;
+
+export function setupCalendarVaultBridge() {
+  if (calendarVaultBridgeInstalled) return;
+
+  calendarVaultBridgeInstalled = true;
+
+  window.addEventListener('yanta-vault-hydrated', (e) => {
+    /*
+      Calendar events/categories live in VaultDoc but the Calendar module may
+      not be mounted yet. Remote sync can therefore update event->note links
+      without triggering normal calendar UI setup.
+    */
+    hydrateCalendarStateFromVault({
+      silent: true,
+    });
+
+    if (state.currentNoteId) {
+      requestAnimationFrame(() => {
+        renderCalendarNoteAttachments(state.currentNoteId);
+      });
+    }
+
+    if (calendarSurfaceVisible()) {
+      scheduleCalendarRender();
+    }
+
+    window.dispatchEvent(new CustomEvent('yanta-calendar-links-refreshed', {
+      detail: {
+        source: e.detail?.source || 'vault',
+        reason: e.detail?.reason || 'vault-hydrated',
+      },
+    }));
+  });
+
+  window.addEventListener('yanta-note-opened', (e) => {
+    const noteId = e.detail?.noteId || state.currentNoteId;
+
+    if (!noteId) return;
+
+    hydrateCalendarStateFromVault({
+      silent: true,
+    });
+
+    requestAnimationFrame(() => {
+      renderCalendarNoteAttachments(noteId);
+    });
+  });
+}
+
 export function setupCalendar() {
   if (initialized) return;
   initialized = true;
@@ -11221,17 +11333,13 @@ export function setupCalendar() {
   });
 
   window.addEventListener('yanta-vault-hydrated', (e) => {
-    /*
-      Wenn Sync sagt "nichts geändert", darf Calendar nicht indirekt
-      yanta-calendar-updated feuern, sonst rendert das Dashboard trotzdem.
-    */
-    if (e.detail?.source === 'sync' && e.detail?.changed === false) {
-      return;
-    }
-
     hydrateCalendarStateFromVault({
-      silent: e.detail?.source === 'sync',
+      silent: true,
     });
+
+    if (calendarSurfaceVisible()) {
+      scheduleCalendarRender();
+    }
 
     if (state.currentNoteId) {
       requestAnimationFrame(() => {

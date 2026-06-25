@@ -90,6 +90,8 @@ import {
   vaultImagesMap,
   vaultTombstonesMap,
   safeJsonClone,
+  encodeCompactVaultState,
+  encodeVaultState,
 } from './sync2/vault-doc.js';
 
 import {
@@ -809,6 +811,70 @@ window.yantaSync2CompactNow = async (options = {}) => {
   );
 
   return result;
+};
+
+window.yantaSync2Debug = async () => {
+  const engine =
+    sync2Auto.engine ||
+    window.yantaSync2?.engine ||
+    null;
+
+  const [
+    vaultDoc,
+    cloudApi,
+  ] = await Promise.all([
+    import('./sync2/vault-doc.js'),
+    import('./cloud/cloud-api.js'),
+  ]);
+
+  const compactVaultBytes = vaultDoc.encodeCompactVaultState().byteLength;
+
+  let status = null;
+  let breakdown = null;
+
+  try {
+    status = await engine?.status?.();
+  } catch {}
+
+  try {
+    const vaultId =
+      window.yantaSync2?.vaultId ||
+      engine?.vaultId ||
+      await store.settings.get('sync2.yantaCloud.vaultId', '');
+
+    const deviceId =
+      window.yantaSync2?.deviceId ||
+      engine?.deviceId ||
+      '';
+
+    if (vaultId) {
+      breakdown = await cloudApi.cloudStorageBreakdown(vaultId, {
+        deviceId,
+      });
+    }
+  } catch (err) {
+    breakdown = {
+      error: err?.message || String(err),
+    };
+  }
+
+  const outbox = Array.isArray(engine?.outbox)
+    ? engine.outbox.map((item) => ({
+        kind: item.kind,
+        noteId: item.noteId || null,
+        bytes: Number(item.update?.byteLength || 0),
+        full: item.full === true,
+        compact: item.compact === true,
+        reason: item.reason || '',
+      }))
+    : [];
+
+  return {
+    compactVaultBytes,
+    status,
+    outbox,
+    breakdown,
+  };
 };
 
 function searchHaystack(note, body = '') {

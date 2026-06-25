@@ -389,26 +389,37 @@ async function fetchFeedCloud(feed) {
   );
 }
 
+function directFeedFallbackAllowed(settings = {}) {
+  /*
+    Production CSP intentionally does not allow arbitrary feed hosts in
+    connect-src. Therefore direct browser fallback creates noisy CSP errors
+    and cannot be reliable for SaaS.
+    
+    Direct mode remains available for local/dev or explicitly configured
+    self-hosted use.
+  */
+  if (settings.fetchProvider !== 'direct') return false;
+
+  return (
+    import.meta.env.DEV ||
+    location.hostname === 'localhost' ||
+    location.hostname === '127.0.0.1'
+  );
+}
+
 export async function fetchRssFeed(feed) {
   const settings = await getRssSettings();
 
-  if (settings.fetchProvider === 'direct') {
+  if (directFeedFallbackAllowed(settings)) {
     return fetchFeedDirect(feed);
   }
 
-  try {
-    return await fetchFeedCloud(feed);
-  } catch (cloudErr) {
-    if (cloudErr?.code === 'EAUTH_REQUIRED') {
-      throw cloudErr;
-    }
-
-    try {
-      return await fetchFeedDirect(feed);
-    } catch {
-      throw cloudErr;
-    }
-  }
+  /*
+    SaaS/default path:
+    Cloud fetch only. Do not silently fall back to browser fetch, because
+    arbitrary external feed URLs are intentionally blocked by CSP.
+  */
+  return fetchFeedCloud(feed);
 }
 
 export async function rssImageProxyUrl(rawUrl, settingsOverride = null) {

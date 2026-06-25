@@ -53,6 +53,15 @@ import {
 const DEFAULT_MIN_HEADROOM_BYTES = 3 * 1024 * 1024;
 const DEFAULT_KEEP_SNAPSHOTS_PER_DOC = 2;
 
+function isObjectTooLargeError(err) {
+  return (
+    err?.status === 413 ||
+    err?.code === 'EOBJECT_TOO_LARGE' ||
+    err?.serverCode === 'object_too_large' ||
+    /object_too_large|object too large|content too large/i.test(err?.message || '')
+  );
+}
+
 async function markCoveredBoth(engine, key, value) {
   if (!key) return;
 
@@ -560,6 +569,54 @@ export async function compactYantaCloudStorage(engine, {
 
   await engine.start();
 
+  /*
+    Old local builds may have queued huge VaultDoc full updates.
+    They are superseded by the fresh compact heads/snapshots created below.
+  */
+  if (Array.isArray(engine.outbox) && engine.outbox.some((item) => item?.kind === 'vault')) {
+    const before = engine.outbox.length;
+
+    engine.outbox = engine.outbox.filter((item) => item?.kind !== 'vault');
+
+    const dropped = before - engine.outbox.length;
+
+    if (dropped > 0) {
+      engine.progress?.({
+        phase: 'compactOutbox',
+        direction: 'up',
+        detailed: true,
+        message: `Dropped ${dropped} stale local vault metadata update${dropped === 1 ? '' : 's'} before compaction.`,
+      });
+    }
+  }
+
+  /*
+    Safety first:
+    Pull remote heads/updates before declaring old journals covered by new heads.
+    If an old oversized local upload exists, app-engine continues the pull.
+  */
+  if (!engine.syncing) {
+    try {
+      engine.progress?.({
+        phase: 'compactStart',
+        direction: 'down',
+        detailed: true,
+        message: 'Synchronizing before storage optimization…',
+      });
+
+      await engine.syncNow({
+        verbose: false,
+        pullSnapshots: true,
+      });
+    } catch (err) {
+      if (!isObjectTooLargeError(err)) {
+        throw err;
+      }
+
+      console.warn('[YANTA Sync2] pre-compaction sync had oversized upload but pull continued where possible', err);
+    }
+  }
+
   engine.progress?.({
     phase: 'compactStart',
     direction: 'up',
@@ -722,8 +779,8 @@ export async function compactYantaCloudStorage(engine, {
   /*
     Strong cleanup:
     After fresh latest-state heads are uploaded, older update-journal entries
-    are redundant for normal clients. They can be removed even if this device
-    did not individually mark every historical update as seen.
+    are redundant for normal clients. This reduces Note Sync Journal even when
+    historical updates were not individually marked as seen by this device.
   */
   const indexAfterHeads = await engine.loadRemoteIndex({
     force: true,

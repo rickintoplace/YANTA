@@ -4,11 +4,11 @@ var __name = (target, value) => __defProp(target, "name", { value, configurable:
 // src/index.js
 var PLAN_LIMITS = {
   free: {
-    storageBytes: 25 * 1024 * 1024,
+    storageBytes: 30 * 1024 * 1024,
     vaults: 1,
     devices: 3,
     objects: 10_000,
-    objectSizeBytes: 2 * 1024 * 1024,
+    objectSizeBytes: 16 * 1024 * 1024,
 
     uploadBytesDay: 250 * 1024 * 1024,
     downloadBytesMonth: 250 * 1024 * 1024,
@@ -1848,7 +1848,13 @@ async function handleStoragePut(env, req, url, headers) {
   const createdAt = await getUserCreatedAt(env, user.userId);
   const limits = effectiveLimits(user, createdAt);
   if (size > limits.objectSizeBytes) {
-    return json({ error: "object_too_large", maxBytes: limits.objectSizeBytes }, 413, headers);
+    return json({
+      error: "object_too_large",
+      code: "object_too_large",
+      message: `Object too large. Maximum object size is ${limits.objectSizeBytes} bytes.`,
+      maxBytes: limits.objectSizeBytes,
+      gotBytes: size,
+    }, 413, headers);
   }
   const usage = await ensureUsageRow(env, user.userId);
   const existing = await env.DB.prepare(
@@ -3699,7 +3705,16 @@ async function fetchExternal(url, {
     try {
       const headers = {
         accept,
-        "user-agent": "YANTA Sources/1.0 (+https://yanta.page)"
+
+        /*
+          Some publishers reject uncommon/bot-looking user agents from Workers.
+          Use a browser-like UA with a YANTA product token.
+        */
+        "user-agent":
+          env.RSS_USER_AGENT ||
+          "Mozilla/5.0 (compatible; YANTA Sources/1.0; +https://yanta.page)",
+
+        "accept-language": "en-US,en;q=0.9,de;q=0.8",
       };
       if (etag && redirectCount === 0) {
         headers["if-none-match"] = etag;
@@ -4091,13 +4106,24 @@ async function handleRssFetch(env, req, url, headers) {
   }
 
   if (fetched.status < 200 || fetched.status >= 400) {
-    return json({ error: "fetch_failed", status: fetched.status }, 502, headers);
+    return json({
+      error: "fetch_failed",
+      message: `Feed server returned HTTP ${fetched.status}.`,
+      status: fetched.status,
+      finalUrl: fetched.finalUrl || targetUrl,
+    }, 502, headers);
   }
 
   const rawBody = decodeUtf8(fetched.bytes);
 
   if (!looksLikeFeedText(rawBody)) {
-    return json({ error: "not_a_feed", message: "URL did not return a supported RSS/Atom/JSON feed." }, 400, headers);
+    return json({
+      error: "not_a_feed",
+      message: "URL did not return a supported RSS/Atom/JSON feed.",
+      finalUrl: fetched.finalUrl || targetUrl,
+      contentType: fetched.headers.get("content-type") || "",
+      preview: rawBody.slice(0, 700),
+    }, 400, headers);
   }
 
   const trimmed = trimLargeFeedBody(rawBody, {

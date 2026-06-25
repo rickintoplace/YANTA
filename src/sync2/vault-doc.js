@@ -197,6 +197,56 @@ export function vaultJsonSnapshot() {
   });
 }
 
+function copyVaultMapToCompactDoc(targetDoc, targetName, sourceMap) {
+  const target = targetDoc.getMap(targetName);
+
+  for (const [id, value] of sourceMap()) {
+    if (!id || value == null) continue;
+
+    target.set(String(id), safeJsonClone(value));
+  }
+}
+
+/**
+ * Encode a fresh compact VaultDoc update from the current semantic maps.
+ *
+ * Why this exists:
+ * Y.encodeStateAsUpdate(getVaultDoc()) can become huge because Yjs preserves
+ * CRDT history/structs. For vault metadata we do not need that historical
+ * struct graph remotely. Remote clients need the current semantic maps.
+ *
+ * This produces a small canonical full-state update from a fresh Y.Doc.
+ */
+export function encodeCompactVaultState({
+  includeDevices = false,
+  includeSettings = false,
+} = {}) {
+  const compact = new Y.Doc({
+    gc: true,
+  });
+
+  copyVaultMapToCompactDoc(compact, 'notes', vaultNotesMap);
+  copyVaultMapToCompactDoc(compact, 'folders', vaultFoldersMap);
+  copyVaultMapToCompactDoc(compact, 'images', vaultImagesMap);
+  copyVaultMapToCompactDoc(compact, 'events', vaultEventsMap);
+  copyVaultMapToCompactDoc(compact, 'calendarCategories', vaultCalendarCategoriesMap);
+  copyVaultMapToCompactDoc(compact, 'tombstones', vaultTombstonesMap);
+
+  if (includeDevices) {
+    copyVaultMapToCompactDoc(compact, 'devices', vaultDevicesMap);
+  }
+
+  if (includeSettings) {
+    copyVaultMapToCompactDoc(compact, 'settings', vaultSettingsMap);
+  }
+
+  const update = Y.encodeStateAsUpdate(compact);
+
+  compact.destroy();
+
+  return update;
+}
+
 export async function clearVaultDocDataForDebugOnly() {
   const entry = getVaultEntry();
   await entry.ready;

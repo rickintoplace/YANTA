@@ -221,6 +221,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
   background: transparent; color: var(--text-dim);
   border: 0; border-radius: var(--r-sm);
   cursor: pointer; transition: all 0.12s;
+  font-size: 1.4em;
 }
 .icon-btn:hover { background: var(--bg-elev-3); color: var(--text); }
 .icon-btn.active { color: var(--accent); background: var(--bg-elev-3); }
@@ -5333,4 +5334,168 @@ input.yanta-task-checkbox {
 
 #editor .cm-content .yanta-cm-title-widget .yanta-note-title-mirror:focus {
   color: var(--text);
+}
+
+/* ============================================================
+   YANTA Fullscreen Surfaces — Calendar / Graph / RSS
+   One global desktop/mobile shell language.
+   ============================================================ */
+
+:root {
+  --yanta-surface-padding: 14px;
+  --yanta-surface-radius: 14px;
+}
+
+/*
+  Desktop:
+  Fullscreen app surfaces occupy the main content area only,
+  exactly like Calendar. Sidebar remains visible.
+*/
+@media (min-width: 881px) {
+  .graph-overlay,
+  .yanta-rss-fullscreen {
+    top: 0 !important;
+    right: 0 !important;
+    bottom: 0 !important;
+    left: var(--yanta-desktop-overlay-left, 0px) !important;
+
+    width: auto !important;
+    height: auto !important;
+  }
+}
+
+/*
+  Shared fullscreen surface canvas.
+  Calendar already has .calendar-surface, but these variables and layout
+  align Graph/RSS with it.
+*/
+.graph-overlay,
+.yanta-rss-fullscreen {
+  box-sizing: border-box !important;
+
+  padding: var(--yanta-surface-padding) !important;
+
+  background: var(--bg) !important;
+  color: var(--text);
+
+  overflow: hidden !important;
+}
+
+/* ============================================================
+   Graph fullscreen shell
+   ============================================================ */
+
+.graph-overlay {
+  display: flex !important;
+  flex-direction: column !important;
+  min-width: 0;
+  min-height: 0;
+}
+
+.graph-overlay[hidden] {
+  display: none !important;
+}
+
+.graph-overlay .graph-head {
+  flex: 0 0 auto;
+
+  min-height: 48px;
+
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  padding: 8px 10px;
+
+  border: 1px solid var(--border);
+  border-bottom: 0;
+  border-radius: var(--yanta-surface-radius) var(--yanta-surface-radius) 0 0;
+
+  background: var(--bg-elev-2);
+  color: var(--text);
+}
+
+.graph-overlay .graph-canvas-wrap {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+
+  border: 1px solid var(--border);
+  border-radius: 0 0 var(--yanta-surface-radius) var(--yanta-surface-radius);
+
+  background: var(--bg-elev);
+  color: var(--text);
+
+  overflow: hidden;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--border) 70%, transparent) inset;
+}
+
+.graph-overlay .graph-canvas {
+  width: 100%;
+  height: 100%;
+}
+
+/* ============================================================
+   RSS fullscreen shell
+   ============================================================ */
+
+.yanta-rss-fullscreen[hidden] {
+  display: none !important;
+}
+
+.yanta-rss-fullscreen .yanta-rss-root {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+
+  border: 1px solid var(--border);
+  border-radius: var(--yanta-surface-radius);
+
+  background: var(--bg-elev);
+  color: var(--text);
+
+  overflow: hidden;
+
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--border) 70%, transparent) inset;
+}
+
+/* ============================================================
+   Mobile mirrors Calendar's edge-to-edge surface.
+   ============================================================ */
+
+@media (max-width: 760px) {
+  :root {
+    --yanta-surface-padding: 0px;
+    --yanta-surface-radius: 0px;
+  }
+
+  .graph-overlay,
+  .yanta-rss-fullscreen {
+    inset: 0 !important;
+    width: auto !important;
+    height: auto !important;
+    padding: 0 !important;
+  }
+
+  .graph-overlay .graph-head {
+    border-right: 0;
+    border-left: 0;
+    border-radius: 0;
+  }
+
+  .graph-overlay .graph-canvas-wrap {
+    border-right: 0;
+    border-left: 0;
+    border-bottom: 0;
+    border-radius: 0;
+  }
+
+  .yanta-rss-fullscreen .yanta-rss-root {
+    border-right: 0;
+    border-left: 0;
+    border-radius: 0;
+  }
 }

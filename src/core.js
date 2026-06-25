@@ -491,6 +491,45 @@ export function lucide(name, size = 14) {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
 }
 
+export function lucideCalendarDay(size = 14, day = new Date().getDate()) {
+  const dayNum = Number(day);
+
+  if (!Number.isInteger(dayNum) || dayNum < 1 || dayNum > 31) {
+    return lucide('calendar-1', size);
+  }
+
+  const twoDigits = dayNum >= 10;
+
+  return `
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="${size}"
+      height="${size}"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      class="lucide lucide-calendar yanta-calendar-day-icon"
+      aria-hidden="true">
+      <path d="M8 2v4"/>
+      <path d="M16 2v4"/>
+      <rect width="18" height="18" x="3" y="4" rx="2"/>
+      <path d="M3 10h18"/>
+      <text
+        x="12"
+        y="${twoDigits ? '19.5' : '19.5'}"
+        text-anchor="middle"
+        font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+        font-size="${twoDigits ? '10' : '10'}"
+        font-weight="750"
+        fill="currentColor"
+        stroke="none">${dayNum}</text>
+    </svg>
+  `;
+}
+
 export function toast(msg, type = '') {
   const t = $('toast');
   t.textContent = msg;

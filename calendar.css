@@ -2459,8 +2459,7 @@
 }
 
 .yanta-calendar-weekday-row {
-  display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  display: flex;
   gap: 6px;
 
   margin: 8px 0 6px;
@@ -2749,21 +2748,261 @@
   display: none !important;
 }
 
-/* @media (max-width: 700px) {
-  .yanta-calendar-preset-grid {
-    grid-template-columns: 1fr;
+/* ============================================================
+   Calendar view segmented icon buttons
+   Desktop: sliding active pill
+   Mobile: active-only dropdown
+   ============================================================ */
+
+.yanta-calendar-view-select.yanta-calendar-view-buttons {
+  --calendar-view-button-size: 38px;
+  --calendar-view-button-height: 38px;
+  --calendar-view-button-gap: 2px;
+  --calendar-view-padding: 6px;
+  --active-index: 0;
+
+  position: relative;
+  width: auto;
+  min-width: 0;
+  max-width: none;
+  height: 36px;
+  margin: 0;
+  padding: var(--calendar-view-padding);
+
+  display: inline-flex;
+  align-items: center;
+
+  border-radius: 999px;
+
+  background: var(--bg-elev);
+  overflow: visible;
+}
+
+.yanta-calendar-view-current {
+  display: none;
+}
+
+.yanta-calendar-view-menu {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--calendar-view-button-gap);
+
+  min-width: 0;
+  min-height: 0;
+}
+
+.yanta-calendar-view-menu::before {
+  content: "";
+
+  position: absolute;
+  z-index: 0;
+  top: 0;
+  left: 0;
+
+  width: var(--calendar-view-button-size);
+  height: var(--calendar-view-button-height);
+
+  border-radius: 999px;
+
+  background: var(--accent);
+
+  transform:
+    translateX(
+      calc(
+        var(--active-index) *
+        (var(--calendar-view-button-size) + var(--calendar-view-button-gap))
+      )
+    );
+
+  transition:
+    transform 220ms cubic-bezier(.2, .8, .2, 1),
+    background-color 160ms ease;
+}
+
+.yanta-calendar-view-menu button {
+  position: relative;
+  z-index: 1;
+
+  width: var(--calendar-view-button-size);
+  height: var(--calendar-view-button-height);
+  min-width: var(--calendar-view-button-size);
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+
+  background: transparent;
+  color: var(--text-dim);
+
+  cursor: pointer;
+
+  transition:
+    color 140ms ease,
+    transform 120ms ease;
+}
+
+.yanta-calendar-view-menu button:hover {
+  color: var(--text);
+}
+
+.yanta-calendar-view-menu button.active {
+  color: white;
+}
+
+.yanta-calendar-view-menu button:active {
+  transform: scale(0.94);
+}
+
+.yanta-calendar-view-menu button:focus-visible,
+.yanta-calendar-view-current:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent) 55%, transparent);
+  outline-offset: 2px;
+}
+
+.yanta-calendar-view-buttons svg,
+.yanta-calendar-day-icon {
+  width: 22px;
+  height: 22px;
+}
+
+.yanta-calendar-day-icon text {
+  dominant-baseline: auto;
+  paint-order: normal;
+  pointer-events: none;
+  user-select: none;
+}
+
+/* Mobile: show only active button; dropdown opens downward */
+@media (max-width: 880px) {
+  .yanta-calendar-view-select.yanta-calendar-view-buttons {
+    --calendar-view-button-size: 32px;
+    --calendar-view-button-height: 32px;
+    --calendar-view-button-gap: 4px;
+    --calendar-view-padding: 0px;
+
+    width: 34px;
+    min-width: 34px;
+    height: 34px;
+    padding: 1px;
+
+    background: transparent;
+    border-color: transparent;
+    box-shadow: none;
   }
 
-  .yanta-calendar-custom-every-row {
-    grid-template-columns: 82px 1fr;
+  .yanta-calendar-view-current {
+    position: relative;
+    z-index: 2;
+
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+
+    padding: 0;
+    border: 1px solid color-mix(in srgb, var(--accent) 48%, var(--border));
+    border-radius: 999px;
+
+    background: var(--accent);
+    color: white;
+
+    cursor: pointer;
+
+    transition:
+      transform 120ms ease,
+      filter 120ms ease,
+      box-shadow 120ms ease;
   }
 
-  .yanta-calendar-radio-row {
-    grid-template-columns: 20px auto minmax(0, 1fr);
+  .yanta-calendar-view-current:hover {
+    filter: brightness(1.05);
   }
 
-  .yanta-calendar-radio-row input[data-field="recurrenceCount"],
-  .yanta-calendar-radio-row input[data-field="recurrenceUntil"] {
-    max-width: none;
+  .yanta-calendar-view-current:active {
+    transform: scale(0.94);
   }
-} */
+
+  .yanta-calendar-view-menu {
+    position: absolute;
+    z-index: 80;
+    top: calc(100% + 6px);
+    right: 0;
+
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+
+    padding: 4px;
+
+    border: 1px solid var(--border);
+    border-radius: 18px;
+
+    background: var(--bg-elev);
+    color: var(--text);
+
+    box-shadow:
+      0 18px 42px rgba(0, 0, 0, 0.34),
+      0 0 0 1px color-mix(in srgb, var(--border) 70%, transparent) inset;
+
+    opacity: 0;
+    pointer-events: none;
+
+    transform: translateY(-4px) scale(0.96);
+    transform-origin: top right;
+
+    transition:
+      opacity 140ms ease,
+      transform 170ms cubic-bezier(.2, .8, .2, 1);
+  }
+
+  .yanta-calendar-view-buttons.open .yanta-calendar-view-menu {
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0) scale(1);
+  }
+
+  .yanta-calendar-view-menu::before {
+    display: none;
+  }
+
+  .yanta-calendar-view-menu button {
+    width: 34px;
+    min-width: 34px;
+    height: 34px;
+
+    color: var(--text-dim);
+  }
+
+  .yanta-calendar-view-menu button:hover {
+    background: var(--bg-elev-2);
+    color: var(--text);
+  }
+
+  .yanta-calendar-view-menu button.active {
+    background: color-mix(in srgb, var(--accent) 16%, transparent);
+    color: var(--accent);
+  }
+
+  .yanta-calendar-view-buttons svg,
+  .yanta-calendar-day-icon {
+    width: 17px;
+    height: 17px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .yanta-calendar-view-menu::before,
+  .yanta-calendar-view-menu,
+  .yanta-calendar-view-menu button,
+  .yanta-calendar-view-current {
+    transition: none !important;
+  }
+}

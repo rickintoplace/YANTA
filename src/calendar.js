@@ -25,6 +25,7 @@ import {
   escapeAttr,
   safeFilename,
   lucide,
+  lucideCalendarDay,
   cssColorToHex,
 } from './core.js';
 
@@ -520,6 +521,7 @@ function prefersReducedMotion() {
 // Native YANTA calendar chrome / routing / pane mode
 // ============================================================
 
+
 function calendarToolbarEl() {
   if (calendarMode === 'pane') {
     return document.querySelector('.yanta-calendar-side-pane .yanta-calendar-topbar') || null;
@@ -528,14 +530,130 @@ function calendarToolbarEl() {
   return $('calendarSurface')?.querySelector('.yanta-calendar-topbar') || null;
 }
 
+const CALENDAR_VIEW_BUTTONS = Object.freeze([
+  {
+    type: 'dayGridMonth',
+    label: 'Month',
+    icon: 'calendar-days',
+  },
+  {
+    type: 'timeGridWeek',
+    label: 'Week',
+    icon: 'calendar-range',
+  },
+  {
+    type: 'timeGridDay',
+    label: 'Day',
+    icon: 'dynamic-calendar-day',
+  },
+  {
+    type: 'listWeek',
+    label: 'List',
+    icon: 'list',
+  },
+]);
+
+function calendarViewButtonIcon(icon, size = 18) {
+  if (icon === 'dynamic-calendar-day') {
+    return lucideCalendarDay(size);
+  }
+
+  return lucide(icon, size);
+}
+
+function calendarViewMeta(viewType = '') {
+  return CALENDAR_VIEW_BUTTONS.find((view) => view.type === viewType) ||
+    CALENDAR_VIEW_BUTTONS[0];
+}
+
+function calendarViewIndex(viewType = '') {
+  return Math.max(
+    0,
+    CALENDAR_VIEW_BUTTONS.findIndex((view) => view.type === viewType)
+  );
+}
+
+function calendarViewButtonsHtml(activeView = '') {
+  const active = calendarViewMeta(activeView);
+  const activeIndex = calendarViewIndex(active.type);
+
+  return `
+    <div
+      class="text-input yanta-calendar-view-select yanta-calendar-view-buttons"
+      data-cal-view-group
+      role="group"
+      aria-label="Calendar view"
+      style="--active-index:${activeIndex}">
+      <button
+        type="button"
+        class="yanta-calendar-view-current"
+        data-cal-view-current
+        title="${escapeAttr(active.label)}"
+        aria-label="Calendar view: ${escapeAttr(active.label)}"
+        aria-haspopup="listbox"
+        aria-expanded="false">
+        ${calendarViewButtonIcon(active.icon, 18)}
+      </button>
+
+      <div
+        class="yanta-calendar-view-menu"
+        data-cal-view-menu
+        role="listbox"
+        aria-label="Calendar view options">
+        ${CALENDAR_VIEW_BUTTONS.map((view) => `
+          <button
+            type="button"
+            role="option"
+            class="${view.type === active.type ? 'active' : ''}"
+            data-cal-view-btn="${escapeAttr(view.type)}"
+            title="${escapeAttr(view.label)}"
+            aria-label="${escapeAttr(view.label)}"
+            aria-selected="${view.type === active.type ? 'true' : 'false'}"
+            aria-pressed="${view.type === active.type ? 'true' : 'false'}">
+            ${calendarViewButtonIcon(view.icon, 18)}
+          </button>
+        `).join('')}
+      </div>
+    </div>
+  `;
+}
+
 function setCalendarToolbarTitle(title = '') {
   const el = calendarToolbarEl()?.querySelector('[data-cal-title]');
   if (el) el.textContent = title || fc?.view?.title || 'Calendar';
 }
 
 function setCalendarToolbarView(viewType = '') {
-  const sel = calendarToolbarEl()?.querySelector('[data-cal-view]');
-  if (sel && viewType) sel.value = viewType;
+  const bar = calendarToolbarEl();
+  if (!bar || !viewType) return;
+
+  const active = calendarViewMeta(viewType);
+  const activeIndex = calendarViewIndex(active.type);
+  const group = bar.querySelector('[data-cal-view-group]');
+  const current = bar.querySelector('[data-cal-view-current]');
+
+  if (group) {
+    group.style.setProperty('--active-index', String(activeIndex));
+  }
+
+  if (current) {
+    current.innerHTML = calendarViewButtonIcon(active.icon, 18);
+    current.title = active.label;
+    current.setAttribute('aria-label', `Calendar view: ${active.label}`);
+  }
+
+  const legacySelect = bar.querySelector('[data-cal-view]');
+  if (legacySelect) {
+    legacySelect.value = active.type;
+  }
+
+  bar.querySelectorAll('[data-cal-view-btn]').forEach((btn) => {
+    const isActive = btn.dataset.calViewBtn === active.type;
+
+    btn.classList.toggle('active', isActive);
+    btn.setAttribute('aria-selected', isActive ? 'true' : 'false');
+    btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+  });
 }
 
 function openCalendarMenu(anchor) {
@@ -599,6 +717,11 @@ function renderCalendarTopbar() {
   const bar = calendarToolbarEl();
   if (!bar) return;
 
+  const activeView =
+    fc?.view?.type ||
+    state.currentCalendarView ||
+    'dayGridMonth';
+
   bar.innerHTML = `
     <button class="icon-btn" data-cal-nav="prev" title="Previous">
       ${lucide('chevron-left', 18)}
@@ -616,12 +739,7 @@ function renderCalendarTopbar() {
 
     <span class="grow"></span>
 
-    <select class="text-input yanta-calendar-view-select" data-cal-view title="Calendar view">
-      <option value="dayGridMonth">Month</option>
-      <option value="timeGridWeek">Week</option>
-      <option value="timeGridDay">Day</option>
-      <option value="listWeek">List</option>
-    </select>
+    ${calendarViewButtonsHtml(activeView)}
 
     <button class="icon-btn" data-cal-menu title="Calendar menu">
       ${lucide('more-vertical', 18)}
@@ -632,10 +750,7 @@ function renderCalendarTopbar() {
     </button>
   `;
 
-  const viewSelect = bar.querySelector('[data-cal-view]');
-  if (viewSelect && fc?.view?.type) {
-    viewSelect.value = fc.view.type;
-  }
+  setCalendarToolbarView(activeView);
 
   bar.querySelector('[data-cal-nav="prev"]')?.addEventListener('click', () => {
     smoothCalendarNavigate('prev');
@@ -654,14 +769,83 @@ function renderCalendarTopbar() {
     scheduleCalendarResize({ render: true });
   });
 
-  viewSelect?.addEventListener('change', (e) => {
-    if (!fc) return;
+  const viewGroup = bar.querySelector('[data-cal-view-group]');
+  const currentViewButton = bar.querySelector('[data-cal-view-current]');
 
-    fc.changeView(e.target.value);
-    state.currentCalendarView = e.target.value;
+  const closeViewMenu = () => {
+    viewGroup?.classList.remove('open');
+    currentViewButton?.setAttribute('aria-expanded', 'false');
+  };
 
-    invalidateCalendarSwipeCache();
-    scheduleCalendarResize({ render: true });
+  const openViewMenu = () => {
+    viewGroup?.classList.add('open');
+    currentViewButton?.setAttribute('aria-expanded', 'true');
+
+    const onOutsideClick = (event) => {
+      if (viewGroup?.contains(event.target)) return;
+
+      closeViewMenu();
+      document.removeEventListener('click', onOutsideClick, true);
+    };
+
+    requestAnimationFrame(() => {
+      document.addEventListener('click', onOutsideClick, true);
+    });
+  };
+
+  currentViewButton?.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (viewGroup?.classList.contains('open')) {
+      closeViewMenu();
+    } else {
+      openViewMenu();
+    }
+  });
+
+  currentViewButton?.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter' && e.key !== ' ') return;
+
+    e.preventDefault();
+
+    if (viewGroup?.classList.contains('open')) {
+      closeViewMenu();
+    } else {
+      openViewMenu();
+    }
+  });
+
+  viewGroup?.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      closeViewMenu();
+      currentViewButton?.focus();
+    }
+  });
+
+  bar.querySelectorAll('[data-cal-view-btn]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (!fc) return;
+
+      const nextView = btn.dataset.calViewBtn;
+      if (!nextView) return;
+
+      if (nextView !== fc.view?.type) {
+        fc.changeView(nextView);
+        state.currentCalendarView = nextView;
+
+        setCalendarToolbarView(nextView);
+
+        invalidateCalendarSwipeCache();
+        scheduleCalendarResize({ render: true });
+      }
+
+      closeViewMenu();
+    });
   });
 
   bar.querySelector('[data-cal-menu]')?.addEventListener('click', (e) => {
@@ -10578,6 +10762,7 @@ function toNewEventInputFromDateClick(info) {
 
 export function closeCalendar({
   surface = calendarReturnSurface || 'note',
+  fromRouteChange = false,
 } = {}) {
   if (calendarMode === 'pane') {
     return;
@@ -10627,9 +10812,23 @@ export function closeCalendar({
     dash.hidden = targetSurface !== 'dashboard';
   }
 
-  closeEventModal();
-  closeCategoriesModal();
-  closeCalendarSourcesModal();
+  closeEventModal({
+    fromHistory: fromRouteChange,
+  });
+
+  closeCategoriesModal({
+    fromHistory: fromRouteChange,
+  });
+
+  closeCalendarSourcesModal({
+    fromHistory: fromRouteChange,
+  });
+
+  closeCalendarDateTimePicker({
+    fromHistory: fromRouteChange,
+  });
+
+  closeKnownIconPickerModal();
 }
 
 function leaveCalendarSurface() {

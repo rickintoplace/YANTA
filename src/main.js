@@ -3,7 +3,7 @@
 // pane divider, history navigation, view modes.
 // ============================================================
 
-import { $, state, store, openDB, toast, cssColorToHex, safeCssColor, lucide } from './core.js';
+import { $, state, store, openDB, toast, cssColorToHex, safeCssColor, lucide, lucideCalendarDay } from './core.js';
 import {
   loadAppearance,
   watchSystemTheme,
@@ -162,6 +162,8 @@ import {
 import {
   setupRss,
   openRssInbox,
+  closeRssFullscreenUI,
+  closeRssSourcesManagerUI,
 } from './rss/rss-ui.js';
 import {
   setupOverlayHistoryRouter,
@@ -216,6 +218,69 @@ function ensureSidebarBackdropVisible(visible) {
   if (!backdrop) return;
 
   backdrop.hidden = !visible;
+}
+
+function updateDesktopOverlaySidebarOffset() {
+  const sidebar = $('sidebar');
+
+  const offset =
+    DESKTOP_SIDEBAR_MQ.matches && sidebar
+      ? Math.round(sidebar.getBoundingClientRect().width || 0)
+      : 0;
+
+  document.documentElement.style.setProperty(
+    '--yanta-desktop-overlay-left',
+    `${offset}px`
+  );
+}
+
+function updateSidebarFootCalendarIcon() {
+  const foot = $('sidebarFoot') || document.querySelector('.sidebar-foot');
+  if (!foot) return;
+
+  const candidates = [
+    ...foot.querySelectorAll('button, a, [role="button"]'),
+  ];
+
+  const calendarButton = candidates.find((node) => {
+    const hay = [
+      node.getAttribute('title') || '',
+      node.getAttribute('aria-label') || '',
+      node.dataset?.action || '',
+      node.dataset?.key || '',
+      node.textContent || '',
+    ].join(' ').toLowerCase();
+
+    return hay.includes('calendar') || hay.includes('kalender');
+  });
+
+  if (!calendarButton) return;
+
+  const iconHtml = lucideCalendarDay(15);
+  const existingSvg = calendarButton.querySelector('svg');
+
+  if (existingSvg) {
+    existingSvg.outerHTML = iconHtml;
+  } else {
+    calendarButton.insertAdjacentHTML('afterbegin', iconHtml);
+  }
+}
+
+function scheduleSidebarFootCalendarIconRefresh() {
+  updateSidebarFootCalendarIcon();
+
+  const now = new Date();
+  const nextMidnight = new Date(now);
+
+  nextMidnight.setHours(24, 0, 5, 0);
+
+  window.setTimeout(() => {
+    updateSidebarFootCalendarIcon();
+
+    window.setInterval(() => {
+      updateSidebarFootCalendarIcon();
+    }, 24 * 60 * 60 * 1000);
+  }, Math.max(1000, nextMidnight.getTime() - now.getTime()));
 }
 
 function openMobileSidebarSafe() {
@@ -337,6 +402,33 @@ async function openSourcesRoute(source = 'unknown') {
   return runCreateAction('rss', {
     source,
   });
+}
+
+function closeTransientFullscreenUiForAppRoute(route = {}) {
+  const targetSurface = route.surface || null;
+
+  /*
+    Programmatic navigation via history.pushState does not emit popstate.
+    Therefore fullscreen overlays/surfaces must be closed explicitly when
+    an actual app route is opened.
+  */
+
+  // Graph fullscreen overlay.
+  closeGraph({
+    fromHistory: true,
+  });
+
+  // RSS fullscreen + source manager.
+  closeRssSourcesManagerUI();
+  closeRssFullscreenUI();
+
+  // Calendar fullscreen surface should only stay visible on calendar routes.
+  if (targetSurface !== 'calendar') {
+    closeCalendar({
+      surface: targetSurface === 'dashboard' ? 'dashboard' : 'note',
+      fromRouteChange: true,
+    });
+  }
 }
 
 let sync2Auto = {
@@ -1374,6 +1466,10 @@ async function init() {
   // Initialize the native browser navigation router
   setupOverlayHistoryRouter();
 
+  window.addEventListener('yanta-app-route-change', (e) => {
+    closeTransientFullscreenUiForAppRoute(e.detail || {});
+  });
+
   await installVaultStoreBridge();
 
   try {
@@ -1615,6 +1711,7 @@ async function init() {
 
   sidebarCollapsedPref = !!sidebarCollapsed;
   applySidebarCollapsed(sidebarCollapsedPref, { persist: false });
+  updateDesktopOverlaySidebarOffset();
 
   const initialView = isMobileViewport()
     ? (mobileView || (view === 'split' ? 'edit' : view))
@@ -1992,6 +2089,8 @@ function applySidebarCollapsed(collapsed, { persist = true } = {}) {
   // CodeMirror, Graph, Drawings etc. sollen nach Layoutwechsel sauber messen.
   // Wichtig: Tree-Floater nach der Sidebar-Transition neu setzen.
   const refreshLayout = () => {
+    updateDesktopOverlaySidebarOffset();
+
     window.dispatchEvent(new Event('resize'));
     window.dispatchEvent(new CustomEvent('yanta-sidebar-resized', {
       detail: { collapsed: effectiveCollapsed },
@@ -2071,6 +2170,7 @@ function setupDesktopSidebarCollapse() {
 
   DESKTOP_SIDEBAR_MQ.addEventListener?.('change', () => {
     applySidebarCollapsed(sidebarCollapsedPref, { persist: false });
+    updateDesktopOverlaySidebarOffset();
   });
 }
 
@@ -2335,6 +2435,17 @@ function bindEvents() {
       },
     }
   );
+
+  scheduleSidebarFootCalendarIconRefresh();
+
+  window.addEventListener('resize', () => {
+    updateDesktopOverlaySidebarOffset();
+    updateSidebarFootCalendarIcon();
+  });
+
+  window.addEventListener('yanta-sidebar-resized', () => {
+    updateSidebarFootCalendarIcon();
+  });
 
   $('importFile')?.addEventListener('change', (e) => { if (e.target.files.length) importFiles([...e.target.files]); e.target.value = ''; });
   $('importFolder')?.addEventListener('change', async (e) => {

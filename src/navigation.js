@@ -5,7 +5,51 @@
 // - Note:          #<noteId>
 // - Calendar:      #calendar
 // - Calendar Event:#calendar/<eventId>
+//
+// Important:
+// pushState/replaceState do NOT emit popstate.
+// Therefore every programmatic app-route navigation emits
+// yanta-app-route-change so fullscreen overlays/surfaces can close.
 // ============================================================
+
+function emitAppRouteChange(routeState, {
+  replace = false,
+} = {}) {
+  if (typeof window === 'undefined') return;
+
+  window.dispatchEvent(new CustomEvent('yanta-app-route-change', {
+    detail: {
+      ...routeState,
+      replace,
+    },
+  }));
+}
+
+function writeAppHistoryState(routeState, url, {
+  replace = false,
+} = {}) {
+  /*
+    If an app route is opened while a transient overlay state is current
+    (Graph/RSS/dialog/mobile sidebar), replace that overlay entry instead
+    of stacking a normal app route on top of it.
+
+    This prevents:
+      URL changed to note/dashboard, but old overlay stays visible.
+  */
+  const shouldReplace =
+    replace ||
+    !!history.state?.yantaOverlay;
+
+  history[shouldReplace ? 'replaceState' : 'pushState'](
+    routeState,
+    '',
+    url
+  );
+
+  emitAppRouteChange(routeState, {
+    replace: shouldReplace,
+  });
+}
 
 export function dashboardUrl(folderId = null) {
   return folderId
@@ -66,9 +110,8 @@ export function pushCalendarEventHistory(eventId) {
     return;
   }
 
-  history.pushState(
+  writeAppHistoryState(
     calendarEventState(id),
-    '',
     calendarEventUrl(id)
   );
 }
@@ -81,58 +124,63 @@ export function replaceCalendarEventHistory(eventId) {
     return;
   }
 
-  history.replaceState(
+  writeAppHistoryState(
     calendarEventState(id),
-    '',
-    calendarEventUrl(id)
+    calendarEventUrl(id),
+    {
+      replace: true,
+    }
   );
 }
 
 export function pushDashboardHistory(folderId = null) {
-  history.pushState(
+  writeAppHistoryState(
     dashboardState(folderId),
-    '',
     dashboardUrl(folderId)
   );
 }
 
 export function replaceDashboardHistory(folderId = null) {
-  history.replaceState(
+  writeAppHistoryState(
     dashboardState(folderId),
-    '',
-    dashboardUrl(folderId)
+    dashboardUrl(folderId),
+    {
+      replace: true,
+    }
   );
 }
 
 export function pushNoteHistory(noteId) {
-  history.pushState(
+  writeAppHistoryState(
     noteState(noteId),
-    '',
     noteUrl(noteId)
   );
 }
 
 export function replaceNoteHistory(noteId) {
-  history.replaceState(
+  writeAppHistoryState(
     noteState(noteId),
-    '',
-    noteUrl(noteId)
+    noteUrl(noteId),
+    {
+      replace: true,
+    }
   );
 }
 
 export function pushCalendarHistory() {
-  history.pushState(
+  writeAppHistoryState(
     calendarState(),
-    '',
     calendarUrl()
   );
 }
 
 export function replaceCalendarHistory() {
-  history.replaceState(
+  writeAppHistoryState(
     calendarState(),
-    '',
-    calendarUrl()
+    calendarUrl(),
+    {
+      replace: true,
+    }
   );
 }
 

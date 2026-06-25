@@ -1609,7 +1609,7 @@ async function openRssSourcesManagerInternal() {
                 ? feeds.map((feed) => `
                   <div class="yanta-rss-source-row" data-feed-id="${escapeAttr(feed.id)}">
                     <span class="yanta-rss-source-row-icon">
-                      ${lucide(isYoutubeFeed(feed) ? 'youtube' : 'rss', 17)}
+                      ${lucide(isYoutubeFeed(feed) ? 'play' : 'rss', 17)}
                     </span>
 
                     <span class="yanta-rss-source-row-main">
@@ -2054,7 +2054,7 @@ async function renderShell() {
       });
 
       btn.innerHTML = `
-        ${lucide(isYoutubeFeed(feed) ? 'youtube' : 'rss', 12)}
+        ${lucide(isYoutubeFeed(feed) ? 'play' : 'rss', 12)}
         <span>${escapeHtml(feed.title || 'Source')}</span>
       `;
 
@@ -2843,7 +2843,7 @@ function injectCss() {
   border: none;
   color: var(--text-faint);
   cursor: pointer;
-  padding: 8px;
+  // padding: 8px;
   border-radius: 50%;
   transition: color 0.2s ease, transform 0.1s ease, background-color 0.2s ease;
 }
@@ -3161,7 +3161,6 @@ function injectCss() {
 .yanta-rss-fullscreen .yanta-rss-root {
   width: 100%;
   height: 100%;
-  background: var(--bg);
 }
 
 .yanta-rss-side-pane .yanta-side-pane-body {

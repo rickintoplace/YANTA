@@ -3696,7 +3696,8 @@ async function fetchExternal(url, {
   lastModified = "",
   maxBytes = 2 * 1024 * 1024,
   timeoutMs = 12e3,
-  maxRedirects = 3
+  maxRedirects = 3,
+  userAgent = ""
 } = {}) {
   let currentUrl = safeExternalRssUrl(url);
   for (let redirectCount = 0; redirectCount <= maxRedirects; redirectCount++) {
@@ -3709,9 +3710,14 @@ async function fetchExternal(url, {
         /*
           Some publishers reject uncommon/bot-looking user agents from Workers.
           Use a browser-like UA with a YANTA product token.
+          
+          Important:
+          Do not reference env here. fetchExternal() is shared by RSS fetch,
+          RSS image proxy, web read, feed discovery/search, etc.
+          If an override is needed, pass userAgent via options.
         */
         "user-agent":
-          env.RSS_USER_AGENT ||
+          userAgent ||
           "Mozilla/5.0 (compatible; YANTA Sources/1.0; +https://yanta.page)",
 
         "accept-language": "en-US,en;q=0.9,de;q=0.8",
@@ -4098,7 +4104,8 @@ async function handleRssFetch(env, req, url, headers) {
     etag: url.searchParams.get("etag") || "",
     lastModified: url.searchParams.get("lastModified") || "",
     maxBytes: maxFeedBytes,
-    timeoutMs: 18e3
+    timeoutMs: 18e3,
+    userAgent: env.RSS_USER_AGENT || "",
   });
 
   if (fetched.status === 304) {
@@ -4176,7 +4183,8 @@ async function handleRssImage(env, req, url, headers) {
   const fetched = await fetchExternal(targetUrl, {
     accept: "image/avif,image/webp,image/png,image/jpeg,image/gif,image/svg+xml,image/*,*/*",
     maxBytes: limits.rssImageBytesMax || 2 * 1024 * 1024,
-    timeoutMs: 1e4
+    timeoutMs: 1e4,
+    userAgent: env.RSS_USER_AGENT || "",
   });
   if (fetched.status < 200 || fetched.status >= 400) {
     return json({ error: "image_fetch_failed", status: fetched.status }, 502, headers);

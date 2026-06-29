@@ -3450,6 +3450,17 @@ if (SITE_PAGE_PATHS.has(normalizedPath)) {
       console.error(e);
       document.body.innerHTML = '<main style="padding:24px;font-family:system-ui">Could not load share viewer.</main>';
     });
+} else if (String(location.hash || '').replace(/^#/, '').startsWith('slides-remote=')) {
+  import('./slides/slides-ui.js')
+    .then((m) => {
+      if (!m.mountSlidesRemoteFromHash()) {
+        document.body.innerHTML = '<main style="padding:24px;font-family:system-ui">Invalid slideshow remote link.</main>';
+      }
+    })
+    .catch((e) => {
+      console.error(e);
+      document.body.innerHTML = '<main style="padding:24px;font-family:system-ui">Could not open slideshow remote.</main>';
+    });
 } else {
   init().catch((e) => {
     console.error(e);

@@ -137,6 +137,47 @@ function cloneJson(v) {
   }
 }
 
+// YANTA Drawing extension fields.
+// These are not native Excalidraw scene fields, but they belong to a YANTA drawing.
+// Important: setDrawing() must preserve these fields on every scene save.
+const DRAWING_EXTENSION_KEYS = [
+  'slides',
+  'slideDecks',
+  'defaultSlideDeckId',
+  'presentationSettings',
+];
+
+function drawingExtensionPatch(raw = {}) {
+  const out = {};
+  const yanta = raw?.yanta && typeof raw.yanta === 'object'
+    ? raw.yanta
+    : {};
+
+  for (const key of DRAWING_EXTENSION_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(raw || {}, key)) {
+      out[key] = cloneJson(raw[key]);
+    } else if (Object.prototype.hasOwnProperty.call(yanta, key)) {
+      out[key] = cloneJson(yanta[key]);
+    }
+  }
+
+  return out;
+}
+
+function preserveDrawingExtensionFields(scene = {}, prev = {}) {
+  const out = {};
+
+  for (const key of DRAWING_EXTENSION_KEYS) {
+    if (Object.prototype.hasOwnProperty.call(scene || {}, key)) {
+      out[key] = cloneJson(scene[key]);
+    } else if (Object.prototype.hasOwnProperty.call(prev || {}, key)) {
+      out[key] = cloneJson(prev[key]);
+    }
+  }
+
+  return out;
+}
+
 function noteIdFromYantaLink(link = '') {
   const s = String(link || '').trim();
 
@@ -196,6 +237,9 @@ export function normalizeDrawingScene(raw = {}) {
     files: cloneJson(files),
     canvas: normalizeCanvasSize(raw.canvas || raw.yanta?.canvas || raw),
     text: extractTextFromDrawingScene({ elements }),
+
+    // Preserve YANTA-specific drawing extensions when importing/loading.
+    ...drawingExtensionPatch(raw),
   };
 }
 
@@ -292,20 +336,28 @@ export function setDrawing(noteId, drawingId, scene, origin = 'draw') {
   const { doc } = getNoteDoc(noteId);
   const map = doc.getMap('drawings');
   const prev = map.get(drawingId) || {};
+
   const normalized = normalizeDrawingScene({
     ...prev,
     ...scene,
     canvas: scene?.canvas || prev.canvas || scene,
   });
 
+  const extensions = preserveDrawingExtensionFields(scene, prev);
+
   doc.transact(() => {
     map.set(drawingId, {
       ...cloneJson(prev),
+
       id: drawingId,
       title: scene?.title ?? prev.title ?? 'Drawing',
       version: 2,
       updated: Date.now(),
+
       ...normalized,
+
+      // Critical: scene saves from Excalidraw must not delete slides.
+      ...extensions,
     });
   }, origin);
 }

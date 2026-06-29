@@ -5081,6 +5081,9 @@ export async function openDrawModal(
 function closeDrawModalRaw() {
   if (!modal) return;
 
+  const closingDrawingId = active.drawingId;
+  const closingNoteId = active.noteId;
+
   hideNotePreviewPopover();
 
   modal.hidden = true;
@@ -5103,6 +5106,13 @@ function closeDrawModalRaw() {
     unmountDrawEmbeds(host);
     host.replaceChildren();
   }
+
+  window.dispatchEvent(new CustomEvent('yanta-draw-fullscreen-closed', {
+    detail: {
+      noteId: closingNoteId,
+      drawingId: closingDrawingId,
+    },
+  }));
 
   active = {
     noteId: null,
@@ -5176,6 +5186,13 @@ export function drawingToExcalidrawJson(noteId, drawingId) {
     yanta: {
       title: d.title || 'Drawing',
       canvas: d.canvas || { width: 760, height: 420 },
+
+      // YANTA Slides extension.
+      // Kept under yanta.* so ordinary Excalidraw importers can ignore it.
+      slides: Array.isArray(d.slides) ? d.slides : [],
+      slideDecks: Array.isArray(d.slideDecks) ? d.slideDecks : [],
+      defaultSlideDeckId: d.defaultSlideDeckId || null,
+      presentationSettings: d.presentationSettings || null,
     },
   };
 }

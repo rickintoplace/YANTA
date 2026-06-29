@@ -592,10 +592,15 @@ export async function exportAsZip() {
         appState: d.appState || {},
         files: d.files || {},
 
-        // YANTA extension: persisted visual canvas/container size.
+        // YANTA extension: persisted visual canvas/container size + slides.
         yanta: {
           canvas: d.canvas || { width: 760, height: 420 },
           title: d.title || 'Drawing',
+
+          slides: Array.isArray(d.slides) ? d.slides : [],
+          slideDecks: Array.isArray(d.slideDecks) ? d.slideDecks : [],
+          defaultSlideDeckId: d.defaultSlideDeckId || null,
+          presentationSettings: d.presentationSettings || null,
         },
       };
 

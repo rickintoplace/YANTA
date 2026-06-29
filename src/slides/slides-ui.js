@@ -643,6 +643,87 @@ function zoomValue(appState = {}) {
 }
 
 /**
+ * Browser client coords -> Excalidraw infinite-board scene coords.
+ *
+ * Same coordinate model as draw.js:
+ *
+ *   sceneX = (clientX - rect.left) / zoom - scrollX
+ *   sceneY = (clientY - rect.top) / zoom - scrollY
+ *
+ * Uses object params intentionally, so wrong argument order cannot silently
+ * create NaN slide bounds.
+ */
+function screenToScene({
+  api,
+  container,
+  clientX,
+  clientY,
+}) {
+  if (!Number.isFinite(Number(clientX)) || !Number.isFinite(Number(clientY))) {
+    console.warn('[YANTA Slides] invalid screenToScene input', {
+      clientX,
+      clientY,
+      container,
+    });
+
+    return {
+      x: 0,
+      y: 0,
+      invalid: true,
+    };
+  }
+
+  // Prefer Excalidraw's own conversion if available.
+  // This matches draw.js behavior and should be the source of truth.
+  try {
+    if (api?.screenToSceneCoords) {
+      const p = api.screenToSceneCoords({
+        clientX,
+        clientY,
+      });
+
+      if (
+        p &&
+        Number.isFinite(Number(p.x)) &&
+        Number.isFinite(Number(p.y))
+      ) {
+        return {
+          x: Number(p.x),
+          y: Number(p.y),
+        };
+      }
+
+      const p2 = api.screenToSceneCoords({
+        x: clientX,
+        y: clientY,
+      });
+
+      if (
+        p2 &&
+        Number.isFinite(Number(p2.x)) &&
+        Number.isFinite(Number(p2.y))
+      ) {
+        return {
+          x: Number(p2.x),
+          y: Number(p2.y),
+        };
+      }
+    }
+  } catch {}
+
+  const rect = drawingViewportRect(container);
+  const appState = api?.getAppState?.() || {};
+  const zoom = zoomValue(appState);
+  const scrollX = finiteNumber(appState.scrollX, 0);
+  const scrollY = finiteNumber(appState.scrollY, 0);
+
+  return {
+    x: (clientX - rect.left) / zoom - scrollX,
+    y: (clientY - rect.top) / zoom - scrollY,
+  };
+}
+
+/**
  * Exact same coordinate model as draw.js.
  *
  * This uses object params intentionally, so old/wrong call order cannot

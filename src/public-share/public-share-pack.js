@@ -339,8 +339,23 @@ export async function packPublicNoteShare({
       elements: d.elements || [],
       appState: d.appState || {},
       files: d.files || {},
+    
+      // YANTA Slides:
+      // Public shares include slide camera targets, but not presenter notes.
+      slides: Array.isArray(d.slides)
+        ? d.slides.map((slide) => {
+            const clean = { ...slide };
+            delete clean.notes;
+            delete clean.presenterNotes;
+            return clean;
+          })
+        : [],
+    
+      slideDecks: Array.isArray(d.slideDecks) ? d.slideDecks : [],
+      defaultSlideDeckId: d.defaultSlideDeckId || null,
+    
       updated: d.updated || null,
-    })),
+    })),    
 
     citations,
 

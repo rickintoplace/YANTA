@@ -183,6 +183,10 @@ import {
   bindMediaTimestampClicks,
 } from './media/media-timestamps.js';
 
+import {
+  setupSlides,
+} from './slides/slides-ui.js';
+
 let sharePreviewLocked = false;
 
 let noteTitleSaveTimer = 0;
@@ -1755,6 +1759,7 @@ async function init() {
   setupWikilinkHover();
   setupImage();
   setupDraw();
+  setupSlides();
   setupCalendarVaultBridge();
   setupCitations();
   setupFormatToolbar();

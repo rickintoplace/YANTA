@@ -63,4 +63,5 @@ tmp/
 temp/
 .cache/
 
-vendor/
+vendor/node_modules/
+.vite/

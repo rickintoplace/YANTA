@@ -112,6 +112,23 @@ const inlineRoots = new WeakMap();
 const inlineApis = new WeakMap();
 const thumbnailCache = new Map();
 
+export function getDrawingApiForEmbed(embed) {
+  return embed ? inlineApis.get(embed) || null : null;
+}
+
+
+export function getActiveDrawingApi() {
+  return active.api || null;
+}
+
+export function getActiveDrawingHost() {
+  return (
+    host?.querySelector?.('.yanta-draw-fullscreen-host') ||
+    host ||
+    null
+  );
+}
+
 const DRAW_LIBRARY_SETTINGS_KEY = 'drawLibraryItems.v1';
 
 const DRAW_MOBILE_MQ = window.matchMedia?.('(pointer: coarse), (max-width: 760px)');
@@ -4422,6 +4439,16 @@ async function mountInlineDrawing(embed, sourceNoteId, drawingId, drawing) {
         apiRef.current = api;
         inlineApis.set(embed, api);
 
+        window.dispatchEvent(new CustomEvent('yanta-draw-api-ready', {
+          detail: {
+            noteId: sourceNoteId,
+            drawingId,
+            api,
+            embed,
+            surface,
+          },
+        }));
+
         addFilesToExcalidrawApi(api, drawing.files);
 
         setTimeout(() => {
@@ -4993,6 +5020,16 @@ export async function openDrawModal(
         apiRef.current = api;
         active.api = api;
 
+        window.dispatchEvent(new CustomEvent('yanta-draw-api-ready', {
+          detail: {
+            noteId: sourceNoteId,
+            drawingId,
+            api,
+            embed: null,
+            surface: 'fullscreen',
+          },
+        }));
+        
         addFilesToExcalidrawApi(api, current.files);
 
         if (shouldSelectInitialTool) {

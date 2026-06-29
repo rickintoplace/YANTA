@@ -53,6 +53,10 @@ import {
   bindMediaTimestampClicks,
 } from '../media/media-timestamps.js';
 
+import {
+  mountPublicShareSlides,
+} from '../slides/slides-public-share-viewer.js';
+
 let currentPayload = null;
 let currentImageResolver = null;
 let currentShareState = null;
@@ -1236,6 +1240,7 @@ export async function mountPublicShareViewer() {
     const drawingsById = new Map(drawings.map((d) => [d.id, d]));
 
     await hydratePublicDrawings(drawingsById);
+    mountPublicShareSlides(payload);
   } catch (err) {
     console.error('[YANTA Public Share] viewer failed', err);
     renderState('Could not open shared note', err?.message || String(err));

@@ -632,6 +632,18 @@ export function renderDrawEmbedHtml(id, label = 'Drawing', surface = 'preview') 
   </div>`;
 }
 
+export function renderSlidesEmbedHtml(id, label = 'Slideshow') {
+  const cleanId = String(id || '').trim();
+
+  return `<div class="yanta-slides-embed" data-slides-draw-id="${escapeAttr(cleanId)}" contenteditable="false">
+    <div class="yanta-slides-embed-head">
+      ${previewLucide('presentation', 16)}
+      <strong>${escapeHtml(label || 'Slideshow')}</strong>
+      <span style="color:var(--text-faint);font-size:12px">slides://${escapeHtml(cleanId)}</span>
+    </div>
+  </div>`;
+}
+
 function resolveWikilinkNoteId(target) {
   const decoded = decodeEntities(String(target || '').trim());
   const key = decoded.toLowerCase();
@@ -687,6 +699,19 @@ export function renderInline(s) {
   out = out.replace(
     /(^|[\s>])draw:\/\/([a-z0-9_-]+)/gi,
     (_, prefix, id) => `${prefix}${stash(renderDrawEmbedHtml(id, 'Drawing'))}`
+  );
+
+  // Slideshow embeds:
+  //   slides://abc123
+  //   ![](slides://abc123)
+  out = out.replace(
+    /!\[([^\]]*)\]\(slides:\/\/([a-z0-9_-]+)\)/gi,
+    (_, alt, id) => stash(renderSlidesEmbedHtml(id, decodeEntities(alt || 'Slideshow')))
+  );
+
+  out = out.replace(
+    /(^|[\s>])slides:\/\/([a-z0-9_-]+)/gi,
+    (_, prefix, id) => `${prefix}${stash(renderSlidesEmbedHtml(id, 'Slideshow'))}`
   );
 
   // Inline Lucide icon syntax:

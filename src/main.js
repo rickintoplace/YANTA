@@ -187,6 +187,10 @@ import {
   setupSlides,
 } from './slides/slides-ui.js';
 
+import {
+  openPresentationPairingInputModal,
+} from './presentation/presentation-pairing.js';
+
 let sharePreviewLocked = false;
 
 let noteTitleSaveTimer = 0;
@@ -1462,6 +1466,39 @@ function consumePendingPublicShareCalendarEvent() {
   return true;
 }
 
+function presentPairPayloadFromHash(hash = location.hash) {
+  const raw = String(hash || '').replace(/^#/, '');
+
+  if (!raw.startsWith('present-pair=')) return '';
+
+  try {
+    return decodeURIComponent(raw.slice('present-pair='.length));
+  } catch {
+    return raw.slice('present-pair='.length);
+  }
+}
+
+async function handlePresentPairHashIfNeeded(hash = location.hash) {
+  const payload = presentPairPayloadFromHash(hash);
+
+  if (!payload) return false;
+
+  history.replaceState({}, '', location.pathname + location.search);
+
+  try {
+    const {
+      handlePresentationPairingPayload,
+    } = await import('./presentation/presentation-pairing.js');
+
+    await handlePresentationPairingPayload(payload);
+    return true;
+  } catch (err) {
+    console.error('[YANTA Presentation] pairing failed', err);
+    toast(err?.message || 'Could not read presentation pairing code', 'error');
+    return false;
+  }
+}
+
 async function init() {
   await openDB();
 
@@ -1718,26 +1755,7 @@ async function init() {
     }, 700);
   }
 
-  if (presentationPairingHashPayload) {
-    /*
-      Remove pairing token from URL/history immediately.
-      The pairing token allows sending a presentation to the waiting display.
-    */
-    history.replaceState({}, '', location.pathname + location.search);
-
-    setTimeout(async () => {
-      try {
-        const {
-          handlePresentationPairingPayload,
-        } = await import('./presentation/presentation-pairing.js');
-
-        await handlePresentationPairingPayload(presentationPairingHashPayload);
-      } catch (err) {
-        console.error('[YANTA Presentation] pairing failed', err);
-        toast(err?.message || 'Could not read presentation pairing code', 'error');
-      }
-    }, 700);
-  }
+  handlePresentPairHashIfNeeded(location.hash).catch(() => {});
 
   await loadAppearance();
   await loadCalendarPreferences();
@@ -1774,6 +1792,7 @@ async function init() {
     openAssistantFloating,
     openSources: () => openSourcesRoute('command-palette'),
     openCitationManager,
+    openPresentationPairing: openPresentationPairingInputModal,
     exportAsZip,
     exportNoteAsMd,
     exportBundle,
@@ -2848,6 +2867,10 @@ function bindEvents() {
 
   window.addEventListener('yanta-open-citation-manager', () => {
     openCitationManager();
+  });
+
+  window.addEventListener('hashchange', () => {
+    handlePresentPairHashIfNeeded(location.hash).catch(() => {});
   });
 
   window.addEventListener('yanta-note-opened', () => {

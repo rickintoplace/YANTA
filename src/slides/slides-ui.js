@@ -67,6 +67,10 @@ import {
   openPresentationSessionModal,
 } from '../presentation/presentation-ui.js';
 
+import {
+  openPresentationPairingInputModal,
+} from '../presentation/presentation-pairing.js';
+
 const SIGNALING_URL =
   import.meta.env.VITE_YANTA_SIGNALING_URL ||
   'wss://yanta-signaling-932960946294.europe-west1.run.app';
@@ -1643,6 +1647,13 @@ function refreshSlidesPanel(embed) {
                 Meeting Room
               </span>
             </button>
+
+            <button class="btn" data-slides-action="scan-display">
+              ${lucide('camera', 13)}
+              <span>
+                Scan Display
+              </span>
+            </button>
           </div>
 
           <div class="yanta-slides-strip">
@@ -1767,6 +1778,10 @@ function refreshSlidesPanel(embed) {
       noteId: ctx.noteId,
       drawingId: ctx.drawingId,
     });
+  });
+
+  panel.querySelector('[data-slides-action="scan-display"]')?.addEventListener('click', () => {
+    openPresentationPairingInputModal();
   });
 
   panel.querySelectorAll('[data-slide-id]').forEach((btn) => {
@@ -1912,6 +1927,13 @@ function renderFullscreenSlidesDock(ctx) {
                 </span>
               </button>
 
+              <button class="btn" data-fs-slides-action="scan-display">
+                ${lucide('camera', 13)}
+                <span>
+                  Scan Display
+                </span>
+              </button>
+
             </div>
 
             <div class="yanta-slides-strip">
@@ -2023,6 +2045,10 @@ function renderFullscreenSlidesDock(ctx) {
       noteId: ctx.noteId,
       drawingId: ctx.drawingId,
     });
+  });
+
+  dock.querySelector('[data-fs-slides-action="scan-display"]')?.addEventListener('click', () => {
+    openPresentationPairingInputModal();
   });
 
   dock.querySelectorAll('[data-slide-id]').forEach((btn) => {

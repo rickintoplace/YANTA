@@ -91,6 +91,83 @@ const pendingPanelRefreshes = new Set();
 let panelRefreshRaf = 0;
 let cameraAnimationRaf = 0;
 
+function requestSlideshowFullscreen() {
+  const target =
+    getActiveDrawingHost?.() ||
+    document.querySelector('.yanta-draw-modal') ||
+    document.documentElement;
+
+  try {
+    if (!document.fullscreenElement) {
+      target.requestFullscreen?.();
+    }
+  } catch {}
+}
+
+function exitSlideshowFullscreen() {
+  try {
+    if (document.fullscreenElement) {
+      document.exitFullscreen?.();
+    }
+  } catch {}
+}
+
+function setSlideshowImmersive(active) {
+  if (!slideshow) return;
+
+  slideshow.immersive = !!active;
+
+  document.body.classList.toggle(
+    'yanta-slideshow-immersive',
+    slideshow.immersive
+  );
+
+  const immersiveBtn = slideshow.toolbar?.querySelector?.('[data-slide-immersive]');
+  immersiveBtn?.classList.toggle('active', slideshow.immersive);
+
+  if (slideshow.immersive) {
+    ensureSlideshowImmersiveHint();
+  } else {
+    document
+      .querySelectorAll('.yanta-slideshow-immersive-hint')
+      .forEach((node) => node.remove());
+  }
+
+  requestAnimationFrame(() => {
+    try {
+      slideshow.api?.refresh?.();
+    } catch {}
+  });
+}
+
+function ensureSlideshowImmersiveHint() {
+  document
+    .querySelectorAll('.yanta-slideshow-immersive-hint')
+    .forEach((node) => node.remove());
+
+  const hint = document.createElement('div');
+  hint.className = 'yanta-slideshow-immersive-hint';
+  hint.textContent = 'Press Esc for controls';
+
+  document.body.append(hint);
+
+  window.setTimeout(() => {
+    hint.remove();
+  }, 3600);
+}
+
+function slideshowFullscreenChangeHandler() {
+  /*
+    Browser Esc in fullscreen often exits native fullscreen before/without
+    regular app-level key handling. Show controls when fullscreen ends.
+  */
+  if (!slideshow) return;
+
+  if (!document.fullscreenElement && slideshow.immersive) {
+    setSlideshowImmersive(false);
+  }
+}
+
 const hiddenSlideFrameSnapshots = [];
 const middleMousePanBindings = new WeakSet();
 
@@ -642,6 +719,83 @@ body.yanta-slideshow-active .yanta-slides-fullscreen-dock,
 
   .yanta-slides-remote-controls {
     grid-template-columns: 1fr;
+  }
+}
+
+/* ============================================================
+   Immersive Slideshow Mode
+   ============================================================ */
+
+body.yanta-slideshow-active.yanta-slideshow-immersive .yanta-draw-head,
+body.yanta-slideshow-active.yanta-slideshow-immersive .yanta-slides-fullscreen-dock,
+body.yanta-slideshow-active.yanta-slideshow-immersive .yanta-slideshow-toolbar,
+body.yanta-slideshow-active.yanta-slideshow-immersive .yanta-slideshow-notes {
+  display: none !important;
+}
+
+body.yanta-slideshow-active.yanta-slideshow-immersive .excalidraw .App-toolbar,
+body.yanta-slideshow-active.yanta-slideshow-immersive .excalidraw .FixedSideContainer,
+body.yanta-slideshow-active.yanta-slideshow-immersive .excalidraw .HintViewer,
+body.yanta-slideshow-active.yanta-slideshow-immersive .excalidraw .help-icon,
+body.yanta-slideshow-active.yanta-slideshow-immersive .excalidraw .layer-ui__wrapper__top-right,
+body.yanta-slideshow-active.yanta-slideshow-immersive .excalidraw .layer-ui__wrapper__footer-right,
+body.yanta-slideshow-active.yanta-slideshow-immersive .excalidraw .layer-ui__wrapper__footer-left,
+body.yanta-slideshow-active.yanta-slideshow-immersive .excalidraw .Island,
+body.yanta-slideshow-active.yanta-slideshow-immersive .excalidraw .App-menu,
+body.yanta-slideshow-active.yanta-slideshow-immersive .excalidraw .Stack_vertical {
+  display: none !important;
+  pointer-events: none !important;
+}
+
+.yanta-slideshow-immersive-hint {
+  position: fixed;
+  left: 50%;
+  bottom: max(18px, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 623;
+
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+
+  background: color-mix(in srgb, var(--bg-elev) 88%, transparent);
+  color: var(--text-dim);
+
+  font-size: 12px;
+  font-weight: 750;
+
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+
+  opacity: 0;
+  pointer-events: none;
+
+  animation: yanta-slideshow-immersive-hint 3.2s ease forwards;
+}
+
+body:not(.yanta-slideshow-immersive) .yanta-slideshow-immersive-hint {
+  display: none !important;
+}
+
+@keyframes yanta-slideshow-immersive-hint {
+  0% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(8px);
+  }
+
+  12% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+
+  72% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-6px);
   }
 }
   `;
@@ -2551,7 +2705,8 @@ export function startSlideshow({
     <button class="icon-btn" data-slide-laser title="Laser">${lucide('mouse-pointer-2', 17)}</button>
     <button class="icon-btn" data-slide-notes title="Notes">${lucide('notebook-text', 17)}</button>
     <button class="icon-btn" data-slide-remote title="Remote">${lucide('qr-code', 17)}</button>
-    <button class="icon-btn" data-slide-exit title="Exit">${lucide('x', 17)}</button>
+    <button class="icon-btn" data-slide-immersive title="Fullscreen presentation">${lucide('maximize', 17)}</button>
+    <button class="icon-btn" data-slide-exit title="Exit slideshow">${lucide('x', 17)}</button>
   `;
 
   const laserLayer = document.createElement('div');
@@ -2575,10 +2730,18 @@ export function startSlideshow({
     notesOpen: false,
     notesEl: null,
     laserHideTimer: 0,
+    immersive: true,
   };
 
   document.body.classList.add('yanta-slideshow-active');
   fullscreenSlidesDock?.classList.add('is-hidden-during-slideshow');
+
+  document.body.classList.add('yanta-slideshow-immersive');
+  document.addEventListener('fullscreenchange', slideshowFullscreenChangeHandler);
+
+  if (!silent) {
+    requestSlideshowFullscreen();
+  }
 
   hideSlideFramesForPresentation(slideshow.api);
 
@@ -2588,6 +2751,11 @@ export function startSlideshow({
   toolbar.querySelector('[data-slide-laser]')?.addEventListener('click', toggleLaser);
   toolbar.querySelector('[data-slide-notes]')?.addEventListener('click', toggleNotes);
   toolbar.querySelector('[data-slide-remote]')?.addEventListener('click', openRemoteQrModal);
+
+  toolbar.querySelector('[data-slide-immersive]')?.addEventListener('click', () => {
+    requestSlideshowFullscreen();
+    setSlideshowImmersive(true);
+  });
 
   document.addEventListener('keydown', slideshowKeyHandler, true);
   document.addEventListener('pointermove', laserPointerMove, true);
@@ -2613,10 +2781,19 @@ export function stopSlideshow() {
   restoreSlideFramesAfterPresentation();
 
   document.body.classList.remove('yanta-slideshow-active');
+  document.body.classList.remove('yanta-slideshow-immersive');
   fullscreenSlidesDock?.classList.remove('is-hidden-during-slideshow');
+
+  document.removeEventListener('fullscreenchange', slideshowFullscreenChangeHandler);
+
+  document
+    .querySelectorAll('.yanta-slideshow-immersive-hint')
+    .forEach((node) => node.remove());
 
   cancelAnimationFrame(cameraAnimationRaf);
   cameraAnimationRaf = 0;
+
+  exitSlideshowFullscreen();
 
   slideshow = null;
 }
@@ -2635,6 +2812,17 @@ function slideshowKeyHandler(e) {
 
   if (e.key === 'Escape') {
     e.preventDefault();
+
+    /*
+      First Esc reveals controls / edit chrome.
+      Second Esc exits slideshow.
+    */
+    if (slideshow.immersive) {
+      setSlideshowImmersive(false);
+      exitSlideshowFullscreen();
+      return;
+    }
+
     stopSlideshow();
     return;
   }

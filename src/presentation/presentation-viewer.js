@@ -24,9 +24,8 @@ import {
 } from './presentation-crypto.js';
 
 import {
+  normalizeSlideBounds,
   normalizeSlides,
-  visibleElementsInSlide,
-  makeVirtualElementForSlide,
   isSlideFrameElement,
 } from '../slides/slides-model.js';
 
@@ -878,20 +877,22 @@ function PresentationApp() {
         files: drawing.files || {},
       },
 
-      excalidrawAPI(nextApi) {
+    excalidrawAPI(nextApi) {
         api = nextApi;
 
         requestAnimationFrame(() => {
-          api?.refresh?.();
+            applyElementsForMode(mode);
 
-          if (slides.length) {
+            api?.refresh?.();
+
+            if (slides.length) {
             goToSlide(0, {
-              notifyOwner: true,
-              animated: false,
+                notifyOwner: true,
+                animated: false,
             });
-          }
+            }
         });
-      },
+    },
 
       UIOptions: {
         canvasActions: {

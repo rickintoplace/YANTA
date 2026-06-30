@@ -22,6 +22,9 @@ import {
 
 import {
   normalizeSlides,
+  visibleElementsInSlide,
+  makeVirtualElementForSlide,
+  isSlideFrameElement,
 } from '../slides/slides-model.js';
 
 import {

@@ -38,6 +38,7 @@ import {
   createSlide,
   updateSlide,
   deleteSlide,
+  reorderSlides,
   setSlideNotes,
   syncSlidesFromScene,
   drawingRef,
@@ -59,7 +60,12 @@ import {
   getDrawingApiForEmbed,
   getActiveDrawingApi,
   getActiveDrawingHost,
+  runDrawingApiUpdateWithoutSaving,
 } from '../draw.js';
+
+import {
+  openPresentationSessionModal,
+} from '../presentation/presentation-ui.js';
 
 const SIGNALING_URL =
   import.meta.env.VITE_YANTA_SIGNALING_URL ||
@@ -80,6 +86,9 @@ const REMOTE_PREVIEW_MAX_CHARS = 650_000;
 const pendingPanelRefreshes = new Set();
 let panelRefreshRaf = 0;
 let cameraAnimationRaf = 0;
+
+const hiddenSlideFrameSnapshots = [];
+const middleMousePanBindings = new WeakSet();
 
 function injectCss() {
   if (cssInjected) return;
@@ -109,10 +118,33 @@ function injectCss() {
 }
 
 .yanta-slides-actions .btn {
-  min-height: 28px;
+  max-height: 3em;
   padding: 4px 8px;
   font-size: 11px;
 }
+
+.yanta-slides-panel .yanta-slides-actions .btn {
+    width: auto;
+    min-width: 0;
+    max-width: max-content;
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    column-gap: 4px;
+    white-space: nowrap !important;
+    line-height: 1 !important;
+}
+
+.yanta-slides-panel .yanta-slides-actions {
+  gap: 4px;
+}
+
+.yanta-slides-panel.is-open .yanta-slides-actions .btn {
+  padding: 4px 6px !important;
+}
+  
 
 .yanta-slides-actions small {
   color: var(--text-faint);
@@ -139,8 +171,40 @@ function injectCss() {
   grid-template-columns: auto minmax(0, 1fr) auto;
   gap: 7px;
   align-items: center;
-  cursor: pointer;
+  cursor: grab;
   text-align: left;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.yanta-slide-chip:active {
+  cursor: grabbing;
+}
+
+.yanta-slide-chip.is-dragging {
+  opacity: .42;
+  transform: scale(.985);
+}
+
+.yanta-slides-strip.is-reordering {
+  cursor: grabbing;
+}
+
+.yanta-slides-strip.is-reordering .yanta-slide-chip:not(.is-dragging) {
+  transition:
+    transform 120ms ease,
+    border-color 120ms ease,
+    background-color 120ms ease;
+}
+
+.yanta-slide-chip.is-drop-before {
+  border-left-color: var(--accent);
+  box-shadow: -3px 0 0 var(--accent);
+}
+
+.yanta-slide-chip.is-drop-after {
+  border-right-color: var(--accent);
+  box-shadow: 3px 0 0 var(--accent);
 }
 
 .yanta-slide-chip:hover,
@@ -215,7 +279,7 @@ function injectCss() {
 .yanta-slideshow {
   position: fixed;
   inset: 0;
-  z-index: 390;
+  z-index: 620;
   pointer-events: none;
 }
 
@@ -224,6 +288,7 @@ function injectCss() {
   left: 50%;
   bottom: max(18px, env(safe-area-inset-bottom));
   transform: translateX(-50%);
+  z-index: 622;
   pointer-events: auto;
   display: flex;
   align-items: center;
@@ -280,6 +345,21 @@ function injectCss() {
   padding: 9px 11px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-elev-2);
+  cursor: move;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.yanta-slideshow-notes-head button,
+.yanta-slideshow-notes-head input,
+.yanta-slideshow-notes-head textarea {
+  cursor: pointer;
+}
+
+.yanta-slideshow-notes.is-dragging {
+  user-select: none;
+  -webkit-user-select: none;
 }
 
 .yanta-slideshow-notes-head strong {
@@ -302,12 +382,13 @@ function injectCss() {
   line-height: 1.55;
   padding: 12px;
   box-sizing: border-box;
+  cursor: text;
 }
 
 .yanta-laser-layer {
   position: fixed;
   inset: 0;
-  z-index: 391;
+  z-index: 621;
   pointer-events: none;
 }
 
@@ -544,6 +625,7 @@ function injectCss() {
   transform: scale(1);
 }
 
+body.yanta-slideshow-active .yanta-slides-fullscreen-dock,
 .yanta-slides-fullscreen-dock.is-hidden-during-slideshow {
   display: none !important;
 }
@@ -640,6 +722,233 @@ function drawingViewportRect(container = null) {
 
 function zoomValue(appState = {}) {
   return finiteNumber(appState.zoom?.value ?? appState.zoom, 1) || 1;
+}
+
+function isTextInputTarget(target) {
+  const el = target instanceof Element ? target : null;
+  if (!el) return false;
+
+  if (
+    el instanceof HTMLInputElement ||
+    el instanceof HTMLTextAreaElement ||
+    el instanceof HTMLSelectElement
+  ) {
+    return true;
+  }
+
+  return !!el.closest?.(
+    [
+      'input',
+      'textarea',
+      'select',
+      '[contenteditable="true"]',
+      '[role="textbox"]',
+    ].join(',')
+  );
+}
+
+function clampPanelPosition(panel, left, top) {
+  const rect = panel.getBoundingClientRect();
+  const margin = 10;
+
+  return {
+    left: clamp(
+      left,
+      margin,
+      Math.max(margin, window.innerWidth - rect.width - margin)
+    ),
+    top: clamp(
+      top,
+      margin,
+      Math.max(margin, window.innerHeight - rect.height - margin)
+    ),
+  };
+}
+
+function sceneElementsForApi(api) {
+  try {
+    return (
+      api?.getSceneElementsIncludingDeleted?.() ||
+      api?.getSceneElements?.() ||
+      []
+    );
+  } catch {
+    return [];
+  }
+}
+
+function hideSlideFramesForPresentation(api) {
+  if (!api) return;
+
+  const elements = sceneElementsForApi(api);
+  if (!Array.isArray(elements) || !elements.length) return;
+
+  const frames = elements.filter((el) =>
+    el &&
+    !el.isDeleted &&
+    isSlideFrameElement(el)
+  );
+
+  if (!frames.length) return;
+
+  const alreadyHidden = hiddenSlideFrameSnapshots.some((entry) => entry.api === api);
+  if (alreadyHidden) return;
+
+  const originals = new Map(
+    frames.map((frame) => [
+      frame.id,
+      {
+        opacity: frame.opacity,
+        locked: frame.locked,
+      },
+    ])
+  );
+
+  hiddenSlideFrameSnapshots.push({
+    api,
+    originals,
+  });
+
+  const nextElements = elements.map((el) =>
+    originals.has(el.id)
+      ? {
+          ...el,
+          opacity: 0,
+          locked: true,
+        }
+      : el
+  );
+
+  runDrawingApiUpdateWithoutSaving(api, {
+    elements: nextElements,
+  });
+}
+
+function restoreSlideFramesAfterPresentation() {
+  while (hiddenSlideFrameSnapshots.length) {
+    const entry = hiddenSlideFrameSnapshots.pop();
+    const api = entry?.api;
+    const originals = entry?.originals;
+
+    if (!api || !originals?.size) continue;
+
+    const elements = sceneElementsForApi(api);
+    if (!Array.isArray(elements) || !elements.length) continue;
+
+    const nextElements = elements.map((el) => {
+      const original = originals.get(el?.id);
+      if (!original) return el;
+
+      return {
+        ...el,
+        opacity: original.opacity ?? 100,
+        locked: original.locked ?? false,
+      };
+    });
+
+    runDrawingApiUpdateWithoutSaving(api, {
+      elements: nextElements,
+    });
+  }
+}
+
+function pointInBounds(point, bounds, pad = 8) {
+  return (
+    point.x >= bounds.x - pad &&
+    point.x <= bounds.x + bounds.width + pad &&
+    point.y >= bounds.y - pad &&
+    point.y <= bounds.y + bounds.height + pad
+  );
+}
+
+function slideFrameAtScreenPoint(api, container, clientX, clientY) {
+  if (!api) return null;
+
+  const scene = screenToScene({
+    api,
+    container,
+    clientX,
+    clientY,
+  });
+
+  if (scene.invalid) return null;
+
+  const elements = sceneElementsForApi(api);
+
+  for (let i = elements.length - 1; i >= 0; i--) {
+    const el = elements[i];
+
+    if (!el || el.isDeleted) continue;
+    if (!isSlideFrameElement(el)) continue;
+
+    const bounds = elementBounds(el);
+
+    if (pointInBounds(scene, bounds, 10)) {
+      return el;
+    }
+  }
+
+  return null;
+}
+
+function withoutSelectedId(selectedElementIds, id) {
+  if (!selectedElementIds || !id) return selectedElementIds || {};
+
+  if (Array.isArray(selectedElementIds)) {
+    return selectedElementIds.filter((x) => x !== id);
+  }
+
+  if (selectedElementIds instanceof Set) {
+    const next = new Set(selectedElementIds);
+    next.delete(id);
+    return next;
+  }
+
+  if (typeof selectedElementIds === 'object') {
+    const next = { ...selectedElementIds };
+    delete next[id];
+    return next;
+  }
+
+  return selectedElementIds;
+}
+
+function bindSlideFrameMiddleMousePan(container, api) {
+  if (!container || !api || middleMousePanBindings.has(container)) return;
+
+  middleMousePanBindings.add(container);
+
+  container.addEventListener('pointerdown', (e) => {
+    // Middle mouse only. Left mouse should still move/resize slide frames.
+    if (e.button !== 1) return;
+
+    const frame = slideFrameAtScreenPoint(
+      api,
+      container,
+      e.clientX,
+      e.clientY
+    );
+
+    if (!frame) return;
+
+    /*
+      Do not stop propagation:
+      Excalidraw must still receive middle mouse and start native panning.
+      We only remove the slide frame from selection before drag evaluation.
+    */
+    e.preventDefault();
+
+    const appState = api.getAppState?.() || {};
+
+    runDrawingApiUpdateWithoutSaving(api, {
+      appState: {
+        selectedElementIds: withoutSelectedId(
+          appState.selectedElementIds,
+          frame.id
+        ),
+      },
+    });
+  }, true);
 }
 
 /**
@@ -752,9 +1061,9 @@ function slideUnitToScreen(data = {}) {
 
   const slide = slideshow.slides[slideshow.index];
   const api =
-    slideshow.api ||
-    currentApiForDrawing(slideshow.noteId, slideshow.drawingId);
-
+    currentApiForDrawing(slideshow.noteId, slideshow.drawingId) ||
+    slideshow.api;
+    
   if (!slide || !api) return null;
 
   const bounds = normalizeSlideBounds(slide.bounds);
@@ -775,8 +1084,8 @@ function screenToSlideUnit(clientX, clientY) {
 
   const slide = slideshow.slides[slideshow.index];
   const api =
-    slideshow.api ||
-    currentApiForDrawing(slideshow.noteId, slideshow.drawingId);
+    currentApiForDrawing(slideshow.noteId, slideshow.drawingId) ||
+    slideshow.api;
 
   if (!slide || !api) return null;
 
@@ -837,7 +1146,7 @@ function slideCameraTarget(api, container, slide, {
 function updateCamera(api, camera) {
   if (!api || !camera) return;
 
-  api.updateScene({
+  runDrawingApiUpdateWithoutSaving(api, {
     appState: {
       scrollX: camera.scrollX,
       scrollY: camera.scrollY,
@@ -845,11 +1154,9 @@ function updateCamera(api, camera) {
         value: camera.zoom,
       },
     },
+  }, {
+    releaseMs: 260,
   });
-
-  try {
-    api.refresh?.();
-  } catch {}
 }
 
 function animateCameraToSlide(api, container, slide, {
@@ -1048,6 +1355,181 @@ async function hydrateSlideThumbnails(root, drawing, slides = []) {
   await Promise.allSettled(tasks);
 }
 
+function slideChipFromEventTarget(target) {
+  return target?.closest?.('.yanta-slide-chip[data-slide-id]') || null;
+}
+
+function orderedSlideIdsFromStrip(strip) {
+  return [...strip.querySelectorAll('.yanta-slide-chip[data-slide-id]')]
+    .map((node) => node.dataset.slideId)
+    .filter(Boolean);
+}
+
+function clearSlideDropIndicators(strip) {
+  strip
+    ?.querySelectorAll?.('.is-drop-before, .is-drop-after')
+    ?.forEach((node) => {
+      node.classList.remove('is-drop-before', 'is-drop-after');
+    });
+}
+
+function slideDragInsertTarget(strip, clientX) {
+  const chips = [
+    ...strip.querySelectorAll('.yanta-slide-chip[data-slide-id]:not(.is-dragging)'),
+  ];
+
+  for (const chip of chips) {
+    const rect = chip.getBoundingClientRect();
+    const midpoint = rect.left + rect.width / 2;
+
+    if (clientX < midpoint) {
+      return {
+        chip,
+        position: 'before',
+      };
+    }
+  }
+
+  const last = chips.at(-1) || null;
+
+  return {
+    chip: last,
+    position: 'after',
+  };
+}
+
+function moveDraggedSlideChip(strip, draggedChip, clientX) {
+  if (!strip || !draggedChip) return;
+
+  const target = slideDragInsertTarget(strip, clientX);
+
+  clearSlideDropIndicators(strip);
+
+  if (!target.chip) {
+    strip.append(draggedChip);
+    return;
+  }
+
+  if (target.position === 'before') {
+    target.chip.classList.add('is-drop-before');
+
+    if (target.chip !== draggedChip.nextElementSibling) {
+      strip.insertBefore(draggedChip, target.chip);
+    }
+
+    return;
+  }
+
+  target.chip.classList.add('is-drop-after');
+
+  if (target.chip.nextSibling !== draggedChip) {
+    strip.insertBefore(draggedChip, target.chip.nextSibling);
+  }
+}
+
+function bindSlideStripReorder(strip, {
+  noteId,
+  drawingId,
+  refresh,
+} = {}) {
+  if (!strip || strip.dataset.reorderBound === '1') return;
+
+  strip.dataset.reorderBound = '1';
+
+  let draggedChip = null;
+  let draggedId = '';
+  let originalOrder = [];
+
+  const suppressNextClick = () => {
+    strip.dataset.suppressClick = '1';
+
+    window.setTimeout(() => {
+      delete strip.dataset.suppressClick;
+    }, 180);
+  };
+
+  const cleanup = () => {
+    draggedChip?.classList.remove('is-dragging');
+    draggedChip = null;
+    draggedId = '';
+    originalOrder = [];
+
+    strip.classList.remove('is-reordering');
+    clearSlideDropIndicators(strip);
+
+    suppressNextClick();
+  };
+
+  strip.addEventListener('dragstart', (e) => {
+    const chip = slideChipFromEventTarget(e.target);
+    if (!chip) return;
+
+    draggedChip = chip;
+    draggedId = chip.dataset.slideId || '';
+    originalOrder = orderedSlideIdsFromStrip(strip);
+
+    if (!draggedId) return;
+
+    strip.classList.add('is-reordering');
+    chip.classList.add('is-dragging');
+
+    try {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', draggedId);
+    } catch {}
+  });
+
+  strip.addEventListener('dragover', (e) => {
+    if (!draggedChip) return;
+
+    e.preventDefault();
+
+    try {
+      e.dataTransfer.dropEffect = 'move';
+    } catch {}
+
+    moveDraggedSlideChip(strip, draggedChip, e.clientX);
+  });
+
+  strip.addEventListener('drop', (e) => {
+    if (!draggedChip || !draggedId) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const nextOrder = orderedSlideIdsFromStrip(strip);
+
+    const hasSameSlides =
+      originalOrder.length === nextOrder.length &&
+      originalOrder.every((id) => nextOrder.includes(id));
+
+    const changed =
+      hasSameSlides &&
+      originalOrder.some((id, index) => nextOrder[index] !== id);
+
+    cleanup();
+
+    if (!changed) return;
+
+    reorderSlides(noteId, drawingId, nextOrder);
+    refresh?.();
+  });
+
+  strip.addEventListener('dragend', cleanup);
+  strip.addEventListener('dragcancel', cleanup);
+
+  /*
+    If a drag started on a button, browsers may still fire click afterwards.
+    Let chip click handlers skip that click.
+  */
+  strip.addEventListener('click', (e) => {
+    if (strip.dataset.suppressClick !== '1') return;
+
+    e.preventDefault();
+    e.stopPropagation();
+  }, true);
+}
+
 function enhanceDrawingEmbed(embed) {
   injectCss();
 
@@ -1090,9 +1572,7 @@ function refreshSlidesPanel(embed) {
 
   const open = slidesPanelOpen(embed);
 
-  const slides = open
-    ? syncSlidesFromScene(ctx.noteId, ctx.drawingId, ctx.api)
-    : listSlides(ctx.noteId, ctx.drawingId);
+  const slides = syncSlidesFromScene(ctx.noteId, ctx.drawingId, ctx.api);
 
   panel.classList.toggle('is-open', open);
 
@@ -1100,7 +1580,9 @@ function refreshSlidesPanel(embed) {
     <div class="yanta-slides-actions">
       <button class="btn ${open ? 'primary' : ''}" data-slides-action="toggle">
         ${lucide('presentation', 13)}
-        Slides
+        <span>
+          Slides
+        </span>
       </button>
 
       <small>
@@ -1114,32 +1596,52 @@ function refreshSlidesPanel(embed) {
           <div class="yanta-slides-actions">
             <button class="btn" data-slides-action="draw">
               ${lucide('scan', 13)}
-              Draw slide
+              <span>
+                Draw slide
+              </span>
+
             </button>
 
             <button class="btn" data-slides-action="current-view">
               ${lucide('focus', 13)}
-              Current view
+              <span>
+                Current view
+              </span>
             </button>
 
             <button class="btn" data-slides-action="selection">
               ${lucide('scan-check', 13)}
-              Selection
+              <span>
+                Selection
+              </span>
             </button>
 
             <button class="btn primary" data-slides-action="present">
               ${lucide('play', 13)}
-              Present
+              <span>
+                Present
+              </span>
             </button>
 
             <button class="btn" data-slides-action="pdf">
               ${lucide('file-down', 13)}
-              PDF
+              <span>
+                PDF
+              </span>
             </button>
 
             <button class="btn" data-slides-action="remote">
               ${lucide('qr-code', 13)}
-              Remote
+              <span>
+                Remote
+              </span>
+            </button>
+
+            <button class="btn" data-slides-action="meeting-room">
+              ${lucide('screen-share', 13)}
+              <span>
+                Meeting Room
+              </span>
             </button>
           </div>
 
@@ -1147,7 +1649,7 @@ function refreshSlidesPanel(embed) {
             ${
               slides.length
                 ? slides.map((slide, index) => `
-                  <button class="yanta-slide-chip" data-slide-id="${escapeAttr(slide.id)}">
+                    <button class="yanta-slide-chip" draggable="true" data-slide-id="${escapeAttr(slide.id)}">
                     <span class="yanta-slide-chip-thumb" data-slide-thumb="${escapeAttr(slide.id)}">
                       ${lucide('presentation', 13)}
                     </span>
@@ -1171,6 +1673,12 @@ function refreshSlidesPanel(embed) {
   if (open) {
     hydrateSlideThumbnails(panel, ctx.drawing, slides).catch((err) => {
       console.warn('[YANTA Slides] could not hydrate thumbnails', err);
+    });
+
+    bindSlideStripReorder(panel.querySelector('.yanta-slides-strip'), {
+      noteId: ctx.noteId,
+      drawingId: ctx.drawingId,
+      refresh: () => refreshSlidesPanel(embed),
     });
   }
 
@@ -1254,8 +1762,19 @@ function refreshSlidesPanel(embed) {
     openRemoteQrModal();
   });
 
+  panel.querySelector('[data-slides-action="meeting-room"]')?.addEventListener('click', () => {
+    openPresentationSessionModal({
+      noteId: ctx.noteId,
+      drawingId: ctx.drawingId,
+    });
+  });
+
   panel.querySelectorAll('[data-slide-id]').forEach((btn) => {
     btn.addEventListener('click', () => {
+      if (btn.closest('.yanta-slides-strip')?.dataset.suppressClick === '1') {
+        return;
+      }
+
       const slide = listSlides(ctx.noteId, ctx.drawingId)
         .find((s) => s.id === btn.dataset.slideId);
 
@@ -1286,12 +1805,20 @@ function ensureFullscreenSlidesDock() {
   injectCss();
 
   if (fullscreenSlidesDock?.isConnected) {
+    if (slideshow) {
+      fullscreenSlidesDock.classList.add('is-hidden-during-slideshow');
+    }
+
     return fullscreenSlidesDock;
   }
 
   fullscreenSlidesDock = document.createElement('div');
   fullscreenSlidesDock.className = 'yanta-slides-fullscreen-dock';
   fullscreenSlidesDock.dataset.slidesFullscreenDock = '1';
+
+  if (slideshow) {
+    fullscreenSlidesDock.classList.add('is-hidden-during-slideshow');
+  }
 
   document.body.append(fullscreenSlidesDock);
 
@@ -1338,40 +1865,60 @@ function renderFullscreenSlidesDock(ctx) {
             <div class="yanta-slides-actions">
               <button class="btn" data-fs-slides-action="draw">
                 ${lucide('scan', 13)}
-                Draw slide
+                <span>
+                  Draw Slide
+                </span>
               </button>
 
               <button class="btn" data-fs-slides-action="current-view">
                 ${lucide('focus', 13)}
-                Current view
+                <span>
+                  Current view
+                </span>
               </button>
 
               <button class="btn" data-fs-slides-action="selection">
                 ${lucide('scan-check', 13)}
-                Selection
+                <span>
+                  Selection
+                </span>
               </button>
 
               <button class="btn primary" data-fs-slides-action="present">
                 ${lucide('play', 13)}
-                Present
+                <span>
+                  Present
+                </span>
               </button>
 
               <button class="btn" data-fs-slides-action="pdf">
                 ${lucide('file-down', 13)}
-                PDF
+                <span>
+                  PDF
+                </span>
               </button>
 
               <button class="btn" data-fs-slides-action="remote">
                 ${lucide('qr-code', 13)}
-                Remote
+                <span>
+                  Remote
+                </span>
               </button>
+
+              <button class="btn" data-fs-slides-action="meeting-room">
+                ${lucide('screen-share', 13)}
+                <span>
+                  Meeting Room
+                </span>
+              </button>
+
             </div>
 
             <div class="yanta-slides-strip">
               ${
                 slides.length
                   ? slides.map((slide, index) => `
-                      <button class="yanta-slide-chip" data-slide-id="${escapeAttr(slide.id)}">
+                      <button class="yanta-slide-chip" draggable="true" data-slide-id="${escapeAttr(slide.id)}">
                         <span class="yanta-slide-chip-thumb" data-slide-thumb="${escapeAttr(slide.id)}">
                           ${lucide('presentation', 13)}
                         </span>
@@ -1407,6 +1954,12 @@ function renderFullscreenSlidesDock(ctx) {
 
   hydrateSlideThumbnails(dock, drawing, slides).catch((err) => {
     console.warn('[YANTA Slides] fullscreen thumbnails failed', err);
+  });
+
+  bindSlideStripReorder(dock.querySelector('.yanta-slides-strip'), {
+    noteId: ctx.noteId,
+    drawingId: ctx.drawingId,
+    refresh: () => renderFullscreenSlidesDock(ctx),
   });
 
   dock.querySelector('[data-fs-slides-action="draw"]')?.addEventListener('click', () => {
@@ -1465,8 +2018,19 @@ function renderFullscreenSlidesDock(ctx) {
     openRemoteQrModal();
   });
 
+  dock.querySelector('[data-fs-slides-action="meeting-room"]')?.addEventListener('click', () => {
+    openPresentationSessionModal({
+      noteId: ctx.noteId,
+      drawingId: ctx.drawingId,
+    });
+  });
+
   dock.querySelectorAll('[data-slide-id]').forEach((btn) => {
     btn.addEventListener('click', () => {
+      if (btn.closest('.yanta-slides-strip')?.dataset.suppressClick === '1') {
+        return;
+      }
+
       const slide = listSlides(ctx.noteId, ctx.drawingId)
         .find((s) => s.id === btn.dataset.slideId);
 
@@ -1498,12 +2062,36 @@ function mountFullscreenSlidesDockFromApiReady(detail = {}) {
 
   if (!noteId || !drawingId || !api || !container) return;
 
+  bindSlideFrameMiddleMousePan(container, api);
+
   renderFullscreenSlidesDock({
     noteId,
     drawingId,
     api,
     container,
   });
+
+  /*
+    Critical:
+    If user starts Present in inline mode and then opens Full screen,
+    the slideshow must switch to the new fullscreen Excalidraw API.
+  */
+  if (
+    slideshow &&
+    slideshow.noteId === noteId &&
+    slideshow.drawingId === drawingId
+  ) {
+    slideshow.api = api;
+    slideshow.container = container;
+
+    hideSlideFramesForPresentation(api);
+
+    requestAnimationFrame(() => {
+      goToSlide(slideshow.index, {
+        notifyRemote: false,
+      });
+    });
+  }
 }
 
 function normalizeSelectedIds(value) {
@@ -1947,8 +2535,6 @@ export function startSlideshow({
   root.append(toolbar, laserLayer);
   document.body.append(root);
 
-  fullscreenSlidesDock?.classList.add('is-hidden-during-slideshow');
-
   slideshow = {
     noteId,
     drawingId,
@@ -1964,6 +2550,11 @@ export function startSlideshow({
     notesEl: null,
     laserHideTimer: 0,
   };
+
+  document.body.classList.add('yanta-slideshow-active');
+  fullscreenSlidesDock?.classList.add('is-hidden-during-slideshow');
+
+  hideSlideFramesForPresentation(slideshow.api);
 
   toolbar.querySelector('[data-slide-prev]')?.addEventListener('click', previousSlide);
   toolbar.querySelector('[data-slide-next]')?.addEventListener('click', nextSlide);
@@ -1993,13 +2584,28 @@ export function stopSlideshow() {
 
   closeRemoteSocket();
 
+  restoreSlideFramesAfterPresentation();
+
+  document.body.classList.remove('yanta-slideshow-active');
   fullscreenSlidesDock?.classList.remove('is-hidden-during-slideshow');
+
+  cancelAnimationFrame(cameraAnimationRaf);
+  cameraAnimationRaf = 0;
 
   slideshow = null;
 }
 
 function slideshowKeyHandler(e) {
   if (!slideshow) return;
+
+  /*
+    Critical UX:
+    Presenter Notes contain a textarea. Slideshow shortcuts must not steal
+    normal typing, arrows, Space, N/L etc. from native inputs.
+  */
+  if (isTextInputTarget(e.target)) {
+    return;
+  }
 
   if (e.key === 'Escape') {
     e.preventDefault();
@@ -2040,13 +2646,20 @@ function goToSlide(index, {
 
   const slide = slideshow.slides[slideshow.index];
 
-  const api =
-    slideshow.api ||
-    currentApiForDrawing(slideshow.noteId, slideshow.drawingId);
+  const liveApi =
+    currentApiForDrawing(slideshow.noteId, slideshow.drawingId) ||
+    slideshow.api;
 
-  slideshow.api = api;
+  const liveContainer =
+    getActiveDrawingHost?.() ||
+    slideshow.container;
 
-  scrollToSlide(api, slide, slideshow.container);
+  slideshow.api = liveApi;
+  slideshow.container = liveContainer;
+
+  hideSlideFramesForPresentation(liveApi);
+
+  scrollToSlide(liveApi, slide, liveContainer);
 
   const count = slideshow.toolbar.querySelector('[data-slide-count]');
 
@@ -2140,6 +2753,89 @@ function laserPointerMove(e) {
   }
 }
 
+function makePresenterNotesDraggable(panel) {
+  const handle = panel?.querySelector('.yanta-slideshow-notes-head');
+  if (!panel || !handle || panel.dataset.dragBound === '1') return;
+
+  panel.dataset.dragBound = '1';
+
+  let dragging = false;
+  let pointerId = null;
+  let startX = 0;
+  let startY = 0;
+  let startLeft = 0;
+  let startTop = 0;
+
+  const stop = () => {
+    if (!dragging) return;
+
+    dragging = false;
+    pointerId = null;
+
+    panel.classList.remove('is-dragging');
+
+    document.removeEventListener('pointermove', onMove, true);
+    document.removeEventListener('pointerup', onUp, true);
+    document.removeEventListener('pointercancel', onUp, true);
+  };
+
+  const onMove = (e) => {
+    if (!dragging) return;
+    if (pointerId != null && e.pointerId !== pointerId) return;
+
+    e.preventDefault();
+
+    const next = clampPanelPosition(
+      panel,
+      startLeft + (e.clientX - startX),
+      startTop + (e.clientY - startY)
+    );
+
+    panel.style.left = `${next.left}px`;
+    panel.style.top = `${next.top}px`;
+    panel.style.right = 'auto';
+  };
+
+  const onUp = (e) => {
+    if (pointerId != null && e.pointerId !== pointerId) return;
+    stop();
+  };
+
+  handle.addEventListener('pointerdown', (e) => {
+    if (e.button != null && e.button !== 0) return;
+
+    if (
+      e.target.closest?.(
+        'button, input, textarea, select, a, [contenteditable="true"]'
+      )
+    ) {
+      return;
+    }
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const rect = panel.getBoundingClientRect();
+
+    dragging = true;
+    pointerId = e.pointerId;
+    startX = e.clientX;
+    startY = e.clientY;
+    startLeft = rect.left;
+    startTop = rect.top;
+
+    panel.classList.add('is-dragging');
+
+    try {
+      handle.setPointerCapture?.(e.pointerId);
+    } catch {}
+
+    document.addEventListener('pointermove', onMove, true);
+    document.addEventListener('pointerup', onUp, true);
+    document.addEventListener('pointercancel', onUp, true);
+  }, true);
+}
+
 function toggleNotes() {
   if (!slideshow) return;
 
@@ -2183,6 +2879,8 @@ function toggleNotes() {
 
   slideshow.root.append(panel);
   slideshow.notesEl = panel;
+
+  makePresenterNotesDraggable(panel);
 
   updateNotesPanel();
 }
@@ -2619,12 +3317,32 @@ export function setupSlides() {
     const detail = e.detail || {};
 
     if (detail.surface === 'fullscreen') {
-      mountFullscreenSlidesDockFromApiReady(detail);
+      requestAnimationFrame(() => {
+        const container =
+          getActiveDrawingHost?.() ||
+          document.querySelector('.yanta-draw-fullscreen-host') ||
+          null;
+
+        bindSlideFrameMiddleMousePan(container, detail.api);
+
+        mountFullscreenSlidesDockFromApiReady({
+          ...detail,
+          container,
+        });
+      });
+
       return;
     }
 
     if (detail.embed) {
-      enhanceDrawingEmbed(detail.embed);
+      requestAnimationFrame(() => {
+        const container =
+          detail.embed.querySelector('.yanta-draw-inline-host') ||
+          detail.embed;
+
+        bindSlideFrameMiddleMousePan(container, detail.api);
+        enhanceDrawingEmbed(detail.embed);
+      });
     }
   });
 

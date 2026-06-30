@@ -131,9 +131,10 @@ import {
       },
     };
   }
-  
+    
   export function isSlideFrameElement(el) {
-    return !!el?.customData?.yanta?.slideId;
+    return el?.customData?.yanta?.slideFrame === true ||
+      !!el?.customData?.yanta?.slideId;
   }
   
   export function slideIdFromElement(el) {

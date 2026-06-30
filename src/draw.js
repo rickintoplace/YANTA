@@ -129,6 +129,22 @@ export function getActiveDrawingHost() {
   );
 }
 
+function dispatchDrawApiReadyDeferred(detail) {
+  /*
+    Excalidraw calls excalidrawAPI while its class component can still be
+    completing mount. Dispatching app-level listeners synchronously can cause
+    those listeners to call api.updateScene(), which triggers React warnings:
+      "Can't call setState on a component that is not yet mounted."
+      
+    Defer one frame so consumers receive a mounted, measurable API.
+  */
+  requestAnimationFrame(() => {
+    window.dispatchEvent(new CustomEvent('yanta-draw-api-ready', {
+      detail,
+    }));
+  });
+}
+
 const DRAW_LIBRARY_SETTINGS_KEY = 'drawLibraryItems.v1';
 
 const DRAW_MOBILE_MQ = window.matchMedia?.('(pointer: coarse), (max-width: 760px)');
@@ -2151,6 +2167,216 @@ function addFilesToExcalidrawApi(api, files = {}) {
   try {
     api.addFiles(clean);
   } catch {}
+}
+
+// ------------------------------------------------------------
+// Excalidraw scene persistence guards
+//
+// Excalidraw fires onChange for both real user edits and many programmatic
+// updateScene() calls. Programmatic UI-only updates must never be persisted,
+// otherwise old snapshots, camera moves or presentation-only changes can
+// overwrite user edits.
+// ------------------------------------------------------------
+
+const DRAW_API_SAVE_SUPPRESSION = new WeakMap();
+
+function isDrawingApiSaveSuppressed(api) {
+  return !!api && DRAW_API_SAVE_SUPPRESSION.has(api);
+}
+
+function suppressDrawingApiSave(api, {
+  releaseMs = 220,
+} = {}) {
+  if (!api) return () => {};
+
+  const token = {};
+  let released = false;
+
+  DRAW_API_SAVE_SUPPRESSION.set(api, token);
+
+  const release = () => {
+    if (released) return;
+    released = true;
+
+    if (DRAW_API_SAVE_SUPPRESSION.get(api) === token) {
+      DRAW_API_SAVE_SUPPRESSION.delete(api);
+    }
+  };
+
+  // Excalidraw can emit onChange synchronously, next frame, or shortly after
+  // updateScene(). Keep suppression briefly active, but never permanently.
+  requestAnimationFrame(() => {
+    requestAnimationFrame(release);
+  });
+
+  window.setTimeout(release, releaseMs);
+
+  return release;
+}
+
+/**
+ * Run api.updateScene() without letting the Drawing autosave persist it.
+ *
+ * Use this for:
+ * - Yjs/remote scene hydration
+ * - camera moves
+ * - selection-only changes
+ * - presentation-only visual changes
+ *
+ * Do NOT use for user-intended mutations unless you persist via setDrawing()
+ * yourself in the same code path.
+ */
+export function runDrawingApiUpdateWithoutSaving(api, updateOrFn, {
+  refresh = true,
+  releaseMs = 220,
+} = {}) {
+  if (!api) return false;
+
+  suppressDrawingApiSave(api, {
+    releaseMs,
+  });
+
+  try {
+    if (typeof updateOrFn === 'function') {
+      updateOrFn(api);
+    } else {
+      api.updateScene?.(updateOrFn);
+    }
+
+    if (refresh) {
+      api.refresh?.();
+    }
+
+    return true;
+  } catch (err) {
+    console.warn('[YANTA Draw] programmatic Excalidraw update failed', err);
+    return false;
+  }
+}
+
+/**
+ * Apply persisted/remote Drawing content to an existing Excalidraw instance.
+ *
+ * Important:
+ * We intentionally do NOT replay persisted appState here. appState contains
+ * volatile UI state such as activeTool, selectedElementIds, editingElement, etc.
+ * Replaying it is what causes tool-button flicker / wrong active-tool display.
+ */
+function applyPersistedDrawingToApi(api, drawing) {
+  if (!api || !drawing) return false;
+
+  return runDrawingApiUpdateWithoutSaving(api, () => {
+    addFilesToExcalidrawApi(api, drawing.files);
+
+    api.updateScene({
+      elements: drawing.elements || [],
+      files: drawing.files || {},
+    });
+  });
+}
+
+function readElementsFromApi(api, fallback = []) {
+  try {
+    const elements =
+      api?.getSceneElementsIncludingDeleted?.() ||
+      api?.getSceneElements?.();
+
+    if (Array.isArray(elements)) return elements;
+  } catch {}
+
+  return Array.isArray(fallback) ? fallback : [];
+}
+
+function readAppStateFromApi(api, fallback = {}) {
+  try {
+    const appState = api?.getAppState?.();
+
+    if (appState && typeof appState === 'object') {
+      return appState;
+    }
+  } catch {}
+
+  return fallback && typeof fallback === 'object' ? fallback : {};
+}
+
+function readFilesFromApi(api, fallback = {}) {
+  try {
+    const files = api?.getFiles?.();
+
+    if (files && typeof files === 'object') {
+      return files;
+    }
+  } catch {}
+
+  return fallback && typeof fallback === 'object' ? fallback : {};
+}
+
+function buildPersistedDrawingSceneFromApi(api, {
+  drawingId,
+  previous = {},
+  fallback = {},
+} = {}) {
+  const base = previous || fallback || {};
+
+  const elements = readElementsFromApi(api, base.elements || fallback.elements || []);
+  const appState = readAppStateFromApi(api, base.appState || fallback.appState || {});
+  const files = readFilesFromApi(api, base.files || fallback.files || {});
+
+  return {
+    id: drawingId,
+    title: base.title || fallback.title || 'Drawing',
+    canvas: base.canvas || fallback.canvas || { width: 760, height: 420 },
+    elements: cleanStaleSceneWikiData(elements),
+    appState: cleanAppState(appState),
+    files,
+  };
+}
+
+function persistCurrentDrawingApiScene({
+  api,
+  noteId,
+  drawingId,
+  previous,
+  fallback,
+  origin,
+  lastSigRef,
+  afterPersist = null,
+} = {}) {
+  if (!api || isDrawingApiSaveSuppressed(api)) return false;
+
+  const nextScene = buildPersistedDrawingSceneFromApi(api, {
+    drawingId,
+    previous,
+    fallback,
+  });
+
+  const nextSig = sceneSignature(
+    nextScene.elements,
+    nextScene.appState,
+    nextScene.files
+  );
+
+  if (lastSigRef && nextSig === lastSigRef.current) {
+    return false;
+  }
+
+  if (lastSigRef) {
+    lastSigRef.current = nextSig;
+  }
+
+  setDrawing(noteId, drawingId, nextScene, origin);
+
+  afterPersist?.(nextScene);
+
+  window.dispatchEvent(new CustomEvent('yanta-drawing-updated', {
+    detail: {
+      noteId,
+      drawingId,
+      reason: 'scene-persisted',
+    },
+  }));
+
+  return true;
 }
 
 function noteVisualColor(note) {
@@ -4282,6 +4508,12 @@ async function mountInlineDrawing(embed, sourceNoteId, drawingId, drawing) {
     const [links, setLinks] = React.useState(extractWikiTargetsFromScene(drawing));
 
     React.useEffect(() => {
+      return () => {
+        clearTimeout(saveTimerRef.current);
+      };
+    }, []);
+
+    React.useEffect(() => {
       const entry = getNoteDoc(sourceNoteId);
       const drawings = entry.doc.getMap('drawings');
 
@@ -4292,23 +4524,17 @@ async function mountInlineDrawing(embed, sourceNoteId, drawingId, drawing) {
         const next = getDrawing(sourceNoteId, drawingId);
         if (!next) return;
 
+        // A remote/external scene arrived. Any pending local debounced save was
+        // based on older data and must not be allowed to write back afterwards.
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = 0;
+
         updateEmbedFromDrawing(embed, next);
         setLinks(extractWikiTargetsFromScene(next));
         lastSigRef.current = drawingSignature(next);
 
         if (apiRef.current) {
-          try {
-            suppressChangeRef.current = true;
-            addFilesToExcalidrawApi(apiRef.current, next.files);
-            apiRef.current.updateScene(initialDataForDrawing(next));
-
-            requestAnimationFrame(() => {
-              suppressChangeRef.current = false;
-              apiRef.current?.refresh?.();
-            });
-          } catch {
-            suppressChangeRef.current = false;
-          }
+          applyPersistedDrawingToApi(apiRef.current, next);
         }
       };
 
@@ -4369,51 +4595,48 @@ async function mountInlineDrawing(embed, sourceNoteId, drawingId, drawing) {
 
     const saveScene = (elements, appState, files) => {
       if (!editable) return;
-      if (suppressChangeRef.current) return;
+
+      const api = apiRef.current;
+
+      if (suppressChangeRef.current || isDrawingApiSaveSuppressed(api)) {
+        return;
+      }
 
       if (!didInitialChangeRef.current) {
         didInitialChangeRef.current = true;
         return;
       }
 
-    const cleanedAppState = cleanAppState(appState);
-    const cleanedElements = cleanStaleSceneWikiData(elements || []);
-    const sig = sceneSignature(cleanedElements, cleanedAppState, files);
+      const incomingElements = cleanStaleSceneWikiData(elements || []);
+      const incomingAppState = cleanAppState(appState);
+      const incomingSig = sceneSignature(incomingElements, incomingAppState, files);
 
-      if (sig === lastSigRef.current) return;
+      if (incomingSig === lastSigRef.current) return;
 
       clearTimeout(saveTimerRef.current);
 
-      saveTimerRef.current = setTimeout(() => {
+      saveTimerRef.current = window.setTimeout(() => {
+        const liveApi = apiRef.current;
+
+        if (!liveApi || isDrawingApiSaveSuppressed(liveApi)) {
+          return;
+        }
+
         const prev = getDrawing(sourceNoteId, drawingId) || drawing;
 
-        const nextScene = {
-          id: drawingId,
-          title: prev.title || drawing.title || 'Drawing',
-          canvas: prev.canvas || drawing.canvas,
-          elements: cleanedElements,
-          appState: cleanedAppState,
-          files: files || {},
-        };
-
-        const nextSig = sceneSignature(
-          nextScene.elements,
-          nextScene.appState,
-          nextScene.files
-        );
-
-        if (nextSig === lastSigRef.current) return;
-
-        lastSigRef.current = nextSig;
-
-        setDrawing(sourceNoteId, drawingId, nextScene, localOriginRef.current);
-
-        updateEmbedFromDrawing(embed, nextScene);
-        setLinks(extractWikiTargetsFromScene(nextScene));
-
-        window.dispatchEvent(new CustomEvent('yanta-drawing-updated', {
-          detail: { noteId: sourceNoteId, drawingId },
-        }));
+        persistCurrentDrawingApiScene({
+          api: liveApi,
+          noteId: sourceNoteId,
+          drawingId,
+          previous: prev,
+          fallback: drawing,
+          origin: localOriginRef.current,
+          lastSigRef,
+          afterPersist: (nextScene) => {
+            updateEmbedFromDrawing(embed, nextScene);
+            setLinks(extractWikiTargetsFromScene(nextScene));
+          },
+        });
       }, 250);
     };
 
@@ -4439,15 +4662,13 @@ async function mountInlineDrawing(embed, sourceNoteId, drawingId, drawing) {
         apiRef.current = api;
         inlineApis.set(embed, api);
 
-        window.dispatchEvent(new CustomEvent('yanta-draw-api-ready', {
-          detail: {
-            noteId: sourceNoteId,
-            drawingId,
-            api,
-            embed,
-            surface,
-          },
-        }));
+        dispatchDrawApiReadyDeferred({
+          noteId: sourceNoteId,
+          drawingId,
+          api,
+          embed,
+          surface,
+        });
 
         addFilesToExcalidrawApi(api, drawing.files);
 
@@ -4845,6 +5066,12 @@ export async function openDrawModal(
     const [theme, setTheme] = React.useState(currentExcalidrawTheme());
 
     React.useEffect(() => {
+      return () => {
+        clearTimeout(saveTimerRef.current);
+      };
+    }, []);
+
+    React.useEffect(() => {
       const observer = (event) => {
         if (!event.keysChanged.has(drawingId)) return;
         if (event.transaction.origin === localOriginRef.current) return;
@@ -4852,22 +5079,15 @@ export async function openDrawModal(
         const next = getDrawing(sourceNoteId, drawingId);
         if (!next) return;
 
+        // External scene wins. Cancel stale local debounced writes.
+        clearTimeout(saveTimerRef.current);
+        saveTimerRef.current = 0;
+
         setModalDrawingTitle(drawingId, next);
         lastSigRef.current = drawingSignature(next);
 
         if (apiRef.current) {
-          try {
-            suppressChangeRef.current = true;
-            addFilesToExcalidrawApi(apiRef.current, next.files);
-            apiRef.current.updateScene(initialDataForDrawing(next));
-
-            requestAnimationFrame(() => {
-              suppressChangeRef.current = false;
-              apiRef.current?.refresh?.();
-            });
-          } catch {
-            suppressChangeRef.current = false;
-          }
+          applyPersistedDrawingToApi(apiRef.current, next);
         }
       };
 
@@ -4939,48 +5159,43 @@ export async function openDrawModal(
     }, []);
 
     const onChange = (elements, appState, files) => {
-      if (suppressChangeRef.current) return;
+      const api = apiRef.current;
+
+      if (suppressChangeRef.current || isDrawingApiSaveSuppressed(api)) {
+        return;
+      }
 
       if (!didInitialChangeRef.current) {
         didInitialChangeRef.current = true;
         return;
       }
 
-    const cleanedAppState = cleanAppState(appState);
-    const cleanedElements = cleanStaleSceneWikiData(elements || []);
-    const sig = sceneSignature(cleanedElements, cleanedAppState, files);
+      const incomingElements = cleanStaleSceneWikiData(elements || []);
+      const incomingAppState = cleanAppState(appState);
+      const incomingSig = sceneSignature(incomingElements, incomingAppState, files);
 
-      if (sig === lastSigRef.current) return;
+      if (incomingSig === lastSigRef.current) return;
 
       clearTimeout(saveTimerRef.current);
 
-      saveTimerRef.current = setTimeout(() => {
+      saveTimerRef.current = window.setTimeout(() => {
+        const liveApi = apiRef.current;
+
+        if (!liveApi || isDrawingApiSaveSuppressed(liveApi)) {
+          return;
+        }
+
         const prev = getDrawing(sourceNoteId, drawingId) || current;
 
-        const nextScene = {
-          id: drawingId,
-          title: prev.title || current.title || 'Drawing',
-          canvas: prev.canvas || current.canvas,
-          elements: cleanedElements,
-          appState: cleanedAppState,
-          files: files || {},
-        };
-
-        const nextSig = sceneSignature(
-          nextScene.elements,
-          nextScene.appState,
-          nextScene.files
-        );
-
-        if (nextSig === lastSigRef.current) return;
-
-        lastSigRef.current = nextSig;
-
-        setDrawing(sourceNoteId, drawingId, nextScene, localOriginRef.current);
-
-        window.dispatchEvent(new CustomEvent('yanta-drawing-updated', {
-          detail: { noteId: sourceNoteId, drawingId },
-        }));
+        persistCurrentDrawingApiScene({
+          api: liveApi,
+          noteId: sourceNoteId,
+          drawingId,
+          previous: prev,
+          fallback: current,
+          origin: localOriginRef.current,
+          lastSigRef,
+        });
       }, 250);
     };
 
@@ -5020,15 +5235,13 @@ export async function openDrawModal(
         apiRef.current = api;
         active.api = api;
 
-        window.dispatchEvent(new CustomEvent('yanta-draw-api-ready', {
-          detail: {
-            noteId: sourceNoteId,
-            drawingId,
-            api,
-            embed: null,
-            surface: 'fullscreen',
-          },
-        }));
+        dispatchDrawApiReadyDeferred({
+          noteId: sourceNoteId,
+          drawingId,
+          api,
+          embed: null,
+          surface: 'fullscreen',
+        });
         
         addFilesToExcalidrawApi(api, current.files);
 

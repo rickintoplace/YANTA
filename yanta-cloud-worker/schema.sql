@@ -215,3 +215,36 @@ CREATE TABLE IF NOT EXISTS public_share_assets (
 
 CREATE INDEX IF NOT EXISTS idx_public_share_assets_share
 ON public_share_assets(share_id);
+
+-- ============================================================
+-- Presentation Sessions
+-- Ephemeral zero-knowledge meeting-room presentation sessions.
+-- Display payload is encrypted client-side.
+-- Edits are scoped to the session until owner applies them.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS presentation_sessions (
+  id TEXT PRIMARY KEY,
+  owner_user_id TEXT NOT NULL,
+  vault_id TEXT,
+  source_type TEXT NOT NULL DEFAULT 'drawing',
+  source_id TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  expires_at INTEGER NOT NULL,
+  revoked_at INTEGER,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  payload_object_key TEXT,
+  payload_etag TEXT,
+  payload_size_bytes INTEGER NOT NULL DEFAULT 0,
+  signaling_topic TEXT NOT NULL,
+  signaling_token TEXT NOT NULL,
+  FOREIGN KEY(owner_user_id) REFERENCES users(id),
+  FOREIGN KEY(vault_id) REFERENCES vaults(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_presentation_sessions_owner
+ON presentation_sessions(owner_user_id, updated_at);
+
+CREATE INDEX IF NOT EXISTS idx_presentation_sessions_source
+ON presentation_sessions(owner_user_id, source_type, source_id);

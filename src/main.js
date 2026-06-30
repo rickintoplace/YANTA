@@ -3450,6 +3450,13 @@ if (SITE_PAGE_PATHS.has(normalizedPath)) {
       console.error(e);
       document.body.innerHTML = '<main style="padding:24px;font-family:system-ui">Could not load share viewer.</main>';
     });
+} else if (location.pathname.startsWith('/present/')) {
+  import('./presentation/presentation-viewer.js')
+    .then((m) => m.mountPresentationViewer())
+    .catch((e) => {
+      console.error(e);
+      document.body.innerHTML = '<main style="padding:24px;font-family:system-ui">Could not load presentation.</main>';
+    });
 } else if (String(location.hash || '').replace(/^#/, '').startsWith('slides-remote=')) {
   import('./slides/slides-ui.js')
     .then((m) => {

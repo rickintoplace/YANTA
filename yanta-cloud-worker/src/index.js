@@ -4924,6 +4924,290 @@ async function handleWebRead(env, req, url, headers) {
 }
 __name(handleWebRead, "handleWebRead");
 
+// ============================================================
+// Presentation Sessions
+// ============================================================
+
+function presentationSessionPayloadKey(sessionId) {
+  return `presentation-sessions/${sessionId}/payload.enc`;
+}
+
+function presentationSessionId() {
+  return `p_${randomToken(9)}`;
+}
+
+function isPresentationSessionActive(row) {
+  if (!row) return false;
+  if (row.status !== 'active') return false;
+  if (row.revoked_at) return false;
+  if (row.expires_at && Number(row.expires_at) <= now()) return false;
+  return true;
+}
+
+async function requireOwnedPresentationSession(env, user, sessionId) {
+  const row = await env.DB.prepare(
+    `SELECT *
+     FROM presentation_sessions
+     WHERE id = ? AND owner_user_id = ?`
+  ).bind(sessionId, user.userId).first();
+
+  if (!row) {
+    const err = new Error('Presentation session not found');
+    err.status = 404;
+    throw err;
+  }
+
+  return row;
+}
+
+async function handleCreatePresentationSession(env, req, headers) {
+  const user = await requireUser(env, req);
+  const body = await bodyJson(req);
+
+  const vaultId = String(body.vaultId || '').trim();
+  const sourceType = String(body.sourceType || 'drawing').trim();
+  const sourceId = String(body.sourceId || '').trim();
+
+  const ttlMs = Math.max(
+    5 * 60 * 1000,
+    Math.min(
+      24 * 60 * 60 * 1000,
+      Number(body.ttlMs || 2 * 60 * 60 * 1000)
+    )
+  );
+
+  if (!sourceId) {
+    return json({
+      ok: false,
+      message: 'sourceId required',
+    }, 400, headers);
+  }
+
+  if (vaultId) {
+    await requireVault(env, user, vaultId);
+  }
+
+  const t = now();
+  const sessionId = presentationSessionId();
+  const topic = `present-${sessionId}-${randomToken(10)}`;
+  const token = randomToken(24);
+
+  await env.DB.prepare(
+    `INSERT INTO presentation_sessions
+     (id, owner_user_id, vault_id, source_type, source_id, status,
+      expires_at, created_at, updated_at, signaling_topic, signaling_token)
+     VALUES (?, ?, ?, ?, ?, 'active', ?, ?, ?, ?, ?)`
+  ).bind(
+    sessionId,
+    user.userId,
+    vaultId || null,
+    sourceType,
+    sourceId,
+    t + ttlMs,
+    t,
+    t,
+    topic,
+    token
+  ).run();
+
+  await audit(env, req, 'presentation_session_created', user.userId, {
+    sessionId,
+    vaultId,
+    sourceType,
+    sourceId,
+  });
+
+  return json({
+    ok: true,
+    session: {
+      id: sessionId,
+      sessionId,
+      vaultId: vaultId || null,
+      sourceType,
+      sourceId,
+      status: 'active',
+      expiresAt: t + ttlMs,
+      createdAt: t,
+      updatedAt: t,
+      signalingTopic: topic,
+      signalingToken: token,
+    },
+  }, 200, headers);
+}
+
+async function handlePutPresentationSessionPayload(env, req, url, headers) {
+  const user = await requireUser(env, req);
+
+  const m = url.pathname.match(/^\/api\/presentation-sessions\/([^/]+)\/payload$/);
+  const sessionId = m?.[1] || '';
+
+  if (!sessionId) {
+    return json({
+      ok: false,
+      message: 'sessionId required',
+    }, 400, headers);
+  }
+
+  const session = await requireOwnedPresentationSession(env, user, sessionId);
+
+  if (!isPresentationSessionActive(session)) {
+    return json({
+      ok: false,
+      message: 'Presentation session is not active',
+    }, 409, headers);
+  }
+
+  const body = await bodyJson(req);
+
+  const encryptedPayload = String(body.encryptedPayload || '');
+  const payloadBytes = new TextEncoder().encode(encryptedPayload);
+  const etag = String(body.etag || `"${payloadBytes.byteLength}-${now()}"`);
+
+  if (!encryptedPayload) {
+    return json({
+      ok: false,
+      message: 'encryptedPayload required',
+    }, 400, headers);
+  }
+
+  if (payloadBytes.byteLength > 8 * 1024 * 1024) {
+    return json({
+      ok: false,
+      message: 'Presentation payload too large',
+    }, 413, headers);
+  }
+
+  const objectKey = presentationSessionPayloadKey(sessionId);
+
+  await env.OBJECTS.put(objectKey, payloadBytes, {
+    httpMetadata: {
+      contentType: 'application/octet-stream',
+    },
+    customMetadata: {
+      sessionId,
+      ownerUserId: user.userId,
+    },
+  });
+
+  const t = now();
+
+  await env.DB.prepare(
+    `UPDATE presentation_sessions
+     SET payload_object_key = ?,
+         payload_etag = ?,
+         payload_size_bytes = ?,
+         updated_at = ?
+     WHERE id = ? AND owner_user_id = ?`
+  ).bind(
+    objectKey,
+    etag,
+    payloadBytes.byteLength,
+    t,
+    sessionId,
+    user.userId
+  ).run();
+
+  await audit(env, req, 'presentation_session_published', user.userId, {
+    sessionId,
+    payloadSizeBytes: payloadBytes.byteLength,
+  });
+
+  return json({
+    ok: true,
+    sessionId,
+    etag,
+    updatedAt: t,
+  }, 200, headers);
+}
+
+async function handleGetPresentationSession(env, req, url, headers) {
+  const m = url.pathname.match(/^\/api\/presentation-sessions\/([^/]+)$/);
+  const sessionId = m?.[1] || '';
+
+  const row = await env.DB.prepare(
+    `SELECT id, status, expires_at, revoked_at, updated_at, payload_object_key,
+            payload_etag, payload_size_bytes, signaling_topic, signaling_token
+     FROM presentation_sessions
+     WHERE id = ?`
+  ).bind(sessionId).first();
+
+  if (!isPresentationSessionActive(row)) {
+    return json({
+      error: 'not_found',
+    }, 404, {
+      ...headers,
+      'cache-control': 'no-store',
+    });
+  }
+
+  if (!row.payload_object_key) {
+    return json({
+      error: 'not_published',
+    }, 404, {
+      ...headers,
+      'cache-control': 'no-store',
+    });
+  }
+
+  const obj = await env.OBJECTS.get(row.payload_object_key);
+
+  if (!obj) {
+    return json({
+      error: 'payload_missing',
+    }, 404, {
+      ...headers,
+      'cache-control': 'no-store',
+    });
+  }
+
+  const encryptedPayload = await obj.text();
+
+  return json({
+    sessionId: row.id,
+    status: row.status,
+    expiresAt: row.expires_at,
+    updatedAt: row.updated_at,
+    etag: row.payload_etag || '',
+    payloadSizeBytes: row.payload_size_bytes || 0,
+    signalingTopic: row.signaling_topic,
+    signalingToken: row.signaling_token,
+    encryptedPayload,
+  }, 200, {
+    ...headers,
+    'cache-control': 'no-store',
+  });
+}
+
+async function handleDeletePresentationSession(env, req, url, headers) {
+  const user = await requireUser(env, req);
+
+  const m = url.pathname.match(/^\/api\/presentation-sessions\/([^/]+)$/);
+  const sessionId = m?.[1] || '';
+
+  const session = await requireOwnedPresentationSession(env, user, sessionId);
+  const t = now();
+
+  await env.DB.prepare(
+    `UPDATE presentation_sessions
+     SET status = 'revoked',
+         revoked_at = COALESCE(revoked_at, ?),
+         updated_at = ?
+     WHERE id = ? AND owner_user_id = ?`
+  ).bind(t, t, session.id, user.userId).run();
+
+  if (session.payload_object_key) {
+    await env.OBJECTS.delete(session.payload_object_key).catch(() => {});
+  }
+
+  await audit(env, req, 'presentation_session_revoked', user.userId, {
+    sessionId,
+  });
+
+  return json({
+    ok: true,
+  }, 200, headers);
+}
+
 async function route(req, env) {
   const headers = corsHeaders(env, req);
   if (!originAllowed(env, req)) {
@@ -5067,6 +5351,24 @@ async function route(req, env) {
     if (url.pathname === "/api/paddle/webhook" && req.method === "POST") {
       return handlePaddleWebhook(env, req, headers);
     }
+
+    // Presentation Sessions
+    if (url.pathname === "/api/presentation-sessions" && req.method === "POST") {
+      return handleCreatePresentationSession(env, req, headers);
+    }
+
+    if (/^\/api\/presentation-sessions\/[^/]+\/payload$/.test(url.pathname) && req.method === "PUT") {
+      return handlePutPresentationSessionPayload(env, req, url, headers);
+    }
+
+    if (/^\/api\/presentation-sessions\/[^/]+$/.test(url.pathname) && req.method === "GET") {
+      return handleGetPresentationSession(env, req, url, headers);
+    }
+
+    if (/^\/api\/presentation-sessions\/[^/]+$/.test(url.pathname) && req.method === "DELETE") {
+      return handleDeletePresentationSession(env, req, url, headers);
+    }
+    
     return json({ error: "not_found" }, 404, headers);
   } catch (err) {
     console.error("[YANTA Cloud Worker]", safeErrorForLog(err));

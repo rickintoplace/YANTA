@@ -24,6 +24,10 @@ import {
   now,
 } from './slides-model.js';
 
+import {
+  runDrawingApiUpdateWithoutSaving,
+} from '../draw.js';
+
 function cloneJson(value) {
   try {
     return structuredClone(value);
@@ -68,6 +72,116 @@ function sceneFilesForApiOrDrawing(d, api = null) {
   } catch {}
 
   return cloneJson(d?.files || {});
+}
+
+function readSceneElementsFromApi(api = null) {
+  if (!api) {
+    return {
+      ok: false,
+      elements: [],
+    };
+  }
+
+  try {
+    const elements =
+      api.getSceneElementsIncludingDeleted?.() ||
+      api.getSceneElements?.();
+
+    if (Array.isArray(elements)) {
+      return {
+        ok: true,
+        elements: cloneJson(elements),
+      };
+    }
+  } catch {}
+
+  return {
+    ok: false,
+    elements: [],
+  };
+}
+
+function hasLiveSlideFrame(elements = []) {
+  return (Array.isArray(elements) ? elements : []).some((el) =>
+    el &&
+    !el.isDeleted &&
+    isSlideFrameElement(el) &&
+    slideIdFromElement(el)
+  );
+}
+
+/**
+ * Excalidraw API can be momentarily empty/incomplete during mount.
+ *
+ * Critical:
+ * We must not delete slide metadata just because api.getSceneElements()
+ * returned an unhydrated initial scene. Prefer persisted drawing elements
+ * if they clearly contain slide frames and the API does not.
+ */
+function sceneElementsForSlideSync(d, api = null) {
+  const persisted = cloneJson(d?.elements || []);
+  const apiRead = readSceneElementsFromApi(api);
+
+  const persistedHasFrames = hasLiveSlideFrame(persisted);
+  const apiHasFrames = hasLiveSlideFrame(apiRead.elements);
+
+  if (!apiRead.ok) {
+    return {
+      elements: persisted,
+      canDeleteMissingFrames: false,
+      source: 'persisted-no-api',
+    };
+  }
+
+  if (apiRead.elements.length === 0 && persisted.length > 0) {
+    return {
+      elements: persisted,
+      canDeleteMissingFrames: false,
+      source: 'persisted-api-empty',
+    };
+  }
+
+  if (persistedHasFrames && !apiHasFrames) {
+    return {
+      elements: persisted,
+      canDeleteMissingFrames: false,
+      source: 'persisted-api-no-frames',
+    };
+  }
+
+  return {
+    elements: apiRead.elements,
+    canDeleteMissingFrames: true,
+    source: 'api',
+  };
+}
+
+function slidesFromSceneFrames(elements = []) {
+  const frames = (Array.isArray(elements) ? elements : [])
+    .filter((el) =>
+      el &&
+      !el.isDeleted &&
+      isSlideFrameElement(el) &&
+      slideIdFromElement(el)
+    );
+
+  if (!frames.length) return [];
+
+  return normalizeSlides(frames.map((frame, index) => {
+    const slideId = slideIdFromElement(frame);
+    const bounds = elementBounds(frame);
+
+    return normalizeSlide({
+      id: slideId,
+      order: index,
+      title: `Slide ${index + 1}`,
+      frameElementId: frame.id,
+      bounds,
+      aspectRatio: bounds.width / bounds.height,
+      created: Number(frame.updated || now()),
+      updated: Number(frame.updated || now()),
+    }, index);
+  }));
 }
 
 export function drawingRef(noteId, drawingId) {
@@ -165,13 +279,9 @@ export function createSlide(noteId, drawingId, {
   }, 'slides-create');
 
   if (api) {
-    try {
-      api.updateScene({
-        elements: nextElements,
-      });
-
-      api.refresh?.();
-    } catch {}
+    runDrawingApiUpdateWithoutSaving(api, {
+      elements: nextElements,
+    });
   }
 
   window.dispatchEvent(new CustomEvent('yanta-slides-updated', {
@@ -251,13 +361,9 @@ export function deleteSlide(noteId, drawingId, slideId, {
   }, 'slides-delete');
 
   if (api) {
-    try {
-      api.updateScene({
-        elements: nextElements,
-      });
-
-      api.refresh?.();
-    } catch {}
+    runDrawingApiUpdateWithoutSaving(api, {
+      elements: nextElements,
+    });
   }
 
   window.dispatchEvent(new CustomEvent('yanta-slides-updated', {
@@ -312,18 +418,36 @@ export function syncSlidesFromScene(noteId, drawingId, api = null) {
   const d = getDrawing(noteId, drawingId);
   if (!d) return [];
 
-  const slides = listSlides(noteId, drawingId);
-  if (!slides.length) return slides;
+  const scene = sceneElementsForSlideSync(d, api);
 
-  const sceneElements =
-    api?.getSceneElementsIncludingDeleted?.() ||
-    api?.getSceneElements?.() ||
-    d.elements ||
-    [];
+  let slides = listSlides(noteId, drawingId);
+
+  /*
+    Recovery path:
+    A previous build may have deleted d.slides because Excalidraw API returned
+    an empty scene during mount. If physical slide frames still exist, rebuild
+    slide metadata from those frames.
+  */
+  if (!slides.length) {
+    const recovered = slidesFromSceneFrames(scene.elements);
+
+    if (recovered.length) {
+      saveSlides(
+        noteId,
+        drawingId,
+        recovered,
+        'slides-recover-from-scene-frames'
+      );
+
+      return recovered;
+    }
+
+    return [];
+  }
 
   const bySlideId = new Map();
 
-  for (const el of sceneElements) {
+  for (const el of scene.elements) {
     if (!el || el.isDeleted) continue;
     if (!isSlideFrameElement(el)) continue;
 
@@ -334,11 +458,35 @@ export function syncSlidesFromScene(noteId, drawingId, api = null) {
   }
 
   let changed = false;
+  const nextSlides = [];
 
-  const nextSlides = slides.map((slide) => {
+  for (const slide of slides) {
     const frame = bySlideId.get(slide.id);
 
-    if (!frame) return slide;
+    /*
+      UX rule:
+      A slide with a physical frame belongs to that frame.
+      If the user deletes the frame from a trusted, hydrated API scene,
+      the slide is removed too.
+
+      Important:
+      During Excalidraw mount the API can be empty/incomplete. In that case
+      missing frames are NOT deletion evidence.
+    */
+    if (!frame && slide.frameElementId) {
+      if (scene.canDeleteMissingFrames) {
+        changed = true;
+        continue;
+      }
+
+      nextSlides.push(slide);
+      continue;
+    }
+
+    if (!frame) {
+      nextSlides.push(slide);
+      continue;
+    }
 
     const bounds = elementBounds(frame);
 
@@ -349,24 +497,29 @@ export function syncSlidesFromScene(noteId, drawingId, api = null) {
       bounds.height === slide.bounds.height &&
       frame.id === slide.frameElementId;
 
-    if (same) return slide;
+    if (same) {
+      nextSlides.push(slide);
+      continue;
+    }
 
     changed = true;
 
-    return {
+    nextSlides.push({
       ...slide,
       frameElementId: frame.id,
       bounds,
       aspectRatio: bounds.width / bounds.height,
       updated: now(),
-    };
-  });
-
-  if (changed) {
-    saveSlides(noteId, drawingId, nextSlides, 'slides-sync-from-scene');
+    });
   }
 
-  return normalizeSlides(nextSlides);
+  const normalized = normalizeSlides(nextSlides);
+
+  if (changed) {
+    saveSlides(noteId, drawingId, normalized, 'slides-sync-from-scene');
+  }
+
+  return normalized;
 }
 
 export function publicSafeSlides(slides = []) {

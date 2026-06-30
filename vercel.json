@@ -11,6 +11,10 @@
       "destination": "/index.html"
     },
     {
+      "source": "/present/:path*",
+      "destination": "/index.html"
+    },
+    {
       "source": "/pricing",
       "destination": "/index.html"
     },
@@ -58,6 +62,10 @@
         {
           "key": "X-Frame-Options",
           "value": "DENY"
+        },
+        {
+          "key": "Cache-Control",
+          "value": "no-store"
         }
       ]
     },

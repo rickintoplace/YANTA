@@ -11,6 +11,10 @@
       "destination": "/index.html"
     },
     {
+      "source": "/present",
+      "destination": "/index.html"
+    },
+    {
       "source": "/present/:path*",
       "destination": "/index.html"
     },

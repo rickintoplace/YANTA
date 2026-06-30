@@ -1672,6 +1672,18 @@ async function init() {
       return raw.slice('sync2='.length);
     }
   })();
+
+  const presentationPairingHashPayload = (() => {
+    const raw = String(location.hash || '').replace(/^#/, '');
+
+    if (!raw.startsWith('present-pair=')) return '';
+
+    try {
+      return decodeURIComponent(raw.slice('present-pair='.length));
+    } catch {
+      return raw.slice('present-pair='.length);
+    }
+  })();
   
   if (sync2HashPayload) {
     // Remove secret from browser URL/history as soon as possible.
@@ -1702,6 +1714,27 @@ async function init() {
       } catch (err) {
         console.error('[YANTA Sync2] pairing payload failed', err);
         toast(err?.message || 'Could not read pairing link', 'error');
+      }
+    }, 700);
+  }
+
+  if (presentationPairingHashPayload) {
+    /*
+      Remove pairing token from URL/history immediately.
+      The pairing token allows sending a presentation to the waiting display.
+    */
+    history.replaceState({}, '', location.pathname + location.search);
+
+    setTimeout(async () => {
+      try {
+        const {
+          handlePresentationPairingPayload,
+        } = await import('./presentation/presentation-pairing.js');
+
+        await handlePresentationPairingPayload(presentationPairingHashPayload);
+      } catch (err) {
+        console.error('[YANTA Presentation] pairing failed', err);
+        toast(err?.message || 'Could not read presentation pairing code', 'error');
       }
     }, 700);
   }
@@ -3449,6 +3482,13 @@ if (SITE_PAGE_PATHS.has(normalizedPath)) {
     .catch((e) => {
       console.error(e);
       document.body.innerHTML = '<main style="padding:24px;font-family:system-ui">Could not load share viewer.</main>';
+    });
+} else if (location.pathname === '/present' || location.pathname === '/present/') {
+  import('./presentation/presentation-pairing-viewer.js')
+    .then((m) => m.mountPresentationPairingViewer())
+    .catch((e) => {
+      console.error(e);
+      document.body.innerHTML = '<main style="padding:24px;font-family:system-ui">Could not open presentation pairing.</main>';
     });
 } else if (location.pathname.startsWith('/present/')) {
   import('./presentation/presentation-viewer.js')

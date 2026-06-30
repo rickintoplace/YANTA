@@ -24,8 +24,10 @@ import {
 } from './presentation-crypto.js';
 
 import {
-  normalizeSlideBounds,
   normalizeSlides,
+  visibleElementsInSlide,
+  makeVirtualElementForSlide,
+  isSlideFrameElement,
 } from '../slides/slides-model.js';
 
 const SIGNALING_URL =
@@ -40,6 +42,10 @@ let ws = null;
 let slides = [];
 let index = 0;
 let sendDraftTimer = 0;
+
+let cameraRaf = 0;
+let setViewerMode = null;
+let laserHideTimer = 0;
 
 function sessionIdFromPath(pathname = location.pathname) {
   const m = String(pathname || '').match(/^\/present\/([^/?#]+)/);
@@ -82,6 +88,167 @@ function cleanAppState(appState = {}) {
   }
 
   return out;
+}
+
+function prefersReducedMotion() {
+  try {
+    return window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+  } catch {
+    return false;
+  }
+}
+
+function easeInOutCubic(t) {
+  const x = clamp(t, 0, 1);
+
+  return x < 0.5
+    ? 4 * x * x * x
+    : 1 - Math.pow(-2 * x + 2, 3) / 2;
+}
+
+function zoomValue(appState = {}) {
+  return Number(appState.zoom?.value ?? appState.zoom ?? 1) || 1;
+}
+
+function presentationElements(elements = []) {
+  /*
+    Meeting-room presentation view:
+    Slide frames are structural authoring helpers.
+    They must not be visible in the actual presentation.
+  */
+  return (Array.isArray(elements) ? elements : []).map((el) => {
+    if (!el || !isSlideFrameElement(el)) return el;
+
+    return {
+      ...el,
+      opacity: 0,
+      locked: true,
+      selected: false,
+    };
+  });
+}
+
+function editableDraftElements(elements = []) {
+  /*
+    Scoped Edit Mode:
+    The meeting-room laptop edits only presentation content.
+    Slide-frame authoring elements are never sent back as draft edits.
+    Owner-side Apply merges these edits with the original private slide frames.
+  */
+  return (Array.isArray(elements) ? elements : [])
+    .filter((el) => el && !isSlideFrameElement(el));
+}
+
+function applyElementsForMode(mode) {
+  if (!api || !payload?.display?.drawing) return;
+
+  const drawing = payload.display.drawing;
+
+  api.updateScene({
+    elements:
+      mode === 'present'
+        ? presentationElements(drawing.elements || [])
+        : drawing.elements || [],
+    files: drawing.files || {},
+  });
+
+  api.refresh?.();
+}
+
+function updatePresentationBodyMode(mode) {
+  document.body.classList.toggle('is-yanta-presentation-presenting', mode === 'present');
+  document.body.classList.toggle('is-yanta-presentation-editing', mode !== 'present');
+}
+
+function requestPresentationFullscreen() {
+  const el =
+    document.querySelector('.yanta-presentation-shell') ||
+    document.documentElement;
+
+  try {
+    if (!document.fullscreenElement) {
+      el.requestFullscreen?.();
+    }
+  } catch {}
+}
+
+function exitPresentationFullscreen() {
+  try {
+    if (document.fullscreenElement) {
+      document.exitFullscreen?.();
+    }
+  } catch {}
+}
+
+function sceneToScreen(sceneX, sceneY) {
+  if (!api) return null;
+
+  const host = document.querySelector('[data-presentation-stage]');
+  const rect =
+    host?.querySelector?.('.excalidraw')?.getBoundingClientRect?.() ||
+    host?.getBoundingClientRect?.();
+
+  if (!rect) return null;
+
+  const appState = api.getAppState?.() || {};
+  const zoom = zoomValue(appState);
+  const scrollX = Number(appState.scrollX || 0);
+  const scrollY = Number(appState.scrollY || 0);
+
+  return {
+    x: rect.left + (sceneX + scrollX) * zoom,
+    y: rect.top + (sceneY + scrollY) * zoom,
+  };
+}
+
+function slideUnitToScreen(data = {}) {
+  const slide = slides[index];
+  if (!slide) return null;
+
+  const bounds = normalizeSlideBounds(slide.bounds);
+
+  const sceneX = bounds.x + clamp(Number(data.x || 0), 0, 1) * bounds.width;
+  const sceneY = bounds.y + clamp(Number(data.y || 0), 0, 1) * bounds.height;
+
+  return sceneToScreen(sceneX, sceneY);
+}
+
+function ensureLaserDot() {
+  let dot = document.querySelector('[data-presentation-laser-dot]');
+
+  if (dot) return dot;
+
+  dot = document.createElement('div');
+  dot.className = 'yanta-presentation-laser-dot';
+  dot.dataset.presentationLaserDot = '1';
+
+  document.body.append(dot);
+
+  return dot;
+}
+
+function showLaserDotAt(x, y) {
+  const dot = ensureLaserDot();
+
+  dot.style.left = `${x}px`;
+  dot.style.top = `${y}px`;
+  dot.classList.add('visible');
+
+  clearTimeout(laserHideTimer);
+
+  laserHideTimer = window.setTimeout(() => {
+    dot.classList.remove('visible');
+  }, 850);
+}
+
+function showLaserDotFromRemote(data = {}) {
+  if (data.unit === 'slide') {
+    const point = slideUnitToScreen(data);
+
+    if (point) {
+      showLaserDotAt(point.x, point.y);
+    }
+  }
 }
 
 function drawingViewportRect() {
@@ -132,8 +299,81 @@ function slideCameraTarget(slide, {
   };
 }
 
+function currentCamera() {
+  const appState = api?.getAppState?.() || {};
+
+  return {
+    scrollX: Number(appState.scrollX || 0),
+    scrollY: Number(appState.scrollY || 0),
+    zoom: zoomValue(appState),
+  };
+}
+
+function applyCamera(camera) {
+  if (!api || !camera) return;
+
+  api.updateScene({
+    appState: {
+      scrollX: camera.scrollX,
+      scrollY: camera.scrollY,
+      zoom: {
+        value: camera.zoom,
+      },
+    },
+  });
+}
+
+function animateCameraToSlide(slide, {
+  duration = 520,
+} = {}) {
+  if (!api || !slide) return;
+
+  cancelAnimationFrame(cameraRaf);
+  cameraRaf = 0;
+
+  const target = slideCameraTarget(slide);
+
+  const to = {
+    scrollX: target.scrollX,
+    scrollY: target.scrollY,
+    zoom: target.zoom.value,
+  };
+
+  if (prefersReducedMotion() || duration <= 0) {
+    applyCamera(to);
+    api.refresh?.();
+    return;
+  }
+
+  const from = currentCamera();
+  const start = performance.now();
+
+  const tick = () => {
+    const t = clamp((performance.now() - start) / duration, 0, 1);
+    const k = easeInOutCubic(t);
+
+    applyCamera({
+      scrollX: from.scrollX + (to.scrollX - from.scrollX) * k,
+      scrollY: from.scrollY + (to.scrollY - from.scrollY) * k,
+      zoom: from.zoom + (to.zoom - from.zoom) * k,
+    });
+
+    if (t < 1) {
+      cameraRaf = requestAnimationFrame(tick);
+      return;
+    }
+
+    cameraRaf = 0;
+    applyCamera(to);
+    api.refresh?.();
+  };
+
+  cameraRaf = requestAnimationFrame(tick);
+}
+
 function goToSlide(nextIndex, {
   notifyOwner = true,
+  animated = true,
 } = {}) {
   if (!api || !slides.length) return;
 
@@ -141,11 +381,9 @@ function goToSlide(nextIndex, {
 
   const slide = slides[index];
 
-  api.updateScene({
-    appState: slideCameraTarget(slide),
+  animateCameraToSlide(slide, {
+    duration: animated ? 560 : 0,
   });
-
-  api.refresh?.();
 
   updateTopbar();
 
@@ -225,6 +463,10 @@ function connectSocket() {
       return;
     }
 
+    if (data.kind === 'laser') {
+      showLaserDotFromRemote(data);
+      return;
+    }
     if (data.kind === 'discard-draft') {
       renderNotice('Owner discarded the current draft.');
       return;
@@ -366,6 +608,107 @@ body.yanta-presentation-page {
   font-size: 13px;
   box-shadow: 0 18px 50px rgba(0,0,0,.4);
 }
+
+.yanta-presentation-shell.is-presenting .yanta-presentation-top {
+  display: none !important;
+}
+
+.yanta-presentation-shell.is-presenting .excalidraw .App-toolbar,
+.yanta-presentation-shell.is-presenting .excalidraw .FixedSideContainer,
+.yanta-presentation-shell.is-presenting .excalidraw .HintViewer,
+.yanta-presentation-shell.is-presenting .excalidraw .help-icon,
+.yanta-presentation-shell.is-presenting .excalidraw .layer-ui__wrapper__top-right,
+.yanta-presentation-shell.is-presenting .excalidraw .layer-ui__wrapper__footer-right,
+.yanta-presentation-shell.is-presenting .excalidraw .layer-ui__wrapper__footer-left,
+.yanta-presentation-shell.is-presenting .excalidraw .Island,
+.yanta-presentation-shell.is-presenting .excalidraw .App-menu,
+.yanta-presentation-shell.is-presenting .excalidraw .Stack_vertical {
+  display: none !important;
+  pointer-events: none !important;
+}
+
+.yanta-presentation-shell.is-presenting .excalidraw {
+  --color-primary: #6ea8fe;
+}
+
+.yanta-presentation-present-hint {
+  position: fixed;
+  left: 50%;
+  bottom: max(18px, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 30;
+
+  padding: 8px 12px;
+  border: 1px solid #333;
+  border-radius: 999px;
+
+  background: rgba(28,28,28,.86);
+  color: #9a9794;
+
+  font-size: 12px;
+  font-weight: 750;
+
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+
+  opacity: 0;
+  pointer-events: none;
+
+  animation: yantaPresentHint 3.2s ease forwards;
+}
+
+@keyframes yantaPresentHint {
+  0% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(8px);
+  }
+
+  12% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+
+  72% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-6px);
+  }
+}
+
+.yanta-presentation-laser-dot {
+  position: fixed;
+  z-index: 60;
+
+  width: 20px;
+  height: 20px;
+  margin-left: -10px;
+  margin-top: -10px;
+
+  border-radius: 999px;
+  background: #ff3b30;
+
+  box-shadow:
+    0 0 0 5px rgba(255,59,48,.18),
+    0 0 26px rgba(255,59,48,.76);
+
+  opacity: 0;
+  transform: scale(.82);
+
+  pointer-events: none;
+
+  transition:
+    opacity 80ms ease,
+    transform 80ms ease;
+}
+
+.yanta-presentation-laser-dot.visible {
+  opacity: 1;
+  transform: scale(1);
+}
   `;
 
   document.head.append(style);
@@ -417,9 +760,32 @@ function renderState(title, message) {
 
 function PresentationApp() {
   const drawing = payload.display.drawing;
+  const [mode, setMode] = React.useState('present');
+
+  React.useEffect(() => {
+    setViewerMode = setMode;
+
+    return () => {
+      if (setViewerMode === setMode) {
+        setViewerMode = null;
+      }
+    };
+  }, []);
+
+  React.useEffect(() => {
+    updatePresentationBodyMode(mode);
+    applyElementsForMode(mode);
+
+    if (slides[index]) {
+      goToSlide(index, {
+        notifyOwner: false,
+        animated: false,
+      });
+    }
+  }, [mode]);
 
   return React.createElement('div', {
-    className: 'yanta-presentation-shell',
+    className: `yanta-presentation-shell ${mode === 'present' ? 'is-presenting' : 'is-editing'}`,
   }, [
     React.createElement('header', {
       className: 'yanta-presentation-top',
@@ -460,7 +826,43 @@ function PresentationApp() {
         className: 'yanta-presentation-btn primary',
         onClick: nextSlide,
       }, 'Next'),
+
+      React.createElement('button', {
+        key: 'present',
+        className: 'yanta-presentation-btn',
+        onClick: () => {
+          setMode('present');
+          goToSlide(index, {
+            notifyOwner: true,
+            animated: false,
+          });
+        },
+      }, 'Present'),
+
+      React.createElement('button', {
+        key: 'edit',
+        className: 'yanta-presentation-btn',
+        onClick: () => {
+          setMode('edit');
+        },
+      }, 'Edit copy'),
+
+      React.createElement('button', {
+        key: 'fullscreen',
+        className: 'yanta-presentation-btn',
+        onClick: () => {
+          requestPresentationFullscreen();
+          setMode('present');
+        },
+      }, 'Fullscreen'),
     ]),
+
+    mode === 'present'
+      ? React.createElement('div', {
+          key: 'hint',
+          className: 'yanta-presentation-present-hint',
+        }, 'Press Esc for controls')
+      : null,
 
     React.createElement('main', {
       className: 'yanta-presentation-stage',
@@ -468,7 +870,7 @@ function PresentationApp() {
       'data-presentation-stage': '1',
     }, React.createElement(Excalidraw, {
       initialData: {
-        elements: drawing.elements || [],
+        elements: presentationElements(drawing.elements || []),
         appState: {
           ...(drawing.appState || {}),
           collaborators: new Map(),
@@ -485,6 +887,7 @@ function PresentationApp() {
           if (slides.length) {
             goToSlide(0, {
               notifyOwner: true,
+              animated: false,
             });
           }
         });
@@ -495,16 +898,24 @@ function PresentationApp() {
           loadScene: false,
           saveAsImage: false,
           export: false,
-          clearCanvas: true,
+          clearCanvas: mode !== 'present',
           toggleTheme: false,
         },
       },
 
+      viewModeEnabled: mode === 'present',
+      zenModeEnabled: mode === 'present',
       detectScroll: true,
       autoFocus: true,
 
       onChange(elements, appState, files) {
-        scheduleDraftSend(elements, appState, files);
+        if (mode === 'present') return;
+
+        scheduleDraftSend(
+          editableDraftElements(elements || []),
+          appState,
+          files
+        );
       },
     })),
   ]);
@@ -552,15 +963,50 @@ export async function mountPresentationViewer() {
     connectSocket();
 
     window.addEventListener('keydown', (e) => {
-      if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') {
+    if (e.key === 'Escape') {
+        /*
+        UX rule:
+        Esc exits presentation/fullscreen UI first.
+        It does NOT end the meeting-room session.
+        */
+        e.preventDefault();
+        e.stopPropagation();
+
+        exitPresentationFullscreen();
+
+        if (setViewerMode) {
+        setViewerMode('edit');
+        }
+
+        return;
+    }
+
+    const target = e.target instanceof Element ? e.target : null;
+
+    if (
+        target?.closest?.('input, textarea, select, [contenteditable="true"], [role="textbox"]')
+    ) {
+        return;
+    }
+
+    if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') {
         e.preventDefault();
         nextSlide();
-      }
+    }
 
-      if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+    if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
         e.preventDefault();
         prevSlide();
-      }
+    }
+
+    if (e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+        requestPresentationFullscreen();
+
+        if (setViewerMode) {
+        setViewerMode('present');
+        }
+    }
     }, true);
 
     window.addEventListener('resize', () => {

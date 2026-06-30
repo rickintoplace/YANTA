@@ -61,7 +61,7 @@ self.addEventListener('fetch', (event) => {
       url.pathname.startsWith('/cloud-api/') ||
       url.pathname.startsWith('/api/') ||
       url.pathname.startsWith('/share/') ||
-      url.pathname.startsWith('/present/')
+      url.pathname.startsWith('/present')
     )
   ) {
     return;

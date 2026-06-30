@@ -134,6 +134,55 @@ function ensureCss() {
     grid-template-columns: 1fr;
   }
 }
+
+.yanta-presentation-owner-preview {
+  position: relative;
+  min-height: 220px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg);
+  overflow: hidden;
+  touch-action: none;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.yanta-presentation-owner-preview svg {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.yanta-presentation-owner-laser-dot {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  margin-left: -9px;
+  margin-top: -9px;
+
+  border-radius: 999px;
+  background: #ff3b30;
+
+  box-shadow:
+    0 0 0 4px rgba(255,59,48,.18),
+    0 0 24px rgba(255,59,48,.72);
+
+  opacity: 0;
+  transform: scale(.8);
+
+  pointer-events: none;
+
+  transition:
+    opacity 80ms ease,
+    transform 80ms ease;
+}
+
+.yanta-presentation-owner-laser-dot.visible {
+  opacity: 1;
+  transform: scale(1);
+}
   `;
 
   document.head.append(style);
@@ -199,6 +248,144 @@ function currentNotesText() {
   return String(slide.notes?.markdown || slide.presenterNotes || '');
 }
 
+async function renderOwnerSlideSvgString(drawing, slide) {
+  const mod = await import('@excalidraw/excalidraw');
+
+  if (typeof mod.exportToSvg !== 'function') {
+    throw new Error('Excalidraw SVG export unavailable');
+  }
+
+  const content = visibleElementsInSlide(drawing.elements || [], slide);
+  const virtual = makeVirtualElementForSlide(slide);
+
+  const svg = await mod.exportToSvg({
+    elements: [
+      ...content,
+      virtual,
+    ],
+    appState: {
+      ...(drawing.appState || {}),
+      exportBackground: true,
+      viewBackgroundColor:
+        document.documentElement.dataset.theme === 'dark'
+          ? '#121212'
+          : '#ffffff',
+    },
+    files: drawing.files || {},
+  });
+
+  svg.setAttribute('width', '100%');
+  svg.setAttribute('height', '100%');
+  svg.setAttribute('preserveAspectRatio', 'xMidYMid meet');
+
+  return new XMLSerializer().serializeToString(svg);
+}
+
+function showOwnerLaserDot(host, x, y) {
+  const dot = host?.querySelector('[data-owner-laser-dot]');
+  const preview = host?.querySelector('[data-owner-slide-preview] svg') ||
+    host?.querySelector('[data-owner-slide-preview]');
+
+  if (!dot || !preview) return;
+
+  const wrapRect = host.getBoundingClientRect();
+  const svgRect = preview.getBoundingClientRect();
+
+  dot.style.left = `${svgRect.left - wrapRect.left + Math.max(0, Math.min(1, x)) * svgRect.width}px`;
+  dot.style.top = `${svgRect.top - wrapRect.top + Math.max(0, Math.min(1, y)) * svgRect.height}px`;
+  dot.classList.add('visible');
+
+  clearTimeout(dot._hideTimer);
+
+  dot._hideTimer = window.setTimeout(() => {
+    dot.classList.remove('visible');
+  }, 850);
+}
+
+async function hydrateOwnerSlidePreview() {
+  const host = modal?.querySelector('[data-owner-preview-host]');
+  const preview = modal?.querySelector('[data-owner-slide-preview]');
+
+  if (!host || !preview || !activeSession) return;
+
+  const slides = normalizeSlides(activeSession.drawing?.slides || []).filter((s) => !s.hidden);
+  const slide = slides[ownerIndex] || null;
+
+  if (!slide) {
+    preview.innerHTML = '<div style="color:var(--text-faint);font-size:13px">No slide preview</div>';
+    return;
+  }
+
+  preview.innerHTML = '<div style="color:var(--text-faint);font-size:13px">Rendering slide…</div>';
+
+  try {
+    const svg = await renderOwnerSlideSvgString(activeSession.drawing, slide);
+
+    if (!preview.isConnected) return;
+
+    preview.innerHTML = svg;
+  } catch (err) {
+    console.warn('[YANTA Presentation] owner preview failed', err);
+
+    if (!preview.isConnected) return;
+
+    preview.innerHTML = '<div style="color:var(--text-faint);font-size:13px">Preview unavailable</div>';
+  }
+}
+
+function bindOwnerLaserPad() {
+  const host = modal?.querySelector('[data-owner-preview-host]');
+  const preview = modal?.querySelector('[data-owner-slide-preview]');
+
+  if (!host || !preview || host.dataset.laserBound === '1') return;
+
+  host.dataset.laserBound = '1';
+
+  const pointerToUnit = (e) => {
+    const svg = preview.querySelector('svg') || preview;
+    const rect = svg.getBoundingClientRect();
+
+    if (!rect.width || !rect.height) return null;
+
+    return {
+      x: Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width)),
+      y: Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height)),
+    };
+  };
+
+  const sendLaser = (e) => {
+    const unit = pointerToUnit(e);
+
+    if (!unit) return;
+
+    showOwnerLaserDot(host, unit.x, unit.y);
+
+    sendOwnerMessage({
+      kind: 'laser',
+      unit: 'slide',
+      x: unit.x,
+      y: unit.y,
+      ts: Date.now(),
+    });
+  };
+
+  host.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+
+    try {
+      host.setPointerCapture?.(e.pointerId);
+    } catch {}
+
+    sendLaser(e);
+  });
+
+  host.addEventListener('pointermove', (e) => {
+    if (!(e.buttons & 1)) return;
+    e.preventDefault();
+    sendLaser(e);
+  });
+}
+
 function publishOwnerState() {
   const slides = normalizeSlides(activeSession?.drawing?.slides || []).filter((s) => !s.hidden);
   const slide = slides[ownerIndex] || null;
@@ -231,6 +418,13 @@ function renderOwnerRemotePanel() {
       </span>
     </div>
 
+    <div class="yanta-presentation-owner-preview" data-owner-preview-host>
+      <div data-owner-slide-preview style="width:100%;height:100%;display:flex;align-items:center;justify-content:center">
+        <div style="color:var(--text-faint);font-size:13px">Rendering slide…</div>
+      </div>
+      <div class="yanta-presentation-owner-laser-dot" data-owner-laser-dot></div>
+    </div>
+
     <div class="compress-actions" style="justify-content:center">
       <button class="btn" data-presentation-prev>${lucide('chevron-left', 14)} Prev</button>
       <button class="btn primary" data-presentation-next>Next ${lucide('chevron-right', 14)}</button>
@@ -245,11 +439,11 @@ function renderOwnerRemotePanel() {
         latestDraft
           ? `
             <strong>Scoped edits received.</strong><br>
-            The meeting-room laptop changed the session copy.
+            The target device changed the session copy.
             Apply them to your original drawing or discard them.
           `
           : `
-            Waiting for scoped edits from the meeting-room laptop.
+            Waiting for scoped edits from the target device.
           `
       }
     </div>
@@ -310,6 +504,10 @@ function renderOwnerRemotePanel() {
   host.querySelector('[data-presentation-end]')?.addEventListener('click', async () => {
     await endActivePresentationSession();
   });
+
+  hydrateOwnerSlidePreview().then(() => {
+    bindOwnerLaserPad();
+  }).catch(() => {});
 }
 
 function openOwnerSocket() {
@@ -381,14 +579,29 @@ async function applyLatestDraft() {
     return;
   }
 
+  const draftContentElements = (latestDraft.elements || [])
+    .filter((el) => el && !isSlideFrameElement(el));
+
+  const originalSlideFrameElements = (current.elements || [])
+    .filter((el) => el && isSlideFrameElement(el));
+
   setDrawing(activeSession.noteId, activeSession.drawingId, {
     ...current,
 
-    elements: latestDraft.elements || [],
+    /*
+      Scoped Edit Apply:
+      - session content edits come from the target device (e.g. meeting-room laptop)
+      - original slide-frame authoring elements stay private/local
+      - slide metadata + presenter notes are preserved
+    */
+    elements: [
+      ...draftContentElements,
+      ...originalSlideFrameElements,
+    ],
+
     appState: latestDraft.appState || {},
     files: latestDraft.files || {},
 
-    // Preserve private/session-independent metadata from original.
     slides: current.slides || [],
     slideDecks: current.slideDecks || [],
     defaultSlideDeckId: current.defaultSlideDeckId || null,
@@ -449,6 +662,137 @@ export function closePresentationSessionModal() {
   activeSession = null;
   latestDraft = null;
   ownerIndex = 0;
+}
+
+export async function createPresentationSessionForDrawing({
+  noteId = state.currentNoteId,
+  drawingId,
+  ttlMs = 2 * 60 * 60 * 1000,
+} = {}) {
+  if (!noteId || !drawingId) {
+    throw new Error('noteId and drawingId required');
+  }
+
+  const drawing = getDrawing(noteId, drawingId);
+
+  if (!drawing) {
+    throw new Error('Drawing not found');
+  }
+
+  const vaultId = await getConfiguredVaultId();
+  const key = generatePresentationKeyString();
+
+  const created = await createPresentationSession({
+    vaultId,
+    sourceType: 'drawing',
+    sourceId: drawingId,
+    ttlMs,
+  });
+
+  const session = created.session;
+
+  const packed = await packPresentationSession({
+    noteId,
+    drawingId,
+    session,
+  });
+
+  const encryptedPayload = await encryptPresentationPayload(
+    key,
+    packed.payload
+  );
+
+  await publishPresentationSessionPayload(session.sessionId, {
+    encryptedPayload,
+    etag: packed.payloadHash,
+  });
+
+  const url = makePresentationUrl(session.sessionId, key);
+
+  return {
+    session,
+    key,
+    url,
+    drawing,
+    noteId,
+    drawingId,
+  };
+}
+
+export function openPresentationControllerForExistingSession({
+  noteId = state.currentNoteId,
+  drawingId,
+  drawing,
+  session,
+  url,
+} = {}) {
+  if (!session?.sessionId || !session?.signalingTopic || !session?.signalingToken) {
+    throw new Error('Invalid presentation session.');
+  }
+
+  const m = ensureModal();
+
+  m.hidden = false;
+
+  activeSession = {
+    ...session,
+    displayUrl: url,
+    noteId,
+    drawingId,
+    drawing,
+  };
+
+  latestDraft = null;
+  ownerIndex = 0;
+
+  m.innerHTML = `
+    <div class="modal-card yanta-presentation-card">
+      <header class="modal-head">
+        <h3>Meeting Room Presentation</h3>
+        <button class="icon-btn" data-presentation-close>&times;</button>
+      </header>
+
+      <div class="modal-body">
+        <div class="yanta-presentation-box">
+          <div class="yanta-presentation-info">
+            <strong>Display connected</strong><br>
+            The target device can edit only a temporary session copy.
+            You decide whether to apply or discard edits.
+          </div>
+
+          <div class="yanta-presentation-link-row">
+            <input class="text-input" readonly value="${escapeAttr(url || '')}" data-presentation-link>
+            <button class="btn primary" data-copy-presentation-link>${lucide('copy', 14)} Copy</button>
+          </div>
+
+          <div class="yanta-presentation-qr" data-presentation-qr></div>
+
+          <section class="yanta-presentation-remote" data-presentation-remote></section>
+        </div>
+      </div>
+    </div>
+  `;
+
+  if (url) {
+    m.querySelector('[data-presentation-qr]')?.append(renderBrandedQrSvg(url, {
+      size: 230,
+      logo: BRAND_LOGO_SVG,
+    }));
+  }
+
+  m.querySelector('[data-copy-presentation-link]')?.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(url || '');
+      toast('Presentation link copied', 'success');
+    } catch {
+      toast('Copy failed', 'error');
+    }
+  });
+
+  openOwnerSocket();
+  renderOwnerRemotePanel();
+
+  return activeSession;
 }
 
 export async function openPresentationSessionModal({
@@ -540,7 +884,7 @@ export async function openPresentationSessionModal({
           <div class="yanta-presentation-box">
             <div class="yanta-presentation-info">
               <strong>Display link</strong><br>
-              Open this on the meeting-room laptop. It can edit only a temporary session copy.
+              Open this on the target device. It can edit only a temporary session copy.
               You decide whether to apply or discard edits.
             </div>
 

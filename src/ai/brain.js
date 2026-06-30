@@ -36,6 +36,7 @@ export const AI_BRAIN_IDS = Object.freeze({
   activity: 'system_ai_brain_activity_log',
 
   weatherSkill: 'system_ai_brain_skill_weather',
+  excalidrawSlideshowSkill: 'system_ai_brain_skill_excalidraw_slideshow',
 });
 
 const NOW = () => Date.now();
@@ -275,6 +276,122 @@ Use for:
 The stored user location is approximate and rounded. Treat it as a city/region-level hint, not an exact address.
 `.trim();
 
+export const DEFAULT_AI_BRAIN_EXCALIDRAW_SLIDESHOW_SKILL = `
+---
+name: excalidraw-slideshow
+description: Create editable YANTA slideshows using Excalidraw slide frames
+version: 1.0.0
+metadata:
+  yanta:
+    tags: [excalidraw, slides, presentation, visual]
+    category: visual
+---
+
+# Excalidraw Slideshow
+
+## When to Use
+
+Use this skill when the user asks for:
+- slides
+- a slideshow
+- a deck
+- a presentation
+- a visual lesson
+- slide frames
+- Folien
+- Präsentation
+- Excalidraw slides
+
+## Procedure
+
+1. Create a concise slide plan.
+2. Generate complete Excalidraw JSON.
+3. Use YANTA slide-frame rectangles as camera targets.
+4. Put visible content spatially inside each slide-frame rectangle.
+5. Call \`create_excalidraw_slideshow\`.
+6. Do not paste the JSON into chat.
+
+## YANTA Slide Frame Format
+
+A YANTA slide frame is a rectangle element:
+
+\`\`\`json
+{
+  "id": "slide_frame_01",
+  "type": "rectangle",
+  "x": 0,
+  "y": 0,
+  "width": 1280,
+  "height": 720,
+  "strokeColor": "#6ea8fe",
+  "backgroundColor": "transparent",
+  "roughness": 0,
+  "opacity": 100,
+  "customData": {
+    "yanta": {
+      "slideId": "slide_01",
+      "slideFrame": true
+    }
+  }
+}
+\`\`\`
+
+Also include matching YANTA slide metadata:
+
+\`\`\`json
+{
+  "yanta": {
+    "slides": [
+      {
+        "id": "slide_01",
+        "title": "Intro",
+        "frameElementId": "slide_frame_01",
+        "bounds": {
+          "x": 0,
+          "y": 0,
+          "width": 1280,
+          "height": 720
+        },
+        "order": 0,
+        "notes": {
+          "markdown": "",
+          "visibility": "presenter-only"
+        }
+      }
+    ]
+  }
+}
+\`\`\`
+
+## Layout Rules
+
+- Default slide size: 1280×720.
+- Space slides left-to-right with at least 160px gap.
+- Keep content inside safe margins.
+- Use large readable text.
+- Avoid dense slides.
+- Prefer visual structure over bullet walls.
+
+## Pitfalls
+
+- Do not use SVG-only drawings for slide decks.
+- Do not rely on native Excalidraw frame elements.
+- Do not set \`customData.yanta.slideId\` on normal content elements.
+- Only slide-frame rectangles should use \`customData.yanta.slideFrame=true\`.
+- Do not paste huge JSON into chat.
+- When editing, preserve speaker notes by slide id.
+
+## Verification
+
+Before tool call:
+- JSON parses.
+- Every slide has one YANTA slide-frame rectangle.
+- Every slide has matching \`yanta.slides\` metadata.
+- No duplicate element ids.
+- Slide text is readable.
+- Content intersects the correct slide bounds.
+`.trim();
+
 function systemFolderPatch(extra = {}) {
   return {
     system: true,
@@ -433,6 +550,20 @@ await ensureNote(
     tags: ['ai-brain'],
   },
   DEFAULT_AI_BRAIN_WEATHER_SKILL
+);
+
+await ensureNote(
+  AI_BRAIN_IDS.excalidrawSlideshowSkill,
+  {
+    title: 'Skill: Excalidraw Slideshow',
+    folderId: AI_BRAIN_IDS.skillsFolder,
+    icon: 'presentation',
+    color: '#8b5cf6',
+    tags: ['ai-brain', 'skill'],
+    skillName: 'excalidraw-slideshow',
+    skillCategory: 'visual',
+  },
+  DEFAULT_AI_BRAIN_EXCALIDRAW_SLIDESHOW_SKILL
 );
 
   state.expandedFolders.add(AI_BRAIN_IDS.rootFolder);

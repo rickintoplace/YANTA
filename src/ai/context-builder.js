@@ -48,6 +48,10 @@ import {
   buildAiContextPromptParts,
 } from './context-attachments.js';
 
+import {
+  buildSkillIndexContext,
+} from './skills.js';
+
 const WIKILINK_RE = /\[\[([^\]|\n]+)(?:\|([^\]\n]+))?\]\]/g;
 const IMAGE_RE = /!\[[^\]]*\]\(([^)\s]+)(?:\s+"[^"]*")?\)(?:\{[^}\n]*\})?/g;
 const YANTA_IMAGE_RE = /yanta-img:\/\/([a-z0-9]+)/gi;
@@ -249,7 +253,9 @@ export async function buildCurrentNoteContext({ includeMarkdown = true } = {}) {
   };
 }
 
-export async function buildSystemMessage() {
+export async function buildSystemMessage({
+  userText = '',
+} = {}) {
   const settings = getAiSettings();
 
   const runtimeSettings = getEffectiveAiRuntimeSettings();
@@ -262,6 +268,16 @@ export async function buildSystemMessage() {
     soul = await readBrainNoteMarkdown(AI_BRAIN_IDS.soul);
   } catch {
     soul = '';
+  }
+
+  let skillIndexContext = '';
+
+  try {
+    skillIndexContext = await buildSkillIndexContext({
+      maxSkills: 80,
+    });
+  } catch {
+    skillIndexContext = '';
   }
 
   const brainRules = [
@@ -302,6 +318,8 @@ export async function buildSystemMessage() {
       soul.trim()
         ? `# Soul\n${soul.trim()}`
         : '',
+      '',
+      skillIndexContext,
       '',
       brainRules,
       '',

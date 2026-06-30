@@ -1463,6 +1463,15 @@ function toolDisplayName(name) {
     web_search: 'Web search',
     web_read: 'Read web page',
 
+    create_excalidraw_slideshow: 'Create slideshow',
+    update_excalidraw_slideshow: 'Update slideshow',
+    read_excalidraw_drawing_json: 'Read Excalidraw JSON',
+    validate_excalidraw_slideshow_json: 'Validate slideshow JSON',
+
+    skills_list: 'List skills',
+    skill_view: 'View skill',
+    skill_manage: 'Manage skill',
+
   };
 
   return map[name] || name || 'Tool';
@@ -2598,7 +2607,9 @@ async function runAssistant(userText) {
   const tools = openAiToolsForModel();
 
   const messages = [
-    await buildSystemMessage(),
+    await buildSystemMessage({
+      userText,
+    }),
     await buildContextMessage({
       attachments: activeContextItems,
     }),
@@ -2797,10 +2808,111 @@ async function runAssistant(userText) {
   addMessage('assistant', `I stopped after ${maxRounds} tool round${maxRounds === 1 ? '' : 's'}. I should summarize or ask you to continue instead of searching more.`);
 }
 
+async function maybeHandleAssistantSlashCommand(text) {
+  const raw = String(text || '').trim();
+
+  if (!raw.startsWith('/')) return false;
+
+  const [commandRaw, ...restParts] = raw.slice(1).split(/\s+/);
+  const command = commandRaw.trim().toLowerCase();
+  const rest = restParts.join(' ').trim();
+
+  if (!command) return false;
+
+  if (command === 'skills') {
+    const {
+      skillsListAction,
+      skillViewAction,
+    } = await import('./skills.js');
+
+    if (!rest || rest === 'list') {
+      const result = await skillsListAction();
+
+      addMessage(
+        'assistant',
+        [
+          '## Installed Skills',
+          '',
+          result.skills.length
+            ? result.skills.map((s) =>
+                `- **${s.name}** — ${s.description || 'No description'}`
+              ).join('\n')
+            : 'No skills installed.',
+        ].join('\n'),
+        {
+          model: 'YANTA',
+        }
+      );
+
+      return true;
+    }
+
+    const showMatch = /^show\s+(.+)$/.exec(rest) || /^view\s+(.+)$/.exec(rest);
+
+    if (showMatch) {
+      const skill = await skillViewAction({
+        name: showMatch[1],
+      });
+
+      addMessage(
+        'assistant',
+        [
+          `## Skill: ${skill.name}`,
+          '',
+          '```markdown',
+          skill.text,
+          '```',
+        ].join('\n'),
+        {
+          model: 'YANTA',
+        }
+      );
+
+      return true;
+    }
+  }
+
+  /*
+    /skill-name request
+    Load the skill content and run a normal AI turn with it attached.
+  */
+  try {
+    const {
+      skillViewAction,
+    } = await import('./skills.js');
+
+    const skill = await skillViewAction({
+      name: command,
+    });
+
+    const prompt = [
+      `Use this YANTA skill for the following request.`,
+      '',
+      `<YANTA_SKILL name="${skill.name}">`,
+      skill.text,
+      '</YANTA_SKILL>',
+      '',
+      'User request:',
+      rest || `Use the ${skill.name} skill.`,
+    ].join('\n');
+
+    await submitUserText(prompt);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function submitUserText(text) {
   const clean = String(text || '').trim();
 
   if (!clean) return;
+
+  if (clean.startsWith('/')) {
+    const handled = await maybeHandleAssistantSlashCommand(clean);
+
+    if (handled) return;
+  }
 
   if (abortController) {
     toast('YANTA AI is already working', 'error');

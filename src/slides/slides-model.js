@@ -133,8 +133,24 @@ import {
   }
     
   export function isSlideFrameElement(el) {
-    return el?.customData?.yanta?.slideFrame === true ||
-      !!el?.customData?.yanta?.slideId;
+    const yanta = el?.customData?.yanta || {};
+
+    /*
+      YANTA slide frames are camera-target rectangles on the infinite board.
+      Important: normal content elements must not become invisible in export/
+      presentation just because they carry a slideId-like metadata field.
+    */
+    return (
+      yanta.slideFrame === true ||
+      yanta.kind === 'slide-frame' ||
+
+      // Backward compatibility for older slide-frame elements.
+      (
+        !!yanta.slideId &&
+        el?.type === 'rectangle' &&
+        String(el?.id || '').startsWith('slide_frame_')
+      )
+    );
   }
   
   export function slideIdFromElement(el) {

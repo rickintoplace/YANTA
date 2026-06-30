@@ -41,6 +41,19 @@ import {
   aiBrainWriteAction,
 } from './brain.js';
 
+import {
+  createExcalidrawSlideshowAction,
+  updateExcalidrawSlideshowAction,
+  readExcalidrawDrawingJsonAction,
+  validateExcalidrawSlideshowJsonAction,
+} from './slideshow-actions.js';
+
+import {
+  skillsListAction,
+  skillViewAction,
+  skillManageAction,
+} from './skills.js';
+
 export const TOOL_REGISTRY = [
   {
     name: 'search_notes',
@@ -165,6 +178,108 @@ export const TOOL_REGISTRY = [
       required: ['title', 'svg'],
     },
     execute: createDrawingNoteAction,
+  },
+
+  {
+    name: 'create_excalidraw_slideshow',
+    permission: 'allowCreateNotes',
+    risk: 'write',
+    description: [
+      'Create a native editable YANTA slideshow from complete Excalidraw JSON.',
+      'Use this when the user asks for slides, a deck, a presentation, a slideshow, Folien, Präsentation, or slide frames.',
+      'The JSON should contain YANTA slide-frame rectangles, not just SVG.',
+      'A YANTA slide-frame is a rectangle element with customData.yanta.slideFrame=true and customData.yanta.slideId.',
+      'The tool creates a note, stores the drawing, derives YANTA slide metadata, and inserts draw:// into the note.',
+      'Do not paste the JSON into chat. Pass it as excalidrawJson.',
+    ].join('\n'),
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        title: {
+          type: 'string',
+          description: 'Title for the new slideshow note.',
+        },
+        body: {
+          type: 'string',
+          description: 'Optional Markdown body before the drawing embed.',
+        },
+        folderId: {
+          type: ['string', 'null'],
+        },
+        tags: {
+          type: 'array',
+          items: { type: 'string' },
+        },
+        excalidrawJson: {
+          type: ['object', 'string'],
+          description: 'Complete Excalidraw JSON with YANTA slide-frame rectangles.',
+        },
+      },
+      required: ['title', 'excalidrawJson'],
+    },
+    execute: createExcalidrawSlideshowAction,
+  },
+
+  {
+    name: 'update_excalidraw_slideshow',
+    permission: 'allowEditNotes',
+    risk: 'write',
+    description: [
+      'Replace/update an existing YANTA slideshow from complete Excalidraw JSON.',
+      'Use after read_excalidraw_drawing_json when the user asks to edit an existing slideshow.',
+      'Preserves speaker notes where slide ids match.',
+      'Do not paste the JSON into chat. Pass it as excalidrawJson.',
+    ].join('\n'),
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        noteId: { type: 'string' },
+        drawingId: { type: 'string' },
+        title: { type: 'string' },
+        excalidrawJson: {
+          type: ['object', 'string'],
+        },
+      },
+      required: ['noteId', 'drawingId', 'excalidrawJson'],
+    },
+    execute: updateExcalidrawSlideshowAction,
+  },
+
+  {
+    name: 'read_excalidraw_drawing_json',
+    permission: 'allowReadNotes',
+    risk: 'read',
+    description: 'Read an existing YANTA drawing/slideshow as Excalidraw JSON including YANTA slide metadata.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        noteId: { type: 'string' },
+        drawingId: { type: 'string' },
+      },
+      required: ['noteId', 'drawingId'],
+    },
+    execute: readExcalidrawDrawingJsonAction,
+  },
+
+  {
+    name: 'validate_excalidraw_slideshow_json',
+    permission: 'allowCreateNotes',
+    risk: 'read',
+    description: 'Validate Excalidraw JSON for YANTA slideshow import.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        excalidrawJson: {
+          type: ['object', 'string'],
+        },
+      },
+      required: ['excalidrawJson'],
+    },
+    execute: validateExcalidrawSlideshowJsonAction,
   },
 
   {
@@ -352,6 +467,102 @@ export const TOOL_REGISTRY = [
     },
     execute: aiBrainWriteAction,
   },
+
+  {
+    name: 'skills_list',
+    permission: 'allowReadAiBrain',
+    risk: 'read',
+    description: [
+      'List installed YANTA skills with compact metadata.',
+      'Use this before loading a skill. Skills are on-demand procedural knowledge documents.',
+    ].join('\n'),
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Optional search query.',
+        },
+      },
+    },
+    execute: skillsListAction,
+  },
+
+  {
+    name: 'skill_view',
+    permission: 'allowReadAiBrain',
+    risk: 'read',
+    description: [
+      'Load a YANTA skill.',
+      'Without path returns the full SKILL.md content.',
+      'With path returns a supporting file stored with the skill.',
+      'Use this when a listed skill is relevant to the user request.',
+    ].join('\n'),
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        name: {
+          type: 'string',
+          description: 'Skill name, e.g. excalidraw-slideshow.',
+        },
+        path: {
+          type: 'string',
+          description: 'Optional supporting file path.',
+        },
+      },
+      required: ['name'],
+    },
+    execute: skillViewAction,
+  },
+
+  {
+    name: 'skill_manage',
+    permission: 'allowWriteAiBrain',
+    risk: 'write',
+    description: [
+      'Create, patch, edit, delete, or add/remove supporting files for YANTA skills.',
+      'Use this when a reusable workflow should become procedural memory.',
+      'Skills should follow SKILL.md frontmatter and sections: When to Use, Procedure, Pitfalls, Verification.',
+      'Prefer patch over edit for small changes.',
+    ].join('\n'),
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        action: {
+          type: 'string',
+          enum: ['create', 'patch', 'edit', 'delete', 'write_file', 'remove_file'],
+        },
+        name: { type: 'string' },
+        category: { type: 'string' },
+        content: {
+          type: 'string',
+          description: 'Full SKILL.md for create/edit.',
+        },
+        old_string: {
+          type: 'string',
+          description: 'Exact text to replace for patch.',
+        },
+        new_string: {
+          type: 'string',
+          description: 'Replacement text for patch.',
+        },
+        file_path: {
+          type: 'string',
+          description: 'Supporting file path for write_file/remove_file.',
+        },
+        file_content: {
+          type: 'string',
+          description: 'Supporting file content for write_file.',
+        },
+      },
+      required: ['action', 'name'],
+    },
+    execute: skillManageAction,
+  },
+  
   {
     name: 'add_rss_source',
     permission: 'allowAddRssSources',

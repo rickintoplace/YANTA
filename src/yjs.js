@@ -226,13 +226,211 @@ function normalizeCanvasSize(raw = {}) {
   };
 }
 
-export function normalizeDrawingScene(raw = {}) {
-  const elements = Array.isArray(raw.elements) ? raw.elements : [];
-  const appState = raw.appState && typeof raw.appState === 'object' ? raw.appState : {};
-  const files = raw.files && typeof raw.files === 'object' ? raw.files : {};
+function finiteNumber(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function clampNumber(value, min, max, fallback = min) {
+  const n = finiteNumber(value, fallback);
+  return Math.max(min, Math.min(max, n));
+}
+
+function normalizeElementPoints(points, fallbackWidth = 0, fallbackHeight = 0) {
+  if (
+    Array.isArray(points) &&
+    points.length >= 2 &&
+    points.every((p) =>
+      Array.isArray(p) &&
+      p.length >= 2 &&
+      Number.isFinite(Number(p[0])) &&
+      Number.isFinite(Number(p[1]))
+    )
+  ) {
+    return points.map((p) => [
+      Number(p[0]),
+      Number(p[1]),
+    ]);
+  }
+
+  return [
+    [0, 0],
+    [
+      finiteNumber(fallbackWidth, 0),
+      finiteNumber(fallbackHeight, 0),
+    ],
+  ];
+}
+
+function normalizeTextElement(el, common) {
+  const text = String(
+    el.text ??
+    el.rawText ??
+    el.originalText ??
+    ''
+  );
+
+  const fontSize = clampNumber(el.fontSize, 1, 240, 20);
 
   return {
-    elements: cloneJson(elements),
+    ...common,
+
+    text,
+    rawText: String(el.rawText ?? text),
+    originalText: String(el.originalText ?? text),
+
+    fontSize,
+    fontFamily: Number(el.fontFamily || 5),
+    textAlign: el.textAlign || 'left',
+    verticalAlign: el.verticalAlign || 'top',
+    baseline: Number(el.baseline || Math.round(fontSize * 1.15)),
+    containerId: el.containerId || null,
+    lineHeight: Number(el.lineHeight || 1.25),
+  };
+}
+
+function normalizeLinearElement(el, common) {
+  const points = normalizeElementPoints(
+    el.points,
+    common.width,
+    common.height
+  );
+
+  return {
+    ...common,
+
+    points,
+
+    startBinding: el.startBinding || null,
+    endBinding: el.endBinding || null,
+
+    startArrowhead: el.startArrowhead ?? null,
+    endArrowhead:
+      common.type === 'arrow'
+        ? (el.endArrowhead ?? 'arrow')
+        : (el.endArrowhead ?? null),
+
+    roundness:
+      el.roundness === undefined
+        ? { type: 2 }
+        : el.roundness,
+  };
+}
+
+/**
+ * Defensive Excalidraw element normalization.
+ *
+ * AI-generated JSON often omits fields that Excalidraw itself assumes
+ * are present. This function makes imported/read drawings safe to render.
+ */
+function normalizeExcalidrawElementForYanta(el, index = 0) {
+  if (!el || typeof el !== 'object') return null;
+
+  const type = String(el.type || 'rectangle');
+
+  const common = {
+    ...cloneJson(el),
+
+    id: String(el.id || `el_${uid()}_${index}`),
+    type,
+
+    x: finiteNumber(el.x, 0),
+    y: finiteNumber(el.y, 0),
+    width: finiteNumber(el.width, 0),
+    height: finiteNumber(el.height, 0),
+    angle: finiteNumber(el.angle, 0),
+
+    strokeColor: el.strokeColor || '#1e1e1e',
+    backgroundColor: el.backgroundColor ?? 'transparent',
+    fillStyle: el.fillStyle || 'solid',
+    strokeWidth: finiteNumber(el.strokeWidth, 1),
+    strokeStyle: el.strokeStyle || 'solid',
+    roughness: finiteNumber(el.roughness, 0),
+    opacity: clampNumber(el.opacity, 0, 100, 100),
+
+    groupIds: Array.isArray(el.groupIds) ? cloneJson(el.groupIds) : [],
+    frameId: el.frameId || null,
+
+    roundness:
+      el.roundness === undefined
+        ? (type === 'rectangle' ? { type: 3 } : null)
+        : el.roundness,
+
+    seed: finiteNumber(el.seed, Math.floor(Math.random() * 2 ** 31)),
+    version: finiteNumber(el.version, 1),
+    versionNonce: finiteNumber(el.versionNonce, Math.floor(Math.random() * 2 ** 31)),
+    isDeleted: el.isDeleted === true,
+    boundElements: el.boundElements ?? null,
+    updated: finiteNumber(el.updated, Date.now()),
+    link: el.link || null,
+    locked: el.locked === true,
+    customData: el.customData && typeof el.customData === 'object'
+      ? cloneJson(el.customData)
+      : {},
+  };
+
+  if (type === 'text') {
+    return normalizeTextElement(el, common);
+  }
+
+  if (type === 'line' || type === 'arrow') {
+    return normalizeLinearElement(el, common);
+  }
+
+  if (type === 'freedraw') {
+    return {
+      ...common,
+      points: normalizeElementPoints(el.points, common.width, common.height),
+      pressures: Array.isArray(el.pressures) ? cloneJson(el.pressures) : [],
+      simulatePressure: el.simulatePressure !== false,
+      lastCommittedPoint: el.lastCommittedPoint || null,
+    };
+  }
+
+  if (type === 'image') {
+    return {
+      ...common,
+      fileId: el.fileId || '',
+      scale: Array.isArray(el.scale) ? cloneJson(el.scale) : [1, 1],
+      status: el.status || 'saved',
+    };
+  }
+
+  return common;
+}
+
+function normalizeDrawingObject(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+
+  const normalized = normalizeDrawingScene(raw);
+
+  return {
+    ...cloneJson(raw),
+    ...normalized,
+    id: raw.id || normalized.id || '',
+    title: raw.title || 'Drawing',
+    version: Number(raw.version || 2),
+    updated: Number(raw.updated || 0),
+  };
+}
+
+export function normalizeDrawingScene(raw = {}) {
+  const rawElements = Array.isArray(raw.elements) ? raw.elements : [];
+
+  const elements = rawElements
+    .map((el, index) => normalizeExcalidrawElementForYanta(el, index))
+    .filter(Boolean);
+
+  const appState = raw.appState && typeof raw.appState === 'object'
+    ? raw.appState
+    : {};
+
+  const files = raw.files && typeof raw.files === 'object'
+    ? raw.files
+    : {};
+
+  return {
+    elements,
     appState: cloneJson(appState),
     files: cloneJson(files),
     canvas: normalizeCanvasSize(raw.canvas || raw.yanta?.canvas || raw),
@@ -272,7 +470,7 @@ export function getDrawing(noteId, drawingId) {
   if (!noteId || !drawingId) return null;
 
   const d = getDrawingsMap(noteId).get(drawingId);
-  return d ? cloneJson(d) : null;
+  return d ? normalizeDrawingObject(d) : null;
 }
 
 /**
@@ -308,7 +506,8 @@ export function listDrawingsForNote(noteId) {
 
   return [...map.values()]
     .filter(Boolean)
-    .map((d) => cloneJson(d))
+    .map(normalizeDrawingObject)
+    .filter(Boolean)
     .sort((a, b) => (b.updated || 0) - (a.updated || 0));
 }
 

@@ -62,32 +62,72 @@ function stableElementId(prefix = 'el') {
   return `${prefix}_${uid()}`;
 }
 
+function finiteNumber(value, fallback = 0) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function clampNumber(value, min, max, fallback = min) {
+  const n = finiteNumber(value, fallback);
+  return Math.max(min, Math.min(max, n));
+}
+
+function normalizeElementPoints(points, fallbackWidth = 0, fallbackHeight = 0) {
+  if (
+    Array.isArray(points) &&
+    points.length >= 2 &&
+    points.every((p) =>
+      Array.isArray(p) &&
+      p.length >= 2 &&
+      Number.isFinite(Number(p[0])) &&
+      Number.isFinite(Number(p[1]))
+    )
+  ) {
+    return points.map((p) => [
+      Number(p[0]),
+      Number(p[1]),
+    ]);
+  }
+
+  return [
+    [0, 0],
+    [
+      finiteNumber(fallbackWidth, 0),
+      finiteNumber(fallbackHeight, 0),
+    ],
+  ];
+}
+
 function normalizeElement(el, index = 0) {
+  const type = String(el.type || 'rectangle');
   const updated = Number(el.updated || Date.now());
 
-  return {
+  const common = {
     ...el,
 
     id: String(el.id || stableElementId(`el_${index}`)),
-    type: String(el.type || 'rectangle'),
+    type,
 
-    x: Number(el.x || 0),
-    y: Number(el.y || 0),
-    width: Number(el.width || 0),
-    height: Number(el.height || 0),
-    angle: Number(el.angle || 0),
+    x: finiteNumber(el.x, 0),
+    y: finiteNumber(el.y, 0),
+    width: finiteNumber(el.width, 0),
+    height: finiteNumber(el.height, 0),
+    angle: finiteNumber(el.angle, 0),
 
     strokeColor: el.strokeColor || '#1e1e1e',
     backgroundColor: el.backgroundColor ?? 'transparent',
     fillStyle: el.fillStyle || 'solid',
-    strokeWidth: Number(el.strokeWidth || 1),
+    strokeWidth: finiteNumber(el.strokeWidth, 1),
     strokeStyle: el.strokeStyle || 'solid',
-    roughness: Number(el.roughness ?? 0),
-    opacity: Number(el.opacity ?? 100),
+    roughness: finiteNumber(el.roughness, 0),
+    opacity: clampNumber(el.opacity, 0, 100, 100),
 
     groupIds: Array.isArray(el.groupIds) ? el.groupIds : [],
     frameId: el.frameId || null,
-    roundness: el.roundness ?? null,
+    roundness:
+      el.roundness === undefined
+        ? (type === 'rectangle' ? { type: 3 } : null)
+        : el.roundness,
 
     seed: Number(el.seed || randomInt()),
     version: Number(el.version || 1),
@@ -99,6 +139,70 @@ function normalizeElement(el, index = 0) {
     locked: el.locked === true,
     customData: el.customData || {},
   };
+
+  if (type === 'text') {
+    const text = String(
+      el.text ??
+      el.rawText ??
+      el.originalText ??
+      ''
+    );
+
+    const fontSize = clampNumber(el.fontSize, 1, 240, 20);
+
+    return {
+      ...common,
+      text,
+      rawText: String(el.rawText ?? text),
+      originalText: String(el.originalText ?? text),
+      fontSize,
+      fontFamily: Number(el.fontFamily || 5),
+      textAlign: el.textAlign || 'left',
+      verticalAlign: el.verticalAlign || 'top',
+      baseline: Number(el.baseline || Math.round(fontSize * 1.15)),
+      containerId: el.containerId || null,
+      lineHeight: Number(el.lineHeight || 1.25),
+    };
+  }
+
+  if (type === 'line' || type === 'arrow') {
+    return {
+      ...common,
+      points: normalizeElementPoints(el.points, common.width, common.height),
+      startBinding: el.startBinding || null,
+      endBinding: el.endBinding || null,
+      startArrowhead: el.startArrowhead ?? null,
+      endArrowhead:
+        type === 'arrow'
+          ? (el.endArrowhead ?? 'arrow')
+          : (el.endArrowhead ?? null),
+      roundness:
+        el.roundness === undefined
+          ? { type: 2 }
+          : el.roundness,
+    };
+  }
+
+  if (type === 'freedraw') {
+    return {
+      ...common,
+      points: normalizeElementPoints(el.points, common.width, common.height),
+      pressures: Array.isArray(el.pressures) ? el.pressures : [],
+      simulatePressure: el.simulatePressure !== false,
+      lastCommittedPoint: el.lastCommittedPoint || null,
+    };
+  }
+
+  if (type === 'image') {
+    return {
+      ...common,
+      fileId: el.fileId || '',
+      scale: Array.isArray(el.scale) ? el.scale : [1, 1],
+      status: el.status || 'saved',
+    };
+  }
+
+  return common;
 }
 
 function rawSlidesFromJson(raw = {}) {

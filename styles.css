@@ -313,6 +313,9 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .app.sidebar-collapsed .tree-row.pinned-mirror .tree-note-location {
   display: none !important;
 }
+.app.sidebar-collapsed .sync-indicator-text {
+    display: none;
+}
 
 .tree-row .menu-trigger {
   visibility: hidden; padding: 0 4px; color: var(--text-faint);

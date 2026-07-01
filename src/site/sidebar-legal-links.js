@@ -73,6 +73,8 @@ function ensureCss() {
 
 .yanta-sidebar-legal__links {
   display: block;
+  display: flex;
+  justify-content: center;
   min-width: 0;
   overflow: hidden;
 }

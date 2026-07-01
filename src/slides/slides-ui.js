@@ -220,6 +220,7 @@ function injectCss() {
 
 .yanta-slides-panel .yanta-slides-actions {
   gap: 4px;
+  white-space: normal;
 }
 
 .yanta-slides-panel.is-open .yanta-slides-actions .btn {

@@ -851,7 +851,7 @@ function resetCompact() {
     <span class="sync-sym sync-synced" style="display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px;">
       ${getIconSvg('cloud', 13)}
     </span>
-    <span>Cloud</span>
+    <span class="sync-indicator-text">Cloud</span>
   `;
 
   indicator.title = 'YANTA Cloud Sync';

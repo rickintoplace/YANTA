@@ -536,7 +536,6 @@ function pricingContent() {
           <li>8 connected devices</li>
           <li>Included AI: 500 requests/day</li>
           <li>Higher Sources/RSS limits</li>
-          <li>Customer-friendly billing grace period</li>
         </ul>
 
         <div class="yanta-btn-row">
@@ -589,7 +588,7 @@ function pricingContent() {
         <div class="yanta-faq-item">
           <h3>Can YANTA read my notes?</h3>
           <p>
-            YANTA Cloud is designed around client-side encryption for sync data.
+            No. YANTA Cloud is designed around client-side encryption for sync data.
             The server stores encrypted sync objects and operational metadata, not plaintext note contents.
           </p>
         </div>

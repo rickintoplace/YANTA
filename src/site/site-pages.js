@@ -1,4 +1,9 @@
 import {
+  ensureLegalFooterCss,
+  legalFooterHtml,
+} from './legal-footer.js';
+
+import {
   openBillingCheckout,
   openBillingPortal,
 } from '../billing/billing-api.js';
@@ -13,7 +18,7 @@ const YANTA_APP_ORIGIN =
 const BILLING_PUBLIC_ORIGIN =
   (import.meta.env.VITE_BILLING_PUBLIC_ORIGIN || YANTA_APP_ORIGIN).replace(/\/+$/, '');
 
-const CONTACT_EMAIL = 'rickintoplace@proton.me';
+const CONTACT_EMAIL = 'rick@yanta.page';
 
 const LEGAL = {
   providerName: 'Eirik Heilmann',
@@ -354,26 +359,6 @@ body {
   font-size: 14px;
 }
 
-.yanta-site-footer {
-  border-top: 1px solid var(--border, #d8c7a5);
-  color: var(--text-faint, #95886f);
-}
-
-.yanta-site-footer-inner {
-  width: min(1040px, calc(100vw - 32px));
-  margin: 0 auto;
-  padding: 20px 0;
-  display: flex;
-  gap: 12px;
-  flex-wrap: wrap;
-  align-items: center;
-}
-
-.yanta-site-footer-inner a {
-  color: var(--text-dim, #625a49);
-  text-decoration: none;
-}
-
 .yanta-legal-doc {
   max-width: 820px;
 }
@@ -428,6 +413,7 @@ html.yanta-site-page * {
 
 function shell(content) {
   injectCss();
+  ensureLegalFooterCss();
 
   document.title = 'YANTA';
 
@@ -455,18 +441,10 @@ function shell(content) {
         ${content}
       </main>
 
-      <footer class="yanta-site-footer">
-        <div class="yanta-site-footer-inner">
-          <span>© ${new Date().getFullYear()} YANTA</span>
-          <span>·</span>
-          <a href="${escapeHtml(BILLING_PUBLIC_ORIGIN)}/terms">Terms</a>
-          <a href="${escapeHtml(BILLING_PUBLIC_ORIGIN)}/privacy">Privacy</a>
-          <a href="${escapeHtml(BILLING_PUBLIC_ORIGIN)}/refund">Refunds</a>
-          <a href="${escapeHtml(BILLING_PUBLIC_ORIGIN)}/imprint">Imprint</a>
-          <span>·</span>
-          <a href="mailto:${escapeHtml(CONTACT_EMAIL)}">${escapeHtml(CONTACT_EMAIL)}</a>
-        </div>
-      </footer>
+      ${legalFooterHtml({
+        id: 'yanta-site-legal-footer',
+        variant: 'site',
+      })}
     </div>
   `;
 }

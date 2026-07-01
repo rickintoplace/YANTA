@@ -5,7 +5,7 @@
 // User data is in IndexedDB/Yjs, not in this cache.
 // ============================================================
 
-const CACHE_VERSION = 'yanta-app-v11';
+const CACHE_VERSION = 'yanta-app-v13';
 const APP_SHELL = [
   '/',
   '/index.html',

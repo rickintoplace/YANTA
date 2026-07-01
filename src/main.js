@@ -182,7 +182,12 @@ import {
 import {
   bindMediaTimestampClicks,
 } from './media/media-timestamps.js';
-
+import {
+  ensureLegalFooter,
+} from './site/legal-footer.js';
+import {
+  mountSidebarLegalLinks,
+} from './site/sidebar-legal-links.js';
 import {
   setupSlides,
 } from './slides/slides-ui.js';
@@ -2493,6 +2498,11 @@ function bindEvents() {
     }
   );
 
+  mountSidebarLegalLinks({
+    container: document.querySelector('.sidebar'),
+    showMenu,
+  });
+
   scheduleSidebarFootCalendarIconRefresh();
 
   window.addEventListener('resize', () => {
@@ -3501,24 +3511,66 @@ if (SITE_PAGE_PATHS.has(normalizedPath)) {
     });
 } else if (location.pathname.startsWith('/share/')) {
   import('./public-share/public-share-viewer.js')
-    .then((m) => m.mountPublicShareViewer())
+    .then(async (m) => {
+      await m.mountPublicShareViewer();
+
+      ensureLegalFooter({
+        parent: document.body,
+        id: 'yanta-public-share-legal-footer',
+        variant: 'public',
+      });
+    })
     .catch((e) => {
       console.error(e);
       document.body.innerHTML = '<main style="padding:24px;font-family:system-ui">Could not load share viewer.</main>';
+
+      ensureLegalFooter({
+        parent: document.body,
+        id: 'yanta-public-share-error-legal-footer',
+        variant: 'public',
+      });
     });
 } else if (location.pathname === '/present' || location.pathname === '/present/') {
   import('./presentation/presentation-pairing-viewer.js')
-    .then((m) => m.mountPresentationPairingViewer())
+    .then(async (m) => {
+      await m.mountPresentationPairingViewer();
+
+      ensureLegalFooter({
+        parent: document.body,
+        id: 'yanta-presentation-pairing-legal-footer',
+        variant: 'public',
+      });
+    })
     .catch((e) => {
       console.error(e);
       document.body.innerHTML = '<main style="padding:24px;font-family:system-ui">Could not open presentation pairing.</main>';
+
+      ensureLegalFooter({
+        parent: document.body,
+        id: 'yanta-presentation-pairing-error-legal-footer',
+        variant: 'public',
+      });
     });
 } else if (location.pathname.startsWith('/present/')) {
   import('./presentation/presentation-viewer.js')
-    .then((m) => m.mountPresentationViewer())
+    .then(async (m) => {
+      await m.mountPresentationViewer();
+
+      ensureLegalFooter({
+        parent: document.body,
+        id: 'yanta-presentation-legal-footer',
+        variant: 'public',
+      });
+    })
     .catch((e) => {
       console.error(e);
       document.body.innerHTML = '<main style="padding:24px;font-family:system-ui">Could not load presentation.</main>';
+
+      ensureLegalFooter({
+        parent: document.body,
+        id: 'yanta-presentation-error-legal-footer',
+        variant: 'public',
+      });
     });
 } else if (String(location.hash || '').replace(/^#/, '').startsWith('slides-remote=')) {
   import('./slides/slides-ui.js')
@@ -3526,10 +3578,22 @@ if (SITE_PAGE_PATHS.has(normalizedPath)) {
       if (!m.mountSlidesRemoteFromHash()) {
         document.body.innerHTML = '<main style="padding:24px;font-family:system-ui">Invalid slideshow remote link.</main>';
       }
+
+      ensureLegalFooter({
+        parent: document.body,
+        id: 'yanta-slides-remote-legal-footer',
+        variant: 'public',
+      });
     })
     .catch((e) => {
       console.error(e);
       document.body.innerHTML = '<main style="padding:24px;font-family:system-ui">Could not open slideshow remote.</main>';
+
+      ensureLegalFooter({
+        parent: document.body,
+        id: 'yanta-slides-remote-error-legal-footer',
+        variant: 'public',
+      });
     });
 } else {
   init().catch((e) => {

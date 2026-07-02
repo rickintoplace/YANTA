@@ -1377,6 +1377,12 @@ body > .hover-preview {
   min-width: 0;
 }
 
+.yanta-draw-head-btn.is-active {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-elev));
+}
+
 .yanta-draw-btn-label {
   display: inline;
 }
@@ -4187,24 +4193,26 @@ function ensureModal() {
   const spacer = document.createElement('span');
   spacer.style.flex = '1';
 
-  const linkNoteBtn = document.createElement('button');
-  linkNoteBtn.className = 'btn yanta-draw-head-btn';
-  linkNoteBtn.title = 'Link selected element to note';
-  linkNoteBtn.innerHTML = `
-    ${lucide('file-plus', 14)}
-    <span class="yanta-draw-btn-label">Link note</span>
-  `;
+  const slidesBtn = document.createElement('button');
+    slidesBtn.className = 'btn yanta-draw-head-btn';
+    slidesBtn.title = 'Slides';
+    slidesBtn.setAttribute('data-draw-head-slides', '1');
+    slidesBtn.setAttribute('aria-pressed', 'false');
+    slidesBtn.innerHTML = `
+      ${lucide('presentation', 14)}
+      <span class="yanta-draw-btn-label">Slides</span>
+    `;
 
-  linkNoteBtn.addEventListener('click', async () => {
-    if (!active.api) return;
+    slidesBtn.addEventListener('click', () => {
+      if (!active.noteId || !active.drawingId) return;
 
-    const note = await openNoteReferencePicker();
-    if (!note) return;
-
-    if (await linkSelectedElementsToNote(active.api, note)) {
-      toast(`Linked ${note.title || 'Untitled'}`, 'success');
-    }
-  });
+      window.dispatchEvent(new CustomEvent('yanta-toggle-fullscreen-slides', {
+        detail: {
+          noteId: active.noteId,
+          drawingId: active.drawingId,
+        },
+      }));
+    });
 
   const exportBtn = document.createElement('button');
   exportBtn.className = 'btn yanta-draw-head-btn';
@@ -4260,7 +4268,7 @@ function ensureModal() {
   host = document.createElement('div');
   host.className = 'yanta-draw-body';
 
-  head.append(titleEl, spacer, linkNoteBtn, exportBtn, deleteBtn, closeBtn);
+  head.append(titleEl, spacer, slidesBtn, exportBtn, deleteBtn, closeBtn);
   modal.append(head, host);
   document.body.append(modal);
 
@@ -4949,6 +4957,18 @@ function bindEmbedActions(embed) {
     }
   });
 }
+
+function setFullscreenSlidesButtonActive(open) {
+  const btn = document.querySelector('[data-draw-head-slides]');
+  if (!btn) return;
+
+  btn.setAttribute('aria-pressed', open ? 'true' : 'false');
+  btn.classList.toggle('is-active', !!open);
+}
+
+window.addEventListener('yanta-fullscreen-slides-visibility', (e) => {
+  setFullscreenSlidesButtonActive(e.detail?.open === true);
+});
 
 export async function openDrawModal(
   drawingId,

@@ -5,6 +5,19 @@
 // - A Drawing is an infinite board.
 // - Slides are named rectangular camera targets on that board.
 // - A slideshow smoothly moves the Excalidraw camera between targets.
+//
+// UX principles (SaaS-grade):
+// - The slide toolbar is ONE compact row: a Slides toggle + count on the
+//   left, a primary "Present" action and a single "⋯" menu on the right.
+//   Everything else (create actions, connect, PDF) lives in that menu, so
+//   there is never a wall of buttons — on desktop or mobile.
+// - "Present" enters the Drawing's fullscreen stage, NOT browser fullscreen.
+//   Browser fullscreen is an explicit opt-in inside the slideshow toolbar.
+// - "Connect" bundles remote-control + present-on-another-screen with plain,
+//   human wording ("this device" vs "another device (your phone)").
+// - Modals participate in the app's overlay-history router, so browser /
+//   Android Back closes them instead of navigating away.
+// - Errors explain the cause and the fix (e.g. sign in to YANTA Cloud).
 // ============================================================
 
 import {
@@ -14,6 +27,7 @@ import {
   escapeHtml,
   escapeAttr,
   uid,
+  store,
 } from '../core.js';
 
 import {
@@ -61,6 +75,7 @@ import {
   getActiveDrawingApi,
   getActiveDrawingHost,
   runDrawingApiUpdateWithoutSaving,
+  openDrawModal,
 } from '../draw.js';
 
 import {
@@ -70,6 +85,16 @@ import {
 import {
   openPresentationPairingInputModal,
 } from '../presentation/presentation-pairing.js';
+
+import {
+  registerOverlayRoute,
+  pushOverlayState,
+  closeTopOverlay,
+} from '../overlay-history.js';
+
+import {
+  showMenu,
+} from '../tree.js';
 
 const SIGNALING_URL =
   import.meta.env.VITE_YANTA_SIGNALING_URL ||
@@ -87,89 +112,85 @@ let fullscreenSlidesCtx = null;
 const slidePreviewCache = new Map();
 const REMOTE_PREVIEW_MAX_CHARS = 650_000;
 
+// Tracks slide-frame opacity/lock state hidden during presentation so it can
+// be restored afterwards. One entry per Excalidraw API instance.
+const hiddenSlideFrameSnapshots = [];
+
+// Bound middle-mouse-pan handlers, keyed by container to avoid double binding.
+const middleMousePanBindings = new WeakSet();
+
 const pendingPanelRefreshes = new Set();
 let panelRefreshRaf = 0;
 let cameraAnimationRaf = 0;
 
-function requestSlideshowFullscreen() {
-  const target =
-    getActiveDrawingHost?.() ||
-    document.querySelector('.yanta-draw-modal') ||
-    document.documentElement;
+const DRAW_MOBILE_MQ = window.matchMedia?.('(pointer: coarse), (max-width: 760px)');
 
-  try {
-    if (!document.fullscreenElement) {
-      target.requestFullscreen?.();
-    }
-  } catch {}
+function isMobileSlidesUx() {
+  return !!DRAW_MOBILE_MQ?.matches;
 }
 
-function exitSlideshowFullscreen() {
-  try {
-    if (document.fullscreenElement) {
-      document.exitFullscreen?.();
-    }
-  } catch {}
-}
+// ============================================================
+// Overlay-history-aware modal helper
+//
+// Every transient slides modal (Connect chooser, Remote QR) registers an
+// overlay route and pushes an overlay history entry, so the browser / Android
+// Back button closes it instead of navigating the app. Esc is handled by the
+// central overlay router too.
+// ============================================================
 
-function setSlideshowImmersive(active) {
-  if (!slideshow) return;
+const slidesOverlayHandles = new Map();
 
-  slideshow.immersive = !!active;
+function openSlidesOverlay(id, buildEl, { onClose } = {}) {
+  // Close any existing instance of the same overlay first.
+  closeSlidesOverlay(id, { fromHistory: true });
 
-  document.body.classList.toggle(
-    'yanta-slideshow-immersive',
-    slideshow.immersive
-  );
+  const node = buildEl();
+  if (!node) return null;
 
-  const immersiveBtn = slideshow.toolbar?.querySelector?.('[data-slide-immersive]');
-  immersiveBtn?.classList.toggle('active', slideshow.immersive);
+  document.body.append(node);
 
-  if (slideshow.immersive) {
-    ensureSlideshowImmersiveHint();
-  } else {
-    document
-      .querySelectorAll('.yanta-slideshow-immersive-hint')
-      .forEach((node) => node.remove());
-  }
+  const handle = {
+    node,
+    onClose: typeof onClose === 'function' ? onClose : null,
+  };
 
-  requestAnimationFrame(() => {
-    try {
-      slideshow.api?.refresh?.();
-    } catch {}
+  slidesOverlayHandles.set(id, handle);
+
+  // Register (idempotent) the overlay route so Back/Esc close it.
+  registerOverlayRoute(id, {
+    open: () => {
+      // History restored directly onto this overlay while it isn't mounted:
+      // nothing to reopen (transient modals aren't reconstructable), so no-op.
+    },
+    close: ({ fromHistory = false } = {}) => {
+      closeSlidesOverlay(id, { fromHistory });
+    },
+    isOpen: () => slidesOverlayHandles.has(id),
   });
+
+  pushOverlayState(id, {});
+
+  return node;
 }
 
-function ensureSlideshowImmersiveHint() {
-  document
-    .querySelectorAll('.yanta-slideshow-immersive-hint')
-    .forEach((node) => node.remove());
+function closeSlidesOverlay(id, { fromHistory = false } = {}) {
+  const handle = slidesOverlayHandles.get(id);
+  if (!handle) return;
 
-  const hint = document.createElement('div');
-  hint.className = 'yanta-slideshow-immersive-hint';
-  hint.textContent = 'Press Esc for controls';
+  slidesOverlayHandles.delete(id);
 
-  document.body.append(hint);
+  try {
+    handle.node.remove();
+  } catch {}
 
-  window.setTimeout(() => {
-    hint.remove();
-  }, 3600);
-}
+  handle.onClose?.();
 
-function slideshowFullscreenChangeHandler() {
-  /*
-    Browser Esc in fullscreen often exits native fullscreen before/without
-    regular app-level key handling. Show controls when fullscreen ends.
-  */
-  if (!slideshow) return;
-
-  if (!document.fullscreenElement && slideshow.immersive) {
-    setSlideshowImmersive(false);
+  // If the user closed via UI (not Back), pop the overlay history entry so the
+  // URL/state stays consistent.
+  if (!fromHistory) {
+    closeTopOverlay();
   }
 }
-
-const hiddenSlideFrameSnapshots = [];
-const middleMousePanBindings = new WeakSet();
 
 function injectCss() {
   if (cssInjected) return;
@@ -178,60 +199,113 @@ function injectCss() {
   const style = document.createElement('style');
   style.id = 'yanta-slides-css';
   style.textContent = `
+/* ============================================================
+   Slide toolbar — ONE compact row
+   ============================================================ */
+
 .yanta-slides-panel {
   border-top: 1px solid var(--border);
   background: var(--bg-elev-2);
-  padding: 7px;
+  padding: 7px 8px;
   display: flex;
   flex-direction: column;
   gap: 7px;
 }
 
-.yanta-slides-panel:not(.is-open) {
-  padding-block: 6px;
-}
-
-.yanta-slides-actions {
+.yanta-slides-bar {
   display: flex;
   align-items: center;
   gap: 6px;
-  flex-wrap: wrap;
+  min-width: 0;
 }
 
-.yanta-slides-actions .btn {
-  max-height: 3em;
-  padding: 4px 8px;
-  font-size: 11px;
+.yanta-slides-bar .grow {
+  flex: 1;
+  min-width: 0;
 }
 
-.yanta-slides-panel .yanta-slides-actions .btn {
-    width: auto;
-    min-width: 0;
-    max-width: max-content;
-    flex: 0 0 auto;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    column-gap: 4px;
-    white-space: nowrap !important;
-    line-height: 1 !important;
+.yanta-slides-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-elev);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  flex: 0 0 auto;
 }
 
-.yanta-slides-panel .yanta-slides-actions {
-  gap: 4px;
-  white-space: normal;
+.yanta-slides-toggle:hover {
+  border-color: var(--accent);
 }
 
-.yanta-slides-panel.is-open .yanta-slides-actions .btn {
-  padding: 4px 6px !important;
+.yanta-slides-toggle.is-open {
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-elev));
 }
-  
 
-.yanta-slides-actions small {
+.yanta-slides-toggle .yanta-slides-count {
   color: var(--text-faint);
+  font-weight: 750;
   font-size: 11px;
 }
+
+.yanta-slides-toggle.is-open .yanta-slides-count {
+  color: inherit;
+}
+
+.yanta-slides-primary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  cursor: pointer;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+
+.yanta-slides-primary:hover {
+  filter: brightness(1.05);
+}
+
+.yanta-slides-primary:disabled {
+  opacity: .5;
+  cursor: not-allowed;
+  filter: none;
+}
+
+.yanta-slides-more {
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-elev);
+  color: var(--text);
+  cursor: pointer;
+  flex: 0 0 auto;
+}
+
+.yanta-slides-more:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* Slide thumbnail strip */
 
 .yanta-slides-strip {
   display: flex;
@@ -250,7 +324,7 @@ function injectCss() {
   color: var(--text);
   padding: 7px 8px;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
+  grid-template-columns: 52px minmax(0, 1fr) auto;
   gap: 7px;
   align-items: center;
   cursor: grab;
@@ -321,6 +395,40 @@ function injectCss() {
   opacity: .72;
 }
 
+.yanta-slide-chip-thumb {
+  width: 52px;
+  height: 32px;
+  border: 1px solid var(--border);
+  border-radius: 7px;
+  background: var(--bg);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-faint);
+}
+
+.yanta-slide-chip-thumb svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.yanta-slide-chip-thumb img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.yanta-slides-empty-hint {
+  color: var(--text-faint);
+  font-size: 12px;
+  padding: 4px 2px;
+}
+
+/* Slide draw overlay */
+
 .yanta-slide-draw-overlay {
   position: absolute;
   inset: 0;
@@ -358,11 +466,28 @@ function injectCss() {
   box-shadow: 0 0 0 1px rgba(255,255,255,.14) inset;
 }
 
+/* ============================================================
+   Slideshow overlay
+   ============================================================ */
+
 .yanta-slideshow {
   position: fixed;
   inset: 0;
   z-index: 620;
   pointer-events: none;
+}
+
+.yanta-slideshow-progress {
+  position: fixed;
+  left: 0;
+  top: 0;
+  height: 3px;
+  width: 0%;
+  z-index: 624;
+  pointer-events: none;
+  background: var(--accent);
+  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 70%, transparent);
+  transition: width 320ms cubic-bezier(.4, 0, .2, 1);
 }
 
 .yanta-slideshow-toolbar {
@@ -382,6 +507,7 @@ function injectCss() {
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   box-shadow: 0 16px 50px rgba(0,0,0,.34);
+  max-width: calc(100vw - 20px);
 }
 
 .yanta-slideshow-toolbar .btn,
@@ -396,7 +522,7 @@ function injectCss() {
 }
 
 .yanta-slideshow-count {
-  min-width: 88px;
+  min-width: 76px;
   color: var(--text-dim);
   font-size: 12px;
   text-align: center;
@@ -495,11 +621,16 @@ function injectCss() {
   transform: scale(1);
 }
 
+/* ============================================================
+   Remote control + Connect chooser modals
+   ============================================================ */
+
 .yanta-slides-remote-modal,
-.yanta-slides-remote-screen {
+.yanta-slides-remote-screen,
+.yanta-slides-connect-modal {
   position: fixed;
   inset: 0;
-  z-index: 530;
+  z-index: 560;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -509,8 +640,9 @@ function injectCss() {
 }
 
 .yanta-slides-remote-card,
-.yanta-slides-remote-phone {
-  width: min(460px, 94vw);
+.yanta-slides-remote-phone,
+.yanta-slides-connect-card {
+  width: min(500px, 94vw);
   border: 1px solid var(--border);
   border-radius: 18px;
   background: var(--bg-elev);
@@ -520,7 +652,8 @@ function injectCss() {
 }
 
 .yanta-slides-remote-card header,
-.yanta-slides-remote-phone header {
+.yanta-slides-remote-phone header,
+.yanta-slides-connect-card header {
   min-height: 52px;
   padding: 12px 14px;
   display: flex;
@@ -531,7 +664,8 @@ function injectCss() {
 }
 
 .yanta-slides-remote-card header h3,
-.yanta-slides-remote-phone header h3 {
+.yanta-slides-remote-phone header h3,
+.yanta-slides-connect-card header h3 {
   flex: 1;
   margin: 0;
   font-size: 15px;
@@ -566,18 +700,61 @@ function injectCss() {
   font-weight: 850;
 }
 
-.yanta-slides-remote-laserpad {
-  grid-column: 1 / -1;
-  min-height: 220px;
-  border: 1px dashed var(--border-strong);
-  border-radius: 18px;
-  display: flex;
+.yanta-slides-connect-body {
+  padding: 16px;
+  display: grid;
+  gap: 10px;
+}
+
+.yanta-slides-connect-option {
+  width: 100%;
+  min-height: 74px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg-elev-2);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
+}
+
+.yanta-slides-connect-option:hover {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg-elev-2));
+}
+
+.yanta-slides-connect-icon {
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
-  color: var(--text-faint);
-  touch-action: none;
-  user-select: none;
+  border-radius: 999px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 13%, transparent);
+  flex: 0 0 auto;
 }
+
+.yanta-slides-connect-text strong {
+  display: block;
+  font-size: 14px;
+}
+
+.yanta-slides-connect-text small {
+  display: block;
+  margin-top: 3px;
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* ============================================================
+   slides:// embed
+   ============================================================ */
 
 .yanta-slides-embed {
   margin: 12px 0;
@@ -598,35 +775,9 @@ function injectCss() {
   min-width: 0;
 }
 
-.yanta-slide-chip {
-  grid-template-columns: 52px minmax(0, 1fr) auto;
-}
-
-.yanta-slide-chip-thumb {
-  width: 52px;
-  height: 32px;
-  border: 1px solid var(--border);
-  border-radius: 7px;
-  background: var(--bg);
-  overflow: hidden;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: var(--text-faint);
-}
-
-.yanta-slide-chip-thumb svg {
-  display: block;
-  width: 100%;
-  height: 100%;
-}
-
-.yanta-slide-chip-thumb img {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-}
+/* ============================================================
+   Fullscreen dock
+   ============================================================ */
 
 .yanta-slides-fullscreen-dock {
   position: fixed;
@@ -634,7 +785,7 @@ function injectCss() {
   bottom: max(14px, env(safe-area-inset-bottom));
   z-index: 392;
   width: min(720px, calc(100vw - 28px));
-  max-height: min(44vh, 360px);
+  max-height: min(46vh, 380px);
   overflow: auto;
 
   border: 1px solid var(--border);
@@ -645,6 +796,20 @@ function injectCss() {
   box-shadow: 0 18px 60px rgba(0,0,0,.38);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
+
+  /* Hidden until opened from the fullscreen "Slides" header button. */
+  opacity: 0;
+  transform: translateY(10px);
+  pointer-events: none;
+  transition:
+    opacity 160ms ease,
+    transform 160ms ease;
+}
+
+.yanta-slides-fullscreen-dock.is-visible {
+  opacity: 1;
+  transform: translateY(0);
+  pointer-events: auto;
 }
 
 .yanta-slides-fullscreen-dock .yanta-slides-panel {
@@ -713,11 +878,6 @@ body.yanta-slideshow-active .yanta-slides-fullscreen-dock,
 }
 
 @media (max-width: 680px) {
-  .yanta-slideshow-toolbar {
-    max-width: calc(100vw - 20px);
-    overflow-x: auto;
-  }
-
   .yanta-slides-remote-controls {
     grid-template-columns: 1fr;
   }
@@ -727,11 +887,21 @@ body.yanta-slideshow-active .yanta-slides-fullscreen-dock,
    Immersive Slideshow Mode
    ============================================================ */
 
+/*
+  On DESKTOP immersive mode hides all controls (clean stage, Esc reveals).
+  On MOBILE we always keep the slideshow toolbar reachable, because there is
+  no reliable Esc key and users otherwise get stuck.
+*/
 body.yanta-slideshow-active.yanta-slideshow-immersive .yanta-draw-head,
 body.yanta-slideshow-active.yanta-slideshow-immersive .yanta-slides-fullscreen-dock,
-body.yanta-slideshow-active.yanta-slideshow-immersive .yanta-slideshow-toolbar,
 body.yanta-slideshow-active.yanta-slideshow-immersive .yanta-slideshow-notes {
   display: none !important;
+}
+
+@media (min-width: 761px) and (pointer: fine) {
+  body.yanta-slideshow-active.yanta-slideshow-immersive .yanta-slideshow-toolbar {
+    display: none !important;
+  }
 }
 
 body.yanta-slideshow-active.yanta-slideshow-immersive .excalidraw .App-toolbar,
@@ -774,6 +944,35 @@ body.yanta-slideshow-active.yanta-slideshow-immersive .excalidraw .Stack_vertica
   animation: yanta-slideshow-immersive-hint 3.2s ease forwards;
 }
 
+.yanta-slides-context-separator {
+  height: 1px;
+  margin: 5px 6px;
+  background: var(--border);
+  opacity: 0.8;
+}
+
+.yanta-slides-context-item {
+  width: 100%;
+  min-width: 200px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 7px;
+  cursor: pointer;
+  text-align: left;
+  font-size: 13px;
+  font-family: var(--font);
+}
+
+.yanta-slides-context-item:hover {
+  background: var(--bg-elev-2);
+  color: var(--accent);
+}
+
 body:not(.yanta-slideshow-immersive) .yanta-slideshow-immersive-hint {
   display: none !important;
 }
@@ -804,6 +1003,404 @@ body:not(.yanta-slideshow-immersive) .yanta-slideshow-immersive-hint {
   document.head.append(style);
 }
 
+// ============================================================
+// Slide toolbar — ONE compact row + overflow menu
+//
+// Layout:
+//   [ Slides · N ]        [ Present ▸ ] [ ⋯ ]
+//   [ thumbnail strip ......................... ]   (only when open)
+//
+// The overflow menu (⋯) holds every secondary action, grouped:
+//   Create slide  → Draw slide / Current view / Selection
+//   Present        → Connect a device / Export PDF
+//
+// Both the inline embed panel and the fullscreen dock render the same
+// toolbar. The only difference is the data-attribute name so existing
+// querySelectors stay scoped.
+// ============================================================
+
+const SLIDE_CREATE_ACTIONS = [
+  { action: 'draw', icon: 'scan', label: 'Draw a slide frame' },
+  { action: 'current-view', icon: 'focus', label: 'Use current view' },
+  { action: 'selection', icon: 'scan-check', label: 'Use selected objects' },
+];
+
+function slidesActionAttr(fullscreen) {
+  return fullscreen ? 'data-fs-slides-action' : 'data-slides-action';
+}
+
+function renderSlidesBarHtml(slides, { open, fullscreen }) {
+  const attr = slidesActionAttr(fullscreen);
+  const hasSlides = slides.length > 0;
+
+  return `
+    <div class="yanta-slides-bar">
+      <button class="yanta-slides-toggle ${open ? 'is-open' : ''}" ${attr}="toggle" type="button" aria-expanded="${open ? 'true' : 'false'}">
+        ${lucide('presentation', 14)}
+        <span>Slides</span>
+        <span class="yanta-slides-count">· ${slides.length}</span>
+      </button>
+
+      <span class="grow"></span>
+
+      <button class="yanta-slides-primary" ${attr}="present" type="button" ${hasSlides ? '' : 'disabled'} title="${hasSlides ? 'Present slideshow' : 'Create a slide first'}">
+        ${lucide('play', 13)}
+        <span>Present</span>
+      </button>
+
+      <button class="yanta-slides-more" ${attr}="more" type="button" title="More slide actions" aria-label="More slide actions">
+        ${lucide('ellipsis', 16)}
+      </button>
+    </div>
+  `;
+}
+
+function renderSlidesStripHtml(slides) {
+  if (!slides.length) {
+    return `
+      <div class="yanta-slides-strip">
+        <div class="yanta-slides-empty-hint">
+          No slides yet. Open the ⋯ menu → “Create slide” to capture part of the board.
+        </div>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="yanta-slides-strip">
+      ${slides.map((slide, index) => `
+        <button class="yanta-slide-chip" draggable="true" data-slide-id="${escapeAttr(slide.id)}">
+          <span class="yanta-slide-chip-thumb" data-slide-thumb="${escapeAttr(slide.id)}">
+            ${lucide('presentation', 13)}
+          </span>
+          <span class="yanta-slide-chip-title">
+            <span class="yanta-slide-chip-num">${index + 1}</span>
+            ${escapeHtml(slide.title)}
+          </span>
+          <span class="yanta-slide-chip-menu">${lucide('chevron-right', 13)}</span>
+        </button>
+      `).join('')}
+    </div>
+  `;
+}
+
+/**
+ * The single ⋯ menu. Groups create + present-adjacent actions with dividers.
+ *
+ * We keep to the widely-supported showMenu item shape ({label, icon, action}
+ * plus 'hr' separators). Actions that require slides guard themselves with an
+ * explanatory toast rather than relying on a disabled-item feature.
+ */
+function openSlidesOverflowMenu(anchor, ctx, { getApi, refresh, hasSlides } = {}) {
+  const rect = anchor.getBoundingClientRect();
+
+  const api = () => (typeof getApi === 'function' ? getApi() : ctx.api);
+  const done = () => refresh?.();
+
+  const requireSlides = (fn) => () => {
+    if (!hasSlides) {
+      toast('Create at least one slide first', 'error');
+      return;
+    }
+    fn();
+  };
+
+  const items = [
+    {
+      label: 'Draw a slide frame',
+      icon: 'scan',
+      action: () => {
+        const liveApi = api();
+        if (!liveApi) {
+          toast('Drawing is still loading — try again in a moment', 'error');
+          return;
+        }
+        startSlideDrawMode({
+          noteId: ctx.noteId,
+          drawingId: ctx.drawingId,
+          api: liveApi,
+          container: ctx.container,
+          onDone: done,
+        });
+      },
+    },
+    {
+      label: 'Slide from current view',
+      icon: 'focus',
+      action: () => createSlideFromCurrentView({
+        noteId: ctx.noteId,
+        drawingId: ctx.drawingId,
+        api: api(),
+        container: ctx.container,
+        onDone: done,
+      }),
+    },
+    {
+      label: 'Slide from selection',
+      icon: 'scan-check',
+      action: () => createSlideFromSelection({
+        noteId: ctx.noteId,
+        drawingId: ctx.drawingId,
+        api: api(),
+        onDone: done,
+      }),
+    },
+    'hr',
+    {
+      label: 'Connect a device…',
+      icon: 'screen-share',
+      action: requireSlides(() => openConnectDeviceModal({
+        ...ctx,
+        api: api(),
+      })),
+    },
+    {
+      label: 'Export as PDF',
+      icon: 'file-down',
+      action: requireSlides(() => exportDrawingSlidesToPdf(ctx.noteId, ctx.drawingId)),
+    },
+  ];
+
+  showMenu(rect.right, rect.bottom + 6, items, {
+    align: 'end',
+  });
+}
+
+/**
+ * Wire the compact toolbar. `getApi()` re-reads the live API (inline embeds
+ * may re-mount). `refresh()` re-renders the owning panel/dock.
+ */
+function wireSlidesBar(root, ctx, {
+  fullscreen = false,
+  getApi,
+  refresh,
+  onToggle,
+  hasSlides,
+} = {}) {
+  const attr = slidesActionAttr(fullscreen);
+  const q = (action) => root.querySelector(`[${attr}="${action}"]`);
+
+  q('toggle')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    onToggle?.();
+  });
+
+  q('present')?.addEventListener('click', () => {
+    presentSlides(ctx, {
+      fromFullscreen: fullscreen,
+      getApi,
+    });
+  });
+
+  q('more')?.addEventListener('click', (e) => {
+    openSlidesOverflowMenu(e.currentTarget, ctx, {
+      getApi,
+      refresh,
+      hasSlides,
+    });
+  });
+}
+
+// ============================================================
+// Connect a device — merged remote + present-on-another-screen
+// ============================================================
+
+const CONNECT_OVERLAY_ID = 'slides-connect';
+
+function openConnectDeviceModal(ctx) {
+  injectCss();
+
+  openSlidesOverlay(CONNECT_OVERLAY_ID, () => {
+    const modal = document.createElement('div');
+    modal.className = 'yanta-slides-connect-modal';
+
+    modal.innerHTML = `
+      <div class="yanta-slides-connect-card">
+        <header>
+          ${lucide('screen-share', 18)}
+          <h3>Connect a device</h3>
+          <button class="icon-btn" data-connect-close>${lucide('x', 16)}</button>
+        </header>
+
+        <div class="yanta-slides-connect-body">
+          <button class="yanta-slides-connect-option" data-connect-option="phone-remote">
+            <span class="yanta-slides-connect-icon">${lucide('smartphone', 20)}</span>
+            <span class="yanta-slides-connect-text">
+              <strong>Use your phone as a remote</strong>
+              <small>Slides stay on this screen. Scan a QR with your phone to flip slides and point a laser.</small>
+            </span>
+            ${lucide('chevron-right', 16)}
+          </button>
+
+          <button class="yanta-slides-connect-option" data-connect-option="send-to-screen">
+            <span class="yanta-slides-connect-icon">${lucide('cast', 20)}</span>
+            <span class="yanta-slides-connect-text">
+              <strong>Send the slides to another screen</strong>
+              <small>Open yanta.page/present on a TV or projector, then scan or paste its code to hand off the presentation.</small>
+            </span>
+            ${lucide('chevron-right', 16)}
+          </button>
+
+          <button class="yanta-slides-connect-option" data-connect-option="share-link">
+            <span class="yanta-slides-connect-icon">${lucide('link', 20)}</span>
+            <span class="yanta-slides-connect-text">
+              <strong>Get a shareable display link</strong>
+              <small>Generate an encrypted link or QR to open on any other device yourself.</small>
+            </span>
+            ${lucide('chevron-right', 16)}
+          </button>
+        </div>
+      </div>
+    `;
+
+    const close = () => closeSlidesOverlay(CONNECT_OVERLAY_ID);
+
+    modal.querySelector('[data-connect-close]')?.addEventListener('click', close);
+    modal.addEventListener('click', (e) => {
+      if (e.target === modal) close();
+    });
+
+    modal.querySelector('[data-connect-option="phone-remote"]')?.addEventListener('click', () => {
+      close();
+      ensureSlideshowForRemote({
+        ...ctx,
+        api: ctx.api || currentApiForDrawing(ctx.noteId, ctx.drawingId),
+      });
+      openRemoteQrModal();
+    });
+
+    modal.querySelector('[data-connect-option="send-to-screen"]')?.addEventListener('click', () => {
+      close();
+      // Join a waiting display (scan/paste its pairing code).
+      openPresentationPairingInputModal();
+    });
+
+    modal.querySelector('[data-connect-option="share-link"]')?.addEventListener('click', async () => {
+      close();
+      // Host: generate a link/QR. This requires YANTA Cloud — guard with a
+      // clear, actionable error instead of a cryptic failure.
+      await openShareDisplayLinkGuarded(ctx);
+    });
+
+    return modal;
+  });
+}
+
+/**
+ * "Share a display link" needs a configured YANTA Cloud vault (the encrypted
+ * session is stored there). If it isn't set up, explain why and offer to open
+ * the setup instead of throwing a vague error deep inside the session code.
+ */
+async function openShareDisplayLinkGuarded(ctx) {
+  let vaultId = '';
+
+  try {
+    vaultId = await store.settings.get('sync2.yantaCloud.vaultId', '');
+  } catch {}
+
+  if (!vaultId) {
+    const setup = await yantaConfirm({
+      title: 'YANTA Cloud needed for display links',
+      message: [
+        'Sending slides to another device uses an end-to-end-encrypted session that lives in your YANTA Cloud vault.',
+        '',
+        'You are not signed in to YANTA Cloud yet, so there is nowhere to store the session.',
+        '',
+        'Set up YANTA Cloud now? It only takes a moment, and “Use your phone as a remote” works without it.',
+      ].join('\n'),
+      confirmLabel: 'Set up YANTA Cloud',
+      cancelLabel: 'Not now',
+      icon: 'cloud',
+    });
+
+    if (setup) {
+      try {
+        const { openYantaCloudSetup } = await import('../sync2/yanta-cloud-setup-ui.js');
+        await openYantaCloudSetup();
+      } catch (err) {
+        console.error('[YANTA Slides] could not open cloud setup', err);
+        toast('Could not open YANTA Cloud setup', 'error');
+      }
+    }
+
+    return;
+  }
+
+  openPresentationSessionModal({
+    noteId: ctx.noteId,
+    drawingId: ctx.drawingId,
+  });
+}
+
+// ============================================================
+// Present entry point
+//
+// Present does NOT enter browser fullscreen. It ensures the drawing is shown
+// on its big fullscreen stage (opening it if we started from an inline embed
+// or the read-only preview), then starts the slideshow there. Browser
+// fullscreen remains an explicit toggle in the slideshow toolbar.
+// ============================================================
+
+async function presentSlides(ctx, { fromFullscreen = false, getApi } = {}) {
+  const slides = listSlides(ctx.noteId, ctx.drawingId).filter((s) => !s.hidden);
+
+  if (!slides.length) {
+    toast('Create at least one slide before presenting', 'error');
+    return;
+  }
+
+  if (fromFullscreen) {
+    startSlideshow({
+      noteId: ctx.noteId,
+      drawingId: ctx.drawingId,
+      api: (typeof getApi === 'function' ? getApi() : ctx.api),
+      container: ctx.container,
+    });
+    return;
+  }
+
+  try {
+    await openDrawModal(ctx.drawingId, ctx.noteId, {
+      transition: true,
+    });
+  } catch (err) {
+    console.warn('[YANTA Slides] could not open fullscreen for presentation', err);
+    startSlideshow({
+      noteId: ctx.noteId,
+      drawingId: ctx.drawingId,
+      api: (typeof getApi === 'function' ? getApi() : ctx.api),
+      container: ctx.container,
+    });
+    return;
+  }
+
+  waitForFullscreenApiThenPresent(ctx.noteId, ctx.drawingId);
+}
+
+function waitForFullscreenApiThenPresent(noteId, drawingId, attempts = 0) {
+  const api = getActiveDrawingApi?.();
+  const container = getActiveDrawingHost?.();
+
+  if (api && container) {
+    startSlideshow({
+      noteId,
+      drawingId,
+      api,
+      container,
+    });
+    return;
+  }
+
+  if (attempts > 40) {
+    startSlideshow({ noteId, drawingId });
+    return;
+  }
+
+  requestAnimationFrame(() => {
+    waitForFullscreenApiThenPresent(noteId, drawingId, attempts + 1);
+  });
+}
 function scheduleSlidesPanelRefresh(embed) {
   if (!embed) return;
 
@@ -1050,6 +1647,72 @@ function slideFrameAtScreenPoint(api, container, clientX, clientY) {
   return null;
 }
 
+function excalidrawFrameAtScreenPoint(api, container, clientX, clientY) {
+  if (!api) return null;
+
+  const scene = screenToScene({
+    api,
+    container,
+    clientX,
+    clientY,
+  });
+
+  if (scene.invalid) return null;
+
+  const elements = sceneElementsForApi(api);
+
+  for (let i = elements.length - 1; i >= 0; i--) {
+    const el = elements[i];
+
+    if (!el || el.isDeleted) continue;
+    if (el.type !== 'frame') continue;
+    if (isSlideFrameElement(el)) continue;
+
+    if (pointInBounds(scene, elementBounds(el), 6)) {
+      return el;
+    }
+  }
+
+  return null;
+}
+
+function slideBoundsFromFrameElement(frame) {
+  return normalizeSlideBounds(elementBounds(frame));
+}
+
+function createSlideFromExcalidrawFrame({
+  noteId,
+  drawingId,
+  api,
+  frame,
+  onDone,
+} = {}) {
+  if (!api || !frame) {
+    toast('Drawing is not ready yet', 'error');
+    return null;
+  }
+
+  const bounds = slideBoundsFromFrameElement(frame);
+
+  if (bounds.width < 40 || bounds.height < 40) {
+    toast('Frame is too small for a slide', 'error');
+    return null;
+  }
+
+  const slide = createSlide(noteId, drawingId, {
+    title: frame.name || '',
+    bounds,
+    api,
+  });
+
+  if (slide) {
+    toast(`Created ${slide.title}`, 'success');
+    onDone?.(slide);
+  }
+
+  return slide;
+}
+
 function withoutSelectedId(selectedElementIds, id) {
   if (!selectedElementIds || !id) return selectedElementIds || {};
 
@@ -1112,14 +1775,6 @@ function bindSlideFrameMiddleMousePan(container, api) {
 
 /**
  * Browser client coords -> Excalidraw infinite-board scene coords.
- *
- * Same coordinate model as draw.js:
- *
- *   sceneX = (clientX - rect.left) / zoom - scrollX
- *   sceneY = (clientY - rect.top) / zoom - scrollY
- *
- * Uses object params intentionally, so wrong argument order cannot silently
- * create NaN slide bounds.
  */
 function screenToScene({
   api,
@@ -1141,8 +1796,6 @@ function screenToScene({
     };
   }
 
-  // Prefer Excalidraw's own conversion if available.
-  // This matches draw.js behavior and should be the source of truth.
   try {
     if (api?.screenToSceneCoords) {
       const p = api.screenToSceneCoords({
@@ -1191,12 +1844,6 @@ function screenToScene({
   };
 }
 
-/**
- * Exact same coordinate model as draw.js.
- *
- * This uses object params intentionally, so old/wrong call order cannot
- * silently turn clientY into undefined and create NaN slide bounds.
- */
 function sceneToScreen({
   api,
   container,
@@ -1222,7 +1869,7 @@ function slideUnitToScreen(data = {}) {
   const api =
     currentApiForDrawing(slideshow.noteId, slideshow.drawingId) ||
     slideshow.api;
-    
+
   if (!slide || !api) return null;
 
   const bounds = normalizeSlideBounds(slide.bounds);
@@ -1284,17 +1931,6 @@ function slideCameraTarget(api, container, slide, {
   const centerX = bounds.x + bounds.width / 2;
   const centerY = bounds.y + bounds.height / 2;
 
-  /*
-    Inverse of fallback transform:
-      sceneX = (clientX - rect.left) / zoom - scrollX
-      clientX - rect.left = (sceneX + scrollX) * zoom
-
-    Want slide center at viewport center:
-      rect.width / 2 = (centerX + scrollX) * zoom
-
-    Therefore:
-      scrollX = rect.width / (2 * zoom) - centerX
-  */
   return {
     scrollX: rect.width / (2 * zoom) - centerX,
     scrollY: rect.height / (2 * zoom) - centerY,
@@ -1434,11 +2070,6 @@ function slidePreviewCacheKey(drawing, slide, {
   ].join(':');
 }
 
-/**
- * Render the exact slide viewport by adding a transparent virtual element
- * with the slide bounds. This forces Excalidraw export bounds to match the
- * slide frame, so remote laser mapping can use normalized slide coords.
- */
 async function renderSlideSvgString(drawing, slide, {
   background = slidePreviewBackground(),
 } = {}) {
@@ -1677,10 +2308,6 @@ function bindSlideStripReorder(strip, {
   strip.addEventListener('dragend', cleanup);
   strip.addEventListener('dragcancel', cleanup);
 
-  /*
-    If a drag started on a button, browsers may still fire click afterwards.
-    Let chip click handlers skip that click.
-  */
   strip.addEventListener('click', (e) => {
     if (strip.dataset.suppressClick !== '1') return;
 
@@ -1688,6 +2315,43 @@ function bindSlideStripReorder(strip, {
     e.stopPropagation();
   }, true);
 }
+
+function bindSlideChipInteractions(root, ctx, {
+  getApi,
+  refresh,
+} = {}) {
+  const api = () => (typeof getApi === 'function' ? getApi() : ctx.api);
+
+  root.querySelectorAll('[data-slide-id]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (btn.closest('.yanta-slides-strip')?.dataset.suppressClick === '1') {
+        return;
+      }
+
+      const slide = listSlides(ctx.noteId, ctx.drawingId)
+        .find((s) => s.id === btn.dataset.slideId);
+
+      scrollToSlide(api(), slide, ctx.container);
+    });
+
+    btn.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+
+      openSlideMiniMenu(e.clientX, e.clientY, {
+        noteId: ctx.noteId,
+        drawingId: ctx.drawingId,
+        slideId: btn.dataset.slideId,
+        api: api(),
+        refresh,
+      });
+    });
+  });
+}
+
+
+// ============================================================
+// Inline embed panel + fullscreen dock
+// ============================================================
 
 function enhanceDrawingEmbed(embed) {
   injectCss();
@@ -1730,238 +2394,45 @@ function refreshSlidesPanel(embed) {
   }
 
   const open = slidesPanelOpen(embed);
-
   const slides = syncSlidesFromScene(ctx.noteId, ctx.drawingId, ctx.api);
 
-  panel.classList.toggle('is-open', open);
-
   panel.innerHTML = `
-    <div class="yanta-slides-actions">
-      <button class="btn ${open ? 'primary' : ''}" data-slides-action="toggle">
-        ${lucide('presentation', 13)}
-        <span>
-          Slides
-        </span>
-      </button>
-
-      <small>
-        ${slides.length} slide${slides.length === 1 ? '' : 's'}
-      </small>
-    </div>
-
-    ${
-      open
-        ? `
-          <div class="yanta-slides-actions">
-            <button class="btn" data-slides-action="draw">
-              ${lucide('scan', 13)}
-              <span>
-                Draw slide
-              </span>
-
-            </button>
-
-            <button class="btn" data-slides-action="current-view">
-              ${lucide('focus', 13)}
-              <span>
-                Current view
-              </span>
-            </button>
-
-            <button class="btn" data-slides-action="selection">
-              ${lucide('scan-check', 13)}
-              <span>
-                Selection
-              </span>
-            </button>
-
-            <button class="btn primary" data-slides-action="present">
-              ${lucide('play', 13)}
-              <span>
-                Present
-              </span>
-            </button>
-
-            <button class="btn" data-slides-action="pdf">
-              ${lucide('file-down', 13)}
-              <span>
-                PDF
-              </span>
-            </button>
-
-            <button class="btn" data-slides-action="remote">
-              ${lucide('qr-code', 13)}
-              <span>
-                Remote
-              </span>
-            </button>
-
-            <button class="btn" data-slides-action="meeting-room">
-              ${lucide('screen-share', 13)}
-              <span>
-                Meeting Room
-              </span>
-            </button>
-
-            <button class="btn" data-slides-action="scan-display">
-              ${lucide('camera', 13)}
-              <span>
-                Scan Display
-              </span>
-            </button>
-          </div>
-
-          <div class="yanta-slides-strip">
-            ${
-              slides.length
-                ? slides.map((slide, index) => `
-                    <button class="yanta-slide-chip" draggable="true" data-slide-id="${escapeAttr(slide.id)}">
-                    <span class="yanta-slide-chip-thumb" data-slide-thumb="${escapeAttr(slide.id)}">
-                      ${lucide('presentation', 13)}
-                    </span>
-                    <span class="yanta-slide-chip-title">
-                      <span class="yanta-slide-chip-num">${index + 1}</span>
-                      ${escapeHtml(slide.title)}
-                    </span>
-                    <span class="yanta-slide-chip-menu">${lucide('chevron-right', 13)}</span>
-                  </button>
-                  `).join('')
-                : `<div style="color:var(--text-faint);font-size:12px;padding:4px 2px">
-                    Create slides from the infinite board: draw a frame, use the current view, or use selected objects.
-                  </div>`
-            }
-          </div>
-        `
-        : ''
-    }
+    ${renderSlidesBarHtml(slides, { open, fullscreen: false })}
+    ${open ? renderSlidesStripHtml(slides) : ''}
   `;
 
-  if (open) {
-    hydrateSlideThumbnails(panel, ctx.drawing, slides).catch((err) => {
-      console.warn('[YANTA Slides] could not hydrate thumbnails', err);
-    });
-
-    bindSlideStripReorder(panel.querySelector('.yanta-slides-strip'), {
-      noteId: ctx.noteId,
-      drawingId: ctx.drawingId,
-      refresh: () => refreshSlidesPanel(embed),
-    });
-  }
-
-  panel.querySelector('[data-slides-action="toggle"]')?.addEventListener('click', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-
-    setSlidesPanelOpen(embed, !open);
+  const getApi = () => getDrawingApiForEmbed(embed);
+  const refresh = () => {
+    setSlidesPanelOpen(embed, true);
     refreshSlidesPanel(embed);
+  };
+
+  wireSlidesBar(panel, ctx, {
+    fullscreen: false,
+    getApi,
+    refresh,
+    hasSlides: slides.length > 0,
+    onToggle: () => {
+      setSlidesPanelOpen(embed, !open);
+      refreshSlidesPanel(embed);
+    },
   });
 
   if (!open) return;
 
-  panel.querySelector('[data-slides-action="draw"]')?.addEventListener('click', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-
-    const api = getDrawingApiForEmbed(embed);
-
-    if (!api) {
-      toast('Drawing is not ready yet', 'error');
-      return;
-    }
-
-    startSlideDrawMode({
-      noteId: ctx.noteId,
-      drawingId: ctx.drawingId,
-      api,
-      container: ctx.container,
-      onDone: () => {
-        setSlidesPanelOpen(embed, true);
-        refreshSlidesPanel(embed);
-      },
-    });
+  hydrateSlideThumbnails(panel, ctx.drawing, slides).catch((err) => {
+    console.warn('[YANTA Slides] could not hydrate thumbnails', err);
   });
 
-  panel.querySelector('[data-slides-action="current-view"]')?.addEventListener('click', () => {
-    createSlideFromCurrentView({
-      noteId: ctx.noteId,
-      drawingId: ctx.drawingId,
-      api: getDrawingApiForEmbed(embed),
-      container: ctx.container,
-      onDone: () => {
-        setSlidesPanelOpen(embed, true);
-        refreshSlidesPanel(embed);
-      },
-    });
+  bindSlideStripReorder(panel.querySelector('.yanta-slides-strip'), {
+    noteId: ctx.noteId,
+    drawingId: ctx.drawingId,
+    refresh,
   });
 
-  panel.querySelector('[data-slides-action="selection"]')?.addEventListener('click', () => {
-    createSlideFromSelection({
-      noteId: ctx.noteId,
-      drawingId: ctx.drawingId,
-      api: getDrawingApiForEmbed(embed),
-      onDone: () => {
-        setSlidesPanelOpen(embed, true);
-        refreshSlidesPanel(embed);
-      },
-    });
-  });
-
-  panel.querySelector('[data-slides-action="present"]')?.addEventListener('click', () => {
-    startSlideshow({
-      noteId: ctx.noteId,
-      drawingId: ctx.drawingId,
-      api: getDrawingApiForEmbed(embed),
-      container: ctx.container,
-    });
-  });
-
-  panel.querySelector('[data-slides-action="pdf"]')?.addEventListener('click', () => {
-    exportDrawingSlidesToPdf(ctx.noteId, ctx.drawingId);
-  });
-
-  panel.querySelector('[data-slides-action="remote"]')?.addEventListener('click', () => {
-    ensureSlideshowForRemote({
-      ...ctx,
-      api: getDrawingApiForEmbed(embed),
-    });
-
-    openRemoteQrModal();
-  });
-
-  panel.querySelector('[data-slides-action="meeting-room"]')?.addEventListener('click', () => {
-    openPresentationSessionModal({
-      noteId: ctx.noteId,
-      drawingId: ctx.drawingId,
-    });
-  });
-
-  panel.querySelector('[data-slides-action="scan-display"]')?.addEventListener('click', () => {
-    openPresentationPairingInputModal();
-  });
-
-  panel.querySelectorAll('[data-slide-id]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      if (btn.closest('.yanta-slides-strip')?.dataset.suppressClick === '1') {
-        return;
-      }
-
-      const slide = listSlides(ctx.noteId, ctx.drawingId)
-        .find((s) => s.id === btn.dataset.slideId);
-
-      scrollToSlide(getDrawingApiForEmbed(embed), slide, ctx.container);
-    });
-
-    btn.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-
-      openSlideMiniMenu(e.clientX, e.clientY, {
-        noteId: ctx.noteId,
-        drawingId: ctx.drawingId,
-        slideId: btn.dataset.slideId,
-        api: getDrawingApiForEmbed(embed),
-        refresh: () => refreshSlidesPanel(embed),
-      });
-    });
+  bindSlideChipInteractions(panel, ctx, {
+    getApi,
+    refresh,
   });
 }
 
@@ -1969,6 +2440,10 @@ function removeFullscreenSlidesDock() {
   fullscreenSlidesDock?.remove();
   fullscreenSlidesDock = null;
   fullscreenSlidesCtx = null;
+
+  window.dispatchEvent(new CustomEvent('yanta-fullscreen-slides-visibility', {
+    detail: { open: false },
+  }));
 }
 
 function ensureFullscreenSlidesDock() {
@@ -1985,6 +2460,9 @@ function ensureFullscreenSlidesDock() {
   fullscreenSlidesDock = document.createElement('div');
   fullscreenSlidesDock.className = 'yanta-slides-fullscreen-dock';
   fullscreenSlidesDock.dataset.slidesFullscreenDock = '1';
+
+  // Hidden until the user opens Slides from the fullscreen header.
+  fullscreenSlidesDock.dataset.docked = '0';
 
   if (slideshow) {
     fullscreenSlidesDock.classList.add('is-hidden-during-slideshow');
@@ -2011,120 +2489,26 @@ function renderFullscreenSlidesDock(ctx) {
   const open = dock.dataset.open !== '0';
 
   dock.innerHTML = `
-    <div class="yanta-slides-panel is-open">
-      <div class="yanta-slides-actions">
-        <button class="btn ${open ? 'primary' : ''}" data-fs-slides-action="toggle">
-          ${lucide('presentation', 13)}
-          Slides
-        </button>
-
-        <small>
-          ${slides.length} slide${slides.length === 1 ? '' : 's'}
-        </small>
-
-        <span style="flex:1"></span>
-
-        <button class="icon-btn" data-fs-slides-action="close" title="Hide slides">
-          ${lucide('x', 14)}
-        </button>
-      </div>
-
-      ${
-        open
-          ? `
-            <div class="yanta-slides-actions">
-              <button class="btn" data-fs-slides-action="draw">
-                ${lucide('scan', 13)}
-                <span>
-                  Draw Slide
-                </span>
-              </button>
-
-              <button class="btn" data-fs-slides-action="current-view">
-                ${lucide('focus', 13)}
-                <span>
-                  Current view
-                </span>
-              </button>
-
-              <button class="btn" data-fs-slides-action="selection">
-                ${lucide('scan-check', 13)}
-                <span>
-                  Selection
-                </span>
-              </button>
-
-              <button class="btn primary" data-fs-slides-action="present">
-                ${lucide('play', 13)}
-                <span>
-                  Present
-                </span>
-              </button>
-
-              <button class="btn" data-fs-slides-action="pdf">
-                ${lucide('file-down', 13)}
-                <span>
-                  PDF
-                </span>
-              </button>
-
-              <button class="btn" data-fs-slides-action="remote">
-                ${lucide('qr-code', 13)}
-                <span>
-                  Remote
-                </span>
-              </button>
-
-              <button class="btn" data-fs-slides-action="meeting-room">
-                ${lucide('screen-share', 13)}
-                <span>
-                  Meeting Room
-                </span>
-              </button>
-
-              <button class="btn" data-fs-slides-action="scan-display">
-                ${lucide('camera', 13)}
-                <span>
-                  Scan Display
-                </span>
-              </button>
-
-            </div>
-
-            <div class="yanta-slides-strip">
-              ${
-                slides.length
-                  ? slides.map((slide, index) => `
-                      <button class="yanta-slide-chip" draggable="true" data-slide-id="${escapeAttr(slide.id)}">
-                        <span class="yanta-slide-chip-thumb" data-slide-thumb="${escapeAttr(slide.id)}">
-                          ${lucide('presentation', 13)}
-                        </span>
-                        <span class="yanta-slide-chip-title">
-                          <span class="yanta-slide-chip-num">${index + 1}</span>
-                          ${escapeHtml(slide.title)}
-                        </span>
-                        <span class="yanta-slide-chip-menu">${lucide('chevron-right', 13)}</span>
-                      </button>
-                    `).join('')
-                  : `<div style="color:var(--text-faint);font-size:12px;padding:4px 2px">
-                      Create slides from the infinite board: draw a frame, use the current view, or use selected objects.
-                    </div>`
-              }
-            </div>
-          `
-          : ''
-      }
+    <div class="yanta-slides-panel">
+      ${renderSlidesBarHtml(slides, { open, fullscreen: true })}
+      ${open ? renderSlidesStripHtml(slides) : ''}
     </div>
   `;
 
-  dock.querySelector('[data-fs-slides-action="toggle"]')?.addEventListener('click', () => {
-    dock.dataset.open = open ? '0' : '1';
+  const refresh = () => {
+    dock.dataset.open = '1';
     renderFullscreenSlidesDock(ctx);
-  });
+  };
 
-  dock.querySelector('[data-fs-slides-action="close"]')?.addEventListener('click', () => {
-    dock.dataset.open = '0';
-    renderFullscreenSlidesDock(ctx);
+  wireSlidesBar(dock, ctx, {
+    fullscreen: true,
+    getApi: () => ctx.api,
+    refresh,
+    hasSlides: slides.length > 0,
+    onToggle: () => {
+      dock.dataset.open = open ? '0' : '1';
+      renderFullscreenSlidesDock(ctx);
+    },
   });
 
   if (!open) return;
@@ -2136,99 +2520,223 @@ function renderFullscreenSlidesDock(ctx) {
   bindSlideStripReorder(dock.querySelector('.yanta-slides-strip'), {
     noteId: ctx.noteId,
     drawingId: ctx.drawingId,
-    refresh: () => renderFullscreenSlidesDock(ctx),
+    refresh,
   });
 
-  dock.querySelector('[data-fs-slides-action="draw"]')?.addEventListener('click', () => {
-    startSlideDrawMode({
-      noteId: ctx.noteId,
-      drawingId: ctx.drawingId,
-      api: ctx.api,
-      container: ctx.container,
-      onDone: () => {
-        dock.dataset.open = '1';
-        renderFullscreenSlidesDock(ctx);
+  bindSlideChipInteractions(dock, ctx, {
+    getApi: () => ctx.api,
+    refresh,
+  });
+}
+
+// ============================================================
+// Native Excalidraw context menu — YANTA Slides entries
+//
+// Adds "YANTA: Make slide from frame" on real Excalidraw frames and
+// "YANTA: Slide from selection" when objects are selected. Uses a
+// MutationObserver to inject into Excalidraw's own context menu, so the
+// native menu behavior (positioning, Esc, outside-click) is preserved.
+// ============================================================
+
+const slidesContextState = new WeakMap();
+
+function isElementVisible(el) {
+  if (!el || !(el instanceof Element)) return false;
+
+  const style = getComputedStyle(el);
+  if (style.display === 'none' || style.visibility === 'hidden') return false;
+
+  const r = el.getBoundingClientRect();
+  return r.width > 0 && r.height > 0;
+}
+
+function distanceFromRectToPoint(rect, x, y) {
+  const cx = Math.max(rect.left, Math.min(x, rect.right));
+  const cy = Math.max(rect.top, Math.min(y, rect.bottom));
+  return Math.hypot(cx - x, cy - y);
+}
+
+function findOpenExcalidrawContextMenu(ctx) {
+  const candidates = [
+    ...document.querySelectorAll(
+      [
+        '.context-menu',
+        '.excalidraw .context-menu',
+        '[data-testid="context-menu"]',
+        '[role="menu"]',
+      ].join(',')
+    ),
+  ].filter((el) => {
+    if (!isElementVisible(el)) return false;
+    if (el.closest('.yanta-slides-panel')) return false;
+    if (el.closest('.ctx-menu')) return false;
+    return true;
+  });
+
+  if (!candidates.length) return null;
+
+  candidates.sort((a, b) =>
+    distanceFromRectToPoint(a.getBoundingClientRect(), ctx.clientX, ctx.clientY) -
+    distanceFromRectToPoint(b.getBoundingClientRect(), ctx.clientX, ctx.clientY)
+  );
+
+  return candidates[0];
+}
+
+function closeNativeExcalidrawContextMenu() {
+  try {
+    document.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Escape',
+      code: 'Escape',
+      bubbles: true,
+    }));
+  } catch {}
+}
+
+function makeSlidesContextButton({ icon, label, onClick }) {
+  const btn = document.createElement('button');
+
+  btn.type = 'button';
+  btn.className = 'context-menu-option yanta-slides-context-item';
+  btn.setAttribute('role', 'menuitem');
+  btn.setAttribute('data-yanta-slides-context-item', '1');
+  btn.innerHTML = `${lucide(icon, 14)} <span>${escapeHtml(label)}</span>`;
+
+  btn.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, true);
+
+  btn.addEventListener('click', async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    closeNativeExcalidrawContextMenu();
+
+    try {
+      await onClick?.();
+    } catch (err) {
+      console.error('[YANTA Slides] context action failed', err);
+      toast('Slide action failed', 'error');
+    }
+  }, true);
+
+  return btn;
+}
+
+function injectSlidesItemsIntoNativeContextMenu(container) {
+  const ctx = slidesContextState.get(container);
+  if (!ctx?.api) return;
+  if (!ctx.frame && !ctx.hasSelection) return;
+
+  const menu = findOpenExcalidrawContextMenu(ctx);
+  if (!menu) return;
+  if (menu.querySelector('[data-yanta-slides-context-item="1"]')) return;
+
+  const separator = document.createElement('div');
+  separator.className = 'yanta-slides-context-separator';
+  separator.setAttribute('data-yanta-slides-context-item', '1');
+
+  menu.append(separator);
+
+  const refresh = () => {
+    if (isFullscreenSlidesDockVisible() && fullscreenSlidesCtx) {
+      renderFullscreenSlidesDock(fullscreenSlidesCtx);
+    }
+
+    document
+      .querySelectorAll('.yanta-draw-embed[data-draw-id]')
+      .forEach(scheduleSlidesPanelRefresh);
+  };
+
+  if (ctx.frame) {
+    menu.append(makeSlidesContextButton({
+      icon: 'presentation',
+      label: 'YANTA: Make slide from frame',
+      onClick: () => {
+        createSlideFromExcalidrawFrame({
+          noteId: ctx.noteId,
+          drawingId: ctx.drawingId,
+          api: ctx.api,
+          frame: ctx.frame,
+          onDone: refresh,
+        });
       },
-    });
-  });
+    }));
+  }
 
-  dock.querySelector('[data-fs-slides-action="current-view"]')?.addEventListener('click', () => {
-    createSlideFromCurrentView({
-      noteId: ctx.noteId,
-      drawingId: ctx.drawingId,
-      api: ctx.api,
-      container: ctx.container,
-      onDone: () => {
-        dock.dataset.open = '1';
-        renderFullscreenSlidesDock(ctx);
+  if (ctx.hasSelection) {
+    menu.append(makeSlidesContextButton({
+      icon: 'scan-check',
+      label: 'YANTA: Slide from selection',
+      onClick: () => {
+        createSlideFromSelection({
+          noteId: ctx.noteId,
+          drawingId: ctx.drawingId,
+          api: ctx.api,
+          onDone: refresh,
+        });
       },
-    });
+    }));
+  }
+}
+
+function bindSlidesNativeContextMenu(container, {
+  noteId,
+  drawingId,
+  api,
+} = {}) {
+  if (!container || !api) return;
+  if (container.dataset.slidesCtxBound === '1') return;
+
+  container.dataset.slidesCtxBound = '1';
+
+  const ctx = {
+    api,
+    noteId,
+    drawingId,
+    frame: null,
+    hasSelection: false,
+    clientX: 0,
+    clientY: 0,
+    observer: null,
+  };
+
+  slidesContextState.set(container, ctx);
+
+  container.addEventListener('contextmenu', (e) => {
+    ctx.api = api;
+    ctx.clientX = e.clientX;
+    ctx.clientY = e.clientY;
+
+    ctx.frame = excalidrawFrameAtScreenPoint(api, container, e.clientX, e.clientY);
+
+    const selected = normalizeSelectedIds(
+      api.getAppState?.().selectedElementIds
+    );
+
+    // Only offer "slide from selection" for real, non-frame content.
+    const elements = sceneElementsForApi(api);
+    ctx.hasSelection = elements.some((el) =>
+      el &&
+      !el.isDeleted &&
+      selected.has(el.id) &&
+      !isSlideFrameElement(el)
+    );
+
+    // Do NOT preventDefault: Excalidraw should open its native menu.
+    setTimeout(() => injectSlidesItemsIntoNativeContextMenu(container), 0);
+    setTimeout(() => injectSlidesItemsIntoNativeContextMenu(container), 40);
+    setTimeout(() => injectSlidesItemsIntoNativeContextMenu(container), 120);
+  }, true);
+
+  ctx.observer = new MutationObserver(() => {
+    injectSlidesItemsIntoNativeContextMenu(container);
   });
 
-  dock.querySelector('[data-fs-slides-action="selection"]')?.addEventListener('click', () => {
-    createSlideFromSelection({
-      noteId: ctx.noteId,
-      drawingId: ctx.drawingId,
-      api: ctx.api,
-      onDone: () => {
-        dock.dataset.open = '1';
-        renderFullscreenSlidesDock(ctx);
-      },
-    });
-  });
-
-  dock.querySelector('[data-fs-slides-action="present"]')?.addEventListener('click', () => {
-    startSlideshow({
-      noteId: ctx.noteId,
-      drawingId: ctx.drawingId,
-      api: ctx.api,
-      container: ctx.container,
-    });
-  });
-
-  dock.querySelector('[data-fs-slides-action="pdf"]')?.addEventListener('click', () => {
-    exportDrawingSlidesToPdf(ctx.noteId, ctx.drawingId);
-  });
-
-  dock.querySelector('[data-fs-slides-action="remote"]')?.addEventListener('click', () => {
-    ensureSlideshowForRemote(ctx);
-    openRemoteQrModal();
-  });
-
-  dock.querySelector('[data-fs-slides-action="meeting-room"]')?.addEventListener('click', () => {
-    openPresentationSessionModal({
-      noteId: ctx.noteId,
-      drawingId: ctx.drawingId,
-    });
-  });
-
-  dock.querySelector('[data-fs-slides-action="scan-display"]')?.addEventListener('click', () => {
-    openPresentationPairingInputModal();
-  });
-
-  dock.querySelectorAll('[data-slide-id]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      if (btn.closest('.yanta-slides-strip')?.dataset.suppressClick === '1') {
-        return;
-      }
-
-      const slide = listSlides(ctx.noteId, ctx.drawingId)
-        .find((s) => s.id === btn.dataset.slideId);
-
-      scrollToSlide(ctx.api, slide, ctx.container);
-    });
-
-    btn.addEventListener('contextmenu', (e) => {
-      e.preventDefault();
-
-      openSlideMiniMenu(e.clientX, e.clientY, {
-        noteId: ctx.noteId,
-        drawingId: ctx.drawingId,
-        slideId: btn.dataset.slideId,
-        api: ctx.api,
-        refresh: () => renderFullscreenSlidesDock(ctx),
-      });
-    });
+  ctx.observer.observe(document.body, {
+    childList: true,
+    subtree: true,
   });
 }
 
@@ -2245,12 +2753,24 @@ function mountFullscreenSlidesDockFromApiReady(detail = {}) {
 
   bindSlideFrameMiddleMousePan(container, api);
 
-  renderFullscreenSlidesDock({
+    bindSlidesNativeContextMenu(container, {
+      noteId,
+      drawingId,
+      api,
+    });
+    
+  // Remember context so the header toggle can open the dock on demand.
+  fullscreenSlidesCtx = {
     noteId,
     drawingId,
     api,
     container,
-  });
+  };
+
+  // If the dock is already open (e.g. re-mount after API swap), re-render it.
+  if (isFullscreenSlidesDockVisible()) {
+    renderFullscreenSlidesDock(fullscreenSlidesCtx);
+  }
 
   /*
     Critical:
@@ -2273,6 +2793,48 @@ function mountFullscreenSlidesDockFromApiReady(detail = {}) {
       });
     });
   }
+}
+
+function isFullscreenSlidesDockVisible() {
+  return (
+    fullscreenSlidesDock?.isConnected &&
+    fullscreenSlidesDock.dataset.docked === '1'
+  );
+}
+
+function setFullscreenSlidesDockVisible(visible) {
+  const dock = ensureFullscreenSlidesDock();
+
+  dock.dataset.docked = visible ? '1' : '0';
+  dock.classList.toggle('is-visible', !!visible);
+
+  window.dispatchEvent(new CustomEvent('yanta-fullscreen-slides-visibility', {
+    detail: { open: !!visible },
+  }));
+
+  if (visible && fullscreenSlidesCtx) {
+    dock.dataset.open = '1';
+    renderFullscreenSlidesDock(fullscreenSlidesCtx);
+  }
+}
+
+function toggleFullscreenSlidesDock(ctx) {
+  if (ctx?.noteId && ctx?.drawingId) {
+    // Prefer live API/container from the active fullscreen surface.
+    fullscreenSlidesCtx = {
+      noteId: ctx.noteId,
+      drawingId: ctx.drawingId,
+      api: getActiveDrawingApi?.() || fullscreenSlidesCtx?.api || null,
+      container:
+        getActiveDrawingHost?.() ||
+        fullscreenSlidesCtx?.container ||
+        null,
+    };
+  }
+
+  if (!fullscreenSlidesCtx?.noteId) return;
+
+  setFullscreenSlidesDockVisible(!isFullscreenSlidesDockVisible());
 }
 
 function normalizeSelectedIds(value) {
@@ -2626,13 +3188,6 @@ function startSlideDrawMode({
       height: y2 - y1,
     });
 
-    console.log('[YANTA Slides] created bounds', {
-      startScene: start.scene,
-      latestScene: latest.scene,
-      bounds,
-      appState: api?.getAppState?.(),
-    });
-
     cleanup();
 
     if (bounds.width < 80 || bounds.height < 60) {
@@ -2673,6 +3228,98 @@ function ensureSlideshowForRemote(ctx) {
   }
 }
 
+
+// ============================================================
+// Slideshow
+// ============================================================
+
+function requestSlideshowFullscreen() {
+  const target =
+    getActiveDrawingHost?.() ||
+    document.querySelector('.yanta-draw-modal') ||
+    document.documentElement;
+
+  try {
+    if (!document.fullscreenElement) {
+      target.requestFullscreen?.();
+    }
+  } catch {}
+}
+
+function exitSlideshowFullscreen() {
+  try {
+    if (document.fullscreenElement) {
+      document.exitFullscreen?.();
+    }
+  } catch {}
+}
+
+function setSlideshowImmersive(active) {
+  if (!slideshow) return;
+
+  slideshow.immersive = !!active;
+
+  document.body.classList.toggle(
+    'yanta-slideshow-immersive',
+    slideshow.immersive
+  );
+
+  const immersiveBtn = slideshow.toolbar?.querySelector?.('[data-slide-immersive]');
+  immersiveBtn?.classList.toggle('active', slideshow.immersive);
+
+  if (slideshow.immersive) {
+    ensureSlideshowImmersiveHint();
+  } else {
+    document
+      .querySelectorAll('.yanta-slideshow-immersive-hint')
+      .forEach((node) => node.remove());
+  }
+
+  requestAnimationFrame(() => {
+    try {
+      slideshow.api?.refresh?.();
+    } catch {}
+  });
+}
+
+function ensureSlideshowImmersiveHint() {
+  document
+    .querySelectorAll('.yanta-slideshow-immersive-hint')
+    .forEach((node) => node.remove());
+
+  // On mobile there is no reliable Esc key, so the hint would be misleading.
+  if (isMobileSlidesUx()) return;
+
+  const hint = document.createElement('div');
+  hint.className = 'yanta-slideshow-immersive-hint';
+  hint.textContent = 'Press Esc for controls';
+
+  document.body.append(hint);
+
+  window.setTimeout(() => {
+    hint.remove();
+  }, 3600);
+}
+
+function slideshowFullscreenChangeHandler() {
+  if (!slideshow) return;
+
+  if (!document.fullscreenElement && slideshow.immersive) {
+    setSlideshowImmersive(false);
+  }
+}
+
+function updateSlideshowProgress() {
+  if (!slideshow?.progressEl) return;
+
+  const total = slideshow.slides.length;
+  const pct = total <= 1
+    ? 100
+    : (slideshow.index / (total - 1)) * 100;
+
+  slideshow.progressEl.style.width = `${Math.max(0, Math.min(100, pct))}%`;
+}
+
 export function startSlideshow({
   noteId,
   drawingId,
@@ -2696,25 +3343,28 @@ export function startSlideshow({
   const root = document.createElement('div');
   root.className = 'yanta-slideshow';
 
+  const progressEl = document.createElement('div');
+  progressEl.className = 'yanta-slideshow-progress';
+
   const toolbar = document.createElement('div');
   toolbar.className = 'yanta-slideshow-toolbar';
 
   toolbar.innerHTML = `
-    <button class="icon-btn" data-slide-prev title="Previous">${lucide('chevron-left', 18)}</button>
+    <button class="icon-btn" data-slide-prev title="Previous (←)">${lucide('chevron-left', 18)}</button>
     <span class="yanta-slideshow-count" data-slide-count></span>
-    <button class="icon-btn" data-slide-next title="Next">${lucide('chevron-right', 18)}</button>
-    <button class="icon-btn" data-slide-laser title="Laser">${lucide('mouse-pointer-2', 17)}</button>
-    <button class="icon-btn" data-slide-notes title="Notes">${lucide('notebook-text', 17)}</button>
-    <button class="icon-btn" data-slide-remote title="Remote">${lucide('qr-code', 17)}</button>
-    <button class="icon-btn" data-slide-immersive title="Fullscreen presentation">${lucide('maximize', 17)}</button>
-    <button class="icon-btn" data-slide-exit title="Exit slideshow">${lucide('x', 17)}</button>
+    <button class="icon-btn" data-slide-next title="Next (→)">${lucide('chevron-right', 18)}</button>
+    <button class="icon-btn" data-slide-laser title="Laser pointer (L)">${lucide('mouse-pointer-2', 17)}</button>
+    <button class="icon-btn" data-slide-notes title="Speaker notes (N)">${lucide('notebook-text', 17)}</button>
+    <button class="icon-btn" data-slide-connect title="Connect a device">${lucide('screen-share', 17)}</button>
+    <button class="icon-btn" data-slide-immersive title="Browser fullscreen">${lucide('maximize', 17)}</button>
+    <button class="icon-btn" data-slide-exit title="Exit slideshow (Esc)">${lucide('x', 17)}</button>
   `;
 
   const laserLayer = document.createElement('div');
   laserLayer.className = 'yanta-laser-layer';
   laserLayer.innerHTML = `<div class="yanta-laser-dot" data-laser-dot></div>`;
 
-  root.append(toolbar, laserLayer);
+  root.append(progressEl, toolbar, laserLayer);
   document.body.append(root);
 
   slideshow = {
@@ -2726,6 +3376,7 @@ export function startSlideshow({
     index: Math.max(0, Math.min(slides.length - 1, startIndex)),
     root,
     toolbar,
+    progressEl,
     laserLayer,
     laserEnabled: false,
     notesOpen: false,
@@ -2740,9 +3391,11 @@ export function startSlideshow({
   document.body.classList.add('yanta-slideshow-immersive');
   document.addEventListener('fullscreenchange', slideshowFullscreenChangeHandler);
 
-  if (!silent) {
-    requestSlideshowFullscreen();
-  }
+  /*
+    Present no longer forces browser fullscreen. The drawing is already shown
+    on its big fullscreen stage (see presentSlides). Immersive mode only hides
+    the app/Excalidraw chrome; browser fullscreen stays an explicit toggle.
+  */
 
   hideSlideFramesForPresentation(slideshow.api);
 
@@ -2751,11 +3404,23 @@ export function startSlideshow({
   toolbar.querySelector('[data-slide-exit]')?.addEventListener('click', stopSlideshow);
   toolbar.querySelector('[data-slide-laser]')?.addEventListener('click', toggleLaser);
   toolbar.querySelector('[data-slide-notes]')?.addEventListener('click', toggleNotes);
-  toolbar.querySelector('[data-slide-remote]')?.addEventListener('click', openRemoteQrModal);
+
+  toolbar.querySelector('[data-slide-connect]')?.addEventListener('click', () => {
+    openConnectDeviceModal({
+      noteId,
+      drawingId,
+      api: slideshow.api,
+      container: slideshow.container,
+    });
+  });
 
   toolbar.querySelector('[data-slide-immersive]')?.addEventListener('click', () => {
-    requestSlideshowFullscreen();
-    setSlideshowImmersive(true);
+    if (document.fullscreenElement) {
+      exitSlideshowFullscreen();
+    } else {
+      requestSlideshowFullscreen();
+      setSlideshowImmersive(true);
+    }
   });
 
   document.addEventListener('keydown', slideshowKeyHandler, true);
@@ -2768,6 +3433,43 @@ export function startSlideshow({
   return slideshow;
 }
 
+function goToSlide(index, {
+  notifyRemote = true,
+} = {}) {
+  if (!slideshow) return;
+
+  slideshow.index = Math.max(0, Math.min(slideshow.slides.length - 1, index));
+
+  const slide = slideshow.slides[slideshow.index];
+
+  const liveApi =
+    currentApiForDrawing(slideshow.noteId, slideshow.drawingId) ||
+    slideshow.api;
+
+  const liveContainer =
+    getActiveDrawingHost?.() ||
+    slideshow.container;
+
+  slideshow.api = liveApi;
+  slideshow.container = liveContainer;
+
+  hideSlideFramesForPresentation(liveApi);
+
+  scrollToSlide(liveApi, slide, liveContainer);
+
+  const count = slideshow.toolbar.querySelector('[data-slide-count]');
+
+  if (count) {
+    count.textContent = `${slideshow.index + 1} / ${slideshow.slides.length}`;
+  }
+
+  updateSlideshowProgress();
+  updateNotesPanel();
+
+  if (notifyRemote) {
+    publishRemoteState();
+  }
+}
 export function stopSlideshow() {
   if (!slideshow) return;
 
@@ -2815,12 +3517,19 @@ function slideshowKeyHandler(e) {
     e.preventDefault();
 
     /*
-      First Esc reveals controls / edit chrome.
-      Second Esc exits slideshow.
+      Escape ladder:
+      1) exit browser fullscreen if active
+      2) reveal controls if immersive (desktop)
+      3) exit slideshow
     */
-    if (slideshow.immersive) {
-      setSlideshowImmersive(false);
+    if (document.fullscreenElement) {
       exitSlideshowFullscreen();
+      setSlideshowImmersive(false);
+      return;
+    }
+
+    if (slideshow.immersive && !isMobileSlidesUx()) {
+      setSlideshowImmersive(false);
       return;
     }
 
@@ -2849,43 +3558,6 @@ function slideshowKeyHandler(e) {
   if (e.key.toLowerCase() === 'n') {
     e.preventDefault();
     toggleNotes();
-  }
-}
-
-function goToSlide(index, {
-  notifyRemote = true,
-} = {}) {
-  if (!slideshow) return;
-
-  slideshow.index = Math.max(0, Math.min(slideshow.slides.length - 1, index));
-
-  const slide = slideshow.slides[slideshow.index];
-
-  const liveApi =
-    currentApiForDrawing(slideshow.noteId, slideshow.drawingId) ||
-    slideshow.api;
-
-  const liveContainer =
-    getActiveDrawingHost?.() ||
-    slideshow.container;
-
-  slideshow.api = liveApi;
-  slideshow.container = liveContainer;
-
-  hideSlideFramesForPresentation(liveApi);
-
-  scrollToSlide(liveApi, slide, liveContainer);
-
-  const count = slideshow.toolbar.querySelector('[data-slide-count]');
-
-  if (count) {
-    count.textContent = `${slideshow.index + 1} / ${slideshow.slides.length}`;
-  }
-
-  updateNotesPanel();
-
-  if (notifyRemote) {
-    publishRemoteState();
   }
 }
 
@@ -3495,13 +4167,16 @@ function hydrateSlidesEmbeds(root = document) {
 
     node.querySelector('[data-start]')?.addEventListener('click', () => {
       const embed = document.querySelector(`.yanta-draw-embed[data-draw-id="${CSS.escape(drawingId)}"]`);
-      const api = embed ? getDrawingApiForEmbed(embed) : getActiveDrawingApi();
 
-      startSlideshow({
+      // Route through presentSlides so slides://-embeds also open the big
+      // fullscreen stage instead of driving a tiny inline surface.
+      presentSlides({
         noteId: ref.noteId,
         drawingId,
-        api,
+        api: embed ? getDrawingApiForEmbed(embed) : getActiveDrawingApi(),
         container: embed || getActiveDrawingHost(),
+      }, {
+        fromFullscreen: false,
       });
     });
   });
@@ -3556,6 +4231,13 @@ export function setupSlides() {
           detail.embed;
 
         bindSlideFrameMiddleMousePan(container, detail.api);
+
+        bindSlidesNativeContextMenu(container, {
+          noteId: detail.noteId,
+          drawingId: detail.drawingId,
+          api: detail.api,
+        });
+
         enhanceDrawingEmbed(detail.embed);
       });
     }
@@ -3583,7 +4265,11 @@ export function setupSlides() {
     }
   });
 
-  window.addEventListener('yanta-draw-fullscreen-closed', () => {
+window.addEventListener('yanta-draw-fullscreen-closed', () => {
     removeFullscreenSlidesDock();
+  });
+
+  window.addEventListener('yanta-toggle-fullscreen-slides', (e) => {
+    toggleFullscreenSlidesDock(e.detail || {});
   });
 }

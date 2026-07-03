@@ -216,3 +216,33 @@ import {
         return rectsIntersect(bounds, b);
       });
   }
+
+
+// Reads the app accent color once, resolved to a concrete value.
+export function accentColor() {
+  const raw = getComputedStyle(document.documentElement)
+    .getPropertyValue('--accent')
+    .trim();
+  return raw || '#6ea8fe';
+}
+
+// The three visual states a slide frame can be in.
+export const SLIDE_FRAME_VISIBILITY = {
+  // Slide-mode active, no slideshow running → visible, accent colored.
+  VISIBLE: 'visible',
+  // Slideshow running, or slide-mode off → not shown on the board.
+  HIDDEN: 'hidden',
+};
+
+// Returns the element patch for a given target visibility.
+// Kept pure so both frame creation and reconcile share one definition.
+export function slideFramePatchFor(visibility) {
+  if (visibility === SLIDE_FRAME_VISIBILITY.HIDDEN) {
+    return { opacity: 0, locked: true };
+  }
+  return {
+    opacity: 100,
+    locked: false,
+    strokeColor: accentColor(),
+  };
+}

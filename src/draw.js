@@ -2271,11 +2271,45 @@ export function runDrawingApiUpdateWithoutSaving(api, updateOrFn, {
 function applyPersistedDrawingToApi(api, drawing) {
   if (!api || !drawing) return false;
 
+  // During an active slideshow, slide frames are intentionally hidden
+  // (opacity 0, locked). Re-applying the persisted scene would restore their
+  // original opacity and make them reappear mid-presentation. Preserve the
+  // live hidden state for slide-frame elements in that case.
+  const slideshowActive =
+    document.body.classList.contains('yanta-slideshow-active');
+
+  let elements = drawing.elements || [];
+
+  if (slideshowActive) {
+    let liveById = null;
+    try {
+      const live =
+        api.getSceneElementsIncludingDeleted?.() ||
+        api.getSceneElements?.() ||
+        [];
+      liveById = new Map(live.map((el) => [el.id, el]));
+    } catch {}
+
+    if (liveById) {
+      elements = elements.map((el) => {
+        const live = liveById.get(el?.id);
+        // A slide frame currently hidden for presentation stays hidden.
+        if (live && live.opacity === 0 && live.locked === true) {
+          return {
+            ...el,
+            opacity: 0,
+            locked: true,
+          };
+        }
+        return el;
+      });
+    }
+  }
+
   return runDrawingApiUpdateWithoutSaving(api, () => {
     addFilesToExcalidrawApi(api, drawing.files);
-
     api.updateScene({
-      elements: drawing.elements || [],
+      elements,
       files: drawing.files || {},
     });
   });

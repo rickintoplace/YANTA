@@ -64,6 +64,9 @@ import {
   elementBounds,
   isSlideFrameElement,
   visibleElementsInSlide,
+  accentColor,
+  slideFramePatchFor,
+  SLIDE_FRAME_VISIBILITY,
 } from './slides-model.js';
 
 import {
@@ -204,9 +207,7 @@ function injectCss() {
    ============================================================ */
 
 .yanta-slides-panel {
-  border-top: 1px solid var(--border);
   background: var(--bg-elev-2);
-  padding: 7px 8px;
   display: flex;
   flex-direction: column;
   gap: 7px;
@@ -313,6 +314,36 @@ function injectCss() {
   gap: 6px;
   overflow-x: auto;
   padding-bottom: 2px;
+  animation: yanta-slides-strip-in 200ms cubic-bezier(.4, 0, .2, 1);
+}
+@keyframes yanta-slides-strip-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .yanta-slides-strip {
+    animation: none;
+  }
+}
+
+.yanta-slides-panel:not([hidden]) {
+  animation: yanta-slides-panel-in 180ms cubic-bezier(.4, 0, .2, 1);
+  padding: 7px 8px;
+}
+@keyframes yanta-slides-panel-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .yanta-slides-panel:not([hidden]) {
+    animation: none;
+  }
 }
 
 .yanta-slide-chip {
@@ -486,7 +517,6 @@ function injectCss() {
   z-index: 624;
   pointer-events: none;
   background: var(--accent);
-  box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 70%, transparent);
   transition: width 320ms cubic-bezier(.4, 0, .2, 1);
 }
 
@@ -1046,6 +1076,36 @@ body:not(.yanta-slideshow-immersive) .yanta-slideshow-immersive-hint {
   color: var(--text);
   cursor: pointer;
 }
+
+.yanta-slides-head-btn.is-active {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.yanta-slides-drawframe {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 11px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-elev);
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+.yanta-slides-drawframe:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+@media (max-width: 520px) {
+  .yanta-slides-drawframe-label {
+    display: none;
+  }
+}
   `;
 
   document.head.append(style);
@@ -1081,6 +1141,17 @@ function renderSlidesBarHtml(slides, { open, fullscreen }) {
   const attr = slidesActionAttr(fullscreen);
   const hasSlides = slides.length > 0;
 
+  // In the roomy fullscreen dock, surface "Draw a slide frame" directly
+  // instead of hiding it behind the ⋯ menu.
+  const drawFrameBtn = fullscreen
+    ? `
+      <button class="yanta-slides-drawframe" ${attr}="draw-frame" type="button" title="Draw a slide frame">
+        ${lucide('scan', 13)}
+        <span class="yanta-slides-drawframe-label">Draw slide</span>
+      </button>
+    `
+    : '';
+
   return `
     <div class="yanta-slides-bar">
       <button class="yanta-slides-toggle ${open ? 'is-open' : ''}" ${attr}="toggle" type="button" aria-expanded="${open ? 'true' : 'false'}">
@@ -1088,14 +1159,12 @@ function renderSlidesBarHtml(slides, { open, fullscreen }) {
         <span>Slides</span>
         <span class="yanta-slides-count">· ${slides.length}</span>
       </button>
-
       <span class="grow"></span>
-
+      ${drawFrameBtn}
       <button class="yanta-slides-primary" ${attr}="present" type="button" ${hasSlides ? '' : 'disabled'} title="${hasSlides ? 'Present slideshow' : 'Create a slide first'}">
         ${lucide('play', 13)}
         <span>Present</span>
       </button>
-
       <button class="yanta-slides-more" ${attr}="more" type="button" title="More slide actions" aria-label="More slide actions">
         ${lucide('ellipsis', 16)}
       </button>
@@ -1212,6 +1281,15 @@ function openSlidesOverflowMenu(anchor, ctx, { getApi, refresh, hasSlides } = {}
   showMenu(rect.right, rect.bottom + 6, items, {
     align: 'end',
   });
+
+  // The fullscreen dock sits at z-index 392; showMenu's default stacking can
+  // render the overflow menu underneath it, making it look like nothing opens.
+  // Raise the just-created menu above the dock.
+  const menus = [...document.querySelectorAll('body > .ctx-menu')];
+  const menu = menus.at(-1);
+  if (menu) {
+    menu.style.zIndex = '640';
+  }
 }
 
 /**
@@ -1246,6 +1324,22 @@ function wireSlidesBar(root, ctx, {
       getApi,
       refresh,
       hasSlides,
+    });
+  });
+
+  q('draw-frame')?.addEventListener('click', () => {
+    const liveApi = typeof getApi === 'function' ? getApi() : ctx.api;
+    if (!liveApi) {
+      toast('Drawing is still loading — try again in a moment', 'error');
+      return;
+    }
+    startSlideDrawMode({
+      noteId: ctx.noteId,
+      drawingId: ctx.drawingId,
+      api: liveApi,
+      container:
+        getActiveDrawingHost?.() || ctx.container,
+      onDone: refresh,
     });
   });
 }
@@ -1581,78 +1675,105 @@ function sceneElementsForApi(api) {
   }
 }
 
-function hideSlideFramesForPresentation(api) {
-  if (!api) return;
+// Tracks, per API, whether we currently intend frames to be visible. Lets us
+// avoid redundant updateScene() churn and lets a Yjs re-render self-heal.
+const slideFrameVisibilityByApi = new WeakMap();
 
-  const elements = sceneElementsForApi(api);
+function slideModeActiveForDrawing(noteId, drawingId) {
+  // Fullscreen dock counts as slide-mode when docked open.
+  if (
+    isFullscreenSlidesDockVisible() &&
+    fullscreenSlidesCtx?.noteId === noteId &&
+    fullscreenSlidesCtx?.drawingId === drawingId
+  ) {
+    return true;
+  }
+  // Any inline embed for this drawing with its Slides panel open.
+  const embed = document.querySelector(
+    `.yanta-draw-embed[data-draw-id="${CSS.escape(drawingId)}"][data-note-id="${CSS.escape(noteId)}"]`
+  );
+  return !!embed && slidesPanelOpen(embed);
+}
+
+function slideshowRunningForDrawing(noteId, drawingId) {
+  return (
+    !!slideshow &&
+    slideshow.noteId === noteId &&
+    slideshow.drawingId === drawingId
+  );
+}
+
+// Derive the target visibility for a drawing from the two state booleans.
+function targetSlideFrameVisibility(noteId, drawingId) {
+  const slideMode = slideModeActiveForDrawing(noteId, drawingId);
+  const running = slideshowRunningForDrawing(noteId, drawingId);
+  if (slideMode && !running) {
+    return SLIDE_FRAME_VISIBILITY.VISIBLE;
+  }
+  return SLIDE_FRAME_VISIBILITY.HIDDEN;
+}
+
+/**
+ * Apply the correct slide-frame visibility for one drawing/API.
+ *
+ * Idempotent: safe to call after every relevant event (panel toggle,
+ * slideshow start/stop, fullscreen open/close, Yjs re-render). It writes
+ * to the scene only when at least one frame actually needs to change, so
+ * spamming it is cheap.
+ */
+function reconcileSlideFrameVisibility(noteId, drawingId, api = null) {
+  const liveApi =
+    api ||
+    currentApiForDrawing(noteId, drawingId) ||
+    (slideshowRunningForDrawing(noteId, drawingId) ? slideshow.api : null);
+  if (!liveApi) return;
+
+  const elements = sceneElementsForApi(liveApi);
   if (!Array.isArray(elements) || !elements.length) return;
 
-  const frames = elements.filter((el) =>
-    el &&
-    !el.isDeleted &&
-    isSlideFrameElement(el)
+  const frames = elements.filter(
+    (el) => el && !el.isDeleted && isSlideFrameElement(el)
   );
-
   if (!frames.length) return;
 
-  const alreadyHidden = hiddenSlideFrameSnapshots.some((entry) => entry.api === api);
-  if (alreadyHidden) return;
+  const visibility = targetSlideFrameVisibility(noteId, drawingId);
+  const patch = slideFramePatchFor(visibility);
+  const wantVisible = visibility === SLIDE_FRAME_VISIBILITY.VISIBLE;
 
-  const originals = new Map(
-    frames.map((frame) => [
-      frame.id,
-      {
-        opacity: frame.opacity,
-        locked: frame.locked,
-      },
-    ])
-  );
+  slideFrameVisibilityByApi.set(liveApi, wantVisible);
 
-  hiddenSlideFrameSnapshots.push({
-    api,
-    originals,
+  // Only write if a frame diverges from the target — avoids update churn and
+  // lets remote re-renders that reset opacity self-heal on the next call.
+  const needsUpdate = frames.some((frame) => {
+    if (wantVisible) {
+      return (
+        frame.opacity !== patch.opacity ||
+        frame.locked !== patch.locked ||
+        frame.strokeColor !== patch.strokeColor
+      );
+    }
+    return frame.opacity !== patch.opacity || frame.locked !== patch.locked;
   });
+  if (!needsUpdate) return;
 
+  const frameIds = new Set(frames.map((f) => f.id));
   const nextElements = elements.map((el) =>
-    originals.has(el.id)
-      ? {
-          ...el,
-          opacity: 0,
-          locked: true,
-        }
-      : el
+    frameIds.has(el.id) ? { ...el, ...patch } : el
   );
 
-  runDrawingApiUpdateWithoutSaving(api, {
+  runDrawingApiUpdateWithoutSaving(liveApi, {
     elements: nextElements,
   });
 }
 
-function restoreSlideFramesAfterPresentation() {
-  while (hiddenSlideFrameSnapshots.length) {
-    const entry = hiddenSlideFrameSnapshots.pop();
-    const api = entry?.api;
-    const originals = entry?.originals;
-
-    if (!api || !originals?.size) continue;
-
-    const elements = sceneElementsForApi(api);
-    if (!Array.isArray(elements) || !elements.length) continue;
-
-    const nextElements = elements.map((el) => {
-      const original = originals.get(el?.id);
-      if (!original) return el;
-
-      return {
-        ...el,
-        opacity: original.opacity ?? 100,
-        locked: original.locked ?? false,
-      };
-    });
-
-    runDrawingApiUpdateWithoutSaving(api, {
-      elements: nextElements,
-    });
+// Convenience: reconcile every surface that currently shows this drawing.
+function reconcileAllSurfacesForDrawing(noteId, drawingId) {
+  reconcileSlideFrameVisibility(noteId, drawingId);
+  if (
+    slideshowRunningForDrawing(noteId, drawingId) &&
+    slideshow.api
+  ) {
+    reconcileSlideFrameVisibility(noteId, drawingId, slideshow.api);
   }
 }
 
@@ -2401,24 +2522,54 @@ function bindSlideChipInteractions(root, ctx, {
 // Inline embed panel + fullscreen dock
 // ============================================================
 
+function ensureInlineSlidesHeadButton(embed) {
+  const head = embed.querySelector('.yanta-draw-embed-head');
+  if (!head || head.querySelector('[data-slides-head-toggle]')) return;
+
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'icon-btn yanta-slides-head-btn';
+  btn.dataset.slidesHeadToggle = '1';
+  btn.title = 'Slides';
+  btn.setAttribute('aria-pressed', 'false');
+  btn.innerHTML = lucide('presentation', 20);
+
+  btn.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setSlidesPanelOpen(embed, !slidesPanelOpen(embed));
+    refreshSlidesPanel(embed);
+  });
+
+  // Insert into the existing actions cluster if present, else into the head.
+  const actions = head.querySelector('.yanta-draw-embed-actions');
+  if (actions) {
+    actions.insertBefore(btn, actions.firstChild);
+  } else {
+    head.append(btn);
+  }
+}
+
 function enhanceDrawingEmbed(embed) {
   injectCss();
-
   if (!embed) return;
 
   if (embed.dataset.slidesEnhanced === '1') {
     scheduleSlidesPanelRefresh(embed);
     return;
   }
-
   embed.dataset.slidesEnhanced = '1';
 
+  // Slides toggle button lives in the embed head, next to the other actions.
+  ensureInlineSlidesHeadButton(embed);
+
+  // The panel is created lazily and stays hidden until the user opens Slides.
   const panel = document.createElement('div');
   panel.className = 'yanta-slides-panel';
   panel.dataset.slidesPanel = '1';
+  panel.hidden = true;
 
   const host = embed.querySelector('.yanta-draw-inline-host');
-
   if (host) {
     embed.insertBefore(panel, host);
   } else {
@@ -2430,23 +2581,44 @@ function enhanceDrawingEmbed(embed) {
 
 function refreshSlidesPanel(embed) {
   if (!embed) return;
-
   const panel = embed.querySelector('[data-slides-panel]');
   if (!panel) return;
-
   const ctx = contextFromEmbed(embed);
+  const headBtn = embed.querySelector('[data-slides-head-toggle]');
+  const open = slidesPanelOpen(embed);
+
+  headBtn?.classList.toggle('is-active', open);
+  headBtn?.setAttribute('aria-pressed', open ? 'true' : 'false');
 
   if (!ctx) {
+    panel.hidden = true;
     panel.innerHTML = '';
     return;
   }
 
-  const open = slidesPanelOpen(embed);
+  // Keep the head badge count fresh even while the panel is closed.
   const slides = syncSlidesFromScene(ctx.noteId, ctx.drawingId, ctx.api);
 
+  // Slide-mode visibility depends on panel open-state; sync it now,
+  // before any early return for the closed state.
+  reconcileSlideFrameVisibility(ctx.noteId, ctx.drawingId, ctx.api);
+
+  if (headBtn) {
+    headBtn.title = slides.length
+      ? `Slides · ${slides.length}`
+      : 'Slides';
+  }
+
+  if (!open) {
+    panel.hidden = true;
+    panel.innerHTML = '';
+    return;
+  }
+
+  panel.hidden = false;
   panel.innerHTML = `
-    ${renderSlidesBarHtml(slides, { open, fullscreen: false })}
-    ${open ? renderSlidesStripHtml(slides) : ''}
+    ${renderSlidesBarHtml(slides, { open: true, fullscreen: false })}
+    ${renderSlidesStripHtml(slides)}
   `;
 
   const getApi = () => getDrawingApiForEmbed(embed);
@@ -2461,12 +2633,10 @@ function refreshSlidesPanel(embed) {
     refresh,
     hasSlides: slides.length > 0,
     onToggle: () => {
-      setSlidesPanelOpen(embed, !open);
+      setSlidesPanelOpen(embed, false);
       refreshSlidesPanel(embed);
     },
   });
-
-  if (!open) return;
 
   hydrateSlideThumbnails(panel, ctx.drawing, slides).catch((err) => {
     console.warn('[YANTA Slides] could not hydrate thumbnails', err);
@@ -2482,6 +2652,11 @@ function refreshSlidesPanel(embed) {
     getApi,
     refresh,
   });
+
+  // After the open/closed state is settled, sync frame visibility.
+  if (ctx) {
+    reconcileSlideFrameVisibility(ctx.noteId, ctx.drawingId, ctx.api);
+  }
 }
 
 function removeFullscreenSlidesDock() {
@@ -2632,12 +2807,27 @@ function findOpenExcalidrawContextMenu(ctx) {
 }
 
 function closeNativeExcalidrawContextMenu() {
+  // IMPORTANT: do NOT dispatch a global Escape keydown here.
+  // In fullscreen, draw.js listens for Escape and would close the entire
+  // drawing modal. Excalidraw closes its own context menu on an outside
+  // pointerdown, so simulate that instead — scoped, with no app-level Escape.
   try {
-    document.dispatchEvent(new KeyboardEvent('keydown', {
-      key: 'Escape',
-      code: 'Escape',
+    const menu = document.querySelector(
+      '.excalidraw .context-menu, .context-menu, [data-testid="context-menu"]'
+    );
+    // Dispatch a pointerdown on the document body, away from the menu.
+    document.body.dispatchEvent(new PointerEvent('pointerdown', {
       bubbles: true,
+      cancelable: true,
+      clientX: 0,
+      clientY: 0,
     }));
+    // As a fallback, remove a still-open menu directly.
+    if (menu && menu.isConnected) {
+      requestAnimationFrame(() => {
+        if (menu.isConnected) menu.remove();
+      });
+    }
   } catch {}
 }
 
@@ -2854,6 +3044,10 @@ function mountFullscreenSlidesDockFromApiReady(detail = {}) {
     renderFullscreenSlidesDock(fullscreenSlidesCtx);
   }
 
+  // New fullscreen API instance: bring its frames to the correct state,
+  // preserving whatever slide-mode/slideshow status was active before.
+  reconcileSlideFrameVisibility(noteId, drawingId, api);
+
   /*
     Critical:
     If user starts Present in inline mode and then opens Full screen,
@@ -2867,7 +3061,18 @@ function mountFullscreenSlidesDockFromApiReady(detail = {}) {
     slideshow.api = api;
     slideshow.container = container;
 
-    hideSlideFramesForPresentation(api);
+    if (
+      slideshow &&
+      slideshow.noteId === noteId &&
+      slideshow.drawingId === drawingId
+    ) {
+      slideshow.api = api;
+      slideshow.container = container;
+      reconcileSlideFrameVisibility(noteId, drawingId, api);
+      requestAnimationFrame(() => {
+        goToSlide(slideshow.index, { notifyRemote: false });
+      });
+    }
 
     requestAnimationFrame(() => {
       goToSlide(slideshow.index, {
@@ -2886,17 +3091,22 @@ function isFullscreenSlidesDockVisible() {
 
 function setFullscreenSlidesDockVisible(visible) {
   const dock = ensureFullscreenSlidesDock();
-
   dock.dataset.docked = visible ? '1' : '0';
   dock.classList.toggle('is-visible', !!visible);
-
   window.dispatchEvent(new CustomEvent('yanta-fullscreen-slides-visibility', {
     detail: { open: !!visible },
   }));
-
   if (visible && fullscreenSlidesCtx) {
     dock.dataset.open = '1';
     renderFullscreenSlidesDock(fullscreenSlidesCtx);
+  }
+  // Docking the panel enters/leaves slide-mode → frames follow.
+  if (fullscreenSlidesCtx) {
+    reconcileSlideFrameVisibility(
+      fullscreenSlidesCtx.noteId,
+      fullscreenSlidesCtx.drawingId,
+      fullscreenSlidesCtx.api
+    );
   }
 }
 
@@ -3480,7 +3690,13 @@ export function startSlideshow({
     the app/Excalidraw chrome; browser fullscreen stays an explicit toggle.
   */
 
-  hideSlideFramesForPresentation(slideshow.api);
+  document.body.classList.add('yanta-slideshow-active');
+  fullscreenSlidesDock?.classList.add('is-hidden-during-slideshow');
+  document.body.classList.add('yanta-slideshow-immersive');
+  document.addEventListener('fullscreenchange', slideshowFullscreenChangeHandler);
+
+  // Slideshow is now running → frames must hide everywhere for this drawing.
+  reconcileSlideFrameVisibility(noteId, drawingId, slideshow.api);
 
   toolbar.querySelector('[data-slide-prev]')?.addEventListener('click', previousSlide);
   toolbar.querySelector('[data-slide-next]')?.addEventListener('click', nextSlide);
@@ -3536,7 +3752,10 @@ function goToSlide(index, {
   slideshow.api = liveApi;
   slideshow.container = liveContainer;
 
-  hideSlideFramesForPresentation(liveApi);
+  slideshow.api = liveApi;
+  slideshow.container = liveContainer;
+  reconcileSlideFrameVisibility(slideshow.noteId, slideshow.drawingId, liveApi);
+  scrollToSlide(liveApi, slide, liveContainer);
 
   scrollToSlide(liveApi, slide, liveContainer);
 
@@ -3555,33 +3774,28 @@ function goToSlide(index, {
 }
 export function stopSlideshow() {
   if (!slideshow) return;
+  const { noteId, drawingId } = slideshow;
 
   document.removeEventListener('keydown', slideshowKeyHandler, true);
   document.removeEventListener('pointermove', laserPointerMove, true);
-
   slideshow.notesEl?.remove();
   slideshow.root?.remove();
-
   closeRemoteSocket();
-
-  restoreSlideFramesAfterPresentation();
-
   document.body.classList.remove('yanta-slideshow-active');
   document.body.classList.remove('yanta-slideshow-immersive');
   fullscreenSlidesDock?.classList.remove('is-hidden-during-slideshow');
-
   document.removeEventListener('fullscreenchange', slideshowFullscreenChangeHandler);
-
   document
     .querySelectorAll('.yanta-slideshow-immersive-hint')
     .forEach((node) => node.remove());
-
   cancelAnimationFrame(cameraAnimationRaf);
   cameraAnimationRaf = 0;
-
   exitSlideshowFullscreen();
-
   slideshow = null;
+
+  // Slideshow no longer running. reconcile now decides on its own whether
+  // frames come back: they only reappear if slide-mode is still active.
+  reconcileAllSurfacesForDrawing(noteId, drawingId);
 }
 
 function slideshowKeyHandler(e) {
@@ -4335,13 +4549,18 @@ export function setupSlides() {
     }
   });
 
-  window.addEventListener('yanta-drawing-updated', () => {
+  window.addEventListener('yanta-drawing-updated', (e) => {
     document
       .querySelectorAll('.yanta-draw-embed[data-draw-id]')
       .forEach(scheduleSlidesPanelRefresh);
-
     if (fullscreenSlidesCtx) {
       renderFullscreenSlidesDock(fullscreenSlidesCtx);
+      // A remote/persisted scene may have reset frame opacity/color;
+      // re-derive the correct visibility.
+      reconcileSlideFrameVisibility(
+        fullscreenSlidesCtx.noteId,
+        fullscreenSlidesCtx.drawingId
+      );
     }
   });
 

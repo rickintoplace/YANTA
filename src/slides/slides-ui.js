@@ -998,6 +998,54 @@ body:not(.yanta-slideshow-immersive) .yanta-slideshow-immersive-hint {
     transform: translateX(-50%) translateY(-6px);
   }
 }
+
+/* Standalone remote page: self-contained button/input styles, because the
+   global app stylesheet is not loaded on the /#slides-remote route. */
+.yanta-slides-remote-screen .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg-elev-2);
+  color: var(--text);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  padding: 12px 16px;
+}
+.yanta-slides-remote-screen .btn:hover {
+  border-color: var(--accent);
+}
+.yanta-slides-remote-screen .btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.yanta-slides-remote-screen .text-input {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-elev-2);
+  color: var(--text);
+  font: inherit;
+  padding: 10px 12px;
+  box-sizing: border-box;
+  resize: vertical;
+}
+.yanta-slides-remote-screen .icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-elev-2);
+  color: var(--text);
+  cursor: pointer;
+}
   `;
 
   document.head.append(style);
@@ -2700,9 +2748,39 @@ function bindSlidesNativeContextMenu(container, {
     clientX: 0,
     clientY: 0,
     observer: null,
+    observerStopTimer: 0,
   };
 
   slidesContextState.set(container, ctx);
+
+  const stopObserving = () => {
+    if (ctx.observer) {
+      try {
+        ctx.observer.disconnect();
+      } catch {}
+      ctx.observer = null;
+    }
+    clearTimeout(ctx.observerStopTimer);
+    ctx.observerStopTimer = 0;
+  };
+
+  const startObserving = () => {
+    // Only observe briefly, while Excalidraw is about to open its menu.
+    // A permanent document-wide subtree observer is a serious perf drain.
+    if (ctx.observer) return;
+
+    ctx.observer = new MutationObserver(() => {
+      injectSlidesItemsIntoNativeContextMenu(container);
+    });
+
+    ctx.observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+    });
+
+    // Auto-stop shortly after; the menu appears within a frame or two.
+    ctx.observerStopTimer = window.setTimeout(stopObserving, 1200);
+  };
 
   container.addEventListener('contextmenu', (e) => {
     ctx.api = api;
@@ -2715,7 +2793,6 @@ function bindSlidesNativeContextMenu(container, {
       api.getAppState?.().selectedElementIds
     );
 
-    // Only offer "slide from selection" for real, non-frame content.
     const elements = sceneElementsForApi(api);
     ctx.hasSelection = elements.some((el) =>
       el &&
@@ -2724,20 +2801,26 @@ function bindSlidesNativeContextMenu(container, {
       !isSlideFrameElement(el)
     );
 
-    // Do NOT preventDefault: Excalidraw should open its native menu.
+    // Nothing YANTA-specific to add: don't spin up the observer at all.
+    if (!ctx.frame && !ctx.hasSelection) {
+      return;
+    }
+
+    startObserving();
+
     setTimeout(() => injectSlidesItemsIntoNativeContextMenu(container), 0);
     setTimeout(() => injectSlidesItemsIntoNativeContextMenu(container), 40);
     setTimeout(() => injectSlidesItemsIntoNativeContextMenu(container), 120);
   }, true);
 
-  ctx.observer = new MutationObserver(() => {
-    injectSlidesItemsIntoNativeContextMenu(container);
-  });
-
-  ctx.observer.observe(document.body, {
-    childList: true,
-    subtree: true,
-  });
+  // Stop observing once a menu item was injected or the menu closed.
+  document.addEventListener('pointerdown', () => {
+    if (ctx.observer) {
+      // Give the click a moment to resolve, then stop.
+      clearTimeout(ctx.observerStopTimer);
+      ctx.observerStopTimer = window.setTimeout(stopObserving, 300);
+    }
+  }, true);
 }
 
 function mountFullscreenSlidesDockFromApiReady(detail = {}) {
@@ -2749,23 +2832,22 @@ function mountFullscreenSlidesDockFromApiReady(detail = {}) {
     document.querySelector('.yanta-draw-fullscreen-host') ||
     null;
 
-  if (!noteId || !drawingId || !api || !container) return;
+    if (!noteId || !drawingId || !api || !container) return;
 
-  bindSlideFrameMiddleMousePan(container, api);
-
+    bindSlideFrameMiddleMousePan(container, api);
     bindSlidesNativeContextMenu(container, {
       noteId,
       drawingId,
       api,
     });
-    
-  // Remember context so the header toggle can open the dock on demand.
-  fullscreenSlidesCtx = {
-    noteId,
-    drawingId,
-    api,
-    container,
-  };
+  
+    // Remember context so the header toggle can open the dock on demand.
+    fullscreenSlidesCtx = {
+      noteId,
+      drawingId,
+      api,
+      container,
+    };
 
   // If the dock is already open (e.g. re-mount after API swap), re-render it.
   if (isFullscreenSlidesDockVisible()) {
@@ -2819,21 +2901,22 @@ function setFullscreenSlidesDockVisible(visible) {
 }
 
 function toggleFullscreenSlidesDock(ctx) {
-  if (ctx?.noteId && ctx?.drawingId) {
-    // Prefer live API/container from the active fullscreen surface.
-    fullscreenSlidesCtx = {
-      noteId: ctx.noteId,
-      drawingId: ctx.drawingId,
-      api: getActiveDrawingApi?.() || fullscreenSlidesCtx?.api || null,
-      container:
-        getActiveDrawingHost?.() ||
-        fullscreenSlidesCtx?.container ||
-        null,
-    };
-  }
-
-  if (!fullscreenSlidesCtx?.noteId) return;
-
+  const noteId = ctx?.noteId || fullscreenSlidesCtx?.noteId || '';
+  const drawingId = ctx?.drawingId || fullscreenSlidesCtx?.drawingId || '';
+  if (!noteId || !drawingId) return;
+  fullscreenSlidesCtx = {
+    noteId,
+    drawingId,
+    api:
+      getActiveDrawingApi?.() ||
+      fullscreenSlidesCtx?.api ||
+      currentApiForDrawing(noteId, drawingId) ||
+      null,
+    container:
+      getActiveDrawingHost?.() ||
+      fullscreenSlidesCtx?.container ||
+      null,
+  };
   setFullscreenSlidesDockVisible(!isFullscreenSlidesDockVisible());
 }
 
@@ -4009,9 +4092,8 @@ function showRemoteLaserDot(screen, x, y) {
 }
 
 function mountRemoteControl(payload) {
-  injectCss();
-
   document.body.innerHTML = '';
+  injectCss();
 
   const screen = document.createElement('div');
   screen.className = 'yanta-slides-remote-screen';
@@ -4212,15 +4294,13 @@ export function setupSlides() {
           getActiveDrawingHost?.() ||
           document.querySelector('.yanta-draw-fullscreen-host') ||
           null;
-
-        bindSlideFrameMiddleMousePan(container, detail.api);
-
+        // Middle-mouse pan and native-context-menu binding both happen inside
+        // mountFullscreenSlidesDockFromApiReady; no need to bind pan twice.
         mountFullscreenSlidesDockFromApiReady({
           ...detail,
           container,
         });
       });
-
       return;
     }
 

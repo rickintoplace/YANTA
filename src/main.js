@@ -3572,30 +3572,33 @@ if (SITE_PAGE_PATHS.has(normalizedPath)) {
         variant: 'public',
       });
     });
-} else if (String(location.hash || '').replace(/^#/, '').startsWith('slides-remote=')) {
-  import('./slides/slides-ui.js')
-    .then((m) => {
-      if (!m.mountSlidesRemoteFromHash()) {
-        document.body.innerHTML = '<main style="padding:24px;font-family:system-ui">Invalid slideshow remote link.</main>';
-      }
-
-      ensureLegalFooter({
-        parent: document.body,
-        id: 'yanta-slides-remote-legal-footer',
-        variant: 'public',
+  } else if (String(location.hash || '').replace(/^#/, '').startsWith('slides-remote=')) {
+    // The remote-control page runs standalone: init() never executes here, so
+    // the theme CSS variables (--bg, --text, --accent, …) would be undefined and
+    // the control UI would render invisibly. Load appearance first, then mount.
+    loadAppearance()
+      .catch(() => {})
+      .then(() => import('./slides/slides-ui.js'))
+      .then((m) => {
+        if (!m.mountSlidesRemoteFromHash()) {
+          document.body.innerHTML = '<main style="padding:24px;font-family:system-ui">Invalid slideshow remote link.</main>';
+        }
+        ensureLegalFooter({
+          parent: document.body,
+          id: 'yanta-slides-remote-legal-footer',
+          variant: 'public',
+        });
+      })
+      .catch((e) => {
+        console.error(e);
+        document.body.innerHTML = '<main style="padding:24px;font-family:system-ui">Could not open slideshow remote.</main>';
+        ensureLegalFooter({
+          parent: document.body,
+          id: 'yanta-slides-remote-error-legal-footer',
+          variant: 'public',
+        });
       });
-    })
-    .catch((e) => {
-      console.error(e);
-      document.body.innerHTML = '<main style="padding:24px;font-family:system-ui">Could not open slideshow remote.</main>';
-
-      ensureLegalFooter({
-        parent: document.body,
-        id: 'yanta-slides-remote-error-legal-footer',
-        variant: 'public',
-      });
-    });
-} else {
+  } else {
   init().catch((e) => {
     console.error(e);
     toast('Failed to start: ' + e.message, 'error');

@@ -43,6 +43,8 @@ import {
   moveNoteToTrash,
 } from './trash.js';
 
+import { putImageObjectUrl } from './media/object-url-cache.js';
+
 let _navSuppress = false;
 let _unsubDoc = null;
 
@@ -885,7 +887,10 @@ function preloadImagesFor(md) {
   Promise.all(ids.map(async (id) => {
     if (state.imageBlobs.has(id)) return;
     const rec = await store.images.get(id);
-    if (rec && rec.blob) { state.imageBlobs.set(id, URL.createObjectURL(rec.blob)); needsRerender = true; }
+    if (rec?.blob) {
+      putImageObjectUrl(id, rec.blob);
+      needsRerender = true;
+    }
   })).then(() => { if (needsRerender) schedulePreview(); });
 }
 

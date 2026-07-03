@@ -14,6 +14,8 @@ import { autocompletion, completionKeymap, acceptCompletion } from '@codemirror/
 import { searchKeymap, highlightSelectionMatches } from '@codemirror/search';
 import { tags as t } from '@lezer/highlight';
 import { classifyLine, renderDrawEmbedHtml } from './markdown.js';
+import { videoEmbedUrl, audioEmbedUrl } from './media/video-embeds.js';
+import { getImageObjectUrl, putImageObjectUrl } from './media/object-url-cache.js';
 
 import { $, state, safeCssColor, lucide } from './core.js';
 import { getNoteDoc, getMarkdownText } from './yjs.js';
@@ -55,6 +57,7 @@ const yantaTheme = EditorView.theme({
     height: '100%',
     width: '100%',
     minWidth: '0',
+    minHeight: '0',
     maxWidth: '100%',
     overflow: 'hidden',
   },
@@ -62,11 +65,11 @@ const yantaTheme = EditorView.theme({
   '.cm-scroller': {
     fontFamily: 'var(--font)',
     lineHeight: 'var(--lh-base)',
-
+    height: '100%',
+    minHeight: '0',
     padding: '28px clamp(14px, 5vw, 40px) calc(28px + 40vh)',
     overflowY: 'auto',
     overflowX: 'hidden',
-
     boxSizing: 'border-box',
     minWidth: '0',
     maxWidth: '100%',
@@ -214,6 +217,195 @@ const yantaTheme = EditorView.theme({
     pointerEvents: 'none',
   },
 });
+
+// ============================================================
+// CodeMirror viewport/render sync
+// ------------------------------------------------------------
+// CodeMirror virtualisiert große Dokumente. In komplexen SaaS-Layouts
+// mit verschachtelten Scroll-Containern, Split-Panes, versteckten Tabs
+// oder animierten Pane-Größen kann der Browser scrollen, ohne dass CM
+// sofort neu misst. Ergebnis: Inhalt/Widgets erscheinen erst beim Klick.
+//
+// Diese Extension synchronisiert CM-Messungen robust, aber performant:
+// - hört auf relevante Scroll-Container + Window-Capture-Scroll
+// - coalesced alles via requestAnimationFrame
+// - reagiert auf Resize, Visibility, Focus und Intersection
+// - keine Doc-Änderung, kein History-Eintrag, kein redundantes Rendering
+// ============================================================
+
+const VIEWPORT_SYNC_EVENT_OPTIONS = { passive: true, capture: true };
+
+function isScrollableElement(el) {
+  if (!(el instanceof Element)) return false;
+
+  const style = window.getComputedStyle(el);
+  const overflow = `${style.overflowY} ${style.overflow}`;
+  return /(auto|scroll|overlay)/i.test(overflow);
+}
+
+function collectEditorScrollTargets(startNode) {
+  const targets = new Set();
+
+  // Window-Capture ist wichtig, weil scroll nicht zuverlässig bubbled.
+  targets.add(window);
+
+  if (document.scrollingElement) {
+    targets.add(document.scrollingElement);
+  }
+
+  let node = startNode instanceof Element ? startNode : null;
+
+  while (node && node !== document.documentElement) {
+    if (isScrollableElement(node)) {
+      targets.add(node);
+    }
+
+    const root = node.getRootNode?.();
+    node =
+      node.parentElement ||
+      (root && root.host instanceof Element ? root.host : null);
+  }
+
+  return [...targets];
+}
+
+const viewportRenderSyncPlugin = ViewPlugin.fromClass(class {
+  constructor(view) {
+    this.view = view;
+    this.destroyed = false;
+    this.frame = 0;
+
+    this.onViewportSignal = () => this.schedule();
+
+    this.scrollTargets = collectEditorScrollTargets(view.dom);
+    for (const target of this.scrollTargets) {
+      target.addEventListener('scroll', this.onViewportSignal, VIEWPORT_SYNC_EVENT_OPTIONS);
+    }
+
+    if (window.visualViewport) {
+      window.visualViewport.addEventListener('resize', this.onViewportSignal, VIEWPORT_SYNC_EVENT_OPTIONS);
+      window.visualViewport.addEventListener('scroll', this.onViewportSignal, VIEWPORT_SYNC_EVENT_OPTIONS);
+    }
+
+    if (typeof ResizeObserver !== 'undefined') {
+      this.resizeObserver = new ResizeObserver(this.onViewportSignal);
+
+      for (const el of [
+        view.dom,
+        view.scrollDOM,
+        view.dom.parentElement,
+        view.dom.closest?.('#paneEdit'),
+      ]) {
+        if (el instanceof Element) {
+          this.resizeObserver.observe(el);
+        }
+      }
+    } else {
+      this.resizeObserver = null;
+      window.addEventListener('resize', this.onViewportSignal, VIEWPORT_SYNC_EVENT_OPTIONS);
+    }
+
+    if (typeof IntersectionObserver !== 'undefined') {
+      this.intersectionObserver = new IntersectionObserver((entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          this.schedule(true);
+        }
+      });
+      this.intersectionObserver.observe(view.dom);
+    } else {
+      this.intersectionObserver = null;
+    }
+
+    this.onVisibilityChange = () => {
+      if (!document.hidden) {
+        this.schedule(true);
+      }
+    };
+
+    this.onFocus = () => this.schedule(true);
+
+    document.addEventListener('visibilitychange', this.onVisibilityChange, { passive: true });
+    window.addEventListener('focus', this.onFocus, { passive: true });
+
+    // Initiale Layouts sind oft nach Mount, Fonts, Pane-Animationen oder
+    // Split-Layout erst 1–2 Frames später stabil.
+    this.schedule(true);
+    requestAnimationFrame(() => this.schedule(true));
+  }
+
+  schedule(immediate = false) {
+    if (this.destroyed) return;
+
+    if (immediate) {
+      if (this.frame) {
+        cancelAnimationFrame(this.frame);
+        this.frame = 0;
+      }
+      this.flush();
+      return;
+    }
+
+    if (this.frame) return;
+
+    this.frame = requestAnimationFrame(() => {
+      this.frame = 0;
+      this.flush();
+    });
+  }
+
+  flush() {
+    if (this.destroyed) return;
+
+    // Löst CodeMirrors interne Viewport-/Geometry-Messung aus.
+    // Das ist bewusst kein Dispatch und verändert weder Dokument noch Undo.
+    this.view.requestMeasure();
+  }
+
+  destroy() {
+    this.destroyed = true;
+
+    if (this.frame) {
+      cancelAnimationFrame(this.frame);
+      this.frame = 0;
+    }
+
+    for (const target of this.scrollTargets || []) {
+      target.removeEventListener('scroll', this.onViewportSignal, VIEWPORT_SYNC_EVENT_OPTIONS);
+    }
+
+    if (window.visualViewport) {
+      window.visualViewport.removeEventListener('resize', this.onViewportSignal, VIEWPORT_SYNC_EVENT_OPTIONS);
+      window.visualViewport.removeEventListener('scroll', this.onViewportSignal, VIEWPORT_SYNC_EVENT_OPTIONS);
+    }
+
+    if (this.resizeObserver) {
+      this.resizeObserver.disconnect();
+    } else {
+      window.removeEventListener('resize', this.onViewportSignal, VIEWPORT_SYNC_EVENT_OPTIONS);
+    }
+
+    this.intersectionObserver?.disconnect();
+
+    document.removeEventListener('visibilitychange', this.onVisibilityChange);
+    window.removeEventListener('focus', this.onFocus);
+  }
+});
+
+function primeEditorViewport(v) {
+  const measure = () => {
+    if (view === v) {
+      v.requestMeasure();
+    }
+  };
+
+  // Mehrere Frames decken Mount, CSS/Layout, Pane-Transitions und Font-Swap ab.
+  requestAnimationFrame(() => {
+    measure();
+    requestAnimationFrame(measure);
+  });
+
+  document.fonts?.ready?.then(measure).catch(() => {});
+}
 
 // ============================================================
 // Task checkbox widget — clickable in the editor.
@@ -648,45 +840,52 @@ class ImageWidget extends WidgetType {
 function resolveImageForWidget(url) {
   if (url.startsWith('yanta-img://')) {
     const id = url.slice('yanta-img://'.length);
-    return state.imageBlobs.get(id) || '';
+    return getImageObjectUrl(id);
   }
 
   return url;
 }
 
 async function ensureImageBlob(id) {
-  if (state.imageBlobs.has(id)) {
-    return state.imageBlobs.get(id);
-  }
+  const cached = getImageObjectUrl(id);
+  if (cached) return cached;
 
   const { store } = await import('./core.js');
   const rec = await store.images.get(id);
 
-  if (!rec || !rec.blob) return null;
+  if (!rec?.blob) return null;
 
-  const u = URL.createObjectURL(rec.blob);
-  state.imageBlobs.set(id, u);
-
-  return u;
+  return putImageObjectUrl(id, rec.blob);
 }
 
+/*
+  Wichtig:
+  CodeMirror erlaubt block:true Decorations NICHT über ViewPlugin.
+  Block-Widgets beeinflussen die vertikale Geometrie und müssen daher aus
+  StateFields kommen. Viewport-Optimierung für Block-Widgets braucht eine
+  andere Architektur; dieser sichere Pfad verhindert Editor-Crashes.
+*/
 const imagePreviewField = StateField.define({
-  create(s) {
-    return buildImageDecos(s);
+  create(state) {
+    return buildImageDecos(state);
   },
 
-  update(d, tr) {
-    return tr.docChanged ? buildImageDecos(tr.state) : d.map(tr.changes);
+  update(deco, tr) {
+    if (tr.docChanged) {
+      return buildImageDecos(tr.state);
+    }
+
+    return deco.map(tr.changes);
   },
 
-  provide: (f) => EditorView.decorations.from(f),
+  provide: (field) => EditorView.decorations.from(field),
 });
 
-function buildImageDecos(s) {
+function buildImageDecos(state) {
   const b = new RangeSetBuilder();
 
-  for (let p = 0; p < s.doc.length;) {
-    const line = s.doc.lineAt(p);
+  for (let p = 0; p < state.doc.length;) {
+    const line = state.doc.lineAt(p);
     const m = IMAGE_LINE_RE.exec(line.text);
 
     if (m && !videoEmbedUrl(m[2])) {
@@ -702,31 +901,11 @@ function buildImageDecos(s) {
       }));
     }
 
+    if (line.to >= state.doc.length) break;
     p = line.to + 1;
   }
 
   return b.finish();
-}
-
-// ============================================================
-// Inline YouTube / Vimeo video preview widget.
-// Matches image-syntax lines whose URL is a recognised video host.
-// ============================================================
-function videoEmbedUrl(url) {
-  let m;
-  if ((m = /(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{6,})/.exec(url))) return `https://www.youtube-nocookie.com/embed/${m[1]}`;
-  if ((m = /youtube\.com\/embed\/([a-zA-Z0-9_-]{6,})/.exec(url))) return `https://www.youtube-nocookie.com/embed/${m[1]}`;
-  if ((m = /vimeo\.com\/(\d+)/.exec(url))) return `https://player.vimeo.com/video/${m[1]}`;
-  return null;
-}
-function audioEmbedUrl(url) {
-  const s = String(url || '').trim();
-
-  if (/\.(mp3|m4a|aac|ogg|oga|opus|wav)(?:$|[?#])/i.test(s)) {
-    return s;
-  }
-
-  return '';
 }
 
 class AudioWidget extends WidgetType {
@@ -772,16 +951,31 @@ class VideoWidget extends WidgetType {
     return wrap;
   }
 }
+
+/*
+  Block-Widgets müssen über StateField kommen, nicht über ViewPlugin.
+*/
 const videoPreviewField = StateField.define({
-  create(s) { return buildVideoDecos(s); },
-  update(d, tr) { return tr.docChanged ? buildVideoDecos(tr.state) : d; },
-  provide: (f) => EditorView.decorations.from(f),
+  create(state) {
+    return buildVideoDecos(state);
+  },
+
+  update(deco, tr) {
+    if (tr.docChanged) {
+      return buildVideoDecos(tr.state);
+    }
+
+    return deco.map(tr.changes);
+  },
+
+  provide: (field) => EditorView.decorations.from(field),
 });
-function buildVideoDecos(s) {
+
+function buildVideoDecos(state) {
   const b = new RangeSetBuilder();
 
-  for (let p = 0; p < s.doc.length;) {
-    const line = s.doc.lineAt(p);
+  for (let p = 0; p < state.doc.length;) {
+    const line = state.doc.lineAt(p);
     const m = /^!?\[[^\]]*\]\(([^)\s]+)\)\s*$/.exec(line.text);
 
     if (m) {
@@ -803,6 +997,7 @@ function buildVideoDecos(s) {
       }
     }
 
+    if (line.to >= state.doc.length) break;
     p = line.to + 1;
   }
 
@@ -849,23 +1044,30 @@ class DrawWidget extends WidgetType {
     return true;
   }
 }
+/*
+  Block-Widgets müssen über StateField kommen, nicht über ViewPlugin.
+*/
 const drawPreviewField = StateField.define({
-  create(s) {
-    return buildDrawDecos(s);
+  create(state) {
+    return buildDrawDecos(state);
   },
 
-  update(d, tr) {
-    return tr.docChanged ? buildDrawDecos(tr.state) : d.map(tr.changes);
+  update(deco, tr) {
+    if (tr.docChanged) {
+      return buildDrawDecos(tr.state);
+    }
+
+    return deco.map(tr.changes);
   },
 
-  provide: (f) => EditorView.decorations.from(f),
+  provide: (field) => EditorView.decorations.from(field),
 });
 
-function buildDrawDecos(s) {
+function buildDrawDecos(state) {
   const b = new RangeSetBuilder();
 
-  for (let p = 0; p < s.doc.length;) {
-    const line = s.doc.lineAt(p);
+  for (let p = 0; p < state.doc.length;) {
+    const line = state.doc.lineAt(p);
     const m = /^\s*draw:\/\/([a-z0-9_-]+)\s*$/i.exec(line.text);
 
     if (m) {
@@ -876,6 +1078,7 @@ function buildDrawDecos(s) {
       }));
     }
 
+    if (line.to >= state.doc.length) break;
     p = line.to + 1;
   }
 
@@ -1087,7 +1290,6 @@ function dropHandler() {
     },
     drop(e, view) {
       const types = [...(e.dataTransfer.types || [])];
-      console.log('[editor dragover]', types);
       // Find caret position for the drop.
       const pos = view.posAtCoords({ x: e.clientX, y: e.clientY }) ?? view.state.doc.length;
       const calendarEventJson = e.dataTransfer.getData('text/yanta-calendar-event');
@@ -1322,88 +1524,96 @@ function collectMarkdownInlineRanges(text, lineFrom, ranges) {
 
 const LUCIDE_INLINE_RE = /:lucide\[([a-zA-Z0-9-_ ]+)\](?:\{([^}\n:]+)\})?:/g;
 
-const lucideInlineEditField = StateField.define({
-  create(state) {
-    return buildLucideInlineEditDecos(state);
-  },
+const lucideInlineEditField = ViewPlugin.fromClass(class {
+  constructor(view) {
+    this.decorations = buildLucideInlineEditDecos(view);
+  }
 
-  update(deco, tr) {
-    if (tr.docChanged) return buildLucideInlineEditDecos(tr.state);
-    return deco.map(tr.changes);
-  },
-
-  provide: (field) => EditorView.decorations.from(field),
+  update(update) {
+    if (update.docChanged || update.viewportChanged) {
+      this.decorations = buildLucideInlineEditDecos(update.view);
+    }
+  }
+}, {
+  decorations: (plugin) => plugin.decorations,
 });
 
-function buildLucideInlineEditDecos(s) {
+function buildLucideInlineEditDecos(view) {
   const b = new RangeSetBuilder();
+  const doc = view.state.doc;
 
-  for (let p = 0; p <= s.doc.length;) {
-    const line = s.doc.lineAt(p);
-    const text = line.text;
+  for (const range of view.visibleRanges) {
+    let p = doc.lineAt(range.from).from;
 
-    LUCIDE_INLINE_RE.lastIndex = 0;
+    while (p <= range.to) {
+      const line = doc.lineAt(p);
+      const text = line.text;
 
-    let m;
-    while ((m = LUCIDE_INLINE_RE.exec(text)) !== null) {
-      const tokenFrom = line.from + m.index;
-      const tokenTo = tokenFrom + m[0].length;
+      LUCIDE_INLINE_RE.lastIndex = 0;
 
-      const iconFrom = tokenFrom + ':lucide['.length;
-      const iconTo = iconFrom + m[1].length;
+      let m;
+      while ((m = LUCIDE_INLINE_RE.exec(text)) !== null) {
+        const tokenFrom = line.from + m.index;
+        const tokenTo = tokenFrom + m[0].length;
 
-      const baseAttrs = {
-        'data-token-from': String(tokenFrom),
-        'data-token-to': String(tokenTo),
-        'data-icon': m[1].trim(),
-        'data-icon-from': String(iconFrom),
-        'data-icon-to': String(iconTo),
-      };
+        const iconFrom = tokenFrom + ':lucide['.length;
+        const iconTo = iconFrom + m[1].length;
 
-      if (m[2]) {
-        const colorBrace = m[0].indexOf('{');
-        const colorFrom = tokenFrom + colorBrace + 1;
-        const colorTo = colorFrom + m[2].length;
+        const baseAttrs = {
+          'data-token-from': String(tokenFrom),
+          'data-token-to': String(tokenTo),
+          'data-icon': m[1].trim(),
+          'data-icon-from': String(iconFrom),
+          'data-icon-to': String(iconTo),
+        };
 
-        baseAttrs['data-color'] = m[2].trim();
-        baseAttrs['data-color-from'] = String(colorFrom);
-        baseAttrs['data-color-to'] = String(colorTo);
-      }
+        if (m[2]) {
+          const colorBrace = m[0].indexOf('{');
+          const colorFrom = tokenFrom + colorBrace + 1;
+          const colorTo = colorFrom + m[2].length;
 
-      b.add(
-        iconFrom,
-        iconTo,
-        Decoration.mark({
-          class: 'yanta-lucide-key',
-          attributes: baseAttrs,
-        })
-      );
-
-      if (m[2]) {
-        const colorBrace = m[0].indexOf('{');
-        const colorFrom = tokenFrom + colorBrace + 1;
-        const colorTo = colorFrom + m[2].length;
-        const safeColor = safeCssColor(m[2]);
+          baseAttrs['data-color'] = m[2].trim();
+          baseAttrs['data-color-from'] = String(colorFrom);
+          baseAttrs['data-color-to'] = String(colorTo);
+        }
 
         b.add(
-          colorFrom,
-          colorTo,
+          iconFrom,
+          iconTo,
           Decoration.mark({
-            class: 'yanta-color-code',
-            attributes: {
-              ...baseAttrs,
-              'data-color': m[2].trim(),
-              'data-color-from': String(colorFrom),
-              'data-color-to': String(colorTo),
-              ...(safeColor ? { style: `color:${safeColor};border-bottom-color:${safeColor}` } : {}),
-            },
+            class: 'yanta-lucide-key',
+            attributes: baseAttrs,
           })
         );
-      }
-    }
 
-    if (line.to >= s.doc.length) break;
-    p = line.to + 1;
+        if (m[2]) {
+          const colorBrace = m[0].indexOf('{');
+          const colorFrom = tokenFrom + colorBrace + 1;
+          const colorTo = colorFrom + m[2].length;
+          const safeColor = safeCssColor(m[2]);
+
+          b.add(
+            colorFrom,
+            colorTo,
+            Decoration.mark({
+              class: 'yanta-color-code',
+              attributes: {
+                ...baseAttrs,
+                'data-color': m[2].trim(),
+                'data-color-from': String(colorFrom),
+                'data-color-to': String(colorTo),
+                ...(safeColor
+                  ? { style: `color:${safeColor};border-bottom-color:${safeColor}` }
+                  : {}),
+              },
+            })
+          );
+        }
+      }
+
+      if (line.to >= doc.length) break;
+      p = line.to + 1;
+    }
   }
 
   return b.finish();
@@ -1810,9 +2020,8 @@ export function mountEditor(host, { noteId, awarenessUser }) {
     history(),
     drawSelection(),
     EditorView.lineWrapping,
-
+    viewportRenderSyncPlugin,
     editorTitleWidgetField,
-
     markdown({ base: markdownLanguage }),
     syntaxHighlighting(yantaHighlight),
     syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
@@ -1883,6 +2092,7 @@ export function mountEditor(host, { noteId, awarenessUser }) {
   });
 
   bindYTextToEditor(view, ytext);
+  primeEditorViewport(view);
 
   return view;
 }

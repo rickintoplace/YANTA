@@ -4185,6 +4185,8 @@ function confirmDeleteDrawing(noteId, drawingId, {
     danger: true,
     onConfirm: async () => {
       deleteDrawing(noteId, drawingId);
+      deletePersistedThumb(`${noteId}:${drawingId}`);
+      thumbnailCache.delete(`${noteId}:${drawingId}`);
       toast('Drawing deleted');
 
       window.dispatchEvent(new CustomEvent('yanta-drawing-updated', {
@@ -5776,29 +5778,124 @@ export async function exportDrawing(noteId, drawingId, {
   }
 }
 
+// ------------------------------------------------------------
+// Persistenter Drawing-Thumbnail-Cache (eigene Mini-IndexedDB).
+//
+// Warum:
+// Dashboard-Thumbnails dürfen NICHT das komplette Excalidraw-Bundle
+// erzwingen. Nach dem ersten Rendern liegt das Thumbnail als Data-URL
+// persistiert vor und wird über eine Content-Signatur invalidiert.
+// Bewusst eine eigene DB: kein Versions-Bump der Haupt-DB, keine
+// Kopplung an Vault-Sync, verlustfrei löschbar.
+// ------------------------------------------------------------
+const THUMB_DB_NAME = 'yanta-thumbs';
+let thumbDbPromise = null;
+
+function thumbDb() {
+  thumbDbPromise ||= new Promise((resolve) => {
+    try {
+      const req = indexedDB.open(THUMB_DB_NAME, 1);
+      req.onupgradeneeded = () => {
+        req.result.createObjectStore('thumbs', { keyPath: 'key' });
+      };
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => resolve(null);
+    } catch {
+      resolve(null);
+    }
+  });
+  return thumbDbPromise;
+}
+
+async function readPersistedThumb(key) {
+  const db = await thumbDb();
+  if (!db) return null;
+  return new Promise((resolve) => {
+    try {
+      const r = db.transaction('thumbs').objectStore('thumbs').get(key);
+      r.onsuccess = () => resolve(r.result || null);
+      r.onerror = () => resolve(null);
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+function writePersistedThumb(entry) {
+  thumbDb().then((db) => {
+    if (!db) return;
+    try {
+      db.transaction('thumbs', 'readwrite').objectStore('thumbs').put(entry);
+    } catch {}
+  });
+}
+
+function deletePersistedThumb(key) {
+  thumbDb().then((db) => {
+    if (!db) return;
+    try {
+      db.transaction('thumbs', 'readwrite').objectStore('thumbs').delete(key);
+    } catch {}
+  });
+}
+
+function drawingThumbSignature(d) {
+  const els = liveDrawingElements(d);
+  let maxUpdated = 0;
+  let versionSum = 0;
+  for (const el of els) {
+    maxUpdated = Math.max(maxUpdated, Number(el.updated || 0));
+    versionSum += Number(el.version || 0);
+  }
+  return [
+    'v1',
+    els.length,
+    versionSum,
+    maxUpdated,
+    currentExcalidrawTheme(),
+  ].join(':');
+}
+
 export async function drawingThumbnailUrl(noteId, drawingId) {
   const key = `${noteId}:${drawingId}`;
-  const cached = thumbnailCache.get(key);
-  if (cached) return cached;
-
   const d = getDrawing(noteId, drawingId);
-
-  if (!d) return '';
-
+  if (!d) {
+    return thumbnailCache.get(key)?.url || '';
+  }
   if (!liveDrawingElements(d).length) {
-    const fallback = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(`
+    const sig = 'empty:' + currentExcalidrawTheme();
+    const memo = thumbnailCache.get(key);
+    if (memo?.sig === sig) return memo.url;
+    const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(`
       <svg xmlns="http://www.w3.org/2000/svg" width="360" height="220" viewBox="0 0 360 220">
         <rect width="360" height="220" rx="14" fill="#121212"/>
         <text x="180" y="112" dominant-baseline="middle" text-anchor="middle" fill="#6ea8fe" font-family="system-ui" font-size="20">Drawing</text>
       </svg>
     `)}`;
-    thumbnailCache.set(key, fallback);
-    return fallback;
+    thumbnailCache.set(key, { sig, url });
+    return url;
   }
-
+  const sig = drawingThumbSignature(d);
+  /*
+    1. In-Memory-Memo (wird bei yanta-drawing-updated geleert).
+  */
+  const memo = thumbnailCache.get(key);
+  if (memo?.sig === sig) return memo.url;
+  /*
+    2. Persistenter Cache — der eigentliche Performance-Fix:
+    Nach Reload KEIN Excalidraw-Load, solange sich das Drawing
+    inhaltlich nicht geändert hat.
+  */
+  const persisted = await readPersistedThumb(key);
+  if (persisted?.sig === sig && persisted.url) {
+    thumbnailCache.set(key, { sig, url: persisted.url });
+    return persisted.url;
+  }
+  /*
+    3. Nur jetzt wirklich rendern (lädt Excalidraw lazy).
+  */
   try {
     const { exportToSvg } = await loadExcalidraw();
-
     const svg = await exportToSvg({
       elements: liveDrawingElements(d),
       appState: {
@@ -5809,14 +5906,12 @@ export async function drawingThumbnailUrl(noteId, drawingId) {
       },
       files: d.files || {},
     });
-
     svg.setAttribute('width', '360');
     svg.setAttribute('height', '220');
-
     const data = new XMLSerializer().serializeToString(svg);
     const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(data)}`;
-
-    thumbnailCache.set(key, url);
+    thumbnailCache.set(key, { sig, url });
+    writePersistedThumb({ key, sig, url, updated: Date.now() });
     return url;
   } catch {
     return '';

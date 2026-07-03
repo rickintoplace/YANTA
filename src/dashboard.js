@@ -81,6 +81,10 @@ import {
   getDashboardSelectedKeys,
 } from './dashboard-multiselect.js';
 
+import { videoEmbedUrl, videoThumbnailUrl } from './media/video-embeds.js';
+import { getImageObjectUrl, putImageObjectUrl } from './media/object-url-cache.js';
+import { EVT, emit, shouldIgnoreInvisibleSyncEvent } from './events.js';
+
   const MOBILE_MQ = window.matchMedia('(max-width: 880px)');
   
   const DASH_ORDER_STEP = 1000;
@@ -122,6 +126,13 @@ import {
   const DASHBOARD_DRAWING_THUMB_H = 220;
 
   const DASHBOARD_EMPTY_PENDING_MS = 12_000;
+
+/*
+    So viele Note-Cards werden nach einem Full-Render sofort hydriert,
+    ohne auf den IntersectionObserver zu warten. Deckt den sichtbaren
+    Viewport ab und macht das LCP-Bild so früh wie möglich anforderbar.
+  */
+  const EAGER_PREVIEW_COUNT = 6;
 
   function injectDashboardPreviewLoadingCss() {
     if (document.getElementById('yanta-dashboard-preview-loading-css')) return;
@@ -394,6 +405,8 @@ import {
     suppressOpenUntil: 0,
     paneMode: false,
 
+    layoutCommitInProgress: false,
+
     // Disable entry stagger while a View Transition is taking snapshots.
     // Otherwise target snapshots can be captured with opacity:0.
     suppressStagger: false,
@@ -401,6 +414,10 @@ import {
     // Temporarily suppress stagger after drag/drop reorder.
     // Otherwise a dashboard refresh after reordering replays the entry animation.
     suppressStaggerUntil: 0,
+
+    // Signatur des zuletzt voll gerenderten Dashboard-Zustands.
+    // Gleiche Signatur => kein replaceChildren(), nur gezielte Card-Refreshes.
+    lastStructureSig: '',
   };
 
   let dashboardStaggerIndex = 0;
@@ -1556,14 +1573,25 @@ function getDashboardItems() {
     });
 
     window.addEventListener('yanta-folder-updated', (e) => {
+      invalidateDashboardChildIndex();
+
+      if (shouldIgnoreInvisibleSyncEvent(e.detail)) {
+        return;
+      }
+
       if (!dashboard.visible) return;
-    
+
       const folderId = e.detail?.folderId;
       if (!folderId) return;
-    
+
       if (e.detail?.refreshDashboard === false) {
         syncDashboardFolderLabels(folderId);
+        return;
       }
+
+      renderDashboard({
+        animate: e.detail?.source !== 'sync',
+      });
     });
 
     window.addEventListener('yanta-dashboard-settings-changed', () => {
@@ -1719,33 +1747,49 @@ function getDashboardItems() {
     
       pendingBlankTap = null;
     }, true);
-  
-      window.addEventListener('yanta-note-updated', (e) => {
-        const noteId = e.detail?.noteId;
-        const reason = e.detail?.reason || '';
-        const source = e.detail?.source || '';
+      
+    window.addEventListener('yanta-note-updated', (e) => {
+      const noteId = e.detail?.noteId;
+      const reason = e.detail?.reason || '';
+      const source = e.detail?.source || '';
 
-        if (noteId) {
-          previewCache.delete(noteId);
-        }
+      invalidateDashboardChildIndex();
 
-        /*
-          Wenn der Task direkt im Dashboard angehakt wurde, rendert der
-          Checkbox-Handler nur die betroffene Card neu. Ein komplettes
-          renderDashboard() würde unnötig flackern und Stagger/Scroll resetten.
-        */
-        if (
-          dashboard.visible &&
-          reason === 'task-toggle' &&
-          source === 'dashboard'
-        ) {
-          return;
-        }
+      if (shouldIgnoreInvisibleSyncEvent(e.detail)) {
+        return;
+      }
 
-        if (dashboard.visible) {
-          renderDashboard();
-        }
-      });
+      /*
+        Layout-Änderungen dürfen keine Preview-Invalidierung auslösen.
+        Content-/Title-/Task-Änderungen weiterhin schon.
+      */
+      if (noteId && reason !== 'layout-change') {
+        previewCache.delete(noteId);
+      }
+
+      /*
+        Dashboard-eigene Layout-Änderungen sind bereits im DOM umgesetzt
+        oder werden explizit durch die jeweilige Aktion gerendert.
+        Kein Full-Render, keine Preview-Rehydration.
+      */
+      if (reason === 'layout-change' && source === 'dashboard') {
+        return;
+      }
+
+      if (
+        dashboard.visible &&
+        reason === 'task-toggle' &&
+        source === 'dashboard'
+      ) {
+        return;
+      }
+
+      if (dashboard.visible) {
+        renderDashboard({
+          animate: source !== 'sync',
+        });
+      }
+    });
   
       window.addEventListener('yanta-dashboard-rename-folder', (e) => {
         if (!dashboard.visible) return;
@@ -1834,14 +1878,15 @@ function getDashboardItems() {
     });
     window.addEventListener('yanta-calendar-updated', (e) => {
       if (!dashboard.visible) return;
-
       if (e.detail?.source === 'sync' && e.detail?.changed === false) {
         return;
       }
-
-      renderDashboard({
-        animate: e.detail?.source !== 'sync',
-      });
+      /*
+        Kalender-Änderungen ändern die Card-Struktur nicht — nur die
+        Event-Header in den Note-Previews. Gezielt Previews auffrischen
+        statt Full-Rerender.
+      */
+      refreshAllDashboardNotePreviews();
     });
 
     window.addEventListener('yanta-vault-hydrated', (e) => {
@@ -2169,44 +2214,185 @@ export async function showDashboardFromNote(noteId = state.currentNoteId, {
       rootMargin: '280px 0px',
     });
   }
+
+function dashboardStructureSignature(items) {
+  const { pinnedNotes, normalItems } = items;
+  const parts = [
+    'sig-v1',
+    dashboard.folderId || 'root',
+    JSON.stringify(dashboardCardDisplay),
+  ];
+  for (const item of [...pinnedNotes, ...normalItems]) {
+    if (item.kind === 'note') {
+      const n = item.note;
+      parts.push([
+        'n',
+        n.id,
+        n.title || '',
+        n.icon || '',
+        n.color || '',
+        n.pinned ? 1 : 0,
+        item.mirrored ? 1 : 0,
+        n.dashboardHeightPx ?? n.dashboardHeight ?? '',
+        isPublicShareActive(publicShareStateForNote(n.id)) ? 1 : 0,
+      ].join('\u0001'));
+      continue;
+    }
+    const f = item.folder;
+    /*
+      Folder-Cards rendern Mini-Previews ihrer Kinder.
+      Kinder-STRUKTUR (Keys, Titel, Icons, Farben) gehört deshalb in die
+      Signatur. Kinder-INHALT (note.updated) bewusst nicht — der wird
+      über refreshChangedDashboardCards() gezielt nachgezogen.
+    */
+    const children = folderPreviewItems(f.id)
+      .map((c) => `${c.kind}:${c.id}:${c.title}:${c.icon}:${c.color}`)
+      .join(',');
+    parts.push([
+      'f',
+      f.id,
+      f.name || '',
+      f.icon || '',
+      f.color || '',
+      f.dashboardHeightPx ?? f.dashboardHeight ?? '',
+      children,
+    ].join('\u0001'));
+  }
+  return parts.join('\n');
+}
+
+/*
+  Gezielter Refresh statt Full-Render:
+  Nur Cards/Mini-Zellen, deren note.updated sich seit dem letzten Render
+  geändert hat, werden neu hydriert. Alles andere bleibt unangetastet
+  (Scroll, Fokus, Animationszustand, bereits geladene Thumbnails).
+*/
+function refreshChangedDashboardCards() {
+  if (!root) return;
+  root
+    .querySelectorAll('.yanta-dash-card.note-card[data-note-id]')
+    .forEach((card) => {
+      const note = state.notes.get(card.dataset.noteId);
+      if (!note) return;
+      const stamp = String(note.updated || 0);
+      if (card.dataset.updatedStamp === stamp) return;
+      card.dataset.updatedStamp = stamp;
+      previewCache.delete(note.id);
+      previewObserver?.unobserve(card);
+      hydrateCardPreview(card, note.id).catch(() => {});
+    });
+  root
+    .querySelectorAll('[data-mini-note-preview]')
+    .forEach((host) => {
+      const id = host.dataset.miniNotePreview;
+      const note = state.notes.get(id);
+      if (!note) return;
+      const stamp = String(note.updated || 0);
+      if (host.dataset.updatedStamp === stamp) return;
+      previewCache.delete(id);
+      hydrateFolderNotePreviewCell(host, id).catch(() => {});
+    });
+}
+
+/*
+  Für Kalender-Änderungen: Event-Header hängen nicht an note.updated,
+  deshalb hier alle sichtbaren Note-Previews auffrischen — ohne die
+  Card-Struktur anzufassen.
+*/
+function refreshAllDashboardNotePreviews() {
+  if (!root) return;
+  root
+    .querySelectorAll('.yanta-dash-card.note-card[data-note-id]')
+    .forEach((card) => {
+      const id = card.dataset.noteId;
+      previewCache.delete(id);
+      previewObserver?.unobserve(card);
+      hydrateCardPreview(card, id).catch(() => {});
+    });
+}
+
+/*
+  Nach Drag-Reorder: persistGridOrder() ändert dashboardOrder + updated
+  im State, aber der DOM ist bereits korrekt. Baseline synchronisieren,
+  damit der nächste renderDashboard()-Aufruf kein unnötiges Full-Render
+  und keine Preview-Rehydration auslöst.
+*/
+function syncDashboardRenderBaseline() {
+  invalidateDashboardChildIndex();
+  dashboard.lastStructureSig = dashboardStructureSignature(getDashboardItems());
+  root
+    ?.querySelectorAll('.yanta-dash-card.note-card[data-note-id]')
+    ?.forEach((card) => {
+      const note = state.notes.get(card.dataset.noteId);
+      if (note) {
+        card.dataset.updatedStamp = String(note.updated || 0);
+      }
+    });
+}
+
+/*
+  LCP-Fix: die ersten sichtbaren Note-Cards sofort hydrieren,
+  ohne auf den IntersectionObserver zu warten.
+*/
+function hydrateAboveTheFoldPreviews() {
+  if (!root) return;
+  const limit = window.innerHeight + 200;
+  let eager = 0;
+  for (const card of root.querySelectorAll('.yanta-dash-card.note-card[data-note-id]')) {
+    if (eager >= EAGER_PREVIEW_COUNT) break;
+    const r = card.getBoundingClientRect();
+    if (r.top > limit) break;
+    previewObserver?.unobserve(card);
+    hydrateCardPreview(card, card.dataset.noteId, { eager: true }).catch(() => {});
+    eager++;
+  }
+}
   
-function renderDashboard({ animate = true } = {}) {
+function renderDashboard({ animate = true, force = false } = {}) {
   if (dashboard.dragging) {
     forceCancelDashboardDrag('render-dashboard');
   }
-
   ensureDashboardRoot();
-  setupPreviewObserver();
 
+  if (dashboard.layoutCommitInProgress && !force) {
+    return;
+  }
+
+  /*
+    Der Child-Index wurde bisher praktisch nie invalidiert (Bug):
+    Folder-Previews konnten veralten. Jetzt: pro Render frisch.
+  */
+  invalidateDashboardChildIndex();
+  const items = getDashboardItems();
+  const structureSig = dashboardStructureSignature(items);
+  const hasPage = !!root.querySelector('.yanta-dashboard-page');
+  if (!force && hasPage && structureSig === dashboard.lastStructureSig) {
+    /*
+      Struktur unverändert => KEIN replaceChildren().
+      Scroll, Fokus, geladene Thumbnails und Animationszustand bleiben.
+      Nur inhaltlich geänderte Cards werden gezielt neu hydriert.
+      Das ist der Fix für den störenden Full-Rerender beim Zurückkommen
+      aus einer Note.
+    */
+    refreshChangedDashboardCards();
+    scheduleDashboardVisibleNoteAutofit({
+      delay: 220,
+    });
+    return;
+  }
+  dashboard.lastStructureSig = structureSig;
+  setupPreviewObserver();
   if (!animate) {
     suppressDashboardAnimationsFor(1200);
   }
-
   dashboardStaggerIndex = 0;
   root.replaceChildren();
-
-  /*
-    Folder view transitions need a real surface that is replaced on each
-    dashboard render, similar to how Notes transition between panes <-> card.
-    Do not transition #dashboard itself; it is reused.
-  */
   const page = el('div', { class: 'yanta-dashboard-page' });
-
   page.dataset.notesHeader = dashboardCardDisplay.notesShowHeader ? '1' : '0';
   page.dataset.foldersHeader = dashboardCardDisplay.foldersShowHeader ? '1' : '0';
-
   page.append(renderDashboardHeader());
-
-  const { pinnedNotes, normalItems } = getDashboardItems();
-
+  const { pinnedNotes, normalItems } = items;
   const body = el('div', { class: 'yanta-dashboard-body' });
-
-  /*
-    Keine sichtbaren Section-Titles mehr.
-    Gepinnte Items stehen einfach oben.
-    Im Root sind gepinnte Notes Shortcuts aus dem ganzen Vault.
-    In Foldern sind gepinnte Notes nur lokale Top-Items.
-  */
   if (!pinnedNotes.length && !normalItems.length) {
     body.append(
       dashboard.folderId
@@ -2217,15 +2403,13 @@ function renderDashboard({ animate = true } = {}) {
     if (pinnedNotes.length) {
       body.append(renderGrid(pinnedNotes, { section: 'pinned' }));
     }
-
     if (normalItems.length) {
       body.append(renderGrid(normalItems, { section: 'normal' }));
     }
   }
-
   page.append(body);
   root.append(page);
-
+  hydrateAboveTheFoldPreviews();
   scheduleDashboardVisibleNoteAutofit({
     delay: 220,
   });
@@ -2433,6 +2617,11 @@ function renderCard(item, { section }) {
   card.style.viewTransitionName = '';
 
   card.dataset.effectiveHeight = String(heightPx);
+
+  if (item.kind === 'note') {
+    card.dataset.updatedStamp = String(item.note.updated || 0);
+  }
+
   card.tabIndex = 0;
 
   if (item.kind === 'folder') {
@@ -2678,22 +2867,24 @@ function renderCardActions(item) {
   async function toggleDashboardPin(noteId) {
     const note = state.notes.get(noteId);
     if (!note) return;
-  
+
+    const t = Date.now();
+
     note.pinned = !note.pinned;
-    note.updated = Date.now();
-  
+    note.layoutUpdated = t;
+
     if (note.pinned && note.dashboardPinnedOrder == null) {
-      note.dashboardPinnedOrder = Date.now();
+      note.dashboardPinnedOrder = t;
     }
-  
+
     await store.notes.put(note);
-  
-    previewCache.delete(noteId);
-  
-    window.dispatchEvent(new CustomEvent('yanta-note-updated', {
-      detail: { noteId },
-    }));
-  
+
+    emit(EVT.NOTE_UPDATED, {
+      noteId,
+      reason: 'layout-change',
+      source: 'dashboard',
+    });
+
     renderDashboard();
   }
   
@@ -2760,9 +2951,11 @@ function renderCardActions(item) {
   
     rebuildWikilinkIndex();
   
-    window.dispatchEvent(new CustomEvent('yanta-note-updated', {
-      detail: { noteId: id },
-    }));
+    emit(EVT.NOTE_UPDATED, {
+      noteId: id,
+      reason: 'note-created',
+      source: 'dashboard',
+    });
   
     toast('Note duplicated', 'success');
     renderDashboard();
@@ -2848,9 +3041,11 @@ function renderCardActions(item) {
   
     previewCache.delete(noteId);
   
-    window.dispatchEvent(new CustomEvent('yanta-note-updated', {
-      detail: { noteId },
-    }));
+    emit(EVT.NOTE_UPDATED, {
+      noteId,
+      reason: 'metadata-save',
+      source: 'dashboard',
+    });
   
     toast('Moved to root', 'success');
     renderDashboard();
@@ -3323,6 +3518,7 @@ async function hydrateFolderNotePreviewCell(host, noteId) {
   const note = state.notes.get(noteId);
 
   if (!note || !host) return;
+  host.dataset.updatedStamp = String(note.updated || 0);
 
   /*
     Nicht vor dem await auf isConnected abbrechen:
@@ -3513,26 +3709,25 @@ function renderFolderMiniDrawing(noteId, block) {
   // Preview extraction
   // ============================================================
   
-  async function hydrateCardPreview(card, noteId) {
+async function hydrateCardPreview(card, noteId, { eager = false } = {}) {
     const note = state.notes.get(noteId);
     if (!note || !card.isConnected) return;
-  
+
+    card.dataset.updatedStamp = String(note.updated || 0);
+
     const host = card.querySelector('[data-preview-host]');
     if (!host) return;
-  
+
     const [preview, eventHeader] = await Promise.all([
       getDashboardPreview(note),
       dashboardLinkedEventHeader(note.id),
     ]);
-
+    if (!card.isConnected || !host.isConnected) return;
     host.classList.toggle('is-media-only', !!preview.mediaOnly && !eventHeader);
-
     host.replaceChildren();
-
     if (eventHeader) {
       host.append(eventHeader);
     }
-
     if (!preview.blocks.length && !preview.badges.length && !eventHeader) {
       if (dashboardNoteLooksTemporarilyEmpty(note, {
         preview,
@@ -3548,11 +3743,10 @@ function renderFolderMiniDrawing(noteId, block) {
           class: 'yanta-dash-empty-preview',
         }, 'Empty note'));
       }
-
       fitDashboardNoteCardToRenderedPreview(card, note, host);
       return;
     }
-  
+
     for (const block of preview.blocks) {
       if (block.type === 'heading') {
         host.append(el('div', {
@@ -3560,65 +3754,64 @@ function renderFolderMiniDrawing(noteId, block) {
         }, block.text));
         continue;
       }
-  
+
       if (block.type === 'text') {
         host.append(el('div', {
           class: 'yanta-dash-preview-line',
         }, block.text));
         continue;
       }
-  
+
       if (block.type === 'quote') {
         host.append(el('div', {
           class: 'yanta-dash-preview-line is-quote',
         }, block.text));
         continue;
       }
-  
+
       if (block.type === 'list') {
         host.append(el('div', {
           class: 'yanta-dash-preview-line is-list',
         }, block.text));
         continue;
       }
-  
+
       if (block.type === 'task') {
         host.append(renderDashboardTask(noteId, block));
         continue;
       }
-  
+
       if (block.type === 'image') {
-        host.append(await renderDashboardImage(block));
+        host.append(await renderDashboardImage(block, { eager }));
         continue;
       }
-  
+
       if (block.type === 'video') {
         host.append(renderDashboardVideo(block));
         continue;
       }
-  
+
       if (block.type === 'drawing') {
-        host.append(renderDashboardDrawing(noteId, block));
+        host.append(renderDashboardDrawing(noteId, block, { eager }));
         continue;
       }
     }
-  
+
     if (preview.badges.length) {
       const badges = el('div', { class: 'yanta-dash-badges' });
-  
+
       for (const badge of preview.badges) {
         const pill = el('span', {
           class: 'yanta-dash-badge',
           title: badge.label,
         });
-  
+
         pill.innerHTML = lucide(badge.icon, 12);
         badges.append(pill);
       }
-  
+
       host.append(badges);
     }
-
     fitDashboardNoteCardToRenderedPreview(card, note, host);
   }
 
@@ -3665,17 +3858,19 @@ function renderFolderMiniDrawing(noteId, block) {
     return row;
   }
   
-  async function renderDashboardImage(block) {
+async function renderDashboardImage(block, { eager = false } = {}) {
     const wrap = el('div', { class: 'yanta-dash-media yanta-dash-image' });
-  
+
     const img = el('img', {
       alt: block.alt || '',
-      loading: 'lazy',
+      loading: eager ? 'eager' : 'lazy',
+      fetchpriority: eager ? 'high' : 'auto',
+      decoding: 'async',
       draggable: 'false',
     });
-  
+
     const src = await resolveDashboardImageUrl(block.url);
-  
+
     if (src) {
       img.src = src;
       wrap.append(img);
@@ -3684,7 +3879,7 @@ function renderFolderMiniDrawing(noteId, block) {
         class: 'yanta-dash-drawing-thumb',
       }, 'Image unavailable'));
     }
-  
+
     return wrap;
   }
   
@@ -3789,36 +3984,27 @@ async function replaceWithFadeInImage(wrap, img) {
   });
 }
 
-function renderDashboardDrawing(noteId, block) {
+function renderDashboardDrawing(noteId, block, { eager = false } = {}) {
   const wrap = el('div', {
     class: 'yanta-dash-media yanta-dash-drawing-thumb is-loading',
   });
-
   reserveDashboardDrawingPreviewSpace(wrap);
-
-  /*
-    Dezenter leerer Placeholder:
-    Fläche ist reserviert, aber kein sichtbarer Text/Icon.
-  */
   wrap.append(el('div', {
     class: 'yanta-dash-drawing-placeholder',
     'aria-hidden': 'true',
   }));
-
   import('./draw.js')
     .then(async ({ drawingThumbnailUrl }) => {
       const hit = findDrawing(block.id, noteId);
-
       if (!hit || !wrap.isConnected) return;
-
       const url = await drawingThumbnailUrl(hit.noteId, block.id);
-
       if (!url || !wrap.isConnected) return;
-
       const img = el('img', {
         src: url,
         alt: 'Drawing',
         loading: 'eager',
+        fetchpriority: eager ? 'high' : 'auto',
+        decoding: 'async',
         draggable: 'false',
         class: 'yanta-dash-drawing-img',
         style: {
@@ -3829,51 +4015,43 @@ function renderDashboardDrawing(noteId, block) {
           border: '0',
         },
       });
-
       await replaceWithFadeInImage(wrap, img);
     })
     .catch((err) => {
       console.warn('[YANTA Dashboard] Drawing thumbnail failed', err);
-
       if (!wrap.isConnected) return;
-
       wrap.classList.remove('is-loading');
-
       wrap.replaceChildren(
         el('div', {
           class: 'yanta-dash-drawing-placeholder is-error',
         }, 'Drawing')
       );
     });
-
   return wrap;
 }
   
-  async function resolveDashboardImageUrl(url) {
-    const raw = String(url || '');
-  
-    if (!raw.startsWith('yanta-img://')) {
-      return raw;
-    }
-  
-    const id = raw.slice('yanta-img://'.length);
-  
-    if (state.imageBlobs.has(id)) {
-      return state.imageBlobs.get(id);
-    }
-  
-    try {
-      const rec = await store.images.get(id);
-  
-      if (rec?.blob) {
-        const obj = URL.createObjectURL(rec.blob);
-        state.imageBlobs.set(id, obj);
-        return obj;
-      }
-    } catch {}
-  
-    return '';
+async function resolveDashboardImageUrl(url) {
+  const raw = String(url || '');
+
+  if (!raw.startsWith('yanta-img://')) {
+    return raw;
   }
+
+  const id = raw.slice('yanta-img://'.length);
+
+  const cached = getImageObjectUrl(id);
+  if (cached) return cached;
+
+  try {
+    const rec = await store.images.get(id);
+
+    if (rec?.blob) {
+      return putImageObjectUrl(id, rec.blob);
+    }
+  } catch {}
+
+  return '';
+}
 
   async function getDashboardPreview(note) {
     const cached = previewCache.get(note.id);
@@ -4194,78 +4372,6 @@ async function openDashboardCalendarEventFromHeader(header) {
     toast('Could not open calendar event', 'error');
     return false;
   }
-}
-
-function youtubeVideoId(url) {
-  const s = String(url || '').trim();
-
-  try {
-    const u = new URL(s, location.href);
-    const host = u.hostname.replace(/^www\./, '');
-
-    if (
-      host === 'youtube.com' ||
-      host === 'm.youtube.com' ||
-      host === 'youtube-nocookie.com'
-    ) {
-      if (u.pathname === '/watch') {
-        return u.searchParams.get('v') || '';
-      }
-
-      const embed = /^\/embed\/([a-zA-Z0-9_-]{6,})/.exec(u.pathname);
-      if (embed) return embed[1];
-
-      const shorts = /^\/shorts\/([a-zA-Z0-9_-]{6,})/.exec(u.pathname);
-      if (shorts) return shorts[1];
-    }
-
-    if (host === 'youtu.be') {
-      return u.pathname.replace(/^\//, '').split('/')[0] || '';
-    }
-  } catch {}
-
-  let m;
-
-  if ((m = /(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{6,})/.exec(s))) {
-    return m[1];
-  }
-
-  if ((m = /(?:youtube\.com|youtube-nocookie\.com)\/embed\/([a-zA-Z0-9_-]{6,})/.exec(s))) {
-    return m[1];
-  }
-
-  if ((m = /youtube\.com\/shorts\/([a-zA-Z0-9_-]{6,})/.exec(s))) {
-    return m[1];
-  }
-
-  return '';
-}
-
-function videoEmbedUrl(url) {
-  const s = String(url || '').trim();
-
-  const yt = youtubeVideoId(s);
-  if (yt) return `https://www.youtube-nocookie.com/embed/${yt}`;
-
-  let m;
-
-  if ((m = /vimeo\.com\/(\d+)/.exec(s))) {
-    return `https://player.vimeo.com/video/${m[1]}`;
-  }
-
-  return '';
-}
-
-function videoThumbnailUrl(url) {
-  const yt = youtubeVideoId(url);
-
-  if (yt) {
-    return `https://i.ytimg.com/vi/${yt}/hqdefault.jpg`;
-  }
-
-  // Vimeo-Thumbnails brauchen normalerweise einen API/oEmbed-Request.
-  // Daher für Vimeo erstmal kein Thumbnail.
-  return '';
 }
 
   function cleanInlineText(s) {
@@ -6684,10 +6790,18 @@ async function finishCardDrag() {
 
     await animateCloneToRect(clone, finalRect);
 
-    await persistGridOrder(grid, grid.dataset.section || d.section);
+    dashboard.layoutCommitInProgress = true;
+
+    try {
+      await persistGridOrder(grid, grid.dataset.section || d.section);
+      syncDashboardRenderBaseline();
+    } finally {
+      dashboard.layoutCommitInProgress = false;
+    }
 
     dashboard.selectedKey = source.dataset.key || d.key;
     source.classList.add('selected');
+
   } catch (err) {
     console.error('[YANTA Dashboard] Could not finish drag', err);
     toast('Could not complete drag', 'error');
@@ -6743,36 +6857,66 @@ async function persistGridOrder(grid, section) {
     .filter((card) => !card.classList.contains('drag-clone'));
 
   const writes = [];
+  const changedNotes = [];
+  const changedFolders = [];
+
   const t = Date.now();
   let order = DASH_ORDER_STEP;
 
   for (const card of cards) {
     const { kind, id } = parseItemKey(card.dataset.key);
+
     if (kind === 'note') {
       const note = state.notes.get(id);
       if (!note) continue;
+
       if (section === 'pinned') {
         note.dashboardPinnedOrder = order;
       } else {
         note.dashboardOrder = order;
       }
-      note.updated = t;
+
+      note.layoutUpdated = t;
+
       writes.push(store.notes.put(note));
+      changedNotes.push(id);
     } else if (kind === 'folder') {
       const folder = state.folders.get(id);
       if (!folder) continue;
+
       folder.dashboardOrder = order;
-      folder.updated = t;
+      folder.layoutUpdated = t;
+
       writes.push(store.folders.put(folder));
+      changedFolders.push(id);
     }
+
     order += DASH_ORDER_STEP;
   }
 
   await Promise.all(writes);
+
   /*
-    Absichtlich KEIN yanta-dashboard-refresh:
+    Absichtlich kein yanta-dashboard-refresh:
     DOM-Reihenfolge ist nach dem Drag bereits korrekt.
+    Events sind aber wichtig für Sync/Index-Bridge.
   */
+  for (const noteId of changedNotes) {
+    emit(EVT.NOTE_UPDATED, {
+      noteId,
+      reason: 'layout-change',
+      source: 'dashboard',
+    });
+  }
+
+  for (const folderId of changedFolders) {
+    emit(EVT.FOLDER_UPDATED, {
+      folderId,
+      reason: 'layout-change',
+      source: 'dashboard',
+      refreshDashboard: false,
+    });
+  }
 }
 
 function bindResizeHandle(handle, key) {
@@ -7078,48 +7222,65 @@ function bindResizeHandle(handle, key) {
   }
 }
   
-  async function setItemHeightPx(key, heightPx) {
-    const { kind, id } = parseItemKey(key);
-  
-    const clean =
-      heightPx == null
-        ? null
-        : Math.max(
-            MIN_CARD_HEIGHT,
-            Math.min(MAX_CARD_HEIGHT, Math.round(heightPx))
-          );
-  
-        if (kind === 'note') {
-          const note = state.notes.get(id);
-          if (!note) return;
+async function setItemHeightPx(key, heightPx) {
+  const { kind, id } = parseItemKey(key);
 
-          if (clean == null) {
-            delete note.dashboardHeightPx;
-            delete note.dashboardHeight;
-          } else {
-            note.dashboardHeightPx = clean;
-            delete note.dashboardHeight;
-          }
+  const clean =
+    heightPx == null
+      ? null
+      : Math.max(
+          MIN_CARD_HEIGHT,
+          Math.min(MAX_CARD_HEIGHT, Math.round(heightPx))
+        );
 
-          note.updated = Date.now();
+  const t = Date.now();
 
-          await store.notes.put(note);
-        }
-  
-    if (kind === 'folder') {
-      const folder = state.folders.get(id);
-      if (!folder) return;
+  if (kind === 'note') {
+    const note = state.notes.get(id);
+    if (!note) return;
 
-      if (clean == null) {
-        delete folder.dashboardHeightPx;
-        delete folder.dashboardHeight;
-      } else {
-        folder.dashboardHeightPx = clean;
-        delete folder.dashboardHeight;
-      }
-
-      folder.updated = Date.now();
-
-      await store.folders.put(folder);
+    if (clean == null) {
+      delete note.dashboardHeightPx;
+      delete note.dashboardHeight;
+    } else {
+      note.dashboardHeightPx = clean;
+      delete note.dashboardHeight;
     }
+
+    note.layoutUpdated = t;
+
+    await store.notes.put(note);
+
+    emit(EVT.NOTE_UPDATED, {
+      noteId: id,
+      reason: 'layout-change',
+      source: 'dashboard',
+    });
+
+    return;
   }
+
+  if (kind === 'folder') {
+    const folder = state.folders.get(id);
+    if (!folder) return;
+
+    if (clean == null) {
+      delete folder.dashboardHeightPx;
+      delete folder.dashboardHeight;
+    } else {
+      folder.dashboardHeightPx = clean;
+      delete folder.dashboardHeight;
+    }
+
+    folder.layoutUpdated = t;
+
+    await store.folders.put(folder);
+
+    emit(EVT.FOLDER_UPDATED, {
+      folderId: id,
+      reason: 'layout-change',
+      source: 'dashboard',
+      refreshDashboard: false,
+    });
+  }
+}

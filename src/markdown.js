@@ -10,6 +10,8 @@ import DOMPurify from 'dompurify';
 import { state, store, escapeHtml, escapeAttr, decodeEntities, safeUrl, lucide, safeCssColor } from './core.js';
 import { wikilinkIndex } from './features-state.js';
 import { noteMarkdown } from './yjs.js';
+import { videoEmbedUrl, audioEmbedUrl } from './media/video-embeds.js';
+import { getImageObjectUrl, putImageObjectUrl } from './media/object-url-cache.js';
 
 function hydrateLucideHost(host, name, size = 16) {
   host.replaceChildren();
@@ -250,14 +252,6 @@ export function classifyLine(line, ctx) {
   return { type: 'p' };
 }
 
-function videoEmbedUrl(url) {
-  let m;
-  if ((m = /(?:youtube\.com\/watch\?v=|youtu\.be\/)([a-zA-Z0-9_-]{6,})/.exec(url))) return `https://www.youtube-nocookie.com/embed/${m[1]}`;
-  if ((m = /youtube\.com\/embed\/([a-zA-Z0-9_-]{6,})/.exec(url))) return `https://www.youtube-nocookie.com/embed/${m[1]}`;
-  if ((m = /vimeo\.com\/(\d+)/.exec(url))) return `https://player.vimeo.com/video/${m[1]}`;
-  return null;
-}
-
 function timestampToSeconds(raw = '') {
   const parts = String(raw || '')
     .trim()
@@ -296,16 +290,6 @@ function timestampToSeconds(raw = '') {
   }
 
   return null;
-}
-
-function audioEmbedUrl(url) {
-  const s = String(url || '').trim();
-
-  if (/\.(mp3|m4a|aac|ogg|oga|opus|wav)(?:$|[?#])/i.test(s)) {
-    return s;
-  }
-
-  return '';
 }
 
 function markdownHasPlayableMedia(md = '') {
@@ -358,7 +342,6 @@ function withMediaTimestampRenderFlag(md, fn) {
   }
 }
 
-
 function resolveImageUrl(url) {
   const ctx = currentRenderContext();
 
@@ -368,13 +351,15 @@ function resolveImageUrl(url) {
 
   if (url.startsWith('yanta-img://')) {
     const id = url.slice('yanta-img://'.length);
-    if (state.imageBlobs.has(id)) return state.imageBlobs.get(id);
+
+    const cached = getImageObjectUrl(id);
+    if (cached) return cached;
+
     if (!state.imagesMeta.has(id)) return null;
 
     store.images.get(id).then((rec) => {
-      if (rec && rec.blob) {
-        const u = URL.createObjectURL(rec.blob);
-        state.imageBlobs.set(id, u);
+      if (rec?.blob) {
+        putImageObjectUrl(id, rec.blob);
         rerenderHook?.();
       }
     });
@@ -608,7 +593,7 @@ export function renderDrawEmbedHtml(id, label = 'Drawing', surface = 'preview') 
       <div class="yanta-draw-embed-meta" data-draw-info>draw://${escapeHtml(cleanId)}</div>
 
       <button type="button" class="btn yanta-draw-mobile-done" data-draw-action="mobile-done" title="Leave drawing mode">
-        ${previewLucide('check', 14)} Done
+        ${previewLucide('check', 14)}
       </button>
 
       <div class="yanta-draw-embed-actions">

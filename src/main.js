@@ -197,6 +197,8 @@ import {
   openPresentationPairingInputModal,
 } from './presentation/presentation-pairing.js';
 
+import { revokeImageObjectUrl } from './media/object-url-cache.js';
+
 let sharePreviewLocked = false;
 
 let noteTitleSaveTimer = 0;
@@ -1223,6 +1225,7 @@ function sanitizeStartupNoteMeta(note) {
     publicShare: sanitizeStartupPublicShareMeta(note.publicShare),
     created: Number(note.created || Date.now()),
     updated: Number(note.updated || Date.now()),
+    layoutUpdated: finiteNumberOrUndefinedForStartupHydrate(note.layoutUpdated),
     bodyMigrated: note.bodyMigrated === true ? true : undefined,
 
     dashboardOrder: finiteNumberOrUndefinedForStartupHydrate(note.dashboardOrder),
@@ -1258,6 +1261,7 @@ function sanitizeStartupFolderMeta(folder) {
     color: folder.color || undefined,
     created: Number(folder.created || Date.now()),
     updated: Number(folder.updated || folder.created || Date.now()),
+    layoutUpdated: finiteNumberOrUndefinedForStartupHydrate(folder.layoutUpdated),
 
     dashboardOrder: finiteNumberOrUndefinedForStartupHydrate(folder.dashboardOrder),
     dashboardHeightPx: finiteNumberOrUndefinedForStartupHydrate(folder.dashboardHeightPx),
@@ -1359,15 +1363,7 @@ async function hydrateLocalMetadataFromVaultDocOnStartup() {
 
       state.imagesMeta.delete(id);
 
-      const url = state.imageBlobs.get(id);
-
-      if (url) {
-        try {
-          URL.revokeObjectURL(url);
-        } catch {}
-      }
-
-      state.imageBlobs.delete(id);
+      revokeImageObjectUrl(id);
 
       try {
         await store.images.del(id);
@@ -2947,7 +2943,27 @@ function bindEvents() {
   setInterval(() => store.settings.set('expandedFolders', [...state.expandedFolders]), 5000);
 
   // Unload
-  window.addEventListener('beforeunload', () => { if (state.dirty) saveCurrentNote(); });
+  // Primary flush triggers. beforeunload is too late/unreliable for async writes.
+  const flushOnPageLifecycleEnd = () => {
+    flushCurrentNoteTitleSave().catch((err) => {
+      console.warn('[YANTA] lifecycle title flush failed', err);
+    });
+  };
+
+  window.addEventListener('pagehide', flushOnPageLifecycleEnd);
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      flushOnPageLifecycleEnd();
+    }
+  });
+
+  // Best-effort fallback only. Do not rely on async completion here.
+  window.addEventListener('beforeunload', () => {
+    if (!state.dirty) return;
+
+    saveCurrentNote().catch(() => {});
+  });
 }
 
 function replaceEditorRange(from, to, insert) {

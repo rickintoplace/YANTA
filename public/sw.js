@@ -19,7 +19,7 @@ const APP_SHELL = [
   '/apple-touch-icon.png',
   '/android-chrome-192x192.png',
   '/android-chrome-512x512.png',
-  '/boot-appearance.js',
+  // '/boot-appearance.js',
 ];
 
 self.addEventListener('install', (event) => {

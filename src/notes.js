@@ -263,7 +263,7 @@ export async function removePristineWelcomeVaultIfPresent({ reason = 'unknown' }
 
 setMarkdownRerenderHook(() => { schedulePreview(); });
 
-function searchHaystack(note, body = '') {
+export function searchHaystack(note, body = '') {
   return [
     note?.title || '',
     (note?.tags || []).join(' '),

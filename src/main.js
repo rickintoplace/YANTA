@@ -3,7 +3,7 @@
 // pane divider, history navigation, view modes.
 // ============================================================
 
-import { $, state, store, openDB, toast, cssColorToHex, safeCssColor, lucide, lucideCalendarDay } from './core.js';
+import { $, state, store, openDB, toast, cssColorToHex, safeCssColor, lucide, lucideCalendarDay, debounce } from './core.js';
 import {
   loadAppearance,
   watchSystemTheme,
@@ -23,6 +23,7 @@ import {
   addTag,
   createNoteWithTitle,
   toggleTaskLineInNote,
+  searchHaystack,
 } from './notes.js';
 import { renderTree, renderTagCloud, showMenu, closeMenu, currentFolderForNew } from './tree.js';
 import { renderBacklinks, renderOutline, setupWikilinkHover, handleWikilinkClick, openPalette, closePalette, buildCommandList, paletteMove, paletteAccept, paletteFilter } from './features.js';
@@ -34,7 +35,7 @@ import { exportAsZip, exportNoteAsMd, exportBundle, exportEveryNoteMd, openExpor
 import { syncRestore, syncConnect, syncDisconnect, syncFull, openSyncSetup, closeSyncSetup, syncMenu } from './sync.js';
 import { openGraph, closeGraph, setupGraphInteractions, openGraphPane } from './graph.js';
 import { wikilinkIndex } from './features-state.js';
-import { getNoteDoc, noteMarkdown, drawingsTextForNote, citationsTextForNote } from './yjs.js';
+import { getNoteDoc, noteMarkdown } from './yjs.js';
 import {
   closeShareModal,
   stopSharing,
@@ -1123,26 +1124,52 @@ window.yantaSync2Debug = async () => {
   return result;
 };
 
-function searchHaystack(note, body = '') {
-  return [
-    note?.title || '',
-    (note?.tags || []).join(' '),
-    body || '',
-    note?.id ? drawingsTextForNote(note.id) : '',
-    note?.id ? citationsTextForNote(note.id) : '',
-  ].join(' ').toLowerCase();
-}
+const SEARCH_INDEX_BATCH = 12;
 
-async function buildSearchIndex() {
+function buildSearchIndexInBackground() {
+  // Sofort: schneller Titel/Tags-Index, damit Suche ab Frame 1 funktioniert.
   for (const note of state.notes.values()) {
-    try {
-      const entry = getNoteDoc(note.id);
-      await entry.ready;
-      state.searchIndex.set(note.id, searchHaystack(note, noteMarkdown(note.id)));
-    } catch {
+    if (!state.searchIndex.has(note.id)) {
       state.searchIndex.set(note.id, searchHaystack(note, ''));
     }
   }
+
+  const ids = [...state.notes.keys()];
+  let i = 0;
+
+  const scheduleNext = (fn) => {
+    if ('requestIdleCallback' in window) {
+      requestIdleCallback(fn, { timeout: 800 });
+    } else {
+      setTimeout(fn, 24);
+    }
+  };
+
+  return new Promise((resolve) => {
+    const step = async () => {
+      const slice = ids.slice(i, i + SEARCH_INDEX_BATCH);
+      i += SEARCH_INDEX_BATCH;
+
+      await Promise.all(slice.map(async (id) => {
+        const note = state.notes.get(id);
+        if (!note) return;
+        try {
+          const entry = getNoteDoc(id);
+          await entry.ready;
+          state.searchIndex.set(id, searchHaystack(note, noteMarkdown(id)));
+        } catch {
+          state.searchIndex.set(id, searchHaystack(note, ''));
+        }
+      }));
+
+      if (i < ids.length) {
+        scheduleNext(step);
+      } else {
+        resolve();
+      }
+    };
+    scheduleNext(step);
+  });
 }
 
 function cleanUndefinedForStartupHydrate(obj = {}) {
@@ -1780,7 +1807,7 @@ async function init() {
   setView(initialView, { persist: false });
 
   rebuildWikilinkIndex();
-  await buildSearchIndex();
+  buildSearchIndexInBackground();
 
   buildCommandList({
     openImageModal,
@@ -2360,18 +2387,6 @@ function closeRightPane(kind = 'preview') {
 }
 
 function bindEvents() {
-  setupNoteChrome({
-    openShare: openUnifiedShareModal,
-    openImage: openImageModal,
-    openCitation: openCitationManager,
-    openIcon: openIconInsertPicker,
-    createDrawing: createDrawingAndInsert,
-    deleteNote: deleteCurrentNote,
-    exportNote: (note) => {
-      const n = note || state.notes.get(state.currentNoteId);
-      if (n) exportNoteAsMd(n);
-    },
-  });
 
   // title + tags
   $('noteTitle')?.addEventListener('input', () => {
@@ -2481,22 +2496,22 @@ function bindEvents() {
     }
   );
 
-  renderSidebarFootActions(
-    $('sidebarFoot') || document.querySelector('.sidebar-foot'),
-    createSidebarFootActions({
-      openPalette: () => openPalette('commands'),
-      openGraph,
-      openCalendar: openCalendarRoute,
-      openSources: () => openSourcesRoute('sidebar-foot'),
-      openAssistant: openAssistantSmart,
-      openMore: openSidebarFootMenu,
-    }),
-    {
-      afterAction: () => {
-        closeMobileSidebarSafe();
-      },
-    }
-  );
+  // renderSidebarFootActions(
+  //   $('sidebarFoot') || document.querySelector('.sidebar-foot'),
+  //   createSidebarFootActions({
+  //     openPalette: () => openPalette('commands'),
+  //     openGraph,
+  //     openCalendar: openCalendarRoute,
+  //     openSources: () => openSourcesRoute('sidebar-foot'),
+  //     openAssistant: openAssistantSmart,
+  //     openMore: openSidebarFootMenu,
+  //   }),
+  //   {
+  //     afterAction: () => {
+  //       closeMobileSidebarSafe();
+  //     },
+  //   }
+  // );
 
   mountSidebarLegalLinks({
     container: document.querySelector('.sidebar'),
@@ -2596,7 +2611,11 @@ function bindEvents() {
   });
 
   // Search
-  $('search').addEventListener('input', (e) => { state.searchQuery = e.target.value; renderTree(); });
+  const renderTreeDebounced = debounce(() => renderTree(), 120);
+  $('search').addEventListener('input', (e) => {
+    state.searchQuery = e.target.value;
+    renderTreeDebounced();
+  });
 
   window.addEventListener('yanta-expand-sidebar-search', () => {
     expandSidebarForSearch();

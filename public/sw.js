@@ -5,7 +5,7 @@
 // User data is in IndexedDB/Yjs, not in this cache.
 // ============================================================
 
-const CACHE_VERSION = 'yanta-app-v13';
+const CACHE_VERSION = 'yanta-app-v14';
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -81,15 +81,16 @@ self.addEventListener('fetch', (event) => {
     event.respondWith(
       fetch(req)
         .then((res) => {
-          const copy = res.clone();
-          caches.open(CACHE_VERSION).then((cache) => {
-            cache.put('/index.html', copy).catch(() => {});
-          });
+          if (res.ok) {
+            const copy = res.clone();
+            caches.open(CACHE_VERSION).then((cache) => {
+              cache.put('/index.html', copy).catch(() => {});
+            });
+          }
           return res;
         })
         .catch(() => caches.match('/index.html'))
     );
-
     return;
   }
 

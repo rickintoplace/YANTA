@@ -513,29 +513,32 @@ import {
 
   async function moveDashboardKeysToFolder(keys = [], folderId) {
     let moved = 0;
-
+  
+    const writes = [];
+    const t = Date.now();
+  
     for (const key of keys) {
       const { kind, id } = parseItemKey(key);
-
+  
       if (kind === 'note') {
         const note = state.notes.get(id);
         if (!note) continue;
-
+  
         note.folderId = folderId || null;
         note.pinned = false;
-        note.updated = Date.now();
-
-        await store.notes.put(note);
+        note.updated = t;
+  
+        writes.push(store.notes.put(note));
         previewCache.delete(id);
-
+  
         moved++;
         continue;
       }
-
+  
       if (kind === 'folder') {
         const folder = state.folders.get(id);
         if (!folder) continue;
-
+  
         if (
           folderId &&
           (
@@ -545,20 +548,22 @@ import {
         ) {
           continue;
         }
-
+  
         folder.parentId = folderId || null;
-        folder.updated = Date.now();
-
-        await store.folders.put(folder);
-
+        folder.updated = t;
+  
+        writes.push(store.folders.put(folder));
+  
         moved++;
       }
     }
-
+  
+    await Promise.all(writes);
+  
     if (folderId) {
       state.expandedFolders.add(folderId);
     }
-
+  
     return moved;
   }
 
@@ -1399,6 +1404,30 @@ import {
     return parts;
   }
   
+  let dashboardChildIndex = null;
+
+  function invalidateDashboardChildIndex() {
+    dashboardChildIndex = null;
+  }
+  
+  function dashboardChildren() {
+    if (dashboardChildIndex) return dashboardChildIndex;
+    const foldersByParent = new Map();
+    const notesByFolder = new Map();
+    for (const f of state.folders.values()) {
+      const key = f.parentId || null;
+      if (!foldersByParent.has(key)) foldersByParent.set(key, []);
+      foldersByParent.get(key).push(f);
+    }
+    for (const n of state.notes.values()) {
+      const key = n.folderId || null;
+      if (!notesByFolder.has(key)) notesByFolder.set(key, []);
+      notesByFolder.get(key).push(n);
+    }
+    dashboardChildIndex = { foldersByParent, notesByFolder };
+    return dashboardChildIndex;
+  }
+
 function getDashboardItems() {
   const folderId = dashboard.folderId || null;
 
@@ -1480,6 +1509,8 @@ function getDashboardItems() {
   
     return root;
   }
+
+  invalidateDashboardChildIndex();
 
   function attachDashboardToMain() {
     ensureDashboardRoot();
@@ -3080,30 +3111,25 @@ function renderCardHeader(item) {
 }
   
 function folderPreviewItems(folderId) {
-  const folders = [...state.folders.values()]
-    .filter((f) => f.parentId === folderId)
-    .map((folder) => ({
-      kind: 'folder',
-      id: folder.id,
-      folder,
-      title: folder.name || 'Folder',
-      icon: defaultIconForFolder(folder),
-      color: safeCssColor(folder.color) || '',
-      order: fallbackOrderForFolder(folder),
-    }));
-
-  const notes = [...state.notes.values()]
-    .filter((n) => n.folderId === folderId)
-    .map((note) => ({
-      kind: 'note',
-      id: note.id,
-      note,
-      title: note.title || 'Untitled',
-      icon: defaultIconForNote(note),
-      color: safeCssColor(note.color) || '',
-      order: fallbackOrderForNote(note),
-    }));
-
+  const { foldersByParent, notesByFolder } = dashboardChildren();
+  const folders = (foldersByParent.get(folderId) || []).map((folder) => ({
+    kind: 'folder',
+    id: folder.id,
+    folder,
+    title: folder.name || 'Folder',
+    icon: defaultIconForFolder(folder),
+    color: safeCssColor(folder.color) || '',
+    order: fallbackOrderForFolder(folder),
+  }));
+  const notes = (notesByFolder.get(folderId) || []).map((note) => ({
+    kind: 'note',
+    id: note.id,
+    note,
+    title: note.title || 'Untitled',
+    icon: defaultIconForNote(note),
+    color: safeCssColor(note.color) || '',
+    order: fallbackOrderForNote(note),
+  }));
   return [...folders, ...notes].sort((a, b) =>
     a.order - b.order ||
     a.title.localeCompare(b.title)
@@ -3111,22 +3137,14 @@ function folderPreviewItems(folderId) {
 }
 
 function folderDirectBreakdown(folderId) {
-  let folders = 0;
-  let notes = 0;
+  const { foldersByParent, notesByFolder } = dashboardChildren();
+  const folders = (foldersByParent.get(folderId) || []).length;
+  const notes = (notesByFolder.get(folderId) || []).length;
+  return { folders, notes, total: folders + notes };
+}
 
-  for (const f of state.folders.values()) {
-    if (f.parentId === folderId) folders++;
-  }
-
-  for (const note of state.notes.values()) {
-    if (note.folderId === folderId) notes++;
-  }
-
-  return {
-    folders,
-    notes,
-    total: folders + notes,
-  };
+function folderDirectCount(folderId) {
+  return folderDirectBreakdown(folderId).total;
 }
 
 function folderMetaText(folderCount, noteCount, emptyText = '') {
@@ -3489,20 +3507,6 @@ function renderFolderMiniDrawing(noteId, block) {
     bindResizeHandle(handle, key);
   
     return handle;
-  }
-  
-  function folderDirectCount(folderId) {
-    let n = 0;
-  
-    for (const f of state.folders.values()) {
-      if (f.parentId === folderId) n++;
-    }
-  
-    for (const note of state.notes.values()) {
-      if (note.folderId === folderId) n++;
-    }
-  
-    return n;
   }
   
   // ============================================================
@@ -6738,49 +6742,36 @@ async function persistGridOrder(grid, section) {
   const cards = [...grid.querySelectorAll('.yanta-dash-card[data-key]')]
     .filter((card) => !card.classList.contains('drag-clone'));
 
+  const writes = [];
+  const t = Date.now();
   let order = DASH_ORDER_STEP;
 
   for (const card of cards) {
     const { kind, id } = parseItemKey(card.dataset.key);
-
     if (kind === 'note') {
       const note = state.notes.get(id);
       if (!note) continue;
-
       if (section === 'pinned') {
         note.dashboardPinnedOrder = order;
       } else {
         note.dashboardOrder = order;
       }
-
-      /*
-        Wichtig:
-        Kein yanta-dashboard-refresh hier.
-        Die DOM-Reihenfolge ist nach dem Drag bereits korrekt.
-        Ein kompletter renderDashboard() würde nur flickern.
-      */
-      note.updated = Date.now();
-
-      await store.notes.put(note);
+      note.updated = t;
+      writes.push(store.notes.put(note));
     } else if (kind === 'folder') {
       const folder = state.folders.get(id);
       if (!folder) continue;
-
       folder.dashboardOrder = order;
-      folder.updated = Date.now();
-
-      await store.folders.put(folder);
+      folder.updated = t;
+      writes.push(store.folders.put(folder));
     }
-
     order += DASH_ORDER_STEP;
   }
 
+  await Promise.all(writes);
   /*
-    Absichtlich KEIN:
-      window.dispatchEvent(new CustomEvent('yanta-dashboard-refresh'));
-    
-    Reorder ist bereits visuell abgeschlossen.
-    Die neue Reihenfolge ist persisted.
+    Absichtlich KEIN yanta-dashboard-refresh:
+    DOM-Reihenfolge ist nach dem Drag bereits korrekt.
   */
 }
 

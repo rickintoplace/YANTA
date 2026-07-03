@@ -246,25 +246,94 @@ class TaskCheckboxWidget extends WidgetType {
 
 // Decorate lines starting with "- [ ]" / "- [x]" with a clickable checkbox
 // rendered as an atomic replacement of just the bracket triple.
-const taskCheckboxField = StateField.define({
-  create(s) { return buildTaskDecos(s); },
-  update(d, tr) { return tr.docChanged ? buildTaskDecos(tr.state) : d; },
-  provide: (f) => EditorView.decorations.from(f),
-});
-function buildTaskDecos(s) {
-  const b = new RangeSetBuilder();
-  for (let p = 0; p < s.doc.length;) {
-    const line = s.doc.lineAt(p);
-    const m = /^(\s*[-*+]\s+\[)([ xX])(\])/.exec(line.text);
-    if (m) {
-      const from = line.from + m[1].length;
-      const to = from + 1;
-      b.add(from, to, Decoration.replace({ widget: new TaskCheckboxWidget(m[2].toLowerCase() === 'x', line.from) }));
-    }
+// ============================================================
+// Viewport-basierte Markdown-Dekorationen.
+// Rechnet Line-Klassen, Inline-Klassen und Task-Checkboxen nur
+// für sichtbare Zeilen. Fence-Kontext wird günstig (nur ```-Test)
+// bis zum Viewport-Start ermittelt.
+// ============================================================
+function fenceStateAt(doc, pos) {
+  let inFence = false;
+  for (let p = 0; p < pos;) {
+    const line = doc.lineAt(p);
+    if (/^```/.test(line.text)) inFence = !inFence;
+    if (line.to >= doc.length) break;
     p = line.to + 1;
   }
-  return b.finish();
+  return inFence;
 }
+
+function forVisibleLines(view, fn) {
+  const doc = view.state.doc;
+  for (const range of view.visibleRanges) {
+    const startLine = doc.lineAt(range.from);
+    const ctx = { inFence: fenceStateAt(doc, startLine.from) };
+    for (let p = startLine.from; p <= range.to;) {
+      const line = doc.lineAt(p);
+      const info = classifyLine(line.text, ctx);
+      fn(line, info);
+      if (info.type === 'fence') ctx.inFence = !!info.opens;
+      if (line.to >= doc.length) break;
+      p = line.to + 1;
+    }
+  }
+}
+
+const mdLineClassPlugin = ViewPlugin.fromClass(class {
+  constructor(view) { this.decorations = this.build(view); }
+  update(u) {
+    if (u.docChanged || u.viewportChanged) this.decorations = this.build(u.view);
+  }
+  build(view) {
+    const b = new RangeSetBuilder();
+    forVisibleLines(view, (line, info) => {
+      let cls = 'cm-md-line cm-md-' + info.type;
+      if (/^h[1-6]$/.test(info.type)) cls += ' cm-md-heading';
+      b.add(line.from, line.from, Decoration.line({ class: cls }));
+    });
+    return b.finish();
+  }
+}, { decorations: (v) => v.decorations });
+
+const taskCheckboxPlugin = ViewPlugin.fromClass(class {
+  constructor(view) { this.decorations = this.build(view); }
+  update(u) {
+    if (u.docChanged || u.viewportChanged) this.decorations = this.build(u.view);
+  }
+  build(view) {
+    const b = new RangeSetBuilder();
+    forVisibleLines(view, (line, info) => {
+      if (info.type !== 'task') return;
+      const m = /^(\s*[-*+]\s+\[)([ xX])(\])/.exec(line.text);
+      if (!m) return;
+      const from = line.from + m[1].length;
+      b.add(from, from + 1, Decoration.replace({
+        widget: new TaskCheckboxWidget(m[2].toLowerCase() === 'x', line.from),
+      }));
+    });
+    return b.finish();
+  }
+}, { decorations: (v) => v.decorations });
+
+const mdInlineClassPlugin = ViewPlugin.fromClass(class {
+  constructor(view) { this.decorations = this.build(view); }
+  update(u) {
+    if (u.docChanged || u.viewportChanged) this.decorations = this.build(u.view);
+  }
+  build(view) {
+    const ranges = [];
+    forVisibleLines(view, (line, info) => {
+      if (info.type === 'code' || info.type === 'fence') return;
+      collectMarkdownInlineRanges(line.text, line.from, ranges);
+    });
+    ranges.sort((a, b) => a.from - b.from || a.to - b.to);
+    const b = new RangeSetBuilder();
+    for (const r of ranges) {
+      if (r.to > r.from) b.add(r.from, r.to, Decoration.mark({ class: r.className }));
+    }
+    return b.finish();
+  }
+}, { decorations: (v) => v.decorations });
 
 // ============================================================
 // Wikilink decorations — colour [[Target]] based on whether
@@ -1095,95 +1164,6 @@ function dropHandler() {
   });
 }
 
-// ============================================================
-// Markdown line classes — this is what makes pane-edit visually
-// mirror the preview. The old .ed-line CSS is legacy and does not
-// apply to CodeMirror.
-// ============================================================
-
-const markdownLineClassField = StateField.define({
-  create(state) {
-    return buildMarkdownLineClasses(state);
-  },
-  update(deco, tr) {
-    if (tr.docChanged || tr.viewportChanged) return buildMarkdownLineClasses(tr.state);
-    return deco;
-  },
-  provide: (field) => EditorView.decorations.from(field),
-});
-
-function buildMarkdownLineClasses(s) {
-  const b = new RangeSetBuilder();
-  const ctx = { inFence: false };
-
-  for (let p = 0; p <= s.doc.length;) {
-    const line = s.doc.lineAt(p);
-    const info = classifyLine(line.text, ctx);
-
-    let cls = 'cm-md-line cm-md-' + info.type;
-    if (/^h[1-6]$/.test(info.type)) cls += ' cm-md-heading';
-
-    b.add(line.from, line.from, Decoration.line({ class: cls }));
-
-    if (info.type === 'fence') ctx.inFence = !!info.opens;
-    if (line.to >= s.doc.length) break;
-    p = line.to + 1;
-  }
-
-  return b.finish();
-}
-
-// ============================================================
-// Markdown inline classes — make inline Markdown in the editor
-// visually match the preview: bold, italic, strike, mark, code,
-// links, images, math, DOI.
-// We keep the Markdown source visible; only the affected spans are styled.
-// ============================================================
-
-const markdownInlineClassField = StateField.define({
-  create(state) {
-    return buildMarkdownInlineClasses(state);
-  },
-
-  update(deco, tr) {
-    if (tr.docChanged) return buildMarkdownInlineClasses(tr.state);
-    return deco.map(tr.changes);
-  },
-
-  provide: (field) => EditorView.decorations.from(field),
-});
-
-function buildMarkdownInlineClasses(s) {
-  const ranges = [];
-  const ctx = { inFence: false };
-
-  for (let p = 0; p <= s.doc.length;) {
-    const line = s.doc.lineAt(p);
-    const info = classifyLine(line.text, ctx);
-
-    // Do not apply inline markdown styling inside fenced code blocks or
-    // on fence delimiter lines.
-    if (info.type !== 'code' && info.type !== 'fence') {
-      collectMarkdownInlineRanges(line.text, line.from, ranges);
-    }
-
-    if (info.type === 'fence') ctx.inFence = !!info.opens;
-    if (line.to >= s.doc.length) break;
-    p = line.to + 1;
-  }
-
-  ranges.sort((a, b) => a.from - b.from || a.to - b.to);
-
-  const b = new RangeSetBuilder();
-  for (const r of ranges) {
-    if (r.to > r.from) {
-      b.add(r.from, r.to, Decoration.mark({ class: r.className }));
-    }
-  }
-
-  return b.finish();
-}
-
 function collectMarkdownInlineRanges(text, lineFrom, ranges) {
   const protectedRanges = [];
 
@@ -1836,8 +1816,8 @@ export function mountEditor(host, { noteId, awarenessUser }) {
     markdown({ base: markdownLanguage }),
     syntaxHighlighting(yantaHighlight),
     syntaxHighlighting(defaultHighlightStyle, { fallback: true }),
-    markdownLineClassField,
-    markdownInlineClassField,
+    mdLineClassPlugin,
+    mdInlineClassPlugin,
     lucideInlineEditField,
     editorLineSpacerField,
     indentOnInput(),
@@ -1850,7 +1830,7 @@ export function mountEditor(host, { noteId, awarenessUser }) {
     }),
     wikiPlugin,
     tagPlugin,
-    taskCheckboxField,
+    taskCheckboxPlugin,
     imagePreviewField,
     videoPreviewField,
     drawPreviewField,

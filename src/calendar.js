@@ -137,6 +137,289 @@ const DEFAULT_CATEGORY_ID = 'cal_default';
 
 const CALENDAR_SWIPE_EDGE_GUARD_PX = 24;
 
+const CALENDAR_REMINDER_PRESETS = Object.freeze([
+  { id: 'at-time', label: 'At time of event', minutesBefore: 0 },
+  { id: '10m', label: '10 minutes before', minutesBefore: 10 },
+  { id: '30m', label: '30 minutes before', minutesBefore: 30 },
+  { id: '1h', label: '1 hour before', minutesBefore: 60 },
+  { id: '1d', label: '1 day before', minutesBefore: 24 * 60 },
+]);
+
+function defaultCalendarRemindersForEvent(ev = {}) {
+  if (ev.allDay) {
+    return [
+      {
+        id: 'default-1d',
+        label: '1 day before',
+        minutesBefore: 24 * 60,
+        enabled: true,
+      },
+    ];
+  }
+
+  return [
+    {
+      id: 'default-10m',
+      label: '10 minutes before',
+      minutesBefore: 10,
+      enabled: true,
+    },
+  ];
+}
+
+function normalizeCalendarReminder(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+
+  const minutesBefore = Number(raw.minutesBefore);
+  if (!Number.isFinite(minutesBefore) || minutesBefore < 0) return null;
+
+  const rounded = Math.round(minutesBefore);
+
+  return {
+    id: String(raw.id || `rem_${rounded}_${uid()}`),
+    label: String(raw.label || reminderLabelForMinutes(rounded)),
+    minutesBefore: rounded,
+    enabled: raw.enabled !== false,
+  };
+}
+
+function normalizeCalendarReminders(raw, ev = {}) {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map(normalizeCalendarReminder)
+    .filter(Boolean)
+    .slice(0, 12);
+}
+
+function reminderLabelForMinutes(minutes) {
+  const n = Number(minutes || 0);
+  if (n === 0) return 'At time of event';
+  if (n < 60) return `${n} minute${n === 1 ? '' : 's'} before`;
+  if (n % 1440 === 0) {
+    const d = n / 1440;
+    return `${d} day${d === 1 ? '' : 's'} before`;
+  }
+  if (n % 60 === 0) {
+    const h = n / 60;
+    return `${h} hour${h === 1 ? '' : 's'} before`;
+  }
+  return `${n} minutes before`;
+}
+
+function nativeNotificationStatus() {
+  try {
+    return window.yantaAndroidBridge?.status?.() || {
+      isAndroidApp: false,
+      notificationsGranted: false,
+      exactAlarmAllowed: false,
+    };
+  } catch {
+    return {
+      isAndroidApp: false,
+      notificationsGranted: false,
+      exactAlarmAllowed: false,
+    };
+  }
+}
+
+function nativeNotificationHintHtml() {
+  const status = nativeNotificationStatus();
+  const isAndroid = !!status.isAndroidApp;
+  const ok = !!status.notificationsGranted && !!status.exactAlarmAllowed;
+
+  if (!isAndroid) {
+    return `
+      <div class="yanta-calendar-native-notification-hint">
+        ${lucide('smartphone', 14)}
+        <span>
+          <strong>Notifications work in the Android app.</strong>
+          <small>Browser/PWA notifications are not reliable for calendar alarms. Install/open the YANTA Android app for event reminders.</small>
+        </span>
+      </div>
+    `;
+  }
+
+  return `
+    <div class="yanta-calendar-native-notification-hint ${ok ? 'ok' : 'warn'}">
+      ${lucide(ok ? 'bell' : 'bell-off', 14)}
+      <span>
+        <strong>${ok ? 'Android notifications are ready.' : 'Android notification permission is missing.'}</strong>
+        <small>
+          Event notifications only work in the app and only when notification/exact-alarm permissions are allowed.
+        </small>
+      </span>
+      ${
+        !status.notificationsGranted
+          ? `<button type="button" class="btn compact" data-native-notification-permission>${lucide('bell', 13)} Allow</button>`
+          : ''
+      }
+      ${
+        !status.exactAlarmAllowed
+          ? `<button type="button" class="btn compact" data-native-exact-alarm>${lucide('alarm-clock', 13)} Exact alarms</button>`
+          : ''
+      }
+    </div>
+  `;
+}
+
+function remindersEditorHtml(ev = {}) {
+  const reminders = normalizeCalendarReminders(ev.reminders || [], ev);
+
+  return `
+    <section class="yanta-calendar-reminders-box" data-reminders-box>
+      <div class="yanta-calendar-reminders-head">
+        <strong>${lucide('bell', 14)} Notifications</strong>
+        <button type="button" class="btn compact" data-reminder-add>
+          ${lucide('plus', 13)} Add notification
+        </button>
+      </div>
+
+      ${nativeNotificationHintHtml()}
+
+      <div class="yanta-calendar-reminders-list" data-reminders-list>
+        ${
+          reminders.length
+            ? reminders.map((reminder) => reminderRowHtml(reminder)).join('')
+            : `<div class="yanta-calendar-reminders-empty">No notifications set.</div>`
+        }
+      </div>
+    </section>
+  `;
+}
+
+function reminderRowHtml(reminder = {}) {
+  const value = Number(reminder.minutesBefore || 0);
+  const isPreset = CALENDAR_REMINDER_PRESETS.some((p) => p.minutesBefore === value);
+
+  return `
+    <div class="yanta-calendar-reminder-row" data-reminder-row>
+      <label class="switch yanta-calendar-switch yanta-calendar-reminder-enabled">
+        <input type="checkbox" data-reminder-enabled ${reminder.enabled !== false ? 'checked' : ''} />
+        <span></span>
+      </label>
+
+      <select class="text-input" data-reminder-preset>
+        ${CALENDAR_REMINDER_PRESETS.map((preset) => `
+          <option value="${preset.minutesBefore}" ${preset.minutesBefore === value ? 'selected' : ''}>
+            ${escapeHtml(preset.label)}
+          </option>
+        `).join('')}
+        <option value="custom" ${isPreset ? '' : 'selected'}>Custom...</option>
+      </select>
+
+      <input
+        class="text-input yanta-calendar-reminder-custom"
+        data-reminder-custom
+        type="number"
+        min="0"
+        max="525600"
+        step="1"
+        inputmode="numeric"
+        value="${escapeAttr(value)}"
+        ${isPreset ? 'hidden' : ''} />
+
+      <span class="yanta-calendar-reminder-unit" ${isPreset ? 'hidden' : ''}>min before</span>
+
+      <button type="button" class="icon-btn danger" data-reminder-remove title="Remove notification">
+        ${lucide('trash', 14)}
+      </button>
+    </div>
+  `;
+}
+
+function setupRemindersEditor(modal) {
+  const box = modal.querySelector('[data-reminders-box]');
+  const list = modal.querySelector('[data-reminders-list]');
+  if (!box || !list) return;
+
+  const renderEmptyState = () => {
+    const rows = list.querySelectorAll('[data-reminder-row]');
+    const empty = list.querySelector('.yanta-calendar-reminders-empty');
+    if (!rows.length && !empty) {
+      list.innerHTML = `<div class="yanta-calendar-reminders-empty">No notifications set.</div>`;
+    }
+    if (rows.length && empty) empty.remove();
+  };
+
+  const bindRow = (row) => {
+    row.querySelector('[data-reminder-preset]')?.addEventListener('change', (e) => {
+      const custom = row.querySelector('[data-reminder-custom]');
+      const unit = row.querySelector('.yanta-calendar-reminder-unit');
+      const isCustom = e.target.value === 'custom';
+      if (custom) custom.hidden = !isCustom;
+      if (unit) unit.hidden = !isCustom;
+      if (!isCustom && custom) custom.value = e.target.value;
+    });
+
+    row.querySelector('[data-reminder-remove]')?.addEventListener('click', () => {
+      row.remove();
+      renderEmptyState();
+    });
+  };
+
+  list.querySelectorAll('[data-reminder-row]').forEach(bindRow);
+
+  box.querySelector('[data-reminder-add]')?.addEventListener('click', () => {
+    list.querySelector('.yanta-calendar-reminders-empty')?.remove();
+
+    const currentCount = list.querySelectorAll('[data-reminder-row]').length;
+    const preset =
+      currentCount === 0
+        ? CALENDAR_REMINDER_PRESETS[1]
+        : currentCount === 1
+          ? CALENDAR_REMINDER_PRESETS[3]
+          : CALENDAR_REMINDER_PRESETS[4];
+
+    const wrap = document.createElement('template');
+    wrap.innerHTML = reminderRowHtml({
+      id: `rem_${uid()}`,
+      label: preset.label,
+      minutesBefore: preset.minutesBefore,
+      enabled: true,
+    }).trim();
+
+    const row = wrap.content.firstElementChild;
+    list.append(row);
+    bindRow(row);
+  });
+
+  box.querySelector('[data-native-notification-permission]')?.addEventListener('click', () => {
+    window.yantaAndroidBridge?.requestNotifications?.();
+  });
+
+  box.querySelector('[data-native-exact-alarm]')?.addEventListener('click', () => {
+    window.yantaAndroidBridge?.openExactAlarmSettings?.();
+  });
+
+  window.addEventListener('yanta-native-notification-status-changed', () => {
+    const hintHost = box.querySelector('.yanta-calendar-native-notification-hint');
+    if (!hintHost) return;
+    const tpl = document.createElement('template');
+    tpl.innerHTML = nativeNotificationHintHtml().trim();
+    hintHost.replaceWith(tpl.content.firstElementChild);
+    setupRemindersEditor(modal);
+  }, { once: true });
+}
+
+function readRemindersFromModal(modal) {
+  return [...modal.querySelectorAll('[data-reminder-row]')]
+    .map((row) => {
+      const preset = row.querySelector('[data-reminder-preset]')?.value || '10';
+      const customValue = row.querySelector('[data-reminder-custom]')?.value || '0';
+      const minutesBefore = preset === 'custom'
+        ? Number(customValue)
+        : Number(preset);
+
+      return normalizeCalendarReminder({
+        id: row.dataset.reminderId || `rem_${minutesBefore}_${uid()}`,
+        minutesBefore,
+        label: reminderLabelForMinutes(minutesBefore),
+        enabled: !!row.querySelector('[data-reminder-enabled]')?.checked,
+      });
+    })
+    .filter(Boolean);
+}
+
 /*
   Muss kleiner sein als selectLongPressDelay.
   Bis dahin entscheidet YANTA:
@@ -5755,9 +6038,7 @@ export function sanitizeCalendarEvent(raw) {
         ? raw.recurrenceOverrides
         : {},
 
-    reminders: Array.isArray(raw.reminders)
-      ? raw.reminders
-      : [],
+    reminders: normalizeCalendarReminders(raw.reminders, raw),
 
     externalUid: raw.externalUid || '',
 
@@ -9287,7 +9568,7 @@ export function openNewCalendarEvent(input = {}) {
       ? null
       : new Date(start.getTime() + 30 * 60 * 1000);
 
-  openEventEditor({
+  const eventDraft = {
     ...input,
     title: input.title && input.title !== 'Untitled event'
       ? input.title
@@ -9295,6 +9576,13 @@ export function openNewCalendarEvent(input = {}) {
     start: start.toISOString(),
     end: end && !Number.isNaN(end.getTime()) ? end.toISOString() : null,
     allDay,
+  };
+
+  openEventEditor({
+    ...eventDraft,
+    reminders: Array.isArray(input.reminders)
+      ? input.reminders
+      : defaultCalendarRemindersForEvent(eventDraft),
   });
 }
 
@@ -9692,10 +9980,13 @@ function openEventEditor(input = {}) {
           </label>
         </div>
 
-        ${recurrenceEditorHtml(ev)}
+      ${recurrenceEditorHtml(ev)}
 
-        <label>
-          Location
+      ${remindersEditorHtml(ev)}
+
+      <label>
+
+        Location
           <input class="text-input" data-field="location" value="${escapeAttr(ev.location || '')}" placeholder="Room, address, link…" />
         </label>
 
@@ -9896,6 +10187,7 @@ function openEventEditor(input = {}) {
       _appearanceTouched: appearanceTouched,
 
       recurrence: nextRecurrence,
+      reminders: readRemindersFromModal(modal),
       recurrenceExceptions: nextRecurrence
         ? (ev.recurrenceExceptions || [])
         : [],
@@ -10163,6 +10455,8 @@ function openEventEditor(input = {}) {
   });
 
   setupRecurrenceEditor(modal, ev);
+  setupRemindersEditor(modal);
+
   renderNoteSection();
   updateDatePreviews();
 

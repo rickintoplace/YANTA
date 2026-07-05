@@ -1,0 +1,14 @@
+[
+  {
+    "relation": [
+      "delegate_permission/common.handle_all_urls"
+    ],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "page.yanta.app",
+      "sha256_cert_fingerprints": [
+        "7C:F9:0A:4C:2E:19:B3:3D:25:17:98:B7:03:E5:83:4C:01:49:FB:48:D8:DE:20:29:99:7B:19:3E:3C:89:7B:67"
+      ]
+    }
+  }
+]

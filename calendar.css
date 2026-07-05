@@ -3006,3 +3006,128 @@
     transition: none !important;
   }
 }
+
+.yanta-calendar-reminders-box {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg-elev-2);
+}
+
+.yanta-calendar-reminders-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.yanta-calendar-reminders-head strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text);
+  font-size: 13px;
+}
+
+.yanta-calendar-native-notification-hint {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border));
+  border-radius: 12px;
+  color: var(--text-dim);
+  background: color-mix(in srgb, var(--accent) 7%, transparent);
+}
+
+.yanta-calendar-native-notification-hint.warn {
+  border-color: color-mix(in srgb, var(--yellow) 42%, var(--border));
+  background: color-mix(in srgb, var(--yellow) 9%, transparent);
+}
+
+.yanta-calendar-native-notification-hint.ok {
+  border-color: color-mix(in srgb, var(--green, #22c55e) 42%, var(--border));
+  background: color-mix(in srgb, var(--green, #22c55e) 8%, transparent);
+}
+
+.yanta-calendar-native-notification-hint > svg {
+  flex: 0 0 auto;
+  color: var(--accent);
+  margin-top: 2px;
+}
+
+.yanta-calendar-native-notification-hint span {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.yanta-calendar-native-notification-hint strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.yanta-calendar-native-notification-hint small {
+  color: var(--text-dim);
+  line-height: 1.35;
+}
+
+.yanta-calendar-reminders-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.yanta-calendar-reminders-empty {
+  padding: 10px;
+  color: var(--text-faint);
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  font-size: 12px;
+}
+
+.yanta-calendar-reminder-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 96px auto auto;
+  gap: 7px;
+  align-items: center;
+}
+
+.yanta-calendar-reminder-enabled {
+  margin: 0 !important;
+}
+
+.yanta-calendar-reminder-custom {
+  min-width: 76px;
+}
+
+.yanta-calendar-reminder-unit {
+  color: var(--text-faint);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+@media (max-width: 760px) {
+  .yanta-calendar-reminder-row {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .yanta-calendar-reminder-custom,
+  .yanta-calendar-reminder-unit {
+    grid-column: 2 / -1;
+  }
+
+  .yanta-calendar-native-notification-hint {
+    flex-direction: column;
+  }
+
+  .yanta-calendar-native-notification-hint .btn {
+    width: 100%;
+    justify-content: center;
+  }
+}

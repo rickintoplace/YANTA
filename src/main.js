@@ -199,6 +199,10 @@ import {
 
 import { revokeImageObjectUrl } from './media/object-url-cache.js';
 
+import {
+  setupAndroidBridge,
+} from './native/android-bridge.js';
+
 let sharePreviewLocked = false;
 
 let noteTitleSaveTimer = 0;
@@ -1534,6 +1538,7 @@ async function init() {
 
   // Initialize the native browser navigation router
   setupOverlayHistoryRouter();
+  setupAndroidBridge();
 
   window.addEventListener('yanta-app-route-change', (e) => {
     closeTransientFullscreenUiForAppRoute(e.detail || {});

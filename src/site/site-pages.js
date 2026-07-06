@@ -13,6 +13,8 @@ import {
   cloudMe,
 } from '../cloud/cloud-api.js';
 
+import { BRAND_LOGO_SVG } from '../brand-logo.js';
+
 const YANTA_APP_ORIGIN =
   (import.meta.env.VITE_APP_ORIGIN || 'https://yanta.page').replace(/\/+$/, '');
 
@@ -40,6 +42,10 @@ const PLUS_YEARLY_EUR =
 
 const PLUS_YEARLY_USD =
   import.meta.env.VITE_PADDLE_PLUS_YEARLY_USD_PRICE_ID || '';
+
+function brandLogoSvg() {
+  return BRAND_LOGO_SVG;
+}
 
   function userCurrency() {
     const lang = navigator.language || '';
@@ -447,15 +453,20 @@ function shell(content) {
     <div class="yanta-site">
       <header class="yanta-site-header">
         <nav class="yanta-site-nav">
-          <a class="yanta-site-brand" href="${escapeHtml(BILLING_PUBLIC_ORIGIN)}/pricing">YANTA</a>
-
+          <a class="brand yanta-site-brand" href="${escapeHtml(YANTA_APP_ORIGIN)}">
+            <div class="sidebar-head">
+              <div class="brand">
+                <span class="brand-mark">${brandLogoSvg()}</span>
+                <span>YANTA</span>
+              </div>
+            </div>
+          </a>
           <div class="yanta-site-nav-links">
             <a href="${escapeHtml(BILLING_PUBLIC_ORIGIN)}/pricing">Pricing</a>
             <a href="${escapeHtml(BILLING_PUBLIC_ORIGIN)}/terms">Terms</a>
             <a href="${escapeHtml(BILLING_PUBLIC_ORIGIN)}/privacy">Privacy</a>
             <a href="${escapeHtml(BILLING_PUBLIC_ORIGIN)}/refund">Refunds</a>
             <a href="${escapeHtml(BILLING_PUBLIC_ORIGIN)}/imprint">Imprint</a>
-            <a href="${escapeHtml(YANTA_APP_ORIGIN)}">Open app</a>
           </div>
         </nav>
       </header>

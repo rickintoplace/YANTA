@@ -4,6 +4,7 @@ import {
 } from './legal-footer.js';
 
 import {
+  billingStatus,
   openBillingCheckout,
   openBillingPortal,
 } from '../billing/billing-api.js';
@@ -40,39 +41,33 @@ const PLUS_YEARLY_EUR =
 const PLUS_YEARLY_USD =
   import.meta.env.VITE_PADDLE_PLUS_YEARLY_USD_PRICE_ID || '';
 
-function userCurrency() {
-  const lang = navigator.language || '';
-
-const YANTA_APP_ORIGIN =
-  (import.meta.env.VITE_APP_ORIGIN || location.origin).replace(/\/+$/, '');
-
-const BILLING_PUBLIC_ORIGIN =
-  (import.meta.env.VITE_BILLING_PUBLIC_ORIGIN || location.origin).replace(/\/+$/, '');
-
-  if (
-    lang.startsWith('de') ||
-    lang.startsWith('fr') ||
-    lang.startsWith('es') ||
-    lang.startsWith('it') ||
-    lang.startsWith('nl') ||
-    lang.startsWith('pt') ||
-    lang.startsWith('fi') ||
-    lang.startsWith('sv') ||
-    lang.startsWith('da') ||
-    lang.startsWith('pl') ||
-    lang.startsWith('cs') ||
-    lang.startsWith('sk') ||
-    lang.startsWith('sl') ||
-    lang.startsWith('et') ||
-    lang.startsWith('lv') ||
-    lang.startsWith('lt') ||
-    lang.startsWith('el')
-  ) {
-    return 'EUR';
+  function userCurrency() {
+    const lang = navigator.language || '';
+  
+    if (
+      lang.startsWith('de') ||
+      lang.startsWith('fr') ||
+      lang.startsWith('es') ||
+      lang.startsWith('it') ||
+      lang.startsWith('nl') ||
+      lang.startsWith('pt') ||
+      lang.startsWith('fi') ||
+      lang.startsWith('sv') ||
+      lang.startsWith('da') ||
+      lang.startsWith('pl') ||
+      lang.startsWith('cs') ||
+      lang.startsWith('sk') ||
+      lang.startsWith('sl') ||
+      lang.startsWith('et') ||
+      lang.startsWith('lv') ||
+      lang.startsWith('lt') ||
+      lang.startsWith('el')
+    ) {
+      return 'EUR';
+    }
+  
+    return 'USD';
   }
-
-  return 'USD';
-}
 
 function priceIds() {
   const c = userCurrency();
@@ -95,6 +90,34 @@ function money(monthly = true) {
 
   if (c === 'EUR') return monthly ? '€6' : '€60';
   return monthly ? '$6' : '$60';
+}
+
+function envFlagEnabled(value) {
+  return ['1', 'true', 'yes', 'on'].includes(
+    String(value || '').trim().toLowerCase()
+  );
+}
+
+function checkoutEnabled() {
+  return envFlagEnabled(import.meta.env.VITE_PADDLE_CHECKOUT_ENABLED);
+}
+
+function setButtonBusy(btn, busy, label = '') {
+  if (!btn) return;
+
+  if (busy) {
+    btn.dataset.oldText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = label || 'Working…';
+    return;
+  }
+
+  btn.disabled = false;
+
+  if (btn.dataset.oldText) {
+    btn.textContent = btn.dataset.oldText;
+    delete btn.dataset.oldText;
+  }
 }
 
 function escapeHtml(s) {
@@ -455,10 +478,11 @@ function billingBannerHtml() {
 
   if (state === 'success') {
     return `
-      <section class="yanta-note-box yanta-billing-banner success">
+      <section class="yanta-note-box yanta-billing-banner success" id="billing-success-banner">
         <p>
           <strong>Thank you.</strong>
-          Paddle is confirming your YANTA Plus subscription. Open YANTA Cloud Sync settings to see your updated plan.
+          Paddle is confirming your YANTA Plus subscription.
+          <span id="billing-success-status">Checking your billing status…</span>
         </p>
       </section>
     `;
@@ -475,6 +499,42 @@ function billingBannerHtml() {
   }
 
   return '';
+}
+
+async function refreshBillingSuccessBanner() {
+  const params = new URLSearchParams(location.search);
+
+  if (params.get('billing') !== 'success') return;
+
+  const statusEl = document.getElementById('billing-success-status');
+  if (!statusEl) return;
+
+  for (let attempt = 0; attempt < 10; attempt += 1) {
+    try {
+      const res = await billingStatus();
+      const plan = res?.billing?.plan || '';
+      const label = res?.billing?.label || '';
+
+      if (plan === 'premium') {
+        statusEl.textContent = `Your plan is now ${label || 'YANTA Plus'}.`;
+        return;
+      }
+
+      statusEl.textContent = 'Still waiting for Paddle confirmation…';
+    } catch (err) {
+      if (err?.status === 401) {
+        statusEl.textContent = 'Open YANTA and sign in to see your updated plan.';
+        return;
+      }
+
+      statusEl.textContent = 'Still waiting for Paddle confirmation…';
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, 1800 + attempt * 500));
+  }
+
+  statusEl.textContent =
+    'Payment received. Your plan may take a moment to update. Please refresh YANTA Cloud settings shortly.';
 }
 
 function pricingContent() {
@@ -506,10 +566,10 @@ function pricingContent() {
         </div>
 
         <ul class="yanta-feature-list">
-          <li>25 MB encrypted cloud sync storage</li>
+          <li>30 MB encrypted cloud sync storage budget*</li>
           <li>1 cloud vault</li>
           <li>3 connected devices</li>
-          <li>Included AI: 25 requests/day</li>
+          <li>Included AI credit budget for limited use**</li>
           <li>Encrypted backup export</li>
           <li>Local-first browser storage</li>
         </ul>
@@ -531,10 +591,10 @@ function pricingContent() {
         </div>
 
         <ul class="yanta-feature-list">
-          <li>5 GB encrypted cloud sync storage</li>
+          <li>5 GB encrypted cloud sync storage budget*</li>
           <li>5 cloud vaults</li>
           <li>8 connected devices</li>
-          <li>Included AI: 500 requests/day</li>
+          <li>Higher Included AI credit budget for everyday lightweight use**</li>
           <li>Higher Sources/RSS limits</li>
         </ul>
 
@@ -556,10 +616,29 @@ function pricingContent() {
 
     <section class="yanta-note-box">
       <p>
+        <strong>* Cloud sync storage budget:</strong>
+        This is the total encrypted YANTA Cloud Sync budget for your account.
+        It includes encrypted notes and assets as well as sync metadata, vault snapshots,
+        update history, indexes, encryption overhead and other technical data needed
+        for reliable cross-device sync. The amount of visible note or asset content you
+        can store may therefore be lower than the headline storage number.
+      </p>
+
+      <p style="margin-top:8px">
+        <strong>** Included AI:</strong>
+        Included AI is a fair-use credit budget, not an unlimited fixed number of prompts.
+        Actual availability depends on model cost, prompt/context size, output length,
+        tool usage, daily/monthly credit limits, rate limits and abuse protection.
+        For heavy AI usage, you can use BYOK with your own OpenRouter key.
+      </p>
+    </section>
+
+    <section class="yanta-note-box">
+      <p>
         <strong>How to upgrade:</strong>
-        Open YANTA, sign in to YANTA Cloud, then choose
-        <strong>Settings → Sync → YANTA Plus</strong>. This connects your subscription
-        to the correct YANTA Cloud account.
+        Sign in to YANTA Cloud, then choose a YANTA Plus plan here or from
+        <strong>Settings → Sync → YANTA Plus</strong>. Your subscription is linked
+        to your YANTA Cloud account.
       </p>
     </section>
 
@@ -596,8 +675,9 @@ function pricingContent() {
         <div class="yanta-faq-item">
           <h3>What is YANTA Plus?</h3>
           <p>
-            Plus increases usage limits: encrypted cloud storage, devices, cloud vaults,
-            Included AI requests and Sources/RSS limits. It does not unlock exclusive features for now.
+            Plus increases usage limits: encrypted cloud sync storage budget, devices,
+            cloud vaults, Included AI credit budget and Sources/RSS limits. It does not
+            unlock exclusive features for now.
           </p>
         </div>
 
@@ -713,7 +793,8 @@ function legalContent(kind) {
 
         <h2>5. Subscriptions</h2>
         <p>
-          YANTA Plus increases usage limits such as cloud storage, devices and Included AI credits.
+          YANTA Plus increases usage limits such as encrypted cloud sync storage budget,
+          devices and Included AI credits.
           Payments, taxes, invoices and payment methods are processed by Paddle as Merchant of Record.
           Subscription terms shown in Paddle Checkout apply.
         </p>
@@ -728,7 +809,8 @@ function legalContent(kind) {
 
         <h2>7. Included AI and BYOK</h2>
         <p>
-          Included AI is subject to rate limits, credit limits, model availability and abuse protection.
+          Included AI is subject to daily and monthly credit budgets, request limits,
+          context limits, output limits, model availability, provider costs and abuse protection.
           AI responses may be inaccurate. You are responsible for reviewing AI-generated output before relying on it.
           BYOK mode uses your own OpenRouter key and is subject to OpenRouter’s terms and pricing.
         </p>
@@ -942,6 +1024,7 @@ export function mountSitePage() {
     document.title = 'Pricing · YANTA';
     shell(pricingContent());
     wirePricingButtons();
+    refreshBillingSuccessBanner();
     return;
   }
 
@@ -967,17 +1050,16 @@ export function mountSitePage() {
 }
 
 async function wirePricingButtons() {
-  const checkoutDisabledByReview =
-    import.meta.env.VITE_PADDLE_CHECKOUT_ENABLED === 'false';
+  const checkoutButtons = [...document.querySelectorAll('[data-checkout]')];
+  const portalBtn = document.querySelector('[data-portal]');
 
-  if (checkoutDisabledByReview) {
-    document.querySelectorAll('[data-checkout]').forEach((btn) => {
-      btn.textContent = 'Available after Paddle approval';
+  if (!checkoutEnabled()) {
+    checkoutButtons.forEach((btn) => {
+      btn.textContent = 'Available soon';
       btn.disabled = true;
-      btn.title = 'YANTA Plus checkout is awaiting payment provider approval.';
+      btn.title = 'YANTA Plus checkout is not enabled yet.';
     });
 
-    const portalBtn = document.querySelector('[data-portal]');
     if (portalBtn) {
       portalBtn.textContent = 'Open YANTA';
       portalBtn.addEventListener('click', () => {
@@ -993,9 +1075,19 @@ async function wirePricingButtons() {
   }));
 
   const isAuthenticated = !!me?.authenticated;
+  const isPlus =
+    me?.user?.plan === 'premium' ||
+    me?.billing?.plan === 'premium';
 
-  document.querySelectorAll('[data-checkout]').forEach((btn) => {
+  checkoutButtons.forEach((btn) => {
     const priceId = btn.getAttribute('data-checkout') || '';
+
+    if (!priceId) {
+      btn.textContent = 'Price unavailable';
+      btn.disabled = true;
+      btn.title = 'This YANTA Plus price is not configured.';
+      return;
+    }
 
     if (!isAuthenticated) {
       btn.textContent = 'Open YANTA to upgrade';
@@ -1007,27 +1099,38 @@ async function wirePricingButtons() {
       return;
     }
 
-    btn.addEventListener('click', async () => {
-      if (!priceId) {
-        alert('YANTA Plus checkout is not configured yet.');
-        return;
-      }
-
+    if (isPlus) {
+      btn.textContent = 'You are on YANTA Plus';
       btn.disabled = true;
-      const old = btn.textContent;
-      btn.textContent = 'Opening checkout…';
+      btn.title = 'Your account already has YANTA Plus.';
+      return;
+    }
+
+    btn.addEventListener('click', async () => {
+      setButtonBusy(btn, true, 'Opening secure checkout…');
 
       try {
         await openBillingCheckout(priceId);
+
+        /*
+          Paddle Overlay opens without navigating immediately.
+          Restore the button shortly so the page does not look stuck
+          if the customer closes the overlay.
+        */
+        setTimeout(() => {
+          setButtonBusy(btn, false);
+        }, 1600);
       } catch (err) {
         console.error(err);
+
+        setButtonBusy(btn, false);
 
         if (err.status === 401) {
           alert(
             [
               'Please sign in to YANTA Cloud first.',
               '',
-              'Open the YANTA app, sign in to YANTA Cloud, then upgrade from Settings → Sync.',
+              'Open YANTA, sign in to YANTA Cloud, then upgrade from Settings → Sync.',
             ].join('\n')
           );
 
@@ -1036,37 +1139,44 @@ async function wirePricingButtons() {
         }
 
         alert(err?.message || 'Could not open checkout.');
-
-        btn.disabled = false;
-        btn.textContent = old;
       }
     });
   });
 
-  const portalBtn = document.querySelector('[data-portal]');
+  if (!portalBtn) return;
 
-  if (portalBtn) {
-    if (!isAuthenticated) {
-      portalBtn.textContent = 'Open YANTA to manage billing';
+  if (!isAuthenticated) {
+    portalBtn.textContent = 'Open YANTA to manage billing';
 
-      portalBtn.addEventListener('click', () => {
-        location.href = YANTA_APP_ORIGIN;
-      });
-    } else {
-      portalBtn.addEventListener('click', async () => {
-        try {
-          await openBillingPortal();
-        } catch (err) {
-          console.error(err);
+    portalBtn.addEventListener('click', () => {
+      location.href = YANTA_APP_ORIGIN;
+    });
 
-          if (err.status === 401) {
-            alert('Please sign in to YANTA Cloud first.');
-            location.href = YANTA_APP_ORIGIN;
-          } else {
-            alert(err?.message || 'Could not open billing portal.');
-          }
-        }
-      });
-    }
+    return;
   }
+
+  portalBtn.addEventListener('click', async () => {
+    setButtonBusy(portalBtn, true, 'Opening billing portal…');
+
+    try {
+      await openBillingPortal();
+    } catch (err) {
+      console.error(err);
+
+      setButtonBusy(portalBtn, false);
+
+      if (err.status === 401) {
+        alert('Please sign in to YANTA Cloud first.');
+        location.href = YANTA_APP_ORIGIN;
+        return;
+      }
+
+      if (err.status === 404) {
+        alert('No billing profile exists yet. Subscribe to YANTA Plus first.');
+        return;
+      }
+
+      alert(err?.message || 'Could not open billing portal.');
+    }
+  });
 }

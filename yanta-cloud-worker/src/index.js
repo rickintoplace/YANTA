@@ -2011,6 +2011,13 @@ async function handleBillingCheckout(env, req, headers) {
   const user = await requireUser(env, req);
   const body = await bodyJson(req);
 
+  if (String(env.PADDLE_ENVIRONMENT || "").toLowerCase() !== "live") {
+    return json({
+      ok: false,
+      message: "Production billing is not configured. PADDLE_ENVIRONMENT must be live."
+    }, 500, headers);
+  }
+
   const priceId = String(body.priceId || "").trim();
   const plan = planForPaddlePriceId(env, priceId);
 
@@ -2058,27 +2065,36 @@ async function handleBillingCheckout(env, req, headers) {
     }
   });
 
+  const transactionId = tx?.data?.id || "";
+
   const checkoutUrl =
     tx?.data?.checkout?.url ||
     tx?.data?.checkout_url ||
     "";
 
-  if (!checkoutUrl) {
+  if (!transactionId && !checkoutUrl) {
     return json({
       ok: false,
-      message: "Paddle did not return a checkout URL."
+      message: "Paddle did not return a checkout transaction."
     }, 502, headers);
   }
 
   await audit(env, req, "billing_checkout_created", user.userId, {
     priceId,
-    plan
+    plan,
+    transactionId
   });
 
   return json({
     ok: true,
-    checkoutUrl
-  }, 200, headers);
+    transactionId,
+    checkoutUrl,
+    successUrl,
+    cancelUrl
+  }, 200, {
+    ...headers,
+    "cache-control": "no-store"
+  });
 }
 
 async function handleBillingPortal(env, req, headers) {
@@ -2265,7 +2281,17 @@ async function handlePaddleWebhook(env, req, headers) {
 
   await verifyPaddleWebhookSignature(env, req, rawBody);
 
-  const event = JSON.parse(rawBody);
+  let event;
+
+  try {
+    event = JSON.parse(rawBody);
+  } catch {
+    return json({
+      ok: false,
+      message: "Invalid JSON"
+    }, 400, headers);
+  }
+
   const eventId = String(event.event_id || event.id || "");
   const eventType = String(event.event_type || event.type || "");
 
@@ -2287,33 +2313,54 @@ async function handlePaddleWebhook(env, req, headers) {
     }, 200, headers);
   }
 
-  await env.DB.prepare(
-    `INSERT INTO billing_events
-     (id, paddle_event_id, event_type, processed_at, raw_json)
-     VALUES (?, ?, ?, ?, ?)`
-  ).bind(
-    id("bev"),
-    eventId,
-    eventType,
-    now(),
-    rawBody
-  ).run();
-
   const data = event.data || {};
+  const processed = [];
 
   if (eventType.startsWith("subscription.")) {
-    await upsertBillingSubscriptionFromPaddle(env, data);
+    const result = await upsertBillingSubscriptionFromPaddle(env, data);
+    processed.push({
+      kind: "subscription",
+      ...result
+    });
   }
 
   if (eventType.startsWith("transaction.")) {
-    await upsertBillingTransactionFromPaddle(env, data);
+    const result = await upsertBillingTransactionFromPaddle(env, data);
+    processed.push({
+      kind: "transaction",
+      ...result
+    });
+  }
 
-    // Paddle transaction may include subscription_id but not full subscription details.
-    // Subscription webhook is still the authoritative entitlement update.
+  try {
+    await env.DB.prepare(
+      `INSERT INTO billing_events
+       (id, paddle_event_id, event_type, processed_at, raw_json)
+       VALUES (?, ?, ?, ?, ?)`
+    ).bind(
+      id("bev"),
+      eventId,
+      eventType,
+      now(),
+      rawBody
+    ).run();
+  } catch (err) {
+    const msg = String(err?.message || err || "");
+
+    if (msg.includes("UNIQUE") || msg.includes("constraint")) {
+      return json({
+        ok: true,
+        duplicate: true
+      }, 200, headers);
+    }
+
+    throw err;
   }
 
   return json({
-    ok: true
+    ok: true,
+    eventType,
+    processed
   }, 200, headers);
 }
 
@@ -2472,21 +2519,23 @@ async function handleAiCompletions(env, req, headers) {
     provider: openRouterZdrProviderPreferences()
   };
 
+  const preflightCostMicros = estimatePreflightAiCostMicros(
+    messages,
+    forwardBody.max_tokens || policy.maxTokens
+  );
+
+  if (
+    Number(usage.ai_spend_micros_day || 0) + preflightCostMicros > policy.aiSpendMicrosDay ||
+    Number(usage.ai_spend_micros_month || 0) + preflightCostMicros > policy.aiSpendMicrosMonth
+  ) {
+    return json({
+      error: {
+        message: "This request would exceed your Included AI credits."
+      }
+    }, 403, headers);
+  }
+
   if (body.stream === true) {
-    const maxTokens = forwardBody.max_tokens || policy.maxTokens;
-    const preflightCostMicros = estimatePreflightAiCostMicros(messages, maxTokens);
-
-    if (
-      Number(usage.ai_spend_micros_day || 0) + preflightCostMicros > policy.aiSpendMicrosDay ||
-      Number(usage.ai_spend_micros_month || 0) + preflightCostMicros > policy.aiSpendMicrosMonth
-    ) {
-      return json({
-        error: {
-          message: "This request would exceed your Included AI credits."
-        }
-      }, 403, headers);
-    }
-
     const streamBody = {
       ...forwardBody,
       stream: true,
@@ -2595,17 +2644,6 @@ async function handleAiCompletions(env, req, headers) {
   }
 
   const costMicros = estimateAiCostMicros(jsonResponse);
-
-  if (
-    Number(usage.ai_spend_micros_day || 0) + costMicros > policy.aiSpendMicrosDay ||
-    Number(usage.ai_spend_micros_month || 0) + costMicros > policy.aiSpendMicrosMonth
-  ) {
-    return json({
-      error: {
-        message: "This request would exceed your Included AI credits."
-      }
-    }, 403, headers);
-  }
 
   const u = jsonResponse.usage || {};
 

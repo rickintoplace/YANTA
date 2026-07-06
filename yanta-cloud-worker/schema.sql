@@ -248,3 +248,78 @@ ON presentation_sessions(owner_user_id, updated_at);
 
 CREATE INDEX IF NOT EXISTS idx_presentation_sessions_source
 ON presentation_sessions(owner_user_id, source_type, source_id);
+
+-- ============================================================
+-- Billing / Paddle
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS billing_customers (
+  user_id TEXT PRIMARY KEY,
+  paddle_customer_id TEXT NOT NULL UNIQUE,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  FOREIGN KEY(user_id) REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_billing_customers_paddle_customer
+ON billing_customers(paddle_customer_id);
+
+CREATE TABLE IF NOT EXISTS billing_subscriptions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  paddle_subscription_id TEXT NOT NULL UNIQUE,
+  paddle_customer_id TEXT,
+  status TEXT NOT NULL,
+  plan TEXT NOT NULL,
+  price_id TEXT,
+  current_period_starts_at INTEGER,
+  current_period_ends_at INTEGER,
+  cancel_at_period_end INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  raw_json TEXT,
+  FOREIGN KEY(user_id) REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_billing_subscriptions_user
+ON billing_subscriptions(user_id, updated_at);
+
+CREATE INDEX IF NOT EXISTS idx_billing_subscriptions_customer
+ON billing_subscriptions(paddle_customer_id);
+
+CREATE INDEX IF NOT EXISTS idx_billing_subscriptions_status
+ON billing_subscriptions(status);
+
+CREATE TABLE IF NOT EXISTS billing_transactions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT,
+  paddle_transaction_id TEXT NOT NULL UNIQUE,
+  paddle_subscription_id TEXT,
+  paddle_customer_id TEXT,
+  status TEXT NOT NULL,
+  amount INTEGER NOT NULL DEFAULT 0,
+  currency TEXT,
+  created_at INTEGER NOT NULL,
+  raw_json TEXT,
+  FOREIGN KEY(user_id) REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_billing_transactions_user
+ON billing_transactions(user_id, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_billing_transactions_subscription
+ON billing_transactions(paddle_subscription_id);
+
+CREATE INDEX IF NOT EXISTS idx_billing_transactions_customer
+ON billing_transactions(paddle_customer_id);
+
+CREATE TABLE IF NOT EXISTS billing_events (
+  id TEXT PRIMARY KEY,
+  paddle_event_id TEXT NOT NULL UNIQUE,
+  event_type TEXT NOT NULL,
+  processed_at INTEGER NOT NULL,
+  raw_json TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_billing_events_type
+ON billing_events(event_type, processed_at);

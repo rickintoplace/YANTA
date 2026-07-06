@@ -2,6 +2,16 @@ import {
   YANTA_CLOUD_BASE_URL,
 } from '../cloud/cloud-api.js';
 
+import {
+  openPaddleCheckout as openPaddleOverlayCheckout,
+} from './paddle-client.js';
+
+export const YANTA_APP_ORIGIN =
+  (import.meta.env.VITE_APP_ORIGIN || 'https://yanta.page').replace(/\/+$/, '');
+
+export const BILLING_PUBLIC_ORIGIN =
+  (import.meta.env.VITE_BILLING_PUBLIC_ORIGIN || YANTA_APP_ORIGIN).replace(/\/+$/, '');
+
 function apiUrl(path) {
   const base = String(YANTA_CLOUD_BASE_URL || '/cloud-api').replace(/\/+$/, '');
   const clean = String(path || '').replace(/^\/+/, '');
@@ -69,15 +79,21 @@ export async function createBillingCheckout({
 }
 
 export async function openBillingCheckout(priceId) {
+  const successUrl = `${BILLING_PUBLIC_ORIGIN}/pricing?billing=success`;
+  const cancelUrl = `${BILLING_PUBLIC_ORIGIN}/pricing?billing=cancel`;
+
   const res = await createBillingCheckout({
     priceId,
+    successUrl,
+    cancelUrl,
   });
 
-  if (!res?.checkoutUrl) {
-    throw new Error('Checkout URL missing.');
-  }
-
-  location.href = res.checkoutUrl;
+  await openPaddleOverlayCheckout({
+    transactionId: res.transactionId,
+    checkoutUrl: res.checkoutUrl,
+    successUrl,
+    cancelUrl,
+  });
 }
 
 export async function openBillingPortal() {
@@ -89,14 +105,8 @@ export async function openBillingPortal() {
     throw new Error('Billing portal URL missing.');
   }
 
-  location.href = res.portalUrl;
+  window.location.assign(res.portalUrl);
 }
-
-export const YANTA_APP_ORIGIN =
-  (import.meta.env.VITE_APP_ORIGIN || 'https://yanta.page').replace(/\/+$/, '');
-
-export const BILLING_PUBLIC_ORIGIN =
-  (import.meta.env.VITE_BILLING_PUBLIC_ORIGIN || YANTA_APP_ORIGIN).replace(/\/+$/, '');
 
 export function billingPageUrl(path = '/pricing') {
   const clean = String(path || '/pricing').startsWith('/')

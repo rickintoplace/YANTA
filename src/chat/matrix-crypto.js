@@ -262,11 +262,13 @@ async function sdkDecodeRecoveryKey(encodedPrivateKey) {
 async function recoveryMaterialForSdk(record, keys = {}) {
   if (!record || typeof record !== 'object') return null;
 
+  const firstKeyId = record.keyId || Object.keys(keys || {})[0] || '';
+
   if (record.privateKeyB64) {
     const privateKey = base64UrlDecode(record.privateKeyB64);
 
-    return record.keyId
-      ? [record.keyId, privateKey]
+    return firstKeyId
+      ? [firstKeyId, privateKey]
       : privateKey;
   }
 
@@ -274,14 +276,17 @@ async function recoveryMaterialForSdk(record, keys = {}) {
     const decoded = await sdkDecodeRecoveryKey(record.encodedPrivateKey);
 
     if (decoded) {
-      return record.keyId
-        ? [record.keyId, decoded]
+      return firstKeyId
+        ? [firstKeyId, decoded]
         : decoded;
     }
 
-    // Some SDK versions accept the encoded recovery key directly.
-    return record.keyId
-      ? [record.keyId, record.encodedPrivateKey]
+    /*
+      Compatibility fallback for SDKs that accept encoded recovery keys.
+      New YANTA-created records should prefer privateKeyB64 above.
+    */
+    return firstKeyId
+      ? [firstKeyId, record.encodedPrivateKey]
       : record.encodedPrivateKey;
   }
 
@@ -289,9 +294,10 @@ async function recoveryMaterialForSdk(record, keys = {}) {
     return record.raw;
   }
 
-  const keyIds = Object.keys(keys || {});
-  if (keyIds.length && record.raw?.privateKey) {
-    return [keyIds[0], record.raw.privateKey];
+  if (record.raw instanceof Uint8Array) {
+    return firstKeyId
+      ? [firstKeyId, record.raw]
+      : record.raw;
   }
 
   return record.raw || null;
@@ -422,48 +428,24 @@ export async function readChatRecoveryFromVault() {
   }
 }
 
-async function createMatrixSecretStorageKey(client) {
-  const sdkMod = await import('matrix-js-sdk');
-  const sdk = sdkMod.default || sdkMod;
-
-  if (typeof client?.createRecoveryKeyFromPassphrase === 'function') {
-    const generated = await client.createRecoveryKeyFromPassphrase();
-    return {
-      forSdk: generated,
-      vault: generated,
-    };
-  }
-
-  if (typeof sdk.createRecoveryKeyFromPassphrase === 'function') {
-    const generated = await sdk.createRecoveryKeyFromPassphrase();
-    return {
-      forSdk: generated,
-      vault: generated,
-    };
-  }
-
-  if (sdk.crypto?.createRecoveryKeyFromPassphrase) {
-    const generated = await sdk.crypto.createRecoveryKeyFromPassphrase();
-    return {
-      forSdk: generated,
-      vault: generated,
-    };
-  }
-
+async function createMatrixSecretStorageKey() {
   /*
-    Fallback only for SDK builds without helper exports.
-    Rust crypto-capable Matrix JS SDK builds normally provide one of the
-    helpers above. We still generate strong random material so the failure mode
-    is explicit instead of silently using weak/null key material.
+    Matrix Secret Storage ultimately needs raw AES key material.
+    Some matrix-js-sdk builds expose helpers that return SDK-version-specific
+    wrapper objects. Returning those wrappers caused WebCrypto importKey()
+    failures in production.
+
+    Warum:
+    YANTA does not show a passphrase/recovery phrase. The Sync2 Vault is the
+    recovery channel. Therefore the most robust representation is a random
+    32-byte raw key, encrypted into VaultDoc settings immediately before the
+    SDK receives it.
   */
   const privateKey = randomBytes(32);
 
   return {
     forSdk: privateKey,
-    vault: {
-      privateKey,
-      encodedPrivateKey: base64UrlEncode(privateKey),
-    },
+    vault: privateKey,
   };
 }
 

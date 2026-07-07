@@ -44,6 +44,8 @@ import {
 import {
   mxcToBlobUrl,
   revokeAllChatMediaObjectUrls,
+  sendFileMessage,
+  sendImageFileWithPreview,
 } from './chat-media.js';
 
 import {
@@ -53,7 +55,12 @@ import {
   renderTimelineEvents,
 } from './chat-message-render.js';
 
+import {
+  setupChatComposer,
+} from './chat-composer.js';
+
 import './chat.css';
+
 
 const PAGE_SIZE = 30;
 const TYPING_THROTTLE_MS = 3500;
@@ -91,6 +98,8 @@ let typingEl = null;
 let listenersBoundClient = null;
 let sendTypingTimer = 0;
 let typingActive = false;
+
+let chatComposer = null;
 
 function isMobile() {
   return MOBILE_MQ.matches;
@@ -610,27 +619,43 @@ function bindRootEvents() {
     openRoomMenu(e.currentTarget);
   });
 
-  composerEl?.addEventListener('submit', (e) => {
-    e.preventDefault();
-    sendCurrentMessage().catch((err) => {
-      console.warn('[YANTA Chat] Send failed', err);
-      toast('Could not send message.', 'error');
-    });
+  chatComposer = setupChatComposer({
+    form: composerEl,
+    getClient: () => client,
+    getRoomId: () => activeRoomId,
+
+    onSendText: async (text) => {
+      await sendCurrentMessage(text);
+    },
+
+    onSendImage: async (file) => {
+      if (!client || !activeRoomId) {
+        toast('Chat is not connected.', 'error');
+        throw new Error('Matrix client or active room missing.');
+      }
+
+      await sendImageFileWithPreview(client, activeRoomId, file);
+      await reloadActiveTimeline({
+        keepBottom: true,
+        scrollBottom: true,
+      });
+    },
+
+    onSendFile: async (file) => {
+      await sendFileWithOptimisticBubble(file);
+    },
+
+    onSent: () => {
+      renderRoomListSoon();
+      reloadActiveTimelineSoon({
+        keepBottom: true,
+        scrollBottom: true,
+      });
+    },
   });
 
-  const input = root.querySelector('[data-chat-input]');
-
-  input?.addEventListener('input', () => {
-    autoResizeComposer();
-    updateComposerState();
+  chatComposer?.input()?.addEventListener('input', () => {
     sendTypingThrottled();
-  });
-
-  input?.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) {
-      e.preventDefault();
-      composerEl?.requestSubmit?.();
-    }
   });
 
   MOBILE_MQ.addEventListener?.('change', () => {
@@ -1314,6 +1339,8 @@ async function openActiveRoomIfNeeded() {
 
   renderRoomHeader(room);
 
+  await chatComposer?.setRoom(activeRoomId);
+
   if (timelineInitializedFor !== activeRoomId) {
     timelineInitializedFor = activeRoomId;
     timelineWindow = null;
@@ -1330,8 +1357,7 @@ async function openActiveRoomIfNeeded() {
   }, 250);
 
   requestAnimationFrame(() => {
-    const input = root.querySelector('[data-chat-input]');
-    input?.focus();
+    chatComposer?.focus();
   });
 }
 
@@ -1519,33 +1545,86 @@ async function sendReadReceiptIfVisible() {
   renderRoomListSoon();
 }
 
-function autoResizeComposer() {
-  const input = root.querySelector('[data-chat-input]');
+async function sendFileWithOptimisticBubble(file) {
+  if (!client || !activeRoomId) {
+    toast('Chat is not connected.', 'error');
+    throw new Error('Matrix client or active room missing.');
+  }
 
-  if (!input) return;
+  const eventsHost = root.querySelector('[data-chat-events]');
+  const abortController = new AbortController();
 
-  input.style.height = 'auto';
-  input.style.height = `${Math.min(input.scrollHeight, 180)}px`;
+  const row = el('div', {
+    class: 'yanta-chat-event own yanta-chat-upload-event',
+  });
+
+  row.innerHTML = `
+    <div class="yanta-chat-bubble">
+      <div class="yanta-chat-file-card">
+        <span class="yanta-chat-file-icon">${lucide('paperclip', 22)}</span>
+        <span class="yanta-chat-file-main">
+          <strong>${escapeHtml(file.name || 'File')}</strong>
+          <small>${fmtDate(Date.now())} · uploading · ${escapeHtml(file.size ? `${Math.round(file.size / 1024)} KB` : '')}</small>
+        </span>
+        <button class="icon-btn danger" data-cancel title="Cancel upload" aria-label="Cancel upload">
+          ${lucide('x', 17)}
+        </button>
+      </div>
+      <div class="yanta-chat-upload-progress">
+        <span data-progress></span>
+      </div>
+    </div>
+  `;
+
+  eventsHost?.append(row);
+
+  requestAnimationFrame(() => {
+    if (timelineEl) {
+      timelineEl.scrollTop = timelineEl.scrollHeight;
+    }
+  });
+
+  row.querySelector('[data-cancel]')?.addEventListener('click', () => {
+    abortController.abort();
+    row.remove();
+    toast('Upload cancelled', 'success');
+  });
+
+  try {
+    await sendFileMessage(client, activeRoomId, file, {
+      abortController,
+      onProgress: ({ percent }) => {
+        const bar = row.querySelector('[data-progress]');
+        if (bar) {
+          bar.style.width = `${Math.max(0, Math.min(1, percent || 0)) * 100}%`;
+        }
+      },
+    });
+
+    row.remove();
+
+    await reloadActiveTimeline({
+      keepBottom: true,
+      scrollBottom: true,
+    });
+  } catch (err) {
+    row.remove();
+
+    if (abortController.signal.aborted) {
+      console.warn('[YANTA Chat] File upload cancelled', err);
+      return;
+    }
+
+    console.warn('[YANTA Chat] Could not send file with optimistic bubble', err);
+    toast('Could not send file.', 'error');
+    throw err;
+  }
 }
 
-function updateComposerState() {
-  const input = root.querySelector('[data-chat-input]');
-  const btn = root.querySelector('.yanta-chat-send');
-
-  if (!input || !btn) return;
-
-  btn.disabled = !input.value.trim();
-}
-
-async function sendCurrentMessage() {
-  const input = root.querySelector('[data-chat-input]');
-  const text = String(input?.value || '').trim();
+async function sendCurrentMessage(textOverride = '') {
+  const text = String(textOverride || '').trim();
 
   if (!text || !activeRoomId) return;
-
-  input.value = '';
-  autoResizeComposer();
-  updateComposerState();
 
   try {
     if (typingActive) {

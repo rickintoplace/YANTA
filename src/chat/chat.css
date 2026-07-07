@@ -367,7 +367,7 @@
 .yanta-chat-events {
   display: flex;
   flex-direction: column;
-  gap: 2px;
+  gap: 3px;
 }
 
 .yanta-chat-top-sentinel,
@@ -459,22 +459,27 @@
 }
 
 .yanta-chat-event.grouped .yanta-chat-bubble {
-  margin-top: 1px;
+  margin-top: 0px;
 }
 
 .yanta-chat-event.own.grouped .yanta-chat-bubble {
-  border-top-right-radius: 10px;
+    border-top-right-radius: 5px;
+    border-bottom-right-radius: 5px;
 }
 
+
 .yanta-chat-event.other.grouped .yanta-chat-bubble {
-  border-top-left-radius: 10px;
+    border-top-left-radius: 5px;
+    border-bottom-left-radius: 5px;
 }
+
 
 .yanta-chat-sender {
   margin: 0 0 3px;
   color: var(--accent);
   font-size: 11px;
   font-weight: 800;
+  display: none;
 }
 
 .yanta-chat-message-text {
@@ -563,9 +568,23 @@
   line-height: 1;
 }
 
+/* Verstecke Meta in gruppierten Elementen, ES SEI DENN, es folgt kein weiteres gruppiertes Element mehr */
+.yanta-chat-event.grouped:has(+ :not(.grouped)),
+.yanta-chat-event.grouped:last-child {
+    & .yanta-chat-meta {
+        display: flex; /* Zeigen */
+    }
+}
+
+/* Standardmäßig für alle anderen gruppierten ausblenden */
+.yanta-chat-event.grouped .yanta-chat-meta {
+    display: none;
+}
+
 .yanta-chat-status {
   display: inline-flex;
   color: var(--text-faint);
+  align-items: center;
 }
 
 .yanta-chat-media {
@@ -978,4 +997,540 @@
   border-color: color-mix(in srgb, var(--red) 38%, var(--border));
   background: color-mix(in srgb, var(--red) 7%, var(--bg));
   color: var(--red);
+}
+
+/* ============================================================
+   YANTA Chat — AP5 Composer + Media + Voice
+   ============================================================ */
+
+.yanta-chat-composer {
+  position: relative;
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  padding: 8px;
+}
+
+.yanta-chat-composer textarea[data-chat-input] {
+  flex: 1;
+  min-height: 38px;
+  max-height: 40dvh;
+  resize: none;
+  field-sizing: content;
+  overflow-y: auto;
+  line-height: 1.35;
+  padding: 9px 12px;
+  border-radius: 16px;
+}
+
+.yanta-chat-attach,
+.yanta-chat-send {
+  width: 40px;
+  height: 40px;
+  flex: 0 0 40px;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-elev-2);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.yanta-chat-attach:hover,
+.yanta-chat-send:hover {
+  border-color: color-mix(in srgb, var(--accent) 48%, var(--border));
+  color: var(--accent);
+}
+
+.yanta-chat-action-morph {
+  position: relative;
+  overflow: hidden;
+  touch-action: none;
+  transition:
+    transform 150ms ease,
+    background 150ms ease,
+    color 150ms ease,
+    border-color 150ms ease;
+}
+
+.yanta-chat-action-icon {
+  position: absolute;
+  inset: 0;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  opacity: 0;
+  transform: scale(0.82);
+  transition:
+    opacity 150ms ease,
+    transform 150ms ease;
+}
+
+.yanta-chat-action-icon.is-mic {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.yanta-chat-composer.has-text .yanta-chat-action-icon.is-mic {
+  opacity: 0;
+  transform: scale(0.82);
+}
+
+.yanta-chat-composer.has-text .yanta-chat-action-icon.is-send {
+  opacity: 1;
+  transform: scale(1);
+}
+
+.yanta-chat-composer.has-text .yanta-chat-action-morph {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast, white);
+}
+
+.yanta-chat-recording-ui,
+.yanta-chat-locked-ui {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+
+  display: flex;
+  align-items: center;
+  gap: 12px;
+
+  padding: 8px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-elev);
+}
+
+.yanta-chat-rec-live {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 72px;
+  color: var(--red);
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.yanta-chat-rec-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--red);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--red) 40%, transparent);
+  animation: yanta-chat-rec-pulse 1.15s ease-in-out infinite;
+}
+
+.yanta-chat-rec-hint {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  color: var(--text-dim);
+  font-size: 13px;
+  transition: opacity 120ms ease;
+}
+
+.yanta-chat-rec-hint svg {
+  animation: yanta-chat-chevron-shimmer 1s ease-in-out infinite;
+}
+
+.yanta-chat-rec-lock {
+  position: absolute;
+  right: 18px;
+  bottom: 64px;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 36px;
+  height: 36px;
+  border-radius: 999px;
+  color: var(--accent);
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  opacity: 0.96;
+  transform: translateY(0);
+  transition:
+    transform 140ms ease,
+    background 140ms ease,
+    color 140ms ease;
+}
+
+.yanta-chat-rec-lock.is-locking {
+  color: var(--accent-contrast, white);
+  background: var(--accent);
+  transform: translateY(-8px) scale(1.08);
+}
+
+.yanta-chat-locked-ui {
+  justify-content: space-between;
+}
+
+.yanta-chat-locked-ui .danger {
+  color: var(--red);
+}
+
+.yanta-chat-voice-send {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-contrast, white);
+}
+
+.yanta-chat-composer.is-voice-recording textarea,
+.yanta-chat-composer.is-voice-recording .yanta-chat-attach,
+.yanta-chat-composer.is-voice-locked textarea,
+.yanta-chat-composer.is-voice-locked .yanta-chat-attach,
+.yanta-chat-composer.is-voice-locked > .yanta-chat-send {
+  visibility: hidden;
+}
+
+@keyframes yanta-chat-rec-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--red) 40%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 9px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+}
+
+@keyframes yanta-chat-chevron-shimmer {
+  0%,
+  100% {
+    opacity: 0.45;
+    transform: translateX(2px);
+  }
+  50% {
+    opacity: 1;
+    transform: translateX(-3px);
+  }
+}
+
+/* Preview sheet */
+
+.yanta-chat-preview-sheet,
+.yanta-chat-image-viewer {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  padding: 18px;
+  background: rgba(0, 0, 0, 0.58);
+  backdrop-filter: blur(12px);
+}
+
+.yanta-chat-preview-card {
+  width: min(560px, 96vw);
+  max-height: 92dvh;
+
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-xl, 0 24px 80px rgba(0, 0, 0, 0.32));
+}
+
+.yanta-chat-preview-card header,
+.yanta-chat-preview-card footer,
+.yanta-chat-image-viewer header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.yanta-chat-preview-card footer {
+  justify-content: flex-end;
+}
+
+.yanta-chat-preview-image-wrap {
+  min-height: 120px;
+  max-height: 58dvh;
+  overflow: hidden;
+  border-radius: 14px;
+  background: var(--bg);
+}
+
+.yanta-chat-preview-image-wrap img {
+  width: 100%;
+  height: 100%;
+  max-height: 58dvh;
+  object-fit: contain;
+  display: block;
+}
+
+.yanta-chat-preview-card textarea {
+  width: 100%;
+  min-height: 46px;
+  max-height: 24dvh;
+  resize: vertical;
+}
+
+/* Image messages */
+
+.yanta-chat-image-message {
+  display: block;
+  max-width: min(360px, 72vw);
+  padding: 0;
+  border: 0;
+  border-radius: 14px;
+  overflow: hidden;
+  background: var(--bg-elev-2);
+  cursor: zoom-in;
+}
+
+.yanta-chat-image-message img {
+  display: block;
+  width: 100%;
+  max-height: 420px;
+  object-fit: cover;
+}
+
+.yanta-chat-image-skeleton {
+  min-width: 220px;
+  min-height: 160px;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.yanta-chat-image-viewer {
+  align-items: stretch;
+  justify-content: stretch;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.yanta-chat-image-viewer header {
+  color: white;
+}
+
+.yanta-chat-image-viewer main {
+  flex: 1;
+  min-height: 0;
+
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.yanta-chat-image-viewer img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  border-radius: 12px;
+}
+
+/* File */
+
+.yanta-chat-file-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  min-width: min(280px, 68vw);
+  max-width: min(420px, 76vw);
+
+  padding: 10px;
+  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--bg-elev-2) 76%, transparent);
+}
+
+.yanta-chat-file-icon {
+  width: 38px;
+  height: 38px;
+  flex: 0 0 38px;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  border-radius: 12px;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 11%, transparent);
+}
+
+.yanta-chat-file-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.yanta-chat-file-main strong,
+.yanta-chat-file-main small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.yanta-chat-file-main strong {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.yanta-chat-file-main small {
+  margin-top: 2px;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
+.yanta-chat-upload-progress {
+  height: 3px;
+  margin-top: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--bg);
+}
+
+.yanta-chat-upload-progress span {
+  display: block;
+  width: 0%;
+  height: 100%;
+  background: var(--accent);
+  transition: width 120ms ease;
+}
+
+/* Voice */
+
+.yanta-chat-voice {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+
+  min-width: min(280px, 72vw);
+  max-width: min(420px, 78vw);
+
+  padding: 8px 10px;
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--bg-elev-2) 74%, transparent);
+}
+
+.yanta-chat-voice-play {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  border: 0;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-contrast, white);
+  cursor: pointer;
+}
+
+.yanta-chat-waveform {
+  position: relative;
+  flex: 1;
+  min-width: 120px;
+  height: 34px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.yanta-chat-waveform-bars {
+  position: absolute;
+  inset: 0;
+
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.yanta-chat-waveform-bars span {
+  width: 3px;
+  min-height: 3px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text) 28%, transparent);
+}
+
+.yanta-chat-waveform-progress {
+  position: absolute;
+  inset: 0 auto 0 0;
+  width: 0%;
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
+  border-radius: 999px;
+  pointer-events: none;
+}
+
+.yanta-chat-voice-duration {
+  min-width: 38px;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.yanta-chat-voice-speed {
+  min-width: 38px;
+  height: 28px;
+
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--bg-elev);
+  color: var(--text-dim);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.yanta-chat-media-error,
+.yanta-chat-media-unsupported {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  padding: 10px 12px;
+  color: var(--red);
+  background: color-mix(in srgb, var(--red) 8%, transparent);
+  border: 1px solid color-mix(in srgb, var(--red) 24%, var(--border));
+  border-radius: 12px;
+  font-size: 12px;
+}
+
+@media (max-width: 760px) {
+  .yanta-chat-composer textarea[data-chat-input] {
+    max-height: 40dvh;
+  }
+
+  .yanta-chat-image-message {
+    max-width: 78vw;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .yanta-chat-action-icon,
+  .yanta-chat-action-morph,
+  .yanta-chat-rec-dot,
+  .yanta-chat-rec-hint svg {
+    animation: none !important;
+    transition: none !important;
+  }
 }

@@ -13,8 +13,8 @@ import {
 } from '../core.js';
 
 import {
-  mxcToBlobUrl,
-} from './chat-media.js';
+  renderChatMediaContent,
+} from './chat-media-render.js';
 
 const FIVE_MINUTES = 5 * 60 * 1000;
 
@@ -405,7 +405,7 @@ function renderMediaContent(client, content = {}) {
   return wrap;
 }
 
-function renderMessageBody(client, content = {}) {
+function renderMessageBody(client, content = {}, context = {}) {
   const msgtype = content.msgtype || 'm.text';
 
   if (
@@ -414,7 +414,7 @@ function renderMessageBody(client, content = {}) {
     msgtype === 'm.audio' ||
     msgtype === 'm.file'
   ) {
-    return renderMediaContent(client, content);
+    return renderChatMediaContent(client, content, context);
   }
 
   return renderTextContent(content);
@@ -535,7 +535,10 @@ function renderSingleMessage(event, {
       edited,
     } = effectiveContent(event);
 
-    bubble.append(renderMessageBody(client, content));
+    bubble.append(renderMessageBody(client, content, {
+        roomId: room?.roomId || '',
+        eventId: eventId(event),
+    }));
 
     if (edited) {
       bubble.append(el('span', {

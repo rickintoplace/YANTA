@@ -36,6 +36,11 @@ const lazyImageObserver = new IntersectionObserver((entries) => {
 
 const voicePlayersByRoom = new Map();
 
+const activeVoicePlayback = {
+  audio: null,
+  eventId: '',
+};
+
 const resolvedImageUrlCache = new Map();
 
 function imageResolvedKey(source = {}) {
@@ -432,6 +437,31 @@ function playNextVoice(roomId, eventId) {
   list[idx + 1]?.play?.();
 }
 
+function downsampleForDisplay(values = [], bins = 48) {
+  if (!Array.isArray(values) || values.length <= bins) return values;
+
+  const out = [];
+  const step = values.length / bins;
+
+  for (let i = 0; i < bins; i++) {
+    const start = Math.floor(i * step);
+    const end = Math.max(start + 1, Math.floor((i + 1) * step));
+    const slice = values.slice(start, end);
+    const avg = slice.reduce((sum, n) => sum + Number(n || 0), 0) / slice.length;
+
+    out.push(Math.max(0, Math.min(1024, Math.round(avg))));
+  }
+
+  return out;
+}
+
+function isAbortLikeAudioError(err) {
+  return (
+    err?.name === 'AbortError' ||
+    /play\(\) request was interrupted|media was removed/i.test(err?.message || '')
+  );
+}
+
 function renderAudioMessage(client, content = {}, context = {}) {
   const source = sourceFromContent(content);
   const durationMs =
@@ -439,11 +469,14 @@ function renderAudioMessage(client, content = {}, context = {}) {
     content.info?.duration ||
     0;
 
-  const waveform = waveformFromContent(content);
+  const waveform = downsampleForDisplay(waveformFromContent(content), 48);
   const bars = waveform.map((n) => {
     const h = Math.max(3, Math.round((n / 1024) * 28));
     return `<span style="height:${h}px"></span>`;
   }).join('');
+
+  const eventId = context.eventId || '';
+  const roomId = context.roomId || '';
 
   const wrap = el('div', {
     class: 'yanta-chat-voice',
@@ -456,7 +489,7 @@ function renderAudioMessage(client, content = {}, context = {}) {
 
     <button class="yanta-chat-waveform" type="button" title="Seek">
       <span class="yanta-chat-waveform-progress" data-progress></span>
-      <span class="yanta-chat-waveform-bars">${bars}</span>
+      <span class="yanta-chat-waveform-bars" style="--wf-bars:${waveform.length || 1}">${bars}</span>
     </button>
 
     <span class="yanta-chat-voice-duration" data-duration>${durationLabel(durationMs)}</span>
@@ -471,66 +504,153 @@ function renderAudioMessage(client, content = {}, context = {}) {
   const speedBtn = wrap.querySelector('[data-speed]');
 
   const audio = new Audio();
+
   audio.preload = 'metadata';
 
   let hydrated = false;
+  let hydratePromise = null;
+  let playPromise = null;
+  let wantsPlayback = false;
   let speedIndex = 0;
+
   const speeds = [1, 1.5, 2];
 
   async function hydrate() {
     if (hydrated) return;
-    hydrated = true;
+    if (hydratePromise) return hydratePromise;
 
-    if (!source?.mxcUrl) {
-      throw new Error('Audio message is missing media data.');
+    hydratePromise = (async () => {
+      if (!source?.mxcUrl) {
+        throw new Error('Audio message is missing media data.');
+      }
+
+      const url = await mxcToBlobUrl(client, source.mxcUrl, {
+        thumbnail: false,
+        encryptedFile: source.encryptedFile,
+        mimeType: source.mimeType || content.info?.mimetype || 'audio/webm',
+      });
+
+      audio.src = url;
+      hydrated = true;
+    })();
+
+    try {
+      await hydratePromise;
+    } finally {
+      hydratePromise = null;
+    }
+  }
+
+  function totalSeconds() {
+    if (audio.duration && Number.isFinite(audio.duration)) {
+      return audio.duration;
     }
 
-    const url = await mxcToBlobUrl(client, source.mxcUrl, {
-      thumbnail: false,
-      encryptedFile: source.encryptedFile,
-      mimeType: source.mimeType || content.info?.mimetype || 'audio/webm',
-    });
-
-    audio.src = url;
+    return Number(durationMs || 0) / 1000;
   }
 
   function syncUi() {
-    const total = audio.duration && Number.isFinite(audio.duration)
-      ? audio.duration
-      : Number(durationMs || 0) / 1000;
-
+    const total = totalSeconds();
     const ratio = total ? audio.currentTime / total : 0;
 
-    progress.style.width = `${Math.max(0, Math.min(1, ratio)) * 100}%`;
+    if (progress) {
+      progress.style.width = `${Math.max(0, Math.min(1, ratio)) * 100}%`;
+    }
 
-    duration.textContent = audio.paused
-      ? durationLabel(durationMs || total * 1000)
-      : durationLabel(Math.max(0, (total - audio.currentTime) * 1000));
+    if (duration) {
+      duration.textContent = audio.paused
+        ? durationLabel(durationMs || total * 1000)
+        : durationLabel(Math.max(0, (total - audio.currentTime) * 1000));
+    }
 
-    playBtn.innerHTML = lucide(audio.paused ? 'play' : 'pause', 18);
-    playBtn.title = audio.paused ? 'Play' : 'Pause';
-    playBtn.setAttribute('aria-label', playBtn.title);
+    if (playBtn) {
+      const loading = !!playPromise || !!hydratePromise;
+
+      wrap.classList.toggle('is-loading', loading);
+      playBtn.innerHTML = lucide(audio.paused ? 'play' : 'pause', 18);
+      playBtn.title = audio.paused ? 'Play' : 'Pause';
+      playBtn.setAttribute('aria-label', playBtn.title);
+    }
+  }
+
+  function pauseThisAudio() {
+    wantsPlayback = false;
+
+    try {
+      audio.pause();
+    } catch (err) {
+      console.warn('[YANTA Chat] Could not pause voice message', err);
+      toast('Could not pause voice message.', 'error');
+    }
+
+    syncUi();
   }
 
   async function play() {
-    try {
-      await hydrate();
-      audio.playbackRate = speeds[speedIndex];
-      await audio.play();
-      syncUi();
-    } catch (err) {
-      console.warn('[YANTA Chat] Could not play voice message', err);
-      toast('Could not play voice message.', 'error');
+    wantsPlayback = true;
+
+    if (playPromise) {
+      return playPromise;
     }
+
+    playPromise = (async () => {
+      try {
+        /*
+          Only one voice message may play at a time. This also prevents old
+          audio instances from previous timeline renders from overlapping.
+        */
+        if (activeVoicePlayback.audio && activeVoicePlayback.audio !== audio) {
+          try {
+            activeVoicePlayback.audio.pause();
+          } catch (err) {
+            console.warn('[YANTA Chat] Could not pause previous voice message', err);
+          }
+        }
+
+        activeVoicePlayback.audio = audio;
+        activeVoicePlayback.eventId = eventId;
+
+        await hydrate();
+
+        if (!wantsPlayback) return;
+
+        audio.playbackRate = speeds[speedIndex];
+
+        const playResult = audio.play();
+
+        if (playResult?.then) {
+          await playResult;
+        }
+
+        if (!wantsPlayback) {
+          audio.pause();
+        }
+
+        syncUi();
+      } catch (err) {
+        if (isAbortLikeAudioError(err) && !wantsPlayback) {
+          console.warn('[YANTA Chat] Voice playback was interrupted by user action', err);
+          return;
+        }
+
+        console.warn('[YANTA Chat] Could not play voice message', err);
+        toast('Could not play voice message.', 'error');
+      } finally {
+        playPromise = null;
+        syncUi();
+      }
+    })();
+
+    return playPromise;
   }
 
   playBtn.addEventListener('click', async () => {
-    if (audio.paused) {
-      await play();
-    } else {
-      audio.pause();
-      syncUi();
+    if (!audio.paused || playPromise) {
+      pauseThisAudio();
+      return;
     }
+
+    await play();
   });
 
   waveformBtn.addEventListener('click', async (e) => {
@@ -539,9 +659,7 @@ function renderAudioMessage(client, content = {}, context = {}) {
 
       const rect = waveformBtn.getBoundingClientRect();
       const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
-      const total = audio.duration && Number.isFinite(audio.duration)
-        ? audio.duration
-        : Number(durationMs || 0) / 1000;
+      const total = totalSeconds();
 
       audio.currentTime = total * ratio;
       syncUi();
@@ -562,11 +680,20 @@ function renderAudioMessage(client, content = {}, context = {}) {
   audio.addEventListener('pause', syncUi);
   audio.addEventListener('play', syncUi);
   audio.addEventListener('ended', () => {
+    wantsPlayback = false;
     syncUi();
-    playNextVoice(context.roomId || '', context.eventId || '');
+
+    if (activeVoicePlayback.audio === audio) {
+      activeVoicePlayback.audio = null;
+      activeVoicePlayback.eventId = '';
+    }
+
+    playNextVoice(roomId, eventId);
   });
 
-  registerVoicePlayer(context.roomId || '', context.eventId || '', play);
+  registerVoicePlayer(roomId, eventId, play);
+
+  syncUi();
 
   return wrap;
 }

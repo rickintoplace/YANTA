@@ -164,10 +164,11 @@ export function setupChatComposer({
   function openAttachMenu(e = null) {
     e?.preventDefault?.();
     e?.stopPropagation?.();
+    e?.stopImmediatePropagation?.();
 
     if (!attachButton) {
-      toast('Attachment menu is not available.', 'error');
       console.warn('[YANTA Chat] Attach button missing');
+      toast('Attachment menu is not available.', 'error');
       return;
     }
 
@@ -176,48 +177,54 @@ export function setupChatComposer({
 
       /*
         Warum:
-        The composer sits at the bottom. Some menu implementations place the
-        menu below the given coordinate. Use the upper edge on compact screens
-        so the menu remains visible.
+        showMenu appends to document.body. The Chat surface/window may have a
+        higher stacking context, so we mark this menu and force a high z-index.
       */
-      const x = Math.max(8, r.left);
-      const y = r.top > 240
-        ? r.top - 8
-        : r.bottom + 8;
+      const menu = showMenu(
+        Math.max(8, r.left),
+        r.top > 240 ? r.top - 8 : r.bottom + 8,
+        [
+          {
+            label: 'Photo',
+            icon: 'image',
+            action: () => {
+              imageInput?.click();
+            },
+          },
+          {
+            label: 'File',
+            icon: 'paperclip',
+            action: () => {
+              fileInput?.click();
+            },
+          },
+          'hr',
+          {
+            label: 'YANTA Note',
+            icon: 'file-text',
+            disabled: true,
+            action: () => toast('YANTA Note attachments are coming in AP8.', 'error'),
+          },
+          {
+            label: 'YANTA Event',
+            icon: 'calendar',
+            disabled: true,
+            action: () => toast('YANTA Event attachments are coming in AP8.', 'error'),
+          },
+          {
+            label: 'Drawing',
+            icon: 'line-squiggle',
+            disabled: true,
+            action: () => toast('Drawing attachments are coming in AP8.', 'error'),
+          },
+        ],
+        {
+          align: 'start',
+        }
+      );
 
-      showMenu(x, y, [
-        {
-          label: 'Photo',
-          icon: 'image',
-          action: () => imageInput?.click(),
-        },
-        {
-          label: 'File',
-          icon: 'paperclip',
-          action: () => fileInput?.click(),
-        },
-        'hr',
-        {
-          label: 'YANTA Note',
-          icon: 'file-text',
-          disabled: true,
-          action: () => toast('YANTA Note attachments are coming in AP8.', 'error'),
-        },
-        {
-          label: 'YANTA Event',
-          icon: 'calendar',
-          disabled: true,
-          action: () => toast('YANTA Event attachments are coming in AP8.', 'error'),
-        },
-        {
-          label: 'Drawing',
-          icon: 'line-squiggle',
-          disabled: true,
-          action: () => toast('Drawing attachments are coming in AP8.', 'error'),
-        },
-      ], {
-        align: 'start',
-      });
+      menu?.classList?.add('yanta-chat-attach-menu');
+      menu?.style?.setProperty('z-index', '10080', 'important');
     } catch (err) {
       console.warn('[YANTA Chat] Could not open attachment menu', err);
       toast('Could not open attachment menu.', 'error');
@@ -257,7 +264,16 @@ export function setupChatComposer({
     }
   });
 
-    attachButton.addEventListener('click', (e) => openAttachMenu(e));
+  /*
+    Use pointerdown instead of click so the composer/mic pointer handling and
+    menu outside-close logic cannot swallow the action on touch devices.
+  */
+  attachButton.addEventListener('pointerdown', (e) => openAttachMenu(e), true);
+
+  attachButton.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, true);
 
 
   imageInput.addEventListener('change', async () => {

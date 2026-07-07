@@ -168,6 +168,11 @@ export function setupVoiceRecorder({
 
   let state = 'IDLE';
   let pointerId = null;
+  let pointerIsDown = false;
+  let autoLockOnStart = false;
+  let startSeq = 0;
+  let startInFlight = false;
+
   let startX = 0;
   let startY = 0;
   let axis = '';
@@ -208,25 +213,28 @@ export function setupVoiceRecorder({
   }
 
   function updateGestureUi(dx, dy) {
-    const cancelRatio = Math.max(0, Math.min(1, Math.abs(Math.min(0, dx)) / Math.abs(CANCEL_DX)));
+    const cancelRatio = Math.max(
+      0,
+      Math.min(1, Math.abs(Math.min(0, dx)) / Math.abs(CANCEL_DX))
+    );
 
     if (hint) {
       hint.style.opacity = String(1 - cancelRatio);
     }
 
-    micButton.style.transform = `translateX(${Math.max(CANCEL_DX, Math.min(0, dx))}px) scale(1.6)`;
+    micButton.style.transform =
+      `translateX(${Math.max(CANCEL_DX, Math.min(0, dx))}px) scale(1.6)`;
 
     if (lockPill) {
-      const locked = dy <= LOCK_DY;
+      const locking = dy <= LOCK_DY;
 
-      lockPill.classList.toggle('is-locking', locked);
-      lockPill.innerHTML = lucide(locked ? 'lock' : 'lock-open', 16);
+      lockPill.classList.toggle('is-locking', locking);
+      lockPill.innerHTML = lucide(locking ? 'lock' : 'lock-open', 16);
     }
   }
 
   async function startAudio() {
     assertMicrophoneMayBeRequested();
-
 
     stream = await navigator.mediaDevices.getUserMedia({
       audio: {
@@ -318,6 +326,8 @@ export function setupVoiceRecorder({
     hardLimitTimer = 0;
     tickTimer = 0;
     waveformTimer = 0;
+    startInFlight = false;
+    autoLockOnStart = false;
 
     try {
       if (recorder && recorder.state !== 'inactive') {
@@ -344,6 +354,7 @@ export function setupVoiceRecorder({
     audioContext = null;
     analyser = null;
     pointerId = null;
+    pointerIsDown = false;
     axis = '';
     startedAt = 0;
 
@@ -409,11 +420,10 @@ export function setupVoiceRecorder({
       throw new Error('Matrix client or room missing.');
     }
 
-    let blob;
-
     try {
-      blob = await recorderStoppedBlob();
+      const blob = await recorderStoppedBlob();
       const waveform = downsampleWaveform(waveformSamples, 100);
+      const finalMimeType = blob.type || mimeType || 'audio/webm';
 
       cleanup();
 
@@ -421,7 +431,7 @@ export function setupVoiceRecorder({
         blob,
         durationMs: currentDuration,
         waveform,
-        mimeType: blob.type || mimeType || 'audio/webm',
+        mimeType: finalMimeType,
       });
 
       onSent?.();
@@ -435,10 +445,33 @@ export function setupVoiceRecorder({
     }
   }
 
-  async function beginRecording() {
+  async function beginRecording(seq) {
+    startInFlight = true;
+
     try {
       await startAudio();
-      setState('RECORDING');
+
+      if (seq !== startSeq) {
+        cleanup();
+        setState('IDLE');
+        return;
+      }
+
+      startInFlight = false;
+
+      /*
+        Warum:
+        Browser permission prompts can interrupt pointer tracking. If the user
+        releases while the permission sheet is open, we must not create an
+        unfinishable RECORDING state. WhatsApp-like behavior: lock it.
+      */
+      if (autoLockOnStart || !pointerIsDown) {
+        navigator.vibrate?.(10);
+        setState('LOCKED');
+        micButton.style.transform = '';
+      } else {
+        setState('RECORDING');
+      }
     } catch (err) {
       cleanup();
       setState('IDLE');
@@ -485,7 +518,14 @@ export function setupVoiceRecorder({
   function onPointerUp(e) {
     if (pointerId !== e.pointerId) return;
 
+    pointerIsDown = false;
+
     if (state === 'ARMED') {
+      if (startInFlight) {
+        autoLockOnStart = true;
+        return;
+      }
+
       cleanup();
       setState('IDLE');
       return;
@@ -497,6 +537,28 @@ export function setupVoiceRecorder({
         toast('Could not send voice message.', 'error');
       });
     }
+  }
+
+  function onPointerCancel(e) {
+    if (pointerId != null && e.pointerId !== pointerId) return;
+
+    pointerIsDown = false;
+
+    if (state === 'ARMED' && startInFlight) {
+      autoLockOnStart = true;
+      return;
+    }
+
+    if (state === 'RECORDING' || state === 'LOCKED') {
+      cancelRecording().catch((err) => {
+        console.warn('[YANTA Chat] Could not cancel voice recording', err);
+        toast('Could not cancel recording.', 'error');
+      });
+      return;
+    }
+
+    cleanup();
+    setState('IDLE');
   }
 
   function onVisibilityChange() {
@@ -512,7 +574,11 @@ export function setupVoiceRecorder({
     e.preventDefault();
     e.stopPropagation();
 
+    startSeq += 1;
     pointerId = e.pointerId;
+    pointerIsDown = true;
+    autoLockOnStart = false;
+    startInFlight = false;
     startX = e.clientX;
     startY = e.clientY;
     axis = '';
@@ -520,8 +586,10 @@ export function setupVoiceRecorder({
     micButton.setPointerCapture?.(e.pointerId);
     setState('ARMED');
 
+    const seq = startSeq;
+
     armTimer = window.setTimeout(() => {
-      beginRecording();
+      beginRecording(seq);
     }, ARM_MS);
   });
 
@@ -530,17 +598,7 @@ export function setupVoiceRecorder({
   });
 
   micButton.addEventListener('pointerup', onPointerUp);
-  micButton.addEventListener('pointercancel', () => {
-    if (state === 'RECORDING' || state === 'LOCKED') {
-      cancelRecording().catch((err) => {
-        console.warn('[YANTA Chat] Could not cancel voice recording', err);
-        toast('Could not cancel recording.', 'error');
-      });
-    } else {
-      cleanup();
-      setState('IDLE');
-    }
-  });
+  micButton.addEventListener('pointercancel', onPointerCancel);
 
   lockedUi.querySelector('[data-voice-send]')?.addEventListener('click', () => {
     finishAndSend().catch((err) => {
@@ -565,6 +623,7 @@ export function setupVoiceRecorder({
      * Stops recorder resources.
      */
     destroy() {
+      startSeq += 1;
       document.removeEventListener('visibilitychange', onVisibilityChange);
       cleanup();
     },

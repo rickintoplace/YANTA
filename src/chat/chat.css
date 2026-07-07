@@ -1611,3 +1611,39 @@
 .yanta-chat-image-message.is-resolved .yanta-chat-image-skeleton {
   display: none;
 }
+
+/* ============================================================
+   YANTA Chat — AP5 hotfix round 2
+   ============================================================ */
+
+/* Make context menu opened from the Chat composer win over the Chat surface. */
+.ctx-menu.yanta-chat-attach-menu {
+  z-index: 10080 !important;
+}
+
+/* The waveform must never overflow horizontally. */
+.yanta-chat-waveform {
+  overflow: hidden;
+}
+
+.yanta-chat-waveform-bars {
+  width: 100%;
+  min-width: 0;
+
+  display: grid;
+  grid-template-columns: repeat(var(--wf-bars, 48), minmax(1px, 1fr));
+  align-items: center;
+  gap: 1px;
+}
+
+.yanta-chat-waveform-bars span {
+  width: auto !important;
+  min-width: 0;
+  max-width: none;
+}
+
+/* Better feedback while audio is hydrating/starting. */
+.yanta-chat-voice.is-loading .yanta-chat-voice-play {
+  opacity: 0.72;
+  pointer-events: none;
+}

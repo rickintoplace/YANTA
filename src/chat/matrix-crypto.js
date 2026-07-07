@@ -303,6 +303,78 @@ async function recoveryMaterialForSdk(record, keys = {}) {
   return record.raw || null;
 }
 
+async function chatSecretStorageKeyForSdk(keysOrRequest = {}) {
+  const keys =
+    keysOrRequest?.keys && typeof keysOrRequest.keys === 'object'
+      ? keysOrRequest.keys
+      : keysOrRequest;
+
+  const recovery = await readChatRecoveryFromVault();
+
+  if (!recovery) {
+    throw new Error('Chat recovery key is not available in this Vault yet');
+  }
+
+  const material = await recoveryMaterialForSdk(recovery, keys || {});
+
+  if (!material) {
+    throw new Error('Could not prepare Chat recovery key for Matrix Secret Storage');
+  }
+
+  return material;
+}
+
+/**
+ * Installs Matrix SDK Secret Storage callbacks backed by the YANTA Vault.
+ *
+ * Warum:
+ * Some matrix-js-sdk flows call client-level cryptoCallbacks later while
+ * exporting cross-signing keys or key-backup secrets. Passing
+ * getSecretStorageKey only to bootstrapSecretStorage() is not enough there.
+ */
+function installSecretStorageCallbacks(client) {
+  if (!client) return false;
+
+  const callbacks = {
+    getSecretStorageKey: async (keysOrRequest = {}) => {
+      return chatSecretStorageKeyForSdk(keysOrRequest);
+    },
+
+    cacheSecretStorageKey: async (keyId, keyInfo, privateKey) => {
+      if (!privateKey) return;
+
+      try {
+        await saveChatRecoveryToVault({
+          keyId,
+          keyInfo: keyInfo || null,
+          privateKey,
+        });
+      } catch (err) {
+        reportCryptoError('Could not cache Chat recovery key in Vault.', err, {
+          step: 'cache-secret-storage-key',
+        });
+      }
+    },
+  };
+
+  if (typeof client.setCryptoCallbacks === 'function') {
+    client.setCryptoCallbacks({
+      ...(client.cryptoCallbacks || {}),
+      ...callbacks,
+    });
+
+    return true;
+  }
+
+  // Compatibility fallback for SDK builds exposing callbacks as a property.
+  client.cryptoCallbacks = {
+    ...(client.cryptoCallbacks || {}),
+    ...callbacks,
+  };
+
+  return true;
+}
+
 /**
  * Stores the Matrix account password in the synced Vault, encrypted with the
  * Sync2 contentKey.
@@ -486,22 +558,11 @@ function isMissingServerSecretStorageBootstrapError(err) {
 }
 
 async function bootstrapNewSecretStorage(client, cryptoApi) {
-  await cryptoApi.bootstrapSecretStorage({
-    setupNewSecretStorage: true,
-    createSecretStorageKey: async () => {
-      const generated = await createMatrixSecretStorageKey();
-
-      /*
-        Spec-critical ordering:
-        Store the generated recovery material in the Vault before returning it
-        to Matrix bootstrap so a crash after bootstrap does not strand the
-        account without Vault-carried recovery.
-      */
-      await saveChatRecoveryToVault(generated.vault);
-
-      return generated.forSdk;
+    await cryptoApi.bootstrapSecretStorage({
+    getSecretStorageKey: async (keysOrRequest = {}) => {
+        return chatSecretStorageKeyForSdk(keysOrRequest);
     },
-  });
+    });
 
   return 'created';
 }
@@ -562,13 +623,17 @@ async function maybeBootstrapCrossSigning(client, {
     if (ready) return true;
   }
 
-  await cryptoApi.bootstrapCrossSigning({
+    await cryptoApi.bootstrapCrossSigning({
+    getSecretStorageKey: async (keysOrRequest = {}) => {
+        return chatSecretStorageKeyForSdk(keysOrRequest);
+    },
+
     authUploadDeviceSigningKeys: (makeRequest) =>
-      authUploadDeviceSigningKeysWithPassword(makeRequest, {
+        authUploadDeviceSigningKeysWithPassword(makeRequest, {
         userId,
         password,
-      }),
-  });
+        }),
+    });
 
   return true;
 }
@@ -578,6 +643,7 @@ async function maybeEnableKeyBackup(client, {
 } = {}) {
   const cryptoApi = getCryptoApi(client);
   if (!cryptoApi) return false;
+    installSecretStorageCallbacks(client);
 
   let activeVersion = null;
 
@@ -606,6 +672,7 @@ async function maybeEnableKeyBackup(client, {
 async function maybeRestoreKeyBackup(client) {
   const cryptoApi = getCryptoApi(client);
   if (!cryptoApi) return false;
+    installSecretStorageCallbacks(client);
 
   if (typeof cryptoApi.restoreKeyBackupWithSecretStorage === 'function') {
     await cryptoApi.restoreKeyBackupWithSecretStorage();
@@ -686,6 +753,7 @@ export async function bootstrapChatCrypto(client, {
   firstDevice = false,
   account = null,
 } = {}) {
+  installSecretStorageCallbacks(client);
   const normalized = normalizeAccount(account || {});
   let vaultAccount = await readChatPasswordFromVault();
 

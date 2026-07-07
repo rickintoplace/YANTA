@@ -2,18 +2,18 @@
 // YANTA — Graph settings.
 //
 // Single persisted source of truth for every user-tunable graph
-// option (display, forces, layers, behavior).
+// option (view mode, display, forces, layers, behavior).
 //
 // Pure module: no DOM, no dependency on graph.js. Consumers read
 // via graphSettings(), write via updateGraphSettings() and react
 // via onGraphSettingsChange().
 //
 // Persistence: one JSON blob under STORAGE_KEY. Legacy per-option
-// keys from older builds are migrated once, then ignored.
+// keys from older builds are migrated once, then ignored. New
+// fields added later simply fall back to defaults on sanitize, so
+// no version bump is required for additive changes.
 // ============================================================
-
 const STORAGE_KEY = 'yanta.graph.settings.v2';
-
 const LEGACY_BOOL_KEYS = Object.freeze({
   showFolders: 'yanta.graph.showFolders',
   showSemantic: 'yanta.graph.showSemantic',
@@ -23,20 +23,29 @@ const LEGACY_BOOL_KEYS = Object.freeze({
   controlsOpen: 'yanta.graph.controlsOpen',
   deepSearch: 'yanta.graph.deepSearch',
 });
-
 export const NODE_SIZE_MODES = Object.freeze([
   'uniform',   // every note the same size
   'links',     // scaled by wikilink connectivity (Obsidian-style)
   'content',   // scaled by note text length
   'recency',   // recently edited notes are larger
 ]);
-
 export const LABEL_MODES = Object.freeze([
   'off',       // labels only on hover / focus
   'smart',     // fade in with zoom level (level-of-detail)
   'always',    // always visible
 ]);
-
+export const GRAPH_LAYOUT_MODES = Object.freeze([
+  'force',     // organic force-directed layout
+  'radial',    // ego / local graph around a focus note
+  'tree',      // top-down folder hierarchy
+  'clusters',  // connected components packed as islands
+]);
+export const GRAPH_COLOR_MODES = Object.freeze([
+  'meta',        // user-assigned note/folder colors (default)
+  'folder',      // color by top-level folder (auto palette)
+  'recency',     // heat: recently edited → accent, old → faint
+  'connections', // heat: hubs → accent, orphans → dim
+]);
 export const GRAPH_FORCE_DEFAULTS = Object.freeze({
   center: 0.35,       // 0..1 pull toward the canvas center
   repel: 0.55,        // 0..1 many-body repulsion
@@ -45,8 +54,11 @@ export const GRAPH_FORCE_DEFAULTS = Object.freeze({
   folderPull: 0.4,    // 0..1 clustering around folder nodes
   collide: true,      // prevent node overlap
 });
-
 export const GRAPH_SETTINGS_DEFAULTS = Object.freeze({
+  // View
+  layoutMode: 'force',
+  colorMode: 'meta',
+  egoDepth: 2, // radial mode: hops around the focus note (1..3)
   // Layers
   showFolders: true,
   showSemantic: false,
@@ -64,7 +76,6 @@ export const GRAPH_SETTINGS_DEFAULTS = Object.freeze({
   controlsOpen: false,
   forces: GRAPH_FORCE_DEFAULTS,
 });
-
 // ------------------------------------------------------------
 // Sanitizing
 // ------------------------------------------------------------
@@ -73,11 +84,9 @@ function clamp(v, min, max, fallback) {
   if (!Number.isFinite(n)) return fallback;
   return Math.min(max, Math.max(min, n));
 }
-
 function oneOf(v, list, fallback) {
   return list.includes(v) ? v : fallback;
 }
-
 function sanitizeForces(raw = {}) {
   const d = GRAPH_FORCE_DEFAULTS;
   return {
@@ -89,10 +98,12 @@ function sanitizeForces(raw = {}) {
     collide: raw.collide !== false,
   };
 }
-
 function sanitize(raw = {}) {
   const d = GRAPH_SETTINGS_DEFAULTS;
   return {
+    layoutMode: oneOf(raw.layoutMode, GRAPH_LAYOUT_MODES, d.layoutMode),
+    colorMode: oneOf(raw.colorMode, GRAPH_COLOR_MODES, d.colorMode),
+    egoDepth: Math.round(clamp(raw.egoDepth, 1, 3, d.egoDepth)),
     showFolders: raw.showFolders !== false,
     showSemantic: raw.showSemantic === true,
     showArchive: raw.showArchive === true,
@@ -108,7 +119,6 @@ function sanitize(raw = {}) {
     forces: sanitizeForces(raw.forces),
   };
 }
-
 // ------------------------------------------------------------
 // Load with one-time legacy migration
 // ------------------------------------------------------------
@@ -120,7 +130,6 @@ function readLegacyBool(key) {
     return undefined;
   }
 }
-
 function load() {
   let raw = null;
   try {
@@ -140,24 +149,20 @@ function load() {
   persist(settings);
   return settings;
 }
-
 function persist(settings) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
   } catch {}
 }
-
 // ------------------------------------------------------------
 // Live state + pub/sub
 // ------------------------------------------------------------
 let current = load();
 const listeners = new Set();
-
 /** Read-only view of the current settings. Do not mutate. */
 export function graphSettings() {
   return current;
 }
-
 /**
  * Merge a partial patch (forces are deep-merged), persist and notify.
  * Returns the keys that actually changed so callers can react
@@ -191,11 +196,9 @@ export function updateGraphSettings(patch = {}) {
   }
   return changed;
 }
-
 export function resetGraphForces() {
   return updateGraphSettings({ forces: { ...GRAPH_FORCE_DEFAULTS } });
 }
-
 /** Subscribe to settings changes. Returns an unsubscribe function. */
 export function onGraphSettingsChange(fn) {
   listeners.add(fn);

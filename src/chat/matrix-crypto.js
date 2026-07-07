@@ -474,6 +474,33 @@ async function authUploadDeviceSigningKeysWithPassword(makeRequest, {
   return auth;
 }
 
+function isMissingServerSecretStorageBootstrapError(err) {
+  return /createSecretStorageKey is not set|unable to create a new secret storage key|m\.secret_storage\.default_key/i.test(
+    err?.message || String(err || '')
+  );
+}
+
+async function bootstrapNewSecretStorage(client, cryptoApi) {
+  await cryptoApi.bootstrapSecretStorage({
+    setupNewSecretStorage: true,
+    createSecretStorageKey: async () => {
+      const generated = await createMatrixSecretStorageKey();
+
+      /*
+        Spec-critical ordering:
+        Store the generated recovery material in the Vault before returning it
+        to Matrix bootstrap so a crash after bootstrap does not strand the
+        account without Vault-carried recovery.
+      */
+      await saveChatRecoveryToVault(generated.vault);
+
+      return generated.forSdk;
+    },
+  });
+
+  return 'created';
+}
+
 async function maybeBootstrapSecretStorage(client, {
   firstDevice,
 } = {}) {
@@ -481,24 +508,7 @@ async function maybeBootstrapSecretStorage(client, {
   if (!cryptoApi?.bootstrapSecretStorage) return false;
 
   if (firstDevice) {
-    await cryptoApi.bootstrapSecretStorage({
-      setupNewSecretStorage: true,
-      createSecretStorageKey: async () => {
-        const generated = await createMatrixSecretStorageKey(client);
-
-        /*
-          Spec-critical ordering:
-          Store the generated recovery material in the Vault before returning it
-          to Matrix bootstrap so a crash after bootstrap does not strand the
-          account without Vault-carried recovery.
-        */
-        await saveChatRecoveryToVault(generated.vault);
-
-        return generated.forSdk;
-      },
-    });
-
-    return true;
+    return bootstrapNewSecretStorage(client, cryptoApi);
   }
 
   const recovery = await readChatRecoveryFromVault();
@@ -507,13 +517,32 @@ async function maybeBootstrapSecretStorage(client, {
     throw new Error('Chat recovery key is not available in this Vault yet');
   }
 
-  await cryptoApi.bootstrapSecretStorage({
-    getSecretStorageKey: async ({ keys } = {}) => {
-      return recoveryMaterialForSdk(recovery, keys);
-    },
-  });
+  try {
+    await cryptoApi.bootstrapSecretStorage({
+      getSecretStorageKey: async ({ keys } = {}) => {
+        return recoveryMaterialForSdk(recovery, keys);
+      },
+    });
 
-  return true;
+    return 'restored';
+  } catch (err) {
+    /*
+      Migration/repair case:
+      The Vault already contains YANTA's recovery material, but the Matrix
+      account itself has no server-side Secret Storage default key yet
+      because the account was created before AP3 completed crypto bootstrap.
+
+      In that specific state we are allowed to create Secret Storage now and
+      overwrite the Vault recovery record with the newly accepted raw key.
+    */
+    if (!isMissingServerSecretStorageBootstrapError(err)) {
+      throw err;
+    }
+
+    console.warn('[YANTA Chat Crypto] Matrix Secret Storage is missing on server; creating it now', err);
+
+    return bootstrapNewSecretStorage(client, cryptoApi);
+  }
 }
 
 async function maybeBootstrapCrossSigning(client, {
@@ -695,11 +724,17 @@ export async function bootstrapChatCrypto(client, {
     }
   };
 
-  await step('secret-storage', () =>
-    maybeBootstrapSecretStorage(client, {
+  let createdSecretStorage = false;
+
+  await step('secret-storage', async () => {
+    const mode = await maybeBootstrapSecretStorage(client, {
       firstDevice,
-    })
-  );
+    });
+
+    createdSecretStorage = mode === 'created';
+
+    return mode;
+  });
 
   await step('cross-signing', () =>
     maybeBootstrapCrossSigning(client, {
@@ -708,7 +743,12 @@ export async function bootstrapChatCrypto(client, {
     })
   );
 
-  if (firstDevice) {
+  /*
+    If Secret Storage was created during a repair/migration run, this device is
+    effectively the first crypto-bootstrap device for the Matrix account even
+    if the session was started via stored credentials.
+  */
+  if (firstDevice || createdSecretStorage) {
     await step('key-backup-enable', () =>
       maybeEnableKeyBackup(client, {
         firstDevice: true,
@@ -723,6 +763,6 @@ export async function bootstrapChatCrypto(client, {
       maybeRestoreKeyBackup(client)
     );
   }
-
+  
   return result;
 }

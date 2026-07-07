@@ -6,11 +6,23 @@
 // local semantic links.
 //
 // Architecture:
-//   graph-settings.js  persisted user options (display, forces, layers)
-//   graph-physics.js   pure force simulation (Barnes-Hut, springs)
-//   graph-preview.js   note preview popover (real Markdown renderer)
+//   graph-settings.js   persisted user options (view, display, forces)
+//   graph-physics.js    pure force simulation (Barnes-Hut, springs,
+//                       layout-target force)
+//   graph-layouts.js    pure layout engines (radial / tree / clusters)
+//   graph-insights.js   pure vault analytics (orphans, hubs, stale, …)
+//   graph-preview.js    note preview popover (real Markdown renderer)
 //   graph-appearance.js icon & color editor
-//   graph-css.js       runtime styles
+//   graph-css.js        runtime styles
+//
+// Visualization modes (persisted, keyboard 1–4):
+//   force     organic force-directed layout (classic)
+//   radial    ego / local graph around a focus note, hop rings
+//   tree      top-down folder hierarchy
+//   clusters  connected components packed as islands
+//
+// Non-force modes compute *target positions* (node.tx/ty) that the
+// simulation pulls toward, so switching modes animates smoothly.
 //
 // Simulation model (d3 semantics):
 //   alpha += (alphaTarget - alpha) * alphaDecay   per tick
@@ -22,9 +34,10 @@
 //   - Viewport culling for nodes and links
 //   - Two-pass z-ordering (no per-frame sort)
 //   - Level-of-detail labels driven by zoom + node importance
-//   - Cached search-match set (no per-frame string work)
+//   - Cached search/spotlight emphasis (no per-frame string work)
+//   - Color modes: custom meta colors, per-folder palette,
+//     recency heat, connectivity heat
 // ============================================================
-
 import {
   $,
   state,
@@ -49,10 +62,20 @@ import { injectGraphCss } from './graph/graph-css.js';
 import { tickSimulation } from './graph/graph-physics.js';
 import { computeSemanticLinks } from './graph/graph-semantic.js';
 import {
+  computeRadialLayout,
+  computeTreeLayout,
+  computeClusterLayout,
+} from './graph/graph-layouts.js';
+import {
+  computeGraphInsights,
+  topSemanticSuggestions,
+} from './graph/graph-insights.js';
+import {
   graphSettings,
   updateGraphSettings,
   resetGraphForces,
   onGraphSettingsChange,
+  GRAPH_LAYOUT_MODES,
 } from './graph/graph-settings.js';
 import {
   showGraphNotePreview,
@@ -77,9 +100,7 @@ import {
   closeTopOverlay,
   registerOverlayRoute,
 } from './overlay-history.js';
-
 const WIKILINK_RE = /\[\[([^\]|\n]+)(?:\|[^\]\n]+)?\]\]/g;
-
 const NODE = { NOTE: 'note', FOLDER: 'folder' };
 const LINK = {
   WIKI: 'wiki',
@@ -87,7 +108,6 @@ const LINK = {
   CONTAINS: 'contains',
   FOLDER: 'folder',
 };
-
 // d3-style simulation constants (not user-facing).
 const SIM = Object.freeze({
   alphaMin: 0.002,
@@ -96,11 +116,9 @@ const SIM = Object.freeze({
   dragAlphaTarget: 0.3,
 });
 const BUILD_ALPHA = 1;
-
 // Visual transition tuning.
 const VISUAL_EASE = 0.24;
 const VISUAL_EPS = 0.007;
-
 // Interaction tuning.
 const CLICK_MOVE_TOLERANCE = 6;
 const LONG_PRESS_MS = 560;
@@ -109,13 +127,23 @@ const VIEW_TRANSITION_MS = 360;
 const ZOOM_MIN = 0.06;
 const ZOOM_MAX = 5;
 const POSITION_MEMORY_MAX = 4000;
-
 // Optional pane mode.
 const WIDE_PANE_MIN_WIDTH = 1120;
-
+// Layout-mode metadata for the floating view switcher.
+const MODE_BAR_DEFS = Object.freeze([
+  { value: 'force', icon: 'waypoints', label: 'Organic', hint: 'Force-directed layout · 1' },
+  { value: 'radial', icon: 'target', label: 'Focus', hint: 'Local graph around a note · 2' },
+  { value: 'tree', icon: 'list-tree', label: 'Tree', hint: 'Folder hierarchy · 3' },
+  { value: 'clusters', icon: 'boxes', label: 'Islands', hint: 'Linked clusters · 4' },
+]);
+// Calm, theme-compatible palette for the per-folder color mode.
+// Deliberately no oranges: hues stay in YANTA's blue/violet/green family.
+const FOLDER_PALETTE = Object.freeze([
+  '#6ea8fe', '#a78bfa', '#4ade80', '#22d3ee', '#f472b6',
+  '#818cf8', '#34d399', '#e879f9', '#5eead4', '#93c5fd',
+]);
 // Convenience accessor for persisted settings.
 const S = () => graphSettings();
-
 const graph = {
   nodes: [],
   links: [],
@@ -146,6 +174,7 @@ const graph = {
   hasQuery: false,
   hubDegree: 3,
   focusFolderId: null,
+  foldersIncluded: true,
   pressMx: 0,
   pressMy: 0,
   moved: 0,
@@ -156,18 +185,25 @@ const graph = {
   previewAnchor: null,
   positionMemory: new Map(), // gid -> { x, y, vx, vy }
   spawnPositions: new Map(), // gid -> { x, y }
+  // View-mode state
+  egoNoteId: null,      // explicit radial focus (session, not persisted)
+  egoFocusGid: null,    // resolved focus gid of the current radial build
+  radialRings: null,    // { cx, cy, gap, maxHop } ring guides
+  clusterInfo: null,    // { count, sizes } from the cluster layout
+  // Insights + spotlight
+  insights: null,
+  semanticSuggestions: [],
+  spotlight: null,      // { label, set:Set<gid> }
 };
-
 const iconCache = new Map();
 const boundCanvases = new WeakSet();
 let menuEl = null;
 let graphOverlayRegistered = false;
 let settingsSubscribed = false;
-
+let keyboardBound = false;
 function graphOverlayIsOpen() {
   return graph.mode === 'overlay' && $('graphOverlay')?.hidden === false;
 }
-
 function registerGraphOverlayRoute() {
   if (graphOverlayRegistered) return;
   graphOverlayRegistered = true;
@@ -177,14 +213,12 @@ function registerGraphOverlayRoute() {
     isOpen: graphOverlayIsOpen,
   });
 }
-
 // ------------------------------------------------------------
 // Theme / utility
 // ------------------------------------------------------------
 function cssVar(style, name, fallback) {
   return style.getPropertyValue(name).trim() || fallback;
 }
-
 function theme() {
   const s = getComputedStyle(document.documentElement);
   return {
@@ -205,35 +239,27 @@ function theme() {
     font: s.fontFamily || 'system-ui, sans-serif',
   };
 }
-
 function graphIdForNote(noteId) {
   return `note:${noteId}`;
 }
-
 function graphIdForFolder(folderId) {
   return `folder:${folderId}`;
 }
-
 function safeMetaColor(color, fallback = '') {
   return safeCssColor(color) || fallback;
 }
-
 function clamp01(x) {
   return Math.max(0, Math.min(1, x));
 }
-
 function lerpValue(current, target, ease = VISUAL_EASE) {
   return current + (target - current) * ease;
 }
-
 function easeInOutCubic(t) {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 }
-
 function pairKey(aGid, bGid) {
   return [aGid, bGid].sort().join('::');
 }
-
 function deterministicPhase(s) {
   let h = 2166136261;
   for (let i = 0; i < String(s).length; i++) {
@@ -242,7 +268,41 @@ function deterministicPhase(s) {
   }
   return ((h >>> 0) / 4294967295) * Math.PI * 2;
 }
-
+function truncateLabel(text, max = 22) {
+  const s = String(text || '');
+  return s.length > max ? s.slice(0, max) + '…' : s;
+}
+// ---- Color resolution (color modes need concrete canvas colors) ----
+let colorProbeCtx = null;
+function resolveColorToHex(color, fallback = '#8a93a4') {
+  try {
+    if (!colorProbeCtx) {
+      colorProbeCtx = document.createElement('canvas').getContext('2d');
+    }
+    colorProbeCtx.fillStyle = '#000000';
+    colorProbeCtx.fillStyle = String(color || '').trim() || fallback;
+    const v = colorProbeCtx.fillStyle;
+    return /^#[0-9a-f]{6}$/i.test(v) ? v : fallback;
+  } catch {
+    return fallback;
+  }
+}
+function lerpHex(a, b, t) {
+  const pa = parseInt(a.slice(1), 16);
+  const pb = parseInt(b.slice(1), 16);
+  const k = clamp01(t);
+  const channel = (shift) => {
+    const ca = (pa >> shift) & 255;
+    const cb = (pb >> shift) & 255;
+    return Math.round(ca + (cb - ca) * k);
+  };
+  return (
+    '#' +
+    [16, 8, 0]
+      .map((shift) => channel(shift).toString(16).padStart(2, '0'))
+      .join('')
+  );
+}
 function canvasCssSize() {
   if (!graph.canvas) return { w: 1200, h: 800 };
   const r = graph.canvas.getBoundingClientRect();
@@ -251,12 +311,10 @@ function canvasCssSize() {
     h: Math.max(1, r.height || graph.canvas.clientHeight || 800),
   };
 }
-
 function viewportCenter() {
   const { w, h } = canvasCssSize();
   return { x: w / 2, y: h / 2 };
 }
-
 function graphVisible() {
   if (graph.mode === 'pane') {
     return !!graph.paneHost?.isConnected && !!graph.canvas;
@@ -264,7 +322,6 @@ function graphVisible() {
   const ov = $('graphOverlay');
   return !!ov && !ov.hidden && !!graph.canvas;
 }
-
 async function copyText(text, message) {
   try {
     await navigator.clipboard.writeText(text);
@@ -273,7 +330,6 @@ async function copyText(text, message) {
     toast('Copy failed', 'error');
   }
 }
-
 // ------------------------------------------------------------
 // Folder / note metadata helpers
 // ------------------------------------------------------------
@@ -282,7 +338,6 @@ function folderByIdOrSelf(folderOrId) {
     ? state.folders.get(folderOrId)
     : folderOrId;
 }
-
 function folderIsAiBrain(folderOrId) {
   const start = folderByIdOrSelf(folderOrId);
   if (!start) return false;
@@ -295,7 +350,6 @@ function folderIsAiBrain(folderOrId) {
   }
   return false;
 }
-
 function noteIsAiBrain(note) {
   if (!note) return false;
   return (
@@ -308,7 +362,6 @@ function noteIsAiBrain(note) {
     folderIsAiBrain(note.folderId)
   );
 }
-
 function folderIsArchived(folderOrId) {
   const start = folderByIdOrSelf(folderOrId);
   if (!start) return false;
@@ -321,12 +374,10 @@ function folderIsArchived(folderOrId) {
   }
   return false;
 }
-
 function noteIsArchived(note) {
   if (!note) return false;
   return note.archived === true || folderIsArchived(note.folderId);
 }
-
 function graphArchiveExists() {
   for (const folder of state.folders.values()) {
     if (folderIsArchived(folder)) return true;
@@ -336,7 +387,6 @@ function graphArchiveExists() {
   }
   return false;
 }
-
 function graphAiBrainExists() {
   for (const folder of state.folders.values()) {
     if (folderIsAiBrain(folder)) return true;
@@ -346,7 +396,6 @@ function graphAiBrainExists() {
   }
   return false;
 }
-
 function folderIsGraphExcluded(folderOrId) {
   const start = folderByIdOrSelf(folderOrId);
   if (!start) return false;
@@ -363,7 +412,6 @@ function folderIsGraphExcluded(folderOrId) {
   }
   return false;
 }
-
 function noteIsGraphExcluded(note) {
   if (!note) return true;
   if (trash.isNoteInTrash(note)) return true;
@@ -380,7 +428,6 @@ function noteIsGraphExcluded(note) {
   if (note.folderId && folderIsGraphExcluded(note.folderId)) return true;
   return false;
 }
-
 function folderPath(folderId) {
   if (!folderId) return [];
   const out = [];
@@ -393,12 +440,10 @@ function folderPath(folderId) {
   }
   return out;
 }
-
 function noteFolderLabel(note) {
   const path = folderPath(note.folderId);
   return path.length ? path.join(' / ') : 'No folder';
 }
-
 function folderDepth(folderId) {
   let d = 0;
   let f = state.folders.get(folderId);
@@ -410,7 +455,6 @@ function folderDepth(folderId) {
   }
   return d;
 }
-
 function folderRootId(folderId) {
   let f = state.folders.get(folderId);
   const seen = new Set();
@@ -421,11 +465,9 @@ function folderRootId(folderId) {
   }
   return f?.id || folderId;
 }
-
 function isTopLevelFolder(folder) {
   return !folder.parentId || !state.folders.has(folder.parentId);
 }
-
 function topLevelFolderIds() {
   return [...state.folders.values()]
     .filter((folder) => !folderIsGraphExcluded(folder))
@@ -437,7 +479,6 @@ function topLevelFolderIds() {
     .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
     .map((f) => f.id);
 }
-
 // ------------------------------------------------------------
 // Graph data creation
 // ------------------------------------------------------------
@@ -460,7 +501,6 @@ function rememberPositions() {
     }
   }
 }
-
 function resolvePosition(gid, fallback) {
   const spawn = graph.spawnPositions.get(gid);
   if (spawn) {
@@ -478,7 +518,6 @@ function resolvePosition(gid, fallback) {
   }
   return { x: fallback.x, y: fallback.y, vx: 0, vy: 0, birthT: 0 };
 }
-
 function addNode(node) {
   node.phase = node.phase ?? deterministicPhase(node.gid);
   node.hoverT = node.hoverT ?? 0;
@@ -490,7 +529,6 @@ function addNode(node) {
   graph.idIndex.set(node.gid, graph.nodes.length);
   graph.nodes.push(node);
 }
-
 function addLink(aGid, bGid, kind, weight = 1, extra = {}) {
   const a = graph.idIndex.get(aGid);
   const b = graph.idIndex.get(bGid);
@@ -514,7 +552,6 @@ function addLink(aGid, bGid, kind, weight = 1, extra = {}) {
   graph.adj.get(b).add(a);
   return link;
 }
-
 function groupCenters() {
   const { w, h } = canvasCssSize();
   const cx = w / 2;
@@ -536,7 +573,6 @@ function groupCenters() {
   });
   return centers;
 }
-
 function initialFolderPosition(folder, indexByRoot, centers) {
   const root = folderRootId(folder.id) || folder.id;
   const center = centers.get(root) || viewportCenter();
@@ -550,9 +586,8 @@ function initialFolderPosition(folder, indexByRoot, centers) {
     y: center.y + Math.sin(angle) * radius,
   };
 }
-
 function initialNotePosition(note, noteIndexByGroup, centers, folderNodeById) {
-  if (S().showFolders && note.folderId && folderNodeById.has(note.folderId)) {
+  if (graph.foldersIncluded && note.folderId && folderNodeById.has(note.folderId)) {
     const parent = folderNodeById.get(note.folderId);
     const key = note.folderId;
     const i = noteIndexByGroup.get(key) || 0;
@@ -580,7 +615,6 @@ function initialNotePosition(note, noteIndexByGroup, centers, folderNodeById) {
     y: center.y + Math.sin(angle) * radius,
   };
 }
-
 function buildDescendantSets() {
   graph.descendantsByFolder.clear();
   const visibleFolderIds = new Set(
@@ -613,7 +647,6 @@ function buildDescendantSets() {
     }
   }
 }
-
 function buildGraph() {
   rememberPositions();
   graph.nodes = [];
@@ -623,8 +656,10 @@ function buildGraph() {
   graph.descendantsByFolder.clear();
   graph.hover = null;
   const s = S();
-  if (!s.showFolders) graph.focusFolderId = null;
-
+  const layoutMode = currentLayoutMode();
+  // Tree mode always needs folder nodes present, even if the folder layer is off.
+  graph.foldersIncluded = s.showFolders || layoutMode === 'tree';
+  if (!graph.foldersIncluded) graph.focusFolderId = null;
   const t = theme();
   const centers = groupCenters();
   const folders = [...state.folders.values()]
@@ -641,9 +676,8 @@ function buildGraph() {
       const fb = folderPath(b.folderId).join('/');
       return fa.localeCompare(fb) || (b.updated || 0) - (a.updated || 0);
     });
-
   const folderNodeById = new Map();
-  if (s.showFolders) {
+  if (graph.foldersIncluded) {
     const folderIndexByRoot = new Map();
     for (const f of folders) {
       const fallback = initialFolderPosition(f, folderIndexByRoot, centers);
@@ -675,7 +709,6 @@ function buildGraph() {
       addNode(node);
     }
   }
-
   const noteIndexByGroup = new Map();
   for (const n of notes) {
     const fallback = initialNotePosition(n, noteIndexByGroup, centers, folderNodeById);
@@ -704,8 +737,7 @@ function buildGraph() {
       pinned: !!n.pinned,
     });
   }
-
-  if (s.showFolders) {
+  if (graph.foldersIncluded) {
     for (const f of folders) {
       if (f.parentId && state.folders.has(f.parentId)) {
         addLink(graphIdForFolder(f.parentId), graphIdForFolder(f.id), LINK.FOLDER, 1.3);
@@ -717,7 +749,6 @@ function buildGraph() {
       }
     }
   }
-
   // Wiki links — count multiplicities per ordered pair and merge into a
   // single visible link per unordered pair with attached "count" weight.
   const wikiCounts = new Map(); // pairKey -> { a, b, fwd, rev, total }
@@ -754,11 +785,7 @@ function buildGraph() {
       mutual: entry.fwd > 0 && entry.rev > 0,
     });
   }
-
   addSemanticLinks(notes, wikiSeenGlobal);
-  buildDescendantSets();
-  graph.spawnPositions.clear();
-
   // Hub threshold for label LOD: 80th percentile of wiki connectivity.
   const degs = graph.nodes
     .filter((n) => n.type === NODE.NOTE && n.wikiDegree > 0)
@@ -767,11 +794,341 @@ function buildGraph() {
   graph.hubDegree = degs.length
     ? Math.max(3, degs[Math.floor(degs.length * 0.8)])
     : 3;
-
+  // Compute vault-wide insights BEFORE any ego filtering, so orphan / hub /
+  // island stats always reflect the whole graph rather than a local view.
+  graph.insights = computeGraphInsights({
+    nodes: graph.nodes,
+    links: graph.links,
+    wikiKind: LINK.WIKI,
+  });
+  graph.semanticSuggestions = s.showSemantic
+    ? topSemanticSuggestions({
+        nodes: graph.nodes,
+        links: graph.links,
+        semanticKind: LINK.SEMANTIC,
+      })
+    : [];
+  // Radial mode reduces the graph to an ego network around a focus note.
+  if (layoutMode === 'radial') {
+    filterGraphToEgo();
+  } else {
+    graph.egoFocusGid = null;
+    graph.radialRings = null;
+  }
+  buildDescendantSets();
+  graph.spawnPositions.clear();
   recomputeNodeMetrics();
+  recomputeNodeColors();
   recomputeSearchMatches();
+  applyLayout();
+  refreshSpotlightChip();
+  syncModeBar();
 }
-
+// ------------------------------------------------------------
+// Layout modes (force / radial / tree / clusters)
+// ------------------------------------------------------------
+function currentLayoutMode() {
+  const mode = S().layoutMode;
+  return GRAPH_LAYOUT_MODES.includes(mode) ? mode : 'force';
+}
+function layoutIsActive() {
+  return currentLayoutMode() !== 'force';
+}
+/**
+ * Reduce graph.nodes / graph.links to the ego network (BFS to egoDepth hops)
+ * around a resolved focus note, remapping all indices and adjacency.
+ */
+function filterGraphToEgo() {
+  const depth = Math.max(1, Math.min(3, S().egoDepth || 2));
+  // Resolve the focus node: explicit pick → current note → top hub → first note.
+  let focusGid = null;
+  const explicit = graph.egoNoteId ? graphIdForNote(graph.egoNoteId) : null;
+  if (explicit && graph.idIndex.has(explicit)) {
+    focusGid = explicit;
+  } else if (
+    state.currentNoteId &&
+    graph.idIndex.has(graphIdForNote(state.currentNoteId))
+  ) {
+    focusGid = graphIdForNote(state.currentNoteId);
+  } else if (graph.insights?.hubs?.length) {
+    for (const hub of graph.insights.hubs) {
+      if (graph.idIndex.has(hub.gid)) {
+        focusGid = hub.gid;
+        break;
+      }
+    }
+  }
+  if (!focusGid) {
+    const firstNote = graph.nodes.find((n) => n.type === NODE.NOTE);
+    focusGid = firstNote?.gid || graph.nodes[0]?.gid || null;
+  }
+  if (!focusGid) {
+    graph.egoFocusGid = null;
+    return;
+  }
+  graph.egoFocusGid = focusGid;
+  // BFS over adjacency to collect the ego set within `depth` hops.
+  const startIdx = graph.idIndex.get(focusGid);
+  const keep = new Set([startIdx]);
+  let frontier = [startIdx];
+  for (let hop = 0; hop < depth; hop++) {
+    const next = [];
+    for (const idx of frontier) {
+      const neighbors = graph.adj.get(idx);
+      if (!neighbors) continue;
+      for (const nb of neighbors) {
+        if (!keep.has(nb)) {
+          keep.add(nb);
+          next.push(nb);
+        }
+      }
+    }
+    frontier = next;
+    if (!frontier.length) break;
+  }
+  // Rebuild node list + index maps for the surviving subset.
+  const oldNodes = graph.nodes;
+  const keptNodes = [];
+  const remap = new Map(); // oldIdx -> newIdx
+  for (const oldIdx of keep) {
+    const node = oldNodes[oldIdx];
+    if (!node) continue;
+    remap.set(oldIdx, keptNodes.length);
+    keptNodes.push(node);
+  }
+  const keptLinks = [];
+  for (const l of graph.links) {
+    if (remap.has(l.a) && remap.has(l.b)) {
+      keptLinks.push({ ...l, a: remap.get(l.a), b: remap.get(l.b) });
+    }
+  }
+  graph.nodes = keptNodes;
+  graph.links = keptLinks;
+  graph.idIndex.clear();
+  keptNodes.forEach((n, i) => graph.idIndex.set(n.gid, i));
+  graph.adj.clear();
+  for (let i = 0; i < keptNodes.length; i++) graph.adj.set(i, new Set());
+  for (const l of keptLinks) {
+    graph.adj.get(l.a)?.add(l.b);
+    graph.adj.get(l.b)?.add(l.a);
+  }
+  // Recompute degrees for the reduced graph.
+  for (const n of keptNodes) {
+    n.degree = 0;
+    n.wikiDegree = 0;
+    n.semanticDegree = 0;
+  }
+  for (const l of keptLinks) {
+    const a = keptNodes[l.a];
+    const b = keptNodes[l.b];
+    a.degree++;
+    b.degree++;
+    if (l.kind === LINK.WIKI) {
+      a.wikiDegree++;
+      b.wikiDegree++;
+    } else if (l.kind === LINK.SEMANTIC) {
+      a.semanticDegree++;
+      b.semanticDegree++;
+    }
+  }
+}
+/**
+ * Apply the active layout mode by computing target positions (node.tx/ty).
+ * The physics layout-target force eases nodes toward these, so switching
+ * modes animates smoothly. Force mode simply clears the targets.
+ */
+function applyLayout() {
+  const mode = currentLayoutMode();
+  const { x: cx, y: cy } = viewportCenter();
+  if (mode === 'force') {
+    for (const n of graph.nodes) {
+      n.tx = null;
+      n.ty = null;
+    }
+    graph.radialRings = null;
+    graph.clusterInfo = null;
+    return;
+  }
+  let targets = null;
+  if (mode === 'radial') {
+    const centerIdx = graph.egoFocusGid != null
+      ? graph.idIndex.get(graph.egoFocusGid) ?? 0
+      : 0;
+    const res = computeRadialLayout({
+      nodes: graph.nodes,
+      adj: graph.adj,
+      centerIdx,
+      depth: Math.max(1, Math.min(3, S().egoDepth || 2)),
+      cx,
+      cy,
+    });
+    targets = res.targets;
+    graph.radialRings = {
+      cx,
+      cy,
+      gap: res.ringGap,
+      maxHop: res.maxHop,
+    };
+    graph.clusterInfo = null;
+  } else if (mode === 'tree') {
+    const entries = buildTreeEntries();
+    const res = computeTreeLayout({ entries });
+    targets = res.targets;
+    centerTargets(targets, cx, cy);
+    graph.radialRings = null;
+    graph.clusterInfo = null;
+  } else if (mode === 'clusters') {
+    const res = computeClusterLayout({
+      nodes: graph.nodes,
+      links: graph.links,
+      cx,
+      cy,
+    });
+    targets = res.targets;
+    graph.radialRings = null;
+    graph.clusterInfo = {
+      count: res.componentCount,
+      sizes: res.componentSizes,
+    };
+  }
+  if (!targets) return;
+  for (let i = 0; i < graph.nodes.length; i++) {
+    const n = graph.nodes[i];
+    const target = targets.get(i);
+    if (target) {
+      n.tx = target.x;
+      n.ty = target.y;
+    } else {
+      n.tx = null;
+      n.ty = null;
+    }
+  }
+}
+/** Recenter a target Map (world coords around 0,0) onto (cx, cy). */
+function centerTargets(targets, cx, cy) {
+  if (!targets || !targets.size) return;
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const t of targets.values()) {
+    if (t.x < minX) minX = t.x;
+    if (t.y < minY) minY = t.y;
+    if (t.x > maxX) maxX = t.x;
+    if (t.y > maxY) maxY = t.y;
+  }
+  const dx = cx - (minX + maxX) / 2;
+  const dy = cy - (minY + maxY) / 2;
+  for (const t of targets.values()) {
+    t.x += dx;
+    t.y += dy;
+  }
+}
+/** Build tidy-tree entries (folders + notes) for computeTreeLayout. */
+function buildTreeEntries() {
+  const entries = [];
+  for (let i = 0; i < graph.nodes.length; i++) {
+    const n = graph.nodes[i];
+    if (n.type === NODE.FOLDER) {
+      entries.push({
+        idx: i,
+        kind: 'folder',
+        id: n.id,
+        parentFolderId:
+          state.folders.get(n.id)?.parentId &&
+          graph.idIndex.has(graphIdForFolder(state.folders.get(n.id).parentId))
+            ? state.folders.get(n.id).parentId
+            : null,
+        sortKey: (n.title || '').toLowerCase(),
+      });
+    } else {
+      entries.push({
+        idx: i,
+        kind: 'note',
+        id: n.id,
+        folderId:
+          n.folderId && graph.idIndex.has(graphIdForFolder(n.folderId))
+            ? n.folderId
+            : null,
+        sortKey: (n.title || '').toLowerCase(),
+      });
+    }
+  }
+  return entries;
+}
+// ------------------------------------------------------------
+// Color modes (custom meta / folder / recency / connections)
+// ------------------------------------------------------------
+function topLevelFolderIdOf(node) {
+  let folderId = node.type === NODE.FOLDER ? node.id : node.folderId;
+  const seen = new Set();
+  while (folderId && !seen.has(folderId)) {
+    seen.add(folderId);
+    const f = state.folders.get(folderId);
+    if (!f || !f.parentId) break;
+    folderId = f.parentId;
+  }
+  return folderId || null;
+}
+/**
+ * Assign node.displayColor based on the active color mode. drawNode prefers
+ * displayColor over the stored meta color.
+ */
+function recomputeNodeColors() {
+  const mode = S().colorMode || 'meta';
+  const t = theme();
+  if (mode === 'meta') {
+    for (const n of graph.nodes) n.displayColor = null;
+    return;
+  }
+  if (mode === 'folder') {
+    const paletteByRoot = new Map();
+    let next = 0;
+    for (const n of graph.nodes) {
+      const root = topLevelFolderIdOf(n);
+      if (!root) {
+        n.displayColor = t.textFaint;
+        continue;
+      }
+      if (!paletteByRoot.has(root)) {
+        paletteByRoot.set(root, FOLDER_PALETTE[next % FOLDER_PALETTE.length]);
+        next++;
+      }
+      n.displayColor = paletteByRoot.get(root);
+    }
+    return;
+  }
+  if (mode === 'recency') {
+    const now = Date.now();
+    const cold = resolveColorToHex(t.textFaint, '#5b6270');
+    const hot = resolveColorToHex(t.accent, '#6ea8fe');
+    for (const n of graph.nodes) {
+      if (n.type === NODE.FOLDER) {
+        n.displayColor = t.textFaint;
+        continue;
+      }
+      const note = state.notes.get(n.id);
+      const days = Math.max(0, (now - (note?.updated || 0)) / 86400000);
+      n.displayColor = lerpHex(cold, hot, Math.exp(-days / 30));
+    }
+    return;
+  }
+  if (mode === 'connections') {
+    const cold = resolveColorToHex(t.textDim, '#8a93a4');
+    const hot = resolveColorToHex(t.accent, '#6ea8fe');
+    const hub = Math.max(1, graph.hubDegree || 3);
+    for (const n of graph.nodes) {
+      if (n.type === NODE.FOLDER) {
+        n.displayColor = t.textFaint;
+        continue;
+      }
+      const deg = n.wikiDegree || 0;
+      n.displayColor = lerpHex(cold, hot, clamp01(deg / hub));
+    }
+    return;
+  }
+  for (const n of graph.nodes) n.displayColor = null;
+}
 // ------------------------------------------------------------
 // Node metrics (size modes)
 // ------------------------------------------------------------
@@ -811,7 +1168,6 @@ function computeBaseRadius(node, s, now) {
   }
   return r * scale;
 }
-
 function recomputeNodeMetrics() {
   const s = S();
   const now = Date.now();
@@ -820,7 +1176,6 @@ function recomputeNodeMetrics() {
     n.hitRadius = n.baseR + 8;
   }
 }
-
 // ------------------------------------------------------------
 // Local semantic graph
 // ------------------------------------------------------------
@@ -856,7 +1211,6 @@ function addSemanticLinks(notes, explicitWikiPairs) {
     );
   }
 }
-
 // ------------------------------------------------------------
 // Physics
 // ------------------------------------------------------------
@@ -864,22 +1218,30 @@ function forceConfig(dragging) {
   const s = S();
   const f = s.forces;
   const { w, h } = canvasCssSize();
+  const layoutActive = layoutIsActive();
+  // In non-force modes, node.tx/ty positions dominate: repulsion, links,
+  // center and folder pulls are heavily damped so the target force wins and
+  // the arrangement reads as the chosen layout, not a force blob.
   return {
     alpha: graph.simAlpha,
-    repelK: (200 + f.repel * 2800) * (s.showSemantic ? 0.82 : 1),
-    linkScale: 0.25 + f.link * 1.5,
+    repelK:
+      (200 + f.repel * 2800) *
+      (s.showSemantic ? 0.82 : 1) *
+      (layoutActive ? 0.26 : 1),
+    linkScale: (0.25 + f.link * 1.5) * (layoutActive ? 0.3 : 1),
     distanceScale: f.linkDistance,
     centerX: w / 2,
     centerY: h / 2,
-    centerStrength: f.center * 0.008 * (dragging ? 0.45 : 1),
-    folderStrength: s.showFolders
-      ? f.folderPull * 0.01 * (dragging ? 0.5 : 1)
-      : 0,
+    centerStrength: layoutActive ? 0 : f.center * 0.008 * (dragging ? 0.45 : 1),
+    folderStrength:
+      !layoutActive && graph.foldersIncluded
+        ? f.folderPull * 0.01 * (dragging ? 0.5 : 1)
+        : 0,
+    targetStrength: layoutActive ? 0.085 : 0,
     friction: 1 - SIM.velocityDecay,
     collide: f.collide,
   };
 }
-
 function preparePhysicsModel({ dragging = false, dragIdx = null } = {}) {
   const s = S();
   for (const n of graph.nodes) {
@@ -892,7 +1254,7 @@ function preparePhysicsModel({ dragging = false, dragIdx = null } = {}) {
         ? (n.isTopLevelFolder ? 2.2 : 1.45) + Math.sqrt(connectivity || 0) * 0.22
         : 1 + Math.sqrt(connectivity || 0) * 0.16;
     n.collideR = n.baseR + (n.type === NODE.FOLDER ? 6 : 4);
-    if (s.showFolders && n.type === NODE.NOTE && n.folderId) {
+    if (graph.foldersIncluded && n.type === NODE.NOTE && n.folderId) {
       const folderIdx = graph.idIndex.get(graphIdForFolder(n.folderId));
       n.groupIdx = folderIdx == null ? -1 : folderIdx;
     } else {
@@ -937,7 +1299,6 @@ function preparePhysicsModel({ dragging = false, dragIdx = null } = {}) {
     l.strength = strength * (l.weight || 1);
   }
 }
-
 function stepGraph() {
   if (!graph.canvas) return 0;
   const dragging = !!graph.dragNode;
@@ -945,7 +1306,6 @@ function stepGraph() {
   preparePhysicsModel({ dragging, dragIdx });
   return tickSimulation(graph.nodes, graph.links, forceConfig(dragging));
 }
-
 function wakeSimulation() {
   if (!graph.simRunning) {
     graph.simRunning = true;
@@ -954,17 +1314,14 @@ function wakeSimulation() {
   }
   startVisualLoop();
 }
-
 function kickSimulation(alpha = 0.5) {
   graph.simAlpha = Math.max(graph.simAlpha || 0, alpha);
   wakeSimulation();
 }
-
 function setAlphaTarget(target) {
   graph.alphaTarget = target;
   if (target > 0) wakeSimulation();
 }
-
 function stopSimulation({ keepDrag = false } = {}) {
   graph.simRunning = false;
   graph.simAlpha = 0;
@@ -983,7 +1340,6 @@ function stopSimulation({ keepDrag = false } = {}) {
   }
   startVisualLoop();
 }
-
 function animate() {
   if (!graph.simRunning) return;
   // d3 semantics: alpha relaxes toward alphaTarget every tick.
@@ -999,7 +1355,6 @@ function animate() {
   }
   graph.raf = requestAnimationFrame(animate);
 }
-
 // ------------------------------------------------------------
 // Visual transitions
 // ------------------------------------------------------------
@@ -1007,7 +1362,6 @@ function startVisualLoop() {
   if (graph.visualRaf) return;
   graph.visualRaf = requestAnimationFrame(visualFrame);
 }
-
 function visualFrame() {
   graph.visualRaf = 0;
   const transitionsActive = updateVisualTransitions();
@@ -1019,7 +1373,6 @@ function visualFrame() {
     graph.visualRaf = requestAnimationFrame(visualFrame);
   }
 }
-
 function stepViewTween() {
   const tw = graph.viewTween;
   if (!tw) return false;
@@ -1035,13 +1388,12 @@ function stepViewTween() {
   }
   return true;
 }
-
 function updateVisualTransitions() {
   let active = false;
   for (const n of graph.nodes) {
     const hoverTarget = graph.hover === n ? 1 : 0;
     const currentTarget = isCurrent(n) ? 1 : 0;
-    const matchTarget = graph.hasQuery && n.isMatch ? 1 : 0;
+    const matchTarget = nodeEmphasized(n) ? 1 : 0;
     const dimTarget = nodeDimmed(n) ? 1 : 0;
     const nextHover = lerpValue(n.hoverT || 0, hoverTarget);
     const nextCurrent = lerpValue(n.currentT || 0, currentTarget);
@@ -1071,7 +1423,6 @@ function updateVisualTransitions() {
   }
   return active;
 }
-
 // ------------------------------------------------------------
 // Search matches (cached, no per-frame string work)
 // ------------------------------------------------------------
@@ -1091,7 +1442,6 @@ function noteMatchesQuery(node, q, deep) {
     return false;
   }
 }
-
 function recomputeSearchMatches() {
   const q = graph.highlight.trim().toLowerCase();
   graph.hasQuery = !!q;
@@ -1126,7 +1476,6 @@ function recomputeSearchMatches() {
   }
   startVisualLoop();
 }
-
 // ------------------------------------------------------------
 // Drawing
 // ------------------------------------------------------------
@@ -1137,7 +1486,6 @@ function escapeSvgAttr(v) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
 }
-
 function iconImage(name, color, size = 28) {
   const cleanName = name || 'square';
   const cleanColor = color || '#d8dee9';
@@ -1159,7 +1507,6 @@ function iconImage(name, color, size = 28) {
   img.src = url;
   return null;
 }
-
 function roundedRect(ctx, x, y, w, h, r) {
   const rr = Math.min(r, w / 2, h / 2);
   ctx.beginPath();
@@ -1173,16 +1520,24 @@ function roundedRect(ctx, x, y, w, h, r) {
   ctx.lineTo(x, y + rr);
   ctx.quadraticCurveTo(x, y, x + rr, y);
 }
-
 function focusSet() {
-  if (!S().showFolders || !graph.focusFolderId) return null;
+  if (!graph.foldersIncluded || !graph.focusFolderId) return null;
   return graph.descendantsByFolder.get(graph.focusFolderId) || null;
 }
-
+// ---- Spotlight (insight-driven highlight of an arbitrary node set) ----
+function spotlightActive() {
+  return !!graph.spotlight && graph.spotlight.set.size > 0;
+}
+function nodeInSpotlight(node) {
+  return spotlightActive() && graph.spotlight.set.has(node.gid);
+}
+/** A node is emphasized when it matches the search query or the spotlight. */
+function nodeEmphasized(node) {
+  return (graph.hasQuery && node.isMatch) || nodeInSpotlight(node);
+}
 function isCurrent(node) {
   return node.type === NODE.NOTE && node.id === state.currentNoteId;
 }
-
 function isHoverConnected(node) {
   if (!graph.hover) return false;
   const hi = graph.idIndex.get(graph.hover.gid);
@@ -1191,34 +1546,37 @@ function isHoverConnected(node) {
   if (hi === ni) return true;
   return graph.adj.get(hi)?.has(ni) || false;
 }
-
 function nodeDimmed(node) {
   const fs = focusSet();
-  const match = graph.hasQuery && node.isMatch;
-  if (fs && !fs.has(node.gid) && !match && !isCurrent(node) && !isHoverConnected(node)) {
+  const emph = nodeEmphasized(node);
+  if (fs && !fs.has(node.gid) && !emph && !isCurrent(node) && !isHoverConnected(node)) {
     return true;
   }
-  if (graph.hover && !isHoverConnected(node) && !match && !isCurrent(node)) {
+  if (graph.hover && !isHoverConnected(node) && !emph && !isCurrent(node)) {
     return true;
   }
-  if (graph.hasQuery && !match && !isCurrent(node) && !isHoverConnected(node)) {
+  if (spotlightActive() && !emph && !isCurrent(node) && !isHoverConnected(node)) {
+    return true;
+  }
+  if (graph.hasQuery && !emph && !isCurrent(node) && !isHoverConnected(node)) {
     return true;
   }
   return false;
 }
-
 function linkDimmed(link) {
   const a = graph.nodes[link.a];
   const b = graph.nodes[link.b];
   const fs = focusSet();
   if (fs && !fs.has(a.gid) && !fs.has(b.gid)) return true;
   if (graph.hover) return graph.hover !== a && graph.hover !== b;
+  if (spotlightActive()) {
+    return !nodeInSpotlight(a) && !nodeInSpotlight(b);
+  }
   if (graph.hasQuery) {
     return !a.isMatch && !b.isMatch && !isCurrent(a) && !isCurrent(b);
   }
   return false;
 }
-
 function labelAlphaFor(node, s) {
   const focusA = Math.max(node.hoverT || 0, node.currentT || 0, node.matchT || 0);
   const mode = node.type === NODE.FOLDER ? s.folderLabels : s.noteLabels;
@@ -1236,7 +1594,6 @@ function labelAlphaFor(node, s) {
   }
   return Math.max(a, focusA);
 }
-
 function drawSingleLine(ctx, ax, ay, bx, by, offset = 0) {
   if (offset === 0) {
     ctx.beginPath();
@@ -1255,7 +1612,6 @@ function drawSingleLine(ctx, ax, ay, bx, by, offset = 0) {
   ctx.lineTo(bx + nx * offset, by + ny * offset);
   ctx.stroke();
 }
-
 function drawLink(ctx, link, t) {
   const a = graph.nodes[link.a];
   const b = graph.nodes[link.b];
@@ -1307,7 +1663,6 @@ function drawLink(ctx, link, t) {
   ctx.setLineDash([]);
   ctx.globalAlpha = 1;
 }
-
 function drawNode(ctx, node, t, s) {
   const hoverT = node.hoverT || 0;
   const currentT = node.currentT || 0;
@@ -1316,10 +1671,9 @@ function drawNode(ctx, node, t, s) {
   const birthT = node.birthT || 0;
   const baseR = node.baseR || 11;
   const r = baseR + currentT * 4 + hoverT * 3 + matchT * 2 + birthT * 7;
-  const color = node.color || (node.type === NODE.FOLDER ? t.textDim : t.text);
+  const color = node.displayColor || node.color || (node.type === NODE.FOLDER ? t.textDim : t.text);
   node.radius = r;
   node.hitRadius = baseR + 9;
-
   ctx.save();
   ctx.globalAlpha = (1 - dimT * 0.68) * (1 - birthT * 0.28);
   if (birthT > 0.02) {
@@ -1353,7 +1707,6 @@ function drawNode(ctx, node, t, s) {
   ) / graph.scale;
   ctx.globalAlpha = (1 - dimT * 0.55) * (1 - birthT * 0.18);
   ctx.stroke();
-
   if (node.type === NODE.NOTE && s.showSemantic && node.semanticDegree && !node.wikiDegree) {
     ctx.beginPath();
     ctx.arc(node.x, node.y, r + 4, 0, Math.PI * 2);
@@ -1364,7 +1717,6 @@ function drawNode(ctx, node, t, s) {
     ctx.stroke();
     ctx.setLineDash([]);
   }
-
   ctx.globalAlpha = (1 - dimT * 0.68) * (1 - birthT * 0.18);
   if (node.pinned) {
     ctx.beginPath();
@@ -1372,7 +1724,6 @@ function drawNode(ctx, node, t, s) {
     ctx.fillStyle = t.yellow;
     ctx.fill();
   }
-
   // Icon (or a colored core dot when icons are turned off).
   if (s.showIcons) {
     const iconSize = Math.max(12, Math.min(30, r * 1.15));
@@ -1394,7 +1745,6 @@ function drawNode(ctx, node, t, s) {
     ctx.fill();
     ctx.globalAlpha = (1 - dimT * 0.68) * (1 - birthT * 0.18);
   }
-
   // Label with level-of-detail fade.
   const labelA = labelAlphaFor(node, s);
   if (labelA > 0.03) {
@@ -1438,7 +1788,6 @@ function drawNode(ctx, node, t, s) {
   }
   ctx.restore();
 }
-
 function drawEmptyState(ctx, t, dpr) {
   const { w, h } = canvasCssSize();
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
@@ -1450,7 +1799,6 @@ function drawEmptyState(ctx, t, dpr) {
   ctx.font = `12px ${t.font}`;
   ctx.fillText('Right-click to create your first note or folder.', w / 2, h / 2 + 12);
 }
-
 function drawGraph() {
   const c = graph.canvas;
   const ctx = graph.ctx;
@@ -1460,14 +1808,11 @@ function drawGraph() {
   const s = S();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.clearRect(0, 0, c.width, c.height);
-
   if (!graph.nodes.length) {
     drawEmptyState(ctx, t, dpr);
     return;
   }
-
   ctx.setTransform(graph.scale * dpr, 0, 0, graph.scale * dpr, graph.ox * dpr, graph.oy * dpr);
-
   // Viewport culling bounds (world coordinates, generous padding for labels).
   const { w, h } = canvasCssSize();
   const pad = 160 / graph.scale + 160;
@@ -1475,7 +1820,21 @@ function drawGraph() {
   const vy0 = -graph.oy / graph.scale - pad;
   const vx1 = (w - graph.ox) / graph.scale + pad;
   const vy1 = (h - graph.oy) / graph.scale + pad;
-
+  // Radial mode: faint concentric hop-ring guides behind everything.
+  if (currentLayoutMode() === 'radial' && graph.radialRings) {
+    const { cx, cy, gap, maxHop } = graph.radialRings;
+    ctx.save();
+    ctx.setLineDash([4, 9]);
+    ctx.lineWidth = 1 / graph.scale;
+    for (let hop = 1; hop <= maxHop; hop++) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, gap * hop, 0, Math.PI * 2);
+      ctx.strokeStyle = t.border;
+      ctx.globalAlpha = Math.max(0.08, 0.4 - hop * 0.07);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
   for (const kind of [LINK.SEMANTIC, LINK.FOLDER, LINK.CONTAINS, LINK.WIKI]) {
     for (const l of graph.links) {
       if (l.kind !== kind) continue;
@@ -1490,13 +1849,12 @@ function drawGraph() {
       drawLink(ctx, l, t);
     }
   }
-
   // Two-pass z-ordering without per-frame sorting: normal nodes first,
   // then the small elevated set (current / hover / matches) on top.
   const elevated = [];
   for (const n of graph.nodes) {
     if (n.x < vx0 || n.x > vx1 || n.y < vy0 || n.y > vy1) continue;
-    if (graph.hover === n || isCurrent(n) || (graph.hasQuery && n.isMatch)) {
+    if (graph.hover === n || isCurrent(n) || nodeEmphasized(n)) {
       elevated.push(n);
       continue;
     }
@@ -1506,7 +1864,6 @@ function drawGraph() {
     drawNode(ctx, n, t, s);
   }
 }
-
 // ------------------------------------------------------------
 // Interaction helpers
 // ------------------------------------------------------------
@@ -1518,7 +1875,6 @@ function nodeAt(x, y) {
   }
   return null;
 }
-
 function canvasCoords(e) {
   const r = graph.canvas.getBoundingClientRect();
   return {
@@ -1526,34 +1882,28 @@ function canvasCoords(e) {
     y: (e.clientY - r.top - graph.oy) / graph.scale,
   };
 }
-
 // ---- Shared pinch zoom (document listeners bound exactly once) ----
 const pinch = {
   pointers: new Map(),
   session: null,
   docBound: false,
 };
-
 function pinchIsTouchLike(e) {
   return e.pointerType === 'touch' || e.pointerType === 'pen';
 }
-
 function pinchDistance(a, b) {
   return Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
 }
-
 function pinchCenter(a, b) {
   return {
     clientX: (a.clientX + b.clientX) / 2,
     clientY: (a.clientY + b.clientY) / 2,
   };
 }
-
 function pinchPair() {
   const list = [...pinch.pointers.values()];
   return list.length >= 2 ? [list[0], list[1]] : null;
 }
-
 function beginPinch() {
   const pair = pinchPair();
   if (!pair || !graph.canvas) return;
@@ -1574,7 +1924,6 @@ function beginPinch() {
   clearLongPressTimer();
   graph.canvas.classList.add('dragging');
 }
-
 function updatePinch(e) {
   if (!pinch.session || !graph.canvas) return;
   const pair = pinchPair();
@@ -1599,7 +1948,6 @@ function updatePinch(e) {
   e.stopPropagation();
   e.stopImmediatePropagation?.();
 }
-
 function bindPinchDocumentListenersOnce() {
   if (pinch.docBound) return;
   pinch.docBound = true;
@@ -1621,7 +1969,6 @@ function bindPinchDocumentListenersOnce() {
   document.addEventListener('pointerup', end, { capture: true, passive: false });
   document.addEventListener('pointercancel', end, { capture: true, passive: false });
 }
-
 function installGraphPinchZoom(canvas) {
   bindPinchDocumentListenersOnce();
   canvas.addEventListener('pointerdown', (e) => {
@@ -1636,7 +1983,6 @@ function installGraphPinchZoom(canvas) {
     }
   }, { capture: true, passive: false });
 }
-
 // ---- View transitions ----
 function centerOnNode(node, scale = Math.max(1.15, graph.scale), { animated = true } = {}) {
   const { w, h } = canvasCssSize();
@@ -1663,7 +2009,6 @@ function centerOnNode(node, scale = Math.max(1.15, graph.scale), { animated = tr
   };
   startVisualLoop();
 }
-
 function fitToView({ nodes = graph.nodes, animated = true, maxScale = 1.4 } = {}) {
   if (!nodes.length || !graph.canvas) return;
   let x0 = Infinity;
@@ -1709,7 +2054,6 @@ function fitToView({ nodes = graph.nodes, animated = true, maxScale = 1.4 } = {}
   };
   startVisualLoop();
 }
-
 function fitFolderToView(folderId) {
   const desc = graph.descendantsByFolder.get(folderId);
   if (!desc) return;
@@ -1720,19 +2064,24 @@ function fitFolderToView(folderId) {
   }
   if (nodes.length) fitToView({ nodes, maxScale: 1.6 });
 }
-
+function fitToNodes(gids, { animated = true } = {}) {
+  const nodes = [];
+  for (const gid of gids) {
+    const idx = graph.idIndex.get(gid);
+    if (idx != null) nodes.push(graph.nodes[idx]);
+  }
+  if (nodes.length) fitToView({ nodes, animated, maxScale: 1.5 });
+}
 function recenterAll() {
   graph.focusFolderId = null;
   fitToView({ animated: true });
   updateStats();
   kickSimulation(0.35);
 }
-
 function clearLongPressTimer() {
   clearTimeout(graph.longPressTimer);
   graph.longPressTimer = 0;
 }
-
 // ------------------------------------------------------------
 // Note preview integration
 // ------------------------------------------------------------
@@ -1755,8 +2104,14 @@ function previewHandlers() {
         openNote(noteId);
         return;
       }
-      const target = graph.nodes[idx];
-      centerOnNode(target, Math.max(1.1, graph.scale));
+      // In Focus (radial) view, navigating re-centers the local graph on
+      // the destination note instead of just panning to it.
+      if (currentLayoutMode() === 'radial') {
+        setRadialFocus(noteId);
+      } else {
+        const target = graph.nodes[idx];
+        centerOnNode(target, Math.max(1.1, graph.scale));
+      }
       const a = graph.previewAnchor || {
         x: window.innerWidth / 2,
         y: window.innerHeight / 2,
@@ -1765,7 +2120,6 @@ function previewHandlers() {
     },
   };
 }
-
 function openPreviewForNode(node, clientX, clientY) {
   if (!node || node.type !== NODE.NOTE) return;
   const note = state.notes.get(node.id);
@@ -1774,7 +2128,6 @@ function openPreviewForNode(node, clientX, clientY) {
   graph.previewAnchor = { x: clientX, y: clientY };
   showGraphNotePreview(note, clientX, clientY, previewHandlers());
 }
-
 // ------------------------------------------------------------
 // Context menus
 // ------------------------------------------------------------
@@ -1783,7 +2136,6 @@ function hideContextMenu() {
   menuEl.remove();
   menuEl = null;
 }
-
 function ensureContextMenuCloseHandlers() {
   document.addEventListener('mousedown', (e) => {
     if (menuEl && !menuEl.contains(e.target)) hideContextMenu();
@@ -1792,7 +2144,6 @@ function ensureContextMenuCloseHandlers() {
     if (e.key === 'Escape') hideContextMenu();
   });
 }
-
 function positionFloatingElement(elm, x, y) {
   elm.hidden = false;
   requestAnimationFrame(() => {
@@ -1809,7 +2160,6 @@ function positionFloatingElement(elm, x, y) {
     elm.style.top = top + 'px';
   });
 }
-
 function menuShell(metaIcon, metaText) {
   injectGraphCss();
   hideGraphNotePreview();
@@ -1824,7 +2174,6 @@ function menuShell(metaIcon, metaText) {
   }
   return menuEl;
 }
-
 function menuItem(menu, icon, label, onClick, { danger = false, kbd = '' } = {}) {
   const btn = document.createElement('button');
   if (danger) btn.className = 'danger';
@@ -1841,17 +2190,14 @@ function menuItem(menu, icon, label, onClick, { danger = false, kbd = '' } = {})
   menu.append(btn);
   return btn;
 }
-
 function menuDivider(menu) {
   menu.append(document.createElement('hr'));
 }
-
 function folderLabelForContext(folderId) {
   if (!folderId) return 'root';
   const f = state.folders.get(folderId);
   return f?.name || 'folder';
 }
-
 async function togglePinFromGraph(node) {
   const n = state.notes.get(node.id);
   if (!n) return;
@@ -1866,14 +2212,12 @@ async function togglePinFromGraph(node) {
   toast(n.pinned ? 'Note pinned' : 'Note unpinned', 'success');
   startVisualLoop();
 }
-
 async function duplicateNoteFromGraph(node) {
   const { duplicateNoteById } = await import('./item-actions.js');
   await duplicateNoteById(node.id);
   renderTree();
   rebuildAndAnimateAfterMutation(0.7);
 }
-
 async function trashNoteFromGraph(node) {
   await trash.moveNoteToTrash(node.id, {
     source: 'graph-context-menu',
@@ -1885,7 +2229,6 @@ async function trashNoteFromGraph(node) {
     window.yantaSync2Now?.();
   } catch {}
 }
-
 async function renameFolderFromGraph(folder) {
   const name = await yantaPrompt({
     title: 'Rename folder',
@@ -1907,7 +2250,6 @@ async function renameFolderFromGraph(folder) {
   rebuildAndAnimateAfterMutation(0.4);
   toast('Folder renamed', 'success');
 }
-
 function showNodeContextMenu(node, clientX, clientY) {
   if (!node) return;
   if (node.type === NODE.NOTE) {
@@ -1915,7 +2257,6 @@ function showNodeContextMenu(node, clientX, clientY) {
     if (!note) return;
     const parentFolderId = note.folderId || null;
     const menu = menuShell('file-text', `Note in ${folderLabelForContext(parentFolderId)} · ${node.wikiDegree || 0} link${(node.wikiDegree || 0) === 1 ? '' : 's'}`);
-
     menuItem(menu, 'file-text', 'Open note', async () => {
       if (graph.mode === 'overlay') closeGraph();
       await openNote(node.id);
@@ -1923,6 +2264,7 @@ function showNodeContextMenu(node, clientX, clientY) {
     menuItem(menu, 'eye', 'Quick preview', () => {
       openPreviewForNode(node, clientX, clientY);
     });
+    menuItem(menu, 'target', 'Focus local graph', () => setRadialFocus(node.id));
     menuItem(
       menu,
       note.pinned ? 'pin-off' : 'pin',
@@ -1954,17 +2296,14 @@ function showNodeContextMenu(node, clientX, clientY) {
     menuItem(menu, 'trash', 'Move to Trash', () => trashNoteFromGraph(node), {
       danger: true,
     });
-
     document.body.append(menu);
     positionFloatingElement(menu, clientX, clientY);
     return;
   }
-
   if (node.type === NODE.FOLDER) {
     const folder = state.folders.get(node.id);
     if (!folder) return;
     const menu = menuShell('folder', `Folder · ${folderPath(folder.id).join(' / ') || folder.name}`);
-
     menuItem(
       menu,
       graph.focusFolderId === folder.id ? 'minimize-2' : 'maximize-2',
@@ -2001,12 +2340,10 @@ function showNodeContextMenu(node, clientX, clientY) {
         rebuildAndAnimateAfterMutation(0.8);
       }, { danger: true });
     }
-
     document.body.append(menu);
     positionFloatingElement(menu, clientX, clientY);
   }
 }
-
 function showEmptyContextMenu(clientX, clientY) {
   const menu = menuShell('mouse-pointer-2', 'Canvas');
   menuItem(menu, 'file-plus', 'New root note', () =>
@@ -2021,7 +2358,6 @@ function showEmptyContextMenu(clientX, clientY) {
   document.body.append(menu);
   positionFloatingElement(menu, clientX, clientY);
 }
-
 // ------------------------------------------------------------
 // Creating notes / folders from the graph
 // ------------------------------------------------------------
@@ -2032,7 +2368,6 @@ function spawnNearNode(sourceNode, gid, distance = 46) {
     y: sourceNode.y + Math.sin(angle) * distance,
   });
 }
-
 function spawnAtClient(gid, clientX, clientY) {
   if (!graph.canvas) return;
   const r = graph.canvas.getBoundingClientRect();
@@ -2041,7 +2376,6 @@ function spawnAtClient(gid, clientX, clientY) {
     y: (clientY - r.top - graph.oy) / graph.scale,
   });
 }
-
 async function persistNewNote(title, folderId) {
   const id = uid();
   const note = {
@@ -2064,7 +2398,6 @@ async function persistNewNote(title, folderId) {
   rebuildWikilinkIndex();
   return note;
 }
-
 async function createNoteFromGraph(sourceNode, folderId) {
   const title = await yantaPrompt({
     title: 'New note',
@@ -2086,7 +2419,6 @@ async function createNoteFromGraph(sourceNode, folderId) {
   rebuildAndAnimateAfterMutation(0.9);
   toast('Note created', 'success');
 }
-
 async function createFolderFromGraph(sourceNode, parentId) {
   const id = uid();
   const now = Date.now();
@@ -2109,7 +2441,6 @@ async function createFolderFromGraph(sourceNode, parentId) {
   }));
   toast('Folder created', 'success');
 }
-
 async function createRootEntity(kind, clientX, clientY) {
   if (kind === 'note') {
     const title = await yantaPrompt({
@@ -2145,7 +2476,6 @@ async function createRootEntity(kind, clientX, clientY) {
     toast('Folder created', 'success');
   }
 }
-
 function rebuildAndAnimateAfterMutation(alpha = 0.8) {
   if (!graph.canvas || !graphVisible()) return;
   buildGraph();
@@ -2153,7 +2483,6 @@ function rebuildAndAnimateAfterMutation(alpha = 0.8) {
   refreshControlsUI();
   kickSimulation(alpha);
 }
-
 // ------------------------------------------------------------
 // Stats + controls panel
 // ------------------------------------------------------------
@@ -2164,31 +2493,37 @@ function statsHtml() {
   const wikiCount = graph.links.filter((l) => l.kind === LINK.WIKI).length;
   const semanticCount = graph.links.filter((l) => l.kind === LINK.SEMANTIC).length;
   const parts = [`<strong>${noteCount}</strong> notes`];
-  if (s.showFolders) parts.push(`<strong>${folderCount}</strong> folders`);
+  if (graph.foldersIncluded) parts.push(`<strong>${folderCount}</strong> folders`);
   parts.push(`<strong>${wikiCount}</strong> links`);
   if (s.showSemantic) parts.push(`<strong>${semanticCount}</strong> semantic`);
+  const mode = currentLayoutMode();
+  if (mode === 'radial' && graph.egoFocusGid) {
+    const idx = graph.idIndex.get(graph.egoFocusGid);
+    const title = idx != null ? graph.nodes[idx]?.title : '';
+    if (title) {
+      parts.push(`focus <strong>${escapeHtml(truncateLabel(title, 24))}</strong>`);
+    }
+  } else if (mode === 'clusters' && graph.clusterInfo) {
+    parts.push(`<strong>${graph.clusterInfo.count}</strong> islands`);
+  }
   return parts.join('<span style="opacity:0.4">·</span>');
 }
-
 function statsEl() {
   if (graph.mode === 'pane') {
     return graph.paneHost?.querySelector('[data-graph-stats]') || null;
   }
   return document.querySelector('[data-graph-stats-overlay]');
 }
-
 function updateStats() {
   const el = statsEl();
   if (el) el.innerHTML = statsHtml();
 }
-
 function controlsEl() {
   if (graph.mode === 'pane') {
     return graph.paneHost?.querySelector('[data-graph-controls]') || null;
   }
   return document.querySelector('[data-graph-controls-overlay]');
 }
-
 function refreshControlsUI() {
   const el = controlsEl();
   if (!el) return;
@@ -2199,7 +2534,6 @@ function refreshControlsUI() {
     } catch {}
   }
 }
-
 // ---- Generic control builders ----
 function ctlToggle(panel, { icon, label, get, set }) {
   const row = document.createElement('div');
@@ -2231,7 +2565,6 @@ function ctlToggle(panel, { icon, label, get, set }) {
   panel.__syncs.push(sync);
   return row;
 }
-
 function ctlSegment(panel, { options, get, set, ariaLabel = '' }) {
   const seg = document.createElement('div');
   seg.className = 'gc-seg';
@@ -2262,7 +2595,6 @@ function ctlSegment(panel, { options, get, set, ariaLabel = '' }) {
   panel.__syncs.push(sync);
   return seg;
 }
-
 function ctlSlider(panel, { icon, label, min, max, step, get, set, format, hint = '' }) {
   const row = document.createElement('div');
   row.className = 'gc-slider-row';
@@ -2291,7 +2623,6 @@ function ctlSlider(panel, { icon, label, min, max, step, get, set, format, hint 
   panel.__syncs.push(sync);
   return row;
 }
-
 function ctlGroup(title, extraButton = null) {
   const group = document.createElement('div');
   group.className = 'gc-group';
@@ -2302,14 +2633,12 @@ function ctlGroup(title, extraButton = null) {
   group.append(head);
   return group;
 }
-
 function ctlFieldLabel(icon, text) {
   const label = document.createElement('div');
   label.className = 'gc-field-label';
   label.innerHTML = `${lucide(icon, 12)} ${escapeHtml(text)}`;
   return label;
 }
-
 function ctlAction(icon, label, onClick) {
   const btn = document.createElement('button');
   btn.type = 'button';
@@ -2318,29 +2647,268 @@ function ctlAction(icon, label, onClick) {
   btn.addEventListener('click', onClick);
   return btn;
 }
-
+// ---- Insights rows ----
+function insightRow(host, { icon, label, value, badge, sub, disabled, onClick, title }) {
+  const row = document.createElement(onClick && !disabled ? 'button' : 'div');
+  row.className = 'gc-insight' + (sub ? ' sub' : '');
+  if (disabled) row.setAttribute('disabled', '');
+  if (title) row.title = title;
+  row.innerHTML = `
+    <span class="gci-label">${icon ? lucide(icon, 12) + ' ' : ''}${escapeHtml(label)}</span>
+    ${value != null ? `<span class="gci-value">${escapeHtml(String(value))}</span>` : ''}
+    ${badge ? `<span class="gci-badge">${escapeHtml(badge)}</span>` : ''}
+  `;
+  if (onClick && !disabled) {
+    row.type = 'button';
+    row.addEventListener('click', onClick);
+  }
+  host.append(row);
+  return row;
+}
+function populateInsights(host) {
+  if (!host) return;
+  host.replaceChildren();
+  const ins = graph.insights;
+  if (!ins || !ins.noteCount) {
+    insightRow(host, { icon: 'info', label: 'No notes to analyze yet', disabled: true });
+    return;
+  }
+  // Orphans
+  insightRow(host, {
+    icon: 'unlink',
+    label: 'Orphan notes',
+    value: ins.orphans.length,
+    disabled: ins.orphans.length === 0,
+    title: 'Notes with no wikilinks. Click to spotlight them.',
+    onClick: () =>
+      spotlightFromInsight(
+        `${ins.orphans.length} orphan notes`,
+        ins.orphans.map((o) => o.gid)
+      ),
+  });
+  // Stale
+  insightRow(host, {
+    icon: 'clock',
+    label: `Stale (${ins.staleDays}d+)`,
+    value: ins.stale.length,
+    disabled: ins.stale.length === 0,
+    title: 'Notes not edited recently. Click to spotlight them.',
+    onClick: () =>
+      spotlightFromInsight(
+        `${ins.stale.length} stale notes`,
+        ins.stale.map((s) => s.gid)
+      ),
+  });
+  // Islands
+  insightRow(host, {
+    icon: 'boxes',
+    label: 'Linked islands',
+    value: ins.componentCount,
+    title: 'Number of disconnected clusters. Switch to Islands view to see them.',
+    onClick: () => setLayoutMode('clusters'),
+  });
+  // Top hubs
+  if (ins.hubs.length) {
+    insightRow(host, { icon: 'zap', label: 'Top hubs', sub: true, disabled: true });
+    for (const hub of ins.hubs) {
+      insightRow(host, {
+        label: hub.title,
+        badge: `${hub.degree}`,
+        title: `${hub.title} · ${hub.degree} links. Click to focus.`,
+        onClick: () => focusInsightNode(hub.gid),
+      });
+    }
+  }
+  // Semantic suggestions
+  if (graph.semanticSuggestions?.length) {
+    insightRow(host, {
+      icon: 'sparkles',
+      label: 'Suggested links',
+      sub: true,
+      disabled: true,
+    });
+    for (const sug of graph.semanticSuggestions) {
+      insightRow(host, {
+        label: `${sug.aTitle} ↔ ${sug.bTitle}`,
+        badge: `${Math.round(sug.score * 100)}%`,
+        title: 'Semantically similar notes that are not yet linked. Click to spotlight.',
+        onClick: () =>
+          spotlightFromInsight(
+            `${sug.aTitle} ↔ ${sug.bTitle}`,
+            [sug.aGid, sug.bGid]
+          ),
+      });
+    }
+  }
+}
+// ------------------------------------------------------------
+// Floating mode bar (layout switcher) + spotlight chip
+// ------------------------------------------------------------
+function buildModeBar() {
+  injectGraphCss();
+  const bar = document.createElement('div');
+  bar.className = 'yanta-graph-modebar';
+  bar.setAttribute('data-graph-modebar', '');
+  for (const def of MODE_BAR_DEFS) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.dataset.mode = def.value;
+    btn.title = def.hint;
+    btn.innerHTML = `${lucide(def.icon, 15)}<span class="gm-label">${escapeHtml(def.label)}</span>`;
+    btn.addEventListener('click', () => setLayoutMode(def.value));
+    bar.append(btn);
+  }
+  syncModeBarNode(bar);
+  return bar;
+}
+function modeBarNodes() {
+  return document.querySelectorAll('[data-graph-modebar]');
+}
+function syncModeBarNode(bar) {
+  const mode = currentLayoutMode();
+  for (const btn of bar.querySelectorAll('button')) {
+    btn.classList.toggle('on', btn.dataset.mode === mode);
+  }
+}
+function syncModeBar() {
+  for (const bar of modeBarNodes()) syncModeBarNode(bar);
+}
+function buildSpotlightChip() {
+  injectGraphCss();
+  const chip = document.createElement('div');
+  chip.className = 'yanta-graph-spotlight-chip';
+  chip.setAttribute('data-graph-spotlight', '');
+  chip.hidden = true;
+  chip.innerHTML = `
+    <span class="gs-label"></span>
+    <span class="gs-count"></span>
+    <button type="button" class="gs-clear" title="Clear spotlight">${lucide('x', 13)}</button>
+  `;
+  chip.querySelector('.gs-clear').addEventListener('click', clearSpotlight);
+  syncSpotlightChipNode(chip);
+  return chip;
+}
+function spotlightChipNodes() {
+  return document.querySelectorAll('[data-graph-spotlight]');
+}
+function syncSpotlightChipNode(chip) {
+  if (spotlightActive()) {
+    chip.hidden = false;
+    chip.querySelector('.gs-label').textContent = graph.spotlight.label;
+    chip.querySelector('.gs-count').textContent = `${graph.spotlight.set.size}`;
+  } else {
+    chip.hidden = true;
+  }
+}
+function refreshSpotlightChip() {
+  for (const chip of spotlightChipNodes()) syncSpotlightChipNode(chip);
+}
+// ------------------------------------------------------------
+// Layout mode + focus + spotlight actions
+// ------------------------------------------------------------
+function setLayoutMode(mode) {
+  if (!GRAPH_LAYOUT_MODES.includes(mode) || mode === currentLayoutMode()) {
+    syncModeBar();
+    return;
+  }
+  updateGraphSettings({ layoutMode: mode });
+  graph.hover = null;
+  buildGraph();
+  updateStats();
+  refreshControlsUI();
+  kickSimulation(0.9);
+  requestAnimationFrame(() => fitToView({ animated: true }));
+}
+function setRadialFocus(noteId) {
+  graph.egoNoteId = noteId || null;
+  if (currentLayoutMode() !== 'radial') {
+    updateGraphSettings({ layoutMode: 'radial' });
+  }
+  graph.hover = null;
+  buildGraph();
+  updateStats();
+  refreshControlsUI();
+  kickSimulation(0.9);
+  requestAnimationFrame(() => fitToView({ animated: true }));
+}
+function setSpotlight(label, gids) {
+  const set = new Set((gids || []).filter((g) => graph.idIndex.has(g)));
+  graph.spotlight = set.size ? { label, set } : null;
+  refreshSpotlightChip();
+  startVisualLoop();
+}
+function clearSpotlight() {
+  if (!graph.spotlight) return;
+  graph.spotlight = null;
+  refreshSpotlightChip();
+  startVisualLoop();
+}
+/**
+ * Spotlight a set of notes from the insights panel. Insight gids are
+ * vault-wide; if we're in a filtered (radial) view, switch to force first so
+ * every member is present, then fit the spotlight if it's small enough.
+ */
+function spotlightFromInsight(label, gids) {
+  const apply = () => {
+    setSpotlight(label, gids);
+    const members = gids.filter((g) => graph.idIndex.has(g));
+    if (members.length && members.length <= 60) {
+      requestAnimationFrame(() =>
+        requestAnimationFrame(() => fitToNodes(members, { animated: true }))
+      );
+    }
+  };
+  if (currentLayoutMode() === 'radial') {
+    updateGraphSettings({ layoutMode: 'force' });
+    graph.egoNoteId = null;
+    buildGraph();
+    updateStats();
+    refreshControlsUI();
+    kickSimulation(0.85);
+    requestAnimationFrame(apply);
+  } else {
+    apply();
+  }
+}
+function focusInsightNode(gid) {
+  const idx = graph.idIndex.get(gid);
+  if (idx == null) {
+    // Not in the current (possibly filtered) view: rebuild in force mode.
+    if (currentLayoutMode() === 'radial') {
+      updateGraphSettings({ layoutMode: 'force' });
+      graph.egoNoteId = null;
+      buildGraph();
+      updateStats();
+      refreshControlsUI();
+      kickSimulation(0.6);
+      requestAnimationFrame(() => focusInsightNode(gid));
+    }
+    return;
+  }
+  const node = graph.nodes[idx];
+  setSpotlight(node.title || 'Focused note', [gid]);
+  centerOnNode(node, Math.max(1.3, graph.scale), { animated: true });
+}
 // ---- Panel assembly ----
 function setForce(key, value) {
   updateGraphSettings({ forces: { [key]: value } });
   kickSimulation(0.4);
 }
-
 function setLayer(key, value) {
   updateGraphSettings({ [key]: value });
   graph.focusFolderId = null;
   graph.hover = null;
   buildGraph();
   updateStats();
+  refreshControlsUI();
   kickSimulation(BUILD_ALPHA);
 }
-
 function buildControlsPanel({ paneMode = false } = {}) {
   injectGraphCss();
   const wrap = document.createElement('div');
   wrap.__syncs = [];
   wrap.className = 'yanta-graph-controls' + (S().controlsOpen ? '' : ' collapsed');
   wrap.setAttribute(paneMode ? 'data-graph-controls' : 'data-graph-controls-overlay', '');
-
   // Head (collapse toggle)
   const head = document.createElement('div');
   head.className = 'yanta-graph-controls-head';
@@ -2356,11 +2924,9 @@ function buildControlsPanel({ paneMode = false } = {}) {
       lucide(S().controlsOpen ? 'chevron-up' : 'chevron-down', 13);
   });
   wrap.append(head);
-
   const body = document.createElement('div');
   body.className = 'yanta-graph-controls-body';
   wrap.append(body);
-
   // --- Search -------------------------------------------------
   const searchGroup = ctlGroup('Search');
   const search = document.createElement('input');
@@ -2382,7 +2948,6 @@ function buildControlsPanel({ paneMode = false } = {}) {
     },
   }));
   body.append(searchGroup);
-
   // --- Display ------------------------------------------------
   const displayGroup = ctlGroup('Display');
   displayGroup.append(ctlFieldLabel('type', 'Note labels'));
@@ -2447,8 +3012,23 @@ function buildControlsPanel({ paneMode = false } = {}) {
     },
     format: (v) => `×${v.toFixed(2)}`,
   }));
+  displayGroup.append(ctlFieldLabel('palette', 'Color by'));
+  displayGroup.append(ctlSegment(wrap, {
+    ariaLabel: 'Color mode',
+    options: [
+      { value: 'meta', label: 'Custom', hint: 'Your icon & note colors' },
+      { value: 'folder', label: 'Folder', hint: 'One hue per top-level folder' },
+      { value: 'recency', label: 'Age', hint: 'Recently edited notes glow' },
+      { value: 'connections', label: 'Links', hint: 'Well-connected notes glow' },
+    ],
+    get: () => S().colorMode,
+    set: (v) => {
+      updateGraphSettings({ colorMode: v });
+      recomputeNodeColors();
+      startVisualLoop();
+    },
+  }));
   body.append(displayGroup);
-
   // --- Forces -------------------------------------------------
   const resetBtn = document.createElement('button');
   resetBtn.innerHTML = `${lucide('rotate-ccw', 11)} Reset`;
@@ -2508,7 +3088,6 @@ function buildControlsPanel({ paneMode = false } = {}) {
     set: (v) => setForce('collide', v),
   }));
   body.append(forcesGroup);
-
   // --- Layers -------------------------------------------------
   const layersGroup = ctlGroup('Layers');
   layersGroup.append(ctlToggle(wrap, {
@@ -2540,7 +3119,6 @@ function buildControlsPanel({ paneMode = false } = {}) {
     }));
   }
   body.append(layersGroup);
-
   // --- View ---------------------------------------------------
   const viewGroup = ctlGroup('View');
   const actionsRow = document.createElement('div');
@@ -2550,6 +3128,24 @@ function buildControlsPanel({ paneMode = false } = {}) {
     ctlAction('scan', 'Fit all', () => fitToView({ animated: true }))
   );
   viewGroup.append(actionsRow);
+  viewGroup.append(ctlSlider(wrap, {
+    icon: 'target',
+    label: 'Focus depth (Focus view)',
+    min: 1,
+    max: 3,
+    step: 1,
+    get: () => S().egoDepth,
+    set: (v) => {
+      updateGraphSettings({ egoDepth: Math.round(v) });
+      if (currentLayoutMode() === 'radial') {
+        buildGraph();
+        updateStats();
+        kickSimulation(0.9);
+      }
+    },
+    format: (v) => `${Math.round(v)} hop${Math.round(v) === 1 ? '' : 's'}`,
+    hint: 'How many link hops the Focus view includes around the focus note.',
+  }));
   viewGroup.append(ctlToggle(wrap, {
     icon: 'panel-right',
     label: 'Show in side pane',
@@ -2564,16 +3160,23 @@ function buildControlsPanel({ paneMode = false } = {}) {
     },
   }));
   body.append(viewGroup);
-
+  // --- Insights -----------------------------------------------
+  const insightsGroup = ctlGroup('Insights');
+  const insightsHost = document.createElement('div');
+  insightsHost.setAttribute('data-gc-insights', '');
+  insightsHost.style.display = 'flex';
+  insightsHost.style.flexDirection = 'column';
+  insightsHost.style.gap = '4px';
+  insightsGroup.append(insightsHost);
+  body.append(insightsGroup);
+  wrap.__syncs.push(() => populateInsights(insightsHost));
   const hint = document.createElement('div');
   hint.className = 'gc-hint';
   hint.textContent =
     'Middle-click to pan · right-click for actions · double-click a note to open.';
   body.append(hint);
-
   return wrap;
 }
-
 // ------------------------------------------------------------
 // Canvas mount / resize / pane mode
 // ------------------------------------------------------------
@@ -2586,7 +3189,6 @@ function activateCanvas(canvas, mode) {
     resizeGraphCanvas();
   }
 }
-
 function resizeGraphCanvas() {
   if (!graph.canvas) return;
   const wrap =
@@ -2602,7 +3204,6 @@ function resizeGraphCanvas() {
   graph.canvas.style.height = r.height + 'px';
   startVisualLoop();
 }
-
 export function openGraphPane() {
   /*
     Only open the graph pane when the real right preview pane is visible.
@@ -2644,6 +3245,8 @@ export function openGraphPane() {
   graph.paneHost = body;
   graph.paneCanvas = body.querySelector('[data-graph-pane-canvas]');
   const canvasWrap = body.querySelector('.graph-canvas-wrap');
+  canvasWrap.append(buildModeBar());
+  canvasWrap.append(buildSpotlightChip());
   canvasWrap.append(buildControlsPanel({ paneMode: true }));
   activateCanvas(graph.paneCanvas, 'pane');
   graph.scale = 1;
@@ -2671,7 +3274,6 @@ export function openGraphPane() {
     });
   });
 }
-
 function closeGraphPane({ silent = false, preservePreference = false } = {}) {
   if (!isSidePaneOpen('graph')) return;
   closeSidePane({ silent });
@@ -2679,7 +3281,6 @@ function closeGraphPane({ silent = false, preservePreference = false } = {}) {
     updateGraphSettings({ preferPane: false });
   }
 }
-
 // ------------------------------------------------------------
 // Public API
 // ------------------------------------------------------------
@@ -2693,7 +3294,6 @@ function canOpenGraphPaneNow() {
     pane.offsetParent !== null
   );
 }
-
 function ensureOverlayChrome() {
   injectGraphCss();
   const wrap = $('graphCanvasWrap');
@@ -2707,6 +3307,12 @@ function ensureOverlayChrome() {
     stats.setAttribute('data-graph-stats-overlay', '');
     wrap.append(stats);
   }
+  if (!wrap.querySelector('[data-graph-modebar]')) {
+    wrap.append(buildModeBar());
+  }
+  if (!wrap.querySelector('[data-graph-spotlight]')) {
+    wrap.append(buildSpotlightChip());
+  }
   if (!wrap.querySelector('[data-graph-controls-overlay]')) {
     wrap.append(buildControlsPanel({ paneMode: false }));
   }
@@ -2714,7 +3320,6 @@ function ensureOverlayChrome() {
   const legacySearch = $('graphSearch');
   if (legacySearch) legacySearch.style.display = 'none';
 }
-
 export function openGraph({ forceOverlay = false, fromHistory = false } = {}) {
   injectGraphCss();
   if (!forceOverlay && S().preferPane && canOpenGraphPaneNow()) {
@@ -2750,7 +3355,6 @@ export function openGraph({ forceOverlay = false, fromHistory = false } = {}) {
     fitToView({ animated: false });
   });
 }
-
 function closeGraphUI() {
   if (graph.mode !== 'overlay') return;
   stopSimulation();
@@ -2765,7 +3369,6 @@ function closeGraphUI() {
   graph.canvas = null;
   graph.ctx = null;
 }
-
 export function closeGraph({ fromHistory = false } = {}) {
   if (!fromHistory && graphOverlayIsOpen()) {
     closeTopOverlay(() => closeGraphUI());
@@ -2773,14 +3376,12 @@ export function closeGraph({ fromHistory = false } = {}) {
   }
   closeGraphUI();
 }
-
 // ------------------------------------------------------------
 // Interaction binding
 // ------------------------------------------------------------
 function bindGraphCanvas(c) {
   if (!c || boundCanvases.has(c)) return;
   boundCanvases.add(c);
-
   c.addEventListener('pointerdown', (e) => {
     if (!graph.canvas || c !== graph.canvas || !graphVisible()) return;
     hideContextMenu();
@@ -2794,7 +3395,6 @@ function bindGraphCanvas(c) {
     graph.suppressNextClick = false;
     const pos = canvasCoords(e);
     const hit = nodeAt(pos.x, pos.y);
-
     // Middle mouse button → always pan.
     if (e.button === 1) {
       e.preventDefault();
@@ -2854,7 +3454,6 @@ function bindGraphCanvas(c) {
     }
     startVisualLoop();
   });
-
   c.addEventListener('pointermove', (e) => {
     if (!graph.canvas || c !== graph.canvas || !graphVisible()) return;
     graph.moved = Math.max(
@@ -2891,7 +3490,6 @@ function bindGraphCanvas(c) {
       startVisualLoop();
     }
   });
-
   c.addEventListener('pointerup', (e) => {
     if (!graph.canvas || c !== graph.canvas) return;
     clearLongPressTimer();
@@ -2914,7 +3512,6 @@ function bindGraphCanvas(c) {
     }
     startVisualLoop();
   });
-
   c.addEventListener('pointercancel', () => {
     clearLongPressTimer();
     if (graph.dragNode) {
@@ -2928,19 +3525,16 @@ function bindGraphCanvas(c) {
     c.classList.remove('dragging');
     startVisualLoop();
   });
-
   c.addEventListener('mouseleave', () => {
     if (graph.dragNode || graph.panning) return;
     graph.hover = null;
     c.style.cursor = 'grab';
     startVisualLoop();
   });
-
   // Prevent middle-click default (autoscroll in some browsers).
   c.addEventListener('auxclick', (e) => {
     if (e.button === 1) e.preventDefault();
   });
-
   c.addEventListener('click', (e) => {
     if (!graph.canvas || c !== graph.canvas || !graphVisible()) return;
     if (graph.suppressNextClick) {
@@ -2962,7 +3556,6 @@ function bindGraphCanvas(c) {
       updateStats();
     }
   });
-
   c.addEventListener('dblclick', async (e) => {
     if (!graph.canvas || c !== graph.canvas || !graphVisible()) return;
     const pos = canvasCoords(e);
@@ -2973,7 +3566,6 @@ function bindGraphCanvas(c) {
     if (graph.mode === 'overlay') closeGraph();
     await openNote(hit.id);
   });
-
   c.addEventListener('contextmenu', (e) => {
     if (!graph.canvas || c !== graph.canvas || !graphVisible()) return;
     e.preventDefault();
@@ -2982,7 +3574,6 @@ function bindGraphCanvas(c) {
     if (hit) showNodeContextMenu(hit, e.clientX, e.clientY);
     else showEmptyContextMenu(e.clientX, e.clientY);
   });
-
   c.addEventListener('wheel', (e) => {
     if (!graph.canvas || c !== graph.canvas || !graphVisible()) return;
     e.preventDefault();
@@ -2999,17 +3590,14 @@ function bindGraphCanvas(c) {
     graph.oy = my - wy * graph.scale;
     startVisualLoop();
   }, { passive: false });
-
   installGraphPinchZoom(c);
 }
-
 export function setupGraphInteractions() {
   injectGraphCss();
   registerGraphOverlayRoute();
   ensureContextMenuCloseHandlers();
   const c = $('graphCanvas');
   if (c) bindGraphCanvas(c);
-
   // Keep the legacy header search wired (hidden, but harmless).
   $('graphSearch')?.addEventListener('input', (e) => {
     graph.highlight = e.target.value || '';
@@ -3017,16 +3605,17 @@ export function setupGraphInteractions() {
   });
   $('graphRecenter')?.addEventListener('click', () => recenterAll());
   $('graphClose')?.addEventListener('click', closeGraph);
-
   // Resize: only re-measure the canvas and gently reheat.
   // (A full rebuild on every resize event destroyed layout stability.)
   const onResize = debounce(() => {
     if (!graphVisible()) return;
     resizeGraphCanvas();
+    // Non-force layouts are anchored to the viewport center; recompute
+    // their targets so the arrangement stays centered after a resize.
+    if (layoutIsActive()) applyLayout();
     kickSimulation(0.25);
   }, 150);
   window.addEventListener('resize', onResize);
-
   // Note bodies changed while the pane graph is visible → rebuild links.
   const rebuildFromPreview = debounce(() => {
     if (graph.mode === 'pane' && graphVisible()) {
@@ -3036,13 +3625,11 @@ export function setupGraphInteractions() {
     }
   }, 400);
   window.addEventListener('yanta-preview-rendered', rebuildFromPreview);
-
   // Keep the open preview popover in sync with live note edits.
   window.addEventListener('yanta-note-updated', (e) => {
     const noteId = e.detail?.noteId;
     if (noteId) refreshGraphNotePreview(noteId);
   });
-
   window.addEventListener('yanta-appearance-changed', () => {
     iconCache.clear();
     if (!graphVisible()) return;
@@ -3051,12 +3638,41 @@ export function setupGraphInteractions() {
     refreshControlsUI();
     kickSimulation(0.35);
   });
-
   if (!settingsSubscribed) {
     settingsSubscribed = true;
     onGraphSettingsChange(() => {
       refreshControlsUI();
+      syncModeBar();
       startVisualLoop();
+    });
+  }
+  // Keyboard shortcuts: 1–4 switch layout modes, f fits the view,
+  // Esc clears the active spotlight. Guarded so they never fire while
+  // typing or when the graph isn't visible.
+  if (!keyboardBound) {
+    keyboardBound = true;
+    window.addEventListener('keydown', (e) => {
+      if (!graphVisible()) return;
+      if (e.metaKey || e.ctrlKey || e.altKey) return;
+      const el = document.activeElement;
+      const tag = el?.tagName;
+      if (
+        el?.isContentEditable ||
+        tag === 'INPUT' ||
+        tag === 'TEXTAREA' ||
+        tag === 'SELECT'
+      ) {
+        return;
+      }
+      if (e.key === '1') setLayoutMode('force');
+      else if (e.key === '2') setLayoutMode('radial');
+      else if (e.key === '3') setLayoutMode('tree');
+      else if (e.key === '4') setLayoutMode('clusters');
+      else if (e.key === 'f' || e.key === 'F') fitToView({ animated: true });
+      else if (e.key === 'Escape' && spotlightActive()) {
+        e.stopPropagation();
+        clearSpotlight();
+      } else return;
     });
   }
 }

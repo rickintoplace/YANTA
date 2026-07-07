@@ -6,6 +6,11 @@
 // - Degree-biased link springs (the trick that makes d3/Obsidian
 //   layouts feel calm: low-degree nodes move, hubs stay put)
 // - Center (forceX/forceY equivalent) + folder-group positioning
+// - Layout-target force: nodes with tx/ty set are pulled toward
+//   their target position (used by the radial / tree / cluster
+//   layout engines, see graph-layouts.js). This is what makes
+//   switching visualization modes a smooth animated transition
+//   instead of a teleport.
 // - Grid-based collision pass so nodes never overlap
 // - Velocity Verlet integration with velocity decay
 //
@@ -15,29 +20,28 @@
 // and calls tickSimulation once per animation frame while warm.
 //
 // Node contract (mutated in place):
-//   { x, y, vx, vy, fx, fy, mass, collideR, degree, groupIdx, phase }
+//   { x, y, vx, vy, fx, fy, tx, ty, mass, collideR, degree,
+//     groupIdx, phase }
 //   fx/fy: pinned position while dragging (null otherwise)
+//   tx/ty: layout target position (null in organic force mode)
 //   groupIdx: index of the folder node this node clusters around
 //             (or -1 when folders are hidden / node is a root)
 //
 // Link contract:
 //   { a, b, distance, strength }   (a/b are node indices)
 // ============================================================
-
 const THETA2 = 0.81;          // Barnes-Hut criterion (theta = 0.9)²
 const SOFTENING = 40;         // avoids force singularities at tiny distances
 const DEFAULT_DISTANCE_MAX2 = 1500 * 1500;
 const MAX_QUAD_DEPTH = 22;
 const DEFAULT_COLLIDE_STRENGTH = 0.72;
 const COLLIDE_PADDING = 2.5;
-
 // ------------------------------------------------------------
 // Quadtree
 // ------------------------------------------------------------
 function newCell(x, y, s) {
   return { x, y, s, q: null, p: null, pts: null, mass: 0, cx: 0, cy: 0 };
 }
-
 function insert(cell, node, depth) {
   if (depth >= MAX_QUAD_DEPTH) {
     (cell.pts || (cell.pts = [])).push(node);
@@ -55,7 +59,6 @@ function insert(cell, node, depth) {
   }
   placeChild(cell, node, depth);
 }
-
 function placeChild(cell, node, depth) {
   const half = cell.s / 2;
   const ix = node.x >= cell.x + half ? 1 : 0;
@@ -67,7 +70,6 @@ function placeChild(cell, node, depth) {
   }
   insert(child, node, depth + 1);
 }
-
 function aggregate(cell) {
   let m = 0;
   let cx = 0;
@@ -97,7 +99,6 @@ function aggregate(cell) {
   cell.cx = m ? cx / m : cell.x;
   cell.cy = m ? cy / m : cell.y;
 }
-
 function buildQuadtree(nodes) {
   let x0 = Infinity;
   let y0 = Infinity;
@@ -117,7 +118,6 @@ function buildQuadtree(nodes) {
   aggregate(root);
   return root;
 }
-
 // ------------------------------------------------------------
 // Forces
 // ------------------------------------------------------------
@@ -137,7 +137,6 @@ function repelFrom(node, px, py, mass, repelK, alpha, distanceMax2) {
   node.vx -= (dx / d) * f;
   node.vy -= (dy / d) * f;
 }
-
 function applyManyBody(nodes, repelK, alpha, distanceMax2) {
   if (nodes.length < 2) return;
   const root = buildQuadtree(nodes);
@@ -176,7 +175,6 @@ function applyManyBody(nodes, repelK, alpha, distanceMax2) {
     }
   }
 }
-
 function applyLinks(nodes, links, linkScale, distanceScale, alpha) {
   for (const l of links) {
     const a = nodes[l.a];
@@ -201,11 +199,15 @@ function applyLinks(nodes, links, linkScale, distanceScale, alpha) {
     a.vy += dy * (1 - bias);
   }
 }
-
 function applyPositioning(nodes, cfg, alpha) {
   const centerK = cfg.centerStrength * alpha;
   const folderK = cfg.folderStrength * alpha;
+  const targetK = (cfg.targetStrength || 0) * alpha;
   for (const n of nodes) {
+    if (targetK > 0 && n.tx != null && n.ty != null) {
+      n.vx += (n.tx - n.x) * targetK;
+      n.vy += (n.ty - n.y) * targetK;
+    }
     if (centerK > 0) {
       n.vx += (cfg.centerX - n.x) * centerK;
       n.vy += (cfg.centerY - n.y) * centerK;
@@ -219,7 +221,6 @@ function applyPositioning(nodes, cfg, alpha) {
     }
   }
 }
-
 function applyCollision(nodes, collideStrength) {
   const n = nodes.length;
   if (n < 2) return;
@@ -282,7 +283,6 @@ function applyCollision(nodes, collideStrength) {
     }
   }
 }
-
 function integrate(nodes, alpha, friction) {
   const maxV = 10 + 90 * alpha;
   let energy = 0;
@@ -308,7 +308,6 @@ function integrate(nodes, alpha, friction) {
   }
   return energy;
 }
-
 /**
  * Run one simulation tick. Returns total kinetic energy so the caller
  * can decide when the layout has settled.
@@ -321,6 +320,7 @@ function integrate(nodes, alpha, friction) {
  *   centerX/Y        viewport center in world coordinates
  *   centerStrength   0..~0.02
  *   folderStrength   0..~0.02
+ *   targetStrength   0..~0.1 pull toward node.tx/node.ty (layout modes)
  *   friction         velocity retained per tick (d3 default: 0.6)
  *   collide          boolean
  *   collideStrength  optional, default 0.72

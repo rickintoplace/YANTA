@@ -2,15 +2,14 @@
 // YANTA — Graph runtime CSS.
 //
 // One injection point for every graph-related surface:
-// canvas chrome, controls panel, note preview popover, context
-// menus, appearance picker and scope picker.
+// canvas chrome, view-mode switcher, controls panel, insights
+// rows, spotlight chip, note preview popover, context menus,
+// appearance picker and scope picker.
 //
 // Kept in its own module so graph.js and graph-appearance.js can
 // both depend on it without a cycle.
 // ============================================================
-
 let injected = false;
-
 export function injectGraphCss() {
   if (injected) return;
   injected = true;
@@ -52,7 +51,108 @@ export function injectGraphCss() {
       border-color: var(--accent);
       background: color-mix(in srgb, var(--accent) 10%, transparent);
     }
-
+    /* ---------- View-mode switcher ---------- */
+    .yanta-graph-modebar {
+      position: absolute;
+      left: 14px;
+      top: 14px;
+      z-index: 5;
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      padding: 3px;
+      border-radius: 12px;
+      background: color-mix(in srgb, var(--bg-elev) 88%, transparent);
+      backdrop-filter: blur(14px) saturate(1.25);
+      -webkit-backdrop-filter: blur(14px) saturate(1.25);
+      border: 1px solid var(--border);
+      box-shadow:
+        0 1px 0 color-mix(in srgb, var(--text) 5%, transparent) inset,
+        0 12px 32px rgba(0, 0, 0, 0.28);
+    }
+    .yanta-graph-modebar button {
+      all: unset;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 10px;
+      border-radius: 9px;
+      font-size: 12px;
+      color: var(--text-dim);
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.12s ease, color 0.12s ease;
+    }
+    .yanta-graph-modebar button:hover { color: var(--text); }
+    .yanta-graph-modebar button:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: -2px;
+    }
+    .yanta-graph-modebar button.on {
+      background: var(--bg-elev-2);
+      color: var(--accent);
+      font-weight: 600;
+      box-shadow: 0 1px 4px rgba(0, 0, 0, 0.22);
+    }
+    .yanta-graph-modebar button svg { flex: 0 0 auto; }
+    @media (max-width: 900px) {
+      .yanta-graph-modebar button .gm-label { display: none; }
+      .yanta-graph-modebar button { padding: 7px 9px; }
+    }
+    /* ---------- Spotlight chip ---------- */
+    .yanta-graph-spotlight-chip {
+      position: absolute;
+      left: 14px;
+      bottom: 54px;
+      z-index: 5;
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      max-width: min(360px, 60%);
+      padding: 5px 6px 5px 11px;
+      border-radius: 999px;
+      background: color-mix(in srgb, var(--accent) 13%, var(--bg-elev));
+      border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border));
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
+      color: var(--text);
+      font-size: 11px;
+      animation: fade-in 0.12s ease;
+    }
+    .yanta-graph-spotlight-chip[hidden] { display: none !important; }
+    .yanta-graph-spotlight-chip .gs-label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-width: 0;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+    .yanta-graph-spotlight-chip .gs-label svg { color: var(--accent); flex: 0 0 auto; }
+    .yanta-graph-spotlight-chip .gs-count {
+      color: var(--accent);
+      font-weight: 700;
+      font-variant-numeric: tabular-nums;
+      flex: 0 0 auto;
+    }
+    .yanta-graph-spotlight-chip button {
+      all: unset;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 20px;
+      height: 20px;
+      border-radius: 999px;
+      color: var(--text-dim);
+      cursor: pointer;
+      flex: 0 0 auto;
+      transition: background 0.12s ease, color 0.12s ease;
+    }
+    .yanta-graph-spotlight-chip button:hover {
+      color: var(--text);
+      background: color-mix(in srgb, var(--accent) 22%, transparent);
+    }
     /* ---------- Stats badge ---------- */
     .yanta-graph-stats {
       position: absolute;
@@ -72,13 +172,15 @@ export function injectGraphCss() {
       font-size: 11px;
       pointer-events: none;
       white-space: nowrap;
+      max-width: calc(100% - 28px);
+      overflow: hidden;
+      text-overflow: ellipsis;
     }
     .yanta-graph-stats strong {
       color: var(--text);
       font-weight: 600;
       font-variant-numeric: tabular-nums;
     }
-
     /* ---------- Controls panel ---------- */
     .yanta-graph-controls {
       position: absolute;
@@ -170,7 +272,6 @@ export function injectGraphCss() {
       color: var(--text);
       background: var(--bg-elev-2);
     }
-
     /* Toggle rows */
     .yanta-graph-controls .gc-toggle {
       display: flex;
@@ -231,7 +332,6 @@ export function injectGraphCss() {
       transform: translateX(13px);
       background: var(--accent);
     }
-
     /* Action buttons */
     .yanta-graph-controls .gc-actions-row {
       display: grid;
@@ -259,7 +359,6 @@ export function injectGraphCss() {
       border-color: var(--border-strong);
     }
     .yanta-graph-controls .gc-action svg { color: var(--text-dim); }
-
     .yanta-graph-controls input[type="search"] {
       width: 100%;
       background: var(--bg-elev-2);
@@ -281,7 +380,6 @@ export function injectGraphCss() {
       line-height: 1.45;
       padding: 0 2px;
     }
-
     /* Field label above a control */
     .yanta-graph-controls .gc-field-label {
       display: flex;
@@ -291,7 +389,6 @@ export function injectGraphCss() {
       font-size: 11px;
       padding: 2px 2px 0;
     }
-
     /* Segmented control */
     .yanta-graph-controls .gc-seg {
       display: grid;
@@ -330,7 +427,6 @@ export function injectGraphCss() {
       box-shadow: 0 1px 4px rgba(0, 0, 0, 0.22);
       font-weight: 600;
     }
-
     /* Slider rows */
     .yanta-graph-controls .gc-slider-row {
       display: flex;
@@ -374,7 +470,76 @@ export function injectGraphCss() {
       margin: 2px 0 0;
       height: 16px;
     }
-
+    /* ---------- Insight rows ---------- */
+    .yanta-graph-controls .gc-insights {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+    .yanta-graph-controls .gc-insight {
+      all: unset;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 6px 9px;
+      border-radius: 9px;
+      background: var(--bg-elev-2);
+      border: 1px solid var(--border);
+      cursor: pointer;
+      color: var(--text);
+      font-size: 12px;
+      transition: border-color 0.12s ease, background 0.12s ease;
+    }
+    .yanta-graph-controls .gc-insight:hover:not([disabled]) {
+      border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+      background: color-mix(in srgb, var(--accent) 7%, var(--bg-elev-2));
+    }
+    .yanta-graph-controls .gc-insight:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 1px;
+    }
+    .yanta-graph-controls .gc-insight[disabled] {
+      opacity: 0.45;
+      cursor: default;
+    }
+    .yanta-graph-controls .gc-insight .gci-label {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      min-width: 0;
+      overflow: hidden;
+      white-space: nowrap;
+      text-overflow: ellipsis;
+    }
+    .yanta-graph-controls .gc-insight .gci-label svg {
+      color: var(--text-dim);
+      flex: 0 0 auto;
+    }
+    .yanta-graph-controls .gc-insight:hover:not([disabled]) .gci-label svg {
+      color: var(--accent);
+    }
+    .yanta-graph-controls .gc-insight .gci-value {
+      color: var(--text-dim);
+      font-weight: 600;
+      font-variant-numeric: tabular-nums;
+      flex: 0 0 auto;
+    }
+    .yanta-graph-controls .gc-insight .gci-badge {
+      flex: 0 0 auto;
+      font-size: 10px;
+      font-weight: 700;
+      padding: 1px 7px;
+      border-radius: 999px;
+      color: var(--accent);
+      background: color-mix(in srgb, var(--accent) 14%, transparent);
+      font-variant-numeric: tabular-nums;
+    }
+    .yanta-graph-controls .gc-insight.sub {
+      background: transparent;
+      border-style: dashed;
+      padding: 5px 9px;
+    }
     /* ---------- Note preview popover ---------- */
     .yanta-graph-note-preview {
       position: fixed;
@@ -471,7 +636,6 @@ export function injectGraphCss() {
     .yanta-graph-note-preview-body .pv-outline { display: none !important; }
     .yanta-graph-note-preview-body a.wiki-link { cursor: pointer; }
     .yanta-graph-note-preview-body .task { cursor: pointer; }
-
     /* Drawings render as static thumbnails inside the popover */
     .yanta-graph-draw-thumb {
       margin: 8px 0;
@@ -526,7 +690,6 @@ export function injectGraphCss() {
       border-radius: 10px;
       background: var(--bg-elev);
     }
-
     /* ---------- Context menu ---------- */
     .yanta-graph-context-menu {
       position: fixed;
@@ -595,7 +758,6 @@ export function injectGraphCss() {
       white-space: nowrap;
       text-overflow: ellipsis;
     }
-
     /* ---------- Pane host / overlay ---------- */
     .yanta-graph-pane-host {
       position: absolute;
@@ -618,7 +780,6 @@ export function injectGraphCss() {
       padding: 0 !important;
       overflow: hidden;
     }
-
     /* ---------- Scope picker ---------- */
     .yanta-scope-modal {
       position: fixed;
@@ -687,7 +848,6 @@ export function injectGraphCss() {
       display: inline-flex;
       color: var(--accent);
     }
-
     /* ---------- Appearance picker ---------- */
     .yanta-appearance-modal {
       position: fixed;
@@ -939,10 +1099,10 @@ export function injectGraphCss() {
       color: var(--text);
       background: var(--bg-elev-3);
     }
-
     @media (prefers-reduced-motion: reduce) {
       .yanta-graph-note-preview,
-      .yanta-graph-context-menu { animation: none; }
+      .yanta-graph-context-menu,
+      .yanta-graph-spotlight-chip { animation: none; }
       .yanta-graph-controls,
       .yanta-graph-controls .gc-switch,
       .yanta-graph-controls .gc-switch::after { transition: none; }

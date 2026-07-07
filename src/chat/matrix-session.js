@@ -372,16 +372,20 @@ export async function ensureMatrixLoaded() {
   return matrixLoadPromise;
 }
 
-async function createMatrixSdkStore(sdk) {
+async function createMatrixSdkStore(sdk, credentials = {}) {
   if (!sdk.IndexedDBStore) return null;
 
   const matrixStore = new sdk.IndexedDBStore({
     indexedDB: window.indexedDB,
-    dbName: MATRIX_STORE_DB,
+    dbName: matrixStoreDbName(credentials),
 
     /*
       Intentionally no localStorage for secrets.
       Matrix room/timeline state is persisted in IndexedDB.
+
+      Wichtig:
+      matrix-js-sdk prefixes this internally, e.g.
+      matrix-js-sdk:yanta-chat-matrix-sdk.<user>.<device>
     */
   });
 
@@ -708,10 +712,38 @@ export async function startChatSession({
         credentials = login.credentials;
       }
 
-      const matrixStore = await createMatrixSdkStore(sdk);
-      const client = createClientFromCredentials(sdk, credentials, matrixStore);
+      let matrixStore = await createMatrixSdkStore(sdk, credentials);
+      let client = createClientFromCredentials(sdk, credentials, matrixStore);
 
-      await initClientCrypto(client);
+      try {
+        await initClientCrypto(client);
+      } catch (err) {
+        if (!isMatrixCryptoStoreMismatchError(err)) {
+          throw err;
+        }
+
+        /*
+          Rust crypto stores are bound to one Matrix user+device identity.
+          If password login creates a new Matrix device, the old default
+          crypto store can block startup. Reset Matrix SDK local stores and
+          retry once with device-scoped store names.
+        */
+        console.warn(
+          '[YANTA Chat Session] Matrix crypto store/device mismatch; resetting local Matrix stores',
+          err
+        );
+
+        try {
+          matrixStore?.destroy?.();
+        } catch {}
+
+        await clearChatMatrixLocalStoresForDebugOnly();
+
+        matrixStore = await createMatrixSdkStore(sdk, credentials);
+        client = createClientFromCredentials(sdk, credentials, matrixStore);
+
+        await initClientCrypto(client);
+      }
 
       const sessionId = `${credentials.userId}:${credentials.deviceId}:${Date.now()}`;
 

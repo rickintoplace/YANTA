@@ -65,6 +65,7 @@ import {
 
 import {
   getVaultDoc,
+  vaultNotesMap,
   vaultEventsMap,
   vaultCalendarCategoriesMap,
   vaultTombstonesMap,

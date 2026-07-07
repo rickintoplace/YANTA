@@ -430,21 +430,26 @@ export async function readChatRecoveryFromVault() {
 
 async function createMatrixSecretStorageKey() {
   /*
-    Matrix Secret Storage ultimately needs raw AES key material.
-    Some matrix-js-sdk builds expose helpers that return SDK-version-specific
-    wrapper objects. Returning those wrappers caused WebCrypto importKey()
-    failures in production.
+    Matrix JS SDK expects createSecretStorageKey() to return an object:
+      { keyInfo, privateKey }
+
+    privateKey must be raw 32-byte key material. Returning only Uint8Array is
+    not accepted by all SDK builds and can cause WebCrypto importKey() errors.
 
     Warum:
-    YANTA does not show a passphrase/recovery phrase. The Sync2 Vault is the
-    recovery channel. Therefore the most robust representation is a random
-    32-byte raw key, encrypted into VaultDoc settings immediately before the
-    SDK receives it.
+    YANTA does not show a recovery phrase. The Sync2 Vault is the recovery
+    channel, so we store the raw privateKey encrypted in VaultDoc settings.
   */
   const privateKey = randomBytes(32);
 
   return {
-    forSdk: privateKey,
+    forSdk: {
+      keyInfo: {
+        algorithm: 'm.secret_storage.v1.aes-hmac-sha2',
+        name: 'YANTA Chat Recovery',
+      },
+      privateKey,
+    },
     vault: privateKey,
   };
 }
@@ -763,6 +768,6 @@ export async function bootstrapChatCrypto(client, {
       maybeRestoreKeyBackup(client)
     );
   }
-  
+
   return result;
 }

@@ -1567,11 +1567,10 @@ async function init() {
     });
   };
 
-  window.yantaRepairChatPassword = async ({
+  window.yantaRepairActiveChatCrypto = async ({
     userId = '@rick:yanta.me',
     homeserverUrl = 'https://matrix.yanta.me',
     password = '',
-    firstDevice = true,
   } = {}) => {
     if (!password) {
       throw new Error('Matrix password missing');
@@ -1579,40 +1578,52 @@ async function init() {
 
     const [
       cryptoMod,
-      storeMod,
       sessionMod,
     ] = await Promise.all([
       import('./chat/matrix-crypto.js'),
-      import('./chat/chat-store.js'),
       import('./chat/matrix-session.js'),
     ]);
 
-    await cryptoMod.saveChatPasswordToVault({
+    const existing =
+      sessionMod.getChatSession?.() ||
+      window.yantaChatSession ||
+      null;
+
+    if (!existing?.client) {
+      throw new Error('No active Chat session. Run await window.yantaOpenChat() first.');
+    }
+
+    const account = {
       userId,
       homeserverUrl,
       password,
-    });
+    };
+
+    await cryptoMod.saveChatPasswordToVault(account);
 
     /*
-      Token/device credentials from before AP3 may be stale or not bound to
-      the new Vault-carried password flow. Clear them and let AP3 login cleanly.
+      Wichtig:
+      Repair crypto on the existing Matrix device. Do NOT password-login again.
+      Password login creates a new Matrix device and can leave local Rust crypto
+      stores in conflicting states.
     */
-    await storeMod.clearChatCredentials();
-
-    toast('Chat password saved to Vault', 'success');
-
-    return sessionMod.startChatSession({
-      account: {
-        userId,
-        homeserverUrl,
-        password,
-      },
-      firstDevice,
-      forceLogin: true,
-      reason: 'manual-password-repair',
+    const cryptoResult = await cryptoMod.bootstrapChatCrypto(existing.client, {
+      firstDevice: true,
+      account,
     });
+
+    existing.crypto = cryptoResult;
+
+    toast('Chat encryption repaired on this device', 'success');
+
+    return {
+      ok: true,
+      userId: existing.client.getUserId?.(),
+      deviceId: existing.client.getDeviceId?.(),
+      crypto: cryptoResult,
+    };
   };
-  
+
   try {
     if (await hasEncryptedChatCredentials()) {
       scheduleChatAutoResume();

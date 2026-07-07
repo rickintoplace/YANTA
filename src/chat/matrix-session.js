@@ -80,43 +80,105 @@ function homeserverFromUserId(userId = '') {
   return `https://${m[1]}`;
 }
 
+function firstString(...values) {
+  for (const value of values) {
+    const s = String(value ?? '').trim();
+    if (s) return s;
+  }
+
+  return '';
+}
+
 function normalizeAccount(account = {}) {
-  const userId = String(
-    account.userId ||
-    account.matrixUserId ||
-    account.mxid ||
-    account.matrix?.userId ||
-    ''
-  ).trim();
+  const matrix = account.matrix || {};
+  const credentials = account.credentials || {};
+  const login = account.login || {};
 
-  const homeserverUrl = normalizeHomeserverUrl(
-    account.homeserverUrl ||
-    account.baseUrl ||
-    account.matrixHomeserverUrl ||
-    account.matrix?.homeserverUrl ||
-    import.meta.env.VITE_YANTA_MATRIX_HOMESERVER_URL ||
+  const userId = firstString(
+    account.userId,
+    account.user_id,
+    account.matrixUserId,
+    account.matrix_user_id,
+    account.mxid,
+    account.mx_id,
+    matrix.userId,
+    matrix.user_id,
+    matrix.mxid,
+    credentials.userId,
+    credentials.user_id,
+    login.userId,
+    login.user_id
+  );
+
+  const homeserverUrl = normalizeHomeserverUrl(firstString(
+    account.homeserverUrl,
+    account.homeserver_url,
+    account.baseUrl,
+    account.base_url,
+    account.matrixHomeserverUrl,
+    account.matrix_homeserver_url,
+    account.matrixBaseUrl,
+    account.matrix_base_url,
+    matrix.homeserverUrl,
+    matrix.homeserver_url,
+    matrix.baseUrl,
+    matrix.base_url,
+    matrix.server,
+    matrix.serverUrl,
+    matrix.server_url,
+    credentials.homeserverUrl,
+    credentials.homeserver_url,
+    credentials.baseUrl,
+    credentials.base_url,
+    login.homeserverUrl,
+    login.homeserver_url,
+    import.meta.env.VITE_YANTA_MATRIX_HOMESERVER_URL,
     homeserverFromUserId(userId)
+  ));
+
+  const password = firstString(
+    account.password,
+    account.matrixPassword,
+    account.matrix_password,
+    account.loginPassword,
+    account.login_password,
+    matrix.password,
+    matrix.matrixPassword,
+    matrix.matrix_password,
+    matrix.loginPassword,
+    matrix.login_password,
+    credentials.password,
+    credentials.matrixPassword,
+    credentials.matrix_password,
+    login.password,
+    login.matrixPassword,
+    login.matrix_password
   );
 
-  const password = String(
-    account.password ||
-    account.matrixPassword ||
-    account.matrix?.password ||
-    ''
+  const accessToken = firstString(
+    account.accessToken,
+    account.access_token,
+    account.matrixAccessToken,
+    account.matrix_access_token,
+    matrix.accessToken,
+    matrix.access_token,
+    credentials.accessToken,
+    credentials.access_token,
+    login.accessToken,
+    login.access_token
   );
 
-  const accessToken = String(
-    account.accessToken ||
-    account.matrixAccessToken ||
-    account.matrix?.accessToken ||
-    ''
-  );
-
-  const deviceId = String(
-    account.deviceId ||
-    account.matrixDeviceId ||
-    account.matrix?.deviceId ||
-    ''
+  const deviceId = firstString(
+    account.deviceId,
+    account.device_id,
+    account.matrixDeviceId,
+    account.matrix_device_id,
+    matrix.deviceId,
+    matrix.device_id,
+    credentials.deviceId,
+    credentials.device_id,
+    login.deviceId,
+    login.device_id
   );
 
   return {
@@ -288,7 +350,18 @@ async function loginWithVaultPassword({
     '';
 
   if (!homeserverUrl || !userId || !password) {
-    throw new Error('Chat account is not ready on this device yet');
+    const err = new Error(
+      'Chat account is not ready on this device yet. Missing Matrix login secret in local credentials and Vault.'
+    );
+
+    err.code = 'ECHAT_NOT_READY';
+    err.missing = {
+      homeserverUrl: !homeserverUrl,
+      userId: !userId,
+      password: !password,
+    };
+
+    throw err;
   }
 
   const loginClient = sdk.createClient({

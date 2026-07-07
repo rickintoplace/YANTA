@@ -101,29 +101,78 @@ function getCryptoApi(client) {
   return client?.getCrypto?.() || client?.crypto || null;
 }
 
+function firstString(...values) {
+  for (const value of values) {
+    const s = String(value ?? '').trim();
+    if (s) return s;
+  }
+
+  return '';
+}
+
 function normalizeAccount(account = {}) {
-  const userId = String(
-    account.userId ||
-    account.matrixUserId ||
-    account.mxid ||
-    account.matrix?.userId ||
-    ''
-  ).trim();
+  const matrix = account.matrix || {};
+  const credentials = account.credentials || {};
+  const login = account.login || {};
 
-  const homeserverUrl = String(
-    account.homeserverUrl ||
-    account.baseUrl ||
-    account.matrixHomeserverUrl ||
-    account.matrix?.homeserverUrl ||
-    import.meta.env.VITE_YANTA_MATRIX_HOMESERVER_URL ||
-    ''
-  ).trim();
+  const userId = firstString(
+    account.userId,
+    account.user_id,
+    account.matrixUserId,
+    account.matrix_user_id,
+    account.mxid,
+    account.mx_id,
+    matrix.userId,
+    matrix.user_id,
+    matrix.mxid,
+    credentials.userId,
+    credentials.user_id,
+    login.userId,
+    login.user_id
+  );
 
-  const password = String(
-    account.password ||
-    account.matrixPassword ||
-    account.matrix?.password ||
-    ''
+  const homeserverUrl = firstString(
+    account.homeserverUrl,
+    account.homeserver_url,
+    account.baseUrl,
+    account.base_url,
+    account.matrixHomeserverUrl,
+    account.matrix_homeserver_url,
+    account.matrixBaseUrl,
+    account.matrix_base_url,
+    matrix.homeserverUrl,
+    matrix.homeserver_url,
+    matrix.baseUrl,
+    matrix.base_url,
+    matrix.server,
+    matrix.serverUrl,
+    matrix.server_url,
+    credentials.homeserverUrl,
+    credentials.homeserver_url,
+    credentials.baseUrl,
+    credentials.base_url,
+    login.homeserverUrl,
+    login.homeserver_url,
+    import.meta.env.VITE_YANTA_MATRIX_HOMESERVER_URL
+  );
+
+  const password = firstString(
+    account.password,
+    account.matrixPassword,
+    account.matrix_password,
+    account.loginPassword,
+    account.login_password,
+    matrix.password,
+    matrix.matrixPassword,
+    matrix.matrix_password,
+    matrix.loginPassword,
+    matrix.login_password,
+    credentials.password,
+    credentials.matrixPassword,
+    credentials.matrix_password,
+    login.password,
+    login.matrixPassword,
+    login.matrix_password
   );
 
   return {

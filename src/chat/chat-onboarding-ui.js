@@ -541,17 +541,74 @@ function scheduleAvailabilityCheck(name) {
 }
 
 function isProvisionedAccount(res) {
+  const account = res?.account || res || {};
+  const matrix = account.matrix || {};
+
   return !!(
     res?.provisioned ||
-    res?.account?.userId ||
-    res?.account?.matrixUserId ||
+    account.provisioned ||
+    account.userId ||
+    account.user_id ||
+    account.matrixUserId ||
+    account.matrix_user_id ||
+    account.matrixUserId ||
+    account.mxid ||
+    account.mx_id ||
+    matrix.userId ||
+    matrix.user_id ||
+    matrix.mxid ||
     res?.matrixUserId ||
-    res?.userId
+    res?.matrix_user_id ||
+    res?.userId ||
+    res?.user_id
   );
 }
 
 function normalizedAccount(res) {
-  return res?.account || res || null;
+  const account = res?.account || res || null;
+  if (!account) return null;
+
+  const matrix = account.matrix || {};
+
+  return {
+    ...account,
+
+    // Keep original nested data, but expose common Matrix fields at top-level
+    // for AP3. Warum: backend/API versions may use snake_case or nested
+    // matrix payloads; AP3 should not depend on one exact response shape.
+    userId:
+      account.userId ||
+      account.user_id ||
+      account.matrixUserId ||
+      account.matrix_user_id ||
+      account.mxid ||
+      matrix.userId ||
+      matrix.user_id ||
+      matrix.mxid ||
+      '',
+
+    homeserverUrl:
+      account.homeserverUrl ||
+      account.homeserver_url ||
+      account.baseUrl ||
+      account.base_url ||
+      account.matrixHomeserverUrl ||
+      account.matrix_homeserver_url ||
+      matrix.homeserverUrl ||
+      matrix.homeserver_url ||
+      matrix.baseUrl ||
+      matrix.base_url ||
+      '',
+
+    password:
+      account.password ||
+      account.matrixPassword ||
+      account.matrix_password ||
+      matrix.password ||
+      matrix.matrixPassword ||
+      matrix.matrix_password ||
+      '',
+  };
 }
 
 async function continueToChatBootstrap(account, {

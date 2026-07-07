@@ -262,6 +262,76 @@ function renderTextContent(content = {}) {
   return node;
 }
 
+function imageMediaSource(content = {}) {
+  const info = content.info || {};
+
+  /*
+    E2EE image messages usually look like:
+      content.file.url
+      content.info.thumbnail_file.url
+
+    Important:
+    Encrypted media must be downloaded and decrypted locally. Do not ask the
+    homeserver to thumbnail encrypted bytes.
+  */
+  if (info.thumbnail_file?.url) {
+    return {
+      mxcUrl: info.thumbnail_file.url,
+      encryptedFile: info.thumbnail_file,
+      thumbnail: false,
+      mimeType:
+        info.thumbnail_info?.mimetype ||
+        info.mimetype ||
+        'image/jpeg',
+      w: info.thumbnail_info?.w || info.w || 360,
+      h: info.thumbnail_info?.h || info.h || 360,
+    };
+  }
+
+  if (content.file?.url) {
+    return {
+      mxcUrl: content.file.url,
+      encryptedFile: content.file,
+      thumbnail: false,
+      mimeType:
+        info.mimetype ||
+        content.file?.mimetype ||
+        'image/jpeg',
+      w: info.w || 900,
+      h: info.h || 900,
+    };
+  }
+
+  if (info.thumbnail_url) {
+    return {
+      mxcUrl: info.thumbnail_url,
+      encryptedFile: null,
+      thumbnail: false,
+      mimeType:
+        info.thumbnail_info?.mimetype ||
+        info.mimetype ||
+        'image/jpeg',
+      w: info.thumbnail_info?.w || info.w || 360,
+      h: info.thumbnail_info?.h || info.h || 360,
+    };
+  }
+
+  if (content.url) {
+    return {
+      mxcUrl: content.url,
+      encryptedFile: null,
+      thumbnail: true,
+      mimeType:
+        info.mimetype ||
+        'image/jpeg',
+      w: info.w || 900,
+      h: info.h || 900,
+    };
+  }
+
+  return null;
+}
+
 function renderMediaContent(client, content = {}) {
   const msgtype = content.msgtype || '';
   const url = content.url || content.file?.url || '';
@@ -283,30 +353,52 @@ function renderMediaContent(client, content = {}) {
 
   wrap.append(head);
 
-  if (msgtype === 'm.image' && url) {
+  if (msgtype === 'm.image') {
+    const source = imageMediaSource(content);
+
+    if (!source?.mxcUrl) {
+      wrap.append(el('div', {
+        class: 'yanta-chat-media-error',
+      }, 'Image is missing media data.'));
+      return wrap;
+    }
+
     const img = el('img', {
       class: 'yanta-chat-image',
       alt: name,
       loading: 'lazy',
     });
 
+    const state = el('div', {
+      class: 'yanta-chat-media-state',
+    }, 'Loading image…');
+
     img.hidden = true;
 
-    wrap.append(img);
+    wrap.append(img, state);
 
-    mxcToBlobUrl(client, url, {
-      thumbnail: true,
-      w: Math.min(900, Number(info.w || 900)),
-      h: Math.min(900, Number(info.h || 900)),
+    mxcToBlobUrl(client, source.mxcUrl, {
+      thumbnail: source.thumbnail,
+      w: Math.min(900, Number(source.w || 900)),
+      h: Math.min(900, Number(source.h || 900)),
+      encryptedFile: source.encryptedFile,
+      mimeType: source.mimeType,
     })
       .then((objectUrl) => {
         if (!img.isConnected) return;
+
         img.src = objectUrl;
         img.hidden = false;
+        state.remove();
       })
       .catch((err) => {
         console.warn('[YANTA Chat] Could not hydrate image message', err);
         toast('Could not load chat image.', 'error');
+
+        if (state.isConnected) {
+          state.className = 'yanta-chat-media-error';
+          state.textContent = 'Could not load image.';
+        }
       });
   }
 

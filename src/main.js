@@ -121,6 +121,10 @@ import {
   replaceCalendarHistory,
   pushCalendarEventHistory,
   replaceCalendarEventHistory,
+  chatUrl,
+  chatState,
+  pushChatHistory,
+  replaceChatHistory,
 } from './navigation.js';
 import {
   openCalendar,
@@ -216,6 +220,12 @@ import {
 import {
   ensureChatAccountAndOpen,
 } from './chat/chat-onboarding-ui.js';
+
+import {
+  setupChat,
+  openChat,
+  closeChat,
+} from './chat/chat-ui.js';
 
 let sharePreviewLocked = false;
 
@@ -361,6 +371,29 @@ function replaceMobileSidebarOverlayWithCurrentRoute() {
     return;
   }
 
+  async function openChatRoute(roomId = null, {
+    replace = false,
+  } = {}) {
+    /*
+      If Chat is launched from the mobile sidebar, remove the sidebar
+      overlay entry first. Otherwise Back from Chat would reopen the
+      sidebar instead of returning to the underlying app route.
+    */
+    replaceMobileSidebarOverlayWithCurrentRoute();
+
+    await openChat({
+      roomId,
+      push: false,
+      replace: false,
+    });
+
+    if (replace) {
+      replaceChatHistory(roomId || null);
+    } else {
+      pushChatHistory(roomId || null);
+    }
+  }
+
   if (appSurface === 'note' && state.currentNoteId) {
     history.replaceState(
       noteState(state.currentNoteId),
@@ -426,6 +459,29 @@ function openCalendarEventRoute(eventId, {
   }
 }
 
+async function openChatRoute(roomId = null, {
+  replace = false,
+} = {}) {
+  /*
+    If Chat is launched from the mobile sidebar, remove the sidebar
+    overlay entry first. Otherwise Back from Chat would reopen the
+    sidebar instead of returning to the underlying app route.
+  */
+  replaceMobileSidebarOverlayWithCurrentRoute();
+
+  await openChat({
+    roomId,
+    push: false,
+    replace: false,
+  });
+
+  if (replace) {
+    replaceChatHistory(roomId || null);
+  } else {
+    pushChatHistory(roomId || null);
+  }
+}
+
 async function openSourcesRoute(source = 'unknown') {
   /*
     If Sources is launched from the mobile sidebar, let the upcoming
@@ -455,6 +511,11 @@ function closeTransientFullscreenUiForAppRoute(route = {}) {
   // RSS fullscreen + source manager.
   closeRssSourcesManagerUI();
   closeRssFullscreenUI();
+
+  // Chat fullscreen surface should only stay visible on chat routes.
+  if (targetSurface !== 'chat') {
+    closeChat();
+  }
 
   // Calendar fullscreen surface should only stay visible on calendar routes.
   if (targetSurface !== 'calendar') {
@@ -1567,63 +1628,6 @@ async function init() {
     });
   };
 
-  window.yantaRepairActiveChatCrypto = async ({
-    userId = '@rick:yanta.me',
-    homeserverUrl = 'https://matrix.yanta.me',
-    password = '',
-  } = {}) => {
-    if (!password) {
-      throw new Error('Matrix password missing');
-    }
-
-    const [
-      cryptoMod,
-      sessionMod,
-    ] = await Promise.all([
-      import('./chat/matrix-crypto.js'),
-      import('./chat/matrix-session.js'),
-    ]);
-
-    const existing =
-      sessionMod.getChatSession?.() ||
-      window.yantaChatSession ||
-      null;
-
-    if (!existing?.client) {
-      throw new Error('No active Chat session. Run await window.yantaOpenChat() first.');
-    }
-
-    const account = {
-      userId,
-      homeserverUrl,
-      password,
-    };
-
-    await cryptoMod.saveChatPasswordToVault(account);
-
-    /*
-      Wichtig:
-      Repair crypto on the existing Matrix device. Do NOT password-login again.
-      Password login creates a new Matrix device and can leave local Rust crypto
-      stores in conflicting states.
-    */
-    const cryptoResult = await cryptoMod.bootstrapChatCrypto(existing.client, {
-      firstDevice: true,
-      account,
-    });
-
-    existing.crypto = cryptoResult;
-
-    toast('Chat encryption repaired on this device', 'success');
-
-    return {
-      ok: true,
-      userId: existing.client.getUserId?.(),
-      deviceId: existing.client.getDeviceId?.(),
-      crypto: cryptoResult,
-    };
-  };
-
   try {
     if (await hasEncryptedChatCredentials()) {
       scheduleChatAutoResume();
@@ -1920,6 +1924,7 @@ async function init() {
     }),
     openCalendar: openCalendarRoute,
     openCalendarPane,
+    openChat: () => openChatRoute(),
     openAssistant: openAssistantSmart,
     openAssistantFloating,
     openSources: () => openSourcesRoute('command-palette'),
@@ -1953,6 +1958,7 @@ async function init() {
   setupAssistant();
   setupFloatingCreate();
   setupRss();
+  setupChat();
   await ensureAiSessionsFolder();
   window.addEventListener('yanta-public-share-changed', () => {
     renderShareIndicator();
@@ -2019,6 +2025,14 @@ async function init() {
 // Back should return to the previous website/history entry, not force Dashboard.
 if (!sharedOpen?.noteId) {
   const route = parseAppHash();
+
+  if (route.surface === 'chat') {
+    await openChatRoute(route.roomId || null, {
+      replace: true,
+    });
+
+    return;
+  }
 
   if (route.surface === 'calendar') {
     if (route.eventId) {
@@ -2118,6 +2132,25 @@ window.addEventListener('popstate', async (e) => {
     } else {
       openCalendarFromHistory();
     }
+
+    return;
+  }
+
+  if (st.surface === 'chat' || route.surface === 'chat') {
+    closeGraph();
+    closeCalendarPane({ silent: true });
+    closeCalendar({
+      surface: 'dashboard',
+      fromRouteChange: true,
+    });
+    hideDashboard({ push: false });
+
+    await openChat({
+      roomId: st.roomId || route.roomId || '',
+      fromHistory: true,
+      push: false,
+      replace: false,
+    });
 
     return;
   }
@@ -2583,6 +2616,7 @@ function bindEvents() {
     openPalette: () => openPalette('commands'),
     openGraph,
     openCalendar: openCalendarRoute,
+    openChat: () => openChatRoute(),
     openSources: () => openSourcesRoute('sidebar-foot'),
     openAssistant: openAssistantSmart,
     openMore: openSidebarFootMenu,
@@ -3204,6 +3238,20 @@ function handleGlobalKey(e) {
         history.back();
       } else {
         closeCalendar({ surface: 'dashboard' });
+        showDashboard({
+          folderId: state.dashboardFolderId || null,
+          push: true,
+        });
+      }
+
+      return;
+    }
+
+    if (state.surface === 'chat') {
+      if (history.state?.surface === 'chat') {
+        history.back();
+      } else {
+        closeChat();
         showDashboard({
           folderId: state.dashboardFolderId || null,
           push: true,

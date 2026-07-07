@@ -5,6 +5,7 @@
 // - Note:          #<noteId>
 // - Calendar:      #calendar
 // - Calendar Event:#calendar/<eventId>
+// - Chat:          #chat or #chat/<roomId>
 //
 // Important:
 // pushState/replaceState do NOT emit popstate.
@@ -32,9 +33,6 @@ function writeAppHistoryState(routeState, url, {
     If an app route is opened while a transient overlay state is current
     (Graph/RSS/dialog/mobile sidebar), replace that overlay entry instead
     of stacking a normal app route on top of it.
-
-    This prevents:
-      URL changed to note/dashboard, but old overlay stays visible.
   */
   const shouldReplace =
     replace ||
@@ -65,6 +63,14 @@ export function calendarUrl() {
   return '#calendar';
 }
 
+export function chatUrl(roomId = null) {
+  const id = String(roomId || '').trim();
+
+  return id
+    ? `#chat/${encodeURIComponent(id)}`
+    : '#chat';
+}
+
 export function dashboardState(folderId = null) {
   return {
     surface: 'dashboard',
@@ -85,6 +91,15 @@ export function calendarState() {
   };
 }
 
+export function chatState(roomId = null) {
+  const id = String(roomId || '').trim();
+
+  return {
+    surface: 'chat',
+    roomId: id || null,
+  };
+}
+
 export function calendarEventUrl(eventId) {
   const id = String(eventId || '').trim();
 
@@ -100,6 +115,23 @@ export function calendarEventState(eventId) {
     surface: 'calendar',
     eventId: id || null,
   };
+}
+
+export function pushChatHistory(roomId = null) {
+  writeAppHistoryState(
+    chatState(roomId),
+    chatUrl(roomId)
+  );
+}
+
+export function replaceChatHistory(roomId = null) {
+  writeAppHistoryState(
+    chatState(roomId),
+    chatUrl(roomId),
+    {
+      replace: true,
+    }
+  );
 }
 
 export function pushCalendarEventHistory(eventId) {
@@ -193,6 +225,27 @@ export function parseAppHash(hash = window.location.hash) {
       noteId: null,
       folderId: null,
       eventId: null,
+      roomId: null,
+    };
+  }
+
+  if (raw === 'chat') {
+    return {
+      surface: 'chat',
+      noteId: null,
+      folderId: null,
+      eventId: null,
+      roomId: null,
+    };
+  }
+
+  if (raw.startsWith('chat/')) {
+    return {
+      surface: 'chat',
+      noteId: null,
+      folderId: null,
+      eventId: null,
+      roomId: raw.slice('chat/'.length) || null,
     };
   }
 
@@ -202,6 +255,7 @@ export function parseAppHash(hash = window.location.hash) {
       noteId: null,
       folderId: null,
       eventId: null,
+      roomId: null,
     };
   }
 
@@ -211,6 +265,7 @@ export function parseAppHash(hash = window.location.hash) {
       noteId: null,
       folderId: null,
       eventId: raw.slice('calendar/'.length) || null,
+      roomId: null,
     };
   }
 
@@ -220,6 +275,7 @@ export function parseAppHash(hash = window.location.hash) {
       noteId: null,
       folderId: null,
       eventId: null,
+      roomId: null,
     };
   }
 
@@ -229,6 +285,7 @@ export function parseAppHash(hash = window.location.hash) {
       noteId: null,
       folderId: raw.slice('dashboard/'.length) || null,
       eventId: null,
+      roomId: null,
     };
   }
 
@@ -238,6 +295,7 @@ export function parseAppHash(hash = window.location.hash) {
       noteId: null,
       folderId: null,
       eventId: null,
+      roomId: null,
     };
   }
 
@@ -246,6 +304,7 @@ export function parseAppHash(hash = window.location.hash) {
     noteId: raw,
     folderId: null,
     eventId: null,
+    roomId: null,
   };
 }
 

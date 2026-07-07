@@ -181,6 +181,7 @@ function ensureCss() {
 .yanta-chat-input-wrap input {
   width: 100%;
   padding-right: 42px;
+  margin-bottom: 0;
 }
 
 .yanta-chat-availability {
@@ -190,7 +191,7 @@ function ensureCss() {
   width: 22px;
   height: 22px;
 
-  display: inline-flex;
+  display: flex;
   align-items: center;
   justify-content: center;
 

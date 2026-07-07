@@ -6,6 +6,7 @@ export function createSidebarFootActions({
   openPalette,
   openGraph,
   openCalendar,
+  openChat,
   openSources,
   openAssistant,
   openMore,
@@ -18,6 +19,14 @@ export function createSidebarFootActions({
       label: 'Command palette',
       title: 'Command palette (Ctrl+P)',
       onClick: () => openPalette?.('commands'),
+    },
+    {
+      id: 'btn-chat',
+      key: 'chat',
+      icon: 'messages-square',
+      label: 'Chat',
+      title: 'Chat',
+      onClick: () => openChat?.(),
     },
     {
       id: 'btn-graph',

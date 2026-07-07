@@ -1567,6 +1567,52 @@ async function init() {
     });
   };
 
+  window.yantaRepairChatPassword = async ({
+    userId = '@rick:yanta.me',
+    homeserverUrl = 'https://matrix.yanta.me',
+    password = '',
+    firstDevice = true,
+  } = {}) => {
+    if (!password) {
+      throw new Error('Matrix password missing');
+    }
+
+    const [
+      cryptoMod,
+      storeMod,
+      sessionMod,
+    ] = await Promise.all([
+      import('./chat/matrix-crypto.js'),
+      import('./chat/chat-store.js'),
+      import('./chat/matrix-session.js'),
+    ]);
+
+    await cryptoMod.saveChatPasswordToVault({
+      userId,
+      homeserverUrl,
+      password,
+    });
+
+    /*
+      Token/device credentials from before AP3 may be stale or not bound to
+      the new Vault-carried password flow. Clear them and let AP3 login cleanly.
+    */
+    await storeMod.clearChatCredentials();
+
+    toast('Chat password saved to Vault', 'success');
+
+    return sessionMod.startChatSession({
+      account: {
+        userId,
+        homeserverUrl,
+        password,
+      },
+      firstDevice,
+      forceLogin: true,
+      reason: 'manual-password-repair',
+    });
+  };
+
   try {
     if (await hasEncryptedChatCredentials()) {
       scheduleChatAutoResume();

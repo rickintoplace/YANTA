@@ -330,6 +330,914 @@ function emailDomain(email) {
 __name(emailDomain, "emailDomain");
 
 // ============================================================
+// Chat / Matrix Provisioning
+// ============================================================
+
+const CHAT_LOCALPART_BLOCKLIST = new Set([
+  "admin",
+  "administrator",
+  "abuse",
+  "postmaster",
+  "hostmaster",
+  "webmaster",
+  "root",
+  "support",
+  "security",
+  "noreply",
+  "no-reply",
+  "mailer-daemon",
+  "billing",
+  "legal",
+  "privacy",
+  "terms",
+  "help",
+  "contact",
+  "info",
+  "sales",
+  "team",
+  "office",
+  "hello",
+  "mail",
+  "email",
+  "smtp",
+  "imap",
+  "pop",
+  "dns",
+  "api",
+  "www",
+  "ftp",
+  "ssh",
+  "dev",
+  "test",
+  "staging",
+  "status",
+  "system",
+  "service",
+  "services",
+  "moderator",
+  "moderation",
+  "trust",
+  "safety",
+  "yanta",
+  "matrix",
+  "synapse",
+  "element",
+  "riot",
+  "server",
+  "bot",
+  "bots"
+]);
+
+function normalizeChatLocalpart(raw) {
+  return String(raw || "").trim().toLowerCase();
+}
+__name(normalizeChatLocalpart, "normalizeChatLocalpart");
+
+/**
+ * Validates and normalizes a YANTA Chat localpart.
+ *
+ * Warum so streng:
+ * These names should be usable 1:1 as future e-mail localparts
+ * like rick@yanta.me. Therefore: no '+', no Unicode, no case collisions.
+ */
+function validChatLocalpart(raw) {
+  const localpart = normalizeChatLocalpart(raw);
+
+  if (!localpart) {
+    return {
+      ok: false,
+      localpart,
+      reason: "missing",
+      message: "Username is required."
+    };
+  }
+
+  if (!/^[a-z0-9](?:[a-z0-9._-]{1,28})[a-z0-9]$/.test(localpart)) {
+    return {
+      ok: false,
+      localpart,
+      reason: "invalid_format",
+      message: "Username must be 3–30 characters and use lowercase letters, numbers, dot, underscore or dash."
+    };
+  }
+
+  if (localpart.includes("..")) {
+    return {
+      ok: false,
+      localpart,
+      reason: "double_dot",
+      message: "Username must not contain consecutive dots."
+    };
+  }
+
+  if (CHAT_LOCALPART_BLOCKLIST.has(localpart)) {
+    return {
+      ok: false,
+      localpart,
+      reason: "reserved",
+      message: "This username is reserved."
+    };
+  }
+
+  return {
+    ok: true,
+    localpart
+  };
+}
+__name(validChatLocalpart, "validChatLocalpart");
+
+function matrixHomeserverUrl(env) {
+  const hs = String(env.MATRIX_HS_URL || "").trim().replace(/\/+$/, "");
+
+  if (!hs) {
+    const err = new Error("MATRIX_HS_URL is not configured");
+    err.status = 500;
+    throw err;
+  }
+
+  return hs;
+}
+__name(matrixHomeserverUrl, "matrixHomeserverUrl");
+
+function matrixServerName(env) {
+  const configured = String(env.MATRIX_SERVER_NAME || "").trim();
+
+  if (configured) return configured;
+
+  try {
+    return new URL(matrixHomeserverUrl(env)).hostname;
+  } catch {
+    const err = new Error("MATRIX_SERVER_NAME is not configured");
+    err.status = 500;
+    throw err;
+  }
+}
+__name(matrixServerName, "matrixServerName");
+
+function matrixUserIdForLocalpart(env, localpart) {
+  return `@${localpart}:${matrixServerName(env)}`;
+}
+__name(matrixUserIdForLocalpart, "matrixUserIdForLocalpart");
+
+function matrixApiUrl(env, path) {
+  return `${matrixHomeserverUrl(env)}${path}`;
+}
+__name(matrixApiUrl, "matrixApiUrl");
+
+function matrixErrorMessage(data, fallback = "Matrix request failed") {
+  return (
+    data?.error ||
+    data?.message ||
+    data?.errcode ||
+    fallback
+  );
+}
+__name(matrixErrorMessage, "matrixErrorMessage");
+
+async function matrixFetchJson(env, path, {
+  method = "GET",
+  body = null,
+  token = "",
+  timeoutMs = 20_000
+} = {}) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const headers = {
+      accept: "application/json"
+    };
+
+    if (body) {
+      headers["content-type"] = "application/json";
+    }
+
+    if (token) {
+      headers.authorization = `Bearer ${token}`;
+    }
+
+    const res = await fetch(matrixApiUrl(env, path), {
+      method,
+      signal: controller.signal,
+      headers,
+      body: body ? JSON.stringify(body) : null
+    });
+
+    const data = await res.json().catch(async () => ({
+      error: await res.text().catch(() => `HTTP ${res.status}`)
+    }));
+
+    return {
+      ok: res.ok,
+      status: res.status,
+      data
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+__name(matrixFetchJson, "matrixFetchJson");
+
+function pickRegistrationTokenFlow(flows = []) {
+  return (Array.isArray(flows) ? flows : []).find((flow) => {
+    const stages = Array.isArray(flow?.stages) ? flow.stages : [];
+    return stages.includes("m.login.registration_token");
+  }) || null;
+}
+__name(pickRegistrationTokenFlow, "pickRegistrationTokenFlow");
+
+function nextRegistrationStage(flow, completed = []) {
+  const done = new Set(Array.isArray(completed) ? completed : []);
+  const stages = Array.isArray(flow?.stages) ? flow.stages : [];
+
+  return stages.find((stage) => !done.has(stage)) || "";
+}
+__name(nextRegistrationStage, "nextRegistrationStage");
+
+/**
+ * Registers a Matrix user through the registration-token UIA flow.
+ * The generated password and Matrix access token are returned once only.
+ */
+async function matrixRegisterWithRegistrationToken(env, {
+  localpart,
+  password
+}) {
+  const registrationToken = String(env.MATRIX_REGISTRATION_TOKEN || "").trim();
+
+  if (!registrationToken) {
+    const err = new Error("MATRIX_REGISTRATION_TOKEN is not configured");
+    err.status = 500;
+    throw err;
+  }
+
+  const baseBody = {
+    username: localpart,
+    password,
+
+    // We need an access_token once so the client can bootstrap Matrix.
+    inhibit_login: false,
+
+    initial_device_display_name: "YANTA"
+  };
+
+  /*
+    Matrix registration is UIA-based. Some homeservers accept auth directly,
+    others first return a session plus a list of required stages.
+  */
+  let res = await matrixFetchJson(env, "/_matrix/client/v3/register?kind=user", {
+    method: "POST",
+    body: {
+      ...baseBody,
+      auth: {
+        type: "m.login.registration_token",
+        token: registrationToken
+      }
+    }
+  });
+
+  if (res.ok) {
+    return res.data;
+  }
+
+  if (res.status !== 401) {
+    const err = new Error(matrixErrorMessage(res.data, `Matrix registration failed: HTTP ${res.status}`));
+    err.status = res.status;
+    err.matrixErrcode = res.data?.errcode || "";
+    throw err;
+  }
+
+  let session = res.data?.session || "";
+  let flow = pickRegistrationTokenFlow(res.data?.flows || []);
+  let completed = res.data?.completed || [];
+
+  if (!session || !flow) {
+    const err = new Error(matrixErrorMessage(res.data, "Matrix registration token flow is not available."));
+    err.status = 502;
+    throw err;
+  }
+
+  for (let i = 0; i < 6; i++) {
+    const stage = nextRegistrationStage(flow, completed);
+
+    if (!stage) {
+      const err = new Error("Matrix registration flow did not finish.");
+      err.status = 502;
+      throw err;
+    }
+
+    let auth;
+
+    if (stage === "m.login.registration_token") {
+      auth = {
+        type: "m.login.registration_token",
+        token: registrationToken,
+        session
+      };
+    } else if (stage === "m.login.dummy") {
+      auth = {
+        type: "m.login.dummy",
+        session
+      };
+    } else {
+      const err = new Error(`Unsupported Matrix registration stage: ${stage}`);
+      err.status = 502;
+      throw err;
+    }
+
+    res = await matrixFetchJson(env, "/_matrix/client/v3/register?kind=user", {
+      method: "POST",
+      body: {
+        ...baseBody,
+        auth
+      }
+    });
+
+    if (res.ok) {
+      return res.data;
+    }
+
+    if (res.status !== 401) {
+      const err = new Error(matrixErrorMessage(res.data, `Matrix registration failed: HTTP ${res.status}`));
+      err.status = res.status;
+      err.matrixErrcode = res.data?.errcode || "";
+      throw err;
+    }
+
+    session = res.data?.session || session;
+    flow = pickRegistrationTokenFlow(res.data?.flows || []) || flow;
+    completed = res.data?.completed || completed;
+  }
+
+  const err = new Error("Matrix registration did not complete.");
+  err.status = 502;
+  throw err;
+}
+__name(matrixRegisterWithRegistrationToken, "matrixRegisterWithRegistrationToken");
+
+function matrixAdminRoomId(env) {
+  const roomId = String(env.MATRIX_ADMIN_ROOM_ID || "").trim();
+
+  if (!roomId) {
+    const err = new Error("MATRIX_ADMIN_ROOM_ID is not configured");
+    err.status = 500;
+    throw err;
+  }
+
+  return roomId;
+}
+__name(matrixAdminRoomId, "matrixAdminRoomId");
+
+function matrixAdminDeactivateCommand(env, matrixUserId) {
+  const template = String(
+    env.MATRIX_ADMIN_DEACTIVATE_COMMAND ||
+    "!admin users deactivate {userId}"
+  );
+
+  return template
+    .replaceAll("{userId}", matrixUserId)
+    .replaceAll("{mxid}", matrixUserId);
+}
+__name(matrixAdminDeactivateCommand, "matrixAdminDeactivateCommand");
+
+async function matrixSendAdminRoomMessage(env, body) {
+  const adminToken = String(env.MATRIX_ADMIN_TOKEN || "").trim();
+
+  if (!adminToken) {
+    const err = new Error("MATRIX_ADMIN_TOKEN is not configured");
+    err.status = 500;
+    throw err;
+  }
+
+  const roomId = matrixAdminRoomId(env);
+  const txnId = `yanta-${now()}-${randomToken(8)}`;
+
+  const path =
+    `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}` +
+    `/send/m.room.message/${encodeURIComponent(txnId)}`;
+
+  const res = await matrixFetchJson(env, path, {
+    method: "PUT",
+    token: adminToken,
+    body: {
+      msgtype: "m.text",
+      body
+    }
+  });
+
+  if (!res.ok) {
+    const err = new Error(matrixErrorMessage(res.data, `Matrix admin room send failed: HTTP ${res.status}`));
+    err.status = res.status;
+    err.matrixErrcode = res.data?.errcode || "";
+    throw err;
+  }
+
+  return res.data;
+}
+__name(matrixSendAdminRoomMessage, "matrixSendAdminRoomMessage");
+
+async function matrixDeactivateUserViaAdminRoom(env, matrixUserId, reason = "YANTA Chat deprovision") {
+  const command = matrixAdminDeactivateCommand(env, matrixUserId);
+
+  /*
+    Continuwuity does not expose Synapse's admin deactivate endpoint.
+    Admin actions are performed through the server admin room instead.
+    The command template is configurable because Continuwuity command names
+    can change between releases.
+  */
+  const sent = await matrixSendAdminRoomMessage(env, command);
+
+  return {
+    ok: true,
+    via: "admin_room",
+    eventId: sent?.event_id || "",
+    matrixUserId,
+    reason
+  };
+}
+__name(matrixDeactivateUserViaAdminRoom, "matrixDeactivateUserViaAdminRoom");
+
+async function matrixDeactivateUser(env, matrixUserId, reason = "YANTA Chat deprovision") {
+  const adminToken = String(env.MATRIX_ADMIN_TOKEN || "").trim();
+
+  if (!adminToken) {
+    const err = new Error("MATRIX_ADMIN_TOKEN is not configured");
+    err.status = 500;
+    throw err;
+  }
+
+  const encodedUserId = encodeURIComponent(matrixUserId);
+
+  const res = await matrixFetchJson(
+    env,
+    `/_synapse/admin/v1/deactivate/${encodedUserId}`,
+    {
+      method: "POST",
+      token: adminToken,
+      body: {
+        erase: false,
+        reason
+      }
+    }
+  );
+
+  if (res.ok) {
+    return res.data;
+  }
+
+  if (res.status === 404 && res.data?.errcode === "M_UNRECOGNIZED") {
+    console.warn("[YANTA Chat] Synapse deactivate API unavailable; falling back to admin room command", {
+      matrixUserId,
+      errcode: res.data?.errcode
+    });
+
+    return await matrixDeactivateUserViaAdminRoom(env, matrixUserId, reason);
+  }
+
+  const err = new Error(matrixErrorMessage(res.data, `Matrix deactivate failed: HTTP ${res.status}`));
+  err.status = res.status;
+  err.matrixErrcode = res.data?.errcode || "";
+  throw err;
+}
+__name(matrixDeactivateUser, "matrixDeactivateUser");
+
+async function chatLocalpartD1State(env, localpart) {
+  const [reserved, account] = await Promise.all([
+    env.DB.prepare(
+      `SELECT localpart, reason
+       FROM chat_reserved_names
+       WHERE localpart = ?`
+    ).bind(localpart).first(),
+
+    env.DB.prepare(
+      `SELECT user_id, matrix_localpart, matrix_user_id, disabled_at
+       FROM chat_accounts
+       WHERE matrix_localpart = ?`
+    ).bind(localpart).first()
+  ]);
+
+  return {
+    reserved,
+    account
+  };
+}
+__name(chatLocalpartD1State, "chatLocalpartD1State");
+
+async function checkHomeserverUsernameAvailable(env, localpart) {
+  if (String(env.MATRIX_SKIP_AVAILABLE_CHECK || "0") === "1") {
+    return {
+      checked: false,
+      available: true,
+      skipped: true
+    };
+  }
+
+  try {
+    const path =
+      `/_matrix/client/v3/register/available?username=${encodeURIComponent(localpart)}`;
+
+    const res = await matrixFetchJson(env, path, {
+      method: "GET",
+      timeoutMs: 8_000
+    });
+
+    if (res.ok) {
+      return {
+        checked: true,
+        available: res.data?.available !== false
+      };
+    }
+
+    if (res.status === 404) {
+      console.warn("[YANTA Chat] Matrix availability endpoint not found", {
+        status: res.status
+      });
+
+      return {
+        checked: false,
+        available: true,
+        warning: "Homeserver availability endpoint is not available."
+      };
+    }
+
+    return {
+      checked: true,
+      available: false,
+      reason: res.data?.errcode || "homeserver_rejected",
+      message: matrixErrorMessage(res.data, "Homeserver rejected this username.")
+    };
+  } catch (err) {
+    console.warn("[YANTA Chat] Matrix availability check failed", safeErrorForLog(err));
+
+    /*
+      Availability is a helper endpoint. Provisioning remains authoritative.
+      Do not fail the UI just because an optional preflight check is down.
+    */
+    return {
+      checked: false,
+      available: true,
+      warning: "Homeserver availability check failed."
+    };
+  }
+}
+__name(checkHomeserverUsernameAvailable, "checkHomeserverUsernameAvailable");
+
+function isUniqueConstraintError(err) {
+  const msg = String(err?.message || err || "").toLowerCase();
+
+  return (
+    msg.includes("unique") ||
+    msg.includes("constraint") ||
+    msg.includes("primary key")
+  );
+}
+__name(isUniqueConstraintError, "isUniqueConstraintError");
+
+/**
+ * Returns the current user's YANTA Chat / Matrix account state.
+ */
+async function handleChatAccount(env, req, headers) {
+  const user = await requireUser(env, req);
+
+  const row = await env.DB.prepare(
+    `SELECT matrix_localpart, matrix_user_id, created_at, disabled_at
+     FROM chat_accounts
+     WHERE user_id = ?`
+  ).bind(user.userId).first();
+
+  return json({
+    provisioned: !!row && !row.disabled_at,
+    matrixLocalpart: row?.matrix_localpart || null,
+    matrixUserId: row?.matrix_user_id || null,
+    createdAt: row?.created_at || null,
+    disabledAt: row?.disabled_at || null,
+    homeserverUrl: matrixHomeserverUrl(env)
+  }, 200, {
+    ...headers,
+    "cache-control": "no-store"
+  });
+}
+__name(handleChatAccount, "handleChatAccount");
+
+/**
+ * Checks whether a requested YANTA Chat username is available.
+ */
+async function handleChatUsernameAvailable(env, req, url, headers) {
+  const user = await requireUser(env, req);
+
+  const rl = await rateLimit(
+    env,
+    `chat:username-available:user:${user.userId}`,
+    30,
+    60 * 60 * 1000
+  );
+
+  if (!rl.ok) {
+    await audit(env, req, "chat_username_available_rate_limited", user.userId, {});
+
+    return json({
+      available: false,
+      reason: "rate_limited",
+      message: "Too many username checks. Please try again later."
+    }, 429, headers);
+  }
+
+  const rawName = url.searchParams.get("name") || "";
+  const policy = validChatLocalpart(rawName);
+
+  if (!policy.ok) {
+    return json({
+      available: false,
+      localpart: policy.localpart,
+      reason: policy.reason,
+      message: policy.message,
+      homeserverUrl: matrixHomeserverUrl(env)
+    }, 200, headers);
+  }
+
+  const state = await chatLocalpartD1State(env, policy.localpart);
+
+  if (state.reserved) {
+    return json({
+      available: false,
+      localpart: policy.localpart,
+      reason: "reserved",
+      message: "This username is reserved.",
+      homeserverUrl: matrixHomeserverUrl(env)
+    }, 200, headers);
+  }
+
+  if (state.account) {
+    return json({
+      available: false,
+      localpart: policy.localpart,
+      reason: "taken",
+      message: "This username is already taken.",
+      homeserverUrl: matrixHomeserverUrl(env)
+    }, 200, headers);
+  }
+
+  const hs = await checkHomeserverUsernameAvailable(env, policy.localpart);
+
+  if (!hs.available) {
+    return json({
+      available: false,
+      localpart: policy.localpart,
+      reason: hs.reason || "homeserver_rejected",
+      message: hs.message || "This username is not available on the homeserver.",
+      homeserverChecked: hs.checked,
+      homeserverUrl: matrixHomeserverUrl(env)
+    }, 200, headers);
+  }
+
+  return json({
+    available: true,
+    localpart: policy.localpart,
+    matrixUserId: matrixUserIdForLocalpart(env, policy.localpart),
+    homeserverChecked: hs.checked,
+    warning: hs.warning || null,
+    homeserverUrl: matrixHomeserverUrl(env)
+  }, 200, headers);
+}
+__name(handleChatUsernameAvailable, "handleChatUsernameAvailable");
+
+/**
+ * Provisions exactly one Matrix account for the authenticated YANTA Cloud user.
+ */
+async function handleChatProvision(env, req, headers) {
+  const user = await requireUser(env, req);
+
+  const rl = await rateLimit(
+    env,
+    `chat:provision:user:${user.userId}`,
+    10,
+    60 * 60 * 1000
+  );
+
+  if (!rl.ok) {
+    await audit(env, req, "chat_provision_rate_limited", user.userId, {});
+
+    return json({
+      ok: false,
+      message: "Too many provisioning attempts. Please try again later."
+    }, 429, headers);
+  }
+
+  const body = await bodyJson(req);
+  const policy = validChatLocalpart(body.username);
+
+  await audit(env, req, "chat_provision_attempt", user.userId, {
+    requestedLocalpart: policy.localpart || normalizeChatLocalpart(body.username)
+  });
+
+  if (!policy.ok) {
+    return json({
+      ok: false,
+      reason: policy.reason,
+      message: policy.message
+    }, 400, headers);
+  }
+
+  const existingForUser = await env.DB.prepare(
+    `SELECT matrix_user_id, disabled_at
+     FROM chat_accounts
+     WHERE user_id = ?`
+  ).bind(user.userId).first();
+
+  if (existingForUser) {
+    return json({
+      ok: false,
+      message: "This YANTA account already has a Matrix account.",
+      matrixUserId: existingForUser.matrix_user_id,
+      disabledAt: existingForUser.disabled_at || null
+    }, 409, headers);
+  }
+
+  const state = await chatLocalpartD1State(env, policy.localpart);
+
+  if (state.reserved) {
+    return json({
+      ok: false,
+      reason: "reserved",
+      message: "This username is reserved."
+    }, 400, headers);
+  }
+
+  if (state.account) {
+    return json({
+      ok: false,
+      reason: "taken",
+      message: "This username is already taken."
+    }, 409, headers);
+  }
+
+  const hsAvailable = await checkHomeserverUsernameAvailable(env, policy.localpart);
+
+  if (!hsAvailable.available) {
+    return json({
+      ok: false,
+      reason: hsAvailable.reason || "homeserver_rejected",
+      message: hsAvailable.message || "This username is not available on the homeserver."
+    }, 400, headers);
+  }
+
+  const password = randomToken(48);
+
+  let registered = null;
+  let matrixUserId = matrixUserIdForLocalpart(env, policy.localpart);
+
+  try {
+    registered = await matrixRegisterWithRegistrationToken(env, {
+      localpart: policy.localpart,
+      password
+    });
+
+    matrixUserId = registered?.user_id || matrixUserId;
+
+    /*
+      Zero-knowledge decision:
+      The Worker never stores the Matrix password or access_token.
+      They are returned once so the client can immediately encrypt and store
+      them locally in AP3.
+    */
+    await env.DB.prepare(
+      `INSERT INTO chat_accounts
+       (user_id, matrix_localpart, matrix_user_id, created_at)
+       VALUES (?, ?, ?, ?)`
+    ).bind(
+      user.userId,
+      policy.localpart,
+      matrixUserId,
+      now()
+    ).run();
+  } catch (err) {
+    if (registered?.user_id || matrixUserId) {
+      try {
+        await matrixDeactivateUser(
+          env,
+          registered?.user_id || matrixUserId,
+          "YANTA compensation after D1 insert failure"
+        );
+
+        await audit(env, req, "chat_provision_compensated", user.userId, {
+          matrixUserId: registered?.user_id || matrixUserId,
+          error: err?.message || String(err)
+        });
+      } catch (deactivateErr) {
+        console.warn("[YANTA Chat] Compensation deactivate failed", safeErrorForLog(deactivateErr));
+
+        await audit(env, req, "chat_provision_compensation_failed", user.userId, {
+          matrixUserId: registered?.user_id || matrixUserId,
+          error: deactivateErr?.message || String(deactivateErr)
+        });
+      }
+    }
+
+    if (isUniqueConstraintError(err)) {
+      return json({
+        ok: false,
+        reason: "taken",
+        message: "This username was claimed just now. Please choose another one."
+      }, 409, headers);
+    }
+
+    throw err;
+  }
+
+  await audit(env, req, "chat_provision_success", user.userId, {
+    matrixUserId,
+    matrixLocalpart: policy.localpart
+  });
+
+  return json({
+    ok: true,
+    matrixUserId,
+    deviceId: registered?.device_id || "",
+    accessToken: registered?.access_token || "",
+    password,
+    homeserverUrl: matrixHomeserverUrl(env)
+  }, 200, {
+    ...headers,
+    "cache-control": "no-store"
+  });
+}
+__name(handleChatProvision, "handleChatProvision");
+
+/**
+ * Deactivates the user's Matrix account but keeps the localpart reserved.
+ */
+async function handleChatDeprovision(env, req, headers) {
+  const user = await requireUser(env, req);
+
+  const rl = await rateLimit(
+    env,
+    `chat:deprovision:user:${user.userId}`,
+    6,
+    60 * 60 * 1000
+  );
+
+  if (!rl.ok) {
+    await audit(env, req, "chat_deprovision_rate_limited", user.userId, {});
+
+    return json({
+      ok: false,
+      message: "Too many deprovisioning attempts. Please try again later."
+    }, 429, headers);
+  }
+
+  const row = await env.DB.prepare(
+    `SELECT matrix_localpart, matrix_user_id, disabled_at
+     FROM chat_accounts
+     WHERE user_id = ?`
+  ).bind(user.userId).first();
+
+  if (!row) {
+    return json({
+      ok: false,
+      message: "No Matrix account exists for this YANTA account."
+    }, 404, headers);
+  }
+
+  if (row.disabled_at) {
+    return json({
+      ok: true,
+      matrixUserId: row.matrix_user_id,
+      disabledAt: row.disabled_at,
+      alreadyDisabled: true
+    }, 200, headers);
+  }
+
+  await matrixDeactivateUser(env, row.matrix_user_id, "YANTA Chat deprovision");
+
+  const t = now();
+
+  await env.DB.prepare(
+    `UPDATE chat_accounts
+     SET disabled_at = COALESCE(disabled_at, ?)
+     WHERE user_id = ?`
+  ).bind(t, user.userId).run();
+
+  /*
+    Important:
+    The row remains in chat_accounts. This keeps the localpart reserved forever
+    for the future e-mail namespace.
+  */
+  await audit(env, req, "chat_deprovision_success", user.userId, {
+    matrixUserId: row.matrix_user_id,
+    matrixLocalpart: row.matrix_localpart
+  });
+
+  return json({
+    ok: true,
+    matrixUserId: row.matrix_user_id,
+    disabledAt: t
+  }, 200, {
+    ...headers,
+    "cache-control": "no-store"
+  });
+}
+__name(handleChatDeprovision, "handleChatDeprovision");
+
+// ============================================================
 // Billing / Paddle
 // ============================================================
 
@@ -5273,6 +6181,18 @@ async function route(req, env) {
     }
     if (url.pathname === "/api/me" && req.method === "GET") {
       return handleMe(env, req, headers);
+    }
+    if (url.pathname === "/api/chat/account" && req.method === "GET") {
+      return handleChatAccount(env, req, headers);
+    }
+    if (url.pathname === "/api/chat/username-available" && req.method === "GET") {
+      return handleChatUsernameAvailable(env, req, url, headers);
+    }
+    if (url.pathname === "/api/chat/provision" && req.method === "POST") {
+      return handleChatProvision(env, req, headers);
+    }
+    if (url.pathname === "/api/chat/deprovision" && req.method === "POST") {
+      return handleChatDeprovision(env, req, headers);
     }
     if (url.pathname === "/api/vaults" && req.method === "GET") {
       return handleListVaults(env, req, headers);

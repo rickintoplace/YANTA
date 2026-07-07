@@ -13,6 +13,15 @@ COOKIE_NAME = "yanta_cloud_session"
 COOKIE_DOMAIN = ""
 OPENROUTER_SITE_URL = "https://yanta.page"
 OPENROUTER_APP_TITLE = "YANTA"
+# Matrix / Chat
+# Public homeserver URL used by clients and the Worker.
+MATRIX_HS_URL = "https://matrix.yanta.me"
+
+# Server name used in Matrix IDs: @rick:yanta.me
+MATRIX_SERVER_NAME = "yanta.me"
+
+# Optional: set to "1" if /register/available is not exposed by the HS.
+MATRIX_SKIP_AVAILABLE_CHECK = "0"
 
 [[d1_databases]]
 binding = "DB"

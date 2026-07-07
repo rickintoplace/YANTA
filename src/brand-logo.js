@@ -21,4 +21,3 @@ export const BRAND_LOGO_SVG = `
   </g>
 </svg>
 `;
-

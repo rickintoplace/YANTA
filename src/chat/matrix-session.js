@@ -37,7 +37,7 @@ let startPromise = null;
 let stopPromise = null;
 let unknownTokenRetryInFlight = false;
 
-const MATRIX_STORE_DB = 'yanta-chat-matrix-sdk';
+const MATRIX_STORE_DB_PREFIX = 'yanta-chat-matrix-sdk';
 const INITIAL_SYNC_LIMIT = 30;
 
 function reportSessionError(message, err) {
@@ -205,6 +205,96 @@ function isUnknownTokenError(err) {
   );
 }
 
+function isMatrixCryptoStoreMismatchError(err) {
+  return /account in the store doesn't match the account in the constructor/i.test(
+    err?.message || String(err || '')
+  );
+}
+
+function safeDbPart(value = '') {
+  return String(value || '')
+    .replace(/^@/, '')
+    .replace(/[^a-z0-9._-]+/gi, '_')
+    .slice(0, 80) || 'unknown';
+}
+
+function matrixStoreDbName(credentials = {}) {
+  /*
+    Matrix local timeline state should be scoped by Matrix user + device.
+    Warum: Rust crypto stores are device-bound. Reusing one IndexedDB name
+    across freshly logged-in Matrix devices can make initRustCrypto fail with
+    “account in the store doesn't match”.
+  */
+  return [
+    MATRIX_STORE_DB_PREFIX,
+    safeDbPart(credentials.userId),
+    safeDbPart(credentials.deviceId),
+  ].join('.');
+}
+
+function deleteIndexedDatabase(name) {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.deleteDatabase(name);
+
+    req.onsuccess = () => resolve(true);
+    req.onerror = () => reject(req.error || new Error(`Could not delete IndexedDB ${name}`));
+
+    req.onblocked = () => {
+      console.warn('[YANTA Chat Session] IndexedDB delete blocked', name);
+      resolve(false);
+    };
+  });
+}
+
+/**
+ * Clears Matrix SDK local stores after a Matrix device/account mismatch.
+ *
+ * This does not touch YANTA notes/Vault data. It only removes Matrix SDK local
+ * caches/crypto state so the current device can initialize a fresh crypto store.
+ */
+export async function clearChatMatrixLocalStoresForDebugOnly() {
+  try {
+    const dbs = typeof indexedDB.databases === 'function'
+      ? await indexedDB.databases()
+      : [];
+
+    const names = dbs
+      .map((db) => db.name)
+      .filter(Boolean)
+      .filter((name) => {
+        const n = String(name || '');
+
+        if (n === 'yanta-chat') return false;
+
+        return (
+          n === MATRIX_STORE_DB_PREFIX ||
+          n.startsWith(`${MATRIX_STORE_DB_PREFIX}.`) ||
+
+          // Matrix JS SDK default stores.
+          n.startsWith('matrix-js-sdk') ||
+          n.startsWith('matrix_js_sdk') ||
+
+          // Rust/WASM crypto store variants used by Matrix SDK builds.
+          n.includes('matrix-sdk') ||
+          n.includes('matrix_sdk') ||
+          n.includes('matrix-rust') ||
+          n.includes('matrix_rust')
+        );
+      });
+
+    for (const name of names) {
+      await deleteIndexedDatabase(name);
+    }
+
+    return {
+      cleared: names,
+    };
+  } catch (err) {
+    reportSessionError('Could not reset local Chat crypto storage.', err);
+    throw err;
+  }
+}
+
 function eventIdOf(ev) {
   return ev?.getId?.() || ev?.event?.event_id || ev?.event_id || '';
 }
@@ -302,6 +392,23 @@ async function createMatrixSdkStore(sdk) {
   return matrixStore;
 }
 
+function matrixCryptoStorePrefix(credentials = {}) {
+  /*
+    Critical:
+    Matrix Rust crypto stores are bound to exactly one Matrix user+device.
+    The timeline store dbName alone is not enough; Rust crypto also needs a
+    device-scoped prefix. Otherwise password re-login creates a new device,
+    but initRustCrypto() opens the old default crypto store and fails with:
+    “the account in the store doesn't match the account in the constructor”.
+  */
+  return [
+    MATRIX_STORE_DB_PREFIX,
+    'crypto',
+    safeDbPart(credentials.userId),
+    safeDbPart(credentials.deviceId),
+  ].join('.');
+}
+
 function createClientFromCredentials(sdk, credentials, matrixStore) {
   return sdk.createClient({
     baseUrl: credentials.homeserverUrl,
@@ -309,6 +416,10 @@ function createClientFromCredentials(sdk, credentials, matrixStore) {
     accessToken: credentials.accessToken,
     deviceId: credentials.deviceId,
     store: matrixStore || undefined,
+
+    // Rust crypto / Matrix SDK crypto store isolation.
+    cryptoStorePrefix: matrixCryptoStorePrefix(credentials),
+
     timelineSupport: true,
     useAuthorizationHeader: true,
   });

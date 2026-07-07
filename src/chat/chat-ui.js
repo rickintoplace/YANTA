@@ -29,6 +29,7 @@ import {
 import {
   registerOverlayRoute,
   pushOverlayState,
+  replaceOverlayState,
   closeTopOverlay,
   overlayIdFromState,
 } from '../overlay-history.js';
@@ -57,6 +58,9 @@ import './chat.css';
 const PAGE_SIZE = 30;
 const TYPING_THROTTLE_MS = 3500;
 const READ_RECEIPT_DEBOUNCE_MS = 650;
+const ROOM_LIST_DEFAULT_WIDTH = 320;
+const ROOM_LIST_MIN_WIDTH = 72;
+const ROOM_LIST_MAX_WIDTH = 460;
 
 const MOBILE_MQ = window.matchMedia('(max-width: 760px)');
 
@@ -64,6 +68,7 @@ const CHAT_FLOATING_OVERLAY_ID = 'chat-floating';
 
 let chatOverlayRegistered = false;
 let chatMode = 'surface'; // surface | floating
+let roomListWidth = ROOM_LIST_DEFAULT_WIDTH;
 
 let initialized = false;
 let root = null;
@@ -145,16 +150,44 @@ function setChatMode(nextMode = 'surface') {
   root.classList.toggle('is-surface', chatMode === 'surface');
 
   if (chatMode === 'floating') {
-    root.style.left ||= 'calc(100vw - 760px)';
-    root.style.top ||= '76px';
+    /*
+      Keep a floating position only if the user already moved the window.
+      Do not force top-left on every room switch.
+    */
+    if (!root.style.left || root.style.left === '0px') {
+      root.style.left = 'calc(100vw - 760px)';
+    }
+
+    if (!root.style.top || root.style.top === '0px') {
+      root.style.top = '76px';
+    }
+
     root.style.right = 'auto';
     root.style.bottom = 'auto';
   } else {
-    root.style.left = '';
-    root.style.top = '';
-    root.style.right = '';
-    root.style.bottom = '';
+    /*
+      Warum:
+      Browser resize on a resizable fixed element writes inline width/height.
+      Fullscreen surface must remove those inline dimensions, otherwise it
+      keeps the small window size after docking.
+    */
+    for (const prop of [
+      'left',
+      'top',
+      'right',
+      'bottom',
+      'width',
+      'height',
+      'minWidth',
+      'minHeight',
+      'maxWidth',
+      'maxHeight',
+    ]) {
+      root.style[prop] = '';
+    }
   }
+
+  updateFloatingButtons();
 }
 
 function roomById(roomId) {
@@ -339,6 +372,8 @@ function ensureRoot() {
       <div class="yanta-chat-room-list" data-chat-room-list></div>
     </aside>
 
+    <div class="yanta-chat-list-resizer" data-chat-list-resizer title="Resize chat list"></div>
+
     <main class="yanta-chat-main-pane" data-chat-main-pane>
       <section class="yanta-chat-empty" data-chat-empty>
         <div>${lucide('message-circle', 28)}</div>
@@ -418,9 +453,13 @@ function ensureRoot() {
   composerEl = root.querySelector('[data-chat-composer]');
   typingEl = root.querySelector('[data-chat-typing]');
 
-  bindRootEvents();
+  root.style.setProperty('--chat-list-width', `${roomListWidth}px`);
 
+  bindRootEvents();
+  bindListPaneResize();
   bindFloatingDrag();
+
+  updateRoomListDensity();
 
   return root;
 }
@@ -678,6 +717,79 @@ function bindFloatingDrag() {
   }, true);
 }
 
+function updateRoomListDensity() {
+  if (!root) return;
+
+  root.style.setProperty('--chat-list-width', `${roomListWidth}px`);
+
+  root.classList.toggle('is-list-collapsed', roomListWidth <= 112);
+  root.classList.toggle('is-list-compact', roomListWidth > 112 && roomListWidth < 260);
+}
+
+function clampRoomListWidth(value) {
+  return Math.max(
+    ROOM_LIST_MIN_WIDTH,
+    Math.min(ROOM_LIST_MAX_WIDTH, Number(value || ROOM_LIST_DEFAULT_WIDTH))
+  );
+}
+
+function bindListPaneResize() {
+  if (!root || root.dataset.chatListResizeBound === '1') return;
+
+  root.dataset.chatListResizeBound = '1';
+
+  const handle = root.querySelector('[data-chat-list-resizer]');
+
+  if (!handle) return;
+
+  let dragging = false;
+  let pointerId = null;
+  let startX = 0;
+  let startWidth = roomListWidth;
+
+  function onMove(e) {
+    if (!dragging) return;
+    if (pointerId != null && e.pointerId !== pointerId) return;
+
+    e.preventDefault();
+
+    roomListWidth = clampRoomListWidth(startWidth + e.clientX - startX);
+    updateRoomListDensity();
+  }
+
+  function onUp(e) {
+    if (pointerId != null && e.pointerId !== pointerId) return;
+
+    dragging = false;
+    pointerId = null;
+
+    root.classList.remove('is-resizing-list');
+
+    document.removeEventListener('pointermove', onMove, true);
+    document.removeEventListener('pointerup', onUp, true);
+    document.removeEventListener('pointercancel', onUp, true);
+  }
+
+  handle.addEventListener('pointerdown', (e) => {
+    if (isMobile()) return;
+    if (e.button != null && e.button !== 0) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    dragging = true;
+    pointerId = e.pointerId;
+    startX = e.clientX;
+    startWidth = roomListWidth;
+
+    root.classList.add('is-resizing-list');
+
+    document.addEventListener('pointermove', onMove, true);
+    document.addEventListener('pointerup', onUp, true);
+    document.addEventListener('pointercancel', onUp, true);
+  });
+}
+
 async function openNewChatDialog() {
   const target = await askText({
     title: 'New chat',
@@ -741,14 +853,15 @@ function onTypingChange() {
   renderTyping();
 }
 
-function onRoomTimeline(_event, room) {
+function onRoomTimeline(event, room) {
   renderRoomListSoon();
 
-  if (room?.roomId === activeRoomId) {
-    const nearBottom = isTimelineNearBottom();
+  const roomId = room?.roomId || event?.getRoomId?.() || '';
 
-    renderTimelineSoon({
-      keepBottom: nearBottom,
+  if (roomId === activeRoomId) {
+    handleLiveTimelineUpdate({
+      roomId,
+      eventId: event?.getId?.() || '',
     });
   }
 }
@@ -762,6 +875,87 @@ const renderTimelineSoon = debounce((options = {}) => {
     renderTimeline(options);
   }
 }, 80);
+
+const reloadActiveTimelineSoon = debounce((options = {}) => {
+  reloadActiveTimeline(options).catch((err) => {
+    console.warn('[YANTA Chat] Could not refresh live timeline', err);
+    toast('Could not refresh chat messages.', 'error');
+  });
+}, 80);
+
+function timelineHasEvent(eventId) {
+  if (!eventId || !timelineWindow) return false;
+
+  return timelineWindow
+    .getEvents()
+    .some((event) => event?.getId?.() === eventId);
+}
+
+function currentTimelineReloadLimit() {
+  const current = timelineWindow?.getEvents?.()?.length || 0;
+
+  return Math.max(
+    PAGE_SIZE,
+    Math.min(500, current + PAGE_SIZE)
+  );
+}
+
+async function reloadActiveTimeline({
+  keepBottom = false,
+  scrollBottom = false,
+} = {}) {
+  if (!client || !activeRoomId) return;
+
+  const room = roomById(activeRoomId);
+
+  if (!room) return;
+
+  const limit = currentTimelineReloadLimit();
+
+  const nextWindow = new TimelineWindow(client, room, {
+    windowLimit: 500,
+  });
+
+  await nextWindow.load(undefined, limit);
+
+  timelineWindow = nextWindow;
+  timelineInitializedFor = activeRoomId;
+
+  renderTimeline({
+    keepBottom,
+    scrollBottom,
+  });
+}
+
+function handleLiveTimelineUpdate({
+  roomId,
+  eventId,
+} = {}) {
+  if (!roomId || roomId !== activeRoomId) return;
+
+  const keepBottom = isTimelineNearBottom();
+
+  /*
+    Warum:
+    TimelineWindow does not reliably expose freshly appended live events in all
+    SDK versions until the window is reloaded/paginated. We first let the SDK
+    settle for one frame, then reload from live if the event is still missing.
+  */
+  requestAnimationFrame(() => {
+    if (eventId && timelineHasEvent(eventId)) {
+      renderTimeline({
+        keepBottom,
+      });
+
+      return;
+    }
+
+    reloadActiveTimelineSoon({
+      keepBottom,
+      scrollBottom: keepBottom,
+    });
+  });
+}
 
 async function ensureClient() {
   if (client) return client;
@@ -791,6 +985,48 @@ async function ensureClient() {
   return client;
 }
 
+function bindAppLevelChatEvents() {
+  window.addEventListener('yanta-chat-message', (e) => {
+    const detail = e.detail || {};
+
+    if (detail.roomId === activeRoomId) {
+      handleLiveTimelineUpdate({
+        roomId: detail.roomId,
+        eventId: detail.eventId || '',
+      });
+    }
+
+    renderRoomListSoon();
+  });
+
+  window.addEventListener('yanta-chat-room-updated', (e) => {
+    const detail = e.detail || {};
+
+    renderRoomListSoon();
+
+    if (detail.roomId === activeRoomId) {
+      renderTimelineSoon({
+        keepBottom: isTimelineNearBottom(),
+      });
+    }
+  });
+
+  window.addEventListener('yanta-chat-ready', () => {
+    client = window.yantaChatSession?.client || window.yantaMatrixClient || client;
+
+    if (client) {
+      bindClientEvents(client);
+      renderRoomListSoon();
+
+      if (activeRoomId) {
+        reloadActiveTimelineSoon({
+          scrollBottom: true,
+        });
+      }
+    }
+  });
+}
+
 /**
  * Initialize Chat UI.
  */
@@ -800,6 +1036,7 @@ export function setupChat() {
   initialized = true;
   ensureRoot();
   registerChatOverlayRoute();
+  bindAppLevelChatEvents();
 }
 
 /**
@@ -818,6 +1055,9 @@ export async function openChat({
   setChatMode(mode);
 
   root.hidden = false;
+
+  root.style.setProperty('--chat-list-width', `${roomListWidth}px`);
+  updateRoomListDensity();
 
   const surfaceMode = chatMode === 'surface';
 
@@ -873,11 +1113,11 @@ export async function openChatFloating({
     fromHistory: true,
   });
 
-  if (
-    !fromHistory &&
-    wasClosed &&
-    overlayIdFromState() !== CHAT_FLOATING_OVERLAY_ID
-  ) {
+  if (overlayIdFromState() === CHAT_FLOATING_OVERLAY_ID) {
+    replaceOverlayState(CHAT_FLOATING_OVERLAY_ID, {
+      roomId: activeRoomId || null,
+    });
+  } else if (!fromHistory && wasClosed) {
     pushOverlayState(CHAT_FLOATING_OVERLAY_ID, {
       roomId: activeRoomId || null,
     });
@@ -965,6 +1205,32 @@ function renderRoomList() {
   }
 }
 
+async function openRoomFromList(roomId) {
+  const id = String(roomId || '').trim();
+
+  if (!id) return;
+
+  /*
+    Warum:
+    A room switch inside the floating window must not accidentally dock the
+    Chat surface or reset the window position. Surface routing is only for
+    fullscreen Chat.
+  */
+  if (chatMode === 'floating') {
+    await openChatFloating({
+      roomId: id,
+    });
+
+    return;
+  }
+
+  await openChat({
+    roomId: id,
+    push: true,
+    mode: 'surface',
+  });
+}
+
 function renderRoomRow(room) {
   const lastEvent = latestEvent(room);
   const preview = lastEvent ? messagePreview(lastEvent) : 'No messages yet';
@@ -975,10 +1241,7 @@ function renderRoomRow(room) {
     type: 'button',
     class: `yanta-chat-room-row ${room.roomId === activeRoomId ? 'active' : ''}`,
     onclick: () => {
-      openChat({
-        roomId: room.roomId,
-        push: true,
-      }).catch((err) => {
+      openRoomFromList(room.roomId).catch((err) => {
         console.warn('[YANTA Chat] Could not open room', err);
         toast('Could not open chat.', 'error');
       });
@@ -1061,6 +1324,11 @@ async function openActiveRoomIfNeeded() {
 
   renderTyping();
 
+  window.setTimeout(() => {
+    scheduleReadReceipt();
+    renderRoomListSoon();
+  }, 250);
+
   requestAnimationFrame(() => {
     const input = root.querySelector('[data-chat-input]');
     input?.focus();
@@ -1083,9 +1351,7 @@ function renderRoomHeader(room) {
 }
 
 async function initTimeline(room) {
-  const loading = root.querySelector('[data-chat-loading-row]');
-
-  if (loading) loading.hidden = false;
+  setOlderLoadingVisible(true);
 
   try {
     timelineWindow = new TimelineWindow(client, room, {
@@ -1101,7 +1367,7 @@ async function initTimeline(room) {
     console.warn('[YANTA Chat] Could not initialize timeline', err);
     toast('Could not load chat timeline.', 'error');
   } finally {
-    if (loading) loading.hidden = true;
+    setOlderLoadingVisible(false);
   }
 }
 
@@ -1114,12 +1380,19 @@ function isTimelineNearBottom() {
 async function paginateBackwards() {
   if (!timelineWindow || timelineLoading || !timelineEl) return;
 
+  if (
+    typeof timelineWindow.canPaginate === 'function' &&
+    !timelineWindow.canPaginate(EventTimeline.BACKWARDS)
+  ) {
+    setOlderLoadingVisible(false);
+    return;
+  }
+
   timelineLoading = true;
 
-  const loading = root.querySelector('[data-chat-loading-row]');
   const before = timelineEl.scrollHeight;
 
-  if (loading) loading.hidden = false;
+  setOlderLoadingVisible(true);
 
   try {
     await timelineWindow.paginate(EventTimeline.BACKWARDS, PAGE_SIZE);
@@ -1132,7 +1405,15 @@ async function paginateBackwards() {
     toast('Could not load older messages.', 'error');
   } finally {
     timelineLoading = false;
-    if (loading) loading.hidden = true;
+    setOlderLoadingVisible(false);
+  }
+}
+
+function setOlderLoadingVisible(visible) {
+  const loading = root?.querySelector('[data-chat-loading-row]');
+
+  if (loading) {
+    loading.hidden = !visible;
   }
 }
 
@@ -1168,7 +1449,9 @@ function renderTimeline({
     });
   }
 
-  scheduleReadReceipt();
+  window.setTimeout(() => {
+    scheduleReadReceipt();
+  }, 120);
 }
 
 function setupTimelineObservers() {
@@ -1214,7 +1497,7 @@ const scheduleReadReceipt = debounce(() => {
 
 async function sendReadReceiptIfVisible() {
   if (!document.hasFocus()) return;
-  if (!timelineWindow || !client) return;
+  if (!timelineWindow || !client || !activeRoomId) return;
   if (!isTimelineNearBottom()) return;
 
   const event = lastReadableEvent(timelineWindow.getEvents());
@@ -1222,6 +1505,18 @@ async function sendReadReceiptIfVisible() {
   if (!event) return;
 
   await client.sendReadReceipt(event);
+
+  const eventId = event.getId?.();
+
+  if (eventId && typeof client.setRoomReadMarkers === 'function') {
+    await client.setRoomReadMarkers(activeRoomId, eventId, event);
+  }
+
+  /*
+    The SDK updates room notification counts asynchronously. Re-render after
+    the receipt/marker write so the "1" badge disappears without reopening.
+  */
+  renderRoomListSoon();
 }
 
 function autoResizeComposer() {

@@ -742,15 +742,115 @@
 }
 
 /* ============================================================
-   Floating Chat Window
+   live loading row, list resize, floating/fullscreen
    ============================================================ */
 
+.yanta-chat-loading-row[hidden] {
+  display: none !important;
+}
+
+.yanta-chat-surface {
+  grid-template-columns:
+    var(--chat-list-width, 320px)
+    6px
+    minmax(0, 1fr);
+}
+
+.yanta-chat-list-pane {
+  grid-column: 1;
+}
+
+.yanta-chat-list-resizer {
+  grid-column: 2;
+  grid-row: 1;
+
+  width: 6px;
+  min-width: 6px;
+
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.yanta-chat-list-resizer:hover,
+.yanta-chat-surface.is-resizing-list .yanta-chat-list-resizer {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.yanta-chat-main-pane {
+  grid-column: 3;
+}
+
 .yanta-chat-surface.is-floating {
-  position: fixed;
-  z-index: 260;
+  grid-template-columns:
+    var(--chat-list-width, 320px)
+    6px
+    minmax(0, 1fr);
+}
 
-  inset: auto;
+.yanta-chat-surface.is-list-compact .yanta-chat-room-row {
+  grid-template-columns: auto minmax(0, 1fr);
+}
 
+.yanta-chat-surface.is-list-compact .yanta-chat-room-row-subtitle span:first-child {
+  max-width: 120px;
+}
+
+.yanta-chat-surface.is-list-collapsed {
+  --chat-list-width: 72px;
+}
+
+.yanta-chat-surface.is-list-collapsed .yanta-chat-list-head {
+  justify-content: center;
+  padding-left: 8px;
+  padding-right: 8px;
+}
+
+.yanta-chat-surface.is-list-collapsed .yanta-chat-title strong,
+.yanta-chat-surface.is-list-collapsed .yanta-chat-search input,
+.yanta-chat-surface.is-list-collapsed .yanta-chat-search svg,
+.yanta-chat-surface.is-list-collapsed .yanta-chat-room-row-main,
+.yanta-chat-surface.is-list-collapsed [data-chat-new] {
+  display: none !important;
+}
+
+.yanta-chat-surface.is-list-collapsed .yanta-chat-search {
+  min-height: 1px;
+  height: 1px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+}
+
+.yanta-chat-surface.is-list-collapsed .yanta-chat-room-list {
+  padding: 8px 6px;
+}
+
+.yanta-chat-surface.is-list-collapsed .yanta-chat-room-row {
+  min-height: 50px;
+  display: flex;
+  justify-content: center;
+  padding: 6px;
+}
+
+.yanta-chat-surface.is-list-collapsed .yanta-chat-avatar {
+  width: 40px;
+  height: 40px;
+  flex-basis: 40px;
+}
+
+.yanta-chat-surface.is-surface {
+  width: auto !important;
+  height: auto !important;
+  min-width: 0 !important;
+  min-height: 0 !important;
+  max-width: none !important;
+  max-height: none !important;
+  resize: none !important;
+}
+
+.yanta-chat-surface.is-floating {
   width: min(900px, calc(100vw - 20px));
   height: min(720px, calc(100dvh - 20px));
 
@@ -758,63 +858,28 @@
   min-height: min(460px, calc(100dvh - 20px));
 
   resize: both;
-  overflow: hidden;
-
-  grid-template-columns: minmax(250px, 300px) minmax(0, 1fr);
-
-  border: 1px solid var(--border);
-  border-radius: 18px;
-  box-shadow: 0 24px 90px rgba(0, 0, 0, 0.48);
-
-  background: var(--bg);
-}
-
-.yanta-chat-surface.is-floating .yanta-chat-list-head,
-.yanta-chat-surface.is-floating .yanta-chat-room-head {
-  cursor: move;
-  user-select: none;
-}
-
-.yanta-chat-surface.is-floating.is-dragging {
-  user-select: none;
-}
-
-.yanta-chat-surface.is-floating .yanta-chat-list-pane {
-  border-top-left-radius: 18px;
-  border-bottom-left-radius: 18px;
-  overflow: hidden;
-}
-
-.yanta-chat-surface.is-floating .yanta-chat-room {
-  border-top-right-radius: 18px;
-  border-bottom-right-radius: 18px;
-  overflow: hidden;
 }
 
 @media (max-width: 760px) {
+  .yanta-chat-surface,
   .yanta-chat-surface.is-floating {
-    left: 0 !important;
-    top: 0 !important;
-
-    width: 100vw !important;
-    height: 100dvh !important;
-    max-width: 100vw !important;
-    max-height: 100dvh !important;
-
-    min-width: 0 !important;
-    min-height: 0 !important;
-
-    resize: none;
-
-    border-radius: 0;
-    border-left: 0;
-    border-right: 0;
+    grid-template-columns: 1fr;
   }
 
-  @supports (height: 100svh) {
-    .yanta-chat-surface.is-floating {
-      height: 100svh !important;
-      max-height: 100svh !important;
-    }
+  .yanta-chat-list-resizer {
+    display: none !important;
+  }
+
+  .yanta-chat-list-pane,
+  .yanta-chat-main-pane {
+    grid-column: 1;
+  }
+
+  .yanta-chat-surface.is-list-collapsed .yanta-chat-title strong,
+  .yanta-chat-surface.is-list-collapsed .yanta-chat-search input,
+  .yanta-chat-surface.is-list-collapsed .yanta-chat-search svg,
+  .yanta-chat-surface.is-list-collapsed .yanta-chat-room-row-main,
+  .yanta-chat-surface.is-list-collapsed [data-chat-new] {
+    display: revert !important;
   }
 }

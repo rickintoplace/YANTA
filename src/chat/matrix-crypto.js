@@ -332,10 +332,11 @@ async function chatSecretStorageKeyForSdk(keysOrRequest = {}) {
  * exporting cross-signing keys or key-backup secrets. Passing
  * getSecretStorageKey only to bootstrapSecretStorage() is not enough there.
  */
-function installSecretStorageCallbacks(client) {
-  if (!client) return false;
-
-  const callbacks = {
+/**
+ * Returns Matrix SDK Secret Storage callbacks backed by the YANTA Vault.
+ */
+export function createChatSecretStorageCallbacks() {
+  return {
     getSecretStorageKey: async (keysOrRequest = {}) => {
       return chatSecretStorageKeyForSdk(keysOrRequest);
     },
@@ -356,21 +357,64 @@ function installSecretStorageCallbacks(client) {
       }
     },
   };
+}
+
+/**
+ * Installs Matrix SDK Secret Storage callbacks backed by the YANTA Vault.
+ *
+ * Warum:
+ * Some matrix-js-sdk flows call SecretStorage's own callbacks later while
+ * exporting cross-signing keys or key-backup secrets. Passing callbacks only
+ * to one bootstrap call is not enough for all SDK builds.
+ */
+export function installSecretStorageCallbacks(client) {
+  if (!client) return false;
+
+  const callbacks = createChatSecretStorageCallbacks();
 
   if (typeof client.setCryptoCallbacks === 'function') {
     client.setCryptoCallbacks({
       ...(client.cryptoCallbacks || {}),
       ...callbacks,
     });
-
-    return true;
   }
 
-  // Compatibility fallback for SDK builds exposing callbacks as a property.
   client.cryptoCallbacks = {
     ...(client.cryptoCallbacks || {}),
     ...callbacks,
   };
+
+  /*
+    Compatibility with SDK builds where SecretStorage captured callbacks at
+    construction time. These are intentionally best-effort private-ish fields.
+  */
+  for (const target of [
+    client.secretStorage,
+    client._secretStorage,
+    client.secretStorageStore,
+  ]) {
+    if (!target) continue;
+
+    try {
+      if (typeof target.setCryptoCallbacks === 'function') {
+        target.setCryptoCallbacks(callbacks);
+      }
+    } catch {}
+
+    try {
+      target.cryptoCallbacks = {
+        ...(target.cryptoCallbacks || {}),
+        ...callbacks,
+      };
+    } catch {}
+
+    try {
+      target.callbacks = {
+        ...(target.callbacks || {}),
+        ...callbacks,
+      };
+    } catch {}
+  }
 
   return true;
 }
@@ -558,11 +602,53 @@ function isMissingServerSecretStorageBootstrapError(err) {
 }
 
 async function bootstrapNewSecretStorage(client, cryptoApi) {
-    await cryptoApi.bootstrapSecretStorage({
-    getSecretStorageKey: async (keysOrRequest = {}) => {
-        return chatSecretStorageKeyForSdk(keysOrRequest);
+  installSecretStorageCallbacks(client);
+
+  let generated = null;
+
+  await cryptoApi.bootstrapSecretStorage({
+    setupNewSecretStorage: true,
+
+    createSecretStorageKey: async () => {
+      generated = await createMatrixSecretStorageKey();
+
+      /*
+        Spec-critical ordering:
+        Store the generated recovery material in the Vault before returning it
+        to Matrix bootstrap so a crash after bootstrap does not strand the
+        account without Vault-carried recovery.
+      */
+      await saveChatRecoveryToVault(generated.vault);
+
+      return generated.forSdk;
     },
-    });
+
+    /*
+      Important:
+      During bootstrapSecretStorage() the SDK may immediately store existing
+      backup/cross-signing secrets and calls getSecretStorageKey again. Without
+      this callback some SDK builds fail with:
+      “No getSecretStorageKey callback supplied”.
+    */
+    getSecretStorageKey: async (keysOrRequest = {}) => {
+      const keys =
+        keysOrRequest?.keys && typeof keysOrRequest.keys === 'object'
+          ? keysOrRequest.keys
+          : keysOrRequest;
+
+      const keyId = Object.keys(keys || {})[0] || '';
+
+      if (generated?.vault) {
+        return keyId
+          ? [keyId, generated.vault]
+          : generated.vault;
+      }
+
+      return chatSecretStorageKeyForSdk(keysOrRequest);
+    },
+  });
+
+  installSecretStorageCallbacks(client);
 
   return 'created';
 }

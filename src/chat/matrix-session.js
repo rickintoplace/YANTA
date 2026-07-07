@@ -29,6 +29,8 @@ import {
   bootstrapChatCrypto,
   ingestChatAccountSecrets,
   readChatPasswordFromVault,
+  createChatSecretStorageCallbacks,
+  installSecretStorageCallbacks,
 } from './matrix-crypto.js';
 
 let matrixLoadPromise = null;
@@ -414,7 +416,9 @@ function matrixCryptoStorePrefix(credentials = {}) {
 }
 
 function createClientFromCredentials(sdk, credentials, matrixStore) {
-  return sdk.createClient({
+  const cryptoCallbacks = createChatSecretStorageCallbacks();
+
+  const client = sdk.createClient({
     baseUrl: credentials.homeserverUrl,
     userId: credentials.userId,
     accessToken: credentials.accessToken,
@@ -424,9 +428,21 @@ function createClientFromCredentials(sdk, credentials, matrixStore) {
     // Rust crypto / Matrix SDK crypto store isolation.
     cryptoStorePrefix: matrixCryptoStorePrefix(credentials),
 
+    /*
+      Critical:
+      Provide Secret Storage callbacks at client construction time. Some
+      matrix-js-sdk builds copy callbacks into SecretStorage during createClient
+      and do not fully pick up later setCryptoCallbacks() calls.
+    */
+    cryptoCallbacks,
+
     timelineSupport: true,
     useAuthorizationHeader: true,
   });
+
+  installSecretStorageCallbacks(client);
+
+  return client;
 }
 
 async function initClientCrypto(client) {
@@ -715,6 +731,8 @@ export async function startChatSession({
       let matrixStore = await createMatrixSdkStore(sdk, credentials);
       let client = createClientFromCredentials(sdk, credentials, matrixStore);
 
+      installSecretStorageCallbacks(client);
+
       try {
         await initClientCrypto(client);
       } catch (err) {
@@ -741,6 +759,8 @@ export async function startChatSession({
 
         matrixStore = await createMatrixSdkStore(sdk, credentials);
         client = createClientFromCredentials(sdk, credentials, matrixStore);
+
+        installSecretStorageCallbacks(client);
 
         await initClientCrypto(client);
       }

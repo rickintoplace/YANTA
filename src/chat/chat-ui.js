@@ -27,6 +27,13 @@ import {
 } from '../navigation.js';
 
 import {
+  registerOverlayRoute,
+  pushOverlayState,
+  closeTopOverlay,
+  overlayIdFromState,
+} from '../overlay-history.js';
+
+import {
   createDm,
   leaveRoom,
   resolveMatrixClient,
@@ -52,6 +59,11 @@ const TYPING_THROTTLE_MS = 3500;
 const READ_RECEIPT_DEBOUNCE_MS = 650;
 
 const MOBILE_MQ = window.matchMedia('(max-width: 760px)');
+
+const CHAT_FLOATING_OVERLAY_ID = 'chat-floating';
+
+let chatOverlayRegistered = false;
+let chatMode = 'surface'; // surface | floating
 
 let initialized = false;
 let root = null;
@@ -81,6 +93,68 @@ function isMobile() {
 
 function chatIsOpen() {
   return root && root.hidden === false;
+}
+
+function chatFloatingIsOpen() {
+  return chatIsOpen() && chatMode === 'floating';
+}
+
+function registerChatOverlayRoute() {
+  if (chatOverlayRegistered) return;
+
+  chatOverlayRegistered = true;
+
+  registerOverlayRoute(CHAT_FLOATING_OVERLAY_ID, {
+    open: async ({ state: overlayState } = {}) => {
+      await openChatFloating({
+        roomId: overlayState?.roomId || activeRoomId || '',
+        fromHistory: true,
+      });
+    },
+
+    close: () => {
+      closeChat({
+        fromHistory: true,
+      });
+    },
+
+    isOpen: chatFloatingIsOpen,
+  });
+}
+
+function closeChatFromButton() {
+  if (chatMode === 'floating') {
+    closeChat();
+    return;
+  }
+
+  if (history.state?.surface === 'chat') {
+    history.back();
+    return;
+  }
+
+  closeChat();
+}
+
+function setChatMode(nextMode = 'surface') {
+  chatMode = nextMode === 'floating' ? 'floating' : 'surface';
+
+  if (!root) return;
+
+  root.classList.toggle('is-floating', chatMode === 'floating');
+  root.classList.toggle('is-surface', chatMode === 'surface');
+
+  if (chatMode === 'floating') {
+    root.style.left ||= 'calc(100vw - 760px)';
+    root.style.top ||= '76px';
+    root.style.right = 'auto';
+    root.style.bottom = 'auto';
+  } else {
+    root.style.left = '';
+    root.style.top = '';
+    root.style.right = '';
+    root.style.bottom = '';
+  }
 }
 
 function roomById(roomId) {
@@ -233,7 +307,7 @@ function ensureRoot() {
 
   root.innerHTML = `
     <aside class="yanta-chat-list-pane" data-chat-list-pane>
-      <header class="yanta-chat-list-head">
+      <header class="yanta-chat-list-head" data-chat-drag-handle>
         <div class="yanta-chat-title">
           ${lucide('messages-square', 18)}
           <strong>Chat</strong>
@@ -241,6 +315,14 @@ function ensureRoot() {
 
         <button class="icon-btn" data-chat-new title="New chat" aria-label="New chat">
           ${lucide('message-circle-plus', 17)}
+        </button>
+
+        <button class="icon-btn" data-chat-float title="Open as window" aria-label="Open as window">
+          ${lucide('picture-in-picture-2', 17)}
+        </button>
+
+        <button class="icon-btn" data-chat-close title="Close Chat" aria-label="Close Chat">
+          ${lucide('x', 17)}
         </button>
       </header>
 
@@ -265,7 +347,7 @@ function ensureRoot() {
       </section>
 
       <section class="yanta-chat-room" data-chat-room hidden>
-        <header class="yanta-chat-room-head">
+        <header class="yanta-chat-room-head" data-chat-drag-handle>
           <button class="icon-btn yanta-chat-back" data-chat-back title="Back" aria-label="Back">
             ${lucide('arrow-left', 18)}
           </button>
@@ -290,6 +372,14 @@ function ensureRoot() {
 
           <button class="icon-btn" data-chat-menu title="Chat menu" aria-label="Chat menu">
             ${lucide('ellipsis-vertical', 17)}
+          </button>
+
+          <button class="icon-btn" data-chat-float title="Open as window" aria-label="Open as window">
+            ${lucide('picture-in-picture-2', 17)}
+          </button>
+
+          <button class="icon-btn" data-chat-close title="Close Chat" aria-label="Close Chat">
+            ${lucide('x', 17)}
           </button>
         </header>
 
@@ -329,6 +419,8 @@ function ensureRoot() {
   typingEl = root.querySelector('[data-chat-typing]');
 
   bindRootEvents();
+
+  bindFloatingDrag();
 
   return root;
 }
@@ -409,6 +501,41 @@ function bindRootEvents() {
     });
   });
 
+  root.querySelectorAll('[data-chat-close]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      closeChatFromButton();
+    });
+  });
+
+  root.querySelectorAll('[data-chat-float]').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      if (chatMode === 'floating') {
+        openChat({
+          roomId: activeRoomId || '',
+          mode: 'surface',
+          push: true,
+        }).catch((err) => {
+          console.warn('[YANTA Chat] Could not dock Chat', err);
+          toast('Could not dock Chat.', 'error');
+        });
+
+        return;
+      }
+
+      openChatFloating({
+        roomId: activeRoomId || '',
+      }).catch((err) => {
+        console.warn('[YANTA Chat] Could not open floating Chat', err);
+        toast('Could not open Chat window.', 'error');
+      });
+    });
+  });
+
   roomSearchInput?.addEventListener('input', () => {
     renderRoomList();
   });
@@ -470,6 +597,85 @@ function bindRootEvents() {
   MOBILE_MQ.addEventListener?.('change', () => {
     updateMobileState();
   });
+}
+
+function bindFloatingDrag() {
+  if (!root || root.dataset.chatDragBound === '1') return;
+
+  root.dataset.chatDragBound = '1';
+
+  let dragging = false;
+  let pointerId = null;
+  let startX = 0;
+  let startY = 0;
+  let startLeft = 0;
+  let startTop = 0;
+
+  function clampPosition(left, top) {
+    const r = root.getBoundingClientRect();
+    const margin = 8;
+
+    return {
+      left: Math.max(margin, Math.min(window.innerWidth - r.width - margin, left)),
+      top: Math.max(margin, Math.min(window.innerHeight - r.height - margin, top)),
+    };
+  }
+
+  function onMove(e) {
+    if (!dragging) return;
+    if (pointerId != null && e.pointerId !== pointerId) return;
+
+    e.preventDefault();
+
+    const next = clampPosition(
+      startLeft + e.clientX - startX,
+      startTop + e.clientY - startY
+    );
+
+    root.style.left = `${next.left}px`;
+    root.style.top = `${next.top}px`;
+  }
+
+  function onUp(e) {
+    if (pointerId != null && e.pointerId !== pointerId) return;
+
+    dragging = false;
+    pointerId = null;
+
+    root.classList.remove('is-dragging');
+
+    document.removeEventListener('pointermove', onMove, true);
+    document.removeEventListener('pointerup', onUp, true);
+    document.removeEventListener('pointercancel', onUp, true);
+  }
+
+  root.addEventListener('pointerdown', (e) => {
+    if (chatMode !== 'floating') return;
+
+    const handle = e.target.closest?.('[data-chat-drag-handle]');
+    if (!handle) return;
+
+    if (e.target.closest?.('button, input, textarea, select, a')) return;
+    if (e.button != null && e.button !== 0) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    const r = root.getBoundingClientRect();
+
+    dragging = true;
+    pointerId = e.pointerId;
+    startX = e.clientX;
+    startY = e.clientY;
+    startLeft = r.left;
+    startTop = r.top;
+
+    root.classList.add('is-dragging');
+
+    document.addEventListener('pointermove', onMove, true);
+    document.addEventListener('pointerup', onUp, true);
+    document.addEventListener('pointercancel', onUp, true);
+  }, true);
 }
 
 async function openNewChatDialog() {
@@ -593,6 +799,7 @@ export function setupChat() {
 
   initialized = true;
   ensureRoot();
+  registerChatOverlayRoute();
 }
 
 /**
@@ -603,25 +810,32 @@ export async function openChat({
   push = false,
   replace = false,
   fromHistory = false,
+  mode = 'surface',
 } = {}) {
   setupChat();
   await ensureClient();
 
+  setChatMode(mode);
+
   root.hidden = false;
 
-  state.surface = 'chat';
+  const surfaceMode = chatMode === 'surface';
 
-  const app = document.getElementById('app');
+  if (surfaceMode) {
+    state.surface = 'chat';
 
-  if (app) {
-    app.dataset.surface = 'chat';
+    const app = document.getElementById('app');
+
+    if (app) {
+      app.dataset.surface = 'chat';
+    }
   }
 
   const nextRoomId = String(roomId || '').trim();
 
   activeRoomId = nextRoomId;
 
-  if (!fromHistory) {
+  if (surfaceMode && !fromHistory) {
     if (replace) {
       replaceChatHistory(activeRoomId || null);
     } else if (push) {
@@ -632,19 +846,75 @@ export async function openChat({
   renderRoomList();
   await openActiveRoomIfNeeded();
   updateMobileState();
+  updateFloatingButtons();
 
   window.dispatchEvent(new CustomEvent('yanta-chat-opened', {
     detail: {
       roomId: activeRoomId || null,
+      mode: chatMode,
     },
   }));
 }
 
 /**
- * Close the Chat surface and cleanup transient object URLs.
+ * Open Chat as a movable/resizable transient window.
  */
-export function closeChat() {
+export async function openChatFloating({
+  roomId = '',
+  fromHistory = false,
+} = {}) {
+  setupChat();
+
+  const wasClosed = !chatFloatingIsOpen();
+
+  await openChat({
+    roomId,
+    mode: 'floating',
+    fromHistory: true,
+  });
+
+  if (
+    !fromHistory &&
+    wasClosed &&
+    overlayIdFromState() !== CHAT_FLOATING_OVERLAY_ID
+  ) {
+    pushOverlayState(CHAT_FLOATING_OVERLAY_ID, {
+      roomId: activeRoomId || null,
+    });
+  }
+}
+
+function updateFloatingButtons() {
   if (!root) return;
+
+  root.querySelectorAll('[data-chat-float]').forEach((btn) => {
+    btn.innerHTML = lucide(chatMode === 'floating' ? 'panel-right' : 'picture-in-picture-2', 17);
+    btn.title = chatMode === 'floating' ? 'Dock Chat' : 'Open as window';
+    btn.setAttribute('aria-label', btn.title);
+  });
+}
+
+/**
+ * Close the Chat surface/window and cleanup transient object URLs.
+ */
+export function closeChat({
+  fromHistory = false,
+} = {}) {
+  if (!root) return;
+
+  if (
+    !fromHistory &&
+    chatMode === 'floating' &&
+    overlayIdFromState() === CHAT_FLOATING_OVERLAY_ID
+  ) {
+    closeTopOverlay(() => {
+      closeChat({
+        fromHistory: true,
+      });
+    });
+
+    return;
+  }
 
   root.hidden = true;
   activeRoomId = '';
@@ -656,9 +926,11 @@ export function closeChat() {
 
   revokeAllChatMediaObjectUrls();
 
-  if (state.surface === 'chat') {
+  if (chatMode === 'surface' && state.surface === 'chat') {
     state.surface = 'dashboard';
   }
+
+  setChatMode('surface');
 
   window.dispatchEvent(new CustomEvent('yanta-chat-closed'));
 }
@@ -1070,6 +1342,23 @@ function openRoomMenu(anchor) {
   const r = anchor.getBoundingClientRect();
 
   showMenu(r.right, r.bottom + 4, [
+    {
+      label: chatMode === 'floating' ? 'Dock Chat' : 'Open as window',
+      icon: chatMode === 'floating' ? 'panel-right' : 'picture-in-picture-2',
+      action: async () => {
+        if (chatMode === 'floating') {
+          await openChat({
+            roomId: activeRoomId || '',
+            mode: 'surface',
+            push: true,
+          });
+        } else {
+          await openChatFloating({
+            roomId: activeRoomId || '',
+          });
+        }
+      },
+    },
     {
       label: isRoomMuted(roomId) ? 'Unmute chat' : 'Mute chat',
       icon: isRoomMuted(roomId) ? 'bell' : 'bell-off',

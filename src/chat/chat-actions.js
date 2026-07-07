@@ -34,7 +34,13 @@ export async function resolveMatrixClient() {
   const session = await matrixSessionModule();
   const api = await chatApiModule();
 
+  const sessionNow =
+    typeof session.getChatSession === 'function'
+      ? session.getChatSession()
+      : null;
+
   const candidates = [
+    sessionNow?.client,
     session.getMatrixClient?.(),
     session.getChatClient?.(),
     session.currentMatrixClient?.(),
@@ -49,6 +55,7 @@ export async function resolveMatrixClient() {
     api.chatClient,
     api.client,
 
+    window.yantaChatSession?.client,
     window.yantaMatrixClient,
     window.yantaChatClient,
     window.matrixClient,

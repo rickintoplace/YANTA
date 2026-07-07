@@ -374,10 +374,10 @@ export async function ensureMatrixLoaded() {
   return matrixLoadPromise;
 }
 
-async function createMatrixSdkStore(sdk, credentials = {}) {
+function createMatrixSdkStore(sdk, credentials = {}) {
   if (!sdk.IndexedDBStore) return null;
 
-  const matrixStore = new sdk.IndexedDBStore({
+  return new sdk.IndexedDBStore({
     indexedDB: window.indexedDB,
     dbName: matrixStoreDbName(credentials),
 
@@ -388,14 +388,23 @@ async function createMatrixSdkStore(sdk, credentials = {}) {
       Wichtig:
       matrix-js-sdk prefixes this internally, e.g.
       matrix-js-sdk:yanta-chat-matrix-sdk.<user>.<device>
+
+      Warum:
+      IndexedDBStore.startup() MUST run after the store was assigned to the
+      Matrix client via createClient({ store }). New SDK builds enforce this.
     */
   });
+}
 
-  if (typeof matrixStore.startup === 'function') {
-    await matrixStore.startup();
+async function startupMatrixSdkStore(matrixStore) {
+  if (!matrixStore) return false;
+
+  if (typeof matrixStore.startup !== 'function') {
+    return false;
   }
 
-  return matrixStore;
+  await matrixStore.startup();
+  return true;
 }
 
 function matrixCryptoStorePrefix(credentials = {}) {
@@ -728,8 +737,10 @@ export async function startChatSession({
         credentials = login.credentials;
       }
 
-      let matrixStore = await createMatrixSdkStore(sdk, credentials);
+      let matrixStore = createMatrixSdkStore(sdk, credentials);
       let client = createClientFromCredentials(sdk, credentials, matrixStore);
+
+      await startupMatrixSdkStore(matrixStore);
 
       installSecretStorageCallbacks(client);
 
@@ -757,8 +768,10 @@ export async function startChatSession({
 
         await clearChatMatrixLocalStoresForDebugOnly();
 
-        matrixStore = await createMatrixSdkStore(sdk, credentials);
+        matrixStore = createMatrixSdkStore(sdk, credentials);
         client = createClientFromCredentials(sdk, credentials, matrixStore);
+
+        await startupMatrixSdkStore(matrixStore);
 
         installSecretStorageCallbacks(client);
 

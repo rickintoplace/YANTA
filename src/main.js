@@ -224,6 +224,7 @@ import {
 import {
   setupChat,
   openChat,
+  openChatFloating,
   closeChat,
 } from './chat/chat-ui.js';
 
@@ -1924,7 +1925,7 @@ async function init() {
     }),
     openCalendar: openCalendarRoute,
     openCalendarPane,
-    openChat: () => openChatRoute(),
+    openChat: () => openChatFloating(),
     openAssistant: openAssistantSmart,
     openAssistantFloating,
     openSources: () => openSourcesRoute('command-palette'),

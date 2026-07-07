@@ -61,7 +61,7 @@
         },
         {
           "key": "Permissions-Policy",
-          "value": "geolocation=(), microphone=(), usb=(), camera=(self), payment=(self \"https://checkout.paddle.com\")"
+          "value": "geolocation=(), microphone=(self), usb=(), camera=(self), payment=(self \"https://checkout.paddle.com\")"
         },
         {
           "key": "X-Frame-Options",

@@ -161,42 +161,67 @@ export function setupChatComposer({
     }
   }
 
-  function openAttachMenu() {
-    const r = attachButton.getBoundingClientRect();
+  function openAttachMenu(e = null) {
+    e?.preventDefault?.();
+    e?.stopPropagation?.();
 
-    showMenu(r.left, r.top - 4, [
-      {
-        label: 'Photo',
-        icon: 'image',
-        action: () => imageInput.click(),
-      },
-      {
-        label: 'File',
-        icon: 'paperclip',
-        action: () => fileInput.click(),
-      },
-      'hr',
-      {
-        label: 'YANTA Note',
-        icon: 'file-text',
-        disabled: true,
-        action: () => toast('YANTA Note attachments are coming in AP8.', 'error'),
-      },
-      {
-        label: 'YANTA Event',
-        icon: 'calendar',
-        disabled: true,
-        action: () => toast('YANTA Event attachments are coming in AP8.', 'error'),
-      },
-      {
-        label: 'Drawing',
-        icon: 'line-squiggle',
-        disabled: true,
-        action: () => toast('Drawing attachments are coming in AP8.', 'error'),
-      },
-    ], {
-      align: 'start',
-    });
+    if (!attachButton) {
+      toast('Attachment menu is not available.', 'error');
+      console.warn('[YANTA Chat] Attach button missing');
+      return;
+    }
+
+    try {
+      const r = attachButton.getBoundingClientRect();
+
+      /*
+        Warum:
+        The composer sits at the bottom. Some menu implementations place the
+        menu below the given coordinate. Use the upper edge on compact screens
+        so the menu remains visible.
+      */
+      const x = Math.max(8, r.left);
+      const y = r.top > 240
+        ? r.top - 8
+        : r.bottom + 8;
+
+      showMenu(x, y, [
+        {
+          label: 'Photo',
+          icon: 'image',
+          action: () => imageInput?.click(),
+        },
+        {
+          label: 'File',
+          icon: 'paperclip',
+          action: () => fileInput?.click(),
+        },
+        'hr',
+        {
+          label: 'YANTA Note',
+          icon: 'file-text',
+          disabled: true,
+          action: () => toast('YANTA Note attachments are coming in AP8.', 'error'),
+        },
+        {
+          label: 'YANTA Event',
+          icon: 'calendar',
+          disabled: true,
+          action: () => toast('YANTA Event attachments are coming in AP8.', 'error'),
+        },
+        {
+          label: 'Drawing',
+          icon: 'line-squiggle',
+          disabled: true,
+          action: () => toast('Drawing attachments are coming in AP8.', 'error'),
+        },
+      ], {
+        align: 'start',
+      });
+    } catch (err) {
+      console.warn('[YANTA Chat] Could not open attachment menu', err);
+      toast('Could not open attachment menu.', 'error');
+    }
   }
 
   form.addEventListener('submit', (e) => {
@@ -232,7 +257,8 @@ export function setupChatComposer({
     }
   });
 
-  attachButton.addEventListener('click', openAttachMenu);
+    attachButton.addEventListener('click', (e) => openAttachMenu(e));
+
 
   imageInput.addEventListener('change', async () => {
     const file = imageInput.files?.[0];

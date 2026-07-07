@@ -35,6 +35,37 @@ function supportedMimeType() {
   }
 }
 
+function assertMicrophoneMayBeRequested() {
+  if (!window.isSecureContext) {
+    throw new Error('Voice recording requires HTTPS.');
+  }
+
+  const policy =
+    document.permissionsPolicy ||
+    document.featurePolicy ||
+    null;
+
+  try {
+    if (
+      policy?.allowsFeature &&
+      policy.allowsFeature('microphone') === false
+    ) {
+      throw new Error('Microphone is blocked by this page permissions policy.');
+    }
+  } catch (err) {
+    if (/permissions policy/i.test(err?.message || '')) {
+      throw err;
+    }
+
+    console.warn('[YANTA Chat] Could not inspect microphone permissions policy', err);
+    toast('Could not check microphone permission.', 'error');
+  }
+
+  if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
+    throw new Error('Voice recording is not supported in this browser.');
+  }
+}
+
 function fmtTimer(ms) {
   const s = Math.floor(ms / 1000);
   const m = Math.floor(s / 60);
@@ -194,9 +225,8 @@ export function setupVoiceRecorder({
   }
 
   async function startAudio() {
-    if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
-      throw new Error('Voice recording is not supported in this browser.');
-    }
+    assertMicrophoneMayBeRequested();
+
 
     stream = await navigator.mediaDevices.getUserMedia({
       audio: {

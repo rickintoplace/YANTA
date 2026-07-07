@@ -1534,3 +1534,80 @@
     transition: none !important;
   }
 }
+
+/* ============================================================
+   YANTA Chat — AP5 hotfixes
+   ============================================================ */
+
+/* Author display:flex overrides the browser's hidden UA rule otherwise. */
+.yanta-chat-recording-ui[hidden],
+.yanta-chat-locked-ui[hidden] {
+  display: none !important;
+}
+
+.yanta-chat-composer:not(.is-voice-recording):not(.is-voice-locked) .yanta-chat-recording-ui,
+.yanta-chat-composer:not(.is-voice-locked) .yanta-chat-locked-ui {
+  display: none !important;
+}
+
+.yanta-chat-composer.is-voice-recording .yanta-chat-recording-ui {
+  display: flex !important;
+}
+
+.yanta-chat-composer.is-voice-locked .yanta-chat-locked-ui {
+  display: flex !important;
+}
+
+.yanta-chat-attach {
+  position: relative;
+  z-index: 2;
+}
+
+/* Image viewer controls must stay above the image on every theme. */
+.yanta-chat-image-viewer {
+  cursor: zoom-out;
+}
+
+.yanta-chat-image-viewer header {
+  position: fixed;
+  top: max(12px, env(safe-area-inset-top));
+  left: max(12px, env(safe-area-inset-left));
+  right: max(12px, env(safe-area-inset-right));
+  z-index: 10001;
+
+  min-height: 48px;
+  padding: 8px 10px;
+
+  color: white;
+  background: rgba(12, 15, 22, 0.72);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 16px;
+  backdrop-filter: blur(14px);
+}
+
+.yanta-chat-image-viewer header .icon-btn {
+  color: white;
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.16);
+}
+
+.yanta-chat-image-viewer header .icon-btn:hover {
+  background: rgba(255, 255, 255, 0.16);
+}
+
+.yanta-chat-image-viewer main {
+  cursor: zoom-out;
+}
+
+.yanta-chat-image-viewer img {
+  cursor: default;
+}
+
+.yanta-chat-image-message img {
+  background: var(--bg-elev-2);
+}
+
+/* Avoid visual skeleton flashes when images are already resolved. */
+.yanta-chat-image-message.is-resolved .yanta-chat-image-skeleton {
+  display: none;
+}

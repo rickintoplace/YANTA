@@ -36,6 +36,17 @@ const lazyImageObserver = new IntersectionObserver((entries) => {
 
 const voicePlayersByRoom = new Map();
 
+const resolvedImageUrlCache = new Map();
+
+function imageResolvedKey(source = {}) {
+  return [
+    source?.mxcUrl || '',
+    source?.encryptedFile?.iv || '',
+    source?.encryptedFile?.hashes?.sha256 || '',
+    source?.mimeType || '',
+  ].join('|');
+}
+
 function sourceFromContent(content = {}) {
   const info = content.info || {};
 
@@ -157,6 +168,7 @@ function openImageViewer(client, full, title = 'Photo') {
     role: 'dialog',
     'aria-modal': 'true',
     'aria-label': title,
+    tabindex: '-1',
   });
 
   overlay.innerHTML = `
@@ -170,20 +182,46 @@ function openImageViewer(client, full, title = 'Photo') {
         ${lucide('x', 18)}
       </button>
     </header>
-    <main>
+    <main data-viewer-backdrop>
       <span class="yanta-chat-spinner"></span>
     </main>
   `;
 
-  const close = () => overlay.remove();
+  const close = () => {
+    window.removeEventListener('keydown', onKeyDown, true);
+    overlay.remove();
+  };
+
+  function onKeyDown(e) {
+    if (e.key !== 'Escape') return;
+
+    /*
+      Warum:
+      Chat itself also listens for Escape/back navigation. The fullscreen media
+      viewer is the top-most overlay and must consume Escape first.
+    */
+    e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation?.();
+
+    close();
+  }
 
   overlay.addEventListener('click', async (e) => {
-    if (e.target === overlay || e.target.closest?.('[data-close]')) {
+    const closeHit =
+      e.target === overlay ||
+      e.target === overlay.querySelector('[data-viewer-backdrop]') ||
+      e.target.closest?.('[data-close]');
+
+    if (closeHit) {
       close();
       return;
     }
 
     if (e.target.closest?.('[data-download]')) {
+      e.preventDefault();
+      e.stopPropagation();
+
       try {
         const blob = await mxcToBlob(client, full.mxcUrl, {
           thumbnail: false,
@@ -199,7 +237,9 @@ function openImageViewer(client, full, title = 'Photo') {
     }
   });
 
+  window.addEventListener('keydown', onKeyDown, true);
   document.body.append(overlay);
+  overlay.focus();
 
   mxcToBlobUrl(client, full.mxcUrl, {
     thumbnail: false,
@@ -214,6 +254,10 @@ function openImageViewer(client, full, title = 'Photo') {
       const img = el('img', {
         src: url,
         alt: title || 'Photo',
+      });
+
+      img.addEventListener('click', (e) => {
+        e.stopPropagation();
       });
 
       overlay.querySelector('main')?.replaceChildren(img);
@@ -249,13 +293,29 @@ function renderImageMessage(client, content = {}) {
     return wrap;
   }
 
-  const skeleton = el('div', {
-    class: 'yanta-chat-image-skeleton',
-  }, 'Loading image…');
+  const key = imageResolvedKey(source.preview);
+  const cachedUrl = resolvedImageUrlCache.get(key);
 
-  wrap.append(skeleton);
+  if (cachedUrl) {
+    wrap.classList.add('is-resolved');
+
+    wrap.append(el('img', {
+      src: cachedUrl,
+      alt: title,
+      loading: 'lazy',
+      decoding: 'async',
+    }));
+  } else {
+    const skeleton = el('div', {
+      class: 'yanta-chat-image-skeleton',
+    }, 'Loading image…');
+
+    wrap.append(skeleton);
+  }
 
   wrap._yantaHydrateImage = async () => {
+    if (resolvedImageUrlCache.has(key)) return;
+
     try {
       const url = await mxcToBlobUrl(client, source.preview.mxcUrl, {
         thumbnail: false,
@@ -265,14 +325,18 @@ function renderImageMessage(client, content = {}) {
         h: source.preview.h,
       });
 
+      resolvedImageUrlCache.set(key, url);
+
       if (!wrap.isConnected) return;
 
       const img = el('img', {
         src: url,
         alt: title,
         loading: 'lazy',
+        decoding: 'async',
       });
 
+      wrap.classList.add('is-resolved');
       wrap.replaceChildren(img);
     } catch (err) {
       console.warn('[YANTA Chat] Could not hydrate image message', err);
@@ -290,7 +354,9 @@ function renderImageMessage(client, content = {}) {
     openImageViewer(client, source.full, title);
   });
 
-  lazyImageObserver.observe(wrap);
+  if (!cachedUrl) {
+    lazyImageObserver.observe(wrap);
+  }
 
   return wrap;
 }

@@ -323,3 +323,38 @@ CREATE TABLE IF NOT EXISTS billing_events (
 
 CREATE INDEX IF NOT EXISTS idx_billing_events_type
 ON billing_events(event_type, processed_at);
+
+-- ============================================================
+-- Chat / Matrix Provisioning
+-- One YANTA Cloud user can claim exactly one Matrix account.
+-- Localparts stay reserved after deprovisioning for future e-mail aliases.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS chat_accounts (
+  user_id TEXT PRIMARY KEY,              -- YANTA user
+  matrix_localpart TEXT NOT NULL UNIQUE, -- 'rick'
+  matrix_user_id TEXT NOT NULL UNIQUE,   -- '@rick:yanta.me'
+  created_at INTEGER NOT NULL,
+  disabled_at INTEGER,
+  FOREIGN KEY(user_id) REFERENCES users(id)
+);
+
+CREATE TABLE IF NOT EXISTS chat_reserved_names (
+  localpart TEXT PRIMARY KEY,
+  reason TEXT,
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_chat_accounts_localpart
+ON chat_accounts(matrix_localpart);
+
+CREATE INDEX IF NOT EXISTS idx_chat_accounts_matrix_user_id
+ON chat_accounts(matrix_user_id);
+
+INSERT OR IGNORE INTO chat_reserved_names (localpart, reason, created_at)
+VALUES
+  ('help', 'reserved', unixepoch() * 1000),
+  ('contact', 'reserved', unixepoch() * 1000),
+  ('hello', 'reserved', unixepoch() * 1000),
+  ('team', 'reserved', unixepoch() * 1000),
+  ('office', 'reserved', unixepoch() * 1000);

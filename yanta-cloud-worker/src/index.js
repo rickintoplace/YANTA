@@ -735,6 +735,84 @@ async function matrixSendAdminRoomMessage(env, body) {
 }
 __name(matrixSendAdminRoomMessage, "matrixSendAdminRoomMessage");
 
+async function matrixFetchAdminRoomRecentMessages(env, limit = 8) {
+  const adminToken = String(env.MATRIX_ADMIN_TOKEN || "").trim();
+
+  if (!adminToken) {
+    const err = new Error("MATRIX_ADMIN_TOKEN is not configured");
+    err.status = 500;
+    throw err;
+  }
+
+  const roomId = matrixAdminRoomId(env);
+
+  const path =
+    `/_matrix/client/v3/rooms/${encodeURIComponent(roomId)}` +
+    `/messages?dir=b&limit=${Math.max(1, Math.min(20, Number(limit || 8)))}`;
+
+  const res = await matrixFetchJson(env, path, {
+    method: "GET",
+    token: adminToken
+  });
+
+  if (!res.ok) {
+    const err = new Error(matrixErrorMessage(res.data, `Matrix admin room read failed: HTTP ${res.status}`));
+    err.status = res.status;
+    err.matrixErrcode = res.data?.errcode || "";
+    throw err;
+  }
+
+  return Array.isArray(res.data?.chunk) ? res.data.chunk : [];
+}
+__name(matrixFetchAdminRoomRecentMessages, "matrixFetchAdminRoomRecentMessages");
+
+function matrixAdminMessageLooksLikeCommandFailure(body = "") {
+  const s = String(body || "").trim().toLowerCase();
+
+  return (
+    s.startsWith("error:") ||
+    s.includes("unrecognized subcommand") ||
+    s.includes("invalid value") ||
+    s.includes("missing required") ||
+    s.includes("usage: !admin")
+  );
+}
+__name(matrixAdminMessageLooksLikeCommandFailure, "matrixAdminMessageLooksLikeCommandFailure");
+
+async function matrixAssertAdminRoomCommandAccepted(env, eventId) {
+  /*
+    Admin-room APIs are asynchronous. We only do a small best-effort check:
+    if the bot immediately replies with an error after our command, fail loudly.
+    This avoids silently marking a YANTA account disabled while Matrix did nothing.
+  */
+  await new Promise((resolve) => setTimeout(resolve, 1200));
+
+  const messages = await matrixFetchAdminRoomRecentMessages(env, 10);
+
+  const ownIndex = messages.findIndex((ev) => ev?.event_id === eventId);
+
+  const candidateReplies =
+    ownIndex >= 0
+      ? messages.slice(0, ownIndex)
+      : messages.slice(0, 5);
+
+  const failure = candidateReplies.find((ev) => {
+    const sender = String(ev?.sender || "");
+    const body = ev?.content?.body || "";
+
+    return sender.includes(":") && matrixAdminMessageLooksLikeCommandFailure(body);
+  });
+
+  if (failure) {
+    const err = new Error(`Matrix admin command failed: ${failure.content?.body || "unknown error"}`);
+    err.status = 502;
+    throw err;
+  }
+
+  return true;
+}
+__name(matrixAssertAdminRoomCommandAccepted, "matrixAssertAdminRoomCommandAccepted");
+
 async function matrixDeactivateUserViaAdminRoom(env, matrixUserId, reason = "YANTA Chat deprovision") {
   const command = matrixAdminDeactivateCommand(env, matrixUserId);
 
@@ -745,11 +823,16 @@ async function matrixDeactivateUserViaAdminRoom(env, matrixUserId, reason = "YAN
     can change between releases.
   */
   const sent = await matrixSendAdminRoomMessage(env, command);
+  const eventId = sent?.event_id || "";
+
+  if (eventId) {
+    await matrixAssertAdminRoomCommandAccepted(env, eventId);
+  }
 
   return {
     ok: true,
     via: "admin_room",
-    eventId: sent?.event_id || "",
+    eventId,
     matrixUserId,
     reason
   };

@@ -203,6 +203,20 @@ import {
   setupAndroidBridge,
 } from './native/android-bridge.js';
 
+import {
+  scheduleChatAutoResume,
+  installChatAccountReadyListener,
+  startChatSession,
+} from './chat/matrix-session.js';
+
+import {
+  hasEncryptedChatCredentials,
+} from './chat/chat-store.js';
+
+import {
+  ensureChatAccountAndOpen,
+} from './chat/chat-onboarding-ui.js';
+
 let sharePreviewLocked = false;
 
 let noteTitleSaveTimer = 0;
@@ -1533,6 +1547,34 @@ async function handlePresentPairHashIfNeeded(hash = location.hash) {
 
 async function init() {
   await openDB();
+
+  installChatAccountReadyListener();
+
+  window.yantaOpenChat = async ({
+    account = null,
+    source = 'manual',
+  } = {}) => {
+    if (account) {
+      return startChatSession({
+        account,
+        firstDevice: source === 'chat-provision',
+        reason: source,
+      });
+    }
+
+    return ensureChatAccountAndOpen({
+      source,
+    });
+  };
+
+  try {
+    if (await hasEncryptedChatCredentials()) {
+      scheduleChatAutoResume();
+    }
+  } catch (err) {
+    console.warn('[YANTA Chat] auto-resume check failed', err);
+    toast('Could not check Chat session.', 'error');
+  }
 
   registerServiceWorker();
 

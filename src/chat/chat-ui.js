@@ -59,6 +59,20 @@ import {
   setupChatComposer,
 } from './chat-composer.js';
 
+import {
+  getChatSession,
+  scheduleChatAutoResume,
+  startChatSession,
+} from './matrix-session.js';
+
+import {
+  hasEncryptedChatCredentials,
+} from './chat-store.js';
+
+import {
+  hasVaultChatAccount,
+} from './matrix-crypto.js';
+
 import './chat.css';
 
 
@@ -148,6 +162,57 @@ function closeChatFromButton() {
   }
 
   closeChat();
+}
+
+function renderChatSetupState({
+  title = 'Setting up Chat…',
+  message = 'YANTA is waiting for your encrypted Chat account to sync to this device.',
+  actionLabel = '',
+  action = null,
+} = {}) {
+  const node = ensureRoot();
+
+  const empty = node.querySelector('[data-chat-empty]');
+  const roomShell = node.querySelector('[data-chat-room]');
+
+  if (roomShell) roomShell.hidden = true;
+  if (!empty) return;
+
+  empty.hidden = false;
+  empty.innerHTML = `
+    <div>${lucide('messages-square', 28)}</div>
+    <strong>${escapeHtml(title)}</strong>
+    <p>${escapeHtml(message)}</p>
+    ${
+      actionLabel
+        ? `
+          <button class="btn primary" data-chat-setup-action>
+            ${lucide('sparkles', 14)}
+            ${escapeHtml(actionLabel)}
+          </button>
+        `
+        : ''
+    }
+  `;
+
+  const btn = empty.querySelector('[data-chat-setup-action]');
+
+  if (btn && action) {
+    btn.addEventListener('click', () => {
+      action().catch((err) => {
+        console.warn('[YANTA Chat] setup action failed', err);
+        toast('Could not continue Chat setup.', 'error');
+      });
+    });
+  }
+}
+
+async function openChatOnboardingFromUi() {
+  const mod = await import('./chat-onboarding-ui.js');
+
+  await mod.ensureChatAccountAndOpen({
+    source: 'chat-ui-setup-action',
+  });
 }
 
 function setChatMode(nextMode = 'surface') {
@@ -985,29 +1050,95 @@ function handleLiveTimelineUpdate({
 async function ensureClient() {
   if (client) return client;
 
-  client = await resolveMatrixClient();
+  const existingSession = getChatSession();
+  const existingClient =
+    existingSession?.client ||
+    await resolveMatrixClient();
 
-  if (!client && typeof window.yantaOpenChat === 'function') {
-    try {
-      await window.yantaOpenChat({
-        source: 'chat-ui',
+  if (existingClient) {
+    client = existingClient;
+    bindClientEvents(client);
+    return client;
+  }
+
+  scheduleChatAutoResume({
+    delay: 200,
+  });
+
+  let hasLocalCredentials = false;
+  let hasVaultAccount = false;
+
+  try {
+    hasLocalCredentials = await hasEncryptedChatCredentials();
+    hasVaultAccount = hasVaultChatAccount();
+  } catch (err) {
+    console.warn('[YANTA Chat] could not inspect Chat readiness', err);
+    toast('Could not inspect Chat readiness.', 'error');
+  }
+
+  if (!hasLocalCredentials && !hasVaultAccount) {
+    renderChatSetupState({
+      title: 'Chat is being set up…',
+      message:
+        'If you activated Chat on another device, keep YANTA open until Cloud Sync delivers your encrypted Chat key. If this is your first time, activate Chat now.',
+      actionLabel: 'Activate Chat',
+      action: openChatOnboardingFromUi,
+    });
+
+    return null;
+  }
+
+  renderChatSetupState({
+    title: 'Connecting Chat…',
+    message: 'YANTA is unlocking your encrypted Matrix session for this device.',
+  });
+
+  try {
+    const session = await startChatSession({
+      reason: 'chat-ui-open',
+    });
+
+    client = session?.client || await resolveMatrixClient();
+
+    if (!client) {
+      throw new Error('Matrix client is not available after Chat startup.');
+    }
+
+    bindClientEvents(client);
+
+    return client;
+  } catch (err) {
+    if (err?.code === 'ECHAT_NOT_READY') {
+      renderChatSetupState({
+        title: 'Chat is syncing…',
+        message:
+          'Your Chat account exists, but the encrypted login key has not reached this device yet. Wait for Cloud Sync to finish and try again.',
       });
 
-      client = await resolveMatrixClient();
-    } catch (err) {
-      console.warn('[YANTA Chat] Could not start Chat session', err);
-      toast('Could not start Chat.', 'error');
+      return null;
     }
+
+    console.warn('[YANTA Chat] Could not start Chat session', err);
+    toast('Could not connect Chat.', 'error');
+
+    renderChatSetupState({
+      title: 'Chat could not connect',
+      message: err?.message || 'YANTA could not start the encrypted Chat session.',
+      actionLabel: 'Try again',
+      action: async () => {
+        client = null;
+
+        await ensureClient();
+
+        if (client) {
+          renderRoomList();
+          await openActiveRoomIfNeeded();
+        }
+      },
+    });
+
+    return null;
   }
-
-  if (!client) {
-    toast('Chat is not connected.', 'error');
-    throw new Error('Matrix client is not available.');
-  }
-
-  bindClientEvents(client);
-
-  return client;
 }
 
 function bindAppLevelChatEvents() {
@@ -1075,11 +1206,22 @@ export async function openChat({
   mode = 'surface',
 } = {}) {
   setupChat();
-  await ensureClient();
 
   setChatMode(mode);
-
   root.hidden = false;
+
+  renderChatSetupState({
+    title: 'Opening Chat…',
+    message: 'Preparing your encrypted Chat session.',
+  });
+
+  const readyClient = await ensureClient();
+
+  if (!readyClient) {
+    updateMobileState();
+    updateFloatingButtons();
+    return;
+  }
 
   root.style.setProperty('--chat-list-width', `${roomListWidth}px`);
   updateRoomListDensity();

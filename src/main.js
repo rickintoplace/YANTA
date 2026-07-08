@@ -214,10 +214,6 @@ import {
 } from './chat/matrix-session.js';
 
 import {
-  hasEncryptedChatCredentials,
-} from './chat/chat-store.js';
-
-import {
   ensureChatAccountAndOpen,
 } from './chat/chat-onboarding-ui.js';
 
@@ -1630,12 +1626,16 @@ async function init() {
   };
 
   try {
-    if (await hasEncryptedChatCredentials()) {
-      scheduleChatAutoResume();
-    }
+    /*
+      Chat auto-resume must be installed even without local Matrix credentials.
+      Why:
+      On a newly synced device, Matrix credentials are intentionally absent.
+      The synced Vault chatAccount entry is the real cross-device signal.
+    */
+    scheduleChatAutoResume();
   } catch (err) {
-    console.warn('[YANTA Chat] auto-resume check failed', err);
-    toast('Could not check Chat session.', 'error');
+    console.warn('[YANTA Chat] auto-resume setup failed', err);
+    toast('Could not set up Chat auto-resume.', 'error');
   }
 
   registerServiceWorker();

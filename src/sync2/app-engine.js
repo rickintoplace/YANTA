@@ -44,6 +44,8 @@ import {
   vaultEventsMap,
   vaultCalendarCategoriesMap,
   vaultDevicesMap,
+  vaultSettingsMap,
+  VAULT_SYNCED_SETTING_KEYS,
   vaultTombstonesMap,
   vaultJsonSnapshot,
   VAULT_ORIGINS,
@@ -419,6 +421,8 @@ const SYNC2_VAULT_FINGERPRINT_VOLATILE_KEYS = new Set([
   */
   'created',
   'updated',
+  'updatedAt',
+  'savedAt',
   'ts',
   'deletedAt',
 
@@ -495,6 +499,7 @@ export async function sync2LocalVaultContentFingerprint() {
     events: {},
     calendarCategories: {},
     tombstones: {},
+    settings: {},
   };
 
   try {
@@ -520,6 +525,15 @@ export async function sync2LocalVaultContentFingerprint() {
 
     for (const [id, tombstone] of vaultTombstonesMap()) {
       snapshot.tombstones[id] = stripVolatileVaultFingerprintFields(tombstone);
+    }
+  } catch {}
+
+  try {
+    for (const [key, value] of vaultSettingsMap()) {
+      if (!VAULT_SYNCED_SETTING_KEYS.has(String(key))) continue;
+
+      snapshot.settings[String(key)] =
+        stripVolatileVaultFingerprintFields(value);
     }
   } catch {}
 

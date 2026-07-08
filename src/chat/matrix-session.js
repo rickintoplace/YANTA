@@ -31,7 +31,13 @@ import {
   readChatPasswordFromVault,
   createChatSecretStorageCallbacks,
   installSecretStorageCallbacks,
+  hasVaultChatAccount,
 } from './matrix-crypto.js';
+
+import {
+  waitForVaultDoc,
+  vaultSettingsMap,
+} from '../sync2/vault-doc.js';
 
 let matrixLoadPromise = null;
 let activeSession = null;
@@ -927,20 +933,171 @@ export function isChatSessionStarted() {
 /**
  * Starts Chat in browser idle time when local credentials exist.
  */
-export function scheduleChatAutoResume() {
-  idle(async () => {
-    try {
-      const { hasEncryptedChatCredentials } = await import('./chat-store.js');
+const CHAT_AUTO_RESUME_BACKOFF_MS = 30_000;
 
-      if (!await hasEncryptedChatCredentials()) return;
+let chatAutoResumeInstalled = false;
+let chatAutoResumeTimer = 0;
+let chatAutoResumeRunning = false;
+let chatAutoResumeBackoffUntil = 0;
+let unobserveChatAccount = null;
 
-      await startChatSession({
-        reason: 'auto-resume',
-      });
-    } catch (err) {
-      reportSessionError('Could not resume Chat.', err);
+function isChatPendingError(err) {
+  return err?.code === 'ECHAT_NOT_READY';
+}
+
+function requestChatAutoResume(reason = 'auto-resume', delay = 500) {
+  clearTimeout(chatAutoResumeTimer);
+
+  const waitMs = Math.max(
+    Number(delay || 0),
+    Math.max(0, chatAutoResumeBackoffUntil - Date.now())
+  );
+
+  chatAutoResumeTimer = window.setTimeout(() => {
+    runChatAutoResume(reason).catch((err) => {
+      console.warn('[YANTA Chat Session] auto-resume runner failed', err);
+      toast('Could not resume Chat.', 'error');
+    });
+  }, waitMs);
+}
+
+async function hasAnyChatResumeSignal() {
+  await waitForVaultDoc();
+
+  const { hasEncryptedChatCredentials } = await import('./chat-store.js');
+
+  const hasLocalCredentials = await hasEncryptedChatCredentials();
+  const hasVaultAccount = hasVaultChatAccount();
+
+  return {
+    hasLocalCredentials,
+    hasVaultAccount,
+    any: hasLocalCredentials || hasVaultAccount,
+  };
+}
+
+async function runChatAutoResume(reason = 'auto-resume') {
+  if (activeSession?.client || startPromise || chatAutoResumeRunning) {
+    return activeSession;
+  }
+
+  if (Date.now() < chatAutoResumeBackoffUntil) {
+    requestChatAutoResume(reason, chatAutoResumeBackoffUntil - Date.now());
+    return null;
+  }
+
+  chatAutoResumeRunning = true;
+
+  try {
+    const signal = await hasAnyChatResumeSignal();
+
+    if (!signal.any) {
+      return null;
     }
+
+    /*
+      Why:
+      Local Matrix credentials are device-specific. On a new synced device they
+      are intentionally absent. A Vault Chat account means we should create a
+      fresh Matrix device by password login, then restore crypto from Vault.
+    */
+    return await startChatSession({
+      reason,
+    });
+  } catch (err) {
+    if (isChatPendingError(err)) {
+      // Not an error: Sync2 may not have delivered chatAccount yet.
+      console.info('[YANTA Chat Session] Chat account not ready yet:', reason);
+      return null;
+    }
+
+    chatAutoResumeBackoffUntil = Date.now() + CHAT_AUTO_RESUME_BACKOFF_MS;
+
+    reportSessionError('Could not resume Chat.', err);
+
+    return null;
+  } finally {
+    chatAutoResumeRunning = false;
+  }
+}
+
+function installChatAutoResumeWatchers() {
+  if (chatAutoResumeInstalled) return;
+
+  chatAutoResumeInstalled = true;
+
+  waitForVaultDoc()
+    .then(() => {
+      const settings = vaultSettingsMap();
+
+      const handler = (event) => {
+        if (!event?.keysChanged?.has?.('chatAccount')) return;
+
+        requestChatAutoResume('vault-chat-account-ready', 200);
+      };
+
+      settings.observe(handler);
+
+      unobserveChatAccount = () => {
+        try {
+          settings.unobserve(handler);
+        } catch {}
+      };
+
+      if (hasVaultChatAccount()) {
+        requestChatAutoResume('vault-chat-account-present', 200);
+      }
+    })
+    .catch((err) => {
+      console.warn('[YANTA Chat Session] could not watch Vault Chat account', err);
+      toast('Could not watch Chat account sync.', 'error');
+    });
+
+  window.addEventListener('yanta-vault-hydrated', () => {
+    requestChatAutoResume('vault-hydrated', 600);
   });
+
+  window.addEventListener('yanta-sync2-runtime-ready', () => {
+    requestChatAutoResume('sync2-runtime-ready', 1200);
+  });
+
+  window.addEventListener('online', () => {
+    requestChatAutoResume('online', 1000);
+  });
+
+  window.addEventListener('focus', () => {
+    requestChatAutoResume('focus', 1000);
+  });
+}
+
+/**
+ * Starts Chat in browser idle time when local credentials or a Vault-synced
+ * Chat account exist.
+ */
+export function scheduleChatAutoResume({
+  delay = 800,
+} = {}) {
+  installChatAutoResumeWatchers();
+
+  idle(() => {
+    requestChatAutoResume('auto-resume', delay);
+  });
+}
+
+/**
+ * Stops the Chat auto-resume watcher.
+ */
+export function stopChatAutoResumeForDebugOnly() {
+  clearTimeout(chatAutoResumeTimer);
+  chatAutoResumeTimer = 0;
+
+  if (unobserveChatAccount) {
+    unobserveChatAccount();
+    unobserveChatAccount = null;
+  }
+
+  chatAutoResumeInstalled = false;
+  chatAutoResumeRunning = false;
 }
 
 /**

@@ -219,7 +219,7 @@ function copyVaultMapToCompactDoc(targetDoc, targetName, sourceMap) {
  */
 export function encodeCompactVaultState({
   includeDevices = false,
-  includeSettings = false,
+  includeSettings = true,
 } = {}) {
   const compact = new Y.Doc({
     gc: true,
@@ -237,7 +237,7 @@ export function encodeCompactVaultState({
   }
 
   if (includeSettings) {
-    copyVaultMapToCompactDoc(compact, 'settings', vaultSettingsMap);
+    copyVaultSettingsToCompactDoc(compact);
   }
 
   const update = Y.encodeStateAsUpdate(compact);
@@ -257,4 +257,28 @@ export async function clearVaultDocDataForDebugOnly() {
 
   entry.doc.destroy();
   vaultEntry = null;
+}
+
+export const VAULT_SYNCED_SETTING_KEYS = new Set([
+  /*
+    Only explicitly synced, JSON-safe Vault settings.
+
+    Why:
+    store.settings may contain browser/native handles or local-only state.
+    VaultDoc.settings is reserved for intentionally synced encrypted app
+    secrets/config. Chat uses encrypted values only.
+  */
+  'chatAccount',
+  'chatRecovery',
+]);
+
+function copyVaultSettingsToCompactDoc(targetDoc) {
+  const target = targetDoc.getMap('settings');
+
+  for (const [key, value] of vaultSettingsMap()) {
+    if (!VAULT_SYNCED_SETTING_KEYS.has(String(key))) continue;
+    if (value == null) continue;
+
+    target.set(String(key), safeJsonClone(value));
+  }
 }

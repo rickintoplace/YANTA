@@ -925,3 +925,36 @@ export async function bootstrapChatCrypto(client, {
 
   return result;
 }
+
+/**
+ * Returns true when this Vault already contains a synced Chat account secret.
+ */
+export function hasVaultChatAccount() {
+  try {
+    const rec = vaultSettingsMap().get(CHAT_ACCOUNT_KEY) || null;
+
+    return !!(
+      rec &&
+      rec.userId &&
+      rec.passwordEnc
+    );
+  } catch (err) {
+    console.warn('[YANTA Chat Crypto] could not inspect Vault Chat account', err);
+    toast('Could not inspect Chat account state.', 'error');
+    return false;
+  }
+}
+
+/**
+ * Returns true when this Vault contains Matrix Secret Storage recovery material.
+ */
+export function hasVaultChatRecovery() {
+  try {
+    const rec = vaultSettingsMap().get(CHAT_RECOVERY_KEY) || null;
+    return !!rec?.keyEnc;
+  } catch (err) {
+    console.warn('[YANTA Chat Crypto] could not inspect Vault Chat recovery', err);
+    toast('Could not inspect Chat recovery state.', 'error');
+    return false;
+  }
+}

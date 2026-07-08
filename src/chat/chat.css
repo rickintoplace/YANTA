@@ -2,6 +2,15 @@
    YANTA Chat — Surface
    ============================================================ */
 
+:root {
+  --chat-image-radius: 14px;
+
+  --chat-bubble-padding-top: 8px;
+  --chat-bubble-padding-right: 8px;
+  --chat-bubble-padding-bottom: 6px;
+  --chat-bubble-padding-left: 8px;
+}
+
 .yanta-chat-surface {
   position: fixed;
   z-index: 210;
@@ -439,6 +448,11 @@
 
   padding: 8px 10px 6px;
 
+  padding-top: var(--chat-bubble-padding-top);
+  padding-right: var(--chat-bubble-padding-right);
+  padding-bottom: var(--chat-bubble-padding-bottom);
+  padding-left: var(--chat-bubble-padding-left);
+
   border: 1px solid var(--border);
   border-radius: 18px;
 
@@ -468,10 +482,19 @@
 }
 
 
-.yanta-chat-event.other.grouped .yanta-chat-bubble {
+.yanta-chat-event.other.grouped:has(.yanta-chat-image-message-wrap) .yanta-chat-bubble {
+  border-radius: var(--chat-image-radius);
+}
+
+/* .yanta-chat-event.other.grouped .yanta-chat-bubble .yanta-chat-image-message {
     border-top-left-radius: 5px;
     border-bottom-left-radius: 5px;
+} */
+
+.yanta-chat-event.other.grouped .yanta-chat-bubble {
+    border-radius: 5px;
 }
+
 
 
 .yanta-chat-sender {
@@ -556,7 +579,7 @@
 }
 
 .yanta-chat-meta {
-  margin-top: 3px;
+  /* margin-top: 3px; */
 
   display: flex;
   justify-content: flex-end;
@@ -1291,7 +1314,7 @@
   max-width: min(360px, 72vw);
   padding: 0;
   border: 0;
-  border-radius: 14px;
+  border-radius: var(--chat-image-radius);
   overflow: hidden;
   background: var(--bg-elev-2);
   cursor: zoom-in;
@@ -1713,10 +1736,20 @@
   line-height: 1.35;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
+  padding-left: var(--chat-bubble-padding-left);
 }
 
 .yanta-chat-event.own .yanta-chat-image-caption {
   color: color-mix(in srgb, var(--text) 96%, white);
+}
+
+.yanta-chat-bubble:has(.yanta-chat-image-message-wrap) {
+    padding: 0;
+}
+
+.yanta-chat-image-message-wrap:has(.yanta-chat-image-caption) .yanta-chat-image-message {
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
 }
 
 @media (max-width: 760px) {

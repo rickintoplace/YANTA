@@ -1647,3 +1647,80 @@
   opacity: 0.72;
   pointer-events: none;
 }
+
+/* ============================================================
+   YANTA Chat — Image options + captions
+   ============================================================ */
+
+.yanta-chat-image-options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.yanta-chat-image-options label {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+
+  color: var(--text-dim);
+  background: var(--bg-elev-2);
+  font-size: 12px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.yanta-chat-image-options input {
+  margin: 0;
+}
+
+.yanta-chat-image-output-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+
+  min-height: 24px;
+  color: var(--text-faint);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.yanta-chat-image-output-meta span {
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: var(--bg-elev-2);
+}
+
+.yanta-chat-image-message-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: min(360px, 72vw);
+}
+
+.yanta-chat-image-message-wrap .yanta-chat-image-message {
+  max-width: 100%;
+}
+
+.yanta-chat-image-caption {
+  padding: 0 2px;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.35;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.yanta-chat-event.own .yanta-chat-image-caption {
+  color: color-mix(in srgb, var(--text) 96%, white);
+}
+
+@media (max-width: 760px) {
+  .yanta-chat-image-message-wrap {
+    max-width: 78vw;
+  }
+}

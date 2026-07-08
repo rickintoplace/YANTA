@@ -11,6 +11,7 @@ import {
   escapeHtml,
   fmtBytes,
   lucide,
+  safeFilename,
   toast,
 } from '../core.js';
 
@@ -512,6 +513,126 @@ function fileExtForMime(mime = '') {
   return '';
 }
 
+function imageExtForMime(mime = '') {
+  if (mime === 'image/webp') return '.webp';
+  if (mime === 'image/png') return '.png';
+  if (mime === 'image/jpeg') return '.jpg';
+  if (mime === 'image/gif') return '.gif';
+  if (mime === 'image/avif') return '.avif';
+  if (mime === 'image/svg+xml') return '.svg';
+  return '.img';
+}
+
+function outputImageName(inputName = 'photo', mime = 'image/webp') {
+  const base = fileBaseName(inputName || 'photo');
+  return safeFilename(`${base}${imageExtForMime(mime)}`);
+}
+
+async function imageDimensionsFromBlob(blob) {
+  if (!blob || blob.type === 'image/svg+xml') {
+    return {
+      width: 0,
+      height: 0,
+    };
+  }
+
+  try {
+    const bitmap = await createImageBitmap(blob);
+
+    return {
+      width: bitmap.width || 0,
+      height: bitmap.height || 0,
+    };
+  } catch (err) {
+    console.warn('[YANTA Chat] Could not read image dimensions', err);
+    toast('Could not read image dimensions.', 'error');
+
+    return {
+      width: 0,
+      height: 0,
+    };
+  }
+}
+
+async function prepareImageVariants(file, {
+  optimize = true,
+  convertWebp = true,
+} = {}) {
+  const originalMime = file.type || 'application/octet-stream';
+
+  if (!optimize) {
+    const dim = await imageDimensionsFromBlob(file);
+
+    let thumb = null;
+
+    try {
+      thumb = await compressImageFile(file, {
+        maxWidth: 320,
+        quality: 0.78,
+        mime: convertWebp ? 'image/webp' : originalMime,
+      });
+    } catch (err) {
+      console.warn('[YANTA Chat] Could not create image thumbnail', err);
+      toast('Could not create image thumbnail.', 'error');
+    }
+
+    return {
+      full: {
+        blob: file,
+        mime: originalMime,
+        width: dim.width,
+        height: dim.height,
+        size: file.size || 0,
+        optimized: false,
+      },
+      thumb: thumb
+        ? {
+            blob: thumb.blob,
+            mime: thumb.mime || thumb.blob?.type || 'image/webp',
+            width: thumb.width || 0,
+            height: thumb.height || 0,
+            size: thumb.blob?.size || 0,
+          }
+        : null,
+    };
+  }
+
+  const targetMime = convertWebp
+    ? 'image/webp'
+    : originalMime;
+
+  const full = await compressImageFile(file, {
+    maxWidth: 2048,
+    quality: 0.85,
+    mime: targetMime,
+  });
+
+  const thumb = await compressImageFile(file, {
+    maxWidth: 320,
+    quality: 0.78,
+    mime: convertWebp ? 'image/webp' : targetMime,
+  });
+
+  return {
+    full: {
+      blob: full.blob,
+      mime: full.mime || full.blob?.type || targetMime,
+      width: full.width || 0,
+      height: full.height || 0,
+      size: full.blob?.size || 0,
+      originalSize: full.originalSize || file.size || 0,
+      optimized: true,
+    },
+    thumb: {
+      blob: thumb.blob,
+      mime: thumb.mime || thumb.blob?.type || 'image/webp',
+      width: thumb.width || 0,
+      height: thumb.height || 0,
+      size: thumb.blob?.size || 0,
+    },
+  };
+}
+
 function imageObjectUrl(blob) {
   const url = URL.createObjectURL(blob);
 
@@ -527,10 +648,8 @@ function imageObjectUrl(blob) {
   };
 }
 
-function openImagePreviewSheet({ blob, fileName }) {
+function openImagePreviewSheet(file) {
   return new Promise((resolve) => {
-    const preview = imageObjectUrl(blob);
-
     const overlay = el('div', {
       class: 'yanta-chat-preview-sheet',
       role: 'dialog',
@@ -548,7 +667,24 @@ function openImagePreviewSheet({ blob, fileName }) {
         </header>
 
         <div class="yanta-chat-preview-image-wrap">
-          <img src="${preview.url}" alt="${escapeHtml(fileName || 'Photo')}">
+          <span class="yanta-chat-spinner"></span>
+          <img hidden alt="${escapeHtml(file.name || 'Photo')}">
+        </div>
+
+        <div class="yanta-chat-image-options">
+          <label>
+            <input type="checkbox" data-optimize checked>
+            <span>Optimize image</span>
+          </label>
+
+          <label>
+            <input type="checkbox" data-webp checked>
+            <span>Convert to WEBP</span>
+          </label>
+        </div>
+
+        <div class="yanta-chat-image-output-meta" data-meta>
+          Preparing preview…
         </div>
 
         <textarea
@@ -559,7 +695,7 @@ function openImagePreviewSheet({ blob, fileName }) {
 
         <footer>
           <button class="btn" data-cancel>Cancel</button>
-          <button class="btn primary" data-send>
+          <button class="btn primary" data-send disabled>
             ${lucide('send-horizontal', 14)}
             Send
           </button>
@@ -567,10 +703,114 @@ function openImagePreviewSheet({ blob, fileName }) {
       </div>
     `;
 
+    const img = overlay.querySelector('img');
+    const spinner = overlay.querySelector('.yanta-chat-spinner');
+    const optimizeInput = overlay.querySelector('[data-optimize]');
+    const webpInput = overlay.querySelector('[data-webp]');
+    const metaEl = overlay.querySelector('[data-meta]');
+    const sendBtn = overlay.querySelector('[data-send]');
+
+    let previewUrl = '';
+    let variants = null;
+    let seq = 0;
+    let recompressTimer = 0;
+
+    const cleanupPreviewUrl = () => {
+      if (!previewUrl) return;
+
+      try {
+        URL.revokeObjectURL(previewUrl);
+      } catch (err) {
+        console.warn('[YANTA Chat] Could not revoke preview URL', err);
+      }
+
+      previewUrl = '';
+    };
+
     const close = (value) => {
-      preview.revoke();
+      window.clearTimeout(recompressTimer);
+      cleanupPreviewUrl();
       overlay.remove();
       resolve(value);
+    };
+
+    const renderMeta = () => {
+      if (!variants?.full) {
+        metaEl.textContent = 'Preparing preview…';
+        return;
+      }
+
+      const full = variants.full;
+      const original = file.size || 0;
+      const output = full.blob?.size || full.size || 0;
+      const delta = original
+        ? Math.round((1 - output / original) * 100)
+        : 0;
+
+      const dimensions = full.width && full.height
+        ? `${full.width}×${full.height}`
+        : 'original dimensions';
+
+      const optimizationText = full.optimized
+        ? `${delta >= 0 ? '−' : '+'}${Math.abs(delta)}%`
+        : 'original file';
+
+      metaEl.innerHTML = `
+        <span>${escapeHtml(dimensions)}</span>
+        <span>${escapeHtml(fmtBytes(original))} → <strong>${escapeHtml(fmtBytes(output))}</strong></span>
+        <span>${escapeHtml((full.mime || file.type || 'image').replace(/^image\//, '').toUpperCase())}</span>
+        <span>${escapeHtml(optimizationText)}</span>
+      `;
+    };
+
+    const recompute = async () => {
+      const ownSeq = ++seq;
+
+      sendBtn.disabled = true;
+      spinner.hidden = false;
+      img.hidden = true;
+      metaEl.textContent = 'Preparing preview…';
+
+      try {
+        const next = await prepareImageVariants(file, {
+          optimize: !!optimizeInput.checked,
+          convertWebp: !!webpInput.checked,
+        });
+
+        if (ownSeq !== seq) return;
+
+        variants = next;
+
+        cleanupPreviewUrl();
+
+        previewUrl = URL.createObjectURL(variants.full.blob);
+        img.src = previewUrl;
+        img.hidden = false;
+        spinner.hidden = true;
+
+        renderMeta();
+
+        sendBtn.disabled = false;
+      } catch (err) {
+        console.warn('[YANTA Chat] Could not prepare image preview', err);
+        toast('Could not prepare image preview.', 'error');
+
+        if (ownSeq !== seq) return;
+
+        variants = null;
+        sendBtn.disabled = true;
+        spinner.hidden = true;
+        img.hidden = true;
+        metaEl.textContent = 'Could not prepare image.';
+      }
+    };
+
+    const scheduleRecompute = () => {
+      window.clearTimeout(recompressTimer);
+
+      recompressTimer = window.setTimeout(() => {
+        recompute();
+      }, 80);
     };
 
     overlay.addEventListener('click', (e) => {
@@ -578,13 +818,24 @@ function openImagePreviewSheet({ blob, fileName }) {
       if (e.target.closest?.('[data-close], [data-cancel]')) close(null);
 
       if (e.target.closest?.('[data-send]')) {
+        if (!variants?.full) {
+          toast('Image preview is not ready yet.', 'error');
+          return;
+        }
+
         close({
           caption: String(overlay.querySelector('[data-caption]')?.value || '').trim(),
+          variants,
         });
       }
     });
 
+    optimizeInput.addEventListener('change', scheduleRecompute);
+    webpInput.addEventListener('change', scheduleRecompute);
+
     document.body.append(overlay);
+
+    recompute();
 
     setTimeout(() => {
       overlay.querySelector('[data-caption]')?.focus();
@@ -593,7 +844,7 @@ function openImagePreviewSheet({ blob, fileName }) {
 }
 
 /**
- * Compresses, previews, uploads and sends an m.image message.
+ * Previews, optionally optimizes/converts, uploads and sends an m.image message.
  */
 export async function sendImageFileWithPreview(client, roomId, file, {
   onProgress = null,
@@ -608,48 +859,48 @@ export async function sendImageFileWithPreview(client, roomId, file, {
   }
 
   try {
-    const full = await compressImageFile(file, {
-      maxWidth: 2048,
-      quality: 0.85,
-      mime: 'image/webp',
-    });
-
-    const thumb = await compressImageFile(file, {
-      maxWidth: 320,
-      quality: 0.78,
-      mime: 'image/webp',
-    });
-
-    const preview = await openImagePreviewSheet({
-      blob: full.blob,
-      fileName: file.name || 'Photo',
-    });
+    const preview = await openImagePreviewSheet(file);
 
     if (!preview) return null;
 
-    const encrypted = roomIsEncrypted(client, roomId);
-    const safeName = `${fileBaseName(file.name || 'photo')}.webp`;
+    const { variants } = preview;
+    const full = variants.full;
+    const thumb = variants.thumb;
 
+    if (!full?.blob) {
+      throw new Error('Prepared image is missing.');
+    }
+
+    const encrypted = roomIsEncrypted(client, roomId);
+    const safeName = outputImageName(file.name || 'photo', full.mime || file.type || 'image/webp');
+
+    /*
+      Matrix m.image has no separate caption field in classic events. For
+      interoperability we use body as caption when present, otherwise a file
+      name. The renderer suppresses filename-like bodies under the image.
+    */
     const content = {
       msgtype: 'm.image',
       body: preview.caption || safeName,
       info: {
-        w: full.width,
-        h: full.height,
-        size: full.blob.size,
-        mimetype: full.mime || 'image/webp',
-        thumbnail_info: {
-          w: thumb.width,
-          h: thumb.height,
-          size: thumb.blob.size,
-          mimetype: thumb.mime || 'image/webp',
-        },
+        w: full.width || 0,
+        h: full.height || 0,
+        size: full.blob.size || 0,
+        mimetype: full.mime || full.blob.type || file.type || 'application/octet-stream',
       },
     };
 
+    if (thumb?.blob) {
+      content.info.thumbnail_info = {
+        w: thumb.width || 0,
+        h: thumb.height || 0,
+        size: thumb.blob.size || 0,
+        mimetype: thumb.mime || thumb.blob.type || 'image/webp',
+      };
+    }
+
     if (encrypted) {
       const encryptedFull = await encryptMatrixAttachment(full.blob);
-      const encryptedThumb = await encryptMatrixAttachment(thumb.blob);
 
       encryptedFull.file.url = await uploadMatrixContent(client, encryptedFull.blob, {
         name: safeName,
@@ -657,24 +908,31 @@ export async function sendImageFileWithPreview(client, roomId, file, {
         onProgress,
       });
 
-      encryptedThumb.file.url = await uploadMatrixContent(client, encryptedThumb.blob, {
-        name: `thumb-${safeName}`,
-        type: 'application/octet-stream',
-      });
-
       content.file = encryptedFull.file;
-      content.info.thumbnail_file = encryptedThumb.file;
+
+      if (thumb?.blob) {
+        const encryptedThumb = await encryptMatrixAttachment(thumb.blob);
+
+        encryptedThumb.file.url = await uploadMatrixContent(client, encryptedThumb.blob, {
+          name: `thumb-${safeName}`,
+          type: 'application/octet-stream',
+        });
+
+        content.info.thumbnail_file = encryptedThumb.file;
+      }
     } else {
       content.url = await uploadMatrixContent(client, full.blob, {
         name: safeName,
-        type: full.mime || 'image/webp',
+        type: full.mime || full.blob.type || file.type || 'application/octet-stream',
         onProgress,
       });
 
-      content.info.thumbnail_url = await uploadMatrixContent(client, thumb.blob, {
-        name: `thumb-${safeName}`,
-        type: thumb.mime || 'image/webp',
-      });
+      if (thumb?.blob) {
+        content.info.thumbnail_url = await uploadMatrixContent(client, thumb.blob, {
+          name: `thumb-${safeName}`,
+          type: thumb.mime || thumb.blob.type || 'image/webp',
+        });
+      }
     }
 
     const result = await sendRoomMessage(client, roomId, content);

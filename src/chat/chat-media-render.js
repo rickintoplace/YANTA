@@ -281,9 +281,36 @@ function openImageViewer(client, full, title = 'Photo') {
     });
 }
 
+function imageCaptionFromContent(content = {}) {
+  const body = String(content.body || '').trim();
+
+  if (!body) return '';
+
+  /*
+    Why:
+    Matrix m.image uses body both for captions and file names. YANTA sends the
+    file name when there is no caption, so filename-like bodies are suppressed
+    below the image.
+  */
+  if (/^photo(?:[-_\s]?\d+)?\.(webp|png|jpe?g|gif|avif|heic|svg)$/i.test(body)) {
+    return '';
+  }
+
+  if (/\.(webp|png|jpe?g|gif|avif|heic|svg)$/i.test(body) && !/\s/.test(body)) {
+    return '';
+  }
+
+  return body;
+}
+
 function renderImageMessage(client, content = {}) {
   const source = imageSourceFromContent(content);
   const title = content.body || 'Photo';
+  const caption = imageCaptionFromContent(content);
+
+  const outer = el('div', {
+    class: 'yanta-chat-image-message-wrap',
+  });
 
   const wrap = el('button', {
     type: 'button',
@@ -291,11 +318,19 @@ function renderImageMessage(client, content = {}) {
     title: 'Open photo',
   });
 
+  outer.append(wrap);
+
+  if (caption) {
+    outer.append(el('div', {
+      class: 'yanta-chat-image-caption',
+    }, caption));
+  }
+
   if (!source?.preview?.mxcUrl) {
     wrap.append(el('div', {
       class: 'yanta-chat-media-error',
     }, 'Image is missing media data.'));
-    return wrap;
+    return outer;
   }
 
   const key = imageResolvedKey(source.preview);
@@ -363,7 +398,7 @@ function renderImageMessage(client, content = {}) {
     lazyImageObserver.observe(wrap);
   }
 
-  return wrap;
+  return outer;
 }
 
 function renderFileMessage(client, content = {}) {

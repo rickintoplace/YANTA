@@ -32,6 +32,7 @@ import {
   createChatSecretStorageCallbacks,
   installSecretStorageCallbacks,
   hasVaultChatAccount,
+  finalizeChatCryptoAfterSync,
 } from './matrix-crypto.js';
 
 import {
@@ -792,15 +793,17 @@ export async function startChatSession({
         sessionId,
       });
 
-      const cryptoResult = await bootstrapChatCrypto(client, {
+      const cryptoBootstrapResult = await bootstrapChatCrypto(client, {
         firstDevice,
         account: normalizedAccount,
       });
 
-      await client.startClient({
-        initialSyncLimit: INITIAL_SYNC_LIMIT,
-      });
-
+      /*
+        Publish the client before startClient().
+        Why:
+        Matrix sync events can fire immediately. UI/listeners should already be
+        able to resolve the active client while crypto finalization continues.
+      */
       activeSession = {
         sdk,
         client,
@@ -808,7 +811,10 @@ export async function startChatSession({
         sessionId,
         credentials,
         startedAt: Date.now(),
-        crypto: cryptoResult,
+        crypto: {
+          bootstrap: cryptoBootstrapResult,
+          keyBackup: null,
+        },
         unwire,
 
         /**
@@ -822,12 +828,34 @@ export async function startChatSession({
       window.yantaMatrixClient = client;
       window.yantaChatSession = activeSession;
 
+      await client.startClient({
+        initialSyncLimit: INITIAL_SYNC_LIMIT,
+      });
+
+      /*
+        Critical for multi-device old-message decryption:
+        Key Backup must be finalized after initial sync reached PREPARED.
+        Doing this before startClient() can make the SDK miss backup account
+        data and old messages show "sent before this device logged in".
+      */
+      const keyBackupResult = await finalizeChatCryptoAfterSync(client, {
+        sdk,
+        firstDevice,
+        timeoutMs: 25_000,
+      });
+
+      activeSession.crypto = {
+        bootstrap: cryptoBootstrapResult,
+        keyBackup: keyBackupResult,
+      };
+
       emit('yanta-chat-sync-state', {
         state: 'STARTED',
         reason,
       });
 
       return activeSession;
+    
     } catch (err) {
       activeSession = null;
 
@@ -1115,6 +1143,51 @@ export function installChatAccountReadyListener() {
       reportSessionError('Could not open Chat.', err);
     });
   });
+}
+
+/**
+ * Repairs Matrix encryption backup for this device.
+ *
+ * Use this on an existing device that can still decrypt old messages. It will
+ * create/enable Matrix Key Backup and upload locally known room keys so newly
+ * added devices can restore historical messages.
+ */
+export async function repairChatEncryptionBackupNow({
+  reason = 'manual-key-backup-repair',
+} = {}) {
+  try {
+    const session =
+      activeSession ||
+      await startChatSession({
+        reason,
+      });
+
+    if (!session?.client) {
+      throw new Error('Chat session is not connected.');
+    }
+
+    const result = await finalizeChatCryptoAfterSync(session.client, {
+      sdk: session.sdk,
+      firstDevice: false,
+      timeoutMs: 30_000,
+    });
+
+    session.crypto = {
+      ...(session.crypto || {}),
+      keyBackup: result,
+    };
+
+    if (result.ok) {
+      toast('Chat encryption keys repaired.', 'success');
+    } else {
+      toast('Chat encryption repair finished with warnings.', 'error');
+    }
+
+    return result;
+  } catch (err) {
+    reportSessionError('Could not repair Chat encryption keys.', err);
+    throw err;
+  }
 }
 
 /**

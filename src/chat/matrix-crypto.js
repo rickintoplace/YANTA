@@ -778,6 +778,289 @@ async function maybeRestoreKeyBackup(client) {
   return false;
 }
 
+function emitChatCryptoEvent(name, detail = {}) {
+  try {
+    window.dispatchEvent(new CustomEvent(name, {
+      detail: {
+        ts: Date.now(),
+        ...detail,
+      },
+    }));
+  } catch {}
+}
+
+function isPreparedSyncStateValue(sdk, value) {
+  const prepared = sdk?.SyncState?.Prepared || 'PREPARED';
+  const s = String(value || '').toUpperCase();
+
+  return value === prepared || s === 'PREPARED';
+}
+
+/**
+ * Waits until Matrix initial sync reached PREPARED.
+ *
+ * Why:
+ * Key Backup account data and room state are only reliable after the first
+ * sync. Restoring backup before PREPARED often leaves old messages undecryptable.
+ */
+export function waitForChatPrepared(client, {
+  sdk = null,
+  timeoutMs = 20_000,
+} = {}) {
+  if (!client) {
+    return Promise.resolve(false);
+  }
+
+  if (isPreparedSyncStateValue(sdk, client.getSyncState?.())) {
+    return Promise.resolve(true);
+  }
+
+  return new Promise((resolve) => {
+    let done = false;
+    let timer = 0;
+
+    const finish = (ok) => {
+      if (done) return;
+
+      done = true;
+      clearTimeout(timer);
+
+      try {
+        client.removeListener?.('sync', onSync);
+      } catch {}
+
+      try {
+        const ev = sdk?.ClientEvent?.Sync;
+        if (ev) client.removeListener?.(ev, onSync);
+      } catch {}
+
+      resolve(!!ok);
+    };
+
+    const onSync = (state) => {
+      if (isPreparedSyncStateValue(sdk, state)) {
+        finish(true);
+      }
+    };
+
+    try {
+      client.on?.('sync', onSync);
+
+      const ev = sdk?.ClientEvent?.Sync;
+      if (ev && ev !== 'sync') {
+        client.on?.(ev, onSync);
+      }
+    } catch (err) {
+      console.warn('[YANTA Chat Crypto] could not subscribe to Matrix sync state', err);
+      toast('Could not monitor Chat sync state.', 'error');
+      finish(false);
+      return;
+    }
+
+    timer = window.setTimeout(() => {
+      console.warn('[YANTA Chat Crypto] Matrix sync did not reach PREPARED before key backup timeout');
+      toast('Chat encryption sync is still preparing.', 'error');
+      finish(false);
+    }, Math.max(3000, Number(timeoutMs || 20_000)));
+  });
+}
+
+async function activeChatBackupVersion(cryptoApi) {
+  if (!cryptoApi) return '';
+
+  try {
+    const active = await cryptoApi.getActiveSessionBackupVersion?.();
+
+    if (active) {
+      return String(active.version || active);
+    }
+  } catch (err) {
+    console.warn('[YANTA Chat Crypto] could not read active key backup version', err);
+  }
+
+  try {
+    const info = await cryptoApi.getKeyBackupInfo?.();
+
+    if (info?.version) return String(info.version);
+    if (info?.version_id) return String(info.version_id);
+  } catch (err) {
+    console.warn('[YANTA Chat Crypto] could not read server key backup info', err);
+  }
+
+  return '';
+}
+
+async function ensureChatServerKeyBackupExists(client, {
+  allowCreate = true,
+} = {}) {
+  const cryptoApi = getCryptoApi(client);
+
+  if (!cryptoApi) {
+    throw new Error('Matrix crypto API is not available.');
+  }
+
+  installSecretStorageCallbacks(client);
+
+  let version = await activeChatBackupVersion(cryptoApi);
+
+  if (version) {
+    return {
+      created: false,
+      version,
+    };
+  }
+
+  if (!allowCreate) {
+    return {
+      created: false,
+      version: '',
+    };
+  }
+
+  if (typeof cryptoApi.resetKeyBackup !== 'function') {
+    throw new Error('Matrix key backup creation is not supported by this SDK version.');
+  }
+
+  /*
+    Why:
+    If no server-side key backup exists, old messages can never be restored on
+    newly logged-in devices. resetKeyBackup() creates a new backup version
+    protected by Secret Storage, whose recovery key is stored in YANTA Vault.
+  */
+  await cryptoApi.resetKeyBackup();
+
+  version = await activeChatBackupVersion(cryptoApi);
+
+  return {
+    created: true,
+    version,
+  };
+}
+
+async function enableChatKeyBackup(client) {
+  const cryptoApi = getCryptoApi(client);
+
+  if (!cryptoApi) return false;
+
+  installSecretStorageCallbacks(client);
+
+  if (typeof cryptoApi.checkKeyBackupAndEnable === 'function') {
+    await cryptoApi.checkKeyBackupAndEnable();
+    return true;
+  }
+
+  if (typeof cryptoApi.enableKeyBackup === 'function') {
+    await cryptoApi.enableKeyBackup();
+    return true;
+  }
+
+  return false;
+}
+
+async function forceUploadKnownRoomKeysToBackup(client) {
+  const cryptoApi = getCryptoApi(client);
+  if (!cryptoApi) return false;
+
+  installSecretStorageCallbacks(client);
+
+  /*
+    Matrix JS SDK versions expose this differently. We intentionally try a
+    small list of stable/best-effort entry points. Uploading all known sessions
+    is what makes already existing messages readable on future devices.
+  */
+  const candidates = [
+    () => cryptoApi.backupAllGroupSessions?.(),
+    () => cryptoApi.scheduleAllGroupSessionsForBackup?.(),
+    () => cryptoApi.backupManager?.backupAllGroupSessions?.(),
+    () => cryptoApi.backupManager?.scheduleAllGroupSessionsForBackup?.(),
+    () => client.crypto?.backupManager?.backupAllGroupSessions?.(),
+    () => client.crypto?.backupManager?.scheduleAllGroupSessionsForBackup?.(),
+  ];
+
+  for (const run of candidates) {
+    try {
+      const res = await run();
+
+      if (res !== undefined) {
+        return true;
+      }
+    } catch (err) {
+      console.warn('[YANTA Chat Crypto] room-key backup upload attempt failed', err);
+    }
+  }
+
+  return false;
+}
+
+/**
+ * Finalizes Matrix key backup after initial sync.
+ *
+ * Call this after client.startClient(). It:
+ * - waits for PREPARED sync state,
+ * - creates/enables server-side key backup if missing,
+ * - restores old room keys from Secret Storage,
+ * - forces upload of locally known room keys for future devices.
+ */
+export async function finalizeChatCryptoAfterSync(client, {
+  sdk = null,
+  firstDevice = false,
+  timeoutMs = 20_000,
+} = {}) {
+  installSecretStorageCallbacks(client);
+
+  const result = {
+    ok: true,
+    degraded: false,
+    prepared: false,
+    steps: {},
+  };
+
+  const step = async (name, fn) => {
+    try {
+      result.steps[name] = await fn();
+    } catch (err) {
+      result.ok = false;
+      result.degraded = true;
+
+      reportCryptoError('Chat encryption keys could not be fully restored.', err, {
+        step: name,
+        firstDevice,
+      });
+    }
+  };
+
+  result.prepared = await waitForChatPrepared(client, {
+    sdk,
+    timeoutMs,
+  });
+
+  await step('ensure-key-backup', () =>
+    ensureChatServerKeyBackupExists(client, {
+      allowCreate: true,
+    })
+  );
+
+  await step('enable-key-backup', () =>
+    enableChatKeyBackup(client)
+  );
+
+  await step('restore-key-backup', () =>
+    maybeRestoreKeyBackup(client)
+  );
+
+  await step('upload-known-room-keys', () =>
+    forceUploadKnownRoomKeysToBackup(client)
+  );
+
+  emitChatCryptoEvent('yanta-chat-key-backup-ready', {
+    ok: result.ok,
+    degraded: result.degraded,
+    steps: result.steps,
+  });
+
+  return result;
+}
+
 async function maybeSelfSignOwnDevice(client) {
   const cryptoApi = getCryptoApi(client);
   const deviceId = client?.getDeviceId?.() || client?.deviceId || '';

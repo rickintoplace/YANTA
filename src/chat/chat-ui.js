@@ -1155,6 +1155,19 @@ function bindAppLevelChatEvents() {
     renderRoomListSoon();
   });
 
+  window.addEventListener('yanta-chat-key-backup-ready', () => {
+    if (!chatIsOpen()) return;
+
+    renderRoomListSoon();
+
+    if (activeRoomId) {
+      reloadActiveTimelineSoon({
+        keepBottom: isTimelineNearBottom(),
+        scrollBottom: isTimelineNearBottom(),
+      });
+    }
+  });
+
   window.addEventListener('yanta-chat-room-updated', (e) => {
     const detail = e.detail || {};
 
@@ -1881,6 +1894,29 @@ function openRoomMenu(anchor) {
       action: async () => {
         await toggleRoomMute(roomId);
         renderRoomList();
+      },
+    },
+    {
+      label: 'Repair encryption keys',
+      icon: 'shield-check',
+      action: async () => {
+        try {
+          const {
+            repairChatEncryptionBackupNow,
+          } = await import('./matrix-session.js');
+
+          await repairChatEncryptionBackupNow({
+            reason: 'room-menu',
+          });
+
+          await reloadActiveTimeline({
+            keepBottom: true,
+            scrollBottom: true,
+          });
+        } catch (err) {
+          console.warn('[YANTA Chat] Could not repair encryption keys', err);
+          toast('Could not repair encryption keys.', 'error');
+        }
       },
     },
     {

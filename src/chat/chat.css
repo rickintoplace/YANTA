@@ -1747,6 +1747,11 @@
     padding: 0;
 }
 
+.yanta-chat-bubble:has(.yanta-chat-image-message-wrap) .yanta-chat-meta {
+    padding-bottom: var(--chat-bubble-padding-bottom);
+    padding-right: var(--chat-bubble-padding-right);
+}
+
 .yanta-chat-image-message-wrap:has(.yanta-chat-image-caption) .yanta-chat-image-message {
     border-bottom-left-radius: 0;
     border-bottom-right-radius: 0;

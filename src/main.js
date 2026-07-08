@@ -211,6 +211,7 @@ import {
   scheduleChatAutoResume,
   installChatAccountReadyListener,
   startChatSession,
+  repairChatEncryptionBackupNow,
 } from './chat/matrix-session.js';
 
 import {
@@ -1622,6 +1623,18 @@ async function init() {
 
     return ensureChatAccountAndOpen({
       source,
+    });
+  };
+
+  /**
+   * Manually repairs Matrix Key Backup.
+   *
+   * Run this from DevTools on a device that can still decrypt old messages:
+   *   await window.yantaChatRepairEncryptionNow()
+   */
+  window.yantaChatRepairEncryptionNow = async () => {
+    return repairChatEncryptionBackupNow({
+      reason: 'manual-console',
     });
   };
 

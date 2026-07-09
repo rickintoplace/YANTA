@@ -41,6 +41,10 @@ import {
   vaultSettingsMap,
 } from '../sync2/vault-doc.js';
 
+import {
+  installChatMediaIndexer,
+} from './chat-media-index.js';
+
 let matrixLoadPromise = null;
 let activeSession = null;
 let startPromise = null;
@@ -909,6 +913,8 @@ export async function startChatSession({
 
       window.yantaMatrixClient = client;
       window.yantaChatSession = activeSession;
+
+      installChatMediaIndexer(client);
 
       await client.startClient({
         initialSyncLimit: INITIAL_SYNC_LIMIT,

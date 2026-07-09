@@ -19,6 +19,12 @@ import {
   compressImageFile,
 } from '../media/image-compression.js';
 
+import {
+  chatMediaCacheKey,
+  getCachedChatMediaBlob,
+  putCachedChatMediaBlob,
+} from './chat-media-cache.js';
+
 const MAX_CHAT_MEDIA_OBJECT_URLS = 160;
 
 const objectUrlCache = new Map();
@@ -30,23 +36,12 @@ function cacheKeyFor(mxcUrl, {
   h = 96,
   encryptedFile = null,
 } = {}) {
-  const fileKey = encryptedFile
-    ? [
-        encryptedFile.v || '',
-        encryptedFile.iv || '',
-        encryptedFile.hashes?.sha256 || '',
-        encryptedFile.key?.kid || '',
-        encryptedFile.key?.k || '',
-      ].join(':')
-    : '';
-
-  return [
-    String(mxcUrl || ''),
-    thumbnail ? 'thumb' : 'download',
-    Number(w || 0),
-    Number(h || 0),
-    fileKey,
-  ].join('|');
+  return chatMediaCacheKey(mxcUrl, {
+    thumbnail,
+    w,
+    h,
+    encryptedFile,
+  });
 }
 
 function touch(cache, key, value) {
@@ -384,6 +379,7 @@ export async function mxcToBlob(client, mxcUrl, {
   h = 96,
   encryptedFile = null,
   mimeType = '',
+  roomId = '',
 } = {}) {
   const key = cacheKeyFor(mxcUrl, {
     thumbnail,
@@ -397,6 +393,18 @@ export async function mxcToBlob(client, mxcUrl, {
   if (cached?.blob) {
     touch(blobCache, key, cached);
     return cached.blob;
+  }
+
+  const persistentBlob = await getCachedChatMediaBlob(key);
+
+  if (persistentBlob) {
+    touch(blobCache, key, {
+      blob: persistentBlob,
+    });
+
+    evictIfNeeded();
+
+    return persistentBlob;
   }
 
   try {
@@ -428,6 +436,12 @@ export async function mxcToBlob(client, mxcUrl, {
       blob,
     });
 
+    await putCachedChatMediaBlob(key, blob, {
+      roomId,
+      mxcUrl,
+      mime: blob.type || mimeType,
+    });
+
     evictIfNeeded();
 
     return blob;
@@ -449,6 +463,7 @@ export async function mxcToBlobUrl(client, mxcUrl, {
   h = 96,
   encryptedFile = null,
   mimeType = '',
+  roomId = '',
 } = {}) {
   const key = cacheKeyFor(mxcUrl, {
     thumbnail,
@@ -470,6 +485,7 @@ export async function mxcToBlobUrl(client, mxcUrl, {
     h,
     encryptedFile,
     mimeType,
+    roomId,
   });
 
   const url = URL.createObjectURL(blob);
@@ -497,6 +513,34 @@ export function revokeAllChatMediaObjectUrls() {
 
   objectUrlCache.clear();
   blobCache.clear();
+}
+
+/**
+ * Purges in-memory media URLs/blobs for one MXC URL.
+ */
+export function purgeChatMediaMemoryCacheForMxc(mxcUrl) {
+  const needle = String(mxcUrl || '');
+
+  if (!needle) return;
+
+  for (const [key, entry] of [...objectUrlCache.entries()]) {
+    if (!key.startsWith(needle)) continue;
+
+    objectUrlCache.delete(key);
+
+    try {
+      URL.revokeObjectURL(entry.url);
+    } catch (err) {
+      console.warn('[YANTA Chat] Could not revoke media object URL', err);
+      toast('Could not release media preview.', 'error');
+    }
+  }
+
+  for (const key of [...blobCache.keys()]) {
+    if (key.startsWith(needle)) {
+      blobCache.delete(key);
+    }
+  }
 }
 
 function fileBaseName(name = '') {

@@ -36,11 +36,12 @@ import {
 } from '../sync2/app-engine.js';
 
 const DB_NAME = 'yanta-chat';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 const STORES = {
   kv: 'kv',
   mediaIndex: 'mediaIndex',
+  mediaCache: 'mediaCache',
   searchIndex: 'searchIndex',
   drafts: 'drafts',
 };
@@ -78,6 +79,41 @@ function openChatDb() {
         s.createIndex('roomId', 'roomId', { unique: false });
         s.createIndex('eventId', 'eventId', { unique: false });
         s.createIndex('createdAt', 'createdAt', { unique: false });
+      }
+
+      if (db.objectStoreNames.contains(STORES.mediaIndex)) {
+        const s = req.transaction.objectStore(STORES.mediaIndex);
+
+        if (!s.indexNames.contains('roomId')) {
+          s.createIndex('roomId', 'roomId', { unique: false });
+        }
+
+        if (!s.indexNames.contains('eventId')) {
+          s.createIndex('eventId', 'eventId', { unique: false });
+        }
+
+        if (!s.indexNames.contains('createdAt')) {
+          s.createIndex('createdAt', 'createdAt', { unique: false });
+        }
+
+        if (!s.indexNames.contains('ts')) {
+          s.createIndex('ts', 'ts', { unique: false });
+        }
+
+        if (!s.indexNames.contains('kind')) {
+          s.createIndex('kind', 'kind', { unique: false });
+        }
+      }
+
+      if (!db.objectStoreNames.contains(STORES.mediaCache)) {
+        const s = db.createObjectStore(STORES.mediaCache, {
+          keyPath: 'id',
+        });
+
+        s.createIndex('roomId', 'roomId', { unique: false });
+        s.createIndex('mxcUrl', 'mxcUrl', { unique: false });
+        s.createIndex('lastAccessedAt', 'lastAccessedAt', { unique: false });
+        s.createIndex('size', 'size', { unique: false });
       }
 
       if (!db.objectStoreNames.contains(STORES.searchIndex)) {
@@ -422,6 +458,7 @@ export const chatStore = {
   dbName: DB_NAME,
   settings: chatSettings,
   mediaIndex: createChatObjectStore(STORES.mediaIndex),
+  mediaCache: createChatObjectStore(STORES.mediaCache),
   searchIndex: createChatObjectStore(STORES.searchIndex),
   drafts: createChatObjectStore(STORES.drafts),
 

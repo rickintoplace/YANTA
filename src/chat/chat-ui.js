@@ -85,6 +85,18 @@ import {
   hasVaultChatAccount,
 } from './matrix-crypto.js';
 
+import {
+  openChatGallery,
+} from './chat-gallery.js';
+
+import {
+  openChatSettings,
+} from './chat-settings.js';
+
+import {
+  indexTimelineEventsMedia,
+} from './chat-media-index.js';
+
 import './chat.css';
 
 
@@ -732,7 +744,16 @@ function bindRootEvents() {
   });
 
   root.querySelector('[data-chat-profile]')?.addEventListener('click', () => {
-    toast('Chat details will be available soon.', 'error');
+    const room = roomById(activeRoomId);
+
+    openChatSettings({
+      client,
+      roomId: activeRoomId,
+      roomName: room ? roomDisplayName(room) : 'Chat',
+    }).catch((err) => {
+      console.warn('[YANTA Chat] Could not open chat settings', err);
+      toast('Could not open chat settings.', 'error');
+    });
   });
 
   root.querySelector('[data-chat-search-room]')?.addEventListener('click', () => {
@@ -740,7 +761,16 @@ function bindRootEvents() {
   });
 
   root.querySelector('[data-chat-gallery]')?.addEventListener('click', () => {
-    toast('Gallery will be available soon.', 'error');
+    const room = roomById(activeRoomId);
+
+    openChatGallery({
+      client,
+      roomId: activeRoomId,
+      roomName: room ? roomDisplayName(room) : 'Chat',
+    }).catch((err) => {
+      console.warn('[YANTA Chat] Could not open gallery', err);
+      toast('Could not open gallery.', 'error');
+    });
   });
 
   root.querySelector('[data-chat-menu]')?.addEventListener('click', (e) => {
@@ -1071,6 +1101,10 @@ async function reloadActiveTimeline({
   });
 
   await nextWindow.load(undefined, limit);
+
+  await indexTimelineEventsMedia(nextWindow.getEvents(), {
+    roomId: activeRoomId,
+  });
 
   timelineWindow = nextWindow;
   timelineInitializedFor = activeRoomId;
@@ -1631,6 +1665,10 @@ async function initTimeline(room) {
 
     await timelineWindow.load(undefined, PAGE_SIZE);
 
+    await indexTimelineEventsMedia(timelineWindow.getEvents(), {
+      roomId: room.roomId,
+    });
+
     renderTimeline({
       scrollBottom: true,
     });
@@ -1667,6 +1705,10 @@ async function paginateBackwards() {
 
   try {
     await timelineWindow.paginate(EventTimeline.BACKWARDS, PAGE_SIZE);
+
+    await indexTimelineEventsMedia(timelineWindow.getEvents(), {
+      roomId: activeRoomId,
+    });
 
     renderTimeline({
       preserveTopDeltaFrom: before,
@@ -1976,6 +2018,28 @@ function openRoomMenu(anchor) {
             roomId: activeRoomId || '',
           });
         }
+      },
+    },
+    {
+      label: 'Galerie',
+      icon: 'images',
+      action: async () => {
+        await openChatGallery({
+          client,
+          roomId,
+          roomName: roomDisplayName(room),
+        });
+      },
+    },
+    {
+      label: 'Chat-Einstellungen',
+      icon: 'settings',
+      action: async () => {
+        await openChatSettings({
+          client,
+          roomId,
+          roomName: roomDisplayName(room),
+        });
       },
     },
     {

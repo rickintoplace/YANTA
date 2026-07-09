@@ -1315,6 +1315,24 @@ window.yantaSync2Debug = async () => {
   return result;
 };
 
+window.yantaChatDebugUndecryptable = async (roomId = '') => {
+  const mod = await import('./chat/matrix-session.js');
+
+  return mod.debugChatUndecryptableEvents(window.yantaChatSession?.client, {
+    roomId,
+    limit: 200,
+  });
+};
+
+window.yantaChatRetryDecryptNow = async () => {
+  const mod = await import('./chat/matrix-session.js');
+
+  return mod.retryDecryptKnownChatEvents(window.yantaChatSession?.client, {
+    reason: 'manual-console',
+    maxEvents: 2000,
+  });
+};
+
 const SEARCH_INDEX_BATCH = 12;
 
 function buildSearchIndexInBackground() {

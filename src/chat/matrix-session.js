@@ -795,6 +795,150 @@ async function handleUnknownToken({
   }
 }
 
+function allKnownRoomEvents(client) {
+  const out = [];
+
+  try {
+    const rooms = client?.getRooms?.() || client?.getVisibleRooms?.() || [];
+
+    for (const room of rooms) {
+      const timelines = room.getUnfilteredTimelineSet?.()?.getTimelines?.() || [];
+
+      for (const timeline of timelines) {
+        for (const ev of timeline.getEvents?.() || []) {
+          out.push({
+            room,
+            event: ev,
+          });
+        }
+      }
+
+      for (const ev of room.getLiveTimeline?.()?.getEvents?.() || []) {
+        out.push({
+          room,
+          event: ev,
+        });
+      }
+    }
+  } catch (err) {
+    console.warn('[YANTA Chat Session] Could not collect room events for decrypt retry', err);
+  }
+
+  const seen = new Set();
+
+  return out.filter(({ event }) => {
+    const id = event?.getId?.() || event?.event?.event_id || '';
+
+    if (!id) return true;
+    if (seen.has(id)) return false;
+
+    seen.add(id);
+    return true;
+  });
+}
+
+async function retryDecryptEvent(client, event) {
+  if (!event) return false;
+
+  const type = event.getType?.() || event.event?.type || '';
+
+  if (type !== 'm.room.encrypted') return false;
+
+  try {
+    if (typeof client.decryptEventIfNeeded === 'function') {
+      await client.decryptEventIfNeeded(event, {
+        isRetry: true,
+        forceRedecryptIfUntrusted: true,
+      });
+
+      return !event.isDecryptionFailure?.();
+    }
+  } catch (err) {
+    console.warn('[YANTA Chat Session] decryptEventIfNeeded retry failed', err);
+  }
+
+  try {
+    const crypto = client.getCrypto?.() || client.crypto;
+
+    if (typeof event.attemptDecryption === 'function' && crypto) {
+      await event.attemptDecryption(crypto, {
+        isRetry: true,
+        forceRedecryptIfUntrusted: true,
+      });
+
+      return !event.isDecryptionFailure?.();
+    }
+  } catch (err) {
+    console.warn('[YANTA Chat Session] attemptDecryption retry failed', err);
+  }
+
+  return false;
+}
+
+/**
+ * Retries decryption for known encrypted timeline events after key import.
+ */
+export async function retryDecryptKnownChatEvents(client = activeSession?.client, {
+  reason = 'manual',
+  maxEvents = 1200,
+} = {}) {
+  if (!client) {
+    return {
+      ok: false,
+      retried: 0,
+      decrypted: 0,
+      reason: 'missing-client',
+    };
+  }
+
+  const pairs = allKnownRoomEvents(client).slice(-Math.max(1, Number(maxEvents || 1200)));
+
+  let retried = 0;
+  let decrypted = 0;
+  const changedRooms = new Set();
+
+  for (const { room, event } of pairs) {
+    const encrypted = event?.getType?.() === 'm.room.encrypted' || event?.event?.type === 'm.room.encrypted';
+    const failed = event?.isDecryptionFailure?.() === true;
+
+    if (!encrypted || !failed) continue;
+
+    retried += 1;
+
+    const ok = await retryDecryptEvent(client, event);
+
+    if (ok) {
+      decrypted += 1;
+      if (room?.roomId) changedRooms.add(room.roomId);
+    }
+  }
+
+  for (const roomId of changedRooms) {
+    emit('yanta-chat-room-updated', {
+      roomId,
+      reason: `decrypt-retry:${reason}`,
+    });
+  }
+
+  if (decrypted > 0) {
+    emit('yanta-chat-key-backup-ready', {
+      ok: true,
+      source: 'decrypt-retry',
+      retried,
+      decrypted,
+      reason,
+    });
+  }
+
+  return {
+    ok: true,
+    retried,
+    decrypted,
+    changedRooms: [...changedRooms],
+    reason,
+  };
+}
+
 /**
  * Starts or resumes the Matrix Chat session.
  *
@@ -983,6 +1127,10 @@ export async function startChatSession({
           reason: 'chat-session-start',
         });
 
+        const decryptRetryAfterYantaImport = await retryDecryptKnownChatEvents(client, {
+          reason: 'chat-session-start-yanta-room-key-import',
+        });
+
         const yantaRoomKeyExport = await exportChatRoomKeysToVault(client, {
           reason: 'chat-session-start-auto-refresh',
         });
@@ -1004,6 +1152,7 @@ export async function startChatSession({
           keyBackup: keyBackupResult,
           yantaRoomKeyImport,
           yantaRoomKeyExport,
+          decryptRetryAfterYantaImport,
         };
 
       emit('yanta-chat-sync-state', {
@@ -1245,15 +1394,20 @@ function installChatAutoResumeWatchers() {
         importChatRoomKeysFromVault(activeSession.client, {
           reason: 'vault-hydrated',
         })
-          .then((res) => {
-            if (res?.imported) {
-              emit('yanta-chat-key-backup-ready', {
-                ok: true,
-                source: 'yanta-vault-room-keys',
-                count: res.count || 0,
-              });
-            }
-          })
+        .then(async (res) => {
+          const retry = await retryDecryptKnownChatEvents(activeSession.client, {
+            reason: 'vault-hydrated-room-key-import',
+          });
+
+          if (res?.imported || retry.decrypted > 0) {
+            emit('yanta-chat-key-backup-ready', {
+              ok: true,
+              source: 'yanta-vault-room-keys',
+              count: res?.count || 0,
+              decrypted: retry.decrypted || 0,
+            });
+          }
+        })
           .catch((err) => {
             console.warn('[YANTA Chat Session] could not import Vault room keys after hydrate', err);
           });
@@ -1358,6 +1512,13 @@ export async function repairChatEncryptionBackupNow({
     });
 
     result.yantaRoomKeyExport = yantaRoomKeyExport;
+
+    const decryptRetry = await retryDecryptKnownChatEvents(session.client, {
+      reason: `${reason}:after-room-key-export`,
+    });
+
+    result.decryptRetry = decryptRetry;
+    
     if (result.ok && session.credentials) {
       await writeChatCryptoReadyMarker(session.credentials, {
         backupVersion: result.backupVersion || '',
@@ -1408,4 +1569,47 @@ export async function ensureChatSessionAndOpen(options = {}) {
     reportSessionError('Could not open Chat.', err);
     throw err;
   }
+}
+
+export async function debugChatUndecryptableEvents(client = activeSession?.client, {
+  roomId = '',
+  limit = 80,
+} = {}) {
+  if (!client) {
+    throw new Error('Chat client is not running.');
+  }
+
+  const pairs = allKnownRoomEvents(client)
+    .filter(({ room }) => !roomId || room?.roomId === roomId)
+    .slice(-Math.max(1, Number(limit || 80)));
+
+  const out = [];
+
+  for (const { room, event } of pairs) {
+    const type = event?.getType?.() || event?.event?.type || '';
+
+    if (type !== 'm.room.encrypted') continue;
+
+    const content = event?.getContent?.() || event?.event?.content || {};
+    const failed = event?.isDecryptionFailure?.() === true;
+
+    out.push({
+      roomId: room?.roomId || event?.getRoomId?.() || '',
+      eventId: event?.getId?.() || event?.event?.event_id || '',
+      sender: event?.getSender?.() || event?.event?.sender || '',
+      ts: event?.getTs?.() || event?.event?.origin_server_ts || 0,
+      failed,
+      algorithm: content.algorithm || '',
+      session_id: content.session_id || '',
+      sender_key: content.sender_key || '',
+      device_id: content.device_id || '',
+      error: event?.getDecryptionFailureReason?.() || event?.decryptionFailureReason || '',
+      clearType: event?.getClearContent?.()?.msgtype || '',
+      preview: event?.getClearContent?.()?.body || '',
+    });
+  }
+
+  console.table(out);
+
+  return out;
 }

@@ -442,7 +442,26 @@ function roomInitials(room) {
 
 function roomAvatarMxc(room) {
   try {
-    return room.getMxcAvatarUrl?.() || room.getAvatarUrl?.(client?.baseUrl, 96, 96, 'scale', false, false) || '';
+    const directUserId = userIdForDirectRoom(room.roomId);
+
+    if (directUserId) {
+      const member = room.getMember?.(directUserId);
+
+      const memberAvatar =
+        member?.getMxcAvatarUrl?.() ||
+        member?.events?.member?.getContent?.()?.avatar_url ||
+        member?.event?.content?.avatar_url ||
+        member?.avatarUrl ||
+        '';
+
+      if (memberAvatar) return memberAvatar;
+    }
+
+    return (
+      room.getMxcAvatarUrl?.() ||
+      room.getAvatarUrl?.(client?.baseUrl, 96, 96, 'scale', false, false) ||
+      ''
+    );
   } catch {
     return '';
   }
@@ -478,6 +497,8 @@ function latestEvent(room) {
 function hydrateAvatar(node, room) {
   const mxc = roomAvatarMxc(room);
 
+  node.classList.remove('has-image');
+
   if (!mxc || !String(mxc).startsWith('mxc://')) return;
 
   mxcToBlobUrl(client, mxc, {
@@ -500,8 +521,7 @@ function hydrateAvatar(node, room) {
       node.classList.add('has-image');
     })
     .catch((err) => {
-      console.warn('[YANTA Chat] Could not load room avatar', err);
-      toast('Could not load chat avatar.', 'error');
+      console.warn('[YANTA Chat] Could not load room/member avatar', err);
     });
 }
 
@@ -894,6 +914,12 @@ function bindRootEvents() {
     }
   });
 
+  root.querySelector('[data-chat-crypto-banner-close]')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    dismissCryptoBanner();
+  });
+
   root.addEventListener('keydown', (e) => {
     const meta = e.ctrlKey || e.metaKey;
 
@@ -1161,6 +1187,9 @@ function bindClientEvents(nextClient) {
       listenersBoundClient.removeListener?.('Room.name', onRoomListChange);
       listenersBoundClient.removeListener?.('Room.accountData', onRoomListChange);
       listenersBoundClient.removeListener?.('RoomMember.typing', onTypingChange);
+      listenersBoundClient.removeListener?.('RoomMember.membership', onRoomMemberProfileChange);
+      listenersBoundClient.removeListener?.('RoomMember.name', onRoomMemberProfileChange);
+      listenersBoundClient.removeListener?.('RoomMember.avatarUrl', onRoomMemberProfileChange);
       listenersBoundClient.removeListener?.('sync', onSync);
     } catch (err) {
       console.warn('[YANTA Chat] Could not unbind Matrix listeners', err);
@@ -1174,7 +1203,28 @@ function bindClientEvents(nextClient) {
   nextClient.on?.('Room.name', onRoomListChange);
   nextClient.on?.('Room.accountData', onRoomListChange);
   nextClient.on?.('RoomMember.typing', onTypingChange);
+  nextClient.on?.('RoomMember.membership', onRoomMemberProfileChange);
+  nextClient.on?.('RoomMember.name', onRoomMemberProfileChange);
+  nextClient.on?.('RoomMember.avatarUrl', onRoomMemberProfileChange);
   nextClient.on?.('sync', onSync);
+}
+
+function onRoomMemberProfileChange(_event, member) {
+  const roomId = member?.roomId || member?.room?.roomId || activeRoomId || '';
+
+  renderRoomListSoon();
+
+  if (roomId && roomId === activeRoomId) {
+    const room = roomById(activeRoomId);
+
+    if (room) {
+      renderRoomHeader(room);
+    }
+
+    renderTimelineSoon({
+      keepBottom: isTimelineNearBottom(),
+    });
+  }
 }
 
 function onSync(state, prevState, data = {}) {
@@ -1519,23 +1569,37 @@ function writeCryptoBannerDismiss(message) {
   } catch {}
 }
 
+const CHAT_CRYPTO_BANNER_DISMISS_LS_KEY = 'yanta.chat.cryptoBanner.dismissed.v2';
+
+function cryptoBannerDismissed() {
+  try {
+    const rec = JSON.parse(localStorage.getItem(CHAT_CRYPTO_BANNER_DISMISS_LS_KEY) || 'null');
+
+    return rec && Number(rec.dismissedAt || 0) > Date.now() - 30 * 24 * 60 * 60 * 1000;
+  } catch {
+    return false;
+  }
+}
+
+function dismissCryptoBanner() {
+  try {
+    localStorage.setItem(CHAT_CRYPTO_BANNER_DISMISS_LS_KEY, JSON.stringify({
+      dismissedAt: Date.now(),
+    }));
+  } catch {}
+
+  const banner = root?.querySelector('[data-chat-crypto-banner]');
+
+  if (banner) banner.hidden = true;
+}
+
 function setChatCryptoBanner(message = '') {
   const banner = root?.querySelector('[data-chat-crypto-banner]');
   if (!banner) return;
 
   const clean = String(message || '').trim();
 
-  if (!clean) {
-    banner.hidden = true;
-    return;
-  }
-
-  const dismissed = readCryptoBannerDismiss();
-
-  if (
-    dismissed &&
-    Number(dismissed.dismissedAt || 0) > Date.now() - 7 * 24 * 60 * 60 * 1000
-  ) {
+  if (!clean || cryptoBannerDismissed()) {
     banner.hidden = true;
     return;
   }
@@ -1566,7 +1630,7 @@ function bindAppLevelChatEvents() {
   window.addEventListener('yanta-chat-crypto-degraded', (e) => {
     setChatCryptoBanner(e.detail?.message || 'Chat encryption is being set up…');
   });
-
+  
   window.addEventListener('yanta-chat-jump-to-message', (e) => {
     const detail = e.detail || {};
 

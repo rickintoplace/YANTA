@@ -1,14 +1,13 @@
 // ============================================================
-// YANTA Chat — Message context actions
+// YANTA Chat — Message context actions, self-contained menu
 // ============================================================
 
 import {
+  el,
+  escapeHtml,
+  lucide,
   toast,
 } from '../core.js';
-
-import {
-  showMenu,
-} from '../tree.js';
 
 import {
   yantaConfirm,
@@ -18,6 +17,8 @@ import {
 import {
   messagePreview,
 } from './chat-message-render.js';
+
+let menuEl = null;
 
 function eventId(event) {
   return event?.getId?.() || event?.event?.event_id || '';
@@ -43,19 +44,120 @@ function isOwnEvent(client, event) {
   return !!client?.getUserId?.() && eventSender(event) === client.getUserId();
 }
 
-function closestMessageRow(target, root) {
-  const row = target?.closest?.('.yanta-chat-event[data-event-id]');
-
-  if (!row || !root?.contains?.(row)) return null;
-
-  return row;
+function closeChatMessageMenu() {
+  menuEl?.remove();
+  menuEl = null;
+  document.removeEventListener('pointerdown', onOutsidePointer, true);
+  document.removeEventListener('keydown', onMenuKey, true);
 }
 
-function findEvent(row, getEvents) {
-  const id = row?.dataset?.eventId || '';
-  if (!id) return null;
+function onOutsidePointer(e) {
+  if (menuEl?.contains(e.target)) return;
+  closeChatMessageMenu();
+}
 
-  return (getEvents?.() || []).find((ev) => eventId(ev) === id) || null;
+function onMenuKey(e) {
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    closeChatMessageMenu();
+  }
+}
+
+function ensureMenuCss() {
+  if (document.getElementById('yanta-chat-message-menu-css')) return;
+
+  const style = document.createElement('style');
+  style.id = 'yanta-chat-message-menu-css';
+  style.textContent = `
+.yanta-chat-message-menu {
+  position: fixed;
+  z-index: 30000;
+  min-width: 210px;
+  max-width: min(320px, calc(100vw - 16px));
+  padding: 6px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--bg-elev);
+  color: var(--text);
+  box-shadow: 0 18px 60px rgba(0,0,0,.36);
+  backdrop-filter: blur(14px);
+}
+.yanta-chat-message-menu button {
+  width: 100%;
+  min-height: 34px;
+  display: grid;
+  grid-template-columns: 18px minmax(0,1fr);
+  align-items: center;
+  gap: 9px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 720;
+  text-align: left;
+  cursor: pointer;
+}
+.yanta-chat-message-menu button:hover {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+}
+.yanta-chat-message-menu button.danger {
+  color: var(--red);
+}
+.yanta-chat-message-menu hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 5px;
+}
+.yanta-chat-event.is-selected .yanta-chat-bubble {
+  outline: 2px solid color-mix(in srgb, var(--accent) 70%, transparent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent);
+}
+`;
+  document.head.append(style);
+}
+
+function selectedIds() {
+  try {
+    return new Set(JSON.parse(sessionStorage.getItem('yanta.chat.selectedMessages.v1') || '[]'));
+  } catch {
+    return new Set();
+  }
+}
+
+function writeSelectedIds(ids) {
+  try {
+    sessionStorage.setItem('yanta.chat.selectedMessages.v1', JSON.stringify([...ids]));
+  } catch {}
+}
+
+function toggleSelect(row) {
+  const id = row?.dataset?.eventId || '';
+  if (!id) return;
+
+  const ids = selectedIds();
+
+  if (ids.has(id)) {
+    ids.delete(id);
+    row.classList.remove('is-selected');
+  } else {
+    ids.add(id);
+    row.classList.add('is-selected');
+  }
+
+  writeSelectedIds(ids);
+}
+
+function restoreSelection(root) {
+  const ids = selectedIds();
+
+  for (const row of root.querySelectorAll('.yanta-chat-event[data-event-id]')) {
+    row.classList.toggle('is-selected', ids.has(row.dataset.eventId || ''));
+  }
 }
 
 async function copyText(event) {
@@ -157,35 +259,34 @@ async function showInfo(event) {
   });
 }
 
-function selectedIds() {
-  try {
-    return new Set(JSON.parse(sessionStorage.getItem('yanta.chat.selectedMessages.v1') || '[]'));
-  } catch {
-    return new Set();
-  }
-}
+function menuButton({
+  icon,
+  label,
+  danger = false,
+  action,
+}) {
+  const btn = el('button', {
+    type: 'button',
+    class: danger ? 'danger' : '',
+  });
 
-function writeSelectedIds(ids) {
-  try {
-    sessionStorage.setItem('yanta.chat.selectedMessages.v1', JSON.stringify([...ids]));
-  } catch {}
-}
+  btn.innerHTML = `${lucide(icon, 15)} <span>${escapeHtml(label)}</span>`;
 
-function toggleSelect(row) {
-  const id = row?.dataset?.eventId || '';
-  if (!id) return;
+  btn.addEventListener('click', async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
 
-  const ids = selectedIds();
+    closeChatMessageMenu();
 
-  if (ids.has(id)) {
-    ids.delete(id);
-    row.classList.remove('is-selected');
-  } else {
-    ids.add(id);
-    row.classList.add('is-selected');
-  }
+    try {
+      await action?.();
+    } catch (err) {
+      console.warn('[YANTA Chat] message action failed', err);
+      toast('Action failed.', 'error');
+    }
+  });
 
-  writeSelectedIds(ids);
+  return btn;
 }
 
 function openMenu({
@@ -198,65 +299,118 @@ function openMenu({
   onReply,
   onReload,
 }) {
+  ensureMenuCss();
+  closeChatMessageMenu();
+
   const own = isOwnEvent(client, event);
   const hasText = !!eventText(event);
 
-  showMenu(x, y, [
-    {
-      label: 'Reply',
-      icon: 'reply',
-      action: () => onReply?.(event),
-    },
-    own && {
-      label: 'Edit',
-      icon: 'pencil',
-      action: () => editMessage({
-        client,
-        roomId,
-        event,
-        onReload,
-      }),
-    },
-    {
-      label: 'Select',
-      icon: 'check-square',
-      action: () => toggleSelect(row),
-    },
-    hasText && {
-      label: 'Copy Text',
-      icon: 'copy',
-      action: () => copyText(event),
-    },
-    {
-      label: 'Forward',
-      icon: 'forward',
-      action: () => toast('Forward is coming soon.', 'error'),
-    },
-    {
-      label: 'Pin',
-      icon: 'pin',
-      action: () => toast('Pinning is coming soon.', 'error'),
-    },
-    {
-      label: 'Info',
-      icon: 'info',
-      action: () => showInfo(event),
-    },
-    own && 'hr',
-    own && {
-      label: 'Delete',
-      icon: 'trash',
-      danger: true,
-      action: () => deleteMessage({
-        client,
-        roomId,
-        event,
-        onReload,
-      }),
-    },
-  ].filter(Boolean), {
-    align: 'start',
+  menuEl = el('div', {
+    class: 'yanta-chat-message-menu',
+    role: 'menu',
   });
+
+  menuEl.append(
+    menuButton({
+      icon: 'reply',
+      label: 'Reply',
+      action: () => onReply?.(event),
+    })
+  );
+
+  if (own) {
+    menuEl.append(
+      menuButton({
+        icon: 'pencil',
+        label: 'Edit',
+        action: () => editMessage({
+          client,
+          roomId,
+          event,
+          onReload,
+        }),
+      })
+    );
+  }
+
+  menuEl.append(
+    menuButton({
+      icon: 'check-square',
+      label: 'Select',
+      action: () => toggleSelect(row),
+    })
+  );
+
+  if (hasText) {
+    menuEl.append(
+      menuButton({
+        icon: 'copy',
+        label: 'Copy Text',
+        action: () => copyText(event),
+      })
+    );
+  }
+
+  menuEl.append(
+    menuButton({
+      icon: 'forward',
+      label: 'Forward',
+      action: () => toast('Forward is coming soon.', 'error'),
+    }),
+    menuButton({
+      icon: 'pin',
+      label: 'Pin',
+      action: () => toast('Pinning is coming soon.', 'error'),
+    }),
+    menuButton({
+      icon: 'info',
+      label: 'Info',
+      action: () => showInfo(event),
+    })
+  );
+
+  if (own) {
+    menuEl.append(document.createElement('hr'));
+    menuEl.append(
+      menuButton({
+        icon: 'trash',
+        label: 'Delete',
+        danger: true,
+        action: () => deleteMessage({
+          client,
+          roomId,
+          event,
+          onReload,
+        }),
+      })
+    );
+  }
+
+  document.body.append(menuEl);
+
+  const rect = menuEl.getBoundingClientRect();
+  const left = Math.max(8, Math.min(window.innerWidth - rect.width - 8, x));
+  const top = Math.max(8, Math.min(window.innerHeight - rect.height - 8, y));
+
+  menuEl.style.left = `${left}px`;
+  menuEl.style.top = `${top}px`;
+
+  setTimeout(() => {
+    document.addEventListener('pointerdown', onOutsidePointer, true);
+    document.addEventListener('keydown', onMenuKey, true);
+  }, 0);
+}
+
+function rowFromTarget(root, target) {
+  const row = target?.closest?.('.yanta-chat-event[data-event-id]');
+  return row && root.contains(row) ? row : null;
+}
+
+function eventForRow(row, getEvents) {
+  const id = row?.dataset?.eventId || '';
+  if (!id) return null;
+
+  return (getEvents?.() || []).find((ev) => eventId(ev) === id) || null;
 }
 
 export function installChatMessageActions({
@@ -270,6 +424,7 @@ export function installChatMessageActions({
   if (!root || root.dataset.chatMessageActionsInstalled === '1') return;
 
   root.dataset.chatMessageActionsInstalled = '1';
+  ensureMenuCss();
 
   let longPress = null;
   let longPressTimer = 0;
@@ -283,10 +438,10 @@ export function installChatMessageActions({
   document.addEventListener('contextmenu', (e) => {
     if (!root || root.hidden) return;
 
-    const row = closestMessageRow(e.target, root);
+    const row = rowFromTarget(root, e.target);
     if (!row) return;
 
-    const event = findEvent(row, getEvents);
+    const event = eventForRow(row, getEvents);
     if (!event) return;
 
     e.preventDefault();
@@ -309,10 +464,10 @@ export function installChatMessageActions({
     if (!root || root.hidden) return;
     if (e.target.closest?.('a,button,input,textarea,select')) return;
 
-    const row = closestMessageRow(e.target, root);
+    const row = rowFromTarget(root, e.target);
     if (!row) return;
 
-    const event = findEvent(row, getEvents);
+    const event = eventForRow(row, getEvents);
     if (!event) return;
 
     e.preventDefault();
@@ -323,10 +478,10 @@ export function installChatMessageActions({
     if (!root || root.hidden) return;
     if (e.pointerType !== 'touch' && e.pointerType !== 'pen') return;
 
-    const row = closestMessageRow(e.target, root);
+    const row = rowFromTarget(root, e.target);
     if (!row) return;
 
-    const event = findEvent(row, getEvents);
+    const event = eventForRow(row, getEvents);
     if (!event) return;
 
     longPress = {
@@ -369,4 +524,8 @@ export function installChatMessageActions({
 
   document.addEventListener('pointerup', clearLongPress, true);
   document.addEventListener('pointercancel', clearLongPress, true);
+
+  window.addEventListener('yanta-chat-room-updated', () => {
+    requestAnimationFrame(() => restoreSelection(root));
+  });
 }

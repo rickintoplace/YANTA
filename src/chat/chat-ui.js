@@ -80,7 +80,6 @@ import {
 
 import {
   openChatExportSheet,
-  pickAndImportYantaChatExport,
 } from './chat-export.js';
 
 import {
@@ -1663,13 +1662,12 @@ function renderRoomList() {
     roomListEl.append(el('div', {
       class: 'yanta-chat-room-empty',
     }, query ? 'No chats found.' : 'No chats yet.'));
-    return;
+  } else {
+    for (const room of rooms) {
+      roomListEl.append(renderRoomRow(room));
+    }
   }
-
-  for (const room of rooms) {
-    roomListEl.append(renderRoomRow(room));
-  }
-
+  
   renderImportedArchiveSectionSoon();
 }
 
@@ -1934,7 +1932,7 @@ async function paginateBackwards() {
     });
 
     await indexTimelineEventsForSearch(timelineWindow.getEvents(), {
-      roomId: room.roomId,
+      roomId: activeRoomId,
     });
 
     renderTimeline({

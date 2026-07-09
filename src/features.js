@@ -13,18 +13,6 @@ import { currentFolderForNew } from './tree.js';
 import { insertAtCursor } from './editor.js';
 import { inlineConfirm } from './inline-ui.js';
 
-import {
-  openGlobalChatSearch,
-} from './chat/chat-search.js';
-
-import {
-  pickAndImportYantaChatExport,
-} from './chat/chat-export.js';
-
-import {
-  resolveMatrixClient,
-} from './chat/chat-actions.js';
-
 const WIKILINK_RE = /\[\[([^\]|\n]+)(?:\|[^\]\n]+)?\]\]/g;
 
 // -------- Backlinks --------------------------------------------

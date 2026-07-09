@@ -223,7 +223,20 @@ import {
   openChat,
   openChatFloating,
   closeChat,
+  jumpToMessageFromSearch,
 } from './chat/chat-ui.js';
+
+import {
+  resolveMatrixClient,
+} from './chat/chat-actions.js';
+
+import {
+  openGlobalChatSearch,
+} from './chat/chat-search.js';
+
+import {
+  pickAndImportYantaChatExport,
+} from './chat/chat-export.js';
 
 import {
   setupChatNotifications,
@@ -371,29 +384,6 @@ function replaceMobileSidebarOverlayWithCurrentRoute() {
     );
 
     return;
-  }
-
-  async function openChatRoute(roomId = null, {
-    replace = false,
-  } = {}) {
-    /*
-      If Chat is launched from the mobile sidebar, remove the sidebar
-      overlay entry first. Otherwise Back from Chat would reopen the
-      sidebar instead of returning to the underlying app route.
-    */
-    replaceMobileSidebarOverlayWithCurrentRoute();
-
-    await openChat({
-      roomId,
-      push: false,
-      replace: false,
-    });
-
-    if (replace) {
-      replaceChatHistory(roomId || null);
-    } else {
-      pushChatHistory(roomId || null);
-    }
   }
 
   if (appSurface === 'note' && state.currentNoteId) {

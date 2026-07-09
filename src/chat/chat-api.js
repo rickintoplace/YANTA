@@ -78,19 +78,7 @@ export function chatProvision(name) {
   return apiFetch('/api/chat/provision', {
     method: 'POST',
     body: {
-      name,
+      username: name,
     },
-  });
-}
-
-/**
- * Repairs/mints the Matrix login secret for an already provisioned Chat account.
- *
- * This is only used for accounts created before AP3/S2, where the browser
- * does not yet have a Vault-synced Matrix password.
- */
-export function chatRepairLoginSecret() {
-  return apiFetch('/api/chat/repair-login-secret', {
-    method: 'POST',
   });
 }

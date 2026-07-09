@@ -1106,10 +1106,10 @@ async function handleChatProvision(env, req, headers) {
   }
 
   const body = await bodyJson(req);
-  const policy = validChatLocalpart(body.username);
+  const policy = validChatLocalpart(body.username ?? body.name);
 
   await audit(env, req, "chat_provision_attempt", user.userId, {
-    requestedLocalpart: policy.localpart || normalizeChatLocalpart(body.username)
+    requestedLocalpart: policy.localpart || normalizeChatLocalpart(body.username ?? body.name)
   });
 
   if (!policy.ok) {

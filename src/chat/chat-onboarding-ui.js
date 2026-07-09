@@ -30,7 +30,7 @@ let availabilitySeq = 0;
 
 const CHAT_DOMAIN = 'yanta.me';
 const HANDLE_MIN = 3;
-const HANDLE_MAX = 32;
+const HANDLE_MAX = 30;
 const HANDLE_RE = /^[a-z0-9](?:[a-z0-9._-]{1,30}[a-z0-9])$/;
 
 const state = {

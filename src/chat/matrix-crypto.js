@@ -66,12 +66,11 @@ let degradedToastAt = 0;
 function reportCryptoError(message, err, detail = {}) {
   console.warn('[YANTA Chat Crypto]', message, err);
 
-  // Avoid toast storms during retry-heavy Matrix startup.
-  if (Date.now() - degradedToastAt > 300_000) {
-    degradedToastAt = Date.now();
-    toast(message || 'Chat encryption is being set up…', 'error');
-  }
-
+  /*
+    Crypto setup can legitimately take time during startup / first sync.
+    Do not show a toast on every app start. The non-blocking Chat banner is
+    enough and can be dismissed by the user.
+  */
   window.dispatchEvent(new CustomEvent('yanta-chat-crypto-degraded', {
     detail: {
       message: message || 'Chat encryption is being set up…',
@@ -729,7 +728,8 @@ async function maybeEnableKeyBackup(client, {
 } = {}) {
   const cryptoApi = getCryptoApi(client);
   if (!cryptoApi) return false;
-    installSecretStorageCallbacks(client);
+
+  installSecretStorageCallbacks(client);
 
   let activeVersion = null;
 
@@ -739,16 +739,19 @@ async function maybeEnableKeyBackup(client, {
 
   if (activeVersion && typeof cryptoApi.checkKeyBackupAndEnable === 'function') {
     await cryptoApi.checkKeyBackupAndEnable();
+    await forceUploadKnownRoomKeysToBackup(client);
     return true;
   }
 
   if (firstDevice && typeof cryptoApi.resetKeyBackup === 'function') {
     await cryptoApi.resetKeyBackup();
+    await forceUploadKnownRoomKeysToBackup(client);
     return true;
   }
 
   if (typeof cryptoApi.checkKeyBackupAndEnable === 'function') {
     await cryptoApi.checkKeyBackupAndEnable();
+    await forceUploadKnownRoomKeysToBackup(client);
     return true;
   }
 
@@ -968,9 +971,8 @@ async function forceUploadKnownRoomKeysToBackup(client) {
   installSecretStorageCallbacks(client);
 
   /*
-    Matrix JS SDK versions expose this differently. We intentionally try a
-    small list of stable/best-effort entry points. Uploading all known sessions
-    is what makes already existing messages readable on future devices.
+    Matrix SDK versions expose this differently.
+    Some methods return void even on success, so "no throw" counts as success.
   */
   const candidates = [
     () => cryptoApi.backupAllGroupSessions?.(),
@@ -983,13 +985,36 @@ async function forceUploadKnownRoomKeysToBackup(client) {
 
   for (const run of candidates) {
     try {
-      const res = await run();
+      const maybePromise = run();
 
-      if (res !== undefined) {
-        return true;
+      if (maybePromise === undefined) {
+        continue;
       }
+
+      await maybePromise;
+      return true;
     } catch (err) {
       console.warn('[YANTA Chat Crypto] room-key backup upload attempt failed', err);
+    }
+  }
+
+  /*
+    Fallback:
+    scheduleAllGroupSessionsForBackup often returns undefined. Try it directly
+    and treat no-throw as success.
+  */
+  for (const fn of [
+    cryptoApi.scheduleAllGroupSessionsForBackup,
+    cryptoApi.backupManager?.scheduleAllGroupSessionsForBackup,
+    client.crypto?.backupManager?.scheduleAllGroupSessionsForBackup,
+  ]) {
+    if (typeof fn !== 'function') continue;
+
+    try {
+      await fn.call(cryptoApi.backupManager || client.crypto?.backupManager || cryptoApi);
+      return true;
+    } catch (err) {
+      console.warn('[YANTA Chat Crypto] fallback room-key backup scheduling failed', err);
     }
   }
 

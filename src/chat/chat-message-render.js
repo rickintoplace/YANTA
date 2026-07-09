@@ -272,6 +272,18 @@ function renderMessageBody(client, content = {}, context = {}) {
 
 function readByOther(room, event, ownUserId) {
   try {
+    /*
+      Important:
+      room.getReceiptsForEvent(event) only returns receipts exactly on this
+      event. In Matrix, a read receipt on a later event also means all previous
+      events were read. room.getUsersReadUpTo(event) handles that ordering.
+    */
+    const users = room.getUsersReadUpTo?.(event) || [];
+
+    if (users.some((userId) => userId && userId !== ownUserId)) {
+      return true;
+    }
+
     const receipts = room.getReceiptsForEvent?.(event) || [];
 
     return receipts.some((receipt) =>
@@ -290,7 +302,7 @@ function statusIcon(client, room, event) {
 
   if (!ownUserId || sender !== ownUserId) return null;
 
-  const status = event.status || '';
+  const status = String(event.status || '');
 
   const wrap = el('span', {
     class: 'yanta-chat-status',
@@ -298,23 +310,28 @@ function statusIcon(client, room, event) {
   });
 
   if (status && status !== 'sent') {
-    wrap.innerHTML = lucide('clock-3', 12);
+    wrap.classList.add('is-sending');
+    wrap.innerHTML = lucide('circle-dashed', 12);
     wrap.title = 'Sending';
     return wrap;
   }
 
   if (readByOther(room, event, ownUserId)) {
+    wrap.classList.add('is-read');
     wrap.innerHTML = lucide('check-check', 12);
     wrap.title = 'Read';
     return wrap;
   }
 
+  /*
+    Matrix does not expose Signal-style "delivered to device" receipts by
+    default. This is server-accepted/sent state.
+  */
+  wrap.classList.add('is-sent');
   wrap.innerHTML = lucide('check', 12);
   wrap.title = 'Sent';
-
   return wrap;
 }
-
 function replyPreviewNode(event, eventMap, room) {
   const content = clearContent(event);
   const replyId = content?.['m.relates_to']?.['m.in_reply_to']?.event_id;
@@ -415,6 +432,92 @@ function renderSingleMessage(event, {
   return row;
 }
 
+function isRenderableStateEvent(event) {
+  const type = event?.getType?.() || event?.event?.type || '';
+
+  return (
+    type === 'm.room.member' ||
+    type === 'm.room.name' ||
+    type === 'm.room.avatar' ||
+    type === 'm.room.topic'
+  );
+}
+
+function stateEventText(event, room) {
+  const type = event?.getType?.() || event?.event?.type || '';
+  const sender = event?.getSender?.() || event?.event?.sender || '';
+  const content = event?.getContent?.() || event?.event?.content || {};
+  const prev = event?.event?.unsigned?.prev_content || {};
+
+  if (type === 'm.room.name') {
+    const next = String(content.name || '').trim();
+    const before = String(prev.name || '').trim();
+
+    if (next && before && next !== before) {
+      return `${senderName(room, sender)} changed the chat name to “${next}”.`;
+    }
+
+    if (next) return `${senderName(room, sender)} named the chat “${next}”.`;
+  }
+
+  if (type === 'm.room.topic') {
+    const next = String(content.topic || '').trim();
+    if (next) return `${senderName(room, sender)} changed the topic.`;
+  }
+
+  if (type === 'm.room.avatar') {
+    return `${senderName(room, sender)} changed the chat picture.`;
+  }
+
+  if (type === 'm.room.member') {
+    const stateKey = event?.getStateKey?.() || event?.event?.state_key || sender;
+    const memberName = senderName(room, stateKey);
+    const membership = content.membership || '';
+    const prevMembership = prev.membership || '';
+
+    const nextDisplay = String(content.displayname || '').trim();
+    const prevDisplay = String(prev.displayname || '').trim();
+
+    const nextAvatar = String(content.avatar_url || '').trim();
+    const prevAvatar = String(prev.avatar_url || '').trim();
+
+    if (nextDisplay && prevDisplay && nextDisplay !== prevDisplay) {
+      return `${prevDisplay} is now ${nextDisplay}.`;
+    }
+
+    if (nextDisplay && !prevDisplay && stateKey === sender) {
+      return `${stateKey} set their profile name to ${nextDisplay}.`;
+    }
+
+    if (nextAvatar && nextAvatar !== prevAvatar) {
+      return `${memberName} changed their profile picture.`;
+    }
+
+    if (membership === 'join' && prevMembership !== 'join') {
+      return `${memberName} joined the chat.`;
+    }
+
+    if (membership === 'leave' && prevMembership === 'join') {
+      return `${memberName} left the chat.`;
+    }
+  }
+
+  return '';
+}
+
+function renderSystemEvent(event, room) {
+  const text = stateEventText(event, room);
+
+  if (!text) return null;
+
+  return el('div', {
+    class: 'yanta-chat-system-event',
+    dataset: {
+      eventId: eventId(event),
+    },
+  }, text);
+}
+
 /**
  * Render a Matrix TimelineWindow event list.
  *
@@ -438,9 +541,13 @@ export function renderTimelineEvents(events = [], context = {}) {
   let previousDayTs = 0;
 
   for (const event of events) {
-    if (!isMessageLike(event) || isEditEvent(event)) continue;
-
     const ts = eventTs(event);
+
+    const shouldRender =
+      (isMessageLike(event) && !isEditEvent(event)) ||
+      isRenderableStateEvent(event);
+
+    if (!shouldRender) continue;
 
     if (!previousDayTs || !sameDay(previousDayTs, ts)) {
       fragment.append(el('div', {
@@ -449,6 +556,16 @@ export function renderTimelineEvents(events = [], context = {}) {
 
       previousDayTs = ts;
       previousRenderable = null;
+    }
+
+    if (isRenderableStateEvent(event)) {
+      const node = renderSystemEvent(event, context.room);
+
+      if (node) {
+        fragment.append(node);
+      }
+
+      continue;
     }
 
     const sameSender =

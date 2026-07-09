@@ -121,6 +121,14 @@ import {
   getChatPreferences,
 } from './chat-preferences.js';
 
+import {
+  chatSettings,
+} from './chat-store.js';
+
+import {
+  installChatMessageActions,
+} from './chat-message-actions.js';
+
 import './chat.css';
 
 
@@ -134,6 +142,8 @@ const ROOM_LIST_MAX_WIDTH = 460;
 const MOBILE_MQ = window.matchMedia('(max-width: 760px)');
 
 const CHAT_FLOATING_OVERLAY_ID = 'chat-floating';
+
+const CHAT_CRYPTO_BANNER_DISMISS_KEY = 'chat.cryptoBanner.dismissed.v1';
 
 let chatOverlayRegistered = false;
 let chatMode = 'surface'; // surface | floating
@@ -165,6 +175,9 @@ let chatComposer = null;
 
 // Onboarding automatisch öffnen, wenn kein Account existiert.
 let onboardingAutoOpenedAt = 0;
+
+let replyTargetEvent = null;
+let replyBarEl = null;
 
 async function openChatOnboardingAutomatically() {
   /*
@@ -659,6 +672,24 @@ function ensureRoot() {
   root.style.setProperty('--chat-list-width', `${roomListWidth}px`);
 
   bindRootEvents();
+
+  installChatMessageActions({
+    root,
+    getClient: () => client,
+    getRoomId: () => activeRoomId,
+    getEvents: () => timelineWindow?.getEvents?.() || [],
+    onReply: (event) => {
+      setReplyTarget(event);
+      chatComposer?.focus?.();
+    },
+    onReload: async () => {
+      await reloadActiveTimeline({
+        keepBottom: isTimelineNearBottom(),
+        scrollBottom: isTimelineNearBottom(),
+      });
+    },
+  });
+
   bindListPaneResize();
   bindFloatingDrag();
 
@@ -862,6 +893,31 @@ function bindRootEvents() {
       toast('Could not reconnect Chat.', 'error');
     }
   });
+
+  root.addEventListener('keydown', (e) => {
+    const meta = e.ctrlKey || e.metaKey;
+
+    if (!meta) return;
+
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+
+      if (!replyTargetEvent) {
+        const target = lastReplyCandidate();
+
+        if (target) setReplyTarget(target);
+        return;
+      }
+
+      moveReplyTarget(-1);
+      return;
+    }
+
+    if (e.key === 'ArrowDown' && replyTargetEvent) {
+      e.preventDefault();
+      moveReplyTarget(1);
+    }
+  }, true);
 
   chatComposer = setupChatComposer({
     form: composerEl,
@@ -1428,18 +1484,43 @@ async function ensureClient() {
   }
 }
 
-function setChatCryptoBanner(message = '') {
+async function setChatCryptoBanner(message = '') {
   const banner = root?.querySelector('[data-chat-crypto-banner]');
   if (!banner) return;
-  if (!message) {
+
+  const clean = String(message || '').trim();
+
+  if (!clean) {
     banner.hidden = true;
     return;
   }
+
+  try {
+    const dismissed = await chatSettings.get(CHAT_CRYPTO_BANNER_DISMISS_KEY, null);
+
+    if (
+      dismissed?.message === clean &&
+      Number(dismissed.dismissedAt || 0) > Date.now() - 24 * 60 * 60 * 1000
+    ) {
+      banner.hidden = true;
+      return;
+    }
+  } catch {}
+
   const text = banner.querySelector('[data-chat-crypto-banner-text]');
-  if (text) text.textContent = message;
+  if (text) text.textContent = clean;
+
   banner.hidden = false;
-  banner.querySelector('[data-chat-crypto-banner-close]')?.addEventListener('click', () => {
+
+  banner.querySelector('[data-chat-crypto-banner-close]')?.addEventListener('click', async () => {
     banner.hidden = true;
+
+    try {
+      await chatSettings.set(CHAT_CRYPTO_BANNER_DISMISS_KEY, {
+        message: clean,
+        dismissedAt: Date.now(),
+      });
+    } catch {}
   }, { once: true });
 }
 
@@ -1461,9 +1542,24 @@ function setChatConnectionBanner(message = '') {
 function bindAppLevelChatEvents() {
 
   window.addEventListener('yanta-chat-crypto-degraded', (e) => {
-    setChatCryptoBanner(e.detail?.message || 'Chat encryption is being set up…');
+    setChatCryptoBanner(e.detail?.message || 'Chat encryption is being set up…')
+      .catch((err) => {
+        console.warn('[YANTA Chat] Could not show crypto banner', err);
+      });
   });
 
+  window.addEventListener('yanta-chat-jump-to-message', (e) => {
+    const detail = e.detail || {};
+
+    jumpToMessageFromSearch({
+      roomId: detail.roomId,
+      eventId: detail.eventId,
+    }).catch((err) => {
+      console.warn('[YANTA Chat] Could not jump to gallery message', err);
+      toast('Could not jump to message.', 'error');
+    });
+  });
+  
   window.addEventListener('yanta-chat-key-backup-ready', (e) => {
     if (e.detail?.ok) setChatCryptoBanner('');
   });
@@ -2231,6 +2327,88 @@ async function sendFileWithOptimisticBubble(file) {
   }
 }
 
+function clearReplyTarget() {
+  replyTargetEvent = null;
+  renderReplyBar();
+}
+
+function setReplyTarget(event) {
+  replyTargetEvent = event || null;
+  renderReplyBar();
+}
+
+function renderReplyBar() {
+  const footer = root?.querySelector('.yanta-chat-composer-wrap');
+
+  if (!footer) return;
+
+  replyBarEl?.remove();
+  replyBarEl = null;
+
+  if (!replyTargetEvent) return;
+
+  const sender = replyTargetEvent.getSender?.() || '';
+  const preview = messagePreview(replyTargetEvent) || 'Message';
+
+  replyBarEl = el('div', {
+    class: 'yanta-chat-reply-target-bar',
+  });
+
+  replyBarEl.innerHTML = `
+    <span>${lucide('reply', 14)}</span>
+    <span class="yanta-chat-reply-target-main">
+      <strong>${escapeHtml(sender)}</strong>
+      <small>${escapeHtml(preview)}</small>
+    </span>
+    <button class="icon-btn" type="button" data-clear-reply title="Cancel reply" aria-label="Cancel reply">
+      ${lucide('x', 14)}
+    </button>
+  `;
+
+  replyBarEl.querySelector('[data-clear-reply]')?.addEventListener('click', clearReplyTarget);
+
+  footer.prepend(replyBarEl);
+}
+
+function lastReplyCandidate() {
+  const own = client?.getUserId?.() || '';
+  const events = timelineWindow?.getEvents?.() || [];
+
+  for (let i = events.length - 1; i >= 0; i--) {
+    const ev = events[i];
+    const type = ev?.getType?.();
+
+    if (type !== 'm.room.message' && type !== 'm.sticker') continue;
+    if (ev?.isRedacted?.()) continue;
+    if (ev?.getSender?.() === own) continue;
+
+    return ev;
+  }
+
+  return null;
+}
+
+function moveReplyTarget(delta) {
+  const events = (timelineWindow?.getEvents?.() || [])
+    .filter((ev) => {
+      const type = ev?.getType?.();
+      return (type === 'm.room.message' || type === 'm.sticker') && !ev?.isRedacted?.();
+    });
+
+  if (!events.length) return;
+
+  const currentId = replyTargetEvent?.getId?.() || '';
+  let idx = currentId
+    ? events.findIndex((ev) => ev.getId?.() === currentId)
+    : events.length - 1;
+
+  if (idx < 0) idx = events.length - 1;
+
+  idx = Math.max(0, Math.min(events.length - 1, idx + delta));
+
+  setReplyTarget(events[idx]);
+}
+
 async function sendCurrentMessage(textOverride = '') {
   const text = String(textOverride || '').trim();
 
@@ -2240,6 +2418,23 @@ async function sendCurrentMessage(textOverride = '') {
     if (typingActive) {
       typingActive = false;
       await client.sendTyping(activeRoomId, false, 0);
+    }
+
+    const replyId = replyTargetEvent?.getId?.() || '';
+
+    if (replyId) {
+      await client.sendMessage(activeRoomId, {
+        msgtype: 'm.text',
+        body: text,
+        'm.relates_to': {
+          'm.in_reply_to': {
+            event_id: replyId,
+          },
+        },
+      });
+
+      clearReplyTarget();
+      return;
     }
 
     await client.sendTextMessage(activeRoomId, text);

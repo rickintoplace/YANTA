@@ -361,15 +361,15 @@ function ensureChatSidebarBadgeCss() {
 
 .yanta-chat-sidebar-badge {
   position: absolute;
-  top: 2px;
-  right: 2px;
-  min-width: 16px;
-  height: 16px;
+  top: -2px;
+  right: -1px;
+  min-width: 14px;
+  height: 14px;
   display: inline-grid;
   place-items: center;
   padding: 0 4px;
   border-radius: 999px;
-  background: var(--red, #ef4444);
+  background: var(--accent, #ef4444);
   color: #fff;
   font-size: 10px;
   font-weight: 850;

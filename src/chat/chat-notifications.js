@@ -258,37 +258,50 @@ import {
     };
   }
   
-  function showWebNotification(payload) {
+  async function showWebNotification(payload) {
     if (!('Notification' in window)) return false;
     if (Notification.permission !== 'granted') return false;
-  
+
+    const options = {
+      body: payload.body,
+      tag: `yanta-chat-${payload.roomId}`,
+      renotify: true,
+      badge: '/android-chrome-192x192.png',
+      icon: '/android-chrome-192x192.png',
+      data: {
+        roomId: payload.roomId,
+        eventId: payload.eventId,
+        url: payload.url,
+      },
+    };
+
+    try {
+      const reg = await navigator.serviceWorker?.ready?.catch(() => null);
+
+      if (reg?.showNotification) {
+        await reg.showNotification(payload.title, options);
+        return true;
+      }
+    } catch (err) {
+      console.warn('[YANTA Chat Notifications] Service Worker notification failed', err);
+    }
+
     try {
       const old = webNotificationsByRoom.get(payload.roomId);
-  
+
       try {
         old?.close?.();
       } catch {}
-  
-      const n = new Notification(payload.title, {
-        body: payload.body,
-        tag: `yanta-chat-${payload.roomId}`,
-        renotify: true,
-        badge: '/icons/icon-192.png',
-        icon: '/icons/icon-192.png',
-        data: {
-          roomId: payload.roomId,
-          eventId: payload.eventId,
-          url: payload.url,
-        },
-      });
-  
+
+      const n = new Notification(payload.title, options);
+
       n.onclick = () => {
         try {
           window.focus();
         } catch {}
-  
+
         location.hash = `#chat/${encodeURIComponent(payload.roomId)}`;
-  
+
         import('./chat-ui.js')
           .then(({ openChat }) => openChat({
             roomId: payload.roomId,
@@ -298,12 +311,12 @@ import {
             console.warn('[YANTA Chat Notifications] Could not open chat from notification', err);
             toast('Could not open chat.', 'error');
           });
-  
+
         n.close();
       };
-  
+
       webNotificationsByRoom.set(payload.roomId, n);
-  
+
       return true;
     } catch (err) {
       console.warn('[YANTA Chat Notifications] Web notification failed', err);
@@ -414,7 +427,7 @@ import {
     const nativeShown = androidShowChatNotification(payload);
   
     if (!nativeShown) {
-      showWebNotification(payload);
+      await showWebNotification(payload);
     }
   }
   
@@ -523,11 +536,15 @@ import {
   
     window.addEventListener('yanta-chat-ready', () => {
       refreshChatUnreadBadge();
-  
+
       ensureNativeChatPusher().catch((err) => {
         console.warn('[YANTA Chat Notifications] Pusher setup failed', err);
         toast('Could not set up chat push notifications.', 'error');
       });
+
+      if ('Notification' in window && Notification.permission === 'default') {
+        requestChatWebNotificationPermission().catch(() => {});
+      }
     });
   
     document.addEventListener('visibilitychange', () => {

@@ -72,7 +72,7 @@ function registerDialogOverlayRoute() {
   .yanta-dialog-modal {
     position: fixed;
     inset: 0;
-    z-index: 520;
+    z-index: 1520;
   
     display: flex;
     align-items: center;

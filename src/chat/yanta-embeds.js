@@ -850,7 +850,7 @@ import {
     }
   
     if (embed.type === 'drawing') {
-      return 'Drawing image attached above';
+      return '';
     }
   
     return '';

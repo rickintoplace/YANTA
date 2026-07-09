@@ -42,6 +42,10 @@ import {
     purgeChatMediaCacheForItem,
   } from './chat-media-cache.js';
   
+  import {
+  showMenu,
+} from '../tree.js';
+
   const CHAT_GALLERY_OVERLAY_ID = 'chat-gallery';
   
   const TABS = [
@@ -515,6 +519,78 @@ import {
         deleteItem(item);
       });
     });
+
+    root.querySelectorAll('[data-gallery-item-json]').forEach((node) => {
+      let longPressTimer = 0;
+
+      const itemFromNode = () => JSON.parse(node.dataset.galleryItemJson || '{}');
+
+      const openItemMenu = (x, y) => {
+        const item = itemFromNode();
+
+        if (!item?.id) return;
+
+        showMenu(x, y, [
+          {
+            label: 'Jump to Message',
+            icon: 'message-square',
+            action: () => {
+              window.dispatchEvent(new CustomEvent('yanta-chat-jump-to-message', {
+                detail: {
+                  roomId: item.roomId,
+                  eventId: item.eventId,
+                },
+              }));
+
+              closeChatGallery();
+            },
+          },
+          {
+            label: 'Download',
+            icon: 'download',
+            action: () => downloadItem(item),
+          },
+          {
+            label: 'Delete',
+            icon: 'trash',
+            danger: true,
+            action: () => deleteItem(item),
+          },
+        ], {
+          align: 'start',
+        });
+      };
+
+      node.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openItemMenu(e.clientX, e.clientY);
+      });
+
+      node.addEventListener('pointerdown', (e) => {
+        if (e.pointerType !== 'touch' && e.pointerType !== 'pen') return;
+
+        longPressTimer = window.setTimeout(() => {
+          try {
+            navigator.vibrate?.(8);
+          } catch {}
+
+          openItemMenu(e.clientX, e.clientY);
+        }, 480);
+      }, true);
+
+      node.addEventListener('pointermove', () => {
+        clearTimeout(longPressTimer);
+      }, true);
+
+      node.addEventListener('pointerup', () => {
+        clearTimeout(longPressTimer);
+      }, true);
+
+      node.addEventListener('pointercancel', () => {
+        clearTimeout(longPressTimer);
+      }, true);
+    });
   }
   
   function rowActionsHtml(item) {
@@ -565,69 +641,117 @@ import {
     `;
   }
   
-  async function hydrateImages(root, items) {
-    imageObserver?.disconnect();
-  
-    const cards = [...root.querySelectorAll('.yanta-chat-gallery-image')];
-  
-    imageObserver = new IntersectionObserver((entries) => {
-      for (const entry of entries) {
-        if (!entry.isIntersecting) continue;
-  
-        const card = entry.target;
-        const item = JSON.parse(card.dataset.galleryItemJson || '{}');
-        const img = card.querySelector('[data-gallery-image]');
-        const placeholder = card.querySelector('.yanta-chat-gallery-empty');
-  
-        imageObserver.unobserve(card);
-  
-        const mxcUrl = item.thumbnailMxcUrl || item.mxcUrl;
-        const encryptedFile = item.thumbnailEncryptedFile || item.encryptedFile || null;
-  
-        mxcToBlobUrl(currentClient, mxcUrl, {
-          thumbnail: !encryptedFile,
-          w: 360,
-          h: 360,
-          encryptedFile,
-          mimeType: item.mime || '',
-          roomId: item.roomId,
-        })
-          .then((url) => {
-            if (!img?.isConnected) return;
-  
-            img.src = url;
-            img.hidden = false;
-  
-            if (placeholder) placeholder.hidden = true;
-          })
-          .catch((err) => {
-            console.warn('[YANTA Chat Gallery] Could not load thumbnail', err);
-            toast('Could not load gallery image.', 'error');
-  
-            if (placeholder) {
-              placeholder.innerHTML = `
-                <div>
-                  ${lucide('image-off', 24)}
-                  <small>Preview failed</small>
-                </div>
-              `;
-            }
-          });
+async function hydrateImages(root, items) {
+  imageObserver?.disconnect();
+
+  const cards = [...root.querySelectorAll('.yanta-chat-gallery-image')];
+
+  const hydrateCard = async (card) => {
+    if (!card?.isConnected || card.dataset.hydrated === '1') return;
+
+    card.dataset.hydrated = '1';
+
+    const item = JSON.parse(card.dataset.galleryItemJson || '{}');
+    const img = card.querySelector('[data-gallery-image]');
+    const placeholder = card.querySelector('.yanta-chat-gallery-empty');
+
+    const mxcUrl = item.thumbnailMxcUrl || item.mxcUrl;
+    const encryptedFile = item.thumbnailEncryptedFile || item.encryptedFile || null;
+
+    if (!mxcUrl) {
+      if (placeholder) {
+        placeholder.innerHTML = `
+          <div>
+            ${lucide('image-off', 24)}
+            <small>No media URL</small>
+          </div>
+        `;
       }
-    }, {
-      root: root.querySelector('.yanta-chat-gallery-body'),
-      threshold: 0.01,
-      rootMargin: '200px',
-    });
-  
-    for (const card of cards) {
-      imageObserver.observe(card);
+
+      return;
     }
-  
-    if (!items.length) {
-      imageObserver.disconnect();
+
+    try {
+      const url = await mxcToBlobUrl(currentClient, mxcUrl, {
+        thumbnail: !encryptedFile,
+        w: 360,
+        h: 360,
+        encryptedFile,
+        mimeType: item.mime || '',
+        roomId: item.roomId,
+      });
+
+      if (!img?.isConnected) return;
+
+      img.src = url;
+      img.hidden = false;
+
+      if (placeholder) placeholder.hidden = true;
+    } catch (err) {
+      console.warn('[YANTA Chat Gallery] Could not load thumbnail', err);
+
+      if (placeholder) {
+        placeholder.innerHTML = `
+          <div>
+            ${lucide('image-off', 24)}
+            <small>Preview failed</small>
+          </div>
+        `;
+      }
     }
+  };
+
+  if (!('IntersectionObserver' in window)) {
+    await Promise.all(cards.map(hydrateCard));
+    return;
   }
+
+  imageObserver = new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      if (!entry.isIntersecting) continue;
+
+      imageObserver.unobserve(entry.target);
+      hydrateCard(entry.target);
+    }
+  }, {
+    root: root.querySelector('.yanta-chat-gallery-body'),
+    threshold: 0.01,
+    rootMargin: '320px',
+  });
+
+  for (const card of cards) {
+    imageObserver.observe(card);
+  }
+
+  /*
+    Safari/PWA edge case:
+    IntersectionObserver can miss already-visible children when the overlay was
+    hidden right before rendering. Hydrate viewport cards once after paint.
+  */
+  requestAnimationFrame(() => {
+    const body = root.querySelector('.yanta-chat-gallery-body');
+    const bodyRect = body?.getBoundingClientRect();
+
+    if (!bodyRect) return;
+
+    for (const card of cards) {
+      const r = card.getBoundingClientRect();
+
+      const visible =
+        r.bottom >= bodyRect.top - 320 &&
+        r.top <= bodyRect.bottom + 320;
+
+      if (visible) {
+        imageObserver?.unobserve(card);
+        hydrateCard(card);
+      }
+    }
+  });
+
+  if (!items.length) {
+    imageObserver.disconnect();
+  }
+}
   
   async function renderGallery() {
     const node = ensureOverlay();

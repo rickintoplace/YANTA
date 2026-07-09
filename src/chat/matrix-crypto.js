@@ -67,7 +67,7 @@ function reportCryptoError(message, err, detail = {}) {
   console.warn('[YANTA Chat Crypto]', message, err);
 
   // Avoid toast storms during retry-heavy Matrix startup.
-  if (Date.now() - degradedToastAt > 15_000) {
+  if (Date.now() - degradedToastAt > 300_000) {
     degradedToastAt = Date.now();
     toast(message || 'Chat encryption is being set up…', 'error');
   }
@@ -851,15 +851,19 @@ export function waitForChatPrepared(client, {
         client.on?.(ev, onSync);
       }
     } catch (err) {
+      /*
+        Kein Toast: Das ist kein User-Fehlerpfad. finalizeChatCryptoAfterSync()
+        läuft trotzdem weiter; echte Probleme melden sich über
+        yanta-chat-crypto-degraded und den Chat-Banner.
+      */
       console.warn('[YANTA Chat Crypto] could not subscribe to Matrix sync state', err);
-      toast('Could not monitor Chat sync state.', 'error');
       finish(false);
       return;
     }
 
     timer = window.setTimeout(() => {
-      console.warn('[YANTA Chat Crypto] Matrix sync did not reach PREPARED before key backup timeout');
-      toast('Chat encryption sync is still preparing.', 'error');
+      // Kein Toast: langsamer Initial-Sync ist normal, kein Fehler.
+      console.info('[YANTA Chat Crypto] Matrix sync did not reach PREPARED before key backup timeout');
       finish(false);
     }, Math.max(3000, Number(timeoutMs || 20_000)));
   });

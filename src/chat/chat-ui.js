@@ -3,9 +3,21 @@
 // ============================================================
 
 import {
-  EventTimeline,
-  TimelineWindow,
-} from 'matrix-js-sdk';
+  ensureMatrixLoaded,
+} from './matrix-session.js';
+/*
+  Warum kein statischer matrix-js-sdk-Import:
+  Das SDK ist mehrere MB groß und wird über ensureMatrixLoaded() lazy
+  geladen. Ein statischer Import hier würde es in das Haupt-Bundle ziehen.
+*/
+let EventTimeline = null;
+let TimelineWindow = null;
+async function ensureMatrixSdkClasses() {
+  if (TimelineWindow && EventTimeline) return;
+  const { sdk } = await ensureMatrixLoaded();
+  EventTimeline = sdk.EventTimeline;
+  TimelineWindow = sdk.TimelineWindow;
+}
 
 import {
   el,
@@ -115,6 +127,26 @@ let typingActive = false;
 
 let chatComposer = null;
 
+// Onboarding automatisch öffnen, wenn kein Account existiert.
+let onboardingAutoOpenedAt = 0;
+
+async function openChatOnboardingAutomatically() {
+  /*
+    Ein User ohne Chat-Account soll beim Öffnen von Chat direkt das
+    Onboarding sehen.
+    Der Zeit-Guard verhindert Modal-Loops, falls ensureClient() durch
+    Retry-Aktionen mehrfach läuft.
+  */
+  if (Date.now() - onboardingAutoOpenedAt < 5000) return;
+  onboardingAutoOpenedAt = Date.now();
+  try {
+    await openChatOnboardingFromUi();
+  } catch (err) {
+    console.warn('[YANTA Chat] Could not auto-open Chat onboarding', err);
+    toast('Could not open Chat setup.', 'error');
+  }
+}
+
 function isMobile() {
   return MOBILE_MQ.matches;
 }
@@ -171,13 +203,41 @@ function renderChatSetupState({
   action = null,
 } = {}) {
   const node = ensureRoot();
-
   const empty = node.querySelector('[data-chat-empty]');
   const roomShell = node.querySelector('[data-chat-room]');
-
   if (roomShell) roomShell.hidden = true;
+  /*
+    Warum:
+    Mobile zeigt ohne aktiven Raum nur die Listen-Pane. Der Setup-Zustand
+    muss deshalb auch dort sichtbar sein, sonst wirkt Chat leer/kaputt.
+  */
+  if (roomListEl && !client) {
+    roomListEl.replaceChildren();
+    roomListEl.insertAdjacentHTML('afterbegin', `
+      <div class="yanta-chat-room-empty yanta-chat-room-setup">
+        ${lucide('sparkles', 16)}
+        <strong>${escapeHtml(title)}</strong>
+        <small>${escapeHtml(message)}</small>
+        ${
+          actionLabel
+            ? `<button class="btn primary compact" data-chat-setup-action-list>
+                 ${escapeHtml(actionLabel)}
+               </button>`
+            : ''
+        }
+      </div>
+    `);
+    const listBtn = roomListEl.querySelector('[data-chat-setup-action-list]');
+    if (listBtn && action) {
+      listBtn.addEventListener('click', () => {
+        action().catch((err) => {
+          console.warn('[YANTA Chat] setup action failed', err);
+          toast('Could not continue Chat setup.', 'error');
+        });
+      });
+    }
+  }
   if (!empty) return;
-
   empty.hidden = false;
   empty.innerHTML = `
     <div>${lucide('messages-square', 28)}</div>
@@ -185,18 +245,13 @@ function renderChatSetupState({
     <p>${escapeHtml(message)}</p>
     ${
       actionLabel
-        ? `
-          <button class="btn primary" data-chat-setup-action>
-            ${lucide('sparkles', 14)}
-            ${escapeHtml(actionLabel)}
-          </button>
-        `
+        ? `<button class="btn primary" data-chat-setup-action>
+             ${lucide('sparkles', 14)} ${escapeHtml(actionLabel)}
+           </button>`
         : ''
     }
   `;
-
   const btn = empty.querySelector('[data-chat-setup-action]');
-
   if (btn && action) {
     btn.addEventListener('click', () => {
       action().catch((err) => {
@@ -517,6 +572,14 @@ function ensureRoot() {
         </footer>
       </section>
     </main>
+
+    <div class="yanta-chat-crypto-banner" data-chat-crypto-banner hidden>
+      ${lucide('shield-alert', 14)}
+      <span data-chat-crypto-banner-text>Chat encryption is being set up…</span>
+      <button class="icon-btn" data-chat-crypto-banner-close title="Dismiss" aria-label="Dismiss">
+        ${lucide('x', 14)}
+      </button>
+    </div>
   `;
 
   document.body.append(root);
@@ -995,6 +1058,7 @@ async function reloadActiveTimeline({
   scrollBottom = false,
 } = {}) {
   if (!client || !activeRoomId) return;
+  await ensureMatrixSdkClasses();
 
   const room = roomById(activeRoomId);
 
@@ -1078,13 +1142,15 @@ async function ensureClient() {
 
   if (!hasLocalCredentials && !hasVaultAccount) {
     renderChatSetupState({
-      title: 'Chat is being set up…',
+      title: 'Activate Chat',
       message:
-        'If you activated Chat on another device, keep YANTA open until Cloud Sync delivers your encrypted Chat key. If this is your first time, activate Chat now.',
+        'Choose your permanent Chat handle to activate encrypted messaging. ' +
+        'If you already activated Chat on another device, keep YANTA open until Cloud Sync arrives.',
       actionLabel: 'Activate Chat',
       action: openChatOnboardingFromUi,
     });
-
+    // Onboarding direkt öffnen, nicht auf einen zweiten Klick warten.
+    openChatOnboardingAutomatically();
     return null;
   }
 
@@ -1141,7 +1207,30 @@ async function ensureClient() {
   }
 }
 
+function setChatCryptoBanner(message = '') {
+  const banner = root?.querySelector('[data-chat-crypto-banner]');
+  if (!banner) return;
+  if (!message) {
+    banner.hidden = true;
+    return;
+  }
+  const text = banner.querySelector('[data-chat-crypto-banner-text]');
+  if (text) text.textContent = message;
+  banner.hidden = false;
+  banner.querySelector('[data-chat-crypto-banner-close]')?.addEventListener('click', () => {
+    banner.hidden = true;
+  }, { once: true });
+}
+
 function bindAppLevelChatEvents() {
+
+  window.addEventListener('yanta-chat-crypto-degraded', (e) => {
+    setChatCryptoBanner(e.detail?.message || 'Chat encryption is being set up…');
+  });
+  window.addEventListener('yanta-chat-key-backup-ready', (e) => {
+    if (e.detail?.ok) setChatCryptoBanner('');
+  });
+
   window.addEventListener('yanta-chat-message', (e) => {
     const detail = e.detail || {};
 
@@ -1532,6 +1621,7 @@ function renderRoomHeader(room) {
 }
 
 async function initTimeline(room) {
+  await ensureMatrixSdkClasses();
   setOlderLoadingVisible(true);
 
   try {

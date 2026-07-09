@@ -21,8 +21,25 @@ import {
   setupVoiceRecorder,
 } from './chat-voice.js';
 
+import { androidChatMediaStatus } from '../native/android-bridge.js';
+
 const DRAFT_DEBOUNCE_MS = 400;
 const MOBILE_MQ = window.matchMedia('(max-width: 760px), (pointer: coarse)');
+
+function assertNativeChatAttachmentsAvailable() {
+  const status = androidChatMediaStatus();
+  if (!status.isAndroidApp) return true;
+  if (status.supported === false) {
+    console.warn('[YANTA Chat] Android attachments unavailable', status);
+    toast('Attachments are not supported by this Android app version yet. Please update the YANTA app.', 'error');
+    return false;
+  }
+  if (status.filePickerSupported === false || status.storageGranted === false) {
+    toast('Allow file access for YANTA in Android settings to send attachments.', 'error');
+    return false;
+  }
+  return true;
+}
 
 function isDesktopSendEnter() {
   return !MOBILE_MQ.matches;
@@ -188,6 +205,7 @@ export function setupChatComposer({
             label: 'Photo',
             icon: 'image',
             action: () => {
+              if (!assertNativeChatAttachmentsAvailable()) return;
               imageInput?.click();
             },
           },
@@ -195,6 +213,7 @@ export function setupChatComposer({
             label: 'File',
             icon: 'paperclip',
             action: () => {
+              if (!assertNativeChatAttachmentsAvailable()) return;
               fileInput?.click();
             },
           },

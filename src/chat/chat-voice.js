@@ -14,6 +14,8 @@ import {
   sendVoiceMessage,
 } from './chat-media.js';
 
+import { androidChatMediaStatus } from '../native/android-bridge.js';
+
 const MIME_CANDIDATES = [
   'audio/ogg;codecs=opus',
   'audio/webm;codecs=opus',
@@ -36,6 +38,13 @@ function supportedMimeType() {
 }
 
 function assertMicrophoneMayBeRequested() {
+  const native = androidChatMediaStatus();
+  if (native.isAndroidApp && native.supported === false) {
+    throw new Error('Voice messages are not supported by this Android app version yet. Please update the YANTA app.');
+  }
+  if (native.isAndroidApp && native.micGranted === false) {
+    throw new Error('Microphone permission is missing. Allow the microphone for YANTA in Android settings.');
+  }
   if (!window.isSecureContext) {
     throw new Error('Voice recording requires HTTPS.');
   }
@@ -63,6 +72,22 @@ function assertMicrophoneMayBeRequested() {
 
   if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
     throw new Error('Voice recording is not supported in this browser.');
+  }
+
+  /**
+   * Maps getUserMedia/MediaRecorder failures to actionable user messages.
+   */
+  function friendlyMicError(err) {
+    const name = err?.name || '';
+    const inAndroidApp = androidChatMediaStatus().isAndroidApp;
+    if (name === 'NotAllowedError' || name === 'SecurityError') {
+      return inAndroidApp
+        ? 'Microphone permission is missing. Allow the microphone for YANTA in Android settings.'
+        : 'Microphone permission was denied.';
+    }
+    if (name === 'NotFoundError') return 'No microphone was found on this device.';
+    if (name === 'NotReadableError') return 'The microphone is in use by another app.';
+    return err?.message || 'Could not start voice recording.';
   }
 }
 
@@ -476,7 +501,7 @@ export function setupVoiceRecorder({
       cleanup();
       setState('IDLE');
       console.warn('[YANTA Chat] Could not start voice recording', err);
-      toast(err?.message || 'Could not start voice recording.', 'error');
+      toast(friendlyMicError(err), 'error');
     }
   }
 

@@ -1,4 +1,4 @@
-import { state } from '../core.js';
+import { state, toast, } from '../core.js';
 
 let installed = false;
 let syncTimer = 0;
@@ -225,7 +225,22 @@ export function setupAndroidBridge() {
     openExactAlarmSettings: openAndroidExactAlarmSettings,
     syncNow: syncNativeSnapshotNow,
     syncSoon: scheduleNativeSnapshotSync,
+    chatMediaStatus: androidChatMediaStatus,
+    showChatNotification: androidShowChatNotification,
+    clearChatNotifications: androidClearChatNotifications,
+    chatPushConfig: androidChatPushConfig,
   };
+
+  // Native → JS: Tap auf eine Chat-Notification öffnet den Raum.
+  window.addEventListener('yanta-android-chat-notification-open', (e) => {
+    const roomId = e.detail?.roomId || '';
+    import('../chat/chat-ui.js')
+      .then(({ openChat }) => openChat({ roomId, push: true }))
+      .catch((err) => {
+        console.warn('[YANTA Android Bridge] Could not open chat from notification', err);
+        toast('Could not open chat.', 'error');
+      });
+  });
 
   window.addEventListener('yanta-android-notification-status', (e) => {
     lastNotificationStatus = {
@@ -256,4 +271,67 @@ export function setupAndroidBridge() {
   });
 
   window.setTimeout(() => scheduleNativeSnapshotSync(1500), 1500);
+}
+
+/**
+ * Chat media capability status from the native Android app.
+ *
+ * Contract (native side, later): getChatMediaStatus() returns JSON like
+ * { micGranted: bool, filePickerSupported: bool, storageGranted: bool }.
+ * Missing bridge method means the installed app version cannot handle
+ * chat media yet — callers must show feedback instead of failing silently.
+ */
+export function androidChatMediaStatus() {
+  if (!isAndroidApp()) {
+    return { isAndroidApp: false, supported: true };
+  }
+  if (typeof window.YantaAndroid?.getChatMediaStatus !== 'function') {
+    return { isAndroidApp: true, supported: false, reason: 'bridge-missing' };
+  }
+  const raw = callAndroid('getChatMediaStatus');
+  try {
+    return { isAndroidApp: true, supported: true, ...JSON.parse(raw || '{}') };
+  } catch (err) {
+    console.warn('[YANTA Android Bridge] getChatMediaStatus parse failed', err);
+    return { isAndroidApp: true, supported: false, reason: 'bridge-error' };
+  }
+}
+
+/**
+ * Shows a native chat notification. Returns false when the installed
+ * Android app version does not support chat notifications yet.
+ */
+export function androidShowChatNotification(notification) {
+  if (!isAndroidApp()) return false;
+  if (typeof window.YantaAndroid?.showChatNotification !== 'function') {
+    return false;
+  }
+  callAndroid('showChatNotification', safeJson(notification));
+  return true;
+}
+
+/**
+ * Clears native chat notifications (all, or for one room).
+ */
+export function androidClearChatNotifications(roomId = '') {
+  callAndroid('clearChatNotifications', String(roomId || ''));
+}
+
+/**
+ * Native push configuration for Matrix HTTP pushers.
+ *
+ * Contract (native side, later): getChatPushConfig() returns JSON like
+ * { pushkey: '<fcm-token>', gatewayUrl: 'https://push.yanta.me/_matrix/push/v1/notify', appId: 'page.yanta.android' }.
+ */
+export function androidChatPushConfig() {
+  if (!isAndroidApp()) return null;
+  if (typeof window.YantaAndroid?.getChatPushConfig !== 'function') return null;
+  const raw = callAndroid('getChatPushConfig');
+  try {
+    const config = JSON.parse(raw || 'null');
+    return config?.pushkey && config?.gatewayUrl ? config : null;
+  } catch (err) {
+    console.warn('[YANTA Android Bridge] getChatPushConfig parse failed', err);
+    return null;
+  }
 }

@@ -225,6 +225,10 @@ import {
   closeChat,
 } from './chat/chat-ui.js';
 
+import {
+  setupChatNotifications,
+} from './chat/chat-notifications.js';
+
 let sharePreviewLocked = false;
 
 let noteTitleSaveTimer = 0;
@@ -1973,6 +1977,7 @@ async function init() {
   setupFloatingCreate();
   setupRss();
   setupChat();
+  setupChatNotifications();
   await ensureAiSessionsFolder();
   window.addEventListener('yanta-public-share-changed', () => {
     renderShareIndicator();

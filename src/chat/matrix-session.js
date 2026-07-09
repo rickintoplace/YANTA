@@ -23,6 +23,7 @@ import {
   getChatCredentials,
   setChatCredentials,
   clearChatCredentials,
+  chatSettings,
 } from './chat-store.js';
 
 import {
@@ -48,6 +49,77 @@ let unknownTokenRetryInFlight = false;
 
 const MATRIX_STORE_DB_PREFIX = 'yanta-chat-matrix-sdk';
 const INITIAL_SYNC_LIMIT = 30;
+
+const CHAT_CRYPTO_READY_KEY = 'chat.crypto.ready.v1';
+
+/**
+ * Reads the device-local crypto-ready marker for the given Matrix identity.
+ * The marker is keyed to userId+deviceId, so re-logins invalidate it automatically.
+ */
+async function readChatCryptoReadyMarker(credentials) {
+  try {
+    const marker = await chatSettings.get(CHAT_CRYPTO_READY_KEY, null);
+    if (!marker) return null;
+    if (marker.userId !== credentials.userId) return null;
+    if (marker.deviceId !== credentials.deviceId) return null;
+    return marker;
+  } catch (err) {
+    console.warn('[YANTA Chat Session] could not read crypto-ready marker', err);
+    return null;
+  }
+}
+
+async function writeChatCryptoReadyMarker(credentials, extra = {}) {
+  try {
+    await chatSettings.set(CHAT_CRYPTO_READY_KEY, {
+      userId: credentials.userId,
+      deviceId: credentials.deviceId,
+      verifiedAt: Date.now(),
+      ...extra,
+    });
+  } catch (err) {
+    console.warn('[YANTA Chat Session] could not write crypto-ready marker', err);
+  }
+}
+
+async function clearChatCryptoReadyMarker() {
+  try {
+    await chatSettings.del(CHAT_CRYPTO_READY_KEY);
+  } catch (err) {
+    console.warn('[YANTA Chat Session] could not clear crypto-ready marker', err);
+  }
+}
+
+/**
+ * Cheap, silent health check for already bootstrapped devices.
+ * No toasts, no degraded events — pure verification.
+ */
+async function verifyChatCryptoQuietly(client) {
+  try {
+    const cryptoApi = client.getCrypto?.() || client.crypto;
+    if (!cryptoApi) return { ok: false };
+    const crossSigningReady =
+      await cryptoApi.isCrossSigningReady?.().catch(() => false);
+    let backupVersion = null;
+    try {
+      backupVersion = await cryptoApi.getActiveSessionBackupVersion?.();
+    } catch {}
+    if (!backupVersion && typeof cryptoApi.checkKeyBackupAndEnable === 'function') {
+      await cryptoApi.checkKeyBackupAndEnable().catch(() => {});
+      try {
+        backupVersion = await cryptoApi.getActiveSessionBackupVersion?.();
+      } catch {}
+    }
+    return {
+      ok: !!crossSigningReady && !!backupVersion,
+      crossSigningReady: !!crossSigningReady,
+      backupVersion: String(backupVersion?.version || backupVersion || ''),
+    };
+  } catch (err) {
+    console.warn('[YANTA Chat Session] quiet crypto verification failed', err);
+    return { ok: false };
+  }
+}
 
 function reportSessionError(message, err) {
   console.warn('[YANTA Chat Session]', err);
@@ -793,10 +865,20 @@ export async function startChatSession({
         sessionId,
       });
 
-      const cryptoBootstrapResult = await bootstrapChatCrypto(client, {
-        firstDevice,
-        account: normalizedAccount,
-      });
+      /*
+        Auf einem fertig eingerichteten Gerät ist das volle Crypto-Bootstrap
+        (Secret Storage, Cross-Signing-UIA, Backup-Restore) unnötig und laut.
+        Der Ready-Marker (userId+deviceId) überspringt es; ein stiller Check
+        verifiziert den Zustand. Nur wenn der stille Check scheitert, läuft
+        einmalig die volle Reparatur.
+      */
+        const cryptoReadyMarker = await readChatCryptoReadyMarker(credentials);
+        const cryptoBootstrapResult = cryptoReadyMarker
+          ? { ok: true, degraded: false, skipped: true, steps: {} }
+          : await bootstrapChatCrypto(client, {
+              firstDevice,
+              account: normalizedAccount,
+            });
 
       /*
         Publish the client before startClient().
@@ -838,11 +920,44 @@ export async function startChatSession({
         Doing this before startClient() can make the SDK miss backup account
         data and old messages show "sent before this device logged in".
       */
-      const keyBackupResult = await finalizeChatCryptoAfterSync(client, {
-        sdk,
-        firstDevice,
-        timeoutMs: 25_000,
-      });
+
+        let keyBackupResult;
+        if (cryptoReadyMarker) {
+          keyBackupResult = await verifyChatCryptoQuietly(client);
+          if (!keyBackupResult.ok) {
+            console.warn('[YANTA Chat Session] crypto-ready marker was stale; running full repair');
+            await clearChatCryptoReadyMarker();
+            /*
+              Der stille Check kann an fehlendem Cross-Signing scheitern.
+              finalizeChatCryptoAfterSync() repariert nur Key Backup, daher
+              vorher einmal das volle Bootstrap (idempotent) laufen lassen.
+            */
+            await bootstrapChatCrypto(client, {
+              firstDevice: false,
+              account: normalizedAccount,
+            });
+            keyBackupResult = await finalizeChatCryptoAfterSync(client, {
+              sdk,
+              firstDevice: false,
+              timeoutMs: 25_000,
+            });
+          }
+        } else {
+          keyBackupResult = await finalizeChatCryptoAfterSync(client, {
+            sdk,
+            firstDevice,
+            timeoutMs: 25_000,
+          });
+        }
+        if (
+          cryptoBootstrapResult.ok &&
+          !cryptoBootstrapResult.degraded &&
+          keyBackupResult.ok
+        ) {
+          await writeChatCryptoReadyMarker(credentials, {
+            backupVersion: keyBackupResult.backupVersion || '',
+          });
+        }
 
       activeSession.crypto = {
         bootstrap: cryptoBootstrapResult,
@@ -1166,11 +1281,23 @@ export async function repairChatEncryptionBackupNow({
       throw new Error('Chat session is not connected.');
     }
 
+/*
+      Manuelle Reparatur bedeutet: der User vermutet ein Crypto-Problem.
+      Der Ready-Marker darf den nächsten Start dann nicht mehr abkürzen,
+      bis die Reparatur nachweislich erfolgreich war.
+    */
+    await clearChatCryptoReadyMarker();
     const result = await finalizeChatCryptoAfterSync(session.client, {
       sdk: session.sdk,
       firstDevice: false,
       timeoutMs: 30_000,
     });
+    if (result.ok && session.credentials) {
+      await writeChatCryptoReadyMarker(session.credentials, {
+        backupVersion: result.backupVersion || '',
+        repairedAt: Date.now(),
+      });
+    }
 
     session.crypto = {
       ...(session.crypto || {}),

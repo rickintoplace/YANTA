@@ -270,6 +270,7 @@ export const VAULT_SYNCED_SETTING_KEYS = new Set([
   */
   'chatAccount',
   'chatRecovery',
+  'chatRoomKeys',
 ]);
 
 function copyVaultSettingsToCompactDoc(targetDoc) {

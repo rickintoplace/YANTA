@@ -961,6 +961,22 @@ function bindRootEvents() {
   MOBILE_MQ.addEventListener?.('change', () => {
     updateMobileState();
   });
+
+  root.addEventListener('click', (e) => {
+    const btn = e.target.closest?.('[data-chat-crypto-banner-close]');
+    if (!btn) return;
+
+    const banner = root.querySelector('[data-chat-crypto-banner]');
+    const text = root.querySelector('[data-chat-crypto-banner-text]')?.textContent || '';
+
+    writeCryptoBannerDismiss(text);
+
+    if (banner) banner.hidden = true;
+
+    e.preventDefault();
+    e.stopPropagation();
+  }, true);
+
 }
 
 function bindFloatingDrag() {
@@ -1484,7 +1500,26 @@ async function ensureClient() {
   }
 }
 
-async function setChatCryptoBanner(message = '') {
+const CHAT_CRYPTO_BANNER_DISMISS_LS_KEY = 'yanta.chat.cryptoBanner.dismissed.v1';
+
+function readCryptoBannerDismiss() {
+  try {
+    return JSON.parse(localStorage.getItem(CHAT_CRYPTO_BANNER_DISMISS_LS_KEY) || 'null');
+  } catch {
+    return null;
+  }
+}
+
+function writeCryptoBannerDismiss(message) {
+  try {
+    localStorage.setItem(CHAT_CRYPTO_BANNER_DISMISS_LS_KEY, JSON.stringify({
+      message: String(message || ''),
+      dismissedAt: Date.now(),
+    }));
+  } catch {}
+}
+
+function setChatCryptoBanner(message = '') {
   const banner = root?.querySelector('[data-chat-crypto-banner]');
   if (!banner) return;
 
@@ -1495,33 +1530,20 @@ async function setChatCryptoBanner(message = '') {
     return;
   }
 
-  try {
-    const dismissed = await chatSettings.get(CHAT_CRYPTO_BANNER_DISMISS_KEY, null);
+  const dismissed = readCryptoBannerDismiss();
 
-    if (
-      dismissed?.message === clean &&
-      Number(dismissed.dismissedAt || 0) > Date.now() - 24 * 60 * 60 * 1000
-    ) {
-      banner.hidden = true;
-      return;
-    }
-  } catch {}
+  if (
+    dismissed &&
+    Number(dismissed.dismissedAt || 0) > Date.now() - 7 * 24 * 60 * 60 * 1000
+  ) {
+    banner.hidden = true;
+    return;
+  }
 
   const text = banner.querySelector('[data-chat-crypto-banner-text]');
   if (text) text.textContent = clean;
 
   banner.hidden = false;
-
-  banner.querySelector('[data-chat-crypto-banner-close]')?.addEventListener('click', async () => {
-    banner.hidden = true;
-
-    try {
-      await chatSettings.set(CHAT_CRYPTO_BANNER_DISMISS_KEY, {
-        message: clean,
-        dismissedAt: Date.now(),
-      });
-    } catch {}
-  }, { once: true });
 }
 
 function setChatConnectionBanner(message = '') {
@@ -1542,10 +1564,7 @@ function setChatConnectionBanner(message = '') {
 function bindAppLevelChatEvents() {
 
   window.addEventListener('yanta-chat-crypto-degraded', (e) => {
-    setChatCryptoBanner(e.detail?.message || 'Chat encryption is being set up…')
-      .catch((err) => {
-        console.warn('[YANTA Chat] Could not show crypto banner', err);
-      });
+    setChatCryptoBanner(e.detail?.message || 'Chat encryption is being set up…');
   });
 
   window.addEventListener('yanta-chat-jump-to-message', (e) => {
@@ -1559,7 +1578,7 @@ function bindAppLevelChatEvents() {
       toast('Could not jump to message.', 'error');
     });
   });
-  
+
   window.addEventListener('yanta-chat-key-backup-ready', (e) => {
     if (e.detail?.ok) setChatCryptoBanner('');
   });

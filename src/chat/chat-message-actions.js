@@ -3,8 +3,6 @@
 // ============================================================
 
 import {
-  escapeHtml,
-  lucide,
   toast,
 } from '../core.js';
 
@@ -38,18 +36,23 @@ function eventContent(event) {
 }
 
 function eventText(event) {
-  const content = eventContent(event);
-  return String(content.body || '').trim();
+  return String(eventContent(event).body || '').trim();
 }
 
 function isOwnEvent(client, event) {
-  const own = client?.getUserId?.() || '';
-  return !!own && eventSender(event) === own;
+  return !!client?.getUserId?.() && eventSender(event) === client.getUserId();
 }
 
-function eventFromRow(row, getEvents) {
-  const id = row?.dataset?.eventId || '';
+function closestMessageRow(target, root) {
+  const row = target?.closest?.('.yanta-chat-event[data-event-id]');
 
+  if (!row || !root?.contains?.(row)) return null;
+
+  return row;
+}
+
+function findEvent(row, getEvents) {
+  const id = row?.dataset?.eventId || '';
   if (!id) return null;
 
   return (getEvents?.() || []).find((ev) => eventId(ev) === id) || null;
@@ -97,8 +100,6 @@ async function editMessage({
 
   if (!clean || clean === oldText.trim()) return;
 
-  const targetId = eventId(event);
-
   await client.sendMessage(roomId, {
     msgtype: 'm.text',
     body: `* ${clean}`,
@@ -108,7 +109,7 @@ async function editMessage({
     },
     'm.relates_to': {
       rel_type: 'm.replace',
-      event_id: targetId,
+      event_id: eventId(event),
     },
   });
 
@@ -139,9 +140,7 @@ async function deleteMessage({
   await onReload?.();
 }
 
-async function infoMessage(event) {
-  const content = eventContent(event);
-
+async function showInfo(event) {
   await yantaConfirm({
     title: 'Message info',
     message: [
@@ -150,7 +149,7 @@ async function infoMessage(event) {
       `Sender: ${eventSender(event)}`,
       `Time: ${new Date(event?.getTs?.() || Date.now()).toLocaleString()}`,
       '',
-      messagePreview(event) || JSON.stringify(content).slice(0, 500),
+      messagePreview(event) || eventText(event) || 'No preview',
     ].join('\n'),
     confirmLabel: 'OK',
     cancelLabel: '',
@@ -158,17 +157,49 @@ async function infoMessage(event) {
   });
 }
 
-function openContextMenu({
+function selectedIds() {
+  try {
+    return new Set(JSON.parse(sessionStorage.getItem('yanta.chat.selectedMessages.v1') || '[]'));
+  } catch {
+    return new Set();
+  }
+}
+
+function writeSelectedIds(ids) {
+  try {
+    sessionStorage.setItem('yanta.chat.selectedMessages.v1', JSON.stringify([...ids]));
+  } catch {}
+}
+
+function toggleSelect(row) {
+  const id = row?.dataset?.eventId || '';
+  if (!id) return;
+
+  const ids = selectedIds();
+
+  if (ids.has(id)) {
+    ids.delete(id);
+    row.classList.remove('is-selected');
+  } else {
+    ids.add(id);
+    row.classList.add('is-selected');
+  }
+
+  writeSelectedIds(ids);
+}
+
+function openMenu({
   x,
   y,
+  row,
+  event,
   client,
   roomId,
-  event,
   onReply,
   onReload,
 }) {
   const own = isOwnEvent(client, event);
-  const text = eventText(event);
+  const hasText = !!eventText(event);
 
   showMenu(x, y, [
     {
@@ -186,22 +217,15 @@ function openContextMenu({
         onReload,
       }),
     },
-    text && {
-      label: 'Copy Text',
-      icon: 'copy',
-      action: () => copyText(event),
-    },
     {
       label: 'Select',
       icon: 'check-square',
-      action: () => {
-        window.dispatchEvent(new CustomEvent('yanta-chat-select-message', {
-          detail: {
-            roomId,
-            eventId: eventId(event),
-          },
-        }));
-      },
+      action: () => toggleSelect(row),
+    },
+    hasText && {
+      label: 'Copy Text',
+      icon: 'copy',
+      action: () => copyText(event),
     },
     {
       label: 'Forward',
@@ -216,7 +240,7 @@ function openContextMenu({
     {
       label: 'Info',
       icon: 'info',
-      action: () => infoMessage(event),
+      action: () => showInfo(event),
     },
     own && 'hr',
     own && {
@@ -247,84 +271,86 @@ export function installChatMessageActions({
 
   root.dataset.chatMessageActionsInstalled = '1';
 
+  let longPress = null;
   let longPressTimer = 0;
-  let longPressStart = null;
 
-  function clearLongPress() {
+  const clearLongPress = () => {
     clearTimeout(longPressTimer);
     longPressTimer = 0;
-    longPressStart = null;
-  }
+    longPress = null;
+  };
 
-  root.addEventListener('contextmenu', (e) => {
-    const row = e.target.closest?.('.yanta-chat-event[data-event-id]');
+  document.addEventListener('contextmenu', (e) => {
+    if (!root || root.hidden) return;
 
-    if (!row || !root.contains(row)) return;
+    const row = closestMessageRow(e.target, root);
+    if (!row) return;
 
-    const event = eventFromRow(row, getEvents);
-
+    const event = findEvent(row, getEvents);
     if (!event) return;
 
     e.preventDefault();
     e.stopPropagation();
+    e.stopImmediatePropagation?.();
 
-    openContextMenu({
+    openMenu({
       x: e.clientX,
       y: e.clientY,
+      row,
+      event,
       client: getClient?.(),
       roomId: getRoomId?.(),
-      event,
       onReply,
       onReload,
     });
   }, true);
 
-  root.addEventListener('dblclick', (e) => {
-    const row = e.target.closest?.('.yanta-chat-event[data-event-id]');
+  document.addEventListener('dblclick', (e) => {
+    if (!root || root.hidden) return;
+    if (e.target.closest?.('a,button,input,textarea,select')) return;
 
-    if (!row || !root.contains(row)) return;
+    const row = closestMessageRow(e.target, root);
+    if (!row) return;
 
-    if (e.target.closest?.('a, button, input, textarea, select')) return;
-
-    const event = eventFromRow(row, getEvents);
-
+    const event = findEvent(row, getEvents);
     if (!event) return;
 
     e.preventDefault();
     onReply?.(event);
   }, true);
 
-  root.addEventListener('pointerdown', (e) => {
+  document.addEventListener('pointerdown', (e) => {
+    if (!root || root.hidden) return;
     if (e.pointerType !== 'touch' && e.pointerType !== 'pen') return;
 
-    const row = e.target.closest?.('.yanta-chat-event[data-event-id]');
+    const row = closestMessageRow(e.target, root);
+    if (!row) return;
 
-    if (!row || !root.contains(row)) return;
-
-    const event = eventFromRow(row, getEvents);
-
+    const event = findEvent(row, getEvents);
     if (!event) return;
 
-    longPressStart = {
+    longPress = {
+      pointerId: e.pointerId,
       x: e.clientX,
       y: e.clientY,
-      pointerId: e.pointerId,
+      row,
       event,
     };
 
     longPressTimer = window.setTimeout(() => {
-      if (!longPressStart) return;
+      if (!longPress) return;
 
       try {
         navigator.vibrate?.(8);
       } catch {}
 
-      openContextMenu({
-        x: longPressStart.x,
-        y: longPressStart.y,
+      openMenu({
+        x: longPress.x,
+        y: longPress.y,
+        row: longPress.row,
+        event: longPress.event,
         client: getClient?.(),
         roomId: getRoomId?.(),
-        event: longPressStart.event,
         onReply,
         onReload,
       });
@@ -333,14 +359,14 @@ export function installChatMessageActions({
     }, 480);
   }, true);
 
-  root.addEventListener('pointermove', (e) => {
-    if (!longPressStart || e.pointerId !== longPressStart.pointerId) return;
+  document.addEventListener('pointermove', (e) => {
+    if (!longPress || e.pointerId !== longPress.pointerId) return;
 
-    const dist = Math.hypot(e.clientX - longPressStart.x, e.clientY - longPressStart.y);
-
-    if (dist > 10) clearLongPress();
+    if (Math.hypot(e.clientX - longPress.x, e.clientY - longPress.y) > 10) {
+      clearLongPress();
+    }
   }, true);
 
-  root.addEventListener('pointerup', clearLongPress, true);
-  root.addEventListener('pointercancel', clearLongPress, true);
+  document.addEventListener('pointerup', clearLongPress, true);
+  document.addEventListener('pointercancel', clearLongPress, true);
 }

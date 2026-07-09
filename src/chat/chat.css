@@ -1886,3 +1886,9 @@
   color: var(--text-faint);
   font-size: 11px;
 }
+
+.yanta-chat-event.is-selected .yanta-chat-bubble {
+  outline: 2px solid color-mix(in srgb, var(--accent) 70%, transparent);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent);
+}

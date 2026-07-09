@@ -1750,6 +1750,31 @@ async function init() {
     });
   };
 
+  window.yantaChatKeyDebug = async () => {
+    const session = window.yantaChatSession;
+    if (!session?.client) {
+      throw new Error('Chat session is not running.');
+    }
+
+    const crypto = await import('./chat/matrix-crypto.js');
+
+    const exported = await crypto.exportChatRoomKeysToVault(session.client, {
+      reason: 'manual-debug-export',
+    });
+
+    const imported = await crypto.importChatRoomKeysFromVault(session.client, {
+      reason: 'manual-debug-import',
+    });
+
+    return {
+      userId: session.client.getUserId?.(),
+      deviceId: session.client.getDeviceId?.(),
+      exported,
+      imported,
+      vaultHasRoomKeys: !!(await crypto.readChatRoomKeysFromVault()),
+    };
+  };
+
   try {
     /*
       Chat auto-resume must be installed even without local Matrix credentials.

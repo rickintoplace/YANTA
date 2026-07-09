@@ -56,6 +56,9 @@ import {
 const CHAT_ACCOUNT_KEY = 'chatAccount';
 const CHAT_RECOVERY_KEY = 'chatRecovery';
 
+const CHAT_ROOM_KEYS_KEY = 'chatRoomKeys';
+const ROOM_KEYS_AAD = 'yanta-chat-room-keys-v1';
+
 const PASSWORD_AAD = 'yanta-chat-password-v1';
 const RECOVERY_AAD = 'yanta-chat-recovery-v1';
 
@@ -1378,6 +1381,272 @@ export async function getChatCryptoHealth(client) {
       available: false,
       crossSigningReady: false,
       backupVersion: '',
+      error: err?.message || String(err),
+    };
+  }
+}
+
+function normalizeExportedRoomKeys(value) {
+  if (!value) return [];
+
+  if (Array.isArray(value)) return value;
+
+  if (Array.isArray(value.room_keys)) return value.room_keys;
+  if (Array.isArray(value.rooms)) return value.rooms;
+  if (Array.isArray(value.sessions)) return value.sessions;
+  if (Array.isArray(value.exported_room_keys)) return value.exported_room_keys;
+
+  return [];
+}
+
+async function callRoomKeyExportCandidate(fn, receiver) {
+  if (typeof fn !== 'function') return null;
+
+  /*
+    SDK compatibility:
+    - client.exportRoomKeys()
+    - crypto.exportRoomKeys()
+    Some builds accept options, some accept none.
+  */
+  try {
+    return await fn.call(receiver);
+  } catch (err1) {
+    try {
+      return await fn.call(receiver, {});
+    } catch (err2) {
+      console.warn('[YANTA Chat Crypto] room-key export candidate failed', err1, err2);
+      return null;
+    }
+  }
+}
+
+async function exportRoomKeysFromClient(client) {
+  const cryptoApi = getCryptoApi(client);
+
+  const candidates = [
+    [client?.exportRoomKeys, client],
+    [cryptoApi?.exportRoomKeys, cryptoApi],
+    [client?.crypto?.exportRoomKeys, client.crypto],
+  ];
+
+  for (const [fn, receiver] of candidates) {
+    const result = await callRoomKeyExportCandidate(fn, receiver);
+    const keys = normalizeExportedRoomKeys(result);
+
+    if (keys.length) return keys;
+  }
+
+  return [];
+}
+
+async function callRoomKeyImportCandidate(fn, receiver, keys) {
+  if (typeof fn !== 'function') return false;
+
+  try {
+    await fn.call(receiver, keys, {
+      progressCallback: () => {},
+    });
+    return true;
+  } catch (err1) {
+    try {
+      await fn.call(receiver, keys);
+      return true;
+    } catch (err2) {
+      console.warn('[YANTA Chat Crypto] room-key import candidate failed', err1, err2);
+      return false;
+    }
+  }
+}
+
+async function importRoomKeysIntoClient(client, keys = []) {
+  if (!client || !Array.isArray(keys) || !keys.length) {
+    return {
+      imported: false,
+      count: 0,
+    };
+  }
+
+  const cryptoApi = getCryptoApi(client);
+
+  const candidates = [
+    [client?.importRoomKeys, client],
+    [cryptoApi?.importRoomKeys, cryptoApi],
+    [client?.crypto?.importRoomKeys, client.crypto],
+  ];
+
+  for (const [fn, receiver] of candidates) {
+    const ok = await callRoomKeyImportCandidate(fn, receiver, keys);
+
+    if (ok) {
+      return {
+        imported: true,
+        count: keys.length,
+      };
+    }
+  }
+
+  return {
+    imported: false,
+    count: keys.length,
+  };
+}
+
+/**
+ * Exports all locally known Matrix Megolm room keys into the synced YANTA Vault.
+ *
+ * This is the "Signal-quality" fallback path:
+ * Matrix key backup is still used, but YANTA also carries a zero-knowledge
+ * encrypted room-key snapshot through Sync2.
+ */
+export async function exportChatRoomKeysToVault(client, {
+  reason = 'manual',
+} = {}) {
+  try {
+    if (!client) {
+      throw new Error('Matrix client is missing.');
+    }
+
+    installSecretStorageCallbacks(client);
+
+    const keys = await exportRoomKeysFromClient(client);
+
+    if (!keys.length) {
+      return {
+        ok: false,
+        count: 0,
+        reason: 'no-exported-keys',
+      };
+    }
+
+    const payload = {
+      v: 1,
+      exportedAt: Date.now(),
+      reason,
+      userId: client.getUserId?.() || '',
+      deviceId: client.getDeviceId?.() || client.deviceId || '',
+      count: keys.length,
+      keys,
+    };
+
+    const contentKey = await contentKeyForVaultChatSecrets();
+    const encrypted = await encryptBytes(
+      contentKey,
+      utf8Encode(JSON.stringify(payload)),
+      ROOM_KEYS_AAD
+    );
+
+    setVaultSetting(CHAT_ROOM_KEYS_KEY, {
+      v: 1,
+      keyEnc: utf8Decode(encrypted),
+      count: keys.length,
+      updatedAt: Date.now(),
+      sourceUserId: payload.userId,
+      sourceDeviceId: payload.deviceId,
+    });
+
+    emitChatCryptoEvent('yanta-chat-room-keys-exported', {
+      ok: true,
+      count: keys.length,
+      reason,
+    });
+
+    return {
+      ok: true,
+      count: keys.length,
+      sourceDeviceId: payload.deviceId,
+    };
+  } catch (err) {
+    reportCryptoError('Could not export Chat room keys to Vault.', err, {
+      step: 'export-room-keys-to-vault',
+      reason,
+    });
+
+    return {
+      ok: false,
+      count: 0,
+      error: err?.message || String(err),
+    };
+  }
+}
+
+export async function readChatRoomKeysFromVault() {
+  try {
+    const rec = vaultSettingsMap().get(CHAT_ROOM_KEYS_KEY) || null;
+
+    if (!rec?.keyEnc) return null;
+
+    const contentKey = await contentKeyForVaultChatSecrets();
+    const plain = await decryptBytes(
+      contentKey,
+      utf8Encode(rec.keyEnc),
+      ROOM_KEYS_AAD
+    );
+
+    const payload = JSON.parse(utf8Decode(plain));
+
+    if (!payload || payload.v !== 1 || !Array.isArray(payload.keys)) {
+      throw new Error('Unsupported YANTA Chat room-key snapshot.');
+    }
+
+    return payload;
+  } catch (err) {
+    reportCryptoError('Could not read Chat room keys from Vault.', err, {
+      step: 'read-room-keys-from-vault',
+    });
+
+    return null;
+  }
+}
+
+/**
+ * Imports the synced YANTA room-key snapshot into the current Matrix device.
+ */
+export async function importChatRoomKeysFromVault(client, {
+  reason = 'startup',
+} = {}) {
+  try {
+    if (!client) {
+      throw new Error('Matrix client is missing.');
+    }
+
+    installSecretStorageCallbacks(client);
+
+    const payload = await readChatRoomKeysFromVault();
+
+    if (!payload?.keys?.length) {
+      return {
+        ok: false,
+        imported: false,
+        count: 0,
+        reason: 'no-vault-room-keys',
+      };
+    }
+
+    const result = await importRoomKeysIntoClient(client, payload.keys);
+
+    emitChatCryptoEvent('yanta-chat-room-keys-imported', {
+      ok: result.imported,
+      count: result.count,
+      reason,
+    });
+
+    return {
+      ok: result.imported,
+      imported: result.imported,
+      count: result.count,
+      exportedAt: payload.exportedAt || 0,
+      sourceDeviceId: payload.deviceId || payload.sourceDeviceId || '',
+    };
+  } catch (err) {
+    reportCryptoError('Could not import Chat room keys from Vault.', err, {
+      step: 'import-room-keys-from-vault',
+      reason,
+    });
+
+    return {
+      ok: false,
+      imported: false,
+      count: 0,
       error: err?.message || String(err),
     };
   }

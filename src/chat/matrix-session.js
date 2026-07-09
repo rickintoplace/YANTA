@@ -34,8 +34,9 @@ import {
   installSecretStorageCallbacks,
   hasVaultChatAccount,
   finalizeChatCryptoAfterSync,
+  exportChatRoomKeysToVault,
+  importChatRoomKeysFromVault,
 } from './matrix-crypto.js';
-
 import {
   waitForVaultDoc,
   vaultSettingsMap,
@@ -977,6 +978,15 @@ export async function startChatSession({
             timeoutMs: 25_000,
           });
         }
+
+        const yantaRoomKeyImport = await importChatRoomKeysFromVault(client, {
+          reason: 'chat-session-start',
+        });
+
+        const yantaRoomKeyExport = await exportChatRoomKeysToVault(client, {
+          reason: 'chat-session-start-auto-refresh',
+        });
+
         if (
           cryptoBootstrapResult.ok &&
           !cryptoBootstrapResult.degraded &&
@@ -984,13 +994,17 @@ export async function startChatSession({
         ) {
           await writeChatCryptoReadyMarker(credentials, {
             backupVersion: keyBackupResult.backupVersion || '',
+            yantaRoomKeysImported: yantaRoomKeyImport?.imported === true,
+            yantaRoomKeyCount: yantaRoomKeyImport?.count || 0,
           });
         }
 
-      activeSession.crypto = {
-        bootstrap: cryptoBootstrapResult,
-        keyBackup: keyBackupResult,
-      };
+        activeSession.crypto = {
+          bootstrap: cryptoBootstrapResult,
+          keyBackup: keyBackupResult,
+          yantaRoomKeyImport,
+          yantaRoomKeyExport,
+        };
 
       emit('yanta-chat-sync-state', {
         state: 'STARTED',
@@ -1224,9 +1238,27 @@ function installChatAutoResumeWatchers() {
       toast('Could not watch Chat account sync.', 'error');
     });
 
-  window.addEventListener('yanta-vault-hydrated', () => {
-    requestChatAutoResume('vault-hydrated', 600);
-  });
+    window.addEventListener('yanta-vault-hydrated', () => {
+      requestChatAutoResume('vault-hydrated', 600);
+
+      if (activeSession?.client) {
+        importChatRoomKeysFromVault(activeSession.client, {
+          reason: 'vault-hydrated',
+        })
+          .then((res) => {
+            if (res?.imported) {
+              emit('yanta-chat-key-backup-ready', {
+                ok: true,
+                source: 'yanta-vault-room-keys',
+                count: res.count || 0,
+              });
+            }
+          })
+          .catch((err) => {
+            console.warn('[YANTA Chat Session] could not import Vault room keys after hydrate', err);
+          });
+      }
+    });
 
   window.addEventListener('yanta-sync2-runtime-ready', () => {
     requestChatAutoResume('sync2-runtime-ready', 1200);
@@ -1320,6 +1352,12 @@ export async function repairChatEncryptionBackupNow({
       firstDevice: false,
       timeoutMs: 30_000,
     });
+
+    const yantaRoomKeyExport = await exportChatRoomKeysToVault(session.client, {
+      reason,
+    });
+
+    result.yantaRoomKeyExport = yantaRoomKeyExport;
     if (result.ok && session.credentials) {
       await writeChatCryptoReadyMarker(session.credentials, {
         backupVersion: result.backupVersion || '',
@@ -1330,6 +1368,7 @@ export async function repairChatEncryptionBackupNow({
     session.crypto = {
       ...(session.crypto || {}),
       keyBackup: result,
+      yantaRoomKeyExport,
     };
 
     if (result.ok) {

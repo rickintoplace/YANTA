@@ -36,7 +36,7 @@ import {
 } from '../sync2/app-engine.js';
 
 const DB_NAME = 'yanta-chat';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 
 const STORES = {
   kv: 'kv',
@@ -44,6 +44,7 @@ const STORES = {
   mediaCache: 'mediaCache',
   searchIndex: 'searchIndex',
   drafts: 'drafts',
+  archives: 'archives',
 };
 
 const CHAT_CREDENTIALS_KEY = 'chat.credentials.enc';
@@ -131,6 +132,16 @@ function openChatDb() {
           keyPath: 'roomId',
         });
 
+        s.createIndex('updatedAt', 'updatedAt', { unique: false });
+      }
+
+      if (!db.objectStoreNames.contains(STORES.archives)) {
+        const s = db.createObjectStore(STORES.archives, {
+          keyPath: 'id',
+        });
+
+        s.createIndex('kind', 'kind', { unique: false });
+        s.createIndex('importedAt', 'importedAt', { unique: false });
         s.createIndex('updatedAt', 'updatedAt', { unique: false });
       }
     };
@@ -434,6 +445,58 @@ export function createChatObjectStore(storeName) {
     },
 
     /**
+     * Scans this object store/index with an IndexedDB cursor.
+     *
+     * Return false from onValue to stop early.
+     */
+    async cursor({
+      indexName = '',
+      query = null,
+      direction = 'next',
+      onValue,
+    } = {}) {
+      if (typeof onValue !== 'function') {
+        throw new Error('cursor onValue callback missing');
+      }
+
+      try {
+        const { tx, store: s } = await txStore(storeName);
+        const source = indexName ? s.index(indexName) : s;
+
+        await new Promise((resolve, reject) => {
+          const req = source.openCursor(query, direction);
+
+          req.onsuccess = () => {
+            const cursor = req.result;
+
+            if (!cursor) {
+              resolve();
+              return;
+            }
+
+            const keepGoing = onValue(cursor.value, cursor);
+
+            if (keepGoing === false) {
+              resolve();
+              return;
+            }
+
+            cursor.continue();
+          };
+
+          req.onerror = () => reject(req.error || new Error('IndexedDB cursor failed'));
+          tx.onerror = () => reject(tx.error || new Error('IndexedDB transaction failed'));
+          tx.onabort = () => reject(tx.error || new Error('IndexedDB transaction aborted'));
+        });
+
+        return true;
+      } catch (err) {
+        reportStoreError(`Could not scan Chat ${storeName}.`, err);
+        throw err;
+      }
+    },
+
+    /**
      * Clears this local Chat store.
      */
     async clear() {
@@ -461,7 +524,8 @@ export const chatStore = {
   mediaCache: createChatObjectStore(STORES.mediaCache),
   searchIndex: createChatObjectStore(STORES.searchIndex),
   drafts: createChatObjectStore(STORES.drafts),
-
+  archives: createChatObjectStore(STORES.archives),
+  
   /**
    * Opens the Chat IndexedDB database.
    */

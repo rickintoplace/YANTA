@@ -873,7 +873,7 @@ function crc32(bytes) {
   return (c ^ 0xffffffff) >>> 0;
 }
 
-function makeZip(entries) {
+export function makeZip(entries) {
   const now = new Date();
 
   const dosTime = (
@@ -1008,7 +1008,7 @@ async function inflateRaw(bytes) {
   return out;
 }
 
-async function readZip(blob) {
+export async function readZip(blob) {
   const buf = await blob.arrayBuffer();
   const u8 = new Uint8Array(buf);
   const dv = new DataView(buf);

@@ -13,6 +13,18 @@ import { currentFolderForNew } from './tree.js';
 import { insertAtCursor } from './editor.js';
 import { inlineConfirm } from './inline-ui.js';
 
+import {
+  openGlobalChatSearch,
+} from './chat/chat-search.js';
+
+import {
+  pickAndImportYantaChatExport,
+} from './chat/chat-export.js';
+
+import {
+  resolveMatrixClient,
+} from './chat/chat-actions.js';
+
 const WIKILINK_RE = /\[\[([^\]|\n]+)(?:\|[^\]\n]+)?\]\]/g;
 
 // -------- Backlinks --------------------------------------------
@@ -373,6 +385,8 @@ let commandList = [];
     openPublicSharesManager,
     importFiles,
     importFolder,
+    openChatSearch,
+    importChatArchive,
   }) {
   commandList = [
     { label: 'New note', icon: 'plus', hint: 'Ctrl+N', action: () => newNote(currentFolderForNew()) },
@@ -388,6 +402,17 @@ let commandList = [];
     { label: 'Open AI assistant as floating window', icon: 'picture-in-picture-2', action: openAssistantFloating },
     { label: 'Open graph view', icon: 'network', hint: 'Ctrl+G', action: openGraph },
     { label: 'Search notes', icon: 'search', hint: 'Ctrl+K', action: () => $('search').focus() },
+    {
+      label: 'Search chat messages',
+      icon: 'messages-square',
+      hint: 'Local E2EE index',
+      action: () => openChatSearch?.(),
+    },
+    {
+      label: 'Import YANTA chat archive…',
+      icon: 'archive',
+      action: () => importChatArchive?.(),
+    },
     { label: 'Toggle preview/edit/split', icon: 'eye', hint: 'Ctrl+/', action: () => window.dispatchEvent(new CustomEvent('yanta-cycle-view')) },
     { label: 'Insert image', icon: 'image', hint: 'Ctrl+I', action: openImageModal },
     { label: 'Insert citation', icon: 'quote', hint: '/cite', action: openCitationManager },

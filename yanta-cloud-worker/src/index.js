@@ -1347,7 +1347,7 @@ function planForPaddlePriceId(env, priceId) {
 }
 
 function paddleApiBase(env) {
-  const environment = String(env.PADDLE_ENVIRONMENT || "sandbox").toLowerCase();
+  const environment = String(env.PADDLE_ENVIRONMENT || "live").toLowerCase();
 
   return environment === "live"
     ? "https://api.paddle.com"
@@ -3162,35 +3162,78 @@ async function handleBillingStatus(env, req, headers) {
   the Paddle API. Webhooks remain the fast path; this is the reliable path.
   Heals lost/misconfigured webhooks, proxy issues, and email-mismatch cases.
 */
-async function syncBillingFromPaddle(env, userId) {
-  const customer = await env.DB.prepare(
+async function discoverPaddleCustomerIdsForUser(env, user) {
+  const ids = new Set();
+  const linked = await env.DB.prepare(
     `SELECT paddle_customer_id FROM billing_customers WHERE user_id = ?`
-  ).bind(userId).first();
-  if (!customer?.paddle_customer_id) {
+  ).bind(user.userId).first();
+  if (linked?.paddle_customer_id) {
+    ids.add(linked.paddle_customer_id);
+  }
+  /*
+    A buyer can enter a different email in Paddle checkout, which makes
+    Paddle create a second customer we never linked. Search Paddle by the
+    YANTA account email so those subscriptions are found too.
+  */
+  try {
+    const res = await paddleApi(
+      env,
+      `/customers?email=${encodeURIComponent(user.email)}`
+    );
+    for (const c of res?.data || []) {
+      if (c?.id) ids.add(c.id);
+    }
+  } catch (err) {
+    console.warn("[YANTA Billing] Paddle customer email search failed", safeErrorForLog(err));
+  }
+  return [...ids];
+}
+
+async function syncBillingFromPaddle(env, user) {
+  const customerIds = await discoverPaddleCustomerIdsForUser(env, user);
+  if (!customerIds.length) {
     return { synced: false, reason: "no_customer" };
   }
-  const res = await paddleApi(
-    env,
-    `/subscriptions?customer_id=${encodeURIComponent(customer.paddle_customer_id)}&per_page=50`
-  );
-  const subs = Array.isArray(res?.data) ? res.data : [];
-  for (const sub of subs) {
-    /*
-      Inject userId into custom_data so upsert never depends on
-      webhook-style user matching. We already know who this customer is.
-    */
-    await upsertBillingSubscriptionFromPaddle(env, {
-      ...sub,
-      custom_data: {
-        ...(sub.custom_data || {}),
-        userId,
-      },
-    });
+  let subscriptionCount = 0;
+  let adoptedCustomerId = "";
+  for (const customerId of customerIds) {
+    const res = await paddleApi(
+      env,
+      `/subscriptions?customer_id=${encodeURIComponent(customerId)}&per_page=50`
+    );
+    const subs = Array.isArray(res?.data) ? res.data : [];
+    for (const sub of subs) {
+      subscriptionCount += 1;
+      await upsertBillingSubscriptionFromPaddle(env, {
+        ...sub,
+        custom_data: {
+          ...(sub.custom_data || {}),
+          userId: user.userId,
+        },
+      });
+      const status = String(sub.status || "").toLowerCase();
+      if (["active", "trialing", "past_due"].includes(status)) {
+        adoptedCustomerId = customerId;
+      }
+    }
   }
-  const plan = await refreshUserPlanFromBilling(env, userId);
+  /*
+    Link the customer that actually holds the subscription, so future
+    webhooks resolve via billing_customers without the email fallback.
+  */
+  if (adoptedCustomerId) {
+    const t = now();
+    await env.DB.prepare(
+      `INSERT OR REPLACE INTO billing_customers
+       (user_id, paddle_customer_id, created_at, updated_at)
+       VALUES (?, ?, COALESCE((SELECT created_at FROM billing_customers WHERE user_id = ?), ?), ?)`
+    ).bind(user.userId, adoptedCustomerId, user.userId, t, t).run();
+  }
+  const plan = await refreshUserPlanFromBilling(env, user.userId);
   return {
     synced: true,
-    subscriptionCount: subs.length,
+    customerIdsChecked: customerIds.length,
+    subscriptionCount,
     plan,
   };
 }
@@ -3211,12 +3254,13 @@ async function handleBillingSync(env, req, headers) {
   }
   let result;
   try {
-    result = await syncBillingFromPaddle(env, user.userId);
+    result = await syncBillingFromPaddle(env, user);
   } catch (err) {
-    console.warn("[YANTA Billing] Paddle reconciliation failed", safeErrorForLog(err));
+    console.error("[YANTA Billing] Paddle reconciliation failed", safeErrorForLog(err));
     result = {
       synced: false,
       reason: "paddle_api_error",
+      message: err?.message || "",
     };
   }
   const billing = await getBillingSummary(env, user.userId);

@@ -1931,6 +1931,26 @@ async function init() {
   rebuildWikilinkIndex();
   buildSearchIndexInBackground();
 
+  async function openChatSearchFromPalette() {
+    try {
+      const client = await resolveMatrixClient();
+  
+      if (!client) {
+        toast('Chat is not connected.', 'error');
+        console.warn('[YANTA Chat] Cannot open palette chat search without client');
+        return;
+      }
+  
+      openGlobalChatSearch({
+        client,
+        onJump: jumpToMessageFromSearch,
+      });
+    } catch (err) {
+      console.warn('[YANTA Chat] Could not open chat search from palette', err);
+      toast('Could not open chat search.', 'error');
+    }
+  }
+
   buildCommandList({
     openImageModal,
     openIconInsertPicker,
@@ -1961,6 +1981,8 @@ async function init() {
     openPublicSharesManager,
     importFiles,
     importFolder: () => $('importFolder').click(),
+    openChatSearch: openChatSearchFromPalette,
+    importChatArchive: pickAndImportYantaChatExport,
   });
   setupGraphInteractions();
   setupWikilinkHover();

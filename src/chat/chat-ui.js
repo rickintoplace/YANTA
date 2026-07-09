@@ -72,6 +72,23 @@ import {
 } from './chat-composer.js';
 
 import {
+  backfillRoomSearchIndex,
+  indexTimelineEventsForSearch,
+  openGlobalChatSearch,
+  openRoomChatSearch,
+} from './chat-search.js';
+
+import {
+  openChatExportSheet,
+  pickAndImportYantaChatExport,
+} from './chat-export.js';
+
+import {
+  listImportedChatArchives,
+  openImportedChatArchive,
+} from './chat-archive.js';
+
+import {
   getChatSession,
   scheduleChatAutoResume,
   startChatSession,
@@ -596,6 +613,27 @@ function ensureRoot() {
 
   document.body.append(root);
 
+  if (!document.getElementById('yanta-chat-jump-highlight-css')) {
+    const style = document.createElement('style');
+    style.id = 'yanta-chat-jump-highlight-css';
+    style.textContent = `
+      .yanta-chat-jump-highlight .yanta-chat-bubble,
+      .yanta-chat-event.yanta-chat-jump-highlight {
+        animation: yanta-chat-jump-pulse 1.8s ease both;
+      }
+
+      @keyframes yanta-chat-jump-pulse {
+        0%, 100% { box-shadow: none; }
+        18%, 70% {
+          box-shadow:
+            0 0 0 3px color-mix(in srgb, var(--accent) 45%, transparent),
+            0 12px 36px rgba(0,0,0,.22);
+        }
+      }
+    `;
+    document.head.append(style);
+  }
+
   roomSearchInput = root.querySelector('[data-chat-search]');
   roomListEl = root.querySelector('[data-chat-room-list]');
   timelineEl = root.querySelector('[data-chat-timeline]');
@@ -757,7 +795,15 @@ function bindRootEvents() {
   });
 
   root.querySelector('[data-chat-search-room]')?.addEventListener('click', () => {
-    toast('Message search will be available soon.', 'error');
+    const room = roomById(activeRoomId);
+
+    openRoomChatSearch({
+      container: root.querySelector('[data-chat-room]'),
+      client,
+      roomId: activeRoomId,
+      roomName: room ? roomDisplayName(room) : 'Chat',
+      onJump: jumpToMessageFromSearch,
+    });
   });
 
   root.querySelector('[data-chat-gallery]')?.addEventListener('click', () => {
@@ -1106,6 +1152,10 @@ async function reloadActiveTimeline({
     roomId: activeRoomId,
   });
 
+  await indexTimelineEventsForSearch(nextWindow.getEvents(), {
+    roomId: activeRoomId,
+  });
+
   timelineWindow = nextWindow;
   timelineInitializedFor = activeRoomId;
 
@@ -1113,6 +1163,87 @@ async function reloadActiveTimeline({
     keepBottom,
     scrollBottom,
   });
+}
+
+export async function jumpToMessageFromSearch(result) {
+  if (!client || !result?.roomId || !result?.eventId) {
+    toast('Search result is incomplete.', 'error');
+    console.warn('[YANTA Chat] Invalid search jump result', result);
+    return;
+  }
+
+  try {
+    if (chatMode === 'floating') {
+      await openChatFloating({
+        roomId: result.roomId,
+      });
+    } else {
+      await openChat({
+        roomId: result.roomId,
+        push: true,
+        mode: 'surface',
+      });
+    }
+
+    await ensureMatrixSdkClasses();
+
+    const room = roomById(result.roomId);
+
+    if (!room) {
+      throw new Error('Room not found for search result.');
+    }
+
+    /*
+      Preferred Matrix path: load a timeline around the target event.
+      Fallback reloads the active timeline and highlights if already present.
+    */
+    if (typeof client.getEventTimeline === 'function') {
+      const timelineSet = room.getUnfilteredTimelineSet?.() || room.getLiveTimeline?.()?.getTimelineSet?.();
+
+      if (timelineSet) {
+        const eventTimeline = await client.getEventTimeline(timelineSet, result.eventId);
+
+        const nextWindow = new TimelineWindow(client, room, {
+          windowLimit: 500,
+        });
+
+        await nextWindow.load(eventTimeline, 80);
+
+        timelineWindow = nextWindow;
+        timelineInitializedFor = result.roomId;
+
+        await indexTimelineEventsForSearch(nextWindow.getEvents(), {
+          roomId: result.roomId,
+        });
+
+        renderTimeline();
+      }
+    }
+
+    requestAnimationFrame(() => {
+      const selector = `[data-event-id="${CSS.escape(result.eventId)}"]`;
+      const bubble = root?.querySelector(selector);
+
+      if (!bubble) {
+        toast('Message loaded. Scroll position may differ on this device.', 'success');
+        return;
+      }
+
+      bubble.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center',
+      });
+
+      bubble.classList.add('yanta-chat-jump-highlight');
+
+      setTimeout(() => {
+        bubble.classList.remove('yanta-chat-jump-highlight');
+      }, 1800);
+    });
+  } catch (err) {
+    console.warn('[YANTA Chat] Could not jump to message', err);
+    toast('Could not jump to message.', 'error');
+  }
 }
 
 function handleLiveTimelineUpdate({
@@ -1261,6 +1392,7 @@ function bindAppLevelChatEvents() {
   window.addEventListener('yanta-chat-crypto-degraded', (e) => {
     setChatCryptoBanner(e.detail?.message || 'Chat encryption is being set up…');
   });
+
   window.addEventListener('yanta-chat-key-backup-ready', (e) => {
     if (e.detail?.ok) setChatCryptoBanner('');
   });
@@ -1317,6 +1449,11 @@ function bindAppLevelChatEvents() {
       }
     }
   });
+
+  window.addEventListener('yanta-chat-archives-changed', () => {
+    renderRoomListSoon();
+  });
+
 }
 
 /**
@@ -1496,6 +1633,32 @@ function renderRoomList() {
 
   roomListEl.replaceChildren();
 
+  const globalSearchBtn = el('button', {
+    type: 'button',
+    class: 'yanta-chat-room-row',
+    onclick: () => {
+      openGlobalChatSearch({
+        client,
+        onJump: jumpToMessageFromSearch,
+      });
+    },
+  });
+
+  globalSearchBtn.innerHTML = `
+    <span class="yanta-chat-avatar">${lucide('search', 16)}</span>
+    <span class="yanta-chat-room-row-main">
+      <span class="yanta-chat-room-row-title">
+        <strong>Search all messages</strong>
+        <small>Local</small>
+      </span>
+      <span class="yanta-chat-room-row-subtitle">
+        <span>Search decrypted messages on this device</span>
+      </span>
+    </span>
+  `;
+
+  roomListEl.append(globalSearchBtn);
+
   if (!rooms.length) {
     roomListEl.append(el('div', {
       class: 'yanta-chat-room-empty',
@@ -1505,6 +1668,62 @@ function renderRoomList() {
 
   for (const room of rooms) {
     roomListEl.append(renderRoomRow(room));
+  }
+
+  renderImportedArchiveSectionSoon();
+}
+
+const renderImportedArchiveSectionSoon = debounce(() => {
+  renderImportedArchiveSection().catch((err) => {
+    console.warn('[YANTA Chat] Could not render imported archives', err);
+    toast('Could not render imported chats.', 'error');
+  });
+}, 120);
+
+async function renderImportedArchiveSection() {
+  if (!roomListEl) return;
+
+  const archives = await listImportedChatArchives();
+
+  if (!archives.length) return;
+
+  const title = el('div', {
+    class: 'yanta-chat-room-empty',
+    style: {
+      minHeight: 'auto',
+      padding: '10px 12px 4px',
+      textAlign: 'left',
+      color: 'var(--text-faint)',
+      fontSize: '11px',
+      fontWeight: '850',
+      textTransform: 'uppercase',
+      letterSpacing: '.08em',
+    },
+  }, 'Archiviert/Importiert');
+
+  roomListEl.append(title);
+
+  for (const archive of archives) {
+    const btn = el('button', {
+      type: 'button',
+      class: 'yanta-chat-room-row',
+      onclick: () => openImportedChatArchive(archive.id),
+    });
+
+    btn.innerHTML = `
+      <span class="yanta-chat-avatar">${lucide('archive', 16)}</span>
+      <span class="yanta-chat-room-row-main">
+        <span class="yanta-chat-room-row-title">
+          <strong>${escapeHtml(archive.title || 'Imported Chat')}</strong>
+          <small>${escapeHtml(archive.importedAt ? compactTime(archive.importedAt) : '')}</small>
+        </span>
+        <span class="yanta-chat-room-row-subtitle">
+          <span>Read-only local archive</span>
+        </span>
+      </span>
+    `;
+
+    roomListEl.append(btn);
   }
 }
 
@@ -1669,6 +1888,10 @@ async function initTimeline(room) {
       roomId: room.roomId,
     });
 
+    await indexTimelineEventsForSearch(timelineWindow.getEvents(), {
+      roomId: activeRoomId,
+    });
+
     renderTimeline({
       scrollBottom: true,
     });
@@ -1710,6 +1933,10 @@ async function paginateBackwards() {
       roomId: activeRoomId,
     });
 
+    await indexTimelineEventsForSearch(timelineWindow.getEvents(), {
+      roomId: room.roomId,
+    });
+
     renderTimeline({
       preserveTopDeltaFrom: before,
     });
@@ -1727,6 +1954,22 @@ function setOlderLoadingVisible(visible) {
 
   if (loading) {
     loading.hidden = !visible;
+  }
+}
+
+function stampRenderedEventIds(eventsHost, events = []) {
+  if (!eventsHost) return;
+
+  const rows = [...eventsHost.querySelectorAll('.yanta-chat-event')];
+
+  if (!rows.length) return;
+
+  for (let i = 0; i < Math.min(rows.length, events.length); i++) {
+    const id = events[i]?.getId?.() || events[i]?.event?.event_id || '';
+
+    if (id && !rows[i].dataset.eventId) {
+      rows[i].dataset.eventId = id;
+    }
   }
 }
 
@@ -1748,6 +1991,8 @@ function renderTimeline({
     client,
     room,
   }));
+
+  stampRenderedEventIds(eventsHost, events);
 
   setupTimelineObservers();
 
@@ -2021,7 +2266,7 @@ function openRoomMenu(anchor) {
       },
     },
     {
-      label: 'Galerie',
+      label: 'Gallery',
       icon: 'images',
       action: async () => {
         await openChatGallery({
@@ -2032,12 +2277,57 @@ function openRoomMenu(anchor) {
       },
     },
     {
-      label: 'Chat-Einstellungen',
+      label: 'Chat Settings',
       icon: 'settings',
       action: async () => {
         await openChatSettings({
           client,
           roomId,
+          roomName: roomDisplayName(room),
+        });
+      },
+    },
+    {
+      label: 'Search Messages',
+      icon: 'search',
+      action: async () => {
+        openRoomChatSearch({
+          container: root.querySelector('[data-chat-room]'),
+          client,
+          roomId,
+          roomName: roomDisplayName(room),
+          onJump: jumpToMessageFromSearch,
+        });
+      },
+    },
+    {
+      label: 'Index older Messages of this Chat',
+      icon: 'scan-search',
+      action: async () => {
+        let lastToastAt = 0;
+
+        await backfillRoomSearchIndex(client, roomId, {
+          onProgress: ({ scanned, indexed, done }) => {
+            const now = Date.now();
+
+            if (done || now - lastToastAt > 1600) {
+              lastToastAt = now;
+              toast(
+                done
+                  ? `Index complete: ${indexed}/${scanned} messages`
+                  : `Indexing older messages… ${indexed}/${scanned}`,
+                'success'
+              );
+            }
+          },
+        });
+      },
+    },
+    {
+      label: 'Export / Import…',
+      icon: 'download',
+      action: async () => {
+        openChatExportSheet(client, roomId, {
           roomName: roomDisplayName(room),
         });
       },
@@ -2072,11 +2362,6 @@ function openRoomMenu(anchor) {
           toast('Could not repair encryption keys.', 'error');
         }
       },
-    },
-    {
-      label: 'Export visible messages',
-      icon: 'download',
-      action: exportVisibleTimeline,
     },
     'hr',
     {

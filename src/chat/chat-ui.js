@@ -1550,8 +1550,6 @@ async function ensureClient() {
   }
 }
 
-const CHAT_CRYPTO_BANNER_DISMISS_LS_KEY = 'yanta.chat.cryptoBanner.dismissed.v1';
-
 function readCryptoBannerDismiss() {
   try {
     return JSON.parse(localStorage.getItem(CHAT_CRYPTO_BANNER_DISMISS_LS_KEY) || 'null');
@@ -1630,7 +1628,7 @@ function bindAppLevelChatEvents() {
   window.addEventListener('yanta-chat-crypto-degraded', (e) => {
     setChatCryptoBanner(e.detail?.message || 'Chat encryption is being set up…');
   });
-  
+
   window.addEventListener('yanta-chat-jump-to-message', (e) => {
     const detail = e.detail || {};
 

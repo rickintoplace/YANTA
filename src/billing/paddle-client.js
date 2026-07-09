@@ -17,29 +17,31 @@ export function paddleClientToken() {
 }
 
 export async function getPaddle() {
-  if (!paddleCheckoutEnabled()) {
-    return null;
+    if (!paddleCheckoutEnabled()) {
+      return null;
+    }
+    const token = paddleClientToken();
+    if (!token) {
+      throw new Error('Paddle client-side token is missing.');
+    }
+    if (!token.startsWith('live_')) {
+      throw new Error('Paddle client-side token must be a Production live_ token.');
+    }
+    if (!paddlePromise) {
+      paddlePromise = initializePaddle({
+        environment: 'production',
+        token,
+        eventCallback(event) {
+          if (event?.name === 'checkout.completed') {
+            window.dispatchEvent(new CustomEvent('yanta:paddle-checkout-completed', {
+              detail: event.data || null,
+            }));
+          }
+        },
+      });
+    }
+    return paddlePromise;
   }
-
-  const token = paddleClientToken();
-
-  if (!token) {
-    throw new Error('Paddle client-side token is missing.');
-  }
-
-  if (!token.startsWith('live_')) {
-    throw new Error('Paddle client-side token must be a Production live_ token.');
-  }
-
-  if (!paddlePromise) {
-    paddlePromise = initializePaddle({
-      environment: 'production',
-      token,
-    });
-  }
-
-  return paddlePromise;
-}
 
 function preferredTheme() {
   const explicit = document.documentElement.dataset.theme;

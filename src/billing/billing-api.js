@@ -115,3 +115,27 @@ export function billingPageUrl(path = '/pricing') {
 
   return `${BILLING_PUBLIC_ORIGIN}${clean}`;
 }
+
+export function syncBillingNow() {
+  return fetchJson('/api/billing/sync', {
+    method: 'POST',
+  });
+}
+
+/*
+  Paddle Overlay completion → reconcile immediately.
+  The webhook usually wins the race, but this guarantees the plan
+  flips within seconds even if the webhook is delayed or lost.
+*/
+if (typeof window !== 'undefined') {
+  window.addEventListener('yanta:paddle-checkout-completed', async () => {
+    try {
+      const res = await syncBillingNow();
+      window.dispatchEvent(new CustomEvent('yanta:billing-updated', {
+        detail: res?.billing || null,
+      }));
+    } catch (err) {
+      console.warn('[YANTA Billing] Post-checkout sync failed', err);
+    }
+  });
+}

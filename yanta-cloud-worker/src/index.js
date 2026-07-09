@@ -1675,36 +1675,54 @@ async function findUserIdForPaddleEvent(env, data = {}) {
     data.customData?.userId ||
     data.custom_data?.user_id ||
     "";
-
   if (customUserId) {
     return String(customUserId);
   }
-
   const customerId = data.customer_id || data.customerId || "";
-
   if (customerId) {
     const row = await env.DB.prepare(
       `SELECT user_id FROM billing_customers WHERE paddle_customer_id = ?`
     ).bind(customerId).first();
-
     if (row?.user_id) return row.user_id;
   }
-
-  const email = normalizeEmail(
+  const inlineEmail = normalizeEmail(
     data.customer?.email ||
     data.customer_email ||
     data.billing_details?.email ||
     ""
   );
-
-  if (email) {
+  if (inlineEmail) {
     const user = await env.DB.prepare(
       `SELECT id FROM users WHERE email = ?`
-    ).bind(email).first();
-
+    ).bind(inlineEmail).first();
     if (user?.id) return user.id;
   }
-
+  /*
+    Last resort: resolve the buyer's email through the Paddle API.
+    Handles checkouts where Paddle created a customer we never linked.
+  */
+  if (customerId && env.PADDLE_API_KEY) {
+    try {
+      const customer = await paddleApi(env, `/customers/${encodeURIComponent(customerId)}`);
+      const email = normalizeEmail(customer?.data?.email || "");
+      if (email) {
+        const user = await env.DB.prepare(
+          `SELECT id FROM users WHERE email = ?`
+        ).bind(email).first();
+        if (user?.id) {
+          const t = now();
+          await env.DB.prepare(
+            `INSERT OR REPLACE INTO billing_customers
+             (user_id, paddle_customer_id, created_at, updated_at)
+             VALUES (?, ?, COALESCE((SELECT created_at FROM billing_customers WHERE user_id = ?), ?), ?)`
+          ).bind(user.id, customerId, user.id, t, t).run();
+          return user.id;
+        }
+      }
+    } catch (err) {
+      console.warn("[YANTA Billing] Paddle customer lookup failed", safeErrorForLog(err));
+    }
+  }
   return "";
 }
 
@@ -3139,6 +3157,80 @@ async function handleBillingStatus(env, req, headers) {
   }, 200, headers);
 }
 
+/*
+  Reconciliation: pull the authoritative subscription state directly from
+  the Paddle API. Webhooks remain the fast path; this is the reliable path.
+  Heals lost/misconfigured webhooks, proxy issues, and email-mismatch cases.
+*/
+async function syncBillingFromPaddle(env, userId) {
+  const customer = await env.DB.prepare(
+    `SELECT paddle_customer_id FROM billing_customers WHERE user_id = ?`
+  ).bind(userId).first();
+  if (!customer?.paddle_customer_id) {
+    return { synced: false, reason: "no_customer" };
+  }
+  const res = await paddleApi(
+    env,
+    `/subscriptions?customer_id=${encodeURIComponent(customer.paddle_customer_id)}&per_page=50`
+  );
+  const subs = Array.isArray(res?.data) ? res.data : [];
+  for (const sub of subs) {
+    /*
+      Inject userId into custom_data so upsert never depends on
+      webhook-style user matching. We already know who this customer is.
+    */
+    await upsertBillingSubscriptionFromPaddle(env, {
+      ...sub,
+      custom_data: {
+        ...(sub.custom_data || {}),
+        userId,
+      },
+    });
+  }
+  const plan = await refreshUserPlanFromBilling(env, userId);
+  return {
+    synced: true,
+    subscriptionCount: subs.length,
+    plan,
+  };
+}
+
+async function handleBillingSync(env, req, headers) {
+  const user = await requireUser(env, req);
+  const rl = await rateLimit(
+    env,
+    `billing:sync:user:${user.userId}`,
+    30,
+    60 * 60 * 1000
+  );
+  if (!rl.ok) {
+    return json({
+      ok: false,
+      message: "Too many billing refreshes. Please try again in a few minutes."
+    }, 429, headers);
+  }
+  let result;
+  try {
+    result = await syncBillingFromPaddle(env, user.userId);
+  } catch (err) {
+    console.warn("[YANTA Billing] Paddle reconciliation failed", safeErrorForLog(err));
+    result = {
+      synced: false,
+      reason: "paddle_api_error",
+    };
+  }
+  const billing = await getBillingSummary(env, user.userId);
+  return json({
+    ok: true,
+    sync: result,
+    billing,
+    limits: PLAN_LIMITS[billing.plan] || PLAN_LIMITS.free,
+  }, 200, {
+    ...headers,
+    "cache-control": "no-store",
+  });
+}
+
 async function upsertBillingSubscriptionFromPaddle(env, data = {}) {
   const userId = await findUserIdForPaddleEvent(env, data);
 
@@ -3269,90 +3361,83 @@ async function upsertBillingTransactionFromPaddle(env, data = {}) {
 
 async function handlePaddleWebhook(env, req, headers) {
   const rawBody = await req.text();
-
   await verifyPaddleWebhookSignature(env, req, rawBody);
-
   let event;
-
   try {
     event = JSON.parse(rawBody);
   } catch {
-    return json({
-      ok: false,
-      message: "Invalid JSON"
-    }, 400, headers);
+    return json({ ok: false, message: "Invalid JSON" }, 400, headers);
   }
-
   const eventId = String(event.event_id || event.id || "");
   const eventType = String(event.event_type || event.type || "");
-
   if (!eventId || !eventType) {
-    return json({
-      ok: false,
-      message: "Invalid Paddle event"
-    }, 400, headers);
+    return json({ ok: false, message: "Invalid Paddle event" }, 400, headers);
   }
-
   const existing = await env.DB.prepare(
     `SELECT id FROM billing_events WHERE paddle_event_id = ?`
   ).bind(eventId).first();
-
   if (existing) {
-    return json({
-      ok: true,
-      duplicate: true
-    }, 200, headers);
+    return json({ ok: true, duplicate: true }, 200, headers);
   }
-
   const data = event.data || {};
   const processed = [];
-
   if (eventType.startsWith("subscription.")) {
     const result = await upsertBillingSubscriptionFromPaddle(env, data);
-    processed.push({
-      kind: "subscription",
-      ...result
-    });
+    processed.push({ kind: "subscription", ...result });
+    if (!result.ok && result.reason === "user_not_found") {
+      /*
+        Do NOT record this event and do NOT return 200.
+        A 5xx makes Paddle retry and surfaces the failure in the
+        Paddle notifications dashboard instead of silently losing
+        the plan upgrade.
+      */
+      console.error("[YANTA Billing] Webhook could not match a user", {
+        eventId,
+        eventType,
+        customerId: data.customer_id || "",
+      });
+      return json({
+        ok: false,
+        error: "user_not_found",
+        message: "No YANTA user could be matched for this subscription event."
+      }, 500, headers);
+    }
   }
-
   if (eventType.startsWith("transaction.")) {
     const result = await upsertBillingTransactionFromPaddle(env, data);
-    processed.push({
-      kind: "transaction",
-      ...result
-    });
+    processed.push({ kind: "transaction", ...result });
+    /*
+      Self-healing: a completed transaction that belongs to a subscription
+      also refreshes that subscription from the Paddle API. This covers
+      setups where subscription.* events are not subscribed.
+    */
+    const subscriptionId = data.subscription_id || "";
+    if (subscriptionId) {
+      try {
+        const sub = await paddleApi(env, `/subscriptions/${encodeURIComponent(subscriptionId)}`);
+        if (sub?.data) {
+          const subResult = await upsertBillingSubscriptionFromPaddle(env, sub.data);
+          processed.push({ kind: "subscription_via_transaction", ...subResult });
+        }
+      } catch (err) {
+        console.warn("[YANTA Billing] Subscription refresh via transaction failed", safeErrorForLog(err));
+      }
+    }
   }
-
   try {
     await env.DB.prepare(
       `INSERT INTO billing_events
        (id, paddle_event_id, event_type, processed_at, raw_json)
        VALUES (?, ?, ?, ?, ?)`
-    ).bind(
-      id("bev"),
-      eventId,
-      eventType,
-      now(),
-      rawBody
-    ).run();
+    ).bind(id("bev"), eventId, eventType, now(), rawBody).run();
   } catch (err) {
     const msg = String(err?.message || err || "");
-
     if (msg.includes("UNIQUE") || msg.includes("constraint")) {
-      return json({
-        ok: true,
-        duplicate: true
-      }, 200, headers);
+      return json({ ok: true, duplicate: true }, 200, headers);
     }
-
     throw err;
   }
-
-  return json({
-    ok: true,
-    eventType,
-    processed
-  }, 200, headers);
+  return json({ ok: true, eventType, processed }, 200, headers);
 }
 
 function estimateAiCostMicros(openRouterJson) {
@@ -6387,6 +6472,10 @@ async function route(req, env) {
 
     if (url.pathname === "/api/billing/status" && req.method === "GET") {
       return handleBillingStatus(env, req, headers);
+    }
+
+    if (url.pathname === "/api/billing/sync" && req.method === "POST") {
+      return handleBillingSync(env, req, headers);
     }
 
     if (url.pathname === "/api/paddle/webhook" && req.method === "POST") {

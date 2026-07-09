@@ -15,6 +15,8 @@ import {
 
 import { BRAND_LOGO_SVG } from '../brand-logo.js';
 
+import { syncBillingNow } from '../billing/billing-api.js';
+
 const YANTA_APP_ORIGIN =
   (import.meta.env.VITE_APP_ORIGIN || 'https://yanta.page').replace(/\/+$/, '');
 
@@ -514,36 +516,34 @@ function billingBannerHtml() {
 
 async function refreshBillingSuccessBanner() {
   const params = new URLSearchParams(location.search);
-
   if (params.get('billing') !== 'success') return;
-
   const statusEl = document.getElementById('billing-success-status');
   if (!statusEl) return;
-
   for (let attempt = 0; attempt < 10; attempt += 1) {
     try {
-      const res = await billingStatus();
+      /*
+        Active reconciliation instead of passively waiting for the webhook.
+        First attempts force a server-side sync against the Paddle API.
+      */
+      const res = attempt < 3
+        ? await syncBillingNow()
+        : await billingStatus();
       const plan = res?.billing?.plan || '';
       const label = res?.billing?.label || '';
-
       if (plan === 'premium') {
         statusEl.textContent = `Your plan is now ${label || 'YANTA Plus'}.`;
         return;
       }
-
       statusEl.textContent = 'Still waiting for Paddle confirmation…';
     } catch (err) {
       if (err?.status === 401) {
         statusEl.textContent = 'Open YANTA and sign in to see your updated plan.';
         return;
       }
-
       statusEl.textContent = 'Still waiting for Paddle confirmation…';
     }
-
     await new Promise((resolve) => setTimeout(resolve, 1800 + attempt * 500));
   }
-
   statusEl.textContent =
     'Payment received. Your plan may take a moment to update. Please refresh YANTA Cloud settings shortly.';
 }

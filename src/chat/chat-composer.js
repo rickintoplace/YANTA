@@ -27,6 +27,10 @@ import {
 
 import { androidChatMediaStatus } from '../native/android-bridge.js';
 
+import {
+  getChatPreferences,
+} from './chat-preferences.js';
+
 const DRAFT_DEBOUNCE_MS = 400;
 const MOBILE_MQ = window.matchMedia('(max-width: 760px), (pointer: coarse)');
 
@@ -45,8 +49,19 @@ function assertNativeChatAttachmentsAvailable() {
   return true;
 }
 
-function isDesktopSendEnter() {
-  return !MOBILE_MQ.matches;
+async function shouldSendOnEnter() {
+  if (MOBILE_MQ.matches) return false;
+
+  try {
+    const prefs = await getChatPreferences();
+
+    return prefs.enterBehavior !== 'newline';
+  } catch (err) {
+    console.warn('[YANTA Chat] Could not read Enter behavior', err);
+    toast('Could not read Chat input preference.', 'error');
+
+    return true;
+  }
 }
 
 function supportsFieldSizing() {
@@ -284,12 +299,12 @@ export function setupChatComposer({
     persistDraft();
   });
 
-  textArea.addEventListener('keydown', (e) => {
+  textArea.addEventListener('keydown', async (e) => {
     if (
       e.key === 'Enter' &&
       !e.shiftKey &&
       !e.isComposing &&
-      isDesktopSendEnter()
+      await shouldSendOnEnter()
     ) {
       e.preventDefault();
 

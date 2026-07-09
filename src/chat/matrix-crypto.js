@@ -1245,3 +1245,115 @@ export function hasVaultChatRecovery() {
     return false;
   }
 }
+
+async function sdkEncodeRecoveryKey(privateKey) {
+  try {
+    const sdkMod = await import('matrix-js-sdk');
+    const sdk = sdkMod.default || sdkMod;
+
+    if (typeof sdk.encodeRecoveryKey === 'function') {
+      return sdk.encodeRecoveryKey(privateKey);
+    }
+
+    if (sdk.crypto?.encodeRecoveryKey) {
+      return sdk.crypto.encodeRecoveryKey(privateKey);
+    }
+  } catch (err) {
+    console.warn('[YANTA Chat Crypto] could not encode Matrix recovery key through SDK', err);
+    toast('Could not format Chat recovery key.', 'error');
+  }
+
+  return '';
+}
+
+/**
+ * Reads the Vault-decrypted Matrix recovery key as display/copy text.
+ *
+ * Warum:
+ * YANTA stores the actual recovery material encrypted in the Sync2 Vault.
+ * Showing it is a deliberate high-risk user action and must only happen
+ * behind UI warnings.
+ */
+export async function readChatRecoveryKeyTextForDisplay() {
+  try {
+    const record = await readChatRecoveryFromVault();
+
+    if (!record) {
+      throw new Error('Chat recovery key is not available in this Vault.');
+    }
+
+    if (record.encodedPrivateKey) {
+      return {
+        kind: 'matrix-recovery-key',
+        text: String(record.encodedPrivateKey),
+      };
+    }
+
+    if (record.privateKeyB64) {
+      const privateKey = base64UrlDecode(record.privateKeyB64);
+      const encoded = await sdkEncodeRecoveryKey(privateKey);
+
+      return {
+        kind: encoded ? 'matrix-recovery-key' : 'raw-private-key',
+        text: encoded || `raw:${record.privateKeyB64}`,
+      };
+    }
+
+    throw new Error('Unsupported Chat recovery key record.');
+  } catch (err) {
+    console.warn('[YANTA Chat Crypto] Could not read recovery key for display', err);
+    toast('Could not unlock Chat recovery key.', 'error');
+
+    throw err;
+  }
+}
+
+/**
+ * Returns a simple Chat crypto health summary for settings/details UI.
+ */
+export async function getChatCryptoHealth(client) {
+  try {
+    const cryptoApi = getCryptoApi(client);
+
+    if (!cryptoApi) {
+      return {
+        available: false,
+        crossSigningReady: false,
+        backupVersion: '',
+      };
+    }
+
+    const crossSigningReady =
+      await cryptoApi.isCrossSigningReady?.().catch((err) => {
+        console.warn('[YANTA Chat Crypto] could not read cross-signing state', err);
+        toast('Could not read Chat verification state.', 'error');
+        return false;
+      });
+
+    let backupVersion = '';
+
+    try {
+      const active = await cryptoApi.getActiveSessionBackupVersion?.();
+      backupVersion = String(active?.version || active || '');
+    } catch (err) {
+      console.warn('[YANTA Chat Crypto] could not read backup version', err);
+      toast('Could not read Chat key backup state.', 'error');
+    }
+
+    return {
+      available: true,
+      crossSigningReady: !!crossSigningReady,
+      backupVersion,
+    };
+  } catch (err) {
+    console.warn('[YANTA Chat Crypto] Could not inspect crypto health', err);
+    toast('Could not inspect Chat encryption.', 'error');
+
+    return {
+      available: false,
+      crossSigningReady: false,
+      backupVersion: '',
+      error: err?.message || String(err),
+    };
+  }
+}

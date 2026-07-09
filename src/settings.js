@@ -1121,6 +1121,7 @@ function ensureModal() {
     { id: 'calendar',   label: 'Calendar',   icon: 'calendar-days' },
     { id: 'sources',    label: 'Sources',    icon: 'rss' },
     { id: 'ai',         label: 'AI',         icon: 'bot' },
+    { id: 'chat',       label: 'Chat',       icon: 'message-circle' },
     { id: 'sync',       label: 'Sync & Backup', icon: 'refresh-cw' },
     { id: 'about',      label: 'About',      icon: 'info' },
   ];
@@ -1177,6 +1178,7 @@ function renderSettingsBody() {
   else if (activeSection === 'calendar') renderCalendarSection(content);
   else if (activeSection === 'sources') renderSourcesSection(content);
   else if (activeSection === 'ai') renderAiSection(content);
+  else if (activeSection === 'chat') renderChatSection(content);
   else if (activeSection === 'sync') renderSyncSection(content);
   else if (activeSection === 'about') renderAboutSection(content);
 }
@@ -2468,6 +2470,564 @@ function renderAiSection(host) {
         </div>
       `;
     });
+}
+
+async function renderChatSection(host) {
+  host.replaceChildren();
+
+  host.append(sectionHeader(
+    'Chat',
+    'Configure encrypted messaging, receipts, media, storage and recovery.'
+  ));
+
+  const loading = el('div', {
+    class: 'yanta-settings-group',
+  });
+
+  loading.innerHTML = `
+    <div class="yanta-settings-info">
+      <p><strong>Loading Chat settings…</strong></p>
+    </div>
+  `;
+
+  host.append(loading);
+
+  try {
+    const [
+      prefsMod,
+      cacheMod,
+      cryptoMod,
+      sessionMod,
+      storeMod,
+    ] = await Promise.all([
+      import('./chat/chat-preferences.js'),
+      import('./chat/chat-media-cache.js'),
+      import('./chat/matrix-crypto.js'),
+      import('./chat/matrix-session.js'),
+      import('./chat/chat-store.js'),
+    ]);
+
+    const prefs = await prefsMod.getChatPreferences();
+    const usage = await cacheMod.getChatMediaCacheUsage();
+    const limit = await cacheMod.getChatMediaCacheLimitBytes();
+    const session = sessionMod.getChatSession?.();
+    const client = session?.client || window.yantaMatrixClient || null;
+
+    host.replaceChildren();
+
+    host.append(sectionHeader(
+      'Chat',
+      'Configure encrypted messaging, receipts, media, storage and recovery.'
+    ));
+
+    host.append(renderChatConnectionCard({
+      client,
+      session,
+      sessionMod,
+    }));
+
+    host.append(renderChatPreferencesCard({
+      prefs,
+      prefsMod,
+    }));
+
+    host.append(renderChatStorageCard({
+      usage,
+      limit,
+      cacheMod,
+    }));
+
+    host.append(renderChatRecoveryCard({
+      cryptoMod,
+    }));
+
+    host.append(renderChatDeviceCard({
+      client,
+      sessionMod,
+      storeMod,
+    }));
+  } catch (err) {
+    console.warn('[YANTA Settings] Could not render Chat settings', err);
+    toast('Could not load Chat settings.', 'error');
+
+    loading.innerHTML = `
+      <div class="yanta-settings-info">
+        <p><strong>Could not load Chat settings.</strong></p>
+        <p>${escapeSettingsText(err?.message || String(err))}</p>
+      </div>
+    `;
+  }
+}
+
+function escapeSettingsText(value = '') {
+  const div = document.createElement('div');
+  div.textContent = String(value || '');
+  return div.innerHTML;
+}
+
+function renderChatConnectionCard({
+  client,
+  session,
+  sessionMod,
+}) {
+  const group = el('div', {
+    class: 'yanta-settings-group',
+  });
+
+  const userId = client?.getUserId?.() || session?.credentials?.userId || '';
+
+  group.innerHTML = `
+    <div class="yanta-sync-card">
+      <div class="yanta-sync-card-head">
+        <div class="yanta-sync-card-icon">
+          ${lucide(client ? 'message-circle-check' : 'message-circle-warning', 22)}
+        </div>
+
+        <div class="yanta-sync-card-title">
+          <strong>Chat connection</strong>
+          <p>
+            ${
+              client
+                ? `Connected as <code>${escapeSettingsText(userId)}</code>.`
+                : 'Chat is not connected on this device.'
+            }
+          </p>
+        </div>
+      </div>
+
+      <div class="compress-actions yanta-sync-card-actions">
+        <button class="btn primary" data-chat-reconnect>
+          ${lucide('refresh-cw', 14)}
+          ${client ? 'Reconnect' : 'Connect Chat'}
+        </button>
+      </div>
+    </div>
+  `;
+
+  group.querySelector('[data-chat-reconnect]')?.addEventListener('click', async () => {
+    try {
+      await sessionMod.stopChatSession?.({
+        silent: true,
+      });
+
+      await sessionMod.startChatSession?.({
+        forceLogin: true,
+        reason: 'settings-chat-reconnect',
+      });
+
+      toast('Chat reconnected', 'success');
+      renderSettingsBody();
+    } catch (err) {
+      console.warn('[YANTA Settings] Chat reconnect failed', err);
+      toast('Could not reconnect Chat.', 'error');
+    }
+  });
+
+  return group;
+}
+
+function renderChatPreferencesCard({
+  prefs,
+  prefsMod,
+}) {
+  const group = el('div', {
+    class: 'yanta-settings-group',
+  });
+
+  group.append(
+    el('div', {
+      class: 'yanta-settings-group-title',
+    }, 'Messaging')
+  );
+
+  group.append(
+    renderSettingsToggleRow({
+      checked: prefs.sendReadReceipts !== false,
+      label: 'Send read receipts',
+      hint: 'Matrix read receipts are send-side only here. Turning this off stops YANTA from sending new receipts.',
+      onChange: async (checked) => {
+        await prefsMod.setChatPreferences({
+          sendReadReceipts: checked,
+        });
+
+        toast('Chat preference saved', 'success');
+      },
+    }),
+
+    renderSettingsSelect({
+      label: 'Enter behavior',
+      hint: 'Desktop only. Mobile keyboards still use their native send/newline behavior.',
+      value: prefs.enterBehavior || 'send',
+      options: [
+        {
+          value: 'send',
+          label: 'Enter sends message',
+        },
+        {
+          value: 'newline',
+          label: 'Enter inserts newline',
+        },
+      ],
+      onChange: async (value) => {
+        await prefsMod.setChatPreferences({
+          enterBehavior: value,
+        });
+
+        toast('Chat preference saved', 'success');
+      },
+    }),
+
+    renderSettingsSelect({
+      label: 'Media auto-download',
+      hint: 'Browsers cannot reliably detect Wi-Fi. Choose always or on demand.',
+      value: prefs.mediaAutoDownload || 'ask',
+      options: [
+        {
+          value: 'always',
+          label: 'Always',
+        },
+        {
+          value: 'ask',
+          label: 'On demand',
+        },
+      ],
+      onChange: async (value) => {
+        await prefsMod.setChatPreferences({
+          mediaAutoDownload: value,
+        });
+
+        toast('Chat preference saved', 'success');
+      },
+    })
+  );
+
+  return group;
+}
+
+function renderChatStorageCard({
+  usage,
+  limit,
+  cacheMod,
+}) {
+  const group = el('div', {
+    class: 'yanta-settings-group',
+  });
+
+  const pct = limit > 0
+    ? Math.max(0, Math.min(100, Math.round((usage.totalBytes / limit) * 100)))
+    : 0;
+
+  group.innerHTML = `
+    <div class="yanta-sync-card">
+      <div class="yanta-sync-card-head">
+        <div class="yanta-sync-card-icon secondary">
+          ${lucide('database', 22)}
+        </div>
+
+        <div class="yanta-sync-card-title">
+          <strong>Storage management</strong>
+          <p>
+            Local decrypted media cache: <strong>${fmtBytes(usage.totalBytes || 0)}</strong>
+            across ${Number(usage.count || 0)} item${Number(usage.count || 0) === 1 ? '' : 's'}.
+          </p>
+        </div>
+      </div>
+
+      <div class="yanta-chat-settings-mini-meter">
+        <span style="width:${pct}%"></span>
+      </div>
+
+      <div class="yanta-chat-settings-row">
+        <label>
+          Cache limit
+          <select class="text-input" data-chat-cache-limit>
+            ${cacheMod.CHAT_MEDIA_CACHE_LIMITS.map((option) => `
+              <option value="${option.bytes}" ${Number(option.bytes) === Number(limit) ? 'selected' : ''}>
+                ${escapeSettingsText(option.label)}
+              </option>
+            `).join('')}
+          </select>
+        </label>
+      </div>
+
+      <div class="compress-actions yanta-sync-card-actions">
+        <button class="btn danger" data-chat-cache-clear>
+          ${lucide('trash', 14)}
+          Clear media cache
+        </button>
+      </div>
+    </div>
+  `;
+
+  group.querySelector('[data-chat-cache-limit]')?.addEventListener('change', async (e) => {
+    try {
+      await cacheMod.setChatMediaCacheLimitBytes(Number(e.currentTarget.value || 0));
+      await updateStorageMeter();
+
+      toast('Media cache limit saved', 'success');
+      renderSettingsBody();
+    } catch (err) {
+      console.warn('[YANTA Settings] Could not save media cache limit', err);
+      toast('Could not save media cache limit.', 'error');
+    }
+  });
+
+  group.querySelector('[data-chat-cache-clear]')?.addEventListener('click', async () => {
+    const ok = await yantaConfirm({
+      title: 'Clear Chat media cache?',
+      message: 'This removes locally cached decrypted Chat media. Messages stay intact.',
+      confirmLabel: 'Clear cache',
+      cancelLabel: 'Cancel',
+      danger: true,
+      icon: 'trash',
+    });
+
+    if (!ok) return;
+
+    try {
+      const result = await cacheMod.purgeAllChatMediaCache();
+
+      await updateStorageMeter();
+
+      toast(`Media cache cleared: ${fmtBytes(result.bytes || 0)}`, 'success');
+      renderSettingsBody();
+    } catch (err) {
+      console.warn('[YANTA Settings] Could not clear media cache', err);
+      toast('Could not clear media cache.', 'error');
+    }
+  });
+
+  return group;
+}
+
+function renderChatRecoveryCard({
+  cryptoMod,
+}) {
+  const group = el('div', {
+    class: 'yanta-settings-group',
+  });
+
+  group.innerHTML = `
+    <div class="yanta-sync-card">
+      <div class="yanta-sync-card-head">
+        <div class="yanta-sync-card-icon secondary">
+          ${lucide('key-round', 22)}
+        </div>
+
+        <div class="yanta-sync-card-title">
+          <strong>Recovery key</strong>
+          <p>
+            Show or copy the Vault-decrypted Matrix recovery key. Only do this in a private place.
+          </p>
+        </div>
+      </div>
+
+      <div class="compress-actions yanta-sync-card-actions">
+        <button class="btn" data-chat-show-recovery>
+          ${lucide('eye', 14)}
+          Show / copy recovery key
+        </button>
+      </div>
+    </div>
+  `;
+
+  group.querySelector('[data-chat-show-recovery]')?.addEventListener('click', async () => {
+    const ok = await yantaConfirm({
+      title: 'Show recovery key?',
+      message:
+        'This key can unlock encrypted Chat history when combined with account access.\n\n' +
+        'Never share it with anyone.',
+      confirmLabel: 'Show recovery key',
+      cancelLabel: 'Cancel',
+      danger: true,
+      icon: 'key-round',
+    });
+
+    if (!ok) return;
+
+    try {
+      const recovery = await cryptoMod.readChatRecoveryKeyTextForDisplay();
+
+      const overlay = el('div', {
+        class: 'modal',
+      });
+
+      overlay.innerHTML = `
+        <div class="modal-card" style="width:min(620px,94vw)">
+          <header class="modal-head">
+            <h3>Chat recovery key</h3>
+            <button class="icon-btn" data-close>${lucide('x', 18)}</button>
+          </header>
+
+          <div style="padding:16px">
+            <p class="yanta-settings-hint">
+              Store this somewhere safe. Do not send it to anyone.
+            </p>
+
+            <pre style="
+              white-space:pre-wrap;
+              word-break:break-word;
+              padding:12px;
+              border:1px solid var(--border);
+              border-radius:12px;
+              background:var(--bg);
+              color:var(--text);
+              font-family:var(--font-mono);
+              font-size:12px;
+              max-height:260px;
+              overflow:auto;
+            ">${escapeSettingsText(recovery.text)}</pre>
+
+            <div class="compress-actions" style="margin-top:12px">
+              <button class="btn primary" data-copy>${lucide('copy', 14)} Copy key</button>
+              <button class="btn" data-close>Done</button>
+            </div>
+          </div>
+        </div>
+      `;
+
+      overlay.addEventListener('click', async (e) => {
+        if (e.target === overlay || e.target.closest?.('[data-close]')) {
+          overlay.remove();
+          return;
+        }
+
+        if (e.target.closest?.('[data-copy]')) {
+          try {
+            await navigator.clipboard.writeText(recovery.text);
+            toast('Recovery key copied', 'success');
+          } catch (err) {
+            console.warn('[YANTA Settings] Could not copy recovery key', err);
+            toast('Could not copy recovery key.', 'error');
+          }
+        }
+      });
+
+      document.body.append(overlay);
+    } catch (err) {
+      console.warn('[YANTA Settings] Could not show recovery key', err);
+      toast('Could not show recovery key.', 'error');
+    }
+  });
+
+  return group;
+}
+
+function renderChatDeviceCard({
+  client,
+  sessionMod,
+  storeMod,
+}) {
+  const group = el('div', {
+    class: 'yanta-settings-group',
+  });
+
+  group.innerHTML = `
+    <div class="yanta-sync-card">
+      <div class="yanta-sync-card-head">
+        <div class="yanta-sync-card-icon secondary">
+          ${lucide('smartphone', 22)}
+        </div>
+
+        <div class="yanta-sync-card-title">
+          <strong>This device</strong>
+          <p>
+            Deprovision Chat on this browser. Your YANTA notes and synced Vault stay untouched.
+          </p>
+        </div>
+      </div>
+
+      <div class="compress-actions yanta-sync-card-actions">
+        <button class="btn danger" data-chat-deprovision>
+          ${lucide('log-out', 14)}
+          Deprovision this device
+        </button>
+      </div>
+    </div>
+  `;
+
+  group.querySelector('[data-chat-deprovision]')?.addEventListener('click', async () => {
+    const ok = await yantaConfirm({
+      title: 'Deprovision Chat on this device?',
+      message:
+        'This signs out Chat and removes local Matrix credentials and crypto stores.\n\n' +
+        'You can reconnect later from your encrypted YANTA Vault.',
+      confirmLabel: 'Deprovision device',
+      cancelLabel: 'Cancel',
+      danger: true,
+      icon: 'log-out',
+    });
+
+    if (!ok) return;
+
+    try {
+      try {
+        await client?.logout?.(true);
+      } catch (err) {
+        console.warn('[YANTA Settings] Matrix logout failed during deprovision', err);
+        toast('Matrix logout failed; local Chat data will still be removed.', 'error');
+      }
+
+      await sessionMod.stopChatSession?.({
+        silent: true,
+      });
+
+      await storeMod.clearChatCredentials?.();
+      await sessionMod.clearChatMatrixLocalStoresForDebugOnly?.();
+
+      toast('Chat deprovisioned on this device', 'success');
+      renderSettingsBody();
+    } catch (err) {
+      console.warn('[YANTA Settings] Could not deprovision Chat', err);
+      toast('Could not deprovision Chat.', 'error');
+    }
+  });
+
+  return group;
+}
+
+function renderSettingsToggleRow({
+  checked,
+  label,
+  hint,
+  onChange,
+}) {
+  const row = el('label', {
+    class: 'yanta-settings-toggle',
+  });
+
+  const cb = el('input', {
+    type: 'checkbox',
+  });
+
+  cb.checked = !!checked;
+
+  cb.addEventListener('change', async () => {
+    try {
+      await onChange?.(cb.checked);
+    } catch (err) {
+      console.warn('[YANTA Settings] Toggle change failed', err);
+      toast('Could not save setting.', 'error');
+
+      cb.checked = !cb.checked;
+    }
+  });
+
+  row.append(
+    cb,
+    el('div', {
+      class: 'yanta-settings-toggle-meta',
+    },
+      el('div', {
+        class: 'yanta-settings-toggle-label',
+      }, label),
+      el('div', {
+        class: 'yanta-settings-toggle-hint',
+      }, hint),
+    )
+  );
+
+  return row;
 }
 
 // ---- Sync section ----
@@ -3959,6 +4519,40 @@ function injectSettingsCss() {
     flex: 1 1 auto;
     justify-content: center;
   }
+}
+
+.yanta-chat-settings-mini-meter {
+  position: relative;
+  height: 8px;
+  overflow: hidden;
+  margin-top: 13px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-faint) 16%, transparent);
+}
+
+.yanta-chat-settings-mini-meter > span {
+  display: block;
+  height: 100%;
+  min-width: 4px;
+  max-width: 100%;
+  border-radius: inherit;
+  background: linear-gradient(
+    90deg,
+    var(--accent),
+    color-mix(in srgb, var(--accent) 70%, white)
+  );
+}
+
+.yanta-chat-settings-row {
+  margin-top: 12px;
+}
+
+.yanta-chat-settings-row label {
+  display: grid;
+  gap: 6px;
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 750;
 }
   `;
 

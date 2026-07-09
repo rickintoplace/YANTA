@@ -117,6 +117,10 @@ import {
   decorateTimelineWithYantaEmbeds,
 } from './yanta-embeds.js';
 
+import {
+  getChatPreferences,
+} from './chat-preferences.js';
+
 import './chat.css';
 
 
@@ -605,6 +609,15 @@ function ensureRoot() {
       </section>
     </main>
 
+    <div class="yanta-chat-connection-banner" data-chat-connection-banner hidden>
+      ${lucide('wifi-off', 14)}
+      <span data-chat-connection-banner-text>Connection lost.</span>
+      <button class="btn compact" data-chat-reconnect-now>
+        ${lucide('refresh-cw', 13)}
+        Reconnect
+      </button>
+    </div>
+
     <div class="yanta-chat-crypto-banner" data-chat-crypto-banner hidden>
       ${lucide('shield-alert', 14)}
       <span data-chat-crypto-banner-text>Chat encryption is being set up…</span>
@@ -824,6 +837,30 @@ function bindRootEvents() {
 
   root.querySelector('[data-chat-menu]')?.addEventListener('click', (e) => {
     openRoomMenu(e.currentTarget);
+  });
+
+  root.querySelector('[data-chat-reconnect-now]')?.addEventListener('click', async () => {
+    try {
+      const {
+        stopChatSession,
+        startChatSession,
+      } = await import('./matrix-session.js');
+
+      await stopChatSession({
+        silent: true,
+      });
+
+      await startChatSession({
+        forceLogin: true,
+        reason: 'manual-reconnect-banner',
+      });
+
+      setChatConnectionBanner('');
+      toast('Chat reconnected', 'success');
+    } catch (err) {
+      console.warn('[YANTA Chat] Reconnect failed', err);
+      toast('Could not reconnect Chat.', 'error');
+    }
   });
 
   chatComposer = setupChatComposer({
@@ -1068,7 +1105,23 @@ function bindClientEvents(nextClient) {
   nextClient.on?.('sync', onSync);
 }
 
-function onSync() {
+function onSync(state, prevState, data = {}) {
+  const s = String(state || '').toUpperCase();
+
+  if (
+    s === 'ERROR' ||
+    s === 'RECONNECTING' ||
+    data?.error
+  ) {
+    setChatConnectionBanner('Connection lost — reconnect');
+  } else if (
+    s === 'PREPARED' ||
+    s === 'SYNCING' ||
+    s === 'STARTED'
+  ) {
+    setChatConnectionBanner('');
+  }
+
   renderRoomListSoon();
   renderTimelineSoon();
 }
@@ -1388,6 +1441,21 @@ function setChatCryptoBanner(message = '') {
   banner.querySelector('[data-chat-crypto-banner-close]')?.addEventListener('click', () => {
     banner.hidden = true;
   }, { once: true });
+}
+
+function setChatConnectionBanner(message = '') {
+  const banner = root?.querySelector('[data-chat-connection-banner]');
+  if (!banner) return;
+
+  if (!message) {
+    banner.hidden = true;
+    return;
+  }
+
+  const text = banner.querySelector('[data-chat-connection-banner-text]');
+  if (text) text.textContent = message;
+
+  banner.hidden = false;
 }
 
 function bindAppLevelChatEvents() {
@@ -2061,6 +2129,9 @@ const scheduleReadReceipt = debounce(() => {
 }, READ_RECEIPT_DEBOUNCE_MS);
 
 async function sendReadReceiptIfVisible() {
+  const prefs = await getChatPreferences();
+
+  if (prefs.sendReadReceipts === false) return;
   if (!document.hasFocus()) return;
   if (!timelineWindow || !client || !activeRoomId) return;
   if (!isTimelineNearBottom()) return;
@@ -2291,6 +2362,18 @@ function openRoomMenu(anchor) {
           client,
           roomId,
           roomName: roomDisplayName(room),
+        });
+      },
+    },
+    {
+      label: 'My Chat Profile',
+      icon: 'user-round',
+      action: async () => {
+        await openChatSettings({
+          client,
+          roomId,
+          roomName: roomDisplayName(room),
+          tab: 'profile',
         });
       },
     },

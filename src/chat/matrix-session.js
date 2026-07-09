@@ -712,6 +712,28 @@ function wireLifecycleEvents({
     }
   });
 
+  const decryptedEvent =
+    sdk.MatrixEventEvent?.Decrypted ||
+    sdk.MatrixEventEvent?.EventDecrypted ||
+    'Event.decrypted';
+
+  on(client, decryptedEvent, (ev) => {
+    const roomId = ev?.getRoomId?.() || ev?.event?.room_id || '';
+    const eventId = eventIdOf(ev);
+
+    if (!roomId || !eventId) return;
+
+    emit('yanta-chat-room-updated', {
+      roomId,
+      reason: 'decrypted',
+    });
+
+    emit('yanta-chat-message-decrypted', {
+      roomId,
+      eventId,
+    });
+  });
+  
   for (const evName of [
     receiptEvent,
     nameEvent,

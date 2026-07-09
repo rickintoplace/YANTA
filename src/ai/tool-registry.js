@@ -24,6 +24,8 @@ import {
   updateEventAppearanceAction,
   linkEventToNoteAction,
   getWeatherAction,
+  chatSearchAction,
+  chatSendMessageAction,
 } from './app-actions.js';
 
 import {
@@ -946,6 +948,37 @@ export const TOOL_REGISTRY = [
       required: ['eventId', 'noteId'],
     },
     execute: linkEventToNoteAction,
+  },
+  {
+    name: 'chat_search',
+    description:
+      'Searches locally decrypted YANTA Chat messages. Because Chat is E2EE, this uses the local device index, not server search.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        query: { type: 'string' },
+        roomId: { type: 'string' },
+        limit: { type: 'number' },
+      },
+      required: ['query'],
+    },
+    run: chatSearchAction,
+  },
+  {
+    name: 'chat_send_message',
+    description:
+      'Sends a YANTA Chat message. Requires allowSendChatMessages=true and explicit user confirmation.',
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        roomId: { type: 'string' },
+        text: { type: 'string' },
+      },
+      required: ['roomId', 'text'],
+    },
+    run: chatSendMessageAction,
   },
 ];
 

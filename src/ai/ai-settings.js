@@ -7,6 +7,10 @@ import {
   normalizeIncludedAiModel,
 } from './ai-models.js';
 
+import {
+  toast,
+} from '../core.js';
+
 const AI_SETTINGS_KEY = 'yanta.ai.settings.v2';
 const AI_KEY_SESSION_KEY = 'yanta.ai.openrouter.key.session';
 const AI_KEY_LOCAL_KEY = 'yanta.ai.openrouter.key.local';
@@ -89,6 +93,8 @@ export const DEFAULT_AI_SETTINGS = {
     allowManageRss: true,
     allowAddRssSources: true,
     allowSaveRssToNotes: true,
+
+    allowSendChatMessages: false,
     },
 };
 
@@ -156,6 +162,70 @@ export function saveAiSettings(patch = {}) {
   return next;
 }
 
+/**
+ * Reads whether AI may send Chat messages after user confirmation.
+ *
+ * Stored in:
+ * yanta.ai.settings.v2 -> permissions.allowSendChatMessages
+ */
+export async function getAllowSendChatMessages() {
+  try {
+    const settings = getAiSettings();
+    return settings.permissions?.allowSendChatMessages === true;
+  } catch (err) {
+    console.warn('[YANTA AI Settings] Could not read chat send permission', err);
+    toast('Could not read AI chat permission.', 'error');
+    return false;
+  }
+}
+
+/**
+ * Stores whether AI may send Chat messages after user confirmation.
+ *
+ * Stored in:
+ * yanta.ai.settings.v2 -> permissions.allowSendChatMessages
+ */
+export async function setAllowSendChatMessages(value) {
+  try {
+    const allowed = value === true;
+
+    const next = saveAiSettings({
+      permissions: {
+        allowSendChatMessages: allowed,
+      },
+    });
+
+    return next.permissions.allowSendChatMessages === true;
+  } catch (err) {
+    console.warn('[YANTA AI Settings] Could not save chat send permission', err);
+    toast('Could not save AI chat permission.', 'error');
+    throw err;
+  }
+}
+
+/**
+ * Returns AI permission snapshot.
+ */
+export async function aiPermissionSnapshot() {
+  try {
+    const settings = getAiSettings();
+
+    return {
+      ...DEFAULT_AI_SETTINGS.permissions,
+      ...(settings.permissions || {}),
+      allowSendChatMessages: await getAllowSendChatMessages(),
+    };
+  } catch (err) {
+    console.warn('[YANTA AI Settings] Could not create permission snapshot', err);
+    toast('Could not read AI permissions.', 'error');
+
+    return {
+      ...DEFAULT_AI_SETTINGS.permissions,
+      allowSendChatMessages: false,
+    };
+  }
+}
+
 export function resetAssistantPrompt() {
   return saveAiSettings({
     assistantPrompt: DEFAULT_ASSISTANT_PROMPT,
@@ -197,3 +267,4 @@ export function clearAiApiKey() {
   sessionStorage.removeItem(AI_KEY_SESSION_KEY);
   localStorage.removeItem(AI_KEY_LOCAL_KEY);
 }
+

@@ -113,6 +113,10 @@ import {
   indexTimelineEventsMedia,
 } from './chat-media-index.js';
 
+import {
+  decorateTimelineWithYantaEmbeds,
+} from './yanta-embeds.js';
+
 import './chat.css';
 
 
@@ -1991,6 +1995,11 @@ function renderTimeline({
   }));
 
   stampRenderedEventIds(eventsHost, events);
+
+  decorateTimelineWithYantaEmbeds(eventsHost, events, {
+    client,
+    room,
+  });
 
   setupTimelineObservers();
 

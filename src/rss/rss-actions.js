@@ -1638,3 +1638,73 @@ export async function rssSaveItemAsNoteAction(args = {}) {
 export async function rssMarkItemReadAction({ itemId, read = true } = {}) {
   return markRssItemRead(itemId, read);
 }
+
+/**
+ * Sends an RSS/source item as YANTA Chat source embed.
+ */
+export async function sendRssItemAsChatEmbedAction({
+  itemId,
+  roomId,
+} = {}) {
+  const item = await getRssItem(itemId);
+
+  if (!item) {
+    throw new Error('RSS item not found.');
+  }
+
+  const targetRoomId = String(roomId || '').trim();
+
+  if (!targetRoomId) {
+    throw new Error('roomId is required.');
+  }
+
+  try {
+    const {
+      resolveMatrixClient,
+    } = await import('../chat/chat-actions.js');
+
+    const {
+      sendSourceEmbed,
+    } = await import('../chat/yanta-embeds.js');
+
+    const client = await resolveMatrixClient();
+
+    if (!client) {
+      toast('Chat is not connected.', 'error');
+      throw new Error('Matrix client is not available.');
+    }
+
+    await sendSourceEmbed(client, targetRoomId, {
+      title: item.title || 'Source',
+      url: item.url || item.canonicalUrl || item.mediaUrl || '',
+      feedTitle: item.feedTitle || '',
+      publishedAt: item.publishedAt
+        ? new Date(item.publishedAt).toISOString()
+        : null,
+    });
+
+    await patchRssItem(itemId, {
+      read: true,
+    });
+
+    window.dispatchEvent(new CustomEvent('yanta-rss-updated', {
+      detail: {
+        itemId,
+        localOnly: true,
+        sentToChat: true,
+      },
+    }));
+
+    toast('Source sent to Chat', 'success');
+
+    return {
+      ok: true,
+      itemId,
+      roomId: targetRoomId,
+    };
+  } catch (err) {
+    console.warn('[YANTA RSS] Could not send source item to Chat', err);
+    toast('Could not send source to Chat.', 'error');
+    throw err;
+  }
+}

@@ -342,6 +342,124 @@ function scheduleSidebarFootCalendarIconRefresh() {
   }, Math.max(1000, nextMidnight.getTime() - now.getTime()));
 }
 
+function ensureChatSidebarBadgeCss() {
+  if (document.getElementById('yanta-chat-sidebar-badge-css')) return;
+
+  const style = document.createElement('style');
+
+  style.id = 'yanta-chat-sidebar-badge-css';
+  style.textContent = `
+.sidebar-foot button,
+.sidebar-foot a,
+.sidebar-foot [role="button"] {
+  position: relative;
+}
+
+.has-chat-unread {
+  position: relative;
+}
+
+.yanta-chat-sidebar-badge {
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  min-width: 16px;
+  height: 16px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--red, #ef4444);
+  color: #fff;
+  font-size: 10px;
+  font-weight: 850;
+  line-height: 1;
+  box-shadow: 0 0 0 2px var(--bg-elev);
+  pointer-events: none;
+}
+
+.yanta-chat-sidebar-badge[hidden] {
+  display: none !important;
+}
+`;
+
+  document.head.append(style);
+}
+
+function chatSidebarButtons() {
+  const scope =
+    $('sidebarFoot') ||
+    document.querySelector('.sidebar-foot') ||
+    null;
+
+  if (!scope) return [];
+
+  return [
+    ...scope.querySelectorAll('button, a, [role="button"]'),
+  ].filter((node) => {
+    const hay = [
+      node.getAttribute('title') || '',
+      node.getAttribute('aria-label') || '',
+      node.dataset?.action || '',
+      node.dataset?.key || '',
+      node.textContent || '',
+    ].join(' ').toLowerCase();
+
+    return hay.includes('chat');
+  });
+}
+
+function updateChatSidebarBadge(count = 0) {
+  ensureChatSidebarBadgeCss();
+
+  const n = Math.max(0, Number(count || 0));
+  const buttons = chatSidebarButtons();
+
+  for (const node of buttons) {
+    let badge = node.querySelector(':scope > .yanta-chat-sidebar-badge');
+
+    if (!n) {
+      badge?.remove();
+      node.classList.remove('has-chat-unread');
+      node.removeAttribute('data-chat-unread-count');
+      continue;
+    }
+
+    if (!badge) {
+      badge = document.createElement('span');
+      badge.className = 'yanta-chat-sidebar-badge';
+      node.append(badge);
+    }
+
+    badge.textContent = n > 99 ? '99+' : String(n);
+    node.classList.add('has-chat-unread');
+    node.dataset.chatUnreadCount = String(n);
+  }
+}
+
+function installChatSidebarBadgeListener() {
+  ensureChatSidebarBadgeCss();
+
+  window.addEventListener('yanta-chat-unread-changed', (e) => {
+    updateChatSidebarBadge(e.detail?.count || 0);
+  });
+
+  /*
+    Warum:
+    Sidebar-Foot-Actions werden später dynamisch gerendert. Wenn der Badge
+    vorher schon bekannt war, wird er nach dem Render erneut angelegt.
+  */
+  window.addEventListener('yanta-sidebar-resized', () => {
+    const last = Number(
+      document.querySelector('.has-chat-unread')?.dataset?.chatUnreadCount || 0
+    );
+
+    if (last > 0) {
+      updateChatSidebarBadge(last);
+    }
+  });
+}
+
 function openMobileSidebarSafe() {
   if (!isMobileViewport()) return;
 
@@ -1650,6 +1768,7 @@ async function init() {
   // Initialize the native browser navigation router
   setupOverlayHistoryRouter();
   setupAndroidBridge();
+  installChatSidebarBadgeListener();
 
   window.addEventListener('yanta-app-route-change', (e) => {
     closeTransientFullscreenUiForAppRoute(e.detail || {});
@@ -2659,6 +2778,10 @@ function bindEvents() {
     {
       afterAction: closeMobileAfterSidebarAction,
     }
+  );
+
+  updateChatSidebarBadge(
+    Number(document.querySelector('.has-chat-unread')?.dataset?.chatUnreadCount || 0)
   );
 
   // renderSidebarFootActions(

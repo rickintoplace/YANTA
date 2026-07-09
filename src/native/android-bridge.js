@@ -229,6 +229,8 @@ export function setupAndroidBridge() {
     showChatNotification: androidShowChatNotification,
     clearChatNotifications: androidClearChatNotifications,
     chatPushConfig: androidChatPushConfig,
+    setChatUnreadCount: androidSetChatUnreadCount,
+    handleDeepLink: handleAndroidDeepLink,
   };
 
   // Native → JS: Tap auf eine Chat-Notification öffnet den Raum.
@@ -254,6 +256,19 @@ export function setupAndroidBridge() {
 
   window.addEventListener('yanta-android-quick-action', (e) => {
     handleNativeQuickAction(e.detail?.action || '');
+  });
+
+  window.addEventListener('yanta-android-open-url', (e) => {
+    handleAndroidDeepLink(e.detail?.url || e.detail?.hash || '');
+  });
+
+  window.addEventListener('yanta-android-chat-notification-open', (e) => {
+    const roomId = e.detail?.roomId || '';
+
+    handleAndroidDeepLink(
+      e.detail?.url ||
+      `#chat/${encodeURIComponent(roomId)}`
+    );
   });
 
   [
@@ -298,40 +313,122 @@ export function androidChatMediaStatus() {
 }
 
 /**
- * Shows a native chat notification. Returns false when the installed
- * Android app version does not support chat notifications yet.
+ * Shows a native chat notification.
+ *
+ * Payload:
+ * { roomId, eventId, title, body, roomName, sender, url, ts }
  */
 export function androidShowChatNotification(notification) {
   if (!isAndroidApp()) return false;
+
   if (typeof window.YantaAndroid?.showChatNotification !== 'function') {
     return false;
   }
-  callAndroid('showChatNotification', safeJson(notification));
+
+  callAndroid('showChatNotification', safeJson({
+    ...notification,
+    url:
+      notification?.url ||
+      `${location.origin}${location.pathname}${location.search}#chat/${encodeURIComponent(notification?.roomId || '')}`,
+  }));
+
   return true;
 }
 
 /**
- * Clears native chat notifications (all, or for one room).
+ * Clears native chat notifications. Pass roomId to clear one room.
  */
 export function androidClearChatNotifications(roomId = '') {
   callAndroid('clearChatNotifications', String(roomId || ''));
 }
 
 /**
+ * Updates native app badge / launcher unread count if supported.
+ */
+export function androidSetChatUnreadCount(count = 0) {
+  if (!isAndroidApp()) return false;
+
+  const n = Math.max(0, Number(count || 0));
+
+  if (typeof window.YantaAndroid?.setChatUnreadCount !== 'function') {
+    return false;
+  }
+
+  callAndroid('setChatUnreadCount', String(n));
+
+  return true;
+}
+
+/**
  * Native push configuration for Matrix HTTP pushers.
  *
- * Contract (native side, later): getChatPushConfig() returns JSON like
- * { pushkey: '<fcm-token>', gatewayUrl: 'https://push.yanta.me/_matrix/push/v1/notify', appId: 'page.yanta.android' }.
+ * Native contract:
+ * getChatPushConfig() returns JSON:
+ * {
+ *   pushkey: '<fcm-token>',
+ *   gatewayUrl: 'https://push.yanta.page/_matrix/push/v1/notify',
+ *   appId: 'page.yanta.android',
+ *   deviceName: 'Pixel 8'
+ * }
  */
 export function androidChatPushConfig() {
   if (!isAndroidApp()) return null;
-  if (typeof window.YantaAndroid?.getChatPushConfig !== 'function') return null;
+
+  if (typeof window.YantaAndroid?.getChatPushConfig !== 'function') {
+    return null;
+  }
+
   const raw = callAndroid('getChatPushConfig');
+
   try {
     const config = JSON.parse(raw || 'null');
-    return config?.pushkey && config?.gatewayUrl ? config : null;
+
+    return config?.pushkey && config?.gatewayUrl
+      ? config
+      : null;
   } catch (err) {
     console.warn('[YANTA Android Bridge] getChatPushConfig parse failed', err);
+    toast('Could not read Android chat push configuration.', 'error');
     return null;
+  }
+}
+
+/**
+ * Opens an app deep link from native.
+ */
+export function handleAndroidDeepLink(urlOrHash = '') {
+  const raw = String(urlOrHash || '').trim();
+
+  if (!raw) return false;
+
+  try {
+    const url = raw.startsWith('#')
+      ? new URL(location.href.split('#')[0] + raw)
+      : new URL(raw, location.href);
+
+    if (url.hash.startsWith('#chat/')) {
+      const roomId = decodeURIComponent(url.hash.replace(/^#chat\//, ''));
+
+      location.hash = `#chat/${encodeURIComponent(roomId)}`;
+
+      import('../chat/chat-ui.js')
+        .then(({ openChat }) => openChat({
+          roomId,
+          push: true,
+        }))
+        .catch((err) => {
+          console.warn('[YANTA Android Bridge] Could not open chat deep link', err);
+          toast('Could not open chat.', 'error');
+        });
+
+      return true;
+    }
+
+    location.href = url.href;
+    return true;
+  } catch (err) {
+    console.warn('[YANTA Android Bridge] Invalid deep link', err);
+    toast('Could not open Android link.', 'error');
+    return false;
   }
 }

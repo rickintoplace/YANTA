@@ -21,6 +21,10 @@ import {
   setupVoiceRecorder,
 } from './chat-voice.js';
 
+import {
+  openYantaEmbedSendSheet,
+} from './yanta-embeds.js';
+
 import { androidChatMediaStatus } from '../native/android-bridge.js';
 
 const DRAFT_DEBOUNCE_MS = 400;
@@ -221,20 +225,33 @@ export function setupChatComposer({
           {
             label: 'YANTA Note',
             icon: 'file-text',
-            disabled: true,
-            action: () => toast('YANTA Note attachments are coming in AP8.', 'error'),
+            action: () => {
+              openYantaEmbedSendSheet({
+                client: getClient?.(),
+                roomId: getRoomId?.(),
+              });
+            },
           },
           {
             label: 'YANTA Event',
             icon: 'calendar',
-            disabled: true,
-            action: () => toast('YANTA Event attachments are coming in AP8.', 'error'),
+
+            action: () => {
+              openYantaEmbedSendSheet({
+                client: getClient?.(),
+                roomId: getRoomId?.(),
+              });
+            },
           },
           {
             label: 'Drawing',
             icon: 'line-squiggle',
-            disabled: true,
-            action: () => toast('Drawing attachments are coming in AP8.', 'error'),
+            action: () => {
+              openYantaEmbedSendSheet({
+                client: getClient?.(),
+                roomId: getRoomId?.(),
+              });
+            },
           },
         ],
         {

@@ -5663,6 +5663,64 @@ async function exportDrawingWebp(noteId, drawingId) {
   downloadBlob(blob, name);
 }
 
+/**
+ * Exports a drawing as PNG Blob for Chat embeds.
+ *
+ * Warum:
+ * YANTA Chat Drawings are sent as normal Matrix m.image first, so every
+ * Matrix client can display them. The following YANTA embed event only adds
+ * metadata/actions for YANTA clients.
+ */
+export async function exportDrawingPngBlob({
+  noteId,
+  drawingId,
+} = {}) {
+  try {
+    const id = String(drawingId || '').trim();
+    const nId = String(noteId || '').trim();
+
+    if (!nId || !id) {
+      throw new Error('noteId and drawingId are required.');
+    }
+
+    const drawing = getDrawing(nId, id);
+
+    if (!drawing) {
+      throw new Error('Drawing not found.');
+    }
+
+    const { exportToBlob } = await loadExcalidraw();
+
+    if (typeof exportToBlob !== 'function') {
+      throw new Error('PNG export unavailable in this Excalidraw build.');
+    }
+
+    const blob = await exportToBlob({
+      elements: liveDrawingElements(drawing),
+      appState: {
+        ...cleanAppState(drawing.appState || {}),
+        exportBackground: true,
+        viewBackgroundColor:
+          currentExcalidrawTheme() === 'dark'
+            ? '#121212'
+            : '#ffffff',
+      },
+      files: drawing.files || {},
+      mimeType: 'image/png',
+    });
+
+    if (!(blob instanceof Blob) || !blob.size) {
+      throw new Error('Drawing PNG export returned an empty blob.');
+    }
+
+    return blob;
+  } catch (err) {
+    console.warn('[YANTA Draw] PNG blob export failed', err);
+    toast('Drawing export failed', 'error');
+    throw err;
+  }
+}
+
 async function exportDrawingPdf(noteId, drawingId) {
   const d = getDrawing(noteId, drawingId);
 

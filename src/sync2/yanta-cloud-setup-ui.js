@@ -1184,11 +1184,19 @@ function usageBarsHtml(me, storageBreakdown = null, {
     ? 'Hover the colored sections to see what uses storage. Compaction mainly reduces update history.'
     : 'Encrypted vault objects stored in YANTA Cloud. Breakdown loads after device/vault verification.';
 
+      // Plan-Name transformieren oder Fallback nutzen
+  let displayPlan = plan;
+  if (plan === 'free') {
+    displayPlan = 'Free';
+  } else if (plan === 'premium') {
+    displayPlan = 'Plus';
+  }
+
   return `
     <div class="yanta-cloud-usage-list">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:2px">
         <strong style="color:var(--text)">Plan</strong>
-        <span style="color:var(--accent);font-weight:800;text-transform:capitalize">${escapeHtml(plan)}</span>
+        <span style="color:var(--accent);font-weight:800;text-transform:capitalize">${escapeHtml(displayPlan)}</span>
       </div>
 
       ${usageBarHtml({

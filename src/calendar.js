@@ -792,6 +792,29 @@ let calendarSwipeToken = 0;
 let calendarInteractiveSwipeState = null;
 
 let calendarReturnSurface = 'note';
+/*
+  Mobile Tap-Navigation:
+  Tap auf Tag/Event in Monats-/Wochenansicht öffnet die Tagesansicht.
+  Dieser Wechsel ist transient und darf state.currentCalendarView
+  (= View beim nächsten Öffnen) NICHT überschreiben.
+*/
+let calendarTransientDayView = false;
+function calendarMobileTapShouldOpenDay() {
+  if (!calendarMobile()) return false;
+  const viewType = fc?.view?.type || '';
+  return viewType === 'dayGridMonth' || viewType === 'timeGridWeek';
+}
+function openCalendarDayViewAt(dateLike) {
+  if (!fc) return;
+  const d = dateLikeToLocalDate(dateLike) || new Date();
+  calendarTransientDayView = true;
+  try {
+    fc.changeView('timeGridDay', d);
+  } catch {}
+  setCalendarToolbarView('timeGridDay');
+  invalidateCalendarSwipeCache();
+  scheduleCalendarResize({ render: true });
+}
 
 function calendarMobile() {
   return CALENDAR_MOBILE_MQ.matches;
@@ -1114,13 +1137,16 @@ function renderCalendarTopbar() {
       e.stopPropagation();
 
       if (!fc) return;
-
       const nextView = btn.dataset.calViewBtn;
       if (!nextView) return;
-
+      /*
+        Expliziter View-Wechsel = echte Nutzer-Präferenz.
+        Auch wenn zuvor transient in die Tagesansicht navigiert wurde.
+      */
+      calendarTransientDayView = false;
+      state.currentCalendarView = nextView;
       if (nextView !== fc.view?.type) {
         fc.changeView(nextView);
-        state.currentCalendarView = nextView;
 
         setCalendarToolbarView(nextView);
 
@@ -3707,23 +3733,32 @@ function setupCalendarSwipeNavigation() {
       movedY <= 6 &&
       age <= 650;
 
-    if (isCleanStoredEventTap) {
+if (isCleanStoredEventTap) {
       cleanupInteractiveCalendarSwipe();
       cleanupMobileEventDrag(p);
-
       suppressCalendarSelectionFor(500);
-
       safePreventDefault(originalEvent);
       originalEvent?.stopImmediatePropagation?.();
-
       try {
         fc?.unselect?.();
       } catch {}
-
-      openEventEditor({
-        id: eventTapId,
-      });
-
+      /*
+        Mobil in Monats-/Wochenansicht:
+        Tap auf ein Event öffnet erst die Tagesansicht dieses Tages.
+        Erst in der Tagesansicht öffnet ein Tap den Event-Editor.
+      */
+      if (calendarMobileTapShouldOpenDay()) {
+        const fcEvent = fc?.getEventById?.(eventTapId);
+        const tapDate =
+          fcEvent?.start ||
+          state.calendarEvents.get(eventTapId)?.start ||
+          new Date();
+        openCalendarDayViewAt(tapDate);
+      } else {
+        openEventEditor({
+          id: eventTapId,
+        });
+      }
       scheduleCalendarSwipePrewarm();
       return;
     }
@@ -3741,21 +3776,21 @@ function setupCalendarSwipeNavigation() {
       movedY <= 6 &&
       age <= 550;
 
-    if (isCleanTap) {
-      cleanupInteractiveCalendarSwipe();
-
-      suppressCalendarSelectionFor(500);
-
-      safePreventDefault(originalEvent);
-      originalEvent?.stopImmediatePropagation?.();
-
-      try {
-        fc?.unselect?.();
-      } catch {}
-
-      openEventEditor(p.cellTapInput);
-      return;
-    }
+      if (isCleanTap) {
+        cleanupInteractiveCalendarSwipe();
+        suppressCalendarSelectionFor(500);
+        safePreventDefault(originalEvent);
+        originalEvent?.stopImmediatePropagation?.();
+        try {
+          fc?.unselect?.();
+        } catch {}
+        if (calendarMobileTapShouldOpenDay()) {
+          openCalendarDayViewAt(p.cellTapInput.start);
+        } else {
+          openEventEditor(p.cellTapInput);
+        }
+        return;
+      }
 
     /*
       Kein Fallback-Navigate.
@@ -4715,21 +4750,20 @@ function openCalendarDateTimePicker({
   value = null,
   allDay = false,
   allowClear = false,
+  allowAllDayToggle = true,
   onPick = null,
   fromHistory = false,
 } = {}) {
   const modal = ensureCalendarDateTimePickerModal();
-
   registerCalendarFullscreenModalRoutes();
-
   lastCalendarDateTimePickerOptions = {
     title,
     value,
     allDay,
     allowClear,
+    allowAllDayToggle,
     onPick,
   };
-
   openCalendarOverlayState(
     CALENDAR_OVERLAY_IDS.DATETIME_PICKER,
     {
@@ -4739,52 +4773,42 @@ function openCalendarDateTimePicker({
       fromHistory,
     }
   );
-
-  const prefs = getCalendarPreferences();
-
+  /*
+    All-Day ist jetzt Picker-interner State.
+    Der "Time"-Tab ist nie disabled; stattdessen gibt es dort einen
+    All-Day-Schalter. onPick liefert { allDay } als zweites Argument.
+  */
+  let isAllDay = !!allDay;
   let selected =
     dateLikeToLocalDate(value) ||
     new Date();
-
   selected = cloneDate(selected);
   selected.setSeconds(0, 0);
-
-  if (allDay) {
+  if (isAllDay) {
     selected.setHours(0, 0, 0, 0);
   }
-
   let viewYear = selected.getFullYear();
   let viewMonth = selected.getMonth();
-
   let mode = 'date'; // date | time
-
   const render = () => {
     const currentPrefs = getCalendarPreferences();
     const hour12 = currentPrefs.timeFormat === '12';
-
     const selectedHour = selected.getHours();
     const selectedMinute = selected.getMinutes();
-
     const hour12Value = selectedHour % 12 || 12;
     const isPm = selectedHour >= 12;
-
     const weekdays = weekdayLabelsForPicker();
-
     const firstOfMonth = new Date(viewYear, viewMonth, 1);
     const weekStart = Number(currentPrefs.weekStart ?? 1);
     const offset = (firstOfMonth.getDay() - weekStart + 7) % 7;
     const gridStart = addLocalDays(firstOfMonth, -offset);
-
     const today = startOfLocalDay(new Date());
-
     const daysHtml = [];
-
     for (let i = 0; i < 42; i++) {
       const d = addLocalDays(gridStart, i);
       const inMonth = d.getMonth() === viewMonth;
       const selectedDay = sameLocalDate(d, selected);
       const todayDay = sameLocalDate(d, today);
-
       daysHtml.push(`
         <button
           type="button"
@@ -4794,17 +4818,12 @@ function openCalendarDateTimePicker({
         </button>
       `);
     }
-
     const minuteSet = new Set();
-
     for (let m = 0; m < 60; m += 5) {
       minuteSet.add(m);
     }
-
     minuteSet.add(selectedMinute);
-
     const minutes = [...minuteSet].sort((a, b) => a - b);
-
     const hoursHtml = hour12
       ? Array.from({ length: 12 }, (_, i) => i + 1).map((h) => `
           <button
@@ -4822,7 +4841,6 @@ function openCalendarDateTimePicker({
             ${String(h).padStart(2, '0')}
           </button>
         `).join('');
-
     const minutesHtml = minutes.map((m) => `
       <button
         type="button"
@@ -4831,7 +4849,6 @@ function openCalendarDateTimePicker({
         ${String(m).padStart(2, '0')}
       </button>
     `).join('');
-
     modal.innerHTML = `
       <div class="modal-card yanta-calendar-datetime-card">
         <header class="yanta-dtp-head">
@@ -4839,25 +4856,22 @@ function openCalendarDateTimePicker({
             <div class="yanta-dtp-kicker">${escapeHtml(title)}</div>
             <div class="yanta-dtp-value">
               ${escapeHtml(formatCalendarDateTime(selected, {
-                allDay,
+                allDay: isAllDay,
                 editor: true,
                 includeWeekday: true,
               }))}
             </div>
           </div>
-
           <button class="icon-btn" data-ydtp-close title="Close">${lucide('x', 16)}</button>
         </header>
-
         <div class="yanta-dtp-tabs">
           <button class="${mode === 'date' ? 'active' : ''}" data-ydtp-mode="date">
             ${lucide('calendar-days', 14)} Date
           </button>
-          <button class="${mode === 'time' ? 'active' : ''}" data-ydtp-mode="time" ${allDay ? 'disabled' : ''}>
+          <button class="${mode === 'time' ? 'active' : ''}" data-ydtp-mode="time">
             ${lucide('clock', 14)} Time
           </button>
         </div>
-
         <div class="yanta-dtp-body">
           <section class="yanta-dtp-panel ${mode === 'date' ? 'active' : ''}" data-ydtp-panel="date">
             <div class="yanta-dtp-month-row">
@@ -4865,156 +4879,159 @@ function openCalendarDateTimePicker({
               <strong>${escapeHtml(monthLabel(viewYear, viewMonth))}</strong>
               <button type="button" class="icon-btn" data-ydtp-month="1">${lucide('chevron-right', 17)}</button>
             </div>
-
             <div class="yanta-dtp-weekdays">
               ${weekdays.map((w) => `<span>${escapeHtml(w)}</span>`).join('')}
             </div>
-
             <div class="yanta-dtp-grid">
               ${daysHtml.join('')}
             </div>
           </section>
-
           <section class="yanta-dtp-panel ${mode === 'time' ? 'active' : ''}" data-ydtp-panel="time">
-            <div class="yanta-dtp-time-display">
-              ${escapeHtml(formatCalendarEditorTimePart(selected))}
-            </div>
-
-            <div class="yanta-dtp-time-wheels ${hour12 ? 'is-12h' : ''}">
-              <div class="yanta-dtp-wheel" data-wheel="hour">
-                <div class="yanta-dtp-wheel-label">Hour</div>
-                ${hoursHtml}
-              </div>
-
-              <div class="yanta-dtp-wheel" data-wheel="minute">
-                <div class="yanta-dtp-wheel-label">Minute</div>
-                ${minutesHtml}
-              </div>
-
-              ${hour12 ? `
-                <div class="yanta-dtp-ampm">
-                  <button type="button" class="${!isPm ? 'selected' : ''}" data-ydtp-ampm="am">AM</button>
-                  <button type="button" class="${isPm ? 'selected' : ''}" data-ydtp-ampm="pm">PM</button>
-                </div>
-              ` : ''}
-            </div>
+            ${
+              allowAllDayToggle
+                ? `
+                  <label class="switch yanta-calendar-switch yanta-dtp-allday-row">
+                    <input type="checkbox" data-ydtp-allday ${isAllDay ? 'checked' : ''} />
+                    <span>All day</span>
+                  </label>
+                `
+                : ''
+            }
+            ${
+              isAllDay
+                ? `
+                  <div class="yanta-dtp-allday-hint">
+                    All-day event — no time needed.<br>
+                    Turn off “All day” to pick a time.
+                  </div>
+                `
+                : `
+                  <div class="yanta-dtp-time-display">
+                    ${escapeHtml(formatCalendarEditorTimePart(selected))}
+                  </div>
+                  <div class="yanta-dtp-time-wheels ${hour12 ? 'is-12h' : ''}">
+                    <div class="yanta-dtp-wheel" data-wheel="hour">
+                      <div class="yanta-dtp-wheel-label">Hour</div>
+                      ${hoursHtml}
+                    </div>
+                    <div class="yanta-dtp-wheel" data-wheel="minute">
+                      <div class="yanta-dtp-wheel-label">Minute</div>
+                      ${minutesHtml}
+                    </div>
+                    ${hour12 ? `
+                      <div class="yanta-dtp-ampm">
+                        <button type="button" class="${!isPm ? 'selected' : ''}" data-ydtp-ampm="am">AM</button>
+                        <button type="button" class="${isPm ? 'selected' : ''}" data-ydtp-ampm="pm">PM</button>
+                      </div>
+                    ` : ''}
+                  </div>
+                `
+            }
           </section>
         </div>
-
         <footer class="yanta-dtp-foot">
           ${allowClear ? `<button type="button" class="btn" data-ydtp-clear>Clear</button>` : ''}
-          <button type="button" class="btn" data-ydtp-today>${allDay ? 'Today' : 'Now'}</button>
+          <button type="button" class="btn" data-ydtp-today>${isAllDay ? 'Today' : 'Now'}</button>
           <span class="grow"></span>
           <button type="button" class="btn" data-ydtp-close>Cancel</button>
           <button type="button" class="btn primary" data-ydtp-ok>OK</button>
         </footer>
       </div>
     `;
-
     modal.querySelectorAll('[data-ydtp-mode]').forEach((btn) => {
       btn.addEventListener('click', () => {
-        if (btn.disabled) return;
         mode = btn.dataset.ydtpMode || 'date';
         render();
       });
     });
-
+    modal.querySelector('[data-ydtp-allday]')?.addEventListener('change', (e) => {
+      isAllDay = !!e.target.checked;
+      if (isAllDay) {
+        selected.setHours(0, 0, 0, 0);
+      } else {
+        /*
+          Beim Abwählen von All-Day sofort eine sinnvolle Default-Zeit setzen,
+          damit nie ein "Datum ohne Uhrzeit" entsteht.
+        */
+        selected = new Date(applyCurrentDefaultTimeToDate(selected));
+      }
+      render();
+    });
     modal.querySelectorAll('[data-ydtp-month]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const delta = Number(btn.dataset.ydtpMonth || 0);
         const next = new Date(viewYear, viewMonth + delta, 1);
-
         viewYear = next.getFullYear();
         viewMonth = next.getMonth();
-
         render();
       });
     });
-
     modal.querySelectorAll('[data-ydtp-day]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const date = localDateOnlyToDate(btn.dataset.ydtpDay);
         if (!date) return;
-
         const h = selected.getHours();
         const m = selected.getMinutes();
-
         selected = date;
-        selected.setHours(allDay ? 0 : h, allDay ? 0 : m, 0, 0);
-
-        if (!allDay) {
+        selected.setHours(isAllDay ? 0 : h, isAllDay ? 0 : m, 0, 0);
+        if (!isAllDay) {
           mode = 'time';
         }
-
         render();
       });
     });
-
     modal.querySelectorAll('[data-ydtp-hour]').forEach((btn) => {
       btn.addEventListener('click', () => {
         selected.setHours(Number(btn.dataset.ydtpHour || 0), selected.getMinutes(), 0, 0);
         render();
       });
     });
-
     modal.querySelectorAll('[data-ydtp-hour12]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const h12 = Number(btn.dataset.ydtpHour12 || 12);
         const currentlyPm = selected.getHours() >= 12;
-
         let h = h12 % 12;
         if (currentlyPm) h += 12;
-
         selected.setHours(h, selected.getMinutes(), 0, 0);
         render();
       });
     });
-
     modal.querySelectorAll('[data-ydtp-minute]').forEach((btn) => {
       btn.addEventListener('click', () => {
         selected.setMinutes(Number(btn.dataset.ydtpMinute || 0), 0, 0);
         render();
       });
     });
-
     modal.querySelectorAll('[data-ydtp-ampm]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const wantPm = btn.dataset.ydtpAmpm === 'pm';
         let h = selected.getHours();
-
         if (wantPm && h < 12) h += 12;
         if (!wantPm && h >= 12) h -= 12;
-
         selected.setHours(h, selected.getMinutes(), 0, 0);
         render();
       });
     });
-
     modal.querySelector('[data-ydtp-today]')?.addEventListener('click', () => {
       const n = new Date();
-      selected = allDay ? startOfLocalDay(n) : n;
+      selected = isAllDay ? startOfLocalDay(n) : n;
       selected.setSeconds(0, 0);
       viewYear = selected.getFullYear();
       viewMonth = selected.getMonth();
       render();
     });
-
     modal.querySelector('[data-ydtp-clear]')?.addEventListener('click', () => {
-      onPick?.(null);
+      onPick?.(null, { allDay: isAllDay });
       closeCalendarDateTimePicker();
     });
-
     modal.querySelector('[data-ydtp-ok]')?.addEventListener('click', () => {
       const picked = cloneDate(selected);
-
-      if (allDay) {
+      if (isAllDay) {
         picked.setHours(0, 0, 0, 0);
       }
-
-      onPick?.(picked.toISOString());
+      onPick?.(picked.toISOString(), { allDay: isAllDay });
       closeCalendarDateTimePicker();
     });
-
     requestAnimationFrame(() => {
       modal
         .querySelector('.yanta-dtp-wheel-item.selected')
@@ -5024,7 +5041,6 @@ function openCalendarDateTimePicker({
         });
     });
   };
-
   modal.hidden = false;
   armCalendarModalInputGuard();
   render();
@@ -10251,31 +10267,39 @@ function openEventEditor(input = {}) {
   const openPickerForInput = (which) => {
     const inputEl = which === 'start' ? startInput : endInput;
     const allDay = !!allDayInput?.checked;
-
     const parsed =
       parseCalendarEditorInput(inputEl.value, allDay) ||
       (which === 'start' ? ev.start : ev.end) ||
       ev.start ||
       new Date().toISOString();
-
     openCalendarDateTimePicker({
       title: which === 'start' ? 'Start' : 'End',
       value: parsed,
       allDay,
       allowClear: which === 'end',
-      onPick: (iso) => {
+      onPick: (iso, meta = {}) => {
+        const nextAllDay =
+          typeof meta.allDay === 'boolean'
+            ? meta.allDay
+            : allDay;
+        /*
+          Wenn All-Day im Picker geändert wurde:
+          Editor-Checkbox synchronisieren. Der change-Handler formatiert
+          Start/End passend um; danach den gepickten Wert setzen.
+        */
+        if (allDayInput && !!allDayInput.checked !== nextAllDay) {
+          allDayInput.checked = nextAllDay;
+          allDayInput.dispatchEvent(new Event('change', { bubbles: true }));
+        }
         if (which === 'end') {
           endTouched = !!iso;
         }
-
         inputEl.value = iso
-          ? calendarEditorInputValue(iso, allDay)
+          ? calendarEditorInputValue(iso, nextAllDay)
           : '';
-
         if (which === 'start') {
           autoFillEndFromStart();
         }
-
         updateDatePreviews();
       },
     });
@@ -10312,32 +10336,49 @@ function openEventEditor(input = {}) {
   allDayInput?.addEventListener('change', () => {
     const allDay = allDayInput.checked;
     const previousAllDay = !allDay;
-
+    /*
+      Defensiv doppelt parsen:
+      Falls das Feld bereits im "anderen" Format steht (z. B. Datum ohne
+      Uhrzeit nach einem früheren All-Day-Toggle), trotzdem übernehmen.
+    */
     const startIso =
       parseCalendarEditorInput(startInput.value, previousAllDay) ||
+      parseCalendarEditorInput(startInput.value, allDay) ||
       ev.start;
-
     const endIso =
       parseCalendarEditorInput(endInput.value, previousAllDay) ||
+      parseCalendarEditorInput(endInput.value, allDay) ||
       ev.end;
-
     startInput.placeholder = calendarEditorDatePlaceholder(allDay);
     endInput.placeholder = calendarEditorDatePlaceholder(allDay);
-
     if (!allDay) {
       const nextStartIso = applyCurrentDefaultTimeToDate(startIso);
-      const nextEndIso = addMinutesIso(nextStartIso, 30);
-
       startInput.value = calendarEditorInputValue(nextStartIso, false);
-
-      if (!endTouched && nextEndIso) {
+      /*
+        Nach All-Day -> Timed darf im End-Feld nie ein reines Datum ohne
+        Uhrzeit stehen bleiben (war vorher als "Invalid date" markiert).
+        - End leer + nicht angefasst: Start + 30 min auto-füllen.
+        - End gleicher Tag: Start + 30 min.
+        - End mehrtägig: End-Datum behalten, Uhrzeit vom Start übernehmen.
+      */
+      const endHasValue = !!endInput.value.trim();
+      let nextEndIso = addMinutesIso(nextStartIso, 30);
+      if (endHasValue && endIso && !sameLocalDay(nextStartIso, endIso)) {
+        const endDate = dateLikeToLocalDate(endIso);
+        const startDate = dateLikeToLocalDate(nextStartIso);
+        if (endDate && startDate) {
+          endDate.setHours(startDate.getHours(), startDate.getMinutes(), 0, 0);
+          nextEndIso = endDate.toISOString();
+        }
+      }
+      if ((endHasValue || !endTouched) && nextEndIso) {
         endInput.value = calendarEditorInputValue(nextEndIso, false);
+        endTouched = endHasValue;
       }
     } else {
       startInput.value = calendarEditorInputValue(startIso, true);
       endInput.value = endIso ? calendarEditorInputValue(endIso, true) : '';
     }
-
     updateDatePreviews();
   });
 
@@ -11616,8 +11657,15 @@ export function setupCalendar() {
     },
 
     datesSet(info) {
-      state.currentCalendarView = info.view.type;
-
+      if (calendarTransientDayView && info.view.type === 'timeGridDay') {
+        /*
+          Transienter Tap-Wechsel in die Tagesansicht:
+          currentCalendarView bewusst NICHT aktualisieren.
+        */
+      } else {
+        calendarTransientDayView = false;
+        state.currentCalendarView = info.view.type;
+      }
       setCalendarToolbarTitle(info.view.title);
       setCalendarToolbarView(info.view.type);
 
@@ -11675,9 +11723,19 @@ export function setupCalendar() {
         return;
       }
 
-      const kind = info.event.extendedProps?.yantaKind;
-
-      if (kind === 'markdown-event') {
+/*
+        Mobil in Monats-/Wochenansicht:
+        Jeder Event-Tap navigiert erst in die Tagesansicht.
+        (Gespeicherte Events werden bereits im pointerup abgefangen;
+        hier landen v. a. Markdown-/Holiday-/Source-Events.)
+      */
+        if (calendarMobileTapShouldOpenDay()) {
+          info.jsEvent?.preventDefault?.();
+          openCalendarDayViewAt(info.event.start || new Date());
+          return;
+        }
+        const kind = info.event.extendedProps?.yantaKind;
+        if (kind === 'markdown-event') {
         info.jsEvent?.preventDefault?.();
 
         const raw = info.event.extendedProps?.raw;

@@ -3131,3 +3131,16 @@
     justify-content: center;
   }
 }
+
+.yanta-dtp-allday-row {
+  margin: 2px 0 10px;
+}
+.yanta-dtp-allday-hint {
+  padding: 22px 14px;
+  text-align: center;
+  color: var(--text-dim);
+  font-size: 13px;
+  line-height: 1.5;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+}

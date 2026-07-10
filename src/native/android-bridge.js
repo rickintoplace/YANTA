@@ -233,17 +233,6 @@ export function setupAndroidBridge() {
     handleDeepLink: handleAndroidDeepLink,
   };
 
-  // Native → JS: Tap auf eine Chat-Notification öffnet den Raum.
-  window.addEventListener('yanta-android-chat-notification-open', (e) => {
-    const roomId = e.detail?.roomId || '';
-    import('../chat/chat-ui.js')
-      .then(({ openChat }) => openChat({ roomId, push: true }))
-      .catch((err) => {
-        console.warn('[YANTA Android Bridge] Could not open chat from notification', err);
-        toast('Could not open chat.', 'error');
-      });
-  });
-
   window.addEventListener('yanta-android-notification-status', (e) => {
     lastNotificationStatus = {
       ...lastNotificationStatus,

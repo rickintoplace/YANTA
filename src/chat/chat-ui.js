@@ -143,8 +143,6 @@ const MOBILE_MQ = window.matchMedia('(max-width: 760px)');
 
 const CHAT_FLOATING_OVERLAY_ID = 'chat-floating';
 
-const CHAT_CRYPTO_BANNER_DISMISS_KEY = 'chat.cryptoBanner.dismissed.v1';
-
 let chatOverlayRegistered = false;
 let chatMode = 'surface'; // surface | floating
 let roomListWidth = ROOM_LIST_DEFAULT_WIDTH;
@@ -988,21 +986,6 @@ function bindRootEvents() {
     updateMobileState();
   });
 
-  root.addEventListener('click', (e) => {
-    const btn = e.target.closest?.('[data-chat-crypto-banner-close]');
-    if (!btn) return;
-
-    const banner = root.querySelector('[data-chat-crypto-banner]');
-    const text = root.querySelector('[data-chat-crypto-banner-text]')?.textContent || '';
-
-    writeCryptoBannerDismiss(text);
-
-    if (banner) banner.hidden = true;
-
-    e.preventDefault();
-    e.stopPropagation();
-  }, true);
-
 }
 
 function bindFloatingDrag() {
@@ -1548,23 +1531,6 @@ async function ensureClient() {
 
     return null;
   }
-}
-
-function readCryptoBannerDismiss() {
-  try {
-    return JSON.parse(localStorage.getItem(CHAT_CRYPTO_BANNER_DISMISS_LS_KEY) || 'null');
-  } catch {
-    return null;
-  }
-}
-
-function writeCryptoBannerDismiss(message) {
-  try {
-    localStorage.setItem(CHAT_CRYPTO_BANNER_DISMISS_LS_KEY, JSON.stringify({
-      message: String(message || ''),
-      dismissedAt: Date.now(),
-    }));
-  } catch {}
 }
 
 const CHAT_CRYPTO_BANNER_DISMISS_LS_KEY = 'yanta.chat.cryptoBanner.dismissed.v2';
@@ -2755,36 +2721,4 @@ function openRoomMenu(anchor) {
   ], {
     align: 'end',
   });
-}
-
-function exportVisibleTimeline() {
-  if (!timelineWindow || !activeRoomId) return;
-
-  try {
-    const data = timelineWindow.getEvents().map((event) => ({
-      id: event.getId?.(),
-      type: event.getType?.(),
-      sender: event.getSender?.(),
-      ts: event.getTs?.(),
-      content: event.getClearContent?.() || event.getContent?.() || {},
-    }));
-
-    const blob = new Blob([JSON.stringify(data, null, 2)], {
-      type: 'application/json',
-    });
-
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-
-    a.href = url;
-    a.download = `yanta-chat-${activeRoomId.replace(/[^a-z0-9_-]+/gi, '_')}.json`;
-    a.click();
-
-    URL.revokeObjectURL(url);
-
-    toast('Chat export created', 'success');
-  } catch (err) {
-    console.warn('[YANTA Chat] Could not export timeline', err);
-    toast('Could not export chat.', 'error');
-  }
 }

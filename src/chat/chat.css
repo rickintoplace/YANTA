@@ -794,7 +794,7 @@
 .yanta-chat-surface {
   grid-template-columns:
     var(--chat-list-width, 320px)
-    6px
+    0px
     minmax(0, 1fr);
 }
 
@@ -803,19 +803,33 @@
 }
 
 .yanta-chat-list-resizer {
-  grid-column: 2;
-  grid-row: 1;
-
-  width: 6px;
-  min-width: 6px;
-
-  background: transparent;
-  cursor: col-resize;
-  touch-action: none;
+    grid-column: 2;
+    grid-row: 1;
+    /* 1. Der Resizer selbst nimmt keinen (oder kaum) Platz weg */
+    width: 0; 
+    min-width: 0;
+    position: relative; /* Wichtig für die Positionierung des Pseudoelements */
+    cursor: col-resize;
+    touch-action: none;
 }
 
-.yanta-chat-list-resizer:hover,
-.yanta-chat-surface.is-resizing-list .yanta-chat-list-resizer {
+/* 2. Die unsichtbare "Hitbox" zum Draggen */
+.yanta-chat-list-resizer::after {
+    content: "";
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 50%;
+    width: 8px; 
+    transform: translateX(-50%);
+    background: transparent; /* Bleibt unsichtbar */
+}
+
+.yanta-chat-list-resizer:hover::after {
+    background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.yanta-chat-surface.is-resizing-list .yanta-chat-list-resizer::after {
   background: color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
@@ -902,7 +916,7 @@
 .yanta-chat-surface.is-floating {
   grid-template-columns:
     var(--chat-list-width, 320px)
-    6px
+    0px
     minmax(0, 1fr);
 }
 

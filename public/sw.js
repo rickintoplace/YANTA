@@ -5,7 +5,7 @@
 // User data is in IndexedDB/Yjs, not in this cache.
 // ============================================================
 
-const CACHE_VERSION = 'yanta-app-v14';
+const CACHE_VERSION = 'yanta-app-v15';
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -122,6 +122,7 @@ self.addEventListener('notificationclick', (event) => {
 
   const data = event.notification?.data || {};
   const url = data.url || '/';
+  const roomId = data.roomId || '';
 
   event.waitUntil((async () => {
     const allClients = await clients.matchAll({
@@ -129,18 +130,20 @@ self.addEventListener('notificationclick', (event) => {
       includeUncontrolled: true,
     });
 
+    // Reuse a running app window: focus + in-app navigation via message.
     for (const client of allClients) {
       if ('focus' in client) {
         await client.focus();
-
-        if ('navigate' in client && url) {
-          await client.navigate(url);
-        }
-
+        client.postMessage({
+          type: 'yanta-notification-click',
+          roomId,
+          url,
+        });
         return;
       }
     }
 
+    // No window open: cold start with the deep link.
     if (clients.openWindow) {
       await clients.openWindow(url);
     }

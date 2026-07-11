@@ -179,6 +179,16 @@ let onboardingAutoOpenedAt = 0;
 let replyTargetEvent = null;
 let replyBarEl = null;
 
+let suppressChatBackUntil = 0;
+
+function suppressChatBackBriefly(ms = 700) {
+  suppressChatBackUntil = Math.max(suppressChatBackUntil, Date.now() + ms);
+}
+
+function chatBackSuppressed() {
+  return Date.now() < suppressChatBackUntil;
+}
+
 async function openChatOnboardingAutomatically() {
   /*
     Ein User ohne Chat-Account soll beim Öffnen von Chat direkt das
@@ -849,7 +859,19 @@ function bindRootEvents() {
     renderRoomList();
   });
 
-  root.querySelector('[data-chat-back]')?.addEventListener('click', () => {
+  root.querySelector('[data-chat-back]')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    /*
+      Schutz gegen Touch/Ghost-Clicks:
+      Direkt nach einem Raum-Klick darf der neu erschienene Mobile-Back-Button
+      nicht denselben Tap als "zurück" interpretieren.
+    */
+    if (chatBackSuppressed()) {
+      return;
+    }
+
     if (history.state?.surface === 'chat' && history.state?.roomId) {
       history.back();
       return;
@@ -1912,7 +1934,10 @@ function renderRoomList() {
   const globalSearchBtn = el('button', {
     type: 'button',
     class: 'yanta-chat-room-row',
-    onclick: () => {
+    onclick: (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
       openGlobalChatSearch({
         client,
         onJump: jumpToMessageFromSearch,
@@ -2037,7 +2062,17 @@ function renderRoomRow(room) {
   const btn = el('button', {
     type: 'button',
     class: `yanta-chat-room-row ${room.roomId === activeRoomId ? 'active' : ''}`,
-    onclick: () => {
+
+    onpointerdown: (e) => {
+      e.stopPropagation();
+    },
+
+    onclick: (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      suppressChatBackBriefly();
+
       openRoomFromList(room.roomId).catch((err) => {
         console.warn('[YANTA Chat] Could not open room', err);
         toast('Could not open chat.', 'error');

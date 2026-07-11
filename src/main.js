@@ -2336,7 +2336,9 @@ window.addEventListener('popstate', async (e) => {
     st.surface !== 'chat' &&
     route.surface !== 'chat'
   ) {
-    closeChat();
+    closeChat({
+      fromHistory: true,
+    });
   }
 
   if (st.surface === 'calendar' || route.surface === 'calendar') {

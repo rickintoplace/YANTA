@@ -31,7 +31,14 @@ const AXIS_THRESHOLD = 12;
 
 function supportedMimeType() {
   try {
-    return MIME_CANDIDATES.find((m) => MediaRecorder.isTypeSupported?.(m)) || '';
+    if (typeof MediaRecorder === 'undefined') return '';
+    const found = MIME_CANDIDATES.find((m) => MediaRecorder.isTypeSupported?.(m));
+    if (found) return found;
+    /*
+      Fallback: leerer mimeType lässt MediaRecorder seinen Plattform-Default
+      wählen (Android WebView: meist audio/webm;codecs=opus).
+    */
+    return '';
   } catch {
     return '';
   }
@@ -39,21 +46,23 @@ function supportedMimeType() {
 
 function assertMicrophoneMayBeRequested() {
   const native = androidChatMediaStatus();
-  if (native.isAndroidApp && native.supported === false) {
-    throw new Error('Voice messages are not supported by this Android app version yet. Please update the YANTA app.');
-  }
-  if (native.isAndroidApp && native.micGranted === false) {
+  /*
+    Warum bridge-missing NICHT mehr blockt:
+    Eine App-Version ohne getChatMediaStatus()-Bridge kann trotzdem
+    getUserMedia im WebView unterstützen. Wir versuchen die Aufnahme und
+    mappen echte Permission-Fehler über friendlyMicError().
+    Nur ein explizites micGranted === false blockt vorab.
+  */
+  if (native.isAndroidApp && native.supported && native.micGranted === false) {
     throw new Error('Microphone permission is missing. Allow the microphone for YANTA in Android settings.');
   }
   if (!window.isSecureContext) {
     throw new Error('Voice recording requires HTTPS.');
   }
-
   const policy =
     document.permissionsPolicy ||
     document.featurePolicy ||
     null;
-
   try {
     if (
       policy?.allowsFeature &&
@@ -65,30 +74,27 @@ function assertMicrophoneMayBeRequested() {
     if (/permissions policy/i.test(err?.message || '')) {
       throw err;
     }
-
     console.warn('[YANTA Chat] Could not inspect microphone permissions policy', err);
-    toast('Could not check microphone permission.', 'error');
   }
-
   if (!navigator.mediaDevices?.getUserMedia || !window.MediaRecorder) {
     throw new Error('Voice recording is not supported in this browser.');
   }
+}
 
-  /**
-   * Maps getUserMedia/MediaRecorder failures to actionable user messages.
-   */
-  function friendlyMicError(err) {
-    const name = err?.name || '';
-    const inAndroidApp = androidChatMediaStatus().isAndroidApp;
-    if (name === 'NotAllowedError' || name === 'SecurityError') {
-      return inAndroidApp
-        ? 'Microphone permission is missing. Allow the microphone for YANTA in Android settings.'
-        : 'Microphone permission was denied.';
-    }
-    if (name === 'NotFoundError') return 'No microphone was found on this device.';
-    if (name === 'NotReadableError') return 'The microphone is in use by another app.';
-    return err?.message || 'Could not start voice recording.';
+/**
+ * Maps getUserMedia/MediaRecorder failures to actionable user messages.
+ */
+function friendlyMicError(err) {
+  const name = err?.name || '';
+  const inAndroidApp = androidChatMediaStatus().isAndroidApp;
+  if (name === 'NotAllowedError' || name === 'SecurityError') {
+    return inAndroidApp
+      ? 'Microphone permission is missing. Allow the microphone for YANTA in Android settings.'
+      : 'Microphone permission was denied.';
   }
+  if (name === 'NotFoundError') return 'No microphone was found on this device.';
+  if (name === 'NotReadableError') return 'The microphone is in use by another app.';
+  return err?.message || 'Could not start voice recording.';
 }
 
 function fmtTimer(ms) {
@@ -271,11 +277,16 @@ export function setupVoiceRecorder({
     });
 
     mimeType = supportedMimeType();
-
-    recorder = new MediaRecorder(stream, {
-      mimeType,
+    const recorderOptions = {
       audioBitsPerSecond: 24_000,
-    });
+    };
+    if (mimeType) {
+      recorderOptions.mimeType = mimeType;
+    }
+    recorder = new MediaRecorder(stream, recorderOptions);
+    if (!mimeType) {
+      mimeType = recorder.mimeType || '';
+    }
 
     chunks = [];
 

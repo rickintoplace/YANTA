@@ -171,6 +171,8 @@ let typingActive = false;
 
 let chatComposer = null;
 
+let chatMessageActionsCtl = null;
+
 // Onboarding automatisch öffnen, wenn kein Account existiert.
 let onboardingAutoOpenedAt = 0;
 
@@ -542,6 +544,10 @@ function ensureRoot() {
           <strong>Chat</strong>
         </div>
 
+        <button class="icon-btn" data-chat-my-settings title="My profile & settings" aria-label="My profile & settings">
+          ${lucide('user-round', 17)}
+        </button>
+
         <button class="icon-btn" data-chat-new title="New chat" aria-label="New chat">
           ${lucide('message-circle-plus', 17)}
         </button>
@@ -691,7 +697,7 @@ function ensureRoot() {
 
   bindRootEvents();
 
-  installChatMessageActions({
+  chatMessageActionsCtl = installChatMessageActions({
     root,
     getClient: () => client,
     getRoomId: () => activeRoomId,
@@ -785,6 +791,18 @@ async function askConfirm({
 }
 
 function bindRootEvents() {
+
+  root.querySelector('[data-chat-my-settings]')?.addEventListener('click', () => {
+    openChatSettings({
+      client,
+      scope: 'me',
+      tab: 'profile',
+    }).catch((err) => {
+      console.warn('[YANTA Chat] Could not open my chat settings', err);
+      toast('Could not open Chat settings.', 'error');
+    });
+  });
+
   root.querySelector('[data-chat-new]')?.addEventListener('click', () => {
     openNewChatDialog().catch((err) => {
       console.warn('[YANTA Chat] New chat failed', err);
@@ -985,6 +1003,29 @@ function bindRootEvents() {
   MOBILE_MQ.addEventListener?.('change', () => {
     updateMobileState();
   });
+
+  /*
+    ESC-Priorität im Chat (Capture, vor main.js handleGlobalKey):
+    1. Bildviewer behandelt ESC selbst.
+    2. Selection-Modus beenden.
+    3. Aktiven Reply entfernen.
+    4. Sonst normale Navigation (main.js: history.back / closeChat).
+  */
+  window.addEventListener('keydown', (e) => {
+    if (e.key !== 'Escape' || !chatIsOpen()) return;
+    if (document.querySelector('.yanta-chat-image-viewer')) return;
+    if (chatMessageActionsCtl?.selection?.isActive()) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      chatMessageActionsCtl.selection.exit();
+      return;
+    }
+    if (replyTargetEvent) {
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      clearReplyTarget();
+    }
+  }, true);
 
 }
 
@@ -1535,43 +1576,60 @@ async function ensureClient() {
 
 const CHAT_CRYPTO_BANNER_DISMISS_LS_KEY = 'yanta.chat.cryptoBanner.dismissed.v2';
 
+/*
+  In-Memory-Flag zusätzlich zu localStorage:
+  Schließen muss auch funktionieren, wenn localStorage nicht schreibbar ist
+  (z. B. restriktive WebView-Konfiguration).
+*/
+let cryptoBannerDismissedMem = false;
+let cryptoBannerShowTimer = 0;
+
 function cryptoBannerDismissed() {
+  if (cryptoBannerDismissedMem) return true;
   try {
     const rec = JSON.parse(localStorage.getItem(CHAT_CRYPTO_BANNER_DISMISS_LS_KEY) || 'null');
-
-    return rec && Number(rec.dismissedAt || 0) > Date.now() - 30 * 24 * 60 * 60 * 1000;
+    return !!rec && Number(rec.dismissedAt || 0) > Date.now() - 30 * 24 * 60 * 60 * 1000;
   } catch {
     return false;
   }
 }
 
 function dismissCryptoBanner() {
+  cryptoBannerDismissedMem = true;
+  clearTimeout(cryptoBannerShowTimer);
+  cryptoBannerShowTimer = 0;
   try {
     localStorage.setItem(CHAT_CRYPTO_BANNER_DISMISS_LS_KEY, JSON.stringify({
       dismissedAt: Date.now(),
     }));
   } catch {}
-
   const banner = root?.querySelector('[data-chat-crypto-banner]');
-
   if (banner) banner.hidden = true;
 }
 
 function setChatCryptoBanner(message = '') {
   const banner = root?.querySelector('[data-chat-crypto-banner]');
   if (!banner) return;
-
+  clearTimeout(cryptoBannerShowTimer);
+  cryptoBannerShowTimer = 0;
   const clean = String(message || '').trim();
-
   if (!clean || cryptoBannerDismissed()) {
     banner.hidden = true;
     return;
   }
-
-  const text = banner.querySelector('[data-chat-crypto-banner-text]');
-  if (text) text.textContent = clean;
-
-  banner.hidden = false;
+  /*
+    Warum verzögert:
+    Beim Chat-Start feuern kurzlebige degraded-Events, die Sekunden später
+    durch yanta-chat-key-backup-ready geheilt werden. Banner nur zeigen,
+    wenn der Zustand nach 12s NICHT geheilt wurde. Ein Success-Event ruft
+    setChatCryptoBanner('') auf und cancelt den Timer.
+  */
+  cryptoBannerShowTimer = window.setTimeout(() => {
+    if (cryptoBannerDismissed()) return;
+    const text = banner.querySelector('[data-chat-crypto-banner-text]');
+    if (text) text.textContent = clean;
+    banner.hidden = false;
+  }, 12_000);
 }
 
 function setChatConnectionBanner(message = '') {
@@ -1593,6 +1651,10 @@ function bindAppLevelChatEvents() {
 
   window.addEventListener('yanta-chat-crypto-degraded', (e) => {
     setChatCryptoBanner(e.detail?.message || 'Chat encryption is being set up…');
+  });
+
+  window.addEventListener('yanta-chat-room-keys-imported', (e) => {
+    if (e.detail?.ok) setChatCryptoBanner('');
   });
 
   window.addEventListener('yanta-chat-jump-to-message', (e) => {
@@ -2225,6 +2287,12 @@ function renderTimeline({
     });
   }
 
+  window.dispatchEvent(new CustomEvent('yanta-chat-timeline-rendered', {
+    detail: {
+      roomId: activeRoomId,
+    },
+  }));
+
   window.setTimeout(() => {
     scheduleReadReceipt();
   }, 120);
@@ -2568,6 +2636,17 @@ function openRoomMenu(anchor) {
   const r = anchor.getBoundingClientRect();
 
   showMenu(r.right, r.bottom + 4, [
+    {
+      label: 'My Chat Profile',
+      icon: 'user-round',
+      action: async () => {
+        await openChatSettings({
+          client,
+          scope: 'me',
+          tab: 'profile',
+        });
+      },
+    },
     {
       label: chatMode === 'floating' ? 'Dock Chat' : 'Open as window',
       icon: chatMode === 'floating' ? 'panel-right' : 'picture-in-picture-2',

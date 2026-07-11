@@ -15,6 +15,7 @@ import {
   fileSubtitle,
   mxcToBlob,
   mxcToBlobUrl,
+  peekChatMediaObjectUrl,
 } from './chat-media.js';
 
 const lazyImageObserver = new IntersectionObserver((entries) => {
@@ -40,17 +41,6 @@ const activeVoicePlayback = {
   audio: null,
   eventId: '',
 };
-
-const resolvedImageUrlCache = new Map();
-
-function imageResolvedKey(source = {}) {
-  return [
-    source?.mxcUrl || '',
-    source?.encryptedFile?.iv || '',
-    source?.encryptedFile?.hashes?.sha256 || '',
-    source?.mimeType || '',
-  ].join('|');
-}
 
 function sourceFromContent(content = {}) {
   const info = content.info || {};
@@ -167,7 +157,7 @@ function waveformFromContent(content = {}) {
   return Array.from({ length: 48 }, () => 180);
 }
 
-function openImageViewer(client, full, title = 'Photo') {
+export function openChatImageViewer(client, full, title = 'Photo') {
   const overlay = el('div', {
     class: 'yanta-chat-image-viewer',
     role: 'dialog',
@@ -311,13 +301,11 @@ function renderImageMessage(client, content = {}) {
   const outer = el('div', {
     class: 'yanta-chat-image-message-wrap',
   });
-
   const wrap = el('button', {
     type: 'button',
     class: 'yanta-chat-image-message',
     title: 'Open photo',
   });
-
   outer.append(wrap);
 
   if (caption) {
@@ -333,55 +321,51 @@ function renderImageMessage(client, content = {}) {
     return outer;
   }
 
-  const key = imageResolvedKey(source.preview);
-  const cachedUrl = resolvedImageUrlCache.get(key);
+  const previewOpts = {
+    thumbnail: false,
+    encryptedFile: source.preview.encryptedFile,
+    mimeType: source.preview.mimeType,
+    w: source.preview.w,
+    h: source.preview.h,
+  };
 
-  if (cachedUrl) {
-    wrap.classList.add('is-resolved');
-
-    wrap.append(el('img', {
-      src: cachedUrl,
+  const showImage = (url) => {
+    if (!wrap.isConnected) return;
+    const img = el('img', {
+      src: url,
       alt: title,
       loading: 'lazy',
       decoding: 'async',
-    }));
-  } else {
-    const skeleton = el('div', {
-      class: 'yanta-chat-image-skeleton',
-    }, 'Loading image…');
+    });
+    wrap.classList.add('is-resolved');
+    wrap.replaceChildren(img);
+  };
 
-    wrap.append(skeleton);
+  /*
+    Warum kein eigener URL-Cache mehr:
+    Object-URL-Lebenszyklus gehört ausschließlich chat-media.js. Ein lokaler
+    Cache lieferte nach closeChat() revoked URLs (ERR_FILE_NOT_FOUND).
+  */
+  const cachedUrl = peekChatMediaObjectUrl(source.preview.mxcUrl, previewOpts);
+
+  if (cachedUrl) {
+    wrap.dataset.hydrated = '1';
+    showImage(cachedUrl);
+  } else {
+    wrap.append(el('div', {
+      class: 'yanta-chat-image-skeleton',
+    }, 'Loading image…'));
   }
 
   wrap._yantaHydrateImage = async () => {
-    if (resolvedImageUrlCache.has(key)) return;
-
+    if (wrap.dataset.hydrated === '1') return;
+    wrap.dataset.hydrated = '1';
     try {
-      const url = await mxcToBlobUrl(client, source.preview.mxcUrl, {
-        thumbnail: false,
-        encryptedFile: source.preview.encryptedFile,
-        mimeType: source.preview.mimeType,
-        w: source.preview.w,
-        h: source.preview.h,
-      });
-
-      resolvedImageUrlCache.set(key, url);
-
-      if (!wrap.isConnected) return;
-
-      const img = el('img', {
-        src: url,
-        alt: title,
-        loading: 'lazy',
-        decoding: 'async',
-      });
-
-      wrap.classList.add('is-resolved');
-      wrap.replaceChildren(img);
+      const url = await mxcToBlobUrl(client, source.preview.mxcUrl, previewOpts);
+      showImage(url);
     } catch (err) {
       console.warn('[YANTA Chat] Could not hydrate image message', err);
-      toast('Could not load chat image.', 'error');
-
+      wrap.dataset.hydrated = '';
       if (wrap.isConnected) {
         wrap.replaceChildren(el('div', {
           class: 'yanta-chat-media-error',
@@ -391,7 +375,7 @@ function renderImageMessage(client, content = {}) {
   };
 
   wrap.addEventListener('click', () => {
-    openImageViewer(client, source.full, title);
+    openChatImageViewer(client, source.full, title);
   });
 
   if (!cachedUrl) {

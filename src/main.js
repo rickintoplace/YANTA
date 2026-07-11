@@ -485,12 +485,23 @@ function closeMobileSidebarSafe() {
 
 function replaceMobileSidebarOverlayWithCurrentRoute() {
   if (history.state?.yantaOverlay !== 'mobile-sidebar') return;
-
   const appSurface =
     state.surface ||
     $('app')?.dataset?.surface ||
     'dashboard';
-
+  if (appSurface === 'chat') {
+    /*
+      Die Chat-Room-Id steckt noch im URL-Hash (#chat/<roomId>), da der
+      Sidebar-Overlay-Eintrag die URL nicht verändert.
+    */
+    const route = parseAppHash();
+    history.replaceState(
+      chatState(route.roomId || null),
+      '',
+      chatUrl(route.roomId || null)
+    );
+    return;
+  }
   if (
     appSurface === 'calendar' ||
     $('calendarSurface')?.hidden === false
@@ -500,20 +511,16 @@ function replaceMobileSidebarOverlayWithCurrentRoute() {
       '',
       calendarUrl()
     );
-
     return;
   }
-
   if (appSurface === 'note' && state.currentNoteId) {
     history.replaceState(
       noteState(state.currentNoteId),
       '',
       noteUrl(state.currentNoteId)
     );
-
     return;
   }
-
   history.replaceState(
     dashboardState(state.dashboardFolderId || null),
     '',
@@ -2309,6 +2316,21 @@ window.addEventListener('popstate', async (e) => {
 
   const st = e.state || {};
   const route = parseAppHash();
+
+/*
+    Chat ist eine Fullscreen-Surface wie Calendar. popstate ruft aber nur die
+    Ziel-Branch-Renderer auf; closeTransientFullscreenUiForAppRoute() feuert
+    nur bei programmatischer Navigation (yanta-app-route-change), nicht bei
+    Browser-/Geräte-Back. Ohne diesen Guard bliebe die Chat-Surface über
+    Dashboard/Note/Calendar sichtbar.
+  */
+  if (
+    state.surface === 'chat' &&
+    st.surface !== 'chat' &&
+    route.surface !== 'chat'
+  ) {
+    closeChat();
+  }
 
   if (st.surface === 'calendar' || route.surface === 'calendar') {
     closeGraph();

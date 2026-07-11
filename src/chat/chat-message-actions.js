@@ -1,45 +1,74 @@
 // ============================================================
-// YANTA Chat — Message context actions, self-contained menu
+// YANTA Chat — Message context actions (menu, reply, selection)
 // ============================================================
-
 import {
   el,
   escapeHtml,
   lucide,
   toast,
 } from '../core.js';
-
 import {
   yantaConfirm,
   yantaPrompt,
 } from '../dialogs.js';
-
 import {
   messagePreview,
 } from './chat-message-render.js';
+import {
+  createChatSelection,
+} from './chat-selection.js';
+import {
+  openChatForwardPicker,
+} from './chat-forward.js';
 
 let menuEl = null;
+
+const COARSE_MQ = window.matchMedia('(pointer: coarse)');
+
+/*
+  Doppelklick auf diese Elemente ist Textauswahl-Intention (Wort markieren),
+  kein Reply-Trigger — wie in Telegram.
+*/
+const TEXT_TARGET_SELECTOR = [
+  '.yanta-chat-message-text',
+  '.yanta-chat-image-caption',
+  '.yanta-chat-reply-preview',
+  '.yanta-chat-sender',
+  '.yanta-chat-redacted',
+  'pre',
+  'code',
+].join(', ');
+
+const INTERACTIVE_TARGET_SELECTOR = [
+  'a',
+  'button',
+  'input',
+  'textarea',
+  'select',
+  'audio',
+  'video',
+  'img',
+  '.yanta-chat-image-message',
+  '.yanta-chat-voice',
+  '.yanta-chat-file-card',
+  '.yanta-chat-embed-card',
+].join(', ');
 
 function eventId(event) {
   return event?.getId?.() || event?.event?.event_id || '';
 }
-
 function eventType(event) {
   return event?.getType?.() || event?.event?.type || '';
 }
-
 function eventSender(event) {
   return event?.getSender?.() || event?.event?.sender || '';
 }
-
 function eventContent(event) {
   return event?.getClearContent?.() || event?.getContent?.() || event?.event?.content || {};
 }
-
 function eventText(event) {
   return String(eventContent(event).body || '').trim();
 }
-
 function isOwnEvent(client, event) {
   return !!client?.getUserId?.() && eventSender(event) === client.getUserId();
 }
@@ -50,22 +79,20 @@ function closeChatMessageMenu() {
   document.removeEventListener('pointerdown', onOutsidePointer, true);
   document.removeEventListener('keydown', onMenuKey, true);
 }
-
 function onOutsidePointer(e) {
   if (menuEl?.contains(e.target)) return;
   closeChatMessageMenu();
 }
-
 function onMenuKey(e) {
   if (e.key === 'Escape') {
     e.preventDefault();
+    e.stopImmediatePropagation();
     closeChatMessageMenu();
   }
 }
 
 function ensureMenuCss() {
   if (document.getElementById('yanta-chat-message-menu-css')) return;
-
   const style = document.createElement('style');
   style.id = 'yanta-chat-message-menu-css';
   style.textContent = `
@@ -112,62 +139,16 @@ function ensureMenuCss() {
   border-top: 1px solid var(--border);
   margin: 5px;
 }
-.yanta-chat-event.is-selected .yanta-chat-bubble {
-  outline: 2px solid color-mix(in srgb, var(--accent) 70%, transparent);
-  outline-offset: 2px;
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent);
-}
 `;
   document.head.append(style);
 }
 
-function selectedIds() {
-  try {
-    return new Set(JSON.parse(sessionStorage.getItem('yanta.chat.selectedMessages.v1') || '[]'));
-  } catch {
-    return new Set();
-  }
-}
-
-function writeSelectedIds(ids) {
-  try {
-    sessionStorage.setItem('yanta.chat.selectedMessages.v1', JSON.stringify([...ids]));
-  } catch {}
-}
-
-function toggleSelect(row) {
-  const id = row?.dataset?.eventId || '';
-  if (!id) return;
-
-  const ids = selectedIds();
-
-  if (ids.has(id)) {
-    ids.delete(id);
-    row.classList.remove('is-selected');
-  } else {
-    ids.add(id);
-    row.classList.add('is-selected');
-  }
-
-  writeSelectedIds(ids);
-}
-
-function restoreSelection(root) {
-  const ids = selectedIds();
-
-  for (const row of root.querySelectorAll('.yanta-chat-event[data-event-id]')) {
-    row.classList.toggle('is-selected', ids.has(row.dataset.eventId || ''));
-  }
-}
-
 async function copyText(event) {
   const text = eventText(event);
-
   if (!text) {
     toast('No text to copy.', 'error');
     return;
   }
-
   await navigator.clipboard.writeText(text);
   toast('Copied', 'success');
 }
@@ -179,14 +160,11 @@ async function editMessage({
   onReload,
 }) {
   const content = eventContent(event);
-
   if (content.msgtype !== 'm.text') {
     toast('Only text messages can be edited.', 'error');
     return;
   }
-
   const oldText = String(content.body || '');
-
   const nextText = await yantaPrompt({
     title: 'Edit message',
     message: 'Update your message.',
@@ -197,11 +175,8 @@ async function editMessage({
     confirmLabel: 'Save',
     icon: 'pencil',
   });
-
   const clean = String(nextText || '').trim();
-
   if (!clean || clean === oldText.trim()) return;
-
   await client.sendMessage(roomId, {
     msgtype: 'm.text',
     body: `* ${clean}`,
@@ -214,7 +189,6 @@ async function editMessage({
       event_id: eventId(event),
     },
   });
-
   toast('Message edited', 'success');
   await onReload?.();
 }
@@ -233,11 +207,8 @@ async function deleteMessage({
     danger: true,
     icon: 'trash',
   });
-
   if (!ok) return;
-
   await client.redactEvent(roomId, eventId(event));
-
   toast('Message deleted', 'success');
   await onReload?.();
 }
@@ -269,15 +240,11 @@ function menuButton({
     type: 'button',
     class: danger ? 'danger' : '',
   });
-
   btn.innerHTML = `${lucide(icon, 15)} <span>${escapeHtml(label)}</span>`;
-
   btn.addEventListener('click', async (e) => {
     e.preventDefault();
     e.stopPropagation();
-
     closeChatMessageMenu();
-
     try {
       await action?.();
     } catch (err) {
@@ -285,31 +252,27 @@ function menuButton({
       toast('Action failed.', 'error');
     }
   });
-
   return btn;
 }
 
 function openMenu({
   x,
   y,
-  row,
   event,
   client,
   roomId,
   onReply,
   onReload,
+  selection,
 }) {
   ensureMenuCss();
   closeChatMessageMenu();
-
   const own = isOwnEvent(client, event);
   const hasText = !!eventText(event);
-
   menuEl = el('div', {
     class: 'yanta-chat-message-menu',
     role: 'menu',
   });
-
   menuEl.append(
     menuButton({
       icon: 'reply',
@@ -317,7 +280,6 @@ function openMenu({
       action: () => onReply?.(event),
     })
   );
-
   if (own) {
     menuEl.append(
       menuButton({
@@ -332,15 +294,13 @@ function openMenu({
       })
     );
   }
-
   menuEl.append(
     menuButton({
       icon: 'check-square',
       label: 'Select',
-      action: () => toggleSelect(row),
+      action: () => selection?.enterWith(eventId(event)),
     })
   );
-
   if (hasText) {
     menuEl.append(
       menuButton({
@@ -350,17 +310,15 @@ function openMenu({
       })
     );
   }
-
   menuEl.append(
     menuButton({
       icon: 'forward',
       label: 'Forward',
-      action: () => toast('Forward is coming soon.', 'error'),
-    }),
-    menuButton({
-      icon: 'pin',
-      label: 'Pin',
-      action: () => toast('Pinning is coming soon.', 'error'),
+      action: () => openChatForwardPicker({
+        client,
+        sourceRoomId: roomId,
+        events: [event],
+      }),
     }),
     menuButton({
       icon: 'info',
@@ -368,7 +326,6 @@ function openMenu({
       action: () => showInfo(event),
     })
   );
-
   if (own) {
     menuEl.append(document.createElement('hr'));
     menuEl.append(
@@ -385,16 +342,12 @@ function openMenu({
       })
     );
   }
-
   document.body.append(menuEl);
-
   const rect = menuEl.getBoundingClientRect();
   const left = Math.max(8, Math.min(window.innerWidth - rect.width - 8, x));
   const top = Math.max(8, Math.min(window.innerHeight - rect.height - 8, y));
-
   menuEl.style.left = `${left}px`;
   menuEl.style.top = `${top}px`;
-
   setTimeout(() => {
     document.addEventListener('pointerdown', onOutsidePointer, true);
     document.addEventListener('keydown', onMenuKey, true);
@@ -409,10 +362,12 @@ function rowFromTarget(root, target) {
 function eventForRow(row, getEvents) {
   const id = row?.dataset?.eventId || '';
   if (!id) return null;
-
   return (getEvents?.() || []).find((ev) => eventId(ev) === id) || null;
 }
 
+/**
+ * Installs message context actions and returns { selection }.
+ */
 export function installChatMessageActions({
   root,
   getClient,
@@ -421,111 +376,126 @@ export function installChatMessageActions({
   onReply,
   onReload,
 } = {}) {
-  if (!root || root.dataset.chatMessageActionsInstalled === '1') return;
-
+  if (!root || root.dataset.chatMessageActionsInstalled === '1') return null;
   root.dataset.chatMessageActionsInstalled = '1';
   ensureMenuCss();
 
+  const selection = createChatSelection({
+    root,
+    getClient,
+    getRoomId,
+    getEvents,
+    onReply,
+    onReload,
+  });
+
   let longPress = null;
   let longPressTimer = 0;
-
   const clearLongPress = () => {
     clearTimeout(longPressTimer);
     longPressTimer = 0;
     longPress = null;
   };
 
+  // Rechtsklick (Desktop) → Kontextmenü.
+  // Long-Press-contextmenu (Android/Chrome) → Selection-Modus statt Menü.
   document.addEventListener('contextmenu', (e) => {
     if (!root || root.hidden) return;
-
     const row = rowFromTarget(root, e.target);
     if (!row) return;
-
     const event = eventForRow(row, getEvents);
     if (!event) return;
-
     e.preventDefault();
     e.stopPropagation();
     e.stopImmediatePropagation?.();
-
+    if (COARSE_MQ.matches) {
+      selection.enterWith(row.dataset.eventId || '');
+      return;
+    }
     openMenu({
       x: e.clientX,
       y: e.clientY,
-      row,
       event,
       client: getClient?.(),
       roomId: getRoomId?.(),
       onReply,
       onReload,
+      selection,
     });
   }, true);
 
+  // Doppelklick → Reply, aber NICHT auf Text (Browser-Wortmarkierung).
   document.addEventListener('dblclick', (e) => {
     if (!root || root.hidden) return;
+    if (selection.isActive()) return;
     if (e.target.closest?.('a,button,input,textarea,select')) return;
-
+    if (e.target.closest?.(TEXT_TARGET_SELECTOR)) return;
     const row = rowFromTarget(root, e.target);
     if (!row) return;
-
     const event = eventForRow(row, getEvents);
     if (!event) return;
-
     e.preventDefault();
     onReply?.(event);
   }, true);
 
+  // Mobil: Tap auf Nachricht (außerhalb interaktiver Elemente) → Kontextmenü.
+  document.addEventListener('click', (e) => {
+    if (!root || root.hidden) return;
+    if (!e.isTrusted) return;
+    if (!COARSE_MQ.matches) return;
+    if (selection.isActive()) return;
+    if (e.target.closest?.(INTERACTIVE_TARGET_SELECTOR)) return;
+    const row = rowFromTarget(root, e.target);
+    if (!row) return;
+    const event = eventForRow(row, getEvents);
+    if (!event) return;
+    e.preventDefault();
+    e.stopPropagation();
+    openMenu({
+      x: e.clientX,
+      y: e.clientY,
+      event,
+      client: getClient?.(),
+      roomId: getRoomId?.(),
+      onReply,
+      onReload,
+      selection,
+    });
+  }, true);
+
+  // Mobil: Long-Press → Multiselect-Modus (Telegram-Verhalten).
   document.addEventListener('pointerdown', (e) => {
     if (!root || root.hidden) return;
     if (e.pointerType !== 'touch' && e.pointerType !== 'pen') return;
-
+    if (selection.isActive()) return;
     const row = rowFromTarget(root, e.target);
     if (!row) return;
-
-    const event = eventForRow(row, getEvents);
-    if (!event) return;
-
     longPress = {
       pointerId: e.pointerId,
       x: e.clientX,
       y: e.clientY,
       row,
-      event,
     };
-
     longPressTimer = window.setTimeout(() => {
       if (!longPress) return;
-
       try {
         navigator.vibrate?.(8);
       } catch {}
-
-      openMenu({
-        x: longPress.x,
-        y: longPress.y,
-        row: longPress.row,
-        event: longPress.event,
-        client: getClient?.(),
-        roomId: getRoomId?.(),
-        onReply,
-        onReload,
-      });
-
+      selection.enterWith(longPress.row.dataset.eventId || '');
       clearLongPress();
     }, 480);
   }, true);
 
   document.addEventListener('pointermove', (e) => {
     if (!longPress || e.pointerId !== longPress.pointerId) return;
-
     if (Math.hypot(e.clientX - longPress.x, e.clientY - longPress.y) > 10) {
       clearLongPress();
     }
   }, true);
-
   document.addEventListener('pointerup', clearLongPress, true);
   document.addEventListener('pointercancel', clearLongPress, true);
 
-  window.addEventListener('yanta-chat-room-updated', () => {
-    requestAnimationFrame(() => restoreSelection(root));
-  });
+  return {
+    selection,
+  };
 }

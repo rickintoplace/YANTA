@@ -1085,7 +1085,13 @@ export async function startChatSession({
 
       await client.startClient({
         initialSyncLimit: INITIAL_SYNC_LIMIT,
+        /*
+          Kein TURN konfiguriert und YANTA bietet (noch) keine Calls an.
+          Verhindert den 404-Poll auf /voip/turnServer.
+        */
+        fallbackICEServerAllowed: false,
       });
+      client.setFallbackICEServerAllowed?.(false);
 
       /*
         Critical for multi-device old-message decryption:

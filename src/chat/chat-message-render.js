@@ -137,22 +137,25 @@ function isEditEvent(event) {
   return relates.rel_type === 'm.replace';
 }
 
+function isRedactionEvent(event) {
+  return (event?.getType?.() || event?.event?.type || '') === 'm.room.redaction';
+}
+
+/*
+  isRedacted() darf nur die REDIGIERTE Original-Nachricht erkennen.
+  Das m.room.redaction-Event selbst ist das neueste Timeline-Event und
+  wurde bisher als "Message deleted" ganz unten gerendert.
+*/
 function isRedacted(event) {
   return (
-    event?.isRedacted?.() ||
-    !!event?.event?.unsigned?.redacted_because ||
-    event?.getType?.() === 'm.room.redaction'
+    event?.isRedacted?.() === true ||
+    !!event?.event?.unsigned?.redacted_because
   );
 }
 
 function isMessageLike(event) {
   const type = event?.getType?.();
-
-  return (
-    type === 'm.room.message' ||
-    type === 'm.sticker' ||
-    isRedacted(event)
-  );
+  return type === 'm.room.message' || type === 'm.sticker';
 }
 
 function linkifyEscapedText(text) {

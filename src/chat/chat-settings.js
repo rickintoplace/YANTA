@@ -54,6 +54,7 @@ import {
   let currentRoomId = '';
   let currentRoomName = 'Chat';
   let activeTab = 'details';
+  let currentScope = 'room'; // 'room' | 'me'
   
   function isOpen() {
     return !!overlay && overlay.hidden === false;
@@ -1124,6 +1125,8 @@ import {
           client: currentClient,
           roomId: state?.roomId || currentRoomId,
           roomName: state?.roomName || currentRoomName,
+          tab: state?.tab || '',
+          scope: state?.scope || '',
           fromHistory: true,
         });
       },
@@ -1317,11 +1320,18 @@ import {
   
         <div style="height:10px"></div>
   
-        ${storageBarHtml({
-          label: 'This chat',
-          bytes: roomUsage.bytes,
-          limit: Math.max(limit, roomUsage.bytes),
-        })}
+        ${
+          currentScope === 'room'
+            ? `
+              <div style="height:10px"></div>
+              ${storageBarHtml({
+                label: 'This chat',
+                bytes: roomUsage.bytes,
+                limit: Math.max(limit, roomUsage.bytes),
+              })}
+            `
+            : ''
+        }
   
         <div class="yanta-chat-policy-row">
           <label for="chatMediaCachePolicy" style="color:var(--text-dim);font-size:12px;font-weight:750">
@@ -1338,7 +1348,11 @@ import {
         </div>
   
         <div class="yanta-chat-settings-actions">
-          <button class="btn" data-clear-room-cache>${lucide('eraser', 14)} Clear this chat cache</button>
+          ${
+            currentScope === 'room'
+              ? `<button class="btn" data-clear-room-cache>${lucide('eraser', 14)} Clear this chat cache</button>`
+              : ''
+          }
           <button class="btn danger" data-clear-all-cache>${lucide('trash', 14)} Clear all media cache</button>
         </div>
       </section>
@@ -1354,7 +1368,21 @@ import {
         : activeTab === 'storage'
           ? await storageTabHtml()
           : await detailsTabHtml();
-  
+      
+    const tabs = currentScope === 'me'
+      ? [
+          { id: 'profile', icon: 'user-round', label: 'Profile' },
+          { id: 'storage', icon: 'database', label: 'Storage' },
+        ]
+      : [
+          { id: 'details', icon: 'info', label: 'Details' },
+          { id: 'storage', icon: 'database', label: 'Storage' },
+        ];
+
+    if (!tabs.some((t) => t.id === activeTab)) {
+      activeTab = tabs[0].id;
+    }
+
     node.innerHTML = `
       <section class="yanta-chat-settings-card">
         <header class="yanta-chat-settings-head">
@@ -1364,7 +1392,7 @@ import {
   
           <span class="yanta-chat-settings-head-title">
             <strong>${escapeHtml(activeTab === 'profile' ? 'Profile' : activeTab === 'storage' ? 'Storage' : 'Chat details')}</strong>
-            <small>${escapeHtml(currentRoomName)}</small>
+            <small>${escapeHtml(currentScope === 'me' ? 'Your YANTA Chat account' : currentRoomName)}</small>
           </span>
   
           <span class="grow"></span>
@@ -1375,15 +1403,11 @@ import {
         </header>
   
         <nav class="yanta-chat-settings-tabs">
-          <button class="yanta-chat-settings-tab ${activeTab === 'details' ? 'active' : ''}" data-tab="details">
-            ${lucide('info', 14)} Details
-          </button>
-          <button class="yanta-chat-settings-tab ${activeTab === 'profile' ? 'active' : ''}" data-tab="profile">
-            ${lucide('user-round', 14)} Profile
-          </button>
-          <button class="yanta-chat-settings-tab ${activeTab === 'storage' ? 'active' : ''}" data-tab="storage">
-            ${lucide('database', 14)} Storage
-          </button>
+          ${tabs.map((t) => `
+            <button class="yanta-chat-settings-tab ${activeTab === t.id ? 'active' : ''}" data-tab="${t.id}">
+              ${lucide(t.icon, 14)} ${escapeHtml(t.label)}
+            </button>
+          `).join('')}
         </nav>
   
         <div class="yanta-chat-settings-body">
@@ -1521,46 +1545,51 @@ import {
   }
   
   /**
-   * Opens Chat settings/details for one room.
+   * Opens Chat settings.
+   *
+   * scope 'room': Details + Storage für einen Chat (Klick auf Chat-Kopf).
+   * scope 'me':   Eigenes Profil + Storage (List-Head), kein Room nötig.
    */
   export async function openChatSettings({
     client,
-    roomId,
+    roomId = '',
     roomName = 'Chat',
-    tab = 'details',
+    tab = '',
+    scope = '',
     fromHistory = false,
   } = {}) {
     registerRoute();
-  
+
     currentClient = client || currentClient;
-    currentRoomId = String(roomId || currentRoomId || '');
-    currentRoomName = roomName || currentRoomName || 'Chat';
-    activeTab = tab || activeTab || 'details';
-  
-    if (!currentRoomId) {
+    currentRoomId = String(roomId || '');
+    currentRoomName = roomName || 'Chat';
+    currentScope = scope || (tab === 'profile' || !currentRoomId ? 'me' : 'room');
+    activeTab = tab || (currentScope === 'me' ? 'profile' : 'details');
+
+    if (currentScope === 'room' && !currentRoomId) {
       toast('No chat selected.', 'error');
-      console.warn('[YANTA Chat Settings] Missing roomId');
+      console.warn('[YANTA Chat Settings] Missing roomId for room scope');
       return;
     }
-  
+
     if (!currentClient) {
       toast('Chat is not connected.', 'error');
       console.warn('[YANTA Chat Settings] Missing Matrix client');
       return;
     }
-  
+
     const node = ensureOverlay();
-  
     node.hidden = false;
-  
+
     if (!fromHistory && overlayIdFromState() !== CHAT_SETTINGS_OVERLAY_ID) {
       pushOverlayState(CHAT_SETTINGS_OVERLAY_ID, {
         roomId: currentRoomId,
         roomName: currentRoomName,
         tab: activeTab,
+        scope: currentScope,
       });
     }
-  
+
     await renderSettings();
   }
   

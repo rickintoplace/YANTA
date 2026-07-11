@@ -37,14 +37,18 @@ import {
     mxcToBlobUrl,
     purgeChatMediaMemoryCacheForMxc,
   } from './chat-media.js';
-  
+
+  import {
+    openChatImageViewer,
+  } from './chat-media-render.js';
+
   import {
     purgeChatMediaCacheForItem,
   } from './chat-media-cache.js';
-  
+
   import {
   showMenu,
-} from '../tree.js';
+  } from '../tree.js';
 
   const CHAT_GALLERY_OVERLAY_ID = 'chat-gallery';
   
@@ -640,131 +644,123 @@ import {
       </article>
     `;
   }
-  
-async function hydrateImages(root, items) {
-  imageObserver?.disconnect();
+    
+  async function hydrateImages(overlayNode, items) {
+    imageObserver?.disconnect();
+    imageObserver = null;
 
-  const cards = [...root.querySelectorAll('.yanta-chat-gallery-image')];
+    const body = overlayNode.querySelector('.yanta-chat-gallery-body');
+    const cards = [...overlayNode.querySelectorAll('.yanta-chat-gallery-image')];
+    if (!cards.length) return;
 
-  async function resolveGalleryImageUrl(item) {
-    const attempts = [
-      {
-        mxcUrl: item.thumbnailMxcUrl,
-        encryptedFile: item.thumbnailEncryptedFile || null,
-        thumbnail: !item.thumbnailEncryptedFile,
-        w: 360,
-        h: 360,
-      },
-      {
-        mxcUrl: item.mxcUrl,
-        encryptedFile: item.encryptedFile || null,
-        thumbnail: false,
-        w: 1200,
-        h: 1200,
-      },
-    ].filter((x) => x.mxcUrl);
+    async function resolveGalleryImageUrl(item) {
+      const attempts = [
+        {
+          mxcUrl: item.thumbnailMxcUrl,
+          encryptedFile: item.thumbnailEncryptedFile || null,
+          thumbnail: !item.thumbnailEncryptedFile,
+          w: 360,
+          h: 360,
+        },
+        {
+          mxcUrl: item.mxcUrl,
+          encryptedFile: item.encryptedFile || null,
+          thumbnail: false,
+          w: 1200,
+          h: 1200,
+        },
+      ].filter((x) => x.mxcUrl);
 
-    let lastErr = null;
+      let lastErr = null;
+      for (const attempt of attempts) {
+        try {
+          return await mxcToBlobUrl(currentClient, attempt.mxcUrl, {
+            thumbnail: attempt.thumbnail,
+            w: attempt.w,
+            h: attempt.h,
+            encryptedFile: attempt.encryptedFile,
+            mimeType: item.mime || '',
+            roomId: item.roomId,
+          });
+        } catch (err) {
+          lastErr = err;
+          console.warn('[YANTA Chat Gallery] image source failed, trying fallback', {
+            itemId: item.id,
+            mxcUrl: attempt.mxcUrl,
+            err,
+          });
+        }
+      }
+      throw lastErr || new Error('No gallery image source worked.');
+    }
 
-    for (const attempt of attempts) {
+    function openGalleryItemViewer(item) {
+      openChatImageViewer(currentClient, {
+        mxcUrl: item.mxcUrl || item.thumbnailMxcUrl,
+        encryptedFile: item.encryptedFile || item.thumbnailEncryptedFile || null,
+        mimeType: item.mime || '',
+        w: 1600,
+        h: 1600,
+      }, item.name || 'Photo');
+    }
+
+    const hydrateCard = async (card) => {
+      if (!card?.isConnected || card.dataset.hydrated === '1') return;
+      card.dataset.hydrated = '1';
+      const item = JSON.parse(card.dataset.galleryItemJson || '{}');
+      const img = card.querySelector('[data-gallery-image]');
+      const placeholder = card.querySelector('.yanta-chat-gallery-empty');
       try {
-        return await mxcToBlobUrl(currentClient, attempt.mxcUrl, {
-          thumbnail: attempt.thumbnail,
-          w: attempt.w,
-          h: attempt.h,
-          encryptedFile: attempt.encryptedFile,
-          mimeType: item.mime || '',
-          roomId: item.roomId,
+        const url = await resolveGalleryImageUrl(item);
+        if (!img?.isConnected) return;
+        img.src = url;
+        img.hidden = false;
+        if (placeholder) placeholder.hidden = true;
+        /*
+          Klick auf das Bild öffnet den Fullscreen-Viewer.
+          Die Action-Buttons (Download/Delete) stoppen selbst die Propagation
+          nicht — daher hier auf das <img> selbst binden.
+        */
+        img.style.cursor = 'zoom-in';
+        img.addEventListener('click', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          openGalleryItemViewer(item);
         });
       } catch (err) {
-        lastErr = err;
-        console.warn('[YANTA Chat Gallery] image source failed, trying fallback', {
-          itemId: item.id,
-          mxcUrl: attempt.mxcUrl,
-          encrypted: !!attempt.encryptedFile,
-          err,
-        });
+        console.warn('[YANTA Chat Gallery] Could not load image', err);
+        if (placeholder) {
+          placeholder.innerHTML = `
+            <div>
+              ${lucide('image-off', 24)}
+              <small>Preview failed</small>
+            </div>
+          `;
+        }
       }
+    };
+
+    if (!('IntersectionObserver' in window) || !body) {
+      await Promise.all(cards.map(hydrateCard));
+      return;
     }
 
-    throw lastErr || new Error('No gallery image source worked.');
-  }
-
-  const hydrateCard = async (card) => {
-    if (!card?.isConnected || card.dataset.hydrated === '1') return;
-
-    card.dataset.hydrated = '1';
-
-    const item = JSON.parse(card.dataset.galleryItemJson || '{}');
-    const img = card.querySelector('[data-gallery-image]');
-    const placeholder = card.querySelector('.yanta-chat-gallery-empty');
-
-    try {
-      const url = await resolveGalleryImageUrl(item);
-
-      if (!img?.isConnected) return;
-
-      img.src = url;
-      img.hidden = false;
-
-      if (placeholder) placeholder.hidden = true;
-    } catch (err) {
-      console.warn('[YANTA Chat Gallery] Could not load image', err);
-
-      if (placeholder) {
-        placeholder.innerHTML = `
-          <div>
-            ${lucide('image-off', 24)}
-            <small>Preview failed</small>
-          </div>
-        `;
+    imageObserver = new IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (!entry.isIntersecting) continue;
+        imageObserver?.unobserve(entry.target);
+        hydrateCard(entry.target);
       }
-    }
-  };
-
-  if (!('IntersectionObserver' in window)) {
-    await Promise.all(cards.map(hydrateCard));
-    return;
-  }
-
-  const body = root.querySelector('.yanta-chat-gallery-body');
-
-  imageObserver = new IntersectionObserver((entries) => {
-    for (const entry of entries) {
-      if (!entry.isIntersecting) continue;
-
-      imageObserver.unobserve(entry.target);
-      hydrateCard(entry.target);
-    }
-  }, {
-    root: body,
-    threshold: 0.01,
-    rootMargin: '400px',
-  });
-
-  for (const card of cards) {
-    imageObserver.observe(card);
-  }
-
-  requestAnimationFrame(() => {
-    const bodyRect = body?.getBoundingClientRect();
-
-    if (!bodyRect) return;
+    }, {
+      root: body,
+      threshold: 0.01,
+      rootMargin: '400px',
+    });
 
     for (const card of cards) {
-      const r = card.getBoundingClientRect();
-
-      const visible =
-        r.bottom >= bodyRect.top - 400 &&
-        r.top <= bodyRect.bottom + 400;
-
-      if (visible) {
-        imageObserver?.unobserve(card);
-        hydrateCard(card);
-      }
+      imageObserver.observe(card);
     }
-  });
-}
+  }
   
   async function renderGallery() {
     const node = ensureOverlay();

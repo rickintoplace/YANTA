@@ -25,10 +25,18 @@ import {
   putCachedChatMediaBlob,
 } from './chat-media-cache.js';
 
-const MAX_CHAT_MEDIA_OBJECT_URLS = 160;
+const MAX_CHAT_MEDIA_OBJECT_URLS = 400;
 
 const objectUrlCache = new Map();
 const blobCache = new Map();
+
+/*
+  Object-URLs, die aus dem LRU-Cache fallen, dürfen NICHT sofort revoked
+  werden — sie können noch in gerenderten <img>/<audio>-Elementen hängen
+  (Timeline, Galerie). Sie werden gesammelt und erst beim vollständigen
+  Teardown in revokeAllChatMediaObjectUrls() freigegeben.
+*/
+const retiredObjectUrls = new Set();
 
 function cacheKeyFor(mxcUrl, {
   thumbnail = true,
@@ -55,18 +63,12 @@ function touch(cache, key, value) {
 function evictIfNeeded() {
   while (objectUrlCache.size > MAX_CHAT_MEDIA_OBJECT_URLS) {
     const [oldestKey, oldest] = objectUrlCache.entries().next().value || [];
-
     if (!oldestKey) return;
-
     objectUrlCache.delete(oldestKey);
-
-    try {
-      URL.revokeObjectURL(oldest.url);
-    } catch (err) {
-      console.warn('[YANTA Chat] Could not revoke media object URL', err);
+    if (oldest?.url) {
+      retiredObjectUrls.add(oldest.url);
     }
   }
-
   while (blobCache.size > MAX_CHAT_MEDIA_OBJECT_URLS) {
     const [oldestKey] = blobCache.entries().next().value || [];
     if (!oldestKey) return;
@@ -500,19 +502,50 @@ export async function mxcToBlobUrl(client, mxcUrl, {
 }
 
 /**
- * Revoke all chat media object URLs.
+ * Returns a cached, still-valid object URL synchronously (or '').
+ *
+ * Warum:
+ * Die Timeline wird bei jedem Room-Update neu gerendert. Ein synchroner
+ * Cache-Treffer verhindert Skeleton-Flackern, ohne dass Render-Module
+ * eigene (revocation-unsichere) URL-Caches führen müssen.
+ */
+export function peekChatMediaObjectUrl(mxcUrl, {
+  thumbnail = true,
+  w = 96,
+  h = 96,
+  encryptedFile = null,
+} = {}) {
+  const key = cacheKeyFor(mxcUrl, {
+    thumbnail,
+    w,
+    h,
+    encryptedFile,
+  });
+  const cached = objectUrlCache.get(key);
+  if (!cached?.url) return '';
+  touch(objectUrlCache, key, cached);
+  return cached.url;
+}
+
+/**
+ * Revoke all chat media object URLs (full teardown only).
  */
 export function revokeAllChatMediaObjectUrls() {
   for (const entry of objectUrlCache.values()) {
+    if (entry?.url) {
+      retiredObjectUrls.add(entry.url);
+    }
+  }
+  objectUrlCache.clear();
+  blobCache.clear();
+  for (const url of retiredObjectUrls) {
     try {
-      URL.revokeObjectURL(entry.url);
+      URL.revokeObjectURL(url);
     } catch (err) {
       console.warn('[YANTA Chat] Could not revoke media object URL', err);
     }
   }
-
-  objectUrlCache.clear();
-  blobCache.clear();
+  retiredObjectUrls.clear();
 }
 
 /**
@@ -520,22 +553,14 @@ export function revokeAllChatMediaObjectUrls() {
  */
 export function purgeChatMediaMemoryCacheForMxc(mxcUrl) {
   const needle = String(mxcUrl || '');
-
   if (!needle) return;
-
   for (const [key, entry] of [...objectUrlCache.entries()]) {
     if (!key.startsWith(needle)) continue;
-
     objectUrlCache.delete(key);
-
-    try {
-      URL.revokeObjectURL(entry.url);
-    } catch (err) {
-      console.warn('[YANTA Chat] Could not revoke media object URL', err);
-      toast('Could not release media preview.', 'error');
+    if (entry?.url) {
+      retiredObjectUrls.add(entry.url);
     }
   }
-
   for (const key of [...blobCache.keys()]) {
     if (key.startsWith(needle)) {
       blobCache.delete(key);

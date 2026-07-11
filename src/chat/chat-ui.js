@@ -1756,8 +1756,29 @@ export async function openChat({
 } = {}) {
   setupChat();
 
-  setChatMode(mode);
+  const nextRoomId = String(roomId || '').trim();
+  const nextMode = mode === 'floating' ? 'floating' : 'surface';
+  const surfaceMode = nextMode === 'surface';
+
+  /*
+    Wichtig:
+    pushChatHistory()/replaceChatHistory() emittiert yanta-app-route-change.
+    Dieser Event schließt globale/transiente UIs. Wenn der Chat zu diesem
+    Zeitpunkt bereits sichtbar ist, kann er direkt wieder geschlossen werden.
+
+    Daher zuerst die App-Route schreiben, danach den Chat sichtbar machen.
+  */
+  if (surfaceMode && !fromHistory) {
+    if (replace) {
+      replaceChatHistory(nextRoomId || null);
+    } else if (push) {
+      pushChatHistory(nextRoomId || null);
+    }
+  }
+
+  setChatMode(nextMode);
   root.hidden = false;
+
 
   renderChatSetupState({
     title: 'Opening Chat…',
@@ -1775,8 +1796,6 @@ export async function openChat({
   root.style.setProperty('--chat-list-width', `${roomListWidth}px`);
   updateRoomListDensity();
 
-  const surfaceMode = chatMode === 'surface';
-
   if (surfaceMode) {
     state.surface = 'chat';
 
@@ -1787,17 +1806,7 @@ export async function openChat({
     }
   }
 
-  const nextRoomId = String(roomId || '').trim();
-
   activeRoomId = nextRoomId;
-
-  if (surfaceMode && !fromHistory) {
-    if (replace) {
-      replaceChatHistory(activeRoomId || null);
-    } else if (push) {
-      pushChatHistory(activeRoomId || null);
-    }
-  }
 
   renderRoomList();
   await openActiveRoomIfNeeded();

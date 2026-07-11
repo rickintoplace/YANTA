@@ -76,29 +76,6 @@ function writeAppHistoryState(routeState, url, {
   });
 }
 
-function writeAppHistoryState(routeState, url, {
-  replace = false,
-} = {}) {
-  /*
-    If an app route is opened while a transient overlay state is current
-    (Graph/RSS/dialog/mobile sidebar), replace that overlay entry instead
-    of stacking a normal app route on top of it.
-  */
-  const shouldReplace =
-    replace ||
-    !!history.state?.yantaOverlay;
-
-  history[shouldReplace ? 'replaceState' : 'pushState'](
-    routeState,
-    '',
-    url
-  );
-
-  emitAppRouteChange(routeState, {
-    replace: shouldReplace,
-  });
-}
-
 export function dashboardUrl(folderId = null) {
   return folderId
     ? `#dashboard/${encodeURIComponent(folderId)}`

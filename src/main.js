@@ -579,24 +579,23 @@ function openCalendarEventRoute(eventId, {
 async function openChatRoute(roomId = null, {
   replace = false,
 } = {}) {
-  /*
-    If Chat is launched from the mobile sidebar, remove the sidebar
-    overlay entry first. Otherwise Back from Chat would reopen the
-    sidebar instead of returning to the underlying app route.
-  */
   replaceMobileSidebarOverlayWithCurrentRoute();
 
-  await openChat({
-    roomId,
-    push: false,
-    replace: false,
-  });
+  const id = String(roomId || '').trim() || null;
 
   if (replace) {
-    replaceChatHistory(roomId || null);
+    replaceChatHistory(id);
   } else {
-    pushChatHistory(roomId || null);
+    pushChatHistory(id);
   }
+
+  await openChat({
+    roomId: id || '',
+    fromHistory: true,
+    push: false,
+    replace: false,
+    mode: 'surface',
+  });
 }
 
 async function openSourcesRoute(source = 'unknown') {
@@ -631,7 +630,9 @@ function closeTransientFullscreenUiForAppRoute(route = {}) {
 
   // Chat fullscreen surface should only stay visible on chat routes.
   if (targetSurface !== 'chat') {
-    closeChat();
+    closeChat({
+      fromHistory: true,
+    });
   }
 
   // Calendar fullscreen surface should only stay visible on calendar routes.
@@ -1751,11 +1752,17 @@ async function init() {
     source = 'manual',
   } = {}) => {
     if (account) {
-      return startChatSession({
+      const session = await startChatSession({
         account,
         firstDevice: source === 'chat-provision',
         reason: source,
       });
+
+      await openChatRoute(null, {
+        replace: true,
+      });
+
+      return session;
     }
 
     return ensureChatAccountAndOpen({

@@ -1778,7 +1778,7 @@
 }
 
 .yanta-chat-crypto-banner {
-  display: flex;
+  display: hidden;
   align-items: center;
   gap: 8px;
   padding: 8px 12px;
@@ -1796,6 +1796,10 @@
   gap: 8px;
   padding: 28px 16px;
   text-align: center;
+}
+
+.yanta-chat-crypto-banner:not([hidden]) {
+  display: flex;
 }
 
 .yanta-chat-connection-banner {

@@ -1828,7 +1828,21 @@ async function init() {
   installChatSidebarBadgeListener();
 
   window.addEventListener('yanta-app-route-change', (e) => {
-    closeTransientFullscreenUiForAppRoute(e.detail || {});
+    const detail = e.detail || {};
+
+    /*
+      A route update inside the same fullscreen surface is not a global app
+      navigation. Example:
+        #chat -> #chat/<roomId>
+
+      It must not run global fullscreen/overlay cleanup because some close
+      handlers may use history.back() internally.
+    */
+    if (detail.sameSurface && !detail.replacedOverlay) {
+      return;
+    }
+
+    closeTransientFullscreenUiForAppRoute(detail);
   });
 
   await installVaultStoreBridge();
@@ -2225,199 +2239,154 @@ async function init() {
   });
 
   renderTree();
+    
+  let initialRouteHandled = false;
 
-// Open initial route.
-// Dashboard is Home for normal app entry.
-// But direct note/share deep-links must respect browser Back:
-// Back should return to the previous website/history entry, not force Dashboard.
-if (!sharedOpen?.noteId) {
-  const route = parseAppHash();
+  // Open initial route.
+  // Dashboard is Home for normal app entry.
+  // But direct note/share deep-links must respect browser Back:
+  // Back should return to the previous website/history entry, not force Dashboard.
+  if (!sharedOpen?.noteId) {
+    const route = parseAppHash();
 
-  if (route.surface === 'chat') {
-    await openChatRoute(route.roomId || null, {
-      replace: true,
-    });
-
-    return;
-  }
-
-  if (route.surface === 'calendar') {
-    if (route.eventId) {
-      openCalendarEventRoute(route.eventId, {
+    if (route.surface === 'chat') {
+      await openChatRoute(route.roomId || null, {
         replace: true,
       });
-    } else {
-      openCalendarRoute({
-        replace: true,
-      });
+
+      initialRouteHandled = true;
     }
 
-    consumePendingPublicShareCalendarEvent();
+    else if (route.surface === 'calendar') {
+      if (route.eventId) {
+        openCalendarEventRoute(route.eventId, {
+          replace: true,
+        });
+      } else {
+        openCalendarRoute({
+          replace: true,
+        });
+      }
 
-    return;
-  }
+      consumePendingPublicShareCalendarEvent();
 
-  const explicitNoteId =
-    route.surface === 'note' &&
-    route.noteId &&
-    state.notes.has(route.noteId)
-      ? route.noteId
-      : null;
-
-  if (explicitNoteId) {
-    /*
-      Direct note deep-link.
-      Wichtig:
-      Kein künstlicher Dashboard-Eintrag darunter.
-      Sonst wirkt YANTA wie ein "Back-Trap".
-    */
-    setNavSuppress(true);
-
-    try {
-      await openNote(explicitNoteId);
-    } finally {
-      setNavSuppress(false);
+      initialRouteHandled = true;
     }
 
-    replaceNoteHistory(explicitNoteId);
-    hideDashboard({ push: false });
-  } else {
-    // Normal app entry => Dashboard/Home.
-    if (!state.notes.size) {
-      setNavSuppress(true);
+    else {
+      const explicitNoteId =
+        route.surface === 'note' &&
+        route.noteId &&
+        state.notes.has(route.noteId)
+          ? route.noteId
+          : null;
 
-      try {
-        await createWelcomeNote();
-      } finally {
-        setNavSuppress(false);
+      if (explicitNoteId) {
+        /*
+          Direct note deep-link.
+          Wichtig:
+          Kein künstlicher Dashboard-Eintrag darunter.
+          Sonst wirkt YANTA wie ein "Back-Trap".
+        */
+        setNavSuppress(true);
+
+        try {
+          await openNote(explicitNoteId);
+        } finally {
+          setNavSuppress(false);
+        }
+
+        replaceNoteHistory(explicitNoteId);
+        hideDashboard({ push: false });
+      } else {
+        // Normal app entry => Dashboard/Home.
+        if (!state.notes.size) {
+          setNavSuppress(true);
+
+          try {
+            await createWelcomeNote();
+          } finally {
+            setNavSuppress(false);
+          }
+        }
+
+        const folderId =
+          route.surface === 'dashboard' &&
+          route.folderId &&
+          state.folders.has(route.folderId)
+            ? route.folderId
+            : null;
+
+        showDashboard({
+          folderId,
+          replace: true,
+        });
       }
     }
-
-    const folderId =
-      route.surface === 'dashboard' &&
-      route.folderId &&
-      state.folders.has(route.folderId)
-        ? route.folderId
-        : null;
-
-    showDashboard({
-      folderId,
-      replace: true,
-    });
   }
-}
 
-  if (state.notes.size && state.currentNoteId) {
-    // Trigger initial sync pull (if linked) — fire-and-forget.
-    // (Pull happens in syncRestore already if handle exists, but kick it
-    // again so we pick up changes since the page was last open.)
+  if (!initialRouteHandled && state.notes.size && state.currentNoteId) {
     syncFull(false).catch(() => {});
   }
 
-window.addEventListener('popstate', async (e) => {
-  // Overlay states are handled by overlay-history.js.
-  // Do not let the main app router interpret them as Dashboard/Note routes.
-  if (e.state?.yantaOverlay) {
-    return;
-  }
-
-  const st = e.state || {};
-  const route = parseAppHash();
-
-/*
-    Chat ist eine Fullscreen-Surface wie Calendar. popstate ruft aber nur die
-    Ziel-Branch-Renderer auf; closeTransientFullscreenUiForAppRoute() feuert
-    nur bei programmatischer Navigation (yanta-app-route-change), nicht bei
-    Browser-/Geräte-Back. Ohne diesen Guard bliebe die Chat-Surface über
-    Dashboard/Note/Calendar sichtbar.
-  */
-  if (
-    state.surface === 'chat' &&
-    st.surface !== 'chat' &&
-    route.surface !== 'chat'
-  ) {
-    closeChat({
-      fromHistory: true,
-    });
-  }
-
-  if (st.surface === 'calendar' || route.surface === 'calendar') {
-    closeGraph();
-    closeCalendarPane({ silent: true });
-    hideDashboard({ push: false });
-
-    const eventId = st.eventId || route.eventId || null;
-
-    if (eventId) {
-      openCalendarEvent(eventId, {
-        push: false,
-        replace: false,
-      });
-    } else {
-      openCalendarFromHistory();
+  window.addEventListener('popstate', async (e) => {
+    // Overlay states are handled by overlay-history.js.
+    // Do not let the main app router interpret them as Dashboard/Note routes.
+    if (e.state?.yantaOverlay) {
+      return;
     }
 
-    return;
-  }
-
-  if (st.surface === 'chat' || route.surface === 'chat') {
-    closeGraph();
-    closeCalendarPane({ silent: true });
-    closeCalendar({
-      surface: 'dashboard',
-      fromRouteChange: true,
-    });
-    hideDashboard({ push: false });
-
-    await openChat({
-      roomId: st.roomId || route.roomId || '',
-      fromHistory: true,
-      push: false,
-      replace: false,
-    });
-
-    return;
-  }
+    const st = e.state || {};
+    const route = parseAppHash();
 
   /*
-    Dashboard-History inklusive Folder-Zurücknavigation.
-
-    - Dashboard sichtbar + Folder zurück:
-      showDashboardFolderFromHistory() nutzt intern navigateDashboardFolder()
-      und erhält die Folder-Zoom-Transition.
-
-    - Note offen + Back:
-      Note -> Dashboard via showDashboardFromNote()
-      und erhält die Note-Zoom-Back-Transition.
-  */
-  if (st.surface === 'dashboard' || route.surface === 'dashboard') {
-    const folderId =
-      st.folderId !== undefined
-        ? st.folderId
-        : route.folderId;
-
-    const targetFolderId =
-      folderId && state.folders.has(folderId)
-        ? folderId
-        : null;
-
-    const calendarWasOpen =
-      state.surface === 'calendar' ||
-      $('calendarSurface')?.hidden === false;
-
-    closeCalendarPane({ silent: true });
-
-    /*
-      Wichtig:
-      Beim Back aus einer Note darf closeCalendar() NICHT vorher
-      app.dataset.surface = 'dashboard' setzen, sonst ist .panes vor
-      startViewTransition() schon display:none.
+      Chat ist eine Fullscreen-Surface wie Calendar. popstate ruft aber nur die
+      Ziel-Branch-Renderer auf; closeTransientFullscreenUiForAppRoute() feuert
+      nur bei programmatischer Navigation (yanta-app-route-change), nicht bei
+      Browser-/Geräte-Back. Ohne diesen Guard bliebe die Chat-Surface über
+      Dashboard/Note/Calendar sichtbar.
     */
-    if (calendarWasOpen) {
-      closeCalendar({ surface: 'dashboard' });
+    if (
+      state.surface === 'chat' &&
+      st.surface !== 'chat' &&
+      route.surface !== 'chat'
+    ) {
+      closeChat({
+        fromHistory: true,
+      });
+    }
 
-      showDashboard({
-        folderId: targetFolderId,
+    if (st.surface === 'calendar' || route.surface === 'calendar') {
+      closeGraph();
+      closeCalendarPane({ silent: true });
+      hideDashboard({ push: false });
+
+      const eventId = st.eventId || route.eventId || null;
+
+      if (eventId) {
+        openCalendarEvent(eventId, {
+          push: false,
+          replace: false,
+        });
+      } else {
+        openCalendarFromHistory();
+      }
+
+      return;
+    }
+
+    if (st.surface === 'chat' || route.surface === 'chat') {
+      closeGraph();
+      closeCalendarPane({ silent: true });
+      closeCalendar({
+        surface: 'dashboard',
+        fromRouteChange: true,
+      });
+      hideDashboard({ push: false });
+
+      await openChat({
+        roomId: st.roomId || route.roomId || '',
+        fromHistory: true,
         push: false,
         replace: false,
       });
@@ -2425,56 +2394,102 @@ window.addEventListener('popstate', async (e) => {
       return;
     }
 
-    await showDashboardFolderFromHistory(targetFolderId);
+    /*
+      Dashboard-History inklusive Folder-Zurücknavigation.
 
-    return;
-  }
+      - Dashboard sichtbar + Folder zurück:
+        showDashboardFolderFromHistory() nutzt intern navigateDashboardFolder()
+        und erhält die Folder-Zoom-Transition.
 
-  const id =
-    st.noteId ||
-    route.noteId ||
-    null;
+      - Note offen + Back:
+        Note -> Dashboard via showDashboardFromNote()
+        und erhält die Note-Zoom-Back-Transition.
+    */
+    if (st.surface === 'dashboard' || route.surface === 'dashboard') {
+      const folderId =
+        st.folderId !== undefined
+          ? st.folderId
+          : route.folderId;
 
-  if (id && state.notes.has(id)) {
-    setNavSuppress(true);
+      const targetFolderId =
+        folderId && state.folders.has(folderId)
+          ? folderId
+          : null;
 
-    try {
+      const calendarWasOpen =
+        state.surface === 'calendar' ||
+        $('calendarSurface')?.hidden === false;
+
+      closeCalendarPane({ silent: true });
+
       /*
-        Browser Back/Forward must use the same visual navigation path
-        as direct Dashboard card navigation.
-
-        - Dashboard -> Note via history forward:
-          dashboard card/page -> panes transition.
-
-        - Already in note surface:
-          normal note swap/open.
-
         Wichtig:
-        setNavSuppress(true) prevents openNote() from pushing a fresh
-        history entry while we are handling popstate.
+        Beim Back aus einer Note darf closeCalendar() NICHT vorher
+        app.dataset.surface = 'dashboard' setzen, sonst ist .panes vor
+        startViewTransition() schon display:none.
       */
-      if (isDashboardVisible()) {
-        await openNoteFromDashboardHistory(id);
-      } else {
-        if (id !== state.currentNoteId) {
-          await openNote(id);
-        }
+      if (calendarWasOpen) {
+        closeCalendar({ surface: 'dashboard' });
 
-        hideDashboard({ push: false });
+        showDashboard({
+          folderId: targetFolderId,
+          push: false,
+          replace: false,
+        });
+
+        return;
       }
-    } finally {
-      setNavSuppress(false);
+
+      await showDashboardFolderFromHistory(targetFolderId);
+
+      return;
     }
 
-    return;
-  }
+    const id =
+      st.noteId ||
+      route.noteId ||
+      null;
 
-  // Defensive fallback: invalid route -> Home instead of blank state.
-  showDashboard({
-    folderId: null,
-    replace: true,
+    if (id && state.notes.has(id)) {
+      setNavSuppress(true);
+
+      try {
+        /*
+          Browser Back/Forward must use the same visual navigation path
+          as direct Dashboard card navigation.
+
+          - Dashboard -> Note via history forward:
+            dashboard card/page -> panes transition.
+
+          - Already in note surface:
+            normal note swap/open.
+
+          Wichtig:
+          setNavSuppress(true) prevents openNote() from pushing a fresh
+          history entry while we are handling popstate.
+        */
+        if (isDashboardVisible()) {
+          await openNoteFromDashboardHistory(id);
+        } else {
+          if (id !== state.currentNoteId) {
+            await openNote(id);
+          }
+
+          hideDashboard({ push: false });
+        }
+      } finally {
+        setNavSuppress(false);
+      }
+
+      return;
+    }
+
+    // Defensive fallback: invalid route -> Home instead of blank state.
+    showDashboard({
+      folderId: null,
+      replace: true,
+    });
   });
-});
 
   bindEvents();
 }

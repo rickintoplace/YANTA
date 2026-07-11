@@ -15,15 +15,65 @@
 
 function emitAppRouteChange(routeState, {
   replace = false,
+  previousSurface = null,
+  previousUrl = '',
+  replacedOverlay = false,
 } = {}) {
   if (typeof window === 'undefined') return;
+
+  const nextSurface = routeState?.surface || null;
 
   window.dispatchEvent(new CustomEvent('yanta-app-route-change', {
     detail: {
       ...routeState,
       replace,
+      previousSurface,
+      previousUrl,
+      sameSurface: !!previousSurface && previousSurface === nextSurface,
+      replacedOverlay,
     },
   }));
+}
+
+function writeAppHistoryState(routeState, url, {
+  replace = false,
+} = {}) {
+  /*
+    Capture previous route BEFORE pushState/replaceState.
+    Important for distinguishing a real surface change
+    from an internal subroute update like:
+      #chat -> #chat/<roomId>
+  */
+  const previousParsedRoute = parseAppHash();
+  const previousSurface =
+    history.state?.surface ||
+    previousParsedRoute.surface ||
+    null;
+
+  const previousUrl = location.href;
+  const hadOverlay = !!history.state?.yantaOverlay;
+
+  /*
+    If an app route is opened while a transient overlay state is current
+    (Graph/RSS/dialog/mobile sidebar), replace that overlay entry instead
+    of stacking a normal app route on top of it.
+  */
+  const shouldReplace =
+    replace ||
+    hadOverlay;
+
+  history[shouldReplace ? 'replaceState' : 'pushState'](
+    routeState,
+    '',
+    url
+  );
+
+  emitAppRouteChange(routeState, {
+    replace: shouldReplace,
+    previousSurface,
+    previousUrl,
+    replacedOverlay: hadOverlay,
+  });
 }
 
 function writeAppHistoryState(routeState, url, {

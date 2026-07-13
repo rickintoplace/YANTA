@@ -40,21 +40,12 @@ import {
   YANTA_CLOUD_BASE_URL,
 } from '../cloud/cloud-api.js';
 
-import {
-  yantaConfirm,
-} from '../dialogs.js';
-
-import {
-  searchChatMessages,
-} from '../chat/chat-search.js';
-
-import {
-  resolveMatrixClient,
-} from '../chat/chat-actions.js';
-
-import {
-  getAllowSendChatMessages,
-} from './ai-settings.js';
+export {
+  chatListRoomsAction,
+  chatReadRecentMessagesAction,
+  chatSearchMessagesAction,
+  chatSendMessageAction,
+} from '../chat/chat-ai-actions.js';
 
 function now() {
   return Date.now();
@@ -1484,123 +1475,4 @@ export async function webReadAction({
   }
 
   return setFreshCache(WEB_READ_CACHE, cacheKey, json);
-}
-
-/**
- * AI action: searches the local E2EE Chat index.
- */
-export async function chatSearchAction({
-  query = '',
-  roomId = '',
-  limit = 20,
-} = {}) {
-  const q = String(query || '').trim();
-
-  if (!q) {
-    throw new Error('Search query is required.');
-  }
-
-  const results = await searchChatMessages(q, {
-    roomId: String(roomId || '').trim(),
-    limit: Math.max(1, Math.min(50, Number(limit || 20))),
-  });
-
-  return {
-    query: q,
-    roomId: roomId || null,
-    count: results.length,
-    results: results.map((row) => ({
-      roomId: row.roomId,
-      eventId: row.eventId,
-      ts: row.ts || null,
-      sender: row.sender || '',
-      snippet: row.snippet || row.body || '',
-      score: row.score || 0,
-    })),
-  };
-}
-
-/**
- * AI action: sends a Chat message after permission + explicit confirmation.
- */
-export async function chatSendMessageAction({
-  roomId = '',
-  text = '',
-} = {}) {
-  const targetRoomId = String(roomId || '').trim();
-  const body = String(text || '').trim();
-
-  if (!targetRoomId) {
-    throw new Error('roomId is required.');
-  }
-
-  if (!body) {
-    throw new Error('Message text is required.');
-  }
-
-  const allowed = await getAllowSendChatMessages();
-
-  if (!allowed) {
-    throw new Error(
-      'AI is not allowed to send Chat messages. Enable allowSendChatMessages in AI settings.'
-    );
-  }
-
-  const client = await resolveMatrixClient();
-
-  if (!client) {
-    appActionToast('Chat is not connected.', 'error');
-    throw new Error('Matrix client is not available.');
-  }
-
-  const room = client.getRoom?.(targetRoomId);
-  const roomName =
-    room?.name ||
-    room?.getDefaultRoomName?.(client.getUserId?.()) ||
-    targetRoomId;
-
-  const ok = await yantaConfirm({
-    title: 'AI wants to send a Chat message',
-    message: [
-      `Room: ${roomName}`,
-      '',
-      body.length > 1200 ? body.slice(0, 1200) + '…' : body,
-    ].join('\n'),
-    confirmLabel: 'Send message',
-    cancelLabel: 'Cancel',
-    danger: false,
-    icon: 'send-horizontal',
-  });
-
-  if (!ok) {
-    return {
-      ok: false,
-      cancelled: true,
-    };
-  }
-
-  try {
-    if (typeof client.sendTextMessage === 'function') {
-      await client.sendTextMessage(targetRoomId, body);
-    } else if (typeof client.sendMessage === 'function') {
-      await client.sendMessage(targetRoomId, {
-        msgtype: 'm.text',
-        body,
-      });
-    } else {
-      throw new Error('Matrix send API is not available.');
-    }
-
-    appActionToast('Chat message sent', 'success');
-
-    return {
-      ok: true,
-      roomId: targetRoomId,
-      chars: body.length,
-    };
-  } catch (err) {
-    console.warn('[YANTA AI Actions] Could not send Chat message', err);
-    appActionToast('Could not send Chat message.', 'error');
-    throw err;
-  }
 }

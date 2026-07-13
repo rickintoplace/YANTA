@@ -67,12 +67,6 @@ function checkboxValue(panel, key) {
     ?.checked;
 }
 
-function agentPermissionValue(panel, key) {
-  return !!panel
-    ?.querySelector(`[data-agent-permission="${cssEscape(key)}"]`)
-    ?.checked;
-}
-
 function permissionCheckboxHtml(key, label, badge, checked) {
   const recommended = /recommended/i.test(badge) && !/not/i.test(badge);
 
@@ -893,6 +887,8 @@ export function renderAiSettingsPanel(panel) {
         ${permissionCheckboxHtml('allowManageRss', 'Allow assistant to refresh/manage Sources', 'Optional', p.allowManageRss)}
         ${permissionCheckboxHtml('allowAddRssSources', 'Allow assistant to add RSS feeds and YouTube channels to Sources', 'Recommended', p.allowAddRssSources)}
         ${permissionCheckboxHtml('allowSaveRssToNotes', 'Allow assistant to save Sources items as notes', 'Recommended', p.allowSaveRssToNotes)}
+        ${permissionCheckboxHtml('allowReadChatMessages', 'Allow assistant to read Chat messages', 'Optional', p.allowReadChatMessages)}
+        ${permissionCheckboxHtml('allowSendChatMessages', 'Allow assistant to send Chat messages after confirmation', 'Optional', p.allowSendChatMessages)}
 
       </section>
 
@@ -985,6 +981,9 @@ export function renderAiSettingsPanel(panel) {
       allowManageRss: checkboxValue(panel, 'allowManageRss'),
       allowAddRssSources: checkboxValue(panel, 'allowAddRssSources'),
       allowSaveRssToNotes: checkboxValue(panel, 'allowSaveRssToNotes'),
+      allowReadChatMessages: checkboxValue(panel, 'allowReadChatMessages'),
+      allowSendChatMessages: checkboxValue(panel, 'allowSendChatMessages'),
+    
     };
 
     saveAiSettings({

@@ -16,8 +16,8 @@ const AI_KEY_SESSION_KEY = 'yanta.ai.openrouter.key.session';
 const AI_KEY_LOCAL_KEY = 'yanta.ai.openrouter.key.local';
 
 export const DEFAULT_ASSISTANT_PROMPT = [
-  'You are the YANTA assistant.',
-  'You help the user work with notes, drawings, tasks, citations and calendar events.',
+  'You are the YANTA AI assistant.',
+  'You help the user work with notes, drawings, tasks, citations, calendar events, sources and encrypted chat messages.',
   '',
   'Core behavior:',
   '- Be concise, practical and careful.',
@@ -45,6 +45,10 @@ export const DEFAULT_ASSISTANT_PROMPT = [
   '- Use read_excalidraw_drawing_json before editing an existing slideshow, then update_excalidraw_slideshow.',
   '- Do not use SVG-only drawings for editable slideshows. Use create_drawing_note with SVG only for simple standalone illustrations or icons.',
   '- Skills are on-demand procedural documents. Use skills_list and skill_view when a relevant skill may exist.',
+  '- For Chat/Matrix questions, use chat_list_rooms, chat_read_recent_messages or chat_search_messages instead of guessing.',
+  '- Before sending a Chat message, use chat_send_message. The user will review and confirm the exact message.',
+  '- Never claim that a Chat message was sent unless chat_send_message returns ok=true.',
+  '- AI-sent Chat messages are transparently marked as sent by YANTA AI.',
   '',
   'Safety:',
   '- Only use tools exposed to you.',
@@ -94,6 +98,7 @@ export const DEFAULT_AI_SETTINGS = {
     allowAddRssSources: true,
     allowSaveRssToNotes: true,
 
+    allowReadChatMessages: false,
     allowSendChatMessages: false,
     },
 };

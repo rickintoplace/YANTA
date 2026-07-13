@@ -56,6 +56,10 @@ import {
     }
   }
   
+  function chatSendRequiresConfirmation() {
+    return getAiSettings().permissions?.allowAutonomousChatMessages !== true;
+  }
+
   async function requireMatrixClient() {
     const client = await resolveMatrixClient();
   
@@ -214,6 +218,25 @@ function compactMessageEvent(event) {
       },
     };
   }
+
+  function roomMemberSearchText(room, client) {
+    const own = client.getUserId?.() || '';
+  
+    try {
+      return (room.getJoinedMembers?.() || [])
+        .filter((member) => member.userId !== own)
+        .slice(0, 12)
+        .map((member) => [
+          member.userId,
+          member.name,
+          member.rawDisplayName,
+          member.displayName,
+        ].filter(Boolean).join(' '))
+        .join(' ');
+    } catch {
+      return '';
+    }
+  }
   
   export async function chatListRoomsAction({
     query = '',
@@ -224,38 +247,45 @@ function compactMessageEvent(event) {
     const client = await requireMatrixClient();
     const q = String(query || '').trim().toLowerCase();
     const max = Math.max(1, Math.min(100, Number(limit || 30)));
-  
+    const memberSearchText = roomMemberSearchText(room, client);
+
     const rooms = visibleRooms(client)
-      .map((room) => {
-        const name = roomName(client, room);
-        const directUserId = directUserIdForRoom(client, room.roomId);
+    .map((room) => {
+      const name = roomName(client, room);
+      const directUserId = directUserIdForRoom(client, room.roomId);
+      const memberSearchText = roomMemberSearchText(room, client);
   
-        return {
-          room,
-          data: {
-            roomId: room.roomId,
-            name,
-            isDirect: !!directUserId,
-            directUserId: directUserId || null,
-            unread: Number(room.getUnreadNotificationCount?.() || 0),
-            lastActive:
-              Number(room.getLastActiveTimestamp?.() || room.getLastModifiedTime?.() || 0) ||
-              null,
-          },
-        };
-      })
-      .filter(({ data }) => {
-        if (!q) return true;
+      return {
+        room,
+        data: {
+          roomId: room.roomId,
+          name,
+          isDirect: !!directUserId,
+          directUserId: directUserId || null,
+          unread: Number(room.getUnreadNotificationCount?.() || 0),
+          lastActive:
+            Number(room.getLastActiveTimestamp?.() || room.getLastModifiedTime?.() || 0) ||
+            null,
+          memberSearchText,
+        },
+      };
+    })
+    .filter(({ data }) => {
+      if (!q) return true;
   
-        return [
-          data.name,
-          data.roomId,
-          data.directUserId || '',
-        ].join(' ').toLowerCase().includes(q);
-      })
-      .sort((a, b) => Number(b.data.lastActive || 0) - Number(a.data.lastActive || 0))
-      .slice(0, max)
-      .map(({ data }) => data);
+      return [
+        data.name,
+        data.roomId,
+        data.directUserId || '',
+        data.memberSearchText || '',
+      ].join(' ').toLowerCase().includes(q);
+    })
+    .sort((a, b) => Number(b.data.lastActive || 0) - Number(a.data.lastActive || 0))
+    .slice(0, max)
+    .map(({ data }) => {
+      const { memberSearchText, ...safe } = data;
+      return safe;
+    });
   
     return {
       count: rooms.length,
@@ -373,28 +403,32 @@ function compactMessageEvent(event) {
       ? roomName(client, room)
       : targetUserId || targetRoomId;
   
-    const ok = await yantaConfirm({
-      title: 'AI wants to send a Chat message',
-      message: [
-        `To: ${displayName}`,
-        '',
-        body.length > 1400 ? `${body.slice(0, 1400)}…` : body,
-        '',
-        targetRoomId
-          ? 'The message will be marked as sent by YANTA AI.'
-          : 'YANTA may create or open a direct chat first. The message will be marked as sent by YANTA AI.',
-      ].join('\n'),
-      confirmLabel: 'Send message',
-      cancelLabel: 'Cancel',
-      danger: false,
-      icon: 'send-horizontal',
-    });
+    const requireConfirmation = chatSendRequiresConfirmation();
   
-    if (!ok) {
-      return {
-        ok: false,
-        cancelled: true,
-      };
+    if (requireConfirmation) {
+      const ok = await yantaConfirm({
+        title: 'AI wants to send a Chat message',
+        message: [
+          `To: ${displayName}`,
+          '',
+          body.length > 1400 ? `${body.slice(0, 1400)}…` : body,
+          '',
+          targetRoomId
+            ? 'The message will be marked as sent by YANTA AI.'
+            : 'YANTA may create or open a direct chat first. The message will be marked as sent by YANTA AI.',
+        ].join('\n'),
+        confirmLabel: 'Send message',
+        cancelLabel: 'Cancel',
+        danger: false,
+        icon: 'send-horizontal',
+      });
+  
+      if (!ok) {
+        return {
+          ok: false,
+          cancelled: true,
+        };
+      }
     }
   
     if (!targetRoomId && targetUserId) {
@@ -408,7 +442,12 @@ function compactMessageEvent(event) {
     const content = buildAiMessageContent(body);
     const sendResult = await client.sendMessage(targetRoomId, content);
   
-    toast('AI Chat message sent', 'success');
+    toast(
+      requireConfirmation
+        ? 'AI Chat message sent'
+        : 'AI Chat message sent automatically',
+      'success'
+    );
   
     return {
       ok: true,
@@ -417,5 +456,7 @@ function compactMessageEvent(event) {
       eventId: sendResult?.event_id || sendResult?.eventId || null,
       chars: body.length,
       aiAttributed: true,
+      humanConfirmed: requireConfirmation,
+      autonomous: !requireConfirmation,
     };
   }

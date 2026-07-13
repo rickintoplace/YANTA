@@ -99,7 +99,8 @@ export const DEFAULT_AI_SETTINGS = {
     allowSaveRssToNotes: true,
 
     allowReadChatMessages: false,
-    allowSendChatMessages: false,
+    allowSendChatMessages: true,
+    allowAutonomousChatMessages: false,
     },
 };
 

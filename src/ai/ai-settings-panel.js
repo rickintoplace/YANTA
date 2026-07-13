@@ -889,7 +889,11 @@ export function renderAiSettingsPanel(panel) {
         ${permissionCheckboxHtml('allowSaveRssToNotes', 'Allow assistant to save Sources items as notes', 'Recommended', p.allowSaveRssToNotes)}
         ${permissionCheckboxHtml('allowReadChatMessages', 'Allow assistant to read Chat messages', 'Optional', p.allowReadChatMessages)}
         ${permissionCheckboxHtml('allowSendChatMessages', 'Allow assistant to send Chat messages after confirmation', 'Optional', p.allowSendChatMessages)}
-
+        ${permissionCheckboxHtml(
+          'allowAutonomousChatMessages',
+          'Allow assistant to send Chat messages without review',
+          p.allowAutonomousChatMessages
+        )}
       </section>
 
       ${approxLocationSettingsHtml()}
@@ -983,7 +987,8 @@ export function renderAiSettingsPanel(panel) {
       allowSaveRssToNotes: checkboxValue(panel, 'allowSaveRssToNotes'),
       allowReadChatMessages: checkboxValue(panel, 'allowReadChatMessages'),
       allowSendChatMessages: checkboxValue(panel, 'allowSendChatMessages'),
-    
+      allowAutonomousChatMessages: checkboxValue(panel, 'allowAutonomousChatMessages'),
+
     };
 
     saveAiSettings({

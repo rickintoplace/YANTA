@@ -63,6 +63,33 @@ import {
 
 const CHAT_TOOLS = [
   {
+    name: 'chat_find_contact',
+    permission: 'allowReadChatMessages',
+    risk: 'read',
+    description: [
+      'Find a YANTA Chat/Matrix contact, direct message, room, person or handle by name.',
+      'Use this when the user asks to message, DM, reply to, write to, contact or send something to a person.',
+      'This searches locally available Matrix rooms and direct chats by room name, member name and user id where available.',
+      'Use before chat_send_message when the target roomId is unknown.',
+    ].join('\n'),
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        query: {
+          type: 'string',
+          description: 'Person name, handle, room name or Matrix user id, e.g. "Rick".',
+        },
+        limit: {
+          type: 'number',
+          default: 10,
+        },
+      },
+      required: ['query'],
+    },
+    execute: chatListRoomsAction,
+  },
+  {
     name: 'chat_list_rooms',
     permission: 'allowReadChatMessages',
     risk: 'read',

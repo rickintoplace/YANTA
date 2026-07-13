@@ -238,6 +238,46 @@ function compactMessageEvent(event) {
     }
   }
   
+  function roomMemberSearchText(room, client) {
+    const ownUserId = client?.getUserId?.() || '';
+  
+    try {
+      return (room.getJoinedMembers?.() || [])
+        .filter((member) => member?.userId && member.userId !== ownUserId)
+        .slice(0, 20)
+        .map((member) => [
+          member.userId,
+          member.name,
+          member.rawDisplayName,
+          member.displayName,
+        ].filter(Boolean).join(' '))
+        .filter(Boolean)
+        .join(' ');
+    } catch {
+      return '';
+    }
+  }
+  
+  function roomMemberPreview(room, client) {
+    const ownUserId = client?.getUserId?.() || '';
+  
+    try {
+      return (room.getJoinedMembers?.() || [])
+        .filter((member) => member?.userId && member.userId !== ownUserId)
+        .slice(0, 6)
+        .map((member) => ({
+          userId: member.userId,
+          name:
+            member.name ||
+            member.rawDisplayName ||
+            member.displayName ||
+            member.userId,
+        }));
+    } catch {
+      return [];
+    }
+  }
+  
   export async function chatListRoomsAction({
     query = '',
     limit = 30,
@@ -247,47 +287,50 @@ function compactMessageEvent(event) {
     const client = await requireMatrixClient();
     const q = String(query || '').trim().toLowerCase();
     const max = Math.max(1, Math.min(100, Number(limit || 30)));
-    const memberSearchText = roomMemberSearchText(room, client);
-
-    const rooms = visibleRooms(client)
-    .map((room) => {
-      const name = roomName(client, room);
-      const directUserId = directUserIdForRoom(client, room.roomId);
-      const memberSearchText = roomMemberSearchText(room, client);
   
-      return {
-        room,
-        data: {
+    const rooms = visibleRooms(client)
+      .map((room) => {
+        const name = roomName(client, room);
+        const directUserId = directUserIdForRoom(client, room.roomId);
+        const memberSearchText = roomMemberSearchText(room, client);
+        const members = roomMemberPreview(room, client);
+  
+        return {
           roomId: room.roomId,
           name,
           isDirect: !!directUserId,
           directUserId: directUserId || null,
+          members,
           unread: Number(room.getUnreadNotificationCount?.() || 0),
           lastActive:
-            Number(room.getLastActiveTimestamp?.() || room.getLastModifiedTime?.() || 0) ||
-            null,
-          memberSearchText,
-        },
-      };
-    })
-    .filter(({ data }) => {
-      if (!q) return true;
+            Number(
+              room.getLastActiveTimestamp?.() ||
+              room.getLastModifiedTime?.() ||
+              0
+            ) || null,
   
-      return [
-        data.name,
-        data.roomId,
-        data.directUserId || '',
-        data.memberSearchText || '',
-      ].join(' ').toLowerCase().includes(q);
-    })
-    .sort((a, b) => Number(b.data.lastActive || 0) - Number(a.data.lastActive || 0))
-    .slice(0, max)
-    .map(({ data }) => {
-      const { memberSearchText, ...safe } = data;
-      return safe;
-    });
+          // Internal-only search field. Removed before return.
+          _searchText: [
+            name,
+            room.roomId,
+            directUserId || '',
+            memberSearchText,
+          ].join(' ').toLowerCase(),
+        };
+      })
+      .filter((room) => {
+        if (!q) return true;
+        return room._searchText.includes(q);
+      })
+      .sort((a, b) => Number(b.lastActive || 0) - Number(a.lastActive || 0))
+      .slice(0, max)
+      .map((room) => {
+        const { _searchText, ...safeRoom } = room;
+        return safeRoom;
+      });
   
     return {
+      query: query || null,
       count: rooms.length,
       rooms,
     };

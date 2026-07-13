@@ -1472,6 +1472,12 @@ function toolDisplayName(name) {
     skill_view: 'View skill',
     skill_manage: 'Manage skill',
 
+    chat_find_contact: 'Find Chat contact',
+    chat_list_rooms: 'List chats',
+    chat_read_recent_messages: 'Read recent Chat messages',
+    chat_search_messages: 'Search Chat messages',
+    chat_send_message: 'Send Chat message',
+
   };
 
   return map[name] || name || 'Tool';
@@ -1488,6 +1494,33 @@ function summarizeToolResult(name, data, rawContent = '') {
 
   if (toolResultIsError(data)) {
     return data.error || data.message || 'Tool failed.';
+  }
+
+  if (name === 'chat_find_contact' || name === 'chat_list_rooms') {
+    const rooms = Array.isArray(data?.rooms) ? data.rooms : [];
+    return `${rooms.length} Chat contact${rooms.length === 1 ? '' : 's'} / room${rooms.length === 1 ? '' : 's'} found.`;
+  }
+
+  if (name === 'chat_read_recent_messages') {
+    const messages = Array.isArray(data?.messages) ? data.messages : [];
+    const roomName = data?.roomName || data?.roomId || 'chat';
+    return `Read ${messages.length} recent message${messages.length === 1 ? '' : 's'} from ${roomName}.`;
+  }
+
+  if (name === 'chat_search_messages') {
+    const results = Array.isArray(data?.results) ? data.results : [];
+    return `${results.length} Chat message result${results.length === 1 ? '' : 's'} found for "${data?.query || ''}".`;
+  }
+
+  if (name === 'chat_send_message') {
+    if (data.cancelled) return 'Chat message cancelled.';
+    if (data.ok) {
+      return data.autonomous
+        ? 'Chat message sent automatically and marked as sent by YANTA AI.'
+        : 'Chat message sent and marked as sent by YANTA AI.';
+    }
+
+    return 'Chat message was not sent.';
   }
 
   if (name === 'search_events') {
@@ -1808,6 +1841,95 @@ function renderToolRichContent(name, data) {
 
   if (!data) return null;
 
+  if (name === 'chat_find_contact' || name === 'chat_list_rooms') {
+    const rooms = Array.isArray(data?.rooms) ? data.rooms : [];
+
+    if (!rooms.length) return null;
+
+    const list = document.createElement('div');
+    list.className = 'yanta-ai-tool-list';
+
+    for (const room of rooms.slice(0, 8)) {
+      list.append(renderToolChatRoomRow(room));
+    }
+
+    if (rooms.length > 8) {
+      const more = document.createElement('div');
+      more.className = 'yanta-ai-tool-more';
+      more.textContent = `+ ${rooms.length - 8} more`;
+      list.append(more);
+    }
+
+    return list;
+  }
+
+  if (name === 'chat_read_recent_messages') {
+    const messages = Array.isArray(data?.messages) ? data.messages : [];
+
+    if (!messages.length) return null;
+
+    const list = document.createElement('div');
+    list.className = 'yanta-ai-tool-list';
+
+    for (const msg of messages.slice(-8)) {
+      list.append(renderToolChatMessageRow(msg, {
+        roomId: data.roomId || '',
+      }));
+    }
+
+    return list;
+  }
+
+  if (name === 'chat_search_messages') {
+    const results = Array.isArray(data?.results) ? data.results : [];
+
+    if (!results.length) return null;
+
+    const list = document.createElement('div');
+    list.className = 'yanta-ai-tool-list';
+
+    for (const result of results.slice(0, 8)) {
+      list.append(renderToolChatMessageRow(result, {
+        roomId: result.roomId || data.roomId || '',
+      }));
+    }
+
+    if (results.length > 8) {
+      const more = document.createElement('div');
+      more.className = 'yanta-ai-tool-more';
+      more.textContent = `+ ${results.length - 8} more`;
+      list.append(more);
+    }
+
+    return list;
+  }
+
+  if (name === 'chat_send_message') {
+    const list = document.createElement('div');
+    list.className = 'yanta-ai-tool-list';
+
+    const row = document.createElement('div');
+    row.className = 'yanta-ai-tool-row';
+
+    row.innerHTML = `
+      <span class="yanta-ai-tool-row-icon">
+        ${lucide(data?.ok ? 'send-horizontal' : 'ban', 14)}
+      </span>
+      <span class="yanta-ai-tool-row-main">
+        <strong>${data?.ok ? 'Message sent' : data?.cancelled ? 'Message cancelled' : 'Message not sent'}</strong>
+        <small>
+          ${data?.roomId ? `Room: ${escapeHtml(data.roomId)}` : ''}
+          ${data?.autonomous ? ' · autonomous' : ''}
+          ${data?.humanConfirmed ? ' · confirmed' : ''}
+        </small>
+        ${data?.eventId ? `<em>${escapeHtml(data.eventId)}</em>` : ''}
+      </span>
+    `;
+
+    list.append(row);
+    return list;
+  }
+
   if (name === 'search_events') {
     const events = Array.isArray(data) ? data : data.events || [];
 
@@ -1895,6 +2017,64 @@ function renderToolRichContent(name, data) {
   }
 
   return null;
+}
+
+function renderToolChatRoomRow(room) {
+  const row = document.createElement('div');
+  row.className = 'yanta-ai-tool-row';
+
+  const title = room.name || room.directUserId || room.roomId || 'Chat';
+  const subtitle = [
+    room.isDirect ? 'Direct chat' : 'Room',
+    room.unread ? `${room.unread} unread` : '',
+    room.lastActive ? formatToolDateTime(room.lastActive) : '',
+  ].filter(Boolean).join(' · ');
+
+  row.innerHTML = `
+    <span class="yanta-ai-tool-row-icon">
+      ${lucide(room.isDirect ? 'user-round' : 'messages-square', 14)}
+    </span>
+    <span class="yanta-ai-tool-row-main">
+      <strong>${escapeHtml(title)}</strong>
+      ${subtitle ? `<small>${escapeHtml(subtitle)}</small>` : ''}
+      ${room.roomId ? `<em>${escapeHtml(room.roomId)}</em>` : ''}
+      ${room.directUserId ? `<em>${escapeHtml(room.directUserId)}</em>` : ''}
+    </span>
+  `;
+
+  return row;
+}
+
+function renderToolChatMessageRow(message, {
+  roomId = '',
+} = {}) {
+  const row = document.createElement('div');
+  row.className = 'yanta-ai-tool-row';
+
+  const text = String(
+    message.snippet ||
+    message.body ||
+    ''
+  ).trim();
+
+  const sender = message.sender || 'Unknown';
+  const when = message.ts ? formatToolDateTime(message.ts) : '';
+  const targetRoomId = message.roomId || roomId || '';
+
+  row.innerHTML = `
+    <span class="yanta-ai-tool-row-icon">
+      ${lucide(message.isAiGenerated ? 'sparkles' : 'message-circle', 14)}
+    </span>
+    <span class="yanta-ai-tool-row-main">
+      <strong>${escapeHtml(sender)}</strong>
+      ${when ? `<small>${escapeHtml(when)}</small>` : ''}
+      ${text ? `<span>${escapeHtml(text.slice(0, 260))}</span>` : ''}
+      ${targetRoomId ? `<em>${escapeHtml(targetRoomId)}</em>` : ''}
+      ${message.eventId ? `<em>${escapeHtml(message.eventId)}</em>` : ''}
+    </span>
+  `;
+
+  return row;
 }
 
 function renderToolEventRow(ev) {
@@ -2606,6 +2786,17 @@ function requestExternalSourceToolApproval({
 async function runAssistant(userText) {
   const tools = openAiToolsForModel();
 
+  console.info('[YANTA AI] tools offered to model', tools.map((tool) =>
+    tool.function?.name || ''
+  ));
+
+  window.dispatchEvent(new CustomEvent('yanta-ai-tools-offered', {
+    detail: {
+      names: tools.map((tool) => tool.function?.name || ''),
+      tools,
+    },
+  }));
+
   const messages = [
     await buildSystemMessage({
       userText,
@@ -2818,6 +3009,36 @@ async function maybeHandleAssistantSlashCommand(text) {
   const rest = restParts.join(' ').trim();
 
   if (!command) return false;
+
+  if (command === 'tools') {
+    const tools = openAiToolsForModel()
+      .map((tool) => ({
+        name: tool.function?.name || '',
+        description: String(tool.function?.description || '').trim(),
+      }))
+      .filter((tool) => tool.name)
+      .sort((a, b) => a.name.localeCompare(b.name));
+
+    addMessage(
+      'assistant',
+      [
+        '## Available YANTA AI tools',
+        '',
+        `Count: ${tools.length}`,
+        '',
+        '| Tool | Description |',
+        '|---|---|',
+        ...tools.map((tool) =>
+          `| \`${tool.name}\` | ${tool.description.replace(/\n+/g, ' ').slice(0, 180)} |`
+        ),
+      ].join('\n'),
+      {
+        model: 'YANTA',
+      }
+    );
+
+    return true;
+  }
 
   if (command === 'skills') {
     const {
@@ -3041,6 +3262,28 @@ export function setupAssistant() {
   ensureRoot();
   createFloatingShell();
   setupAgentBridge();
+
+  window.yantaAiTools = () => {
+    const tools = openAiToolsForModel();
+
+    return tools.map((tool) => ({
+      name: tool.function?.name || '',
+      description: tool.function?.description || '',
+      parameters: tool.function?.parameters || null,
+    }));
+  };
+
+  window.yantaAiToolNames = () =>
+    openAiToolsForModel().map((tool) => tool.function?.name || '');
+
+  window.yantaAiToolDump = () => {
+    const rows = window.yantaAiTools();
+    console.table(rows.map((tool) => ({
+      name: tool.name,
+      description: String(tool.description || '').slice(0, 90),
+    })));
+    return rows;
+  };
 
     if (!conversation.length) {
         conversation = loadTransientConversation();

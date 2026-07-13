@@ -57,6 +57,7 @@ const INCLUDED_AI_POLICY = {
 
     maxPromptChars: 70_000,
     maxToolsChars: 45_000,
+    maxTools: 80,
     maxMessages: 40,
     maxTokens: 1024,
 
@@ -76,6 +77,7 @@ const INCLUDED_AI_POLICY = {
 
     maxPromptChars: 220_000,
     maxToolsChars: 120_000,
+    maxTools: 120,
     maxMessages: 100,
     maxTokens: 4096,
 
@@ -207,7 +209,17 @@ function sanitizeIncludedAiMessages(messages, policy) {
 function sanitizeIncludedAiTools(tools, policy) {
   if (!Array.isArray(tools) || !tools.length) return undefined;
 
-  const size = jsonSize(tools);
+  const maxTools = Math.max(
+    1,
+    Math.min(
+      128,
+      Number(policy.maxTools || 80)
+    )
+  );
+
+  const selected = tools.slice(0, maxTools);
+
+  const size = jsonSize(selected);
 
   if (size > policy.maxToolsChars) {
     const err = new Error("Tool schema too large for Included AI.");
@@ -215,7 +227,7 @@ function sanitizeIncludedAiTools(tools, policy) {
     throw err;
   }
 
-  return tools.slice(0, 32);
+  return selected;
 }
 
 function openRouterZdrProviderPreferences() {

@@ -1189,6 +1189,34 @@ async function handleChatProvision(env, req, headers) {
     matrixUserId = registered?.user_id || matrixUserId;
 
     /*
+      Continuwuity hängt per Default-Config (new_user_displayname_suffix)
+      ein Suffix an neue Displaynames an. YANTA-Identitäten sollen exakt dem
+      gewählten Handle entsprechen, daher wird der Displayname direkt nach
+      der Registrierung explizit gesetzt. Fehler hier sind nicht fatal.
+    */
+    if (registered?.access_token) {
+      try {
+        const profileRes = await matrixFetchJson(
+          env,
+          `/_matrix/client/v3/profile/${encodeURIComponent(matrixUserId)}/displayname`,
+          {
+            method: "PUT",
+            token: registered.access_token,
+            body: {
+              displayname: policy.localpart
+            }
+          }
+        );
+
+        if (!profileRes.ok) {
+          console.warn("[YANTA Chat] Could not set initial displayname", profileRes.status);
+        }
+      } catch (err) {
+        console.warn("[YANTA Chat] Could not set initial displayname", safeErrorForLog(err));
+      }
+    }
+
+    /*
       Zero-knowledge decision:
       The Worker never stores the Matrix password or access_token.
       They are returned once so the client can immediately encrypt and store

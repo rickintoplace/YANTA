@@ -264,7 +264,11 @@ function openChatFromNotification(roomId) {
   try {
     window.focus();
   } catch {}
-  location.hash = `#chat/${encodeURIComponent(roomId)}`;
+  /*
+    Kein manuelles location.hash-Setzen:
+    openChat({ push: true }) schreibt URL und History-State selbst. Ein
+    zusätzlicher Hash-Eintrag ohne State erzeugt doppelte Back-Schritte.
+  */
   import('./chat-ui.js')
     .then(({ openChat }) => openChat({
       roomId,

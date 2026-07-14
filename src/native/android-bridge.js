@@ -398,8 +398,11 @@ export function handleAndroidDeepLink(urlOrHash = '') {
     if (url.hash.startsWith('#chat/')) {
       const roomId = decodeURIComponent(url.hash.replace(/^#chat\//, ''));
 
-      location.hash = `#chat/${encodeURIComponent(roomId)}`;
-
+      /*
+        Kein manuelles location.hash-Setzen:
+        openChat({ push: true }) schreibt URL und History-State selbst. Ein
+        zusätzlicher Hash-Eintrag ohne State erzeugt doppelte Back-Schritte.
+      */
       import('../chat/chat-ui.js')
         .then(({ openChat }) => openChat({
           roomId,

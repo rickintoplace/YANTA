@@ -223,6 +223,7 @@ import {
   openChat,
   openChatFloating,
   closeChat,
+  closeActiveChatRoom,
   jumpToMessageFromSearch,
 } from './chat/chat-ui.js';
 
@@ -3470,6 +3471,13 @@ function handleGlobalKey(e) {
     }
   }
   else if (e.key === 'Escape') {
+    /*
+      Overlays (Chat-Settings, Graph-History-Overlays, …) behandeln ESC selbst
+      über overlay-history.js. Ohne diesen Guard würde ESC zusätzlich die
+      darunterliegende Surface (z. B. das ganze Chatfenster) schließen.
+    */
+    if (e.defaultPrevented || history.state?.yantaOverlay) return;
+
     closeImageModal();
     closeShareModal();
     closeUnifiedShareModal();
@@ -3491,6 +3499,10 @@ function handleGlobalKey(e) {
     }
 
     if (state.surface === 'chat') {
+      // Gestufte Navigation: erst offene Konversation -> Chatliste,
+      // erst dann verlässt ein weiteres ESC die Chat-Surface.
+      if (closeActiveChatRoom()) return;
+
       if (history.state?.surface === 'chat') {
         history.back();
       } else {

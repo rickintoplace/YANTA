@@ -220,25 +220,6 @@ function compactMessageEvent(event) {
   }
 
   function roomMemberSearchText(room, client) {
-    const own = client.getUserId?.() || '';
-  
-    try {
-      return (room.getJoinedMembers?.() || [])
-        .filter((member) => member.userId !== own)
-        .slice(0, 12)
-        .map((member) => [
-          member.userId,
-          member.name,
-          member.rawDisplayName,
-          member.displayName,
-        ].filter(Boolean).join(' '))
-        .join(' ');
-    } catch {
-      return '';
-    }
-  }
-  
-  function roomMemberSearchText(room, client) {
     const ownUserId = client?.getUserId?.() || '';
   
     try {

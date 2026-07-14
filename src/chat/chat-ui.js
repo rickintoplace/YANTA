@@ -247,12 +247,59 @@ function closeChatFromButton() {
     return;
   }
 
-  if (history.state?.surface === 'chat') {
-    history.back();
+  const st = history.state;
+
+  if (st?.surface === 'chat') {
+    /*
+      Liegt ein Raum-Eintrag über dem Listen-Eintrag (fromList), müssen beide
+      Chat-Einträge in einem Schritt verlassen werden — sonst landet "Close
+      Chat" nur auf der Chatliste statt zurück in der App.
+    */
+    history.go(st.roomId && st.fromList ? -2 : -1);
     return;
   }
 
   closeChat();
+}
+
+/**
+ * Navigates from an open conversation back to the chat list without ever
+ * leaving the Chat surface/window.
+ */
+function goBackToChatList() {
+  if (chatMode === 'floating') {
+    openChatFloating({
+      roomId: '',
+    }).catch((err) => {
+      console.warn('[YANTA Chat] Could not go back to chat list', err);
+      toast('Could not open chat list.', 'error');
+    });
+
+    return;
+  }
+
+  /*
+    history.back() nur, wenn der Listen-Eintrag nachweislich direkt darunter
+    liegt (fromList-Marker beim Push gesetzt). Bei Direkteinstiegen wie
+    #chat/<roomId> würde Back sonst die komplette Chat-Surface schließen.
+  */
+  if (
+    history.state?.surface === 'chat' &&
+    history.state?.roomId &&
+    history.state?.fromList
+  ) {
+    history.back();
+    return;
+  }
+
+  openChat({
+    roomId: '',
+    replace: true,
+    mode: 'surface',
+  }).catch((err) => {
+    console.warn('[YANTA Chat] Could not go back to chat list', err);
+    toast('Could not open chat list.', 'error');
+  });
 }
 
 function renderChatSetupState({
@@ -625,7 +672,7 @@ function ensureRoot() {
             ${lucide('picture-in-picture-2', 17)}
           </button>
 
-          <button class="icon-btn" data-chat-close title="Close Chat" aria-label="Close Chat">
+          <button class="icon-btn" data-chat-close-room title="Close conversation" aria-label="Close conversation">
             ${lucide('x', 17)}
           </button>
         </header>
@@ -828,6 +875,12 @@ function bindRootEvents() {
     });
   });
 
+  root.querySelector('[data-chat-close-room]')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    goBackToChatList();
+  });
+
   root.querySelectorAll('[data-chat-float]').forEach((btn) => {
     btn.addEventListener('click', (e) => {
       e.preventDefault();
@@ -872,18 +925,7 @@ function bindRootEvents() {
       return;
     }
 
-    if (history.state?.surface === 'chat' && history.state?.roomId) {
-      history.back();
-      return;
-    }
-
-    openChat({
-      roomId: '',
-      replace: true,
-    }).catch((err) => {
-      console.warn('[YANTA Chat] Could not go back to chat list', err);
-      toast('Could not open chat list.', 'error');
-    });
+    goBackToChatList();
   });
 
   root.querySelector('[data-chat-profile]')?.addEventListener('click', () => {
@@ -1206,8 +1248,8 @@ function bindListPaneResize() {
 async function openNewChatDialog() {
   const target = await askText({
     title: 'New chat',
-    message: 'Enter a Matrix user id or YANTA handle.',
-    placeholder: '@alice:matrix.org',
+    message: 'Enter a YANTA handle (e.g. alice) or a full Matrix user id.',
+    placeholder: '@alice:yanta.me',
     confirmLabel: 'Start chat',
   });
 
@@ -1811,13 +1853,26 @@ export async function openChat({
 
   const nextRoomId = String(roomId || '').trim();
 
+  /*
+    fromList markiert Raum-Einträge, die über einem Chatlisten-Eintrag
+    gepusht werden. Nur dann darf "Zurück zur Liste" history.back() nutzen.
+    Vor activeRoomId-Zuweisung lesen, damit der aktuelle Zustand zählt.
+  */
+  const pushedOverList =
+    !!nextRoomId &&
+    history.state?.surface === 'chat' &&
+    !history.state?.roomId;
+
   activeRoomId = nextRoomId;
 
   if (surfaceMode && !fromHistory) {
     if (replace) {
       replaceChatHistory(activeRoomId || null);
     } else if (push) {
-      pushChatHistory(activeRoomId || null);
+      pushChatHistory(
+        activeRoomId || null,
+        pushedOverList ? { fromList: true } : {}
+      );
     }
   }
 
@@ -1870,6 +1925,18 @@ function updateFloatingButtons() {
     btn.title = chatMode === 'floating' ? 'Dock Chat' : 'Open as window';
     btn.setAttribute('aria-label', btn.title);
   });
+}
+
+/**
+ * Closes only the active conversation and returns to the chat list.
+ * Returns true when a conversation was open and handled.
+ */
+export function closeActiveChatRoom() {
+  if (!chatIsOpen() || !activeRoomId) return false;
+
+  goBackToChatList();
+
+  return true;
 }
 
 /**
@@ -2055,7 +2122,10 @@ async function openRoomFromList(roomId) {
 
 function renderRoomRow(room) {
   const lastEvent = latestEvent(room);
-  const preview = lastEvent ? messagePreview(lastEvent) : 'No messages yet';
+  const isInvite = room.getMyMembership?.() === 'invite';
+  const preview = isInvite
+    ? 'Joining chat…'
+    : lastEvent ? messagePreview(lastEvent) : 'No messages yet';
   const unread = Number(room.getUnreadNotificationCount?.() || 0);
   const ts = lastEvent?.getTs?.() || lastActive(room);
 
@@ -2718,18 +2788,6 @@ function openRoomMenu(anchor) {
           client,
           roomId,
           roomName: roomDisplayName(room),
-        });
-      },
-    },
-    {
-      label: 'My Chat Profile',
-      icon: 'user-round',
-      action: async () => {
-        await openChatSettings({
-          client,
-          roomId,
-          roomName: roomDisplayName(room),
-          tab: 'profile',
         });
       },
     },

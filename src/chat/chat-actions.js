@@ -72,8 +72,15 @@ export async function resolveMatrixClient() {
   return null;
 }
 
+function ownServerName(client) {
+  const userId = String(client?.getUserId?.() || '');
+  const idx = userId.indexOf(':');
+
+  return idx > 0 ? userId.slice(idx + 1) : '';
+}
+
 function normalizeUserId(input, {
-  defaultServer = 'matrix.org',
+  defaultServer = '',
 } = {}) {
   const raw = String(input || '').trim();
 
@@ -83,16 +90,20 @@ function normalizeUserId(input, {
     return raw;
   }
 
-  if (raw.startsWith('@') && !raw.includes(':')) {
-    return `${raw}:${defaultServer}`;
-  }
-
   if (!raw.startsWith('@') && raw.includes(':')) {
     return `@${raw}`;
   }
 
-  // YANTA handle fallback: treat plain handles as matrix.org users for now.
-  return `@${raw.replace(/^@/, '')}:${defaultServer}`;
+  /*
+    Warum eigener Homeserver statt matrix.org:
+    Plain Handles sind YANTA-Handles. Sie leben auf demselben Homeserver wie
+    der eingeloggte User. Ein matrix.org-Fallback würde stillschweigend einen
+    fremden/nicht existierenden User einladen — der Chat erscheint dann zwar,
+    aber Nachrichten erreichen nie den echten Kontakt.
+  */
+  if (!defaultServer) return '';
+
+  return `@${raw.replace(/^@/, '').split(':')[0]}:${defaultServer}`;
 }
 
 function directAccountData(client) {
@@ -111,15 +122,47 @@ function visibleRooms(client) {
   }
 }
 
-function existingDmRoomIdFor(client, userId) {
-  const direct = directAccountData(client);
-  const candidates = Array.isArray(direct[userId]) ? direct[userId] : [];
-  const rooms = new Set(visibleRooms(client).map((room) => room.roomId));
-
-  return candidates.find((roomId) => rooms.has(roomId)) || '';
+function isActiveMembership(membership) {
+  return membership === 'join' || membership === 'invite';
 }
 
-async function setDirectRoom(client, userId, roomId) {
+function existingDmRoomFor(client, userId) {
+  const rooms = visibleRooms(client)
+    .filter((room) => isActiveMembership(room.getMyMembership?.() || ''));
+
+  const direct = directAccountData(client);
+  const candidates = Array.isArray(direct[userId]) ? direct[userId] : [];
+  const byId = new Map(rooms.map((room) => [room.roomId, room]));
+
+  for (const roomId of candidates) {
+    const room = byId.get(roomId);
+    if (room) return room;
+  }
+
+  /*
+    m.direct existiert nur auf der Seite, die den Chat erstellt hat.
+    Hat die Gegenseite den DM-Raum angelegt, findet ihn nur ein Member-Scan.
+    Ohne diesen Scan entsteht beim gegenseitigen Hinzufügen ein zweiter,
+    doppelter DM-Raum.
+  */
+  for (const room of rooms) {
+    const members = (room.getMembers?.() || [])
+      .filter((member) => isActiveMembership(member.membership));
+
+    if (members.length > 2) continue;
+    if (!members.some((member) => member.userId === userId)) continue;
+
+    return room;
+  }
+
+  return null;
+}
+
+/**
+ * Records a room as direct chat with the given user in m.direct account data.
+ * Returns false when the mapping already existed.
+ */
+export async function markRoomAsDirectChat(client, userId, roomId) {
   const direct = {
     ...directAccountData(client),
   };
@@ -128,13 +171,14 @@ async function setDirectRoom(client, userId, roomId) {
     ? [...direct[userId]]
     : [];
 
-  if (!list.includes(roomId)) {
-    list.unshift(roomId);
-  }
+  if (list.includes(roomId)) return false;
 
+  list.unshift(roomId);
   direct[userId] = list;
 
   await client.setAccountData('m.direct', direct);
+
+  return true;
 }
 
 /**
@@ -151,17 +195,33 @@ export async function createDm(input) {
     throw new Error('Matrix client is not available.');
   }
 
-  const userId = normalizeUserId(input);
+  const userId = normalizeUserId(input, {
+    defaultServer: ownServerName(client),
+  });
 
   if (!userId) {
     toast('Enter a Matrix user id.', 'error');
     throw new Error('Missing Matrix user id.');
   }
 
-  const existingRoomId = existingDmRoomIdFor(client, userId);
+  if (userId === client.getUserId?.()) {
+    toast('You cannot start a chat with yourself.', 'error');
+    throw new Error('Cannot create DM with own user id.');
+  }
 
-  if (existingRoomId) {
-    return existingRoomId;
+  const existingRoom = existingDmRoomFor(client, userId);
+
+  if (existingRoom) {
+    /*
+      Reparatur für Räume, die die Gegenseite angelegt hat:
+      m.direct nachziehen, damit Anzeigename/Avatar des Kontakts und künftige
+      Lookups stabil funktionieren.
+    */
+    await markRoomAsDirectChat(client, userId, existingRoom.roomId).catch((err) => {
+      console.warn('[YANTA Chat] Could not update m.direct for existing DM', err);
+    });
+
+    return existingRoom.roomId;
   }
 
   try {
@@ -196,7 +256,7 @@ export async function createDm(input) {
       throw new Error('Homeserver did not return a room id.');
     }
 
-    await setDirectRoom(client, userId, roomId);
+    await markRoomAsDirectChat(client, userId, roomId);
 
     toast('Chat created', 'success');
 

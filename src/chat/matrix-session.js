@@ -56,6 +56,14 @@ const MATRIX_STORE_DB_PREFIX = 'yanta-chat-matrix-sdk';
 const INITIAL_SYNC_LIMIT = 30;
 
 const CHAT_CRYPTO_READY_KEY = 'chat.crypto.ready.v1';
+const CHAT_PROFILE_REPAIR_KEY = 'chat.profile.serverSuffixRepaired.v1';
+
+/*
+  Continuwuity hängt neuen Accounts per Default-Config
+  (new_user_displayname_suffix) ein Suffix an den Displaynamen an.
+  YANTA-Identitäten sollen exakt dem gewählten Handle entsprechen.
+*/
+const SERVER_DISPLAYNAME_SUFFIX = '🏳️‍⚧️';
 
 /**
  * Reads the device-local crypto-ready marker for the given Matrix identity.
@@ -406,6 +414,99 @@ function isTimelineLiveEvent(sdk, data = {}) {
   return !data.toStartOfTimeline && data.timeline !== eventTimeline.BACKWARDS;
 }
 
+/*
+  Einladungen werden automatisch angenommen (WhatsApp-Modell):
+  YANTA Chat läuft auf einem geschlossenen Homeserver. Ohne Auto-Join sieht
+  die eingeladene Seite den Chat zwar in der Liste, tritt dem Raum aber nie
+  bei — Nachrichten kommen dann nie an.
+*/
+const inviteJoinsInFlight = new Set();
+
+async function autoJoinInvitedRoom(client, room) {
+  const roomId = room?.roomId || '';
+
+  if (!roomId || inviteJoinsInFlight.has(roomId)) return;
+  if (room.getMyMembership?.() !== 'invite') return;
+
+  inviteJoinsInFlight.add(roomId);
+
+  try {
+    const ownUserId = client.getUserId?.() || '';
+    const memberEvent = room.getMember?.(ownUserId)?.events?.member;
+    const isDirect = !!memberEvent?.getContent?.()?.is_direct;
+    const inviterId =
+      memberEvent?.getSender?.() ||
+      room.getDMInviter?.() ||
+      '';
+
+    await client.joinRoom(roomId);
+
+    /*
+      m.direct auch auf der eingeladenen Seite pflegen, sonst zeigt die
+      Chatliste Raum- statt Kontaktnamen und createDm() legt beim
+      Zurück-Hinzufügen einen doppelten Raum an.
+    */
+    if (isDirect && inviterId && inviterId !== ownUserId) {
+      const { markRoomAsDirectChat } = await import('./chat-actions.js');
+      await markRoomAsDirectChat(client, inviterId, roomId);
+    }
+
+    emit('yanta-chat-room-updated', {
+      roomId,
+      reason: 'invite-auto-join',
+    });
+  } catch (err) {
+    console.warn('[YANTA Chat Session] Could not auto-join invited room', roomId, err);
+  } finally {
+    inviteJoinsInFlight.delete(roomId);
+  }
+}
+
+function autoJoinPendingInvites(client) {
+  for (const room of client.getRooms?.() || []) {
+    if (room.getMyMembership?.() === 'invite') {
+      autoJoinInvitedRoom(client, room);
+    }
+  }
+}
+
+/**
+ * One-time repair for accounts that were registered while the homeserver
+ * appended its default displayname suffix. Only the untouched server default
+ * ("<handle> <suffix>") is rewritten — custom display names stay as they are.
+ */
+async function repairServerDisplayNameSuffix(client, credentials) {
+  try {
+    const userId = credentials?.userId || client.getUserId?.() || '';
+    const localpart = (userId.match(/^@([^:]+):/) || [])[1] || '';
+
+    if (!localpart) return;
+
+    const marker = await chatSettings.get(CHAT_PROFILE_REPAIR_KEY, null);
+    if (marker?.userId === userId) return;
+
+    const profile = await client.getProfileInfo?.(userId, 'displayname').catch(() => null);
+    const displayName = String(profile?.displayname || '').trim();
+
+    const isUntouchedServerDefault =
+      displayName.endsWith(SERVER_DISPLAYNAME_SUFFIX) &&
+      displayName.slice(0, -SERVER_DISPLAYNAME_SUFFIX.length).trim() === localpart;
+
+    if (isUntouchedServerDefault) {
+      await client.setDisplayName?.(localpart);
+    }
+
+    await chatSettings.set(CHAT_PROFILE_REPAIR_KEY, {
+      userId,
+      repairedAt: Date.now(),
+      changed: isUntouchedServerDefault,
+    });
+  } catch (err) {
+    // Rein kosmetisch — darf den Chat-Start nie blockieren.
+    console.warn('[YANTA Chat Session] Could not repair display name suffix', err);
+  }
+}
+
 /**
  * Dynamically loads matrix-js-sdk and initializes Rust crypto WASM once.
  */
@@ -662,6 +763,9 @@ function wireLifecycleEvents({
         userId: client.getUserId?.() || '',
         deviceId: client.getDeviceId?.() || '',
       });
+
+      // Einladungen, die während Offline-Zeit eingingen, jetzt annehmen.
+      autoJoinPendingInvites(client);
     }
 
     if (data?.error && isUnknownTokenError(data.error)) {
@@ -675,10 +779,29 @@ function wireLifecycleEvents({
   on(client, roomEvent, (room) => {
     if (!room?.roomId) return;
 
+    if (room.getMyMembership?.() === 'invite') {
+      autoJoinInvitedRoom(client, room);
+    }
+
     emit('yanta-chat-room-updated', {
       roomId: room.roomId,
       reason: 'room',
     });
+  });
+
+  const memberEvents = sdk.RoomMemberEvent || {};
+  const membershipEvent = memberEvents.Membership || 'RoomMember.membership';
+
+  on(client, membershipEvent, (_event, member) => {
+    if (!member?.roomId) return;
+    if (member.userId !== client.getUserId?.()) return;
+    if (member.membership !== 'invite') return;
+
+    const room = client.getRoom?.(member.roomId);
+
+    if (room) {
+      autoJoinInvitedRoom(client, room);
+    }
   });
 
   on(client, timelineEvent, (ev, room, toStartOfTimeline, removed, data = {}) => {
@@ -1082,6 +1205,10 @@ export async function startChatSession({
       window.yantaChatSession = activeSession;
 
       installChatMediaIndexer(client);
+
+      idle(() => {
+        repairServerDisplayNameSuffix(client, credentials);
+      });
 
       await client.startClient({
         initialSyncLimit: INITIAL_SYNC_LIMIT,

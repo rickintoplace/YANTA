@@ -118,10 +118,11 @@ export function calendarState() {
   };
 }
 
-export function chatState(roomId = null) {
+export function chatState(roomId = null, extra = {}) {
   const id = String(roomId || '').trim();
 
   return {
+    ...extra,
     surface: 'chat',
     roomId: id || null,
   };
@@ -144,9 +145,9 @@ export function calendarEventState(eventId) {
   };
 }
 
-export function pushChatHistory(roomId = null) {
+export function pushChatHistory(roomId = null, extra = {}) {
   writeAppHistoryState(
-    chatState(roomId),
+    chatState(roomId, extra),
     chatUrl(roomId)
   );
 }

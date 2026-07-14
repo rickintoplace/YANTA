@@ -257,6 +257,14 @@ export function setupOverlayHistoryRouter() {
 
     if (overlayIdFromState()) {
       e.preventDefault();
+
+      /*
+        Wichtig: window-Level-Handler (main.js handleGlobalKey) dürfen dieses
+        ESC nicht zusätzlich interpretieren. Sonst schließt ESC auf einem
+        Overlay (z. B. Chat-Settings) gleichzeitig die darunterliegende
+        Surface — doppelte Navigation.
+      */
+      e.stopPropagation();
       history.back();
     }
   });

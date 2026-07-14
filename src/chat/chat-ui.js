@@ -686,10 +686,6 @@ function ensureRoot() {
             ${lucide('ellipsis-vertical', 17)}
           </button>
 
-          <button class="icon-btn" data-chat-float title="Open as window" aria-label="Open as window">
-            ${lucide('picture-in-picture-2', 17)}
-          </button>
-
           <button class="icon-btn" data-chat-close-room title="Close conversation" aria-label="Close conversation">
             ${lucide('x', 17)}
           </button>

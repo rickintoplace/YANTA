@@ -17,8 +17,16 @@ import {
   getMarkdownText,
   noteMarkdown,
   destroyNoteDoc,
+  getDrawing,
   setDrawing,
 } from '../yjs.js';
+
+import {
+  mermaidToDrawingScene,
+  svgToDrawingScene,
+  sceneBounds,
+  translateSceneElements,
+} from './drawing-scene.js';
 
 import {
   getView,
@@ -1188,91 +1196,81 @@ export async function getWeatherAction({
   };
 }
 
-function sanitizeSvgForDrawing(rawSvg = '') {
-  const raw = String(rawSvg || '').trim();
+const DRAWING_MARGIN = 40;
 
-  if (!raw) {
-    throw new Error('SVG is required.');
+// Build an { elements, files, editable, warnings } scene from exactly one of
+// mermaid / svg. Shared by drawing create and update.
+async function buildDrawingScene({ mermaid = '', svg = '' } = {}) {
+  const hasMermaid = String(mermaid || '').trim().length > 0;
+  const hasSvg = String(svg || '').trim().length > 0;
+
+  if (hasMermaid && hasSvg) {
+    throw new Error('Provide either mermaid or svg, not both.');
   }
 
-  if (!/^<svg[\s>]/i.test(raw)) {
-    throw new Error('Only inline SVG starting with <svg> is supported.');
+  if (!hasMermaid && !hasSvg) {
+    throw new Error('Provide mermaid diagram code or inline svg.');
   }
 
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(raw, 'image/svg+xml');
+  if (hasMermaid) {
+    const scene = await mermaidToDrawingScene(mermaid);
 
-  if (doc.querySelector('parsererror')) {
-    throw new Error('Invalid SVG.');
+    return {
+      source: 'mermaid',
+      elements: scene.elements,
+      files: scene.files,
+      editable: scene.editable,
+      warnings: scene.warnings,
+    };
   }
 
-  const svg = doc.documentElement;
-
-  if (!svg || svg.tagName.toLowerCase() !== 'svg') {
-    throw new Error('Invalid SVG root.');
-  }
-
-  for (const node of [...svg.querySelectorAll('script, foreignObject, iframe, object, embed')]) {
-    node.remove();
-  }
-
-  for (const el of [svg, ...svg.querySelectorAll('*')]) {
-    for (const attr of [...el.attributes]) {
-      const name = attr.name.toLowerCase();
-      const value = String(attr.value || '').trim().toLowerCase();
-
-      if (name.startsWith('on')) {
-        el.removeAttribute(attr.name);
-        continue;
-      }
-
-      if (
-        (name === 'href' || name.endsWith(':href')) &&
-        value.startsWith('javascript:')
-      ) {
-        el.removeAttribute(attr.name);
-      }
-    }
-  }
-
-  if (!svg.getAttribute('xmlns')) {
-    svg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-  }
-
-  return new XMLSerializer().serializeToString(svg);
-}
-
-function svgToDataUrl(svg) {
-  return `data:image/svg+xml;base64,${btoa(unescape(encodeURIComponent(svg)))}`;
-}
-
-function svgSize(svgText = '') {
-  const width = Number(svgText.match(/\bwidth=["']?(\d+(?:\.\d+)?)/i)?.[1] || 0);
-  const height = Number(svgText.match(/\bheight=["']?(\d+(?:\.\d+)?)/i)?.[1] || 0);
-
-  const viewBox = svgText.match(/\bviewBox=["']([^"']+)["']/i)?.[1] || '';
-  const vb = viewBox
-    .split(/\s+/)
-    .map(Number)
-    .filter(Number.isFinite);
+  const scene = svgToDrawingScene(svg);
 
   return {
-    width: Math.max(24, Math.min(2000, width || vb[2] || 320)),
-    height: Math.max(24, Math.min(2000, height || vb[3] || 240)),
+    source: 'svg',
+    elements: scene.elements,
+    files: scene.files,
+    editable: false,
+    warnings: [],
+    svgBytes: scene.svgBytes,
   };
+}
+
+function drawingDefaultsForSource(source) {
+  if (source === 'mermaid') {
+    return { icon: 'workflow', color: '#8b5cf6' };
+  }
+
+  return { icon: 'line-squiggle', color: '#38bdf8' };
 }
 
 export async function createDrawingNoteAction({
   title = 'Drawing',
   body = '',
   svg = '',
+  mermaid = '',
   folderId = null,
   tags = [],
-  icon = 'line-squiggle',
-  color = '#38bdf8',
+  icon = null,
+  color = null,
 } = {}) {
-  const safeSvg = sanitizeSvgForDrawing(svg);
-  const size = svgSize(safeSvg);
+  const scene = await buildDrawingScene({ mermaid, svg });
+
+  // Normalize the scene so its top-left sits at a consistent margin.
+  const bounds = sceneBounds(scene.elements);
+
+  if (bounds) {
+    translateSceneElements(
+      scene.elements,
+      DRAWING_MARGIN - bounds.minX,
+      DRAWING_MARGIN - bounds.minY,
+    );
+  }
+
+  const contentWidth = bounds?.width || 320;
+  const contentHeight = bounds?.height || 240;
+
+  const defaults = drawingDefaultsForSource(scene.source);
 
   const note = await createNoteAction({
     title,
@@ -1283,68 +1281,22 @@ export async function createDrawingNoteAction({
     ].join('\n').trim(),
     folderId,
     tags: Array.isArray(tags) ? tags : [],
-    icon,
-    color,
+    icon: icon || defaults.icon,
+    color: color || defaults.color,
   });
 
   const drawingId = `ai_draw_${uid()}`;
-  const fileId = `svg_${uid()}`;
-
-  const imageElement = {
-    id: uid(),
-    type: 'image',
-    x: 40,
-    y: 40,
-    width: size.width,
-    height: size.height,
-    angle: 0,
-    strokeColor: 'transparent',
-    backgroundColor: 'transparent',
-    fillStyle: 'solid',
-    strokeWidth: 1,
-    strokeStyle: 'solid',
-    roughness: 0,
-    opacity: 100,
-    groupIds: [],
-    frameId: null,
-    roundness: null,
-    seed: Math.floor(Math.random() * 2 ** 31),
-    version: 1,
-    versionNonce: Math.floor(Math.random() * 2 ** 31),
-    isDeleted: false,
-    boundElements: null,
-    updated: now(),
-    link: null,
-    locked: false,
-    fileId,
-    scale: [1, 1],
-    status: 'saved',
-    customData: {
-      yanta: {
-        generatedBy: 'ai',
-        source: 'svg',
-      },
-    },
-  };
 
   setDrawing(note.id, drawingId, {
     id: drawingId,
     title: title || 'AI Drawing',
     canvas: {
-      width: Math.max(420, size.width + 80),
-      height: Math.max(260, size.height + 80),
+      width: Math.max(420, contentWidth + 2 * DRAWING_MARGIN),
+      height: Math.max(260, contentHeight + 2 * DRAWING_MARGIN),
     },
-    elements: [imageElement],
+    elements: scene.elements,
     appState: {},
-    files: {
-      [fileId]: {
-        id: fileId,
-        dataURL: svgToDataUrl(safeSvg),
-        mimeType: 'image/svg+xml',
-        created: now(),
-        lastRetrieved: now(),
-      },
-    },
+    files: scene.files,
   }, 'ai-create-drawing');
 
   await appendToNoteAction({
@@ -1358,7 +1310,135 @@ export async function createDrawingNoteAction({
     ok: true,
     note,
     drawingId,
-    svgBytes: new TextEncoder().encode(safeSvg).byteLength,
+    source: scene.source,
+    editable: scene.editable,
+    elementCount: scene.elements.length,
+    svgBytes: scene.svgBytes,
+    warnings: scene.warnings,
+  };
+}
+
+// Accept an Excalidraw-style scene object (or JSON string) and extract the
+// element/file/appState arrays used by a YANTA drawing.
+function parseExcalidrawSceneInput(input) {
+  let json = input;
+
+  if (typeof json === 'string') {
+    try {
+      json = JSON.parse(json);
+    } catch {
+      throw new Error('excalidrawJson is not valid JSON.');
+    }
+  }
+
+  if (!json || typeof json !== 'object') {
+    throw new Error('excalidrawJson must be an object.');
+  }
+
+  const elements = Array.isArray(json.elements) ? json.elements : null;
+
+  if (!elements) {
+    throw new Error('excalidrawJson must contain an "elements" array.');
+  }
+
+  return {
+    elements,
+    files: (json.files && typeof json.files === 'object') ? json.files : {},
+    appState: (json.appState && typeof json.appState === 'object') ? json.appState : null,
+  };
+}
+
+export async function updateDrawingAction({
+  noteId,
+  drawingId,
+  mermaid = '',
+  svg = '',
+  excalidrawJson = null,
+  mode = 'append',
+} = {}) {
+  if (!noteId || !drawingId) {
+    throw new Error('noteId and drawingId are required.');
+  }
+
+  const existing = getDrawing(noteId, drawingId);
+
+  if (!existing) {
+    throw new Error('Drawing not found.');
+  }
+
+  const wantsReplace = mode === 'replace';
+  const existingElements = wantsReplace ? [] : (existing.elements || []);
+  const existingFiles = wantsReplace ? {} : { ...(existing.files || {}) };
+
+  let nextElements;
+  let nextFiles;
+  let result = { source: excalidrawJson ? 'excalidraw' : null, warnings: [] };
+
+  if (excalidrawJson) {
+    // Full-scene edit: the model rewrote the Excalidraw JSON directly.
+    const parsed = parseExcalidrawSceneInput(excalidrawJson);
+    nextElements = [...existingElements, ...parsed.elements];
+    nextFiles = { ...existingFiles, ...parsed.files };
+  } else {
+    // Convenience edit: render mermaid/svg and merge it in.
+    const scene = await buildDrawingScene({ mermaid, svg });
+    result = { source: scene.source, editable: scene.editable, warnings: scene.warnings };
+
+    if (existingElements.length) {
+      // Place the new fragment below existing content with a gap so it does
+      // not overlap.
+      const currentBounds = sceneBounds(existingElements);
+      const sceneBox = sceneBounds(scene.elements);
+
+      if (currentBounds && sceneBox) {
+        translateSceneElements(
+          scene.elements,
+          currentBounds.minX - sceneBox.minX,
+          currentBounds.maxY + DRAWING_MARGIN - sceneBox.minY,
+        );
+      }
+    }
+
+    nextElements = [...existingElements, ...scene.elements];
+    nextFiles = { ...existingFiles, ...scene.files };
+  }
+
+  const bounds = sceneBounds(nextElements);
+  const canvas = bounds
+    ? {
+        width: Math.max(420, bounds.maxX + DRAWING_MARGIN),
+        height: Math.max(260, bounds.maxY + DRAWING_MARGIN),
+      }
+    : (existing.canvas || null);
+
+  setDrawing(noteId, drawingId, {
+    ...existing,
+    id: drawingId,
+    elements: nextElements,
+    files: nextFiles,
+    canvas,
+  }, 'ai-update-drawing');
+
+  await notifyNoteChanged(noteId, 'ai-update-drawing');
+
+  window.dispatchEvent(new CustomEvent('yanta-drawing-updated', {
+    detail: {
+      noteId,
+      drawingId,
+      reason: 'ai-update-drawing',
+      source: 'ai',
+    },
+  }));
+
+  return {
+    ok: true,
+    noteId,
+    drawingId,
+    mode: wantsReplace ? 'replace' : 'append',
+    source: result.source,
+    editable: result.editable ?? null,
+    elementCount: nextElements.length,
+    warnings: result.warnings || [],
   };
 }
 

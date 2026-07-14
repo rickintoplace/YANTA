@@ -1441,6 +1441,8 @@ function toolDisplayName(name) {
     read_note: 'Read note',
     read_notes: 'Read notes',
     create_note: 'Create note',
+    create_drawing_note: 'Create drawing',
+    update_drawing: 'Update drawing',
     update_note_appearance: 'Update note appearance',
     append_to_note: 'Append to note',
     replace_current_selection: 'Replace selection',
@@ -1567,6 +1569,18 @@ function summarizeToolResult(name, data, rawContent = '') {
 
   if (name === 'delete_note') {
     return `Moved note to Trash: ${data.title || data.trashedNoteId || 'Untitled'}.`;
+  }
+
+  if (name === 'create_drawing_note') {
+    const kind = data.source === 'mermaid'
+      ? (data.editable ? 'editable Mermaid diagram' : 'Mermaid diagram (image)')
+      : 'SVG drawing';
+    return `Created drawing note with ${kind}: ${data.note?.title || 'Drawing'}.`;
+  }
+
+  if (name === 'update_drawing') {
+    const how = data.mode === 'replace' ? 'Replaced' : 'Updated';
+    return `${how} drawing (${data.elementCount || 0} element${data.elementCount === 1 ? '' : 's'}).`;
   }
 
   if (name === 'create_event') {
@@ -2675,6 +2689,10 @@ function externalApprovalToolLabel(toolName, args = {}) {
 
   if (toolName === 'create_drawing_note') {
     return `create drawing note "${args.title || 'Drawing'}"`;
+  }
+
+  if (toolName === 'update_drawing') {
+    return `edit drawing ${args.drawingId || ''}`.trim();
   }
 
   if (toolName === 'update_event' || toolName === 'update_event_appearance') {

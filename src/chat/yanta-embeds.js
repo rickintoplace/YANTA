@@ -992,24 +992,18 @@ import {
   }
   
   .yanta-chat-embed-card {
-    min-width: min(420px, 76vw);
     max-width: min(560px, 84vw);
     display: grid;
     grid-template-columns: auto minmax(0, 1fr);
-    grid-template-areas:
-      "icon main"
-      "actions actions";
+    grid-template-areas:         "icon main"        "actions actions";
     gap: 10px 12px;
     padding: 13px;
-    border: 1px solid color-mix(in srgb, var(--embed-color) 36%, var(--border));
+    border: 1px solid 
+color-mix(in srgb, var(--embed-color) 36%, var(--border));
     border-radius: 18px;
-    background:
-      linear-gradient(
-        135deg,
-        color-mix(in srgb, var(--embed-color) 12%, var(--bg-elev)),
-        var(--bg-elev)
-      );
-    box-shadow: 0 10px 30px rgba(0,0,0,.18);
+    background: linear-gradient(135deg, 
+color-mix(in srgb, var(--embed-color) 12%, var(--bg-elev)), var(--bg-elev));
+    box-shadow: none !important;
   }
   
   .yanta-chat-embed-icon {

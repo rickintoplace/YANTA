@@ -12,6 +12,7 @@ import {
   readNotesAction,
   createNoteAction,
   createDrawingNoteAction,
+  updateDrawingAction,
   webSearchAction,
   webReadAction,
   updateNoteAppearanceAction,
@@ -298,10 +299,17 @@ export const TOOL_REGISTRY = [
     permission: 'allowCreateNotes',
     risk: 'write',
     description: [
-      'Create a new Markdown note containing a YANTA Excalidraw drawing from inline SVG.',
-      'Use this when the user asks you to draw something, sketch a simple diagram, create an icon-like illustration, or create a note and drawing together.',
-      'The SVG becomes a visible drawing inside the note.',
-      'Keep SVG simple, safe, self-contained and without scripts/external resources.',
+      'Create a new Markdown note containing a YANTA Excalidraw drawing from either a Mermaid diagram or inline SVG.',
+      'Use this when the user asks you to draw something, sketch a diagram, visualize a process/flow/structure, or create a note and drawing together.',
+      '',
+      'Prefer mermaid for diagrams (flowcharts, process flows, sequence diagrams, class/UML diagrams, org charts):',
+      '- Mermaid flowchart, sequence and class diagrams become native, fully editable Excalidraw shapes the user can rearrange.',
+      '- Other Mermaid types (pie, gantt, mindmap, state, ER, timeline, …) are inserted as a static, non-editable image. Avoid them unless the user just wants a picture.',
+      '',
+      'Use svg only for freeform illustrations or icon-like art that Mermaid cannot express. SVG becomes a single non-editable image.',
+      'SVG must be self-contained and safe: no scripts, no external resources.',
+      '',
+      'Provide exactly one of mermaid or svg.',
     ].join('\n'),
     parameters: {
       type: 'object',
@@ -315,9 +323,13 @@ export const TOOL_REGISTRY = [
           type: 'string',
           description: 'Optional Markdown body before the drawing.',
         },
+        mermaid: {
+          type: 'string',
+          description: 'Mermaid diagram source, e.g. "flowchart TD\\n A[Start] --> B[End]". Prefer flowchart, sequence or class diagrams so the result stays editable.',
+        },
         svg: {
           type: 'string',
-          description: 'Complete inline SVG markup starting with <svg>. No scripts, no external resources.',
+          description: 'Complete inline SVG markup starting with <svg>. No scripts, no external resources. Use only when Mermaid cannot express the drawing.',
         },
         folderId: {
           type: ['string', 'null'],
@@ -335,9 +347,63 @@ export const TOOL_REGISTRY = [
           description: 'Optional safe CSS color, preferably hex.',
         },
       },
-      required: ['title', 'svg'],
+      required: ['title'],
     },
     execute: createDrawingNoteAction,
+  },
+
+  {
+    name: 'update_drawing',
+    permission: 'allowEditNotes',
+    risk: 'write',
+    description: [
+      'Edit an existing YANTA drawing (not a slideshow — use update_excalidraw_slideshow for those).',
+      'Use this when the user asks to add to, change, or extend a drawing that already exists.',
+      '',
+      'Three ways to edit, provide exactly one content source:',
+      '- mermaid: render a Mermaid diagram and merge it into the drawing (flowchart/sequence/class stay editable).',
+      '- svg: merge an inline SVG illustration as an image.',
+      '- excalidrawJson: replace/extend with raw Excalidraw JSON. First call read_excalidraw_drawing_json, modify the returned elements, then pass them back here.',
+      '',
+      'mode:',
+      '- append (default): keep existing content and place the new content beside it.',
+      '- replace: discard existing elements and use only the new content.',
+      '',
+      'For structural edits of existing shapes, read the drawing first with read_excalidraw_drawing_json, then send the full edited scene as excalidrawJson with mode=replace.',
+    ].join('\n'),
+    parameters: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        noteId: {
+          type: 'string',
+          description: 'Id of the note that contains the drawing.',
+        },
+        drawingId: {
+          type: 'string',
+          description: 'Id of the drawing to edit (from the draw:// embed or read_excalidraw_drawing_json).',
+        },
+        mermaid: {
+          type: 'string',
+          description: 'Mermaid diagram source to merge in.',
+        },
+        svg: {
+          type: 'string',
+          description: 'Inline SVG to merge in as an image.',
+        },
+        excalidrawJson: {
+          type: ['object', 'string'],
+          description: 'Excalidraw JSON with an elements array (and optional files/appState).',
+        },
+        mode: {
+          type: 'string',
+          enum: ['append', 'replace'],
+          default: 'append',
+        },
+      },
+      required: ['noteId', 'drawingId'],
+    },
+    execute: updateDrawingAction,
   },
 
   {

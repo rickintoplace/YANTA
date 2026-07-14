@@ -27,6 +27,7 @@ let currentYBinding = null;
 let applyingYUpdate = false;
 
 const themeCompartment = new Compartment();
+const editableCompartment = new Compartment();
 
 // ----- Custom highlight style (matches YANTA theme) ---------------------
 const yantaHighlight = HighlightStyle.define([
@@ -2082,6 +2083,7 @@ export function mountEditor(host, { noteId, awarenessUser }) {
     ]),
     placeholder('Start writing in Markdown… type / for commands, [[ for links'),
     themeCompartment.of(yantaTheme),
+    editableCompartment.of([]),
   ];
 
   // y-codemirror.next expects the initial editor doc to mirror the
@@ -2098,6 +2100,20 @@ export function mountEditor(host, { noteId, awarenessUser }) {
 }
 
 export function getView() { return view; }
+
+// Hard read-only for notes the user may not edit (e.g. mounted from a
+// shared space with a read role). Blocks both keyboard input and
+// programmatic transactions at the state level.
+export function setEditorReadOnly(readOnly) {
+  if (!view) return;
+  view.dispatch({
+    effects: editableCompartment.reconfigure(
+      readOnly
+        ? [EditorState.readOnly.of(true), EditorView.editable.of(false)]
+        : []
+    ),
+  });
+}
 
 export function destroyEditor() {
   cleanupYBinding();

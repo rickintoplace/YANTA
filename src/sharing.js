@@ -295,28 +295,44 @@ export function closeShareModal() {
 }
 
 // ---------------- Indicator in head actions --------------------
+function spaceSessionForNoteId(noteId) {
+  for (const session of state.spaces.values()) {
+    if (session.noteId === noteId) return session;
+  }
+  return null;
+}
+
 export function renderShareIndicator() {
   const btn = $('btn-share');
   if (!btn) return;
 
   const id = state.currentNoteId;
   const sess = id ? state.liveShares.get(id) : null;
+  const space = id ? spaceSessionForNoteId(id) : null;
   const note = id ? state.notes.get(id) : null;
   const publicActive = note
     ? isPublicShareActive(publicShareStateForNote(note.id))
     : false;
 
-  btn.classList.toggle('active', !!sess || publicActive);
+  btn.classList.toggle('active', !!sess || !!space || publicActive);
 
-  if (sess && publicActive) {
-    btn.title = `Public link active · Live sharing active · ${sess.peers} peer${sess.peers === 1 ? '' : 's'}`;
-  } else if (publicActive) {
-    btn.title = 'Public link active';
-  } else if (sess) {
-    btn.title = `Live sharing · ${sess.peers} peer${sess.peers === 1 ? '' : 's'}`;
-  } else {
-    btn.title = 'Share this note';
+  const parts = [];
+
+  if (publicActive) parts.push('Public link active');
+
+  if (space) {
+    parts.push(
+      space.role === 'owner'
+        ? `Live share active · ${space.peers} peer${space.peers === 1 ? '' : 's'}`
+        : `Shared with you (${space.role === 'write' ? 'can edit' : 'read-only'})`
+    );
   }
+
+  if (sess) {
+    parts.push(`Legacy live sharing · ${sess.peers} peer${sess.peers === 1 ? '' : 's'}`);
+  }
+
+  btn.title = parts.length ? parts.join(' · ') : 'Share this note';
 }
 
 // ---------------- Auto-restore previously shared notes ----------

@@ -16,7 +16,7 @@
 //   browser-native objects such as FileSystemDirectoryHandle
 // ============================================================
 
-import { state, store } from '../core.js';
+import { state, store, isSpaceMountedNote } from '../core.js';
 
 import {
   waitForVaultDoc,
@@ -415,7 +415,13 @@ export async function installVaultStoreBridge() {
 
   store.notes.put = async (note) => {
     const res = await originals.notes.put(note);
-    putVaultNoteMeta(note);
+
+    // Notes mounted from someone else's shared space stay out of the
+    // private vault CRDT — their metadata/content belong to the space.
+    if (!isSpaceMountedNote(note)) {
+      putVaultNoteMeta(note);
+    }
+
     return res;
   };
 
@@ -424,10 +430,12 @@ export async function installVaultStoreBridge() {
 
     const res = await originals.notes.del(id);
 
-    deleteVaultNoteMeta(id, {
-      title: existing?.title || '',
-      deletedBy: await getDeviceIdBestEffort(),
-    });
+    if (!isSpaceMountedNote(existing)) {
+      deleteVaultNoteMeta(id, {
+        title: existing?.title || '',
+        deletedBy: await getDeviceIdBestEffort(),
+      });
+    }
 
     return res;
   };

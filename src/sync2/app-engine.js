@@ -22,7 +22,7 @@
 
 import * as Y from 'yjs';
 
-import { $, state, store, toast } from '../core.js';
+import { $, state, store, toast, isSpaceMountedNote } from '../core.js';
 import { rebuildWikilinkIndex } from '../notes.js';
 import { renderTree } from '../tree.js';
 
@@ -1246,6 +1246,11 @@ export class Sync2AppEngine {
 
   async observeNote(noteId) {
     if (!noteId || this.noteObservers.has(noteId)) return;
+
+    // Space-mounted notes are synced by their SpaceEngine — keeping
+    // them out here prevents shared content from leaking into the
+    // user's private vault storage.
+    if (isSpaceMountedNote(state.notes.get(noteId))) return;
 
     const entry = getNoteDoc(noteId);
     await entry.ready;

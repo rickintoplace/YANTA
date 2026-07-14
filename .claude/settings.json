@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(node e2e-nearlive.cjs)",
+      "Bash(node --check yanta-cloud-worker/src/index.js)",
+      "Edit(/.claude/skills/verify/**)"
+    ]
+  }
+}

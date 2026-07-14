@@ -103,8 +103,12 @@ export function syncKeyToBytes(syncKey) {
  *
  * - contentKey: AES-GCM key for object encryption
  * - nameKey:    HMAC key for remote object names/IDs
+ *
+ * The salt namespaces the derivation: the private vault uses the default
+ * 'yanta-sync-v1', shared spaces use 'yanta-space-v1' so a space root key
+ * can never collide with vault key material.
  */
-export async function deriveKeys(syncKey) {
+export async function deriveKeys(syncKey, { salt: saltLabel = 'yanta-sync-v1' } = {}) {
   const raw = syncKeyToBytes(syncKey);
 
   const ikm = await crypto.subtle.importKey(
@@ -115,7 +119,7 @@ export async function deriveKeys(syncKey) {
     ['deriveKey']
   );
 
-  const salt = utf8Encode('yanta-sync-v1');
+  const salt = utf8Encode(saltLabel);
 
   const contentKey = await crypto.subtle.deriveKey(
     {

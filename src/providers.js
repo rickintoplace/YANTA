@@ -14,7 +14,8 @@ import { getNoteDoc } from './yjs.js';
 
 // Public signaling servers maintained by the y-webrtc project.
 // Users can override via settings (see core.js settings.signalingServers).
-const DEFAULT_SIGNALING = [
+// Also used as a lightweight pub/sub "poke" channel by shared spaces.
+export const DEFAULT_SIGNALING = [
   'wss://yanta-signaling-932960946294.europe-west1.run.app/'
 ];
 

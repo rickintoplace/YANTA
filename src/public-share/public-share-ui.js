@@ -9,9 +9,16 @@ import {
 } from '../core.js';
 
 import {
-  openShareModal as openLiveShareModal,
-  stopSharing as stopLiveSharing,
+  stopSharing as stopLegacyLiveSharing,
 } from '../sharing.js';
+
+import {
+  createSpaceForNote,
+  stopSpaceShare,
+  spaceSessionForNote,
+  spaceLinksFor,
+  leaveSpace,
+} from '../spaces/space-session.js';
 
 import {
   createOrGetPublicShare,
@@ -638,35 +645,256 @@ async function renderPublicTab(noteId) {
   });
 }
 
-function renderLiveTab() {
+function wireCopyButton(btn, value) {
+  btn?.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(value);
+
+      const originalHtml = btn.dataset.originalHtml || btn.innerHTML;
+      btn.dataset.originalHtml = originalHtml;
+      btn.classList.add('success');
+      btn.innerHTML = `${lucide('check', 14)} Copied`;
+
+      window.setTimeout(() => {
+        btn.classList.remove('success');
+        btn.innerHTML = originalHtml;
+      }, 1300);
+    } catch {
+      toast('Copy failed', 'error');
+    }
+  });
+}
+
+async function renderLiveTab() {
   const body = modal.querySelector('[data-share-body]');
   if (!body) return;
 
+  const noteId = state.currentNoteId;
+  const note = state.notes.get(noteId);
+  const session = spaceSessionForNote(noteId);
+  const legacy = state.liveShares.get(noteId);
+
+  // Recipient view: this note was mounted from someone else's space.
+  if (note?.spaceId && session && session.role !== 'owner') {
+    const roleLabel = session.role === 'write'
+      ? 'You can read and edit this shared note.'
+      : 'You have read-only access to this shared note.';
+
+    body.innerHTML = `
+      <div class="yanta-public-share-box">
+        <div class="yanta-public-share-info">
+          <strong>Shared with you</strong><br>
+          ${roleLabel} Changes sync even while the owner is offline.
+        </div>
+
+        <div class="compress-actions">
+          <span class="grow"></span>
+          <button class="btn danger" data-leave-space>${lucide('log-out', 14)} Leave share</button>
+        </div>
+      </div>
+    `;
+
+    body.querySelector('[data-leave-space]')?.addEventListener('click', async () => {
+      const ok = await yantaConfirm({
+        title: 'Leave this share?',
+        message: 'The shared note will be removed from this device. You can rejoin anytime with the link.',
+        confirmLabel: 'Leave share',
+        cancelLabel: 'Cancel',
+        danger: true,
+        icon: 'log-out',
+      });
+
+      if (!ok) return;
+
+      await leaveSpace(session.spaceId);
+      closeUnifiedShareModal();
+      toast('Left the share');
+    });
+
+    return;
+  }
+
+  // Owner view without an active space yet.
+  if (!session) {
+    body.innerHTML = `
+      <div class="yanta-public-share-box">
+        <div class="yanta-public-share-info">
+          <strong>Live share</strong><br>
+          Invite people to read or edit this note in real time — drawings included.
+          Everything is end-to-end encrypted, and the share keeps working when you go offline.
+        </div>
+
+        <div class="compress-actions sharing-options">
+          <button class="btn primary" data-start-space-share>
+            ${lucide('users', 14)}
+            Start live share
+          </button>
+          <button class="btn" data-open-cloud-setup>
+            ${lucide('cloud', 14)}
+            Set up YANTA Cloud
+          </button>
+        </div>
+
+        ${
+          legacy
+            ? `
+              <div class="yanta-public-share-status warn">
+                A legacy live share is still active for this note. It only works while this device is online.
+              </div>
+              <div class="compress-actions">
+                <span class="grow"></span>
+                <button class="btn danger" data-stop-legacy-share>${lucide('x', 14)} Stop legacy share</button>
+              </div>
+            `
+            : ''
+        }
+      </div>
+    `;
+
+    body.querySelector('[data-start-space-share]')?.addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      btn.disabled = true;
+
+      try {
+        await createSpaceForNote(noteId);
+        await renderLiveTab();
+        toast('Live share started', 'success');
+      } catch (err) {
+        console.error(err);
+        btn.disabled = false;
+
+        if (err?.status === 401) {
+          toast('Sign in to YANTA Cloud to start a live share', 'error');
+        } else {
+          toast(err?.message || 'Could not start live share', 'error');
+        }
+      }
+    });
+
+    body.querySelector('[data-open-cloud-setup]')?.addEventListener('click', async () => {
+      await openYantaCloudSetup();
+    });
+
+    body.querySelector('[data-stop-legacy-share]')?.addEventListener('click', async () => {
+      await stopLegacyLiveSharing(noteId);
+      await renderLiveTab();
+    });
+
+    return;
+  }
+
+  // Owner view with an active space.
+  const links = spaceLinksFor(session);
+  const peers = session.peers || 0;
+
   body.innerHTML = `
     <div class="yanta-public-share-box">
-      <div class="yanta-public-share-info">
-        <strong>Live collaboration</strong><br>
-        Real-time WebRTC/Yjs editing with people who have the link.
-        This is separate from public read-only links.
+      <div class="yanta-public-share-status good">
+        Live share active · ${peers} ${peers === 1 ? 'person' : 'people'} connected live
       </div>
 
+      <div class="yanta-public-share-info">
+        <strong>Read link</strong> — anyone with it can view, near-live, but never edit.
+      </div>
+
+      <div class="yanta-public-share-link-row">
+        <input class="text-input" data-space-read-link readonly value="${escapeHtml(links.read)}">
+        <button class="btn" data-space-qr-read>${lucide('qr-code', 14)}</button>
+        <button class="btn primary" data-copy-space-read>${lucide('copy', 14)} Copy</button>
+      </div>
+
+      ${
+        links.write
+          ? `
+            <div class="yanta-public-share-info">
+              <strong>Edit link</strong> — anyone with it can edit in real time. Share carefully.
+            </div>
+
+            <div class="yanta-public-share-link-row">
+              <input class="text-input" data-space-write-link readonly value="${escapeHtml(links.write)}">
+              <button class="btn" data-space-qr-write>${lucide('qr-code', 14)}</button>
+              <button class="btn primary" data-copy-space-write>${lucide('copy', 14)} Copy</button>
+            </div>
+          `
+          : ''
+      }
+
+      <div class="yanta-public-share-qr" data-space-qr></div>
+
       <div class="compress-actions">
-        <button class="btn primary" data-open-live-share>${lucide('users', 14)} Open live share</button>
-        <button class="btn danger" data-stop-live-share>${lucide('x', 14)} Stop live share</button>
+        <span class="grow"></span>
+        <button class="btn danger" data-stop-space-share>
+          ${lucide('x', 14)}
+          Stop live share
+        </button>
+      </div>
+
+      <div class="yanta-public-share-danger">
+        <small style="color:var(--text-faint)">
+          Stopping removes the encrypted share data from the cloud and blocks all links immediately.
+        </small>
       </div>
     </div>
   `;
 
-  body.querySelector('[data-open-live-share]')?.addEventListener('click', async () => {
-    closeUnifiedShareModal({
-      fromHistory: true,
+  const qrHost = body.querySelector('[data-space-qr]');
+
+  const showQr = (url) => {
+    if (!qrHost) return;
+    qrHost.replaceChildren(renderBrandedQrSvg(url, {
+      size: 220,
+      logo: BRAND_LOGO_SVG,
+    }));
+  };
+
+  showQr(links.read);
+
+  body.querySelector('[data-space-qr-read]')?.addEventListener('click', () => showQr(links.read));
+  body.querySelector('[data-space-qr-write]')?.addEventListener('click', () => showQr(links.write));
+
+  wireCopyButton(body.querySelector('[data-copy-space-read]'), links.read);
+
+  if (links.write) {
+    wireCopyButton(body.querySelector('[data-copy-space-write]'), links.write);
+  }
+
+  body.querySelector('[data-stop-space-share]')?.addEventListener('click', async () => {
+    const ok = await yantaConfirm({
+      title: 'Stop live sharing?',
+      message: [
+        'Stop live sharing this note?',
+        '',
+        'All links stop working and the encrypted share data is deleted from the cloud.',
+        'Copies already synced to other devices cannot be removed.',
+      ].join('\n'),
+      confirmLabel: 'Stop sharing',
+      cancelLabel: 'Cancel',
+      danger: true,
+      icon: 'x',
     });
 
-    await openLiveShareModal();
-  });
+    if (!ok) return;
 
-  body.querySelector('[data-stop-live-share]')?.addEventListener('click', async () => {
-    await stopLiveSharing(state.currentNoteId);
+    try {
+      await stopSpaceShare(session.spaceId);
+      await renderLiveTab();
+    } catch (err) {
+      console.error(err);
+      toast(err?.message || 'Could not stop sharing', 'error');
+    }
+  });
+}
+
+// Keep the live tab fresh while it is visible (peer count, stop/start
+// from elsewhere). Space events are rare, so a full re-render is fine.
+if (typeof window !== 'undefined') {
+  window.addEventListener('yanta-space-changed', () => {
+    const liveTabActive = modal?.hidden === false &&
+      modal.querySelector('[data-share-tab="live"]')?.classList.contains('active');
+
+    if (liveTabActive) {
+      renderLiveTab().catch(() => {});
+    }
   });
 }
 

@@ -20,7 +20,12 @@ var PLAN_LIMITS = {
 
     rssFetchesDay: 200,
     rssImageBytesDay: 50 * 1024 * 1024,
-    rssImageBytesMax: 2 * 1024 * 1024
+    rssImageBytesMax: 2 * 1024 * 1024,
+
+    maxActiveSpaces: 3,
+    spaceBytes: 20 * 1024 * 1024,
+    spaceObjects: 2_000,
+    spaceMembersMax: 5
   },
 
   // Internal name. User-facing label is "YANTA Plus".
@@ -41,7 +46,12 @@ var PLAN_LIMITS = {
 
     rssFetchesDay: 10_000,
     rssImageBytesDay: 5 * 1024 * 1024 * 1024,
-    rssImageBytesMax: 10 * 1024 * 1024
+    rssImageBytesMax: 10 * 1024 * 1024,
+
+    maxActiveSpaces: 100,
+    spaceBytes: 512 * 1024 * 1024,
+    spaceObjects: 50_000,
+    spaceMembersMax: 50
   }
 };
 const INCLUDED_AI_POLICY = {
@@ -1845,8 +1855,8 @@ function corsHeaders(env, req) {
   }
   return {
     "access-control-allow-origin": origin,
-    "access-control-allow-methods": "GET,POST,PUT,DELETE,OPTIONS",
-    "access-control-allow-headers": "content-type,x-yanta-vault-id,x-yanta-device-id,x-yanta-platform,x-csrf-token",
+    "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
+    "access-control-allow-headers": "content-type,x-yanta-vault-id,x-yanta-device-id,x-yanta-platform,x-csrf-token,x-yanta-space-read-token,x-yanta-space-write-token",
     "access-control-allow-credentials": "true",
     "access-control-max-age": "86400",
     vary: "Origin"
@@ -6406,6 +6416,676 @@ async function handleDeletePresentationSession(env, req, url, headers) {
   }, 200, headers);
 }
 
+// ============================================================
+// Shared Spaces
+//
+// Zero-knowledge live-sharing containers for a note or folder.
+// Encrypted Yjs snapshots/updates live in the existing objects
+// table + R2 with vault_id = space id; the owner pays for storage
+// and traffic. Access:
+//   - owner:  session cookie
+//   - member: session cookie + space_members row (read | write)
+//   - link:   bearer read/write token in a request header
+// The server never sees key material — read/decryption keys travel
+// only in URL fragments or E2EE Matrix messages.
+// ============================================================
+
+var SPACE_NAMESPACE = "yanta-space-v1/";
+
+// Invalid paths are a client error, not a server fault — status 400
+// also keeps clients from retrying them (5xx is retryable, 4xx not).
+function spacePathError(message) {
+  const err = new Error(message);
+  err.status = 400;
+  return err;
+}
+
+function spaceNormalizeRemotePath(raw) {
+  let p = String(raw || "").replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/+/g, "/").trim();
+  const parts = [];
+  for (const part of p.split("/")) {
+    if (!part || part === ".") continue;
+    if (part === "..") throw spacePathError("Path must not contain ..");
+    if (part.includes("\0")) throw spacePathError("Path contains NUL");
+    parts.push(part);
+  }
+  p = parts.join("/");
+  if (!p) throw spacePathError("Path must not be empty");
+  if (!p.startsWith(SPACE_NAMESPACE)) {
+    throw spacePathError("Path outside YANTA space namespace");
+  }
+  return p;
+}
+
+function spaceNormalizeRemotePrefix(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return SPACE_NAMESPACE;
+  let p = s.replace(/\\/g, "/").replace(/^\/+/, "").replace(/\/+/g, "/").trim();
+  const hadTrailingSlash = p.endsWith("/");
+  const parts = [];
+  for (const part of p.split("/")) {
+    if (!part || part === ".") continue;
+    if (part === "..") throw spacePathError("Prefix must not contain ..");
+    if (part.includes("\0")) throw spacePathError("Prefix contains NUL");
+    parts.push(part);
+  }
+  p = parts.join("/");
+  if (!p) return SPACE_NAMESPACE;
+  if (!p.startsWith("yanta-space-v1")) {
+    throw spacePathError("Prefix outside YANTA space namespace");
+  }
+  if (hadTrailingSlash && !p.endsWith("/")) p += "/";
+  return p;
+}
+
+function timingSafeEqualStr(a, b) {
+  const sa = String(a || "");
+  const sb = String(b || "");
+  if (sa.length !== sb.length) return false;
+  let diff = 0;
+  for (let i = 0; i < sa.length; i++) {
+    diff |= sa.charCodeAt(i) ^ sb.charCodeAt(i);
+  }
+  return diff === 0;
+}
+
+function spaceMetaJson(space, role) {
+  return {
+    id: space.id,
+    role,
+    status: space.status,
+    sourceType: space.source_type,
+    sourceId: role === "owner" ? space.source_id : void 0,
+    vaultId: role === "owner" ? space.vault_id : void 0,
+    webrtcEpoch: Number(space.webrtc_epoch || 1),
+    signalingTopic: space.signaling_topic,
+    linkRead: !!space.read_token_hash,
+    linkWrite: !!space.write_token_hash,
+    storageBytes: Number(space.storage_bytes || 0),
+    objectCount: Number(space.object_count || 0),
+    createdAt: space.created_at,
+    updatedAt: space.updated_at
+  };
+}
+
+async function spaceOwnerLimits(env, space) {
+  const owner = await env.DB.prepare(
+    `SELECT id, plan FROM users WHERE id = ?`
+  ).bind(space.owner_user_id).first();
+  const plan = await resolveBillingPlan(env, space.owner_user_id, owner?.plan || "free");
+  return effectiveLimits({ plan });
+}
+
+// Resolve who is asking and what they may do with this space.
+// Order matters: an owner session wins over tokens, a member session
+// wins over tokens, a write token implies read.
+async function resolveSpaceAccess(env, req, spaceId) {
+  const space = await env.DB.prepare(
+    `SELECT * FROM spaces WHERE id = ?`
+  ).bind(String(spaceId || "")).first();
+
+  if (!space) {
+    const err = new Error("Space not found");
+    err.status = 404;
+    throw err;
+  }
+
+  const user = await getSession(env, req);
+  let role = null;
+
+  if (user && user.userId === space.owner_user_id) {
+    role = "owner";
+  }
+
+  if (!role && user) {
+    const member = await env.DB.prepare(
+      `SELECT role, revoked_at FROM space_members
+       WHERE space_id = ? AND user_id = ?`
+    ).bind(space.id, user.userId).first();
+    if (member && !member.revoked_at) {
+      role = member.role === "write" ? "write" : "read";
+    }
+  }
+
+  if (!role) {
+    const writeToken = req.headers.get("x-yanta-space-write-token") || "";
+    if (writeToken && space.write_token_hash) {
+      const h = await hashToken(env, writeToken);
+      if (timingSafeEqualStr(h, space.write_token_hash)) role = "write";
+    }
+  }
+
+  if (!role) {
+    const readToken = req.headers.get("x-yanta-space-read-token") || "";
+    if (readToken && space.read_token_hash) {
+      const h = await hashToken(env, readToken);
+      if (timingSafeEqualStr(h, space.read_token_hash)) role = "read";
+    }
+  }
+
+  // A revoked or deleted-pending space stays visible to its owner only.
+  if (space.status !== "active" && role !== "owner") {
+    const err = new Error("Space not found");
+    err.status = 404;
+    throw err;
+  }
+
+  return { space, user, role };
+}
+
+function requireSpaceRole(access, allowed) {
+  if (!access.role || !allowed.includes(access.role)) {
+    const err = new Error("Space access denied");
+    err.status = access.role ? 403 : 401;
+    throw err;
+  }
+}
+
+// Anonymous (token-based) readers get a per-IP burst limit so a leaked
+// read link cannot silently drain the owner's download quota.
+async function spaceAnonReadAllowed(env, req, access) {
+  if (access.user) return true;
+  const limit = await rateLimit(
+    env,
+    `space:read:ip:${await ipHash(env, req)}`,
+    600,
+    10 * 60 * 1e3
+  );
+  return limit.ok;
+}
+
+async function handleCreateSpace(env, req, headers) {
+  const user = await requireUser(env, req);
+
+  const burst = await rateLimit(env, `space:create:user:${user.userId}`, 20, 24 * 60 * 60 * 1e3);
+  if (!burst.ok) {
+    return json({ error: "rate_limited", message: "Too many spaces created today." }, 429, headers);
+  }
+
+  const body = await bodyJson(req);
+  const sourceType = String(body.sourceType || "note").trim();
+  const sourceId = String(body.sourceId || "").trim();
+  const vaultId = String(body.vaultId || "").trim();
+  const readToken = String(body.readToken || "").trim();
+  const writeToken = String(body.writeToken || "").trim();
+
+  if (!["note", "folder"].includes(sourceType)) {
+    return json({ error: "invalid_source_type" }, 400, headers);
+  }
+  if (!sourceId) {
+    return json({ error: "source_id_required" }, 400, headers);
+  }
+
+  const limits = effectiveLimits(user);
+  const activeCount = await env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM spaces
+     WHERE owner_user_id = ? AND status = 'active'`
+  ).bind(user.userId).first();
+
+  if (Number(activeCount?.n || 0) >= limits.maxActiveSpaces) {
+    return json({
+      error: "space_quota_exceeded",
+      message: `Plan allows at most ${limits.maxActiveSpaces} active shared spaces.`,
+      maxSpaces: limits.maxActiveSpaces
+    }, 403, headers);
+  }
+
+  const t = now();
+  const spaceId = `space_${randomToken(16)}`;
+  const topic = `space-${spaceId}-${randomToken(10)}`;
+
+  await env.DB.prepare(
+    `INSERT INTO spaces
+     (id, owner_user_id, vault_id, source_type, source_id, status,
+      read_token_hash, write_token_hash, webrtc_epoch, signaling_topic,
+      storage_bytes, object_count, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, 'active', ?, ?, 1, ?, 0, 0, ?, ?)`
+  ).bind(
+    spaceId,
+    user.userId,
+    vaultId || null,
+    sourceType,
+    sourceId,
+    readToken ? await hashToken(env, readToken) : null,
+    writeToken ? await hashToken(env, writeToken) : null,
+    topic,
+    t,
+    t
+  ).run();
+
+  await audit(env, req, "space_created", user.userId, { spaceId, sourceType });
+
+  const space = await env.DB.prepare(
+    `SELECT * FROM spaces WHERE id = ?`
+  ).bind(spaceId).first();
+
+  return json({ ok: true, space: spaceMetaJson(space, "owner") }, 200, headers);
+}
+
+async function handleListSpaces(env, req, url, headers) {
+  const user = await requireUser(env, req);
+
+  const owned = await env.DB.prepare(
+    `SELECT * FROM spaces
+     WHERE owner_user_id = ?
+     ORDER BY updated_at DESC`
+  ).bind(user.userId).all();
+
+  const memberOf = await env.DB.prepare(
+    `SELECT s.*, m.role AS member_role FROM spaces s
+     JOIN space_members m ON m.space_id = s.id
+     WHERE m.user_id = ? AND m.revoked_at IS NULL AND s.status = 'active'
+     ORDER BY s.updated_at DESC`
+  ).bind(user.userId).all();
+
+  return json({
+    owned: (owned.results || []).map((s) => spaceMetaJson(s, "owner")),
+    memberOf: (memberOf.results || []).map((s) => spaceMetaJson(
+      s,
+      s.member_role === "write" ? "write" : "read"
+    ))
+  }, 200, { ...headers, "cache-control": "no-store" });
+}
+
+async function handleGetSpace(env, req, url, headers) {
+  const spaceId = url.pathname.match(/^\/api\/spaces\/([^/]+)$/)?.[1] || "";
+  const access = await resolveSpaceAccess(env, req, spaceId);
+  requireSpaceRole(access, ["owner", "write", "read"]);
+  return json({
+    space: spaceMetaJson(access.space, access.role)
+  }, 200, { ...headers, "cache-control": "no-store" });
+}
+
+async function handlePatchSpace(env, req, url, headers) {
+  const user = await requireUser(env, req);
+  const spaceId = url.pathname.match(/^\/api\/spaces\/([^/]+)$/)?.[1] || "";
+
+  const space = await env.DB.prepare(
+    `SELECT * FROM spaces WHERE id = ? AND owner_user_id = ?`
+  ).bind(spaceId, user.userId).first();
+
+  if (!space) {
+    return json({ error: "not_found" }, 404, headers);
+  }
+
+  const body = await bodyJson(req);
+  const sets = [];
+  const binds = [];
+
+  // readToken / writeToken: string rotates the link credential,
+  // explicit null disables link access of that kind entirely.
+  if ("readToken" in body) {
+    sets.push("read_token_hash = ?");
+    binds.push(body.readToken ? await hashToken(env, String(body.readToken)) : null);
+  }
+  if ("writeToken" in body) {
+    sets.push("write_token_hash = ?");
+    binds.push(body.writeToken ? await hashToken(env, String(body.writeToken)) : null);
+  }
+  if (body.bumpEpoch) {
+    sets.push("webrtc_epoch = webrtc_epoch + 1");
+  }
+  if (body.status === "revoked" || body.status === "active") {
+    sets.push("status = ?");
+    binds.push(body.status);
+    if (body.status === "revoked") {
+      sets.push("revoked_at = ?");
+      binds.push(now());
+    }
+  }
+
+  if (!sets.length) {
+    return json({ error: "nothing_to_update" }, 400, headers);
+  }
+
+  sets.push("updated_at = ?");
+  binds.push(now());
+
+  await env.DB.prepare(
+    `UPDATE spaces SET ${sets.join(", ")} WHERE id = ?`
+  ).bind(...binds, spaceId).run();
+
+  await audit(env, req, "space_updated", user.userId, {
+    spaceId,
+    rotatedRead: "readToken" in body,
+    rotatedWrite: "writeToken" in body,
+    bumpEpoch: !!body.bumpEpoch,
+    status: body.status || ""
+  });
+
+  const updated = await env.DB.prepare(
+    `SELECT * FROM spaces WHERE id = ?`
+  ).bind(spaceId).first();
+
+  return json({ ok: true, space: spaceMetaJson(updated, "owner") }, 200, headers);
+}
+
+async function handleDeleteSpace(env, req, url, headers) {
+  const user = await requireUser(env, req);
+  const spaceId = url.pathname.match(/^\/api\/spaces\/([^/]+)$/)?.[1] || "";
+
+  const space = await env.DB.prepare(
+    `SELECT * FROM spaces WHERE id = ? AND owner_user_id = ?`
+  ).bind(spaceId, user.userId).first();
+
+  if (!space) {
+    return json({ error: "not_found" }, 404, headers);
+  }
+
+  const rows = await env.DB.prepare(
+    `SELECT id, path, size FROM objects WHERE vault_id = ?`
+  ).bind(spaceId).all();
+
+  let freedBytes = 0;
+  let freedObjects = 0;
+
+  for (const row of rows.results || []) {
+    await env.OBJECTS.delete(r2Key(space.owner_user_id, spaceId, row.path)).catch(() => {});
+    freedBytes += Number(row.size || 0);
+    freedObjects += 1;
+  }
+
+  await env.DB.prepare(`DELETE FROM objects WHERE vault_id = ?`).bind(spaceId).run();
+  await env.DB.prepare(`DELETE FROM space_members WHERE space_id = ?`).bind(spaceId).run();
+  await env.DB.prepare(`DELETE FROM spaces WHERE id = ?`).bind(spaceId).run();
+
+  if (freedObjects > 0) {
+    await ensureUsageRow(env, space.owner_user_id);
+    await env.DB.prepare(
+      `UPDATE usage_current
+       SET storage_bytes = MAX(0, storage_bytes - ?),
+           object_count = MAX(0, object_count - ?)
+       WHERE user_id = ?`
+    ).bind(freedBytes, freedObjects, space.owner_user_id).run();
+  }
+
+  await audit(env, req, "space_deleted", user.userId, { spaceId, freedBytes, freedObjects });
+
+  return json({ ok: true }, 200, headers);
+}
+
+async function handleSpaceStorageIndex(env, req, url, headers, spaceId) {
+  const access = await resolveSpaceAccess(env, req, spaceId);
+  requireSpaceRole(access, ["owner", "write", "read"]);
+
+  if (!(await spaceAnonReadAllowed(env, req, access))) {
+    return json({ error: "read_rate_limited" }, 429, { ...headers, "retry-after": "120" });
+  }
+
+  const rows = await env.DB.prepare(
+    `SELECT path,size,etag,updated_at FROM objects
+     WHERE vault_id = ? AND path >= ? AND path < ?
+     ORDER BY path ASC`
+  ).bind(spaceId, SPACE_NAMESPACE, SPACE_NAMESPACE + "\uF8FF").all();
+
+  return json({
+    entries: (rows.results || []).map((r) => ({
+      path: r.path,
+      size: Number(r.size || 0),
+      etag: r.etag || "",
+      updated: Number(r.updated_at || 0)
+    }))
+  }, 200, { ...headers, "cache-control": "no-store" });
+}
+
+async function handleSpaceStorageList(env, req, url, headers, spaceId) {
+  const access = await resolveSpaceAccess(env, req, spaceId);
+  requireSpaceRole(access, ["owner", "write", "read"]);
+
+  if (!(await spaceAnonReadAllowed(env, req, access))) {
+    return json({ error: "read_rate_limited" }, 429, { ...headers, "retry-after": "120" });
+  }
+
+  const prefix = spaceNormalizeRemotePrefix(url.searchParams.get("prefix") || "");
+  const rows = await env.DB.prepare(
+    `SELECT path,size,etag,updated_at FROM objects
+     WHERE vault_id = ? AND path >= ? AND path < ?
+     ORDER BY path ASC`
+  ).bind(spaceId, prefix, prefix + "\uF8FF").all();
+
+  return json({
+    entries: (rows.results || []).map((r) => ({
+      path: r.path,
+      size: Number(r.size || 0),
+      etag: r.etag || "",
+      updated: Number(r.updated_at || 0)
+    }))
+  }, 200, { ...headers, "cache-control": "no-store" });
+}
+
+async function handleSpaceStorageStat(env, req, url, headers, spaceId) {
+  const access = await resolveSpaceAccess(env, req, spaceId);
+  requireSpaceRole(access, ["owner", "write", "read"]);
+
+  const path = spaceNormalizeRemotePath(url.searchParams.get("path") || "");
+  const row = await env.DB.prepare(
+    `SELECT path,size,etag,updated_at FROM objects
+     WHERE vault_id = ? AND path = ?`
+  ).bind(spaceId, path).first();
+
+  return json({
+    entry: row ? {
+      path: row.path,
+      size: row.size,
+      etag: row.etag,
+      updated: row.updated_at
+    } : null
+  }, 200, { ...headers, "cache-control": "no-store" });
+}
+
+async function handleSpaceStorageGet(env, req, url, headers, spaceId) {
+  const access = await resolveSpaceAccess(env, req, spaceId);
+  requireSpaceRole(access, ["owner", "write", "read"]);
+
+  if (!(await spaceAnonReadAllowed(env, req, access))) {
+    return json({ error: "read_rate_limited" }, 429, { ...headers, "retry-after": "120" });
+  }
+
+  const path = spaceNormalizeRemotePath(url.searchParams.get("path") || "");
+  const row = await env.DB.prepare(
+    `SELECT path,size,etag,updated_at FROM objects
+     WHERE vault_id = ? AND path = ?`
+  ).bind(spaceId, path).first();
+
+  if (!row) {
+    return json({ error: "not_found" }, 404, headers);
+  }
+
+  // The owner pays for all space traffic, including anonymous readers.
+  const ownerId = access.space.owner_user_id;
+  const usage = await ensureUsageRow(env, ownerId);
+  const limits = await spaceOwnerLimits(env, access.space);
+
+  if (usage.download_bytes_month + row.size > limits.downloadBytesMonth) {
+    return json({ error: "download_quota_exceeded" }, 403, headers);
+  }
+
+  const obj = await env.OBJECTS.get(r2Key(ownerId, spaceId, path));
+  if (!obj) {
+    return json({ error: "object_missing" }, 404, headers);
+  }
+
+  await env.DB.prepare(
+    `UPDATE usage_current
+     SET download_bytes_month = download_bytes_month + ?
+     WHERE user_id = ?`
+  ).bind(row.size, ownerId).run();
+
+  return new Response(obj.body, {
+    status: 200,
+    headers: {
+      ...headers,
+      "content-type": "application/octet-stream",
+      "content-length": String(row.size),
+      etag: row.etag || ""
+    }
+  });
+}
+
+async function handleSpaceStoragePut(env, req, url, headers, spaceId) {
+  const access = await resolveSpaceAccess(env, req, spaceId);
+  requireSpaceRole(access, ["owner", "write"]);
+
+  if (access.space.status !== "active") {
+    return json({ error: "space_not_active" }, 409, headers);
+  }
+
+  const putBurst = await rateLimit(env, `space:put:space:${spaceId}`, 1200, 10 * 60 * 1e3);
+  if (!putBurst.ok) {
+    return json({
+      error: "write_rate_limited",
+      message: "Too many uploads for this space. Please wait a few minutes.",
+      retryAfterSeconds: 120
+    }, 429, { ...headers, "retry-after": "120" });
+  }
+
+  const path = spaceNormalizeRemotePath(url.searchParams.get("path") || "");
+  const ifAbsent = url.searchParams.get("ifAbsent") === "1";
+  const body = new Uint8Array(await req.arrayBuffer());
+  const size = body.byteLength;
+
+  const ownerId = access.space.owner_user_id;
+  const limits = await spaceOwnerLimits(env, access.space);
+
+  if (size > limits.objectSizeBytes) {
+    return json({
+      error: "object_too_large",
+      code: "object_too_large",
+      message: `Object too large. Maximum object size is ${limits.objectSizeBytes} bytes.`,
+      maxBytes: limits.objectSizeBytes,
+      gotBytes: size
+    }, 413, headers);
+  }
+
+  const usage = await ensureUsageRow(env, ownerId);
+  const existing = await env.DB.prepare(
+    `SELECT id,size FROM objects WHERE vault_id = ? AND path = ?`
+  ).bind(spaceId, path).first();
+
+  if (ifAbsent && existing) {
+    return json({ error: "already_exists" }, 409, headers);
+  }
+
+  const deltaStorage = existing ? size - existing.size : size;
+  const deltaObjects = existing ? 0 : 1;
+
+  if (Number(access.space.storage_bytes || 0) + deltaStorage > limits.spaceBytes) {
+    return json({ error: "space_quota_exceeded", maxBytes: limits.spaceBytes }, 403, headers);
+  }
+  if (Number(access.space.object_count || 0) + deltaObjects > limits.spaceObjects) {
+    return json({ error: "space_quota_exceeded", maxObjects: limits.spaceObjects }, 403, headers);
+  }
+  if (usage.storage_bytes + deltaStorage > limits.storageBytes) {
+    return json({ error: "storage_quota_exceeded", maxBytes: limits.storageBytes }, 403, headers);
+  }
+  if (usage.upload_bytes_day + size > limits.uploadBytesDay) {
+    return json({ error: "upload_day_quota_exceeded", maxBytes: limits.uploadBytesDay }, 403, headers);
+  }
+  if (usage.writes_today + 1 > limits.writesDay) {
+    return json({ error: "writes_day_quota_exceeded", maxWrites: limits.writesDay }, 403, headers);
+  }
+
+  const objectKey = r2Key(ownerId, spaceId, path);
+  const etag = `"${size}-${now()}-${randomToken(6)}"`;
+  const updatedAt = now();
+
+  await env.OBJECTS.put(objectKey, body, {
+    httpMetadata: { contentType: "application/octet-stream" },
+    customMetadata: { userId: ownerId, vaultId: spaceId, path }
+  });
+
+  let actualDeltaStorage = deltaStorage;
+  let actualDeltaObjects = deltaObjects;
+
+  if (existing) {
+    await env.DB.prepare(
+      `UPDATE objects SET size = ?, etag = ?, updated_at = ? WHERE id = ?`
+    ).bind(size, etag, updatedAt, existing.id).run();
+  } else {
+    try {
+      await env.DB.prepare(
+        `INSERT INTO objects
+         (id,user_id,vault_id,path,size,etag,updated_at,created_at)
+         VALUES (?,?,?,?,?,?,?,?)`
+      ).bind(id("obj"), ownerId, spaceId, path, size, etag, updatedAt, updatedAt).run();
+    } catch (err) {
+      const msg = String(err?.message || err || "");
+      if (msg.includes("UNIQUE") || msg.includes("constraint")) {
+        if (ifAbsent) {
+          return json({ error: "already_exists" }, 409, headers);
+        }
+        const current = await env.DB.prepare(
+          `SELECT id,size FROM objects WHERE vault_id = ? AND path = ?`
+        ).bind(spaceId, path).first();
+        if (!current) throw err;
+        actualDeltaStorage = size - Number(current.size || 0);
+        actualDeltaObjects = 0;
+        await env.DB.prepare(
+          `UPDATE objects SET size = ?, etag = ?, updated_at = ? WHERE id = ?`
+        ).bind(size, etag, updatedAt, current.id).run();
+      } else {
+        throw err;
+      }
+    }
+  }
+
+  await env.DB.prepare(
+    `UPDATE usage_current
+     SET storage_bytes = storage_bytes + ?,
+         object_count = object_count + ?,
+         upload_bytes_day = upload_bytes_day + ?,
+         upload_bytes_month = upload_bytes_month + ?,
+         writes_today = writes_today + 1
+     WHERE user_id = ?`
+  ).bind(actualDeltaStorage, actualDeltaObjects, size, size, ownerId).run();
+
+  await env.DB.prepare(
+    `UPDATE spaces
+     SET storage_bytes = MAX(0, storage_bytes + ?),
+         object_count = MAX(0, object_count + ?),
+         updated_at = ?
+     WHERE id = ?`
+  ).bind(actualDeltaStorage, actualDeltaObjects, updatedAt, spaceId).run();
+
+  return json({
+    ok: true,
+    entry: { path, size, etag, updated: updatedAt }
+  }, 200, headers);
+}
+
+async function handleSpaceStorageDelete(env, req, url, headers, spaceId) {
+  const access = await resolveSpaceAccess(env, req, spaceId);
+  requireSpaceRole(access, ["owner", "write"]);
+
+  const path = spaceNormalizeRemotePath(url.searchParams.get("path") || "");
+  const existing = await env.DB.prepare(
+    `SELECT id,size FROM objects WHERE vault_id = ? AND path = ?`
+  ).bind(spaceId, path).first();
+
+  if (existing) {
+    const ownerId = access.space.owner_user_id;
+    await env.OBJECTS.delete(r2Key(ownerId, spaceId, path));
+    await env.DB.prepare(`DELETE FROM objects WHERE id = ?`).bind(existing.id).run();
+    await ensureUsageRow(env, ownerId);
+    await env.DB.prepare(
+      `UPDATE usage_current
+       SET storage_bytes = MAX(0, storage_bytes - ?),
+           object_count = MAX(0, object_count - 1),
+           writes_today = writes_today + 1
+       WHERE user_id = ?`
+    ).bind(existing.size, ownerId).run();
+    await env.DB.prepare(
+      `UPDATE spaces
+       SET storage_bytes = MAX(0, storage_bytes - ?),
+           object_count = MAX(0, object_count - 1),
+           updated_at = ?
+       WHERE id = ?`
+    ).bind(existing.size, now(), spaceId).run();
+  }
+
+  return json({ ok: true }, 200, headers);
+}
+
 async function route(req, env) {
   const headers = corsHeaders(env, req);
   if (!originAllowed(env, req)) {
@@ -6564,6 +7244,54 @@ async function route(req, env) {
 
     if (url.pathname === "/api/paddle/webhook" && req.method === "POST") {
       return handlePaddleWebhook(env, req, headers);
+    }
+
+    // Shared Spaces
+    if (url.pathname === "/api/spaces" && req.method === "POST") {
+      return handleCreateSpace(env, req, headers);
+    }
+
+    if (url.pathname === "/api/spaces" && req.method === "GET") {
+      return handleListSpaces(env, req, url, headers);
+    }
+
+    const spaceStorageMatch = url.pathname.match(
+      /^\/api\/spaces\/([^/]+)\/storage\/(index|list|stat|object)$/
+    );
+
+    if (spaceStorageMatch) {
+      const [, spaceId, resource] = spaceStorageMatch;
+
+      if (resource === "index" && req.method === "GET") {
+        return handleSpaceStorageIndex(env, req, url, headers, spaceId);
+      }
+      if (resource === "list" && req.method === "GET") {
+        return handleSpaceStorageList(env, req, url, headers, spaceId);
+      }
+      if (resource === "stat" && req.method === "GET") {
+        return handleSpaceStorageStat(env, req, url, headers, spaceId);
+      }
+      if (resource === "object" && req.method === "GET") {
+        return handleSpaceStorageGet(env, req, url, headers, spaceId);
+      }
+      if (resource === "object" && req.method === "PUT") {
+        return handleSpaceStoragePut(env, req, url, headers, spaceId);
+      }
+      if (resource === "object" && req.method === "DELETE") {
+        return handleSpaceStorageDelete(env, req, url, headers, spaceId);
+      }
+    }
+
+    if (/^\/api\/spaces\/[^/]+$/.test(url.pathname) && req.method === "GET") {
+      return handleGetSpace(env, req, url, headers);
+    }
+
+    if (/^\/api\/spaces\/[^/]+$/.test(url.pathname) && req.method === "PATCH") {
+      return handlePatchSpace(env, req, url, headers);
+    }
+
+    if (/^\/api\/spaces\/[^/]+$/.test(url.pathname) && req.method === "DELETE") {
+      return handleDeleteSpace(env, req, url, headers);
     }
 
     // Presentation Sessions

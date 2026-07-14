@@ -21,7 +21,7 @@ import {
   citationsTextForNote,
   setDrawing,
 } from './yjs.js';
-import { mountEditor, destroyEditor, currentMarkdown, focusEditor, getView } from './editor.js';
+import { mountEditor, destroyEditor, currentMarkdown, focusEditor, getView, setEditorReadOnly } from './editor.js';
 import { renderPreview, setMarkdownRerenderHook } from './markdown.js';
 import { wikilinkIndex } from './features-state.js';
 import { renderTree, renderTagCloud } from './tree.js';
@@ -461,6 +461,7 @@ export async function openNote(id) {
 
   if (titleInput) {
     titleInput.value = note.title || '';
+    titleInput.readOnly = note.spaceRole === 'read';
   }
 
   // Mount editor (replaces previous instance)
@@ -468,6 +469,11 @@ export async function openNote(id) {
   host.replaceChildren();
 
   mountEditor(host, { noteId: id });
+
+  // Notes mounted from a shared space with a read role are hard
+  // read-only: the server rejects their writes anyway, this keeps
+  // the UI honest about it.
+  setEditorReadOnly(note.spaceRole === 'read');
 
   renderChips();
   updatePinIcon();
@@ -483,7 +489,7 @@ export async function openNote(id) {
       typeof origin === 'string' &&
       origin.startsWith('draw');
 
-    if (origin === 'sync-folder' || origin === 'sync2-remote') {
+    if (origin === 'sync-folder' || origin === 'sync2-remote' || origin === 'space-remote') {
       schedulePreview();
       updateSearchIndexFor(note);
       markNoteSyncStatus(id, 'synced');

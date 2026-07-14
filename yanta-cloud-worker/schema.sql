@@ -325,6 +325,52 @@ CREATE INDEX IF NOT EXISTS idx_billing_events_type
 ON billing_events(event_type, processed_at);
 
 -- ============================================================
+-- Shared Spaces
+-- Zero-knowledge live-sharing containers for a note or folder.
+-- The server stores only encrypted Yjs snapshots/updates (in the
+-- existing objects table + R2, keyed by vault_id = space id) and
+-- enforces read/write access without ever seeing key material.
+-- ============================================================
+
+CREATE TABLE IF NOT EXISTS spaces (
+  id TEXT PRIMARY KEY,
+  owner_user_id TEXT NOT NULL,
+  vault_id TEXT,
+  source_type TEXT NOT NULL DEFAULT 'note',
+  source_id TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'active',
+  read_token_hash TEXT,
+  write_token_hash TEXT,
+  webrtc_epoch INTEGER NOT NULL DEFAULT 1,
+  signaling_topic TEXT NOT NULL,
+  storage_bytes INTEGER NOT NULL DEFAULT 0,
+  object_count INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  revoked_at INTEGER,
+  FOREIGN KEY(owner_user_id) REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_spaces_owner
+ON spaces(owner_user_id, updated_at);
+
+CREATE TABLE IF NOT EXISTS space_members (
+  space_id TEXT NOT NULL,
+  user_id TEXT NOT NULL,
+  matrix_user_id TEXT,
+  role TEXT NOT NULL DEFAULT 'read',
+  invited_by TEXT,
+  created_at INTEGER NOT NULL,
+  key_delivered_at INTEGER,
+  revoked_at INTEGER,
+  PRIMARY KEY (space_id, user_id),
+  FOREIGN KEY(space_id) REFERENCES spaces(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_space_members_user
+ON space_members(user_id, created_at);
+
+-- ============================================================
 -- Chat / Matrix Provisioning
 -- One YANTA Cloud user can claim exactly one Matrix account.
 -- Localparts stay reserved after deprovisioning for future e-mail aliases.

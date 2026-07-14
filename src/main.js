@@ -45,6 +45,13 @@ import {
 } from './sharing.js';
 
 import {
+  handleSpaceUrl,
+  restoreSpaces,
+  spaceSessionForNote,
+  stopSpaceShare,
+} from './spaces/space-session.js';
+
+import {
   openUnifiedShareModal,
   closeUnifiedShareModal,
   openPublicSharesManager,
@@ -2158,7 +2165,15 @@ async function init() {
     syncDisconnect,
     cleanupUnusedImages,
     openShareModal: openUnifiedShareModal,
-    stopSharing: () => stopSharing(state.currentNoteId),
+    stopSharing: () => {
+      const session = spaceSessionForNote(state.currentNoteId);
+
+      if (session?.role === 'owner') {
+        return stopSpaceShare(session.spaceId);
+      }
+
+      return stopSharing(state.currentNoteId);
+    },
     openPublicSharesManager,
     importFiles,
     importFolder: () => $('importFolder').click(),
@@ -2192,6 +2207,11 @@ async function init() {
     renderTree();
   });
 
+  window.addEventListener('yanta-space-changed', () => {
+    renderShareIndicator();
+    renderTree();
+  });
+
   setupPublicShareAutoPublisher();
   setupSync2ProgressUi();
   setupSyncReminderUi();
@@ -2210,7 +2230,17 @@ async function init() {
   await syncRestore();
   let sharedOpen = null;
 
-  if (window.location.hash.startsWith('#share=') || window.location.hash.startsWith('#share2=')) {
+  if (window.location.hash.startsWith('#space=')) {
+    const spaceOpen = await handleSpaceUrl();
+
+    if (spaceOpen?.noteId) {
+      sharedOpen = spaceOpen;
+      await openNote(spaceOpen.noteId);
+      setView(spaceOpen.role === 'read' ? 'preview' : 'split');
+    }
+
+    await restoreSpaces();
+  } else if (window.location.hash.startsWith('#share=') || window.location.hash.startsWith('#share2=')) {
     sharedOpen = await handleShareUrl();
 
     if (sharedOpen?.noteId) {
@@ -2222,8 +2252,11 @@ async function init() {
       await openNote(sharedOpen.noteId);
       setView(sharedOpen.view || 'preview');
     }
+
+    await restoreSpaces();
   } else {
     await restoreSharedNotes();
+    await restoreSpaces();
   }
 
   setupNoteChrome({

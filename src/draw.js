@@ -4519,7 +4519,8 @@ async function mountInlineDrawing(embed, sourceNoteId, drawingId, drawing) {
   const reactMount = ensureInlineReactMount(inlineHost);
 
   const surface = embed.getAttribute('data-draw-surface') || 'preview';
-  const editable = surface === 'editor';
+  const readOnlyShare = state.notes.get(sourceNoteId)?.spaceRole === 'read';
+  const editable = surface === 'editor' && !readOnlyShare;
 
   ensureMobileDrawingGate(embed, inlineHost, editable);
 

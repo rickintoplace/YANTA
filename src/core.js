@@ -543,7 +543,7 @@ export function toast(msg, type = '') {
 // IndexedDB — metadata only (note bodies live in Yjs y-indexeddb)
 // ----------------------------------------------------------------
 const DB_NAME = 'yanta';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 let db;
 
 export function openDB() {
@@ -560,6 +560,7 @@ export function openDB() {
       if (!idb.objectStoreNames.contains('images')) idb.createObjectStore('images', { keyPath: 'id' });
       if (!idb.objectStoreNames.contains('settings')) idb.createObjectStore('settings', { keyPath: 'key' });
       if (!idb.objectStoreNames.contains('shares')) idb.createObjectStore('shares', { keyPath: 'noteId' });
+      if (!idb.objectStoreNames.contains('spaces')) idb.createObjectStore('spaces', { keyPath: 'spaceId' });
     };
     req.onsuccess = () => { db = req.result; res(db); };
     req.onerror = () => rej(req.error);
@@ -621,7 +622,20 @@ export const store = {
     put: (s) => req(tx('shares', 'readwrite').put(s)),
     del: (id) => req(tx('shares', 'readwrite').delete(id)),
   },
+  spaces: {
+    all: () => req(tx('spaces').getAll()),
+    get: (id) => req(tx('spaces').get(id)),
+    put: (s) => req(tx('spaces', 'readwrite').put(s)),
+    del: (id) => req(tx('spaces', 'readwrite').delete(id)),
+  },
 };
+
+// A note mounted from someone else's shared space. Such notes must
+// never enter this user's private vault sync — their content belongs
+// to the space container, not the vault.
+export function isSpaceMountedNote(note) {
+  return !!note?.spaceId;
+}
 
 // ----------------------------------------------------------------
 // State
@@ -649,6 +663,8 @@ export const state = {
   globalSyncStatus: 'synced',
   // Active live shares: noteId -> { room, key, provider, peers }
   liveShares: new Map(),
+  // Mounted shared spaces: spaceId -> session (see spaces/space-session.js)
+  spaces: new Map(),
 };
 
 // ----------------------------------------------------------------

@@ -392,23 +392,28 @@ function readByOther(room, event, ownUserId) {
   try {
     /*
       Important:
-      room.getReceiptsForEvent(event) only returns receipts exactly on this
-      event. In Matrix, a read receipt on a later event also means all previous
-      events were read. room.getUsersReadUpTo(event) handles that ordering.
+      Matrix attaches a read receipt only to the LAST event a user read.
+      Older messages carry no receipt themselves but are implicitly read.
+      getUsersReadUpTo()/getReceiptsForEvent() only return exact matches on
+      this event — with them, only the newest own message ever shows "read".
+      room.hasUserReadEvent() respects the receipt ordering.
     */
-    const users = room.getUsersReadUpTo?.(event) || [];
+    const id = eventId(event);
 
-    if (users.some((userId) => userId && userId !== ownUserId)) {
-      return true;
+    if (id && typeof room?.hasUserReadEvent === 'function') {
+      const members = room.getJoinedMembers?.() || [];
+
+      return members.some((member) =>
+        member?.userId &&
+        member.userId !== ownUserId &&
+        room.hasUserReadEvent(member.userId, id)
+      );
     }
 
-    const receipts = room.getReceiptsForEvent?.(event) || [];
+    // Fallback for SDK builds without hasUserReadEvent: exact receipts only.
+    const users = room.getUsersReadUpTo?.(event) || [];
 
-    return receipts.some((receipt) =>
-      receipt?.type === 'm.read' &&
-      receipt?.userId &&
-      receipt.userId !== ownUserId
-    );
+    return users.some((userId) => userId && userId !== ownUserId);
   } catch {
     return false;
   }

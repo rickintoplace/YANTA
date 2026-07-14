@@ -816,7 +816,14 @@ function wireLifecycleEvents({
       reason: 'timeline',
     });
 
+    /*
+      readyEmitted-Guard:
+      Der Initial-Sync spielt die letzten Nachrichten JEDES Raums als
+      Live-Timeline-Events ein. Ohne den Guard löst jeder App-Start für jede
+      längst gelesene letzte Nachricht erneut eine Benachrichtigung aus.
+    */
     if (
+      readyEmitted &&
       eventId &&
       isTimelineLiveEvent(sdk, {
         ...data,

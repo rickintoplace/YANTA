@@ -329,8 +329,15 @@ function renderImageMessage(client, content = {}) {
     h: source.preview.h,
   };
 
+  /*
+    Warum kein isConnected-Guard:
+    Beim Timeline-Re-Render läuft der Cache-Treffer synchron, während der
+    Node noch im detached DocumentFragment hängt. Ein isConnected-Check
+    ließe jedes bereits geladene Bild nach dem nächsten Re-Render leer
+    zurück (Bild "verschwindet"). Ein Render in einen bereits verworfenen
+    Node ist dagegen harmlos — er wird ohnehin garbage-collected.
+  */
   const showImage = (url) => {
-    if (!wrap.isConnected) return;
     const img = el('img', {
       src: url,
       alt: title,

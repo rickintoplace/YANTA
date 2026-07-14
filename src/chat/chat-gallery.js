@@ -221,6 +221,23 @@ import {
     object-fit: cover;
     display: block;
   }
+
+  /* Warum:
+     Der Lade-Platzhalter liegt absolut über der 1:1-Kachel. Als normales
+     Grid-Kind (min-height 280px) würde er das Bild aus der overflow:hidden-
+     Kachel schieben — Bilder wären nie sichtbar. */
+  .yanta-chat-gallery-image .yanta-chat-gallery-empty {
+    position: absolute;
+    inset: 0;
+    min-height: 0;
+  }
+
+  /* Warum:
+     Author-CSS (display:block/grid) überschreibt sonst das hidden-Attribut
+     aus dem UA-Stylesheet — Spinner bliebe sichtbar, Bild bliebe versteckt. */
+  .yanta-chat-gallery-overlay [hidden] {
+    display: none !important;
+  }
   
   /* Warum:
      Actions are hidden until hover/focus to keep the grid calm like high-end

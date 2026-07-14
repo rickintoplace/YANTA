@@ -373,6 +373,41 @@ function computeTotalUnread(client) {
   return visibleRooms(client).reduce((sum, room) => sum + unreadCountForRoom(room), 0);
 }
 
+/*
+  Read on ANY device means: never notify again. The own read receipt for a
+  room syncs to every device, so hasUserReadEvent() covers cross-device reads.
+*/
+function isEventAlreadyRead(client, roomId, eventId) {
+  try {
+    const own = ownUserId(client);
+    const room = roomById(client, roomId);
+
+    return !!(
+      own &&
+      room &&
+      typeof room.hasUserReadEvent === 'function' &&
+      room.hasUserReadEvent(own, eventId)
+    );
+  } catch {
+    return false;
+  }
+}
+
+/*
+  Dismiss visible notifications once the room has no unread messages left —
+  e.g. after the message was read on another device (receipt arrives via sync).
+*/
+function clearNotificationsIfRoomRead(roomId) {
+  if (!roomId) return;
+
+  const client = matrixClient();
+  const room = roomById(client, roomId);
+
+  if (room && unreadCountForRoom(room) === 0) {
+    clearNotificationsForRoom(roomId);
+  }
+}
+
 function emitUnreadChanged(count) {
   const safeCount = Math.max(0, Number(count || 0));
   if (safeCount === lastUnreadCount) return;
@@ -413,6 +448,7 @@ async function onIncomingMessage(detail = {}) {
   refreshChatUnreadBadge();
 
   if (isRoomVisibleAndFocused(roomId)) return;
+  if (isEventAlreadyRead(client, roomId, eventId)) return;
   if (await isRoomMuted(client, roomId)) return;
 
   const payload = await notificationPayload(client, roomId, eventId);
@@ -549,8 +585,9 @@ export function setupChatNotifications() {
     });
   });
 
-  window.addEventListener('yanta-chat-room-updated', () => {
+  window.addEventListener('yanta-chat-room-updated', (e) => {
     refreshChatUnreadBadge();
+    clearNotificationsIfRoomRead(e.detail?.roomId || '');
   });
 
   window.addEventListener('yanta-chat-opened', (e) => {

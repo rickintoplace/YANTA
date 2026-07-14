@@ -48,6 +48,7 @@ import {
 
 import {
   createDm,
+  deleteRoom,
   leaveRoom,
   resolveMatrixClient,
   toggleRoomMute,
@@ -248,18 +249,35 @@ function closeChatFromButton() {
   }
 
   const st = history.state;
+  const depth = st?.surface === 'chat'
+    ? Math.max(0, Number(st.chatDepth) || 0)
+    : 0;
 
-  if (st?.surface === 'chat') {
+  if (depth > 0) {
     /*
-      Liegt ein Raum-Eintrag über dem Listen-Eintrag (fromList), müssen beide
-      Chat-Einträge in einem Schritt verlassen werden — sonst landet "Close
-      Chat" nur auf der Chatliste statt zurück in der App.
+      Alle Chat-History-Einträge dieses Besuchs in EINEM Schritt verlassen.
+      Ein pauschales history.go(-1/-2) landete bei Raum→Raum-Navigation nur
+      auf dem zuvor geöffneten Chat statt zurück in der App.
+      chatDepth wird von pushChatHistory/replaceChatHistory gepflegt.
     */
-    history.go(st.roomId && st.fromList ? -2 : -1);
+    history.go(-depth);
     return;
   }
 
+  /*
+    Direkteinstieg (#chat/…): unter dem Chat liegt kein App-Eintrag.
+    Surface schließen und den Eintrag durch das Dashboard ersetzen, damit
+    "Close Chat" nicht die Website verlässt.
+  */
   closeChat();
+
+  import('../dashboard.js')
+    .then(({ showDashboard }) => showDashboard({
+      replace: true,
+    }))
+    .catch((err) => {
+      console.warn('[YANTA Chat] Could not open dashboard after closing Chat', err);
+    });
 }
 
 /**
@@ -1993,6 +2011,14 @@ function renderRoomList() {
   const query = String(roomSearchInput?.value || '').trim().toLowerCase();
 
   const rooms = visibleRooms()
+    /*
+      Verlassene Räume bleiben im SDK-Store, gehören aber nicht in die
+      Chatliste. Endgültig entfernt werden sie über "Delete chat" (forget).
+    */
+    .filter((room) => {
+      const membership = room.getMyMembership?.() || '';
+      return membership === 'join' || membership === 'invite';
+    })
     .filter((room) => !query || roomDisplayName(room).toLowerCase().includes(query))
     .sort((a, b) => lastActive(b) - lastActive(a));
 
@@ -2120,6 +2146,130 @@ async function openRoomFromList(roomId) {
   });
 }
 
+async function markRoomAsRead(room) {
+  if (!client || !room) return;
+
+  const events = room.getLiveTimeline?.()?.getEvents?.() || [];
+  const event = latestEvent(room) || events[events.length - 1] || null;
+
+  if (!event) return;
+
+  try {
+    await client.sendReadReceipt(event);
+
+    const eventId = event.getId?.();
+
+    if (eventId && typeof client.setRoomReadMarkers === 'function') {
+      await client.setRoomReadMarkers(room.roomId, eventId, event);
+    }
+  } catch (err) {
+    console.warn('[YANTA Chat] Could not mark chat as read', err);
+    toast('Could not mark chat as read.', 'error');
+    return;
+  }
+
+  renderRoomListSoon();
+}
+
+/*
+  Nach Leave/Delete: aktiven Raum verlassen (zurück zur Liste), sonst nur
+  die Liste auffrischen.
+*/
+async function handleRoomGone(roomId) {
+  if (roomId === activeRoomId) {
+    await openChat({
+      roomId: '',
+      replace: true,
+    });
+  } else {
+    renderRoomList();
+  }
+}
+
+async function confirmLeaveRoom(room) {
+  const ok = await askConfirm({
+    title: 'Leave chat',
+    message: `Leave "${roomDisplayName(room)}"? The chat disappears from your list; the other side keeps it.`,
+    confirmLabel: 'Leave chat',
+    danger: true,
+  });
+
+  if (!ok) return;
+
+  await leaveRoom(room.roomId);
+  await handleRoomGone(room.roomId);
+}
+
+async function confirmDeleteRoom(room) {
+  const ok = await askConfirm({
+    title: 'Delete chat',
+    message:
+      `Delete "${roomDisplayName(room)}"? ` +
+      'This removes the conversation from your account on all your devices ' +
+      'and clears its local media cache. The other side keeps their copy.',
+    confirmLabel: 'Delete chat',
+    danger: true,
+  });
+
+  if (!ok) return;
+
+  await deleteRoom(room.roomId);
+  await handleRoomGone(room.roomId);
+}
+
+function roomRowMenuItems(room) {
+  const roomId = room.roomId;
+  const unread = Number(room.getUnreadNotificationCount?.() || 0);
+
+  return [
+    {
+      label: 'Open as window',
+      icon: 'picture-in-picture-2',
+      action: async () => {
+        await openChatFloating({
+          roomId,
+        });
+      },
+    },
+    ...(unread > 0
+      ? [{
+          label: 'Mark as read',
+          icon: 'check-check',
+          action: async () => {
+            await markRoomAsRead(room);
+          },
+        }]
+      : []),
+    {
+      label: isRoomMuted(roomId) ? 'Unmute chat' : 'Mute chat',
+      icon: isRoomMuted(roomId) ? 'bell' : 'bell-off',
+      action: async () => {
+        await toggleRoomMute(roomId);
+        renderRoomList();
+      },
+    },
+    'hr',
+    {
+      label: 'Leave chat',
+      icon: 'log-out',
+      danger: true,
+      action: async () => {
+        await confirmLeaveRoom(room);
+      },
+    },
+    {
+      label: 'Delete chat',
+      icon: 'trash-2',
+      danger: true,
+      action: async () => {
+        await confirmDeleteRoom(room);
+      },
+    },
+  ];
+}
+
+const ROOM_ROW_LONG_PRESS_MS = 480;
+
 function renderRoomRow(room) {
   const lastEvent = latestEvent(room);
   const isInvite = room.getMyMembership?.() === 'invite';
@@ -2129,17 +2279,60 @@ function renderRoomRow(room) {
   const unread = Number(room.getUnreadNotificationCount?.() || 0);
   const ts = lastEvent?.getTs?.() || lastActive(room);
 
+  let longPressTimer = 0;
+  let longPressFired = false;
+
+  const openRowMenu = (x, y) => {
+    longPressFired = true;
+    showMenu(x, y, roomRowMenuItems(room), {
+      align: 'start',
+    });
+  };
+
+  const cancelLongPress = () => {
+    window.clearTimeout(longPressTimer);
+    longPressTimer = 0;
+  };
+
   const btn = el('button', {
     type: 'button',
     class: `yanta-chat-room-row ${room.roomId === activeRoomId ? 'active' : ''}`,
 
     onpointerdown: (e) => {
       e.stopPropagation();
+
+      longPressFired = false;
+
+      // Long-press öffnet das Kontextmenü (Touch/Stift, wie in der Galerie).
+      if (e.pointerType === 'touch' || e.pointerType === 'pen') {
+        cancelLongPress();
+
+        longPressTimer = window.setTimeout(() => {
+          try {
+            navigator.vibrate?.(8);
+          } catch {}
+
+          openRowMenu(e.clientX, e.clientY);
+        }, ROOM_ROW_LONG_PRESS_MS);
+      }
     },
+
+    onpointermove: cancelLongPress,
+    onpointerup: cancelLongPress,
+    onpointercancel: cancelLongPress,
 
     onclick: (e) => {
       e.preventDefault();
       e.stopPropagation();
+
+      /*
+        Nach einem Long-Press feuert derselbe Tap noch ein Click-Event.
+        Das darf den Raum nicht zusätzlich zum Menü öffnen.
+      */
+      if (longPressFired) {
+        longPressFired = false;
+        return;
+      }
 
       suppressChatBackBriefly();
 
@@ -2147,6 +2340,17 @@ function renderRoomRow(room) {
         console.warn('[YANTA Chat] Could not open room', err);
         toast('Could not open chat.', 'error');
       });
+    },
+
+    oncontextmenu: (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      cancelLongPress();
+
+      // Browser feuern contextmenu auch bei Touch-Long-Press → kein Doppelmenü.
+      if (!longPressFired) {
+        openRowMenu(e.clientX, e.clientY);
+      }
     },
   });
 
@@ -2873,21 +3077,15 @@ function openRoomMenu(anchor) {
       icon: 'log-out',
       danger: true,
       action: async () => {
-        const ok = await askConfirm({
-          title: 'Leave chat',
-          message: `Leave "${roomDisplayName(room)}"?`,
-          confirmLabel: 'Leave chat',
-          danger: true,
-        });
-
-        if (!ok) return;
-
-        await leaveRoom(roomId);
-
-        await openChat({
-          roomId: '',
-          replace: true,
-        });
+        await confirmLeaveRoom(room);
+      },
+    },
+    {
+      label: 'Delete chat',
+      icon: 'trash-2',
+      danger: true,
+      action: async () => {
+        await confirmDeleteRoom(room);
       },
     },
   ], {

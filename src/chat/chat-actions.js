@@ -290,6 +290,58 @@ export async function leaveRoom(roomId) {
 }
 
 /**
+ * Delete a Matrix room from this account: leave + forget + purge local data.
+ *
+ * Forget removes the room from the room list permanently (leave alone keeps
+ * it in "historical" state). Local gallery index and media cache for the
+ * room are purged best-effort — a cleanup failure must not block the delete.
+ */
+export async function deleteRoom(roomId) {
+  const client = await resolveMatrixClient();
+
+  if (!client) {
+    toast('Chat is not connected.', 'error');
+    throw new Error('Matrix client is not available.');
+  }
+
+  try {
+    const membership = client.getRoom?.(roomId)?.getMyMembership?.() || '';
+
+    if (membership === 'join' || membership === 'invite') {
+      await client.leave(roomId);
+    }
+
+    await client.forget(roomId);
+  } catch (err) {
+    console.warn('[YANTA Chat] Could not delete room', err);
+    toast('Could not delete chat.', 'error');
+    throw err;
+  }
+
+  try {
+    const { purgeChatMediaCacheForRoom } = await import('./chat-media-cache.js');
+    await purgeChatMediaCacheForRoom(roomId);
+  } catch (err) {
+    console.warn('[YANTA Chat] Could not purge media cache for deleted room', err);
+  }
+
+  try {
+    const { chatStore } = await import('./chat-store.js');
+
+    for (const storeName of ['mediaIndex', 'searchIndex']) {
+      const rows = await chatStore[storeName].all();
+      const targets = rows.filter((row) => String(row.roomId || '') === String(roomId));
+
+      await Promise.all(targets.map((row) => chatStore[storeName].del(row.id)));
+    }
+  } catch (err) {
+    console.warn('[YANTA Chat] Could not purge local indexes for deleted room', err);
+  }
+
+  toast('Chat deleted', 'success');
+}
+
+/**
  * Toggle Matrix room mute push rule.
  */
 export async function toggleRoomMute(roomId) {

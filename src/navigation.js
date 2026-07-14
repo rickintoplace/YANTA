@@ -145,16 +145,34 @@ export function calendarEventState(eventId) {
   };
 }
 
+/*
+  chatDepth zählt, wie viele History-Einträge zum aktuellen Chat-Besuch
+  gehören. "Close Chat" kann damit die komplette Chat-Strecke in einem
+  history.go(-chatDepth) verlassen, statt auf dem vorher geöffneten Raum
+  zu landen. 0 = Direkteinstieg (#chat/...) ohne App-Eintrag darunter.
+*/
+function currentChatHistoryDepth() {
+  return history.state?.surface === 'chat'
+    ? Math.max(0, Number(history.state.chatDepth) || 0)
+    : 0;
+}
+
 export function pushChatHistory(roomId = null, extra = {}) {
   writeAppHistoryState(
-    chatState(roomId, extra),
+    chatState(roomId, {
+      chatDepth: currentChatHistoryDepth() + 1,
+      ...extra,
+    }),
     chatUrl(roomId)
   );
 }
 
-export function replaceChatHistory(roomId = null) {
+export function replaceChatHistory(roomId = null, extra = {}) {
   writeAppHistoryState(
-    chatState(roomId),
+    chatState(roomId, {
+      chatDepth: currentChatHistoryDepth(),
+      ...extra,
+    }),
     chatUrl(roomId),
     {
       replace: true,

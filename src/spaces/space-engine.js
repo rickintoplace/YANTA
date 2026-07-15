@@ -24,7 +24,7 @@ import * as Y from 'yjs';
 
 import { encryptBytes, decryptBytes } from '../sync2/crypto.js';
 import { createAndEncodeUpdatePack, decodePack } from '../sync2/pack.js';
-import { getNoteDoc, encodeNoteState } from '../yjs.js';
+import { getNoteDoc } from '../yjs.js';
 import { store } from '../core.js';
 
 import { deriveSpaceKeys } from './space-keys.js';
@@ -113,24 +113,32 @@ export class SpaceEngine {
   // ---------------- doc attachment ------------------------------
 
   /**
-   * Attach a local note doc under a space-stable remote key.
+   * Attach a Y.Doc under a space-stable remote key.
    *
-   * Local note IDs differ between participants (recipients mount a
-   * placeholder note), so remote paths are derived from `remoteKey`
-   * — the same for everyone in the space — never from the local ID.
+   * Local IDs differ between participants (recipients mount their own
+   * placeholder notes), so remote paths derive from `remoteKey` — the
+   * same for everyone in the space — never from a local ID.
+   *
+   * Pass `doc` to attach an arbitrary document (the folder workspace
+   * doc); omit it to attach the note doc belonging to `localId`.
    */
-  async attachDoc(noteId, remoteKey) {
-    if (this.docs.has(noteId)) return;
+  async attachDoc(localId, remoteKey, doc = null) {
+    if (this.docs.has(localId)) return;
 
     if (!remoteKey) {
       throw new Error('SpaceEngine.attachDoc requires a remoteKey');
     }
 
-    const entry = getNoteDoc(noteId);
-    await entry.ready;
+    let target = doc;
+
+    if (!target) {
+      const entry = getNoteDoc(localId);
+      await entry.ready;
+      target = entry.doc;
+    }
 
     const record = {
-      doc: entry.doc,
+      doc: target,
       remoteKey,
       handler: null,
       buffer: [],
@@ -143,10 +151,23 @@ export class SpaceEngine {
         this.scheduleFlush();
       };
 
-      entry.doc.on('update', record.handler);
+      target.on('update', record.handler);
     }
 
-    this.docs.set(noteId, record);
+    this.docs.set(localId, record);
+  }
+
+  detachDoc(localId) {
+    const record = this.docs.get(localId);
+    if (!record) return;
+
+    if (record.handler) {
+      try {
+        record.doc.off('update', record.handler);
+      } catch {}
+    }
+
+    this.docs.delete(localId);
   }
 
   detach() {
@@ -154,15 +175,9 @@ export class SpaceEngine {
     clearTimeout(this.flushTimer);
     this.flushTimer = null;
 
-    for (const record of this.docs.values()) {
-      if (record.handler) {
-        try {
-          record.doc.off('update', record.handler);
-        } catch {}
-      }
+    for (const localId of [...this.docs.keys()]) {
+      this.detachDoc(localId);
     }
-
-    this.docs.clear();
   }
 
   // ---------------- upload path (writers) -----------------------
@@ -231,6 +246,23 @@ export class SpaceEngine {
         this.state.packsSinceHead += 1;
         uploaded = true;
       } catch (err) {
+        if (err?.code === 'ECOMPACTION_REQUIRED') {
+          // The doc's journal is full. Publish a head (which covers every
+          // pack this participant wrote), prune those packs, and retry —
+          // the update is still in `merged`, so nothing is lost.
+          try {
+            await this.uploadHeads();
+
+            const entry = await this.remote.put(path, encrypted);
+            this.state.seen[path] = entry ? entryEtag(entry) : 'own';
+            this.state.packsSinceHead += 1;
+            uploaded = true;
+            continue;
+          } catch (retryErr) {
+            err = retryErr;
+          }
+        }
+
         // Put the batch back so nothing is lost; retry on next change/poll.
         record.buffer = [merged, ...record.buffer];
         this.state.seq -= 1;
@@ -264,14 +296,14 @@ export class SpaceEngine {
 
     const coveredSeq = this.state.seq;
 
-    for (const [noteId, record] of this.docs) {
+    for (const record of this.docs.values()) {
       const path = await spaceDocHeadPath(
         this.keys.nameKey,
         record.remoteKey,
         this.state.participantId
       );
 
-      const plain = encodeNoteState(noteId);
+      const plain = Y.encodeStateAsUpdate(record.doc);
       const encrypted = await encryptBytes(this.keys.contentKey, plain, path);
       const entry = await this.remote.put(path, encrypted);
 
@@ -317,7 +349,7 @@ export class SpaceEngine {
   async ensureHeads() {
     if (!this.canWrite) return;
 
-    for (const [noteId, record] of this.docs) {
+    for (const record of this.docs.values()) {
       const path = await spaceDocHeadPath(
         this.keys.nameKey,
         record.remoteKey,
@@ -327,7 +359,7 @@ export class SpaceEngine {
       const existing = await this.remote.stat(path).catch(() => null);
       if (existing) continue;
 
-      const plain = encodeNoteState(noteId);
+      const plain = Y.encodeStateAsUpdate(record.doc);
       const encrypted = await encryptBytes(this.keys.contentKey, plain, path);
       const entry = await this.remote.put(path, encrypted);
       this.state.seen[path] = entry ? entryEtag(entry) : 'own';

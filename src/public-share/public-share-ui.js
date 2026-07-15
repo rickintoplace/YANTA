@@ -14,11 +14,28 @@ import {
 
 import {
   createSpaceForNote,
+  createSpaceForFolder,
   stopSpaceShare,
   spaceSessionForNote,
+  spaceSessionForFolder,
   spaceLinksFor,
   leaveSpace,
+  apiListSpaceMembers,
+  apiAddSpaceMember,
+  apiRemoveSpaceMember,
+  rotateSpaceWriteAccess,
 } from '../spaces/space-session.js';
+
+import {
+  sendSpaceInvite,
+  sendSpaceRevokeNotice,
+  sendSpaceLinkMessage,
+} from '../spaces/space-matrix.js';
+
+import {
+  resolveMatrixClient,
+  normalizeUserId,
+} from '../chat/chat-actions.js';
 
 import {
   createOrGetPublicShare,
@@ -57,6 +74,33 @@ import {
 let modal = null;
 let shareOverlayRegistered = false;
 
+// What the dialog is currently sharing: a single note, or a folder
+// subtree as a live workspace. The Live and People tabs work for both;
+// public read-only links exist for notes only.
+let shareTarget = { kind: 'note', id: '' };
+
+function targetIsFolder() {
+  return shareTarget.kind === 'folder';
+}
+
+function targetTitle() {
+  return targetIsFolder()
+    ? state.folders.get(shareTarget.id)?.name || 'Untitled folder'
+    : state.notes.get(shareTarget.id)?.title || 'Untitled';
+}
+
+function targetSession() {
+  return targetIsFolder()
+    ? spaceSessionForFolder(shareTarget.id)
+    : spaceSessionForNote(shareTarget.id);
+}
+
+async function createTargetSpace() {
+  return targetIsFolder()
+    ? createSpaceForFolder(shareTarget.id)
+    : createSpaceForNote(shareTarget.id);
+}
+
 function unifiedShareModalIsOpen() {
   return !!modal && modal.hidden === false;
 }
@@ -72,6 +116,15 @@ function registerShareOverlayRoutes() {
 
   registerOverlayRoute('share-note', {
     open: ({ data, state: historyState } = {}) => {
+      const folderId = data?.folderId || historyState?.folderId || '';
+
+      if (folderId) {
+        return openUnifiedShareModal({
+          fromHistory: true,
+          folderId,
+        });
+      }
+
       const noteId =
         data?.noteId ||
         historyState?.noteId ||
@@ -669,16 +722,16 @@ async function renderLiveTab() {
   const body = modal.querySelector('[data-share-body]');
   if (!body) return;
 
-  const noteId = state.currentNoteId;
-  const note = state.notes.get(noteId);
-  const session = spaceSessionForNote(noteId);
-  const legacy = state.liveShares.get(noteId);
+  const isFolder = targetIsFolder();
+  const thing = isFolder ? 'folder' : 'note';
+  const session = targetSession();
+  const legacy = !isFolder ? state.liveShares.get(shareTarget.id) : null;
 
-  // Recipient view: this note was mounted from someone else's space.
-  if (note?.spaceId && session && session.role !== 'owner') {
+  // Recipient view: mounted from someone else's space.
+  if (session && session.role !== 'owner') {
     const roleLabel = session.role === 'write'
-      ? 'You can read and edit this shared note.'
-      : 'You have read-only access to this shared note.';
+      ? `You can read and edit this shared ${thing}.`
+      : `You have read-only access to this shared ${thing}.`;
 
     body.innerHTML = `
       <div class="yanta-public-share-box">
@@ -697,7 +750,7 @@ async function renderLiveTab() {
     body.querySelector('[data-leave-space]')?.addEventListener('click', async () => {
       const ok = await yantaConfirm({
         title: 'Leave this share?',
-        message: 'The shared note will be removed from this device. You can rejoin anytime with the link.',
+        message: `The shared ${thing} will be removed from this device. You can rejoin anytime with the link.`,
         confirmLabel: 'Leave share',
         cancelLabel: 'Cancel',
         danger: true,
@@ -720,7 +773,11 @@ async function renderLiveTab() {
       <div class="yanta-public-share-box">
         <div class="yanta-public-share-info">
           <strong>Live share</strong><br>
-          Invite people to read or edit this note in real time — drawings included.
+          ${
+            isFolder
+              ? 'Share this folder as a live workspace — editors can add, change and remove notes inside it.'
+              : 'Invite people to read or edit this note in real time — drawings included.'
+          }
           Everything is end-to-end encrypted, and the share keeps working when you go offline.
         </div>
 
@@ -756,7 +813,7 @@ async function renderLiveTab() {
       btn.disabled = true;
 
       try {
-        await createSpaceForNote(noteId);
+        await createTargetSpace();
         await renderLiveTab();
         toast('Live share started', 'success');
       } catch (err) {
@@ -776,7 +833,7 @@ async function renderLiveTab() {
     });
 
     body.querySelector('[data-stop-legacy-share]')?.addEventListener('click', async () => {
-      await stopLegacyLiveSharing(noteId);
+      await stopLegacyLiveSharing(shareTarget.id);
       await renderLiveTab();
     });
 
@@ -790,7 +847,11 @@ async function renderLiveTab() {
   body.innerHTML = `
     <div class="yanta-public-share-box">
       <div class="yanta-public-share-status good">
-        Live share active · ${peers} ${peers === 1 ? 'person' : 'people'} connected live
+        ${
+          isFolder
+            ? 'Workspace share active · changes sync for everyone with access'
+            : `Live share active · ${peers} ${peers === 1 ? 'person' : 'people'} connected live`
+        }
       </div>
 
       <div class="yanta-public-share-info">
@@ -862,7 +923,7 @@ async function renderLiveTab() {
     const ok = await yantaConfirm({
       title: 'Stop live sharing?',
       message: [
-        'Stop live sharing this note?',
+        `Stop live sharing this ${thing}?`,
         '',
         'All links stop working and the encrypted share data is deleted from the cloud.',
         'Copies already synced to other devices cannot be removed.',
@@ -882,6 +943,265 @@ async function renderLiveTab() {
       console.error(err);
       toast(err?.message || 'Could not stop sharing', 'error');
     }
+  });
+}
+
+// ---------------- People tab (Matrix-ID grants) -------------------
+
+async function ownMatrixServer() {
+  try {
+    const client = await resolveMatrixClient();
+    const userId = String(client?.getUserId?.() || '');
+    const idx = userId.indexOf(':');
+    return idx > 0 ? userId.slice(idx + 1) : '';
+  } catch {
+    return '';
+  }
+}
+
+// Rotating write access invalidates the writer secret every member
+// held — remaining writers need a fresh bundle delivered over Matrix.
+async function rotateAndRedeliver(session) {
+  const record = await rotateSpaceWriteAccess(session.spaceId);
+  const members = await apiListSpaceMembers(session.spaceId).catch(() => []);
+
+  for (const member of members) {
+    if (member.role !== 'write' || !member.matrixUserId) continue;
+
+    await sendSpaceInvite(record, member.matrixUserId, 'write').catch((err) => {
+      console.warn('[YANTA Spaces] re-delivery after rotation failed', member.matrixUserId, err);
+      toast(`Could not re-deliver keys to ${member.matrixUserId}`, 'error');
+    });
+  }
+}
+
+async function renderPeopleTab() {
+  const body = modal.querySelector('[data-share-body]');
+  if (!body) return;
+
+  const session = targetSession();
+
+  if (!session || session.role !== 'owner') {
+    body.innerHTML = `
+      <div class="yanta-public-share-box">
+        <div class="yanta-public-share-info">
+          <strong>People</strong><br>
+          Give specific people read or edit access via their Matrix ID.
+          Start a live share first — keys are delivered end-to-end encrypted over Chat.
+        </div>
+
+        <div class="compress-actions">
+          <button class="btn primary" data-people-start-share>
+            ${lucide('users', 14)}
+            Start live share
+          </button>
+        </div>
+      </div>
+    `;
+
+    body.querySelector('[data-people-start-share]')?.addEventListener('click', async (e) => {
+      e.currentTarget.disabled = true;
+
+      try {
+        await createTargetSpace();
+      } catch (err) {
+        console.error(err);
+        toast(err?.status === 401
+          ? 'Sign in to YANTA Cloud to start a live share'
+          : err?.message || 'Could not start live share', 'error');
+      }
+
+      await renderPeopleTab();
+    });
+
+    return;
+  }
+
+  body.innerHTML = `
+    <div class="yanta-public-share-box">
+      <div class="yanta-public-share-info">
+        <strong>People</strong><br>
+        Invite by Matrix ID (e.g. <code>@anna:yanta.me</code>) or YANTA handle.
+        Keys are delivered end-to-end encrypted over Chat; access is enforced by the server.
+      </div>
+
+      <div class="yanta-public-share-link-row">
+        <input class="text-input" data-people-input placeholder="@user:yanta.me">
+        <select class="text-input" data-people-role style="max-width:120px">
+          <option value="read">Can view</option>
+          <option value="write">Can edit</option>
+        </select>
+        <button class="btn primary" data-people-add>${lucide('user-plus', 14)} Add</button>
+      </div>
+
+      <div class="yanta-public-shares-list" data-people-list>
+        <div class="yanta-public-shares-empty">Loading…</div>
+      </div>
+    </div>
+  `;
+
+  const listHost = body.querySelector('[data-people-list]');
+
+  const renderMembers = async () => {
+    let members = [];
+
+    try {
+      members = await apiListSpaceMembers(session.spaceId);
+    } catch (err) {
+      listHost.innerHTML = `<div class="yanta-public-shares-empty">${escapeHtml(err?.message || 'Could not load members')}</div>`;
+      return;
+    }
+
+    if (!members.length) {
+      listHost.innerHTML = '<div class="yanta-public-shares-empty">Nobody has personal access yet.</div>';
+      return;
+    }
+
+    listHost.replaceChildren();
+
+    for (const member of members) {
+      const row = document.createElement('div');
+      row.className = 'yanta-public-share-row';
+
+      row.innerHTML = `
+        <div class="yanta-public-share-row-main">
+          <strong>${escapeHtml(member.matrixUserId || member.userId)}</strong>
+          <small>${member.role === 'write' ? 'Can edit' : 'Can view'}</small>
+        </div>
+        <div class="yanta-public-share-row-actions">
+          <select class="text-input" data-member-role style="max-width:110px">
+            <option value="read" ${member.role === 'read' ? 'selected' : ''}>Can view</option>
+            <option value="write" ${member.role === 'write' ? 'selected' : ''}>Can edit</option>
+          </select>
+          <button class="btn danger" data-member-remove title="Remove access">${lucide('user-x', 14)}</button>
+        </div>
+      `;
+
+      row.querySelector('[data-member-role]')?.addEventListener('change', async (e) => {
+        const newRole = e.target.value === 'write' ? 'write' : 'read';
+        if (newRole === member.role) return;
+
+        e.target.disabled = true;
+
+        try {
+          await apiAddSpaceMember(session.spaceId, {
+            matrixUserId: member.matrixUserId,
+            role: newRole,
+          });
+
+          if (member.role === 'write' && newRole === 'read') {
+            // Downgraded writers held the writer secret — rotate it.
+            await rotateAndRedeliver(session);
+          }
+
+          await sendSpaceInvite(session.record, member.matrixUserId, newRole).catch((err) => {
+            console.warn('[YANTA Spaces] role-change delivery failed', err);
+          });
+
+          toast('Access updated', 'success');
+        } catch (err) {
+          console.error(err);
+          toast(err?.message || 'Could not change access', 'error');
+        }
+
+        await renderMembers();
+      });
+
+      row.querySelector('[data-member-remove]')?.addEventListener('click', async () => {
+        const ok = await yantaConfirm({
+          title: 'Remove access?',
+          message: `Remove ${member.matrixUserId || 'this member'} from this share? They lose access immediately.`,
+          confirmLabel: 'Remove',
+          cancelLabel: 'Cancel',
+          danger: true,
+          icon: 'user-x',
+        });
+
+        if (!ok) return;
+
+        try {
+          await apiRemoveSpaceMember(session.spaceId, member.userId);
+
+          if (member.role === 'write') {
+            await rotateAndRedeliver(session);
+          }
+
+          if (member.matrixUserId) {
+            sendSpaceRevokeNotice(session.spaceId, member.matrixUserId);
+          }
+
+          toast('Access removed', 'success');
+        } catch (err) {
+          console.error(err);
+          toast(err?.message || 'Could not remove access', 'error');
+        }
+
+        await renderMembers();
+      });
+
+      listHost.append(row);
+    }
+  };
+
+  renderMembers();
+
+  body.querySelector('[data-people-add]')?.addEventListener('click', async (e) => {
+    const btn = e.currentTarget;
+    const input = body.querySelector('[data-people-input]');
+    const role = body.querySelector('[data-people-role]')?.value === 'write' ? 'write' : 'read';
+
+    const matrixUserId = normalizeUserId(input?.value || '', {
+      defaultServer: await ownMatrixServer(),
+    });
+
+    if (!matrixUserId) {
+      toast('Enter a Matrix ID like @user:yanta.me', 'error');
+      return;
+    }
+
+    btn.disabled = true;
+
+    try {
+      const res = await apiAddSpaceMember(session.spaceId, { matrixUserId, role });
+
+      if (res.resolved) {
+        await sendSpaceInvite(session.record, matrixUserId, role);
+        toast(`Shared with ${matrixUserId}`, 'success');
+        if (input) input.value = '';
+      } else {
+        // Not a YANTA user — offer the link fallback over federation.
+        const ok = await yantaConfirm({
+          title: 'Not a YANTA user',
+          message: [
+            `${matrixUserId} has no YANTA account, so access cannot be enforced per person.`,
+            '',
+            role === 'write'
+              ? 'Send them the edit link via chat instead? Anyone with that link can edit.'
+              : 'Send them the read link via chat instead? Anyone with that link can view.',
+          ].join('\n'),
+          confirmLabel: 'Send link',
+          cancelLabel: 'Cancel',
+          icon: 'link',
+        });
+
+        if (ok) {
+          const links = spaceLinksFor(session);
+          const url = role === 'write' && links.write ? links.write : links.read;
+          await sendSpaceLinkMessage(
+            matrixUserId,
+            `I shared "${session.record.title || 'a note'}" with you on YANTA: ${url}`
+          );
+          toast(`Link sent to ${matrixUserId}`, 'success');
+          if (input) input.value = '';
+        }
+      }
+    } catch (err) {
+      console.error(err);
+      toast(err?.message || 'Could not share', 'error');
+    }
+
+    btn.disabled = false;
+    await renderMembers();
   });
 }
 
@@ -1239,32 +1559,53 @@ export async function openPublicSharesManager({
   await renderPublicSharesManager();
 }
 
+/**
+ * Share dialog for a note or a folder.
+ *
+ * Notes get all three tabs; folders are shared as live workspaces and
+ * have no public read-only snapshot, so their dialog opens on Live.
+ */
 export async function openUnifiedShareModal({
   fromHistory = false,
+  folderId = '',
+  noteId: explicitNoteId = '',
 } = {}) {
   registerShareOverlayRoutes();
 
-  const noteId = state.currentNoteId;
+  if (folderId) {
+    if (!state.folders.has(folderId)) {
+      toast('Folder not found', 'error');
+      return;
+    }
 
-  if (!noteId || !state.notes.has(noteId)) {
-    toast('Open a note first', 'error');
-    return;
+    shareTarget = { kind: 'folder', id: folderId };
+  } else {
+    const noteId = explicitNoteId || state.currentNoteId;
+
+    if (!noteId || !state.notes.has(noteId)) {
+      toast('Open a note first', 'error');
+      return;
+    }
+
+    shareTarget = { kind: 'note', id: noteId };
   }
 
-  const note = state.notes.get(noteId);
+  const isFolder = targetIsFolder();
+  const targetId = shareTarget.id;
   const m = ensureModal();
 
   m.innerHTML = `
     <div class="modal-card yanta-public-share-card">
       <header class="modal-head">
-        <h3>Share note: ${escapeHtml(note.title || 'Untitled')}</h3>
+        <h3>Share ${isFolder ? 'folder' : 'note'}: ${escapeHtml(targetTitle())}</h3>
         <button class="icon-btn" data-public-share-close>&times;</button>
       </header>
 
       <div class="modal-body">
         <div class="yanta-share-tabs">
-          <button data-share-tab="public" class="active">Public link</button>
-          <button data-share-tab="live">Live collaboration</button>
+          ${isFolder ? '' : '<button data-share-tab="public" class="active">Public link</button>'}
+          <button data-share-tab="live" ${isFolder ? 'class="active"' : ''}>Live collaboration</button>
+          <button data-share-tab="people">People</button>
         </div>
 
         <div data-share-body></div>
@@ -1272,17 +1613,25 @@ export async function openUnifiedShareModal({
     </div>
   `;
 
-  m.querySelector('[data-share-tab="public"]')?.addEventListener('click', async () => {
+  const activate = (tab) => {
     m.querySelectorAll('[data-share-tab]').forEach((b) => b.classList.remove('active'));
-    m.querySelector('[data-share-tab="public"]').classList.add('active');
+    m.querySelector(`[data-share-tab="${tab}"]`)?.classList.add('active');
+  };
+
+  m.querySelector('[data-share-tab="public"]')?.addEventListener('click', async () => {
+    activate('public');
     await refreshOwnPublicShareStatusFromCloud().catch(() => {});
-    await renderPublicTab(noteId);
+    await renderPublicTab(targetId);
   });
 
   m.querySelector('[data-share-tab="live"]')?.addEventListener('click', () => {
-    m.querySelectorAll('[data-share-tab]').forEach((b) => b.classList.remove('active'));
-    m.querySelector('[data-share-tab="live"]').classList.add('active');
+    activate('live');
     renderLiveTab();
+  });
+
+  m.querySelector('[data-share-tab="people"]')?.addEventListener('click', () => {
+    activate('people');
+    renderPeopleTab();
   });
 
   const wasClosed = m.hidden !== false;
@@ -1291,22 +1640,28 @@ export async function openUnifiedShareModal({
 
   if (!fromHistory && wasClosed) {
     pushOverlayState('share-note', {
-      noteId,
+      noteId: isFolder ? '' : targetId,
+      folderId: isFolder ? targetId : '',
     });
   }
 
-await renderPublicTab(noteId);
+  if (isFolder) {
+    await renderLiveTab();
+    return;
+  }
 
-/*
-  Fast first paint, then reconcile with cloud.
-  This catches cloud-only shares and repairs stale local status without making
-  the dialog feel slow.
-*/
-refreshOwnPublicShareStatusFromCloud()
-  .then(() => {
-    if (modal?.hidden === false && state.currentNoteId === noteId) {
-      return renderPublicTab(noteId);
-    }
-  })
-  .catch(() => {});
+  await renderPublicTab(targetId);
+
+  /*
+    Fast first paint, then reconcile with cloud.
+    This catches cloud-only shares and repairs stale local status without making
+    the dialog feel slow.
+  */
+  refreshOwnPublicShareStatusFromCloud()
+    .then(() => {
+      if (modal?.hidden === false && shareTarget.id === targetId) {
+        return renderPublicTab(targetId);
+      }
+    })
+    .catch(() => {});
 }

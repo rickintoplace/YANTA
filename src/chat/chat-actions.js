@@ -79,7 +79,7 @@ function ownServerName(client) {
   return idx > 0 ? userId.slice(idx + 1) : '';
 }
 
-function normalizeUserId(input, {
+export function normalizeUserId(input, {
   defaultServer = '',
 } = {}) {
   const raw = String(input || '').trim();

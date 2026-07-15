@@ -16,7 +16,7 @@
 //   browser-native objects such as FileSystemDirectoryHandle
 // ============================================================
 
-import { state, store, isSpaceMountedNote } from '../core.js';
+import { state, store, isSpaceMountedNote, isSpaceMountedFolder } from '../core.js';
 
 import {
   waitForVaultDoc,
@@ -442,7 +442,11 @@ export async function installVaultStoreBridge() {
 
   store.folders.put = async (folder) => {
     const res = await originals.folders.put(folder);
-    putVaultFolderMeta(folder);
+
+    if (!isSpaceMountedFolder(folder)) {
+      putVaultFolderMeta(folder);
+    }
+
     return res;
   };
 
@@ -451,10 +455,12 @@ export async function installVaultStoreBridge() {
 
     const res = await originals.folders.del(id);
 
-    deleteVaultFolderMeta(id, {
-      name: existing?.name || '',
-      deletedBy: await getDeviceIdBestEffort(),
-    });
+    if (!isSpaceMountedFolder(existing)) {
+      deleteVaultFolderMeta(id, {
+        name: existing?.name || '',
+        deletedBy: await getDeviceIdBestEffort(),
+      });
+    }
 
     return res;
   };

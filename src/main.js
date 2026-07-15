@@ -51,6 +51,8 @@ import {
   stopSpaceShare,
 } from './spaces/space-session.js';
 
+import { setupSpaceMatrix } from './spaces/space-matrix.js';
+
 import {
   openUnifiedShareModal,
   closeUnifiedShareModal,
@@ -2196,6 +2198,7 @@ async function init() {
   setupRss();
   setupChat();
   setupChatNotifications();
+  setupSpaceMatrix();
   await ensureAiSessionsFolder();
   window.addEventListener('yanta-public-share-changed', () => {
     renderShareIndicator();

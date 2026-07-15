@@ -3,7 +3,7 @@
 // menus, drag-and-drop reorganisation, multi-select + bulk ops.
 // ============================================================
 
-import { $, el, uid, state, store, lucide, safeCssColor, toast } from './core.js';
+import { $, el, uid, state, store, lucide, safeCssColor, toast, isSpaceMountedFolder } from './core.js';
 
 import {
   openNote,
@@ -107,7 +107,12 @@ function isAiSessionsRootFolder(folder) {
 }
 
 function isMainTreeItem(item) {
-  return !isSystemItem(item) && !isArchivedItem(item) && !isFolderInTrash(item);
+  return (
+    !isSpaceMountedFolder(item) &&
+    !isSystemItem(item) &&
+    !isArchivedItem(item) &&
+    !isFolderInTrash(item)
+  );
 }
 
 function isSystemFolder(f) {
@@ -138,9 +143,16 @@ function noteBelongsToArchived(note) {
   );
 }
 
+// Notes mounted from someone else's shared space live in their own
+// "Shared with me" section — they have no place in the user's folders.
+function noteBelongsToShared(note) {
+  return !isNoteInTrash(note) && !!note.spaceId;
+}
+
 function noteBelongsToMain(note) {
   return (
     !isNoteInTrash(note) &&
+    !noteBelongsToShared(note) &&
     !noteBelongsToSystem(note) &&
     !noteBelongsToArchived(note)
   );
@@ -950,6 +962,35 @@ if (pinned.length) {
   root.append(sec);
 }
 
+  const visibleShared = visible.filter(noteBelongsToShared);
+
+  const sharedFolders = [...state.folders.values()]
+    .filter(isSpaceMountedFolder)
+    .filter((f) => !f.parentId || !isSpaceMountedFolder(state.folders.get(f.parentId)))
+    .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+
+  // Notes shared individually (not part of a shared workspace folder).
+  const sharedRootNotes = visibleShared
+    .filter((n) => !n.folderId || !isSpaceMountedFolder(state.folders.get(n.folderId)))
+    .sort((a, b) => b.updated - a.updated);
+
+  if (sharedFolders.length || sharedRootNotes.length) {
+    const sec = el('div', { class: 'tree-section tree-section-shared' });
+    sec.append(el('div', { class: 'tree-section-title' }, 'Shared with me'));
+
+    for (const n of sharedRootNotes) {
+      sec.append(noteRow(n, 0));
+    }
+
+    for (const f of sharedFolders) {
+      sec.append(folderRow(f, visibleShared, 0, {
+        folderFilter: isSpaceMountedFolder,
+      }));
+    }
+
+    root.append(sec);
+  }
+
   const folderSec = el('div', { class: 'tree-section' });
 
   const ftitle = el(
@@ -1423,6 +1464,25 @@ function folderRow(f, visibleNotes, depth, {
       class: 'tree-folder-count',
       title: `${childCount} item${childCount === 1 ? '' : 's'}`,
     }, String(childCount)));
+  }
+
+  if (f.spaceId) {
+    const badge = el('span', {
+      class: 'public-share-dot',
+      title: f.spaceRole === 'write'
+        ? 'Shared workspace · you can edit'
+        : 'Shared workspace · read-only',
+    });
+
+    badge.innerHTML = lucide(f.spaceRole === 'write' ? 'pencil' : 'eye', 11);
+    row.append(badge);
+  } else {
+    for (const spaceSession of state.spaces.values()) {
+      if (spaceSession.record?.rootFolderId === f.id && spaceSession.role === 'owner') {
+        row.append(el('span', { class: 'live-dot', title: 'Shared as live workspace' }));
+        break;
+      }
+    }
   }
 
   if (!lockedAiSessionsFolder) {
@@ -2073,6 +2133,25 @@ function noteRow(n, depth = 0, {
     row.append(el('span', { class: 'live-dot', title: 'Live shared' }));
   }
 
+  if (n.spaceId) {
+    const badge = el('span', {
+      class: 'public-share-dot',
+      title: n.spaceRole === 'write'
+        ? 'Shared with you · can edit'
+        : 'Shared with you · read-only',
+    });
+
+    badge.innerHTML = lucide(n.spaceRole === 'write' ? 'pencil' : 'eye', 11);
+    row.append(badge);
+  } else {
+    for (const spaceSession of state.spaces.values()) {
+      if (spaceSession.noteId === n.id && spaceSession.role === 'owner') {
+        row.append(el('span', { class: 'live-dot', title: 'Live share active' }));
+        break;
+      }
+    }
+  }
+
   if (isPublicShareActive(publicShareStateForNote(n.id))) {
     const publicDot = el('span', {
       class: 'public-share-dot',
@@ -2499,6 +2578,16 @@ function folderMenu(e, f) {
       label: 'Select folder contents',
       action: () => selectFolderSubtree(f.id),
     },
+    'hr',
+    {
+      label: f.spaceId ? 'Shared workspace…' : 'Share folder…',
+      icon: 'users',
+      action: async () => {
+        const { openUnifiedShareModal } = await import('./public-share/public-share-ui.js');
+        openUnifiedShareModal({ folderId: f.id });
+      },
+    },
+    'hr',
     {
       label: 'Icon & color…',
       action: () => editItemsIconColor([folderKey(f.id)]),

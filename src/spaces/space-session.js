@@ -29,6 +29,15 @@ import {
   deriveWriterRoomCredentials,
 } from './space-keys.js';
 import { subscribeSpacePoke, publishSpacePoke } from './space-poke.js';
+import {
+  WORKSPACE_REMOTE_KEY,
+  waitForWorkspaceDoc,
+  destroyWorkspaceDoc,
+} from './workspace-doc.js';
+import {
+  installWorkspaceBridge,
+  uninstallWorkspaceBridge,
+} from './workspace-bridge.js';
 
 const POLL_INTERVAL_MS = 60_000;
 const POKE_PULL_DEBOUNCE_MS = 400;
@@ -101,6 +110,36 @@ async function apiDeleteSpace(spaceId) {
   return apiJson(res, 'Could not delete shared space');
 }
 
+export async function apiListSpaceMembers(spaceId) {
+  const res = await fetchWithRetry(apiUrl(`/api/spaces/${encodeURIComponent(spaceId)}/members`), {
+    method: 'GET',
+    credentials: 'include',
+  }, { label: 'List members' });
+
+  return (await apiJson(res, 'Could not load members')).members || [];
+}
+
+export async function apiAddSpaceMember(spaceId, { matrixUserId, role }) {
+  const res = await fetchWithRetry(apiUrl(`/api/spaces/${encodeURIComponent(spaceId)}/members`), {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ matrixUserId, role }),
+  }, { label: 'Add member' });
+
+  return apiJson(res, 'Could not add member');
+}
+
+export async function apiRemoveSpaceMember(spaceId, userId) {
+  const res = await fetchWithRetry(
+    apiUrl(`/api/spaces/${encodeURIComponent(spaceId)}/members/${encodeURIComponent(userId)}`),
+    { method: 'DELETE', credentials: 'include' },
+    { label: 'Remove member' }
+  );
+
+  return apiJson(res, 'Could not remove member');
+}
+
 // ---------------- session registry ------------------------------
 
 export function spaceSessionFor(spaceId) {
@@ -159,13 +198,17 @@ async function mountSpace(record) {
     writeToken: record.writeToken,
   });
 
+  const isFolder = record.sourceType === 'folder';
+
   const session = {
     spaceId: record.spaceId,
     noteId: record.noteId,
+    sourceType: record.sourceType || 'note',
     role: record.role,
     record,
     engine: null,
     provider: null,
+    workspaceDoc: null,
     peers: 0,
     unsubscribePoke: null,
     pollTimer: null,
@@ -194,10 +237,20 @@ async function mountSpace(record) {
   });
 
   await engine.init();
-  await engine.attachDoc(record.noteId, MAIN_DOC_KEY);
 
   session.engine = engine;
   state.spaces.set(record.spaceId, session);
+
+  if (isFolder) {
+    // A folder space syncs a workspace doc (the subtree's notes and
+    // folders) plus one content doc per note inside it. The bridge
+    // owns attaching/detaching those note docs as items come and go.
+    session.workspaceDoc = await waitForWorkspaceDoc(record.spaceId);
+    await engine.attachDoc(WORKSPACE_REMOTE_KEY, WORKSPACE_REMOTE_KEY, session.workspaceDoc);
+    await installWorkspaceBridge(session);
+  } else {
+    await engine.attachDoc(record.noteId, MAIN_DOC_KEY);
+  }
 
   // The owner guarantees a restorable full state on the server the
   // moment the share exists — this is what makes the share survive
@@ -229,7 +282,11 @@ async function mountSpace(record) {
 
   // Real-time fast path between writers only. Readers never receive
   // the writer secret, so they cannot join (or inject into) this room.
-  if (engine.canWrite && record.writerSecret) {
+  //
+  // Note spaces only: a folder space has many docs, and one WebRTC room
+  // per note would be costly. Its writers converge over the poke channel
+  // instead (a couple of seconds rather than sub-second).
+  if (!isFolder && engine.canWrite && record.writerSecret) {
     try {
       const creds = await deriveWriterRoomCredentials(record.writerSecret, record.epoch || 1);
 
@@ -275,6 +332,10 @@ function unmountSpace(spaceId) {
   try {
     session.provider?.disconnect();
   } catch {}
+
+  if (session.sourceType === 'folder') {
+    uninstallWorkspaceBridge(spaceId);
+  }
 
   try {
     session.engine?.detach();
@@ -326,6 +387,59 @@ export async function createSpaceForNote(noteId) {
   return mountSpace(record);
 }
 
+export function spaceSessionForFolder(folderId) {
+  for (const session of state.spaces.values()) {
+    if (session.sourceType === 'folder' && session.record.rootFolderId === folderId) {
+      return session;
+    }
+  }
+  return null;
+}
+
+/**
+ * Share a folder subtree as a live workspace. Writers can create,
+ * edit and delete notes inside it; membership of the subtree stays
+ * the owner's call (they move notes in and out of the folder).
+ */
+export async function createSpaceForFolder(folderId) {
+  const existing = spaceSessionForFolder(folderId);
+  if (existing) return existing;
+
+  const folder = state.folders.get(folderId);
+  if (!folder) throw new Error('Folder not found');
+
+  const rootKey = generateSpaceSecret();
+  const writerSecret = generateSpaceSecret();
+  const readToken = generateSpaceToken();
+  const writeToken = generateSpaceToken();
+
+  const meta = await apiCreateSpace({
+    sourceType: 'folder',
+    sourceId: folderId,
+    readToken,
+    writeToken,
+  });
+
+  const record = {
+    spaceId: meta.id,
+    noteId: '',
+    rootFolderId: folderId,
+    role: 'owner',
+    sourceType: 'folder',
+    title: folder.name || '',
+    rootKey,
+    readToken,
+    writeToken,
+    writerSecret,
+    epoch: meta.webrtcEpoch || 1,
+    signalingTopic: meta.signalingTopic,
+  };
+
+  await store.spaces.put(record);
+
+  return mountSpace(record);
+}
+
 export async function stopSpaceShare(spaceId) {
   const session = state.spaces.get(spaceId);
   const record = session?.record || await store.spaces.get(spaceId);
@@ -351,6 +465,43 @@ export async function stopSpaceShare(spaceId) {
   toast('Stopped live sharing');
 }
 
+/**
+ * Rotate all write credentials of a space: new write token, new
+ * writer secret, epoch bump. Removed writers keep nothing usable —
+ * the server rejects their old token and the WebRTC room moves.
+ *
+ * Key re-delivery to remaining write members is the caller's job
+ * (send a fresh invite bundle per member via space-matrix).
+ */
+export async function rotateSpaceWriteAccess(spaceId) {
+  const session = state.spaces.get(spaceId);
+  const record = session?.record || await store.spaces.get(spaceId);
+
+  if (!record || record.role !== 'owner') {
+    throw new Error('Only the owner can rotate write access');
+  }
+
+  const writerSecret = generateSpaceSecret();
+  const writeToken = generateSpaceToken();
+
+  const meta = await apiPatchSpace(spaceId, {
+    writeToken,
+    bumpEpoch: true,
+  });
+
+  record.writerSecret = writerSecret;
+  record.writeToken = writeToken;
+  record.epoch = meta.webrtcEpoch || (record.epoch || 1) + 1;
+
+  await store.spaces.put(record);
+
+  // Reconnect with the new WebRTC credentials.
+  unmountSpace(spaceId);
+  await mountSpace(record);
+
+  return record;
+}
+
 // ---------------- recipient: open link / leave -------------------
 
 export async function handleSpaceUrl() {
@@ -372,37 +523,14 @@ export async function handleSpaceUrl() {
 
   const existing = await store.spaces.get(parsed.spaceId);
   const role = meta.role === 'owner' ? 'owner' : parsed.role;
-
-  // Owners opening their own link (e.g. second device) reattach their
-  // real note; everyone else gets a placeholder with a space-derived
-  // ID that cannot collide with their own notes.
-  const noteId =
-    existing?.noteId ||
-    (role === 'owner' && meta.sourceId ? meta.sourceId : `spacenote_${parsed.spaceId}`);
-
-  if (!state.notes.has(noteId)) {
-    const note = {
-      id: noteId,
-      title: parsed.title || 'Shared note',
-      type: 'markdown',
-      folderId: null,
-      tags: ['shared'],
-      pinned: false,
-      created: Date.now(),
-      updated: Date.now(),
-      spaceId: parsed.spaceId,
-      spaceRole: role,
-    };
-
-    state.notes.set(noteId, note);
-    await store.notes.put(note);
-  }
+  const sourceType = meta.sourceType === 'folder' ? 'folder' : parsed.sourceType;
 
   const record = {
     spaceId: parsed.spaceId,
-    noteId,
+    noteId: existing?.noteId || '',
+    rootFolderId: existing?.rootFolderId || (role === 'owner' ? meta.sourceId : '') || '',
     role,
-    sourceType: parsed.sourceType,
+    sourceType,
     title: parsed.title || '',
     rootKey: parsed.rootKey,
     readToken: parsed.readToken,
@@ -412,12 +540,148 @@ export async function handleSpaceUrl() {
     signalingTopic: meta.signalingTopic,
   };
 
+  if (sourceType === 'note') {
+    // Owners opening their own link (e.g. second device) reattach their
+    // real note; everyone else gets a placeholder with a space-derived
+    // ID that cannot collide with their own notes.
+    record.noteId =
+      record.noteId ||
+      (role === 'owner' && meta.sourceId ? meta.sourceId : `spacenote_${parsed.spaceId}`);
+
+    await ensurePlaceholderNote(record, parsed.title);
+  }
+
   await store.spaces.put(record);
   await mountSpace(record);
 
-  history.replaceState({ noteId }, '', '#' + encodeURIComponent(noteId));
+  // A folder workspace opens on its root folder, not a single note.
+  const openNoteId = sourceType === 'note' ? record.noteId : '';
 
-  return { noteId, role, spaceId: parsed.spaceId };
+  history.replaceState(
+    { noteId: openNoteId },
+    '',
+    openNoteId ? '#' + encodeURIComponent(openNoteId) : location.pathname
+  );
+
+  return {
+    noteId: openNoteId,
+    folderId: record.rootFolderId || '',
+    sourceType,
+    role,
+    spaceId: parsed.spaceId,
+  };
+}
+
+async function ensurePlaceholderNote(record, title = '') {
+  if (state.notes.has(record.noteId)) return;
+
+  const note = {
+    id: record.noteId,
+    title: title || record.title || 'Shared note',
+    type: 'markdown',
+    folderId: null,
+    tags: ['shared'],
+    pinned: false,
+    created: Date.now(),
+    updated: Date.now(),
+    spaceId: record.spaceId,
+    spaceRole: record.role,
+  };
+
+  state.notes.set(note.id, note);
+  await store.notes.put(note);
+}
+
+/**
+ * Mount a space from a key bundle delivered over E2EE Matrix
+ * (me.yanta.space.invite.v1). The server's member row is the
+ * authoritative role; the bundle only carries key material.
+ */
+export async function mountSpaceFromInvite({
+  spaceId,
+  title = '',
+  sourceType = 'note',
+  bundle = {},
+  invitedBy = '',
+}) {
+  if (!spaceId || !bundle.k) return null;
+
+  const existing = await store.spaces.get(spaceId);
+
+  if (existing?.role === 'owner') return null;
+
+  let meta = null;
+
+  try {
+    meta = await apiGetSpace(spaceId);
+  } catch (err) {
+    console.warn('[YANTA Spaces] invite for inaccessible space', spaceId, err);
+    return null;
+  }
+
+  const role = meta.role === 'write' ? 'write' : 'read';
+  const epoch = Number(bundle.ep || meta.webrtcEpoch || 1);
+
+  // Re-deliveries with the same key material and role are no-ops.
+  if (
+    existing &&
+    existing.role === role &&
+    existing.epoch === epoch &&
+    existing.rootKey === bundle.k &&
+    (existing.writerSecret || '') === (bundle.ws || '')
+  ) {
+    return state.spaces.get(spaceId) || mountSpace(existing);
+  }
+
+  const kind = meta.sourceType === 'folder' ? 'folder' : sourceType;
+
+  const record = {
+    spaceId,
+    noteId: existing?.noteId || (kind === 'note' ? `spacenote_${spaceId}` : ''),
+    rootFolderId: existing?.rootFolderId || '',
+    role,
+    sourceType: kind,
+    title: title || existing?.title || '',
+    rootKey: bundle.k,
+    readToken: '',
+    writeToken: '',
+    writerSecret: bundle.ws || '',
+    epoch,
+    signalingTopic: meta.signalingTopic,
+    invitedBy,
+  };
+
+  if (kind === 'note') {
+    await ensurePlaceholderNote(record, title);
+
+    // A role change (e.g. viewer promoted to editor) must reach the
+    // already-materialized note, otherwise the editor stays locked.
+    const note = state.notes.get(record.noteId);
+
+    if (note?.spaceId === spaceId && note.spaceRole !== role) {
+      note.spaceRole = role;
+      await store.notes.put(note);
+    }
+  }
+
+  await store.spaces.put(record);
+
+  // Rotation / role change: remount so WebRTC creds and observers
+  // match the new material.
+  if (state.spaces.has(spaceId)) {
+    unmountSpace(spaceId);
+  }
+
+  const session = await mountSpace(record);
+
+  if (!existing) {
+    toast(
+      `"${record.title || (kind === 'folder' ? 'A folder' : 'A note')}" was shared with you`,
+      'success'
+    );
+  }
+
+  return session;
 }
 
 export async function leaveSpace(spaceId) {
@@ -433,15 +697,28 @@ export async function leaveSpace(spaceId) {
 
   await store.spaces.del(spaceId);
 
-  // Recipients drop their local placeholder note; the owner keeps
-  // their real note untouched.
-  if (record.role !== 'owner' && record.noteId) {
-    const note = state.notes.get(record.noteId);
+  // Recipients drop everything they materialized from the space; the
+  // owner keeps their own notes and folders untouched.
+  if (record.role !== 'owner') {
+    for (const note of [...state.notes.values()]) {
+      if (note.spaceId !== spaceId) continue;
 
-    if (note?.spaceId === spaceId) {
-      state.notes.delete(record.noteId);
-      await store.notes.del(record.noteId);
+      state.notes.delete(note.id);
+      await store.notes.del(note.id);
+
+      if (state.currentNoteId === note.id) state.currentNoteId = null;
     }
+
+    for (const folder of [...state.folders.values()]) {
+      if (folder.spaceId !== spaceId) continue;
+
+      state.folders.delete(folder.id);
+      await store.folders.del(folder.id);
+    }
+  }
+
+  if (record.sourceType === 'folder') {
+    await destroyWorkspaceDoc(spaceId);
   }
 
   emitSpaceChanged(spaceId);
@@ -459,9 +736,23 @@ export async function restoreSpaces() {
   }
 
   for (const record of records) {
-    // Owner shares only make sense while the note exists.
-    if (record.role === 'owner' && !state.notes.has(record.noteId)) {
+    // A stale share: its local source is gone (owner deleted the note
+    // or folder, recipient deleted their materialized copy).
+    const sourceGone =
+      record.sourceType === 'folder'
+        ? record.rootFolderId && !state.folders.has(record.rootFolderId)
+        : !state.notes.has(record.noteId);
+
+    // Recipients of a folder space materialize their root folder on the
+    // first pull, so a missing root folder is normal on a fresh mount.
+    const notYetMaterialized =
+      record.sourceType === 'folder' &&
+      record.role !== 'owner' &&
+      !record.rootFolderId;
+
+    if (sourceGone && !notYetMaterialized) {
       await store.spaces.del(record.spaceId);
+      await store.settings.set(`space.${record.spaceId}.state`, null).catch(() => {});
       continue;
     }
 

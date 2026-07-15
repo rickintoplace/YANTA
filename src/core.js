@@ -630,11 +630,16 @@ export const store = {
   },
 };
 
-// A note mounted from someone else's shared space. Such notes must
-// never enter this user's private vault sync — their content belongs
-// to the space container, not the vault.
+// An item materialized from someone else's shared space. Such items
+// must never enter this user's private vault sync — they belong to the
+// space container, not to the vault. (The owner of a space marks
+// nothing: those are their own notes and folders.)
 export function isSpaceMountedNote(note) {
   return !!note?.spaceId;
+}
+
+export function isSpaceMountedFolder(folder) {
+  return !!folder?.spaceId;
 }
 
 // ----------------------------------------------------------------

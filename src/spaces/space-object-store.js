@@ -145,8 +145,14 @@ export class SpaceObjectStore extends RemoteObjectStore {
     );
 
     if (res.status === 409) {
-      const err = new Error(`Space object already exists: ${p}`);
-      err.code = 'EEXIST';
+      const err = await errorFromResponse(res, 'Space put rejected');
+
+      // The server demands a head + prune before accepting more journal
+      // packs; the engine handles this by compacting and retrying.
+      err.code = err.serverCode === 'compaction_required'
+        ? 'ECOMPACTION_REQUIRED'
+        : 'EEXIST';
+
       throw err;
     }
 

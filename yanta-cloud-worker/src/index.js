@@ -6432,6 +6432,12 @@ async function handleDeletePresentationSession(env, req, url, headers) {
 
 var SPACE_NAMESPACE = "yanta-space-v1/";
 
+// Upper bound for "everything under this prefix" range scans.
+var PATH_RANGE_END = "\uF8FF";
+
+// Update packs per doc before the server demands a head + prune.
+var SPACE_MAX_JOURNAL_OBJECTS = 400;
+
 // Invalid paths are a client error, not a server fault — status 400
 // also keeps clients from retrying them (5xx is retryable, 4xx not).
 function spacePathError(message) {
@@ -6804,6 +6810,152 @@ async function handleDeleteSpace(env, req, url, headers) {
   return json({ ok: true }, 200, headers);
 }
 
+// ---------------- space members (Matrix-ID grants) ----------------
+//
+// Members are YANTA users resolved from their Matrix ID via the
+// chat_accounts mapping. The server enforces their role on every
+// storage request; the space keys travel separately over E2EE Matrix
+// (the worker never sees them). Non-YANTA (federated) Matrix users
+// cannot get a member row — clients fall back to sending them a link.
+
+async function requireOwnedSpace(env, user, spaceId) {
+  const space = await env.DB.prepare(
+    `SELECT * FROM spaces WHERE id = ? AND owner_user_id = ?`
+  ).bind(String(spaceId || ""), user.userId).first();
+
+  if (!space) {
+    const err = new Error("Space not found");
+    err.status = 404;
+    throw err;
+  }
+
+  return space;
+}
+
+function spaceMemberJson(row) {
+  return {
+    userId: row.user_id,
+    matrixUserId: row.matrix_user_id || "",
+    role: row.role === "write" ? "write" : "read",
+    createdAt: row.created_at,
+    keyDeliveredAt: row.key_delivered_at || null
+  };
+}
+
+async function handleSpaceMembersList(env, req, url, headers, spaceId) {
+  const user = await requireUser(env, req);
+  await requireOwnedSpace(env, user, spaceId);
+
+  const rows = await env.DB.prepare(
+    `SELECT * FROM space_members
+     WHERE space_id = ? AND revoked_at IS NULL
+     ORDER BY created_at ASC`
+  ).bind(spaceId).all();
+
+  return json({
+    members: (rows.results || []).map(spaceMemberJson)
+  }, 200, { ...headers, "cache-control": "no-store" });
+}
+
+async function handleSpaceMemberAdd(env, req, headers, spaceId) {
+  const user = await requireUser(env, req);
+  const space = await requireOwnedSpace(env, user, spaceId);
+
+  const body = await bodyJson(req);
+  const matrixUserId = String(body.matrixUserId || "").trim();
+  const role = body.role === "write" ? "write" : "read";
+
+  if (!/^@[^:\s]+:[^:\s]+$/.test(matrixUserId)) {
+    return json({ error: "invalid_matrix_user_id" }, 400, headers);
+  }
+
+  const account = await env.DB.prepare(
+    `SELECT user_id FROM chat_accounts
+     WHERE matrix_user_id = ? AND disabled_at IS NULL`
+  ).bind(matrixUserId).first();
+
+  // Federated / non-YANTA users have no cloud account to grant against.
+  // The client falls back to sharing a link over Matrix instead.
+  if (!account) {
+    return json({ ok: true, resolved: false }, 200, headers);
+  }
+
+  if (account.user_id === space.owner_user_id) {
+    return json({ error: "cannot_add_owner" }, 400, headers);
+  }
+
+  const limits = effectiveLimits(user);
+  const count = await env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM space_members
+     WHERE space_id = ? AND revoked_at IS NULL`
+  ).bind(spaceId).first();
+
+  if (Number(count?.n || 0) >= limits.spaceMembersMax) {
+    return json({
+      error: "space_quota_exceeded",
+      message: `Plan allows at most ${limits.spaceMembersMax} members per space.`,
+      maxMembers: limits.spaceMembersMax
+    }, 403, headers);
+  }
+
+  const t = now();
+
+  await env.DB.prepare(
+    `INSERT INTO space_members
+     (space_id, user_id, matrix_user_id, role, invited_by, created_at)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(space_id, user_id) DO UPDATE SET
+       role = excluded.role,
+       matrix_user_id = excluded.matrix_user_id,
+       revoked_at = NULL`
+  ).bind(spaceId, account.user_id, matrixUserId, role, user.userId, t).run();
+
+  await env.DB.prepare(
+    `UPDATE spaces SET updated_at = ? WHERE id = ?`
+  ).bind(t, spaceId).run();
+
+  await audit(env, req, "space_member_added", user.userId, { spaceId, role });
+
+  const row = await env.DB.prepare(
+    `SELECT * FROM space_members WHERE space_id = ? AND user_id = ?`
+  ).bind(spaceId, account.user_id).first();
+
+  return json({ ok: true, resolved: true, member: spaceMemberJson(row) }, 200, headers);
+}
+
+async function handleSpaceMemberDelete(env, req, url, headers, spaceId, memberUserId) {
+  const user = await requireUser(env, req);
+
+  const space = await env.DB.prepare(
+    `SELECT * FROM spaces WHERE id = ?`
+  ).bind(spaceId).first();
+
+  if (!space) {
+    return json({ error: "not_found" }, 404, headers);
+  }
+
+  // Owners remove anyone; members may remove themselves (leave).
+  const isOwner = space.owner_user_id === user.userId;
+  const isSelf = memberUserId === user.userId;
+
+  if (!isOwner && !isSelf) {
+    return json({ error: "forbidden" }, 403, headers);
+  }
+
+  await env.DB.prepare(
+    `UPDATE space_members
+     SET revoked_at = ?
+     WHERE space_id = ? AND user_id = ? AND revoked_at IS NULL`
+  ).bind(now(), spaceId, memberUserId).run();
+
+  await audit(env, req, "space_member_removed", user.userId, {
+    spaceId,
+    self: isSelf
+  });
+
+  return json({ ok: true }, 200, headers);
+}
+
 async function handleSpaceStorageIndex(env, req, url, headers, spaceId) {
   const access = await resolveSpaceAccess(env, req, spaceId);
   requireSpaceRole(access, ["owner", "write", "read"]);
@@ -6816,7 +6968,7 @@ async function handleSpaceStorageIndex(env, req, url, headers, spaceId) {
     `SELECT path,size,etag,updated_at FROM objects
      WHERE vault_id = ? AND path >= ? AND path < ?
      ORDER BY path ASC`
-  ).bind(spaceId, SPACE_NAMESPACE, SPACE_NAMESPACE + "\uF8FF").all();
+  ).bind(spaceId, SPACE_NAMESPACE, SPACE_NAMESPACE + PATH_RANGE_END).all();
 
   return json({
     entries: (rows.results || []).map((r) => ({
@@ -6841,7 +6993,7 @@ async function handleSpaceStorageList(env, req, url, headers, spaceId) {
     `SELECT path,size,etag,updated_at FROM objects
      WHERE vault_id = ? AND path >= ? AND path < ?
      ORDER BY path ASC`
-  ).bind(spaceId, prefix, prefix + "\uF8FF").all();
+  ).bind(spaceId, prefix, prefix + PATH_RANGE_END).all();
 
   return json({
     entries: (rows.results || []).map((r) => ({
@@ -6946,6 +7098,26 @@ async function handleSpaceStoragePut(env, req, url, headers, spaceId) {
 
   const ownerId = access.space.owner_user_id;
   const limits = await spaceOwnerLimits(env, access.space);
+
+  // Cap the update journal per doc. Writers answer a 409 by uploading a
+  // full-state head and pruning the packs it covers, which keeps a space
+  // small and cheap no matter how long it stays live.
+  if (path.includes("/updates/")) {
+    const prefix = path.slice(0, path.indexOf("/updates/") + "/updates/".length);
+
+    const journal = await env.DB.prepare(
+      `SELECT COUNT(*) AS n FROM objects
+       WHERE vault_id = ? AND path >= ? AND path < ?`
+    ).bind(spaceId, prefix, prefix + PATH_RANGE_END).first();
+
+    if (Number(journal?.n || 0) >= SPACE_MAX_JOURNAL_OBJECTS) {
+      return json({
+        error: "compaction_required",
+        message: "Update journal is full. Upload a head and prune covered updates.",
+        maxJournalObjects: SPACE_MAX_JOURNAL_OBJECTS
+      }, 409, headers);
+    }
+  }
 
   if (size > limits.objectSizeBytes) {
     return json({
@@ -7279,6 +7451,24 @@ async function route(req, env) {
       }
       if (resource === "object" && req.method === "DELETE") {
         return handleSpaceStorageDelete(env, req, url, headers, spaceId);
+      }
+    }
+
+    const spaceMemberMatch = url.pathname.match(
+      /^\/api\/spaces\/([^/]+)\/members(?:\/([^/]+))?$/
+    );
+
+    if (spaceMemberMatch) {
+      const [, spaceId, memberUserId] = spaceMemberMatch;
+
+      if (!memberUserId && req.method === "GET") {
+        return handleSpaceMembersList(env, req, url, headers, spaceId);
+      }
+      if (!memberUserId && req.method === "POST") {
+        return handleSpaceMemberAdd(env, req, headers, spaceId);
+      }
+      if (memberUserId && req.method === "DELETE") {
+        return handleSpaceMemberDelete(env, req, url, headers, spaceId, decodeURIComponent(memberUserId));
       }
     }
 

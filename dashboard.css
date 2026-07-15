@@ -1886,6 +1886,23 @@
     color: var(--accent);
     background: color-mix(in srgb, var(--accent) 8%, transparent);
   }
+
+  /* Root title is a greeting; tapping edits the display name. */
+  .yanta-dashboard-title.is-greeting {
+    cursor: pointer;
+    border-radius: 8px;
+    padding: 2px 4px;
+    margin-left: -4px;
+
+    transition:
+      color 120ms ease,
+      background-color 120ms ease;
+  }
+
+  .yanta-dashboard-title.is-greeting:hover {
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 8%, transparent);
+  }
   
   .yanta-dashboard-title.can-rename .yanta-inline-edit {
     width: min(100%, 420px);

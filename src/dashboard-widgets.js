@@ -29,6 +29,7 @@ async function getWidgetsConfig() {
   return {
     order: Array.isArray(raw?.order) ? raw.order.filter(Boolean) : [],
     disabled: Array.isArray(raw?.disabled) ? raw.disabled.filter(Boolean) : [],
+    layout: raw?.layout === 'grid' ? 'grid' : 'stack',
   };
 }
 
@@ -117,9 +118,6 @@ function persistOrderFromDom(host) {
 }
 
 function makeSlotDraggable(slot, host) {
-  const head = slot.querySelector('.yanta-dash-widget-head');
-  if (!head) return;
-
   const grip = el('button', {
     class: 'icon-btn yanta-dash-widget-grip',
     title: 'Drag to reorder',
@@ -127,7 +125,42 @@ function makeSlotDraggable(slot, host) {
   });
 
   grip.innerHTML = lucide('grip-vertical', 14);
-  head.prepend(grip);
+
+  /*
+    Widgets rebuild their own head on self-refresh (replaceChildren) —
+    that used to silently drop the grip until the next full dashboard
+    render. Re-attach it whenever a grip-less head (re)appears.
+
+    Warum parentElement statt isConnected: Nach einem Dashboard-Re-Render
+    ist der alte Slot detached; dort ist isConnected für den Grip IMMER
+    false, und prepend→Mutation→Observer wird zur endlosen Microtask-
+    Schleife (Renderer-Crash). Der relative Check terminiert, und
+    detachte Slots stoppen ihren Observer ganz.
+  */
+  const ensureGrip = () => {
+    const head = slot.querySelector('.yanta-dash-widget-head');
+
+    if (!head) return;
+    if (grip.parentElement === head) return;
+
+    head.prepend(grip);
+  };
+
+  ensureGrip();
+
+  const observer = new MutationObserver(() => {
+    if (!slot.isConnected) {
+      observer.disconnect();
+      return;
+    }
+
+    ensureGrip();
+  });
+
+  observer.observe(slot, {
+    childList: true,
+    subtree: true,
+  });
 
   // Draggable only while grabbed by the grip, so text selection and
   // scrolling inside the widget keep working.
@@ -170,7 +203,11 @@ function installDropHandling(host) {
     if (!over || over === draggingSlot) return;
 
     const rect = over.getBoundingClientRect();
-    const before = e.clientY < rect.top + rect.height / 2;
+
+    // Side-by-side layout flows horizontally — compare on that axis.
+    const before = host.classList.contains('yanta-dash-widgets-grid')
+      ? e.clientX < rect.left + rect.width / 2
+      : e.clientY < rect.top + rect.height / 2;
 
     if (before) {
       over.before(draggingSlot);
@@ -190,6 +227,34 @@ function injectRegistryCss() {
   const style = document.createElement('style');
   style.id = 'yanta-dash-widgets-css';
   style.textContent = `
+.yanta-dashboard-widgets {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.yanta-dashboard-widgets:not(:empty) {
+  margin-block-end: 6px;
+}
+
+.yanta-dash-widget-slot {
+  min-width: 0;
+}
+
+/* Side-by-side on wide screens; media query keeps mobile stacked. */
+.yanta-dashboard-widgets.yanta-dash-widgets-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  align-items: start;
+}
+
+@media (max-width: 760px) {
+  .yanta-dashboard-widgets.yanta-dash-widgets-grid {
+    display: flex;
+    flex-direction: column;
+  }
+}
+
 .yanta-dash-widget-grip {
   width: 24px !important;
   height: 24px !important;
@@ -248,6 +313,42 @@ function injectRegistryCss() {
   font-size: 12px;
   line-height: 1.5;
 }
+
+.yanta-dash-widget-manager-layout {
+  display: inline-flex;
+  gap: 2px;
+
+  padding: 2px;
+
+  border: 1px solid var(--border);
+  border-radius: 8px;
+
+  background: var(--bg);
+}
+
+.yanta-dash-widget-manager-layout button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+
+  min-height: 26px;
+  padding: 2px 10px;
+
+  border: 0;
+  border-radius: 6px;
+
+  background: transparent;
+  color: var(--text-dim);
+
+  font-size: 12px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.yanta-dash-widget-manager-layout button.active {
+  color: var(--text);
+  background: var(--bg-elev-2, var(--bg-elev));
+}
 `;
 
   document.head.append(style);
@@ -265,6 +366,8 @@ export async function renderDashboardWidgetsInto(host) {
 
   const config = await getWidgetsConfig();
   const defs = await sortedWidgetDefs();
+
+  host.classList.toggle('yanta-dash-widgets-grid', config.layout === 'grid');
 
   for (const def of defs) {
     if (config.disabled.includes(def.id)) continue;
@@ -312,14 +415,42 @@ export async function openDashboardWidgetManager() {
     </header>
 
     <div class="modal-body" style="display:flex;flex-direction:column;gap:12px">
+      <div class="yanta-dash-widget-manager-row" style="gap:12px">
+        <strong style="flex:1">Layout</strong>
+        <div class="yanta-dash-widget-manager-layout" data-widget-layout>
+          <button type="button" data-layout="stack">${lucide('rows-3', 13)} Stacked</button>
+          <button type="button" data-layout="grid">${lucide('columns-3', 13)} Side by side</button>
+        </div>
+      </div>
+
       <div class="yanta-dash-widget-manager-list" data-widget-list></div>
 
       <div class="yanta-dash-widget-manager-hint">
         Widgets appear above your notes on the dashboard home. Reorder them
         here or drag them directly on the dashboard using the grip handle.
+        On small screens widgets always stack.
       </div>
     </div>
   `;
+
+  let layout = config.layout;
+
+  const layoutButtons = [...card.querySelectorAll('[data-layout]')];
+
+  const syncLayoutButtons = () => {
+    for (const btn of layoutButtons) {
+      btn.classList.toggle('active', btn.dataset.layout === layout);
+    }
+  };
+
+  for (const btn of layoutButtons) {
+    btn.addEventListener('click', () => {
+      layout = btn.dataset.layout === 'grid' ? 'grid' : 'stack';
+      syncLayoutButtons();
+    });
+  }
+
+  syncLayoutButtons();
 
   const list = card.querySelector('[data-widget-list]');
   const disabled = new Set(config.disabled);
@@ -383,6 +514,7 @@ export async function openDashboardWidgetManager() {
     await saveWidgetsConfig({
       order,
       disabled: [...disabled],
+      layout,
     });
 
     close();

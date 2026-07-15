@@ -76,16 +76,6 @@ function injectCss() {
   const style = document.createElement('style');
   style.id = 'yanta-rss-dash-widget-css';
   style.textContent = `
-.yanta-dashboard-widgets {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-
-.yanta-dashboard-widgets:not(:empty) {
-  margin-block-end: 6px;
-}
-
 .yanta-dash-widget {
   border: 1px solid var(--border);
   border-radius: 14px;

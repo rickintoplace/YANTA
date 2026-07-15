@@ -31,6 +31,11 @@ import {
 } from './dashboard-widgets.js';
 
 import {
+  currentGreeting,
+  editGreetingDisplayName,
+} from './dashboard-greeting.js';
+
+import {
   renameNoteById,
   renameFolderById,
 } from './item-actions.js';
@@ -2402,7 +2407,11 @@ function renderDashboard({ animate = true, force = false } = {}) {
   const page = el('div', { class: 'yanta-dashboard-page' });
   page.dataset.notesHeader = dashboardCardDisplay.notesShowHeader ? '1' : '0';
   page.dataset.foldersHeader = dashboardCardDisplay.foldersShowHeader ? '1' : '0';
-  page.append(renderDashboardHeader());
+  // The side pane brings its own header (tabs, expand, close) —
+  // a second dashboard header in the narrow pane is just noise.
+  if (!dashboard.paneMode) {
+    page.append(renderDashboardHeader());
+  }
 
   // Widgets live on the dashboard root only, never inside folders.
   // They fill in asynchronously and keep themselves fresh afterwards.
@@ -2453,36 +2462,52 @@ function renderDashboardHeader() {
 
   const path = currentFolderPath();
 
+  const onTitleActivate = async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (dashboard.folderId) {
+      renameDashboardCurrentFolderTitle(e.currentTarget);
+      return;
+    }
+
+    // Root title is a personal greeting — tapping edits the name it uses.
+    const changed = await editGreetingDisplayName();
+
+    if (changed) {
+      renderDashboard({
+        animate: false,
+        force: true,
+      });
+    }
+  };
+
   const title = el('div', {
     class:
       'yanta-dashboard-title' +
-      (dashboard.folderId ? ' can-rename' : ''),
-    role: dashboard.folderId ? 'button' : null,
-    tabindex: dashboard.folderId ? '0' : null,
+      (dashboard.folderId ? ' can-rename' : ' is-greeting'),
+    role: 'button',
+    tabindex: '0',
     title: dashboard.folderId
       ? 'Tap to rename folder'
-      : 'Notes',
-  
-    onclick: (e) => {
-      if (!dashboard.folderId) return;
-  
-      e.preventDefault();
-      e.stopPropagation();
-  
-      renameDashboardCurrentFolderTitle(e.currentTarget);
-    },
-  
+      : 'Tap to set your display name',
+
+    onclick: onTitleActivate,
+
     onkeydown: (e) => {
-      if (!dashboard.folderId) return;
-  
       if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        e.stopPropagation();
-  
-        renameDashboardCurrentFolderTitle(e.currentTarget);
+        onTitleActivate(e);
       }
     },
-  }, dashboard.folderId ? (path.at(-1)?.name || 'Folder') : 'Notes');
+  }, dashboard.folderId
+    ? (path.at(-1)?.name || 'Folder')
+    : currentGreeting({
+        // The name resolves async (settings/Matrix) — patch in place.
+        onUpdate: (text) => {
+          if (title.isConnected) title.textContent = text;
+        },
+      })
+  );
 
   const crumb = el('div', { class: 'yanta-dashboard-breadcrumb' });
 

@@ -24,7 +24,11 @@ import {
   destroyNoteDoc,
 } from './yjs.js';
 import { inlineTextEdit } from './inline-ui.js';
-import { renderDashboardWidgetsInto } from './dashboard-widgets.js';
+import {
+  renderDashboardWidgetsInto,
+  openDashboardWidgetManager,
+  hasDashboardWidgets,
+} from './dashboard-widgets.js';
 
 import {
   renameNoteById,
@@ -2510,6 +2514,18 @@ function renderDashboardHeader() {
 
   searchBtn.innerHTML = lucide('search', 21);
 
+  const widgetsBtn = el('button', {
+    class: 'icon-btn yanta-dashboard-icon-btn',
+    title: 'Manage widgets',
+    onclick: () => {
+      openDashboardWidgetManager().catch((err) => {
+        console.error(err);
+      });
+    },
+  });
+
+  widgetsBtn.innerHTML = lucide('layout-panel-top', 21);
+
   const newBtn = el('button', {
     class: 'btn primary yanta-dashboard-new-btn',
     title: 'Create',
@@ -2534,7 +2550,17 @@ function renderDashboardHeader() {
 
   newBtn.innerHTML = `${lucide('plus', 17)} <span>New</span>`;
 
-  header.append(menuBtn, titleWrap, searchBtn, newBtn);
+  // Widgets live on the dashboard root only — hide the manager inside
+  // folders and when no widget module registered itself.
+  const showWidgetsBtn = !dashboard.folderId && hasDashboardWidgets();
+
+  header.append(
+    menuBtn,
+    titleWrap,
+    searchBtn,
+    ...(showWidgetsBtn ? [widgetsBtn] : []),
+    newBtn
+  );
 
   return header;
 }

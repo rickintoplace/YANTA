@@ -16,7 +16,10 @@ import {
   escapeHtml,
 } from '../core.js';
 
-import { registerDashboardWidget } from '../dashboard-widgets.js';
+import {
+  registerDashboardWidget,
+  setDashboardWidgetEnabled,
+} from '../dashboard-widgets.js';
 
 import {
   getRssSettings,
@@ -31,21 +34,13 @@ import { openRssItemContextMenu } from './rss-item-menu.js';
 const WIDGET_SETTING = 'rss.dashboardWidget.v1';
 const MAX_ITEMS = 8;
 
-export async function getRssDashboardWidgetConfig() {
-  return getWidgetConfig();
-}
-
-export async function saveRssDashboardWidgetConfig(patch = {}) {
-  await saveWidgetConfig(patch);
-}
-
 async function getWidgetConfig() {
   const raw = await store.settings.get(WIDGET_SETTING, {});
 
   return {
-    enabled: raw?.enabled !== false,
     // Empty array = all feeds.
     feedIds: Array.isArray(raw?.feedIds) ? raw.feedIds.filter(Boolean) : [],
+    view: raw?.view === 'list' ? 'list' : 'cards',
   };
 }
 
@@ -228,6 +223,54 @@ function injectCss() {
   text-overflow: ellipsis;
 }
 
+/* Compact vertical list view */
+
+.yanta-dash-widget-list {
+  display: flex;
+  flex-direction: column;
+
+  max-height: 264px;
+  padding: 6px;
+
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-width: thin;
+}
+
+.yanta-rss-dash-listrow {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  align-items: center;
+  gap: 10px;
+
+  padding: 6px 8px;
+  border-radius: 9px;
+
+  cursor: pointer;
+}
+
+.yanta-rss-dash-listrow:hover {
+  background: var(--bg-elev-2, var(--bg-elev));
+}
+
+.yanta-rss-dash-listrow .yanta-rss-dash-thumb {
+  width: 34px;
+  height: 34px;
+
+  border-radius: 8px;
+  flex: 0 0 auto;
+}
+
+.yanta-rss-dash-listrow .yanta-rss-dash-thumb svg {
+  width: 15px;
+  height: 15px;
+}
+
+.yanta-rss-dash-listrow .yanta-rss-dash-title {
+  -webkit-line-clamp: 1;
+  font-size: 12.5px;
+}
+
 .yanta-rss-dash-config {
   position: absolute;
   z-index: 60;
@@ -336,9 +379,9 @@ async function collectItems(config) {
   return { feeds, items };
 }
 
-async function buildCard(item) {
+async function buildCard(item, view = 'cards') {
   const card = el('div', {
-    class: 'yanta-rss-dash-card',
+    class: view === 'list' ? 'yanta-rss-dash-listrow' : 'yanta-rss-dash-card',
     role: 'button',
     tabindex: '0',
   });
@@ -481,10 +524,9 @@ function openConfigPopover(anchor, { feeds, config, onSaved }) {
   const hide = el('button', { class: 'btn' }, 'Hide widget');
 
   hide.addEventListener('click', async () => {
-    await saveWidgetConfig({ enabled: false });
+    await setDashboardWidgetEnabled('rss-latest', false);
     panel.remove();
-    toast('Widget hidden — re-enable it in Sources settings');
-    onSaved?.();
+    toast('Widget hidden — manage widgets from the dashboard header');
   });
 
   const apply = el('button', { class: 'btn primary' }, 'Apply');
@@ -522,13 +564,6 @@ function openConfigPopover(anchor, { feeds, config, onSaved }) {
 
 async function renderWidgetContent(section) {
   const config = await getWidgetConfig();
-
-  if (!config.enabled) {
-    section.hidden = true;
-    section.replaceChildren();
-    return;
-  }
-
   const { feeds, items } = await collectItems(config);
 
   if (!items.length) {
@@ -539,18 +574,33 @@ async function renderWidgetContent(section) {
 
   section.hidden = false;
 
+  const isList = config.view === 'list';
+
   const head = el('div', { class: 'yanta-dash-widget-head' });
   head.innerHTML = `
     ${lucide('rss', 15)}
     <span class="yanta-dash-widget-title">New from your sources</span>
     <span class="yanta-dash-widget-count">${escapeHtml(String(items.length))}</span>
     <span class="yanta-dash-widget-spacer"></span>
+    <button class="icon-btn" data-widget-view title="${isList ? 'Switch to cards' : 'Switch to list'}">${lucide(isList ? 'layout-grid' : 'list', 15)}</button>
     <button class="icon-btn" data-widget-config title="Choose sources">${lucide('settings-2', 15)}</button>
     <button class="icon-btn" data-widget-open title="Open Sources">${lucide('arrow-right', 15)}</button>
   `;
 
+  head.querySelector('[data-widget-view]')?.addEventListener('click', async () => {
+    await saveWidgetConfig({ view: isList ? 'cards' : 'list' });
+    await renderWidgetContent(section);
+  });
+
   head.querySelector('[data-widget-open]')?.addEventListener('click', () => {
-    window.dispatchEvent(new CustomEvent('yanta-open-rss'));
+    // Fullscreen dashboard has no visible side pane — use the overlay there.
+    const surface = document.getElementById('app')?.dataset.surface || '';
+
+    window.dispatchEvent(new CustomEvent(
+      surface === 'dashboard' || surface === 'calendar'
+        ? 'yanta-open-rss-fullscreen'
+        : 'yanta-open-rss'
+    ));
   });
 
   head.querySelector('[data-widget-config]')?.addEventListener('click', (e) => {
@@ -561,10 +611,12 @@ async function renderWidgetContent(section) {
     });
   });
 
-  const scroll = el('div', { class: 'yanta-dash-widget-scroll' });
+  const scroll = el('div', {
+    class: isList ? 'yanta-dash-widget-list' : 'yanta-dash-widget-scroll',
+  });
 
   for (const item of items) {
-    scroll.append(await buildCard(item));
+    scroll.append(await buildCard(item, config.view));
   }
 
   section.replaceChildren(head, scroll);
@@ -573,9 +625,6 @@ async function renderWidgetContent(section) {
 async function renderRssWidget() {
   const settings = await getRssSettings();
   if (!settings.enabled) return null;
-
-  const config = await getWidgetConfig();
-  if (!config.enabled) return null;
 
   const feeds = await getRssFeeds();
   if (!feeds.length) return null;
@@ -606,6 +655,8 @@ async function renderRssWidget() {
 
 registerDashboardWidget({
   id: 'rss-latest',
-  order: 10,
+  title: 'New from your sources',
+  icon: 'rss',
+  order: 20,
   render: renderRssWidget,
 });

@@ -34,9 +34,12 @@ import {
 } from './rss-opml.js';
 
 import {
-  getRssDashboardWidgetConfig,
-  saveRssDashboardWidgetConfig,
-} from './rss-dashboard-widget.js';
+  isDashboardWidgetEnabled,
+  setDashboardWidgetEnabled,
+} from '../dashboard-widgets.js';
+
+// Ensures the widget is registered before its toggle is shown.
+import './rss-dashboard-widget.js';
 
 function injectRssSettingsPanelCss() {
   if (document.getElementById('yanta-rss-settings-panel-css')) return;
@@ -325,20 +328,13 @@ export async function renderRssSettingsPanel(host) {
   const dashboardGroup = el('div', { class: 'yanta-settings-group' });
   dashboardGroup.append(el('div', { class: 'yanta-settings-group-title' }, 'Dashboard'));
 
-  const widgetConfig = await getRssDashboardWidgetConfig();
-
   dashboardGroup.append(
     boolToggle({
-      checked: widgetConfig.enabled,
+      checked: await isDashboardWidgetEnabled('rss-latest'),
       label: 'Show "New from your sources" on the dashboard',
       hint: 'A compact strip of unread items. Pick which sources appear via the widget’s gear icon.',
       onChange: async (checked) => {
-        await saveRssDashboardWidgetConfig({ enabled: checked });
-
-        window.dispatchEvent(new CustomEvent('yanta-dashboard-refresh', {
-          detail: { force: true },
-        }));
-
+        await setDashboardWidgetEnabled('rss-latest', checked);
         toast('Sources setting saved', 'success');
       },
     })

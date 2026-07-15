@@ -176,6 +176,9 @@ import {
 import {
   notifySyncAuthRequired,
 } from './sync2/sync-auth-notice.js';
+
+// Registers the calendar dashboard widget (side effect).
+import './calendar-widget.js';
 import {
   setupRss,
   openRssInbox,

@@ -3858,7 +3858,18 @@ export function setupRss() {
     const itemId = e.detail?.itemId || '';
     if (!itemId) return;
 
-    openRssPane()
+    /*
+      Warum: Die RSS-Pane lebt in der Split-View des Note-Surface. Ist das
+      Dashboard fullscreen aktiv, läge die Pane unsichtbar dahinter — dann
+      muss das Fullscreen-Overlay her.
+    */
+    const surface = document.getElementById('app')?.dataset.surface || '';
+
+    const opened = surface === 'dashboard' || surface === 'calendar'
+      ? openRssFullscreen()
+      : openRssPane();
+
+    opened
       .then(() => renderReader(itemId))
       .catch((err) => {
         console.error(err);

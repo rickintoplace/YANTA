@@ -631,6 +631,50 @@ html.yanta-public-share-page[data-public-share-theme="light"] {
   color: var(--accent);
 }
 
+.yps-footer p {
+  margin: 10px 0 0;
+}
+
+.yps-made-with {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+
+  min-height: 30px;
+  padding: 3px 12px 3px 9px;
+
+  border: 1px solid var(--border);
+  border-radius: 999px;
+
+  color: var(--text-dim) !important;
+  background: var(--bg-elev);
+
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.yps-made-with:hover {
+  color: var(--text) !important;
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--border));
+  background: var(--bg-elev-2);
+}
+
+.yps-made-with .brand-mark svg {
+  display: block;
+  width: 15px;
+  height: 15px;
+}
+
+.yps-made-with strong {
+  color: var(--text);
+  font-weight: 800;
+}
+
+.yps-made-with .yps-made-with-sep {
+  color: var(--text-faint);
+}
+
 .yps-state-wrap {
   position: fixed;
   inset: 0;
@@ -1090,6 +1134,43 @@ function bindHeaderActions() {
   updateThemeButtons();
 }
 
+function renderFooter(payload) {
+  /*
+    Badge default: shown. Publishers on YANTA Plus can turn it off; the flag
+    travels inside the encrypted payload, so older payloads (no branding
+    field) keep the badge.
+  */
+  const showBadge = payload?.branding?.madeWithYanta !== false;
+
+  const privacyNote =
+    'Decrypted in your browser — the private key stayed in the link fragment and was never sent to the server.';
+
+  if (!showBadge) {
+    return `
+      <footer class="yps-footer">
+        ${privacyNote}
+      </footer>
+    `;
+  }
+
+  return `
+    <footer class="yps-footer">
+      <a
+        class="yps-made-with"
+        href="${escapeAttr(location.origin)}"
+        title="Create your own private workspace with YANTA"
+      >
+        <span class="brand-mark">${brandLogoSvg()}</span>
+        <strong>Made with YANTA</strong>
+        <span class="yps-made-with-sep">·</span>
+        <span>Private by design</span>
+      </a>
+
+      <p>${privacyNote}</p>
+    </footer>
+  `;
+}
+
 function renderPage(payload, imageResolver) {
   const note = payload.note || {};
   const color = applyPublicAccent(note.color || '#6ea8fe');
@@ -1165,10 +1246,7 @@ function renderPage(payload, imageResolver) {
 
         ${renderPublicShareCalendarSectionHtml(payload)}
 
-        <footer class="yps-footer">
-          Shared through <a href="${escapeAttr(location.origin)}">YANTA</a>.
-          The private decryption key stayed in the link fragment and was not sent to the server.
-        </footer>
+        ${renderFooter(payload)}
       </main>
 
       ${renderMenu()}

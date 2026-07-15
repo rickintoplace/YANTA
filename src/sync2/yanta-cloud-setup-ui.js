@@ -41,6 +41,11 @@ import {
 } from './crypto.js';
 
 import {
+  printRecoveryKit,
+  extractSyncKeyFromRecoveryInput,
+} from './recovery-kit.js';
+
+import {
   removePristineWelcomeVaultIfPresent,
 } from '../notes.js';
 
@@ -2227,8 +2232,12 @@ function renderExistingVaultStep(vaultId, {
           throw new Error('This QR code belongs to a different cloud vault.');
         }
       } else {
-        syncKeyToBytes(raw);
-        await setSync2SyncKey(raw);
+        // Tolerates the printed Recovery Kit form (grouped with spaces)
+        // and a pasted recovery JSON file, not just the bare key.
+        const key = extractSyncKeyFromRecoveryInput(raw);
+
+        syncKeyToBytes(key);
+        await setSync2SyncKey(key);
       }
 
       const baseUrl =
@@ -2319,6 +2328,7 @@ async function renderRecoveryStep(vaultId, { mode = 'new' } = {}) {
       <div class="compress-actions" style="margin-top:10px;flex-wrap:wrap">
         <button class="btn" data-copy>${lucide('copy', 14)} Copy</button>
         <button class="btn" data-download>${lucide('download', 14)} Download recovery file</button>
+        <button class="btn" data-print-kit>${lucide('printer', 14)} Print Recovery Kit</button>
       </div>
 
       <label class="yanta-cloud-warning" style="display:flex;gap:8px;align-items:flex-start;margin-top:12px">
@@ -2364,6 +2374,26 @@ async function renderRecoveryStep(vaultId, { mode = 'new' } = {}) {
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  });
+
+  modal.querySelector('[data-print-kit]')?.addEventListener('click', async () => {
+    try {
+      let accountEmail = '';
+
+      try {
+        accountEmail = (await cloudMe())?.user?.email || '';
+      } catch {}
+
+      await printRecoveryKit({
+        provider: 'yanta-cloud',
+        vaultId,
+        syncKey,
+        accountEmail,
+      });
+    } catch (err) {
+      console.error(err);
+      setStatus(err?.message || 'Could not open Recovery Kit', 'error');
+    }
   });
 
   modal.querySelector('[data-enable]')?.addEventListener('click', async () => {
@@ -2456,6 +2486,7 @@ async function renderConnected(vaultId, syncKey) {
       <div class="compress-actions" style="margin-top:10px;flex-wrap:wrap">
         <button class="btn" data-copy-link>${lucide('copy', 14)} Copy Pairing Link</button>
         <button class="btn" data-copy-pairing>${lucide('copy', 14)} Copy raw Text</button>
+        <button class="btn" data-print-kit>${lucide('printer', 14)} Print Recovery Kit</button>
         <button class="btn" data-sync-now>${lucide('refresh-cw', 14)} Sync now</button>
         <button class="btn" data-repair-sync>${lucide('wrench', 14)} Repair Cloud Sync</button>
         <button class="btn" data-compact-sync>${lucide('archive', 14)} Optimize Cloud Storage</button>
@@ -2485,6 +2516,26 @@ async function renderConnected(vaultId, syncKey) {
       toast('Pairing text copied', 'success');
     } catch {
       toast('Copy failed', 'error');
+    }
+  });
+
+  modal.querySelector('[data-print-kit]')?.addEventListener('click', async () => {
+    try {
+      let accountEmail = '';
+
+      try {
+        accountEmail = (await cloudMe())?.user?.email || '';
+      } catch {}
+
+      await printRecoveryKit({
+        provider: 'yanta-cloud',
+        vaultId,
+        syncKey,
+        accountEmail,
+      });
+    } catch (err) {
+      console.error(err);
+      setStatus(err?.message || 'Could not open Recovery Kit', 'error');
     }
   });
 

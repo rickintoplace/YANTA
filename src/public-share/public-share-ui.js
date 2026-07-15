@@ -3,6 +3,7 @@ import { BRAND_LOGO_SVG } from '../brand-logo.js';
 
 import {
   state,
+  store,
   escapeHtml,
   lucide,
   toast,
@@ -46,7 +47,15 @@ import {
   stopAllPublicShares,
   isPublicShareActive,
   refreshOwnPublicShareStatusFromCloud,
+  listLocalPublicSharedNotes,
+  schedulePublicSharePublish,
+  PUBLIC_SHARE_BRANDING_SETTING,
 } from './public-share-publisher.js';
+
+import {
+  currentBillingSummary,
+  openYantaPlusUpgrade,
+} from '../billing/billing-ui.js';
 
 import {
   listOwnPublicShares,
@@ -431,6 +440,54 @@ function ensureCss() {
   color: var(--text-faint);
 }
 
+.yanta-public-share-branding {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+
+  padding: 9px 11px;
+
+  border: 1px solid var(--border);
+  border-radius: 10px;
+
+  background: var(--bg-elev);
+
+  color: var(--text-dim);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.yanta-public-share-branding input[type="checkbox"] {
+  flex: 0 0 auto;
+  accent-color: var(--accent);
+}
+
+.yanta-public-share-branding .grow {
+  flex: 1;
+}
+
+.yanta-public-share-branding-plus {
+  flex: 0 0 auto;
+
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+
+  min-height: 22px;
+  padding: 1px 8px;
+
+  border: 1px solid color-mix(in srgb, var(--accent) 42%, var(--border));
+  border-radius: 999px;
+
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 9%, transparent);
+
+  font-size: 11px;
+  font-weight: 750;
+
+  cursor: pointer;
+}
+
 @media (max-width: 680px) {
   .yanta-public-share-row {
     grid-template-columns: 1fr;
@@ -517,6 +574,21 @@ async function renderPublicTab(noteId) {
   const share = publicShareStateForNote(noteId);
   const hasShare = isPublicShareActive(share);
   const hasPrivateKey = !!share?.shareKey;
+
+  /*
+    "Made with YANTA" badge preference. Hiding is a Plus perk; free plans see
+    the toggle locked to "shown". Offline/signed-out defaults to free, which
+    only locks the toggle — publishing itself enforces the plan again.
+  */
+  let brandingIsPlus = false;
+
+  try {
+    brandingIsPlus = (await currentBillingSummary()).plan === 'premium';
+  } catch {}
+
+  const brandingShown =
+    !brandingIsPlus ||
+    (await store.settings.get(PUBLIC_SHARE_BRANDING_SETTING, true)) !== false;
 
   const url = hasShare && hasPrivateKey
     ? share.url || makePublicShareUrl(share.shareId, share.shareKey)
@@ -638,6 +710,31 @@ async function renderPublicTab(noteId) {
             </div>
           `
       }
+
+      <label class="yanta-public-share-branding">
+        <input
+          type="checkbox"
+          data-public-share-branding
+          ${brandingShown ? 'checked' : ''}
+          ${brandingIsPlus ? '' : 'disabled'}
+        >
+        <span>Show “Made with YANTA · Private by design” on the public page</span>
+        <span class="grow"></span>
+        ${
+          brandingIsPlus
+            ? ''
+            : `
+              <button
+                type="button"
+                class="yanta-public-share-branding-plus"
+                data-branding-upgrade
+                title="Hiding the badge is part of YANTA Plus"
+              >
+                ${lucide('sparkles', 11)} Plus
+              </button>
+            `
+        }
+      </label>
     </div>
   `;
 
@@ -745,6 +842,52 @@ async function renderPublicTab(noteId) {
     } catch (err) {
       console.error(err);
       toast(err?.message || 'Could not stop sharing', 'error');
+    }
+  });
+
+  body.querySelector('[data-public-share-branding]')?.addEventListener('change', async (e) => {
+    const show = !!e.currentTarget.checked;
+
+    try {
+      await store.settings.set(PUBLIC_SHARE_BRANDING_SETTING, show);
+    } catch (err) {
+      console.error(err);
+      toast('Could not save badge preference', 'error');
+      return;
+    }
+
+    /*
+      The badge travels inside each published payload, so already-published
+      pages only pick up the change through a republish.
+    */
+    let republished = 0;
+
+    for (const row of listLocalPublicSharedNotes()) {
+      if (!row.share?.shareKey) continue;
+
+      schedulePublicSharePublish(row.noteId, {
+        delay: 600,
+      });
+
+      republished++;
+    }
+
+    toast(
+      republished
+        ? `Badge ${show ? 'enabled' : 'hidden'} · updating ${republished} public page${republished === 1 ? '' : 's'}`
+        : `Badge ${show ? 'enabled' : 'hidden'}`,
+      'success'
+    );
+  });
+
+  body.querySelector('[data-branding-upgrade]')?.addEventListener('click', async (e) => {
+    e.preventDefault();
+
+    try {
+      await openYantaPlusUpgrade();
+    } catch (err) {
+      console.error(err);
+      toast(err?.message || 'Could not open upgrade', 'error');
     }
   });
 
@@ -943,7 +1086,7 @@ body.innerHTML = `
           aria-label="Copy read link"
           title="Copy read link"
         >
-          ${lucide('copy', 14)}
+          ${lucide('copy', 14)} Copy read link
         </button>
       </div>
     </div>
@@ -981,7 +1124,7 @@ body.innerHTML = `
                 aria-label="Copy edit link"
                 title="Copy edit link"
               >
-                ${lucide('copy', 14)}
+                ${lucide('copy', 14)} Copy edit link
               </button>
             </div>
           </div>

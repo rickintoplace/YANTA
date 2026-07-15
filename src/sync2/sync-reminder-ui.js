@@ -309,28 +309,28 @@ import {
         </span>
   
         <span class="yanta-sync-reminder-main">
-          <strong>Schütze deine YANTA-Daten</strong>
+          <strong>Protect your YANTA data</strong>
           <p>
-            Deine Notizen sind aktuell nur lokal gespeichert.
-            Richte Sync ein oder lade ein verschlüsseltes Backup herunter,
-            damit du deine Daten nicht verlierst.
+            Your notes are currently stored on this device only.
+            Set up sync or download an encrypted backup so you don't
+            lose your data.
           </p>
         </span>
-  
-        <button class="yanta-sync-reminder-close" data-sync-reminder-snooze title="Später erinnern">
+
+        <button class="yanta-sync-reminder-close" data-sync-reminder-snooze title="Remind me later">
           ${lucide('x', 15)}
         </button>
       </div>
-  
+
       <div class="yanta-sync-reminder-actions">
         <button class="btn" data-sync-reminder-backup>
           ${lucide('download', 14)}
-          Backup herunterladen
+          Download backup
         </button>
-  
+
         <button class="btn primary" data-sync-reminder-cloud>
           ${lucide('cloud', 14)}
-          Cloud Sync einrichten
+          Set up Cloud Sync
         </button>
       </div>
     `;
@@ -352,7 +352,7 @@ import {
         });
       } catch (err) {
         console.error('[YANTA Sync Reminder] could not open Cloud setup', err);
-        toast('Cloud Sync konnte nicht geöffnet werden', 'error');
+        toast('Could not open Cloud Sync setup', 'error');
       }
     });
   
@@ -369,10 +369,10 @@ import {
           snoozedUntil: now() + BACKUP_OK_MS,
         });
   
-        toast('Verschlüsseltes Backup heruntergeladen', 'success');
+        toast('Encrypted backup downloaded', 'success');
       } catch (err) {
         console.error('[YANTA Sync Reminder] backup failed', err);
-        toast('Backup konnte nicht erstellt werden', 'error');
+        toast('Could not create backup', 'error');
       }
     });
   

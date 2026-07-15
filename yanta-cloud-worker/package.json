@@ -2,6 +2,7 @@
   "name": "yanta-cloud-worker",
   "version": "1.0.0",
   "private": true,
+  "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
     "dev": "npx -y wrangler@4 dev",

@@ -27,6 +27,22 @@ import {
 
 const LOCAL_PUBLIC_SHARE_STATUS_KEY = 'yanta.publicShares.local.v1';
 
+export const PUBLIC_SHARE_BRANDING_SETTING = 'publicShare.showBranding';
+
+/*
+  "Made with YANTA" badge on public pages.
+  Default: shown. Hiding is a YANTA Plus perk, enforced at publish time —
+  the payload is end-to-end encrypted, so the server cannot enforce it.
+*/
+export async function shouldHidePublicShareBranding(me) {
+  const isPlus = String(me?.user?.plan || 'free') === 'premium';
+  if (!isPlus) return false;
+
+  const showBranding = await store.settings.get(PUBLIC_SHARE_BRANDING_SETTING, true);
+
+  return showBranding === false;
+}
+
 let timers = new Map();
 let publishing = new Map();
 let lastOwnPublicShareCloudRefreshAt = 0;
@@ -637,7 +653,7 @@ export async function publishPublicShareNow(noteId, {
   if (publishing.get(noteId)) return publishing.get(noteId);
 
   const promise = (async () => {
-    const { engine } = await assertPublicSharePrereqs();
+    const { engine, me } = await assertPublicSharePrereqs();
 
     const share = await createOrGetPublicShare(noteId, {
       expiresAt,
@@ -659,6 +675,7 @@ export async function publishPublicShareNow(noteId, {
       noteId,
       shareKey: share.shareKey,
       engine,
+      hideBranding: await shouldHidePublicShareBranding(me),
     });
 
     if (!force && share.lastPayloadHash === packed.payloadHash) {

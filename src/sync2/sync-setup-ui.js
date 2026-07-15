@@ -47,6 +47,11 @@ import {
 } from './crypto.js';
 
 import {
+  printRecoveryKit,
+  extractSyncKeyFromRecoveryInput,
+} from './recovery-kit.js';
+
+import {
   SYNC2_PROVIDERS,
 } from './provider-registry.js';
 
@@ -365,9 +370,13 @@ async function importKeyOrPairingText(text) {
     return await importSync2PairingPayload(raw);
   } catch {}
 
-  syncKeyToBytes(raw);
+  // Tolerates the printed Recovery Kit form (grouped with spaces)
+  // and a pasted recovery JSON file, not just the bare key.
+  const key = extractSyncKeyFromRecoveryInput(raw);
 
-  await setSync2SyncKey(raw);
+  syncKeyToBytes(key);
+
+  await setSync2SyncKey(key);
   await store.settings.set('sync2.provider', 'google-drive');
 
   return {
@@ -375,7 +384,7 @@ async function importKeyOrPairingText(text) {
     app: 'YANTA',
     kind: 'sync2-manual-key',
     provider: 'google-drive',
-    syncKey: raw,
+    syncKey: key,
   };
 }
 
@@ -789,6 +798,9 @@ async function renderConnectedView({
           <button class="btn" data-action="new-device">
             ${lucide('smartphone', 14)} Connect another device
           </button>
+          <button class="btn" data-action="print-kit">
+            ${lucide('printer', 14)} Print Recovery Kit
+          </button>
           <button class="btn primary" data-sync2-close>Done</button>
         </div>
 
@@ -826,6 +838,18 @@ async function renderConnectedView({
 
   m.querySelector('[data-action="new-device"]')?.addEventListener('click', () => {
     renderConnectExistingView(rawPayload || pairingUrl || key);
+  });
+
+  m.querySelector('[data-action="print-kit"]')?.addEventListener('click', async () => {
+    try {
+      await printRecoveryKit({
+        provider: 'google-drive',
+        syncKey: key,
+      });
+    } catch (err) {
+      console.error(err);
+      setStatus(err?.message || 'Could not open Recovery Kit', 'error');
+    }
   });
 
   m.hidden = false;

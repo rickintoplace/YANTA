@@ -174,6 +174,9 @@ import {
   setupSyncReminderUi,
 } from './sync2/sync-reminder-ui.js';
 import {
+  notifySyncAuthRequired,
+} from './sync2/sync-auth-notice.js';
+import {
   setupRss,
   openRssInbox,
   closeRssFullscreenUI,
@@ -880,6 +883,17 @@ async function runSync2Now(reason = 'manual', {
     return engine.status();
   } catch (err) {
     console.warn('[YANTA Sync2] sync failed:', reason, err);
+
+    /*
+      BYO Google Drive: Token abgelaufen/widerrufen. Hintergrund-Sync darf
+      hier nie still scheitern — der User glaubt sonst, er sei gesynct.
+    */
+    if (err?.code === 'EAUTH_REQUIRED') {
+      notifySyncAuthRequired({
+        provider: 'google-drive',
+      });
+    }
+
     throw err;
   } finally {
     sync2Auto.running = false;
@@ -1060,6 +1074,11 @@ async function ensureGoogleDriveSyncSilently(reason = 'silent') {
     } catch (err) {
       if (err?.code === 'EAUTH_REQUIRED') {
         console.info('[YANTA Sync2] Google sign-in required.');
+
+        notifySyncAuthRequired({
+          provider: 'google-drive',
+        });
+
         return;
       }
 

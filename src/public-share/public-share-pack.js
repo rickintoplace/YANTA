@@ -255,6 +255,7 @@ export async function packPublicNoteShare({
   noteId,
   shareKey,
   engine,
+  hideBranding = false,
 } = {}) {
   if (!noteId) throw new Error('noteId required');
   if (!shareKey) throw new Error('shareKey required');
@@ -319,6 +320,16 @@ export async function packPublicNoteShare({
     v: 1,
     kind: 'yanta-public-note-share',
     exportedAt: new Date().toISOString(),
+
+    /*
+      Zero-knowledge: der Server kann das Payload nicht lesen, also reist die
+      Branding-Entscheidung des Publishers verschlüsselt mit. Der Viewer zeigt
+      das "Made with YANTA"-Badge, außer madeWithYanta ist explizit false
+      (nur YANTA Plus darf das beim Publish setzen).
+    */
+    branding: {
+      madeWithYanta: !hideBranding,
+    },
 
     note: {
       id: note.id,

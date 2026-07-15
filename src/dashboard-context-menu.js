@@ -978,6 +978,14 @@ import {
         label: 'Copy note ID',
         action: () => copyText(note.id, 'Note ID copied'),
       },
+      'hr',
+      {
+        label: note.spaceId ? 'Shared note…' : 'Share note…',
+        action: async () => {
+          const { openUnifiedShareModal } = await import('./public-share/public-share-ui.js');
+          openUnifiedShareModal({ noteId: note.id });
+        },
+      },
     ];
   
     if (ev) {
@@ -1067,6 +1075,13 @@ import {
       {
         label: 'Move to folder…',
         action: () => moveKeysToFolder([key]),
+      },
+      {
+        label: folder.spaceId ? 'Shared workspace…' : 'Share folder…',
+        action: async () => {
+          const { openUnifiedShareModal } = await import('./public-share/public-share-ui.js');
+          openUnifiedShareModal({ folderId: folder.id });
+        },
       },
       {
         label: 'Select contents',

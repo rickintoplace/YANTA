@@ -48,6 +48,9 @@ desktop.ini
 *.swp
 *.swo
 
+# Claude Code (local agent config/skills — not part of the product)
+.claude/
+
 # Local certificates / keys
 *.pem
 *.key

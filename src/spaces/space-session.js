@@ -345,6 +345,97 @@ function unmountSpace(spaceId) {
   emitSpaceChanged(spaceId);
 }
 
+// ---------------- sharing guards ---------------------------------
+
+function folderChainIds(folderId) {
+  const chain = [];
+  const seen = new Set();
+
+  let current = folderId;
+
+  while (current && !seen.has(current)) {
+    seen.add(current);
+    chain.push(current);
+    current = state.folders.get(current)?.parentId || null;
+  }
+
+  return chain;
+}
+
+/**
+ * Why nested/foreign shares are blocked instead of allowed:
+ * an item inside a shared workspace already syncs through that space.
+ * A second space over the same item would double-attach its docs under
+ * different keys, and a recipient re-sharing someone else's content
+ * would silently widen access the owner never granted.
+ *
+ * Returns a human-readable conflict message, or '' when sharing is fine.
+ */
+export function sharingConflictForNote(noteId) {
+  const note = state.notes.get(noteId);
+  if (!note) return '';
+
+  if (note.spaceId) {
+    return 'This note is shared with you. Only the person who shared it can manage its sharing.';
+  }
+
+  for (const id of folderChainIds(note.folderId)) {
+    const folder = state.folders.get(id);
+
+    if (folder?.spaceId) {
+      return 'This note is inside a folder that was shared with you. Only the person who shared it can manage its sharing.';
+    }
+
+    const session = spaceSessionForFolder(id);
+
+    if (session) {
+      return `This note is already shared through the "${folder?.name || 'shared'}" workspace. Manage sharing on that folder instead.`;
+    }
+  }
+
+  return '';
+}
+
+export function sharingConflictForFolder(folderId) {
+  const folder = state.folders.get(folderId);
+  if (!folder) return '';
+
+  if (folder.spaceId && !spaceSessionForFolder(folderId)) {
+    return 'This folder is shared with you. Only the person who shared it can manage its sharing.';
+  }
+
+  // An ancestor is already a workspace root (or mounted from someone
+  // else) — this folder already lives inside a shared space.
+  for (const id of folderChainIds(folderId).slice(1)) {
+    const ancestor = state.folders.get(id);
+
+    if (ancestor?.spaceId) {
+      return 'This folder is inside a folder that was shared with you. Only the person who shared it can manage its sharing.';
+    }
+
+    if (spaceSessionForFolder(id)) {
+      return `This folder is already shared through the "${ancestor?.name || 'shared'}" workspace. Manage sharing on that folder instead.`;
+    }
+  }
+
+  // A descendant is already a workspace root — sharing this folder
+  // would nest one space inside another.
+  for (const session of state.spaces.values()) {
+    if (session.sourceType !== 'folder') continue;
+
+    const rootId = session.record.rootFolderId;
+    if (!rootId || rootId === folderId) continue;
+
+    if (folderChainIds(rootId).includes(folderId)) {
+      const root = state.folders.get(rootId);
+
+      return `The sub-folder "${root?.name || 'a sub-folder'}" inside this folder is already shared. Stop that share first, or share this folder's contents through it.`;
+    }
+  }
+
+  return '';
+}
+
 // ---------------- owner: create / stop ---------------------------
 
 export async function createSpaceForNote(noteId) {
@@ -353,6 +444,9 @@ export async function createSpaceForNote(noteId) {
 
   const note = state.notes.get(noteId);
   if (!note) throw new Error('Note not found');
+
+  const conflict = sharingConflictForNote(noteId);
+  if (conflict) throw new Error(conflict);
 
   const rootKey = generateSpaceSecret();
   const writerSecret = generateSpaceSecret();
@@ -407,6 +501,9 @@ export async function createSpaceForFolder(folderId) {
 
   const folder = state.folders.get(folderId);
   if (!folder) throw new Error('Folder not found');
+
+  const conflict = sharingConflictForFolder(folderId);
+  if (conflict) throw new Error(conflict);
 
   const rootKey = generateSpaceSecret();
   const writerSecret = generateSpaceSecret();

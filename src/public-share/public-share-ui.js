@@ -25,6 +25,8 @@ import {
   apiAddSpaceMember,
   apiRemoveSpaceMember,
   rotateSpaceWriteAccess,
+  sharingConflictForNote,
+  sharingConflictForFolder,
 } from '../spaces/space-session.js';
 
 import {
@@ -571,6 +573,25 @@ function statusClass(status) {
 }
 
 async function renderPublicTab(noteId) {
+  const body0 = modal.querySelector('[data-share-body]');
+
+  // Notes mounted from someone else's space are not in this user's own
+  // cloud vault — publishing would leak a degraded copy without assets.
+  if (state.notes.get(noteId)?.spaceId) {
+    if (body0) {
+      body0.innerHTML = `
+        <div class="yanta-public-share-box">
+          <div class="yanta-public-share-info">
+            <strong>Shared with you</strong><br>
+            This note was shared with you. Only the person who shared it can publish it as a public page.
+          </div>
+        </div>
+      `;
+    }
+
+    return;
+  }
+
   const share = publicShareStateForNote(noteId);
   const hasShare = isPublicShareActive(share);
   const hasPrivateKey = !!share?.shareKey;
@@ -969,6 +990,28 @@ async function renderLiveTab() {
     return;
   }
 
+  // No session for this exact item — but it may already be covered by
+  // another share (inside a shared workspace, or shared with this user).
+  // Show why instead of offering a "Start live share" that would fail.
+  const conflict = !session
+    ? (isFolder
+        ? sharingConflictForFolder(shareTarget.id)
+        : sharingConflictForNote(shareTarget.id))
+    : '';
+
+  if (conflict) {
+    body.innerHTML = `
+      <div class="yanta-public-share-box">
+        <div class="yanta-public-share-info">
+          <strong>Already covered by a share</strong><br>
+          ${escapeHtml(conflict)}
+        </div>
+      </div>
+    `;
+
+    return;
+  }
+
   // Owner view without an active space yet.
   if (!session) {
     body.innerHTML = `
@@ -1314,7 +1357,9 @@ async function renderPeopleTab() {
       <div class="yanta-public-share-info">
         <strong>People</strong><br>
         Invite by Matrix ID (e.g. <code>@anna:yanta.me</code>) or YANTA handle.
-        Keys are delivered end-to-end encrypted over Chat; access is enforced by the server.
+        Invited people automatically get this ${targetIsFolder() ? 'folder' : 'note'} in their YANTA
+        under <em>Shared with me</em> — keys are delivered end-to-end encrypted over Chat,
+        and access is enforced by the server.
       </div>
 
       <div class="yanta-public-share-link-row">
@@ -1365,9 +1410,25 @@ async function renderPeopleTab() {
             <option value="read" ${member.role === 'read' ? 'selected' : ''}>Can view</option>
             <option value="write" ${member.role === 'write' ? 'selected' : ''}>Can edit</option>
           </select>
+          <button class="btn" data-member-resend title="Resend invite">${lucide('send', 14)}</button>
           <button class="btn danger" data-member-remove title="Remove access">${lucide('user-x', 14)}</button>
         </div>
       `;
+
+      row.querySelector('[data-member-resend]')?.addEventListener('click', async (e) => {
+        const resendBtn = e.currentTarget;
+        resendBtn.disabled = true;
+
+        try {
+          await sendSpaceInvite(session.record, member.matrixUserId, member.role);
+          toast(`Invite re-sent to ${member.matrixUserId}`, 'success');
+        } catch (err) {
+          console.error(err);
+          toast(err?.message || 'Could not resend invite', 'error');
+        }
+
+        resendBtn.disabled = false;
+      });
 
       row.querySelector('[data-member-role]')?.addEventListener('change', async (e) => {
         const newRole = e.target.value === 'write' ? 'write' : 'read';
@@ -1457,8 +1518,23 @@ async function renderPeopleTab() {
       const res = await apiAddSpaceMember(session.spaceId, { matrixUserId, role });
 
       if (res.resolved) {
-        await sendSpaceInvite(session.record, matrixUserId, role);
-        toast(`Shared with ${matrixUserId}`, 'success');
+        /*
+          Access is granted at this point even if key delivery fails
+          (e.g. Chat not connected). Say so explicitly — otherwise the
+          owner sees an error and assumes nothing happened, while the
+          member row exists without keys.
+        */
+        try {
+          await sendSpaceInvite(session.record, matrixUserId, role);
+          toast(`Shared with ${matrixUserId} — it appears in their YANTA automatically`, 'success');
+        } catch (err) {
+          console.error(err);
+          toast(
+            `Access granted, but key delivery failed (${err?.message || 'chat unavailable'}). Use “Resend invite” next to their name.`,
+            'error'
+          );
+        }
+
         if (input) input.value = '';
       } else {
         // Not a YANTA user — offer the link fallback over federation.

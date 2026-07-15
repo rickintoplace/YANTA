@@ -430,12 +430,58 @@ class WorkspaceBridge {
   belongsToSpace(item) {
     if (!item) return false;
 
-    if (this.isOwner) {
-      const folderId = item.folderId ?? item.parentId ?? null;
-      return item.id === this.rootFolderId || isInSubtree(folderId, this.rootFolderId);
-    }
+    /*
+      Membership is geometry, not marking, for BOTH roles: an item is in
+      the space iff it sits inside the (owner's real / recipient's
+      materialized) shared root folder. Checking the spaceId mark instead
+      broke recipients: items they had just created carried no mark yet,
+      so they never reached the workspace doc.
+    */
+    const folderId = item.folderId ?? item.parentId ?? null;
+    return item.id === this.rootFolderId || isInSubtree(folderId, this.rootFolderId);
+  }
 
-    return item.spaceId === this.spaceId;
+  /**
+   * Recipient-created items need the spaceId mark: it keeps them out of
+   * the recipient's private vault sync (isSpaceMountedNote) and labels
+   * them in the UI. Owners never mark — their items live in their vault.
+   */
+  async ensureSpaceMark(item, kind) {
+    if (this.isOwner) return;
+    if (item.spaceId === this.spaceId && item.spaceRole === this.role) return;
+
+    item.spaceId = this.spaceId;
+    item.spaceRole = this.role;
+
+    if (kind === 'note') {
+      state.notes.set(item.id, item);
+      await this.withoutHooks(() => store.notes.put(item));
+    } else {
+      state.folders.set(item.id, item);
+      await this.withoutHooks(() => store.folders.put(item));
+    }
+  }
+
+  /**
+   * Inverse of ensureSpaceMark: a recipient moved the item out of the
+   * shared subtree. Without unmarking, the item would be excluded from
+   * their private vault sync but no longer synced by the space either —
+   * a data limbo.
+   */
+  async clearSpaceMark(item, kind) {
+    if (this.isOwner) return;
+    if (!item || item.spaceId !== this.spaceId) return;
+
+    delete item.spaceId;
+    delete item.spaceRole;
+
+    if (kind === 'note') {
+      state.notes.set(item.id, item);
+      await this.withoutHooks(() => store.notes.put(item));
+    } else {
+      state.folders.set(item.id, item);
+      await this.withoutHooks(() => store.folders.put(item));
+    }
   }
 
   async removeNoteOut(id, existing) {
@@ -458,16 +504,21 @@ class WorkspaceBridge {
     const known = workspaceNotesMap(this.spaceId).has(note.id);
 
     if (!inSpace) {
-      // The owner moved a note out of the shared folder — it leaves
-      // the space (content already uploaded stays until compaction).
-      if (known && this.isOwner) {
+      // Moved out of the shared folder — the note leaves the space
+      // (content already uploaded stays until compaction). Recipients
+      // keep their local copy as a private note again.
+      if (known && this.canWrite) {
         addWorkspaceTombstone(this.spaceId, 'note', note.id, WORKSPACE_ORIGINS.BRIDGE);
         this.session.engine?.detachDoc(note.id);
         this.attachedNotes.delete(note.id);
+
+        await this.clearSpaceMark(note, 'note');
       }
 
       return;
     }
+
+    await this.ensureSpaceMark(note, 'note');
 
     getNoteDoc(note.id);
 
@@ -483,12 +534,16 @@ class WorkspaceBridge {
     const known = workspaceFoldersMap(this.spaceId).has(folder.id);
 
     if (!inSpace) {
-      if (known && this.isOwner) {
+      if (known && this.canWrite) {
         addWorkspaceTombstone(this.spaceId, 'folder', folder.id, WORKSPACE_ORIGINS.BRIDGE);
+
+        await this.clearSpaceMark(folder, 'folder');
       }
 
       return;
     }
+
+    await this.ensureSpaceMark(folder, 'folder');
 
     this.session.workspaceDoc.transact(() => {
       workspaceFoldersMap(this.spaceId).set(folder.id, workspaceFolderMeta(folder));

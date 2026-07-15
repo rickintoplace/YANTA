@@ -2491,6 +2491,16 @@ function noteMenu(e, n) {
       label: 'Rename…',
       action: () => renameTreeNote(n.id),
     },
+    'hr',
+    {
+      label: n.spaceId ? 'Shared note…' : 'Share note…',
+      icon: 'users',
+      action: async () => {
+        const { openUnifiedShareModal } = await import('./public-share/public-share-ui.js');
+        openUnifiedShareModal({ noteId: n.id });
+      },
+    },
+    'hr',
     {
       label: n.archived ? 'Unarchive' : 'Archive',
       action: async () => {

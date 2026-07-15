@@ -78,6 +78,14 @@ import {
 
 import { pushOverlayState, closeTopOverlay } from '../overlay-history.js';
 
+import {
+  openRssItemContextMenu,
+  pickChatRoomAndSendRssItem,
+} from './rss-item-menu.js';
+
+// Registers the "New from your sources" dashboard widget (side effect).
+import './rss-dashboard-widget.js';
+
 let initialized = false;
 
 let mode = 'pane'; // pane | fullscreen
@@ -480,6 +488,20 @@ async function renderItemCard(item) {
       e.preventDefault();
       btn.click();
     }
+  });
+
+  // Right-click on desktop; Android fires contextmenu on long-press.
+  btn.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    openRssItemContextMenu({
+      x: e.clientX,
+      y: e.clientY,
+      item,
+      onOpen: () => renderReader(item.id),
+      onChanged: () => renderInbox(),
+    }).catch((err) => console.warn('[YANTA RSS] item menu failed', err));
   });
 
   const thumb = el('div', { class: 'yanta-rss-thumb' });
@@ -1240,7 +1262,21 @@ async function renderReader(itemId, { fromHistory = false } = {}) {
     }
   });
 
-  saveGroup.append(star, save, append);
+  const sendChat = el('button', {
+    class: 'btn iconish',
+    title: 'Send to chat',
+  });
+
+  sendChat.innerHTML = lucide('send', 15);
+
+  sendChat.addEventListener('click', () => {
+    const rect = sendChat.getBoundingClientRect();
+
+    pickChatRoomAndSendRssItem(item, rect.left, rect.bottom + 4)
+      .catch((err) => console.warn('[YANTA RSS] send to chat failed', err));
+  });
+
+  saveGroup.append(star, save, append, sendChat);
 
   actions.append(navGroup, saveGroup);
   head.append(actions);
@@ -3814,6 +3850,20 @@ export function setupRss() {
       console.error(err);
       toast('Could not open Sources', 'error');
     });
+  });
+
+  // Open a specific item's reader from outside the RSS UI
+  // (dashboard widget, AI actions).
+  window.addEventListener('yanta-open-rss-item', (e) => {
+    const itemId = e.detail?.itemId || '';
+    if (!itemId) return;
+
+    openRssPane()
+      .then(() => renderReader(itemId))
+      .catch((err) => {
+        console.error(err);
+        toast('Could not open source item', 'error');
+      });
   });
 
   window.addEventListener('yanta-side-pane-switch', (e) => {

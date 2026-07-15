@@ -1,28 +1,29 @@
 # YANTA
 
-**A local-first workspace — notes, drawings, calendar, chat and AI — that works fully offline and whose cloud can never read your data.**
+**A local-first workspace (notes, drawings, calendar, chat and AI) that works fully offline and whose cloud can never read your data.**
 
 Your notes are encrypted on your device before they sync anywhere. YANTA Cloud (or your own Google Drive) only ever stores ciphertext; the keys stay with you.
 
 ## Features
 
-- **Markdown notes** — CodeMirror 6 editor with slash commands, autocomplete, inline image/video previews. Every note is a Yjs CRDT document: conflict-free, offline-first, collaboration-ready.
-- **Drawings & slides** — Excalidraw drawings embedded in notes (`/drawing`), Mermaid import, slide decks with camera targets and presenter notes.
-- **Calendar** — FullCalendar-based agenda with ICS sources, recurrence, holidays, and notes ↔ events linking.
-- **Chat** — end-to-end encrypted Matrix chat built in (`src/chat/`), used both for messaging and for delivering share invitations.
-- **AI assistant** — bring your own OpenRouter key, or use the AI quota included with YANTA Plus. Context building from notes, drawings and calendar.
-- **Live sharing (Shared Spaces)** — share a note or a whole folder as a live space. Writers collaborate over WebRTC; readers get near-live updates through the cloud relay. Everything is end-to-end encrypted; the keys travel in the URL fragment or over encrypted Matrix DMs, never to the server.
-- **Public pages** — publish a note as a read-only page (`/share/<id>#k=…`). The payload is encrypted client-side; the decryption key stays in the link fragment.
+- **Markdown notes**: CodeMirror 6 editor with slash commands, autocomplete, inline image/video previews. Every note is a Yjs CRDT document: conflict-free, offline-first, collaboration-ready.
+- **Drawings & slides**: Excalidraw drawings embedded in notes (`/drawing`), Mermaid import, slide decks with camera targets and presenter notes.
+- **Calendar**: FullCalendar-based agenda with ICS sources, recurrence, and notes-events linking.
+- **Chat**: end-to-end encrypted Matrix chat built in (`src/chat/`), used both for messaging and for delivering share invitations.
+- **Sources (RSS)**: built-in reader for RSS/Atom feeds, podcasts and YouTube channels, with OPML import/export. Articles plug into everything else: save as note, append to the current note, send to a chat, star, or surface in the "New from your sources" dashboard widget.
+- **AI assistant**: bring your own OpenRouter key, or use the AI quota included with YANTA Plus. Context building from notes, drawings and calendar.
+- **Live sharing (Shared Spaces)**: share a note or a whole folder as a live space. Writers collaborate over WebRTC; readers get near-live updates through the cloud relay. Everything is end-to-end encrypted; the keys travel in the URL fragment or over encrypted Matrix DMs, never to the server.
+- **Public pages**: publish a note as a read-only page (`/share/<id>#k=…`). The payload is encrypted client-side; the decryption key stays in the link fragment.
 - **Sync, three ways** (all client-side encrypted, see below):
-  1. **YANTA Cloud** — zero-setup account sync ("it just works").
-  2. **Your own Google Drive** — encrypted blobs in your Drive's hidden app data folder.
-  3. **A local folder** — plain `.md` files next to a `.yanta/` CRDT directory; point Syncthing, Dropbox or iCloud at it.
-- **Recovery Kit** — printable one-page document with the Recovery Key and a pairing QR code. Zero-knowledge means YANTA cannot reset your key; the kit is the guaranteed way back in.
+  1. **YANTA Cloud**: zero-setup account sync ("it just works").
+  2. **Your own Google Drive**: encrypted blobs in your Drive's hidden app data folder.
+  3. **A local folder**: plain `.md` files next to a `.yanta/` CRDT directory; point Syncthing, Dropbox or iCloud at it.
+- **Recovery Kit**: printable one-page document with the Recovery Key and a pairing QR code. Zero-knowledge means YANTA cannot reset your key; the kit is the guaranteed way back in.
 
 ## Security model
 
 - All sync payloads are encrypted **on the client** with AES-256-GCM; keys are derived (HKDF) from a 256-bit Sync Key that never leaves your devices (`src/sync2/crypto.js`).
-- Remote object names are HMAC-derived — the storage provider learns neither titles nor structure.
+- Remote object names are HMAC-derived. The storage provider learns neither titles nor structure.
 - Share links carry their keys in the URL **fragment** (`#…`), which browsers do not send to servers.
 - The server enforces quotas and access roles, but can never decrypt content.
 
@@ -78,4 +79,4 @@ YANTA is designed so the cloud is a convenience, not a dependency:
 
 ## License
 
-YANTA is licensed under the **GNU Affero General Public License v3.0** — see [LICENSE](LICENSE). If you run a modified version as a network service, the AGPL requires you to offer its source to your users.
+YANTA is licensed under the **GNU Affero General Public License v3.0**, see [LICENSE](LICENSE). If you run a modified version as a network service, the AGPL requires you to offer its source to your users.

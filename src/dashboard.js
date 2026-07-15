@@ -24,6 +24,7 @@ import {
   destroyNoteDoc,
 } from './yjs.js';
 import { inlineTextEdit } from './inline-ui.js';
+import { renderDashboardWidgetsInto } from './dashboard-widgets.js';
 
 import {
   renameNoteById,
@@ -1839,6 +1840,13 @@ function getDashboardItems() {
 
         renderDashboard({
           animate: e.detail?.source !== 'sync',
+
+          /*
+            Warum: Widget-Sichtbarkeit (z.B. RSS-Widget an/aus) ändert die
+            Struktur-Signatur nicht — ohne force würde der Cache den
+            Re-Render verschlucken.
+          */
+          force: e.detail?.force === true,
         });
       });
   
@@ -2391,6 +2399,15 @@ function renderDashboard({ animate = true, force = false } = {}) {
   page.dataset.notesHeader = dashboardCardDisplay.notesShowHeader ? '1' : '0';
   page.dataset.foldersHeader = dashboardCardDisplay.foldersShowHeader ? '1' : '0';
   page.append(renderDashboardHeader());
+
+  // Widgets live on the dashboard root only, never inside folders.
+  // They fill in asynchronously and keep themselves fresh afterwards.
+  if (!dashboard.folderId) {
+    const widgetsHost = el('div', { class: 'yanta-dashboard-widgets' });
+    page.append(widgetsHost);
+    renderDashboardWidgetsInto(widgetsHost).catch(() => {});
+  }
+
   const { pinnedNotes, normalItems } = items;
   const body = el('div', { class: 'yanta-dashboard-body' });
   if (!pinnedNotes.length && !normalItems.length) {

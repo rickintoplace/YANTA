@@ -1245,9 +1245,13 @@ import {
   
     const root = dashboardRoot();
     if (!root || !root.contains(e.target)) return;
-  
+
     // Keep browser context menu inside modals/inputs/menus.
     if (interactiveTarget(e.target)) return;
+
+    // Dashboard widgets bring their own context menus (e.g. RSS items) —
+    // this capture-phase handler must not swallow them.
+    if (e.target.closest?.('.yanta-dashboard-widgets')) return;
   
     const card = cardFromTarget(e.target);
   

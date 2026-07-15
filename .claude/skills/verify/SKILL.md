@@ -41,6 +41,15 @@ Cookie name: `yanta_cloud_session`.
 - Useful selectors: sidebar note `aside >> text=<title>`, editor `.cm-content`, title `#noteTitle`, share button `#btn-share`, share modal tabs `[data-share-tab="live"|"public"]`.
 - First app boot seeds welcome notes ("Start here" etc.) after ~3s.
 
+## Shared Spaces specifics
+
+- Member grants (Phase 2) resolve a Matrix ID → YANTA user via `chat_accounts`. To test without a real homeserver, create a second cloud user, then insert mappings directly:
+  `wrangler d1 execute yanta-cloud-db --local --persist-to <state> --command "INSERT OR REPLACE INTO chat_accounts (user_id, matrix_localpart, matrix_user_id, created_at) VALUES ('<uid>','anna','@anna:yanta.me',1)"`.
+  Then drive `/api/spaces/:id/members` with each user's session cookie.
+- Folder workspaces / note spaces: seed and drive through the app's ES modules from the page, e.g. `await import('/src/spaces/space-session.js')` then `createSpaceForFolder(folderId)` / `spaceLinksFor(session)`. Reading `state.notes`/`state.folders` from `/src/core.js` is more reliable than scraping the tree DOM (folders render collapsed).
+- The headline case is always: create/share, close the owner context entirely, then drive a fresh guest context against the write link — content must still appear (server-restorable heads), and on owner return the two converge.
+- Matrix key delivery itself (invite events over Megolm) needs a real/staging homeserver; the worker-side member enforcement is fully testable offline.
+
 ## Gotchas
 
 - Free plan allows only 3 active shared spaces — DELETE leftover test spaces via `/api/spaces` between runs or creation 403s.

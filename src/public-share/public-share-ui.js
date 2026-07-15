@@ -263,6 +263,8 @@ function ensureCss() {
     background: white;
     box-shadow: 0 8px 24px rgba(0,0,0,0.08);
     overflow: hidden;
+    width: fit-content;
+    margin: auto;
   }
 
   .yanta-public-share-qr svg {
@@ -370,6 +372,63 @@ function ensureCss() {
 
 .compress-actions.sharing-options button.btn.primary {
     flex: auto;
+}
+
+.yanta-share-link-section {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.yanta-share-link-info {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.yanta-share-link-title,
+.yanta-share-qr-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.yanta-share-link-title svg,
+.yanta-share-qr-title svg {
+  color: var(--accent);
+}
+
+.yanta-copy-compact {
+  width: auto;
+  min-width: 2.25rem;
+  padding-inline: 0.65rem;
+  flex: 0 0 auto;
+}
+
+.yanta-qr-toggle {
+  flex: 0 0 auto;
+}
+
+.yanta-qr-toggle.is-active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.yanta-share-qr-panel {
+  display: grid;
+  justify-items: center;
+  gap: 0.75rem;
+  padding-block: 0.5rem;
+}
+
+.yanta-share-qr-heading {
+  display: grid;
+  justify-items: center;
+  gap: 0.2rem;
+  text-align: center;
+}
+
+.yanta-share-qr-heading small {
+  color: var(--text-faint);
 }
 
 @media (max-width: 680px) {
@@ -840,110 +899,200 @@ async function renderLiveTab() {
     return;
   }
 
-  // Owner view with an active space.
-  const links = spaceLinksFor(session);
-  const peers = session.peers || 0;
+// Owner view with an active space.
+const links = spaceLinksFor(session);
+const peers = session.peers || 0;
 
-  body.innerHTML = `
-    <div class="yanta-public-share-box">
-      <div class="yanta-public-share-status good">
-        ${
-          isFolder
-            ? 'Workspace share active · changes sync for everyone with access'
-            : `Live share active · ${peers} ${peers === 1 ? 'person' : 'people'} connected live`
-        }
-      </div>
+body.innerHTML = `
+  <div class="yanta-public-share-box">
+    <div class="yanta-public-share-status good">
+      ${
+        isFolder
+          ? 'Workspace share active · changes sync for everyone with access'
+          : `Live share active · ${peers} ${peers === 1 ? 'person' : 'people'} connected live`
+      }
+    </div>
 
-      <div class="yanta-public-share-info">
-        <strong>Read link</strong> — anyone with it can view, near-live, but never edit.
+    <div class="yanta-share-link-section">
+      <div class="yanta-public-share-info yanta-share-link-info">
+        <div class="yanta-share-link-title">
+          ${lucide('eye', 15)}
+          <strong>Read link</strong>
+        </div>
+        <span>Anyone with it can view, near-live, but never edit.</span>
       </div>
 
       <div class="yanta-public-share-link-row">
         <input class="text-input" data-space-read-link readonly value="${escapeHtml(links.read)}">
-        <button class="btn" data-space-qr-read>${lucide('qr-code', 14)}</button>
-        <button class="btn primary" data-copy-space-read>${lucide('copy', 14)} Copy</button>
-      </div>
 
-      ${
-        links.write
-          ? `
-            <div class="yanta-public-share-info">
-              <strong>Edit link</strong> — anyone with it can edit in real time. Share carefully.
+        <button
+          class="btn yanta-qr-toggle is-active"
+          data-space-qr-read
+          type="button"
+          aria-pressed="true"
+          title="Show read QR code"
+        >
+          ${lucide('qr-code', 14)}
+          <span>QR</span>
+        </button>
+
+        <button
+          class="btn primary yanta-copy-compact"
+          data-copy-space-read
+          type="button"
+          aria-label="Copy read link"
+          title="Copy read link"
+        >
+          ${lucide('copy', 14)}
+        </button>
+      </div>
+    </div>
+
+    ${
+      links.write
+        ? `
+          <div class="yanta-share-link-section">
+            <div class="yanta-public-share-info yanta-share-link-info">
+              <div class="yanta-share-link-title">
+                ${lucide('pencil', 15)}
+                <strong>Edit link</strong>
+              </div>
+              <span>Anyone with it can edit in real time. Share carefully.</span>
             </div>
 
             <div class="yanta-public-share-link-row">
               <input class="text-input" data-space-write-link readonly value="${escapeHtml(links.write)}">
-              <button class="btn" data-space-qr-write>${lucide('qr-code', 14)}</button>
-              <button class="btn primary" data-copy-space-write>${lucide('copy', 14)} Copy</button>
+
+              <button
+                class="btn yanta-qr-toggle"
+                data-space-qr-write
+                type="button"
+                aria-pressed="false"
+                title="Show edit QR code"
+              >
+                ${lucide('qr-code', 14)}
+                <span>QR</span>
+              </button>
+
+              <button
+                class="btn primary yanta-copy-compact"
+                data-copy-space-write
+                type="button"
+                aria-label="Copy edit link"
+                title="Copy edit link"
+              >
+                ${lucide('copy', 14)}
+              </button>
             </div>
-          `
-          : ''
-      }
+          </div>
+        `
+        : ''
+    }
 
+    <div class="yanta-share-qr-panel">
+      <div class="yanta-share-qr-heading" data-space-qr-heading></div>
       <div class="yanta-public-share-qr" data-space-qr></div>
-
-      <div class="compress-actions">
-        <span class="grow"></span>
-        <button class="btn danger" data-stop-space-share>
-          ${lucide('x', 14)}
-          Stop live share
-        </button>
-      </div>
-
-      <div class="yanta-public-share-danger">
-        <small style="color:var(--text-faint)">
-          Stopping removes the encrypted share data from the cloud and blocks all links immediately.
-        </small>
-      </div>
     </div>
-  `;
 
-  const qrHost = body.querySelector('[data-space-qr]');
+    <div class="compress-actions">
+      <span class="grow"></span>
+      <button class="btn danger" data-stop-space-share>
+        ${lucide('x', 14)}
+        Stop live share
+      </button>
+    </div>
 
-  const showQr = (url) => {
-    if (!qrHost) return;
-    qrHost.replaceChildren(renderBrandedQrSvg(url, {
-      size: 220,
-      logo: BRAND_LOGO_SVG,
-    }));
-  };
+    <div class="yanta-public-share-danger">
+      <small style="color:var(--text-faint)">
+        Stopping removes the encrypted share data from the cloud and blocks all links immediately.
+      </small>
+    </div>
+  </div>
+`;
 
-  showQr(links.read);
+const qrHost = body.querySelector('[data-space-qr]');
+const qrHeading = body.querySelector('[data-space-qr-heading]');
+const readQrButton = body.querySelector('[data-space-qr-read]');
+const writeQrButton = body.querySelector('[data-space-qr-write]');
 
-  body.querySelector('[data-space-qr-read]')?.addEventListener('click', () => showQr(links.read));
-  body.querySelector('[data-space-qr-write]')?.addEventListener('click', () => showQr(links.write));
+const setQrButtonState = (mode) => {
+  readQrButton?.classList.toggle('is-active', mode === 'read');
+  readQrButton?.setAttribute('aria-pressed', mode === 'read' ? 'true' : 'false');
 
-  wireCopyButton(body.querySelector('[data-copy-space-read]'), links.read);
+  writeQrButton?.classList.toggle('is-active', mode === 'write');
+  writeQrButton?.setAttribute('aria-pressed', mode === 'write' ? 'true' : 'false');
+};
 
-  if (links.write) {
-    wireCopyButton(body.querySelector('[data-copy-space-write]'), links.write);
+const showQr = (mode) => {
+  if (!qrHost) return;
+
+  const isWrite = mode === 'write';
+  const url = isWrite ? links.write : links.read;
+
+  if (!url) return;
+
+  if (qrHeading) {
+    qrHeading.innerHTML = isWrite
+      ? `
+        <div class="yanta-share-qr-title">
+          ${lucide('pencil', 16)}
+          <strong>Edit QR code</strong>
+        </div>
+        <small>Scan to join with editing access.</small>
+      `
+      : `
+        <div class="yanta-share-qr-title">
+          ${lucide('eye', 16)}
+          <strong>Read QR code</strong>
+        </div>
+        <small>Scan to open read-only access.</small>
+      `;
   }
 
-  body.querySelector('[data-stop-space-share]')?.addEventListener('click', async () => {
-    const ok = await yantaConfirm({
-      title: 'Stop live sharing?',
-      message: [
-        `Stop live sharing this ${thing}?`,
-        '',
-        'All links stop working and the encrypted share data is deleted from the cloud.',
-        'Copies already synced to other devices cannot be removed.',
-      ].join('\n'),
-      confirmLabel: 'Stop sharing',
-      cancelLabel: 'Cancel',
-      danger: true,
-      icon: 'x',
-    });
+  qrHost.replaceChildren(renderBrandedQrSvg(url, {
+    size: 220,
+    logo: BRAND_LOGO_SVG,
+  }));
 
-    if (!ok) return;
+  setQrButtonState(mode);
+};
 
-    try {
-      await stopSpaceShare(session.spaceId);
-      await renderLiveTab();
-    } catch (err) {
-      console.error(err);
-      toast(err?.message || 'Could not stop sharing', 'error');
-    }
+showQr('read');
+
+readQrButton?.addEventListener('click', () => showQr('read'));
+writeQrButton?.addEventListener('click', () => showQr('write'));
+
+wireCopyButton(body.querySelector('[data-copy-space-read]'), links.read);
+
+if (links.write) {
+  wireCopyButton(body.querySelector('[data-copy-space-write]'), links.write);
+}
+
+body.querySelector('[data-stop-space-share]')?.addEventListener('click', async () => {
+  const ok = await yantaConfirm({
+    title: 'Stop live sharing?',
+    message: [
+      `Stop live sharing this ${thing}?`,
+      '',
+      'All links stop working and the encrypted share data is deleted from the cloud.',
+      'Copies already synced to other devices cannot be removed.',
+    ].join('\n'),
+    confirmLabel: 'Stop sharing',
+    cancelLabel: 'Cancel',
+    danger: true,
+    icon: 'x',
   });
+
+  if (!ok) return;
+
+  try {
+    await stopSpaceShare(session.spaceId);
+    await renderLiveTab();
+  } catch (err) {
+    console.error(err);
+    toast(err?.message || 'Could not stop sharing', 'error');
+  }
+});
 }
 
 // ---------------- People tab (Matrix-ID grants) -------------------

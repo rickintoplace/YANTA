@@ -183,7 +183,7 @@ function injectCss() {
 
 .yanta-cal-dash-rows {
   display: flex;
-  flex-direction: column;
+  flex-direction: column-reverse;
 
   max-height: 264px;
   overflow-y: auto;

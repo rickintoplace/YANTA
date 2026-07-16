@@ -45,7 +45,7 @@
 
 /* Header */
 .yanta-dashboard-head {
-  position: sticky;
+  /* position: sticky; */
   top: 0;
   z-index: 20;
 
@@ -1856,7 +1856,8 @@
     }
   
     .yanta-dashboard-head {
-      width: min(1120px, 100%);
+      /* width: min(1120px, 100%); */
+      width: 100%;
       margin: 0 auto;
     }
   }
@@ -1868,6 +1869,14 @@
   @media (max-width: 880px) {
     .yanta-dashboard-menu-btn {
       display: inline-flex;
+    }
+
+    .yanta-dashboard-head {
+      position: sticky;
+    }
+
+    .app[data-surface="dashboard"] .yanta-dashboard-title-wrap {
+      visibility: hidden;
     }
   }
 

@@ -75,7 +75,6 @@ const GREETINGS = {
     'Yet another great idea, {name}?',
     'Note bad, huh?',
     'Safe and sound, {name}',
-    'Stay YANTAstic, {name}',
     'Encrypted with love',
     'Secure, private, yours',
     'The cloud ',   
@@ -219,7 +218,7 @@ export async function resolveGreetingName() {
     if (custom) return custom;
   } catch {}
 
-  return matrixDisplayName();
+  return await matrixDisplayName();
 }
 
 let cachedGreeting = '';

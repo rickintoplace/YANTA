@@ -9781,7 +9781,7 @@ function renderCalendarSharedNoteBanner(noteId) {
         ${
           info.mounted
             ? `Shared with you via calendar “${escapeHtml(info.name)}”`
-            : `Shared via calendar “${escapeHtml(info.name)}” — everyone with access can read this note`
+            : `Shared via calendar “${escapeHtml(info.name)}”. Everyone with access can read this note`
         }
       </span>
     `;

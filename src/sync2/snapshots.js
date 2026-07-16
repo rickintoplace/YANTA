@@ -155,6 +155,7 @@ export async function downloadVaultSnapshots(engine) {
       entry.path
     );
 
+    engine.noteIncomingVaultBytes?.(plain);
     applyVaultUpdate(plain, 'sync2-remote');
 
     await engine.markSeen(entry.path, {

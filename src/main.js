@@ -117,6 +117,10 @@ import {
   capsuleDebugSnapshot,
 } from './sync2/capsule.js';
 import {
+  startVaultPokeSubscription,
+  publishVaultPoke,
+} from './sync2/vault-poke.js';
+import {
   parseAppHash,
   pushNoteHistory,
   replaceNoteHistory,
@@ -853,6 +857,8 @@ async function runSync2Now(reason = 'manual', {
 
     suppressDashboardAnimationsFor(2500);
 
+    const hadQueuedUploads = (engine.outbox?.length || 0) > 0;
+
     await engine.syncNow({
       verbose: false,
 
@@ -881,6 +887,19 @@ async function runSync2Now(reason = 'manual', {
       });
 
       await store.settings.set('sync2.lastCatchupSnapshotAt', Date.now());
+    }
+
+    /*
+      Local changes went up — poke the user's other devices so they
+      pull now instead of on their next periodic sync (best-effort).
+    */
+    const ackUploaded = (engine.notificationAckSync?.uploaded || 0) > 0;
+
+    if (hadQueuedUploads || ackUploaded || catchUp) {
+      publishVaultPoke({
+        syncKey: engine.syncKey,
+        deviceId: engine.deviceId,
+      }).catch(() => {});
     }
 
     console.debug('[YANTA Sync2] sync done:', reason);
@@ -939,6 +958,18 @@ function startSync2AutoSync(engine, {
   if (!engine) return;
 
   sync2Auto.engine = engine;
+
+  /*
+    Near-live pulls: when another of the user's devices uploads vault
+    changes it pokes this topic; pulling right away is what makes e.g.
+    the dashboard's notification-coverage item clear seconds after the
+    phone synced. Re-subscribes on runtime replacement (key may change).
+  */
+  startVaultPokeSubscription({
+    syncKey: engine.syncKey,
+    deviceId: engine.deviceId,
+    onPoke: () => requestSync2AutoSync('vault-poke', 800),
+  }).catch(() => {});
 
   if (sync2Auto.started) {
     requestSync2AutoSync('runtime-replaced', 300);
@@ -1028,6 +1059,15 @@ function startSync2AutoSync(engine, {
     if (isRemoteOrInternalSyncEvent(detail)) return;
 
     requestSync2AutoSync('calendar-updated', SYNC2_CALENDAR_IDLE_MS);
+  });
+
+  /*
+    Android wrote its notification ack into the vault device record.
+    Push it out promptly — the other devices' dashboards show reminders
+    as uncovered until this ack lands there.
+  */
+  window.addEventListener('yanta-notification-ack-recorded', () => {
+    requestSync2AutoSync('notification-ack', 1000);
   });
 
   /*

@@ -145,6 +145,19 @@ export function vaultHeadsPrefix() {
   return joinRemotePath(SYNC_ROOT, 'vault', 'heads') + '/';
 }
 
+export function notificationAckPath(deviceId) {
+  return joinRemotePath(
+    SYNC_ROOT,
+    'vault',
+    'notification-acks',
+    `${deviceId}.json.enc`
+  );
+}
+
+export function notificationAcksPrefix() {
+  return joinRemotePath(SYNC_ROOT, 'vault', 'notification-acks') + '/';
+}
+
 export async function docHeadPath(nameKey, noteId, deviceId) {
   const id = await remoteDocId(nameKey, noteId);
 

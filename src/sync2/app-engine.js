@@ -107,6 +107,17 @@ import {
   pruneSeenUpdatesCoveredByHeads,
 } from './heads.js';
 
+import {
+  uploadNotificationAckIfChanged,
+  downloadNotificationAcks,
+} from './notification-ack-sync.js';
+
+import {
+  createCalendarVersionCollector,
+  collectCalendarVersionsFromUpdate,
+  reconcileCalendarVersions,
+} from './calendar-version-guard.js';
+
 export const SYNC2_REMOTE_ORIGIN = 'sync2-remote';
 export const SYNC2_LOCAL_ORIGIN = 'sync2-local';
 
@@ -484,7 +495,8 @@ function stripVolatileVaultFingerprintFields(value) {
  * Semantic fingerprint of durable Vault metadata.
  *
  * Critical:
- * - Devices are intentionally excluded.
+ * - Devices are intentionally excluded (their notification acks sync as
+ *   dedicated per-device objects — see notification-ack-sync.js).
  * - updated-only metadata changes are ignored.
  * - Note bodies are intentionally excluded; they sync via per-note Y.Doc updates.
  *
@@ -1111,6 +1123,18 @@ export class Sync2AppEngine {
     this.uploading = false;
   }
 
+  /**
+   * Calendar version guard hook: download paths (heads, snapshots,
+   * update packs) report every incoming vault payload here before
+   * applying it, so reconcileCalendarVersions() can restore entries
+   * the CRDT merge left stale. No-op outside a pull cycle.
+   */
+  noteIncomingVaultBytes(bytes) {
+    if (!this.activeCalendarGuard) return;
+
+    collectCalendarVersionsFromUpdate(this.activeCalendarGuard, bytes);
+  }
+
   async hasSeen(path) {
     return this.localState.hasSeen(path);
   }
@@ -1215,6 +1239,10 @@ export class Sync2AppEngine {
       // Device heartbeat/status changes are local presence, not durable
       // user content. If we queue them, every sync creates another sync.
       if (origin === SYNC2_DEVICE_PRESENCE_ORIGIN) return;
+
+      // Notification acks travel as dedicated per-device objects
+      // (notification-ack-sync.js), never as vault update packs.
+      if (origin === 'native-notification-ack') return;
 
       /*
         Wichtig:
@@ -1869,6 +1897,26 @@ export class Sync2AppEngine {
         });
       }
 
+      /*
+        Notification acks are per-device overwritten objects outside the
+        update/head pipeline (see notification-ack-sync.js). Push ours,
+        pull the others' — cheap no-ops when nothing changed.
+      */
+      const ackUp = await uploadNotificationAckIfChanged(this);
+      const ackDown = await downloadNotificationAcks(this);
+
+      this.notificationAckSync = {
+        uploaded: ackUp.uploaded,
+        applied: ackDown.applied,
+      };
+
+      /*
+        Calendar version guard: remember the newest event/category
+        versions across the local state and everything this pull
+        applies, then repair stale CRDT merge winners afterwards.
+      */
+      this.activeCalendarGuard = createCalendarVersionCollector();
+
       this.progress({
         phase: 'downloadVaultHeads',
         direction: 'down',
@@ -1917,14 +1965,33 @@ export class Sync2AppEngine {
       });
 
       vaultUpdates = await this.downloadVaultUpdates();
-  
+
       if (vaultUpdates.applied > 0) {
         await this.updateDeviceRecord({
           lastPullAt: Date.now(),
           lastPullCount: vaultUpdates.applied,
         });
       }
-  
+
+      /*
+        Outside the outbox suppression on purpose: a restore is a real
+        local write that must propagate, so every device converges on
+        the newest version instead of a random CRDT merge winner.
+      */
+      const calendarRestores = reconcileCalendarVersions(
+        this.activeCalendarGuard,
+        SYNC2_LOCAL_ORIGIN
+      );
+
+      this.activeCalendarGuard = null;
+
+      if (calendarRestores > 0) {
+        console.info(
+          '[YANTA Sync2] calendar version guard restored stale entries:',
+          calendarRestores
+        );
+      }
+
       await this.withVaultOutboxSuppressed(async () => {
         this.hydrateAppStateFromVault();
         await this.persistVaultMetadataToLocalCache();
@@ -1937,7 +2004,7 @@ export class Sync2AppEngine {
 
         await downloadMissingAssets(this);
       });
-  
+
       await this.observeAllKnownNotes();
 
       this.progress({
@@ -2145,6 +2212,7 @@ export class Sync2AppEngine {
   
       throw err;
     } finally {
+      this.activeCalendarGuard = null;
       this.syncing = false;
     }
   }
@@ -2793,6 +2861,7 @@ export class Sync2AppEngine {
       }
 
       for (const update of pack.updates) {
+        this.noteIncomingVaultBytes(update);
         applyVaultUpdate(update, SYNC2_REMOTE_ORIGIN);
       }
 

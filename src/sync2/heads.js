@@ -174,6 +174,7 @@ export async function downloadVaultHeads(engine) {
       entry.path
     );
 
+    engine.noteIncomingVaultBytes?.(plain);
     applyVaultUpdate(plain, 'sync2-remote');
 
     await writeLocalState(engine.localState, seenKey, etag);

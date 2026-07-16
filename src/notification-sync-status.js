@@ -36,6 +36,13 @@ import {
 const REMINDER_WINDOW_MS = 420 * 24 * 60 * 60 * 1000;
 const REMINDER_GRACE_MS = 5 * 60 * 1000;
 
+/*
+  Contract with sync2: writes under this origin are excluded from the
+  vault update outbox (app-engine.js). The ack reaches other devices as
+  a dedicated per-device object instead (sync2/notification-ack-sync.js),
+  because the update/head pipeline neither fingerprints nor carries
+  device records.
+*/
 const ACK_ORIGIN = 'native-notification-ack';
 
 function enabledReminderCount(ev) {
@@ -176,6 +183,15 @@ export function recordNativeNotificationAck(status = {}) {
       notificationSync: next,
     });
   }, ACK_ORIGIN);
+
+  /*
+    Other devices are waiting for this ack (the dashboard shows the
+    reminder as uncovered until it arrives) — ask for a remote sync
+    soon instead of leaving it queued until the next periodic cycle.
+  */
+  window.dispatchEvent(new CustomEvent('yanta-notification-ack-recorded', {
+    detail: { deviceId },
+  }));
 
   return next;
 }

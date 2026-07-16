@@ -2264,6 +2264,10 @@ async function init() {
       sharedOpen = spaceOpen;
       await openNote(spaceOpen.noteId);
       setView(spaceOpen.role === 'read' ? 'preview' : 'split');
+    } else if (spaceOpen?.sourceType === 'calendar') {
+      // A shared calendar opens on the calendar surface: route through
+      // the normal hash routing below (sharedOpen has no noteId).
+      history.replaceState({}, '', '#calendar');
     }
 
     await restoreSpaces();

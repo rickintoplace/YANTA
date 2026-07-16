@@ -16,6 +16,7 @@ import {
 } from './core.js';
 
 import { registerDashboardWidget } from './dashboard-widgets.js';
+import { categoryIsShared } from './spaces/calendar-registry.js';
 
 import {
   dateLikeToDate,
@@ -246,6 +247,14 @@ function injectCss() {
   text-overflow: ellipsis;
 }
 
+.yanta-cal-dash-shared {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  color: var(--accent, #6ea8fe);
+  opacity: 0.9;
+}
+
 /* Week strip */
 
 .yanta-cal-dash-week {
@@ -399,6 +408,18 @@ function eventRow(ev, { showDate = true } = {}) {
   dot.style.background = eventColor(ev);
 
   what.append(dot, el('span', { class: 'yanta-cal-dash-title' }, ev.title || 'Untitled event'));
+
+  // Shared calendars stay recognizable in the widget too.
+  const cat = ev.categoryId ? state.calendarCategories?.get?.(ev.categoryId) : null;
+
+  if (cat?.spaceId || ev.spaceId || categoryIsShared(ev.categoryId)) {
+    const shared = el('span', {
+      class: 'yanta-cal-dash-shared',
+      title: `Shared calendar "${cat?.name || ''}"`,
+    });
+    shared.innerHTML = lucide('users', 11);
+    what.append(shared);
+  }
 
   row.append(when, what);
 

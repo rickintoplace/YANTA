@@ -1,6 +1,7 @@
 import { state, toast, } from '../core.js';
 
 import { recordNativeNotificationAck } from '../notification-sync-status.js';
+import { effectiveRemindersForEvent } from '../calendar-personal.js';
 
 let installed = false;
 let syncTimer = 0;
@@ -78,9 +79,12 @@ function reminderSafe(reminder = {}) {
 function eventForNative(ev = {}) {
   if (!ev?.id || !ev?.start) return null;
 
-  const reminders = Array.isArray(ev.reminders)
-    ? ev.reminders.map(reminderSafe).filter(Boolean)
-    : [];
+  // What actually fires for THIS user: the event's own reminders (or
+  // the personal overlay for shared-calendar events) plus the personal
+  // per-category default reminders, deduplicated by offset.
+  const reminders = effectiveRemindersForEvent(ev)
+    .map(reminderSafe)
+    .filter(Boolean);
 
   if (!reminders.length) return null;
 

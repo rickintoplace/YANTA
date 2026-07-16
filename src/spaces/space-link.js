@@ -10,8 +10,10 @@
 //   id = space id            k  = rootKey (read access)
 //   rt = read token          wt = write token (server write auth)
 //   ws = writer secret       ep = webrtc epoch
-//   t  = title hint          st = source type ('note' | 'folder')
+//   t  = title hint          st = source type ('note' | 'folder' | 'calendar')
 // ============================================================
+
+const SOURCE_TYPES = new Set(['note', 'folder', 'calendar']);
 
 function b64urlEncodeString(s) {
   const bytes = new TextEncoder().encode(s);
@@ -78,7 +80,7 @@ export function parseSpaceFragment(hash) {
       writerSecret: hasWrite ? String(obj.ws) : '',
       epoch: Number(obj.ep || 1),
       title: String(obj.t || ''),
-      sourceType: obj.st === 'folder' ? 'folder' : 'note',
+      sourceType: SOURCE_TYPES.has(obj.st) ? obj.st : 'note',
       role: hasWrite ? 'write' : 'read',
     };
   } catch {

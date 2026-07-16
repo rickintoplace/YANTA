@@ -370,6 +370,18 @@ CREATE TABLE IF NOT EXISTS space_members (
 CREATE INDEX IF NOT EXISTS idx_space_members_user
 ON space_members(user_id, created_at);
 
+-- Approximate, privacy-preserving link statistics per space: one row,
+-- counters only — no IPs, no user agents, nothing per-visitor. Lets the
+-- owner see "~N link opens" and get told when their link was throttled.
+CREATE TABLE IF NOT EXISTS space_link_stats (
+  space_id TEXT PRIMARY KEY,
+  link_opens INTEGER NOT NULL DEFAULT 0,
+  last_open_at INTEGER,
+  throttled_at INTEGER,
+  quota_hit_at INTEGER,
+  FOREIGN KEY(space_id) REFERENCES spaces(id)
+);
+
 -- ============================================================
 -- Chat / Matrix Provisioning
 -- One YANTA Cloud user can claim exactly one Matrix account.

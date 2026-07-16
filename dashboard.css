@@ -2088,3 +2088,15 @@ color-mix(in srgb, var(--accent) 36%, transparent);
 .yanta-dash-card.drag-clone.yanta-crumple-active > :not(.yanta-crumple-canvas) {
   visibility: hidden !important;
 }
+/* Shared badge on folder cards — sharing must never be invisible. */
+.yanta-dash-shared-badge {
+  display: inline-flex;
+  align-items: center;
+  flex: 0 0 auto;
+  margin-left: 4px;
+  color: var(--accent, #6ea8fe);
+}
+
+.yanta-dash-shared-badge.is-mounted {
+  color: var(--ok, #4ade80);
+}

@@ -16,18 +16,33 @@ import {
 import {
   createSpaceForNote,
   createSpaceForFolder,
+  createSpaceForCalendarCategory,
   stopSpaceShare,
   spaceSessionForNote,
   spaceSessionForFolder,
+  spaceSessionForCalendarCategory,
   spaceLinksFor,
   leaveSpace,
+  apiGetSpace,
   apiListSpaceMembers,
   apiAddSpaceMember,
   apiRemoveSpaceMember,
   rotateSpaceWriteAccess,
   sharingConflictForNote,
   sharingConflictForFolder,
+  sharingConflictForCalendarCategory,
 } from '../spaces/space-session.js';
+
+import {
+  calendarBridgeForSpace,
+} from '../spaces/calendar-registry.js';
+
+import {
+  loadShareGroups,
+  createShareGroup,
+  deleteShareGroup,
+  setShareGroupMembers,
+} from '../spaces/share-groups.js';
 
 import {
   sendSpaceInvite,
@@ -85,28 +100,45 @@ import {
 let modal = null;
 let shareOverlayRegistered = false;
 
-// What the dialog is currently sharing: a single note, or a folder
-// subtree as a live workspace. The Live and People tabs work for both;
-// public read-only links exist for notes only.
+// What the dialog is currently sharing: a single note, a folder
+// subtree as a live workspace, or a calendar category as a live
+// calendar. The Live and People tabs work for all three; public
+// read-only snapshot links exist for notes only.
 let shareTarget = { kind: 'note', id: '' };
 
 function targetIsFolder() {
   return shareTarget.kind === 'folder';
 }
 
+function targetIsCalendar() {
+  return shareTarget.kind === 'calendar';
+}
+
+function targetThing() {
+  return targetIsCalendar() ? 'calendar' : targetIsFolder() ? 'folder' : 'note';
+}
+
 function targetTitle() {
+  if (targetIsCalendar()) {
+    return state.calendarCategories.get(shareTarget.id)?.name || 'Untitled calendar';
+  }
+
   return targetIsFolder()
     ? state.folders.get(shareTarget.id)?.name || 'Untitled folder'
     : state.notes.get(shareTarget.id)?.title || 'Untitled';
 }
 
 function targetSession() {
+  if (targetIsCalendar()) return spaceSessionForCalendarCategory(shareTarget.id);
+
   return targetIsFolder()
     ? spaceSessionForFolder(shareTarget.id)
     : spaceSessionForNote(shareTarget.id);
 }
 
 async function createTargetSpace() {
+  if (targetIsCalendar()) return createSpaceForCalendarCategory(shareTarget.id);
+
   return targetIsFolder()
     ? createSpaceForFolder(shareTarget.id)
     : createSpaceForNote(shareTarget.id);
@@ -128,11 +160,20 @@ function registerShareOverlayRoutes() {
   registerOverlayRoute('share-note', {
     open: ({ data, state: historyState } = {}) => {
       const folderId = data?.folderId || historyState?.folderId || '';
+      const calendarCategoryId =
+        data?.calendarCategoryId || historyState?.calendarCategoryId || '';
 
       if (folderId) {
         return openUnifiedShareModal({
           fromHistory: true,
           folderId,
+        });
+      }
+
+      if (calendarCategoryId) {
+        return openUnifiedShareModal({
+          fromHistory: true,
+          calendarCategoryId,
         });
       }
 
@@ -185,6 +226,114 @@ function ensureCss() {
   style.textContent = `
 .yanta-public-share-card {
   width: min(620px, 94vw);
+}
+
+.yanta-share-e2ee-note {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12.5px;
+}
+
+.yanta-calendar-share-stats {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 8px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-elev-2);
+  color: var(--text-dim);
+  font-size: 12.5px;
+}
+
+.yanta-calendar-share-stats-warn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--warn, #f59e0b);
+  font-weight: 600;
+}
+
+.yanta-calendar-share-extras {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.yanta-calendar-share-note-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.yanta-calendar-share-note-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.yanta-calendar-share-note-row:hover {
+  background: var(--bg-elev-2);
+}
+
+.yanta-calendar-share-note-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.yanta-calendar-share-note-row small {
+  color: var(--text-faint);
+  flex: 0 0 auto;
+}
+
+.yanta-share-groups-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.yanta-share-group-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--bg-elev-3);
+  font-size: 10.5px;
+  font-weight: 700;
+}
+
+.yanta-share-groups-card {
+  width: min(520px, 94vw);
+}
+
+.yanta-share-group-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.yanta-share-group-editor textarea {
+  resize: vertical;
+  font-size: 12.5px;
 }
 
 .yanta-share-tabs {
@@ -946,9 +1095,10 @@ async function renderLiveTab() {
   if (!body) return;
 
   const isFolder = targetIsFolder();
-  const thing = isFolder ? 'folder' : 'note';
+  const isCalendar = targetIsCalendar();
+  const thing = targetThing();
   const session = targetSession();
-  const legacy = !isFolder ? state.liveShares.get(shareTarget.id) : null;
+  const legacy = shareTarget.kind === 'note' ? state.liveShares.get(shareTarget.id) : null;
 
   // Recipient view: mounted from someone else's space.
   if (session && session.role !== 'owner') {
@@ -994,9 +1144,11 @@ async function renderLiveTab() {
   // another share (inside a shared workspace, or shared with this user).
   // Show why instead of offering a "Start live share" that would fail.
   const conflict = !session
-    ? (isFolder
-        ? sharingConflictForFolder(shareTarget.id)
-        : sharingConflictForNote(shareTarget.id))
+    ? (isCalendar
+        ? sharingConflictForCalendarCategory(shareTarget.id)
+        : isFolder
+          ? sharingConflictForFolder(shareTarget.id)
+          : sharingConflictForNote(shareTarget.id))
     : '';
 
   if (conflict) {
@@ -1019,11 +1171,13 @@ async function renderLiveTab() {
         <div class="yanta-public-share-info">
           <strong>Live share</strong><br>
           ${
-            isFolder
-              ? 'Share this folder as a live workspace — editors can add, change and remove notes inside it.'
-              : 'Invite people to read or edit this note in real time — drawings included.'
+            isCalendar
+              ? 'Share this calendar live — invited people see events as they change, and editors can add and update events. Notes linked to events travel with them.'
+              : isFolder
+                ? 'Share this folder as a live workspace — editors can add, change and remove notes inside it.'
+                : 'Invite people to read or edit this note in real time — drawings included.'
           }
-          Everything is end-to-end encrypted, and the share keeps working when you go offline.
+          Everything is end-to-end encrypted — YANTA Cloud only ever stores ciphertext — and the share keeps working when you go offline.
         </div>
 
         <div class="compress-actions sharing-options">
@@ -1095,8 +1249,15 @@ body.innerHTML = `
       ${
         isFolder
           ? 'Workspace share active · changes sync for everyone with access'
-          : `Live share active · ${peers} ${peers === 1 ? 'person' : 'people'} connected live`
+          : isCalendar
+            ? 'Calendar share active · events sync live for everyone with access'
+            : `Live share active · ${peers} ${peers === 1 ? 'person' : 'people'} connected live`
       }
+    </div>
+
+    <div class="yanta-public-share-info yanta-share-e2ee-note">
+      ${lucide('shield-check', 14)}
+      End-to-end encrypted: keys travel only in the link itself or over encrypted chat — the cloud can never read this ${thing}.
     </div>
 
     <div class="yanta-share-link-section">
@@ -1180,6 +1341,8 @@ body.innerHTML = `
       <div class="yanta-public-share-qr" data-space-qr></div>
     </div>
 
+    ${isCalendar ? '<div data-calendar-share-extras></div>' : ''}
+
     <div class="compress-actions">
       <span class="grow"></span>
       <button class="btn danger" data-stop-space-share>
@@ -1254,6 +1417,10 @@ if (links.write) {
   wireCopyButton(body.querySelector('[data-copy-space-write]'), links.write);
 }
 
+if (isCalendar) {
+  renderCalendarShareExtras(body, session).catch(() => {});
+}
+
 body.querySelector('[data-stop-space-share]')?.addEventListener('click', async () => {
   const ok = await yantaConfirm({
     title: 'Stop live sharing?',
@@ -1279,6 +1446,328 @@ body.querySelector('[data-stop-space-share]')?.addEventListener('click', async (
     toast(err?.message || 'Could not stop sharing', 'error');
   }
 });
+}
+
+// ---------------- Calendar share extras ----------------------------
+//
+// Owner-only panel under the links: approximate link stats (opens,
+// throttling) and the linked-notes list with per-note opt-out — the
+// single most important control against accidental oversharing.
+
+async function renderCalendarShareExtras(body, session) {
+  const host = body.querySelector('[data-calendar-share-extras]');
+  if (!host) return;
+
+  const bridge = calendarBridgeForSpace(session.spaceId);
+
+  const excluded = new Set(session.record.excludedNoteIds || []);
+  const referenced = bridge ? [...bridge.referencedNoteIds()] : [];
+
+  const noteRows = referenced
+    .map((noteId) => {
+      const note = state.notes.get(noteId);
+      const title = note?.title || 'Untitled note';
+      const checked = !excluded.has(noteId);
+
+      return `
+        <label class="yanta-calendar-share-note-row">
+          <input type="checkbox" data-share-note-id="${escapeHtml(noteId)}" ${checked ? 'checked' : ''} />
+          <span class="yanta-calendar-share-note-title">
+            ${lucide(note?.icon || 'file-text', 13)}
+            ${escapeHtml(title)}
+          </span>
+          <small>${checked ? 'shared with the calendar' : 'kept private'}</small>
+        </label>
+      `;
+    })
+    .join('');
+
+  let statsHtml = '';
+
+  try {
+    const meta = await apiGetSpace(session.spaceId, session.record);
+    const stats = meta?.linkStats;
+
+    if (stats) {
+      const day = 24 * 60 * 60 * 1000;
+      const throttled = stats.throttledAt && Date.now() - stats.throttledAt < day;
+      const quotaHit = stats.quotaHitAt && Date.now() - stats.quotaHitAt < day;
+
+      statsHtml = `
+        <div class="yanta-calendar-share-stats">
+          ${lucide('eye', 13)}
+          Link opened ≈ ${Number(stats.linkOpens || 0)} time${Number(stats.linkOpens || 0) === 1 ? '' : 's'}
+          ${
+            throttled
+              ? `<span class="yanta-calendar-share-stats-warn">${lucide('flame', 12)} Your link is hot — some anonymous readers were rate-limited in the last 24 h.</span>`
+              : ''
+          }
+          ${
+            quotaHit
+              ? `<span class="yanta-calendar-share-stats-warn">${lucide('triangle-alert', 12)} Readers hit your monthly download quota — consider YANTA Plus if this keeps happening.</span>`
+              : ''
+          }
+        </div>
+      `;
+    }
+  } catch {}
+
+  host.innerHTML = `
+    <div class="yanta-calendar-share-extras">
+      ${statsHtml}
+
+      <div class="yanta-share-link-section">
+        <div class="yanta-public-share-info yanta-share-link-info">
+          <div class="yanta-share-link-title">
+            ${lucide('file-text', 15)}
+            <strong>Linked notes</strong>
+          </div>
+          <span>
+            ${
+              referenced.length
+                ? 'Notes linked to shared events are readable by everyone with access. Untick a note to keep it private.'
+                : 'No notes are linked to events in this calendar yet. When you link one, it shows up here and everyone with access can read it.'
+            }
+          </span>
+        </div>
+
+        ${noteRows ? `<div class="yanta-calendar-share-note-list">${noteRows}</div>` : ''}
+      </div>
+    </div>
+  `;
+
+  host.querySelectorAll('[data-share-note-id]').forEach((checkbox) => {
+    checkbox.addEventListener('change', async () => {
+      const noteId = checkbox.dataset.shareNoteId;
+      const nextExcluded = new Set(session.record.excludedNoteIds || []);
+
+      if (checkbox.checked) {
+        nextExcluded.delete(noteId);
+      } else {
+        nextExcluded.add(noteId);
+      }
+
+      try {
+        await bridge?.setExcludedNoteIds([...nextExcluded]);
+        toast(checkbox.checked ? 'Note is shared with the calendar' : 'Note stays private', 'success');
+      } catch (err) {
+        console.error(err);
+        toast('Could not update note sharing', 'error');
+      }
+
+      renderCalendarShareExtras(body, session).catch(() => {});
+    });
+  });
+}
+
+// ---------------- Share groups (Family, Team, …) -------------------
+//
+// Personal shortcuts that expand to per-member grants. Deliberately
+// minimal: chips + one manage dialog. The server never learns about
+// groups; access stays per person, so revocation keeps working.
+
+async function renderShareGroupsRow(body, session, renderMembers) {
+  const host = body.querySelector('[data-people-groups]');
+  if (!host) return;
+
+  const groups = await loadShareGroups();
+
+  host.innerHTML = `
+    <div class="yanta-share-groups-row">
+      ${groups
+        .filter((group) => group.members.length)
+        .map((group) => `
+          <button class="btn compact" data-share-group="${escapeHtml(group.id)}" title="${escapeHtml(group.members.join(', '))}">
+            ${lucide('users', 13)}
+            ${escapeHtml(group.name)}
+            <span class="yanta-share-group-count">${group.members.length}</span>
+          </button>
+        `)
+        .join('')}
+      <button class="btn compact" data-share-groups-manage>
+        ${lucide('settings-2', 13)} Groups…
+      </button>
+    </div>
+  `;
+
+  host.querySelectorAll('[data-share-group]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const group = groups.find((g) => g.id === btn.dataset.shareGroup);
+      if (!group?.members.length) return;
+
+      const role = body.querySelector('[data-people-role]')?.value === 'write' ? 'write' : 'read';
+
+      const ok = await yantaConfirm({
+        title: `Share with "${group.name}"?`,
+        message: [
+          `Give ${group.members.length} ${group.members.length === 1 ? 'person' : 'people'} ${role === 'write' ? 'edit' : 'view'} access:`,
+          '',
+          group.members.join('\n'),
+        ].join('\n'),
+        confirmLabel: 'Share with group',
+        cancelLabel: 'Cancel',
+        icon: 'users',
+      });
+
+      if (!ok) return;
+
+      btn.disabled = true;
+
+      const failed = [];
+
+      for (const matrixUserId of group.members) {
+        try {
+          const res = await apiAddSpaceMember(session.spaceId, { matrixUserId, role });
+
+          if (res.resolved) {
+            await sendSpaceInvite(session.record, matrixUserId, role).catch((err) => {
+              console.warn('[YANTA Spaces] group invite delivery failed', matrixUserId, err);
+              failed.push(`${matrixUserId} (keys not delivered — use "Resend invite")`);
+            });
+          } else {
+            failed.push(`${matrixUserId} (no YANTA account)`);
+          }
+        } catch (err) {
+          console.error(err);
+          failed.push(`${matrixUserId} (${err?.message || 'failed'})`);
+        }
+      }
+
+      btn.disabled = false;
+
+      if (failed.length) {
+        toast(`Shared with "${group.name}" — issues: ${failed.join(' · ')}`, 'error');
+      } else {
+        toast(`Shared with everyone in "${group.name}"`, 'success');
+      }
+
+      await renderMembers();
+    });
+  });
+
+  host.querySelector('[data-share-groups-manage]')?.addEventListener('click', async () => {
+    await openShareGroupsManager();
+    await renderShareGroupsRow(body, session, renderMembers);
+  });
+}
+
+async function openShareGroupsManager() {
+  const groups = await loadShareGroups();
+
+  const wrap = document.createElement('div');
+  wrap.className = 'modal yanta-share-groups-modal';
+
+  const renderList = () => {
+    wrap.querySelector('[data-groups-list]').innerHTML = groups.length
+      ? groups.map((group) => `
+          <div class="yanta-share-group-editor" data-group-id="${escapeHtml(group.id)}">
+            <div class="yanta-public-share-link-row">
+              <input class="text-input" data-group-name value="${escapeHtml(group.name)}" />
+              <button class="btn danger" data-group-delete title="Delete group">${lucide('trash', 14)}</button>
+            </div>
+            <textarea
+              class="text-input"
+              data-group-members
+              rows="3"
+              placeholder="@anna:yanta.me&#10;@ben:yanta.me"
+            >${escapeHtml(group.members.join('\n'))}</textarea>
+          </div>
+        `).join('')
+      : '<div class="yanta-public-shares-empty">No groups yet — create one below.</div>';
+
+    wrap.querySelectorAll('[data-group-delete]').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const id = btn.closest('[data-group-id]')?.dataset.groupId;
+        await deleteShareGroup(id);
+
+        const idx = groups.findIndex((g) => g.id === id);
+        if (idx >= 0) groups.splice(idx, 1);
+
+        renderList();
+      });
+    });
+  };
+
+  return new Promise((resolve) => {
+    wrap.innerHTML = `
+      <div class="modal-card yanta-share-groups-card">
+        <header class="modal-head">
+          <h3>${lucide('users', 16)} Share groups</h3>
+          <button class="icon-btn" data-groups-close>&times;</button>
+        </header>
+
+        <div class="modal-body">
+          <div class="yanta-public-share-info">
+            Groups are personal shortcuts for sharing: one Matrix ID per line.
+            Sharing with a group always grants access person by person, so you can
+            still remove individuals later.
+          </div>
+
+          <div data-groups-list></div>
+
+          <div class="yanta-public-share-link-row" style="margin-top:10px">
+            <input class="text-input" data-new-group-name placeholder="New group name (e.g. Family)" />
+            <button class="btn primary" data-new-group-add>${lucide('plus', 14)} Create</button>
+          </div>
+
+          <div class="compress-actions">
+            <span class="grow"></span>
+            <button class="btn primary" data-groups-save>${lucide('check', 14)} Save & close</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    document.body.append(wrap);
+    renderList();
+
+    const close = () => {
+      wrap.remove();
+      resolve();
+    };
+
+    wrap.addEventListener('click', (e) => {
+      if (e.target === wrap) close();
+      if (e.target.closest?.('[data-groups-close]')) close();
+    });
+
+    wrap.querySelector('[data-new-group-add]')?.addEventListener('click', async () => {
+      const input = wrap.querySelector('[data-new-group-name]');
+      const name = input?.value?.trim();
+      if (!name) return;
+
+      const group = await createShareGroup(name);
+      groups.push(group);
+
+      if (input) input.value = '';
+      renderList();
+    });
+
+    wrap.querySelector('[data-groups-save]')?.addEventListener('click', async () => {
+      for (const editor of wrap.querySelectorAll('[data-group-id]')) {
+        const id = editor.dataset.groupId;
+        const name = editor.querySelector('[data-group-name]')?.value?.trim();
+        const members = (editor.querySelector('[data-group-members]')?.value || '')
+          .split(/[\n,;]+/)
+          .map((m) => m.trim())
+          .filter(Boolean);
+
+        const group = groups.find((g) => g.id === id);
+
+        if (group) {
+          group.name = name || group.name;
+          group.members = members;
+
+          const { renameShareGroup } = await import('../spaces/share-groups.js');
+          await renameShareGroup(id, group.name);
+          await setShareGroupMembers(id, members);
+        }
+      }
+
+      toast('Groups saved', 'success');
+      close();
+    });
+  });
 }
 
 // ---------------- People tab (Matrix-ID grants) -------------------
@@ -1357,8 +1846,8 @@ async function renderPeopleTab() {
       <div class="yanta-public-share-info">
         <strong>People</strong><br>
         Invite by Matrix ID (e.g. <code>@anna:yanta.me</code>) or YANTA handle.
-        Invited people automatically get this ${targetIsFolder() ? 'folder' : 'note'} in their YANTA
-        under <em>Shared with me</em> — keys are delivered end-to-end encrypted over Chat,
+        Invited people automatically get this ${targetThing()} in their YANTA
+        ${targetIsCalendar() ? 'as a shared calendar' : 'under <em>Shared with me</em>'} — keys are delivered end-to-end encrypted over Chat,
         and access is enforced by the server.
       </div>
 
@@ -1370,6 +1859,8 @@ async function renderPeopleTab() {
         </select>
         <button class="btn primary" data-people-add>${lucide('user-plus', 14)} Add</button>
       </div>
+
+      <div class="yanta-share-groups" data-people-groups></div>
 
       <div class="yanta-public-shares-list" data-people-list>
         <div class="yanta-public-shares-empty">Loading…</div>
@@ -1497,6 +1988,7 @@ async function renderPeopleTab() {
   };
 
   renderMembers();
+  renderShareGroupsRow(body, session, renderMembers).catch(() => {});
 
   body.querySelector('[data-people-add]')?.addEventListener('click', async (e) => {
     const btn = e.currentTarget;
@@ -1936,6 +2428,7 @@ export async function openPublicSharesManager({
 export async function openUnifiedShareModal({
   fromHistory = false,
   folderId = '',
+  calendarCategoryId = '',
   noteId: explicitNoteId = '',
 } = {}) {
   registerShareOverlayRoutes();
@@ -1947,6 +2440,13 @@ export async function openUnifiedShareModal({
     }
 
     shareTarget = { kind: 'folder', id: folderId };
+  } else if (calendarCategoryId) {
+    if (!state.calendarCategories.has(calendarCategoryId)) {
+      toast('Calendar not found', 'error');
+      return;
+    }
+
+    shareTarget = { kind: 'calendar', id: calendarCategoryId };
   } else {
     const noteId = explicitNoteId || state.currentNoteId;
 
@@ -1958,6 +2458,7 @@ export async function openUnifiedShareModal({
     shareTarget = { kind: 'note', id: noteId };
   }
 
+  const isNote = shareTarget.kind === 'note';
   const isFolder = targetIsFolder();
   const targetId = shareTarget.id;
   const m = ensureModal();
@@ -1965,14 +2466,14 @@ export async function openUnifiedShareModal({
   m.innerHTML = `
     <div class="modal-card yanta-public-share-card">
       <header class="modal-head">
-        <h3>Share ${isFolder ? 'folder' : 'note'}: ${escapeHtml(targetTitle())}</h3>
+        <h3>Share ${targetThing()}: ${escapeHtml(targetTitle())}</h3>
         <button class="icon-btn" data-public-share-close>&times;</button>
       </header>
 
       <div class="modal-body">
         <div class="yanta-share-tabs">
-          ${isFolder ? '' : '<button data-share-tab="public" class="active">Public link</button>'}
-          <button data-share-tab="live" ${isFolder ? 'class="active"' : ''}>Live collaboration</button>
+          ${isNote ? '<button data-share-tab="public" class="active">Public link</button>' : ''}
+          <button data-share-tab="live" ${isNote ? '' : 'class="active"'}>Live collaboration</button>
           <button data-share-tab="people">People</button>
         </div>
 
@@ -2008,12 +2509,13 @@ export async function openUnifiedShareModal({
 
   if (!fromHistory && wasClosed) {
     pushOverlayState('share-note', {
-      noteId: isFolder ? '' : targetId,
+      noteId: isNote ? targetId : '',
       folderId: isFolder ? targetId : '',
+      calendarCategoryId: targetIsCalendar() ? targetId : '',
     });
   }
 
-  if (isFolder) {
+  if (!isNote) {
     await renderLiveTab();
     return;
   }

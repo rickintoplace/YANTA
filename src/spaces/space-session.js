@@ -38,6 +38,17 @@ import {
   installWorkspaceBridge,
   uninstallWorkspaceBridge,
 } from './workspace-bridge.js';
+import {
+  CALENDAR_REMOTE_KEY,
+  waitForCalendarDoc,
+  destroyCalendarDoc,
+} from './calendar-space-doc.js';
+import {
+  installCalendarBridge,
+  uninstallCalendarBridge,
+} from './calendar-bridge.js';
+import { calendarBridgeForSpace } from './calendar-registry.js';
+import { clearCalendarFeed } from './calendar-feed.js';
 
 const POLL_INTERVAL_MS = 60_000;
 const POKE_PULL_DEBOUNCE_MS = 400;
@@ -80,7 +91,7 @@ async function apiCreateSpace(body) {
   return (await apiJson(res, 'Could not create shared space')).space;
 }
 
-async function apiGetSpace(spaceId, record = null) {
+export async function apiGetSpace(spaceId, record = null) {
   const res = await fetchWithRetry(apiUrl(`/api/spaces/${encodeURIComponent(spaceId)}`), {
     method: 'GET',
     credentials: 'include',
@@ -199,6 +210,7 @@ async function mountSpace(record) {
   });
 
   const isFolder = record.sourceType === 'folder';
+  const isCalendar = record.sourceType === 'calendar';
 
   const session = {
     spaceId: record.spaceId,
@@ -209,6 +221,7 @@ async function mountSpace(record) {
     engine: null,
     provider: null,
     workspaceDoc: null,
+    calendarDoc: null,
     peers: 0,
     unsubscribePoke: null,
     pollTimer: null,
@@ -248,6 +261,13 @@ async function mountSpace(record) {
     session.workspaceDoc = await waitForWorkspaceDoc(record.spaceId);
     await engine.attachDoc(WORKSPACE_REMOTE_KEY, WORKSPACE_REMOTE_KEY, session.workspaceDoc);
     await installWorkspaceBridge(session);
+  } else if (isCalendar) {
+    // A calendar space syncs one calendar doc (category meta + events +
+    // linked-note metas) plus one content doc per linked note. The
+    // bridge owns the vault<->doc mirroring and note attachment.
+    session.calendarDoc = await waitForCalendarDoc(record.spaceId);
+    await engine.attachDoc(CALENDAR_REMOTE_KEY, CALENDAR_REMOTE_KEY, session.calendarDoc);
+    await installCalendarBridge(session);
   } else {
     await engine.attachDoc(record.noteId, MAIN_DOC_KEY);
   }
@@ -335,6 +355,10 @@ function unmountSpace(spaceId) {
 
   if (session.sourceType === 'folder') {
     uninstallWorkspaceBridge(spaceId);
+  }
+
+  if (session.sourceType === 'calendar') {
+    uninstallCalendarBridge(spaceId);
   }
 
   try {
@@ -490,6 +514,45 @@ export function spaceSessionForFolder(folderId) {
   return null;
 }
 
+export function spaceSessionForCalendarCategory(categoryId) {
+  for (const session of state.spaces.values()) {
+    if (session.sourceType === 'calendar' && session.record.categoryId === categoryId) {
+      return session;
+    }
+  }
+  return null;
+}
+
+/**
+ * Why some categories cannot be shared:
+ * - A category mounted from someone else's share already syncs through
+ *   that space; only its owner manages sharing.
+ * - Dynamic-source categories (holidays, ICS, custom dates) generate
+ *   their events client-side from a definition — sharing would publish
+ *   stale copies of data the recipient can subscribe to themselves.
+ *
+ * Returns a human-readable conflict message, or '' when sharing is fine.
+ */
+export function sharingConflictForCalendarCategory(categoryId) {
+  const cat = state.calendarCategories.get(categoryId);
+  if (!cat) return 'Category not found';
+
+  // Mounted categories carry the spaceId mark; the owner's own never do.
+  if (cat.spaceId) {
+    return 'This calendar is shared with you. Only the person who shared it can manage its sharing.';
+  }
+
+  if (cat.source) {
+    return 'Dynamic source categories (holidays, imported dates) cannot be shared — recipients can add the same source themselves.';
+  }
+
+  if (cat.readonly) {
+    return 'Read-only categories cannot be shared.';
+  }
+
+  return '';
+}
+
 /**
  * Share a folder subtree as a live workspace. Writers can create,
  * edit and delete notes inside it; membership of the subtree stays
@@ -537,6 +600,54 @@ export async function createSpaceForFolder(folderId) {
   return mountSpace(record);
 }
 
+/**
+ * Share a calendar category as a live calendar. Writers can create,
+ * edit and delete events; linked notes travel with the events (the
+ * owner can exclude individual notes in the share dialog).
+ */
+export async function createSpaceForCalendarCategory(categoryId) {
+  const existing = spaceSessionForCalendarCategory(categoryId);
+  if (existing) return existing;
+
+  const cat = state.calendarCategories.get(categoryId);
+  if (!cat) throw new Error('Category not found');
+
+  const conflict = sharingConflictForCalendarCategory(categoryId);
+  if (conflict) throw new Error(conflict);
+
+  const rootKey = generateSpaceSecret();
+  const writerSecret = generateSpaceSecret();
+  const readToken = generateSpaceToken();
+  const writeToken = generateSpaceToken();
+
+  const meta = await apiCreateSpace({
+    sourceType: 'calendar',
+    sourceId: categoryId,
+    readToken,
+    writeToken,
+  });
+
+  const record = {
+    spaceId: meta.id,
+    noteId: '',
+    categoryId,
+    role: 'owner',
+    sourceType: 'calendar',
+    title: cat.name || '',
+    excludedNoteIds: [],
+    rootKey,
+    readToken,
+    writeToken,
+    writerSecret,
+    epoch: meta.webrtcEpoch || 1,
+    signalingTopic: meta.signalingTopic,
+  };
+
+  await store.spaces.put(record);
+
+  return mountSpace(record);
+}
+
 export async function stopSpaceShare(spaceId) {
   const session = state.spaces.get(spaceId);
   const record = session?.record || await store.spaces.get(spaceId);
@@ -549,6 +660,10 @@ export async function stopSpaceShare(spaceId) {
     } catch {}
 
     await store.spaces.del(spaceId);
+  }
+
+  if (record?.sourceType === 'calendar') {
+    await cleanupCalendarSpaceLocal(spaceId, record);
   }
 
   try {
@@ -620,15 +735,22 @@ export async function handleSpaceUrl() {
 
   const existing = await store.spaces.get(parsed.spaceId);
   const role = meta.role === 'owner' ? 'owner' : parsed.role;
-  const sourceType = meta.sourceType === 'folder' ? 'folder' : parsed.sourceType;
+  const sourceType = ['folder', 'calendar'].includes(meta.sourceType)
+    ? meta.sourceType
+    : parsed.sourceType;
 
   const record = {
     spaceId: parsed.spaceId,
     noteId: existing?.noteId || '',
     rootFolderId: existing?.rootFolderId || (role === 'owner' ? meta.sourceId : '') || '',
+    categoryId:
+      existing?.categoryId ||
+      (sourceType === 'calendar' && role === 'owner' ? meta.sourceId : '') ||
+      '',
     role,
     sourceType,
     title: parsed.title || '',
+    excludedNoteIds: existing?.excludedNoteIds || [],
     rootKey: parsed.rootKey,
     readToken: parsed.readToken,
     writeToken: parsed.writeToken,
@@ -651,7 +773,8 @@ export async function handleSpaceUrl() {
   await store.spaces.put(record);
   await mountSpace(record);
 
-  // A folder workspace opens on its root folder, not a single note.
+  // A folder workspace opens on its root folder, a shared calendar on
+  // the calendar surface — only note spaces open a single note.
   const openNoteId = sourceType === 'note' ? record.noteId : '';
 
   history.replaceState(
@@ -663,6 +786,7 @@ export async function handleSpaceUrl() {
   return {
     noteId: openNoteId,
     folderId: record.rootFolderId || '',
+    categoryId: record.categoryId || '',
     sourceType,
     role,
     spaceId: parsed.spaceId,
@@ -730,12 +854,15 @@ export async function mountSpaceFromInvite({
     return state.spaces.get(spaceId) || mountSpace(existing);
   }
 
-  const kind = meta.sourceType === 'folder' ? 'folder' : sourceType;
+  const kind = ['folder', 'calendar'].includes(meta.sourceType)
+    ? meta.sourceType
+    : sourceType;
 
   const record = {
     spaceId,
     noteId: existing?.noteId || (kind === 'note' ? `spacenote_${spaceId}` : ''),
     rootFolderId: existing?.rootFolderId || '',
+    categoryId: existing?.categoryId || '',
     role,
     sourceType: kind,
     title: title || existing?.title || '',
@@ -772,10 +899,11 @@ export async function mountSpaceFromInvite({
   const session = await mountSpace(record);
 
   if (!existing) {
-    toast(
-      `"${record.title || (kind === 'folder' ? 'A folder' : 'A note')}" was shared with you`,
-      'success'
-    );
+    const thing = kind === 'folder'
+      ? 'A folder'
+      : kind === 'calendar' ? 'A calendar' : 'A note';
+
+    toast(`"${record.title || thing}" was shared with you`, 'success');
   }
 
   return session;
@@ -818,7 +946,42 @@ export async function leaveSpace(spaceId) {
     await destroyWorkspaceDoc(spaceId);
   }
 
+  if (record.sourceType === 'calendar') {
+    await cleanupCalendarSpaceLocal(spaceId, record);
+  }
+
   emitSpaceChanged(spaceId);
+}
+
+/**
+ * Drop everything a calendar space materialized locally: the calendar
+ * doc, the change feed, and placeholder notes that only existed
+ * because they were linked to shared events. The recipient's mounted
+ * category and events disappear with the doc; the owner's own events
+ * stay untouched in their vault.
+ */
+async function cleanupCalendarSpaceLocal(spaceId, record) {
+  for (const note of [...state.notes.values()]) {
+    if (note.spaceId !== spaceId) continue;
+
+    state.notes.delete(note.id);
+    await store.notes.del(note.id);
+
+    if (state.currentNoteId === note.id) state.currentNoteId = null;
+  }
+
+  await destroyCalendarDoc(spaceId);
+  await clearCalendarFeed(spaceId);
+
+  // The calendar module re-hydrates and drops the mounted category.
+  window.dispatchEvent(new CustomEvent('yanta-calendar-space-applied', {
+    detail: { spaceId, removed: true },
+  }));
+
+  if (record?.role !== 'owner' && record?.categoryId) {
+    const { forgetCategoryPersonalPrefs } = await import('../calendar-personal.js');
+    forgetCategoryPersonalPrefs(record.categoryId);
+  }
 }
 
 // ---------------- startup restore --------------------------------
@@ -834,11 +997,16 @@ export async function restoreSpaces() {
 
   for (const record of records) {
     // A stale share: its local source is gone (owner deleted the note
-    // or folder, recipient deleted their materialized copy).
+    // or folder, recipient deleted their materialized copy). Calendar
+    // categories are not hydrated yet at this point, so calendar spaces
+    // are never dropped here — deleting a shared category stops its
+    // share explicitly instead.
     const sourceGone =
-      record.sourceType === 'folder'
-        ? record.rootFolderId && !state.folders.has(record.rootFolderId)
-        : !state.notes.has(record.noteId);
+      record.sourceType === 'calendar'
+        ? false
+        : record.sourceType === 'folder'
+          ? record.rootFolderId && !state.folders.has(record.rootFolderId)
+          : !state.notes.has(record.noteId);
 
     // Recipients of a folder space materialize their root folder on the
     // first pull, so a missing root folder is normal on a fresh mount.
@@ -857,4 +1025,55 @@ export async function restoreSpaces() {
       console.warn('[YANTA Spaces] restore failed', record.spaceId, err);
     });
   }
+
+  scheduleOwnedSpaceHealthCheck(records);
+}
+
+// ---------------- owner link-health notice -----------------------
+//
+// If a public link went viral enough to hit protective limits, the
+// owner is the one who wants to know. One deferred, quiet check per
+// session; one toast per space per day.
+
+let spaceHealthCheckScheduled = false;
+
+function scheduleOwnedSpaceHealthCheck(records) {
+  if (spaceHealthCheckScheduled) return;
+  spaceHealthCheckScheduled = true;
+
+  const owned = records.filter((r) => r.role === 'owner').slice(0, 12);
+  if (!owned.length) return;
+
+  setTimeout(async () => {
+    const day = 24 * 60 * 60 * 1000;
+
+    for (const record of owned) {
+      let meta = null;
+
+      try {
+        meta = await apiGetSpace(record.spaceId, record);
+      } catch {
+        continue;
+      }
+
+      const stats = meta?.linkStats;
+      if (!stats) continue;
+
+      const incidentAt = Math.max(Number(stats.throttledAt || 0), Number(stats.quotaHitAt || 0));
+      if (!incidentAt || Date.now() - incidentAt > day) continue;
+
+      const noticeKey = `space.${record.spaceId}.lastThrottleNotice`;
+      const lastNotice = await store.settings.get(noticeKey, 0).catch(() => 0);
+      if (incidentAt <= Number(lastNotice || 0)) continue;
+
+      await store.settings.set(noticeKey, incidentAt).catch(() => {});
+
+      toast(
+        `Your share link for "${record.title || 'a shared item'}" is popular — ` +
+        `it was opened ≈${Number(stats.linkOpens || 0)} times and some readers were rate-limited. ` +
+        'Details in the share dialog.',
+        'success'
+      );
+    }
+  }, 12_000);
 }

@@ -135,7 +135,9 @@ async function handleInvite(ev) {
   await mountSpaceFromInvite({
     spaceId: String(content.spaceId),
     title: String(content.title || ''),
-    sourceType: content.sourceType === 'folder' ? 'folder' : 'note',
+    sourceType: ['folder', 'calendar'].includes(content.sourceType)
+      ? content.sourceType
+      : 'note',
     bundle: content.bundle,
     invitedBy: ev.getSender?.() || '',
   });

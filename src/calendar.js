@@ -140,6 +140,28 @@ import {
   observeNotificationSyncStatus,
 } from './notification-sync-status.js';
 
+import {
+  calendarBridgeForCategory,
+  calendarBridgeForSpace,
+  mountedCalendarBridges,
+  calendarBridges,
+} from './spaces/calendar-registry.js';
+
+import {
+  loadCalendarPersonal,
+  applyCategoryOverlay,
+  setCategoryPersonalPrefs,
+  defaultRemindersForCategory,
+  setDefaultRemindersForCategory,
+  personalEventReminders,
+} from './calendar-personal.js';
+
+import {
+  calendarFeedFor,
+  unseenCalendarFeedCount,
+  markCalendarFeedSeen,
+} from './spaces/calendar-feed.js';
+
 const ORIGIN = 'calendar';
 const DEFAULT_CATEGORY_ID = 'cal_default';
 
@@ -272,6 +294,7 @@ function nativeNotificationHintHtml() {
 
 function remindersEditorHtml(ev = {}, {
   editingExisting = false,
+  shared = false,
 } = {}) {
   const reminders = normalizeCalendarReminders(ev.reminders || [], ev);
 
@@ -283,6 +306,15 @@ function remindersEditorHtml(ev = {}, {
           ${lucide('plus', 13)} Add notification
         </button>
       </div>
+
+      ${
+        shared
+          ? `<div class="yanta-calendar-reminders-personal-hint">
+              ${lucide('lock', 12)}
+              Notifications are personal — they never affect other people in this shared calendar.
+            </div>`
+          : ''
+      }
 
       ${nativeNotificationHintHtml()}
 
@@ -1171,6 +1203,19 @@ function renderCalendarTopbar() {
 
     <span class="grow"></span>
 
+    <button class="btn compact yanta-calendar-feed-chip" data-cal-feed hidden>
+      ${lucide('bell-ring', 14)}
+      <span data-cal-feed-count></span>
+    </button>
+
+    <button
+      class="icon-btn ${calendarFindTimeActive ? 'active' : ''}"
+      data-cal-findtime
+      title="Find a time — highlight free slots across your visible calendars"
+      aria-pressed="${calendarFindTimeActive ? 'true' : 'false'}">
+      ${lucide('clock', 18)}
+    </button>
+
     ${calendarViewButtonsHtml(activeView)}
 
     <button class="icon-btn" data-cal-menu title="Calendar menu">
@@ -1287,7 +1332,137 @@ function renderCalendarTopbar() {
     openCalendarMenu(e.currentTarget);
   });
 
+  bar.querySelector('[data-cal-findtime]')?.addEventListener('click', () => {
+    toggleCalendarFindTime();
+  });
+
+  bar.querySelector('[data-cal-feed]')?.addEventListener('click', (e) => {
+    openCalendarFeedPopover(e.currentTarget);
+  });
+
+  refreshCalendarFeedChip();
+
   bar.querySelector('[data-cal-close]')?.addEventListener('click', closeCalendarViaHistory);
+}
+
+// ============================================================
+// Shared-calendar change feed ("what happened while I was away")
+// ============================================================
+
+async function calendarFeedSummary() {
+  const bridges = calendarBridges();
+
+  let unseen = 0;
+  const sections = [];
+
+  for (const bridge of bridges) {
+    const [feed, count] = await Promise.all([
+      calendarFeedFor(bridge.spaceId),
+      unseenCalendarFeedCount(bridge.spaceId),
+    ]);
+
+    unseen += count;
+
+    if (feed.entries.length) {
+      sections.push({
+        bridge,
+        name: state.calendarCategories.get(bridge.categoryId)?.name || 'Shared calendar',
+        entries: [...feed.entries].reverse().slice(0, 12),
+        lastSeenAt: feed.lastSeenAt,
+      });
+    }
+  }
+
+  return { unseen, sections };
+}
+
+async function refreshCalendarFeedChip() {
+  const chip = calendarToolbarEl()?.querySelector('[data-cal-feed]');
+  if (!chip) return;
+
+  const { unseen } = await calendarFeedSummary();
+
+  chip.hidden = unseen === 0;
+
+  const countEl = chip.querySelector('[data-cal-feed-count]');
+  if (countEl) {
+    countEl.textContent = unseen > 9 ? '9+' : String(unseen);
+  }
+}
+
+let calendarFeedPopover = null;
+
+function closeCalendarFeedPopover() {
+  calendarFeedPopover?.remove();
+  calendarFeedPopover = null;
+}
+
+async function openCalendarFeedPopover(anchor) {
+  if (calendarFeedPopover) {
+    closeCalendarFeedPopover();
+    return;
+  }
+
+  const { sections } = await calendarFeedSummary();
+
+  const pop = document.createElement('div');
+  pop.className = 'yanta-calendar-feed-popover';
+
+  pop.innerHTML = sections.length
+    ? sections.map((section) => `
+        <div class="yanta-calendar-feed-section">
+          <div class="yanta-calendar-feed-title">
+            ${lucide('users', 13)} ${escapeHtml(section.name)}
+          </div>
+          ${section.entries.map((entry) => `
+            <button class="yanta-calendar-feed-entry ${entry.ts > section.lastSeenAt ? 'is-new' : ''}" data-feed-event-id="${escapeAttr(entry.eventId || '')}">
+              <span class="yanta-calendar-feed-entry-main">
+                <strong>${escapeHtml(entry.actor || 'Someone')}</strong>
+                ${entry.action === 'added' ? 'added' : entry.action === 'removed' ? 'removed' : 'updated'}
+                “${escapeHtml(entry.title || 'Untitled event')}”
+              </span>
+              <small>${escapeHtml(formatCalendarDateTime(new Date(entry.ts).toISOString(), { editor: true }))}</small>
+            </button>
+          `).join('')}
+        </div>
+      `).join('')
+    : '<div class="yanta-calendar-feed-empty">No shared-calendar changes yet.</div>';
+
+  document.body.append(pop);
+  calendarFeedPopover = pop;
+
+  const r = anchor.getBoundingClientRect();
+  pop.style.top = `${r.bottom + 6}px`;
+  pop.style.right = `${Math.max(8, window.innerWidth - r.right)}px`;
+
+  pop.addEventListener('click', (e) => {
+    const entryBtn = e.target.closest?.('[data-feed-event-id]');
+    const eventId = entryBtn?.dataset.feedEventId;
+
+    if (eventId && state.calendarEvents.has(eventId)) {
+      closeCalendarFeedPopover();
+      openCalendarEvent(eventId);
+    }
+  });
+
+  const onOutside = (e) => {
+    if (pop.contains(e.target) || anchor.contains(e.target)) return;
+    closeCalendarFeedPopover();
+    document.removeEventListener('click', onOutside, true);
+  };
+
+  requestAnimationFrame(() => {
+    document.addEventListener('click', onOutside, true);
+  });
+
+  // Opening the digest counts as reading it.
+  for (const section of sections) {
+    markCalendarFeedSeen(section.bridge.spaceId).catch(() => {});
+  }
+
+  requestAnimationFrame(() => {
+    refreshCalendarFeedChip();
+  });
 }
 
 export function openCalendarPane() {
@@ -6247,6 +6422,8 @@ export function hydrateCalendarStateFromVault({
     state.calendarEvents.set(ev.id, safeJsonClone(ev));
   }
 
+  mergeMountedCalendarSpaces();
+
   calendarHydrated = true;
 
   if (!silent) {
@@ -6259,6 +6436,126 @@ export function hydrateCalendarStateFromVault({
     events: state.calendarEvents.size,
     categories: state.calendarCategories.size,
   };
+}
+
+/**
+ * Fold calendars mounted from other people's shares into the in-memory
+ * state. They live in their space docs, never in this user's vault:
+ * that keeps them out of the private vault sync entirely. Mounted
+ * records carry the spaceId mark; color and visibility come from the
+ * personal overlay (each participant styles a shared calendar for
+ * themselves).
+ */
+function mergeMountedCalendarSpaces() {
+  for (const bridge of mountedCalendarBridges()) {
+    const shared = bridge.category();
+    if (!shared) continue;
+
+    const cat = sanitizeCalendarCategory({
+      ...shared,
+      color: '#8ab4f8',
+      visible: true,
+    });
+
+    if (!cat) continue;
+
+    const merged = applyCategoryOverlay(cat);
+
+    merged.spaceId = bridge.spaceId;
+    merged.spaceRole = bridge.role;
+
+    // Read-only members must not edit events; the existing readonly
+    // handling for source categories covers the UI for free.
+    if (!bridge.canWrite) merged.readonly = true;
+
+    state.calendarCategories.set(merged.id, merged);
+
+    for (const raw of bridge.events()) {
+      const ev = sanitizeCalendarEvent(raw);
+      if (!ev) continue;
+
+      ev.spaceId = bridge.spaceId;
+      ev.spaceRole = bridge.role;
+
+      state.calendarEvents.set(ev.id, ev);
+    }
+  }
+}
+
+/**
+ * Owner-side share status of a category (mounted categories carry the
+ * spaceId mark instead and are checked directly).
+ */
+function categoryIsSharedAnyRole(categoryId) {
+  return !!calendarBridgeForCategory(categoryId) ||
+    calendarCategoryShareInfo(categoryId).shared;
+}
+
+/**
+ * Confirm the one move that silently widens visibility: a previously
+ * private event entering a shared calendar. Everything else (edits
+ * inside a shared calendar, moves out of it) needs no interruption —
+ * the editor banner already says who sees what.
+ */
+async function confirmCalendarShareMove({ fromCategoryId, toCategoryId, title = '' }) {
+  if (!toCategoryId || fromCategoryId === toCategoryId) return true;
+  if (!categoryIsSharedAnyRole(toCategoryId)) return true;
+  if (fromCategoryId && categoryIsSharedAnyRole(fromCategoryId)) return true;
+
+  const cat = state.calendarCategories.get(toCategoryId);
+
+  return yantaConfirm({
+    title: 'Move into shared calendar?',
+    message: [
+      title ? `"${title}"` : 'This event',
+      `will become visible to everyone with access to "${cat?.name || 'the shared calendar'}".`,
+    ].join(' '),
+    confirmLabel: 'Move & share',
+    cancelLabel: 'Cancel',
+    icon: 'users',
+  });
+}
+
+async function leaveMountedCalendar(cat) {
+  const ok = await yantaConfirm({
+    title: 'Leave shared calendar?',
+    message: [
+      `Leave "${cat.name || 'this shared calendar'}"?`,
+      '',
+      'It disappears from your calendar together with its shared notes. The owner and other members keep everything.',
+    ].join('\n'),
+    confirmLabel: 'Leave calendar',
+    cancelLabel: 'Cancel',
+    danger: true,
+    icon: 'log-out',
+  });
+
+  if (!ok) return false;
+
+  try {
+    const { leaveSpace } = await import('./spaces/space-session.js');
+    await leaveSpace(cat.spaceId);
+    toast('Left the shared calendar', 'success');
+    return true;
+  } catch (err) {
+    console.error(err);
+    toast(err?.message || 'Could not leave the shared calendar', 'error');
+    return false;
+  }
+}
+
+function calendarCategoryShareInfo(categoryId) {
+  for (const session of state.spaces.values()) {
+    if (session.sourceType === 'calendar' && session.record.categoryId === categoryId) {
+      return {
+        shared: session.role === 'owner',
+        hasLink: !!session.record.readToken,
+        session,
+      };
+    }
+  }
+
+  return { shared: false, hasLink: false, session: null };
 }
 
 // ============================================================
@@ -6279,6 +6576,42 @@ export function putCalendarCategory(patch) {
   });
 
   if (!cat) return null;
+
+  const bridge = calendarBridgeForCategory(cat.id);
+
+  if (bridge && !bridge.isOwner) {
+    /*
+      Mounted shared calendar: color and visibility are personal (each
+      participant styles the calendar for themselves), only the name/
+      icon are shared — and only writers may change those.
+    */
+    setCategoryPersonalPrefs(cat.id, {
+      color: patch.color !== undefined ? cat.color : undefined,
+      visible: patch.visible !== undefined ? cat.visible : undefined,
+    });
+
+    const shared = bridge.category();
+
+    if (
+      bridge.canWrite &&
+      shared &&
+      ((patch.name !== undefined && cat.name !== shared.name) ||
+        (patch.icon !== undefined && cat.icon !== shared.icon))
+    ) {
+      bridge.putCategoryMetaFromLocal({ name: cat.name, icon: cat.icon });
+    }
+
+    cat.spaceId = bridge.spaceId;
+    cat.spaceRole = bridge.role;
+    if (!bridge.canWrite) cat.readonly = true;
+
+    state.calendarCategories.set(cat.id, cat);
+
+    scheduleCalendarRender();
+    window.dispatchEvent(new CustomEvent('yanta-calendar-updated'));
+
+    return cat;
+  }
 
   const doc = getVaultDoc();
 
@@ -6306,6 +6639,10 @@ export function deleteCalendarCategory(categoryId, {
 
   const existing = state.calendarCategories.get(id);
   if (!existing) return;
+
+  // A calendar mounted from someone else's share is not deleted, it is
+  // left — the categories modal routes to leaveSpace() instead.
+  if (existing.spaceId) return;
 
   const eventsInCategory = [...state.calendarEvents.values()]
     .filter((ev) => ev.categoryId === id);
@@ -6560,6 +6897,59 @@ export function putCalendarEvent(patch) {
 
   if (!ev) return null;
 
+  /*
+    Events in a calendar MOUNTED from someone else's share live in that
+    space's doc, never in this user's vault. The owner's events always
+    take the vault path below — their bridge mirrors the change into
+    the space automatically.
+  */
+  const sourceBridge = existing ? calendarBridgeForCategory(existing.categoryId) : null;
+  const targetBridge = calendarBridgeForCategory(ev.categoryId);
+  const mountedSource = sourceBridge && !sourceBridge.isOwner ? sourceBridge : null;
+  const mountedTarget = targetBridge && !targetBridge.isOwner ? targetBridge : null;
+
+  if ((mountedTarget && !mountedTarget.canWrite) || (mountedSource && !mountedSource.canWrite)) {
+    toast('This shared calendar is read-only for you', 'error');
+    return null;
+  }
+
+  if (mountedSource && mountedSource !== mountedTarget) {
+    // Moved out of the mounted calendar (possibly into another one, or
+    // into an own category): it leaves that space.
+    mountedSource.deleteEventFromLocal(ev.id);
+  }
+
+  if (mountedTarget) {
+    mountedTarget.putEventFromLocal(safeJsonClone(ev));
+
+    if (!mountedSource && existing) {
+      // Moved in from an own category — remove the private copy.
+      const doc = getVaultDoc();
+
+      doc.transact(() => {
+        vaultEventsMap().delete(ev.id);
+        vaultTombstonesMap().set(ev.id, {
+          id: ev.id,
+          type: 'calendar-event',
+          title: ev.title || '',
+          deletedAt: now(),
+        });
+      }, ORIGIN);
+    }
+
+    const local = safeJsonClone(ev);
+
+    // Reminders stay personal (the bridge stored them in the overlay).
+    delete local.reminders;
+    local.spaceId = mountedTarget.spaceId;
+    local.spaceRole = mountedTarget.role;
+
+    state.calendarEvents.set(local.id, local);
+
+    finishPutCalendarEvent(local, existing);
+    return local;
+  }
+
   const doc = getVaultDoc();
 
   doc.transact(() => {
@@ -6569,21 +6959,26 @@ export function putCalendarEvent(patch) {
 
   state.calendarEvents.set(ev.id, safeJsonClone(ev));
 
-if (ev.noteId && state.notes.has(ev.noteId)) {
-  removeLegacyManagedEventBlocksFromNote(ev.noteId);
+  finishPutCalendarEvent(ev, existing);
+  return ev;
+}
 
-  if (state.currentNoteId === ev.noteId) {
+function finishPutCalendarEvent(ev, existing) {
+  if (ev.noteId && state.notes.has(ev.noteId)) {
+    removeLegacyManagedEventBlocksFromNote(ev.noteId);
+
+    if (state.currentNoteId === ev.noteId) {
+      requestAnimationFrame(() => {
+        renderCalendarNoteAttachments(ev.noteId);
+      });
+    }
+  }
+
+  if (existing?.noteId && existing.noteId !== ev.noteId && state.currentNoteId === existing.noteId) {
     requestAnimationFrame(() => {
-      renderCalendarNoteAttachments(ev.noteId);
+      renderCalendarNoteAttachments(existing.noteId);
     });
   }
-}
-
-if (existing?.noteId && existing.noteId !== ev.noteId && state.currentNoteId === existing.noteId) {
-  requestAnimationFrame(() => {
-    renderCalendarNoteAttachments(existing.noteId);
-  });
-}
 
   scheduleCalendarRender();
 
@@ -6596,8 +6991,6 @@ if (existing?.noteId && existing.noteId !== ev.noteId && state.currentNoteId ===
   window.dispatchEvent(new CustomEvent('yanta-calendar-updated', {
     detail: { eventId: ev.id },
   }));
-
-  return ev;
 }
 
 export function deleteCalendarEvent(eventId) {
@@ -6607,19 +7000,32 @@ export function deleteCalendarEvent(eventId) {
   const existing = state.calendarEvents.get(id);
   const oldNoteId = existing?.noteId || null;
 
-  const doc = getVaultDoc();
+  const bridge = existing ? calendarBridgeForCategory(existing.categoryId) : null;
 
-  doc.transact(() => {
-    vaultEventsMap().delete(id);
-    vaultTombstonesMap().set(id, {
-      id,
-      type: 'calendar-event',
-      title: existing?.title || '',
-      deletedAt: now(),
-    });
-  }, ORIGIN);
+  if (bridge && !bridge.isOwner) {
+    // Mounted shared calendar: the event lives in the space doc only.
+    if (!bridge.canWrite) {
+      toast('This shared calendar is read-only for you', 'error');
+      return;
+    }
 
-  state.calendarEvents.delete(id);
+    bridge.deleteEventFromLocal(id);
+    state.calendarEvents.delete(id);
+  } else {
+    const doc = getVaultDoc();
+
+    doc.transact(() => {
+      vaultEventsMap().delete(id);
+      vaultTombstonesMap().set(id, {
+        id,
+        type: 'calendar-event',
+        title: existing?.title || '',
+        deletedAt: now(),
+      });
+    }, ORIGIN);
+
+    state.calendarEvents.delete(id);
+  }
 
   if (oldNoteId && state.currentNoteId === oldNoteId) {
     requestAnimationFrame(() => {
@@ -7055,6 +7461,7 @@ function fullCalendarEventFromYanta(ev) {
     classNames: [
       isOccurrence ? 'yanta-cal-recurring-occurrence' : '',
       isRecurringMaster ? 'yanta-cal-recurring-master' : '',
+      categoryIsSharedAnyRole(ev.categoryId) ? 'yanta-cal-shared-event' : '',
     ].filter(Boolean),
 
     extendedProps: {
@@ -7222,6 +7629,20 @@ function calendarEventContent(info) {
       repeatSpan.innerHTML = lucide('repeat-2', 11);
 
       wrap.append(repeatSpan);
+    }
+
+    // Shared calendars are visible at a glance, on every single chip.
+    if (kind === 'event' && raw && categoryIsSharedAnyRole(raw.categoryId)) {
+      const cat = state.calendarCategories.get(raw.categoryId);
+      const sharedSpan = document.createElement('span');
+
+      sharedSpan.className = 'yanta-cal-event-shared';
+      sharedSpan.title = cat?.spaceId
+        ? `Shared calendar "${cat?.name || ''}" — shared with you`
+        : `Shared calendar "${cat?.name || ''}" — you are sharing this`;
+      sharedSpan.innerHTML = lucide('users', 11);
+
+      wrap.append(sharedSpan);
     }
   }
 
@@ -7858,7 +8279,111 @@ function buildFullCalendarEventsForRange(start, end) {
     out.push(fullCalendarEventFromMarkdownEvent(ev));
   }
 
+  if (calendarFindTimeActive) {
+    out.push(...freeSlotBackgroundEvents(out, start, end));
+  }
+
   return out;
+}
+
+// ============================================================
+// Find a time — free-slot overlay
+//
+// Highlights the gaps between everyone's visible events (own and
+// shared calendars alike) inside the day window, so coordinating a
+// meeting across calendars is one glance instead of arithmetic.
+// Computed purely client-side from what is already on screen.
+// ============================================================
+
+let calendarFindTimeActive = false;
+
+const FIND_TIME_DAY_START_HOUR = 8;
+const FIND_TIME_DAY_END_HOUR = 20;
+
+function freeSlotBackgroundEvents(fcEvents, start, end) {
+  const busy = fcEvents
+    .filter((ev) => !ev.allDay && ev.start && ev.display !== 'background')
+    .map((ev) => ({
+      start: new Date(ev.start).getTime(),
+      end: new Date(ev.end || ev.start).getTime() || new Date(ev.start).getTime(),
+    }))
+    .filter((iv) => Number.isFinite(iv.start))
+    .sort((a, b) => a.start - b.start);
+
+  const out = [];
+  const day = new Date(start instanceof Date ? start : new Date(start));
+  day.setHours(0, 0, 0, 0);
+
+  const rangeEnd = (end instanceof Date ? end : new Date(end)).getTime();
+
+  while (day.getTime() < rangeEnd) {
+    const windowStart = new Date(day);
+    windowStart.setHours(FIND_TIME_DAY_START_HOUR, 0, 0, 0);
+
+    const windowEnd = new Date(day);
+    windowEnd.setHours(FIND_TIME_DAY_END_HOUR, 0, 0, 0);
+
+    let cursor = windowStart.getTime();
+
+    for (const iv of busy) {
+      if (iv.end <= cursor || iv.start >= windowEnd.getTime()) continue;
+
+      if (iv.start > cursor) {
+        out.push(freeSlotEvent(cursor, iv.start));
+      }
+
+      cursor = Math.max(cursor, iv.end);
+    }
+
+    if (cursor < windowEnd.getTime()) {
+      out.push(freeSlotEvent(cursor, windowEnd.getTime()));
+    }
+
+    day.setDate(day.getDate() + 1);
+  }
+
+  // Slots under 15 minutes are noise, not opportunities.
+  return out.filter((slot) =>
+    new Date(slot.end).getTime() - new Date(slot.start).getTime() >= 15 * 60 * 1000
+  );
+}
+
+function freeSlotEvent(startMs, endMs) {
+  return {
+    id: `freeslot_${startMs}`,
+    start: new Date(startMs).toISOString(),
+    end: new Date(endMs).toISOString(),
+    display: 'background',
+    classNames: ['yanta-cal-free-slot'],
+    extendedProps: {
+      yantaKind: 'free-slot',
+      generated: true,
+    },
+  };
+}
+
+export function toggleCalendarFindTime(force) {
+  calendarFindTimeActive = typeof force === 'boolean'
+    ? force
+    : !calendarFindTimeActive;
+
+  if (calendarFindTimeActive && fc && !String(fc.view?.type || '').startsWith('timeGrid')) {
+    // Free slots only make sense on a time grid.
+    calendarTransientDayView = false;
+    state.currentCalendarView = 'timeGridWeek';
+
+    try {
+      fc.changeView('timeGridWeek');
+    } catch {}
+  }
+
+  try {
+    fc?.refetchEvents();
+  } catch {}
+
+  renderCalendarTopbar();
+
+  return calendarFindTimeActive;
 }
 
 export function expandedCalendarRawEventsForRange(start, end, {
@@ -9191,6 +9716,78 @@ export function renderCalendarNoteAttachments(noteId = state.currentNoteId) {
 
   renderEditorEventAttachment(noteId);
   renderPreviewEventAttachment(noteId);
+  renderCalendarSharedNoteBanner(noteId);
+}
+
+/**
+ * Persistent banner on any note that is readable through a shared
+ * calendar — because it is linked to a shared event (owner side) or
+ * was materialized from someone's calendar share (recipient side).
+ * Accidental oversharing dies in daylight.
+ */
+function renderCalendarSharedNoteBanner(noteId) {
+  const hosts = [$('paneEdit'), $('panePreview')].filter(Boolean);
+
+  for (const host of hosts) {
+    host.querySelectorAll(':scope > .yanta-calendar-shared-note-banner')
+      .forEach((n) => n.remove());
+  }
+
+  const note = state.notes.get(noteId);
+  if (!note) return;
+
+  let info = null;
+
+  if (note.spaceId) {
+    const bridge = calendarBridgeForSpace(note.spaceId);
+
+    if (bridge) {
+      const cat = state.calendarCategories.get(bridge.categoryId);
+      info = {
+        name: cat?.name || 'a shared calendar',
+        mounted: true,
+      };
+    }
+  }
+
+  if (!info) {
+    for (const ev of state.calendarEvents.values()) {
+      const linked = ev.noteId === noteId ||
+        (Array.isArray(ev.relatedNoteIds) && ev.relatedNoteIds.includes(noteId));
+
+      if (!linked || !categoryIsSharedAnyRole(ev.categoryId)) continue;
+
+      const shareInfo = calendarCategoryShareInfo(ev.categoryId);
+      const excluded = new Set(shareInfo.session?.record?.excludedNoteIds || []);
+
+      if (shareInfo.shared && excluded.has(noteId)) continue;
+
+      info = {
+        name: state.calendarCategories.get(ev.categoryId)?.name || 'a shared calendar',
+        mounted: !shareInfo.shared,
+      };
+      break;
+    }
+  }
+
+  if (!info) return;
+
+  for (const host of hosts) {
+    const banner = document.createElement('div');
+    banner.className = 'yanta-calendar-shared-note-banner';
+    banner.innerHTML = `
+      ${lucide('users', 13)}
+      <span>
+        ${
+          info.mounted
+            ? `Shared with you via calendar “${escapeHtml(info.name)}”`
+            : `Shared via calendar “${escapeHtml(info.name)}” — everyone with access can read this note`
+        }
+      </span>
+    `;
+
+    host.prepend(banner);
+  }
 }
 
 export function unlinkEventNote(eventId) {
@@ -9293,6 +9890,29 @@ export async function linkCalendarEventToNote(eventId, noteId, {
     toast('Event is already linked to this note', 'success');
     renderCalendarNoteAttachments(note.id);
     return true;
+  }
+
+  /*
+    Linking a note to an event in a shared calendar shares the note's
+    content with everyone in that calendar — never let that happen
+    silently.
+  */
+  if (ask && categoryIsSharedAnyRole(event.categoryId) && !note.spaceId) {
+    const cat = state.calendarCategories.get(event.categoryId);
+
+    const ok = await yantaConfirm({
+      title: 'Share this note?',
+      message: [
+        `"${event.title || 'This event'}" lives in the shared calendar "${cat?.name || 'Shared'}".`,
+        '',
+        `Linking "${note.title || 'Untitled'}" makes the note readable for everyone with access to that calendar.`,
+      ].join('\n'),
+      confirmLabel: 'Link & share note',
+      cancelLabel: 'Cancel',
+      icon: 'users',
+    });
+
+    if (!ok) return false;
   }
 
   const noteExistingEvent = calendarEventForNoteIdExcept(note.id, event.id);
@@ -9969,6 +10589,18 @@ function openEventEditor(input = {}) {
     ev.recurrenceOccurrence = true;
   }
 
+  /*
+    Events in a calendar mounted from someone else's share carry no
+    reminders in their shared record — reminders are personal and live
+    in the local overlay.
+  */
+  const sharedSpaceEvent = !!sourceForEditor?.spaceId;
+
+  if (sharedSpaceEvent) {
+    ev.reminders = personalEventReminders(ev.id);
+    ev.spaceId = sourceForEditor.spaceId;
+  }
+
   let linkedNote = ev.noteId ? state.notes.get(ev.noteId) : null;
 
   /*
@@ -10187,6 +10819,8 @@ function openEventEditor(input = {}) {
           </select>
         </label>
 
+        <div class="yanta-calendar-shared-banner" data-shared-banner hidden></div>
+
         <div class="yanta-calendar-appearance-box">
           <input type="hidden" data-field="color" value="${escapeAttr(ev.color || '')}" />
           <input type="hidden" data-field="icon" value="${escapeAttr(ev.icon || '')}" />
@@ -10263,7 +10897,10 @@ function openEventEditor(input = {}) {
 
       ${recurrenceEditorHtml(ev)}
 
-      ${remindersEditorHtml(ev, { editingExisting })}
+      ${remindersEditorHtml(ev, {
+        editingExisting,
+        shared: sharedSpaceEvent || categoryIsSharedAnyRole(ev.categoryId),
+      })}
 
       <label>
 
@@ -10296,6 +10933,53 @@ function openEventEditor(input = {}) {
   const allDayInput = modal.querySelector('[data-field="allDay"]');
   const startInput = modal.querySelector('[data-field="start"]');
   const endInput = modal.querySelector('[data-field="end"]');
+
+  /*
+    Shared-calendar awareness: whenever the selected category is a
+    shared calendar, say so persistently right under the picker — the
+    user must never be surprised about who can see an event.
+  */
+  const sharedBanner = modal.querySelector('[data-shared-banner]');
+  const categorySelect = modal.querySelector('[data-field="categoryId"]');
+
+  const updateSharedBanner = () => {
+    if (!sharedBanner || !categorySelect) return;
+
+    const catId = categorySelect.value || DEFAULT_CATEGORY_ID;
+    const cat = state.calendarCategories.get(catId);
+    const bridge = calendarBridgeForCategory(catId);
+    const ownShare = calendarCategoryShareInfo(catId);
+    const shared = !!bridge || ownShare.shared;
+
+    if (!shared) {
+      sharedBanner.hidden = true;
+      sharedBanner.innerHTML = '';
+      return;
+    }
+
+    const mounted = bridge && !bridge.isOwner;
+
+    const who = mounted
+      ? `everyone in "${cat?.name || 'this shared calendar'}"`
+      : `everyone you shared "${cat?.name || 'this calendar'}" with`;
+
+    const attribution =
+      editingExisting && sourceForEditor?.updatedBy
+        ? `<small>Last edited by ${escapeHtml(sourceForEditor.updatedBy)}</small>`
+        : '';
+
+    sharedBanner.hidden = false;
+    sharedBanner.innerHTML = `
+      <span class="yanta-calendar-shared-banner-main">
+        ${lucide('users', 13)}
+        Visible to ${escapeHtml(who)}
+      </span>
+      ${attribution}
+    `;
+  };
+
+  updateSharedBanner();
+  categorySelect?.addEventListener('change', updateSharedBanner);
 
   modal.querySelector('[data-action="pick-icon"]')?.addEventListener('click', async (e) => {
     e.preventDefault();
@@ -10722,6 +11406,16 @@ function openEventEditor(input = {}) {
       return;
     }
 
+    if (editingExisting) {
+      const ok = await confirmCalendarShareMove({
+        fromCategoryId: existing?.categoryId || ev.categoryId,
+        toCategoryId: patch.categoryId,
+        title: patch.title,
+      });
+
+      if (!ok) return;
+    }
+
     await applyCalendarEventAppearanceSideEffects(patch);
 
     const saved = putCalendarEvent(patch);
@@ -11139,6 +11833,28 @@ function renderCategoriesModal({
 
   ensureDefaultCalendarCategory();
 
+  const defaultReminderOptions = (categoryId) => {
+    const current = defaultRemindersForCategory(categoryId);
+    const selected = current.length ? Number(current[0].minutesBefore) : -1;
+
+    const options = [
+      { value: -1, label: 'No default reminder' },
+      { value: 0, label: 'At time of event' },
+      { value: 10, label: '10 min before' },
+      { value: 30, label: '30 min before' },
+      { value: 60, label: '1 hour before' },
+      { value: 24 * 60, label: '1 day before' },
+    ];
+
+    return options
+      .map((opt) => `
+        <option value="${opt.value}" ${opt.value === selected ? 'selected' : ''}>
+          ${escapeHtml(opt.label)}
+        </option>
+      `)
+      .join('');
+  };
+
   const rows = [...state.calendarCategories.values()]
     .sort((a, b) => String(a.name).localeCompare(String(b.name)))
     .map((cat) => {
@@ -11148,27 +11864,64 @@ function renderCategoriesModal({
 
       const sourceDesc = calendarCategorySourceDescription(cat.source);
 
+      const mounted = !!cat.spaceId;
+      const shareInfo = calendarCategoryShareInfo(cat.id);
+      const shared = mounted || shareInfo.shared;
+      const canShare = !sourceDesc && !cat.readonly && !mounted;
+
+      const shareLine = mounted
+        ? `
+          <span class="yanta-calendar-cat-shared-badge is-mounted">
+            ${lucide('users', 13)}
+            Shared with you${cat.readonly ? ' · view only' : ' · you can edit'}
+          </span>
+          <button class="btn compact danger" data-cat-leave>${lucide('log-out', 13)} Leave</button>
+        `
+        : shareInfo.shared
+          ? `
+            <span class="yanta-calendar-cat-shared-badge">
+              ${lucide('users', 13)}
+              Live shared${shareInfo.memberCount ? ` · ${shareInfo.memberCount} ${shareInfo.memberCount === 1 ? 'person' : 'people'}` : ''}${shareInfo.hasLink ? ` · ${lucide('globe', 12)} link` : ''}
+            </span>
+            <button class="btn compact" data-cat-share>${lucide('share-2', 13)} Manage sharing</button>
+          `
+          : canShare
+            ? `
+              <span>${lucide('lock', 13)} Private — only you</span>
+              <button class="btn compact" data-cat-share>${lucide('share-2', 13)} Share…</button>
+            `
+            : `
+              <span>
+                ${
+                  sourceDesc
+                    ? `${lucide('calendar-days', 13)} ${escapeHtml(sourceDesc)}`
+                    : `${lucide('lock', 13)} Private`
+                }
+              </span>
+            `;
+
       return `
-        <div class="yanta-calendar-cat-row" data-cat-id="${escapeAttr(cat.id)}">          <input type="checkbox" data-cat-visible ${cat.visible !== false ? 'checked' : ''} title="Visible" />
-          <input type="color" data-cat-color value="${escapeAttr(cat.color || '#6ea8fe')}" />
-          <input class="text-input" data-cat-name value="${escapeAttr(cat.name || '')}" />
+        <div class="yanta-calendar-cat-row ${shared ? 'is-shared' : ''}" data-cat-id="${escapeAttr(cat.id)}">
+          <input type="checkbox" data-cat-visible ${cat.visible !== false ? 'checked' : ''} title="Visible" />
+          <input type="color" data-cat-color value="${escapeAttr(cat.color || '#6ea8fe')}" title="${mounted ? 'Your personal color for this shared calendar' : 'Category color'}" />
+          <input class="text-input" data-cat-name value="${escapeAttr(cat.name || '')}" ${cat.readonly && !mounted ? '' : ''} ${mounted && cat.readonly ? 'readonly title="Only people with edit access can rename this shared calendar"' : ''} />
+          ${shared ? `<span class="yanta-calendar-cat-share-icon" title="${mounted ? 'Shared with you' : 'You are sharing this calendar'}">${lucide('users', 14)}</span>` : ''}
           <span class="yanta-calendar-cat-count" title="${escapeAttr(sourceDesc || `${count} stored event(s)`)}">
             ${sourceDesc ? 'source' : count}
           </span>
           <button class="icon-btn" data-cat-export-ics title="Export category as .ics">${lucide('calendar-arrow-down', 15)}</button>
           <button class="icon-btn" data-cat-export-json title="Export category as JSON">${lucide('download', 15)}</button>
-          <button class="icon-btn danger" data-cat-delete title="Delete category" ${cat.id === DEFAULT_CATEGORY_ID ? 'disabled' : ''}>${lucide('trash', 15)}</button>
+          <button class="icon-btn danger" data-cat-delete title="${mounted ? 'Leave shared calendar' : 'Delete category'}" ${cat.id === DEFAULT_CATEGORY_ID ? 'disabled' : ''}>${lucide('trash', 15)}</button>
         </div>
 
-        <div class="yanta-calendar-cat-share" data-cat-id="${escapeAttr(cat.id)}">
-          <span>
-            ${
-              sourceDesc
-                ? `${lucide('calendar-days', 13)} ${escapeHtml(sourceDesc)}`
-                : `${lucide('lock', 13)} Sharing prepared but not active`
-            }
-          </span>
-          <small>Category ID: ${escapeHtml(cat.id)}</small>
+        <div class="yanta-calendar-cat-share ${shared ? 'is-shared' : ''}" data-cat-id="${escapeAttr(cat.id)}">
+          <span class="yanta-calendar-cat-share-main">${shareLine}</span>
+          <label class="yanta-calendar-cat-default-reminder" title="Your personal default reminder for events in this calendar — it never affects other people">
+            ${lucide('bell', 12)}
+            <select class="text-input" data-cat-default-reminder>
+              ${defaultReminderOptions(cat.id)}
+            </select>
+          </label>
         </div>
       `;
     })
@@ -11268,6 +12021,42 @@ function renderCategoriesModal({
       const cat = state.calendarCategories.get(catId);
       if (!cat || cat.id === DEFAULT_CATEGORY_ID) return;
 
+      // Mounted shared calendar: leaving is the only "delete".
+      if (cat.spaceId) {
+        await leaveMountedCalendar(cat);
+        renderCategoriesModal();
+        return;
+      }
+
+      // Own shared calendar: deleting it ends the share for everyone.
+      const shareInfo = calendarCategoryShareInfo(catId);
+
+      if (shareInfo.shared) {
+        const ok = await yantaConfirm({
+          title: 'Delete shared calendar?',
+          message: [
+            `"${cat.name || 'This calendar'}" is currently shared.`,
+            '',
+            'Deleting it stops the share for everyone: all links stop working and the encrypted share data is removed from the cloud.',
+          ].join('\n'),
+          confirmLabel: 'Stop share & continue',
+          cancelLabel: 'Cancel',
+          danger: true,
+          icon: 'users',
+        });
+
+        if (!ok) return;
+
+        try {
+          const { stopSpaceShare } = await import('./spaces/space-session.js');
+          await stopSpaceShare(shareInfo.session.spaceId);
+        } catch (err) {
+          console.error(err);
+          toast(err?.message || 'Could not stop the share', 'error');
+          return;
+        }
+      }
+
       const choice = await openDeleteCalendarCategoryDialog(catId);
 
       if (!choice) return;
@@ -11285,6 +12074,44 @@ function renderCategoriesModal({
           : 'Category deleted and events moved',
         'success'
       );
+    });
+  }
+
+  for (const shareRow of modal.querySelectorAll('.yanta-calendar-cat-share')) {
+    const catId = shareRow.dataset.catId;
+
+    shareRow.querySelector('[data-cat-share]')?.addEventListener('click', async () => {
+      const { openUnifiedShareModal } = await import('./public-share/public-share-ui.js');
+
+      await openUnifiedShareModal({
+        calendarCategoryId: catId,
+      });
+    });
+
+    shareRow.querySelector('[data-cat-leave]')?.addEventListener('click', async () => {
+      const cat = state.calendarCategories.get(catId);
+      if (!cat?.spaceId) return;
+
+      await leaveMountedCalendar(cat);
+      renderCategoriesModal();
+    });
+
+    shareRow.querySelector('[data-cat-default-reminder]')?.addEventListener('change', (e) => {
+      const minutes = Number(e.target.value);
+
+      setDefaultRemindersForCategory(
+        catId,
+        minutes >= 0
+          ? [{
+              id: `rem_default_${minutes}`,
+              label: '',
+              minutesBefore: minutes,
+              enabled: true,
+            }]
+          : []
+      );
+
+      toast('Personal default reminder saved — it only affects you', 'success');
     });
   }
 
@@ -11726,6 +12553,31 @@ export function setupCalendarVaultBridge() {
   if (calendarVaultBridgeInstalled) return;
 
   calendarVaultBridgeInstalled = true;
+
+  // Personal overlays (shared-calendar colors, default reminders) are
+  // needed synchronously by render paths — hydrate the cache early.
+  loadCalendarPersonal().catch(() => {});
+
+  /*
+    A shared-calendar space applied remote changes (or was unmounted).
+    Mounted categories/events live outside the vault, so a full re-merge
+    of vault + mounted spaces is the simplest correct refresh.
+  */
+  window.addEventListener('yanta-calendar-space-applied', () => {
+    hydrateCalendarStateFromVault({
+      silent: false,
+    });
+
+    if (state.currentNoteId) {
+      requestAnimationFrame(() => {
+        renderCalendarNoteAttachments(state.currentNoteId);
+      });
+    }
+  });
+
+  window.addEventListener('yanta-calendar-feed-updated', () => {
+    refreshCalendarFeedChip().catch(() => {});
+  });
 
   window.addEventListener('yanta-vault-hydrated', (e) => {
     /*

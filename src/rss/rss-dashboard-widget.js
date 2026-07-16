@@ -134,6 +134,8 @@ function injectCss() {
   color: var(--text-dim);
 }
 
+ 
+
 .yanta-dash-widget-scroll {
   display: flex;
   gap: 10px;
@@ -143,6 +145,9 @@ function injectCss() {
   overflow-x: auto;
   overscroll-behavior-x: contain;
   scrollbar-width: thin;
+
+  -webkit-mask-image: linear-gradient(to right, transparent 0%, #000 20px, #000 calc(100% - 20px), transparent 100%);
+  mask-image: linear-gradient(to right, transparent 0%, #000 20px, #000 calc(100% - 20px), transparent 100%);
 }
 
 .yanta-rss-dash-card {

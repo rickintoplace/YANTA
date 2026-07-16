@@ -3360,6 +3360,18 @@ function renderCardHeader(item) {
   head.append(icon, title);
 
   if (item.kind === 'folder') {
+    const share = folderShareStatus(item.folder);
+
+    if (share) {
+      const shared = el('span', {
+        class: 'yanta-dash-shared-badge' + (share.mounted ? ' is-mounted' : ''),
+        title: share.title,
+      });
+
+      shared.innerHTML = lucide('users', 12);
+      head.append(shared);
+    }
+
     const count = folderDirectCount(item.id);
 
     const badge = el('span', {
@@ -3371,6 +3383,33 @@ function renderCardHeader(item) {
   }
 
   return head;
+}
+
+/**
+ * Sharing was invisible on dashboard folder cards — a folder could be
+ * live-shared with the whole team and look exactly like a private one.
+ * Returns null, or { mounted, title } for the badge.
+ */
+function folderShareStatus(folder) {
+  if (!folder) return null;
+
+  if (folder.spaceId) {
+    return {
+      mounted: true,
+      title: `Shared with you${folder.spaceRole === 'write' ? ' · you can edit' : ' · view only'}`,
+    };
+  }
+
+  for (const session of state.spaces.values()) {
+    if (session.sourceType === 'folder' && session.record.rootFolderId === folder.id) {
+      return {
+        mounted: false,
+        title: 'You are sharing this folder as a live workspace',
+      };
+    }
+  }
+
+  return null;
 }
   
 function folderPreviewItems(folderId) {

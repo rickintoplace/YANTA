@@ -22,7 +22,10 @@ var PLAN_LIMITS = {
     rssImageBytesDay: 50 * 1024 * 1024,
     rssImageBytesMax: 2 * 1024 * 1024,
 
-    maxActiveSpaces: 3,
+    // Spaces are the organic growth loop — the ceiling is generous on
+    // purpose. Real cost is bounded by spaceBytes / download quotas,
+    // not by the space count.
+    maxActiveSpaces: 10,
     spaceBytes: 20 * 1024 * 1024,
     spaceObjects: 2_000,
     spaceMembersMax: 5
@@ -6495,6 +6498,35 @@ function timingSafeEqualStr(a, b) {
   return diff === 0;
 }
 
+// ---- approximate link stats (counters only, never per-visitor) ----
+
+async function spaceLinkStatsRow(env, spaceId) {
+  return env.DB.prepare(
+    `SELECT * FROM space_link_stats WHERE space_id = ?`
+  ).bind(spaceId).first();
+}
+
+async function bumpSpaceLinkOpen(env, spaceId) {
+  const t = now();
+  await env.DB.prepare(
+    `INSERT INTO space_link_stats (space_id, link_opens, last_open_at)
+     VALUES (?, 1, ?)
+     ON CONFLICT(space_id) DO UPDATE SET
+       link_opens = link_opens + 1,
+       last_open_at = ?`
+  ).bind(spaceId, t, t).run();
+}
+
+async function markSpaceLinkIncident(env, spaceId, column) {
+  if (!["throttled_at", "quota_hit_at"].includes(column)) return;
+  const t = now();
+  await env.DB.prepare(
+    `INSERT INTO space_link_stats (space_id, link_opens, ${column})
+     VALUES (?, 0, ?)
+     ON CONFLICT(space_id) DO UPDATE SET ${column} = ?`
+  ).bind(spaceId, t, t).run();
+}
+
 function spaceMetaJson(space, role) {
   return {
     id: space.id,
@@ -6553,11 +6585,16 @@ async function resolveSpaceAccess(env, req, spaceId) {
     }
   }
 
+  let viaToken = false;
+
   if (!role) {
     const writeToken = req.headers.get("x-yanta-space-write-token") || "";
     if (writeToken && space.write_token_hash) {
       const h = await hashToken(env, writeToken);
-      if (timingSafeEqualStr(h, space.write_token_hash)) role = "write";
+      if (timingSafeEqualStr(h, space.write_token_hash)) {
+        role = "write";
+        viaToken = true;
+      }
     }
   }
 
@@ -6565,7 +6602,10 @@ async function resolveSpaceAccess(env, req, spaceId) {
     const readToken = req.headers.get("x-yanta-space-read-token") || "";
     if (readToken && space.read_token_hash) {
       const h = await hashToken(env, readToken);
-      if (timingSafeEqualStr(h, space.read_token_hash)) role = "read";
+      if (timingSafeEqualStr(h, space.read_token_hash)) {
+        role = "read";
+        viaToken = true;
+      }
     }
   }
 
@@ -6576,7 +6616,7 @@ async function resolveSpaceAccess(env, req, spaceId) {
     throw err;
   }
 
-  return { space, user, role };
+  return { space, user, role, viaToken };
 }
 
 function requireSpaceRole(access, allowed) {
@@ -6597,6 +6637,11 @@ async function spaceAnonReadAllowed(env, req, access) {
     600,
     10 * 60 * 1e3
   );
+  if (!limit.ok) {
+    // Remember the incident so the owner can be told their public link
+    // is hot enough to hit protective limits.
+    await markSpaceLinkIncident(env, access.space.id, "throttled_at").catch(() => {});
+  }
   return limit.ok;
 }
 
@@ -6615,7 +6660,7 @@ async function handleCreateSpace(env, req, headers) {
   const readToken = String(body.readToken || "").trim();
   const writeToken = String(body.writeToken || "").trim();
 
-  if (!["note", "folder"].includes(sourceType)) {
+  if (!["note", "folder", "calendar"].includes(sourceType)) {
     return json({ error: "invalid_source_type" }, 400, headers);
   }
   if (!sourceId) {
@@ -6697,8 +6742,27 @@ async function handleGetSpace(env, req, url, headers) {
   const spaceId = url.pathname.match(/^\/api\/spaces\/([^/]+)$/)?.[1] || "";
   const access = await resolveSpaceAccess(env, req, spaceId);
   requireSpaceRole(access, ["owner", "write", "read"]);
+
+  // Space meta is fetched once per link open (not per poll), which makes
+  // it a good approximation of "how often was my link used".
+  if (access.viaToken) {
+    await bumpSpaceLinkOpen(env, spaceId).catch(() => {});
+  }
+
+  const meta = spaceMetaJson(access.space, access.role);
+
+  if (access.role === "owner") {
+    const stats = await spaceLinkStatsRow(env, spaceId).catch(() => null);
+    meta.linkStats = {
+      linkOpens: Number(stats?.link_opens || 0),
+      lastOpenAt: stats?.last_open_at || null,
+      throttledAt: stats?.throttled_at || null,
+      quotaHitAt: stats?.quota_hit_at || null
+    };
+  }
+
   return json({
-    space: spaceMetaJson(access.space, access.role)
+    space: meta
   }, 200, { ...headers, "cache-control": "no-store" });
 }
 
@@ -6793,6 +6857,7 @@ async function handleDeleteSpace(env, req, url, headers) {
 
   await env.DB.prepare(`DELETE FROM objects WHERE vault_id = ?`).bind(spaceId).run();
   await env.DB.prepare(`DELETE FROM space_members WHERE space_id = ?`).bind(spaceId).run();
+  await env.DB.prepare(`DELETE FROM space_link_stats WHERE space_id = ?`).bind(spaceId).run();
   await env.DB.prepare(`DELETE FROM spaces WHERE id = ?`).bind(spaceId).run();
 
   if (freedObjects > 0) {
@@ -7049,6 +7114,7 @@ async function handleSpaceStorageGet(env, req, url, headers, spaceId) {
   const limits = await spaceOwnerLimits(env, access.space);
 
   if (usage.download_bytes_month + row.size > limits.downloadBytesMonth) {
+    await markSpaceLinkIncident(env, spaceId, "quota_hit_at").catch(() => {});
     return json({ error: "download_quota_exceeded" }, 403, headers);
   }
 

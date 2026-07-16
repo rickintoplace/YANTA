@@ -1,5 +1,7 @@
 import { state, toast, } from '../core.js';
 
+import { recordNativeNotificationAck } from '../notification-sync-status.js';
+
 let installed = false;
 let syncTimer = 0;
 let lastNotificationStatus = {
@@ -172,10 +174,12 @@ export async function syncNativeSnapshotNow() {
     collectRssItems(),
   ]);
 
+  const notificationStatus = androidNotificationStatus();
+
   const snapshot = {
     version: 1,
     exportedAt: new Date().toISOString(),
-    notificationStatus: androidNotificationStatus(),
+    notificationStatus,
     calendarEvents,
     notes: collectNotes(),
     folders: collectFolders(),
@@ -183,6 +187,17 @@ export async function syncNativeSnapshotNow() {
   };
 
   callAndroid('syncNativeSnapshot', safeJson(snapshot));
+
+  /*
+    The native alarm scheduler now knows the current reminders —
+    publish that to the synced device record so other devices can
+    show whether reminders are actually covered somewhere.
+  */
+  try {
+    recordNativeNotificationAck(notificationStatus);
+  } catch (err) {
+    console.warn('[YANTA Android Bridge] notification ack failed', err);
+  }
 }
 
 export function scheduleNativeSnapshotSync(delay = 500) {
@@ -241,6 +256,10 @@ export function setupAndroidBridge() {
     window.dispatchEvent(new CustomEvent('yanta-native-notification-status-changed', {
       detail: lastNotificationStatus,
     }));
+
+    // Permission changes alter what the device can deliver — refresh
+    // the native snapshot + synced notification ack right away.
+    scheduleNativeSnapshotSync(300);
   });
 
   window.addEventListener('yanta-android-quick-action', (e) => {

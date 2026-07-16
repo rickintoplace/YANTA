@@ -331,6 +331,89 @@ export function parseIcsEvents(text) {
   return events;
 }
 
+function icsAlarmTrigger(reminder) {
+  if (!reminder || reminder.enabled === false) return null;
+
+  const minutes = Math.round(Number(reminder.minutesBefore));
+  if (!Number.isFinite(minutes) || minutes < 0) return null;
+
+  if (minutes === 0) return 'PT0S';
+  if (minutes % 1440 === 0) return `-P${minutes / 1440}D`;
+  if (minutes % 60 === 0) return `-PT${minutes / 60}H`;
+
+  return `-PT${minutes}M`;
+}
+
+/*
+  "Add to calendar" links for third-party calendars.
+
+  All-day handling mirrors eventsToIcs: YANTA stores inclusive end
+  dates, the providers expect exclusive ones.
+*/
+function allDayEndKeyExclusive(e) {
+  return addDaysKey(localDateKey(e.end || e.start), 1);
+}
+
+function timedEndIso(e) {
+  if (e.end) return e.end;
+
+  // Providers require an end — default to the app's 30-minute slot.
+  const d = new Date(e.start);
+  if (Number.isNaN(d.getTime())) return e.start;
+
+  return new Date(d.getTime() + 30 * 60 * 1000).toISOString();
+}
+
+export function googleCalendarEventUrl(e = {}) {
+  if (!e.start) return '';
+
+  const dates = e.allDay
+    ? `${toIcsDate(e.start, true)}/${toIcsDate(allDayEndKeyExclusive(e), true)}`
+    : `${toIcsDate(e.start)}/${toIcsDate(timedEndIso(e))}`;
+
+  const params = new URLSearchParams({
+    action: 'TEMPLATE',
+    text: e.title || 'Untitled event',
+    dates,
+  });
+
+  if (e.location) params.set('location', e.location);
+  if (e.description) params.set('details', e.description);
+  if (e.recurrence?.rrule) params.set('recur', `RRULE:${e.recurrence.rrule}`);
+
+  return `https://calendar.google.com/calendar/render?${params.toString()}`;
+}
+
+export function outlookCalendarEventUrl(e = {}, {
+  office = false,
+} = {}) {
+  if (!e.start) return '';
+
+  const params = new URLSearchParams({
+    path: '/calendar/action/compose',
+    rru: 'addevent',
+    subject: e.title || 'Untitled event',
+  });
+
+  if (e.allDay) {
+    params.set('startdt', localDateKey(e.start));
+    params.set('enddt', allDayEndKeyExclusive(e));
+    params.set('allday', 'true');
+  } else {
+    params.set('startdt', new Date(e.start).toISOString());
+    params.set('enddt', new Date(timedEndIso(e)).toISOString());
+  }
+
+  if (e.location) params.set('location', e.location);
+  if (e.description) params.set('body', e.description);
+
+  const host = office
+    ? 'https://outlook.office.com'
+    : 'https://outlook.live.com';
+
+  return `${host}/calendar/0/deeplink/compose?${params.toString()}`;
+}
+
 export function eventsToIcs(events, {
   calendarName = 'YANTA',
 } = {}) {
@@ -380,6 +463,17 @@ export function eventsToIcs(events, {
 
     if (e.recurrence?.rrule) {
       lines.push(`RRULE:${e.recurrence.rrule}`);
+    }
+
+    for (const reminder of e.reminders || []) {
+      const trigger = icsAlarmTrigger(reminder);
+      if (!trigger) continue;
+
+      lines.push('BEGIN:VALARM');
+      lines.push('ACTION:DISPLAY');
+      lines.push(`DESCRIPTION:${escapeIcsText(e.title || 'Reminder')}`);
+      lines.push(`TRIGGER:${trigger}`);
+      lines.push('END:VALARM');
     }
 
     for (const ex of e.recurrenceExceptions || []) {

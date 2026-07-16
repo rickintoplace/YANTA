@@ -179,6 +179,8 @@ import {
 
 // Registers the calendar dashboard widget (side effect).
 import './calendar-widget.js';
+// Registers the dashboard information panel (side effect).
+import './dashboard-info-panel.js';
 import {
   setupRss,
   openRssInbox,

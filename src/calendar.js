@@ -76,6 +76,8 @@ import {
   parseIcsEvents,
   exportEventsAsIcs,
   eventsToIcs,
+  googleCalendarEventUrl,
+  outlookCalendarEventUrl,
 } from './calendar-ics.js';
 
 import {
@@ -132,6 +134,11 @@ import {
 import {
   moveNoteToTrash,
 } from './trash.js';
+
+import {
+  notificationSyncStatusForEvent,
+  observeNotificationSyncStatus,
+} from './notification-sync-status.js';
 
 const ORIGIN = 'calendar';
 const DEFAULT_CATEGORY_ID = 'cal_default';
@@ -263,7 +270,9 @@ function nativeNotificationHintHtml() {
   `;
 }
 
-function remindersEditorHtml(ev = {}) {
+function remindersEditorHtml(ev = {}, {
+  editingExisting = false,
+} = {}) {
   const reminders = normalizeCalendarReminders(ev.reminders || [], ev);
 
   return `
@@ -284,7 +293,92 @@ function remindersEditorHtml(ev = {}) {
             : `<div class="yanta-calendar-reminders-empty">No notifications set.</div>`
         }
       </div>
+
+      ${notificationDeviceListHtml(ev, {
+        editingExisting,
+        hasReminders: reminders.length > 0,
+      })}
     </section>
+  `;
+}
+
+/*
+  Which connected Android devices already know this event's
+  notifications. Reminders only fire on a device after YANTA was
+  opened there and handed them to the native alarm scheduler — this
+  makes that visible instead of leaving the user to hope.
+*/
+function notificationDeviceListHtml(ev = {}, {
+  editingExisting = false,
+  hasReminders = false,
+} = {}) {
+  let status;
+
+  try {
+    status = notificationSyncStatusForEvent(ev);
+  } catch {
+    return '';
+  }
+
+  // No notification-capable device known: the hint above already
+  // explains how to get one — an empty list adds nothing.
+  if (!status.hasNotificationDevices) return '';
+
+  const rows = status.devices.map((device) => {
+    const label = device.current
+      ? `${device.name} (this device)`
+      : device.name;
+
+    if (device.state === 'permissions') {
+      return deviceRowHtml({
+        tone: 'warn',
+        icon: 'bell-off',
+        label,
+        text: 'Notifications disabled in the app',
+        tooltip: `Open YANTA on "${device.name}" and allow notifications and exact alarms — until then reminders cannot fire there.`,
+      });
+    }
+
+    if (device.state === 'synced') {
+      return deviceRowHtml({
+        tone: 'ok',
+        icon: 'check',
+        label,
+        text: 'Notifications synced',
+        tooltip: `"${device.name}" has scheduled this event's notifications. You will be notified even while YANTA is closed.`,
+      });
+    }
+
+    return deviceRowHtml({
+      tone: 'pending',
+      icon: 'refresh-cw',
+      label,
+      text: editingExisting
+        ? 'Not synced yet — open YANTA on this device'
+        : 'Will sync after saving',
+      tooltip: editingExisting
+        ? `"${device.name}" does not know this event's notifications yet. Open YANTA there once — it syncs automatically and schedules the reminders.`
+        : `After saving, open YANTA on "${device.name}" once so it can schedule the reminders.`,
+    });
+  }).join('');
+
+  return `
+    <div
+      class="yanta-calendar-notification-devices"
+      data-notification-devices
+      ${hasReminders ? '' : 'hidden'}>
+      ${rows}
+    </div>
+  `;
+}
+
+function deviceRowHtml({ tone, icon, label, text, tooltip }) {
+  return `
+    <div class="yanta-calendar-notification-device ${tone}" title="${escapeAttr(tooltip)}">
+      ${lucide('smartphone', 13)}
+      <strong>${escapeHtml(label)}</strong>
+      <span>${lucide(icon, 12)} ${escapeHtml(text)}</span>
+    </div>
   `;
 }
 
@@ -328,10 +422,29 @@ function reminderRowHtml(reminder = {}) {
   `;
 }
 
-function setupRemindersEditor(modal) {
+function setupRemindersEditor(modal, ev = {}, {
+  editingExisting = false,
+} = {}) {
   const box = modal.querySelector('[data-reminders-box]');
   const list = modal.querySelector('[data-reminders-list]');
   if (!box || !list) return;
+
+  const refreshDeviceList = () => {
+    const host = box.querySelector('[data-notification-devices]');
+    const hasReminders = !!list.querySelector('[data-reminder-row]');
+
+    const tpl = document.createElement('template');
+    tpl.innerHTML = notificationDeviceListHtml(ev, {
+      editingExisting,
+      hasReminders,
+    }).trim();
+
+    const next = tpl.content.firstElementChild;
+
+    if (host && next) host.replaceWith(next);
+    else if (host && !next) host.remove();
+    else if (!host && next) box.append(next);
+  };
 
   const renderEmptyState = () => {
     const rows = list.querySelectorAll('[data-reminder-row]');
@@ -340,6 +453,10 @@ function setupRemindersEditor(modal) {
       list.innerHTML = `<div class="yanta-calendar-reminders-empty">No notifications set.</div>`;
     }
     if (rows.length && empty) empty.remove();
+
+    // Device coverage only matters while there is something to deliver.
+    const devices = box.querySelector('[data-notification-devices]');
+    if (devices) devices.hidden = !rows.length;
   };
 
   const bindRow = (row) => {
@@ -398,8 +515,16 @@ function setupRemindersEditor(modal) {
     const tpl = document.createElement('template');
     tpl.innerHTML = nativeNotificationHintHtml().trim();
     hintHost.replaceWith(tpl.content.firstElementChild);
-    setupRemindersEditor(modal);
+    setupRemindersEditor(modal, ev, { editingExisting });
   }, { once: true });
+
+  /*
+    Device acks arrive via vault sync while the editor is open —
+    e.g. the user opens YANTA on their phone and "Not synced yet"
+    flips to "Notifications synced" without reopening the dialog.
+    The observer unhooks itself once this editor DOM is replaced.
+  */
+  observeNotificationSyncStatus(refreshDeviceList, () => box.isConnected);
 }
 
 function readRemindersFromModal(modal) {
@@ -9523,6 +9648,137 @@ function safeNotePickerColor(color) {
 // Event modal
 // ============================================================
 
+// ============================================================
+// Event export menu — .ics download plus "add to" deep links for
+// third-party calendars, each openable directly or copyable.
+// ============================================================
+
+let eventExportMenu = null;
+
+function closeEventExportMenu() {
+  if (!eventExportMenu) return;
+
+  eventExportMenu.remove();
+  eventExportMenu = null;
+
+  document.removeEventListener('click', onEventExportMenuOutsideClick, true);
+  document.removeEventListener('keydown', onEventExportMenuKeydown, true);
+}
+
+function onEventExportMenuOutsideClick(e) {
+  if (eventExportMenu?.contains(e.target)) return;
+  closeEventExportMenu();
+}
+
+function onEventExportMenuKeydown(e) {
+  if (e.key !== 'Escape') return;
+
+  // Only dismiss the menu — the event editor stays open.
+  e.preventDefault();
+  e.stopPropagation();
+  closeEventExportMenu();
+}
+
+function exportProviderRowHtml({ id, icon, label }) {
+  return `
+    <div class="yanta-calendar-export-row">
+      <button type="button" class="has-icon" data-export-open="${escapeAttr(id)}" title="Open ${escapeAttr(label)} in a new tab">
+        <span class="ctx-menu-icon">${lucide(icon, 14)}</span>
+        <span class="ctx-menu-label">${escapeHtml(label)}</span>
+      </button>
+      <button type="button" class="icon-btn yanta-calendar-export-copy" data-export-copy="${escapeAttr(id)}" title="Copy ${escapeAttr(label)} link">
+        ${lucide('copy', 13)}
+      </button>
+    </div>
+  `;
+}
+
+function openEventExportMenu(anchor, ev) {
+  closeEventExportMenu();
+  if (!anchor || !ev?.start) return;
+
+  const links = {
+    google: googleCalendarEventUrl(ev),
+    outlook: outlookCalendarEventUrl(ev),
+    office365: outlookCalendarEventUrl(ev, { office: true }),
+  };
+
+  const menu = document.createElement('div');
+  menu.className = 'ctx-menu yanta-calendar-export-menu';
+
+  menu.innerHTML = `
+    <button type="button" class="has-icon" data-export-ics title="Save this event as an .ics file">
+      <span class="ctx-menu-icon">${lucide('download', 14)}</span>
+      <span class="ctx-menu-label">Download .ics</span>
+    </button>
+    <hr />
+    ${exportProviderRowHtml({ id: 'google', icon: 'calendar-plus', label: 'Google Calendar' })}
+    ${exportProviderRowHtml({ id: 'outlook', icon: 'calendar-plus', label: 'Outlook.com' })}
+    ${exportProviderRowHtml({ id: 'office365', icon: 'calendar-plus', label: 'Office 365' })}
+  `;
+
+  menu.querySelector('[data-export-ics]')?.addEventListener('click', () => {
+    closeEventExportMenu();
+
+    exportEventsAsIcs([ev], {
+      filename: `${safeFilename(ev.title || 'event')}.ics`,
+      calendarName: 'YANTA',
+    });
+
+    toast('Event exported as .ics', 'success');
+  });
+
+  menu.querySelectorAll('[data-export-open]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const url = links[btn.dataset.exportOpen] || '';
+      closeEventExportMenu();
+
+      if (!url) return;
+      window.open(url, '_blank', 'noopener');
+    });
+  });
+
+  menu.querySelectorAll('[data-export-copy]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const url = links[btn.dataset.exportCopy] || '';
+      closeEventExportMenu();
+
+      if (!url) return;
+
+      try {
+        await navigator.clipboard.writeText(url);
+        toast('Calendar link copied', 'success');
+      } catch (err) {
+        console.warn('[YANTA Calendar] Could not copy export link', err);
+        toast('Could not copy link.', 'error');
+      }
+    });
+  });
+
+  document.body.append(menu);
+  eventExportMenu = menu;
+
+  // Anchored under the button; flips above when the footer sits too low.
+  const r = anchor.getBoundingClientRect();
+  const m = menu.getBoundingClientRect();
+  const margin = 8;
+
+  let left = Math.min(r.left, window.innerWidth - m.width - margin);
+  let top = r.bottom + 6;
+
+  if (top + m.height > window.innerHeight - margin) {
+    top = r.top - m.height - 6;
+  }
+
+  menu.style.left = `${Math.max(margin, Math.round(left))}px`;
+  menu.style.top = `${Math.max(margin, Math.round(top))}px`;
+
+  setTimeout(() => {
+    document.addEventListener('click', onEventExportMenuOutsideClick, true);
+    document.addEventListener('keydown', onEventExportMenuKeydown, true);
+  }, 0);
+}
+
 function ensureEventModal() {
   registerCalendarEventOverlayRoute();
 
@@ -9545,6 +9801,8 @@ function ensureEventModal() {
 function closeEventModal({
   fromHistory = false,
 } = {}) {
+  closeEventExportMenu();
+
   if (!eventModal) return;
 
   closeCalendarOverlayBackedModal(
@@ -9692,6 +9950,12 @@ function openEventEditor(input = {}) {
     recurrence: sourceForEditor?.recurrence || input.recurrence || null,
     recurrenceExceptions: sourceForEditor?.recurrenceExceptions || [],
     recurrenceOverrides: sourceForEditor?.recurrenceOverrides || {},
+
+    reminders: Array.isArray(sourceForEditor?.reminders)
+      ? sourceForEditor.reminders
+      : Array.isArray(input.reminders)
+        ? input.reminders
+        : [],
 
     created: sourceForEditor?.created || now(),
     updated: sourceForEditor?.updated || now(),
@@ -9999,7 +10263,7 @@ function openEventEditor(input = {}) {
 
       ${recurrenceEditorHtml(ev)}
 
-      ${remindersEditorHtml(ev)}
+      ${remindersEditorHtml(ev, { editingExisting })}
 
       <label>
 
@@ -10019,6 +10283,9 @@ function openEventEditor(input = {}) {
         <div class="compress-actions">
           ${editingExisting ? `<button class="btn danger" data-action="delete">${lucide('trash', 14)} Delete</button>` : ''}
           <span class="grow"></span>
+          <button class="btn" data-action="export" title="Export event or add it to another calendar">
+            ${lucide('calendar-arrow-down', 14)} Export ${lucide('chevron-down', 12)}
+          </button>
           <button class="btn" data-cal-close>Cancel</button>
           <button class="btn primary" data-action="save">${lucide('check', 14)} Save</button>
         </div>
@@ -10382,6 +10649,22 @@ function openEventEditor(input = {}) {
     updateDatePreviews();
   });
 
+  modal.querySelector('[data-action="export"]')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (eventExportMenu) {
+      closeEventExportMenu();
+      return;
+    }
+
+    // Export what the user sees — including unsaved edits.
+    const patch = readPatchFromModal();
+    if (!validatePatch(patch)) return;
+
+    openEventExportMenu(e.currentTarget, patch);
+  });
+
   modal.querySelector('[data-action="save"]')?.addEventListener('click', async () => {
     const patch = readPatchFromModal();
     if (!validatePatch(patch)) return;
@@ -10497,7 +10780,7 @@ function openEventEditor(input = {}) {
   });
 
   setupRecurrenceEditor(modal, ev);
-  setupRemindersEditor(modal);
+  setupRemindersEditor(modal, ev, { editingExisting });
 
   renderNoteSection();
   updateDatePreviews();

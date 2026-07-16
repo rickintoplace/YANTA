@@ -239,7 +239,35 @@ async function notificationPayload(client, roomId, eventId) {
 
   await ensureEventDecrypted(client, event);
 
-  const preview = event.isDecryptionFailure?.()
+  const decryptionFailed = !!event.isDecryptionFailure?.();
+
+  /*
+    Nach der Entschlüsselung kann sich ein m.room.encrypted-Event als Edit,
+    Reaction oder Redaction entpuppen. Ohne Text-Preview gäbe das eine leere
+    "New message"-Notification — solche Events nie melden.
+  */
+  if (!decryptionFailed) {
+    if (event.isRedacted?.()) return null;
+
+    const relates = event.getContent?.()?.['m.relates_to'] || {};
+    if (relates.rel_type === 'm.replace' || relates.rel_type === 'm.annotation') {
+      return null;
+    }
+
+    if (!messagePreview(event)) return null;
+  }
+
+  /*
+    Placeholder "New encrypted message" nur, wenn die App wirklich im
+    Hintergrund ist. Im Vordergrund holen Key-Import/Backup die Entschlüsselung
+    meist Sekunden später nach — die Placeholder-Notification bliebe dann als
+    leere/stale Notification stehen (Bug: leere Notification beim App-Start).
+  */
+  if (decryptionFailed && document.visibilityState === 'visible') {
+    return null;
+  }
+
+  const preview = decryptionFailed
     ? 'New encrypted message'
     : (messagePreview(event) || 'New message');
 
@@ -454,6 +482,15 @@ async function onIncomingMessage(detail = {}) {
   const payload = await notificationPayload(client, roomId, eventId);
   if (!payload) return;
 
+  /*
+    notificationPayload wartet auf Entschlüsselung (bis zu DECRYPT_WAIT_MS).
+    In der Zwischenzeit kann der Nutzer genau diesen Chat geöffnet oder die
+    Nachricht auf einem anderen Gerät gelesen haben — direkt vor dem Anzeigen
+    erneut prüfen.
+  */
+  if (isRoomVisibleAndFocused(roomId)) return;
+  if (isEventAlreadyRead(client, roomId, eventId)) return;
+
   const nativeShown = androidShowChatNotification(payload);
   if (!nativeShown) {
     await showWebNotification(payload);
@@ -632,14 +669,30 @@ export function setupChatNotifications() {
     });
   });
 
+  /*
+    App zurück im Vordergrund mit offenem Chat: dessen Notifications sind
+    ab jetzt sichtbarer Inhalt und müssen aus der Leiste verschwinden.
+  */
+  const clearVisibleRoomNotifications = () => {
+    if (
+      chatSurfaceOpen &&
+      visibleRoomId &&
+      document.visibilityState === 'visible'
+    ) {
+      clearNotificationsForRoom(visibleRoomId);
+    }
+  };
+
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
       refreshChatUnreadBadge();
+      clearVisibleRoomNotifications();
     }
   });
 
   window.addEventListener('focus', () => {
     refreshChatUnreadBadge();
+    clearVisibleRoomNotifications();
   });
 
   installServiceWorkerClickListener();

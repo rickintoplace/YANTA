@@ -98,6 +98,15 @@ export function setupChatComposer({
       ${lucide('plus', 19)}
     </button>
 
+    <button
+      class="yanta-chat-attach"
+      type="button"
+      data-chat-emoji
+      title="Emoji & stickers"
+      aria-label="Emoji & stickers">
+      ${lucide('smile', 19)}
+    </button>
+
     <textarea
       rows="1"
       placeholder="Message…"
@@ -122,11 +131,35 @@ export function setupChatComposer({
   const textArea = form.querySelector('[data-chat-input]');
   const sendButton = form.querySelector('[data-chat-send]');
   const attachButton = form.querySelector('[data-chat-attach]');
+  const emojiButton = form.querySelector('[data-chat-emoji]');
   const imageInput = form.querySelector('[data-chat-image-input]');
   const fileInput = form.querySelector('[data-chat-file-input]');
 
   let currentRoomId = '';
   let restoring = false;
+
+  /*
+    Lazy geladen (Emoji-Datensatz ist ein eigener Chunk); Referenz gemerkt,
+    damit setRoom() das Panel nur schließt, wenn es je geöffnet wurde.
+  */
+  let expressionsApi = null;
+
+  async function toggleExpressionsPanel() {
+    try {
+      expressionsApi = expressionsApi || await import('./chat-expressions.js');
+
+      expressionsApi.toggleChatExpressions({
+        form,
+        textArea,
+        getClient,
+        getRoomId,
+        onStickerSent: () => onSent?.(),
+      });
+    } catch (err) {
+      console.warn('[YANTA Chat] Could not open emoji panel', err);
+      toast('Could not open emoji & stickers.', 'error');
+    }
+  }
 
   const persistDraft = debounce(async () => {
     if (restoring || !currentRoomId) return;
@@ -326,6 +359,17 @@ export function setupChatComposer({
     e.stopPropagation();
   }, true);
 
+  emojiButton?.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    toggleExpressionsPanel();
+  }, true);
+
+  emojiButton?.addEventListener('click', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  }, true);
+
 
   imageInput.addEventListener('change', async () => {
     const file = imageInput.files?.[0];
@@ -372,6 +416,9 @@ export function setupChatComposer({
      */
     async setRoom(roomId) {
       currentRoomId = String(roomId || '');
+
+      // Panel gehört zum vorherigen Gespräch — beim Raumwechsel schließen.
+      expressionsApi?.closeChatExpressions?.(form);
 
       restoring = true;
 

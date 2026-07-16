@@ -295,6 +295,21 @@ export function parseAppHash(hash = window.location.hash) {
     };
   }
 
+  /*
+    #chat-dm/<handle>: Deep-Link (z. B. aus dem Profil-QR-Code), der einen
+    neuen verschlüsselten Chat mit diesem Nutzer startet.
+  */
+  if (raw.startsWith('chat-dm/')) {
+    return {
+      surface: 'chat',
+      noteId: null,
+      folderId: null,
+      eventId: null,
+      roomId: null,
+      dmUserId: raw.slice('chat-dm/'.length) || null,
+    };
+  }
+
   if (raw === 'calendar') {
     return {
       surface: 'calendar',

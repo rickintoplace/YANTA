@@ -634,6 +634,7 @@ import {
   export function openGlobalChatSearch({
     client,
     onJump,
+    initialQuery = '',
   } = {}) {
     if (!client) {
       toast('Chat is not connected.', 'error');
@@ -689,10 +690,17 @@ import {
         closeGlobalChatSearch();
       }
     });
-  
+
+    if (initialQuery) {
+      input.value = String(initialQuery);
+    }
+
     run();
-  
-    setTimeout(() => input.focus(), 0);
+
+    setTimeout(() => {
+      input.focus();
+      input.setSelectionRange(input.value.length, input.value.length);
+    }, 0);
   }
   
   /**

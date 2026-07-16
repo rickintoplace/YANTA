@@ -418,6 +418,19 @@ export function handleAndroidDeepLink(urlOrHash = '') {
       ? new URL(location.href.split('#')[0] + raw)
       : new URL(raw, location.href);
 
+    if (url.hash.startsWith('#chat-dm/')) {
+      const handle = decodeURIComponent(url.hash.replace(/^#chat-dm\//, ''));
+
+      import('../chat/chat-ui.js')
+        .then(({ startDmFromDeepLink }) => startDmFromDeepLink(handle))
+        .catch((err) => {
+          console.warn('[YANTA Android Bridge] Could not start chat from deep link', err);
+          toast('Could not start chat from link.', 'error');
+        });
+
+      return true;
+    }
+
     if (url.hash.startsWith('#chat/')) {
       const roomId = decodeURIComponent(url.hash.replace(/^#chat\//, ''));
 

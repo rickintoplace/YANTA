@@ -141,7 +141,21 @@ import {
   
   function roomAvatarMxc(room = currentRoom()) {
     try {
-      return room?.getMxcAvatarUrl?.() || '';
+      const own = room?.getMxcAvatarUrl?.();
+      if (own) return own;
+
+      /*
+        DM-Räume haben meist kein eigenes Raum-Avatar. Das Profilbild des
+        Gegenübers ist dort das erwartete Bild.
+      */
+      const directUserId = directUserIdForRoom(room?.roomId || currentRoomId);
+      const member = directUserId ? room?.getMember?.(directUserId) : null;
+
+      return (
+        member?.getMxcAvatarUrl?.() ||
+        (directUserId ? userAvatarMxc(directUserId) : '') ||
+        ''
+      );
     } catch (err) {
       console.warn('[YANTA Chat Settings] Could not read room avatar', err);
       toast('Could not read chat avatar.', 'error');
@@ -312,6 +326,90 @@ import {
     }
   }
   
+  /*
+    Avatar-Wechsel direkt am Bild (Hover-Overlay / Tap auf Mobil) statt
+    über einen separaten Datei-Input. Upload startet sofort nach Auswahl.
+  */
+  function bindProfileAvatarEditor(node) {
+    const editButton = node.querySelector('[data-avatar-edit]');
+    const fileInput = node.querySelector('[data-avatar-input]');
+
+    if (!editButton || !fileInput) return;
+
+    editButton.addEventListener('click', () => {
+      if (editButton.classList.contains('is-uploading')) return;
+      fileInput.click();
+    });
+
+    fileInput.addEventListener('change', async () => {
+      const file = fileInput.files?.[0] || null;
+      fileInput.value = '';
+
+      if (!file) return;
+
+      editButton.classList.add('is-uploading');
+      editButton.disabled = true;
+
+      try {
+        // Re-renders the settings overlay on success.
+        await updateOwnChatProfile({
+          avatarFile: file,
+        });
+      } catch {
+        editButton.classList.remove('is-uploading');
+        editButton.disabled = false;
+      }
+    });
+  }
+
+  function bindProfileDisplayNameEditor(node) {
+    const view = node.querySelector('[data-display-name-view]');
+    const form = node.querySelector('[data-display-name-form]');
+
+    if (!view || !form) return;
+
+    const input = form.elements.displayName;
+
+    const startEditing = () => {
+      view.hidden = true;
+      form.hidden = false;
+      input?.focus();
+      input?.select();
+    };
+
+    const stopEditing = () => {
+      form.hidden = true;
+      view.hidden = false;
+    };
+
+    view.querySelector('[data-display-name-edit]')?.addEventListener('click', startEditing);
+    form.querySelector('[data-display-name-cancel]')?.addEventListener('click', stopEditing);
+
+    input?.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') {
+        e.preventDefault();
+        e.stopPropagation();
+        stopEditing();
+      }
+    });
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+
+      const nextName = String(input?.value || '').trim();
+
+      if (!nextName) {
+        stopEditing();
+        return;
+      }
+
+      // Re-renders the settings overlay on success.
+      await updateOwnChatProfile({
+        displayName: nextName,
+      });
+    });
+  }
+
   async function ownProfileInfo() {
     try {
       const userId = ownUserId();
@@ -359,22 +457,26 @@ import {
     }
   }
   
-  async function renderQrInto(host, text) {
+  /*
+    QR-Inhalt ist eine URL, kein reiner Handle-Text: Handy-Kameras öffnen
+    URLs direkt. #chat-dm/<handle> startet in YANTA den New-Chat-Flow.
+  */
+  function chatDmDeepLinkUrl(handle) {
+    return `${location.origin}${location.pathname}#chat-dm/${encodeURIComponent(String(handle || ''))}`;
+  }
+
+  async function renderQrInto(host, handle) {
     if (!host) return;
-  
+
     try {
       const mod = await import('../qr.js');
-  
+
       if (typeof mod.renderBrandedQrSvg !== 'function') {
         throw new Error('renderBrandedQrSvg is not available.');
       }
-  
-      const svg = mod.renderBrandedQrSvg(text, {
-        title: 'YANTA Chat',
-        subtitle: text,
-      });
-  
-      host.innerHTML = typeof svg === 'string' ? svg : '';
+
+      // renderBrandedQrSvg returns an SVGSVGElement, not markup.
+      host.replaceChildren(mod.renderBrandedQrSvg(chatDmDeepLinkUrl(handle)));
     } catch (err) {
       console.warn('[YANTA Chat Settings] Could not render QR code', err);
       toast('Could not render QR code.', 'error');
@@ -911,7 +1013,126 @@ import {
     height: 100%;
     object-fit: cover;
   }
-  
+
+  .yanta-chat-avatar-xl.is-editable {
+    position: relative;
+    padding: 0;
+    cursor: pointer;
+    transition: border-color .15s ease, box-shadow .15s ease;
+  }
+
+  .yanta-chat-avatar-xl.is-editable:hover,
+  .yanta-chat-avatar-xl.is-editable:focus-visible {
+    border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+  }
+
+  .yanta-chat-avatar-media {
+    width: 100%;
+    height: 100%;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    border-radius: inherit;
+  }
+
+  .yanta-chat-avatar-edit-overlay {
+    position: absolute;
+    inset: 0;
+    display: grid;
+    place-items: center;
+    border-radius: inherit;
+    background: rgba(0, 0, 0, .45);
+    color: #fff;
+    opacity: 0;
+    transition: opacity .15s ease;
+    pointer-events: none;
+  }
+
+  .yanta-chat-avatar-xl.is-editable:hover .yanta-chat-avatar-edit-overlay,
+  .yanta-chat-avatar-xl.is-editable:focus-visible .yanta-chat-avatar-edit-overlay,
+  .yanta-chat-avatar-xl.is-uploading .yanta-chat-avatar-edit-overlay {
+    opacity: 1;
+  }
+
+  .yanta-chat-avatar-xl.is-uploading .yanta-chat-avatar-edit-overlay svg {
+    animation: yanta-chat-avatar-upload-pulse 1.1s ease-in-out infinite;
+  }
+
+  @keyframes yanta-chat-avatar-upload-pulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: .45; transform: scale(.9); }
+  }
+
+  /*
+    Touch hat kein Hover: kleiner permanenter Kamera-Badge signalisiert
+    "Bild antippen zum Ändern".
+  */
+  .yanta-chat-avatar-edit-badge {
+    position: absolute;
+    right: -4px;
+    bottom: -4px;
+    display: none;
+    place-items: center;
+    width: 28px;
+    height: 28px;
+    border-radius: 999px;
+    border: 2px solid var(--bg-elev-2);
+    background: var(--accent);
+    color: #fff;
+    pointer-events: none;
+  }
+
+  @media (hover: none), (pointer: coarse) {
+    .yanta-chat-avatar-edit-badge {
+      display: grid;
+    }
+  }
+
+  .yanta-chat-display-name {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .yanta-chat-display-name[hidden] {
+    display: none;
+  }
+
+  .yanta-chat-display-name strong {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .yanta-chat-display-name .icon-btn {
+    flex: none;
+    opacity: .55;
+  }
+
+  .yanta-chat-display-name .icon-btn:hover {
+    opacity: 1;
+  }
+
+  .yanta-chat-display-name-form {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .yanta-chat-display-name-form[hidden] {
+    display: none;
+  }
+
+  .yanta-chat-display-name-form input {
+    min-width: 0;
+    flex: 1;
+    font-size: 15px;
+    font-weight: 800;
+  }
+
   .yanta-chat-profile-main {
     min-width: 0;
   }
@@ -966,20 +1187,6 @@ import {
     flex-wrap: wrap;
     gap: 8px;
     margin-top: 12px;
-  }
-  
-  .yanta-chat-profile-form {
-    display: grid;
-    gap: 9px;
-    margin-top: 12px;
-  }
-  
-  .yanta-chat-profile-form label {
-    display: grid;
-    gap: 5px;
-    color: var(--text-dim);
-    font-size: 12px;
-    font-weight: 750;
   }
   
   .yanta-chat-business-card {
@@ -1239,47 +1446,65 @@ import {
   
   async function profileTabHtml() {
     const profile = await ownProfileInfo();
-  
+    const initial = (profile.displayName || profile.userId || 'Y').slice(0, 1).toUpperCase();
+
     return `
       <section class="yanta-chat-settings-section">
         <div class="yanta-chat-profile-hero">
-          <span class="yanta-chat-avatar-xl" data-own-avatar>${escapeHtml((profile.displayName || profile.userId || 'Y').slice(0, 1).toUpperCase())}</span>
-  
+          <button
+            type="button"
+            class="yanta-chat-avatar-xl is-editable"
+            data-avatar-edit
+            title="Change profile picture"
+            aria-label="Change profile picture">
+            <span class="yanta-chat-avatar-media" data-own-avatar>${escapeHtml(initial)}</span>
+            <span class="yanta-chat-avatar-edit-overlay">${lucide('camera', 20)}</span>
+            <span class="yanta-chat-avatar-edit-badge">${lucide('camera', 13)}</span>
+          </button>
+          <input type="file" accept="image/*" data-avatar-input hidden>
+
           <span class="yanta-chat-profile-main">
-            <strong>${escapeHtml(profile.displayName || profile.userId || 'Your profile')}</strong>
+            <span class="yanta-chat-display-name" data-display-name-view>
+              <strong>${escapeHtml(profile.displayName || profile.userId || 'Your profile')}</strong>
+              <button class="icon-btn" type="button" data-display-name-edit title="Edit display name" aria-label="Edit display name">
+                ${lucide('pencil', 14)}
+              </button>
+            </span>
+
+            <form class="yanta-chat-display-name-form" data-display-name-form hidden>
+              <input
+                class="text-input"
+                name="displayName"
+                value="${escapeHtml(profile.displayName || '')}"
+                maxlength="64"
+                autocomplete="name"
+                aria-label="Display name">
+              <button class="icon-btn" type="submit" title="Save name" aria-label="Save name">
+                ${lucide('check', 15)}
+              </button>
+              <button class="icon-btn" type="button" data-display-name-cancel title="Cancel" aria-label="Cancel">
+                ${lucide('x', 15)}
+              </button>
+            </form>
+
             <code>${escapeHtml(profile.handle || profile.userId || '')}</code>
           </span>
         </div>
-  
-        <form class="yanta-chat-profile-form" data-profile-form>
-          <label>
-            Display name
-            <input class="text-input" name="displayName" value="${escapeHtml(profile.displayName || '')}" autocomplete="name">
-          </label>
-  
-          <label>
-            Avatar
-            <input class="text-input" name="avatar" type="file" accept="image/*">
-          </label>
-  
-          <div class="yanta-chat-settings-actions">
-            <button class="btn primary" type="submit">${lucide('save', 14)} Save profile</button>
-          </div>
-        </form>
       </section>
-  
+
       <section class="yanta-chat-settings-section">
         <h4>Your YANTA card</h4>
-        <p>Share this handle so others can start an encrypted chat with you.</p>
-  
+        <p>Scanning the QR code with a phone camera opens an encrypted chat with you.</p>
+
         <div class="yanta-chat-business-card">
           <span>
             <code>${escapeHtml(profile.handle || '')}</code>
             <div class="yanta-chat-settings-actions">
               <button class="btn" data-copy-handle>${lucide('copy', 14)} Copy handle</button>
+              <button class="btn" data-copy-chat-link>${lucide('link', 14)} Copy chat link</button>
             </div>
           </span>
-  
+
           <span class="yanta-chat-business-card-qr" data-card-qr></span>
         </div>
       </section>
@@ -1440,23 +1665,18 @@ import {
       });
   
       renderQrInto(node.querySelector('[data-card-qr]'), profile.handle || profile.userId || '');
-  
+
       node.querySelector('[data-copy-handle]')?.addEventListener('click', () => {
         copyText(profile.handle || profile.userId || '', 'Handle copied');
       });
-    }
-  
-    node.querySelector('[data-profile-form]')?.addEventListener('submit', async (e) => {
-      e.preventDefault();
-  
-      const form = e.currentTarget;
-      const file = form.elements.avatar?.files?.[0] || null;
-  
-      await updateOwnChatProfile({
-        displayName: form.elements.displayName?.value || '',
-        avatarFile: file,
+
+      node.querySelector('[data-copy-chat-link]')?.addEventListener('click', () => {
+        copyText(chatDmDeepLinkUrl(profile.handle || profile.userId || ''), 'Chat link copied');
       });
-    });
+
+      bindProfileAvatarEditor(node);
+      bindProfileDisplayNameEditor(node);
+    }
   
     node.querySelector('[data-verify]')?.addEventListener('click', verifyCurrentChatPartner);
     node.querySelector('[data-toggle-mute]')?.addEventListener('click', toggleMute);

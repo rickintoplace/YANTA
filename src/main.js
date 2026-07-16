@@ -2319,6 +2319,16 @@ async function init() {
         replace: true,
       });
 
+      if (route.dmUserId) {
+        // QR-/Link-Einstieg: neuen DM-Flow starten (mit Nutzer-Bestätigung).
+        import('./chat/chat-ui.js')
+          .then(({ startDmFromDeepLink }) => startDmFromDeepLink(route.dmUserId))
+          .catch((err) => {
+            console.warn('[YANTA] Could not start chat from deep link', err);
+            toast('Could not start chat from link.', 'error');
+          });
+      }
+
       initialRouteHandled = true;
     }
 

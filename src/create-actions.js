@@ -94,6 +94,12 @@ export const CREATE_ACTIONS = [
     icon: 'rss',
     resultType: 'sources',
   },
+  {
+    id: 'chat',
+    label: 'Open Chat',
+    icon: 'messages-square',
+    resultType: 'chat',
+  },
 ];
 
 export function isGraphVisible() {
@@ -277,6 +283,22 @@ async function openSourcesAction() {
   };
 }
 
+async function openChatAction() {
+  await closeGraphIfOpen();
+
+  // Lazy import: Chat (inkl. Matrix-SDK-Pfad) gehört nicht ins Haupt-Bundle.
+  const { openChat } = await import('./chat/chat-ui.js');
+
+  await openChat({
+    push: true,
+  });
+
+  return {
+    id: 'chat',
+    type: 'chat',
+  };
+}
+
 export async function runCreateAction(actionId, {
   folderId,
   source = 'unknown',
@@ -314,6 +336,10 @@ export async function runCreateAction(actionId, {
 
     if (actionId === 'rss') {
       return await openSourcesAction();
+    }
+
+    if (actionId === 'chat') {
+      return await openChatAction();
     }
 
     if (actionId === 'ai') {

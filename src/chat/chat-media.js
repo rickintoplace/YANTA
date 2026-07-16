@@ -316,7 +316,7 @@ function roomIsEncrypted(client, roomId) {
   }
 }
 
-async function uploadMatrixContent(client, blob, {
+export async function uploadMatrixContent(client, blob, {
   name = 'file',
   type = '',
   onProgress = null,

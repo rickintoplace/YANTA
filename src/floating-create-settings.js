@@ -61,6 +61,11 @@ export const FLOATING_CREATE_ACTION_CATALOG = [
     defaultLabel: 'AI',
     defaultIcon: 'bot',
   },
+  {
+    id: 'chat',
+    defaultLabel: 'Chat',
+    defaultIcon: 'messages-square',
+  },
 ];
 
 export const DEFAULT_FLOATING_CREATE_SETTINGS = {
@@ -111,6 +116,15 @@ export const DEFAULT_FLOATING_CREATE_SETTINGS = {
       x: 0,
       y: -73,
       order: 4,
+    },
+    {
+      id: 'chat',
+      enabled: true,
+      label: 'Chat',
+      icon: 'messages-square',
+      x: -63,
+      y: -135,
+      order: 8,
     },
     {
       id: 'folder',

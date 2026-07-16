@@ -13,6 +13,7 @@ import {
 
 import {
   renderChatMediaContent,
+  renderStickerContent,
 } from './chat-media-render.js';
 
 const FIVE_MINUTES = 5 * 60 * 1000;
@@ -333,6 +334,8 @@ export function messagePreview(event) {
 
   if (isRedacted(event)) return 'Message deleted';
 
+  if (event.getType?.() === 'm.sticker') return 'Sticker';
+
   const {
     content,
     edited,
@@ -535,10 +538,15 @@ function renderSingleMessage(event, {
       bubble.append(renderYantaAiBanner());
     }
 
-    bubble.append(renderMessageBody(client, cleanContent, {
-      roomId: room?.roomId || '',
-      eventId: eventId(event),
-    }));
+    if (event.getType?.() === 'm.sticker') {
+      bubble.classList.add('is-sticker');
+      bubble.append(renderStickerContent(client, cleanContent));
+    } else {
+      bubble.append(renderMessageBody(client, cleanContent, {
+        roomId: room?.roomId || '',
+        eventId: eventId(event),
+      }));
+    }
 
     if (edited) {
       bubble.append(el('span', {

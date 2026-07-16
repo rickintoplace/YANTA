@@ -578,6 +578,16 @@ export function listDrawLibraryItems() {
   return normalizeDrawLibraryItems(drawLibraryItems).map(structuredCloneSafe);
 }
 
+/**
+ * Like listDrawLibraryItems(), but loads the persisted library first.
+ * Required for consumers (e.g. Chat stickers) that run before any
+ * drawing UI touched the library this session.
+ */
+export async function listDrawLibraryItemsAsync() {
+  await loadDrawLibraryItemsFromSettings();
+  return listDrawLibraryItems();
+}
+
 export async function insertDrawLibraryItemIntoCurrent(itemId) {
   if (!state.currentNoteId) {
     toast('Open a note first', 'error');
@@ -659,6 +669,37 @@ export async function drawLibraryItemThumbnailUrl(itemId) {
   } catch {
     return '';
   }
+}
+
+/**
+ * Exports a Personal Library item as a transparent PNG blob.
+ * Used by Chat to send library drawings as stickers.
+ */
+export async function drawLibraryItemPngBlob(itemId, {
+  maxSize = 512,
+} = {}) {
+  await loadDrawLibraryItemsFromSettings();
+
+  const item = drawLibraryItems.find((x) => String(x.id) === String(itemId));
+  if (!item) return null;
+
+  const { exportToBlob } = await loadExcalidraw();
+
+  if (typeof exportToBlob !== 'function') {
+    throw new Error('Excalidraw exportToBlob is not available.');
+  }
+
+  return exportToBlob({
+    elements: item.elements || [],
+    appState: {
+      // Transparent background: stickers float over chat bubbles.
+      exportBackground: false,
+    },
+    files: item.files || {},
+    mimeType: 'image/png',
+    exportPadding: 12,
+    maxWidthOrHeight: Math.max(64, Number(maxSize) || 512),
+  });
 }
 
 function unmountInlineHost(inlineHost) {

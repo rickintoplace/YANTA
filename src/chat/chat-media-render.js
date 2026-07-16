@@ -392,6 +392,85 @@ function renderImageMessage(client, content = {}) {
   return outer;
 }
 
+/**
+ * Renders an m.sticker event body: image-like, but without caption and
+ * with transparent presentation (bubble chrome is removed via CSS).
+ */
+export function renderStickerContent(client, content = {}) {
+  const source = imageSourceFromContent(content);
+  const title = content.body || 'Sticker';
+
+  const wrap = el('button', {
+    type: 'button',
+    class: 'yanta-chat-image-message yanta-chat-sticker',
+    title,
+  });
+
+  if (!source?.preview?.mxcUrl) {
+    wrap.append(el('div', {
+      class: 'yanta-chat-media-error',
+    }, 'Sticker is missing media data.'));
+    return wrap;
+  }
+
+  const previewOpts = {
+    thumbnail: false,
+    encryptedFile: source.preview.encryptedFile,
+    mimeType: source.preview.mimeType,
+    w: source.preview.w,
+    h: source.preview.h,
+  };
+
+  const showImage = (url) => {
+    const img = el('img', {
+      src: url,
+      alt: title,
+      loading: 'lazy',
+      decoding: 'async',
+    });
+    wrap.classList.add('is-resolved');
+    wrap.replaceChildren(img);
+  };
+
+  const cachedUrl = peekChatMediaObjectUrl(source.preview.mxcUrl, previewOpts);
+
+  if (cachedUrl) {
+    wrap.dataset.hydrated = '1';
+    showImage(cachedUrl);
+  } else {
+    wrap.append(el('div', {
+      class: 'yanta-chat-image-skeleton',
+    }, ''));
+  }
+
+  wrap._yantaHydrateImage = async () => {
+    if (wrap.dataset.hydrated === '1') return;
+    wrap.dataset.hydrated = '1';
+    try {
+      const url = await mxcToBlobUrl(client, source.preview.mxcUrl, previewOpts);
+      showImage(url);
+    } catch (err) {
+      console.warn('[YANTA Chat] Could not hydrate sticker', err);
+      wrap.dataset.hydrated = '';
+      if (wrap.isConnected) {
+        wrap.replaceChildren(el('div', {
+          class: 'yanta-chat-media-error',
+        }, 'Could not load sticker.'));
+      }
+    }
+  };
+
+  wrap.addEventListener('click', () => {
+    openChatImageViewer(client, source.full, title);
+  });
+
+  if (!cachedUrl) {
+    lazyImageObserver.observe(wrap);
+  }
+
+  return wrap;
+}
+
 function renderFileMessage(client, content = {}) {
   const source = sourceFromContent(content);
   const info = content.info || {};

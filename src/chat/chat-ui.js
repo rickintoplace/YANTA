@@ -926,6 +926,13 @@ function bindRootEvents() {
     renderRoomList();
   });
 
+  roomSearchInput?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && roomSearchInput.value.trim()) {
+      e.preventDefault();
+      openGlobalMessageSearchFromList();
+    }
+  });
+
   root.querySelector('[data-chat-back]')?.addEventListener('click', (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -1277,6 +1284,47 @@ async function openNewChatDialog() {
     roomId,
     push: true,
   });
+}
+
+/**
+ * Starts a DM from a #chat-dm/<handle> deep link (profile QR code / chat
+ * link). Asks for confirmation first — deep links are untrusted input and
+ * must not silently create rooms.
+ */
+export async function startDmFromDeepLink(handle) {
+  const clean = String(handle || '').trim();
+
+  if (!clean) return;
+
+  /*
+    Beim Boot-Deep-Link liegt bereits ein Chat-History-Eintrag vor (replace),
+    aus der laufenden App (Android-Intent) noch nicht (push).
+  */
+  const alreadyInChat = history.state?.surface === 'chat';
+
+  await openChat(alreadyInChat ? { replace: true } : { push: true });
+
+  if (!client) return;
+
+  const ok = await askConfirm({
+    title: 'Start chat',
+    message: `Start an encrypted chat with "${clean}"?`,
+    confirmLabel: 'Start chat',
+  });
+
+  if (!ok) return;
+
+  try {
+    const roomId = await createDm(clean);
+
+    await openChat({
+      roomId,
+      push: true,
+    });
+  } catch (err) {
+    console.warn('[YANTA Chat] Could not start chat from deep link', err);
+    toast('Could not start this chat.', 'error');
+  }
 }
 
 function bindClientEvents(nextClient) {
@@ -2020,35 +2068,6 @@ function renderRoomList() {
 
   roomListEl.replaceChildren();
 
-  const globalSearchBtn = el('button', {
-    type: 'button',
-    class: 'yanta-chat-room-row',
-    onclick: (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-
-      openGlobalChatSearch({
-        client,
-        onJump: jumpToMessageFromSearch,
-      });
-    },
-  });
-
-  globalSearchBtn.innerHTML = `
-    <span class="yanta-chat-avatar">${lucide('search', 16)}</span>
-    <span class="yanta-chat-room-row-main">
-      <span class="yanta-chat-room-row-title">
-        <strong>Search all messages</strong>
-        <small>Local</small>
-      </span>
-      <span class="yanta-chat-room-row-subtitle">
-        <span>Search decrypted messages on this device</span>
-      </span>
-    </span>
-  `;
-
-  roomListEl.append(globalSearchBtn);
-
   if (!rooms.length) {
     roomListEl.append(el('div', {
       class: 'yanta-chat-room-empty',
@@ -2058,8 +2077,47 @@ function renderRoomList() {
       roomListEl.append(renderRoomRow(room));
     }
   }
-  
+
+  /*
+    Nachrichtensuche direkt in die Chatlisten-Suche integriert (statt einer
+    Pseudo-Chat-Zeile): Tippen filtert Chats, die Zeile darunter (oder Enter)
+    sucht in den Nachrichteninhalten.
+  */
+  if (query) {
+    const messageSearchBtn = el('button', {
+      type: 'button',
+      class: 'yanta-chat-room-row yanta-chat-message-search-row',
+      onclick: (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        openGlobalMessageSearchFromList();
+      },
+    });
+
+    messageSearchBtn.innerHTML = `
+      <span class="yanta-chat-avatar">${lucide('text-search', 16)}</span>
+      <span class="yanta-chat-room-row-main">
+        <span class="yanta-chat-room-row-title">
+          <strong>Search messages for “${escapeHtml(roomSearchInput?.value?.trim() || '')}”</strong>
+        </span>
+        <span class="yanta-chat-room-row-subtitle">
+          <span>Search decrypted messages on this device</span>
+        </span>
+      </span>
+    `;
+
+    roomListEl.append(messageSearchBtn);
+  }
+
   renderImportedArchiveSectionSoon();
+}
+
+function openGlobalMessageSearchFromList() {
+  openGlobalChatSearch({
+    client,
+    initialQuery: String(roomSearchInput?.value || '').trim(),
+    onJump: jumpToMessageFromSearch,
+  });
 }
 
 const renderImportedArchiveSectionSoon = debounce(() => {
@@ -2218,15 +2276,18 @@ function roomRowMenuItems(room) {
   const unread = Number(room.getUnreadNotificationCount?.() || 0);
 
   return [
-    {
-      label: 'Open as window',
-      icon: 'picture-in-picture-2',
-      action: async () => {
-        await openChatFloating({
-          roomId,
-        });
-      },
-    },
+    // Floating windows are a desktop concept — pointless on touch layouts.
+    ...(!isMobile()
+      ? [{
+          label: 'Open as window',
+          icon: 'picture-in-picture-2',
+          action: async () => {
+            await openChatFloating({
+              roomId,
+            });
+          },
+        }]
+      : []),
     ...(unread > 0
       ? [{
           label: 'Mark as read',
@@ -2393,6 +2454,82 @@ function renderRoomRow(room) {
   return btn;
 }
 
+/*
+  Kaltstart über Notification/Deep-Link: openChat() läuft, bevor der
+  Initial-Sync den Raum in den SDK-Store gelegt hat. Statt eines leeren
+  Screens warten wir auf das Erscheinen des Raums.
+*/
+const ROOM_APPEAR_TIMEOUT_MS = 20000;
+
+function waitForRoom(roomId, timeoutMs = ROOM_APPEAR_TIMEOUT_MS) {
+  const existing = roomById(roomId);
+  if (existing) return Promise.resolve(existing);
+
+  return new Promise((resolve) => {
+    let timer = 0;
+
+    const cleanup = () => {
+      clearTimeout(timer);
+      window.removeEventListener('yanta-chat-room-updated', check);
+      window.removeEventListener('yanta-chat-ready', check);
+    };
+
+    const check = () => {
+      const room = roomById(roomId);
+      if (!room) return;
+      cleanup();
+      resolve(room);
+    };
+
+    window.addEventListener('yanta-chat-room-updated', check);
+    window.addEventListener('yanta-chat-ready', check);
+
+    timer = window.setTimeout(() => {
+      cleanup();
+      resolve(null);
+    }, timeoutMs);
+  });
+}
+
+function renderRoomPendingState({
+  title,
+  message,
+  spinner = false,
+  actionLabel = '',
+  action = null,
+} = {}) {
+  const eventsEl = root.querySelector('[data-chat-events]');
+  const titleEl = root.querySelector('[data-chat-room-title]');
+  const avatarEl = root.querySelector('[data-chat-room-avatar]');
+
+  if (titleEl) titleEl.textContent = title;
+
+  if (avatarEl) {
+    avatarEl.className = 'yanta-chat-avatar';
+    avatarEl.innerHTML = lucide('message-circle', 16);
+  }
+
+  if (!eventsEl) return;
+
+  eventsEl.innerHTML = `
+    <div class="yanta-chat-room-pending">
+      ${spinner ? '<span class="yanta-chat-spinner"></span>' : lucide('message-circle-off', 26)}
+      <strong>${escapeHtml(title)}</strong>
+      <p>${escapeHtml(message)}</p>
+      ${
+        actionLabel
+          ? `<button class="btn" data-chat-pending-action>${escapeHtml(actionLabel)}</button>`
+          : ''
+      }
+    </div>
+  `;
+
+  const btn = eventsEl.querySelector('[data-chat-pending-action]');
+  if (btn && action) {
+    btn.addEventListener('click', action);
+  }
+}
+
 async function openActiveRoomIfNeeded() {
   const empty = root.querySelector('[data-chat-empty]');
   const roomShell = root.querySelector('[data-chat-room]');
@@ -2406,12 +2543,32 @@ async function openActiveRoomIfNeeded() {
   if (empty) empty.hidden = true;
   if (roomShell) roomShell.hidden = false;
 
-  const room = roomById(activeRoomId);
+  let room = roomById(activeRoomId);
 
   if (!room) {
-    toast('Chat room not found.', 'error');
-    console.warn('[YANTA Chat] Room not found', activeRoomId);
-    return;
+    const requestedRoomId = activeRoomId;
+
+    renderRoomPendingState({
+      title: 'Opening chat…',
+      message: 'Syncing this conversation to your device.',
+      spinner: true,
+    });
+
+    room = await waitForRoom(requestedRoomId);
+
+    // User navigated elsewhere while waiting — that flow owns the UI now.
+    if (activeRoomId !== requestedRoomId) return;
+
+    if (!room) {
+      console.warn('[YANTA Chat] Room not found', requestedRoomId);
+      renderRoomPendingState({
+        title: 'Chat not found',
+        message: 'This conversation is not available on this device (yet).',
+        actionLabel: 'Back to chats',
+        action: () => goBackToChatList(),
+      });
+      return;
+    }
   }
 
   renderRoomHeader(room);
@@ -2952,23 +3109,25 @@ function openRoomMenu(anchor) {
         });
       },
     },
-    {
-      label: chatMode === 'floating' ? 'Dock Chat' : 'Open as window',
-      icon: chatMode === 'floating' ? 'panel-right' : 'picture-in-picture-2',
-      action: async () => {
-        if (chatMode === 'floating') {
-          await openChat({
-            roomId: activeRoomId || '',
-            mode: 'surface',
-            push: true,
-          });
-        } else {
-          await openChatFloating({
-            roomId: activeRoomId || '',
-          });
-        }
-      },
-    },
+    ...(!isMobile()
+      ? [{
+          label: chatMode === 'floating' ? 'Dock Chat' : 'Open as window',
+          icon: chatMode === 'floating' ? 'panel-right' : 'picture-in-picture-2',
+          action: async () => {
+            if (chatMode === 'floating') {
+              await openChat({
+                roomId: activeRoomId || '',
+                mode: 'surface',
+                push: true,
+              });
+            } else {
+              await openChatFloating({
+                roomId: activeRoomId || '',
+              });
+            }
+          },
+        }]
+      : []),
     {
       label: 'Gallery',
       icon: 'images',

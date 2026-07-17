@@ -97,8 +97,7 @@ const GREETINGS = {
     'Note bad, huh?',
     'Safe and sound, {name}',
     'Encrypted with love',
-    'Secure, private, yours',
-    'The cloud can’t read this, {name}',
+    'The cloud can’t read this',
     'Note the moment',
   ],
 };

@@ -12,9 +12,14 @@
 // ============================================================
 
 import * as Y from 'yjs';
-import { IndexeddbPersistence } from 'y-indexeddb';
+import { IndexeddbPersistence, storeState } from 'y-indexeddb';
 
 const VAULT_DOC_KEY = 'yanta-vault-v1';
+
+// Marker in the persistence "custom" store. Its presence means this device has
+// already collapsed the pre-gc VaultDoc history into a compact snapshot, so we
+// only pay that one-time heal once per device.
+const VAULT_COMPACTION_MARKER = 'yanta-vault-gc-compaction-v1';
 
 let vaultEntry = null;
 
@@ -31,12 +36,27 @@ export function vaultDevicesMap() {
 export function getVaultEntry() {
   if (vaultEntry) return vaultEntry;
 
-  const doc = new Y.Doc();
+  /*
+    gc:true is essential here.
+
+    VaultDoc maps are overwritten on every metadata change (pin, reorder, tags,
+    trash, public-share status, dashboard layout …). Without garbage collection
+    Yjs keeps every superseded value as durable struct history, so the persisted
+    update log grows without bound. On boot y-indexeddb replays that whole log
+    with a synchronous Y.applyUpdate loop, which froze the UI for ~15s on
+    long-lived vaults (the "Opening your vault…" stall). GC collapses deleted
+    structs so the doc — and its persisted snapshot — stay small.
+  */
+  const doc = new Y.Doc({ gc: true });
   const persistence = new IndexeddbPersistence(VAULT_DOC_KEY, doc);
 
   const ready = new Promise((resolve) => {
     persistence.once('synced', () => resolve());
   });
+
+  // Heal vaults whose persistence was written before gc was enabled: one forced
+  // re-encode drops the pre-gc history and rewrites a compact snapshot.
+  ready.then(() => compactVaultPersistenceOnce(persistence)).catch(() => {});
 
   vaultEntry = {
     doc,
@@ -45,6 +65,24 @@ export function getVaultEntry() {
   };
 
   return vaultEntry;
+}
+
+async function compactVaultPersistenceOnce(persistence) {
+  try {
+    if (await persistence.get(VAULT_COMPACTION_MARKER)) return;
+
+    /*
+      forceStore:true encodes the now-GC'd doc state as a single update row and
+      deletes all prior (pre-gc, bloated) rows. The state vector is unchanged,
+      so remote sync and tombstone semantics are unaffected.
+    */
+    await storeState(persistence, true);
+    await persistence.set(VAULT_COMPACTION_MARKER, Date.now());
+  } catch (err) {
+    // Non-fatal: the app still works, the boot is just not compacted yet and
+    // will be retried on the next launch.
+    console.warn('[YANTA Sync2] VaultDoc compaction skipped', err);
+  }
 }
 
 export function getVaultDoc() {

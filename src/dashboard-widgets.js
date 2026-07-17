@@ -231,6 +231,9 @@ function injectRegistryCss() {
   display: flex;
   flex-direction: column;
   gap: 14px;
+  width: min(1120px, 100%);
+  margin-left: auto;
+  margin-right: auto;
 }
 
 .yanta-dashboard-widgets:not(:empty) {

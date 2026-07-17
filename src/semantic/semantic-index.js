@@ -30,6 +30,10 @@ import {
 } from '../trash.js';
 
 import {
+  isSystemItem,
+} from '../ai/brain.js';
+
+import {
   getSemanticConfig,
   saveSemanticConfig,
   semanticModelById,
@@ -161,6 +165,19 @@ function djb2(text) {
   return (h >>> 0).toString(36) + ':' + text.length;
 }
 
+/** Collapse immediate repeats of 3..12-word phrases ("a b c a b c" → "a b c"). */
+function dedupeRepeatedPhrases(s) {
+  let out = String(s || '');
+  let prev;
+
+  do {
+    prev = out;
+    out = out.replace(/\b(\S+(?:\s+\S+){2,11})\s+\1\b/g, '$1');
+  } while (out !== prev);
+
+  return out;
+}
+
 function previewOf(text) {
   return String(text || '')
     .replace(/\s+/g, ' ')
@@ -215,9 +232,20 @@ export function chunkNoteContent(title, body, drawingsText = '') {
 
   if (acc) push(acc);
 
-  const draw = String(drawingsText || '').replace(/\s+/g, ' ').trim();
+  /*
+    Drawing-Text-Hygiene: Excalidraw-Elemente liefern text +
+    originalText + rawText — identischer Inhalt dreifach. Solche
+    Wiederholungs-Chunks embedden zu "ähnlich zu allem" und machten
+    jede Drawing-Note zum Dauertreffer. Deshalb: Phrasen-Dedupe und
+    ein Mindestgehalt, sonst wird das Drawing gar nicht indexiert.
+  */
+  const draw = dedupeRepeatedPhrases(
+    String(drawingsText || '').replace(/\s+/g, ' ').trim()
+  );
 
-  if (draw) {
+  const uniqueWords = new Set(draw.toLowerCase().split(/\W+/).filter((w) => w.length > 2));
+
+  if (draw.length >= 40 && uniqueWords.size >= 6) {
     for (let i = 0; i < draw.length && chunks.length < MAX_CHUNKS_PER_NOTE; i += CHUNK_TARGET_CHARS) {
       push(`Drawing: ${draw.slice(i, i + CHUNK_TARGET_CHARS)}`);
     }
@@ -231,10 +259,33 @@ export function chunkNoteContent(title, body, drawingsText = '') {
 
 // ---------------- doc access with memory hygiene --------------------
 
+/*
+  Warum System-Notes raus: AI-Sessions und Brain-Notes sind interne
+  Gesprächs-/Gedächtnisdumps — semantisch "ähnlich zu allem" und als
+  Related-Treffer immer falsch. Der Crawl räumt bereits indexierte
+  System-Notes automatisch wieder aus dem Index.
+*/
+function inSystemTree(note) {
+  if (isSystemItem(note)) return true;
+
+  let folder = note.folderId ? state.folders.get(note.folderId) : null;
+  const seen = new Set();
+
+  while (folder && !seen.has(folder.id)) {
+    if (isSystemItem(folder)) return true;
+
+    seen.add(folder.id);
+    folder = folder.parentId ? state.folders.get(folder.parentId) : null;
+  }
+
+  return false;
+}
+
 function indexableNote(note) {
   return note &&
     !isNoteInTrash(note) &&
-    !isSpaceMountedNote(note);
+    !isSpaceMountedNote(note) &&
+    !inSystemTree(note);
 }
 
 function maybeUnloadDoc(noteId, wasLoaded) {

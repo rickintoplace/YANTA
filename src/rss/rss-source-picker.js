@@ -19,6 +19,7 @@ import {
 } from './rss-settings.js';
 
 import {
+  ensureRssCatalogLoaded,
   searchRssCatalog,
   searchRssCatalogFacets,
   feedsForRssCatalogFacet,
@@ -578,6 +579,8 @@ export async function addBestRssSourceFromInput(input, {
   if (!raw) return null;
 
   if (!isProbablyUrlOrDomain(raw)) {
+    await ensureRssCatalogLoaded();
+
     const [hit] = searchRssCatalog(raw, {
       limit: 1,
     });
@@ -761,6 +764,9 @@ export function attachRssSourcePicker(input, {
   input.dataset.rssSourcePickerBound = '1';
   input.dataset.rssSourceInput = '1';
 
+  // Katalog im Hintergrund laden, bevor der User zu tippen beginnt.
+  ensureRssCatalogLoaded();
+
   let timer = 0;
 
   const refresh = () => {
@@ -839,6 +845,8 @@ export async function openRssSourceBrowser({
   initialFacet = null,
   onAdded,
 } = {}) {
+  await ensureRssCatalogLoaded();
+
   const modal = ensureBrowserModal();
   let activeFacet =
     initialFacet ||

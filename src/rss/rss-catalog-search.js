@@ -2,11 +2,34 @@
 // YANTA Sources / RSS — local curated catalog search
 // ============================================================
 
-import {
-  RSS_CATALOG,
-  RSS_CATALOG_SOURCE,
-  RSS_CATALOG_GENERATED_AT,
-} from './rss-catalog.js';
+/*
+  Warum lazy: der generierte Katalog ist ~450 KB Quellcode und wird
+  nur im Source-Picker gebraucht — er gehört nicht in den kritischen
+  Boot-Pfad. Die Suchfunktionen bleiben synchron; vor dem ersten
+  Treffer muss einmal ensureRssCatalogLoaded() gelaufen sein (die
+  Picker-Einstiege stoßen das beim Öffnen an).
+*/
+let RSS_CATALOG = [];
+let RSS_CATALOG_SOURCE = '';
+let RSS_CATALOG_GENERATED_AT = '';
+let catalogLoading = null;
+
+export function ensureRssCatalogLoaded() {
+  if (catalogLoading) return catalogLoading;
+
+  catalogLoading = import('./rss-catalog.js')
+    .then((m) => {
+      RSS_CATALOG = m.RSS_CATALOG || [];
+      RSS_CATALOG_SOURCE = m.RSS_CATALOG_SOURCE || '';
+      RSS_CATALOG_GENERATED_AT = m.RSS_CATALOG_GENERATED_AT || '';
+    })
+    .catch((err) => {
+      console.warn('[YANTA Sources] could not load feed catalog', err);
+      catalogLoading = null;
+    });
+
+  return catalogLoading;
+}
 
 const CATEGORY_META = {
   android: { label: 'Android', icon: 'smartphone', aliases: ['android'] },

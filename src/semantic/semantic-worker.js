@@ -367,7 +367,16 @@ async function handleRemoveNotes({ noteIds }) {
   return { removed: noteIds.length };
 }
 
-async function handleSearch({ query, topK = 8, minScore = 0.78 }) {
+/*
+  Warum Baseline-relativ: E5-Cosines clustern hoch — auch völlig
+  fremde Paare liegen bei ~0.75-0.81. Eine absolute Schwelle trennt
+  das nie sauber. Deshalb: Mittelwert über ALLE Chunk-Scores dieser
+  Query als Rauschboden, Treffer müssen deutlich darüber liegen
+  (UND über der absoluten Untergrenze).
+*/
+const BASELINE_MARGIN = 0.05;
+
+async function handleSearch({ query, topK = 8, minScore = 0.78, margin = BASELINE_MARGIN }) {
   if (!extractor) throw new Error('Model not ready');
   if (!index.vectors.length) return { results: [] };
 
@@ -378,12 +387,18 @@ async function handleSearch({ query, topK = 8, minScore = 0.78 }) {
   // because it is long.
   const bestByNote = new Map();
 
+  let scoreSum = 0;
+  let scoreCount = 0;
+
   for (let i = 0; i < index.vectors.length; i++) {
     const v = index.vectors[i];
     if (v.length !== dims) continue;
 
     let dot = 0;
     for (let j = 0; j < dims; j++) dot += v[j] * qvec[j];
+
+    scoreSum += dot;
+    scoreCount++;
 
     const prev = bestByNote.get(index.noteIds[i]);
 
@@ -396,19 +411,22 @@ async function handleSearch({ query, topK = 8, minScore = 0.78 }) {
     }
   }
 
+  const mean = scoreCount ? scoreSum / scoreCount : 0;
+  const effectiveMin = Math.max(minScore, mean + margin);
+
   const results = [...bestByNote.values()]
-    .filter((r) => r.score >= minScore)
+    .filter((r) => r.score >= effectiveMin)
     .sort((a, b) => b.score - a.score)
     .slice(0, topK);
 
-  return { results };
+  return { results, baseline: Math.round(mean * 1000) / 1000 };
 }
 
 /**
  * Related notes for ONE note: its chunk vectors query the whole matrix,
  * best chunk-to-chunk score per foreign note wins.
  */
-function handleSimilarNotes({ noteId, topK = 5, minScore = 0.8 }) {
+function handleSimilarNotes({ noteId, topK = 5, minScore = 0.8, margin = BASELINE_MARGIN }) {
   const queries = [];
 
   for (let i = 0; i < index.vectors.length; i++) {
@@ -420,6 +438,9 @@ function handleSimilarNotes({ noteId, topK = 5, minScore = 0.8 }) {
   }
 
   const bestByNote = new Map();
+
+  let scoreSum = 0;
+  let scoreCount = 0;
 
   for (let i = 0; i < index.vectors.length; i++) {
     const targetNote = index.noteIds[i];
@@ -436,6 +457,11 @@ function handleSimilarNotes({ noteId, topK = 5, minScore = 0.8 }) {
       if (dot > best) best = dot;
     }
 
+    if (best > -1) {
+      scoreSum += best;
+      scoreCount++;
+    }
+
     const prev = bestByNote.get(targetNote);
 
     if (!prev || best > prev.score) {
@@ -447,8 +473,11 @@ function handleSimilarNotes({ noteId, topK = 5, minScore = 0.8 }) {
     }
   }
 
+  const mean = scoreCount ? scoreSum / scoreCount : 0;
+  const effectiveMin = Math.max(minScore, mean + margin);
+
   const results = [...bestByNote.values()]
-    .filter((r) => r.score >= minScore)
+    .filter((r) => r.score >= effectiveMin)
     .sort((a, b) => b.score - a.score)
     .slice(0, topK);
 
@@ -460,7 +489,7 @@ function handleSimilarNotes({ noteId, topK = 5, minScore = 0.8 }) {
  * note, pairwise cosine, top links per note. Quadratic in notes —
  * capped, the caller falls back to the TF heuristic above the cap.
  */
-function handleNoteLinks({ maxPerNote = 3, minScore = 0.8, cap = 1500 }) {
+function handleNoteLinks({ maxPerNote = 3, minScore = 0.8, cap = 1500, margin = BASELINE_MARGIN }) {
   const sums = new Map();   // noteId -> { vec: Float64Array, n }
 
   for (let i = 0; i < index.vectors.length; i++) {
@@ -496,7 +525,11 @@ function handleNoteLinks({ maxPerNote = 3, minScore = 0.8, cap = 1500 }) {
     means.push(mean);
   }
 
-  const perNote = new Map(ids.map((id) => [id, []]));
+  // Zwei Durchläufe: erst Rauschboden (Mittelwert aller Paar-Scores),
+  // dann Filterung — Paare müssen deutlich über dem Boden liegen.
+  const pairs = [];
+  let scoreSum = 0;
+  let scoreCount = 0;
 
   for (let a = 0; a < ids.length; a++) {
     const va = means[a];
@@ -508,11 +541,23 @@ function handleNoteLinks({ maxPerNote = 3, minScore = 0.8, cap = 1500 }) {
       let dot = 0;
       for (let j = 0; j < va.length; j++) dot += va[j] * vb[j];
 
-      if (dot < minScore) continue;
+      scoreSum += dot;
+      scoreCount++;
 
-      perNote.get(ids[a]).push({ other: ids[b], score: dot });
-      perNote.get(ids[b]).push({ other: ids[a], score: dot });
+      if (dot >= minScore) pairs.push([a, b, dot]);
     }
+  }
+
+  const mean = scoreCount ? scoreSum / scoreCount : 0;
+  const effectiveMin = Math.max(minScore, mean + margin);
+
+  const perNote = new Map(ids.map((id) => [id, []]));
+
+  for (const [a, b, dot] of pairs) {
+    if (dot < effectiveMin) continue;
+
+    perNote.get(ids[a]).push({ other: ids[b], score: dot });
+    perNote.get(ids[b]).push({ other: ids[a], score: dot });
   }
 
   const seen = new Set();

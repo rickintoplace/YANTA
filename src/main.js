@@ -3110,9 +3110,45 @@ function bindEvents() {
 
   // Search
   const renderTreeDebounced = debounce(() => renderTree(), 120);
+
+  // Dashboard mirrors the filter (its renderer reads state.searchQuery);
+  // debounced separately — card grids are heavier than tree rows.
+  const refreshDashboardForSearch = debounce(() => {
+    window.dispatchEvent(new CustomEvent('yanta-dashboard-refresh', {
+      detail: { reason: 'search-filter' },
+    }));
+  }, 250);
+
   $('search').addEventListener('input', (e) => {
     state.searchQuery = e.target.value;
     renderTreeDebounced();
+    refreshDashboardForSearch();
+  });
+
+  // Keyboard-only search: Enter opens the top match, ArrowDown walks
+  // into the result list, Esc clears.
+  $('search').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+
+      const first = $('tree')?.querySelector('.tree-row[data-tree-key^="note:"]');
+      const id = first?.dataset?.treeKey?.slice('note:'.length);
+
+      if (id && state.notes.has(id)) {
+        openNote(id);
+      }
+    } else if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      $('tree')?.querySelector('.tree-row[data-tree-key]')?.focus();
+    } else if (e.key === 'Escape' && e.target.value) {
+      e.preventDefault();
+      e.stopPropagation();
+
+      e.target.value = '';
+      state.searchQuery = '';
+      renderTree();
+      refreshDashboardForSearch();
+    }
   });
 
   window.addEventListener('yanta-expand-sidebar-search', () => {

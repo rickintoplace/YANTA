@@ -1459,6 +1459,71 @@ function getDashboardItems() {
   const folderId = dashboard.folderId || null;
 
   /*
+    Aktive Sidebar-Suche filtert auch das Dashboard: Treffer aus dem
+    gesamten aktuellen Teilbaum (Root = ganzer Vault), flach nach
+    Aktualität — gleiche Haystack-Logik wie der Tree.
+  */
+  const searchQ = String(state.searchQuery || '').trim().toLowerCase();
+
+  if (searchQ) {
+    const matchesNote = (n) => {
+      const hay = state.searchIndex.get(n.id) || [
+        n.title || '',
+        (n.tags || []).join(' '),
+      ].join(' ').toLowerCase();
+
+      return hay.includes(searchQ);
+    };
+
+    const inSubtree = (n) => {
+      if (!folderId) return true;
+
+      let f = n.folderId ? state.folders.get(n.folderId) : null;
+      const seen = new Set();
+
+      while (f && !seen.has(f.id)) {
+        if (f.id === folderId) return true;
+        seen.add(f.id);
+        f = f.parentId ? state.folders.get(f.parentId) : null;
+      }
+
+      return false;
+    };
+
+    const searchNotes = [...state.notes.values()]
+      .filter((n) => !isNoteInTrash(n))
+      .filter((n) => !shouldHideFromDashboard(n))
+      .filter(inSubtree)
+      .filter(matchesNote)
+      .sort((a, b) => (b.updated || 0) - (a.updated || 0))
+      .map((note) => ({
+        kind: 'note',
+        id: note.id,
+        note,
+        pinned: false,
+        mirrored: false,
+      }));
+
+    const searchFolders = [...state.folders.values()]
+      .filter((f) => !isFolderInTrash(f))
+      .filter((f) => !shouldHideFromDashboard(f))
+      .filter((f) => (f.parentId || null) === folderId)
+      .filter((f) => (f.name || '').toLowerCase().includes(searchQ))
+      .map((folder) => ({
+        kind: 'folder',
+        id: folder.id,
+        folder,
+        pinned: false,
+        mirrored: false,
+      }));
+
+    return {
+      pinnedNotes: [],
+      normalItems: [...searchFolders, ...searchNotes],
+    };
+  }
+
+  /*
     Pinning ist jetzt eine Shortcut-/Priority-Ebene, kein "Move".
 
     Root/Home:

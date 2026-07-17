@@ -704,6 +704,29 @@ function bindTreeKeyboardShortcuts(root) {
 
     root.addEventListener('keydown', (e) => {
       handleTreeF2(e);
+
+      // Keyboard-only tree navigation: arrows move between rows,
+      // Enter activates (open note / toggle folder), ArrowUp from the
+      // first row returns to the search field.
+      const row = e.target?.closest?.('.tree-row[data-tree-key]');
+      if (!row) return;
+
+      if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+        e.preventDefault();
+
+        const rows = [...root.querySelectorAll('.tree-row[data-tree-key]')];
+        const i = rows.indexOf(row);
+
+        if (e.key === 'ArrowUp' && i === 0) {
+          $('search')?.focus();
+          return;
+        }
+
+        rows[i + (e.key === 'ArrowDown' ? 1 : -1)]?.focus();
+      } else if (e.key === 'Enter') {
+        e.preventDefault();
+        row.click();
+      }
     });
   }
 
@@ -938,6 +961,29 @@ export function renderTree() {
   const visibleSystem = visible.filter(noteBelongsToSystem);
   const visibleArchived = visible.filter(noteBelongsToArchived);
 
+  /*
+    Bei aktiver Suche/Tag-Filter nur Ordner zeigen, die (transitiv)
+    Treffer enthalten — leere Ordnerskelette verstecken die Treffer
+    sonst zwischen irrelevantem Rauschen.
+  */
+  const filterActive = !!(q || filterTag);
+  const foldersWithMatches = new Set();
+
+  if (filterActive) {
+    for (const n of visible) {
+      let f = n.folderId ? state.folders.get(n.folderId) : null;
+      const seen = new Set();
+
+      while (f && !seen.has(f.id)) {
+        foldersWithMatches.add(f.id);
+        seen.add(f.id);
+        f = f.parentId ? state.folders.get(f.parentId) : null;
+      }
+    }
+  }
+
+  const folderHasMatches = (f) => !filterActive || foldersWithMatches.has(f.id);
+
 const pinned = visible
   .filter((n) => n.pinned)
   .sort((a, b) => b.updated - a.updated);
@@ -966,6 +1012,7 @@ if (pinned.length) {
 
   const sharedFolders = [...state.folders.values()]
     .filter(isSpaceMountedFolder)
+    .filter(folderHasMatches)
     .filter((f) => !f.parentId || !isSpaceMountedFolder(state.folders.get(f.parentId)))
     .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
@@ -1038,6 +1085,7 @@ if (pinned.length) {
 
   const topFolders = [...state.folders.values()]
     .filter(isMainTreeItem)
+    .filter(folderHasMatches)
     .filter((f) => !f.parentId || !state.folders.has(f.parentId))
     .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
@@ -1055,6 +1103,7 @@ if (pinned.length) {
 
   const archivedFolders = [...state.folders.values()]
     .filter(isArchivedFolder)
+    .filter(folderHasMatches)
     .filter((f) => !f.parentId || !isArchivedFolder(state.folders.get(f.parentId)))
     .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
 
@@ -1088,6 +1137,7 @@ if (pinned.length) {
 
   const systemFolders = [...state.folders.values()]
     .filter(isSystemFolder)
+    .filter(folderHasMatches)
     .filter((f) => !f.parentId || !isSystemFolder(state.folders.get(f.parentId)))
     .sort((a, b) => {
       if (a.id === AI_BRAIN_IDS.rootFolder) return -1;
@@ -1417,7 +1467,11 @@ function folderRow(f, visibleNotes, depth, {
       treeDepth: String(depth),
     },
   });
-  const expanded = state.expandedFolders.has(f.id);
+  // Bei aktiver Suche auto-expandieren — die Treffer sollen sichtbar
+  // sein, nicht hinter zugeklappten Ordnern stecken. Der gespeicherte
+  // Expand-Zustand bleibt unangetastet.
+  const searchActive = !!(String(state.searchQuery || '').trim() || state.activeTagFilter);
+  const expanded = searchActive || state.expandedFolders.has(f.id);
   const selected = isSelected(key);
   const isAnchor = selection.anchorKey === key;
 

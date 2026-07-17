@@ -14,7 +14,33 @@
 // Events are generated dynamically for the visible FullCalendar range.
 // ============================================================
 
-import Holidays from 'date-holidays';
+/*
+  Warum lazy: date-holidays bringt mit seinen Daten + astronomia +
+  moment ~2 MB Quellcode mit — das war ~20% des Main-Bundles, nur für
+  Feiertage. Bis das Modul da ist, liefern Holiday-Quellen einfach
+  keine Events; das yanta-calendar-updated-Event rendert dann nach.
+*/
+let HolidaysCtor = null;
+let holidaysLoading = null;
+
+function ensureHolidaysLoaded() {
+  if (HolidaysCtor || holidaysLoading) return holidaysLoading;
+
+  holidaysLoading = import('date-holidays')
+    .then((m) => {
+      HolidaysCtor = m.default;
+
+      window.dispatchEvent(new CustomEvent('yanta-calendar-updated', {
+        detail: { reason: 'holidays-module-loaded' },
+      }));
+    })
+    .catch((err) => {
+      console.warn('[YANTA Calendar] could not load date-holidays', err);
+      holidaysLoading = null;
+    });
+
+  return holidaysLoading;
+}
 
 const holidayProviderCache = new Map();
 
@@ -369,6 +395,12 @@ export function calendarCategorySourceDescription(source) {
 // ------------------------------------------------------------
 
 function holidayProviderFor(source) {
+  // Modul noch nicht geladen: Laden anstoßen, diese Runde leer liefern.
+  if (!HolidaysCtor) {
+    ensureHolidaysLoaded();
+    return null;
+  }
+
   const key = [
     source.country || '',
     source.state || '',
@@ -380,7 +412,7 @@ function holidayProviderFor(source) {
     return holidayProviderCache.get(key);
   }
 
-  const hd = new Holidays(
+  const hd = new HolidaysCtor(
     source.country || 'DE',
     source.state || undefined,
     source.region || undefined
@@ -408,6 +440,8 @@ function holidayRawEventsForCategory(cat, rangeStartMs, rangeEndMs, fromYear, to
 
   const out = [];
   const hd = holidayProviderFor(source);
+
+  if (!hd) return out;
 
   const types = Array.isArray(source.types) && source.types.length
     ? source.types

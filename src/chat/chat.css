@@ -660,6 +660,12 @@
   background: var(--bg-elev-2);
 }
 
+.yanta-chat-composer-wrap,
+.yanta-chat-composer-wrap * {
+    box-sizing: border-box;
+    min-width: 0;
+}
+
 .yanta-chat-composer {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

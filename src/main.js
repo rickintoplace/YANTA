@@ -95,7 +95,6 @@ import {
 import {
   vaultJsonSnapshot,
   getVaultDoc,
-  getVaultEntry,
   prepareVaultDoc,
   vaultNotesMap,
   vaultFoldersMap,
@@ -1835,162 +1834,15 @@ function bootDone() {
   } catch {}
 }
 
-/*
-  Temporary boot profiler. Logs the wall-clock cost of each init phase so a
-  slow/frozen boot ("Opening your vault…" stall) can be pinpointed from the
-  console. Each phase is logged immediately, so even a phase that hangs shows
-  up as the last line printed. Remove once the boot stall is diagnosed.
-*/
-let __bootProfT0 = 0;
-let __bootProfPrev = 0;
-function bootProfile(label) {
-  const now = performance.now();
-  if (!__bootProfT0) {
-    __bootProfT0 = now;
-    __bootProfPrev = now;
-  }
-  const delta = now - __bootProfPrev;
-  const total = now - __bootProfT0;
-  __bootProfPrev = now;
-  console.info(`[YANTA Boot] +${delta.toFixed(0)}ms  (t=${total.toFixed(0)}ms)  ${label}`);
-}
-
-/*
-  Catch every main-thread block >120ms during boot, no matter which code path
-  caused it (including fire-and-forget sync work applied in a later microtask,
-  which the phase marks above cannot bracket). This is what actually freezes the
-  boot spinner. Attribution goes to the JS callsite via the long task's
-  attribution entries when the browser exposes them.
-*/
-try {
-  if (typeof PerformanceObserver !== 'undefined') {
-    const obs = new PerformanceObserver((list) => {
-      for (const entry of list.getEntries()) {
-        if (entry.duration < 120) continue;
-        const attribution = (entry.attribution || [])
-          .map((a) => a.containerName || a.containerSrc || a.name)
-          .filter(Boolean)
-          .join(', ');
-        console.warn(
-          `[YANTA Boot] LONG TASK ${entry.duration.toFixed(0)}ms at t≈${entry.startTime.toFixed(0)}ms` +
-          (attribution ? `  (${attribution})` : '')
-        );
-      }
-    });
-    obs.observe({ type: 'longtask', buffered: true });
-  }
-} catch {}
-
-/*
-  Temporary diagnostic: what makes the VaultDoc so expensive to load?
-  Logs the encoded doc size and a per-map / largest-entry size breakdown, so a
-  single huge live entry (e.g. an accumulated chatRoomKeys / events blob) is
-  obvious. Remove once the boot stall is fixed.
-*/
-function logVaultDocBreakdown() {
-  try {
-    const doc = getVaultDoc();
-    const encodedBytes = encodeVaultState().length;
-
-    const kb = (n) => `${(n / 1024).toFixed(1)}KB`;
-
-    const rows = [];
-    const mapNames = [
-      'notes', 'folders', 'images', 'events',
-      'calendarCategories', 'settings', 'devices', 'tombstones',
-    ];
-
-    for (const name of mapNames) {
-      const map = doc.getMap(name);
-      let total = 0;
-      let biggest = { key: null, size: 0 };
-
-      for (const [key, value] of map) {
-        let size = 0;
-        try { size = JSON.stringify(value)?.length || 0; } catch { size = -1; }
-        total += size;
-        if (size > biggest.size) biggest = { key, size };
-      }
-
-      rows.push({
-        map: name,
-        entries: map.size,
-        approxJSON: kb(total),
-        biggestKey: biggest.key,
-        biggestSize: kb(biggest.size),
-      });
-    }
-
-    console.warn(`[YANTA VaultDoc] encoded update size = ${kb(encodedBytes)} (${encodedBytes} bytes)`);
-    console.table(rows);
-
-    // Where is the 7MB of history? Count CRDT structs per root map so the
-    // high-churn source is unambiguous. GC structs lose their parent, so they
-    // are counted globally; live/deleted Items are attributed per map.
-    try {
-      const typeName = new Map();
-      for (const [name, type] of doc.share) typeName.set(type, name);
-
-      let gcCount = 0;
-      let itemLive = 0;
-      let itemDeleted = 0;
-      let totalStructs = 0;
-      const perMap = {};
-
-      for (const structs of doc.store.clients.values()) {
-        for (const s of structs) {
-          totalStructs++;
-
-          if (s.constructor && s.constructor.name === 'GC') {
-            gcCount++;
-            continue;
-          }
-
-          const deleted = !!s.deleted;
-          if (deleted) itemDeleted++; else itemLive++;
-
-          const name = typeName.get(s.parent) || 'other/nested';
-          const bucket = perMap[name] || (perMap[name] = { liveItems: 0, deletedItems: 0 });
-          if (deleted) bucket.deletedItems++; else bucket.liveItems++;
-        }
-      }
-
-      console.warn(
-        `[YANTA VaultDoc] structs total=${totalStructs}  gc=${gcCount}  ` +
-        `liveItems=${itemLive}  deletedItems=${itemDeleted}  (doc.gc=${doc.gc})`
-      );
-      console.table(perMap);
-    } catch (err) {
-      console.warn('[YANTA VaultDoc] struct census failed', err);
-    }
-
-    // Did the gc compaction actually shrink the persisted y-indexeddb log?
-    try {
-      const persistence = getVaultEntry().persistence;
-      Promise.resolve(persistence.get('yanta-vault-gc-compaction-v1')).then((marker) => {
-        console.warn(
-          `[YANTA VaultDoc] persistence rows(_dbsize)=${persistence._dbsize}, ` +
-          `gc=${getVaultDoc().gc}, compactionMarker=${marker ? 'set' : 'MISSING'}`
-        );
-      });
-    } catch {}
-  } catch (err) {
-    console.warn('[YANTA VaultDoc] breakdown failed', err);
-  }
-}
-
 async function init() {
-  bootProfile('init start');
   bootStage('Opening your vault…', 48);
 
   await openDB();
-  bootProfile('openDB');
 
   // Create the VaultDoc first, healing any bloated local CRDT history before
   // anything else references it. Must run before installVaultStoreBridge and
   // before any chat/sync code touches the doc.
   await prepareVaultDoc();
-  bootProfile('prepareVaultDoc (compaction check)');
 
   installChatAccountReadyListener();
 
@@ -2093,8 +1945,6 @@ async function init() {
   });
 
   await installVaultStoreBridge();
-  bootProfile('installVaultStoreBridge (waitForVaultDoc)');
-  logVaultDocBreakdown();
 
   try {
     if (navigator.storage?.persist) {
@@ -2102,7 +1952,6 @@ async function init() {
       if (!already) await navigator.storage.persist();
     }
   } catch {}
-  bootProfile('storage.persist');
 
   bootStage('Loading your notes…', 60);
 
@@ -2115,17 +1964,14 @@ async function init() {
     store.settings.get('viewMobile', null),
     store.settings.get('sidebarCollapsed', false),
   ]);
-  bootProfile(`store.*.all (notes=${notes.length}, folders=${folders.length}, images=${images.length})`);
 
   for (const n of notes) state.notes.set(n.id, n);
   for (const f of folders) state.folders.set(f.id, f);
   for (const im of images) state.imagesMeta.set(im.id, im);
 
   await seedVaultFromLocalState();
-  bootProfile('seedVaultFromLocalState');
 
   await hydrateLocalMetadataFromVaultDocOnStartup();
-  bootProfile('hydrateLocalMetadataFromVaultDocOnStartup');
 
   // Debug helper. Maybe remove later.
   window.yantaVaultDebug = {
@@ -2196,7 +2042,6 @@ async function init() {
   } catch (err) {
     console.warn('[YANTA Sync2] runtime setup failed', err);
   }
-  bootProfile('sync2 provider setup');
 
   window.yantaConnectSync2Broker = async ({
     baseUrl = 'http://localhost:8787',
@@ -2349,7 +2194,6 @@ async function init() {
 
   await loadAppearance();
   await loadCalendarPreferences();
-  bootProfile('loadAppearance + loadCalendarPreferences');
 
   watchSystemTheme();
 
@@ -2365,13 +2209,10 @@ async function init() {
 
   setView(initialView, { persist: false });
 
-  bootProfile('setView + workspace prep start');
   bootStage('Preparing your workspace…', 75);
 
   rebuildWikilinkIndex();
-  bootProfile('rebuildWikilinkIndex');
   buildSearchIndexInBackground();
-  bootProfile('buildSearchIndexInBackground (kickoff)');
 
   async function openChatSearchFromPalette() {
     try {
@@ -2467,8 +2308,6 @@ async function init() {
     renderTree();
   });
 
-  bootProfile('buildCommandList + setup* handlers');
-
   setupPublicShareAutoPublisher();
   setupSync2ProgressUi();
   setupSyncReminderUi();
@@ -2484,9 +2323,7 @@ async function init() {
   });
 
   // setupCalendar();
-  bootProfile('quota/progress UI + before syncRestore');
   await syncRestore();
-  bootProfile('syncRestore');
   let sharedOpen = null;
 
   if (window.location.hash.startsWith('#space=')) {
@@ -2535,11 +2372,9 @@ async function init() {
     },
   });
 
-  bootProfile('shared/space restore + noteChrome');
   bootStage('Almost ready…', 90);
 
   renderTree();
-  bootProfile('renderTree');
 
   let initialRouteHandled = false;
 
@@ -2802,12 +2637,9 @@ async function init() {
     });
   });
 
-  bootProfile('initial route + first surface render');
-
   bindEvents();
 
   // First surface is rendered and interactive — release the boot loader.
-  bootProfile('bootDone (total init)');
   bootDone();
 
   // Opt-in semantic index: no-op unless enabled; starts in idle time.

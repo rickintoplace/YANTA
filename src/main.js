@@ -183,6 +183,7 @@ import {
 
 // Registers the calendar dashboard widget (side effect).
 import './calendar-widget.js';
+import './today-widget.js';
 // Registers the dashboard information panel (side effect).
 import './dashboard-info-panel.js';
 import {
@@ -3516,6 +3517,15 @@ function openNativeColorPickerForRange({ from, to, color }) {
 function handleGlobalKey(e) {
   const meta = e.ctrlKey || e.metaKey;
   if (meta && e.key === 'n') { e.preventDefault(); newNote(currentFolderForNew()); }
+  else if (meta && e.shiftKey && e.code === 'Space') {
+    // Quick capture works from anywhere — including while typing in the
+    // editor. That's the point: one keystroke, thought saved, back to work.
+    e.preventDefault();
+
+    import('./journal.js')
+      .then((m) => m.openQuickCapture({ source: 'hotkey' }))
+      .catch((err) => console.error('[YANTA Journal] quick capture failed', err));
+  }
   else if (meta && e.key === 'k') {
     e.preventDefault();
     expandSidebarForSearch();

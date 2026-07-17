@@ -377,6 +377,8 @@ let commandList = [];
     importChatArchive,
   }) {
   commandList = [
+    { label: 'Quick capture (to today’s note)', icon: 'zap', hint: 'Ctrl+Shift+Space', action: () => import('./journal.js').then((m) => m.openQuickCapture({ source: 'palette' })) },
+    { label: 'Open today’s note', icon: 'sun', action: () => import('./journal.js').then((m) => m.openTodayNote()) },
     { label: 'New note', icon: 'plus', hint: 'Ctrl+N', action: () => newNote(currentFolderForNew()) },
     { label: 'New shopping/checklist (live-friendly)', icon: 'shopping-cart', action: () => newNote(currentFolderForNew(), 'list') },
     { label: 'New folder', icon: 'folder-plus', action: () => newFolder(null) },

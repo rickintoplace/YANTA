@@ -53,6 +53,12 @@ import {
 
 export const CREATE_ACTIONS = [
   {
+    id: 'capture',
+    label: 'Quick capture',
+    icon: 'zap',
+    resultType: 'capture',
+  },
+  {
     id: 'folder',
     label: 'New folder',
     icon: 'folder-plus',
@@ -308,6 +314,17 @@ export async function runCreateAction(actionId, {
   });
 
   try {
+    if (actionId === 'capture') {
+      const { openQuickCapture } = await import('./journal.js');
+
+      openQuickCapture({ source });
+
+      return {
+        id: 'capture',
+        type: 'capture',
+      };
+    }
+
     if (actionId === 'folder') {
       return await createFolder(targetFolderId, {
         source,

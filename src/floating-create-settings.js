@@ -22,6 +22,11 @@ export const FLOATING_CREATE_BOUNDS = Object.freeze({
 
 export const FLOATING_CREATE_ACTION_CATALOG = [
   {
+    id: 'capture',
+    defaultLabel: 'Quick capture',
+    defaultIcon: 'zap',
+  },
+  {
     id: 'note',
     defaultLabel: 'New note',
     defaultIcon: 'file-text',
@@ -125,6 +130,15 @@ export const DEFAULT_FLOATING_CREATE_SETTINGS = {
       x: -63,
       y: -135,
       order: 8,
+    },
+    {
+      id: 'capture',
+      enabled: true,
+      label: 'Quick capture',
+      icon: 'zap',
+      x: -6,
+      y: -160,
+      order: 9,
     },
     {
       id: 'folder',

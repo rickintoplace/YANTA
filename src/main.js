@@ -96,6 +96,7 @@ import {
   vaultJsonSnapshot,
   getVaultDoc,
   getVaultEntry,
+  prepareVaultDoc,
   vaultNotesMap,
   vaultFoldersMap,
   vaultImagesMap,
@@ -1923,6 +1924,46 @@ function logVaultDocBreakdown() {
     console.warn(`[YANTA VaultDoc] encoded update size = ${kb(encodedBytes)} (${encodedBytes} bytes)`);
     console.table(rows);
 
+    // Where is the 7MB of history? Count CRDT structs per root map so the
+    // high-churn source is unambiguous. GC structs lose their parent, so they
+    // are counted globally; live/deleted Items are attributed per map.
+    try {
+      const typeName = new Map();
+      for (const [name, type] of doc.share) typeName.set(type, name);
+
+      let gcCount = 0;
+      let itemLive = 0;
+      let itemDeleted = 0;
+      let totalStructs = 0;
+      const perMap = {};
+
+      for (const structs of doc.store.clients.values()) {
+        for (const s of structs) {
+          totalStructs++;
+
+          if (s.constructor && s.constructor.name === 'GC') {
+            gcCount++;
+            continue;
+          }
+
+          const deleted = !!s.deleted;
+          if (deleted) itemDeleted++; else itemLive++;
+
+          const name = typeName.get(s.parent) || 'other/nested';
+          const bucket = perMap[name] || (perMap[name] = { liveItems: 0, deletedItems: 0 });
+          if (deleted) bucket.deletedItems++; else bucket.liveItems++;
+        }
+      }
+
+      console.warn(
+        `[YANTA VaultDoc] structs total=${totalStructs}  gc=${gcCount}  ` +
+        `liveItems=${itemLive}  deletedItems=${itemDeleted}  (doc.gc=${doc.gc})`
+      );
+      console.table(perMap);
+    } catch (err) {
+      console.warn('[YANTA VaultDoc] struct census failed', err);
+    }
+
     // Did the gc compaction actually shrink the persisted y-indexeddb log?
     try {
       const persistence = getVaultEntry().persistence;
@@ -1944,6 +1985,12 @@ async function init() {
 
   await openDB();
   bootProfile('openDB');
+
+  // Create the VaultDoc first, healing any bloated local CRDT history before
+  // anything else references it. Must run before installVaultStoreBridge and
+  // before any chat/sync code touches the doc.
+  await prepareVaultDoc();
+  bootProfile('prepareVaultDoc (compaction check)');
 
   installChatAccountReadyListener();
 

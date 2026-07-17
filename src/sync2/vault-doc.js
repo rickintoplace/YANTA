@@ -12,14 +12,30 @@
 // ============================================================
 
 import * as Y from 'yjs';
-import { IndexeddbPersistence, storeState } from 'y-indexeddb';
+import { IndexeddbPersistence, clearDocument } from 'y-indexeddb';
 
 const VAULT_DOC_KEY = 'yanta-vault-v1';
 
-// Marker in the persistence "custom" store. Its presence means this device has
-// already collapsed the pre-gc VaultDoc history into a compact snapshot, so we
-// only pay that one-time heal once per device.
-const VAULT_COMPACTION_MARKER = 'yanta-vault-gc-compaction-v1';
+/*
+  All synced root maps of the VaultDoc. Used by the local history-compaction
+  rebuild to copy every live value into a fresh doc. If a new synced vault map
+  is ever added, it MUST be listed here or it would be lost on compaction.
+*/
+const VAULT_MAP_NAMES = [
+  'notes',
+  'folders',
+  'images',
+  'events',
+  'calendarCategories',
+  'settings',
+  'devices',
+  'tombstones',
+];
+
+// A VaultDoc is considered bloated when its encoded update is much larger than
+// its live compact state and past a floor where the load cost actually matters.
+const VAULT_BLOAT_MIN_BYTES = 512 * 1024;
+const VAULT_BLOAT_FACTOR = 4;
 
 let vaultEntry = null;
 
@@ -33,30 +49,28 @@ export function vaultDevicesMap() {
   return vaultMap('devices');
 }
 
+function newVaultDoc() {
+  /*
+    gc:true drops the CONTENT of deleted/overwritten structs. It does not remove
+    the struct markers from the encoding, so gc alone cannot undo an already
+    bloated history — that is what prepareVaultDoc()'s rebuild is for — but it
+    keeps ongoing churn cheaper.
+  */
+  return new Y.Doc({ gc: true });
+}
+
+function whenPersistenceSynced(persistence) {
+  return new Promise((resolve) => {
+    persistence.once('synced', () => resolve());
+  });
+}
+
 export function getVaultEntry() {
   if (vaultEntry) return vaultEntry;
 
-  /*
-    gc:true is essential here.
-
-    VaultDoc maps are overwritten on every metadata change (pin, reorder, tags,
-    trash, public-share status, dashboard layout …). Without garbage collection
-    Yjs keeps every superseded value as durable struct history, so the persisted
-    update log grows without bound. On boot y-indexeddb replays that whole log
-    with a synchronous Y.applyUpdate loop, which froze the UI for ~15s on
-    long-lived vaults (the "Opening your vault…" stall). GC collapses deleted
-    structs so the doc — and its persisted snapshot — stay small.
-  */
-  const doc = new Y.Doc({ gc: true });
+  const doc = newVaultDoc();
   const persistence = new IndexeddbPersistence(VAULT_DOC_KEY, doc);
-
-  const ready = new Promise((resolve) => {
-    persistence.once('synced', () => resolve());
-  });
-
-  // Heal vaults whose persistence was written before gc was enabled: one forced
-  // re-encode drops the pre-gc history and rewrites a compact snapshot.
-  ready.then(() => compactVaultPersistenceOnce(persistence)).catch(() => {});
+  const ready = whenPersistenceSynced(persistence);
 
   vaultEntry = {
     doc,
@@ -67,22 +81,90 @@ export function getVaultEntry() {
   return vaultEntry;
 }
 
-async function compactVaultPersistenceOnce(persistence) {
-  try {
-    if (await persistence.get(VAULT_COMPACTION_MARKER)) return;
+/*
+  Copy only the current (live) values of every vault map into a brand-new gc doc
+  and encode it. The result carries the full semantic state with ZERO history —
+  this is the only way to actually shrink a VaultDoc whose struct history has
+  ballooned (e.g. from device-presence churn). Tombstones are copied too, so
+  deletions are preserved and cannot resurrect on the next merge.
+*/
+function encodeCompactFromDoc(sourceDoc) {
+  const compact = newVaultDoc();
 
-    /*
-      forceStore:true encodes the now-GC'd doc state as a single update row and
-      deletes all prior (pre-gc, bloated) rows. The state vector is unchanged,
-      so remote sync and tombstone semantics are unaffected.
-    */
-    await storeState(persistence, true);
-    await persistence.set(VAULT_COMPACTION_MARKER, Date.now());
+  for (const name of VAULT_MAP_NAMES) {
+    const src = sourceDoc.getMap(name);
+    const tgt = compact.getMap(name);
+
+    for (const [id, value] of src) {
+      if (!id || value == null) continue;
+      tgt.set(String(id), safeJsonClone(value));
+    }
+  }
+
+  const update = Y.encodeStateAsUpdate(compact);
+  compact.destroy();
+
+  return update;
+}
+
+/**
+ * Create the VaultDoc, healing a bloated local history first.
+ *
+ * MUST be awaited once during app startup BEFORE anything else touches the
+ * VaultDoc (so the rebuild can replace the persistence without any live doc
+ * references dangling). If the doc was already created, this is a no-op and the
+ * rebuild is skipped.
+ *
+ * Why a rebuild and not gc/storeState: y-indexeddb replays the whole update log
+ * synchronously on boot. A VaultDoc with a huge struct history (device presence
+ * was written on every sync cycle) took ~17s to apply even though the live data
+ * was ~48KB. Rebuilding from a fresh compact doc drops that history entirely.
+ */
+export async function prepareVaultDoc() {
+  if (vaultEntry) return vaultEntry;
+
+  let doc = newVaultDoc();
+  let persistence = new IndexeddbPersistence(VAULT_DOC_KEY, doc);
+  await whenPersistenceSynced(persistence);
+
+  try {
+    const encoded = Y.encodeStateAsUpdate(doc);
+    const compact = encodeCompactFromDoc(doc);
+
+    const bloated =
+      encoded.length > VAULT_BLOAT_MIN_BYTES &&
+      encoded.length > compact.length * VAULT_BLOAT_FACTOR;
+
+    if (bloated) {
+      // Replace the bloated persistence with the history-less compact state.
+      // Close our connection, then await the DB deletion explicitly:
+      // y-indexeddb's clearData() does not await the delete, which would race
+      // the fresh persistence we open right after.
+      await persistence.destroy();
+      await clearDocument(VAULT_DOC_KEY);
+
+      doc = newVaultDoc();
+      persistence = new IndexeddbPersistence(VAULT_DOC_KEY, doc);
+      await whenPersistenceSynced(persistence);
+
+      Y.applyUpdate(doc, compact, VAULT_ORIGINS.LOCAL_SEED);
+
+      console.info('[YANTA Sync2] VaultDoc history compacted', {
+        beforeBytes: encoded.length,
+        afterBytes: compact.length,
+      });
+    }
   } catch (err) {
-    // Non-fatal: the app still works, the boot is just not compacted yet and
-    // will be retried on the next launch.
     console.warn('[YANTA Sync2] VaultDoc compaction skipped', err);
   }
+
+  vaultEntry = {
+    doc,
+    persistence,
+    ready: Promise.resolve(),
+  };
+
+  return vaultEntry;
 }
 
 export function getVaultDoc() {

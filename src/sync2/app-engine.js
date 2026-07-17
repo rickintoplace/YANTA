@@ -125,6 +125,12 @@ export const SYNC2_LOCAL_ORIGIN = 'sync2-local';
 // These should NOT create remote update packs on every sync cycle.
 export const SYNC2_DEVICE_PRESENCE_ORIGIN = 'sync2-device-presence';
 
+// How often a device's coarse presence (lastSeenAt) may be written into the
+// VaultDoc. Presence is called many times per sync; persisting each call grew
+// the local CRDT history to megabytes and froze boot. 30 min keeps the
+// device-list "last seen" useful while making history growth negligible.
+const DEVICE_PRESENCE_PERSIST_MS = 30 * 60 * 1000;
+
 function emitSync2Progress(detail = {}) {
   try {
     window.dispatchEvent(new CustomEvent('yanta-sync2-progress', {
@@ -1167,18 +1173,47 @@ export class Sync2AppEngine {
       ...patch,
     });
 
+    // Freshest record is always available in memory for local UI, even when we
+    // decide not to persist it below.
+    this.localDeviceRecord = next;
+
     /*
-      Default queue=false:
-      Sync status / heartbeat / lastSeenAt must not cause remote writes.
-      They are useful locally for UI, but if they are queued, each sync
-      creates a new Vault update and therefore another sync cycle.
-      
-      Full snapshots still include this local device record because it is
-      stored in the VaultDoc before encodeVaultState().
+      Presence/status must not accumulate CRDT history.
+
+      updateDeviceRecord is called many times per sync cycle (status
+      transitions, lastSeenAt, seq). Every Yjs write is persisted locally by
+      y-indexeddb regardless of origin, so writing on each call grew the
+      VaultDoc history to megabytes and froze boot for ~17s while y-indexeddb
+      replayed it. These fields never sync as update packs anyway
+      (SYNC2_DEVICE_PRESENCE_ORIGIN is excluded from the outbox).
+
+      So only touch the persisted Yjs record when it actually matters:
+        - an explicit durable/queued write,
+        - a durable identity field changed (name, created, …),
+        - the device record does not exist yet, or
+        - the coarse presence-heartbeat window elapsed, so full snapshots still
+          carry a roughly-current lastSeenAt for the device-list UI.
+      Otherwise the update stays in memory only.
     */
-    doc.transact(() => {
-      devices.set(this.deviceId, next);
-    }, queue ? SYNC2_LOCAL_ORIGIN : SYNC2_DEVICE_PRESENCE_ORIGIN);
+    const durableChanged =
+      stableJsonStringifyForSync2(stripVolatileVaultFingerprintFields(existing)) !==
+      stableJsonStringifyForSync2(stripVolatileVaultFingerprintFields(next));
+
+    const heartbeatDue =
+      (Date.now() - Number(existing.lastSeenAt || 0)) > DEVICE_PRESENCE_PERSIST_MS;
+
+    const shouldPersist =
+      queue || durableChanged || heartbeatDue || !devices.has(this.deviceId);
+
+    if (shouldPersist) {
+      /*
+        Full snapshots still include this local device record because it is
+        stored in the VaultDoc before encodeVaultState().
+      */
+      doc.transact(() => {
+        devices.set(this.deviceId, next);
+      }, queue ? SYNC2_LOCAL_ORIGIN : SYNC2_DEVICE_PRESENCE_ORIGIN);
+    }
 
     return next;
   }

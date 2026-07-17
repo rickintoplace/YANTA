@@ -10,6 +10,20 @@
   display: none !important;
 }
 
+/*
+  Why: .main's default rows are auto 1fr auto (head/content/status). With
+  head+status hidden the dashboard auto-places into the first "auto" row and
+  is sized to its content — short dashboards leave an empty 1fr strip at the
+  bottom. Collapse to one full-height row (same fix as the calendar surface).
+*/
+.app[data-surface="dashboard"] .main {
+  grid-template-rows: 1fr;
+  min-height: 0;
+  height: 100vh;
+  height: 100dvh;
+  overflow: hidden;
+}
+
 /* Dashboard shell */
 .dashboard[hidden] {
   display: none !important;

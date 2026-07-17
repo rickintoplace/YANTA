@@ -9,11 +9,48 @@
 // ============================================================
 
 import { Calendar } from '@fullcalendar/core';
-import allLocales from '@fullcalendar/core/locales-all';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
 import listPlugin from '@fullcalendar/list';
 import interactionPlugin from '@fullcalendar/interaction';
+
+/*
+  Warum kein locales-all-Import: das Gesamtpaket (~65 Sprachen) hängt sonst
+  im Main-Bundle. fullCalendarLocale() mappt ohnehin fast immer auf diese
+  Kernsprachen; nur für exotischere navigator.language-Werte wird das volle
+  Paket nachgeladen und per setOption nachgereicht.
+*/
+import deLocale from '@fullcalendar/core/locales/de';
+import frLocale from '@fullcalendar/core/locales/fr';
+import esLocale from '@fullcalendar/core/locales/es';
+import itLocale from '@fullcalendar/core/locales/it';
+import nlLocale from '@fullcalendar/core/locales/nl';
+import enGbLocale from '@fullcalendar/core/locales/en-gb';
+
+const CORE_FC_LOCALES = [deLocale, frLocale, esLocale, itLocale, nlLocale, enGbLocale];
+
+// 'en' is FullCalendar's built-in default and needs no locale module.
+const CORE_FC_LOCALE_CODES = new Set(['en', 'en-gb', 'de', 'fr', 'es', 'it', 'nl']);
+
+let allFcLocalesPromise = null;
+
+function ensureAllFullCalendarLocales(fc, localeCode) {
+  if (CORE_FC_LOCALE_CODES.has(String(localeCode || '').toLowerCase())) return;
+
+  allFcLocalesPromise = allFcLocalesPromise
+    || import('@fullcalendar/core/locales-all').then((m) => m.default);
+
+  allFcLocalesPromise
+    .then((allLocales) => {
+      if (!fc) return;
+
+      fc.setOption('locales', allLocales);
+      fc.setOption('locale', localeCode);
+    })
+    .catch((err) => {
+      console.warn('[YANTA Calendar] Could not load extra locales', err);
+    });
+}
 
 import {
   $,
@@ -2275,7 +2312,7 @@ async function createAdjacentCalendarViewSnapshot(dir, {
       interactionPlugin,
     ],
 
-    locales: allLocales,
+    locales: CORE_FC_LOCALES,
     locale: fullCalendarLocale(prefs),
     firstDay: Number(prefs.weekStart),
     weekNumbers: !!prefs.weekNumbers,
@@ -12485,6 +12522,7 @@ function applyCalendarPreferencesToFullCalendar() {
 
   try {
     fc.setOption('locale', fullCalendarLocale(prefs));
+    ensureAllFullCalendarLocales(fc, fullCalendarLocale(prefs));
     fc.setOption('firstDay', Number(prefs.weekStart));
     fc.setOption('weekNumbers', !!prefs.weekNumbers);
     fc.setOption('weekNumberCalculation', 'ISO');
@@ -12652,7 +12690,7 @@ export function setupCalendar() {
       interactionPlugin,
     ],
 
-    locales: allLocales,
+    locales: CORE_FC_LOCALES,
     locale: fullCalendarLocale(getCalendarPreferences()),
     firstDay: Number(getCalendarPreferences().weekStart),
     weekNumbers: !!getCalendarPreferences().weekNumbers,
@@ -12999,6 +13037,8 @@ export function setupCalendar() {
   });
 
   fc.render();
+
+  ensureAllFullCalendarLocales(fc, fullCalendarLocale(getCalendarPreferences()));
 
   setupSmoothCalendarNavigation();
   setupCalendarSwipeNavigation();

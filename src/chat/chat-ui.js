@@ -1885,6 +1885,25 @@ export async function openChat({
   setChatMode(mode);
   root.hidden = false;
 
+  const surfaceMode = chatMode === 'surface';
+
+  /*
+    Wichtig: Surface-State VOR dem (async) Client-Aufbau setzen.
+    Sonst gibt es ein Fenster — und ohne Chat-Account einen Dauerzustand —
+    in dem die Chat-Surface sichtbar ist, aber state.surface noch die alte
+    Surface meldet. Geräte-Back ruft dann nie closeChat() auf und die
+    Chat-Surface bleibt über dem Dashboard hängen.
+  */
+  if (surfaceMode) {
+    state.surface = 'chat';
+
+    const app = document.getElementById('app');
+
+    if (app) {
+      app.dataset.surface = 'chat';
+    }
+  }
+
   renderChatSetupState({
     title: 'Opening Chat…',
     message: 'Preparing your encrypted Chat session.',
@@ -1900,18 +1919,6 @@ export async function openChat({
 
   root.style.setProperty('--chat-list-width', `${roomListWidth}px`);
   updateRoomListDensity();
-
-  const surfaceMode = chatMode === 'surface';
-
-  if (surfaceMode) {
-    state.surface = 'chat';
-
-    const app = document.getElementById('app');
-
-    if (app) {
-      app.dataset.surface = 'chat';
-    }
-  }
 
   const nextRoomId = String(roomId || '').trim();
 
@@ -2035,6 +2042,19 @@ export function closeChat({
 
   if (chatMode === 'surface' && state.surface === 'chat') {
     state.surface = 'dashboard';
+
+    /*
+      Wichtig: das data-surface-Attribut mitziehen. Bleibt es auf "chat",
+      greifen die Dashboard-Surface-Styles nicht (Status-/Kopfzeile werden
+      wieder sichtbar → leerer Balken unter dem Dashboard). Navigiert Back
+      stattdessen zu Note/Calendar, überschreibt deren Route-Handler das
+      Attribut direkt danach.
+    */
+    const app = document.getElementById('app');
+
+    if (app && app.dataset.surface === 'chat') {
+      app.dataset.surface = 'dashboard';
+    }
   }
 
   setChatMode('surface');

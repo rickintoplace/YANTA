@@ -310,6 +310,25 @@ function openMenu({
       })
     );
   }
+  if (eventType(event) === 'm.sticker') {
+    menuEl.append(
+      menuButton({
+        icon: 'shapes',
+        label: 'Add to library',
+        action: async () => {
+          const { addStickerToUserPack } = await import('./chat-stickers.js');
+          const result = await addStickerToUserPack(client, eventContent(event));
+
+          toast(
+            result.existed
+              ? 'Sticker is already in your library'
+              : 'Sticker added to your library',
+            'success'
+          );
+        },
+      })
+    );
+  }
   menuEl.append(
     menuButton({
       icon: 'forward',

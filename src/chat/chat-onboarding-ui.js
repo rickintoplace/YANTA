@@ -375,6 +375,12 @@ function ensureModal() {
     }
   }, true);
 
+  // Back/route-change closes the chat surface — the onboarding modal
+  // belongs to it and must not survive on top of the next surface.
+  window.addEventListener('yanta-chat-closed', () => {
+    close();
+  });
+
   document.body.append(modal);
 
   return modal;

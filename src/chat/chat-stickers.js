@@ -22,11 +22,16 @@ import {
 } from '../draw.js';
 
 import {
+  mxcToBlob,
   uploadMatrixContent,
 } from './chat-media.js';
 
 const USER_EMOTES_TYPE = 'im.ponies.user_emotes';
 const YANTA_LIBRARY_KEY = 'page.yanta.library_item_id';
+
+// Original mxc of a saved received sticker — dedupes repeated "Add to
+// library" even when the encrypted source had to be re-uploaded as plain.
+const YANTA_SOURCE_MXC_KEY = 'page.yanta.source_mxc';
 
 function userEmotesContent(client) {
   try {
@@ -183,6 +188,94 @@ export async function stickerForLibraryItem(client, item) {
     body: image.body,
     info: image.info,
     libraryItemId: String(item.id),
+  };
+}
+
+/**
+ * Saves a received sticker (m.sticker event content) into the user's
+ * MSC2545 image pack, making it sendable from the sticker tab.
+ *
+ * Pack images require plain mxc URLs (packs are reused across rooms), so
+ * encrypted attachments are downloaded, decrypted and re-uploaded once.
+ *
+ * Returns { shortcode, existed } — existed=true when it was already saved.
+ */
+export async function addStickerToUserPack(client, content = {}) {
+  if (!client) {
+    throw new Error('Chat is not connected.');
+  }
+
+  const info = content.info || {};
+  const body = String(content.body || '').trim() || 'Sticker';
+  const sourceMxc = String(content.url || content.file?.url || '');
+
+  if (!sourceMxc) {
+    throw new Error('Sticker is missing its media URL.');
+  }
+
+  const current = userEmotesContent(client);
+  const images = { ...(current.images || {}) };
+
+  for (const [shortcode, image] of Object.entries(images)) {
+    if (!image?.url) continue;
+
+    if (image.url === sourceMxc || image[YANTA_SOURCE_MXC_KEY] === sourceMxc) {
+      return {
+        shortcode,
+        existed: true,
+      };
+    }
+  }
+
+  let url = String(content.url || '');
+  let imageInfo = {
+    w: Number(info.w || 0),
+    h: Number(info.h || 0),
+    mimetype: info.mimetype || 'image/png',
+    size: Number(info.size || 0),
+  };
+
+  if (!url) {
+    const blob = await mxcToBlob(client, content.file.url, {
+      thumbnail: false,
+      encryptedFile: content.file,
+      mimeType: info.mimetype || '',
+    });
+
+    if (!blob?.size) {
+      throw new Error('Could not load the sticker media.');
+    }
+
+    url = await uploadMatrixContent(client, blob, {
+      name: 'sticker.png',
+      type: blob.type || info.mimetype || 'image/png',
+    });
+
+    const dim = await imageDimensions(blob);
+
+    imageInfo = {
+      w: dim.w || imageInfo.w,
+      h: dim.h || imageInfo.h,
+      mimetype: blob.type || imageInfo.mimetype,
+      size: blob.size,
+    };
+  }
+
+  const shortcode = stickerShortcode(body, images);
+
+  images[shortcode] = {
+    url,
+    body,
+    usage: ['sticker'],
+    info: imageInfo,
+    [YANTA_SOURCE_MXC_KEY]: sourceMxc,
+  };
+
+  await saveUserEmotesImages(client, images);
+
+  return {
+    shortcode,
+    existed: false,
   };
 }
 

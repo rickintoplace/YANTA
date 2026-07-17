@@ -18,6 +18,13 @@ import {
   peekChatMediaObjectUrl,
 } from './chat-media.js';
 
+import {
+  registerOverlayRoute,
+  pushOverlayState,
+  closeTopOverlay,
+  overlayIdFromState,
+} from '../overlay-history.js';
+
 const lazyImageObserver = new IntersectionObserver((entries) => {
   for (const entry of entries) {
     if (!entry.isIntersecting) continue;
@@ -157,7 +164,56 @@ function waveformFromContent(content = {}) {
   return Array.from({ length: 48 }, () => 180);
 }
 
-export function openChatImageViewer(client, full, title = 'Photo') {
+/*
+  Warum overlay-history: Der Bildviewer liegt fullscreen über dem Chat.
+  Ohne eigenen History-Eintrag würde Geräte-Back den Chat-Eintrag poppen
+  und damit den ganzen Chat schließen statt nur den Viewer.
+*/
+const CHAT_IMAGE_VIEWER_OVERLAY_ID = 'chat-image-viewer';
+
+let imageViewerRouteRegistered = false;
+let activeImageViewer = null; // { destroy }
+let lastImageViewerArgs = null; // { client, full, title } for forward-restore
+
+function registerImageViewerRoute() {
+  if (imageViewerRouteRegistered) return;
+
+  imageViewerRouteRegistered = true;
+
+  registerOverlayRoute(CHAT_IMAGE_VIEWER_OVERLAY_ID, {
+    open: async () => {
+      if (lastImageViewerArgs) {
+        openChatImageViewer(
+          lastImageViewerArgs.client,
+          lastImageViewerArgs.full,
+          lastImageViewerArgs.title,
+          {
+            fromHistory: true,
+            stickerContent: lastImageViewerArgs.stickerContent,
+          }
+        );
+      }
+    },
+
+    close: () => {
+      activeImageViewer?.destroy();
+    },
+
+    isOpen: () => !!activeImageViewer,
+  });
+}
+
+export function openChatImageViewer(client, full, title = 'Photo', {
+  fromHistory = false,
+  stickerContent = null,
+} = {}) {
+  registerImageViewerRoute();
+
+  // Only one viewer at a time; replace instead of stacking.
+  activeImageViewer?.destroy();
+
+  lastImageViewerArgs = { client, full, title, stickerContent };
+
   const overlay = el('div', {
     class: 'yanta-chat-image-viewer',
     role: 'dialog',
@@ -170,6 +226,13 @@ export function openChatImageViewer(client, full, title = 'Photo') {
     <header>
       <strong>${escapeHtml(title || 'Photo')}</strong>
       <span class="grow"></span>
+      ${
+        stickerContent
+          ? `<button class="icon-btn" data-add-library title="Add to library" aria-label="Add sticker to library">
+              ${lucide('shapes', 18)}
+            </button>`
+          : ''
+      }
       <button class="icon-btn" data-download title="Download" aria-label="Download">
         ${lucide('download', 18)}
       </button>
@@ -182,10 +245,24 @@ export function openChatImageViewer(client, full, title = 'Photo') {
     </main>
   `;
 
-  const close = () => {
+  const destroy = () => {
+    if (activeImageViewer?.destroy === destroy) activeImageViewer = null;
+
     window.removeEventListener('keydown', onKeyDown, true);
     overlay.remove();
   };
+
+  // User-initiated close: pop the viewer's history entry so Back stays in sync.
+  const close = () => {
+    if (overlayIdFromState() === CHAT_IMAGE_VIEWER_OVERLAY_ID) {
+      closeTopOverlay(destroy);
+      return;
+    }
+
+    destroy();
+  };
+
+  activeImageViewer = { destroy };
 
   function onKeyDown(e) {
     if (e.key !== 'Escape') return;
@@ -213,6 +290,28 @@ export function openChatImageViewer(client, full, title = 'Photo') {
       return;
     }
 
+    if (stickerContent && e.target.closest?.('[data-add-library]')) {
+      e.preventDefault();
+      e.stopPropagation();
+
+      try {
+        const { addStickerToUserPack } = await import('./chat-stickers.js');
+        const result = await addStickerToUserPack(client, stickerContent);
+
+        toast(
+          result.existed
+            ? 'Sticker is already in your library'
+            : 'Sticker added to your library',
+          'success'
+        );
+      } catch (err) {
+        console.warn('[YANTA Chat] Could not add sticker to library', err);
+        toast('Could not add sticker to library.', 'error');
+      }
+
+      return;
+    }
+
     if (e.target.closest?.('[data-download]')) {
       e.preventDefault();
       e.stopPropagation();
@@ -235,6 +334,10 @@ export function openChatImageViewer(client, full, title = 'Photo') {
   window.addEventListener('keydown', onKeyDown, true);
   document.body.append(overlay);
   overlay.focus();
+
+  if (!fromHistory && overlayIdFromState() !== CHAT_IMAGE_VIEWER_OVERLAY_ID) {
+    pushOverlayState(CHAT_IMAGE_VIEWER_OVERLAY_ID, {});
+  }
 
   mxcToBlobUrl(client, full.mxcUrl, {
     thumbnail: false,
@@ -461,7 +564,9 @@ export function renderStickerContent(client, content = {}) {
   };
 
   wrap.addEventListener('click', () => {
-    openChatImageViewer(client, source.full, title);
+    openChatImageViewer(client, source.full, title, {
+      stickerContent: content,
+    });
   });
 
   if (!cachedUrl) {

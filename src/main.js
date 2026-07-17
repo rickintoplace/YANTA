@@ -1817,7 +1817,25 @@ async function handlePresentPairHashIfNeeded(hash = location.hash) {
   }
 }
 
+/*
+  Boot loader bridge (inline UI in index.html). Reports honest progress:
+  the bundle is parsed once init() runs, then vault/notes/workspace follow.
+*/
+function bootStage(text, pct) {
+  try {
+    window.__yantaBoot?.stage(text, pct);
+  } catch {}
+}
+
+function bootDone() {
+  try {
+    window.__yantaBoot?.done();
+  } catch {}
+}
+
 async function init() {
+  bootStage('Opening your vault…', 48);
+
   await openDB();
 
   installChatAccountReadyListener();
@@ -1929,6 +1947,8 @@ async function init() {
     }
   } catch {}
     
+  bootStage('Loading your notes…', 60);
+
   const [notes, folders, images, expanded, view, mobileView, sidebarCollapsed] = await Promise.all([
     store.notes.all(),
     store.folders.all(),
@@ -2183,6 +2203,8 @@ async function init() {
 
   setView(initialView, { persist: false });
 
+  bootStage('Preparing your workspace…', 75);
+
   rebuildWikilinkIndex();
   buildSearchIndexInBackground();
 
@@ -2344,8 +2366,10 @@ async function init() {
     },
   });
 
+  bootStage('Almost ready…', 90);
+
   renderTree();
-    
+
   let initialRouteHandled = false;
 
   // Open initial route.
@@ -2608,6 +2632,9 @@ async function init() {
   });
 
   bindEvents();
+
+  // First surface is rendered and interactive — release the boot loader.
+  bootDone();
 
   // Opt-in semantic index: no-op unless enabled; starts in idle time.
   import('./semantic/semantic-index.js')
@@ -4109,6 +4136,18 @@ const SITE_PAGE_PATHS = new Set([
 
 const normalizedPath = location.pathname.replace(/\/+$/, '') || '/';
 
+const isStandalonePage =
+  SITE_PAGE_PATHS.has(normalizedPath) ||
+  location.pathname.startsWith('/share/') ||
+  location.pathname.startsWith('/present') ||
+  String(location.hash || '').replace(/^#/, '').startsWith('slides-remote=');
+
+// Standalone pages (site, share viewer, presenter, slides remote) manage
+// their own mount UX — the app boot loader must not sit on top of them.
+if (isStandalonePage) {
+  bootDone();
+}
+
 if (SITE_PAGE_PATHS.has(normalizedPath)) {
   import('./site/site-pages.js')
     .then((m) => m.mountSitePage())
@@ -4208,6 +4247,11 @@ if (SITE_PAGE_PATHS.has(normalizedPath)) {
   } else {
   init().catch((e) => {
     console.error(e);
+
+    try {
+      window.__yantaBoot?.fail('Could not start YANTA: ' + (e?.message || 'unknown error'));
+    } catch {}
+
     toast('Failed to start: ' + e.message, 'error');
   });
 }

@@ -13,6 +13,13 @@ import { yantaPrompt } from './dialogs.js';
 
 export const DISPLAY_NAME_SETTING = 'user.displayName';
 
+/*
+  Warum ein Cache: Die Matrix-Session startet erst Sekunden nach dem ersten
+  Dashboard-Render (idle auto-resume + sync). Ohne Cache bliebe das Greeting
+  bei jedem Boot namenlos, obwohl der Matrix-Name bekannt ist.
+*/
+const MATRIX_NAME_CACHE_SETTING = 'chat.displayNameCache';
+
 // "{name}" is optional in every template: without a known name the
 // ", {name}" (or " {name}") segment is stripped, punctuation intact.
 const GREETINGS = {
@@ -26,11 +33,17 @@ const GREETINGS = {
     'Fresh page energy',
     'Fresh brew, fresh view',
     'Early bird vibes, {name}?',
+    'Awake and aware, {name}',
+    'A calm start, {name}',
+    'Soft start, clear mind',
+    'Morning stillness, {name}',
   ],
 
   midday: [
     'Good day, {name}',
     'Midday check-in',
+    'Pause and breathe, {name}',
+    'Midday mindfulness',
   ],
  
   afternoon: [
@@ -44,12 +57,15 @@ const GREETINGS = {
     'Evening, {name}',
     'Evening thoughts, {name}?',
     'Wind down and write down',
+    'Letting the day settle',
   ],
 
   night: [
     'Late-night ideas, {name}?',
     'The best notes happen after dark',
     'Midnight muse reporting for duty',
+    'Moonlit mindfulness',
+    'Rest in stillness, {name}',
   ],
 
   generic: [
@@ -65,6 +81,11 @@ const GREETINGS = {
     'Decrypted and ready',
     'Only you can see this, {name}',
     'Back at it, {name}',
+    'Be here now, {name}',
+    'A calm mind begins',
+    'Present and ready',
+    'Mindful {weekday}, {name}',
+    'Clarity starts here',
   ],
 
   puns: [
@@ -77,8 +98,8 @@ const GREETINGS = {
     'Safe and sound, {name}',
     'Encrypted with love',
     'Secure, private, yours',
-    'The cloud ',   
-
+    'The cloud can’t read this, {name}',
+    'Note the moment',
   ],
 };
 
@@ -87,6 +108,7 @@ const WEEKDAY_GREETINGS = {
     'Fresh week, fresh notes, {name}',
     'Monday momentum',
     'Start the week strong, {name}',
+    'One calm step into the week',
   ],
 
   tuesday: [
@@ -189,7 +211,12 @@ function pickTemplate() {
     ...weekdayGreetingPool(now),
   ];
 
-  sessionTemplate = pool[Math.floor(Math.random() * pool.length)];
+  // Templates outside the weekday pools may use {weekday} too.
+  const weekday = now.toLocaleDateString('en-US', { weekday: 'long' });
+
+  sessionTemplate = pool[Math.floor(Math.random() * pool.length)]
+    .replaceAll('{weekday}', weekday);
+
   return sessionTemplate;
 }
 
@@ -212,16 +239,48 @@ async function matrixDisplayName() {
   }
 }
 
+/**
+ * Name priority: user-chosen display name > Matrix profile name
+ * (live, falling back to the cached value from an earlier session) > none.
+ */
 export async function resolveGreetingName() {
   try {
     const custom = String(await store.settings.get(DISPLAY_NAME_SETTING, '') || '').trim();
     if (custom) return custom;
   } catch {}
 
-  return await matrixDisplayName();
+  const live = await matrixDisplayName();
+
+  if (live) {
+    store.settings.set(MATRIX_NAME_CACHE_SETTING, live).catch(() => {});
+    return live;
+  }
+
+  try {
+    return String(await store.settings.get(MATRIX_NAME_CACHE_SETTING, '') || '').trim();
+  } catch {
+    return '';
+  }
 }
 
 let cachedGreeting = '';
+let lastOnUpdate = null;
+let chatReadyHooked = false;
+
+function refreshGreeting() {
+  const template = pickTemplate();
+
+  resolveGreetingName()
+    .then((name) => {
+      const next = fillName(template, name);
+
+      if (next !== cachedGreeting) {
+        cachedGreeting = next;
+        lastOnUpdate?.(next);
+      }
+    })
+    .catch(() => {});
+}
 
 /**
  * Synchronous accessor for render paths: returns the last resolved
@@ -235,16 +294,22 @@ export function currentGreeting({ onUpdate = null } = {}) {
     cachedGreeting = fillName(template, '');
   }
 
-  resolveGreetingName()
-    .then((name) => {
-      const next = fillName(template, name);
+  if (onUpdate) lastOnUpdate = onUpdate;
 
-      if (next !== cachedGreeting) {
-        cachedGreeting = next;
-        onUpdate?.(next);
-      }
-    })
-    .catch(() => {});
+  if (!chatReadyHooked) {
+    chatReadyHooked = true;
+
+    // First Matrix sync mid-session: the profile name just became known.
+    window.addEventListener('yanta-chat-ready', refreshGreeting);
+
+    // Chat removed from this device: the Matrix name is no longer known.
+    window.addEventListener('yanta-chat-deprovisioned', () => {
+      store.settings.set(MATRIX_NAME_CACHE_SETTING, '').catch(() => {});
+      refreshGreeting();
+    });
+  }
+
+  refreshGreeting();
 
   return cachedGreeting;
 }

@@ -5,7 +5,7 @@
 // User data is in IndexedDB/Yjs, not in this cache.
 // ============================================================
 
-const CACHE_VERSION = 'yanta-app-v15';
+const CACHE_VERSION = 'yanta-app-v16';
 const APP_SHELL = [
   '/',
   '/index.html',
@@ -76,20 +76,32 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Same-origin navigation: network first, fallback to cached shell.
+  /*
+    Same-origin navigation: app-shell strategy (cache first, revalidate in
+    the background). Why: on app reopen (Android kills the WebView freely)
+    a network-first shell used to block first paint for as long as a weak
+    connection needed — tens of seconds on mobile. The cached shell paints
+    instantly; a fresh copy is fetched alongside and used on the NEXT boot.
+    Hashed asset URLs referenced by a stale shell stay valid via the
+    stale-while-revalidate asset cache below.
+  */
   if (req.mode === 'navigate' && url.origin === location.origin) {
     event.respondWith(
-      fetch(req)
-        .then((res) => {
-          if (res.ok) {
-            const copy = res.clone();
-            caches.open(CACHE_VERSION).then((cache) => {
-              cache.put('/index.html', copy).catch(() => {});
-            });
-          }
-          return res;
-        })
-        .catch(() => caches.match('/index.html'))
+      caches.match('/index.html').then((cached) => {
+        const fresh = fetch(req)
+          .then((res) => {
+            if (res.ok) {
+              const copy = res.clone();
+              caches.open(CACHE_VERSION).then((cache) => {
+                cache.put('/index.html', copy).catch(() => {});
+              });
+            }
+            return res;
+          })
+          .catch(() => cached);
+
+        return cached || fresh;
+      })
     );
     return;
   }

@@ -30,6 +30,13 @@ import {
   mxcToBlobUrl,
 } from './chat-media.js';
 
+import {
+  registerOverlayRoute,
+  pushOverlayState,
+  closeTopOverlay,
+  overlayIdFromState,
+} from '../overlay-history.js';
+
 const RECENT_EMOJI_KEY = 'chat.recentEmoji.v1';
 const RECENT_EMOJI_LIMIT = 36;
 const SEARCH_RESULT_LIMIT = 120;
@@ -48,6 +55,40 @@ const GROUP_ICONS = {
 
 let emojiGroupsPromise = null;
 const panelsByForm = new WeakMap();
+
+/*
+  Warum overlay-history: Auf Android soll Geräte-Back ein offenes
+  Emoji-/Sticker-Panel schließen (WhatsApp-Verhalten) — nicht den Raum
+  oder gleich den ganzen Chat.
+*/
+const CHAT_EXPRESSIONS_OVERLAY_ID = 'chat-expressions';
+
+let expressionsRouteRegistered = false;
+let openPanelRef = null; // the currently open panel element
+let lastToggleArgs = null; // for forward-restore via history
+
+function registerExpressionsRoute() {
+  if (expressionsRouteRegistered) return;
+
+  expressionsRouteRegistered = true;
+
+  registerOverlayRoute(CHAT_EXPRESSIONS_OVERLAY_ID, {
+    open: async () => {
+      if (lastToggleArgs?.form?.isConnected && !openPanelRef?.isConnected) {
+        toggleChatExpressions({
+          ...lastToggleArgs,
+          fromHistory: true,
+        });
+      }
+    },
+
+    close: () => {
+      destroyPanel(openPanelRef);
+    },
+
+    isOpen: () => !!openPanelRef?.isConnected,
+  });
+}
 
 function idle(fn) {
   if ('requestIdleCallback' in window) {
@@ -570,10 +611,27 @@ function buildPanel(context) {
   return panel;
 }
 
+function destroyPanel(panel) {
+  if (!panel) return;
+
+  if (openPanelRef === panel) openPanelRef = null;
+
+  panel.remove();
+}
+
+// User-initiated close: pop the panel's history entry so Back stays in sync.
 function closePanel(panel) {
   if (!panel) return;
 
-  panel.remove();
+  if (
+    panel === openPanelRef &&
+    overlayIdFromState() === CHAT_EXPRESSIONS_OVERLAY_ID
+  ) {
+    closeTopOverlay(() => destroyPanel(panel));
+    return;
+  }
+
+  destroyPanel(panel);
 }
 
 /**
@@ -585,8 +643,11 @@ export function toggleChatExpressions({
   getClient,
   getRoomId,
   onStickerSent = null,
+  fromHistory = false,
 } = {}) {
   if (!form) return;
+
+  registerExpressionsRoute();
 
   const existing = panelsByForm.get(form);
 
@@ -615,6 +676,12 @@ export function toggleChatExpressions({
 
   host.prepend(panel);
   panelsByForm.set(form, panel);
+  openPanelRef = panel;
+  lastToggleArgs = { form, textArea, getClient, getRoomId, onStickerSent };
+
+  if (!fromHistory && overlayIdFromState() !== CHAT_EXPRESSIONS_OVERLAY_ID) {
+    pushOverlayState(CHAT_EXPRESSIONS_OVERLAY_ID, {});
+  }
 
   setActiveTab(panel, 'emoji', context);
 }

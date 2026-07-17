@@ -2608,6 +2608,11 @@ async function init() {
   });
 
   bindEvents();
+
+  // Opt-in semantic index: no-op unless enabled; starts in idle time.
+  import('./semantic/semantic-index.js')
+    .then((m) => m.bootSemanticIfEnabled())
+    .catch(() => {});
 }
 
 function setView(v, { persist = true } = {}) {

@@ -1118,6 +1118,10 @@ if (pinned.length) {
 
   normalizeCollapsedTreeIndents(root);
 
+  if (q && q.length >= 3) {
+    scheduleSemanticTreeResults(root, q, new Set(visible.map((n) => n.id)));
+  }
+
   requestAnimationFrame(() => {
     updateActiveTreeIndicator(root);
     restoreTreeFocusSoon();
@@ -1125,6 +1129,61 @@ if (pinned.length) {
 
   renderTagCloud();
   updateStorageMeter();
+}
+
+/*
+  Hybrid search, second stage: keyword results above render instantly
+  and untouched; semantic hits the keyword filter missed arrive async
+  and append below as "Related matches". Everything degrades silently
+  — feature off, model loading, worker error: the tree looks exactly
+  like before.
+*/
+let semanticTreeToken = 0;
+
+async function scheduleSemanticTreeResults(root, q, visibleIds) {
+  const token = ++semanticTreeToken;
+
+  let semantic;
+
+  try {
+    semantic = await import('./semantic/semantic-index.js');
+  } catch {
+    return;
+  }
+
+  if (!semantic.semanticEnabled() || !semantic.semanticReady()) return;
+
+  let results = [];
+
+  try {
+    results = await semantic.semanticSearchDebounced(q, { topK: 10 });
+  } catch {
+    return;
+  }
+
+  // Stale guards: newer render, changed query, or the root left the DOM.
+  if (token !== semanticTreeToken) return;
+  if (String(state.searchQuery || '').toLowerCase() !== q) return;
+  if (!root.isConnected) return;
+
+  const rows = results
+    .map((r) => ({ note: state.notes.get(r.noteId), preview: r.preview }))
+    .filter(({ note }) => note && !visibleIds.has(note.id) && !isNoteInTrash(note))
+    .slice(0, 6);
+
+  if (!rows.length) return;
+
+  const sec = el('div', { class: 'tree-section tree-section-semantic' });
+
+  const title = el('div', { class: 'tree-section-title' }, 'Related matches');
+  title.title = 'Found by meaning (on-device semantic search)';
+  sec.append(title);
+
+  for (const { note } of rows) {
+    sec.append(noteRow(note, 0, { registerOrder: false }));
+  }
+
+  root.append(sec);
 }
 
 function isAncestor(ancestorId, descendantId) {

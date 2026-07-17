@@ -1121,6 +1121,7 @@ function ensureModal() {
     { id: 'calendar',   label: 'Calendar',   icon: 'calendar-days' },
     { id: 'sources',    label: 'Sources',    icon: 'rss' },
     { id: 'ai',         label: 'AI',         icon: 'bot' },
+    { id: 'semantic',   label: 'Semantic search', icon: 'brain-circuit' },
     { id: 'chat',       label: 'Chat',       icon: 'message-circle' },
     { id: 'sync',       label: 'Sync & Backup', icon: 'refresh-cw' },
     { id: 'about',      label: 'About',      icon: 'info' },
@@ -1178,6 +1179,7 @@ function renderSettingsBody() {
   else if (activeSection === 'calendar') renderCalendarSection(content);
   else if (activeSection === 'sources') renderSourcesSection(content);
   else if (activeSection === 'ai') renderAiSection(content);
+  else if (activeSection === 'semantic') renderSemanticSection(content);
   else if (activeSection === 'chat') renderChatSection(content);
   else if (activeSection === 'sync') renderSyncSection(content);
   else if (activeSection === 'about') renderAboutSection(content);
@@ -2467,6 +2469,38 @@ function renderAiSection(host) {
       mount.innerHTML = `
         <div class="yanta-settings-info">
           Could not load AI settings.
+        </div>
+      `;
+    });
+}
+
+function renderSemanticSection(host) {
+  host.append(sectionHeader(
+    'Semantic search',
+    'On-device AI that finds notes by meaning. Nothing leaves your device.'
+  ));
+
+  const mount = el('div', { class: 'yanta-settings-group' });
+
+  mount.innerHTML = `
+    <div class="tree-empty" style="display:block;padding:14px">
+      Loading semantic settings…
+    </div>
+  `;
+
+  host.append(mount);
+
+  import('./semantic/semantic-settings-ui.js')
+    .then(({ renderSemanticSettingsPanel }) => {
+      if (!mount.isConnected) return;
+      renderSemanticSettingsPanel(mount);
+    })
+    .catch((err) => {
+      console.error('[YANTA Settings] Could not load semantic settings panel', err);
+
+      mount.innerHTML = `
+        <div class="yanta-settings-info">
+          Could not load semantic search settings.
         </div>
       `;
     });

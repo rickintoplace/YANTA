@@ -94,6 +94,28 @@ export function encodeNoteUpdateFrom(noteId, stateVector) {
 }
 
 // Release a doc when a note is deleted.
+export function isNoteDocLoaded(noteId) {
+  return docs.has(noteId);
+}
+
+/**
+ * Unload a note's Y.Doc from memory WITHOUT touching persisted data.
+ * (destroyNoteDoc below DELETES the stored doc — not the same thing.)
+ *
+ * Callers must ensure nothing still observes the doc: not the open
+ * note, no live share, no sync2 observer. The semantic indexer uses
+ * this to keep bulk crawls from pinning every doc in RAM.
+ */
+export function unloadNoteDoc(noteId) {
+  const entry = docs.get(noteId);
+  if (!entry) return;
+
+  try { entry.persistence.destroy(); } catch {}
+  try { entry.doc.destroy(); } catch {}
+
+  docs.delete(noteId);
+}
+
 export async function destroyNoteDoc(noteId) {
   const entry = docs.get(noteId);
 

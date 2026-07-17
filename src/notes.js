@@ -59,7 +59,7 @@ let _unsubDoc = null;
 // Welcome folders/notes without touching real user content.
 // ------------------------------------------------------------
 
-export const WELCOME_VERSION = 2;
+export const WELCOME_VERSION = 3;
 
 export const WELCOME_IDS = Object.freeze({
   folders: Object.freeze({
@@ -73,13 +73,13 @@ export const WELCOME_IDS = Object.freeze({
 
   notes: Object.freeze({
     welcome: 'welcome_note_welcome',
-    basics: 'welcome_note_feature_map',
-    canvas: 'welcome_note_drawings_visual_thinking',
     shopping: 'welcome_note_tasks_workflows',
-    sharing: 'welcome_note_sync_live_sharing',
 
     // Legacy IDs from older Welcome Vaults.
     // Kept for pristine-welcome cleanup compatibility.
+    basics: 'welcome_note_feature_map',
+    canvas: 'welcome_note_drawings_visual_thinking',
+    sharing: 'welcome_note_sync_live_sharing',
     markdown: 'welcome_note_markdown_essentials',
     graph: 'welcome_note_graph_wikilinks',
     media: 'welcome_note_images_icons_media',
@@ -999,181 +999,67 @@ export async function createWelcomeNote() {
 
   const ids = {
     welcome: WELCOME_IDS.notes.welcome,
-    basics: WELCOME_IDS.notes.basics,
-    canvas: WELCOME_IDS.notes.canvas,
     shopping: WELCOME_IDS.notes.shopping,
-    sharing: WELCOME_IDS.notes.sharing,
   };
 
   const drawingId = WELCOME_IDS.drawing;
 
+  /*
+    Warum nur zwei Notes: das alte Welcome-Vault (5 Notes) wurde nicht
+    gelesen — zu viel Text, dreimal Sync erklärt, dasselbe Drawing
+    doppelt eingebettet. Onboarding passiert jetzt durch TUN (die
+    Checkliste unten), nicht durch Lesen.
+  */
   const notes = [
     {
       id: ids.welcome,
       title: 'Start here',
       type: 'markdown',
       folderId,
-      tags: ['welcome', 'start'],
+      tags: ['welcome'],
       pinned: false,
       icon: 'sparkles',
       color: '#2563eb',
-      body: `# Start here
+      body: `# Start here 👋
 
-Welcome to **YANTA** — a calm, local-first workspace for notes, sketches, tasks and connected ideas.
-
-Start with a thought. Sketch it. Link it when it becomes useful.
+**YANTA** is your private workspace — notes, drawings, calendar, chat and AI in one place. Everything stays on your device unless *you* decide to sync or share.
 
 draw://${drawingId}
 
-## Try this
+## Try it — one minute
 
-- [ ] Click into the canvas above
-- [ ] Move one element
-- [ ] Open [[Shopping List]]
-- [ ] Press Ctrl/⌘+G to see the graph
+- [ ] Press **Ctrl/⌘ + Shift + Space** and capture a thought — it lands in today's journal note
+- [ ] Type \`/\` in any note — drawings, images, events and more
+- [ ] Type \`[[\` to link notes — try [[Shopping List]]
+- [ ] Press **Ctrl/⌘ + P** — every command lives there
 
-## A small map
+## Good to know
 
-- [[First Canvas]] shows visual thinking
-- [[YANTA Basics]] shows the simplest commands
-- [[Shopping List]] is a practical checklist example
-- [[Sync & Sharing]] explains backup and collaboration briefly
+- **Private by design** — sync and sharing are end-to-end encrypted; not even the cloud can read your notes.
+- **No lock-in** — plain Markdown under the hood, export everything anytime.
+- Calendar, feeds, chat and the AI assistant wait in the bottom-left corner — explore whenever you're ready.
 
-Your notes stay on this device unless you choose to sync, export or share them.`,
-    },
-    {
-      id: ids.canvas,
-      title: 'First Canvas',
-      type: 'markdown',
-      folderId,
-      tags: ['drawing', 'canvas', 'visual'],
-      pinned: false,
-      icon: 'line-squiggle',
-      color: '#16a34a',
-      body: `# First Canvas
-
-Sketch before you organize.
-
-YANTA embeds Excalidraw directly inside Markdown notes, so visual thinking and writing can live together.
-
-draw://${drawingId}
-
-## Try this
-
-- Click into the drawing
-- Add a box, arrow or text label
-- Drag a note from the sidebar into the canvas
-- Use linked text like [[Shopping List]] or [[Sync & Sharing]]
-
-A useful drawing does not need to explain everything. It should make the next step obvious.`,
-    },
-    {
-      id: ids.basics,
-      title: 'YANTA Basics',
-      type: 'markdown',
-      folderId,
-      tags: ['basics', 'markdown', 'links'],
-      pinned: false,
-      icon: 'file-text',
-      color: '#0891b2',
-      body: `# YANTA Basics
-
-YANTA is built around three simple actions:
-
-1. Write notes
-2. Draw ideas
-3. Connect related things
-
-## Useful gestures
-
-- Type \`/\` for commands
-- Type \`[[\` to link notes
-- Press Ctrl/⌘+G for the graph
-- Press Ctrl/⌘+I to insert images
-- Use the Share button when someone should edit with you
-
-## Links
-
-A Wikilink connects one note to another:
-
-[[First Canvas]]
-
-Use links when they help you navigate, explain or continue an idea.
-
-## Local-first
-
-YANTA works offline. Your notes are stored locally in this browser unless you choose to sync, export or share them.
-
-For the short version, see [[Sync & Sharing]].`,
+*Delete this Welcome folder whenever you like.*`,
     },
     {
       id: ids.shopping,
       title: 'Shopping List',
       type: 'markdown',
       folderId,
-      tags: ['tasks', 'example', 'sharing'],
+      tags: ['example'],
       pinned: false,
       icon: 'shopping-cart',
       color: '#059669',
       body: `# Shopping List
 
-A tiny checklist example.
+A tiny checklist — check something off!
 
 - [ ] Apples
 - [ ] Coffee
 - [ ] Pasta
 - [ ] Olive oil
-- [ ] Something for dinner
-- [ ] Check what is already at home
 
-## Hint
-
-Use **Share** to turn this into a live collaborative list.
-
-That is useful when someone else should add or check off items from their own device.
-
-For backup and collaboration basics, see [[Sync & Sharing]].`,
-    },
-    {
-      id: ids.sharing,
-      title: 'Sync & Sharing',
-      type: 'markdown',
-      folderId,
-      tags: ['sync', 'sharing', 'backup'],
-      pinned: false,
-      icon: 'refresh-cw',
-      color: '#d97706',
-      body: `# Sync & Sharing
-
-YANTA is local-first.
-
-That means your workspace works offline and stays on this device by default.
-
-## Backup
-
-Use **Export** to create a backup.
-
-For an encrypted portable backup, choose:
-
-**Export → Back up YANTA (.yanta, encrypted)**
-
-Keep the sync key private.
-
-## Folder sync
-
-Advanced users can connect a sync folder and mirror it with tools like Syncthing, Dropbox, iCloud Drive or an external drive.
-
-You do not need to set this up immediately.
-
-## Live sharing
-
-Use the **Share** button in a note when someone should edit with you in real time.
-
-A good first test is [[Shopping List]].
-
-## Simple rule
-
-Write first. Organize later. Sync when you are ready.`,
+**Tip:** hit **Share** (top right) and this becomes a live list — whoever you invite can tick items off from their phone while you shop.`,
     },
   ];
 
@@ -1197,55 +1083,6 @@ Write first. Organize later. Sync when you are ready.`,
 
     updateSearchIndexFor(meta);
   }
-
-  const parseCssColorToRgb = (color) => {
-    const s = String(color || '').trim();
-
-    if (/^#[0-9a-f]{3}$/i.test(s)) {
-      return {
-        r: parseInt(s[1] + s[1], 16),
-        g: parseInt(s[2] + s[2], 16),
-        b: parseInt(s[3] + s[3], 16),
-      };
-    }
-
-    if (/^#[0-9a-f]{6}$/i.test(s)) {
-      return {
-        r: parseInt(s.slice(1, 3), 16),
-        g: parseInt(s.slice(3, 5), 16),
-        b: parseInt(s.slice(5, 7), 16),
-      };
-    }
-
-    const rgb = /^rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)/i.exec(s);
-    if (rgb) {
-      return {
-        r: parseInt(rgb[1], 10),
-        g: parseInt(rgb[2], 10),
-        b: parseInt(rgb[3], 10),
-      };
-    }
-
-    return null;
-  };
-
-  const relativeLuminance = (color) => {
-    const rgb = parseCssColorToRgb(color);
-    if (!rgb) return 0;
-
-    const channel = (v) => {
-      const x = v / 255;
-      return x <= 0.03928
-        ? x / 12.92
-        : Math.pow((x + 0.055) / 1.055, 2.4);
-    };
-
-    return (
-      0.2126 * channel(rgb.r) +
-      0.7152 * channel(rgb.g) +
-      0.0722 * channel(rgb.b)
-    );
-  };
 
   // Build the Welcome canvas with normal Excalidraw-style elements.
   //
@@ -1550,14 +1387,21 @@ Write first. Organize later. Sync when you are ready.`,
 
   const makeArrow = ({
     id = uid(),
-    startBox,
-    endBox,
+    startBox = null,
+    endBox = null,
     start,
     end,
+    via = null,
     strokeColor = XCOL.muted,
+    strokeStyle = 'solid',
   }) => {
     const width = end.x - start.x;
     const height = end.y - start.y;
+
+    // A "via" waypoint bends the arrow into a gentle arc.
+    const points = via
+      ? [[0, 0], [via[0], via[1]], [width, height]]
+      : [[0, 0], [width, height]];
 
     return makeExcalidrawElement(
       {
@@ -1569,21 +1413,23 @@ Write first. Organize later. Sync when you are ready.`,
         height,
         strokeColor,
         strokeWidth: 2,
+        strokeStyle,
         roughness: 1,
-        points: [
-          [0, 0],
-          [width, height],
-        ],
-        startBinding: {
-          elementId: startBox.id,
-          focus: 0,
-          gap: WELCOME_ARROW_GAP,
-        },
-        endBinding: {
-          elementId: endBox.id,
-          focus: 0,
-          gap: WELCOME_ARROW_GAP,
-        },
+        points,
+        startBinding: startBox
+          ? {
+            elementId: startBox.id,
+            focus: 0,
+            gap: WELCOME_ARROW_GAP,
+          }
+          : null,
+        endBinding: endBox
+          ? {
+            elementId: endBox.id,
+            focus: 0,
+            gap: WELCOME_ARROW_GAP,
+          }
+          : null,
         startArrowhead: null,
         endArrowhead: 'arrow',
         roundness: { type: 2 },
@@ -1594,6 +1440,7 @@ Write first. Organize later. Sync when you are ready.`,
         width,
         height,
         strokeColor,
+        strokeStyle,
         strokeWidth: 2,
         opacity: 78,
         roundness: { type: 2 },
@@ -1611,6 +1458,7 @@ Write first. Organize later. Sync when you are ready.`,
     noteId,
     strokeColor,
     backgroundColor,
+    angle = 0,
   }) => {
     const groupId = uid();
     const boxId = uid();
@@ -1675,10 +1523,21 @@ Write first. Organize later. Sync when you are ready.`,
       linkEnabled: false,
     });
 
+    const elements = [box, titleText, subtitleText];
+
+    /*
+      Leichte Neigung (±1.5°) für den handgemachten Look. Excalidraw
+      rotiert jedes Element um sein eigenes Zentrum — bei so kleinen
+      Winkeln ist der Versatz gegenüber echter Gruppenrotation unsichtbar.
+    */
+    if (angle) {
+      for (const el of elements) el.angle = angle;
+    }
+
     return {
       groupId,
       box,
-      elements: [box, titleText, subtitleText],
+      elements,
       cx: x + width / 2,
       cy: y + height / 2,
       left: x,
@@ -1688,155 +1547,160 @@ Write first. Organize later. Sync when you are ready.`,
     };
   };
 
-  const centerGroupId = uid();
+  // --- Scene: one idea travels from capture to shared -------------
+  // Serpentine: 💭 idea → capture → write ↓ connect → share.
+  // Kompakt (~640 breit), damit das Embed in der Notizspalte nichts
+  // abschneidet. Slight tilts + arcs keep it hand-made, not stiff.
 
-  const centerBox = makeRect({
-    id: uid(),
-    groupIds: [centerGroupId],
-    x: 350,
-    y: 210,
-    width: 260,
-    height: 120,
-    strokeColor: XCOL.violetStroke,
-    backgroundColor: XCOL.violetBg,
-    boundElements: [],
-  });
+  const bubbleGroupId = uid();
 
-  const centerTitlePos = centeredTextBox({
-    text: 'YANTA',
-    boxX: centerBox.x,
-    boxY: centerBox.y,
-    boxW: centerBox.width,
-    yOffset: 24,
-    fontSize: 40,
-    maxInset: 20,
-  });
+  const bubble = makeExcalidrawElement(
+    {
+      id: uid(),
+      type: 'ellipse',
+      x: 60,
+      y: 96,
+      width: 200,
+      height: 56,
+      strokeColor: XCOL.yellowStroke,
+      backgroundColor: 'transparent',
+      strokeStyle: 'dashed',
+      strokeWidth: 2,
+      roughness: 1,
+      groupIds: [bubbleGroupId],
+    },
+    {
+      x: 60,
+      y: 96,
+      width: 200,
+      height: 56,
+      strokeStyle: 'dashed',
+      angle: -0.02,
+    }
+  );
 
-  const centerSubtitlePos = centeredTextBox({
-    text: 'write · draw · connect',
-    boxX: centerBox.x,
-    boxY: centerBox.y,
-    boxW: centerBox.width,
-    yOffset: 78,
-    fontSize: 17,
-    maxInset: 20,
-  });
-
-  const centerTitle = makeText({
-    groupIds: [centerGroupId],
-    text: 'YANTA',
-    x: centerTitlePos.x,
-    y: centerTitlePos.y,
-    width: centerTitlePos.width,
-    fontSize: 40,
-    strokeColor: XCOL.violetStroke,
-    textAlign: 'center',
-  });
-
-  const centerSubtitle = makeText({
-    groupIds: [centerGroupId],
-    text: 'write · draw · connect',
-    x: centerSubtitlePos.x,
-    y: centerSubtitlePos.y,
-    width: centerSubtitlePos.width,
-    fontSize: 17,
+  const bubbleText = makeText({
+    groupIds: [bubbleGroupId],
+    text: '💭 that shower idea',
+    x: 80,
+    y: 112,
+    width: 160,
+    fontSize: 14,
     strokeColor: XCOL.muted,
-    textAlign: 'center',
   });
 
-  const canvasCard = makeCard({
-    x: 72,
-    y: 70,
-    title: 'First Canvas',
-    subtitle: 'Sketch an idea',
-    noteId: ids.canvas,
-    strokeColor: XCOL.greenStroke,
-    backgroundColor: XCOL.greenBg,
+  bubbleText.angle = -0.02;
+
+  const heading = makeText({
+    text: 'Your ideas, connected.',
+    x: 150,
+    y: 28,
+    width: 340,
+    fontSize: 26,
+    strokeColor: XCOL.strokeDefault,
   });
 
-  const basicsCard = makeCard({
-    x: 648,
-    y: 70,
-    title: 'YANTA Basics',
-    subtitle: 'Slash, links, graph',
-    noteId: ids.basics,
-    strokeColor: XCOL.cyanStroke,
-    backgroundColor: XCOL.cyanBg,
+  const captureCard = makeCard({
+    x: 50,
+    y: 218,
+    width: 200,
+    height: 88,
+    title: '💡 Capture',
+    subtitle: 'one keystroke',
+    noteId: null,
+    strokeColor: XCOL.yellowStroke,
+    backgroundColor: XCOL.yellowBg,
+    angle: -0.025,
   });
 
-  const shoppingCard = makeCard({
-    x: 92,
-    y: 404,
-    title: 'Shopping List',
-    subtitle: 'Tasks + sharing',
-    noteId: ids.shopping,
+  const writeCard = makeCard({
+    x: 350,
+    y: 200,
+    width: 200,
+    height: 88,
+    title: '✍️ Write',
+    subtitle: 'notes, draw, embed',
+    noteId: null,
     strokeColor: XCOL.blueStroke,
     backgroundColor: XCOL.blueBg,
+    angle: 0.02,
   });
 
-  const sharingCard = makeCard({
-    x: 628,
-    y: 404,
-    title: 'Sync & Sharing',
-    subtitle: 'Backup when ready',
-    noteId: ids.sharing,
-    strokeColor: XCOL.orangeStroke,
-    backgroundColor: XCOL.orangeBg,
+  const connectCard = makeCard({
+    x: 350,
+    y: 390,
+    width: 200,
+    height: 88,
+    title: '🔗 Connect',
+    subtitle: 'wikilinks + graph',
+    noteId: null,
+    strokeColor: XCOL.violetStroke,
+    backgroundColor: XCOL.violetBg,
+    angle: -0.015,
   });
 
-  const arrows = [
-    makeArrow({
-      startBox: canvasCard.box,
-      endBox: centerBox,
-      start: {
-        x: canvasCard.right + WELCOME_ARROW_GAP,
-        y: canvasCard.cy,
-      },
-      end: {
-        x: centerBox.x - WELCOME_ARROW_GAP,
-        y: centerBox.y + 44,
-      },
-    }),
+  const shareCard = makeCard({
+    x: 50,
+    y: 408,
+    width: 200,
+    height: 88,
+    title: '🤝 Share',
+    subtitle: 'live + encrypted',
+    noteId: ids.shopping,
+    strokeColor: XCOL.greenStroke,
+    backgroundColor: XCOL.greenBg,
+    angle: 0.02,
+  });
 
-    makeArrow({
-      startBox: basicsCard.box,
-      endBox: centerBox,
-      start: {
-        x: basicsCard.left - WELCOME_ARROW_GAP,
-        y: basicsCard.cy,
-      },
-      end: {
-        x: centerBox.x + centerBox.width + WELCOME_ARROW_GAP,
-        y: centerBox.y + 44,
-      },
-    }),
+  const sparkles = [
+    { x: 300, y: 122, fontSize: 18, color: XCOL.violetStroke, angle: 0.3 },
+    { x: 588, y: 316, fontSize: 15, color: XCOL.cyanStroke, angle: -0.2 },
+    { x: 88, y: 348, fontSize: 20, color: XCOL.yellowStroke, angle: 0.25 },
+  ].map((s) => {
+    const star = makeText({
+      text: '✦',
+      x: s.x,
+      y: s.y,
+      width: 30,
+      fontSize: s.fontSize,
+      strokeColor: s.color,
+    });
 
-    makeArrow({
-      startBox: shoppingCard.box,
-      endBox: centerBox,
-      start: {
-        x: shoppingCard.right + WELCOME_ARROW_GAP,
-        y: shoppingCard.cy,
-      },
-      end: {
-        x: centerBox.x + 44,
-        y: centerBox.y + centerBox.height + WELCOME_ARROW_GAP,
-      },
-    }),
+    star.angle = s.angle;
+    return star;
+  });
 
-    makeArrow({
-      startBox: sharingCard.box,
-      endBox: centerBox,
-      start: {
-        x: sharingCard.left - WELCOME_ARROW_GAP,
-        y: sharingCard.cy,
-      },
-      end: {
-        x: centerBox.x + centerBox.width - 44,
-        y: centerBox.y + centerBox.height + WELCOME_ARROW_GAP,
-      },
-    }),
+  const flow = [
+    {
+      from: captureCard,
+      to: writeCard,
+      start: { x: 260, y: 262 },
+      end: { x: 340, y: 246 },
+      via: [40, -14],
+    },
+    {
+      from: writeCard,
+      to: connectCard,
+      start: { x: 452, y: 298 },
+      end: { x: 452, y: 380 },
+      via: [22, 41],
+    },
+    {
+      from: connectCard,
+      to: shareCard,
+      start: { x: 340, y: 436 },
+      end: { x: 260, y: 452 },
+      via: [-40, 14],
+    },
   ];
+
+  const arrows = flow.map((step) => makeArrow({
+    startBox: step.from.box,
+    endBox: step.to.box,
+    start: step.start,
+    end: step.end,
+    via: step.via,
+  }));
 
   const attachArrowToBox = (box, arrow) => {
     if (!box.boundElements) box.boundElements = [];
@@ -1849,26 +1713,27 @@ Write first. Organize later. Sync when you are ready.`,
     }
   };
 
-  for (const arrow of arrows) {
-    const startCard = [
-      canvasCard,
-      basicsCard,
-      shoppingCard,
-      sharingCard,
-    ].find((card) => card.box.id === arrow.startBinding?.elementId);
+  flow.forEach((step, i) => {
+    attachArrowToBox(step.from.box, arrows[i]);
+    attachArrowToBox(step.to.box, arrows[i]);
+  });
 
-    if (startCard) attachArrowToBox(startCard.box, arrow);
-    attachArrowToBox(centerBox, arrow);
-  }
-
-  const hintText = 'Excalidraw is fully integrated!';
+  // Unbound on purpose: the doodle arrow from the thought bubble is
+  // decoration, not diagram plumbing.
+  const bubbleArrow = makeArrow({
+    start: { x: 166, y: 160 },
+    end: { x: 152, y: 210 },
+    via: [-8, 22],
+    strokeColor: XCOL.yellowStroke,
+    strokeStyle: 'dashed',
+  });
 
   const hint = makeText({
-    text: hintText,
-    x: 190,
-    y: 528,
-    width: 580,
-    fontSize: 17,
+    text: 'A live canvas — drag things around · the green card links to a note',
+    x: 40,
+    y: 532,
+    width: 560,
+    fontSize: 14.5,
     strokeColor: XCOL.muted,
     textAlign: 'center',
   });
@@ -1877,21 +1742,23 @@ Write first. Organize later. Sync when you are ready.`,
     id: drawingId,
     title: 'YANTA Welcome Canvas',
     canvas: {
-      width: 960,
-      height: 610,
+      width: 640,
+      height: 580,
     },
     elements: [
       ...arrows,
+      bubbleArrow,
 
-      centerBox,
-      centerTitle,
-      centerSubtitle,
+      bubble,
+      bubbleText,
+      heading,
 
-      ...canvasCard.elements,
-      ...basicsCard.elements,
-      ...shoppingCard.elements,
-      ...sharingCard.elements,
+      ...captureCard.elements,
+      ...writeCard.elements,
+      ...connectCard.elements,
+      ...shareCard.elements,
 
+      ...sparkles,
       hint,
     ],
 
@@ -1899,10 +1766,10 @@ Write first. Organize later. Sync when you are ready.`,
     // Excalidraw/draw.js steuert das aktuelle Theme.
     appState: {
       zoom: {
-        value: 0.82,
+        value: 0.75,
       },
-      scrollX: -20,
-      scrollY: 80,
+      scrollX: 8,
+      scrollY: 10,
     },
 
     files: {},

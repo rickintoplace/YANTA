@@ -1833,10 +1833,58 @@ function bootDone() {
   } catch {}
 }
 
+/*
+  Temporary boot profiler. Logs the wall-clock cost of each init phase so a
+  slow/frozen boot ("Opening your vault…" stall) can be pinpointed from the
+  console. Each phase is logged immediately, so even a phase that hangs shows
+  up as the last line printed. Remove once the boot stall is diagnosed.
+*/
+let __bootProfT0 = 0;
+let __bootProfPrev = 0;
+function bootProfile(label) {
+  const now = performance.now();
+  if (!__bootProfT0) {
+    __bootProfT0 = now;
+    __bootProfPrev = now;
+  }
+  const delta = now - __bootProfPrev;
+  const total = now - __bootProfT0;
+  __bootProfPrev = now;
+  console.info(`[YANTA Boot] +${delta.toFixed(0)}ms  (t=${total.toFixed(0)}ms)  ${label}`);
+}
+
+/*
+  Catch every main-thread block >120ms during boot, no matter which code path
+  caused it (including fire-and-forget sync work applied in a later microtask,
+  which the phase marks above cannot bracket). This is what actually freezes the
+  boot spinner. Attribution goes to the JS callsite via the long task's
+  attribution entries when the browser exposes them.
+*/
+try {
+  if (typeof PerformanceObserver !== 'undefined') {
+    const obs = new PerformanceObserver((list) => {
+      for (const entry of list.getEntries()) {
+        if (entry.duration < 120) continue;
+        const attribution = (entry.attribution || [])
+          .map((a) => a.containerName || a.containerSrc || a.name)
+          .filter(Boolean)
+          .join(', ');
+        console.warn(
+          `[YANTA Boot] LONG TASK ${entry.duration.toFixed(0)}ms at t≈${entry.startTime.toFixed(0)}ms` +
+          (attribution ? `  (${attribution})` : '')
+        );
+      }
+    });
+    obs.observe({ type: 'longtask', buffered: true });
+  }
+} catch {}
+
 async function init() {
+  bootProfile('init start');
   bootStage('Opening your vault…', 48);
 
   await openDB();
+  bootProfile('openDB');
 
   installChatAccountReadyListener();
 
@@ -1939,6 +1987,7 @@ async function init() {
   });
 
   await installVaultStoreBridge();
+  bootProfile('installVaultStoreBridge (waitForVaultDoc)');
 
   try {
     if (navigator.storage?.persist) {
@@ -1946,7 +1995,8 @@ async function init() {
       if (!already) await navigator.storage.persist();
     }
   } catch {}
-    
+  bootProfile('storage.persist');
+
   bootStage('Loading your notes…', 60);
 
   const [notes, folders, images, expanded, view, mobileView, sidebarCollapsed] = await Promise.all([
@@ -1958,14 +2008,17 @@ async function init() {
     store.settings.get('viewMobile', null),
     store.settings.get('sidebarCollapsed', false),
   ]);
+  bootProfile(`store.*.all (notes=${notes.length}, folders=${folders.length}, images=${images.length})`);
 
   for (const n of notes) state.notes.set(n.id, n);
   for (const f of folders) state.folders.set(f.id, f);
   for (const im of images) state.imagesMeta.set(im.id, im);
 
   await seedVaultFromLocalState();
+  bootProfile('seedVaultFromLocalState');
 
   await hydrateLocalMetadataFromVaultDocOnStartup();
+  bootProfile('hydrateLocalMetadataFromVaultDocOnStartup');
 
   // Debug helper. Maybe remove later.
   window.yantaVaultDebug = {
@@ -2036,6 +2089,7 @@ async function init() {
   } catch (err) {
     console.warn('[YANTA Sync2] runtime setup failed', err);
   }
+  bootProfile('sync2 provider setup');
 
   window.yantaConnectSync2Broker = async ({
     baseUrl = 'http://localhost:8787',
@@ -2188,6 +2242,7 @@ async function init() {
 
   await loadAppearance();
   await loadCalendarPreferences();
+  bootProfile('loadAppearance + loadCalendarPreferences');
 
   watchSystemTheme();
 
@@ -2203,10 +2258,13 @@ async function init() {
 
   setView(initialView, { persist: false });
 
+  bootProfile('setView + workspace prep start');
   bootStage('Preparing your workspace…', 75);
 
   rebuildWikilinkIndex();
+  bootProfile('rebuildWikilinkIndex');
   buildSearchIndexInBackground();
+  bootProfile('buildSearchIndexInBackground (kickoff)');
 
   async function openChatSearchFromPalette() {
     try {
@@ -2302,6 +2360,8 @@ async function init() {
     renderTree();
   });
 
+  bootProfile('buildCommandList + setup* handlers');
+
   setupPublicShareAutoPublisher();
   setupSync2ProgressUi();
   setupSyncReminderUi();
@@ -2317,7 +2377,9 @@ async function init() {
   });
 
   // setupCalendar();
+  bootProfile('quota/progress UI + before syncRestore');
   await syncRestore();
+  bootProfile('syncRestore');
   let sharedOpen = null;
 
   if (window.location.hash.startsWith('#space=')) {
@@ -2366,9 +2428,11 @@ async function init() {
     },
   });
 
+  bootProfile('shared/space restore + noteChrome');
   bootStage('Almost ready…', 90);
 
   renderTree();
+  bootProfile('renderTree');
 
   let initialRouteHandled = false;
 
@@ -2631,9 +2695,12 @@ async function init() {
     });
   });
 
+  bootProfile('initial route + first surface render');
+
   bindEvents();
 
   // First surface is rendered and interactive — release the boot loader.
+  bootProfile('bootDone (total init)');
   bootDone();
 
   // Opt-in semantic index: no-op unless enabled; starts in idle time.

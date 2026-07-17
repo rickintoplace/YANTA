@@ -95,6 +95,7 @@ import {
 import {
   vaultJsonSnapshot,
   getVaultDoc,
+  getVaultEntry,
   vaultNotesMap,
   vaultFoldersMap,
   vaultImagesMap,
@@ -1879,6 +1880,64 @@ try {
   }
 } catch {}
 
+/*
+  Temporary diagnostic: what makes the VaultDoc so expensive to load?
+  Logs the encoded doc size and a per-map / largest-entry size breakdown, so a
+  single huge live entry (e.g. an accumulated chatRoomKeys / events blob) is
+  obvious. Remove once the boot stall is fixed.
+*/
+function logVaultDocBreakdown() {
+  try {
+    const doc = getVaultDoc();
+    const encodedBytes = encodeVaultState().length;
+
+    const kb = (n) => `${(n / 1024).toFixed(1)}KB`;
+
+    const rows = [];
+    const mapNames = [
+      'notes', 'folders', 'images', 'events',
+      'calendarCategories', 'settings', 'devices', 'tombstones',
+    ];
+
+    for (const name of mapNames) {
+      const map = doc.getMap(name);
+      let total = 0;
+      let biggest = { key: null, size: 0 };
+
+      for (const [key, value] of map) {
+        let size = 0;
+        try { size = JSON.stringify(value)?.length || 0; } catch { size = -1; }
+        total += size;
+        if (size > biggest.size) biggest = { key, size };
+      }
+
+      rows.push({
+        map: name,
+        entries: map.size,
+        approxJSON: kb(total),
+        biggestKey: biggest.key,
+        biggestSize: kb(biggest.size),
+      });
+    }
+
+    console.warn(`[YANTA VaultDoc] encoded update size = ${kb(encodedBytes)} (${encodedBytes} bytes)`);
+    console.table(rows);
+
+    // Did the gc compaction actually shrink the persisted y-indexeddb log?
+    try {
+      const persistence = getVaultEntry().persistence;
+      Promise.resolve(persistence.get('yanta-vault-gc-compaction-v1')).then((marker) => {
+        console.warn(
+          `[YANTA VaultDoc] persistence rows(_dbsize)=${persistence._dbsize}, ` +
+          `gc=${getVaultDoc().gc}, compactionMarker=${marker ? 'set' : 'MISSING'}`
+        );
+      });
+    } catch {}
+  } catch (err) {
+    console.warn('[YANTA VaultDoc] breakdown failed', err);
+  }
+}
+
 async function init() {
   bootProfile('init start');
   bootStage('Opening your vault…', 48);
@@ -1988,6 +2047,7 @@ async function init() {
 
   await installVaultStoreBridge();
   bootProfile('installVaultStoreBridge (waitForVaultDoc)');
+  logVaultDocBreakdown();
 
   try {
     if (navigator.storage?.persist) {

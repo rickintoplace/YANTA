@@ -50,6 +50,10 @@ import {
 } from './brain.js';
 
 import {
+  semanticSearchNotesAction,
+} from '../semantic/semantic-index.js';
+
+import {
   createExcalidrawSlideshowAction,
   updateExcalidrawSlideshowAction,
   readExcalidrawDrawingJsonAction,
@@ -230,6 +234,22 @@ export const TOOL_REGISTRY = [
       required: ['query'],
     },
     execute: searchNotesAction,
+  },
+
+  {
+    name: 'semantic_search_notes',
+    permission: 'allowReadNotes',
+    risk: 'read',
+    description: 'Find notes by MEANING using the on-device semantic index (works across languages, includes text inside drawings). Prefer this over search_notes for conceptual or paraphrased queries — e.g. when the user asks "what did I write about X" without exact keywords. If the response says available:false, fall back to search_notes.',
+    parameters: {
+      type: 'object',
+      properties: {
+        query: { type: 'string', description: 'Natural-language description of what to find; any language.' },
+        limit: { type: 'number', default: 8 },
+      },
+      required: ['query'],
+    },
+    execute: semanticSearchNotesAction,
   },
 
   {

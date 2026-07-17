@@ -1179,11 +1179,91 @@ function recomputeNodeMetrics() {
 // ------------------------------------------------------------
 // Local semantic graph
 // ------------------------------------------------------------
+/*
+  Embedding-Links kommen asynchron aus dem Semantic-Worker, der
+  Graph-Build ist aber synchron. Deshalb ein Cache: der Build liest
+  synchron, ein Refresh läuft daneben; landet der erste Refresh
+  während der Graph offen ist, wird genau EINMAL neu gebaut (der
+  Throttle verhindert die Rebuild-Schleife). Ohne Embeddings (Feature
+  aus, Index kalt, Vault über dem Worker-Cap) bleibt die TF-Heuristik
+  unverändert aktiv.
+*/
+let semanticLinksCache = null;
+let semanticLinksFetchedAt = 0;
+let semanticLinksFetching = false;
+
+const SEMANTIC_LINKS_TTL_MS = 30000;
+
+function refreshSemanticLinksCache() {
+  if (semanticLinksFetching) return;
+  if (Date.now() - semanticLinksFetchedAt < SEMANTIC_LINKS_TTL_MS) return;
+
+  semanticLinksFetching = true;
+
+  import('./semantic/semantic-index.js')
+    .then((m) => m.semanticNoteLinks({ maxPerNote: 3, minScore: 0.78 }))
+    .then((links) => {
+      semanticLinksFetchedAt = Date.now();
+
+      // null = Feature aus / Index kalt / über Cap → TF-Fallback behalten.
+      if (!Array.isArray(links)) return;
+
+      const firstArrival = semanticLinksCache === null;
+      semanticLinksCache = links;
+
+      // graphVisible() deckt Overlay UND Side-Pane ab.
+      if (firstArrival && graphVisible()) {
+        rebuildAndAnimateAfterMutation(0.5);
+      }
+    })
+    .catch(() => {
+      semanticLinksFetchedAt = Date.now();
+    })
+    .finally(() => {
+      semanticLinksFetching = false;
+    });
+}
+
+function addEmbeddingSemanticLinks(visibleNotes, explicitWikiPairs) {
+  const visibleIds = new Set(visibleNotes.map((n) => n.id));
+  let added = 0;
+
+  for (const link of semanticLinksCache) {
+    if (!visibleIds.has(link.aId) || !visibleIds.has(link.bId)) continue;
+
+    const aGid = graphIdForNote(link.aId);
+    const bGid = graphIdForNote(link.bId);
+
+    if (explicitWikiPairs.has(pairKey(aGid, bGid))) continue;
+
+    const closeness = Math.max(0, Math.min(1, (link.score - 0.78) / 0.2));
+
+    addLink(aGid, bGid, LINK.SEMANTIC, Math.max(0.4, link.score), {
+      score: link.score,
+      semanticDistance: 1 - link.score,
+      semanticStrength: 0.0045 + closeness * 0.023,
+      semanticCloseness: closeness,
+    });
+
+    added++;
+  }
+
+  return added;
+}
+
 function addSemanticLinks(notes, explicitWikiPairs) {
   if (!S().showSemantic || notes.length < 2) return;
   const visibleNotes = notes.filter((note) =>
     graph.idIndex.has(graphIdForNote(note.id))
   );
+
+  refreshSemanticLinksCache();
+
+  if (semanticLinksCache) {
+    addEmbeddingSemanticLinks(visibleNotes, explicitWikiPairs);
+    return;
+  }
+
   const semanticLinks = computeSemanticLinks(
     visibleNotes,
     (noteId) => {

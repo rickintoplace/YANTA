@@ -567,6 +567,92 @@ export async function semanticSearch(query, {
   return results || [];
 }
 
+/** Related notes for one note, from its stored chunk vectors. */
+export async function semanticSimilarNotes(noteId, {
+  topK = 4,
+  minScore = 0.8,
+} = {}) {
+  if (!noteId || !semanticEnabled() || !semanticReady()) return [];
+
+  const { results } = await request({
+    type: 'similar-notes',
+    noteId,
+    topK,
+    minScore,
+  });
+
+  return results || [];
+}
+
+/**
+ * Note-level link suggestions for the graph. Returns null when the
+ * feature is off/not ready OR the vault exceeds the worker's cap —
+ * callers keep their existing (TF) behavior in that case.
+ */
+export async function semanticNoteLinks({
+  maxPerNote = 3,
+  minScore = 0.8,
+} = {}) {
+  if (!semanticEnabled() || !semanticReady()) return null;
+
+  const { links } = await request({
+    type: 'note-links',
+    maxPerNote,
+    minScore,
+  });
+
+  return links;
+}
+
+/**
+ * AI tool action: lets the assistant retrieve notes by meaning.
+ * Returns a hint instead of failing when the feature is disabled, so
+ * the model can fall back to keyword search gracefully.
+ */
+export async function semanticSearchNotesAction({
+  query,
+  limit = 8,
+} = {}) {
+  const q = String(query || '').trim();
+
+  if (!q) throw new Error('query is required');
+
+  if (!semanticEnabled()) {
+    return {
+      available: false,
+      hint: 'Semantic search is not enabled (Settings → Semantic search). Use search_notes instead.',
+      results: [],
+    };
+  }
+
+  if (!semanticReady()) {
+    return {
+      available: false,
+      hint: 'Semantic index is still starting up. Use search_notes instead.',
+      results: [],
+    };
+  }
+
+  const results = await semanticSearch(q, {
+    topK: Math.min(20, Math.max(1, limit)),
+    minScore: 0.72,
+  });
+
+  return {
+    available: true,
+    results: results.map((r) => {
+      const note = state.notes.get(r.noteId);
+
+      return {
+        noteId: r.noteId,
+        title: note?.title || 'Untitled',
+        score: Math.round(r.score * 1000) / 1000,
+        preview: r.preview || '',
+      };
+    }).filter((r) => state.notes.has(r.noteId)),
+  };
+}
+
 // Debug/automation handle (window.yantaSync2 precedent) — also the
 // stable probe for tests: Vite-HMR can duplicate this module under
 // ?t= URLs, but the app's live instance always owns this global.
@@ -574,6 +660,9 @@ if (typeof window !== 'undefined') {
   window.yantaSemanticDebug = {
     status: semanticStatus,
     search: (q, opts) => semanticSearch(q, opts),
+    similar: (noteId, opts) => semanticSimilarNotes(noteId, opts),
+    noteLinks: (opts) => semanticNoteLinks(opts),
+    aiAction: (args) => semanticSearchNotesAction(args),
   };
 }
 

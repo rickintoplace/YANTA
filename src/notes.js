@@ -868,6 +868,12 @@ export const schedulePreview = debounce(() => {
   renderBacklinks(state.currentNoteId);
   updateWordCount(md);
 
+  // Semantic "Related notes" below the backlinks (no-op when disabled;
+  // renders from cache, refreshes through the worker on a throttle).
+  import('./semantic/semantic-related.js')
+    .then((m) => m.renderRelatedNotes(state.currentNoteId))
+    .catch(() => {});
+
   requestAnimationFrame(() => {
     renderCalendarAttachmentsSoon(state.currentNoteId);
     window.dispatchEvent(new CustomEvent('yanta-preview-rendered'));

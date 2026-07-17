@@ -1337,6 +1337,13 @@ async function renderReader(itemId, { fromHistory = false } = {}) {
     content.append(details);
   }
 
+  // Semantic bridge: the article surfaces the user's own related notes.
+  // Placeholder keeps DOM order stable; fills async, stays empty when
+  // the semantic index is off or finds nothing.
+  const relatedNotesHost = el('div');
+  content.append(relatedNotesHost);
+  fillRelatedNotesStrip(relatedNotesHost, item).catch(() => {});
+
   const more = await renderMoreFromSameFeed(item);
 
   if (more) {
@@ -1350,6 +1357,83 @@ async function renderReader(itemId, { fromHistory = false } = {}) {
   if (wasInList && !fromHistory) {
     pushOverlayState('rss-reader', { rssItemId: item.id });
   }
+}
+
+async function fillRelatedNotesStrip(host, item) {
+  let semantic;
+
+  try {
+    semantic = await import('../semantic/semantic-index.js');
+  } catch {
+    return;
+  }
+
+  if (!semantic.semanticEnabled() || !semantic.semanticReady()) return;
+
+  const query = [
+    item.title || '',
+    String(item.summaryText || readerText(item) || '').slice(0, 400),
+  ].filter(Boolean).join('\n');
+
+  if (!query.trim()) return;
+
+  let results = [];
+
+  try {
+    results = await semantic.semanticSearch(query, {
+      topK: 3,
+      minScore: 0.76,
+    });
+  } catch {
+    return;
+  }
+
+  // Reader may have moved on while we were searching.
+  if (!host.isConnected || activeReaderItemId !== item.id) return;
+
+  const { state } = await import('../core.js');
+  const rows = results
+    .map((r) => ({ note: state.notes.get(r.noteId), preview: r.preview }))
+    .filter((r) => r.note && r.note.trashed !== true);
+
+  if (!rows.length) return;
+
+  const strip = el('div', { class: 'yanta-rss-related-notes' });
+
+  const title = el('div', { class: 'yanta-rss-related-notes-title' });
+  title.innerHTML = `${lucide('brain-circuit', 13)} <span>Related in your notes</span>`;
+  strip.append(title);
+
+  for (const { note, preview } of rows) {
+    const row = el('div', {
+      class: 'yanta-rss-related-note',
+      role: 'button',
+      tabindex: '0',
+    });
+
+    row.append(
+      el('strong', {}, note.title || 'Untitled'),
+      el('span', {}, preview || ''),
+    );
+
+    const open = async () => {
+      // Same navigation the "Save as note" flow already uses.
+      const { openNote } = await import('../notes.js');
+      openNote(note.id).catch(() => {});
+    };
+
+    row.addEventListener('click', open);
+    row.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        open();
+      }
+    });
+
+    strip.append(row);
+  }
+
+  host.append(strip);
 }
 
 function renderRssCloudLoginNotice({
@@ -2622,6 +2706,67 @@ function injectCss() {
   color: var(--text-faint);
   text-align: center;
   font-size: 13px;
+}
+
+/* Reader: related notes strip (semantic bridge into the vault) */
+.yanta-rss-related-notes {
+  margin-top: 14px;
+  padding: 12px 14px;
+
+  border: 1px solid var(--border);
+  border-radius: 14px;
+
+  background: var(--bg-elev);
+}
+
+.yanta-rss-related-notes-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+
+  margin-bottom: 8px;
+
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.yanta-rss-related-notes-title svg { color: var(--accent); }
+
+.yanta-rss-related-note {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+
+  padding: 6px 8px;
+
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.yanta-rss-related-note:hover {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.yanta-rss-related-note strong {
+  flex: 0 0 auto;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.yanta-rss-related-note span {
+  flex: 1;
+  min-width: 0;
+
+  color: var(--text-faint);
+  font-size: 12px;
+
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 /* Reader */

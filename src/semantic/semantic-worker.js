@@ -198,6 +198,12 @@ async function initModel(requestedModel, forceDevice, progress) {
     env.backends.onnx.wasm.numThreads = 1;
   }
 
+  // Self-hosted ORT runtimes (public/ort/, siehe copy-ort-assets.mjs)
+  // statt cdn.jsdelivr.net — die Produktions-CSP erlaubt nur 'self'.
+  if (env?.backends?.onnx?.wasm) {
+    env.backends.onnx.wasm.wasmPaths = new URL('/ort/', self.location.origin).href;
+  }
+
   const dev = await pickDevice(forceDevice);
   lastDeviceTried = dev;
 
@@ -398,6 +404,135 @@ async function handleSearch({ query, topK = 8, minScore = 0.78 }) {
   return { results };
 }
 
+/**
+ * Related notes for ONE note: its chunk vectors query the whole matrix,
+ * best chunk-to-chunk score per foreign note wins.
+ */
+function handleSimilarNotes({ noteId, topK = 5, minScore = 0.8 }) {
+  const queries = [];
+
+  for (let i = 0; i < index.vectors.length; i++) {
+    if (index.noteIds[i] === noteId) queries.push(index.vectors[i]);
+  }
+
+  if (!queries.length || index.vectors.length <= queries.length) {
+    return { results: [] };
+  }
+
+  const bestByNote = new Map();
+
+  for (let i = 0; i < index.vectors.length; i++) {
+    const targetNote = index.noteIds[i];
+    if (targetNote === noteId) continue;
+
+    const v = index.vectors[i];
+    let best = -1;
+
+    for (const q of queries) {
+      if (q.length !== v.length) continue;
+
+      let dot = 0;
+      for (let j = 0; j < v.length; j++) dot += v[j] * q[j];
+      if (dot > best) best = dot;
+    }
+
+    const prev = bestByNote.get(targetNote);
+
+    if (!prev || best > prev.score) {
+      bestByNote.set(targetNote, {
+        noteId: targetNote,
+        score: best,
+        preview: index.previews[i],
+      });
+    }
+  }
+
+  const results = [...bestByNote.values()]
+    .filter((r) => r.score >= minScore)
+    .sort((a, b) => b.score - a.score)
+    .slice(0, topK);
+
+  return { results };
+}
+
+/**
+ * Note-level link suggestions for the graph: mean chunk vector per
+ * note, pairwise cosine, top links per note. Quadratic in notes —
+ * capped, the caller falls back to the TF heuristic above the cap.
+ */
+function handleNoteLinks({ maxPerNote = 3, minScore = 0.8, cap = 1500 }) {
+  const sums = new Map();   // noteId -> { vec: Float64Array, n }
+
+  for (let i = 0; i < index.vectors.length; i++) {
+    const v = index.vectors[i];
+    let acc = sums.get(index.noteIds[i]);
+
+    if (!acc) {
+      acc = { vec: new Float64Array(v.length), n: 0 };
+      sums.set(index.noteIds[i], acc);
+    }
+
+    if (acc.vec.length !== v.length) continue;
+
+    for (let j = 0; j < v.length; j++) acc.vec[j] += v[j];
+    acc.n++;
+  }
+
+  if (sums.size < 2) return { links: [] };
+  if (sums.size > cap) return { links: null };
+
+  const ids = [];
+  const means = [];
+
+  for (const [noteId, acc] of sums) {
+    let norm = 0;
+    for (let j = 0; j < acc.vec.length; j++) norm += acc.vec[j] * acc.vec[j];
+    norm = Math.sqrt(norm) || 1;
+
+    const mean = new Float32Array(acc.vec.length);
+    for (let j = 0; j < acc.vec.length; j++) mean[j] = acc.vec[j] / norm;
+
+    ids.push(noteId);
+    means.push(mean);
+  }
+
+  const perNote = new Map(ids.map((id) => [id, []]));
+
+  for (let a = 0; a < ids.length; a++) {
+    const va = means[a];
+
+    for (let b = a + 1; b < ids.length; b++) {
+      const vb = means[b];
+      if (va.length !== vb.length) continue;
+
+      let dot = 0;
+      for (let j = 0; j < va.length; j++) dot += va[j] * vb[j];
+
+      if (dot < minScore) continue;
+
+      perNote.get(ids[a]).push({ other: ids[b], score: dot });
+      perNote.get(ids[b]).push({ other: ids[a], score: dot });
+    }
+  }
+
+  const seen = new Set();
+  const links = [];
+
+  for (const [noteId, list] of perNote) {
+    list.sort((x, y) => y.score - x.score);
+
+    for (const { other, score } of list.slice(0, maxPerNote)) {
+      const key = noteId < other ? `${noteId}|${other}` : `${other}|${noteId}`;
+      if (seen.has(key)) continue;
+
+      seen.add(key);
+      links.push({ aId: noteId, bId: other, score });
+    }
+  }
+
+  return { links };
+}
+
 function statusPayload() {
   return {
     device,
@@ -470,6 +605,16 @@ self.onmessage = async (e) => {
 
     if (type === 'search') {
       reply(await handleSearch(msg));
+      return;
+    }
+
+    if (type === 'similar-notes') {
+      reply(handleSimilarNotes(msg));
+      return;
+    }
+
+    if (type === 'note-links') {
+      reply(handleNoteLinks(msg));
       return;
     }
 

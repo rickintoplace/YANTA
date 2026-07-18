@@ -26,6 +26,18 @@ import {
 const WIDGET_SETTING = 'calendar.dashboardWidget.v1';
 const VIEWS = ['month', 'week', 'day', 'list'];
 
+// Views the user can page through (List is always "now forward").
+const PAGED_VIEWS = new Set(['month', 'week', 'day']);
+
+// Anchor date the paged views render around. Lives in module scope so it
+// survives widget re-renders within a session; resets to today on reload.
+let navRef = null;
+
+function navAnchor() {
+  if (!navRef) navRef = startOfDay(new Date());
+  return navRef;
+}
+
 async function getWidgetConfig() {
   const raw = await store.settings.get(WIDGET_SETTING, {});
 
@@ -55,6 +67,20 @@ function addDays(d, days) {
   const out = new Date(d);
   out.setDate(out.getDate() + days);
   return out;
+}
+
+/** Month arithmetic that clamps overflow (Jan 31 → Feb 28), like calendars do. */
+function addMonths(d, months) {
+  const out = new Date(d);
+  const targetMonth = out.getMonth() + months;
+  out.setDate(1);
+  out.setMonth(targetMonth);
+  out.setDate(Math.min(d.getDate(), daysInMonth(out)));
+  return out;
+}
+
+function daysInMonth(d) {
+  return new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate();
 }
 
 /** Monday-based week start (matches the app's FullCalendar config). */
@@ -117,14 +143,81 @@ async function eventsForRange(rangeStart, rangeEnd) {
     );
 
   return events.sort((a, b) => {
+    // Chronological first — the nearest event must lead, whether it is
+    // all-day or timed. All-day only wins as a same-day tiebreak so it
+    // sits atop that day's timed events.
+    const diff = a._start - b._start;
+    if (diff) return diff;
     if (!!a.allDay !== !!b.allDay) return a.allDay ? -1 : 1;
-    return a._start - b._start;
+    return 0;
   });
 }
 
 async function openCalendarApp() {
   const { openCalendar } = await import('./calendar.js');
   openCalendar({ push: true });
+}
+
+// ---------------- period navigation ------------------------------
+
+/** Move the anchor one unit forward/back for the active view. */
+function stepNav(view, dir) {
+  const ref = navAnchor();
+
+  if (view === 'month') navRef = addMonths(ref, dir);
+  else if (view === 'week') navRef = addDays(ref, dir * 7);
+  else if (view === 'day') navRef = addDays(ref, dir);
+}
+
+/** Whether the currently shown period contains today (hides "Today"). */
+function viewingToday(view) {
+  const ref = navAnchor();
+  const today = new Date();
+
+  if (view === 'month') {
+    return ref.getFullYear() === today.getFullYear() &&
+      ref.getMonth() === today.getMonth();
+  }
+
+  if (view === 'week') {
+    return sameDay(startOfWeek(ref), startOfWeek(today));
+  }
+
+  return sameDay(ref, today);
+}
+
+/** Human label for the shown period, e.g. "July 2026" / "14–20 Jul". */
+function periodLabel(view) {
+  const ref = navAnchor();
+
+  if (view === 'month') {
+    return ref.toLocaleDateString([], { month: 'long', year: 'numeric' });
+  }
+
+  if (view === 'day') {
+    return ref.toLocaleDateString([], {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+    });
+  }
+
+  // Week: a locale-aware range that collapses shared parts on its own,
+  // e.g. "Jul 14 – 20, 2026" (en) or "14.–20. Juli 2026" (de).
+  const start = startOfWeek(ref);
+  const end = addDays(start, 6);
+
+  const fmt = new Intl.DateTimeFormat([], {
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+
+  try {
+    return fmt.formatRange(start, end);
+  } catch {
+    return `${fmt.format(start)} – ${fmt.format(end)}`;
+  }
 }
 
 // ---------------- css --------------------------------------------
@@ -169,6 +262,76 @@ function injectCss() {
 
 .yanta-cal-dash-body {
   padding: 10px 12px 12px;
+}
+
+/* Period navigation (Month / Week / Day) */
+
+.yanta-cal-dash-nav {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+
+  padding: 8px 10px 0;
+}
+
+.yanta-cal-dash-nav .icon-btn {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  color: var(--text-dim);
+}
+
+.yanta-cal-dash-period {
+  flex: 1;
+  min-width: 0;
+
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 700;
+  text-align: center;
+
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.yanta-cal-dash-today {
+  flex: 0 0 auto;
+
+  margin-left: 2px;
+  padding: 3px 10px;
+
+  border: 1px solid var(--border);
+  border-radius: 999px;
+
+  background: transparent;
+  color: var(--accent, #6ea8fe);
+
+  font-size: 11px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.yanta-cal-dash-today:hover {
+  background: var(--bg-elev-2, var(--bg-elev));
+}
+
+@keyframes yanta-cal-dash-slide-next {
+  from { opacity: 0; transform: translateX(16px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes yanta-cal-dash-slide-prev {
+  from { opacity: 0; transform: translateX(-16px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+.yanta-cal-dash-body.slide-next { animation: yanta-cal-dash-slide-next 0.18s ease; }
+.yanta-cal-dash-body.slide-prev { animation: yanta-cal-dash-slide-prev 0.18s ease; }
+
+@media (prefers-reduced-motion: reduce) {
+  .yanta-cal-dash-body.slide-next,
+  .yanta-cal-dash-body.slide-prev { animation: none; }
 }
 
 .yanta-cal-dash-empty {
@@ -425,7 +588,7 @@ function eventRow(ev, { showDate = true } = {}) {
 
   row.append(when, what);
 
-  const open = () => openCalendarApp().catch(() => {});
+  const open = openFromGrid;
   row.addEventListener('click', open);
   row.addEventListener('keydown', (e) => {
     if (e.key === 'Enter' || e.key === ' ') {
@@ -455,12 +618,13 @@ async function renderListView(body) {
   body.append(rows);
 }
 
-async function renderDayView(body) {
-  const today = startOfDay(new Date());
-  const events = await eventsForRange(today, addDays(today, 1));
+async function renderDayView(body, ref = navAnchor()) {
+  const day = startOfDay(ref);
+  const events = await eventsForRange(day, addDays(day, 1));
 
   if (!events.length) {
-    body.append(el('div', { class: 'yanta-cal-dash-empty' }, 'Nothing scheduled today.'));
+    body.append(el('div', { class: 'yanta-cal-dash-empty' },
+      sameDay(day, new Date()) ? 'Nothing scheduled today.' : 'Nothing scheduled.'));
     return;
   }
 
@@ -473,8 +637,8 @@ async function renderDayView(body) {
   body.append(rows);
 }
 
-async function renderWeekView(body) {
-  const weekStart = startOfWeek(new Date());
+async function renderWeekView(body, ref = navAnchor()) {
+  const weekStart = startOfWeek(ref);
   const events = await eventsForRange(weekStart, addDays(weekStart, 7));
   const today = new Date();
 
@@ -508,16 +672,16 @@ async function renderWeekView(body) {
       cell.append(el('span', { class: 'yanta-cal-dash-more' }, `+${dayEvents.length - 3} more`));
     }
 
-    cell.addEventListener('click', () => openCalendarApp().catch(() => {}));
+    cell.addEventListener('click', openFromGrid);
     grid.append(cell);
   }
 
   body.append(grid);
 }
 
-async function renderMonthView(body) {
+async function renderMonthView(body, ref = navAnchor()) {
   const now = new Date();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const monthStart = new Date(ref.getFullYear(), ref.getMonth(), 1);
   const gridStart = startOfWeek(monthStart);
   const gridEnd = addDays(gridStart, 42);
 
@@ -548,7 +712,7 @@ async function renderMonthView(body) {
     const cell = el('div', {
       class: [
         'yanta-cal-dash-month-day',
-        day.getMonth() !== now.getMonth() ? 'dim' : '',
+        day.getMonth() !== monthStart.getMonth() ? 'dim' : '',
         sameDay(day, now) ? 'today' : '',
       ].filter(Boolean).join(' '),
       role: 'button',
@@ -569,7 +733,7 @@ async function renderMonthView(body) {
     }
 
     cell.append(dots);
-    cell.addEventListener('click', () => openCalendarApp().catch(() => {}));
+    cell.addEventListener('click', openFromGrid);
 
     grid.append(cell);
   }
@@ -586,8 +750,88 @@ const VIEW_LABELS = {
   list: 'List',
 };
 
-async function renderWidgetContent(section) {
+// A grid/row tap opens the full calendar — but a horizontal swipe ends
+// on the same element, so we suppress the tap that a swipe would emit.
+let swipeGuardUntil = 0;
+
+function openFromGrid() {
+  if (Date.now() < swipeGuardUntil) return;
+  openCalendarApp().catch(() => {});
+}
+
+async function renderBody(body, view) {
+  if (view === 'month') await renderMonthView(body);
+  else if (view === 'week') await renderWeekView(body);
+  else if (view === 'day') await renderDayView(body);
+  else await renderListView(body);
+}
+
+function navigateWidget(section, view, dir) {
+  stepNav(view, dir);
+  renderWidgetContent(section, { dir }).catch(() => {});
+}
+
+/** Prev · Period · Next (+ Today when off the current period). */
+function buildNavRow(section, view) {
+  const row = el('div', { class: 'yanta-cal-dash-nav' });
+
+  const prev = el('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Previous' });
+  prev.innerHTML = lucide('chevron-left', 16);
+
+  const label = el('span', { class: 'yanta-cal-dash-period' }, periodLabel(view));
+
+  const next = el('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Next' });
+  next.innerHTML = lucide('chevron-right', 16);
+
+  prev.addEventListener('click', () => navigateWidget(section, view, -1));
+  next.addEventListener('click', () => navigateWidget(section, view, 1));
+
+  row.append(prev, label, next);
+
+  if (!viewingToday(view)) {
+    const today = el('button', { class: 'yanta-cal-dash-today', type: 'button' }, 'Today');
+    today.addEventListener('click', () => {
+      navRef = startOfDay(new Date());
+      renderWidgetContent(section).catch(() => {});
+    });
+    row.append(today);
+  }
+
+  return row;
+}
+
+/** Touch-swipe left/right pages the period, mirroring the full calendar. */
+function attachSwipe(target, section, view) {
+  let startX = 0;
+  let startY = 0;
+  let tracking = false;
+
+  target.addEventListener('touchstart', (e) => {
+    tracking = e.touches.length === 1;
+    if (!tracking) return;
+    startX = e.touches[0].clientX;
+    startY = e.touches[0].clientY;
+  }, { passive: true });
+
+  target.addEventListener('touchend', (e) => {
+    if (!tracking) return;
+    tracking = false;
+
+    const touch = e.changedTouches[0];
+    const dx = touch.clientX - startX;
+    const dy = touch.clientY - startY;
+
+    // Horizontal intent only — vertical scrolls (day list) stay untouched.
+    if (Math.abs(dx) < 45 || Math.abs(dx) < Math.abs(dy) * 1.5) return;
+
+    swipeGuardUntil = Date.now() + 400;
+    navigateWidget(section, view, dx < 0 ? 1 : -1);
+  }, { passive: true });
+}
+
+async function renderWidgetContent(section, { dir = 0 } = {}) {
   const config = await getWidgetConfig();
+  const view = config.view;
 
   const head = el('div', { class: 'yanta-dash-widget-head' });
 
@@ -601,17 +845,17 @@ async function renderWidgetContent(section) {
 
   const viewsHost = head.querySelector('.yanta-cal-dash-views');
 
-  for (const view of VIEWS) {
+  for (const v of VIEWS) {
     const btn = el('button', {
       type: 'button',
-      class: view === config.view ? 'active' : '',
+      class: v === view ? 'active' : '',
       role: 'tab',
-    }, VIEW_LABELS[view]);
+    }, VIEW_LABELS[v]);
 
     btn.addEventListener('click', async () => {
-      if (view === config.view) return;
+      if (v === view) return;
 
-      await saveWidgetConfig({ view });
+      await saveWidgetConfig({ view: v });
       await renderWidgetContent(section);
     });
 
@@ -622,14 +866,21 @@ async function renderWidgetContent(section) {
     openCalendarApp().catch(() => {});
   });
 
+  const paged = PAGED_VIEWS.has(view);
+
   const body = el('div', { class: 'yanta-cal-dash-body' });
+  await renderBody(body, view);
 
-  if (config.view === 'month') await renderMonthView(body);
-  else if (config.view === 'week') await renderWeekView(body);
-  else if (config.view === 'day') await renderDayView(body);
-  else await renderListView(body);
+  if (paged) {
+    attachSwipe(body, section, view);
+    if (dir) body.classList.add(dir > 0 ? 'slide-next' : 'slide-prev');
+  }
 
-  section.replaceChildren(head, body);
+  const parts = paged
+    ? [head, buildNavRow(section, view), body]
+    : [head, body];
+
+  section.replaceChildren(...parts);
 }
 
 async function renderCalendarWidget() {

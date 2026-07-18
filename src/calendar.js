@@ -348,7 +348,7 @@ function remindersEditorHtml(ev = {}, {
         shared
           ? `<div class="yanta-calendar-reminders-personal-hint">
               ${lucide('lock', 12)}
-              Notifications are personal — they never affect other people in this shared calendar.
+              Notifications are personal. They never affect other people in this shared calendar.
             </div>`
           : ''
       }
@@ -1378,8 +1378,130 @@ function renderCalendarTopbar() {
   });
 
   refreshCalendarFeedChip();
+  refreshCalendarShareIntroBanner();
 
   bar.querySelector('[data-cal-close]')?.addEventListener('click', closeCalendarViaHistory);
+}
+
+// ============================================================
+// "Shared with you" intro banner
+//
+// Sharing a calendar delivers a contentless invite event; the
+// recipient's notification is therefore blank, and tapping it just
+// drops them on the calendar with no idea what changed. This banner
+// spells it out — who shared which calendar — and is dismissed per
+// space so it greets once instead of nagging.
+// ============================================================
+
+const CAL_SHARE_INTRO_DISMISSED_KEY = 'calendar.shareIntro.dismissed.v1';
+let calShareIntroDismissed = null; // Set<spaceId>, lazily hydrated
+
+async function loadCalShareIntroDismissed() {
+  if (calShareIntroDismissed) return calShareIntroDismissed;
+
+  const raw = await store.settings
+    .get(CAL_SHARE_INTRO_DISMISSED_KEY, [])
+    .catch(() => []);
+
+  calShareIntroDismissed = new Set(Array.isArray(raw) ? raw : []);
+  return calShareIntroDismissed;
+}
+
+function persistCalShareIntroDismissed() {
+  if (!calShareIntroDismissed) return;
+
+  store.settings
+    .set(CAL_SHARE_INTRO_DISMISSED_KEY, [...calShareIntroDismissed])
+    .catch(() => {});
+}
+
+/** Best-effort friendly name for a Matrix sharer id (@alice:hs → Alice). */
+function friendlySharerName(userId) {
+  if (!userId) return 'Someone';
+
+  try {
+    const client = window.yantaChatSession?.client || window.yantaMatrixClient || null;
+
+    for (const room of client?.getRooms?.() || []) {
+      const member = room.getMember?.(userId);
+      const name = member?.name || member?.rawDisplayName || member?.displayName;
+      if (name) return String(name);
+    }
+  } catch {}
+
+  const m = /^@([^:]+):/.exec(String(userId));
+  return m ? m[1] : String(userId);
+}
+
+/** Calendars mounted from someone else's share (recipient side only). */
+function mountedCalendarInvites() {
+  const out = [];
+
+  for (const session of state.spaces.values()) {
+    if (session.sourceType !== 'calendar' || session.role === 'owner') continue;
+
+    const categoryId = session.record?.categoryId || '';
+    const cat = categoryId ? state.calendarCategories.get(categoryId) : null;
+
+    out.push({
+      spaceId: session.spaceId,
+      name: cat?.name || session.record?.title || 'a calendar',
+      sharer: friendlySharerName(session.record?.invitedBy || ''),
+      role: session.role,
+    });
+  }
+
+  return out;
+}
+
+function renderCalendarShareIntroBanner() {
+  const bar = calendarToolbarEl();
+  const shell = bar?.parentElement;
+  if (!shell) return;
+
+  shell.querySelector(':scope > .yanta-calendar-share-intro')?.remove();
+
+  const dismissed = calShareIntroDismissed || new Set();
+  const invites = mountedCalendarInvites().filter((inv) => !dismissed.has(inv.spaceId));
+  if (!invites.length) return;
+
+  const banner = document.createElement('div');
+  banner.className = 'yanta-calendar-share-intro';
+
+  banner.innerHTML = invites.map((inv) => `
+    <div class="yanta-calendar-share-intro-row" data-space-id="${escapeAttr(inv.spaceId)}">
+      ${lucide('users', 15)}
+      <span class="yanta-calendar-share-intro-text">
+        <strong>${escapeHtml(inv.sharer)}</strong> shared the calendar
+        “${escapeHtml(inv.name)}” with you.${inv.role === 'write' ? ' You can edit it' : ' View only'}.
+      </span>
+      <button class="icon-btn" data-share-intro-dismiss title="Dismiss">${lucide('x', 15)}</button>
+    </div>
+  `).join('');
+
+  banner.addEventListener('click', async (e) => {
+    const btn = e.target.closest?.('[data-share-intro-dismiss]');
+    if (!btn) return;
+
+    const row = btn.closest('[data-space-id]');
+    const spaceId = row?.dataset.spaceId;
+    if (!spaceId) return;
+
+    (await loadCalShareIntroDismissed()).add(spaceId);
+    persistCalShareIntroDismissed();
+
+    row.remove();
+    if (!banner.querySelector('[data-space-id]')) banner.remove();
+  });
+
+  // Directly under the toolbar, above the calendar grid.
+  bar.insertAdjacentElement('afterend', banner);
+}
+
+function refreshCalendarShareIntroBanner() {
+  loadCalShareIntroDismissed()
+    .then(() => renderCalendarShareIntroBanner())
+    .catch(() => renderCalendarShareIntroBanner());
 }
 
 // ============================================================
@@ -12605,6 +12727,8 @@ export function setupCalendarVaultBridge() {
     hydrateCalendarStateFromVault({
       silent: false,
     });
+
+    refreshCalendarShareIntroBanner();
 
     if (state.currentNoteId) {
       requestAnimationFrame(() => {

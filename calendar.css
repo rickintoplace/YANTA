@@ -537,18 +537,21 @@
 }
 
 .yanta-calendar-cat-row {
-  display: grid;
-  grid-template-columns: 28px 42px 1fr 46px 32px 32px 32px;
-  align-items: center;
-  gap: 7px;
-
-  padding: 8px;
-
-  border: 1px solid var(--border);
-  border-radius: 9px;
-
-  background: var(--bg-elev-2);
-}
+    display: grid;
+    /* Erzwingt eine einzige Zeile für alle Inhalte */
+    grid-template-rows: 1fr; 
+    /* Definiert die Spaltenbreiten wie zuvor */
+    grid-template-columns: 28px 42px 1fr 46px 32px 32px 32px;
+    align-items: center;
+    gap: 7px;
+    padding: 8px;
+    border: 1px solid var(--border);
+    border-radius: 9px;
+    background: var(--bg-elev-2);
+    
+    /* Verhindert das Umbrechen von Grid-Items auf neue Zeilen */
+    grid-auto-flow: column;
+}   
 
 .yanta-calendar-cat-row input[type="color"] {
   height: 100%;
@@ -3312,6 +3315,10 @@
   color: var(--text-dim);
 }
 
+.yanta-calendar-shared-banner[hidden] {
+  display: none !important;
+}
+
 .yanta-calendar-reminders-personal-hint {
   display: flex;
   align-items: center;
@@ -3341,6 +3348,44 @@
   background: color-mix(in srgb, var(--accent, #6ea8fe) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--accent, #6ea8fe) 35%, transparent);
   color: var(--text);
+}
+
+/* "Shared with you" intro banner */
+.yanta-calendar-share-intro {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 8px 12px 0;
+}
+
+.yanta-calendar-share-intro-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 8px 8px 12px;
+  border-radius: 10px;
+  font-size: 12.5px;
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent, #6ea8fe) 12%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent, #6ea8fe) 35%, transparent);
+}
+
+.yanta-calendar-share-intro-row > svg {
+  flex: 0 0 auto;
+  color: var(--accent, #6ea8fe);
+}
+
+.yanta-calendar-share-intro-text {
+  flex: 1;
+  min-width: 0;
+  line-height: 1.4;
+}
+
+.yanta-calendar-share-intro-row .icon-btn {
+  flex: 0 0 auto;
+  width: 26px;
+  height: 26px;
+  color: var(--text-dim);
 }
 
 /* Change-feed chip + popover */

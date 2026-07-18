@@ -1153,7 +1153,7 @@ button.link { background: 0; border: 0; color: var(--accent); cursor: pointer; p
   color: var(--text); padding: 6px 8px; border-radius: var(--r-sm); outline: 0;
 }
 .compress-controls select:focus, .text-input:focus { border-color: var(--accent); }
-.text-input { width: 100%; margin-bottom: 8px; }
+.compress-controls .text-input { margin-bottom: 8px; width: 100%; }
 
 .switch { flex-direction: row !important; align-items: center; gap: 6px !important; cursor: pointer; }
 .switch input { accent-color: var(--accent); }

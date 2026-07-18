@@ -183,7 +183,7 @@ function injectCss() {
 
 .yanta-cal-dash-rows {
   display: flex;
-  flex-direction: column-reverse;
+  flex-direction: column;
 
   max-height: 264px;
   overflow-y: auto;
@@ -193,7 +193,7 @@ function injectCss() {
 
 .yanta-cal-dash-row {
   display: grid;
-  grid-template-columns: 72px minmax(0, 1fr);
+  grid-template-columns: minmax(64px, max-content) minmax(0, 1fr);
   align-items: center;
   gap: 10px;
 
@@ -396,8 +396,10 @@ function eventRow(ev, { showDate = true } = {}) {
   const when = el('div', { class: 'yanta-cal-dash-when' });
 
   if (showDate) {
+    // Weekday + day alone was ambiguous across month boundaries — the
+    // month short-name keeps "Sat 18" from meaning two different days.
     when.append(el('strong', {},
-      ev._start.toLocaleDateString([], { weekday: 'short', day: 'numeric' })
+      ev._start.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })
     ));
   }
 

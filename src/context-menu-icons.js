@@ -95,7 +95,7 @@ function cleanLabel(label = '') {
     // ----------------------------------------------------------------
     if (startsAny(label, ['duplicate'])) return 'copy';
     if (startsAny(label, ['copy wikilink'])) return 'brackets';
-    if (startsAny(label, ['copy note id'])) return 'badge';
+    if (startsAny(label, ['copy note id'])) return 'hash';
     if (startsAny(label, ['copy'])) return 'copy';
   
     if (startsAny(label, ['export'])) return 'download';
@@ -125,6 +125,12 @@ function cleanLabel(label = '') {
     // ----------------------------------------------------------------
     if (includesAny(label, ['ai', 'assistant'])) return 'bot';
   
+    // ----------------------------------------------------------------
+    // Share
+    // ----------------------------------------------------------------
+    if (startsAny(label, ['share note', 'share this note', 'share folder', 'share this folder',])) return 'users';
+  
+
     // ----------------------------------------------------------------
     // Settings / misc
     // ----------------------------------------------------------------

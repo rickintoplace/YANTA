@@ -3173,16 +3173,37 @@ async function handleBillingPortal(env, req, headers) {
     }, 404, headers);
   }
 
-  const session = await paddleApi(env, "/customer-portal-sessions", {
-    method: "POST",
-    body: {
-      customer_id: customer.paddle_customer_id
+  /*
+    Pass the user's subscriptions so Paddle deep-links the portal to
+    update-payment and cancel actions for them, not just a bare overview.
+  */
+  const subs = await env.DB.prepare(
+    `SELECT paddle_subscription_id
+     FROM billing_subscriptions
+     WHERE user_id = ? AND paddle_subscription_id IS NOT NULL
+     ORDER BY updated_at DESC
+     LIMIT 25`
+  ).bind(user.userId).all();
+
+  const subscriptionIds = (subs?.results || [])
+    .map((r) => r.paddle_subscription_id)
+    .filter(Boolean);
+
+  // Paddle Billing: POST /customers/{customer_id}/portal-sessions
+  const session = await paddleApi(
+    env,
+    `/customers/${encodeURIComponent(customer.paddle_customer_id)}/portal-sessions`,
+    {
+      method: "POST",
+      body: subscriptionIds.length
+        ? { subscription_ids: subscriptionIds }
+        : {}
     }
-  });
+  );
 
   const url =
     session?.data?.urls?.general?.overview ||
-    session?.data?.urls?.subscriptions ||
+    session?.data?.urls?.subscriptions?.[0]?.cancel_subscription ||
     session?.data?.url ||
     "";
 

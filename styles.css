@@ -5,6 +5,11 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* The `hidden` attribute must always win: component classes such as .btn set
+   an explicit `display`, which ties the UA `[hidden]` rule on specificity and
+   beats it on source order, leaving "hidden" elements visible. */
+[hidden] { display: none !important; }
+
 :root {
   /* Dark defaults.
      These can all be overridden at runtime by settings.js. */

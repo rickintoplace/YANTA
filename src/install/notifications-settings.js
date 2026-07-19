@@ -49,6 +49,7 @@ import {
   unsubscribeWebPush,
   refreshPushActiveState,
   onPushStateChange,
+  sendBackgroundTest,
 } from '../push/web-push-client.js';
 
 function injectCss() {
@@ -346,12 +347,36 @@ export function notificationsSettingsElement() {
           },
         });
         card.append(bg);
+
+        if (isPushActive()) {
+          const testActions = el('div', { class: 'yanta-notif-actions' });
+          const testBtn = el('button', { class: 'btn', type: 'button' });
+          testBtn.innerHTML = `${lucide('send', 13)} Test background delivery`;
+          testBtn.addEventListener('click', async () => {
+            try {
+              const res = await sendBackgroundTest();
+              if (!res?.count) {
+                toast('No subscription stored on the server — toggle background delivery off and on again.', 'error');
+              } else {
+                const ok = (res.results || []).some((r) => r.ok);
+                const detail = (res.results || [])
+                  .map((r) => (r.ok ? `ok ${r.status || ''}`.trim() : (r.reason || `status ${r.status}`)))
+                  .join(', ');
+                toast(`Background test → ${res.count} device(s): ${detail}`, ok ? 'success' : 'error');
+              }
+            } catch (err) {
+              toast(err?.status === 401 ? 'Sign in to YANTA Cloud first.' : (err?.message || 'Test failed.'), 'error');
+            }
+          });
+          testActions.append(testBtn);
+          card.append(testActions);
+        }
       }
 
       if (!env.androidApp) {
         card.append(el('p', { class: 'yanta-notif-note' },
           isPushActive()
-            ? 'Background delivery is on — chat and reminders arrive even when YANTA is closed.'
+            ? 'Background delivery is on. Chat and reminders arrive even when YANTA is closed.'
             : 'Without background delivery, web notifications only arrive while YANTA is open. Turn it on above, or install the app on your phone.'));
       }
     } else {

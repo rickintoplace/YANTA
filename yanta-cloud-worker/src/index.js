@@ -7536,6 +7536,33 @@ async function handlePushSchedule(env, req, headers) {
   return json({ ok: true, scheduled: stmts.length }, 200, headers);
 }
 
+// Diagnostic: push a test notification to the caller's own subscriptions and
+// report the push service's HTTP status. Isolates the send path (VAPID +
+// encryption + endpoint) from the cron and the Matrix gateway.
+async function handlePushTest(env, req, headers) {
+  const user = await requireUser(env, req);
+
+  const subs = await env.DB.prepare(
+    `SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = ?`
+  ).bind(user.userId).all();
+
+  const results = [];
+  for (const sub of subs?.results || []) {
+    results.push(await sendWebPush(
+      env, sub,
+      { kind: "test", title: "YANTA", body: "Background delivery works." },
+      60
+    ));
+  }
+
+  return json({
+    ok: true,
+    count: results.length,
+    results,
+    vapidConfigured: !!(env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY),
+  }, 200, headers);
+}
+
 // Matrix Push Gateway API. The homeserver POSTs here (unauthenticated, keyed
 // by the opaque per-device pushkey). event_id_only → no message content ever
 // reaches the Worker.
@@ -7666,6 +7693,9 @@ async function route(req, env) {
     }
     if (url.pathname === "/api/push/schedule" && req.method === "POST") {
       return handlePushSchedule(env, req, headers);
+    }
+    if (url.pathname === "/api/push/test" && req.method === "POST") {
+      return handlePushTest(env, req, headers);
     }
     if (url.pathname === "/_matrix/push/v1/notify" && req.method === "POST") {
       return handleMatrixNotify(env, req, headers);

@@ -62,9 +62,14 @@ function randomId() {
   return bytesToB64url(b);
 }
 
-/** Stable per-browser id used to key the subscription server-side. */
+/**
+ * Stable per-browser id used to key the subscription server-side. Must be
+ * independent of sync2 (whose deviceId may be undefined early and defined
+ * later) so subscribe + schedule always agree — otherwise the cron's JOIN
+ * between scheduled_pushes and push_subscriptions finds nothing.
+ */
 export function pushDeviceId() {
-  return window.yantaSync2?.deviceId || persisted(DEVICE_ID_KEY, randomId);
+  return persisted(DEVICE_ID_KEY, randomId);
 }
 
 /** Stable opaque pushkey the Matrix web pusher uses. */
@@ -330,10 +335,30 @@ export async function refreshPushActiveState() {
     setActive(false);
     return false;
   }
+
   const { sub } = await existingSubscription();
   const active = !!sub;
   if (active !== isPushActive()) setActive(active);
+
+  // Re-register with the server so it always has the current device id +
+  // endpoint (heals stale rows from earlier deviceId schemes / rotations).
+  if (sub) {
+    apiFetch('/api/push/subscribe', {
+      method: 'POST',
+      body: { deviceId: pushDeviceId(), pushkey: pushKey(), subscription: sub.toJSON() },
+    }).catch(() => {});
+  }
+
   return active;
+}
+
+/**
+ * Asks the Worker to push a test notification to this user's stored
+ * subscription(s) — the decisive check that the full server→push-service
+ * path works. Returns { count, results:[{ok,status,reason}], vapidConfigured }.
+ */
+export async function sendBackgroundTest() {
+  return apiFetch('/api/push/test', { method: 'POST' });
 }
 
 function bytesEqual(a, b) {

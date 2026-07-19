@@ -42,6 +42,15 @@ import {
   onNotificationPrefsChange,
 } from '../notification-preferences.js';
 
+import {
+  isPushSupported,
+  isPushActive,
+  subscribeWebPush,
+  unsubscribeWebPush,
+  refreshPushActiveState,
+  onPushStateChange,
+} from '../push/web-push-client.js';
+
 function injectCss() {
   if (document.getElementById('yanta-notif-settings-css')) return;
 
@@ -165,6 +174,7 @@ function currentDeviceRow(env, notifications) {
   head.append(el('strong', {}, name));
   head.append(badge(kind, 'muted'));
   head.append(granted ? badge('Notifications on') : badge('Notifications off', 'warn'));
+  if (!env.androidApp && isPushActive()) head.append(badge('Background: on'));
 
   const chips = el('div', { class: 'yanta-notif-device-chips' });
   chips.append(chip('message-circle', 'Chat', granted && chatNotificationsEnabled()));
@@ -307,16 +317,42 @@ export function notificationsSettingsElement() {
         label: 'Calendar reminders',
         hint: env.androidApp
           ? 'Handled by the app’s system alarms.'
-          : 'Remind me about upcoming events while YANTA is open.',
+          : 'Remind me about upcoming events.',
         onChange: (v) => setCalendarNotificationsEnabled(v),
       }));
       card.append(toggles);
 
       card.append(troubleshoot);
 
+      // ---- Background delivery (Web Push) ----
+      if (!env.androidApp && isPushSupported()) {
+        const bg = toggleRow({
+          checked: isPushActive(),
+          disabled,
+          label: 'Background delivery',
+          hint: 'Receive chat and reminders even when YANTA is closed. Requires a YANTA Cloud account.',
+          onChange: async (wantOn) => {
+            try {
+              if (wantOn) await subscribeWebPush();
+              else await unsubscribeWebPush();
+            } catch (err) {
+              if (err?.status === 401) {
+                toast('Sign in to YANTA Cloud to enable background delivery.', 'error');
+              } else {
+                toast(err?.message || 'Could not change background delivery.', 'error');
+              }
+              render(); // revert the toggle to the real state
+            }
+          },
+        });
+        card.append(bg);
+      }
+
       if (!env.androidApp) {
         card.append(el('p', { class: 'yanta-notif-note' },
-          'Web notifications are delivered while YANTA is open. For reminders that reach you even when the app is closed, install the app on your phone.'));
+          isPushActive()
+            ? 'Background delivery is on — chat and reminders arrive even when YANTA is closed.'
+            : 'Without background delivery, web notifications only arrive while YANTA is open. Turn it on above, or install the app on your phone.'));
       }
     } else {
       card.append(el('p', { class: 'yanta-notif-note' },
@@ -347,7 +383,11 @@ export function notificationsSettingsElement() {
 
   const stopInstall = onInstallStateChange(() => { if (alive()) render(); else stopInstall(); });
   const stopPrefs = onNotificationPrefsChange(() => { if (alive()) render(); else stopPrefs(); });
+  const stopPush = onPushStateChange(() => { if (alive()) render(); else stopPush(); });
   observeNotificationSyncStatus(() => { if (alive()) render(); }, alive);
+
+  // Reconcile the toggle with the real subscription state on open.
+  refreshPushActiveState().catch(() => {});
 
   return root;
 }

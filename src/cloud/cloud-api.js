@@ -18,7 +18,7 @@ function apiUrl(path) {
   return `${base}/${cleanPath}`;
 }
 
-async function apiFetch(path, {
+export async function apiFetch(path, {
   method = 'GET',
   body = null,
   headers = {},

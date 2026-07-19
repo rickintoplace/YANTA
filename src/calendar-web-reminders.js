@@ -23,6 +23,8 @@ import {
 
 import { isAndroidApp } from './install/install-environment.js';
 
+import { isPushActive } from './push/web-push-client.js';
+
 const RESCAN_MS = 5 * 60 * 1000;              // rebuild timers every 5 minutes
 const SCHEDULE_WINDOW_MS = 20 * 60 * 1000;    // schedule exact timers up to 20 min out
 const SCAN_HORIZON_MS = 8 * 24 * 60 * 60 * 1000; // look ahead far enough for week-long lead times
@@ -80,7 +82,7 @@ function canDeliver() {
   return calendarNotificationsEnabled();
 }
 
-function reminderBody(ev, minutesBefore) {
+export function reminderBody(ev, minutesBefore) {
   const startMs = eventStartMs(ev);
   const lead =
     minutesBefore <= 0 ? 'now'
@@ -139,28 +141,30 @@ async function fireReminder(ev, minutesBefore, key) {
   }
 }
 
-async function rescan() {
-  clearTimers();
-
-  if (!canDeliver()) return;
-
-  const now = Date.now();
-
+/**
+ * Expands calendar occurrences and returns every enabled reminder that
+ * fires within `horizonMs`, as `{ ev, minutesBefore, startMs, fireAt, key }`.
+ *
+ * Single source of truth for "what reminders exist", shared by the
+ * foreground scheduler here and the background push scheduler
+ * (calendar-push-scheduler.js). Mirrors the Android bridge's reminder path.
+ */
+export async function collectUpcomingReminders({ now = Date.now(), horizonMs = SCAN_HORIZON_MS } = {}) {
   let occurrences;
   try {
     const { expandedCalendarRawEventsForRange } = await import('./calendar.js');
     occurrences = expandedCalendarRawEventsForRange(
       new Date(now - GRACE_MS),
-      new Date(now + SCAN_HORIZON_MS),
+      new Date(now + horizonMs),
       { includeStored: true, includeMarkdownDerived: true, includeSources: false },
     );
   } catch (err) {
     console.warn('[YANTA Calendar Reminders] Could not read calendar', err);
-    return;
+    return [];
   }
 
   const { effectiveRemindersForEvent } = await import('./calendar-personal.js');
-  const fired = loadFired();
+  const out = [];
 
   for (const ev of occurrences) {
     if (!ev || ev.status === 'cancelled') continue;
@@ -177,19 +181,42 @@ async function rescan() {
 
     for (const r of reminders) {
       const minutesBefore = Math.round(Number(r.minutesBefore));
-      const fireAt = startMs - minutesBefore * 60000;
-      const key = `${masterId}|${startMs}|${minutesBefore}`;
-
-      if (fired.has(key) || timers.has(key)) continue;
-
-      const delay = fireAt - now;
-      if (delay < -GRACE_MS) continue;         // too old — skip
-      if (delay > SCHEDULE_WINDOW_MS) continue; // a later rescan will pick it up
-
-      timers.set(key, setTimeout(() => {
-        fireReminder(ev, minutesBefore, key).catch(() => {});
-      }, Math.max(0, delay)));
+      out.push({
+        ev,
+        minutesBefore,
+        startMs,
+        fireAt: startMs - minutesBefore * 60000,
+        key: `${masterId}|${startMs}|${minutesBefore}`,
+      });
     }
+  }
+
+  return out;
+}
+
+async function rescan() {
+  clearTimers();
+
+  if (!canDeliver()) return;
+
+  // When background Web Push is active it covers reminders whether the app is
+  // open or closed — running the foreground timers too would double-fire.
+  if (isPushActive()) return;
+
+  const now = Date.now();
+  const reminders = await collectUpcomingReminders({ now });
+  const fired = loadFired();
+
+  for (const rem of reminders) {
+    if (fired.has(rem.key) || timers.has(rem.key)) continue;
+
+    const delay = rem.fireAt - now;
+    if (delay < -GRACE_MS) continue;         // too old — skip
+    if (delay > SCHEDULE_WINDOW_MS) continue; // a later rescan will pick it up
+
+    timers.set(rem.key, setTimeout(() => {
+      fireReminder(rem.ev, rem.minutesBefore, rem.key).catch(() => {});
+    }, Math.max(0, delay)));
   }
 }
 

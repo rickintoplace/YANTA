@@ -42,7 +42,14 @@ import {
   messagePreview,
 } from './chat-message-render.js';
 
+import {
+  isPushActive,
+  pushKey,
+  getPushGatewayUrl,
+} from '../push/web-push-client.js';
+
 const CHAT_PUSHER_APP_ID = 'page.yanta.android';
+const CHAT_WEB_PUSHER_APP_ID = 'page.yanta.web';
 const LOCAL_MUTED_ROOMS_KEY = 'chat.mutedRooms.v1';
 const DECRYPT_WAIT_MS = 2500;
 
@@ -577,6 +584,93 @@ export async function ensureNativeChatPusher({
 }
 
 /**
+ * Registers a Matrix HTTP pusher for WEB background push, pointing at the
+ * YANTA Cloud Worker's push gateway. Coexists with the Android pusher
+ * (append: true). event_id_only → no message content reaches the gateway.
+ * No-op unless the browser has an active Web Push subscription.
+ */
+export async function ensureWebChatPusher() {
+  const client = matrixClient();
+  if (!client || !isPushActive()) return false;
+
+  const gatewayUrl = await getPushGatewayUrl().catch(() => '');
+  if (!gatewayUrl) return false;
+
+  const key = pushKey();
+
+  try {
+    const existing = await client.getPushers?.();
+    const pushers = existing?.pushers || existing || [];
+
+    const already = pushers.some((p) =>
+      p?.kind === 'http' &&
+      p?.app_id === CHAT_WEB_PUSHER_APP_ID &&
+      p?.pushkey === key
+    );
+
+    // Drop web pushers with a rotated pushkey for this app.
+    const stale = pushers.filter((p) =>
+      p?.kind === 'http' &&
+      p?.app_id === CHAT_WEB_PUSHER_APP_ID &&
+      p?.pushkey &&
+      p.pushkey !== key
+    );
+    for (const p of stale) {
+      try {
+        await client.setPusher({ ...p, kind: null });
+      } catch {}
+    }
+
+    if (already) return true;
+
+    await client.setPusher({
+      kind: 'http',
+      app_id: CHAT_WEB_PUSHER_APP_ID,
+      pushkey: key,
+      app_display_name: 'YANTA',
+      device_display_name: 'YANTA Web',
+      lang: navigator.language || 'en',
+      data: {
+        url: gatewayUrl,
+        format: 'event_id_only',
+      },
+      append: true,
+    });
+
+    return true;
+  } catch (err) {
+    console.warn('[YANTA Chat Notifications] Could not register web pusher', err);
+    return false;
+  }
+}
+
+/**
+ * Removes this device's web chat pusher (called when the user turns off
+ * background delivery).
+ */
+export async function removeWebChatPusher() {
+  const client = matrixClient();
+  if (!client) return;
+
+  const key = pushKey();
+
+  try {
+    const existing = await client.getPushers?.();
+    const pushers = existing?.pushers || existing || [];
+
+    for (const p of pushers) {
+      if (p?.kind === 'http' && p?.app_id === CHAT_WEB_PUSHER_APP_ID && p?.pushkey === key) {
+        try {
+          await client.setPusher({ ...p, kind: null });
+        } catch {}
+      }
+    }
+  } catch (err) {
+    console.warn('[YANTA Chat Notifications] Could not remove web pusher', err);
+  }
+}
+
+/**
  * Requests Web Notification permission. Call only from a user-initiated
  * flow (e.g. opening Chat) — unsolicited prompts get auto-blocked by
  * browsers and feel hostile.
@@ -661,6 +755,18 @@ export function setupChatNotifications() {
     ensureNativeChatPusher().catch((err) => {
       console.warn('[YANTA Chat Notifications] Pusher setup failed', err);
     });
+    ensureWebChatPusher().catch((err) => {
+      console.warn('[YANTA Chat Notifications] Web pusher setup failed', err);
+    });
+  });
+
+  // Background delivery toggled on/off — (de)register the web pusher.
+  window.addEventListener('yanta-push-state-changed', () => {
+    if (isPushActive()) {
+      ensureWebChatPusher().catch(() => {});
+    } else {
+      removeWebChatPusher().catch(() => {});
+    }
   });
 
   /*

@@ -189,6 +189,8 @@ import './today-widget.js';
 import './dashboard-info-panel.js';
 
 import { setupCalendarWebReminders } from './calendar-web-reminders.js';
+import { setupCalendarPushScheduler } from './push/calendar-push-scheduler.js';
+import { refreshPushActiveState } from './push/web-push-client.js';
 import {
   setupRss,
   openRssInbox,
@@ -2294,6 +2296,9 @@ async function init() {
   setupChat();
   setupChatNotifications();
   setupCalendarWebReminders();
+  setupCalendarPushScheduler();
+  // Reconcile the stored push flag with the real browser subscription.
+  refreshPushActiveState().catch(() => {});
   setupSpaceMatrix();
   await ensureAiSessionsFolder();
   window.addEventListener('yanta-public-share-changed', () => {

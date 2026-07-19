@@ -187,6 +187,8 @@ import './calendar-widget.js';
 import './today-widget.js';
 // Registers the dashboard information panel (side effect).
 import './dashboard-info-panel.js';
+
+import { setupCalendarWebReminders } from './calendar-web-reminders.js';
 import {
   setupRss,
   openRssInbox,
@@ -2291,6 +2293,7 @@ async function init() {
   setupRss();
   setupChat();
   setupChatNotifications();
+  setupCalendarWebReminders();
   setupSpaceMatrix();
   await ensureAiSessionsFolder();
   window.addEventListener('yanta-public-share-changed', () => {

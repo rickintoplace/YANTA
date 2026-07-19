@@ -24,6 +24,10 @@ import {
 } from '../core.js';
 
 import {
+  chatNotificationsEnabled,
+} from '../notification-preferences.js';
+
+import {
   androidShowChatNotification,
   androidClearChatNotifications,
   androidChatPushConfig,
@@ -494,7 +498,7 @@ async function onIncomingMessage(detail = {}) {
   if (isEventAlreadyRead(client, roomId, eventId)) return;
 
   const nativeShown = androidShowChatNotification(payload);
-  if (!nativeShown) {
+  if (!nativeShown && chatNotificationsEnabled()) {
     await showWebNotification(payload);
   }
 }

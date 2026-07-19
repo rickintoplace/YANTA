@@ -45,6 +45,7 @@ import {
 } from './overlay-history.js';
 
 import { installCardElement } from './install/install-ui.js';
+import { notificationsSettingsElement } from './install/notifications-settings.js';
 
 // ----------------------------------------------------------------
 // Theme tokens — these map 1:1 to CSS custom properties.
@@ -1126,6 +1127,7 @@ function ensureModal() {
     { id: 'semantic',   label: 'Semantic search', icon: 'brain-circuit' },
     { id: 'chat',       label: 'Chat',       icon: 'message-circle' },
     { id: 'sync',       label: 'Sync & Backup', icon: 'refresh-cw' },
+    { id: 'notifications', label: 'Notifications', icon: 'bell' },
     { id: 'install',    label: 'Install app', icon: 'smartphone' },
     { id: 'about',      label: 'About',      icon: 'info' },
   ];
@@ -1185,15 +1187,26 @@ function renderSettingsBody() {
   else if (activeSection === 'semantic') renderSemanticSection(content);
   else if (activeSection === 'chat') renderChatSection(content);
   else if (activeSection === 'sync') renderSyncSection(content);
+  else if (activeSection === 'notifications') renderNotificationsSection(content);
   else if (activeSection === 'install') renderInstallSection(content);
   else if (activeSection === 'about') renderAboutSection(content);
+}
+
+// ---- Notifications section ----
+function renderNotificationsSection(host) {
+  host.append(sectionHeader(
+    'Notifications',
+    'Choose what YANTA notifies you about on this device, and see what your connected devices deliver.',
+  ));
+
+  host.append(notificationsSettingsElement());
 }
 
 // ---- Install app section ----
 function renderInstallSection(host) {
   host.append(sectionHeader(
     'Install app',
-    'Install YANTA and turn on notifications so chat messages and event reminders arrive as reliable system notifications.',
+    'Install YANTA so chat messages and event reminders arrive as reliable system notifications.',
   ));
 
   host.append(installCardElement());

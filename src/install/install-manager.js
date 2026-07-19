@@ -162,6 +162,86 @@ export async function requestWebNotificationPermission() {
   }
 }
 
+/**
+ * Fires a real notification through the same path chat/reminders use
+ * (Service Worker first, page-scoped Notification as fallback). This is
+ * the fastest way to tell an OS/daemon problem apart from app logic:
+ * if this shows nothing while permission is granted, the browser or
+ * desktop notification server is the culprit, not YANTA.
+ *
+ * Resolves to { ok, via?, reason? }.
+ */
+export async function sendTestNotification() {
+  if (typeof window === 'undefined' || !('Notification' in window)) {
+    return { ok: false, reason: 'unsupported' };
+  }
+  if (Notification.permission !== 'granted') {
+    return { ok: false, reason: 'permission' };
+  }
+
+  const title = 'YANTA test notification';
+  const options = {
+    body: 'If you can see this, system notifications are working.',
+    icon: '/android-chrome-192x192.png',
+    badge: '/android-chrome-192x192.png',
+    tag: 'yanta-test',
+    renotify: true,
+  };
+
+  try {
+    const reg = await navigator.serviceWorker?.ready?.catch(() => null);
+    if (reg?.showNotification) {
+      await reg.showNotification(title, options);
+      return { ok: true, via: 'sw' };
+    }
+  } catch (err) {
+    console.warn('[YANTA Install] SW test notification failed', err);
+  }
+
+  try {
+    // eslint-disable-next-line no-new
+    new Notification(title, options);
+    return { ok: true, via: 'page' };
+  } catch (err) {
+    console.warn('[YANTA Install] page test notification failed', err);
+    return { ok: false, reason: 'error' };
+  }
+}
+
+/**
+ * OS-specific tips for "I allowed notifications but see nothing", which on
+ * Linux especially is almost always a desktop-side setting, not the app.
+ */
+export function notificationTroubleshooting(os) {
+  const common = 'Make sure Do Not Disturb / Focus mode is turned off.';
+
+  switch (os) {
+    case 'linux':
+      return [
+        'Linux desktops need a notification daemon running (GNOME/KDE have one built in; on a tiling WM start e.g. dunst or mako).',
+        'In Chromium, open Settings → Privacy & security → Site settings → Notifications and make sure this site is allowed and “Use quieter messaging” is off.',
+        common,
+      ];
+    case 'windows':
+      return [
+        'Open Windows Settings → System → Notifications and make sure notifications are on for your browser.',
+        'Turn off Focus assist / Do Not Disturb.',
+        common,
+      ];
+    case 'macos':
+      return [
+        'Open System Settings → Notifications → your browser and allow notifications.',
+        'Turn off Do Not Disturb / any Focus.',
+        common,
+      ];
+    default:
+      return [
+        'Check your browser’s notification settings and allow this site.',
+        common,
+      ];
+  }
+}
+
 // ---- Synced notification-capable phones -----------------------------------
 
 /**

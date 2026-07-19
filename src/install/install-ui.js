@@ -24,6 +24,8 @@ import {
   requestWebNotificationPermission,
   browserInstallGuide,
   onInstallStateChange,
+  sendTestNotification,
+  notificationTroubleshooting,
 } from './install-manager.js';
 
 function injectCss() {
@@ -61,6 +63,22 @@ function injectCss() {
 }
 
 .yanta-install-status > svg { flex: 0 0 auto; color: var(--accent); }
+
+.yanta-install-status-col { flex-direction: column; align-items: stretch; gap: 10px; }
+.yanta-install-status-line { display: flex; align-items: center; gap: 10px; }
+.yanta-install-status-line > span { flex: 1; }
+.yanta-install-status-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+
+.yanta-install-linkbtn {
+  border: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--accent);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.yanta-install-linkbtn:hover { text-decoration: underline; }
 
 .yanta-install-rec {
   display: flex;
@@ -183,7 +201,7 @@ const PERFECT_COPY = {
 };
 
 function notificationStatusRow(rec) {
-  const { notifications } = rec;
+  const { notifications, env } = rec;
   if (!notifications.applicable) return null;
 
   if (!notifications.supported) {
@@ -192,16 +210,52 @@ function notificationStatusRow(rec) {
       el('span', {}, 'This browser can’t show notifications. Install YANTA or use a different browser.'));
   }
 
-  if (notifications.permission === 'granted') {
-    return el('div', { class: 'yanta-install-status ok' },
-      lucideEl('bell-ring'),
-      el('span', {}, 'Notifications are enabled on this device.'));
-  }
-
   if (notifications.permission === 'denied') {
     return el('div', { class: 'yanta-install-status' },
       lucideEl('bell-off'),
       el('span', {}, 'Notifications are blocked. Re-enable them in your browser’s site settings for YANTA.'));
+  }
+
+  if (notifications.permission === 'granted') {
+    const wrap = el('div', { class: 'yanta-install-status ok yanta-install-status-col' });
+
+    const line = el('div', { class: 'yanta-install-status-line' },
+      lucideEl('bell-ring'),
+      el('span', {}, 'Notifications are enabled on this device.'));
+
+    const actions = el('div', { class: 'yanta-install-status-actions' });
+
+    const testBtn = el('button', { class: 'btn compact', type: 'button' });
+    testBtn.innerHTML = `${lucide('send', 13)} Send a test notification`;
+
+    const trouble = el('ul', { class: 'yanta-install-guide', hidden: true });
+    for (const tip of notificationTroubleshooting(env.os)) {
+      trouble.append(el('li', {}, tip));
+    }
+
+    const troubleBtn = el('button', { class: 'yanta-install-linkbtn', type: 'button' }, 'Not seeing them?');
+    troubleBtn.addEventListener('click', () => {
+      trouble.hidden = !trouble.hidden;
+    });
+
+    testBtn.addEventListener('click', async () => {
+      const result = await sendTestNotification();
+      if (result.ok) {
+        toast('Test notification sent — check your desktop.', 'success');
+        // If it truly appeared they won't need this, but surface the
+        // fallback path proactively since silent failures are common.
+        trouble.hidden = false;
+      } else if (result.reason === 'permission') {
+        toast('Allow notifications first.', 'error');
+      } else {
+        toast('Could not send a test notification.', 'error');
+        trouble.hidden = false;
+      }
+    });
+
+    actions.append(testBtn, troubleBtn);
+    wrap.append(line, actions, trouble);
+    return wrap;
   }
 
   return null;

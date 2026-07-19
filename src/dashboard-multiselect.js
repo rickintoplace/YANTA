@@ -44,6 +44,8 @@ import {
 
   import {
     moveItemsToTrash,
+    permanentlyDeleteNote,
+    permanentlyDeleteFolder,
   } from './trash.js';
   
   const DESKTOP_MQ = window.matchMedia('(min-width: 901px)');
@@ -1057,30 +1059,42 @@ import {
   }
   
   function renderBulkTray() {
-    removeBulkTray();
-  
     const items = selectedItems();
-  
+
     // Important UX:
     // 0 items: no tray
     // 1 item: no tray; normal card actionbar is shown
-    if (items.length <= 1) return;
-  
+    if (items.length <= 1) {
+      removeBulkTray();
+      return;
+    }
+
     const notes = selectedNotes(items);
     const folders = selectedFolders(items);
-  
-    bulkBar = el('div', {
-      class: 'yanta-dashboard-selection-tray',
-      role: 'toolbar',
-      'aria-label': 'Dashboard bulk actions',
-      onpointerdown: (e) => {
-        e.stopPropagation();
-      },
-      onclick: (e) => {
-        e.stopPropagation();
-      },
-    });
-  
+
+    /*
+      Reuse the existing tray element while a selection is being built.
+      Rebuilding it from scratch on every rect/drag frame replays the
+      entry animation and makes the tray flicker.
+    */
+    if (!bulkBar) {
+      bulkBar = el('div', {
+        class: 'yanta-dashboard-selection-tray',
+        role: 'toolbar',
+        'aria-label': 'Dashboard bulk actions',
+        onpointerdown: (e) => {
+          e.stopPropagation();
+        },
+        onclick: (e) => {
+          e.stopPropagation();
+        },
+      });
+
+      document.body.append(bulkBar);
+    } else {
+      bulkBar.replaceChildren();
+    }
+
     const summary = el('div', { class: 'yanta-dashboard-selection-summary' });
   
     summary.innerHTML = `
@@ -1155,7 +1169,6 @@ import {
     );
   
     bulkBar.append(summary, actions);
-    document.body.append(bulkBar);
   }
   
   function trayButton({
@@ -1422,7 +1435,7 @@ import {
     return out;
   }
   
-  async function deleteItems(items) {
+  async function deleteItems(items, { skipTrash = false } = {}) {
     const directFolderIds = new Set(
       items
         .filter((item) => item.kind === 'folder')
@@ -1461,20 +1474,43 @@ import {
         ? `\n\nSelected folders include ${descendantFolderCount} sub-folder${descendantFolderCount === 1 ? '' : 's'} and ${descendantNoteCount} note${descendantNoteCount === 1 ? '' : 's'}.`
         : '';
 
-    const ok = await confirmPopover({
-      title: 'Move selected items to Trash',
-      message: `Move ${what} to Trash?${extra}\n\nYou can restore them later from Trash.`,
-      confirmLabel: 'Move to Trash',
-      danger: true,
-    });
+    const ok = await confirmPopover(
+      skipTrash
+        ? {
+            title: 'Delete selected items permanently',
+            message: `Permanently delete ${what}?${extra}\n\nThis cannot be undone.`,
+            confirmLabel: 'Delete permanently',
+            danger: true,
+          }
+        : {
+            title: 'Move selected items to Trash',
+            message: `Move ${what} to Trash?${extra}\n\nYou can restore them later from Trash.`,
+            confirmLabel: 'Move to Trash',
+            danger: true,
+          }
+    );
 
     if (!ok) return;
 
-    await moveItemsToTrash({
-      noteIds: [...directNoteIds],
-      folderIds: [...directFolderIds],
-      source: 'dashboard-multiselect',
-    });
+    if (skipTrash) {
+      /*
+        Trash übersprungen (Strg/Cmd beim Löschen): endgültig entfernen.
+        Ordner nehmen ihre Inhalte mit.
+      */
+      for (const noteId of directNoteIds) {
+        await permanentlyDeleteNote(noteId, { source: 'dashboard-multiselect' });
+      }
+
+      for (const folderId of directFolderIds) {
+        await permanentlyDeleteFolder(folderId, { source: 'dashboard-multiselect' });
+      }
+    } else {
+      await moveItemsToTrash({
+        noteIds: [...directNoteIds],
+        folderIds: [...directFolderIds],
+        source: 'dashboard-multiselect',
+      });
+    }
 
     clearSelection({ sync: false });
 
@@ -2379,9 +2415,16 @@ import {
         return;
       }
   
-      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedKeys.size > 1) {
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedKeys.size) {
         e.preventDefault();
-        deleteItems(selectedItems());
+
+        /*
+          Del/Backspace: markierte Items in den Trash verschieben.
+          Mit Strg (bzw. Cmd auf macOS): Trash überspringen, endgültig löschen.
+        */
+        deleteItems(selectedItems(), {
+          skipTrash: e.ctrlKey || e.metaKey,
+        });
       }
     }, true);
   

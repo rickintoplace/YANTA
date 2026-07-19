@@ -11,7 +11,6 @@
 // ciphertext — it never learns event titles.
 // ============================================================
 
-import { swRegistrationReady } from '../core.js';
 import { apiFetch, YANTA_CLOUD_BASE_URL } from '../cloud/cloud-api.js';
 
 const DEVICE_ID_KEY = 'yanta.push.deviceId.v1';
@@ -200,8 +199,45 @@ export async function encryptReminderPayload(obj) {
 
 // ---- subscribe / unsubscribe ----------------------------------------------
 
+/**
+ * Resolves a service worker registration with an ACTIVE worker — the hard
+ * requirement for pushManager.subscribe(). More robust than relying on
+ * navigator.serviceWorker.ready (which hangs forever if a worker never
+ * activates): it registers if needed and waits for activation explicitly.
+ */
+async function ensureActiveRegistration(timeoutMs = 10000) {
+  if (!('serviceWorker' in navigator)) return null;
+
+  let reg = await navigator.serviceWorker.getRegistration().catch(() => null);
+  if (!reg) reg = await navigator.serviceWorker.register('/sw.js').catch(() => null);
+  if (!reg) return null;
+  if (reg.active) return reg;
+
+  await new Promise((resolve) => {
+    let settled = false;
+    const done = () => { if (!settled) { settled = true; resolve(); } };
+
+    const watch = (worker) => {
+      if (!worker) return;
+      if (worker.state === 'activated') return done();
+      worker.addEventListener('statechange', () => {
+        if (worker.state === 'activated') done();
+      });
+    };
+
+    watch(reg.installing);
+    watch(reg.waiting);
+    reg.addEventListener('updatefound', () => watch(reg.installing));
+    navigator.serviceWorker.ready.then(done).catch(() => {});
+    setTimeout(done, timeoutMs);
+  });
+
+  reg = await navigator.serviceWorker.getRegistration().catch(() => reg);
+  return reg || null;
+}
+
 async function existingSubscription() {
-  const reg = await swRegistrationReady();
+  const reg = await ensureActiveRegistration();
   if (!reg?.pushManager) return { reg: null, sub: null };
   const sub = await reg.pushManager.getSubscription().catch(() => null);
   return { reg, sub };
@@ -223,8 +259,10 @@ export async function subscribeWebPush() {
     if (perm !== 'granted') throw new Error('Notification permission is required.');
   }
 
-  const reg = await swRegistrationReady(3000);
-  if (!reg?.pushManager) throw new Error('Service worker is not ready.');
+  const reg = await ensureActiveRegistration();
+  if (!reg) throw new Error('Service worker could not be registered.');
+  if (!reg.active) throw new Error('Service worker did not activate — reload the page and try again.');
+  if (!reg.pushManager) throw new Error('Push is not available in this browser.');
 
   let sub = await reg.pushManager.getSubscription().catch(() => null);
 

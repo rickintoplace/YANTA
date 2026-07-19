@@ -15,6 +15,11 @@ import {
 
 import { BRAND_LOGO_SVG } from '../brand-logo.js';
 
+import {
+  getAppContent,
+  wireGetAppPage,
+} from './get-app-content.js';
+
 import { syncBillingNow } from '../billing/billing-api.js';
 
 const YANTA_APP_ORIGIN =
@@ -464,6 +469,7 @@ function shell(content) {
             </div>
           </a>
           <div class="yanta-site-nav-links">
+            <a href="${escapeHtml(YANTA_APP_ORIGIN)}/get-app">Get the app</a>
             <a href="${escapeHtml(BILLING_PUBLIC_ORIGIN)}/pricing">Pricing</a>
             <a href="${escapeHtml(BILLING_PUBLIC_ORIGIN)}/terms">Terms</a>
             <a href="${escapeHtml(BILLING_PUBLIC_ORIGIN)}/privacy">Privacy</a>
@@ -1056,6 +1062,13 @@ export function mountSitePage() {
 
   if (path === '/imprint') {
     shell(legalContent('imprint'));
+    return;
+  }
+
+  if (path === '/get-app') {
+    document.title = 'Get the app · YANTA';
+    shell(getAppContent());
+    wireGetAppPage();
     return;
   }
 }

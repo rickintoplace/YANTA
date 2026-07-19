@@ -4138,6 +4138,7 @@ const SITE_PAGE_PATHS = new Set([
   '/privacy',
   '/refund',
   '/imprint',
+  '/get-app',
 ]);
 
 const normalizedPath = location.pathname.replace(/\/+$/, '') || '/';

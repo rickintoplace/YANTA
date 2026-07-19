@@ -37,6 +37,10 @@
     {
       "source": "/imprint",
       "destination": "/index.html"
+    },
+    {
+      "source": "/get-app",
+      "destination": "/index.html"
     }
   ],
   "headers": [

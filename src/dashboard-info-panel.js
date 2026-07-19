@@ -23,6 +23,32 @@ import {
   observeNotificationSyncStatus,
 } from './notification-sync-status.js';
 
+import {
+  computeInstallRecommendation,
+  onInstallStateChange,
+} from './install/install-manager.js';
+
+import { openInstallModal } from './install/install-ui.js';
+
+const INSTALL_HINT_DISMISSED_KEY = 'yanta.install.hint.dismissed.v1';
+
+function dismissedInstallHints() {
+  try {
+    const raw = localStorage.getItem(INSTALL_HINT_DISMISSED_KEY);
+    return new Set(raw ? JSON.parse(raw) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function dismissInstallHint(id) {
+  try {
+    const set = dismissedInstallHints();
+    set.add(id);
+    localStorage.setItem(INSTALL_HINT_DISMISSED_KEY, JSON.stringify([...set]));
+  } catch {}
+}
+
 function injectCss() {
   if (document.getElementById('yanta-dash-info-css')) return;
 
@@ -108,6 +134,45 @@ function injectCss() {
 .yanta-dash-info-details[hidden] {
   display: none !important;
 }
+
+.yanta-dash-info-action {
+  align-self: flex-start;
+
+  margin-top: 6px;
+  padding: 6px 12px;
+
+  border: 0;
+  border-radius: 8px;
+  background: var(--accent);
+
+  color: var(--accent-contrast, #fff);
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.yanta-dash-info-action:hover {
+  filter: brightness(1.05);
+}
+
+.yanta-dash-info-dismiss {
+  flex: 0 0 auto;
+  margin: -2px -4px 0 0;
+  padding: 4px;
+
+  border: 0;
+  background: transparent;
+
+  color: var(--text-dim);
+  cursor: pointer;
+  border-radius: 6px;
+  line-height: 0;
+}
+
+.yanta-dash-info-dismiss:hover {
+  background: var(--bg);
+  color: var(--text);
+}
 `;
 
   document.head.append(style);
@@ -128,19 +193,59 @@ function formatDeviceNames(devices) {
 }
 
 /**
+ * The single most important install/notification recommendation for the
+ * current device, as a dismissible info item. Returns [] when there is
+ * nothing to suggest or the user dismissed it.
+ */
+function collectInstallItems() {
+  let rec;
+
+  try {
+    rec = computeInstallRecommendation();
+  } catch {
+    return [];
+  }
+
+  const primary = rec.primary;
+  if (!primary) return [];
+
+  const hintId = `install-${primary.id}`;
+  if (dismissedInstallHints().has(hintId)) return [];
+
+  return [{
+    id: hintId,
+    tone: 'info',
+    icon: primary.icon || 'download',
+    title: primary.title,
+    text: primary.body,
+    action: {
+      label: primary.cta?.label || 'Set up',
+      onClick: () => openInstallModal(),
+    },
+    dismissible: hintId,
+  }];
+}
+
+/**
  * Collect the items worth showing. Returns [] on a healthy setup —
  * the widget stays invisible then.
  */
 function collectInfoItems() {
+  const items = [];
+
+  // Context-aware install nudge — quiet, dismissible, and only the single
+  // most important recommendation so the panel never feels naggy. Kept
+  // independent of the reminder report so it shows before the vault loads.
+  items.push(...collectInstallItems());
+
   let report;
 
   try {
     report = notificationSyncReport();
   } catch {
-    return [];
+    return items;
   }
 
-  const items = [];
   const inApp = isAndroidApp();
 
   // Nothing scheduled → notifications cannot be a problem.
@@ -200,7 +305,7 @@ function collectInfoItems() {
   return items;
 }
 
-function renderItems(body) {
+function renderItems(body, onChange) {
   const items = collectInfoItems();
 
   if (!items.length) {
@@ -221,6 +326,11 @@ function renderItems(body) {
         <strong>${escapeHtml(item.title)}</strong>
         <small>${escapeHtml(item.text)}</small>
         ${
+          item.action
+            ? `<button type="button" class="yanta-dash-info-action" data-info-action>${escapeHtml(item.action.label)}</button>`
+            : ''
+        }
+        ${
           item.details
             ? `
               <button type="button" class="yanta-dash-info-fix" data-info-fix>How does this work?</button>
@@ -229,6 +339,11 @@ function renderItems(body) {
             : ''
         }
       </div>
+      ${
+        item.dismissible
+          ? `<button type="button" class="yanta-dash-info-dismiss" data-info-dismiss title="Dismiss" aria-label="Dismiss">${lucide('x', 14)}</button>`
+          : ''
+      }
     `;
 
     const fixBtn = row.querySelector('[data-info-fix]');
@@ -238,6 +353,20 @@ function renderItems(body) {
       const show = details.hidden;
       details.hidden = !show;
       fixBtn.textContent = show ? 'Hide' : 'How does this work?';
+    });
+
+    row.querySelector('[data-info-action]')?.addEventListener('click', () => {
+      try {
+        item.action.onClick();
+      } catch (err) {
+        console.warn('[YANTA Dashboard Info] action failed', err);
+      }
+    });
+
+    row.querySelector('[data-info-dismiss]')?.addEventListener('click', () => {
+      dismissInstallHint(item.dismissible);
+      // Re-render so the widget hides itself if this was the last item.
+      onChange?.();
     });
 
     list.append(row);
@@ -265,7 +394,7 @@ async function renderInfoPanel() {
   section.append(head, body);
 
   const refresh = () => {
-    const count = renderItems(body);
+    const count = renderItems(body, refresh);
 
     /*
       Self-hide via inline style, not [hidden]: several stylesheets
@@ -291,6 +420,16 @@ async function renderInfoPanel() {
 
   window.addEventListener('yanta-calendar-updated', onCalendarUpdated);
   window.addEventListener('yanta-native-notification-status-changed', onCalendarUpdated);
+
+  // Install availability / notification permission can change mid-session
+  // (e.g. the browser offers a prompt, or the user installs) — reflect it.
+  const stopInstallWatch = onInstallStateChange(() => {
+    if (!alive()) {
+      stopInstallWatch();
+      return;
+    }
+    refresh();
+  });
 
   // Device acks land through vault sync — flip items live.
   observeNotificationSyncStatus(refresh, alive);

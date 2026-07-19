@@ -241,10 +241,7 @@ function notificationStatusRow(rec) {
     testBtn.addEventListener('click', async () => {
       const result = await sendTestNotification();
       if (result.ok) {
-        toast('Test notification sent — check your desktop.', 'success');
-        // If it truly appeared they won't need this, but surface the
-        // fallback path proactively since silent failures are common.
-        trouble.hidden = false;
+        toast(`Test notification sent (${result.via}) — check your desktop.`, 'success');
       } else if (result.reason === 'permission') {
         toast('Allow notifications first.', 'error');
       } else {

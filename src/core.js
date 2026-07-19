@@ -64,6 +64,28 @@ export const el = (tag, attrs = {}, ...children) => {
   return n;
 };
 
+/**
+ * Resolves the active Service Worker registration, or null if none becomes
+ * ready within `timeoutMs`.
+ *
+ * `navigator.serviceWorker.ready` never rejects and waits *forever* when no
+ * worker ever reaches "activated" (e.g. a failed install). Awaiting it
+ * directly can hang a caller silently — always race it against a timeout so
+ * callers fall back (e.g. to a page-scoped Notification) instead of hanging.
+ */
+export async function swRegistrationReady(timeoutMs = 1500) {
+  if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return null;
+
+  try {
+    return await Promise.race([
+      navigator.serviceWorker.ready,
+      new Promise((resolve) => setTimeout(() => resolve(null), timeoutMs)),
+    ]);
+  } catch {
+    return null;
+  }
+}
+
 export const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 
 export const debounce = (fn, ms) => {

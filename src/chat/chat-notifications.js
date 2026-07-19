@@ -20,6 +20,7 @@
 // ============================================================
 import {
   toast,
+  swRegistrationReady,
 } from '../core.js';
 
 import {
@@ -326,9 +327,10 @@ async function showWebNotification(payload) {
   };
 
   // Preferred: Service Worker notification (survives tab focus changes,
-  // click handling routes through the SW message channel below).
+  // click handling routes through the SW message channel below). Guarded by
+  // a timeout — a never-activating SW must not block the page fallback.
   try {
-    const reg = await navigator.serviceWorker?.ready?.catch(() => null);
+    const reg = await swRegistrationReady();
     if (reg?.showNotification) {
       await reg.showNotification(payload.title, options);
       return true;

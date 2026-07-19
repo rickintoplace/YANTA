@@ -15,6 +15,8 @@
 // section and the dashboard hint, so the advice stays consistent.
 // ============================================================
 
+import { swRegistrationReady } from '../core.js';
+
 import {
   installEnvironment,
 } from './install-environment.js';
@@ -188,8 +190,10 @@ export async function sendTestNotification() {
     renotify: true,
   };
 
+  // Try the Service Worker path first (same one chat uses), but never hang
+  // on it — a never-activating SW would otherwise swallow the whole test.
   try {
-    const reg = await navigator.serviceWorker?.ready?.catch(() => null);
+    const reg = await swRegistrationReady();
     if (reg?.showNotification) {
       await reg.showNotification(title, options);
       return { ok: true, via: 'sw' };
@@ -198,6 +202,7 @@ export async function sendTestNotification() {
     console.warn('[YANTA Install] SW test notification failed', err);
   }
 
+  // Fallback: page-scoped Notification (works whenever bennish-style tests do).
   try {
     // eslint-disable-next-line no-new
     new Notification(title, options);

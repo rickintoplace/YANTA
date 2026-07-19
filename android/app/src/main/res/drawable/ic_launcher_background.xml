@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<vector
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="272"
+    android:viewportHeight="272">
+    <group
+        android:name="logo"
+        android:translateX="-478"
+        android:translateY="-462.5">
+        <path
+            android:fillColor="@android:color/transparent"
+            android:strokeColor="#FFFFFF"
+            android:strokeWidth="13"
+            android:pathData="M614,482.5a116,116 0,1 1,0 232a116,116 0,1 1,0 -232" />
+        <clip-path
+            android:name="inner_clip"
+            android:pathData="M614,496.5a102,102 0,1 1,0 204a102,102 0,1 1,0 -204" />
+    </group>
+</vector>

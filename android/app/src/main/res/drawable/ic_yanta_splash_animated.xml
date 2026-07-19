@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<animated-vector
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    android:drawable="@drawable/ic_yanta_splash_vector">
+
+    <target
+        android:name="splash_ring"
+        android:animation="@animator/yanta_splash_ring_draw" />
+
+    <target
+        android:name="splash_mark_1"
+        android:animation="@animator/yanta_splash_fill_1" />
+
+    <target
+        android:name="splash_mark_2"
+        android:animation="@animator/yanta_splash_fill_2" />
+
+    <target
+        android:name="splash_mark_3"
+        android:animation="@animator/yanta_splash_fill_3" />
+
+</animated-vector>

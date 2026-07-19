@@ -1,0 +1,12 @@
+<resources>
+    <string name="app_name">YANTA</string>
+
+    <string name="shortcut_calendar_short">Calendar</string>
+    <string name="shortcut_calendar_long">Open YANTA Calendar</string>
+
+    <string name="shortcut_sources_short">Sources</string>
+    <string name="shortcut_sources_long">Open YANTA Sources</string>
+
+    <string name="shortcut_ai_short">YANTA AI</string>
+    <string name="shortcut_ai_long">Open YANTA AI</string>
+</resources>

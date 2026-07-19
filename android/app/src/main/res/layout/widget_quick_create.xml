@@ -1,0 +1,36 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:orientation="horizontal"
+    android:gravity="center"
+    android:padding="10dp"
+    android:background="#1C1C1C"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <Button
+        android:id="@+id/qc_note"
+        android:text="Note"
+        android:layout_weight="1"
+        android:layout_width="0dp"
+        android:layout_height="48dp" />
+
+    <Button
+        android:id="@+id/qc_folder"
+        android:text="Folder"
+        android:layout_weight="1"
+        android:layout_width="0dp"
+        android:layout_height="48dp" />
+
+    <Button
+        android:id="@+id/qc_event"
+        android:text="Event"
+        android:layout_weight="1"
+        android:layout_width="0dp"
+        android:layout_height="48dp" />
+
+    <Button
+        android:id="@+id/qc_sources"
+        android:text="Sources"
+        android:layout_weight="1"
+        android:layout_width="0dp"
+        android:layout_height="48dp" />
+</LinearLayout>

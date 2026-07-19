@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Launcher/Splash dark mode -->
+    <color name="yanta_logo_background">#000000</color>
+    <color name="yanta_logo_foreground">#FFFFFF</color>
+
+    <color name="yanta_icon_background">@color/yanta_logo_background</color>
+    <color name="yanta_icon_foreground">@color/yanta_logo_foreground</color>
+</resources>

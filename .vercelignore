@@ -1,0 +1,3 @@
+# Native Android app — lives in the repo but is not part of the web build.
+# Keep it out of the Vercel deployment upload entirely.
+android/

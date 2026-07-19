@@ -1,0 +1,36 @@
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <shortcut
+        android:shortcutId="calendar"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_note"
+        android:shortcutShortLabel="@string/shortcut_calendar_short"
+        android:shortcutLongLabel="@string/shortcut_calendar_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="yanta://open?action=calendar" />
+    </shortcut>
+
+    <shortcut
+        android:shortcutId="sources"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_note"
+        android:shortcutShortLabel="@string/shortcut_sources_short"
+        android:shortcutLongLabel="@string/shortcut_sources_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="yanta://open?action=sources" />
+    </shortcut>
+
+    <shortcut
+        android:shortcutId="ai"
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_note"
+        android:shortcutShortLabel="@string/shortcut_ai_short"
+        android:shortcutLongLabel="@string/shortcut_ai_long">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="yanta://open?action=ai" />
+    </shortcut>
+
+</shortcuts>

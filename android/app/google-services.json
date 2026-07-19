@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1048120173973",
+    "project_id": "yanta-page",
+    "storage_bucket": "yanta-page.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1048120173973:android:3909cf9f3e69c5a721029c",
+        "android_client_info": {
+          "package_name": "page.yanta.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyCJ8y_yYeyf-LbZhHjmyBVwdtjxf1ABf8c"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

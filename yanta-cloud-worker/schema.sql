@@ -416,3 +416,42 @@ VALUES
   ('hello', 'reserved', unixepoch() * 1000),
   ('team', 'reserved', unixepoch() * 1000),
   ('office', 'reserved', unixepoch() * 1000);
+-- ============================================================
+-- Web Push (desktop background notifications)
+-- ============================================================
+
+-- One Web Push subscription per user + device (browser/PWA).
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  device_id TEXT NOT NULL,
+  pushkey TEXT NOT NULL,
+  endpoint TEXT NOT NULL,
+  p256dh TEXT NOT NULL,
+  auth TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  last_seen_at INTEGER,
+  fail_count INTEGER NOT NULL DEFAULT 0,
+  UNIQUE(user_id, device_id),
+  FOREIGN KEY(user_id) REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_push_subscriptions_pushkey
+ON push_subscriptions(pushkey);
+
+-- Client-scheduled calendar reminder pushes. enc_payload is opaque to the
+-- Worker (client-side AES-GCM), so event titles never reach the server.
+CREATE TABLE IF NOT EXISTS scheduled_pushes (
+  id TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  device_id TEXT NOT NULL,
+  fire_at INTEGER NOT NULL,
+  enc_payload TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  sent_at INTEGER,
+  FOREIGN KEY(user_id) REFERENCES users(id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_scheduled_pushes_due
+ON scheduled_pushes(sent_at, fire_at);

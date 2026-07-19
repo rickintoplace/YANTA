@@ -23,6 +23,20 @@ MATRIX_SERVER_NAME = "yanta.me"
 # Optional: set to "1" if /register/available is not exposed by the HS.
 MATRIX_SKIP_AVAILABLE_CHECK = "0"
 
+# ---- Web Push (desktop background notifications) ----
+# VAPID subject (contact) and the public key clients subscribe with. The
+# public key is non-secret; the private key is set via `wrangler secret put
+# VAPID_PRIVATE_KEY` (JWK JSON). Generate both with scripts/gen-vapid.mjs.
+VAPID_SUBJECT = "mailto:rick@yanta.page"
+VAPID_PUBLIC_KEY = ""
+# URL the Matrix homeserver posts chat pushes to (this Worker, direct — not
+# via the Vercel /cloud-api proxy). Set to the deployed worker origin.
+PUSH_GATEWAY_URL = "https://yanta-cloud.rickintoplace.workers.dev/_matrix/push/v1/notify"
+
+# Fire scheduled calendar reminder pushes every minute.
+[triggers]
+crons = ["* * * * *"]
+
 [[d1_databases]]
 binding = "DB"
 database_name = "yanta-cloud-db"

@@ -7324,6 +7324,282 @@ async function handleSpaceStorageDelete(env, req, url, headers, spaceId) {
   return json({ ok: true }, 200, headers);
 }
 
+// ============================================================
+// Web Push (RFC 8291 aes128gcm + VAPID / RFC 8292)
+//
+// Pure Web Crypto — no dependencies. sendWebPush() encrypts a JSON payload
+// to a browser push subscription and POSTs it to the endpoint. Dead
+// subscriptions (404/410) are pruned automatically.
+// ============================================================
+
+function b64urlToBytes(str) {
+  const s = String(str || "").replace(/-/g, "+").replace(/_/g, "/");
+  const pad = s.length % 4 ? "=".repeat(4 - (s.length % 4)) : "";
+  const bin = atob(s + pad);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+function concatBytes(...arrs) {
+  let len = 0;
+  for (const a of arrs) len += a.length;
+  const out = new Uint8Array(len);
+  let o = 0;
+  for (const a of arrs) { out.set(a, o); o += a.length; }
+  return out;
+}
+
+async function hkdf(ikm, salt, info, length) {
+  const key = await crypto.subtle.importKey("raw", ikm, "HKDF", false, ["deriveBits"]);
+  const bits = await crypto.subtle.deriveBits(
+    { name: "HKDF", hash: "SHA-256", salt, info },
+    key,
+    length * 8
+  );
+  return new Uint8Array(bits);
+}
+
+async function webPushEncrypt(p256dhB64, authB64, plaintext) {
+  const uaPublic = b64urlToBytes(p256dhB64); // 65-byte EC point
+  const authSecret = b64urlToBytes(authB64); // 16 bytes
+
+  const asKeys = await crypto.subtle.generateKey(
+    { name: "ECDH", namedCurve: "P-256" }, true, ["deriveBits"]
+  );
+  const asPublic = new Uint8Array(await crypto.subtle.exportKey("raw", asKeys.publicKey));
+
+  const uaKey = await crypto.subtle.importKey(
+    "raw", uaPublic, { name: "ECDH", namedCurve: "P-256" }, false, []
+  );
+  const ecdh = new Uint8Array(
+    await crypto.subtle.deriveBits({ name: "ECDH", public: uaKey }, asKeys.privateKey, 256)
+  );
+
+  const enc = new TextEncoder();
+  const keyInfo = concatBytes(enc.encode("WebPush: info\0"), uaPublic, asPublic);
+  const ikm = await hkdf(ecdh, authSecret, keyInfo, 32);
+
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+  const cek = await hkdf(ikm, salt, enc.encode("Content-Encoding: aes128gcm\0"), 16);
+  const nonce = await hkdf(ikm, salt, enc.encode("Content-Encoding: nonce\0"), 12);
+
+  const cekKey = await crypto.subtle.importKey("raw", cek, { name: "AES-GCM" }, false, ["encrypt"]);
+  const record = concatBytes(plaintext, new Uint8Array([0x02])); // last-record delimiter
+  const ct = new Uint8Array(
+    await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce }, cekKey, record)
+  );
+
+  // aes128gcm header: salt(16) | rs(4) | idlen(1) | keyid(as_public 65)
+  const header = new Uint8Array(16 + 4 + 1 + asPublic.length);
+  header.set(salt, 0);
+  new DataView(header.buffer).setUint32(16, 4096, false);
+  header[20] = asPublic.length;
+  header.set(asPublic, 21);
+
+  return concatBytes(header, ct);
+}
+
+async function vapidAuthHeader(env, endpoint) {
+  const enc = new TextEncoder();
+  const header = { typ: "JWT", alg: "ES256" };
+  const payload = {
+    aud: new URL(endpoint).origin,
+    exp: Math.floor(Date.now() / 1000) + 12 * 3600,
+    sub: env.VAPID_SUBJECT || "mailto:rick@yanta.page",
+  };
+  const signingInput =
+    base64url(enc.encode(JSON.stringify(header))) + "." +
+    base64url(enc.encode(JSON.stringify(payload)));
+
+  const jwk = JSON.parse(env.VAPID_PRIVATE_KEY);
+  const key = await crypto.subtle.importKey(
+    "jwk", jwk, { name: "ECDSA", namedCurve: "P-256" }, false, ["sign"]
+  );
+  const sig = new Uint8Array(
+    await crypto.subtle.sign({ name: "ECDSA", hash: "SHA-256" }, key, enc.encode(signingInput))
+  );
+
+  return `vapid t=${signingInput}.${base64url(sig)}, k=${env.VAPID_PUBLIC_KEY}`;
+}
+
+async function sendWebPush(env, sub, payloadObj, ttl = 3600) {
+  if (!env.VAPID_PRIVATE_KEY || !env.VAPID_PUBLIC_KEY) {
+    return { ok: false, reason: "no_vapid" };
+  }
+
+  let body;
+  try {
+    body = await webPushEncrypt(sub.p256dh, sub.auth, new TextEncoder().encode(JSON.stringify(payloadObj)));
+  } catch (err) {
+    console.warn("[webpush] encrypt failed", safeErrorForLog(err));
+    return { ok: false, reason: "encrypt_failed" };
+  }
+
+  let res;
+  try {
+    res = await fetch(sub.endpoint, {
+      method: "POST",
+      headers: {
+        Authorization: await vapidAuthHeader(env, sub.endpoint),
+        "Content-Encoding": "aes128gcm",
+        "Content-Type": "application/octet-stream",
+        TTL: String(ttl),
+        Urgency: "high",
+      },
+      body,
+    });
+  } catch (err) {
+    console.warn("[webpush] send failed", safeErrorForLog(err));
+    return { ok: false, reason: "network" };
+  }
+
+  if (res.status === 404 || res.status === 410) {
+    await env.DB.prepare(`DELETE FROM push_subscriptions WHERE endpoint = ?`).bind(sub.endpoint).run();
+    return { ok: false, reason: "gone" };
+  }
+
+  return { ok: res.ok, status: res.status };
+}
+
+async function handlePushConfig(env, req, headers) {
+  return json({
+    vapidPublicKey: env.VAPID_PUBLIC_KEY || "",
+    gatewayUrl: env.PUSH_GATEWAY_URL || "",
+  }, 200, headers);
+}
+
+async function handlePushSubscribe(env, req, headers) {
+  const user = await requireUser(env, req);
+  const body = await bodyJson(req);
+  const deviceId = String(body.deviceId || "").slice(0, 128);
+  const pushkey = String(body.pushkey || "").slice(0, 256);
+  const sub = body.subscription || {};
+  const endpoint = String(sub.endpoint || "");
+  const p256dh = String(sub.keys?.p256dh || "");
+  const auth = String(sub.keys?.auth || "");
+
+  if (!deviceId || !pushkey || !endpoint || !p256dh || !auth) {
+    return json({ ok: false, message: "invalid_subscription" }, 400, headers);
+  }
+
+  await env.DB.prepare(
+    `INSERT INTO push_subscriptions
+       (id,user_id,device_id,pushkey,endpoint,p256dh,auth,created_at,last_seen_at,fail_count)
+     VALUES (?,?,?,?,?,?,?,?,?,0)
+     ON CONFLICT(user_id,device_id) DO UPDATE SET
+       pushkey=excluded.pushkey, endpoint=excluded.endpoint,
+       p256dh=excluded.p256dh, auth=excluded.auth,
+       last_seen_at=excluded.last_seen_at, fail_count=0`
+  ).bind(id("push"), user.userId, deviceId, pushkey, endpoint, p256dh, auth, now(), now()).run();
+
+  return json({ ok: true }, 200, headers);
+}
+
+async function handlePushUnsubscribe(env, req, headers) {
+  const user = await requireUser(env, req);
+  const body = await bodyJson(req);
+  const deviceId = String(body.deviceId || "");
+  await env.DB.prepare(`DELETE FROM push_subscriptions WHERE user_id=? AND device_id=?`).bind(user.userId, deviceId).run();
+  await env.DB.prepare(`DELETE FROM scheduled_pushes WHERE user_id=? AND device_id=?`).bind(user.userId, deviceId).run();
+  return json({ ok: true }, 200, headers);
+}
+
+async function handlePushSchedule(env, req, headers) {
+  const user = await requireUser(env, req);
+  const body = await bodyJson(req);
+  const deviceId = String(body.deviceId || "");
+  if (!deviceId) return json({ ok: false, message: "device_required" }, 400, headers);
+
+  const items = Array.isArray(body.items) ? body.items.slice(0, 500) : [];
+  const nowMs = now();
+  const maxHorizon = nowMs + 8 * 24 * 3600 * 1000;
+
+  // Replace this device's pending schedule with the fresh set.
+  await env.DB.prepare(
+    `DELETE FROM scheduled_pushes WHERE user_id=? AND device_id=? AND sent_at IS NULL`
+  ).bind(user.userId, deviceId).run();
+
+  const stmts = [];
+  for (const it of items) {
+    const fireAt = Math.round(Number(it.fireAt));
+    const encPayload = String(it.enc || "");
+    if (!Number.isFinite(fireAt) || fireAt < nowMs - 60000 || fireAt > maxHorizon || !encPayload) continue;
+    stmts.push(env.DB.prepare(
+      `INSERT INTO scheduled_pushes
+         (id,user_id,device_id,fire_at,enc_payload,created_at,expires_at,sent_at)
+       VALUES (?,?,?,?,?,?,?,NULL)`
+    ).bind(id("sch"), user.userId, deviceId, fireAt, encPayload.slice(0, 4000), nowMs, fireAt + 3600000));
+  }
+
+  if (stmts.length) await env.DB.batch(stmts);
+  return json({ ok: true, scheduled: stmts.length }, 200, headers);
+}
+
+// Matrix Push Gateway API. The homeserver POSTs here (unauthenticated, keyed
+// by the opaque per-device pushkey). event_id_only → no message content ever
+// reaches the Worker.
+async function handleMatrixNotify(env, req, headers) {
+  const body = await bodyJson(req);
+  const n = body?.notification;
+  if (!n) return json({ rejected: [] }, 200, headers);
+
+  const devices = Array.isArray(n.devices) ? n.devices : [];
+  const roomId = n.room_id || "";
+  const rejected = [];
+
+  // A "clear" notification (read elsewhere) carries no event id — nothing to show.
+  const isClear = !n.event_id && n.counts && Number(n.counts.unread || 0) === 0;
+
+  for (const d of devices) {
+    const pushkey = d?.pushkey;
+    if (!pushkey) continue;
+
+    const sub = await env.DB.prepare(
+      `SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE pushkey = ?`
+    ).bind(pushkey).first();
+
+    if (!sub) { rejected.push(pushkey); continue; }
+    if (isClear) continue;
+
+    const url = `${env.APP_ORIGIN || "https://yanta.page"}/#chat/${encodeURIComponent(roomId)}`;
+    const r = await sendWebPush(env, sub, { kind: "chat", roomId, url }, 3600);
+    if (r.reason === "gone") rejected.push(pushkey);
+  }
+
+  return json({ rejected }, 200, headers);
+}
+
+async function runScheduledPushes(env) {
+  const nowMs = now();
+
+  const rows = await env.DB.prepare(
+    `SELECT sp.id AS sid, sp.enc_payload AS enc, ps.endpoint, ps.p256dh, ps.auth
+     FROM scheduled_pushes sp
+     JOIN push_subscriptions ps
+       ON ps.user_id = sp.user_id AND ps.device_id = sp.device_id
+     WHERE sp.sent_at IS NULL AND sp.fire_at <= ?
+     ORDER BY sp.fire_at
+     LIMIT 200`
+  ).bind(nowMs).all();
+
+  for (const row of rows?.results || []) {
+    try {
+      await sendWebPush(
+        env,
+        { endpoint: row.endpoint, p256dh: row.p256dh, auth: row.auth },
+        { kind: "calendar-reminder", enc: row.enc },
+        3600
+      );
+    } catch (err) {
+      console.warn("[push cron] send failed", safeErrorForLog(err));
+    }
+    await env.DB.prepare(`UPDATE scheduled_pushes SET sent_at = ? WHERE id = ?`).bind(nowMs, row.sid).run();
+  }
+
+  await env.DB.prepare(`DELETE FROM scheduled_pushes WHERE expires_at < ?`).bind(nowMs).run();
+}
+
 async function route(req, env) {
   const headers = corsHeaders(env, req);
   if (!originAllowed(env, req)) {
@@ -7378,6 +7654,21 @@ async function route(req, env) {
     }
     if (url.pathname === "/api/usage" && req.method === "GET") {
       return handleUsage(env, req, headers);
+    }
+    if (url.pathname === "/api/push/config" && req.method === "GET") {
+      return handlePushConfig(env, req, headers);
+    }
+    if (url.pathname === "/api/push/subscribe" && req.method === "POST") {
+      return handlePushSubscribe(env, req, headers);
+    }
+    if (url.pathname === "/api/push/unsubscribe" && req.method === "POST") {
+      return handlePushUnsubscribe(env, req, headers);
+    }
+    if (url.pathname === "/api/push/schedule" && req.method === "POST") {
+      return handlePushSchedule(env, req, headers);
+    }
+    if (url.pathname === "/_matrix/push/v1/notify" && req.method === "POST") {
+      return handleMatrixNotify(env, req, headers);
     }
     if (url.pathname === "/api/storage/index" && req.method === "GET") {
       return handleStorageIndex(env, req, url, headers);
@@ -7597,6 +7888,11 @@ var index_default = {
         status: err?.status || 500
       }, err?.status || 500, headers);
     }
+  },
+  async scheduled(event, env, ctx) {
+    ctx.waitUntil(
+      runScheduledPushes(env).catch((err) => console.error("[push cron]", safeErrorForLog(err)))
+    );
   }
 };
 export {

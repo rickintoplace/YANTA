@@ -5,13 +5,13 @@
 // User data is in IndexedDB/Yjs, not in this cache.
 // ============================================================
 
-const CACHE_VERSION = 'yanta-app-v17';
+const CACHE_VERSION = 'yanta-app-v18';
+// Only files that actually exist at these paths in the build. CSS/JS are
+// hashed into /assets by Vite and cached at runtime by the fetch handler —
+// they must NOT be listed here (a 404 here would fail the whole install).
 const APP_SHELL = [
   '/',
   '/index.html',
-  '/styles.css',
-  '/dashboard.css',
-  '/calendar.css',
   '/site.webmanifest',
   '/favicon.ico',
   '/favicon-16x16.png',
@@ -19,16 +19,20 @@ const APP_SHELL = [
   '/apple-touch-icon.png',
   '/android-chrome-192x192.png',
   '/android-chrome-512x512.png',
-  // '/boot-appearance.js',
 ];
 
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches
-      .open(CACHE_VERSION)
-      .then((cache) => cache.addAll(APP_SHELL))
-      .then(() => self.skipWaiting())
-  );
+  event.waitUntil((async () => {
+    const cache = await caches.open(CACHE_VERSION);
+
+    // Cache entries individually: one missing/blocked asset must never fail
+    // the whole install. A failed install leaves the worker inactive, so
+    // navigator.serviceWorker.ready hangs forever — which breaks Web Push
+    // (pushManager needs an active registration) and SW notifications.
+    await Promise.allSettled(APP_SHELL.map((url) => cache.add(url)));
+
+    await self.skipWaiting();
+  })());
 });
 
 self.addEventListener('activate', (event) => {

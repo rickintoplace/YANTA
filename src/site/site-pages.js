@@ -105,6 +105,33 @@ function money(monthly = true) {
   return monthly ? '$6' : '$60';
 }
 
+/*
+  Only emit a checkout button for a price that is actually configured.
+  A missing yearly/monthly price id must never render as a dead
+  "Price unavailable" button — we simply omit it.
+*/
+function plusCheckoutButtonsHtml(ids) {
+  const buttons = [];
+
+  if (ids.monthly) {
+    buttons.push(`
+      <button class="yanta-site-btn primary" data-checkout="${escapeHtml(ids.monthly)}">
+        Start monthly
+      </button>
+    `);
+  }
+
+  if (ids.yearly) {
+    buttons.push(`
+      <button class="yanta-site-btn${ids.monthly ? '' : ' primary'}" data-checkout="${escapeHtml(ids.yearly)}">
+        Yearly · ${escapeHtml(money(false))}/year
+      </button>
+    `);
+  }
+
+  return buttons.join('\n');
+}
+
 function envFlagEnabled(value) {
   return ['1', 'true', 'yes', 'on'].includes(
     String(value || '').trim().toLowerCase()
@@ -152,6 +179,9 @@ function injectCss() {
 :root {
   color-scheme: dark light;
 }
+
+/* The hidden attribute must win over .yanta-site-btn's explicit display. */
+[hidden] { display: none !important; }
 
 html.yanta-site-page,
 body.yanta-site-page {
@@ -616,13 +646,7 @@ function pricingContent() {
         </ul>
 
         <div class="yanta-btn-row">
-          <button class="yanta-site-btn primary" data-checkout="${escapeHtml(ids.monthly)}">
-            Start monthly
-          </button>
-
-          <button class="yanta-site-btn" data-checkout="${escapeHtml(ids.yearly)}">
-            Yearly · ${escapeHtml(money(false))}/year
-          </button>
+          ${plusCheckoutButtonsHtml(ids)}
 
           <button class="yanta-site-btn" data-portal>
             Manage billing
@@ -1103,13 +1127,30 @@ async function wirePricingButtons() {
     me?.user?.plan === 'premium' ||
     me?.billing?.plan === 'premium';
 
+  /*
+    Already subscribed: collapse the checkout buttons into a single clear
+    status pill instead of repeating "You are on YANTA Plus" per price.
+  */
+  if (isPlus) {
+    checkoutButtons.forEach((btn, i) => {
+      if (i === 0) {
+        btn.textContent = 'You are on YANTA Plus';
+        btn.disabled = true;
+        btn.classList.add('primary');
+        btn.title = 'Your account already has YANTA Plus.';
+      } else {
+        btn.hidden = true;
+      }
+    });
+  }
+
   checkoutButtons.forEach((btn) => {
+    if (isPlus) return;
+
     const priceId = btn.getAttribute('data-checkout') || '';
 
     if (!priceId) {
-      btn.textContent = 'Price unavailable';
-      btn.disabled = true;
-      btn.title = 'This YANTA Plus price is not configured.';
+      btn.hidden = true;
       return;
     }
 
@@ -1120,13 +1161,6 @@ async function wirePricingButtons() {
         location.href = YANTA_APP_ORIGIN;
       });
 
-      return;
-    }
-
-    if (isPlus) {
-      btn.textContent = 'You are on YANTA Plus';
-      btn.disabled = true;
-      btn.title = 'Your account already has YANTA Plus.';
       return;
     }
 

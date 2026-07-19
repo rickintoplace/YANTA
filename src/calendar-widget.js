@@ -153,6 +153,129 @@ async function eventsForRange(rangeStart, rangeEnd) {
   });
 }
 
+const DAY_MS = 86400000;
+
+/** Whole calendar days between two dates (DST-safe via local midnight). */
+function dayDiff(a, b) {
+  return Math.round((startOfDay(b) - startOfDay(a)) / DAY_MS);
+}
+
+/**
+ * The day range an event occupies as `[startDay, endExclusive)` at local
+ * midnight. All-day ends are stored inclusive, so we add a day; timed ends
+ * are real instants, so an event finishing exactly at midnight does not
+ * bleed into the following day.
+ */
+function eventDaySpan(ev) {
+  const startDay = startOfDay(ev._start);
+
+  let endExclusive;
+  if (ev.allDay) {
+    const endInclusive = ev.end ? dateLikeToDate(ev.end, { allDay: true }) : null;
+    endExclusive = addDays(endInclusive ? startOfDay(endInclusive) : startDay, 1);
+  } else {
+    const endDate = ev.end ? dateLikeToDate(ev.end) : null;
+    endExclusive = endDate && endDate > ev._start
+      ? addDays(startOfDay(new Date(endDate.getTime() - 1)), 1)
+      : addDays(startDay, 1);
+  }
+
+  if (endExclusive <= startDay) endExclusive = addDays(startDay, 1);
+  return { startDay, endExclusive };
+}
+
+function isMultiDayEvent(ev) {
+  return dayDiff(ev._span.startDay, ev._span.endExclusive) > 1;
+}
+
+/**
+ * Grid views need every event that *touches* the visible range, not only
+ * those starting inside it — a run beginning before the window must still
+ * paint its tail across the first days on screen. Each event is tagged with
+ * its `_span` so the callers can lay out continuous bars.
+ */
+async function gridEventsForRange(rangeStart, rangeEnd) {
+  const { expandedCalendarRawEventsForRange } = await import('./calendar.js');
+
+  return expandedCalendarRawEventsForRange(rangeStart, rangeEnd)
+    .map((ev) => ({ ...ev, _start: eventStartDate(ev) }))
+    // Unexpanded recurring masters would duplicate their own occurrences.
+    .filter((ev) => ev._start && !hasRecurrence(ev))
+    .map((ev) => ({ ...ev, _span: eventDaySpan(ev) }))
+    .filter((ev) => ev._span.startDay < rangeEnd && ev._span.endExclusive > rangeStart)
+    .sort((a, b) => {
+      const diff = a._span.startDay - b._span.startDay;
+      if (diff) return diff;
+      // Longer runs claim their lane first so shorter events tuck around them.
+      const lenA = a._span.endExclusive - a._span.startDay;
+      const lenB = b._span.endExclusive - b._span.startDay;
+      if (lenA !== lenB) return lenB - lenA;
+      if (!!a.allDay !== !!b.allDay) return a.allDay ? -1 : 1;
+      return a._start - b._start;
+    });
+}
+
+/**
+ * Pack the multi-day events crossing one week into non-overlapping lanes,
+ * clipping each to the week's 7 columns. Events that don't fit within
+ * `maxLanes` are counted per column so the caller can show a "+N" hint.
+ */
+function layoutWeekBars(events, weekStart, maxLanes) {
+  const weekEnd = addDays(weekStart, 7);
+
+  const segments = [];
+  for (const ev of events) {
+    const { startDay, endExclusive } = ev._span;
+    if (startDay >= weekEnd || endExclusive <= weekStart) continue;
+
+    segments.push({
+      ev,
+      startCol: Math.max(0, dayDiff(weekStart, startDay)),
+      endCol: Math.min(6, dayDiff(weekStart, endExclusive) - 1),
+      continuesLeft: startDay < weekStart,
+      continuesRight: endExclusive > weekEnd,
+      lane: -1,
+    });
+  }
+
+  // Earlier, then longer, so the eye follows uninterrupted horizontal runs.
+  segments.sort((a, b) =>
+    a.startCol - b.startCol || (b.endCol - b.startCol) - (a.endCol - a.startCol));
+
+  const lanes = [];
+  const overflow = new Array(7).fill(0);
+  const placed = [];
+
+  for (const seg of segments) {
+    let lane = lanes.findIndex(
+      (occupied) => occupied.every((s) => seg.endCol < s.startCol || seg.startCol > s.endCol));
+
+    if (lane === -1 && lanes.length < maxLanes) {
+      lane = lanes.length;
+      lanes.push([]);
+    }
+
+    if (lane === -1) {
+      for (let c = seg.startCol; c <= seg.endCol; c++) overflow[c]++;
+      continue;
+    }
+
+    lanes[lane].push(seg);
+    seg.lane = lane;
+    placed.push(seg);
+  }
+
+  return { segments: placed, laneCount: lanes.length, overflow };
+}
+
+/** Place a bar across its columns and square off any clipped edge. */
+function applyBarSpan(barEl, seg, color) {
+  barEl.style.gridColumn = `${seg.startCol + 1} / ${seg.endCol + 2}`;
+  barEl.style.setProperty('--bar-color', color);
+  if (seg.continuesLeft) barEl.classList.add('cont-left');
+  if (seg.continuesRight) barEl.classList.add('cont-right');
+}
+
 async function openCalendarApp() {
   const { openCalendar } = await import('./calendar.js');
   openCalendar({ push: true });
@@ -421,6 +544,49 @@ function injectCss() {
 /* Week strip */
 
 .yanta-cal-dash-week {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.yanta-cal-dash-week-band {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  column-gap: 6px;
+  row-gap: 3px;
+}
+
+.yanta-cal-dash-week-bar {
+  min-width: 0;
+  padding: 2px 7px;
+
+  border-radius: 6px;
+
+  color: #fff;
+  background: var(--bar-color, var(--accent));
+
+  font-size: 10.5px;
+  font-weight: 650;
+  line-height: 1.4;
+
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  cursor: pointer;
+}
+
+.yanta-cal-dash-week-bar.cont-left {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.yanta-cal-dash-week-bar.cont-right {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+}
+
+.yanta-cal-dash-week-grid {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 6px;
@@ -488,9 +654,46 @@ function injectCss() {
 /* Month mini-grid */
 
 .yanta-cal-dash-month {
+  --bar-h: 7px;
+
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.yanta-cal-dash-month-heads,
+.yanta-cal-dash-week-row {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
-  gap: 2px;
+  column-gap: 2px;
+}
+
+.yanta-cal-dash-week-row {
+  row-gap: 2px;
+}
+
+.yanta-cal-dash-month-bar {
+  grid-row: 2;
+  align-self: center;
+
+  height: var(--bar-h);
+  min-width: 0;
+
+  border-radius: 3px;
+  background: var(--bar-color, var(--accent));
+
+  pointer-events: none;
+  z-index: 1;
+}
+
+.yanta-cal-dash-month-bar.cont-left {
+  border-top-left-radius: 0;
+  border-bottom-left-radius: 0;
+}
+
+.yanta-cal-dash-month-bar.cont-right {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
 }
 
 .yanta-cal-dash-month-head {
@@ -504,9 +707,14 @@ function injectCss() {
 }
 
 .yanta-cal-dash-month-day {
+  /* Span every lane row so the cell background frames its whole column;
+     bars are placed into the middle rows on top of it. */
+  grid-row: 1 / -1;
+
   display: flex;
   flex-direction: column;
   align-items: center;
+  justify-content: space-between;
   gap: 2px;
 
   min-height: 34px;
@@ -536,6 +744,7 @@ function injectCss() {
 
 .yanta-cal-dash-month-dots {
   display: flex;
+  align-items: center;
   gap: 2px;
   min-height: 4px;
 }
@@ -545,6 +754,14 @@ function injectCss() {
   height: 4px;
   border-radius: 999px;
   background: var(--dot-color, var(--accent));
+}
+
+.yanta-cal-dash-month-more {
+  margin-left: 1px;
+  color: var(--text-faint);
+  font-size: 8px;
+  font-weight: 700;
+  line-height: 1;
 }
 `;
 
@@ -637,16 +854,48 @@ async function renderDayView(body, ref = navAnchor()) {
   body.append(rows);
 }
 
+// Multi-day event bar lanes shown before it overflows to a "+N" hint.
+const WEEK_BAR_LANES = 4;
+
 async function renderWeekView(body, ref = navAnchor()) {
   const weekStart = startOfWeek(ref);
-  const events = await eventsForRange(weekStart, addDays(weekStart, 7));
+  const events = await gridEventsForRange(weekStart, addDays(weekStart, 7));
   const today = new Date();
 
-  const grid = el('div', { class: 'yanta-cal-dash-week' });
+  const wrap = el('div', { class: 'yanta-cal-dash-week' });
+
+  // Multi-day events span horizontally in a band above the day columns; the
+  // per-day cards below carry only that day's single-day events.
+  const multiDay = events.filter(isMultiDayEvent);
+  const band = layoutWeekBars(multiDay, weekStart, WEEK_BAR_LANES);
+
+  if (band.segments.length) {
+    const bandEl = el('div', { class: 'yanta-cal-dash-week-band' });
+    bandEl.style.gridTemplateRows = `repeat(${band.laneCount}, auto)`;
+
+    for (const seg of band.segments) {
+      const bar = el('div', {
+        class: 'yanta-cal-dash-week-bar',
+        title: seg.ev.title || 'Untitled event',
+        role: 'button',
+        tabindex: '0',
+        onclick: openFromGrid,
+      }, seg.ev.title || 'Untitled event');
+
+      bar.style.gridRow = String(seg.lane + 1);
+      applyBarSpan(bar, seg, eventColor(seg.ev));
+      bandEl.append(bar);
+    }
+
+    wrap.append(bandEl);
+  }
+
+  const grid = el('div', { class: 'yanta-cal-dash-week-grid' });
 
   for (let i = 0; i < 7; i++) {
     const day = addDays(weekStart, i);
-    const dayEvents = events.filter((ev) => sameDay(ev._start, day));
+    const dayEvents = events.filter(
+      (ev) => !isMultiDayEvent(ev) && sameDay(ev._start, day));
 
     const cell = el('div', {
       class: 'yanta-cal-dash-weekday' + (sameDay(day, today) ? ' today' : ''),
@@ -668,16 +917,21 @@ async function renderWeekView(body, ref = navAnchor()) {
       cell.append(chip);
     }
 
-    if (dayEvents.length > 3) {
-      cell.append(el('span', { class: 'yanta-cal-dash-more' }, `+${dayEvents.length - 3} more`));
+    const overflow = (dayEvents.length > 3 ? dayEvents.length - 3 : 0) + band.overflow[i];
+    if (overflow > 0) {
+      cell.append(el('span', { class: 'yanta-cal-dash-more' }, `+${overflow} more`));
     }
 
     cell.addEventListener('click', openFromGrid);
     grid.append(cell);
   }
 
-  body.append(grid);
+  wrap.append(grid);
+  body.append(wrap);
 }
+
+// Multi-day bar lanes reserved per week in the mini-month before overflow.
+const MONTH_BAR_LANES = 3;
 
 async function renderMonthView(body, ref = navAnchor()) {
   const now = new Date();
@@ -685,57 +939,92 @@ async function renderMonthView(body, ref = navAnchor()) {
   const gridStart = startOfWeek(monthStart);
   const gridEnd = addDays(gridStart, 42);
 
-  const events = await eventsForRange(gridStart, gridEnd);
+  const events = await gridEventsForRange(gridStart, gridEnd);
 
-  const byDay = new Map();
-
+  // Multi-day events become continuous bars; single-day ones stay as dots
+  // under their date. Bars are packed per week, and every week reserves the
+  // same lane count so the six rows stay vertically aligned.
+  const multiDay = events.filter(isMultiDayEvent);
+  const singleByDay = new Map();
   for (const ev of events) {
+    if (isMultiDayEvent(ev)) continue;
     const key = ev._start.toDateString();
-    if (!byDay.has(key)) byDay.set(key, []);
-    byDay.get(key).push(ev);
+    if (!singleByDay.has(key)) singleByDay.set(key, []);
+    singleByDay.get(key).push(ev);
   }
+
+  const weekLayouts = [];
+  for (let w = 0; w < 6; w++) {
+    weekLayouts.push(layoutWeekBars(multiDay, addDays(gridStart, w * 7), MONTH_BAR_LANES));
+  }
+  const barLanes = Math.max(0, ...weekLayouts.map((l) => l.laneCount));
 
   const grid = el('div', { class: 'yanta-cal-dash-month' });
 
+  const heads = el('div', { class: 'yanta-cal-dash-month-heads' });
   const monday = startOfWeek(new Date());
-
   for (let i = 0; i < 7; i++) {
-    grid.append(el('div', { class: 'yanta-cal-dash-month-head' },
+    heads.append(el('div', { class: 'yanta-cal-dash-month-head' },
       addDays(monday, i).toLocaleDateString([], { weekday: 'narrow' })
     ));
   }
+  grid.append(heads);
 
-  for (let i = 0; i < 42; i++) {
-    const day = addDays(gridStart, i);
-    const dayEvents = byDay.get(day.toDateString()) || [];
+  for (let w = 0; w < 6; w++) {
+    const weekStart = addDays(gridStart, w * 7);
+    const layout = weekLayouts[w];
 
-    const cell = el('div', {
-      class: [
-        'yanta-cal-dash-month-day',
-        day.getMonth() !== monthStart.getMonth() ? 'dim' : '',
-        sameDay(day, now) ? 'today' : '',
-      ].filter(Boolean).join(' '),
-      role: 'button',
-      tabindex: '0',
-      title: dayEvents.length
-        ? `${dayEvents.length} event${dayEvents.length === 1 ? '' : 's'}`
-        : '',
-    });
+    const row = el('div', { class: 'yanta-cal-dash-week-row' });
+    row.style.gridTemplateRows = barLanes
+      ? `auto repeat(${barLanes}, var(--bar-h))`
+      : 'auto';
 
-    cell.append(el('span', {}, String(day.getDate())));
+    for (let i = 0; i < 7; i++) {
+      const day = addDays(weekStart, i);
+      const dayEvents = singleByDay.get(day.toDateString()) || [];
+      const overflow = (dayEvents.length > 3 ? dayEvents.length - 3 : 0) + layout.overflow[i];
 
-    const dots = el('span', { class: 'yanta-cal-dash-month-dots' });
+      const cell = el('div', {
+        class: [
+          'yanta-cal-dash-month-day',
+          day.getMonth() !== monthStart.getMonth() ? 'dim' : '',
+          sameDay(day, now) ? 'today' : '',
+        ].filter(Boolean).join(' '),
+        role: 'button',
+        tabindex: '0',
+        style: { gridColumn: String(i + 1) },
+        onclick: openFromGrid,
+      });
 
-    for (const ev of dayEvents.slice(0, 3)) {
-      const dot = document.createElement('i');
-      dot.style.setProperty('--dot-color', eventColor(ev));
-      dots.append(dot);
+      cell.append(el('span', {}, String(day.getDate())));
+
+      const dots = el('span', { class: 'yanta-cal-dash-month-dots' });
+      for (const ev of dayEvents.slice(0, 3)) {
+        const dot = document.createElement('i');
+        dot.style.setProperty('--dot-color', eventColor(ev));
+        dots.append(dot);
+      }
+      if (overflow > 0) {
+        dots.append(el('span', { class: 'yanta-cal-dash-month-more' }, `+${overflow}`));
+      }
+      cell.append(dots);
+
+      row.append(cell);
     }
 
-    cell.append(dots);
-    cell.addEventListener('click', openFromGrid);
+    // Bars overlay the middle lane rows on top of the day cells; clicks fall
+    // through to whichever cell sits under the pointer.
+    for (const seg of layout.segments) {
+      const bar = el('div', {
+        class: 'yanta-cal-dash-month-bar',
+        title: seg.ev.title || 'Untitled event',
+      });
+      bar.style.gridRow = String(seg.lane + 2);
+      applyBarSpan(bar, seg, eventColor(seg.ev));
+      row.append(bar);
+    }
 
-    grid.append(cell);
+    grid.append(row);
   }
 
   body.append(grid);

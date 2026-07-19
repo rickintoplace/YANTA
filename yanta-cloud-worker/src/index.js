@@ -7574,6 +7574,7 @@ async function handleMatrixNotify(env, req, headers) {
   const devices = Array.isArray(n.devices) ? n.devices : [];
   const roomId = n.room_id || "";
   const rejected = [];
+  const results = []; // diagnostic — Synapse only reads `rejected`.
 
   // A "clear" notification (read elsewhere) carries no event id — nothing to show.
   const isClear = !n.event_id && n.counts && Number(n.counts.unread || 0) === 0;
@@ -7586,15 +7587,17 @@ async function handleMatrixNotify(env, req, headers) {
       `SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE pushkey = ?`
     ).bind(pushkey).first();
 
-    if (!sub) { rejected.push(pushkey); continue; }
-    if (isClear) continue;
+    if (!sub) { rejected.push(pushkey); results.push({ reason: "no_subscription" }); continue; }
+    if (isClear) { results.push({ reason: "clear_skipped" }); continue; }
 
     const url = `${env.APP_ORIGIN || "https://yanta.page"}/#chat/${encodeURIComponent(roomId)}`;
     const r = await sendWebPush(env, sub, { kind: "chat", roomId, url }, 3600);
+    results.push(r);
     if (r.reason === "gone") rejected.push(pushkey);
   }
 
-  return json({ rejected }, 200, headers);
+  console.log("[matrix notify]", JSON.stringify({ room: roomId, event: !!n.event_id, results }));
+  return json({ rejected, results }, 200, headers);
 }
 
 async function runScheduledPushes(env) {

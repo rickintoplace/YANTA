@@ -54,6 +54,11 @@ import {
 } from '../dialogs.js';
 
 import {
+  describeBillingState,
+  reconciledBillingSummary,
+} from '../billing/billing-ui.js';
+
+import {
   registerOverlayRoute,
   pushOverlayState,
   closeTopOverlay,
@@ -589,6 +594,13 @@ function ensureCss() {
   flex: 0 0 auto;
   color: var(--accent);
   margin-top: 1px;
+}
+
+.yanta-cloud-plan-fineprint {
+  margin: 9px 2px 0;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  line-height: 1.45;
 }
 
 .yanta-cloud-usage-bar.segmented {
@@ -1243,63 +1255,78 @@ function usageBarsHtml(me, storageBreakdown = null, {
 }
 
 function cloudPlanSectionHtml(me = {}) {
-  const plan = me.user?.plan || 'free';
-  const billing = me.billing || null;
-
-  const isPlus = plan === 'premium';
-
-  const periodEnd = billing?.subscription?.currentPeriodEndsAt
-    ? new Date(billing.subscription.currentPeriodEndsAt).toLocaleDateString()
-    : '';
-
-  const statusLine = isPlus
-    ? `
-      <strong style="color:var(--green)">YANTA Plus is active.</strong>
-      ${periodEnd ? `Current period ends ${escapeHtml(periodEnd)}.` : 'Thank you for supporting YANTA.'}
-    `
-    : `
-      <strong>Free plan.</strong>
-      Upgrade when you need more encrypted cloud storage, more devices, or higher Included AI limits.
-    `;
+  const state = describeBillingState({
+    plan: me.user?.plan || 'free',
+    billing: me.billing || null,
+  });
 
   return `
     <section class="yanta-cloud-section">
       <h4>Plan</h4>
 
       <div class="yanta-cloud-limit-note">
-        ${lucide(isPlus ? 'sparkles' : 'info', 14)}
-        <span>${statusLine}</span>
+        ${lucide(state.isPlus ? 'sparkles' : 'info', 14)}
+        <span data-yanta-plus-status>${state.html}</span>
       </div>
 
       <div class="compress-actions" style="margin-top:10px;justify-content:flex-start;flex-wrap:wrap">
-        ${
-          isPlus
-            ? `
-              <button class="btn" data-yanta-plus-manage>
-                ${lucide('credit-card', 14)}
-                Manage billing
-              </button>
-            `
-            : `
-              <button class="btn primary" data-yanta-plus-upgrade>
-                ${lucide('sparkles', 14)}
-                Upgrade to YANTA Plus
-              </button>
+        <button class="btn primary" data-yanta-plus-upgrade ${state.showUpgrade ? '' : 'hidden'}>
+          ${lucide('sparkles', 14)}
+          Upgrade to YANTA Plus
+        </button>
 
-              <button class="btn" data-yanta-plus-manage>
-                ${lucide('credit-card', 14)}
-                Manage billing
-              </button>
-            `
-        }
+        <button class="btn" data-yanta-plus-manage ${state.showManage ? '' : 'hidden'}>
+          ${lucide('credit-card', 14)}
+          Manage subscription
+        </button>
 
         <a class="btn" href="/pricing" target="_blank" rel="noopener">
           ${lucide('external-link', 14)}
           Pricing
         </a>
       </div>
+
+      <p class="yanta-cloud-plan-fineprint" data-yanta-plus-fineprint ${state.isPlus ? '' : 'hidden'}>
+        Update your payment method or cancel anytime — your subscription stays
+        active until the end of the paid period.
+      </p>
     </section>
   `;
+}
+
+/*
+  Fast render uses the DB-cached plan; if the renewal date sits in the past
+  a webhook was missed, so reconcile against Paddle and patch the section.
+*/
+async function reconcileCloudPlanSectionIfStale(modal, me = {}) {
+  const initial = describeBillingState({
+    plan: me.user?.plan || 'free',
+    billing: me.billing || null,
+  });
+
+  if (!initial.stale) return;
+
+  const statusEl = modal?.querySelector('[data-yanta-plus-status]');
+  const upgradeEl = modal?.querySelector('[data-yanta-plus-upgrade]');
+  const manageEl = modal?.querySelector('[data-yanta-plus-manage]');
+  const fineprintEl = modal?.querySelector('[data-yanta-plus-fineprint]');
+  if (!statusEl) return;
+
+  let fresh;
+  try {
+    fresh = await reconciledBillingSummary();
+  } catch (err) {
+    console.warn('[YANTA Billing] Reconcile failed', err);
+    fresh = { plan: me.user?.plan || 'free', billing: me.billing || null };
+  }
+
+  if (!statusEl.isConnected) return;
+
+  const state = describeBillingState(fresh, { afterReconcile: true });
+  statusEl.innerHTML = state.html;
+  if (upgradeEl) upgradeEl.hidden = !state.showUpgrade;
+  if (manageEl) manageEl.hidden = !state.showManage;
+  if (fineprintEl) fineprintEl.hidden = !state.isPlus;
 }
 
 async function hydrateUsageWithStorageBreakdown({
@@ -1958,6 +1985,8 @@ ${
       setStatus(err?.message || 'Could not open billing portal', 'error');
     }
   });
+
+  reconcileCloudPlanSectionIfStale(modal, me);
 
   modal.querySelectorAll('[data-vault-action="connect-this-device"]').forEach((btn) => {
     btn.addEventListener('click', () => {

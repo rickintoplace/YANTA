@@ -3300,14 +3300,14 @@ function renderYantaPlusBillingCard() {
       </div>
 
       <div class="compress-actions yanta-sync-card-actions">
-        <button class="btn primary" data-yanta-plus-upgrade>
+        <button class="btn primary" data-yanta-plus-upgrade hidden>
           ${lucide('sparkles', 14)}
           Upgrade to YANTA Plus
         </button>
 
-        <button class="btn" data-yanta-plus-manage>
+        <button class="btn" data-yanta-plus-manage hidden>
           ${lucide('credit-card', 14)}
-          Manage billing
+          Manage subscription
         </button>
 
         <a class="btn" href="/pricing" target="_blank" rel="noopener">
@@ -3315,38 +3315,43 @@ function renderYantaPlusBillingCard() {
           Pricing
         </a>
       </div>
+
+      <p class="yanta-sync-card-fineprint" data-yanta-plus-fineprint hidden>
+        Update your payment method or cancel anytime — your subscription stays
+        active until the end of the paid period.
+      </p>
     </div>
   `;
 
   const status = group.querySelector('[data-yanta-plus-status]');
   const upgrade = group.querySelector('[data-yanta-plus-upgrade]');
   const manage = group.querySelector('[data-yanta-plus-manage]');
+  const fineprint = group.querySelector('[data-yanta-plus-fineprint]');
+
+  const applyState = (state) => {
+    status.innerHTML = state.html;
+    upgrade.hidden = !state.showUpgrade;
+    manage.hidden = !state.showManage;
+    fineprint.hidden = !state.isPlus;
+  };
 
   import('./billing/billing-ui.js')
-    .then(({ currentBillingSummary }) => currentBillingSummary())
-    .then(({ plan, billing }) => {
-      if (plan === 'premium') {
-        status.innerHTML = `
-          <strong style="color:var(--green)">YANTA Plus is active.</strong>
-          ${
-            billing?.subscription?.currentPeriodEndsAt
-              ? `Current period ends ${new Date(billing.subscription.currentPeriodEndsAt).toLocaleDateString()}.`
-              : 'Thank you for supporting YANTA.'
-          }
-        `;
+    .then(async ({ currentBillingSummary, describeBillingState, reconciledBillingSummary }) => {
+      const summary = await currentBillingSummary();
+      const state = describeBillingState(summary);
+      applyState(state);
 
-        upgrade.hidden = true;
-        manage.hidden = false;
-        return;
+      // A past renewal date means the local plan cache missed a webhook.
+      // Reconcile against Paddle and re-render with the authoritative state.
+      if (state.stale) {
+        try {
+          const fresh = await reconciledBillingSummary();
+          applyState(describeBillingState(fresh, { afterReconcile: true }));
+        } catch (err) {
+          console.warn('[YANTA Billing] Reconcile failed', err);
+          applyState(describeBillingState(summary, { afterReconcile: true }));
+        }
       }
-
-      status.innerHTML = `
-        <strong>Free plan.</strong>
-        Upgrade when you need more encrypted cloud storage, more devices, or higher Included AI limits.
-      `;
-
-      upgrade.hidden = false;
-      manage.hidden = false;
     })
     .catch(() => {
       status.innerHTML = `
@@ -4428,6 +4433,13 @@ function injectSettingsCss() {
   margin-top: 13px;
   justify-content: flex-start;
   flex-wrap: wrap;
+}
+
+.yanta-sync-card-fineprint {
+  margin: 9px 2px 0;
+  color: var(--text-faint);
+  font-size: 11.5px;
+  line-height: 1.45;
 }
 
 .yanta-sync-advanced-details {

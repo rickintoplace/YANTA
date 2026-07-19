@@ -12,6 +12,7 @@ import {
 import {
   openBillingCheckout,
   openBillingPortal,
+  syncBillingNow,
 } from './billing-api.js';
 
 function userWantsEur() {
@@ -371,5 +372,124 @@ export async function currentBillingSummary() {
     billing: me?.billing || null,
     limits: me?.limits || {},
     usage: me?.usage || {},
+  };
+}
+
+/*
+  Paddle-authoritative refresh. The fast path (`/api/me`) only reads the
+  worker DB, so a missed or delayed renewal webhook can leave the plan or
+  renewal date stale. This reconciles directly against the Paddle API and
+  returns a summary in the same shape as currentBillingSummary().
+*/
+export async function reconciledBillingSummary() {
+  const res = await syncBillingNow();
+  const billing = res?.billing || null;
+
+  return {
+    me: null,
+    plan: billing?.plan || 'free',
+    planLabel: billing?.label || (billing?.plan === 'premium' ? 'YANTA Plus' : 'Free'),
+    billing,
+    limits: res?.limits || {},
+    usage: {},
+  };
+}
+
+function fmtBillingDate(ms) {
+  const value = Number(ms || 0);
+  if (!value) return '';
+
+  try {
+    return new Date(value).toLocaleDateString();
+  } catch {
+    return '';
+  }
+}
+
+/*
+  Single source of truth for the plan status line and which billing
+  buttons to show. Honest, period-aware copy: trials say "free until",
+  active subs say "renews", scheduled cancellations say "cancels".
+  `afterReconcile` is set once we have already pulled fresh Paddle state,
+  so a still-past period no longer promises a refresh that won't happen.
+*/
+export function describeBillingState({ plan, billing } = {}, { afterReconcile = false } = {}) {
+  const sub = billing?.subscription || null;
+  const isPlus = plan === 'premium';
+
+  const status = String(sub?.status || '').toLowerCase();
+  const endsAt = Number(sub?.currentPeriodEndsAt || 0);
+  const endsLabel = escapeHtml(fmtBillingDate(endsAt));
+  const cancels = !!sub?.cancelAtPeriodEnd;
+
+  // Period end sits in the past while the sub still claims to be running:
+  // the local DB missed a renewal. Reconcile before trusting the date.
+  const stale =
+    !afterReconcile &&
+    isPlus &&
+    endsAt > 0 &&
+    endsAt < Date.now() &&
+    (status === 'trialing' || status === 'active');
+
+  if (!isPlus) {
+    return {
+      isPlus: false,
+      stale: false,
+      showUpgrade: true,
+      showManage: !!sub,
+      html: `
+        <strong>Free plan.</strong>
+        Upgrade when you need more encrypted cloud storage, more devices, or higher Included AI limits.
+      `,
+    };
+  }
+
+  let html;
+
+  if (stale) {
+    html = `
+      <strong style="color:var(--green)">YANTA Plus is active.</strong>
+      Refreshing your renewal date…
+    `;
+  } else if (status === 'trialing') {
+    html = cancels
+      ? `
+        <strong style="color:var(--green)">YANTA Plus trial is active.</strong>
+        ${endsLabel ? `Your trial ends ${endsLabel} and won't renew — you won't be charged.` : `Your trial won't renew.`}
+      `
+      : `
+        <strong style="color:var(--green)">YANTA Plus trial is active.</strong>
+        ${endsLabel ? `Free until ${endsLabel}, then your subscription begins automatically.` : `Your subscription begins automatically when the trial ends.`}
+      `;
+  } else if (status === 'past_due') {
+    html = `
+      <strong style="color:var(--yellow)">Payment needs attention.</strong>
+      Update your payment method to keep YANTA Plus.
+    `;
+  } else if (cancels || status === 'canceled') {
+    html = endsLabel
+      ? `
+        <strong style="color:var(--green)">YANTA Plus is active.</strong>
+        Your subscription is canceled — you keep Plus until ${endsLabel}.
+      `
+      : `<strong style="color:var(--green)">YANTA Plus is active.</strong>`;
+  } else if (endsLabel) {
+    html = `
+      <strong style="color:var(--green)">YANTA Plus is active.</strong>
+      Renews ${endsLabel}.
+    `;
+  } else {
+    html = `
+      <strong style="color:var(--green)">YANTA Plus is active.</strong>
+      Thank you for supporting YANTA.
+    `;
+  }
+
+  return {
+    isPlus: true,
+    stale,
+    showUpgrade: false,
+    showManage: true,
+    html,
   };
 }

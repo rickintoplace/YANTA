@@ -26,7 +26,6 @@ import {
   searchHaystack,
 } from './notes.js';
 import { renderTree, renderTagCloud, showMenu, closeMenu, currentFolderForNew } from './tree.js';
-import { runFirstRunOnboarding, hasCompletedOnboarding } from './onboarding.js';
 import { renderBacklinks, renderOutline, setupWikilinkHover, handleWikilinkClick, openPalette, closePalette, buildCommandList, paletteMove, paletteAccept, paletteFilter } from './features.js';
 import { openImageModal, closeImageModal, setupImage, pickImageFile, cleanupUnusedImages, insertImageAsRef } from './image.js';
 import { openIconInsertPicker, openIconPicker } from './icon-picker.js';
@@ -1842,12 +1841,6 @@ function bootDone() {
 async function init() {
   bootStage('Opening your vault…', 48);
 
-  // Set when a fresh user reaches the dashboard for the first time. The
-  // capture-first onboarding overlay must NOT run inside the boot path
-  // (it awaits user input); we launch it after bootDone(), on top of the
-  // rendered dashboard.
-  let pendingFirstRunOnboarding = false;
-
   await openDB();
 
   // Create the VaultDoc first, healing any bloated local CRDT history before
@@ -2461,12 +2454,6 @@ async function init() {
         hideDashboard({ push: false });
       } else {
         // Normal app entry => Dashboard/Home.
-        // First contact: remember to run the capture-first welcome once the
-        // dashboard is live (see after bootDone()). This must not block boot.
-        if (!state.notes.size && !(await hasCompletedOnboarding())) {
-          pendingFirstRunOnboarding = true;
-        }
-
         if (!state.notes.size) {
           setNavSuppress(true);
 
@@ -2662,14 +2649,6 @@ async function init() {
 
   // First surface is rendered and interactive — release the boot loader.
   bootDone();
-
-  // Capture-first welcome, on top of the now-visible dashboard. Never
-  // awaited: it resolves only on user action, and boot is already done.
-  if (pendingFirstRunOnboarding) {
-    runFirstRunOnboarding().catch((err) => {
-      console.warn('[YANTA] first-run onboarding failed', err);
-    });
-  }
 
   // Opt-in semantic index: no-op unless enabled; starts in idle time.
   import('./semantic/semantic-index.js')

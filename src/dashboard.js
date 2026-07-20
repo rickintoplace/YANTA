@@ -29,6 +29,7 @@ import {
   openDashboardWidgetManager,
   hasDashboardWidgets,
 } from './dashboard-widgets.js';
+import { renderSyncNudgeInto } from './onboarding.js';
 
 import {
   currentGreeting,
@@ -2479,6 +2480,12 @@ function renderDashboard({ animate = true, force = false } = {}) {
   // Widgets live on the dashboard root only, never inside folders.
   // They fill in asynchronously and keep themselves fresh afterwards.
   if (!dashboard.folderId) {
+    // Non-blocking storage nudge for local-only users, above the widgets.
+    // Self-hiding: a no-op once the choice is settled or sync is on.
+    const nudgeHost = el('div', { class: 'yanta-dashboard-nudge-host' });
+    page.append(nudgeHost);
+    renderSyncNudgeInto(nudgeHost).catch(() => {});
+
     const widgetsHost = el('div', { class: 'yanta-dashboard-widgets' });
     page.append(widgetsHost);
     renderDashboardWidgetsInto(widgetsHost).catch(() => {});

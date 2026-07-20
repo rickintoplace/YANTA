@@ -68,9 +68,6 @@ function injectCss() {
 
   padding: 10px 12px;
 
-  border: 1px solid var(--border);
-  border-radius: 12px;
-
   background: var(--bg-elev);
 }
 

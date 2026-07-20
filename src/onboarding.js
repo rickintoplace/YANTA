@@ -1,15 +1,14 @@
 // ============================================================
-// YANTA — First-run onboarding
+// YANTA — Storage onboarding (non-blocking)
 //
-// A calm, capture-first welcome. The very first screen asks for
-// exactly one thing: a thought. Only after that first capture —
-// the aha moment — do we surface the storage choice
-// (Local / YANTA Cloud / Bring-your-own).
+// YANTA is local-first, so choosing where notes live (this device /
+// YANTA Cloud / your own Drive) is reversible and must never gate the
+// first use. There is no takeover screen: the app is fully usable the
+// instant it loads.
 //
-// Design intent: YANTA is local-first, so the storage decision is
-// non-destructive and reversible. It must never block the first
-// use. Local is the default; Cloud/BYO are opt-in upgrades that
-// layer sync on top and can be enabled here or anytime in Settings.
+// Instead, local-only users see one dismissible nudge on the dashboard.
+// The Local/Cloud/BYO chooser opens only when *they* ask for it — a
+// user-triggered dialog, never an unsolicited wall.
 // ============================================================
 
 import {
@@ -20,13 +19,35 @@ import {
   escapeHtml,
 } from './core.js';
 
-import { captureToJournal } from './journal.js';
+// Marks the storage decision as settled — set when the user picks a
+// destination or dismisses the nudge. Once set, the nudge stays gone.
+const DECIDED_FLAG = 'onboarding.storageChoice.v1';
 
-const ONBOARDING_FLAG = 'onboarding.v1';
+/**
+ * True once the user has made (or dismissed) the storage choice, OR sync
+ * is already configured — i.e. the nudge should not appear.
+ */
+async function storageChoiceSettled() {
+  try {
+    const [decided, provider] = await Promise.all([
+      store.settings.get(DECIDED_FLAG, null),
+      store.settings.get('sync2.provider', null),
+    ]);
 
-let overlay = null;
-let resolveRun = null;
-let prevBodyOverflow = '';
+    return decided === 'done' || !!provider;
+  } catch {
+    // On read failure, stay quiet rather than nag.
+    return true;
+  }
+}
+
+async function markDecided() {
+  try {
+    await store.settings.set(DECIDED_FLAG, 'done');
+  } catch (err) {
+    console.warn('[YANTA onboarding] could not persist storage choice', err);
+  }
+}
 
 function injectCss() {
   if (document.getElementById('yanta-onboarding-css')) return;
@@ -34,112 +55,30 @@ function injectCss() {
   const style = document.createElement('style');
   style.id = 'yanta-onboarding-css';
   style.textContent = `
-.yanta-onb {
-  position: fixed;
-  inset: 0;
-  z-index: 400;
+/* ---- Dashboard nudge (inline, dismissible, non-blocking) ---- */
 
+/* Match the widgets container's centered max-width so the nudge lines up. */
+.yanta-dashboard-nudge-host:not(:empty) {
+  width: min(1120px, 100%);
+  margin: 0 auto 14px;
+}
+
+.yanta-sync-nudge {
   display: flex;
   align-items: center;
-  justify-content: center;
+  gap: 14px;
 
-  padding: 24px;
+  padding: 14px 14px 14px 16px;
 
   background:
-    radial-gradient(circle at 50% -10%, color-mix(in srgb, var(--accent) 20%, transparent), transparent 55%),
-    color-mix(in srgb, var(--bg) 82%, black);
-  backdrop-filter: blur(6px);
-
-  animation: yanta-onb-fade 200ms ease;
-}
-
-.yanta-onb[hidden] {
-  display: none !important;
-}
-
-.yanta-onb-card {
-  width: min(560px, 100%);
-  max-height: 92vh;
-  overflow-y: auto;
-
-  padding: 32px 28px 24px;
-
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: 22px;
-  box-shadow: var(--shadow);
-
-  animation: yanta-onb-rise 260ms cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-.yanta-onb-hero-icon {
-  width: 52px;
-  height: 52px;
-
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-
-  color: var(--accent);
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-  border-radius: 18px;
-}
-
-.yanta-onb-title {
-  margin: 18px 0 6px;
-
-  color: var(--text);
-  font-size: 22px;
-  font-weight: 760;
-  line-height: 1.2;
-  letter-spacing: -0.01em;
-}
-
-.yanta-onb-sub {
-  margin: 0;
-
-  color: var(--text-dim);
-  font-size: 14.5px;
-  line-height: 1.5;
-}
-
-/* ---- Step 1: capture ---- */
-
-.yanta-onb-capture {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-
-  margin-top: 22px;
-  padding: 6px 6px 6px 16px;
-
-  background: var(--bg);
-  border: 1.5px solid var(--border);
+    linear-gradient(135deg, color-mix(in srgb, var(--accent) 9%, var(--bg-elev)), var(--bg-elev));
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--border));
   border-radius: 14px;
 
-  transition: border-color 140ms ease;
+  animation: yanta-sync-nudge-in 260ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.yanta-onb-capture:focus-within {
-  border-color: var(--accent);
-}
-
-.yanta-onb-capture input {
-  flex: 1;
-  min-width: 0;
-
-  padding: 10px 0;
-
-  background: none;
-  border: none;
-  outline: none;
-
-  color: var(--text);
-  font: inherit;
-  font-size: 15.5px;
-}
-
-.yanta-onb-send {
+.yanta-sync-nudge-icon {
   flex: 0 0 auto;
 
   width: 40px;
@@ -149,37 +88,133 @@ function injectCss() {
   align-items: center;
   justify-content: center;
 
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  border-radius: 12px;
+}
+
+.yanta-sync-nudge-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.yanta-sync-nudge-title {
+  color: var(--text);
+  font-size: 13.5px;
+  font-weight: 700;
+}
+
+.yanta-sync-nudge-sub {
+  margin-top: 2px;
+
+  color: var(--text-dim);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.yanta-sync-nudge-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.yanta-sync-nudge-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+
+  padding: 8px 13px;
+
   color: white;
   background: var(--accent);
   border: none;
-  border-radius: 10px;
+  border-radius: 9px;
+
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 650;
 
   cursor: pointer;
-  transition: opacity 140ms ease, transform 120ms ease;
+  transition: transform 120ms ease;
+  white-space: nowrap;
 }
 
-.yanta-onb-send:hover {
+.yanta-sync-nudge-cta:hover {
   transform: translateY(-1px);
 }
 
-.yanta-onb-send:disabled {
-  opacity: 0.45;
-  cursor: default;
-  transform: none;
-}
+.yanta-sync-nudge-dismiss {
+  flex: 0 0 auto;
 
-/* ---- Step 2: storage chooser ---- */
+  width: 30px;
+  height: 30px;
 
-.yanta-onb-saved {
   display: inline-flex;
   align-items: center;
-  gap: 7px;
+  justify-content: center;
 
-  margin-bottom: 4px;
+  color: var(--text-faint);
+  background: none;
+  border: none;
+  border-radius: 8px;
 
-  color: var(--green);
-  font-size: 13px;
-  font-weight: 650;
+  cursor: pointer;
+  transition: color 120ms ease, background 120ms ease;
+}
+
+.yanta-sync-nudge-dismiss:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+@media (max-width: 560px) {
+  .yanta-sync-nudge {
+    flex-wrap: wrap;
+  }
+
+  .yanta-sync-nudge-main {
+    flex-basis: calc(100% - 54px);
+  }
+
+  .yanta-sync-nudge-actions {
+    flex-basis: 100%;
+    justify-content: flex-end;
+  }
+}
+
+/* ---- Chooser dialog (user-triggered only) ---- */
+
+.yanta-onb-card {
+  width: min(500px, 94vw);
+  max-height: 90vh;
+  overflow-y: auto;
+
+  padding: 26px 24px 20px;
+
+  background: var(--bg-elev);
+  border: 1px solid var(--border);
+  border-radius: 20px;
+  box-shadow: var(--shadow);
+
+  animation: yanta-onb-rise 240ms cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.yanta-onb-title {
+  margin: 0 0 4px;
+
+  color: var(--text);
+  font-size: 19px;
+  font-weight: 750;
+  letter-spacing: -0.01em;
+}
+
+.yanta-onb-sub {
+  margin: 0;
+
+  color: var(--text-dim);
+  font-size: 13.5px;
+  line-height: 1.5;
 }
 
 .yanta-onb-cards {
@@ -187,7 +222,7 @@ function injectCss() {
   flex-direction: column;
   gap: 10px;
 
-  margin: 20px 0 16px;
+  margin: 18px 0 14px;
 }
 
 .yanta-onb-choice {
@@ -196,12 +231,12 @@ function injectCss() {
   gap: 13px;
 
   width: 100%;
-  padding: 14px 15px;
+  padding: 13px 14px;
   text-align: left;
 
   background: var(--bg);
   border: 1.5px solid var(--border);
-  border-radius: 14px;
+  border-radius: 13px;
 
   cursor: pointer;
   transition: border-color 140ms ease, background 140ms ease;
@@ -219,8 +254,8 @@ function injectCss() {
 .yanta-onb-choice-icon {
   flex: 0 0 auto;
 
-  width: 38px;
-  height: 38px;
+  width: 36px;
+  height: 36px;
 
   display: inline-flex;
   align-items: center;
@@ -228,7 +263,7 @@ function injectCss() {
 
   color: var(--accent);
   background: color-mix(in srgb, var(--accent) 12%, transparent);
-  border-radius: 11px;
+  border-radius: 10px;
 }
 
 .yanta-onb-choice-main {
@@ -244,7 +279,7 @@ function injectCss() {
 
 .yanta-onb-choice-title {
   color: var(--text);
-  font-size: 14.5px;
+  font-size: 14px;
   font-weight: 700;
 }
 
@@ -255,7 +290,7 @@ function injectCss() {
   background: color-mix(in srgb, var(--accent) 14%, transparent);
   border-radius: 999px;
 
-  font-size: 10.5px;
+  font-size: 10px;
   font-weight: 700;
   letter-spacing: 0.02em;
   text-transform: uppercase;
@@ -270,13 +305,12 @@ function injectCss() {
   margin: 3px 0 0;
 
   color: var(--text-dim);
-  font-size: 12.5px;
+  font-size: 12px;
   line-height: 1.45;
 }
 
 .yanta-onb-choice-check {
   flex: 0 0 auto;
-
   align-self: center;
 
   color: var(--accent);
@@ -293,10 +327,10 @@ function injectCss() {
   align-items: flex-start;
   gap: 7px;
 
-  margin: 0 0 18px;
+  margin: 0 0 16px;
 
   color: var(--text-faint);
-  font-size: 12px;
+  font-size: 11.5px;
   line-height: 1.45;
 }
 
@@ -305,29 +339,10 @@ function injectCss() {
   margin-top: 1px;
 }
 
-/* ---- shared actions ---- */
-
 .yanta-onb-actions {
   display: flex;
   align-items: center;
   gap: 10px;
-}
-
-.yanta-onb-skip {
-  padding: 8px 4px;
-
-  background: none;
-  border: none;
-
-  color: var(--text-faint);
-  font: inherit;
-  font-size: 13px;
-
-  cursor: pointer;
-}
-
-.yanta-onb-skip:hover {
-  color: var(--text-dim);
 }
 
 .yanta-onb-spacer {
@@ -339,52 +354,42 @@ function injectCss() {
   align-items: center;
   gap: 7px;
 
-  padding: 10px 18px;
+  padding: 9px 17px;
 
   color: white;
   background: var(--accent);
   border: none;
-  border-radius: 11px;
+  border-radius: 10px;
 
   font: inherit;
-  font-size: 14px;
+  font-size: 13.5px;
   font-weight: 650;
 
   cursor: pointer;
-  transition: transform 120ms ease, opacity 140ms ease;
+  transition: transform 120ms ease;
 }
 
 .yanta-onb-primary:hover {
   transform: translateY(-1px);
 }
 
-@keyframes yanta-onb-fade {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
-
-@keyframes yanta-onb-rise {
-  from { opacity: 0; transform: translateY(12px) scale(0.985); }
+@keyframes yanta-sync-nudge-in {
+  from { opacity: 0; transform: translateY(-6px); }
   to { opacity: 1; transform: none; }
 }
 
-@media (max-width: 520px) {
-  .yanta-onb-card {
-    padding: 26px 20px 20px;
-  }
-
-  .yanta-onb-title {
-    font-size: 20px;
-  }
+@keyframes yanta-onb-rise {
+  from { opacity: 0; transform: translateY(10px) scale(0.99); }
+  to { opacity: 1; transform: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .yanta-onb,
+  .yanta-sync-nudge,
   .yanta-onb-card {
     animation: none;
   }
 
-  .yanta-onb-send:hover,
+  .yanta-sync-nudge-cta:hover,
   .yanta-onb-primary:hover {
     transform: none;
   }
@@ -394,162 +399,7 @@ function injectCss() {
   document.head.append(style);
 }
 
-function ensureOverlay() {
-  if (overlay) return overlay;
-
-  injectCss();
-
-  overlay = el('div', {
-    class: 'yanta-onb',
-    role: 'dialog',
-    'aria-modal': 'true',
-    'aria-label': 'Welcome to YANTA',
-    hidden: true,
-  });
-
-  // Escape skips onboarding entirely (Local default) — never a trap.
-  overlay.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      finish('skip');
-    }
-  });
-
-  document.body.append(overlay);
-
-  return overlay;
-}
-
-function open() {
-  const m = ensureOverlay();
-
-  prevBodyOverflow = document.body.style.overflow;
-  document.body.style.overflow = 'hidden';
-
-  m.hidden = false;
-}
-
-async function finish(choice) {
-  // Idempotent: the first resolve wins; later calls (e.g. a stray
-  // Escape after Continue) are ignored.
-  const resolve = resolveRun;
-  resolveRun = null;
-
-  try {
-    await store.settings.set(ONBOARDING_FLAG, 'done');
-  } catch (err) {
-    console.warn('[YANTA onboarding] could not persist flag', err);
-  }
-
-  if (overlay) {
-    overlay.hidden = true;
-    overlay.replaceChildren();
-  }
-
-  document.body.style.overflow = prevBodyOverflow;
-
-  // Cloud / BYO setup opens on the next tick, so the dashboard the
-  // caller renders after we resolve is already underneath it.
-  if (choice === 'cloud' || choice === 'byo') {
-    setTimeout(() => openStorageSetup(choice), 0);
-  }
-
-  if (typeof resolve === 'function') resolve({ choice });
-}
-
-async function openStorageSetup(choice) {
-  try {
-    if (choice === 'cloud') {
-      const { openYantaCloudSetup } = await import('./sync2/yanta-cloud-setup-ui.js');
-      await openYantaCloudSetup();
-    } else if (choice === 'byo') {
-      const { openGoogleDriveSyncSetup } = await import('./sync2/sync-setup-ui.js');
-      openGoogleDriveSyncSetup();
-    }
-  } catch (err) {
-    console.warn('[YANTA onboarding] could not open storage setup', err);
-    toast('Could not open sync setup. You can enable it anytime in Settings.', 'error');
-  }
-}
-
-function renderCaptureStep() {
-  const card = el('div', { class: 'yanta-onb-card' });
-
-  card.innerHTML = `
-    <div class="yanta-onb-hero-icon">${lucide('feather', 26)}</div>
-
-    <h2 class="yanta-onb-title">Think out loud.<br>YANTA keeps it in order.</h2>
-    <p class="yanta-onb-sub">
-      Every quick thought lands in today’s note — searchable, linkable, yours.
-      Start with just one.
-    </p>
-
-    <div class="yanta-onb-capture">
-      <input
-        type="text"
-        data-onb-input
-        placeholder="What’s on your mind right now?"
-        autocomplete="off"
-        autocapitalize="sentences"
-        spellcheck="false"
-        maxlength="280" />
-
-      <button class="yanta-onb-send" data-onb-capture type="button" title="Capture" disabled>
-        ${lucide('arrow-right', 18)}
-      </button>
-    </div>
-
-    <div class="yanta-onb-actions" style="margin-top: 18px;">
-      <button class="yanta-onb-skip" data-onb-skip type="button">Skip for now</button>
-      <span class="yanta-onb-spacer"></span>
-    </div>
-  `;
-
-  overlay.replaceChildren(card);
-
-  const input = card.querySelector('[data-onb-input]');
-  const sendBtn = card.querySelector('[data-onb-capture]');
-
-  const refresh = () => {
-    sendBtn.disabled = !input.value.trim();
-  };
-
-  const submit = async () => {
-    const text = input.value.trim();
-    if (!text) return;
-
-    sendBtn.disabled = true;
-    input.disabled = true;
-
-    try {
-      await captureToJournal(text, { source: 'onboarding' });
-    } catch (err) {
-      console.warn('[YANTA onboarding] first capture failed', err);
-      input.disabled = false;
-      refresh();
-      toast('Could not save that just now — try again.', 'error');
-      input.focus();
-      return;
-    }
-
-    renderChooseStep({ captured: true });
-  };
-
-  input.addEventListener('input', refresh);
-
-  input.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      e.preventDefault();
-      submit();
-    }
-  });
-
-  sendBtn.addEventListener('click', submit);
-
-  card.querySelector('[data-onb-skip]')?.addEventListener('click', () => finish('skip'));
-
-  setTimeout(() => input.focus(), 60);
-}
+// ---------------- Chooser dialog (user-triggered) ----------------
 
 const STORAGE_CHOICES = [
   {
@@ -575,12 +425,62 @@ const STORAGE_CHOICES = [
   },
 ];
 
-function renderChooseStep({ captured = false } = {}) {
-  const card = el('div', { class: 'yanta-onb-card' });
+let chooserModal = null;
 
-  const savedBanner = captured
-    ? `<div class="yanta-onb-saved">${lucide('check-circle-2', 15)} Saved to today’s note</div>`
-    : '';
+function closeChooser() {
+  if (chooserModal) {
+    chooserModal.hidden = true;
+    chooserModal.replaceChildren();
+  }
+}
+
+async function applyChoice(choice, { onSettled } = {}) {
+  await markDecided();
+  closeChooser();
+
+  try {
+    if (choice === 'cloud') {
+      const { openYantaCloudSetup } = await import('./sync2/yanta-cloud-setup-ui.js');
+      await openYantaCloudSetup();
+    } else if (choice === 'byo') {
+      const { openGoogleDriveSyncSetup } = await import('./sync2/sync-setup-ui.js');
+      openGoogleDriveSyncSetup();
+    } else {
+      toast('Your notes stay on this device. You can enable sync anytime in Settings.', 'info');
+    }
+  } catch (err) {
+    console.warn('[YANTA onboarding] could not open storage setup', err);
+    toast('Could not open sync setup. You can enable it anytime in Settings.', 'error');
+  }
+
+  if (typeof onSettled === 'function') onSettled();
+}
+
+/**
+ * Opens the storage chooser. Only ever called from an explicit user
+ * action (the dashboard nudge, or Settings) — never on load.
+ */
+export function openStorageChooser({ onSettled } = {}) {
+  injectCss();
+
+  if (!chooserModal) {
+    chooserModal = el('div', { class: 'modal', hidden: true });
+
+    chooserModal.addEventListener('click', (e) => {
+      if (e.target === chooserModal || e.target.closest?.('[data-onb-close]')) {
+        closeChooser();
+      }
+    });
+
+    window.addEventListener('keydown', (e) => {
+      if (chooserModal?.hidden === false && e.key === 'Escape') {
+        e.preventDefault();
+        closeChooser();
+      }
+    });
+
+    document.body.append(chooserModal);
+  }
 
   const cardsHtml = STORAGE_CHOICES.map((c, i) => `
     <div
@@ -589,7 +489,7 @@ function renderChooseStep({ captured = false } = {}) {
       tabindex="${i === 0 ? '0' : '-1'}"
       aria-checked="${i === 0 ? 'true' : 'false'}"
       data-onb-choice="${c.id}">
-      <div class="yanta-onb-choice-icon">${lucide(c.icon, 19)}</div>
+      <div class="yanta-onb-choice-icon">${lucide(c.icon, 18)}</div>
 
       <div class="yanta-onb-choice-main">
         <div class="yanta-onb-choice-head">
@@ -603,39 +503,39 @@ function renderChooseStep({ captured = false } = {}) {
     </div>
   `).join('');
 
-  card.innerHTML = `
-    ${savedBanner}
+  chooserModal.innerHTML = `
+    <div class="yanta-onb-card" role="dialog" aria-modal="true" aria-label="Where should your notes live?">
+      <h2 class="yanta-onb-title">Where should your notes live?</h2>
+      <p class="yanta-onb-sub">Pick a starting point — this isn’t permanent.</p>
 
-    <h2 class="yanta-onb-title">Where should your notes live?</h2>
-    <p class="yanta-onb-sub">Pick a starting point — this isn’t permanent.</p>
+      <div class="yanta-onb-cards" role="radiogroup" aria-label="Storage location">
+        ${cardsHtml}
+      </div>
 
-    <div class="yanta-onb-cards" role="radiogroup" aria-label="Storage location">
-      ${cardsHtml}
-    </div>
+      <p class="yanta-onb-footnote">
+        ${lucide('shield-check', 14)}
+        <span>You can change this anytime in Settings — your notes stay put when you do.</span>
+      </p>
 
-    <p class="yanta-onb-footnote">
-      ${lucide('shield-check', 14)}
-      <span>You can change this anytime in Settings — your notes stay put when you do.</span>
-    </p>
-
-    <div class="yanta-onb-actions">
-      <button class="yanta-onb-skip" data-onb-later type="button">Not now</button>
-      <span class="yanta-onb-spacer"></span>
-      <button class="yanta-onb-primary" data-onb-continue type="button">
-        Continue
-        ${lucide('arrow-right', 16)}
-      </button>
+      <div class="yanta-onb-actions">
+        <button class="yanta-sync-nudge-dismiss" data-onb-close type="button" title="Close" style="width:auto;padding:8px 4px;font-size:13px;">Cancel</button>
+        <span class="yanta-onb-spacer"></span>
+        <button class="yanta-onb-primary" data-onb-continue type="button">
+          Continue
+          ${lucide('arrow-right', 16)}
+        </button>
+      </div>
     </div>
   `;
 
-  overlay.replaceChildren(card);
+  chooserModal.hidden = false;
 
+  const card = chooserModal.querySelector('.yanta-onb-card');
   const choices = [...card.querySelectorAll('[data-onb-choice]')];
   let selected = 'local';
 
   const select = (id) => {
     selected = id;
-
     for (const node of choices) {
       const isMatch = node.dataset.onbChoice === id;
       node.setAttribute('aria-checked', isMatch ? 'true' : 'false');
@@ -653,45 +553,74 @@ function renderChooseStep({ captured = false } = {}) {
         return;
       }
 
-      // Roving focus within the radio group.
       let next = -1;
       if (e.key === 'ArrowDown' || e.key === 'ArrowRight') next = (i + 1) % choices.length;
       if (e.key === 'ArrowUp' || e.key === 'ArrowLeft') next = (i - 1 + choices.length) % choices.length;
 
       if (next >= 0) {
         e.preventDefault();
-        const node2 = choices[next];
-        select(node2.dataset.onbChoice);
-        node2.focus();
+        select(choices[next].dataset.onbChoice);
+        choices[next].focus();
       }
     });
   });
 
-  card.querySelector('[data-onb-continue]')?.addEventListener('click', () => finish(selected));
-  card.querySelector('[data-onb-later]')?.addEventListener('click', () => finish('local'));
+  card.querySelector('[data-onb-continue]')?.addEventListener('click', () => {
+    applyChoice(selected, { onSettled });
+  });
+
+  setTimeout(() => choices[0]?.focus(), 40);
 }
+
+// ---------------- Dashboard nudge (inline, dismissible) ----------------
 
 /**
- * Runs the first-run onboarding overlay. Resolves once the user has
- * finished or skipped — the caller then renders the dashboard, with any
- * Cloud/BYO setup layering on top.
- *
- * Resolves to `{ choice }` where choice is one of
- * 'local' | 'cloud' | 'byo' | 'skip'.
+ * Appends the dismissible "set up sync" nudge to `host` — but only for
+ * local-only users who haven't settled the choice yet. A no-op otherwise,
+ * so it is safe to call on every dashboard render.
  */
-export function runFirstRunOnboarding() {
-  return new Promise((resolve) => {
-    resolveRun = resolve;
-    open();
-    renderCaptureStep();
-  });
-}
+export async function renderSyncNudgeInto(host) {
+  if (!host) return;
 
-/** Whether the first-run onboarding has already been completed/skipped. */
-export async function hasCompletedOnboarding() {
-  try {
-    return (await store.settings.get(ONBOARDING_FLAG, null)) === 'done';
-  } catch {
-    return false;
-  }
+  if (await storageChoiceSettled()) return;
+
+  // The dashboard may have re-rendered while we were awaiting; bail if the
+  // host we were handed is gone.
+  if (host.isConnected === false) return;
+
+  injectCss();
+
+  const nudge = el('div', { class: 'yanta-sync-nudge' });
+
+  nudge.innerHTML = `
+    <div class="yanta-sync-nudge-icon">${lucide('cloud', 20)}</div>
+
+    <div class="yanta-sync-nudge-main">
+      <div class="yanta-sync-nudge-title">Your notes live on this device</div>
+      <div class="yanta-sync-nudge-sub">Set up sync to keep them on all your devices — end-to-end encrypted.</div>
+    </div>
+
+    <div class="yanta-sync-nudge-actions">
+      <button class="yanta-sync-nudge-cta" data-nudge-setup type="button">
+        ${lucide('arrow-right', 14)}
+        Set up sync
+      </button>
+      <button class="yanta-sync-nudge-dismiss" data-nudge-dismiss type="button" title="Dismiss" aria-label="Dismiss">
+        ${lucide('x', 16)}
+      </button>
+    </div>
+  `;
+
+  nudge.querySelector('[data-nudge-setup]')?.addEventListener('click', () => {
+    openStorageChooser({
+      onSettled: () => nudge.remove(),
+    });
+  });
+
+  nudge.querySelector('[data-nudge-dismiss]')?.addEventListener('click', async () => {
+    nudge.remove();
+    await markDecided();
+  });
+
+  host.append(nudge);
 }

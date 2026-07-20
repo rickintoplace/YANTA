@@ -1037,6 +1037,26 @@ let modal = null;
 let activeSection = 'appearance';
 let settingsOverlayRegistered = false;
 
+// Section registry — drives the rail, the mobile drill-down list and search.
+// `keywords` widens search matches beyond the visible label.
+const SETTINGS_SECTIONS = [
+  { id: 'appearance',   label: 'Appearance',      icon: 'palette',        keywords: 'theme dark light mode look' },
+  { id: 'colors',       label: 'Colors',          icon: 'paintbrush',     keywords: 'palette accent color scheme' },
+  { id: 'typography',   label: 'Typography',      icon: 'type',           keywords: 'font size text' },
+  { id: 'dashboard',    label: 'Dashboard',       icon: 'layout-dashboard', keywords: 'home widgets greeting' },
+  { id: 'quick-create', label: 'Quick Create',    icon: 'circle-plus',    keywords: 'floating create menu bubble action' },
+  { id: 'calendar',     label: 'Calendar',        icon: 'calendar-days',  keywords: 'events reminders ics' },
+  { id: 'sources',      label: 'Sources',         icon: 'rss',            keywords: 'rss feeds sources' },
+  { id: 'ai',           label: 'AI',              icon: 'bot',            keywords: 'assistant model provider' },
+  { id: 'semantic',     label: 'Semantic search', icon: 'brain-circuit',  keywords: 'embeddings vector search' },
+  { id: 'chat',         label: 'Chat',            icon: 'message-circle', keywords: 'messages conversation' },
+  { id: 'sync',         label: 'Sync & Backup',   icon: 'refresh-cw',     keywords: 'cloud backup devices encrypted google drive' },
+  { id: 'notifications', label: 'Notifications',  icon: 'bell',           keywords: 'alerts push reminders' },
+  { id: 'install',      label: 'Install app',     icon: 'smartphone',     keywords: 'pwa install app native' },
+  { id: 'billing',      label: 'Plan & Billing',  icon: 'credit-card',    keywords: 'subscription plus upgrade payment invoice plan paddle' },
+  { id: 'about',        label: 'About',           icon: 'info',           keywords: 'version legal license' },
+];
+
 function settingsIsOpen() {
   return !!modal && modal.hidden === false;
 }
@@ -1074,6 +1094,9 @@ export function openSettings({
   modal.hidden = false;
   renderSettingsBody();
 
+  // On mobile, always land on the section list rather than a stale detail pane.
+  if (wasClosed) setMobileDetail(false);
+
   if (!fromHistory && wasClosed) {
     pushOverlayState('settings');
   }
@@ -1107,43 +1130,47 @@ function ensureModal() {
   const card = el('div', { class: 'modal-card yanta-settings-card' });
 
   const head = el('header', { class: 'modal-head' },
+    el('button', {
+      class: 'icon-btn yanta-settings-back',
+      onclick: () => setMobileDetail(false),
+      title: 'Back',
+      'aria-label': 'Back to settings',
+    }, lucide('chevron-left', 18)),
     el('h3', {}, 'Settings'),
     el('button', { class: 'icon-btn', onclick: closeSettings, title: 'Close' }, '✕'),
   );
 
   const body = el('div', { class: 'yanta-settings-body' });
 
-  // Left rail: sections
+  // Left rail: search + section list. On mobile the rail is the master list of
+  // a drill-down; selecting a section reveals the detail pane (see setMobileDetail).
   const rail = el('nav', { class: 'yanta-settings-rail' });
-  const sections = [
-    { id: 'appearance', label: 'Appearance', icon: 'palette' },
-    { id: 'colors',     label: 'Colors',     icon: 'paintbrush' },
-    { id: 'typography', label: 'Typography', icon: 'type' },
-    { id: 'dashboard',  label: 'Dashboard',  icon: 'layout-dashboard' },
-    { id: 'quick-create', label: 'Quick Create', icon: 'circle-plus' },
-    { id: 'calendar',   label: 'Calendar',   icon: 'calendar-days' },
-    { id: 'sources',    label: 'Sources',    icon: 'rss' },
-    { id: 'ai',         label: 'AI',         icon: 'bot' },
-    { id: 'semantic',   label: 'Semantic search', icon: 'brain-circuit' },
-    { id: 'chat',       label: 'Chat',       icon: 'message-circle' },
-    { id: 'sync',       label: 'Sync & Backup', icon: 'refresh-cw' },
-    { id: 'notifications', label: 'Notifications', icon: 'bell' },
-    { id: 'install',    label: 'Install app', icon: 'smartphone' },
-    { id: 'about',      label: 'About',      icon: 'info' },
-  ];
 
-  for (const s of sections) {
+  const search = el('input', {
+    class: 'yanta-settings-search',
+    type: 'search',
+    placeholder: 'Search settings…',
+    'aria-label': 'Search settings',
+  });
+  search.addEventListener('input', () => filterSettingsRail(search.value));
+
+  const railList = el('div', { class: 'yanta-settings-rail-list' });
+  const railEmpty = el('div', { class: 'yanta-settings-rail-empty', hidden: true }, 'No matching settings');
+
+  for (const s of SETTINGS_SECTIONS) {
     const btn = el('button', {
       class: 'yanta-settings-rail-btn' + (activeSection === s.id ? ' active' : ''),
-      dataset: { section: s.id },
-      onclick: () => {
-        activeSection = s.id;
-        renderSettingsBody();
-      },
+      dataset: { section: s.id, search: `${s.label} ${s.keywords || ''}`.toLowerCase() },
+      onclick: () => goToSection(s.id),
     });
-    btn.innerHTML = `${lucide(s.icon, 14)} <span>${s.label}</span>`;
-    rail.append(btn);
+    btn.innerHTML =
+      `${lucide(s.icon, 16)}` +
+      `<span class="yanta-settings-rail-label">${s.label}</span>` +
+      `<span class="yanta-settings-rail-chevron">${lucide('chevron-right', 15)}</span>`;
+    railList.append(btn);
   }
+
+  rail.append(search, railList, railEmpty);
 
   const content = el('div', { class: 'yanta-settings-content' });
 
@@ -1189,7 +1216,37 @@ function renderSettingsBody() {
   else if (activeSection === 'sync') renderSyncSection(content);
   else if (activeSection === 'notifications') renderNotificationsSection(content);
   else if (activeSection === 'install') renderInstallSection(content);
+  else if (activeSection === 'billing') renderBillingSection(content);
   else if (activeSection === 'about') renderAboutSection(content);
+}
+
+// Navigate to a section. On mobile this also enters the detail pane of the
+// drill-down; on desktop the extra state is inert (both panes stay visible).
+function goToSection(id) {
+  activeSection = id;
+  renderSettingsBody();
+  setMobileDetail(true);
+}
+
+// Toggle the mobile drill-down between the section list and the detail pane.
+function setMobileDetail(on) {
+  modal?.querySelector('.yanta-settings-card')?.classList.toggle('is-detail', on);
+}
+
+// Filter the rail as the user types. Matches label + keywords.
+function filterSettingsRail(query) {
+  if (!modal) return;
+  const q = query.trim().toLowerCase();
+  let visible = 0;
+
+  for (const btn of modal.querySelectorAll('.yanta-settings-rail-btn')) {
+    const match = !q || (btn.dataset.search || '').includes(q);
+    btn.hidden = !match;
+    if (match) visible += 1;
+  }
+
+  const empty = modal.querySelector('.yanta-settings-rail-empty');
+  if (empty) empty.hidden = visible > 0;
 }
 
 // ---- Notifications section ----
@@ -3101,9 +3158,20 @@ function renderSyncSection(host) {
   ));
 
   host.append(renderYantaCloudSyncPrimaryCard());
-  host.append(renderYantaPlusBillingCard());
   host.append(renderEncryptedBackupCard());
   host.append(renderAdvancedSyncMethods());
+}
+
+// ---- Plan & Billing section ----
+function renderBillingSection(host) {
+  host.replaceChildren();
+
+  host.append(sectionHeader(
+    'Plan & Billing',
+    'Manage your YANTA Plus subscription, payment method and invoices.'
+  ));
+
+  host.append(renderYantaPlusBillingCard());
 }
 
 function renderYantaCloudSyncPrimaryCard() {
@@ -3666,9 +3734,43 @@ function injectSettingsCss() {
   padding: 12px 8px;
   display: flex;
   flex-direction: column;
+  gap: 8px;
+  overflow: hidden;
+  min-height: 0;
+}
+
+.yanta-settings-search {
+  flex: 0 0 auto;
+  width: 100%;
+  padding: 7px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.yanta-settings-search:focus {
+  outline: none;
+  border-color: var(--accent);
+}
+
+.yanta-settings-search::placeholder { color: var(--text-faint); }
+
+.yanta-settings-rail-list {
+  display: flex;
+  flex-direction: column;
   gap: 2px;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow-y: auto;
-  height: fit-content;
+}
+
+.yanta-settings-rail-empty {
+  padding: 12px;
+  font-size: 12px;
+  color: var(--text-faint);
+  text-align: center;
 }
 
 .yanta-settings-rail-btn {
@@ -3685,6 +3787,16 @@ function injectSettingsCss() {
   font-size: 13px;
 }
 
+.yanta-settings-rail-btn[hidden] { display: none; }
+
+.yanta-settings-rail-label { flex: 1; min-width: 0; }
+
+/* Drill-down affordance — mobile only. */
+.yanta-settings-rail-chevron {
+  display: none;
+  color: var(--text-faint);
+}
+
 .yanta-settings-rail-btn:hover {
   background: var(--bg-elev-3);
   color: var(--text);
@@ -3695,6 +3807,9 @@ function injectSettingsCss() {
   color: var(--accent);
   font-weight: 600;
 }
+
+/* Back button in the header — mobile drill-down only. */
+.yanta-settings-back { display: none; }
 
 .yanta-settings-content {
   overflow-y: auto;
@@ -4517,24 +4632,40 @@ function injectSettingsCss() {
     grid-template-columns: 1fr;
   }
 
+  /* Drill-down: the rail is a full-width vertical list (master),
+     the content is the detail. Only one is visible at a time. */
   .yanta-settings-rail {
-    flex-direction: row;
     border-right: 0;
-    border-bottom: 1px solid var(--border);
-    overflow-x: auto;
-    padding: 8px;
-    gap: 4px;
-    justify-content: space-around;
+    padding: 12px;
+    gap: 10px;
   }
+
+  .yanta-settings-rail-list { gap: 4px; }
 
   .yanta-settings-rail-btn {
-    flex: 0 0 auto;
-    white-space: nowrap;
+    padding: 13px 12px;
+    font-size: 15px;
+    border-radius: 10px;
   }
 
-  .yanta-settings-rail-btn span {
-    display: none;
+  .yanta-settings-rail-btn.active {
+    background: transparent;
+    color: var(--text-dim);
+    font-weight: 400;
   }
+
+  .yanta-settings-rail-btn:active { background: var(--bg-elev-3); }
+
+  .yanta-settings-rail-chevron { display: inline-flex; }
+
+  /* List mode → show rail, hide detail. Detail mode → the reverse. */
+  .yanta-settings-card:not(.is-detail) .yanta-settings-content { display: none; }
+
+  .yanta-settings-card.is-detail .yanta-settings-rail { display: none; }
+
+  .yanta-settings-card.is-detail .yanta-settings-back { display: inline-flex; }
+
+  .yanta-settings-content { padding: 18px 18px 28px; }
 
   .yanta-settings-field {
     display: flex;

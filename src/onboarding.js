@@ -597,7 +597,7 @@ export async function renderSyncNudgeInto(host) {
 
     <div class="yanta-sync-nudge-main">
       <div class="yanta-sync-nudge-title">Your notes live on this device</div>
-      <div class="yanta-sync-nudge-sub">Set up sync to keep them on all your devices — end-to-end encrypted.</div>
+      <div class="yanta-sync-nudge-sub">Set up sync to keep them on all your devices. End-to-end encrypted.</div>
     </div>
 
     <div class="yanta-sync-nudge-actions">

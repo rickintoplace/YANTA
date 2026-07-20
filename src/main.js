@@ -26,6 +26,7 @@ import {
   searchHaystack,
 } from './notes.js';
 import { renderTree, renderTagCloud, showMenu, closeMenu, currentFolderForNew } from './tree.js';
+import { runFirstRunOnboarding, hasCompletedOnboarding } from './onboarding.js';
 import { renderBacklinks, renderOutline, setupWikilinkHover, handleWikilinkClick, openPalette, closePalette, buildCommandList, paletteMove, paletteAccept, paletteFilter } from './features.js';
 import { openImageModal, closeImageModal, setupImage, pickImageFile, cleanupUnusedImages, insertImageAsRef } from './image.js';
 import { openIconInsertPicker, openIconPicker } from './icon-picker.js';
@@ -2454,6 +2455,22 @@ async function init() {
         hideDashboard({ push: false });
       } else {
         // Normal app entry => Dashboard/Home.
+        // First contact: a calm, capture-first welcome that surfaces the
+        // storage choice only after the first capture. It resolves before
+        // we render the dashboard; any Cloud/BYO setup layers on top.
+        if (!state.notes.size && !(await hasCompletedOnboarding())) {
+          setNavSuppress(true);
+
+          try {
+            await runFirstRunOnboarding();
+          } finally {
+            setNavSuppress(false);
+          }
+        }
+
+        // Seed the built-in "learn what YANTA can do" vault only if the
+        // user arrives with nothing — a first capture during onboarding
+        // already gives them content, so the engaged path stays clutter-free.
         if (!state.notes.size) {
           setNavSuppress(true);
 

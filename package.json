@@ -11,6 +11,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "lint": "eslint src/**/*.js",
+    "i18n:check": "node scripts/i18n-check.mjs",
+    "check": "npm run i18n:check && npm run lint",
     "format": "prettier --write .",
     "build:rss-catalog": "node scripts/build-rss-catalog-from-plenary.mjs vendor/awesome-rss-feeds src/rss/rss-catalog.js"
   },

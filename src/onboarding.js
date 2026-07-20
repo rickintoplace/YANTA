@@ -18,6 +18,7 @@ import {
   store,
   escapeHtml,
 } from './core.js';
+import { t } from './i18n/index.js';
 
 // Marks the storage decision as settled — set when the user picks a
 // destination or dismisses the nudge. Once set, the nudge stays gone.
@@ -401,28 +402,13 @@ function injectCss() {
 
 // ---------------- Chooser dialog (user-triggered) ----------------
 
+// Static shape only — all copy is resolved from the catalog at render time
+// (onboarding.choices.<id>.* and onboarding.badge.<badge>) so it follows the
+// active locale.
 const STORAGE_CHOICES = [
-  {
-    id: 'local',
-    icon: 'hard-drive',
-    title: 'On this device',
-    badge: { label: 'Default', muted: true },
-    desc: 'No account, nothing to set up. Private by default — your notes never leave this device.',
-  },
-  {
-    id: 'cloud',
-    icon: 'cloud',
-    title: 'YANTA Cloud',
-    badge: { label: 'Recommended', muted: false },
-    desc: 'Sync across all your devices, end-to-end encrypted. We only ever store encrypted objects.',
-  },
-  {
-    id: 'byo',
-    icon: 'folder-sync',
-    title: 'Your own Google Drive',
-    badge: { label: 'Advanced', muted: true },
-    desc: 'Bring your own storage. Encrypted sync runs through a Drive folder you fully control.',
-  },
+  { id: 'local', icon: 'hard-drive',  badge: 'default',     badgeMuted: true },
+  { id: 'cloud', icon: 'cloud',       badge: 'recommended', badgeMuted: false },
+  { id: 'byo',   icon: 'folder-sync', badge: 'advanced',    badgeMuted: true },
 ];
 
 let chooserModal = null;
@@ -446,11 +432,11 @@ async function applyChoice(choice, { onSettled } = {}) {
       const { openGoogleDriveSyncSetup } = await import('./sync2/sync-setup-ui.js');
       openGoogleDriveSyncSetup();
     } else {
-      toast('Your notes stay on this device. You can enable sync anytime in Settings.', 'info');
+      toast(t('onboarding.localToast'), 'info');
     }
   } catch (err) {
     console.warn('[YANTA onboarding] could not open storage setup', err);
-    toast('Could not open sync setup. You can enable it anytime in Settings.', 'error');
+    toast(t('onboarding.openError'), 'error');
   }
 
   if (typeof onSettled === 'function') onSettled();
@@ -493,10 +479,10 @@ export function openStorageChooser({ onSettled } = {}) {
 
       <div class="yanta-onb-choice-main">
         <div class="yanta-onb-choice-head">
-          <span class="yanta-onb-choice-title">${escapeHtml(c.title)}</span>
-          <span class="yanta-onb-badge${c.badge.muted ? ' muted' : ''}">${escapeHtml(c.badge.label)}</span>
+          <span class="yanta-onb-choice-title">${escapeHtml(t(`onboarding.choices.${c.id}.title`))}</span>
+          <span class="yanta-onb-badge${c.badgeMuted ? ' muted' : ''}">${escapeHtml(t(`onboarding.badge.${c.badge}`))}</span>
         </div>
-        <p class="yanta-onb-choice-desc">${escapeHtml(c.desc)}</p>
+        <p class="yanta-onb-choice-desc">${escapeHtml(t(`onboarding.choices.${c.id}.desc`))}</p>
       </div>
 
       <span class="yanta-onb-choice-check">${lucide('check-circle-2', 18)}</span>
@@ -504,24 +490,24 @@ export function openStorageChooser({ onSettled } = {}) {
   `).join('');
 
   chooserModal.innerHTML = `
-    <div class="yanta-onb-card" role="dialog" aria-modal="true" aria-label="Where should your notes live?">
-      <h2 class="yanta-onb-title">Where should your notes live?</h2>
-      <p class="yanta-onb-sub">Pick a starting point — this isn’t permanent.</p>
+    <div class="yanta-onb-card" role="dialog" aria-modal="true" aria-label="${escapeHtml(t('onboarding.chooser.ariaLabel'))}">
+      <h2 class="yanta-onb-title">${escapeHtml(t('onboarding.chooser.title'))}</h2>
+      <p class="yanta-onb-sub">${escapeHtml(t('onboarding.chooser.subtitle'))}</p>
 
-      <div class="yanta-onb-cards" role="radiogroup" aria-label="Storage location">
+      <div class="yanta-onb-cards" role="radiogroup" aria-label="${escapeHtml(t('onboarding.chooser.groupLabel'))}">
         ${cardsHtml}
       </div>
 
       <p class="yanta-onb-footnote">
         ${lucide('shield-check', 14)}
-        <span>You can change this anytime in Settings — your notes stay put when you do.</span>
+        <span>${escapeHtml(t('onboarding.chooser.footnote'))}</span>
       </p>
 
       <div class="yanta-onb-actions">
-        <button class="yanta-sync-nudge-dismiss" data-onb-close type="button" title="Close" style="width:auto;padding:8px 4px;font-size:13px;">Cancel</button>
+        <button class="yanta-sync-nudge-dismiss" data-onb-close type="button" title="${escapeHtml(t('common.close'))}" style="width:auto;padding:8px 4px;font-size:13px;">${escapeHtml(t('common.cancel'))}</button>
         <span class="yanta-onb-spacer"></span>
         <button class="yanta-onb-primary" data-onb-continue type="button">
-          Continue
+          ${escapeHtml(t('common.continue'))}
           ${lucide('arrow-right', 16)}
         </button>
       </div>
@@ -596,16 +582,16 @@ export async function renderSyncNudgeInto(host) {
     <div class="yanta-sync-nudge-icon">${lucide('cloud', 20)}</div>
 
     <div class="yanta-sync-nudge-main">
-      <div class="yanta-sync-nudge-title">Your notes live on this device</div>
-      <div class="yanta-sync-nudge-sub">Set up sync to keep them on all your devices. End-to-end encrypted.</div>
+      <div class="yanta-sync-nudge-title">${escapeHtml(t('onboarding.nudge.title'))}</div>
+      <div class="yanta-sync-nudge-sub">${escapeHtml(t('onboarding.nudge.subtitle'))}</div>
     </div>
 
     <div class="yanta-sync-nudge-actions">
       <button class="yanta-sync-nudge-cta" data-nudge-setup type="button">
         ${lucide('arrow-right', 14)}
-        Set up sync
+        ${escapeHtml(t('onboarding.nudge.cta'))}
       </button>
-      <button class="yanta-sync-nudge-dismiss" data-nudge-dismiss type="button" title="Dismiss" aria-label="Dismiss">
+      <button class="yanta-sync-nudge-dismiss" data-nudge-dismiss type="button" title="${escapeHtml(t('onboarding.nudge.dismiss'))}" aria-label="${escapeHtml(t('onboarding.nudge.dismiss'))}">
         ${lucide('x', 16)}
       </button>
     </div>

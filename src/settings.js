@@ -7,6 +7,7 @@
 // ============================================================
 
 import { $, el, state, store, toast, lucide, safeCssColor, cssColorToHex } from './core.js';
+import { LOCALES, getLocale, hasExplicitLocale, setLocale, clearLocale, t } from './i18n/index.js';
 import {
   getDashboardCardDisplayPrefs,
   setDashboardCardDisplayPrefs,
@@ -1046,6 +1047,7 @@ let settingsOverlayRegistered = false;
 // `keywords` widens search matches beyond the visible label.
 const SETTINGS_SECTIONS = [
   { id: 'appearance',   label: 'Appearance',      icon: 'palette',        keywords: 'theme dark light mode look' },
+  { id: 'language',     label: 'Language',        icon: 'languages',      keywords: 'language locale english deutsch german español spanish français french 日本語 japanese translation' },
   { id: 'colors',       label: 'Colors',          icon: 'paintbrush',     keywords: 'palette accent color scheme' },
   { id: 'typography',   label: 'Typography',      icon: 'type',           keywords: 'font size text' },
   { id: 'dashboard',    label: 'Dashboard',       icon: 'layout-dashboard', keywords: 'home widgets greeting' },
@@ -1234,6 +1236,7 @@ function renderSettingsBody() {
   content.replaceChildren();
 
   if (activeSection === 'appearance') renderAppearanceSection(content);
+  else if (activeSection === 'language') renderLanguageSection(content);
   else if (activeSection === 'colors') renderColorsSection(content);
   else if (activeSection === 'typography') renderTypographySection(content);
   else if (activeSection === 'dashboard') renderDashboardSection(content);
@@ -1297,6 +1300,34 @@ function renderInstallSection(host) {
   ));
 
   host.append(installCardElement());
+}
+
+// ---- Language section ----
+function renderLanguageSection(host) {
+  host.append(sectionHeader(t('settings.language.title'), t('settings.language.subtitle')));
+
+  // 'system' follows browser detection; an explicit code pins the choice.
+  const current = hasExplicitLocale() ? getLocale() : 'system';
+
+  host.append(renderSettingsSelect({
+    label: t('settings.language.label'),
+    hint: t('settings.language.hint'),
+    value: current,
+    options: [
+      { value: 'system', label: t('settings.language.matchSystem') },
+      ...LOCALES.map((l) => ({ value: l.code, label: l.native })),
+    ],
+    onChange: (val) => {
+      const changed = val === 'system' ? (clearLocale(), true) : setLocale(val);
+      if (!changed && val !== 'system') return;
+
+      // No reactive framework re-renders the already-built views, so we reload
+      // — the choice is persisted and initI18n() applies it on next boot. This
+      // is the same soft-reload UX Apple/Google apps use for a language change.
+      toast(t('settings.language.changed'), 'success');
+      setTimeout(() => location.reload(), 400);
+    },
+  }));
 }
 
 // ---- Appearance section ----

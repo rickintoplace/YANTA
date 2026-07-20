@@ -4,6 +4,7 @@
 // ============================================================
 
 import { $, state, store, openDB, toast, cssColorToHex, safeCssColor, lucide, lucideCalendarDay, debounce } from './core.js';
+import { initI18n, t } from './i18n/index.js';
 import {
   loadAppearance,
   watchSystemTheme,
@@ -1840,7 +1841,11 @@ function bootDone() {
 }
 
 async function init() {
-  bootStage('Opening your vault…', 48);
+  // Load the active locale (+ EN fallback) before the first render, so t() and
+  // [data-i18n] markup resolve on the very first paint rather than flashing keys.
+  await initI18n();
+
+  bootStage(t('boot.stage.vault'), 48);
 
   await openDB();
 
@@ -1959,7 +1964,7 @@ async function init() {
     }
   } catch {}
 
-  bootStage('Loading your notes…', 60);
+  bootStage(t('boot.stage.notes'), 60);
 
   const [notes, folders, images, expanded, view, mobileView, sidebarCollapsed] = await Promise.all([
     store.notes.all(),
@@ -2215,7 +2220,7 @@ async function init() {
 
   setView(initialView, { persist: false });
 
-  bootStage('Preparing your workspace…', 75);
+  bootStage(t('boot.stage.workspace'), 75);
 
   rebuildWikilinkIndex();
   buildSearchIndexInBackground();
@@ -2382,7 +2387,7 @@ async function init() {
     },
   });
 
-  bootStage('Almost ready…', 90);
+  bootStage(t('boot.stage.almost'), 90);
 
   renderTree();
 

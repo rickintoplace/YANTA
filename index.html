@@ -78,6 +78,40 @@
 })();
 </script>
 
+  <!-- Resolve the UI locale before any bundle parses, so <html lang> and the
+       boot loader paint in the user's language. Mirrors src/i18n/index.js
+       (resolveLocale) and the boot strings in src/i18n/locales/* — keep in
+       sync; the tiny duplication is the price of a localized first paint. -->
+  <script>
+(() => {
+  try {
+    const SUP = ['en', 'de', 'es', 'fr', 'ja'];
+    let pick = null;
+    try {
+      const stored = localStorage.getItem('yanta.lang');
+      if (SUP.includes(stored)) pick = stored;
+    } catch {}
+    if (!pick) {
+      for (const p of navigator.languages || [navigator.language || '']) {
+        const base = String(p || '').toLowerCase().split('-')[0];
+        if (SUP.includes(base)) { pick = base; break; }
+      }
+    }
+    pick = pick || 'en';
+    document.documentElement.lang = pick;
+
+    const M = {
+      en: { loading: 'Loading app…', slow: 'Still loading — your connection seems slow…', failed: 'Could not start YANTA. Please reload.' },
+      de: { loading: 'App wird geladen…', slow: 'Lädt noch – deine Verbindung scheint langsam zu sein…', failed: 'YANTA konnte nicht gestartet werden. Bitte neu laden.' },
+      es: { loading: 'Cargando la aplicación…', slow: 'Sigue cargando: tu conexión parece lenta…', failed: 'No se pudo iniciar YANTA. Vuelve a cargar la página.' },
+      fr: { loading: 'Chargement de l’application…', slow: 'Chargement en cours – votre connexion semble lente…', failed: 'Impossible de démarrer YANTA. Veuillez recharger la page.' },
+      ja: { loading: 'アプリを読み込んでいます…', slow: '読み込み中です — 接続が遅いようです…', failed: 'YANTA を起動できませんでした。再読み込みしてください。' },
+    };
+    window.__yantaBootI18n = M[pick] || M.en;
+  } catch {}
+})();
+</script>
+
   <link rel="stylesheet" href="/styles.css" />
   <link rel="stylesheet" href="/dashboard.css" />
   <link rel="stylesheet" href="/calendar.css" />
@@ -195,7 +229,7 @@
     </svg>
   </div>
   <div class="yb-progress"><span id="yb-bar"></span></div>
-  <div class="yb-status" id="yb-status">Loading app&hellip;</div>
+  <div class="yb-status" id="yb-status"></div>
 </div>
 
 <script>
@@ -203,6 +237,9 @@
   const root = document.getElementById('yanta-boot');
   const bar = document.getElementById('yb-bar');
   const statusEl = document.getElementById('yb-status');
+  const L = window.__yantaBootI18n || { loading: 'Loading app…', slow: 'Still loading — your connection seems slow…', failed: 'Could not start YANTA. Please reload.' };
+
+  statusEl.textContent = L.loading;
 
   let pct = 6;
   let target = 40; // download+parse phase creeps here until main.js reports in
@@ -242,14 +279,14 @@
     fail(text) {
       if (finished) return;
       clearInterval(creep);
-      statusEl.textContent = text || 'Could not start YANTA. Please reload.';
+      statusEl.textContent = text || L.failed;
     },
   };
 
   // Honest slow-path feedback instead of a silent stuck screen.
   setTimeout(() => {
     if (!finished && root.isConnected && pct < 45) {
-      statusEl.textContent = 'Still loading — your connection seems slow…';
+      statusEl.textContent = L.slow;
     }
   }, 12000);
 })();
@@ -287,10 +324,10 @@
         <span>YANTA</span>
       </div>
       <div class="row-actions">
-        <button class="icon-btn" id="btn-theme" title="Toggle theme (T)">
+        <button class="icon-btn" id="btn-theme" title="Toggle theme (T)" data-i18n-title="appShell.toggleTheme">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
         </button>
-        <button class="icon-btn" id="btn-settings" title="Settings">
+        <button class="icon-btn" id="btn-settings" title="Settings" data-i18n-title="appShell.settings">
           <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
         </button>
       </div>
@@ -298,7 +335,7 @@
 
     <div class="search-bar">
       <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/></svg>
-      <input id="search" type="search" placeholder="Search notes… (Ctrl+K)" autocomplete="off" />
+      <input id="search" type="search" placeholder="Search notes… (Ctrl+K)" data-i18n-placeholder="appShell.searchPlaceholder" autocomplete="off" />
     </div>
 
     <!-- <div class="quick-actions">
@@ -355,7 +392,7 @@
       <span id="statWords">0 words</span>
       <span id="statChars">0 chars</span>
       <span class="grow"></span>
-      <span id="statSaved">Saved</span>
+      <span id="statSaved" data-i18n="appShell.status.saved">Saved</span>
     </footer>
   </main>
 </div>

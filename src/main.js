@@ -1842,6 +1842,12 @@ function bootDone() {
 async function init() {
   bootStage('Opening your vault…', 48);
 
+  // Set when a fresh user reaches the dashboard for the first time. The
+  // capture-first onboarding overlay must NOT run inside the boot path
+  // (it awaits user input); we launch it after bootDone(), on top of the
+  // rendered dashboard.
+  let pendingFirstRunOnboarding = false;
+
   await openDB();
 
   // Create the VaultDoc first, healing any bloated local CRDT history before
@@ -2455,22 +2461,12 @@ async function init() {
         hideDashboard({ push: false });
       } else {
         // Normal app entry => Dashboard/Home.
-        // First contact: a calm, capture-first welcome that surfaces the
-        // storage choice only after the first capture. It resolves before
-        // we render the dashboard; any Cloud/BYO setup layers on top.
+        // First contact: remember to run the capture-first welcome once the
+        // dashboard is live (see after bootDone()). This must not block boot.
         if (!state.notes.size && !(await hasCompletedOnboarding())) {
-          setNavSuppress(true);
-
-          try {
-            await runFirstRunOnboarding();
-          } finally {
-            setNavSuppress(false);
-          }
+          pendingFirstRunOnboarding = true;
         }
 
-        // Seed the built-in "learn what YANTA can do" vault only if the
-        // user arrives with nothing — a first capture during onboarding
-        // already gives them content, so the engaged path stays clutter-free.
         if (!state.notes.size) {
           setNavSuppress(true);
 
@@ -2666,6 +2662,14 @@ async function init() {
 
   // First surface is rendered and interactive — release the boot loader.
   bootDone();
+
+  // Capture-first welcome, on top of the now-visible dashboard. Never
+  // awaited: it resolves only on user action, and boot is already done.
+  if (pendingFirstRunOnboarding) {
+    runFirstRunOnboarding().catch((err) => {
+      console.warn('[YANTA] first-run onboarding failed', err);
+    });
+  }
 
   // Opt-in semantic index: no-op unless enabled; starts in idle time.
   import('./semantic/semantic-index.js')

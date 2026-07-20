@@ -160,5 +160,10 @@ export async function errorFromResponse(res, fallback) {
     err.serverCode = errorCode;
   }
 
+  if (res.status === 403 && parsed?.code === 'DEVICE_REVOKED') {
+    err.code = 'EDEVICE_REVOKED';
+    err.serverCode = 'DEVICE_REVOKED';
+  }
+
   return err;
 }

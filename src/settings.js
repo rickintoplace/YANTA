@@ -1044,7 +1044,7 @@ const SETTINGS_SECTIONS = [
   { id: 'colors',       label: 'Colors',          icon: 'paintbrush',     keywords: 'palette accent color scheme' },
   { id: 'typography',   label: 'Typography',      icon: 'type',           keywords: 'font size text' },
   { id: 'dashboard',    label: 'Dashboard',       icon: 'layout-dashboard', keywords: 'home widgets greeting' },
-  { id: 'quick-create', label: 'Quick Create',    icon: 'circle-plus',    keywords: 'floating create menu bubble action' },
+  { id: 'quick-create', label: 'Quick Create',    icon: 'gamepad-directional',    keywords: 'floating create menu bubble action' },
   { id: 'calendar',     label: 'Calendar',        icon: 'calendar-days',  keywords: 'events reminders ics' },
   { id: 'sources',      label: 'Sources',         icon: 'rss',            keywords: 'rss feeds sources' },
   { id: 'ai',           label: 'AI',              icon: 'bot',            keywords: 'assistant model provider' },
@@ -1129,13 +1129,18 @@ function ensureModal() {
 
   const card = el('div', { class: 'modal-card yanta-settings-card' });
 
+  // lucide() returns an SVG string, so the icon must go in via innerHTML —
+  // passing it as an el() child would render as literal text.
+  const backBtn = el('button', {
+    class: 'icon-btn yanta-settings-back',
+    onclick: () => setMobileDetail(false),
+    title: 'Back',
+    'aria-label': 'Back to settings',
+  });
+  backBtn.innerHTML = lucide('chevron-left', 18);
+
   const head = el('header', { class: 'modal-head' },
-    el('button', {
-      class: 'icon-btn yanta-settings-back',
-      onclick: () => setMobileDetail(false),
-      title: 'Back',
-      'aria-label': 'Back to settings',
-    }, lucide('chevron-left', 18)),
+    backBtn,
     el('h3', {}, 'Settings'),
     el('button', { class: 'icon-btn', onclick: closeSettings, title: 'Close' }, '✕'),
   );
@@ -1981,7 +1986,7 @@ function renderQuickCreateLayoutEditor(settings) {
       title: 'Quick Create button',
     });
 
-    origin.innerHTML = lucide('plus', 20);
+    origin.innerHTML = lucide('gamepad-directional', 20);
     stage.append(origin);
 
     const enabled = enabledQuickCreateActions(working);

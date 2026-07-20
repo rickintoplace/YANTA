@@ -237,6 +237,7 @@ import {
 import {
   scheduleChatAutoResume,
   installChatAccountReadyListener,
+  installChatDeviceRevokedListener,
   startChatSession,
   repairChatEncryptionBackupNow,
 } from './chat/matrix-session.js';
@@ -1849,6 +1850,7 @@ async function init() {
   await prepareVaultDoc();
 
   installChatAccountReadyListener();
+  installChatDeviceRevokedListener();
 
   window.yantaOpenChat = async ({
     account = null,

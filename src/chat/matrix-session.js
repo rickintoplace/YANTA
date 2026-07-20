@@ -30,6 +30,7 @@ import {
   bootstrapChatCrypto,
   ingestChatAccountSecrets,
   readChatPasswordFromVault,
+  saveChatPasswordToVault,
   createChatSecretStorageCallbacks,
   installSecretStorageCallbacks,
   hasVaultChatAccount,
@@ -1610,6 +1611,202 @@ export function installChatAccountReadyListener() {
       reason: detail.source || 'chat-account-ready',
     }).catch((err) => {
       reportSessionError('Could not open Chat.', err);
+    });
+  });
+}
+
+/*
+  Generates a strong, URL-safe Matrix account password.
+  Mirrors the entropy of the Worker's randomToken(48) used at provisioning.
+*/
+function generateStrongChatPassword(bytes = 48) {
+  const buf = new Uint8Array(bytes);
+  crypto.getRandomValues(buf);
+
+  let bin = '';
+  for (const b of buf) bin += String.fromCharCode(b);
+
+  return btoa(bin)
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
+/**
+ * Security response to removing a device from the vault.
+ *
+ * The Matrix account uses ONE shared password (synced, encrypted, in the
+ * Vault), and every device holds its own independent Matrix access token.
+ * Simply revoking a YANTA Cloud device does nothing to Matrix, and even
+ * killing a single Matrix token would not help because the removed device
+ * still knows the shared password and could log in again.
+ *
+ * So we treat device removal as a credential-compromise event and rotate it:
+ *   1. Authenticate with the CURRENT password (reusing the live session if we
+ *      have one) to hold a token that survives the sweep.
+ *   2. Change the account password with logout_devices=true — this revokes
+ *      every OTHER device/token on the homeserver, including the removed one,
+ *      and blocks re-login with the old password.
+ *   3. Publish the new password to the shared Vault. Remaining trusted devices
+ *      hit M_UNKNOWN_TOKEN and silently re-login via handleUnknownToken().
+ *
+ * Must be called from a trusted, still-active device that can read the Vault.
+ */
+export async function rotateChatPasswordForDeviceRemoval() {
+  const vaultAccount = await readChatPasswordFromVault();
+
+  // No Chat account provisioned (or no secret on this device) → nothing to do.
+  if (!vaultAccount?.userId || !vaultAccount?.password) {
+    return {
+      rotated: false,
+      reason: 'no-chat-account',
+    };
+  }
+
+  const { sdk } = await ensureMatrixLoaded();
+
+  const userId = vaultAccount.userId;
+  const oldPassword = vaultAccount.password;
+  const homeserverUrl = normalizeHomeserverUrl(
+    vaultAccount.homeserverUrl ||
+    homeserverFromUserId(userId)
+  );
+
+  if (!homeserverUrl) {
+    throw new Error('Chat homeserver URL is unknown; cannot rotate password.');
+  }
+
+  const passwordAuth = {
+    type: 'm.login.password',
+    identifier: {
+      type: 'm.id.user',
+      user: userId,
+    },
+    user: userId,
+    password: oldPassword,
+  };
+
+  const running = activeSession?.client;
+  const runningIsUsable =
+    !!running &&
+    typeof running.setPassword === 'function' &&
+    !!running.getAccessToken?.() &&
+    (running.getUserId?.() || userId) === userId;
+
+  let authedClient = running;
+  let tempClient = null;
+
+  if (!runningIsUsable) {
+    /*
+      No live session on this device (e.g. removal from Settings without Chat
+      open). Log in with the current password to obtain a token that will
+      survive logout_devices, then discard it afterwards.
+    */
+    const loginClient = sdk.createClient({
+      baseUrl: homeserverUrl,
+    });
+
+    const login = await loginClient.loginRequest({
+      ...passwordAuth,
+      initial_device_display_name: 'YANTA (device management)',
+    });
+
+    if (!login?.access_token) {
+      throw new Error('Could not authenticate Chat account for password rotation.');
+    }
+
+    tempClient = sdk.createClient({
+      baseUrl: homeserverUrl,
+      accessToken: login.access_token,
+      userId: login.user_id || userId,
+      deviceId: login.device_id || '',
+    });
+
+    authedClient = tempClient;
+  }
+
+  const newPassword = generateStrongChatPassword();
+
+  try {
+    // logout_devices=true revokes every OTHER device/token, incl. the removed one.
+    await authedClient.setPassword(passwordAuth, newPassword, true);
+  } finally {
+    // A temp login leaves behind an unused device; sign it out to stay tidy.
+    if (tempClient) {
+      try {
+        await tempClient.logout(true);
+      } catch (err) {
+        console.warn('[YANTA Chat Session] temp rotation client logout failed', err);
+      }
+    }
+  }
+
+  await saveChatPasswordToVault({
+    userId,
+    password: newPassword,
+    homeserverUrl,
+  });
+
+  return {
+    rotated: true,
+    reusedSession: runningIsUsable,
+    userId,
+  };
+}
+
+/**
+ * Tears down all local Matrix access on a device that has been removed from
+ * the vault. Purely local defense-in-depth + clean UX — the authoritative
+ * cut-off is the server-side password rotation above.
+ */
+export async function tearDownChatForRevokedDevice({
+  reason = 'device-revoked',
+} = {}) {
+  try {
+    await stopChatSession({
+      silent: true,
+    });
+  } catch (err) {
+    console.warn('[YANTA Chat Session] stop during revoke teardown failed', err);
+  }
+
+  try {
+    await clearChatCredentials();
+  } catch (err) {
+    console.warn('[YANTA Chat Session] clearing credentials during revoke teardown failed', err);
+  }
+
+  try {
+    await clearChatMatrixLocalStoresForDebugOnly();
+  } catch (err) {
+    console.warn('[YANTA Chat Session] clearing local stores during revoke teardown failed', err);
+  }
+
+  emit('yanta-chat-signed-out', {
+    reason,
+    message: 'This device was removed and has been signed out of Chat.',
+  });
+
+  try {
+    toast('This device was removed and signed out of Chat.', 'error');
+  } catch {}
+}
+
+/**
+ * Installs the one-shot listener that tears Chat down when this device learns
+ * (via the cloud sync layer) that it has been revoked from the vault.
+ */
+export function installChatDeviceRevokedListener() {
+  let handled = false;
+
+  window.addEventListener('yanta-cloud-device-revoked', (e) => {
+    if (handled) return;
+    handled = true;
+
+    tearDownChatForRevokedDevice({
+      reason: e?.detail?.message || 'device-revoked',
+    }).catch((err) => {
+      console.warn('[YANTA Chat Session] revoke teardown failed', err);
     });
   });
 }

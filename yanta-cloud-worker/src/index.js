@@ -2209,6 +2209,7 @@ async function requireActiveVaultDevice(env, user, vaultId, deviceId, req = null
   if (row.revoked_at) {
     const err = new Error("This device was removed from this vault");
     err.status = 403;
+    err.code = "DEVICE_REVOKED";
     throw err;
   }
   if (req) {
@@ -2268,6 +2269,7 @@ async function ensureDevice(env, user, vaultId, deviceId, req = null) {
     if (existing.revoked_at) {
       const err = new Error("Device revoked");
       err.status = 403;
+      err.code = "DEVICE_REVOKED";
       throw err;
     }
     await env.DB.prepare(
@@ -7918,7 +7920,8 @@ async function route(req, env) {
     return json({
       error: "internal_error",
       message: err?.message || String(err),
-      status: err?.status || 500
+      status: err?.status || 500,
+      code: err?.code || err?.serverCode || ""
     }, err.status || 500, headers);
   }
 }
@@ -7939,7 +7942,8 @@ var index_default = {
       return json({
         error: "internal_error",
         message: err?.message || String(err),
-        status: err?.status || 500
+        status: err?.status || 500,
+        code: err?.code || err?.serverCode || ""
       }, err?.status || 500, headers);
     }
   },

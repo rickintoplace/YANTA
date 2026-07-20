@@ -2073,6 +2073,20 @@ ${
     });
   });
 
+  async function revokeChatAccessAfterDeviceRemoval() {
+    try {
+      const mod = await import('../chat/matrix-session.js');
+      await mod.rotateChatPasswordForDeviceRemoval();
+    } catch (err) {
+      console.warn('[YANTA Cloud] Chat access rotation after device removal failed', err);
+      toast(
+        'Device removed, but its Chat access could not be revoked automatically. ' +
+        'Change your Chat password to be safe.',
+        'error'
+      );
+    }
+  }
+
   modal.querySelectorAll('[data-remove-cloud-device]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       const deviceId = btn.dataset.removeCloudDevice || '';
@@ -2087,6 +2101,8 @@ ${
           `Device ID: ${deviceId}`,
           '',
           'The removed device can no longer sync this cloud vault or manage its connected devices unless it is connected again with the Recovery Key or pairing QR.',
+          '',
+          'If you use Chat, this also signs the removed device out of Chat by rotating your Chat password. Your other devices reconnect automatically.',
         ].join('\n'),
         confirmLabel: 'Remove device',
         cancelLabel: 'Cancel',
@@ -2102,6 +2118,12 @@ ${
         await cloudRemoveVaultDevice(configuredVaultId, deviceId, {
           currentDeviceId,
         });
+
+        // Cut the removed device off from Chat too. Revoking the cloud device
+        // alone leaves its independent Matrix session intact, so we rotate the
+        // shared Chat password (revokes all other Matrix devices; remaining
+        // trusted devices silently re-login from the synced Vault).
+        await revokeChatAccessAfterDeviceRemoval();
 
         setStatus('Device removed', 'success');
         toast('Device removed', 'success');

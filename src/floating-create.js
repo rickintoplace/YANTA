@@ -631,7 +631,7 @@ function buildDom() {
   trigger.setAttribute('aria-label', 'Quick create');
   trigger.setAttribute('aria-haspopup', 'menu');
   trigger.setAttribute('aria-expanded', 'false');
-  trigger.innerHTML = lucide('plus', 26);
+  trigger.innerHTML = lucide('gamepad-directional', 26);
 
   const tooltip = document.createElement('div');
   tooltip.className = 'yanta-qc-tooltip';

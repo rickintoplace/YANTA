@@ -288,6 +288,35 @@ export class YantaCloudObjectStore extends RemoteObjectStore {
   }
 
   async errorFromResponse(res, fallback) {
-    return errorFromResponse(res, fallback);
+    const err = await errorFromResponse(res, fallback);
+
+    if (err?.code === 'EDEVICE_REVOKED') {
+      announceDeviceRevoked({
+        vaultId: this.vaultId,
+        deviceId: this.deviceId,
+        message: err?.message || 'This device was removed from the vault.',
+      });
+    }
+
+    return err;
   }
+}
+
+/*
+  A removed device keeps hitting 403 DEVICE_REVOKED on every sync request.
+  We surface it exactly once as a global event so dependent subsystems
+  (e.g. Chat) can tear down their own access cleanly, without every caller
+  needing to string-match server errors.
+*/
+let deviceRevokedAnnounced = false;
+
+function announceDeviceRevoked(detail) {
+  if (deviceRevokedAnnounced) return;
+  deviceRevokedAnnounced = true;
+
+  try {
+    window.dispatchEvent(
+      new CustomEvent('yanta-cloud-device-revoked', { detail })
+    );
+  } catch {}
 }

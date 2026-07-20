@@ -1223,6 +1223,34 @@ button.link { background: 0; border: 0; color: var(--accent); cursor: pointer; p
 .toast.success { border-color: var(--green); }
 @keyframes toast-in { from { opacity: 0; transform: translate(-50%, 10px); } to { opacity: 1; transform: translate(-50%, 0); } }
 
+/* ---------- Action toast (non-blocking undo) ---------- */
+.action-toast {
+  position: fixed; bottom: 24px; left: 50%;
+  transform: translate(-50%, 12px);
+  display: flex; align-items: center; gap: 8px;
+  max-width: min(92vw, 460px);
+  background: var(--bg-elev-3); color: var(--text);
+  padding: 8px 8px 8px 16px; border-radius: var(--r-sm);
+  border: 1px solid var(--border); box-shadow: var(--shadow);
+  font-size: 13px; z-index: 400;
+  opacity: 0; pointer-events: none;
+  transition: opacity .2s ease, transform .2s ease;
+}
+.action-toast.show { opacity: 1; transform: translate(-50%, 0); pointer-events: auto; }
+.action-toast.error { border-color: var(--red); }
+.action-toast-msg { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.action-toast-btn {
+  flex: none; cursor: pointer;
+  background: transparent; border: 1px solid transparent;
+  color: var(--accent); font-weight: 600; font-size: 13px;
+  padding: 4px 10px; border-radius: var(--r-sm);
+}
+.action-toast-btn:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.action-toast-btn:focus-visible { outline: none; border-color: var(--accent); }
+@media (prefers-reduced-motion: reduce) {
+  .action-toast { transition: opacity .2s ease; transform: translate(-50%, 0); }
+}
+
 /* ---------- Context menu ---------- */
 .ctx-menu {
   position: fixed; z-index: 500;

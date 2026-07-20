@@ -209,6 +209,7 @@ function previewText(text) {
     .replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (m, target, label) => label || target);
 }
 
+
 async function renderEntries(body) {
   const entries = await listTodayEntries();
 
@@ -218,7 +219,7 @@ async function renderEntries(body) {
 
     // First contact vs. quiet day — explain once, then stay out of the way.
     const hint = !folder && !note
-      ? 'Captured thoughts land in a daily note inside your Journal folder — created on your first capture.'
+      ? 'Captured thoughts land in a daily note inside your Journal folder.'
       : 'Nothing captured yet today.';
 
     body.replaceChildren(el('div', { class: 'yanta-today-empty' }, hint));

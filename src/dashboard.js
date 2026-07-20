@@ -66,9 +66,7 @@ import {
 import {
   isNoteInTrash,
   isFolderInTrash,
-  moveNoteToTrash,
-  moveFolderToTrash,
-  moveItemsToTrash,
+  trashItemsWithUndo,
 } from './trash.js';
 
 import {
@@ -615,7 +613,7 @@ import { EVT, emit, shouldIgnoreInvisibleSyncEvent } from './events.js';
       return 0;
     }
 
-    const movedCount = await moveItemsToTrash({
+    const { changed } = await trashItemsWithUndo({
       noteIds,
       folderIds,
       source: 'dashboard-drag-multi',
@@ -625,7 +623,7 @@ import { EVT, emit, shouldIgnoreInvisibleSyncEvent } from './events.js';
       previewCache.delete(id);
     }
 
-    return movedCount;
+    return changed;
   }
 
   export function getDashboardCardDisplayPrefs() {
@@ -3098,9 +3096,9 @@ function renderCardActions(item) {
     const note = state.notes.get(noteId);
     if (!note) return;
 
-    await moveNoteToTrash(noteId, {
+    await trashItemsWithUndo({
+      noteIds: [noteId],
       source: 'dashboard',
-      toastMessage: 'Moved note to Trash',
     });
 
     previewCache.delete(noteId);
@@ -3148,9 +3146,9 @@ function renderCardActions(item) {
     const folder = state.folders.get(folderId);
     if (!folder) return;
 
-    await moveFolderToTrash(folderId, {
+    await trashItemsWithUndo({
+      folderIds: [folderId],
       source: 'dashboard',
-      toastMessage: 'Moved folder to Trash',
     });
 
     if (dashboard.folderId === folderId || dashboardFolderIsAncestor(folderId, dashboard.folderId)) {

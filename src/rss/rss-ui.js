@@ -20,6 +20,7 @@ import {
   escapeAttr,
   lucide,
   toast,
+  actionToast,
 } from '../core.js';
 
 import {
@@ -36,7 +37,6 @@ import {
   getRssSettings,
   saveRssSettings,
   getRssFeeds,
-  deleteRssFeed,
   setRssFeedTags,
   rssTagCountsFromFeeds,
 } from './rss-settings.js';
@@ -44,6 +44,7 @@ import {
 import {
   listRssItems,
   getRssItem,
+  pruneOrphanedRssItems,
 } from './rss-store.js';
 
 import {
@@ -59,6 +60,8 @@ import {
   archiveRssItem,
   saveRssItemAsNote,
   appendRssItemToCurrentNote,
+  removeRssSource,
+  restoreRssSource,
 } from './rss-actions.js';
 
 import {
@@ -71,10 +74,6 @@ import {
   getRssCloudAuthState,
   openYantaCloudLoginForSources,
 } from './rss-cloud-auth.js';
-
-import {
-  yantaConfirm,
-} from '../dialogs.js';
 
 import { pushOverlayState, closeTopOverlay } from '../overlay-history.js';
 
@@ -1809,28 +1808,24 @@ async function openRssSourcesManagerInternal() {
 
       if (!feed) return;
 
-      const ok = await yantaConfirm({
-        title: 'Delete source?',
-        message: `Delete source "${feed.title || 'Source'}"?\n\nCached items may remain locally until cache cleanup.`,
-        confirmLabel: 'Delete source',
-        cancelLabel: 'Cancel',
-        danger: true,
-        icon: 'trash',
-      });
-
-      if (!ok) return;
-
-      await deleteRssFeed(feedId);
+      const { undo } = await removeRssSource(feedId);
 
       if (currentFeedId === feedId) {
         currentFeedId = '';
         currentMode = 'unread';
       }
 
-      toast('Source deleted', 'success');
-
       await renderShell();
       await openRssSourcesManager();
+
+      actionToast(`Removed "${feed.title || 'Source'}"`, {
+        actionLabel: 'Undo',
+        onAction: async () => {
+          await restoreRssSource(undo);
+          await renderShell();
+          await openRssSourcesManager();
+        },
+      });
     });
   });
 
@@ -3929,6 +3924,19 @@ export function setupRss() {
   if (initialized) return;
 
   initialized = true;
+
+  // Self-heal the local item cache against the (synced) source list.
+  // Covers: items left behind by a source deleted before this cleanup
+  // existed, and sources deleted on another device that synced in here.
+  const pruneOrphans = (feeds) => {
+    pruneOrphanedRssItems((feeds || []).map((f) => f.id)).catch(() => {});
+  };
+
+  getRssFeeds().then(pruneOrphans).catch(() => {});
+
+  window.addEventListener('yanta-rss-feeds-changed', (e) => {
+    pruneOrphans(e.detail);
+  });
 
   // Listen for native browser navigation (back/forward)
   window.addEventListener('yanta-overlay-route', (e) => {

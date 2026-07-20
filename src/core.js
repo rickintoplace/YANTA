@@ -562,6 +562,97 @@ export function toast(msg, type = '') {
 }
 
 // ----------------------------------------------------------------
+// Action toast — a non-blocking toast carrying one action, typically
+// "Undo". Used to replace confirm() dialogs for reversible actions
+// (move to trash, archive, move to folder, remove source): execute
+// immediately, then offer a brief window to reverse it.
+//
+// Only one action toast lives at a time; showing a new one dismisses
+// the previous. The auto-dismiss timer pauses while the toast is
+// hovered or focused, so the action is always reachable.
+// ----------------------------------------------------------------
+let actionToastEl = null;
+let actionToastTimer = null;
+
+export function dismissActionToast() {
+  clearTimeout(actionToastTimer);
+  actionToastTimer = null;
+
+  const node = actionToastEl;
+  actionToastEl = null;
+
+  if (node) {
+    node.classList.remove('show');
+    setTimeout(() => node.remove(), 200);
+  }
+}
+
+export function actionToast(message, {
+  actionLabel = '',
+  onAction = null,
+  duration = 6500,
+  type = '',
+} = {}) {
+  dismissActionToast();
+
+  const wrap = document.createElement('div');
+  wrap.className = 'action-toast' + (type ? ' ' + type : '');
+  wrap.setAttribute('role', 'status');
+  wrap.setAttribute('aria-live', 'polite');
+
+  const msg = document.createElement('span');
+  msg.className = 'action-toast-msg';
+  msg.textContent = message;
+  wrap.append(msg);
+
+  const hasAction = actionLabel && typeof onAction === 'function';
+
+  if (hasAction) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'action-toast-btn';
+    btn.textContent = actionLabel;
+
+    btn.addEventListener('click', async () => {
+      dismissActionToast();
+
+      try {
+        await onAction();
+      } catch (err) {
+        console.error('[YANTA] action-toast action failed', err);
+        toast('Could not undo', 'error');
+      }
+    });
+
+    wrap.append(btn);
+  }
+
+  document.body.append(wrap);
+  actionToastEl = wrap;
+
+  requestAnimationFrame(() => wrap.classList.add('show'));
+
+  const startTimer = () => {
+    clearTimeout(actionToastTimer);
+    actionToastTimer = setTimeout(dismissActionToast, duration);
+  };
+
+  const stopTimer = () => {
+    clearTimeout(actionToastTimer);
+    actionToastTimer = null;
+  };
+
+  wrap.addEventListener('mouseenter', stopTimer);
+  wrap.addEventListener('mouseleave', startTimer);
+  wrap.addEventListener('focusin', stopTimer);
+  wrap.addEventListener('focusout', startTimer);
+
+  startTimer();
+
+  return { dismiss: dismissActionToast };
+}
+
+// ----------------------------------------------------------------
 // IndexedDB — metadata only (note bodies live in Yjs y-indexeddb)
 // ----------------------------------------------------------------
 const DB_NAME = 'yanta';

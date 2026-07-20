@@ -3,7 +3,7 @@
 // menus, drag-and-drop reorganisation, multi-select + bulk ops.
 // ============================================================
 
-import { $, el, uid, state, store, lucide, safeCssColor, toast, isSpaceMountedFolder } from './core.js';
+import { $, el, uid, state, store, lucide, safeCssColor, toast, actionToast, isSpaceMountedFolder } from './core.js';
 
 import {
   openNote,
@@ -40,9 +40,7 @@ import {
   isFolderInTrash,
   collectTrashedRootItems,
   trashCount,
-  moveNoteToTrash,
-  moveFolderToTrash,
-  moveItemsToTrash,
+  trashItemsWithUndo,
   restoreNoteFromTrash,
   restoreFolderFromTrash,
   permanentlyDeleteNote,
@@ -1315,6 +1313,82 @@ function emitTreeStructureChanged(reason, detail = {}) {
   }));
 }
 
+async function setNoteArchived(note, archived) {
+  if (!note) return;
+
+  note.archived = !!archived;
+  note.updated = Date.now();
+
+  await store.notes.put(note);
+
+  renderTree();
+
+  window.dispatchEvent(new CustomEvent('yanta-dashboard-refresh'));
+  window.dispatchEvent(new CustomEvent('yanta-note-updated', {
+    detail: {
+      noteId: note.id,
+      reason: note.archived ? 'archived' : 'unarchived',
+    },
+  }));
+}
+
+async function setFolderArchived(folder, archived) {
+  if (!folder) return;
+
+  folder.archived = !!archived;
+  folder.updated = Date.now();
+
+  await store.folders.put(folder);
+
+  renderTree();
+
+  window.dispatchEvent(new CustomEvent('yanta-dashboard-refresh'));
+  window.dispatchEvent(new CustomEvent('yanta-folder-updated', {
+    detail: {
+      folderId: folder.id,
+      reason: folder.archived ? 'archived' : 'unarchived',
+    },
+  }));
+}
+
+async function undoMoveToFolder(noteOrigins = [], folderOrigins = []) {
+  let restored = 0;
+
+  for (const { id, folderId } of noteOrigins) {
+    const note = state.notes.get(id);
+    if (!note) continue;
+
+    if ((note.folderId || null) === (folderId || null)) continue;
+
+    note.folderId = folderId || null;
+    note.updated = Date.now();
+
+    await store.notes.put(note);
+    restored++;
+  }
+
+  for (const { id, parentId } of folderOrigins) {
+    const folder = state.folders.get(id);
+    if (!folder) continue;
+
+    if ((folder.parentId || null) === (parentId || null)) continue;
+    if (!canMoveFolderToParent(id, parentId || null)) continue;
+
+    folder.parentId = parentId || null;
+    folder.updated = Date.now();
+
+    await store.folders.put(folder);
+    restored++;
+  }
+
+  if (!restored) return;
+
+  emitTreeStructureChanged('tree-bulk-move-undo', {});
+  renderTree();
+
+  toast(`Move undone`, 'success');
+}
+
 async function moveNotesToFolder(noteIds = [], targetFolderId = null, source = 'tree-drop') {
   const target = targetFolderId || null;
   let moved = 0;
@@ -1756,13 +1830,13 @@ function trashRootFolderRow(trashItems, totalTrashCount) {
         ? draggedFolderIds(folderId)
         : [];
 
-      const moved = await moveItemsToTrash({
+      const { changed } = await trashItemsWithUndo({
         noteIds,
         folderIds,
         source: 'tree-drop-trash',
       });
 
-      if (!moved) return;
+      if (!changed) return;
 
       clearTreeSelection();
       renderTree();
@@ -2617,20 +2691,14 @@ function noteMenu(e, n) {
     {
       label: n.archived ? 'Unarchive' : 'Archive',
       action: async () => {
-        n.archived = !n.archived;
-        n.updated = Date.now();
+        const nowArchived = !n.archived;
 
-        await store.notes.put(n);
+        await setNoteArchived(n, nowArchived);
 
-        renderTree();
-
-        window.dispatchEvent(new CustomEvent('yanta-dashboard-refresh'));
-        window.dispatchEvent(new CustomEvent('yanta-note-updated', {
-          detail: {
-            noteId: n.id,
-            reason: n.archived ? 'archived' : 'unarchived',
-          },
-        }));
+        actionToast(nowArchived ? 'Note archived' : 'Note unarchived', {
+          actionLabel: 'Undo',
+          onAction: () => setNoteArchived(n, !nowArchived),
+        });
       },
     },
     {
@@ -2646,9 +2714,9 @@ function noteMenu(e, n) {
       label: 'Move to Trash',
       danger: true,
       action: async () => {
-        await moveNoteToTrash(n.id, {
+        await trashItemsWithUndo({
+          noteIds: [n.id],
           source: 'tree-menu',
-          toastMessage: 'Moved note to Trash',
         });
       },
     },
@@ -2722,20 +2790,14 @@ function folderMenu(e, f) {
     {
       label: f.archived ? 'Unarchive folder' : 'Archive folder',
       action: async () => {
-        f.archived = !f.archived;
-        f.updated = Date.now();
+        const nowArchived = !f.archived;
 
-        await store.folders.put(f);
+        await setFolderArchived(f, nowArchived);
 
-        renderTree();
-
-        window.dispatchEvent(new CustomEvent('yanta-dashboard-refresh'));
-        window.dispatchEvent(new CustomEvent('yanta-folder-updated', {
-          detail: {
-            folderId: f.id,
-            reason: f.archived ? 'archived' : 'unarchived',
-          },
-        }));
+        actionToast(nowArchived ? 'Folder archived' : 'Folder unarchived', {
+          actionLabel: 'Undo',
+          onAction: () => setFolderArchived(f, !nowArchived),
+        });
       },
     },
     {
@@ -2747,9 +2809,9 @@ function folderMenu(e, f) {
       label: 'Move folder to Trash',
       danger: true,
       action: async () => {
-        await moveFolderToTrash(f.id, {
+        await trashItemsWithUndo({
+          folderIds: [f.id],
           source: 'tree-menu',
-          toastMessage: 'Moved folder to Trash',
         });
       },
     },
@@ -2986,6 +3048,17 @@ async function moveSelectedToFolder(keys = [...selection.keys]) {
     return !noteIsInsideAnyFolder(note, topFolderIds);
   });
 
+  // Snapshot origins before moving so the move can be reversed.
+  const noteOrigins = effectiveNoteIds.map((id) => ({
+    id,
+    folderId: state.notes.get(id)?.folderId ?? null,
+  }));
+
+  const folderOrigins = topFolderIds.map((id) => ({
+    id,
+    parentId: state.folders.get(id)?.parentId ?? null,
+  }));
+
   const movedNotes = await moveNotesToFolder(
     effectiveNoteIds,
     targetFolderId || null,
@@ -3020,8 +3093,11 @@ async function moveSelectedToFolder(keys = [...selection.keys]) {
       `Moved ${moved}; skipped ${skipped} invalid folder move${skipped === 1 ? '' : 's'}`,
       'error'
     );
-  } else {
-    toast(`Moved ${moved} item${moved === 1 ? '' : 's'}`, 'success');
+  } else if (moved) {
+    actionToast(`Moved ${moved} item${moved === 1 ? '' : 's'}`, {
+      actionLabel: 'Undo',
+      onAction: () => undoMoveToFolder(noteOrigins, folderOrigins),
+    });
   }
 }
 
@@ -3136,48 +3212,7 @@ async function deleteSelectedItems(items = getSelectedItems()) {
 
   if (!folderIds.size && !noteIds.size) return;
 
-  const descendantStats = {
-    folders: 0,
-    notes: 0,
-  };
-
-  for (const folderId of folderIds) {
-    const all = collectFolderIdsRecursive(folderId);
-
-    descendantStats.folders += Math.max(0, all.size - 1);
-
-    for (const note of state.notes.values()) {
-      if (note.folderId && all.has(note.folderId)) {
-        descendantStats.notes++;
-      }
-    }
-  }
-
-  const parts = [];
-
-  if (noteIds.size) {
-    parts.push(`${noteIds.size} note${noteIds.size === 1 ? '' : 's'}`);
-  }
-
-  if (folderIds.size) {
-    parts.push(`${folderIds.size} folder${folderIds.size === 1 ? '' : 's'}`);
-  }
-
-  const extra =
-    descendantStats.folders || descendantStats.notes
-      ? `\n\nSelected folders include ${descendantStats.folders} sub-folder${descendantStats.folders === 1 ? '' : 's'} and ${descendantStats.notes} note${descendantStats.notes === 1 ? '' : 's'}.`
-      : '';
-
-  const ok = await yantaConfirm({
-    title: 'Move selected items to Trash?',
-    message: `Move ${parts.join(' and ')} to Trash?${extra}\n\nYou can restore them later from Trash.`,
-    confirmLabel: 'Move to Trash',
-    danger: true,
-  });
-
-  if (!ok) return;
-
-  await moveItemsToTrash({
+  await trashItemsWithUndo({
     noteIds: [...noteIds],
     folderIds: [...folderIds],
     source: 'tree-bulk',

@@ -43,7 +43,7 @@ import {
   } from './item-actions.js';
 
   import {
-    moveItemsToTrash,
+    trashItemsWithUndo,
     permanentlyDeleteNote,
     permanentlyDeleteFolder,
   } from './trash.js';
@@ -1450,53 +1450,45 @@ import {
 
     if (!directFolderIds.size && !directNoteIds.size) return;
 
-    let descendantFolderCount = 0;
-    let descendantNoteCount = 0;
-
-    for (const folderId of directFolderIds) {
-      const folderIds = collectFolderIdsRecursive(folderId);
-      descendantFolderCount += Math.max(0, folderIds.size - 1);
-
-      for (const note of state.notes.values()) {
-        if (note.folderId && folderIds.has(note.folderId)) {
-          descendantNoteCount++;
-        }
-      }
-    }
-
-    const what = [
-      directNoteIds.size ? `${directNoteIds.size} note${directNoteIds.size === 1 ? '' : 's'}` : '',
-      directFolderIds.size ? `${directFolderIds.size} folder${directFolderIds.size === 1 ? '' : 's'}` : '',
-    ].filter(Boolean).join(' and ');
-
-    const extra =
-      descendantFolderCount || descendantNoteCount
-        ? `\n\nSelected folders include ${descendantFolderCount} sub-folder${descendantFolderCount === 1 ? '' : 's'} and ${descendantNoteCount} note${descendantNoteCount === 1 ? '' : 's'}.`
-        : '';
-
-    const ok = await confirmPopover(
-      skipTrash
-        ? {
-            title: 'Delete selected items permanently',
-            message: `Permanently delete ${what}?${extra}\n\nThis cannot be undone.`,
-            confirmLabel: 'Delete permanently',
-            danger: true,
-          }
-        : {
-            title: 'Move selected items to Trash',
-            message: `Move ${what} to Trash?${extra}\n\nYou can restore them later from Trash.`,
-            confirmLabel: 'Move to Trash',
-            danger: true,
-          }
-    );
-
-    if (!ok) return;
-
     if (skipTrash) {
       /*
         Trash übersprungen (Strg/Cmd beim Löschen): endgültig entfernen.
-        Ordner nehmen ihre Inhalte mit.
+        Ordner nehmen ihre Inhalte mit. Permanentes Löschen bleibt eine
+        bewusste, nicht rückgängig machbare Aktion → weiterhin mit Dialog.
       */
+      let descendantFolderCount = 0;
+      let descendantNoteCount = 0;
+
+      for (const folderId of directFolderIds) {
+        const folderIds = collectFolderIdsRecursive(folderId);
+        descendantFolderCount += Math.max(0, folderIds.size - 1);
+
+        for (const note of state.notes.values()) {
+          if (note.folderId && folderIds.has(note.folderId)) {
+            descendantNoteCount++;
+          }
+        }
+      }
+
+      const what = [
+        directNoteIds.size ? `${directNoteIds.size} note${directNoteIds.size === 1 ? '' : 's'}` : '',
+        directFolderIds.size ? `${directFolderIds.size} folder${directFolderIds.size === 1 ? '' : 's'}` : '',
+      ].filter(Boolean).join(' and ');
+
+      const extra =
+        descendantFolderCount || descendantNoteCount
+          ? `\n\nSelected folders include ${descendantFolderCount} sub-folder${descendantFolderCount === 1 ? '' : 's'} and ${descendantNoteCount} note${descendantNoteCount === 1 ? '' : 's'}.`
+          : '';
+
+      const ok = await confirmPopover({
+        title: 'Delete selected items permanently',
+        message: `Permanently delete ${what}?${extra}\n\nThis cannot be undone.`,
+        confirmLabel: 'Delete permanently',
+        danger: true,
+      });
+
+      if (!ok) return;
+
       for (const noteId of directNoteIds) {
         await permanentlyDeleteNote(noteId, { source: 'dashboard-multiselect' });
       }
@@ -1505,7 +1497,7 @@ import {
         await permanentlyDeleteFolder(folderId, { source: 'dashboard-multiselect' });
       }
     } else {
-      await moveItemsToTrash({
+      await trashItemsWithUndo({
         noteIds: [...directNoteIds],
         folderIds: [...directFolderIds],
         source: 'dashboard-multiselect',

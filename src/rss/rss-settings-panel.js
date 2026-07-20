@@ -7,6 +7,7 @@ import {
   escapeHtml,
   lucide,
   toast,
+  actionToast,
 } from '../core.js';
 
 import {
@@ -14,8 +15,12 @@ import {
   saveRssSettings,
   getRssFeeds,
   saveRssFeeds,
-  deleteRssFeed,
 } from './rss-settings.js';
+
+import {
+  removeRssSource,
+  restoreRssSource,
+} from './rss-actions.js';
 
 import {
   addBestRssSourceFromInput,
@@ -474,10 +479,17 @@ export async function renderRssSettingsPanel(host) {
     const remove = el('button', { class: 'btn danger' }, 'Remove');
 
     remove.addEventListener('click', async () => {
-      await deleteRssFeed(feed.id);
+      const { undo } = await removeRssSource(feed.id);
 
-      toast('Source removed', 'success');
       await renderRssSettingsPanel(host);
+
+      actionToast(`Removed "${feed.title || 'Source'}"`, {
+        actionLabel: 'Undo',
+        onAction: async () => {
+          await restoreRssSource(undo);
+          await renderRssSettingsPanel(host);
+        },
+      });
     });
 
     row.append(meta, remove);

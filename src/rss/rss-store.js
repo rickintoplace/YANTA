@@ -178,18 +178,71 @@ export async function countUnreadRssItems() {
 
 export async function deleteRssItemsByFeed(feedId) {
   const db = await openRssDb();
-  const all = await reqToPromise(db.transaction('items').objectStore('items').getAll());
-
   const tx = db.transaction('items', 'readwrite');
-  const store = tx.objectStore('items');
+  const index = tx.objectStore('items').index('feedId');
 
-  for (const item of all) {
-    if (item.feedId === feedId) {
-      store.delete(item.id);
-    }
-  }
+  let removed = 0;
+
+  await new Promise((resolve, reject) => {
+    const req = index.openCursor(IDBKeyRange.only(String(feedId || '')));
+
+    req.onsuccess = () => {
+      const cursor = req.result;
+
+      if (!cursor) {
+        resolve();
+        return;
+      }
+
+      cursor.delete();
+      removed++;
+      cursor.continue();
+    };
+
+    req.onerror = () => reject(req.error);
+  });
 
   await txDone(tx);
+  return removed;
+}
+
+// Reconciles the local item cache against the current source list, e.g.
+// after a source was removed on another synced device. Cheap in the
+// common case: only the distinct feedId values are scanned, not every item.
+export async function pruneOrphanedRssItems(validFeedIds = []) {
+  const db = await openRssDb();
+  const valid = new Set(validFeedIds);
+
+  const cachedFeedIds = await new Promise((resolve, reject) => {
+    const ids = [];
+    const req = db.transaction('items').objectStore('items')
+      .index('feedId')
+      .openKeyCursor(null, 'nextunique');
+
+    req.onsuccess = () => {
+      const cursor = req.result;
+
+      if (!cursor) {
+        resolve(ids);
+        return;
+      }
+
+      ids.push(cursor.key);
+      cursor.continue();
+    };
+
+    req.onerror = () => reject(req.error);
+  });
+
+  const orphanFeedIds = cachedFeedIds.filter((feedId) => !valid.has(feedId));
+  if (!orphanFeedIds.length) return 0;
+
+  let removed = 0;
+  for (const feedId of orphanFeedIds) {
+    removed += await deleteRssItemsByFeed(feedId);
+  }
+
+  return removed;
 }
 
 export async function pruneRssItems({

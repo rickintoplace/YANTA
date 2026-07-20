@@ -58,7 +58,7 @@ import {
   } from './dashboard-multiselect.js';
   
   import {
-    moveItemsToTrash,
+    trashItemsWithUndo,
   } from './trash.js';
 
   let initialized = false;
@@ -368,73 +368,6 @@ import {
   
       host.style.left = `${left}px`;
       host.style.top = `${top}px`;
-    });
-  }
-  
-  function confirmPopover({
-    title = 'Confirm',
-    message = '',
-    confirmLabel = 'Confirm',
-    cancelLabel = 'Cancel',
-    danger = false,
-  } = {}) {
-    return new Promise((resolve) => {
-      const host = popoverCard({
-        className: 'yanta-dashboard-confirm-popover',
-        html: `
-          <div class="yanta-dashboard-popover-head">
-            <strong>${escapeHtml(title)}</strong>
-            <button class="icon-btn" data-cancel>&times;</button>
-          </div>
-  
-          <div class="yanta-dashboard-popover-body">
-            <div class="yanta-dashboard-popover-message">
-              ${escapeHtml(message).replace(/\n/g, '<br>')}
-            </div>
-  
-            <div class="compress-actions">
-              <button class="btn" data-cancel>${escapeHtml(cancelLabel)}</button>
-              <button class="btn ${danger ? 'danger' : 'primary'}" data-confirm>
-                ${escapeHtml(confirmLabel)}
-              </button>
-            </div>
-          </div>
-        `,
-      });
-  
-      const finish = (value) => {
-        document.removeEventListener('pointerdown', outside, true);
-        document.removeEventListener('keydown', onKey, true);
-        host.remove();
-        resolve(value);
-      };
-  
-      const outside = (e) => {
-        if (!host.contains(e.target)) finish(false);
-      };
-  
-      const onKey = (e) => {
-        if (e.key === 'Escape') {
-          e.preventDefault();
-          finish(false);
-        }
-      };
-  
-      host.querySelectorAll('[data-cancel]').forEach((btn) => {
-        btn.addEventListener('click', () => finish(false));
-      });
-  
-      host.querySelector('[data-confirm]')?.addEventListener('click', () => {
-        finish(true);
-      });
-  
-      positionPopover(host);
-  
-      setTimeout(() => {
-        document.addEventListener('pointerdown', outside, true);
-        document.addEventListener('keydown', onKey, true);
-        host.querySelector('[data-confirm]')?.focus?.();
-      }, 0);
     });
   }
   
@@ -817,45 +750,7 @@ import {
 
     if (!directNoteIds.size && !directFolderIds.size) return;
 
-    let descendantFolderCount = 0;
-    let descendantNoteCount = 0;
-
-    for (const folderId of directFolderIds) {
-      const folderIds = collectFolderIdsRecursive(folderId);
-
-      descendantFolderCount += Math.max(0, folderIds.size - 1);
-
-      for (const note of state.notes.values()) {
-        if (note.folderId && folderIds.has(note.folderId)) {
-          descendantNoteCount++;
-        }
-      }
-    }
-
-    const parts = [
-      directNoteIds.size
-        ? `${directNoteIds.size} note${directNoteIds.size === 1 ? '' : 's'}`
-        : '',
-      directFolderIds.size
-        ? `${directFolderIds.size} folder${directFolderIds.size === 1 ? '' : 's'}`
-        : '',
-    ].filter(Boolean);
-
-    const extra =
-      descendantFolderCount || descendantNoteCount
-        ? `\n\nSelected folders include ${descendantFolderCount} sub-folder${descendantFolderCount === 1 ? '' : 's'} and ${descendantNoteCount} note${descendantNoteCount === 1 ? '' : 's'}.`
-        : '';
-
-    const ok = await confirmPopover({
-      title: 'Move selected items to Trash',
-      message: `Move ${parts.join(' and ')} to Trash?${extra}\n\nYou can restore them later from Trash.`,
-      confirmLabel: 'Move to Trash',
-      danger: true,
-    });
-
-    if (!ok) return;
-
-    await moveItemsToTrash({
+    await trashItemsWithUndo({
       noteIds: [...directNoteIds],
       folderIds: [...directFolderIds],
       source: 'dashboard-context-menu',

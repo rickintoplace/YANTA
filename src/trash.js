@@ -14,6 +14,7 @@ import {
     state,
     store,
     toast,
+    actionToast,
   } from './core.js';
   
   import {
@@ -340,6 +341,7 @@ import {
     noteIds = [],
     folderIds = [],
     source = 'user',
+    silent = false,
   } = {}) {
     const folderSet = new Set([...folderIds].map(String).filter(Boolean));
   
@@ -375,26 +377,80 @@ import {
       return true;
     });
   
-    let changed = 0;
-  
+    const trashedNoteIds = [];
+    const trashedFolderIds = [];
+
     for (const noteId of effectiveNoteIds) {
-      if (await moveNoteToTrash(noteId, { source })) changed++;
+      if (await moveNoteToTrash(noteId, { source })) trashedNoteIds.push(noteId);
     }
-  
+
     for (const folderId of effectiveFolderIds) {
-      if (await moveFolderToTrash(folderId, { source })) changed++;
+      if (await moveFolderToTrash(folderId, { source })) trashedFolderIds.push(folderId);
     }
-  
-    if (changed) {
+
+    const changed = trashedNoteIds.length + trashedFolderIds.length;
+
+    if (changed && !silent) {
       toast(`Moved ${changed} item${changed === 1 ? '' : 's'} to Trash`, 'success');
     }
-  
-    return changed;
+
+    return {
+      changed,
+      noteIds: trashedNoteIds,
+      folderIds: trashedFolderIds,
+    };
+  }
+
+  // Move to trash, then surface a non-blocking Undo toast. This is the
+  // entry point UI call sites should use instead of a confirm() dialog:
+  // the action is reversible from Trash, so we execute immediately and
+  // let the user reverse it, rather than blocking on a prompt first.
+  export async function trashItemsWithUndo({
+    noteIds = [],
+    folderIds = [],
+    source = 'user',
+  } = {}) {
+    const result = await moveItemsToTrash({
+      noteIds,
+      folderIds,
+      source,
+      silent: true,
+    });
+
+    if (!result.changed) return result;
+
+    const noteCount = result.noteIds.length;
+    const folderCount = result.folderIds.length;
+
+    const parts = [];
+    if (noteCount) parts.push(`${noteCount} note${noteCount === 1 ? '' : 's'}`);
+    if (folderCount) parts.push(`${folderCount} folder${folderCount === 1 ? '' : 's'}`);
+
+    actionToast(`Moved ${parts.join(' and ')} to Trash`, {
+      actionLabel: 'Undo',
+      onAction: async () => {
+        for (const noteId of result.noteIds) {
+          await restoreNoteFromTrash(noteId, { source: `${source}-undo`, silent: true });
+        }
+
+        for (const folderId of result.folderIds) {
+          await restoreFolderFromTrash(folderId, { source: `${source}-undo`, silent: true });
+        }
+
+        toast(
+          `Restored ${result.changed} item${result.changed === 1 ? '' : 's'}`,
+          'success'
+        );
+      },
+    });
+
+    return result;
   }
   
   export async function restoreNoteFromTrash(noteId, {
     targetFolderId = undefined,
     source = 'user',
+    silent = false,
   } = {}) {
     const note = state.notes.get(String(noteId || ''));
   
@@ -430,15 +486,18 @@ import {
       targetFolderId: restoreFolderId,
       source,
     });
-  
-    toast('Note restored', 'success');
-  
+
+    if (!silent) {
+      toast('Note restored', 'success');
+    }
+
     return true;
   }
   
   export async function restoreFolderFromTrash(folderId, {
     targetParentId = undefined,
     source = 'user',
+    silent = false,
   } = {}) {
     const folder = state.folders.get(String(folderId || ''));
   
@@ -492,9 +551,11 @@ import {
       targetParentId: restoreParentId,
       source,
     });
-  
-    toast('Folder restored', 'success');
-  
+
+    if (!silent) {
+      toast('Folder restored', 'success');
+    }
+
     return true;
   }
   

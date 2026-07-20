@@ -21,6 +21,7 @@ import {
   getRssFeeds,
   upsertRssFeed,
   saveRssFeeds,
+  deleteRssFeed,
   getRssSettings,
 } from './rss-settings.js';
 
@@ -48,6 +49,7 @@ import {
   patchRssItem,
   listRssItems,
   pruneRssItems,
+  deleteRssItemsByFeed,
 } from './rss-store.js';
 
 function now() {
@@ -1332,6 +1334,69 @@ export async function refreshAllRssFeeds({
   }));
 
   return out;
+}
+
+// Removing a source must also clear its cached items — otherwise the
+// grid/widget keep showing entries whose feed no longer exists.
+//
+// Returns an `undo` snapshot (the feed plus its cached items) so callers
+// can offer a non-blocking "Undo" instead of a blocking confirm dialog.
+export async function removeRssSource(feedId) {
+  const id = String(feedId || '');
+  if (!id) throw new Error('Source id is required.');
+
+  const feeds = await getRssFeeds();
+  const feed = feeds.find((f) => f.id === id) || null;
+
+  // Snapshot the cache before deleting so a removal can be reversed.
+  let items = [];
+  try {
+    items = await listRssItems({ feedId: id, archived: true, limit: 100000 });
+  } catch {}
+
+  try {
+    await deleteRssItemsByFeed(id);
+  } catch (err) {
+    // Non-fatal: the source is still removed below, and any leftover
+    // cache entries are self-healed by pruneOrphanedRssItems() on startup.
+    console.warn('[YANTA RSS] Could not clear cached items for removed source', err);
+  }
+
+  const remaining = await deleteRssFeed(id);
+
+  window.dispatchEvent(new CustomEvent('yanta-rss-updated', {
+    detail: {
+      feedId: id,
+      removed: true,
+    },
+  }));
+
+  return {
+    feeds: remaining,
+    undo: feed ? { feed, items } : null,
+  };
+}
+
+// Reverses removeRssSource() using the snapshot it returned.
+export async function restoreRssSource(undo) {
+  if (!undo?.feed) return null;
+
+  // Re-add the feed first (also re-fires yanta-rss-feeds-changed), then
+  // restore its items — so the startup orphan-prune never sees them as stale.
+  await upsertRssFeed(undo.feed);
+
+  if (undo.items?.length) {
+    await upsertRssItems(undo.items);
+  }
+
+  window.dispatchEvent(new CustomEvent('yanta-rss-updated', {
+    detail: {
+      feedId: undo.feed.id,
+      restored: true,
+    },
+  }));
+
+  return undo.feed;
 }
 
 export async function markRssItemRead(itemId, read = true) {

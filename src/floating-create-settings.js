@@ -13,6 +13,12 @@ export const FLOATING_CREATE_SETTINGS_KEY = 'yanta.floatingCreate.v2';
 
 export const FLOATING_CREATE_MIN_DISTANCE = 58;
 
+// Trigger icon morphs — implementations live in floating-create-icons.js,
+// keyed by these ids. This list is the canonical set for validation.
+export const FLOATING_CREATE_ICON_STYLES = Object.freeze(['bubbles', 'loader', 'gamepad']);
+
+export const DEFAULT_FLOATING_CREATE_ICON_STYLE = 'bubbles';
+
 export const FLOATING_CREATE_BOUNDS = Object.freeze({
   minX: -260,
   maxX: 34,
@@ -76,6 +82,7 @@ export const FLOATING_CREATE_ACTION_CATALOG = [
 export const DEFAULT_FLOATING_CREATE_SETTINGS = {
   version: 2,
   minDistance: 58,
+  iconStyle: DEFAULT_FLOATING_CREATE_ICON_STYLE,
   actions: [
     {
       id: 'note',
@@ -450,6 +457,9 @@ export function normalizeFloatingCreateSettings(raw = {}) {
   return {
     version: 2,
     minDistance: numberOr(raw.minDistance, FLOATING_CREATE_MIN_DISTANCE),
+    iconStyle: FLOATING_CREATE_ICON_STYLES.includes(raw.iconStyle)
+      ? raw.iconStyle
+      : DEFAULT_FLOATING_CREATE_ICON_STYLE,
     actions,
   };
 }

@@ -35,6 +35,11 @@ import {
 } from './floating-create-settings.js';
 
 import {
+  FLOATING_CREATE_ICON_OPTIONS,
+  floatingCreateIconPreview,
+} from './floating-create-icons.js';
+
+import {
   yantaConfirm,
 } from './dialogs.js';
 
@@ -1044,7 +1049,7 @@ const SETTINGS_SECTIONS = [
   { id: 'colors',       label: 'Colors',          icon: 'paintbrush',     keywords: 'palette accent color scheme' },
   { id: 'typography',   label: 'Typography',      icon: 'type',           keywords: 'font size text' },
   { id: 'dashboard',    label: 'Dashboard',       icon: 'layout-dashboard', keywords: 'home widgets greeting' },
-  { id: 'quick-create', label: 'Quick Create',    icon: 'gamepad-directional',    keywords: 'floating create menu bubble action' },
+  { id: 'quick-create', label: 'Quick Actions',   icon: 'gamepad-directional',    keywords: 'floating create menu bubble action chat ai rss shortcut' },
   { id: 'calendar',     label: 'Calendar',        icon: 'calendar-days',  keywords: 'events reminders ics' },
   { id: 'sources',      label: 'Sources',         icon: 'rss',            keywords: 'rss feeds sources' },
   { id: 'ai',           label: 'AI',              icon: 'bot',            keywords: 'assistant model provider' },
@@ -1695,18 +1700,13 @@ function renderQuickCreateSection(host) {
   host.replaceChildren();
 
   host.append(sectionHeader(
-    'Quick Create',
-    'Customize the floating create menu: actions, labels, icons and free bubble positions.'
+    'Quick Actions',
+    'Customize the floating quick-access button: trigger icon, actions, labels and free bubble positions.'
   ));
 
   const settings = getFloatingCreateSettings();
 
-  const intro = el('div', { class: 'yanta-settings-info' });
-  intro.innerHTML = `
-    <p><strong>Free layout with guard rails.</strong> Drag bubbles in the preview. YANTA automatically keeps a minimum distance between bubbles, so the menu stays usable.</p>
-  `;
-  host.append(intro);
-
+  host.append(renderQuickCreateIconGroup(settings));
   host.append(renderQuickCreateActionsGroup(settings));
   host.append(renderQuickCreateLayoutEditor(settings));
 
@@ -1718,13 +1718,53 @@ function renderQuickCreateSection(host) {
       class: 'btn',
       onclick: () => {
         resetFloatingCreateSettings();
-        toast('Quick Create reset to default', 'success');
+        toast('Quick actions reset to default', 'success');
         renderSettingsBody();
       },
-    }, 'Reset Quick Create to default')
+    }, 'Reset quick actions to default')
   );
 
   host.append(resetGroup);
+}
+
+function renderQuickCreateIconGroup(settings) {
+  const group = el('div', { class: 'yanta-settings-group' });
+
+  group.append(el('div', { class: 'yanta-settings-group-title' }, 'Trigger icon'));
+  group.append(el('p', { class: 'yanta-settings-hint' },
+    'The floating button morphs this icon into a close (×) when the menu opens.'
+  ));
+
+  const choices = el('div', { class: 'yanta-qc-icon-choices' });
+
+  for (const { id, label } of FLOATING_CREATE_ICON_OPTIONS) {
+    const selected = settings.iconStyle === id;
+
+    const choice = el('button', {
+      type: 'button',
+      class: 'yanta-qc-icon-choice' + (selected ? ' active' : ''),
+      title: label,
+      'aria-pressed': selected ? 'true' : 'false',
+      onclick: () => {
+        if (settings.iconStyle === id) return;
+
+        persistQuickCreateSettings(
+          { ...cloneQuickCreateSettings(settings), iconStyle: id },
+          { toastMessage: 'Trigger icon updated' }
+        );
+      },
+    });
+
+    const preview = el('span', { class: 'yanta-qc-icon-preview' });
+    preview.innerHTML = floatingCreateIconPreview(id);
+
+    choice.append(preview, el('span', { class: 'yanta-qc-icon-choice-label' }, label));
+    choices.append(choice);
+  }
+
+  group.append(choices);
+
+  return group;
 }
 
 function renderQuickCreateActionsGroup(settings) {
@@ -1786,7 +1826,7 @@ function renderQuickCreateActionsGroup(settings) {
           });
 
           persistQuickCreateSettings(next, {
-            toastMessage: 'Quick Create action added',
+            toastMessage: 'Action added',
           });
         },
       });
@@ -1835,7 +1875,7 @@ function renderQuickCreateActionRow(settings, action) {
           a.icon = icon;
 
           persistQuickCreateSettings(next, {
-            toastMessage: 'Quick Create icon updated',
+            toastMessage: 'Icon updated',
           });
         },
       });
@@ -1861,7 +1901,7 @@ function renderQuickCreateActionRow(settings, action) {
 
     persistQuickCreateSettings(next, {
       rerender: false,
-      toastMessage: 'Quick Create label saved',
+      toastMessage: 'Label saved',
     });
   });
 
@@ -1890,7 +1930,7 @@ function renderQuickCreateActionRow(settings, action) {
   const remove = el('button', {
     type: 'button',
     class: 'icon-btn danger',
-    title: 'Remove from Quick Create',
+    title: 'Remove from quick actions',
     onclick: () => {
       const next = cloneQuickCreateSettings(settings);
       const a = quickCreateActionById(next, action.id);
@@ -1899,7 +1939,7 @@ function renderQuickCreateActionRow(settings, action) {
       a.enabled = false;
 
       persistQuickCreateSettings(next, {
-        toastMessage: 'Quick Create action removed',
+        toastMessage: 'Action removed',
       });
     },
   });
@@ -1937,7 +1977,7 @@ function moveQuickCreateAction(settings, actionId, delta) {
     }));
 
   persistQuickCreateSettings(next, {
-    toastMessage: 'Quick Create order updated',
+    toastMessage: 'Order updated',
   });
 }
 
@@ -1983,10 +2023,10 @@ function renderQuickCreateLayoutEditor(settings) {
 
     const origin = el('div', {
       class: 'yanta-qc-layout-origin',
-      title: 'Quick Create button',
+      title: 'Quick actions button',
     });
 
-    origin.innerHTML = lucide('gamepad-directional', 20);
+    origin.innerHTML = floatingCreateIconPreview(working.iconStyle);
     stage.append(origin);
 
     const enabled = enabledQuickCreateActions(working);
@@ -2128,7 +2168,7 @@ function renderQuickCreateLayoutEditor(settings) {
       class: 'btn',
       onclick: () => {
         resetFloatingCreateSettings();
-        toast('Quick Create layout reset', 'success');
+        toast('Quick actions layout reset', 'success');
         renderSettingsBody();
       },
     }, 'Reset layout')
@@ -4200,7 +4240,79 @@ function injectSettingsCss() {
   text-align: right;
 }
 
-/* Quick Create settings */
+/* Quick Actions settings */
+.yanta-qc-icon-choices {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
+  gap: 10px;
+
+  margin-top: 10px;
+}
+
+.yanta-qc-icon-choice {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 9px;
+
+  padding: 14px 10px 11px;
+
+  border: 1px solid var(--border);
+  border-radius: 14px;
+
+  background: var(--bg-elev-2);
+  color: var(--text);
+
+  cursor: pointer;
+
+  transition:
+    border-color 140ms ease,
+    background-color 140ms ease,
+    transform 140ms cubic-bezier(.2,.8,.2,1);
+}
+
+.yanta-qc-icon-choice:hover {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--border));
+  transform: translateY(-1px);
+}
+
+.yanta-qc-icon-choice.active {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--bg-elev-2));
+}
+
+.yanta-qc-icon-preview {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 46px;
+  height: 46px;
+
+  border-radius: 999px;
+
+  background: var(--accent);
+  color: white;
+
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+}
+
+.yanta-qc-icon-preview svg {
+  width: 24px;
+  height: 24px;
+  overflow: visible;
+}
+
+.yanta-qc-icon-choice-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-dim);
+}
+
+.yanta-qc-icon-choice.active .yanta-qc-icon-choice-label {
+  color: var(--text);
+}
+
 .yanta-qc-settings-actions {
   margin-top: 18px;
 }
@@ -4330,6 +4442,12 @@ function injectSettingsCss() {
 
   box-shadow: 0 10px 28px rgba(0,0,0,0.22);
   pointer-events: none;
+}
+
+.yanta-qc-layout-origin svg {
+  width: 25px;
+  height: 25px;
+  overflow: visible;
 }
 
 .yanta-qc-layout-bubble {

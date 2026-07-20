@@ -1064,6 +1064,13 @@ const SETTINGS_SECTIONS = [
   { id: 'about',        label: 'About',           icon: 'info',           keywords: 'version legal license' },
 ];
 
+// Rail label for a section id, from the catalog (settings.nav.<camelId>).
+// Section ids are kebab-case; catalog keys are camelCase ('quick-create' →
+// 'quickCreate').
+function navLabel(id) {
+  return t('settings.nav.' + id.replace(/-(\w)/g, (_, c) => c.toUpperCase()));
+}
+
 // The Quick Actions rail entry mirrors the chosen trigger icon; the rest
 // use their static lucide glyph.
 function settingsRailIcon(section) {
@@ -1161,15 +1168,15 @@ function ensureModal() {
   const backBtn = el('button', {
     class: 'icon-btn yanta-settings-back',
     onclick: () => setMobileDetail(false),
-    title: 'Back',
-    'aria-label': 'Back to settings',
+    title: t('common.back'),
+    'aria-label': t('settings.backAria'),
   });
   backBtn.innerHTML = lucide('chevron-left', 18);
 
   const head = el('header', { class: 'modal-head' },
     backBtn,
-    el('h3', {}, 'Settings'),
-    el('button', { class: 'icon-btn', onclick: closeSettings, title: 'Close' }, '✕'),
+    el('h3', {}, t('settings.title')),
+    el('button', { class: 'icon-btn', onclick: closeSettings, title: t('common.close') }, '✕'),
   );
 
   const body = el('div', { class: 'yanta-settings-body' });
@@ -1181,23 +1188,26 @@ function ensureModal() {
   const search = el('input', {
     class: 'yanta-settings-search',
     type: 'search',
-    placeholder: 'Search settings…',
-    'aria-label': 'Search settings',
+    placeholder: t('settings.searchPlaceholder'),
+    'aria-label': t('settings.searchAria'),
   });
   search.addEventListener('input', () => filterSettingsRail(search.value));
 
   const railList = el('div', { class: 'yanta-settings-rail-list' });
-  const railEmpty = el('div', { class: 'yanta-settings-rail-empty', hidden: true }, 'No matching settings');
+  const railEmpty = el('div', { class: 'yanta-settings-rail-empty', hidden: true }, t('settings.noMatches'));
 
   for (const s of SETTINGS_SECTIONS) {
+    const label = navLabel(s.id);
     const btn = el('button', {
       class: 'yanta-settings-rail-btn' + (activeSection === s.id ? ' active' : ''),
-      dataset: { section: s.id, search: `${s.label} ${s.keywords || ''}`.toLowerCase() },
+      // Search still matches the (English) keyword aliases so power users find
+      // sections by concept regardless of UI language.
+      dataset: { section: s.id, search: `${label} ${s.keywords || ''}`.toLowerCase() },
       onclick: () => goToSection(s.id),
     });
     btn.innerHTML =
       `<span class="yanta-settings-rail-icon">${settingsRailIcon(s)}</span>` +
-      `<span class="yanta-settings-rail-label">${s.label}</span>` +
+      `<span class="yanta-settings-rail-label">${label}</span>` +
       `<span class="yanta-settings-rail-chevron">${lucide('chevron-right', 15)}</span>`;
     railList.append(btn);
   }
@@ -1285,8 +1295,8 @@ function filterSettingsRail(query) {
 // ---- Notifications section ----
 function renderNotificationsSection(host) {
   host.append(sectionHeader(
-    'Notifications',
-    'Choose what YANTA notifies you about on this device, and see what your connected devices deliver.',
+    t('settings.sections.notifications.title'),
+    t('settings.sections.notifications.subtitle'),
   ));
 
   host.append(notificationsSettingsElement());
@@ -1295,8 +1305,8 @@ function renderNotificationsSection(host) {
 // ---- Install app section ----
 function renderInstallSection(host) {
   host.append(sectionHeader(
-    'Install app',
-    'Install YANTA so chat messages and event reminders arrive as reliable system notifications.',
+    t('settings.sections.install.title'),
+    t('settings.sections.install.subtitle'),
   ));
 
   host.append(installCardElement());
@@ -1334,17 +1344,17 @@ function renderLanguageSection(host) {
 function renderAppearanceSection(host) {
   const a = getAppearance();
 
-  host.append(sectionHeader('Appearance', 'Choose how YANTA looks.'));
+  host.append(sectionHeader(t('settings.sections.appearance.title'), t('settings.sections.appearance.subtitle')));
 
   // Mode picker
   const modeGroup = el('div', { class: 'yanta-settings-group' });
-  modeGroup.append(el('div', { class: 'yanta-settings-group-title' }, 'Theme'));
+  modeGroup.append(el('div', { class: 'yanta-settings-group-title' }, t('settings.appearance.theme')));
 
   const modes = [
-    { id: 'auto', label: 'Follow system', hint: 'Match OS light/dark' },
-    { id: 'dark', label: 'Dark', hint: 'Always dark' },
-    { id: 'light', label: 'Light', hint: 'Always light' },
-    { id: 'system-colors', label: 'System colors', hint: 'Follow OS theme + use system accent' },
+    { id: 'auto', key: 'auto' },
+    { id: 'dark', key: 'dark' },
+    { id: 'light', key: 'light' },
+    { id: 'system-colors', key: 'systemColors' },
   ];
 
   const modeRow = el('div', { class: 'yanta-settings-mode-row' });
@@ -1357,8 +1367,8 @@ onclick: async () => {
 },
     });
     card.innerHTML = `
-      <div class="yanta-settings-mode-label">${m.label}</div>
-      <div class="yanta-settings-mode-hint">${m.hint}</div>
+      <div class="yanta-settings-mode-label">${t(`settings.appearance.modes.${m.key}.label`)}</div>
+      <div class="yanta-settings-mode-hint">${t(`settings.appearance.modes.${m.key}.hint`)}</div>
     `;
     modeRow.append(card);
   }
@@ -1370,14 +1380,14 @@ onclick: async () => {
 
   // Quick reset
   const reset = el('div', { class: 'yanta-settings-group' });
-  reset.append(el('div', { class: 'yanta-settings-group-title' }, 'Reset'));
+  reset.append(el('div', { class: 'yanta-settings-group-title' }, t('common.reset')));
   reset.append(el('button', {
     class: 'btn',
     onclick: async () => {
       const ok = await yantaConfirm({
-        title: 'Reset appearance?',
-        message: 'Reset appearance, colors and typography to defaults?\n\nYour notes are not affected.',
-        confirmLabel: 'Reset appearance',
+        title: t('settings.appearance.resetConfirmTitle'),
+        message: t('settings.appearance.resetConfirmMessage'),
+        confirmLabel: t('settings.appearance.resetConfirmAction'),
         danger: true,
       });
 
@@ -1385,9 +1395,9 @@ onclick: async () => {
       appearance = deepMerge(DEFAULT_APPEARANCE, { deviceOnly: a.deviceOnly });
       await saveAppearance({}, { reason: 'reset' });
       renderSettingsBody();
-      toast('Appearance reset', 'success');
+      toast(t('settings.appearance.resetToast'), 'success');
     },
-  }, 'Reset all appearance to defaults'));
+  }, t('settings.appearance.resetButton')));
   host.append(reset);
 }
 
@@ -1435,7 +1445,7 @@ async function applyColorPreset(mode, preset) {
     reason: `color-preset:${mode}:${preset.id}`,
   });
 
-  toast(`Applied "${preset.name}" to ${mode} mode`, 'success');
+  toast(t('settings.colors.presetApplied', { name: preset.name, mode: t(`settings.colors.modeNoun.${mode}`) }), 'success');
   rerenderSettingsBody();
 }
 
@@ -1445,9 +1455,9 @@ function renderColorPresetPicker(targetMode, appearanceSettings) {
   const group = el('div', { class: 'yanta-settings-group yanta-settings-presets-group' });
 
   group.append(
-    el('div', { class: 'yanta-settings-group-title' }, 'Presets'),
+    el('div', { class: 'yanta-settings-group-title' }, t('settings.colors.presets')),
     el('p', { class: 'yanta-settings-hint' },
-      `These presets only apply to ${targetMode} mode. Your other mode stays unchanged.`
+      t('settings.colors.presetsHint', { mode: t(`settings.colors.modeNoun.${targetMode}`) })
     )
   );
 
@@ -1484,7 +1494,7 @@ function renderColorsSection(host) {
 
   const a = getAppearance();
 
-  host.append(sectionHeader('Colors', 'Customize the color palette. Dark and light modes are configured separately.'));
+  host.append(sectionHeader(t('settings.sections.colors.title'), t('settings.sections.colors.subtitle')));
 
   // Sub-tabs: dark / light
   const targetMode = host.dataset.colorMode || resolveEffectiveMode();
@@ -1499,7 +1509,7 @@ function renderColorsSection(host) {
         host.dataset.colorMode = m;
         rerenderSettingsBody();
       },
-    }, m === 'dark' ? '🌙 Dark mode' : '☀️ Light mode'));
+    }, m === 'dark' ? t('settings.colors.tabDark') : t('settings.colors.tabLight')));
   }
 
   host.append(tabs);
@@ -1581,9 +1591,9 @@ function renderColorsSection(host) {
         await saveAppearance(next);
 
         renderSettingsBody();
-        toast(`${targetMode} colors reset`, 'success');
+        toast(t('settings.colors.resetToast', { mode: t(`settings.colors.modeNoun.${targetMode}`) }), 'success');
       },
-    }, `Reset ${targetMode} colors to defaults`)
+    }, t('settings.colors.resetButton', { mode: t(`settings.colors.modeNoun.${targetMode}`) }))
   );
 
   host.append(resetGroup);
@@ -1613,11 +1623,11 @@ function updateColorToken(mode, key, value) {
 function renderTypographySection(host) {
   const a = getAppearance();
 
-  host.append(sectionHeader('Typography', 'Choose fonts and sizing.'));
+  host.append(sectionHeader(t('settings.sections.typography.title'), t('settings.sections.typography.subtitle')));
 
   // Body font
   const fontGroup = el('div', { class: 'yanta-settings-group' });
-  fontGroup.append(el('div', { class: 'yanta-settings-group-title' }, 'Body font'));
+  fontGroup.append(el('div', { class: 'yanta-settings-group-title' }, t('settings.typography.bodyFont')));
   const fontGrid = el('div', { class: 'yanta-settings-font-grid' });
   for (const f of FONT_OPTIONS) {
     const card = el('button', {
@@ -1630,7 +1640,7 @@ onclick: async () => {
     });
     card.innerHTML = `
       <div class="yanta-settings-font-name">${f.label}</div>
-      <div class="yanta-settings-font-sample">The quick brown fox jumps</div>
+      <div class="yanta-settings-font-sample">${t('settings.typography.bodySample')}</div>
     `;
     fontGrid.append(card);
   }
@@ -1639,7 +1649,7 @@ onclick: async () => {
 
   // Mono font
   const monoGroup = el('div', { class: 'yanta-settings-group' });
-  monoGroup.append(el('div', { class: 'yanta-settings-group-title' }, 'Monospace font (code)'));
+  monoGroup.append(el('div', { class: 'yanta-settings-group-title' }, t('settings.typography.monoFont')));
   const monoGrid = el('div', { class: 'yanta-settings-font-grid' });
   for (const f of MONO_OPTIONS) {
     const card = el('button', {
@@ -1661,7 +1671,7 @@ onclick: async () => {
 
   // Font size
   const sizeGroup = el('div', { class: 'yanta-settings-group' });
-  sizeGroup.append(el('div', { class: 'yanta-settings-group-title' }, 'Font size'));
+  sizeGroup.append(el('div', { class: 'yanta-settings-group-title' }, t('settings.typography.fontSize')));
   const sizeRow = el('div', { class: 'yanta-settings-size-row' });
   for (const s of FONT_SIZES) {
     sizeRow.append(el('button', {
@@ -1677,7 +1687,7 @@ onclick: async () => {
 
   // Line height
   const lhGroup = el('div', { class: 'yanta-settings-group' });
-  lhGroup.append(el('div', { class: 'yanta-settings-group-title' }, 'Line height'));
+  lhGroup.append(el('div', { class: 'yanta-settings-group-title' }, t('settings.typography.lineHeight')));
   const lhRow = el('div', { class: 'yanta-settings-lh-row' });
   const lhSlider = el('input', {
     type: 'range',
@@ -1751,8 +1761,8 @@ function renderQuickCreateSection(host) {
   host.replaceChildren();
 
   host.append(sectionHeader(
-    'Quick Actions',
-    'Customize the floating quick-access button: trigger icon, actions, labels and free bubble positions.'
+    t('settings.sections.quickCreate.title'),
+    t('settings.sections.quickCreate.subtitle'),
   ));
 
   const settings = getFloatingCreateSettings();
@@ -1762,17 +1772,17 @@ function renderQuickCreateSection(host) {
   host.append(renderQuickCreateLayoutEditor(settings));
 
   const resetGroup = el('div', { class: 'yanta-settings-group' });
-  resetGroup.append(el('div', { class: 'yanta-settings-group-title' }, 'Reset'));
+  resetGroup.append(el('div', { class: 'yanta-settings-group-title' }, t('common.reset')));
 
   resetGroup.append(
     el('button', {
       class: 'btn',
       onclick: () => {
         resetFloatingCreateSettings();
-        toast('Quick actions reset to default', 'success');
+        toast(t('settings.quickCreate.resetToast'), 'success');
         renderSettingsBody();
       },
-    }, 'Reset quick actions to default')
+    }, t('settings.quickCreate.resetButton'))
   );
 
   host.append(resetGroup);
@@ -1781,9 +1791,9 @@ function renderQuickCreateSection(host) {
 function renderQuickCreateIconGroup(settings) {
   const group = el('div', { class: 'yanta-settings-group' });
 
-  group.append(el('div', { class: 'yanta-settings-group-title' }, 'Trigger icon'));
+  group.append(el('div', { class: 'yanta-settings-group-title' }, t('settings.quickCreate.triggerIcon')));
   group.append(el('p', { class: 'yanta-settings-hint' },
-    'The floating button morphs this icon into a close (×) when the menu opens.'
+    t('settings.quickCreate.triggerIconHint')
   ));
 
   const choices = el('div', { class: 'yanta-qc-icon-choices' });
@@ -1801,7 +1811,7 @@ function renderQuickCreateIconGroup(settings) {
 
         persistQuickCreateSettings(
           { ...cloneQuickCreateSettings(settings), iconStyle: id },
-          { toastMessage: 'Trigger icon updated' }
+          { toastMessage: t('settings.quickCreate.triggerIconUpdated') }
         );
 
         refreshQuickCreateRailIcon();
@@ -1823,12 +1833,12 @@ function renderQuickCreateIconGroup(settings) {
 function renderQuickCreateActionsGroup(settings) {
   const group = el('div', { class: 'yanta-settings-group yanta-qc-settings-actions' });
 
-  group.append(el('div', { class: 'yanta-settings-group-title' }, 'Actions'));
+  group.append(el('div', { class: 'yanta-settings-group-title' }, t('settings.quickCreate.actions')));
 
   const enabled = enabledQuickCreateActions(settings);
 
   if (!enabled.length) {
-    group.append(el('div', { class: 'tree-empty' }, 'No actions enabled. Add one below.'));
+    group.append(el('div', { class: 'tree-empty' }, t('settings.quickCreate.noActions')));
   }
 
   for (const action of enabled) {
@@ -1838,7 +1848,7 @@ function renderQuickCreateActionsGroup(settings) {
   const disabled = disabledQuickCreateCatalogItems(settings);
 
   if (disabled.length) {
-    group.append(el('div', { class: 'yanta-qc-settings-add-title' }, 'Add action'));
+    group.append(el('div', { class: 'yanta-qc-settings-add-title' }, t('settings.quickCreate.addAction')));
 
     const addRow = el('div', { class: 'yanta-qc-settings-add-row' });
 
@@ -1879,7 +1889,7 @@ function renderQuickCreateActionsGroup(settings) {
           });
 
           persistQuickCreateSettings(next, {
-            toastMessage: 'Action added',
+            toastMessage: t('settings.quickCreate.actionAdded'),
           });
         },
       });
@@ -1908,16 +1918,16 @@ function renderQuickCreateActionRow(settings, action) {
   const iconPreview = el('button', {
     type: 'button',
     class: 'yanta-qc-settings-icon-btn',
-    title: 'Choose icon',
+    title: t('settings.quickCreate.chooseIcon'),
     onclick: async () => {
       const { openIconPicker } = await import('./icon-picker.js');
 
       openIconPicker({
-        title: `Icon for ${label}`,
+        title: t('settings.quickCreate.iconForLabel', { label }),
         initialIcon: action.icon || cat?.defaultIcon || 'circle',
         initialColor: '#6ea8fe',
         allowReset: false,
-        applyLabel: 'Apply',
+        applyLabel: t('common.apply'),
         onApply: ({ icon }) => {
           if (!icon) return;
 
@@ -1928,7 +1938,7 @@ function renderQuickCreateActionRow(settings, action) {
           a.icon = icon;
 
           persistQuickCreateSettings(next, {
-            toastMessage: 'Icon updated',
+            toastMessage: t('settings.quickCreate.iconUpdated'),
           });
         },
       });
@@ -1942,7 +1952,7 @@ function renderQuickCreateActionRow(settings, action) {
     value: label,
     autocomplete: 'off',
     spellcheck: 'false',
-    title: 'Action label',
+    title: t('settings.quickCreate.actionLabelField'),
   });
 
   labelInput.addEventListener('change', () => {
@@ -1954,14 +1964,14 @@ function renderQuickCreateActionRow(settings, action) {
 
     persistQuickCreateSettings(next, {
       rerender: false,
-      toastMessage: 'Label saved',
+      toastMessage: t('settings.quickCreate.labelSaved'),
     });
   });
 
   const moveUp = el('button', {
     type: 'button',
     class: 'icon-btn',
-    title: 'Move up',
+    title: t('settings.quickCreate.moveUp'),
     onclick: () => {
       moveQuickCreateAction(settings, action.id, -1);
     },
@@ -1972,7 +1982,7 @@ function renderQuickCreateActionRow(settings, action) {
   const moveDown = el('button', {
     type: 'button',
     class: 'icon-btn',
-    title: 'Move down',
+    title: t('settings.quickCreate.moveDown'),
     onclick: () => {
       moveQuickCreateAction(settings, action.id, 1);
     },
@@ -1983,7 +1993,7 @@ function renderQuickCreateActionRow(settings, action) {
   const remove = el('button', {
     type: 'button',
     class: 'icon-btn danger',
-    title: 'Remove from quick actions',
+    title: t('settings.quickCreate.removeAction'),
     onclick: () => {
       const next = cloneQuickCreateSettings(settings);
       const a = quickCreateActionById(next, action.id);
@@ -1992,7 +2002,7 @@ function renderQuickCreateActionRow(settings, action) {
       a.enabled = false;
 
       persistQuickCreateSettings(next, {
-        toastMessage: 'Action removed',
+        toastMessage: t('settings.quickCreate.actionRemoved'),
       });
     },
   });
@@ -2030,7 +2040,7 @@ function moveQuickCreateAction(settings, actionId, delta) {
     }));
 
   persistQuickCreateSettings(next, {
-    toastMessage: 'Order updated',
+    toastMessage: t('settings.quickCreate.orderUpdated'),
   });
 }
 
@@ -2054,17 +2064,17 @@ function renderQuickCreateLayoutEditor(settings) {
 
   const group = el('div', { class: 'yanta-settings-group yanta-qc-layout-group' });
 
-  group.append(el('div', { class: 'yanta-settings-group-title' }, 'Bubble layout'));
+  group.append(el('div', { class: 'yanta-settings-group-title' }, t('settings.quickCreate.bubbleLayout')));
 
   const hint = el('p', { class: 'yanta-settings-hint' },
-    `Drag bubbles freely. Minimum distance: ${FLOATING_CREATE_MIN_DISTANCE}px. Nearby bubbles move aside automatically.`
+    t('settings.quickCreate.bubbleLayoutHint', { distance: FLOATING_CREATE_MIN_DISTANCE })
   );
 
   group.append(hint);
 
   const toolbar = el('div', { class: 'yanta-qc-layout-toolbar' });
 
-  const activeLabel = el('span', { class: 'yanta-qc-layout-active-label' }, 'Drag a bubble');
+  const activeLabel = el('span', { class: 'yanta-qc-layout-active-label' }, t('settings.quickCreate.dragBubble'));
 
   toolbar.append(activeLabel);
   group.append(toolbar);
@@ -2076,7 +2086,7 @@ function renderQuickCreateLayoutEditor(settings) {
 
     const origin = el('div', {
       class: 'yanta-qc-layout-origin',
-      title: 'Quick actions button',
+      title: t('settings.quickCreate.quickActionsButton'),
     });
 
     origin.innerHTML = floatingCreateIconPreview(working.iconStyle);
@@ -2085,7 +2095,7 @@ function renderQuickCreateLayoutEditor(settings) {
     const enabled = enabledQuickCreateActions(working);
 
     if (!enabled.length) {
-      const empty = el('div', { class: 'yanta-qc-layout-empty' }, 'Enable or add an action first.');
+      const empty = el('div', { class: 'yanta-qc-layout-empty' }, t('settings.quickCreate.enableFirst'));
       stage.append(empty);
       return;
     }
@@ -2117,8 +2127,8 @@ function renderQuickCreateLayoutEditor(settings) {
           n.classList.toggle('active', n.dataset.qcPreviewAction === activeId);
         }
 
-        const label = quickCreateActionById(working, activeId)?.label || 'Bubble';
-        activeLabel.textContent = `Dragging: ${label}`;
+        const label = quickCreateActionById(working, activeId)?.label || t('settings.quickCreate.bubbleFallback');
+        activeLabel.textContent = t('settings.quickCreate.dragging', { label });
 
         try {
           bubble.setPointerCapture?.(e.pointerId);
@@ -2157,7 +2167,7 @@ function renderQuickCreateLayoutEditor(settings) {
           upEvent.stopPropagation();
 
           stage.classList.remove('is-dragging');
-          activeLabel.textContent = 'Layout saved';
+          activeLabel.textContent = t('settings.quickCreate.layoutSaved');
 
           document.removeEventListener('pointermove', onMove, true);
           document.removeEventListener('pointerup', onUp, true);
@@ -2174,7 +2184,7 @@ function renderQuickCreateLayoutEditor(settings) {
           if (cancelEvent.pointerId !== e.pointerId) return;
 
           stage.classList.remove('is-dragging');
-          activeLabel.textContent = 'Drag a bubble';
+          activeLabel.textContent = t('settings.quickCreate.dragBubble');
 
           document.removeEventListener('pointermove', onMove, true);
           document.removeEventListener('pointerup', onUp, true);
@@ -2213,18 +2223,18 @@ function renderQuickCreateLayoutEditor(settings) {
       onclick: () => {
         working = getFloatingCreateSettings();
         renderStage();
-        activeLabel.textContent = 'Reloaded saved layout';
+        activeLabel.textContent = t('settings.quickCreate.reloadedLayout');
       },
-    }, 'Reload saved layout'),
+    }, t('settings.quickCreate.reloadLayout')),
 
     el('button', {
       class: 'btn',
       onclick: () => {
         resetFloatingCreateSettings();
-        toast('Quick actions layout reset', 'success');
+        toast(t('settings.quickCreate.layoutReset'), 'success');
         renderSettingsBody();
       },
-    }, 'Reset layout')
+    }, t('settings.quickCreate.resetLayout'))
   );
 
   group.append(actions);
@@ -2237,8 +2247,8 @@ function renderDashboardSection(host) {
   host.replaceChildren();
 
   host.append(sectionHeader(
-    'Dashboard',
-    'Choose how note and folder cards are displayed.'
+    t('settings.sections.dashboard.title'),
+    t('settings.sections.dashboard.subtitle'),
   ));
 
   const prefs = getDashboardCardDisplayPrefs();
@@ -2246,33 +2256,33 @@ function renderDashboardSection(host) {
   const group = el('div', { class: 'yanta-settings-group' });
 
   group.append(
-    el('div', { class: 'yanta-settings-group-title' }, 'Card labels')
+    el('div', { class: 'yanta-settings-group-title' }, t('settings.dashboard.cardLabels'))
   );
 
   group.append(
     renderDashboardToggle({
       checked: !!prefs.notesShowHeader,
-      label: 'Show note title and icon',
-      hint: 'Shows a compact header on note cards.',
+      label: t('settings.dashboard.showNoteHeader'),
+      hint: t('settings.dashboard.showNoteHeaderHint'),
       onChange: async (checked) => {
         await setDashboardCardDisplayPrefs({
           notesShowHeader: checked,
         });
 
-        toast('Dashboard setting saved', 'success');
+        toast(t('settings.dashboard.saved'), 'success');
       },
     }),
 
     renderDashboardToggle({
       checked: !!prefs.foldersShowHeader,
-      label: 'Show folder title and icon',
-      hint: 'Shows a compact header on folder cards.',
+      label: t('settings.dashboard.showFolderHeader'),
+      hint: t('settings.dashboard.showFolderHeaderHint'),
       onChange: async (checked) => {
         await setDashboardCardDisplayPrefs({
           foldersShowHeader: checked,
         });
 
-        toast('Dashboard setting saved', 'success');
+        toast(t('settings.dashboard.saved'), 'success');
       },
     }),
   );
@@ -2283,20 +2293,20 @@ function renderDashboardSection(host) {
   const eventGroup = el('div', { class: 'yanta-settings-group' });
 
   eventGroup.append(
-    el('div', { class: 'yanta-settings-group-title' }, 'Linked event card')
+    el('div', { class: 'yanta-settings-group-title' }, t('settings.dashboard.linkedEventCard'))
   );
 
   eventGroup.append(
     renderDashboardToggle({
       checked: prefs.linkedEventShow !== false,
-      label: 'Show linked event card on note cards',
-      hint: 'Shows a compact calendar event header on dashboard note cards when a note is linked to an event.',
+      label: t('settings.dashboard.showLinkedEvent'),
+      hint: t('settings.dashboard.showLinkedEventHint'),
       onChange: async (checked) => {
         await setDashboardCardDisplayPrefs({
           linkedEventShow: checked,
         });
 
-        toast('Dashboard setting saved', 'success');
+        toast(t('settings.dashboard.saved'), 'success');
         renderSettingsBody();
       },
     })
@@ -2304,51 +2314,25 @@ function renderDashboardSection(host) {
 
   const fieldPrefs = prefs.linkedEventFields || {};
 
-  const fields = [
-    {
-      key: 'icon',
-      label: 'Show icon',
-      hint: 'Shows a small calendar icon.',
-    },
-    {
-      key: 'title',
-      label: 'Show title',
-      hint: 'Shows the event title.',
-    },
-    {
-      key: 'time',
-      label: 'Show time/date',
-      hint: 'Shows the event date and time.',
-    },
-    {
-      key: 'location',
-      label: 'Show location',
-      hint: 'Shows the event location if present.',
-    },
-    {
-      key: 'description',
-      label: 'Show description',
-      hint: 'Shows the event description if present.',
-    },
-  ];
+  const fields = ['icon', 'title', 'time', 'location', 'description'];
 
-  for (const field of fields) {
+  for (const key of fields) {
     eventGroup.append(
       renderDashboardToggle({
-        checked: fieldPrefs[field.key] !== false,
-        label: field.label,
-        hint: field.hint,
+        checked: fieldPrefs[key] !== false,
+        label: t(`settings.dashboard.fields.${key}.label`),
+        hint: t(`settings.dashboard.fields.${key}.hint`),
         onChange: async (checked) => {
           const current = getDashboardCardDisplayPrefs();
 
           await setDashboardCardDisplayPrefs({
             linkedEventFields: {
               ...(current.linkedEventFields || {}),
-              [field.key]: checked,
+              [key]: checked,
             },
           });
 
-          toast('Dashboard setting saved', 'success');
+          toast(t('settings.dashboard.saved'), 'success');
         },
       })
     );
@@ -2359,10 +2343,13 @@ function renderDashboardSection(host) {
 
   const info = el('div', { class: 'yanta-settings-info' });
 
-  info.innerHTML = `
-    <p><strong>Rename UX:</strong> When headers are hidden, YANTA temporarily opens the card header only for renaming.</p>
-    <p>This keeps the dashboard clean by default, while Rename, F2 and keyboard workflows remain reliable.</p>
-  `;
+  info.append(
+    el('p', {},
+      el('strong', {}, t('settings.dashboard.info.renameTitle')),
+      ' ' + t('settings.dashboard.info.renameBody'),
+    ),
+    el('p', {}, t('settings.dashboard.info.line2')),
+  );
 
   host.append(info);
 }
@@ -2373,8 +2360,8 @@ function renderCalendarSection(host) {
   const prefs = getCalendarPreferences();
 
   host.append(sectionHeader(
-    'Calendar',
-    'Configure date display, time format, week start and calendar weeks.'
+    t('settings.sections.calendar.title'),
+    t('settings.sections.calendar.subtitle'),
   ));
 
   const group = el('div', { class: 'yanta-settings-group' });
@@ -2505,8 +2492,8 @@ function renderSourcesSection(host) {
   host.replaceChildren();
 
   host.append(sectionHeader(
-    'Sources',
-    'Follow RSS, Atom and JSON feeds. Feed items are cached locally; only saved items become YANTA notes.'
+    t('settings.sections.sources.title'),
+    t('settings.sections.sources.subtitle'),
   ));
 
   const info = el('div', { class: 'yanta-settings-info' });
@@ -2617,8 +2604,8 @@ function renderAiSection(host) {
   host.replaceChildren();
 
   host.append(sectionHeader(
-    'YANTA AI',
-    'Configure the YANTA AI assistant, OpenRouter API key, permissions, location context and external agent bridge.'
+    t('settings.sections.ai.title'),
+    t('settings.sections.ai.subtitle'),
   ));
 
   const info = el('div', { class: 'yanta-settings-info' });
@@ -2658,8 +2645,8 @@ function renderAiSection(host) {
 
 function renderSemanticSection(host) {
   host.append(sectionHeader(
-    'Semantic search',
-    'On-device AI that finds notes by meaning. Nothing leaves your device.'
+    t('settings.sections.semantic.title'),
+    t('settings.sections.semantic.subtitle'),
   ));
 
   const mount = el('div', { class: 'yanta-settings-group' });
@@ -2692,8 +2679,8 @@ async function renderChatSection(host) {
   host.replaceChildren();
 
   host.append(sectionHeader(
-    'Chat',
-    'Configure encrypted messaging, receipts, media, storage and recovery.'
+    t('settings.sections.chat.title'),
+    t('settings.sections.chat.subtitle'),
   ));
 
   const loading = el('div', {
@@ -2732,8 +2719,8 @@ async function renderChatSection(host) {
     host.replaceChildren();
 
     host.append(sectionHeader(
-      'Chat',
-      'Configure encrypted messaging, receipts, media, storage and recovery.'
+      t('settings.sections.chat.title'),
+      t('settings.sections.chat.subtitle'),
     ));
 
     host.append(renderChatConnectionCard({
@@ -3251,8 +3238,8 @@ function renderSyncSection(host) {
   host.replaceChildren();
 
   host.append(sectionHeader(
-    'Sync',
-    'Keep YANTA up to date across your devices.'
+    t('settings.sections.sync.title'),
+    t('settings.sections.sync.subtitle'),
   ));
 
   host.append(renderYantaCloudSyncPrimaryCard());
@@ -3265,8 +3252,8 @@ function renderBillingSection(host) {
   host.replaceChildren();
 
   host.append(sectionHeader(
-    'Plan & Billing',
-    'Manage your YANTA Plus subscription, payment method and invoices.'
+    t('settings.sections.billing.title'),
+    t('settings.sections.billing.subtitle'),
   ));
 
   host.append(renderYantaPlusBillingCard());
@@ -3732,7 +3719,7 @@ function renderAdvancedSyncMethods() {
 
 // ---- About section ----
 function renderAboutSection(host) {
-  host.append(sectionHeader('About', null));
+  host.append(sectionHeader(t('settings.sections.about.title'), null));
   const about = el('div', { class: 'yanta-settings-info' });
   about.innerHTML = `
     <p><strong>YANTA</strong> — Yet Another Note Taking App.</p>

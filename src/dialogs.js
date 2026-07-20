@@ -25,6 +25,7 @@ import {
   escapeAttr,
   lucide,
 } from './core.js';
+import { t } from './i18n/index.js';
 
 import {
   pushOverlayState,
@@ -577,7 +578,7 @@ function makeModal({
   card.className = 'yanta-dialog-card' + (danger ? ' danger' : '');
   card.setAttribute('role', 'dialog');
   card.setAttribute('aria-modal', 'true');
-  card.setAttribute('aria-label', title || 'Dialog');
+  card.setAttribute('aria-label', title || t('dialog.ariaFallback'));
 
   card.innerHTML = `
     <header class="yanta-dialog-head">
@@ -588,7 +589,7 @@ function makeModal({
         ${kicker ? `<div class="yanta-dialog-kicker">${escapeHtml(kicker)}</div>` : ''}
       </div>
 
-      <button type="button" class="icon-btn" data-dialog-x title="Close">${lucide('x', 16)}</button>
+      <button type="button" class="icon-btn" data-dialog-x title="${escapeAttr(t('common.close'))}">${lucide('x', 16)}</button>
     </header>
 
     <main class="yanta-dialog-body">
@@ -760,10 +761,10 @@ function makeModal({
   }
   
   export function yantaConfirm({
-    title = 'Confirm',
+    title = t('dialog.confirmTitle'),
     message = '',
-    confirmLabel = 'Confirm',
-    cancelLabel = 'Cancel',
+    confirmLabel = t('dialog.confirmAction'),
+    cancelLabel = t('common.cancel'),
     danger = false,
     icon = danger ? 'triangle-alert' : 'help-circle',
     kicker = '',
@@ -810,10 +811,10 @@ function makeModal({
   }
   
   export function yantaAlert({
-    title = 'Notice',
+    title = t('dialog.noticeTitle'),
     message = '',
     icon = 'info',
-    confirmLabel = 'OK',
+    confirmLabel = t('common.ok'),
   } = {}) {
     return new Promise((resolve) => {
       const dlg = makeModal({
@@ -842,7 +843,7 @@ function makeModal({
   }
   
   export function yantaPrompt({
-    title = 'Input',
+    title = t('dialog.inputTitle'),
     message = '',
     label = '',
     initial = '',
@@ -850,8 +851,8 @@ function makeModal({
     required = false,
     multiline = false,
     inputType = 'text',
-    confirmLabel = 'Save',
-    cancelLabel = 'Cancel',
+    confirmLabel = t('common.save'),
+    cancelLabel = t('common.cancel'),
     danger = false,
     icon = danger ? 'triangle-alert' : 'pencil',
     validate = null,
@@ -907,7 +908,7 @@ function makeModal({
       dlg.actions.append(cancel, submit);
   
       const fail = (msg) => {
-        error.textContent = msg || 'Invalid input';
+        error.textContent = msg || t('dialog.invalid');
         error.hidden = false;
         input.focus();
       };
@@ -916,7 +917,7 @@ function makeModal({
         const value = String(input.value || '').trim();
   
         if (required && !value) {
-          fail('This field is required.');
+          fail(t('dialog.required'));
           return;
         }
   
@@ -924,7 +925,7 @@ function makeModal({
           const result = await validate(value);
   
           if (result === false) {
-            fail('Invalid input.');
+            fail(t('dialog.invalid'));
             return;
           }
   

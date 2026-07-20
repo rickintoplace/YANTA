@@ -86,18 +86,28 @@ function createAnimator(render) {
   return { setProgress: apply, animateTo };
 }
 
-/** Draws a set of `<path>` strokes from center outward (dash reveal). */
+/**
+ * Reveals the four X half-strokes together. Each `<path>` starts at the
+ * center, so a single dash offset grows all arms outward symmetrically —
+ * no directional top-to-bottom wipe.
+ */
 function drawXLines(xLines, xLengths, xDraw) {
   xLines.forEach((line, i) => {
-    const stagger = i * 0.12;
-    const localDraw = clamp((xDraw - stagger) / (1 - stagger));
     const len = xLengths[i];
 
-    line.setAttribute('opacity', localDraw);
+    line.setAttribute('opacity', xDraw);
     line.setAttribute('stroke-dasharray', len);
-    line.setAttribute('stroke-dashoffset', len * (1 - localDraw));
+    line.setAttribute('stroke-dashoffset', len * (1 - xDraw));
   });
 }
+
+// The X is four half-strokes emanating from the center to each corner.
+// Kept identical for every icon so the reveal reads the same everywhere.
+const X_LINES_MARKUP = `
+        <path data-qc-x-line d="M12 12 18 6" opacity="0"/>
+        <path data-qc-x-line d="M12 12 6 18" opacity="0"/>
+        <path data-qc-x-line d="M12 12 6 6" opacity="0"/>
+        <path data-qc-x-line d="M12 12 18 18" opacity="0"/>`;
 
 // ---- icon: bubbles ----------------------------------------------
 // Three stroke bubbles merge (goo filter), pop into a burst, draw an X.
@@ -142,9 +152,7 @@ function bubblesMarkup() {
         <line x1="5.2" y1="12" x2="2.2" y2="12"/>
       </g>
 
-      <g data-qc-x-group fill="none">
-        <path data-qc-x-line d="M18 6 6 18" opacity="0"/>
-        <path data-qc-x-line d="m6 6 12 12" opacity="0"/>
+      <g data-qc-x-group fill="none">${X_LINES_MARKUP}
       </g>
     </svg>
   `;
@@ -208,14 +216,17 @@ function initBubbles(svg) {
 }
 
 // ---- icon: loader (radial spokes) -------------------------------
-// Eight radial spokes; the 4 cardinal ones rotate 45° while all
-// pull inward to the center, closing into an X.
+// Two-beat morph:
+//   1. cardinal spokes (12/3/6/9) pull inward to a small +, while the
+//      diagonal spokes rotate 45° onto the axes to form a large + —
+//      together one continuous plus sign.
+//   2. the whole glyph rotates 45°, turning that plus into the final X.
 
 const LOADER_CENTER = 12;
 const LOADER_BASE_INNER = 6;
 const LOADER_BASE_OUTER = 9.5;
-const LOADER_X_INNER = 0;
-const LOADER_X_OUTER = 8.49; // reaches a 6,6 corner
+const LOADER_MID = 4.24; // seam between the small + and the large +
+const LOADER_OUTER = 8.49; // reaches a 6,6 corner once rotated
 
 function spokePoint(angleDeg, r) {
   const rad = (angleDeg * Math.PI) / 180;
@@ -225,20 +236,11 @@ function spokePoint(angleDeg, r) {
   };
 }
 
-const LOADER_SPOKES = Array.from({ length: 8 }, (_, i) => {
-  const baseAngle = i * 45;
-  const cardinal = i % 2 === 0;
-
-  return {
-    baseAngle,
-    targetAngle: cardinal ? baseAngle + 45 : baseAngle,
-  };
-});
-
 function loaderMarkup() {
-  const lines = LOADER_SPOKES.map(({ baseAngle }) => {
-    const a = spokePoint(baseAngle, LOADER_BASE_INNER);
-    const b = spokePoint(baseAngle, LOADER_BASE_OUTER);
+  const lines = Array.from({ length: 8 }, (_, i) => {
+    const angle = i * 45;
+    const a = spokePoint(angle, LOADER_BASE_INNER);
+    const b = spokePoint(angle, LOADER_BASE_OUTER);
 
     return `<line
       data-qc-spoke
@@ -257,23 +259,30 @@ function loaderMarkup() {
       stroke-linejoin="round"
       aria-hidden="true"
       focusable="false">
-      <g fill="none">${lines}</g>
+      <g data-qc-loader-group fill="none">${lines}</g>
     </svg>
   `;
 }
 
 function initLoader(svg) {
-  const spokes = [...svg.querySelectorAll('[data-qc-spoke]')];
+  const group = svg.querySelector('[data-qc-loader-group]');
+  const spokes = [...group.querySelectorAll('[data-qc-spoke]')];
 
   return createAnimator((progress) => {
-    const e = smooth(progress);
+    const plus = smooth(clamp(progress / 0.62)); // spokes gather into a +
+    const spin = smooth(clamp((progress - 0.55) / 0.45)); // + rotates into X
+
+    group.setAttribute('transform', `rotate(${(45 * spin).toFixed(3)} 12 12)`);
 
     spokes.forEach((line, i) => {
-      const { baseAngle, targetAngle } = LOADER_SPOKES[i];
+      const cardinal = i % 2 === 0;
+      const baseAngle = i * 45;
 
-      const angle = lerp(baseAngle, targetAngle, e);
-      const inner = lerp(LOADER_BASE_INNER, LOADER_X_INNER, e);
-      const outer = lerp(LOADER_BASE_OUTER, LOADER_X_OUTER, e);
+      // Cardinals hold their axis and shrink to the inner +; diagonals
+      // rotate 45° onto the axes and become the outer + arms.
+      const angle = cardinal ? baseAngle : lerp(baseAngle, baseAngle + 45, plus);
+      const inner = lerp(LOADER_BASE_INNER, cardinal ? 0 : LOADER_MID, plus);
+      const outer = lerp(LOADER_BASE_OUTER, cardinal ? LOADER_MID : LOADER_OUTER, plus);
 
       const a = spokePoint(angle, inner);
       const b = spokePoint(angle, outer);
@@ -308,9 +317,7 @@ function gamepadMarkup() {
         <path d="M9 3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2.172a2 2 0 0 1-.586 1.414l-1.56 1.56a1.207 1.207 0 0 1-1.708 0l-1.56-1.56A2 2 0 0 1 9 5.172z"/>
       </g>
 
-      <g data-qc-x-group fill="none">
-        <path data-qc-x-line d="M18 6 6 18" opacity="0"/>
-        <path data-qc-x-line d="m6 6 12 12" opacity="0"/>
+      <g data-qc-x-group fill="none">${X_LINES_MARKUP}
       </g>
     </svg>
   `;
@@ -318,6 +325,7 @@ function gamepadMarkup() {
 
 function initGamepad(svg) {
   const gamepad = svg.querySelector('[data-qc-gamepad]');
+  const xGroup = svg.querySelector('[data-qc-x-group]');
   const xLines = [...svg.querySelectorAll('[data-qc-x-line]')];
   const xLengths = xLines.map((line) => line.getTotalLength());
 
@@ -332,10 +340,7 @@ function initGamepad(svg) {
 
     const xDraw = smooth(clamp((progress - 0.45) / 0.55));
 
-    svg.querySelector('[data-qc-x-group]').setAttribute(
-      'transform',
-      spin(lerp(0.6, 1, xDraw))
-    );
+    xGroup.setAttribute('transform', spin(lerp(0.6, 1, xDraw)));
 
     drawXLines(xLines, xLengths, xDraw);
   });

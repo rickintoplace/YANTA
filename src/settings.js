@@ -1062,6 +1062,26 @@ const SETTINGS_SECTIONS = [
   { id: 'about',        label: 'About',           icon: 'info',           keywords: 'version legal license' },
 ];
 
+// The Quick Actions rail entry mirrors the chosen trigger icon; the rest
+// use their static lucide glyph.
+function settingsRailIcon(section) {
+  if (section.id === 'quick-create') {
+    return floatingCreateIconPreview(getFloatingCreateSettings().iconStyle);
+  }
+
+  return lucide(section.icon, 16);
+}
+
+function refreshQuickCreateRailIcon() {
+  const icon = modal?.querySelector(
+    '.yanta-settings-rail-btn[data-section="quick-create"] .yanta-settings-rail-icon'
+  );
+
+  if (icon) {
+    icon.innerHTML = floatingCreateIconPreview(getFloatingCreateSettings().iconStyle);
+  }
+}
+
 function settingsIsOpen() {
   return !!modal && modal.hidden === false;
 }
@@ -1174,7 +1194,7 @@ function ensureModal() {
       onclick: () => goToSection(s.id),
     });
     btn.innerHTML =
-      `${lucide(s.icon, 16)}` +
+      `<span class="yanta-settings-rail-icon">${settingsRailIcon(s)}</span>` +
       `<span class="yanta-settings-rail-label">${s.label}</span>` +
       `<span class="yanta-settings-rail-chevron">${lucide('chevron-right', 15)}</span>`;
     railList.append(btn);
@@ -1752,6 +1772,8 @@ function renderQuickCreateIconGroup(settings) {
           { ...cloneQuickCreateSettings(settings), iconStyle: id },
           { toastMessage: 'Trigger icon updated' }
         );
+
+        refreshQuickCreateRailIcon();
       },
     });
 
@@ -3836,6 +3858,22 @@ function injectSettingsCss() {
 
 .yanta-settings-rail-label { flex: 1; min-width: 0; }
 
+.yanta-settings-rail-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  width: 16px;
+  height: 16px;
+}
+
+.yanta-settings-rail-icon svg {
+  display: block;
+  width: 16px;
+  height: 16px;
+  overflow: visible;
+}
+
 /* Drill-down affordance — mobile only. */
 .yanta-settings-rail-chevron {
   display: none;
@@ -4298,6 +4336,7 @@ function injectSettingsCss() {
 }
 
 .yanta-qc-icon-preview svg {
+  display: block;
   width: 24px;
   height: 24px;
   overflow: visible;
@@ -4445,6 +4484,7 @@ function injectSettingsCss() {
 }
 
 .yanta-qc-layout-origin svg {
+  display: block;
   width: 25px;
   height: 25px;
   overflow: visible;

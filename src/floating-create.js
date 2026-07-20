@@ -393,6 +393,7 @@ function injectCss() {
 }
 
 .yanta-qc-trigger svg {
+  display: block;
   width: 25px;
   height: 25px;
   stroke-width: 2;

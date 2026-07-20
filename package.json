@@ -9,6 +9,8 @@
     "dev": "vite --host 0.0.0.0",
     "prebuild": "node scripts/copy-excalidraw-assets.mjs && node scripts/copy-ort-assets.mjs",
     "build": "vite build",
+    "postbuild": "node scripts/csp-hashes.mjs",
+    "csp:check": "node scripts/csp-hashes.mjs",
     "preview": "vite preview",
     "lint": "eslint src/**/*.js",
     "i18n:check": "node scripts/i18n-check.mjs",

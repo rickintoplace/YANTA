@@ -28,6 +28,7 @@ let initialized = false;
 let root = null;
 let graphObserver = null;
 let actions = [];
+let iconAnim = null;
 
 let globalKeyBound = false;
 let globalOutsidePointerBound = false;
@@ -75,6 +76,8 @@ function setOpen(open) {
 
   root.classList.toggle('is-open', !!open);
   root.querySelector('[data-qc-trigger]')?.setAttribute('aria-expanded', open ? 'true' : 'false');
+
+  iconAnim?.animateTo(open ? 1 : 0);
 
   if (!open) {
     clearHotBubble();
@@ -369,7 +372,7 @@ function injectCss() {
 .yanta-qc.is-open .yanta-qc-trigger {
   transform:
     translate3d(var(--qc-drag-x), var(--qc-drag-y), 0)
-    rotate(45deg)
+    rotate(0deg)
     scale(1.02);
 }
 
@@ -385,9 +388,11 @@ function injectCss() {
 .yanta-qc-trigger svg {
   width: 25px;
   height: 25px;
-  stroke-width: 2.6;
+  stroke-width: 2;
 
   opacity: 1;
+
+  overflow: visible;
 
   filter: drop-shadow(0 1px 1px rgba(0,0,0,0.22));
 
@@ -555,6 +560,176 @@ function injectCss() {
   document.head.append(style);
 }
 
+function bubbleXSvgMarkup() {
+  // Quick-access icon: three bubbles that merge (goo filter) and pop into an X.
+  // Driven by initBubbleXIcon() — see setProgress() there for the phases.
+  return `
+    <svg
+      class="yanta-qc-bubblex"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+      aria-hidden="true"
+      focusable="false">
+      <defs>
+        <filter id="qc-stroke-goo" x="-40%" y="-40%" width="180%" height="180%">
+          <feGaussianBlur in="SourceGraphic" stdDeviation="0.75" result="blur"/>
+          <feColorMatrix
+            in="blur"
+            mode="matrix"
+            values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 18 -7"
+            result="goo"/>
+        </filter>
+      </defs>
+
+      <g data-qc-bubble-group filter="url(#qc-stroke-goo)" fill="none">
+        <circle data-qc-bubble="big" cx="7.5" cy="16.5" r="5.5"/>
+        <circle data-qc-bubble="right" cx="18.5" cy="8.5" r="3.5"/>
+        <circle data-qc-bubble="small" cx="7.5" cy="4.5" r="2.5"/>
+        <path data-qc-bubble-arc d="M7.001 15.085A1.5 1.5 0 0 1 9 16.5"/>
+      </g>
+
+      <g data-qc-burst-group fill="none">
+        <line x1="12" y1="5.2" x2="12" y2="2.2"/>
+        <line x1="17" y1="7" x2="19.2" y2="4.8"/>
+        <line x1="18.8" y1="12" x2="21.8" y2="12"/>
+        <line x1="17" y1="17" x2="19.2" y2="19.2"/>
+        <line x1="7" y1="17" x2="4.8" y2="19.2"/>
+        <line x1="5.2" y1="12" x2="2.2" y2="12"/>
+      </g>
+
+      <g data-qc-x-group fill="none">
+        <path data-qc-x-line d="M18 6 6 18"/>
+        <path data-qc-x-line d="m6 6 12 12"/>
+      </g>
+    </svg>
+  `;
+}
+
+function initBubbleXIcon(svg) {
+  if (!svg) return null;
+
+  const bubbleGroup = svg.querySelector('[data-qc-bubble-group]');
+  const bubbleArc = svg.querySelector('[data-qc-bubble-arc]');
+  const burstGroup = svg.querySelector('[data-qc-burst-group]');
+  const burstLines = [...burstGroup.querySelectorAll('line')];
+  const xLines = [...svg.querySelectorAll('[data-qc-x-line]')];
+  const xLengths = xLines.map((line) => line.getTotalLength());
+
+  const bubbles = [
+    { el: svg.querySelector('[data-qc-bubble="big"]'), cx: 7.5, cy: 16.5, r: 5.5, mergedR: 6.2 },
+    { el: svg.querySelector('[data-qc-bubble="right"]'), cx: 18.5, cy: 8.5, r: 3.5, mergedR: 5.7 },
+    { el: svg.querySelector('[data-qc-bubble="small"]'), cx: 7.5, cy: 4.5, r: 2.5, mergedR: 5.2 },
+  ];
+
+  const DURATION = 420;
+
+  let progress = 0;
+  let raf = null;
+
+  const clamp = (v, min = 0, max = 1) => Math.min(max, Math.max(min, v));
+  const lerp = (a, b, t) => a + (b - a) * t;
+  const smooth = (t) => {
+    t = clamp(t);
+    return t * t * (3 - 2 * t);
+  };
+
+  function setProgress(p) {
+    progress = clamp(p);
+
+    const merge = smooth(progress / 0.62);
+    const pop = smooth((progress - 0.58) / 0.18);
+    const xDraw = smooth((progress - 0.68) / 0.28);
+
+    const bubbleOpacity = 1 - pop;
+    const gooStroke = lerp(2, 4.6, merge) * bubbleOpacity;
+
+    bubbleGroup.setAttribute('opacity', bubbleOpacity);
+    bubbleGroup.setAttribute('stroke-width', Math.max(0.01, gooStroke));
+
+    bubbles.forEach(({ el, cx, cy, r, mergedR }) => {
+      const wobble = Math.sin(progress * Math.PI * 2) * 0.15 * (1 - pop);
+
+      el.setAttribute('cx', lerp(cx, 12, merge));
+      el.setAttribute('cy', lerp(cy, 12, merge));
+      el.setAttribute('r', Math.max(0.01, lerp(r, mergedR + wobble, merge) * bubbleOpacity));
+    });
+
+    bubbleArc.setAttribute('opacity', Math.max(0, 1 - merge * 1.4));
+    bubbleArc.setAttribute(
+      'transform',
+      `translate(${lerp(0, 4.1, merge)} ${lerp(0, -3.5, merge)}) scale(${lerp(1, 0.15, merge)})`
+    );
+
+    // Burst erscheint beim Poppen, auch rückwärts.
+    const burstPhase = clamp((progress - 0.58) / 0.34);
+    const burstOpacity = Math.sin(burstPhase * Math.PI);
+
+    burstGroup.setAttribute('opacity', burstOpacity);
+    burstGroup.setAttribute('stroke-width', 1.5);
+
+    burstLines.forEach((line, i) => {
+      const offset = burstPhase * 2.8;
+
+      line.setAttribute('stroke-dasharray', '3');
+      line.setAttribute('stroke-dashoffset', 3 - offset - i * 0.12);
+    });
+
+    // X zeichnen — Stagger normalisieren, damit die zweite Linie 100% erreicht.
+    xLines.forEach((line, i) => {
+      const stagger = i * 0.12;
+      const localDraw = clamp((xDraw - stagger) / (1 - stagger));
+      const len = xLengths[i];
+
+      line.setAttribute('stroke-width', 2);
+      line.setAttribute('opacity', localDraw);
+      line.setAttribute('stroke-dasharray', len);
+      line.setAttribute('stroke-dashoffset', len * (1 - localDraw));
+    });
+  }
+
+  function animateTo(nextTarget) {
+    const end = clamp(nextTarget);
+
+    if (raf) {
+      cancelAnimationFrame(raf);
+      raf = null;
+    }
+
+    const reduceMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
+    if (reduceMotion) {
+      setProgress(end);
+      return;
+    }
+
+    const start = progress;
+    const startTime = performance.now();
+
+    function frame(now) {
+      const t = clamp((now - startTime) / DURATION);
+      const eased = smooth(t);
+
+      setProgress(lerp(start, end, eased));
+
+      if (t < 1) {
+        raf = requestAnimationFrame(frame);
+      } else {
+        setProgress(end);
+        raf = null;
+      }
+    }
+
+    raf = requestAnimationFrame(frame);
+  }
+
+  setProgress(0);
+
+  return { setProgress, animateTo };
+}
+
 function createSvgFilter() {
   const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
 
@@ -631,7 +806,7 @@ function buildDom() {
   trigger.setAttribute('aria-label', 'Quick create');
   trigger.setAttribute('aria-haspopup', 'menu');
   trigger.setAttribute('aria-expanded', 'false');
-  trigger.innerHTML = lucide('gamepad-directional', 26);
+  trigger.innerHTML = bubbleXSvgMarkup();
 
   const tooltip = document.createElement('div');
   tooltip.className = 'yanta-qc-tooltip';
@@ -664,6 +839,8 @@ function buildDom() {
 
   root.append(createSvgFilter(), shell);
   document.body.append(root);
+
+  iconAnim = initBubbleXIcon(trigger.querySelector('svg'));
 
   bindPointerInteractions(trigger);
 

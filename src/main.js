@@ -1840,14 +1840,14 @@ function addLibraryUrlFromHash(hash = location.hash) {
   return libraryUrl ? String(libraryUrl) : '';
 }
 
-async function handleAddLibraryHashIfNeeded() {
-  const libraryUrl = addLibraryUrlFromHash();
-
-  if (!libraryUrl) return false;
-
-  // Clear the hash first so a reload can't re-trigger the import and normal
-  // routing continues from a clean state.
-  history.replaceState({}, '', location.pathname + location.search);
+/*
+  Runs the actual import + confirmation for a captured library URL. Called
+  AFTER the boot loader is released (bootDone) — never before, because the
+  confirm modal would otherwise render behind the full-screen boot splash and
+  block the whole app boot on a dialog the user cannot see. Fire-and-forget.
+*/
+async function runExcalidrawLibraryImport(libraryUrl) {
+  if (!libraryUrl) return;
 
   try {
     const { yantaConfirm } = await import('./dialogs.js');
@@ -1863,7 +1863,7 @@ async function handleAddLibraryHashIfNeeded() {
         }),
     });
 
-    if (result.cancelled) return true;
+    if (result.cancelled) return;
 
     toast(
       t('image.libraryImportDone', {
@@ -1876,8 +1876,6 @@ async function handleAddLibraryHashIfNeeded() {
     console.error('[YANTA] Excalidraw library import failed', err);
     toast(t('image.libraryImportFailed'), 'error');
   }
-
-  return true;
 }
 
 /*
@@ -2396,7 +2394,15 @@ async function init() {
   // setupCalendar();
   await syncRestore();
 
-  await handleAddLibraryHashIfNeeded();
+  /*
+    Capture (and clear) a pending "#addLibrary=" deep link now, before hash
+    routing consumes it. The import itself runs after bootDone() so its confirm
+    dialog is not hidden behind the boot splash.
+  */
+  const pendingExcalidrawLibraryUrl = addLibraryUrlFromHash();
+  if (pendingExcalidrawLibraryUrl) {
+    history.replaceState({}, '', location.pathname + location.search);
+  }
 
   let sharedOpen = null;
 
@@ -2715,6 +2721,12 @@ async function init() {
 
   // First surface is rendered and interactive — release the boot loader.
   bootDone();
+
+  // Now that the boot splash is gone, run any pending Excalidraw library
+  // import so its confirm dialog is actually visible and interactive.
+  if (pendingExcalidrawLibraryUrl) {
+    runExcalidrawLibraryImport(pendingExcalidrawLibraryUrl);
+  }
 
   // Opt-in semantic index: no-op unless enabled; starts in idle time.
   import('./semantic/semantic-index.js')

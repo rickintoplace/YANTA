@@ -49,6 +49,7 @@ import {
   toast,
   debounce,
 } from './core.js';
+import { t } from './i18n/index.js';
 import { wikilinkIndex } from './features-state.js';
 import { openNote, rebuildWikilinkIndex } from './notes.js';
 import { renderTree } from './tree.js';
@@ -130,11 +131,13 @@ const POSITION_MEMORY_MAX = 4000;
 // Optional pane mode.
 const WIDE_PANE_MIN_WIDTH = 1120;
 // Layout-mode metadata for the floating view switcher.
+// Labels/hints resolved via t('graph.modes.<value>.*') at render time so the
+// active locale is loaded before use.
 const MODE_BAR_DEFS = Object.freeze([
-  { value: 'force', icon: 'waypoints', label: 'Organic', hint: 'Force-directed layout · 1' },
-  { value: 'radial', icon: 'target', label: 'Focus', hint: 'Local graph around a note · 2' },
-  { value: 'tree', icon: 'list-tree', label: 'Tree', hint: 'Folder hierarchy · 3' },
-  { value: 'clusters', icon: 'boxes', label: 'Islands', hint: 'Linked clusters · 4' },
+  { value: 'force', icon: 'waypoints' },
+  { value: 'radial', icon: 'target' },
+  { value: 'tree', icon: 'list-tree' },
+  { value: 'clusters', icon: 'boxes' },
 ]);
 // Calm, theme-compatible palette for the per-folder color mode.
 // Deliberately no oranges: hues stay in YANTA's blue/violet/green family.
@@ -327,7 +330,7 @@ async function copyText(text, message) {
     await navigator.clipboard.writeText(text);
     toast(message, 'success');
   } catch {
-    toast('Copy failed', 'error');
+    toast(t('graph.copyFailed'), 'error');
   }
 }
 // ------------------------------------------------------------
@@ -2264,7 +2267,7 @@ function menuItem(menu, icon, label, onClick, { danger = false, kbd = '' } = {})
       await onClick();
     } catch (err) {
       console.error(err);
-      toast('Action failed', 'error');
+      toast(t('note.actionFailed'), 'error');
     }
   });
   menu.append(btn);
@@ -2274,9 +2277,9 @@ function menuDivider(menu) {
   menu.append(document.createElement('hr'));
 }
 function folderLabelForContext(folderId) {
-  if (!folderId) return 'root';
+  if (!folderId) return t('graph.ctxRoot');
   const f = state.folders.get(folderId);
-  return f?.name || 'folder';
+  return f?.name || t('graph.ctxFolder');
 }
 async function togglePinFromGraph(node) {
   const n = state.notes.get(node.id);
@@ -2289,7 +2292,7 @@ async function togglePinFromGraph(node) {
   window.dispatchEvent(new CustomEvent('yanta-note-updated', {
     detail: { noteId: n.id, reason: 'pin-toggle', source: 'graph' },
   }));
-  toast(n.pinned ? 'Note pinned' : 'Note unpinned', 'success');
+  toast(n.pinned ? t('graph.notePinned') : t('graph.noteUnpinned'), 'success');
   startVisualLoop();
 }
 async function duplicateNoteFromGraph(node) {
@@ -2301,7 +2304,7 @@ async function duplicateNoteFromGraph(node) {
 async function trashNoteFromGraph(node) {
   await trash.moveNoteToTrash(node.id, {
     source: 'graph-context-menu',
-    toastMessage: 'Moved note to Trash',
+    toastMessage: t('graph.movedNoteToTrash'),
   });
   renderTree();
   rebuildAndAnimateAfterMutation(0.7);
@@ -2311,16 +2314,16 @@ async function trashNoteFromGraph(node) {
 }
 async function renameFolderFromGraph(folder) {
   const name = await yantaPrompt({
-    title: 'Rename folder',
-    label: 'Folder name',
+    title: t('graph.prompt.renameFolderTitle'),
+    label: t('graph.prompt.folderName'),
     initial: folder.name || '',
-    placeholder: 'Folder name',
+    placeholder: t('graph.prompt.folderName'),
     required: true,
-    confirmLabel: 'Rename',
+    confirmLabel: t('graph.prompt.renameConfirm'),
     icon: 'folder-pen',
   });
   if (name === null) return;
-  folder.name = name.trim() || folder.name || 'Folder';
+  folder.name = name.trim() || folder.name || t('items.folderFallback');
   folder.updated = Date.now();
   await store.folders.put(folder);
   renderTree();
@@ -2328,7 +2331,7 @@ async function renameFolderFromGraph(folder) {
     detail: { folderId: folder.id, reason: 'folder-renamed', source: 'graph' },
   }));
   rebuildAndAnimateAfterMutation(0.4);
-  toast('Folder renamed', 'success');
+  toast(t('items.folderRenamed'), 'success');
 }
 function showNodeContextMenu(node, clientX, clientY) {
   if (!node) return;
@@ -2336,44 +2339,44 @@ function showNodeContextMenu(node, clientX, clientY) {
     const note = state.notes.get(node.id);
     if (!note) return;
     const parentFolderId = note.folderId || null;
-    const menu = menuShell('file-text', `Note in ${folderLabelForContext(parentFolderId)} · ${node.wikiDegree || 0} link${(node.wikiDegree || 0) === 1 ? '' : 's'}`);
-    menuItem(menu, 'file-text', 'Open note', async () => {
+    const menu = menuShell('file-text', t('graph.ctxNoteMeta', { folder: folderLabelForContext(parentFolderId), count: node.wikiDegree || 0 }));
+    menuItem(menu, 'file-text', t('graph.menu.openNote'), async () => {
       if (graph.mode === 'overlay') closeGraph();
       await openNote(node.id);
     }, { kbd: '⏎' });
-    menuItem(menu, 'eye', 'Quick preview', () => {
+    menuItem(menu, 'eye', t('graph.menu.quickPreview'), () => {
       openPreviewForNode(node, clientX, clientY);
     });
-    menuItem(menu, 'target', 'Focus local graph', () => setRadialFocus(node.id));
+    menuItem(menu, 'target', t('graph.menu.focusLocal'), () => setRadialFocus(node.id));
     menuItem(
       menu,
       note.pinned ? 'pin-off' : 'pin',
-      note.pinned ? 'Unpin note' : 'Pin note',
+      note.pinned ? t('graph.menu.unpinNote') : t('graph.menu.pinNote'),
       () => togglePinFromGraph(node)
     );
-    menuItem(menu, 'palette', 'Icon & color…', () => {
+    menuItem(menu, 'palette', t('tree.menu.iconColor'), () => {
       editNoteAppearancePicker(note);
     });
     menuDivider(menu);
-    menuItem(menu, 'brackets', 'Copy wikilink', () => {
-      copyText(`[[${note.title || 'Untitled'}]]`, 'Wikilink copied');
+    menuItem(menu, 'brackets', t('graph.menu.copyWikilink'), () => {
+      copyText(`[[${note.title || t('note.untitled')}]]`, t('graph.wikilinkCopied'));
     });
-    menuItem(menu, 'link', 'Copy note link', () => {
+    menuItem(menu, 'link', t('graph.menu.copyNoteLink'), () => {
       copyText(
         `${location.origin}${location.pathname}${noteUrl(note.id)}`,
-        'Link copied'
+        t('graph.linkCopied')
       );
     });
     menuDivider(menu);
-    menuItem(menu, 'file-plus', 'New note in this folder', () =>
+    menuItem(menu, 'file-plus', t('graph.menu.newNoteInFolder'), () =>
       createNoteFromGraph(node, parentFolderId)
     );
-    menuItem(menu, 'folder-plus', 'New folder in this folder', () =>
+    menuItem(menu, 'folder-plus', t('graph.menu.newFolderInFolder'), () =>
       createFolderFromGraph(node, parentFolderId)
     );
     menuDivider(menu);
-    menuItem(menu, 'copy', 'Duplicate note', () => duplicateNoteFromGraph(node));
-    menuItem(menu, 'trash', 'Move to Trash', () => trashNoteFromGraph(node), {
+    menuItem(menu, 'copy', t('graph.menu.duplicateNote'), () => duplicateNoteFromGraph(node));
+    menuItem(menu, 'trash', t('tree.menu.moveToTrash'), () => trashNoteFromGraph(node), {
       danger: true,
     });
     document.body.append(menu);
@@ -2383,11 +2386,11 @@ function showNodeContextMenu(node, clientX, clientY) {
   if (node.type === NODE.FOLDER) {
     const folder = state.folders.get(node.id);
     if (!folder) return;
-    const menu = menuShell('folder', `Folder · ${folderPath(folder.id).join(' / ') || folder.name}`);
+    const menu = menuShell('folder', t('graph.ctxFolderMeta', { path: folderPath(folder.id).join(' / ') || folder.name }));
     menuItem(
       menu,
       graph.focusFolderId === folder.id ? 'minimize-2' : 'maximize-2',
-      graph.focusFolderId === folder.id ? 'Clear focus' : 'Focus this folder',
+      graph.focusFolderId === folder.id ? t('graph.menu.clearFocus') : t('graph.menu.focusThisFolder'),
       () => {
         graph.focusFolderId = graph.focusFolderId === folder.id ? null : folder.id;
         centerOnNode(node, Math.max(1.25, graph.scale));
@@ -2395,26 +2398,26 @@ function showNodeContextMenu(node, clientX, clientY) {
         startVisualLoop();
       }
     );
-    menuItem(menu, 'scan', 'Zoom to contents', () => fitFolderToView(folder.id));
-    menuItem(menu, 'folder-pen', 'Rename folder…', () =>
+    menuItem(menu, 'scan', t('graph.menu.zoomToContents'), () => fitFolderToView(folder.id));
+    menuItem(menu, 'folder-pen', t('graph.menu.renameFolder'), () =>
       renameFolderFromGraph(folder)
     );
-    menuItem(menu, 'palette', 'Icon & color…', () => {
+    menuItem(menu, 'palette', t('tree.menu.iconColor'), () => {
       editFolderAppearancePicker(folder);
     });
     menuDivider(menu);
-    menuItem(menu, 'file-plus', 'New note in this folder', () =>
+    menuItem(menu, 'file-plus', t('graph.menu.newNoteInFolder'), () =>
       createNoteFromGraph(node, folder.id)
     );
-    menuItem(menu, 'folder-plus', 'New sub-folder', () =>
+    menuItem(menu, 'folder-plus', t('tree.menu.newSubFolder'), () =>
       createFolderFromGraph(node, folder.id)
     );
     if (typeof trash.moveFolderToTrash === 'function') {
       menuDivider(menu);
-      menuItem(menu, 'trash', 'Move to Trash', async () => {
+      menuItem(menu, 'trash', t('tree.menu.moveToTrash'), async () => {
         await trash.moveFolderToTrash(folder.id, {
           source: 'graph-context-menu',
-          toastMessage: 'Moved folder to Trash',
+          toastMessage: t('graph.movedFolderToTrash'),
         });
         renderTree();
         rebuildAndAnimateAfterMutation(0.8);
@@ -2425,16 +2428,16 @@ function showNodeContextMenu(node, clientX, clientY) {
   }
 }
 function showEmptyContextMenu(clientX, clientY) {
-  const menu = menuShell('mouse-pointer-2', 'Canvas');
-  menuItem(menu, 'file-plus', 'New root note', () =>
+  const menu = menuShell('mouse-pointer-2', t('graph.ctxCanvas'));
+  menuItem(menu, 'file-plus', t('graph.menu.newRootNote'), () =>
     createRootEntity('note', clientX, clientY)
   );
-  menuItem(menu, 'folder-plus', 'New root folder', () =>
+  menuItem(menu, 'folder-plus', t('graph.menu.newRootFolder'), () =>
     createRootEntity('folder', clientX, clientY)
   );
   menuDivider(menu);
-  menuItem(menu, 'crosshair', 'Recenter view', () => recenterAll());
-  menuItem(menu, 'scan', 'Fit everything', () => fitToView({ animated: true }));
+  menuItem(menu, 'crosshair', t('graph.menu.recenterView'), () => recenterAll());
+  menuItem(menu, 'scan', t('graph.menu.fitEverything'), () => fitToView({ animated: true }));
   document.body.append(menu);
   positionFloatingElement(menu, clientX, clientY);
 }
@@ -2460,7 +2463,7 @@ async function persistNewNote(title, folderId) {
   const id = uid();
   const note = {
     id,
-    title: title.trim() || 'Untitled',
+    title: title.trim() || t('note.untitled'),
     type: 'markdown',
     folderId: folderId || null,
     tags: [],
@@ -2480,15 +2483,15 @@ async function persistNewNote(title, folderId) {
 }
 async function createNoteFromGraph(sourceNode, folderId) {
   const title = await yantaPrompt({
-    title: 'New note',
+    title: t('graph.prompt.newNoteTitle'),
     message: folderId
-      ? 'Create a new note in this folder.'
-      : 'Create a new root note.',
-    label: 'Note title',
-    initial: 'Untitled',
-    placeholder: 'Untitled',
+      ? t('graph.prompt.newNoteInFolderMsg')
+      : t('graph.prompt.newRootNoteMsg'),
+    label: t('graph.prompt.noteTitle'),
+    initial: t('note.untitled'),
+    placeholder: t('note.untitled'),
     required: true,
-    confirmLabel: 'Create note',
+    confirmLabel: t('graph.prompt.createNote'),
     icon: 'file-plus',
   });
   if (title === null) return;
@@ -2497,14 +2500,14 @@ async function createNoteFromGraph(sourceNode, folderId) {
   spawnNearNode(sourceNode, graphIdForNote(note.id), 48);
   renderTree();
   rebuildAndAnimateAfterMutation(0.9);
-  toast('Note created', 'success');
+  toast(t('graph.noteCreated'), 'success');
 }
 async function createFolderFromGraph(sourceNode, parentId) {
   const id = uid();
   const now = Date.now();
   const folder = {
     id,
-    name: 'New folder',
+    name: t('graph.newFolderName'),
     parentId: parentId || null,
     created: now,
     updated: now,
@@ -2519,17 +2522,17 @@ async function createFolderFromGraph(sourceNode, parentId) {
   window.dispatchEvent(new CustomEvent('yanta-folder-created', {
     detail: { folderId: id, parentId: parentId || null, focusRename: true, source: 'graph' },
   }));
-  toast('Folder created', 'success');
+  toast(t('graph.folderCreated'), 'success');
 }
 async function createRootEntity(kind, clientX, clientY) {
   if (kind === 'note') {
     const title = await yantaPrompt({
-      title: 'New root note',
-      label: 'Note title',
-      initial: 'Untitled',
-      placeholder: 'Untitled',
+      title: t('graph.prompt.newRootNoteTitle'),
+      label: t('graph.prompt.noteTitle'),
+      initial: t('note.untitled'),
+      placeholder: t('note.untitled'),
       required: true,
-      confirmLabel: 'Create note',
+      confirmLabel: t('graph.prompt.createNote'),
       icon: 'file-plus',
     });
     if (title === null) return;
@@ -2537,13 +2540,13 @@ async function createRootEntity(kind, clientX, clientY) {
     spawnAtClient(graphIdForNote(note.id), clientX, clientY);
     renderTree();
     rebuildAndAnimateAfterMutation(0.9);
-    toast('Note created', 'success');
+    toast(t('graph.noteCreated'), 'success');
     return;
   }
   if (kind === 'folder') {
     const id = uid();
     const now = Date.now();
-    const folder = { id, name: 'New folder', parentId: null, created: now, updated: now };
+    const folder = { id, name: t('graph.newFolderName'), parentId: null, created: now, updated: now };
     state.folders.set(id, folder);
     await store.folders.put(folder);
     state.expandedFolders.add(id);
@@ -2553,7 +2556,7 @@ async function createRootEntity(kind, clientX, clientY) {
     window.dispatchEvent(new CustomEvent('yanta-folder-created', {
       detail: { folderId: id, parentId: null, focusRename: true, source: 'graph' },
     }));
-    toast('Folder created', 'success');
+    toast(t('graph.folderCreated'), 'success');
   }
 }
 function rebuildAndAnimateAfterMutation(alpha = 0.8) {
@@ -2572,19 +2575,19 @@ function statsHtml() {
   const folderCount = graph.nodes.filter((n) => n.type === NODE.FOLDER).length;
   const wikiCount = graph.links.filter((l) => l.kind === LINK.WIKI).length;
   const semanticCount = graph.links.filter((l) => l.kind === LINK.SEMANTIC).length;
-  const parts = [`<strong>${noteCount}</strong> notes`];
-  if (graph.foldersIncluded) parts.push(`<strong>${folderCount}</strong> folders`);
-  parts.push(`<strong>${wikiCount}</strong> links`);
-  if (s.showSemantic) parts.push(`<strong>${semanticCount}</strong> semantic`);
+  const parts = [`<strong>${noteCount}</strong> ${t('graph.stats.notes')}`];
+  if (graph.foldersIncluded) parts.push(`<strong>${folderCount}</strong> ${t('graph.stats.folders')}`);
+  parts.push(`<strong>${wikiCount}</strong> ${t('graph.stats.links')}`);
+  if (s.showSemantic) parts.push(`<strong>${semanticCount}</strong> ${t('graph.stats.semantic')}`);
   const mode = currentLayoutMode();
   if (mode === 'radial' && graph.egoFocusGid) {
     const idx = graph.idIndex.get(graph.egoFocusGid);
     const title = idx != null ? graph.nodes[idx]?.title : '';
     if (title) {
-      parts.push(`focus <strong>${escapeHtml(truncateLabel(title, 24))}</strong>`);
+      parts.push(`${t('graph.stats.focus')} <strong>${escapeHtml(truncateLabel(title, 24))}</strong>`);
     }
   } else if (mode === 'clusters' && graph.clusterInfo) {
-    parts.push(`<strong>${graph.clusterInfo.count}</strong> islands`);
+    parts.push(`<strong>${graph.clusterInfo.count}</strong> ${t('graph.stats.islands')}`);
   }
   return parts.join('<span style="opacity:0.4">·</span>');
 }
@@ -2750,51 +2753,51 @@ function populateInsights(host) {
   host.replaceChildren();
   const ins = graph.insights;
   if (!ins || !ins.noteCount) {
-    insightRow(host, { icon: 'info', label: 'No notes to analyze yet', disabled: true });
+    insightRow(host, { icon: 'info', label: t('graph.insights.none'), disabled: true });
     return;
   }
   // Orphans
   insightRow(host, {
     icon: 'unlink',
-    label: 'Orphan notes',
+    label: t('graph.insights.orphans'),
     value: ins.orphans.length,
     disabled: ins.orphans.length === 0,
-    title: 'Notes with no wikilinks. Click to spotlight them.',
+    title: t('graph.insights.orphansHint'),
     onClick: () =>
       spotlightFromInsight(
-        `${ins.orphans.length} orphan notes`,
+        t('graph.insights.orphansSpotlight', { count: ins.orphans.length }),
         ins.orphans.map((o) => o.gid)
       ),
   });
   // Stale
   insightRow(host, {
     icon: 'clock',
-    label: `Stale (${ins.staleDays}d+)`,
+    label: t('graph.insights.stale', { days: ins.staleDays }),
     value: ins.stale.length,
     disabled: ins.stale.length === 0,
-    title: 'Notes not edited recently. Click to spotlight them.',
+    title: t('graph.insights.staleHint'),
     onClick: () =>
       spotlightFromInsight(
-        `${ins.stale.length} stale notes`,
+        t('graph.insights.staleSpotlight', { count: ins.stale.length }),
         ins.stale.map((s) => s.gid)
       ),
   });
   // Islands
   insightRow(host, {
     icon: 'boxes',
-    label: 'Linked islands',
+    label: t('graph.insights.islands'),
     value: ins.componentCount,
-    title: 'Number of disconnected clusters. Switch to Islands view to see them.',
+    title: t('graph.insights.islandsHint'),
     onClick: () => setLayoutMode('clusters'),
   });
   // Top hubs
   if (ins.hubs.length) {
-    insightRow(host, { icon: 'zap', label: 'Top hubs', sub: true, disabled: true });
+    insightRow(host, { icon: 'zap', label: t('graph.insights.topHubs'), sub: true, disabled: true });
     for (const hub of ins.hubs) {
       insightRow(host, {
         label: hub.title,
         badge: `${hub.degree}`,
-        title: `${hub.title} · ${hub.degree} links. Click to focus.`,
+        title: t('graph.insights.hubTitle', { title: hub.title, count: hub.degree }),
         onClick: () => focusInsightNode(hub.gid),
       });
     }
@@ -2803,7 +2806,7 @@ function populateInsights(host) {
   if (graph.semanticSuggestions?.length) {
     insightRow(host, {
       icon: 'sparkles',
-      label: 'Suggested links',
+      label: t('graph.insights.suggestedLinks'),
       sub: true,
       disabled: true,
     });
@@ -2811,7 +2814,7 @@ function populateInsights(host) {
       insightRow(host, {
         label: `${sug.aTitle} ↔ ${sug.bTitle}`,
         badge: `${Math.round(sug.score * 100)}%`,
-        title: 'Semantically similar notes that are not yet linked. Click to spotlight.',
+        title: t('graph.insights.suggestedHint'),
         onClick: () =>
           spotlightFromInsight(
             `${sug.aTitle} ↔ ${sug.bTitle}`,
@@ -2833,8 +2836,8 @@ function buildModeBar() {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.dataset.mode = def.value;
-    btn.title = def.hint;
-    btn.innerHTML = `${lucide(def.icon, 15)}<span class="gm-label">${escapeHtml(def.label)}</span>`;
+    btn.title = t(`graph.modes.${def.value}.hint`);
+    btn.innerHTML = `${lucide(def.icon, 15)}<span class="gm-label">${escapeHtml(t(`graph.modes.${def.value}.label`))}</span>`;
     btn.addEventListener('click', () => setLayoutMode(def.value));
     bar.append(btn);
   }
@@ -2862,7 +2865,7 @@ function buildSpotlightChip() {
   chip.innerHTML = `
     <span class="gs-label"></span>
     <span class="gs-count"></span>
-    <button type="button" class="gs-clear" title="Clear spotlight">${lucide('x', 13)}</button>
+    <button type="button" class="gs-clear" title="${escapeHtml(t('graph.clearSpotlight'))}">${lucide('x', 13)}</button>
   `;
   chip.querySelector('.gs-clear').addEventListener('click', clearSpotlight);
   syncSpotlightChipNode(chip);
@@ -2994,7 +2997,7 @@ function buildControlsPanel({ paneMode = false } = {}) {
   head.className = 'yanta-graph-controls-head';
   head.innerHTML = `
     <span class="gc-chev">${lucide('sliders-horizontal', 14)}</span>
-    <span class="gc-title">Graph</span>
+    <span class="gc-title">${escapeHtml(t('graph.title'))}</span>
     <span class="gc-chev" data-gc-chevron>${lucide(S().controlsOpen ? 'chevron-up' : 'chevron-down', 13)}</span>
   `;
   head.addEventListener('click', () => {
@@ -3008,10 +3011,10 @@ function buildControlsPanel({ paneMode = false } = {}) {
   body.className = 'yanta-graph-controls-body';
   wrap.append(body);
   // --- Search -------------------------------------------------
-  const searchGroup = ctlGroup('Search');
+  const searchGroup = ctlGroup(t('graph.controls.search'));
   const search = document.createElement('input');
   search.type = 'search';
-  search.placeholder = 'Highlight notes…';
+  search.placeholder = t('graph.controls.highlightPlaceholder');
   search.value = graph.highlight || '';
   search.addEventListener('input', (e) => {
     graph.highlight = e.target.value || '';
@@ -3020,7 +3023,7 @@ function buildControlsPanel({ paneMode = false } = {}) {
   searchGroup.append(search);
   searchGroup.append(ctlToggle(wrap, {
     icon: 'text-search',
-    label: 'Deep search (note text)',
+    label: t('graph.controls.deepSearch'),
     get: () => S().deepSearch,
     set: (v) => {
       updateGraphSettings({ deepSearch: v });
@@ -3029,14 +3032,14 @@ function buildControlsPanel({ paneMode = false } = {}) {
   }));
   body.append(searchGroup);
   // --- Display ------------------------------------------------
-  const displayGroup = ctlGroup('Display');
-  displayGroup.append(ctlFieldLabel('type', 'Note labels'));
+  const displayGroup = ctlGroup(t('graph.controls.display'));
+  displayGroup.append(ctlFieldLabel('type', t('graph.controls.noteLabels')));
   displayGroup.append(ctlSegment(wrap, {
-    ariaLabel: 'Note labels',
+    ariaLabel: t('graph.controls.noteLabels'),
     options: [
-      { value: 'off', label: 'Off', hint: 'Only on hover' },
-      { value: 'smart', label: 'Smart', hint: 'Fade in with zoom' },
-      { value: 'always', label: 'All', hint: 'Always visible' },
+      { value: 'off', label: t('graph.controls.labelsOff'), hint: t('graph.controls.labelsOffHint') },
+      { value: 'smart', label: t('graph.controls.labelsSmart'), hint: t('graph.controls.labelsSmartHint') },
+      { value: 'always', label: t('graph.controls.labelsAll'), hint: t('graph.controls.labelsAllHint') },
     ],
     get: () => S().noteLabels,
     set: (v) => {
@@ -3046,7 +3049,7 @@ function buildControlsPanel({ paneMode = false } = {}) {
   }));
   displayGroup.append(ctlToggle(wrap, {
     icon: 'folder-open',
-    label: 'Folder labels',
+    label: t('graph.controls.folderLabels'),
     get: () => S().folderLabels !== 'off',
     set: (v) => {
       updateGraphSettings({ folderLabels: v ? 'always' : 'off' });
@@ -3055,21 +3058,21 @@ function buildControlsPanel({ paneMode = false } = {}) {
   }));
   displayGroup.append(ctlToggle(wrap, {
     icon: 'shapes',
-    label: 'Node icons',
+    label: t('graph.controls.nodeIcons'),
     get: () => S().showIcons,
     set: (v) => {
       updateGraphSettings({ showIcons: v });
       startVisualLoop();
     },
   }));
-  displayGroup.append(ctlFieldLabel('circle-dot', 'Node size'));
+  displayGroup.append(ctlFieldLabel('circle-dot', t('graph.controls.nodeSize')));
   displayGroup.append(ctlSegment(wrap, {
-    ariaLabel: 'Node size mode',
+    ariaLabel: t('graph.controls.nodeSizeMode'),
     options: [
-      { value: 'uniform', label: 'Same', hint: 'All notes the same size' },
-      { value: 'links', label: 'Links', hint: 'Well-connected notes grow' },
-      { value: 'content', label: 'Text', hint: 'Longer notes grow' },
-      { value: 'recency', label: 'New', hint: 'Recently edited notes grow' },
+      { value: 'uniform', label: t('graph.controls.sizeSame'), hint: t('graph.controls.sizeSameHint') },
+      { value: 'links', label: t('graph.controls.sizeLinks'), hint: t('graph.controls.sizeLinksHint') },
+      { value: 'content', label: t('graph.controls.sizeText'), hint: t('graph.controls.sizeTextHint') },
+      { value: 'recency', label: t('graph.controls.sizeNew'), hint: t('graph.controls.sizeNewHint') },
     ],
     get: () => S().nodeSizeMode,
     set: (v) => {
@@ -3080,7 +3083,7 @@ function buildControlsPanel({ paneMode = false } = {}) {
   }));
   displayGroup.append(ctlSlider(wrap, {
     icon: 'proportions',
-    label: 'Node scale',
+    label: t('graph.controls.nodeScale'),
     min: 0.6,
     max: 1.8,
     step: 0.05,
@@ -3092,14 +3095,14 @@ function buildControlsPanel({ paneMode = false } = {}) {
     },
     format: (v) => `×${v.toFixed(2)}`,
   }));
-  displayGroup.append(ctlFieldLabel('palette', 'Color by'));
+  displayGroup.append(ctlFieldLabel('palette', t('graph.controls.colorBy')));
   displayGroup.append(ctlSegment(wrap, {
-    ariaLabel: 'Color mode',
+    ariaLabel: t('graph.controls.colorMode'),
     options: [
-      { value: 'meta', label: 'Custom', hint: 'Your icon & note colors' },
-      { value: 'folder', label: 'Folder', hint: 'One hue per top-level folder' },
-      { value: 'recency', label: 'Age', hint: 'Recently edited notes glow' },
-      { value: 'connections', label: 'Links', hint: 'Well-connected notes glow' },
+      { value: 'meta', label: t('graph.controls.colorCustom'), hint: t('graph.controls.colorCustomHint') },
+      { value: 'folder', label: t('graph.controls.colorFolder'), hint: t('graph.controls.colorFolderHint') },
+      { value: 'recency', label: t('graph.controls.colorAge'), hint: t('graph.controls.colorAgeHint') },
+      { value: 'connections', label: t('graph.controls.colorLinks'), hint: t('graph.controls.colorLinksHint') },
     ],
     get: () => S().colorMode,
     set: (v) => {
@@ -3111,7 +3114,7 @@ function buildControlsPanel({ paneMode = false } = {}) {
   body.append(displayGroup);
   // --- Forces -------------------------------------------------
   const resetBtn = document.createElement('button');
-  resetBtn.innerHTML = `${lucide('rotate-ccw', 11)} Reset`;
+  resetBtn.innerHTML = `${lucide('rotate-ccw', 11)} ${escapeHtml(t('common.reset'))}`;
   resetBtn.addEventListener('click', (e) => {
     e.stopPropagation();
     resetGraphForces();
@@ -3119,73 +3122,73 @@ function buildControlsPanel({ paneMode = false } = {}) {
     kickSimulation(0.7);
     toast('Forces reset to defaults', 'success');
   });
-  const forcesGroup = ctlGroup('Forces', resetBtn);
+  const forcesGroup = ctlGroup(t('graph.controls.forces'), resetBtn);
   const pct = (v) => `${Math.round(v * 100)}%`;
   forcesGroup.append(ctlSlider(wrap, {
-    icon: 'crosshair', label: 'Center force',
+    icon: 'crosshair', label: t('graph.controls.centerForce'),
     min: 0, max: 1, step: 0.02,
     get: () => S().forces.center,
     set: (v) => setForce('center', v),
     format: pct,
-    hint: 'Pull toward the canvas center (0 = drift freely).',
+    hint: t('graph.controls.centerForceHint'),
   }));
   forcesGroup.append(ctlSlider(wrap, {
-    icon: 'expand', label: 'Repel force',
+    icon: 'expand', label: t('graph.controls.repelForce'),
     min: 0, max: 1, step: 0.02,
     get: () => S().forces.repel,
     set: (v) => setForce('repel', v),
     format: pct,
-    hint: 'How strongly nodes push each other apart.',
+    hint: t('graph.controls.repelForceHint'),
   }));
   forcesGroup.append(ctlSlider(wrap, {
-    icon: 'link', label: 'Link force',
+    icon: 'link', label: t('graph.controls.linkForce'),
     min: 0, max: 1, step: 0.02,
     get: () => S().forces.link,
     set: (v) => setForce('link', v),
     format: pct,
-    hint: 'How strongly linked notes pull together.',
+    hint: t('graph.controls.linkForceHint'),
   }));
   forcesGroup.append(ctlSlider(wrap, {
-    icon: 'ruler', label: 'Link distance',
+    icon: 'ruler', label: t('graph.controls.linkDistance'),
     min: 0.4, max: 2.2, step: 0.05,
     get: () => S().forces.linkDistance,
     set: (v) => setForce('linkDistance', v),
     format: (v) => `×${v.toFixed(2)}`,
-    hint: 'Resting length of links.',
+    hint: t('graph.controls.linkDistanceHint'),
   }));
   forcesGroup.append(ctlSlider(wrap, {
-    icon: 'folder', label: 'Folder pull',
+    icon: 'folder', label: t('graph.controls.folderPull'),
     min: 0, max: 1, step: 0.02,
     get: () => S().forces.folderPull,
     set: (v) => setForce('folderPull', v),
     format: pct,
-    hint: 'How tightly notes cluster around their folder.',
+    hint: t('graph.controls.folderPullHint'),
   }));
   forcesGroup.append(ctlToggle(wrap, {
     icon: 'circle-slash-2',
-    label: 'Prevent overlap',
+    label: t('graph.controls.preventOverlap'),
     get: () => S().forces.collide,
     set: (v) => setForce('collide', v),
   }));
   body.append(forcesGroup);
   // --- Layers -------------------------------------------------
-  const layersGroup = ctlGroup('Layers');
+  const layersGroup = ctlGroup(t('graph.controls.layers'));
   layersGroup.append(ctlToggle(wrap, {
     icon: 'folder',
-    label: 'Show folders',
+    label: t('graph.controls.showFolders'),
     get: () => S().showFolders,
     set: (v) => setLayer('showFolders', v),
   }));
   layersGroup.append(ctlToggle(wrap, {
     icon: 'sparkles',
-    label: 'Semantic suggestions',
+    label: t('graph.controls.semanticSuggestions'),
     get: () => S().showSemantic,
     set: (v) => setLayer('showSemantic', v),
   }));
   if (graphArchiveExists()) {
     layersGroup.append(ctlToggle(wrap, {
       icon: 'archive',
-      label: 'Show archive',
+      label: t('graph.controls.showArchive'),
       get: () => S().showArchive,
       set: (v) => setLayer('showArchive', v),
     }));
@@ -3193,24 +3196,24 @@ function buildControlsPanel({ paneMode = false } = {}) {
   if (graphAiBrainExists()) {
     layersGroup.append(ctlToggle(wrap, {
       icon: 'brain-circuit',
-      label: 'Show AI Brain',
+      label: t('graph.controls.showAiBrain'),
       get: () => S().showAiBrain,
       set: (v) => setLayer('showAiBrain', v),
     }));
   }
   body.append(layersGroup);
   // --- View ---------------------------------------------------
-  const viewGroup = ctlGroup('View');
+  const viewGroup = ctlGroup(t('graph.controls.view'));
   const actionsRow = document.createElement('div');
   actionsRow.className = 'gc-actions-row';
   actionsRow.append(
-    ctlAction('crosshair', 'Recenter', () => recenterAll()),
-    ctlAction('scan', 'Fit all', () => fitToView({ animated: true }))
+    ctlAction('crosshair', t('graph.controls.recenter'), () => recenterAll()),
+    ctlAction('scan', t('graph.controls.fitAll'), () => fitToView({ animated: true }))
   );
   viewGroup.append(actionsRow);
   viewGroup.append(ctlSlider(wrap, {
     icon: 'target',
-    label: 'Focus depth (Focus view)',
+    label: t('graph.controls.focusDepth'),
     min: 1,
     max: 3,
     step: 1,
@@ -3223,12 +3226,12 @@ function buildControlsPanel({ paneMode = false } = {}) {
         kickSimulation(0.9);
       }
     },
-    format: (v) => `${Math.round(v)} hop${Math.round(v) === 1 ? '' : 's'}`,
-    hint: 'How many link hops the Focus view includes around the focus note.',
+    format: (v) => t('graph.controls.hops', { count: Math.round(v) }),
+    hint: t('graph.controls.focusDepthHint'),
   }));
   viewGroup.append(ctlToggle(wrap, {
     icon: 'panel-right',
-    label: 'Show in side pane',
+    label: t('graph.controls.showInSidePane'),
     get: () => graph.mode === 'pane',
     set: () => {
       if (graph.mode === 'pane') {
@@ -3241,7 +3244,7 @@ function buildControlsPanel({ paneMode = false } = {}) {
   }));
   body.append(viewGroup);
   // --- Insights -----------------------------------------------
-  const insightsGroup = ctlGroup('Insights');
+  const insightsGroup = ctlGroup(t('graph.controls.insights'));
   const insightsHost = document.createElement('div');
   insightsHost.setAttribute('data-gc-insights', '');
   insightsHost.style.display = 'flex';
@@ -3253,7 +3256,7 @@ function buildControlsPanel({ paneMode = false } = {}) {
   const hint = document.createElement('div');
   hint.className = 'gc-hint';
   hint.textContent =
-    'Middle-click to pan · right-click for actions · double-click a note to open.';
+    t('graph.controls.interactionHint');
   body.append(hint);
   return wrap;
 }
@@ -3298,7 +3301,7 @@ export function openGraphPane() {
   closeGraph();
   const body = openSidePane({
     kind: 'graph',
-    title: 'Graph',
+    title: t('graph.title'),
     icon: 'network',
     className: 'yanta-graph-side-pane',
     onClose: () => {

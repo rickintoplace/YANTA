@@ -19,7 +19,15 @@ import {
   toast,
 } from './core.js';
 
+import { t } from './i18n/index.js';
+
 const widgets = new Map();
+
+// Resolve a widget's display title: prefer an i18n key, fall back to a raw
+// title literal (legacy) or the id.
+function widgetTitle(def) {
+  return def?.titleKey ? t(def.titleKey) : (def?.title || def?.id || '');
+}
 
 const CONFIG_KEY = 'dashboard.widgets.v1';
 
@@ -53,6 +61,7 @@ function forceDashboardRefresh() {
 export function registerDashboardWidget({
   id,
   title = '',
+  titleKey = '',
   icon = 'layout-dashboard',
   order = 100,
   render,
@@ -62,6 +71,7 @@ export function registerDashboardWidget({
   widgets.set(id, {
     id,
     title: title || id,
+    titleKey,
     icon,
     order,
     render,
@@ -120,7 +130,7 @@ function persistOrderFromDom(host) {
 function makeSlotDraggable(slot, host) {
   const grip = el('button', {
     class: 'icon-btn yanta-dash-widget-grip',
-    title: 'Drag to reorder',
+    title: t('dashWidgets.dragToReorder'),
     type: 'button',
   });
 
@@ -413,25 +423,23 @@ export async function openDashboardWidgetManager() {
 
   card.innerHTML = `
     <header class="modal-head">
-      <h3>Dashboard widgets</h3>
+      <h3>${t('dashWidgets.managerTitle')}</h3>
       <button class="icon-btn" data-widget-manager-close>&times;</button>
     </header>
 
     <div class="modal-body" style="display:flex;flex-direction:column;gap:12px">
       <div class="yanta-dash-widget-manager-row" style="gap:12px">
-        <strong style="flex:1">Layout</strong>
+        <strong style="flex:1">${t('dashWidgets.layout')}</strong>
         <div class="yanta-dash-widget-manager-layout" data-widget-layout>
-          <button type="button" data-layout="stack">${lucide('rows-3', 13)} Stacked</button>
-          <button type="button" data-layout="grid">${lucide('columns-3', 13)} Side by side</button>
+          <button type="button" data-layout="stack">${lucide('rows-3', 13)} ${t('dashWidgets.stacked')}</button>
+          <button type="button" data-layout="grid">${lucide('columns-3', 13)} ${t('dashWidgets.sideBySide')}</button>
         </div>
       </div>
 
       <div class="yanta-dash-widget-manager-list" data-widget-list></div>
 
       <div class="yanta-dash-widget-manager-hint">
-        Widgets appear above your notes on the dashboard home. Reorder them
-        here or drag them directly on the dashboard using the grip handle.
-        On small screens widgets always stack.
+        ${t('dashWidgets.hint')}
       </div>
     </div>
   `;
@@ -467,7 +475,7 @@ export async function openDashboardWidgetManager() {
     const iconSpan = el('span', { class: 'yanta-dash-widget-manager-icon' });
     iconSpan.innerHTML = lucide(def.icon, 15);
 
-    const toggle = el('input', { type: 'checkbox', title: 'Show widget' });
+    const toggle = el('input', { type: 'checkbox', title: t('dashWidgets.showWidget') });
     toggle.checked = !disabled.has(def.id);
 
     toggle.addEventListener('change', () => {
@@ -475,19 +483,19 @@ export async function openDashboardWidgetManager() {
       else disabled.add(def.id);
     });
 
-    const up = el('button', { class: 'icon-btn', title: 'Move up', type: 'button' });
+    const up = el('button', { class: 'icon-btn', title: t('dashWidgets.moveUp'), type: 'button' });
     up.innerHTML = lucide('chevron-up', 15);
     up.addEventListener('click', () => {
       row.previousElementSibling?.before(row);
     });
 
-    const down = el('button', { class: 'icon-btn', title: 'Move down', type: 'button' });
+    const down = el('button', { class: 'icon-btn', title: t('dashWidgets.moveDown'), type: 'button' });
     down.innerHTML = lucide('chevron-down', 15);
     down.addEventListener('click', () => {
       row.nextElementSibling?.after(row);
     });
 
-    row.append(toggle, iconSpan, el('strong', {}, def.title), up, down);
+    row.append(toggle, iconSpan, el('strong', {}, widgetTitle(def)), up, down);
 
     return row;
   });
@@ -499,8 +507,8 @@ export async function openDashboardWidgetManager() {
     style: { marginTop: '2px' },
   });
 
-  const cancel = el('button', { class: 'btn' }, 'Cancel');
-  const apply = el('button', { class: 'btn primary' }, 'Apply');
+  const cancel = el('button', { class: 'btn' }, t('common.cancel'));
+  const apply = el('button', { class: 'btn primary' }, t('common.apply'));
 
   const close = () => {
     modal.remove();
@@ -522,7 +530,7 @@ export async function openDashboardWidgetManager() {
 
     close();
     forceDashboardRefresh();
-    toast('Widgets updated', 'success');
+    toast(t('dashWidgets.updated'), 'success');
   });
 
   foot.append(el('span', { class: 'grow' }), cancel, apply);

@@ -103,6 +103,18 @@ export function cloudUsage() {
   return apiFetch('/api/usage');
 }
 
+/*
+  Fetches an Excalidraw ".excalidrawlib" file through the YANTA Cloud proxy.
+  CSP intentionally blocks libraries.excalidraw.com in connect-src, and the
+  proxy also keeps the user's IP/referrer off the Excalidraw CDN. Returns the
+  raw library JSON ({ type, version, libraryItems } | { library }).
+*/
+export function cloudFetchExcalidrawLibrary(libraryUrl) {
+  return apiFetch(
+    `/api/excalidraw/library?url=${encodeURIComponent(String(libraryUrl || ''))}`
+  );
+}
+
 export function cloudStorageBreakdown(vaultId, {
   deviceId = '',
 } = {}) {

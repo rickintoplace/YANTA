@@ -18,6 +18,7 @@
 // ============================================================
 
 import { $, state, store, toast } from './core.js';
+import { t } from './i18n/index.js';
 import { createWebRTCProvider, generateShareCredentials } from './providers.js';
 import { renderTree } from './tree.js';
 import { renderBrandedQrSvg } from './qr.js';
@@ -150,7 +151,7 @@ export async function stopSharing(noteId) {
 
   renderTree();
   renderShareIndicator();
-  toast('Stopped sharing');
+  toast(t('sharing.stopped'));
 }
 
 export async function connectToShare(noteId, room, key) {
@@ -167,7 +168,7 @@ export async function connectToShare(noteId, room, key) {
 
   // Awareness: announce a local user.
   try {
-    const me = await store.settings.get('userName', 'Anonymous');
+    const me = await store.settings.get('userName', t('sharing.anonymous'));
     const color = await store.settings.get('userColor', randomColor());
     provider.awareness.setLocalStateField('user', { name: me, color });
   } catch {}
@@ -219,19 +220,19 @@ export async function openShareModal() {
   const id = state.currentNoteId;
 
   if (!id) {
-    toast('Open a note first', 'error');
+    toast(t('note.openFirst'), 'error');
     return;
   }
 
   const note = state.notes.get(id);
   if (!note) {
-    toast('Note not found', 'error');
+    toast(t('sharing.noteNotFound'), 'error');
     return;
   }
 
   const session = await startSharing(id);
   if (!session) {
-    toast('Could not start sharing', 'error');
+    toast(t('sharing.couldNotStart'), 'error');
     return;
   }
 
@@ -251,7 +252,7 @@ export async function openShareModal() {
   // Wenn das Element nicht existiert, ist Preview trotzdem Standard.
   const previewOnlyEl = $('sharePreviewOnly');
 
-  if (titleEl) titleEl.textContent = note.title || 'Untitled';
+  if (titleEl) titleEl.textContent = note.title || t('note.untitled');
   if (peerEl) peerEl.textContent = String(session.peers || 0);
 
   if (previewOnlyEl) {
@@ -318,21 +319,23 @@ export function renderShareIndicator() {
 
   const parts = [];
 
-  if (publicActive) parts.push('Public link active');
+  if (publicActive) parts.push(t('tree.note.publicLinkActive'));
 
   if (space) {
     parts.push(
       space.role === 'owner'
-        ? `Live share active · ${space.peers} peer${space.peers === 1 ? '' : 's'}`
-        : `Shared with you (${space.role === 'write' ? 'can edit' : 'read-only'})`
+        ? t('sharing.liveShareActivePeers', { count: space.peers })
+        : space.role === 'write'
+          ? t('sharing.sharedWithYouCanEdit')
+          : t('sharing.sharedWithYouReadOnly')
     );
   }
 
   if (sess) {
-    parts.push(`Legacy live sharing · ${sess.peers} peer${sess.peers === 1 ? '' : 's'}`);
+    parts.push(t('sharing.legacyLiveSharingPeers', { count: sess.peers }));
   }
 
-  btn.title = parts.length ? parts.join(' · ') : 'Share this note';
+  btn.title = parts.length ? parts.join(' · ') : t('note.toolbar.shareThis');
 }
 
 // ---------------- Auto-restore previously shared notes ----------
@@ -361,7 +364,7 @@ export async function handleShareUrl() {
   if (!state.notes.has(parsed.noteId)) {
     const note = {
       id: parsed.noteId,
-      title: parsed.title || 'Shared note',
+      title: parsed.title || t('sharing.sharedNoteTitle'),
       type: 'markdown',
       folderId: null,
       tags: ['shared'],

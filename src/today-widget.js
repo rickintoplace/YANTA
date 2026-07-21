@@ -14,6 +14,7 @@ import {
 } from './core.js';
 
 import { registerDashboardWidget } from './dashboard-widgets.js';
+import { t } from './i18n/index.js';
 
 import {
   friendlyDayLabel,
@@ -219,8 +220,8 @@ async function renderEntries(body) {
 
     // First contact vs. quiet day — explain once, then stay out of the way.
     const hint = !folder && !note
-      ? 'Captured thoughts land in a daily note inside your Journal folder.'
-      : 'Nothing captured yet today.';
+      ? t('today.captureHint')
+      : t('today.nothingToday');
 
     body.replaceChildren(el('div', { class: 'yanta-today-empty' }, hint));
     return;
@@ -253,7 +254,7 @@ async function renderEntries(body) {
 
   if (entries.length > MAX_ROWS) {
     const more = el('div', { class: 'yanta-today-empty' },
-      `+${entries.length - MAX_ROWS} earlier — open the note for everything.`);
+      t('today.earlier', { count: entries.length - MAX_ROWS }));
 
     rows.unshift(more);
   }
@@ -271,10 +272,10 @@ async function renderTodayWidget() {
   const head = el('div', { class: 'yanta-dash-widget-head' });
   head.innerHTML = `
     ${lucide('sun', 15)}
-    <span class="yanta-dash-widget-title">Today</span>
+    <span class="yanta-dash-widget-title">${t('dashWidgets.titles.today')}</span>
     <span class="yanta-today-date">${escapeHtml(friendlyDayLabel())}</span>
     <span class="yanta-dash-widget-spacer"></span>
-    <button class="icon-btn" data-widget-open title="Open today’s note">${lucide('arrow-right', 15)}</button>
+    <button class="icon-btn" data-widget-open title="${t('today.openNote')}">${lucide('arrow-right', 15)}</button>
   `;
 
   head.querySelector('[data-widget-open]')?.addEventListener('click', () => {
@@ -285,7 +286,7 @@ async function renderTodayWidget() {
 
   const input = el('input', {
     type: 'text',
-    placeholder: 'Capture a thought…',
+    placeholder: t('today.capturePlaceholder'),
     autocomplete: 'off',
     spellcheck: 'false',
   });
@@ -298,7 +299,7 @@ async function renderTodayWidget() {
   const sendBtn = el('button', {
     class: 'icon-btn',
     type: 'button',
-    title: 'Capture',
+    title: t('today.capture'),
   });
 
   sendBtn.innerHTML = lucide('corner-down-left', 15);
@@ -386,7 +387,7 @@ async function renderTodayWidget() {
 
 registerDashboardWidget({
   id: 'today',
-  title: 'Today',
+  titleKey: 'dashWidgets.titles.today',
   icon: 'sun',
   order: 5,
   render: renderTodayWidget,

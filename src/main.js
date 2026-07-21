@@ -63,7 +63,7 @@ import {
 import {
   setupPublicShareAutoPublisher,
 } from './public-share/public-share-publisher.js';
-import { setupDraw, createDrawingAndInsert, importExcalidrawFileIntoCurrent } from './draw.js';
+import { setupDraw, createDrawingAndInsert, importExcalidrawFileIntoCurrent, importExcalidrawLibraryFromUrl } from './draw.js';
 import { setupCitations, openCitationManager } from './citations.js';
 import {
   installVaultStoreBridge,
@@ -1825,6 +1825,62 @@ async function handlePresentPairHashIfNeeded(hash = location.hash) {
 }
 
 /*
+  Excalidraw's "Add to Excalidraw" flow redirects to
+  <app>/#addLibrary=<encoded .excalidrawlib url>&token=<token>. The redirect
+  reloads YANTA, so we handle it once at boot: fetch the library through the
+  Cloud proxy, confirm with the user, and merge it into the Personal Library —
+  from where it becomes selectable in drawings and sendable as Chat stickers.
+*/
+function addLibraryUrlFromHash(hash = location.hash) {
+  const raw = String(hash || '').replace(/^#/, '');
+
+  if (!raw.startsWith('addLibrary=')) return '';
+
+  const libraryUrl = new URLSearchParams(raw).get('addLibrary');
+  return libraryUrl ? String(libraryUrl) : '';
+}
+
+async function handleAddLibraryHashIfNeeded() {
+  const libraryUrl = addLibraryUrlFromHash();
+
+  if (!libraryUrl) return false;
+
+  // Clear the hash first so a reload can't re-trigger the import and normal
+  // routing continues from a clean state.
+  history.replaceState({}, '', location.pathname + location.search);
+
+  try {
+    const { yantaConfirm } = await import('./dialogs.js');
+
+    const result = await importExcalidrawLibraryFromUrl(libraryUrl, {
+      confirm: ({ sourceName, count }) =>
+        yantaConfirm({
+          kicker: t('image.libraryImportKicker'),
+          title: sourceName,
+          message: t('image.libraryImportConfirm', { count }),
+          confirmLabel: t('image.libraryImportAction'),
+          icon: 'library',
+        }),
+    });
+
+    if (result.cancelled) return true;
+
+    toast(
+      t('image.libraryImportDone', {
+        count: result.added,
+        name: result.sourceName,
+      }),
+      'success'
+    );
+  } catch (err) {
+    console.error('[YANTA] Excalidraw library import failed', err);
+    toast(t('image.libraryImportFailed'), 'error');
+  }
+
+  return true;
+}
+
+/*
   Boot loader bridge (inline UI in index.html). Reports honest progress:
   the bundle is parsed once init() runs, then vault/notes/workspace follow.
 */
@@ -2339,6 +2395,9 @@ async function init() {
 
   // setupCalendar();
   await syncRestore();
+
+  await handleAddLibraryHashIfNeeded();
+
   let sharedOpen = null;
 
   if (window.location.hash.startsWith('#space=')) {

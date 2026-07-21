@@ -14,6 +14,8 @@ import {
   toast,
 } from './core.js';
 
+import { t } from './i18n/index.js';
+
 import {
   defaultCreateFolderId,
   runCreateAction,
@@ -98,7 +100,7 @@ function isOpen() {
 
 function toggleOpen() {
   if (!actions.length) {
-    toast('No quick actions enabled', 'error');
+    toast(t('floatingCreate.noActionsEnabled'), 'error');
     return;
   }
 
@@ -145,7 +147,7 @@ async function runAction(id) {
     });
   } catch (err) {
     console.error('[YANTA Quick Create] action failed', err);
-    toast('Quick create failed', 'error');
+    toast(t('floatingCreate.createFailed'), 'error');
   }
 }
 
@@ -640,15 +642,15 @@ function buildDom() {
   trigger.type = 'button';
   trigger.className = 'yanta-qc-trigger';
   trigger.dataset.qcTrigger = '1';
-  trigger.title = 'Quick actions';
-  trigger.setAttribute('aria-label', 'Quick actions');
+  trigger.title = t('floatingCreate.triggerLabel');
+  trigger.setAttribute('aria-label', t('floatingCreate.triggerLabel'));
   trigger.setAttribute('aria-haspopup', 'menu');
   trigger.setAttribute('aria-expanded', 'false');
   trigger.innerHTML = resolveFloatingCreateIcon(iconStyle).markup();
 
   const tooltip = document.createElement('div');
   tooltip.className = 'yanta-qc-tooltip';
-  tooltip.textContent = 'Tap or hold';
+  tooltip.textContent = t('floatingCreate.tapOrHold');
 
   shell.append(blobLayer, trigger, tooltip);
 

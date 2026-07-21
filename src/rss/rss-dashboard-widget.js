@@ -21,6 +21,8 @@ import {
   setDashboardWidgetEnabled,
 } from '../dashboard-widgets.js';
 
+import { t } from '../i18n/index.js';
+
 import {
   getRssSettings,
   getRssFeeds,
@@ -58,14 +60,14 @@ function relativeTime(ts) {
   if (!ts || ms < 0) return '';
 
   const min = Math.floor(ms / 60_000);
-  if (min < 1) return 'now';
-  if (min < 60) return `${min}m`;
+  if (min < 1) return t('rssWidget.now');
+  if (min < 60) return t('rssWidget.minutes', { count: min });
 
   const hours = Math.floor(min / 60);
-  if (hours < 24) return `${hours}h`;
+  if (hours < 24) return t('rssWidget.hours', { count: hours });
 
   const days = Math.floor(hours / 24);
-  if (days < 7) return `${days}d`;
+  if (days < 7) return t('rssWidget.days', { count: days });
 
   return new Date(ts).toLocaleDateString();
 }
@@ -436,14 +438,14 @@ async function buildCard(item, view = 'cards') {
   }
 
   const meta = [
-    item.feedTitle || 'Source',
+    item.feedTitle || t('rssWidget.sourceFallback'),
     relativeTime(item.publishedAt || item.discoveredAt),
   ].filter(Boolean).join(' · ');
 
   card.append(
     thumb,
     el('div', { class: 'yanta-rss-dash-main' },
-      el('div', { class: 'yanta-rss-dash-title' }, item.title || 'Untitled'),
+      el('div', { class: 'yanta-rss-dash-title' }, item.title || t('note.untitled')),
       el('div', { class: 'yanta-rss-dash-meta' }, meta)
     )
   );
@@ -462,7 +464,7 @@ function openConfigPopover(anchor, { feeds, config, onSaved }) {
   const tags = rssTagCountsFromFeeds(feeds).map((entry) => entry.tag);
 
   if (tags.length) {
-    panel.append(el('h5', {}, 'Toggle by tag'));
+    panel.append(el('h5', {}, t('rssWidget.toggleByTag')));
 
     const tagRow = el('div', { class: 'yanta-rss-dash-config-tags' });
 
@@ -489,7 +491,7 @@ function openConfigPopover(anchor, { feeds, config, onSaved }) {
     panel.append(tagRow);
   }
 
-  panel.append(el('h5', {}, 'Sources'));
+  panel.append(el('h5', {}, t('rssWidget.sources')));
 
   const list = el('div', { class: 'yanta-rss-dash-config-feeds' });
 
@@ -516,15 +518,15 @@ function openConfigPopover(anchor, { feeds, config, onSaved }) {
 
   const foot = el('div', { class: 'yanta-rss-dash-config-foot' });
 
-  const hide = el('button', { class: 'btn' }, 'Hide widget');
+  const hide = el('button', { class: 'btn' }, t('rssWidget.hideWidget'));
 
   hide.addEventListener('click', async () => {
     await setDashboardWidgetEnabled('rss-latest', false);
     panel.remove();
-    toast('Widget hidden — manage widgets from the dashboard header');
+    toast(t('rssWidget.hiddenToast'));
   });
 
-  const apply = el('button', { class: 'btn primary' }, 'Apply');
+  const apply = el('button', { class: 'btn primary' }, t('common.apply'));
 
   apply.addEventListener('click', async () => {
     const all = selected.size >= feeds.length;
@@ -574,12 +576,12 @@ async function renderWidgetContent(section) {
   const head = el('div', { class: 'yanta-dash-widget-head' });
   head.innerHTML = `
     ${lucide('rss', 15)}
-    <span class="yanta-dash-widget-title">New from your sources</span>
+    <span class="yanta-dash-widget-title">${t('dashWidgets.titles.rssLatest')}</span>
     <span class="yanta-dash-widget-count">${escapeHtml(String(items.length))}</span>
     <span class="yanta-dash-widget-spacer"></span>
-    <button class="icon-btn" data-widget-view title="${isList ? 'Switch to cards' : 'Switch to list'}">${lucide(isList ? 'layout-grid' : 'list', 15)}</button>
-    <button class="icon-btn" data-widget-config title="Choose sources">${lucide('settings-2', 15)}</button>
-    <button class="icon-btn" data-widget-open title="Open Sources">${lucide('arrow-right', 15)}</button>
+    <button class="icon-btn" data-widget-view title="${isList ? t('rssWidget.switchToCards') : t('rssWidget.switchToList')}">${lucide(isList ? 'layout-grid' : 'list', 15)}</button>
+    <button class="icon-btn" data-widget-config title="${t('rssWidget.chooseSources')}">${lucide('settings-2', 15)}</button>
+    <button class="icon-btn" data-widget-open title="${t('rssWidget.openSources')}">${lucide('arrow-right', 15)}</button>
   `;
 
   head.querySelector('[data-widget-view]')?.addEventListener('click', async () => {
@@ -650,7 +652,7 @@ async function renderRssWidget() {
 
 registerDashboardWidget({
   id: 'rss-latest',
-  title: 'New from your sources',
+  titleKey: 'dashWidgets.titles.rssLatest',
   icon: 'rss',
   order: 20,
   render: renderRssWidget,

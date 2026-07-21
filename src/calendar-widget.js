@@ -17,6 +17,7 @@ import {
 
 import { registerDashboardWidget } from './dashboard-widgets.js';
 import { categoryIsShared } from './spaces/calendar-registry.js';
+import { t } from './i18n/index.js';
 
 import {
   dateLikeToDate,
@@ -102,7 +103,7 @@ function eventStartDate(ev) {
 }
 
 function timeLabel(ev) {
-  if (ev.allDay) return 'All day';
+  if (ev.allDay) return t('calendarWidget.allDay');
 
   const d = eventStartDate(ev);
   if (!d) return '';
@@ -789,7 +790,7 @@ function eventRow(ev, { showDate = true } = {}) {
   const dot = el('span', { class: 'yanta-cal-dash-dot' });
   dot.style.background = eventColor(ev);
 
-  what.append(dot, el('span', { class: 'yanta-cal-dash-title' }, ev.title || 'Untitled event'));
+  what.append(dot, el('span', { class: 'yanta-cal-dash-title' }, ev.title || t('calendarWidget.untitledEvent')));
 
   // Shared calendars stay recognizable in the widget too.
   const cat = ev.categoryId ? state.calendarCategories?.get?.(ev.categoryId) : null;
@@ -797,7 +798,7 @@ function eventRow(ev, { showDate = true } = {}) {
   if (cat?.spaceId || ev.spaceId || categoryIsShared(ev.categoryId)) {
     const shared = el('span', {
       class: 'yanta-cal-dash-shared',
-      title: `Shared calendar "${cat?.name || ''}"`,
+      title: t('calendarWidget.sharedCalendar', { name: cat?.name || '' }),
     });
     shared.innerHTML = lucide('users', 11);
     what.append(shared);
@@ -822,7 +823,7 @@ async function renderListView(body) {
   const events = (await eventsForRange(now, addDays(startOfDay(now), 31))).slice(0, 8);
 
   if (!events.length) {
-    body.append(el('div', { class: 'yanta-cal-dash-empty' }, 'No upcoming events in the next 30 days.'));
+    body.append(el('div', { class: 'yanta-cal-dash-empty' }, t('calendarWidget.noUpcoming')));
     return;
   }
 
@@ -841,7 +842,7 @@ async function renderDayView(body, ref = navAnchor()) {
 
   if (!events.length) {
     body.append(el('div', { class: 'yanta-cal-dash-empty' },
-      sameDay(day, new Date()) ? 'Nothing scheduled today.' : 'Nothing scheduled.'));
+      sameDay(day, new Date()) ? t('calendarWidget.nothingToday') : t('calendarWidget.nothing')));
     return;
   }
 
@@ -876,11 +877,11 @@ async function renderWeekView(body, ref = navAnchor()) {
     for (const seg of band.segments) {
       const bar = el('div', {
         class: 'yanta-cal-dash-week-bar',
-        title: seg.ev.title || 'Untitled event',
+        title: seg.ev.title || t('calendarWidget.untitledEvent'),
         role: 'button',
         tabindex: '0',
         onclick: openFromGrid,
-      }, seg.ev.title || 'Untitled event');
+      }, seg.ev.title || t('calendarWidget.untitledEvent'));
 
       bar.style.gridRow = String(seg.lane + 1);
       applyBarSpan(bar, seg, eventColor(seg.ev));
@@ -911,7 +912,7 @@ async function renderWeekView(body, ref = navAnchor()) {
       const chip = el('div', {
         class: 'yanta-cal-dash-chip',
         title: `${timeLabel(ev)} ${ev.title || ''}`.trim(),
-      }, ev.title || 'Untitled');
+      }, ev.title || t('note.untitled'));
 
       chip.style.setProperty('--chip-color', eventColor(ev));
       cell.append(chip);
@@ -919,7 +920,7 @@ async function renderWeekView(body, ref = navAnchor()) {
 
     const overflow = (dayEvents.length > 3 ? dayEvents.length - 3 : 0) + band.overflow[i];
     if (overflow > 0) {
-      cell.append(el('span', { class: 'yanta-cal-dash-more' }, `+${overflow} more`));
+      cell.append(el('span', { class: 'yanta-cal-dash-more' }, t('calendarWidget.moreCount', { count: overflow })));
     }
 
     cell.addEventListener('click', openFromGrid);
@@ -1017,7 +1018,7 @@ async function renderMonthView(body, ref = navAnchor()) {
     for (const seg of layout.segments) {
       const bar = el('div', {
         class: 'yanta-cal-dash-month-bar',
-        title: seg.ev.title || 'Untitled event',
+        title: seg.ev.title || t('calendarWidget.untitledEvent'),
       });
       bar.style.gridRow = String(seg.lane + 2);
       applyBarSpan(bar, seg, eventColor(seg.ev));
@@ -1031,13 +1032,6 @@ async function renderMonthView(body, ref = navAnchor()) {
 }
 
 // ---------------- widget shell ------------------------------------
-
-const VIEW_LABELS = {
-  month: 'Month',
-  week: 'Week',
-  day: 'Day',
-  list: 'List',
-};
 
 // A grid/row tap opens the full calendar — but a horizontal swipe ends
 // on the same element, so we suppress the tap that a swipe would emit.
@@ -1064,12 +1058,12 @@ function navigateWidget(section, view, dir) {
 function buildNavRow(section, view) {
   const row = el('div', { class: 'yanta-cal-dash-nav' });
 
-  const prev = el('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Previous' });
+  const prev = el('button', { class: 'icon-btn', type: 'button', 'aria-label': t('calendarWidget.previous') });
   prev.innerHTML = lucide('chevron-left', 16);
 
   const label = el('span', { class: 'yanta-cal-dash-period' }, periodLabel(view));
 
-  const next = el('button', { class: 'icon-btn', type: 'button', 'aria-label': 'Next' });
+  const next = el('button', { class: 'icon-btn', type: 'button', 'aria-label': t('calendarWidget.next') });
   next.innerHTML = lucide('chevron-right', 16);
 
   prev.addEventListener('click', () => navigateWidget(section, view, -1));
@@ -1078,7 +1072,7 @@ function buildNavRow(section, view) {
   row.append(prev, label, next);
 
   if (!viewingToday(view)) {
-    const today = el('button', { class: 'yanta-cal-dash-today', type: 'button' }, 'Today');
+    const today = el('button', { class: 'yanta-cal-dash-today', type: 'button' }, t('calendarWidget.today'));
     today.addEventListener('click', () => {
       navRef = startOfDay(new Date());
       renderWidgetContent(section).catch(() => {});
@@ -1126,10 +1120,10 @@ async function renderWidgetContent(section, { dir = 0 } = {}) {
 
   head.innerHTML = `
     ${lucide('calendar-days', 15)}
-    <span class="yanta-dash-widget-title">Calendar</span>
+    <span class="yanta-dash-widget-title">${t('calendarWidget.title')}</span>
     <span class="yanta-dash-widget-spacer"></span>
-    <span class="yanta-cal-dash-views" role="tablist" aria-label="Calendar widget view"></span>
-    <button class="icon-btn" data-widget-open title="Open Calendar">${lucide('arrow-right', 15)}</button>
+    <span class="yanta-cal-dash-views" role="tablist" aria-label="${t('calendarWidget.viewTablist')}"></span>
+    <button class="icon-btn" data-widget-open title="${t('calendarWidget.openCalendar')}">${lucide('arrow-right', 15)}</button>
   `;
 
   const viewsHost = head.querySelector('.yanta-cal-dash-views');
@@ -1139,7 +1133,7 @@ async function renderWidgetContent(section, { dir = 0 } = {}) {
       type: 'button',
       class: v === view ? 'active' : '',
       role: 'tab',
-    }, VIEW_LABELS[v]);
+    }, t('calendarWidget.viewLabels.' + v));
 
     btn.addEventListener('click', async () => {
       if (v === view) return;
@@ -1197,7 +1191,7 @@ async function renderCalendarWidget() {
 
 registerDashboardWidget({
   id: 'calendar',
-  title: 'Calendar',
+  titleKey: 'dashWidgets.titles.calendar',
   icon: 'calendar-days',
   order: 10,
   render: renderCalendarWidget,

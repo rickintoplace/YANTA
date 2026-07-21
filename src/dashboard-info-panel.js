@@ -17,6 +17,7 @@ import {
 } from './core.js';
 
 import { registerDashboardWidget } from './dashboard-widgets.js';
+import { t } from './i18n/index.js';
 
 import {
   notificationSyncReport,
@@ -182,11 +183,13 @@ function isAndroidApp() {
 function formatDeviceNames(devices) {
   const names = devices.map((d) => d.name).filter(Boolean);
 
-  if (!names.length) return 'your Android device';
-  if (names.length === 1) return `"${names[0]}"`;
+  if (!names.length) return t('infoPanel.yourAndroidDevice');
+  if (names.length === 1) return `“${names[0]}”`;
 
-  return names.slice(0, -1).map((n) => `"${n}"`).join(', ') +
-    ` and "${names[names.length - 1]}"`;
+  const quoted = names.map((n) => `“${n}”`);
+  const last = quoted.pop();
+
+  return `${quoted.join(', ')} ${t('infoPanel.deviceAnd')} ${last}`;
 }
 
 /**
@@ -216,7 +219,7 @@ function collectInstallItems() {
     title: primary.title,
     text: primary.body,
     action: {
-      label: primary.cta?.label || 'Set up',
+      label: primary.cta?.label || t('infoPanel.setUp'),
       onClick: () => openInstallModal(),
     },
     dismissible: hintId,
@@ -256,13 +259,9 @@ function collectInfoItems() {
       id: 'notifications-pending',
       tone: 'warn',
       icon: 'bell-ring',
-      title: n === 1
-        ? '1 event notification is not on a notification device yet'
-        : `${n} event notifications are not on a notification device yet`,
-      text: `Open YANTA on ${formatDeviceNames(stale.length ? stale : report.devices)} to sync — reminders only fire once the app there knows them.`,
-      details: 'Event notifications are delivered by the YANTA Android app. ' +
-        'Each phone schedules them locally when the app is opened and syncs. ' +
-        'Until then, new or changed reminders exist only on the device that created them.',
+      title: t('infoPanel.pendingTitle', { count: n }),
+      text: t('infoPanel.pendingText', { names: formatDeviceNames(stale.length ? stale : report.devices) }),
+      details: t('infoPanel.pendingDetails'),
     });
   }
 
@@ -273,13 +272,9 @@ function collectInfoItems() {
       id: 'notifications-no-device',
       tone: 'warn',
       icon: 'bell-off',
-      title: n === 1
-        ? '1 upcoming notification has no device that can deliver it'
-        : `${n} upcoming notifications have no device that can deliver them`,
-      text: 'No connected Android device can show event reminders yet.',
-      details: 'Install the YANTA app on your Android phone, connect it to ' +
-        'this vault and open it once — it registers as a notification ' +
-        'device and schedules your reminders automatically from then on.',
+      title: t('infoPanel.noDeviceTitle', { count: n }),
+      text: t('infoPanel.noDeviceText'),
+      details: t('infoPanel.noDeviceDetails'),
     });
   }
 
@@ -288,14 +283,11 @@ function collectInfoItems() {
       id: `notifications-permissions-${device.id}`,
       tone: 'warn',
       icon: 'bell-off',
-      title: `Notifications are disabled on "${device.name}"`,
+      title: t('infoPanel.permsTitle', { name: device.name }),
       text: device.current
-        ? 'Allow notifications and exact alarms so reminders can fire on this device.'
-        : `Open YANTA on "${device.name}" and allow notifications and exact alarms.`,
-      details: 'Android requires both the notification permission and the ' +
-        '"Alarms & reminders" permission for reliable, exactly-timed event ' +
-        'reminders. Both can be granted from the notification section of ' +
-        'any event on that device.',
+        ? t('infoPanel.permsTextCurrent')
+        : t('infoPanel.permsTextOther', { name: device.name }),
+      details: t('infoPanel.permsDetails'),
     });
   }
 
@@ -330,7 +322,7 @@ function renderItems(body, onChange) {
         ${
           item.details
             ? `
-              <button type="button" class="yanta-dash-info-fix" data-info-fix>How does this work?</button>
+              <button type="button" class="yanta-dash-info-fix" data-info-fix>${escapeHtml(t('infoPanel.howDoesThisWork'))}</button>
               <div class="yanta-dash-info-details" hidden>${escapeHtml(item.details)}</div>
             `
             : ''
@@ -338,7 +330,7 @@ function renderItems(body, onChange) {
       </div>
       ${
         item.dismissible
-          ? `<button type="button" class="yanta-dash-info-dismiss" data-info-dismiss title="Dismiss" aria-label="Dismiss">${lucide('x', 14)}</button>`
+          ? `<button type="button" class="yanta-dash-info-dismiss" data-info-dismiss title="${escapeHtml(t('infoPanel.dismiss'))}" aria-label="${escapeHtml(t('infoPanel.dismiss'))}">${lucide('x', 14)}</button>`
           : ''
       }
     `;
@@ -349,7 +341,7 @@ function renderItems(body, onChange) {
     fixBtn?.addEventListener('click', () => {
       const show = details.hidden;
       details.hidden = !show;
-      fixBtn.textContent = show ? 'Hide' : 'How does this work?';
+      fixBtn.textContent = show ? t('infoPanel.hide') : t('infoPanel.howDoesThisWork');
     });
 
     row.querySelector('[data-info-action]')?.addEventListener('click', () => {
@@ -384,7 +376,7 @@ async function renderInfoPanel() {
   const head = el('div', { class: 'yanta-dash-widget-head' });
   head.innerHTML = `
     ${lucide('info', 15)}
-    <span class="yanta-dash-widget-title">Information</span>
+    <span class="yanta-dash-widget-title">${t('dashWidgets.titles.infoPanel')}</span>
   `;
 
   const body = el('div', { class: 'yanta-dash-info-body-host' });
@@ -444,7 +436,7 @@ async function renderInfoPanel() {
 
 registerDashboardWidget({
   id: 'info-panel',
-  title: 'Information',
+  titleKey: 'dashWidgets.titles.infoPanel',
   icon: 'info',
   order: 5,
   render: renderInfoPanel,

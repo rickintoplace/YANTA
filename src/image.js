@@ -4,6 +4,7 @@
 // ============================================================
 
 import { $, el, uid, state, store, toast, fmtBytes, lucide } from './core.js';
+import { t } from './i18n/index.js';
 import {
   pushOverlayState,
   closeTopOverlay,
@@ -16,6 +17,7 @@ import {
   drawingThumbnailUrl,
   importSvgFileAsDrawing,
   listDrawLibraryItems,
+  listDrawLibraryGroups,
   drawLibraryItemThumbnailUrl,
   insertDrawLibraryItemIntoCurrent,
 } from './draw.js';
@@ -197,11 +199,11 @@ export async function insertImageAsRef(file) {
   insertAtCursor(`\n![${altBase}](yanta-img://${id})\n`);
 
   updateStorageMeter();
-  toast('Image inserted', 'success');
+  toast(t('image.inserted'), 'success');
 }
 
 export async function pickImageFile(file) {
-  if (!file || !file.type.startsWith('image/')) { toast('Not an image', 'error'); return; }
+  if (!file || !file.type.startsWith('image/')) { toast(t('image.notAnImage'), 'error'); return; }
   imgWorkingBlob = file;
   compressPanel.hidden = false;
   if (file.type === 'image/png' || file.type === 'image/svg+xml') $('fmt').value = 'image/png';
@@ -221,7 +223,7 @@ async function recompress() {
     imgCompressedBlob = imgWorkingBlob;
     imgCompressedDataUrl = await blobToDataURL(imgWorkingBlob);
     $('imgPreview').src = imgCompressedDataUrl;
-    $('imgMeta').innerHTML = `<span>SVG (kept as-is)</span><strong>${fmtBytes(imgWorkingBlob.size)}</strong>`;
+    $('imgMeta').innerHTML = `<span>${t('image.svgKept')}</span><strong>${fmtBytes(imgWorkingBlob.size)}</strong>`;
     return;
   }
   const bmp = await createImageBitmap(imgWorkingBlob);
@@ -250,12 +252,12 @@ function updateBase64Warning(size) {
   if (!$('asBase64').checked) { w.hidden = true; return; }
   if (size > 200 * 1024) {
     w.hidden = false;
-    w.textContent = `Embedding ${fmtBytes(size)} as Base64 will bloat your .md file. Library reference recommended.`;
+    w.textContent = t('image.base64Warning', { size: fmtBytes(size) });
   } else w.hidden = true;
 }
 
 async function insertCompressedImage() {
-  if (!imgCompressedBlob) { toast('Pick an image first', 'error'); return; }
+  if (!imgCompressedBlob) { toast(t('image.pickImageFirst'), 'error'); return; }
   const asRef = $('asReference').checked;
   const asBase64 = $('asBase64').checked;
   let md;
@@ -268,11 +270,11 @@ async function insertCompressedImage() {
     md = `![${imgWorkingBlob.name?.replace(/\.[^.]+$/, '') || 'image'}](yanta-img://${id})`;
   } else if (asBase64) {
     md = `![${imgWorkingBlob.name?.replace(/\.[^.]+$/, '') || 'image'}](${imgCompressedDataUrl})`;
-  } else { toast('Pick a save mode', 'error'); return; }
+  } else { toast(t('image.pickSaveMode'), 'error'); return; }
   insertAtCursor('\n' + md + '\n');
   closeImageModal();
   updateStorageMeter();
-  toast('Image inserted', 'success');
+  toast(t('image.inserted'), 'success');
 }
 
 function sectionTitle(text) {
@@ -300,7 +302,7 @@ function citationTitleForLibrary(c) {
     c?.model?.title ||
     stripHtmlForLibrary(c?.formatted || '') ||
     c?.key ||
-    'Citation'
+    t('image.citationFallback')
   );
 }
 
@@ -324,10 +326,68 @@ function citationMetaForLibrary(c) {
   }
 
   if (c?.isFromCurrentNote) {
-    parts.push('current note');
+    parts.push(t('image.currentNote'));
   }
 
   return parts.join(' · ');
+}
+
+function libraryItemCard(item) {
+  const card = el('div', {
+    class: 'lib-card',
+    title: t('image.insertLibraryItem', { name: item.name || t('image.libraryItem') }),
+    onclick: async () => {
+      await insertDrawLibraryItemIntoCurrent(item.id);
+      closeImageModal();
+    },
+  });
+
+  const thumb = el('div', {
+    style: {
+      width: '100%',
+      height: '80px',
+      borderRadius: '4px',
+      border: '1px solid var(--border)',
+      background: 'var(--bg)',
+      display: 'flex',
+      alignItems: 'center',
+      justifyContent: 'center',
+      color: 'var(--accent)',
+      overflow: 'hidden',
+    },
+  });
+
+  thumb.innerHTML = lucide('library', 26);
+
+  drawLibraryItemThumbnailUrl(item.id).then((url) => {
+    if (!url) return;
+
+    thumb.replaceChildren();
+    thumb.append(el('img', {
+      src: url,
+      alt: item.name || t('image.libraryItem'),
+      style: {
+        width: '100%',
+        height: '100%',
+        objectFit: 'contain',
+        border: '0',
+      },
+    }));
+  });
+
+  card.append(
+    thumb,
+    el('div', {
+      class: 'lib-meta',
+      title: item.name || t('image.libraryItem'),
+    }, item.name || t('image.libraryItem')),
+    el('div', {
+      class: 'lib-meta',
+      style: { color: 'var(--text-faint)' },
+    }, t('image.elementCount', { count: (item.elements || []).length }))
+  );
+
+  return card;
 }
 
 function renderLibrary() {
@@ -340,12 +400,12 @@ function renderLibrary() {
   const images = [...state.imagesMeta.values()].sort((a, b) => b.ts - a.ts);
 
   if (!images.length && !drawings.length && !drawLibraryItems.length && !citations.length) {
-    g.append(el('div', { class: 'tree-empty' }, 'No images, drawings or citations in library yet.'));
+    g.append(el('div', { class: 'tree-empty' }, t('image.libraryEmpty')));
     return;
   }
 
   if (images.length) {
-    g.append(sectionTitle('Images'));
+    g.append(sectionTitle(t('image.sectionImages')));
 
     for (const meta of images) {
       let url = state.imageBlobs.get(meta.id);
@@ -375,7 +435,7 @@ function renderLibrary() {
   }
 
   if (citations.length) {
-    g.append(sectionTitle('Citations'));
+    g.append(sectionTitle(t('image.sectionCitations')));
 
     for (const c of citations) {
       const title = citationTitleForLibrary(c);
@@ -410,7 +470,7 @@ function renderLibrary() {
       const metaEl = el('div', {
         class: 'lib-meta yanta-citation-lib-meta',
         title: meta,
-      }, meta || 'citation');
+      }, meta || t('image.citationMetaFallback'));
 
       const actions = el('div', {
         class: 'yanta-citation-lib-actions',
@@ -418,7 +478,7 @@ function renderLibrary() {
 
       const citeBtn = el('button', {
         class: 'btn',
-        title: 'Insert footnote citation',
+        title: t('image.insertFootnote'),
         onclick: (e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -426,11 +486,11 @@ function renderLibrary() {
           insertSavedCitationIntoCurrentNote(c, { mode: 'footnote' });
           closeImageModal();
         },
-      }, 'Cite');
+      }, t('image.cite'));
 
       const bibBtn = el('button', {
         class: 'btn',
-        title: 'Insert bibliography entry',
+        title: t('image.insertBibliography'),
         onclick: (e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -438,11 +498,11 @@ function renderLibrary() {
           insertSavedCitationIntoCurrentNote(c, { mode: 'bibliography' });
           closeImageModal();
         },
-      }, 'Bib');
+      }, t('image.bib'));
 
       const editBtn = el('button', {
         class: 'btn',
-        title: 'Open citation manager',
+        title: t('image.openCitationManager'),
         onclick: (e) => {
           e.preventDefault();
           e.stopPropagation();
@@ -450,7 +510,7 @@ function renderLibrary() {
           closeImageModal();
           openCitationManager(c.csl?.DOI || c.csl?.URL || c.model?.doi || c.model?.url || c.key || '');
         },
-      }, 'Edit');
+      }, t('image.edit'));
 
       actions.append(citeBtn, bibBtn, editBtn);
 
@@ -460,67 +520,17 @@ function renderLibrary() {
   }
   
   if (drawLibraryItems.length) {
-    g.append(sectionTitle('Excalidraw Library'));
+    // Grouped by source: own drawings first (empty group name), then one
+    // section per imported Excalidraw library.
+    for (const group of listDrawLibraryGroups()) {
+      g.append(sectionTitle(group.name || t('image.sectionExcalidraw')));
 
-    for (const item of drawLibraryItems) {
-      const card = el('div', {
-        class: 'lib-card',
-        title: `Insert library item: ${item.name || 'Library item'}`,
-        onclick: async () => {
-          await insertDrawLibraryItemIntoCurrent(item.id);
-          closeImageModal();
-        },
-      });
-
-      const thumb = el('div', {
-        style: {
-          width: '100%',
-          height: '80px',
-          borderRadius: '4px',
-          border: '1px solid var(--border)',
-          background: 'var(--bg)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          color: 'var(--accent)',
-          overflow: 'hidden',
-        },
-      });
-
-      thumb.innerHTML = lucide('library', 26);
-
-      drawLibraryItemThumbnailUrl(item.id).then((url) => {
-        if (!url) return;
-
-        thumb.replaceChildren();
-        thumb.append(el('img', {
-          src: url,
-          alt: item.name || 'Library item',
-          style: {
-            width: '100%',
-            height: '100%',
-            objectFit: 'contain',
-            border: '0',
-          },
-        }));
-      });
-
-      card.append(
-        thumb,
-        el('div', {
-          class: 'lib-meta',
-          title: item.name || 'Library item',
-        }, item.name || 'Library item'),
-        el('div', {
-          class: 'lib-meta',
-          style: { color: 'var(--text-faint)' },
-        }, `${(item.elements || []).length} element${(item.elements || []).length === 1 ? '' : 's'}`)
-      );
-
-      g.append(card);
+      for (const item of group.items) {
+        g.append(libraryItemCard(item));
+      }
     }
   }
-  g.append(sectionTitle('Drawings'));
+  g.append(sectionTitle(t('image.sectionDrawings')));
 
   const importSvg = el('div', {
     class: 'lib-card',
@@ -559,7 +569,7 @@ function renderLibrary() {
 
   importSvg.append(
     svgImportBox,
-    el('div', { class: 'lib-meta' }, 'Import SVG')
+    el('div', { class: 'lib-meta' }, t('image.importSvg'))
   );
 
   g.append(importSvg);
@@ -568,18 +578,18 @@ function renderLibrary() {
     g.append(el('div', {
       class: 'tree-empty',
       style: { gridColumn: '1 / -1' },
-    }, 'No drawings yet.'));
+    }, t('image.noDrawings')));
     return;
   }
 
   for (const d of drawings) {
     const card = el('div', {
       class: 'lib-card',
-      title: `Insert drawing: ${d.title || 'Drawing'}`,
+      title: t('image.insertDrawing', { title: d.title || t('image.drawingFallback') }),
       onclick: () => {
         insertAtCursor(`\n\ndraw://${d.id}\n\n`);
         closeImageModal();
-        toast('Drawing inserted', 'success');
+        toast(t('image.drawingInserted'), 'success');
       },
     });
 
@@ -605,7 +615,7 @@ function renderLibrary() {
       thumb.replaceChildren();
       thumb.append(el('img', {
         src: url,
-        alt: d.title || 'Drawing',
+        alt: d.title || t('image.drawingFallback'),
         style: {
           width: '100%',
           height: '100%',
@@ -619,12 +629,12 @@ function renderLibrary() {
       thumb,
       el('div', {
         class: 'lib-meta',
-        title: d.title || 'Drawing',
-      }, d.title || 'Drawing'),
+        title: d.title || t('image.drawingFallback'),
+      }, d.title || t('image.drawingFallback')),
       el('div', {
         class: 'lib-meta',
         style: { color: 'var(--text-faint)' },
-      }, d.noteTitle || state.notes.get(d.noteId)?.title || 'Note')
+      }, d.noteTitle || state.notes.get(d.noteId)?.title || t('image.noteFallback'))
     );
 
     g.append(card);
@@ -655,16 +665,16 @@ export async function cleanupUnusedImages() {
     .filter((meta) => !used.has(meta.id));
 
   if (!unused.length) {
-    toast('No unused images', 'success');
+    toast(t('image.noUnusedImages'), 'success');
     return;
   }
 
   const total = unused.reduce((s, m) => s + (m.size || 0), 0);
 
   const ok = await yantaConfirm({
-    title: 'Delete unused images?',
-    message: `Delete ${unused.length} unused image${unused.length === 1 ? '' : 's'} (${fmtBytes(total)})?\n\nThis cannot be undone.`,
-    confirmLabel: 'Delete images',
+    title: t('image.deleteUnusedTitle'),
+    message: t('image.deleteUnusedMessage', { count: unused.length, size: fmtBytes(total) }),
+    confirmLabel: t('image.deleteImages'),
     danger: true,
   });
 
@@ -681,5 +691,5 @@ export async function cleanupUnusedImages() {
     }
   }
 
-  toast(`Cleaned up ${unused.length} image(s)`, 'success');
+  toast(t('image.cleanedUp', { count: unused.length }), 'success');
 }

@@ -6,6 +6,7 @@
 import { $ } from './core.js';
 import { yantaPrompt } from './dialogs.js';
 import { getView } from './editor.js';
+import { t } from './i18n/index.js';
 
 let tb;
 let raf = 0;
@@ -100,35 +101,35 @@ function refresh() {
     `<button data-fmt="${fmt}" title="${title || label}">${label}</button>`;
 
   if (allTasks) {
-    html.push(btn('tasks-toggle', '☑', 'Toggle all done'));
-    html.push(btn('to-bullets', '•', 'Convert to bullets'));
-    html.push(btn('to-numbered', '1.', 'Convert to numbered'));
+    html.push(btn('tasks-toggle', '☑', t('format.toggleAllDone')));
+    html.push(btn('to-bullets', '•', t('format.convertToBullets')));
+    html.push(btn('to-numbered', '1.', t('format.convertToNumbered')));
   } else if (allBullets) {
-    html.push(btn('to-tasks', '☐', 'Make tasks'));
-    html.push(btn('to-numbered', '1.', 'Make numbered'));
+    html.push(btn('to-tasks', '☐', t('format.makeTasks')));
+    html.push(btn('to-numbered', '1.', t('format.makeNumbered')));
   } else if (allOrdered) {
-    html.push(btn('to-tasks', '☐', 'Make tasks'));
-    html.push(btn('to-bullets', '•', 'Make bullets'));
+    html.push(btn('to-tasks', '☐', t('format.makeTasks')));
+    html.push(btn('to-bullets', '•', t('format.makeBullets')));
   } else if (isMultiline) {
-    html.push(btn('to-tasks', '☐ Tasks', 'Make tasks'));
-    html.push(btn('to-bullets', '• Bullets', 'Make bullets'));
-    html.push(btn('to-numbered', '1. Numbered', 'Make numbered'));
-    html.push(btn('quote', 'Quote', 'Quote'));
-    html.push(btn('code-block', '{ }', 'Code block'));
+    html.push(btn('to-tasks', '☐ ' + t('format.tasks'), t('format.makeTasks')));
+    html.push(btn('to-bullets', '• ' + t('format.bullets'), t('format.makeBullets')));
+    html.push(btn('to-numbered', '1. ' + t('format.numbered'), t('format.makeNumbered')));
+    html.push(btn('quote', t('format.quote'), t('format.quote')));
+    html.push(btn('code-block', '{ }', t('format.codeBlock')));
   } else {
-    html.push(btn('bold', 'B', 'Bold'));
-    html.push(btn('italic', 'I', 'Italic'));
-    html.push(btn('code', '</>', 'Inline code'));
-    html.push(btn('strike', 'S', 'Strikethrough'));
+    html.push(btn('bold', 'B', t('format.bold')));
+    html.push(btn('italic', 'I', t('format.italic')));
+    html.push(btn('code', '</>', t('format.inlineCode')));
+    html.push(btn('strike', 'S', t('format.strikethrough')));
     html.push('<span class="sep"></span>');
-    html.push(btn('h1', 'H1', 'Heading 1'));
-    html.push(btn('h2', 'H2', 'Heading 2'));
-    html.push(btn('h3', 'H3', 'Heading 3'));
+    html.push(btn('h1', 'H1', t('format.heading1')));
+    html.push(btn('h2', 'H2', t('format.heading2')));
+    html.push(btn('h3', 'H3', t('format.heading3')));
     html.push('<span class="sep"></span>');
-    html.push(btn('quote', '“”', 'Quote'));
-    html.push(btn('to-bullets', '•', 'Bullet'));
-    html.push(btn('to-tasks', '☐', 'Task'));
-    html.push(btn('link', '🔗', 'Link'));
+    html.push(btn('quote', '“”', t('format.quote')));
+    html.push(btn('to-bullets', '•', t('format.bullet')));
+    html.push(btn('to-tasks', '☐', t('format.task')));
+    html.push(btn('link', '🔗', t('format.link')));
   }
 
   tb.innerHTML = html.join('');
@@ -191,12 +192,12 @@ export async function applyEditorFormat(fmt) {
 
   if (fmt === 'link') {
     const url = await yantaPrompt({
-      title: 'Insert link',
-      label: 'URL',
+      title: t('format.insertLink'),
+      label: t('format.urlLabel'),
       initial: 'https://',
-      placeholder: 'https://example.com',
+      placeholder: t('format.urlPlaceholder'),
       required: true,
-      confirmLabel: 'Insert link',
+      confirmLabel: t('format.insertLink'),
       icon: 'link',
       validate(value) {
         try {
@@ -206,13 +207,13 @@ export async function applyEditorFormat(fmt) {
           }
         } catch {}
   
-        return 'Enter a valid URL.';
+        return t('format.invalidUrl');
       },
     });
   
     if (!url) return;
   
-    const text = v.state.sliceDoc(sel.from, sel.to) || 'link';
+    const text = v.state.sliceDoc(sel.from, sel.to) || t('format.linkText');
     const insert = `[${text}](${url})`;
   
     v.dispatch({

@@ -25,6 +25,7 @@ import {
   safeCssColor,
 } from './core.js';
 
+import { cloudFetchExcalidrawLibrary } from './cloud/cloud-api.js';
 import { insertAtCursor } from './editor.js';
 import { openNote } from './notes.js';
 import { renderPreview } from './markdown.js';
@@ -146,6 +147,14 @@ function dispatchDrawApiReadyDeferred(detail) {
 }
 
 const DRAW_LIBRARY_SETTINGS_KEY = 'drawLibraryItems.v1';
+
+/*
+  Side map { itemId: { name, url, addedAt } } tracking which imported
+  Excalidraw library each item came from. Kept separate from the library
+  items themselves because Excalidraw round-trips items through its own
+  schema and would drop unknown fields — this survives that.
+*/
+const DRAW_LIBRARY_SOURCES_KEY = 'drawLibrarySources.v1';
 
 const DRAW_MOBILE_MQ = window.matchMedia?.('(pointer: coarse), (max-width: 760px)');
 
@@ -489,6 +498,7 @@ function ensureMobileDrawingGate(embed, inlineHost, editable) {
 }
 
 let drawLibraryItems = [];
+let drawLibrarySources = {};
 let drawLibraryLoaded = false;
 
 const saveDrawLibraryItemsDebounced = debounce(async () => {
@@ -496,6 +506,30 @@ const saveDrawLibraryItemsDebounced = debounce(async () => {
     await store.settings.set(DRAW_LIBRARY_SETTINGS_KEY, drawLibraryItems);
   } catch {}
 }, 250);
+
+const saveDrawLibrarySourcesDebounced = debounce(async () => {
+  try {
+    await store.settings.set(DRAW_LIBRARY_SOURCES_KEY, drawLibrarySources);
+  } catch {}
+}, 250);
+
+/*
+  Prunes source entries whose library item no longer exists (e.g. the user
+  deleted it in the Excalidraw panel). Keeps the side map from growing stale.
+*/
+function pruneDrawLibrarySources() {
+  const liveIds = new Set(drawLibraryItems.map((item) => String(item.id)));
+  let changed = false;
+
+  for (const id of Object.keys(drawLibrarySources)) {
+    if (!liveIds.has(id)) {
+      delete drawLibrarySources[id];
+      changed = true;
+    }
+  }
+
+  if (changed) saveDrawLibrarySourcesDebounced();
+}
 
 function normalizeDrawLibraryItem(item, index = 0) {
   if (!item || typeof item !== 'object') return null;
@@ -551,6 +585,15 @@ async function loadDrawLibraryItemsFromSettings() {
     drawLibraryItems = [];
   }
 
+  try {
+    const sources = await store.settings.get(DRAW_LIBRARY_SOURCES_KEY, {});
+    drawLibrarySources = sources && typeof sources === 'object' ? sources : {};
+  } catch {
+    drawLibrarySources = {};
+  }
+
+  pruneDrawLibrarySources();
+
   window.dispatchEvent(new CustomEvent('yanta-draw-library-updated'));
 
   return drawLibraryItems;
@@ -561,10 +604,159 @@ function persistDrawLibraryItems(payload) {
 
   drawLibraryItems = items;
   saveDrawLibraryItemsDebounced();
+  pruneDrawLibrarySources();
 
   window.dispatchEvent(new CustomEvent('yanta-draw-library-updated', {
     detail: { items: listDrawLibraryItems() },
   }));
+}
+
+/*
+  Derives a human-readable library name from a libraries.excalidraw.com URL,
+  e.g. ".../youritjang/stick-figures.excalidrawlib" -> "Stick Figures".
+*/
+function libraryNameFromUrl(rawUrl) {
+  try {
+    const { pathname } = new URL(rawUrl);
+    const slug = pathname
+      .split('/')
+      .pop()
+      .replace(/\.excalidrawlib$/i, '');
+
+    const words = decodeURIComponent(slug)
+      .replace(/[-_]+/g, ' ')
+      .trim();
+
+    if (!words) return 'Excalidraw Library';
+
+    return words.replace(/\b\w/g, (c) => c.toUpperCase());
+  } catch {
+    return 'Excalidraw Library';
+  }
+}
+
+/*
+  Imports an Excalidraw library (.excalidrawlib) from its URL into the Personal
+  Library. Fetched via the YANTA Cloud proxy (CSP + privacy). New items are
+  merged (deduped by id) and tagged with their source library so the image
+  modal and Chat sticker picker can group them.
+
+  An optional `confirm({ sourceName, count })` hook runs after the library is
+  fetched (so it can show the real name/count) and before anything is stored;
+  returning a falsy value cancels the import.
+
+  Returns { added, total, sourceName, cancelled }.
+*/
+export async function importExcalidrawLibraryFromUrl(rawUrl, { confirm } = {}) {
+  const url = String(rawUrl || '').trim();
+  if (!url) throw new Error('Missing library URL.');
+
+  await loadDrawLibraryItemsFromSettings();
+
+  const payload = await cloudFetchExcalidrawLibrary(url);
+
+  const rawItems = Array.isArray(payload?.libraryItems)
+    ? payload.libraryItems
+    : Array.isArray(payload?.library)
+      ? payload.library
+      : [];
+
+  const incoming = normalizeDrawLibraryItems(rawItems);
+  if (!incoming.length) throw new Error('This library has no items.');
+
+  const sourceName = libraryNameFromUrl(url);
+
+  if (typeof confirm === 'function') {
+    const ok = await confirm({ sourceName, count: incoming.length });
+    if (!ok) {
+      return { added: 0, total: incoming.length, sourceName, cancelled: true };
+    }
+  }
+
+  const existingIds = new Set(drawLibraryItems.map((item) => String(item.id)));
+
+  let added = 0;
+
+  for (const item of incoming) {
+    // Stable id keeps re-imports idempotent while still allowing distinct
+    // libraries that happen to reuse plain ids to coexist.
+    const id = existingIds.has(String(item.id))
+      ? `${item.id}-${uid()}`
+      : String(item.id);
+
+    const tagged = { ...item, id };
+
+    drawLibraryItems = [...drawLibraryItems, tagged];
+    existingIds.add(id);
+
+    drawLibrarySources[id] = {
+      name: sourceName,
+      url,
+      addedAt: Date.now(),
+    };
+
+    added += 1;
+  }
+
+  saveDrawLibraryItemsDebounced();
+  saveDrawLibrarySourcesDebounced();
+
+  window.dispatchEvent(new CustomEvent('yanta-draw-library-updated', {
+    detail: { items: listDrawLibraryItems() },
+  }));
+
+  return {
+    added,
+    total: incoming.length,
+    sourceName,
+    cancelled: false,
+  };
+}
+
+/**
+ * Source library metadata ({ name, url } | null) for a library item id.
+ */
+export function drawLibrarySourceForItem(itemId) {
+  const source = drawLibrarySources[String(itemId)];
+  return source ? { ...source } : null;
+}
+
+/**
+ * Groups the Personal Library into sections: one per imported source library,
+ * plus a leading "own drawings" group for hand-made items (source === null).
+ * Returns [{ key, name, url, items }].
+ */
+export function listDrawLibraryGroups() {
+  const own = { key: '', name: '', url: '', items: [] };
+  const bySource = new Map();
+
+  for (const item of listDrawLibraryItems()) {
+    const source = drawLibrarySources[String(item.id)];
+
+    if (!source) {
+      own.items.push(item);
+      continue;
+    }
+
+    const key = source.url || source.name;
+
+    if (!bySource.has(key)) {
+      bySource.set(key, {
+        key,
+        name: source.name || 'Library',
+        url: source.url || '',
+        items: [],
+      });
+    }
+
+    bySource.get(key).items.push(item);
+  }
+
+  const groups = [];
+  if (own.items.length) groups.push(own);
+  groups.push(...bySource.values());
+
+  return groups;
 }
 
 function excalidrawLibraryInitialData(extra = {}) {

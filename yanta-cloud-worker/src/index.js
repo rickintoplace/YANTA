@@ -5445,6 +5445,114 @@ async function handleRssImage(env, req, url, headers) {
 __name(handleRssImage, "handleRssImage");
 
 // ============================================================
+// Excalidraw libraries
+// ============================================================
+
+/*
+  Proxy for Excalidraw's official "Add to Excalidraw" flow. The browser CSP
+  intentionally does not allow libraries.excalidraw.com in connect-src, so
+  the .excalidrawlib JSON is fetched here — this also keeps the user's IP and
+  referrer away from the Excalidraw CDN, matching the RSS proxy's privacy model.
+
+  Only the official Excalidraw libraries host is allowed, so the authenticated
+  proxy cannot be turned into a general-purpose SSRF fetcher.
+*/
+function safeExcalidrawLibraryUrl(raw) {
+  let url;
+  try {
+    url = new URL(String(raw || "").trim());
+  } catch {
+    const err = new Error("Invalid URL");
+    err.status = 400;
+    throw err;
+  }
+  const host = url.hostname.toLowerCase();
+  const allowed = host === "libraries.excalidraw.com";
+  if (url.protocol !== "https:" || !allowed) {
+    const err = new Error("Only libraries.excalidraw.com URLs are allowed");
+    err.status = 400;
+    throw err;
+  }
+  if (!/\.excalidrawlib$/i.test(url.pathname)) {
+    const err = new Error("Not an .excalidrawlib URL");
+    err.status = 400;
+    throw err;
+  }
+  url.username = "";
+  url.password = "";
+  return url.href;
+}
+__name(safeExcalidrawLibraryUrl, "safeExcalidrawLibraryUrl");
+
+async function handleExcalidrawLibrary(env, req, url, headers) {
+  const user = await requireUser(env, req);
+  const targetUrl = safeExcalidrawLibraryUrl(url.searchParams.get("url") || "");
+
+  const cacheKey = new Request(
+    `https://yanta-excalidraw-lib-cache.local/?url=${encodeURIComponent(targetUrl)}`
+  );
+  const cache = caches.default;
+  const cached = await cache.match(cacheKey);
+  if (cached) {
+    return new Response(cached.body, {
+      status: cached.status,
+      headers: {
+        ...headers,
+        "content-type": "application/json; charset=utf-8",
+        "cache-control": "public, max-age=86400"
+      }
+    });
+  }
+
+  const rl = await rateLimit(
+    env,
+    `excalidraw:lib:${user.userId}`,
+    200,
+    24 * 60 * 60 * 1e3
+  );
+  if (!rl.ok) {
+    return json({ error: "excalidraw_library_rate_limited" }, 429, headers);
+  }
+
+  const fetched = await fetchExternal(targetUrl, {
+    accept: "application/json,*/*",
+    maxBytes: 4 * 1024 * 1024,
+    timeoutMs: 1e4,
+  });
+  if (fetched.status < 200 || fetched.status >= 400) {
+    return json({ error: "library_fetch_failed", status: fetched.status }, 502, headers);
+  }
+
+  let payload;
+  try {
+    payload = JSON.parse(new TextDecoder().decode(fetched.bytes));
+  } catch {
+    return json({ error: "invalid_library_file" }, 400, headers);
+  }
+
+  const items = Array.isArray(payload?.libraryItems)
+    ? payload.libraryItems
+    : Array.isArray(payload?.library)
+      ? payload.library
+      : null;
+  if (!items) {
+    return json({ error: "invalid_library_file" }, 400, headers);
+  }
+
+  const res = json(payload, 200, {
+    ...headers,
+    "cache-control": "public, max-age=86400",
+    "x-content-type-options": "nosniff"
+  });
+  try {
+    await cache.put(cacheKey, res.clone());
+  } catch {
+  }
+  return res;
+}
+__name(handleExcalidrawLibrary, "handleExcalidrawLibrary");
+
+// ============================================================
 // Public Shares
 // ============================================================
 
@@ -7767,6 +7875,9 @@ async function route(req, env) {
     }
     if (url.pathname === "/api/rss/search" && req.method === "GET") {
       return handleRssSearch(env, req, url, headers);
+    }
+    if (url.pathname === "/api/excalidraw/library" && req.method === "GET") {
+      return handleExcalidrawLibrary(env, req, url, headers);
     }
     if (url.pathname === "/api/youtube/resolve" && req.method === "GET") {
       return handleYoutubeResolve(env, req, url, headers);

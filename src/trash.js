@@ -16,7 +16,9 @@ import {
     toast,
     actionToast,
   } from './core.js';
-  
+
+  import { t } from './i18n/index.js';
+
   import {
     destroyNoteDoc,
     noteMarkdown,
@@ -72,7 +74,7 @@ import {
   
   export function folderPathNames(folderId) {
     return folderPathIds(folderId)
-      .map((id) => state.folders.get(id)?.name || 'Folder');
+      .map((id) => state.folders.get(id)?.name || t('items.folderFallback'));
   }
   
   export function folderHasTrashedAncestor(folderId) {
@@ -261,7 +263,7 @@ import {
   
     if (!note) return false;
     if (note.aiSession === true || note.type === 'ai-session') {
-      toast('AI Sessions are deleted directly, not moved to Trash.', 'error');
+      toast(t('trash.aiSessionsDirect'), 'error');
       return false;
     }
     if (note.trashed === true) return true;
@@ -304,7 +306,7 @@ import {
   
     if (!folder) return false;
     if (folder.aiSessionRoot === true) {
-      toast('AI Sessions folder is deleted directly, not moved to Trash.', 'error');
+      toast(t('trash.aiSessionsFolderDirect'), 'error');
       return false;
     }
     if (folder.trashed === true) return true;
@@ -391,7 +393,7 @@ import {
     const changed = trashedNoteIds.length + trashedFolderIds.length;
 
     if (changed && !silent) {
-      toast(`Moved ${changed} item${changed === 1 ? '' : 's'} to Trash`, 'success');
+      toast(t('trash.movedToTrash', { count: changed }), 'success');
     }
 
     return {
@@ -423,11 +425,11 @@ import {
     const folderCount = result.folderIds.length;
 
     const parts = [];
-    if (noteCount) parts.push(`${noteCount} note${noteCount === 1 ? '' : 's'}`);
-    if (folderCount) parts.push(`${folderCount} folder${folderCount === 1 ? '' : 's'}`);
+    if (noteCount) parts.push(t('tree.bulk.notesLabel', { count: noteCount }));
+    if (folderCount) parts.push(t('tree.bulk.foldersLabel', { count: folderCount }));
 
-    actionToast(`Moved ${parts.join(' and ')} to Trash`, {
-      actionLabel: 'Undo',
+    actionToast(t('trash.movedSummary', { summary: parts.join(t('trash.summarySep')) }), {
+      actionLabel: t('common.undo'),
       onAction: async () => {
         for (const noteId of result.noteIds) {
           await restoreNoteFromTrash(noteId, { source: `${source}-undo`, silent: true });
@@ -438,7 +440,7 @@ import {
         }
 
         toast(
-          `Restored ${result.changed} item${result.changed === 1 ? '' : 's'}`,
+          t('trash.restoredCount', { count: result.changed }),
           'success'
         );
       },
@@ -488,7 +490,7 @@ import {
     });
 
     if (!silent) {
-      toast('Note restored', 'success');
+      toast(t('trash.noteRestored'), 'success');
     }
 
     return true;
@@ -553,7 +555,7 @@ import {
     });
 
     if (!silent) {
-      toast('Folder restored', 'success');
+      toast(t('trash.folderRestored'), 'success');
     }
 
     return true;
@@ -669,7 +671,7 @@ import {
       }
     }
   
-    toast(`Trash emptied${count ? ` · ${count} root item${count === 1 ? '' : 's'}` : ''}`, 'success');
+    toast(count ? t('trash.emptiedWithCount', { count }) : t('trash.emptied'), 'success');
   
     await emitTrashChanged({
       action: 'empty-trash',

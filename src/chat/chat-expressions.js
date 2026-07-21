@@ -21,6 +21,7 @@ import {
 
 import {
   listLibraryStickerItems,
+  listLibraryStickerGroups,
   listUserPackStickers,
   sendStickerMessage,
   stickerForLibraryItem,
@@ -333,6 +334,7 @@ async function renderStickerTab(panel, {
   host.replaceChildren();
 
   const libraryItems = await listLibraryStickerItems();
+  const libraryGroups = await listLibraryStickerGroups();
   const packStickers = client ? listUserPackStickers(client) : [];
   const linkedIds = new Set(packStickers.map((s) => s.libraryItemId).filter(Boolean));
 
@@ -350,16 +352,19 @@ async function renderStickerTab(panel, {
     closePanel(panel);
   };
 
-  if (libraryItems.length) {
+  // Own drawings first (empty group name), then one section per imported
+  // Excalidraw library — keeps a large imported pack from burying the user's
+  // own stickers.
+  for (const group of libraryGroups) {
     host.append(el('h5', {
       class: 'yanta-chat-expressions-heading',
-    }, 'Personal Library'));
+    }, group.name || 'Personal Library'));
 
     const grid = el('div', {
       class: 'yanta-chat-sticker-grid',
     });
 
-    for (const item of libraryItems) {
+    for (const item of group.items) {
       const tile = stickerTile({
         title: item.name || 'Sticker',
         onSend: async () => {

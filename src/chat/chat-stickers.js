@@ -18,6 +18,7 @@
 
 import {
   listDrawLibraryItemsAsync,
+  listDrawLibraryGroups,
   drawLibraryItemPngBlob,
 } from '../draw.js';
 
@@ -74,6 +75,16 @@ export function listUserPackStickers(client) {
  */
 export function listLibraryStickerItems() {
   return listDrawLibraryItemsAsync();
+}
+
+/**
+ * Like listLibraryStickerItems(), but grouped by source library (own drawings
+ * first, then one group per imported Excalidraw library). Loads the library
+ * first so callers get populated groups.
+ */
+export async function listLibraryStickerGroups() {
+  await listDrawLibraryItemsAsync();
+  return listDrawLibraryGroups();
 }
 
 async function saveUserEmotesImages(client, images) {

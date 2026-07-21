@@ -1,4 +1,5 @@
 import { lucide } from './core.js';
+import { t } from './i18n/index.js';
 
 const DEFAULT_ICON_SIZE = 20;
 
@@ -16,40 +17,40 @@ export function createSidebarFootActions({
       id: 'btn-palette',
       key: 'palette',
       icon: 'keyboard',
-      label: 'Command palette',
-      title: 'Command palette (Ctrl+P)',
+      label: t('sidebar.commandPalette'),
+      title: t('sidebar.commandPaletteTitle'),
       onClick: () => openPalette?.('commands'),
     },
     {
       id: 'btn-chat',
       key: 'chat',
       icon: 'messages-square',
-      label: 'Chat',
-      title: 'Chat',
+      label: t('sidebar.chat'),
+      title: t('sidebar.chat'),
       onClick: () => openChat?.(),
     },
     {
       id: 'btn-graph',
       key: 'graph',
       icon: 'network',
-      label: 'Graph view',
-      title: 'Graph view (Ctrl+G)',
+      label: t('sidebar.graphView'),
+      title: t('sidebar.graphViewTitle'),
       onClick: () => openGraph?.(),
     },
     {
       id: 'btn-calendar',
       key: 'calendar',
       icon: 'calendar-days',
-      label: 'Calendar',
-      title: 'Calendar',
+      label: t('sidebar.calendar'),
+      title: t('sidebar.calendar'),
       onClick: () => openCalendar?.(),
     },
     {
       id: 'btn-sources',
       key: 'sources',
       icon: 'rss',
-      label: 'Sources',
-      title: 'Sources (RSS)',
+      label: t('sidebar.sources'),
+      title: t('sidebar.sourcesTitle'),
       onClick: () => openSources?.(),
     },
     {
@@ -65,8 +66,8 @@ export function createSidebarFootActions({
       key: 'more',
       icon: 'ellipsis-vertical',
       iconSize: 20,
-      label: 'More options',
-      title: 'More options',
+      label: t('sidebar.moreOptions'),
+      title: t('sidebar.moreOptions'),
       wrapperClass: 'sidebar-foot-menu-wrapper',
       closeMobile: false,
       onClick: (event) => openMore?.(event.currentTarget),
@@ -201,7 +202,7 @@ function menuItemFromSidebarFootAction(action, {
   afterAction,
 } = {}) {
   return {
-    label: action.menuLabel || action.label || action.title || 'Action',
+    label: action.menuLabel || action.label || action.title || t('sidebar.actionFallback'),
     action: async () => {
       await action.onClick?.();
 

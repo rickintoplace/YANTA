@@ -6,6 +6,7 @@
 // ============================================================
 
 import { $, uid, state, store, toast, safeFilename, downloadBlob } from './core.js';
+import { t } from './i18n/index.js';
 import { getNoteDoc, noteMarkdown, listDrawingsForNote, listCitationsForNote, setDrawing, normalizeDrawingScene } from './yjs.js';
 import { rebuildWikilinkIndex } from './notes.js';
 import { renderTree } from './tree.js';
@@ -75,7 +76,7 @@ export async function exportNoteAsMd(note) {
   const body = noteMarkdown(note.id);
   const md = noteToFrontmatter(note) + body;
   downloadBlob(new Blob([md], { type: 'text/markdown' }), safeFilename(note.title) + '.md');
-  toast('Exported "' + (note.title || 'note') + '.md"', 'success');
+  toast(t('io.exportedMd', { name: note.title || t('io.noteFallback') }), 'success');
 }
 
 export async function exportBundle() {
@@ -95,7 +96,7 @@ export async function exportBundle() {
   }
   const bundle = { yanta: 2, exported: new Date().toISOString(), notes, folders: [...state.folders.values()], images };
   downloadBlob(new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' }), `yanta-${new Date().toISOString().slice(0, 10)}.json`);
-  toast('Exported full bundle', 'success');
+  toast(t('io.exportedBundle'), 'success');
 }
 
 export async function exportEveryNoteMd() {
@@ -103,14 +104,14 @@ export async function exportEveryNoteMd() {
     .filter((n) => !isNoteInTrash(n));
 
   if (!notes.length) {
-    toast('Nothing to export', 'error');
+    toast(t('io.nothingToExport'), 'error');
     return;
   }
 
   const ok = await yantaConfirm({
-    title: 'Export all notes?',
-    message: `Download ${notes.length} Markdown file${notes.length === 1 ? '' : 's'}?\n\nYour notes are not changed.`,
-    confirmLabel: 'Download files',
+    title: t('io.exportAllTitle'),
+    message: t('io.exportAllMessage', { count: notes.length }),
+    confirmLabel: t('io.downloadFiles'),
     icon: 'download',
   });
 
@@ -133,7 +134,7 @@ export async function exportEveryNoteMd() {
     await new Promise((r) => setTimeout(r, 80));
   }
 
-  toast('Exported ' + notes.length + ' note(s)', 'success');
+  toast(t('io.exportedNotes', { count: notes.length }), 'success');
 }
 
 function blobToDataURL(blob) {
@@ -378,7 +379,7 @@ export async function importItems(items) {
             : fileTime,
         };
 
-        note.title = title || note.title || 'Untitled';
+        note.title = title || note.title || t('note.untitled');
         note.type = meta.type || note.type || 'markdown';
         note.folderId = folderId || null;
         note.tags = Array.isArray(meta.tags) ? meta.tags : note.tags || [];
@@ -413,12 +414,12 @@ export async function importItems(items) {
   rebuildWikilinkIndex();
   renderTree();
   const parts = [];
-  if (noteCount) parts.push(`${noteCount} note${noteCount === 1 ? '' : 's'}`);
-  if (bundleCount) parts.push(`${bundleCount} bundle${bundleCount === 1 ? '' : 's'}`);
-  if (zipCount) parts.push(`${zipCount} ZIP${zipCount === 1 ? '' : 's'}`);
-  if (skipped) parts.push(`${skipped} skipped`);
-  if (failed) parts.push(`${failed} failed`);
-  if (!(zipCount && !noteCount && !bundleCount)) toast('Imported ' + (parts.join(', ') || 'nothing'), failed ? 'error' : 'success');
+  if (noteCount) parts.push(t('io.countNotes', { count: noteCount }));
+  if (bundleCount) parts.push(t('io.countBundles', { count: bundleCount }));
+  if (zipCount) parts.push(t('io.countZips', { count: zipCount }));
+  if (skipped) parts.push(t('io.countSkipped', { count: skipped }));
+  if (failed) parts.push(t('io.countFailed', { count: failed }));
+  if (!(zipCount && !noteCount && !bundleCount)) toast(t('io.imported', { summary: parts.join(', ') || t('io.importedNothing') }), failed ? 'error' : 'success');
 }
 
 export async function importFiles(files) { return importItems(files.map((f) => ({ file: f, pathArr: [] }))); }
@@ -635,7 +636,7 @@ export async function exportAsZip() {
   };
   entries.push({ path: '_yanta-manifest.json', data: _enc.encode(JSON.stringify(manifest, null, 2)) });
   downloadBlob(makeZip(entries), `yanta-${new Date().toISOString().slice(0, 10)}.zip`);
-  toast(`Exported ${entries.length} files`, 'success');
+  toast(t('io.exportedFiles', { count: entries.length }), 'success');
 }
 
 const _imageExtToMime = { jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', webp: 'image/webp', gif: 'image/gif', svg: 'image/svg+xml', bin: 'application/octet-stream' };
@@ -646,7 +647,7 @@ export async function importZipBlob(blob) {
   try {
     entries = await readZip(blob);
   } catch (e) {
-    toast('ZIP read failed: ' + e.message, 'error');
+    toast(t('io.zipReadFailed', { error: e.message }), 'error');
     return;
   }
 
@@ -814,13 +815,11 @@ export async function importZipBlob(blob) {
   rebuildWikilinkIndex();
   renderTree();
 
-  toast(
-    `Imported ${noteCount} note${noteCount === 1 ? '' : 's'}` +
-      (drawingCount ? ` + ${drawingCount} drawing${drawingCount === 1 ? '' : 's'}` : '') +
-      (remap.size ? ` + ${remap.size} image${remap.size === 1 ? '' : 's'}` : '') +
-      ' from ZIP',
-    'success'
-  );
+  let summary = t('io.countNotes', { count: noteCount });
+  if (drawingCount) summary += ' + ' + t('io.countDrawings', { count: drawingCount });
+  if (remap.size) summary += ' + ' + t('io.countImages', { count: remap.size });
+
+  toast(t('io.importedFromZip', { summary }), 'success');
 }
 
 export async function walkEntry(entry, pathArr = []) {
@@ -845,24 +844,24 @@ export function openExportMenu(anchorBtn, showMenuFn) {
 
   showMenuFn(r.left, r.bottom + 4, [
     {
-      label: 'Back up YANTA (.yanta, encrypted)',
+      label: t('io.menu.backup'),
       action: async () => {
         const { exportSyncCapsule } = await import('./sync2/capsule.js');
         await exportSyncCapsule();
       },
     },
     {
-      label: 'Save sync key…',
+      label: t('io.menu.saveSyncKey'),
       action: async () => {
         const { copySyncCapsuleRecoveryKey } = await import('./sync2/capsule.js');
         await copySyncCapsuleRecoveryKey();
       },
     },
     'hr',
-    { label: 'Export readable folder ZIP (.zip)', action: exportAsZip },
+    { label: t('io.menu.exportZip'), action: exportAsZip },
     'hr',
-    { label: 'Export current note (.md)', action: () => note && exportNoteAsMd(note) },
-    { label: 'Export every note as .md files', action: exportEveryNoteMd },
-    { label: 'Export legacy full bundle (.json + base64 images)', action: exportBundle },
+    { label: t('io.menu.exportCurrent'), action: () => note && exportNoteAsMd(note) },
+    { label: t('io.menu.exportEvery'), action: exportEveryNoteMd },
+    { label: t('io.menu.exportLegacy'), action: exportBundle },
   ]);
 }

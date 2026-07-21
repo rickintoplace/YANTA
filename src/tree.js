@@ -5,6 +5,8 @@
 
 import { $, el, uid, state, store, lucide, safeCssColor, toast, actionToast, isSpaceMountedFolder } from './core.js';
 
+import { t } from './i18n/index.js';
+
 import {
   openNote,
   newNote,
@@ -988,7 +990,7 @@ const pinned = visible
 
 if (pinned.length) {
   const sec = el('div', { class: 'tree-section tree-section-pinned' });
-  sec.append(el('div', { class: 'tree-section-title' }, 'Pinned'));
+  sec.append(el('div', { class: 'tree-section-title' }, t('tree.section.pinned')));
 
   for (const n of pinned) {
     /*
@@ -1021,7 +1023,7 @@ if (pinned.length) {
 
   if (sharedFolders.length || sharedRootNotes.length) {
     const sec = el('div', { class: 'tree-section tree-section-shared' });
-    sec.append(el('div', { class: 'tree-section-title' }, 'Shared with me'));
+    sec.append(el('div', { class: 'tree-section-title' }, t('tree.section.sharedWithMe')));
 
     for (const n of sharedRootNotes) {
       sec.append(noteRow(n, 0));
@@ -1041,10 +1043,10 @@ if (pinned.length) {
   const ftitle = el(
     'div',
     { class: 'tree-section-title' },
-    'Root',
+    t('tree.section.root'),
     el('button', {
       class: 'icon-btn',
-      title: 'New folder',
+      title: t('tree.newFolder'),
       onclick: () => newFolder(null),
       style: { width: '20px', height: '20px' },
     }, '+')
@@ -1094,7 +1096,7 @@ if (pinned.length) {
   }
 
   if (!topFolders.length && !orphanNotes.length) {
-    folderSec.append(el('div', { class: 'tree-empty' }, q || filterTag ? 'No matches' : 'No notes yet'));
+    folderSec.append(el('div', { class: 'tree-empty' }, q || filterTag ? t('tree.noMatches') : t('tree.noNotesYet')));
   }
 
   root.append(folderSec);
@@ -1111,7 +1113,7 @@ if (pinned.length) {
 
   if (archivedFolders.length || archivedRootNotes.length) {
     const archivedSec = el('div', { class: 'tree-section tree-section-archived' });
-    archivedSec.append(el('div', { class: 'tree-section-title' }, 'Archived'));
+    archivedSec.append(el('div', { class: 'tree-section-title' }, t('tree.section.archived')));
 
     for (const n of archivedRootNotes) {
       archivedSec.append(noteRow(n));
@@ -1149,7 +1151,7 @@ if (pinned.length) {
 
   if (systemFolders.length || systemRootNotes.length) {
     const systemSec = el('div', { class: 'tree-section tree-section-system' });
-    systemSec.append(el('div', { class: 'tree-section-title' }, 'System'));
+    systemSec.append(el('div', { class: 'tree-section-title' }, t('tree.section.system')));
 
     for (const n of systemRootNotes) {
       systemSec.append(noteRow(n));
@@ -1223,8 +1225,8 @@ async function scheduleSemanticTreeResults(root, q, visibleIds) {
 
   const sec = el('div', { class: 'tree-section tree-section-semantic' });
 
-  const title = el('div', { class: 'tree-section-title' }, 'Related matches');
-  title.title = 'Found by meaning (on-device semantic search)';
+  const title = el('div', { class: 'tree-section-title' }, t('tree.section.relatedMatches'));
+  title.title = t('tree.section.relatedMatchesTitle');
   sec.append(title);
 
   for (const { note } of rows) {
@@ -1386,7 +1388,7 @@ async function undoMoveToFolder(noteOrigins = [], folderOrigins = []) {
   emitTreeStructureChanged('tree-bulk-move-undo', {});
   renderTree();
 
-  toast(`Move undone`, 'success');
+  toast(t('tree.moveUndone'), 'success');
 }
 
 async function moveNotesToFolder(noteIds = [], targetFolderId = null, source = 'tree-drop') {
@@ -1480,7 +1482,7 @@ async function handleTreeDropToFolder(e, {
   e.stopPropagation();
 
   if (targetFolderId === AI_SESSION_IDS.rootFolder) {
-    toast('AI Sessions cannot contain manually moved items.', 'error');
+    toast(t('tree.aiSessionsNoManualItems'), 'error');
     return;
   }
 
@@ -1521,7 +1523,7 @@ async function handleTreeDropToFolder(e, {
 
   if (skipped) {
     toast(
-      `Moved ${moved}; skipped ${skipped} invalid folder move${skipped === 1 ? '' : 's'}`,
+      t('tree.movedSkipped', { count: skipped, moved, skipped }),
       'error'
     );
   }
@@ -1596,7 +1598,7 @@ function folderRow(f, visibleNotes, depth, {
       if (lockedAiSessionsFolder) {
         e.preventDefault();
         e.stopPropagation();
-        toast('AI Sessions cannot contain manually moved items.', 'error');
+        toast(t('tree.aiSessionsNoManualItems'), 'error');
         return;
       }
 
@@ -1642,14 +1644,14 @@ function folderRow(f, visibleNotes, depth, {
   icon.classList.add('tree-folder-icon');
   row.append(icon);
 
-  row.append(el('span', { class: 'label' }, f.name || 'Folder'));
+  row.append(el('span', { class: 'label' }, f.name || t('items.folderFallback')));
 
     const childCount = childFolders.length + childNotes.length;
 
   if (childCount > 0) {
     row.append(el('span', {
       class: 'tree-folder-count',
-      title: `${childCount} item${childCount === 1 ? '' : 's'}`,
+      title: t('tree.itemCount', { count: childCount }),
     }, String(childCount)));
   }
 
@@ -1657,8 +1659,8 @@ function folderRow(f, visibleNotes, depth, {
     const badge = el('span', {
       class: 'public-share-dot',
       title: f.spaceRole === 'write'
-        ? 'Shared workspace · you can edit'
-        : 'Shared workspace · read-only',
+        ? t('tree.folder.sharedWrite')
+        : t('tree.folder.sharedRead'),
     });
 
     badge.innerHTML = lucide(f.spaceRole === 'write' ? 'pencil' : 'eye', 11);
@@ -1666,7 +1668,7 @@ function folderRow(f, visibleNotes, depth, {
   } else {
     for (const spaceSession of state.spaces.values()) {
       if (spaceSession.record?.rootFolderId === f.id && spaceSession.role === 'owner') {
-        row.append(el('span', { class: 'live-dot', title: 'Shared as live workspace' }));
+        row.append(el('span', { class: 'live-dot', title: t('tree.folder.liveWorkspace') }));
         break;
       }
     }
@@ -1675,7 +1677,7 @@ function folderRow(f, visibleNotes, depth, {
   if (!lockedAiSessionsFolder) {
     row.append(el('span', {
       class: 'menu-trigger',
-      title: 'Add note',
+      title: t('tree.addNote'),
       onclick: (e) => {
         e.stopPropagation();
         newNote(f.id);
@@ -1708,7 +1710,7 @@ function folderRow(f, visibleNotes, depth, {
     }
 
     if (!childFolders.length && !childNotes.length) {
-      kids.append(el('div', { class: 'tree-empty' }, 'Empty'));
+      kids.append(el('div', { class: 'tree-empty' }, t('tree.empty')));
     }
 
     wrap.append(kids);
@@ -1720,7 +1722,7 @@ function folderRow(f, visibleNotes, depth, {
 function trashItemDeletedLabel(item) {
   const ts = Number(item?.deletedAt || 0);
 
-  if (!ts) return 'In Trash';
+  if (!ts) return t('tree.trash.inTrash');
 
   try {
     return formatCalendarDateTime(ts, {
@@ -1775,20 +1777,20 @@ function trashRootFolderRow(trashItems, totalTrashCount) {
 
       showMenu(e.clientX, e.clientY, [
         {
-          label: expanded ? 'Collapse Trash' : 'Expand Trash',
+          label: expanded ? t('tree.trash.collapse') : t('tree.trash.expand'),
           icon: expanded ? 'chevron-up' : 'chevron-down',
           action: toggleTrashExpanded,
         },
         'hr',
         {
-          label: 'Empty Trash',
+          label: t('tree.trash.empty'),
           icon: 'shredder',
           danger: true,
           action: async () => {
             const ok = await yantaConfirm({
-              title: 'Empty Trash?',
-              message: `Permanently delete ${totalTrashCount} item${totalTrashCount === 1 ? '' : 's'}?\n\nThis cannot be undone.`,
-              confirmLabel: 'Empty Trash',
+              title: t('tree.trash.emptyConfirmTitle'),
+              message: t('tree.trash.emptyConfirmMessage', { count: totalTrashCount }),
+              confirmLabel: t('tree.trash.empty'),
               icon: 'shredder',
               danger: true,
             });
@@ -1851,11 +1853,11 @@ function trashRootFolderRow(trashItems, totalTrashCount) {
   icon.classList.add('tree-folder-icon', 'tree-trash-root-icon');
   row.append(icon);
 
-  row.append(el('span', { class: 'label' }, 'Trash'));
+  row.append(el('span', { class: 'label' }, t('tree.section.trash')));
 
   row.append(el('span', {
     class: 'tree-folder-count',
-    title: `${totalTrashCount} item${totalTrashCount === 1 ? '' : 's'} in Trash`,
+    title: t('tree.trash.countInTrash', { count: totalTrashCount }),
   }, String(totalTrashCount)));
 
   wrap.append(row);
@@ -1872,7 +1874,7 @@ function trashRootFolderRow(trashItems, totalTrashCount) {
     }
 
     if (!trashItems.folders.length && !trashItems.notes.length) {
-      kids.append(el('div', { class: 'tree-empty' }, 'Trash is empty'));
+      kids.append(el('div', { class: 'tree-empty' }, t('tree.trash.isEmpty')));
     }
 
     wrap.append(kids);
@@ -1921,22 +1923,22 @@ function trashNoteRow(note, depth = 0) {
 
       showMenu(e.clientX, e.clientY, [
         {
-          label: 'Restore',
+          label: t('tree.trash.restore'),
           icon: 'undo-2',
           action: () => restoreNoteFromTrash(note.id),
         },
         {
-          label: 'Restore to folder…',
+          label: t('tree.trash.restoreToFolder'),
           icon: 'folder-input',
           action: async () => {
             const folderId = await yantaFolderPicker({
-              title: 'Restore note to folder',
+              title: t('tree.trash.restoreNoteTitle'),
               allowNone: true,
-              noneLabel: 'Home / no folder',
+              noneLabel: t('tree.trash.homeNoFolder'),
               isDisabled(folder) {
                 return isFolderInTrash(folder);
               },
-              disabledHint: 'Folder is in Trash',
+              disabledHint: t('tree.trash.folderInTrash'),
             });
 
             if (folderId !== undefined) {
@@ -1948,14 +1950,14 @@ function trashNoteRow(note, depth = 0) {
         },
         'hr',
         {
-          label: 'Delete permanently',
+          label: t('tree.trash.deletePermanently'),
           icon: 'shredder',
           danger: true,
           action: async () => {
             const ok = await yantaConfirm({
-              title: 'Delete permanently?',
-              message: `Permanently delete "${note.title || 'Untitled'}"?\n\nThis cannot be undone.`,
-              confirmLabel: 'Delete permanently',
+              title: t('tree.trash.deleteNoteConfirmTitle'),
+              message: t('tree.trash.deleteNoteConfirmMessage', { title: note.title || t('note.untitled') }),
+              confirmLabel: t('tree.trash.deletePermanently'),
               danger: true,
             });
 
@@ -1970,7 +1972,7 @@ function trashNoteRow(note, depth = 0) {
       if (!isSelected(key)) setOnlySelection(key);
 
       e.dataTransfer.setData('text/yanta-note', note.id);
-      e.dataTransfer.setData('text/plain', note.title || 'Untitled');
+      e.dataTransfer.setData('text/plain', note.title || t('note.untitled'));
       e.dataTransfer.effectAllowed = 'move';
     },
   });
@@ -1983,7 +1985,7 @@ function trashNoteRow(note, depth = 0) {
   }
 
   row.append(itemIcon(note.icon || (note.type === 'list' ? 'list' : 'file'), note.color));
-  row.append(el('span', { class: 'label' }, note.title || 'Untitled'));
+  row.append(el('span', { class: 'label' }, note.title || t('note.untitled')));
   row.append(el('span', { class: 'tree-trash-meta' }, trashItemDeletedLabel(note)));
 
   return row;
@@ -2038,18 +2040,18 @@ function trashFolderRow(folder, depth = 0) {
 
       showMenu(e.clientX, e.clientY, [
         {
-          label: 'Restore folder',
+          label: t('tree.trash.restoreFolder'),
           icon: 'undo-2',
           action: () => restoreFolderFromTrash(folder.id),
         },
         {
-          label: 'Restore to folder…',
+          label: t('tree.trash.restoreToFolder'),
           icon: 'folder-input',
           action: async () => {
             const parentId = await yantaFolderPicker({
-              title: 'Restore folder to',
+              title: t('tree.trash.restoreFolderTitle'),
               allowNone: true,
-              noneLabel: 'Home / root',
+              noneLabel: t('tree.trash.homeRoot'),
               isDisabled(target) {
                 return (
                   isFolderInTrash(target) ||
@@ -2057,7 +2059,7 @@ function trashFolderRow(folder, depth = 0) {
                   isAncestor(folder.id, target.id)
                 );
               },
-              disabledHint: 'Invalid restore target',
+              disabledHint: t('tree.trash.invalidRestoreTarget'),
             });
 
             if (parentId !== undefined) {
@@ -2069,13 +2071,13 @@ function trashFolderRow(folder, depth = 0) {
         },
         'hr',
         {
-          label: 'Delete permanently…',
+          label: t('tree.trash.deleteFolderEllipsis'),
           danger: true,
           action: async () => {
             const ok = await yantaConfirm({
-              title: 'Delete folder permanently?',
-              message: `Permanently delete "${folder.name || 'Folder'}" and everything inside?\n\nThis cannot be undone.`,
-              confirmLabel: 'Delete permanently',
+              title: t('tree.trash.deleteFolderConfirmTitle'),
+              message: t('tree.trash.deleteFolderConfirmMessage', { name: folder.name || t('items.folderFallback') }),
+              confirmLabel: t('tree.trash.deletePermanently'),
               danger: true,
             });
 
@@ -2103,7 +2105,7 @@ function trashFolderRow(folder, depth = 0) {
   icon.classList.add('tree-folder-icon');
   row.append(icon);
 
-  row.append(el('span', { class: 'label' }, folder.name || 'Folder'));
+  row.append(el('span', { class: 'label' }, folder.name || t('items.folderFallback')));
   row.append(el('span', { class: 'tree-trash-meta' }, trashItemDeletedLabel(folder)));
 
   wrap.append(row);
@@ -2128,7 +2130,7 @@ function trashFolderRow(folder, depth = 0) {
     }
 
     if (!childFolders.length && !childNotes.length) {
-      kids.append(el('div', { class: 'tree-empty' }, 'Empty'));
+      kids.append(el('div', { class: 'tree-empty' }, t('tree.empty')));
     }
 
     wrap.append(kids);
@@ -2238,7 +2240,7 @@ function noteRow(n, depth = 0, {
       // text/yanta-note enables intra-app folder moves & wikilink-on-drop;
       // text/plain so a drop onto a foreign target still gets the title.
       e.dataTransfer.setData('text/yanta-note', n.id);
-      e.dataTransfer.setData('text/plain', n.title || 'Untitled');
+      e.dataTransfer.setData('text/plain', n.title || t('note.untitled'));
       e.dataTransfer.effectAllowed = 'copyMove';
     },
     ondragover: (e) => {
@@ -2289,7 +2291,7 @@ function noteRow(n, depth = 0, {
   }
 
   row.append(itemIcon(n.icon || (n.type === 'list' ? 'list' : 'file'), n.color));
-  row.append(el('span', { class: 'label' }, n.title || 'Untitled'));
+  row.append(el('span', { class: 'label' }, n.title || t('note.untitled')));
 
   /*
     In der Pinned-Section ist die Note nur ein Shortcut.
@@ -2301,8 +2303,8 @@ function noteRow(n, depth = 0, {
 
     row.append(el('span', {
       class: 'tree-note-location',
-      title: path || folder?.name || 'Folder',
-    }, folder?.name || 'Folder'));
+      title: path || folder?.name || t('items.folderFallback'),
+    }, folder?.name || t('items.folderFallback')));
   }
 
   // Per-note sync status dot
@@ -2317,15 +2319,15 @@ function noteRow(n, depth = 0, {
   }
 
   if (state.liveShares.has(n.id)) {
-    row.append(el('span', { class: 'live-dot', title: 'Live shared' }));
+    row.append(el('span', { class: 'live-dot', title: t('tree.note.liveShared') }));
   }
 
   if (n.spaceId) {
     const badge = el('span', {
       class: 'public-share-dot',
       title: n.spaceRole === 'write'
-        ? 'Shared with you · can edit'
-        : 'Shared with you · read-only',
+        ? t('tree.note.sharedWithYouWrite')
+        : t('tree.note.sharedWithYouRead'),
     });
 
     badge.innerHTML = lucide(n.spaceRole === 'write' ? 'pencil' : 'eye', 11);
@@ -2333,7 +2335,7 @@ function noteRow(n, depth = 0, {
   } else {
     for (const spaceSession of state.spaces.values()) {
       if (spaceSession.noteId === n.id && spaceSession.role === 'owner') {
-        row.append(el('span', { class: 'live-dot', title: 'Live share active' }));
+        row.append(el('span', { class: 'live-dot', title: t('tree.note.liveShareActive') }));
         break;
       }
     }
@@ -2342,7 +2344,7 @@ function noteRow(n, depth = 0, {
   if (isPublicShareActive(publicShareStateForNote(n.id))) {
     const publicDot = el('span', {
       class: 'public-share-dot',
-      title: 'Public link active',
+      title: t('tree.note.publicLinkActive'),
     });
 
     publicDot.innerHTML = lucide('share-2', 11);
@@ -2350,7 +2352,7 @@ function noteRow(n, depth = 0, {
   }
   
   if (n.pinned && !pinnedMirror) {
-    row.append(el('span', { class: 'pin', title: 'Pinned' }, '●'));
+    row.append(el('span', { class: 'pin', title: t('tree.note.pinned') }, '●'));
   }
 
   return row;
@@ -2380,10 +2382,10 @@ function draggedFolderIds(draggedId) {
 
 function statusLabel(s) {
   return {
-    local: 'Local changes',
-    remote: 'Remote changes',
-    syncing: 'Syncing…',
-    conflict: 'Conflict',
+    local: t('tree.status.local'),
+    remote: t('tree.status.remote'),
+    syncing: t('tree.status.syncing'),
+    conflict: t('tree.status.conflict'),
   }[s] || s;
 }
 
@@ -2451,9 +2453,9 @@ function renameTreeNote(noteId) {
   if (!note || !anchor) return;
 
   inlineTextEdit(anchor, {
-    initial: note.title || 'Untitled',
-    placeholder: 'Note title',
-    emptyFallback: 'Untitled',
+    initial: note.title || t('note.untitled'),
+    placeholder: t('tree.note.titlePlaceholder'),
+    emptyFallback: t('note.untitled'),
 
     onCommit: async (value) => {
       return await renameNoteById(noteId, value);
@@ -2468,9 +2470,9 @@ function renameTreeFolder(folderId) {
   if (!folder || !anchor) return;
 
   inlineTextEdit(anchor, {
-    initial: folder.name || 'Folder',
-    placeholder: 'Folder name',
-    emptyFallback: 'Folder',
+    initial: folder.name || t('items.folderFallback'),
+    placeholder: t('tree.folder.namePlaceholder'),
+    emptyFallback: t('items.folderFallback'),
 
     onCommit: async (value) => {
       return await renameFolderById(folderId, value);
@@ -2615,7 +2617,7 @@ function noteMenu(e, n) {
   if (isAiSessionNote(n)) {
     showMenu(e.clientX, e.clientY, [
       {
-        label: 'Open AI session',
+        label: t('tree.menu.openAiSession'),
         icon: 'messages-square',
         action: () => {
           window.dispatchEvent(new CustomEvent('yanta-open-ai-session', {
@@ -2626,20 +2628,20 @@ function noteMenu(e, n) {
         },
       },
       {
-        label: 'Rename…',
+        label: t('tree.menu.rename'),
         icon: 'pencil',
         action: () => renameTreeNote(n.id),
       },
       'hr',
       {
-        label: 'Delete AI session permanently',
+        label: t('tree.menu.deleteAiSession'),
         icon: 'shredder',
         danger: true,
         action: async () => {
           const ok = await yantaConfirm({
-            title: 'Delete AI session?',
-            message: `Permanently delete "${n.title || 'AI Session'}"?\n\nThis will not go to Trash.`,
-            confirmLabel: 'Delete permanently',
+            title: t('tree.menu.deleteAiSessionConfirmTitle'),
+            message: t('tree.menu.deleteAiSessionConfirmMessage', { title: n.title || t('tree.menu.aiSessionFallback') }),
+            confirmLabel: t('tree.trash.deletePermanently'),
             danger: true,
           });
 
@@ -2657,7 +2659,7 @@ function noteMenu(e, n) {
   
   showMenu(e.clientX, e.clientY, [
     {
-      label: n.pinned ? 'Unpin' : 'Pin',
+      label: n.pinned ? t('tree.menu.unpin') : t('tree.menu.pin'),
       action: async () => {
         n.pinned = !n.pinned;
         n.updated = Date.now();
@@ -2671,16 +2673,16 @@ function noteMenu(e, n) {
       },
     },
     {
-      label: 'Icon & color…',
+      label: t('tree.menu.iconColor'),
       action: () => editItemsIconColor([noteKey(n.id)]),
     },
     {
-      label: 'Rename…',
+      label: t('tree.menu.rename'),
       action: () => renameTreeNote(n.id),
     },
     'hr',
     {
-      label: n.spaceId ? 'Shared note…' : 'Share note…',
+      label: n.spaceId ? t('tree.menu.sharedNote') : t('tree.menu.shareNote'),
       icon: 'users',
       action: async () => {
         const { openUnifiedShareModal } = await import('./public-share/public-share-ui.js');
@@ -2689,29 +2691,29 @@ function noteMenu(e, n) {
     },
     'hr',
     {
-      label: n.archived ? 'Unarchive' : 'Archive',
+      label: n.archived ? t('tree.menu.unarchive') : t('tree.menu.archive'),
       action: async () => {
         const nowArchived = !n.archived;
 
         await setNoteArchived(n, nowArchived);
 
-        actionToast(nowArchived ? 'Note archived' : 'Note unarchived', {
-          actionLabel: 'Undo',
+        actionToast(nowArchived ? t('tree.menu.noteArchived') : t('tree.menu.noteUnarchived'), {
+          actionLabel: t('common.undo'),
           onAction: () => setNoteArchived(n, !nowArchived),
         });
       },
     },
     {
-      label: 'Move to folder…',
+      label: t('tree.menu.moveToFolder'),
       action: () => moveSelectedToFolder([noteKey(n.id)]),
     },
     {
-      label: 'Duplicate',
+      label: t('tree.menu.duplicate'),
       action: () => duplicateNote(n),
     },
     'hr',
     {
-      label: 'Move to Trash',
+      label: t('tree.menu.moveToTrash'),
       danger: true,
       action: async () => {
         await trashItemsWithUndo({
@@ -2728,14 +2730,14 @@ function folderMenu(e, f) {
   if (isAiSessionsRootFolder(f)) {
     showMenu(e.clientX, e.clientY, [
       {
-        label: 'Delete AI Sessions permanently',
+        label: t('tree.menu.deleteAiSessions'),
         icon: 'shredder',
         danger: true,
         action: async () => {
           const ok = await yantaConfirm({
-            title: 'Delete AI Sessions?',
-            message: 'Permanently delete the AI Sessions folder and all saved AI chats?\n\nThis will not go to Trash. A fresh AI Sessions folder will be recreated automatically when needed.',
-            confirmLabel: 'Delete permanently',
+            title: t('tree.menu.deleteAiSessionsConfirmTitle'),
+            message: t('tree.menu.deleteAiSessionsConfirmMessage'),
+            confirmLabel: t('tree.trash.deletePermanently'),
             danger: true,
           });
 
@@ -2753,25 +2755,25 @@ function folderMenu(e, f) {
 
   showMenu(e.clientX, e.clientY, [
     {
-      label: 'Open',
+      label: t('tree.menu.open'),
       action: () => openFolderInDashboard(f.id, { push: true }),
     },
     'hr',
     {
-      label: 'New note here',
+      label: t('tree.menu.newNoteHere'),
       action: () => newNote(f.id),
     },
     {
-      label: 'New sub-folder',
+      label: t('tree.menu.newSubFolder'),
       action: () => newFolder(f.id),
     },
     {
-      label: 'Select folder contents',
+      label: t('tree.menu.selectFolderContents'),
       action: () => selectFolderSubtree(f.id),
     },
     'hr',
     {
-      label: f.spaceId ? 'Shared workspace…' : 'Share folder…',
+      label: f.spaceId ? t('tree.menu.sharedWorkspace') : t('tree.menu.shareFolder'),
       icon: 'users',
       action: async () => {
         const { openUnifiedShareModal } = await import('./public-share/public-share-ui.js');
@@ -2780,33 +2782,33 @@ function folderMenu(e, f) {
     },
     'hr',
     {
-      label: 'Icon & color…',
+      label: t('tree.menu.iconColor'),
       action: () => editItemsIconColor([folderKey(f.id)]),
     },
     {
-      label: 'Rename…',
+      label: t('tree.menu.rename'),
       action: () => renameTreeFolder(f.id),
     },
     {
-      label: f.archived ? 'Unarchive folder' : 'Archive folder',
+      label: f.archived ? t('tree.menu.unarchiveFolder') : t('tree.menu.archiveFolder'),
       action: async () => {
         const nowArchived = !f.archived;
 
         await setFolderArchived(f, nowArchived);
 
-        actionToast(nowArchived ? 'Folder archived' : 'Folder unarchived', {
-          actionLabel: 'Undo',
+        actionToast(nowArchived ? t('tree.menu.folderArchived') : t('tree.menu.folderUnarchived'), {
+          actionLabel: t('common.undo'),
           onAction: () => setFolderArchived(f, !nowArchived),
         });
       },
     },
     {
-      label: 'Move to folder…',
+      label: t('tree.menu.moveToFolder'),
       action: () => moveSelectedToFolder([folderKey(f.id)]),
     },
     'hr',
     {
-      label: 'Move folder to Trash',
+      label: t('tree.menu.moveFolderToTrash'),
       danger: true,
       action: async () => {
         await trashItemsWithUndo({
@@ -2831,7 +2833,7 @@ function bulkMenu(e, items) {
 
   const menu = [
     {
-      label: `${count} selected · ${noteCount} note${noteCount === 1 ? '' : 's'} · ${folderCount} folder${folderCount === 1 ? '' : 's'}`,
+      label: `${t('tree.bulk.selectedHeader', { count })} · ${t('tree.bulk.notesLabel', { count: noteCount })} · ${t('tree.bulk.foldersLabel', { count: folderCount })}`,
       disabled: true,
       meta: true,
     },
@@ -2840,31 +2842,31 @@ function bulkMenu(e, items) {
 
   if (noteCount) {
     menu.push({
-      label: anyUnpinned ? `Pin selected note${noteCount === 1 ? '' : 's'}` : 'Pin selected notes',
+      label: t('tree.bulk.pinSelected', { count: noteCount }),
       disabled: !anyUnpinned,
       action: () => bulkSetPinned(notes, true),
     });
 
     menu.push({
-      label: anyPinned ? `Unpin selected note${noteCount === 1 ? '' : 's'}` : 'Unpin selected notes',
+      label: t('tree.bulk.unpinSelected', { count: noteCount }),
       disabled: !anyPinned,
       action: () => bulkSetPinned(notes, false),
     });
   }
 
   menu.push({
-    label: 'Icon & color for selected…',
+    label: t('tree.bulk.iconColorSelected'),
     action: () => editItemsIconColor(items.map((x) => x.key)),
   });
 
   menu.push({
-    label: 'Move selected to folder…',
+    label: t('tree.bulk.moveSelectedToFolder'),
     action: () => moveSelectedToFolder(items.map((x) => x.key)),
   });
 
   if (noteCount) {
     menu.push({
-      label: `Duplicate selected note${noteCount === 1 ? '' : 's'}`,
+      label: t('tree.bulk.duplicateSelected', { count: noteCount }),
       action: () => duplicateNotes(notes),
     });
   }
@@ -2872,7 +2874,7 @@ function bulkMenu(e, items) {
   menu.push('hr');
 
   menu.push({
-    label: 'Clear selection',
+    label: t('tree.bulk.clearSelection'),
     action: () => {
       selection.keys.clear();
       selection.anchorKey = null;
@@ -2881,7 +2883,7 @@ function bulkMenu(e, items) {
   });
 
   menu.push({
-    label: 'Delete selected items',
+    label: t('tree.bulk.deleteSelected'),
     danger: true,
     action: () => deleteSelectedItems(items),
   });
@@ -2918,7 +2920,9 @@ async function bulkSetPinned(notes, pinned) {
   }));
 
   toast(
-    `${pinned ? 'Pinned' : 'Unpinned'} ${notes.length} note${notes.length === 1 ? '' : 's'}`,
+    pinned
+      ? t('tree.bulk.pinnedToast', { count: notes.length })
+      : t('tree.bulk.unpinnedToast', { count: notes.length }),
     'success'
   );
 }
@@ -2936,7 +2940,7 @@ async function editItemsIconColor(keys) {
     .filter(Boolean);
 
   if (!cleanKeys.length) {
-    toast('Nothing selected', 'info');
+    toast(t('tree.bulk.nothingSelected'), 'info');
     return;
   }
 
@@ -2965,7 +2969,7 @@ async function editItemsIconColor(keys) {
 
   // Multi-selection: use the shared Graph appearance picker with Tree scopes.
   editTreeAppearanceTargets(cleanKeys, {
-    title: `Icon & color for ${cleanKeys.length} selected items`,
+    title: t('tree.bulk.iconColorForCount', { count: cleanKeys.length }),
   });
 }
 
@@ -2979,7 +2983,7 @@ function folderPath(folderId) {
 
   while (f && !seen.has(f.id)) {
     seen.add(f.id);
-    parts.unshift(f.name || 'Folder');
+    parts.unshift(f.name || t('items.folderFallback'));
     f = f.parentId ? state.folders.get(f.parentId) : null;
   }
 
@@ -2987,7 +2991,7 @@ function folderPath(folderId) {
 }
 
 async function chooseFolderPrompt({
-  title = 'Move to folder',
+  title = t('tree.move.title'),
   keys = [],
 } = {}) {
   const folderKeys = keys
@@ -2998,7 +3002,7 @@ async function chooseFolderPrompt({
   return await yantaFolderPicker({
     title,
     allowNone: true,
-    noneLabel: 'No folder / Home',
+    noneLabel: t('tree.move.noFolderHome'),
     isDisabled(folder) {
       if (isFolderInTrash(folder)) return true;
 
@@ -3009,7 +3013,7 @@ async function chooseFolderPrompt({
 
       return false;
     },
-    disabledHint: 'Would create a folder loop',
+    disabledHint: t('tree.move.wouldLoop'),
   });
 }
 
@@ -3017,7 +3021,7 @@ async function moveSelectedToFolder(keys = [...selection.keys]) {
   const cleanKeys = uniqueNonEmptyStrings(keys);
 
   const targetFolderId = await chooseFolderPrompt({
-    title: 'Move selected items',
+    title: t('tree.move.selectedItems'),
     keys: cleanKeys,
   });
 
@@ -3090,12 +3094,12 @@ async function moveSelectedToFolder(keys = [...selection.keys]) {
 
   if (skipped) {
     toast(
-      `Moved ${moved}; skipped ${skipped} invalid folder move${skipped === 1 ? '' : 's'}`,
+      t('tree.movedSkipped', { count: skipped, moved, skipped }),
       'error'
     );
   } else if (moved) {
-    actionToast(`Moved ${moved} item${moved === 1 ? '' : 's'}`, {
-      actionLabel: 'Undo',
+    actionToast(t('tree.move.movedToast', { count: moved }), {
+      actionLabel: t('common.undo'),
       onAction: () => undoMoveToFolder(noteOrigins, folderOrigins),
     });
   }
@@ -3111,7 +3115,7 @@ async function duplicateNotes(notes) {
 
   renderTree();
 
-  toast(`Duplicated ${created} note${created === 1 ? '' : 's'}`, 'success');
+  toast(t('tree.bulk.duplicatedToast', { count: created }), 'success');
 }
 
 async function duplicateNote(src, { openCreated = true } = {}) {
@@ -3120,7 +3124,7 @@ async function duplicateNote(src, { openCreated = true } = {}) {
   const n = {
     ...src,
     id,
-    title: (src.title || 'Untitled') + ' (copy)',
+    title: t('items.copySuffix', { title: src.title || t('note.untitled') }),
     created: Date.now(),
     updated: Date.now(),
   };

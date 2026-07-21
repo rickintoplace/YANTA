@@ -4,6 +4,7 @@
 // ============================================================
 
 import { $, el, state, escapeHtml, lucide, toast } from './core.js';
+import { t } from './i18n/index.js';
 import { cycleAppearanceMode } from './settings.js';
 import { wikilinkIndex } from './features-state.js';
 import { openNote, createNoteWithTitle, deleteCurrentNote, newNote, newFolder, togglePin } from './notes.js';
@@ -337,8 +338,8 @@ export function openPalette(mode = 'commands') {
   palette.filter = '';
   palette.active = 0;
   $('paletteInput').value = '';
-  $('paletteInput').placeholder = mode === 'commands' ? 'Type a command…' : 'Type to switch to a note…';
-  $('paletteMode').textContent = mode === 'commands' ? 'Command palette' : 'Quick switcher';
+  $('paletteInput').placeholder = mode === 'commands' ? t('palette.typeCommand') : t('palette.typeNote');
+  $('paletteMode').textContent = mode === 'commands' ? t('palette.commandMode') : t('palette.switcherMode');
   buildPaletteItems();
   $('palette').hidden = false;
   $('paletteInput').focus();
@@ -447,7 +448,7 @@ function buildPaletteItems() {
       .sort((a, b) => b.score - a.score);
   } else {
     palette.items = [...state.notes.values()]
-      .map((n) => ({ id: n.id, label: n.title || 'Untitled', folder: state.folders.get(n.folderId)?.name || '', score: q ? scoreMatch(n.title || '', q) : 1 + (Date.now() - n.updated) * -1 / 1e9 }))
+      .map((n) => ({ id: n.id, label: n.title || t('note.untitled'), folder: state.folders.get(n.folderId)?.name || '', score: q ? scoreMatch(n.title || '', q) : 1 + (Date.now() - n.updated) * -1 / 1e9 }))
       .filter((n) => !q || n.score > 0)
       .sort((a, b) => b.score - a.score)
       .slice(0, 80);
@@ -459,7 +460,7 @@ function renderPaletteList() {
   const list = $('paletteList');
   list.replaceChildren();
   if (!palette.items.length) {
-    list.append(el('div', { class: 'palette-empty' }, palette.mode === 'commands' ? 'No matching command' : 'No matching note'));
+    list.append(el('div', { class: 'palette-empty' }, palette.mode === 'commands' ? t('palette.noCommand') : t('palette.noNote')));
     return;
   }
   for (let i = 0; i < palette.items.length; i++) {

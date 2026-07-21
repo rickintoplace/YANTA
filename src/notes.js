@@ -10,6 +10,7 @@
 // ============================================================
 
 import { $, el, uid, state, store, lucide, fmtDate, debounce, toast } from './core.js';
+import { t } from './i18n/index.js';
 import {
   getNoteDoc,
   getMarkdownText,
@@ -1028,22 +1029,22 @@ export async function createWelcomeNote() {
       color: '#2563eb',
       body: `# Start here 👋
 
-**YANTA** is your private workspace — notes, drawings, calendar, chat and AI in one place. Everything stays on your device unless *you* decide to sync or share.
+**YANTA** is your private workspace. Notes, drawings, calendar, chat and AI in one place. Everything stays on your device or your encrypted cloud unless *you* decide to share.
 
 draw://${drawingId}
 
 ## Try it — one minute
 
-- [ ] Press **Ctrl/⌘ + Shift + Space** and capture a thought — it lands in today's journal note
-- [ ] Type \`/\` in any note — drawings, images, events and more
-- [ ] Type \`[[\` to link notes — try [[Shopping List]]
-- [ ] Press **Ctrl/⌘ + P** — every command lives there
+- [ ] Press **Ctrl/⌘ + Shift + Space** and capture a thought. It lands in today's journal note
+- [ ] Type \`/\` in any note. Drawings, images, events and more
+- [ ] Type \`[[\` to link notes. Try [[Shopping List]]
+- [ ] Press **Ctrl/⌘ + P**. Every command lives there
 
 ## Good to know
 
-- **Private by design** — sync and sharing are end-to-end encrypted; not even the cloud can read your notes.
-- **No lock-in** — plain Markdown under the hood, export everything anytime.
-- Calendar, feeds, chat and the AI assistant wait in the bottom-left corner — explore whenever you're ready.
+- **Private by design**. Sync and sharing are end-to-end encrypted; not even the cloud can read your notes.
+- **No lock-in**. Plain Markdown under the hood, export everything anytime.
+- Calendar, feeds, chat and the AI assistant wait in the bottom-left corner. Explore whenever you're ready.
 
 *Delete this Welcome folder whenever you like.*`,
     },
@@ -1058,14 +1059,14 @@ draw://${drawingId}
       color: '#059669',
       body: `# Shopping List
 
-A tiny checklist — check something off!
+A tiny checklist. Check something off!
 
 - [ ] Apples
 - [ ] Coffee
 - [ ] Pasta
 - [ ] Olive oil
 
-**Tip:** hit **Share** (top right) and this becomes a live list — whoever you invite can tick items off from their phone while you shop.`,
+**Tip:** hit **Share** (top right) and this becomes a live list. Whoever you invite can tick items off from their phone while you shop.`,
     },
   ];
 
@@ -1789,7 +1790,7 @@ A tiny checklist — check something off!
 
   renderTree();
 
-  toast('Welcome vault created', 'success');
+  toast(t('items.welcomeVault'), 'success');
 }
 
 export function setNavSuppress(v) { _navSuppress = v; }

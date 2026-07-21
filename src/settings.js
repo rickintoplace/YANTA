@@ -1531,7 +1531,7 @@ function renderColorsSection(host) {
 
   for (const [groupName, tokens] of Object.entries(grouped)) {
     const groupEl = el('div', { class: 'yanta-settings-group' });
-    groupEl.append(el('div', { class: 'yanta-settings-group-title' }, groupName));
+    groupEl.append(el('div', { class: 'yanta-settings-group-title' }, t('settings.data.colorGroups.' + groupName)));
 
     const grid = el('div', { class: 'yanta-settings-color-grid' });
 
@@ -1555,7 +1555,7 @@ function renderColorsSection(host) {
       swatch.style.background = current;
 
       const meta = el('div', { class: 'yanta-settings-color-meta' });
-      meta.append(el('div', { class: 'yanta-settings-color-label' }, tok.label));
+      meta.append(el('div', { class: 'yanta-settings-color-label' }, t('settings.data.colorLabels.' + tok.key)));
 
       const textInput = el('input', {
         type: 'text',
@@ -1680,7 +1680,7 @@ onclick: async () => {
   await saveAppearance({ fontSizeId: s.id });
   rerenderSettingsBody();
 },
-    }, `${s.label} (${s.px}px)`));
+    }, `${t('settings.data.fontSizes.' + s.id)} (${s.px}px)`));
   }
   sizeGroup.append(sizeRow);
   host.append(sizeGroup);
@@ -2365,27 +2365,28 @@ function renderCalendarSection(host) {
   ));
 
   const group = el('div', { class: 'yanta-settings-group' });
-  group.append(el('div', { class: 'yanta-settings-group-title' }, 'Regional format'));
+  group.append(el('div', { class: 'yanta-settings-group-title' }, t('settings.calendar.regionalFormat')));
 
   group.append(
     renderSettingsSelect({
-      label: 'Calendar language / locale',
-      hint: 'Controls month names, weekdays and FullCalendar labels.',
+      label: t('settings.calendar.localeLabel'),
+      hint: t('settings.calendar.localeHint'),
       value: prefs.locale,
       options: CALENDAR_LOCALES.map((x) => ({
         value: x.id,
-        label: x.label,
+        // Language names stay as autonyms (Deutsch, Français…); only 'Auto' translates.
+        label: x.id === 'auto' ? t('settings.data.calLocaleAuto') : x.label,
       })),
       onChange: async (value) => {
         await saveCalendarPreferences({ locale: value });
-        toast('Calendar setting saved', 'success');
+        toast(t('settings.calendar.saved'), 'success');
         renderSettingsBody();
       },
     }),
 
     renderSettingsSelect({
-      label: 'Compact date format',
-      hint: 'Used for compact YANTA calendar date displays. Default is DD/MM/YYYY.',
+      label: t('settings.calendar.dateFormatLabel'),
+      hint: t('settings.calendar.dateFormatHint'),
       value: prefs.dateFormat,
       options: CALENDAR_DATE_FORMATS.map((x) => ({
         value: x.id,
@@ -2393,37 +2394,37 @@ function renderCalendarSection(host) {
       })),
       onChange: async (value) => {
         await saveCalendarPreferences({ dateFormat: value });
-        toast('Calendar setting saved', 'success');
+        toast(t('settings.calendar.saved'), 'success');
         renderSettingsBody();
       },
     }),
 
     renderSettingsSelect({
-      label: 'Event editor date preview',
-      hint: 'Shown below the date/time inputs when adding or editing events.',
+      label: t('settings.calendar.editorPreviewLabel'),
+      hint: t('settings.calendar.editorPreviewHint'),
       value: prefs.editorDateStyle,
       options: CALENDAR_EDITOR_DATE_STYLES.map((x) => ({
         value: x.id,
-        label: `${x.label} · ${x.exampleDe}`,
+        label: `${t('settings.data.calEditorStyle.' + x.id)} · ${x.exampleDe}`,
       })),
       onChange: async (value) => {
         await saveCalendarPreferences({ editorDateStyle: value });
-        toast('Calendar setting saved', 'success');
+        toast(t('settings.calendar.saved'), 'success');
         renderSettingsBody();
       },
     }),
 
     renderSettingsSelect({
-      label: 'Time format',
-      hint: 'Controls event times in calendar and editor previews.',
+      label: t('settings.calendar.timeFormatLabel'),
+      hint: t('settings.calendar.timeFormatHint'),
       value: prefs.timeFormat,
       options: CALENDAR_TIME_FORMATS.map((x) => ({
         value: x.id,
-        label: `${x.label} · ${x.example}`,
+        label: `${t(x.id === '24' ? 'settings.data.calTime24' : 'settings.data.calTime12')} · ${x.example}`,
       })),
       onChange: async (value) => {
         await saveCalendarPreferences({ timeFormat: value });
-        toast('Calendar setting saved', 'success');
+        toast(t('settings.calendar.saved'), 'success');
         renderSettingsBody();
       },
     })
@@ -2432,31 +2433,31 @@ function renderCalendarSection(host) {
   host.append(group);
 
   const weekGroup = el('div', { class: 'yanta-settings-group' });
-  weekGroup.append(el('div', { class: 'yanta-settings-group-title' }, 'Weeks'));
+  weekGroup.append(el('div', { class: 'yanta-settings-group-title' }, t('settings.calendar.weeks')));
 
   weekGroup.append(
     renderSettingsSelect({
-      label: 'Week starts on',
-      hint: 'ISO 8601 uses Monday.',
+      label: t('settings.calendar.weekStartLabel'),
+      hint: t('settings.calendar.weekStartHint'),
       value: String(prefs.weekStart),
       options: CALENDAR_WEEK_STARTS.map((x) => ({
         value: String(x.id),
-        label: x.label,
+        label: t('settings.data.calWeekday.' + ({ 1: 'mon', 0: 'sun', 6: 'sat' }[x.id] || 'mon')),
       })),
       onChange: async (value) => {
         await saveCalendarPreferences({ weekStart: Number(value) });
-        toast('Calendar setting saved', 'success');
+        toast(t('settings.calendar.saved'), 'success');
         renderSettingsBody();
       },
     }),
 
     renderCalendarToggle({
       checked: !!prefs.weekNumbers,
-      label: 'Show calendar weeks',
-      hint: 'Uses ISO week numbers.',
+      label: t('settings.calendar.weekNumbersLabel'),
+      hint: t('settings.calendar.weekNumbersHint'),
       onChange: async (checked) => {
         await saveCalendarPreferences({ weekNumbers: checked });
-        toast('Calendar setting saved', 'success');
+        toast(t('settings.calendar.saved'), 'success');
         renderSettingsBody();
       },
     })
@@ -2465,25 +2466,25 @@ function renderCalendarSection(host) {
   host.append(weekGroup);
 
   const resetGroup = el('div', { class: 'yanta-settings-group' });
-  resetGroup.append(el('div', { class: 'yanta-settings-group-title' }, 'Reset'));
+  resetGroup.append(el('div', { class: 'yanta-settings-group-title' }, t('common.reset')));
 
   resetGroup.append(el('button', {
     class: 'btn',
     onclick: async () => {
       const ok = await yantaConfirm({
-        title: 'Reset calendar settings?',
-        message: 'Reset all calendar preferences to their defaults?',
-        confirmLabel: 'Reset calendar settings',
+        title: t('settings.calendar.resetConfirmTitle'),
+        message: t('settings.calendar.resetConfirmMessage'),
+        confirmLabel: t('settings.calendar.resetConfirmAction'),
         danger: true,
       });
 
       if (!ok) return;
 
       await resetCalendarPreferences();
-      toast('Calendar settings reset', 'success');
+      toast(t('settings.calendar.resetToast'), 'success');
       renderSettingsBody();
     },
-  }, 'Reset calendar settings'));
+  }, t('settings.calendar.resetButton')));
 
   host.append(resetGroup);
 }
@@ -2497,17 +2498,20 @@ function renderSourcesSection(host) {
   ));
 
   const info = el('div', { class: 'yanta-settings-info' });
-  info.innerHTML = `
-    <p><strong>Cloud-storage friendly:</strong> Source items and images are cached locally and do not consume your encrypted YANTA Cloud vault storage.</p>
-    <p>Images are stored as URLs and loaded through a privacy-protected proxy by default.</p>
-  `;
+  info.append(
+    el('p', {},
+      el('strong', {}, t('settings.sources.infoTitle')),
+      ' ' + t('settings.sources.infoBody'),
+    ),
+    el('p', {}, t('settings.sources.infoLine2')),
+  );
   host.append(info);
 
   const mount = el('div', {
     class: 'yanta-settings-group',
   });
 
-  mount.innerHTML = `<div class="tree-empty">Loading Sources settings…</div>`;
+  mount.append(el('div', { class: 'tree-empty' }, t('settings.sources.loading')));
   host.append(mount);
 
   import('./rss/rss-settings-panel.js')
@@ -2517,7 +2521,7 @@ function renderSourcesSection(host) {
     })
     .catch((err) => {
       console.error('[YANTA Settings] Could not load Sources settings', err);
-      mount.innerHTML = `<div class="yanta-settings-info">Could not load Sources settings.</div>`;
+      mount.replaceChildren(el('div', { class: 'yanta-settings-info' }, t('settings.sources.loadError')));
     });
 }
 
@@ -2609,21 +2613,17 @@ function renderAiSection(host) {
   ));
 
   const info = el('div', { class: 'yanta-settings-info' });
-  info.innerHTML = `
-    <p><strong>Mirrored AI settings.</strong> These are the same settings used inside the YANTA AI assistant panel.</p>
-    <p>Your API key is stored according to the selected storage mode. Prompts and included context are sent to OpenRouter/the chosen model.</p>
-  `;
+  info.append(
+    el('p', {}, el('strong', {}, t('settings.ai.infoTitle')), ' ' + t('settings.ai.infoBody')),
+    el('p', {}, t('settings.ai.infoLine2')),
+  );
   host.append(info);
 
   const mount = el('div', {
     class: 'yanta-settings-group yanta-ai-main-settings-mirror',
   });
 
-  mount.innerHTML = `
-    <div class="tree-empty" style="display:block;padding:14px">
-      Loading AI settings…
-    </div>
-  `;
+  mount.append(el('div', { class: 'tree-empty', style: 'display:block;padding:14px' }, t('settings.ai.loading')));
 
   host.append(mount);
 
@@ -2635,11 +2635,7 @@ function renderAiSection(host) {
     .catch((err) => {
       console.error('[YANTA Settings] Could not load AI settings panel', err);
 
-      mount.innerHTML = `
-        <div class="yanta-settings-info">
-          Could not load AI settings.
-        </div>
-      `;
+      mount.replaceChildren(el('div', { class: 'yanta-settings-info' }, t('settings.ai.loadError')));
     });
 }
 
@@ -2651,11 +2647,7 @@ function renderSemanticSection(host) {
 
   const mount = el('div', { class: 'yanta-settings-group' });
 
-  mount.innerHTML = `
-    <div class="tree-empty" style="display:block;padding:14px">
-      Loading semantic settings…
-    </div>
-  `;
+  mount.append(el('div', { class: 'tree-empty', style: 'display:block;padding:14px' }, t('settings.semantic.loading')));
 
   host.append(mount);
 
@@ -2667,11 +2659,7 @@ function renderSemanticSection(host) {
     .catch((err) => {
       console.error('[YANTA Settings] Could not load semantic settings panel', err);
 
-      mount.innerHTML = `
-        <div class="yanta-settings-info">
-          Could not load semantic search settings.
-        </div>
-      `;
+      mount.replaceChildren(el('div', { class: 'yanta-settings-info' }, t('settings.semantic.loadError')));
     });
 }
 
@@ -2689,7 +2677,7 @@ async function renderChatSection(host) {
 
   loading.innerHTML = `
     <div class="yanta-settings-info">
-      <p><strong>Loading Chat settings…</strong></p>
+      <p><strong>${t('settings.chat.loading')}</strong></p>
     </div>
   `;
 
@@ -2751,11 +2739,11 @@ async function renderChatSection(host) {
     }));
   } catch (err) {
     console.warn('[YANTA Settings] Could not render Chat settings', err);
-    toast('Could not load Chat settings.', 'error');
+    toast(t('settings.chat.loadError'), 'error');
 
     loading.innerHTML = `
       <div class="yanta-settings-info">
-        <p><strong>Could not load Chat settings.</strong></p>
+        <p><strong>${t('settings.chat.loadError')}</strong></p>
         <p>${escapeSettingsText(err?.message || String(err))}</p>
       </div>
     `;
@@ -2787,12 +2775,12 @@ function renderChatConnectionCard({
         </div>
 
         <div class="yanta-sync-card-title">
-          <strong>Chat connection</strong>
+          <strong>${t('settings.chat.connection.title')}</strong>
           <p>
             ${
               client
-                ? `Connected as <code>${escapeSettingsText(userId)}</code>.`
-                : 'Chat is not connected on this device.'
+                ? t('settings.chat.connection.connectedAs', { user: `<code>${escapeSettingsText(userId)}</code>` })
+                : t('settings.chat.connection.notConnected')
             }
           </p>
         </div>
@@ -2801,7 +2789,7 @@ function renderChatConnectionCard({
       <div class="compress-actions yanta-sync-card-actions">
         <button class="btn primary" data-chat-reconnect>
           ${lucide('refresh-cw', 14)}
-          ${client ? 'Reconnect' : 'Connect Chat'}
+          ${client ? t('settings.chat.connection.reconnect') : t('settings.chat.connection.connect')}
         </button>
       </div>
     </div>
@@ -2818,11 +2806,11 @@ function renderChatConnectionCard({
         reason: 'settings-chat-reconnect',
       });
 
-      toast('Chat reconnected', 'success');
+      toast(t('settings.chat.connection.reconnectedToast'), 'success');
       renderSettingsBody();
     } catch (err) {
       console.warn('[YANTA Settings] Chat reconnect failed', err);
-      toast('Could not reconnect Chat.', 'error');
+      toast(t('settings.chat.connection.reconnectError'), 'error');
     }
   });
 
@@ -2840,35 +2828,35 @@ function renderChatPreferencesCard({
   group.append(
     el('div', {
       class: 'yanta-settings-group-title',
-    }, 'Messaging')
+    }, t('settings.chat.prefs.messaging'))
   );
 
   group.append(
     renderSettingsToggleRow({
       checked: prefs.sendReadReceipts !== false,
-      label: 'Send read receipts',
-      hint: 'Matrix read receipts are send-side only here. Turning this off stops YANTA from sending new receipts.',
+      label: t('settings.chat.prefs.readReceipts'),
+      hint: t('settings.chat.prefs.readReceiptsHint'),
       onChange: async (checked) => {
         await prefsMod.setChatPreferences({
           sendReadReceipts: checked,
         });
 
-        toast('Chat preference saved', 'success');
+        toast(t('settings.chat.prefs.saved'), 'success');
       },
     }),
 
     renderSettingsSelect({
-      label: 'Enter behavior',
-      hint: 'Desktop only. Mobile keyboards still use their native send/newline behavior.',
+      label: t('settings.chat.prefs.enterBehavior'),
+      hint: t('settings.chat.prefs.enterBehaviorHint'),
       value: prefs.enterBehavior || 'send',
       options: [
         {
           value: 'send',
-          label: 'Enter sends message',
+          label: t('settings.chat.prefs.enterSends'),
         },
         {
           value: 'newline',
-          label: 'Enter inserts newline',
+          label: t('settings.chat.prefs.enterNewline'),
         },
       ],
       onChange: async (value) => {
@@ -2876,22 +2864,22 @@ function renderChatPreferencesCard({
           enterBehavior: value,
         });
 
-        toast('Chat preference saved', 'success');
+        toast(t('settings.chat.prefs.saved'), 'success');
       },
     }),
 
     renderSettingsSelect({
-      label: 'Media auto-download',
-      hint: 'Browsers cannot reliably detect Wi-Fi. Choose always or on demand.',
+      label: t('settings.chat.prefs.mediaAutoDownload'),
+      hint: t('settings.chat.prefs.mediaAutoDownloadHint'),
       value: prefs.mediaAutoDownload || 'ask',
       options: [
         {
           value: 'always',
-          label: 'Always',
+          label: t('settings.chat.prefs.always'),
         },
         {
           value: 'ask',
-          label: 'On demand',
+          label: t('settings.chat.prefs.onDemand'),
         },
       ],
       onChange: async (value) => {
@@ -2899,7 +2887,7 @@ function renderChatPreferencesCard({
           mediaAutoDownload: value,
         });
 
-        toast('Chat preference saved', 'success');
+        toast(t('settings.chat.prefs.saved'), 'success');
       },
     })
   );
@@ -2928,10 +2916,12 @@ function renderChatStorageCard({
         </div>
 
         <div class="yanta-sync-card-title">
-          <strong>Storage management</strong>
+          <strong>${t('settings.chat.storage.title')}</strong>
           <p>
-            Local decrypted media cache: <strong>${fmtBytes(usage.totalBytes || 0)}</strong>
-            across ${Number(usage.count || 0)} item${Number(usage.count || 0) === 1 ? '' : 's'}.
+            ${t('settings.chat.storage.cacheUsage', {
+              size: `<strong>${fmtBytes(usage.totalBytes || 0)}</strong>`,
+              items: t('settings.chat.storage.itemsCount', { count: Number(usage.count || 0) }),
+            })}
           </p>
         </div>
       </div>
@@ -2942,7 +2932,7 @@ function renderChatStorageCard({
 
       <div class="yanta-chat-settings-row">
         <label>
-          Cache limit
+          ${t('settings.chat.storage.cacheLimit')}
           <select class="text-input" data-chat-cache-limit>
             ${cacheMod.CHAT_MEDIA_CACHE_LIMITS.map((option) => `
               <option value="${option.bytes}" ${Number(option.bytes) === Number(limit) ? 'selected' : ''}>
@@ -2956,7 +2946,7 @@ function renderChatStorageCard({
       <div class="compress-actions yanta-sync-card-actions">
         <button class="btn danger" data-chat-cache-clear>
           ${lucide('trash', 14)}
-          Clear media cache
+          ${t('settings.chat.storage.clearCache')}
         </button>
       </div>
     </div>
@@ -2967,20 +2957,19 @@ function renderChatStorageCard({
       await cacheMod.setChatMediaCacheLimitBytes(Number(e.currentTarget.value || 0));
       await updateStorageMeter();
 
-      toast('Media cache limit saved', 'success');
+      toast(t('settings.chat.storage.limitSaved'), 'success');
       renderSettingsBody();
     } catch (err) {
       console.warn('[YANTA Settings] Could not save media cache limit', err);
-      toast('Could not save media cache limit.', 'error');
+      toast(t('settings.chat.storage.limitError'), 'error');
     }
   });
 
   group.querySelector('[data-chat-cache-clear]')?.addEventListener('click', async () => {
     const ok = await yantaConfirm({
-      title: 'Clear Chat media cache?',
-      message: 'This removes locally cached decrypted Chat media. Messages stay intact.',
-      confirmLabel: 'Clear cache',
-      cancelLabel: 'Cancel',
+      title: t('settings.chat.storage.clearConfirmTitle'),
+      message: t('settings.chat.storage.clearConfirmMessage'),
+      confirmLabel: t('settings.chat.storage.clearConfirmAction'),
       danger: true,
       icon: 'trash',
     });
@@ -2992,11 +2981,11 @@ function renderChatStorageCard({
 
       await updateStorageMeter();
 
-      toast(`Media cache cleared: ${fmtBytes(result.bytes || 0)}`, 'success');
+      toast(t('settings.chat.storage.cleared', { size: fmtBytes(result.bytes || 0) }), 'success');
       renderSettingsBody();
     } catch (err) {
       console.warn('[YANTA Settings] Could not clear media cache', err);
-      toast('Could not clear media cache.', 'error');
+      toast(t('settings.chat.storage.clearError'), 'error');
     }
   });
 
@@ -3018,17 +3007,15 @@ function renderChatRecoveryCard({
         </div>
 
         <div class="yanta-sync-card-title">
-          <strong>Recovery key</strong>
-          <p>
-            Show or copy the Vault-decrypted Matrix recovery key. Only do this in a private place.
-          </p>
+          <strong>${t('settings.chat.recovery.title')}</strong>
+          <p>${t('settings.chat.recovery.desc')}</p>
         </div>
       </div>
 
       <div class="compress-actions yanta-sync-card-actions">
         <button class="btn" data-chat-show-recovery>
           ${lucide('eye', 14)}
-          Show / copy recovery key
+          ${t('settings.chat.recovery.showButton')}
         </button>
       </div>
     </div>
@@ -3036,12 +3023,9 @@ function renderChatRecoveryCard({
 
   group.querySelector('[data-chat-show-recovery]')?.addEventListener('click', async () => {
     const ok = await yantaConfirm({
-      title: 'Show recovery key?',
-      message:
-        'This key can unlock encrypted Chat history when combined with account access.\n\n' +
-        'Never share it with anyone.',
-      confirmLabel: 'Show recovery key',
-      cancelLabel: 'Cancel',
+      title: t('settings.chat.recovery.confirmTitle'),
+      message: t('settings.chat.recovery.confirmMessage'),
+      confirmLabel: t('settings.chat.recovery.confirmAction'),
       danger: true,
       icon: 'key-round',
     });
@@ -3058,13 +3042,13 @@ function renderChatRecoveryCard({
       overlay.innerHTML = `
         <div class="modal-card" style="width:min(620px,94vw)">
           <header class="modal-head">
-            <h3>Chat recovery key</h3>
+            <h3>${t('settings.chat.recovery.modalTitle')}</h3>
             <button class="icon-btn" data-close>${lucide('x', 18)}</button>
           </header>
 
           <div style="padding:16px">
             <p class="yanta-settings-hint">
-              Store this somewhere safe. Do not send it to anyone.
+              ${t('settings.chat.recovery.modalHint')}
             </p>
 
             <pre style="
@@ -3082,8 +3066,8 @@ function renderChatRecoveryCard({
             ">${escapeSettingsText(recovery.text)}</pre>
 
             <div class="compress-actions" style="margin-top:12px">
-              <button class="btn primary" data-copy>${lucide('copy', 14)} Copy key</button>
-              <button class="btn" data-close>Done</button>
+              <button class="btn primary" data-copy>${lucide('copy', 14)} ${t('settings.chat.recovery.copyKey')}</button>
+              <button class="btn" data-close>${t('common.done')}</button>
             </div>
           </div>
         </div>
@@ -3098,10 +3082,10 @@ function renderChatRecoveryCard({
         if (e.target.closest?.('[data-copy]')) {
           try {
             await navigator.clipboard.writeText(recovery.text);
-            toast('Recovery key copied', 'success');
+            toast(t('settings.chat.recovery.copiedToast'), 'success');
           } catch (err) {
             console.warn('[YANTA Settings] Could not copy recovery key', err);
-            toast('Could not copy recovery key.', 'error');
+            toast(t('settings.chat.recovery.copyError'), 'error');
           }
         }
       });
@@ -3109,7 +3093,7 @@ function renderChatRecoveryCard({
       document.body.append(overlay);
     } catch (err) {
       console.warn('[YANTA Settings] Could not show recovery key', err);
-      toast('Could not show recovery key.', 'error');
+      toast(t('settings.chat.recovery.showError'), 'error');
     }
   });
 
@@ -3133,17 +3117,15 @@ function renderChatDeviceCard({
         </div>
 
         <div class="yanta-sync-card-title">
-          <strong>This device</strong>
-          <p>
-            Deprovision Chat on this browser. Your YANTA notes and synced Vault stay untouched.
-          </p>
+          <strong>${t('settings.chat.device.title')}</strong>
+          <p>${t('settings.chat.device.desc')}</p>
         </div>
       </div>
 
       <div class="compress-actions yanta-sync-card-actions">
         <button class="btn danger" data-chat-deprovision>
           ${lucide('log-out', 14)}
-          Deprovision this device
+          ${t('settings.chat.device.deprovisionButton')}
         </button>
       </div>
     </div>
@@ -3151,12 +3133,9 @@ function renderChatDeviceCard({
 
   group.querySelector('[data-chat-deprovision]')?.addEventListener('click', async () => {
     const ok = await yantaConfirm({
-      title: 'Deprovision Chat on this device?',
-      message:
-        'This signs out Chat and removes local Matrix credentials and crypto stores.\n\n' +
-        'You can reconnect later from your encrypted YANTA Vault.',
-      confirmLabel: 'Deprovision device',
-      cancelLabel: 'Cancel',
+      title: t('settings.chat.device.confirmTitle'),
+      message: t('settings.chat.device.confirmMessage'),
+      confirmLabel: t('settings.chat.device.confirmAction'),
       danger: true,
       icon: 'log-out',
     });
@@ -3168,7 +3147,7 @@ function renderChatDeviceCard({
         await client?.logout?.(true);
       } catch (err) {
         console.warn('[YANTA Settings] Matrix logout failed during deprovision', err);
-        toast('Matrix logout failed; local Chat data will still be removed.', 'error');
+        toast(t('settings.chat.device.logoutFailed'), 'error');
       }
 
       await sessionMod.stopChatSession?.({
@@ -3178,11 +3157,11 @@ function renderChatDeviceCard({
       await storeMod.clearChatCredentials?.();
       await sessionMod.clearChatMatrixLocalStoresForDebugOnly?.();
 
-      toast('Chat deprovisioned on this device', 'success');
+      toast(t('settings.chat.device.deprovisionedToast'), 'success');
       renderSettingsBody();
     } catch (err) {
       console.warn('[YANTA Settings] Could not deprovision Chat', err);
-      toast('Could not deprovision Chat.', 'error');
+      toast(t('settings.chat.device.deprovisionError'), 'error');
     }
   });
 
@@ -3210,7 +3189,7 @@ function renderSettingsToggleRow({
       await onChange?.(cb.checked);
     } catch (err) {
       console.warn('[YANTA Settings] Toggle change failed', err);
-      toast('Could not save setting.', 'error');
+      toast(t('settings.saveError'), 'error');
 
       cb.checked = !cb.checked;
     }
@@ -3270,33 +3249,30 @@ function renderYantaCloudSyncPrimaryCard() {
         </div>
 
         <div class="yanta-sync-card-title">
-          <span class="yanta-sync-card-kicker">Recommended</span>
+          <span class="yanta-sync-card-kicker">${t('settings.sync.recommended')}</span>
           <strong>YANTA Cloud Sync</strong>
-          <p>
-            Sync notes, drawings, images and calendar events across your devices.
-            YANTA encrypts your data before upload.
-          </p>
+          <p>${t('settings.sync.cloudDesc')}</p>
         </div>
       </div>
 
       <div class="yanta-sync-card-points">
-        <span>${lucide('check', 13)} Encrypted before leaving this device</span>
-        <span>${lucide('check', 13)} Use your Sync Key or QR code to connect devices</span>
+        <span>${lucide('check', 13)} ${t('settings.sync.cloudPoint1')}</span>
+        <span>${lucide('check', 13)} ${t('settings.sync.cloudPoint2')}</span>
       </div>
 
       <div class="yanta-sync-status-line" data-yanta-cloud-sync-status>
-        Checking sync status…
+        ${t('settings.sync.checkingStatus')}
       </div>
 
       <div class="compress-actions yanta-sync-card-actions">
         <button class="btn primary" data-yanta-cloud-open>
           ${lucide('cloud', 14)}
-          Set up YANTA Cloud Sync
+          ${t('settings.sync.setUpCloud')}
         </button>
 
         <button class="btn" data-yanta-cloud-sync-now hidden>
           ${lucide('refresh-cw', 14)}
-          Sync now
+          ${t('settings.sync.syncNow')}
         </button>
       </div>
     </div>
@@ -3315,7 +3291,7 @@ function renderYantaCloudSyncPrimaryCard() {
 
   syncNowBtn?.addEventListener('click', async () => {
     try {
-      statusEl.textContent = 'Synchronizing…';
+      statusEl.textContent = t('settings.sync.synchronizing');
 
       if (typeof window.yantaSync2Now === 'function') {
         await window.yantaSync2Now({
@@ -3329,11 +3305,11 @@ function renderYantaCloudSyncPrimaryCard() {
         });
       }
 
-      statusEl.textContent = 'Sync complete.';
-      toast('Sync complete', 'success');
+      statusEl.textContent = t('settings.sync.syncComplete');
+      toast(t('settings.sync.syncCompleteToast'), 'success');
     } catch (err) {
-      statusEl.textContent = err?.message || 'Sync failed.';
-      toast('Sync failed', 'error');
+      statusEl.textContent = err?.message || t('settings.sync.syncFailed');
+      toast(t('settings.sync.syncFailedToast'), 'error');
     }
   });
 
@@ -3354,32 +3330,32 @@ async function updateYantaCloudSyncPrimaryCard(group) {
 
   if (provider === 'yanta-cloud' && vaultId) {
     statusEl.innerHTML = `
-      <strong style="color:var(--green)">Active.</strong>
-      This device is connected to YANTA Cloud Sync.
+      <strong style="color:var(--green)">${t('settings.sync.activeLabel')}</strong>
+      ${t('settings.sync.activeBody')}
     `;
 
-    openBtn.innerHTML = `${lucide('settings', 14)} Manage YANTA Cloud Sync`;
+    openBtn.innerHTML = `${lucide('settings', 14)} ${t('settings.sync.manageCloud')}`;
     syncNowBtn.hidden = false;
     return;
   }
 
   if (provider === 'google-drive') {
     statusEl.innerHTML = `
-      <strong style="color:var(--yellow)">Google Drive Sync is active.</strong>
-      YANTA Cloud is still the recommended managed sync option for most users.
+      <strong style="color:var(--yellow)">${t('settings.sync.gdriveActiveLabel')}</strong>
+      ${t('settings.sync.gdriveActiveBody')}
     `;
 
-    openBtn.innerHTML = `${lucide('cloud', 14)} Set up YANTA Cloud Sync`;
+    openBtn.innerHTML = `${lucide('cloud', 14)} ${t('settings.sync.setUpCloud')}`;
     syncNowBtn.hidden = true;
     return;
   }
 
   statusEl.innerHTML = `
-    <strong>No cloud sync is active yet.</strong>
-    Set up sync or download encrypted backups so you do not lose your data.
+    <strong>${t('settings.sync.noSyncLabel')}</strong>
+    ${t('settings.sync.noSyncBody')}
   `;
 
-  openBtn.innerHTML = `${lucide('cloud', 14)} Set up YANTA Cloud Sync`;
+  openBtn.innerHTML = `${lucide('cloud', 14)} ${t('settings.sync.setUpCloud')}`;
   syncNowBtn.hidden = true;
 }
 
@@ -3435,43 +3411,39 @@ function renderYantaPlusBillingCard() {
 
         <div class="yanta-sync-card-title">
           <strong>YANTA Plus</strong>
-          <p>
-            More encrypted cloud storage, more devices, and higher Included AI limits.
-            No extra features are locked behind Plus right now.
-          </p>
+          <p>${t('settings.billing.plusDesc')}</p>
         </div>
       </div>
 
       <div class="yanta-sync-card-points">
-        <span>${lucide('database', 13)} 5 GB encrypted storage</span>
-        <span>${lucide('smartphone', 13)} 8 devices</span>
-        <span>${lucide('bot', 13)} 500 Included AI requests/day</span>
+        <span>${lucide('database', 13)} ${t('settings.billing.point1')}</span>
+        <span>${lucide('smartphone', 13)} ${t('settings.billing.point2')}</span>
+        <span>${lucide('bot', 13)} ${t('settings.billing.point3')}</span>
       </div>
 
       <div class="yanta-sync-status-line" data-yanta-plus-status>
-        Checking billing status…
+        ${t('settings.billing.checkingStatus')}
       </div>
 
       <div class="compress-actions yanta-sync-card-actions">
         <button class="btn primary" data-yanta-plus-upgrade hidden>
           ${lucide('sparkles', 14)}
-          Upgrade to YANTA Plus
+          ${t('settings.billing.upgrade')}
         </button>
 
         <button class="btn" data-yanta-plus-manage hidden>
           ${lucide('credit-card', 14)}
-          Manage subscription
+          ${t('settings.billing.manage')}
         </button>
 
         <a class="btn" href="/pricing" target="_blank" rel="noopener">
           ${lucide('external-link', 14)}
-          Pricing
+          ${t('settings.billing.pricing')}
         </a>
       </div>
 
       <p class="yanta-sync-card-fineprint" data-yanta-plus-fineprint hidden>
-        Update your payment method or cancel anytime — your subscription stays
-        active until the end of the paid period.
+        ${t('settings.billing.fineprint')}
       </p>
     </div>
   `;
@@ -3508,8 +3480,8 @@ function renderYantaPlusBillingCard() {
     })
     .catch(() => {
       status.innerHTML = `
-        <strong>Billing status unavailable.</strong>
-        Sign in to YANTA Cloud to upgrade or manage billing.
+        <strong>${t('settings.billing.unavailableLabel')}</strong>
+        ${t('settings.billing.unavailableBody')}
       `;
     });
 
@@ -3522,7 +3494,7 @@ function renderYantaPlusBillingCard() {
       });
     } catch (err) {
       console.error(err);
-      toast(err?.message || 'Could not open checkout', 'error');
+      toast(err?.message || t('settings.billing.checkoutError'), 'error');
     }
   });
 
@@ -3533,7 +3505,7 @@ function renderYantaPlusBillingCard() {
       await openYantaBillingPortal();
     } catch (err) {
       console.error(err);
-      toast(err?.message || 'Could not open billing portal', 'error');
+      toast(err?.message || t('settings.billing.portalError'), 'error');
     }
   });
 
@@ -3551,28 +3523,25 @@ function renderEncryptedBackupCard() {
         </div>
 
         <div class="yanta-sync-card-title">
-          <strong>Encrypted backup</strong>
-          <p>
-            Download a private <code>.yanta</code> backup file you can store anywhere.
-            You need your Sync Key to restore it.
-          </p>
+          <strong>${t('settings.sync.backupTitle')}</strong>
+          <p>${t('settings.sync.backupDesc', { ext: '<code>.yanta</code>' })}</p>
         </div>
       </div>
 
       <div class="compress-actions yanta-sync-card-actions">
         <button class="btn primary" data-yanta-backup-now>
           ${lucide('download', 14)}
-          Create encrypted backup
+          ${t('settings.sync.backupCreate')}
         </button>
 
         <button class="btn" data-yanta-restore-backup>
           ${lucide('upload', 14)}
-          Restore from backup
+          ${t('settings.sync.backupRestore')}
         </button>
 
         <button class="btn" data-yanta-copy-sync-key>
           ${lucide('key-round', 14)}
-          Copy Sync Key
+          ${t('settings.sync.copySyncKey')}
         </button>
       </div>
     </div>
@@ -3609,62 +3578,49 @@ function renderAdvancedSyncMethods() {
 
   const details = el('details', { class: 'yanta-sync-advanced-details' });
 
-  const summary = el('summary', {}, 'Advanced sync methods');
+  const summary = el('summary', {}, t('settings.sync.advancedSummary'));
 
   const body = el('div', { class: 'yanta-sync-advanced-body' });
 
   body.innerHTML = `
     <p class="yanta-settings-hint">
-      Most users should use YANTA Cloud Sync. These options remain available
-      for technical users who want to manage storage, folders or backend endpoints themselves.
+      ${t('settings.sync.advancedHint')}
     </p>
 
     <div class="yanta-sync-advanced-grid">
       <div class="yanta-sync-advanced-card">
-        <strong>${lucide('hard-drive', 14)} Google Drive Sync</strong>
-        <p>
-          Stores encrypted YANTA sync objects in your hidden Google Drive app data folder.
-          Requires Google OAuth and manual Sync Key handling.
-        </p>
+        <strong>${lucide('hard-drive', 14)} ${t('settings.sync.gdriveTitle')}</strong>
+        <p>${t('settings.sync.gdriveDesc')}</p>
         <button class="btn" data-advanced-google-drive>
           ${lucide('settings', 14)}
-          Open Google Drive Sync
+          ${t('settings.sync.gdriveOpen')}
         </button>
       </div>
 
       <div class="yanta-sync-advanced-card">
-        <strong>${lucide('folder-sync', 14)} Sync Folder / Syncthing</strong>
-        <p>
-          Mirrors readable Markdown files plus YANTA sync metadata to a folder you choose.
-          Useful with Syncthing, iCloud Drive, Dropbox, SMB or an external drive.
-        </p>
+        <strong>${lucide('folder-sync', 14)} ${t('settings.sync.folderTitle')}</strong>
+        <p>${t('settings.sync.folderDesc')}</p>
         <button class="btn" data-advanced-sync-folder>
           ${lucide('folder', 14)}
-          Set up sync folder
+          ${t('settings.sync.folderSetup')}
         </button>
       </div>
 
       <div class="yanta-sync-advanced-card">
-        <strong>${lucide('server', 14)} Custom Sync Broker</strong>
-        <p>
-          Developer/advanced option for provider-neutral encrypted object storage.
-          The broker feature remains available through the existing runtime/API.
-        </p>
+        <strong>${lucide('server', 14)} ${t('settings.sync.brokerTitle')}</strong>
+        <p>${t('settings.sync.brokerDesc')}</p>
         <button class="btn" data-advanced-broker-info>
           ${lucide('terminal', 14)}
-          Show hint
+          ${t('settings.sync.brokerHintBtn')}
         </button>
       </div>
 
       <div class="yanta-sync-advanced-card">
-        <strong>${lucide('key-round', 14)} Sync Key</strong>
-        <p>
-          The Sync Key unlocks encrypted YANTA sync data and can be used to connect devices manually.
-          Keep it private.
-        </p>
+        <strong>${lucide('key-round', 14)} ${t('settings.sync.syncKeyTitle')}</strong>
+        <p>${t('settings.sync.syncKeyDesc')}</p>
         <button class="btn" data-advanced-copy-sync-key>
           ${lucide('copy', 14)}
-          Copy Sync Key
+          ${t('settings.sync.copySyncKey')}
         </button>
       </div>
     </div>
@@ -3685,7 +3641,7 @@ function renderAdvancedSyncMethods() {
   });
 
   body.querySelector('[data-advanced-broker-info]')?.addEventListener('click', () => {
-    toast('Custom broker can be started via yantaConnectSync2Broker(...) in the console.', 'success');
+    toast(t('settings.sync.brokerHintToast'), 'success');
   });
 
   body.querySelector('[data-advanced-copy-sync-key]')?.addEventListener('click', async () => {
@@ -3708,7 +3664,7 @@ function renderAdvancedSyncMethods() {
   });
 
   scopeDetails.append(
-    el('summary', {}, 'Advanced: settings sync scope'),
+    el('summary', {}, t('settings.sync.scopeSummary')),
     renderDeviceOnlyToggle(a)
   );
 
@@ -3721,25 +3677,24 @@ function renderAdvancedSyncMethods() {
 function renderAboutSection(host) {
   host.append(sectionHeader(t('settings.sections.about.title'), null));
   const about = el('div', { class: 'yanta-settings-info' });
-  about.innerHTML = `
-    <p><strong>YANTA</strong> — Yet Another Note Taking App.</p>
-    <p>Local-first Markdown notes with built-in live collaboration.</p>
-    <p style="color:var(--text-faint);font-size:12px;margin-top:12px">All data stays in your browser. Sync happens through a folder you control. Live shares are end-to-end encrypted via WebRTC.</p>
-  `;
+  about.append(
+    el('p', {}, el('strong', {}, 'YANTA'), ' — ' + t('settings.about.tagline')),
+    el('p', {}, t('settings.about.description')),
+    el('p', { style: 'color:var(--text-faint);font-size:12px;margin-top:12px' }, t('settings.about.privacy')),
+  );
   host.append(about);
 
   // Danger zone
   const danger = el('div', { class: 'yanta-settings-group' });
-  danger.append(el('div', { class: 'yanta-settings-group-title' }, 'Reset all settings'));
-  danger.append(el('p', { class: 'yanta-settings-hint' },
-    'This clears all appearance preferences (both device-only and synced). Your notes are untouched.'));
+  danger.append(el('div', { class: 'yanta-settings-group-title' }, t('settings.about.resetAllTitle')));
+  danger.append(el('p', { class: 'yanta-settings-hint' }, t('settings.about.resetAllHint')));
   danger.append(el('button', {
     class: 'btn danger',
     onclick: async () => {
       const ok = await yantaConfirm({
-        title: 'Reset all settings?',
-        message: 'Reset all settings to defaults?\n\nYour notes are not affected.',
-        confirmLabel: 'Reset settings',
+        title: t('settings.about.resetConfirmTitle'),
+        message: t('settings.about.resetConfirmMessage'),
+        confirmLabel: t('settings.about.resetConfirmAction'),
         danger: true,
       });
 
@@ -3749,9 +3704,9 @@ function renderAboutSection(host) {
       appearance = deepMerge(DEFAULT_APPEARANCE, {});
       applyAppearance();
       renderSettingsBody();
-      toast('All settings reset', 'success');
+      toast(t('settings.about.resetToast'), 'success');
     },
-  }, 'Reset all settings'));
+  }, t('settings.about.resetAllButton')));
   host.append(danger);
 }
 
@@ -3765,21 +3720,21 @@ function sectionHeader(title, subtitle) {
 
 function renderDeviceOnlyToggle(a) {
   const group = el('div', { class: 'yanta-settings-group' });
-  group.append(el('div', { class: 'yanta-settings-group-title' }, 'Scope'));
+  group.append(el('div', { class: 'yanta-settings-group-title' }, t('settings.sync.scope')));
 
   const row = el('label', { class: 'yanta-settings-toggle' });
   const cb = el('input', { type: 'checkbox' });
   cb.checked = !!a.deviceOnly;
 cb.addEventListener('change', async () => {
   await saveAppearance({ deviceOnly: cb.checked });
-  toast(cb.checked ? 'Settings saved for this device only' : 'Settings now synced across devices', 'success');
+  toast(cb.checked ? t('settings.sync.deviceOnlySavedToast') : t('settings.sync.deviceSyncedToast'), 'success');
   rerenderSettingsBody();
 });
   row.append(cb);
   row.append(el('div', { class: 'yanta-settings-toggle-meta' },
-    el('div', { class: 'yanta-settings-toggle-label' }, 'For this device only'),
+    el('div', { class: 'yanta-settings-toggle-label' }, t('settings.sync.deviceOnlyLabel')),
     el('div', { class: 'yanta-settings-toggle-hint' },
-      'When on, these settings stay on this device and are not synced or exported with your notes.'),
+      t('settings.sync.deviceOnlyHint')),
   ));
   group.append(row);
   return group;

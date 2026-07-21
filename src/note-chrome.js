@@ -11,6 +11,7 @@ import {
   toast,
   uid,
 } from './core.js';
+import { t } from './i18n/index.js';
 
 import {
   insertAtCursor,
@@ -83,7 +84,7 @@ function currentTags() {
 
 function tagSummaryLabel() {
   const count = currentTags().length;
-  return count ? `Tags · ${count}` : 'Tags';
+  return count ? t('note.tags.summary', { count }) : t('note.tags.label');
 }
 
 function closeTagsPopover() {
@@ -100,25 +101,25 @@ function renderTagsPopoverBody(body) {
   body.replaceChildren();
 
   if (!note) {
-    body.append(el('div', { class: 'yanta-tags-empty' }, 'Open a note first.'));
+    body.append(el('div', { class: 'yanta-tags-empty' }, t('note.openFirst')));
     return;
   }
 
   const tags = note.tags || [];
 
   const currentWrap = el('div', { class: 'yanta-tags-section' });
-  currentWrap.append(el('div', { class: 'yanta-tags-section-title' }, 'This note'));
+  currentWrap.append(el('div', { class: 'yanta-tags-section-title' }, t('note.tags.thisNote')));
 
   const pills = el('div', { class: 'yanta-tags-pills' });
 
   if (!tags.length) {
-    pills.append(el('div', { class: 'yanta-tags-empty' }, 'No tags yet.'));
+    pills.append(el('div', { class: 'yanta-tags-empty' }, t('note.tags.noTags')));
   } else {
     for (const tag of tags) {
       const pill = el('button', {
         type: 'button',
         class: 'yanta-tags-pill active',
-        title: `Remove #${tag}`,
+        title: t('note.tags.remove', { tag }),
         onclick: async () => {
           removeTag(tag);
           renderTagsPopoverBody(body);
@@ -135,7 +136,7 @@ function renderTagsPopoverBody(body) {
 
   const input = el('input', {
     class: 'text-input yanta-tags-input',
-    placeholder: 'Add tag and press Enter…',
+    placeholder: t('note.tags.addPlaceholder'),
     autocomplete: 'off',
     spellcheck: 'false',
   });
@@ -169,18 +170,18 @@ function renderTagsPopoverBody(body) {
     .slice(0, 18);
 
   const suggestWrap = el('div', { class: 'yanta-tags-section' });
-  suggestWrap.append(el('div', { class: 'yanta-tags-section-title' }, 'Suggestions'));
+  suggestWrap.append(el('div', { class: 'yanta-tags-section-title' }, t('note.tags.suggestions')));
 
   const suggestPills = el('div', { class: 'yanta-tags-pills' });
 
   if (!suggestions.length) {
-    suggestPills.append(el('div', { class: 'yanta-tags-empty' }, 'No suggestions.'));
+    suggestPills.append(el('div', { class: 'yanta-tags-empty' }, t('note.tags.noSuggestions')));
   } else {
     for (const [tag, count] of suggestions) {
       const btn = el('button', {
         type: 'button',
         class: 'yanta-tags-pill',
-        title: `Add #${tag}`,
+        title: t('note.tags.add', { tag }),
         onclick: () => {
           addTag(tag);
           renderTagsPopoverBody(body);
@@ -205,15 +206,15 @@ function openTagsPopover(anchor) {
   tagsPopover = el('div', {
     class: 'yanta-tags-popover',
     role: 'dialog',
-    'aria-label': 'Manage note tags',
+    'aria-label': t('note.tags.manageAria'),
   });
 
   const head = el('div', { class: 'yanta-tags-popover-head' },
-    el('strong', {}, 'Manage tags'),
+    el('strong', {}, t('note.tags.manageTitle')),
     el('button', {
       type: 'button',
       class: 'icon-btn',
-      title: 'Close',
+      title: t('common.close'),
       onclick: closeTagsPopover,
     })
   );
@@ -265,7 +266,7 @@ function iconButton({
         await onClick?.(btn, e);
       } catch (err) {
         console.error(err);
-        toast('Action failed', 'error');
+        toast(t('note.actionFailed'), 'error');
       }
     },
   });
@@ -296,7 +297,7 @@ function ensureNoteChromeNodes() {
     noteTitle = el('input', {
       id: 'noteTitle',
       class: 'note-title yanta-canonical-note-title',
-      placeholder: 'Untitled note',
+      placeholder: t('note.untitledPlaceholder'),
       autocomplete: 'off',
       spellcheck: 'false',
     });
@@ -439,7 +440,7 @@ function updateViewToggleButton() {
   const preview = state.view === 'preview';
 
   viewToggleBtn.innerHTML = lucide(preview ? 'pencil' : 'eye', 18);
-  viewToggleBtn.title = preview ? 'Switch to edit' : 'Switch to preview';
+  viewToggleBtn.title = preview ? t('note.toolbar.switchToEdit') : t('note.toolbar.switchToPreview');
   viewToggleBtn.setAttribute('aria-label', viewToggleBtn.title);
 }
 
@@ -471,12 +472,12 @@ function insertEventTextOnly() {
 
   insertAtCursor(`[Event](${calendarEventUrl(eventId)})`);
 
-  toast('Event text link inserted', 'success');
+  toast(t('note.eventLinkInserted'), 'success');
 }
 
 async function addLinkedEventToNote() {
   if (!state.currentNoteId) {
-    toast('Open a note first', 'error');
+    toast(t('note.openFirst'), 'error');
     return;
   }
 
@@ -502,7 +503,7 @@ async function addLinkedEventToNote() {
     return;
   }
 
-  toast('Calendar event creation is not available here', 'error');
+  toast(t('note.eventCreateUnavailable'), 'error');
 }
 
 function insertSourceLink() {
@@ -514,42 +515,42 @@ function openInsertMenu(anchor, deps) {
 
   showMenu(r.left, r.top - 6, [
     {
-      label: 'Add List Entry',
+      label: t('note.add.listEntry'),
       icon: 'list-plus',
       action: insertListItem,
     },
     {
-      label: 'Add Image',
+      label: t('note.add.image'),
       icon: 'image-plus',
       action: deps.openImage,
     },
     {
-      label: 'Add Drawing',
+      label: t('note.add.drawing'),
       icon: 'line-squiggle',
       action: deps.createDrawing,
     },
     {
-      label: 'Link Note',
+      label: t('note.add.linkNote'),
       icon: 'brackets',
       action: () => openNoteLinkPicker(anchor),
     },
     {
-      label: 'Add Citation',
+      label: t('note.add.citation'),
       icon: 'quote',
       action: deps.openCitation,
     },
     {
-      label: 'Link Event',
+      label: t('note.add.linkEvent'),
       icon: 'calendar-plus',
       action: insertEventTextOnly,
     },
     {
-      label: 'Link Source',
+      label: t('note.add.linkSource'),
       icon: 'rss',
       action: insertSourceLink,
     },
     {
-      label: 'Add Icon',
+      label: t('note.add.icon'),
       icon: 'shapes',
       action: deps.openIcon,
     },
@@ -581,27 +582,27 @@ function openFormatMenu(anchor) {
     },
     'hr',
     {
-      label: 'Strong',
+      label: t('note.format.strong'),
       icon: 'bold',
       action: () => applyEditorFormat('bold'),
     },
     {
-      label: 'Italic',
+      label: t('note.format.italic'),
       icon: 'italic',
       action: () => applyEditorFormat('italic'),
     },
     {
-      label: 'Strikethrough',
+      label: t('note.format.strikethrough'),
       icon: 'strikethrough',
       action: () => applyEditorFormat('strike'),
     },
     {
-      label: 'Create Link',
+      label: t('note.format.createLink'),
       icon: 'link',
       action: () => applyEditorFormat('link'),
     },
     {
-      label: 'Highlight',
+      label: t('note.format.highlight'),
       icon: 'highlighter',
       action: () => applyEditorFormat('highlight'),
     },
@@ -618,18 +619,18 @@ function openMoreMenu(anchor, deps) {
 
   showMenu(r.right, r.top - 6, [
     {
-      label: 'Move to Trash',
+      label: t('note.more.trash'),
       icon: 'trash',
       danger: true,
       action: deps.deleteNote,
     },
     {
-      label: 'Duplicate',
+      label: t('note.more.duplicate'),
       icon: 'sticky-notes',
       action: () => duplicateNoteById(note.id),
     },
     {
-      label: 'Export as .md',
+      label: t('note.more.exportMd'),
       icon: 'download',
       action: () => deps.exportNote?.(note),
     },
@@ -669,7 +670,7 @@ function buildDesktopActions(deps) {
   const wrap = el('div', {
     class: 'yanta-desktop-note-actions',
     role: 'toolbar',
-    'aria-label': 'Note actions',
+    'aria-label': t('note.toolbar.actions'),
   });
 
   const note = currentNote();
@@ -680,9 +681,9 @@ function buildDesktopActions(deps) {
   });
 
   views.append(
-    viewModeButton('edit', 'pencil', 'Edit-View'),
-    viewModeButton('split', 'columns-2', 'Split-View'),
-    viewModeButton('preview', 'eye', 'Preview')
+    viewModeButton('edit', 'pencil', t('note.toolbar.editView')),
+    viewModeButton('split', 'columns-2', t('note.toolbar.splitView')),
+    viewModeButton('preview', 'eye', t('note.toolbar.preview'))
   );
 
   // --- Left Group: Tags, Tools, Primary, More ---
@@ -699,20 +700,20 @@ function buildDesktopActions(deps) {
 
   const add = iconButton({
     icon: 'plus',
-    title: 'Add content',
+    title: t('note.toolbar.addContent'),
     className: 'primary-ish',
     onClick: (btn) => openInsertMenu(btn, deps),
   });
 
   const appearance = iconButton({
     icon: 'palette',
-    title: 'Icon & Color',
+    title: t('note.toolbar.iconColor'),
     onClick: editCurrentNoteAppearance,
   });
 
   const format = iconButton({
     icon: 'pilcrow',
-    title: 'Format selected text',
+    title: t('note.toolbar.formatSelected'),
     onClick: openFormatMenu,
   });
 
@@ -727,14 +728,14 @@ function buildDesktopActions(deps) {
   const share = iconButton({
     id: 'btn-share',
     icon: 'share-2',
-    title: 'Share',
+    title: t('note.toolbar.share'),
     onClick: deps.openShare,
   });
 
   const pin = iconButton({
     id: 'btn-pin',
     icon: note?.pinned ? 'pin-off' : 'pin',
-    title: note?.pinned ? 'Unpin' : 'Pin',
+    title: note?.pinned ? t('note.toolbar.unpin') : t('note.toolbar.pin'),
     onClick: async () => {
       togglePin();
       refreshHeaderButtons();
@@ -743,7 +744,7 @@ function buildDesktopActions(deps) {
 
   const event = iconButton({
     icon: 'calendar-plus',
-    title: 'Add linked Event',
+    title: t('note.toolbar.addLinkedEvent'),
     onClick: addLinkedEventToNote,
   });
 
@@ -753,7 +754,7 @@ function buildDesktopActions(deps) {
   // 4. More (Standalone)
   const more = iconButton({
     icon: 'ellipsis-vertical',
-    title: 'More',
+    title: t('note.toolbar.more'),
     onClick: (btn) => openMoreMenu(btn, deps),
   });
   leftGroup.append(more);
@@ -767,7 +768,7 @@ function buildDesktopActions(deps) {
 function buildTagsButton() {
   const btn = iconButton({
     icon: 'tags',
-    title: 'Manage tags',
+    title: t('note.tags.manageTitle'),
     className: 'yanta-tags-button',
     onClick: openTagsPopover,
   });
@@ -788,7 +789,7 @@ function buildHeader(deps) {
 
   const back = iconButton({
     icon: 'arrow-left',
-    title: 'Back',
+    title: t('common.back'),
     className: 'yanta-note-back-btn',
     onClick: goBackFromNote,
   });
@@ -810,7 +811,7 @@ function buildHeader(deps) {
     const group = el('div', {
       class: 'yanta-note-head-group',
       role: 'group',
-      'aria-label': 'Note actions',
+      'aria-label': t('note.toolbar.actions'),
     });
 
     const note = currentNote();
@@ -818,7 +819,7 @@ function buildHeader(deps) {
     const pin = iconButton({
       id: 'btn-pin',
       icon: note?.pinned ? 'pin-off' : 'pin',
-      title: note?.pinned ? 'Unpin' : 'Pin',
+      title: note?.pinned ? t('note.toolbar.unpin') : t('note.toolbar.pin'),
       onClick: async () => {
         togglePin();
         refreshHeaderButtons();
@@ -827,14 +828,14 @@ function buildHeader(deps) {
 
     const event = iconButton({
       icon: 'calendar-plus',
-      title: 'Add linked Event',
+      title: t('note.toolbar.addLinkedEvent'),
       onClick: addLinkedEventToNote,
     });
 
     const share = iconButton({
       id: 'btn-share',
       icon: 'share-2',
-      title: 'Share this Note',
+      title: t('note.toolbar.shareThis'),
       onClick: deps.openShare,
     });
 
@@ -881,7 +882,7 @@ function commitMirrorTitleInput(input) {
   const note = currentNote();
 
   if (note) {
-    note.title = input.value.trim() || note.title || 'Untitled';
+    note.title = input.value.trim() || note.title || t('note.untitled');
     note.updated = Date.now();
   }
 
@@ -899,7 +900,7 @@ function blurMirrorTitleInput(input) {
   const note = currentNote();
 
   if (note) {
-    note.title = input.value.trim() || 'Untitled';
+    note.title = input.value.trim() || t('note.untitled');
     note.updated = Date.now();
   }
 
@@ -921,7 +922,7 @@ function createPaneTitleRow(surface) {
   const input = el('input', {
     class: 'yanta-note-title-mirror',
     value: canonical?.value || '',
-    placeholder: 'Untitled note',
+    placeholder: t('note.untitledPlaceholder'),
     autocomplete: 'off',
     spellcheck: 'false',
   });
@@ -1015,20 +1016,20 @@ function buildFooter(deps) {
 
   const add = iconButton({
     icon: 'plus',
-    title: 'Add content',
+    title: t('note.toolbar.addContent'),
     className: 'primary-ish',
     onClick: (btn) => openInsertMenu(btn, deps),
   });
 
   const appearance = iconButton({
     icon: 'palette',
-    title: 'Icon & Color',
+    title: t('note.toolbar.iconColor'),
     onClick: editCurrentNoteAppearance,
   });
 
 formatBtn = iconButton({
   icon: 'pilcrow',
-  title: 'Format selected text',
+  title: t('note.toolbar.formatSelected'),
   onClick: openFormatMenu,
 });
 
@@ -1036,13 +1037,13 @@ formatBtn.dataset.noteAction = 'format';
 
   viewToggleBtn = iconButton({
     icon: state.view === 'preview' ? 'pencil' : 'eye',
-    title: state.view === 'preview' ? 'Switch to edit' : 'Switch to preview',
+    title: state.view === 'preview' ? t('note.toolbar.switchToEdit') : t('note.toolbar.switchToPreview'),
     onClick: toggleEditPreview,
   });
 
   const more = iconButton({
     icon: 'ellipsis-vertical',
-    title: 'More',
+    title: t('note.toolbar.more'),
     onClick: (btn) => openMoreMenu(btn, deps),
   });
 
@@ -1065,7 +1066,7 @@ function refreshHeaderButtons() {
 
     pin.innerHTML = lucide(note.pinned ? 'pin-off' : 'pin', 18);
     pin.classList.toggle('active', !!note.pinned);
-    pin.title = note.pinned ? 'Unpin' : 'Pin';
+    pin.title = note.pinned ? t('note.toolbar.unpin') : t('note.toolbar.pin');
     pin.setAttribute('aria-label', pin.title);
   });
 
@@ -1099,13 +1100,13 @@ function openNoteLinkPicker(anchor) {
   notePicker = el('div', {
     class: 'yanta-note-link-picker',
     role: 'dialog',
-    'aria-label': 'Link note',
+    'aria-label': t('note.link.aria'),
   });
 
   const input = el('input', {
     class: 'text-input',
     type: 'search',
-    placeholder: 'Search notes…',
+    placeholder: t('note.link.searchPlaceholder'),
     autocomplete: 'off',
   });
 
@@ -1126,7 +1127,7 @@ function openNoteLinkPicker(anchor) {
     list.replaceChildren();
 
     if (!notes.length) {
-      list.append(el('div', { class: 'yanta-note-link-empty' }, 'No notes found'));
+      list.append(el('div', { class: 'yanta-note-link-empty' }, t('note.link.noNotes')));
       return;
     }
 
@@ -1135,14 +1136,14 @@ function openNoteLinkPicker(anchor) {
         type: 'button',
         class: 'yanta-note-link-option',
         onclick: () => {
-          insertAtCursor(`[[${note.title || 'Untitled'}]]`);
+          insertAtCursor(`[[${note.title || t('note.untitled')}]]`);
           closeNoteLinkPicker();
         },
       });
 
       btn.innerHTML = `
         <span>${lucide(note.icon || 'file-text', 15)}</span>
-        <strong>${note.title || 'Untitled'}</strong>
+        <strong>${note.title || t('note.untitled')}</strong>
       `;
 
       list.append(btn);

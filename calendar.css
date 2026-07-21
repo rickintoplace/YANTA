@@ -1028,7 +1028,7 @@
 }
 
 .yanta-cal-event-content {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 4px;
   min-width: 0;
@@ -1145,7 +1145,7 @@
 }
 
 .yanta-cal-event-content {
-  display: inline-flex;
+  display: flex;
   align-items: center;
   gap: 4px;
 

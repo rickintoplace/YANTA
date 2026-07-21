@@ -9,6 +9,7 @@ import {
   store,
   toast,
 } from './core.js';
+import { t } from './i18n/index.js';
 
 export async function refreshSearchIndexForNote(note) {
   if (!note) return;
@@ -66,7 +67,7 @@ export async function renameNoteById(noteId, value, {
   const note = state.notes.get(noteId);
   if (!note) return false;
 
-  const clean = String(value || '').trim() || 'Untitled';
+  const clean = String(value || '').trim() || t('note.untitled');
 
   if (note.title === clean) {
     return note.title;
@@ -103,7 +104,7 @@ export async function renameNoteById(noteId, value, {
   window.dispatchEvent(new CustomEvent('yanta-dashboard-refresh'));
 
   if (!silent) {
-    toast('Note renamed', 'success');
+    toast(t('items.noteRenamed'), 'success');
   }
 
   return note.title;
@@ -117,7 +118,7 @@ export async function renameFolderById(folderId, value, {
   const folder = state.folders.get(folderId);
   if (!folder) return false;
 
-  const clean = String(value || '').trim() || 'Folder';
+  const clean = String(value || '').trim() || t('items.folderFallback');
 
   if (folder.name === clean) {
     return folder.name;
@@ -154,7 +155,7 @@ export async function renameFolderById(folderId, value, {
   }
 
   if (!silent) {
-    toast('Folder renamed', 'success');
+    toast(t('items.folderRenamed'), 'success');
   }
 
   return folder.name;
@@ -162,7 +163,7 @@ export async function renameFolderById(folderId, value, {
 
 export async function duplicateNoteById(noteId, {
   openCreated = false,
-  toastMessage = 'Note duplicated',
+  toastMessage = t('items.noteDuplicated'),
 } = {}) {
   const src = state.notes.get(noteId);
   if (!src) return null;
@@ -179,7 +180,7 @@ export async function duplicateNoteById(noteId, {
   const copy = {
     ...src,
     id,
-    title: `${src.title || 'Untitled'} (copy)`,
+    title: t('items.copySuffix', { title: src.title || t('note.untitled') }),
     pinned: false,
     dashboardPinnedOrder: undefined,
     created: now,

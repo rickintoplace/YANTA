@@ -615,6 +615,10 @@ function persistDrawLibraryItems(payload) {
   Derives a human-readable library name from a libraries.excalidraw.com URL,
   e.g. ".../youritjang/stick-figures.excalidrawlib" -> "Stick Figures".
 */
+export function excalidrawLibraryNameFromUrl(rawUrl) {
+  return libraryNameFromUrl(rawUrl);
+}
+
 function libraryNameFromUrl(rawUrl) {
   try {
     const { pathname } = new URL(rawUrl);

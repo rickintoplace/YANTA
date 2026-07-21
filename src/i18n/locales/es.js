@@ -392,6 +392,7 @@ export default {
       one: '¿Añadir {count} elemento de esta biblioteca de Excalidraw a YANTA? Estará disponible en dibujos y como sticker de chat.',
       other: '¿Añadir {count} elementos de esta biblioteca de Excalidraw a YANTA? Estarán disponibles en dibujos y como stickers de chat.',
     },
+    libraryImportConfirmShort: '¿Añadir esta biblioteca de Excalidraw a YANTA? Estará disponible en dibujos y como stickers de chat.',
     libraryImportAction: 'Añadir biblioteca',
     libraryImportDone: {
       one: 'Se añadió {count} elemento de «{name}» a tu biblioteca',

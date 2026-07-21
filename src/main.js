@@ -63,7 +63,7 @@ import {
 import {
   setupPublicShareAutoPublisher,
 } from './public-share/public-share-publisher.js';
-import { setupDraw, createDrawingAndInsert, importExcalidrawFileIntoCurrent, importExcalidrawLibraryFromUrl } from './draw.js';
+import { setupDraw, createDrawingAndInsert, importExcalidrawFileIntoCurrent, importExcalidrawLibraryFromUrl, excalidrawLibraryNameFromUrl } from './draw.js';
 import { setupCitations, openCitationManager } from './citations.js';
 import {
   installVaultStoreBridge,
@@ -1852,18 +1852,19 @@ async function runExcalidrawLibraryImport(libraryUrl) {
   try {
     const { yantaConfirm } = await import('./dialogs.js');
 
-    const result = await importExcalidrawLibraryFromUrl(libraryUrl, {
-      confirm: ({ sourceName, count }) =>
-        yantaConfirm({
-          kicker: t('image.libraryImportKicker'),
-          title: sourceName,
-          message: t('image.libraryImportConfirm', { count }),
-          confirmLabel: t('image.libraryImportAction'),
-          icon: 'library',
-        }),
+    // Confirm before fetching so the dialog is independent of the network:
+    // the user always sees it, and a later failure is clearly a fetch problem.
+    const ok = await yantaConfirm({
+      kicker: t('image.libraryImportKicker'),
+      title: excalidrawLibraryNameFromUrl(libraryUrl),
+      message: t('image.libraryImportConfirmShort'),
+      confirmLabel: t('image.libraryImportAction'),
+      icon: 'library',
     });
 
-    if (result.cancelled) return;
+    if (!ok) return;
+
+    const result = await importExcalidrawLibraryFromUrl(libraryUrl);
 
     toast(
       t('image.libraryImportDone', {
@@ -1895,6 +1896,18 @@ function bootDone() {
 }
 
 async function init() {
+  /*
+    Capture (and immediately clear) a pending "#addLibrary=" deep link at the
+    very start, before any boot-time hash routing can consume it. The import
+    itself runs after bootDone() so its confirm dialog is not hidden behind the
+    boot splash.
+  */
+  const pendingExcalidrawLibraryUrl = addLibraryUrlFromHash();
+  if (pendingExcalidrawLibraryUrl) {
+    console.info('[YANTA] Pending Excalidraw library import:', pendingExcalidrawLibraryUrl);
+    history.replaceState({}, '', location.pathname + location.search);
+  }
+
   // Load the active locale (+ EN fallback) before the first render, so t() and
   // [data-i18n] markup resolve on the very first paint rather than flashing keys.
   await initI18n();
@@ -2393,16 +2406,6 @@ async function init() {
 
   // setupCalendar();
   await syncRestore();
-
-  /*
-    Capture (and clear) a pending "#addLibrary=" deep link now, before hash
-    routing consumes it. The import itself runs after bootDone() so its confirm
-    dialog is not hidden behind the boot splash.
-  */
-  const pendingExcalidrawLibraryUrl = addLibraryUrlFromHash();
-  if (pendingExcalidrawLibraryUrl) {
-    history.replaceState({}, '', location.pathname + location.search);
-  }
 
   let sharedOpen = null;
 

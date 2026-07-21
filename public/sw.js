@@ -5,7 +5,7 @@
 // User data is in IndexedDB/Yjs, not in this cache.
 // ============================================================
 
-const CACHE_VERSION = 'yanta-app-v19';
+const CACHE_VERSION = 'yanta-app-v20';
 // Only files that actually exist at these paths in the build. CSS/JS are
 // hashed into /assets by Vite and cached at runtime by the fetch handler —
 // they must NOT be listed here (a 404 here would fail the whole install).

@@ -392,6 +392,7 @@ export default {
       one: '{count} Element aus dieser Excalidraw-Bibliothek zu YANTA hinzufügen? Es steht in Zeichnungen und als Chat-Sticker zur Verfügung.',
       other: '{count} Elemente aus dieser Excalidraw-Bibliothek zu YANTA hinzufügen? Sie stehen in Zeichnungen und als Chat-Sticker zur Verfügung.',
     },
+    libraryImportConfirmShort: 'Diese Excalidraw-Bibliothek zu YANTA hinzufügen? Sie steht in Zeichnungen und als Chat-Sticker zur Verfügung.',
     libraryImportAction: 'Bibliothek hinzufügen',
     libraryImportDone: {
       one: '{count} Element aus „{name}“ zu deiner Bibliothek hinzugefügt',

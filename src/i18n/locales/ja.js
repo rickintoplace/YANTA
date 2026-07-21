@@ -389,6 +389,7 @@ export default {
     libraryImportConfirm: {
       other: 'この Excalidraw ライブラリの {count} 個のアイテムを YANTA に追加しますか？描画で使えるほか、チャットのステッカーとしても送信できます。',
     },
+    libraryImportConfirmShort: 'この Excalidraw ライブラリを YANTA に追加しますか？描画で使えるほか、チャットのステッカーとしても送信できます。',
     libraryImportAction: 'ライブラリを追加',
     libraryImportDone: {
       other: '「{name}」から {count} 個のアイテムをライブラリに追加しました',

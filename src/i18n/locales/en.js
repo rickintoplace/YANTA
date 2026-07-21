@@ -399,6 +399,7 @@ export default {
       one: 'Add {count} item from this Excalidraw library to YANTA? It will be available in drawings and as a Chat sticker.',
       other: 'Add {count} items from this Excalidraw library to YANTA? They will be available in drawings and as Chat stickers.',
     },
+    libraryImportConfirmShort: 'Add this Excalidraw library to YANTA? It will be available in drawings and as Chat stickers.',
     libraryImportAction: 'Add library',
     libraryImportDone: {
       one: 'Added {count} item from “{name}” to your library',

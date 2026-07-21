@@ -1904,9 +1904,25 @@ async function init() {
   */
   const pendingExcalidrawLibraryUrl = addLibraryUrlFromHash();
   if (pendingExcalidrawLibraryUrl) {
-    console.info('[YANTA] Pending Excalidraw library import:', pendingExcalidrawLibraryUrl);
+    console.info('[YANTA] Pending Excalidraw library import (boot):', pendingExcalidrawLibraryUrl);
     history.replaceState({}, '', location.pathname + location.search);
   }
+
+  /*
+    Also handle "#addLibrary=" when YANTA is ALREADY running. An installed PWA
+    (or an existing tab the browser reuses) is focused by the Excalidraw redirect,
+    which only changes the hash — there is no fresh init(), so the boot capture
+    above never sees it. Registered here, before the route handlers, so it
+    consumes the deep link before routing sends the surface to the dashboard.
+  */
+  window.addEventListener('hashchange', () => {
+    const url = addLibraryUrlFromHash();
+    if (!url) return;
+
+    console.info('[YANTA] Pending Excalidraw library import (hashchange):', url);
+    history.replaceState({}, '', location.pathname + location.search);
+    runExcalidrawLibraryImport(url);
+  });
 
   // Load the active locale (+ EN fallback) before the first render, so t() and
   // [data-i18n] markup resolve on the very first paint rather than flashing keys.

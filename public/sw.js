@@ -5,7 +5,7 @@
 // User data is in IndexedDB/Yjs, not in this cache.
 // ============================================================
 
-const CACHE_VERSION = 'yanta-app-v20';
+const CACHE_VERSION = 'yanta-app-v21';
 // Only files that actually exist at these paths in the build. CSS/JS are
 // hashed into /assets by Vite and cached at runtime by the fetch handler —
 // they must NOT be listed here (a 404 here would fail the whole install).
@@ -81,32 +81,49 @@ self.addEventListener('fetch', (event) => {
   }
 
   /*
-    Same-origin navigation: app-shell strategy (cache first, revalidate in
-    the background). Why: on app reopen (Android kills the WebView freely)
-    a network-first shell used to block first paint for as long as a weak
-    connection needed — tens of seconds on mobile. The cached shell paints
-    instantly; a fresh copy is fetched alongside and used on the NEXT boot.
-    Hashed asset URLs referenced by a stale shell stay valid via the
-    stale-while-revalidate asset cache below.
+    Same-origin navigation: network-first with a short timeout, falling back
+    to the cached app shell.
+
+    Why network-first: the shell (/index.html, no-store, tiny) names the hashed
+    JS/CSS bundle. A pure cache-first shell meant a fresh deploy did not reach
+    an installed client until a LATER boot — users kept running the previous
+    bundle after every deploy. Network-first serves the just-deployed shell
+    immediately.
+
+    Why the timeout: on app reopen (Android kills the WebView freely) a slow
+    or offline network must never block first paint. If the network has not
+    answered within TIMEOUT_MS we paint the cached shell instantly; the network
+    copy still lands in the cache for the next boot. Hashed asset URLs stay
+    valid across shells via the stale-while-revalidate asset cache below.
   */
   if (req.mode === 'navigate' && url.origin === location.origin) {
-    event.respondWith(
-      caches.match('/index.html').then((cached) => {
-        const fresh = fetch(req)
-          .then((res) => {
-            if (res.ok) {
-              const copy = res.clone();
-              caches.open(CACHE_VERSION).then((cache) => {
-                cache.put('/index.html', copy).catch(() => {});
-              });
-            }
-            return res;
-          })
-          .catch(() => cached);
+    const SHELL_NETWORK_TIMEOUT_MS = 2500;
 
-        return cached || fresh;
-      })
-    );
+    event.respondWith((async () => {
+      const cached = await caches.match('/index.html');
+
+      const network = fetch(req).then((res) => {
+        if (res.ok) {
+          const copy = res.clone();
+          caches.open(CACHE_VERSION).then((cache) => {
+            cache.put('/index.html', copy).catch(() => {});
+          });
+        }
+        return res;
+      });
+
+      // First-ever load (nothing cached): the network is the only option.
+      if (!cached) return network;
+
+      const timeout = new Promise((resolve) => {
+        setTimeout(() => resolve(cached), SHELL_NETWORK_TIMEOUT_MS);
+      });
+
+      return Promise.race([
+        network.catch(() => cached),
+        timeout,
+      ]);
+    })());
     return;
   }
 

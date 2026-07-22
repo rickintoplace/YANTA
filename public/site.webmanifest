@@ -13,7 +13,7 @@
     "background_color": "#fdfcfa",
     "categories": ["productivity", "utilities"],
     "launch_handler": {
-      "client_mode": "focus-existing"
+      "client_mode": "navigate-existing"
     },
     "icons": [
       {

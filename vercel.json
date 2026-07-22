@@ -41,6 +41,10 @@
     {
       "source": "/get-app",
       "destination": "/index.html"
+    },
+    {
+      "source": "/add-library",
+      "destination": "/index.html"
     }
   ],
   "headers": [

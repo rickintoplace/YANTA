@@ -631,6 +631,20 @@ export function excalidrawLibraryNameFromUrl(rawUrl) {
   return libraryNameFromUrl(rawUrl);
 }
 
+/*
+  Return URL for Excalidraw's "Browse Libraries" flow. A DEDICATED path (not
+  "/") is deliberate: libraries.excalidraw.com redirects back to
+  <returnUrl>#addLibrary=<url>. If the return URL were the app root, a browser
+  reusing the already-open YANTA tab could perform a same-document hash
+  navigation — which, depending on PWA launch handling, may deliver neither a
+  hashchange nor a launchQueue entry (deep link silently lost). A distinct
+  path forces a real cross-document navigation, so the app always boots and
+  the boot capture in main.js reliably picks the deep link up.
+*/
+function excalidrawLibraryReturnUrl() {
+  return `${location.origin}/add-library`;
+}
+
 function libraryNameFromUrl(rawUrl) {
   try {
     const { pathname } = new URL(rawUrl);
@@ -4951,6 +4965,7 @@ async function mountInlineDrawing(embed, sourceNoteId, drawingId, drawing) {
       ),
       theme,
       name: drawing.title || 'Drawing',
+      libraryReturnUrl: excalidrawLibraryReturnUrl(),
 
       excalidrawAPI: (api) => {
         apiRef.current = api;
@@ -5536,6 +5551,7 @@ export async function openDrawModal(
       ),
       theme,
       name: current.title || 'Drawing',
+      libraryReturnUrl: excalidrawLibraryReturnUrl(),
 
       excalidrawAPI: (api) => {
         apiRef.current = api;

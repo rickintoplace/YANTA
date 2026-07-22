@@ -1857,6 +1857,19 @@ function addLibraryUrlFrom(input = location.href) {
 }
 
 /*
+  Removes a consumed addLibrary deep link from the URL. The dedicated
+  "/add-library" return path (see draw.js excalidrawLibraryReturnUrl) is
+  normalized back to the app root so reloads and bookmarks stay clean.
+*/
+function clearAddLibraryUrl() {
+  const path = location.pathname.replace(/\/+$/, '') === '/add-library'
+    ? '/'
+    : location.pathname;
+
+  history.replaceState({}, '', path + location.search);
+}
+
+/*
   Runs the actual import + confirmation for a captured library URL. Called
   AFTER the boot loader is released (bootDone) — never before, because the
   confirm modal would otherwise render behind the full-screen boot splash and
@@ -1959,7 +1972,7 @@ async function init() {
   const bootLibraryUrl = addLibraryUrlFrom();
   if (bootLibraryUrl) {
     console.info('[YANTA] Pending Excalidraw library import (boot):', bootLibraryUrl);
-    history.replaceState({}, '', location.pathname + location.search);
+    clearAddLibraryUrl();
     requestExcalidrawLibraryImport(bootLibraryUrl);
   }
 
@@ -1980,7 +1993,7 @@ async function init() {
 
     // Clear the deep link from our own URL so it can't retrigger.
     if (addLibraryUrlFrom(location.href)) {
-      history.replaceState({}, '', location.pathname + location.search);
+      clearAddLibraryUrl();
     }
 
     requestExcalidrawLibraryImport(url);

@@ -415,10 +415,21 @@ export function setupChatComposer({
      * Restores the draft for the active room.
      */
     async setRoom(roomId) {
-      currentRoomId = String(roomId || '');
+      const nextRoomId = String(roomId || '');
+      const roomChanged = nextRoomId !== currentRoomId;
 
-      // Panel gehört zum vorherigen Gespräch — beim Raumwechsel schließen.
-      expressionsApi?.closeChatExpressions?.(form);
+      currentRoomId = nextRoomId;
+
+      /*
+        Panel gehört zum vorherigen Gespräch — NUR beim echten Raumwechsel
+        schließen. setRoom läuft auch bei jedem openChat()-Re-Entry (popstate,
+        Timeline-Reload) für denselben Raum; ein unbedingtes Schließen konnte
+        dann ein zweites history.back() auslösen und den Raum-Eintrag mit
+        poppen (Nutzer flog aus der Konversation in die Raumliste).
+      */
+      if (roomChanged) {
+        expressionsApi?.closeChatExpressions?.(form);
+      }
 
       restoring = true;
 

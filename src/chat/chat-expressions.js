@@ -632,14 +632,40 @@ function destroyPanel(panel) {
   panel.remove();
 }
 
+/*
+  history.back() is ASYNCHRONOUS: the overlay entry stays the current history
+  state until the browser processes the traversal. Any second closePanel() in
+  that window (Escape + click, outside close + toggle, composer setRoom during
+  a re-render, …) would still see the overlay on top and issue ANOTHER back(),
+  popping the chat-room entry too — throwing the user out of the conversation
+  into the room list. This flag makes the history pop single-shot.
+*/
+let overlayPopInFlight = false;
+
+function markOverlayPopInFlight() {
+  overlayPopInFlight = true;
+
+  const clear = () => {
+    overlayPopInFlight = false;
+    window.removeEventListener('popstate', clear);
+  };
+
+  window.addEventListener('popstate', clear);
+
+  // Safety net: never leave the guard stuck if no popstate ever arrives.
+  setTimeout(clear, 1500);
+}
+
 // User-initiated close: pop the panel's history entry so Back stays in sync.
 function closePanel(panel) {
   if (!panel) return;
 
   if (
     panel === openPanelRef &&
-    overlayIdFromState() === CHAT_EXPRESSIONS_OVERLAY_ID
+    overlayIdFromState() === CHAT_EXPRESSIONS_OVERLAY_ID &&
+    !overlayPopInFlight
   ) {
+    markOverlayPopInFlight();
     closeTopOverlay(() => destroyPanel(panel));
     return;
   }

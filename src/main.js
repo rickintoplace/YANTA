@@ -1831,13 +1831,29 @@ async function handlePresentPairHashIfNeeded(hash = location.hash) {
   Cloud proxy, confirm with the user, and merge it into the Personal Library —
   from where it becomes selectable in drawings and sendable as Chat stickers.
 */
-function addLibraryUrlFromHash(hash = location.hash) {
-  const raw = String(hash || '').replace(/^#/, '');
+/*
+  Extracts the "addLibrary" deep-link target from a full URL (or a bare hash
+  string). Checks both the fragment and the query string, exactly like
+  Excalidraw's own parseLibraryTokensFromUrl — the libraries site can return
+  either "#addLibrary=" or "?addLibrary=".
+*/
+function addLibraryUrlFrom(input = location.href) {
+  let hash = '';
+  let search = '';
 
-  if (!raw.startsWith('addLibrary=')) return '';
+  try {
+    const u = new URL(input, location.href);
+    hash = u.hash;
+    search = u.search;
+  } catch {
+    // A bare hash string such as "#addLibrary=..." was passed.
+    hash = String(input || '');
+  }
 
-  const libraryUrl = new URLSearchParams(raw).get('addLibrary');
-  return libraryUrl ? String(libraryUrl) : '';
+  const fromHash = new URLSearchParams(String(hash).replace(/^#/, '')).get('addLibrary');
+  const fromSearch = new URLSearchParams(String(search).replace(/^\?/, '')).get('addLibrary');
+
+  return String(fromHash || fromSearch || '');
 }
 
 /*
@@ -1846,8 +1862,16 @@ function addLibraryUrlFromHash(hash = location.hash) {
   confirm modal would otherwise render behind the full-screen boot splash and
   block the whole app boot on a dialog the user cannot see. Fire-and-forget.
 */
+let activeExcalidrawLibraryImportUrl = '';
+
 async function runExcalidrawLibraryImport(libraryUrl) {
   if (!libraryUrl) return;
+
+  // Dedupe: the same deep link can arrive through several channels at once
+  // (boot capture + launchQueue on a cold start, or hashchange + launchQueue
+  // on a warm PWA launch). Only run one dialog per URL at a time.
+  if (libraryUrl === activeExcalidrawLibraryImportUrl) return;
+  activeExcalidrawLibraryImportUrl = libraryUrl;
 
   try {
     const { yantaConfirm } = await import('./dialogs.js');
@@ -1876,6 +1900,36 @@ async function runExcalidrawLibraryImport(libraryUrl) {
   } catch (err) {
     console.error('[YANTA] Excalidraw library import failed', err);
     toast(t('image.libraryImportFailed'), 'error');
+  } finally {
+    activeExcalidrawLibraryImportUrl = '';
+  }
+}
+
+/*
+  Boot-aware entry point for every deep-link channel (boot capture, hashchange,
+  launchQueue). Before the boot splash is released the import is queued, so its
+  confirm dialog never renders behind the splash; after bootDone it runs at once.
+*/
+let excalidrawImportBootFinished = false;
+let queuedExcalidrawLibraryUrl = '';
+
+function requestExcalidrawLibraryImport(libraryUrl) {
+  if (!libraryUrl) return;
+
+  if (excalidrawImportBootFinished) {
+    runExcalidrawLibraryImport(libraryUrl);
+  } else {
+    queuedExcalidrawLibraryUrl = libraryUrl;
+  }
+}
+
+function flushQueuedExcalidrawLibraryImport() {
+  excalidrawImportBootFinished = true;
+
+  if (queuedExcalidrawLibraryUrl) {
+    const url = queuedExcalidrawLibraryUrl;
+    queuedExcalidrawLibraryUrl = '';
+    runExcalidrawLibraryImport(url);
   }
 }
 
@@ -1902,27 +1956,47 @@ async function init() {
     itself runs after bootDone() so its confirm dialog is not hidden behind the
     boot splash.
   */
-  const pendingExcalidrawLibraryUrl = addLibraryUrlFromHash();
-  if (pendingExcalidrawLibraryUrl) {
-    console.info('[YANTA] Pending Excalidraw library import (boot):', pendingExcalidrawLibraryUrl);
+  const bootLibraryUrl = addLibraryUrlFrom();
+  if (bootLibraryUrl) {
+    console.info('[YANTA] Pending Excalidraw library import (boot):', bootLibraryUrl);
     history.replaceState({}, '', location.pathname + location.search);
+    requestExcalidrawLibraryImport(bootLibraryUrl);
   }
 
   /*
-    Also handle "#addLibrary=" when YANTA is ALREADY running. An installed PWA
-    (or an existing tab the browser reuses) is focused by the Excalidraw redirect,
-    which only changes the hash — there is no fresh init(), so the boot capture
-    above never sees it. Registered here, before the route handlers, so it
-    consumes the deep link before routing sends the surface to the dashboard.
+    Also handle the deep link when YANTA is ALREADY running:
+      - hashchange: a non-PWA tab the redirect reuses (hash changes, no init);
+      - launchQueue: an INSTALLED PWA — `launch_handler: navigate-existing`
+        delivers the launch URL through window.launchQueue, NOT as a hashchange,
+        so without a consumer the deep link is silently dropped (the app just
+        focuses + routes to the dashboard). This was the real cause of "works
+        only after closing the tab".
+    Both funnel through the deduped runExcalidrawLibraryImport.
   */
   window.addEventListener('hashchange', () => {
-    const url = addLibraryUrlFromHash();
+    const url = addLibraryUrlFrom();
     if (!url) return;
 
     console.info('[YANTA] Pending Excalidraw library import (hashchange):', url);
     history.replaceState({}, '', location.pathname + location.search);
-    runExcalidrawLibraryImport(url);
+    requestExcalidrawLibraryImport(url);
   });
+
+  if ('launchQueue' in window && typeof window.launchQueue?.setConsumer === 'function') {
+    window.launchQueue.setConsumer((launchParams) => {
+      const url = addLibraryUrlFrom(launchParams?.targetURL || '');
+      if (!url) return;
+
+      console.info('[YANTA] Pending Excalidraw library import (launchQueue):', url);
+
+      // Drop the deep link from our own URL if the launch navigated us there.
+      if (addLibraryUrlFrom(location.href)) {
+        history.replaceState({}, '', location.pathname + location.search);
+      }
+
+      requestExcalidrawLibraryImport(url);
+    });
+  }
 
   // Load the active locale (+ EN fallback) before the first render, so t() and
   // [data-i18n] markup resolve on the very first paint rather than flashing keys.
@@ -2741,11 +2815,9 @@ async function init() {
   // First surface is rendered and interactive — release the boot loader.
   bootDone();
 
-  // Now that the boot splash is gone, run any pending Excalidraw library
-  // import so its confirm dialog is actually visible and interactive.
-  if (pendingExcalidrawLibraryUrl) {
-    runExcalidrawLibraryImport(pendingExcalidrawLibraryUrl);
-  }
+  // Boot splash is gone: run any Excalidraw library import queued during boot
+  // (and let later hashchange/launchQueue deep links run immediately from now).
+  flushQueuedExcalidrawLibraryImport();
 
   // Opt-in semantic index: no-op unless enabled; starts in idle time.
   import('./semantic/semantic-index.js')

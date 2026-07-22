@@ -1964,37 +1964,39 @@ async function init() {
   }
 
   /*
-    Also handle the deep link when YANTA is ALREADY running:
-      - hashchange: a non-PWA tab the redirect reuses (hash changes, no init);
-      - launchQueue: an INSTALLED PWA — `launch_handler: navigate-existing`
-        delivers the launch URL through window.launchQueue, NOT as a hashchange,
-        so without a consumer the deep link is silently dropped (the app just
-        focuses + routes to the dashboard). This was the real cause of "works
-        only after closing the tab".
-    Both funnel through the deduped runExcalidrawLibraryImport.
+    Also handle the deep link when YANTA is ALREADY running. An installed PWA
+    with `launch_handler: navigate-existing` is FLAKY about how it delivers a
+    warm launch: sometimes a `hashchange`, sometimes only via `launchQueue`,
+    sometimes just a focus after the URL was already updated. So we listen on
+    all of them plus an event-independent re-check whenever the window becomes
+    visible/focused — a warm launch always focuses us. Everything funnels
+    through the deduped `requestExcalidrawLibraryImport`.
   */
-  window.addEventListener('hashchange', () => {
-    const url = addLibraryUrlFrom();
+  const consumeAddLibraryFrom = (source, input) => {
+    const url = addLibraryUrlFrom(input);
     if (!url) return;
 
-    console.info('[YANTA] Pending Excalidraw library import (hashchange):', url);
-    history.replaceState({}, '', location.pathname + location.search);
+    console.info(`[YANTA] Pending Excalidraw library import (${source}):`, url);
+
+    // Clear the deep link from our own URL so it can't retrigger.
+    if (addLibraryUrlFrom(location.href)) {
+      history.replaceState({}, '', location.pathname + location.search);
+    }
+
     requestExcalidrawLibraryImport(url);
+  };
+
+  window.addEventListener('hashchange', () => consumeAddLibraryFrom('hashchange', location.href));
+  window.addEventListener('focus', () => consumeAddLibraryFrom('focus', location.href));
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      consumeAddLibraryFrom('visible', location.href);
+    }
   });
 
   if ('launchQueue' in window && typeof window.launchQueue?.setConsumer === 'function') {
     window.launchQueue.setConsumer((launchParams) => {
-      const url = addLibraryUrlFrom(launchParams?.targetURL || '');
-      if (!url) return;
-
-      console.info('[YANTA] Pending Excalidraw library import (launchQueue):', url);
-
-      // Drop the deep link from our own URL if the launch navigated us there.
-      if (addLibraryUrlFrom(location.href)) {
-        history.replaceState({}, '', location.pathname + location.search);
-      }
-
-      requestExcalidrawLibraryImport(url);
+      consumeAddLibraryFrom('launchQueue', launchParams?.targetURL || '');
     });
   }
 

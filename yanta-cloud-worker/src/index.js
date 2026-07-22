@@ -5535,8 +5535,10 @@ async function handleExcalidrawLibrary(env, req, url, headers) {
     : Array.isArray(payload?.library)
       ? payload.library
       : null;
-  if (!items) {
-    return json({ error: "invalid_library_file" }, 400, headers);
+  // Reject empty/malformed responses (e.g. a transient upstream hiccup) so we
+  // never cache a "no items" body and hand the client an empty library.
+  if (!items || items.length === 0) {
+    return json({ error: "empty_library_file" }, 502, headers);
   }
 
   const res = json(payload, 200, {

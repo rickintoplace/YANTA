@@ -35,6 +35,19 @@ const COLORS = [
   '#94a3b8',
 ];
 
+/*
+  Overlay-Ids, unter denen dieser Picker als History-Eintrag laufen kann:
+  - 'icon-insert': eigener Insert-Picker (unten registriert)
+  - 'calendar-event-appearance-picker': Kalender öffnet den Picker als
+    Appearance-Editor und pusht dafür selbst einen Overlay-Eintrag.
+  Ein UI-Close (Apply/Backdrop) muss den jeweils aktuellen Eintrag mit
+  poppen, sonst bleibt ein toter Back-Schritt in der History zurück.
+*/
+const HISTORY_BACKED_OVERLAY_IDS = new Set([
+  'icon-insert',
+  'calendar-event-appearance-picker',
+]);
+
 let modal;
 let iconInsertOverlayRegistered = false;
 let searchInput;
@@ -298,15 +311,15 @@ export function closeIconPicker({
   if (!modal) return;
 
   /*
-    Only consume browser history for the insert-icon overlay itself.
-    Important:
-    openIconPicker() is also used inside Settings/Graph/Calendar/etc.
-    Closing those appearance pickers must not close the parent overlay.
+    Only consume browser history when the picker itself owns the current
+    overlay entry. Important:
+    openIconPicker() is also used inside Settings/Graph/etc. without an
+    own history entry — closing there must not pop the parent overlay.
   */
   if (
     !fromHistory &&
     modal.hidden === false &&
-    overlayIdFromState() === 'icon-insert'
+    HISTORY_BACKED_OVERLAY_IDS.has(overlayIdFromState())
   ) {
     closeTopOverlay(() => {
       closeIconPicker({
@@ -319,6 +332,16 @@ export function closeIconPicker({
 
   modal.hidden = true;
 }
+
+/*
+  UI-only-Close für fremde Module (z. B. closeCalendar-Cleanup).
+  fromHistory: der Dispatcher ist für etwaige History-Einträge zuständig.
+*/
+window.addEventListener('yanta-close-icon-picker', () => {
+  closeIconPicker({
+    fromHistory: true,
+  });
+});
 
 export function openIconInsertPicker({
   fromHistory = false,

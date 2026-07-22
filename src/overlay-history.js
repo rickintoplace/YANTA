@@ -253,7 +253,9 @@ export function setupOverlayHistoryRouter() {
   });
 
   document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape') return;
+    // Synthetische Escape-Dispatches (etwa an Excalidraw) dürfen keine
+    // History-Navigation auslösen — nur echte Nutzereingaben.
+    if (e.key !== 'Escape' || !e.isTrusted) return;
 
     if (overlayIdFromState()) {
       e.preventDefault();

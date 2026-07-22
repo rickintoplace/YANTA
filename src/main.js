@@ -3797,6 +3797,14 @@ function openNativeColorPickerForRange({ from, to, color }) {
 }
 
 function handleGlobalKey(e) {
+  /*
+    Nur echte Tastatur-Events dürfen global navigieren. Synthetische
+    KeyboardEvents (z. B. Escape-Dispatches an Excalidraw) würden sonst
+    surface-abhängige Navigation auslösen — etwa den aktiven Chat-Raum
+    schließen.
+  */
+  if (!e.isTrusted) return;
+
   const meta = e.ctrlKey || e.metaKey;
   if (meta && e.key === 'n') { e.preventDefault(); newNote(currentFolderForNew()); }
   else if (meta && e.shiftKey && e.code === 'Space') {

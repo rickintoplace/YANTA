@@ -666,6 +666,7 @@ const CALENDAR_OVERLAY_IDS = Object.freeze({
   CATEGORIES: 'calendar-categories',
   SOURCES: 'calendar-sources',
   APPEARANCE_PICKER: 'calendar-event-appearance-picker',
+  DAY_VIEW: 'calendar-day-view',
 });
 
 let calendarFullscreenOverlaysRegistered = false;
@@ -770,19 +771,16 @@ function armCalendarModalInputGuard(ms = 260) {
 
 function closeKnownIconPickerModal() {
   /*
-    Best effort for the shared IconPicker.
-    If your icon-picker.js exposes a dedicated close function/event,
-    this event gives it a clean integration point.
+    icon-picker.js hört auf dieses Event und schließt sich UI-only
+    (fromHistory) — History-Einträge verwaltet der Aufrufer.
+
+    Niemals ein synthetisches Escape-KeyboardEvent dispatchen:
+    handleGlobalKey (main.js) interpretiert Escape surface-abhängig als
+    Navigation. Im gedockten Chat hat genau das die aktive Konversation
+    geschlossen (Emoji-Panel zu -> popstate -> closeCalendar -> "Escape"
+    -> zurück zur Raumliste).
   */
   window.dispatchEvent(new CustomEvent('yanta-close-icon-picker'));
-
-  try {
-    window.dispatchEvent(new KeyboardEvent('keydown', {
-      key: 'Escape',
-      bubbles: true,
-      cancelable: true,
-    }));
-  } catch {}
 
   /*
     Fallback for common modal class names.
@@ -993,19 +991,131 @@ let calendarReturnSurface = 'note';
   (= View beim nächsten Öffnen) NICHT überschreiben.
 */
 let calendarTransientDayView = false;
+
+/*
+  Wohin Back aus der transienten Tagesansicht zurückführt
+  (Monat/Woche + damals sichtbarer Zeitraum).
+*/
+let calendarDayViewReturn = null;
+let calendarDayViewRouteRegistered = false;
+
 function calendarMobileTapShouldOpenDay() {
   if (!calendarMobile()) return false;
   const viewType = fc?.view?.type || '';
   return viewType === 'dayGridMonth' || viewType === 'timeGridWeek';
 }
-function openCalendarDayViewAt(dateLike) {
+
+function registerCalendarDayViewRoute() {
+  if (calendarDayViewRouteRegistered) return;
+
+  calendarDayViewRouteRegistered = true;
+
+  registerOverlayRoute(CALENDAR_OVERLAY_IDS.DAY_VIEW, {
+    // Vorwärts-Navigation (Browser-Forward) stellt die Tagesansicht wieder her.
+    open: ({ data } = {}) => {
+      if (!fc || !data?.dateISO) return;
+
+      openCalendarDayViewAt(new Date(data.dateISO), {
+        fromHistory: true,
+        returnTo: {
+          view: data.returnView || null,
+          dateISO: data.returnDateISO || null,
+        },
+      });
+    },
+
+    close: () => {
+      exitCalendarTransientDayView();
+    },
+
+    isOpen: () =>
+      calendarTransientDayView &&
+      fc?.view?.type === 'timeGridDay',
+  });
+}
+
+/**
+ * Mobile Tap-Navigation Monat/Woche -> Tag.
+ *
+ * Die Tagesansicht ist ein eigener History-Eintrag (overlay-history):
+ * Geräte-/Browser-Back führt zurück zur Ausgangsansicht statt aus dem
+ * Kalender heraus.
+ */
+function openCalendarDayViewAt(dateLike, {
+  fromHistory = false,
+  returnTo = null,
+} = {}) {
   if (!fc) return;
+
   const d = dateLikeToLocalDate(dateLike) || new Date();
+
+  registerCalendarDayViewRoute();
+
+  const returnView = returnTo?.view || fc.view?.type || null;
+  const returnDateISO =
+    returnTo?.dateISO ||
+    (fc.view?.currentStart || fc.getDate?.())?.toISOString?.() ||
+    null;
+
+  calendarDayViewReturn = {
+    view: returnView,
+    dateISO: returnDateISO,
+  };
+
+  /*
+    Nur im Fullscreen-Kalender einen History-Eintrag anlegen. In der
+    Side-Pane wäre ein Overlay-Eintrag über der eigentlichen App-Route
+    (Note/Dashboard) irreführend.
+  */
+  if (
+    !fromHistory &&
+    calendarMode !== 'pane' &&
+    overlayIdFromState() !== CALENDAR_OVERLAY_IDS.DAY_VIEW
+  ) {
+    pushOverlayState(CALENDAR_OVERLAY_IDS.DAY_VIEW, {
+      dateISO: d.toISOString(),
+      returnView,
+      returnDateISO,
+    });
+  }
+
   calendarTransientDayView = true;
   try {
     fc.changeView('timeGridDay', d);
   } catch {}
   setCalendarToolbarView('timeGridDay');
+  invalidateCalendarSwipeCache();
+  scheduleCalendarResize({ render: true });
+}
+
+/*
+ * UI-only Rücksprung aus der transienten Tagesansicht (History-Einträge
+ * verwaltet der Aufrufer bzw. der Overlay-Router).
+ */
+function exitCalendarTransientDayView() {
+  if (!fc || !calendarTransientDayView) return;
+
+  const ret = calendarDayViewReturn;
+
+  calendarDayViewReturn = null;
+  calendarTransientDayView = false;
+
+  const fallbackView =
+    state.currentCalendarView && state.currentCalendarView !== 'timeGridDay'
+      ? state.currentCalendarView
+      : 'dayGridMonth';
+
+  const view =
+    ret?.view && ret.view !== 'timeGridDay'
+      ? ret.view
+      : fallbackView;
+
+  const date = ret?.dateISO ? new Date(ret.dateISO) : undefined;
+
+  try {
+    fc.changeView(view, date);
+  } catch {}
+  setCalendarToolbarView(view);
   invalidateCalendarSwipeCache();
   scheduleCalendarResize({ render: true });
 }
@@ -1349,8 +1459,15 @@ function renderCalendarTopbar() {
       /*
         Expliziter View-Wechsel = echte Nutzer-Präferenz.
         Auch wenn zuvor transient in die Tagesansicht navigiert wurde.
+        Deren History-Eintrag wird dabei durch die normale Kalender-Route
+        ersetzt — Back soll danach den Kalender verlassen, nicht die
+        verworfene Tagesansicht wiederherstellen.
       */
+      if (overlayIdFromState() === CALENDAR_OVERLAY_IDS.DAY_VIEW) {
+        replaceCalendarHistory();
+      }
       calendarTransientDayView = false;
+      calendarDayViewReturn = null;
       state.currentCalendarView = nextView;
       if (nextView !== fc.view?.type) {
         fc.changeView(nextView);
@@ -12434,6 +12551,13 @@ export function closeCalendar({
   });
 
   closeKnownIconPickerModal();
+
+  /*
+    Die transiente Tagesansicht endet mit der Surface. Sonst öffnet der
+    nächste Kalender-Besuch unerwartet im Tag statt in der eigentlichen
+    Nutzer-Präferenz (Monat/Woche).
+  */
+  exitCalendarTransientDayView();
 }
 
 function leaveCalendarSurface() {

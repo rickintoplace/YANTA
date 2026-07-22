@@ -346,10 +346,18 @@ async function renderStickerTab(panel, {
       return;
     }
 
+    /*
+      Close the panel FIRST — while its overlay history entry is guaranteed to
+      be on top — so closeTopOverlay()'s history.back() pops the panel entry
+      (panel -> room). Closing AFTER the async send let the send's timeline
+      re-render mutate chat history in between, so back() then popped the room
+      entry itself (room -> list), throwing the user out of the conversation.
+    */
+    closePanel(panel);
+
     await sendStickerMessage(client, roomId, sticker);
 
     onStickerSent?.();
-    closePanel(panel);
   };
 
   // Own drawings first (empty group name), then one section per imported

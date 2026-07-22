@@ -1996,7 +1996,23 @@ async function init() {
 
   if ('launchQueue' in window && typeof window.launchQueue?.setConsumer === 'function') {
     window.launchQueue.setConsumer((launchParams) => {
-      consumeAddLibraryFrom('launchQueue', launchParams?.targetURL || '');
+      const target = launchParams?.targetURL || '';
+      if (!target) return;
+
+      // The manifest uses launch_handler "focus-existing": a warm launch
+      // focuses this window and delivers the launched URL HERE, without
+      // navigating. Handle the library deep link in place; for any other deep
+      // link, navigate so normal boot/routing applies (else it would be lost).
+      if (addLibraryUrlFrom(target)) {
+        consumeAddLibraryFrom('launchQueue', target);
+        return;
+      }
+
+      try {
+        if (new URL(target, location.href).href !== location.href) {
+          window.location.href = target;
+        }
+      } catch {}
     });
   }
 

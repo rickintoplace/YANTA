@@ -532,30 +532,42 @@ function pruneDrawLibrarySources() {
 }
 
 function normalizeDrawLibraryItem(item, index = 0) {
-  if (!item || typeof item !== 'object') return null;
+  if (!item) return null;
 
-  const elements = Array.isArray(item.elements)
-    ? item.elements
-    : Array.isArray(item.libraryItems)
-      ? item.libraryItems
-      : [];
+  /*
+    Two on-disk shapes exist:
+      - v2 (.excalidrawlib version 2): item is { elements: [...], id, name, ... }
+      - v1 (version 1): item IS a bare array of elements ([el, el, ...]).
+    Excalidraw's own restoreLibraryItems handles both; we must too, or every
+    v1 library imports as "no items".
+  */
+  const elements = Array.isArray(item)
+    ? item
+    : Array.isArray(item.elements)
+      ? item.elements
+      : Array.isArray(item.libraryItems)
+        ? item.libraryItems
+        : [];
 
   if (!elements.length) return null;
 
-  const id = String(item.id || item.name || `lib-${index}-${uid()}`);
+  // For v1 there is no wrapper object to carry metadata.
+  const meta = Array.isArray(item) ? {} : item;
+
+  const id = String(meta.id || meta.name || `lib-${index}-${uid()}`);
 
   const firstText = elements.find((el) =>
     typeof el?.text === 'string' && el.text.trim()
   )?.text?.trim();
 
   return {
-    ...structuredCloneSafe(item),
+    ...structuredCloneSafe(meta),
     id,
-    status: item.status || 'published',
-    created: item.created || Date.now(),
-    name: item.name || firstText || `Library item ${index + 1}`,
+    status: meta.status || 'published',
+    created: meta.created || Date.now(),
+    name: meta.name || firstText || `Library item ${index + 1}`,
     elements: structuredCloneSafe(elements),
-    files: structuredCloneSafe(item.files || {}),
+    files: structuredCloneSafe(meta.files || {}),
   };
 }
 

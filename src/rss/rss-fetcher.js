@@ -253,12 +253,19 @@ export async function resolveYoutubeChannel(input, {
   );
 }
 
-export async function searchYoutubeChannels(query, {
+// Detailed variant for interactive UI: rate-limit / quota exhaustion are
+// expected, first-class outcomes here (the picker renders a friendly fallback),
+// so they are returned as state rather than thrown. Supports an AbortSignal so
+// the debounced autocomplete can cancel in-flight requests.
+export async function searchYoutubeChannelsDetailed(query, {
   limit = 6,
+  signal,
 } = {}) {
   const q = String(query || '').trim();
 
-  if (!q) return [];
+  if (!q) {
+    return { channels: [], limited: null, message: '' };
+  }
 
   const endpoint = new URL(apiUrl('/api/youtube/search'));
 
@@ -271,9 +278,20 @@ export async function searchYoutubeChannels(query, {
     headers: {
       Accept: 'application/json',
     },
+    signal,
   });
 
   assertCloudAuthError(res);
+
+  if (res.status === 429) {
+    const body = await res.json().catch(() => ({}));
+
+    return {
+      channels: [],
+      limited: body?.scope === 'global' ? 'global' : 'user',
+      message: body?.message || '',
+    };
+  }
 
   if (!res.ok) {
     throw new Error(
@@ -289,7 +307,20 @@ export async function searchYoutubeChannels(query, {
     `YouTube search failed: HTTP ${res.status}`
   );
 
-  return Array.isArray(json.channels) ? json.channels : [];
+  return {
+    channels: Array.isArray(json.channels) ? json.channels : [],
+    limited: null,
+    message: '',
+    cached: !!json.cached,
+  };
+}
+
+// Array-returning convenience wrapper. Used by the source-candidate merge, which
+// treats "no results" and "rate limited" identically.
+export async function searchYoutubeChannels(query, opts = {}) {
+  const { channels } = await searchYoutubeChannelsDetailed(query, opts);
+
+  return channels;
 }
 
 async function fetchFeedDirect(feed) {

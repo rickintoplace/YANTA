@@ -811,7 +811,7 @@ function directFeedCandidateFromUrl(input = '') {
   };
 }
 
-async function addRssFeedCandidate(candidate, {
+export async function addRssFeedCandidate(candidate, {
   originalInput = '',
   folderId = null,
   tags = [],

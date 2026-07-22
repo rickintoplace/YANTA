@@ -12,7 +12,13 @@ import {
 
 import {
   addRssFeedFromUniversalInput,
+  addRssFeedCandidate,
 } from './rss-actions.js';
+
+import {
+  searchYoutubeChannelsDetailed,
+  rssImageProxyUrl,
+} from './rss-fetcher.js';
 
 import {
   getRssFeeds,
@@ -36,6 +42,24 @@ import {
 let dropdown = null;
 let browserModal = null;
 let cssInjected = false;
+
+// Live YouTube channel search state. Debounced and quota-aware: the actual API
+// call fires ~550ms after the last keystroke, in-flight requests are aborted,
+// and the last result is cached in `ytState` so the 80ms dropdown re-renders
+// neither flicker nor re-fetch. `key` is the normalized query the state belongs
+// to; a mismatch with the current input means the state is stale.
+let ytSearchTimer = 0;
+let ytAbort = null;
+let ytState = {
+  key: '',
+  status: 'idle', // idle | loading | done | limited | auth | error
+  channels: [],
+  limited: null, // 'user' | 'global' | null
+  message: '',
+};
+
+const YT_MIN_QUERY_LENGTH = 3;
+const YT_SEARCH_DEBOUNCE_MS = 550;
 
 function ensureCss() {
   if (cssInjected) return;
@@ -187,6 +211,67 @@ function ensureCss() {
 
   font-size: 10px;
   font-weight: 850;
+}
+
+.yanta-rss-source-result-icon.yanta-yt-avatar {
+  overflow: hidden;
+  color: #ef4444;
+  background: color-mix(in srgb, #ef4444 14%, transparent);
+}
+
+.yanta-rss-source-result-icon.yanta-yt-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+}
+
+.yanta-rss-source-section-title .yanta-rss-source-section-spinner {
+  display: inline-flex;
+  margin-left: auto;
+  color: var(--text-faint);
+  animation: yanta-rss-spin 0.9s linear infinite;
+}
+
+@keyframes yanta-rss-spin {
+  to { transform: rotate(360deg); }
+}
+
+.yanta-rss-source-note {
+  display: flex;
+  gap: 9px;
+
+  padding: 10px 11px;
+  margin: 3px 7px 7px;
+
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
+  border-radius: 11px;
+
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-elev-2));
+  color: var(--text-dim);
+
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.yanta-rss-source-note svg {
+  flex: 0 0 auto;
+  margin-top: 1px;
+  color: var(--accent);
+}
+
+.yanta-rss-source-note strong {
+  color: var(--text);
+}
+
+.yanta-rss-source-note a {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 700;
+}
+
+.yanta-rss-source-note a:hover {
+  text-decoration: underline;
 }
 
 .yanta-rss-source-empty {
@@ -496,6 +581,10 @@ function ensureDropdown() {
 function closeRssSourceDropdown() {
   if (!dropdown) return;
 
+  // Reset (not just abort) so a mid-flight query never leaves the state stuck on
+  // "loading" for the next open. Reopening the same query hits the shared cache.
+  resetYoutubeState();
+
   dropdown.hidden = true;
   dropdown.replaceChildren();
 }
@@ -601,6 +690,261 @@ export async function addBestRssSourceFromInput(input, {
   return feed;
 }
 
+function normalizeYtQuery(value = '') {
+  return String(value || '').toLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+function shouldOfferYoutubeSearch(value = '') {
+  const raw = String(value || '').trim();
+
+  if (raw.length < YT_MIN_QUERY_LENGTH) return false;
+
+  // URLs / domains / channel IDs resolve through the discover + resolve paths
+  // (which cost no search quota), so we never spend a channel-search call there.
+  return !isProbablyUrlOrDomain(raw);
+}
+
+function formatSubscriberCount(count) {
+  const n = Number(count || 0);
+
+  if (!n) return '';
+
+  if (n >= 1_000_000) {
+    return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`;
+  }
+
+  if (n >= 1_000) {
+    return `${(n / 1_000).toFixed(n >= 10_000 ? 0 : 1)}K`;
+  }
+
+  return String(n);
+}
+
+function abortYoutubeSearch() {
+  clearTimeout(ytSearchTimer);
+  ytSearchTimer = 0;
+
+  if (ytAbort) {
+    ytAbort.abort();
+    ytAbort = null;
+  }
+}
+
+function resetYoutubeState() {
+  abortYoutubeSearch();
+  ytState = { key: '', status: 'idle', channels: [], limited: null, message: '' };
+}
+
+// Kicks off (or reuses) a debounced channel search for `value`. Safe to call on
+// every keystroke — an unchanged query neither reschedules nor re-fetches.
+function ensureYoutubeSearch(input, value, { onAdded } = {}) {
+  const key = normalizeYtQuery(value);
+
+  // Already loading or showing results for this exact query — nothing to do.
+  if (ytState.key === key && ytState.status !== 'idle') return;
+
+  abortYoutubeSearch();
+
+  ytState = { key, status: 'loading', channels: [], limited: null, message: '' };
+
+  ytSearchTimer = window.setTimeout(async () => {
+    if (!input.isConnected) return;
+    if (normalizeYtQuery(input.value) !== key) return; // user moved on
+
+    const controller = new AbortController();
+    ytAbort = controller;
+
+    let next = null;
+
+    try {
+      const result = await searchYoutubeChannelsDetailed(value, {
+        limit: 6,
+        signal: controller.signal,
+      });
+
+      // Pre-resolve proxied avatar URLs so rendering stays synchronous and the
+      // user's image-proxy privacy setting is honoured.
+      const channels = await Promise.all(
+        (result.channels || []).map(async (channel) => ({
+          ...channel,
+          thumbProxied: channel.thumbnail
+            ? await rssImageProxyUrl(channel.thumbnail).catch(() => '')
+            : '',
+        }))
+      );
+
+      next = {
+        key,
+        status: result.limited ? 'limited' : 'done',
+        channels,
+        limited: result.limited,
+        message: result.message || '',
+      };
+    } catch (err) {
+      if (controller.signal.aborted) return;
+
+      next = err?.code === 'EAUTH_REQUIRED'
+        ? { key, status: 'auth', channels: [], limited: null, message: '' }
+        : { key, status: 'error', channels: [], limited: null, message: '' };
+    } finally {
+      if (ytAbort === controller) ytAbort = null;
+    }
+
+    if (!next) return;
+
+    // Discard if the query changed while we were fetching.
+    if (normalizeYtQuery(input.value) !== key) return;
+
+    ytState = next;
+
+    if (dropdown && !dropdown.hidden) {
+      renderDropdown(input, { onAdded });
+    }
+  }, YT_SEARCH_DEBOUNCE_MS);
+}
+
+async function addYoutubeChannel(channel, { onAdded } = {}) {
+  if (!channel?.feedUrl) {
+    toast('Channel has no feed URL', 'error');
+    return;
+  }
+
+  // All channel metadata already came from the search response, so adding costs
+  // no further YouTube API quota.
+  await addRssFeedCandidate({
+    title: channel.title || 'YouTube Channel',
+    feedUrl: channel.feedUrl,
+    siteUrl: channel.siteUrl || '',
+    description: channel.description || '',
+    channelId: channel.channelId || channel.id || '',
+    source: 'youtube-data-api',
+  }, {
+    originalInput: channel.title || '',
+  });
+
+  toast('Channel added', 'success');
+
+  await onAdded?.(channel);
+}
+
+function youtubeResultButton(channel, { onClick } = {}) {
+  const btn = el('button', {
+    type: 'button',
+    class: 'yanta-rss-source-result',
+  });
+
+  const subs = formatSubscriberCount(channel.subscriberCount);
+  const meta = [channel.handle || '', subs ? `${subs} subscribers` : '']
+    .filter(Boolean)
+    .join(' · ');
+
+  const avatar = channel.thumbProxied
+    ? `<img src="${escapeAttr(channel.thumbProxied)}" alt="" loading="lazy" referrerpolicy="no-referrer" />`
+    : lucide('youtube', 17);
+
+  btn.innerHTML = `
+    <span class="yanta-rss-source-result-icon yanta-yt-avatar">${avatar}</span>
+    <span class="yanta-rss-source-result-main">
+      <strong>${escapeHtml(channel.title || 'YouTube Channel')}</strong>
+      ${meta ? `<small>${escapeHtml(meta)}</small>` : ''}
+    </span>
+    <span class="yanta-rss-source-result-badge">Add</span>
+  `;
+
+  const img = btn.querySelector('img');
+  if (img) {
+    img.addEventListener('error', () => {
+      const holder = img.parentElement;
+      if (holder) holder.innerHTML = lucide('youtube', 17);
+    });
+  }
+
+  btn.addEventListener('click', async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+
+    await onClick?.();
+  });
+
+  return btn;
+}
+
+function youtubeLimitNote(state) {
+  const note = el('div', { class: 'yanta-rss-source-note' });
+
+  const isAuth = state.status === 'auth';
+
+  const headline = isAuth
+    ? 'Sign in to search YouTube'
+    : state.limited === 'global'
+      ? 'YouTube search is busy right now'
+      : 'Daily YouTube search limit reached';
+
+  const body = isAuth
+    ? 'Connect YANTA Cloud to search channels by name.'
+    : 'You can still add any channel directly — open it on '
+      + '<a href="https://www.youtube.com" target="_blank" rel="noopener noreferrer">YouTube</a>, '
+      + 'copy the URL from your browser’s address bar, and paste it here.';
+
+  note.innerHTML = `
+    ${lucide(isAuth ? 'log-in' : 'info', 15)}
+    <span><strong>${escapeHtml(headline)}.</strong> ${body}</span>
+  `;
+
+  return note;
+}
+
+function renderYoutubeSection(list, input, value, { onAdded } = {}) {
+  const key = normalizeYtQuery(value);
+
+  // Only trust the state if it belongs to the query currently in the input.
+  const state = ytState.key === key
+    ? ytState
+    : { status: 'loading', channels: [], limited: null, message: '' };
+
+  const title = el('div', { class: 'yanta-rss-source-section-title' });
+  title.innerHTML = `
+    ${lucide('youtube', 12)} YouTube channels
+    ${state.status === 'loading' ? `<span class="yanta-rss-source-section-spinner">${lucide('loader-circle', 12)}</span>` : ''}
+  `;
+  list.append(title);
+
+  if (state.status === 'limited' || state.status === 'auth') {
+    list.append(youtubeLimitNote(state));
+    return;
+  }
+
+  if (state.status === 'error') {
+    const note = el('div', { class: 'yanta-rss-source-empty' });
+    note.textContent = 'YouTube search is unavailable right now. Paste a channel URL to add it directly.';
+    list.append(note);
+    return;
+  }
+
+  if (state.status === 'done' && !state.channels.length) {
+    const note = el('div', { class: 'yanta-rss-source-empty' });
+    note.innerHTML = `No YouTube channels found for “${escapeHtml(value)}”.`;
+    list.append(note);
+    return;
+  }
+
+  for (const channel of state.channels) {
+    list.append(
+      youtubeResultButton(channel, {
+        onClick: async () => {
+          closeRssSourceDropdown();
+
+          try {
+            await addYoutubeChannel(channel, { onAdded });
+          } catch (err) {
+            toast(err?.message || 'Could not add channel', 'error');
+          }
+        },
+      })
+    );
+  }
+}
+
 function renderDropdown(input, {
   onAdded,
 } = {}) {
@@ -619,6 +963,8 @@ function renderDropdown(input, {
   const list = el('div', { class: 'yanta-rss-source-dropdown-list' });
 
   if (!value) {
+    resetYoutubeState();
+
     const examples = knownSearchExamples().slice(0, 10);
 
     list.append(
@@ -684,6 +1030,17 @@ function renderDropdown(input, {
     );
   }
 
+  // Live YouTube channel search (debounced + quota-aware). Placed high so a
+  // creator name surfaces the channel immediately; skipped for URL/domain input.
+  const offerYoutube = shouldOfferYoutubeSearch(value);
+
+  if (offerYoutube) {
+    ensureYoutubeSearch(input, value, { onAdded });
+    renderYoutubeSection(list, input, value, { onAdded });
+  } else {
+    resetYoutubeState();
+  }
+
   const facets = searchRssCatalogFacets(value, {
     limit: 5,
   });
@@ -741,7 +1098,7 @@ function renderDropdown(input, {
     }
   }
 
-  if (!facets.length && !feeds.length && !isProbablyUrlOrDomain(value)) {
+  if (!facets.length && !feeds.length && !isProbablyUrlOrDomain(value) && !offerYoutube) {
     const empty = el('div', { class: 'yanta-rss-source-empty' });
     empty.innerHTML = `
       <strong>No curated source found for “${escapeHtml(value)}”.</strong><br>

@@ -4135,6 +4135,16 @@ function cleanYoutubeInput(value = '') {
 }
 __name(cleanYoutubeInput, "cleanYoutubeInput");
 
+async function sha256Hex(input = '') {
+  const bytes = new TextEncoder().encode(String(input || ''));
+  const digest = await crypto.subtle.digest('SHA-256', bytes);
+
+  return [...new Uint8Array(digest)]
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('');
+}
+__name(sha256Hex, "sha256Hex");
+
 function isYoutubeHost(hostname = '') {
   const h = String(hostname || '').replace(/^www\./, '').toLowerCase();
 
@@ -4268,7 +4278,15 @@ function youtubeChannelCandidate(channel = {}) {
   const id = channel.id || channel.snippet?.channelId || '';
   const snippet = channel.snippet || {};
   const cd = channel.contentDetails || {};
+  const stats = channel.statistics || {};
   const uploadsPlaylistId = cd.relatedPlaylists?.uploads || '';
+
+  // statistics is only present when the channels.list call requests it and the
+  // channel does not hide its counts.
+  const subscriberCount = stats.hiddenSubscriberCount
+    ? null
+    : Number(stats.subscriberCount || 0) || null;
+  const videoCount = Number(stats.videoCount || 0) || null;
 
   return {
     id,
@@ -4279,6 +4297,8 @@ function youtubeChannelCandidate(channel = {}) {
     customUrl: snippet.customUrl || '',
     handle: snippet.customUrl || '',
     publishedAt: snippet.publishedAt || '',
+    subscriberCount,
+    videoCount,
     uploadsPlaylistId,
     siteUrl: id ? `https://www.youtube.com/channel/${id}` : '',
     feedUrl: id ? `https://www.youtube.com/feeds/videos.xml?channel_id=${encodeURIComponent(id)}` : '',
@@ -4376,7 +4396,7 @@ __name(youtubeApiFetch, "youtubeApiFetch");
 
 async function youtubeChannelById(env, channelId) {
   const data = await youtubeApiFetch(env, 'channels', {
-    part: 'snippet,contentDetails',
+    part: 'snippet,contentDetails,statistics',
     id: channelId,
     maxResults: 1,
   });
@@ -4390,7 +4410,7 @@ async function youtubeChannelByHandle(env, handle) {
   const withAt = clean.startsWith('@') ? clean : `@${clean}`;
 
   const data = await youtubeApiFetch(env, 'channels', {
-    part: 'snippet,contentDetails',
+    part: 'snippet,contentDetails,statistics',
     forHandle: withAt,
     maxResults: 1,
   });
@@ -4401,7 +4421,7 @@ __name(youtubeChannelByHandle, "youtubeChannelByHandle");
 
 async function youtubeChannelByUsername(env, username) {
   const data = await youtubeApiFetch(env, 'channels', {
-    part: 'snippet,contentDetails',
+    part: 'snippet,contentDetails,statistics',
     forUsername: username,
     maxResults: 1,
   });
@@ -4425,7 +4445,7 @@ async function youtubeSearchChannels(env, query, limit = 6) {
   if (!ids.length) return [];
 
   const details = await youtubeApiFetch(env, 'channels', {
-    part: 'snippet,contentDetails',
+    part: 'snippet,contentDetails,statistics',
     id: ids.join(','),
     maxResults: ids.length,
   });
@@ -4567,21 +4587,6 @@ __name(handleYoutubeResolve, "handleYoutubeResolve");
 
 async function handleYoutubeSearch(env, req, url, headers) {
   const user = await requireUser(env, req);
-  const limits = effectiveLimits(user, await getUserCreatedAt(env, user.userId));
-
-  const rl = await rateLimit(
-    env,
-    `youtube:search:${user.userId}`,
-    Math.min(180, limits.rssFetchesDay || 200),
-    24 * 60 * 60 * 1000
-  );
-
-  if (!rl.ok) {
-    return json({
-      error: 'youtube_rate_limited',
-      message: 'YouTube search limit reached.',
-    }, 429, headers);
-  }
 
   const q = String(url.searchParams.get('q') || '').trim().slice(0, 160);
   const limit = Math.max(1, Math.min(12, Number(url.searchParams.get('limit') || 6)));
@@ -4592,13 +4597,85 @@ async function handleYoutubeSearch(env, req, url, headers) {
     }, 200, headers);
   }
 
+  const dayMs = 24 * 60 * 60 * 1000;
+
+  // Normalize so trivial variations share one cache entry, and hash the key so
+  // the shared edge cache never stores the raw search term in cleartext.
+  const normalized = q.toLowerCase().replace(/\s+/g, ' ').trim();
+  const cacheId = await sha256Hex(`yt:search:v2:${limit}:${normalized}`);
+  const cache = caches.default;
+  const cacheKey = new Request(`https://yanta-youtube-cache.local/search/${cacheId}`);
+
+  // 1) Shared, cross-user cache. Only public YouTube data keyed by a hashed
+  //    query — no user identity. A hit spends no API quota and counts against
+  //    no budget.
+  const cached = await cache.match(cacheKey);
+
+  if (cached) {
+    const cachedJson = await cached.json().catch(() => null);
+
+    if (cachedJson) {
+      return json({
+        ...cachedJson,
+        cached: true,
+      }, 200, {
+        ...headers,
+        'cache-control': 'no-store',
+      });
+    }
+  }
+
+  // 2) Per-user daily budget of *uncached* searches. Generous, because cached
+  //    hits are free — this only throttles a single user hammering novel terms.
+  const perUser = Math.max(1, Number(env.YOUTUBE_SEARCH_USER_DAILY || 40));
+  const userRl = await rateLimit(env, `youtube:search:${user.userId}`, perUser, dayMs);
+
+  if (!userRl.ok) {
+    return json({
+      error: 'youtube_rate_limited',
+      scope: 'user',
+      message: 'Daily YouTube search limit reached. Paste a channel URL to add it directly.',
+    }, 429, headers);
+  }
+
+  // 3) App-wide circuit breaker protecting the shared YouTube Data API quota.
+  //    Each uncached search costs ~101 units (search.list=100 + channels.list=1);
+  //    the default project quota is 10k units/day. Checked after the per-user
+  //    limit so an over-active user can never burn the shared budget on a request
+  //    we would reject anyway.
+  const globalBudget = Math.max(1, Number(env.YOUTUBE_SEARCH_GLOBAL_DAILY || 80));
+  const globalRl = await rateLimit(env, 'youtube:search:global', globalBudget, dayMs);
+
+  if (!globalRl.ok) {
+    return json({
+      error: 'youtube_quota_exhausted',
+      scope: 'global',
+      message: 'YouTube search is temporarily unavailable. Paste a channel URL to add it directly.',
+    }, 429, headers);
+  }
+
   const channels = await youtubeSearchChannels(env, q, limit);
 
-  return json({
+  const payload = {
     channels,
-  }, 200, {
+  };
+
+  try {
+    await cache.put(
+      cacheKey,
+      new Response(JSON.stringify(payload), {
+        headers: {
+          'content-type': 'application/json',
+          // 6h cross-user lifetime. Key is hashed, so no raw term is persisted.
+          'cache-control': 'public, max-age=21600',
+        },
+      })
+    );
+  } catch {}
+
+  return json(payload, 200, {
     ...headers,
-    'cache-control': 'private, max-age=300',
+    'cache-control': 'no-store',
   });
 }
 __name(handleYoutubeSearch, "handleYoutubeSearch");

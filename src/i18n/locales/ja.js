@@ -2,6 +2,33 @@
 // values carry only `other` — i18n:check treats plural leaves per-language.
 
 export default {
+  shareTarget: {
+    title: 'YANTA に共有',
+    previewImage: '画像',
+    sendToChatsLabel: 'チャットに送信',
+    searchChats: 'チャットを検索…',
+    selectChats: '送信するチャットを選択',
+    sendToChats: {
+      other: '{count} 件のチャットに送信',
+    },
+    sentToChats: {
+      other: '{count} 件のチャットに送信しました',
+    },
+    noChats: 'チャットが見つかりません。',
+    failed: '完了できませんでした。',
+    saved: {
+      capture: '「今日」に保存しました',
+      rss: 'ソースを追加しました',
+    },
+    target: {
+      capture: 'クイックキャプチャ',
+      note: '新規ノート',
+      ai: 'AI に質問',
+      event: '新規イベント',
+      rss: 'ソースを追加',
+    },
+  },
+
   boot: {
     loading: 'アプリを読み込んでいます…',
     slow: '読み込み中です — 接続が遅いようです…',
@@ -617,6 +644,56 @@ export default {
       suggestedLinks: '候補リンク',
       suggestedHint: 'まだリンクされていない意味的に類似したノート。クリックでハイライトします。',
     },
+  },
+
+  appearance: {
+    itemFallback: '項目',
+    nothingToApply: '適用するものがありません',
+    updated: { other: '{count} 件の項目を更新しました' },
+    title: 'アイコンと色',
+    titleFor: 'アイコンと色: {name}',
+    iconLabel: 'アイコン',
+    colorLabel: '色',
+    resetToDefault: '既定に戻す',
+    searchIcons: 'アイコンを検索…',
+    custom: 'カスタム',
+    applyTo: '適用先…',
+    applyIconColorTo: 'アイコンと色を適用…',
+    applyIconTo: 'アイコンを適用…',
+    applyColorTo: '色を適用…',
+    plusFolders: { other: '+{count} フォルダー' },
+    plusItems: { other: '+{count} 項目' },
+    scope: {
+      justThisNote: 'このノートのみ',
+      allNotesIn: '「{name}」内のすべてのノート',
+      allRootNotes: 'すべてのルートノート',
+      noteAndParents: 'このノートとその親フォルダー',
+      justThisFolder: 'このフォルダーのみ',
+      folderAndSiblings: 'このフォルダーと兄弟フォルダー',
+      allRootFolders: 'すべてのルートフォルダー',
+      folderAndChildren: 'このフォルダーと直接の子',
+      folderAndEverything: 'このフォルダーとその中身すべて',
+      folderAndParents: 'このフォルダーとその親フォルダー',
+      justThisItem: 'この項目のみ',
+      selectedItemsOnly: '選択した項目のみ',
+      selectedAndSiblings: '選択した項目と兄弟',
+      selectedFoldersAndChildren: '選択したフォルダーと直接の子',
+      selectedFoldersAndEverything: '選択したフォルダーとその中身すべて',
+      selectedAndParents: '選択した項目と親フォルダー',
+      allNotesAndFolders: 'すべてのノートとフォルダー',
+    },
+  },
+
+  graphPreview: {
+    noFolder: 'フォルダーなし',
+    openDrawingHint: 'このノートを開いて描画を編集',
+    wikiNotFound: '「{name}」が見つかりません',
+    editIconColor: 'アイコンと色を編集',
+    tags: { other: '{count} 個のタグ' },
+    open: '開く',
+    emptyDrawing: '空の描画',
+    openToView: 'ノートを開いてこの描画を表示',
+    noteEmpty: 'このノートはまだ空です。',
   },
 
   palette: {

@@ -13,6 +13,12 @@ import {
   toast,
 } from '../core.js';
 
+import {
+  roomDisplayName,
+  sendRoomMessage,
+  visibleRooms,
+} from './chat-send.js';
+
 function ensureCss() {
   if (document.getElementById('yanta-chat-forward-css')) return;
   const style = document.createElement('style');
@@ -108,33 +114,6 @@ function forwardableContent(event) {
   delete base['m.relates_to'];
   delete base['m.new_content'];
   return base.msgtype ? base : null;
-}
-
-function roomDisplayName(client, room) {
-  return (
-    room?.name ||
-    room?.getDefaultRoomName?.(client?.getUserId?.()) ||
-    room?.roomId ||
-    'Chat'
-  );
-}
-
-function visibleRooms(client) {
-  try {
-    return client?.getVisibleRooms?.() || client?.getRooms?.() || [];
-  } catch {
-    return [];
-  }
-}
-
-async function sendRoomMessage(client, roomId, content) {
-  if (typeof client.sendMessage === 'function') {
-    return client.sendMessage(roomId, content);
-  }
-  if (typeof client.sendEvent === 'function') {
-    return client.sendEvent(roomId, 'm.room.message', content);
-  }
-  throw new Error('Matrix sendMessage is not available.');
 }
 
 /**

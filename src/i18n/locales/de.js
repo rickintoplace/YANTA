@@ -1,6 +1,35 @@
 // Deutsch. Mirrors the key structure of en.js exactly (see i18n:check).
 
 export default {
+  shareTarget: {
+    title: 'In YANTA teilen',
+    previewImage: 'Bild',
+    sendToChatsLabel: 'An Chats senden',
+    searchChats: 'Chats durchsuchen…',
+    selectChats: 'Chats zum Senden wählen',
+    sendToChats: {
+      one: 'An {count} Chat senden',
+      other: 'An {count} Chats senden',
+    },
+    sentToChats: {
+      one: 'An {count} Chat gesendet',
+      other: 'An {count} Chats gesendet',
+    },
+    noChats: 'Keine Chats gefunden.',
+    failed: 'Konnte nicht abgeschlossen werden.',
+    saved: {
+      capture: 'In „Heute“ gespeichert',
+      rss: 'Quelle hinzugefügt',
+    },
+    target: {
+      capture: 'Schnellnotiz',
+      note: 'Neue Notiz',
+      ai: 'KI fragen',
+      event: 'Neuer Termin',
+      rss: 'Quelle hinzufügen',
+    },
+  },
+
   boot: {
     loading: 'App wird geladen…',
     slow: 'Lädt noch – deine Verbindung scheint langsam zu sein…',
@@ -624,6 +653,56 @@ export default {
       suggestedLinks: 'Vorgeschlagene Verknüpfungen',
       suggestedHint: 'Semantisch ähnliche Notizen, die noch nicht verknüpft sind. Zum Hervorheben klicken.',
     },
+  },
+
+  appearance: {
+    itemFallback: 'Element',
+    nothingToApply: 'Nichts anzuwenden',
+    updated: { one: '{count} Element aktualisiert', other: '{count} Elemente aktualisiert' },
+    title: 'Symbol & Farbe',
+    titleFor: 'Symbol & Farbe: {name}',
+    iconLabel: 'Symbol',
+    colorLabel: 'Farbe',
+    resetToDefault: 'Auf Standard zurücksetzen',
+    searchIcons: 'Symbole suchen…',
+    custom: 'Eigene',
+    applyTo: 'Anwenden auf…',
+    applyIconColorTo: 'Symbol & Farbe anwenden auf…',
+    applyIconTo: 'Symbol anwenden auf…',
+    applyColorTo: 'Farbe anwenden auf…',
+    plusFolders: { one: '+{count} Ordner', other: '+{count} Ordner' },
+    plusItems: { one: '+{count} Element', other: '+{count} Elemente' },
+    scope: {
+      justThisNote: 'Nur diese Notiz',
+      allNotesIn: 'Alle Notizen in „{name}“',
+      allRootNotes: 'Alle Root-Notizen',
+      noteAndParents: 'Diese Notiz und ihre übergeordneten Ordner',
+      justThisFolder: 'Nur dieser Ordner',
+      folderAndSiblings: 'Dieser Ordner und seine Geschwisterordner',
+      allRootFolders: 'Alle Root-Ordner',
+      folderAndChildren: 'Dieser Ordner und direkte Unterelemente',
+      folderAndEverything: 'Dieser Ordner und alles darin',
+      folderAndParents: 'Dieser Ordner und seine übergeordneten Ordner',
+      justThisItem: 'Nur dieses Element',
+      selectedItemsOnly: 'Nur ausgewählte Elemente',
+      selectedAndSiblings: 'Ausgewählte Elemente und Geschwister',
+      selectedFoldersAndChildren: 'Ausgewählte Ordner und direkte Unterelemente',
+      selectedFoldersAndEverything: 'Ausgewählte Ordner und alles darin',
+      selectedAndParents: 'Ausgewählte Elemente und übergeordnete Ordner',
+      allNotesAndFolders: 'Alle Notizen und Ordner',
+    },
+  },
+
+  graphPreview: {
+    noFolder: 'Kein Ordner',
+    openDrawingHint: 'Notiz öffnen, um diese Zeichnung zu bearbeiten',
+    wikiNotFound: '„{name}“ nicht gefunden',
+    editIconColor: 'Symbol & Farbe bearbeiten',
+    tags: { one: '{count} Tag', other: '{count} Tags' },
+    open: 'Öffnen',
+    emptyDrawing: 'Leere Zeichnung',
+    openToView: 'Öffne die Notiz, um diese Zeichnung anzusehen',
+    noteEmpty: 'Diese Notiz ist noch leer.',
   },
 
   palette: {

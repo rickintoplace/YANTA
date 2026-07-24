@@ -1947,6 +1947,47 @@ function flushQueuedExcalidrawLibraryImport() {
 }
 
 /*
+  Web Share Target: the service worker stashed the shared payload and
+  303-redirected to /?share-target=1. We detect the flag, read+clear the
+  payload from IDB and open the share router. Consume-once and best-effort:
+  a failure must never block boot. Runs after the splash is released so the
+  router isn't hidden behind it — same rule as the library import above.
+*/
+let shareTargetConsuming = false;
+
+async function consumePendingShareTarget(source) {
+  if (shareTargetConsuming) return;
+
+  const params = new URLSearchParams(location.search);
+  if (params.get('share-target') !== '1') return;
+
+  shareTargetConsuming = true;
+
+  // Clear the flag from our own URL first so it can't retrigger.
+  params.delete('share-target');
+  const clean =
+    location.pathname +
+    (params.toString() ? `?${params}` : '') +
+    location.hash;
+  history.replaceState(history.state, '', clean);
+
+  try {
+    const { readAndClearPendingShare } = await import('./share-target/share-inbox.js');
+    const payload = await readAndClearPendingShare();
+
+    if (payload) {
+      console.info(`[YANTA] Web Share Target payload (${source})`);
+      const { openShareRouter } = await import('./share-target/share-router.js');
+      await openShareRouter(payload);
+    }
+  } catch (err) {
+    console.warn('[YANTA] Web Share Target consume failed', err);
+  } finally {
+    shareTargetConsuming = false;
+  }
+}
+
+/*
   Boot loader bridge (inline UI in index.html). Reports honest progress:
   the bundle is parsed once init() runs, then vault/notes/workspace follow.
 */
@@ -2004,6 +2045,15 @@ async function init() {
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
       consumeAddLibraryFrom('visible', location.href);
+    }
+  });
+
+  // A warm PWA launch from the share sheet can arrive as a focus/visibility
+  // change (the ?share-target=1 flag doesn't fire hashchange). Re-check both.
+  window.addEventListener('focus', () => consumePendingShareTarget('focus'));
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      consumePendingShareTarget('visible');
     }
   });
 
@@ -2849,6 +2899,10 @@ async function init() {
   // Boot splash is gone: run any Excalidraw library import queued during boot
   // (and let later hashchange/launchQueue deep links run immediately from now).
   flushQueuedExcalidrawLibraryImport();
+
+  // Boot splash is gone: open the share router if the app was launched from
+  // the OS share sheet (?share-target=1 set by the service worker redirect).
+  consumePendingShareTarget('boot');
 
   // Opt-in semantic index: no-op unless enabled; starts in idle time.
   import('./semantic/semantic-index.js')

@@ -3308,7 +3308,22 @@ export function setupAssistant() {
         renderMessages();
     }
 
-  window.addEventListener('yanta-open-ai-assistant', () => openAssistantSmart());
+  window.addEventListener('yanta-open-ai-assistant', (e) => {
+    openAssistantSmart();
+
+    // A share-target "AI" route seeds the composer with the shared text/link
+    // so the user can immediately ask about it. Defer a frame so the panel's
+    // input is mounted first.
+    const seed = String(e?.detail?.attachment || '').trim();
+    if (seed) {
+      requestAnimationFrame(() => {
+        if (!inputEl) return;
+        inputEl.value = seed;
+        inputEl.dispatchEvent(new Event('input', { bubbles: true }));
+        inputEl.focus();
+      });
+    }
+  });
   window.addEventListener('yanta-open-ai-floating', () => openAssistantFloating());
 
   window.addEventListener('keydown', (e) => {

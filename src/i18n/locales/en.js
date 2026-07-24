@@ -8,6 +8,35 @@
 //     a `count` param. Interpolate values as `{name}`.
 
 export default {
+  shareTarget: {
+    title: 'Share to YANTA',
+    previewImage: 'Image',
+    sendToChatsLabel: 'Send to chats',
+    searchChats: 'Search chats…',
+    selectChats: 'Select chats to send',
+    sendToChats: {
+      one: 'Send to {count} chat',
+      other: 'Send to {count} chats',
+    },
+    sentToChats: {
+      one: 'Sent to {count} chat',
+      other: 'Sent to {count} chats',
+    },
+    noChats: 'No chats found.',
+    failed: 'Could not complete that.',
+    saved: {
+      capture: 'Saved to Today',
+      rss: 'Source added',
+    },
+    target: {
+      capture: 'Quick capture',
+      note: 'New note',
+      ai: 'Ask AI',
+      event: 'New event',
+      rss: 'Add source',
+    },
+  },
+
   boot: {
     loading: 'Loading app…',
     slow: 'Still loading — your connection seems slow…',
@@ -631,6 +660,56 @@ export default {
       suggestedLinks: 'Suggested links',
       suggestedHint: 'Semantically similar notes that are not yet linked. Click to spotlight.',
     },
+  },
+
+  appearance: {
+    itemFallback: 'Item',
+    nothingToApply: 'Nothing to apply',
+    updated: { one: 'Updated {count} item', other: 'Updated {count} items' },
+    title: 'Icon & color',
+    titleFor: 'Icon & color: {name}',
+    iconLabel: 'Icon',
+    colorLabel: 'Color',
+    resetToDefault: 'Reset to default',
+    searchIcons: 'Search icons…',
+    custom: 'Custom',
+    applyTo: 'Apply to…',
+    applyIconColorTo: 'Apply icon & color to…',
+    applyIconTo: 'Apply icon to…',
+    applyColorTo: 'Apply color to…',
+    plusFolders: { one: '+{count} folder', other: '+{count} folders' },
+    plusItems: { one: '+{count} item', other: '+{count} items' },
+    scope: {
+      justThisNote: 'Just this note',
+      allNotesIn: 'All notes in “{name}”',
+      allRootNotes: 'All root notes',
+      noteAndParents: 'This note and its parent folders',
+      justThisFolder: 'Just this folder',
+      folderAndSiblings: 'This folder and its sibling folders',
+      allRootFolders: 'All root folders',
+      folderAndChildren: 'This folder and direct children',
+      folderAndEverything: 'This folder and everything inside',
+      folderAndParents: 'This folder and its parent folders',
+      justThisItem: 'Just this item',
+      selectedItemsOnly: 'Selected items only',
+      selectedAndSiblings: 'Selected items and siblings',
+      selectedFoldersAndChildren: 'Selected folders and direct children',
+      selectedFoldersAndEverything: 'Selected folders and everything inside',
+      selectedAndParents: 'Selected items and parent folders',
+      allNotesAndFolders: 'All notes and folders',
+    },
+  },
+
+  graphPreview: {
+    noFolder: 'No folder',
+    openDrawingHint: 'Open note to edit this drawing',
+    wikiNotFound: '“{name}” not found',
+    editIconColor: 'Edit icon & color',
+    tags: { one: '{count} tag', other: '{count} tags' },
+    open: 'Open',
+    emptyDrawing: 'Empty drawing',
+    openToView: 'Open the note to view this drawing',
+    noteEmpty: 'This note is still empty.',
   },
 
   palette: {

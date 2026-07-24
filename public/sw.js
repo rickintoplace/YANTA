@@ -5,7 +5,7 @@
 // User data is in IndexedDB/Yjs, not in this cache.
 // ============================================================
 
-const CACHE_VERSION = 'yanta-app-v24';
+const CACHE_VERSION = 'yanta-app-v25';
 // Only files that actually exist at these paths in the build. CSS/JS are
 // hashed into /assets by Vite and cached at runtime by the fetch handler —
 // they must NOT be listed here (a 404 here would fail the whole install).
@@ -50,12 +50,81 @@ self.addEventListener('activate', (event) => {
   );
 });
 
+// ============================================================
+// Web Share Target inbox
+//
+// The manifest declares `share_target` as a POST to /share-target. The OS
+// share sheet posts the shared title/text/url (+ optional image) here. We
+// stash it locally (structured-cloneable File objects go straight into IDB),
+// then 303-redirect into the app, which consumes the payload on boot and
+// opens the share router. Fully local — nothing touches the network, so a
+// share made offline still lands.
+// ============================================================
+
+const SHARE_DB = 'yanta-share';
+const SHARE_STORE = 'inbox';
+const SHARE_KEY = 'pending';
+
+function openShareDb() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(SHARE_DB, 1);
+    req.onupgradeneeded = () => {
+      if (!req.result.objectStoreNames.contains(SHARE_STORE)) {
+        req.result.createObjectStore(SHARE_STORE);
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+function shareDbPut(value) {
+  return openShareDb().then((db) => new Promise((resolve, reject) => {
+    const tx = db.transaction(SHARE_STORE, 'readwrite');
+    tx.objectStore(SHARE_STORE).put(value, SHARE_KEY);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+  }));
+}
+
+async function handleShareTargetPost(req) {
+  try {
+    const form = await req.formData();
+    const files = form
+      .getAll('media')
+      .filter((f) => f && typeof f.arrayBuffer === 'function' && f.size > 0);
+
+    await shareDbPut({
+      title: String(form.get('title') || ''),
+      text: String(form.get('text') || ''),
+      url: String(form.get('url') || ''),
+      files,
+      ts: Date.now(),
+    });
+  } catch {
+    // Even a failed parse should still open the app rather than error out.
+  }
+
+  // 303 turns the POST into a plain GET navigation the app shell can serve.
+  // Response.redirect needs an absolute URL — resolve against our origin.
+  return Response.redirect(new URL('/?share-target=1', self.location.origin).href, 303);
+}
+
 self.addEventListener('fetch', (event) => {
   const req = event.request;
+  const url = new URL(req.url);
+
+  // Web Share Target: intercept the POST before the GET-only bail below.
+  if (
+    req.method === 'POST' &&
+    url.origin === location.origin &&
+    url.pathname === '/share-target'
+  ) {
+    event.respondWith(handleShareTargetPost(req));
+    return;
+  }
 
   if (req.method !== 'GET') return;
-
-  const url = new URL(req.url);
 
   // Never cache YANTA Cloud API / backend endpoints.
   // Important when /cloud-api is same-origin via Vercel/Cloudflare rewrite.

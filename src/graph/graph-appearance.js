@@ -17,6 +17,7 @@ import {
   escapeHtml,
   toast,
 } from '../core.js';
+import { t } from '../i18n/index.js';
 import { renderTree } from '../tree.js';
 import { injectGraphCss } from './graph-css.js';
 
@@ -80,9 +81,9 @@ function firstTarget(keys) {
 }
 
 function targetLabel(item) {
-  if (!item) return 'Item';
-  if (item.kind === 'folder') return item.folder?.name || 'Folder';
-  return item.note?.title || 'Untitled';
+  if (!item) return t('appearance.itemFallback');
+  if (item.kind === 'folder') return item.folder?.name || t('items.folderFallback');
+  return item.note?.title || t('note.untitled');
 }
 
 // ------------------------------------------------------------
@@ -136,11 +137,11 @@ function countAllDescendants(folderId) {
 export async function applyAppearanceToTargets(targets, payload) {
   const { icon, color, applyIcon, applyColor, resetIcon, resetColor } = payload || {};
   if (!applyIcon && !applyColor && !resetIcon && !resetColor) {
-    toast('Nothing to apply', 'info');
+    toast(t('appearance.nothingToApply'), 'info');
     return;
   }
   const writes = [];
-  const t = Date.now();
+  const now = Date.now();
   for (const key of targets) {
     const { kind, id } = parseKey(key);
     if (kind === 'note') {
@@ -150,7 +151,7 @@ export async function applyAppearanceToTargets(targets, payload) {
       else if (applyIcon && icon != null) n.icon = icon;
       if (resetColor) delete n.color;
       else if (applyColor && color != null) n.color = color;
-      n.updated = t;
+      n.updated = now;
       writes.push(store.notes.put(n));
     } else if (kind === 'folder') {
       const f = state.folders.get(id);
@@ -159,7 +160,7 @@ export async function applyAppearanceToTargets(targets, payload) {
       else if (applyIcon && icon != null) f.icon = icon;
       if (resetColor) delete f.color;
       else if (applyColor && color != null) f.color = color;
-      f.updated = t;
+      f.updated = now;
       writes.push(store.folders.put(f));
     }
   }
@@ -174,7 +175,7 @@ export async function applyAppearanceToTargets(targets, payload) {
     detail: { source: 'appearance' },
   }));
   const count = targets.size ?? targets.length ?? 0;
-  toast(`Updated ${count} item${count === 1 ? '' : 's'}`, 'success');
+  toast(t('appearance.updated', { count }), 'success');
 }
 
 // ------------------------------------------------------------
@@ -193,7 +194,7 @@ function openScopePicker({ title, options, onPick }) {
   head.innerHTML = `<h3>${escapeHtml(title)}</h3>`;
   const closeBtn = document.createElement('button');
   closeBtn.className = 'icon-btn';
-  closeBtn.title = 'Close';
+  closeBtn.title = t('common.close');
   closeBtn.textContent = '✕';
   closeBtn.addEventListener('click', () => overlay.remove());
   head.append(closeBtn);
@@ -225,11 +226,11 @@ function openScopePicker({ title, options, onPick }) {
 }
 
 function scopeTitleFor(payload) {
-  if (!payload) return 'Apply to…';
-  if (payload.applyIcon && payload.applyColor) return 'Apply icon & color to…';
-  if (payload.applyIcon) return 'Apply icon to…';
-  if (payload.applyColor) return 'Apply color to…';
-  return 'Apply to…';
+  if (!payload) return t('appearance.applyTo');
+  if (payload.applyIcon && payload.applyColor) return t('appearance.applyIconColorTo');
+  if (payload.applyIcon) return t('appearance.applyIconTo');
+  if (payload.applyColor) return t('appearance.applyColorTo');
+  return t('appearance.applyTo');
 }
 
 function collectTargetsForScope(keys, scope) {
@@ -309,18 +310,18 @@ export function pickScopeForNote(note, payload) {
   openScopePicker({
     title: scopeTitleFor(payload),
     options: [
-      { value: 'self', icon: 'file', label: 'Just this note' },
+      { value: 'self', icon: 'file', label: t('appearance.scope.justThisNote') },
       {
         value: 'siblings',
         icon: 'files',
-        label: folder ? `All notes in "${folder.name || 'folder'}"` : 'All root notes',
-        meta: `${siblings.length + 1} note${siblings.length === 0 ? '' : 's'}`,
+        label: folder ? t('appearance.scope.allNotesIn', { name: folder.name || t('graph.ctxFolder') }) : t('appearance.scope.allRootNotes'),
+        meta: t('tree.bulk.notesLabel', { count: siblings.length + 1 }),
       },
       {
         value: 'parents',
         icon: 'folder-tree',
-        label: 'This note and its parent folders',
-        meta: parents.length ? `+${parents.length} folder${parents.length === 1 ? '' : 's'}` : '',
+        label: t('appearance.scope.noteAndParents'),
+        meta: parents.length ? t('appearance.plusFolders', { count: parents.length }) : '',
         disabled: parents.length === 0,
       },
     ],
@@ -342,32 +343,32 @@ export function pickScopeForFolder(folder, payload) {
   openScopePicker({
     title: scopeTitleFor(payload),
     options: [
-      { value: 'self', icon: 'folder', label: 'Just this folder' },
+      { value: 'self', icon: 'folder', label: t('appearance.scope.justThisFolder') },
       {
         value: 'siblings',
         icon: 'folders',
-        label: folder.parentId ? 'This folder and its sibling folders' : 'All root folders',
-        meta: `${siblings.length + 1} folder${siblings.length === 0 ? '' : 's'}`,
+        label: folder.parentId ? t('appearance.scope.folderAndSiblings') : t('appearance.scope.allRootFolders'),
+        meta: t('tree.bulk.foldersLabel', { count: siblings.length + 1 }),
       },
       {
         value: 'children',
         icon: 'corner-down-right',
-        label: 'This folder and direct children',
-        meta: directChildren ? `+${directChildren} item${directChildren === 1 ? '' : 's'}` : '',
+        label: t('appearance.scope.folderAndChildren'),
+        meta: directChildren ? t('appearance.plusItems', { count: directChildren }) : '',
         disabled: directChildren === 0,
       },
       {
         value: 'descendants',
         icon: 'folder-tree',
-        label: 'This folder and everything inside',
-        meta: allDescendants ? `+${allDescendants} item${allDescendants === 1 ? '' : 's'}` : '',
+        label: t('appearance.scope.folderAndEverything'),
+        meta: allDescendants ? t('appearance.plusItems', { count: allDescendants }) : '',
         disabled: allDescendants === 0,
       },
       {
         value: 'parents',
         icon: 'corner-up-left',
-        label: 'This folder and its parent folders',
-        meta: parents.length ? `+${parents.length} folder${parents.length === 1 ? '' : 's'}` : '',
+        label: t('appearance.scope.folderAndParents'),
+        meta: parents.length ? t('appearance.plusFolders', { count: parents.length }) : '',
         disabled: parents.length === 0,
       },
     ],
@@ -381,7 +382,7 @@ export function pickScopeForFolder(folder, payload) {
 export function pickScopeForTargets(keys, payload) {
   const baseKeys = normalizeTargetKeys(keys);
   if (!baseKeys.length) {
-    toast('Nothing selected', 'info');
+    toast(t('tree.bulk.nothingSelected'), 'info');
     return;
   }
   const selfCount = collectTargetsForScope(baseKeys, 'self').size;
@@ -399,42 +400,42 @@ export function pickScopeForTargets(keys, payload) {
       {
         value: 'self',
         icon: 'check',
-        label: baseKeys.length === 1 ? 'Just this item' : 'Selected items only',
-        meta: `${selfCount} item${selfCount === 1 ? '' : 's'}`,
+        label: baseKeys.length === 1 ? t('appearance.scope.justThisItem') : t('appearance.scope.selectedItemsOnly'),
+        meta: t('tree.itemCount', { count: selfCount }),
       },
       {
         value: 'siblings',
         icon: 'folders',
-        label: 'Selected items and siblings',
-        meta: siblingExtra ? `+${siblingExtra} item${siblingExtra === 1 ? '' : 's'}` : '',
+        label: t('appearance.scope.selectedAndSiblings'),
+        meta: siblingExtra ? t('appearance.plusItems', { count: siblingExtra }) : '',
         disabled: siblingExtra === 0,
       },
       {
         value: 'children',
         icon: 'corner-down-right',
-        label: 'Selected folders and direct children',
-        meta: childExtra ? `+${childExtra} item${childExtra === 1 ? '' : 's'}` : '',
+        label: t('appearance.scope.selectedFoldersAndChildren'),
+        meta: childExtra ? t('appearance.plusItems', { count: childExtra }) : '',
         disabled: childExtra === 0,
       },
       {
         value: 'descendants',
         icon: 'folder-tree',
-        label: 'Selected folders and everything inside',
-        meta: descendantExtra ? `+${descendantExtra} item${descendantExtra === 1 ? '' : 's'}` : '',
+        label: t('appearance.scope.selectedFoldersAndEverything'),
+        meta: descendantExtra ? t('appearance.plusItems', { count: descendantExtra }) : '',
         disabled: descendantExtra === 0,
       },
       {
         value: 'parents',
         icon: 'corner-up-left',
-        label: 'Selected items and parent folders',
-        meta: parentExtra ? `+${parentExtra} folder${parentExtra === 1 ? '' : 's'}` : '',
+        label: t('appearance.scope.selectedAndParents'),
+        meta: parentExtra ? t('appearance.plusFolders', { count: parentExtra }) : '',
         disabled: parentExtra === 0,
       },
       {
         value: 'all',
         icon: 'globe',
-        label: 'All notes and folders',
-        meta: `${allCount} item${allCount === 1 ? '' : 's'}`,
+        label: t('appearance.scope.allNotesAndFolders'),
+        meta: t('tree.itemCount', { count: allCount }),
       },
     ],
     onPick: async (scope) => {
@@ -462,7 +463,7 @@ export function openAppearancePicker(opts) {
   closeAppearancePicker();
 
   const {
-    title = 'Icon & color',
+    title = t('appearance.title'),
     kind,
     target,
     initialIcon,
@@ -489,19 +490,19 @@ export function openAppearancePicker(opts) {
     <div class="yanta-appearance-head">
       <span class="yanta-appearance-preview" data-yap-preview></span>
       <h3>${escapeHtml(title)}</h3>
-      <button class="icon-btn" data-yap-close title="Close">✕</button>
+      <button class="icon-btn" data-yap-close title="${escapeHtml(t('common.close'))}">✕</button>
     </div>
     <div class="yanta-appearance-body">
       <div class="yanta-appearance-section" data-yap-section="icon">
         <div class="yanta-appearance-section-head">
           <label class="yanta-appearance-toggle">
             <input type="checkbox" data-yap-toggle="icon" checked />
-            <span class="yap-title">${lucide('shapes', 12)} Icon</span>
+            <span class="yap-title">${lucide('shapes', 12)} ${escapeHtml(t('appearance.iconLabel'))}</span>
           </label>
-          ${hasIcon ? `<button class="yanta-appearance-reset" data-yap-reset="icon">${lucide('rotate-ccw', 11)} Reset to default</button>` : ''}
+          ${hasIcon ? `<button class="yanta-appearance-reset" data-yap-reset="icon">${lucide('rotate-ccw', 11)} ${escapeHtml(t('appearance.resetToDefault'))}</button>` : ''}
         </div>
         <div class="yap-content">
-          <input type="search" class="yanta-appearance-search" data-yap-search placeholder="Search icons…" />
+          <input type="search" class="yanta-appearance-search" data-yap-search placeholder="${escapeHtml(t('appearance.searchIcons'))}" />
           <div class="yanta-appearance-icon-grid" data-yap-grid></div>
         </div>
       </div>
@@ -509,25 +510,25 @@ export function openAppearancePicker(opts) {
         <div class="yanta-appearance-section-head">
           <label class="yanta-appearance-toggle">
             <input type="checkbox" data-yap-toggle="color" checked />
-            <span class="yap-title">${lucide('palette', 12)} Color</span>
+            <span class="yap-title">${lucide('palette', 12)} ${escapeHtml(t('appearance.colorLabel'))}</span>
           </label>
-          ${hasColor ? `<button class="yanta-appearance-reset" data-yap-reset="color">${lucide('rotate-ccw', 11)} Reset to default</button>` : ''}
+          ${hasColor ? `<button class="yanta-appearance-reset" data-yap-reset="color">${lucide('rotate-ccw', 11)} ${escapeHtml(t('appearance.resetToDefault'))}</button>` : ''}
         </div>
         <div class="yap-content">
           <div class="yanta-appearance-colors" data-yap-swatches></div>
           <div class="yanta-appearance-color-row" style="margin-top:8px">
             <input type="color" data-yap-color-picker value="${escapeHtml(local.color)}" />
             <input type="text" data-yap-color-hex value="${escapeHtml(local.color)}" placeholder="#6ea8fe" maxlength="9" />
-            <span style="font-size:11px;color:var(--text-faint)">Custom</span>
+            <span style="font-size:11px;color:var(--text-faint)">${escapeHtml(t('appearance.custom'))}</span>
           </div>
         </div>
       </div>
     </div>
     <div class="yanta-appearance-foot">
-      <button class="yap-btn ghost" data-yap-cancel>Cancel</button>
+      <button class="yap-btn ghost" data-yap-cancel>${escapeHtml(t('common.cancel'))}</button>
       <span class="yap-spacer"></span>
-      <button class="yap-btn secondary" data-yap-apply-to>${lucide('share-2', 13)} Apply to…</button>
-      <button class="yap-btn primary" data-yap-apply>${lucide('check', 13)} Apply</button>
+      <button class="yap-btn secondary" data-yap-apply-to>${lucide('share-2', 13)} ${escapeHtml(t('appearance.applyTo'))}</button>
+      <button class="yap-btn primary" data-yap-apply>${lucide('check', 13)} ${escapeHtml(t('common.apply'))}</button>
     </div>
   `;
   overlay.append(card);
@@ -716,7 +717,7 @@ export function openAppearancePicker(opts) {
 export function editNoteAppearance(note) {
   if (!note) return;
   openAppearancePicker({
-    title: `Icon & color: ${note.title || 'Untitled'}`,
+    title: t('appearance.titleFor', { name: note.title || t('note.untitled') }),
     kind: 'note',
     target: note,
     initialIcon: note.icon || (note.type === 'list' ? 'list' : 'file'),
@@ -729,7 +730,7 @@ export function editNoteAppearance(note) {
 export function editFolderAppearance(folder) {
   if (!folder) return;
   openAppearancePicker({
-    title: `Icon & color: ${folder.name || 'Folder'}`,
+    title: t('appearance.titleFor', { name: folder.name || t('items.folderFallback') }),
     kind: 'folder',
     target: folder,
     initialIcon: folder.icon || 'folder',
@@ -742,12 +743,12 @@ export function editFolderAppearance(folder) {
 export function editTreeAppearanceTargets(keys, { title } = {}) {
   const targetKeys = normalizeTargetKeys(keys);
   if (!targetKeys.length) {
-    toast('Nothing selected', 'info');
+    toast(t('tree.bulk.nothingSelected'), 'info');
     return;
   }
   const first = firstTarget(targetKeys);
   if (!first) {
-    toast('Nothing selected', 'info');
+    toast(t('tree.bulk.nothingSelected'), 'info');
     return;
   }
   const initialIcon =

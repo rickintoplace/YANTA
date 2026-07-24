@@ -19,6 +19,7 @@ import {
   safeCssColor,
   toast,
 } from '../core.js';
+import { t } from '../i18n/index.js';
 import { noteMarkdown } from '../yjs.js';
 import { renderPreviewWithContext } from '../markdown.js';
 import { bindMediaTimestampClicks } from '../media/media-timestamps.js';
@@ -35,16 +36,16 @@ let renderToken = 0;
 // Helpers
 // ------------------------------------------------------------
 function folderPathLabel(folderId) {
-  if (!folderId) return 'No folder';
+  if (!folderId) return t('graphPreview.noFolder');
   const out = [];
   const seen = new Set();
   let f = state.folders.get(folderId);
   while (f && !seen.has(f.id)) {
     seen.add(f.id);
-    out.unshift(f.name || 'Folder');
+    out.unshift(f.name || t('items.folderFallback'));
     f = f.parentId ? state.folders.get(f.parentId) : null;
   }
-  return out.length ? out.join(' / ') : 'No folder';
+  return out.length ? out.join(' / ') : t('graphPreview.noFolder');
 }
 
 function documentIsDark() {
@@ -118,13 +119,13 @@ export function hideGraphNotePreview() {
 // Drawing thumbnails (real Excalidraw content, static SVG)
 // ------------------------------------------------------------
 function drawThumbPlaceholderHtml(id, label) {
-  return `<div class="yanta-graph-draw-thumb" data-graph-draw-id="${escapeAttr(id)}" title="Open note to edit this drawing">
+  return `<div class="yanta-graph-draw-thumb" data-graph-draw-id="${escapeAttr(id)}" title="${escapeAttr(t('graphPreview.openDrawingHint'))}">
     <div class="yanta-graph-draw-canvas">
       <span class="yanta-graph-draw-spinner" aria-hidden="true">${lucide('loader-circle', 16)}</span>
     </div>
     <div class="yanta-graph-draw-caption">
       ${lucide('line-squiggle', 12)}
-      <span>${escapeHtml(label || 'Drawing')}</span>
+      <span>${escapeHtml(label || t('image.drawingFallback'))}</span>
     </div>
   </div>`;
 }
@@ -163,7 +164,7 @@ async function hydrateDrawingThumbs(bodyEl, noteId, token) {
       if (token !== renderToken) return;
       const elements = (data?.elements || []).filter((el) => !el.isDeleted);
       if (!elements.length) {
-        canvas.innerHTML = `<span class="yanta-graph-draw-empty">${lucide('line-squiggle', 14)} Empty drawing</span>`;
+        canvas.innerHTML = `<span class="yanta-graph-draw-empty">${lucide('line-squiggle', 14)} ${escapeHtml(t('graphPreview.emptyDrawing'))}</span>`;
         continue;
       }
       const { exportToSvg } = await import('@excalidraw/excalidraw');
@@ -187,7 +188,7 @@ async function hydrateDrawingThumbs(bodyEl, noteId, token) {
       canvas.replaceChildren(svg);
     } catch (err) {
       console.warn('[YANTA graph] drawing thumbnail failed', err);
-      canvas.innerHTML = `<span class="yanta-graph-draw-empty">${lucide('line-squiggle', 14)} Open the note to view this drawing</span>`;
+      canvas.innerHTML = `<span class="yanta-graph-draw-empty">${lucide('line-squiggle', 14)} ${escapeHtml(t('graphPreview.openToView'))}</span>`;
     }
   }
 }
@@ -206,7 +207,7 @@ function renderBody(bodyEl, note) {
         // Static thumbnails instead of the interactive editor embed.
         renderDrawEmbedHtml: (id, label) => drawThumbPlaceholderHtml(id, label),
       })}</article>`
-    : `<div class="yanta-graph-empty-preview">${lucide('feather', 16)} This note is still empty.</div>`;
+    : `<div class="yanta-graph-empty-preview">${lucide('feather', 16)} ${escapeHtml(t('graphPreview.noteEmpty'))}</div>`;
   bodyEl.innerHTML = html;
 
   // Clickable media timestamps (12:34) — same binding as the main preview.
@@ -229,7 +230,7 @@ function bindBodyInteractions(bodyEl, note) {
       if (nid && state.notes.has(nid)) {
         currentHandlers.onNavigate?.(nid);
       } else {
-        toast(`"${wiki.dataset.wiki || 'Note'}" not found`, 'error');
+        toast(t('graphPreview.wikiNotFound', { name: wiki.dataset.wiki || t('image.noteFallback') }), 'error');
       }
       return;
     }
@@ -288,18 +289,18 @@ export function showGraphNotePreview(note, clientX, clientY, handlers = {}) {
   pop.innerHTML = `
     <div class="yanta-graph-note-preview-head">
       <span class="yanta-graph-note-preview-icon" role="button" tabindex="0"
-            title="Edit icon &amp; color" data-gnp-appearance
+            title="${escapeAttr(t('graphPreview.editIconColor'))}" data-gnp-appearance
             style="--note-icon-color:${escapeAttr(noteColor)}">${lucide(iconName, 18)}</span>
       <div class="yanta-graph-note-preview-headings">
-        <div class="yanta-graph-note-preview-title">${escapeHtml(note.title || 'Untitled')}</div>
+        <div class="yanta-graph-note-preview-title">${escapeHtml(note.title || t('note.untitled'))}</div>
         <div class="yanta-graph-note-preview-meta">
           <span>${escapeHtml(meta)}</span>
-          ${tagCount ? `<span class="gnp-dot">·</span><span>${tagCount} tag${tagCount === 1 ? '' : 's'}</span>` : ''}
+          ${tagCount ? `<span class="gnp-dot">·</span><span>${escapeHtml(t('graphPreview.tags', { count: tagCount }))}</span>` : ''}
         </div>
       </div>
       <div class="yanta-graph-note-preview-actions">
-        <button class="btn" data-gnp-open>${lucide('file-text', 13)} Open</button>
-        <button class="icon-btn" data-gnp-close title="Close">${lucide('x', 14)}</button>
+        <button class="btn" data-gnp-open>${lucide('file-text', 13)} ${escapeHtml(t('graphPreview.open'))}</button>
+        <button class="icon-btn" data-gnp-close title="${escapeAttr(t('common.close'))}">${lucide('x', 14)}</button>
       </div>
     </div>
     <div class="yanta-graph-note-preview-body"></div>

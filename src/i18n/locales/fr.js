@@ -1,6 +1,35 @@
 // Français. Mirrors the key structure of en.js exactly (see i18n:check).
 
 export default {
+  shareTarget: {
+    title: 'Partager vers YANTA',
+    previewImage: 'Image',
+    sendToChatsLabel: 'Envoyer aux chats',
+    searchChats: 'Rechercher des chats…',
+    selectChats: 'Choisir des chats à envoyer',
+    sendToChats: {
+      one: 'Envoyer à {count} chat',
+      other: 'Envoyer à {count} chats',
+    },
+    sentToChats: {
+      one: 'Envoyé à {count} chat',
+      other: 'Envoyé à {count} chats',
+    },
+    noChats: 'Aucun chat trouvé.',
+    failed: 'Impossible de terminer.',
+    saved: {
+      capture: 'Enregistré dans « Aujourd’hui »',
+      rss: 'Source ajoutée',
+    },
+    target: {
+      capture: 'Capture rapide',
+      note: 'Nouvelle note',
+      ai: 'Demander à l’IA',
+      event: 'Nouvel événement',
+      rss: 'Ajouter une source',
+    },
+  },
+
   boot: {
     loading: 'Chargement de l’application…',
     slow: 'Chargement en cours – votre connexion semble lente…',
@@ -624,6 +653,56 @@ export default {
       suggestedLinks: 'Liens suggérés',
       suggestedHint: 'Notes sémantiquement similaires qui ne sont pas encore liées. Cliquez pour mettre en évidence.',
     },
+  },
+
+  appearance: {
+    itemFallback: 'Élément',
+    nothingToApply: 'Rien à appliquer',
+    updated: { one: '{count} élément mis à jour', other: '{count} éléments mis à jour' },
+    title: 'Icône et couleur',
+    titleFor: 'Icône et couleur : {name}',
+    iconLabel: 'Icône',
+    colorLabel: 'Couleur',
+    resetToDefault: 'Réinitialiser par défaut',
+    searchIcons: 'Rechercher des icônes…',
+    custom: 'Personnalisé',
+    applyTo: 'Appliquer à…',
+    applyIconColorTo: 'Appliquer l’icône et la couleur à…',
+    applyIconTo: 'Appliquer l’icône à…',
+    applyColorTo: 'Appliquer la couleur à…',
+    plusFolders: { one: '+{count} dossier', other: '+{count} dossiers' },
+    plusItems: { one: '+{count} élément', other: '+{count} éléments' },
+    scope: {
+      justThisNote: 'Uniquement cette note',
+      allNotesIn: 'Toutes les notes dans « {name} »',
+      allRootNotes: 'Toutes les notes racine',
+      noteAndParents: 'Cette note et ses dossiers parents',
+      justThisFolder: 'Uniquement ce dossier',
+      folderAndSiblings: 'Ce dossier et ses dossiers frères',
+      allRootFolders: 'Tous les dossiers racine',
+      folderAndChildren: 'Ce dossier et ses enfants directs',
+      folderAndEverything: 'Ce dossier et tout son contenu',
+      folderAndParents: 'Ce dossier et ses dossiers parents',
+      justThisItem: 'Uniquement cet élément',
+      selectedItemsOnly: 'Éléments sélectionnés uniquement',
+      selectedAndSiblings: 'Éléments sélectionnés et frères',
+      selectedFoldersAndChildren: 'Dossiers sélectionnés et enfants directs',
+      selectedFoldersAndEverything: 'Dossiers sélectionnés et tout leur contenu',
+      selectedAndParents: 'Éléments sélectionnés et dossiers parents',
+      allNotesAndFolders: 'Toutes les notes et dossiers',
+    },
+  },
+
+  graphPreview: {
+    noFolder: 'Aucun dossier',
+    openDrawingHint: 'Ouvrez la note pour modifier ce dessin',
+    wikiNotFound: '« {name} » introuvable',
+    editIconColor: 'Modifier l’icône et la couleur',
+    tags: { one: '{count} tag', other: '{count} tags' },
+    open: 'Ouvrir',
+    emptyDrawing: 'Dessin vide',
+    openToView: 'Ouvrez la note pour voir ce dessin',
+    noteEmpty: 'Cette note est encore vide.',
   },
 
   palette: {

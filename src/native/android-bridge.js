@@ -214,6 +214,23 @@ export function scheduleNativeSnapshotSync(delay = 500) {
   }, delay);
 }
 
+function handleNativeShare(detail) {
+  const payload = {
+    title: String(detail?.title || ''),
+    text: String(detail?.text || ''),
+    url: String(detail?.url || ''),
+    files: [],
+  };
+
+  if (!payload.title && !payload.text && !payload.url) return;
+
+  // Same in-app router the Web Share Target (PWA) opens — the native app just
+  // feeds it the shared link/text. Lazy so it stays out of the main bundle.
+  import('../share-target/share-router.js')
+    .then(({ openShareRouter }) => openShareRouter(payload))
+    .catch((err) => console.warn('[YANTA Android Bridge] share router failed', err));
+}
+
 function handleNativeQuickAction(action = '') {
   const normalized = String(action || '');
 
@@ -268,6 +285,10 @@ export function setupAndroidBridge() {
 
   window.addEventListener('yanta-android-quick-action', (e) => {
     handleNativeQuickAction(e.detail?.action || '');
+  });
+
+  window.addEventListener('yanta-android-share', (e) => {
+    handleNativeShare(e.detail || null);
   });
 
   window.addEventListener('yanta-android-open-url', (e) => {

@@ -53,6 +53,12 @@
                     android:scheme="yanta"
                     android:host="open" />
             </intent-filter>
+            <!-- Share sheet: receive shared links/text (Web Share Target parity). -->
+            <intent-filter>
+                <action android:name="android.intent.action.SEND" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
             <meta-data
                 android:name="android.app.shortcuts"
                 android:resource="@xml/shortcuts" />

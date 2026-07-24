@@ -44,6 +44,7 @@ class MainActivity : ComponentActivity() {
     private lateinit var webView: WebView
 
     private var pendingNativeAction: String? = null
+    private var pendingSharedPayload: String? = null
     private var pageLoaded = false
 
     // WebRTC/getUserMedia permission request waiting for the runtime grant.
@@ -177,6 +178,7 @@ class MainActivity : ComponentActivity() {
                     pendingNativeAction = null
                     dispatchQuickAction(action)
                 }
+                if (pendingSharedPayload != null) dispatchSharedPayload()
             }
         }
 
@@ -415,9 +417,38 @@ class MainActivity : ComponentActivity() {
             return
         }
 
+        // Share sheet: a shared link/text opens the in-app share router. Warm
+        // launches dispatch straight to the web layer; a cold start queues the
+        // payload and flushes it in onPageFinished (same rule as quick actions).
+        if (intent.action == Intent.ACTION_SEND && intent.type == "text/plain") {
+            val text = intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty().trim()
+            val subject = intent.getStringExtra(Intent.EXTRA_SUBJECT).orEmpty().trim()
+            if (text.isNotEmpty() || subject.isNotEmpty()) {
+                pendingSharedPayload = JSONObject()
+                    .put("title", subject)
+                    .put("text", text)
+                    .put("url", "")
+                    .toString()
+                if (pageLoaded) dispatchSharedPayload()
+                else webView.loadUrl(BuildConfig.YANTA_URL)
+                return
+            }
+        }
+
         val uri = intent.data
         if (uri != null && handleUri(uri, fromWebView = false)) return
         if (!pageLoaded) webView.loadUrl(BuildConfig.YANTA_URL)
+    }
+
+    private fun dispatchSharedPayload() {
+        val payload = pendingSharedPayload ?: return
+        pendingSharedPayload = null
+        webView.postDelayed({
+            webView.evaluateJavascript(
+                "window.dispatchEvent(new CustomEvent('yanta-android-share', { detail: $payload }));",
+                null
+            )
+        }, 600)
     }
 
     private fun dispatchChatNotificationOpen(roomId: String) {

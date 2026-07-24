@@ -178,7 +178,6 @@ class MainActivity : ComponentActivity() {
                     pendingNativeAction = null
                     dispatchQuickAction(action)
                 }
-                if (pendingSharedPayload != null) dispatchSharedPayload()
             }
         }
 
@@ -417,22 +416,14 @@ class MainActivity : ComponentActivity() {
             return
         }
 
-        // Share sheet: a shared link/text opens the in-app share router. Warm
-        // launches dispatch straight to the web layer; a cold start queues the
-        // payload and flushes it in onPageFinished (same rule as quick actions).
-        if (intent.action == Intent.ACTION_SEND && intent.type == "text/plain") {
-            val text = intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty().trim()
-            val subject = intent.getStringExtra(Intent.EXTRA_SUBJECT).orEmpty().trim()
-            if (text.isNotEmpty() || subject.isNotEmpty()) {
-                pendingSharedPayload = JSONObject()
-                    .put("title", subject)
-                    .put("text", text)
-                    .put("url", "")
-                    .toString()
-                if (pageLoaded) dispatchSharedPayload()
-                else webView.loadUrl(BuildConfig.YANTA_URL)
-                return
-            }
+        // Share sheet (Web Share Target parity). The payload is stashed and the
+        // web layer PULLS it once it is ready (consumeSharedPayload) — a one-shot
+        // event could be lost if the SPA hasn't installed its listener yet on a
+        // cold start. Warm launches get a nudge to re-pull.
+        if (intent.action == Intent.ACTION_SEND) {
+            val type = intent.type.orEmpty()
+            if (type == "text/plain" && handleSharedText(intent)) return
+            if (type.startsWith("image/") && handleSharedImage(intent)) return
         }
 
         val uri = intent.data
@@ -440,15 +431,107 @@ class MainActivity : ComponentActivity() {
         if (!pageLoaded) webView.loadUrl(BuildConfig.YANTA_URL)
     }
 
-    private fun dispatchSharedPayload() {
-        val payload = pendingSharedPayload ?: return
+    private fun handleSharedText(intent: Intent): Boolean {
+        val text = intent.getStringExtra(Intent.EXTRA_TEXT).orEmpty().trim()
+        val subject = intent.getStringExtra(Intent.EXTRA_SUBJECT).orEmpty().trim()
+        if (text.isEmpty() && subject.isEmpty()) return false
+
+        pendingSharedPayload = JSONObject()
+            .put("title", subject)
+            .put("text", text)
+            .put("url", "")
+            .toString()
+        deliverSharedPayload()
+        return true
+    }
+
+    private fun handleSharedImage(intent: Intent): Boolean {
+        val uri = sharedStreamUri(intent) ?: return false
+        val subject = intent.getStringExtra(Intent.EXTRA_SUBJECT).orEmpty().trim()
+
+        // Read + base64 off the UI thread; a shared photo can be several MB.
+        Thread {
+            val json = buildImagePayloadJson(uri, subject)
+            runOnUiThread {
+                if (json != null) {
+                    pendingSharedPayload = json
+                    deliverSharedPayload()
+                } else if (!pageLoaded) {
+                    webView.loadUrl(BuildConfig.YANTA_URL)
+                }
+            }
+        }.start()
+        return true
+    }
+
+    /** Warm: nudge the web layer to re-pull. Cold: load the app; it pulls on boot. */
+    private fun deliverSharedPayload() {
+        if (pageLoaded) {
+            webView.postDelayed({
+                webView.evaluateJavascript(
+                    "window.dispatchEvent(new CustomEvent('yanta-android-share-available'));",
+                    null
+                )
+            }, 300)
+        } else {
+            webView.loadUrl(BuildConfig.YANTA_URL)
+        }
+    }
+
+    /** Returns and clears the pending shared payload JSON, or "null". Bridge-called. */
+    fun takeSharedPayloadJson(): String {
+        val payload = pendingSharedPayload ?: return "null"
         pendingSharedPayload = null
-        webView.postDelayed({
-            webView.evaluateJavascript(
-                "window.dispatchEvent(new CustomEvent('yanta-android-share', { detail: $payload }));",
-                null
-            )
-        }, 600)
+        return payload
+    }
+
+    @Suppress("DEPRECATION")
+    private fun sharedStreamUri(intent: Intent): Uri? {
+        return if (Build.VERSION.SDK_INT >= 33) {
+            intent.getParcelableExtra(Intent.EXTRA_STREAM, Uri::class.java)
+        } else {
+            intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
+        }
+    }
+
+    private fun buildImagePayloadJson(uri: Uri, subject: String): String? {
+        return try {
+            val type = contentResolver.getType(uri) ?: "image/*"
+            val name = queryDisplayName(uri) ?: "shared-image"
+            val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
+            if (bytes.isEmpty() || bytes.size > MAX_SHARE_IMAGE_BYTES) return null
+
+            val data = android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+            JSONObject()
+                .put("title", subject)
+                .put("text", "")
+                .put("url", "")
+                .put(
+                    "image",
+                    JSONObject()
+                        .put("name", name)
+                        .put("type", type)
+                        .put("data", data)
+                )
+                .toString()
+        } catch (_: Throwable) {
+            null
+        }
+    }
+
+    private fun queryDisplayName(uri: Uri): String? {
+        return try {
+            contentResolver.query(
+                uri,
+                arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
+                null, null, null
+            )?.use { cursor ->
+                val idx = cursor.getColumnIndex(android.provider.OpenableColumns.DISPLAY_NAME)
+                if (idx >= 0 && cursor.moveToFirst()) cursor.getString(idx) else null
+            }
+        } catch (_: Throwable) {
+            null
+        }
     }
 
     private fun dispatchChatNotificationOpen(roomId: String) {
@@ -566,6 +649,9 @@ class MainActivity : ComponentActivity() {
     companion object {
         private val HEX_RGB_REGEX = Regex("^#[0-9a-fA-F]{6}$")
         private val DEFAULT_SYSTEM_BAR_COLOR = Color.rgb(20, 20, 20)
+
+        // Cap shared images so the base64 handoff to the web layer stays sane.
+        private const val MAX_SHARE_IMAGE_BYTES = 8 * 1024 * 1024
 
         // Unchanged theme-sync script, extracted for readability.
         private val SYSTEM_BAR_SYNC_JS = """

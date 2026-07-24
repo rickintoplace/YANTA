@@ -63,6 +63,14 @@ class YantaJsBridge(
         android.util.Log.d("YANTA-Web", message)
     }
 
+    /**
+     * Share sheet: returns (and clears) the pending shared payload JSON, or
+     * "null". The web layer pulls this once ready and on the
+     * yanta-android-share-available nudge — see android-bridge.js.
+     */
+    @JavascriptInterface
+    fun consumeSharedPayload(): String = activity.takeSharedPayloadJson()
+
     // ------------------------------------------------------------
     // Chat push (Matrix HTTP pusher config)
     // ------------------------------------------------------------

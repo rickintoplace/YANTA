@@ -214,21 +214,64 @@ export function scheduleNativeSnapshotSync(delay = 500) {
   }, delay);
 }
 
-function handleNativeShare(detail) {
+function base64ToBlob(b64, type) {
+  const bin = atob(String(b64 || ''));
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+  return new Blob([bytes], { type: type || 'application/octet-stream' });
+}
+
+function openNativeShare(data) {
+  const files = [];
+  const img = data?.image;
+
+  if (img?.data) {
+    try {
+      const type = String(img.type || 'image/*');
+      const blob = base64ToBlob(img.data, type);
+      files.push(new File([blob], String(img.name || 'shared-image'), { type: blob.type }));
+    } catch (err) {
+      console.warn('[YANTA Android Bridge] shared image decode failed', err);
+    }
+  }
+
   const payload = {
-    title: String(detail?.title || ''),
-    text: String(detail?.text || ''),
-    url: String(detail?.url || ''),
-    files: [],
+    title: String(data?.title || ''),
+    text: String(data?.text || ''),
+    url: String(data?.url || ''),
+    files,
   };
 
-  if (!payload.title && !payload.text && !payload.url) return;
+  if (!payload.title && !payload.text && !payload.url && !files.length) return;
 
   // Same in-app router the Web Share Target (PWA) opens — the native app just
-  // feeds it the shared link/text. Lazy so it stays out of the main bundle.
+  // feeds it the shared content. Lazy so it stays out of the main bundle.
   import('../share-target/share-router.js')
     .then(({ openShareRouter }) => openShareRouter(payload))
     .catch((err) => console.warn('[YANTA Android Bridge] share router failed', err));
+}
+
+/**
+ * Pull any shared payload the native app stashed and open the router. Called
+ * once the app is booted (main.js) and again on the native "available" nudge
+ * for warm launches — pulling (vs. a one-shot event) avoids losing a share
+ * when the SPA hasn't finished booting.
+ */
+export function consumeNativeSharedPayload() {
+  if (!isAndroidApp()) return;
+  if (typeof window.YantaAndroid?.consumeSharedPayload !== 'function') return;
+
+  const raw = callAndroid('consumeSharedPayload');
+  if (!raw || raw === 'null') return;
+
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    return;
+  }
+
+  openNativeShare(data);
 }
 
 function handleNativeQuickAction(action = '') {
@@ -287,8 +330,8 @@ export function setupAndroidBridge() {
     handleNativeQuickAction(e.detail?.action || '');
   });
 
-  window.addEventListener('yanta-android-share', (e) => {
-    handleNativeShare(e.detail || null);
+  window.addEventListener('yanta-android-share-available', () => {
+    consumeNativeSharedPayload();
   });
 
   window.addEventListener('yanta-android-open-url', (e) => {

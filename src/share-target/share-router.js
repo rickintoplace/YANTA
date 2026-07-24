@@ -47,14 +47,19 @@ function isFeedLike(url) {
   return /(youtube\.com|youtu\.be|\/feed\b|feeds?\.|\.rss\b|\.atom\b|\/rss\b)/i.test(url);
 }
 
-/** A clean text/markdown body from the shared fields, without duplication. */
+/*
+  A clean text/markdown body from the shared fields.
+
+  The title/subject is deliberately NOT merged into the body: Android share
+  sources (e.g. Firefox sharing selected text) often put a source label or the
+  chooser title into EXTRA_SUBJECT, which would otherwise be saved as a noisy
+  prefix. The title survives separately (see shapePayload) for note/event use.
+*/
 function composeText(payload) {
-  const title = String(payload?.title || '').trim();
   const text = String(payload?.text || '').trim();
   const url = String(payload?.url || '').trim();
 
   const parts = [];
-  if (title && title !== text) parts.push(title);
   if (text) parts.push(text);
   if (url && !text.includes(url)) parts.push(url);
 

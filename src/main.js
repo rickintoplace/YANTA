@@ -232,6 +232,7 @@ import {
 import { revokeImageObjectUrl } from './media/object-url-cache.js';
 
 import {
+  consumeNativeSharedPayload,
   setupAndroidBridge,
 } from './native/android-bridge.js';
 
@@ -2903,6 +2904,10 @@ async function init() {
   // Boot splash is gone: open the share router if the app was launched from
   // the OS share sheet (?share-target=1 set by the service worker redirect).
   consumePendingShareTarget('boot');
+
+  // Native Android app: pull any payload the share intent stashed (the WebView
+  // is fully booted now, so the router's targets work immediately).
+  consumeNativeSharedPayload();
 
   // Opt-in semantic index: no-op unless enabled; starts in idle time.
   import('./semantic/semantic-index.js')

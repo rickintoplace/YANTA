@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  YANTA palette for home-screen widgets.
+
+  Mirrors the web tokens in styles.css (:root and [data-theme="light"]).
+  Both schemes live here rather than in values/ + values-night/ because a
+  widget follows the app's own theme setting, which can differ from the
+  system one — WidgetTheme picks the set.
+-->
+<resources>
+    <!-- Dark (styles.css :root) -->
+    <color name="widget_dark_bg">#1C1C1C</color>
+    <color name="widget_dark_surface">#242424</color>
+    <color name="widget_dark_border">#333333</color>
+    <color name="widget_dark_text">#E8E6E3</color>
+    <color name="widget_dark_text_dim">#9A9794</color>
+    <color name="widget_dark_text_faint">#6B6864</color>
+    <color name="widget_dark_accent">#6EA8FE</color>
+
+    <!-- Light (styles.css [data-theme="light"]) -->
+    <color name="widget_light_bg">#F5F4F1</color>
+    <color name="widget_light_surface">#FDFCFA</color>
+    <color name="widget_light_border">#D6D4CE</color>
+    <color name="widget_light_text">#1F1E1C</color>
+    <color name="widget_light_text_dim">#5A5854</color>
+    <color name="widget_light_text_faint">#8A8884</color>
+    <color name="widget_light_accent">#2563EB</color>
+</resources>

@@ -1,6 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Action bar widget. The renderer fills the strip so the number of
-     actions can shrink with the widget's width. -->
+<!-- Week as seven day columns; the renderer fills the strip with columns. -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
     android:layout_width="match_parent"
@@ -15,10 +14,19 @@
         android:src="@drawable/widget_shape_rounded_xl" />
 
     <LinearLayout
-        android:id="@+id/quick_actions"
         android:layout_width="match_parent"
         android:layout_height="match_parent"
-        android:gravity="center"
-        android:orientation="horizontal"
-        android:padding="8dp" />
+        android:orientation="vertical"
+        android:padding="@dimen/widget_padding">
+
+        <include layout="@layout/widget_calendar_header" />
+
+        <LinearLayout
+            android:id="@+id/week_columns"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_marginTop="4dp"
+            android:layout_weight="1"
+            android:orientation="horizontal" />
+    </LinearLayout>
 </FrameLayout>

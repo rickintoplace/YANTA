@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="widget_padding">10dp</dimen>
+    <dimen name="widget_header_button">30dp</dimen>
+    <dimen name="widget_header_button_padding">6dp</dimen>
+    <dimen name="widget_title_size">15sp</dimen>
+    <dimen name="widget_subtitle_size">11sp</dimen>
+
+    <dimen name="widget_weekday_size">10sp</dimen>
+    <dimen name="widget_day_number_size">12sp</dimen>
+    <dimen name="widget_day_marker">22dp</dimen>
+
+    <!-- The month grid packs six rows into the same height, so its day
+         marker and chips run one step tighter than the week's. -->
+    <dimen name="widget_month_day_number_size">11sp</dimen>
+    <dimen name="widget_month_day_marker">18dp</dimen>
+
+    <dimen name="widget_chip_time_size">9sp</dimen>
+    <dimen name="widget_chip_title_size">11sp</dimen>
+    <dimen name="widget_chip_title_compact_size">10sp</dimen>
+    <dimen name="widget_chip_gap">2dp</dimen>
+
+    <dimen name="widget_row_time_width">58dp</dimen>
+    <dimen name="widget_row_bar_width">3dp</dimen>
+    <dimen name="widget_row_title_size">14sp</dimen>
+    <dimen name="widget_row_meta_size">11sp</dimen>
+    <dimen name="widget_row_gap">6dp</dimen>
+
+    <dimen name="widget_empty_icon">40dp</dimen>
+
+    <dimen name="widget_config_choice_gap">8dp</dimen>
+</resources>

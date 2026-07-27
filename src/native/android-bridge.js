@@ -2,9 +2,11 @@ import { state, toast, } from '../core.js';
 
 import { recordNativeNotificationAck } from '../notification-sync-status.js';
 import { effectiveRemindersForEvent } from '../calendar-personal.js';
+import { getCalendarPreferences } from '../calendar-preferences.js';
 
 let installed = false;
 let syncTimer = 0;
+let lastCalendarWidgetPayload = '';
 let lastNotificationStatus = {
   isAndroidApp: false,
   notificationsGranted: false,
@@ -170,6 +172,89 @@ async function collectRssItems() {
   }
 }
 
+/**
+ * How many home-screen widgets of each kind are currently placed.
+ *
+ * Building the widget calendar payload expands recurrences over more than
+ * a year, so it is worth skipping entirely when nothing renders it.
+ */
+function androidWidgetState() {
+  const raw = callAndroid('getWidgetState');
+
+  try {
+    const parsed = JSON.parse(raw || '{}');
+
+    return {
+      calendar: Number(parsed.calendar) || 0,
+      quickCreate: Number(parsed.quickCreate) || 0,
+    };
+  } catch {
+    return { calendar: 0, quickCreate: 0 };
+  }
+}
+
+/*
+  Widget navigation window. Deep enough that paging months back and forth
+  stays instant, bounded so the payload cannot grow without limit.
+*/
+const WIDGET_RANGE_DAYS_PAST = 92;
+const WIDGET_RANGE_DAYS_FUTURE = 400;
+const WIDGET_MAX_EVENTS = 3000;
+
+async function collectCalendarWidgetPayload() {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - WIDGET_RANGE_DAYS_PAST);
+
+  const end = new Date(start);
+  end.setDate(end.getDate() + WIDGET_RANGE_DAYS_PAST + WIDGET_RANGE_DAYS_FUTURE);
+
+  const calendar = await import('../calendar.js');
+
+  const events = calendar.calendarEventsForNativeSurfaces(start, end, {
+    limit: WIDGET_MAX_EVENTS,
+  });
+
+  const prefs = getCalendarPreferences();
+
+  return {
+    version: 1,
+    updatedAt: Date.now(),
+    rangeStart: start.getTime(),
+    rangeEnd: end.getTime(),
+    theme: state.theme || 'auto',
+    weekStart: Number(prefs.weekStart) || 0,
+    timeFormat: prefs.timeFormat === '12' ? '12' : '24',
+    locale: prefs.locale === 'auto' ? '' : String(prefs.locale || ''),
+    events,
+  };
+}
+
+/**
+ * Pushes the calendar data the home-screen widgets render from.
+ *
+ * Kept out of the notification snapshot on purpose: that one is a small
+ * reminder digest read by the alarm scheduler on every sync, while this is
+ * a large display payload written to a file and only read when a widget
+ * redraws.
+ */
+async function syncCalendarWidgetDataNow() {
+  if (typeof window.YantaAndroid?.syncCalendarWidgetData !== 'function') return;
+  if (!androidWidgetState().calendar) return;
+
+  try {
+    const payload = safeJson(await collectCalendarWidgetPayload());
+
+    // Redrawing widgets is not free — skip identical payloads.
+    if (payload === lastCalendarWidgetPayload) return;
+
+    lastCalendarWidgetPayload = payload;
+    callAndroid('syncCalendarWidgetData', payload);
+  } catch (err) {
+    console.warn('[YANTA Android Bridge] widget calendar sync failed', err);
+  }
+}
+
 export async function syncNativeSnapshotNow() {
   if (!isAndroidApp()) return;
 
@@ -191,6 +276,8 @@ export async function syncNativeSnapshotNow() {
   };
 
   callAndroid('syncNativeSnapshot', safeJson(snapshot));
+
+  await syncCalendarWidgetDataNow();
 
   /*
     The native alarm scheduler now knows the current reminders —
@@ -274,22 +361,52 @@ export function consumeNativeSharedPayload() {
   openNativeShare(data);
 }
 
-function handleNativeQuickAction(action = '') {
+/*
+  Actions the native layer can trigger, from widgets and launcher shortcuts.
+  Calendar targets carry parameters (date, event id); the create actions do
+  not. Everything routes through the app's own entry points so widget taps
+  behave exactly like taps inside the app.
+*/
+const NATIVE_CREATE_ACTIONS = {
+  quick_note: 'note',
+  quick_folder: 'folder',
+  quick_event: 'event',
+  sources: 'rss',
+};
+
+function handleNativeQuickAction(action = '', params = {}) {
   const normalized = String(action || '');
 
-  import('../create-actions.js').then(({ runCreateAction }) => {
-    if (normalized === 'quick_note') {
-      runCreateAction('note', { source: 'android-widget' });
-    } else if (normalized === 'quick_folder') {
-      runCreateAction('folder', { source: 'android-widget' });
-    } else if (normalized === 'quick_event') {
-      runCreateAction('event', { source: 'android-widget' });
-    } else if (normalized === 'sources') {
-      runCreateAction('rss', { source: 'android-widget' });
-    } else if (normalized === 'ai') {
-      window.dispatchEvent(new CustomEvent('yanta-open-ai-assistant'));
-    }
-  });
+  if (normalized.startsWith('calendar')) {
+    import('../calendar.js')
+      .then(({ openCalendarFromNative }) => openCalendarFromNative({
+        date: params.date || null,
+        eventId: params.id || '',
+        create: normalized === 'calendar-new',
+      }))
+      .catch((err) => {
+        console.warn('[YANTA Android Bridge] calendar action failed', err);
+        toast('Could not open the calendar.', 'error');
+      });
+
+    return;
+  }
+
+  if (normalized === 'ai') {
+    window.dispatchEvent(new CustomEvent('yanta-open-ai-assistant'));
+    return;
+  }
+
+  const createAction = NATIVE_CREATE_ACTIONS[normalized];
+  if (!createAction) return;
+
+  import('../create-actions.js')
+    .then(({ runCreateAction }) => runCreateAction(createAction, {
+      source: 'android-widget',
+    }))
+    .catch((err) => {
+      console.warn('[YANTA Android Bridge] create action failed', err);
+    });
 }
 
 export function setupAndroidBridge() {
@@ -327,11 +444,15 @@ export function setupAndroidBridge() {
   });
 
   window.addEventListener('yanta-android-quick-action', (e) => {
-    handleNativeQuickAction(e.detail?.action || '');
+    handleNativeQuickAction(e.detail?.action || '', e.detail?.params || {});
   });
 
   window.addEventListener('yanta-android-share-available', () => {
     consumeNativeSharedPayload();
+  });
+
+  window.addEventListener('yanta-android-action-available', () => {
+    consumeNativeQuickAction();
   });
 
   window.addEventListener('yanta-android-open-url', (e) => {
@@ -353,6 +474,8 @@ export function setupAndroidBridge() {
     'yanta-note-updated',
     'yanta-folder-updated',
     'yanta-rss-updated',
+    // Widgets mirror the app's light/dark choice.
+    'yanta-theme-change',
   ].forEach((name) => {
     window.addEventListener(name, () => scheduleNativeSnapshotSync(900));
   });
@@ -466,6 +589,29 @@ export function androidChatPushConfig() {
     console.warn('[YANTA Android Bridge] getChatPushConfig parse failed', err);
     toast('Could not read Android chat push configuration.', 'error');
     return null;
+  }
+}
+
+/**
+ * Pull any widget/shortcut action the native app stashed for a cold start.
+ *
+ * Same reasoning as consumeNativeSharedPayload: a one-shot event fired on
+ * page load races the SPA's boot, and the calendar targets need the app
+ * fully rendered. main.js pulls once the first surface is interactive, and
+ * again on the native "available" nudge for warm launches.
+ */
+export function consumeNativeQuickAction() {
+  if (!isAndroidApp()) return;
+  if (typeof window.YantaAndroid?.consumePendingAction !== 'function') return;
+
+  const raw = callAndroid('consumePendingAction');
+  if (!raw || raw === 'null') return;
+
+  try {
+    const payload = JSON.parse(raw);
+    handleNativeQuickAction(payload?.action || '', payload?.params || {});
+  } catch (err) {
+    console.warn('[YANTA Android Bridge] pending action parse failed', err);
   }
 }
 

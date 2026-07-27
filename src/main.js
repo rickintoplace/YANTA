@@ -233,6 +233,7 @@ import {
 import { revokeImageObjectUrl } from './media/object-url-cache.js';
 
 import {
+  consumeNativeQuickAction,
   consumeNativeSharedPayload,
   setupAndroidBridge,
 } from './native/android-bridge.js';
@@ -2907,6 +2908,9 @@ async function init() {
   // Native Android app: pull any payload the share intent stashed (the WebView
   // is fully booted now, so the router's targets work immediately).
   consumeNativeSharedPayload();
+
+  // Same for a widget or launcher shortcut that cold-started the app.
+  consumeNativeQuickAction();
 
   // Opt-in semantic index: no-op unless enabled; starts in idle time.
   import('./semantic/semantic-index.js')

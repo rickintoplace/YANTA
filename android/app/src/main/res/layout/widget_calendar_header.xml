@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Shared widget chrome: period title on the left, navigation and actions on
+  the right. Buttons that do not apply to a layout (paging in the agenda,
+  "today" while already on today) are hidden by the renderer.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_header"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:gravity="center_vertical"
+    android:orientation="horizontal">
+
+    <LinearLayout
+        android:id="@+id/widget_header_title_group"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:paddingStart="0dp"
+        android:paddingEnd="6dp">
+
+        <TextView
+            android:id="@+id/widget_title"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:fontFamily="sans-serif-medium"
+            android:maxLines="1"
+            android:textSize="@dimen/widget_title_size" />
+
+        <TextView
+            android:id="@+id/widget_subtitle"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textSize="@dimen/widget_subtitle_size" />
+    </LinearLayout>
+
+    <ImageView
+        android:id="@+id/widget_btn_today"
+        android:layout_width="@dimen/widget_header_button"
+        android:layout_height="@dimen/widget_header_button"
+        android:contentDescription="@string/widget_action_today"
+        android:padding="@dimen/widget_header_button_padding"
+        android:src="@drawable/ic_widget_today" />
+
+    <ImageView
+        android:id="@+id/widget_btn_prev"
+        android:layout_width="@dimen/widget_header_button"
+        android:layout_height="@dimen/widget_header_button"
+        android:contentDescription="@string/widget_action_previous"
+        android:padding="@dimen/widget_header_button_padding"
+        android:src="@drawable/ic_widget_chevron_left" />
+
+    <ImageView
+        android:id="@+id/widget_btn_next"
+        android:layout_width="@dimen/widget_header_button"
+        android:layout_height="@dimen/widget_header_button"
+        android:contentDescription="@string/widget_action_next"
+        android:padding="@dimen/widget_header_button_padding"
+        android:src="@drawable/ic_widget_chevron_right" />
+
+    <ImageView
+        android:id="@+id/widget_btn_add"
+        android:layout_width="@dimen/widget_header_button"
+        android:layout_height="@dimen/widget_header_button"
+        android:contentDescription="@string/widget_action_new_event"
+        android:padding="@dimen/widget_header_button_padding"
+        android:src="@drawable/ic_widget_plus" />
+
+    <ImageView
+        android:id="@+id/widget_btn_views"
+        android:layout_width="@dimen/widget_header_button"
+        android:layout_height="@dimen/widget_header_button"
+        android:contentDescription="@string/widget_action_change_view"
+        android:padding="@dimen/widget_header_button_padding"
+        android:src="@drawable/ic_widget_views" />
+</LinearLayout>

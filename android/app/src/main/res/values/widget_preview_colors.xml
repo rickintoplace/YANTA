@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Widget picker previews are inflated by the launcher, so unlike the
+     widgets themselves they follow the system theme via values-night. -->
+<resources>
+    <color name="widget_preview_bg">@color/widget_light_bg</color>
+    <color name="widget_preview_text">@color/widget_light_text</color>
+    <color name="widget_preview_text_dim">@color/widget_light_text_dim</color>
+    <color name="widget_preview_accent">@color/widget_light_accent</color>
+</resources>

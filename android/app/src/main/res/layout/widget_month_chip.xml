@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Month-grid event chip.
+
+  Mirrors the app's mobile month view: no time, no icon, no colour dot and
+  no ellipsis — every one of those costs characters, and in a seven-column
+  grid the title is the only thing worth the width. The label therefore
+  clips rather than truncating with "…", exactly like
+  `span.yanta-cal-event-title { text-overflow: clip }` in calendar.css.
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/chip_root"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="1dp">
+
+    <ImageView
+        android:id="@+id/chip_background"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:contentDescription="@null"
+        android:scaleType="fitXY"
+        android:src="@drawable/widget_shape_rounded_sm" />
+
+    <!-- includeFontPadding="false" reclaims the font's ascent/descent slack,
+         which is a third of a chip's height at this size and therefore an
+         extra event title per cell. -->
+    <TextView
+        android:id="@+id/chip_title"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:fontFamily="sans-serif-medium"
+        android:includeFontPadding="false"
+        android:maxLines="1"
+        android:paddingStart="3dp"
+        android:paddingTop="1dp"
+        android:paddingEnd="2dp"
+        android:paddingBottom="1dp"
+        android:textSize="@dimen/widget_chip_title_compact_size" />
+</FrameLayout>

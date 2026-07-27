@@ -54,8 +54,31 @@ class YantaJsBridge(
     fun syncNativeSnapshot(json: String) {
         NativeStore.saveSnapshot(activity, json)
         NotificationScheduler.scheduleFromSnapshot(activity, json)
-        YantaWidgetUpdater.updateAll(activity)
+        YantaWidgetUpdater.requestUpdate(activity)
         YantaShortcuts.updateDynamicShortcuts(activity, json)
+    }
+
+    // ------------------------------------------------------------
+    // Home-screen widgets
+    // ------------------------------------------------------------
+
+    /**
+     * How many widgets of each kind are placed, so the web layer can skip
+     * building a payload nothing renders. See androidWidgetState() in
+     * src/native/android-bridge.js.
+     */
+    @JavascriptInterface
+    fun getWidgetState(): String = YantaWidgetUpdater.stateJson(activity)
+
+    /**
+     * Display payload for the calendar widgets — see
+     * collectCalendarWidgetPayload() in src/native/android-bridge.js.
+     * Kept separate from the notification snapshot: this one is large and
+     * only read when a widget redraws.
+     */
+    @JavascriptInterface
+    fun syncCalendarWidgetData(json: String) {
+        YantaWidgetUpdater.requestCalendarDataSync(activity, json)
     }
 
     @JavascriptInterface
@@ -70,6 +93,14 @@ class YantaJsBridge(
      */
     @JavascriptInterface
     fun consumeSharedPayload(): String = activity.takeSharedPayloadJson()
+
+    /**
+     * Widget / launcher-shortcut action that cold-started the app, as
+     * { action, params }. Pulled by consumeNativeQuickAction() once the
+     * first surface is interactive — see src/native/android-bridge.js.
+     */
+    @JavascriptInterface
+    fun consumePendingAction(): String = activity.takePendingActionJson()
 
     // ------------------------------------------------------------
     // Chat push (Matrix HTTP pusher config)

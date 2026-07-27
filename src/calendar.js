@@ -8719,6 +8719,68 @@ export function expandedCalendarRawEventsForRange(start, end, {
   return out;
 }
 
+/**
+ * Display-ready event list for native surfaces (Android home-screen widgets).
+ *
+ * Deliberately goes through the same pipeline the calendar itself renders
+ * with, so a widget can never drift from the app: identical category
+ * visibility, recurrence expansion, subscribed sources, markdown-derived
+ * events and resolved colors. The FullCalendar objects are then flattened
+ * to plain values a RemoteViews layout can draw without a DOM.
+ *
+ * All-day ends stay FullCalendar-exclusive — that is what a day-span
+ * calculation needs.
+ */
+export function calendarEventsForNativeSurfaces(start, end, {
+  limit = 3000,
+} = {}) {
+  hydrateCalendarStateFromVault({
+    silent: true,
+  });
+
+  const rangeStart = dateLikeToLocalDate(start);
+  const rangeEnd = dateLikeToLocalDate(end);
+
+  if (!rangeStart || !rangeEnd) return [];
+
+  return buildFullCalendarEventsForRange(rangeStart, rangeEnd)
+    // "Find a time" free slots are an on-screen overlay, not real events.
+    .filter((ev) => ev.display !== 'background')
+    .map((ev) => {
+      const startDate = dateLikeToLocalDate(ev.start);
+      if (!startDate) return null;
+
+      const endDate = dateLikeToLocalDate(ev.end);
+      const raw = ev.extendedProps?.raw || null;
+
+      return {
+        id: String(ev.id || ''),
+        title: String(ev.title || 'Untitled event'),
+        start: startDate.getTime(),
+        end: endDate && endDate.getTime() > startDate.getTime()
+          ? endDate.getTime()
+          : null,
+        allDay: !!ev.allDay,
+        color: ev.backgroundColor,
+        textColor: ev.textColor,
+        location: String(raw?.location || ''),
+
+        /*
+          Only stored events (and their occurrences) have an editable
+          record. Derived ones land on the day view instead.
+        */
+        editable: ev.extendedProps?.yantaKind === 'event',
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) =>
+      a.start - b.start ||
+      Number(b.allDay) - Number(a.allDay) ||
+      a.title.localeCompare(b.title)
+    )
+    .slice(0, limit);
+}
+
 export function renderCalendarEvents() {
   if (!fc) return;
   if (!calendarSurfaceVisible()) return;
@@ -12855,7 +12917,18 @@ export function openCalendarEvent(eventId, {
       hydrateCalendarStateFromVault();
     }
 
-    const ev = state.calendarEvents.get(id);
+    /*
+      Occurrence links (#calendar/<masterId>--<key>) resolve through their
+      master: openEventEditor understands the composite id, but only the
+      master carries the stored record.
+    */
+    const occurrence = parseOccurrenceId(id);
+
+    const ev =
+      state.calendarEvents.get(id) ||
+      (occurrence.isOccurrence
+        ? state.calendarEvents.get(occurrence.masterId)
+        : null);
 
     if (!ev) {
       toast('Calendar event not found', 'error');
@@ -12863,7 +12936,7 @@ export function openCalendarEvent(eventId, {
     }
 
     try {
-      fc?.gotoDate?.(ev.start);
+      fc?.gotoDate?.(occurrence.occurrenceKey || ev.start);
     } catch {}
 
     requestAnimationFrame(() => {
@@ -12872,6 +12945,56 @@ export function openCalendarEvent(eventId, {
         _fromHistory: !push,
       });
     });
+  });
+}
+
+/**
+ * Single entry point for native surfaces (Android widgets, notifications).
+ *
+ * Widgets deep-link into three things — a day, an event, a new event — and
+ * all three have to work from a cold start as well as while the app is
+ * already running. Routing them here (instead of through URL hashes) keeps
+ * the app's history invariants untouched: openCalendar pushes exactly one
+ * entry, so device-Back leaves the calendar rather than unwinding a
+ * synthetic route stack.
+ */
+export function openCalendarFromNative({
+  date = null,
+  eventId = '',
+  create = false,
+} = {}) {
+  const target = dateLikeToLocalDate(date);
+  const id = String(eventId || '').trim();
+
+  if (id) {
+    openCalendarEvent(id);
+    return;
+  }
+
+  openCalendar();
+
+  requestAnimationFrame(() => {
+    if (target) {
+      try {
+        fc?.gotoDate?.(target);
+      } catch {}
+    }
+
+    if (create) {
+      openNewCalendarEvent(
+        target
+          ? {
+              start: applyCurrentDefaultTimeToDate(target),
+            }
+          : {}
+      );
+
+      return;
+    }
+
+    if (target) {
+      openCalendarDayViewAt(target);
+    }
   });
 }
 

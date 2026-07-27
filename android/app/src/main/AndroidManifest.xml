@@ -101,10 +101,11 @@
 
         <receiver
             android:name=".widgets.CalendarWidgetProvider"
-            android:exported="false">
+            android:exported="false"
+            android:label="@string/widget_calendar_label">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
-                <action android:name="page.yanta.app.widget.CALENDAR_VIEW" />
+                <action android:name="page.yanta.app.widget.CALENDAR_NAVIGATE" />
             </intent-filter>
             <meta-data
                 android:name="android.appwidget.provider"
@@ -116,9 +117,44 @@
             android:permission="android.permission.BIND_REMOTEVIEWS"
             android:exported="false" />
 
+        <!--
+          Layout picker. exported=true because the launcher starts it as the
+          widget's configuration activity while placing the widget; it does
+          nothing without a valid app widget id it owns.
+        -->
+        <activity
+            android:name=".widgets.CalendarWidgetConfigActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:label="@string/widget_config_title"
+            android:theme="@style/Theme.Yanta.WidgetConfig">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+
+        <!--
+          Date rollover and clock/locale changes. ACTION_DATE_CHANGED is not
+          delivered to manifest receivers on modern Android, so the daily
+          refresh runs on the self-rescheduling alarm in this receiver.
+        -->
+        <receiver
+            android:name=".widgets.WidgetRefreshReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="page.yanta.app.widget.MIDNIGHT" />
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.LOCALE_CHANGED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+
         <receiver
             android:name=".widgets.QuickCreateWidgetProvider"
-            android:exported="false">
+            android:exported="false"
+            android:label="@string/widget_quick_create_label">
             <intent-filter>
                 <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
             </intent-filter>

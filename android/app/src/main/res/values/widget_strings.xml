@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Widget picker -->
+    <string name="widget_calendar_label">YANTA Calendar</string>
+    <string name="widget_calendar_description">Month, week, day or list — your calendar on the home screen.</string>
+    <string name="widget_quick_create_label">YANTA Quick Create</string>
+    <string name="widget_quick_create_description">One tap to a new note, folder, event or source.</string>
+
+    <!-- Calendar widget chrome -->
+    <string name="widget_action_today">Back to today</string>
+    <string name="widget_action_previous">Previous</string>
+    <string name="widget_action_next">Next</string>
+    <string name="widget_action_new_event">New event</string>
+    <string name="widget_action_change_view">Change layout</string>
+
+    <string name="widget_agenda_title">Upcoming</string>
+    <string name="widget_needs_sync">Open YANTA to sync</string>
+    <string name="widget_empty_day">Nothing scheduled</string>
+    <string name="widget_empty_agenda">No upcoming events</string>
+
+    <!-- "Today · 3 events" -->
+    <string name="widget_subtitle_today">Today · %1$s</string>
+    <!-- "12 events · next 30 days" -->
+    <string name="widget_subtitle_agenda">%1$s · next %2$d days</string>
+    <!-- Agenda day header for the current day -->
+    <string name="widget_today_prefix">Today · %1$s</string>
+
+    <!-- English has no "zero" plural category, so the empty case is its own string. -->
+    <string name="widget_no_events">No events</string>
+    <plurals name="widget_event_count">
+        <item quantity="one">%d event</item>
+        <item quantity="other">%d events</item>
+    </plurals>
+
+    <!-- Layout picker -->
+    <string name="widget_config_title">Calendar widget</string>
+    <string name="widget_config_subtitle">Pick the layout for this widget. You can change it any time from the widget itself.</string>
+
+    <string name="widget_view_month">Month</string>
+    <string name="widget_view_month_hint">Full month grid with event titles</string>
+    <string name="widget_view_week">Week</string>
+    <string name="widget_view_week_hint">Seven day columns at a glance</string>
+    <string name="widget_view_day">Day</string>
+    <string name="widget_view_day_hint">One day as a timeline</string>
+    <string name="widget_view_agenda">List</string>
+    <string name="widget_view_agenda_hint">Upcoming events, grouped by day</string>
+
+    <string name="widget_config_month_section">Month view</string>
+    <string name="widget_month_density_titles">Event titles</string>
+    <string name="widget_month_density_dots">Colour dots</string>
+
+    <!-- Widget picker preview (static sample content) -->
+    <string name="widget_preview_subtitle">Today · 2 events</string>
+    <string name="widget_preview_time_1">09:30</string>
+    <string name="widget_preview_event_1">Design review</string>
+    <string name="widget_preview_time_2">14:00</string>
+    <string name="widget_preview_event_2">Weekly planning</string>
+
+    <!-- Quick create -->
+    <string name="widget_quick_note">Note</string>
+    <string name="widget_quick_folder">Folder</string>
+    <string name="widget_quick_event">Event</string>
+    <string name="widget_quick_sources">Sources</string>
+    <string name="widget_quick_ai">AI</string>
+</resources>

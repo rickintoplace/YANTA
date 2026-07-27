@@ -174,10 +174,9 @@ class MainActivity : ComponentActivity() {
                 installAndroidSystemBarThemeSync()
                 dispatchNotificationStatus()
                 dispatchPushTokenIfChanged()
-                pendingNativeAction?.let { action ->
-                    pendingNativeAction = null
-                    dispatchQuickAction(action)
-                }
+                // A stashed widget/shortcut action is PULLED by the web layer
+                // once it is interactive; nudge it in case it already is.
+                if (pendingNativeAction != null) notifyPendingAction()
             }
         }
 
@@ -563,13 +562,7 @@ class MainActivity : ComponentActivity() {
             return true
         }
         if (uri.scheme == "yanta" && uri.host == "open") {
-            val action = uri.getQueryParameter("action") ?: ""
-            val targetUrl = when (action) {
-                "calendar" -> "${BuildConfig.YANTA_URL}/#calendar"
-                else -> BuildConfig.YANTA_URL
-            }
-            pendingNativeAction = action
-            webView.loadUrl(targetUrl)
+            handleAppAction(uri)
             return true
         }
         if (fromWebView) {
@@ -612,17 +605,54 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun dispatchQuickAction(action: String) {
-        webView.postDelayed({
+    /**
+     * `yanta://open?action=…` — widgets, launcher shortcuts and quick tiles.
+     *
+     * Parameters travel with the action so a widget can target a specific
+     * day or event. A warm app never reloads: re-running the SPA would lose
+     * unsaved editor state and cost a full boot for what is one event.
+     */
+    private fun handleAppAction(uri: Uri) {
+        val action = uri.getQueryParameter("action").orEmpty()
+
+        val params = JSONObject().apply {
+            uri.queryParameterNames
+                .filter { it != "action" }
+                .forEach { put(it, uri.getQueryParameter(it).orEmpty()) }
+        }
+
+        pendingNativeAction = JSONObject()
+            .put("action", action)
+            .put("params", params)
+            .toString()
+
+        if (pageLoaded) {
+            notifyPendingAction()
+        } else {
+            webView.loadUrl(BuildConfig.YANTA_URL)
+        }
+    }
+
+    /**
+     * Returns and clears the stashed action JSON, or "null". Bridge-called.
+     *
+     * Pulled rather than pushed: a cold start races the SPA's boot, and an
+     * event fired before its listener exists is simply lost — the same
+     * reason the share payload is pulled.
+     */
+    fun takePendingActionJson(): String {
+        val payload = pendingNativeAction ?: return "null"
+        pendingNativeAction = null
+        return payload
+    }
+
+    private fun notifyPendingAction() {
+        webView.post {
             webView.evaluateJavascript(
-                """
-                window.dispatchEvent(new CustomEvent('yanta-android-quick-action', {
-                  detail: { action: ${JSONObject.quote(action)} }
-                }));
-                """.trimIndent(),
+                "window.dispatchEvent(new CustomEvent('yanta-android-action-available'));",
                 null
             )
-        }, 600)
+        }
     }
 
     private fun requestNotificationPermission() {

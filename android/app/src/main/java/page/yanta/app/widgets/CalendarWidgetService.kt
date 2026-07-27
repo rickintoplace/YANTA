@@ -1,107 +1,186 @@
 package page.yanta.app.widgets
 
+import android.appwidget.AppWidgetManager
+import android.content.Context
 import android.content.Intent
-import android.net.Uri
+import android.view.View
 import android.widget.RemoteViews
 import android.widget.RemoteViewsService
-import org.json.JSONObject
 import page.yanta.app.R
-import page.yanta.app.data.NativeStore
-import java.time.Instant
+import page.yanta.app.widgets.data.CalendarWidgetSettings
+import page.yanta.app.widgets.data.CalendarWidgetStore
+import page.yanta.app.widgets.data.CalendarWidgetView
+import page.yanta.app.widgets.data.WidgetEvent
+import page.yanta.app.widgets.render.ListWidgetRenderer
+import page.yanta.app.widgets.render.setThemedTextColor
+import page.yanta.app.widgets.render.tint
+import page.yanta.app.widgets.ui.WidgetFormat
+import page.yanta.app.widgets.ui.WidgetIntents
+import page.yanta.app.widgets.ui.WidgetTheme
 import java.time.LocalDate
 import java.time.ZoneId
-import java.time.format.DateTimeFormatter
 
+/** Row source for the day and agenda layouts. */
 class CalendarWidgetService : RemoteViewsService() {
-    override fun onGetViewFactory(intent: Intent): RemoteViewsFactory {
-        return CalendarFactory(applicationContext, intent.getStringExtra(CalendarWidgetProvider.EXTRA_VIEW) ?: "list")
-    }
+    override fun onGetViewFactory(intent: Intent): RemoteViewsFactory =
+        CalendarRowFactory(
+            applicationContext,
+            intent.getIntExtra(
+                AppWidgetManager.EXTRA_APPWIDGET_ID,
+                AppWidgetManager.INVALID_APPWIDGET_ID,
+            ),
+        )
 }
 
-class CalendarFactory(
-    private val context: android.content.Context,
-    private val viewMode: String
+/**
+ * Turns the widget's period into a flat row list.
+ *
+ * The day view is a plain timeline; the agenda groups by day with a header
+ * row in between, the same structure as the app's list view. Everything
+ * runs on the framework's collection thread, so parsing and bucketing the
+ * event data here never blocks a widget update.
+ */
+private class CalendarRowFactory(
+    private val context: Context,
+    private val widgetId: Int,
 ) : RemoteViewsService.RemoteViewsFactory {
 
-    private data class Event(
-        val id: String,
-        val title: String,
-        val startMs: Long,
-        val allDay: Boolean
-    )
-
-    private var events: List<Event> = emptyList()
-
-    override fun onCreate() {}
-
-    override fun onDataSetChanged() {
-        val now = System.currentTimeMillis()
-        val zone = ZoneId.systemDefault()
-        val today = LocalDate.now(zone)
-
-        val root = JSONObject(NativeStore.snapshot(context))
-        val arr = root.optJSONArray("calendarEvents")
-
-        val list = mutableListOf<Event>()
-        if (arr != null) {
-            for (i in 0 until arr.length()) {
-                val obj = arr.optJSONObject(i) ?: continue
-                val startIso = obj.optString("start")
-                val ms = try { Instant.parse(startIso).toEpochMilli() } catch (_: Throwable) { continue }
-                if (ms < now - 86_400_000L) continue
-
-                val date = Instant.ofEpochMilli(ms).atZone(zone).toLocalDate()
-                val include = when (viewMode) {
-                    "day" -> date == today
-                    "week" -> !date.isBefore(today) && date.isBefore(today.plusDays(7))
-                    "month" -> date.month == today.month && date.year == today.year
-                    else -> true
-                }
-
-                if (include) {
-                    list.add(
-                        Event(
-                            id = obj.optString("id"),
-                            title = obj.optString("title", "Untitled event"),
-                            startMs = ms,
-                            allDay = obj.optBoolean("allDay", false)
-                        )
-                    )
-                }
-            }
-        }
-
-        events = list.sortedBy { it.startMs }.take(50)
+    private sealed interface Row {
+        data class Header(val date: LocalDate, val isToday: Boolean) : Row
+        data class Event(val event: WidgetEvent, val date: LocalDate) : Row
     }
 
-    override fun onDestroy() {}
+    private val zone: ZoneId = ZoneId.systemDefault()
 
-    override fun getCount(): Int = events.size
+    private var rows: List<Row> = emptyList()
+    private var theme: WidgetTheme = WidgetTheme.resolve(context, "auto")
+    private var format: WidgetFormat = WidgetFormat.of(CalendarWidgetStore.read(context), zone)
 
-    override fun getViewAt(position: Int): RemoteViews {
-        val event = events[position]
-        val rv = RemoteViews(context.packageName, R.layout.widget_calendar_row)
+    override fun onCreate() = Unit
 
-        val fmt = if (event.allDay) {
-            DateTimeFormatter.ofPattern("EEE, dd MMM").withZone(ZoneId.systemDefault())
-        } else {
-            DateTimeFormatter.ofPattern("EEE, dd MMM · HH:mm").withZone(ZoneId.systemDefault())
+    override fun onDataSetChanged() {
+        val data = CalendarWidgetStore.read(context)
+        val anchor = CalendarWidgetSettings.anchor(context, widgetId)
+
+        theme = WidgetTheme.resolve(context, data.theme)
+        format = WidgetFormat.of(data, zone)
+
+        rows = when (CalendarWidgetSettings.view(context, widgetId)) {
+            CalendarWidgetView.DAY ->
+                data.eventsOn(anchor, zone).map { Row.Event(it, anchor) }
+
+            else -> {
+                val today = LocalDate.now(zone)
+
+                data.eventsFrom(anchor, zone, ListWidgetRenderer.AGENDA_DAYS)
+                    // Events already running when the agenda starts belong to its first day.
+                    .groupBy { maxOf(it.startDate(zone), anchor) }
+                    .toSortedMap()
+                    .flatMap { (date, events) ->
+                        buildList {
+                            add(Row.Header(date, date == today))
+                            events.forEach { add(Row.Event(it, date)) }
+                        }
+                    }
+            }
+        }
+    }
+
+    override fun onDestroy() {
+        rows = emptyList()
+    }
+
+    override fun getCount(): Int = rows.size
+
+    override fun getViewAt(position: Int): RemoteViews =
+        when (val row = rows.getOrNull(position)) {
+            is Row.Header -> headerRow(row)
+            is Row.Event -> eventRow(row)
+            null -> RemoteViews(context.packageName, R.layout.widget_row_day_header)
         }
 
-        rv.setTextViewText(R.id.widget_event_time, fmt.format(Instant.ofEpochMilli(event.startMs)))
-        rv.setTextViewText(R.id.widget_event_title, event.title)
+    private fun headerRow(row: Row.Header): RemoteViews {
+        val views = RemoteViews(context.packageName, R.layout.widget_row_day_header)
 
-        val fillIn = Intent().apply {
-            action = Intent.ACTION_VIEW
-            data = Uri.parse("https://yanta.page/#calendar/${Uri.encode(event.id)}")
+        views.setTextViewText(
+            R.id.header_label,
+            if (row.isToday) {
+                context.getString(R.string.widget_today_prefix, format.dayShort(row.date))
+            } else {
+                format.dayShort(row.date)
+            },
+        )
+        views.setThemedTextColor(
+            R.id.header_label,
+            if (row.isToday) theme.accent else theme.textDim,
+            theme,
+        )
+
+        views.tint(R.id.header_rule, theme.border, theme)
+
+        views.setOnClickFillInIntent(
+            R.id.row_root,
+            WidgetIntents.eventFillIn(eventId = "", editable = false, date = row.date),
+        )
+
+        return views
+    }
+
+    private fun eventRow(row: Row.Event): RemoteViews {
+        val event = row.event
+        val views = RemoteViews(context.packageName, R.layout.widget_row_event)
+
+        val spans = event.allDay || event.spansMultipleDays(zone)
+
+        views.setTextViewText(
+            R.id.row_time_start,
+            if (spans) WidgetFormat.ALL_DAY else format.time(event.startMs),
+        )
+        views.setThemedTextColor(
+            R.id.row_time_start,
+            if (spans) theme.textFaint else theme.text,
+            theme,
+        )
+
+        val showEnd = !spans && event.endMs > event.startMs
+        views.setViewVisibility(R.id.row_time_end, if (showEnd) View.VISIBLE else View.GONE)
+        if (showEnd) {
+            views.setTextViewText(R.id.row_time_end, format.time(event.endMs))
+            views.setThemedTextColor(R.id.row_time_end, theme.textFaint, theme)
         }
-        rv.setOnClickFillInIntent(R.id.widget_event_row, fillIn)
 
-        return rv
+        views.tint(R.id.row_bar, event.color)
+
+        views.setTextViewText(R.id.row_title, event.title)
+        views.setThemedTextColor(R.id.row_title, theme.text, theme)
+
+        views.setViewVisibility(
+            R.id.row_location,
+            if (event.location.isBlank()) View.GONE else View.VISIBLE,
+        )
+        if (event.location.isNotBlank()) {
+            views.setTextViewText(R.id.row_location, event.location)
+            views.setThemedTextColor(R.id.row_location, theme.textDim, theme)
+        }
+
+        views.setOnClickFillInIntent(
+            R.id.row_root,
+            WidgetIntents.eventFillIn(event.id, event.editable, row.date),
+        )
+
+        return views
     }
 
     override fun getLoadingView(): RemoteViews? = null
-    override fun getViewTypeCount(): Int = 1
-    override fun getItemId(position: Int): Long = events[position].id.hashCode().toLong()
+
+    override fun getViewTypeCount(): Int = 2
+
+    override fun getItemId(position: Int): Long =
+        when (val row = rows.getOrNull(position)) {
+            is Row.Header -> row.date.toEpochDay()
+            is Row.Event -> row.event.id.hashCode().toLong() * 31 + row.date.toEpochDay()
+            null -> position.toLong()
+        }
+
     override fun hasStableIds(): Boolean = true
 }

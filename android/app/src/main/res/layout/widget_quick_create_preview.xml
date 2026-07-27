@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Static preview for the widget picker (API 31+). -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_preview_surface"
+    android:gravity="center"
+    android:orientation="horizontal"
+    android:padding="10dp">
+
+    <ImageView
+        android:layout_width="0dp"
+        android:layout_height="30dp"
+        android:layout_weight="1"
+        android:contentDescription="@string/widget_quick_note"
+        android:src="@drawable/ic_widget_note"
+        android:tint="@color/widget_preview_accent" />
+
+    <ImageView
+        android:layout_width="0dp"
+        android:layout_height="30dp"
+        android:layout_weight="1"
+        android:contentDescription="@string/widget_quick_event"
+        android:src="@drawable/ic_widget_event"
+        android:tint="@color/widget_preview_accent" />
+
+    <ImageView
+        android:layout_width="0dp"
+        android:layout_height="30dp"
+        android:layout_weight="1"
+        android:contentDescription="@string/widget_quick_folder"
+        android:src="@drawable/ic_widget_folder"
+        android:tint="@color/widget_preview_accent" />
+
+    <ImageView
+        android:layout_width="0dp"
+        android:layout_height="30dp"
+        android:layout_weight="1"
+        android:contentDescription="@string/widget_quick_ai"
+        android:src="@drawable/ic_widget_ai"
+        android:tint="@color/widget_preview_accent" />
+</LinearLayout>

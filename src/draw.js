@@ -23,7 +23,19 @@ import {
   lucide,
   debounce,
   safeCssColor,
+  structuredCloneSafe,
 } from './core.js';
+
+import {
+  loadReact,
+  loadExcalidraw,
+  currentExcalidrawTheme,
+} from './draw-runtime.js';
+
+import {
+  bindDrawSelectionMenu,
+  destroyDrawSelectionMenu,
+} from './draw-selection-menu.js';
 
 import { cloudFetchExcalidrawLibrary } from './cloud/cloud-api.js';
 import { insertAtCursor } from './editor.js';
@@ -63,8 +75,6 @@ let active = {
   unobserve: null,
 };
 
-let excalidrawLibPromise = null;
-let reactLibPromise = null;
 let injectedCss = false;
 let activeEmbedCloseBound = false;
 let drawOverlayRegistered = false;
@@ -1750,36 +1760,6 @@ body > .hover-preview {
   document.head.append(style);
 }
 
-async function loadReact() {
-  if (!reactLibPromise) {
-    reactLibPromise = Promise.all([
-      import('react'),
-      import('react-dom/client'),
-    ]).then(([React, ReactDOM]) => ({ React, ReactDOM }));
-  }
-
-  return reactLibPromise;
-}
-
-function ensureExcalidrawAssetPath() {
-  if (!window.EXCALIDRAW_ASSET_PATH) {
-    window.EXCALIDRAW_ASSET_PATH = '/excalidraw-assets/';
-  }
-}
-
-async function loadExcalidraw() {
-  ensureExcalidrawAssetPath();
-
-  if (!excalidrawLibPromise) {
-    excalidrawLibPromise = Promise.all([
-      import('@excalidraw/excalidraw'),
-      import('@excalidraw/excalidraw/index.css'),
-    ]).then(([mod]) => mod);
-  }
-
-  return excalidrawLibPromise;
-}
-
 function cleanAppState(appState = {}) {
   const {
     collaborators,
@@ -1854,12 +1834,6 @@ function liveDrawingElements(drawingOrElements) {
     typeof el === 'object' &&
     el.isDeleted !== true
   );
-}
-
-function currentExcalidrawTheme() {
-  return document.documentElement.dataset.theme === 'dark'
-    ? 'dark'
-    : 'light';
 }
 
 function canvasSizeOf(drawing) {
@@ -2412,14 +2386,6 @@ function unlinkElementFromWiki(el) {
   }
 
   return next;
-}
-
-function structuredCloneSafe(v) {
-  try {
-    return structuredClone(v);
-  } catch {
-    return JSON.parse(JSON.stringify(v ?? null));
-  }
 }
 
 function addFilesToExcalidrawApi(api, files = {}) {
@@ -3304,6 +3270,24 @@ async function linkSelectedElementsToNote(api, note) {
   api.refresh?.();
   return true;
 }
+
+/*
+  Wiring for the selection quick actions. The rail itself is surface-agnostic;
+  note linking lives here because this module owns the picker and the wikilink
+  writers.
+*/
+const DRAW_SELECTION_MENU_OPTIONS = {
+  editable: true,
+
+  onLinkNote: async (api) => {
+    const note = await openNoteReferencePicker();
+    if (!note) return;
+
+    if (await linkSelectedElementsToNote(api, note)) {
+      toast(`Linked ${note.title || 'Untitled'}`, 'success');
+    }
+  },
+};
 
 function linkSpecificElementsToNote(api, targets, note) {
   if (!api || !targets?.length || !note) return false;
@@ -4899,6 +4883,8 @@ async function mountInlineDrawing(embed, sourceNoteId, drawingId, drawing) {
         bindNativeExcalidrawContextMenuPatch(inlineHost, apiRef, true);
         bindDrawWikiAutocomplete(inlineHost, apiRef, true);
     }
+
+    return () => destroyDrawSelectionMenu(inlineHost);
     }, []);
 
     const saveScene = (elements, appState, files) => {
@@ -4978,6 +4964,10 @@ async function mountInlineDrawing(embed, sourceNoteId, drawingId, drawing) {
           embed,
           surface,
         });
+
+        if (editable) {
+          bindDrawSelectionMenu(inlineHost, api, DRAW_SELECTION_MENU_OPTIONS);
+        }
 
         addFilesToExcalidrawApi(api, drawing.files);
 
@@ -5454,6 +5444,8 @@ export async function openDrawModal(
       bindWikiPreviewInteractions(fullscreenHost, apiRef, true);
       bindNativeExcalidrawContextMenuPatch(fullscreenHost, apiRef, true);
       bindDrawWikiAutocomplete(fullscreenHost, apiRef, true);
+
+      return () => destroyDrawSelectionMenu(fullscreenHost);
     }, []);
 
     React.useEffect(() => {
@@ -5564,7 +5556,9 @@ export async function openDrawModal(
           embed: null,
           surface: 'fullscreen',
         });
-        
+
+        bindDrawSelectionMenu(fullscreenHost, api, DRAW_SELECTION_MENU_OPTIONS);
+
         addFilesToExcalidrawApi(api, current.files);
 
         if (shouldSelectInitialTool) {

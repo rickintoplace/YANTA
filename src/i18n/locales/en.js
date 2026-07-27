@@ -712,6 +712,27 @@ export default {
     noteEmpty: 'This note is still empty.',
   },
 
+  draw: {
+    selection: {
+      label: 'Selection actions',
+      copy: 'Copy',
+      copyFormats: 'Copy as…',
+      copyElements: 'Elements',
+      copyPng: 'PNG image',
+      copySvg: 'SVG',
+      copiedElements: { one: 'Copied {count} element', other: 'Copied {count} elements' },
+      copiedPng: 'Copied as PNG image',
+      copiedSvg: 'Copied as SVG',
+      duplicate: 'Duplicate',
+      addToLibrary: 'Add to library',
+      addedToLibrary: 'Added to your library',
+      libraryUnsupported: 'Images and embeds cannot be added to the library',
+      linkNote: 'Link note…',
+      more: 'More actions',
+      actionFailed: 'Could not complete that.',
+    },
+  },
+
   palette: {
     // Command entries themselves stay English (power-user / keyboard feature,
     // consistent with the keyboard shortcuts). Only the chrome is localized.

@@ -93,6 +93,16 @@ export const debounce = (fn, ms) => {
   return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); };
 };
 
+// Deep clone that never throws: falls back to JSON for values structuredClone
+// rejects (functions, DOM nodes, proxies inside third-party data).
+export const structuredCloneSafe = (v) => {
+  try {
+    return structuredClone(v);
+  } catch {
+    return JSON.parse(JSON.stringify(v ?? null));
+  }
+};
+
 export const escapeHtml = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({
   '&': '&amp;',
   '<': '&lt;',

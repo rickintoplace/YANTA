@@ -705,6 +705,27 @@ export default {
     noteEmpty: 'Diese Notiz ist noch leer.',
   },
 
+  draw: {
+    selection: {
+      label: 'Aktionen für die Auswahl',
+      copy: 'Kopieren',
+      copyFormats: 'Kopieren als…',
+      copyElements: 'Objekte',
+      copyPng: 'PNG-Bild',
+      copySvg: 'SVG',
+      copiedElements: { one: '{count} Objekt kopiert', other: '{count} Objekte kopiert' },
+      copiedPng: 'Als PNG-Bild kopiert',
+      copiedSvg: 'Als SVG kopiert',
+      duplicate: 'Duplizieren',
+      addToLibrary: 'Zur Bibliothek hinzufügen',
+      addedToLibrary: 'Zur Bibliothek hinzugefügt',
+      libraryUnsupported: 'Bilder und Einbettungen lassen sich nicht zur Bibliothek hinzufügen',
+      linkNote: 'Notiz verknüpfen…',
+      more: 'Weitere Aktionen',
+      actionFailed: 'Das hat leider nicht geklappt.',
+    },
+  },
+
   palette: {
     label: 'Suche und Befehle',
     results: 'Ergebnisse',

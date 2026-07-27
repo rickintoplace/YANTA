@@ -696,6 +696,27 @@ export default {
     noteEmpty: 'このノートはまだ空です。',
   },
 
+  draw: {
+    selection: {
+      label: '選択範囲の操作',
+      copy: 'コピー',
+      copyFormats: '形式を選んでコピー…',
+      copyElements: '要素',
+      copyPng: 'PNG 画像',
+      copySvg: 'SVG',
+      copiedElements: { other: '{count} 個の要素をコピーしました' },
+      copiedPng: 'PNG 画像としてコピーしました',
+      copiedSvg: 'SVG としてコピーしました',
+      duplicate: '複製',
+      addToLibrary: 'ライブラリに追加',
+      addedToLibrary: 'ライブラリに追加しました',
+      libraryUnsupported: '画像と埋め込みはライブラリに追加できません',
+      linkNote: 'ノートをリンク…',
+      more: 'その他の操作',
+      actionFailed: '処理を完了できませんでした。',
+    },
+  },
+
   palette: {
     label: '検索とコマンド',
     results: '検索結果',

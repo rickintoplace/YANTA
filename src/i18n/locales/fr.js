@@ -705,6 +705,27 @@ export default {
     noteEmpty: 'Cette note est encore vide.',
   },
 
+  draw: {
+    selection: {
+      label: 'Actions sur la sélection',
+      copy: 'Copier',
+      copyFormats: 'Copier comme…',
+      copyElements: 'Éléments',
+      copyPng: 'Image PNG',
+      copySvg: 'SVG',
+      copiedElements: { one: '{count} élément copié', other: '{count} éléments copiés' },
+      copiedPng: 'Copié comme image PNG',
+      copiedSvg: 'Copié comme SVG',
+      duplicate: 'Dupliquer',
+      addToLibrary: 'Ajouter à la bibliothèque',
+      addedToLibrary: 'Ajouté à votre bibliothèque',
+      libraryUnsupported: 'Les images et les intégrations ne peuvent pas être ajoutées à la bibliothèque',
+      linkNote: 'Lier une note…',
+      more: 'Plus d’actions',
+      actionFailed: 'Impossible de finaliser cette action.',
+    },
+  },
+
   palette: {
     label: 'Recherche et commandes',
     results: 'Résultats',

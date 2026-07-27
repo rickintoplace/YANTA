@@ -1,0 +1,105 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Quick Create picker: choose which actions the widget offers and in which
+  order. Colours are applied at runtime from WidgetTheme so this screen and
+  the widget it configures always match.
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/config_scrim"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <ScrollView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_gravity="center"
+        android:clipToPadding="false"
+        android:padding="20dp">
+
+        <FrameLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content">
+
+            <ImageView
+                android:id="@+id/config_card_background"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:contentDescription="@null"
+                android:scaleType="fitXY"
+                android:src="@drawable/widget_shape_rounded_xl" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:clickable="true"
+                android:focusable="true"
+                android:orientation="vertical"
+                android:padding="20dp">
+
+                <TextView
+                    android:id="@+id/config_title"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:fontFamily="sans-serif-medium"
+                    android:text="@string/widget_quick_create_label"
+                    android:textSize="20sp" />
+
+                <TextView
+                    android:id="@+id/config_subtitle"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="4dp"
+                    android:text="@string/widget_quick_config_subtitle"
+                    android:textSize="13sp" />
+
+                <TextView
+                    android:id="@+id/config_selected_label"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="18dp"
+                    android:fontFamily="sans-serif-medium"
+                    android:text="@string/widget_quick_config_selected"
+                    android:textSize="13sp" />
+
+                <LinearLayout
+                    android:id="@+id/config_selected"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical" />
+
+                <TextView
+                    android:id="@+id/config_available_label"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="18dp"
+                    android:fontFamily="sans-serif-medium"
+                    android:text="@string/widget_quick_config_available"
+                    android:textSize="13sp" />
+
+                <LinearLayout
+                    android:id="@+id/config_available"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical" />
+
+                <!-- A real background, not the ImageView-behind-text trick the
+                     widgets need: this is an ordinary Activity, so the drawable
+                     can simply be tinted. -->
+                <TextView
+                    android:id="@+id/config_done"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_gravity="end"
+                    android:layout_marginTop="18dp"
+                    android:background="@drawable/widget_shape_rounded_md"
+                    android:fontFamily="sans-serif-medium"
+                    android:paddingStart="26dp"
+                    android:paddingTop="12dp"
+                    android:paddingEnd="26dp"
+                    android:paddingBottom="12dp"
+                    android:text="@string/widget_config_done"
+                    android:textSize="15sp" />
+            </LinearLayout>
+        </FrameLayout>
+    </ScrollView>
+</FrameLayout>

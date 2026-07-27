@@ -4,7 +4,9 @@
     <string name="widget_calendar_label">YANTA Calendar</string>
     <string name="widget_calendar_description">Month, week, day or list — your calendar on the home screen.</string>
     <string name="widget_quick_create_label">YANTA Quick Create</string>
-    <string name="widget_quick_create_description">One tap to a new note, folder, event or source.</string>
+    <string name="widget_quick_create_description">A configurable row of shortcuts — capture, note, event, chat and more.</string>
+    <string name="widget_quick_capture_label">YANTA Quick Capture</string>
+    <string name="widget_quick_capture_description">One tap into the capture sheet, straight to today\'s note.</string>
 
     <!-- Calendar widget chrome -->
     <string name="widget_action_today">Back to today</string>
@@ -56,10 +58,28 @@
     <string name="widget_preview_time_2">14:00</string>
     <string name="widget_preview_event_2">Weekly planning</string>
 
-    <!-- Quick create -->
-    <string name="widget_quick_note">Note</string>
-    <string name="widget_quick_folder">Folder</string>
-    <string name="widget_quick_event">Event</string>
-    <string name="widget_quick_sources">Sources</string>
-    <string name="widget_quick_ai">AI</string>
+    <!-- Quick create actions. Labels sit under a 40dp icon, so they stay
+         short; the picker shows the same names. -->
+    <string name="widget_action_capture">Capture</string>
+    <string name="widget_action_note">Note</string>
+    <string name="widget_action_event">Event</string>
+    <string name="widget_action_chat">Chat</string>
+    <string name="widget_action_ai">AI</string>
+    <string name="widget_action_sources">Sources</string>
+    <string name="widget_action_checklist">Checklist</string>
+    <string name="widget_action_drawing">Drawing</string>
+    <string name="widget_action_image">Image</string>
+    <string name="widget_action_folder">Folder</string>
+
+    <string name="widget_quick_config_subtitle">Pick the actions this widget offers and their order. Two actions make a neat 2x1; one makes a 1x1 button.</string>
+    <string name="widget_quick_config_selected">In this widget</string>
+    <string name="widget_quick_config_available">Add an action</string>
+    <string name="widget_config_move_up">Move up</string>
+    <string name="widget_config_move_down">Move down</string>
+    <string name="widget_config_remove">Remove</string>
+    <string name="widget_config_add">Add</string>
+    <string name="widget_config_done">Done</string>
+
+    <!-- Quick capture. Matches the placeholder in the app's capture sheet. -->
+    <string name="widget_capture_prompt">What\'s on your mind?</string>
 </resources>

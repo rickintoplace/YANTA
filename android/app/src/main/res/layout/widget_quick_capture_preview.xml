@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Static preview for the widget picker (API 31+). -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_preview_surface"
+    android:gravity="center_vertical"
+    android:orientation="horizontal"
+    android:padding="12dp">
+
+    <ImageView
+        android:layout_width="34dp"
+        android:layout_height="34dp"
+        android:contentDescription="@null"
+        android:src="@drawable/ic_widget_capture"
+        android:tint="@color/widget_preview_accent" />
+
+    <TextView
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="12dp"
+        android:layout_weight="1"
+        android:maxLines="1"
+        android:text="@string/widget_capture_prompt"
+        android:textColor="@color/widget_preview_text_dim"
+        android:textSize="15sp" />
+</LinearLayout>

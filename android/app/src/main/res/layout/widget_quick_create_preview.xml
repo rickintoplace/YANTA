@@ -12,7 +12,15 @@
         android:layout_width="0dp"
         android:layout_height="30dp"
         android:layout_weight="1"
-        android:contentDescription="@string/widget_quick_note"
+        android:contentDescription="@string/widget_action_capture"
+        android:src="@drawable/ic_widget_capture"
+        android:tint="@color/widget_preview_accent" />
+
+    <ImageView
+        android:layout_width="0dp"
+        android:layout_height="30dp"
+        android:layout_weight="1"
+        android:contentDescription="@string/widget_action_note"
         android:src="@drawable/ic_widget_note"
         android:tint="@color/widget_preview_accent" />
 
@@ -20,23 +28,15 @@
         android:layout_width="0dp"
         android:layout_height="30dp"
         android:layout_weight="1"
-        android:contentDescription="@string/widget_quick_event"
+        android:contentDescription="@string/widget_action_chat"
+        android:src="@drawable/ic_widget_chat"
+        android:tint="@color/widget_preview_accent" />
+
+    <ImageView
+        android:layout_width="0dp"
+        android:layout_height="30dp"
+        android:layout_weight="1"
+        android:contentDescription="@string/widget_action_event"
         android:src="@drawable/ic_widget_event"
-        android:tint="@color/widget_preview_accent" />
-
-    <ImageView
-        android:layout_width="0dp"
-        android:layout_height="30dp"
-        android:layout_weight="1"
-        android:contentDescription="@string/widget_quick_folder"
-        android:src="@drawable/ic_widget_folder"
-        android:tint="@color/widget_preview_accent" />
-
-    <ImageView
-        android:layout_width="0dp"
-        android:layout_height="30dp"
-        android:layout_weight="1"
-        android:contentDescription="@string/widget_quick_ai"
-        android:src="@drawable/ic_widget_ai"
         android:tint="@color/widget_preview_accent" />
 </LinearLayout>

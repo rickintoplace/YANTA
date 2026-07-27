@@ -88,10 +88,14 @@ object WidgetIntents {
         )
 
     fun openViewPicker(context: Context, widgetId: Int): PendingIntent =
+        openConfig(context, widgetId, CalendarWidgetConfigActivity::class.java)
+
+    /** Opens a widget's configuration screen from the widget itself. */
+    fun openConfig(context: Context, widgetId: Int, activity: Class<*>): PendingIntent =
         PendingIntent.getActivity(
             context,
             requestCode(widgetId, LANE_CONFIG),
-            Intent(context, CalendarWidgetConfigActivity::class.java).apply {
+            Intent(context, activity).apply {
                 action = Intent.ACTION_VIEW
                 data = "yanta-widget://configure/$widgetId".toUri()
                 putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId)

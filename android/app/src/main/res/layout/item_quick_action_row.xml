@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  One action in the Quick Create picker. The trailing controls differ per
+  section — reorder and remove for chosen actions, add for the rest — so
+  the row carries all of them and the activity shows the pair it needs.
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/row_root"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:layout_marginTop="6dp">
+
+    <ImageView
+        android:id="@+id/row_background"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:contentDescription="@null"
+        android:scaleType="fitXY"
+        android:src="@drawable/widget_shape_rounded_md" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:gravity="center_vertical"
+        android:orientation="horizontal"
+        android:paddingStart="14dp"
+        android:paddingTop="8dp"
+        android:paddingEnd="6dp"
+        android:paddingBottom="8dp">
+
+        <ImageView
+            android:id="@+id/row_icon"
+            android:layout_width="22dp"
+            android:layout_height="22dp"
+            android:contentDescription="@null" />
+
+        <TextView
+            android:id="@+id/row_label"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="14dp"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:textSize="15sp" />
+
+        <ImageView
+            android:id="@+id/row_up"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:contentDescription="@string/widget_config_move_up"
+            android:padding="8dp"
+            android:src="@drawable/ic_widget_move_up" />
+
+        <ImageView
+            android:id="@+id/row_down"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:contentDescription="@string/widget_config_move_down"
+            android:padding="8dp"
+            android:src="@drawable/ic_widget_move_down" />
+
+        <ImageView
+            android:id="@+id/row_remove"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:contentDescription="@string/widget_config_remove"
+            android:padding="9dp"
+            android:src="@drawable/ic_widget_remove" />
+
+        <ImageView
+            android:id="@+id/row_add"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:contentDescription="@string/widget_config_add"
+            android:padding="8dp"
+            android:src="@drawable/ic_widget_plus" />
+    </LinearLayout>
+</FrameLayout>

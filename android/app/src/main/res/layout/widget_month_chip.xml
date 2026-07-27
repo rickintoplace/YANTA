@@ -9,6 +9,7 @@
   `span.yanta-cal-event-title { text-overflow: clip }` in calendar.css.
 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/chip_root"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
@@ -25,16 +26,29 @@
     <!-- includeFontPadding="false" reclaims the font's ascent/descent slack,
          which is a third of a chip's height at this size and therefore an
          extra event title per cell. -->
+    <!--
+      Show as many characters of the title as fit, clipped mid-word — the
+      most text a seven-column grid can carry, and what Google's calendar
+      widget does.
+
+      Both attributes are needed. maxLines still lays the text out in
+      word-wrapped lines and shows only the first, turning "Tim feiert
+      Geburtstag" into "Tim"; only singleLine suppresses line breaking.
+      singleLine in turn defaults a non-editable TextView to ellipsize=end
+      ("Tim f…"), so "none" has to be spelled out to get a plain clip.
+    -->
     <TextView
         android:id="@+id/chip_title"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:ellipsize="none"
         android:fontFamily="sans-serif-medium"
         android:includeFontPadding="false"
-        android:maxLines="1"
         android:paddingStart="3dp"
         android:paddingTop="1dp"
         android:paddingEnd="2dp"
         android:paddingBottom="1dp"
-        android:textSize="@dimen/widget_chip_title_compact_size" />
+        android:singleLine="true"
+        android:textSize="@dimen/widget_chip_title_compact_size"
+        tools:ignore="Deprecated" />
 </FrameLayout>

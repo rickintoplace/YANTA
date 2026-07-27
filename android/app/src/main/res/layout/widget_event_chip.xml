@@ -5,6 +5,7 @@
   RemoteViews cannot tint a background drawable before API 31.
 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
     android:id="@+id/chip_root"
     android:layout_width="match_parent"
     android:layout_height="wrap_content"
@@ -36,14 +37,25 @@
             android:maxLines="1"
             android:textSize="@dimen/widget_chip_time_size"
             android:visibility="gone" />
+        <!--
+          Show as many characters of the title as fit, clipped mid-word — the
+          most text a seven-column grid can carry, and what Google's calendar
+          widget does.
 
+          Both attributes are needed. maxLines still lays the text out in
+          word-wrapped lines and shows only the first, turning "Tim feiert
+          Geburtstag" into "Tim"; only singleLine suppresses line breaking.
+          singleLine in turn defaults a non-editable TextView to ellipsize=end
+          ("Tim f…"), so "none" has to be spelled out to get a plain clip.
+        -->
         <TextView
             android:id="@+id/chip_title"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:ellipsize="end"
+            android:ellipsize="none"
             android:fontFamily="sans-serif-medium"
-            android:maxLines="1"
-            android:textSize="@dimen/widget_chip_title_size" />
+            android:singleLine="true"
+            android:textSize="@dimen/widget_chip_title_size"
+            tools:ignore="Deprecated" />
     </LinearLayout>
 </FrameLayout>

@@ -19,6 +19,7 @@ object YantaWidgetUpdater {
     fun updateAll(context: Context) {
         CalendarWidgetProvider.updateAll(context)
         QuickCreateWidgetProvider.updateAll(context)
+        QuickCaptureWidgetProvider.updateAll(context)
         WidgetRefreshReceiver.scheduleMidnightRefresh(context)
     }
 
@@ -49,6 +50,7 @@ object YantaWidgetUpdater {
         return JSONObject()
             .put("calendar", count(context, manager, CalendarWidgetProvider::class.java))
             .put("quickCreate", count(context, manager, QuickCreateWidgetProvider::class.java))
+            .put("quickCapture", count(context, manager, QuickCaptureWidgetProvider::class.java))
             .toString()
     }
 

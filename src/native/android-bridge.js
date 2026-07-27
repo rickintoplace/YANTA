@@ -362,21 +362,22 @@ export function consumeNativeSharedPayload() {
 }
 
 /*
-  Actions the native layer can trigger, from widgets and launcher shortcuts.
-  Calendar targets carry parameters (date, event id); the create actions do
-  not. Everything routes through the app's own entry points so widget taps
-  behave exactly like taps inside the app.
+  Native action ids are the app's own CREATE_ACTIONS ids, so a widget or
+  launcher shortcut ends up in exactly the same code path as the in-app
+  create menu. Only these older shortcut names predate that convention.
 */
-const NATIVE_CREATE_ACTIONS = {
+const LEGACY_NATIVE_ACTIONS = {
+  sources: 'rss',
   quick_note: 'note',
   quick_folder: 'folder',
   quick_event: 'event',
-  sources: 'rss',
 };
 
 function handleNativeQuickAction(action = '', params = {}) {
-  const normalized = String(action || '');
+  const normalized = String(action || '').trim();
+  if (!normalized) return;
 
+  // Calendar targets are the only ones carrying parameters (date, event id).
   if (normalized.startsWith('calendar')) {
     import('../calendar.js')
       .then(({ openCalendarFromNative }) => openCalendarFromNative({
@@ -392,18 +393,11 @@ function handleNativeQuickAction(action = '', params = {}) {
     return;
   }
 
-  if (normalized === 'ai') {
-    window.dispatchEvent(new CustomEvent('yanta-open-ai-assistant'));
-    return;
-  }
-
-  const createAction = NATIVE_CREATE_ACTIONS[normalized];
-  if (!createAction) return;
-
   import('../create-actions.js')
-    .then(({ runCreateAction }) => runCreateAction(createAction, {
-      source: 'android-widget',
-    }))
+    .then(({ runCreateAction }) => runCreateAction(
+      LEGACY_NATIVE_ACTIONS[normalized] || normalized,
+      { source: 'android-widget' },
+    ))
     .catch((err) => {
       console.warn('[YANTA Android Bridge] create action failed', err);
     });

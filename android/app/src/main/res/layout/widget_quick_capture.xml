@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Quick capture: one tap from the home screen into the capture sheet.
+
+  A widget cannot host a text field — RemoteViews has no EditText — so the
+  widget is the invitation to type, not the input itself: a pill carrying
+  the app's own prompt, with the whole surface as the tap target.
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <ImageView
+        android:id="@+id/widget_background"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:contentDescription="@null"
+        android:scaleType="fitXY"
+        android:src="@drawable/widget_shape_rounded_xl" />
+
+    <LinearLayout
+        android:id="@+id/capture_row"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:gravity="center"
+        android:orientation="horizontal"
+        android:paddingStart="12dp"
+        android:paddingTop="10dp"
+        android:paddingEnd="12dp"
+        android:paddingBottom="10dp">
+
+        <FrameLayout
+            android:layout_width="38dp"
+            android:layout_height="38dp">
+
+            <ImageView
+                android:id="@+id/capture_icon_background"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:contentDescription="@null"
+                android:src="@drawable/widget_shape_circle" />
+
+            <ImageView
+                android:id="@+id/capture_icon"
+                android:layout_width="match_parent"
+                android:layout_height="match_parent"
+                android:contentDescription="@null"
+                android:padding="9dp"
+                android:src="@drawable/ic_widget_capture" />
+        </FrameLayout>
+
+        <TextView
+            android:id="@+id/capture_prompt"
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_marginStart="12dp"
+            android:layout_weight="1"
+            android:ellipsize="end"
+            android:maxLines="1"
+            android:text="@string/widget_capture_prompt"
+            android:textSize="15sp" />
+    </LinearLayout>
+</FrameLayout>

@@ -10,6 +10,8 @@ import android.view.View
 import android.widget.RemoteViews
 import page.yanta.app.R
 import page.yanta.app.widgets.data.CalendarWidgetStore
+import page.yanta.app.widgets.data.QuickAction
+import page.yanta.app.widgets.data.QuickCreateSettings
 import page.yanta.app.widgets.render.setThemedTextColor
 import page.yanta.app.widgets.render.tint
 import page.yanta.app.widgets.ui.WidgetIntents
@@ -17,11 +19,13 @@ import page.yanta.app.widgets.ui.WidgetTheme
 
 /**
  * Quick create: the fastest path from the home screen into a new note,
- * folder, event, source or the assistant.
+ * capture, event, chat or the assistant.
  *
- * The action strip is filled at render time so a narrow widget shows fewer
- * actions at full size instead of five cramped ones, and labels disappear
- * before the icons do when the widget is only one row tall.
+ * Which actions appear, and in what order, is per widget instance — the
+ * same provider is a six-action bar on one home screen and a single-purpose
+ * 1x1 button on another. The renderer only decides how much room each
+ * chosen action gets, never which ones survive: dropping an action the user
+ * explicitly picked would be the widget overruling its owner.
  */
 class QuickCreateWidgetProvider : AppWidgetProvider() {
 
@@ -50,25 +54,22 @@ class QuickCreateWidgetProvider : AppWidgetProvider() {
         render(context, manager, widgetId)
     }
 
-    private data class QuickAction(
-        val id: String,
-        val iconRes: Int,
-        val labelRes: Int,
-    )
+    override fun onDeleted(context: Context, ids: IntArray) {
+        QuickCreateSettings.forget(context, ids)
+    }
 
     companion object {
 
-        /** Ordered by how often they are reached for; the tail drops first. */
-        private val ACTIONS = listOf(
-            QuickAction("quick_note", R.drawable.ic_widget_note, R.string.widget_quick_note),
-            QuickAction("quick_event", R.drawable.ic_widget_event, R.string.widget_quick_event),
-            QuickAction("quick_folder", R.drawable.ic_widget_folder, R.string.widget_quick_folder),
-            QuickAction("ai", R.drawable.ic_widget_ai, R.string.widget_quick_ai),
-            QuickAction("sources", R.drawable.ic_widget_rss, R.string.widget_quick_sources),
-        )
+        /** Below this much room per action the compact variant is used. */
+        private const val COMPACT_ACTION_DP = 52
 
-        private const val ACTION_WIDTH_DP = 62
+        /** Labels need a second row of text under a 40dp circle. */
         private const val LABEL_MIN_HEIGHT_DP = 84
+
+        private const val FALLBACK_WIDTH_DP = 250
+        private const val FALLBACK_HEIGHT_DP = 60
+
+        private const val ACCENT_WASH_ALPHA = 46
 
         fun updateAll(context: Context) {
             val manager = AppWidgetManager.getInstance(context)
@@ -79,7 +80,7 @@ class QuickCreateWidgetProvider : AppWidgetProvider() {
             ids.forEach { render(context, manager, it) }
         }
 
-        private fun render(context: Context, manager: AppWidgetManager, widgetId: Int) {
+        fun render(context: Context, manager: AppWidgetManager, widgetId: Int) {
             val theme = WidgetTheme.resolve(context, CalendarWidgetStore.read(context).theme)
             val options = runCatching { manager.getAppWidgetOptions(widgetId) }.getOrNull()
 
@@ -91,22 +92,25 @@ class QuickCreateWidgetProvider : AppWidgetProvider() {
                 ?.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 0)
                 ?.takeIf { it > 0 } ?: FALLBACK_HEIGHT_DP
 
+            val actions = QuickCreateSettings.actions(context, widgetId)
+            val perActionDp = widthDp / actions.size.coerceAtLeast(1)
+
+            val compact = perActionDp < COMPACT_ACTION_DP
+            val showLabels = !compact && heightDp >= LABEL_MIN_HEIGHT_DP
+
             val views = RemoteViews(context.packageName, R.layout.widget_quick_create)
 
             views.tint(R.id.widget_background, theme.background, theme)
             views.setOnClickPendingIntent(
                 R.id.widget_background,
-                WidgetIntents.quickAction(context, widgetId, "open", 0),
+                WidgetIntents.openConfig(context, widgetId, QuickCreateConfigActivity::class.java),
             )
 
-            val visibleActions = (widthDp / ACTION_WIDTH_DP).coerceIn(1, ACTIONS.size)
-            val showLabels = heightDp >= LABEL_MIN_HEIGHT_DP
-
             views.removeAllViews(R.id.quick_actions)
-            ACTIONS.take(visibleActions).forEachIndexed { index, action ->
+            actions.forEachIndexed { index, action ->
                 views.addView(
                     R.id.quick_actions,
-                    actionView(context, widgetId, action, index, theme, showLabels),
+                    actionView(context, widgetId, action, index, theme, compact, showLabels),
                 )
             }
 
@@ -119,35 +123,40 @@ class QuickCreateWidgetProvider : AppWidgetProvider() {
             action: QuickAction,
             index: Int,
             theme: WidgetTheme,
+            compact: Boolean,
             showLabel: Boolean,
         ): RemoteViews {
             val label = context.getString(action.labelRes)
-            val views = RemoteViews(context.packageName, R.layout.widget_quick_action)
+            val layout = if (compact) {
+                R.layout.widget_quick_action_small
+            } else {
+                R.layout.widget_quick_action
+            }
+
+            val views = RemoteViews(context.packageName, layout)
 
             views.tint(R.id.action_background, theme.accent, theme, ACCENT_WASH_ALPHA)
 
             views.setImageViewResource(R.id.action_icon, action.iconRes)
             views.tint(R.id.action_icon, theme.accent, theme)
 
-            views.setViewVisibility(
-                R.id.action_label,
-                if (showLabel) View.VISIBLE else View.GONE,
-            )
-            views.setTextViewText(R.id.action_label, label)
-            views.setThemedTextColor(R.id.action_label, theme.textDim, theme)
+            if (!compact) {
+                views.setViewVisibility(
+                    R.id.action_label,
+                    if (showLabel) View.VISIBLE else View.GONE,
+                )
+                views.setTextViewText(R.id.action_label, label)
+                views.setThemedTextColor(R.id.action_label, theme.textDim, theme)
+            }
 
             views.setContentDescription(R.id.action_root, label)
             views.setOnClickPendingIntent(
                 R.id.action_root,
-                // Lane offset keeps the five actions distinct per widget.
+                // Lane offset keeps the actions of one widget distinct.
                 WidgetIntents.quickAction(context, widgetId, action.id, index + 1),
             )
 
             return views
         }
-
-        private const val ACCENT_WASH_ALPHA = 46
-        private const val FALLBACK_WIDTH_DP = 250
-        private const val FALLBACK_HEIGHT_DP = 60
     }
 }

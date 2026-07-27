@@ -162,5 +162,29 @@
                 android:name="android.appwidget.provider"
                 android:resource="@xml/quick_create_widget_info" />
         </receiver>
+
+        <!-- Action picker; exported for the same reason as the calendar one. -->
+        <activity
+            android:name=".widgets.QuickCreateConfigActivity"
+            android:excludeFromRecents="true"
+            android:exported="true"
+            android:label="@string/widget_quick_create_label"
+            android:theme="@style/Theme.Yanta.WidgetConfig">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_CONFIGURE" />
+            </intent-filter>
+        </activity>
+
+        <receiver
+            android:name=".widgets.QuickCaptureWidgetProvider"
+            android:exported="false"
+            android:label="@string/widget_quick_capture_label">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/quick_capture_widget_info" />
+        </receiver>
     </application>
 </manifest>

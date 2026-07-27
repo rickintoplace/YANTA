@@ -482,12 +482,29 @@
 <!-- Hover preview for wikilinks -->
 <div class="hover-preview" id="hoverPreview" hidden></div>
 
-<!-- Command palette / quick switcher -->
+<!-- Unified palette: notes, commands, folders, events, messages -->
 <div class="palette" id="palette" hidden>
-  <div class="palette-card">
-    <div class="palette-mode" id="paletteMode">Command palette</div>
-    <input id="paletteInput" type="text" autocomplete="off" spellcheck="false" />
-    <div class="palette-list" id="paletteList"></div>
+  <div class="palette-card" role="dialog" aria-modal="true" data-i18n-aria-label="palette.label">
+    <div class="palette-search">
+      <span class="palette-search-icon" id="paletteSearchIcon" aria-hidden="true"></span>
+      <input
+        id="paletteInput"
+        type="text"
+        role="combobox"
+        aria-expanded="true"
+        aria-controls="paletteList"
+        aria-autocomplete="list"
+        data-i18n-aria-label="palette.label"
+        autocomplete="off"
+        spellcheck="false" />
+    </div>
+    <div class="palette-list" id="paletteList" role="listbox" data-i18n-aria-label="palette.results"></div>
+    <div class="palette-foot" aria-hidden="true">
+      <span><kbd>↑</kbd><kbd>↓</kbd><span data-i18n="palette.footNavigate">Navigate</span></span>
+      <span><kbd>↵</kbd><span data-i18n="palette.footOpen">Open</span></span>
+      <span><kbd>&gt;</kbd><span data-i18n="palette.footCommands">Commands</span></span>
+      <span><kbd>Esc</kbd><span data-i18n="palette.footClose">Close</span></span>
+    </div>
   </div>
 </div>
 

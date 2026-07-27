@@ -4,9 +4,14 @@
 // UX policy:
 // - No browser geolocation permission dialog.
 // - User explicitly enters city / region / postal code.
-// - Lightweight international lookup via Open-Meteo + Nominatim fallback.
-// - Stored coordinates are rounded before saving.
+// - Stored coordinates are rounded to ~city level before saving.
+//
+// The lookup itself is shared with the calendar's location field
+// (src/places/geocode.js). Only the coarsening policy lives here: what the
+// AI needs is "which city am I in", never a street address.
 // ============================================================
+
+import { searchPlaces } from '../places/geocode.js';
 
 const APPROX_LOCATION_KEY = 'yanta.ai.approxLocation.v1';
 
@@ -16,34 +21,6 @@ function roundCoord(value, decimals = 1) {
 
   const f = 10 ** decimals;
   return Math.round(n * f) / f;
-}
-
-function cleanCountryCode(value = '') {
-  const s = String(value || '').trim().toUpperCase();
-  return /^[A-Z]{2}$/.test(s) ? s : '';
-}
-
-function isPostalLike(query = '') {
-  const q = String(query || '').trim();
-
-  // International-ish postal code heuristic:
-  // - contains at least one digit
-  // - no commas / long place names
-  // - allows spaces and hyphens, e.g. "37073", "10001", "SW1A 1AA"
-  return (
-    q.length >= 3 &&
-    q.length <= 12 &&
-    /\d/.test(q) &&
-    /^[\p{L}\p{N}\s-]+$/u.test(q)
-  );
-}
-
-function compactLabel(parts = []) {
-  return parts
-    .map((x) => String(x || '').trim())
-    .filter(Boolean)
-    .filter((x, i, arr) => arr.indexOf(x) === i)
-    .join(', ');
 }
 
 function normalizeCandidate(raw = {}) {
@@ -62,29 +39,6 @@ function normalizeCandidate(raw = {}) {
     countryCode: raw.countryCode || '',
     source: raw.source || 'geocoding',
   };
-}
-
-function dedupeCandidates(list = []) {
-  const out = [];
-  const seen = new Set();
-
-  for (const raw of list) {
-    const c = normalizeCandidate(raw);
-    if (!c) continue;
-
-    const key = [
-      roundCoord(c.latitude, 2),
-      roundCoord(c.longitude, 2),
-      c.label.toLowerCase(),
-    ].join('|');
-
-    if (seen.has(key)) continue;
-    seen.add(key);
-
-    out.push(c);
-  }
-
-  return out;
 }
 
 function saveApproxLocation(loc) {
@@ -146,107 +100,6 @@ export async function requestApproxUserLocation() {
   );
 }
 
-async function searchOpenMeteo(query, {
-  countryCode = '',
-  limit = 5,
-} = {}) {
-  const q = String(query || '').trim();
-  if (!q) return [];
-
-  const url = new URL('https://geocoding-api.open-meteo.com/v1/search');
-  url.searchParams.set('name', q);
-  url.searchParams.set('count', String(Math.max(1, Math.min(10, Number(limit || 5)))));
-  url.searchParams.set('language', 'de');
-  url.searchParams.set('format', 'json');
-
-  const cc = cleanCountryCode(countryCode);
-  if (cc) {
-    url.searchParams.set('countryCode', cc);
-  }
-
-  const res = await fetch(url.href, {
-    headers: {
-      Accept: 'application/json',
-    },
-  });
-
-  if (!res.ok) {
-    throw new Error(`Open-Meteo geocoding failed: HTTP ${res.status}`);
-  }
-
-  const json = await res.json();
-
-  return (json?.results || []).map((hit) => ({
-    latitude: hit.latitude,
-    longitude: hit.longitude,
-    label: compactLabel([
-      hit.name,
-      hit.admin2,
-      hit.admin1,
-      hit.country,
-    ]),
-    timezone: hit.timezone || '',
-    countryCode: hit.country_code || hit.countryCode || '',
-    source: 'open-meteo-geocoding',
-  }));
-}
-
-async function searchNominatim(query, {
-  countryCode = '',
-  limit = 5,
-} = {}) {
-  const q = String(query || '').trim();
-  if (!q) return [];
-
-  const cc = cleanCountryCode(countryCode);
-
-  const url = new URL('https://nominatim.openstreetmap.org/search');
-  url.searchParams.set('format', 'jsonv2');
-  url.searchParams.set('addressdetails', '1');
-  url.searchParams.set('limit', String(Math.max(1, Math.min(10, Number(limit || 5)))));
-
-  if (cc) {
-    url.searchParams.set('countrycodes', cc.toLowerCase());
-  }
-
-  if (cc && isPostalLike(q)) {
-    url.searchParams.set('postalcode', q);
-  } else {
-    url.searchParams.set('q', q);
-  }
-
-  const res = await fetch(url.href, {
-    headers: {
-      Accept: 'application/json',
-      'Accept-Language': navigator.language || 'de',
-    },
-  });
-
-  if (!res.ok) {
-    throw new Error(`Nominatim geocoding failed: HTTP ${res.status}`);
-  }
-
-  const json = await res.json();
-
-  return (Array.isArray(json) ? json : []).map((hit) => {
-    const a = hit.address || {};
-
-    return {
-      latitude: Number(hit.lat),
-      longitude: Number(hit.lon),
-      label: compactLabel([
-        a.city || a.town || a.village || a.municipality || a.county,
-        a.postcode,
-        a.state,
-        a.country,
-      ]) || hit.display_name,
-      timezone: '',
-      countryCode: (a.country_code || '').toUpperCase(),
-      source: 'nominatim-openstreetmap',
-    };
-  });
-}
-
 /**
  * Search city / region / postal code.
  *
@@ -254,6 +107,10 @@ async function searchNominatim(query, {
  * - 37073 + DE
  * - 10001 + US
  * - SW1A 1AA + GB
+ *
+ * The lookup itself lives in src/places/geocode.js — shared with the calendar
+ * location field. What stays here is this module's own policy: a coarse label
+ * for AI context, and the rounding applied before anything is stored.
  */
 export async function searchApproxLocations(query, {
   countryCode = '',
@@ -265,22 +122,17 @@ export async function searchApproxLocations(query, {
     throw new Error('Enter a city, region or postcode.');
   }
 
-  const max = Math.max(1, Math.min(10, Number(limit || 6)));
-
-  const results = await Promise.allSettled([
-    searchOpenMeteo(q, { countryCode, limit: max }),
-    searchNominatim(q, { countryCode, limit: max }),
-  ]);
-
-  const candidates = dedupeCandidates(
-    results.flatMap((r) => r.status === 'fulfilled' ? r.value : [])
-  ).slice(0, max);
+  const candidates = await searchPlaces(q, { countryCode, limit });
 
   if (!candidates.length) {
     throw new Error(`Location not found: ${q}`);
   }
 
-  return candidates;
+  return candidates.map((c) => ({
+    ...c,
+    // AI context wants "Göttingen, Lower Saxony, Germany", not a house number.
+    label: c.address || c.label,
+  }));
 }
 
 export function setApproxUserLocationFromCandidate(candidate) {

@@ -21,7 +21,13 @@ import {
   import {
     ensureMatrixLoaded,
   } from './matrix-session.js';
-  
+
+  import {
+    scoreText,
+    snippetFor,
+    tokenizeQuery,
+  } from '../text-search.js';
+
   const SEARCH_LIMIT = 100;
   const BACKFILL_BATCH_SIZE = 50;
   
@@ -166,59 +172,6 @@ import {
         roomId,
       });
     }
-  }
-  
-  function tokenizeQuery(query) {
-    return String(query || '')
-      .toLowerCase()
-      .split(/\s+/)
-      .map((x) => x.trim())
-      .filter(Boolean)
-      .slice(0, 8);
-  }
-  
-  function scoreText(text, query, tokens) {
-    if (!query || !text) return 0;
-  
-    let score = 0;
-  
-    if (text.includes(query)) score += 1000;
-  
-    for (const token of tokens) {
-      const idx = text.indexOf(token);
-  
-      if (idx < 0) return 0;
-  
-      score += 40;
-  
-      const before = idx === 0 ? ' ' : text[idx - 1];
-  
-      if (!before || /[\s.,;:!?()[\]{}"'`*_/#>-]/.test(before)) {
-        score += 80;
-      }
-  
-      if (idx === 0) score += 30;
-    }
-  
-    return score;
-  }
-  
-  function snippetFor(body = '', query = '') {
-    const raw = String(body || '');
-    const lower = raw.toLowerCase();
-    const q = String(query || '').toLowerCase();
-  
-    let idx = q ? lower.indexOf(q) : -1;
-  
-    if (idx < 0) {
-      const token = tokenizeQuery(query)[0] || '';
-      idx = token ? lower.indexOf(token) : 0;
-    }
-  
-    const start = Math.max(0, idx - 90);
-    const end = Math.min(raw.length, idx + q.length + 130);
-  
-    return `${start > 0 ? '…' : ''}${raw.slice(start, end)}${end < raw.length ? '…' : ''}`;
   }
   
   /**

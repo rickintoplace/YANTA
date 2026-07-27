@@ -27,7 +27,8 @@ import {
   searchHaystack,
 } from './notes.js';
 import { renderTree, renderTagCloud, showMenu, closeMenu, currentFolderForNew } from './tree.js';
-import { renderBacklinks, renderOutline, setupWikilinkHover, handleWikilinkClick, openPalette, closePalette, buildCommandList, paletteMove, paletteAccept, paletteFilter } from './features.js';
+import { renderBacklinks, renderOutline, setupWikilinkHover, handleWikilinkClick } from './features.js';
+import { openPalette, closePalette, buildCommandList, paletteMove, paletteAccept, paletteFilter } from './palette/palette.js';
 import { openImageModal, closeImageModal, setupImage, pickImageFile, cleanupUnusedImages, insertImageAsRef } from './image.js';
 import { openIconInsertPicker, openIconPicker } from './icon-picker.js';
 import { focusEditorEnd, getView } from './editor.js';
@@ -2467,13 +2468,13 @@ async function init() {
   async function openChatSearchFromPalette() {
     try {
       const client = await resolveMatrixClient();
-  
+
       if (!client) {
         toast('Chat is not connected.', 'error');
         console.warn('[YANTA Chat] Cannot open palette chat search without client');
         return;
       }
-  
+
       openGlobalChatSearch({
         client,
         onJump: jumpToMessageFromSearch,
@@ -2520,8 +2521,6 @@ async function init() {
       return stopSharing(state.currentNoteId);
     },
     openPublicSharesManager,
-    importFiles,
-    importFolder: () => $('importFolder').click(),
     openChatSearch: openChatSearchFromPalette,
     importChatArchive: pickAndImportYantaChatExport,
   });
@@ -3273,7 +3272,7 @@ function bindEvents() {
   };
 
   sidebarFootActions = createSidebarFootActions({
-    openPalette: () => openPalette('commands'),
+    openPalette: () => openPalette(),
     openGraph,
     openCalendar: openCalendarRoute,
     openChat: () => openChatRoute(),
@@ -3904,8 +3903,9 @@ function handleGlobalKey(e) {
       });
   }
   else if (meta && e.key === 'i') { e.preventDefault(); openImageModal(); }
-  else if (meta && e.key === 'o') { e.preventDefault(); openPalette('notes'); }
-  else if (meta && e.key === 'p') { e.preventDefault(); openPalette('commands'); }
+  // Ctrl+O and Ctrl+P both land in the unified palette — the old
+  // switcher/commands split is now the `>` prefix inside it.
+  else if (meta && (e.key === 'o' || e.key === 'p')) { e.preventDefault(); openPalette(); }
   else if (meta && e.key.toLowerCase() === 'j') {
     e.preventDefault();
     openAssistantSmart();

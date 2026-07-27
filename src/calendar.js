@@ -128,6 +128,11 @@ import {
 } from './calendar-sources.js';
 
 import {
+  normalizePlace,
+  primaryMapUrl,
+} from './places/place.js';
+
+import {
   hasRecurrence,
   normalizeRecurrence,
   expandRecurringEvent,
@@ -6607,6 +6612,12 @@ export function sanitizeCalendarEvent(raw) {
     icon: raw.icon || undefined,
 
     location: raw.location || '',
+
+    // Optional structured twin of `location`. The string stays authoritative
+    // (ICS LOCATION, foreign clients); `place` only adds coordinates on top,
+    // and is dropped rather than repaired when it arrives malformed.
+    place: normalizePlace(raw.place) || undefined,
+
     description: raw.description || '',
 
     noteId: raw.noteId || null,
@@ -9660,6 +9671,20 @@ export function removeLegacyManagedEventBlocksFromNote(noteId) {
   return removed;
 }
 
+/**
+ * The location line of an event, linked to a maps app when the event carries
+ * coordinates. A plain <a> beats a JS handler here: middle-click, "copy link
+ * address" and screen readers all work without any extra wiring.
+ */
+function eventLocationHtml(ev) {
+  const text = escapeHtml(ev.location);
+  const url = ev.place ? primaryMapUrl(ev.place) : '';
+
+  if (!url) return `<span>${text}</span>`;
+
+  return `<a href="${escapeAttr(url)}" target="_blank" rel="noopener noreferrer" title="${escapeAttr(ev.place.address || ev.location)}">${text}</a>`;
+}
+
 function createCalendarEventAttachmentNode(ev, {
   surface = 'preview',
 } = {}) {
@@ -9693,7 +9718,7 @@ function createCalendarEventAttachmentNode(ev, {
       ${ev.location ? `
         <div class="yanta-event-note-card-location">
           ${lucide('map-pin', 13)}
-          <span>${escapeHtml(ev.location)}</span>
+          ${eventLocationHtml(ev)}
         </div>
       ` : ''}
 
@@ -9812,7 +9837,7 @@ export function createLinkedCalendarEventDashboardHeader(noteId, {
     ? `
       <span class="yanta-dash-event-header-location">
         ${lucide('map-pin', 11)}
-        <span>${escapeHtml(ev.location)}</span>
+        ${eventLocationHtml(ev)}
       </span>
     `
     : '';
@@ -10839,6 +10864,7 @@ function openEventEditor(input = {}) {
     icon: sourceForEditor?.icon || input.icon || undefined,
 
     location: sourceForEditor?.location || input.location || '',
+    place: sourceForEditor?.place || input.place || null,
     description: sourceForEditor?.description || input.description || '',
     noteId: sourceForEditor?.noteId || input.noteId || null,
     status: sourceForEditor?.status || input.status || 'confirmed',
@@ -11178,10 +11204,9 @@ function openEventEditor(input = {}) {
         shared: sharedSpaceEvent || categoryIsSharedAnyRole(ev.categoryId),
       })}
 
-      <label>
-
-        Location
-          <input class="text-input" data-field="location" value="${escapeAttr(ev.location || '')}" placeholder="Room, address, link…" />
+        <label>
+          Location
+          <input class="text-input" data-field="location" value="${escapeAttr(ev.location || '')}" placeholder="Room, address, link…" autocomplete="off" spellcheck="false" />
         </label>
 
         <label>
@@ -11209,6 +11234,23 @@ function openEventEditor(input = {}) {
   const allDayInput = modal.querySelector('[data-field="allDay"]');
   const startInput = modal.querySelector('[data-field="start"]');
   const endInput = modal.querySelector('[data-field="end"]');
+
+  /*
+    Location stays a plain text field; the enhancement only adds geocoding
+    suggestions on top. Lazy-loaded so opening the editor never waits on it,
+    and a failed import simply leaves the field as it already is.
+  */
+  let placeInput = null;
+
+  import('./places/place-input.js')
+    .then(({ attachPlaceInput }) => {
+      const field = modal.querySelector('[data-field="location"]');
+
+      if (!field || !modal.isConnected) return;
+
+      placeInput = attachPlaceInput(field, { place: ev.place || null });
+    })
+    .catch((err) => console.warn('[YANTA Places] Location autocomplete unavailable', err));
 
   /*
     Shared-calendar awareness: whenever the selected category is a
@@ -11446,6 +11488,8 @@ function openEventEditor(input = {}) {
         allDay,
       }),
       location: modal.querySelector('[data-field="location"]').value.trim(),
+      // null clears a previously pinned place; sanitizeCalendarEvent drops it.
+      place: placeInput?.getPlace() || null,
       description: modal.querySelector('[data-field="description"]').value.trim(),
       noteId: modal.querySelector('[data-field="noteId"]').value.trim() || null,
     };

@@ -1825,12 +1825,25 @@
   color: var(--event-color, var(--accent));
 }
 
-.yanta-dash-event-header-location span {
+.yanta-dash-event-header-location span,
+.yanta-dash-event-header-location a {
   min-width: 0;
 
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+/* Linked only when the event carries coordinates — see eventLocationHtml(). */
+.yanta-dash-event-header-location a {
+  color: inherit;
+  text-decoration: underline dotted;
+  text-underline-offset: 2px;
+}
+
+.yanta-dash-event-header-location a:hover {
+  color: var(--event-color, var(--accent));
+  text-decoration-style: solid;
 }
 
 .yanta-dash-event-header-description {

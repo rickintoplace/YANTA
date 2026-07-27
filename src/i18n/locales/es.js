@@ -706,12 +706,35 @@ export default {
   },
 
   palette: {
+    label: 'Búsqueda y comandos',
+    results: 'Resultados',
+    placeholder: 'Buscar notas, comandos, eventos…',
     typeCommand: 'Escribe un comando…',
-    typeNote: 'Escribe para cambiar a una nota…',
-    commandMode: 'Paleta de comandos',
-    switcherMode: 'Selector rápido',
-    noCommand: 'Ningún comando coincidente',
-    noNote: 'Ninguna nota coincidente',
+    empty: 'No se encontró nada',
+    footNavigate: 'Navegar',
+    footOpen: 'Abrir',
+    footCommands: 'Comandos',
+    footClose: 'Cerrar',
+    group: {
+      recentNotes: 'Notas recientes',
+      recentCommands: 'Comandos frecuentes',
+      notes: 'Notas',
+      commands: 'Comandos',
+      folders: 'Carpetas',
+      events: 'Calendario',
+      messages: 'Mensajes',
+      related: 'Notas relacionadas',
+    },
+  },
+
+  places: {
+    openInMaps: 'Abrir en Mapas',
+    copyAddress: 'Copiar dirección',
+    copyCoordinates: 'Copiar coordenadas',
+    copied: 'Copiado al portapapeles',
+    copyFailed: 'No se pudo copiar',
+    searching: 'Buscando…',
+    noResults: 'No se encontró ningún lugar',
   },
 
   settings: {

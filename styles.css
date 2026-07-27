@@ -989,7 +989,35 @@ a.pv-doi { color: var(--accent-2); text-decoration: none; border-bottom: 1px dot
   text-align: center; font-style: italic;
 }
 
-/* ---------- Command palette / Quick switcher ---------- */
+/* ---------- Place autocomplete ---------- */
+.place-input { position: relative; display: flex; align-items: center; gap: 4px; }
+.place-input > .text-input { flex: 1; min-width: 0; }
+.place-input-open { flex: none; color: var(--accent); }
+.place-input-open[hidden] { display: none; }
+.place-suggest {
+  position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: 520;
+  background: var(--bg-elev-3); border: 1px solid var(--border);
+  border-radius: var(--r-sm); box-shadow: var(--shadow);
+  padding: 4px; max-height: 260px; overflow-y: auto; overscroll-behavior: contain;
+}
+.place-suggest[hidden] { display: none; }
+.place-suggest.above { top: auto; bottom: calc(100% + 4px); }
+.place-suggest-item {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: 7px 8px; border-radius: 5px; cursor: pointer;
+}
+.place-suggest-item.active { background: var(--bg-elev-2); }
+.place-suggest-icon { flex: none; color: var(--text-faint); margin-top: 1px; }
+.place-suggest-item.active .place-suggest-icon { color: var(--accent); }
+.place-suggest-body { min-width: 0; display: flex; flex-direction: column; }
+.place-suggest-label { font-size: 13px; color: var(--text); }
+.place-suggest-address {
+  font-size: 11px; color: var(--text-faint);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.place-suggest-empty { padding: 10px 8px; font-size: 12px; color: var(--text-faint); }
+
+/* ---------- Unified palette ---------- */
 .palette {
   position: fixed; inset: 0; z-index: 110;
   display: flex; align-items: flex-start; justify-content: center;
@@ -1000,35 +1028,62 @@ a.pv-doi { color: var(--accent-2); text-decoration: none; border-bottom: 1px dot
 .palette[hidden] { display: none !important; }
 .palette-card {
   background: var(--bg-elev); border: 1px solid var(--border);
-  border-radius: var(--r-lg); width: min(560px, 92vw); max-height: 70vh;
+  border-radius: var(--r-lg); width: min(600px, 92vw); max-height: 70vh;
   display: flex; flex-direction: column; overflow: hidden;
   box-shadow: var(--shadow);
 }
-.palette-mode {
-  font-size: 11px; color: var(--text-faint);
-  padding: 8px 16px 0; text-transform: uppercase; letter-spacing: 0.08em;
+.palette-search {
+  display: flex; align-items: center; gap: 10px;
+  padding: 0 16px; border-bottom: 1px solid var(--border);
+}
+.palette-search-icon {
+  display: flex; color: var(--text-faint); flex: none;
 }
 .palette input {
-  padding: 12px 16px; border: 0; border-bottom: 1px solid var(--border);
+  flex: 1; min-width: 0;
+  padding: 13px 0; border: 0;
   background: transparent; color: var(--text); font-size: 15px; outline: 0;
 }
-.palette-list { overflow-y: auto; padding: 4px; }
+.palette-list { overflow-y: auto; padding: 4px; overscroll-behavior: contain; }
+.palette-group {
+  font-size: 10px; color: var(--text-faint);
+  padding: 10px 14px 4px; text-transform: uppercase; letter-spacing: 0.08em;
+}
+.palette-list > .palette-group:first-child { padding-top: 6px; }
 .palette-item {
-  padding: 9px 14px; cursor: pointer; border-radius: 6px;
+  padding: 8px 14px; cursor: pointer; border-radius: 6px;
   display: flex; align-items: center; gap: 10px; font-size: 13px;
   color: var(--text);
 }
 .palette-item.active { background: var(--bg-elev-2); color: var(--accent); }
-.palette-item .pi-icon { color: var(--text-faint); width: 16px; text-align: center; }
+.palette-item .pi-icon { color: var(--text-faint); width: 16px; flex: none; text-align: center; }
 .palette-item.active .pi-icon { color: var(--accent); }
-.palette-item .pi-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.palette-item .pi-meta { color: var(--text-faint); font-size: 11px; }
+.palette-item .pi-body { flex: 1; min-width: 0; }
+.palette-item .pi-label,
+.palette-item .pi-snippet {
+  display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.palette-item .pi-snippet { color: var(--text-faint); font-size: 11px; margin-top: 1px; }
+.palette-item mark {
+  background: transparent; color: var(--accent); font-weight: 600;
+}
+.palette-item .pi-meta { color: var(--text-faint); font-size: 11px; flex: none; max-width: 38%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .palette-item .pi-hint {
-  color: var(--text-faint); font-size: 10px;
+  color: var(--text-faint); font-size: 10px; flex: none;
   border: 1px solid var(--border); padding: 1px 5px; border-radius: 3px;
   font-family: var(--font-mono);
 }
 .palette-empty { padding: 18px; color: var(--text-faint); text-align: center; font-size: 13px; }
+.palette-foot {
+  display: flex; flex-wrap: wrap; gap: 14px;
+  padding: 8px 14px; border-top: 1px solid var(--border);
+  color: var(--text-faint); font-size: 11px;
+}
+.palette-foot > span { display: inline-flex; align-items: center; gap: 4px; }
+.palette-foot kbd {
+  border: 1px solid var(--border); border-radius: 3px;
+  padding: 0 4px; font-family: var(--font-mono); font-size: 10px; line-height: 15px;
+}
 
 /* ---------- Graph view ---------- */
 .graph-overlay {
@@ -2737,6 +2792,12 @@ input.yanta-task-checkbox {
 
   .palette-card {
     width: min(94vw, 620px);
+  }
+
+  /* Four hint pairs do not fit a phone width — the shortcuts they
+     describe are not reachable there anyway. */
+  .palette-foot {
+    display: none;
   }
 
   .graph-overlay {

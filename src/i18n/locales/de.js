@@ -706,12 +706,35 @@ export default {
   },
 
   palette: {
+    label: 'Suche und Befehle',
+    results: 'Ergebnisse',
+    placeholder: 'Notizen, Befehle, Termine durchsuchen…',
     typeCommand: 'Befehl eingeben…',
-    typeNote: 'Zum Wechseln zu einer Notiz tippen…',
-    commandMode: 'Befehlspalette',
-    switcherMode: 'Schnellauswahl',
-    noCommand: 'Kein passender Befehl',
-    noNote: 'Keine passende Notiz',
+    empty: 'Nichts gefunden',
+    footNavigate: 'Navigieren',
+    footOpen: 'Öffnen',
+    footCommands: 'Befehle',
+    footClose: 'Schließen',
+    group: {
+      recentNotes: 'Zuletzt bearbeitet',
+      recentCommands: 'Häufige Befehle',
+      notes: 'Notizen',
+      commands: 'Befehle',
+      folders: 'Ordner',
+      events: 'Kalender',
+      messages: 'Nachrichten',
+      related: 'Verwandte Notizen',
+    },
+  },
+
+  places: {
+    openInMaps: 'In Karten öffnen',
+    copyAddress: 'Adresse kopieren',
+    copyCoordinates: 'Koordinaten kopieren',
+    copied: 'In die Zwischenablage kopiert',
+    copyFailed: 'Kopieren fehlgeschlagen',
+    searching: 'Wird gesucht…',
+    noResults: 'Kein Ort gefunden',
   },
 
   settings: {

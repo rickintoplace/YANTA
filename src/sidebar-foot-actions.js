@@ -19,7 +19,7 @@ export function createSidebarFootActions({
       icon: 'keyboard',
       label: t('sidebar.commandPalette'),
       title: t('sidebar.commandPaletteTitle'),
-      onClick: () => openPalette?.('commands'),
+      onClick: () => openPalette?.(),
     },
     {
       id: 'btn-chat',

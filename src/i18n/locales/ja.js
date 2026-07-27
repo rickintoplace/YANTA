@@ -697,12 +697,35 @@ export default {
   },
 
   palette: {
+    label: '検索とコマンド',
+    results: '検索結果',
+    placeholder: 'ノート・コマンド・予定を検索…',
     typeCommand: 'コマンドを入力…',
-    typeNote: '入力してノートに切り替え…',
-    commandMode: 'コマンドパレット',
-    switcherMode: 'クイックスイッチャー',
-    noCommand: '一致するコマンドがありません',
-    noNote: '一致するノートがありません',
+    empty: '見つかりませんでした',
+    footNavigate: '移動',
+    footOpen: '開く',
+    footCommands: 'コマンド',
+    footClose: '閉じる',
+    group: {
+      recentNotes: '最近のノート',
+      recentCommands: 'よく使うコマンド',
+      notes: 'ノート',
+      commands: 'コマンド',
+      folders: 'フォルダー',
+      events: 'カレンダー',
+      messages: 'メッセージ',
+      related: '関連ノート',
+    },
+  },
+
+  places: {
+    openInMaps: 'マップで開く',
+    copyAddress: '住所をコピー',
+    copyCoordinates: '座標をコピー',
+    copied: 'クリップボードにコピーしました',
+    copyFailed: 'コピーできませんでした',
+    searching: '検索中…',
+    noResults: '場所が見つかりません',
   },
 
   settings: {

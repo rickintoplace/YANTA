@@ -715,12 +715,35 @@ export default {
   palette: {
     // Command entries themselves stay English (power-user / keyboard feature,
     // consistent with the keyboard shortcuts). Only the chrome is localized.
+    label: 'Search and commands',
+    results: 'Results',
+    placeholder: 'Search notes, commands, events…',
     typeCommand: 'Type a command…',
-    typeNote: 'Type to switch to a note…',
-    commandMode: 'Command palette',
-    switcherMode: 'Quick switcher',
-    noCommand: 'No matching command',
-    noNote: 'No matching note',
+    empty: 'Nothing found',
+    footNavigate: 'Navigate',
+    footOpen: 'Open',
+    footCommands: 'Commands',
+    footClose: 'Close',
+    group: {
+      recentNotes: 'Recent notes',
+      recentCommands: 'Frequent commands',
+      notes: 'Notes',
+      commands: 'Commands',
+      folders: 'Folders',
+      events: 'Calendar',
+      messages: 'Messages',
+      related: 'Related notes',
+    },
+  },
+
+  places: {
+    openInMaps: 'Open in Maps',
+    copyAddress: 'Copy address',
+    copyCoordinates: 'Copy coordinates',
+    copied: 'Copied to clipboard',
+    copyFailed: 'Could not copy',
+    searching: 'Searching…',
+    noResults: 'No place found',
   },
 
   settings: {

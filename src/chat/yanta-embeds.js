@@ -85,6 +85,11 @@ import {
   import {
     createPublicShareForNoteAction,
   } from '../public-share/public-share-actions.js';
+
+  import {
+    normalizePlace,
+    primaryMapUrl,
+  } from '../places/place.js';
   
   export const YANTA_EMBED_KEY = 'page.yanta.embed';
   export const YANTA_EMBED_MEDIA_REL_TYPE = 'page.yanta.embed.media';
@@ -205,6 +210,10 @@ import {
           end: isoOrNull(input.event?.end),
           allDay: input.event?.allDay === true,
           location: String(input.event?.location || ''),
+          // Optional coordinates for `location`. Absent for events that were
+          // never geocoded, and dropped outright when malformed — the
+          // location string alone always remains a valid event.
+          place: normalizePlace(input.event?.place) || undefined,
           description: String(input.event?.description || ''),
           recurrence: input.event?.recurrence || null,
         },
@@ -518,6 +527,7 @@ import {
         end: ev.end || null,
         allDay: !!ev.allDay,
         location: ev.location || '',
+        place: ev.place || undefined,
         description: ev.description || '',
         recurrence: ev.recurrence || null,
       },
@@ -708,6 +718,7 @@ import {
       end: event.end || null,
       allDay: !!event.allDay,
       location: event.location || '',
+      place: event.place || undefined,
       description: event.description || '',
       recurrence: event.recurrence || null,
       icon: embed.icon || 'calendar-days',
@@ -788,11 +799,19 @@ import {
     }
   
     if (embed.type === 'event') {
+      const mapUrl = embed.event?.place ? primaryMapUrl(embed.event.place) : '';
+
       return `
         <button class="btn compact primary" data-yanta-embed-action="import-event">
           ${lucide('calendar-plus', 13)}
           In Kalender übernehmen
         </button>
+        ${mapUrl ? `
+          <a class="btn compact" href="${escapeHtml(mapUrl)}" target="_blank" rel="noopener noreferrer">
+            ${lucide('map-pin', 13)}
+            In Karten öffnen
+          </a>
+        ` : ''}
       `;
     }
   
@@ -833,7 +852,10 @@ import {
     }
   
     if (embed.type === 'event') {
-      return eventDateText(embed.event || {});
+      return [
+        eventDateText(embed.event || {}),
+        embed.event?.location || '',
+      ].filter(Boolean).join(' · ');
     }
   
     if (embed.type === 'source') {

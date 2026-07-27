@@ -4,7 +4,7 @@
 // Supports:
 // - DTSTART / DTEND
 // - all-day VALUE=DATE
-// - SUMMARY, DESCRIPTION, LOCATION, STATUS, UID
+// - SUMMARY, DESCRIPTION, LOCATION, GEO, STATUS, UID
 // - RRULE preserved
 // ============================================================
 
@@ -13,6 +13,8 @@ import {
   downloadBlob,
   safeFilename,
 } from './core.js';
+
+import { normalizePlace } from './places/place.js';
 
 function escapeIcsText(s) {
   return String(s || '')
@@ -214,6 +216,25 @@ function firstProp(value) {
   return Array.isArray(value) ? value[0] : value;
 }
 
+/**
+ * RFC 5545 `GEO:<lat>;<lon>` into YANTA's place object.
+ * Returns undefined for anything unparsable — an imported event keeps its
+ * LOCATION string either way.
+ */
+function parseIcsGeo(raw, locationRaw = '') {
+  const [lat, lon] = String(raw || '').split(';').map(Number);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return undefined;
+
+  return normalizePlace({
+    latitude: lat,
+    longitude: lon,
+    label: unescapeIcsText(locationRaw || ''),
+    address: unescapeIcsText(locationRaw || ''),
+    source: 'ics-import',
+  }) || undefined;
+}
+
 function parseIcsExdates(values = [], allDay = false) {
   const list = Array.isArray(values)
     ? values
@@ -286,12 +307,14 @@ export function parseIcsEvents(text) {
           const descriptionProp = firstProp(current.DESCRIPTION);
           const locationProp = firstProp(current.LOCATION);
           const statusProp = firstProp(current.STATUS);
+          const geoProp = firstProp(current.GEO);
 
           events.push({
             externalUid: uidProp?.value || '',
             title: unescapeIcsText(summaryProp?.value || 'Imported event'),
             description: unescapeIcsText(descriptionProp?.value || ''),
             location: unescapeIcsText(locationProp?.value || ''),
+            place: parseIcsGeo(geoProp?.value, locationProp?.value),
             status: String(statusProp?.value || 'confirmed').toLowerCase(),
             start: start.iso,
             end: storedEnd,
@@ -451,6 +474,12 @@ export function eventsToIcs(events, {
 
     if (e.location) {
       lines.push(`LOCATION:${escapeIcsText(e.location)}`);
+    }
+
+    // RFC 5545 GEO — lets any calendar app place the event on a map without
+    // re-geocoding the LOCATION string.
+    if (Number.isFinite(e.place?.latitude) && Number.isFinite(e.place?.longitude)) {
+      lines.push(`GEO:${e.place.latitude};${e.place.longitude}`);
     }
 
     if (e.description) {

@@ -706,12 +706,35 @@ export default {
   },
 
   palette: {
+    label: 'Recherche et commandes',
+    results: 'Résultats',
+    placeholder: 'Rechercher notes, commandes, événements…',
     typeCommand: 'Saisissez une commande…',
-    typeNote: 'Saisissez pour basculer vers une note…',
-    commandMode: 'Palette de commandes',
-    switcherMode: 'Sélecteur rapide',
-    noCommand: 'Aucune commande correspondante',
-    noNote: 'Aucune note correspondante',
+    empty: 'Aucun résultat',
+    footNavigate: 'Naviguer',
+    footOpen: 'Ouvrir',
+    footCommands: 'Commandes',
+    footClose: 'Fermer',
+    group: {
+      recentNotes: 'Notes récentes',
+      recentCommands: 'Commandes fréquentes',
+      notes: 'Notes',
+      commands: 'Commandes',
+      folders: 'Dossiers',
+      events: 'Agenda',
+      messages: 'Messages',
+      related: 'Notes associées',
+    },
+  },
+
+  places: {
+    openInMaps: 'Ouvrir dans Plans',
+    copyAddress: 'Copier l’adresse',
+    copyCoordinates: 'Copier les coordonnées',
+    copied: 'Copié dans le presse-papiers',
+    copyFailed: 'Copie impossible',
+    searching: 'Recherche…',
+    noResults: 'Aucun lieu trouvé',
   },
 
   settings: {

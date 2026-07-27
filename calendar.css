@@ -287,9 +287,9 @@
   background: color-mix(in srgb, var(--bg-elev) 72%, var(--bg));
 }
 
-.fc .fc-day-other .fc-daygrid-day-number {
+/* .fc .fc-day-other .fc-daygrid-day-number {
   color: var(--text-faint);
-}
+} */
 
 /* Events */
 
@@ -998,6 +998,11 @@
     flex-direction: column;
     align-items: flex-start;
   }
+
+  button[data-cal-nav="prev"], button[data-cal-nav="next"] {
+      display: none;
+  }
+
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -1142,6 +1147,45 @@
   .calendar-surface .mobile-sidebar-toggle {
     display: none !important;
   }
+
+  .yanta-cal-event-content .yanta-cal-event-icon {
+    display: none !important;
+  }
+
+  span.yanta-cal-event-content {
+    height: 11px;
+  }
+
+  .yanta-cal-event-title {
+    font-size: smaller;
+  }
+
+  .fc-daygrid-day-top {
+      font-weight: bold;
+  }
+
+  span.yanta-cal-event-time {
+      display: none;
+  }
+
+  span.yanta-cal-event-color-dot {
+      display: none;
+  }
+
+  span.yanta-cal-event-title {
+      text-overflow: clip; /* Ellipsis würde Platz wegnehmen */
+  }
+
+  #calendar .fc-event {
+      margin-left: 0;
+      margin-right: 0;
+      padding-left: 2px;
+  }
+
+  .fc .fc-event {
+      border-radius: 4px;
+  }
+
 }
 
 .yanta-cal-event-content {

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A span bar that continues past this week keeps a square edge there, so
+     the grid reads as one event rather than two. Tinted at runtime. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="#FFFFFFFF" />
+    <corners
+        android:topLeftRadius="0dp"
+        android:bottomLeftRadius="0dp"
+        android:topRightRadius="5dp"
+        android:bottomRightRadius="5dp" />
+</shape>

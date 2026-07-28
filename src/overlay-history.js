@@ -68,11 +68,39 @@ export function registerOverlayRoute(id, handlers = {}) {
     open: handlers.open || null,
     close: handlers.close || null,
     isOpen: handlers.isOpen || null,
+    // Optional: the element the Android predictive-back gesture should
+    // animate while the user previews closing this overlay.
+    surface: handlers.surface || null,
   });
 
   return () => {
     registry.delete(id);
   };
+}
+
+/**
+ * Surface descriptor of an overlay for the predictive-back preview:
+ * `{ element, mode: 'shrink' | 'slide-left' | 'slide-right', backdrop }`.
+ * Overlays without a `surface` handler fall back to the generic
+ * resolution in src/native/predictive-back.js.
+ */
+export function overlayRouteSurface(id) {
+  if (!id) return null;
+
+  const surface = registry.get(id)?.surface;
+  if (!surface) return null;
+
+  try {
+    const resolved = surface();
+    if (!resolved) return null;
+
+    return resolved instanceof Element
+      ? { element: resolved, mode: 'shrink' }
+      : resolved;
+  } catch (err) {
+    console.warn('[YANTA overlay-history] surface resolution failed', id, err);
+    return null;
+  }
 }
 
 export function pushOverlayState(id, data = {}, {

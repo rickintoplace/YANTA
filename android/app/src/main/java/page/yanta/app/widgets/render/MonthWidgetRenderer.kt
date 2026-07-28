@@ -18,7 +18,9 @@ import kotlin.math.ceil
  *
  * The grid is sized to the month it shows (four to six week rows) and each
  * cell spends its height on readable event titles, falling back to coloured
- * dots only for the events that do not fit.
+ * dots only for the events that do not fit. Multi-day and all-day events are
+ * drawn once per week as a continuous bar by [SpanLanes] rather than repeated
+ * as a chip on every day they touch.
  */
 object MonthWidgetRenderer {
 
@@ -33,11 +35,22 @@ object MonthWidgetRenderer {
 
     private const val MAX_WEEK_ROWS = 6
 
-    // Vertical budget of a cell, in dp, outside the event area.
-    private const val CELL_CHROME_DP = 19
-    private const val CHIP_DP = 13
+    /*
+      Measured, not guessed: the date marker plus the gaps around the bands
+      is what a cell spends before its first event, and a chip is its text
+      line plus its top margin. Being a dp optimistic here clips the last
+      week's bottom row, which looks broken — so these round up.
+    */
+    private const val CELL_CHROME_DP = 21
+    private const val CHIP_DP = 14
     private const val DOT_ROW_DP = 8
     private const val MAX_CHIPS = 8
+
+    /** Bars are worth more than chips, but not the whole cell. */
+    private const val MAX_LANES = 3
+
+    // Header (~44dp incl. subtitle), weekday strip and the layout padding.
+    private const val HEADER_AND_STRIP_DP = 82
 
     fun render(
         render: WidgetRenderContext,
@@ -78,7 +91,10 @@ object MonthWidgetRenderer {
 
         renderWeekdayStrip(views, render)
 
-        val capacity = capacity(render, rows)
+        val gridHeight = render.heightDp - HEADER_AND_STRIP_DP
+        val cellHeight = if (gridHeight > 0) gridHeight / rows else 0
+        val maxLanes = ((cellHeight - CELL_CHROME_DP) / SpanLanes.LANE_DP)
+            .coerceIn(0, MAX_LANES)
 
         for (row in 0 until MAX_WEEK_ROWS) {
             views.removeAllViews(WEEK_ROW_IDS[row])
@@ -89,17 +105,116 @@ object MonthWidgetRenderer {
 
             if (row >= rows) continue
 
-            for (column in 0 until 7) {
-                val day = gridStart.plusDays((row * 7 + column).toLong())
-
-                views.addView(
-                    WEEK_ROW_IDS[row],
-                    cell(render, day, month, byDay[day].orEmpty(), capacity, zone),
-                )
-            }
+            views.addView(
+                WEEK_ROW_IDS[row],
+                weekBand(
+                    render = render,
+                    weekStart = gridStart.plusDays((row * 7).toLong()),
+                    month = month,
+                    byDay = byDay,
+                    cellHeight = cellHeight,
+                    maxLanes = maxLanes,
+                    zone = zone,
+                ),
+            )
         }
 
         return views
+    }
+
+    private fun weekBand(
+        render: WidgetRenderContext,
+        weekStart: LocalDate,
+        month: YearMonth,
+        byDay: Map<LocalDate, List<WidgetEvent>>,
+        cellHeight: Int,
+        maxLanes: Int,
+        zone: ZoneId,
+    ): RemoteViews {
+        val spans = SpanLanes.build(render, weekStart, byDay, maxLanes, zone)
+        val capacity = capacity(cellHeight, spans.lanes.size)
+
+        return WeekBand.assemble(
+            render = render,
+            days = WeekBand.daysOf(weekStart),
+            lanes = spans.lanes,
+            dayHeader = { dayNumber(render, it, month) },
+            fillDayChips = { day, column ->
+                val events = spans.perDay[day].orEmpty()
+
+                if (render.monthDensity == MonthDensity.DOTS) {
+                    EventStack.fillDots(column, R.id.day_chips, render, events)
+                } else {
+                    EventStack.fillTitles(
+                        container = column,
+                        containerId = R.id.day_chips,
+                        render = render,
+                        events = events,
+                        capacity = capacity,
+                        zone = zone,
+                    )
+                }
+
+                column.setOnClickPendingIntent(
+                    R.id.day_chips,
+                    WidgetIntents.openDay(render.context, render.widgetId, day),
+                )
+            },
+        )
+    }
+
+    private fun dayNumber(
+        render: WidgetRenderContext,
+        day: LocalDate,
+        month: YearMonth,
+    ): RemoteViews {
+        val theme = render.theme
+        val cell = RemoteViews(render.context.packageName, R.layout.widget_month_day_number)
+
+        val inMonth = YearMonth.from(day) == month
+        val isToday = day == render.today
+
+        cell.setTextViewText(R.id.day_number, day.dayOfMonth.toString())
+
+        if (isToday) {
+            // Sits on the accent circle, so it is not a themed colour.
+            cell.setTextColor(R.id.day_number, theme.onAccent)
+        } else {
+            cell.setThemedTextColor(
+                R.id.day_number,
+                if (inMonth) theme.text else theme.textFaint,
+                theme,
+            )
+        }
+
+        cell.setViewVisibility(R.id.day_marker, if (isToday) View.VISIBLE else View.GONE)
+        if (isToday) cell.tint(R.id.day_marker, theme.accent, theme)
+
+        cell.setOnClickPendingIntent(
+            R.id.day_root,
+            WidgetIntents.openDay(render.context, render.widgetId, day),
+        )
+
+        return cell
+    }
+
+    /**
+     * How many event titles a cell can stack once the all-day band has taken
+     * its lanes. The second figure applies to days that overflow into a dot
+     * row, which is half a chip tall.
+     */
+    private fun capacity(cellHeight: Int, lanes: Int): EventStack.Capacity {
+        val forEvents = cellHeight - CELL_CHROME_DP - lanes * SpanLanes.LANE_DP
+
+        /*
+          Zero is a real answer. Squeezing a chip into a cell that cannot
+          hold one clips its descenders and bleeds over the week below, so
+          a cell that small falls back to dots — text only where it reads.
+        */
+        return EventStack.Capacity(
+            chips = (forEvents / CHIP_DP).coerceIn(0, MAX_CHIPS),
+            chipsBesideDots = ((forEvents - DOT_ROW_DP) / CHIP_DP).coerceIn(0, MAX_CHIPS),
+        )
     }
 
     private fun renderWeekdayStrip(views: RemoteViews, render: WidgetRenderContext) {
@@ -113,82 +228,6 @@ object MonthWidgetRenderer {
 
             views.addView(R.id.month_weekdays, label)
         }
-    }
-
-    private fun cell(
-        render: WidgetRenderContext,
-        day: LocalDate,
-        month: YearMonth,
-        events: List<WidgetEvent>,
-        capacity: EventStack.Capacity,
-        zone: ZoneId,
-    ): RemoteViews {
-        val theme = render.theme
-        val cell = RemoteViews(render.context.packageName, R.layout.widget_month_cell)
-
-        val inMonth = YearMonth.from(day) == month
-        val isToday = day == render.today
-
-        cell.setTextViewText(R.id.cell_day_number, day.dayOfMonth.toString())
-        if (isToday) {
-            // Sits on the accent circle, so it is not a themed colour.
-            cell.setTextColor(R.id.cell_day_number, theme.onAccent)
-        } else {
-            cell.setThemedTextColor(
-                R.id.cell_day_number,
-                if (inMonth) theme.text else theme.textFaint,
-                theme,
-            )
-        }
-
-        cell.setViewVisibility(R.id.cell_marker, if (isToday) View.VISIBLE else View.GONE)
-        if (isToday) cell.tint(R.id.cell_marker, theme.accent, theme)
-
-        cell.removeAllViews(R.id.cell_events)
-
-        if (render.monthDensity == MonthDensity.DOTS) {
-            EventStack.fillDots(cell, R.id.cell_events, render, events)
-        } else {
-            EventStack.fillTitles(
-                container = cell,
-                containerId = R.id.cell_events,
-                render = render,
-                events = events,
-                capacity = capacity,
-                zone = zone,
-            )
-        }
-
-        cell.setOnClickPendingIntent(
-            R.id.cell_root,
-            WidgetIntents.openDay(render.context, render.widgetId, day),
-        )
-
-        return cell
-    }
-
-    /**
-     * How many event titles a cell can stack at the widget's current size.
-     *
-     * Measured against the rows the shown month actually needs, so a
-     * five-row month spends its extra height on another event title rather
-     * than on padding. The second figure applies only to days that overflow
-     * into a dot row, which is half a chip tall.
-     */
-    private fun capacity(render: WidgetRenderContext, rows: Int): EventStack.Capacity {
-        val gridHeight = render.heightDp - HEADER_AND_STRIP_DP
-        val cellHeight = if (gridHeight > 0) gridHeight / rows else 0
-        val forEvents = cellHeight - CELL_CHROME_DP
-
-        /*
-          Zero is a real answer. Squeezing a chip into a cell that cannot
-          hold one clips its descenders and bleeds over the week below, so
-          a cell that small falls back to dots — text only where it reads.
-        */
-        return EventStack.Capacity(
-            chips = (forEvents / CHIP_DP).coerceIn(0, MAX_CHIPS),
-            chipsBesideDots = ((forEvents - DOT_ROW_DP) / CHIP_DP).coerceIn(0, MAX_CHIPS),
-        )
     }
 
     /**
@@ -219,8 +258,4 @@ object MonthWidgetRenderer {
 
         return WidgetChrome.eventCountLabel(render, count)
     }
-
-    // Header (~44dp incl. subtitle), weekday strip and the layout padding.
-    private const val HEADER_AND_STRIP_DP = 82
-
 }

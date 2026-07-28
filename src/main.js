@@ -238,6 +238,8 @@ import {
   setupAndroidBridge,
 } from './native/android-bridge.js';
 
+import { installPredictiveBack } from './native/predictive-back.js';
+
 import {
   scheduleChatAutoResume,
   installChatAccountReadyListener,
@@ -2176,6 +2178,7 @@ async function init() {
   // Initialize the native browser navigation router
   setupOverlayHistoryRouter();
   setupAndroidBridge();
+  installPredictiveBack();
   installChatSidebarBadgeListener();
 
   window.addEventListener('yanta-app-route-change', (e) => {

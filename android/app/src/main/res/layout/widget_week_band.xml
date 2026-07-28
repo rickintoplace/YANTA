@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  One week of a calendar grid: the dates, the all-day band, and the timed
+  events under it.
+
+  Used for a month row and for the whole week view — the two differ only in
+  what they put in the header row and how much height they get.
+-->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical">
+
+    <LinearLayout
+        android:id="@+id/band_days"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:weightSum="7" />
+
+    <LinearLayout
+        android:id="@+id/band_lanes"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical" />
+
+    <LinearLayout
+        android:id="@+id/band_chips"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_marginTop="@dimen/widget_chip_gap"
+        android:layout_weight="1"
+        android:orientation="horizontal"
+        android:weightSum="7" />
+</LinearLayout>

@@ -1,13 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- One day in the month grid. The root weight makes seven cells share a row. -->
-<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    android:id="@+id/cell_root"
+<!--
+  The date of one month cell. Split from the cell's event stack because the
+  all-day band sits between them: a bar spanning five days has to be a child
+  of the week row, not of any single day.
+-->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/day_root"
     android:layout_width="0dp"
-    android:layout_height="match_parent"
-    android:layout_weight="1"
-    android:orientation="vertical"
-    android:paddingStart="1dp"
-    android:paddingEnd="1dp">
+    android:layout_height="wrap_content"
+    android:layout_weight="1">
 
     <FrameLayout
         android:layout_width="@dimen/widget_month_day_marker"
@@ -15,7 +16,7 @@
         android:layout_gravity="center_horizontal">
 
         <ImageView
-            android:id="@+id/cell_marker"
+            android:id="@+id/day_marker"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:contentDescription="@null"
@@ -23,17 +24,10 @@
             android:visibility="gone" />
 
         <TextView
-            android:id="@+id/cell_day_number"
+            android:id="@+id/day_number"
             android:layout_width="match_parent"
             android:layout_height="match_parent"
             android:gravity="center"
             android:textSize="@dimen/widget_month_day_number_size" />
     </FrameLayout>
-
-    <LinearLayout
-        android:id="@+id/cell_events"
-        android:layout_width="match_parent"
-        android:layout_height="0dp"
-        android:layout_weight="1"
-        android:orientation="vertical" />
-</LinearLayout>
+</FrameLayout>

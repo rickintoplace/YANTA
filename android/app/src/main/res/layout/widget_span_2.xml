@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Span bar 2 column(s) wide. RemoteViews cannot set layout_weight at
+     runtime, so each width is its own thin wrapper around the shared body. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="0dp"
+    android:layout_height="wrap_content"
+    android:layout_weight="2"
+    android:orientation="vertical">
+
+    <include layout="@layout/widget_span_segment" />
+</LinearLayout>

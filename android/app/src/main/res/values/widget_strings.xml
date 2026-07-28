@@ -27,6 +27,9 @@
     <!-- Agenda day header for the current day -->
     <string name="widget_today_prefix">Today · %1$s</string>
 
+    <!-- Day n of a multi-day event, in the day and list layouts -->
+    <string name="widget_span_position">(%1$d/%2$d)</string>
+
     <!-- English has no "zero" plural category, so the empty case is its own string. -->
     <string name="widget_no_events">No events</string>
     <plurals name="widget_event_count">

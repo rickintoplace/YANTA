@@ -4,7 +4,6 @@ import android.view.View
 import android.widget.RemoteViews
 import page.yanta.app.R
 import page.yanta.app.widgets.data.CalendarWidgetData
-import page.yanta.app.widgets.data.WidgetEvent
 import page.yanta.app.widgets.ui.WidgetIntents
 import java.time.LocalDate
 import java.time.ZoneId
@@ -12,7 +11,10 @@ import java.time.ZoneId
 /**
  * Week as seven day columns, the readable counterpart to the app's
  * `timeGridWeek`: RemoteViews cannot position blocks on an hour axis, so
- * each day stacks its events in order with the start time on the chip.
+ * each day stacks its timed events in order with the start time on the chip.
+ *
+ * All-day and multi-day events sit above them in a band of continuous bars,
+ * exactly where the app's all-day row is.
  */
 object WeekWidgetRenderer {
 
@@ -20,6 +22,9 @@ object WeekWidgetRenderer {
     private const val CHIP_DP = 27
     private const val DOT_ROW_DP = 8
     private const val MAX_CHIPS = 10
+    private const val MAX_LANES = 4
+
+    private const val HEADER_DP = 62
 
     fun render(
         render: WidgetRenderContext,
@@ -42,7 +47,7 @@ object WeekWidgetRenderer {
                 title = render.format.weekTitle(weekStart),
                 subtitle = WidgetChrome.countSubtitle(
                     render,
-                    byDay.values.sumOf { it.size },
+                    byDay.values.flatten().distinctBy { it.id }.size,
                 ),
                 canPage = true,
                 previous = weekStart.minusWeeks(1),
@@ -51,76 +56,80 @@ object WeekWidgetRenderer {
             ),
         )
 
-        val capacity = capacity(render)
+        val available = render.heightDp - COLUMN_CHROME_DP - HEADER_DP
+        val maxLanes = (available / (SpanLanes.LANE_DP * 2)).coerceIn(0, MAX_LANES)
 
-        views.removeAllViews(R.id.week_columns)
-        for (offset in 0L until 7L) {
-            val day = weekStart.plusDays(offset)
+        val spans = SpanLanes.build(render, weekStart, byDay, maxLanes, zone)
+        val capacity = capacity(available, spans.lanes.size)
 
-            views.addView(
-                R.id.week_columns,
-                column(render, day, byDay[day].orEmpty(), capacity, zone),
-            )
-        }
+        views.removeAllViews(R.id.week_body)
+        views.addView(
+            R.id.week_body,
+            WeekBand.assemble(
+                render = render,
+                days = WeekBand.daysOf(weekStart),
+                lanes = spans.lanes,
+                dayHeader = { dayHeader(render, it) },
+                fillDayChips = { day, column ->
+                    EventStack.fillTimed(
+                        container = column,
+                        containerId = R.id.day_chips,
+                        render = render,
+                        events = spans.perDay[day].orEmpty(),
+                        capacity = capacity,
+                        zone = zone,
+                    )
+
+                    column.setOnClickPendingIntent(
+                        R.id.day_chips,
+                        WidgetIntents.openDay(render.context, render.widgetId, day),
+                    )
+                },
+            ),
+        )
 
         return views
     }
 
-    private fun column(
-        render: WidgetRenderContext,
-        day: LocalDate,
-        events: List<WidgetEvent>,
-        capacity: EventStack.Capacity,
-        zone: ZoneId,
-    ): RemoteViews {
+    private fun dayHeader(render: WidgetRenderContext, day: LocalDate): RemoteViews {
         val theme = render.theme
-        val column = RemoteViews(render.context.packageName, R.layout.widget_week_column)
+        val header = RemoteViews(render.context.packageName, R.layout.widget_week_day_header)
 
         val isToday = day == render.today
         val isPast = day.isBefore(render.today)
 
-        column.setTextViewText(R.id.column_weekday, render.format.weekdayNarrow(day.dayOfWeek))
-        column.setThemedTextColor(R.id.column_weekday, theme.textFaint, theme)
+        header.setTextViewText(R.id.day_weekday, render.format.weekdayNarrow(day.dayOfWeek))
+        header.setThemedTextColor(R.id.day_weekday, theme.textFaint, theme)
 
-        column.setTextViewText(R.id.column_day_number, day.dayOfMonth.toString())
+        header.setTextViewText(R.id.day_number, day.dayOfMonth.toString())
+
         if (isToday) {
-            column.setTextColor(R.id.column_day_number, theme.onAccent)
+            header.setTextColor(R.id.day_number, theme.onAccent)
         } else {
-            column.setThemedTextColor(
-                R.id.column_day_number,
+            header.setThemedTextColor(
+                R.id.day_number,
                 if (isPast) theme.textFaint else theme.text,
                 theme,
             )
         }
 
-        column.setViewVisibility(R.id.column_marker, if (isToday) View.VISIBLE else View.GONE)
-        if (isToday) column.tint(R.id.column_marker, theme.accent, theme)
+        header.setViewVisibility(R.id.day_marker, if (isToday) View.VISIBLE else View.GONE)
+        if (isToday) header.tint(R.id.day_marker, theme.accent, theme)
 
-        column.removeAllViews(R.id.column_events)
-
-        EventStack.fillTimed(
-            container = column,
-            containerId = R.id.column_events,
-            render = render,
-            events = events,
-            capacity = capacity,
-            zone = zone,
-        )
-
-        column.setOnClickPendingIntent(
-            R.id.column_root,
+        header.setOnClickPendingIntent(
+            R.id.day_root,
             WidgetIntents.openDay(render.context, render.widgetId, day),
         )
 
-        return column
+        return header
     }
 
-    private fun capacity(render: WidgetRenderContext): EventStack.Capacity {
-        val available = render.heightDp - COLUMN_CHROME_DP - HEADER_DP
+    private fun capacity(available: Int, lanes: Int): EventStack.Capacity {
+        val forChips = available - lanes * SpanLanes.LANE_DP
 
         return EventStack.Capacity(
-            chips = (available / CHIP_DP).coerceIn(1, MAX_CHIPS),
-            chipsBesideDots = ((available - DOT_ROW_DP) / CHIP_DP).coerceIn(1, MAX_CHIPS),
+            chips = (forChips / CHIP_DP).coerceIn(1, MAX_CHIPS),
+            chipsBesideDots = ((forChips - DOT_ROW_DP) / CHIP_DP).coerceIn(1, MAX_CHIPS),
         )
     }
 
@@ -135,6 +144,4 @@ object WeekWidgetRenderer {
         } else {
             weekStart
         }
-
-    private const val HEADER_DP = 62
 }

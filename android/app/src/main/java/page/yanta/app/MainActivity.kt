@@ -3,6 +3,7 @@ package page.yanta.app
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.AlarmManager
+import android.graphics.Bitmap
 import android.graphics.Color
 import android.net.Uri
 import android.os.Build
@@ -19,6 +20,7 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
+import androidx.activity.BackEventCompat
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
@@ -106,6 +108,99 @@ class MainActivity : ComponentActivity() {
             )
         }
 
+    // ------------------------------------------------------------
+    // Predictive back
+    //
+    // Two halves belong together:
+    //  - The callback is DISABLED while the web layer sits on its root
+    //    entry. Only a disabled callback lets the system play its own
+    //    back-to-home preview (an always-enabled callback consumes the
+    //    gesture and kills every system animation).
+    //  - While it IS enabled, the swipe progress is forwarded to the web
+    //    layer, which animates the surface the gesture is about to close.
+    // ------------------------------------------------------------
+
+    /** Reported by the web layer (window.navigation), null until it has. */
+    private var webCanGoBack: Boolean? = null
+
+    /** Latest swipe event, coalesced to one evaluateJavascript per frame. */
+    private var pendingBackEvent: BackEventCompat? = null
+    private var backEventDispatchScheduled = false
+
+    private val backCallback = object : OnBackPressedCallback(false) {
+
+        override fun handleOnBackStarted(backEvent: BackEventCompat) {
+            dispatchBackGesture("start", backEvent)
+        }
+
+        override fun handleOnBackProgressed(backEvent: BackEventCompat) {
+            dispatchBackGesture("progress", backEvent)
+        }
+
+        override fun handleOnBackCancelled() {
+            dispatchBackGesture("cancel", null)
+        }
+
+        override fun handleOnBackPressed() {
+            dispatchBackGesture("commit", null)
+            if (webView.canGoBack()) webView.goBack() else finish()
+        }
+    }
+
+    /**
+     * Enabled state of the back callback.
+     *
+     * Deliberately OR-ed: a wrongly enabled callback only costs the
+     * back-to-home animation, a wrongly disabled one closes the app while
+     * an overlay is open. The web report wins in the "still something to
+     * close" direction, never against it.
+     */
+    private fun syncBackCallback() {
+        backCallback.isEnabled = webView.canGoBack() || webCanGoBack == true
+    }
+
+    /** Called from the JS bridge on every history change. */
+    fun setWebBackState(canGoBack: Boolean) {
+        webCanGoBack = canGoBack
+        syncBackCallback()
+    }
+
+    private fun dispatchBackGesture(phase: String, backEvent: BackEventCompat?) {
+        if (phase == "progress") {
+            pendingBackEvent = backEvent
+
+            if (backEventDispatchScheduled) return
+            backEventDispatchScheduled = true
+
+            webView.postOnAnimation {
+                backEventDispatchScheduled = false
+                val event = pendingBackEvent ?: return@postOnAnimation
+                pendingBackEvent = null
+                evaluateBackGesture("progress", event)
+            }
+            return
+        }
+
+        pendingBackEvent = null
+        evaluateBackGesture(phase, backEvent)
+    }
+
+    private fun evaluateBackGesture(phase: String, backEvent: BackEventCompat?) {
+        if (!pageLoaded) return
+
+        val args = if (backEvent == null) {
+            "'$phase'"
+        } else {
+            "'$phase',${backEvent.progress},${backEvent.touchX}," +
+                "${backEvent.touchY},${backEvent.swipeEdge}"
+        }
+
+        webView.evaluateJavascript(
+            "window.__yantaPredictiveBack&&window.__yantaPredictiveBack($args)",
+            null
+        )
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         installSplashScreen()
@@ -168,9 +263,23 @@ class MainActivity : ComponentActivity() {
                 request: WebResourceRequest
             ): Boolean = handleUri(request.url, fromWebView = true)
 
+            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
+                super.onPageStarted(view, url, favicon)
+                // A fresh document has not reported its history state yet.
+                webCanGoBack = null
+                syncBackCallback()
+            }
+
+            override fun doUpdateVisitedHistory(view: WebView?, url: String?, isReload: Boolean) {
+                super.doUpdateVisitedHistory(view, url, isReload)
+                // Fires for pushState/replaceState/traversals too.
+                syncBackCallback()
+            }
+
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
                 pageLoaded = url?.startsWith(BuildConfig.YANTA_URL) == true
+                syncBackCallback()
                 installAndroidSystemBarThemeSync()
                 dispatchNotificationStatus()
                 dispatchPushTokenIfChanged()
@@ -180,11 +289,7 @@ class MainActivity : ComponentActivity() {
             }
         }
 
-        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
-            override fun handleOnBackPressed() {
-                if (webView.canGoBack()) webView.goBack() else finish()
-            }
-        })
+        onBackPressedDispatcher.addCallback(this, backCallback)
 
         // Ensure an FCM token exists even before the first onNewToken callback.
         FirebaseMessaging.getInstance().token

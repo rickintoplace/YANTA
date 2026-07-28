@@ -72,9 +72,13 @@ private class CalendarRowFactory(
             else -> {
                 val today = LocalDate.now(zone)
 
-                data.eventsFrom(anchor, zone, ListWidgetRenderer.AGENDA_DAYS)
-                    // Events already running when the agenda starts belong to its first day.
-                    .groupBy { maxOf(it.startDate(zone), anchor) }
+                /*
+                  Bucketed by every day an event covers, not by its start day:
+                  a five-day trip has to appear under all five headings, or the
+                  four days in between look empty. Row.Event carries the day it
+                  is listed under, which is what the "(2/5)" counter needs.
+                */
+                data.eventsByDay(anchor, anchor.plusDays(ListWidgetRenderer.AGENDA_DAYS.toLong()), zone)
                     .toSortedMap()
                     .flatMap { (date, events) ->
                         buildList {
@@ -130,23 +134,45 @@ private class CalendarRowFactory(
         val event = row.event
         val views = RemoteViews(context.packageName, R.layout.widget_row_event)
 
-        val spans = event.allDay || event.spansMultipleDays(zone)
+        val dayCount = event.dayCount(zone)
+        val dayIndex = event.dayIndex(row.date, zone)
 
-        views.setTextViewText(
-            R.id.row_time_start,
-            if (spans) WidgetFormat.ALL_DAY else format.time(event.startMs),
-        )
+        /*
+          A timed event crossing midnight starts on its first day and ends on
+          its last; the days in between it simply fills. The counter next to
+          the title says which of those this row is.
+        */
+        val timeless = event.allDay ||
+            (dayCount > 1 && dayIndex > 1 && dayIndex < dayCount)
+
+        val startsToday = dayIndex == 1
+        val timeLabel = when {
+            timeless -> WidgetFormat.ALL_DAY
+            startsToday -> format.time(event.startMs)
+            else -> format.time(event.endMs)
+        }
+
+        views.setTextViewText(R.id.row_time_start, timeLabel)
         views.setThemedTextColor(
             R.id.row_time_start,
-            if (spans) theme.textFaint else theme.text,
+            if (timeless) theme.textFaint else theme.text,
             theme,
         )
 
-        val showEnd = !spans && event.endMs > event.startMs
+        val showEnd = dayCount == 1 && !event.allDay && event.endMs > event.startMs
         views.setViewVisibility(R.id.row_time_end, if (showEnd) View.VISIBLE else View.GONE)
         if (showEnd) {
             views.setTextViewText(R.id.row_time_end, format.time(event.endMs))
             views.setThemedTextColor(R.id.row_time_end, theme.textFaint, theme)
+        }
+
+        views.setViewVisibility(R.id.row_span, if (dayCount > 1) View.VISIBLE else View.GONE)
+        if (dayCount > 1) {
+            views.setTextViewText(
+                R.id.row_span,
+                context.getString(R.string.widget_span_position, dayIndex, dayCount),
+            )
+            views.setThemedTextColor(R.id.row_span, theme.textFaint, theme)
         }
 
         views.tint(R.id.row_bar, event.color)

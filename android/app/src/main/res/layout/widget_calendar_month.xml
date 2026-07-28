@@ -1,8 +1,12 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Month grid. The six week rows and the weekday strip are containers the
-  renderer fills with cell RemoteViews, which is how a fixed layout can
-  still adapt to week start, cell density and event count.
+  Month grid. The weekday strip and the six week rows are containers the
+  renderer fills, which is how a fixed layout still adapts to week start,
+  cell density and event count.
+
+  Each week row is vertical, not a row of cells: the all-day band between
+  the dates and the day chips has to span columns, so a multi-day event is
+  one bar owned by the week rather than a chip repeated per day.
 -->
 <FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
@@ -44,42 +48,42 @@
                 android:layout_width="match_parent"
                 android:layout_height="0dp"
                 android:layout_weight="1"
-                android:orientation="horizontal" />
+                android:orientation="vertical" />
 
             <LinearLayout
                 android:id="@+id/month_week_1"
                 android:layout_width="match_parent"
                 android:layout_height="0dp"
                 android:layout_weight="1"
-                android:orientation="horizontal" />
+                android:orientation="vertical" />
 
             <LinearLayout
                 android:id="@+id/month_week_2"
                 android:layout_width="match_parent"
                 android:layout_height="0dp"
                 android:layout_weight="1"
-                android:orientation="horizontal" />
+                android:orientation="vertical" />
 
             <LinearLayout
                 android:id="@+id/month_week_3"
                 android:layout_width="match_parent"
                 android:layout_height="0dp"
                 android:layout_weight="1"
-                android:orientation="horizontal" />
+                android:orientation="vertical" />
 
             <LinearLayout
                 android:id="@+id/month_week_4"
                 android:layout_width="match_parent"
                 android:layout_height="0dp"
                 android:layout_weight="1"
-                android:orientation="horizontal" />
+                android:orientation="vertical" />
 
             <LinearLayout
                 android:id="@+id/month_week_5"
                 android:layout_width="match_parent"
                 android:layout_height="0dp"
                 android:layout_weight="1"
-                android:orientation="horizontal" />
+                android:orientation="vertical" />
         </LinearLayout>
     </LinearLayout>
 </FrameLayout>

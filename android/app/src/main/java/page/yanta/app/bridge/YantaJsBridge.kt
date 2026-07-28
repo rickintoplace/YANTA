@@ -50,6 +50,17 @@ class YantaJsBridge(
         }
     }
 
+    /**
+     * Whether the web layer still has an in-app entry to go back to.
+     * Drives the predictive-back callback: only while this is false does
+     * the system play its back-to-home preview — see MainActivity.
+     * Called from installPredictiveBack() in src/native/predictive-back.js.
+     */
+    @JavascriptInterface
+    fun setBackState(canGoBack: Boolean) {
+        activity.runOnUiThread { activity.setWebBackState(canGoBack) }
+    }
+
     @JavascriptInterface
     fun syncNativeSnapshot(json: String) {
         NativeStore.saveSnapshot(activity, json)

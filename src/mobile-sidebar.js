@@ -104,6 +104,19 @@ function registerMobileSidebarOverlayRoute() {
     },
 
     isOpen: isMobileSidebarOpen,
+
+    // Android predictive back: the drawer follows the finger back out
+    // instead of the whole app shell shrinking.
+    surface: () => {
+      const { sidebar, backdrop } = elements();
+      if (!sidebar) return null;
+
+      return {
+        element: sidebar,
+        backdrop,
+        mode: 'slide-left',
+      };
+    },
   });
 }
 

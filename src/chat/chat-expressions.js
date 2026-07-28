@@ -88,6 +88,10 @@ function registerExpressionsRoute() {
     },
 
     isOpen: () => !!openPanelRef?.isConnected,
+
+    surface: () => (openPanelRef?.isConnected
+      ? { element: openPanelRef, mode: 'shrink' }
+      : null),
   });
 }
 

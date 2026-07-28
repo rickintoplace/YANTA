@@ -5599,3 +5599,26 @@ input.yanta-task-checkbox {
     border-radius: 0;
   }
 }
+/* ===========================================================
+   Predictive back (Android app shell)
+   Driven per frame from src/native/predictive-back.js — the transform
+   itself is set inline, these rules only prepare the surfaces.
+   =========================================================== */
+
+.yanta-back-gesture {
+  will-change: transform, opacity;
+  transform-origin: center center;
+}
+
+/* The app shell is transparent by default; the shrinking preview needs its
+   own background, plus an edge and a shadow — without them the rounded
+   corners vanish into an equally dark backdrop. */
+.app.yanta-back-gesture {
+  background: var(--bg);
+  box-shadow: 0 0 0 1px var(--border), 0 18px 48px rgba(0, 0, 0, .55);
+}
+
+html.yanta-back-gesture-active body {
+  background: #000;
+  background: color-mix(in srgb, var(--bg) 25%, #000);
+}

@@ -36,6 +36,7 @@ object WidgetIntents {
     private const val LANE_OPEN_DAY = 4
     private const val LANE_CREATE_EVENT = 5
     private const val LANE_COLLECTION = 6
+    private const val LANE_OPEN_EVENT = 7
 
     private const val REQUEST_LANES = 16
 
@@ -47,6 +48,10 @@ object WidgetIntents {
 
     fun createEvent(context: Context, widgetId: Int, date: LocalDate): PendingIntent =
         activity(context, widgetId, LANE_CREATE_EVENT, appUri("calendar-new", "date" to date.toString()))
+
+    /** Opens one event's editor. Grid bars use this; collection rows use [eventFillIn]. */
+    fun openEvent(context: Context, widgetId: Int, eventId: String): PendingIntent =
+        activity(context, widgetId, LANE_OPEN_EVENT, appUri("calendar-event", "id" to eventId))
 
     /**
      * Fill-in intent for a collection item. Collection rows share one

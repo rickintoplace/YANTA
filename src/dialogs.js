@@ -60,6 +60,17 @@ function registerDialogOverlayRoute() {
     },
 
     isOpen: dialogIsOpen,
+
+    surface: () => {
+      const modal = activeDialog?.modal;
+      if (!modal?.isConnected) return null;
+
+      return {
+        element: modal.querySelector('.yanta-dialog-card') || modal,
+        backdrop: modal,
+        mode: 'shrink',
+      };
+    },
   });
 }
 

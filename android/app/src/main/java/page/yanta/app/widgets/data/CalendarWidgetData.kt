@@ -9,6 +9,7 @@ import java.io.File
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
+import java.time.temporal.ChronoUnit
 import java.util.Locale
 
 /**
@@ -58,6 +59,20 @@ data class WidgetEvent(
     /** Multi-day events render as bars, not as a single timed entry. */
     fun spansMultipleDays(zone: ZoneId): Boolean =
         startDate(zone) != endDateInclusive(zone)
+
+    /** How many days the event covers, 1 for a single-day event. */
+    fun dayCount(zone: ZoneId): Int =
+        (ChronoUnit.DAYS.between(startDate(zone), endDateInclusive(zone)) + 1).toInt()
+
+    /** Which day of the span [day] is, 1-based. */
+    fun dayIndex(day: LocalDate, zone: ZoneId): Int =
+        (ChronoUnit.DAYS.between(startDate(zone), day) + 1).toInt()
+
+    /**
+     * Events that belong on a calendar's all-day band rather than in a day's
+     * timed stack: anything all-day, and anything crossing midnight.
+     */
+    fun isBanded(zone: ZoneId): Boolean = allDay || spansMultipleDays(zone)
 }
 
 /**

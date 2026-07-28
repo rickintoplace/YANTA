@@ -34,6 +34,7 @@ class WidgetFormat(
         .withZone(zone)
 
     private val monthTitle = DateTimeFormatter.ofPattern("LLLL yyyy", locale)
+    private val monthName = DateTimeFormatter.ofPattern("LLLL", locale)
     private val dayTitle = DateTimeFormatter.ofPattern("EEEE, d MMMM", locale)
     private val dayShort = DateTimeFormatter.ofPattern("EEE, d MMM", locale)
     private val monthDay = DateTimeFormatter.ofPattern("d MMM", locale)
@@ -58,13 +59,24 @@ class WidgetFormat(
 
     fun dayShort(date: LocalDate): String = dayShort.format(date)
 
+    private fun monthName(date: LocalDate): String =
+        monthName.format(date).replaceFirstChar { it.titlecase(locale) }
+
+    /**
+     * "21–27 July", "27 Jul – 2 Aug", "29 Dec 2026 – 4 Jan 2027".
+     *
+     * The year is dropped for the current one: a widget always shows a period
+     * near today, so the year is noise that costs the title its width.
+     */
     fun weekTitle(start: LocalDate): String {
         val end = start.plusDays(6)
+        val crossesYear = start.year != end.year
+        val year = if (crossesYear || end.year != LocalDate.now(zone).year) " ${end.year}" else ""
 
         return when {
-            start.year != end.year -> "${dayShort.format(start)} – ${dayShort.format(end)}"
-            start.month != end.month -> "${monthDay.format(start)} – ${monthDay.format(end)} ${end.year}"
-            else -> "${start.dayOfMonth}–${end.dayOfMonth} ${monthTitle(start)}"
+            crossesYear -> "${dayShort.format(start)} ${start.year} – ${dayShort.format(end)}$year"
+            start.month != end.month -> "${monthDay.format(start)} – ${monthDay.format(end)}$year"
+            else -> "${start.dayOfMonth}–${end.dayOfMonth} ${monthName(start)}$year"
         }
     }
 

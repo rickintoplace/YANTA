@@ -13,6 +13,7 @@
 import { $, el, lucide } from '../core.js';
 import { t } from '../i18n/index.js';
 import { tokenizeQuery } from '../text-search.js';
+import { openBoundOverlay } from '../overlay-history.js';
 import { noteCommandUsed } from './palette-commands.js';
 import { GROUPS, collectInstant, collectDeferred } from './palette-providers.js';
 
@@ -23,6 +24,8 @@ const DEFERRED_DELAY_MS = 200;
 
 const GROUP_RANK = new Map(GROUPS.map((g, i) => [g.id, i]));
 const GROUP_LABEL = new Map(GROUPS.map((g) => [g.id, g.labelKey]));
+
+let releasePalette = null;
 
 const palette = {
   open: false,
@@ -55,6 +58,12 @@ export function openPalette() {
   applyQuery('');
 
   $('palette').hidden = false;
+
+  // Device-back closes the palette instead of the app.
+  releasePalette = openBoundOverlay('command-palette', {
+    close: closePalette,
+    isOpen: () => palette.open,
+  });
   input.focus();
 }
 
@@ -69,6 +78,10 @@ export function closePalette() {
 
   const node = $('palette');
   if (node) node.hidden = true;
+
+  const release = releasePalette;
+  releasePalette = null;
+  release?.();
 }
 
 export function paletteFilter(value) {

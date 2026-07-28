@@ -19,6 +19,8 @@ import {
   toast,
 } from './core.js';
 
+import { openBoundOverlay } from './overlay-history.js';
+
 import { t } from './i18n/index.js';
 
 const widgets = new Map();
@@ -513,7 +515,14 @@ export async function openDashboardWidgetManager() {
   const close = () => {
     modal.remove();
     if (managerModal === modal) managerModal = null;
+    release?.();
   };
+
+  // Device-back closes the manager instead of the whole app.
+  const release = openBoundOverlay('dashboard-widget-manager', {
+    close,
+    isOpen: () => modal.isConnected,
+  });
 
   cancel.addEventListener('click', close);
 

@@ -19,6 +19,7 @@ import {
 } from '../core.js';
 import { t } from '../i18n/index.js';
 import { renderTree } from '../tree.js';
+import { openBoundOverlay } from '../overlay-history.js';
 import { injectGraphCss } from './graph-css.js';
 
 const APPEARANCE_ICONS = lucideIconNames();
@@ -39,6 +40,7 @@ const COLOR_SWATCHES = [
 ];
 
 let modalEl = null;
+let releaseAppearance = null;
 
 // ------------------------------------------------------------
 // Target key helpers ("note:<id>" / "folder:<id>")
@@ -454,6 +456,10 @@ function closeAppearancePicker() {
     modalEl.remove();
     modalEl = null;
   }
+
+  const release = releaseAppearance;
+  releaseAppearance = null;
+  release?.();
 }
 
 // opts: { title, kind: 'note'|'folder'|'targets', target, initialIcon,
@@ -534,6 +540,12 @@ export function openAppearancePicker(opts) {
   overlay.append(card);
   document.body.append(overlay);
   modalEl = overlay;
+
+  // Device-back closes the picker instead of the app.
+  releaseAppearance = openBoundOverlay('graph-appearance', {
+    close: closeAppearancePicker,
+    isOpen: () => !!modalEl?.isConnected,
+  });
 
   const previewEl = card.querySelector('[data-yap-preview]');
   const iconSearchEl = card.querySelector('[data-yap-search]');

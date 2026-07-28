@@ -15,6 +15,8 @@ import {
   toast,
 } from '../core.js';
 
+import { openBoundOverlay } from '../overlay-history.js';
+
 import {
   compressImageFile,
 } from '../media/image-compression.js';
@@ -801,7 +803,13 @@ function openImagePreviewSheet(file) {
       cleanupPreviewUrl();
       overlay.remove();
       resolve(value);
+      release?.();
     };
+
+    const release = openBoundOverlay('chat-media-options', {
+      close: () => close(null),
+      isOpen: () => overlay.isConnected,
+    });
 
     const renderMeta = () => {
       if (!variants?.full) {

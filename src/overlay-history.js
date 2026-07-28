@@ -68,39 +68,11 @@ export function registerOverlayRoute(id, handlers = {}) {
     open: handlers.open || null,
     close: handlers.close || null,
     isOpen: handlers.isOpen || null,
-    // Optional: the element the Android predictive-back gesture should
-    // animate while the user previews closing this overlay.
-    surface: handlers.surface || null,
   });
 
   return () => {
     registry.delete(id);
   };
-}
-
-/**
- * Surface descriptor of an overlay for the predictive-back preview:
- * `{ element, mode: 'shrink' | 'slide-left' | 'slide-right', backdrop }`.
- * Overlays without a `surface` handler fall back to the generic
- * resolution in src/native/predictive-back.js.
- */
-export function overlayRouteSurface(id) {
-  if (!id) return null;
-
-  const surface = registry.get(id)?.surface;
-  if (!surface) return null;
-
-  try {
-    const resolved = surface();
-    if (!resolved) return null;
-
-    return resolved instanceof Element
-      ? { element: resolved, mode: 'shrink' }
-      : resolved;
-  } catch (err) {
-    console.warn('[YANTA overlay-history] surface resolution failed', id, err);
-    return null;
-  }
 }
 
 export function pushOverlayState(id, data = {}, {
@@ -192,6 +164,41 @@ export function closeTopOverlay(fallbackClose = null) {
   }
 
   return false;
+}
+
+/**
+ * One-call binding for self-contained overlays (modals, sheets, panels):
+ * pushes the history entry and routes device-back/ESC into `close`.
+ *
+ * Only for overlays that a direct user action opens. One that a route
+ * restores (the chat onboarding modal, for instance) must go through
+ * registerOverlayRoute instead — it would otherwise re-push its entry
+ * while the route reopens it, and Back would appear to do nothing.
+ *
+ * Returns a release function to call at the END of the overlay's own
+ * close path, once the element is gone. It only drops a history entry
+ * that is still this overlay's, which makes it a no-op both when the
+ * router closed the overlay and when something was stacked on top —
+ * so a single line inside `close` keeps every dismiss path in sync.
+ */
+export function openBoundOverlay(id, { close, isOpen }) {
+  if (typeof close !== 'function') throw new Error('openBoundOverlay: close required');
+
+  registerOverlayRoute(id, {
+    /*
+      Dismissed modals are not restorable on Forward — their callbacks
+      and promise resolvers are gone. Reopening stays the module's call.
+    */
+    open: () => {},
+    close: () => close({ fromHistory: true }),
+    isOpen: isOpen || null,
+  });
+
+  pushOverlayState(id);
+
+  return function releaseOverlayEntry() {
+    if (overlayIdFromState() === id) history.back();
+  };
 }
 
 async function closeOverlaysNotInStack(keepStack, targetId, state) {

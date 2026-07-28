@@ -63,6 +63,8 @@ function elements() {
     backdrop = document.createElement('div');
     backdrop.id = 'sidebarBackdrop';
     backdrop.className = 'sidebar-backdrop';
+    // Fades along with the drawer during the Android back gesture.
+    backdrop.dataset.backScrim = '';
     backdrop.hidden = true;
     app.append(backdrop);
   }
@@ -104,19 +106,6 @@ function registerMobileSidebarOverlayRoute() {
     },
 
     isOpen: isMobileSidebarOpen,
-
-    // Android predictive back: the drawer follows the finger back out
-    // instead of the whole app shell shrinking.
-    surface: () => {
-      const { sidebar, backdrop } = elements();
-      if (!sidebar) return null;
-
-      return {
-        element: sidebar,
-        backdrop,
-        mode: 'slide-left',
-      };
-    },
   });
 }
 

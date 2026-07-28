@@ -33,6 +33,8 @@ import {
   deletePresentationSession,
 } from './presentation-api.js';
 
+import { openBoundOverlay } from '../overlay-history.js';
+
 import {
   generatePresentationKeyString,
   encryptPresentationPayload,
@@ -52,6 +54,7 @@ const SIGNALING_URL =
   'wss://yanta-signaling-932960946294.europe-west1.run.app';
 
 let modal = null;
+let releaseSession = null;
 let ownerSocket = null;
 let activeSession = null;
 let latestDraft = null;
@@ -213,6 +216,14 @@ function ensureModal() {
 
 function getConfiguredVaultId() {
   return store.settings.get('sync2.yantaCloud.vaultId', '');
+}
+
+/** Device-back closes the session modal instead of the app. */
+function bindBackToSession() {
+  releaseSession = openBoundOverlay('presentation-session', {
+    close: closePresentationSessionModal,
+    isOpen: () => !!modal?.isConnected && !modal.hidden,
+  });
 }
 
 function closeOwnerSocket() {
@@ -665,6 +676,10 @@ export function closePresentationSessionModal() {
   activeSession = null;
   latestDraft = null;
   ownerIndex = 0;
+
+  const release = releaseSession;
+  releaseSession = null;
+  release?.();
 }
 
 export async function createPresentationSessionForDrawing({
@@ -736,6 +751,7 @@ export function openPresentationControllerForExistingSession({
   const m = ensureModal();
 
   m.hidden = false;
+  bindBackToSession();
 
   activeSession = {
     ...session,
@@ -817,6 +833,7 @@ export async function openPresentationSessionModal({
   const m = ensureModal();
 
   m.hidden = false;
+  bindBackToSession();
   m.innerHTML = `
     <div class="modal-card yanta-presentation-card">
       <header class="modal-head">

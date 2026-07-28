@@ -19,6 +19,7 @@ import {
   escapeHtml,
 } from './core.js';
 import { t } from './i18n/index.js';
+import { openBoundOverlay } from './overlay-history.js';
 
 // Marks the storage decision as settled — set when the user picks a
 // destination or dismisses the nudge. Once set, the nudge stays gone.
@@ -412,12 +413,17 @@ const STORAGE_CHOICES = [
 ];
 
 let chooserModal = null;
+let releaseChooser = null;
 
 function closeChooser() {
   if (chooserModal) {
     chooserModal.hidden = true;
     chooserModal.replaceChildren();
   }
+
+  const release = releaseChooser;
+  releaseChooser = null;
+  release?.();
 }
 
 async function applyChoice(choice, { onSettled } = {}) {
@@ -515,6 +521,12 @@ export function openStorageChooser({ onSettled } = {}) {
   `;
 
   chooserModal.hidden = false;
+
+  // Device-back dismisses the chooser instead of closing the app.
+  releaseChooser = openBoundOverlay('storage-chooser', {
+    close: closeChooser,
+    isOpen: () => chooserModal?.hidden === false,
+  });
 
   const card = chooserModal.querySelector('.yanta-onb-card');
   const choices = [...card.querySelectorAll('[data-onb-choice]')];

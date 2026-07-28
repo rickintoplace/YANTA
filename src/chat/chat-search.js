@@ -27,6 +27,8 @@ import {
     snippetFor,
     tokenizeQuery,
   } from '../text-search.js';
+  
+  import { openBoundOverlay } from '../overlay-history.js';
 
   const SEARCH_LIMIT = 100;
   const BACKFILL_BATCH_SIZE = 50;
@@ -36,6 +38,10 @@ import {
   
   let overlay = null;
   let roomPanel = null;
+  
+  // History entries of the two search surfaces, see openBoundOverlay().
+  let releaseGlobalSearch = null;
+  let releaseRoomSearch = null;
   let roomPanelState = {
     roomId: '',
     roomName: '',
@@ -599,6 +605,12 @@ import {
   
     node.hidden = false;
   
+    // Device-back closes the search, not the app.
+    releaseGlobalSearch = openBoundOverlay('chat-search', {
+      close: closeGlobalChatSearch,
+      isOpen: () => node.isConnected && !node.hidden,
+    });
+  
     node.innerHTML = `
       <section class="yanta-chat-search-card">
         <header class="yanta-chat-search-head">
@@ -661,6 +673,10 @@ import {
    */
   export function closeGlobalChatSearch() {
     if (overlay) overlay.hidden = true;
+  
+    const release = releaseGlobalSearch;
+    releaseGlobalSearch = null;
+    release?.();
   }
   
   function ensureRoomPanel(container) {
@@ -823,6 +839,11 @@ import {
   
     panel.hidden = false;
   
+    releaseRoomSearch = openBoundOverlay('chat-room-search', {
+      close: closeRoomChatSearch,
+      isOpen: () => panel.isConnected && !panel.hidden,
+    });
+  
     renderRoomPanel(client);
   
     setTimeout(() => {
@@ -835,4 +856,8 @@ import {
    */
   export function closeRoomChatSearch() {
     if (roomPanel) roomPanel.hidden = true;
+  
+    const release = releaseRoomSearch;
+    releaseRoomSearch = null;
+    release?.();
   }

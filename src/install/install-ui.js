@@ -17,6 +17,7 @@ import {
 import { BRAND_LOGO_SVG } from '../brand-logo.js';
 
 import { renderBrandedQrSvg } from '../qr.js';
+import { openBoundOverlay } from '../overlay-history.js';
 
 import {
   computeInstallRecommendation,
@@ -415,6 +416,7 @@ export function installCardElement({ onResolved } = {}) {
 // ---- Standalone modal (opened from the dashboard hint) --------------------
 
 let modal = null;
+let releaseInstallModal = null;
 
 export function openInstallModal() {
   injectCss();
@@ -446,8 +448,17 @@ export function openInstallModal() {
   card.append(head, body);
   modal.replaceChildren(card);
   modal.hidden = false;
+
+  releaseInstallModal = openBoundOverlay('install', {
+    close: closeInstallModal,
+    isOpen: () => !!modal?.isConnected && !modal.hidden,
+  });
 }
 
 export function closeInstallModal() {
   if (modal) modal.hidden = true;
+
+  const release = releaseInstallModal;
+  releaseInstallModal = null;
+  release?.();
 }

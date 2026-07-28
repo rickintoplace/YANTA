@@ -18,6 +18,8 @@ import {
   import {
     yantaConfirm,
   } from '../dialogs.js';
+
+  import { openBoundOverlay } from '../overlay-history.js';
   
   import {
     makeZip,
@@ -718,7 +720,15 @@ import {
       </section>
     `;
   
-    const close = () => overlay.remove();
+    const close = () => {
+      overlay.remove();
+      release?.();
+    };
+
+    const release = openBoundOverlay('chat-export', {
+      close,
+      isOpen: () => overlay.isConnected,
+    });
   
     overlay.addEventListener('click', (e) => {
       if (e.target === overlay || e.target.closest?.('[data-close]')) {

@@ -42,6 +42,8 @@ import {
   removePristineWelcomeVaultIfPresent,
 } from '../notes.js';
 
+import { openBoundOverlay } from '../overlay-history.js';
+
 import {
   syncKeyToBytes,
 } from './crypto.js';
@@ -56,6 +58,7 @@ import {
 } from './provider-registry.js';
 
 let modal = null;
+let releaseSetup = null;
 let statusEl = null;
 let autoSyncStarted = false;
 let pendingPairingText = '';
@@ -144,8 +147,20 @@ function setStatus(msg = '', type = '') {
   statusEl.className = 'yanta-sync2-setup-status' + (type ? ` ${type}` : '');
 }
 
+/** Device-back closes the setup instead of the app. */
+function bindBackToSetup() {
+  releaseSetup = openBoundOverlay('sync-setup', {
+    close,
+    isOpen: () => !!modal?.isConnected && !modal.hidden,
+  });
+}
+
 function close() {
   if (modal) modal.hidden = true;
+
+  const release = releaseSetup;
+  releaseSetup = null;
+  release?.();
 }
 
 function copyFieldHtml({
@@ -660,6 +675,7 @@ function renderStartView() {
   });
 
   m.hidden = false;
+  bindBackToSetup();
 }
 
 function renderConnectExistingView(initialText = pendingPairingText) {
@@ -853,6 +869,7 @@ async function renderConnectedView({
   });
 
   m.hidden = false;
+  bindBackToSetup();
 }
 
 export function openGoogleDriveSyncSetup() {
@@ -862,6 +879,7 @@ export function openGoogleDriveSyncSetup() {
 export async function openGoogleDriveSyncSetupWithPayload(pairingText) {
   ensureModal();
   modal.hidden = false;
+  bindBackToSetup();
 
   pendingPairingText = pairingText || '';
   renderConnectExistingView(pairingText || '');

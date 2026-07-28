@@ -15,6 +15,7 @@
 
 import { renderBrandedQrSvg } from '../qr.js';
 import { BRAND_LOGO_SVG } from '../brand-logo.js';
+import { openBoundOverlay } from '../overlay-history.js';
 
 
 import {
@@ -237,7 +238,17 @@ export async function scanQrWithCamera() {
       } catch {}
 
       modal.remove();
+      release?.();
     };
+
+    // Device-back aborts the scan instead of closing the app.
+    const release = openBoundOverlay('sync-qr-scan', {
+      close: () => {
+        stop();
+        reject(new Error('QR scan cancelled'));
+      },
+      isOpen: () => modal.isConnected,
+    });
 
     modal.querySelector('[data-close]')?.addEventListener('click', () => {
       stop();

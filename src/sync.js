@@ -23,6 +23,7 @@
 import { $, el, state, store, toast, lucide, uid, safeFilename, escapeHtml } from './core.js';
 import { getNoteDoc, encodeNoteState, applyNoteUpdate, noteMarkdown } from './yjs.js';
 import * as Y from 'yjs';
+import { openBoundOverlay } from './overlay-history.js';
 import { folderPathSegments, ensureFolderPath, parseFrontmatter, noteToFrontmatter, imageExt } from './io.js';
 import {
   yantaConfirm,
@@ -437,6 +438,8 @@ async function importImages(imgDir) {
 }
 
 // ---------------- conflict modal --------------------------------
+let releaseConflictModal = null;
+
 function showSyncConflictsModal(conflicts) {
   const modal = $('conflictModal');
   if (!modal) return;
@@ -453,6 +456,12 @@ function showSyncConflictsModal(conflicts) {
     list.append(card);
   }
   modal.hidden = false;
+
+  // Device-back closes the conflict list instead of the app.
+  releaseConflictModal = openBoundOverlay('sync-conflicts', {
+    close: closeConflictModal,
+    isOpen: () => modal.isConnected && !modal.hidden,
+  });
 }
 async function viewConflictFile(c) {
   const text = await c.file.text();
@@ -495,7 +504,14 @@ async function adoptConflict(c) {
   renderTree();
   toast('Adopted as new note', 'success');
 }
-function closeConflictModal() { const m = $('conflictModal'); if (m) m.hidden = true; }
+function closeConflictModal() {
+  const m = $('conflictModal');
+  if (m) m.hidden = true;
+
+  const release = releaseConflictModal;
+  releaseConflictModal = null;
+  release?.();
+}
 export { closeConflictModal };
 
 // ---------------- per-note + global status ----------------------

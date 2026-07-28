@@ -13,6 +13,8 @@ import {
   toast,
 } from '../core.js';
 
+import { openBoundOverlay } from '../overlay-history.js';
+
 import {
   roomDisplayName,
   sendRoomMessage,
@@ -153,7 +155,14 @@ export function openChatForwardPicker({
       window.removeEventListener('keydown', onKey, true);
       overlay.remove();
       resolve(result);
+      release?.();
     };
+
+    // Device-back dismisses the picker instead of the app.
+    const release = openBoundOverlay('chat-forward', {
+      close: () => close(false),
+      isOpen: () => overlay.isConnected,
+    });
 
     const onKey = (e) => {
       if (e.key !== 'Escape') return;

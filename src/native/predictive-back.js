@@ -12,16 +12,20 @@
 //
 // This module answers two questions:
 //  1. "Is there anything left to go back to?"  -> setBackState()
-//  2. "What would back close?"                 -> the animated surface
+//  2. "What would back close?"                 -> resolveSurface()
+//
+// Surfaces are found generically (top-most layer over the app shell), so
+// new overlays animate without registering anything. Two opt-in hooks
+// exist for the cases that generic cannot know:
+//   data-back-surface="<overlay id>"  the element that IS that overlay,
+//                                     + data-back-mode / data-back-scrim
+//   data-back-card                    the card inside a full-screen scrim
 //
 // Browsers do not expose gesture progress, so everything here is a no-op
 // outside the Android WebView.
 // ============================================================
 
-import {
-  overlayIdFromState,
-  overlayRouteSurface,
-} from '../overlay-history.js';
+import { overlayIdFromState } from '../overlay-history.js';
 
 let installed = false;
 
@@ -33,6 +37,7 @@ let cleanupTimer = 0;
 const MIN_SCALE = 0.9;
 const EDGE_MARGIN = 8;
 const SLIDE_PREVIEW = 26;
+const MIN_COVERAGE = 0.32;
 const COMMIT_MS = 160;
 const CANCEL_MS = 220;
 
@@ -69,32 +74,93 @@ function decelerate(progress) {
 // Which surface does back close?
 // ------------------------------------------------------------
 
-function visibleModalSurface() {
-  const modals = [...document.querySelectorAll('.modal:not([hidden])')]
-    .filter((el) => el.offsetParent !== null || getComputedStyle(el).position === 'fixed');
+function isVisible(el) {
+  if (!el?.isConnected || el.hidden) return false;
 
-  const modal = modals[modals.length - 1];
-  if (!modal) return null;
+  const style = getComputedStyle(el);
+
+  return style.display !== 'none'
+    && style.visibility !== 'hidden'
+    && style.opacity !== '0';
+}
+
+/** Toasts, tooltips and toolbars are not surfaces — real ones fill the screen. */
+function coversScreen(el) {
+  const { width, height } = el.getBoundingClientRect();
+  const viewport = (window.innerWidth || 1) * (window.innerHeight || 1);
+
+  return (width * height) / viewport >= MIN_COVERAGE;
+}
+
+function zIndexOf(el) {
+  const z = Number.parseInt(getComputedStyle(el).zIndex, 10);
+  return Number.isFinite(z) ? z : 0;
+}
+
+/**
+ * The surface an overlay declared for itself via
+ * `data-back-surface="<overlay id>"`, and only while back would really
+ * close that overlay. This is what keeps the mobile drawer sliding while
+ * the identical element, docked as a desktop column, is left alone.
+ */
+function markedSurface() {
+  const id = overlayIdFromState();
+  if (!id) return null;
+
+  const el = document.querySelector(`[data-back-surface="${CSS.escape(id)}"]`);
+  if (!isVisible(el)) return null;
+
+  const scrim = el.parentElement?.querySelector(':scope > [data-back-scrim]');
 
   return {
-    element: modal.querySelector('.modal-card') || modal,
-    backdrop: modal,
+    element: el,
+    mode: el.dataset.backMode || 'shrink',
+    backdrop: isVisible(scrim) ? scrim : null,
+  };
+}
+
+/**
+ * Every full-screen surface in YANTA — chat, AI, graph, modals, palette —
+ * is a sibling of the app shell on <body>, layered by z-index. So the one
+ * the user sees on top is simply the last of those that is visible.
+ */
+function layeredSurface() {
+  const app = document.getElementById('app');
+
+  const candidates = [...document.body.children]
+    .filter((el) => isVisible(el) && coversScreen(el));
+
+  const top = candidates
+    .map((el, index) => ({ el, index, z: zIndexOf(el) }))
+    .sort((a, b) => (a.z - b.z) || (a.index - b.index))
+    .pop()?.el;
+
+  if (!top || top === app) return null;
+
+  /*
+    A scrim is not the surface: fading or scaling it would drag the whole
+    dimmed layer along. The card inside it is what steps back.
+  */
+  const card = top.querySelector(':scope > .modal-card, :scope > [data-back-card]');
+
+  return {
+    element: card || top,
+    backdrop: card ? top : null,
     mode: 'shrink',
   };
 }
 
 /**
- * Resolution order: what the top overlay declared, then any open modal,
- * then the whole app shell — which is exactly the system's cross-activity
- * look and therefore a safe fallback for route-level back.
+ * What back would close, most specific first: an overlay that declared
+ * its own surface, else whatever is layered on top of the app shell, else
+ * the shell itself — which is exactly the system's cross-activity look.
  */
 function resolveSurface() {
-  const declared = overlayRouteSurface(overlayIdFromState());
+  const marked = markedSurface();
+  if (marked) return marked;
 
-  if (declared?.element?.isConnected) return declared;
-
-  const modal = visibleModalSurface();
-  if (modal) return modal;
+  const layered = layeredSurface();
+  if (layered) return layered;
 
   const app = document.getElementById('app');
   if (!app) return null;
@@ -153,7 +219,7 @@ function renderShrink(surface, eased, touchY, swipeEdge) {
 }
 
 function renderSlide(surface, eased) {
-  const dir = surface.mode === 'slide-right' ? 1 : -1;
+  const dir = surface.mode === 'drawer-right' ? 1 : -1;
 
   /*
     A preview hints at the exit, it never performs it: at half a swipe the
@@ -167,10 +233,14 @@ function renderSlide(surface, eased) {
   }
 }
 
+function isDrawer(surface) {
+  return surface.mode === 'drawer-left' || surface.mode === 'drawer-right';
+}
+
 function render(surface, progress, touchY, swipeEdge) {
   const eased = decelerate(progress);
 
-  if (surface.mode === 'slide-left' || surface.mode === 'slide-right') {
+  if (isDrawer(surface)) {
     renderSlide(surface, eased);
     return;
   }
@@ -220,7 +290,7 @@ function endGesture(committed) {
       dropped right away and its transition continues from wherever the
       finger left it; a shrunk shell has none and eases back instead.
     */
-    if (surface.mode === 'slide-left' || surface.mode === 'slide-right') {
+    if (isDrawer(surface)) {
       clearSurface(surface);
       return;
     }

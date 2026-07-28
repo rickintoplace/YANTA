@@ -9,6 +9,8 @@ import {
   cloudMe,
 } from '../cloud/cloud-api.js';
 
+import { openBoundOverlay } from '../overlay-history.js';
+
 import {
   openBillingCheckout,
   openBillingPortal,
@@ -291,7 +293,14 @@ export function showCloudQuotaDialog(detail = {}) {
 
   const close = () => {
     modal.remove();
+    release?.();
   };
+
+  // Device-back closes the modal instead of the app.
+  const release = openBoundOverlay('billing', {
+    close,
+    isOpen: () => modal.isConnected,
+  });
 
   modal.addEventListener('click', (e) => {
     if (e.target === modal) close();

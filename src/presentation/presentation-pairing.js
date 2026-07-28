@@ -23,11 +23,14 @@ import {
   openYantaCloudSetup,
 } from '../sync2/yanta-cloud-setup-ui.js';
 
+import { openBoundOverlay } from '../overlay-history.js';
+
 const SIGNALING_URL =
   import.meta.env.VITE_YANTA_SIGNALING_URL ||
   'wss://yanta-signaling-932960946294.europe-west1.run.app';
 
 let modal = null;
+let releasePairing = null;
 let socket = null;
 let pairingPayload = null;
 
@@ -406,6 +409,14 @@ function ensureModal() {
   return modal;
 }
 
+/** Device-back closes the pairing modal instead of the app. */
+function bindBackToPairing() {
+  releasePairing = openBoundOverlay('presentation-pairing', {
+    close: closePairingModal,
+    isOpen: () => !!modal?.isConnected && !modal.hidden,
+  });
+}
+
 function closeSocket() {
   if (!socket) return;
 
@@ -424,6 +435,10 @@ function closePairingModal() {
   }
 
   pairingPayload = null;
+
+  const release = releasePairing;
+  releasePairing = null;
+  release?.();
 }
 
 function setStatus(message, type = '') {
@@ -534,6 +549,7 @@ function renderPairingModal() {
   const drawings = availablePresentationDrawings();
 
   m.hidden = false;
+  bindBackToPairing();
 
   m.innerHTML = `
     <div class="modal-card yanta-presentation-pair-owner-card">
@@ -641,6 +657,7 @@ export function openPresentationPairingInputModal() {
   const m = ensureModal();
 
   m.hidden = false;
+  bindBackToPairing();
 
   m.innerHTML = `
     <div class="modal-card yanta-presentation-pair-owner-card">

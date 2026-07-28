@@ -22,6 +22,7 @@ import {
 } from '../core.js';
 
 import { t } from '../i18n/index.js';
+import { openBoundOverlay } from '../overlay-history.js';
 
 import { resolveMatrixClient } from '../chat/chat-actions.js';
 
@@ -374,7 +375,13 @@ export function openShareRouter(payload) {
       window.removeEventListener('keydown', onKey, true);
       overlay.remove();
       resolve(result);
+      release?.();
     };
+
+    const release = openBoundOverlay('share-target-picker', {
+      close: () => close(false),
+      isOpen: () => overlay.isConnected,
+    });
 
     const onKey = (e) => {
       if (e.key !== 'Escape') return;

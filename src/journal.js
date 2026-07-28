@@ -24,6 +24,8 @@ import {
   getNoteDoc,
 } from './yjs.js';
 
+import { openBoundOverlay } from './overlay-history.js';
+
 import {
   newFolder,
   openNote,
@@ -389,10 +391,15 @@ function injectCaptureCss() {
 }
 
 let captureOverlay = null;
+let releaseQuickCapture = null;
 
 export function closeQuickCapture() {
   captureOverlay?.remove();
   captureOverlay = null;
+
+  const release = releaseQuickCapture;
+  releaseQuickCapture = null;
+  release?.();
 }
 
 /**
@@ -490,6 +497,12 @@ export function openQuickCapture({
   card.append(head, input, foot);
   overlay.append(card);
   document.body.append(overlay);
+
+  // Device-back closes the capture sheet instead of the app.
+  releaseQuickCapture = openBoundOverlay('quick-capture', {
+    close: closeQuickCapture,
+    isOpen: () => !!captureOverlay?.isConnected,
+  });
 
   input.focus();
 }

@@ -60,17 +60,6 @@ function registerDialogOverlayRoute() {
     },
 
     isOpen: dialogIsOpen,
-
-    surface: () => {
-      const modal = activeDialog?.modal;
-      if (!modal?.isConnected) return null;
-
-      return {
-        element: modal.querySelector('.yanta-dialog-card') || modal,
-        backdrop: modal,
-        mode: 'shrink',
-      };
-    },
   });
 }
 
@@ -587,6 +576,8 @@ function makeModal({
 
   const card = document.createElement('div');
   card.className = 'yanta-dialog-card' + (danger ? ' danger' : '');
+  // The card, not the scrim around it, is what the back gesture moves.
+  card.dataset.backCard = '';
   card.setAttribute('role', 'dialog');
   card.setAttribute('aria-modal', 'true');
   card.setAttribute('aria-label', title || t('dialog.ariaFallback'));

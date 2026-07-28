@@ -88,10 +88,6 @@ function registerExpressionsRoute() {
     },
 
     isOpen: () => !!openPanelRef?.isConnected,
-
-    surface: () => (openPanelRef?.isConnected
-      ? { element: openPanelRef, mode: 'shrink' }
-      : null),
   });
 }
 
@@ -580,6 +576,9 @@ function setActiveTab(panel, tab, context) {
 function buildPanel(context) {
   const panel = el('section', {
     class: 'yanta-chat-expressions',
+    dataset: {
+      backSurface: CHAT_EXPRESSIONS_OVERLAY_ID,
+    },
     role: 'dialog',
     'aria-label': 'Emoji and stickers',
   });

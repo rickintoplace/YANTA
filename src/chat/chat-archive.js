@@ -17,7 +17,10 @@ import {
     chatStore,
   } from './chat-store.js';
   
+  import { openBoundOverlay } from '../overlay-history.js';
+  
   let overlay = null;
+  let releaseArchive = null;
   
   function ensureCss() {
     if (document.getElementById('yanta-chat-archive-css')) return;
@@ -309,6 +312,11 @@ import {
       `;
   
       node.hidden = false;
+  
+      releaseArchive = openBoundOverlay('chat-archive', {
+        close: closeImportedChatArchive,
+        isOpen: () => node.isConnected && !node.hidden,
+      });
     } catch (err) {
       console.warn('[YANTA Chat Archive] Could not open archive', err);
       toast('Could not open chat archive.', 'error');
@@ -320,4 +328,8 @@ import {
    */
   export function closeImportedChatArchive() {
     if (overlay) overlay.hidden = true;
+  
+    const release = releaseArchive;
+    releaseArchive = null;
+    release?.();
   }

@@ -44,6 +44,10 @@ import {
   moveNoteToTrash,
 } from './trash.js';
 
+import {
+  trackDraftNote,
+} from './draft-notes.js';
+
 import { putImageObjectUrl } from './media/object-url-cache.js';
 
 let _navSuppress = false;
@@ -320,6 +324,14 @@ export async function newNote(folderId = null, type = 'markdown') {
 
   state.notes.set(id, note);
   await store.notes.put(note);
+
+  /*
+    Bis der User etwas beiträgt, ist das ein Entwurf:
+    Wird die Note unberührt verlassen, verschwindet sie wieder.
+  */
+  trackDraftNote(id, {
+    title: note.title,
+  });
 
   try {
     await window.yantaSync2?.engine?.observeNote?.(id);

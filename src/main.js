@@ -206,6 +206,9 @@ import {
   setupNoteChrome,
 } from './note-chrome.js';
 import {
+  setupEmptyDraftNoteCleanup,
+} from './draft-notes.js';
+import {
   createSidebarFootActions,
   renderSidebarFootActions,
   createSidebarFootOverflowMenuItems,
@@ -2180,6 +2183,7 @@ async function init() {
   setupAndroidBridge();
   installPredictiveBack();
   installChatSidebarBadgeListener();
+  setupEmptyDraftNoteCleanup();
 
   window.addEventListener('yanta-app-route-change', (e) => {
     const detail = e.detail || {};

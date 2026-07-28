@@ -46,6 +46,8 @@ import {
     trashItemsWithUndo,
     permanentlyDeleteNote,
     permanentlyDeleteFolder,
+    isNoteInTrash,
+    isFolderInTrash,
   } from './trash.js';
   
   const DESKTOP_MQ = window.matchMedia('(min-width: 901px)');
@@ -134,10 +136,23 @@ import {
   
   function keyExists(key) {
     const { kind, id } = parseKey(key);
-  
-    if (kind === 'note') return state.notes.has(id);
-    if (kind === 'folder') return state.folders.has(id);
-  
+
+    /*
+      Getrashte Items bleiben in state, verschwinden aber vom Dashboard.
+      Für die Auswahl zählen sie deshalb als nicht mehr vorhanden — sonst
+      überlebt eine Bulk-Auswahl (inkl. Tray) das Verschieben in den Trash,
+      egal ob per Drag, Karten-Action oder Sync von einem anderen Gerät.
+    */
+    if (kind === 'note') {
+      const note = state.notes.get(id);
+      return !!note && !isNoteInTrash(note);
+    }
+
+    if (kind === 'folder') {
+      const folder = state.folders.get(id);
+      return !!folder && !isFolderInTrash(folder);
+    }
+
     return false;
   }
   

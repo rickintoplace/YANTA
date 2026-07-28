@@ -155,6 +155,23 @@ import {
 } from './calendar-preferences.js';
 
 import {
+  localDateOnlyToDate,
+  dateLikeToLocalDate,
+  calendarEditorDatePlaceholder,
+  calendarEditorInputValue,
+  formatCalendarEditorTimePart,
+  parseCalendarEditorInput,
+  parseCalendarEditorTimePart,
+  splitCalendarEditorSegments,
+} from './calendar-datetime-format.js';
+
+import {
+  attachCalendarDateMask,
+  attachCalendarDateTimeField,
+  createCalendarTimeSegments,
+} from './calendar-datetime-field.js';
+
+import {
   openSidePane,
   closeSidePane,
   isSidePaneOpen,
@@ -650,6 +667,16 @@ const CALENDAR_MOBILE_EVENT_DRAG_MIN_DISTANCE_PX = 14;
 */
 const CALENDAR_CELL_SELECT_LONG_PRESS_MS = 600;
 
+/*
+  Manuelles Scrollen (mobil ersetzt es das per touch-action abgeschaltete
+  native Scrolling): ab dieser Fingergeschwindigkeit (px/ms) gibt es
+  Schwung, der pro Millisekunde um diesen Faktor abklingt.
+*/
+const CALENDAR_SCROLL_FLICK_MIN_VELOCITY = 0.25;
+const CALENDAR_SCROLL_FLICK_DECAY = 0.995;
+
+let calendarScrollMomentumRaf = 0;
+
 let calendarSuppressSelectUntil = 0;
 let calendarSwipeSelectionSuppressed = false;
 
@@ -679,6 +706,12 @@ let calendarModalInputGuardUntil = 0;
 
 let lastCalendarDateTimePickerOptions = null;
 let lastCalendarAppearancePickerOptions = null;
+
+/*
+  Wie im Google-Kalender: die zuletzt gewählte Art der Zeiteingabe
+  (Liste oder Tastatur) bleibt für die Session bestehen.
+*/
+let calendarPickerTimeEntry = 'wheel'; // wheel | keyboard
 
 function calendarNodeIsOpen(node) {
   return !!node && node.hidden === false;
@@ -3445,10 +3478,35 @@ function setupCalendarSwipeNavigation() {
     document.documentElement.classList.remove('yanta-cal-swipe-priming');
   }
 
-  function calendarScrollHost() {
-    return root.closest?.('.yanta-calendar-host') ||
-      root.parentElement ||
-      null;
+  /*
+    Mobil ist natives Scrollen im Kalender per CSS abgeschaltet
+    (touch-action: none), damit Swipe und Long-Press zuverlässig sind.
+    YANTA scrollt deshalb selbst — und zwar in dem Element, das unter
+    dem Finger wirklich scrollt: in den TimeGrid-/DayGrid-/List-Views
+    ist das FullCalendars interner .fc-scroller, nicht der Kalender-Host
+    (der ist overflow: hidden und ignoriert scrollTop komplett).
+  */
+  function elementScrollsVertically(node) {
+    if (!(node instanceof Element)) return false;
+    if (node.scrollHeight - node.clientHeight <= 1) return false;
+
+    const overflowY = getComputedStyle(node).overflowY;
+
+    return overflowY === 'auto' || overflowY === 'scroll';
+  }
+
+  function calendarScrollHostFor(target) {
+    const stop = root.parentElement;
+
+    for (
+      let node = target instanceof Element ? target : null;
+      node && node !== stop;
+      node = node.parentElement
+    ) {
+      if (elementScrollsVertically(node)) return node;
+    }
+
+    return null;
   }
 
   function clearCalendarCellLongPressTimer(p) {
@@ -3901,8 +3959,75 @@ function setupCalendarSwipeNavigation() {
   function applyManualCalendarScroll(p, clientY) {
     if (!p?.scrollEl) return;
 
+    const now = performance.now();
+    const dt = now - (p.lastScrollT ?? p.startT);
+
+    if (dt > 0) {
+      const instant = (clientY - (p.lastScrollY ?? p.startY)) / dt;
+
+      // Geglättet, damit ein einzelner Ausreißer keinen Flick auslöst.
+      p.scrollVelocity =
+        p.scrollVelocity == null
+          ? instant
+          : p.scrollVelocity * 0.6 + instant * 0.4;
+
+      p.lastScrollT = now;
+      p.lastScrollY = clientY;
+    }
+
     const dy = clientY - p.startY;
     p.scrollEl.scrollTop = p.startScrollTop - dy;
+  }
+
+  function stopCalendarScrollMomentum() {
+    if (!calendarScrollMomentumRaf) return;
+
+    cancelAnimationFrame(calendarScrollMomentumRaf);
+    calendarScrollMomentumRaf = 0;
+  }
+
+  /*
+    Ohne natives Scrolling gäbe es auch keinen Schwung. Der Flick wird
+    deshalb nachgebaut: exponentiell abklingende Geschwindigkeit, Stopp
+    am Rand oder sobald der Kalender die Geste erneut übernimmt.
+  */
+  function startCalendarScrollMomentum(p) {
+    stopCalendarScrollMomentum();
+
+    const el = p?.scrollEl;
+    const velocity = p?.scrollVelocity || 0;
+
+    if (!el || !el.isConnected) return;
+    if (Math.abs(velocity) < CALENDAR_SCROLL_FLICK_MIN_VELOCITY) return;
+
+    // Ein Halt vor dem Loslassen darf keinen Schwung erzeugen.
+    if (performance.now() - (p.lastScrollT ?? 0) > 90) return;
+
+    let v = Math.max(-4, Math.min(4, velocity));
+    let last = performance.now();
+
+    const tick = (now) => {
+      const dt = Math.min(32, now - last);
+      last = now;
+
+      const before = el.scrollTop;
+      el.scrollTop = before - v * dt;
+
+      v *= CALENDAR_SCROLL_FLICK_DECAY ** dt;
+
+      if (
+        !el.isConnected ||
+        Math.abs(v) < 0.02 ||
+        Math.abs(el.scrollTop - before) < 0.5
+      ) {
+        calendarScrollMomentumRaf = 0;
+        return;
+      }
+
+      calendarScrollMomentumRaf = requestAnimationFrame(tick);
+    };
+
+    calendarScrollMomentumRaf = requestAnimationFrame(tick);
   }
 
   function pointerTypeSupportedForCalendarSwipe(e) {
@@ -3946,23 +4071,30 @@ function setupCalendarSwipeNavigation() {
     pointerType = '',
     target,
   }) {
+    stopCalendarScrollMomentum();
+
     if (!fc) return;
     if (!calendarMobile()) return;
-    if (!calendarViewSupportsHorizontalAnimation()) return;
     if (calendarNavAnimating) return;
     if (calendarInteractiveSwipeState) return;
 
     if (pointerType === 'mouse') return;
 
-    if (
-      pointerType === 'touch' &&
-      (
-        clientX <= CALENDAR_SWIPE_EDGE_GUARD_PX ||
-        clientX >= window.innerWidth - CALENDAR_SWIPE_EDGE_GUARD_PX
-      )
-    ) {
-      return;
-    }
+    /*
+      Blättern per Wisch gibt es nur in animierbaren Views und nicht am
+      Display-Rand (dort gehört die horizontale Geste dem System).
+      Vertikales Scrollen bleibt in beiden Fällen erlaubt — sonst wäre
+      z. B. die Listenansicht gar nicht scrollbar.
+    */
+    const canSwipe =
+      calendarViewSupportsHorizontalAnimation() &&
+      !(
+        pointerType === 'touch' &&
+        (
+          clientX <= CALENDAR_SWIPE_EDGE_GUARD_PX ||
+          clientX >= window.innerWidth - CALENDAR_SWIPE_EDGE_GUARD_PX
+        )
+      );
 
     if (!target || interactiveTargetBlocked(target)) {
       calendarSwipePointer = null;
@@ -3976,7 +4108,7 @@ function setupCalendarSwipeNavigation() {
       return;
     }
 
-    const scrollEl = calendarScrollHost();
+    const scrollEl = calendarScrollHostFor(target);
 
     calendarSwipeToken++;
 
@@ -3995,8 +4127,13 @@ function setupCalendarSwipeNavigation() {
       lastX: clientX,
       lastY: clientY,
 
+      canSwipe,
+
       scrollEl,
       startScrollTop: scrollEl?.scrollTop || 0,
+      scrollVelocity: null,
+      lastScrollY: clientY,
+      lastScrollT: null,
 
       startT: performance.now(),
 
@@ -4144,6 +4281,7 @@ function setupCalendarSwipeNavigation() {
         zuverlässig den Kalender blättert.
       */
       if (
+        p.canSwipe &&
         absX >= CALENDAR_SWIPE_CLAIM_PX &&
         absX > absY * CALENDAR_SWIPE_CLAIM_RATIO
       ) {
@@ -4170,7 +4308,7 @@ function setupCalendarSwipeNavigation() {
       /*
         Vertikale Absicht.
       */
-      if (absY >= 8 && absY > absX * 1.08) {
+      if (p.scrollEl && absY >= 8 && absY > absX * 1.08) {
         clearCalendarCellLongPressTimer(p);
         clearMobileEventDragTimer(p);
 
@@ -4385,6 +4523,10 @@ if (isCleanStoredEventTap) {
     if (mode !== 'swipe') {
       cleanupInteractiveCalendarSwipe();
       cleanupMobileEventDrag(p);
+
+      if (mode === 'manual-scroll') {
+        startCalendarScrollMomentum(p);
+      }
 
       if (
         mode === 'manual-scroll' ||
@@ -4806,33 +4948,6 @@ function fromLocalInput(value, allDay = false) {
   return new Date(value).toISOString();
 }
 
-function isDateOnlyString(value) {
-  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value.trim());
-}
-
-function localDateOnlyToDate(value) {
-  if (!isDateOnlyString(value)) return null;
-
-  const [y, m, d] = value.split('-').map(Number);
-  const date = new Date(y, m - 1, d, 0, 0, 0, 0);
-
-  return Number.isNaN(date.getTime()) ? null : date;
-}
-
-function dateLikeToLocalDate(value) {
-  if (!value) return null;
-
-  if (isDateOnlyString(value)) {
-    return localDateOnlyToDate(value);
-  }
-
-  const d = value instanceof Date
-    ? value
-    : new Date(value);
-
-  return Number.isNaN(d.getTime()) ? null : d;
-}
-
 function sameLocalDay(a, b) {
   const da = dateLikeToLocalDate(a);
   const db = dateLikeToLocalDate(b);
@@ -4959,254 +5074,6 @@ function calendarEditorRangeIsValid({
   return {
     ok: true,
   };
-}
-
-function calendarEditorDatePlaceholder(allDay = false) {
-  const prefs = getCalendarPreferences();
-  const date = prefs.dateFormat || 'DD/MM/YYYY';
-
-  if (allDay) return date;
-
-  return prefs.timeFormat === '12'
-    ? `${date} 2:30 PM`
-    : `${date} 14:30`;
-}
-
-function formatCalendarEditorDatePart(date, prefs = getCalendarPreferences()) {
-  const d = dateLikeToLocalDate(date);
-  if (!d) return '';
-
-  const day = String(d.getDate()).padStart(2, '0');
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const year = String(d.getFullYear());
-
-  switch (prefs.dateFormat) {
-    case 'DD.MM.YYYY':
-      return `${day}.${month}.${year}`;
-
-    case 'YYYY-MM-DD':
-      return `${year}-${month}-${day}`;
-
-    case 'MM/DD/YYYY':
-      return `${month}/${day}/${year}`;
-
-    case 'DD/MM/YYYY':
-    default:
-      return `${day}/${month}/${year}`;
-  }
-}
-
-function formatCalendarEditorTimePart(date, prefs = getCalendarPreferences()) {
-  const d = dateLikeToLocalDate(date);
-  if (!d) return '';
-
-  const h = d.getHours();
-  const m = String(d.getMinutes()).padStart(2, '0');
-
-  if (prefs.timeFormat === '12') {
-    const suffix = h >= 12 ? 'PM' : 'AM';
-    const hour12 = h % 12 || 12;
-    return `${hour12}:${m} ${suffix}`;
-  }
-
-  return `${String(h).padStart(2, '0')}:${m}`;
-}
-
-function calendarEditorInputValue(iso, allDay = false) {
-  if (!iso) return '';
-
-  const d = dateLikeToLocalDate(iso);
-  if (!d) return '';
-
-  const datePart = formatCalendarEditorDatePart(d);
-
-  if (allDay) return datePart;
-
-  return `${datePart} ${formatCalendarEditorTimePart(d)}`;
-}
-
-function normalizeTwoDigitYear(y) {
-  const n = Number(y);
-  if (!Number.isFinite(n)) return NaN;
-
-  if (String(y).length <= 2) {
-    return n >= 70 ? 1900 + n : 2000 + n;
-  }
-
-  return n;
-}
-
-function parseCalendarEditorDatePart(raw, prefs = getCalendarPreferences()) {
-  let s = String(raw || '').trim();
-
-  if (!s) return null;
-
-  // Allows copy/paste like "Sunday, 30/05/2026"
-  // but deliberately does not attempt full natural-language month parsing.
-  s = s.replace(/^[^\d]+,\s*/, '').trim();
-
-  // Always accept ISO.
-  let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
-
-  if (m) {
-    const y = Number(m[1]);
-    const mo = Number(m[2]);
-    const d = Number(m[3]);
-
-    return validYmd(y, mo, d) ? { y, mo, d } : null;
-  }
-
-  // Accept numeric separators: 30/05/2026, 30.05.2026, 05-30-2026
-  m = s.match(/^(\d{1,2})[./-](\d{1,2})[./-](\d{2,4})$/);
-
-  if (!m) return null;
-
-  let a = Number(m[1]);
-  let b = Number(m[2]);
-  const y = normalizeTwoDigitYear(m[3]);
-
-  let d;
-  let mo;
-
-  if (prefs.dateFormat === 'MM/DD/YYYY') {
-    mo = a;
-    d = b;
-  } else {
-    // Default and ISO-ish European behavior:
-    // DD/MM/YYYY, DD.MM.YYYY
-    d = a;
-    mo = b;
-  }
-
-  // Safety: if the configured interpretation is impossible but the
-  // reverse is possible, accept the reverse. Example: 13/05 in MM/DD.
-  if (!validYmd(y, mo, d) && validYmd(y, d, mo)) {
-    const tmp = d;
-    d = mo;
-    mo = tmp;
-  }
-
-  return validYmd(y, mo, d) ? { y, mo, d } : null;
-}
-
-function validYmd(y, mo, d) {
-  if (!Number.isInteger(y) || !Number.isInteger(mo) || !Number.isInteger(d)) return false;
-  if (y < 1000 || y > 9999) return false;
-  if (mo < 1 || mo > 12) return false;
-  if (d < 1 || d > 31) return false;
-
-  const dt = new Date(y, mo - 1, d);
-
-  return (
-    dt.getFullYear() === y &&
-    dt.getMonth() === mo - 1 &&
-    dt.getDate() === d
-  );
-}
-
-function parseCalendarEditorTimePart(raw, prefs = getCalendarPreferences()) {
-  const s = String(raw || '').trim().toLowerCase();
-
-  if (!s) return null;
-
-  const m = s.match(/^(\d{1,2})(?::(\d{2}))?\s*([ap]\.?m\.?)?$/i);
-  if (!m) return null;
-
-  let h = Number(m[1]);
-  const min = m[2] == null ? 0 : Number(m[2]);
-  const ampm = (m[3] || '').replace(/\./g, '').toLowerCase();
-
-  if (!Number.isInteger(h) || !Number.isInteger(min)) return null;
-  if (min < 0 || min > 59) return null;
-
-  if (ampm) {
-    if (h < 1 || h > 12) return null;
-
-    if (ampm === 'pm' && h !== 12) h += 12;
-    if (ampm === 'am' && h === 12) h = 0;
-  } else {
-    if (h < 0 || h > 23) return null;
-  }
-
-  return {
-    h,
-    min,
-  };
-}
-
-function splitCalendarEditorDateTime(raw, allDay = false) {
-  const s = String(raw || '')
-    .trim()
-    .replace(/\s+/g, ' ')
-    .replace('T', ' ');
-
-  if (!s) {
-    return {
-      datePart: '',
-      timePart: '',
-    };
-  }
-
-  if (allDay) {
-    return {
-      datePart: s,
-      timePart: '',
-    };
-  }
-
-  // Match a time at the end:
-  // 30/05/2026 14:30
-  // 30/05/2026, 14:30
-  // 30/05/2026 2:30 PM
-  // 30/05/2026 2 PM
-  const m = s.match(/^(.*?)(?:,?\s+)(\d{1,2}(?::\d{2})?\s*(?:[ap]\.?m\.?)?)$/i);
-
-  if (!m) {
-    return {
-      datePart: s,
-      timePart: '',
-    };
-  }
-
-  return {
-    datePart: m[1].trim(),
-    timePart: m[2].trim(),
-  };
-}
-
-function parseCalendarEditorInput(value, allDay = false) {
-  const prefs = getCalendarPreferences();
-  const parts = splitCalendarEditorDateTime(value, allDay);
-
-  const date = parseCalendarEditorDatePart(parts.datePart, prefs);
-  if (!date) return null;
-
-  let time = {
-    h: 0,
-    min: 0,
-  };
-
-  if (!allDay) {
-    time = parseCalendarEditorTimePart(parts.timePart, prefs);
-
-    if (!time) {
-      return null;
-    }
-  }
-
-  const d = new Date(
-    date.y,
-    date.mo - 1,
-    date.d,
-    time.h,
-    time.min,
-    0,
-    0
-  );
-
-  if (Number.isNaN(d.getTime())) return null;
-
-  return d.toISOString();
 }
 
 // ============================================================
@@ -5371,9 +5238,18 @@ function openCalendarDateTimePicker({
   let viewYear = selected.getFullYear();
   let viewMonth = selected.getMonth();
   let mode = 'date'; // date | time
+
+  /*
+    Nach dem Umschalten auf Tastatur-Eingabe soll das Stundenfeld direkt
+    den Fokus (und mobil die Zifferntastatur) bekommen — aber nur dann,
+    nicht bei jedem Re-Render.
+  */
+  let focusTimeEntry = false;
+
   const render = () => {
     const currentPrefs = getCalendarPreferences();
     const hour12 = currentPrefs.timeFormat === '12';
+    const keyboardTimeEntry = calendarPickerTimeEntry === 'keyboard';
     const selectedHour = selected.getHours();
     const selectedMinute = selected.getMinutes();
     const hour12Value = selectedHour % 12 || 12;
@@ -5487,25 +5363,35 @@ function openCalendarDateTimePicker({
                   </div>
                 `
                 : `
-                  <div class="yanta-dtp-time-display">
-                    ${escapeHtml(formatCalendarEditorTimePart(selected))}
-                  </div>
-                  <div class="yanta-dtp-time-wheels ${hour12 ? 'is-12h' : ''}">
-                    <div class="yanta-dtp-wheel" data-wheel="hour">
-                      <div class="yanta-dtp-wheel-label">Hour</div>
-                      ${hoursHtml}
-                    </div>
-                    <div class="yanta-dtp-wheel" data-wheel="minute">
-                      <div class="yanta-dtp-wheel-label">Minute</div>
-                      ${minutesHtml}
-                    </div>
-                    ${hour12 ? `
-                      <div class="yanta-dtp-ampm">
-                        <button type="button" class="${!isPm ? 'selected' : ''}" data-ydtp-ampm="am">AM</button>
-                        <button type="button" class="${isPm ? 'selected' : ''}" data-ydtp-ampm="pm">PM</button>
-                      </div>
-                    ` : ''}
-                  </div>
+                  ${
+                    keyboardTimeEntry
+                      ? `<div class="yanta-dtp-time-keyboard" data-ydtp-keyboard></div>`
+                      : `
+                        <div class="yanta-dtp-time-display">
+                          ${escapeHtml(formatCalendarEditorTimePart(selected))}
+                        </div>
+                        <div class="yanta-dtp-time-wheels ${hour12 ? 'is-12h' : ''}">
+                          <div class="yanta-dtp-wheel" data-wheel="hour">
+                            <div class="yanta-dtp-wheel-label">Hour</div>
+                            ${hoursHtml}
+                          </div>
+                          <div class="yanta-dtp-wheel" data-wheel="minute">
+                            <div class="yanta-dtp-wheel-label">Minute</div>
+                            ${minutesHtml}
+                          </div>
+                          ${hour12 ? `
+                            <div class="yanta-dtp-ampm">
+                              <button type="button" class="${!isPm ? 'selected' : ''}" data-ydtp-ampm="am">AM</button>
+                              <button type="button" class="${isPm ? 'selected' : ''}" data-ydtp-ampm="pm">PM</button>
+                            </div>
+                          ` : ''}
+                        </div>
+                      `
+                  }
+                  <button type="button" class="yanta-dtp-entry-toggle" data-ydtp-entry>
+                    ${lucide(keyboardTimeEntry ? 'clock' : 'keyboard', 14)}
+                    ${keyboardTimeEntry ? 'Pick from list' : 'Enter time'}
+                  </button>
                 `
             }
           </section>
@@ -5538,6 +5424,54 @@ function openCalendarDateTimePicker({
       }
       render();
     });
+    modal.querySelector('[data-ydtp-entry]')?.addEventListener('click', () => {
+      calendarPickerTimeEntry = keyboardTimeEntry ? 'wheel' : 'keyboard';
+      focusTimeEntry = !keyboardTimeEntry;
+      render();
+    });
+
+    /*
+      Tastatur-Modus: dieselben Segmente wie im Editor-Feld, damit
+      Stunde/Minute ohne Doppelpunkt-Taste eingebbar sind.
+    */
+    const keyboardHost = modal.querySelector('[data-ydtp-keyboard]');
+
+    if (keyboardHost) {
+      const segments = createCalendarTimeSegments({
+        hour12,
+        value: splitCalendarEditorSegments(
+          calendarEditorInputValue(selected, false)
+        ),
+        onInput: ({ hour, minute, meridiem }) => {
+          const parsed = parseCalendarEditorTimePart(
+            `${hour}:${minute || '00'} ${meridiem}`.trim()
+          );
+
+          if (!parsed) return;
+
+          selected.setHours(parsed.h, parsed.min, 0, 0);
+
+          const valueEl = modal.querySelector('.yanta-dtp-value');
+
+          if (valueEl) {
+            valueEl.textContent = formatCalendarDateTime(selected, {
+              allDay: isAllDay,
+              editor: true,
+              includeWeekday: true,
+            });
+          }
+        },
+      });
+
+      segments.el.classList.add('is-large');
+      keyboardHost.append(segments.el);
+
+      if (focusTimeEntry) {
+        focusTimeEntry = false;
+        requestAnimationFrame(() => segments.focus());
+      }
+    }
+
     modal.querySelectorAll('[data-ydtp-month]').forEach((btn) => {
       btn.addEventListener('click', () => {
         const delta = Number(btn.dataset.ydtpMonth || 0);
@@ -6270,9 +6204,15 @@ function setupRecurrenceEditor(modal, ev = {}) {
     .querySelector('[data-field="recurrenceMonthMode"]')
     ?.addEventListener('change', refresh);
 
-  modal
-    .querySelector('[data-field="recurrenceUntil"]')
-    ?.addEventListener('input', refresh);
+  const untilEl = modal.querySelector('[data-field="recurrenceUntil"]');
+
+  if (untilEl) {
+    // Gleiche Ziffern-Maske wie im Start/End-Feld: kein "/" nötig.
+    attachCalendarDateMask(untilEl, {
+      onInput: refresh,
+      onChange: refresh,
+    });
+  }
 
   modal
     .querySelector('[data-field="recurrenceCount"]')
@@ -11220,43 +11160,17 @@ function openEventEditor(input = {}) {
         </label>
 
         <div class="yanta-calendar-date-grid">
-          <label>
-            Start
-            <div class="yanta-calendar-date-input-row">
-              <input
-                class="text-input"
-                data-field="start"
-                type="text"
-                inputmode="numeric"
-                autocomplete="off"
-                spellcheck="false"
-                placeholder="${escapeAttr(calendarEditorDatePlaceholder(ev.allDay))}"
-                value="${escapeAttr(calendarEditorInputValue(ev.start, ev.allDay))}" />
-              <button type="button" class="icon-btn" data-date-picker="start" title="Pick start date/time">
-                ${lucide('calendar-clock', 16)}
-              </button>
-            </div>
+          <div class="yanta-calendar-date-cell">
+            <span class="yanta-calendar-date-label">Start</span>
+            <div class="yanta-calendar-date-input-row" data-datetime-field="start"></div>
             <div class="yanta-calendar-date-preview" data-date-preview="start"></div>
-          </label>
+          </div>
 
-          <label>
-            End
-            <div class="yanta-calendar-date-input-row">
-              <input
-                class="text-input"
-                data-field="end"
-                type="text"
-                inputmode="numeric"
-                autocomplete="off"
-                spellcheck="false"
-                placeholder="${escapeAttr(calendarEditorDatePlaceholder(ev.allDay))}"
-                value="${escapeAttr(calendarEditorInputValue(ev.end, ev.allDay))}" />
-              <button type="button" class="icon-btn" data-date-picker="end" title="Pick end date/time">
-                ${lucide('calendar-clock', 16)}
-              </button>
-            </div>
+          <div class="yanta-calendar-date-cell">
+            <span class="yanta-calendar-date-label">End</span>
+            <div class="yanta-calendar-date-input-row" data-datetime-field="end"></div>
             <div class="yanta-calendar-date-preview" data-date-preview="end"></div>
-          </label>
+          </div>
         </div>
 
       ${recurrenceEditorHtml(ev)}
@@ -11294,8 +11208,49 @@ function openEventEditor(input = {}) {
   `;
 
   const allDayInput = modal.querySelector('[data-field="allDay"]');
-  const startInput = modal.querySelector('[data-field="start"]');
-  const endInput = modal.querySelector('[data-field="end"]');
+
+  /*
+    Start/End sind segmentierte Felder (Datum + Stunde + Minute).
+    Sie halten den kanonischen Textwert in einem versteckten
+    [data-field="start"|"end"] Input, damit alles Weitere unverändert
+    darauf lesen kann.
+  */
+  const startField = attachCalendarDateTimeField(
+    modal.querySelector('[data-datetime-field="start"]'),
+    {
+      name: 'start',
+      label: 'Start',
+      value: calendarEditorInputValue(ev.start, ev.allDay),
+      allDay: !!ev.allDay,
+      pickerTitle: 'Pick start date/time',
+      onInput: () => updateDatePreviews(),
+      onChange: () => {
+        autoFillEndFromStart();
+        updateDatePreviews();
+      },
+      onPicker: () => openPickerForField('start'),
+    }
+  );
+
+  const endField = attachCalendarDateTimeField(
+    modal.querySelector('[data-datetime-field="end"]'),
+    {
+      name: 'end',
+      label: 'End',
+      value: calendarEditorInputValue(ev.end, ev.allDay),
+      allDay: !!ev.allDay,
+      pickerTitle: 'Pick end date/time',
+      onInput: () => {
+        endTouched = !!endField.value.trim();
+        updateDatePreviews();
+      },
+      onChange: () => {
+        endTouched = !!endField.value.trim();
+        updateDatePreviews();
+      },
+      onPicker: () => openPickerForField('end'),
+    }
+  );
 
   /*
     Location stays a plain text field; the enhancement only adds geocoding
@@ -11429,19 +11384,19 @@ function openEventEditor(input = {}) {
     });
   });
 
-  let endTouched = !!endInput?.value?.trim();
+  let endTouched = !!endField.value.trim();
 
   const updateDatePreviews = () => {
     const allDay = !!allDayInput?.checked;
 
-    const startIso = parseCalendarEditorInput(startInput?.value, allDay);
-    const endIso = parseCalendarEditorInput(endInput?.value, allDay);
+    const startIso = parseCalendarEditorInput(startField.value, allDay);
+    const endIso = parseCalendarEditorInput(endField.value, allDay);
 
     const startPreview = modal.querySelector('[data-date-preview="start"]');
     const endPreview = modal.querySelector('[data-date-preview="end"]');
 
     if (startPreview) {
-      startPreview.textContent = startInput?.value && !startIso
+      startPreview.textContent = startField.value && !startIso
         ? `Invalid date · expected ${calendarEditorDatePlaceholder(allDay)}`
         : startIso
           ? formatCalendarDateTime(startIso, {
@@ -11453,7 +11408,7 @@ function openEventEditor(input = {}) {
     }
 
     if (endPreview) {
-      endPreview.textContent = endInput?.value && !endIso
+      endPreview.textContent = endField.value && !endIso
         ? `Invalid date · expected ${calendarEditorDatePlaceholder(allDay)}`
         : endIso
           ? formatCalendarDateTime(endIso, {
@@ -11470,8 +11425,8 @@ function openEventEditor(input = {}) {
       allDay,
     });
 
-    const endHasValue = !!endInput?.value?.trim();
-    const startInvalid = !!startInput?.value && !startIso;
+    const endHasValue = !!endField.value.trim();
+    const startInvalid = !!startField.value && !startIso;
     const endInvalid = endHasValue && (!endIso || !rangeValidation.ok);
 
     startPreview?.classList.toggle('invalid', startInvalid);
@@ -11487,13 +11442,13 @@ function openEventEditor(input = {}) {
     if (allDay) return;
     if (endTouched) return;
 
-    const startIso = parseCalendarEditorInput(startInput.value, false);
+    const startIso = parseCalendarEditorInput(startField.value, false);
     if (!startIso) return;
 
     const endIso = addMinutesIso(startIso, 30);
     if (!endIso) return;
 
-    endInput.value = calendarEditorInputValue(endIso, false);
+    endField.value = calendarEditorInputValue(endIso, false);
     updateDatePreviews();
   };
 
@@ -11501,15 +11456,8 @@ function openEventEditor(input = {}) {
     const allDay = !!modal.querySelector('[data-field="allDay"]')?.checked;
     const nextRecurrence = readRecurrenceFromModal(modal);
 
-    const parsedStart = parseCalendarEditorInput(
-      modal.querySelector('[data-field="start"]').value,
-      allDay
-    );
-
-    const parsedEnd = parseCalendarEditorInput(
-      modal.querySelector('[data-field="end"]').value,
-      allDay
-    );
+    const parsedStart = parseCalendarEditorInput(startField.value, allDay);
+    const parsedEnd = parseCalendarEditorInput(endField.value, allDay);
 
     const appearanceTouched =
       modal.querySelector('[data-field="appearanceTouched"]')?.value === '1';
@@ -11566,10 +11514,10 @@ function openEventEditor(input = {}) {
       return false;
     }
 
-    const endInputRaw = modal.querySelector('[data-field="end"]').value.trim();
-    const parsedEnd = parseCalendarEditorInput(endInputRaw, allDay);
+    const endRaw = endField.value.trim();
+    const parsedEnd = parseCalendarEditorInput(endRaw, allDay);
 
-    if (endInputRaw && !parsedEnd) {
+    if (endRaw && !parsedEnd) {
       toast(`End date invalid · expected ${calendarEditorDatePlaceholder(allDay)}`, 'error');
       updateDatePreviews();
       return false;
@@ -11597,11 +11545,11 @@ function openEventEditor(input = {}) {
     return true;
   };
 
-  const openPickerForInput = (which) => {
-    const inputEl = which === 'start' ? startInput : endInput;
+  const openPickerForField = (which) => {
+    const field = which === 'start' ? startField : endField;
     const allDay = !!allDayInput?.checked;
     const parsed =
-      parseCalendarEditorInput(inputEl.value, allDay) ||
+      parseCalendarEditorInput(field.value, allDay) ||
       (which === 'start' ? ev.start : ev.end) ||
       ev.start ||
       new Date().toISOString();
@@ -11627,7 +11575,7 @@ function openEventEditor(input = {}) {
         if (which === 'end') {
           endTouched = !!iso;
         }
-        inputEl.value = iso
+        field.value = iso
           ? calendarEditorInputValue(iso, nextAllDay)
           : '';
         if (which === 'start') {
@@ -11638,34 +11586,6 @@ function openEventEditor(input = {}) {
     });
   };
 
-  modal.querySelector('[data-date-picker="start"]')?.addEventListener('click', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    openPickerForInput('start');
-  });
-
-  modal.querySelector('[data-date-picker="end"]')?.addEventListener('click', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    openPickerForInput('end');
-  });
-
-  startInput?.addEventListener('input', updateDatePreviews);
-  startInput?.addEventListener('change', () => {
-    autoFillEndFromStart();
-    updateDatePreviews();
-  });
-
-  endInput?.addEventListener('input', () => {
-    endTouched = !!endInput.value.trim();
-    updateDatePreviews();
-  });
-
-  endInput?.addEventListener('change', () => {
-    endTouched = !!endInput.value.trim();
-    updateDatePreviews();
-  });
-
   allDayInput?.addEventListener('change', () => {
     const allDay = allDayInput.checked;
     const previousAllDay = !allDay;
@@ -11675,18 +11595,19 @@ function openEventEditor(input = {}) {
       Uhrzeit nach einem früheren All-Day-Toggle), trotzdem übernehmen.
     */
     const startIso =
-      parseCalendarEditorInput(startInput.value, previousAllDay) ||
-      parseCalendarEditorInput(startInput.value, allDay) ||
+      parseCalendarEditorInput(startField.value, previousAllDay) ||
+      parseCalendarEditorInput(startField.value, allDay) ||
       ev.start;
     const endIso =
-      parseCalendarEditorInput(endInput.value, previousAllDay) ||
-      parseCalendarEditorInput(endInput.value, allDay) ||
+      parseCalendarEditorInput(endField.value, previousAllDay) ||
+      parseCalendarEditorInput(endField.value, allDay) ||
       ev.end;
-    startInput.placeholder = calendarEditorDatePlaceholder(allDay);
-    endInput.placeholder = calendarEditorDatePlaceholder(allDay);
+    const endHadValue = !!endField.value.trim();
+    startField.allDay = allDay;
+    endField.allDay = allDay;
     if (!allDay) {
       const nextStartIso = applyCurrentDefaultTimeToDate(startIso);
-      startInput.value = calendarEditorInputValue(nextStartIso, false);
+      startField.value = calendarEditorInputValue(nextStartIso, false);
       /*
         Nach All-Day -> Timed darf im End-Feld nie ein reines Datum ohne
         Uhrzeit stehen bleiben (war vorher als "Invalid date" markiert).
@@ -11694,7 +11615,7 @@ function openEventEditor(input = {}) {
         - End gleicher Tag: Start + 30 min.
         - End mehrtägig: End-Datum behalten, Uhrzeit vom Start übernehmen.
       */
-      const endHasValue = !!endInput.value.trim();
+      const endHasValue = endHadValue;
       let nextEndIso = addMinutesIso(nextStartIso, 30);
       if (endHasValue && endIso && !sameLocalDay(nextStartIso, endIso)) {
         const endDate = dateLikeToLocalDate(endIso);
@@ -11705,12 +11626,12 @@ function openEventEditor(input = {}) {
         }
       }
       if ((endHasValue || !endTouched) && nextEndIso) {
-        endInput.value = calendarEditorInputValue(nextEndIso, false);
+        endField.value = calendarEditorInputValue(nextEndIso, false);
         endTouched = endHasValue;
       }
     } else {
-      startInput.value = calendarEditorInputValue(startIso, true);
-      endInput.value = endIso ? calendarEditorInputValue(endIso, true) : '';
+      startField.value = calendarEditorInputValue(startIso, true);
+      endField.value = endIso ? calendarEditorInputValue(endIso, true) : '';
     }
     updateDatePreviews();
   });

@@ -8,6 +8,7 @@ import {
   safeCssColor,
   toast,
 } from './core.js';
+import { t as i18n } from './i18n/index.js';
 
 import {
   openNote,
@@ -336,7 +337,7 @@ import { EVT, emit, shouldIgnoreInvisibleSyncEvent } from './events.js';
         'yanta-dash-preview-loading' +
         (media ? ' media' : '') +
         (event ? ' event' : ''),
-      'aria-label': 'Loading note preview',
+      'aria-label': i18n('dashboard.loadingPreview'),
     });
 
     if (event) {
@@ -359,7 +360,7 @@ import { EVT, emit, shouldIgnoreInvisibleSyncEvent } from './events.js';
   function renderDashboardFolderMiniSkeleton() {
     return el('div', {
       class: 'yanta-dash-folder-mini-loading',
-      'aria-label': 'Loading note preview',
+      'aria-label': i18n('dashboard.loadingPreview'),
     },
       el('span'),
       el('span'),
@@ -824,8 +825,8 @@ import { EVT, emit, shouldIgnoreInvisibleSyncEvent } from './events.js';
   }
   
   function itemTitle(item) {
-    if (item.kind === 'note') return item.note.title || 'Untitled';
-    return item.folder.name || 'Folder';
+    if (item.kind === 'note') return item.note.title || i18n('note.untitled');
+    return item.folder.name || i18n('items.folderFallback');
   }
   
   function itemIcon(item) {
@@ -2063,8 +2064,8 @@ export function showDashboardPane({
   const body = openSidePane({
     kind: 'dashboard',
     title: folderId && state.folders.has(folderId)
-      ? state.folders.get(folderId).name || 'Dashboard'
-      : 'Dashboard',
+      ? state.folders.get(folderId).name || i18n('dashboard.title')
+      : i18n('dashboard.title'),
     icon: 'layout-dashboard',
     className: 'yanta-dashboard-side-pane',
     onClose: () => {
@@ -2520,7 +2521,7 @@ function renderDashboardHeader() {
 
   const menuBtn = el('button', {
     class: 'icon-btn yanta-dashboard-icon-btn yanta-dashboard-menu-btn',
-    title: 'Open sidebar',
+    title: i18n('dashboard.openSidebar'),
     onclick: () => {
       window.dispatchEvent(new CustomEvent('yanta-open-mobile-sidebar'));
     },
@@ -2559,8 +2560,8 @@ function renderDashboardHeader() {
     role: 'button',
     tabindex: '0',
     title: dashboard.folderId
-      ? 'Tap to rename folder'
-      : 'Tap to set your display name',
+      ? i18n('dashboard.tapToRename')
+      : i18n('dashboard.tapToSetName'),
 
     onclick: onTitleActivate,
 
@@ -2570,7 +2571,7 @@ function renderDashboardHeader() {
       }
     },
   }, dashboard.folderId
-    ? (path.at(-1)?.name || 'Folder')
+    ? (path.at(-1)?.name || i18n('items.folderFallback'))
     : currentGreeting({
         // The name resolves async (settings/Matrix) — patch in place.
         onUpdate: (text) => {
@@ -2594,14 +2595,14 @@ function renderDashboardHeader() {
       type: 'button',
       'data-dashboard-folder-crumb': f.id,
       onclick: () => navigateDashboardFolder(f.id),
-    }, f.name || 'Folder'));
+    }, f.name || i18n('items.folderFallback')));
   }
 
   titleWrap.append(title, crumb);
 
   const searchBtn = el('button', {
     class: 'icon-btn yanta-dashboard-icon-btn',
-    title: 'Search',
+    title: i18n('graph.controls.search'),
     onclick: () => {
       window.dispatchEvent(new CustomEvent('yanta-expand-sidebar-search'));
     },
@@ -2611,7 +2612,7 @@ function renderDashboardHeader() {
 
   const widgetsBtn = el('button', {
     class: 'icon-btn yanta-dashboard-icon-btn',
-    title: 'Manage widgets',
+    title: i18n('dashboard.manageWidgets'),
     onclick: () => {
       openDashboardWidgetManager().catch((err) => {
         console.error(err);
@@ -2623,7 +2624,7 @@ function renderDashboardHeader() {
 
   const newBtn = el('button', {
     class: 'btn primary yanta-dashboard-new-btn',
-    title: 'Create',
+    title: i18n('dashboard.create'),
     onclick: (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -2675,7 +2676,7 @@ function renderDashboardHeader() {
         await newNote(dashboard.folderId || null);
         hideDashboard({ push: false });
       },
-    }, 'Create note');
+    }, i18n('graph.prompt.createNote'));
   
     box.append(btn);
   
@@ -2697,7 +2698,7 @@ function renderDashboardHeader() {
         await newNote(dashboard.folderId || null);
         hideDashboard({ push: false });
       },
-    }, 'New note');
+    }, i18n('graph.prompt.newNoteTitle'));
   
     box.append(btn);
   
@@ -2822,7 +2823,7 @@ function renderCard(item, { section }) {
     if (note.pinned) {
       const pin = el('span', {
         class: 'yanta-dash-note-corner-pin',
-        title: 'Pinned',
+        title: i18n('tree.note.pinned'),
       });
   
       pin.innerHTML = lucide('pin', 13);
@@ -2832,7 +2833,7 @@ function renderCard(item, { section }) {
     if (isPublicShareActive(publicShareStateForNote(note.id))) {
       const pub = el('span', {
         class: 'yanta-dash-note-corner-public',
-        title: 'Public link active',
+        title: i18n('tree.note.publicLinkActive'),
       });
 
       pub.innerHTML = lucide('share-2', 14);
@@ -2859,13 +2860,13 @@ function renderCardActions(item) {
     actions.append(
       iconActionButton({
         icon: 'folder-open',
-        title: 'Open',
+        title: i18n('tree.menu.open'),
         onClick: () => navigateDashboardFolder(item.folder.id),
       }),
 
       iconActionButton({
         icon: 'pencil',
-        title: 'Rename',
+        title: i18n('graph.prompt.renameConfirm'),
         onClick: () => {
           const card = findDashboardFolderCard(item.folder.id);
           renameDashboardFolder(item.folder.id, card);
@@ -2874,7 +2875,7 @@ function renderCardActions(item) {
 
       iconActionButton({
         icon: 'palette',
-        title: 'Icon & color',
+        title: i18n('appearance.title'),
         onClick: () => editDashboardFolderAppearance(item.folder),
       }),
     );
@@ -2883,7 +2884,7 @@ function renderCardActions(item) {
       actions.append(
         iconActionButton({
           icon: 'folder-up',
-          title: 'Move folder up one level',
+          title: i18n('dashboard.moveFolderUp'),
           onClick: () => moveDashboardFolderOutOfFolder(item.folder.id),
         })
       );
@@ -2892,7 +2893,7 @@ function renderCardActions(item) {
     actions.append(
       iconActionButton({
         icon: 'trash',
-        title: 'Delete folder',
+        title: i18n('dashboard.deleteFolder'),
         danger: true,
         onClick: () => deleteDashboardFolder(item.folder.id),
       }),
@@ -2906,13 +2907,13 @@ function renderCardActions(item) {
   actions.append(
     iconActionButton({
       icon: note.pinned ? 'pin-off' : 'pin',
-      title: note.pinned ? 'Unpin' : 'Pin',
+      title: note.pinned ? i18n('note.toolbar.unpin') : i18n('note.toolbar.pin'),
       onClick: () => toggleDashboardPin(note.id),
     }),
 
     iconActionButton({
       icon: 'pencil',
-      title: 'Rename',
+      title: i18n('graph.prompt.renameConfirm'),
       onClick: () => {
         const card = findDashboardNoteCard(note.id);
         renameDashboardNote(note.id, card);
@@ -2921,13 +2922,13 @@ function renderCardActions(item) {
 
     iconActionButton({
       icon: 'palette',
-      title: 'Icon & color',
+      title: i18n('appearance.title'),
       onClick: () => editDashboardNoteAppearance(note.id),
     }),
 
     iconActionButton({
       icon: 'copy',
-      title: 'Duplicate',
+      title: i18n('tree.menu.duplicate'),
       onClick: () => duplicateDashboardNote(note.id),
     }),
   );
@@ -2936,7 +2937,7 @@ function renderCardActions(item) {
     actions.append(
       iconActionButton({
         icon: 'folder-up',
-        title: 'Move out of folder',
+        title: i18n('dashboard.moveOutOfFolder'),
         onClick: () => moveDashboardNoteOutOfFolder(note.id),
       })
     );
@@ -2945,7 +2946,7 @@ function renderCardActions(item) {
   actions.append(
     iconActionButton({
       icon: 'trash',
-      title: 'Delete',
+      title: i18n('common.delete'),
       danger: true,
       onClick: () => deleteDashboardNote(note.id),
     })
@@ -2984,7 +2985,7 @@ function renderCardActions(item) {
           await onClick?.();
         } catch (err) {
           console.error(err);
-          toast('Action failed', 'error');
+          toast(i18n('note.actionFailed'), 'error');
         }
       },
       onpointerdown: (e) => {
@@ -3050,7 +3051,7 @@ function renderCardActions(item) {
     const copy = {
       ...src,
       id,
-      title: `${src.title || 'Untitled'} (copy)`,
+      title: `${src.title || i18n('note.untitled')} (copy)`,
       pinned: false,
       dashboardOrder: Date.now(),
       dashboardPinnedOrder: undefined,
@@ -3095,7 +3096,7 @@ function renderCardActions(item) {
       source: 'dashboard',
     });
   
-    toast('Note duplicated', 'success');
+    toast(i18n('items.noteDuplicated'), 'success');
     renderDashboard();
   }
   
@@ -3185,7 +3186,7 @@ function renderCardActions(item) {
       source: 'dashboard',
     });
   
-    toast('Moved to root', 'success');
+    toast(i18n('dashboard.movedToRoot'), 'success');
     renderDashboard();
   }
 
@@ -3202,7 +3203,7 @@ async function moveDashboardFolderOutOfFolder(folderId) {
     aber bei inkonsistenten Daten ist es besser, es abzufangen.
   */
   if (nextParentId && dashboardFolderIsAncestor(folder.id, nextParentId)) {
-    toast('Cannot move folder into itself', 'error');
+    toast(i18n('dashboard.cannotMoveIntoItself'), 'error');
     return;
   }
 
@@ -3224,7 +3225,7 @@ async function moveDashboardFolderOutOfFolder(folderId) {
 
   window.dispatchEvent(new CustomEvent('yanta-dashboard-refresh'));
 
-  toast(nextParentId ? 'Folder moved up one level' : 'Folder moved to root', 'success');
+  toast(nextParentId ? i18n('dashboard.folderMovedUp') : i18n('dashboard.folderMovedToRoot'), 'success');
 
   renderDashboard();
 }
@@ -3280,9 +3281,9 @@ async function renameDashboardNote(noteId, cardOrAnchor) {
   beginDashboardRename(card);
 
   inlineTextEdit(anchor, {
-    initial: note.title || 'Untitled',
-    placeholder: 'Note title',
-    emptyFallback: 'Untitled',
+    initial: note.title || i18n('note.untitled'),
+    placeholder: i18n('tree.note.titlePlaceholder'),
+    emptyFallback: i18n('note.untitled'),
 
     onCancel: () => {
       endDashboardRename(card);
@@ -3317,9 +3318,9 @@ async function renameDashboardFolder(folderId, cardOrAnchor) {
   beginDashboardRename(card);
 
   inlineTextEdit(anchor, {
-    initial: folder.name || 'Folder',
-    placeholder: 'Folder name',
-    emptyFallback: 'Folder',
+    initial: folder.name || i18n('items.folderFallback'),
+    placeholder: i18n('tree.folder.namePlaceholder'),
+    emptyFallback: i18n('items.folderFallback'),
 
     onCancel: () => {
       endDashboardRename(card);
@@ -3347,9 +3348,9 @@ function renameDashboardCurrentFolderTitle(anchor) {
   dashboard.suppressOpenUntil = performance.now() + 1200;
 
   inlineTextEdit(anchor, {
-    initial: folder.name || 'Folder',
-    placeholder: 'Folder name',
-    emptyFallback: 'Folder',
+    initial: folder.name || i18n('items.folderFallback'),
+    placeholder: i18n('tree.folder.namePlaceholder'),
+    emptyFallback: i18n('items.folderFallback'),
 
     onCommit: async (value) => {
       return await renameFolderById(folder.id, value, {
@@ -3364,14 +3365,14 @@ function syncDashboardFolderLabels(folderId) {
   const folder = state.folders.get(folderId);
   if (!folder) return;
 
-  const name = folder.name || 'Folder';
+  const name = folder.name || i18n('items.folderFallback');
 
   if (dashboard.folderId === folderId) {
     const title = root.querySelector('.yanta-dashboard-title');
 
     if (title && title.dataset.inlineEditing !== '1') {
       title.textContent = name;
-      title.title = 'Tap to rename folder';
+      title.title = i18n('dashboard.tapToRename');
     }
   }
 
@@ -3474,7 +3475,7 @@ function folderShareStatus(folder) {
     if (session.sourceType === 'folder' && session.record.rootFolderId === folder.id) {
       return {
         mounted: false,
-        title: 'You are sharing this folder as a live workspace',
+        title: i18n('dashboard.sharingLiveWorkspace'),
       };
     }
   }
@@ -3488,7 +3489,7 @@ function folderPreviewItems(folderId) {
     kind: 'folder',
     id: folder.id,
     folder,
-    title: folder.name || 'Folder',
+    title: folder.name || i18n('items.folderFallback'),
     icon: defaultIconForFolder(folder),
     color: safeCssColor(folder.color) || '',
     order: fallbackOrderForFolder(folder),
@@ -3497,7 +3498,7 @@ function folderPreviewItems(folderId) {
     kind: 'note',
     id: note.id,
     note,
-    title: note.title || 'Untitled',
+    title: note.title || i18n('note.untitled'),
     icon: defaultIconForNote(note),
     color: safeCssColor(note.color) || '',
     order: fallbackOrderForNote(note),
@@ -3582,7 +3583,7 @@ function renderFolderBody(folder) {
 
 function renderFolderMeta(folder) {
   const counts = folderDirectBreakdown(folder.id);
-  const meta = folderMetaText(counts.folders, counts.notes, 'Empty folder');
+  const meta = folderMetaText(counts.folders, counts.notes, i18n('dashboard.emptyFolder'));
 
   if (!meta) return null;
 
@@ -3601,7 +3602,7 @@ function renderFolderMiniFolderPreview(folder) {
   if (!items.length) {
     wrap.append(el('div', {
       class: 'yanta-dash-folder-mini-empty',
-    }, 'Empty folder'));
+    }, i18n('dashboard.emptyFolder')));
   } else {
     for (const item of items) {
       const row = el('div', {
@@ -3683,7 +3684,7 @@ function renderFolderPreviewCell(child) {
       previewHost.replaceChildren(
         el('div', {
           class: 'yanta-dash-folder-mini-empty',
-        }, 'Preview unavailable')
+        }, i18n('dashboard.previewUnavailable'))
       );
     });
   });
@@ -3717,7 +3718,7 @@ async function hydrateFolderNotePreviewCell(host, noteId) {
     } else {
       host.append(el('div', {
         class: 'yanta-dash-folder-mini-empty',
-      }, 'Empty note'));
+      }, i18n('dashboard.emptyNote')));
     }
 
     return;
@@ -3858,7 +3859,7 @@ function renderFolderMiniDrawing(noteId, block) {
 
       media.append(el('img', {
         src: url,
-        alt: 'Drawing',
+        alt: i18n('image.drawingFallback'),
         loading: 'lazy',
         draggable: 'false',
       }));
@@ -3871,7 +3872,7 @@ function renderFolderMiniDrawing(noteId, block) {
   function renderResizeHandle(key) {
     const handle = el('div', {
       class: 'yanta-dash-resize-handle',
-      title: 'Drag to resize · double-click to reset',
+      title: i18n('dashboard.resizeDrawingTitle'),
       dataset: { resizeHandle: key },
     });
   
@@ -3918,7 +3919,7 @@ async function hydrateCardPreview(card, noteId, { eager = false } = {}) {
       } else {
         host.append(el('div', {
           class: 'yanta-dash-empty-preview',
-        }, 'Empty note'));
+        }, i18n('dashboard.emptyNote')));
       }
       fitDashboardNoteCardToRenderedPreview(card, note, host);
       return;
@@ -4054,7 +4055,7 @@ async function renderDashboardImage(block, { eager = false } = {}) {
     } else {
       wrap.append(el('div', {
         class: 'yanta-dash-drawing-thumb',
-      }, 'Image unavailable'));
+      }, i18n('dashboard.imageUnavailable')));
     }
 
     return wrap;
@@ -4068,13 +4069,13 @@ function renderDashboardVideo(block) {
 
   const wrap = el('div', {
     class: 'yanta-dash-media yanta-dash-video-thumb',
-    title: block.title || 'Video',
+    title: block.title || i18n('dashboard.video'),
   });
 
   if (thumb) {
     const img = el('img', {
       src: thumb,
-      alt: block.title || 'Video',
+      alt: block.title || i18n('dashboard.video'),
       loading: 'lazy',
       draggable: 'false',
     });
@@ -4091,7 +4092,7 @@ function renderDashboardVideo(block) {
     wrap.innerHTML = `
       <div class="yanta-dash-video-fallback">
         ${lucide('play', 24)}
-        <span>${block.title || 'Video'}</span>
+        <span>${block.title || i18n('dashboard.video')}</span>
       </div>
     `;
   }
@@ -4178,7 +4179,7 @@ function renderDashboardDrawing(noteId, block, { eager = false } = {}) {
       if (!url || !wrap.isConnected) return;
       const img = el('img', {
         src: url,
-        alt: 'Drawing',
+        alt: i18n('image.drawingFallback'),
         loading: 'eager',
         fetchpriority: eager ? 'high' : 'auto',
         decoding: 'async',
@@ -4201,7 +4202,7 @@ function renderDashboardDrawing(noteId, block, { eager = false } = {}) {
       wrap.replaceChildren(
         el('div', {
           class: 'yanta-dash-drawing-placeholder is-error',
-        }, 'Drawing')
+        }, i18n('image.drawingFallback'))
       );
     });
   return wrap;
@@ -4353,7 +4354,7 @@ async function resolveDashboardImageUrl(url) {
             type: 'video',
             embed,
             thumb: videoThumbnailUrl(image[2]),
-            title: cleanInlineText(image[1]) || 'Video',
+            title: cleanInlineText(image[1]) || i18n('dashboard.video'),
             url: image[2],
           });
         } else {
@@ -4381,7 +4382,7 @@ async function resolveDashboardImageUrl(url) {
             type: 'video',
             embed,
             thumb: videoThumbnailUrl(videoLink[2]),
-            title: cleanInlineText(videoLink[1]) || 'Video',
+            title: cleanInlineText(videoLink[1]) || i18n('dashboard.video'),
             url: videoLink[2],
           });
 
@@ -4514,8 +4515,8 @@ async function resolveDashboardImageUrl(url) {
       }
     }
 
-    if (hasLinks) badges.push({ icon: 'link', label: 'Links' });
-    if (hasCitation) badges.push({ icon: 'quote', label: 'Citation' });
+    if (hasLinks) badges.push({ icon: 'link', label: i18n('dashboard.badgeLinks') });
+    if (hasCitation) badges.push({ icon: 'quote', label: i18n('dashboard.badgeCitation') });
 
     const mediaOnly =
       meaningfulCount === 1 &&
@@ -4546,7 +4547,7 @@ async function openDashboardCalendarEventFromHeader(header) {
     return true;
   } catch (err) {
     console.warn('[YANTA Dashboard] Could not open calendar event', err);
-    toast('Could not open calendar event', 'error');
+    toast(i18n('dashboard.couldNotOpenEvent'), 'error');
     return false;
   }
 }
@@ -6922,7 +6923,7 @@ async function finishCardDrag() {
       const added = addDashboardDragKeysToAiContext(dragKeys);
 
       if (!added) {
-        toast('Could not add item to AI context', 'error');
+        toast(i18n('dashboard.couldNotAddAiContext'), 'error');
       }
 
       return;
@@ -6949,9 +6950,7 @@ async function finishCardDrag() {
 
       if (moved) {
         toast(
-          moved === 1
-            ? 'Moved into folder'
-            : `Moved ${moved} items into folder`,
+          i18n('dashboard.movedIntoFolder', { count: moved }),
           'success'
         );
       }
@@ -6981,7 +6980,7 @@ async function finishCardDrag() {
 
   } catch (err) {
     console.error('[YANTA Dashboard] Could not finish drag', err);
-    toast('Could not complete drag', 'error');
+    toast(i18n('dashboard.couldNotCompleteDrag'), 'error');
 
     renderDashboard({
       animate: false,

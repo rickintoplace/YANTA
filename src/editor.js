@@ -18,6 +18,7 @@ import { videoEmbedUrl, audioEmbedUrl } from './media/video-embeds.js';
 import { getImageObjectUrl, putImageObjectUrl } from './media/object-url-cache.js';
 
 import { $, state, safeCssColor, lucide } from './core.js';
+import { t as i18n } from './i18n/index.js';
 import { getNoteDoc, getMarkdownText } from './yjs.js';
 import { wikilinkIndex } from './features-state.js';
 
@@ -681,7 +682,7 @@ class ImageWidget extends WidgetType {
     wrap.className = 'yanta-img-resizable';
     wrap.tabIndex = 0;
     wrap.setAttribute('role', 'button');
-    wrap.setAttribute('aria-label', 'Image preview. Tap to show resize handle.');
+    wrap.setAttribute('aria-label', i18n('editor.imagePreviewAria'));
 
     const width = this.attrs?.width
       ? clampImageWidth(this.attrs.width)
@@ -722,7 +723,7 @@ class ImageWidget extends WidgetType {
 
     const handle = document.createElement('div');
     handle.className = 'yanta-img-resize-handle';
-    handle.title = 'Drag to resize image · double-click to reset';
+    handle.title = i18n('editor.resizeImageTitle');
 
     const activate = () => {
       clearActiveImageWidgets(wrap);
@@ -1022,7 +1023,7 @@ class DrawWidget extends WidgetType {
   toDOM() {
     const node = document.createElement('div');
     node.className = 'yanta-draw-editor-embed';
-    node.innerHTML = renderDrawEmbedHtml(this.id, 'Drawing', 'editor');
+    node.innerHTML = renderDrawEmbedHtml(this.id, i18n('image.drawingFallback'), 'editor');
 
     requestAnimationFrame(() => {
       window.dispatchEvent(new CustomEvent('yanta-draw-hydrate', {
@@ -1102,10 +1103,10 @@ function wikiCompletion(ctx) {
     .filter((n) => !q || (n.title || '').toLowerCase().includes(q))
     .slice(0, 12)
     .map((n) => ({
-      label: n.title || 'Untitled',
+      label: n.title || i18n('note.untitled'),
       type: 'note',
       apply: (v, _c, from, to) => {
-        const insert = (n.title || 'Untitled') + ']]';
+        const insert = (n.title || i18n('note.untitled')) + ']]';
         v.dispatch({ changes: { from, to, insert }, selection: { anchor: from + insert.length } });
       },
     }));
@@ -1332,7 +1333,7 @@ function dropHandler() {
       const noteId = e.dataTransfer.getData('text/yanta-note');
       if (noteId) {
         e.preventDefault();
-        const title = e.dataTransfer.getData('text/plain') || 'Note';
+        const title = e.dataTransfer.getData('text/plain') || i18n('image.noteFallback');
         const insert = `[[${title}]]`;
         view.dispatch({ changes: { from: pos, to: pos, insert }, selection: { anchor: pos + insert.length } });
         return true;
@@ -1783,7 +1784,7 @@ class EditorTitleWidget extends WidgetType {
     const input = document.createElement('input');
     input.className = 'yanta-note-title-mirror';
     input.value = canonical?.value || note?.title || '';
-    input.placeholder = 'Untitled note';
+    input.placeholder = i18n('note.untitledPlaceholder');
     input.autocomplete = 'off';
     input.spellcheck = false;
 
@@ -1796,7 +1797,7 @@ class EditorTitleWidget extends WidgetType {
       const note = this.noteId ? state.notes.get(this.noteId) : null;
 
       if (note) {
-        note.title = input.value.trim() || note.title || 'Untitled';
+        note.title = input.value.trim() || note.title || i18n('note.untitled');
         note.updated = Date.now();
       }
 
@@ -1814,7 +1815,7 @@ class EditorTitleWidget extends WidgetType {
       const note = this.noteId ? state.notes.get(this.noteId) : null;
 
       if (note) {
-        note.title = input.value.trim() || 'Untitled';
+        note.title = input.value.trim() || i18n('note.untitled');
         note.updated = Date.now();
       }
 

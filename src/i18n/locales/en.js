@@ -733,6 +733,41 @@ export default {
     },
   },
 
+  dashboard: {
+    title: 'Dashboard',
+    loadingPreview: 'Loading note preview',
+    openSidebar: 'Open sidebar',
+    tapToRename: 'Tap to rename folder',
+    tapToSetName: 'Tap to set your display name',
+    manageWidgets: 'Manage widgets',
+    create: 'Create',
+    moveFolderUp: 'Move folder up one level',
+    deleteFolder: 'Delete folder',
+    moveOutOfFolder: 'Move out of folder',
+    movedToRoot: 'Moved to root',
+    cannotMoveIntoItself: 'Cannot move folder into itself',
+    folderMovedUp: 'Folder moved up one level',
+    folderMovedToRoot: 'Folder moved to root',
+    sharingLiveWorkspace: 'You are sharing this folder as a live workspace',
+    emptyFolder: 'Empty folder',
+    previewUnavailable: 'Preview unavailable',
+    emptyNote: 'Empty note',
+    imageUnavailable: 'Image unavailable',
+    video: 'Video',
+    badgeLinks: 'Links',
+    badgeCitation: 'Citation',
+    couldNotOpenEvent: 'Could not open calendar event',
+    couldNotAddAiContext: 'Could not add item to AI context',
+    movedIntoFolder: { one: 'Moved into folder', other: 'Moved {count} items into folder' },
+    couldNotCompleteDrag: 'Could not complete drag',
+    resizeDrawingTitle: 'Drag to resize · double-click to reset',
+  },
+
+  editor: {
+    imagePreviewAria: 'Image preview. Tap to show resize handle.',
+    resizeImageTitle: 'Drag to resize image · double-click to reset',
+  },
+
   palette: {
     // Command entries themselves stay English (power-user / keyboard feature,
     // consistent with the keyboard shortcuts). Only the chrome is localized.

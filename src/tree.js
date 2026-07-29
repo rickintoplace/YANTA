@@ -2546,6 +2546,8 @@ export function showMenu(x, y, items, {
       },
     });
 
+    const label = el('span', { class: 'ctx-menu-label' }, it.label);
+
     if (iconName) {
       const icon = el('span', {
         class: 'ctx-menu-icon',
@@ -2554,13 +2556,15 @@ export function showMenu(x, y, items, {
 
       icon.innerHTML = lucide(iconName, 14);
 
-      const label = el('span', {
-        class: 'ctx-menu-label',
-      }, it.label);
-
       btn.append(icon, label);
     } else {
-      btn.textContent = it.label;
+      btn.append(label);
+    }
+
+    // Keyboard hint, right-aligned — how a command is discovered.
+    if (it.hint) {
+      btn.classList.add('has-hint');
+      btn.append(el('span', { class: 'ctx-menu-hint' }, it.hint));
     }
 
     m.append(btn);

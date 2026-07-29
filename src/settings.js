@@ -50,6 +50,7 @@ import {
   registerOverlayRoute,
 } from './overlay-history.js';
 
+import { editorShortcutsSettingsElement } from './editor/shortcuts-settings.js';
 import { installCardElement } from './install/install-ui.js';
 import { notificationsSettingsElement } from './install/notifications-settings.js';
 import { pulseSettingsElement } from './pulse/pulse-settings-panel.js';
@@ -1051,6 +1052,7 @@ const SETTINGS_SECTIONS = [
   { id: 'language',     label: 'Language',        icon: 'languages',      keywords: 'language locale english deutsch german español spanish français french 日本語 japanese translation' },
   { id: 'colors',       label: 'Colors',          icon: 'paintbrush',     keywords: 'palette accent color scheme' },
   { id: 'typography',   label: 'Typography',      icon: 'type',           keywords: 'font size text' },
+  { id: 'shortcuts',    label: 'Shortcuts',       icon: 'keyboard',       keywords: 'keyboard hotkey key binding shortcut editor formatting bold heading' },
   { id: 'dashboard',    label: 'Dashboard',       icon: 'layout-dashboard', keywords: 'home widgets greeting' },
   { id: 'quick-create', label: 'Quick Actions',   icon: 'gamepad-directional',    keywords: 'floating create menu bubble action chat ai rss shortcut' },
   { id: 'calendar',     label: 'Calendar',        icon: 'calendar-days',  keywords: 'events reminders ics' },
@@ -1258,6 +1260,7 @@ function renderSettingsBody() {
   else if (activeSection === 'language') renderLanguageSection(content);
   else if (activeSection === 'colors') renderColorsSection(content);
   else if (activeSection === 'typography') renderTypographySection(content);
+  else if (activeSection === 'shortcuts') renderShortcutsSection(content);
   else if (activeSection === 'dashboard') renderDashboardSection(content);
   else if (activeSection === 'quick-create') renderQuickCreateSection(content);
   else if (activeSection === 'calendar') renderCalendarSection(content);
@@ -1724,6 +1727,16 @@ onclick: async () => {
   lhRow.append(lhSlider, lhValue);
   lhGroup.append(lhRow);
   host.append(lhGroup);
+}
+
+// ---- Shortcuts section ----
+function renderShortcutsSection(host) {
+  host.append(sectionHeader(
+    t('settings.sections.shortcuts.title'),
+    t('settings.sections.shortcuts.subtitle'),
+  ));
+
+  host.append(editorShortcutsSettingsElement());
 }
 
 // ---- Quick Create section ----
@@ -3937,6 +3950,111 @@ function injectSettingsCss() {
   background: var(--bg-elev-2);
   border-radius: 8px;
   border: 1px solid var(--border);
+}
+
+/* Shortcuts */
+.yanta-shortcut-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+
+  padding: 7px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.yanta-shortcut-row:last-child {
+  border-bottom: 0;
+}
+
+.yanta-shortcut-label {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--text);
+}
+
+.yanta-shortcut-keys {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.yanta-shortcut-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+
+  padding: 2px 4px 2px 8px;
+
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.yanta-shortcut-chip-remove {
+  border: 0;
+  background: transparent;
+  color: var(--text-faint);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  padding: 0 3px;
+  border-radius: 4px;
+}
+
+.yanta-shortcut-chip-remove:hover {
+  color: var(--red);
+  background: var(--bg-elev-3);
+}
+
+.yanta-shortcut-empty {
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.yanta-shortcut-record.is-recording {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.yanta-shortcut-record,
+.yanta-shortcut-reset {
+  flex: none;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.yanta-shortcut-conflict {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+
+  margin: 6px 0 10px;
+  padding: 10px 12px;
+
+  background: var(--bg-elev-2);
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+
+  font-size: 12px;
+  color: var(--text-dim);
+}
+
+.yanta-shortcut-conflict .btn {
+  padding: 4px 10px;
+  font-size: 12px;
+}
+
+.yanta-shortcuts-footer {
+  display: flex;
+  justify-content: flex-end;
 }
 
 .yanta-settings-info p {

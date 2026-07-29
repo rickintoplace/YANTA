@@ -773,6 +773,30 @@ export default {
   editor: {
     imagePreviewAria: 'Bildvorschau. Zum Anzeigen des Größengriffs tippen.',
     resizeImageTitle: 'Ziehen zum Skalieren des Bildes · Doppelklick zum Zurücksetzen',
+
+    commands: {
+      bold: 'Fett',
+      italic: 'Kursiv',
+      strikethrough: 'Durchgestrichen',
+      highlight: 'Hervorheben',
+      inlineCode: 'Inline-Code',
+      link: 'Link',
+
+      heading1: 'Überschrift 1',
+      heading2: 'Überschrift 2',
+      heading3: 'Überschrift 3',
+      heading4: 'Überschrift 4',
+      heading5: 'Überschrift 5',
+      heading6: 'Überschrift 6',
+      paragraph: 'Überschrift entfernen',
+
+      bulletList: 'Aufzählung',
+      numberedList: 'Nummerierte Liste',
+      taskList: 'Aufgabenliste',
+      quote: 'Zitat',
+      codeBlock: 'Codeblock',
+      toggleTaskDone: 'Aufgabe abhaken',
+    },
   },
 
   palette: {
@@ -819,6 +843,7 @@ export default {
       language: 'Sprache',
       colors: 'Farben',
       typography: 'Typografie',
+      shortcuts: 'Tastenkürzel',
       dashboard: 'Dashboard',
       quickCreate: 'Schnellaktionen',
       calendar: 'Kalender',
@@ -838,6 +863,7 @@ export default {
       appearance: { title: 'Darstellung', subtitle: 'Lege fest, wie YANTA aussieht.' },
       colors: { title: 'Farben', subtitle: 'Passe die Farbpalette an. Heller und dunkler Modus werden getrennt konfiguriert.' },
       typography: { title: 'Typografie', subtitle: 'Wähle Schriften und Schriftgrößen.' },
+      shortcuts: { title: 'Tastenkürzel', subtitle: 'Belege die Formatierungsbefehle des Editors neu.' },
       dashboard: { title: 'Dashboard', subtitle: 'Lege fest, wie Notiz- und Ordnerkarten angezeigt werden.' },
       quickCreate: { title: 'Schnellaktionen', subtitle: 'Passe die schwebende Schnellzugriffsschaltfläche an: Auslöser-Symbol, Aktionen, Beschriftungen und freie Positionen.' },
       calendar: { title: 'Kalender', subtitle: 'Konfiguriere Datumsanzeige, Zeitformat, Wochenbeginn und Kalenderwochen.' },
@@ -874,6 +900,24 @@ export default {
       resetConfirmMessage: 'Darstellung, Farben und Typografie auf die Standardwerte zurücksetzen?\n\nDeine Notizen sind nicht betroffen.',
       resetConfirmAction: 'Darstellung zurücksetzen',
       resetToast: 'Darstellung zurückgesetzt',
+    },
+
+    shortcuts: {
+      groups: {
+        inline: 'Inline-Formatierung',
+        headings: 'Überschriften',
+        blocks: 'Listen und Blöcke',
+      },
+      deviceNote: 'Die Kürzel gelten beim Schreiben einer Notiz und werden auf diesem Gerät gespeichert.',
+      browserNote: 'Strg+1 … Strg+6 und Strg+0 belegt der Browser für Tabs und Zoom. In der installierten App erreichen sie den Editor, im Browser-Tab nutze die Alt-Variante.',
+      add: 'Hinzufügen',
+      pressKeys: 'Tasten drücken…',
+      unbound: 'Keins',
+      reset: 'Standard wiederherstellen',
+      resetAll: 'Alle Standards wiederherstellen',
+      removeAria: '{chord} entfernen',
+      conflict: '{chord} wird bereits von {command} verwendet.',
+      takeOver: 'Hier verwenden',
     },
 
     typography: {

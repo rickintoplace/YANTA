@@ -21,6 +21,11 @@ import { $, state, safeCssColor, lucide } from './core.js';
 import { t as i18n } from './i18n/index.js';
 import { getNoteDoc, getMarkdownText } from './yjs.js';
 import { wikilinkIndex } from './features-state.js';
+import {
+  attachEditorShortcuts,
+  detachEditorShortcuts,
+  editorShortcutsExtension,
+} from './editor/editor-shortcuts.js';
 
 let view = null;
 let currentNoteId = null;
@@ -180,13 +185,13 @@ const yantaTheme = EditorView.theme({
     padding: '0 4px',
   },
 
+  // Kein margin auf Editor-Widgets: siehe yanta-cm-block in styles.css.
   '.yanta-img-thumb': {
     display: 'block',
     maxWidth: '100%',
     maxHeight: '220px',
     borderRadius: '6px',
     border: '1px solid var(--border)',
-    margin: '4px 0',
   },
 
   '.yanta-video-embed': {
@@ -390,6 +395,76 @@ const viewportRenderSyncPlugin = ViewPlugin.fromClass(class {
 
     document.removeEventListener('visibilitychange', this.onVisibilityChange);
     window.removeEventListener('focus', this.onFocus);
+  }
+});
+
+// ============================================================
+// Block widgets
+// ------------------------------------------------------------
+// CodeMirror stores the height of a block widget as the height of its
+// border box. Two things therefore break the height map — and with it
+// every click, because posAtCoords resolves the line from that map:
+//
+//   - CSS margins on a widget root. They are invisible to the measurement,
+//     so every line below the widget is off by the margin. This is why
+//     block widgets get their spacing from `.yanta-cm-block` padding.
+//   - Widgets that resize after they were measured: images decoding,
+//     drawings hydrating, media reporting its intrinsic size. The
+//     observer below turns those into a re-measure.
+// ============================================================
+
+/** Spacing host for block widgets whose own box cannot carry padding. */
+function blockWidgetHost(child) {
+  const host = document.createElement('div');
+  host.className = 'yanta-cm-block';
+  host.append(child);
+  return host;
+}
+
+const BLOCK_WIDGET_SELECTOR = [
+  '.yanta-cm-block',
+  '.yanta-cm-title-widget',
+  '.yanta-img-resizable',
+  '.yanta-draw-editor-embed',
+].join(', ');
+
+const blockWidgetHeightSync = ViewPlugin.fromClass(class {
+  constructor(view) {
+    this.view = view;
+    this.observed = new Set();
+
+    this.observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(() => {
+      this.view.requestMeasure();
+    });
+
+    this.sync();
+  }
+
+  update(u) {
+    if (u.docChanged || u.viewportChanged) this.sync();
+  }
+
+  sync() {
+    if (!this.observer) return;
+
+    const current = new Set(this.view.contentDOM.querySelectorAll(BLOCK_WIDGET_SELECTOR));
+
+    for (const node of current) {
+      if (this.observed.has(node)) continue;
+      this.observer.observe(node);
+      this.observed.add(node);
+    }
+
+    for (const node of this.observed) {
+      if (current.has(node)) continue;
+      this.observer.unobserve(node);
+      this.observed.delete(node);
+    }
+  }
+
+  destroy() {
+    this.observer?.disconnect();
+    this.observed.clear();
   }
 });
 
@@ -931,7 +1006,7 @@ class AudioWidget extends WidgetType {
 
     wrap.append(audio);
 
-    return wrap;
+    return blockWidgetHost(wrap);
   }
 
   ignoreEvent() {
@@ -950,7 +1025,7 @@ class VideoWidget extends WidgetType {
     f.setAttribute('frameborder', '0');
     f.setAttribute('allow', 'autoplay; encrypted-media; picture-in-picture');
     wrap.append(f);
-    return wrap;
+    return blockWidgetHost(wrap);
   }
 }
 
@@ -2013,7 +2088,12 @@ function applyCodeMirrorChangesToYText(update, ytext) {
 
 export function mountEditor(host, { noteId, awarenessUser }) {
   cleanupYBinding();
-  if (view) view.destroy();
+
+  if (view) {
+    detachEditorShortcuts(view);
+    view.destroy();
+  }
+
   currentNoteId = noteId;
   const { doc } = getNoteDoc(noteId);
   const ytext = doc.getText('markdown');
@@ -2023,6 +2103,7 @@ export function mountEditor(host, { noteId, awarenessUser }) {
     drawSelection(),
     EditorView.lineWrapping,
     viewportRenderSyncPlugin,
+    blockWidgetHeightSync,
     editorTitleWidgetField,
     markdown({ base: markdownLanguage }),
     syntaxHighlighting(yantaHighlight),
@@ -2071,6 +2152,9 @@ export function mountEditor(host, { noteId, awarenessUser }) {
         window.dispatchEvent(new CustomEvent('yanta-editor-geometry-change'));
       }
     }),
+    // Markdown formatting (rebindable) takes precedence over the stock
+    // editing keymaps below it — see editor/editor-shortcuts.js.
+    editorShortcutsExtension(),
     keymap.of([
       ...defaultKeymap,
       ...historyKeymap,
@@ -2078,9 +2162,6 @@ export function mountEditor(host, { noteId, awarenessUser }) {
       ...completionKeymap,
       { key: 'Tab', run: acceptCompletion },
       indentWithTab,
-      { key: 'Mod-b', run: (v) => wrapSelection(v, '**', '**') },
-      { key: 'Mod-i', run: (v) => wrapSelection(v, '*', '*') },
-      { key: 'Mod-`', run: (v) => wrapSelection(v, '`', '`') },
     ]),
     placeholder('Start writing in Markdown… type / for commands, [[ for links'),
     themeCompartment.of(yantaTheme),
@@ -2095,6 +2176,7 @@ export function mountEditor(host, { noteId, awarenessUser }) {
   });
 
   bindYTextToEditor(view, ytext);
+  attachEditorShortcuts(view);
   primeEditorViewport(view);
 
   return view;
@@ -2120,6 +2202,7 @@ export function destroyEditor() {
   cleanupYBinding();
 
   if (view) {
+    detachEditorShortcuts(view);
     view.destroy();
     view = null;
   }
@@ -2134,15 +2217,6 @@ export function focusEditorEnd() {
   view.focus();
   const len = view.state.doc.length;
   view.dispatch({ selection: { anchor: len }, scrollIntoView: true });
-}
-
-// Force CodeMirror to re-render image/video decorations (called after
-// an async image blob load completes so the widget can swap in the URL).
-export function refreshWidgets() {
-  if (!view) return;
-  // Trigger a no-op dispatch so StateFields recompute (they only rebuild
-  // on docChanged, so we nudge by an empty changes object).
-  view.requestMeasure();
 }
 
 export function insertAtCursor(text) {
@@ -2223,31 +2297,6 @@ export function insertTextAtCoords(text, clientX, clientY) {
   return true;
 }
 
-function wrapSelection(v, open, close) {
-  const sel = v.state.selection.main;
-  const text = v.state.sliceDoc(sel.from, sel.to) || '';
-  v.dispatch({
-    changes: { from: sel.from, to: sel.to, insert: open + text + close },
-    selection: { anchor: sel.from + open.length + text.length + (text ? 0 : 0) },
-  });
-  return true;
-}
-
-export function applyLinePrefix(prefix) {
-  if (!view) return;
-  const sel = view.state.selection.main;
-  const line = view.state.doc.lineAt(sel.from);
-  const stripped = line.text.replace(/^(\s*)(#{1,6}\s+|>\s*|[-*+]\s+\[[ xX]\]\s+|[-*+]\s+|\d+\.\s+)/, '$1');
-  view.dispatch({ changes: { from: line.from, to: line.to, insert: prefix + stripped } });
-}
-
 export function currentMarkdown() {
   return view ? view.state.doc.toString() : '';
 }
-
-export function setEditableForView(viewMode) {
-  if (!view) return;
-  // Editor is hidden via CSS when preview-only; nothing extra needed.
-}
-
-// Cycle theme override or other compartments could go here if needed.

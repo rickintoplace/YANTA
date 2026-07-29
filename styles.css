@@ -1363,6 +1363,24 @@ button.link { background: 0; border: 0; color: var(--accent); cursor: pointer; p
   text-overflow: ellipsis;
 }
 
+.ctx-menu button.has-icon.has-hint {
+  grid-template-columns: 18px minmax(0, 1fr) auto;
+}
+
+.ctx-menu button.has-hint {
+  gap: 14px;
+}
+
+.ctx-menu .ctx-menu-hint {
+  justify-self: end;
+  margin-left: auto;
+
+  color: var(--text-faint);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
 .ctx-menu button.meta.has-icon {
   grid-template-columns: minmax(0, 1fr);
 }
@@ -1697,12 +1715,13 @@ button.link { background: 0; border: 0; color: var(--accent); cursor: pointer; p
    Resizable inserted images
    ============================================================ */
 
+/* Abstand als padding — siehe .yanta-cm-block. */
 #editor .yanta-img-resizable {
   position: relative;
   display: block;
   width: max-content;
   max-width: 100%;
-  margin: 6px 0;
+  padding: 6px 0;
   line-height: 0;
 }
 
@@ -1719,10 +1738,12 @@ button.link { background: 0; border: 0; color: var(--accent); cursor: pointer; p
   max-height: none;
 }
 
+/* bottom = padding (6px) − 5px, damit der Griff wie zuvor knapp über der
+   unteren Bildkante sitzt. */
 #editor .yanta-img-resize-handle {
   position: absolute;
   right: -5px;
-  bottom: -5px;
+  bottom: 1px;
 
   width: 14px;
   height: 14px;
@@ -5389,6 +5410,25 @@ input.yanta-task-checkbox {
 }
 
 /* ============================================================
+   CodeMirror Block-Widgets
+   ------------------------------------------------------------
+   CodeMirror speichert die Höhe eines Block-Widgets als Höhe seiner
+   Border-Box. Ein margin ist für diese Messung unsichtbar — die
+   Height-Map wäre danach um genau diesen Betrag zu kurz, und weil
+   posAtCoords die Zeile aus der Height-Map bestimmt, landet jeder
+   Klick unterhalb des Widgets in der falschen Zeile.
+   Abstände von Block-Widgets gehören deshalb immer ins padding.
+   ============================================================ */
+
+#editor .cm-content .yanta-cm-block {
+  padding: 6px 0;
+}
+
+#editor .cm-content .yanta-cm-block > * {
+  margin: 0 !important;
+}
+
+/* ============================================================
    CodeMirror title widget
    ------------------------------------------------------------
    Die Edit-Titelzeile wird als CodeMirror block widget innerhalb
@@ -5396,12 +5436,13 @@ input.yanta-task-checkbox {
    ohne .cm-scroller als Layout-Container zu verbiegen.
    ============================================================ */
 
+/* Abstand als padding — siehe .yanta-cm-block oben. */
 #editor .cm-content .yanta-cm-title-widget {
   width: 100% !important;
   max-width: 100% !important;
 
-  margin: 0 0 18px 0 !important;
-  padding: 0 2px !important;
+  margin: 0 !important;
+  padding: 0 2px 18px !important;
 
   box-sizing: border-box !important;
   flex: none !important;

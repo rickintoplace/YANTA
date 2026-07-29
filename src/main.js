@@ -3993,6 +3993,14 @@ function handleGlobalKey(e) {
   */
   if (!e.isTrusted) return;
 
+  /*
+    Wer die Taste schon verarbeitet hat, gewinnt. Der Editor bindet
+    Ctrl+I (kursiv) oder Ctrl+E (Inline-Code) und ruft preventDefault;
+    ohne diese Prüfung würde derselbe Anschlag zusätzlich global den
+    Bild-Dialog bzw. den Export auslösen.
+  */
+  if (e.defaultPrevented) return;
+
   const meta = e.ctrlKey || e.metaKey;
   if (meta && e.key === 'n') { e.preventDefault(); newNote(currentFolderForNew()); }
   else if (meta && e.shiftKey && e.code === 'Space') {

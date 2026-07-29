@@ -780,6 +780,32 @@ export default {
   editor: {
     imagePreviewAria: 'Image preview. Tap to show resize handle.',
     resizeImageTitle: 'Drag to resize image · double-click to reset',
+
+    // Editor command names — shown in Settings › Shortcuts and next to
+    // the matching menu entries.
+    commands: {
+      bold: 'Bold',
+      italic: 'Italic',
+      strikethrough: 'Strikethrough',
+      highlight: 'Highlight',
+      inlineCode: 'Inline code',
+      link: 'Link',
+
+      heading1: 'Heading 1',
+      heading2: 'Heading 2',
+      heading3: 'Heading 3',
+      heading4: 'Heading 4',
+      heading5: 'Heading 5',
+      heading6: 'Heading 6',
+      paragraph: 'Remove heading',
+
+      bulletList: 'Bulleted list',
+      numberedList: 'Numbered list',
+      taskList: 'Task list',
+      quote: 'Quote',
+      codeBlock: 'Code block',
+      toggleTaskDone: 'Toggle task done',
+    },
   },
 
   palette: {
@@ -829,6 +855,7 @@ export default {
       language: 'Language',
       colors: 'Colors',
       typography: 'Typography',
+      shortcuts: 'Shortcuts',
       dashboard: 'Dashboard',
       quickCreate: 'Quick Actions',
       calendar: 'Calendar',
@@ -849,6 +876,7 @@ export default {
       appearance: { title: 'Appearance', subtitle: 'Choose how YANTA looks.' },
       colors: { title: 'Colors', subtitle: 'Customize the color palette. Dark and light modes are configured separately.' },
       typography: { title: 'Typography', subtitle: 'Choose fonts and sizing.' },
+      shortcuts: { title: 'Shortcuts', subtitle: 'Rebind the editor’s formatting commands.' },
       dashboard: { title: 'Dashboard', subtitle: 'Choose how note and folder cards are displayed.' },
       quickCreate: { title: 'Quick Actions', subtitle: 'Customize the floating quick-access button: trigger icon, actions, labels and free bubble positions.' },
       calendar: { title: 'Calendar', subtitle: 'Configure date display, time format, week start and calendar weeks.' },
@@ -885,6 +913,24 @@ export default {
       resetConfirmMessage: 'Reset appearance, colors and typography to defaults?\n\nYour notes are not affected.',
       resetConfirmAction: 'Reset appearance',
       resetToast: 'Appearance reset',
+    },
+
+    shortcuts: {
+      groups: {
+        inline: 'Inline formatting',
+        headings: 'Headings',
+        blocks: 'Lists and blocks',
+      },
+      deviceNote: 'Shortcuts apply while writing a note. They are stored on this device.',
+      browserNote: 'Ctrl+1 … Ctrl+6 and Ctrl+0 are claimed by the browser for tabs and zoom. In the installed app they reach the editor; in a browser tab use the Alt variant.',
+      add: 'Add',
+      pressKeys: 'Press keys…',
+      unbound: 'None',
+      reset: 'Restore default',
+      resetAll: 'Restore all defaults',
+      removeAria: 'Remove {chord}',
+      conflict: '{chord} is already used by {command}.',
+      takeOver: 'Use it here',
     },
 
     typography: {

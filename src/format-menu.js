@@ -1,11 +1,21 @@
 // ============================================================
 // YANTA — Floating format toolbar.
 // Appears whenever there is a non-empty selection in the editor.
+//
+// The buttons carry no formatting logic of their own: every one of them
+// runs the same command the keyboard shortcut does, so the toolbar and
+// the shortcuts can never disagree about what "make this a list" means.
+// See editor/markdown-commands.js.
 // ============================================================
 
 import { $ } from './core.js';
-import { yantaPrompt } from './dialogs.js';
 import { getView } from './editor.js';
+import {
+  editorShortcutsFor,
+  formatChord,
+  runEditorCommand,
+} from './editor/editor-shortcuts.js';
+import { parseLine } from './editor/markdown-commands.js';
 import { t } from './i18n/index.js';
 
 let tb;
@@ -19,16 +29,16 @@ export function setupFormatToolbar() {
   // Do not let toolbar clicks steal the CodeMirror selection.
   tb.addEventListener('mousedown', (e) => e.preventDefault());
 
-  tb.addEventListener('click', async (e) => {
+  tb.addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-fmt]');
     if (!btn) return;
-  
+
     applying = true;
-  
-    await applyEditorFormat(btn.dataset.fmt);
-  
+
+    applyEditorFormat(btn.dataset.fmt);
+
     hide();
-  
+
     // Avoid immediate re-open from the selectionchange fired by CM/browser.
     setTimeout(() => {
       applying = false;
@@ -85,20 +95,18 @@ function refresh() {
   const text = v.state.sliceDoc(sel.from, sel.to);
   const lines = text.split('\n');
 
-  const allTasks = lines.length > 0 && lines.every((l) =>
-    /^\s*[-*+]\s+\[[ xX]\]/.test(l) || l.trim() === ''
+  const everyLineIs = (kind) => lines.every(
+    (l) => !l.trim() || parseLine(l).kind === kind
   );
-  const allBullets = lines.length > 0 && lines.every((l) =>
-    /^\s*[-*+]\s+/.test(l) || l.trim() === ''
-  );
-  const allOrdered = lines.length > 0 && lines.every((l) =>
-    /^\s*\d+\.\s+/.test(l) || l.trim() === ''
-  );
+
+  const allTasks = everyLineIs('task');
+  const allBullets = everyLineIs('bullet');
+  const allOrdered = everyLineIs('ordered');
   const isMultiline = lines.length > 1;
 
   const html = [];
   const btn = (fmt, label, title) =>
-    `<button data-fmt="${fmt}" title="${title || label}">${label}</button>`;
+    `<button data-fmt="${fmt}" title="${escapeAttr(withChord(fmt, title || label))}">${label}</button>`;
 
   if (allTasks) {
     html.push(btn('tasks-toggle', '☑', t('format.toggleAllDone')));
@@ -163,146 +171,51 @@ function hide() {
   if (tb) tb.hidden = true;
 }
 
-export async function applyEditorFormat(fmt) {
-  const v = getView();
-  if (!v) return;
-
-  const sel = v.state.selection.main;
-  const wraps = {
-    bold: '**',
-    italic: '*',
-    strike: '~~',
-    code: '`',
-    highlight: '==',
-  };
-
-  if (wraps[fmt]) {
-    const text = v.state.sliceDoc(sel.from, sel.to);
-    const open = wraps[fmt];
-    const close = wraps[fmt];
-    const insert = open + text + close;
-
-    v.dispatch({
-      changes: { from: sel.from, to: sel.to, insert },
-      selection: { anchor: sel.from + insert.length },
-    });
-    v.focus();
-    return;
-  }
-
-  if (fmt === 'link') {
-    const url = await yantaPrompt({
-      title: t('format.insertLink'),
-      label: t('format.urlLabel'),
-      initial: 'https://',
-      placeholder: t('format.urlPlaceholder'),
-      required: true,
-      confirmLabel: t('format.insertLink'),
-      icon: 'link',
-      validate(value) {
-        try {
-          const u = new URL(value);
-          if (u.protocol === 'http:' || u.protocol === 'https:' || u.protocol === 'mailto:' || u.protocol === 'tel:') {
-            return true;
-          }
-        } catch {}
-  
-        return t('format.invalidUrl');
-      },
-    });
-  
-    if (!url) return;
-  
-    const text = v.state.sliceDoc(sel.from, sel.to) || t('format.linkText');
-    const insert = `[${text}](${url})`;
-  
-    v.dispatch({
-      changes: { from: sel.from, to: sel.to, insert },
-      selection: { anchor: sel.from + insert.length },
-    });
-  
-    v.focus();
-    return;
-  }
-
-  if (fmt === 'code-block') {
-    const text = v.state.sliceDoc(sel.from, sel.to);
-    const insert = '```\n' + text + '\n```';
-
-    v.dispatch({
-      changes: { from: sel.from, to: sel.to, insert },
-      selection: { anchor: sel.from + insert.length },
-    });
-    v.focus();
-    return;
-  }
-
-  rewriteLines(v, sel, (line, idx) => {
-    if (fmt === 'h1') return setHeading(line, 1);
-    if (fmt === 'h2') return setHeading(line, 2);
-    if (fmt === 'h3') return setHeading(line, 3);
-    if (fmt === 'quote') return ensurePrefix(line, '> ');
-    if (fmt === 'to-tasks') return convertTo(line, 'task');
-    if (fmt === 'to-bullets') return convertTo(line, 'bullet');
-    if (fmt === 'to-numbered') return convertTo(line, 'ordered', idx);
-    if (fmt === 'tasks-toggle') return toggleTaskLine(line);
-    if (fmt === 'clear-heading') return clearHeading(line);
-    return line;
-  });
+// Tooltips carry user-recorded chords, which can contain quotes.
+function escapeAttr(value) {
+  return String(value).replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 }
 
-function rewriteLines(v, sel, fn) {
-  const fromLine = v.state.doc.lineAt(sel.from);
-  const toLine = v.state.doc.lineAt(sel.to);
-  const newLines = [];
+// ------------------------------------------------------------
+// Format ids → editor commands
+// ------------------------------------------------------------
+// The short ids are what the toolbar markup and the note chrome menus
+// have always used; they stay as the stable vocabulary of those
+// surfaces and map onto the shared command registry here.
+const FORMAT_COMMANDS = {
+  bold: 'bold',
+  italic: 'italic',
+  strike: 'strikethrough',
+  code: 'inlineCode',
+  highlight: 'highlight',
+  link: 'link',
 
-  for (let n = fromLine.number, i = 0; n <= toLine.number; n++, i++) {
-    newLines.push(fn(v.state.doc.line(n).text, i));
-  }
+  h1: 'heading1',
+  h2: 'heading2',
+  h3: 'heading3',
+  'clear-heading': 'paragraph',
 
-  const insert = newLines.join('\n');
+  quote: 'quote',
+  'to-bullets': 'bulletList',
+  'to-numbered': 'numberedList',
+  'to-tasks': 'taskList',
+  'tasks-toggle': 'toggleTaskDone',
+  'code-block': 'codeBlock',
+};
 
-  v.dispatch({
-    changes: { from: fromLine.from, to: toLine.to, insert },
-    selection: { anchor: fromLine.from + insert.length },
-  });
-
-  v.focus();
+/** Display form of the chord bound to a format id, or '' when unbound. */
+export function formatShortcutHint(fmt) {
+  const [chord] = editorShortcutsFor(FORMAT_COMMANDS[fmt]);
+  return chord ? formatChord(chord) : '';
 }
 
-function setHeading(line, level) {
-  const stripped = stripLinePrefix(line);
-  return '#'.repeat(level) + ' ' + stripped.trimStart();
+/** Appends the bound shortcut to a tooltip, when the command has one. */
+function withChord(fmt, label) {
+  const hint = formatShortcutHint(fmt);
+  return hint ? `${label} · ${hint}` : label;
 }
 
-function ensurePrefix(line, p) {
-  const stripped = stripLinePrefix(line);
-  return p + stripped.trimStart();
-}
-
-function stripLinePrefix(line) {
-  return line.replace(/^(\s*)(#{1,6}\s+|>\s*|[-*+]\s+\[[ xX]\]\s+|[-*+]\s+|\d+\.\s+)?/, '$1');
-}
-
-function convertTo(line, kind, idx = 0) {
-  const m = /^(\s*)(?:#{1,6}\s+|>\s*|[-*+]\s+\[[ xX]\]\s+|[-*+]\s+|\d+\.\s+)?(.*)$/.exec(line);
-  const indent = m?.[1] || '';
-  const body = m?.[2] || '';
-
-  if (kind === 'task') return indent + '- [ ] ' + body;
-  if (kind === 'bullet') return indent + '- ' + body;
-  if (kind === 'ordered') return indent + (idx + 1) + '. ' + body;
-
-  return line;
-}
-
-function toggleTaskLine(line) {
-  return line.replace(
-    /(^\s*[-*+]\s+\[)([ xX])(\])/,
-    (_, a, c, d) => a + (c.toLowerCase() === 'x' ? ' ' : 'x') + d
-  );
-}
-
-function clearHeading(line) {
-  return line.replace(/^(\s*)#{1,6}\s+/, '$1');
+/** Runs a toolbar/menu format action against the live editor. */
+export function applyEditorFormat(fmt) {
+  return runEditorCommand(getView(), FORMAT_COMMANDS[fmt]);
 }

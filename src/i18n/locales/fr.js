@@ -773,6 +773,30 @@ export default {
   editor: {
     imagePreviewAria: 'Aperçu de l’image. Appuyez pour afficher la poignée de redimensionnement.',
     resizeImageTitle: 'Faites glisser pour redimensionner l’image · double-clic pour réinitialiser',
+
+    commands: {
+      bold: 'Gras',
+      italic: 'Italique',
+      strikethrough: 'Barré',
+      highlight: 'Surligner',
+      inlineCode: 'Code en ligne',
+      link: 'Lien',
+
+      heading1: 'Titre 1',
+      heading2: 'Titre 2',
+      heading3: 'Titre 3',
+      heading4: 'Titre 4',
+      heading5: 'Titre 5',
+      heading6: 'Titre 6',
+      paragraph: 'Supprimer le titre',
+
+      bulletList: 'Liste à puces',
+      numberedList: 'Liste numérotée',
+      taskList: 'Liste de tâches',
+      quote: 'Citation',
+      codeBlock: 'Bloc de code',
+      toggleTaskDone: 'Cocher la tâche',
+    },
   },
 
   palette: {
@@ -819,6 +843,7 @@ export default {
       language: 'Langue',
       colors: 'Couleurs',
       typography: 'Typographie',
+      shortcuts: 'Raccourcis',
       dashboard: 'Tableau de bord',
       quickCreate: 'Actions rapides',
       calendar: 'Calendrier',
@@ -838,6 +863,7 @@ export default {
       appearance: { title: 'Apparence', subtitle: 'Choisissez l’apparence de YANTA.' },
       colors: { title: 'Couleurs', subtitle: 'Personnalisez la palette de couleurs. Les modes clair et sombre se configurent séparément.' },
       typography: { title: 'Typographie', subtitle: 'Choisissez les polices et les tailles.' },
+      shortcuts: { title: 'Raccourcis', subtitle: 'Réattribuez les commandes de mise en forme de l’éditeur.' },
       dashboard: { title: 'Tableau de bord', subtitle: 'Choisissez l’affichage des cartes de notes et de dossiers.' },
       quickCreate: { title: 'Actions rapides', subtitle: 'Personnalisez le bouton flottant d’accès rapide : icône de déclenchement, actions, libellés et positions libres.' },
       calendar: { title: 'Calendrier', subtitle: 'Configurez l’affichage des dates, le format de l’heure, le début de semaine et les numéros de semaine.' },
@@ -874,6 +900,24 @@ export default {
       resetConfirmMessage: 'Réinitialiser l’apparence, les couleurs et la typographie aux valeurs par défaut ?\n\nVos notes ne sont pas affectées.',
       resetConfirmAction: 'Réinitialiser l’apparence',
       resetToast: 'Apparence réinitialisée',
+    },
+
+    shortcuts: {
+      groups: {
+        inline: 'Mise en forme en ligne',
+        headings: 'Titres',
+        blocks: 'Listes et blocs',
+      },
+      deviceNote: 'Les raccourcis s’appliquent lors de l’écriture d’une note et sont enregistrés sur cet appareil.',
+      browserNote: 'Le navigateur réserve Ctrl+1 … Ctrl+6 et Ctrl+0 pour les onglets et le zoom. Dans l’app installée ils atteignent l’éditeur ; dans un onglet, utilisez la variante Alt.',
+      add: 'Ajouter',
+      pressKeys: 'Appuyez sur les touches…',
+      unbound: 'Aucun',
+      reset: 'Rétablir la valeur par défaut',
+      resetAll: 'Tout rétablir',
+      removeAria: 'Supprimer {chord}',
+      conflict: '{chord} est déjà utilisé par {command}.',
+      takeOver: 'L’utiliser ici',
     },
 
     typography: {

@@ -763,6 +763,30 @@ export default {
   editor: {
     imagePreviewAria: '画像プレビュー。タップするとサイズ変更ハンドルが表示されます。',
     resizeImageTitle: 'ドラッグで画像をサイズ変更 · ダブルクリックでリセット',
+
+    commands: {
+      bold: '太字',
+      italic: '斜体',
+      strikethrough: '取り消し線',
+      highlight: 'ハイライト',
+      inlineCode: 'インラインコード',
+      link: 'リンク',
+
+      heading1: '見出し 1',
+      heading2: '見出し 2',
+      heading3: '見出し 3',
+      heading4: '見出し 4',
+      heading5: '見出し 5',
+      heading6: '見出し 6',
+      paragraph: '見出しを解除',
+
+      bulletList: '箇条書き',
+      numberedList: '番号付きリスト',
+      taskList: 'タスクリスト',
+      quote: '引用',
+      codeBlock: 'コードブロック',
+      toggleTaskDone: 'タスクの完了を切り替え',
+    },
   },
 
   palette: {
@@ -809,6 +833,7 @@ export default {
       language: '言語',
       colors: '配色',
       typography: 'タイポグラフィ',
+      shortcuts: 'ショートカット',
       dashboard: 'ダッシュボード',
       quickCreate: 'クイックアクション',
       calendar: 'カレンダー',
@@ -828,6 +853,7 @@ export default {
       appearance: { title: '外観', subtitle: 'YANTA の見た目を選びます。' },
       colors: { title: '配色', subtitle: 'カラーパレットをカスタマイズします。ダークモードとライトモードは個別に設定します。' },
       typography: { title: 'タイポグラフィ', subtitle: 'フォントとサイズを選びます。' },
+      shortcuts: { title: 'ショートカット', subtitle: 'エディターの書式コマンドのキーを変更します。' },
       dashboard: { title: 'ダッシュボード', subtitle: 'ノートとフォルダーのカードの表示方法を選びます。' },
       quickCreate: { title: 'クイックアクション', subtitle: 'フローティングのクイックアクセスボタンをカスタマイズします：トリガーアイコン、アクション、ラベル、自由な配置。' },
       calendar: { title: 'カレンダー', subtitle: '日付表示、時刻形式、週の始まり、週番号を設定します。' },
@@ -864,6 +890,24 @@ export default {
       resetConfirmMessage: '外観・配色・タイポグラフィを既定値に戻しますか？\n\nノートには影響しません。',
       resetConfirmAction: '外観をリセット',
       resetToast: '外観をリセットしました',
+    },
+
+    shortcuts: {
+      groups: {
+        inline: 'インライン書式',
+        headings: '見出し',
+        blocks: 'リストとブロック',
+      },
+      deviceNote: 'ショートカットはノートの編集中に有効で、この端末に保存されます。',
+      browserNote: 'Ctrl+1 … Ctrl+6 と Ctrl+0 はブラウザーがタブとズームに使います。インストール版アプリではエディターに届きますが、ブラウザーのタブでは Alt 版を使ってください。',
+      add: '追加',
+      pressKeys: 'キーを押してください…',
+      unbound: 'なし',
+      reset: '既定に戻す',
+      resetAll: 'すべて既定に戻す',
+      removeAria: '{chord} を削除',
+      conflict: '{chord} は既に {command} で使われています。',
+      takeOver: 'ここで使う',
     },
 
     typography: {

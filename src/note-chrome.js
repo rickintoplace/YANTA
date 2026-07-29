@@ -26,6 +26,7 @@ import {
 
 import {
   applyEditorFormat,
+  formatShortcutHint,
 } from './format-menu.js';
 
 import {
@@ -564,48 +565,25 @@ function openFormatMenu(anchor) {
 
   const r = anchor.getBoundingClientRect();
 
+  // `fmt` doubles as the shortcut lookup, so the menu always shows the
+  // chord that is actually bound — including one the user changed.
+  const entry = (fmt, label, icon) => ({
+    label,
+    icon,
+    hint: formatShortcutHint(fmt),
+    action: () => applyEditorFormat(fmt),
+  });
+
   showMenu(r.left, r.top - 6, [
-    {
-      label: 'H1',
-      icon: 'heading-1',
-      action: () => applyEditorFormat('h1'),
-    },
-    {
-      label: 'H2',
-      icon: 'heading-2',
-      action: () => applyEditorFormat('h2'),
-    },
-    {
-      label: 'Aa',
-      icon: 'type',
-      action: () => applyEditorFormat('clear-heading'),
-    },
+    entry('h1', 'H1', 'heading-1'),
+    entry('h2', 'H2', 'heading-2'),
+    entry('clear-heading', 'Aa', 'type'),
     'hr',
-    {
-      label: t('note.format.strong'),
-      icon: 'bold',
-      action: () => applyEditorFormat('bold'),
-    },
-    {
-      label: t('note.format.italic'),
-      icon: 'italic',
-      action: () => applyEditorFormat('italic'),
-    },
-    {
-      label: t('note.format.strikethrough'),
-      icon: 'strikethrough',
-      action: () => applyEditorFormat('strike'),
-    },
-    {
-      label: t('note.format.createLink'),
-      icon: 'link',
-      action: () => applyEditorFormat('link'),
-    },
-    {
-      label: t('note.format.highlight'),
-      icon: 'highlighter',
-      action: () => applyEditorFormat('highlight'),
-    },
+    entry('bold', t('note.format.strong'), 'bold'),
+    entry('italic', t('note.format.italic'), 'italic'),
+    entry('strike', t('note.format.strikethrough'), 'strikethrough'),
+    entry('link', t('note.format.createLink'), 'link'),
+    entry('highlight', t('note.format.highlight'), 'highlighter'),
   ], {
     align: 'start',
   });

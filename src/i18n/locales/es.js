@@ -773,6 +773,30 @@ export default {
   editor: {
     imagePreviewAria: 'Vista previa de la imagen. Toca para mostrar el controlador de tamaño.',
     resizeImageTitle: 'Arrastra para cambiar el tamaño de la imagen · doble clic para restablecer',
+
+    commands: {
+      bold: 'Negrita',
+      italic: 'Cursiva',
+      strikethrough: 'Tachado',
+      highlight: 'Resaltar',
+      inlineCode: 'Código en línea',
+      link: 'Enlace',
+
+      heading1: 'Título 1',
+      heading2: 'Título 2',
+      heading3: 'Título 3',
+      heading4: 'Título 4',
+      heading5: 'Título 5',
+      heading6: 'Título 6',
+      paragraph: 'Quitar título',
+
+      bulletList: 'Lista con viñetas',
+      numberedList: 'Lista numerada',
+      taskList: 'Lista de tareas',
+      quote: 'Cita',
+      codeBlock: 'Bloque de código',
+      toggleTaskDone: 'Marcar tarea',
+    },
   },
 
   palette: {
@@ -819,6 +843,7 @@ export default {
       language: 'Idioma',
       colors: 'Colores',
       typography: 'Tipografía',
+      shortcuts: 'Atajos',
       dashboard: 'Panel',
       quickCreate: 'Acciones rápidas',
       calendar: 'Calendario',
@@ -838,6 +863,7 @@ export default {
       appearance: { title: 'Apariencia', subtitle: 'Elige el aspecto de YANTA.' },
       colors: { title: 'Colores', subtitle: 'Personaliza la paleta de colores. Los modos claro y oscuro se configuran por separado.' },
       typography: { title: 'Tipografía', subtitle: 'Elige las fuentes y los tamaños.' },
+      shortcuts: { title: 'Atajos', subtitle: 'Reasigna los comandos de formato del editor.' },
       dashboard: { title: 'Panel', subtitle: 'Elige cómo se muestran las tarjetas de notas y carpetas.' },
       quickCreate: { title: 'Acciones rápidas', subtitle: 'Personaliza el botón flotante de acceso rápido: icono de activación, acciones, etiquetas y posiciones libres.' },
       calendar: { title: 'Calendario', subtitle: 'Configura la visualización de fechas, el formato de hora, el inicio de semana y las semanas del calendario.' },
@@ -874,6 +900,24 @@ export default {
       resetConfirmMessage: '¿Restablecer apariencia, colores y tipografía a los valores predeterminados?\n\nTus notas no se ven afectadas.',
       resetConfirmAction: 'Restablecer apariencia',
       resetToast: 'Apariencia restablecida',
+    },
+
+    shortcuts: {
+      groups: {
+        inline: 'Formato en línea',
+        headings: 'Títulos',
+        blocks: 'Listas y bloques',
+      },
+      deviceNote: 'Los atajos se aplican al escribir una nota y se guardan en este dispositivo.',
+      browserNote: 'El navegador usa Ctrl+1 … Ctrl+6 y Ctrl+0 para las pestañas y el zoom. En la app instalada llegan al editor; en una pestaña usa la variante con Alt.',
+      add: 'Añadir',
+      pressKeys: 'Pulsa las teclas…',
+      unbound: 'Ninguno',
+      reset: 'Restaurar el valor predeterminado',
+      resetAll: 'Restaurar todos los valores predeterminados',
+      removeAria: 'Quitar {chord}',
+      conflict: '{chord} ya lo usa {command}.',
+      takeOver: 'Usarlo aquí',
     },
 
     typography: {

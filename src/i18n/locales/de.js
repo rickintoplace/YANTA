@@ -1222,7 +1222,28 @@ export default {
       manual: 'von dir gestartet',
       clear: 'Verlauf leeren',
     },
-    library: { soon: 'Hier entsteht eine Bibliothek fertiger Routinen.' },
+    library: {
+      intro: 'Fertige Routinen zum Anpassen. Hinzufügen legt eine editierbare Notiz an — es läuft nichts, bis du sie einschaltest.',
+      add: 'Hinzufügen',
+      added: '„{name}“ hinzugefügt. Unter Routinen einschalten.',
+      alreadyInstalled: 'Hinzugefügt',
+      shareRoutine: 'Diese Routine teilen',
+      linkCopied: 'Link kopiert. Die ganze Routine steckt darin — hochgeladen wurde nichts.',
+      copyFailed: 'Der Link konnte nicht kopiert werden.',
+      pasteLabel: 'Du hast einen Routine-Link?',
+      pastePlaceholder: 'Routine-Link einfügen…',
+      open: 'Öffnen',
+      importTitle: 'Geteilte Routine hinzufügen',
+      importFailed: 'Dieser Link konnte nicht gelesen werden.',
+      instructions: 'Was sie tun wird',
+      install: 'Routine hinzufügen',
+      cancel: 'Abbrechen',
+      installed: '„{name}“ hinzugefügt. Schalte sie ein, wenn du so weit bist.',
+      guardReadOnly: 'Sie darf nur lesen und berichten. Ändern oder löschen kann sie nichts.',
+      guardDisabled: 'Sie kommt ausgeschaltet an. Es läuft nichts, bis du es sagst.',
+      guardLocal: 'Sie stammt aus diesem Link, nicht von einem Server. Es wurde nichts geladen oder hochgeladen.',
+      guardClamped: 'Der Absender wollte „{tools}“-Zugriff. Der wurde abgelehnt — du kannst ihn später in der Routine-Notiz erteilen.',
+    },
     duplicates: {
       body: {
         one: 'Eine Routine existiert doppelt — vermutlich haben zwei Geräte sie vor dem ersten Sync angelegt. Verwendet wird die ältere Kopie.',
@@ -1300,6 +1321,7 @@ export default {
       chatUnread: 'Bei ungelesenen Chats',
     },
 
+    output: { inbox: 'Pulse-Posteingang', journal: 'Heutige Notiz', chat: 'YANTA-AI-Chat' },
     profile: {
       read: 'Liest nur',
       write: 'Darf schreiben',

@@ -181,6 +181,50 @@ export function injectPulseCss() {
   font-size: 12px;
   line-height: 1.55;
 }
+
+/*
+  Phones: name, description and chips have no room to share a line with
+  three controls — everything ends up two words wide. Stack instead, and
+  give the controls their own full-width row where they can breathe.
+*/
+@media (max-width: 720px) {
+  .yanta-pulse-routine {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+
+    padding: 14px;
+  }
+
+  .yanta-pulse-routine-name { font-size: 14px; }
+  .yanta-pulse-routine-desc { font-size: 12.5px; }
+
+  .yanta-pulse-routine-when { gap: 6px; margin-top: 2px; }
+  .yanta-pulse-chip { padding: 3px 9px; font-size: 11.5px; }
+
+  .yanta-pulse-routine-side {
+    gap: 10px;
+    padding-top: 11px;
+    border-top: 1px solid var(--border);
+  }
+
+  /* "Run now" takes the free space; the icon and switch keep their size
+     and stay reachable at the right edge under a thumb. */
+  .yanta-pulse-routine-side .yanta-pulse-mini:first-child { flex: 1; }
+
+  .yanta-pulse-mini {
+    padding: 9px 12px;
+    font-size: 12.5px;
+  }
+
+  .yanta-pulse-switch {
+    width: 42px;
+    height: 25px;
+  }
+
+  .yanta-pulse-switch::after { width: 21px; height: 21px; }
+  .yanta-pulse-switch:checked::after { transform: translateX(17px); }
+}
 `;
 
   document.head.append(style);

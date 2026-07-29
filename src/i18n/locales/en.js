@@ -1241,7 +1241,28 @@ export default {
       manual: 'started by you',
       clear: 'Clear history',
     },
-    library: { soon: 'A library of ready-made routines is coming here.' },
+    library: {
+      intro: 'Ready-made routines you can adapt. Adding one creates an editable note — nothing runs until you switch it on.',
+      add: 'Add',
+      added: 'Added “{name}”. Switch it on under Routines.',
+      alreadyInstalled: 'Added',
+      shareRoutine: 'Share this routine',
+      linkCopied: 'Link copied. The whole routine travels inside it — nothing was uploaded.',
+      copyFailed: 'Could not copy the link.',
+      pasteLabel: 'Got a routine link?',
+      pastePlaceholder: 'Paste a routine link…',
+      open: 'Open',
+      importTitle: 'Add a shared routine',
+      importFailed: 'This link could not be read.',
+      instructions: 'What it will do',
+      install: 'Add routine',
+      cancel: 'Cancel',
+      installed: 'Added “{name}”. Switch it on when you are ready.',
+      guardReadOnly: 'It can only read and report. It cannot change or delete anything.',
+      guardDisabled: 'It arrives switched off. Nothing runs until you say so.',
+      guardLocal: 'It came from this link, not from a server. Nothing was fetched or uploaded.',
+      guardClamped: 'The sender asked for “{tools}” access. That was declined — you can grant it later in the routine note.',
+    },
     duplicates: {
       body: {
         one: 'One routine exists twice, probably because two devices set it up before syncing. The older copy is the one in use.',
@@ -1319,6 +1340,7 @@ export default {
       chatUnread: 'When chats go unread',
     },
 
+    output: { inbox: 'Pulse Inbox', journal: 'Today’s note', chat: 'YANTA AI chat' },
     profile: {
       read: 'Reads only',
       write: 'Can write',

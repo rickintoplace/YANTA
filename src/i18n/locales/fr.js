@@ -1222,7 +1222,28 @@ export default {
       manual: 'lancée par vous',
       clear: 'Vider l’historique',
     },
-    library: { soon: 'Une bibliothèque de routines prêtes à l’emploi arrivera ici.' },
+    library: {
+      intro: 'Des routines prêtes à adapter. En ajouter une crée une note modifiable — rien ne s’exécute avant que vous ne l’activiez.',
+      add: 'Ajouter',
+      added: '« {name} » ajoutée. Activez-la dans Routines.',
+      alreadyInstalled: 'Ajoutée',
+      shareRoutine: 'Partager cette routine',
+      linkCopied: 'Lien copié. La routine entière voyage dedans — rien n’a été téléversé.',
+      copyFailed: 'Impossible de copier le lien.',
+      pasteLabel: 'Vous avez un lien de routine ?',
+      pastePlaceholder: 'Collez un lien de routine…',
+      open: 'Ouvrir',
+      importTitle: 'Ajouter une routine partagée',
+      importFailed: 'Ce lien n’a pas pu être lu.',
+      instructions: 'Ce qu’elle fera',
+      install: 'Ajouter la routine',
+      cancel: 'Annuler',
+      installed: '« {name} » ajoutée. Activez-la quand vous le souhaitez.',
+      guardReadOnly: 'Elle peut seulement lire et rapporter. Elle ne peut rien modifier ni supprimer.',
+      guardDisabled: 'Elle arrive désactivée. Rien ne s’exécute avant votre accord.',
+      guardLocal: 'Elle vient de ce lien, pas d’un serveur. Rien n’a été récupéré ni téléversé.',
+      guardClamped: 'L’expéditeur demandait un accès « {tools} ». Il a été refusé — vous pourrez l’accorder plus tard dans la note de la routine.',
+    },
     duplicates: {
       body: {
         one: 'Une routine existe en double, probablement parce que deux appareils l’ont créée avant la synchronisation. C’est la copie la plus ancienne qui est utilisée.',
@@ -1300,6 +1321,7 @@ export default {
       chatUnread: 'En cas de discussions non lues',
     },
 
+    output: { inbox: 'Boîte Pulse', journal: 'Note du jour', chat: 'Chat YANTA AI' },
     profile: {
       read: 'Lecture seule',
       write: 'Peut écrire',

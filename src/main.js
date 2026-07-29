@@ -1889,6 +1889,65 @@ function clearAddLibraryUrl() {
   confirm modal would otherwise render behind the full-screen boot splash and
   block the whole app boot on a dialog the user cannot see. Fire-and-forget.
 */
+/*
+  A shared Pulse routine arrives as "#pulse-routine=<payload>". The whole
+  routine is in the fragment, so nothing is fetched and no server is
+  involved — see pulse-library.js.
+*/
+function pulseRoutinePayloadFrom(input = location.href) {
+  let hash = '';
+  let search = '';
+
+  try {
+    const url = new URL(input, location.href);
+    hash = url.hash;
+    search = url.search;
+  } catch {
+    hash = String(input || '');
+  }
+
+  return String(
+    new URLSearchParams(String(hash).replace(/^#/, '')).get('pulse-routine') ||
+    new URLSearchParams(String(search).replace(/^\?/, '')).get('pulse-routine') ||
+    ''
+  );
+}
+
+function clearPulseRoutineUrl() {
+  history.replaceState({}, '', location.pathname + location.search);
+}
+
+let activePulseRoutinePayload = '';
+let queuedPulseRoutinePayload = '';
+
+async function runPulseRoutineImport(payload) {
+  // Deduped: the same deep link can arrive through several channels at once.
+  if (!payload || payload === activePulseRoutinePayload) return;
+
+  activePulseRoutinePayload = payload;
+
+  try {
+    const { openRoutineImport } = await import('./pulse/pulse-import-ui.js');
+    await openRoutineImport(payload);
+  } catch (err) {
+    console.warn('[YANTA Pulse] routine import failed', err);
+  } finally {
+    activePulseRoutinePayload = '';
+  }
+}
+
+/*
+  Queued until the boot splash is released, for the same reason as the
+  Excalidraw import: a review dialog behind the splash is a dialog the
+  user cannot answer.
+*/
+function requestPulseRoutineImport(payload) {
+  if (!payload) return;
+
+  if (excalidrawImportBootFinished) runPulseRoutineImport(payload);
+  else queuedPulseRoutinePayload = payload;
+}
+
 let activeExcalidrawLibraryImportUrl = '';
 
 async function runExcalidrawLibraryImport(libraryUrl) {
@@ -1957,6 +2016,12 @@ function flushQueuedExcalidrawLibraryImport() {
     const url = queuedExcalidrawLibraryUrl;
     queuedExcalidrawLibraryUrl = '';
     runExcalidrawLibraryImport(url);
+  }
+
+  if (queuedPulseRoutinePayload) {
+    const payload = queuedPulseRoutinePayload;
+    queuedPulseRoutinePayload = '';
+    runPulseRoutineImport(payload);
   }
 }
 
@@ -2032,6 +2097,18 @@ async function init() {
   }
 
   /*
+    "#pulse-routine=" carries a shared Pulse routine in the fragment. Same
+    capture-then-clear shape as the library link above, and for the same
+    reason: the review dialog must not render behind the boot splash.
+  */
+  const bootRoutinePayload = pulseRoutinePayloadFrom();
+  if (bootRoutinePayload) {
+    console.info('[YANTA] Pending Pulse routine import (boot)');
+    clearPulseRoutineUrl();
+    requestPulseRoutineImport(bootRoutinePayload);
+  }
+
+  /*
     Also handle the deep link when YANTA is ALREADY running. An installed PWA
     with `launch_handler: navigate-existing` is FLAKY about how it delivers a
     warm launch: sometimes a `hashchange`, sometimes only via `launchQueue`,
@@ -2056,6 +2133,35 @@ async function init() {
 
   window.addEventListener('hashchange', () => consumeAddLibraryFrom('hashchange', location.href));
   window.addEventListener('focus', () => consumeAddLibraryFrom('focus', location.href));
+
+  /*
+    Same delivery channels as the Excalidraw link: a warm PWA launch is
+    flaky about which one it uses.
+
+    `hashchange` reads event.newURL rather than location, because the app's
+    own hash router also handles the event and has usually rewritten the
+    hash to the current surface by the time this listener runs. newURL is
+    the URL the event was fired for and cannot be raced.
+  */
+  const consumePulseRoutineFrom = (source, input) => {
+    const payload = pulseRoutinePayloadFrom(input || location.href);
+    if (!payload) return;
+
+    console.info(`[YANTA] Pending Pulse routine import (${source})`);
+
+    if (pulseRoutinePayloadFrom(location.href)) clearPulseRoutineUrl();
+
+    requestPulseRoutineImport(payload);
+  };
+
+  window.addEventListener('hashchange', (event) => {
+    consumePulseRoutineFrom('hashchange', event.newURL);
+  });
+
+  window.addEventListener('focus', () => consumePulseRoutineFrom('focus'));
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') consumePulseRoutineFrom('visible');
+  });
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') {
       consumeAddLibraryFrom('visible', location.href);

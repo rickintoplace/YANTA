@@ -132,6 +132,12 @@ function injectCss() {
 
 .yanta-pulse-ov-tab {
   flex: 1;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+
   padding: 7px 10px;
 
   border: 0;
@@ -145,6 +151,9 @@ function injectCss() {
 
   transition: background .14s ease, color .14s ease;
 }
+
+.yanta-pulse-ov-tab > svg { flex: 0 0 auto; opacity: .8; }
+.yanta-pulse-ov-tab.active > svg { opacity: 1; color: var(--accent); }
 
 .yanta-pulse-ov-tab:hover { color: var(--text); }
 
@@ -224,8 +233,6 @@ function injectCss() {
     padding: 14px 16px calc(24px + env(safe-area-inset-bottom));
   }
 
-  .yanta-pulse-routine { padding: 13px; }
-  .yanta-pulse-mini { padding: 7px 11px; font-size: 12px; }
 }
 
 .yanta-pulse-hist {
@@ -304,6 +311,66 @@ function injectCss() {
   color: var(--text-dim);
   font-size: 12px;
 }
+
+.yanta-pulse-lib-grid {
+  flex: 0 0 auto;
+
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(216px, 1fr));
+  gap: 10px;
+}
+
+.yanta-pulse-lib-card {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+
+  padding: 13px;
+
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--bg-elev);
+}
+
+.yanta-pulse-lib-card.is-installed { opacity: .6; }
+
+.yanta-pulse-lib-head {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.yanta-pulse-lib-head > svg { flex: 0 0 auto; color: var(--accent); }
+
+.yanta-pulse-lib-head strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.yanta-pulse-lib-card p {
+  flex: 1;
+  margin: 0;
+
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.yanta-pulse-mini.primary-ghost {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
+  color: var(--accent);
+}
+
+.yanta-pulse-lib-paste {
+  flex: 0 0 auto;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
+.yanta-pulse-lib-paste .yanta-settings-input { flex: 1; min-width: 0; }
 
 `;
 
@@ -394,6 +461,34 @@ function routineRow(routine, { overCap, inboxCount, state, onChange }) {
     await openNote(routine.noteId);
   });
 
+  // Sharing is a link, not an upload — the routine travels in the
+  // fragment, so nothing leaves the device on the way out either.
+  const share = el('button', {
+    type: 'button',
+    class: 'yanta-pulse-mini',
+    title: t('pulse.library.shareRoutine'),
+    'aria-label': t('pulse.library.shareRoutine'),
+  });
+
+  share.innerHTML = lucide('share-2', 12);
+
+  share.addEventListener('click', async () => {
+    const { copyRoutineLink } = await import('./pulse-library.js');
+    const result = await copyRoutineLink(routine.markdown);
+
+    if (result.ok) {
+      toast(t('pulse.library.linkCopied'), 'success');
+      return;
+    }
+
+    if (navigator.share) {
+      await navigator.share({ title: routine.name, url: result.link }).catch(() => {});
+      return;
+    }
+
+    toast(result.message, 'error');
+  });
+
   const toggle = el('input', {
     type: 'checkbox',
     class: 'yanta-pulse-switch',
@@ -413,7 +508,7 @@ function routineRow(routine, { overCap, inboxCount, state, onChange }) {
     }
   });
 
-  side.append(run, open, toggle);
+  side.append(run, share, open, toggle);
   row.append(meta, side);
 
   return row;
@@ -573,8 +668,120 @@ function emptyState(icon, text) {
   return wrap;
 }
 
-function renderLibraryTab(host) {
-  host.replaceChildren(emptyState('library', t('pulse.library.soon')));
+/**
+ * Ready-made routines, plus the way in for one somebody sent you.
+ *
+ * The catalog is a lazy import so none of its prose sits in the boot
+ * bundle — nobody needs it until this tab is opened.
+ */
+async function renderLibraryTab(host, onChange) {
+  const [{ catalogFor }, routines] = await Promise.all([
+    import('./pulse-catalog.js'),
+    listRoutines(),
+  ]);
+
+  const installed = new Set(routines.map((routine) => routine.name));
+  const items = catalogFor(installed);
+
+  host.replaceChildren();
+
+  host.append(el('div', { class: 'yanta-pulse-ov-soon' }, t('pulse.library.intro')));
+
+  const grid = el('div', { class: 'yanta-pulse-lib-grid' });
+
+  for (const item of items) {
+    grid.append(catalogCard(item, onChange));
+  }
+
+  host.append(grid);
+  host.append(pasteLinkRow(onChange));
+}
+
+function catalogCard(item, onChange) {
+  const card = el('div', {
+    class: `yanta-pulse-lib-card${item.installed ? ' is-installed' : ''}`,
+  });
+
+  const head = el('div', { class: 'yanta-pulse-lib-head' });
+  head.innerHTML = `${lucide(item.icon, 15)}<strong>${escapeHtml(item.name)}</strong>`;
+  card.append(head);
+
+  card.append(el('p', {}, item.description));
+
+  const action = el('button', {
+    type: 'button',
+    class: `yanta-pulse-mini${item.installed ? '' : ' primary-ghost'}`,
+  });
+
+  action.textContent = item.installed
+    ? t('pulse.library.alreadyInstalled')
+    : t('pulse.library.add');
+
+  action.disabled = item.installed;
+
+  action.addEventListener('click', async () => {
+    action.disabled = true;
+
+    try {
+      const { installRoutine } = await import('./pulse-library.js');
+      const created = await installRoutine(item.markdown, { name: item.name });
+
+      toast(t('pulse.library.added', { name: created.name }), 'success');
+      onChange();
+    } catch (err) {
+      action.disabled = false;
+      toast(err?.message || String(err), 'error');
+    }
+  });
+
+  card.append(action);
+
+  return card;
+}
+
+/**
+ * A pasted link, for when the routine arrived somewhere that will not
+ * hand YANTA a deep link — an email, a screenshot's caption, a laptop.
+ */
+function pasteLinkRow(onChange) {
+  const wrap = el('div', { class: 'yanta-pulse-lib-paste' });
+
+  wrap.append(el('div', { class: 'yanta-pulse-import-label' }, t('pulse.library.pasteLabel')));
+
+  const row = el('div', { class: 'yanta-pulse-actions' });
+
+  const input = el('input', {
+    type: 'text',
+    class: 'yanta-settings-input',
+    placeholder: t('pulse.library.pastePlaceholder'),
+  });
+
+  const go = el('button', { type: 'button', class: 'yanta-pulse-mini' }, t('pulse.library.open'));
+
+  const submit = async () => {
+    const value = input.value.trim();
+    if (!value) return;
+
+    const { routinePayloadFrom } = await import('./pulse-library.js');
+    const payload = routinePayloadFrom(value) || value;
+
+    const { openRoutineImport } = await import('./pulse-import-ui.js');
+
+    input.value = '';
+    await openRoutineImport(payload);
+
+    onChange();
+  };
+
+  go.addEventListener('click', submit);
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter') submit();
+  });
+
+  row.append(input, go);
+  wrap.append(row);
+
+  return wrap;
 }
 
 // ---------------- shell -------------------------------------------
@@ -678,21 +885,24 @@ function ensureModal() {
     }
 
     if (activeTab === 'history') return renderHistoryTab(body, refresh);
-    if (activeTab === 'library') return renderLibraryTab(body);
+    if (activeTab === 'library') return renderLibraryTab(body, refresh);
 
     return renderRoutinesTab(body, refresh);
   };
 
-  for (const [id, key] of [
-    ['routines', 'pulse.tabs.routines'],
-    ['history', 'pulse.tabs.history'],
-    ['library', 'pulse.tabs.library'],
+  for (const [id, key, icon] of [
+    ['routines', 'pulse.tabs.routines', 'activity'],
+    ['history', 'pulse.tabs.history', 'history'],
+    ['library', 'pulse.tabs.library', 'library'],
   ]) {
     const button = el('button', {
       type: 'button',
       class: 'yanta-pulse-ov-tab',
       dataset: { tab: id },
-    }, t(key));
+    });
+
+    button.innerHTML = lucide(icon, 14);
+    button.append(el('span', {}, t(key)));
 
     button.addEventListener('click', () => {
       activeTab = id;

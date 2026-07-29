@@ -1222,7 +1222,28 @@ export default {
       manual: 'iniciada por ti',
       clear: 'Vaciar el historial',
     },
-    library: { soon: 'Aquí llegará una biblioteca de rutinas listas para usar.' },
+    library: {
+      intro: 'Rutinas listas para adaptar. Añadir una crea una nota editable: no se ejecuta nada hasta que la actives.',
+      add: 'Añadir',
+      added: 'Se ha añadido «{name}». Actívala en Rutinas.',
+      alreadyInstalled: 'Añadida',
+      shareRoutine: 'Compartir esta rutina',
+      linkCopied: 'Enlace copiado. La rutina entera viaja dentro: no se ha subido nada.',
+      copyFailed: 'No se ha podido copiar el enlace.',
+      pasteLabel: '¿Tienes un enlace de rutina?',
+      pastePlaceholder: 'Pega un enlace de rutina…',
+      open: 'Abrir',
+      importTitle: 'Añadir una rutina compartida',
+      importFailed: 'No se ha podido leer este enlace.',
+      instructions: 'Qué va a hacer',
+      install: 'Añadir rutina',
+      cancel: 'Cancelar',
+      installed: 'Se ha añadido «{name}». Actívala cuando quieras.',
+      guardReadOnly: 'Solo puede leer e informar. No puede modificar ni eliminar nada.',
+      guardDisabled: 'Llega desactivada. No se ejecuta nada hasta que tú lo digas.',
+      guardLocal: 'Viene de este enlace, no de un servidor. No se ha descargado ni subido nada.',
+      guardClamped: 'Quien la envió pedía acceso «{tools}». Se ha denegado: puedes concederlo más tarde en la nota de la rutina.',
+    },
     duplicates: {
       body: {
         one: 'Una rutina está duplicada, probablemente porque dos dispositivos la crearon antes de sincronizar. Se usa la copia más antigua.',
@@ -1300,6 +1321,7 @@ export default {
       chatUnread: 'Cuando haya chats sin leer',
     },
 
+    output: { inbox: 'Bandeja de Pulse', journal: 'Nota de hoy', chat: 'Chat de YANTA AI' },
     profile: {
       read: 'Solo lee',
       write: 'Puede escribir',

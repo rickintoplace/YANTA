@@ -1211,7 +1211,28 @@ export default {
       manual: '手動で実行',
       clear: '履歴を消去',
     },
-    library: { soon: 'ここに既成ルーティンのライブラリを用意する予定です。' },
+    library: {
+      intro: '手を加えて使える既成ルーティンです。追加すると編集可能なノートができます。オンにするまで何も実行されません。',
+      add: '追加',
+      added: '「{name}」を追加しました。ルーティンからオンにしてください。',
+      alreadyInstalled: '追加済み',
+      shareRoutine: 'このルーティンを共有',
+      linkCopied: 'リンクをコピーしました。ルーティン全体がこの中にあり、アップロードは行われていません。',
+      copyFailed: 'リンクをコピーできませんでした。',
+      pasteLabel: 'ルーティンのリンクがありますか?',
+      pastePlaceholder: 'ルーティンのリンクを貼り付け…',
+      open: '開く',
+      importTitle: '共有されたルーティンを追加',
+      importFailed: 'このリンクは読み取れませんでした。',
+      instructions: '実行される内容',
+      install: 'ルーティンを追加',
+      cancel: 'キャンセル',
+      installed: '「{name}」を追加しました。準備ができたらオンにしてください。',
+      guardReadOnly: '読み取りと報告のみ可能です。変更や削除はできません。',
+      guardDisabled: 'オフの状態で追加されます。あなたが許可するまで実行されません。',
+      guardLocal: 'サーバーではなくこのリンクから来ています。取得もアップロードも行われていません。',
+      guardClamped: '送信者は「{tools}」権限を要求しましたが、拒否しました。必要ならあとでルーティンのノートで許可できます。',
+    },
     duplicates: {
       body: {
         other: 'ルーティンが {count} 件重複しています。同期前に複数の端末で作成されたためと思われます。古い方が使用されます。',
@@ -1283,6 +1304,7 @@ export default {
       chatUnread: '未読のチャットがあるとき',
     },
 
+    output: { inbox: 'Pulse 受信トレイ', journal: '今日のノート', chat: 'YANTA AI チャット' },
     profile: {
       read: '読み取りのみ',
       write: '書き込み可',

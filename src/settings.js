@@ -52,6 +52,7 @@ import {
 
 import { installCardElement } from './install/install-ui.js';
 import { notificationsSettingsElement } from './install/notifications-settings.js';
+import { pulseSettingsElement } from './pulse/pulse-settings-panel.js';
 
 // ----------------------------------------------------------------
 // Theme tokens — these map 1:1 to CSS custom properties.
@@ -1056,6 +1057,7 @@ const SETTINGS_SECTIONS = [
   { id: 'sources',      label: 'Sources',         icon: 'rss',            keywords: 'rss feeds sources' },
   { id: 'ai',           label: 'AI',              icon: 'bot',            keywords: 'assistant model provider' },
   { id: 'semantic',     label: 'Semantic search', icon: 'brain-circuit',  keywords: 'embeddings vector search' },
+  { id: 'pulse',        label: 'Pulse',           icon: 'activity',       keywords: 'routine automation background proactive agent heartbeat schedule digest' },
   { id: 'chat',         label: 'Chat',            icon: 'message-circle', keywords: 'messages conversation' },
   { id: 'sync',         label: 'Sync & Backup',   icon: 'refresh-cw',     keywords: 'cloud backup devices encrypted google drive' },
   { id: 'notifications', label: 'Notifications',  icon: 'bell',           keywords: 'alerts push reminders' },
@@ -1255,6 +1257,7 @@ function renderSettingsBody() {
   else if (activeSection === 'sources') renderSourcesSection(content);
   else if (activeSection === 'ai') renderAiSection(content);
   else if (activeSection === 'semantic') renderSemanticSection(content);
+  else if (activeSection === 'pulse') renderPulseSection(content);
   else if (activeSection === 'chat') renderChatSection(content);
   else if (activeSection === 'sync') renderSyncSection(content);
   else if (activeSection === 'notifications') renderNotificationsSection(content);
@@ -1300,6 +1303,16 @@ function renderNotificationsSection(host) {
   ));
 
   host.append(notificationsSettingsElement());
+}
+
+// ---- Pulse section ----
+function renderPulseSection(host) {
+  host.append(sectionHeader(
+    t('pulse.settings.title'),
+    t('pulse.settings.subtitle'),
+  ));
+
+  host.append(pulseSettingsElement());
 }
 
 // ---- Install app section ----

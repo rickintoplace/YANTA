@@ -1293,6 +1293,31 @@ function addMessage(role, content, extra = {}) {
   renderContextMeter();
 }
 
+/**
+ * Drops a Pulse result into the assistant conversation. Used by routines
+ * that declare `output: [chat]` — the AI reporting its own background
+ * work belongs on the AI surface, not in a system notification.
+ *
+ * Safe to call with the pane closed: addMessage persists first and
+ * renderMessages() no-ops until the DOM exists.
+ */
+export function postAssistantNotice({
+  title = '',
+  body = '',
+  routineName = '',
+  routineTitle = '',
+} = {}) {
+  const heading = title ? `**${title}**` : '';
+  const source = routineName
+    ? `\n\n<sub>${routineTitle || routineName} · YANTA Pulse</sub>`
+    : '';
+
+  addMessage('assistant', [heading, body].filter(Boolean).join('\n\n') + source, {
+    model: 'YANTA Pulse',
+    pulseRoutine: routineName || null,
+  });
+}
+
 let streamRenderRaf = 0;
 
 function scheduleStreamRender() {

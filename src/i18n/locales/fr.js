@@ -811,6 +811,7 @@ export default {
       sources: 'Sources',
       ai: 'IA',
       semantic: 'Recherche sémantique',
+      pulse: 'Pulse',
       chat: 'Chat',
       sync: 'Synchronisation & sauvegarde',
       notifications: 'Notifications',
@@ -1183,6 +1184,123 @@ export default {
       subtitle: 'Configurez la synchronisation pour les retrouver sur tous vos appareils. Chiffrement de bout en bout.',
       cta: 'Configurer la synchronisation',
       dismiss: 'Ignorer',
+    },
+  },
+
+  pulse: {
+    inboxTitle: 'Pulse',
+    untitledResult: 'Résultat Pulse',
+    unknownRoutine: 'Routine inconnue',
+    dismiss: 'Masquer',
+    pauseRoutine: 'Mettre la routine en pause',
+    routinePaused: '« {routine} » mise en pause. Vous pouvez la réactiver dans Réglages → Pulse.',
+    runNow: 'Exécuter maintenant',
+    running: 'En cours…',
+    openRoutineNote: 'Ouvrir la note de la routine',
+    toggleRoutine: 'Activer ou mettre cette routine en pause',
+    cardsInInbox: {
+      one: '{count} carte dans la boîte',
+      other: '{count} cartes dans la boîte',
+    },
+    lastRun: 'Dernière fois {when}',
+
+    feedback: {
+      useful: 'Utile',
+      notUseful: 'Sans intérêt',
+      markedUseful: 'Marquée utile',
+      markedNotUseful: 'Marquée sans intérêt',
+    },
+
+    proposal: {
+      done: 'Fait',
+      running: 'En cours…',
+      skip: 'Ignorer',
+      executed: 'Fait.',
+    },
+
+    time: {
+      justNow: 'à l’instant',
+      minutesAgo: {
+        one: 'il y a {count} min',
+        other: 'il y a {count} min',
+      },
+      hoursAgo: {
+        one: 'il y a {count} h',
+        other: 'il y a {count} h',
+      },
+      daysAgo: {
+        one: 'il y a {count} jour',
+        other: 'il y a {count} jours',
+      },
+    },
+
+    trigger: {
+      every: 'Toutes les {duration}',
+      daily: 'Chaque jour à {time}',
+      weekdays: 'En semaine à {time}',
+      weekly: '{day} à {time}',
+      at: 'À {time}',
+    },
+
+    weekday: {
+      sun: 'Le dimanche',
+      mon: 'Le lundi',
+      tue: 'Le mardi',
+      wed: 'Le mercredi',
+      thu: 'Le jeudi',
+      fri: 'Le vendredi',
+      sat: 'Le samedi',
+    },
+
+    events: {
+      rssNew: 'À l’arrivée de nouveaux articles',
+      calendarSoon: 'Juste avant un événement',
+      calendarChanged: 'Quand le calendrier change',
+      notesChanged: 'Quand des notes changent',
+      chatUnread: 'En cas de discussions non lues',
+    },
+
+    profile: {
+      read: 'Lecture seule',
+      write: 'Peut écrire',
+      full: 'Accès complet',
+    },
+
+    outcome: {
+      delivered: 'Le résultat est dans votre boîte Pulse.',
+      silent: 'Rien qui mérite d’être signalé.',
+      noSignal: 'Rien n’a changé — ignoré.',
+      repeat: 'Même résultat que la dernière fois — non répété.',
+      failed: 'L’exécution a échoué.',
+    },
+
+    wake: {
+      title: 'Une routine est prête',
+      body: 'Ouvrez YANTA pour l’exécuter : {routine}',
+    },
+
+    settings: {
+      title: 'Pulse',
+      subtitle: 'Des routines qui s’exécutent seules et déposent leur résultat dans votre boîte. Tout se passe sur cet appareil : vos notes ne sont envoyées nulle part pour cela.',
+      general: 'Général',
+      enabledLabel: 'Exécuter les routines automatiquement',
+      enabledHint: 'Désactiver met toutes les routines en pause d’un coup. Les exécutions manuelles restent possibles.',
+      notifyMissedLabel: 'Me rappeler les exécutions manquées',
+      notifyMissedHint: 'Si une routine arrive à échéance alors que YANTA est fermée, vous recevez un rappel pour ouvrir l’app. Nécessite la remise en arrière-plan.',
+      quietHours: 'Heures calmes',
+      quietFrom: 'De',
+      quietTo: 'À',
+      quietHint: 'Rien n’est remis pendant cette plage. Les exécutions manquées ont lieu ensuite au lieu d’être abandonnées.',
+      permissions: 'Ce que les routines peuvent faire',
+      allowWriteLabel: 'Autoriser les routines à écrire',
+      allowWriteHint: 'Créer et modifier notes, événements et sources. Désactivé, elles ne peuvent que lire et rapporter.',
+      allowDestructiveLabel: 'Autoriser les actions irréversibles',
+      allowDestructiveHint: 'Suppressions et cas similaires. Il est conseillé de laisser désactivé : les routines peuvent toujours les proposer pour confirmation.',
+      proposalNote: 'Aucune routine n’envoie de message à autrui d’elle-même. Il arrive dans votre boîte sous forme de proposition en un geste.',
+      routines: 'Routines',
+      noRoutines: 'Aucune routine pour l’instant.',
+      askAiHint: 'Demandez-en une à YANTA AI : « en semaine à 7 h, résume mes flux non lus ».',
+      loadError: 'Impossible de charger les routines.',
     },
   },
 };

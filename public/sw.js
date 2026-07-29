@@ -361,10 +361,28 @@ async function handlePush(event) {
   }
 
   if (payload.kind === 'calendar-reminder') {
+    // The Worker labels every scheduled push the same way; the real kind
+    // lives inside the ciphertext, which only this device can read.
     let info = null;
     try {
       info = await decryptReminder(payload.enc);
     } catch {}
+
+    if (info?.kind === 'pulse-wake') {
+      // A routine came due while YANTA was closed. Nothing can run out
+      // here — the vault is encrypted and the reasoning happens in the
+      // app — so this invites the user back in, and the boot pass runs
+      // the routine the moment they arrive.
+      if (await hasVisibleClient()) return;
+
+      await self.registration.showNotification(info.title || 'YANTA Pulse', {
+        ...iconOpts,
+        body: info.body || 'A routine is ready to run.',
+        tag: 'yanta-pulse-wake',
+        data: { url: info.url || '/#dashboard', kind: 'pulse-wake' },
+      });
+      return;
+    }
 
     await self.registration.showNotification(info?.title || 'Event reminder', {
       ...iconOpts,

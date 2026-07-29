@@ -66,6 +66,10 @@ import {
   skillManageAction,
 } from './skills.js';
 
+import {
+  PULSE_MANAGE_TOOL,
+} from '../pulse/pulse-actions.js';
+
 const CHAT_TOOLS = [
   {
     name: 'chat_find_contact',
@@ -1195,6 +1199,8 @@ export const TOOL_REGISTRY = [
   },
 
   ...CHAT_TOOLS,
+
+  PULSE_MANAGE_TOOL,
 
 ];
 

@@ -189,9 +189,14 @@ import './calendar-widget.js';
 import './today-widget.js';
 // Registers the dashboard information panel (side effect).
 import './dashboard-info-panel.js';
+import './pulse/pulse-inbox-widget.js';
 
 import { setupCalendarWebReminders } from './calendar-web-reminders.js';
 import { setupCalendarPushScheduler } from './push/calendar-push-scheduler.js';
+import { setupPulseEngine } from './pulse/pulse-engine.js';
+import { setupPulseWake } from './pulse/pulse-wake.js';
+import { setupPulseBadge } from './pulse/pulse-badge.js';
+import { ensureStarterRoutines } from './pulse/pulse-starters.js';
 import { refreshPushActiveState } from './push/web-push-client.js';
 import {
   setupRss,
@@ -2552,8 +2557,13 @@ async function init() {
   setupCalendarPushScheduler();
   // Reconcile the stored push flag with the real browser subscription.
   refreshPushActiveState().catch(() => {});
+  setupPulseWake();
+  setupPulseBadge();
+  setupPulseEngine();
   setupSpaceMatrix();
   await ensureAiSessionsFolder();
+  // Suggested routines are seeded disabled — see pulse-starters.js.
+  ensureStarterRoutines().catch(() => {});
   window.addEventListener('yanta-public-share-changed', () => {
     renderShareIndicator();
     renderTree();

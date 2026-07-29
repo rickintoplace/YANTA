@@ -821,6 +821,7 @@ export default {
       sources: 'Sources',
       ai: 'AI',
       semantic: 'Semantic search',
+      pulse: 'Pulse',
       chat: 'Chat',
       sync: 'Sync & Backup',
       notifications: 'Notifications',
@@ -1202,6 +1203,123 @@ export default {
       subtitle: 'Set up sync to keep them on all your devices. End-to-end encrypted.',
       cta: 'Set up sync',
       dismiss: 'Dismiss',
+    },
+  },
+
+  pulse: {
+    inboxTitle: 'Pulse',
+    untitledResult: 'Pulse result',
+    unknownRoutine: 'Unknown routine',
+    dismiss: 'Dismiss',
+    pauseRoutine: 'Pause routine',
+    routinePaused: 'Paused “{routine}”. You can switch it back on in Settings → Pulse.',
+    runNow: 'Run now',
+    running: 'Running…',
+    openRoutineNote: 'Open routine note',
+    toggleRoutine: 'Enable or pause this routine',
+    cardsInInbox: {
+      one: '{count} card in Inbox',
+      other: '{count} cards in Inbox',
+    },
+    lastRun: 'Last run {when}',
+
+    feedback: {
+      useful: 'Useful',
+      notUseful: 'Not useful',
+      markedUseful: 'Marked useful',
+      markedNotUseful: 'Marked not useful',
+    },
+
+    proposal: {
+      done: 'Done',
+      running: 'Working…',
+      skip: 'Skip',
+      executed: 'Done.',
+    },
+
+    time: {
+      justNow: 'just now',
+      minutesAgo: {
+        one: '{count} min ago',
+        other: '{count} min ago',
+      },
+      hoursAgo: {
+        one: '{count} h ago',
+        other: '{count} h ago',
+      },
+      daysAgo: {
+        one: '{count} day ago',
+        other: '{count} days ago',
+      },
+    },
+
+    trigger: {
+      every: 'Every {duration}',
+      daily: 'Daily at {time}',
+      weekdays: 'Weekdays at {time}',
+      weekly: '{day} at {time}',
+      at: 'At {time}',
+    },
+
+    weekday: {
+      sun: 'Sundays',
+      mon: 'Mondays',
+      tue: 'Tuesdays',
+      wed: 'Wednesdays',
+      thu: 'Thursdays',
+      fri: 'Fridays',
+      sat: 'Saturdays',
+    },
+
+    events: {
+      rssNew: 'When new articles arrive',
+      calendarSoon: 'Before an event starts',
+      calendarChanged: 'When the calendar changes',
+      notesChanged: 'When notes change',
+      chatUnread: 'When chats go unread',
+    },
+
+    profile: {
+      read: 'Reads only',
+      write: 'Can write',
+      full: 'Full access',
+    },
+
+    outcome: {
+      delivered: 'The result is in your Pulse Inbox.',
+      silent: 'Nothing worth reporting.',
+      noSignal: 'Nothing changed — skipped.',
+      repeat: 'Same result as last time — not repeated.',
+      failed: 'The run failed.',
+    },
+
+    wake: {
+      title: 'A routine is ready',
+      body: 'Open YANTA to run it: {routine}',
+    },
+
+    settings: {
+      title: 'Pulse',
+      subtitle: 'Routines that run on their own and leave the result in your Inbox. Everything runs on this device — your notes are never sent anywhere to make this work.',
+      general: 'General',
+      enabledLabel: 'Run routines automatically',
+      enabledHint: 'Off pauses every routine at once. Manual runs still work.',
+      notifyMissedLabel: 'Remind me about missed runs',
+      notifyMissedHint: 'If a routine comes due while YANTA is closed, you get a reminder to open the app. Needs background delivery.',
+      quietHours: 'Quiet hours',
+      quietFrom: 'From',
+      quietTo: 'Until',
+      quietHint: 'Nothing is delivered during this window. Missed runs happen afterwards instead of being dropped.',
+      permissions: 'What routines may do',
+      allowWriteLabel: 'Allow routines to write',
+      allowWriteHint: 'Create and edit notes, events and sources. Off means routines can only read and report.',
+      allowDestructiveLabel: 'Allow irreversible actions',
+      allowDestructiveHint: 'Deleting and similar. Off is recommended — routines can still propose these for you to confirm.',
+      proposalNote: 'Messages to other people are never sent by a routine. They arrive in your Inbox as a one-tap proposal.',
+      routines: 'Routines',
+      noRoutines: 'No routines yet.',
+      askAiHint: 'Ask YANTA AI to build one: “every weekday at 7, summarise my unread feeds”.',
+      loadError: 'Could not load routines.',
     },
   },
 };

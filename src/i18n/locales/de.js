@@ -811,6 +811,7 @@ export default {
       sources: 'Quellen',
       ai: 'KI',
       semantic: 'Semantische Suche',
+      pulse: 'Pulse',
       chat: 'Chat',
       sync: 'Sync & Backup',
       notifications: 'Benachrichtigungen',
@@ -1183,6 +1184,123 @@ export default {
       subtitle: 'Richte die Synchronisierung ein, um sie auf allen Geräten zu haben. Ende-zu-Ende-verschlüsselt.',
       cta: 'Sync einrichten',
       dismiss: 'Ausblenden',
+    },
+  },
+
+  pulse: {
+    inboxTitle: 'Pulse',
+    untitledResult: 'Pulse-Ergebnis',
+    unknownRoutine: 'Unbekannte Routine',
+    dismiss: 'Ausblenden',
+    pauseRoutine: 'Routine pausieren',
+    routinePaused: '„{routine}“ pausiert. Du kannst sie unter Einstellungen → Pulse wieder aktivieren.',
+    runNow: 'Jetzt ausführen',
+    running: 'Läuft…',
+    openRoutineNote: 'Routine-Notiz öffnen',
+    toggleRoutine: 'Diese Routine aktivieren oder pausieren',
+    cardsInInbox: {
+      one: '{count} Karte im Posteingang',
+      other: '{count} Karten im Posteingang',
+    },
+    lastRun: 'Zuletzt {when}',
+
+    feedback: {
+      useful: 'Nützlich',
+      notUseful: 'Nicht nützlich',
+      markedUseful: 'Als nützlich markiert',
+      markedNotUseful: 'Als nicht nützlich markiert',
+    },
+
+    proposal: {
+      done: 'Erledigt',
+      running: 'Wird ausgeführt…',
+      skip: 'Überspringen',
+      executed: 'Erledigt.',
+    },
+
+    time: {
+      justNow: 'gerade eben',
+      minutesAgo: {
+        one: 'vor {count} Min.',
+        other: 'vor {count} Min.',
+      },
+      hoursAgo: {
+        one: 'vor {count} Std.',
+        other: 'vor {count} Std.',
+      },
+      daysAgo: {
+        one: 'vor {count} Tag',
+        other: 'vor {count} Tagen',
+      },
+    },
+
+    trigger: {
+      every: 'Alle {duration}',
+      daily: 'Täglich um {time}',
+      weekdays: 'Werktags um {time}',
+      weekly: '{day} um {time}',
+      at: 'Um {time}',
+    },
+
+    weekday: {
+      sun: 'Sonntags',
+      mon: 'Montags',
+      tue: 'Dienstags',
+      wed: 'Mittwochs',
+      thu: 'Donnerstags',
+      fri: 'Freitags',
+      sat: 'Samstags',
+    },
+
+    events: {
+      rssNew: 'Wenn neue Artikel eintreffen',
+      calendarSoon: 'Kurz vor einem Termin',
+      calendarChanged: 'Wenn sich der Kalender ändert',
+      notesChanged: 'Wenn sich Notizen ändern',
+      chatUnread: 'Bei ungelesenen Chats',
+    },
+
+    profile: {
+      read: 'Liest nur',
+      write: 'Darf schreiben',
+      full: 'Voller Zugriff',
+    },
+
+    outcome: {
+      delivered: 'Das Ergebnis liegt in deinem Pulse-Posteingang.',
+      silent: 'Nichts Berichtenswertes.',
+      noSignal: 'Nichts verändert — übersprungen.',
+      repeat: 'Gleiches Ergebnis wie zuletzt — nicht wiederholt.',
+      failed: 'Der Lauf ist fehlgeschlagen.',
+    },
+
+    wake: {
+      title: 'Eine Routine ist fällig',
+      body: 'Öffne YANTA, um sie auszuführen: {routine}',
+    },
+
+    settings: {
+      title: 'Pulse',
+      subtitle: 'Routinen, die von selbst laufen und ihr Ergebnis in deinem Posteingang hinterlassen. Alles läuft auf diesem Gerät — deine Notizen werden dafür nirgendwohin gesendet.',
+      general: 'Allgemein',
+      enabledLabel: 'Routinen automatisch ausführen',
+      enabledHint: 'Aus pausiert alle Routinen gleichzeitig. Manuelle Läufe funktionieren weiterhin.',
+      notifyMissedLabel: 'An verpasste Läufe erinnern',
+      notifyMissedHint: 'Wird eine Routine fällig, während YANTA geschlossen ist, bekommst du eine Erinnerung, die App zu öffnen. Benötigt Hintergrundzustellung.',
+      quietHours: 'Ruhezeiten',
+      quietFrom: 'Von',
+      quietTo: 'Bis',
+      quietHint: 'In diesem Zeitraum wird nichts zugestellt. Verpasste Läufe holen danach auf, statt zu entfallen.',
+      permissions: 'Was Routinen dürfen',
+      allowWriteLabel: 'Routinen dürfen schreiben',
+      allowWriteHint: 'Notizen, Termine und Quellen anlegen und bearbeiten. Aus heißt: nur lesen und berichten.',
+      allowDestructiveLabel: 'Unumkehrbare Aktionen erlauben',
+      allowDestructiveHint: 'Löschen und Ähnliches. Aus ist empfohlen — Routinen können solche Schritte weiterhin zur Bestätigung vorschlagen.',
+      proposalNote: 'Nachrichten an andere Personen versendet keine Routine selbst. Sie landen als Ein-Tipp-Vorschlag in deinem Posteingang.',
+      routines: 'Routinen',
+      noRoutines: 'Noch keine Routinen.',
+      askAiHint: 'Lass YANTA AI eine bauen: „Fasse mir werktags um 7 meine ungelesenen Feeds zusammen“.',
+      loadError: 'Routinen konnten nicht geladen werden.',
     },
   },
 };

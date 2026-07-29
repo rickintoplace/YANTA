@@ -811,6 +811,7 @@ export default {
       sources: 'Fuentes',
       ai: 'IA',
       semantic: 'Búsqueda semántica',
+      pulse: 'Pulse',
       chat: 'Chat',
       sync: 'Sincronización y copias',
       notifications: 'Notificaciones',
@@ -1183,6 +1184,123 @@ export default {
       subtitle: 'Configura la sincronización para tenerlas en todos tus dispositivos. Con cifrado de extremo a extremo.',
       cta: 'Configurar sincronización',
       dismiss: 'Descartar',
+    },
+  },
+
+  pulse: {
+    inboxTitle: 'Pulse',
+    untitledResult: 'Resultado de Pulse',
+    unknownRoutine: 'Rutina desconocida',
+    dismiss: 'Descartar',
+    pauseRoutine: 'Pausar rutina',
+    routinePaused: '«{routine}» en pausa. Puedes reactivarla en Ajustes → Pulse.',
+    runNow: 'Ejecutar ahora',
+    running: 'Ejecutando…',
+    openRoutineNote: 'Abrir la nota de la rutina',
+    toggleRoutine: 'Activar o pausar esta rutina',
+    cardsInInbox: {
+      one: '{count} tarjeta en la bandeja',
+      other: '{count} tarjetas en la bandeja',
+    },
+    lastRun: 'Última vez: {when}',
+
+    feedback: {
+      useful: 'Útil',
+      notUseful: 'No me sirve',
+      markedUseful: 'Marcada como útil',
+      markedNotUseful: 'Marcada como no útil',
+    },
+
+    proposal: {
+      done: 'Hecho',
+      running: 'Trabajando…',
+      skip: 'Omitir',
+      executed: 'Hecho.',
+    },
+
+    time: {
+      justNow: 'ahora mismo',
+      minutesAgo: {
+        one: 'hace {count} min',
+        other: 'hace {count} min',
+      },
+      hoursAgo: {
+        one: 'hace {count} h',
+        other: 'hace {count} h',
+      },
+      daysAgo: {
+        one: 'hace {count} día',
+        other: 'hace {count} días',
+      },
+    },
+
+    trigger: {
+      every: 'Cada {duration}',
+      daily: 'Cada día a las {time}',
+      weekdays: 'Entre semana a las {time}',
+      weekly: '{day} a las {time}',
+      at: 'A las {time}',
+    },
+
+    weekday: {
+      sun: 'Los domingos',
+      mon: 'Los lunes',
+      tue: 'Los martes',
+      wed: 'Los miércoles',
+      thu: 'Los jueves',
+      fri: 'Los viernes',
+      sat: 'Los sábados',
+    },
+
+    events: {
+      rssNew: 'Cuando lleguen artículos nuevos',
+      calendarSoon: 'Antes de que empiece un evento',
+      calendarChanged: 'Cuando cambie el calendario',
+      notesChanged: 'Cuando cambien las notas',
+      chatUnread: 'Cuando haya chats sin leer',
+    },
+
+    profile: {
+      read: 'Solo lee',
+      write: 'Puede escribir',
+      full: 'Acceso completo',
+    },
+
+    outcome: {
+      delivered: 'El resultado está en tu bandeja de Pulse.',
+      silent: 'Nada que merezca la pena contar.',
+      noSignal: 'Nada ha cambiado: se omitió.',
+      repeat: 'El mismo resultado que la última vez: no se repite.',
+      failed: 'La ejecución ha fallado.',
+    },
+
+    wake: {
+      title: 'Una rutina está lista',
+      body: 'Abre YANTA para ejecutarla: {routine}',
+    },
+
+    settings: {
+      title: 'Pulse',
+      subtitle: 'Rutinas que se ejecutan solas y dejan el resultado en tu bandeja. Todo ocurre en este dispositivo: tus notas no se envían a ningún sitio para que esto funcione.',
+      general: 'General',
+      enabledLabel: 'Ejecutar rutinas automáticamente',
+      enabledHint: 'Desactivarlo pausa todas las rutinas a la vez. Las ejecuciones manuales siguen funcionando.',
+      notifyMissedLabel: 'Avisarme de ejecuciones perdidas',
+      notifyMissedHint: 'Si una rutina vence con YANTA cerrada, recibirás un aviso para abrir la app. Requiere entrega en segundo plano.',
+      quietHours: 'Horas de silencio',
+      quietFrom: 'Desde',
+      quietTo: 'Hasta',
+      quietHint: 'No se entrega nada durante este intervalo. Las ejecuciones perdidas se recuperan después en lugar de descartarse.',
+      permissions: 'Qué pueden hacer las rutinas',
+      allowWriteLabel: 'Permitir que las rutinas escriban',
+      allowWriteHint: 'Crear y editar notas, eventos y fuentes. Desactivado, solo pueden leer e informar.',
+      allowDestructiveLabel: 'Permitir acciones irreversibles',
+      allowDestructiveHint: 'Eliminar y similares. Se recomienda dejarlo desactivado: las rutinas pueden proponerlas para que las confirmes.',
+      proposalNote: 'Ninguna rutina envía mensajes a otras personas por su cuenta. Llegan a tu bandeja como una propuesta de un toque.',
+      routines: 'Rutinas',
+      noRoutines: 'Aún no hay rutinas.',
+      askAiHint: 'Pídele una a YANTA AI: «entre semana a las 7, resúmeme los feeds sin leer».',
+      loadError: 'No se han podido cargar las rutinas.',
     },
   },
 };

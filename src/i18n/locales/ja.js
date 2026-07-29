@@ -802,6 +802,7 @@ export default {
       sources: 'ソース',
       ai: 'AI',
       semantic: 'セマンティック検索',
+      pulse: 'Pulse',
       chat: 'チャット',
       sync: '同期とバックアップ',
       notifications: '通知',
@@ -1174,6 +1175,119 @@ export default {
       subtitle: '同期を設定すると、すべての端末で使えます。エンドツーエンドで暗号化されます。',
       cta: '同期を設定',
       dismiss: '閉じる',
+    },
+  },
+
+  pulse: {
+    inboxTitle: 'Pulse',
+    untitledResult: 'Pulse の結果',
+    unknownRoutine: '不明なルーティン',
+    dismiss: '閉じる',
+    pauseRoutine: 'ルーティンを一時停止',
+    routinePaused: '「{routine}」を一時停止しました。設定 → Pulse から再開できます。',
+    runNow: '今すぐ実行',
+    running: '実行中…',
+    openRoutineNote: 'ルーティンのノートを開く',
+    toggleRoutine: 'このルーティンを有効化または一時停止',
+    cardsInInbox: {
+      other: '受信トレイに {count} 件',
+    },
+    lastRun: '前回 {when}',
+
+    feedback: {
+      useful: '役に立った',
+      notUseful: '不要だった',
+      markedUseful: '役に立ったと評価済み',
+      markedNotUseful: '不要と評価済み',
+    },
+
+    proposal: {
+      done: '完了',
+      running: '実行中…',
+      skip: 'スキップ',
+      executed: '完了しました。',
+    },
+
+    time: {
+      justNow: 'たった今',
+      minutesAgo: {
+        other: '{count} 分前',
+      },
+      hoursAgo: {
+        other: '{count} 時間前',
+      },
+      daysAgo: {
+        other: '{count} 日前',
+      },
+    },
+
+    trigger: {
+      every: '{duration} ごと',
+      daily: '毎日 {time}',
+      weekdays: '平日 {time}',
+      weekly: '{day} {time}',
+      at: '{time}',
+    },
+
+    weekday: {
+      sun: '日曜日',
+      mon: '月曜日',
+      tue: '火曜日',
+      wed: '水曜日',
+      thu: '木曜日',
+      fri: '金曜日',
+      sat: '土曜日',
+    },
+
+    events: {
+      rssNew: '新しい記事が届いたとき',
+      calendarSoon: '予定が始まる前',
+      calendarChanged: 'カレンダーが変わったとき',
+      notesChanged: 'ノートが変わったとき',
+      chatUnread: '未読のチャットがあるとき',
+    },
+
+    profile: {
+      read: '読み取りのみ',
+      write: '書き込み可',
+      full: 'フルアクセス',
+    },
+
+    outcome: {
+      delivered: '結果は Pulse の受信トレイにあります。',
+      silent: '報告するほどのことはありませんでした。',
+      noSignal: '変化がないためスキップしました。',
+      repeat: '前回と同じ結果のため繰り返しませんでした。',
+      failed: '実行に失敗しました。',
+    },
+
+    wake: {
+      title: 'ルーティンの時間です',
+      body: 'YANTA を開いて実行してください: {routine}',
+    },
+
+    settings: {
+      title: 'Pulse',
+      subtitle: '自動で実行され、結果を受信トレイに残すルーティンです。すべてこの端末で処理され、そのためにノートが外部へ送られることはありません。',
+      general: '一般',
+      enabledLabel: 'ルーティンを自動で実行',
+      enabledHint: 'オフにするとすべてのルーティンが一括で停止します。手動実行は引き続き可能です。',
+      notifyMissedLabel: '実行し損ねたときに通知',
+      notifyMissedHint: 'YANTA を閉じている間にルーティンの時間が来たら、アプリを開くよう通知します。バックグラウンド配信が必要です。',
+      quietHours: 'サイレント時間',
+      quietFrom: '開始',
+      quietTo: '終了',
+      quietHint: 'この時間帯には何も配信されません。実行し損ねた分は破棄されず、あとで実行されます。',
+      permissions: 'ルーティンに許可する操作',
+      allowWriteLabel: 'ルーティンによる書き込みを許可',
+      allowWriteHint: 'ノート・予定・ソースの作成と編集。オフの場合は読み取りと報告のみです。',
+      allowDestructiveLabel: '取り消せない操作を許可',
+      allowDestructiveHint: '削除など。オフを推奨します。ルーティンは確認用の提案としてなら引き続き出せます。',
+      proposalNote: '他の人へのメッセージをルーティンが自分で送ることはありません。ワンタップで承認できる提案として受信トレイに届きます。',
+      routines: 'ルーティン',
+      noRoutines: 'まだルーティンはありません。',
+      askAiHint: 'YANTA AI に作らせてみてください:「平日の7時に未読フィードを要約して」。',
+      loadError: 'ルーティンを読み込めませんでした。',
     },
   },
 };

@@ -1,11 +1,11 @@
 // ============================================================
 // YANTA — Calendar push scheduler (background delivery)
 //
-// While the app is open, this registers the upcoming reminders with the
-// Cloud Worker so they fire as Web Push notifications even after every tab
-// is closed. Each reminder's text is encrypted with the device key
-// (encryptReminderPayload) before it leaves the browser — the Worker only
-// stores ciphertext + a fire time.
+// While the app is open, this contributes the upcoming reminders to
+// the shared background schedule (push-schedule.js) so they fire as
+// Web Push notifications even after every tab is closed. Each
+// reminder's text is encrypted with the device key before it leaves
+// the browser — the Worker only stores ciphertext + a fire time.
 //
 // The Worker's per-minute cron sends due pushes; the Service Worker
 // decrypts and shows them. Complements calendar-web-reminders.js, which
@@ -14,13 +14,17 @@
 
 import { calendarNotificationsEnabled } from '../notification-preferences.js';
 import { isAndroidApp } from '../install/install-environment.js';
-import { apiFetch } from '../cloud/cloud-api.js';
 
 import {
   isPushActive,
-  pushDeviceId,
   encryptReminderPayload,
 } from './web-push-client.js';
+
+import {
+  registerPushScheduleProvider,
+  schedulePushRefresh,
+  refreshPushSchedule,
+} from './push-schedule.js';
 
 import {
   collectUpcomingReminders,
@@ -33,7 +37,6 @@ const GRACE_MS = 60 * 1000;
 
 let installed = false;
 let refreshInterval = 0;
-let debounce = 0;
 
 function shouldSchedule() {
   return (
@@ -49,12 +52,9 @@ function reminderUrl() {
   return `${location.origin}${location.pathname}${location.search}#calendar`;
 }
 
-/**
- * Rebuilds and uploads this device's background reminder schedule. No-op
- * unless push is active. Safe to call often (debounced by callers).
- */
-export async function refreshCalendarPushSchedule() {
-  if (!shouldSchedule()) return;
+/** Encrypted reminder items for the shared background schedule. */
+async function collectCalendarPushItems() {
+  if (!shouldSchedule()) return [];
 
   const now = Date.now();
 
@@ -63,10 +63,11 @@ export async function refreshCalendarPushSchedule() {
     reminders = await collectUpcomingReminders({ now, horizonMs: HORIZON_MS });
   } catch (err) {
     console.warn('[YANTA Calendar Push] collect failed', err);
-    return;
+    return [];
   }
 
   const items = [];
+
   for (const rem of reminders) {
     // Only future reminders — the cron fires at minute granularity.
     if (rem.fireAt < now - GRACE_MS) continue;
@@ -79,36 +80,23 @@ export async function refreshCalendarPushSchedule() {
         body: reminderBody(rem.ev, rem.minutesBefore),
         url: reminderUrl(),
       });
+
       items.push({ fireAt: Math.round(rem.fireAt), enc });
     } catch (err) {
       console.warn('[YANTA Calendar Push] encrypt failed', err);
     }
   }
 
-  try {
-    await apiFetch('/api/push/schedule', {
-      method: 'POST',
-      body: { deviceId: pushDeviceId(), items },
-    });
-  } catch (err) {
-    // Not signed into Cloud, offline, etc. — the foreground path still covers
-    // the "app open" case, so this is non-fatal.
-    console.warn('[YANTA Calendar Push] schedule upload failed', err);
-  }
-}
-
-function scheduleRefresh(delay = 800) {
-  clearTimeout(debounce);
-  debounce = window.setTimeout(() => {
-    refreshCalendarPushSchedule().catch(() => {});
-  }, delay);
+  return items;
 }
 
 export function setupCalendarPushScheduler() {
   if (installed) return;
   installed = true;
 
-  const kick = () => scheduleRefresh(800);
+  registerPushScheduleProvider('calendar', collectCalendarPushItems);
+
+  const kick = () => schedulePushRefresh(800);
 
   window.addEventListener('yanta-vault-hydrated', kick);
   window.addEventListener('yanta-calendar-updated', kick);
@@ -116,9 +104,14 @@ export function setupCalendarPushScheduler() {
   window.addEventListener('yanta-push-state-changed', kick);
 
   refreshInterval = window.setInterval(() => {
-    refreshCalendarPushSchedule().catch(() => {});
+    refreshPushSchedule().catch(() => {});
   }, REFRESH_MS);
 
   // Deferred first pass, off the boot path.
   window.setTimeout(kick, 6000);
+}
+
+export function teardownCalendarPushScheduler() {
+  clearInterval(refreshInterval);
+  installed = false;
 }

@@ -44,6 +44,7 @@ const PULSE_KEYS = [
   'quietHours',
   'cooldown',
   'maxPerDay',
+  'language',
 ];
 
 function slug(value) {
@@ -81,6 +82,7 @@ function pulseBlockLines(args) {
   push('tools', String(args.tools || PULSE_TOOL_PROFILES.READ).trim());
   push('notify', args.notify === false ? 'false' : 'true');
   push('cooldown', args.cooldown ? String(args.cooldown).trim() : '');
+  push('language', args.language ? String(args.language).trim() : '');
   push('maxPerDay', Number(args.maxPerDay) > 0 ? String(Math.round(args.maxPerDay)) : '');
 
   return lines;
@@ -383,6 +385,12 @@ export const PULSE_MANAGE_TOOL = {
       notify: {
         type: 'boolean',
         description: 'Send a reminder to open YANTA if the run is missed while the app is closed.',
+      },
+      language: {
+        type: 'string',
+        description:
+          'Language for this routine\'s output. Omit to follow the app language, which is almost always right. ' +
+          'Set it only when the user explicitly wants this routine in a different language.',
       },
       enabled: { type: 'boolean' },
     },

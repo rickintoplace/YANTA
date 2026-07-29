@@ -496,6 +496,12 @@ export default {
   },
 
   infoPanel: {
+    pulsePausedTitle: {
+      one: '{count} routine is paused by your plan',
+      other: '{count} routines are paused by your plan',
+    },
+    pulsePausedText: 'They stay off until you free a slot or upgrade: {names}',
+    pulsePausedCta: 'Open Pulse',
     yourAndroidDevice: 'your Android device',
     deviceAnd: 'and',
     setUp: 'Set up',
@@ -1222,6 +1228,31 @@ export default {
       other: '{count} cards in Inbox',
     },
     lastRun: 'Last run {when}',
+    overviewTitle: 'Pulse',
+    overviewSubtitle: 'What runs on its own, and what it has done. Everything happens on this device.',
+    openOverview: 'Overview',
+    openSettings: 'Pulse settings',
+    close: 'Close',
+    nextRun: 'Next run {when}',
+    tabs: { routines: 'Routines', history: 'History', library: 'Library' },
+    history: {
+      empty: 'No runs yet. Once a routine runs, what it did shows up here.',
+      used: 'Used',
+      manual: 'started by you',
+      clear: 'Clear history',
+    },
+    library: { soon: 'A library of ready-made routines is coming here.' },
+    duplicates: {
+      body: {
+        one: 'One routine exists twice, probably because two devices set it up before syncing. The older copy is the one in use.',
+        other: '{count} routines exist twice, probably because two devices set them up before syncing. The older copies are the ones in use.',
+      },
+      cleanUp: 'Remove the extra copies',
+      removed: {
+        one: 'Removed {count} duplicate routine.',
+        other: 'Removed {count} duplicate routines.',
+      },
+    },
     pausedByPlan: 'Paused by plan',
     capReached: {
       one: 'Your plan runs {count} routine at a time. Pause another one first.',
@@ -1326,6 +1357,7 @@ export default {
       allowDestructiveHint: 'Deleting and similar. Off is recommended — routines can still propose these for you to confirm.',
       proposalNote: 'Messages to other people are never sent by a routine. They arrive in your Inbox as a one-tap proposal.',
       routines: 'Routines',
+      manageRoutines: 'Manage routines',
       noRoutines: 'No routines yet.',
       askAiHint: 'Ask YANTA AI to build one: “every weekday at 7, summarise my unread feeds”.',
       loadError: 'Could not load routines.',

@@ -31,6 +31,8 @@ import {
 
 import { openInstallModal } from './install/install-ui.js';
 
+import { pausedByPlanRoutines, openPulseOverview } from './pulse/pulse-overview.js';
+
 const INSTALL_HINT_DISMISSED_KEY = 'yanta.install.hint.dismissed.v1';
 
 function dismissedInstallHints() {
@@ -48,6 +50,49 @@ function dismissInstallHint(id) {
     set.add(id);
     localStorage.setItem(INSTALL_HINT_DISMISSED_KEY, JSON.stringify([...set]));
   } catch {}
+}
+
+/*
+  Plan-paused routines, resolved asynchronously and cached for the
+  synchronous collector.
+
+  Deliberately shown here rather than pushed: a routine the plan paused
+  is not urgent enough to interrupt someone's evening, but it is exactly
+  the kind of thing you should not have to go looking for. The dashboard
+  is where you find out — which is what this panel is for.
+*/
+let pulsePaused = [];
+
+async function refreshPulsePaused() {
+  try {
+    const paused = await pausedByPlanRoutines();
+    const changed = paused.length !== pulsePaused.length;
+
+    pulsePaused = paused;
+
+    return changed;
+  } catch {
+    pulsePaused = [];
+    return false;
+  }
+}
+
+function collectPulseItems() {
+  if (!pulsePaused.length) return [];
+
+  return [{
+    id: 'pulse-paused-by-plan',
+    tone: 'warn',
+    icon: 'pause',
+    title: t('infoPanel.pulsePausedTitle', { count: pulsePaused.length }),
+    text: t('infoPanel.pulsePausedText', {
+      names: pulsePaused.map((routine) => routine.name).join(', '),
+    }),
+    action: {
+      label: t('infoPanel.pulsePausedCta'),
+      onClick: () => openPulseOverview(),
+    },
+  }];
 }
 
 function injectCss() {
@@ -237,6 +282,7 @@ function collectInfoItems() {
   // most important recommendation so the panel never feels naggy. Kept
   // independent of the reminder report so it shows before the vault loads.
   items.push(...collectInstallItems());
+  items.push(...collectPulseItems());
 
   let report;
 
@@ -409,6 +455,23 @@ async function renderInfoPanel() {
 
   window.addEventListener('yanta-calendar-updated', onCalendarUpdated);
   window.addEventListener('yanta-native-notification-status-changed', onCalendarUpdated);
+
+  const onPulseChanged = () => {
+    if (!alive()) {
+      window.removeEventListener('yanta-pulse-routines-changed', onPulseChanged);
+      window.removeEventListener('yanta-pulse-settings-changed', onPulseChanged);
+      return;
+    }
+
+    refreshPulsePaused().then(refresh).catch(() => {});
+  };
+
+  window.addEventListener('yanta-pulse-routines-changed', onPulseChanged);
+  window.addEventListener('yanta-pulse-settings-changed', onPulseChanged);
+
+  refreshPulsePaused().then((changed) => {
+    if (changed && alive()) refresh();
+  }).catch(() => {});
 
   // Install availability / notification permission can change mid-session
   // (e.g. the browser offers a prompt, or the user installs) — reflect it.

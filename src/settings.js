@@ -1121,17 +1121,24 @@ function registerSettingsOverlayRoute() {
 
 export function openSettings({
   fromHistory = false,
+  section = '',
 } = {}) {
   ensureModal();
   registerSettingsOverlayRoute();
 
   const wasClosed = modal.hidden !== false;
 
+  // Deep link from another surface, e.g. the Pulse overview's gear.
+  if (section && SETTINGS_SECTIONS.some((s) => s.id === section)) {
+    activeSection = section;
+  }
+
   modal.hidden = false;
   renderSettingsBody();
 
-  // On mobile, always land on the section list rather than a stale detail pane.
-  if (wasClosed) setMobileDetail(false);
+  // On mobile, land on the section list — unless a deep link named the
+  // section, where skipping straight to it is the whole point.
+  if (wasClosed) setMobileDetail(!!section);
 
   if (!fromHistory && wasClosed) {
     pushOverlayState('settings');

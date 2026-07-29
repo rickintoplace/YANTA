@@ -197,6 +197,7 @@ import { setupPulseEngine } from './pulse/pulse-engine.js';
 import { setupPulseWake } from './pulse/pulse-wake.js';
 import { setupPulseBadge } from './pulse/pulse-badge.js';
 import { ensureStarterRoutines } from './pulse/pulse-starters.js';
+import { watchPulseDocForInbox } from './pulse/pulse-store.js';
 import { refreshPushActiveState } from './push/web-push-client.js';
 import {
   setupRss,
@@ -2560,6 +2561,8 @@ async function init() {
   setupPulseWake();
   setupPulseBadge();
   setupPulseEngine();
+  // Inbox and history live in a synced doc — reflect other devices' writes.
+  watchPulseDocForInbox().catch(() => {});
   setupSpaceMatrix();
   await ensureAiSessionsFolder();
   // Suggested routines are seeded disabled — see pulse-starters.js.

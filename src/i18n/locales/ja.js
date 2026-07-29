@@ -482,6 +482,11 @@ export default {
   },
 
   infoPanel: {
+    pulsePausedTitle: {
+      other: 'プランにより {count} 件のルーティンが停止中です',
+    },
+    pulsePausedText: '枠を空けるかアップグレードするまで停止したままです: {names}',
+    pulsePausedCta: 'Pulse を開く',
     yourAndroidDevice: 'あなたの Android デバイス',
     deviceAnd: 'と',
     setUp: 'セットアップ',
@@ -1193,6 +1198,29 @@ export default {
       other: '受信トレイに {count} 件',
     },
     lastRun: '前回 {when}',
+    overviewTitle: 'Pulse',
+    overviewSubtitle: '自動で動いているものと、その結果です。すべてこの端末で処理されます。',
+    openOverview: '概要',
+    openSettings: 'Pulse の設定',
+    close: '閉じる',
+    nextRun: '次回 {when}',
+    tabs: { routines: 'ルーティン', history: '履歴', library: 'ライブラリ' },
+    history: {
+      empty: 'まだ実行履歴はありません。ルーティンが動くと、ここに内容が表示されます。',
+      used: '使用したツール',
+      manual: '手動で実行',
+      clear: '履歴を消去',
+    },
+    library: { soon: 'ここに既成ルーティンのライブラリを用意する予定です。' },
+    duplicates: {
+      body: {
+        other: 'ルーティンが {count} 件重複しています。同期前に複数の端末で作成されたためと思われます。古い方が使用されます。',
+      },
+      cleanUp: '重複を削除',
+      removed: {
+        other: '重複したルーティンを {count} 件削除しました。',
+      },
+    },
     pausedByPlan: 'プランにより停止中',
     capReached: {
       other: '現在のプランでは同時に {count} 件までです。先に別のルーティンを停止してください。',
@@ -1293,6 +1321,7 @@ export default {
       allowDestructiveHint: '削除など。オフを推奨します。ルーティンは確認用の提案としてなら引き続き出せます。',
       proposalNote: '他の人へのメッセージをルーティンが自分で送ることはありません。ワンタップで承認できる提案として受信トレイに届きます。',
       routines: 'ルーティン',
+      manageRoutines: 'ルーティンを管理',
       noRoutines: 'まだルーティンはありません。',
       askAiHint: 'YANTA AI に作らせてみてください:「平日の7時に未読フィードを要約して」。',
       loadError: 'ルーティンを読み込めませんでした。',

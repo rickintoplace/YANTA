@@ -19,7 +19,10 @@
 //   ---
 // ============================================================
 
-import { state } from '../core.js';
+import { state, store } from '../core.js';
+
+import { destroyNoteDoc } from '../yjs.js';
+import { renderTree } from '../tree.js';
 
 import {
   ensureAiBrain,
@@ -158,25 +161,74 @@ export function routineFromSkill(skill, markdown = skill?.markdown || '') {
       : PULSE_TOOL_PROFILES.READ,
     notify: coerceBool(block.notify, true),
     respectQuietHours: coerceBool(block.quietHours, true),
+    // Empty means "follow the app language" — resolved at run time.
+    language: stripQuotes(block.language),
     cooldownMs,
     maxPerDay,
     invalid,
   };
 }
 
-/** Every routine in the vault, including disabled and invalid ones. */
+/**
+ * Every routine in the vault, including disabled and invalid ones.
+ *
+ * Deduplicated by name, oldest note wins. Two devices that seeded the
+ * starters before the vault finished hydrating each created their own
+ * copy; without this the list shows both and a toggle only ever
+ * reaches one of them, so the switch appears not to work.
+ */
 export async function listRoutines() {
   await ensureAiBrain();
 
   const skills = await listInstalledSkills({ includeMarkdown: true });
-  const routines = [];
+  const byName = new Map();
 
   for (const skill of skills) {
     const routine = routineFromSkill(skill);
-    if (routine) routines.push(routine);
+    if (!routine) continue;
+
+    const existing = byName.get(routine.name);
+
+    if (!existing || (routine.created || 0) < (existing.created || 0)) {
+      byName.set(routine.name, routine);
+    }
   }
 
-  return routines.sort((a, b) => a.name.localeCompare(b.name));
+  return [...byName.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * Routine notes shadowed by an older note of the same name. Surfaced so
+ * the overview can offer to clean them up — they are user-visible notes,
+ * so they are never deleted behind the user's back.
+ */
+export async function findDuplicateRoutineNotes() {
+  await ensureAiBrain();
+
+  const skills = await listInstalledSkills({ includeMarkdown: true });
+  const seen = new Map();
+  const duplicates = [];
+
+  for (const skill of skills) {
+    const routine = routineFromSkill(skill);
+    if (!routine) continue;
+
+    const existing = seen.get(routine.name);
+
+    if (!existing) {
+      seen.set(routine.name, routine);
+      continue;
+    }
+
+    const [keep, drop] = (routine.created || 0) < (existing.created || 0)
+      ? [routine, existing]
+      : [existing, routine];
+
+    seen.set(routine.name, keep);
+    duplicates.push(drop);
+  }
+
+  return duplicates;
 }
 
 export async function getRoutine(name) {
@@ -217,6 +269,33 @@ export function patchPulseBlock(markdown, key, value) {
   else lines.splice(end, 0, entry);
 
   return markdown.replace(parsed.rawFrontmatter, lines.join('\n'));
+}
+
+/**
+ * Deletes the shadowed copies found by findDuplicateRoutineNotes. Only
+ * ever called from an explicit user action — these are notes in the
+ * tree, and the older copy of each name is always the one kept.
+ */
+export async function removeDuplicateRoutineNotes() {
+  const duplicates = await findDuplicateRoutineNotes();
+
+  for (const routine of duplicates) {
+    state.notes.delete(routine.noteId);
+    state.searchIndex.delete(routine.noteId);
+
+    await store.notes.del(routine.noteId).catch(() => {});
+    await destroyNoteDoc(routine.noteId).catch(() => {});
+  }
+
+  if (duplicates.length) {
+    renderTree();
+
+    window.dispatchEvent(new CustomEvent('yanta-pulse-routines-changed', {
+      detail: { removedDuplicates: duplicates.length },
+    }));
+  }
+
+  return duplicates.length;
 }
 
 export async function setRoutineEnabled(name, enabled) {

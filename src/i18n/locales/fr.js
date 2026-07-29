@@ -489,6 +489,12 @@ export default {
   },
 
   infoPanel: {
+    pulsePausedTitle: {
+      one: '{count} routine est en pause à cause de votre formule',
+      other: '{count} routines sont en pause à cause de votre formule',
+    },
+    pulsePausedText: 'Elles resteront inactives jusqu’à ce que vous libériez une place ou changiez de formule : {names}',
+    pulsePausedCta: 'Ouvrir Pulse',
     yourAndroidDevice: 'votre appareil Android',
     deviceAnd: 'et',
     setUp: 'Configurer',
@@ -1203,6 +1209,31 @@ export default {
       other: '{count} cartes dans la boîte',
     },
     lastRun: 'Dernière fois {when}',
+    overviewTitle: 'Pulse',
+    overviewSubtitle: 'Ce qui s’exécute tout seul, et ce que cela a fait. Tout se passe sur cet appareil.',
+    openOverview: 'Vue d’ensemble',
+    openSettings: 'Réglages Pulse',
+    close: 'Fermer',
+    nextRun: 'Prochaine exécution {when}',
+    tabs: { routines: 'Routines', history: 'Historique', library: 'Bibliothèque' },
+    history: {
+      empty: 'Aucune exécution pour l’instant. Dès qu’une routine s’exécutera, vous verrez ici ce qu’elle a fait.',
+      used: 'A utilisé',
+      manual: 'lancée par vous',
+      clear: 'Vider l’historique',
+    },
+    library: { soon: 'Une bibliothèque de routines prêtes à l’emploi arrivera ici.' },
+    duplicates: {
+      body: {
+        one: 'Une routine existe en double, probablement parce que deux appareils l’ont créée avant la synchronisation. C’est la copie la plus ancienne qui est utilisée.',
+        other: '{count} routines existent en double, probablement parce que deux appareils les ont créées avant la synchronisation. Ce sont les copies les plus anciennes qui sont utilisées.',
+      },
+      cleanUp: 'Supprimer les copies en trop',
+      removed: {
+        one: '{count} routine en double supprimée.',
+        other: '{count} routines en double supprimées.',
+      },
+    },
     pausedByPlan: 'En pause selon la formule',
     capReached: {
       one: 'Votre formule exécute {count} routine à la fois. Mettez-en une autre en pause d’abord.',
@@ -1307,6 +1338,7 @@ export default {
       allowDestructiveHint: 'Suppressions et cas similaires. Il est conseillé de laisser désactivé : les routines peuvent toujours les proposer pour confirmation.',
       proposalNote: 'Aucune routine n’envoie de message à autrui d’elle-même. Il arrive dans votre boîte sous forme de proposition en un geste.',
       routines: 'Routines',
+      manageRoutines: 'Gérer les routines',
       noRoutines: 'Aucune routine pour l’instant.',
       askAiHint: 'Demandez-en une à YANTA AI : « en semaine à 7 h, résume mes flux non lus ».',
       loadError: 'Impossible de charger les routines.',

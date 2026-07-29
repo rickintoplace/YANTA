@@ -489,6 +489,12 @@ export default {
   },
 
   infoPanel: {
+    pulsePausedTitle: {
+      one: 'Tu plan tiene {count} rutina en pausa',
+      other: 'Tu plan tiene {count} rutinas en pausa',
+    },
+    pulsePausedText: 'Seguirán apagadas hasta que liberes un hueco o mejores de plan: {names}',
+    pulsePausedCta: 'Abrir Pulse',
     yourAndroidDevice: 'tu dispositivo Android',
     deviceAnd: 'y',
     setUp: 'Configurar',
@@ -1203,6 +1209,31 @@ export default {
       other: '{count} tarjetas en la bandeja',
     },
     lastRun: 'Última vez: {when}',
+    overviewTitle: 'Pulse',
+    overviewSubtitle: 'Qué se ejecuta solo y qué ha hecho. Todo ocurre en este dispositivo.',
+    openOverview: 'Resumen',
+    openSettings: 'Ajustes de Pulse',
+    close: 'Cerrar',
+    nextRun: 'Próxima ejecución {when}',
+    tabs: { routines: 'Rutinas', history: 'Historial', library: 'Biblioteca' },
+    history: {
+      empty: 'Todavía no hay ejecuciones. Cuando una rutina se ejecute, aquí verás qué hizo.',
+      used: 'Ha usado',
+      manual: 'iniciada por ti',
+      clear: 'Vaciar el historial',
+    },
+    library: { soon: 'Aquí llegará una biblioteca de rutinas listas para usar.' },
+    duplicates: {
+      body: {
+        one: 'Una rutina está duplicada, probablemente porque dos dispositivos la crearon antes de sincronizar. Se usa la copia más antigua.',
+        other: 'Hay {count} rutinas duplicadas, probablemente porque dos dispositivos las crearon antes de sincronizar. Se usan las copias más antiguas.',
+      },
+      cleanUp: 'Eliminar las copias sobrantes',
+      removed: {
+        one: 'Se ha eliminado {count} rutina duplicada.',
+        other: 'Se han eliminado {count} rutinas duplicadas.',
+      },
+    },
     pausedByPlan: 'En pausa por el plan',
     capReached: {
       one: 'Tu plan ejecuta {count} rutina a la vez. Pausa otra primero.',
@@ -1307,6 +1338,7 @@ export default {
       allowDestructiveHint: 'Eliminar y similares. Se recomienda dejarlo desactivado: las rutinas pueden proponerlas para que las confirmes.',
       proposalNote: 'Ninguna rutina envía mensajes a otras personas por su cuenta. Llegan a tu bandeja como una propuesta de un toque.',
       routines: 'Rutinas',
+      manageRoutines: 'Gestionar rutinas',
       noRoutines: 'Aún no hay rutinas.',
       askAiHint: 'Pídele una a YANTA AI: «entre semana a las 7, resúmeme los feeds sin leer».',
       loadError: 'No se han podido cargar las rutinas.',

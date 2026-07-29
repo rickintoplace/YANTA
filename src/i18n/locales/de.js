@@ -489,6 +489,12 @@ export default {
   },
 
   infoPanel: {
+    pulsePausedTitle: {
+      one: '{count} Routine ist durch deinen Tarif pausiert',
+      other: '{count} Routinen sind durch deinen Tarif pausiert',
+    },
+    pulsePausedText: 'Sie bleiben aus, bis du einen Platz frei machst oder upgradest: {names}',
+    pulsePausedCta: 'Pulse öffnen',
     yourAndroidDevice: 'dein Android-Gerät',
     deviceAnd: 'und',
     setUp: 'Einrichten',
@@ -1203,6 +1209,31 @@ export default {
       other: '{count} Karten im Posteingang',
     },
     lastRun: 'Zuletzt {when}',
+    overviewTitle: 'Pulse',
+    overviewSubtitle: 'Was von selbst läuft und was es getan hat. Alles passiert auf diesem Gerät.',
+    openOverview: 'Übersicht',
+    openSettings: 'Pulse-Einstellungen',
+    close: 'Schließen',
+    nextRun: 'Nächster Lauf {when}',
+    tabs: { routines: 'Routinen', history: 'Verlauf', library: 'Bibliothek' },
+    history: {
+      empty: 'Noch keine Läufe. Sobald eine Routine läuft, steht hier, was sie getan hat.',
+      used: 'Verwendet',
+      manual: 'von dir gestartet',
+      clear: 'Verlauf leeren',
+    },
+    library: { soon: 'Hier entsteht eine Bibliothek fertiger Routinen.' },
+    duplicates: {
+      body: {
+        one: 'Eine Routine existiert doppelt — vermutlich haben zwei Geräte sie vor dem ersten Sync angelegt. Verwendet wird die ältere Kopie.',
+        other: '{count} Routinen existieren doppelt — vermutlich haben zwei Geräte sie vor dem ersten Sync angelegt. Verwendet werden die älteren Kopien.',
+      },
+      cleanUp: 'Zusätzliche Kopien entfernen',
+      removed: {
+        one: '{count} doppelte Routine entfernt.',
+        other: '{count} doppelte Routinen entfernt.',
+      },
+    },
     pausedByPlan: 'Vom Tarif pausiert',
     capReached: {
       one: 'Dein Tarif führt {count} Routine gleichzeitig aus. Pausiere zuerst eine andere.',
@@ -1307,6 +1338,7 @@ export default {
       allowDestructiveHint: 'Löschen und Ähnliches. Aus ist empfohlen — Routinen können solche Schritte weiterhin zur Bestätigung vorschlagen.',
       proposalNote: 'Nachrichten an andere Personen versendet keine Routine selbst. Sie landen als Ein-Tipp-Vorschlag in deinem Posteingang.',
       routines: 'Routinen',
+      manageRoutines: 'Routinen verwalten',
       noRoutines: 'Noch keine Routinen.',
       askAiHint: 'Lass YANTA AI eine bauen: „Fasse mir werktags um 7 meine ungelesenen Feeds zusammen“.',
       loadError: 'Routinen konnten nicht geladen werden.',

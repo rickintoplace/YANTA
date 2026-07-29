@@ -35,10 +35,14 @@ import {
 } from './pulse-store.js';
 
 import { setRoutineEnabled } from './pulse-routines.js';
+import { injectPulseCss } from './pulse-styles.js';
+import { openPulseOverview } from './pulse-overview.js';
 
 const CSS_ID = 'yanta-pulse-inbox-css';
 
 function injectCss() {
+  injectPulseCss();
+
   if (document.getElementById(CSS_ID)) return;
 
   const style = document.createElement('style');
@@ -159,22 +163,6 @@ function injectCss() {
 
 .yanta-pulse-spacer { flex: 1; }
 
-.yanta-pulse-icon-btn {
-  padding: 4px;
-
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-
-  color: var(--text-dim);
-  line-height: 0;
-  cursor: pointer;
-}
-
-.yanta-pulse-icon-btn:hover {
-  background: var(--bg);
-  color: var(--text);
-}
 
 .yanta-pulse-proposal-error {
   color: var(--red, #ef4444);
@@ -371,7 +359,19 @@ async function renderPulseInbox() {
   head.innerHTML = `
     ${lucide('activity', 15)}
     <span class="yanta-dash-widget-title">${escapeHtml(t('pulse.inboxTitle'))}</span>
+    <span class="yanta-pulse-spacer"></span>
   `;
+
+  // The card answers "what happened"; the overview answers "what is
+  // running and what did it do" — one tap from where the question forms.
+  const overview = el('button', {
+    type: 'button',
+    class: 'yanta-pulse-mini',
+    title: t('pulse.openOverview'),
+  }, t('pulse.openOverview'));
+
+  overview.addEventListener('click', () => openPulseOverview());
+  head.append(overview);
 
   const host = el('div');
   section.append(head, host);

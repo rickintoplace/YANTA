@@ -131,14 +131,46 @@ Turn a stream of unread articles into one thing worth reading, so the feed never
   },
 ];
 
+/** Grace period for a first sync to deliver routines another device seeded. */
+const HYDRATION_TIMEOUT_MS = 20_000;
+
 /**
- * Creates any starter routine the user does not already have. Runs once
- * per device; deleting a starter afterwards makes it stay deleted.
+ * Resolves once the vault has hydrated, or after a grace period when no
+ * sync is configured and the event will never come.
+ */
+function vaultHydrated() {
+  return new Promise((resolve) => {
+    let done = false;
+
+    const finish = () => {
+      if (done) return;
+      done = true;
+      window.removeEventListener('yanta-vault-hydrated', finish);
+      resolve();
+    };
+
+    window.addEventListener('yanta-vault-hydrated', finish);
+    window.setTimeout(finish, HYDRATION_TIMEOUT_MS);
+  });
+}
+
+/**
+ * Creates any starter routine the user does not already have.
+ *
+ * Waits for hydration first: seeding before the vault arrives makes a
+ * second device create its own copy of every starter, which then shows
+ * up twice and cannot be toggled (the switch reaches only one copy).
+ * The seeded marker is device-local, so the name check is what actually
+ * prevents duplicates — and deleting a starter keeps it deleted.
  */
 export async function ensureStarterRoutines() {
   const { store } = await import('../core.js');
 
   if (await store.settings.get(SEEDED_KEY, false).catch(() => false)) return;
+
+  await vaultHydrated();
+
+  let created = 0;
 
   for (const starter of STARTER_ROUTINES) {
     if (await getRoutine(starter.name)) continue;
@@ -149,6 +181,8 @@ export async function ensureStarterRoutines() {
         name: starter.name,
         content: starter.markdown,
       });
+
+      created++;
     } catch (err) {
       console.warn('[YANTA Pulse] starter seed failed', starter.name, err);
     }
@@ -156,7 +190,9 @@ export async function ensureStarterRoutines() {
 
   await store.settings.set(SEEDED_KEY, true);
 
-  window.dispatchEvent(new CustomEvent('yanta-pulse-routines-changed', {
-    detail: { seeded: true },
-  }));
+  if (created) {
+    window.dispatchEvent(new CustomEvent('yanta-pulse-routines-changed', {
+      detail: { seeded: created },
+    }));
+  }
 }

@@ -25,7 +25,7 @@ import {
 import { readSensors } from './pulse-sensors.js';
 
 import {
-  getPulseState,
+  countRunsToday,
   getRoutineState,
 } from './pulse-store.js';
 
@@ -101,9 +101,8 @@ export async function pulseTick({ reason = 'tick' } = {}) {
     if (!settings.enabled) return { ran: 0, skipped: 'disabled' };
 
     const now = Date.now();
-    const globalState = await getPulseState(now);
 
-    if (globalState.runsToday >= settings.maxRunsPerDay) {
+    if (await countRunsToday(now) >= settings.maxRunsPerDay) {
       return { ran: 0, skipped: 'daily-cap' };
     }
 
@@ -132,9 +131,7 @@ export async function pulseTick({ reason = 'tick' } = {}) {
         }));
       }
 
-      const after = await getPulseState(Date.now());
-
-      if (after.runsToday >= settings.maxRunsPerDay) break;
+      if (await countRunsToday(Date.now()) >= settings.maxRunsPerDay) break;
     }
 
     if (results.length) {

@@ -88,7 +88,7 @@ export function renderRelatedNotes(noteId) {
 
   inFlight.add(noteId);
 
-  semanticSimilarNotes(noteId, { topK: 4, minScore: 0.8 })
+  semanticSimilarNotes(noteId, { topK: 4 })
     .then((results) => {
       CACHE.set(noteId, {
         results,

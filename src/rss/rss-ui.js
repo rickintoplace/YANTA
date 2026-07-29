@@ -1379,9 +1379,11 @@ async function fillRelatedNotesStrip(host, item) {
   let results = [];
 
   try {
+    // No minScore here: the floor belongs to the embedding space and
+    // lives in semantic-index.js. A per-caller number silently drifts
+    // out of step whenever the model changes.
     results = await semantic.semanticSearch(query, {
       topK: 3,
-      minScore: 0.76,
     });
   } catch {
     return;

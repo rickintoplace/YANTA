@@ -457,7 +457,16 @@ function routineRow(routine, { overCap, inboxCount, state, onChange }) {
   open.innerHTML = lucide('file-text', 12);
 
   open.addEventListener('click', async () => {
-    closePulseOverview();
+    /*
+      Overlay → app route, so the overlay must NOT call history.back():
+      that fires asynchronously and would land after openNote() has
+      routed, dragging the user straight back off the note. Hide it
+      directly instead — pushAppRoute replaces a current overlay entry
+      on its own, so Back from the note returns to the surface behind
+      the overview, which is what the user means by Back here.
+    */
+    closePulseOverview({ fromHistory: true });
+
     await openNote(routine.noteId);
   });
 

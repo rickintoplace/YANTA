@@ -600,9 +600,27 @@ export function bootSemanticIfEnabled() {
 
 // ---------------- search --------------------------------------------
 
+/*
+  Floors for the current embedding space: if even the BEST candidate
+  is below this, the result set is empty. Related-notes sits higher
+  than search — an empty Related panel is better than a wrong one,
+  whereas an empty search result is a failure. The actual per-query
+  cut is adaptive; see the scoring note in semantic-worker.js.
+*/
+const SEARCH_FLOOR = 0.75;
+const RELATED_FLOOR = 0.8;
+
+/*
+  `minScore` is the absolute noise floor for this embedding space, not a
+  relevance dial: the worker additionally keeps only what is within
+  `band` of the best hit. Raising minScore here does not make results
+  "stricter" in a useful way — it just makes an unlucky vault return
+  nothing. See the scoring note in semantic-worker.js.
+*/
 export async function semanticSearch(query, {
   topK = 8,
-  minScore = 0.78,
+  minScore = SEARCH_FLOOR,
+  band,
 } = {}) {
   const q = String(query || '').trim();
 
@@ -613,6 +631,7 @@ export async function semanticSearch(query, {
     query: q,
     topK,
     minScore,
+    ...(band === undefined ? {} : { band }),
   });
 
   return results || [];
@@ -621,7 +640,8 @@ export async function semanticSearch(query, {
 /** Related notes for one note, from its stored chunk vectors. */
 export async function semanticSimilarNotes(noteId, {
   topK = 4,
-  minScore = 0.8,
+  minScore = RELATED_FLOOR,
+  band,
 } = {}) {
   if (!noteId || !semanticEnabled() || !semanticReady()) return [];
 
@@ -630,6 +650,7 @@ export async function semanticSimilarNotes(noteId, {
     noteId,
     topK,
     minScore,
+    ...(band === undefined ? {} : { band }),
   });
 
   return results || [];
@@ -686,7 +707,11 @@ export async function semanticSearchNotesAction({
 
   const results = await semanticSearch(q, {
     topK: Math.min(20, Math.max(1, limit)),
-    minScore: 0.72,
+
+    // The assistant can weigh a weak hit itself and says so in its
+    // answer; a human scanning a result list cannot. So the tool sees
+    // a wider band than the UI does.
+    band: 0.1,
   });
 
   return {

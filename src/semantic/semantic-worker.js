@@ -368,15 +368,69 @@ async function handleRemoveNotes({ noteIds }) {
 }
 
 /*
-  Warum Baseline-relativ: E5-Cosines clustern hoch — auch völlig
-  fremde Paare liegen bei ~0.75-0.81. Eine absolute Schwelle trennt
-  das nie sauber. Deshalb: Mittelwert über ALLE Chunk-Scores dieser
-  Query als Rauschboden, Treffer müssen deutlich darüber liegen
-  (UND über der absoluten Untergrenze).
-*/
-const BASELINE_MARGIN = 0.05;
+  Scoring model.
 
-async function handleSearch({ query, topK = 8, minScore = 0.78, margin = BASELINE_MARGIN }) {
+  Measured on this embedding space (multilingual-e5-small), relevant
+  and irrelevant scores OVERLAP: relevant land in 0.78–0.89, irrelevant
+  in 0.70–0.84. No absolute threshold separates them, so every constant
+  picked in that range trades recall for precision arbitrarily.
+
+  What does separate them is the drop after the top hit. So the cut is
+  relative to the best score, and the width of the band adapts to how
+  far that best score rises above the query's own noise level:
+
+    noise = median score across notes for this query
+    lift  = best - noise
+    band  = clamp(lift * RATIO, MIN_BAND, maxBand)
+    cut   = best - band
+
+  A confident query (large lift) can afford a wide band and still show
+  only real matches. An ambiguous one (small lift) gets a tight band,
+  because when the winner barely beats the noise, a long tail is not
+  "more results" — it is a list of wrong answers wearing scores.
+
+  The previous rule cut at `mean + margin`. That failed in the other
+  direction: the mean sits close to the good matches here, so a small
+  or single-topic vault could push the floor above everything and the
+  search returned nothing at all.
+*/
+const DEFAULT_MAX_BAND = 0.06;
+const BAND_RATIO = 0.5;
+const MIN_BAND = 0.015;
+
+/** Below this the best hit is noise and the result set is empty. */
+const BEST_FLOOR = 0.75;
+
+/** Graph links only: how far above the all-pairs mean an edge must sit. */
+const LINK_NOISE_MARGIN = 0.05;
+
+function medianOf(sortedDesc) {
+  const mid = sortedDesc.length >> 1;
+
+  return sortedDesc.length % 2
+    ? sortedDesc[mid]
+    : (sortedDesc[mid - 1] + sortedDesc[mid]) / 2;
+}
+
+/**
+ * Adaptive cutoff for one result set. Returns Infinity when nothing is
+ * worth showing.
+ */
+function cutoffFor(scores, { floor, band }) {
+  if (!scores.length) return Infinity;
+
+  const sorted = [...scores].sort((a, b) => b - a);
+  const best = sorted[0];
+
+  if (best < floor) return Infinity;
+
+  const lift = best - medianOf(sorted);
+  const width = Math.min(band, Math.max(MIN_BAND, lift * BAND_RATIO));
+
+  return best - width;
+}
+
+async function handleSearch({ query, topK = 8, minScore = BEST_FLOOR, band = DEFAULT_MAX_BAND }) {
   if (!extractor) throw new Error('Model not ready');
   if (!index.vectors.length) return { results: [] };
 
@@ -387,18 +441,12 @@ async function handleSearch({ query, topK = 8, minScore = 0.78, margin = BASELIN
   // because it is long.
   const bestByNote = new Map();
 
-  let scoreSum = 0;
-  let scoreCount = 0;
-
   for (let i = 0; i < index.vectors.length; i++) {
     const v = index.vectors[i];
     if (v.length !== dims) continue;
 
     let dot = 0;
     for (let j = 0; j < dims; j++) dot += v[j] * qvec[j];
-
-    scoreSum += dot;
-    scoreCount++;
 
     const prev = bestByNote.get(index.noteIds[i]);
 
@@ -411,22 +459,21 @@ async function handleSearch({ query, topK = 8, minScore = 0.78, margin = BASELIN
     }
   }
 
-  const mean = scoreCount ? scoreSum / scoreCount : 0;
-  const effectiveMin = Math.max(minScore, mean + margin);
+  const ranked = [...bestByNote.values()].sort((a, b) => b.score - a.score);
+  const cutoff = cutoffFor(ranked.map((r) => r.score), { floor: minScore, band });
 
-  const results = [...bestByNote.values()]
-    .filter((r) => r.score >= effectiveMin)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, topK);
-
-  return { results, baseline: Math.round(mean * 1000) / 1000 };
+  return {
+    results: ranked.filter((r) => r.score >= cutoff).slice(0, topK),
+    top: ranked.length ? Math.round(ranked[0].score * 1000) / 1000 : 0,
+    cutoff: Math.round(cutoff * 1000) / 1000,
+  };
 }
 
 /**
  * Related notes for ONE note: its chunk vectors query the whole matrix,
  * best chunk-to-chunk score per foreign note wins.
  */
-function handleSimilarNotes({ noteId, topK = 5, minScore = 0.8, margin = BASELINE_MARGIN }) {
+function handleSimilarNotes({ noteId, topK = 5, minScore = 0.8, band = DEFAULT_MAX_BAND }) {
   const queries = [];
 
   for (let i = 0; i < index.vectors.length; i++) {
@@ -438,9 +485,6 @@ function handleSimilarNotes({ noteId, topK = 5, minScore = 0.8, margin = BASELIN
   }
 
   const bestByNote = new Map();
-
-  let scoreSum = 0;
-  let scoreCount = 0;
 
   for (let i = 0; i < index.vectors.length; i++) {
     const targetNote = index.noteIds[i];
@@ -457,11 +501,6 @@ function handleSimilarNotes({ noteId, topK = 5, minScore = 0.8, margin = BASELIN
       if (dot > best) best = dot;
     }
 
-    if (best > -1) {
-      scoreSum += best;
-      scoreCount++;
-    }
-
     const prev = bestByNote.get(targetNote);
 
     if (!prev || best > prev.score) {
@@ -473,15 +512,12 @@ function handleSimilarNotes({ noteId, topK = 5, minScore = 0.8, margin = BASELIN
     }
   }
 
-  const mean = scoreCount ? scoreSum / scoreCount : 0;
-  const effectiveMin = Math.max(minScore, mean + margin);
+  const ranked = [...bestByNote.values()].sort((a, b) => b.score - a.score);
+  const cutoff = cutoffFor(ranked.map((r) => r.score), { floor: minScore, band });
 
-  const results = [...bestByNote.values()]
-    .filter((r) => r.score >= effectiveMin)
-    .sort((a, b) => b.score - a.score)
-    .slice(0, topK);
-
-  return { results };
+  return {
+    results: ranked.filter((r) => r.score >= cutoff).slice(0, topK),
+  };
 }
 
 /**
@@ -489,7 +525,13 @@ function handleSimilarNotes({ noteId, topK = 5, minScore = 0.8, margin = BASELIN
  * note, pairwise cosine, top links per note. Quadratic in notes —
  * capped, the caller falls back to the TF heuristic above the cap.
  */
-function handleNoteLinks({ maxPerNote = 3, minScore = 0.8, cap = 1500, margin = BASELINE_MARGIN }) {
+/*
+  Note-links keeps the mean-relative floor on purpose. Unlike a search,
+  this scores every pair in the vault, so most pairs genuinely are
+  unrelated and their mean is a real noise floor — the property the
+  search path could not rely on.
+*/
+function handleNoteLinks({ maxPerNote = 3, minScore = 0.8, cap = 1500, margin = LINK_NOISE_MARGIN }) {
   const sums = new Map();   // noteId -> { vec: Float64Array, n }
 
   for (let i = 0; i < index.vectors.length; i++) {

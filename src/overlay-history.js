@@ -167,6 +167,29 @@ export function closeTopOverlay(fallbackClose = null) {
 }
 
 /**
+ * Hand the current overlay's history entry to a different overlay.
+ *
+ * Closing then opening does not work: `closeTopOverlay` goes through
+ * `history.back()`, which fires asynchronously. By the time the popstate
+ * lands, the new overlay has already pushed its own entry, and the
+ * router then closes it again — the caller sees the source overlay
+ * vanish and nothing take its place.
+ *
+ * So both panels are moved directly (`fromHistory: true`, no history
+ * calls of their own) and the entry is rewritten once, in place. Back
+ * still returns to the app route, exactly as it did before the swap.
+ *
+ * @param {string} id  overlay id being opened
+ * @param {{from: Function, to: Function}} panels  close/open callbacks
+ */
+export function swapOverlay(id, { from, to } = {}) {
+  from?.({ fromHistory: true });
+  to?.({ fromHistory: true });
+
+  replaceOverlayState(id);
+}
+
+/**
  * One-call binding for self-contained overlays (modals, sheets, panels):
  * pushes the history entry and routes device-back/ESC into `close`.
  *

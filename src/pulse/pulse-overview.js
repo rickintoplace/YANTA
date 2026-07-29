@@ -23,6 +23,7 @@ import {
   pushOverlayState,
   closeTopOverlay,
   registerOverlayRoute,
+  swapOverlay,
 } from '../overlay-history.js';
 
 import {
@@ -68,31 +69,21 @@ function injectCss() {
   const style = document.createElement('style');
   style.id = CSS_ID;
   style.textContent = `
-.yanta-pulse-overview {
-  position: fixed;
-  inset: 0;
-  z-index: 1200;
+/*
+  Built on the app's .modal / .modal-card so the backdrop, fade-in,
+  z-index and [hidden] behaviour match Settings exactly.
 
-  display: grid;
-  place-items: center;
+  The card's height is fixed rather than content-driven: the tabs hold
+  very different amounts of content, and a panel that resizes under the
+  pointer on every tab switch feels broken. The body scrolls instead.
+*/
+.yanta-pulse-ov-card {
+  width: min(760px, 92vw);
+  height: min(660px, 86vh);
 
-  padding: 16px;
-  background: rgb(0 0 0 / .45);
-}
-
-.yanta-pulse-overview[hidden] { display: none !important; }
-
-.yanta-pulse-ov-panel {
   display: flex;
   flex-direction: column;
-
-  width: min(760px, 100%);
-  max-height: min(82vh, 900px);
-
-  border-radius: 16px;
   background: var(--bg);
-  box-shadow: 0 24px 64px rgb(0 0 0 / .35);
-  overflow: hidden;
 }
 
 .yanta-pulse-ov-head {
@@ -100,59 +91,141 @@ function injectCss() {
   align-items: center;
   gap: 10px;
 
-  padding: 14px 16px;
+  flex: 0 0 auto;
+  padding: 15px 18px 13px;
   border-bottom: 1px solid var(--border);
 }
 
+.yanta-pulse-ov-head > svg { color: var(--accent); }
+
 .yanta-pulse-ov-head h2 {
   flex: 1;
+  min-width: 0;
   margin: 0;
 
   color: var(--text);
   font-size: 15px;
-  font-weight: 700;
+  font-weight: 600;
 }
 
 .yanta-pulse-ov-sub {
-  padding: 0 16px 12px;
+  flex: 0 0 auto;
+  padding: 12px 18px 0;
 
   color: var(--text-dim);
   font-size: 12px;
   line-height: 1.5;
-  border-bottom: 1px solid var(--border);
 }
 
 .yanta-pulse-ov-tabs {
-  display: flex;
-  gap: 4px;
+  flex: 0 0 auto;
 
-  padding: 10px 16px 0;
+  display: flex;
+  gap: 3px;
+
+  margin: 12px 18px 0;
+  padding: 3px;
+
+  border-radius: 10px;
+  background: var(--bg-elev-2, var(--bg-elev));
 }
 
 .yanta-pulse-ov-tab {
-  padding: 6px 12px;
+  flex: 1;
+  padding: 7px 10px;
 
   border: 0;
-  border-radius: 8px 8px 0 0;
+  border-radius: 8px;
   background: transparent;
 
   color: var(--text-dim);
-  font-size: 12px;
-  font-weight: 600;
+  font-size: 12.5px;
+  font-weight: 500;
   cursor: pointer;
+
+  transition: background .14s ease, color .14s ease;
 }
 
+.yanta-pulse-ov-tab:hover { color: var(--text); }
+
 .yanta-pulse-ov-tab.active {
+  background: var(--bg-elev-3, var(--bg));
   color: var(--text);
-  background: var(--bg-elev);
+  font-weight: 600;
 }
 
 .yanta-pulse-ov-body {
   flex: 1;
   min-height: 0;
 
-  padding: 14px 16px 18px;
+  display: flex;
+  flex-direction: column;
+
+  padding: 14px 18px 20px;
   overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* A fixed-height panel leaves real space when a tab has little to show.
+   Empty states take the middle of it rather than clinging to the top,
+   which is what makes the height read as deliberate instead of broken. */
+.yanta-pulse-ov-empty {
+  margin: auto 0;
+  padding: 24px 14px;
+
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+
+  text-align: center;
+}
+
+/* Lists keep their natural height at the top of the flex column. */
+.yanta-pulse-ov-body > .yanta-pulse-routines,
+.yanta-pulse-ov-body > .yanta-pulse-hist {
+  flex: 0 0 auto;
+}
+
+.yanta-pulse-ov-empty > svg {
+  color: var(--text-dim);
+  opacity: .5;
+}
+
+.yanta-pulse-ov-empty span {
+  max-width: 32ch;
+
+  color: var(--text-dim);
+  font-size: 12.5px;
+  line-height: 1.6;
+}
+
+/* Phones: a sheet that owns the screen, like Settings — not a window
+   floating on a backdrop nobody can reach around. */
+@media (max-width: 720px) {
+  .yanta-pulse-modal { padding: 0; }
+
+  .yanta-pulse-ov-card {
+    width: 100%;
+    height: 100dvh;
+    max-height: none;
+
+    border: 0;
+    border-radius: 0;
+  }
+
+  .yanta-pulse-ov-head {
+    padding-top: max(15px, env(safe-area-inset-top));
+  }
+
+  .yanta-pulse-ov-tab { font-size: 13.5px; padding: 9px 10px; }
+
+  .yanta-pulse-ov-body {
+    padding: 14px 16px calc(24px + env(safe-area-inset-bottom));
+  }
+
+  .yanta-pulse-routine { padding: 13px; }
+  .yanta-pulse-mini { padding: 7px 11px; font-size: 12px; }
 }
 
 .yanta-pulse-hist {
@@ -232,14 +305,6 @@ function injectCss() {
   font-size: 12px;
 }
 
-.yanta-pulse-ov-empty {
-  padding: 22px 14px;
-  text-align: center;
-
-  color: var(--text-dim);
-  font-size: 12px;
-  line-height: 1.6;
-}
 `;
 
   document.head.append(style);
@@ -407,7 +472,7 @@ async function renderRoutinesTab(host, onChange) {
   }
 
   if (!routines.length) {
-    host.append(el('div', { class: 'yanta-pulse-ov-empty' }, t('pulse.settings.noRoutines')));
+    host.append(emptyState('activity', t('pulse.settings.noRoutines')));
     return;
   }
 
@@ -444,7 +509,7 @@ async function renderHistoryTab(host, onChange) {
   host.replaceChildren();
 
   if (!entries.length) {
-    host.append(el('div', { class: 'yanta-pulse-ov-empty' }, t('pulse.history.empty')));
+    host.append(emptyState('history', t('pulse.history.empty')));
     return;
   }
 
@@ -499,8 +564,17 @@ async function renderHistoryTab(host, onChange) {
   host.append(clear);
 }
 
+function emptyState(icon, text) {
+  const wrap = el('div', { class: 'yanta-pulse-ov-empty' });
+
+  wrap.innerHTML = lucide(icon, 22);
+  wrap.append(el('span', {}, text));
+
+  return wrap;
+}
+
 function renderLibraryTab(host) {
-  host.replaceChildren(el('div', { class: 'yanta-pulse-ov-empty' }, t('pulse.library.soon')));
+  host.replaceChildren(emptyState('library', t('pulse.library.soon')));
 }
 
 // ---------------- shell -------------------------------------------
@@ -510,8 +584,18 @@ function ensureModal() {
 
   injectCss();
 
+  /*
+    An HMR reload gives this module a second instance with its own
+    `modal` variable, while the previous instance's element is still in
+    the document. Two overlays then answer the same clicks. Claim the
+    DOM for the live instance rather than stacking ghosts on it.
+  */
+  for (const stale of document.querySelectorAll('.yanta-pulse-overview')) {
+    stale.remove();
+  }
+
   modal = el('div', {
-    class: 'yanta-pulse-overview',
+    class: 'modal yanta-pulse-modal yanta-pulse-overview',
     role: 'dialog',
     'aria-modal': 'true',
     'aria-label': t('pulse.overviewTitle'),
@@ -519,7 +603,7 @@ function ensureModal() {
 
   modal.hidden = true;
 
-  const panel = el('div', { class: 'yanta-pulse-ov-panel' });
+  const panel = el('div', { class: 'modal-card yanta-pulse-ov-card' });
 
   const head = el('div', { class: 'yanta-pulse-ov-head' });
   head.innerHTML = `${lucide('activity', 16)}<h2>${escapeHtml(t('pulse.overviewTitle'))}</h2>`;
@@ -536,8 +620,10 @@ function ensureModal() {
   gear.addEventListener('click', async () => {
     const { openSettings } = await import('../settings.js');
 
-    closePulseOverview();
-    openSettings({ section: 'pulse' });
+    swapOverlay('settings', {
+      from: closePulseOverview,
+      to: () => openSettings({ fromHistory: true, section: 'pulse' }),
+    });
   });
 
   const close = el('button', {

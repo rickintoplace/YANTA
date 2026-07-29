@@ -169,9 +169,12 @@ export function pulseSettingsElement() {
 
     openButton.addEventListener('click', async () => {
       const { closeSettings } = await import('../settings.js');
+      const { swapOverlay } = await import('../overlay-history.js');
 
-      closeSettings();
-      openPulseOverview();
+      swapOverlay('pulse-overview', {
+        from: closeSettings,
+        to: openPulseOverview,
+      });
     });
 
     routines.append(openButton);

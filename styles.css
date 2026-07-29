@@ -1587,11 +1587,12 @@ button.link { background: 0; border: 0; color: var(--accent); cursor: pointer; p
   display: none !important;
 }
 
+/* Icon-only buttons — meaning comes from the tooltip (label · shortcut). */
 .format-toolbar button {
-  width: auto;
-  min-width: 30px;
+  width: 30px;
   height: 28px;
-  padding: 0 8px;
+  flex: 0 0 auto;
+  padding: 0;
   background: transparent;
   border: 0;
   color: var(--text);
@@ -1600,10 +1601,11 @@ button.link { background: 0; border: 0; color: var(--accent); cursor: pointer; p
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  white-space: nowrap;
-  font-size: 12px;
-  font-weight: 600;
   line-height: 1;
+}
+
+.format-toolbar button svg {
+  display: block;
 }
 
 .format-toolbar button:hover {

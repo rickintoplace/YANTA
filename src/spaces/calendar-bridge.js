@@ -63,6 +63,7 @@ import {
 } from '../calendar-personal.js';
 
 import { appendCalendarFeed } from './calendar-feed.js';
+import { resolveOwnIdentity } from './space-identity.js';
 
 import { SPACE_REMOTE_ORIGIN } from './space-engine.js';
 
@@ -78,31 +79,6 @@ function emitCalendarSpaceApplied(spaceId) {
   window.dispatchEvent(new CustomEvent('yanta-calendar-space-applied', {
     detail: { spaceId },
   }));
-}
-
-async function resolveOwnIdentity() {
-  // Prefer the Matrix handle (stable, member-visible); fall back to the
-  // local display name, then the cloud account email. Lazy imports keep
-  // chat/cloud out of the startup path.
-  try {
-    const { resolveMatrixClient } = await import('../chat/chat-actions.js');
-    const client = await resolveMatrixClient();
-    const userId = client?.getUserId?.();
-    if (userId) return String(userId);
-  } catch {}
-
-  try {
-    const name = await store.settings.get('userName', '');
-    if (name) return String(name);
-  } catch {}
-
-  try {
-    const { cloudMe } = await import('../cloud/cloud-api.js');
-    const me = await cloudMe();
-    if (me?.user?.email) return String(me.user.email);
-  } catch {}
-
-  return 'Someone';
 }
 
 export class CalendarBridge {

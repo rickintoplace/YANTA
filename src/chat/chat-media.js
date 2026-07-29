@@ -376,6 +376,10 @@ async function sendRoomMessage(client, roomId, content) {
 
 /**
  * Fetch Matrix media and return a Blob.
+ *
+ * `silent` suppresses the failure toast for media nobody asked for
+ * (background avatar warm-ups) — a missing picture must never announce
+ * itself as an error the user has to dismiss.
  */
 export async function mxcToBlob(client, mxcUrl, {
   thumbnail = true,
@@ -384,6 +388,7 @@ export async function mxcToBlob(client, mxcUrl, {
   encryptedFile = null,
   mimeType = '',
   roomId = '',
+  silent = false,
 } = {}) {
   const key = cacheKeyFor(mxcUrl, {
     thumbnail,
@@ -451,7 +456,9 @@ export async function mxcToBlob(client, mxcUrl, {
     return blob;
   } catch (err) {
     console.warn('[YANTA Chat] Media fetch failed', err);
-    toast('Could not load chat media.', 'error');
+
+    if (!silent) toast('Could not load chat media.', 'error');
+
     throw err;
   }
 }

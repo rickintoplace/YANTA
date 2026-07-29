@@ -88,6 +88,11 @@ import {
 } from './dashboard-crumple.js';
 
 import {
+  applyDashboardSharingStrip,
+  refreshDashboardSharingStrips,
+} from './dashboard-sharing.js';
+
+import {
   getDashboardSelectedKeys,
 } from './dashboard-multiselect.js';
 
@@ -1672,6 +1677,26 @@ function getDashboardItems() {
     window.addEventListener('yanta-dashboard-settings-changed', () => {
       if (dashboard.visible) renderDashboard();
     });
+
+    /*
+      Sharing-Overlays hängen an Daten, die asynchron eintreffen (erster
+      Pull einer Space, Chat-Login, Edit eines Mitarbeiters). Gezielt
+      auffrischen statt neu rendern — sonst gehen Scrollposition,
+      hydrierte Previews und laufende Animationen verloren.
+    */
+    for (const evt of ['yanta-space-people-changed', 'yanta-space-changed']) {
+      window.addEventListener(evt, () => {
+        if (dashboard.visible) refreshDashboardSharingStrips(root);
+      });
+    }
+
+    // "vor 2 Min." altert, während das Dashboard offen bleibt.
+    setInterval(() => {
+      if (!dashboard.visible || document.hidden) return;
+      if (!root?.querySelector('[data-dash-share]')) return;
+
+      refreshDashboardSharingStrips(root);
+    }, 60_000);
   
     MOBILE_MQ.addEventListener?.('change', () => {
       if (isMobile() && !state.currentNoteId) {
@@ -2801,6 +2826,9 @@ function renderCard(item, { section }) {
   }
 
   card.append(renderResizeHandle(key));
+
+  // Sharing overlay last: it sits on top of preview and folder body.
+  applyDashboardSharingStrip(card, item);
 
   bindCardPointerInteractions(card, item);
 

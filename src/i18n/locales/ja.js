@@ -526,6 +526,14 @@ export default {
     sharedWithYouReadOnly: 'あなたと共有（読み取り専用）',
     legacyLiveSharingPeers: { other: 'レガシーライブ共有 · {count} ピア' },
     sharedNoteTitle: '共有ノート',
+    people: {
+      shared: '共有中',
+      sharedWith: '{names} と共有中',
+      editedBy: '{name} が{when}編集しました',
+      roleOwner: 'オーナー',
+      roleWrite: '編集可能',
+      roleRead: '閲覧のみ',
+    },
   },
 
   graph: {

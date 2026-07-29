@@ -536,6 +536,14 @@ export default {
     sharedWithYouReadOnly: 'Partagé avec vous (lecture seule)',
     legacyLiveSharingPeers: { one: 'Partage en direct hérité · {count} pair', other: 'Partage en direct hérité · {count} pairs' },
     sharedNoteTitle: 'Note partagée',
+    people: {
+      shared: 'Partagé',
+      sharedWith: 'Partagé avec {names}',
+      editedBy: '{name} a modifié ceci {when}',
+      roleOwner: 'propriétaire',
+      roleWrite: 'peut modifier',
+      roleRead: 'peut consulter',
+    },
   },
 
   graph: {

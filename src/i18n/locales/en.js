@@ -543,6 +543,14 @@ export default {
     sharedWithYouReadOnly: 'Shared with you (read-only)',
     legacyLiveSharingPeers: { one: 'Legacy live sharing · {count} peer', other: 'Legacy live sharing · {count} peers' },
     sharedNoteTitle: 'Shared note',
+    people: {
+      shared: 'Shared',
+      sharedWith: 'Shared with {names}',
+      editedBy: '{name} edited this {when}',
+      roleOwner: 'owner',
+      roleWrite: 'can edit',
+      roleRead: 'can view',
+    },
   },
 
   graph: {

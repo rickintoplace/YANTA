@@ -49,6 +49,12 @@ import {
 } from './calendar-bridge.js';
 import { calendarBridgeForSpace } from './calendar-registry.js';
 import { clearCalendarFeed } from './calendar-feed.js';
+import {
+  attachSpacePeople,
+  detachSpacePeople,
+  destroySpacePeopleDoc,
+  recordSpaceActivity,
+} from './space-people.js';
 
 const POLL_INTERVAL_MS = 60_000;
 const POKE_PULL_DEBOUNCE_MS = 400;
@@ -56,7 +62,7 @@ const POKE_PULL_DEBOUNCE_MS = 400;
 // Remote key of a note-space's single document. Local note IDs differ
 // between participants (recipients mount a placeholder note), so remote
 // paths derive from this space-stable key, never from local IDs.
-const MAIN_DOC_KEY = 'main';
+export const MAIN_DOC_KEY = 'main';
 
 function emitSpaceChanged(spaceId) {
   window.dispatchEvent(new CustomEvent('yanta-space-changed', { detail: { spaceId } }));
@@ -233,13 +239,19 @@ async function mountSpace(record) {
     rootKey: record.rootKey,
     role: record.role,
     remote,
-    onDidUpload: () => {
+    onDidUpload: ({ remoteKeys = [] } = {}) => {
       publishSpacePoke(record.signalingTopic, {
         t: 'poke',
         s: record.spaceId,
         p: engine.state?.participantId || '',
         ts: Date.now(),
       });
+
+      // Attribution follows the upload: whatever this participant just
+      // pushed is what this participant edited.
+      for (const key of remoteKeys) {
+        recordSpaceActivity(record.spaceId, key).catch(() => {});
+      }
     },
     onDidApply: () => {
       session.lastPullAt = Date.now();
@@ -253,6 +265,12 @@ async function mountSpace(record) {
 
   session.engine = engine;
   state.spaces.set(record.spaceId, session);
+
+  // Who this space is shared with — attached before the content docs so
+  // the first pull already carries the roster into the UI.
+  await attachSpacePeople(session).catch((err) => {
+    console.warn('[YANTA Spaces] people doc unavailable', err);
+  });
 
   if (isFolder) {
     // A folder space syncs a workspace doc (the subtree's notes and
@@ -353,6 +371,8 @@ function unmountSpace(spaceId) {
     session.provider?.disconnect();
   } catch {}
 
+  detachSpacePeople(spaceId);
+
   if (session.sourceType === 'folder') {
     uninstallWorkspaceBridge(spaceId);
   }
@@ -367,6 +387,69 @@ function unmountSpace(spaceId) {
 
   state.spaces.delete(spaceId);
   emitSpaceChanged(spaceId);
+}
+
+// ---------------- item -> space resolution -----------------------
+//
+// Sharing is inherited: a note inside a shared folder is shared, even
+// though only the folder carries the mark (owner side) or the space
+// session (recipient side). UI that wants to SHOW sharing therefore has
+// to walk the folder chain — these two helpers are that walk.
+
+function spaceContextFromMark(item) {
+  if (!item?.spaceId) return null;
+
+  return {
+    spaceId: item.spaceId,
+    role: item.spaceRole === 'write' ? 'write' : 'read',
+    inherited: false,
+  };
+}
+
+export function spaceContextForFolder(folderId) {
+  const folder = state.folders.get(folderId);
+  if (!folder) return null;
+
+  const own = spaceContextFromMark(folder) ||
+    contextFromSession(spaceSessionForFolder(folderId));
+
+  if (own) return own;
+
+  for (const id of folderChainIds(folder.parentId)) {
+    const ancestor = state.folders.get(id);
+
+    const context =
+      spaceContextFromMark(ancestor) ||
+      contextFromSession(spaceSessionForFolder(id));
+
+    if (context) return { ...context, inherited: true };
+  }
+
+  return null;
+}
+
+export function spaceContextForNote(noteId) {
+  const note = state.notes.get(noteId);
+  if (!note) return null;
+
+  const own = spaceContextFromMark(note) ||
+    contextFromSession(spaceSessionForNote(noteId));
+
+  if (own) return own;
+
+  const parent = note.folderId ? spaceContextForFolder(note.folderId) : null;
+
+  return parent ? { ...parent, inherited: true } : null;
+}
+
+function contextFromSession(session) {
+  if (!session) return null;
+
+  return {
+    spaceId: session.spaceId,
+    role: session.role,
+    inherited: false,
+  };
 }
 
 // ---------------- sharing guards ---------------------------------
@@ -660,6 +743,7 @@ export async function stopSpaceShare(spaceId) {
     } catch {}
 
     await store.spaces.del(spaceId);
+    await destroySpacePeopleDoc(spaceId);
   }
 
   if (record?.sourceType === 'calendar') {
@@ -921,6 +1005,7 @@ export async function leaveSpace(spaceId) {
   } catch {}
 
   await store.spaces.del(spaceId);
+  await destroySpacePeopleDoc(spaceId);
 
   // Recipients drop everything they materialized from the space; the
   // owner keeps their own notes and folders untouched.

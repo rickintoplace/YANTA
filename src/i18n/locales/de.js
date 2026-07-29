@@ -536,6 +536,14 @@ export default {
     sharedWithYouReadOnly: 'Mit dir geteilt (schreibgeschützt)',
     legacyLiveSharingPeers: { one: 'Legacy-Live-Freigabe · {count} Peer', other: 'Legacy-Live-Freigabe · {count} Peers' },
     sharedNoteTitle: 'Geteilte Notiz',
+    people: {
+      shared: 'Geteilt',
+      sharedWith: 'Geteilt mit {names}',
+      editedBy: '{name} hat das {when} bearbeitet',
+      roleOwner: 'Eigentümer',
+      roleWrite: 'bearbeiten',
+      roleRead: 'ansehen',
+    },
   },
 
   graph: {

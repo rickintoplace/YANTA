@@ -38,6 +38,10 @@ import {
 } from '../spaces/calendar-registry.js';
 
 import {
+  publishSpaceRoster,
+} from '../spaces/space-people.js';
+
+import {
   loadShareGroups,
   createShareGroup,
   deleteShareGroup,
@@ -1879,6 +1883,11 @@ async function renderPeopleTab() {
       listHost.innerHTML = `<div class="yanta-public-shares-empty">${escapeHtml(err?.message || 'Could not load members')}</div>`;
       return;
     }
+
+    // Every membership change ends up here — the single place to keep
+    // the in-space roster (what recipients and the dashboard read) in
+    // step with the server's member table.
+    publishSpaceRoster(session.spaceId, members).catch(() => {});
 
     if (!members.length) {
       listHost.innerHTML = '<div class="yanta-public-shares-empty">Nobody has personal access yet.</div>';

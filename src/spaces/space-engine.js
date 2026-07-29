@@ -211,7 +211,9 @@ export class SpaceEngine {
   }
 
   async flushNow() {
-    let uploaded = false;
+    // Remote keys whose local changes reached the server in this flush —
+    // the session turns them into edit attribution (see space-people).
+    const uploadedKeys = [];
 
     for (const [, record] of this.docs) {
       if (!record.buffer.length) continue;
@@ -244,7 +246,7 @@ export class SpaceEngine {
         const entry = await this.remote.put(path, encrypted);
         this.state.seen[path] = entry ? entryEtag(entry) : 'own';
         this.state.packsSinceHead += 1;
-        uploaded = true;
+        uploadedKeys.push(record.remoteKey);
       } catch (err) {
         if (err?.code === 'ECOMPACTION_REQUIRED') {
           // The doc's journal is full. Publish a head (which covers every
@@ -256,7 +258,7 @@ export class SpaceEngine {
             const entry = await this.remote.put(path, encrypted);
             this.state.seen[path] = entry ? entryEtag(entry) : 'own';
             this.state.packsSinceHead += 1;
-            uploaded = true;
+            uploadedKeys.push(record.remoteKey);
             continue;
           } catch (retryErr) {
             err = retryErr;
@@ -271,7 +273,7 @@ export class SpaceEngine {
       }
     }
 
-    if (!uploaded) return;
+    if (!uploadedKeys.length) return;
 
     const headDue =
       this.state.packsSinceHead >= HEAD_EVERY_N_PACKS ||
@@ -284,7 +286,7 @@ export class SpaceEngine {
     }
 
     await this.persistState();
-    this.onDidUpload?.();
+    this.onDidUpload?.({ remoteKeys: [...new Set(uploadedKeys)] });
   }
 
   /**

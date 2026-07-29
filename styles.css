@@ -5622,3 +5622,82 @@ html.yanta-back-gesture-active body {
   background: #000;
   background: color-mix(in srgb, var(--bg) 25%, #000);
 }
+
+/* ===========================================================
+   People — avatars and avatar stacks
+   Shared by the dashboard sharing strip and the share dialog.
+   A monogram on a stable, identity-derived tint stands in until the
+   Matrix picture is cached (src/spaces/people-avatars.js).
+   =========================================================== */
+
+.yanta-people-stack {
+  flex: 0 0 auto;
+
+  display: inline-flex;
+  align-items: center;
+
+  /* Ohne isolation überlappen die Ringe der Avatare unschön mit dem
+     Box-Shadow des jeweils darunterliegenden Kreises. */
+  isolation: isolate;
+}
+
+.yanta-people-stack > * + * {
+  margin-left: -7px;
+}
+
+.yanta-person-avatar {
+  --person-size: 22px;
+
+  width: var(--person-size);
+  height: var(--person-size);
+  flex: 0 0 auto;
+
+  position: relative;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  overflow: hidden;
+
+  border: 1.5px solid var(--avatar-ring, var(--bg-elev));
+  border-radius: 999px;
+
+  background: hsl(var(--person-hue, 210) 55% 45%);
+  color: #fff;
+
+  font-size: 9.5px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: .02em;
+
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* Der zuletzt gerenderte Avatar liegt oben — wie bei Google/Slack. */
+.yanta-people-stack > .yanta-person-avatar:nth-child(1) { z-index: 3; }
+.yanta-people-stack > .yanta-person-avatar:nth-child(2) { z-index: 2; }
+.yanta-people-stack > .yanta-person-avatar:nth-child(3) { z-index: 1; }
+
+.yanta-person-avatar img {
+  width: 100%;
+  height: 100%;
+
+  display: block;
+
+  object-fit: cover;
+}
+
+/* "+N" ist eine Zählung, kein Gesicht: nicht überlappen, sonst wirkt die
+   Zahl im Kreis verschoben. */
+.yanta-people-stack > .yanta-person-avatar.is-more {
+  margin-left: 3px;
+
+  border-color: transparent;
+  background: var(--bg-elev-3);
+  color: var(--text-dim);
+
+  font-size: 9px;
+  letter-spacing: 0;
+}

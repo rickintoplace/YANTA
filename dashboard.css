@@ -213,6 +213,10 @@
 .yanta-dash-card {
   position: relative;
 
+  /* Die Kartenfläche als eigene Variable: Overlays (Sharing-Strip) müssen
+     exakt gegen dieselbe Farbe ausblenden — auch bei farbigen Karten. */
+  --card-surface: var(--bg-elev);
+
   grid-row: span var(--dash-row-span, 18);
 
   min-width: 0;
@@ -226,7 +230,7 @@
   border: 1px solid var(--border);
   border-radius: 16px;
 
-  background: var(--bg-elev);
+  background: var(--card-surface);
   color: var(--text);
 
   box-shadow: none;
@@ -254,8 +258,9 @@
 }
 
 .yanta-dash-card.has-color {
+  --card-surface: color-mix(in srgb, var(--card-color) 12%, var(--bg-elev));
+
   border-color: color-mix(in srgb, var(--card-color) 38%, var(--border));
-  background: color-mix(in srgb, var(--card-color) 12%, var(--bg-elev));
 }
 
 .yanta-dash-card.selected {
@@ -2134,4 +2139,155 @@ color-mix(in srgb, var(--accent) 36%, transparent);
 
 .yanta-dash-shared-badge.is-mounted {
   color: var(--ok, #4ade80);
+}
+
+/* ===========================================================
+   Sharing strip
+   Wer sieht diese Karte — und wer hat zuletzt daran gearbeitet.
+   Overlay statt Layout-Zeile: Karten sind höhenvariabel und randvoll
+   mit Preview; eine echte Zeile würde auf jeder Karte Inhalt kosten.
+   =========================================================== */
+
+.yanta-dash-share {
+  position: absolute;
+  inset: auto 0 0 0;
+  z-index: 3;
+
+  display: flex;
+  align-items: center;
+  gap: 8px;
+
+  padding: 20px 10px 8px;
+
+  /* Der Verlauf blendet gegen die exakte Kartenfläche aus — dadurch bleiben
+     Gesichter und Text über Text, Bildern und Zeichnungen lesbar. */
+  background:
+    linear-gradient(
+      to top,
+      var(--card-surface) 0%,
+      var(--card-surface) 42%,
+      color-mix(in srgb, var(--card-surface) 72%, transparent) 68%,
+      transparent 100%
+    );
+
+  border-radius: 0 0 15px 15px;
+
+  /* Die Karte selbst bleibt Ziel für Tap, Longpress und Drag; nur die
+     Kinder mit Tooltip fangen Pointer-Events ein. */
+  pointer-events: none;
+
+  opacity: 1;
+  transition: opacity 120ms ease;
+}
+
+/* Aktionsleiste und Resize-Griff belegen dieselbe Zone. */
+.yanta-dash-card.selected .yanta-dash-share,
+.yanta-dash-card.resizing .yanta-dash-share {
+  opacity: 0;
+}
+
+/*
+  Platz für den Strip, damit er keine Zeile überdeckt: bei Notes die
+  Preview, bei Folder-Cards die abschließende Meta-Zeile (der Body davor
+  wird dadurch automatisch mit hochgeschoben).
+*/
+.yanta-dash-card.is-shared .yanta-dash-preview:not(.is-media-only),
+.yanta-dash-card.is-shared .yanta-dash-folder-meta {
+  padding-bottom: 30px;
+}
+
+.yanta-dash-share .yanta-people-stack {
+  --avatar-ring: var(--card-surface);
+
+  pointer-events: auto;
+}
+
+.yanta-dash-share-chip {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, transparent);
+  border-radius: 999px;
+
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+
+  pointer-events: auto;
+}
+
+.yanta-dash-share-chip svg {
+  width: 12px;
+  height: 12px;
+}
+
+.yanta-dash-share-edit {
+  min-width: 0;
+
+  display: flex;
+  align-items: baseline;
+  gap: 4px;
+
+  margin-left: auto;
+
+  pointer-events: auto;
+}
+
+.yanta-dash-share-who {
+  min-width: 0;
+
+  overflow: hidden;
+
+  color: var(--text-dim);
+
+  font-size: 10.5px;
+  font-weight: 700;
+  line-height: 1.2;
+
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.yanta-dash-share-when {
+  flex: 0 0 auto;
+
+  color: var(--text-faint);
+
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1.2;
+
+  white-space: nowrap;
+}
+
+/* Mini-Vorschauen in Folder-Cards sind zu klein für einen Strip —
+   dort genügt das Badge im Header. */
+.yanta-dash-folder-preview-cell .yanta-dash-share {
+  display: none;
+}
+
+@media (max-width: 880px) {
+  .yanta-dash-share {
+    gap: 6px;
+    padding: 18px 8px 7px;
+  }
+
+  .yanta-dash-share .yanta-person-avatar {
+    --person-size: 20px;
+
+    font-size: 9px;
+  }
+
+  .yanta-dash-share-chip {
+    width: 20px;
+    height: 20px;
+  }
+
+  .yanta-dash-share-who {
+    font-size: 10px;
+  }
 }

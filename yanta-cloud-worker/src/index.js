@@ -18,6 +18,10 @@ var PLAN_LIMITS = {
     aiRequestsDay: 25,
     aiSpendMicrosMonth: 1_000_000,
 
+    // Enabled Pulse routines. Disabled ones and BYOK users are never
+    // counted — neither costs anything to run.
+    pulseRoutines: 2,
+
     rssFetchesDay: 200,
     rssImageBytesDay: 50 * 1024 * 1024,
     rssImageBytesMax: 2 * 1024 * 1024,
@@ -47,6 +51,8 @@ var PLAN_LIMITS = {
     aiRequestsDay: 500,
     aiSpendMicrosMonth: 50_000_000,
 
+    pulseRoutines: 25,
+
     rssFetchesDay: 10_000,
     rssImageBytesDay: 5 * 1024 * 1024 * 1024,
     rssImageBytesMax: 10 * 1024 * 1024,
@@ -68,6 +74,14 @@ const INCLUDED_AI_POLICY = {
     aiSpendMicrosDay: 180_000,
     aiSpendMicrosMonth: 1_000_000,
 
+    // Ceiling on how many of aiRequestsDay unattended Pulse runs may take.
+    // A sub-allocation, not an addition: a Pulse request still counts
+    // against the daily total, it just cannot consume all of it. So the
+    // assistant is never empty because a background routine drained it —
+    // and marking a request as Pulse only ever restricts the caller,
+    // which is why the client-supplied flag needs no defending.
+    aiPulseRequestsDay: 6,
+
     maxPromptChars: 70_000,
     maxToolsChars: 45_000,
     maxTools: 80,
@@ -87,6 +101,8 @@ const INCLUDED_AI_POLICY = {
     aiRequestsDay: 500,
     aiSpendMicrosDay: 3_000_000,
     aiSpendMicrosMonth: 50_000_000,
+
+    aiPulseRequestsDay: 150,
 
     maxPromptChars: 220_000,
     maxToolsChars: 120_000,
@@ -2550,6 +2566,7 @@ async function handleMe(env, req, headers) {
     aiRequestsDay: includedAiPolicyForPlan(effectivePlan).aiRequestsDay,
     aiSpendMicrosDay: includedAiPolicyForPlan(effectivePlan).aiSpendMicrosDay,
     aiSpendMicrosMonth: includedAiPolicyForPlan(effectivePlan).aiSpendMicrosMonth,
+    aiPulseRequestsDay: includedAiPolicyForPlan(effectivePlan).aiPulseRequestsDay,
     }
   }, 200, headers);
 }
@@ -3651,6 +3668,28 @@ async function handleAiCompletions(env, req, headers) {
       ...headers,
       "retry-after": "60"
     });
+  }
+
+  // Unattended Pulse runs draw from a sub-allocation of the daily total,
+  // so a background routine can never leave the assistant with nothing.
+  // The flag is client-supplied and needs no defending: claiming it only
+  // subjects the caller to a *smaller* cap.
+  if (body.source === "pulse") {
+    const pulseBudget = await rateLimit(
+      env,
+      `ai:pulse:${user.userId}:${new Date().toISOString().slice(0, 10)}`,
+      policy.aiPulseRequestsDay,
+      24 * 60 * 60 * 1000
+    );
+
+    if (!pulseBudget.ok) {
+      return json({
+        error: {
+          message: "Daily Pulse budget reached. Routines resume tomorrow; the assistant is unaffected.",
+          code: "pulse_budget_reached"
+        }
+      }, 403, headers);
+    }
   }
 
   if (Number(usage.ai_requests_day || 0) + 1 > policy.aiRequestsDay) {

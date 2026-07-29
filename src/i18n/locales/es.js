@@ -1203,6 +1203,15 @@ export default {
       other: '{count} tarjetas en la bandeja',
     },
     lastRun: 'Última vez: {when}',
+    pausedByPlan: 'En pausa por el plan',
+    capReached: {
+      one: 'Tu plan ejecuta {count} rutina a la vez. Pausa otra primero.',
+      other: 'Tu plan ejecuta {count} rutinas a la vez. Pausa otra primero.',
+    },
+    allowance: {
+      byok: 'Rutinas ilimitadas: las ejecuciones pasan por tu propia clave de API, así que YANTA no las contabiliza.',
+      plan: '{used} de {max} rutinas en marcha. Las demás siguen en pausa hasta que liberes un hueco o mejores de plan.',
+    },
 
     feedback: {
       useful: 'Útil',

@@ -50,7 +50,7 @@ function openRouterProviderPreferences() {
   };
 }
 
-function buildRequestBody({ messages, tools = [], stream = false } = {}) {
+function buildRequestBody({ messages, tools = [], stream = false, source = '' } = {}) {
   const settings = getEffectiveAiRuntimeSettings();
 
   if (isIncludedAiMode(settings)) {
@@ -63,6 +63,10 @@ function buildRequestBody({ messages, tools = [], stream = false } = {}) {
       max_tokens: Number(settings.maxOutputTokens || 768),
       provider: openRouterProviderPreferences(),
       stream,
+
+      // Draws from the Pulse sub-budget instead of the interactive one.
+      // Server-side concern only; BYOK never sends it.
+      source: source || undefined,
     };
   }
 
@@ -111,6 +115,7 @@ export async function openRouterChatCompletion({
   messages,
   tools = [],
   signal = null,
+  source = '',
 } = {}) {
   const settings = getEffectiveAiRuntimeSettings();
 
@@ -123,6 +128,7 @@ export async function openRouterChatCompletion({
       messages,
       tools,
       stream: false,
+      source,
     })),
   });
 

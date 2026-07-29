@@ -1203,6 +1203,15 @@ export default {
       other: '{count} cartes dans la boîte',
     },
     lastRun: 'Dernière fois {when}',
+    pausedByPlan: 'En pause selon la formule',
+    capReached: {
+      one: 'Votre formule exécute {count} routine à la fois. Mettez-en une autre en pause d’abord.',
+      other: 'Votre formule exécute {count} routines à la fois. Mettez-en une autre en pause d’abord.',
+    },
+    allowance: {
+      byok: 'Routines illimitées — les exécutions passent par votre propre clé d’API, YANTA ne les comptabilise donc pas.',
+      plan: '{used} routine(s) sur {max} en cours. Les autres restent en pause jusqu’à ce que vous libériez une place ou changiez de formule.',
+    },
 
     feedback: {
       useful: 'Utile',

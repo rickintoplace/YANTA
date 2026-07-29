@@ -1203,6 +1203,15 @@ export default {
       other: '{count} Karten im Posteingang',
     },
     lastRun: 'Zuletzt {when}',
+    pausedByPlan: 'Vom Tarif pausiert',
+    capReached: {
+      one: 'Dein Tarif führt {count} Routine gleichzeitig aus. Pausiere zuerst eine andere.',
+      other: 'Dein Tarif führt {count} Routinen gleichzeitig aus. Pausiere zuerst eine andere.',
+    },
+    allowance: {
+      byok: 'Unbegrenzte Routinen — die Läufe gehen über deinen eigenen API-Schlüssel, YANTA zählt sie nicht mit.',
+      plan: '{used} von {max} Routinen aktiv. Weitere bleiben pausiert, bis du einen Platz frei machst oder upgradest.',
+    },
 
     feedback: {
       useful: 'Nützlich',

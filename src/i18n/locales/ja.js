@@ -1193,6 +1193,14 @@ export default {
       other: '受信トレイに {count} 件',
     },
     lastRun: '前回 {when}',
+    pausedByPlan: 'プランにより停止中',
+    capReached: {
+      other: '現在のプランでは同時に {count} 件までです。先に別のルーティンを停止してください。',
+    },
+    allowance: {
+      byok: 'ルーティンは無制限です。実行はご自身の API キーを経由するため、YANTA では計測しません。',
+      plan: '{max} 件中 {used} 件が稼働中。残りは枠を空けるかアップグレードするまで停止したままです。',
+    },
 
     feedback: {
       useful: '役に立った',

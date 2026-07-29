@@ -1222,6 +1222,15 @@ export default {
       other: '{count} cards in Inbox',
     },
     lastRun: 'Last run {when}',
+    pausedByPlan: 'Paused by plan',
+    capReached: {
+      one: 'Your plan runs {count} routine at a time. Pause another one first.',
+      other: 'Your plan runs {count} routines at a time. Pause another one first.',
+    },
+    allowance: {
+      byok: 'Unlimited routines — runs go through your own API key, so YANTA does not meter them.',
+      plan: '{used} of {max} routines running. Extra ones stay paused until you free a slot or upgrade.',
+    },
 
     feedback: {
       useful: 'Useful',

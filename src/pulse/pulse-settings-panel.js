@@ -38,6 +38,12 @@ import {
 
 import { runRoutineNow } from './pulse-engine.js';
 
+import {
+  getPulseAllowance,
+  partitionByAllowance,
+  PULSE_ALLOWANCE_SOURCE,
+} from './pulse-plan.js';
+
 const CSS_ID = 'yanta-pulse-settings-css';
 
 function injectCss() {
@@ -190,6 +196,14 @@ function injectCss() {
   outline-offset: 2px;
 }
 
+.yanta-pulse-allowance {
+  margin-bottom: 8px;
+
+  color: var(--text-dim);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .yanta-pulse-empty {
   padding: 14px;
 
@@ -247,9 +261,25 @@ function clockField(value, onChange) {
   return input;
 }
 
-function routineRow(routine, { inboxCount, state, onChange }) {
+/**
+ * One line saying exactly how many routines run and why that is the
+ * number. BYOK deserves a different sentence than a plan cap: it is not
+ * a limit the user should ever wonder about raising.
+ */
+function allowanceLine(allowance, activeCount) {
+  if (allowance.source === PULSE_ALLOWANCE_SOURCE.BYOK) {
+    return t('pulse.allowance.byok');
+  }
+
+  return t('pulse.allowance.plan', {
+    used: activeCount,
+    max: allowance.routines,
+  });
+}
+
+function routineRow(routine, { inboxCount, state, overCap, atCap, onChange }) {
   const row = el('div', {
-    class: `yanta-pulse-routine${routine.enabled ? '' : ' is-off'}`,
+    class: `yanta-pulse-routine${routine.enabled && !overCap ? '' : ' is-off'}`,
   });
 
   const meta = el('div', { class: 'yanta-pulse-routine-meta' });
@@ -263,6 +293,12 @@ function routineRow(routine, { inboxCount, state, onChange }) {
   const when = el('div', { class: 'yanta-pulse-routine-when' });
 
   const chips = [];
+
+  if (overCap) {
+    // Say it on the row that is affected, not only in a summary line —
+    // an "on" switch that silently does nothing is the worse failure.
+    chips.push(`<span class="yanta-pulse-chip warn">${lucide('pause', 11)} ${escapeHtml(t('pulse.pausedByPlan'))}</span>`);
+  }
 
   if (routine.invalid.length) {
     chips.push(`<span class="yanta-pulse-chip warn">${lucide('triangle-alert', 11)} ${escapeHtml(routine.invalid[0])}</span>`);
@@ -340,6 +376,12 @@ function routineRow(routine, { inboxCount, state, onChange }) {
   toggle.checked = routine.enabled;
 
   toggle.addEventListener('change', async () => {
+    if (toggle.checked && atCap) {
+      toggle.checked = false;
+      toast(t('pulse.capReached', { count: atCap }), 'error');
+      return;
+    }
+
     try {
       await setRoutineEnabled(routine.name, toggle.checked);
       onChange();
@@ -368,6 +410,12 @@ export function pulseSettingsElement() {
     const settings = await getPulseSettings();
     const routines = await listRoutines();
     const counts = await inboxCountByRoutine();
+    const allowance = await getPulseAllowance();
+    const { active, overCap } = partitionByAllowance(routines, allowance);
+    const overCapNames = new Set(overCap.map((routine) => routine.name));
+    const atCap = !allowance.unlimited && active.length >= allowance.routines
+      ? allowance.routines
+      : 0;
     const now = Date.now();
 
     const onChange = () => { render().catch(() => {}); };
@@ -436,20 +484,26 @@ export function pulseSettingsElement() {
     fragment.append(permissions);
 
     // ---- routines ----
-    const active = routines.filter((routine) => routine.enabled);
-    const suggested = routines.filter((routine) => !routine.enabled);
-
     const list = group(t('pulse.settings.routines'));
+
+    list.append(el('div', { class: 'yanta-pulse-allowance' }, allowanceLine(allowance, active.length)));
 
     if (!routines.length) {
       list.append(el('div', { class: 'yanta-pulse-empty' }, t('pulse.settings.noRoutines')));
     } else {
       const wrap = el('div', { class: 'yanta-pulse-routines' });
 
-      for (const routine of [...active, ...suggested]) {
+      const ordered = [
+        ...routines.filter((routine) => routine.enabled),
+        ...routines.filter((routine) => !routine.enabled),
+      ];
+
+      for (const routine of ordered) {
         wrap.append(routineRow(routine, {
           inboxCount: counts.get(routine.name) || 0,
           state: await getRoutineState(routine.name, now),
+          overCap: overCapNames.has(routine.name),
+          atCap: routine.enabled ? 0 : atCap,
           onChange,
         }));
       }

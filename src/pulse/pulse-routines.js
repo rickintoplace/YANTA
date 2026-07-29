@@ -146,6 +146,7 @@ export function routineFromSkill(skill, markdown = skill?.markdown || '') {
     noteId: skill.noteId,
     title: skill.title || `Skill: ${skill.name}`,
     description: skill.description || '',
+    created: Number(skill.created || 0),
     markdown,
 
     enabled: coerceBool(block.enabled, true),

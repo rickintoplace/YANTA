@@ -48,6 +48,10 @@ function toolErrorPayload(err) {
  * to feed the model a refusal instead of executing, or `{ result }` to
  * short-circuit with a synthetic result. Returning nothing allows the call.
  *
+ * `source` labels tool calls for the app; `budgetSource` labels the
+ * provider request for server-side budgeting. They are separate because
+ * the server must not learn the routine name.
+ *
  * @returns {Promise<{text: string, rounds: number, stop: string, toolCalls: Array}>}
  */
 export async function runAgentLoop({
@@ -57,6 +61,7 @@ export async function runAgentLoop({
   signal = null,
   permissions = null,
   source = 'agent',
+  budgetSource = '',
   beforeToolCall = null,
   onToolResult = null,
   onRound = null,
@@ -78,6 +83,7 @@ export async function runAgentLoop({
       messages: thread,
       tools,
       signal,
+      source: budgetSource,
     });
 
     const content = String(message.content || '').trim();

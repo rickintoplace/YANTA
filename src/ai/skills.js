@@ -183,6 +183,7 @@ async function skillRecordFromNote(note) {
     description: skillDescriptionFromMarkdown(markdown).slice(0, 300),
     category: skillCategoryFromMarkdown(markdown),
     tags: skillTagsFromMarkdown(markdown),
+    created: Number(note.created || 0),
     updated: Number(note.updated || 0),
     markdown,
   };

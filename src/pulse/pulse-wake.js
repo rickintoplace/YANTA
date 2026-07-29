@@ -35,6 +35,11 @@ import { listRoutines } from './pulse-routines.js';
 import { nextDueAt } from './pulse-schedule.js';
 import { getRoutineState } from './pulse-store.js';
 
+import {
+  getPulseAllowance,
+  partitionByAllowance,
+} from './pulse-plan.js';
+
 /** Cap on wake-ups per upload — one nudge per routine is plenty. */
 const MAX_WAKES = 12;
 
@@ -62,12 +67,18 @@ async function collectPulseWakeItems() {
   if (!settings.enabled || !settings.notifyMissed) return [];
 
   const now = Date.now();
-  const routines = await listRoutines();
+
+  // Only routines that will actually run deserve a wake-up — waking
+  // someone for a routine the plan pauses would be a broken promise.
+  const { active } = partitionByAllowance(
+    await listRoutines(),
+    await getPulseAllowance()
+  );
+
   const wakes = [];
 
-  for (const routine of routines) {
-    if (!routine.enabled || routine.invalid.length || !routine.when) continue;
-    if (!routine.notify) continue;
+  for (const routine of active) {
+    if (!routine.when || !routine.notify) continue;
 
     const state = await getRoutineState(routine.name, now);
 

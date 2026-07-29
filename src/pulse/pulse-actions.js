@@ -29,6 +29,11 @@ import { skillManageAction } from '../ai/skills.js';
 import { writeBrainNote } from '../ai/brain.js';
 import { getRoutineState } from './pulse-store.js';
 
+import {
+  getPulseAllowance,
+  wouldExceedAllowance,
+} from './pulse-plan.js';
+
 const PULSE_KEYS = [
   'enabled',
   'when',
@@ -174,10 +179,20 @@ export async function pulseManageAction(args = {}) {
       throw new Error(`tools must be one of: ${PULSE_TOOL_PROFILE_ORDER.join(', ')}`);
     }
 
+    // At the cap, create it paused rather than refusing. The user gets
+    // the routine they asked for and one decision to make, instead of a
+    // dead end and a re-dictation.
+    const allowance = await getPulseAllowance();
+    const capped = args.enabled !== false && await wouldExceedAllowance(await listRoutines());
+
     const created = await skillManageAction({
       action: 'create',
       name,
-      content: buildRoutineMarkdown({ ...args, name }),
+      content: buildRoutineMarkdown({
+        ...args,
+        name,
+        enabled: capped ? false : args.enabled,
+      }),
     });
 
     const settings = await getPulseSettings();
@@ -193,10 +208,15 @@ export async function pulseManageAction(args = {}) {
       name,
       noteId: created.noteId,
       effectiveTools: effective,
+      enabled: !capped,
       // Surfaced so the model can tell the user what it cannot do yet
       // instead of silently producing a routine that under-delivers.
       clamped: effective !== requested
         ? `Requested "${requested}" but Pulse settings currently allow at most "${effective}". Ask the user to raise it in Settings → Pulse.`
+        : null,
+      pausedByPlan: capped
+        ? `Created but paused: the current plan runs ${allowance.routines} routine${allowance.routines === 1 ? '' : 's'} at a time. ` +
+          'Tell the user plainly, and offer to pause a different routine so this one can run.'
         : null,
     };
   }
@@ -208,6 +228,17 @@ export async function pulseManageAction(args = {}) {
   }
 
   if (action === 'enable' || action === 'disable') {
+    if (action === 'enable' && !routine.enabled) {
+      const allowance = await getPulseAllowance();
+
+      if (await wouldExceedAllowance(await listRoutines())) {
+        throw new Error(
+          `The current plan runs ${allowance.routines} routine${allowance.routines === 1 ? '' : 's'} at a time. ` +
+          'Ask the user which routine to pause first, or tell them YANTA Plus raises the limit.'
+        );
+      }
+    }
+
     return setRoutineEnabled(name, action === 'enable');
   }
 

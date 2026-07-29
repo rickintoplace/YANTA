@@ -30,6 +30,11 @@ import {
 } from './pulse-store.js';
 
 import {
+  getPulseAllowance,
+  partitionByAllowance,
+} from './pulse-plan.js';
+
+import {
   runRoutine,
   RUN_OUTCOME,
 } from './pulse-runner.js';
@@ -102,10 +107,15 @@ export async function pulseTick({ reason = 'tick' } = {}) {
       return { ran: 0, skipped: 'daily-cap' };
     }
 
-    const routines = await listRoutines();
+    // Plan allowance is enforced here rather than only at the toggle:
+    // a routine note is editable markdown, so `enabled: true` can be
+    // typed in by hand. This is the gate that actually holds.
+    const allowance = await getPulseAllowance();
+    const { active } = partitionByAllowance(await listRoutines(), allowance);
+
     const results = [];
 
-    for (const routine of routines) {
+    for (const routine of active) {
       if (await blockedReason(routine, settings, Date.now())) continue;
 
       const { due, dueAt } = await isDue(routine, Date.now());
@@ -142,7 +152,12 @@ export async function pulseTick({ reason = 'tick' } = {}) {
   }
 }
 
-/** Manual "Run now" from the settings list. Bypasses the sensor gate. */
+/**
+ * Manual "Run now" from the settings list. Bypasses the sensor gate and
+ * the plan allowance — the allowance caps unattended automation, not
+ * what the user may ask for while standing there. The run still draws
+ * from the Pulse budget, so it stays bounded.
+ */
 export async function runRoutineNow(name) {
   const routine = (await listRoutines()).find((entry) => entry.name === name);
 
@@ -157,14 +172,17 @@ export async function runRoutineNow(name) {
   return result;
 }
 
-/** Next scheduled moment across all routines, or 0 when nothing is due. */
+/** Next scheduled moment across all runnable routines, or 0 if none. */
 export async function nextPulseAt(now = Date.now()) {
-  const routines = await listRoutines();
+  const { active } = partitionByAllowance(
+    await listRoutines(),
+    await getPulseAllowance()
+  );
 
   let soonest = 0;
 
-  for (const routine of routines) {
-    if (!routine.enabled || routine.invalid.length || !routine.when) continue;
+  for (const routine of active) {
+    if (!routine.when) continue;
 
     const state = await getRoutineState(routine.name, now);
     const at = nextDueAt(routine, state.lastRunAt, now);

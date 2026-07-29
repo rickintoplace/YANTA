@@ -228,6 +228,7 @@ export async function runRoutine(routine, {
       signal,
       permissions: getAiSettings().permissions,
       source: `pulse:${routine.name}`,
+      budgetSource: 'pulse',
       beforeToolCall: ({ name, args }) => {
         if (!isPulseTool(name)) return undefined;
         return { result: handlePulseTool({ name, args, run }) };

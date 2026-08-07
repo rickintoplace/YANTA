@@ -67,8 +67,8 @@ const INCLUDED_AI_POLICY = {
   free: {
     includedAi: true,
 
-    model: "deepseek/deepseek-v4-flash-latest",
-    modelLabel: "YANTA Cloud Fast (deepseek-v4-flash-latest)",
+    model: "deepseek/deepseek-v4-flash-0731",
+    modelLabel: "YANTA Cloud Fast (deepseek-v4-flash-0731)",
 
     aiRequestsDay: 25,
     aiSpendMicrosDay: 180_000,
@@ -95,8 +95,8 @@ const INCLUDED_AI_POLICY = {
   premium: {
     includedAi: true,
 
-    model: "deepseek/deepseek-v4-flash-latest",
-    modelLabel: "YANTA Cloud Fast (deepseek-v4-flash-latest)",
+    model: "deepseek/deepseek-v4-flash-0731",
+    modelLabel: "YANTA Cloud Fast (deepseek-v4-flash-0731)",
 
     aiRequestsDay: 500,
     aiSpendMicrosDay: 3_000_000,
@@ -277,7 +277,7 @@ function estimatePreflightAiCostMicros(messages = [], maxTokens = 768) {
 __name(estimatePreflightAiCostMicros, "estimatePreflightAiCostMicros");
 var AI_MODEL_ALLOWLIST = /* @__PURE__ */ new Set([
   "google/gemini-2.5-flash-lite",
-  "deepseek/deepseek-v4-flash-latest",
+  "deepseek/deepseek-v4-flash-0731",
   "tencent/hy3-preview",
   "openai/gpt-oss-20b"
 ]);

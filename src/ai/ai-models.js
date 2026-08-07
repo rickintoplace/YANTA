@@ -8,8 +8,8 @@
 
 export const INCLUDED_AI_MODELS = Object.freeze([
   {
-    id: 'deepseek/deepseek-v4-flash-latest',
-    label: 'DeepSeek V4 Flash latest',
+    id: 'deepseek/deepseek-v4-flash-0731',
+    label: 'DeepSeek V4 Flash 0731',
     hint: 'Ultra-Efficient Workhorse',
   },
   {
@@ -29,7 +29,7 @@ export const INCLUDED_AI_MODELS = Object.freeze([
   },
 ]);
 
-export const DEFAULT_INCLUDED_AI_MODEL = 'deepseek/deepseek-v4-flash-latest';
+export const DEFAULT_INCLUDED_AI_MODEL = 'deepseek/deepseek-v4-flash-0731';
 
 export function normalizeIncludedAiModel(model) {
   const clean = String(model || '').trim();

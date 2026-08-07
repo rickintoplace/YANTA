@@ -72,7 +72,7 @@ export const DEFAULT_AI_SETTINGS = {
   billingMode: 'included', // byok | included
   includedModel: DEFAULT_INCLUDED_AI_MODEL,
   baseUrl: 'https://openrouter.ai/api/v1',
-  model: 'deepseek/deepseek-v4-flash-latest',
+  model: 'deepseek/deepseek-v4-flash-0731',
   temperature: 0.2,
   maxToolRounds: 6,
   maxContextChars: 30000,

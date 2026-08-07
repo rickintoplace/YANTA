@@ -1392,4 +1392,56 @@ export default {
       loadError: 'No se han podido cargar las rutinas.',
     },
   },
+
+  site: {
+    nav: {
+      getApp: 'Obtener la app',
+      pricing: 'Precios',
+    },
+
+    legal: {
+      imprint: 'Aviso legal',
+      privacy: 'Privacidad',
+      cancel: 'Cancelar contrato',
+      terms: 'Términos',
+      refunds: 'Reembolsos',
+      accessibility: 'Accesibilidad',
+      deleteAccount: 'Eliminar cuenta',
+      report: 'Denunciar contenido',
+      licenses: 'Licencias',
+      pricing: 'Precios',
+      englishOnly: 'Esta página solo está disponible en inglés. Las declaraciones jurídicamente vinculantes se hacen únicamente en el idioma del texto que se muestra aquí.',
+    },
+
+    title: {
+      pricing: 'Precios',
+      terms: 'Términos del servicio',
+      privacy: 'Política de privacidad',
+      refund: 'Derecho de desistimiento y reembolsos',
+      imprint: 'Aviso legal',
+      licenses: 'Licencias y código fuente',
+      accessibility: 'Accesibilidad',
+      cancel: 'Cancelar contrato',
+      deleteAccount: 'Eliminar cuenta',
+      report: 'Denunciar contenido',
+      getApp: 'Obtener la app',
+    },
+
+    price: {
+      taxNote: 'Precio total con IVA incluido. Se renueva cada mes hasta su cancelación.',
+      freeNote: 'No se requieren datos de pago.',
+      vatBox: 'Todos los precios son precios totales que incluyen el IVA aplicable. El impuesto exacto depende de tu país y lo calcula Paddle en el proceso de pago, donde se muestra el importe final antes de pagar. No hay comisiones de alta ni de transacción. La suscripción se renueva automáticamente por el mismo periodo — los planes mensuales cada mes y los anuales cada año — hasta que la canceles.',
+      withdrawalBox: 'Como consumidor puedes desistir del contrato en un plazo de 14 días. Si nos pides empezar de inmediato, ese derecho se extingue una vez que hayamos ejecutado el servicio por completo; te pedimos que lo confirmes expresamente antes del pago.',
+    },
+
+    consent: {
+      title: 'Antes de pagar',
+      lead: 'YANTA Plus se activa en cuanto se procesa el pago, de modo que empezamos a prestar el servicio dentro del plazo de desistimiento de 14 días. Necesitamos que nos lo pidas expresamente.',
+      keepRight: 'Conservas tu derecho de desistimiento — consulta {link}. Si desistes después de que hayamos empezado, solo pagas la parte del periodo que hayas disfrutado.',
+      linkLabel: 'Derecho de desistimiento',
+      checkbox: 'Solicito expresamente que YANTA comience a prestar YANTA Plus antes de que finalice el plazo de desistimiento y reconozco que pierdo mi derecho de desistimiento una vez ejecutado por completo el servicio.',
+      cancel: 'Cancelar',
+      continue: 'Continuar al pago',
+    },
+  },
 };

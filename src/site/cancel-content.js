@@ -11,9 +11,17 @@
 // identification, the declaration itself, and where the confirmation goes —
 // and nothing beyond it. No account, no captcha: both would be hurdles the
 // provision does not allow.
+//
+// Wording comes from the locale bundle (src/site/legal/<locale>.js); the
+// field structure lives here so it cannot drift out of sync with the wiring.
 // ============================================================
 
 import { apiFetch } from '../cloud/cloud-api.js';
+
+import {
+  englishOnlyNotice,
+  legalFormStrings,
+} from './legal-documents.js';
 
 import {
   escapeHtml,
@@ -22,6 +30,7 @@ import {
 
 import {
   ensureSiteFormCss,
+  fill,
   radioChoice,
   textField,
   wireSiteForm,
@@ -29,103 +38,96 @@ import {
 
 const CONTACT_EMAIL = YANTA_LEGAL.contactEmail;
 
+let s = null;
+
 /** The /cancel page body. Wire it up with wireCancelPage() after mounting. */
-export function cancelContent() {
+export async function cancelContent() {
   ensureSiteFormCss();
+
+  const { strings, localised } = await legalFormStrings('cancel');
+  s = strings;
+
+  const address = [
+    YANTA_LEGAL.providerName,
+    YANTA_LEGAL.street,
+    YANTA_LEGAL.city,
+    YANTA_LEGAL.country,
+  ].map(escapeHtml).join(', ');
 
   return `
     <article class="yanta-legal-doc">
-      <h1>Cancel contract</h1>
+      ${localised ? '' : englishOnlyNotice()}
+
+      <h1>${escapeHtml(s.heading)}</h1>
       <p lang="de" class="yanta-form__hint" style="margin-bottom:20px">
-        Verträge hier kündigen (§ 312k BGB)
+        ${escapeHtml(s.statute)}
       </p>
 
-      <p>
-        Cancel your YANTA Plus subscription here. You do not need to sign in.
-        We confirm every cancellation by email, including the time we received
-        it and the date your contract ends — keep that email, it is your proof.
-      </p>
-
-      <p>
-        Cancelling ends the paid plan only. <strong>Nothing is deleted.</strong>
-        You keep YANTA Plus until the end of the period you already paid for,
-        and the account then continues on the Free plan. To remove the account
-        itself, use <a href="/delete-account">Delete account</a>.
-      </p>
+      <p>${escapeHtml(s.intro)}</p>
+      <p>${s.keepsData}</p>
 
       <form class="yanta-form" id="yanta-cancel-form" novalidate>
         <fieldset class="yanta-form__choices">
-          <legend class="yanta-form__legend">Type of termination</legend>
+          <legend class="yanta-form__legend">${escapeHtml(s.typeLegend)}</legend>
           ${radioChoice({
             name: 'kind',
             value: 'ordinary',
-            title: 'Ordinary termination',
-            description: 'Ends at the end of your current billing period. This is the usual choice.',
+            title: s.ordinary,
+            description: s.ordinaryHint,
             checked: true,
           })}
           ${radioChoice({
             name: 'kind',
             value: 'extraordinary',
-            title: 'Extraordinary termination',
-            description: 'For good cause, with immediate effect. Please state the reason below.',
+            title: s.extraordinary,
+            description: s.extraordinaryHint,
           })}
         </fieldset>
 
         ${textField({
           id: 'yanta-cancel-email',
-          label: 'Email address of your YANTA account',
+          label: s.emailLabel,
           type: 'email',
           autocomplete: 'email',
-          hint: 'We send the confirmation here. Use the address your subscription runs on.',
+          hint: s.emailHint,
         })}
 
         ${textField({
           id: 'yanta-cancel-name',
-          label: 'Name',
+          label: s.nameLabel,
           optional: true,
           autocomplete: 'name',
         })}
 
         ${textField({
           id: 'yanta-cancel-contractRef',
-          label: 'Contract or invoice reference',
+          label: s.refLabel,
           optional: true,
-          hint: 'Helps us find the right contract if you have more than one.',
+          hint: s.refHint,
         })}
 
         <div class="yanta-form__field" id="yanta-cancel-reason-field" hidden>
-          <label for="yanta-cancel-reason">Reason for the extraordinary termination</label>
+          <label for="yanta-cancel-reason">${escapeHtml(s.reasonLabel)}</label>
           <textarea id="yanta-cancel-reason" name="reason"></textarea>
         </div>
 
-        <p class="yanta-form__declaration">
-          By submitting this form I declare that I terminate my YANTA Plus
-          contract at the earliest possible date.
-        </p>
+        <p class="yanta-form__declaration">${escapeHtml(s.declaration)}</p>
 
         <div class="yanta-btn-row">
           <button type="submit" class="yanta-site-btn primary yanta-form__submit">
-            Cancel now
+            ${escapeHtml(s.submit)}
           </button>
         </div>
 
         <p class="yanta-form__status" role="status" aria-live="polite"></p>
       </form>
 
-      <h2>Other ways to cancel</h2>
-      <p>
-        A cancellation is valid in any clear form. You can also email
-        <a href="mailto:${escapeHtml(CONTACT_EMAIL)}">${escapeHtml(CONTACT_EMAIL)}</a>
-        or write to ${escapeHtml(YANTA_LEGAL.providerName)},
-        ${escapeHtml(YANTA_LEGAL.street)}, ${escapeHtml(YANTA_LEGAL.city)},
-        ${escapeHtml(YANTA_LEGAL.country)}. Signed-in customers can also cancel
-        under <strong>Settings → Sync → Manage billing</strong>.
-      </p>
-      <p>
-        Cancelling is not the same as withdrawing. Within 14 days of your first
-        purchase you may also have a statutory right of withdrawal — see
-        <a href="/withdrawal">Right of withdrawal</a>.
-      </p>
+      <h2>${escapeHtml(s.otherHeading)}</h2>
+      <p>${fill(s.otherBody, {
+        mail: `<a href="mailto:${escapeHtml(CONTACT_EMAIL)}">${escapeHtml(CONTACT_EMAIL)}</a>`,
+        address,
+      })}</p>
+      <p>${s.notWithdrawal}</p>
     </article>
   `;
 }
@@ -134,24 +136,23 @@ export function wireCancelPage() {
   const form = document.getElementById('yanta-cancel-form');
   const reasonField = document.getElementById('yanta-cancel-reason-field');
 
-  if (!form) return;
+  if (!form || !s) return;
 
   form.addEventListener('change', () => {
     reasonField.hidden =
       form.querySelector('input[name="kind"]:checked')?.value !== 'extraordinary';
   });
 
+  const mailLink = `<a href="mailto:${escapeHtml(CONTACT_EMAIL)}">${escapeHtml(CONTACT_EMAIL)}</a>`;
+
   wireSiteForm({
     formId: 'yanta-cancel-form',
-    busyLabel: 'Submitting your cancellation…',
+    busyLabel: s.busy,
 
     validate: (data) => (
       String(data.get('email') || '').includes('@')
         ? ''
-        : {
-            message: 'Please enter the email address of your YANTA account.',
-            focus: 'yanta-cancel-email',
-          }
+        : { message: s.needEmail, focus: 'yanta-cancel-email' }
     ),
 
     submit: (data) => apiFetch('/api/cancellation', {
@@ -167,25 +168,18 @@ export function wireCancelPage() {
 
     receipt: (res) => `
       <div class="yanta-receipt">
-        <h2>Cancellation received</h2>
-        <p>
-          Your reference is
-          <span class="yanta-receipt__reference">${escapeHtml(res?.reference || '—')}</span>.
-        </p>
-        <p>
-          We have sent the confirmation to the address you gave, with the exact
-          time we received your declaration and the date your contract ends. If
-          it has not arrived in a few minutes, check your spam folder and then
-          contact
-          <a href="mailto:${escapeHtml(CONTACT_EMAIL)}">${escapeHtml(CONTACT_EMAIL)}</a>.
-        </p>
+        <h2>${escapeHtml(s.receiptHeading)}</h2>
+        <p>${fill(s.receiptRef, {
+          ref: `<span class="yanta-receipt__reference">${escapeHtml(res?.reference || '—')}</span>`,
+        })}</p>
+        <p>${fill(s.receiptBody, { mail: mailLink })}</p>
       </div>
     `,
 
     errorMessage: (err) => (
       err?.status === 429
-        ? `Too many attempts from this device. Please email ${CONTACT_EMAIL} instead — that is equally valid.`
-        : `We could not record your cancellation. Please email ${CONTACT_EMAIL}: a cancellation by email is equally valid and takes effect when it reaches us.`
+        ? fill(s.errRate, { mail: CONTACT_EMAIL })
+        : fill(s.errGeneric, { mail: CONTACT_EMAIL })
     ),
   });
 }

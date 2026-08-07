@@ -1392,4 +1392,56 @@ export default {
       loadError: 'Impossible de charger les routines.',
     },
   },
+
+  site: {
+    nav: {
+      getApp: 'Obtenir l’app',
+      pricing: 'Tarifs',
+    },
+
+    legal: {
+      imprint: 'Mentions légales',
+      privacy: 'Confidentialité',
+      cancel: 'Résilier le contrat',
+      terms: 'CGU',
+      refunds: 'Remboursements',
+      accessibility: 'Accessibilité',
+      deleteAccount: 'Supprimer le compte',
+      report: 'Signaler un contenu',
+      licenses: 'Licences',
+      pricing: 'Tarifs',
+      englishOnly: 'Cette page n’est disponible qu’en anglais. Les déclarations juridiquement contraignantes ne sont faites que dans la langue du texte affiché ici.',
+    },
+
+    title: {
+      pricing: 'Tarifs',
+      terms: 'Conditions d’utilisation',
+      privacy: 'Politique de confidentialité',
+      refund: 'Droit de rétractation et remboursements',
+      imprint: 'Mentions légales',
+      licenses: 'Licences et code source',
+      accessibility: 'Accessibilité',
+      cancel: 'Résilier le contrat',
+      deleteAccount: 'Supprimer le compte',
+      report: 'Signaler un contenu',
+      getApp: 'Obtenir l’app',
+    },
+
+    price: {
+      taxNote: 'Prix total TTC. Renouvellement mensuel jusqu’à résiliation.',
+      freeNote: 'Aucune coordonnée bancaire requise.',
+      vatBox: 'Tous les prix sont des prix totaux incluant la TVA applicable. Le montant exact de la taxe dépend de votre pays et est calculé par Paddle lors du paiement, où le montant final s’affiche avant validation. Aucuns frais de mise en service ni de transaction. L’abonnement se renouvelle automatiquement pour la même durée — mensuelle pour les formules mensuelles, annuelle pour les annuelles — jusqu’à résiliation.',
+      withdrawalBox: 'En tant que consommateur, vous disposez d’un délai de rétractation de 14 jours. Si vous demandez un démarrage immédiat, ce droit s’éteint une fois le service pleinement exécuté ; nous vous demandons de le confirmer expressément avant le paiement.',
+    },
+
+    consent: {
+      title: 'Avant de payer',
+      lead: 'YANTA Plus est activé dès que votre paiement aboutit : nous commençons donc à fournir le service pendant le délai de rétractation de 14 jours. Nous avons besoin de votre demande expresse.',
+      keepRight: 'Vous conservez votre droit de rétractation — voir {link}. Si vous vous rétractez après notre démarrage, vous ne payez que la part de la période dont vous avez réellement bénéficié.',
+      linkLabel: 'Droit de rétractation',
+      checkbox: 'Je demande expressément que YANTA commence à fournir YANTA Plus avant la fin du délai de rétractation et je reconnais perdre mon droit de rétractation une fois le service pleinement exécuté.',
+      cancel: 'Annuler',
+      continue: 'Continuer vers le paiement',
+    },
+  },
 };

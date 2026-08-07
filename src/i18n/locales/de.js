@@ -1392,4 +1392,56 @@ export default {
       loadError: 'Routinen konnten nicht geladen werden.',
     },
   },
+
+  site: {
+    nav: {
+      getApp: 'App holen',
+      pricing: 'Preise',
+    },
+
+    legal: {
+      imprint: 'Impressum',
+      privacy: 'Datenschutz',
+      cancel: 'Vertrag kündigen',
+      terms: 'AGB',
+      refunds: 'Erstattungen',
+      accessibility: 'Barrierefreiheit',
+      deleteAccount: 'Konto löschen',
+      report: 'Inhalt melden',
+      licenses: 'Lizenzen',
+      pricing: 'Preise',
+      englishOnly: 'Diese Seite ist nur auf Englisch verfügbar. Rechtsverbindliche Erklärungen geben wir ausschließlich in der Sprache des hier gezeigten Textes ab.',
+    },
+
+    title: {
+      pricing: 'Preise',
+      terms: 'Allgemeine Geschäftsbedingungen',
+      privacy: 'Datenschutzerklärung',
+      refund: 'Widerrufsrecht & Erstattungen',
+      imprint: 'Impressum',
+      licenses: 'Lizenzen & Quelltext',
+      accessibility: 'Barrierefreiheit',
+      cancel: 'Vertrag kündigen',
+      deleteAccount: 'Konto löschen',
+      report: 'Inhalt melden',
+      getApp: 'App holen',
+    },
+
+    price: {
+      taxNote: 'Gesamtpreis inkl. MwSt. Verlängert sich monatlich bis zur Kündigung.',
+      freeNote: 'Keine Zahlungsdaten erforderlich.',
+      vatBox: 'Alle Preise sind Gesamtpreise einschließlich etwaiger Umsatzsteuer. Die genaue Steuer richtet sich nach Ihrem Land und wird von Paddle im Checkout ermittelt, wo der Endbetrag vor dem Bezahlen angezeigt wird. Es fallen keine Einrichtungs- oder Transaktionsgebühren an. Ein Abonnement verlängert sich automatisch um denselben Zeitraum — Monatstarife monatlich, Jahrestarife jährlich — bis Sie kündigen.',
+      withdrawalBox: 'Als Verbraucher können Sie den Vertrag binnen 14 Tagen widerrufen. Wenn Sie uns bitten, sofort zu beginnen, erlischt dieses Recht, sobald wir die Leistung vollständig erbracht haben — wir holen Ihre ausdrückliche Bestätigung dafür vor dem Checkout ein.',
+    },
+
+    consent: {
+      title: 'Vor dem Bezahlen',
+      lead: 'YANTA Plus wird freigeschaltet, sobald Ihre Zahlung durchgeht. Wir beginnen damit innerhalb der 14-tägigen Widerrufsfrist mit der Leistung — dafür brauchen wir Ihr ausdrückliches Verlangen.',
+      keepRight: 'Ihr Widerrufsrecht bleibt bestehen — siehe {link}. Widerrufen Sie, nachdem wir begonnen haben, zahlen Sie nur den Teil des Zeitraums, den Sie tatsächlich hatten.',
+      linkLabel: 'Widerrufsrecht',
+      checkbox: 'Ich verlange ausdrücklich, dass YANTA vor Ablauf der Widerrufsfrist mit der Erbringung von YANTA Plus beginnt, und bestätige meine Kenntnis davon, dass ich mein Widerrufsrecht mit vollständiger Vertragserfüllung verliere.',
+      cancel: 'Abbrechen',
+      continue: 'Weiter zur Kasse',
+    },
+  },
 };

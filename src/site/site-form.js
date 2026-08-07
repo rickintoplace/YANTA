@@ -158,6 +158,20 @@ export function ensureSiteFormCss() {
   document.head.append(style);
 }
 
+/**
+ * Substitute `{token}` placeholders with already-safe HTML fragments.
+ *
+ * Legal sentences put links and addresses in different places per language,
+ * so the strings carry tokens rather than being split into fragments the
+ * translator cannot reorder.
+ */
+export function fill(template, values) {
+  return String(template ?? '').replace(
+    /\{(\w+)\}/g,
+    (match, name) => (name in values ? values[name] : match)
+  );
+}
+
 export function textField({
   id,
   label,

@@ -4563,8 +4563,13 @@ if (isStandalonePage) {
 }
 
 if (SITE_PAGE_PATHS.has(normalizedPath)) {
-  import('./site/site-pages.js')
-    .then((m) => m.mountSitePage())
+  /*
+    Standalone site pages never reach the app boot, so they have to load the
+    catalogue themselves — otherwise t() renders raw keys. Both happen in
+    parallel; the locale chunk is small and the page waits for neither twice.
+  */
+  Promise.all([initI18n(), import('./site/site-pages.js')])
+    .then(([, m]) => m.mountSitePage())
     .catch((e) => {
       console.error(e);
       document.body.innerHTML = '<main style="padding:24px;font-family:system-ui">Could not load page.</main>';

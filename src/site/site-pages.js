@@ -46,6 +46,7 @@ import {
 } from './legal-links.js';
 
 import { syncBillingNow } from '../billing/billing-api.js';
+import { t } from '../i18n/index.js';
 
 const CONTACT_EMAIL = LEGAL.contactEmail;
 
@@ -543,6 +544,16 @@ body {
   font-size: 16px;
 }
 
+/* Sits above an untranslated document, so it must read as a note, not chrome. */
+.yanta-legal-lang-note {
+  margin-top: 0;
+  margin-bottom: 22px;
+}
+
+.yanta-legal-lang-note p {
+  font-size: 13.5px;
+}
+
 @media (max-width: 780px) {
   .yanta-pricing-grid,
   .yanta-faq-grid {
@@ -578,14 +589,8 @@ html.yanta-site-page * {
   so repeating it up here just crowds the bar once a seventh page exists.
 */
 const SITE_NAV_LINKS = [
-  {
-    label: 'Get the app',
-    href: '/get-app',
-  },
-  {
-    label: 'Pricing',
-    href: '/pricing',
-  },
+  { key: 'getApp', href: '/get-app' },
+  { key: 'pricing', href: '/pricing' },
 ];
 
 function siteNavHtml(currentPath) {
@@ -594,7 +599,7 @@ function siteNavHtml(currentPath) {
       ? ' aria-current="page"'
       : '';
 
-    return `<a href="${escapeHtml(legalLinkUrl(link.href))}"${current}>${escapeHtml(link.label)}</a>`;
+    return `<a href="${escapeHtml(legalLinkUrl(link.href))}"${current}>${escapeHtml(t(`site.nav.${link.key}`))}</a>`;
   }).join('\n');
 }
 
@@ -728,9 +733,7 @@ function pricingContent() {
           <span>/ forever</span>
         </div>
 
-        <p class="yanta-price-tax">
-          No payment details required.
-        </p>
+        <p class="yanta-price-tax">${escapeHtml(t('site.price.freeNote'))}</p>
 
         <ul class="yanta-feature-list">
           <li>30 MB encrypted cloud sync storage budget*</li>
@@ -757,9 +760,7 @@ function pricingContent() {
           <span>/ month</span>
         </div>
 
-        <p class="yanta-price-tax">
-          Total price incl. VAT. Renews monthly until cancelled.
-        </p>
+        <p class="yanta-price-tax">${escapeHtml(t('site.price.taxNote'))}</p>
 
         <ul class="yanta-feature-list">
           <li>5 GB encrypted cloud sync storage budget*</li>
@@ -780,25 +781,12 @@ function pricingContent() {
     </section>
 
     <section class="yanta-note-box">
-      <p>
-        <strong>Prices, VAT and renewal:</strong>
-        All prices are total prices <strong>including any applicable VAT</strong>.
-        The exact tax depends on your country and is calculated by Paddle at
-        checkout, where the final amount is shown before you pay. There are no
-        setup or transaction fees. A subscription renews automatically for the
-        same period — monthly plans monthly, yearly plans yearly — until you
-        cancel, and you can cancel any time at
-        <a class="yanta-site-link" href="/cancel">Cancel contract</a>, with
-        effect from the end of the period you have paid for.
+      <p>${escapeHtml(t('site.price.vatBox'))}
+        <a class="yanta-site-link" href="/cancel">${escapeHtml(t('site.legal.cancel'))}</a>.
       </p>
 
-      <p style="margin-top:8px">
-        <strong>Right of withdrawal:</strong>
-        As a consumer you can withdraw from the contract within 14 days. See
-        <a class="yanta-site-link" href="/withdrawal">Right of withdrawal</a>
-        for the full notice and the model form. If you ask us to start straight
-        away, that right ends once we have fully performed — we ask you to
-        confirm this explicitly before checkout.
+      <p style="margin-top:8px">${escapeHtml(t('site.price.withdrawalBox'))}
+        <a class="yanta-site-link" href="/withdrawal">${escapeHtml(t('site.title.refund'))}</a>.
       </p>
     </section>
 
@@ -911,7 +899,7 @@ function pricingContent() {
 */
 const SITE_ROUTES = new Map([
   ['/pricing', {
-    title: 'Pricing',
+    titleKey: 'site.title.pricing',
     render: pricingContent,
     wire: () => {
       wirePricingButtons();
@@ -919,11 +907,11 @@ const SITE_ROUTES = new Map([
     },
   }],
   ['/terms', {
-    title: 'Terms of Service',
+    titleKey: 'site.title.terms',
     render: () => legalDocument('terms'),
   }],
   ['/privacy', {
-    title: 'Privacy Policy',
+    titleKey: 'site.title.privacy',
     render: () => legalDocument('privacy'),
   }],
   /*
@@ -933,55 +921,58 @@ const SITE_ROUTES = new Map([
     /withdrawal because that is what the notice is called.
   */
   ['/refund', {
-    title: 'Right of withdrawal & refunds',
+    titleKey: 'site.title.refund',
     render: () => legalDocument('withdrawal'),
   }],
   ['/withdrawal', {
-    title: 'Right of withdrawal & refunds',
+    titleKey: 'site.title.refund',
     render: () => legalDocument('withdrawal'),
   }],
   ['/imprint', {
-    title: 'Imprint',
+    titleKey: 'site.title.imprint',
     render: () => legalDocument('imprint'),
   }],
   ['/licenses', {
-    title: 'Licences & source code',
+    titleKey: 'site.title.licenses',
     render: () => legalDocument('licenses'),
   }],
   ['/accessibility', {
-    title: 'Accessibility',
+    titleKey: 'site.title.accessibility',
     render: accessibilityContent,
   }],
   ['/cancel', {
-    title: 'Cancel contract',
+    titleKey: 'site.title.cancel',
     render: cancelContent,
     wire: wireCancelPage,
   }],
   ['/delete-account', {
-    title: 'Delete account',
+    titleKey: 'site.title.deleteAccount',
     render: deleteAccountContent,
     wire: wireDeleteAccountPage,
   }],
   ['/report', {
-    title: 'Report content',
+    titleKey: 'site.title.report',
     render: reportContent,
     wire: wireReportPage,
   }],
   ['/get-app', {
-    title: 'Get the app',
+    titleKey: 'site.title.getApp',
     render: getAppContent,
     wire: wireGetAppPage,
   }],
 ]);
 
-export function mountSitePage() {
+export async function mountSitePage() {
   const path = location.pathname.replace(/\/+$/, '') || '/';
   const route = SITE_ROUTES.get(path);
 
   if (!route) return;
 
-  shell(route.render(), {
-    title: route.title,
+  // Legal documents resolve their locale bundle lazily, so render can be async.
+  const content = await route.render();
+
+  shell(content, {
+    title: t(route.titleKey),
     currentPath: path,
   });
 

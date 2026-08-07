@@ -12,11 +12,15 @@
 // Rendered inside the shared site shell (see site-pages.js).
 // ============================================================
 
+import { englishOnlyNotice } from './legal-documents.js';
+
 import {
   escapeHtml,
   YANTA_APP_ORIGIN,
   YANTA_LEGAL,
 } from './legal-links.js';
+
+import { getLocale } from '../i18n/index.js';
 
 const UPDATED = '2026-07-30';
 
@@ -193,8 +197,14 @@ export function accessibilityContent() {
 
   const { marketSurveillance, conciliation } = ENFORCEMENT;
 
+  /*
+    Not translated: a conformance statement is a claim about the product, and
+    a shaky translation of "partially conformant" is worse than English.
+  */
   return `
     <article class="yanta-legal-doc yanta-a11y">
+      ${getLocale() === 'en' ? '' : englishOnlyNotice()}
+
       <h1>Accessibility</h1>
       <p><strong>Last updated:</strong> ${escapeHtml(UPDATED)}</p>
 

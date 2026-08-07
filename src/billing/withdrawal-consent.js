@@ -15,7 +15,15 @@
 // standalone /pricing page, which has no dialog system of its own.
 // ============================================================
 
+import { t } from '../i18n/index.js';
+
 const DIALOG_ID = 'yanta-withdrawal-consent';
+
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+  }[c]));
+}
 
 function ensureCss() {
   if (document.getElementById(`${DIALOG_ID}-css`)) return;
@@ -146,37 +154,33 @@ export function requestWithdrawalConsent() {
   dialog.id = DIALOG_ID;
   dialog.setAttribute('aria-labelledby', `${DIALOG_ID}-title`);
 
+  /*
+    keepRight carries a {link} token so translators can place the link where
+    their sentence needs it instead of having the markup dictate word order.
+  */
+  const withdrawalLink =
+    `<a href="/withdrawal" target="_blank" rel="noopener">${escapeHtml(t('site.consent.linkLabel'))}</a>`;
+
   dialog.innerHTML = `
     <form method="dialog" class="yanta-consent__body">
-      <h2 id="${DIALOG_ID}-title">Before you pay</h2>
+      <h2 id="${DIALOG_ID}-title">${escapeHtml(t('site.consent.title'))}</h2>
 
-      <p>
-        YANTA Plus is unlocked as soon as your payment goes through, which
-        means we start providing the service inside the 14-day withdrawal
-        period. We need you to ask for that explicitly.
-      </p>
+      <p>${escapeHtml(t('site.consent.lead'))}</p>
 
-      <p>
-        You keep your right of withdrawal — see
-        <a href="/withdrawal" target="_blank" rel="noopener">Right of withdrawal</a>.
-        If you withdraw after we have started, you pay only for the part of
-        the period you actually had.
-      </p>
+      <p>${t('site.consent.keepRight', { link: withdrawalLink })}</p>
 
       <label class="yanta-consent__check">
         <input type="checkbox" id="${DIALOG_ID}-box">
-        <span>
-          I expressly request that YANTA begins providing YANTA Plus before the
-          end of the withdrawal period, and I acknowledge that I lose my right
-          of withdrawal once the service has been fully performed.
-        </span>
+        <span>${escapeHtml(t('site.consent.checkbox'))}</span>
       </label>
     </form>
 
     <div class="yanta-consent__actions">
-      <button type="button" class="yanta-consent__btn" data-consent="cancel">Cancel</button>
+      <button type="button" class="yanta-consent__btn" data-consent="cancel">
+        ${escapeHtml(t('site.consent.cancel'))}
+      </button>
       <button type="button" class="yanta-consent__btn primary" data-consent="ok" disabled>
-        Continue to checkout
+        ${escapeHtml(t('site.consent.continue'))}
       </button>
     </div>
   `;

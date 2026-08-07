@@ -11,6 +11,8 @@
 // pages come first.
 // ============================================================
 
+import { t } from '../i18n/index.js';
+
 function trimTrailingSlashes(value) {
   return String(value || '').replace(/\/+$/, '');
 }
@@ -49,47 +51,22 @@ export const SOURCE_URL = YANTA_LEGAL.sourceUrl;
   available and easy to reach, not buried in an overflow menu.
 */
 export const LEGAL_LINKS = [
-  {
-    label: 'Imprint',
-    href: '/imprint',
-  },
-  {
-    label: 'Privacy',
-    href: '/privacy',
-  },
-  {
-    label: 'Cancel contract',
-    href: '/cancel',
-  },
-  {
-    label: 'Terms',
-    href: '/terms',
-  },
-  {
-    label: 'Refunds',
-    href: '/refund',
-  },
-  {
-    label: 'Accessibility',
-    href: '/accessibility',
-  },
-  {
-    label: 'Delete account',
-    href: '/delete-account',
-  },
-  {
-    label: 'Report content',
-    href: '/report',
-  },
-  {
-    label: 'Licences',
-    href: '/licenses',
-  },
-  {
-    label: 'Pricing',
-    href: '/pricing',
-  },
+  { key: 'imprint', href: '/imprint' },
+  { key: 'privacy', href: '/privacy' },
+  { key: 'cancel', href: '/cancel' },
+  { key: 'terms', href: '/terms' },
+  { key: 'refunds', href: '/refund' },
+  { key: 'accessibility', href: '/accessibility' },
+  { key: 'deleteAccount', href: '/delete-account' },
+  { key: 'report', href: '/report' },
+  { key: 'licenses', href: '/licenses' },
+  { key: 'pricing', href: '/pricing' },
 ];
+
+/** Localised label for a LEGAL_LINKS entry. */
+export function legalLinkLabel(link) {
+  return t(`site.legal.${link.key}`);
+}
 
 /*
   /withdrawal is served by the refunds document (the statutory withdrawal

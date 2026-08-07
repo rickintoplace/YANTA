@@ -4,6 +4,7 @@ import {
 
 import {
   LEGAL_LINKS,
+  legalLinkLabel,
   legalLinkUrl,
 } from './legal-links.js';
 
@@ -119,7 +120,7 @@ function ensureCss() {
 
 function makeMenuItems(links) {
   return links.map((link) => ({
-    label: link.label,
+    label: legalLinkLabel(link),
     action: () => {
       location.href = legalLinkUrl(link.href);
     },
@@ -163,7 +164,7 @@ export function mountSidebarLegalLinks({
 
     a.className = 'yanta-sidebar-legal__link';
     a.href = legalLinkUrl(link.href);
-    a.textContent = link.label;
+    a.textContent = legalLinkLabel(link);
     a.dataset.index = String(index);
 
     linksWrap.append(a);

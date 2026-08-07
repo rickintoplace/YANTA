@@ -1,6 +1,7 @@
 import {
   escapeHtml,
   LEGAL_LINKS,
+  legalLinkLabel,
   legalLinkUrl,
   YANTA_LEGAL,
 } from './legal-links.js';
@@ -121,7 +122,7 @@ export function legalFooterHtml({
     const href = legalLinkUrl(link.href) +
       (link.href === '/report' ? reportContext : '');
 
-    return `<a href="${escapeHtml(href)}">${escapeHtml(link.label)}</a>`;
+    return `<a href="${escapeHtml(href)}">${escapeHtml(legalLinkLabel(link))}</a>`;
   }).join('');
 
   return `

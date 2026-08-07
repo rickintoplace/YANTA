@@ -13,151 +13,139 @@
 import { apiFetch } from '../cloud/cloud-api.js';
 
 import {
+  englishOnlyNotice,
+  legalFormStrings,
+} from './legal-documents.js';
+
+import {
   escapeHtml,
   YANTA_LEGAL,
 } from './legal-links.js';
 
 import {
   ensureSiteFormCss,
+  fill,
   textField,
   wireSiteForm,
 } from './site-form.js';
 
 const CONTACT_EMAIL = YANTA_LEGAL.contactEmail;
 
-const CATEGORIES = [
-  ['copyright', 'Copyright or trademark infringement'],
-  ['personal_data', 'My personal data / privacy violation'],
-  ['illegal_content', 'Other illegal content'],
-  ['csam', 'Child sexual abuse material'],
-  ['malware', 'Malware or phishing'],
-  ['impersonation', 'Impersonation'],
-  ['other', 'Something else'],
+// Order shown in the picker; the labels come from the locale bundle.
+const CATEGORY_ORDER = [
+  'copyright',
+  'personal_data',
+  'illegal_content',
+  'csam',
+  'malware',
+  'impersonation',
+  'other',
 ];
 
+let s = null;
+
 /** The /report page body. Wire it up with wireReportPage() after mounting. */
-export function reportContent() {
+export async function reportContent() {
   ensureSiteFormCss();
+
+  const { strings, localised } = await legalFormStrings('report');
+  s = strings;
+
+  const address = [
+    YANTA_LEGAL.providerName,
+    YANTA_LEGAL.street,
+    YANTA_LEGAL.city,
+    YANTA_LEGAL.country,
+  ].map(escapeHtml).join(', ');
 
   return `
     <article class="yanta-legal-doc">
-      <h1>Report content</h1>
+      ${localised ? '' : englishOnlyNotice()}
 
-      <p>
-        If a YANTA share link points at content you believe is unlawful, tell
-        us here. Anyone can file a notice — no account needed. This is the
-        notice-and-action mechanism required by Article 16 of the Digital
-        Services Act.
-      </p>
+      <h1>${escapeHtml(s.heading)}</h1>
+
+      <p>${escapeHtml(s.intro)}</p>
 
       <div class="yanta-note-box">
-        <p>
-          <strong>What we can and cannot see.</strong> Shared content is
-          end-to-end encrypted and we hold no key, so we cannot open a share to
-          check it. We assess your description, and where a notice is
-          substantiated the measure available to us is to disable the share as
-          a whole. That is why a precise explanation and a working link matter
-          so much here.
-        </p>
+        <p>${s.encryptedNote}</p>
       </div>
 
       <form class="yanta-form" id="yanta-report-form" novalidate>
         ${textField({
           id: 'yanta-report-shareUrl',
-          label: 'Exact address of the content',
-          hint: 'Paste the full share link, for example https://yanta.page/share/abc123…',
+          label: s.urlLabel,
+          hint: s.urlHint,
         })}
 
         <div class="yanta-form__field">
-          <label for="yanta-report-category">What is the problem?</label>
+          <label for="yanta-report-category">${escapeHtml(s.categoryLabel)}</label>
           <select id="yanta-report-category" name="category">
-            ${CATEGORIES.map(([value, label]) => `
-              <option value="${escapeHtml(value)}">${escapeHtml(label)}</option>
+            ${CATEGORY_ORDER.map((value) => `
+              <option value="${escapeHtml(value)}">${escapeHtml(s.categories[value])}</option>
             `).join('')}
           </select>
         </div>
 
         <div class="yanta-form__field">
-          <label for="yanta-report-explanation">Why is this content unlawful?</label>
+          <label for="yanta-report-explanation">${escapeHtml(s.explanationLabel)}</label>
           <textarea id="yanta-report-explanation" name="explanation"></textarea>
-          <p class="yanta-form__hint">
-            Please be specific: what exactly is there, which right it infringes,
-            and — if you hold that right — how we can tell.
-          </p>
+          <p class="yanta-form__hint">${escapeHtml(s.explanationHint)}</p>
         </div>
 
         ${textField({
           id: 'yanta-report-reporterName',
-          label: 'Your name',
+          label: s.nameLabel,
           optional: true,
           autocomplete: 'name',
         })}
 
         ${textField({
           id: 'yanta-report-reporterEmail',
-          label: 'Your email address',
+          label: s.emailLabel,
           type: 'email',
           optional: true,
           autocomplete: 'email',
-          hint: 'Needed for the confirmation of receipt and our decision. Reports about child sexual abuse material may be filed anonymously.',
+          hint: s.emailHint,
         })}
 
         <label class="yanta-form__choice">
           <input type="checkbox" name="goodFaith" value="1">
           <span class="yanta-form__choice-text">
-            <b>I confirm this notice is accurate and complete</b>
-            <span>
-              A bona fide belief that the information is correct, as Art. 16(2)(d) DSA requires.
-            </span>
+            <b>${escapeHtml(s.goodFaith)}</b>
+            <span>${escapeHtml(s.goodFaithHint)}</span>
           </span>
         </label>
 
         <div class="yanta-btn-row">
           <button type="submit" class="yanta-site-btn primary yanta-form__submit">
-            Submit report
+            ${escapeHtml(s.submit)}
           </button>
         </div>
 
         <p class="yanta-form__status" role="status" aria-live="polite"></p>
       </form>
 
-      <h2>What happens next</h2>
+      <h2>${escapeHtml(s.nextHeading)}</h2>
       <ol>
-        <li>We confirm receipt without undue delay, if you gave us an address.</li>
-        <li>
-          We assess the notice in a timely, diligent, non-arbitrary and
-          objective way. We do not use automated moderation, so a human reads
-          every report.
-        </li>
-        <li>
-          We tell you the outcome and the reasons for it, along with the
-          redress available to you.
-        </li>
-        <li>
-          If we act against content, the person who provided it receives a
-          statement of reasons under Art. 17 DSA and can contest the decision.
-        </li>
+        <li>${escapeHtml(s.next1)}</li>
+        <li>${escapeHtml(s.next2)}</li>
+        <li>${escapeHtml(s.next3)}</li>
+        <li>${escapeHtml(s.next4)}</li>
       </ol>
 
-      <h2>Other routes</h2>
-      <p>
-        You can also write to
-        <a href="mailto:${escapeHtml(CONTACT_EMAIL)}">${escapeHtml(CONTACT_EMAIL)}</a>,
-        which is our point of contact under Art. 11 and 12 DSA for users and
-        authorities alike, in German or English. Postal address:
-        ${escapeHtml(YANTA_LEGAL.providerName)},
-        ${escapeHtml(YANTA_LEGAL.street)}, ${escapeHtml(YANTA_LEGAL.city)},
-        ${escapeHtml(YANTA_LEGAL.country)}.
-      </p>
-      <p>
-        Reporting in bad faith — knowingly false notices — can have legal
-        consequences and may lead us to ignore further reports from you.
-      </p>
+      <h2>${escapeHtml(s.otherHeading)}</h2>
+      <p>${fill(s.otherBody, {
+        mail: `<a href="mailto:${escapeHtml(CONTACT_EMAIL)}">${escapeHtml(CONTACT_EMAIL)}</a>`,
+        address,
+      })}</p>
+      <p>${escapeHtml(s.badFaith)}</p>
     </article>
   `;
 }
 
 export function wireReportPage() {
+  if (!s) return;
+
   // Prefilled when the reporter came from the footer of the share itself.
   const fromShare = new URLSearchParams(location.search).get('url');
 
@@ -172,26 +160,26 @@ export function wireReportPage() {
 
   wireSiteForm({
     formId: 'yanta-report-form',
-    busyLabel: 'Submitting your report…',
+    busyLabel: s.busy,
 
     validate: (data) => {
       if (!String(data.get('shareUrl') || '').trim()) {
         return {
-          message: 'Please give the address of the content.',
+          message: s.needUrl,
           focus: 'yanta-report-shareUrl',
         };
       }
 
       if (String(data.get('explanation') || '').trim().length < 20) {
         return {
-          message: 'Please explain why the content is unlawful — a sentence at least.',
+          message: s.needExplanation,
           focus: 'yanta-report-explanation',
         };
       }
 
       if (!data.get('goodFaith')) {
         return {
-          message: 'Please confirm that your notice is accurate and complete.',
+          message: s.needGoodFaith,
           focus: 'yanta-report-explanation',
         };
       }
@@ -213,23 +201,18 @@ export function wireReportPage() {
 
     receipt: (res) => `
       <div class="yanta-receipt">
-        <h2>Report received</h2>
-        <p>
-          Your reference is
-          <span class="yanta-receipt__reference">${escapeHtml(res?.reference || '—')}</span>.
-        </p>
-        <p>
-          A human will look at it. If you gave us an email address, you will
-          get a confirmation now and our decision once we have assessed the
-          notice.
-        </p>
+        <h2>${escapeHtml(s.receiptHeading)}</h2>
+        <p>${fill(s.receiptRef, {
+          ref: `<span class="yanta-receipt__reference">${escapeHtml(res?.reference || '—')}</span>`,
+        })}</p>
+        <p>${escapeHtml(s.receiptBody)}</p>
       </div>
     `,
 
     errorMessage: (err) => (
       err?.status === 429
-        ? `Too many reports from this device. Please email ${CONTACT_EMAIL}.`
-        : (err?.message || `We could not record your report. Please email ${CONTACT_EMAIL}.`)
+        ? fill(s.errRate, { mail: CONTACT_EMAIL })
+        : (err?.message || fill(s.errGeneric, { mail: CONTACT_EMAIL }))
     ),
   });
 }

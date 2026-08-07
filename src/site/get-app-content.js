@@ -15,6 +15,8 @@ import {
 } from '../install/install-manager.js';
 import { installEnvironment } from '../install/install-environment.js';
 import { escapeHtml } from './legal-links.js';
+import { englishOnlyNotice } from './legal-documents.js';
+import { getLocale } from '../i18n/index.js';
 
 const PLAY_BADGE_SVG = `
 <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
@@ -69,6 +71,8 @@ export function getAppContent() {
 
   return `
     <section class="yanta-getapp">
+      ${getLocale() === 'en' ? '' : englishOnlyNotice()}
+
       <div class="yanta-getapp-hero">
         <div class="yanta-getapp-mark">${BRAND_LOGO_SVG}</div>
         <h1>Get YANTA on your phone</h1>

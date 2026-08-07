@@ -1413,4 +1413,59 @@ export default {
       loadError: 'Could not load routines.',
     },
   },
+
+  // Public marketing and legal pages (src/site/). Prose for the legal
+  // documents themselves lives in src/site/legal/<locale>.js; these are the
+  // navigational and interactive strings around it.
+  site: {
+    nav: {
+      getApp: 'Get the app',
+      pricing: 'Pricing',
+    },
+
+    legal: {
+      imprint: 'Imprint',
+      privacy: 'Privacy',
+      cancel: 'Cancel contract',
+      terms: 'Terms',
+      refunds: 'Refunds',
+      accessibility: 'Accessibility',
+      deleteAccount: 'Delete account',
+      report: 'Report content',
+      licenses: 'Licences',
+      pricing: 'Pricing',
+      englishOnly: 'This page is only available in English. Legally binding statements are only made in the language of the text shown here.',
+    },
+
+    title: {
+      pricing: 'Pricing',
+      terms: 'Terms of Service',
+      privacy: 'Privacy Policy',
+      refund: 'Right of withdrawal & refunds',
+      imprint: 'Imprint',
+      licenses: 'Licences & source code',
+      accessibility: 'Accessibility',
+      cancel: 'Cancel contract',
+      deleteAccount: 'Delete account',
+      report: 'Report content',
+      getApp: 'Get the app',
+    },
+
+    price: {
+      taxNote: 'Total price incl. VAT. Renews monthly until cancelled.',
+      freeNote: 'No payment details required.',
+      vatBox: 'All prices are total prices including any applicable VAT. The exact tax depends on your country and is calculated by Paddle at checkout, where the final amount is shown before you pay. There are no setup or transaction fees. A subscription renews automatically for the same period — monthly plans monthly, yearly plans yearly — until you cancel.',
+      withdrawalBox: 'As a consumer you can withdraw from the contract within 14 days. If you ask us to start straight away, that right ends once we have fully performed — we ask you to confirm this explicitly before checkout.',
+    },
+
+    consent: {
+      title: 'Before you pay',
+      lead: 'YANTA Plus is unlocked as soon as your payment goes through, which means we start providing the service inside the 14-day withdrawal period. We need you to ask for that explicitly.',
+      keepRight: 'You keep your right of withdrawal — see {link}. If you withdraw after we have started, you pay only for the part of the period you actually had.',
+      linkLabel: 'Right of withdrawal',
+      checkbox: 'I expressly request that YANTA begins providing YANTA Plus before the end of the withdrawal period, and I acknowledge that I lose my right of withdrawal once the service has been fully performed.',
+      cancel: 'Cancel',
+      continue: 'Continue to checkout',
+    },
+  },
 };

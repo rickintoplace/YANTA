@@ -1015,6 +1015,9 @@ export default {
       resetConfirmMessage: 'Réinitialiser tous les paramètres par défaut ?\n\nVos notes ne sont pas affectées.',
       resetConfirmAction: 'Réinitialiser les paramètres',
       resetToast: 'Tous les paramètres réinitialisés',
+      deleteAccountTitle: 'Supprimer le compte',
+      deleteAccountHint: 'Supprime définitivement votre compte YANTA Cloud et tout ce qui y est synchronisé. Les données stockées uniquement sur cet appareil ne sont pas concernées. Cette action est irréversible.',
+      deleteAccountButton: 'Supprimer le compte…',
     },
 
     sync: {

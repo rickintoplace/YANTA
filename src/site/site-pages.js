@@ -21,10 +21,25 @@ import {
 } from './get-app-content.js';
 
 import { accessibilityContent } from './accessibility-content.js';
+import { legalDocument } from './legal-documents.js';
+
+import {
+  cancelContent,
+  wireCancelPage,
+} from './cancel-content.js';
+
+import {
+  reportContent,
+  wireReportPage,
+} from './report-content.js';
+
+import {
+  deleteAccountContent,
+  wireDeleteAccountPage,
+} from './delete-account-content.js';
 
 import {
   escapeHtml,
-  LEGAL_LINKS,
   legalLinkUrl,
   YANTA_APP_ORIGIN,
   YANTA_LEGAL as LEGAL,
@@ -94,11 +109,12 @@ function priceIds() {
       };
 }
 
-function money(monthly = true) {
-  const c = userCurrency();
+function currencySymbol() {
+  return userCurrency() === 'EUR' ? '€' : '$';
+}
 
-  if (c === 'EUR') return monthly ? '€6' : '€60';
-  return monthly ? '$6' : '$60';
+function money(monthly = true) {
+  return `${currencySymbol()}${monthly ? 6 : 60}`;
 }
 
 /*
@@ -321,6 +337,13 @@ body {
   color: var(--text-dim, #625a49);
 }
 
+/* PAngV: the VAT and renewal statement belongs next to the price itself. */
+.yanta-price-tax {
+  margin: -12px 0 16px;
+  color: var(--text-dim, #625a49);
+  font-size: 12.5px;
+}
+
 .yanta-feature-list {
   margin: 0 0 22px;
   padding: 0;
@@ -459,6 +482,65 @@ body {
   outline: 2px solid var(--accent, #8FA31E);
   outline-offset: 2px;
   border-radius: 7px;
+}
+
+/* Wide tables scroll inside their own box; the page never scrolls sideways. */
+.yanta-legal-table {
+  overflow-x: auto;
+  margin: 14px 0;
+  border: 1px solid color-mix(in srgb, var(--border, #d8c7a5) 72%, transparent);
+  border-radius: 12px;
+}
+
+.yanta-legal-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.yanta-legal-table th,
+.yanta-legal-table td {
+  padding: 10px 14px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.yanta-legal-table th {
+  color: var(--text, #29251d);
+  font-size: 12px;
+  font-weight: 750;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.yanta-legal-table tbody tr {
+  border-top: 1px solid color-mix(in srgb, var(--border, #d8c7a5) 55%, transparent);
+}
+
+.yanta-legal-table td {
+  color: var(--text-dim, #625a49);
+}
+
+.yanta-legal-quote {
+  margin: 14px 0;
+  padding: 14px 18px;
+  border-left: 3px solid var(--accent, #8FA31E);
+  border-radius: 0 10px 10px 0;
+  background: var(--bg-elev, #f7efd8);
+}
+
+.yanta-legal-quote p {
+  margin: 0 0 10px;
+}
+
+.yanta-legal-quote p:last-child {
+  margin-bottom: 0;
+}
+
+.yanta-legal-doc h3 {
+  margin: 22px 0 6px;
+  font-size: 16px;
 }
 
 @media (max-width: 780px) {
@@ -642,9 +724,13 @@ function pricingContent() {
         </p>
 
         <div class="yanta-price">
-          <strong>€0</strong>
+          <strong>${escapeHtml(currencySymbol())}0</strong>
           <span>/ forever</span>
         </div>
+
+        <p class="yanta-price-tax">
+          No payment details required.
+        </p>
 
         <ul class="yanta-feature-list">
           <li>30 MB encrypted cloud sync storage budget*</li>
@@ -671,6 +757,10 @@ function pricingContent() {
           <span>/ month</span>
         </div>
 
+        <p class="yanta-price-tax">
+          Total price incl. VAT. Renews monthly until cancelled.
+        </p>
+
         <ul class="yanta-feature-list">
           <li>5 GB encrypted cloud sync storage budget*</li>
           <li>5 cloud vaults</li>
@@ -687,6 +777,29 @@ function pricingContent() {
           </button>
         </div>
       </article>
+    </section>
+
+    <section class="yanta-note-box">
+      <p>
+        <strong>Prices, VAT and renewal:</strong>
+        All prices are total prices <strong>including any applicable VAT</strong>.
+        The exact tax depends on your country and is calculated by Paddle at
+        checkout, where the final amount is shown before you pay. There are no
+        setup or transaction fees. A subscription renews automatically for the
+        same period — monthly plans monthly, yearly plans yearly — until you
+        cancel, and you can cancel any time at
+        <a class="yanta-site-link" href="/cancel">Cancel contract</a>, with
+        effect from the end of the period you have paid for.
+      </p>
+
+      <p style="margin-top:8px">
+        <strong>Right of withdrawal:</strong>
+        As a consumer you can withdraw from the contract within 14 days. See
+        <a class="yanta-site-link" href="/withdrawal">Right of withdrawal</a>
+        for the full notice and the model form. If you ask us to start straight
+        away, that right ends once we have fully performed — we ask you to
+        confirm this explicitly before checkout.
+      </p>
     </section>
 
     <section class="yanta-note-box">
@@ -790,299 +903,6 @@ function pricingContent() {
   `;
 }
 
-function legalContent(kind) {
-  const updated = '2026-06-24';
-
-  if (kind === 'imprint') {
-    return `
-      <article class="yanta-legal-doc">
-        <h1>Imprint</h1>
-
-        <p>
-          <strong>Provider:</strong><br>
-          ${escapeHtml(LEGAL.providerName)}<br>
-          ${escapeHtml(LEGAL.street)}<br>
-          ${escapeHtml(LEGAL.city)}<br>
-          ${escapeHtml(LEGAL.country)}
-        </p>
-
-        <p>
-          <strong>Contact:</strong><br>
-          <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>
-        </p>
-
-        <p>
-          <strong>Responsible for content:</strong><br>
-          ${escapeHtml(LEGAL.providerName)}, address as above.
-        </p>
-
-        <p>
-          <strong>Project portfolio:</strong><br>
-          <a href="${escapeHtml(LEGAL.portfolioUrl)}" target="_blank" rel="noopener">${escapeHtml(LEGAL.portfolioUrl)}</a>
-        </p>
-
-      </article>
-    `;
-  }
-
-  if (kind === 'terms') {
-    return `
-      <article class="yanta-legal-doc">
-        <h1>Terms of Service</h1>
-        <p><strong>Last updated:</strong> ${updated}</p>
-
-        <h2>1. Provider</h2>
-        <p>
-          YANTA is provided by <strong>${escapeHtml(LEGAL.providerName)},</strong>
-          <br>
-          <strong>${escapeHtml(LEGAL.street)}, ${escapeHtml(LEGAL.city)},
-          <br>
-          ${escapeHtml(LEGAL.country)}.</strong>
-          <br>
-          Contact: <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>.
-        </p>
-
-        <h2>2. Service</h2>
-        <p>
-          YANTA is a local-first workspace for notes, drawings, tasks, sources, calendar items,
-          encrypted sync, public sharing and AI-assisted workflows. Features may change,
-          be added, be removed, or be limited at any time.
-        </p>
-
-        <h2>3. Accounts</h2>
-        <p>
-          YANTA Cloud accounts use email-based login. You are responsible for keeping access
-          to your email account secure and for all activity under your account.
-        </p>
-
-        <h2>4. Encryption and Recovery Key</h2>
-        <p>
-          YANTA Cloud is designed so that note contents and sync objects are encrypted before upload.
-          Your Recovery Key is required to decrypt your vault. YANTA is technically NOT able to
-          restore encrypted content if your Recovery Key is lost.
-        </p>
-
-        <h2>5. Subscriptions</h2>
-        <p>
-          YANTA Plus increases usage limits such as encrypted cloud sync storage budget,
-          devices and Included AI credits.
-          Payments, taxes, invoices and payment methods are processed by Paddle as Merchant of Record.
-          Subscription terms shown in Paddle Checkout apply.
-        </p>
-
-        <h2>6. Cancellations and Downgrades</h2>
-        <p>
-          You can cancel a subscription through the billing portal. Unless stated otherwise,
-          Plus access remains available until the end of the paid billing period. After downgrade,
-          Free limits apply. If your usage exceeds Free limits, new uploads or some cloud features
-          may be restricted until you reduce usage or subscribe again.
-        </p>
-
-        <h2>7. Included AI and BYOK</h2>
-        <p>
-          Included AI is subject to daily and monthly credit budgets, request limits,
-          context limits, output limits, model availability, provider costs and abuse protection.
-          AI responses may be inaccurate. You are responsible for reviewing AI-generated output before relying on it.
-          BYOK mode uses your own OpenRouter key and is subject to OpenRouter’s terms and pricing.
-        </p>
-
-        <h2>8. Sources, Web Search and External Content</h2>
-        <p>
-          YANTA may fetch RSS feeds, YouTube metadata, web pages, search results, citations or weather data
-          from third-party services. External content can be inaccurate, unavailable, malicious or subject to
-          separate terms.
-        </p>
-
-        <h2>9. Public Shares</h2>
-        <p>
-          Public shares are intended to publish encrypted payloads accessible through a share link.
-          Anyone with the share link and key may access the shared content. You are responsible for
-          what you share and for revoking shares when needed.
-        </p>
-
-        <h2>10. Acceptable Use</h2>
-        <p>
-          You must not use YANTA for illegal activity, abuse, spam, malware, unauthorized access,
-          infringement of third-party rights, or attempts to disrupt or overload the service.
-        </p>
-
-        <h2>11. Availability and Changes</h2>
-        <p>
-          YANTA is provided on an “as is” and “as available” basis. No uninterrupted availability,
-          data retention, specific model availability, or permanent feature availability is guaranteed.
-        </p>
-
-        <h2>12. Liability</h2>
-        <p>
-          To the maximum extent permitted by applicable law, liability is limited. Nothing in these Terms
-          limits liability where limitation is not permitted by law, including mandatory liability for intent,
-          gross negligence, injury to life, body or health under applicable German law.
-        </p>
-
-        <h2>13. Termination</h2>
-        <p>
-          We may suspend or terminate access if you violate these Terms, abuse the service, create security risks,
-          or if required by law.
-        </p>
-
-        <h2>14. Governing Law</h2>
-        <p>
-          These Terms are intended to be governed by the laws of ${escapeHtml(LEGAL.country)}., unless mandatory consumer protection
-          rules require otherwise.
-        </p>
-      </article>
-    `;
-  }
-
-  if (kind === 'privacy') {
-    return `
-      <article class="yanta-legal-doc">
-        <h1>Privacy Policy</h1>
-        <p><strong>Last updated:</strong> ${updated}</p>
-
-        <h2>1. Controller</h2>
-        <p>
-          Controller: <strong>${escapeHtml(LEGAL.providerName)},</strong>
-          <br>
-          <strong>${escapeHtml(LEGAL.street)}, ${escapeHtml(LEGAL.city)},
-          <br>
-          ${escapeHtml(LEGAL.country)}.</strong>.
-          <br>
-          Contact: <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a>.
-        </p>
-
-        <h2>2. Data processed</h2>
-        <ul>
-          <li>Email address for login and account access.</li>
-          <li>Session cookies for authentication.</li>
-          <li>Billing customer, transaction and subscription identifiers from Paddle.</li>
-          <li>Encrypted sync objects stored in cloud storage.</li>
-          <li>Usage counters such as storage bytes, object count, bandwidth, writes and AI credit usage.</li>
-          <li>Security/audit metadata such as hashed IP address, event type and timestamp.</li>
-          <li>Public share metadata and encrypted public share payloads.</li>
-          <li>RSS/feed URLs and external lookup requests when you use Sources features.</li>
-          <li>AI prompts and selected context when you use Included AI. YANTA does not intentionally store prompts or completions server-side; they are forwarded transiently to OpenRouter.</li>
-        </ul>
-
-        <h2>3. Local-first data</h2>
-        <p>
-          Much of YANTA data is stored locally in your browser/device using IndexedDB and localStorage.
-          Clearing browser data may delete local YANTA data unless you have sync or backups.
-        </p>
-
-        <h2>4. Encryption</h2>
-        <p>
-          YANTA Cloud stores encrypted sync objects. The server sees metadata needed to operate the service,
-          such as object path, object size, timestamps and account ownership, but not plaintext note contents.
-        </p>
-
-        <h2>5. Legal bases</h2>
-        <p>
-          Processing is based on contract performance, legitimate interests such as security and abuse prevention,
-          consent where required, and legal obligations such as billing/tax records.
-        </p>
-
-        <h2>6. Processors and third-party services</h2>
-        <p>Depending on which features you use, YANTA may use:</p>
-        <ul>
-          <li>Cloudflare Workers, D1 and R2 for YANTA Cloud APIs and encrypted object storage.</li>
-          <li>Vercel for hosting the web app.</li>
-          <li>Paddle for billing, taxes, invoices and subscriptions.</li>
-          <li>Resend for login emails.</li>
-          <li>OpenRouter for AI processing.</li>
-          <li>Brave Search for web search.</li>
-          <li>YouTube Data API for YouTube source features.</li>
-          <li>Open-Meteo for weather.</li>
-          <li>Nominatim/OpenStreetMap for approximate manual location lookup.</li>
-          <li>Google APIs if you choose Advanced Google Drive Sync.</li>
-          <li>Public y-webrtc signaling infrastructure for live collaboration.</li>
-          <li>Crossref, DataCite, OpenLibrary and similar metadata APIs for citation features.</li>
-        </ul>
-
-        <h2>7. AI privacy</h2>
-        <p>
-          In Included AI mode, selected chat messages and context are sent to YANTA Cloud and forwarded to OpenRouter.
-          YANTA requests Zero Data Retention routing where supported. Do not include secrets or sensitive personal data
-          in prompts unless necessary.
-        </p>
-
-        <h2>8. Cookies</h2>
-        <p>
-          YANTA Cloud uses secure HTTP-only session cookies for login. Paddle may use its own cookies and tracking
-          technologies during checkout and billing portal flows.
-        </p>
-
-        <h2>9. Retention</h2>
-        <p>
-          Account, billing and audit records may be retained as needed for service operation, security, accounting,
-          tax and legal obligations. Encrypted sync data is retained while your account/vault exists unless deleted,
-          subject to technical backups and operational delays.
-        </p>
-
-        <h2>10. Your rights</h2>
-        <p>
-          Depending on applicable law, you may have rights to access, correction, deletion, restriction, portability
-          and objection. Contact ${CONTACT_EMAIL}.
-        </p>
-
-        <h2>11. Children</h2>
-        <p>
-          YANTA is not intended for children below the age required to consent to digital services in their jurisdiction.
-        </p>
-
-        <h2>12. Changes</h2>
-        <p>
-          This policy may change as YANTA evolves, including future Android app features such as notifications,
-          camera-based image upload or wrapper functionality.
-        </p>
-      </article>
-    `;
-  }
-
-  return `
-    <article class="yanta-legal-doc">
-      <h1>Refund Policy</h1>
-      <p><strong>Last updated:</strong> ${updated}</p>
-
-      <p>
-       Paddle acts as Merchant of Record for paid subscriptions.
-      </p>
-
-      <h2>1. Customer-friendly first purchase refund</h2>
-      <p>
-        If you are unhappy with YANTA Plus, contact us within 14 days of your first purchase.
-        We will generally provide a refund if the request appears genuine and the service has not been abused.
-      </p>
-
-      <h2>2. Renewals</h2>
-      <p>
-        Renewal payments are generally non-refundable once a new billing period has started, except where required by law
-        or where we decide otherwise at our discretion.
-      </p>
-
-      <h2>3. Abuse prevention</h2>
-      <p>
-        Refunds may be refused in cases of abuse, fraud, repeated refund requests, excessive use intended to avoid payment,
-        violation of the Terms, or other misuse.
-      </p>
-
-      <h2>4. How to request a refund</h2>
-      <p>
-        Contact <a href="mailto:${CONTACT_EMAIL}">${CONTACT_EMAIL}</a> with your account email and Paddle receipt details.
-      </p>
-
-      <h2>5. Processing</h2>
-      <p>
-        Approved refunds are processed through Paddle. Timing depends on Paddle and your payment provider.
-      </p>
-
-      <h2>6. Statutory rights</h2>
-      <p>
-        Nothing in this policy limits mandatory consumer rights that cannot be waived under applicable law.
-      </p>
-    </article>
-  `;
-}
 
 /*
   One entry per public route. `render` returns the <main> markup, `wire`
@@ -1100,23 +920,52 @@ const SITE_ROUTES = new Map([
   }],
   ['/terms', {
     title: 'Terms of Service',
-    render: () => legalContent('terms'),
+    render: () => legalDocument('terms'),
   }],
   ['/privacy', {
     title: 'Privacy Policy',
-    render: () => legalContent('privacy'),
+    render: () => legalDocument('privacy'),
   }],
+  /*
+    One document, two routes: the statutory withdrawal notice and the
+    voluntary refund policy belong on the same page, and both names have to
+    resolve — /refund because it is linked from elsewhere and from Paddle,
+    /withdrawal because that is what the notice is called.
+  */
   ['/refund', {
-    title: 'Refund Policy',
-    render: () => legalContent('refund'),
+    title: 'Right of withdrawal & refunds',
+    render: () => legalDocument('withdrawal'),
+  }],
+  ['/withdrawal', {
+    title: 'Right of withdrawal & refunds',
+    render: () => legalDocument('withdrawal'),
   }],
   ['/imprint', {
     title: 'Imprint',
-    render: () => legalContent('imprint'),
+    render: () => legalDocument('imprint'),
+  }],
+  ['/licenses', {
+    title: 'Licences & source code',
+    render: () => legalDocument('licenses'),
   }],
   ['/accessibility', {
     title: 'Accessibility',
     render: accessibilityContent,
+  }],
+  ['/cancel', {
+    title: 'Cancel contract',
+    render: cancelContent,
+    wire: wireCancelPage,
+  }],
+  ['/delete-account', {
+    title: 'Delete account',
+    render: deleteAccountContent,
+    wire: wireDeleteAccountPage,
+  }],
+  ['/report', {
+    title: 'Report content',
+    render: reportContent,
+    wire: wireReportPage,
   }],
   ['/get-app', {
     title: 'Get the app',
@@ -1221,9 +1070,12 @@ async function wirePricingButtons() {
           setButtonBusy(btn, false);
         }, 1600);
       } catch (err) {
-        console.error(err);
-
         setButtonBusy(btn, false);
+
+        // Backing out of the withdrawal step is a normal choice, not a fault.
+        if (err?.aborted) return;
+
+        console.error(err);
 
         if (err.status === 401) {
           alert(

@@ -3741,6 +3741,21 @@ function renderAboutSection(host) {
     },
   }, t('settings.about.resetAllButton')));
   host.append(danger);
+
+  /*
+    In-app route to account deletion. Google Play requires apps with accounts
+    to offer one, and GDPR Art. 17 wants erasure to be genuinely reachable.
+    The page itself does the work — it also has to exist as a public URL, so
+    duplicating the flow here would mean two implementations of one deletion.
+  */
+  const account = el('div', { class: 'yanta-settings-group' });
+  account.append(el('div', { class: 'yanta-settings-group-title' }, t('settings.about.deleteAccountTitle')));
+  account.append(el('p', { class: 'yanta-settings-hint' }, t('settings.about.deleteAccountHint')));
+  account.append(el('a', {
+    class: 'btn danger',
+    href: '/delete-account',
+  }, t('settings.about.deleteAccountButton')));
+  host.append(account);
 }
 
 // ---- Shared helpers ----

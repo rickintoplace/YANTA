@@ -91,7 +91,18 @@ export async function openYantaPlusUpgrade({
     throw new Error('YANTA Plus price id missing.');
   }
 
-  await openBillingCheckout(priceId);
+  try {
+    await openBillingCheckout(priceId);
+  } catch (err) {
+    /*
+      Declining the withdrawal step is a deliberate choice by the buyer, so
+      it must not surface as a failure at any of the upgrade entry points.
+    */
+    if (err?.aborted) return false;
+    throw err;
+  }
+
+  return true;
 }
 
 export async function openYantaBillingPortal() {

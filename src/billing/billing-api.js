@@ -63,6 +63,7 @@ export async function createBillingCheckout({
   priceId,
   successUrl = `${BILLING_PUBLIC_ORIGIN}/pricing?billing=success`,
   cancelUrl = `${BILLING_PUBLIC_ORIGIN}/pricing?billing=cancel`,
+  withdrawalConsent = false,
 } = {}) {
   if (!priceId) {
     throw new Error('YANTA Plus price id is missing.');
@@ -74,18 +75,44 @@ export async function createBillingCheckout({
       priceId,
       successUrl,
       cancelUrl,
+      withdrawalConsent,
     },
   });
+}
+
+/**
+ * Thrown when the buyer backs out of the withdrawal step. Callers should
+ * treat it as a quiet "never mind", not as an error worth reporting.
+ */
+export class CheckoutAbortedError extends Error {
+  constructor() {
+    super('Checkout cancelled before it opened.');
+    this.name = 'CheckoutAbortedError';
+    this.aborted = true;
+  }
 }
 
 export async function openBillingCheckout(priceId) {
   const successUrl = `${BILLING_PUBLIC_ORIGIN}/pricing?billing=success`;
   const cancelUrl = `${BILLING_PUBLIC_ORIGIN}/pricing?billing=cancel`;
 
+  /*
+    § 356 Abs. 4/5 BGB: performance starts inside the withdrawal period, so
+    the express request has to be collected before checkout opens. Gating it
+    here rather than at each call site means a new upgrade button cannot
+    accidentally skip it. Loaded lazily so the dialog is not in the boot path.
+  */
+  const { requestWithdrawalConsent } = await import('./withdrawal-consent.js');
+
+  if (!await requestWithdrawalConsent()) {
+    throw new CheckoutAbortedError();
+  }
+
   const res = await createBillingCheckout({
     priceId,
     successUrl,
     cancelUrl,
+    withdrawalConsent: true,
   });
 
   await openPaddleOverlayCheckout({

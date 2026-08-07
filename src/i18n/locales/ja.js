@@ -1005,6 +1005,9 @@ export default {
       resetConfirmMessage: 'すべての設定を既定値に戻しますか？\n\nノートには影響しません。',
       resetConfirmAction: '設定をリセット',
       resetToast: 'すべての設定をリセットしました',
+      deleteAccountTitle: 'アカウントを削除',
+      deleteAccountHint: 'YANTA クラウドのアカウントと同期済みのデータをすべて完全に削除します。この端末にのみ保存されているデータは影響を受けません。取り消しはできません。',
+      deleteAccountButton: 'アカウントを削除…',
     },
 
     sync: {

@@ -107,8 +107,21 @@ export function legalFooterHtml({
 } = {}) {
   const year = new Date().getFullYear();
 
+  /*
+    On a share page the reporter is already looking at the thing they want to
+    report, so hand the address to the notice form instead of asking them to
+    copy it. Art. 16 DSA calls for a mechanism that is easy to use, and the
+    exact URL is the one field a reporter is most likely to get wrong.
+  */
+  const reportContext = variant === 'public'
+    ? `?url=${encodeURIComponent(location.href)}`
+    : '';
+
   const linksHtml = LEGAL_LINKS.map((link) => {
-    return `<a href="${escapeHtml(legalLinkUrl(link.href))}">${escapeHtml(link.label)}</a>`;
+    const href = legalLinkUrl(link.href) +
+      (link.href === '/report' ? reportContext : '');
+
+    return `<a href="${escapeHtml(href)}">${escapeHtml(link.label)}</a>`;
   }).join('');
 
   return `

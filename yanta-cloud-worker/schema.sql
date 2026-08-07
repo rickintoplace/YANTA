@@ -64,6 +64,13 @@ CREATE TABLE IF NOT EXISTS devices (
   created_at INTEGER NOT NULL,
   last_seen_at INTEGER,
   revoked_at INTEGER,
+  -- Written by ensureDevice(); a fresh database without these columns makes
+  -- every storage write fail, so they have to be part of the base schema.
+  user_agent TEXT,
+  platform TEXT,
+  browser TEXT,
+  os TEXT,
+  device_type TEXT,
   UNIQUE(vault_id, device_id),
   FOREIGN KEY(user_id) REFERENCES users(id),
   FOREIGN KEY(vault_id) REFERENCES vaults(id)
@@ -455,3 +462,51 @@ CREATE TABLE IF NOT EXISTS scheduled_pushes (
 
 CREATE INDEX IF NOT EXISTS idx_scheduled_pushes_due
 ON scheduled_pushes(sent_at, fire_at);
+
+-- Cancellation declarations submitted through the public § 312k BGB
+-- cancellation page. Recorded verbatim: the declaration and its time of
+-- receipt have to stay reproducible even if the Paddle side later changes.
+-- user_id stays NULL when the address matches no account.
+CREATE TABLE IF NOT EXISTS cancellation_requests (
+  id TEXT PRIMARY KEY,
+  user_id TEXT,
+  email TEXT NOT NULL,
+  name TEXT,
+  contract_ref TEXT,
+  kind TEXT NOT NULL,
+  reason TEXT,
+  requested_effective TEXT NOT NULL,
+  paddle_subscription_id TEXT,
+  effective_at INTEGER,
+  status TEXT NOT NULL,
+  error TEXT,
+  ip_hash TEXT,
+  created_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_cancellation_requests_email
+ON cancellation_requests(email, created_at);
+
+-- DSA Art. 16 notices about public shares. Kept for the statement-of-reasons
+-- duty (Art. 17) and so repeat notices about one share are traceable.
+CREATE TABLE IF NOT EXISTS content_notices (
+  id TEXT PRIMARY KEY,
+  share_id TEXT,
+  share_url TEXT NOT NULL,
+  category TEXT NOT NULL,
+  explanation TEXT NOT NULL,
+  reporter_email TEXT,
+  reporter_name TEXT,
+  good_faith INTEGER NOT NULL DEFAULT 0,
+  status TEXT NOT NULL,
+  ip_hash TEXT,
+  created_at INTEGER NOT NULL,
+  resolved_at INTEGER,
+  resolution TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_content_notices_share
+ON content_notices(share_id, created_at);
+
+CREATE INDEX IF NOT EXISTS idx_content_notices_status
+ON content_notices(status, created_at);

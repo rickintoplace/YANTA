@@ -1015,6 +1015,9 @@ export default {
       resetConfirmMessage: '¿Restablecer todos los ajustes a los valores predeterminados?\n\nTus notas no se ven afectadas.',
       resetConfirmAction: 'Restablecer ajustes',
       resetToast: 'Todos los ajustes restablecidos',
+      deleteAccountTitle: 'Eliminar cuenta',
+      deleteAccountHint: 'Elimina de forma permanente tu cuenta de YANTA Cloud y todo lo sincronizado con ella. Los datos guardados solo en este dispositivo no se ven afectados. Esta acción no se puede deshacer.',
+      deleteAccountButton: 'Eliminar cuenta…',
     },
 
     sync: {

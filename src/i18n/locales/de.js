@@ -1015,6 +1015,9 @@ export default {
       resetConfirmMessage: 'Alle Einstellungen auf die Standardwerte zurücksetzen?\n\nDeine Notizen sind nicht betroffen.',
       resetConfirmAction: 'Einstellungen zurücksetzen',
       resetToast: 'Alle Einstellungen zurückgesetzt',
+      deleteAccountTitle: 'Konto löschen',
+      deleteAccountHint: 'Löscht dein YANTA-Cloud-Konto und alle synchronisierten Daten endgültig. Nur lokal gespeicherte Daten bleiben unberührt. Das lässt sich nicht rückgängig machen.',
+      deleteAccountButton: 'Konto löschen…',
     },
 
     sync: {

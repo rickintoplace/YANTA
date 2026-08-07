@@ -1033,6 +1033,9 @@ export default {
       resetConfirmMessage: 'Reset all settings to defaults?\n\nYour notes are not affected.',
       resetConfirmAction: 'Reset settings',
       resetToast: 'All settings reset',
+      deleteAccountTitle: 'Delete account',
+      deleteAccountHint: 'Permanently deletes your YANTA Cloud account and everything synced to it. Data stored only on this device is not affected. This cannot be undone.',
+      deleteAccountButton: 'Delete account…',
     },
 
     sync: {

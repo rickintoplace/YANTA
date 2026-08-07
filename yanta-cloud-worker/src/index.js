@@ -1949,22 +1949,25 @@ async function verifyTurnstile(env, token, req) {
   return !!data?.success;
 }
 __name(verifyTurnstile, "verifyTurnstile");
-async function sendLoginEmail(env, { email, code, magicUrl }) {
-  if (!env.RESEND_API_KEY) {
-    console.log("[DEV] Login code:", email, code, magicUrl);
-    return;
-  }
-  const html = `
-    <div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;line-height:1.5">
-      <h2>Your YANTA login code</h2>
-      <p>Use this code to sign in:</p>
-      <div style="font-size:28px;font-weight:800;letter-spacing:0.18em">${code}</div>
-      <p>This code expires in 10 minutes.</p>
-      <p>Or open this magic link:</p>
-      <p><a href="${magicUrl}">${magicUrl}</a></p>
-      <p style="color:#666;font-size:12px">If you did not request this email, you can ignore it.</p>
+/* Address a user reaches a human at — imprint, cancellations, DSA notices. */
+function supportEmail(env) {
+  return env.SUPPORT_EMAIL || "rick@yanta.page";
+}
+
+function emailLayout(bodyHtml) {
+  return `
+    <div style="font-family:system-ui,-apple-system,Segoe UI,sans-serif;line-height:1.55;color:#29251d">
+      ${bodyHtml}
     </div>
   `;
+}
+
+async function sendEmail(env, { to, subject, html, replyTo = "" }) {
+  if (!env.RESEND_API_KEY) {
+    console.log("[DEV] Email:", to, subject);
+    return;
+  }
+
   const res = await fetch("https://api.resend.com/emails", {
     method: "POST",
     headers: {
@@ -1973,15 +1976,38 @@ async function sendLoginEmail(env, { email, code, magicUrl }) {
     },
     body: JSON.stringify({
       from: env.FROM_EMAIL,
-      to: email,
-      subject: "Your YANTA login code",
-      html
+      to,
+      subject,
+      html: emailLayout(html),
+      ...(replyTo ? { reply_to: replyTo } : {})
     })
   });
+
   if (!res.ok) {
     const msg = await res.text().catch(() => "");
     throw new Error(`Resend failed: ${res.status} ${msg}`);
   }
+}
+
+async function sendLoginEmail(env, { email, code, magicUrl }) {
+  if (!env.RESEND_API_KEY) {
+    console.log("[DEV] Login code:", email, code, magicUrl);
+    return;
+  }
+
+  await sendEmail(env, {
+    to: email,
+    subject: "Your YANTA login code",
+    html: `
+      <h2>Your YANTA login code</h2>
+      <p>Use this code to sign in:</p>
+      <div style="font-size:28px;font-weight:800;letter-spacing:0.18em">${code}</div>
+      <p>This code expires in 10 minutes.</p>
+      <p>Or open this magic link:</p>
+      <p><a href="${magicUrl}">${magicUrl}</a></p>
+      <p style="color:#666;font-size:12px">If you did not request this email, you can ignore it.</p>
+    `
+  });
 }
 __name(sendLoginEmail, "sendLoginEmail");
 async function getSession(env, req) {
@@ -3122,6 +3148,14 @@ async function handleBillingCheckout(env, req, headers) {
     `${billingOrigin}/pricing?billing=cancel`
   );
 
+  /*
+    Consent to immediate performance is optional in law — a buyer may keep
+    the full 14-day withdrawal right and simply wait. So this is recorded,
+    never required.
+  */
+  const withdrawalConsent = !!body.withdrawalConsent;
+  const consentAt = now();
+
   const customerId = await getOrCreateBillingCustomer(env, user);
 
   const tx = await paddleApi(env, "/transactions", {
@@ -3137,7 +3171,15 @@ async function handleBillingCheckout(env, req, headers) {
       custom_data: {
         userId: user.userId,
         plan,
-        app: "YANTA"
+        app: "YANTA",
+        /*
+          § 356 Abs. 4/5 BGB: the withdrawal right only lapses early if the
+          consumer expressly asked us to start and acknowledged losing it.
+          Stamped onto the transaction so the evidence sits with the payment
+          record rather than only in our logs.
+        */
+        withdrawalConsent: withdrawalConsent ? "granted" : "not_given",
+        withdrawalConsentAt: withdrawalConsent ? new Date(consentAt).toISOString() : ""
       },
       checkout: {
         success_url: successUrl,
@@ -3163,7 +3205,9 @@ async function handleBillingCheckout(env, req, headers) {
   await audit(env, req, "billing_checkout_created", user.userId, {
     priceId,
     plan,
-    transactionId
+    transactionId,
+    withdrawalConsent,
+    consentAt
   });
 
   return json({
@@ -3247,6 +3291,600 @@ async function handleBillingStatus(env, req, headers) {
     ok: true,
     billing,
     limits: PLAN_LIMITS[billing.plan] || PLAN_LIMITS.free
+  }, 200, headers);
+}
+
+/* ============================================================
+   Account deletion (GDPR Art. 17, and a Google Play requirement)
+
+   Erasure with the one retention exception the law forces on us: invoices
+   and the transaction records behind them have to survive for the German
+   commercial and tax retention periods (§ 147 AO, § 257 HGB). So content
+   and identifiers go, billing rows stay, and the users row is anonymised
+   rather than dropped — billing_* rows reference it.
+   ============================================================ */
+
+async function deleteR2Prefix(env, prefix) {
+  let cursor;
+  let deleted = 0;
+
+  do {
+    const listing = await env.OBJECTS.list({ prefix, cursor });
+
+    if (listing.objects.length) {
+      await env.OBJECTS.delete(listing.objects.map((o) => o.key));
+      deleted += listing.objects.length;
+    }
+
+    cursor = listing.truncated ? listing.cursor : undefined;
+  } while (cursor);
+
+  return deleted;
+}
+
+async function purgeUserData(env, userId) {
+  // Everything the user ever synced lives under one R2 prefix.
+  const objectsDeleted = await deleteR2Prefix(env, `users/${userId}/`);
+
+  const shares = await env.DB.prepare(
+    `SELECT id FROM public_shares WHERE owner_user_id = ?`
+  ).bind(userId).all();
+
+  for (const row of shares.results || []) {
+    await deleteR2Prefix(env, `public-shares/${row.id}/`);
+  }
+
+  const presentations = await env.DB.prepare(
+    `SELECT id FROM presentation_sessions WHERE owner_user_id = ?`
+  ).bind(userId).all();
+
+  for (const row of presentations.results || []) {
+    await deleteR2Prefix(env, `presentation-sessions/${row.id}/`);
+  }
+
+  const spaces = await env.DB.prepare(
+    `SELECT id FROM spaces WHERE owner_user_id = ?`
+  ).bind(userId).all();
+
+  for (const row of spaces.results || []) {
+    await deleteR2Prefix(env, `users/${userId}/vaults/${row.id}/`);
+  }
+
+  /*
+    D1 has no cascade, so children go before parents and the order is load
+    bearing: devices, public_shares and presentation_sessions all carry a
+    foreign key to vaults, and deleting vaults first makes the statement fail
+    on the constraint and silently leave the vault behind.
+  */
+  const statements = [
+    // Children of vaults.
+    `DELETE FROM objects WHERE vault_id IN (SELECT id FROM vaults WHERE user_id = ?)`,
+    `DELETE FROM public_share_assets WHERE share_id IN (SELECT id FROM public_shares WHERE owner_user_id = ?)`,
+    `DELETE FROM public_shares WHERE owner_user_id = ?`,
+    `DELETE FROM presentation_sessions WHERE owner_user_id = ?`,
+    `DELETE FROM devices WHERE user_id = ?`,
+    `DELETE FROM vaults WHERE user_id = ?`,
+
+    // Children of spaces, then the spaces themselves.
+    `DELETE FROM space_members WHERE user_id = ?`,
+    `DELETE FROM space_members WHERE space_id IN (SELECT id FROM spaces WHERE owner_user_id = ?)`,
+    `DELETE FROM space_link_stats WHERE space_id IN (SELECT id FROM spaces WHERE owner_user_id = ?)`,
+    `DELETE FROM spaces WHERE owner_user_id = ?`,
+
+    // Everything else hanging off the user.
+    `DELETE FROM sessions WHERE user_id = ?`,
+    `DELETE FROM login_challenges WHERE email = (SELECT email FROM users WHERE id = ?)`,
+    `DELETE FROM usage_current WHERE user_id = ?`,
+    `DELETE FROM ai_usage_events WHERE user_id = ?`,
+    `DELETE FROM scheduled_pushes WHERE user_id = ?`,
+    `DELETE FROM push_subscriptions WHERE user_id = ?`,
+    `DELETE FROM audit_events WHERE user_id = ?`,
+
+    // Legal records: keep the row, drop the link to the person.
+    `UPDATE cancellation_requests SET user_id = NULL WHERE user_id = ?`
+  ];
+
+  for (const sql of statements) {
+    await env.DB.prepare(sql).bind(userId).run().catch((err) => {
+      console.error("[account-delete] statement failed", sql, safeErrorForLog(err));
+    });
+  }
+
+  return { objectsDeleted };
+}
+
+async function handleAccountDelete(env, req, headers) {
+  const user = await requireUser(env, req);
+  const body = await bodyJson(req);
+
+  /*
+    Typed confirmation: irreversible and, unlike cancellation, it cannot be
+    undone by resubscribing.
+  */
+  if (String(body.confirm || "").trim().toUpperCase() !== "DELETE") {
+    return json({
+      ok: false,
+      error: 'Type DELETE to confirm.'
+    }, 400, headers);
+  }
+
+  const email = user.email;
+
+  // An active subscription must not keep billing a deleted account.
+  const sub = await env.DB.prepare(
+    `SELECT * FROM billing_subscriptions
+     WHERE user_id = ? AND status IN ('active','trialing','past_due')
+     ORDER BY updated_at DESC LIMIT 1`
+  ).bind(user.userId).first();
+
+  if (sub?.paddle_subscription_id) {
+    try {
+      await paddleApi(
+        env,
+        `/subscriptions/${encodeURIComponent(sub.paddle_subscription_id)}/cancel`,
+        { method: "POST", body: { effective_from: "immediately" } }
+      );
+    } catch (err) {
+      console.error("[account-delete] paddle cancel failed", safeErrorForLog(err));
+    }
+  }
+
+  const chat = await env.DB.prepare(
+    `SELECT matrix_user_id, disabled_at FROM chat_accounts WHERE user_id = ?`
+  ).bind(user.userId).first();
+
+  if (chat?.matrix_user_id && !chat.disabled_at) {
+    try {
+      await matrixDeactivateUser(env, chat.matrix_user_id, "YANTA account deletion");
+    } catch (err) {
+      console.error("[account-delete] matrix deactivate failed", safeErrorForLog(err));
+    }
+  }
+
+  await purgeUserData(env, user.userId);
+
+  const t = now();
+
+  await env.DB.prepare(
+    `DELETE FROM chat_accounts WHERE user_id = ?`
+  ).bind(user.userId).run().catch(() => {});
+
+  /*
+    Anonymise instead of DELETE: billing_customers/subscriptions/transactions
+    reference this row and have to be kept for the statutory retention period.
+    The address is replaced with an unroutable one so the account can never be
+    signed into or re-matched to the person; disabled_at plus that address is
+    the deletion marker, and the audit row below carries the timestamp.
+  */
+  await env.DB.prepare(
+    `UPDATE users
+     SET email = ?, plan = 'free', disabled_at = ?
+     WHERE id = ?`
+  ).bind(`deleted-${user.userId}@deleted.invalid`, t, user.userId).run();
+
+  // userId deliberately null: this row must outlive the account it describes.
+  await audit(env, req, "account_deleted", null, { at: t });
+
+  try {
+    await sendEmail(env, {
+      to: email,
+      subject: "Your YANTA account has been deleted",
+      replyTo: supportEmail(env),
+      html: `
+        <h2>Your YANTA account is deleted</h2>
+        <p>
+          We removed your encrypted sync data, vaults, devices, shares,
+          spaces and chat account. This cannot be undone.
+        </p>
+        <p>
+          Invoices and the payment records behind them are kept for as long as
+          German commercial and tax law requires (up to 10 years) and are not
+          used for anything else.
+        </p>
+        <p>Anything stored only on your devices is untouched — clear it there if you want it gone.</p>
+      `
+    });
+  } catch (err) {
+    console.error("[account-delete] confirmation email failed", safeErrorForLog(err));
+  }
+
+  return json({ ok: true, deletedAt: t }, 200, {
+    ...headers,
+    "set-cookie": clearCookieHeader(env)
+  });
+}
+
+/* ============================================================
+   DSA Art. 16 notice and action
+
+   Public shares make this a hosting service, and the micro-enterprise
+   carve-out in Art. 19 covers Section 3 only — the notice mechanism itself
+   still applies. Unauthenticated by design: Art. 16 requires it to be easy
+   to access and use, so no account and no captcha.
+   ============================================================ */
+
+const NOTICE_CATEGORIES = new Set([
+  "copyright",
+  "personal_data",
+  "illegal_content",
+  "csam",
+  "malware",
+  "impersonation",
+  "other"
+]);
+
+function shareIdFromUrl(shareUrl) {
+  const match = String(shareUrl || "").match(/\/share\/([A-Za-z0-9_-]{4,64})/);
+
+  return match ? match[1] : null;
+}
+
+async function handleContentNotice(env, req, headers) {
+  const body = await bodyJson(req);
+
+  const shareUrl = String(body.shareUrl || "").trim().slice(0, 2000);
+  const category = NOTICE_CATEGORIES.has(body.category) ? body.category : "other";
+  const explanation = String(body.explanation || "").trim().slice(0, 8000);
+  const reporterEmail = normalizeEmail(body.reporterEmail);
+  const reporterName = String(body.reporterName || "").trim().slice(0, 200);
+  const goodFaith = !!body.goodFaith;
+
+  if (!shareUrl) {
+    return json({ ok: false, error: "Please give the address of the content." }, 400, headers);
+  }
+
+  if (explanation.length < 20) {
+    return json({
+      ok: false,
+      error: "Please explain why the content is unlawful (at least a sentence)."
+    }, 400, headers);
+  }
+
+  if (!goodFaith) {
+    return json({
+      ok: false,
+      error: "Please confirm that your statement is accurate and complete."
+    }, 400, headers);
+  }
+
+  if (reporterEmail && !validEmail(reporterEmail)) {
+    return json({ ok: false, error: "That email address looks wrong." }, 400, headers);
+  }
+
+  const rl = await rateLimit(env, `notice:ip:${await ipHash(env, req)}`, 20, 60 * 60 * 1000);
+
+  if (!rl.ok) {
+    return json({
+      ok: false,
+      error: `Too many reports from this device. Please email ${supportEmail(env)}.`
+    }, 429, headers);
+  }
+
+  const reference = id("ntc");
+  const createdAt = now();
+  const shareId = shareIdFromUrl(shareUrl);
+
+  await env.DB.prepare(
+    `INSERT INTO content_notices
+       (id,share_id,share_url,category,explanation,reporter_email,reporter_name,
+        good_faith,status,ip_hash,created_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?)`
+  ).bind(
+    reference,
+    shareId,
+    shareUrl,
+    category,
+    explanation,
+    reporterEmail || null,
+    reporterName || null,
+    1,
+    "received",
+    await ipHash(env, req),
+    createdAt
+  ).run();
+
+  await audit(env, req, "content_notice", null, { reference, category, shareId });
+
+  try {
+    await sendEmail(env, {
+      to: supportEmail(env),
+      subject: `[YANTA] Content notice ${reference} — ${category}`,
+      replyTo: reporterEmail || undefined,
+      html: `
+        <h3>Notice ${reference}</h3>
+        <p><strong>URL:</strong> ${shareUrl}</p>
+        <p><strong>Share id:</strong> ${shareId || "not recognised"}</p>
+        <p><strong>Category:</strong> ${category}</p>
+        <p><strong>Reporter:</strong> ${reporterName || "—"} ${reporterEmail || "(no address given)"}</p>
+        <pre style="white-space:pre-wrap">${explanation}</pre>
+      `
+    });
+  } catch (err) {
+    console.error("[content-notice] operator notice failed", safeErrorForLog(err));
+  }
+
+  // Art. 16 (4): confirm receipt without undue delay, where we have an address.
+  if (reporterEmail) {
+    try {
+      await sendEmail(env, {
+        to: reporterEmail,
+        subject: `We received your report (${reference})`,
+        replyTo: supportEmail(env),
+        html: `
+          <h2>Thank you — your report has been received</h2>
+          <p>Reference: <strong>${reference}</strong>, received ${formatUtc(createdAt)}.</p>
+          <p>
+            We will assess it in a timely, diligent and non-arbitrary way and
+            tell you the outcome, including how to challenge our decision.
+          </p>
+          <p style="color:#666;font-size:12px">
+            Note: content shared through YANTA is end-to-end encrypted, so we
+            cannot read it. Where we cannot verify a report ourselves, we act on
+            the share as a whole.
+          </p>
+        `
+      });
+    } catch (err) {
+      console.error("[content-notice] reporter ack failed", safeErrorForLog(err));
+    }
+  }
+
+  return json({ ok: true, reference, receivedAt: createdAt }, 200, headers);
+}
+
+/* ============================================================
+   § 312k BGB cancellation button
+
+   The declaration has to be possible without logging in, so this endpoint
+   is unauthenticated. That means anyone who knows an address could submit
+   a cancellation for it — accepted deliberately, and bounded:
+
+   - it only ever schedules the end of the *current paid period*, so nothing
+     already paid for is lost and the owner can resubscribe,
+   - the account owner is emailed immediately, so a hostile submission is
+     visible rather than silent,
+   - the HTTP response is identical whether or not the address has an
+     account, so the endpoint cannot be used to enumerate customers. The
+     specifics § 312k Abs. 3 requires (time of receipt, end of contract)
+     travel in the email, which only the real owner receives.
+   ============================================================ */
+
+const CANCELLATION_KINDS = new Set(["ordinary", "extraordinary"]);
+
+function formatUtc(ts) {
+  if (!ts) return "";
+
+  return `${new Date(ts).toISOString().replace("T", " ").slice(0, 16)} UTC`;
+}
+
+async function findCancellableSubscription(env, email) {
+  const user = await env.DB.prepare(
+    `SELECT id, email FROM users WHERE email = ?`
+  ).bind(email).first();
+
+  if (!user) return null;
+
+  const sub = await env.DB.prepare(
+    `SELECT * FROM billing_subscriptions
+     WHERE user_id = ? AND status IN ('active','trialing','past_due')
+     ORDER BY updated_at DESC
+     LIMIT 1`
+  ).bind(user.id).first();
+
+  return { user, sub: sub || null };
+}
+
+async function cancelSubscriptionAtPeriodEnd(env, subscription) {
+  await paddleApi(
+    env,
+    `/subscriptions/${encodeURIComponent(subscription.paddle_subscription_id)}/cancel`,
+    {
+      method: "POST",
+      body: { effective_from: "next_billing_period" }
+    }
+  );
+
+  await env.DB.prepare(
+    `UPDATE billing_subscriptions
+     SET cancel_at_period_end = 1, updated_at = ?
+     WHERE id = ?`
+  ).bind(now(), subscription.id).run();
+}
+
+function cancellationConfirmationHtml({
+  reference,
+  receivedAt,
+  declaration,
+  effectiveAt,
+  hadSubscription,
+  extraordinary,
+  supportAddress
+}) {
+  const outcome = !hadSubscription
+    ? `<p>We could not find an active paid subscription for this address.
+        Your declaration is on file regardless — if a subscription exists under a
+        different address, reply to this email and we will apply it there.</p>`
+    : extraordinary
+      ? `<p>Your subscription is scheduled to end on <strong>${formatUtc(effectiveAt)}</strong>,
+          so it cannot renew. You declared an extraordinary termination: we are reviewing
+          the reason you gave and will come back to you about an earlier end date.</p>`
+      : `<p>Your subscription is cancelled with effect from
+          <strong>${effectiveAt ? formatUtc(effectiveAt) : "the end of your current billing period"}</strong>.
+          You keep YANTA Plus until then; afterwards the account returns to the Free plan.
+          Nothing is deleted.</p>`;
+
+  return `
+    <h2>Your cancellation has been received</h2>
+
+    <p>
+      This is the confirmation required by § 312k (3) BGB. Keep it —
+      it is your proof of the cancellation and its time of receipt.
+    </p>
+
+    <table style="border-collapse:collapse;margin:18px 0;font-size:14px">
+      <tr>
+        <td style="padding:4px 14px 4px 0;color:#625a49">Received</td>
+        <td style="padding:4px 0"><strong>${formatUtc(receivedAt)}</strong></td>
+      </tr>
+      <tr>
+        <td style="padding:4px 14px 4px 0;color:#625a49">Reference</td>
+        <td style="padding:4px 0"><strong>${reference}</strong></td>
+      </tr>
+      <tr>
+        <td style="padding:4px 14px 4px 0;color:#625a49">Type</td>
+        <td style="padding:4px 0">${extraordinary ? "Extraordinary termination" : "Ordinary termination"}</td>
+      </tr>
+    </table>
+
+    ${outcome}
+
+    <p style="margin-top:18px;color:#625a49;font-size:13px">
+      Your declaration as submitted:
+    </p>
+    <blockquote style="margin:6px 0 0;padding:10px 14px;border-left:3px solid #d8c7a5;color:#625a49;font-size:13px;white-space:pre-wrap">${declaration}</blockquote>
+
+    <p style="margin-top:20px;color:#666;font-size:12px">
+      Did not request this? Contact
+      <a href="mailto:${supportAddress}">${supportAddress}</a> and we will reverse it.
+    </p>
+  `;
+}
+
+async function handleCancellationRequest(env, req, headers) {
+  const body = await bodyJson(req);
+
+  const email = normalizeEmail(body.email);
+  const name = String(body.name || "").trim().slice(0, 200);
+  const contractRef = String(body.contractRef || "").trim().slice(0, 200);
+  const kind = CANCELLATION_KINDS.has(body.kind) ? body.kind : "ordinary";
+  const reason = String(body.reason || "").trim().slice(0, 4000);
+
+  if (!validEmail(email)) {
+    return json({ ok: false, error: "A valid email address is required." }, 400, headers);
+  }
+
+  /*
+    Generous limits on purpose: § 312k forbids putting hurdles in front of
+    the cancellation, so these only stop automated abuse.
+  */
+  const byIp = await rateLimit(env, `cancel:ip:${await ipHash(env, req)}`, 20, 60 * 60 * 1000);
+  const byEmail = await rateLimit(env, `cancel:mail:${email}`, 5, 24 * 60 * 60 * 1000);
+
+  if (!byIp.ok || !byEmail.ok) {
+    return json({
+      ok: false,
+      error: "Too many cancellation requests. Please email us instead."
+    }, 429, headers);
+  }
+
+  const receivedAt = now();
+  const reference = id("cxl");
+  const extraordinary = kind === "extraordinary";
+
+  const declaration = [
+    `I hereby terminate my YANTA Plus contract (${extraordinary ? "extraordinary" : "ordinary"} termination).`,
+    name ? `Name: ${name}` : "",
+    `Email: ${email}`,
+    contractRef ? `Contract reference: ${contractRef}` : "",
+    reason ? `Reason: ${reason}` : ""
+  ].filter(Boolean).join("\n");
+
+  const match = await findCancellableSubscription(env, email);
+  const subscription = match?.sub || null;
+
+  let status = subscription ? "scheduled" : "no_subscription";
+  let error = "";
+  let effectiveAt = subscription?.current_period_ends_at || null;
+
+  if (subscription?.paddle_subscription_id) {
+    try {
+      await cancelSubscriptionAtPeriodEnd(env, subscription);
+    } catch (err) {
+      /*
+        The declaration is legally effective on receipt regardless of whether
+        Paddle accepted the API call, so this must never fail the request —
+        it is recorded and escalated to the operator instead.
+      */
+      status = "manual_review";
+      error = safeErrorForLog(err).message;
+    }
+  }
+
+  await env.DB.prepare(
+    `INSERT INTO cancellation_requests
+       (id,user_id,email,name,contract_ref,kind,reason,requested_effective,
+        paddle_subscription_id,effective_at,status,error,ip_hash,created_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+  ).bind(
+    reference,
+    match?.user?.id || null,
+    email,
+    name || null,
+    contractRef || null,
+    kind,
+    reason || null,
+    "period_end",
+    subscription?.paddle_subscription_id || null,
+    effectiveAt,
+    status,
+    error || null,
+    await ipHash(env, req),
+    receivedAt
+  ).run();
+
+  await audit(env, req, "cancellation_request", match?.user?.id || null, {
+    reference,
+    kind,
+    status
+  });
+
+  const supportAddress = supportEmail(env);
+
+  /*
+    Confirmation on a durable medium (§ 312k Abs. 3) — and the only channel
+    that reveals whether a subscription existed.
+  */
+  try {
+    await sendEmail(env, {
+      to: email,
+      subject: "Your YANTA cancellation — confirmation",
+      replyTo: supportAddress,
+      html: cancellationConfirmationHtml({
+        reference,
+        receivedAt,
+        declaration,
+        effectiveAt,
+        hadSubscription: !!subscription,
+        extraordinary,
+        supportAddress
+      })
+    });
+  } catch (err) {
+    console.error("[cancellation] confirmation email failed", safeErrorForLog(err));
+  }
+
+  if (status === "manual_review" || extraordinary) {
+    try {
+      await sendEmail(env, {
+        to: supportAddress,
+        subject: `[YANTA] Cancellation needs attention — ${reference}`,
+        replyTo: email,
+        html: `
+          <h3>Cancellation ${reference}</h3>
+          <p>Status: <strong>${status}</strong>${error ? ` — ${error}` : ""}</p>
+          <pre style="white-space:pre-wrap">${declaration}</pre>
+        `
+      });
+    } catch (err) {
+      console.error("[cancellation] operator notice failed", safeErrorForLog(err));
+    }
+  }
+
+  // Deliberately identical for every address — see the block comment above.
+  return json({
+    ok: true,
+    reference,
+    receivedAt
   }, 200, headers);
 }
 
@@ -8058,6 +8696,22 @@ async function route(req, env) {
 
     if (url.pathname === "/api/paddle/webhook" && req.method === "POST") {
       return handlePaddleWebhook(env, req, headers);
+    }
+
+    /*
+      Public and deliberately unauthenticated — § 312k BGB and DSA Art. 16
+      both forbid putting an account in front of these. See the handlers.
+    */
+    if (url.pathname === "/api/cancellation" && req.method === "POST") {
+      return handleCancellationRequest(env, req, headers);
+    }
+
+    if (url.pathname === "/api/content-notice" && req.method === "POST") {
+      return handleContentNotice(env, req, headers);
+    }
+
+    if (url.pathname === "/api/account" && req.method === "DELETE") {
+      return handleAccountDelete(env, req, headers);
     }
 
     // Shared Spaces

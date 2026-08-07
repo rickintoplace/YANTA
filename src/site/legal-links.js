@@ -22,7 +22,11 @@ export const BILLING_PUBLIC_ORIGIN =
   trimTrailingSlashes(import.meta.env.VITE_BILLING_PUBLIC_ORIGIN) ||
   YANTA_APP_ORIGIN;
 
-/** Provider identity as it has to appear in the imprint and legal pages. */
+/**
+ * Provider identity as it has to appear in the imprint and legal pages.
+ * `vatId` renders only when set — § 5 Abs. 1 Nr. 6 DDG requires the VAT ID
+ * to be shown once one exists, and requires nothing while none does.
+ */
 export const YANTA_LEGAL = {
   productName: 'YANTA',
   providerName: 'Eirik Heilmann',
@@ -31,8 +35,19 @@ export const YANTA_LEGAL = {
   country: 'Germany',
   contactEmail: 'rick@yanta.page',
   portfolioUrl: 'https://rickinto.place',
+  sourceUrl: 'https://github.com/rickintoplace/yanta',
+  vatId: '',
 };
 
+/** Where the AGPL § 13 source offer points. */
+export const SOURCE_URL = YANTA_LEGAL.sourceUrl;
+
+/*
+  Priority order — surfaces that truncate drop from the end. Imprint and
+  Privacy come first because they are the classic prominence duties, and
+  "Cancel contract" is third because § 312k BGB wants it permanently
+  available and easy to reach, not buried in an overflow menu.
+*/
 export const LEGAL_LINKS = [
   {
     label: 'Imprint',
@@ -41,6 +56,10 @@ export const LEGAL_LINKS = [
   {
     label: 'Privacy',
     href: '/privacy',
+  },
+  {
+    label: 'Cancel contract',
+    href: '/cancel',
   },
   {
     label: 'Terms',
@@ -55,10 +74,29 @@ export const LEGAL_LINKS = [
     href: '/accessibility',
   },
   {
+    label: 'Delete account',
+    href: '/delete-account',
+  },
+  {
+    label: 'Report content',
+    href: '/report',
+  },
+  {
+    label: 'Licences',
+    href: '/licenses',
+  },
+  {
     label: 'Pricing',
     href: '/pricing',
   },
 ];
+
+/*
+  /withdrawal is served by the refunds document (the statutory withdrawal
+  notice is its first section) and needs a route, but not a footer entry of
+  its own next to "Refunds".
+*/
+export const EXTRA_SITE_PATHS = ['/withdrawal', '/get-app'];
 
 /*
   Routes the SPA hands to the standalone site shell instead of booting the app.
@@ -67,7 +105,7 @@ export const LEGAL_LINKS = [
 */
 export const SITE_PAGE_PATHS = new Set([
   ...LEGAL_LINKS.map((link) => link.href),
-  '/get-app',
+  ...EXTRA_SITE_PATHS,
 ]);
 
 /*

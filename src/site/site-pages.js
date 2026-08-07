@@ -20,23 +20,19 @@ import {
   wireGetAppPage,
 } from './get-app-content.js';
 
+import { accessibilityContent } from './accessibility-content.js';
+
+import {
+  escapeHtml,
+  LEGAL_LINKS,
+  legalLinkUrl,
+  YANTA_APP_ORIGIN,
+  YANTA_LEGAL as LEGAL,
+} from './legal-links.js';
+
 import { syncBillingNow } from '../billing/billing-api.js';
 
-const YANTA_APP_ORIGIN =
-  (import.meta.env.VITE_APP_ORIGIN || 'https://yanta.page').replace(/\/+$/, '');
-
-const BILLING_PUBLIC_ORIGIN =
-  (import.meta.env.VITE_BILLING_PUBLIC_ORIGIN || YANTA_APP_ORIGIN).replace(/\/+$/, '');
-
-const CONTACT_EMAIL = 'rick@yanta.page';
-
-const LEGAL = {
-  providerName: 'Eirik Heilmann',
-  street: 'Neustädter Ring 4',
-  city: '37154 Northeim',
-  country: 'Germany',
-  portfolioUrl: 'https://rickinto.place',
-};
+const CONTACT_EMAIL = LEGAL.contactEmail;
 
 const PLUS_MONTHLY_EUR =
   import.meta.env.VITE_PADDLE_PLUS_MONTHLY_EUR_PRICE_ID || '';
@@ -158,16 +154,6 @@ function setButtonBusy(btn, busy, label = '') {
     btn.textContent = btn.dataset.oldText;
     delete btn.dataset.oldText;
   }
-}
-
-function escapeHtml(s) {
-  return String(s ?? '').replace(/[&<>"']/g, (c) => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;',
-  }[c]));
 }
 
 function injectCss() {
@@ -447,6 +433,34 @@ body {
   color: var(--text, #29251d);
 }
 
+/*
+  Inline links inherit the body colour and carry an underline instead of a
+  hue: the UA default blue is unreadable on the dark theme, and the accent
+  olive clears 4.5:1 on neither background. The underline also keeps links
+  distinguishable without relying on colour (WCAG 1.4.1).
+*/
+.yanta-legal-doc a,
+.yanta-note-box a,
+.yanta-faq a {
+  color: var(--text, #29251d);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+}
+
+.yanta-legal-doc a:hover,
+.yanta-note-box a:hover,
+.yanta-faq a:hover {
+  color: var(--accent, #8FA31E);
+}
+
+/* Keyboard focus has to be visible on every control of the site shell. */
+.yanta-site :is(a, button):focus-visible {
+  outline: 2px solid var(--accent, #8FA31E);
+  outline-offset: 2px;
+  border-radius: 7px;
+}
+
 @media (max-width: 780px) {
   .yanta-pricing-grid,
   .yanta-faq-grid {
@@ -477,11 +491,36 @@ html.yanta-site-page * {
   document.head.append(style);
 }
 
-function shell(content) {
+/*
+  Product nav only. Every site page carries the full legal set in its footer,
+  so repeating it up here just crowds the bar once a seventh page exists.
+*/
+const SITE_NAV_LINKS = [
+  {
+    label: 'Get the app',
+    href: '/get-app',
+  },
+  {
+    label: 'Pricing',
+    href: '/pricing',
+  },
+];
+
+function siteNavHtml(currentPath) {
+  return SITE_NAV_LINKS.map((link) => {
+    const current = link.href === currentPath
+      ? ' aria-current="page"'
+      : '';
+
+    return `<a href="${escapeHtml(legalLinkUrl(link.href))}"${current}>${escapeHtml(link.label)}</a>`;
+  }).join('\n');
+}
+
+function shell(content, { title = '', currentPath = '' } = {}) {
   injectCss();
   ensureLegalFooterCss();
 
-  document.title = 'YANTA';
+  document.title = title ? `${title} · YANTA` : 'YANTA';
 
   document.documentElement.classList.add('yanta-site-page');
   document.body.classList.add('yanta-site-page');
@@ -499,12 +538,7 @@ function shell(content) {
             </div>
           </a>
           <div class="yanta-site-nav-links">
-            <a href="${escapeHtml(YANTA_APP_ORIGIN)}/get-app">Get the app</a>
-            <a href="${escapeHtml(BILLING_PUBLIC_ORIGIN)}/pricing">Pricing</a>
-            <a href="${escapeHtml(BILLING_PUBLIC_ORIGIN)}/terms">Terms</a>
-            <a href="${escapeHtml(BILLING_PUBLIC_ORIGIN)}/privacy">Privacy</a>
-            <a href="${escapeHtml(BILLING_PUBLIC_ORIGIN)}/refund">Refunds</a>
-            <a href="${escapeHtml(BILLING_PUBLIC_ORIGIN)}/imprint">Imprint</a>
+            ${siteNavHtml(currentPath)}
           </div>
         </nav>
       </header>
@@ -760,8 +794,6 @@ function legalContent(kind) {
   const updated = '2026-06-24';
 
   if (kind === 'imprint') {
-    document.title = 'Imprint · YANTA';
-
     return `
       <article class="yanta-legal-doc">
         <h1>Imprint</h1>
@@ -794,8 +826,6 @@ function legalContent(kind) {
   }
 
   if (kind === 'terms') {
-    document.title = 'Terms of Service · YANTA';
-
     return `
       <article class="yanta-legal-doc">
         <h1>Terms of Service</h1>
@@ -905,8 +935,6 @@ function legalContent(kind) {
   }
 
   if (kind === 'privacy') {
-    document.title = 'Privacy Policy · YANTA';
-
     return `
       <article class="yanta-legal-doc">
         <h1>Privacy Policy</h1>
@@ -1011,8 +1039,6 @@ function legalContent(kind) {
     `;
   }
 
-  document.title = 'Refund Policy · YANTA';
-
   return `
     <article class="yanta-legal-doc">
       <h1>Refund Policy</h1>
@@ -1058,43 +1084,59 @@ function legalContent(kind) {
   `;
 }
 
+/*
+  One entry per public route. `render` returns the <main> markup, `wire`
+  runs after the shell is in the DOM. Keep the paths in sync with
+  SITE_PAGE_PATHS (legal-links.js) and the host's rewrite rules.
+*/
+const SITE_ROUTES = new Map([
+  ['/pricing', {
+    title: 'Pricing',
+    render: pricingContent,
+    wire: () => {
+      wirePricingButtons();
+      refreshBillingSuccessBanner();
+    },
+  }],
+  ['/terms', {
+    title: 'Terms of Service',
+    render: () => legalContent('terms'),
+  }],
+  ['/privacy', {
+    title: 'Privacy Policy',
+    render: () => legalContent('privacy'),
+  }],
+  ['/refund', {
+    title: 'Refund Policy',
+    render: () => legalContent('refund'),
+  }],
+  ['/imprint', {
+    title: 'Imprint',
+    render: () => legalContent('imprint'),
+  }],
+  ['/accessibility', {
+    title: 'Accessibility',
+    render: accessibilityContent,
+  }],
+  ['/get-app', {
+    title: 'Get the app',
+    render: getAppContent,
+    wire: wireGetAppPage,
+  }],
+]);
+
 export function mountSitePage() {
   const path = location.pathname.replace(/\/+$/, '') || '/';
+  const route = SITE_ROUTES.get(path);
 
-  if (path === '/pricing') {
-    document.title = 'Pricing · YANTA';
-    shell(pricingContent());
-    wirePricingButtons();
-    refreshBillingSuccessBanner();
-    return;
-  }
+  if (!route) return;
 
-  if (path === '/terms') {
-    shell(legalContent('terms'));
-    return;
-  }
+  shell(route.render(), {
+    title: route.title,
+    currentPath: path,
+  });
 
-  if (path === '/privacy') {
-    shell(legalContent('privacy'));
-    return;
-  }
-
-  if (path === '/refund') {
-    shell(legalContent('refund'));
-    return;
-  }
-
-  if (path === '/imprint') {
-    shell(legalContent('imprint'));
-    return;
-  }
-
-  if (path === '/get-app') {
-    document.title = 'Get the app · YANTA';
-    shell(getAppContent());
-    wireGetAppPage();
-    return;
-  }
+  route.wire?.();
 }
 
 async function wirePricingButtons() {

@@ -2,44 +2,10 @@ import {
   lucide,
 } from '../core.js';
 
-const YANTA_APP_ORIGIN =
-  (import.meta.env.VITE_APP_ORIGIN || 'https://yanta.page').replace(/\/+$/, '');
-
-const BILLING_PUBLIC_ORIGIN =
-  (import.meta.env.VITE_BILLING_PUBLIC_ORIGIN || YANTA_APP_ORIGIN).replace(/\/+$/, '');
-
-const LEGAL_LINKS = [
-  {
-    label: 'Imprint',
-    href: '/imprint',
-  },
-  {
-    label: 'Privacy',
-    href: '/privacy',
-  },
-  {
-    label: 'Terms',
-    href: '/terms',
-  },
-  {
-    label: 'Refunds',
-    href: '/refund',
-  },
-  {
-    label: 'Pricing',
-    href: '/pricing',
-  },
-];
-
-function absoluteUrl(path) {
-  if (/^https?:\/\//i.test(path)) return path;
-
-  const clean = String(path || '/').startsWith('/')
-    ? String(path || '/')
-    : `/${path}`;
-
-  return `${BILLING_PUBLIC_ORIGIN}${clean}`;
-}
+import {
+  LEGAL_LINKS,
+  legalLinkUrl,
+} from './legal-links.js';
 
 function ensureCss() {
   if (document.getElementById('yanta-sidebar-legal-links-css')) return;
@@ -155,7 +121,7 @@ function makeMenuItems(links) {
   return links.map((link) => ({
     label: link.label,
     action: () => {
-      location.href = absoluteUrl(link.href);
+      location.href = legalLinkUrl(link.href);
     },
   }));
 }
@@ -196,7 +162,7 @@ export function mountSidebarLegalLinks({
     const a = document.createElement('a');
 
     a.className = 'yanta-sidebar-legal__link';
-    a.href = absoluteUrl(link.href);
+    a.href = legalLinkUrl(link.href);
     a.textContent = link.label;
     a.dataset.index = String(index);
 
@@ -240,13 +206,21 @@ export function mountSidebarLegalLinks({
 
     // Defensive fallback if no menu helper is available.
     if (links[0]) {
-      location.href = absoluteUrl(links[0].href);
+      location.href = legalLinkUrl(links[0].href);
     }
   });
 
   row.append(linksWrap, moreBtn);
   root.append(row);
   container.append(root);
+
+  /* Outer width of a link including the gap the stylesheet puts after it. */
+  function linkWidth(node) {
+    const rect = node.getBoundingClientRect().width;
+    const gap = parseFloat(getComputedStyle(node).marginInlineEnd) || 0;
+
+    return Math.ceil(rect + gap);
+  }
 
   const fit = () => {
     if (!root.isConnected) return;
@@ -257,62 +231,55 @@ export function mountSidebarLegalLinks({
       return;
     }
 
-    for (const node of linkNodes) {
-      node.hidden = false;
-    }
-
-    overflowLinks = [];
-    moreBtn.hidden = true;
-
     const available = Math.floor(row.clientWidth || 0);
 
     if (available <= 0) return;
 
-    const fullWidth = Math.ceil(linksWrap.scrollWidth || 0);
-
-    if (fullWidth <= available) {
-      return;
+    /*
+      Measure at natural width, and by summing the links rather than reading
+      linksWrap.scrollWidth: the wrap is a full-width flex container, so its
+      scrollWidth has a floor of its own clientWidth and never reports that
+      the content would fit.
+    */
+    for (const node of linkNodes) {
+      node.hidden = false;
     }
 
     moreBtn.hidden = false;
 
-    const reservedForMore =
-      Math.ceil(moreBtn.getBoundingClientRect().width || 22) + 6;
+    const widths = linkNodes.map(linkWidth);
+    const total = widths.reduce((sum, width) => sum + width, 0);
 
-    const targetWidth = Math.max(0, available - reservedForMore);
-
-    /*
-      Hide from the end first, preserving:
-      1. Imprint
-      2. Privacy
-      as the highest-priority visible links.
-    */
-    for (let i = linkNodes.length - 1; i >= 0; i--) {
-      const currentWidth = Math.ceil(linksWrap.scrollWidth || 0);
-
-      if (currentWidth <= targetWidth) {
-        break;
-      }
-
-      linkNodes[i].hidden = true;
-      overflowLinks.unshift(LEGAL_LINKS[i]);
-    }
-
-    /*
-      If the sidebar is extremely narrow, make everything available via the menu.
-    */
-    if (targetWidth < 68) {
-      for (const node of linkNodes) {
-        node.hidden = true;
-      }
-
-      overflowLinks = [...LEGAL_LINKS];
-      moreBtn.hidden = false;
-    }
-
-    if (!overflowLinks.length) {
+    if (total <= available) {
+      overflowLinks = [];
       moreBtn.hidden = true;
+      return;
     }
+
+    const budget = Math.max(
+      0,
+      available - (Math.ceil(moreBtn.getBoundingClientRect().width || 20) + 6)
+    );
+
+    /*
+      Keep the highest-priority links that still fit — LEGAL_LINKS is ordered
+      by priority, so Imprint and Privacy are the last to move into the menu.
+      Everything that does not fit stays reachable through the overflow menu,
+      including the case where nothing fits at all.
+    */
+    let used = 0;
+    let visibleCount = 0;
+
+    while (visibleCount < widths.length && used + widths[visibleCount] <= budget) {
+      used += widths[visibleCount];
+      visibleCount += 1;
+    }
+
+    linkNodes.forEach((node, index) => {
+      node.hidden = index >= visibleCount;
+    });
+
+    overflowLinks = LEGAL_LINKS.slice(visibleCount);
   };
 
   schedule(fit);

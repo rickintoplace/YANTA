@@ -1,62 +1,9 @@
-const YANTA_APP_ORIGIN =
-  (import.meta.env.VITE_APP_ORIGIN || 'https://yanta.page').replace(/\/+$/, '');
-
-const BILLING_PUBLIC_ORIGIN =
-  (import.meta.env.VITE_BILLING_PUBLIC_ORIGIN || YANTA_APP_ORIGIN).replace(/\/+$/, '');
-
-export const YANTA_LEGAL = {
-  productName: 'YANTA',
-  operatorName: 'Eirik Heilmann',
-  contactEmail: 'rick@yanta.page',
-  portfolioUrl: 'https://rickinto.place',
-};
-
-const LEGAL_LINKS = [
-  {
-    label: 'Pricing',
-    href: '/pricing',
-  },
-  {
-    label: 'Terms',
-    href: '/terms',
-  },
-  {
-    label: 'Privacy',
-    href: '/privacy',
-  },
-  {
-    label: 'Refunds',
-    href: '/refund',
-  },
-  {
-    label: 'Imprint',
-    href: '/imprint',
-  },
-];
-
-function absoluteUrl(path) {
-  if (/^https?:\/\//i.test(path)) return path;
-
-  const clean = String(path || '/').startsWith('/')
-    ? String(path || '/')
-    : `/${path}`;
-
-  return `${BILLING_PUBLIC_ORIGIN}${clean}`;
-}
-
-function escapeHtml(value) {
-  return String(value ?? '').replace(/[&<>"']/g, (char) => ({
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-    "'": '&#39;',
-  }[char]));
-}
-
-function escapeAttr(value) {
-  return escapeHtml(value);
-}
+import {
+  escapeHtml,
+  LEGAL_LINKS,
+  legalLinkUrl,
+  YANTA_LEGAL,
+} from './legal-links.js';
 
 export function ensureLegalFooterCss() {
   if (document.getElementById('yanta-legal-footer-css')) return;
@@ -161,15 +108,13 @@ export function legalFooterHtml({
   const year = new Date().getFullYear();
 
   const linksHtml = LEGAL_LINKS.map((link) => {
-    return `<a href="${escapeAttr(absoluteUrl(link.href))}">${escapeHtml(link.label)}</a>`;
+    return `<a href="${escapeHtml(legalLinkUrl(link.href))}">${escapeHtml(link.label)}</a>`;
   }).join('');
-
-  const contactHref = `mailto:${YANTA_LEGAL.contactEmail}`;
 
   return `
     <footer
-      ${id ? `id="${escapeAttr(id)}"` : ''}
-      class="yanta-legal-footer yanta-legal-footer--${escapeAttr(variant)}"
+      ${id ? `id="${escapeHtml(id)}"` : ''}
+      class="yanta-legal-footer yanta-legal-footer--${escapeHtml(variant)}"
       data-yanta-legal-footer
       aria-label="Legal information"
     >

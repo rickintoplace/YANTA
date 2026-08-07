@@ -229,6 +229,9 @@ import {
   ensureLegalFooter,
 } from './site/legal-footer.js';
 import {
+  SITE_PAGE_PATHS,
+} from './site/legal-links.js';
+import {
   mountSidebarLegalLinks,
 } from './site/sidebar-legal-links.js';
 import {
@@ -4544,15 +4547,6 @@ function rebuildScrollMaps(sync) {
   sync.maxEditor = Math.max(1, scroller.scrollHeight - scroller.clientHeight);
   sync.maxPreview = Math.max(1, pvPane.scrollHeight - pvPane.clientHeight);
 }
-
-const SITE_PAGE_PATHS = new Set([
-  '/pricing',
-  '/terms',
-  '/privacy',
-  '/refund',
-  '/imprint',
-  '/get-app',
-]);
 
 const normalizedPath = location.pathname.replace(/\/+$/, '') || '/';
 

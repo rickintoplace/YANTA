@@ -39,6 +39,10 @@
       "destination": "/index.html"
     },
     {
+      "source": "/accessibility",
+      "destination": "/index.html"
+    },
+    {
       "source": "/get-app",
       "destination": "/index.html"
     },

@@ -129,6 +129,7 @@ export function listTemplates() {
       meta,
       markdown: tpl.markdown,
       event: tpl.event || null,
+      slides: !!tpl.slides,
       own: false,
     });
   }
@@ -151,6 +152,7 @@ export function listTemplates() {
       meta,
       markdown,
       event: null,
+      slides: false,
       own: true,
     });
   }
@@ -213,6 +215,23 @@ export async function createNoteFromTemplate(entry) {
   if (entry.event) {
     const { createCalendarEventFromTemplate } = await import('./template-event.js');
     await createCalendarEventFromTemplate(entry.event, id);
+  }
+
+  /*
+    A slide template builds its board first, then embeds it — the draw:// line
+    has to name a drawing that already exists, or the editor renders a
+    placeholder for something it cannot find.
+  */
+  if (entry.slides) {
+    const { buildSlideDeck, attachSlideFrames } = await import('./template-slides.js');
+
+    const drawingId = buildSlideDeck(id, {
+      dateLabel: placeholderBase.toLocaleDateString(),
+    });
+
+    await attachSlideFrames(id, drawingId);
+
+    ytext.insert(ytext.length, `\n\ndraw://${drawingId}\n`);
   }
 
   try {
@@ -341,6 +360,9 @@ export function openTemplatePicker() {
                       : ''}
                     ${tpl.event
                       ? `<span class="yanta-tpl-card-meta">${lucide('calendar-plus', 12)}<span>Brings a date with it</span></span>`
+                      : ''}
+                    ${tpl.slides
+                      ? `<span class="yanta-tpl-card-meta">${lucide('presentation', 12)}<span>Five slides, ready to present</span></span>`
                       : ''}
                     ${tpl.own ? '<span class="yanta-tpl-card-badge">Yours</span>' : ''}
                   </button>

@@ -353,6 +353,12 @@ export default {
     aiSessionsDirect: 'AI Sessions are deleted directly, not moved to Trash.',
     aiSessionsFolderDirect: 'AI Sessions folder is deleted directly, not moved to Trash.',
     movedToTrash: { one: 'Moved {count} item to Trash', other: 'Moved {count} items to Trash' },
+    linkedEvent: {
+      title: 'This note has a date',
+      message: '“{title}” is linked to this note. The link is removed either way — should the calendar entry go as well?',
+      delete: 'Delete the date too',
+      keep: 'Keep the date',
+    },
     movedSummary: 'Moved {summary} to Trash',
     summarySep: ' and ',
     restoredCount: { one: 'Restored {count} item', other: 'Restored {count} items' },

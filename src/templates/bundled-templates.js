@@ -110,6 +110,42 @@ Just write. Moving it is easier than making it awkward.
   },
 
   {
+    id: 'slide-deck',
+    /*
+      The one template that shows something no other notes app does: slides are
+      camera targets on an infinite board, presented straight from the note,
+      and shareable as a page. It arrives as a real five-slide deck with
+      presenter notes, because an empty canvas would teach nobody that any of
+      this exists.
+    */
+    slides: true,
+    markdown: `---
+template:
+  name: A talk you can actually give
+  description: Five slides on an infinite board, presenter notes included
+  category: freelance
+---
+
+# What we decided, and why
+
+Press **Slides** above the board, then **Present**. The camera moves between
+the five frames; your notes stay on your screen and not on the wall.
+
+## Before you present
+
+- Rewrite the words. The structure is the useful part, not the sentences.
+- Read the presenter notes — each one is the reason its slide exists.
+- Anything you draw outside a frame is invisible during the talk. That is where
+  to keep the awkward numbers you might get asked about.
+
+## Afterwards
+
+Share this note as a page and the deck goes with it. Whoever opens it can read
+it without an account and without installing anything.
+`,
+  },
+
+  {
     id: 'client-call',
     markdown: `---
 template:

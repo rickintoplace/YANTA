@@ -346,6 +346,12 @@ export default {
     aiSessionsDirect: 'AI Sessions se eliminan directamente, no se mueven a la papelera.',
     aiSessionsFolderDirect: 'La carpeta AI Sessions se elimina directamente, no se mueve a la papelera.',
     movedToTrash: { one: '{count} elemento movido a la papelera', other: '{count} elementos movidos a la papelera' },
+    linkedEvent: {
+      title: 'Esta nota tiene una fecha',
+      message: '«{title}» está vinculado a esta nota. El vínculo se elimina en cualquier caso: ¿borramos también la entrada del calendario?',
+      delete: 'Borrar también la fecha',
+      keep: 'Conservar la fecha',
+    },
     movedSummary: '{summary} movido a la papelera',
     summarySep: ' y ',
     restoredCount: { one: '{count} elemento restaurado', other: '{count} elementos restaurados' },

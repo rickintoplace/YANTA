@@ -346,6 +346,12 @@ export default {
     aiSessionsDirect: 'AI Sessions werden direkt gelöscht, nicht in den Papierkorb verschoben.',
     aiSessionsFolderDirect: 'Der AI-Sessions-Ordner wird direkt gelöscht, nicht in den Papierkorb verschoben.',
     movedToTrash: { one: '{count} Element in den Papierkorb verschoben', other: '{count} Elemente in den Papierkorb verschoben' },
+    linkedEvent: {
+      title: 'Zu dieser Notiz gehört ein Termin',
+      message: '„{title}“ ist mit dieser Notiz verknüpft. Die Verknüpfung wird in jedem Fall entfernt — soll der Kalendereintrag auch weg?',
+      delete: 'Termin mit löschen',
+      keep: 'Termin behalten',
+    },
     movedSummary: '{summary} in den Papierkorb verschoben',
     summarySep: ' und ',
     restoredCount: { one: '{count} Element wiederhergestellt', other: '{count} Elemente wiederhergestellt' },

@@ -255,9 +255,55 @@ import {
     }));
   }
   
+  /*
+    A note and its calendar event are two separate objects, and only the note
+    is covered by the Undo toast. So the link is ALWAYS cut when the note goes
+    to trash — a trashed note that still owns a date left the calendar showing
+    an entry pointing at something the user believes they deleted.
+
+    Whether the event itself goes too is a decision only the user can make, and
+    it is asked once, at the UI entry point, not per note inside a bulk loop.
+
+    calendar.js is imported lazily: it pulls in FullCalendar, and trashing a
+    note must not drag that in for the majority of notes that have no date.
+  */
+  async function detachLinkedCalendarEvent(noteId, { deleteEvent = false } = {}) {
+    try {
+      const calendar = await import('./calendar.js');
+      const ev = calendar.calendarEventForNoteId(noteId);
+
+      if (!ev) return null;
+
+      if (deleteEvent) {
+        calendar.deleteCalendarEvent(ev.id);
+      } else {
+        calendar.unlinkEventNote(ev.id);
+      }
+
+      return ev;
+    } catch (err) {
+      console.warn('[YANTA trash] could not detach the linked event', err);
+      return null;
+    }
+  }
+
+  /**
+   * The event linked to a note, or null. Used by the UI to decide whether the
+   * "delete the date as well?" question is worth asking at all.
+   */
+  export async function linkedCalendarEventForNote(noteId) {
+    try {
+      const calendar = await import('./calendar.js');
+      return calendar.calendarEventForNoteId(noteId);
+    } catch {
+      return null;
+    }
+  }
+
   export async function moveNoteToTrash(noteId, {
     source = 'user',
     toastMessage = '',
+    deleteLinkedEvent = false,
   } = {}) {
     const note = state.notes.get(String(noteId || ''));
   
@@ -280,11 +326,13 @@ import {
     }));
   
     await store.notes.put(note);
-  
+
     state.searchIndex.delete(note.id);
-  
+
+    await detachLinkedCalendarEvent(note.id, { deleteEvent: deleteLinkedEvent });
+
     await clearEditorIfCurrentWasMovedToTrash(new Set([note.id]), new Set());
-  
+
     await emitTrashChanged({
       action: 'trash-note',
       noteId: note.id,
@@ -344,6 +392,7 @@ import {
     folderIds = [],
     source = 'user',
     silent = false,
+    deleteLinkedEvent = false,
   } = {}) {
     const folderSet = new Set([...folderIds].map(String).filter(Boolean));
   
@@ -383,7 +432,7 @@ import {
     const trashedFolderIds = [];
 
     for (const noteId of effectiveNoteIds) {
-      if (await moveNoteToTrash(noteId, { source })) trashedNoteIds.push(noteId);
+      if (await moveNoteToTrash(noteId, { source, deleteLinkedEvent })) trashedNoteIds.push(noteId);
     }
 
     for (const folderId of effectiveFolderIds) {
@@ -412,11 +461,38 @@ import {
     folderIds = [],
     source = 'user',
   } = {}) {
+    /*
+      The one place a question is warranted in a flow that otherwise refuses to
+      ask: the linked event is a second object, and Undo does not bring it back.
+
+      Only for a single note, and only when a date is actually attached — a
+      dialog per note during a bulk delete would be worse than the problem it
+      solves. In the bulk case the link is still cut; the events simply survive.
+    */
+    let deleteLinkedEvent = false;
+
+    if (noteIds.length === 1 && !folderIds.length) {
+      const ev = await linkedCalendarEventForNote(String(noteIds[0]));
+
+      if (ev) {
+        const { yantaConfirm } = await import('./dialogs.js');
+
+        deleteLinkedEvent = await yantaConfirm({
+          title: t('trash.linkedEvent.title'),
+          message: t('trash.linkedEvent.message', { title: ev.title || '' }),
+          confirmLabel: t('trash.linkedEvent.delete'),
+          cancelLabel: t('trash.linkedEvent.keep'),
+          icon: 'calendar-x',
+        });
+      }
+    }
+
     const result = await moveItemsToTrash({
       noteIds,
       folderIds,
       source,
       silent: true,
+      deleteLinkedEvent,
     });
 
     if (!result.changed) return result;
@@ -599,9 +675,16 @@ import {
     const note = state.notes.get(id);
   
     if (!note) return false;
-  
+
+    /*
+      Defensive: notes trashed before the link was cut on the way in still own
+      a date. Purging the note without this would leave a calendar entry
+      pointing at an id that no longer resolves to anything.
+    */
+    await detachLinkedCalendarEvent(id);
+
     await store.notes.del(id);
-  
+
     state.notes.delete(id);
     state.searchIndex.delete(id);
   

@@ -342,6 +342,12 @@ export default {
     aiSessionsDirect: 'AI Sessions は直接削除され、ゴミ箱には移動しません。',
     aiSessionsFolderDirect: 'AI Sessions フォルダーは直接削除され、ゴミ箱には移動しません。',
     movedToTrash: { other: '{count} 件の項目をゴミ箱に移動しました' },
+    linkedEvent: {
+      title: 'このノートには予定があります',
+      message: '「{title}」がこのノートにリンクされています。リンクはいずれの場合も解除されます。カレンダーの予定も削除しますか？',
+      delete: '予定も削除',
+      keep: '予定は残す',
+    },
     movedSummary: '{summary} をゴミ箱に移動しました',
     summarySep: '、',
     restoredCount: { other: '{count} 件の項目を復元しました' },

@@ -346,6 +346,12 @@ export default {
     aiSessionsDirect: 'AI Sessions est supprimé directement, pas mis à la corbeille.',
     aiSessionsFolderDirect: 'Le dossier AI Sessions est supprimé directement, pas mis à la corbeille.',
     movedToTrash: { one: '{count} élément mis à la corbeille', other: '{count} éléments mis à la corbeille' },
+    linkedEvent: {
+      title: 'Cette note a une date',
+      message: '« {title} » est lié à cette note. Le lien est supprimé dans tous les cas — faut-il aussi supprimer l’entrée d’agenda ?',
+      delete: 'Supprimer aussi la date',
+      keep: 'Garder la date',
+    },
     movedSummary: '{summary} mis à la corbeille',
     summarySep: ' et ',
     restoredCount: { one: '{count} élément restauré', other: '{count} éléments restaurés' },

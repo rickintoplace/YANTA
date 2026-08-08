@@ -1756,7 +1756,7 @@ function registerServiceWorker() {
   // In dev lieber nicht cachen, sonst debuggt man alte Bundles.
   if (import.meta.env.DEV) return;
 
-  window.addEventListener('load', () => {
+  const register = () => {
     navigator.serviceWorker
       .register('/sw.js')
       .then((reg) => {
@@ -1765,7 +1765,24 @@ function registerServiceWorker() {
       .catch((err) => {
         console.warn('[YANTA PWA] Service worker registration failed', err);
       });
-  });
+  };
+
+  /*
+    Warum die readyState-Prüfung: registerServiceWorker() läuft weit hinten in
+    der asynchronen Boot-Kette. Ist `load` da schon gefeuert, feuert ein neu
+    angehängter load-Listener nie mehr — die Registrierung fand dann gar nicht
+    statt. Im Desktop-Browser bootete die App meist vor `load` und es fiel nie
+    auf; in der Android-WebView war das Rennen umgekehrt, weshalb dort NIE ein
+    Service Worker existierte: kein Controller, leerer Cache Storage, und
+    offline nur die WebView-Fehlerseite ("Webpage not available").
+    Verifiziert im Emulator am 2026-08-08.
+  */
+  if (document.readyState === 'complete') {
+    register();
+    return;
+  }
+
+  window.addEventListener('load', register, { once: true });
 }
 
 const PUBLIC_SHARE_PENDING_EVENT_KEY = 'yanta.publicShare.pendingCalendarEvent.v1';

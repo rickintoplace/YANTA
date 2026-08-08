@@ -22,6 +22,7 @@ import { getNoteDoc, noteMarkdown } from '../yjs.js';
 import { countFirstNoteIfActivation } from '../metrics/funnel.js';
 import { openBoundOverlay } from '../overlay-history.js';
 import { yantaPrompt } from '../dialogs.js';
+import { eventStartDate } from './template-event.js';
 
 import { BUNDLED_TEMPLATES } from './bundled-templates.js';
 
@@ -44,11 +45,27 @@ function injectCss() {
 .yanta-tpl-groups { display: grid; gap: 22px; }
 
 .yanta-tpl-group-title {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+
   font-size: 12px;
   text-transform: uppercase;
   letter-spacing: .08em;
   color: var(--text-faint);
   margin-bottom: 9px;
+}
+
+.yanta-tpl-group-title svg { flex: none; }
+
+.yanta-tpl-card-meta {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+
+  margin-top: 3px;
+  font-size: 11.5px;
+  color: var(--accent);
 }
 
 .yanta-tpl-grid {
@@ -111,6 +128,7 @@ export function listTemplates() {
       key: `bundled:${tpl.id}`,
       meta,
       markdown: tpl.markdown,
+      event: tpl.event || null,
       own: false,
     });
   }
@@ -132,6 +150,7 @@ export function listTemplates() {
       key: `note:${note.id}`,
       meta,
       markdown,
+      event: null,
       own: true,
     });
   }
@@ -146,7 +165,17 @@ export function listTemplates() {
 export async function createNoteFromTemplate(entry) {
   const notesBefore = state.notes.size;
 
-  const body = fillTemplatePlaceholders(templateBody(entry.markdown));
+  /*
+    Placeholders resolve against the template's OWN date when it carries one.
+    Otherwise an invitation reads "Saturday" in the text while its calendar
+    entry says Tuesday — which is exactly the kind of mistake that makes the
+    person who sent it look careless.
+  */
+  const placeholderBase = entry.event
+    ? eventStartDate(entry.event)
+    : new Date();
+
+  const body = fillTemplatePlaceholders(templateBody(entry.markdown), placeholderBase);
   const id = uid();
   const now = Date.now();
 
@@ -171,6 +200,20 @@ export async function createNoteFromTemplate(entry) {
   if (ytext.length === 0) ytext.insert(0, body);
 
   countFirstNoteIfActivation(notesBefore, state.notes.size);
+
+  /*
+    A template may bring a date with it. The event is linked to the note, which
+    is what makes a template like the invitation shareable: the public-share
+    publisher packs a note's linked events, so the recipient gets the page AND
+    a working "add to calendar" — with the location and its map links — without
+    an account or an install.
+
+    Times are relative to today so a template is never dated in the past.
+  */
+  if (entry.event) {
+    const { createCalendarEventFromTemplate } = await import('./template-event.js');
+    await createCalendarEventFromTemplate(entry.event, id);
+  }
 
   try {
     await window.yantaSync2?.engine?.observeNote?.(id);
@@ -285,13 +328,19 @@ export function openTemplatePicker() {
         <div class="yanta-tpl-groups">
           ${groups.map((group) => `
             <section>
-              <div class="yanta-tpl-group-title">${escapeHtml(group.label)}</div>
+              <div class="yanta-tpl-group-title">
+                ${lucide(group.icon || 'square', 14)}
+                <span>${escapeHtml(group.label)}</span>
+              </div>
               <div class="yanta-tpl-grid">
                 ${group.items.map((tpl) => `
                   <button class="yanta-tpl-card" type="button" data-tpl-key="${escapeHtml(tpl.key)}">
                     <span class="yanta-tpl-card-name">${escapeHtml(tpl.meta.name)}</span>
                     ${tpl.meta.description
                       ? `<span class="yanta-tpl-card-desc">${escapeHtml(tpl.meta.description)}</span>`
+                      : ''}
+                    ${tpl.event
+                      ? `<span class="yanta-tpl-card-meta">${lucide('calendar-plus', 12)}<span>Brings a date with it</span></span>`
                       : ''}
                     ${tpl.own ? '<span class="yanta-tpl-card-badge">Yours</span>' : ''}
                   </button>

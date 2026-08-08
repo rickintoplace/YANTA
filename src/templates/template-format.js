@@ -47,10 +47,11 @@ function readIndentedBlock(rawFrontmatter, key) {
 }
 
 export const TEMPLATE_CATEGORIES = [
-  { id: 'freelance', label: 'Freelance & consulting' },
-  { id: 'teaching', label: 'Teaching' },
-  { id: 'research', label: 'Research & thesis' },
-  { id: 'personal', label: 'Personal' },
+  { id: 'invite', label: 'Send to someone', icon: 'send' },
+  { id: 'freelance', label: 'Freelance & consulting', icon: 'briefcase' },
+  { id: 'teaching', label: 'Teaching', icon: 'graduation-cap' },
+  { id: 'research', label: 'Research & thesis', icon: 'microscope' },
+  { id: 'personal', label: 'Personal', icon: 'heart' },
 ];
 
 /**

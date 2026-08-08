@@ -6,6 +6,11 @@ export default defineConfig({
   worker: {
     format: 'es',
   },
+  build: {
+    // Warum: scripts/sw-precache.mjs leitet daraus die Boot-Assets für den
+    // Service-Worker-Precache ab (Entry + statische Import-Hülle + CSS).
+    manifest: true,
+  },
   server: {
     proxy: {
       '/cloud-api': {

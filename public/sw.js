@@ -5,16 +5,49 @@
 // User data is in IndexedDB/Yjs, not in this cache.
 // ============================================================
 
-const CACHE_VERSION = 'yanta-app-v26';
+const CACHE_VERSION = 'yanta-app-v27';
+
+/*
+  Hashed build output lives in its own cache that deliberately OUTLIVES a
+  version bump.
+
+  Why: /assets URLs are content-addressed, so a stale entry can never be
+  served for changed content — but putting them in the versioned cache made
+  every deploy delete the whole bundle. The activate purge then left an
+  installed client with the shell and no JS, so the next offline start hung on
+  the boot loader forever ("Still loading — your connection seems slow…").
+  Reproduced 2026-08-08: after a simulated deploy the cache held 10 shell
+  entries and 0 assets.
+*/
+const ASSET_CACHE = 'yanta-assets-v1';
+
+/*
+  Cache lookups must ignore Vary.
+
+  Vite marks the entry script and stylesheet `crossorigin`, so the browser
+  requests them in CORS mode WITH an Origin header, while precaching them via
+  cache.add() sends no Origin. A host that answers `Vary: Origin` (vite
+  preview does) therefore makes every precached entry unmatchable — the
+  install-time precache silently never hits, which is exactly how this was
+  found. These are same-origin, content-addressed files whose bytes cannot
+  depend on the Origin header, so ignoring Vary is safe here.
+*/
+const CACHE_MATCH = { ignoreVary: true };
+
+// Ceiling so the persistent cache cannot grow across deploys forever. Cache
+// API keys() preserves insertion order, so pruning the front drops oldest.
+const ASSET_CACHE_MAX_ENTRIES = 300;
+
 // Only files that actually exist at these paths in the build. CSS/JS are
-// hashed into /assets by Vite and cached at runtime by the fetch handler —
-// they must NOT be listed here (a 404 here would fail the whole install).
+// hashed into /assets by Vite — they arrive via PRECACHE_ASSETS below, which
+// scripts/sw-precache.mjs fills in at build time.
 const APP_SHELL = [
   '/',
   '/index.html',
-  // Render-blocking in <head>: without it a cold offline start stalls before
-  // the app or the landing page can decide anything.
+  // Both are render-blocking in <head>: without them a cold offline start
+  // stalls before the app or the landing page can decide anything.
   '/landing-gate.js',
+  '/install-prompt-capture.js',
   '/site.webmanifest',
   '/favicon.ico',
   '/favicon-16x16.png',
@@ -24,33 +57,62 @@ const APP_SHELL = [
   '/android-chrome-512x512.png',
 ];
 
+/*
+  Boot-critical hashed assets, injected by scripts/sw-precache.mjs (postbuild)
+  from Vite's manifest: the entry, its static-import closure and CSS, plus all
+  locale chunks. Empty in dev, where nothing is hashed.
+
+  Runtime caching alone is not enough here: it only fills after a page has
+  loaded under the new worker, which is exactly the round trip a user who
+  updates and then goes offline never makes.
+*/
+const PRECACHE_ASSETS = [/* __YANTA_PRECACHE__ */];
+
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
-    const cache = await caches.open(CACHE_VERSION);
+    const shell = await caches.open(CACHE_VERSION);
 
     // Cache entries individually: one missing/blocked asset must never fail
     // the whole install. A failed install leaves the worker inactive, so
     // navigator.serviceWorker.ready hangs forever — which breaks Web Push
     // (pushManager needs an active registration) and SW notifications.
-    await Promise.allSettled(APP_SHELL.map((url) => cache.add(url)));
+    await Promise.allSettled(APP_SHELL.map((url) => shell.add(url)));
+
+    if (PRECACHE_ASSETS.length) {
+      const assets = await caches.open(ASSET_CACHE);
+      await Promise.allSettled(PRECACHE_ASSETS.map(async (url) => {
+        if (await assets.match(url)) return;
+        await assets.add(url);
+      }));
+    }
 
     await self.skipWaiting();
   })());
 });
 
+async function pruneAssetCache() {
+  try {
+    const cache = await caches.open(ASSET_CACHE);
+    const keys = await cache.keys();
+    const excess = keys.length - ASSET_CACHE_MAX_ENTRIES;
+    if (excess > 0) {
+      await Promise.all(keys.slice(0, excess).map((key) => cache.delete(key)));
+    }
+  } catch {}
+}
+
 self.addEventListener('activate', (event) => {
-  event.waitUntil(
-    caches
-      .keys()
-      .then((keys) =>
-        Promise.all(
-          keys
-            .filter((key) => key !== CACHE_VERSION)
-            .map((key) => caches.delete(key))
-        )
-      )
-      .then(() => self.clients.claim())
-  );
+  event.waitUntil((async () => {
+    const keys = await caches.keys();
+    await Promise.all(
+      keys
+        .filter((key) => key !== CACHE_VERSION && key !== ASSET_CACHE)
+        .map((key) => caches.delete(key))
+    );
+
+    await pruneAssetCache();
+    await self.clients.claim();
+  })());
 });
 
 // ============================================================
@@ -172,7 +234,7 @@ self.addEventListener('fetch', (event) => {
     const SHELL_NETWORK_TIMEOUT_MS = 2500;
 
     event.respondWith((async () => {
-      const cached = await caches.match('/index.html');
+      const cached = await caches.match('/index.html', CACHE_MATCH);
 
       const network = fetch(req).then((res) => {
         if (res.ok) {
@@ -199,28 +261,75 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Same-origin static assets: stale-while-revalidate.
+  /*
+    Hashed build output: content-addressed, so cache-first is both safe and
+    the fastest option — a given URL can never mean different bytes. Lives in
+    the deploy-surviving asset cache.
+  */
+  if (url.origin === location.origin && url.pathname.startsWith('/assets/')) {
+    event.respondWith((async () => {
+      const cache = await caches.open(ASSET_CACHE);
+      const hit = await cache.match(req, CACHE_MATCH);
+      if (hit) return hit;
+
+      try {
+        const res = await fetch(req);
+        if (res.ok) cache.put(req, res.clone()).catch(() => {});
+        return res;
+      } catch {
+        return offlineMiss();
+      }
+    })());
+    return;
+  }
+
+  // Other same-origin static files: stale-while-revalidate.
   if (url.origin === location.origin) {
-    event.respondWith(
-      caches.match(req).then((cached) => {
-        const fresh = fetch(req)
-          .then((res) => {
+    event.respondWith((async () => {
+      const cached = await caches.match(req, CACHE_MATCH);
+
+      if (cached) {
+        event.waitUntil((async () => {
+          try {
+            const res = await fetch(req);
             if (res.ok) {
-              const copy = res.clone();
-              caches.open(CACHE_VERSION).then((cache) => {
-                cache.put(req, copy).catch(() => {});
-              });
+              const cache = await caches.open(CACHE_VERSION);
+              await cache.put(req, res.clone());
             }
+          } catch {}
+        })());
 
-            return res;
-          })
-          .catch(() => cached);
+        return cached;
+      }
 
-        return cached || fresh;
-      })
-    );
+      try {
+        const res = await fetch(req);
+        if (res.ok) {
+          const copy = res.clone();
+          caches.open(CACHE_VERSION).then((cache) => {
+            cache.put(req, copy).catch(() => {});
+          });
+        }
+        return res;
+      } catch {
+        /*
+          The old code returned `cached || fresh` where `fresh` fell back to
+          the (undefined) cache miss — respondWith(undefined) throws, so an
+          uncached file offline surfaced as an opaque network error instead of
+          something legible.
+        */
+        return offlineMiss();
+      }
+    })());
   }
 });
+
+function offlineMiss() {
+  return new Response('', {
+    status: 504,
+    statusText: 'Offline and not cached',
+  });
+}
 
 self.addEventListener('notificationclick', (event) => {
   event.notification.close();

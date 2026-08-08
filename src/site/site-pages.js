@@ -21,6 +21,11 @@ import {
 } from './get-app-content.js';
 
 import { accessibilityContent } from './accessibility-content.js';
+
+import {
+  metricsContent,
+  wireMetricsPage,
+} from './metrics-content.js';
 import { legalDocument } from './legal-documents.js';
 
 import {
@@ -955,6 +960,15 @@ const SITE_ROUTES = new Map([
     render: reportContent,
     wire: wireReportPage,
   }],
+  /*
+    Owner-only funnel dashboard. `titleText` instead of a titleKey: it is not a
+    user-facing surface, so it stays English and out of the locale catalogues.
+  */
+  ['/metrics', {
+    titleText: 'Metrics',
+    render: metricsContent,
+    wire: wireMetricsPage,
+  }],
   ['/get-app', {
     titleKey: 'site.title.getApp',
     render: getAppContent,
@@ -972,7 +986,7 @@ export async function mountSitePage() {
   const content = await route.render();
 
   shell(content, {
-    title: t(route.titleKey),
+    title: route.titleText || t(route.titleKey),
     currentPath: path,
   });
 

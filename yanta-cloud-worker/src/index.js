@@ -1875,7 +1875,7 @@ function corsHeaders(env, req) {
   return {
     "access-control-allow-origin": origin,
     "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
-    "access-control-allow-headers": "content-type,x-yanta-vault-id,x-yanta-device-id,x-yanta-platform,x-csrf-token,x-yanta-space-read-token,x-yanta-space-write-token",
+    "access-control-allow-headers": "content-type,x-yanta-vault-id,x-yanta-device-id,x-yanta-platform,x-csrf-token,x-yanta-space-read-token,x-yanta-space-write-token,x-yanta-metrics-token",
     "access-control-allow-credentials": "true",
     "access-control-max-age": "86400",
     vary: "Origin"
@@ -8517,6 +8517,240 @@ async function runScheduledPushes(env) {
   await env.DB.prepare(`DELETE FROM scheduled_pushes WHERE expires_at < ?`).bind(nowMs).run();
 }
 
+// ============================================================
+// Funnel metrics
+//
+// Two deliberate rules shape everything below:
+//
+//  1. Anything derivable from rows the service already keeps is DERIVED, never
+//     re-collected. Signups, activity, plans, subscriptions and the sharing
+//     loop all come from existing tables — that part of the dashboard adds
+//     zero data collection.
+//  2. The one genuinely new collection — landing views and CTA clicks — is
+//     stored only as an aggregate tally (day, event, variant, referrer host).
+//     No identifier, no session, no IP, no user agent. Nothing that could be
+//     traced to a person, so there is nothing to consent to and nothing to
+//     retain or delete.
+// ============================================================
+
+const METRIC_EVENT_NAMES = new Set(["landing_view", "landing_cta"]);
+
+// Beyond this many distinct referrer hosts in a day, the rest tallies as
+// "other". Keeps an unauthenticated endpoint from growing rows without bound.
+const METRIC_MAX_SOURCES_PER_DAY = 200;
+
+function metricDay(nowMs = Date.now()) {
+  return new Date(nowMs).toISOString().slice(0, 10);
+}
+
+/*
+  Hostname only, lowercased, no port, no path, no query. A full referrer URL
+  can carry private context (an internal wiki page, a search query); the host
+  is enough to tell "Hacker News" from "Reddit" and nothing more.
+*/
+function normalizeMetricSource(raw) {
+  const value = String(raw || "").trim().toLowerCase();
+  if (!value) return "direct";
+  if (!/^[a-z0-9.-]{1,64}$/.test(value)) return "other";
+  if (value.startsWith(".") || value.endsWith(".")) return "other";
+  return value;
+}
+
+async function handleMetricsEvent(env, req, headers) {
+  let body = null;
+  try {
+    body = await req.json();
+  } catch {
+    return json({ ok: false }, 400, headers);
+  }
+
+  const name = String(body?.name || "");
+  if (!METRIC_EVENT_NAMES.has(name)) {
+    return json({ ok: false }, 400, headers);
+  }
+
+  const variant = ["a", "b"].includes(String(body?.variant || ""))
+    ? String(body.variant)
+    : "";
+
+  const day = metricDay();
+  let source = normalizeMetricSource(body?.source);
+
+  if (source !== "direct" && source !== "other") {
+    const distinct = await env.DB.prepare(
+      `SELECT COUNT(DISTINCT source) AS n FROM metric_counters WHERE day = ?`
+    ).bind(day).first();
+
+    if (Number(distinct?.n || 0) >= METRIC_MAX_SOURCES_PER_DAY) {
+      const known = await env.DB.prepare(
+        `SELECT 1 FROM metric_counters WHERE day = ? AND source = ? LIMIT 1`
+      ).bind(day, source).first();
+
+      if (!known) source = "other";
+    }
+  }
+
+  await env.DB.prepare(
+    `INSERT INTO metric_counters (day, name, variant, source, count)
+     VALUES (?, ?, ?, ?, 1)
+     ON CONFLICT(day, name, variant, source)
+     DO UPDATE SET count = count + 1`
+  ).bind(day, name, variant, source).run();
+
+  // 204: the client never reads a body, and an empty response keeps the
+  // beacon as cheap as possible.
+  return new Response(null, { status: 204, headers });
+}
+
+function metricsTokenOk(env, req, url) {
+  const expected = String(env.METRICS_TOKEN || "").trim();
+  if (!expected) return false;
+
+  const provided =
+    String(req.headers.get("x-yanta-metrics-token") || "").trim() ||
+    String(url.searchParams.get("token") || "").trim();
+
+  if (!provided || provided.length !== expected.length) return false;
+
+  // Constant-time-ish compare so the token cannot be probed byte by byte.
+  let diff = 0;
+  for (let i = 0; i < expected.length; i += 1) {
+    diff |= expected.charCodeAt(i) ^ provided.charCodeAt(i);
+  }
+
+  return diff === 0;
+}
+
+async function handleMetricsSummary(env, req, url, headers) {
+  if (!metricsTokenOk(env, req, url)) {
+    return json({ error: "unauthorized" }, 401, headers);
+  }
+
+  const nowMs = Date.now();
+  const DAY = 86400000;
+  const since = (days) => nowMs - days * DAY;
+  const dayFloor = (days) => metricDay(since(days));
+
+  const all = async (sql, ...binds) => {
+    const res = await env.DB.prepare(sql).bind(...binds).all();
+    return res?.results || [];
+  };
+  const one = async (sql, ...binds) =>
+    (await env.DB.prepare(sql).bind(...binds).first()) || {};
+
+  /*
+    Landing funnel — the only collected data. Grouped two ways: by day for the
+    trend, by variant for the A/B comparison, by referrer host for channels.
+  */
+  const landingDaily = await all(
+    `SELECT day, name, SUM(count) AS n
+       FROM metric_counters
+      WHERE day >= ?
+      GROUP BY day, name
+      ORDER BY day`,
+    dayFloor(60)
+  );
+
+  const landingVariants = await all(
+    `SELECT variant, name, SUM(count) AS n
+       FROM metric_counters
+      GROUP BY variant, name`
+  );
+
+  const landingSources = await all(
+    `SELECT source, name, SUM(count) AS n
+       FROM metric_counters
+      WHERE day >= ?
+      GROUP BY source, name`,
+    dayFloor(90)
+  );
+
+  // Everything below is DERIVED from rows the service already keeps.
+  const users = await one(
+    `SELECT
+       COUNT(*) AS total,
+       SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS new_1,
+       SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS new_7,
+       SUM(CASE WHEN created_at >= ? THEN 1 ELSE 0 END) AS new_30,
+       SUM(CASE WHEN last_seen_at >= ? THEN 1 ELSE 0 END) AS active_1,
+       SUM(CASE WHEN last_seen_at >= ? THEN 1 ELSE 0 END) AS active_7,
+       SUM(CASE WHEN last_seen_at >= ? THEN 1 ELSE 0 END) AS active_30
+     FROM users
+     WHERE disabled_at IS NULL`,
+    since(1), since(7), since(30), since(1), since(7), since(30)
+  );
+
+  const signupsDaily = await all(
+    `SELECT DATE(created_at / 1000, 'unixepoch') AS day, COUNT(*) AS n
+       FROM users
+      WHERE created_at >= ? AND disabled_at IS NULL
+      GROUP BY day
+      ORDER BY day`,
+    since(60)
+  );
+
+  const plans = await all(
+    `SELECT plan, COUNT(*) AS n
+       FROM users
+      WHERE disabled_at IS NULL
+      GROUP BY plan`
+  );
+
+  const subscriptions = await all(
+    `SELECT status, COUNT(*) AS n
+       FROM billing_subscriptions
+      GROUP BY status`
+  );
+
+  const cancelPending = await one(
+    `SELECT COUNT(*) AS n FROM billing_subscriptions WHERE cancel_at_period_end = 1`
+  );
+
+  /*
+    Retention by signup week: of the users who joined in week W, how many were
+    still seen at least 7 days after they signed up. Both columns already exist
+    on the row, so this is arithmetic, not tracking.
+  */
+  const retention = await all(
+    `SELECT
+       STRFTIME('%Y-%W', created_at / 1000, 'unixepoch') AS cohort,
+       COUNT(*) AS signups,
+       SUM(CASE WHEN last_seen_at >= created_at + ? THEN 1 ELSE 0 END) AS retained_7
+     FROM users
+     WHERE created_at >= ? AND disabled_at IS NULL
+     GROUP BY cohort
+     ORDER BY cohort`,
+    7 * DAY, since(120)
+  );
+
+  // The sharing loop: shared spaces and public shares are how YANTA spreads.
+  const spaces = await one(
+    `SELECT COUNT(*) AS total FROM spaces`
+  );
+  const spaceMembers = await one(
+    `SELECT COUNT(*) AS total FROM space_members`
+  );
+  const publicShares = await one(
+    `SELECT COUNT(*) AS total FROM public_shares`
+  );
+
+  return json({
+    generatedAt: nowMs,
+    landing: { daily: landingDaily, variants: landingVariants, sources: landingSources },
+    users,
+    signupsDaily,
+    plans,
+    subscriptions,
+    cancelPending: Number(cancelPending?.n || 0),
+    retention,
+    reach: {
+      spaces: Number(spaces?.total || 0),
+      spaceMembers: Number(spaceMembers?.total || 0),
+      publicShares: Number(publicShares?.total || 0)
+    }
+  }, 200, headers);
+}
+
 async function route(req, env) {
   const headers = corsHeaders(env, req);
   if (!originAllowed(env, req)) {
@@ -8544,6 +8778,12 @@ async function route(req, env) {
     }
     if (url.pathname === "/api/me" && req.method === "GET") {
       return handleMe(env, req, headers);
+    }
+    if (url.pathname === "/api/metrics/event" && req.method === "POST") {
+      return await handleMetricsEvent(env, req, headers);
+    }
+    if (url.pathname === "/api/metrics/summary" && req.method === "GET") {
+      return await handleMetricsSummary(env, req, url, headers);
     }
     if (url.pathname === "/api/chat/account" && req.method === "GET") {
       return handleChatAccount(env, req, headers);

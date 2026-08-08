@@ -67,6 +67,10 @@
       "destination": "/index.html"
     },
     {
+      "source": "/metrics",
+      "destination": "/index.html"
+    },
+    {
       "source": "/add-library",
       "destination": "/index.html"
     }

@@ -23,6 +23,16 @@ MATRIX_SERVER_NAME = "yanta.me"
 # Optional: set to "1" if /register/available is not exposed by the HS.
 MATRIX_SKIP_AVAILABLE_CHECK = "0"
 
+# ---- Funnel metrics ----
+# The /metrics dashboard is gated by a single shared secret. Set it with
+#   wrangler secret put METRICS_TOKEN
+# and paste the same value into the token field on https://yanta.page/metrics.
+# Without it, /api/metrics/summary answers 401 to everyone — there is no
+# fallback and no way to read the dashboard.
+#
+# The write side (/api/metrics/event) needs no secret: it only ever increments
+# aggregate counters, so the worst an abuser achieves is noisy funnel numbers.
+
 # ---- Web Push (desktop background notifications) ----
 # VAPID subject (contact) and the public key clients subscribe with. The
 # public key is non-secret; the private key is set via `wrangler secret put

@@ -73,7 +73,13 @@ export function legalLinkLabel(link) {
   notice is its first section) and needs a route, but not a footer entry of
   its own next to "Refunds".
 */
-export const EXTRA_SITE_PATHS = ['/withdrawal', '/get-app'];
+export const EXTRA_SITE_PATHS = [
+  '/withdrawal',
+  '/get-app',
+  // Owner-only funnel dashboard. Deliberately absent from every nav and
+  // footer; it renders nothing without the METRICS_TOKEN.
+  '/metrics',
+];
 
 /*
   Routes the SPA hands to the standalone site shell instead of booting the app.

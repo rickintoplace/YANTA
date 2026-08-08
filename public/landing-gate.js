@@ -64,7 +64,7 @@
     // share keys, slides-remote). Those are always app entries.
     if (location.hash && location.hash !== '#') return false;
 
-    // Installed PWA / Android TWA never sees marketing.
+    // Installed PWA / Android TWA never sees the landing page.
     try {
       if (
         window.matchMedia?.('(display-mode: standalone)')?.matches ||
@@ -111,6 +111,52 @@
     same known state, and "reached the app" stays countable server-side once
     the funnel endpoint exists.
   */
+  /*
+    Funnel beacon.
+
+    Sends two numbers and nothing else: which event, which variant, and the
+    HOSTNAME of the referrer. No id, no session, no cookie, no timestamp beyond
+    the day the server tallies it under — the server stores a counter, not an
+    event. That is why this needs no consent banner and no opt-out: there is
+    nothing here that could be traced back to a visitor.
+
+    sendBeacon so a click never waits on the network, with a keepalive fetch as
+    the fallback for browsers without it.
+  */
+  const referrerHost = () => {
+    try {
+      const ref = String(document.referrer || '');
+      if (!ref) return 'direct';
+
+      const host = new URL(ref).hostname;
+      if (!host || host === location.hostname) return 'direct';
+
+      return host;
+    } catch {
+      return 'direct';
+    }
+  };
+
+  const countEvent = (name) => {
+    const payload = JSON.stringify({ name, variant, source: referrerHost() });
+    const url = '/cloud-api/api/metrics/event';
+
+    try {
+      const blob = new Blob([payload], { type: 'application/json' });
+      if (navigator.sendBeacon?.(url, blob)) return;
+    } catch {}
+
+    try {
+      fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: payload,
+        keepalive: true,
+        credentials: 'omit',
+      }).catch(() => {});
+    } catch {}
+  };
+
   const enterApp = (source) => {
     writeStore(CONVERTED_KEY, JSON.stringify({
       variant,
@@ -118,8 +164,12 @@
       at: Date.now(),
     }));
 
+    countEvent('landing_cta');
+
     location.href = `/?app=1&v=${encodeURIComponent(variant)}`;
   };
+
+  countEvent('landing_view');
 
   const wire = () => {
     const root = document.getElementById('yanta-landing');

@@ -14,7 +14,15 @@ export default defineConfig({
   server: {
     proxy: {
       '/cloud-api': {
-        target: 'https://yanta-cloud.rickintoplace.workers.dev',
+        /*
+          Warum konfigurierbar: public/landing-gate.js ist eine unverarbeitete
+          Datei und kann import.meta.env nicht lesen, postet ihren Funnel-Beacon
+          also fest auf /cloud-api. Ohne diesen Override liefe der Beacon im
+          lokalen Test gegen den Produktions-Worker.
+        */
+        target:
+          process.env.YANTA_CLOUD_PROXY_TARGET ||
+          'https://yanta-cloud.rickintoplace.workers.dev',
         changeOrigin: true,
         rewrite: (path) => path.replace(/^\/cloud-api/, ''),
       },

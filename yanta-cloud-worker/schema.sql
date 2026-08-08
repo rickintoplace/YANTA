@@ -510,3 +510,27 @@ ON content_notices(share_id, created_at);
 
 CREATE INDEX IF NOT EXISTS idx_content_notices_status
 ON content_notices(status, created_at);
+
+-- ============================================================
+-- Aggregate funnel counters.
+--
+-- The ONLY thing YANTA collects that is not already a by-product of running
+-- the service. Deliberately not an event log: there is no row per visit, no
+-- identifier, no session, no IP, no user agent, no timestamp finer than a UTC
+-- day. A row is a tally, so nothing here can be traced to a person and there
+-- is nothing to expire.
+--
+-- `source` is the referring HOSTNAME only (never a path or query), so launch
+-- channels can be compared without learning anything about the visitor.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS metric_counters (
+  day TEXT NOT NULL,                 -- YYYY-MM-DD, UTC
+  name TEXT NOT NULL,                -- allowlisted event name
+  variant TEXT NOT NULL DEFAULT '',  -- 'a' | 'b' | ''
+  source TEXT NOT NULL DEFAULT '',   -- referrer hostname | 'direct' | 'other'
+  count INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (day, name, variant, source)
+);
+
+CREATE INDEX IF NOT EXISTS idx_metric_counters_day
+ON metric_counters(day, name);

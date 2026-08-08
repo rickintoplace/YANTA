@@ -3,7 +3,7 @@
     "name": "YANTA",
     "short_name": "YANTA",
     "description": "YANTA is an encrypted local-first workspace for notes, drawings, tasks and calendar events.",
-    "start_url": "/",
+    "start_url": "/?app=1",
     "scope": "/",
     "display": "standalone",
     "display_override": ["standalone", "minimal-ui", "browser"],

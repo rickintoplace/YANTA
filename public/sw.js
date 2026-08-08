@@ -5,13 +5,16 @@
 // User data is in IndexedDB/Yjs, not in this cache.
 // ============================================================
 
-const CACHE_VERSION = 'yanta-app-v25';
+const CACHE_VERSION = 'yanta-app-v26';
 // Only files that actually exist at these paths in the build. CSS/JS are
 // hashed into /assets by Vite and cached at runtime by the fetch handler —
 // they must NOT be listed here (a 404 here would fail the whole install).
 const APP_SHELL = [
   '/',
   '/index.html',
+  // Render-blocking in <head>: without it a cold offline start stalls before
+  // the app or the landing page can decide anything.
+  '/landing-gate.js',
   '/site.webmanifest',
   '/favicon.ico',
   '/favicon-16x16.png',

@@ -433,9 +433,17 @@ function privacyDocument() {
         Browsers. Genau dieser Speicher macht eine Offline-First-App möglich
         und ist deshalb nach § 25 Abs. 2 TDDDG unbedingt erforderlich, um einen
         von Ihnen ausdrücklich gewünschten Dienst zu erbringen; eine
-        Einwilligung ist dafür nicht nötig. Für Analyse oder Werbung speichern
-        wir nichts auf Ihrem Gerät. Löschen Sie Browserdaten, sind lokale
-        YANTA-Daten weg, sofern Sie keine Synchronisierung oder Sicherung haben.
+        Einwilligung ist dafür nicht nötig. Löschen Sie Browserdaten, sind
+        lokale YANTA-Daten weg, sofern Sie keine Synchronisierung oder
+        Sicherung haben.
+      </p>
+      <p>
+        Darüber hinaus legen wir nichts auf Ihrem Gerät ab: nichts für Werbung,
+        nichts zur Messung, nichts, womit man Sie erkennen oder verfolgen
+        könnte. Unsere Startseite gibt es in zwei Fassungen, damit wir sehen,
+        welche YANTA besser erklärt — welche Sie sehen, wird bei jedem Aufruf
+        neu entschieden und nirgends vermerkt. Es bleibt also keine Markierung
+        auf Ihrem Gerät zurück, und es gibt nichts einzuwilligen.
       </p>
 
       <h2>4. Verschlüsselung und was wir tatsächlich sehen</h2>
@@ -484,13 +492,26 @@ function privacyDocument() {
         bitte keine Geheimnisse oder sensiblen Daten Dritter in Eingaben ein.
       </p>
 
-      <h2>8. Cookies</h2>
+      <h2>8. Cookies und wie wir zählen</h2>
       <p>
         Ein unbedingt erforderliches, HTTP-only gesetztes Sitzungs-Cookie für
         die Anmeldung. Paddle setzt im Checkout und im Abrechnungsportal eigene
-        Cookies — siehe die Datenschutzhinweise von Paddle. Keine Analyse,
-        keine Werbung, kein Tracking durch Dritte; deshalb sehen Sie hier auch
-        kein Einwilligungsbanner.
+        Cookies — siehe die Datenschutzhinweise von Paddle. In YANTA steckt kein
+        Analyse-Produkt, keine Werbung und kein Tracking durch Dritte; deshalb
+        sehen Sie hier auch kein Einwilligungsbanner.
+      </p>
+      <p>
+        Zwei Dinge zählen wir auf unserer Startseite doch: dass die Seite
+        geöffnet wurde, und dass jemand auf „Start“ geklickt hat. Ohne diese
+        zwei Zahlen können wir nicht erkennen, ob die Seite überhaupt
+        funktioniert. Gespeichert wird das als Tagessumme — ein Zähler pro Tag,
+        pro Ereignis, pro Seitenfassung, dazu der Hostname der Seite, von der
+        Sie kamen (nie eine vollständige Adresse, nie eine Suchanfrage). Zu
+        einzelnen Besuchen entsteht kein Eintrag: keine Kennung, keine Sitzung,
+        keine IP-Adresse, kein User-Agent, keine Zeitangabe genauer als der Tag.
+        Da sich aus diesen Summen keine Person ermitteln lässt, sind es keine
+        personenbezogenen Daten; es gibt hier also nichts einzuwilligen,
+        auszukunften oder zu löschen.
       </p>
 
       <h2>9. Speicherdauer</h2>
@@ -501,6 +522,7 @@ function privacyDocument() {
           ['Sitzungen', 'Bis zum Ablauf oder zur Abmeldung'],
           ['Sicherheits- und Protokolldaten (gehashte IP)', 'Bis zu 12 Monate'],
           ['Nutzungszähler', 'Rollierend, bis zu 14 Monate'],
+          ['Tages-Seitensummen (ohne Personenbezug)', 'Bleiben als aggregierte Summen'],
           ['Rechnungen, Zahlungs- und Buchhaltungsunterlagen', '10 Jahre (§ 147 AO, § 257 HGB)'],
           ['Kündigungserklärungen', '3 Jahre (Verjährungsfrist)'],
           ['Inhaltsmeldungen nach dem DSA', 'Bis zu 3 Jahre'],

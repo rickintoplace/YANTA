@@ -1785,6 +1785,32 @@ function registerServiceWorker() {
   window.addEventListener('load', register, { once: true });
 }
 
+const PUBLIC_SHARE_SAVED_NOTE_KEY = 'yanta.publicShare.savedNoteId';
+
+/*
+  The share viewer writes the id of a note it just kept for this visitor and
+  then navigates here. Nobody used to read it, so the note landed silently in
+  the tree and the visitor arrived at a dashboard that looked untouched —
+  precisely the "did anything happen?" moment that kills a first contact.
+  Opening it makes the handover visible.
+*/
+function consumePendingPublicShareSavedNote() {
+  let noteId = '';
+
+  try {
+    noteId = sessionStorage.getItem(PUBLIC_SHARE_SAVED_NOTE_KEY) || '';
+    sessionStorage.removeItem(PUBLIC_SHARE_SAVED_NOTE_KEY);
+  } catch {}
+
+  if (!noteId || !state.notes.has(noteId)) return false;
+
+  requestAnimationFrame(() => {
+    openNote(noteId).catch(() => {});
+  });
+
+  return true;
+}
+
 const PUBLIC_SHARE_PENDING_EVENT_KEY = 'yanta.publicShare.pendingCalendarEvent.v1';
 
 function consumePendingPublicShareCalendarEvent() {
@@ -2816,6 +2842,7 @@ async function init() {
       }
 
       consumePendingPublicShareCalendarEvent();
+      consumePendingPublicShareSavedNote();
 
       initialRouteHandled = true;
     }

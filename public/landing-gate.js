@@ -13,39 +13,37 @@
   does is decide visibility and wire the CTAs.
 */
 (() => {
-  const VARIANT_KEY = 'yanta.landing.variant.v1';
-  const SEEN_KEY = 'yanta.landing.seen.v1';
-  const CONVERTED_KEY = 'yanta.landing.converted.v1';
+  /*
+    This script writes NOTHING to the device. That is deliberate and worth
+    protecting.
 
-  const readStore = (key) => {
-    try {
-      return localStorage.getItem(key);
-    } catch {
-      return null;
-    }
-  };
+    § 25 TDDDG hangs the consent duty on storing or reading information on the
+    terminal equipment, not on processing personal data. A remembered A/B
+    bucket is stored for the operator's benefit, not to deliver the service the
+    visitor asked for — exactly the constellation that needs a banner. So the
+    variant is drawn per page view instead of remembered.
 
-  const writeStore = (key, value) => {
-    try {
-      localStorage.setItem(key, value);
-    } catch {}
-  };
+    The measurement survives that: view and click are both tagged with the
+    variant actually shown on that view, so the per-variant conversion rate
+    stays unbiased. The only cost is that a returning visitor may see the other
+    headline — cheap for a page most people open once, and it buys an
+    unqualified "we store nothing you did not ask for".
+  */
 
   /*
     Anyone who has ever booted the app has yanta.* keys in localStorage
     (appearance, locale, settings). That is the returning-visitor signal —
     no extra marker needed, and it works for users who predate this file.
 
-    The landing's own keys are excluded: they are written on the first visit
-    and would otherwise make every second visit look like a returning user.
+    This is a READ, and reads of terminal equipment are covered by § 25 too —
+    but this one decides whether the visitor is served the app they already
+    use or a page describing it, which is part of delivering the requested
+    service. It also only ever looks at storage the app itself needs.
   */
   const hasAppState = () => {
     try {
       for (let i = 0; i < localStorage.length; i += 1) {
-        const key = String(localStorage.key(i) || '');
-        if (key.startsWith('yanta.') && !key.startsWith('yanta.landing.')) {
-          return true;
-        }
+        if (String(localStorage.key(i) || '').startsWith('yanta.')) return true;
       }
     } catch {}
     return false;
@@ -78,20 +76,15 @@
     return !hasAppState();
   };
 
+  // Per page view, never remembered. `?v=a|b` forces one for testing.
   const pickVariant = () => {
-    const forced = new URLSearchParams(location.search).get('v');
-    const normalize = (v) => {
-      const s = String(v || '').toLowerCase();
-      return s === 'a' || s === 'b' ? s : '';
-    };
+    const forced = String(
+      new URLSearchParams(location.search).get('v') || ''
+    ).toLowerCase();
 
-    const variant =
-      normalize(forced) ||
-      normalize(readStore(VARIANT_KEY)) ||
-      (Math.random() < 0.5 ? 'a' : 'b');
+    if (forced === 'a' || forced === 'b') return forced;
 
-    writeStore(VARIANT_KEY, variant);
-    return variant;
+    return Math.random() < 0.5 ? 'a' : 'b';
   };
 
   if (!shouldShowLanding()) return;
@@ -103,14 +96,6 @@
   document.documentElement.dataset.yantaLanding = variant;
   window.__yantaLanding = variant;
 
-  writeStore(SEEN_KEY, String(Number(readStore(SEEN_KEY) || 0) + 1));
-
-  /*
-    The CTA does a full navigation to /?app=1 instead of booting in place.
-    One reload buys a clean funnel boundary — the app always starts from the
-    same known state, and "reached the app" stays countable server-side once
-    the funnel endpoint exists.
-  */
   /*
     Funnel beacon.
 
@@ -157,13 +142,12 @@
     } catch {}
   };
 
-  const enterApp = (source) => {
-    writeStore(CONVERTED_KEY, JSON.stringify({
-      variant,
-      source,
-      at: Date.now(),
-    }));
-
+  /*
+    A full navigation to /?app=1 rather than booting in place: one reload buys
+    a clean funnel boundary, so the app always starts from the same state and
+    "reached the app" stays countable server-side.
+  */
+  const enterApp = () => {
     countEvent('landing_cta');
 
     location.href = `/?app=1&v=${encodeURIComponent(variant)}`;
@@ -178,7 +162,7 @@
     root.querySelectorAll('[data-landing-cta]').forEach((btn) => {
       btn.addEventListener('click', (e) => {
         e.preventDefault();
-        enterApp(btn.dataset.landingCta || 'unknown');
+        enterApp();
       });
     });
   };

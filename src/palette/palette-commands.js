@@ -197,6 +197,8 @@ export function buildCommandList({
       hint: 'Scan QR from yanta.page/present',
       action: openPresentationPairing,
     },
+    { label: 'Start from a template…', icon: 'sparkles', action: () => import('../templates/template-picker.js').then((m) => m.openTemplatePicker()) },
+    { label: 'Save current note as a template', icon: 'bookmark-plus', action: () => import('../templates/template-picker.js').then((m) => m.turnCurrentNoteIntoTemplate()) },
     { label: 'Manage public shared notes', icon: 'globe', action: openPublicSharesManager },
     { label: 'Stop live sharing this note', icon: 'x', action: stopSharing },
     { label: 'Sync: set up folder…', icon: 'refresh', action: openSyncSetup },

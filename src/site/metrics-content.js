@@ -25,20 +25,34 @@ const TOKEN_KEY = 'yanta.metrics.token';
 const SUMMARY_URL = `${YANTA_CLOUD_BASE_URL}/api/metrics/summary`;
 
 /*
-  Colour scoping, deliberately NOT keyed on prefers-color-scheme.
+  Colour scoping mirrors styles.css exactly, and that is the whole point: ink
+  and chart surface must be driven by the SAME signal, or they disagree.
 
-  Site pages are dark-only today: they never stamp `data-theme`, and `--bg`
-  stays #141414 whatever the OS asks for. A prefers-color-scheme media query
-  therefore paints light ink onto a permanently dark surface — measured, not
-  guessed. So the dark steps are the default, and the light steps hang off
-  `data-theme="light"`: the same signal that would actually change the
-  surface, so ink and surface can never disagree.
+  Dark is the default because YANTA's tokens default to dark. Light applies in
+  the two cases where the app's own tokens go light: an explicit
+  data-theme="light", and a light OS with either data-theme="auto" or no
+  attribute at all — the latter being every first-time visitor and every
+  standalone surface, since only the app stamps the attribute. Getting this
+  wrong once already produced light ink on a dark page.
 
   Series hues are categorical slots 1 and 2 from the data-viz reference
   palette. Both pairs pass all six checks against the surface they render on
   (#141414 dark, #fdfcfa light): worst adjacent CVD ΔE 26.8 dark / 24.7 light,
   well clear of the ≥8 gate.
 */
+const LIGHT_TOKENS = `
+  --ym-s1: #2a78d6;
+  --ym-s2: #eb6834;
+  --ym-ink: #0b0b0b;
+  --ym-ink-2: #52514e;
+  --ym-muted: #898781;
+  --ym-grid: #e1e0d9;
+  --ym-axis: #c3c2b7;
+  --ym-card: rgba(11, 11, 11, .025);
+  --ym-ring: rgba(11, 11, 11, .10);
+  --ym-surface: #fdfcfa;
+`;
+
 const CSS = `
 .ym {
   --ym-s1: #3987e5;
@@ -54,18 +68,12 @@ const CSS = `
   color: var(--ym-ink);
 }
 
-:root[data-theme="light"] .ym {
-  --ym-s1: #2a78d6;
-  --ym-s2: #eb6834;
-  --ym-ink: #0b0b0b;
-  --ym-ink-2: #52514e;
-  --ym-muted: #898781;
-  --ym-grid: #e1e0d9;
-  --ym-axis: #c3c2b7;
-  --ym-card: rgba(11, 11, 11, .025);
-  --ym-ring: rgba(11, 11, 11, .10);
-  --ym-surface: #fdfcfa;
+@media (prefers-color-scheme: light) {
+  :root[data-theme="auto"] .ym,
+  :root:not([data-theme]) .ym { ${LIGHT_TOKENS} }
 }
+
+:root[data-theme="light"] .ym { ${LIGHT_TOKENS} }
 
 .ym-gate { max-width: 30rem; }
 .ym-gate input {
@@ -482,16 +490,60 @@ function retentionSection(retention) {
   `;
 }
 
+/*
+  The activation funnel. Deliberately three steps, because each one is a
+  different decision: look at the page, enter the app, make something of your
+  own. The last step is the only number that cannot be derived server-side —
+  a visitor without an account exists only on their own device.
+*/
+function funnelSection(steps) {
+  const first = steps[0].n || 0;
+
+  if (!first) return '<p class="ym-empty">Nothing counted yet.</p>';
+
+  return `
+    <div class="ym-scroll">
+      <table class="ym-table">
+        <thead><tr><th>Step</th><th>Count</th><th>Of previous</th><th>Of all visits</th><th></th></tr></thead>
+        <tbody>
+          ${steps.map((step, i) => {
+            const prev = i === 0 ? step.n : steps[i - 1].n || 0;
+            return `
+              <tr>
+                <td>${esc(step.label)}</td>
+                <td>${fmt(step.n)}</td>
+                <td>${i === 0 ? '—' : pct(step.n, prev)}</td>
+                <td>${pct(step.n, first)}</td>
+                <td style="width:30%">
+                  <div class="ym-bar-track">
+                    <div class="ym-bar-fill" style="width:${((step.n / first) * 100).toFixed(1)}%"></div>
+                  </div>
+                </td>
+              </tr>
+            `;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
 function dashboard(data) {
   const daily = (name) => data.landing.daily
     .filter((r) => r.name === name)
     .map((r) => ({ day: r.day, n: Number(r.n || 0) }));
+
+  const totalOf = (name) => data.landing.variants
+    .filter((r) => r.name === name)
+    .reduce((sum, r) => sum + Number(r.n || 0), 0);
 
   const views = daily('landing_view');
   const ctas = daily('landing_cta');
 
   const totalViews = views.reduce((s, p) => s + p.n, 0);
   const totalCtas = ctas.reduce((s, p) => s + p.n, 0);
+  const totalFirstNotes = totalOf('first_note');
+  const totalShareKeeps = totalOf('share_keep');
 
   const subsByStatus = new Map(
     data.subscriptions.map((r) => [String(r.status || ''), Number(r.n || 0)])
@@ -518,9 +570,23 @@ function dashboard(data) {
       ${tile('New this week', compact(u.new_7), `${fmt(u.new_1)} today`)}
       ${tile('Active this week', compact(u.active_7), `${fmt(u.active_30)} in 30 days`)}
       ${tile('Landing → app', pct(totalCtas, totalViews), `${fmt(totalCtas)} of ${fmt(totalViews)} visits`)}
-      ${tile('Cancelling', compact(data.cancelPending), 'at period end')}
+      ${tile('Kept from a share', compact(totalShareKeeps), 'chose to keep a shared note')}
       ${tile('Shared spaces', compact(data.reach.spaces), `${fmt(data.reach.spaceMembers)} members · ${fmt(data.reach.publicShares)} public pages`)}
     </div>
+
+    <section class="ym-section">
+      <h2>Activation funnel</h2>
+      <p class="ym-note">
+        Where people stop. The last step — writing something of their own — is
+        the moment a visitor becomes a user, and the only one no server-side
+        derivation can see.
+      </p>
+      ${funnelSection([
+        { label: 'Opened the landing page', n: totalViews },
+        { label: 'Entered the app', n: totalCtas },
+        { label: 'Wrote their first note', n: totalFirstNotes },
+      ])}
+    </section>
 
     <section class="ym-section">
       <h2>Landing page</h2>

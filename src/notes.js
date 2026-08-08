@@ -49,6 +49,7 @@ import {
 } from './draft-notes.js';
 
 import { putImageObjectUrl } from './media/object-url-cache.js';
+import { countFirstNoteIfActivation } from './metrics/funnel.js';
 
 let _navSuppress = false;
 let _unsubDoc = null;
@@ -309,6 +310,7 @@ function renderCalendarAttachmentsSoon(noteId = state.currentNoteId) {
 
 // ---------------- factories -----------------------------------
 export async function newNote(folderId = null, type = 'markdown') {
+  const notesBefore = state.notes.size;
   const id = uid();
 
   const note = {
@@ -324,6 +326,9 @@ export async function newNote(folderId = null, type = 'markdown') {
 
   state.notes.set(id, note);
   await store.notes.put(note);
+
+  // Activation, counted as an anonymous daily total. See metrics/funnel.js.
+  countFirstNoteIfActivation(notesBefore, state.notes.size);
 
   /*
     Bis der User etwas beiträgt, ist das ein Entwurf:
@@ -1039,46 +1044,25 @@ export async function createWelcomeNote() {
       pinned: false,
       icon: 'sparkles',
       color: '#2563eb',
-      body: `# Start here 👋
+      body: `# Start here
 
-**YANTA** is your private workspace. Notes, drawings, calendar, chat and AI in one place. Everything stays on your device or your encrypted cloud unless *you* decide to share.
+This is a note like any other. Change it, or throw the whole Welcome folder away — nothing depends on it.
 
 draw://${drawingId}
 
-## Try it — one minute
+## One thing worth doing now
 
-- [ ] Press **Ctrl/⌘ + Shift + Space** and capture a thought. It lands in today's journal note
-- [ ] Type \`/\` in any note. Drawings, images, events and more
-- [ ] Type \`[[\` to link notes. Try [[Shopping List]]
-- [ ] Press **Ctrl/⌘ + P**. Every command lives there
+Write a line into **Capture a thought** on the dashboard. It lands in today's page with the time next to it, and from then on that page is yours.
 
-## Good to know
+## When you want a page that is already set up
 
-- **Private by design**. Sync and sharing are end-to-end encrypted; not even the cloud can read your notes.
-- **No lock-in**. Plain Markdown under the hood, export everything anytime.
-- Calendar, feeds, chat and the AI assistant wait in the bottom-left corner. Explore whenever you're ready.
+**Start from a template** on the dashboard has ready-made pages — a client call, a lesson, a literature note, a week in review. They arrive filled in, not blank, so there is nothing to invent before you can use them.
 
-*Delete this Welcome folder whenever you like.*`,
-    },
-    {
-      id: ids.shopping,
-      title: 'Shopping List',
-      type: 'markdown',
-      folderId,
-      tags: ['example'],
-      pinned: false,
-      icon: 'shopping-cart',
-      color: '#059669',
-      body: `# Shopping List
+## Why your notes and your calendar live together
 
-A tiny checklist. Check something off!
+Write down what a meeting decided, and the meeting is right next to it. That is the part most tools split across two apps.
 
-- [ ] Apples
-- [ ] Coffee
-- [ ] Pasta
-- [ ] Olive oil
-
-**Tip:** hit **Share** (top right) and this becomes a live list. Whoever you invite can tick items off from their phone while you shop.`,
+Everything here is encrypted on this device before any of it syncs, and it is plain Markdown you can export at any time.`,
     },
   ];
 
@@ -1658,6 +1642,11 @@ A tiny checklist. Check something off!
     angle: -0.015,
   });
 
+  /*
+    No noteId: this card used to open the "Shopping List" demo note, which is
+    no longer seeded. A card linking to a note that does not exist is worse
+    than a card that simply illustrates.
+  */
   const shareCard = makeCard({
     x: 50,
     y: 408,
@@ -1665,7 +1654,6 @@ A tiny checklist. Check something off!
     height: 88,
     title: '🤝 Share',
     subtitle: 'live + encrypted',
-    noteId: ids.shopping,
     strokeColor: XCOL.greenStroke,
     backgroundColor: XCOL.greenBg,
     angle: 0.02,

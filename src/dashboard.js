@@ -30,7 +30,12 @@ import {
   openDashboardWidgetManager,
   hasDashboardWidgets,
 } from './dashboard-widgets.js';
-import { renderSyncNudgeInto } from './onboarding.js';
+import { renderSyncNudgeInto, openStorageChooser } from './onboarding.js';
+import {
+  renderFirstStepsInto,
+  renderDurabilityNoticeInto,
+} from './first-contact.js';
+import { openTemplatePicker } from './templates/template-picker.js';
 
 import {
   currentGreeting,
@@ -2510,6 +2515,16 @@ function renderDashboard({ animate = true, force = false } = {}) {
     // Self-hiding: a no-op once the choice is settled or sync is on.
     const nudgeHost = el('div', { class: 'yanta-dashboard-nudge-host' });
     page.append(nudgeHost);
+
+    /*
+      Order matters: the first-contact cards speak to someone who has just
+      arrived, the sync nudge to someone who already settled in. All three
+      are self-hiding, so at most one of them is ever on screen.
+    */
+    renderFirstStepsInto(nudgeHost).catch(() => {});
+    renderDurabilityNoticeInto(nudgeHost, {
+      onSetUpSync: () => openStorageChooser(),
+    }).catch(() => {});
     renderSyncNudgeInto(nudgeHost).catch(() => {});
 
     const widgetsHost = el('div', { class: 'yanta-dashboard-widgets' });
@@ -2688,23 +2703,36 @@ function renderDashboardHeader() {
   
   function renderEmptyState() {
     const box = el('div', { class: 'yanta-dashboard-empty' });
-  
+
+    /*
+      A blank page is the hardest thing to start from, so the template route
+      is offered next to the empty one — and it is the primary of the two,
+      because a template finishes in one click while a blank note leaves the
+      work still to be invented.
+    */
     box.innerHTML = `
       <div class="yanta-dashboard-empty-icon">${lucide('sparkles', 34)}</div>
-      <strong>No notes yet</strong>
-      <p>Create your first note or open the sidebar.</p>
+      <strong>Nothing here yet</strong>
+      <p>Start from a ready-made page, or with an empty one.</p>
     `;
-  
-    const btn = el('button', {
+
+    const templateBtn = el('button', {
       class: 'btn primary',
+      onclick: () => {
+        openTemplatePicker();
+      },
+    }, 'Start from a template');
+
+    const blankBtn = el('button', {
+      class: 'btn',
       onclick: async () => {
         await newNote(dashboard.folderId || null);
         hideDashboard({ push: false });
       },
     }, i18n('graph.prompt.createNote'));
-  
-    box.append(btn);
-  
+
+    box.append(el('div', { class: 'yanta-dashboard-empty-actions' }, templateBtn, blankBtn));
+
     return box;
   }
   

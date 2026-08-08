@@ -19,6 +19,7 @@ import {
   escapeHtml,
 } from './core.js';
 import { t } from './i18n/index.js';
+import { workspaceHasContent } from './first-contact.js';
 import { openBoundOverlay } from './overlay-history.js';
 
 // Marks the storage decision as settled — set when the user picks a
@@ -579,6 +580,15 @@ export function openStorageChooser({ onSettled } = {}) {
  */
 export async function renderSyncNudgeInto(host) {
   if (!host) return;
+
+  /*
+    Never on an empty workspace. Asking someone to set up sync before they have
+    written anything is a request placed ahead of the value it protects — the
+    first screen a newcomer sees used to lead with exactly that. Once there is
+    content, first-contact.js takes over with the durability notice, which says
+    the same thing at a point where it is true and useful.
+  */
+  if (!workspaceHasContent()) return;
 
   if (await storageChoiceSettled()) return;
 

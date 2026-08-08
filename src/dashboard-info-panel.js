@@ -30,6 +30,7 @@ import {
 } from './install/install-manager.js';
 
 import { openInstallModal } from './install/install-ui.js';
+import { workspaceHasContent } from './first-contact.js';
 
 import { pausedByPlanRoutines, openPulseOverview } from './pulse/pulse-overview.js';
 
@@ -243,6 +244,13 @@ function formatDeviceNames(devices) {
  * nothing to suggest or the user dismissed it.
  */
 function collectInstallItems() {
+  /*
+    Not on an empty workspace. "Install this app" as the first thing a
+    newcomer reads asks for a commitment to something they have not used yet;
+    the same hint after they have written something is an offer.
+  */
+  if (!workspaceHasContent()) return [];
+
   let rec;
 
   try {

@@ -81,9 +81,20 @@
   outline-offset: 2px;
 }
 
-/* "Auto" — follow the system. Defaults are dark; override for light OS. */
+/*
+  "Auto" — follow the system. Defaults are dark; override for light OS.
+
+  `:root:not([data-theme])` is load-bearing, not belt-and-braces: the boot
+  script in index.html only stamps data-theme when an appearance is already
+  stored, and settings.js only runs inside the app. So a first-time visitor,
+  and every standalone surface (landing page, /pricing, legal pages, /metrics),
+  had NO attribute at all — neither selector matched and the dark defaults won
+  on a light-mode system. Keying the absent case to auto is what makes the
+  marketing surfaces honour the OS setting.
+*/
 @media (prefers-color-scheme: light) {
-  [data-theme="auto"] {
+  [data-theme="auto"],
+  :root:not([data-theme]) {
     --bg: #fdfcfa;
     --bg-elev: #f5f4f1;
     --bg-elev-2: #ecebe7;

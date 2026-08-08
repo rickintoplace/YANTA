@@ -25,6 +25,7 @@ import {
 } from './yjs.js';
 
 import { openBoundOverlay } from './overlay-history.js';
+import { countFirstNoteIfActivation } from './metrics/funnel.js';
 
 import {
   newFolder,
@@ -213,7 +214,11 @@ export async function captureToJournal(text, {
 
   if (!trimmed) return null;
 
+  const notesBefore = state.notes.size;
   const note = await getOrCreateTodayNote();
+
+  // Activation, counted as an anonymous daily total. See metrics/funnel.js.
+  countFirstNoteIfActivation(notesBefore, state.notes.size);
 
   const entry = getNoteDoc(note.id);
   await entry.ready;

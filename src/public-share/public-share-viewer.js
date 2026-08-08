@@ -48,6 +48,7 @@ import {
 } from './public-share-viewer-enhancements.js';
 
 import { BRAND_LOGO_SVG } from '../brand-logo.js';
+import { countFunnelEvent } from '../metrics/funnel.js';
 
 import {
   bindMediaTimestampClicks,
@@ -468,6 +469,27 @@ html.yanta-public-share-page[data-public-share-theme="light"] {
 
   margin-top: 12px;
   margin-left: 57px;
+}
+
+.yps-keep-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+
+  margin-top: 18px;
+  margin-left: 57px;
+}
+
+.yps-keep-hint {
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+@media (max-width: 760px) {
+  .yps-keep-row {
+    margin-left: 48px;
+  }
 }
 
 .yps-pill {
@@ -1078,6 +1100,33 @@ function renderHeader() {
   `;
 }
 
+function bindKeepNoteAction() {
+  const btn = document.querySelector('[data-yps-keep-note]');
+  if (!btn) return;
+
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    btn.innerHTML = `${lucide('loader-circle', 15)} <span>Keeping…</span>`;
+
+    countFunnelEvent('share_keep');
+
+    try {
+      await savePublicShareAsLocalNote();
+    } catch (err) {
+      console.error(err);
+
+      btn.disabled = false;
+      btn.innerHTML = `${lucide('bookmark-plus', 15)} <span>Keep this note</span>`;
+
+      await yantaAlert({
+        title: 'Could not keep this note',
+        message: err?.message || String(err),
+        icon: 'triangle-alert',
+      });
+    }
+  });
+}
+
 function bindHeaderActions() {
   document.querySelector('[data-yps-save]')?.addEventListener('click', async () => {
     const btn = document.querySelector('[data-yps-save]');
@@ -1171,6 +1220,33 @@ function renderFooter(payload) {
   `;
 }
 
+/*
+  "Keep this note" — the same savePublicShareAsLocalNote() the header menu has
+  always offered, promoted to where it can actually be seen.
+
+  Deliberately an explicit action and never a side effect of the brand badge:
+  someone opening a read-only link to *read* it must not find a copy in their
+  own YANTA afterwards. That would feel like the page reached into their app.
+  The badge stays a plain link; only this button hands anything over.
+
+  For a newcomer it is also the endowed-progress moment: they arrive with
+  content instead of an empty workspace, and the progress is real rather than
+  staged.
+*/
+function renderKeepNoteAction(note) {
+  if (!note || !String(note.markdown || '').trim()) return '';
+
+  return `
+    <div class="yps-keep-row">
+      <button class="yps-btn primary" type="button" data-yps-keep-note>
+        ${lucide('bookmark-plus', 15)}
+        <span>Keep this note</span>
+      </button>
+      <span class="yps-keep-hint">Copies it into your own YANTA. Free, no account.</span>
+    </div>
+  `;
+}
+
 function renderPage(payload, imageResolver) {
   const note = payload.note || {};
   const color = applyPublicAccent(note.color || '#6ea8fe');
@@ -1238,6 +1314,8 @@ function renderPage(payload, imageResolver) {
             }
             ${tagHtml}
           </div>
+
+          ${renderKeepNoteAction(note)}
         </header>
 
         <article class="yps-content preview">
@@ -1254,6 +1332,7 @@ function renderPage(payload, imageResolver) {
   `;
 
   bindHeaderActions();
+  bindKeepNoteAction();
   bindPublicShareCalendarActions(document, payload);
 
   bindMediaTimestampClicks(document.querySelector('.yps-content'), {

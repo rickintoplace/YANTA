@@ -8533,7 +8533,26 @@ async function runScheduledPushes(env) {
 //     retain or delete.
 // ============================================================
 
-const METRIC_EVENT_NAMES = new Set(["landing_view", "landing_cta"]);
+/*
+  Allowlisted, because an open endpoint must never become a general-purpose
+  event sink:
+   - landing_view / landing_cta: the landing page funnel
+   - share_keep:  someone chose to keep a note they were shown
+   - first_note:  a workspace went from zero notes to one
+
+  first_note is the activation step, and it is the one number no server-side
+  derivation can reach: a visitor without an account exists only on their own
+  device. It is still storage-free — the client fires it on the 0 -> 1
+  transition it already holds in memory, never from a "already counted" flag,
+  because such a flag would be exactly the terminal-equipment write that turns
+  a counter into a consent question.
+*/
+const METRIC_EVENT_NAMES = new Set([
+  "landing_view",
+  "landing_cta",
+  "share_keep",
+  "first_note"
+]);
 
 // Beyond this many distinct referrer hosts in a day, the rest tallies as
 // "other". Keeps an unauthenticated endpoint from growing rows without bound.

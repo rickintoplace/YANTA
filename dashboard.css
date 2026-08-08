@@ -1311,6 +1311,13 @@
   line-height: 1.45;
 }
 
+.yanta-dashboard-empty-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+}
+
 /* Drag & Drop — Google-Keep-like live displacement, no placeholder */
 .dashboard.is-card-dragging {
   cursor: grabbing;

@@ -406,9 +406,15 @@ function privacyDocument() {
         Most of YANTA lives in your browser's IndexedDB and localStorage. That
         storage is what makes an offline-first app work, so under § 25(2)
         TDDDG it is strictly necessary for a service you explicitly requested
-        and needs no consent. We store nothing on your device for analytics or
-        advertising. Clearing browser data deletes local YANTA data unless you
-        have sync or a backup.
+        and needs no consent. Clearing browser data deletes local YANTA data
+        unless you have sync or a backup.
+      </p>
+      <p>
+        Nothing else is put on your device: nothing for advertising, nothing for
+        measurement, nothing that could identify or follow you. Our start page
+        exists in two versions so we can tell which one explains YANTA better,
+        but which one you see is decided fresh each time and never written down
+        — so there is no marker on your device and nothing to consent to.
       </p>
 
       <h2>4. Encryption and what we can actually see</h2>
@@ -456,12 +462,25 @@ function privacyDocument() {
         people's sensitive data into prompts.
       </p>
 
-      <h2>8. Cookies</h2>
+      <h2>8. Cookies and how we count</h2>
       <p>
         One strictly necessary, HTTP-only session cookie for login. Paddle sets
         its own cookies during checkout and in the billing portal — see
-        Paddle's privacy notice. No analytics, no advertising, no third-party
-        tracking, which is why you never see a consent banner here.
+        Paddle's privacy notice. There is no analytics product in YANTA, no
+        advertising and no third-party tracking, which is why you never see a
+        consent banner here.
+      </p>
+      <p>
+        We do count two things on our start page: that the page was opened, and
+        that someone clicked “Start”. Without those two numbers we cannot tell
+        whether the page works at all. They are stored as daily totals — a
+        counter per day, per event, per page version, plus the hostname of the
+        site you came from (never a full address, never a search query). There
+        is no record of individual visits: no identifier, no session, no IP
+        address, no user agent, no time more precise than the day. Because
+        nothing in these totals can be traced back to a person, they are not
+        personal data, and there is nothing here to consent to, request or
+        delete.
       </p>
 
       <h2>9. How long we keep things</h2>
@@ -472,6 +491,7 @@ function privacyDocument() {
           ['Sessions', 'Until expiry or logout'],
           ['Security and audit records (hashed IP)', 'Up to 12 months'],
           ['Usage counters', 'Rolling, up to 14 months'],
+          ['Daily page totals (no personal data)', 'Kept as aggregate totals'],
           ['Invoices, payment and accounting records', '10 years (§ 147 AO, § 257 HGB)'],
           ['Cancellation declarations', '3 years (limitation period)'],
           ['Content notices under the DSA', 'Up to 3 years'],

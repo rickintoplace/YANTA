@@ -26,6 +26,7 @@ import { readSensors } from './pulse-sensors.js';
 
 import {
   countRunsToday,
+  countDeliveriesToday,
   getRoutineState,
 } from './pulse-store.js';
 
@@ -106,6 +107,14 @@ export async function pulseTick({ reason = 'tick' } = {}) {
       return { ran: 0, skipped: 'daily-cap' };
     }
 
+    // A hard cap, not a soft target. Once the day's attention budget is
+    // spent there is nothing useful left to do with a run whose only
+    // outlet would be a delivery the user has already had enough of, so
+    // the pass stops rather than spending tokens to stay silent.
+    if (await countDeliveriesToday(now) >= settings.maxDeliveriesPerDay) {
+      return { ran: 0, skipped: 'delivery-budget' };
+    }
+
     // Plan allowance is enforced here rather than only at the toggle:
     // a routine note is editable markdown, so `enabled: true` can be
     // typed in by hand. This is the gate that actually holds.
@@ -132,6 +141,7 @@ export async function pulseTick({ reason = 'tick' } = {}) {
       }
 
       if (await countRunsToday(Date.now()) >= settings.maxRunsPerDay) break;
+      if (await countDeliveriesToday(Date.now()) >= settings.maxDeliveriesPerDay) break;
     }
 
     if (results.length) {

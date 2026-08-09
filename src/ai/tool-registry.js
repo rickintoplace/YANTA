@@ -772,10 +772,13 @@ export const TOOL_REGISTRY = [
     permission: 'allowWriteAiBrain',
     risk: 'write',
     description: [
-      'Create, patch, edit, delete, or add/remove supporting files for YANTA skills.',
+      'Create, patch, edit, delete, restore, or add/remove supporting files for YANTA skills.',
       'Use this when a reusable workflow should become procedural memory.',
-      'Skills should follow SKILL.md frontmatter and sections: When to Use, Procedure, Pitfalls, Verification.',
+      'Sections: When to use, Not for, Inputs, Procedure, Examples, Pitfalls, Verification.',
+      'Give at least three examples covering a typical case, an edge case, and one that looks like a match but is not.',
+      'Put anything that varies between runs under Inputs; never hardcode the note titles, paths or values of the run you learned the procedure in.',
       'Prefer patch over edit for small changes.',
+      'edit, patch and restore keep the previous version — use history to list them and restore to undo.',
     ].join('\n'),
     parameters: {
       type: 'object',
@@ -783,7 +786,16 @@ export const TOOL_REGISTRY = [
       properties: {
         action: {
           type: 'string',
-          enum: ['create', 'patch', 'edit', 'delete', 'write_file', 'remove_file'],
+          enum: [
+            'create',
+            'patch',
+            'edit',
+            'delete',
+            'history',
+            'restore',
+            'write_file',
+            'remove_file',
+          ],
         },
         name: { type: 'string' },
         category: { type: 'string' },
@@ -798,6 +810,14 @@ export const TOOL_REGISTRY = [
         new_string: {
           type: 'string',
           description: 'Replacement text for patch.',
+        },
+        reason: {
+          type: 'string',
+          description: 'Why this change. Recorded with the saved previous version and in the activity log.',
+        },
+        index: {
+          type: 'number',
+          description: 'Which saved version to restore. 0 is the most recent. Use history to list them.',
         },
         file_path: {
           type: 'string',
@@ -1204,15 +1224,68 @@ export const TOOL_REGISTRY = [
 
 ];
 
-export function openAiToolsForModel() {
-  return TOOL_REGISTRY.map((tool) => ({
+function toOpenAiSpec(tool) {
+  return {
     type: 'function',
     function: {
       name: tool.name,
       description: tool.description,
       parameters: tool.parameters,
     },
-  }));
+  };
+}
+
+/** The permission check itself. Absent permissions grant nothing. */
+function grantsPermission(tool, permissions) {
+  if (!tool?.permission) return true;
+
+  return (
+    permissions?.[tool.permission] === true ||
+    (
+      tool.permission === 'allowAddRssSources' &&
+      permissions?.allowManageRss === true
+    )
+  );
+}
+
+/**
+ * Whether to *offer* this tool to the model.
+ *
+ * Deliberately laxer than the execution check: `permissions === null`
+ * means "do not filter", which the debug helpers on `window` rely on to
+ * show the whole registry. Execution never takes this path — see
+ * `assertPermission`, where a missing permissions object denies.
+ */
+export function isToolOffered(tool, permissions) {
+  if (permissions == null) return true;
+
+  return grantsPermission(tool, permissions);
+}
+
+export function allToolNames() {
+  return TOOL_REGISTRY.map((tool) => tool.name);
+}
+
+/**
+ * Tool specs for a provider request.
+ *
+ * Two filters, both of which shrink the prompt:
+ *   - `permissions` drops what the user's settings already forbid.
+ *     Offering those costs tokens and buys refusals: the model spends a
+ *     round discovering it is not allowed, having been told it was.
+ *   - `names` narrows to an explicit subset, which is how progressive
+ *     disclosure hands over a loadout (see tool-loadout.js).
+ */
+export function openAiToolsForModel({
+  permissions = null,
+  names = null,
+} = {}) {
+  const wanted = names ? new Set(names) : null;
+
+  return TOOL_REGISTRY
+    .filter((tool) => (!wanted || wanted.has(tool.name)))
+    .filter((tool) => isToolOffered(tool, permissions))
+    .map(toOpenAiSpec);
 }
 
 export function getTool(name) {
@@ -1222,14 +1295,7 @@ export function getTool(name) {
 function assertPermission(tool, permissions) {
   if (!tool.permission) return;
 
-  const allowed =
-    permissions?.[tool.permission] === true ||
-    (
-      tool.permission === 'allowAddRssSources' &&
-      permissions?.allowManageRss === true
-    );
-
-  if (!allowed) {
+  if (!grantsPermission(tool, permissions)) {
     const err = new Error(
       `Tool "${tool.name}" is blocked by YANTA settings. Missing permission: ${tool.permission}`
     );

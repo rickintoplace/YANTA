@@ -7,7 +7,7 @@
 //   Run      — one execution of a routine
 //   Inbox    — where results wait for the user
 //   beat     — internal only: one scheduler tick. Never user-facing.
-//   heartbeat— documentation/marketing only. Never user-facing.
+//   heartbeat— documentation only. Never user-facing.
 // ============================================================
 
 import { store } from '../core.js';
@@ -52,6 +52,46 @@ export const PULSE_TOOL_DENYLIST = Object.freeze([
   // A routine that can create routines is a routine that can multiply
   // unattended. Authoring stays a conversation the user is present for.
   'pulse_manage',
+
+  // The Brain and Skills steer every later run and every later chat, and
+  // a background run is exactly where a change to them goes unnoticed: a
+  // routine reads feeds, the web and messages — none of it trustworthy —
+  // and would then be able to write what it "learned" into the same
+  // instructions it is later given. That is a durable compromise made
+  // while nobody is watching, and it survives long after the run.
+  //
+  // A routine that wants to change them proposes the exact call with
+  // `pulse_propose`; the user applies it from the Inbox card, having seen
+  // it. Self-improvement is not blocked, only made visible.
+  'ai_brain_write',
+  'skill_manage',
+]);
+
+/**
+ * Denylisted tools a run may not even park for confirmation.
+ *
+ * One tap is enough review for "send Anna this message" — the user reads
+ * the message on the card. It is not enough for routine authoring, where
+ * the label describes the button and the schedule hides in the arguments.
+ */
+export const PULSE_PROPOSE_DENYLIST = Object.freeze([
+  'pulse_manage',
+]);
+
+/**
+ * Tools whose results a run may read but never act on unreviewed.
+ *
+ * Not a denylist — a routine that cannot read feeds is useless. This is
+ * what marks a run as having consumed untrusted input, which the run log
+ * records so a later review can tell which conclusions to trust.
+ */
+export const PULSE_UNTRUSTED_INPUT_TOOLS = Object.freeze([
+  'web_search',
+  'web_read',
+  'rss_search_items',
+  'rss_read_item',
+  'chat_read_recent_messages',
+  'chat_search_messages',
 ]);
 
 /** Sensor-backed event triggers a routine can subscribe to. */
@@ -74,6 +114,15 @@ export const DEFAULT_PULSE_SETTINGS = Object.freeze({
   // Hard ceiling across all routines. The scheduler stops running once
   // it is hit, so a misconfigured routine cannot flood the Inbox.
   maxRunsPerDay: 12,
+
+  // The other ceiling, and the one that decides whether Pulse survives
+  // contact with the user. Runs are cheap and most stay silent; what is
+  // scarce is attention, and a proactive feature that spends more of it
+  // than it returns gets switched off within a couple of weeks rather
+  // than tuned. Deliveries that actually interrupt — Inbox, chat — are
+  // capped well below the run cap. Journal-only output is not counted:
+  // it waits in today's note instead of asking for anything.
+  maxDeliveriesPerDay: 4,
 
   // Missed-run reminder while the app was closed. Needs Web Push.
   notifyMissed: true,

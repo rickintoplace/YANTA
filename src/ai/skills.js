@@ -30,6 +30,7 @@ import {
   AI_BRAIN_IDS,
   isAiBrainNote,
   writeBrainNote,
+  recordBrainActivity,
 } from './brain.js';
 
 function now() {
@@ -162,6 +163,40 @@ async function skillFilesMap(noteId) {
   await entry.ready;
 
   return entry.doc.getMap('skillFiles');
+}
+
+/**
+ * Previous versions of a skill's markdown, newest first.
+ *
+ * A skill is an instruction the AI gives itself, and letting the AI
+ * revise those without an undo is the part that makes self-improvement
+ * unsafe rather than useful. Yjs keeps the note's own edit history, but
+ * that history is a stream of character operations — no use to someone
+ * asking "what did it change last Tuesday, and put it back".
+ */
+async function skillHistoryArray(noteId) {
+  const entry = getNoteDoc(noteId);
+  await entry.ready;
+
+  return entry.doc.getArray('skillHistory');
+}
+
+const SKILL_HISTORY_LIMIT = 8;
+
+async function snapshotSkill(skill, reason = '') {
+  if (!skill?.noteId || !skill.markdown) return;
+
+  const history = await skillHistoryArray(skill.noteId);
+
+  history.unshift([{
+    at: now(),
+    reason: String(reason || '').slice(0, 120),
+    markdown: skill.markdown,
+  }]);
+
+  if (history.length > SKILL_HISTORY_LIMIT) {
+    history.delete(SKILL_HISTORY_LIMIT, history.length - SKILL_HISTORY_LIMIT);
+  }
 }
 
 async function skillRecordFromNote(note) {
@@ -322,6 +357,18 @@ export async function skillViewAction({
   };
 }
 
+/**
+ * The skeleton a new skill starts from.
+ *
+ * The shape is not arbitrary. Skills that carry worked examples covering
+ * more than the happy path, and that name what varies between runs, get
+ * used correctly; terse ones get ignored or misapplied. The most common
+ * failure is the opposite of vagueness — a skill distilled from one
+ * successful run that hardcodes that run's note titles and values, and
+ * is then less robust than working the task out from scratch. Hence the
+ * explicit "Inputs" and "Not for" sections: both exist to stop a
+ * procedure from silently narrowing to the case it was learned on.
+ */
 function defaultSkillMarkdown({
   name,
   description = '',
@@ -341,13 +388,29 @@ function defaultSkillMarkdown({
     '',
     `# ${cleanName}`,
     '',
-    '## When to Use',
+    '## When to use',
     '',
-    'Use this skill when the task matches the procedure below.',
+    'Describe the situation, not the mechanics — this is what gets matched against a request.',
+    '',
+    '## Not for',
+    '',
+    '- Name the neighbouring cases this skill should *not* be applied to.',
+    '',
+    '## Inputs',
+    '',
+    'What varies between runs, and where it comes from. Anything listed here must not be hardcoded in the procedure below.',
     '',
     '## Procedure',
     '',
     body || '1. Understand the request.\n2. Follow the reusable workflow.\n3. Verify the result.',
+    '',
+    '## Examples',
+    '',
+    'Three at least, and not three variations of the same easy case.',
+    '',
+    '1. **Typical case** — request, what you do, what comes back.',
+    '2. **Edge case** — the input that nearly fits but needs different handling.',
+    '3. **Refusal case** — the request that looks like a match but is not; say what to do instead.',
     '',
     '## Pitfalls',
     '',
@@ -355,11 +418,11 @@ function defaultSkillMarkdown({
     '',
     '## Verification',
     '',
-    '- Confirm the result is complete and useful.',
+    '- How to tell the result is right, not just that it was produced.',
   ].join('\n');
 }
 
-export async function skillManageAction(args = {}) {
+export async function skillManageAction(args = {}, { source = 'chat' } = {}) {
   await ensureAiBrain();
 
   const action = String(args.action || '').trim();
@@ -370,6 +433,13 @@ export async function skillManageAction(args = {}) {
   }
 
   const existing = await findSkill(name);
+
+  const audit = (verb, detail = '') => recordBrainActivity({
+    action: verb,
+    target: `Skill: ${name}`,
+    detail,
+    source,
+  });
 
   if (action === 'create') {
     if (existing) {
@@ -391,6 +461,7 @@ export async function skillManageAction(args = {}) {
       body: content,
       target: 'skill',
       mode: 'replace',
+      audit: false,
     });
 
     const note = state.notes.get(res.id);
@@ -405,6 +476,7 @@ export async function skillManageAction(args = {}) {
     }
 
     renderTree();
+    await audit('created', `${content.length} chars`);
 
     return {
       ok: true,
@@ -425,18 +497,24 @@ export async function skillManageAction(args = {}) {
       throw new Error('content is required for edit.');
     }
 
+    await snapshotSkill(existing, args.reason || 'edit');
+
     await writeBrainNote({
       noteId: existing.noteId,
       body: content,
       mode: 'replace',
       target: 'skill',
+      audit: false,
     });
+
+    await audit('rewrote', String(args.reason || '').slice(0, 120));
 
     return {
       ok: true,
       action,
       name,
       noteId: existing.noteId,
+      restorable: true,
     };
   }
 
@@ -454,18 +532,78 @@ export async function skillManageAction(args = {}) {
 
     const next = existing.markdown.replace(oldString, newString);
 
+    await snapshotSkill(existing, args.reason || 'patch');
+
     await writeBrainNote({
       noteId: existing.noteId,
       body: next,
       mode: 'replace',
       target: 'skill',
+      audit: false,
     });
+
+    await audit('patched', String(args.reason || '').slice(0, 120));
 
     return {
       ok: true,
       action,
       name,
       noteId: existing.noteId,
+      restorable: true,
+    };
+  }
+
+  if (action === 'history') {
+    const history = await skillHistoryArray(existing.noteId);
+
+    return {
+      ok: true,
+      action,
+      name,
+      versions: history.toArray().map((entry, index) => ({
+        index,
+        at: entry?.at || 0,
+        reason: entry?.reason || '',
+        preview: String(entry?.markdown || '').slice(0, 200),
+      })),
+    };
+  }
+
+  if (action === 'restore') {
+    const history = await skillHistoryArray(existing.noteId);
+    const versions = history.toArray();
+
+    const index = Number.isFinite(Number(args.index)) ? Number(args.index) : 0;
+    const target = versions[index];
+
+    if (!target?.markdown) {
+      throw new Error(
+        versions.length
+          ? `No saved version at index ${index}. Available: 0-${versions.length - 1}.`
+          : 'This skill has no earlier versions saved.'
+      );
+    }
+
+    // The state being replaced is itself worth keeping — restoring the
+    // wrong version should not be the one edit you cannot walk back.
+    await snapshotSkill(existing, `restore to #${index}`);
+
+    await writeBrainNote({
+      noteId: existing.noteId,
+      body: target.markdown,
+      mode: 'replace',
+      target: 'skill',
+      audit: false,
+    });
+
+    await audit('restored', `version #${index} from ${new Date(target.at || 0).toISOString().slice(0, 10)}`);
+
+    return {
+      ok: true,
+      action,
+      name,
+      noteId: existing.noteId,
+      restoredFrom: target.at || 0,
     };
   }
 
@@ -477,6 +615,7 @@ export async function skillManageAction(args = {}) {
     await destroyNoteDoc(existing.noteId).catch(() => {});
 
     renderTree();
+    await audit('deleted');
 
     return {
       ok: true,

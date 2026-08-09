@@ -633,6 +633,9 @@ export async function writeBrainNote({
   mode = 'replace',
   folderId = '',
   target = '',
+  // The audit log writes through here too, and must not audit itself.
+  audit = true,
+  source = 'chat',
 } = {}) {
   await ensureAiBrain();
 
@@ -722,12 +725,136 @@ export async function writeBrainNote({
     },
   }));
 
+  if (audit && note.id !== AI_BRAIN_IDS.activity) {
+    await recordBrainActivity({
+      action: cleanMode === 'append' ? 'appended to' : 'rewrote',
+      target: note.title,
+      detail: `${text.length} chars`,
+      source,
+    });
+  }
+
   return {
     ok: true,
     id: note.id,
     title: note.title,
     mode: cleanMode,
   };
+}
+
+// ============================================================
+// Activity log
+//
+// Written by code, never by the model. That is the whole point: the
+// Brain steers every later run, so a change to it has to leave a trace
+// the thing that made the change did not get to phrase. A run that
+// rewrites Soul and then writes "tidied up some notes" into the log is
+// exactly the case this defends against.
+//
+// It is also the evidence base for reviewing what the AI has been
+// learning — a list of small dated facts is reviewable in a way that a
+// month of chat history is not.
+// ============================================================
+
+const ACTIVITY_MAX_ENTRIES = 400;
+
+function activityDay(at = new Date()) {
+  const pad = (n) => String(n).padStart(2, '0');
+
+  return `${at.getFullYear()}-${pad(at.getMonth() + 1)}-${pad(at.getDate())}`;
+}
+
+function activityTime(at = new Date()) {
+  const pad = (n) => String(n).padStart(2, '0');
+
+  return `${pad(at.getHours())}:${pad(at.getMinutes())}`;
+}
+
+/**
+ * Splices one entry into the markdown under today's date heading,
+ * newest first, and trims the tail back to ACTIVITY_MAX_ENTRIES.
+ */
+function spliceActivityEntry(markdown, entry, day) {
+  const marker = '## Log';
+  const at = markdown.indexOf(marker);
+
+  const head = at >= 0
+    ? markdown.slice(0, at + marker.length)
+    : `${markdown.trimEnd()}\n\n${marker}`;
+
+  const body = (at >= 0 ? markdown.slice(at + marker.length) : '')
+    .replace(/^[ \t]*-[ \t]*No entries yet\.[ \t]*$/m, '')
+    .trim();
+
+  const heading = `### ${day}`;
+
+  let next;
+
+  if (body.startsWith(heading)) {
+    const rest = body.slice(heading.length).replace(/^\n/, '');
+    next = `${heading}\n${entry}\n${rest}`;
+  } else {
+    next = `${heading}\n${entry}\n\n${body}`;
+  }
+
+  const lines = next.split('\n');
+  let kept = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    if (!lines[i].startsWith('- ')) continue;
+
+    kept += 1;
+
+    if (kept > ACTIVITY_MAX_ENTRIES) {
+      next = `${lines.slice(0, i).join('\n').trimEnd()}\n\n_Older entries trimmed._`;
+      break;
+    }
+  }
+
+  return `${head}\n\n${next.trim()}\n`;
+}
+
+/**
+ * Appends one line to the activity log.
+ *
+ * Never throws: an audit write that fails must not take down the action
+ * it was auditing, and a silent Brain edit is still better than a lost
+ * one. Failures land in the console instead.
+ */
+export async function recordBrainActivity({
+  action = 'changed',
+  target = '',
+  detail = '',
+  source = 'chat',
+} = {}) {
+  try {
+    await ensureAiBrain();
+
+    const now = new Date();
+
+    const entry = [
+      `- ${activityTime(now)}`,
+      `\`${source}\``,
+      `**${action}**`,
+      target ? `${target}` : '',
+      detail ? `— ${detail}` : '',
+    ].filter(Boolean).join(' · ').replace(' · —', ' —');
+
+    const current = await readBrainNoteMarkdown(AI_BRAIN_IDS.activity).catch(() => '');
+
+    await writeBrainNote({
+      noteId: AI_BRAIN_IDS.activity,
+      body: spliceActivityEntry(
+        current || DEFAULT_AI_BRAIN_ACTIVITY_LOG,
+        entry,
+        activityDay(now)
+      ),
+      mode: 'replace',
+      audit: false,
+    });
+  } catch (err) {
+    console.warn('[YANTA AI Brain] activity log write failed', err);
+  }
 }
 
 export async function listAiBrainItems({
@@ -942,6 +1069,6 @@ export async function aiBrainSearchAction(args = {}) {
   return searchAiBrain(args);
 }
 
-export async function aiBrainWriteAction(args = {}) {
-  return writeBrainNote(args);
+export async function aiBrainWriteAction(args = {}, { source = 'chat' } = {}) {
+  return writeBrainNote({ ...args, audit: true, source });
 }

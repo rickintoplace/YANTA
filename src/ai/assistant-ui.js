@@ -52,6 +52,10 @@ import {
 } from './tool-registry.js';
 
 import {
+  createToolLoadout,
+} from './tool-loadout.js';
+
+import {
   buildSystemMessage,
   buildContextMessage,
 } from './context-builder.js';
@@ -2827,7 +2831,12 @@ function requestExternalSourceToolApproval({
 }
 
 async function runAssistant(userText) {
-  const tools = openAiToolsForModel();
+  const loadout = createToolLoadout({
+    permissions: getAiSettings().permissions,
+    enabled: getAiSettings().progressiveTools !== false,
+  });
+
+  const tools = loadout.specs();
 
   console.info('[YANTA AI] tools offered to model', tools.map((tool) =>
     tool.function?.name || ''
@@ -2843,6 +2852,7 @@ async function runAssistant(userText) {
   const messages = [
     await buildSystemMessage({
       userText,
+      toolIndex: loadout.indexMarkdown(),
     }),
     await buildContextMessage({
       attachments: activeContextItems,
@@ -2878,7 +2888,9 @@ async function runAssistant(userText) {
 
     const assistantMessage = await openRouterChatCompletionStream({
       messages,
-      tools,
+      // Re-read each round: a tools_load call in the previous round
+      // widens what the model may call in this one.
+      tools: loadout.specs(),
       signal: abortController.signal,
       onDelta: (delta) => {
         if (delta.type === 'reasoning') {
@@ -2969,6 +2981,25 @@ async function runAssistant(userText) {
       setAssistantBusy(true, `Using ${toolDisplayName(toolName)}…`);
 
       try {
+        // Resolves inside the run: it changes what the next round may
+        // call, so it never reaches the registry.
+        if (loadout.isLoadTool(toolName)) {
+          const result = loadout.load(args);
+
+          messages.push({
+            role: 'tool',
+            tool_call_id: call.id,
+            name: toolName,
+            content: JSON.stringify(result),
+          });
+
+          addMessage('tool', JSON.stringify({ args, result }, null, 2), {
+            toolName,
+          });
+
+          continue;
+        }
+
         if (toolRequiresExternalSourceApproval(toolName)) {
           const approval = await requestExternalSourceToolApproval({
             toolName,
@@ -3054,7 +3085,9 @@ async function maybeHandleAssistantSlashCommand(text) {
   if (!command) return false;
 
   if (command === 'tools') {
-    const tools = openAiToolsForModel()
+    const permissions = getAiSettings().permissions;
+
+    const tools = openAiToolsForModel({ permissions })
       .map((tool) => ({
         name: tool.function?.name || '',
         description: String(tool.function?.description || '').trim(),
@@ -3062,12 +3095,19 @@ async function maybeHandleAssistantSlashCommand(text) {
       .filter((tool) => tool.name)
       .sort((a, b) => a.name.localeCompare(b.name));
 
+    const blocked = openAiToolsForModel()
+      .map((tool) => tool.function?.name || '')
+      .filter((name) => name && !tools.some((tool) => tool.name === name));
+
     addMessage(
       'assistant',
       [
         '## Available YANTA AI tools',
         '',
         `Count: ${tools.length}`,
+        blocked.length
+          ? `Blocked by your settings and not offered to the model: ${blocked.join(', ')}`
+          : '',
         '',
         '| Tool | Description |',
         '|---|---|',

@@ -141,6 +141,42 @@ export async function countRunsToday(now = Date.now()) {
   return total;
 }
 
+/**
+ * Deliveries that interrupted the user today, across all routines.
+ *
+ * Tracked apart from runs because they are a different budget: a run is
+ * tokens, a delivery is attention. Stamps live on the same per-routine
+ * entries so they sync and expire with everything else.
+ */
+export async function countDeliveriesToday(now = Date.now()) {
+  const { runs } = await maps();
+  const dayStart = startOfLocalDay(now);
+
+  let total = 0;
+
+  for (const entry of runs.values()) {
+    const stamps = Array.isArray(entry?.recentDeliveries) ? entry.recentDeliveries : [];
+    total += stamps.filter((at) => at >= dayStart).length;
+  }
+
+  return total;
+}
+
+export async function recordDelivery(name, now = Date.now()) {
+  const { runs } = await maps();
+
+  const previous = runs.get(name) || {};
+
+  const recentDeliveries = [
+    ...(Array.isArray(previous.recentDeliveries) ? previous.recentDeliveries : []),
+    now,
+  ].filter((at) => now - at < 48 * 60 * 60 * 1000).slice(-48);
+
+  runs.set(name, { ...previous, name, recentDeliveries });
+
+  await touchPulseNote();
+}
+
 export async function recordRun(name, patch = {}, now = Date.now()) {
   const { runs } = await maps();
 
@@ -160,6 +196,13 @@ export async function recordRun(name, patch = {}, now = Date.now()) {
     lastDigest: patch.digest ?? previous.lastDigest ?? '',
     lastError: patch.error || '',
     recentRuns,
+
+    // Carried over deliberately: this runs after deliver(), so rebuilding
+    // the entry from scratch would drop the delivery stamp just written
+    // and hand the routine an unlimited attention budget.
+    recentDeliveries: Array.isArray(previous.recentDeliveries)
+      ? previous.recentDeliveries
+      : [],
   });
 
   await touchPulseNote();

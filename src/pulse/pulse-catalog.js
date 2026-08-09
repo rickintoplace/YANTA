@@ -22,6 +22,7 @@ export const PULSE_CATEGORIES = Object.freeze({
   FOCUS: 'focus',
   READING: 'reading',
   CARE: 'care',
+  SYSTEM: 'system',
 });
 
 function entry({ name, icon, category, description, pulse, goal, procedure, silentWhen }) {
@@ -218,6 +219,54 @@ export const PULSE_CATALOG = [
     silentWhen: [
       '- Fewer than four genuine suggestions exist.',
       '- The workspace is small enough that structure is not yet a problem.',
+    ].join('\n'),
+  }),
+
+  // The self-improvement routine, and the one entry in this catalog that
+  // deliberately cannot act.
+  //
+  // An agent that rewrites its own instructions from its own summary of
+  // its own week has no outside check on any step of that loop, and the
+  // measured result of unverified self-written context is worse
+  // behaviour at higher token cost. What makes revision pay off is a
+  // gate — somewhere the change has to survive a test it could fail.
+  //
+  // YANTA has no sandbox to run a skill against, so the gate is the
+  // user: every change is a `pulse_propose` card showing the exact edit,
+  // applied on a tap or never. That also closes the background-write
+  // hole from the other side, since `ai_brain_write` and `skill_manage`
+  // are denied to unattended runs anyway (see pulse-config.js).
+  entry({
+    name: 'brain-refine',
+    icon: 'brain',
+    category: PULSE_CATEGORIES.SYSTEM,
+    description: 'Reviews what the AI learned this week and proposes corrections you approve',
+    pulse: {
+      enabled: false,
+      when: '"0 10 * * 0"',
+      output: '[inbox]',
+      tools: 'read',
+      cooldown: '5d',
+      maxPerDay: '1',
+    },
+    goal: 'Keep the AI Brain accurate over months instead of letting it silently accumulate one-off details that contradict each other.',
+    procedure: [
+      '1. Read the Activity Log with `ai_brain_read`. It is written by YANTA itself, not by any AI, so it is the one record of Brain changes you can trust.',
+      '2. Read Soul, User Profile and Memory. Use `skills_list` for the skills.',
+      '3. Look for evidence of four specific problems, in this order:',
+      '   - **Contradiction** — two entries that cannot both be true. The more recent one usually wins, but say why.',
+      '   - **Overfitting** — a skill that hardcodes note titles, paths or values from the single run it was learned in. These read as specific and helpful and are the most common way a skill becomes worse than no skill.',
+      '   - **Staleness** — a preference or fact the log shows has been contradicted by later behaviour.',
+      '   - **Bloat** — Soul entries that do not change behaviour in almost every chat, or near-duplicate memories that should be one.',
+      '4. Propose at most three changes. Three real ones beat ten plausible ones, and a week with nothing worth changing is the normal case.',
+      '5. For each, call `pulse_propose` with the exact tool call you would make — `ai_brain_write` or `skill_manage` with `action: patch` — and a label naming what changes.',
+      '6. Call `pulse_emit` once, listing each proposed change with the evidence you found for it. Quote the log or the entry. A proposal without evidence is a guess, and the user cannot check a guess from a card.',
+      '7. Never propose a change you inferred only from your own earlier summaries. Reasoning from your own conclusions is how a small error becomes a permanent one.',
+    ].join('\n'),
+    silentWhen: [
+      '- The Brain is consistent and nothing in the log contradicts it. This is the expected outcome most weeks.',
+      '- The only changes you could name are rewordings.',
+      '- Fewer than a handful of Brain changes happened since the last review.',
     ].join('\n'),
   }),
 ];

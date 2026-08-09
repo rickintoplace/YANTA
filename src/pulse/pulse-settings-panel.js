@@ -62,6 +62,27 @@ function toggleRow({ checked, label, hint, onChange }) {
   return row;
 }
 
+function countField(value, { min, max }, onChange) {
+  const input = el('input', {
+    type: 'number',
+    class: 'yanta-settings-input',
+    min: String(min),
+    max: String(max),
+    value: String(value),
+  });
+
+  input.style.maxWidth = '90px';
+
+  input.addEventListener('change', () => {
+    const next = Math.max(min, Math.min(max, Number(input.value) || min));
+
+    input.value = String(next);
+    onChange(next);
+  });
+
+  return input;
+}
+
 function clockField(value, onChange) {
   const input = el('input', {
     type: 'time',
@@ -132,6 +153,24 @@ export function pulseSettingsElement() {
     quiet.append(el('div', { class: 'yanta-settings-toggle-hint' }, t('pulse.settings.quietHint')));
 
     fragment.append(quiet);
+
+    // ---- attention budget ----
+    const budget = group(t('pulse.settings.budget'));
+
+    const budgetRow = el('div');
+    budgetRow.style.cssText = 'display:flex;align-items:center;gap:10px;flex-wrap:wrap;';
+
+    budgetRow.append(
+      el('span', { class: 'yanta-settings-toggle-hint' }, t('pulse.settings.budgetLabel')),
+      countField(settings.maxDeliveriesPerDay, { min: 1, max: 12 }, (value) =>
+        setPulseSettings({ maxDeliveriesPerDay: value })
+      ),
+    );
+
+    budget.append(budgetRow);
+    budget.append(el('div', { class: 'yanta-settings-toggle-hint' }, t('pulse.settings.budgetHint')));
+
+    fragment.append(budget);
 
     // ---- permissions ----
     const permissions = group(t('pulse.settings.permissions'));

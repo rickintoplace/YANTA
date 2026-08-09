@@ -48,6 +48,10 @@ function toolErrorPayload(err) {
  * to feed the model a refusal instead of executing, or `{ result }` to
  * short-circuit with a synthetic result. Returning nothing allows the call.
  *
+ * `tools` may be a function, which is re-read before every round. That is
+ * what lets a `tools_load` call widen the toolset mid-run: the gate
+ * records the request, and the next round sees the larger set.
+ *
  * `source` labels tool calls for the app; `budgetSource` labels the
  * provider request for server-side budgeting. They are separate because
  * the server must not learn the routine name.
@@ -81,7 +85,7 @@ export async function runAgentLoop({
 
     const message = await openRouterChatCompletion({
       messages: thread,
-      tools,
+      tools: typeof tools === 'function' ? tools() : tools,
       signal,
       source: budgetSource,
     });

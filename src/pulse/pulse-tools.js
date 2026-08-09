@@ -19,6 +19,7 @@ import {
 
 import {
   PULSE_TOOL_DENYLIST,
+  PULSE_PROPOSE_DENYLIST,
   PULSE_TOOL_PROFILES,
 } from './pulse-config.js';
 
@@ -67,6 +68,7 @@ const PULSE_TOOL_DEFINITIONS = [
       description: [
         'Park an action for the user to confirm with one tap.',
         'Use this for anything that leaves YANTA or is hard to undo — sending a chat message, deleting, publishing.',
+        'Also use it for changes to the AI Brain or to a Skill: a background run may propose those, never apply them.',
         'You do not execute the action; the user does, from the Inbox card.',
         'Call pulse_emit as well so the card has context explaining why you propose it.',
       ].join('\n'),
@@ -97,10 +99,10 @@ const PULSE_TOOL_DEFINITIONS = [
  * tools. Anything filtered out simply is not offered — an unattended
  * model should not spend rounds discovering it is not allowed.
  */
-export function toolsForProfile(profile) {
+export function toolsForProfile(profile, { permissions = null } = {}) {
   const allowedRisks = RISK_BY_PROFILE[profile] || RISK_BY_PROFILE[PULSE_TOOL_PROFILES.READ];
 
-  const registryTools = openAiToolsForModel().filter((entry) => {
+  const registryTools = openAiToolsForModel({ permissions }).filter((entry) => {
     const name = entry.function?.name || '';
 
     if (PULSE_TOOL_DENYLIST.includes(name)) return false;
@@ -140,6 +142,15 @@ export function handlePulseTool({ name, args = {}, run }) {
 
     if (!getTool(tool)) {
       return { error: `Unknown tool: ${tool}` };
+    }
+
+    // One tap is enough review for "send this message" — the user reads
+    // the message. It is not enough for "create a routine", where the
+    // label describes the button and the schedule hides in the args.
+    if (PULSE_PROPOSE_DENYLIST.includes(tool)) {
+      return {
+        error: `${tool} cannot be proposed. Routine authoring stays a conversation the user is present for.`,
+      };
     }
 
     if (run.proposals.length >= 4) {

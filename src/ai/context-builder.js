@@ -255,6 +255,7 @@ export async function buildCurrentNoteContext({ includeMarkdown = true } = {}) {
 
 export async function buildSystemMessage({
   userText = '',
+  toolIndex = '',
 } = {}) {
   const settings = getAiSettings();
 
@@ -280,23 +281,43 @@ export async function buildSystemMessage({
     skillIndexContext = '';
   }
 
+  // Memory is a decision, not a reflex.
+  //
+  // Appending whatever seemed interesting is the failure mode: the Brain
+  // fills with one-off details that contradict each other, and recall
+  // degrades instead of improving. So every candidate goes through an
+  // explicit write / update / discard choice, with discard as the
+  // default — most of what happens in a conversation is not durable.
   const brainRules = [
     '# AI Brain operating rules',
     '',
     'You have access to an editable long-term AI Brain inside YANTA.',
     'The AI Brain is visible to the user under System → AI Brain and the user can edit it. But you are supposed to do so.',
     '',
-    'Autonomous learning:',
-    '- When you learn a durable user preference, stable project fact, reusable workflow, or lesson learned, update AI Brain using tools.',
-    '- Create or improve Skills when a reusable procedure emerges.',
-    '- Keep memories compact, factual, and useful.',
-    '- Prefer updating existing Brain notes over creating duplicates.',
-    '- Do not store secrets, API keys, passwords, private credentials, or sensitive personal data unless the user explicitly asks.',
-    '- If the user corrects your communication style or gives a collaboration preference, update Soul.',
-    '- If you learn stable details about the user, update User Profile.',
-    '- If the same preference belongs in both places, store the concise behavioral rule in Soul and fuller details in User Profile.',
-    '- Soul is a living operating contract. Keep it compact and revise it over time.',
-    '- Put something in Soul if it should change how you behave in almost every future chat.',
+    'Before writing anything to the Brain, decide between three actions:',
+    '- WRITE — the information is new, durable, and does not conflict with what the Brain already says. Read or search the relevant Brain note first; you cannot know it is new otherwise.',
+    '- UPDATE — the Brain already covers this and the new evidence is more recent or more reliable. Revise that note in place rather than adding a second version.',
+    '- DISCARD — the default. Choose it for anything task-specific, uncertain, one-off, contradicted by stable memory, or merely interesting. Not writing is a good outcome, not a missed one.',
+    '',
+    'What counts as durable:',
+    '- A stated preference the user would expect you to remember next week, not an in-passing remark.',
+    '- A stable fact about the user, their projects, or their tools.',
+    '- A lesson from something that went wrong, written so it changes future behaviour.',
+    '',
+    'Never write on a single observation what one more turn could confirm. If the user corrects you once, that is evidence; if you inferred it yourself, wait.',
+    '',
+    'Where things go:',
+    '- Soul is a living operating contract. Put something there only if it should change how you behave in almost every future chat. Keep it compact and revise it rather than growing it.',
+    '- User Profile holds stable details about the user. If a preference belongs in both, put the concise behavioural rule in Soul and the fuller detail here.',
+    '- Memory holds everything else durable.',
+    '- Prefer updating an existing note over creating a duplicate.',
+    '',
+    'Skills:',
+    '- Create or improve a Skill when a procedure has proven itself and will recur. One successful run is not proof — a procedure that worked once can be less robust than working it out again.',
+    '- Write down what varies between runs, not the specific names, paths and values from the run you learned it in.',
+    '- Improving an existing Skill beats adding a near-duplicate.',
+    '',
+    'Never store secrets, API keys, passwords, private credentials, or sensitive personal data unless the user explicitly asks.',
   ].join('\n');
 
   const toolBudgetRules = [
@@ -320,6 +341,8 @@ export async function buildSystemMessage({
         : '',
       '',
       skillIndexContext,
+      '',
+      toolIndex,
       '',
       brainRules,
       '',

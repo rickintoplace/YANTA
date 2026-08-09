@@ -80,6 +80,12 @@ export const DEFAULT_AI_SETTINGS = {
 
   privacyMode: 'current-note', // current-note | metadata-only
 
+  // Send a small core toolset plus an index, and let the model pull the
+  // rest in with tools_load. Costs an extra round on tasks that need a
+  // specialised tool; saves several thousand tokens on every turn that
+  // does not. Set false to send every permitted tool up front.
+  progressiveTools: true,
+
   assistantPrompt: DEFAULT_ASSISTANT_PROMPT,
 
     permissions: {

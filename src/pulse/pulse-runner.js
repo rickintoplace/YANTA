@@ -51,6 +51,7 @@ import {
   contentDigest,
   getRoutineState,
   recordRun,
+  recordDelivery,
   recordHistory,
 } from './pulse-store.js';
 
@@ -237,6 +238,7 @@ export async function runRoutine(routine, {
   }
 
   const profile = clampToolProfile(routine.toolProfile, settings);
+  const permissions = getAiSettings().permissions;
 
   const run = {
     emitted: null,
@@ -258,10 +260,10 @@ export async function runRoutine(routine, {
         await buildRunSystemMessage(routine),
         buildRunUserMessage(routine, sensors, now),
       ],
-      tools: toolsForProfile(profile),
+      tools: toolsForProfile(profile, { permissions }),
       maxRounds,
       signal,
-      permissions: getAiSettings().permissions,
+      permissions,
       source: `pulse:${routine.name}`,
       budgetSource: 'pulse',
       beforeToolCall: ({ name, args }) => {
@@ -324,6 +326,14 @@ export async function runRoutine(routine, {
   }
 
   const delivered = await deliver(routine, run, { title, body });
+
+  // Only what actually interrupts counts against the attention budget.
+  // A journal-only routine files into today's note and asks for nothing,
+  // so charging it would make the quiet output as expensive as the loud
+  // one and push routines toward the Inbox.
+  if (delivered.some((target) => target !== PULSE_OUTPUTS.JOURNAL)) {
+    await recordDelivery(routine.name, now);
+  }
 
   await recordRun(routine.name, { dueAt: dueAt || now, digest }, now);
 

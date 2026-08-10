@@ -39,6 +39,11 @@ import {
 } from './location.js';
 
 import {
+  aiTimeRules,
+  describeLocalNow,
+} from './ai-time.js';
+
+import {
   isNoteInTrash,
   isFolderInTrash,
   trashCount,
@@ -346,6 +351,8 @@ export async function buildSystemMessage({
       '',
       brainRules,
       '',
+      aiTimeRules(),
+      '',
       toolBudgetRules,
     ].filter(Boolean).join('\n\n'),
   };
@@ -402,8 +409,14 @@ export async function buildContextMessage({
       ? getApproxUserLocation()
       : null;
 
+  const localNow = describeLocalNow();
+
   const payload = {
-    now: new Date().toISOString(),
+    // Local, with offset. A UTC "now" is what makes a model answer
+    // "until 14:30" for an event the calendar shows at 16:30.
+    now: localNow.iso,
+    nowReadable: localNow.readable,
+    timeZone: localNow.timeZone,
     surface: state.surface,
     currentNote: currentNote
       ? {

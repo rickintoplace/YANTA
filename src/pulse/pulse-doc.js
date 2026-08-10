@@ -12,9 +12,13 @@
 //
 // CRDT shape matters here. Inbox items are keyed by their own id, so two
 // devices delivering at once merge instead of clobbering. Run records
-// are keyed by routine name and are last-writer-wins, which is the right
-// trade: worst case a routine runs twice across a sync gap, and the
-// digest check then suppresses the duplicate result.
+// are keyed by routine name, so a concurrent write is last-writer-wins;
+// pulse-store.js therefore only ever merges those entries forward
+// (monotonic timestamps, unioned stamp lists) so the losing write costs
+// nothing. What last-writer-wins cannot fix is a device acting on a copy
+// that has not arrived yet — a duplicate delivery is not suppressible
+// after the fact, since two runs of the same routine produce different
+// prose. That is gated on sync instead; see pulse-freshness.js.
 // ============================================================
 
 import { state, store } from '../core.js';
@@ -79,7 +83,7 @@ async function ensurePulseNote() {
   return ensured;
 }
 
-/** @returns {Promise<{inbox: Y.Map, runs: Y.Map, history: Y.Array, doc: Y.Doc}>} */
+/** @returns {Promise<{inbox: Y.Map, runs: Y.Map, history: Y.Array, config: Y.Map, doc: Y.Doc}>} */
 export async function pulseMaps() {
   const entry = await ensurePulseNote();
 
@@ -88,6 +92,10 @@ export async function pulseMaps() {
     inbox: entry.doc.getMap('pulseInbox'),
     runs: entry.doc.getMap('pulseRuns'),
     history: entry.doc.getArray('pulseHistory'),
+
+    // Settings that describe the *result* rather than the device that
+    // produced it, so every device produces the same one.
+    config: entry.doc.getMap('pulseConfig'),
   };
 }
 

@@ -101,6 +101,44 @@ async function maps() {
   return pulseMaps();
 }
 
+// ---------------- shared config -----------------------------------
+
+const OUTPUT_LOCALE_KEY = 'outputLocale';
+
+/**
+ * The language every routine result is written in, as a locale code.
+ *
+ * It lives in the shared document rather than in device settings on
+ * purpose: a result is delivered to the Inbox on every device, so which
+ * device happened to be awake at 07:00 must not decide whether the
+ * morning brief is German or English.
+ *
+ * Unset means "not chosen yet"; the runner seeds it from the locale of
+ * the device that first runs a routine, and Pulse settings can change
+ * it. A routine may still pin its own language in frontmatter.
+ */
+export async function getPulseOutputLocale() {
+  const { config } = await maps();
+
+  return String(config.get(OUTPUT_LOCALE_KEY) || '').trim();
+}
+
+export async function setPulseOutputLocale(code) {
+  const { config } = await maps();
+  const clean = String(code || '').trim();
+
+  if (clean === String(config.get(OUTPUT_LOCALE_KEY) || '')) return clean;
+
+  config.set(OUTPUT_LOCALE_KEY, clean);
+  await touchPulseNote();
+
+  window.dispatchEvent(new CustomEvent('yanta-pulse-settings-changed', {
+    detail: { outputLocale: clean },
+  }));
+
+  return clean;
+}
+
 // ---------------- run state ---------------------------------------
 
 export async function getRoutineState(name, now = Date.now()) {
@@ -162,17 +200,40 @@ export async function countDeliveriesToday(now = Date.now()) {
   return total;
 }
 
+const STAMP_WINDOW_MS = 48 * 60 * 60 * 1000;
+
+/**
+ * Union of timestamp lists, pruned to the window the caps care about.
+ *
+ * Run records are keyed by routine name, so two devices writing one
+ * resolve last-writer-wins — and a device with a stale copy would drop
+ * the other's stamps, quietly handing the routine a fresh daily budget.
+ * Merging instead of replacing makes the write order stop mattering.
+ */
+function mergeStamps(lists, now) {
+  const cutoff = now - STAMP_WINDOW_MS;
+  const stamps = new Set();
+
+  for (const list of lists) {
+    for (const at of Array.isArray(list) ? list : []) {
+      const ms = Number(at);
+      if (Number.isFinite(ms) && ms > cutoff) stamps.add(ms);
+    }
+  }
+
+  return [...stamps].sort((a, b) => a - b).slice(-48);
+}
+
 export async function recordDelivery(name, now = Date.now()) {
   const { runs } = await maps();
 
   const previous = runs.get(name) || {};
 
-  const recentDeliveries = [
-    ...(Array.isArray(previous.recentDeliveries) ? previous.recentDeliveries : []),
-    now,
-  ].filter((at) => now - at < 48 * 60 * 60 * 1000).slice(-48);
-
-  runs.set(name, { ...previous, name, recentDeliveries });
+  runs.set(name, {
+    ...previous,
+    name,
+    recentDeliveries: mergeStamps([previous.recentDeliveries, [now]], now),
+  });
 
   await touchPulseNote();
 }
@@ -183,26 +244,23 @@ export async function recordRun(name, patch = {}, now = Date.now()) {
   const previous = runs.get(name) || {};
   const counted = patch.counted !== false;
 
-  // Keep only the stamps that can still matter to a daily cap.
-  const recentRuns = [
-    ...(Array.isArray(previous.recentRuns) ? previous.recentRuns : []),
-    ...(counted ? [now] : []),
-  ].filter((at) => now - at < 48 * 60 * 60 * 1000).slice(-48);
-
   runs.set(name, {
     name,
-    lastRunAt: now,
-    lastDueAt: patch.dueAt || now,
+
+    // Monotonic. A device whose copy of the record is behind must not be
+    // able to rewind the schedule and re-open a slot that already ran.
+    lastRunAt: Math.max(Number(previous.lastRunAt) || 0, now),
+    lastDueAt: Math.max(Number(previous.lastDueAt) || 0, patch.dueAt || now),
+
     lastDigest: patch.digest ?? previous.lastDigest ?? '',
     lastError: patch.error || '',
-    recentRuns,
 
-    // Carried over deliberately: this runs after deliver(), so rebuilding
-    // the entry from scratch would drop the delivery stamp just written
-    // and hand the routine an unlimited attention budget.
-    recentDeliveries: Array.isArray(previous.recentDeliveries)
-      ? previous.recentDeliveries
-      : [],
+    recentRuns: mergeStamps([previous.recentRuns, counted ? [now] : []], now),
+
+    // Merged rather than carried: this runs after deliver(), so the
+    // delivery stamp written moments ago must survive, and so must one
+    // written on another device.
+    recentDeliveries: mergeStamps([previous.recentDeliveries], now),
   });
 
   await touchPulseNote();

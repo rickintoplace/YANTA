@@ -88,6 +88,27 @@ export function injectPulseCss() {
   gap: 6px;
 }
 
+/* The number, time and select fields in Pulse settings. The class was
+   carrying no styling of its own, so a native control sat next to
+   YANTA's own chrome with the platform's border and background. */
+.yanta-settings-input {
+  padding: 6px 9px;
+
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-elev);
+
+  color: var(--text);
+  font-size: 13px;
+}
+
+.yanta-settings-input:focus-visible {
+  outline: none;
+  border-color: var(--accent);
+}
+
+select.yanta-settings-input { cursor: pointer; }
+
 .yanta-pulse-mini {
   padding: 4px 9px;
 

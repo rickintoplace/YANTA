@@ -1070,6 +1070,11 @@ export const TOOL_REGISTRY = [
       '- For exact ranges, pass ISO start and end.',
       '',
       'The tool returns stored calendar events and, by default, Markdown-derived events from notes.',
+      '',
+      'Times:',
+      '- Every start/end is the user\'s local wall-clock time with UTC offset, e.g. "2026-08-10T16:30:00+02:00". Report those clock times exactly as given and never convert them.',
+      '- All-day events carry plain local dates, e.g. "2026-08-10". Their end is the last day the event covers, inclusive; a one-day event has end equal to start.',
+      '- The response repeats the user\'s timezone in `timeZone`.',
     ].join('\n'),
     parameters: {
       type: 'object',
@@ -1119,7 +1124,11 @@ export const TOOL_REGISTRY = [
     name: 'create_event',
     permission: 'allowManageCalendar',
     risk: 'write',
-    description: 'Create a calendar event. Dates must be ISO strings.',
+    description: [
+      'Create a calendar event.',
+      'Dates are ISO strings in the user\'s local time: prefer an explicit offset ("2026-08-10T16:30:00+02:00"); a datetime without one is read as local time. Never pass a UTC "Z" time unless the user gave you one.',
+      'For allDay, pass plain dates ("2026-08-10"), with end as the last day the event covers (inclusive). Omit end for a single day.',
+    ].join('\n'),
     parameters: {
       type: 'object',
       properties: {
@@ -1187,7 +1196,10 @@ export const TOOL_REGISTRY = [
     name: 'update_event',
     permission: 'allowManageCalendar',
     risk: 'write',
-    description: 'Update an existing calendar event by id.',
+    description: [
+      'Update an existing calendar event by id.',
+      'Date fields follow the same local-time rule as create_event.',
+    ].join('\n'),
     parameters: {
       type: 'object',
       properties: {

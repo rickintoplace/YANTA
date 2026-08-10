@@ -96,8 +96,21 @@ function floorToMinute(ms) {
  * Scanning backwards (rather than forward from `lastRunAt`) means a
  * device that was off for a week fires each routine exactly once on
  * return instead of replaying every missed slot.
+ *
+ * `catchUp: false` narrows the scan to the current minute. Reaching
+ * further back is only sound when `lastRunAt` reflects every device —
+ * otherwise a device that just woke up cannot tell a missed slot from
+ * one another device already ran, and delivers it twice. The caller
+ * decides; see pulse-freshness.js.
+ *
+ * @param {object} routine
+ * @param {number} lastRunAt  latest run known across all devices
+ * @param {number} now
+ * @param {{catchUp?: boolean}} options
  */
-export function dueSince(routine, lastRunAt = 0, now = Date.now()) {
+export function dueSince(routine, lastRunAt = 0, now = Date.now(), {
+  catchUp = true,
+} = {}) {
   const when = String(routine?.when || '').trim();
 
   if (!when) return 0;
@@ -105,16 +118,17 @@ export function dueSince(routine, lastRunAt = 0, now = Date.now()) {
   const interval = isCronExpression(when) ? 0 : parseDuration(when);
 
   if (interval) {
-    if (!lastRunAt) return floorToMinute(now);
+    // No record at all is indistinguishable from a record that has not
+    // arrived yet, so an interval routine waits for one.
+    if (!lastRunAt) return catchUp ? floorToMinute(now) : 0;
     return now - lastRunAt >= interval ? floorToMinute(now) : 0;
   }
 
   if (!isCronExpression(when)) return 0;
 
-  const earliest = Math.max(
-    Number(lastRunAt) || 0,
-    now - CATCH_UP_WINDOW_MS,
-  );
+  const earliest = catchUp
+    ? Math.max(Number(lastRunAt) || 0, now - CATCH_UP_WINDOW_MS)
+    : floorToMinute(now) - MINUTE_MS;
 
   const cursor = new Date(floorToMinute(now));
 

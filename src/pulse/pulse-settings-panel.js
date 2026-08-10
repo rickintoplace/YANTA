@@ -15,7 +15,11 @@ import {
   toast,
 } from '../core.js';
 
-import { t } from '../i18n/index.js';
+import {
+  t,
+  getLocale,
+  LOCALES,
+} from '../i18n/index.js';
 
 import {
   getPulseSettings,
@@ -32,6 +36,11 @@ import {
 } from './pulse-plan.js';
 
 import { listRoutines } from './pulse-routines.js';
+
+import {
+  getPulseOutputLocale,
+  setPulseOutputLocale,
+} from './pulse-store.js';
 
 function group(title) {
   const wrap = el('div', { class: 'yanta-settings-group' });
@@ -83,6 +92,21 @@ function countField(value, { min, max }, onChange) {
   return input;
 }
 
+function selectField(value, options, onChange) {
+  const select = el('select', { class: 'yanta-settings-input' });
+
+  select.style.maxWidth = '200px';
+
+  for (const option of options) {
+    select.append(el('option', { value: option.value }, option.label));
+  }
+
+  select.value = value;
+  select.addEventListener('change', () => onChange(select.value));
+
+  return select;
+}
+
 function clockField(value, onChange) {
   const input = el('input', {
     type: 'time',
@@ -107,6 +131,7 @@ export function pulseSettingsElement() {
 
   const render = async () => {
     const settings = await getPulseSettings();
+    const outputLocale = await getPulseOutputLocale().catch(() => '');
     const allowance = await getPulseAllowance();
     const { active } = partitionByAllowance(await listRoutines(), allowance);
 
@@ -135,6 +160,30 @@ export function pulseSettingsElement() {
     }));
 
     fragment.append(general);
+
+    // ---- result language ----
+    //
+    // Deliberately not the display language: results land in one shared
+    // Inbox, so they need one language across devices even when the
+    // devices themselves are set differently.
+    const language = group(t('pulse.settings.language'));
+
+    const languageRow = el('div');
+    languageRow.style.cssText = 'display:flex;align-items:center;gap:10px;flex-wrap:wrap;';
+
+    languageRow.append(
+      el('span', { class: 'yanta-settings-toggle-hint' }, t('pulse.settings.languageLabel')),
+      selectField(
+        LOCALES.some((locale) => locale.code === outputLocale) ? outputLocale : getLocale(),
+        LOCALES.map((locale) => ({ value: locale.code, label: locale.native })),
+        (value) => setPulseOutputLocale(value),
+      ),
+    );
+
+    language.append(languageRow);
+    language.append(el('div', { class: 'yanta-settings-toggle-hint' }, t('pulse.settings.languageHint')));
+
+    fragment.append(language);
 
     // ---- quiet hours ----
     const quiet = group(t('pulse.settings.quietHours'));

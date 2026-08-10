@@ -42,6 +42,8 @@ import {
 
 import { refreshPulseWakeSchedule } from './pulse-wake.js';
 
+import { isPulseStateFresh } from './pulse-freshness.js';
+
 const TICK_MS = 60_000;
 const BOOT_DELAY_MS = 12_000;
 
@@ -74,12 +76,15 @@ async function blockedReason(routine, settings, now) {
  * schedule and uses the sensors as context. An event-only routine runs
  * when its sensors report something, which the runner re-checks before
  * spending anything.
+ *
+ * `catchUp` comes from the pass, not from the routine: it says whether
+ * the shared run log is current enough to reach back for missed slots.
  */
-async function isDue(routine, now) {
+async function isDue(routine, now, { catchUp = true } = {}) {
   const state = await getRoutineState(routine.name, now);
 
   if (routine.when) {
-    const at = dueSince(routine, state.lastRunAt, now);
+    const at = dueSince(routine, state.lastRunAt, now, { catchUp });
     return at ? { due: true, dueAt: at } : { due: false };
   }
 
@@ -90,8 +95,15 @@ async function isDue(routine, now) {
   return sensors.hasSignal ? { due: true, dueAt: now } : { due: false };
 }
 
-/** One scheduler pass. Safe to call at any time; never overlaps itself. */
-export async function pulseTick({ reason = 'tick' } = {}) {
+/**
+ * One scheduler pass. Safe to call at any time; never overlaps itself.
+ *
+ * `waitForSync` marks a pass that starts with possibly stale state — on
+ * boot, or on return from the background. Such a pass waits for the run
+ * log to catch up before deciding anything, because acting on a stale
+ * log is how the same routine gets delivered twice from two devices.
+ */
+export async function pulseTick({ reason = 'tick', waitForSync = false } = {}) {
   if (ticking) return { ran: 0, skipped: 'busy' };
 
   ticking = true;
@@ -100,6 +112,8 @@ export async function pulseTick({ reason = 'tick' } = {}) {
     const settings = await getPulseSettings();
 
     if (!settings.enabled) return { ran: 0, skipped: 'disabled' };
+
+    const catchUp = await isPulseStateFresh({ wait: waitForSync });
 
     const now = Date.now();
 
@@ -126,7 +140,7 @@ export async function pulseTick({ reason = 'tick' } = {}) {
     for (const routine of active) {
       if (await blockedReason(routine, settings, Date.now())) continue;
 
-      const { due, dueAt } = await isDue(routine, Date.now());
+      const { due, dueAt } = await isDue(routine, Date.now(), { catchUp });
 
       if (!due) continue;
 
@@ -146,6 +160,12 @@ export async function pulseTick({ reason = 'tick' } = {}) {
 
     if (results.length) {
       console.info('[YANTA Pulse] pass complete', reason, results);
+    }
+
+    // Not a failure, and worth one line rather than one per minute: the
+    // first tick after a successful sync catches up on a log it trusts.
+    if (!catchUp && waitForSync) {
+      console.info('[YANTA Pulse] missed slots deferred: run log not synced yet', reason);
     }
 
     refreshPulseWakeSchedule().catch(() => {});
@@ -204,20 +224,22 @@ export function setupPulseEngine() {
   if (installed) return;
   installed = true;
 
-  const kick = (reason) => {
-    pulseTick({ reason }).catch(() => {});
+  const kick = (reason, options = {}) => {
+    pulseTick({ reason, ...options }).catch(() => {});
   };
 
   // Catch-up pass, deferred off the boot path.
-  window.setTimeout(() => kick('boot'), BOOT_DELAY_MS);
+  window.setTimeout(() => kick('boot', { waitForSync: true }), BOOT_DELAY_MS);
 
   timer = window.setInterval(() => kick('tick'), TICK_MS);
 
   // Returning to the app after it was backgrounded is the moment a
   // missed run is most welcome — that is the whole "open YANTA to run
-  // it" promise the wake notification makes.
+  // it" promise the wake notification makes. It is also the moment this
+  // device is most likely to be a day behind the others, so it waits
+  // for the run log before catching up.
   document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'visible') kick('visible');
+    if (document.visibilityState === 'visible') kick('visible', { waitForSync: true });
   });
 
   window.addEventListener('yanta-pulse-routines-changed', () => {

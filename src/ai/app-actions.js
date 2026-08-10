@@ -41,6 +41,12 @@ import {
 } from './location.js';
 
 import {
+  localTimeZone,
+  toLocalDate,
+  toLocalIso,
+} from './ai-time.js';
+
+import {
   moveNoteToTrash,
 } from '../trash.js';
 
@@ -675,15 +681,33 @@ function eventIntersectsRangeForAi(ev, startMs, endMs) {
   return true;
 }
 
+/**
+ * One event as a model should read it.
+ *
+ * Two normalisations happen here, both so that what the model reads
+ * matches what the calendar shows:
+ *
+ * - Times leave storage (UTC) as local wall clock with offset. The wall
+ *   clock is the meaning of an appointment; see ai-time.js.
+ * - All-day bounds become plain local dates with an inclusive last day.
+ *   Internally the end is inclusive for stored and Markdown events but
+ *   exclusive for subscribed ones, so both go through eventEndMs first —
+ *   one convention out, or the model is a day off half the time.
+ */
 function compactCalendarEventForAi(ev, {
   source = 'stored',
 } = {}) {
+  const allDay = !!ev.allDay;
+  const endMs = allDay ? eventEndMs(ev) : null;
+
   return {
     id: ev.id,
     title: ev.title || 'Untitled event',
-    start: ev.start,
-    end: ev.end || null,
-    allDay: !!ev.allDay,
+    start: allDay ? toLocalDate(eventStartMs(ev)) : toLocalIso(ev.start),
+    end: allDay
+      ? (endMs != null ? toLocalDate(endMs - 1) : null)
+      : (ev.end ? toLocalIso(ev.end) : null),
+    allDay,
 
     categoryId: ev.categoryId || null,
     icon: ev.icon || null,
@@ -806,14 +830,13 @@ export async function searchEventsAction({
     }));
 
   return {
+    // Local, like the events themselves: a range echoed back in UTC is
+    // the fastest way to talk a model out of a correct answer.
+    timeZone: localTimeZone(),
     range: {
       requested: range || null,
-      start: resolvedRange.startMs != null
-        ? new Date(resolvedRange.startMs).toISOString()
-        : null,
-      end: resolvedRange.endMs != null
-        ? new Date(resolvedRange.endMs).toISOString()
-        : null,
+      start: resolvedRange.startMs != null ? toLocalIso(resolvedRange.startMs) : null,
+      end: resolvedRange.endMs != null ? toLocalIso(resolvedRange.endMs) : null,
     },
     query: q || null,
     count: filtered.length,

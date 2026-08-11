@@ -22,6 +22,11 @@ import { t } from './i18n/index.js';
 import { workspaceHasContent } from './first-contact.js';
 import { openBoundOverlay } from './overlay-history.js';
 
+import {
+  dismissDashboardNudge,
+  registerDashboardNudge,
+} from './dashboard-nudges.js';
+
 // Marks the storage decision as settled — set when the user picks a
 // destination or dismisses the nudge. Once set, the nudge stays gone.
 const DECIDED_FLAG = 'onboarding.storageChoice.v1';
@@ -574,27 +579,23 @@ export function openStorageChooser({ onSettled } = {}) {
 // ---------------- Dashboard nudge (inline, dismissible) ----------------
 
 /**
- * Appends the dismissible "set up sync" nudge to `host` — but only for
- * local-only users who haven't settled the choice yet. A no-op otherwise,
- * so it is safe to call on every dashboard render.
+ * The short "set up sync" card for local-only users who haven't settled the
+ * choice yet. Returns null otherwise.
+ *
+ * Last in the ask slot's priority order: the first-steps checklist asks the
+ * same question as one of its steps, and the durability notice asks it with
+ * copy earned by a workspace that has more to lose. This is what remains when
+ * neither of those applies.
  */
-export async function renderSyncNudgeInto(host) {
-  if (!host) return;
-
+async function buildSyncNudge() {
   /*
     Never on an empty workspace. Asking someone to set up sync before they have
     written anything is a request placed ahead of the value it protects — the
-    first screen a newcomer sees used to lead with exactly that. Once there is
-    content, first-contact.js takes over with the durability notice, which says
-    the same thing at a point where it is true and useful.
+    first screen a newcomer sees used to lead with exactly that.
   */
-  if (!workspaceHasContent()) return;
+  if (!workspaceHasContent()) return null;
 
-  if (await storageChoiceSettled()) return;
-
-  // The dashboard may have re-rendered while we were awaiting; bail if the
-  // host we were handed is gone.
-  if (host.isConnected === false) return;
+  if (await storageChoiceSettled()) return null;
 
   injectCss();
 
@@ -626,9 +627,15 @@ export async function renderSyncNudgeInto(host) {
   });
 
   nudge.querySelector('[data-nudge-dismiss]')?.addEventListener('click', async () => {
-    nudge.remove();
+    dismissDashboardNudge(nudge);
     await markDecided();
   });
 
-  host.append(nudge);
+  return nudge;
 }
+
+registerDashboardNudge({
+  id: 'sync-nudge',
+  order: 30,
+  build: buildSyncNudge,
+});

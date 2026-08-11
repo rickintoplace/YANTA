@@ -18,7 +18,10 @@ import {
   toast,
 } from '../core.js';
 
-import { registerDashboardWidget } from '../dashboard-widgets.js';
+import {
+  registerDashboardWidget,
+  setDashboardWidgetEmpty,
+} from '../dashboard-widgets.js';
 import { renderBlocksInline } from '../markdown.js';
 import { t } from '../i18n/index.js';
 
@@ -395,9 +398,7 @@ async function renderPulseInbox() {
   const renderPass = async () => {
     const items = await listInboxItems();
 
-    // Same self-hide caveat as the info panel: [hidden] loses to the
-    // explicit display rules on widget sections.
-    section.style.display = items.length ? '' : 'none';
+    setDashboardWidgetEmpty(section, !items.length);
 
     if (!items.length) {
       host.replaceChildren();

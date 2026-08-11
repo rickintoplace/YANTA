@@ -199,6 +199,24 @@ function shouldRestoreFocus() {
 }
 
 /**
+ * Put the cursor in the capture field and scroll it into view — what the
+ * onboarding checklist's "capture a thought" step does when clicked.
+ *
+ * Also arms the focus-restore window, because the widget may still be
+ * rendering: a checklist click can land in the same frame as a dashboard
+ * re-render that is about to replace this very input.
+ */
+export function focusTodayCapture() {
+  focusPendingAt = Date.now();
+
+  const input = document.querySelector('.yanta-today-capture input');
+  if (!input) return;
+
+  input.scrollIntoView({ block: 'center', behavior: 'smooth' });
+  input.focus();
+}
+
+/**
  * Strip the markdown the capture format itself produces (bold, links,
  * inline code) for the compact preview — the real note keeps it all.
  */

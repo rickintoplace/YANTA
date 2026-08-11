@@ -15,7 +15,10 @@ import {
   escapeHtml,
 } from './core.js';
 
-import { registerDashboardWidget } from './dashboard-widgets.js';
+import {
+  registerDashboardWidget,
+  setDashboardWidgetEmpty,
+} from './dashboard-widgets.js';
 import { categoryIsShared } from './spaces/calendar-registry.js';
 import { t } from './i18n/index.js';
 
@@ -1166,6 +1169,20 @@ async function renderWidgetContent(section, { dir = 0 } = {}) {
   section.replaceChildren(...parts);
 }
 
+/*
+  Whether this workspace has a calendar at all — any event, past or future.
+
+  Deliberately not "has upcoming events": a widget that vanishes because
+  the last meeting of the week is over would be worse than one that is
+  occasionally quiet. What this gate is really for is the newcomer who has
+  never made an event, and for whom four view tabs above "No upcoming
+  events in the next 30 days" is pure chrome on the busiest screen of
+  their first session.
+*/
+function hasAnyCalendarEvents() {
+  return (state.calendarEvents?.size || 0) > 0;
+}
+
 async function renderCalendarWidget() {
   injectCss();
 
@@ -1173,18 +1190,27 @@ async function renderCalendarWidget() {
     class: 'yanta-dash-widget yanta-dash-widget-calendar',
   });
 
+  const sync = async () => {
+    const show = hasAnyCalendarEvents();
+
+    // Only a calendar worth showing gets built at all.
+    if (show) await renderWidgetContent(section);
+
+    setDashboardWidgetEmpty(section, !show);
+  };
+
   const onCalendarUpdated = () => {
     if (!section.isConnected) {
       window.removeEventListener('yanta-calendar-updated', onCalendarUpdated);
       return;
     }
 
-    renderWidgetContent(section).catch(() => {});
+    sync().catch(() => {});
   };
 
   window.addEventListener('yanta-calendar-updated', onCalendarUpdated);
 
-  await renderWidgetContent(section);
+  await sync();
 
   return section;
 }

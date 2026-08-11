@@ -84,6 +84,26 @@ export function hasDashboardWidgets() {
   return widgets.size > 0;
 }
 
+/**
+ * Declare that a widget currently has nothing to show.
+ *
+ * The widget stays mounted — that is how it keeps its listeners and can
+ * reappear mid-session without a dashboard re-render — but it stops
+ * taking up a cell, and the container's gap with it.
+ *
+ * Call this instead of setting `display: none` on the section: several
+ * stylesheets set explicit display on widget sections, which silently
+ * defeats both `[hidden]` and a self-applied class.
+ */
+export function setDashboardWidgetEmpty(section, empty) {
+  const slot = section?.closest?.('.yanta-dash-widget-slot');
+
+  // Before the first mount there is no slot yet; the section's own
+  // display carries the state until renderDashboardWidgetsInto adopts it.
+  if (section) section.style.display = empty ? 'none' : '';
+  if (slot) slot.dataset.widgetEmpty = empty ? '1' : '0';
+}
+
 export async function isDashboardWidgetEnabled(id) {
   const config = await getWidgetsConfig();
   return !config.disabled.includes(id);
@@ -256,6 +276,15 @@ function injectRegistryCss() {
   min-width: 0;
 }
 
+/*
+  A widget that hides itself still occupies a flex/grid cell, and the
+  container's gap is applied around it — so an invisible widget used to
+  cost 14px of blank dashboard. Hiding the slot removes the cell too.
+*/
+.yanta-dash-widget-slot[data-widget-empty="1"] {
+  display: none;
+}
+
 /* Side-by-side on wide screens; media query keeps mobile stacked. */
 .yanta-dashboard-widgets.yanta-dash-widgets-grid {
   display: grid;
@@ -398,6 +427,12 @@ export async function renderDashboardWidgetsInto(host) {
 
       slot.append(node);
       host.append(slot);
+
+      // A widget can decide it is empty while building, before any slot
+      // exists to mark — adopt that state now that one does.
+      if (node.style?.display === 'none') {
+        slot.dataset.widgetEmpty = '1';
+      }
 
       makeSlotDraggable(slot, host);
     } catch (err) {

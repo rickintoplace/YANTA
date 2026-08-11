@@ -421,6 +421,23 @@ export default {
     cleanedUp: { one: '{count} Bild aufgeräumt', other: '{count} Bilder aufgeräumt' },
   },
 
+  firstContact: {
+    steps: {
+      title: 'Ein Schritt ist geschafft',
+      subtitle: 'Noch zwei, dann gehört YANTA dir.',
+      hasNote: 'Dein Workspace hat eine Notiz',
+      capture: 'Einen eigenen Gedanken festhalten',
+      sync: 'Auf allen Geräten sichern',
+      hide: 'Ausblenden',
+    },
+    durability: {
+      title: 'Das alles liegt nur auf diesem Gerät',
+      body: 'Nichts davon wird hochgeladen — genau das ist der Sinn. Es heißt aber auch: Wenn du deine Browserdaten löschst oder dieses Gerät verlierst, ist alles weg. Sync legt eine verschlüsselte Kopie ab, die nur du lesen kannst, und bringt deine Notizen auf deine anderen Geräte.',
+      cta: 'Sync einrichten',
+      dismiss: 'Später',
+    },
+  },
+
   dashWidgets: {
     managerTitle: 'Dashboard-Widgets',
     dragToReorder: 'Zum Neuordnen ziehen',

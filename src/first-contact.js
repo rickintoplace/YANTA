@@ -14,6 +14,11 @@
   for the same real effort when a goal is framed as begun-and-unfinished rather
   than not-yet-started; here the head start is genuine rather than staged,
   because a workspace that exists at all already cleared step one.
+
+  Both cards here compete for the dashboard's single ask slot rather than
+  rendering themselves — see dashboard-nudges.js. An unfinished step is a
+  button, not a status line: a checklist you cannot act on is a report, and a
+  report is one more thing to read on a screen that already has too many.
 */
 
 import {
@@ -24,6 +29,12 @@ import {
 } from './core.js';
 import { findTodayNote } from './journal.js';
 import { WELCOME_IDS } from './notes.js';
+import { t } from './i18n/index.js';
+
+import {
+  dismissDashboardNudge,
+  registerDashboardNudge,
+} from './dashboard-nudges.js';
 
 const WELCOME_NOTE_IDS = new Set(Object.values(WELCOME_IDS.notes));
 
@@ -90,16 +101,29 @@ function injectCss() {
   list-style: none;
 }
 
-.yanta-fc-steps li {
+/*
+  Rows are <span> when done and <button> when actionable, so the shared
+  box model lives on the li and only the affordances differ.
+*/
+.yanta-fc-steps li > * {
   display: inline-flex;
   align-items: center;
   gap: 7px;
 
+  margin: -4px -8px;
+  padding: 4px 8px;
+
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+
+  font: inherit;
   font-size: 13px;
   color: var(--text-dim);
+  text-align: left;
 }
 
-.yanta-fc-steps li[data-done="1"] {
+.yanta-fc-steps li[data-done="1"] > * {
   color: var(--text);
 }
 
@@ -109,7 +133,36 @@ function injectCss() {
   color: #fff;
 }
 
+.yanta-fc-steps li > button {
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease;
+}
+
+.yanta-fc-steps li > button:hover,
+.yanta-fc-steps li > button:focus-visible {
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.yanta-fc-steps li > button:hover .yanta-fc-step-mark,
+.yanta-fc-steps li > button:focus-visible .yanta-fc-step-mark {
+  border-color: var(--accent);
+}
+
+/* Points at the action, and only on the rows that have one. */
+.yanta-fc-step-go {
+  color: var(--accent);
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.yanta-fc-steps li > button:hover .yanta-fc-step-go,
+.yanta-fc-steps li > button:focus-visible .yanta-fc-step-go {
+  opacity: 1;
+}
+
 .yanta-fc-step-mark {
+  flex: none;
   display: grid;
   place-items: center;
 
@@ -215,24 +268,45 @@ async function syncSettled() {
   }
 }
 
-function stepMarkup(label, done) {
-  return `
-    <li data-done="${done ? '1' : '0'}">
-      <span class="yanta-fc-step-mark">${lucide('check', 11)}</span>
-      <span>${label}</span>
-    </li>
-  `;
+/**
+ * One checklist row. Done rows are inert text; an open row with an action
+ * is a button, so the checklist is the way forward rather than a report
+ * about one.
+ */
+function stepRow({ label, done, onClick }) {
+  const li = el('li', { dataset: { done: done ? '1' : '0' } });
+
+  const mark = el('span', { class: 'yanta-fc-step-mark' });
+  mark.innerHTML = lucide('check', 11);
+
+  const text = el('span', {}, label);
+
+  if (done || !onClick) {
+    li.append(el('span', {}, mark, text));
+    return li;
+  }
+
+  const go = el('span', { class: 'yanta-fc-step-go' });
+  go.innerHTML = lucide('arrow-right', 13);
+
+  li.append(el('button', { type: 'button', onclick: onClick }, mark, text, go));
+
+  return li;
 }
 
 /**
  * Three first steps, shown only while they are unfinished. Disappears by
  * itself once everything is done, and can be dismissed before that.
+ *
+ * While this card is up it is the *only* ask on the dashboard: its third
+ * step is the sync question, so the sync cards below it in the priority
+ * order would only repeat what it already says.
  */
-export async function renderFirstStepsInto(host) {
-  if (!host || readFlag(STEPS_DISMISSED_KEY)) return;
+async function buildFirstSteps({ onSetUpSync, onCapture } = {}) {
+  if (readFlag(STEPS_DISMISSED_KEY)) return null;
 
   const notes = userNoteCount();
-  if (notes === 0) return;
+  if (notes === 0) return null;
 
   const [today, settled] = await Promise.all([
     findTodayNote().catch(() => null),
@@ -240,42 +314,47 @@ export async function renderFirstStepsInto(host) {
   ]);
 
   // All done — nothing to nudge about, and no card to look at.
-  if (notes > 0 && today && settled) return;
-
-  if (host.isConnected === false) return;
+  if (today && settled) return null;
 
   injectCss();
 
   const card = el('div', { class: 'yanta-fc' });
 
-  card.innerHTML = `
-    <div class="yanta-fc-icon">${lucide('sparkles', 19)}</div>
+  const icon = el('div', { class: 'yanta-fc-icon' });
+  icon.innerHTML = lucide('sparkles', 19);
 
-    <div class="yanta-fc-main">
-      <div class="yanta-fc-title">You are one step in</div>
-      <div class="yanta-fc-sub">Two more and YANTA is yours.</div>
+  const steps = el('ul', { class: 'yanta-fc-steps' });
 
-      <ul class="yanta-fc-steps">
-        ${stepMarkup('Your workspace has a note', notes > 0)}
-        ${stepMarkup('Capture a thought of your own', !!today)}
-        ${stepMarkup('Keep it across your devices', settled)}
-      </ul>
-    </div>
+  steps.append(
+    stepRow({ label: t('firstContact.steps.hasNote'), done: notes > 0 }),
+    stepRow({ label: t('firstContact.steps.capture'), done: !!today, onClick: onCapture }),
+    stepRow({ label: t('firstContact.steps.sync'), done: settled, onClick: onSetUpSync }),
+  );
 
-    <div class="yanta-fc-actions">
-      <button class="yanta-fc-dismiss" type="button" data-fc-dismiss-steps
-        title="Hide this" aria-label="Hide this">
-        ${lucide('x', 16)}
-      </button>
-    </div>
-  `;
+  const main = el('div', { class: 'yanta-fc-main' });
 
-  card.querySelector('[data-fc-dismiss-steps]')?.addEventListener('click', () => {
-    writeFlag(STEPS_DISMISSED_KEY);
-    card.remove();
+  main.append(
+    el('div', { class: 'yanta-fc-title' }, t('firstContact.steps.title')),
+    el('div', { class: 'yanta-fc-sub' }, t('firstContact.steps.subtitle')),
+    steps,
+  );
+
+  const dismiss = el('button', {
+    class: 'yanta-fc-dismiss',
+    type: 'button',
+    title: t('firstContact.steps.hide'),
+    'aria-label': t('firstContact.steps.hide'),
+    onclick: () => {
+      writeFlag(STEPS_DISMISSED_KEY);
+      dismissDashboardNudge(card);
+    },
   });
 
-  host.append(card);
+  dismiss.innerHTML = lucide('x', 16);
+
+  card.append(icon, main, el('div', { class: 'yanta-fc-actions' }, dismiss));
+
+  return card;
 }
 
 /**
@@ -285,16 +364,15 @@ export async function renderFirstStepsInto(host) {
  * Timing is the whole point — it appears once there is enough to lose, not on
  * an empty first screen where it would be an unearned scare.
  */
-export async function renderDurabilityNoticeInto(host, { onSetUpSync } = {}) {
-  if (!host || readFlag(DURABILITY_DISMISSED_KEY)) return;
+async function buildDurabilityNotice({ onSetUpSync } = {}) {
+  if (readFlag(DURABILITY_DISMISSED_KEY)) return null;
 
   const notes = userNoteCount();
   const hasEvents = (state.calendarEvents?.size || 0) > 0;
 
-  if (notes < DURABILITY_NOTE_THRESHOLD && !hasEvents) return;
+  if (notes < DURABILITY_NOTE_THRESHOLD && !hasEvents) return null;
 
-  if (await syncSettled()) return;
-  if (host.isConnected === false) return;
+  if (await syncSettled()) return null;
 
   injectCss();
 
@@ -306,36 +384,54 @@ export async function renderDurabilityNoticeInto(host, { onSetUpSync } = {}) {
     The real exposure is narrower — and overstating it would cost more trust
     than the extra urgency is worth.
   */
-  card.innerHTML = `
-    <div class="yanta-fc-icon">${lucide('hard-drive', 19)}</div>
+  const icon = el('div', { class: 'yanta-fc-icon' });
+  icon.innerHTML = lucide('hard-drive', 19);
 
-    <div class="yanta-fc-main">
-      <div class="yanta-fc-title">This all lives on this device only</div>
-      <div class="yanta-fc-sub">
-        Nothing here is uploaded, which is the point — but it also means that
-        clearing your browser data, or losing this device, takes it with it.
-        Sync keeps an encrypted copy that only you can read, and puts your
-        notes on your other devices.
-      </div>
-    </div>
+  const main = el('div', { class: 'yanta-fc-main' });
 
-    <div class="yanta-fc-actions">
-      <button class="btn primary" type="button" data-fc-sync>Set up sync</button>
-      <button class="yanta-fc-dismiss" type="button" data-fc-dismiss
-        title="Not now" aria-label="Not now">
-        ${lucide('x', 16)}
-      </button>
-    </div>
-  `;
+  main.append(
+    el('div', { class: 'yanta-fc-title' }, t('firstContact.durability.title')),
+    el('div', { class: 'yanta-fc-sub' }, t('firstContact.durability.body')),
+  );
 
-  card.querySelector('[data-fc-dismiss]')?.addEventListener('click', () => {
-    writeFlag(DURABILITY_DISMISSED_KEY);
-    card.remove();
+  const cta = el('button', {
+    class: 'btn primary',
+    type: 'button',
+    onclick: () => onSetUpSync?.(),
+  }, t('firstContact.durability.cta'));
+
+  const dismiss = el('button', {
+    class: 'yanta-fc-dismiss',
+    type: 'button',
+    title: t('firstContact.durability.dismiss'),
+    'aria-label': t('firstContact.durability.dismiss'),
+    onclick: () => {
+      writeFlag(DURABILITY_DISMISSED_KEY);
+      dismissDashboardNudge(card);
+    },
   });
 
-  card.querySelector('[data-fc-sync]')?.addEventListener('click', () => {
-    onSetUpSync?.();
-  });
+  dismiss.innerHTML = lucide('x', 16);
 
-  host.append(card);
+  card.append(icon, main, el('div', { class: 'yanta-fc-actions' }, cta, dismiss));
+
+  return card;
 }
+
+/*
+  Priority in the shared ask slot. The checklist outranks both sync cards
+  because it already contains the sync question as its third step; the
+  longer durability copy outranks the short nudge because it only becomes
+  eligible once there is genuinely enough to lose.
+*/
+registerDashboardNudge({
+  id: 'first-steps',
+  order: 10,
+  build: buildFirstSteps,
+});
+
+registerDashboardNudge({
+  id: 'durability',
+  order: 20,
+  build: buildDurabilityNotice,
+});

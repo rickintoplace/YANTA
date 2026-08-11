@@ -18,7 +18,9 @@ import {
   import {
     sync,
   } from '../sync.js';
-  
+
+  import { pendingNudgeId } from '../dashboard-nudges.js';
+
   const REMINDER_STATE_KEY = 'yanta.syncReminder.state.v1';
   
   const CHANGE_THRESHOLD = 3;
@@ -408,9 +410,17 @@ import {
   
   async function shouldShowReminder() {
     if (!currentSurfaceAllowsReminder()) return false;
-  
+
     if (visibleModalOpen()) return false;
-  
+
+    /*
+      Never on top of an open ask. This toast says the same thing as the
+      dashboard's sync nudges, and a floating card overlapping the inline
+      card that already asked is how a first session ends up with three
+      copies of one request on screen at once.
+    */
+    if (pendingNudgeId()) return false;
+
     if (userNotesCount() < MIN_USER_NOTE_COUNT) return false;
   
     const reminderState = readReminderState();

@@ -30,12 +30,13 @@ import {
   openDashboardWidgetManager,
   hasDashboardWidgets,
 } from './dashboard-widgets.js';
-import { renderSyncNudgeInto, openStorageChooser } from './onboarding.js';
-import {
-  renderFirstStepsInto,
-  renderDurabilityNoticeInto,
-} from './first-contact.js';
+import { openStorageChooser } from './onboarding.js';
+import { renderTopNudgeInto } from './dashboard-nudges.js';
+import { focusTodayCapture } from './today-widget.js';
 import { openTemplatePicker } from './templates/template-picker.js';
+
+// Side-effect imports: these register themselves as ask-slot candidates.
+import './first-contact.js';
 
 import {
   currentGreeting,
@@ -2511,21 +2512,18 @@ function renderDashboard({ animate = true, force = false } = {}) {
   // Widgets live on the dashboard root only, never inside folders.
   // They fill in asynchronously and keep themselves fresh afterwards.
   if (!dashboard.folderId) {
-    // Non-blocking storage nudge for local-only users, above the widgets.
-    // Self-hiding: a no-op once the choice is settled or sync is on.
+    /*
+      The single ask slot. Onboarding checklist, sync nudges and anything
+      else that wants something from the user compete for it by priority,
+      and exactly one of them can occupy it — see dashboard-nudges.js.
+    */
     const nudgeHost = el('div', { class: 'yanta-dashboard-nudge-host' });
     page.append(nudgeHost);
 
-    /*
-      Order matters: the first-contact cards speak to someone who has just
-      arrived, the sync nudge to someone who already settled in. All three
-      are self-hiding, so at most one of them is ever on screen.
-    */
-    renderFirstStepsInto(nudgeHost).catch(() => {});
-    renderDurabilityNoticeInto(nudgeHost, {
+    renderTopNudgeInto(nudgeHost, {
       onSetUpSync: () => openStorageChooser(),
+      onCapture: () => focusTodayCapture(),
     }).catch(() => {});
-    renderSyncNudgeInto(nudgeHost).catch(() => {});
 
     const widgetsHost = el('div', { class: 'yanta-dashboard-widgets' });
     page.append(widgetsHost);

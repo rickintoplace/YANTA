@@ -19,6 +19,7 @@ import {
 import {
   registerDashboardWidget,
   setDashboardWidgetEnabled,
+  setDashboardWidgetEmpty,
 } from '../dashboard-widgets.js';
 
 import { t } from '../i18n/index.js';
@@ -564,12 +565,12 @@ async function renderWidgetContent(section) {
   const { feeds, items } = await collectItems(config);
 
   if (!items.length) {
-    section.hidden = true;
+    setDashboardWidgetEmpty(section, true);
     section.replaceChildren();
     return;
   }
 
-  section.hidden = false;
+  setDashboardWidgetEmpty(section, false);
 
   const isList = config.view === 'list';
 

@@ -16,7 +16,12 @@ import {
   escapeHtml,
 } from './core.js';
 
-import { registerDashboardWidget } from './dashboard-widgets.js';
+import {
+  registerDashboardWidget,
+  setDashboardWidgetEmpty,
+} from './dashboard-widgets.js';
+
+import { pendingNudgeId } from './dashboard-nudges.js';
 import { t } from './i18n/index.js';
 
 import {
@@ -251,6 +256,13 @@ function collectInstallItems() {
   */
   if (!workspaceHasContent()) return [];
 
+  /*
+    And not while the dashboard is already asking for something else. This
+    is a second commitment request competing with onboarding for the same
+    attention — it can wait for the ask slot to clear.
+  */
+  if (pendingNudgeId()) return [];
+
   let rec;
 
   try {
@@ -439,12 +451,7 @@ async function renderInfoPanel() {
   const refresh = () => {
     const count = renderItems(body, refresh);
 
-    /*
-      Self-hide via inline style, not [hidden]: several stylesheets
-      set explicit display on widget sections, which silently defeats
-      the hidden attribute (long-standing YANTA pitfall).
-    */
-    section.style.display = count ? '' : 'none';
+    setDashboardWidgetEmpty(section, !count);
 
     return count;
   };
@@ -463,6 +470,19 @@ async function renderInfoPanel() {
 
   window.addEventListener('yanta-calendar-updated', onCalendarUpdated);
   window.addEventListener('yanta-native-notification-status-changed', onCalendarUpdated);
+
+  // The install hint waits for the ask slot to clear — reveal it the moment
+  // it does, without needing a dashboard re-render.
+  const onNudgeChanged = () => {
+    if (!alive()) {
+      window.removeEventListener('yanta-dashboard-nudge-changed', onNudgeChanged);
+      return;
+    }
+
+    refresh();
+  };
+
+  window.addEventListener('yanta-dashboard-nudge-changed', onNudgeChanged);
 
   const onPulseChanged = () => {
     if (!alive()) {

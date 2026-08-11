@@ -421,6 +421,23 @@ export default {
     cleanedUp: { one: '{count} imagen limpiada', other: '{count} imágenes limpiadas' },
   },
 
+  firstContact: {
+    steps: {
+      title: 'Ya has dado un paso',
+      subtitle: 'Dos más y YANTA será tuyo.',
+      hasNote: 'Tu espacio ya tiene una nota',
+      capture: 'Captura una idea propia',
+      sync: 'Consérvalo en todos tus dispositivos',
+      hide: 'Ocultar',
+    },
+    durability: {
+      title: 'Todo esto vive solo en este dispositivo',
+      body: 'Nada de esto se sube a ningún sitio, y esa es la idea — pero también significa que borrar los datos del navegador, o perder este dispositivo, se lo lleva todo. La sincronización guarda una copia cifrada que solo tú puedes leer y lleva tus notas a tus demás dispositivos.',
+      cta: 'Configurar sincronización',
+      dismiss: 'Ahora no',
+    },
+  },
+
   dashWidgets: {
     managerTitle: 'Widgets del panel',
     dragToReorder: 'Arrastra para reordenar',

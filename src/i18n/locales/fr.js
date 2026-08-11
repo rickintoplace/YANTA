@@ -421,6 +421,23 @@ export default {
     cleanedUp: { one: '{count} image nettoyée', other: '{count} images nettoyées' },
   },
 
+  firstContact: {
+    steps: {
+      title: 'Une étape de faite',
+      subtitle: 'Encore deux et YANTA est à vous.',
+      hasNote: 'Votre espace contient une note',
+      capture: 'Capturez une idée à vous',
+      sync: 'Gardez-la sur tous vos appareils',
+      hide: 'Masquer',
+    },
+    durability: {
+      title: 'Tout ceci ne vit que sur cet appareil',
+      body: 'Rien n’est envoyé ailleurs, et c’est bien le but — mais cela veut aussi dire qu’effacer les données de votre navigateur, ou perdre cet appareil, emporte tout. La synchronisation conserve une copie chiffrée que vous seul pouvez lire et place vos notes sur vos autres appareils.',
+      cta: 'Configurer la synchronisation',
+      dismiss: 'Plus tard',
+    },
+  },
+
   dashWidgets: {
     managerTitle: 'Widgets du tableau de bord',
     dragToReorder: 'Glisser pour réorganiser',

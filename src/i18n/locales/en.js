@@ -428,6 +428,23 @@ export default {
     cleanedUp: { one: 'Cleaned up {count} image', other: 'Cleaned up {count} images' },
   },
 
+  firstContact: {
+    steps: {
+      title: 'You are one step in',
+      subtitle: 'Two more and YANTA is yours.',
+      hasNote: 'Your workspace has a note',
+      capture: 'Capture a thought of your own',
+      sync: 'Keep it across your devices',
+      hide: 'Hide this',
+    },
+    durability: {
+      title: 'This all lives on this device only',
+      body: 'Nothing here is uploaded, which is the point — but it also means that clearing your browser data, or losing this device, takes it with it. Sync keeps an encrypted copy that only you can read, and puts your notes on your other devices.',
+      cta: 'Set up sync',
+      dismiss: 'Not now',
+    },
+  },
+
   dashWidgets: {
     managerTitle: 'Dashboard widgets',
     dragToReorder: 'Drag to reorder',

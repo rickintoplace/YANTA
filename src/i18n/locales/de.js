@@ -39,6 +39,7 @@ export default {
       notes: 'Deine Notizen werden geladen…',
       workspace: 'Dein Arbeitsbereich wird vorbereitet…',
       almost: 'Gleich fertig…',
+      sharedFolder: 'Der geteilte Ordner wird geöffnet…',
     },
   },
 
@@ -528,6 +529,8 @@ export default {
     liveShareActivePeers: { one: 'Live-Freigabe aktiv · {count} Peer', other: 'Live-Freigabe aktiv · {count} Peers' },
     sharedWithYouCanEdit: 'Mit dir geteilt (bearbeitbar)',
     sharedWithYouReadOnly: 'Mit dir geteilt (schreibgeschützt)',
+    sharedWithYouBy: 'Von {name} mit dir geteilt',
+    sharedWithYou: 'Mit dir geteilt',
     legacyLiveSharingPeers: { one: 'Legacy-Live-Freigabe · {count} Peer', other: 'Legacy-Live-Freigabe · {count} Peers' },
     sharedNoteTitle: 'Geteilte Notiz',
     people: {

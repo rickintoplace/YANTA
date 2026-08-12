@@ -71,6 +71,19 @@ export function workspaceRootMap(spaceId) {
   return getWorkspaceDoc(spaceId).getMap('root');
 }
 
+/**
+ * Calendar events linked to notes in the shared subtree, plus the meta
+ * of the categories they belong to. A note whose event stayed behind is
+ * only half of what was shared — see shared-events.js for the rule.
+ */
+export function workspaceEventsMap(spaceId) {
+  return getWorkspaceDoc(spaceId).getMap('events');
+}
+
+export function workspaceCategoriesMap(spaceId) {
+  return getWorkspaceDoc(spaceId).getMap('categories');
+}
+
 export async function destroyWorkspaceDoc(spaceId) {
   const entry = entries.get(spaceId);
   if (!entry) return;
@@ -125,6 +138,7 @@ export function addWorkspaceTombstone(spaceId, kind, id, origin) {
 
     if (kind === 'note') workspaceNotesMap(spaceId).delete(id);
     if (kind === 'folder') workspaceFoldersMap(spaceId).delete(id);
+    if (kind === 'event') workspaceEventsMap(spaceId).delete(id);
   }, origin);
 }
 

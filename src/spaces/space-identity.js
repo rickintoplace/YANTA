@@ -74,9 +74,16 @@ export async function hydrateOwnIdentity() {
 }
 
 /**
+ * What a participant is called when nothing identifies them — no
+ * Matrix account, no display name. UI that would otherwise say
+ * "shared by Someone" checks against this and stays neutral instead.
+ */
+export const ANONYMOUS_IDENTITY_LABEL = 'Someone';
+
+/**
  * Identity for attribution, with graceful degradation: Matrix ID →
- * cached Matrix ID → local display name → 'Someone'. Never loads the
- * chat session (callers on hot paths must stay cheap).
+ * cached Matrix ID → local display name → the anonymous label. Never
+ * loads the chat session (callers on hot paths must stay cheap).
  */
 export async function ownIdentityOrLabel() {
   const known = peekOwnIdentity() || (await hydrateOwnIdentity());
@@ -87,7 +94,7 @@ export async function ownIdentityOrLabel() {
     if (name) return String(name);
   } catch {}
 
-  return 'Someone';
+  return ANONYMOUS_IDENTITY_LABEL;
 }
 
 /**
@@ -120,5 +127,5 @@ export async function resolveOwnIdentity() {
     if (me?.user?.email) return String(me.user.email);
   } catch {}
 
-  return 'Someone';
+  return ANONYMOUS_IDENTITY_LABEL;
 }

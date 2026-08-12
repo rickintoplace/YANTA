@@ -39,6 +39,7 @@ export default {
       notes: 'Chargement de vos notes…',
       workspace: 'Préparation de votre espace de travail…',
       almost: 'Presque prêt…',
+      sharedFolder: 'Ouverture du dossier partagé…',
     },
   },
 
@@ -528,6 +529,8 @@ export default {
     liveShareActivePeers: { one: 'Partage en direct actif · {count} pair', other: 'Partage en direct actif · {count} pairs' },
     sharedWithYouCanEdit: 'Partagé avec vous (modifiable)',
     sharedWithYouReadOnly: 'Partagé avec vous (lecture seule)',
+    sharedWithYouBy: 'Partagé avec vous par {name}',
+    sharedWithYou: 'Partagé avec vous',
     legacyLiveSharingPeers: { one: 'Partage en direct hérité · {count} pair', other: 'Partage en direct hérité · {count} pairs' },
     sharedNoteTitle: 'Note partagée',
     people: {

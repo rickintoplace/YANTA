@@ -134,6 +134,63 @@
   color: var(--accent);
 }
 
+/* Wer diesen Ordner geteilt hat — die erste Frage beim Öffnen eines
+   Share-Links, direkt unter Titel und Breadcrumb beantwortet. */
+.yanta-dashboard-share-context {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+
+  overflow: hidden;
+
+  margin-top: 6px;
+
+  white-space: nowrap;
+}
+
+.yanta-dashboard-share-context .yanta-person-avatar {
+  --person-size: 20px;
+
+  flex: 0 0 auto;
+  font-size: 9px;
+}
+
+.yanta-dashboard-share-context-icon {
+  flex: 0 0 auto;
+
+  display: inline-flex;
+  align-items: center;
+
+  color: var(--accent);
+}
+
+.yanta-dashboard-share-context-text {
+  min-width: 0;
+
+  overflow: hidden;
+
+  color: var(--text-dim);
+
+  font-size: 11.5px;
+  font-weight: 600;
+
+  text-overflow: ellipsis;
+}
+
+.yanta-dashboard-share-context-role {
+  flex: 0 0 auto;
+
+  padding: 1px 7px;
+  border-radius: 999px;
+
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: lowercase;
+}
+
 .yanta-dashboard-new-btn {
   height: 44px;
   min-height: 44px;

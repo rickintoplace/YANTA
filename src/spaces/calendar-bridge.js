@@ -44,12 +44,15 @@ import {
   calendarEventsMap,
   calendarNotesMap,
   calendarTombstonesMap,
-  sharedCategoryMeta,
-  sharedEventRecord,
   sharedNoteMeta,
   addCalendarTombstone,
   isCalendarTombstoned,
 } from './calendar-space-doc.js';
+
+import {
+  sharedCategoryMeta,
+  sharedEventRecord,
+} from './shared-events.js';
 
 import {
   registerCalendarBridge,

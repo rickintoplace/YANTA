@@ -204,7 +204,12 @@ import {
   calendarBridgeForSpace,
   mountedCalendarBridges,
   calendarBridges,
+  mountedSpaceEventProviders,
+  mountedSpaceEventProviderForCategory,
+  spaceEventProviders,
 } from './spaces/calendar-registry.js';
+
+import { eventLinksToNote } from './spaces/shared-events.js';
 
 import {
   loadCalendarPersonal,
@@ -6674,6 +6679,11 @@ export function hydrateCalendarStateFromVault({
  * themselves).
  */
 function mergeMountedCalendarSpaces() {
+  // Folder spaces first: a category shared as a calendar is the stronger
+  // claim (it can be written to), so it wins where both deliver the same
+  // event.
+  mergeMountedSpaceEventProviders();
+
   for (const bridge of mountedCalendarBridges()) {
     const shared = bridge.category();
     if (!shared) continue;
@@ -6703,6 +6713,45 @@ function mergeMountedCalendarSpaces() {
 
       ev.spaceId = bridge.spaceId;
       ev.spaceRole = bridge.role;
+
+      state.calendarEvents.set(ev.id, ev);
+    }
+  }
+}
+
+/**
+ * Fold in events that reached this device through a shared FOLDER —
+ * the ones linked to notes inside it. They are read-only for now
+ * (see spaces/workspace-events.js) and, like mounted calendars, never
+ * touch the vault.
+ */
+function mergeMountedSpaceEventProviders() {
+  for (const provider of mountedSpaceEventProviders()) {
+    for (const raw of provider.categories()) {
+      const cat = sanitizeCalendarCategory({
+        ...raw,
+        color: '#8ab4f8',
+        visible: true,
+      });
+
+      if (!cat) continue;
+
+      const merged = applyCategoryOverlay(cat);
+
+      merged.spaceId = provider.spaceId;
+      merged.spaceRole = provider.role;
+      merged.readonly = true;
+
+      state.calendarCategories.set(merged.id, merged);
+    }
+
+    for (const raw of provider.events()) {
+      const ev = sanitizeCalendarEvent(raw);
+      if (!ev) continue;
+
+      ev.spaceId = provider.spaceId;
+      ev.spaceRole = provider.role;
+      ev.readonly = true;
 
       state.calendarEvents.set(ev.id, ev);
     }
@@ -6803,6 +6852,37 @@ export function putCalendarCategory(patch) {
   });
 
   if (!cat) return null;
+
+  const provider = mountedSpaceEventProviderForCategory(cat.id);
+
+  if (provider) {
+    /*
+      A category that only exists because a shared folder brought its
+      events along: it belongs to the folder's owner. Color and
+      visibility are still yours — but nothing about it may enter your
+      vault, or it would outlive the share as a phantom calendar.
+    */
+    setCategoryPersonalPrefs(cat.id, {
+      color: patch.color !== undefined ? cat.color : undefined,
+      visible: patch.visible !== undefined ? cat.visible : undefined,
+    });
+
+    const merged = applyCategoryOverlay({
+      ...cat,
+      name: existing?.name || cat.name,
+    });
+
+    merged.spaceId = provider.spaceId;
+    merged.spaceRole = provider.role;
+    merged.readonly = true;
+
+    state.calendarCategories.set(merged.id, merged);
+
+    scheduleCalendarRender();
+    window.dispatchEvent(new CustomEvent('yanta-calendar-updated'));
+
+    return merged;
+  }
 
   const bridge = calendarBridgeForCategory(cat.id);
 
@@ -7130,6 +7210,20 @@ export function putCalendarEvent(patch) {
     take the vault path below — their bridge mirrors the change into
     the space automatically.
   */
+  /*
+    Events that arrived through a shared FOLDER (linked to a note in it)
+    are read-only in this version — writing them would either fork a
+    private copy or silently drop the change. Both directions are
+    blocked: editing them, and moving an own event into their category.
+  */
+  if (
+    mountedSpaceEventProviderForCategory(existing?.categoryId || '') ||
+    mountedSpaceEventProviderForCategory(ev.categoryId)
+  ) {
+    toast('Events shared through a folder are read-only', 'error');
+    return null;
+  }
+
   const sourceBridge = existing ? calendarBridgeForCategory(existing.categoryId) : null;
   const targetBridge = calendarBridgeForCategory(ev.categoryId);
   const mountedSource = sourceBridge && !sourceBridge.isOwner ? sourceBridge : null;
@@ -7226,6 +7320,11 @@ export function deleteCalendarEvent(eventId) {
 
   const existing = state.calendarEvents.get(id);
   const oldNoteId = existing?.noteId || null;
+
+  if (mountedSpaceEventProviderForCategory(existing?.categoryId || '')) {
+    toast('Events shared through a folder are read-only', 'error');
+    return;
+  }
 
   const bridge = existing ? calendarBridgeForCategory(existing.categoryId) : null;
 
@@ -9743,7 +9842,7 @@ function createCalendarEventAttachmentNode(ev, {
         Open event
       </button>
 
-      ${surface === 'editor' ? `
+      ${surface === 'editor' && !ev.readonly ? `
         <button class="btn" data-event-attachment-action="unlink">
           ${lucide('unlink', 13)}
           Unlink
@@ -10023,9 +10122,10 @@ export function renderCalendarNoteAttachments(noteId = state.currentNoteId) {
 }
 
 /**
- * Persistent banner on any note that is readable through a shared
- * calendar — because it is linked to a shared event (owner side) or
- * was materialized from someone's calendar share (recipient side).
+ * Persistent banner on any note whose calendar side is visible to other
+ * people — because it is linked to a shared event (owner side), was
+ * materialized from someone's calendar share (recipient side), or sits
+ * in a shared folder that carries its events along.
  * Accidental oversharing dies in daylight.
  */
 function renderCalendarSharedNoteBanner(noteId) {
@@ -10049,6 +10149,7 @@ function renderCalendarSharedNoteBanner(noteId) {
       info = {
         name: cat?.name || 'a shared calendar',
         mounted: true,
+        via: 'calendar',
       };
     }
   }
@@ -10068,6 +10169,21 @@ function renderCalendarSharedNoteBanner(noteId) {
       info = {
         name: state.calendarCategories.get(ev.categoryId)?.name || 'a shared calendar',
         mounted: !shareInfo.shared,
+        via: 'calendar',
+      };
+      break;
+    }
+  }
+
+  // Events linked to a note inside a shared folder travel with it.
+  if (!info) {
+    for (const provider of spaceEventProviders()) {
+      if (!provider.events().some((ev) => eventLinksToNote(ev, noteId))) continue;
+
+      info = {
+        name: provider.title || 'a shared folder',
+        mounted: !provider.isOwner,
+        via: 'folder',
       };
       break;
     }
@@ -10075,18 +10191,20 @@ function renderCalendarSharedNoteBanner(noteId) {
 
   if (!info) return;
 
+  const message = info.via === 'folder'
+    ? info.mounted
+      ? `Shared with you via folder “${escapeHtml(info.name)}”`
+      : `Linked events travel with the shared folder “${escapeHtml(info.name)}”`
+    : info.mounted
+      ? `Shared with you via calendar “${escapeHtml(info.name)}”`
+      : `Shared via calendar “${escapeHtml(info.name)}”. Everyone with access can read this note`;
+
   for (const host of hosts) {
     const banner = document.createElement('div');
     banner.className = 'yanta-calendar-shared-note-banner';
     banner.innerHTML = `
       ${lucide('users', 13)}
-      <span>
-        ${
-          info.mounted
-            ? `Shared with you via calendar “${escapeHtml(info.name)}”`
-            : `Shared via calendar “${escapeHtml(info.name)}”. Everyone with access can read this note`
-        }
-      </span>
+      <span>${message}</span>
     `;
 
     host.prepend(banner);
@@ -12168,40 +12286,52 @@ function renderCategoriesModal({
       const sourceDesc = calendarCategorySourceDescription(cat.source);
 
       const mounted = !!cat.spaceId;
+      const folderProvider = mountedSpaceEventProviderForCategory(cat.id);
       const shareInfo = calendarCategoryShareInfo(cat.id);
       const shared = mounted || shareInfo.shared;
       const canShare = !sourceDesc && !cat.readonly && !mounted;
 
-      const shareLine = mounted
+      /*
+        A category that came in with a shared FOLDER is not a calendar
+        you joined — you cannot leave it here, you leave the folder.
+      */
+      const shareLine = folderProvider
         ? `
           <span class="yanta-calendar-cat-shared-badge is-mounted">
-            ${lucide('users', 13)}
-            Shared with you${cat.readonly ? ' · view only' : ' · you can edit'}
+            ${lucide('folder', 13)}
+            From shared folder${folderProvider.title ? ` “${escapeHtml(folderProvider.title)}”` : ''} · view only
           </span>
-          <button class="btn compact danger" data-cat-leave>${lucide('log-out', 13)} Leave</button>
         `
-        : shareInfo.shared
+        : mounted
           ? `
-            <span class="yanta-calendar-cat-shared-badge">
+            <span class="yanta-calendar-cat-shared-badge is-mounted">
               ${lucide('users', 13)}
-              Live shared${shareInfo.memberCount ? ` · ${shareInfo.memberCount} ${shareInfo.memberCount === 1 ? 'person' : 'people'}` : ''}${shareInfo.hasLink ? ` · ${lucide('globe', 12)} link` : ''}
+              Shared with you${cat.readonly ? ' · view only' : ' · you can edit'}
             </span>
-            <button class="btn compact" data-cat-share>${lucide('share-2', 13)} Manage sharing</button>
+            <button class="btn compact danger" data-cat-leave>${lucide('log-out', 13)} Leave</button>
           `
-          : canShare
+          : shareInfo.shared
             ? `
-              <span>${lucide('lock', 13)} Private — only you</span>
-              <button class="btn compact" data-cat-share>${lucide('share-2', 13)} Share…</button>
-            `
-            : `
-              <span>
-                ${
-                  sourceDesc
-                    ? `${lucide('calendar-days', 13)} ${escapeHtml(sourceDesc)}`
-                    : `${lucide('lock', 13)} Private`
-                }
+              <span class="yanta-calendar-cat-shared-badge">
+                ${lucide('users', 13)}
+                Live shared${shareInfo.memberCount ? ` · ${shareInfo.memberCount} ${shareInfo.memberCount === 1 ? 'person' : 'people'}` : ''}${shareInfo.hasLink ? ` · ${lucide('globe', 12)} link` : ''}
               </span>
-            `;
+              <button class="btn compact" data-cat-share>${lucide('share-2', 13)} Manage sharing</button>
+            `
+            : canShare
+              ? `
+                <span>${lucide('lock', 13)} Private — only you</span>
+                <button class="btn compact" data-cat-share>${lucide('share-2', 13)} Share…</button>
+              `
+              : `
+                <span>
+                  ${
+                    sourceDesc
+                      ? `${lucide('calendar-days', 13)} ${escapeHtml(sourceDesc)}`
+                      : `${lucide('lock', 13)} Private`
+                  }
+                </span>
+              `;
 
       return `
         <div class="yanta-calendar-cat-row ${shared ? 'is-shared' : ''}" data-cat-id="${escapeAttr(cat.id)}">

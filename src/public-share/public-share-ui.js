@@ -35,7 +35,10 @@ import {
 
 import {
   calendarBridgeForSpace,
+  spaceEventProviderForSpace,
 } from '../spaces/calendar-registry.js';
+
+import { formatDateTime } from '../i18n/format.js';
 
 import {
   publishSpaceRoster,
@@ -1346,6 +1349,7 @@ body.innerHTML = `
     </div>
 
     ${isCalendar ? '<div data-calendar-share-extras></div>' : ''}
+    ${isFolder ? '<div data-folder-share-extras></div>' : ''}
 
     <div class="compress-actions">
       <span class="grow"></span>
@@ -1423,6 +1427,10 @@ if (links.write) {
 
 if (isCalendar) {
   renderCalendarShareExtras(body, session).catch(() => {});
+}
+
+if (isFolder) {
+  renderFolderShareExtras(body, session);
 }
 
 body.querySelector('[data-stop-space-share]')?.addEventListener('click', async () => {
@@ -1560,6 +1568,88 @@ async function renderCalendarShareExtras(body, session) {
       }
 
       renderCalendarShareExtras(body, session).catch(() => {});
+    });
+  });
+}
+
+// ---------------- Folder share extras ------------------------------
+//
+// The mirror of the calendar panel: a folder carries the calendar
+// events linked to the notes inside it, and the owner decides which of
+// them travel. Same rule as everywhere — nothing leaves silently.
+
+function renderFolderShareExtras(body, session) {
+  const host = body.querySelector('[data-folder-share-extras]');
+  if (!host) return;
+
+  const provider = spaceEventProviderForSpace(session.spaceId);
+  if (!provider) return;
+
+  const excluded = provider.excludedEventIds();
+
+  const events = provider.linkableEvents()
+    .sort((a, b) => String(a.start || '').localeCompare(String(b.start || '')));
+
+  const eventRows = events
+    .map((ev) => {
+      const checked = !excluded.has(ev.id);
+      const when = ev.start ? formatDateTime(ev.start) : '';
+
+      return `
+        <label class="yanta-calendar-share-note-row">
+          <input type="checkbox" data-share-event-id="${escapeHtml(ev.id)}" ${checked ? 'checked' : ''} />
+          <span class="yanta-calendar-share-note-title">
+            ${lucide('calendar', 13)}
+            ${escapeHtml(ev.title || 'Untitled event')}
+          </span>
+          <small>${escapeHtml(when)}${checked ? '' : ' · kept private'}</small>
+        </label>
+      `;
+    })
+    .join('');
+
+  host.innerHTML = `
+    <div class="yanta-calendar-share-extras">
+      <div class="yanta-share-link-section">
+        <div class="yanta-public-share-info yanta-share-link-info">
+          <div class="yanta-share-link-title">
+            ${lucide('calendar', 15)}
+            <strong>Linked events</strong>
+          </div>
+          <span>
+            ${
+              events.length
+                ? 'Events linked to notes in this folder are visible to everyone with access, so the notes make sense. Untick one to keep it private.'
+                : 'No events are linked to notes in this folder. When you link one, it travels with the folder and shows up here.'
+            }
+          </span>
+        </div>
+
+        ${eventRows ? `<div class="yanta-calendar-share-note-list">${eventRows}</div>` : ''}
+      </div>
+    </div>
+  `;
+
+  host.querySelectorAll('[data-share-event-id]').forEach((checkbox) => {
+    checkbox.addEventListener('change', async () => {
+      const eventId = checkbox.dataset.shareEventId;
+      const nextExcluded = new Set(provider.excludedEventIds());
+
+      if (checkbox.checked) {
+        nextExcluded.delete(eventId);
+      } else {
+        nextExcluded.add(eventId);
+      }
+
+      try {
+        await provider.setExcludedEventIds([...nextExcluded]);
+        toast(checkbox.checked ? 'Event is shared with the folder' : 'Event stays private', 'success');
+      } catch (err) {
+        console.error(err);
+        toast('Could not update event sharing', 'error');
+      }
+
+      renderFolderShareExtras(body, session);
     });
   });
 }

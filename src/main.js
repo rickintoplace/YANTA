@@ -2753,8 +2753,13 @@ async function init() {
 
   let sharedOpen = null;
 
+  // A folder share opens ON the shared folder — see the routing below.
+  let sharedFolderId = null;
+
   if (window.location.hash.startsWith('#space=')) {
-    const spaceOpen = await handleSpaceUrl();
+    const spaceOpen = await handleSpaceUrl({
+      onProgress: () => bootStage(t('boot.stage.sharedFolder'), 80),
+    });
 
     if (spaceOpen?.noteId) {
       sharedOpen = spaceOpen;
@@ -2764,6 +2769,8 @@ async function init() {
       // A shared calendar opens on the calendar surface: route through
       // the normal hash routing below (sharedOpen has no noteId).
       history.replaceState({}, '', '#calendar');
+    } else if (spaceOpen?.sourceType === 'folder' && spaceOpen.folderId) {
+      sharedFolderId = spaceOpen.folderId;
     }
 
     await restoreSpaces();
@@ -2812,7 +2819,34 @@ async function init() {
   if (!sharedOpen?.noteId) {
     const route = parseAppHash();
 
-    if (route.surface === 'chat') {
+    if (sharedFolderId && state.folders.has(sharedFolderId)) {
+      /*
+        A folder-share link lands IN the shared folder. A first-time
+        recipient still gets their Welcome content, but seeded quietly
+        in the background — the folder they were invited to is the entry
+        point, not our demo notes.
+      */
+      const hasOwnNotes = [...state.notes.values()].some((note) => !note.spaceId);
+
+      if (!hasOwnNotes) {
+        setNavSuppress(true);
+
+        try {
+          await createWelcomeNote({ open: false });
+        } finally {
+          setNavSuppress(false);
+        }
+      }
+
+      showDashboard({
+        folderId: sharedFolderId,
+        replace: true,
+      });
+
+      initialRouteHandled = true;
+    }
+
+    else if (route.surface === 'chat') {
       await openChatRoute(route.roomId || null, {
         replace: true,
       });

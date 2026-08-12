@@ -43,3 +43,51 @@ export function mountedCalendarBridges() {
 export function categoryIsShared(categoryId) {
   return !!calendarBridgeForCategory(categoryId);
 }
+
+// ---------------- shared-event providers --------------------------
+//
+// A calendar space is not the only source of events that arrive from
+// someone else: a folder space carries the events linked to its notes.
+// The calendar module folds every MOUNTED provider into its in-memory
+// state, so it needs one way to enumerate them, whatever kind of space
+// they came from.
+//
+// Provider contract:
+//   { spaceId, role, isOwner, canWrite, title, categories(), events() }
+
+const eventProviders = new Map(); // spaceId -> provider
+
+export function registerSpaceEventProvider(provider) {
+  eventProviders.set(provider.spaceId, provider);
+}
+
+export function unregisterSpaceEventProvider(spaceId) {
+  eventProviders.delete(spaceId);
+}
+
+export function spaceEventProviders() {
+  return [...eventProviders.values()];
+}
+
+/** Providers whose events came from someone else's share. */
+export function mountedSpaceEventProviders() {
+  return spaceEventProviders().filter((provider) => !provider.isOwner);
+}
+
+export function spaceEventProviderForSpace(spaceId) {
+  return eventProviders.get(spaceId) || null;
+}
+
+/**
+ * The mounted provider a category was hydrated from, if any — the
+ * calendar uses it to keep such a category out of the local vault.
+ */
+export function mountedSpaceEventProviderForCategory(categoryId) {
+  if (!categoryId) return null;
+
+  for (const provider of mountedSpaceEventProviders()) {
+    if (provider.categories().some((cat) => cat.id === categoryId)) return provider;
+  }
+
+  return null;
+}

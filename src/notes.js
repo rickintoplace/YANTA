@@ -994,14 +994,20 @@ export async function toggleTaskLineInNote(noteId, lineIndex, checked, {
 }
 
 // ---------------- welcome -------------------------------------
-export async function createWelcomeNote() {
+/**
+ * @param {object} [options]
+ * @param {boolean} [options.open] Open the Welcome note afterwards.
+ *   Share recipients get the content seeded but keep the folder they
+ *   were invited to as their entry point.
+ */
+export async function createWelcomeNote({ open = true } = {}) {
   const now = Date.now();
 
   // If the stable Welcome Vault already exists, just open it.
   // We intentionally do not overwrite existing Welcome content because
   // the user may already have edited it.
   if (state.notes.has(WELCOME_IDS.notes.welcome)) {
-    await openNote(WELCOME_IDS.notes.welcome);
+    if (open) await openNote(WELCOME_IDS.notes.welcome);
     return;
   }
 
@@ -1786,11 +1792,15 @@ Everything here is encrypted on this device before any of it syncs, and it is pl
 
   rebuildWikilinkIndex();
 
-  await openNote(ids.welcome);
+  if (open) {
+    await openNote(ids.welcome);
+  }
 
   renderTree();
 
-  toast(t('items.welcomeVault'), 'success');
+  if (open) {
+    toast(t('items.welcomeVault'), 'success');
+  }
 }
 
 export function setNavSuppress(v) { _navSuppress = v; }

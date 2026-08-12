@@ -46,6 +46,7 @@ export default {
       notes: 'Loading your notes…',
       workspace: 'Preparing your workspace…',
       almost: 'Almost ready…',
+      sharedFolder: 'Opening the shared folder…',
     },
   },
 
@@ -535,6 +536,8 @@ export default {
     liveShareActivePeers: { one: 'Live share active · {count} peer', other: 'Live share active · {count} peers' },
     sharedWithYouCanEdit: 'Shared with you (can edit)',
     sharedWithYouReadOnly: 'Shared with you (read-only)',
+    sharedWithYouBy: 'Shared with you by {name}',
+    sharedWithYou: 'Shared with you',
     legacyLiveSharingPeers: { one: 'Legacy live sharing · {count} peer', other: 'Legacy live sharing · {count} peers' },
     sharedNoteTitle: 'Shared note',
     people: {

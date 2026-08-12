@@ -96,6 +96,7 @@ import {
 import {
   applyDashboardSharingStrip,
   refreshDashboardSharingStrips,
+  renderSharedFolderContext,
 } from './dashboard-sharing.js';
 
 import {
@@ -1692,9 +1693,31 @@ function getDashboardItems() {
     */
     for (const evt of ['yanta-space-people-changed', 'yanta-space-changed']) {
       window.addEventListener(evt, () => {
-        if (dashboard.visible) refreshDashboardSharingStrips(root);
+        if (!dashboard.visible) return;
+
+        refreshDashboardSharingStrips(root);
+        refreshSharedFolderContext();
       });
     }
+
+    /*
+      Items of a shared folder materialize when the network delivers
+      them — that can be seconds after the dashboard rendered (a fresh
+      recipient opening a share link). renderDashboard() no-ops when the
+      structure is unchanged, so this stays cheap.
+    */
+    window.addEventListener('yanta-space-items-changed', () => {
+      if (dashboard.visible) renderDashboard({ animate: false });
+    });
+
+    // …and their bodies arrive one document at a time after that.
+    window.addEventListener('yanta-space-doc-applied', (e) => {
+      if (!dashboard.visible) return;
+
+      const noteId = e.detail?.docKey;
+
+      if (noteId && state.notes.has(noteId)) refreshDashboardNotePreview(noteId);
+    });
 
     // "vor 2 Min." altert, während das Dashboard offen bleibt.
     setInterval(() => {
@@ -2412,6 +2435,31 @@ function refreshChangedDashboardCards() {
   deshalb hier alle sichtbaren Note-Previews auffrischen — ohne die
   Card-Struktur anzufassen.
 */
+/**
+ * One card, forced to re-read its note. Needed when the BODY changed
+ * without the metadata following — a shared note whose content arrives
+ * over the network keeps its `updated` stamp, so the targeted refresh
+ * above cannot detect it.
+ */
+function refreshDashboardNotePreview(noteId) {
+  if (!root || !noteId) return;
+
+  const card = root.querySelector(`.yanta-dash-card.note-card[data-note-id="${CSS.escape(noteId)}"]`);
+
+  if (card) {
+    previewCache.delete(noteId);
+    previewObserver?.unobserve(card);
+    hydrateCardPreview(card, noteId).catch(() => {});
+  }
+
+  const cell = root.querySelector(`[data-mini-note-preview="${CSS.escape(noteId)}"]`);
+
+  if (cell) {
+    previewCache.delete(noteId);
+    hydrateFolderNotePreviewCell(cell, noteId).catch(() => {});
+  }
+}
+
 function refreshAllDashboardNotePreviews() {
   if (!root) return;
   root
@@ -2554,6 +2602,25 @@ function renderDashboard({ animate = true, force = false } = {}) {
   });
 }
 
+/**
+ * The roster of a shared folder arrives after the first render (people
+ * doc, Matrix login) — patch the header line in place instead of
+ * rebuilding the dashboard around it.
+ */
+function refreshSharedFolderContext() {
+  const titleWrap = root?.querySelector('.yanta-dashboard-title-wrap');
+  if (!titleWrap) return;
+
+  const existing = titleWrap.querySelector('.yanta-dashboard-share-context');
+  const next = dashboard.folderId
+    ? renderSharedFolderContext(dashboard.folderId)
+    : null;
+
+  if (existing && next) existing.replaceWith(next);
+  else if (existing) existing.remove();
+  else if (next) titleWrap.append(next);
+}
+
 function renderDashboardHeader() {
   const header = el('header', { class: 'yanta-dashboard-head' });
 
@@ -2637,6 +2704,14 @@ function renderDashboardHeader() {
   }
 
   titleWrap.append(title, crumb);
+
+  // "Alice shared this folder with you" — only ever on a folder you did
+  // not create yourself.
+  const sharedContext = dashboard.folderId
+    ? renderSharedFolderContext(dashboard.folderId)
+    : null;
+
+  if (sharedContext) titleWrap.append(sharedContext);
 
   const searchBtn = el('button', {
     class: 'icon-btn yanta-dashboard-icon-btn',

@@ -39,6 +39,7 @@ export default {
       notes: 'Cargando tus notas…',
       workspace: 'Preparando tu espacio de trabajo…',
       almost: 'Casi listo…',
+      sharedFolder: 'Abriendo la carpeta compartida…',
     },
   },
 
@@ -528,6 +529,8 @@ export default {
     liveShareActivePeers: { one: 'Uso compartido en vivo activo · {count} par', other: 'Uso compartido en vivo activo · {count} pares' },
     sharedWithYouCanEdit: 'Compartido contigo (puedes editar)',
     sharedWithYouReadOnly: 'Compartido contigo (solo lectura)',
+    sharedWithYouBy: 'Compartido contigo por {name}',
+    sharedWithYou: 'Compartido contigo',
     legacyLiveSharingPeers: { one: 'Uso compartido en vivo heredado · {count} par', other: 'Uso compartido en vivo heredado · {count} pares' },
     sharedNoteTitle: 'Nota compartida',
     people: {

@@ -38,6 +38,7 @@ export default {
       notes: 'ノートを読み込んでいます…',
       workspace: 'ワークスペースを準備しています…',
       almost: 'まもなく完了します…',
+      sharedFolder: '共有フォルダーを開いています…',
     },
   },
 
@@ -518,6 +519,8 @@ export default {
     liveShareActivePeers: { other: 'ライブ共有が有効 · {count} ピア' },
     sharedWithYouCanEdit: 'あなたと共有（編集可能）',
     sharedWithYouReadOnly: 'あなたと共有（読み取り専用）',
+    sharedWithYouBy: '{name} さんがあなたと共有しました',
+    sharedWithYou: 'あなたと共有',
     legacyLiveSharingPeers: { other: 'レガシーライブ共有 · {count} ピア' },
     sharedNoteTitle: '共有ノート',
     people: {

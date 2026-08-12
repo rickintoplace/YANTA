@@ -93,34 +93,6 @@ export async function destroyCalendarDoc(spaceId) {
 
 // ---------------- record shapes ----------------------------------
 
-/**
- * The category as everyone shares it. Personal presentation fields
- * (color, visible) and dynamic-source config are deliberately absent.
- */
-export function sharedCategoryMeta(cat) {
-  return {
-    id: cat.id,
-    name: cat.name || 'Calendar',
-    icon: cat.icon || undefined,
-    created: cat.created || Date.now(),
-    updated: cat.updated || Date.now(),
-  };
-}
-
-/**
- * The event as everyone shares it: reminders are personal and never
- * leave the device; createdBy/updatedBy travel for attribution.
- */
-export function sharedEventRecord(ev) {
-  const out = { ...ev };
-
-  delete out.reminders;
-  delete out.spaceId;
-  delete out.spaceRole;
-
-  return out;
-}
-
 export function sharedNoteMeta(note) {
   return {
     id: note.id,

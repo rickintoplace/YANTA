@@ -3,7 +3,7 @@
 
   The only reason this module exists is that the app must not run at all on
   the landing page. Importing main.js has module-level side effects (settings,
-  locale, IndexedDB) — on a marketing visit those would create app state for
+  locale, IndexedDB) — on a landing page visit those would create app state for
   someone who has not even clicked "start" yet, and they would poison the
   returning-visitor check in landing-gate.js, which reads exactly those keys.
 

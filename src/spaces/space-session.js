@@ -37,6 +37,7 @@ import {
 import {
   installWorkspaceBridge,
   uninstallWorkspaceBridge,
+  whenWorkspaceReady,
 } from './workspace-bridge.js';
 import {
   CALENDAR_REMOTE_KEY,
@@ -253,10 +254,21 @@ async function mountSpace(record) {
         recordSpaceActivity(record.spaceId, key).catch(() => {});
       }
     },
-    onDidApply: () => {
+    onDidApply: (docKey) => {
       session.lastPullAt = Date.now();
+
+      /*
+        `docKey` is the local document the pull just wrote into — for a
+        note in a shared folder, its note ID. Surfaces that cached the
+        old (usually empty) content need exactly that to refresh: the
+        note's metadata does not change when its body arrives.
+      */
       window.dispatchEvent(new CustomEvent('yanta-space-doc-applied', {
-        detail: { spaceId: record.spaceId, noteId: record.noteId },
+        detail: {
+          spaceId: record.spaceId,
+          noteId: record.noteId,
+          docKey: docKey || '',
+        },
       }));
     },
   });
@@ -800,7 +812,13 @@ export async function rotateSpaceWriteAccess(spaceId) {
 
 // ---------------- recipient: open link / leave -------------------
 
-export async function handleSpaceUrl() {
+/**
+ * @param {object} [options]
+ * @param {() => void} [options.onProgress] Called once the space is
+ *   mounted and only its content is still on the way — the caller uses
+ *   it to say so (boot stage text) instead of showing a frozen screen.
+ */
+export async function handleSpaceUrl({ onProgress } = {}) {
   const parsed = parseSpaceFragment(location.hash);
   if (!parsed) return null;
 
@@ -856,6 +874,18 @@ export async function handleSpaceUrl() {
 
   await store.spaces.put(record);
   await mountSpace(record);
+
+  /*
+    A folder space has nothing to show until the workspace doc has been
+    pulled — a recipient's subtree is materialized from it. Waiting here
+    is what makes opening the link land IN the folder; without it the
+    visitor saw an empty dashboard and had to open the link a second
+    time, once IndexedDB had the doc.
+  */
+  if (sourceType === 'folder') {
+    onProgress?.();
+    record.rootFolderId = await whenWorkspaceReady(parsed.spaceId);
+  }
 
   // A folder workspace opens on its root folder, a shared calendar on
   // the calendar surface — only note spaces open a single note.

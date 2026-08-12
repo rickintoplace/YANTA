@@ -20,6 +20,8 @@ import { state, store, uid } from '../core.js';
 import { renderTree } from '../tree.js';
 import { getNoteDoc } from '../yjs.js';
 
+import { WorkspaceEvents } from './workspace-events.js';
+
 import {
   WORKSPACE_ORIGINS,
   waitForWorkspaceDoc,
@@ -34,6 +36,18 @@ import {
 } from './workspace-doc.js';
 
 const bridges = new Map();
+
+/*
+  Materialized workspace items are ordinary notes and folders, but they
+  appear whenever the network delivers them — long after the surface
+  that shows them was rendered. Everything that lists items listens for
+  this instead of polling.
+*/
+function emitWorkspaceItemsChanged(spaceId, rootFolderId) {
+  window.dispatchEvent(new CustomEvent('yanta-space-items-changed', {
+    detail: { spaceId, rootFolderId: rootFolderId || '' },
+  }));
+}
 
 // ---------------- store hooks (installed once) -------------------
 //
@@ -166,6 +180,28 @@ class WorkspaceBridge {
     this.observer = null;
     this.attachedNotes = new Set();
     this.applying = false;
+
+    // Calendar events linked to the notes in this subtree.
+    this.events = new WorkspaceEvents(session);
+
+    /*
+      Recipients only have a folder to show once the workspace root has
+      arrived over the network. The join flow waits on this promise
+      instead of dropping the visitor on an empty dashboard.
+    */
+    this.readyResolve = null;
+    this.ready = new Promise((resolve) => {
+      this.readyResolve = resolve;
+    });
+  }
+
+  markReady() {
+    if (!this.readyResolve) return;
+
+    const resolve = this.readyResolve;
+    this.readyResolve = null;
+
+    resolve(this.rootFolderId || '');
   }
 
   async install() {
@@ -186,6 +222,13 @@ class WorkspaceBridge {
     }
 
     await this.attachAllNoteDocs();
+
+    // Installed last: it derives from the notes map the steps above fill.
+    await this.events.install();
+
+    // The owner's root exists from the start; a recipient's is resolved
+    // by the first materialization that finds it.
+    if (this.isOwner) this.markReady();
   }
 
   uninstall() {
@@ -195,6 +238,11 @@ class WorkspaceBridge {
       } catch {}
       this.observer = null;
     }
+
+    this.events.uninstall();
+
+    // Never leave a join flow waiting on a bridge that is gone.
+    this.markReady();
   }
 
   // ---------- owner: vault → workspace (initial seed) ----------
@@ -286,7 +334,16 @@ class WorkspaceBridge {
         this.session.engine?.pull().catch(() => {});
       }
 
-      if (changed) renderTree();
+      if (changed) {
+        renderTree();
+        emitWorkspaceItemsChanged(this.spaceId, this.rootFolderId);
+
+        // A writer added or removed notes remotely — the owner's set of
+        // travelling events follows the subtree.
+        this.events.scheduleRefresh();
+      }
+
+      if (this.rootFolderId) this.markReady();
     } finally {
       this.applying = false;
     }
@@ -490,6 +547,9 @@ class WorkspaceBridge {
     addWorkspaceTombstone(this.spaceId, 'note', id, WORKSPACE_ORIGINS.BRIDGE);
     this.session.engine?.detachDoc(id);
     this.attachedNotes.delete(id);
+
+    // The note is gone, so its events have nothing to travel with.
+    this.events.scheduleRefresh();
   }
 
   async removeFolderOut(id, existing) {
@@ -497,11 +557,16 @@ class WorkspaceBridge {
     if (id === this.rootFolderId) return;
 
     addWorkspaceTombstone(this.spaceId, 'folder', id, WORKSPACE_ORIGINS.BRIDGE);
+
+    this.events.scheduleRefresh();
   }
 
   async syncNoteOut(note) {
     const inSpace = this.belongsToSpace(note);
     const known = workspaceNotesMap(this.spaceId).has(note.id);
+
+    // Either direction changes which events belong to the space.
+    this.events.scheduleRefresh();
 
     if (!inSpace) {
       // Moved out of the shared folder — the note leaves the space
@@ -532,6 +597,9 @@ class WorkspaceBridge {
   async syncFolderOut(folder) {
     const inSpace = this.belongsToSpace(folder);
     const known = workspaceFoldersMap(this.spaceId).has(folder.id);
+
+    // A folder move carries its notes — and therefore their events.
+    this.events.scheduleRefresh();
 
     if (!inSpace) {
       if (known && this.canWrite) {
@@ -583,6 +651,26 @@ export async function installWorkspaceBridge(session) {
   await bridge.install();
 
   return bridge;
+}
+
+/**
+ * Resolves with the local root folder ID of a folder space once its
+ * subtree exists locally — for recipients that means "the first pull
+ * arrived". Resolves with '' on timeout rather than rejecting: a slow
+ * network must not turn opening a share link into an error, the folder
+ * still appears on its own through `yanta-space-items-changed`.
+ */
+export function whenWorkspaceReady(spaceId, { timeoutMs = 12_000 } = {}) {
+  const bridge = bridges.get(spaceId);
+  if (!bridge) return Promise.resolve('');
+
+  let timer = null;
+
+  const timeout = new Promise((resolve) => {
+    timer = setTimeout(() => resolve(''), timeoutMs);
+  });
+
+  return Promise.race([bridge.ready, timeout]).finally(() => clearTimeout(timer));
 }
 
 export function uninstallWorkspaceBridge(spaceId) {

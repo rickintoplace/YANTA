@@ -23,7 +23,8 @@ import {
 } from './spaces/space-session.js';
 
 import { spacePeople, spaceLastEdit } from './spaces/space-people.js';
-import { renderPeopleStack } from './spaces/people-avatars.js';
+import { ANONYMOUS_IDENTITY_LABEL } from './spaces/space-identity.js';
+import { renderPeopleStack, renderPersonAvatar } from './spaces/people-avatars.js';
 
 const MAX_FACES = 3;
 
@@ -186,6 +187,54 @@ export function applyDashboardSharingStrip(card, item) {
   } else {
     card.append(next);
   }
+}
+
+/**
+ * Header line for a folder someone else shared with you: whose folder
+ * this is, and what you may do in it. Opening a share link drops people
+ * into a folder full of items they have never seen — without this they
+ * have no way to tell it apart from their own.
+ *
+ * Returns null for private folders and for folders you share yourself
+ * (the card strips already say that).
+ */
+export function renderSharedFolderContext(folderId) {
+  const context = spaceContextForFolder(folderId);
+  if (!context || context.inherited) return null;
+
+  const session = state.spaces.get(context.spaceId);
+  if (!session || session.role === 'owner' || session.sourceType !== 'folder') return null;
+
+  const people = spacePeople(context.spaceId);
+
+  // An owner nobody can name ("Someone") adds nothing — say it neutrally.
+  const owner = people.find(
+    (person) => person.role === 'owner' && person.name !== ANONYMOUS_IDENTITY_LABEL
+  ) || null;
+
+  const row = el('div', { class: 'yanta-dashboard-share-context' });
+
+  if (owner) {
+    row.append(renderPersonAvatar(owner));
+  } else {
+    const icon = el('span', { class: 'yanta-dashboard-share-context-icon' });
+    icon.innerHTML = lucide('users', 13);
+    row.append(icon);
+  }
+
+  row.append(el('span', {
+    class: 'yanta-dashboard-share-context-text',
+  }, owner
+    ? t('sharing.sharedWithYouBy', { name: owner.name })
+    : t('sharing.sharedWithYou')));
+
+  row.append(el('span', {
+    class: 'yanta-dashboard-share-context-role',
+  }, session.role === 'write'
+    ? t('sharing.people.roleWrite')
+    : t('sharing.people.roleRead')));
+
+  return row;
 }
 
 /**

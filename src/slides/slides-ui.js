@@ -74,12 +74,28 @@ import {
 } from './slides-export.js';
 
 import {
+  createSlideAnimator,
+  removeTransitionVeil,
+  runSlideTransition,
+  slideBuildCount,
+} from './slides-animation.js';
+
+import {
+  addSelectionAsBuildStep,
+  closeSlideAnimationPanel,
+  openSlideAnimationPanel,
+} from './slides-animation-ui.js';
+
+import {
   getDrawingApiForEmbed,
   getActiveDrawingApi,
   getActiveDrawingHost,
-  runDrawingApiUpdateWithoutSaving,
   openDrawModal,
 } from '../draw.js';
+
+import {
+  runDrawingApiUpdateWithoutSaving,
+} from '../draw-scene-sync.js';
 
 import {
   openPresentationSessionModal,
@@ -93,6 +109,7 @@ import {
   registerOverlayRoute,
   pushOverlayState,
   closeTopOverlay,
+  openBoundOverlay,
 } from '../overlay-history.js';
 
 import {
@@ -102,6 +119,10 @@ import {
 const SIGNALING_URL =
   import.meta.env.VITE_YANTA_SIGNALING_URL ||
   'wss://yanta-signaling-932960946294.europe-west1.run.app';
+
+// Overlay-history id of a running presentation, so Back/ESC exit the
+// slideshow before they touch the drawing or note underneath it.
+const SLIDESHOW_OVERLAY_ID = 'drawing-slideshow';
 
 let cssInjected = false;
 let slideshow = null;
@@ -518,6 +539,41 @@ function injectCss() {
   pointer-events: none;
   background: var(--accent);
   transition: width 320ms cubic-bezier(.4, 0, .2, 1);
+}
+
+/*
+  Fade transition. A DOM veil rather than a canvas effect: GPU-composited,
+  never out of sync with the scene, and identical on a heavy board.
+*/
+.yanta-slide-transition-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 618;
+  pointer-events: none;
+  opacity: 0;
+  background: var(--bg);
+  transition: opacity 180ms linear;
+}
+
+.yanta-slide-transition-veil.is-active {
+  opacity: 1;
+}
+
+/* Build-step markers on the slide strip. */
+.yanta-slide-chip-builds {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  margin-left: 4px;
+  color: var(--accent);
+  vertical-align: middle;
+}
+
+.yanta-slide-chip-builds i {
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: currentColor;
 }
 
 .yanta-slideshow-toolbar {
@@ -1183,6 +1239,14 @@ function renderSlidesStripHtml(slides) {
     `;
   }
 
+  // One dot per build step, so a deck's animated slides are visible at a glance.
+  const buildDots = (slide) => {
+    const count = Math.min(6, slideBuildCount(slide));
+    if (!count) return '';
+
+    return `<span class="yanta-slide-chip-builds" title="${count} build step${count === 1 ? '' : 's'}">${'<i></i>'.repeat(count)}</span>`;
+  };
+
   return `
     <div class="yanta-slides-strip">
       ${slides.map((slide, index) => `
@@ -1192,7 +1256,7 @@ function renderSlidesStripHtml(slides) {
           </span>
           <span class="yanta-slide-chip-title">
             <span class="yanta-slide-chip-num">${index + 1}</span>
-            ${escapeHtml(slide.title)}
+            ${escapeHtml(slide.title)}${buildDots(slide)}
           </span>
           <span class="yanta-slide-chip-menu">${lucide('chevron-right', 13)}</span>
         </button>
@@ -2128,6 +2192,8 @@ function animateCameraToSlide(api, container, slide, {
 } = {}) {
   if (!api || !slide) return;
 
+  duration = Number.isFinite(duration) ? duration : 520;
+
   cancelAnimationFrame(cameraAnimationRaf);
   cameraAnimationRaf = 0;
 
@@ -2169,10 +2235,12 @@ function animateCameraToSlide(api, container, slide, {
   cameraAnimationRaf = requestAnimationFrame(tick);
 }
 
-function scrollToSlide(api, slide, container = null) {
+function scrollToSlide(api, slide, container = null, { animate = true } = {}) {
   if (!api || !slide) return;
 
-  animateCameraToSlide(api, container, slide);
+  animateCameraToSlide(api, container, slide, {
+    duration: animate ? undefined : 0,
+  });
 }
 
 function currentApiForDrawing(noteId, drawingId) {
@@ -2916,6 +2984,20 @@ function injectSlidesItemsIntoNativeContextMenu(container) {
         });
       },
     }));
+
+    menu.append(makeSlidesContextButton({
+      icon: 'sparkles',
+      label: 'YANTA: Animate on click',
+      onClick: () => {
+        addSelectionAsBuildStep({
+          noteId: ctx.noteId,
+          drawingId: ctx.drawingId,
+          api: ctx.api,
+        });
+
+        refresh();
+      },
+    }));
   }
 }
 
@@ -3282,6 +3364,7 @@ function openSlideMiniMenu(x, y, {
   menu.innerHTML = `
     <button data-action="rename">${lucide('pencil', 14)} Rename</button>
     <button data-action="notes">${lucide('notebook-text', 14)} Speaker notes</button>
+    <button data-action="animation">${lucide('sparkles', 14)} Animation…</button>
     <hr>
     <button class="danger" data-action="delete">${lucide('trash', 14)} Delete slide</button>
   `;
@@ -3341,6 +3424,17 @@ function openSlideMiniMenu(x, y, {
       setSlideNotes(noteId, drawingId, slideId, notes);
       refresh?.();
     }
+  });
+
+  menu.querySelector('[data-action="animation"]')?.addEventListener('click', () => {
+    close();
+
+    openSlideAnimationPanel({
+      noteId,
+      drawingId,
+      slideId,
+      getApi: () => currentApiForDrawing(noteId, drawingId) || api,
+    });
   });
 
   menu.querySelector('[data-action="delete"]')?.addEventListener('click', async () => {
@@ -3633,6 +3727,13 @@ export function startSlideshow({
 
   stopSlideshow();
 
+  /*
+    Authoring panels are hidden by CSS while presenting, not closed. Closing
+    them releases a history entry, and that pop would land right after this
+    function pushes the presentation's own entry — the router would then treat
+    the presentation as "not in the stack" and stop it again on the spot.
+  */
+
   const root = document.createElement('div');
   root.className = 'yanta-slideshow';
 
@@ -3667,6 +3768,7 @@ export function startSlideshow({
     container,
     slides,
     index: Math.max(0, Math.min(slides.length - 1, startIndex)),
+    step: 0,
     root,
     toolbar,
     progressEl,
@@ -3676,24 +3778,37 @@ export function startSlideshow({
     notesEl: null,
     laserHideTimer: 0,
     immersive: true,
+
+    animator: createSlideAnimator({
+      // Resolved per call: the fullscreen stage can remount underneath a
+      // running presentation, which swaps the Excalidraw instance.
+      getApi: () =>
+        currentApiForDrawing(noteId, drawingId) ||
+        slideshow?.api ||
+        null,
+    }),
   };
-
-  document.body.classList.add('yanta-slideshow-active');
-  fullscreenSlidesDock?.classList.add('is-hidden-during-slideshow');
-
-  document.body.classList.add('yanta-slideshow-immersive');
-  document.addEventListener('fullscreenchange', slideshowFullscreenChangeHandler);
 
   /*
     Present no longer forces browser fullscreen. The drawing is already shown
     on its big fullscreen stage (see presentSlides). Immersive mode only hides
     the app/Excalidraw chrome; browser fullscreen stays an explicit toggle.
   */
-
   document.body.classList.add('yanta-slideshow-active');
-  fullscreenSlidesDock?.classList.add('is-hidden-during-slideshow');
   document.body.classList.add('yanta-slideshow-immersive');
+  fullscreenSlidesDock?.classList.add('is-hidden-during-slideshow');
   document.addEventListener('fullscreenchange', slideshowFullscreenChangeHandler);
+
+  /*
+    A running presentation is the top-most surface, so device-back and the
+    central ESC router have to exit it first. Without an entry of its own,
+    Back closed the drawing underneath and left the slideshow running over
+    whatever the app navigated to.
+  */
+  slideshow.releaseOverlay = openBoundOverlay(SLIDESHOW_OVERLAY_ID, {
+    close: () => stopSlideshow(),
+    isOpen: () => !!slideshow,
+  });
 
   // Slideshow is now running → frames must hide everywhere for this drawing.
   reconcileSlideFrameVisibility(noteId, drawingId, slideshow.api);
@@ -3734,6 +3849,7 @@ export function startSlideshow({
 
 function goToSlide(index, {
   notifyRemote = true,
+  step = 0,
 } = {}) {
   if (!slideshow) return;
 
@@ -3752,12 +3868,17 @@ function goToSlide(index, {
   slideshow.api = liveApi;
   slideshow.container = liveContainer;
 
-  slideshow.api = liveApi;
-  slideshow.container = liveContainer;
   reconcileSlideFrameVisibility(slideshow.noteId, slideshow.drawingId, liveApi);
-  scrollToSlide(liveApi, slide, liveContainer);
 
-  scrollToSlide(liveApi, slide, liveContainer);
+  const buildCount = slideBuildCount(slide);
+  const wantStep = Math.max(0, Math.min(buildCount, step === 'last' ? buildCount : step));
+
+  slideshow.step = wantStep;
+  slideshow.animator.showStep(slide, wantStep);
+
+  runSlideTransition(slide, ({ animate }) => {
+    scrollToSlide(liveApi, slide, liveContainer, { animate });
+  });
 
   const count = slideshow.toolbar.querySelector('[data-slide-count]');
 
@@ -3774,7 +3895,12 @@ function goToSlide(index, {
 }
 export function stopSlideshow() {
   if (!slideshow) return;
-  const { noteId, drawingId } = slideshow;
+  const { noteId, drawingId, releaseOverlay } = slideshow;
+
+  // Before anything else: put every element a build step touched back exactly
+  // as the user drew it. A presentation must never leave a mark on the board.
+  slideshow.animator.restore();
+  removeTransitionVeil();
 
   document.removeEventListener('keydown', slideshowKeyHandler, true);
   document.removeEventListener('pointermove', laserPointerMove, true);
@@ -3791,7 +3917,11 @@ export function stopSlideshow() {
   cancelAnimationFrame(cameraAnimationRaf);
   cameraAnimationRaf = 0;
   exitSlideshowFullscreen();
+
+  // Cleared before releasing the history entry: the resulting popstate routes
+  // back into this function, which must then be a no-op.
   slideshow = null;
+  releaseOverlay?.();
 
   // Slideshow no longer running. reconcile now decides on its own whether
   // frames come back: they only reappear if slide-mode is still active.
@@ -3810,8 +3940,22 @@ function slideshowKeyHandler(e) {
     return;
   }
 
-  if (e.key === 'Escape') {
+  /*
+    A key the presentation handles is consumed completely.
+
+    preventDefault() alone is not enough: this runs in the capture phase, and
+    the central overlay router (src/overlay-history.js) has its own document
+    keydown listener that turns Escape into history.back(). Both used to fire,
+    so Escape closed the note *and* left the slideshow running on top.
+  */
+  const consume = () => {
     e.preventDefault();
+    e.stopPropagation();
+    e.stopImmediatePropagation();
+  };
+
+  if (e.key === 'Escape') {
+    consume();
 
     /*
       Escape ladder:
@@ -3835,37 +3979,68 @@ function slideshowKeyHandler(e) {
   }
 
   if (e.key === 'ArrowRight' || e.key === ' ' || e.key === 'PageDown') {
-    e.preventDefault();
+    consume();
     nextSlide();
     return;
   }
 
   if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
-    e.preventDefault();
+    consume();
     previousSlide();
     return;
   }
 
   if (e.key.toLowerCase() === 'l') {
-    e.preventDefault();
+    consume();
     toggleLaser();
     return;
   }
 
   if (e.key.toLowerCase() === 'n') {
-    e.preventDefault();
+    consume();
     toggleNotes();
   }
 }
 
+/*
+  Forward/back walk over *steps*, not slides: a slide with build steps reveals
+  them one click at a time before the presentation moves on — and stepping
+  back into a slide lands on its finished state, which is what a presenter
+  expects when they overshoot.
+*/
 function nextSlide() {
   if (!slideshow) return;
+
+  const slide = slideshow.slides[slideshow.index];
+  const builds = slideBuildCount(slide);
+
+  if (slideshow.step < builds) {
+    slideshow.step += 1;
+    slideshow.animator.revealStep(slide, slideshow.step - 1);
+    publishRemoteState();
+    return;
+  }
+
+  if (slideshow.index >= slideshow.slides.length - 1) return;
+
   goToSlide(slideshow.index + 1);
 }
 
 function previousSlide() {
   if (!slideshow) return;
-  goToSlide(slideshow.index - 1);
+
+  if (slideshow.step > 0) {
+    const slide = slideshow.slides[slideshow.index];
+
+    slideshow.step -= 1;
+    slideshow.animator.showStep(slide, slideshow.step);
+    publishRemoteState();
+    return;
+  }
+
+  if (slideshow.index <= 0) return;
+
+  goToSlide(slideshow.index - 1, { step: 'last' });
 }
 
 function toggleLaser() {
@@ -4480,6 +4655,22 @@ function hydrateSlidesEmbeds(root = document) {
 
 export function setupSlides() {
   injectCss();
+
+  /*
+    Last line of defence: a presentation cannot outlive the stage it runs on.
+    Every dismiss path should already have gone through stopSlideshow(), but
+    if the drawing closes for any other reason (a route restore, an error
+    path), a slideshow left running would keep the app chrome hidden with no
+    way back.
+  */
+  window.addEventListener('yanta-draw-fullscreen-closed', (e) => {
+    closeSlideAnimationPanel();
+
+    if (!slideshow) return;
+    if (e.detail?.drawingId && e.detail.drawingId !== slideshow.drawingId) return;
+
+    stopSlideshow();
+  });
 
   window.addEventListener('yanta-preview-rendered', () => {
     document

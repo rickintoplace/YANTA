@@ -37,6 +37,12 @@ import {
   destroyDrawSelectionMenu,
 } from './draw-selection-menu.js';
 
+import {
+  cleanAppState,
+  createDrawingSceneWriter,
+  runDrawingApiUpdateWithoutSaving,
+} from './draw-scene-sync.js';
+
 import { cloudFetchExcalidrawLibrary } from './cloud/cloud-api.js';
 import { insertAtCursor } from './editor.js';
 import { openNote } from './notes.js';
@@ -60,6 +66,7 @@ import {
 import {
   pushOverlayState,
   closeTopOverlay,
+  isOverlayState,
   registerOverlayRoute,
 } from './overlay-history.js';
 
@@ -165,6 +172,68 @@ const DRAW_LIBRARY_SETTINGS_KEY = 'drawLibraryItems.v1';
   schema and would drop unknown fields — this survives that.
 */
 const DRAW_LIBRARY_SOURCES_KEY = 'drawLibrarySources.v1';
+
+/*
+  Excalidraw's FONT_FAMILY.Nunito ("Normal"). Hard-coded on purpose: importing
+  the constant would pull the whole Excalidraw bundle into the main chunk, and
+  the number is part of the persisted .excalidraw scene format, so it is as
+  stable as the file format itself.
+
+  Why not Excalifont: YANTA drawings end up in notes, exports and slideshows,
+  where the hand-drawn face is markedly harder to read than a plain sans.
+*/
+const DRAW_DEFAULT_FONT_FAMILY = 6;
+
+const DRAW_TOOL_LOCK_SETTINGS_KEY = 'drawToolLock.v1';
+
+/*
+  "Keep selected tool active after drawing", on by default — drawing five
+  arrows in a row should not mean picking the arrow tool five times.
+
+  Excalidraw keeps this in appState.activeTool, which YANTA deliberately does
+  not persist with the scene (see cleanAppState — persisting the active tool
+  causes toolbar flicker on reload). So the preference lives here instead and
+  applies to every drawing.
+*/
+let drawToolLock = true;
+
+const saveDrawToolLockDebounced = debounce(async () => {
+  try {
+    await store.settings.set(DRAW_TOOL_LOCK_SETTINGS_KEY, drawToolLock);
+  } catch {}
+}, 300);
+
+async function loadDrawToolLockFromSettings() {
+  try {
+    const stored = await store.settings.get(DRAW_TOOL_LOCK_SETTINGS_KEY);
+    if (typeof stored === 'boolean') drawToolLock = stored;
+  } catch {}
+}
+
+/** Mirrors the user's toolbar lock toggle back into the stored preference. */
+function rememberDrawToolLock(locked) {
+  if (typeof locked !== 'boolean' || locked === drawToolLock) return;
+
+  drawToolLock = locked;
+  saveDrawToolLockDebounced();
+}
+
+/** Applies YANTA's drawing defaults on top of a scene's own appState. */
+function withDrawingDefaults(appState = {}) {
+  const next = { ...appState };
+
+  if (next.currentItemFontFamily == null) {
+    next.currentItemFontFamily = DRAW_DEFAULT_FONT_FAMILY;
+  }
+
+  next.activeTool = {
+    type: 'selection',
+    ...(next.activeTool || {}),
+    locked: drawToolLock,
+  };
+
+  return next;
+}
 
 const DRAW_MOBILE_MQ = window.matchMedia?.('(pointer: coarse), (max-width: 760px)');
 
@@ -1760,70 +1829,6 @@ body > .hover-preview {
   document.head.append(style);
 }
 
-function cleanAppState(appState = {}) {
-  const {
-    collaborators,
-    selectedElementIds,
-    selectedGroupIds,
-    editingElement,
-    resizingElement,
-    draggingElement,
-    suggestedBindings,
-    startBoundElement,
-    cursorButton,
-    name,
-    offsetTop,
-    offsetLeft,
-    width,
-    height,
-    theme,
-    viewBackgroundColor,
-    currentItemStrokeColor,
-    currentItemBackgroundColor,
-    openMenu,
-    openPopup,
-    contextMenu,
-    activeTool,
-    pendingImageElementId,
-    frameToHighlight,
-    editingLinearElement,
-    multiElement,
-    resizingLinearElement,
-    selectionElement,
-    isBindingEnabled,
-    errorMessage,
-    ...rest
-  } = appState || {};
-
-  const cleaned = { ...rest };
-
-  for (const key of Object.keys(cleaned)) {
-    if (cleaned[key] === undefined) delete cleaned[key];
-  }
-
-  return cleaned;
-}
-
-function sceneSignature(elements, appState, files) {
-  try {
-    return JSON.stringify({
-      elements: elements || [],
-      appState: cleanAppState(appState || {}),
-      files: files || {},
-    });
-  } catch {
-    return String(Date.now());
-  }
-}
-
-function drawingSignature(drawing) {
-  return sceneSignature(
-    drawing?.elements || [],
-    drawing?.appState || {},
-    drawing?.files || {}
-  );
-}
-
 function liveDrawingElements(drawingOrElements) {
   const elements = Array.isArray(drawingOrElements)
     ? drawingOrElements
@@ -1853,11 +1858,16 @@ function drawingWidthMode(drawing) {
 }
 
 function initialDataForDrawing(drawing, extra = {}) {
+  const { appState: extraAppState, ...restExtra } = extra || {};
+
   return {
     elements: drawing?.elements || [],
-    appState: cleanAppState(drawing?.appState || {}),
     files: drawing?.files || {},
-    ...extra,
+    ...restExtra,
+
+    appState: withDrawingDefaults(
+      extraAppState || cleanAppState(drawing?.appState || {})
+    ),
   };
 }
 
@@ -2404,91 +2414,6 @@ function addFilesToExcalidrawApi(api, files = {}) {
   } catch {}
 }
 
-// ------------------------------------------------------------
-// Excalidraw scene persistence guards
-//
-// Excalidraw fires onChange for both real user edits and many programmatic
-// updateScene() calls. Programmatic UI-only updates must never be persisted,
-// otherwise old snapshots, camera moves or presentation-only changes can
-// overwrite user edits.
-// ------------------------------------------------------------
-
-const DRAW_API_SAVE_SUPPRESSION = new WeakMap();
-
-function isDrawingApiSaveSuppressed(api) {
-  return !!api && DRAW_API_SAVE_SUPPRESSION.has(api);
-}
-
-function suppressDrawingApiSave(api, {
-  releaseMs = 220,
-} = {}) {
-  if (!api) return () => {};
-
-  const token = {};
-  let released = false;
-
-  DRAW_API_SAVE_SUPPRESSION.set(api, token);
-
-  const release = () => {
-    if (released) return;
-    released = true;
-
-    if (DRAW_API_SAVE_SUPPRESSION.get(api) === token) {
-      DRAW_API_SAVE_SUPPRESSION.delete(api);
-    }
-  };
-
-  // Excalidraw can emit onChange synchronously, next frame, or shortly after
-  // updateScene(). Keep suppression briefly active, but never permanently.
-  requestAnimationFrame(() => {
-    requestAnimationFrame(release);
-  });
-
-  window.setTimeout(release, releaseMs);
-
-  return release;
-}
-
-/**
- * Run api.updateScene() without letting the Drawing autosave persist it.
- *
- * Use this for:
- * - Yjs/remote scene hydration
- * - camera moves
- * - selection-only changes
- * - presentation-only visual changes
- *
- * Do NOT use for user-intended mutations unless you persist via setDrawing()
- * yourself in the same code path.
- */
-export function runDrawingApiUpdateWithoutSaving(api, updateOrFn, {
-  refresh = true,
-  releaseMs = 220,
-} = {}) {
-  if (!api) return false;
-
-  suppressDrawingApiSave(api, {
-    releaseMs,
-  });
-
-  try {
-    if (typeof updateOrFn === 'function') {
-      updateOrFn(api);
-    } else {
-      api.updateScene?.(updateOrFn);
-    }
-
-    if (refresh) {
-      api.refresh?.();
-    }
-
-    return true;
-  } catch (err) {
-    console.warn('[YANTA Draw] programmatic Excalidraw update failed', err);
-    return false;
-  }
-}
-
 /**
  * Apply persisted/remote Drawing content to an existing Excalidraw instance.
  *
@@ -2601,51 +2526,61 @@ function buildPersistedDrawingSceneFromApi(api, {
   };
 }
 
-function persistCurrentDrawingApiScene({
-  api,
+/**
+ * Creates the autosave for one mounted Excalidraw surface.
+ *
+ * The surface only has to forward onChange into `writer.note()` and route
+ * foreign Yjs writes through `writer` — scheduling, coalescing and the
+ * never-lose-a-stroke guarantees live in draw-scene-sync.js.
+ */
+function createSurfaceSceneWriter({
   noteId,
   drawingId,
-  previous,
-  fallback,
-  origin,
-  lastSigRef,
-  afterPersist = null,
-} = {}) {
-  if (!api || isDrawingApiSaveSuppressed(api)) return false;
-
-  const nextScene = buildPersistedDrawingSceneFromApi(api, {
+  getApi,
+  baseline,
+  onPersisted = null,
+}) {
+  return createDrawingSceneWriter({
+    noteId,
     drawingId,
-    previous,
-    fallback,
-  });
+    getApi,
+    baseline,
+    onPersisted,
 
-  const nextSig = sceneSignature(
-    nextScene.elements,
-    nextScene.appState,
-    nextScene.files
-  );
-
-  if (lastSigRef && nextSig === lastSigRef.current) {
-    return false;
-  }
-
-  if (lastSigRef) {
-    lastSigRef.current = nextSig;
-  }
-
-  setDrawing(noteId, drawingId, nextScene, origin);
-
-  afterPersist?.(nextScene);
-
-  window.dispatchEvent(new CustomEvent('yanta-drawing-updated', {
-    detail: {
-      noteId,
+    buildScene: (api) => buildPersistedDrawingSceneFromApi(api, {
       drawingId,
-      reason: 'scene-persisted',
-    },
-  }));
+      previous: getDrawing(noteId, drawingId) || baseline,
+      fallback: baseline,
+    }),
+  });
+}
 
-  return true;
+/**
+ * Reacts to a Yjs write on this drawing that did not come from this surface.
+ *
+ * Returns the scene to apply, or null when the surface must keep what it has.
+ */
+function foreignDrawingSceneToApply(writer, noteId, drawingId) {
+  /*
+    Local strokes that are still only inside this Excalidraw instance must
+    never be replaced by a scene that was built without them. Writing them
+    out here would re-enter Yjs mid-transaction, so the flush is deferred by
+    one task — the resulting update is what the other surfaces then adopt.
+  */
+  if (writer.isDirty()) {
+    writer.flushSoon();
+    return null;
+  }
+
+  const next = getDrawing(noteId, drawingId);
+
+  if (!next || writer.matchesScene(next)) return null;
+
+  // Baseline first: the onChange that updateScene() echoes back must be
+  // recognised as "nothing new" instead of scheduling a pointless write.
+  writer.adopt(next);
+
+  return next;
 }
 
 function noteVisualColor(note) {
@@ -4497,6 +4432,34 @@ function ensureModal() {
       }));
     });
 
+  const layersBtn = document.createElement('button');
+  layersBtn.className = 'btn yanta-draw-head-btn';
+  layersBtn.title = 'Layers';
+  layersBtn.setAttribute('data-draw-head-layers', '1');
+  layersBtn.setAttribute('aria-pressed', 'false');
+  layersBtn.innerHTML = `
+    ${lucide('layers', 14)}
+    <span class="yanta-draw-btn-label">Layers</span>
+  `;
+
+  layersBtn.addEventListener('click', async () => {
+    if (!active.noteId || !active.drawingId) return;
+
+    const { openLayersPanel, closeLayersPanel, isLayersPanelOpen } =
+      await import('./layers/layers-ui.js');
+
+    if (isLayersPanelOpen()) {
+      closeLayersPanel();
+      return;
+    }
+
+    openLayersPanel({
+      noteId: active.noteId,
+      drawingId: active.drawingId,
+      getApi: () => active.api,
+    });
+  });
+
   const exportBtn = document.createElement('button');
   exportBtn.className = 'btn yanta-draw-head-btn';
   exportBtn.title = 'Download drawing';
@@ -4551,16 +4514,25 @@ function ensureModal() {
   host = document.createElement('div');
   host.className = 'yanta-draw-body';
 
-  head.append(titleEl, spacer, slidesBtn, exportBtn, deleteBtn, closeBtn);
+  head.append(titleEl, spacer, layersBtn, slidesBtn, exportBtn, deleteBtn, closeBtn);
   modal.append(head, host);
   document.body.append(modal);
 
+  /*
+    Fallback for the case where the drawing is on screen without a history
+    entry of its own. Whenever it does have one — the normal path — the
+    central overlay router already handles Escape and stops the event before
+    it reaches here, so a panel or a presentation stacked on top closes first
+    instead of taking the whole drawing down with it.
+  */
   window.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && modal && !modal.hidden) {
-      closeDrawModal({
-        transition: true,
-      });
-    }
+    if (e.key !== 'Escape' || !e.isTrusted || e.defaultPrevented) return;
+    if (isOverlayState()) return;
+    if (!modal || modal.hidden) return;
+
+    closeDrawModal({
+      transition: true,
+    });
   });
 }
 
@@ -4789,20 +4761,27 @@ async function mountInlineDrawing(embed, sourceNoteId, drawingId, drawing) {
 
   function InlineDrawing() {
     const apiRef = React.useRef(null);
-    const saveTimerRef = React.useRef(0);
-    const suppressChangeRef = React.useRef(false);
-    const didInitialChangeRef = React.useRef(false);
-    const lastSigRef = React.useRef(drawingSignature(drawing));
-
-    const localOriginRef = React.useRef(`draw-inline-local-${uid()}`);
 
     const [theme, setTheme] = React.useState(currentExcalidrawTheme());
     const [links, setLinks] = React.useState(extractWikiTargetsFromScene(drawing));
 
+    const writerRef = React.useRef(null);
+
+    if (!writerRef.current && editable) {
+      writerRef.current = createSurfaceSceneWriter({
+        noteId: sourceNoteId,
+        drawingId,
+        baseline: drawing,
+        getApi: () => apiRef.current,
+        onPersisted: (scene) => {
+          updateEmbedFromDrawing(embed, scene);
+          setLinks(extractWikiTargetsFromScene(scene));
+        },
+      });
+    }
+
     React.useEffect(() => {
-      return () => {
-        clearTimeout(saveTimerRef.current);
-      };
+      return () => writerRef.current?.dispose();
     }, []);
 
     React.useEffect(() => {
@@ -4811,19 +4790,19 @@ async function mountInlineDrawing(embed, sourceNoteId, drawingId, drawing) {
 
       const observer = (event) => {
         if (!event.keysChanged.has(drawingId)) return;
-        if (event.transaction.origin === localOriginRef.current) return;
 
-        const next = getDrawing(sourceNoteId, drawingId);
+        const writer = writerRef.current;
+
+        if (writer?.isOwnOrigin(event.transaction.origin)) return;
+
+        const next = writer
+          ? foreignDrawingSceneToApply(writer, sourceNoteId, drawingId)
+          : getDrawing(sourceNoteId, drawingId);
+
         if (!next) return;
-
-        // A remote/external scene arrived. Any pending local debounced save was
-        // based on older data and must not be allowed to write back afterwards.
-        clearTimeout(saveTimerRef.current);
-        saveTimerRef.current = 0;
 
         updateEmbedFromDrawing(embed, next);
         setLinks(extractWikiTargetsFromScene(next));
-        lastSigRef.current = drawingSignature(next);
 
         if (apiRef.current) {
           applyPersistedDrawingToApi(apiRef.current, next);
@@ -4888,50 +4867,8 @@ async function mountInlineDrawing(embed, sourceNoteId, drawingId, drawing) {
     }, []);
 
     const saveScene = (elements, appState, files) => {
-      if (!editable) return;
-
-      const api = apiRef.current;
-
-      if (suppressChangeRef.current || isDrawingApiSaveSuppressed(api)) {
-        return;
-      }
-
-      if (!didInitialChangeRef.current) {
-        didInitialChangeRef.current = true;
-        return;
-      }
-
-      const incomingElements = cleanStaleSceneWikiData(elements || []);
-      const incomingAppState = cleanAppState(appState);
-      const incomingSig = sceneSignature(incomingElements, incomingAppState, files);
-
-      if (incomingSig === lastSigRef.current) return;
-
-      clearTimeout(saveTimerRef.current);
-
-      saveTimerRef.current = window.setTimeout(() => {
-        const liveApi = apiRef.current;
-
-        if (!liveApi || isDrawingApiSaveSuppressed(liveApi)) {
-          return;
-        }
-
-        const prev = getDrawing(sourceNoteId, drawingId) || drawing;
-
-        persistCurrentDrawingApiScene({
-          api: liveApi,
-          noteId: sourceNoteId,
-          drawingId,
-          previous: prev,
-          fallback: drawing,
-          origin: localOriginRef.current,
-          lastSigRef,
-          afterPersist: (nextScene) => {
-            updateEmbedFromDrawing(embed, nextScene);
-            setLinks(extractWikiTargetsFromScene(nextScene));
-          },
-        });
-      }, 250);
+      rememberDrawToolLock(appState?.activeTool?.locked);
+      writerRef.current?.note(elements, appState, files);
     };
 
     const onLinkOpen = (element, event) => {
@@ -5261,6 +5198,27 @@ window.addEventListener('yanta-fullscreen-slides-visibility', (e) => {
   setFullscreenSlidesButtonActive(e.detail?.open === true);
 });
 
+window.addEventListener('yanta-draw-layers-visibility', (e) => {
+  const btn = document.querySelector('[data-draw-head-layers]');
+  if (!btn) return;
+
+  const open = e.detail?.open === true;
+
+  btn.setAttribute('aria-pressed', open ? 'true' : 'false');
+  btn.classList.toggle('is-active', open);
+});
+
+/*
+  The layers panel belongs to one open drawing. Loaded lazily, so it is only
+  reached when the module is in memory — which it is exactly when a panel
+  could still be on screen.
+*/
+window.addEventListener('yanta-draw-fullscreen-closed', () => {
+  import('./layers/layers-ui.js')
+    .then((m) => m.closeLayersPanel())
+    .catch(() => {});
+});
+
 export async function openDrawModal(
   drawingId,
   noteId = state.currentNoteId,
@@ -5368,34 +5326,36 @@ export async function openDrawModal(
 
   function FullscreenDrawing() {
     const apiRef = React.useRef(null);
-    const saveTimerRef = React.useRef(0);
-    const suppressChangeRef = React.useRef(false);
-    const didInitialChangeRef = React.useRef(false);
-    const lastSigRef = React.useRef(drawingSignature(current));
-    const localOriginRef = React.useRef(`draw-modal-local-${uid()}`);
 
     const [theme, setTheme] = React.useState(currentExcalidrawTheme());
 
+    const writerRef = React.useRef(null);
+
+    if (!writerRef.current) {
+      writerRef.current = createSurfaceSceneWriter({
+        noteId: sourceNoteId,
+        drawingId,
+        baseline: current,
+        getApi: () => apiRef.current,
+      });
+    }
+
     React.useEffect(() => {
-      return () => {
-        clearTimeout(saveTimerRef.current);
-      };
+      return () => writerRef.current?.dispose();
     }, []);
 
     React.useEffect(() => {
       const observer = (event) => {
         if (!event.keysChanged.has(drawingId)) return;
-        if (event.transaction.origin === localOriginRef.current) return;
 
-        const next = getDrawing(sourceNoteId, drawingId);
+        const writer = writerRef.current;
+
+        if (writer.isOwnOrigin(event.transaction.origin)) return;
+
+        const next = foreignDrawingSceneToApply(writer, sourceNoteId, drawingId);
         if (!next) return;
 
-        // External scene wins. Cancel stale local debounced writes.
-        clearTimeout(saveTimerRef.current);
-        saveTimerRef.current = 0;
-
         setModalDrawingTitle(drawingId, next);
-        lastSigRef.current = drawingSignature(next);
 
         if (apiRef.current) {
           applyPersistedDrawingToApi(apiRef.current, next);
@@ -5472,44 +5432,8 @@ export async function openDrawModal(
     }, []);
 
     const onChange = (elements, appState, files) => {
-      const api = apiRef.current;
-
-      if (suppressChangeRef.current || isDrawingApiSaveSuppressed(api)) {
-        return;
-      }
-
-      if (!didInitialChangeRef.current) {
-        didInitialChangeRef.current = true;
-        return;
-      }
-
-      const incomingElements = cleanStaleSceneWikiData(elements || []);
-      const incomingAppState = cleanAppState(appState);
-      const incomingSig = sceneSignature(incomingElements, incomingAppState, files);
-
-      if (incomingSig === lastSigRef.current) return;
-
-      clearTimeout(saveTimerRef.current);
-
-      saveTimerRef.current = window.setTimeout(() => {
-        const liveApi = apiRef.current;
-
-        if (!liveApi || isDrawingApiSaveSuppressed(liveApi)) {
-          return;
-        }
-
-        const prev = getDrawing(sourceNoteId, drawingId) || current;
-
-        persistCurrentDrawingApiScene({
-          api: liveApi,
-          noteId: sourceNoteId,
-          drawingId,
-          previous: prev,
-          fallback: current,
-          origin: localOriginRef.current,
-          lastSigRef,
-        });
-      }, 250);
+      rememberDrawToolLock(appState?.activeTool?.locked);
+      writerRef.current?.note(elements, appState, files);
     };
 
     const onLinkOpen = (element, event) => {
@@ -5534,7 +5458,6 @@ export async function openDrawModal(
               ? {
                   activeTool: {
                     type: initialTool,
-                    locked: false,
                   },
                 }
               : {}),
@@ -5566,7 +5489,7 @@ export async function openDrawModal(
             try {
               api.setActiveTool?.({
                 type: initialTool,
-                locked: false,
+                locked: drawToolLock,
               });
             } catch {}
           });
@@ -6385,6 +6308,7 @@ export function setupDraw() {
   injectDrawCss();
   registerDrawOverlayRoute();
   loadDrawLibraryItemsFromSettings().catch(() => {});
+  loadDrawToolLockFromSettings().catch(() => {});
 
   window.addEventListener('yanta-create-drawing', () => createDrawingAndInsert());
 

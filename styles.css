@@ -174,8 +174,13 @@ button, input, select, textarea { font: inherit; color: inherit; }
   animation: fade-in 0.15s ease;
 }
 
-/* ---------- Sidebar ---------- */
-.sidebar {
+/* ---------- Sidebar ----------
+   Addressed by id, not by `.sidebar`. Excalidraw uses the same class name for
+   its library panel, and the mobile drawer rules below (position: fixed +
+   translateX(-100%)) used to push that panel off-screen on every viewport
+   under 880px — which is every tablet in portrait. Keep app chrome scoped to
+   #sidebar so embedded third-party UI stays untouched. */
+#sidebar {
   min-width: 40px;
   background: var(--bg-elev);
   border-right: 1px solid var(--border);
@@ -1406,7 +1411,7 @@ button.link { background: 0; border: 0; color: var(--accent); cursor: pointer; p
     grid-template-columns: 1fr;
   }
 
-  .sidebar {
+  #sidebar {
     position: fixed;
     left: 0;
     top: 0;
@@ -1418,7 +1423,7 @@ button.link { background: 0; border: 0; color: var(--accent); cursor: pointer; p
     box-shadow: var(--shadow);
   }
 
-  .app.sidebar-open .sidebar {
+  .app.sidebar-open #sidebar {
     transform: translateX(0);
   }
 
@@ -2684,7 +2689,7 @@ input.yanta-task-checkbox {
 }
 
 @media (max-width: 880px) {
-  .sidebar {
+  #sidebar {
     will-change: transform;
   }
 }
@@ -2710,7 +2715,7 @@ input.yanta-task-checkbox {
     flex: 0 0 auto;
   }
 
-  .sidebar {
+  #sidebar {
     position: fixed !important;
     z-index: 100;
     inset: 0 auto 0 0;
@@ -2724,7 +2729,7 @@ input.yanta-task-checkbox {
     border-right: 1px solid var(--border);
   }
 
-  .app.sidebar-open .sidebar {
+  .app.sidebar-open #sidebar {
     transform: translateX(0);
   }
 
@@ -2863,7 +2868,7 @@ input.yanta-task-checkbox {
   transition: grid-template-columns 180ms ease;
 }
 
-.sidebar {
+#sidebar {
   position: relative;
   width: var(--sidebar-w, var(--sidebar-expanded-w));
   transition:
@@ -2919,7 +2924,7 @@ input.yanta-task-checkbox {
     box-shadow 120ms ease;
 }
 
-.sidebar:hover .sidebar-collapse-toggle,
+#sidebar:hover .sidebar-collapse-toggle,
 .sidebar-collapse-toggle:focus,
 .sidebar-collapse-toggle:focus-visible {
   opacity: 1;
@@ -2947,12 +2952,12 @@ input.yanta-task-checkbox {
   --sidebar-w: var(--sidebar-collapsed-w);
 }
 
-.app.sidebar-collapsed .sidebar {
+.app.sidebar-collapsed #sidebar {
   min-width: var(--sidebar-collapsed-w);
   overflow: visible;
 }
 
-.app.sidebar-collapsed .sidebar * {
+.app.sidebar-collapsed #sidebar * {
   min-width: 0;
 }
 
@@ -3381,7 +3386,7 @@ input.yanta-task-checkbox {
     --sidebar-w: var(--sidebar-expanded-w);
   }
 
-  .app.sidebar-collapsed .sidebar {
+  .app.sidebar-collapsed #sidebar {
     width: min(86vw, 340px);
     min-width: 0;
   }
@@ -3393,7 +3398,7 @@ input.yanta-task-checkbox {
 
 @media (prefers-reduced-motion: reduce) {
   .app,
-  .sidebar,
+  #sidebar,
   .sidebar-collapse-toggle {
     transition: none !important;
   }
@@ -3630,7 +3635,7 @@ input.yanta-task-checkbox {
   border-color: var(--border-strong);
 }
 
-.app.sidebar-collapsed .sidebar .tree-folder-count {
+.app.sidebar-collapsed #sidebar .tree-folder-count {
     margin-left: -2px;
     margin-top: -17px;
     padding: 4px !important;
@@ -3848,7 +3853,7 @@ input.yanta-task-checkbox {
 
   /* ---------- Sidebar ---------- */
 
-  .sidebar {
+  #sidebar {
     width: min(88vw, 360px);
   }
 
@@ -4143,13 +4148,13 @@ input.yanta-task-checkbox {
    ============================================================ */
 
 @media (max-width: 880px) {
-  .app .sidebar {
+  .app #sidebar {
     transform: translate3d(-104%, 0, 0) !important;
     transition: transform 220ms cubic-bezier(.2, .8, .2, 1) !important;
     will-change: transform;
   }
 
-  .app.sidebar-open .sidebar {
+  .app.sidebar-open #sidebar {
     transform: translate3d(0, 0, 0) !important;
   }
 
@@ -4171,7 +4176,7 @@ input.yanta-task-checkbox {
 }
 
 @media (max-width: 880px) and (prefers-reduced-motion: reduce) {
-  .app .sidebar,
+  .app #sidebar,
   .app .sidebar-backdrop {
     transition: none !important;
   }
@@ -4181,7 +4186,7 @@ input.yanta-task-checkbox {
    Sidebar fixed footer/toe + scrollable tree
    ============================================================ */
 
-.sidebar {
+#sidebar {
   height: 100dvh;
   max-height: 100dvh;
   min-height: 0;
@@ -4231,7 +4236,7 @@ input.yanta-task-checkbox {
 
 /* Mobile/PWA viewport safety */
 @supports (height: 100svh) {
-  .sidebar {
+  #sidebar {
     height: 100svh;
     max-height: 100svh;
   }

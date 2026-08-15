@@ -26,7 +26,7 @@ import {
 
 import {
   runDrawingApiUpdateWithoutSaving,
-} from '../draw.js';
+} from '../draw-scene-sync.js';
 
 function cloneJson(value) {
   try {

@@ -167,6 +167,7 @@ const DRAWING_EXTENSION_KEYS = [
   'slideDecks',
   'defaultSlideDeckId',
   'presentationSettings',
+  'layers',
 ];
 
 function drawingExtensionPatch(raw = {}) {

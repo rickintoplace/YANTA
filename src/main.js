@@ -3522,7 +3522,7 @@ function bindEvents() {
   // );
 
   mountSidebarLegalLinks({
-    container: document.querySelector('.sidebar'),
+    container: document.getElementById('sidebar'),
     showMenu,
   });
 

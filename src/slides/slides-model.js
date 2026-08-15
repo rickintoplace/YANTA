@@ -8,7 +8,11 @@
 import {
     uid,
   } from '../core.js';
-  
+
+  import {
+    normalizeSlideAnimation,
+  } from './slides-animation.js';
+
   export const SLIDE_DEFAULT_ASPECT = 16 / 9;
   
   export function now() {
@@ -46,6 +50,7 @@ import {
         visibility: raw.notes?.visibility || 'presenter-only',
       },
       hidden: raw.hidden === true,
+      animation: normalizeSlideAnimation(raw.animation),
       created: Number(raw.created || now()),
       updated: Number(raw.updated || now()),
     };

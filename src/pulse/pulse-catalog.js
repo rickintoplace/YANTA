@@ -159,7 +159,7 @@ export const PULSE_CATALOG = [
       '1. Call `rss_search_items` with unreadOnly=true, limit 40.',
       '2. Judge against the interests recorded in the AI Brain user profile — read it with `ai_brain_read` first.',
       '3. Pick at most five. Prefer depth over novelty; drop anything that is coverage of coverage.',
-      '4. Save them with `rss_save_item_as_note` into one reading note.',
+      '4. Save each of them with `rss_save_item_as_note`. Saving the same article twice is a no-op, so nothing is duplicated on a later run.',
       '5. Call `pulse_emit` with one line per item saying why it made the cut.',
     ].join('\n'),
     silentWhen: [

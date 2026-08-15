@@ -431,8 +431,8 @@ export default {
 
   firstContact: {
     steps: {
-      title: 'You are one step in',
-      subtitle: 'Two more and YANTA is yours.',
+      title: { one: 'You are one step in', other: 'You are {count} steps in' },
+      subtitle: { one: 'One more and YANTA is yours.', other: '{count} more and YANTA is yours.' },
       hasNote: 'Your workspace has a note',
       capture: 'Capture a thought of your own',
       sync: 'Keep it across your devices',

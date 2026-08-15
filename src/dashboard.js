@@ -2257,30 +2257,33 @@ export async function showDashboardFromNote(noteId = state.currentNoteId, {
   }
 
   const transitionName = transitionNameFor('note', noteId);
-  const source = $('panes');
 
-  let targetCard = null;
-  let targetPage = null;
+  const sourceToken = setTemporaryViewTransitionElement(
+    $('panes'),
+    transitionName,
+    'is-note-transition-source'
+  );
 
-  if (source) {
-    source.style.viewTransitionName = transitionName;
-    source.style.contain = 'layout paint';
-    source.classList.add('is-note-transition-source');
-  }
+  let targetToken = null;
 
   dashboard.suppressStagger = true;
 
   const vt = document.startViewTransition(() => {
     showDashboard({ folderId, replace: false, push: false });
 
-    targetCard = root?.querySelector(
-      `.yanta-dash-card[data-note-id="${CSS.escape(noteId)}"]`
-    );
+    const targetCard = findDashboardNoteCard(noteId);
 
     if (targetCard) {
-      targetCard.style.viewTransitionName = transitionName;
-      targetCard.style.contain = 'layout paint';
-      targetCard.classList.add('is-note-transition-target');
+      // Land on the card the note came from, so the morph ends where the
+      // user is actually looking rather than somewhere below the fold.
+      scrollElementIntoDashboardView(targetCard);
+
+      targetToken = setTemporaryViewTransitionElement(
+        targetCard,
+        transitionName,
+        'is-note-transition-target'
+      );
+
       return;
     }
 
@@ -2288,38 +2291,21 @@ export async function showDashboardFromNote(noteId = state.currentNoteId, {
       Fallback:
       If the note card is not visible in the target dashboard route
       (e.g. note opened from tree, note lives elsewhere), still animate
-      panes -> dashboard page instead of doing no transition.
+      panes -> dashboard surface instead of doing no transition.
     */
-    targetPage = dashboardPage();
-
-    if (targetPage) {
-      targetPage.style.viewTransitionName = transitionName;
-      targetPage.style.contain = 'layout paint';
-      targetPage.classList.add('is-note-transition-target');
-    }
+    targetToken = setTemporaryViewTransitionElement(
+      dashboardSurfaceElement(),
+      transitionName,
+      'is-note-transition-target'
+    );
   });
 
   await vt.finished.catch(() => {});
 
   dashboard.suppressStagger = false;
 
-  if (source) {
-    source.style.viewTransitionName = '';
-    source.style.contain = '';
-    source.classList.remove('is-note-transition-source');
-  }
-
-  if (targetCard) {
-    targetCard.style.viewTransitionName = '';
-    targetCard.style.contain = '';
-    targetCard.classList.remove('is-note-transition-target');
-  }
-
-  if (targetPage) {
-    targetPage.style.viewTransitionName = '';
-    targetPage.style.contain = '';
-    targetPage.classList.remove('is-note-transition-target');
-  }
+  clearTemporaryViewTransitionElement(sourceToken);
+  clearTemporaryViewTransitionElement(targetToken);
 
   if (replace) {
     history.replaceState(
@@ -4721,39 +4707,19 @@ async function openDashboardCalendarEventFromHeader(header) {
     );
   }
 
-  function dashboardPage() {
-    return root?.querySelector('.yanta-dashboard-page') || null;
-  }
-
-  function setTemporaryViewTransitionElement(node, transitionName, className = '', {
-    viewportClip = false,
-  } = {}) {
+  function setTemporaryViewTransitionElement(node, transitionName, className = '') {
     if (!node || !transitionName) return null;
 
     const token = {
       node,
       previousViewTransitionName: node.style.viewTransitionName,
       previousContain: node.style.contain,
-      previousHeight: node.style.height,
-      previousOverflow: node.style.overflow,
-      previousBackground: node.style.background,
       className,
       active: true,
     };
 
     node.style.viewTransitionName = transitionName;
     node.style.contain = 'layout paint';
-
-    /*
-      For folder page transitions we must snapshot the visible dashboard area,
-      not an arbitrarily tall content box. This makes it behave like panes.
-    */
-    if (viewportClip && root) {
-      const r = root.getBoundingClientRect();
-      node.style.height = `${Math.max(1, Math.round(r.height))}px`;
-      node.style.overflow = 'hidden';
-      node.style.background = 'var(--bg)';
-    }
 
     if (className) {
       node.classList.add(className);
@@ -4773,13 +4739,27 @@ async function openDashboardCalendarEventFromHeader(header) {
 
     node.style.viewTransitionName = token.previousViewTransitionName || '';
     node.style.contain = token.previousContain || '';
-    node.style.height = token.previousHeight || '';
-    node.style.overflow = token.previousOverflow || '';
-    node.style.background = token.previousBackground || '';
 
     if (token.className) {
       node.classList.remove(token.className);
     }
+  }
+
+  /*
+    Whenever a transition needs "the dashboard" as one of its two endpoints,
+    that endpoint is the scroll viewport (#dashboard) — never the page inside
+    it.
+
+    .yanta-dashboard-page is a content box: it is as tall as the widgets and
+    cards it holds, and once the dashboard is scrolled its top sits above the
+    visible area. Either one makes the two snapshots disagree about where the
+    dashboard *is*, and the morph lands with a vertical jump — which is exactly
+    what going back from a note or a folder used to look like once the widget
+    row made the page taller than the screen. #dashboard is the visible region
+    in both directions, whatever the content height or the scroll position.
+  */
+  function dashboardSurfaceElement() {
+    return ensureDashboardRoot();
   }
 
   function folderPathForId(folderId) {
@@ -4856,6 +4836,15 @@ async function openDashboardCalendarEventFromHeader(header) {
     dashboard.folderId = folderId || null;
     dashboard.selectedKey = null;
 
+    /*
+      In-dashboard folder navigation is the only route that does not go through
+      showDashboard(), so this mirror has to be maintained here too. Everything
+      that creates "here" — the blank context menu, floating create, the sidebar
+      New menu — resolves its target folder from state.dashboardFolderId, and a
+      stale value put new items into the folder the user had just left.
+    */
+    state.dashboardFolderId = dashboard.folderId;
+
     if (push) {
       pushDashboardFolderHistory();
     }
@@ -4888,7 +4877,7 @@ async function navigateDashboardFolder(folderId, {
         card <-> panes
 
       Folder open/back:
-        folder-card <-> yanta-dashboard-page
+        folder-card <-> dashboard surface
 
     Wichtig:
     Im startViewTransition()-Update-Callback NICHT auf requestAnimationFrame()
@@ -4912,11 +4901,9 @@ async function navigateDashboardFolder(folderId, {
 
   const transitionName = transitionNameFor('folder', sharedFolderId);
 
-  const oldPage = dashboardPage();
-
   const oldElement = isOpeningFolder
     ? sourceCard
-    : oldPage;
+    : dashboardSurfaceElement();
 
   if (!oldElement) {
     commitDashboardFolderNavigation(targetFolderId, { push });
@@ -4927,10 +4914,7 @@ async function navigateDashboardFolder(folderId, {
   const oldToken = setTemporaryViewTransitionElement(
     oldElement,
     transitionName,
-    'is-folder-transition-source',
-    {
-      viewportClip: !isOpeningFolder,
-    }
+    'is-folder-transition-source'
   );
 
   let newToken = null;
@@ -4938,20 +4922,23 @@ async function navigateDashboardFolder(folderId, {
   dashboard.suppressStagger = true;
 
   const vt = document.startViewTransition(() => {
+    /*
+      The old snapshot is already taken. Release the name before naming the
+      new endpoint: the surface element survives the re-render, so leaving it
+      on would put the same view-transition-name on two live elements and the
+      browser would abort the whole transition.
+    */
+    clearTemporaryViewTransitionElement(oldToken);
+
     commitDashboardFolderNavigation(targetFolderId, { push });
 
     if (isOpeningFolder) {
       root.scrollTop = 0;
 
-      const newPage = dashboardPage();
-
       newToken = setTemporaryViewTransitionElement(
-        newPage,
+        dashboardSurfaceElement(),
         transitionName,
-        'is-folder-transition-target',
-        {
-          viewportClip: true,
-        }
+        'is-folder-transition-target'
       );
 
       return;
@@ -4959,7 +4946,7 @@ async function navigateDashboardFolder(folderId, {
 
     /*
       Back/up:
-      old dashboard page -> folder card in new dashboard.
+      old dashboard surface -> folder card in new dashboard.
 
       Kein await requestAnimationFrame() hier!
       scrollIntoView({ behavior:'instant' }) reicht synchron aus.
@@ -4991,15 +4978,10 @@ async function navigateDashboardFolder(folderId, {
     */
     root.scrollTop = 0;
 
-    const newPage = dashboardPage();
-
     newToken = setTemporaryViewTransitionElement(
-      newPage,
+      dashboardSurfaceElement(),
       transitionName,
-      'is-folder-transition-target',
-      {
-        viewportClip: true,
-      }
+      'is-folder-transition-target'
     );
   });
 
@@ -5021,7 +5003,16 @@ async function navigateDashboardFolder(folderId, {
   } = {}) {
     if (!ignoreSuppress && performance.now() < (dashboard.suppressOpenUntil || 0)) return;
     if (dashboard.dragging || dashboard.resize) return;
-  
+
+    /*
+      While a selection is up, a tap means "toggle this card" — never "open it".
+
+      dashboard-multiselect suppresses the click for that reason, but the touch
+      path here runs on touchend, which its pointerdown/click guards cannot
+      reach: on mobile the tap toggled the selection AND opened the note.
+    */
+    if (getDashboardSelectedKeys().length > 0) return;
+
     if (item.kind === 'folder') {
       await navigateDashboardFolder(item.id, {
         sourceCard: card,
@@ -5039,35 +5030,30 @@ async function navigateDashboardFolder(folderId, {
   
     try {
       if (document.startViewTransition && card) {
-        card.style.viewTransitionName = transitionName;
-        card.style.contain = 'layout paint';
-  
-        let target = null;
+        const sourceToken = setTemporaryViewTransitionElement(
+          card,
+          transitionName,
+          'is-note-transition-source'
+        );
+
+        let targetToken = null;
 
         const vt = document.startViewTransition(async () => {
           hideDashboard({ push: false });
-  
+
           await openNote(noteId);
-  
-          target = $('panes');
-  
-          if (target) {
-            target.style.viewTransitionName = transitionName;
-            target.style.contain = 'layout paint';
-            target.classList.add('is-note-transition-target');
-          }
+
+          targetToken = setTemporaryViewTransitionElement(
+            $('panes'),
+            transitionName,
+            'is-note-transition-target'
+          );
         });
-  
+
         await vt.finished.catch(() => {});
-  
-        if (target) {
-          target.style.viewTransitionName = '';
-          target.style.contain = '';
-          target.classList.remove('is-note-transition-target');
-        }
-  
-        card.style.viewTransitionName = '';
-        card.style.contain = '';
+
+        clearTemporaryViewTransitionElement(sourceToken);
+        clearTemporaryViewTransitionElement(targetToken);
 
         return;
       }
@@ -5105,52 +5091,41 @@ async function navigateDashboardFolder(folderId, {
 
     /*
       Fallback:
-      dashboard page -> note panes.
+      dashboard surface -> note panes.
       This covers history forward/back routes where the note is not visible
       as a card in the current dashboard folder.
     */
     dashboard.internalOpeningNote = true;
 
     const transitionName = transitionNameFor('note', noteId);
-    const sourcePage = dashboardPage();
-    let target = null;
+
+    const sourceToken = setTemporaryViewTransitionElement(
+      dashboardSurfaceElement(),
+      transitionName,
+      'is-note-transition-source'
+    );
+
+    let targetToken = null;
 
     try {
-      if (sourcePage) {
-        sourcePage.style.viewTransitionName = transitionName;
-        sourcePage.style.contain = 'layout paint';
-        sourcePage.classList.add('is-note-transition-source');
-      }
-
       const vt = document.startViewTransition(async () => {
         hideDashboard({ push: false });
 
         await openNote(noteId);
 
-        target = $('panes');
-
-        if (target) {
-          target.style.viewTransitionName = transitionName;
-          target.style.contain = 'layout paint';
-          target.classList.add('is-note-transition-target');
-        }
+        targetToken = setTemporaryViewTransitionElement(
+          $('panes'),
+          transitionName,
+          'is-note-transition-target'
+        );
       });
 
       await vt.finished.catch(() => {});
     } finally {
       dashboard.internalOpeningNote = false;
 
-      if (sourcePage) {
-        sourcePage.style.viewTransitionName = '';
-        sourcePage.style.contain = '';
-        sourcePage.classList.remove('is-note-transition-source');
-      }
-
-      if (target) {
-        target.style.viewTransitionName = '';
-        target.style.contain = '';
-        target.classList.remove('is-note-transition-target');
-      }
+      clearTemporaryViewTransitionElement(sourceToken);
+      clearTemporaryViewTransitionElement(targetToken);
     }
   }
   

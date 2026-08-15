@@ -424,8 +424,8 @@ export default {
 
   firstContact: {
     steps: {
-      title: 'Ya has dado un paso',
-      subtitle: 'Dos más y YANTA será tuyo.',
+      title: { one: 'Ya has dado un paso', other: 'Ya has dado {count} pasos' },
+      subtitle: { one: 'Uno más y YANTA será tuyo.', other: '{count} más y YANTA será tuyo.' },
       hasNote: 'Tu espacio ya tiene una nota',
       capture: 'Captura una idea propia',
       sync: 'Consérvalo en todos tus dispositivos',

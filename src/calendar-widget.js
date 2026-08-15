@@ -24,7 +24,7 @@ import { t } from './i18n/index.js';
 
 import {
   dateLikeToDate,
-  hasRecurrence,
+  isUnexpandedRecurrenceMaster,
 } from './calendar-recurrence.js';
 
 const WIDGET_SETTING = 'calendar.dashboardWidget.v1';
@@ -143,7 +143,7 @@ async function eventsForRange(rangeStart, rangeEnd) {
       ev._start < rangeEnd &&
       // Unexpanded recurring masters outside the range would duplicate
       // their own occurrences.
-      !hasRecurrence(ev)
+      !isUnexpandedRecurrenceMaster(ev)
     );
 
   return events.sort((a, b) => {
@@ -204,7 +204,7 @@ async function gridEventsForRange(rangeStart, rangeEnd) {
   return expandedCalendarRawEventsForRange(rangeStart, rangeEnd)
     .map((ev) => ({ ...ev, _start: eventStartDate(ev) }))
     // Unexpanded recurring masters would duplicate their own occurrences.
-    .filter((ev) => ev._start && !hasRecurrence(ev))
+    .filter((ev) => ev._start && !isUnexpandedRecurrenceMaster(ev))
     .map((ev) => ({ ...ev, _span: eventDaySpan(ev) }))
     .filter((ev) => ev._span.startDay < rangeEnd && ev._span.endExclusive > rangeStart)
     .sort((a, b) => {

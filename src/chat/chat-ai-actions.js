@@ -24,7 +24,11 @@ import {
   import {
     searchChatMessages,
   } from './chat-search.js';
-  
+
+  import {
+    toLocalIso,
+  } from '../ai/ai-time.js';
+
   const AI_ATTRIBUTION_FOOTER = '— sent by YANTA AI';
   const AI_ATTRIBUTION_FOOTER_RE = /\n{1,3}— sent by YANTA AI\s*$/i;
   
@@ -123,9 +127,14 @@ import {
     );
   }
   
+  /*
+    When a message was sent, as the user would read it off their own clock:
+    local wall time with its UTC offset (see ai-time.js). Matrix hands us
+    epoch milliseconds, which a model can only guess at — and guesses UTC.
+  */
   function eventTimestamp(event) {
     try {
-      return event.getTs?.() || event.event?.origin_server_ts || null;
+      return toLocalIso(event.getTs?.() || event.event?.origin_server_ts || 0) || null;
     } catch {
       return null;
     }
@@ -389,7 +398,7 @@ function compactMessageEvent(event) {
       results: results.map((row) => ({
         roomId: row.roomId,
         eventId: row.eventId,
-        ts: row.ts || null,
+        ts: toLocalIso(row.ts) || null,
         sender: row.sender || '',
         snippet: stripYantaAiFooter(row.snippet || row.body || ''),
         score: row.score || 0,

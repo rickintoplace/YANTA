@@ -27,7 +27,7 @@ import {
   state,
   store,
 } from './core.js';
-import { findTodayNote } from './journal.js';
+import { hasAnyDailyNote } from './journal.js';
 import { WELCOME_IDS } from './notes.js';
 import { t } from './i18n/index.js';
 
@@ -301,6 +301,13 @@ function stepRow({ label, done, onClick }) {
  * While this card is up it is the *only* ask on the dashboard: its third
  * step is the sync question, so the sync cards below it in the priority
  * order would only repeat what it already says.
+ *
+ * Every step is a one-way door. The capture step in particular asks whether
+ * the user has *ever* captured, not whether they captured today — the daily
+ * question un-ticked itself at midnight and brought the whole card back to
+ * someone who had been using quick capture for a week. And completing the
+ * last step writes the dismissed flag, so no later state change can make
+ * a finished checklist reappear.
  */
 async function buildFirstSteps({ onSetUpSync, onCapture } = {}) {
   if (readFlag(STEPS_DISMISSED_KEY)) return null;
@@ -308,13 +315,19 @@ async function buildFirstSteps({ onSetUpSync, onCapture } = {}) {
   const notes = userNoteCount();
   if (notes === 0) return null;
 
-  const [today, settled] = await Promise.all([
-    findTodayNote().catch(() => null),
+  const [captured, settled] = await Promise.all([
+    hasAnyDailyNote().catch(() => false),
     syncSettled(),
   ]);
 
-  // All done — nothing to nudge about, and no card to look at.
-  if (today && settled) return null;
+  const done = [notes > 0, captured, settled];
+  const doneCount = done.filter(Boolean).length;
+
+  // All done — retire the card for good rather than leaving it eligible.
+  if (doneCount === done.length) {
+    writeFlag(STEPS_DISMISSED_KEY);
+    return null;
+  }
 
   injectCss();
 
@@ -326,16 +339,16 @@ async function buildFirstSteps({ onSetUpSync, onCapture } = {}) {
   const steps = el('ul', { class: 'yanta-fc-steps' });
 
   steps.append(
-    stepRow({ label: t('firstContact.steps.hasNote'), done: notes > 0 }),
-    stepRow({ label: t('firstContact.steps.capture'), done: !!today, onClick: onCapture }),
-    stepRow({ label: t('firstContact.steps.sync'), done: settled, onClick: onSetUpSync }),
+    stepRow({ label: t('firstContact.steps.hasNote'), done: done[0] }),
+    stepRow({ label: t('firstContact.steps.capture'), done: done[1], onClick: onCapture }),
+    stepRow({ label: t('firstContact.steps.sync'), done: done[2], onClick: onSetUpSync }),
   );
 
   const main = el('div', { class: 'yanta-fc-main' });
 
   main.append(
-    el('div', { class: 'yanta-fc-title' }, t('firstContact.steps.title')),
-    el('div', { class: 'yanta-fc-sub' }, t('firstContact.steps.subtitle')),
+    el('div', { class: 'yanta-fc-title' }, t('firstContact.steps.title', { count: doneCount })),
+    el('div', { class: 'yanta-fc-sub' }, t('firstContact.steps.subtitle', { count: done.length - doneCount })),
     steps,
   );
 

@@ -27,6 +27,7 @@ const VAULT_MAP_NAMES = [
   'images',
   'events',
   'calendarCategories',
+  'rssFeeds',
   'settings',
   'devices',
   'tombstones',
@@ -201,6 +202,19 @@ export function vaultCalendarCategoriesMap() {
   return vaultMap('calendarCategories');
 }
 
+/*
+  Feed subscriptions, keyed by feed id.
+
+  A map rather than one array under `settings`: two devices adding a source
+  at the same time have to end up with both, and last-writer-wins on a single
+  array value silently drops one of them. Unsubscribing writes a soft-deleted
+  record instead of removing the key, so a device that still has the source
+  locally cannot resurrect it on the next merge.
+*/
+export function vaultRssFeedsMap() {
+  return vaultMap('rssFeeds');
+}
+
 export function vaultSettingsMap() {
   return vaultMap('settings');
 }
@@ -301,6 +315,7 @@ export function vaultJsonSnapshot() {
   const images = Object.fromEntries(vaultImagesMap());
   const events = Object.fromEntries(vaultEventsMap());
   const calendarCategories = Object.fromEntries(vaultCalendarCategoriesMap());
+  const rssFeeds = Object.fromEntries(vaultRssFeedsMap());
   const settings = Object.fromEntries(vaultSettingsMap());
   const devices = Object.fromEntries(vaultDevicesMap());
   const tombstones = Object.fromEntries(vaultTombstonesMap());
@@ -311,6 +326,7 @@ export function vaultJsonSnapshot() {
     images,
     events,
     calendarCategories,
+    rssFeeds,
     settings,
     devices,
     tombstones,
@@ -350,6 +366,7 @@ export function encodeCompactVaultState({
   copyVaultMapToCompactDoc(compact, 'images', vaultImagesMap);
   copyVaultMapToCompactDoc(compact, 'events', vaultEventsMap);
   copyVaultMapToCompactDoc(compact, 'calendarCategories', vaultCalendarCategoriesMap);
+  copyVaultMapToCompactDoc(compact, 'rssFeeds', vaultRssFeedsMap);
   copyVaultMapToCompactDoc(compact, 'tombstones', vaultTombstonesMap);
 
   if (includeDevices) {

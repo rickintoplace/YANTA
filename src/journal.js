@@ -150,6 +150,33 @@ export async function findTodayNote() {
   return findDailyNoteIn(folder?.id || null, dailyKey());
 }
 
+const DAILY_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Whether this workspace has ever held a daily note — any day, not just today.
+ *
+ * The distinction matters for anything that asks "has the user tried quick
+ * capture yet": with findTodayNote() that answer flips back to "no" every
+ * midnight, and a habit the user already has would keep being requested.
+ */
+export async function hasAnyDailyNote() {
+  const folder = await findJournalFolder();
+  if (!folder) return false;
+
+  for (const note of state.notes.values()) {
+    if (
+      note.folderId === folder.id &&
+      note.trashed !== true &&
+      !note.spaceId &&
+      DAILY_KEY_RE.test(String(note.title || ''))
+    ) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 export async function getOrCreateTodayNote() {
   const folder = await ensureJournalFolder();
   const key = dailyKey();

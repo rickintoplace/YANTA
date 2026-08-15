@@ -112,8 +112,11 @@ function compactNote(note) {
     pinned: !!note.pinned,
     icon: note.icon || null,
     color: note.color || null,
-    created: note.created || null,
-    updated: note.updated || null,
+
+    // Local wall clock, like every other moment we hand a model — epoch
+    // milliseconds are something it can only guess at, and it guesses UTC.
+    created: toLocalIso(note.created) || null,
+    updated: toLocalIso(note.updated) || null,
   };
 }
 

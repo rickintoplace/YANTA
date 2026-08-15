@@ -122,6 +122,18 @@ export function hasRecurrence(ev) {
   return !!normalizeRecurrence(ev?.recurrence)?.rrule;
 }
 
+/**
+ * A series master that has NOT been expanded into occurrences.
+ *
+ * This is the predicate a renderer wants when it drops "the master would
+ * duplicate its own occurrences": generated occurrences inherit the master's
+ * `recurrence` field, so hasRecurrence() alone is true for them too and
+ * filtering on it hides the entire series.
+ */
+export function isUnexpandedRecurrenceMaster(ev) {
+  return hasRecurrence(ev) && ev?.recurrenceOccurrence !== true;
+}
+
 export function parseOccurrenceId(id = '') {
   const s = String(id || '');
   const idx = s.indexOf(OCCURRENCE_ID_SEP);

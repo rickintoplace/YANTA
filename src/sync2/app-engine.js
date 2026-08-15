@@ -23,7 +23,7 @@
 import * as Y from 'yjs';
 
 import { $, state, store, toast, isSpaceMountedNote } from '../core.js';
-import { rebuildWikilinkIndex } from '../notes.js';
+import { isNoteTitleFieldFocused, rebuildWikilinkIndex } from '../notes.js';
 import { renderTree } from '../tree.js';
 
 import {
@@ -43,6 +43,7 @@ import {
   vaultImagesMap,
   vaultEventsMap,
   vaultCalendarCategoriesMap,
+  vaultRssFeedsMap,
   vaultDevicesMap,
   vaultSettingsMap,
   VAULT_SYNCED_SETTING_KEYS,
@@ -516,6 +517,7 @@ export async function sync2LocalVaultContentFingerprint() {
     images: {},
     events: {},
     calendarCategories: {},
+    rssFeeds: {},
     tombstones: {},
     settings: {},
   };
@@ -539,6 +541,10 @@ export async function sync2LocalVaultContentFingerprint() {
 
     for (const [id, cat] of vaultCalendarCategoriesMap()) {
       snapshot.calendarCategories[id] = stripVolatileVaultFingerprintFields(cat);
+    }
+
+    for (const [id, feed] of vaultRssFeedsMap()) {
+      snapshot.rssFeeds[id] = stripVolatileVaultFingerprintFields(feed);
     }
 
     for (const [id, tombstone] of vaultTombstonesMap()) {
@@ -3315,7 +3321,17 @@ export class Sync2AppEngine {
       ? state.notes.get(state.currentNoteId)
       : null;
 
-    if (current) {
+    /*
+      Adopt a remotely changed title into the open note — unless the user is
+      writing in it.
+
+      The title field autosaves on a debounce, so between a keystroke and the
+      store write the vault legitimately still holds the previous title. A
+      hydration landing in that window used to rewrite the field back to it,
+      and the save that fired afterwards then persisted the old title: the
+      edit was not just visually reverted, it was lost.
+    */
+    if (current && !isNoteTitleFieldFocused()) {
       const titleEl = $('noteTitle');
 
       if (titleEl && titleEl.value !== (current.title || '')) {

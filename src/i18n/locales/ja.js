@@ -417,8 +417,8 @@ export default {
 
   firstContact: {
     steps: {
-      title: '最初の一歩は完了',
-      subtitle: 'あと2つで YANTA はあなたのものです。',
+      title: { other: '{count} ステップ完了' },
+      subtitle: { other: 'あと{count}つで YANTA はあなたのものです。' },
       hasNote: 'ワークスペースにノートがあります',
       capture: '自分の考えを書き留める',
       sync: 'すべての端末で保持する',

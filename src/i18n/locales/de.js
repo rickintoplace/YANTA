@@ -424,8 +424,8 @@ export default {
 
   firstContact: {
     steps: {
-      title: 'Ein Schritt ist geschafft',
-      subtitle: 'Noch zwei, dann gehört YANTA dir.',
+      title: { one: 'Ein Schritt ist geschafft', other: '{count} Schritte sind geschafft' },
+      subtitle: { one: 'Noch einer, dann gehört YANTA dir.', other: 'Noch {count}, dann gehört YANTA dir.' },
       hasNote: 'Dein Workspace hat eine Notiz',
       capture: 'Einen eigenen Gedanken festhalten',
       sync: 'Auf allen Geräten sichern',

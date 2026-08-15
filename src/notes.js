@@ -695,6 +695,25 @@ export function clearEditor() {
   markSaved();
 }
 
+/**
+ * Whether the user is currently in a note title field — the canonical
+ * #noteTitle input or one of the mirrors rendered into the editor and
+ * preview panes.
+ *
+ * Anything that would write a stored title back into the field has to ask
+ * this first: the field autosaves on a debounce, so a write that lands
+ * mid-edit both reverts what was typed and makes the pending save persist
+ * the value it reverted to.
+ */
+export function isNoteTitleFieldFocused() {
+  const active = document.activeElement;
+
+  return !!active && (
+    active.id === 'noteTitle' ||
+    active.classList?.contains('yanta-note-title-mirror') === true
+  );
+}
+
 export async function saveCurrentNote() {
   const noteId = state.currentNoteId;
   if (!noteId) return;

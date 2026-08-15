@@ -44,6 +44,11 @@ import {
 } from './rss-cloud-auth.js';
 
 import {
+  toLocalDate,
+  toLocalIso,
+} from '../ai/ai-time.js';
+
+import {
   getRssItem,
   upsertRssItems,
   patchRssItem,
@@ -75,18 +80,6 @@ async function hashString(text) {
   const digest = await crypto.subtle.digest('SHA-256', bytes);
 
   return base64Url(new Uint8Array(digest)).slice(0, 32);
-}
-
-function isoDate(ms) {
-  const t = Number(ms || 0);
-
-  if (!t) return '';
-
-  try {
-    return new Date(t).toISOString();
-  } catch {
-    return '';
-  }
 }
 
 function mdEscape(value = '') {
@@ -267,9 +260,9 @@ export function rssItemMarkdown(item, feed = null) {
   const sourceTitle = feed?.title || item.feedTitle || 'Source';
   const sourceUrl = item.url || feed?.siteUrl || feed?.feedUrl || '';
 
-  const published = item.publishedAt
-    ? isoDate(item.publishedAt).slice(0, 10)
-    : '';
+  // The reader's calendar day, not UTC's: an article that arrived at 00:30
+  // local is dated the previous day by a UTC slice.
+  const published = toLocalDate(item.publishedAt);
 
   const content = articleTextForMarkdown(item);
   const summary = String(item.summaryText || stripHtml(item.summaryHtml || '') || '').trim();
@@ -1456,6 +1449,19 @@ export async function saveRssItemAsNote(itemId, {
 
   if (!item) throw new Error('RSS item not found.');
 
+  /*
+    Saving an article is idempotent: an item already has at most one note.
+
+    Without this, every call minted a fresh note for the same article, and
+    the AI's rss_save_item_as_note tool made that a flood — a Pulse routine
+    re-reading its feed turned one article into one note per run.
+  */
+  const existing = item.savedNoteId ? state.notes.get(item.savedNoteId) : null;
+
+  if (existing && !existing.trashed) {
+    return existing;
+  }
+
   const feeds = await getRssFeeds();
   const feed = feeds.find((f) => f.id === item.feedId);
 
@@ -1586,7 +1592,14 @@ export async function appendRssItemToCurrentNote(itemId) {
   toast('Added source item to current note', 'success');
 }
 
-// AI action wrappers
+/*
+  AI action wrappers
+
+  Every timestamp leaving for a model goes through ai-time.js: local wall
+  clock with its UTC offset. A raw UTC ISO reads literally as the wrong hour
+  — the whole reason that module exists — and a Pulse routine summarising
+  feeds reported every article's time shifted by the user's offset.
+*/
 
 function compactRssFeedForAi(feed) {
   if (!feed) return null;
@@ -1603,7 +1616,7 @@ function compactRssFeedForAi(feed) {
     icon: feed.icon || '',
     color: feed.color || '',
     enabled: feed.enabled !== false,
-    lastFetchedAt: feed.lastFetchedAt ? new Date(feed.lastFetchedAt).toISOString() : null,
+    lastFetchedAt: toLocalIso(feed.lastFetchedAt) || null,
     lastError: feed.lastError || '',
   };
 }
@@ -1655,7 +1668,7 @@ export async function rssSearchItemsAction(args = {}) {
       title: item.title,
       author: item.author,
       url: item.url,
-      publishedAt: item.publishedAt ? new Date(item.publishedAt).toISOString() : null,
+      publishedAt: toLocalIso(item.publishedAt) || null,
       summary: item.summaryText || item.contentText?.slice(0, 800) || '',
       mediaUrl: item.mediaUrl || '',
       mediaType: item.mediaType || '',
@@ -1680,7 +1693,7 @@ export async function rssReadItemAction({ itemId } = {}) {
     title: item.title,
     author: item.author,
     url: item.url,
-    publishedAt: item.publishedAt ? new Date(item.publishedAt).toISOString() : null,
+    publishedAt: toLocalIso(item.publishedAt) || null,
     summaryText: item.summaryText || '',
     contentText: item.contentText || '',
     fullText: item.contentText || stripHtml(item.contentHtml || '') || item.summaryText || '',

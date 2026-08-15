@@ -1,8 +1,11 @@
 // ============================================================
-// YANTA Sources / RSS — settings + synced feed subscriptions
+// YANTA Sources / RSS — settings + feed subscriptions
 //
 // Storage strategy:
-// - Feeds/settings in core store.settings -> synced with YANTA vault.
+// - Feeds/settings in core store.settings -> this device's copy.
+// - Feeds additionally in the VaultDoc -> shared across devices. This
+//   module stays a plain local store; rss-feed-sync.js owns the vault side
+//   and reconciles it, hanging off yanta-rss-feeds-changed.
 // - Items/content in rss-store.js -> local IndexedDB cache only.
 // ============================================================
 

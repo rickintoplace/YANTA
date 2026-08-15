@@ -424,8 +424,8 @@ export default {
 
   firstContact: {
     steps: {
-      title: 'Une étape de faite',
-      subtitle: 'Encore deux et YANTA est à vous.',
+      title: { one: 'Une étape de faite', other: '{count} étapes de faites' },
+      subtitle: { one: 'Encore une et YANTA est à vous.', other: 'Encore {count} et YANTA est à vous.' },
       hasNote: 'Votre espace contient une note',
       capture: 'Capturez une idée à vous',
       sync: 'Gardez-la sur tous vos appareils',

@@ -1548,8 +1548,9 @@
 }
 
 /*
-  Real dashboard surface for folder transitions.
-  This is intentionally replaced on every renderDashboard().
+  The page inside the dashboard. Replaced on every renderDashboard() — the
+  transition endpoint is the scrolling #dashboard around it, not this box,
+  because this one is as tall as its content.
 */
 .yanta-dashboard-page {
   min-height: 100%;
@@ -1558,8 +1559,12 @@
 
 .yanta-dash-card.is-folder-transition-source,
 .yanta-dash-card.is-folder-transition-target,
-.yanta-dashboard-page.is-folder-transition-source,
-.yanta-dashboard-page.is-folder-transition-target,
+.yanta-dash-card.is-note-transition-source,
+.yanta-dash-card.is-note-transition-target,
+.dashboard.is-folder-transition-source,
+.dashboard.is-folder-transition-target,
+.dashboard.is-note-transition-source,
+.dashboard.is-note-transition-target,
 .panes.is-note-transition-source,
 .panes.is-note-transition-target {
   contain: layout paint;

@@ -22,6 +22,7 @@
 
 import { $, el, state, store, toast, lucide, uid, safeFilename, escapeHtml } from './core.js';
 import { getNoteDoc, encodeNoteState, applyNoteUpdate, noteMarkdown } from './yjs.js';
+import { isNoteTitleFieldFocused } from './notes.js';
 import * as Y from 'yjs';
 import { openBoundOverlay } from './overlay-history.js';
 import { folderPathSegments, ensureFolderPath, parseFrontmatter, noteToFrontmatter, imageExt } from './io.js';
@@ -389,7 +390,8 @@ async function ingestMdFile(file, path, segs, filename, result) {
     sync.knownFiles.set(id, path);
     sync.fileMtimes.set(path, fileTime);
     result.updated++;
-    if (state.currentNoteId === id) {
+    // Never over the user's fingers — see isNoteTitleFieldFocused().
+    if (state.currentNoteId === id && !isNoteTitleFieldFocused()) {
       const titleEl = $('noteTitle'); if (titleEl) titleEl.value = existing.title;
     }
     return;

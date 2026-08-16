@@ -371,11 +371,14 @@ function writeAnimation(noteId, drawingId, slide, animation) {
 // ------------------------------------------------------------
 
 /**
- * Turns the current board selection into the slide's next build step.
+ * Turns the current board selection into a slide's next build step.
  *
- * Returns the slide it was added to, or null when there was nothing to add.
+ * @param {string} [options.preferSlideId]  slide to use when the selection is
+ *   not inside any slide — the one the panel is showing. Without it, every
+ *   step added from outside a slide frame would spawn a slide of its own.
+ * @returns the slide the step landed on, or null when there was nothing to add
  */
-export function addSelectionAsBuildStep({ noteId, drawingId, api }) {
+export function addSelectionAsBuildStep({ noteId, drawingId, api, preferSlideId = '' }) {
   const elements = sceneElements(api);
   const selectedIds = selectedElementIdsFromApi(api);
 
@@ -394,13 +397,22 @@ export function addSelectionAsBuildStep({ noteId, drawingId, api }) {
   const chosen = elements.filter((el) => ids.includes(el.id));
 
   /*
+    Which slide the step belongs to, in order of what the user most likely
+    means:
+      1. the slide the selection actually sits on
+      2. the slide currently open in the panel — you are editing its animation
+      3. a new slide around the selection
+
     An animation belongs to a slide, but nobody should have to know that
-    before they can animate something. If the selection sits on bare board, a
-    slide is created around it — one click instead of a dead end, and the
-    toast says what happened so it is never a silent surprise.
+    before they can animate something; step 3 is what keeps a bare board from
+    being a dead end. Step 2 is what keeps it from spawning a slide per click.
   */
   let slide = slideForElements(noteId, drawingId, chosen);
   let createdSlide = false;
+
+  if (!slide && preferSlideId) {
+    slide = listSlides(noteId, drawingId).find((s) => s.id === preferSlideId) || null;
+  }
 
   if (!slide) {
     slide = createSlide(noteId, drawingId, {
@@ -419,6 +431,10 @@ export function addSelectionAsBuildStep({ noteId, drawingId, api }) {
   const animation = slideAnimation(slide);
 
   // An element can only belong to one step; re-animating moves it.
+  const wasAnimated = animation.builds.some((build) =>
+    build.elementIds.some((id) => ids.includes(id))
+  );
+
   const builds = animation.builds
     .map((build) => ({
       ...build,
@@ -435,15 +451,27 @@ export function addSelectionAsBuildStep({ noteId, drawingId, api }) {
 
   writeAnimation(noteId, drawingId, slide, { ...animation, builds });
 
+  /*
+    Say which of the three things happened. Re-adding an already animated
+    object moves it to a new last step rather than adding one, so the step
+    count does not grow — without a word about it that reads as "the button
+    did nothing".
+  */
   toast(
     createdSlide
       ? `Created "${slide.title}" — animation step 1`
-      : `Step ${builds.length} on "${slide.title}"`,
+      : wasAnimated
+        ? `Moved to step ${builds.length} on "${slide.title}"`
+        : `Step ${builds.length} on "${slide.title}"`,
     'success'
   );
 
-  // An open panel follows along, including onto a slide just created for it.
-  if (panel && (panel.slideId === slide.id || !panel.slideId)) {
+  /*
+    The panel always follows the step that was just created. Anything else
+    means adding a step and not seeing it appear, which reads as "the button
+    does nothing".
+  */
+  if (panel) {
     panel.slideId = slide.id;
     render();
   }
@@ -741,8 +769,8 @@ function previewBuild(buildId) {
     animator.revealStep(solo, 0);
 
     window.setTimeout(() => {
-      animator.restore();
-      panel.previewing = false;
+      animator.dispose();
+      if (panel) panel.previewing = false;
     }, build.duration + 260);
   });
 }
@@ -809,6 +837,7 @@ export function openSlideAnimationPanel({
       noteId,
       drawingId,
       api: panel?.getApi?.(),
+      preferSlideId: panel?.slideId || '',
     });
   });
 

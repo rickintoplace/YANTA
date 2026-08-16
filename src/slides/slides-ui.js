@@ -3917,7 +3917,7 @@ export function stopSlideshow() {
 
   // Before anything else: put every element a build step touched back exactly
   // as the user drew it. A presentation must never leave a mark on the board.
-  slideshow.animator.restore();
+  slideshow.animator.dispose();
   removeTransitionVeil();
 
   document.removeEventListener('keydown', slideshowKeyHandler, true);

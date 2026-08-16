@@ -220,6 +220,55 @@ export function drawingSignature(drawing) {
 }
 
 // ------------------------------------------------------------
+// Persist sanitizers
+//
+// Some features put elements into a temporary, presentation-only state — a
+// slideshow build step hides what it is about to reveal by setting opacity 0.
+// That state lives in the same element fields that get persisted, so relying
+// on the suppression window above to keep it out of the document is a race:
+// Excalidraw may emit the matching onChange after the window has closed, and
+// the element is then saved as permanently invisible.
+//
+// A sanitizer removes that state structurally. It is asked to convert the
+// live element array into the one that should be written, and runs on every
+// save regardless of timing.
+// ------------------------------------------------------------
+
+const sceneSanitizers = new Set();
+
+/**
+ * Registers a function that strips presentation-only state before a save.
+ *
+ * @param {(elements: Array) => Array} sanitize
+ * @returns {Function} call to unregister
+ */
+export function registerScenePersistSanitizer(sanitize) {
+  if (typeof sanitize !== 'function') return () => {};
+
+  sceneSanitizers.add(sanitize);
+
+  return () => sceneSanitizers.delete(sanitize);
+}
+
+/** Applies every registered sanitizer. Identity when none are active. */
+export function sanitizeElementsForPersist(elements) {
+  if (!sceneSanitizers.size || !Array.isArray(elements)) return elements;
+
+  let out = elements;
+
+  for (const sanitize of sceneSanitizers) {
+    try {
+      const next = sanitize(out);
+      if (Array.isArray(next)) out = next;
+    } catch (err) {
+      console.warn('[YANTA Draw] scene sanitizer failed', err);
+    }
+  }
+
+  return out;
+}
+
+// ------------------------------------------------------------
 // Local origins
 //
 // Every writer stamps its Yjs transactions with a unique origin. A surface

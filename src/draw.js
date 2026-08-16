@@ -41,10 +41,11 @@ import {
   cleanAppState,
   createDrawingSceneWriter,
   runDrawingApiUpdateWithoutSaving,
+  sanitizeElementsForPersist,
 } from './draw-scene-sync.js';
 
 import { layerSortedElements } from './layers/layers-order.js';
-import { menuTopSection } from './menu-position.js';
+import { menuTopSection, watchExcalidrawContextMenus } from './menu-position.js';
 
 import { cloudFetchExcalidrawLibrary } from './cloud/cloud-api.js';
 import { insertAtCursor } from './editor.js';
@@ -2527,7 +2528,14 @@ function buildPersistedDrawingSceneFromApi(api, {
     id: drawingId,
     title: base.title || fallback.title || 'Drawing',
     canvas: base.canvas || fallback.canvas || { width: 760, height: 420 },
-    elements: cleanStaleSceneWikiData(elements),
+
+    /*
+      Sanitize first: a running build step hides elements by setting opacity 0
+      on the live scene, and that must never reach the document — otherwise an
+      onChange landing outside the suppression window saves them as invisible
+      and they are gone for good.
+    */
+    elements: cleanStaleSceneWikiData(sanitizeElementsForPersist(elements)),
     appState: cleanAppState(appState),
     files,
   };
@@ -6357,6 +6365,7 @@ export async function importExcalidrawDataAsNote(data, title = 'Drawing') {
 export function setupDraw() {
   injectDrawCss();
   registerDrawOverlayRoute();
+  watchExcalidrawContextMenus();
   loadDrawLibraryItemsFromSettings().catch(() => {});
   loadDrawToolLockFromSettings().catch(() => {});
 

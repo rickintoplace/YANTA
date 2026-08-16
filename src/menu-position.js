@@ -9,6 +9,8 @@
 
 const MARGIN = 8;
 
+let contextMenuWatcher = null;
+
 /**
  * Positions a fixed/absolute menu at (x, y) and flips or nudges it so the
  * whole menu stays inside the viewport.
@@ -102,13 +104,62 @@ export function keepMenuInViewport(menu, { margin = MARGIN } = {}) {
 
   if (!dx && !dy) return;
 
-  const style = getComputedStyle(host);
-  const top = parseFloat(host.style.top || style.top) || 0;
-  const left = parseFloat(host.style.left || style.left) || 0;
+  /*
+    Derived from the host's measured box rather than from its `top`/`left`
+    style: the popup may be placed with `bottom`, with `auto`, or via a
+    transform, and parsing the wrong one moves it somewhere random instead of
+    nudging it.
+  */
+  const hostRect = host.getBoundingClientRect();
+  const parent = host.offsetParent;
+  const parentRect = parent
+    ? parent.getBoundingClientRect()
+    : { top: 0, left: 0 };
 
-  host.style.top = `${Math.round(top + dy)}px`;
-  host.style.left = `${Math.round(left + dx)}px`;
+  host.style.top = `${Math.round(hostRect.top + dy - parentRect.top)}px`;
+  host.style.left = `${Math.round(hostRect.left + dx - parentRect.left)}px`;
+  host.style.bottom = 'auto';
+  host.style.right = 'auto';
 }
+
+/**
+ * Fits every Excalidraw context menu that opens anywhere in the app.
+ *
+ * Deliberately global rather than hooked into the code that adds YANTA's own
+ * entries: those injectors only run for certain selections, so menus opened in
+ * other situations were left unfitted — which is why the *first* right-click
+ * near the bottom edge still lost the end of the menu.
+ */
+export function watchExcalidrawContextMenus() {
+  if (contextMenuWatcher) return;
+
+  const SELECTOR = '.context-menu, [data-testid="context-menu"]';
+
+  const fitAll = (root) => {
+    if (!(root instanceof Element)) return;
+
+    if (root.matches?.(SELECTOR)) {
+      keepMenuInViewportWhileOpen(root);
+      return;
+    }
+
+    root.querySelectorAll?.(SELECTOR).forEach((menu) => {
+      keepMenuInViewportWhileOpen(menu);
+    });
+  };
+
+  contextMenuWatcher = new MutationObserver((records) => {
+    for (const record of records) {
+      for (const node of record.addedNodes) fitAll(node);
+    }
+  });
+
+  contextMenuWatcher.observe(document.body, {
+    childList: true,
+    subtree: true,
+  });
+}
+
 
 /**
  * Keeps a third-party menu inside the viewport for as long as it is open.
@@ -133,13 +184,29 @@ export function keepMenuInViewportWhileOpen(menu, { margin = MARGIN } = {}) {
     return true;
   };
 
+  if (menu.dataset.yantaMenuFitted === '1') {
+    fit();
+    return;
+  }
+
+  menu.dataset.yantaMenuFitted = '1';
+
   fit();
+  requestAnimationFrame(fit);
 
-  requestAnimationFrame(() => {
-    if (fit()) requestAnimationFrame(fit);
-  });
+  /*
+    A short poll on top of the ResizeObserver: the menu can be *moved* by its
+    owner after mounting (Excalidraw sets the popover position itself), and a
+    size observer never sees that. Bounded to under a second, so it costs
+    nothing once the menu has settled.
+  */
+  let ticks = 0;
 
-  window.setTimeout(fit, 120);
+  const poll = window.setInterval(() => {
+    ticks++;
+
+    if (!fit() || ticks > 10) window.clearInterval(poll);
+  }, 80);
 
   if (typeof ResizeObserver !== 'function') return;
 
@@ -157,6 +224,7 @@ export function keepMenuInViewportWhileOpen(menu, { margin = MARGIN } = {}) {
     }
 
     observer.disconnect();
+    window.clearInterval(poll);
   };
 
   window.setTimeout(stopWhenGone, 400);

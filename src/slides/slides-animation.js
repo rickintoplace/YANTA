@@ -21,7 +21,11 @@
 // ============================================================
 
 import { uid } from '../core.js';
-import { runDrawingApiUpdateWithoutSaving } from '../draw-scene-sync.js';
+
+import {
+  registerScenePersistSanitizer,
+  runDrawingApiUpdateWithoutSaving,
+} from '../draw-scene-sync.js';
 
 export const SLIDE_TRANSITIONS = ['auto', 'cut', 'fade'];
 
@@ -410,6 +414,24 @@ export function createSlideAnimator({ getApi }) {
   let applyRaf = 0;
   let animationRaf = 0;
 
+  /*
+    Hard guarantee that a presentation never leaves a mark on the drawing: any
+    save that happens while elements are hidden or mid-flight writes their
+    untouched values instead. `restore()` puts the board back on screen; this
+    protects the document even if the tab is closed mid-presentation.
+  */
+  const unregisterSanitizer = registerScenePersistSanitizer((elements) => {
+    if (!originals.size) return elements;
+
+    return elements.map((el) => {
+      const original = originals.get(el?.id);
+
+      return original && differs(el, restoreTarget(original))
+        ? { ...el, ...restoreTarget(original) }
+        : el;
+    });
+  });
+
   function readElements() {
     const api = getApi?.();
     if (!api) return { api: null, elements: [] };
@@ -665,6 +687,12 @@ export function createSlideAnimator({ getApi }) {
     showStep,
     revealStep,
     restore,
+
+    /** Restores the board and stops protecting saves. Call when done for good. */
+    dispose() {
+      restore();
+      unregisterSanitizer();
+    },
   };
 }
 

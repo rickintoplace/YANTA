@@ -354,6 +354,20 @@ export function createDrawingSceneWriter({
   let lastSeenSig = baseline ? drawingSignature(baseline) : '';
   let lastPersistedSig = lastSeenSig;
 
+  /*
+    The last scene an onChange reported. It is the freshest data that provably
+    came from a living editor, and it is what a flush falls back to when the
+    Excalidraw instance has already been torn down — which is exactly what
+    happens when a note is closed moments after an edit.
+  */
+  let live = null;
+
+  // Whether an onChange ever reported an empty scene. Only then may an empty
+  // scene be written; otherwise "empty" means the instance stopped answering.
+  let sawEmptyScene = !baseline?.elements?.length;
+
+  let lastKnownCount = baseline?.elements?.length || 0;
+
   function clearTimer() {
     if (!timer) return;
     window.clearTimeout(timer);
@@ -404,8 +418,25 @@ export function createDrawingSceneWriter({
     const api = getApi();
     if (!api) return false;
 
-    const scene = buildScene(api);
+    const scene = buildScene(api, { live });
     if (!scene) return false;
+
+    /*
+      Last line of defence against wiping a drawing. Deleting everything by
+      hand still produces a non-empty scene (tombstones), and a genuine clear
+      arrives through onChange — so an empty scene that no onChange ever
+      reported can only mean the editor stopped answering.
+    */
+    if (!scene.elements?.length && lastKnownCount > 0 && !sawEmptyScene) {
+      console.warn(
+        '[YANTA Draw] refused to save an empty scene over %d elements — the editor reported nothing',
+        lastKnownCount
+      );
+
+      dirtySince = 0;
+
+      return false;
+    }
 
     const sig = drawingSignature(scene);
 
@@ -415,6 +446,7 @@ export function createDrawingSceneWriter({
     if (sig === lastPersistedSig) return false;
 
     lastPersistedSig = sig;
+    lastKnownCount = scene.elements?.length || 0;
 
     setDrawing(noteId, drawingId, scene, origin);
     onPersisted?.(scene);
@@ -446,6 +478,12 @@ export function createDrawingSceneWriter({
       lastSeenSig = sig;
       pointerDown = appState?.cursorButton === 'down';
 
+      // Held by reference — Excalidraw hands out a fresh array each time, so
+      // this costs nothing and keeps the last living view of the scene.
+      live = { elements, appState, files };
+
+      if (Array.isArray(elements) && !elements.length) sawEmptyScene = true;
+
       if (!dirtySince) dirtySince = performance.now();
 
       scheduleFromDeadline();
@@ -476,6 +514,7 @@ export function createDrawingSceneWriter({
 
       lastSeenSig = sig;
       lastPersistedSig = sig;
+      lastKnownCount = scene?.elements?.length || 0;
       dirtySince = 0;
       pointerDown = false;
 

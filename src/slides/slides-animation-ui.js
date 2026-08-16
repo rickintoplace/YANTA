@@ -58,10 +58,18 @@ import {
   makePanelDraggable,
 } from '../draggable-panel.js';
 
+import {
+  getActiveDrawingApi,
+} from '../draw.js';
+
 const PANEL_OVERLAY_ID = 'slide-animation';
 
 let panel = null;
 let cssInjected = false;
+
+// Rendered step thumbnails, keyed by the elements they show. A step's picture
+// only changes when its objects change, so this stays tiny and always fresh.
+const stepThumbnailCache = new Map();
 
 function injectCss() {
   if (cssInjected) return;
@@ -228,7 +236,7 @@ body.yanta-slideshow-active .yanta-slide-anim-panel {
 
 .yanta-slide-anim-step {
   display: grid;
-  grid-template-columns: 22px 1fr;
+  grid-template-columns: auto 1fr;
   align-items: start;
   gap: 8px;
   padding: 8px;
@@ -237,8 +245,30 @@ body.yanta-slideshow-active .yanta-slide-anim-panel {
   background: var(--bg);
 }
 
+.yanta-slide-anim-step-lead {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 5px;
+}
+
+/* What this step animates, at a glance — ids in a list say nothing. */
+.yanta-slide-anim-step-thumb {
+  width: 40px;
+  height: 32px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-elev);
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: contain;
+}
+
+.yanta-slide-anim-step-thumb.is-empty {
+  opacity: 0.35;
+}
+
 .yanta-slide-anim-step-index {
-  margin-top: 3px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -333,6 +363,17 @@ body.yanta-slideshow-active .yanta-slide-anim-panel {
 // ------------------------------------------------------------
 // Slide lookup
 // ------------------------------------------------------------
+
+/**
+ * The Excalidraw instance the panel should talk to.
+ *
+ * Falls back to whatever drawing is on the fullscreen stage: the panel can
+ * outlive the instance it was opened against (a remount, a route restore),
+ * and a panel wired to a dead API is a panel whose buttons do nothing.
+ */
+function panelApi() {
+  return panel?.getApi?.() || getActiveDrawingApi?.() || null;
+}
 
 function selectedElementIdsFromApi(api) {
   try {
@@ -543,8 +584,84 @@ function currentSlide() {
     .find((s) => s.id === panel.slideId) || null;
 }
 
+/**
+ * Draws a small picture of the objects a step animates.
+ *
+ * Element ids in a list say nothing; a thumbnail is how you recognise "the
+ * headline" versus "the arrow" at a glance. Rendered lazily after the list is
+ * in the DOM, so opening the panel stays instant.
+ */
+async function hydrateStepThumbnails(slide) {
+  const root = panel?.root;
+  if (!root) return;
+
+  const elements = sceneElements(panelApi());
+  const byId = new Map(elements.map((el) => [el.id, el]));
+
+  for (const build of slideAnimation(slide).builds) {
+    const host = root.querySelector(`[data-step-thumb="${CSS.escape(build.id)}"]`);
+    if (!host) continue;
+
+    const content = build.elementIds
+      .map((id) => byId.get(id))
+      .filter((el) => el && !el.isDeleted && !isSlideFrameElement(el));
+
+    if (!content.length) {
+      host.classList.add('is-empty');
+      continue;
+    }
+
+    const key = content.map((el) => `${el.id}:${el.version}`).join(',');
+
+    if (host.dataset.thumbKey === key) continue;
+
+    const cached = stepThumbnailCache.get(key);
+
+    if (cached) {
+      host.dataset.thumbKey = key;
+      host.style.backgroundImage = `url("${cached}")`;
+      continue;
+    }
+
+    try {
+      const { exportToSvg } = await import('@excalidraw/excalidraw');
+
+      const svg = await exportToSvg({
+        elements: content,
+        appState: {
+          exportBackground: false,
+          viewBackgroundColor: 'transparent',
+        },
+        files: {},
+
+        // In-app preview — see renderSlideSvgString in slides-ui.js.
+        skipInliningFonts: true,
+      });
+
+      svg.setAttribute('width', '100%');
+      svg.setAttribute('height', '100%');
+
+      const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(
+        new XMLSerializer().serializeToString(svg)
+      )}`;
+
+      stepThumbnailCache.set(key, url);
+
+      // The panel may have re-rendered or closed while this was exporting.
+      const liveHost = panel?.root?.querySelector(`[data-step-thumb="${CSS.escape(build.id)}"]`);
+
+      if (liveHost) {
+        liveHost.dataset.thumbKey = key;
+        liveHost.style.backgroundImage = `url("${url}")`;
+      }
+    } catch {
+      host.classList.add('is-empty');
+    }
+  }
+}
+
 function stepSummary(slide, build) {
-  const elements = sceneElements(panel?.getApi?.());
+  const elements = sceneElements(panelApi());
   const known = build.elementIds.filter((id) =>
     elements.some((el) => el.id === id && !el.isDeleted)
   );
@@ -644,8 +761,11 @@ function render() {
         return `
         <div class="yanta-slide-anim-step ${build.id === panel.highlightBuildId ? 'is-new' : ''}"
              data-build="${escapeAttr(build.id)}">
-          <span class="yanta-slide-anim-step-index"
-                title="Plays on click ${clickNumber.get(build.id) || 1}">${clickNumber.get(build.id) || 1}</span>
+          <span class="yanta-slide-anim-step-lead">
+            <span class="yanta-slide-anim-step-index"
+                  title="Plays on click ${clickNumber.get(build.id) || 1}">${clickNumber.get(build.id) || 1}</span>
+            <span class="yanta-slide-anim-step-thumb" data-step-thumb="${escapeAttr(build.id)}"></span>
+          </span>
 
           <div class="yanta-slide-anim-step-main">
             <div class="yanta-slide-anim-step-controls">
@@ -714,6 +834,8 @@ function render() {
     target?.scrollIntoView({ block: 'nearest' });
     panel.highlightBuildId = '';
   }
+
+  hydrateStepThumbnails(slide).catch(() => {});
 }
 
 function updateBuilds(mutate) {
@@ -856,7 +978,7 @@ function previewBuild(buildId) {
   */
   stopPreview();
 
-  const animator = createSlideAnimator({ getApi: () => panel?.getApi?.() });
+  const animator = createSlideAnimator({ getApi: () => panelApi() });
 
   // A one-step slide: hidden first, then played on its own timeline.
   const solo = {
@@ -960,7 +1082,7 @@ export function openSlideAnimationPanel({
     addSelectionAsBuildStep({
       noteId,
       drawingId,
-      api: panel?.getApi?.(),
+      api: panelApi(),
       preferSlideId: panel?.slideId || '',
     });
   });

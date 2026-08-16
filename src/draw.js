@@ -2477,16 +2477,29 @@ function applyPersistedDrawingToApi(api, drawing) {
   });
 }
 
-function readElementsFromApi(api, fallback = []) {
+/**
+ * Reads the scene from a mounted Excalidraw instance.
+ *
+ * An *empty* result is treated as "no answer", not as "the drawing is empty":
+ * a torn-down instance reports zero elements, and deleting everything by hand
+ * does not — Excalidraw keeps deleted elements as tombstones, so a real clear
+ * still comes back as a non-empty array. Without this, closing a note right
+ * after an edit flushed an empty scene over the whole drawing.
+ */
+function readElementsFromApi(api, fallbacks = []) {
   try {
     const elements =
       api?.getSceneElementsIncludingDeleted?.() ||
       api?.getSceneElements?.();
 
-    if (Array.isArray(elements)) return elements;
+    if (Array.isArray(elements) && elements.length) return elements;
   } catch {}
 
-  return Array.isArray(fallback) ? fallback : [];
+  for (const fallback of fallbacks) {
+    if (Array.isArray(fallback) && fallback.length) return fallback;
+  }
+
+  return [];
 }
 
 function readAppStateFromApi(api, fallback = {}) {
@@ -2517,10 +2530,21 @@ function buildPersistedDrawingSceneFromApi(api, {
   drawingId,
   previous = {},
   fallback = {},
+  live = null,
 } = {}) {
   const base = previous || fallback || {};
 
-  const elements = readElementsFromApi(api, base.elements || fallback.elements || []);
+  /*
+    Order of trust: the mounted instance, then the last onChange payload (the
+    freshest data that definitely came from a live editor), then what is
+    already stored.
+  */
+  const elements = readElementsFromApi(api, [
+    live?.elements,
+    base.elements,
+    fallback.elements,
+  ]);
+
   const appState = readAppStateFromApi(api, base.appState || fallback.appState || {});
   const files = readFilesFromApi(api, base.files || fallback.files || {});
 
@@ -2595,10 +2619,11 @@ function createSurfaceSceneWriter({
     baseline,
     onPersisted,
 
-    buildScene: (api) => buildPersistedDrawingSceneFromApi(api, {
+    buildScene: (api, { live } = {}) => buildPersistedDrawingSceneFromApi(api, {
       drawingId,
       previous: getDrawing(noteId, drawingId) || baseline,
       fallback: baseline,
+      live,
     }),
   });
 }

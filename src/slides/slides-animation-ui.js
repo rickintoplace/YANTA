@@ -60,6 +60,7 @@ import {
 
 import {
   getActiveDrawingApi,
+  getActiveDrawingApiFor,
 } from '../draw.js';
 
 const PANEL_OVERLAY_ID = 'slide-animation';
@@ -372,7 +373,17 @@ body.yanta-slideshow-active .yanta-slide-anim-panel {
  * and a panel wired to a dead API is a panel whose buttons do nothing.
  */
 function panelApi() {
-  return panel?.getApi?.() || getActiveDrawingApi?.() || null;
+  /*
+    The fullscreen stage wins whenever it is showing this drawing. A drawing
+    can be mounted twice at once — inline in the editor and on the stage — and
+    the selection the user made lives in exactly one of them.
+  */
+  return (
+    getActiveDrawingApiFor?.(panel?.noteId, panel?.drawingId) ||
+    panel?.getApi?.() ||
+    getActiveDrawingApi?.() ||
+    null
+  );
 }
 
 function selectedElementIdsFromApi(api) {

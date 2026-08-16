@@ -91,6 +91,7 @@ import {
 import {
   getDrawingApiForEmbed,
   getActiveDrawingApi,
+  getActiveDrawingApiFor,
   getActiveDrawingHost,
   openDrawModal,
 } from '../draw.js';
@@ -2239,15 +2240,14 @@ function scrollToSlide(api, slide, container = null, { animate = true } = {}) {
 }
 
 function currentApiForDrawing(noteId, drawingId) {
-  const fullscreenApi = getActiveDrawingApi?.();
-
-  if (
-    fullscreenApi &&
-    slideshow?.drawingId === drawingId &&
-    slideshow?.noteId === noteId
-  ) {
-    return fullscreenApi;
-  }
+  /*
+    The fullscreen stage owns the drawing whenever it is showing it — not only
+    while presenting. The old check was slideshow-only, so with the stage open
+    and no presentation running this fell through to the *inline* embed: a
+    second Excalidraw instance with its own, empty selection.
+  */
+  const stageApi = getActiveDrawingApiFor?.(noteId, drawingId);
+  if (stageApi) return stageApi;
 
   const embed = document.querySelector(
     `.yanta-draw-embed[data-draw-id="${CSS.escape(drawingId)}"][data-note-id="${CSS.escape(noteId)}"]`

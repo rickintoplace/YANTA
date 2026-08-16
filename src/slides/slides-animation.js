@@ -702,7 +702,7 @@ export function createSlideAnimator({ getApi }) {
     // untouched values to animate towards.
     const timeline = [];
 
-    for (const { build, startAt } of group.steps) {
+    for (const { build, startAt, endAt } of group.steps) {
       for (const id of build.elementIds) {
         const el = byId.get(id);
         if (!el || el.isDeleted) continue;
@@ -710,6 +710,12 @@ export function createSlideAnimator({ getApi }) {
         timeline.push({
           id,
           startAt,
+
+          // Needed to mirror the timeline for reverse playback. Leaving it out
+          // made every reverse frame compute NaN, which Excalidraw stored as a
+          // null opacity — the step vanished instantly instead of fading.
+          endAt,
+
           duration: build.duration,
           direction: build.direction,
           effect: effectForElement(el, build.effect),
@@ -772,7 +778,10 @@ export function createSlideAnimator({ getApi }) {
           ? 0
           : (entry.effect === 'draw' || entry.effect === 'type' ? clamped : easeOutCubic(clamped));
 
-        const patch = effectPatch(entry.original, entry.effect, entry.direction, local >= 1 ? 1 : k);
+        // Belt and braces: a non-finite progress must never reach the scene.
+        const safe = Number.isFinite(k) ? k : 1;
+
+        const patch = effectPatch(entry.original, entry.effect, entry.direction, local >= 1 ? 1 : safe);
 
         if (local <= 0) {
           overrides.set(entry.id, { opacity: 0, locked: true });

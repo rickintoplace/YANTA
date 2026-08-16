@@ -144,6 +144,24 @@ export function getActiveDrawingApi() {
   return active.api || null;
 }
 
+/**
+ * The fullscreen stage's Excalidraw API, but only if it is showing exactly
+ * this drawing.
+ *
+ * Callers need to know *which* drawing the stage owns. Without that they fall
+ * back to the inline embed's instance, which is a different editor with its
+ * own — empty — selection: the reason "Add selection as step" reported
+ * "select something first" while something was plainly selected on the
+ * fullscreen board.
+ */
+export function getActiveDrawingApiFor(noteId, drawingId) {
+  if (!active.api || !drawingId) return null;
+  if (active.drawingId !== drawingId) return null;
+  if (noteId && active.noteId !== noteId) return null;
+
+  return active.api;
+}
+
 export function getActiveDrawingHost() {
   return (
     host?.querySelector?.('.yanta-draw-fullscreen-host') ||

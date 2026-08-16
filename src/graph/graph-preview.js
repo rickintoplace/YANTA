@@ -178,6 +178,10 @@ async function hydrateDrawingThumbs(bodyEl, noteId, token) {
           viewBackgroundColor: 'transparent',
         },
         files: data.files || {},
+
+        // Rendered into the app itself, where the drawing fonts are already
+        // loaded — see renderSlideSvgString in slides-ui.js.
+        skipInliningFonts: true,
       });
       if (token !== renderToken) return;
       svg.removeAttribute('width');

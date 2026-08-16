@@ -110,7 +110,8 @@ import {
 } from '../draggable-panel.js';
 
 import {
-  keepMenuInViewport,
+  keepMenuInViewportWhileOpen,
+  menuTopSection,
   positionMenuAt,
 } from '../menu-position.js';
 
@@ -2326,6 +2327,15 @@ async function renderSlideSvgString(drawing, slide, {
       viewBackgroundColor: background,
     },
     files: drawing?.files || {},
+
+    /*
+      In-app preview: the page already has the drawing fonts loaded, so there
+      is nothing to embed. Inlining them would run Excalidraw's harfbuzz glyph
+      subsetting, which needs `eval` — blocked by YANTA's CSP (rightly so) and
+      logged as a scary "Skipped glyph subsetting" error on every thumbnail.
+      Real file exports keep inlining, where embedded fonts actually matter.
+    */
+    skipInliningFonts: true,
   });
 
   svg.setAttribute('width', '100%');
@@ -2934,16 +2944,14 @@ function injectSlidesItemsIntoNativeContextMenu(container) {
     fits, so a right-click near the bottom of a drawing loses the lower half of
     the menu. Correct that for every menu, not just the ones we extend.
   */
-  keepMenuInViewport(menu);
+  keepMenuInViewportWhileOpen(menu);
 
   if (!ctx.frame && !ctx.hasSelection) return;
   if (menu.querySelector('[data-yanta-slides-context-item="1"]')) return;
 
-  const separator = document.createElement('div');
-  separator.className = 'yanta-slides-context-separator';
-  separator.setAttribute('data-yanta-slides-context-item', '1');
-
-  menu.append(separator);
+  // Pinned to the top of the menu — Excalidraw's own list is long enough to
+  // scroll, and entries below the fold may as well not exist.
+  const section = menuTopSection(menu);
 
   const refresh = () => {
     if (isFullscreenSlidesDockVisible() && fullscreenSlidesCtx) {
@@ -2956,7 +2964,7 @@ function injectSlidesItemsIntoNativeContextMenu(container) {
   };
 
   if (ctx.frame) {
-    menu.append(makeSlidesContextButton({
+    section.append(makeSlidesContextButton({
       icon: 'presentation',
       label: 'YANTA: Make slide from frame',
       onClick: () => {
@@ -2972,7 +2980,7 @@ function injectSlidesItemsIntoNativeContextMenu(container) {
   }
 
   if (ctx.hasSelection) {
-    menu.append(makeSlidesContextButton({
+    section.append(makeSlidesContextButton({
       icon: 'scan-check',
       label: 'YANTA: Slide from selection',
       onClick: () => {
@@ -2985,7 +2993,7 @@ function injectSlidesItemsIntoNativeContextMenu(container) {
       },
     }));
 
-    menu.append(makeSlidesContextButton({
+    section.append(makeSlidesContextButton({
       icon: 'sparkles',
       label: 'YANTA: Animate…',
       onClick: () => {
@@ -2999,20 +3007,17 @@ function injectSlidesItemsIntoNativeContextMenu(container) {
 
         // Straight into the editor for the step that was just created — the
         // effect and its timing are the point, not the bare "it appears".
-        if (slide) {
-          openSlideAnimationPanel({
-            noteId: ctx.noteId,
-            drawingId: ctx.drawingId,
-            slideId: slide.id,
-            getApi: () => currentApiForDrawing(ctx.noteId, ctx.drawingId) || ctx.api,
-          });
-        }
+        openSlideAnimationPanel({
+          noteId: ctx.noteId,
+          drawingId: ctx.drawingId,
+          slideId: slide?.id || null,
+          getApi: () => currentApiForDrawing(ctx.noteId, ctx.drawingId) || ctx.api,
+        });
       },
     }));
   }
 
-  // The menu just grew; make sure all of it is still on screen.
-  requestAnimationFrame(() => keepMenuInViewport(menu));
+  // The menu just grew; the watcher above re-fits it on the size change.
 }
 
 function bindSlidesNativeContextMenu(container, {

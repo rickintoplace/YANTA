@@ -21,6 +21,7 @@ import {
 } from '../core.js';
 
 import {
+  createSlide,
   listSlides,
   updateSlide,
 } from './slides-store.js';
@@ -30,6 +31,7 @@ import {
   isSlideFrameElement,
   normalizeSlideBounds,
   rectsIntersect,
+  slideBoundsAroundElements,
 } from './slides-model.js';
 
 import {
@@ -390,11 +392,28 @@ export function addSelectionAsBuildStep({ noteId, drawingId, api }) {
   }
 
   const chosen = elements.filter((el) => ids.includes(el.id));
-  const slide = slideForElements(noteId, drawingId, chosen);
+
+  /*
+    An animation belongs to a slide, but nobody should have to know that
+    before they can animate something. If the selection sits on bare board, a
+    slide is created around it — one click instead of a dead end, and the
+    toast says what happened so it is never a silent surprise.
+  */
+  let slide = slideForElements(noteId, drawingId, chosen);
+  let createdSlide = false;
 
   if (!slide) {
-    toast('This selection is not on a slide yet', 'error');
-    return null;
+    slide = createSlide(noteId, drawingId, {
+      bounds: slideBoundsAroundElements(chosen),
+      api,
+    });
+
+    if (!slide) {
+      toast('Could not create a slide for this selection', 'error');
+      return null;
+    }
+
+    createdSlide = true;
   }
 
   const animation = slideAnimation(slide);
@@ -416,9 +435,18 @@ export function addSelectionAsBuildStep({ noteId, drawingId, api }) {
 
   writeAnimation(noteId, drawingId, slide, { ...animation, builds });
 
-  toast(`Step ${builds.length} on "${slide.title}"`, 'success');
+  toast(
+    createdSlide
+      ? `Created "${slide.title}" — animation step 1`
+      : `Step ${builds.length} on "${slide.title}"`,
+    'success'
+  );
 
-  if (panel?.slideId === slide.id) render();
+  // An open panel follows along, including onto a slide just created for it.
+  if (panel && (panel.slideId === slide.id || !panel.slideId)) {
+    panel.slideId = slide.id;
+    render();
+  }
 
   return slide;
 }
@@ -450,18 +478,34 @@ function render() {
   if (!panel?.root?.isConnected) return;
 
   const slide = currentSlide();
+  const body = panel.root.querySelector('[data-anim-body]');
+  const title = panel.root.querySelector('[data-anim-title]');
 
+  if (!body) return;
+
+  /*
+    No slide yet — do NOT close. The panel closing itself the moment it opened
+    is exactly the "I clicked it and nothing happened" bug. Explain instead;
+    the footer button creates the slide along with the first step.
+  */
   if (!slide) {
-    closeSlideAnimationPanel();
+    if (title) title.textContent = 'Animation';
+
+    body.innerHTML = `
+      <div class="yanta-slide-anim-empty">
+        Select the objects you want to animate on the board, then press
+        <strong>Add selection as step</strong>. They become the first step of a
+        slide — one is created around them if this part of the board is not a
+        slide yet.
+      </div>
+    `;
+
     return;
   }
 
   const animation = slideAnimation(slide);
-  const body = panel.root.querySelector('[data-anim-body]');
-  const title = panel.root.querySelector('[data-anim-title]');
 
   if (title) title.textContent = `Animation · ${slide.title}`;
-  if (!body) return;
 
   const transitions = SLIDE_TRANSITIONS.map((kind) => `
     <button type="button"

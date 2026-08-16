@@ -208,6 +208,32 @@ import {
     return ax1 < bx2 && ax2 > bx1 && ay1 < by2 && ay2 > by1;
   }
   
+  /**
+   * A slide frame that comfortably contains `elements`.
+   *
+   * Shared by "Slide from selection" and by the animation panel, which creates
+   * a slide on the fly when something is animated on a bare board.
+   */
+  export function slideBoundsAroundElements(elements = [], pad = 48) {
+    const boxes = (Array.isArray(elements) ? elements : [])
+      .filter((el) => el && !el.isDeleted && !isSlideFrameElement(el))
+      .map(elementBounds);
+
+    if (!boxes.length) return null;
+
+    const x1 = Math.min(...boxes.map((b) => b.x)) - pad;
+    const y1 = Math.min(...boxes.map((b) => b.y)) - pad;
+    const x2 = Math.max(...boxes.map((b) => b.x + b.width)) + pad;
+    const y2 = Math.max(...boxes.map((b) => b.y + b.height)) + pad;
+
+    return normalizeSlideBounds({
+      x: x1,
+      y: y1,
+      width: x2 - x1,
+      height: y2 - y1,
+    });
+  }
+
   export function visibleElementsInSlide(elements = [], slide) {
     const bounds = normalizeSlideBounds(slide.bounds);
   

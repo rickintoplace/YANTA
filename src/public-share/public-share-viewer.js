@@ -850,6 +850,9 @@ async function publicDrawingSvg(drawing) {
           : '#121212',
     },
     files: drawing.files || {},
+
+    // In-app preview — see renderSlideSvgString in slides-ui.js.
+    skipInliningFonts: true,
   });
 
   svg.setAttribute('width', '100%');

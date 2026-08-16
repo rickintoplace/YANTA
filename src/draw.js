@@ -44,6 +44,7 @@ import {
 } from './draw-scene-sync.js';
 
 import { layerSortedElements } from './layers/layers-order.js';
+import { menuTopSection } from './menu-position.js';
 
 import { cloudFetchExcalidrawLibrary } from './cloud/cloud-api.js';
 import { insertAtCursor } from './editor.js';
@@ -960,6 +961,9 @@ export async function drawLibraryItemThumbnailUrl(itemId) {
           currentExcalidrawTheme() === 'dark' ? '#121212' : '#ffffff',
       },
       files: item.files || {},
+
+      // In-app thumbnail — see the note in renderSlideSvgString.
+      skipInliningFonts: true,
     });
 
     svg.setAttribute('width', '360');
@@ -3473,9 +3477,13 @@ function injectYantaItemsIntoNativeContextMenu(container) {
 
   if (menu.querySelector('[data-yanta-draw-context-item="1"]')) return;
 
-  const separator = document.createElement('div');
-  separator.className = 'yanta-excalidraw-context-separator';
-  separator.setAttribute('data-yanta-draw-context-item', '1');
+  // Pinned to the top of the menu — Excalidraw's own list is long enough to
+  // scroll, and entries below the fold may as well not exist.
+  const section = menuTopSection(menu);
+
+  const marker = document.createElement('div');
+  marker.hidden = true;
+  marker.setAttribute('data-yanta-draw-context-item', '1');
 
   const linkedNoteId = firstLinkedNoteId(ctx.targets);
   const hasAnyWikiLink = ctx.targets.some((target) =>
@@ -3495,7 +3503,7 @@ function injectYantaItemsIntoNativeContextMenu(container) {
     },
   });
 
-  menu.append(separator, linkBtn);
+  section.append(marker, linkBtn);
 
   if (linkedNoteId && state.notes.has(linkedNoteId)) {
     const openBtn = makeNativeContextButton({
@@ -3506,7 +3514,7 @@ function injectYantaItemsIntoNativeContextMenu(container) {
       },
     });
 
-    menu.append(openBtn);
+    section.append(openBtn);
   }
 
   if (hasAnyWikiLink) {
@@ -3521,7 +3529,7 @@ function injectYantaItemsIntoNativeContextMenu(container) {
       },
     });
 
-    menu.append(removeBtn);
+    section.append(removeBtn);
   }
 }
 
@@ -6184,6 +6192,10 @@ export async function drawingThumbnailUrl(noteId, drawingId) {
           currentExcalidrawTheme() === 'dark' ? '#121212' : '#ffffff',
       },
       files: d.files || {},
+
+      // In-app thumbnail — fonts are already loaded, and inlining them would
+      // hit the CSP-blocked glyph subsetting (see renderSlideSvgString).
+      skipInliningFonts: true,
     });
     svg.setAttribute('width', '360');
     svg.setAttribute('height', '220');

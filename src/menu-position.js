@@ -63,7 +63,23 @@ export function keepMenuInViewport(menu, { margin = MARGIN } = {}) {
   const host = positionedHost(menu);
   if (!host) return;
 
-  const rect = menu.getBoundingClientRect();
+  let rect = menu.getBoundingClientRect();
+
+  /*
+    A menu taller than the screen cannot be nudged into view — Excalidraw's
+    element menu plus YANTA's own entries is around 830px, which does not fit
+    a laptop window. Cap it and let it scroll, instead of dropping its last
+    entries off the bottom edge.
+  */
+  const available = window.innerHeight - margin * 2;
+
+  if (rect.height > available) {
+    menu.style.maxHeight = `${Math.round(available)}px`;
+    menu.style.overflowY = 'auto';
+    menu.style.overscrollBehavior = 'contain';
+
+    rect = menu.getBoundingClientRect();
+  }
 
   let dx = 0;
   let dy = 0;
@@ -92,6 +108,85 @@ export function keepMenuInViewport(menu, { margin = MARGIN } = {}) {
 
   host.style.top = `${Math.round(top + dy)}px`;
   host.style.left = `${Math.round(left + dx)}px`;
+}
+
+/**
+ * Keeps a third-party menu inside the viewport for as long as it is open.
+ *
+ * A single correction is not enough: the menu is measured the moment it
+ * appears, but React is often still filling it in — and anything appended
+ * afterwards (our own entries) makes it taller again. Excalidraw may also
+ * re-apply its own position after mounting. So the fit is re-checked over the
+ * next few frames and on every size change until the menu is gone.
+ *
+ * Symptom without this: the first right-click near the bottom edge showed a
+ * clipped menu, the second one was fine because the menu was already sized.
+ */
+export function keepMenuInViewportWhileOpen(menu, { margin = MARGIN } = {}) {
+  if (!menu?.isConnected) return;
+
+  const fit = () => {
+    if (!menu.isConnected) return false;
+
+    keepMenuInViewport(menu, { margin });
+
+    return true;
+  };
+
+  fit();
+
+  requestAnimationFrame(() => {
+    if (fit()) requestAnimationFrame(fit);
+  });
+
+  window.setTimeout(fit, 120);
+
+  if (typeof ResizeObserver !== 'function') return;
+
+  const observer = new ResizeObserver(() => {
+    if (!fit()) observer.disconnect();
+  });
+
+  observer.observe(menu);
+
+  // Stop watching once the menu is detached; nothing else disposes of it.
+  const stopWhenGone = () => {
+    if (menu.isConnected) {
+      window.setTimeout(stopWhenGone, 400);
+      return;
+    }
+
+    observer.disconnect();
+  };
+
+  window.setTimeout(stopWhenGone, 400);
+}
+
+/**
+ * A container pinned to the top of a third-party menu, for the app's own
+ * entries.
+ *
+ * Appending was the obvious thing and the wrong one: Excalidraw's element
+ * menu is long enough to need scrolling, so entries added at the end sat
+ * below the fold and were, in practice, unreachable. Several injectors share
+ * one section so their order stays stable.
+ */
+export function menuTopSection(menu, { className = 'yanta-menu-section' } = {}) {
+  const existing = menu.querySelector(`:scope > .${className}`);
+  if (existing) return existing;
+
+  const section = document.createElement('div');
+  section.className = className;
+
+  // Styled inline: the host menu is third-party markup with its own theme
+  // variables, and this is the whole of the styling it needs.
+  section.style.paddingBottom = '.5rem';
+  section.style.marginBottom = '.25rem';
+  section.style.borderBottom = '1px solid var(--button-gray-3, rgba(0, 0, 0, 0.12))';
+
+  menu.prepend(section);
+
+  return section;
 }
 
 function positionedHost(node) {

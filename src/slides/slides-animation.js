@@ -88,12 +88,23 @@ const TRAVEL_MAX = 260;
 const BOXY_TYPES = new Set(['rectangle', 'ellipse', 'diamond', 'image', 'frame', 'embeddable']);
 const LINEAR_TYPES = new Set(['freedraw', 'line', 'arrow']);
 
-/** The effect that will actually be used for one element. */
+/**
+ * The effect that will actually be used for one element.
+ *
+ * "Draw" means the same thing to a user on every object — it appears the way
+ * it was made — so it degrades into whichever motion expresses that for the
+ * element at hand: retracing the stroke, typing out the letters, or growing
+ * the shape.
+ */
 export function effectForElement(el, effect) {
   const type = el?.type;
 
   if (effect === 'draw') {
     if (LINEAR_TYPES.has(type)) return 'draw';
+
+    // Text is "drawn" letter by letter, front to back.
+    if (type === 'text' && typeof el?.text === 'string' && el.text.length) return 'type';
+
     return BOXY_TYPES.has(type) ? 'wipe' : 'fade';
   }
 
@@ -126,7 +137,7 @@ function normalizeBuild(raw = {}, index = 0) {
     order: Number.isFinite(Number(raw.order)) ? Number(raw.order) : index,
     elementIds,
 
-    effect: SLIDE_BUILD_EFFECTS.includes(raw.effect) ? raw.effect : 'fade',
+    effect: SLIDE_BUILD_EFFECTS.includes(raw.effect) ? raw.effect : 'draw',
 
     direction: SLIDE_BUILD_DIRECTIONS.includes(raw.direction)
       ? raw.direction
@@ -408,6 +419,22 @@ function effectPatch(original, effect, direction, k) {
       return patch;
     }
 
+    case 'type': {
+      /*
+        Letter by letter. Excalidraw renders `text` (already wrapped), so
+        slicing it reveals the line exactly as it was typed — the closest
+        thing to "drawing" a piece of text.
+      */
+      const text = original.text || '';
+      const shown = Math.max(1, Math.round(text.length * k));
+
+      return {
+        opacity: original.opacity,
+        text: text.slice(0, shown),
+        locked: true,
+      };
+    }
+
     case 'fade':
     default:
       return {
@@ -478,17 +505,35 @@ export function createSlideAnimator({ getApi }) {
   function remember(el) {
     if (originals.has(el.id)) return originals.get(el.id);
 
+    /*
+      Never snapshot our own leftovers as the truth.
+
+      `opacity: 0 + locked` is the marker a build step uses while hiding an
+      element. If a previous presentation ended without restoring — the stage
+      was torn down before restore() could reach a live API — the element is
+      still carrying that marker. Reading it as "this element is originally
+      invisible" makes the state permanent, and the object is gone from the
+      drawing for good. Layer-hidden elements carry their own marker and are
+      genuinely meant to be invisible, so they are left alone.
+    */
+    const yanta = el.customData?.yanta || {};
+    const presentationResidue =
+      el.opacity === 0 &&
+      el.locked === true &&
+      yanta.layerHidden !== true;
+
     const snapshot = {
       id: el.id,
       type: el.type,
-      opacity: el.opacity,
+      opacity: presentationResidue ? 100 : el.opacity,
       x: el.x,
       y: el.y,
       width: el.width,
       height: el.height,
-      locked: el.locked === true,
+      locked: presentationResidue ? false : el.locked === true,
       points: el.points,
       pressures: el.pressures,
+      text: el.text,
     };
 
     originals.set(el.id, snapshot);
@@ -510,7 +555,8 @@ export function createSlideAnimator({ getApi }) {
       el.height !== target.height ||
       el.locked !== target.locked ||
       el.points !== target.points ||
-      el.pressures !== target.pressures
+      el.pressures !== target.pressures ||
+      el.text !== target.text
     );
   }
 
@@ -524,6 +570,7 @@ export function createSlideAnimator({ getApi }) {
       locked: original.locked,
       points: original.points,
       pressures: original.pressures,
+      text: original.text,
     };
   }
 
@@ -636,8 +683,13 @@ export function createSlideAnimator({ getApi }) {
     applyDeckState([slide], 0, step);
   }
 
-  /** Plays one click's worth of animation: the whole group, on its timeline. */
-  function revealStep(slide, groupIndex) {
+  /**
+   * Plays one click's worth of animation: the whole group, on its timeline.
+   *
+   * @param {boolean} [options.reverse]  play it backwards, ending hidden —
+   *   what stepping back through a presentation should look like.
+   */
+  function revealStep(slide, groupIndex, { reverse = false } = {}) {
     cancelAnimation();
 
     const group = slideBuildGroups(slide)[groupIndex];
@@ -669,7 +721,14 @@ export function createSlideAnimator({ getApi }) {
     const finish = () => {
       animationRaf = 0;
 
-      for (const entry of timeline) overrides.delete(entry.id);
+      for (const entry of timeline) {
+        // Backwards ends hidden; forwards hands the element back untouched.
+        if (reverse) {
+          overrides.set(entry.id, { opacity: 0, locked: true });
+        } else {
+          overrides.delete(entry.id);
+        }
+      }
 
       scheduleApply();
     };
@@ -690,9 +749,18 @@ export function createSlideAnimator({ getApi }) {
       }
 
       for (const entry of timeline) {
-        const local = entry.duration > 0
+        const forward = entry.duration > 0
           ? (elapsed - entry.startAt) / entry.duration
           : (elapsed >= entry.startAt ? 1 : 0);
+
+        /*
+          Reverse mirrors the timeline: the step that finished last is undone
+          first, so stepping back looks like the build running in rewind
+          rather than things blinking out.
+        */
+        const local = reverse
+          ? 1 - Math.min(1, Math.max(0, (elapsed - (group.duration - entry.endAt)) / (entry.duration || 1)))
+          : forward;
 
         /*
           Before its slot a step stays hidden; after it, it is simply done.
@@ -702,12 +770,14 @@ export function createSlideAnimator({ getApi }) {
         const clamped = Math.min(1, local);
         const k = local <= 0
           ? 0
-          : (entry.effect === 'draw' ? clamped : easeOutCubic(clamped));
+          : (entry.effect === 'draw' || entry.effect === 'type' ? clamped : easeOutCubic(clamped));
 
         const patch = effectPatch(entry.original, entry.effect, entry.direction, local >= 1 ? 1 : k);
 
-        if (patch) {
-          overrides.set(entry.id, local <= 0 ? { opacity: 0, locked: true } : patch);
+        if (local <= 0) {
+          overrides.set(entry.id, { opacity: 0, locked: true });
+        } else if (patch) {
+          overrides.set(entry.id, patch);
         } else {
           overrides.delete(entry.id);
         }

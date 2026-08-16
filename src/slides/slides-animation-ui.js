@@ -419,32 +419,69 @@ function boundsOfElements(elements = []) {
   });
 }
 
-/** The slide a set of elements belongs to: the one it overlaps most. */
-export function slideForElements(noteId, drawingId, elements = []) {
+function contains(outer, inner) {
+  return (
+    inner.x >= outer.x &&
+    inner.y >= outer.y &&
+    inner.x + inner.width <= outer.x + outer.width &&
+    inner.y + inner.height <= outer.y + outer.height
+  );
+}
+
+/**
+ * The slide a set of elements belongs to.
+ *
+ * A slide that *contains* the selection outright wins over one that merely
+ * overlaps it, and among containing slides the smallest wins — slides are free
+ * rectangles on one board, so they can nest or overlap, and "largest overlap"
+ * alone happily picked the big slide behind the small one the user was
+ * actually looking at.
+ *
+ * @param {string} [activeSlideId]  breaks ties towards the slide in view
+ */
+export function slideForElements(noteId, drawingId, elements = [], activeSlideId = '') {
   const bounds = boundsOfElements(elements);
   if (!bounds) return null;
 
-  let best = null;
-  let bestArea = 0;
+  const slides = listSlides(noteId, drawingId);
 
-  for (const slide of listSlides(noteId, drawingId)) {
+  let containing = null;
+  let containingArea = Infinity;
+
+  let overlapping = null;
+  let overlapArea = 0;
+
+  for (const slide of slides) {
     const slideBounds = normalizeSlideBounds(slide.bounds);
     if (!rectsIntersect(slideBounds, bounds)) continue;
+
+    const area = slideBounds.width * slideBounds.height;
+
+    if (contains(slideBounds, bounds)) {
+      const preferred = slide.id === activeSlideId && containing?.id !== activeSlideId;
+
+      if (preferred || area < containingArea) {
+        containing = slide;
+        containingArea = preferred ? -1 : area;
+      }
+
+      continue;
+    }
 
     const w = Math.min(slideBounds.x + slideBounds.width, bounds.x + bounds.width) -
       Math.max(slideBounds.x, bounds.x);
     const h = Math.min(slideBounds.y + slideBounds.height, bounds.y + bounds.height) -
       Math.max(slideBounds.y, bounds.y);
 
-    const area = Math.max(0, w) * Math.max(0, h);
+    const overlap = Math.max(0, w) * Math.max(0, h);
 
-    if (area > bestArea) {
-      bestArea = area;
-      best = slide;
+    if (overlap > overlapArea) {
+      overlapArea = overlap;
+      overlapping = slide;
     }
   }
 
-  return best;
+  return containing || overlapping;
 }
 
 function writeAnimation(noteId, drawingId, slide, animation) {
@@ -469,6 +506,7 @@ function writeAnimation(noteId, drawingId, slide, animation) {
  */
 export function addSelectionAsBuildStep({ noteId, drawingId, api, preferSlideId = '' }) {
   if (!api) {
+    console.warn('[YANTA Slides] add step: no drawing API');
     toast('Drawing is not ready yet', 'error');
     return null;
   }
@@ -484,6 +522,7 @@ export function addSelectionAsBuildStep({ noteId, drawingId, api, preferSlideId 
     });
 
   if (!ids.length) {
+    console.warn('[YANTA Slides] add step: nothing selected');
     toast('Select something on the board first', 'error');
     return null;
   }
@@ -511,7 +550,14 @@ export function addSelectionAsBuildStep({ noteId, drawingId, api, preferSlideId 
     before they can animate something; step 3 is what keeps a bare board from
     being a dead end. Step 2 is what keeps it from spawning a slide per click.
   */
-  let slide = slideForElements(noteId, drawingId, picked.length ? picked : chosen);
+  let slide = slideForElements(
+    noteId,
+    drawingId,
+    picked.length ? picked : chosen,
+    // The slide on screen breaks ties, so "Animate on X" and where the step
+    // lands cannot disagree.
+    preferSlideId || panel?.slideId || ''
+  );
   let createdSlide = false;
 
   if (!slide && preferSlideId) {
@@ -985,6 +1031,7 @@ function previewBuild(buildId) {
     nothing is impossible to report and impossible to diagnose.
   */
   if (!panelApi()) {
+    console.warn('[YANTA Slides] preview: no drawing API');
     toast('Drawing is not ready yet', 'error');
     return;
   }
@@ -992,6 +1039,7 @@ function previewBuild(buildId) {
   const slide = currentSlide();
 
   if (!slide) {
+    console.warn('[YANTA Slides] preview: panel has no slide', panel?.slideId);
     toast('This step no longer belongs to a slide', 'error');
     return;
   }
@@ -999,6 +1047,7 @@ function previewBuild(buildId) {
   const build = slideAnimation(slide).builds.find((b) => b.id === buildId);
 
   if (!build) {
+    console.warn('[YANTA Slides] preview: step not found', buildId);
     toast('Step not found', 'error');
     return;
   }

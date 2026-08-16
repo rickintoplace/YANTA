@@ -1282,12 +1282,18 @@ button.link { background: 0; border: 0; color: var(--accent); cursor: pointer; p
 .drop-overlay-hint { font-size: 12px; color: var(--text-dim); }
 
 /* ---------- Toast ---------- */
+/*
+  Above every fullscreen surface. At z-index 200 the toast sat *behind* the
+  fullscreen drawing modal (220) and its panels, so nothing the drawing
+  reported — errors included — was ever visible while it was open. Feedback
+  that only shows up on some screens is worse than no feedback.
+*/
 .toast {
   position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
   background: var(--bg-elev-3); color: var(--text);
   padding: 8px 14px; border-radius: var(--r-sm);
   border: 1px solid var(--border); box-shadow: var(--shadow);
-  font-size: 13px; z-index: 200;
+  font-size: 13px; z-index: 1100;
   animation: toast-in 0.2s ease;
 }
 .toast.error { border-color: var(--red); color: var(--red); }
@@ -1303,7 +1309,7 @@ button.link { background: 0; border: 0; color: var(--accent); cursor: pointer; p
   background: var(--bg-elev-3); color: var(--text);
   padding: 8px 8px 8px 16px; border-radius: var(--r-sm);
   border: 1px solid var(--border); box-shadow: var(--shadow);
-  font-size: 13px; z-index: 400;
+  font-size: 13px; z-index: 1100;
   opacity: 0; pointer-events: none;
   transition: opacity .2s ease, transform .2s ease;
 }

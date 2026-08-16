@@ -2577,6 +2577,8 @@ function bindSlideChipInteractions(root, ctx, {
       // An open animation panel follows the slide you navigate to — editing
       // slide 3's animation while looking at slide 1 helps nobody.
       if (slide) {
+        rememberActiveSlide(ctx.noteId, ctx.drawingId, slide.id);
+
         retargetSlideAnimationPanel({
           noteId: ctx.noteId,
           drawingId: ctx.drawingId,
@@ -2944,6 +2946,29 @@ function makeSlidesContextButton({ icon, label, onClick }) {
   return btn;
 }
 
+/*
+  The slide the user is looking at: the one being presented, otherwise the last
+  one navigated to from a slide strip. Used only to break ties when a selection
+  sits inside more than one slide frame.
+*/
+const activeSlideIds = new Map();
+
+function activeSlideKey(noteId, drawingId) {
+  return `${noteId}::${drawingId}`;
+}
+
+function rememberActiveSlide(noteId, drawingId, slideId) {
+  activeSlideIds.set(activeSlideKey(noteId, drawingId), slideId);
+}
+
+function activeSlideIdFor(noteId, drawingId) {
+  if (slideshow?.noteId === noteId && slideshow?.drawingId === drawingId) {
+    return slideshow.slides[slideshow.index]?.id || '';
+  }
+
+  return activeSlideIds.get(activeSlideKey(noteId, drawingId)) || '';
+}
+
 /** The slide the current board selection sits on, if any. */
 function slideForSelection(ctx) {
   try {
@@ -2953,7 +2978,12 @@ function slideForSelection(ctx) {
     const chosen = sceneElementsForApi(ctx.api)
       .filter((el) => el && !el.isDeleted && selected.has(el.id));
 
-    return slideForElements(ctx.noteId, ctx.drawingId, chosen);
+    return slideForElements(
+      ctx.noteId,
+      ctx.drawingId,
+      chosen,
+      activeSlideIdFor(ctx.noteId, ctx.drawingId)
+    );
   } catch {
     return null;
   }
@@ -2973,7 +3003,20 @@ function injectSlidesItemsIntoNativeContextMenu(container) {
   */
   keepMenuInViewportWhileOpen(menu);
 
-  if (!ctx.frame && !ctx.hasSelection) return;
+  /*
+    Read the selection again, now.
+
+    Right-clicking an object that was not selected yet makes Excalidraw select
+    it *during* the same event — the flag captured in the contextmenu handler
+    is from before that, so the entries were missing exactly when a user
+    right-clicks something for the first time. This runs from the observer,
+    once the menu exists, by which time the selection has settled.
+  */
+  const hasSelection = ctx.hasSelection || !!normalizeSelectedIds(
+    ctx.api?.getAppState?.()?.selectedElementIds
+  ).size;
+
+  if (!ctx.frame && !hasSelection) return;
   if (menu.querySelector('[data-yanta-slides-context-item="1"]')) return;
 
   // Pinned to the top of the menu — Excalidraw's own list is long enough to
@@ -3006,7 +3049,7 @@ function injectSlidesItemsIntoNativeContextMenu(container) {
     }));
   }
 
-  if (ctx.hasSelection) {
+  if (hasSelection) {
     section.append(makeSlidesContextButton({
       icon: 'scan-check',
       label: 'YANTA: Slide from selection',
@@ -4087,8 +4130,11 @@ function previousSlide() {
   if (!slideshow) return;
 
   if (slideshow.step > 0) {
+    const slide = slideshow.slides[slideshow.index];
+
+    // Play the build backwards instead of blinking it out.
     slideshow.step -= 1;
-    slideshow.animator.applyDeckState(slideshow.slides, slideshow.index, slideshow.step);
+    slideshow.animator.revealStep(slide, slideshow.step, { reverse: true });
     publishRemoteState();
     return;
   }

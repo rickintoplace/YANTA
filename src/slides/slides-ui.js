@@ -84,6 +84,7 @@ import {
   addSelectionAsBuildStep,
   closeSlideAnimationPanel,
   openSlideAnimationPanel,
+  slideForElements,
 } from './slides-animation-ui.js';
 
 import {
@@ -2932,6 +2933,21 @@ function makeSlidesContextButton({ icon, label, onClick }) {
   return btn;
 }
 
+/** The slide the current board selection sits on, if any. */
+function slideForSelection(ctx) {
+  try {
+    const selected = normalizeSelectedIds(ctx.api?.getAppState?.()?.selectedElementIds);
+    if (!selected.size) return null;
+
+    const chosen = sceneElementsForApi(ctx.api)
+      .filter((el) => el && !el.isDeleted && selected.has(el.id));
+
+    return slideForElements(ctx.noteId, ctx.drawingId, chosen);
+  } catch {
+    return null;
+  }
+}
+
 function injectSlidesItemsIntoNativeContextMenu(container) {
   const ctx = slidesContextState.get(container);
   if (!ctx?.api) return;
@@ -2993,9 +3009,18 @@ function injectSlidesItemsIntoNativeContextMenu(container) {
       },
     }));
 
+    /*
+      Name the target slide in the label. "Animate…" left the user guessing
+      which slide the step had just landed on — the single most confusing part
+      of the first version.
+    */
+    const targetSlide = slideForSelection(ctx);
+
     section.append(makeSlidesContextButton({
       icon: 'sparkles',
-      label: 'YANTA: Animate…',
+      label: targetSlide
+        ? `YANTA: Animate on “${targetSlide.title}”`
+        : 'YANTA: Animate (creates a slide)',
       onClick: () => {
         const slide = addSelectionAsBuildStep({
           noteId: ctx.noteId,
@@ -3892,7 +3917,10 @@ function goToSlide(index, {
   const wantStep = Math.max(0, Math.min(buildCount, step === 'last' ? buildCount : step));
 
   slideshow.step = wantStep;
-  slideshow.animator.showStep(slide, wantStep);
+
+  // Deck-wide: everything a later slide animates stays hidden from the very
+  // first frame, instead of sitting on the board and popping out on arrival.
+  slideshow.animator.applyDeckState(slideshow.slides, slideshow.index, wantStep);
 
   runSlideTransition(slide, ({ animate }) => {
     scrollToSlide(liveApi, slide, liveContainer, { animate });
@@ -4048,10 +4076,8 @@ function previousSlide() {
   if (!slideshow) return;
 
   if (slideshow.step > 0) {
-    const slide = slideshow.slides[slideshow.index];
-
     slideshow.step -= 1;
-    slideshow.animator.showStep(slide, slideshow.step);
+    slideshow.animator.applyDeckState(slideshow.slides, slideshow.index, slideshow.step);
     publishRemoteState();
     return;
   }

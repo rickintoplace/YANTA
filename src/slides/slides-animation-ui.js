@@ -18,6 +18,7 @@ import {
   escapeHtml,
   escapeAttr,
   toast,
+  uid,
 } from '../core.js';
 
 import {
@@ -128,12 +129,59 @@ body.yanta-slideshow-active .yanta-slide-anim-panel {
   white-space: nowrap;
 }
 
+/*
+  The target slide is stated, not inferred. "Which slide did that animation
+  just go to?" was the single most confusing thing about the first version.
+*/
+.yanta-slide-anim-target {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.yanta-slide-anim-target label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.yanta-slide-anim-target select {
+  flex: 1 1 auto;
+  min-width: 0;
+  font-size: 12px;
+  padding: 4px 6px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+}
+
 .yanta-slide-anim-body {
   padding: 12px;
   overflow: auto;
   display: flex;
   flex-direction: column;
   gap: 14px;
+}
+
+/* Flash the step that was just added or moved, so it is never a silent write. */
+@keyframes yanta-slide-anim-flash {
+  from {
+    border-color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 22%, var(--bg));
+  }
+  to {
+    border-color: var(--border);
+    background: var(--bg);
+  }
+}
+
+.yanta-slide-anim-step.is-new {
+  animation: yanta-slide-anim-flash 1.4s ease-out;
 }
 
 .yanta-slide-anim-section-label {
@@ -442,12 +490,15 @@ export function addSelectionAsBuildStep({ noteId, drawingId, api, preferSlideId 
     }))
     .filter((build) => build.elementIds.length);
 
-  builds.push({
+  const added = {
+    id: uid(),
     elementIds: ids,
     effect: 'fade',
     trigger: 'click',
     order: builds.length,
-  });
+  };
+
+  builds.push(added);
 
   writeAnimation(noteId, drawingId, slide, { ...animation, builds });
 
@@ -467,12 +518,14 @@ export function addSelectionAsBuildStep({ noteId, drawingId, api, preferSlideId 
   );
 
   /*
-    The panel always follows the step that was just created. Anything else
-    means adding a step and not seeing it appear, which reads as "the button
-    does nothing".
+    The panel always follows the step that was just created, and flags it so
+    render() can flash and scroll to it. Adding a step and not seeing anything
+    move is what reads as "the button does nothing" — especially when the
+    selection was already animated and the step count therefore stays put.
   */
   if (panel) {
     panel.slideId = slide.id;
+    panel.highlightBuildId = added.id;
     render();
   }
 
@@ -502,12 +555,39 @@ function stepSummary(slide, build) {
   return `${count} object${count === 1 ? '' : 's'}${missing > 0 ? ' · some deleted' : ''}`;
 }
 
+/** Fills the "which slide" picker and keeps it on the panel's target. */
+function renderSlidePicker(slides) {
+  const select = panel.root.querySelector('[data-anim-slide]');
+  if (!select) return;
+
+  if (!slides.length) {
+    select.innerHTML = '<option value="">No slide yet</option>';
+    select.disabled = true;
+    return;
+  }
+
+  select.disabled = false;
+
+  select.innerHTML = slides.map((slide, index) => {
+    const count = slideAnimation(slide).builds.length;
+
+    return `
+      <option value="${escapeAttr(slide.id)}" ${slide.id === panel.slideId ? 'selected' : ''}>
+        ${index + 1}. ${escapeHtml(slide.title)}${count ? ` · ${count} step${count === 1 ? '' : 's'}` : ''}
+      </option>
+    `;
+  }).join('');
+}
+
 function render() {
   if (!panel?.root?.isConnected) return;
 
+  const slides = listSlides(panel.noteId, panel.drawingId);
   const slide = currentSlide();
   const body = panel.root.querySelector('[data-anim-body]');
   const title = panel.root.querySelector('[data-anim-title]');
+
+  renderSlidePicker(slides);
 
   if (!body) return;
 
@@ -562,7 +642,8 @@ function render() {
         const directional = build.effect === 'fly' || build.effect === 'wipe';
 
         return `
-        <div class="yanta-slide-anim-step" data-build="${escapeAttr(build.id)}">
+        <div class="yanta-slide-anim-step ${build.id === panel.highlightBuildId ? 'is-new' : ''}"
+             data-build="${escapeAttr(build.id)}">
           <span class="yanta-slide-anim-step-index"
                 title="Plays on click ${clickNumber.get(build.id) || 1}">${clickNumber.get(build.id) || 1}</span>
 
@@ -624,6 +705,15 @@ function render() {
       <div class="yanta-slide-anim-steps">${steps}</div>
     </div>
   `;
+
+  // Bring the step that was just touched into view, then forget it so the
+  // flash does not replay on the next unrelated render.
+  if (panel.highlightBuildId) {
+    const target = body.querySelector('.yanta-slide-anim-step.is-new');
+
+    target?.scrollIntoView({ block: 'nearest' });
+    panel.highlightBuildId = '';
+  }
 }
 
 function updateBuilds(mutate) {
@@ -744,12 +834,27 @@ function onBodyChange(e) {
  * only this step. Nothing about it is persisted, and it always ends by putting
  * the board back.
  */
+function stopPreview() {
+  if (!panel?.preview) return;
+
+  window.clearTimeout(panel.preview.timer);
+  panel.preview.animator.dispose();
+  panel.preview = null;
+}
+
 function previewBuild(buildId) {
   const slide = currentSlide();
-  if (!slide || panel.previewing) return;
+  if (!slide) return;
 
   const build = slideAnimation(slide).builds.find((b) => b.id === buildId);
   if (!build) return;
+
+  /*
+    Restart rather than ignore. A "previewing" latch meant a second click did
+    nothing, and any path that left the flag set made the play button dead for
+    the rest of the session.
+  */
+  stopPreview();
 
   const animator = createSlideAnimator({ getApi: () => panel?.getApi?.() });
 
@@ -761,22 +866,30 @@ function previewBuild(buildId) {
     },
   };
 
-  panel.previewing = true;
-
   animator.showStep(solo, 0);
 
+  panel.preview = {
+    animator,
+    timer: 0,
+  };
+
   requestAnimationFrame(() => {
+    if (panel?.preview?.animator !== animator) return;
+
     animator.revealStep(solo, 0);
 
-    window.setTimeout(() => {
-      animator.dispose();
-      if (panel) panel.previewing = false;
-    }, build.duration + 260);
+    panel.preview.timer = window.setTimeout(() => {
+      if (panel?.preview?.animator !== animator) return;
+      stopPreview();
+    }, build.duration + 320);
   });
 }
 
 export function closeSlideAnimationPanel({ fromHistory = false } = {}) {
   if (!panel) return;
+
+  // A preview must never outlive the panel — it holds elements hidden.
+  stopPreview();
 
   const release = panel.release;
 
@@ -805,6 +918,11 @@ export function openSlideAnimationPanel({
       <button class="icon-btn" data-anim-close title="Close">${lucide('x', 16)}</button>
     </div>
 
+    <div class="yanta-slide-anim-target">
+      <label for="yanta-anim-slide">Slide</label>
+      <select id="yanta-anim-slide" data-anim-slide></select>
+    </div>
+
     <div class="yanta-slide-anim-body" data-anim-body></div>
 
     <div class="yanta-slide-anim-foot">
@@ -820,9 +938,15 @@ export function openSlideAnimationPanel({
     drawingId,
     slideId,
     getApi: getApi || (() => null),
-    previewing: false,
+    highlightBuildId: '',
+    preview: null,
     release: null,
   };
+
+  root.querySelector('[data-anim-slide]')?.addEventListener('change', (e) => {
+    panel.slideId = e.target.value || null;
+    render();
+  });
 
   makePanelDraggable(root, root.querySelector('[data-anim-drag]'), {
     key: 'slide-animation',

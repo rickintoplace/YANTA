@@ -363,9 +363,31 @@ function effectPatch(original, effect, direction, k) {
         return { opacity: Math.max(1, Math.round(original.opacity * k)), locked: true };
       }
 
-      // At least two points, or Excalidraw has nothing to render.
-      const count = Math.max(2, Math.ceil(points.length * k));
-      const sliced = points.slice(0, count);
+      /*
+        The tip advances *within* the current segment, not from point to
+        point. Slicing whole points made a 20-point stroke jump in 20 visible
+        chunks — the stop-motion look. Interpolating the last one gives a tip
+        that moves continuously no matter how coarse the stroke is.
+      */
+      const segments = points.length - 1;
+      const exact = segments * k;
+      const whole = Math.min(segments, Math.floor(exact));
+      const frac = exact - whole;
+
+      const sliced = points.slice(0, whole + 1);
+
+      if (frac > 0 && whole < segments) {
+        const from = points[whole];
+        const to = points[whole + 1];
+
+        sliced.push([
+          from[0] + (to[0] - from[0]) * frac,
+          from[1] + (to[1] - from[1]) * frac,
+        ]);
+      }
+
+      // Excalidraw needs at least two points to draw anything at all.
+      if (sliced.length < 2) sliced.push([...points[0]]);
 
       const patch = {
         opacity: original.opacity,
@@ -374,7 +396,7 @@ function effectPatch(original, effect, direction, k) {
       };
 
       if (Array.isArray(original.pressures) && original.pressures.length) {
-        patch.pressures = original.pressures.slice(0, count);
+        patch.pressures = original.pressures.slice(0, sliced.length);
       }
 
       return patch;
@@ -554,36 +576,58 @@ export function createSlideAnimator({ getApi }) {
     animationRaf = 0;
   }
 
-  function idsFromGroups(groups, fromIndex) {
-    const ids = new Set();
-
+  function collectHiddenIds(groups, fromIndex, into) {
     for (let i = fromIndex; i < groups.length; i++) {
       for (const { build } of groups[i].steps) {
-        for (const id of build.elementIds) ids.add(id);
+        for (const id of build.elementIds) into.add(id);
       }
     }
-
-    return ids;
   }
 
   /**
-   * Puts a slide into the state of a given step: everything up to `step` is
-   * visible, everything after it is hidden. No animation — this is the jump
-   * used when entering a slide or stepping backwards.
+   * Sets the visibility of the whole deck for one position in it.
+   *
+   * Deck-wide on purpose. Hiding only the current slide's build steps meant
+   * everything a *later* slide animates was already on the board — visible
+   * while presenting an earlier slide, and then popping out of existence the
+   * moment its own slide came up. A build element must stay hidden from the
+   * first frame of the presentation until its own step plays.
+   *
+   * @param {Array}  slides  the running deck, in order
+   * @param {number} index   slide being presented
+   * @param {number} step    build steps of that slide already revealed
    */
-  function showStep(slide, step = 0) {
+  function applyDeckState(slides, index, step = 0) {
     cancelAnimation();
 
     overrides.clear();
 
-    for (const id of idsFromGroups(slideBuildGroups(slide), step)) {
+    const deck = Array.isArray(slides) ? slides : [];
+    const hidden = new Set();
+
+    deck.forEach((slide, i) => {
+      const groups = slideBuildGroups(slide);
+
+      // Past slides keep everything they revealed; the current one hides from
+      // its next step on; later ones are hidden completely.
+      const from = i < index ? groups.length : (i === index ? step : 0);
+
+      collectHiddenIds(groups, from, hidden);
+    });
+
+    for (const id of hidden) {
       // opacity 0 + locked is the marker a scene re-hydration keeps hidden
       // (see applyPersistedDrawingToApi), so a sync mid-presentation cannot
-      // flash the rest of the slide.
+      // flash the rest of the deck.
       overrides.set(id, { opacity: 0, locked: true });
     }
 
     scheduleApply();
+  }
+
+  /** Single-slide shorthand, used by the authoring preview. */
+  function showStep(slide, step = 0) {
+    applyDeckState([slide], 0, step);
   }
 
   /** Plays one click's worth of animation: the whole group, on its timeline. */
@@ -644,8 +688,15 @@ export function createSlideAnimator({ getApi }) {
           ? (elapsed - entry.startAt) / entry.duration
           : (elapsed >= entry.startAt ? 1 : 0);
 
-        // Before its slot a step stays hidden; after it, it is simply done.
-        const k = local <= 0 ? 0 : easeOutCubic(Math.min(1, local));
+        /*
+          Before its slot a step stays hidden; after it, it is simply done.
+          A pen moves at a steady speed, so `draw` runs linear — easing makes
+          the tip visibly stall near the end of the stroke.
+        */
+        const clamped = Math.min(1, local);
+        const k = local <= 0
+          ? 0
+          : (entry.effect === 'draw' ? clamped : easeOutCubic(clamped));
 
         const patch = effectPatch(entry.original, entry.effect, entry.direction, local >= 1 ? 1 : k);
 
@@ -684,6 +735,7 @@ export function createSlideAnimator({ getApi }) {
   }
 
   return {
+    applyDeckState,
     showStep,
     revealStep,
     restore,

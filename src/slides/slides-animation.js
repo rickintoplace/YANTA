@@ -222,8 +222,12 @@ export function slideStepCount(slide) {
 /**
  * Expands a raw selection into the element set a build step must move.
  *
- * Moving a container without its bound label, or half a group, looks broken —
- * so the selection grows to whole groups and to bound text.
+ * Grows to whole groups and to bound *text* — a label is part of its
+ * container, and animating a box without its caption looks broken.
+ *
+ * Bound arrows are deliberately NOT pulled in: an arrow attached to a shape is
+ * its own object with its own meaning in a build, and silently animating it
+ * along with the shape is both surprising and wrong.
  */
 export function expandBuildSelection(elements = [], selectedIds = []) {
   const wanted = new Set(selectedIds.map(String).filter(Boolean));
@@ -252,8 +256,10 @@ export function expandBuildSelection(elements = [], selectedIds = []) {
     out.add(el.id);
 
     for (const bound of el.boundElements || []) {
-      const boundEl = byId.get(bound?.id);
-      if (boundEl) add(boundEl);
+      if (bound?.type !== 'text') continue;
+
+      const boundEl = byId.get(bound.id);
+      if (boundEl?.type === 'text') add(boundEl);
     }
   };
 

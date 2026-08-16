@@ -84,6 +84,7 @@ import {
   addSelectionAsBuildStep,
   closeSlideAnimationPanel,
   openSlideAnimationPanel,
+  retargetSlideAnimationPanel,
   slideForElements,
 } from './slides-animation-ui.js';
 
@@ -2572,6 +2573,16 @@ function bindSlideChipInteractions(root, ctx, {
         .find((s) => s.id === btn.dataset.slideId);
 
       scrollToSlide(api(), slide, ctx.container);
+
+      // An open animation panel follows the slide you navigate to — editing
+      // slide 3's animation while looking at slide 1 helps nobody.
+      if (slide) {
+        retargetSlideAnimationPanel({
+          noteId: ctx.noteId,
+          drawingId: ctx.drawingId,
+          slideId: slide.id,
+        });
+      }
     });
 
     btn.addEventListener('contextmenu', (e) => {

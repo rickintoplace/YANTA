@@ -468,6 +468,11 @@ function writeAnimation(noteId, drawingId, slide, animation) {
  * @returns the slide the step landed on, or null when there was nothing to add
  */
 export function addSelectionAsBuildStep({ noteId, drawingId, api, preferSlideId = '' }) {
+  if (!api) {
+    toast('Drawing is not ready yet', 'error');
+    return null;
+  }
+
   const elements = sceneElements(api);
   const selectedIds = selectedElementIdsFromApi(api);
 
@@ -486,6 +491,16 @@ export function addSelectionAsBuildStep({ noteId, drawingId, api, preferSlideId 
   const chosen = elements.filter((el) => ids.includes(el.id));
 
   /*
+    The slide is decided by what the user actually selected, never by the
+    expanded set. Expansion can reach across a slide boundary (a group member,
+    a label), and then the step landed on a different slide than the one the
+    context-menu label had just promised.
+  */
+  const picked = elements.filter(
+    (el) => selectedIds.includes(el.id) && !isSlideFrameElement(el)
+  );
+
+  /*
     Which slide the step belongs to, in order of what the user most likely
     means:
       1. the slide the selection actually sits on
@@ -496,7 +511,7 @@ export function addSelectionAsBuildStep({ noteId, drawingId, api, preferSlideId 
     before they can animate something; step 3 is what keeps a bare board from
     being a dead end. Step 2 is what keeps it from spawning a slide per click.
   */
-  let slide = slideForElements(noteId, drawingId, chosen);
+  let slide = slideForElements(noteId, drawingId, picked.length ? picked : chosen);
   let createdSlide = false;
 
   if (!slide && preferSlideId) {
@@ -965,11 +980,28 @@ function stopPreview() {
 }
 
 function previewBuild(buildId) {
+  /*
+    Every bail-out says something. A play button that does nothing and logs
+    nothing is impossible to report and impossible to diagnose.
+  */
+  if (!panelApi()) {
+    toast('Drawing is not ready yet', 'error');
+    return;
+  }
+
   const slide = currentSlide();
-  if (!slide) return;
+
+  if (!slide) {
+    toast('This step no longer belongs to a slide', 'error');
+    return;
+  }
 
   const build = slideAnimation(slide).builds.find((b) => b.id === buildId);
-  if (!build) return;
+
+  if (!build) {
+    toast('Step not found', 'error');
+    return;
+  }
 
   /*
     Restart rather than ignore. A "previewing" latch meant a second click did
@@ -1007,6 +1039,23 @@ function previewBuild(buildId) {
   });
 }
 
+/**
+ * Points an already-open panel at a different slide. No-op when it is closed —
+ * navigating slides should never conjure the panel up.
+ */
+export function retargetSlideAnimationPanel({ noteId, drawingId, slideId }) {
+  if (!panel) return false;
+  if (panel.noteId !== noteId || panel.drawingId !== drawingId) return false;
+  if (panel.slideId === slideId) return false;
+
+  stopPreview();
+
+  panel.slideId = slideId;
+  render();
+
+  return true;
+}
+
 export function closeSlideAnimationPanel({ fromHistory = false } = {}) {
   if (!panel) return;
 
@@ -1028,7 +1077,28 @@ export function openSlideAnimationPanel({
   getApi,
 }) {
   injectCss();
-  closeSlideAnimationPanel();
+
+  /*
+    Already open → retarget it, never close and reopen.
+
+    closeSlideAnimationPanel() releases the overlay entry with history.back(),
+    which lands asynchronously; the router then syncs to the older state and
+    closes the panel that was pushed in the meantime. The panel appeared to
+    vanish on "Animate on <slide>", and what was left behind answered to no
+    click at all.
+  */
+  if (panel) {
+    stopPreview();
+
+    panel.noteId = noteId;
+    panel.drawingId = drawingId;
+    panel.slideId = slideId;
+    if (getApi) panel.getApi = getApi;
+
+    render();
+
+    return panel.root;
+  }
 
   const root = document.createElement('div');
   root.className = 'yanta-slide-anim-panel';

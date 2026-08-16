@@ -33,10 +33,16 @@ import {
 } from './slides-model.js';
 
 import {
+  createSlideAnimator,
   expandBuildSelection,
   slideAnimation,
+  slideBuildGroups,
+  SLIDE_BUILD_DIRECTIONS,
+  SLIDE_BUILD_DIRECTION_LABELS,
   SLIDE_BUILD_EFFECTS,
   SLIDE_BUILD_EFFECT_LABELS,
+  SLIDE_BUILD_TRIGGERS,
+  SLIDE_BUILD_TRIGGER_LABELS,
   SLIDE_TRANSITIONS,
   SLIDE_TRANSITION_LABELS,
 } from './slides-animation.js';
@@ -44,6 +50,10 @@ import {
 import {
   openBoundOverlay,
 } from '../overlay-history.js';
+
+import {
+  makePanelDraggable,
+} from '../draggable-panel.js';
 
 const PANEL_OVERLAY_ID = 'slide-animation';
 
@@ -169,10 +179,7 @@ body.yanta-slideshow-active .yanta-slide-anim-panel {
 .yanta-slide-anim-step {
   display: grid;
   grid-template-columns: 22px 1fr;
-  grid-template-areas:
-    "index main"
-    "actions actions";
-  align-items: center;
+  align-items: start;
   gap: 8px;
   padding: 8px;
   border: 1px solid var(--border);
@@ -181,7 +188,7 @@ body.yanta-slideshow-active .yanta-slide-anim-panel {
 }
 
 .yanta-slide-anim-step-index {
-  grid-area: index;
+  margin-top: 3px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -195,11 +202,17 @@ body.yanta-slideshow-active .yanta-slide-anim-panel {
 }
 
 .yanta-slide-anim-step-main {
-  grid-area: main;
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 5px;
+}
+
+.yanta-slide-anim-step-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .yanta-slide-anim-step-meta {
@@ -214,6 +227,8 @@ body.yanta-slideshow-active .yanta-slide-anim-panel {
 }
 
 .yanta-slide-anim-step select {
+  flex: 1 1 0;
+  min-width: 0;
   font-size: 12px;
   padding: 3px 6px;
   border-radius: 7px;
@@ -222,12 +237,17 @@ body.yanta-slideshow-active .yanta-slide-anim-panel {
   color: var(--text);
 }
 
+.yanta-slide-anim-panel.is-dragging {
+  box-shadow: 0 30px 70px rgba(0, 0, 0, 0.42);
+  user-select: none;
+}
+
 .yanta-slide-anim-step-actions {
-  grid-area: actions;
   display: flex;
   align-items: center;
   justify-content: flex-end;
   gap: 2px;
+  flex: 0 0 auto;
 }
 
 .yanta-slide-anim-step-actions .icon-btn {
@@ -390,6 +410,7 @@ export function addSelectionAsBuildStep({ noteId, drawingId, api }) {
   builds.push({
     elementIds: ids,
     effect: 'fade',
+    trigger: 'click',
     order: builds.length,
   });
 
@@ -450,43 +471,73 @@ function render() {
     </button>
   `).join('');
 
+  // Click number per step, the way PowerPoint's animation pane numbers them:
+  // steps that play together share the number of the click that starts them.
+  const clickNumber = new Map();
+
+  slideBuildGroups(slide).forEach((group, index) => {
+    for (const { build } of group.steps) clickNumber.set(build.id, index + 1);
+  });
+
+  const options = (values, labels, selected) => values.map((value) => `
+    <option value="${escapeAttr(value)}" ${value === selected ? 'selected' : ''}>
+      ${escapeHtml(labels[value] || value)}
+    </option>
+  `).join('');
+
   const steps = animation.builds.length
-    ? animation.builds.map((build, index) => `
+    ? animation.builds.map((build, index) => {
+        const directional = build.effect === 'fly' || build.effect === 'wipe';
+
+        return `
         <div class="yanta-slide-anim-step" data-build="${escapeAttr(build.id)}">
-          <span class="yanta-slide-anim-step-index">${index + 1}</span>
+          <span class="yanta-slide-anim-step-index"
+                title="Plays on click ${clickNumber.get(build.id) || 1}">${clickNumber.get(build.id) || 1}</span>
 
           <div class="yanta-slide-anim-step-main">
             <div class="yanta-slide-anim-step-controls">
               <select data-effect aria-label="Effect">
-                ${SLIDE_BUILD_EFFECTS.map((effect) => `
-                  <option value="${escapeAttr(effect)}" ${build.effect === effect ? 'selected' : ''}>
-                    ${escapeHtml(SLIDE_BUILD_EFFECT_LABELS[effect] || effect)}
-                  </option>
-                `).join('')}
+                ${options(SLIDE_BUILD_EFFECTS, SLIDE_BUILD_EFFECT_LABELS, build.effect)}
               </select>
 
-              <select data-duration aria-label="Pace">
-                <option value="220" ${build.duration <= 260 ? 'selected' : ''}>Fast</option>
-                <option value="420" ${build.duration > 260 && build.duration <= 600 ? 'selected' : ''}>Normal</option>
-                <option value="800" ${build.duration > 600 ? 'selected' : ''}>Slow</option>
+              ${directional ? `
+                <select data-direction aria-label="Direction">
+                  ${options(SLIDE_BUILD_DIRECTIONS, SLIDE_BUILD_DIRECTION_LABELS, build.direction)}
+                </select>
+              ` : ''}
+            </div>
+
+            <div class="yanta-slide-anim-step-controls">
+              <select data-trigger aria-label="Start" ${index === 0 ? 'disabled' : ''}>
+                ${options(SLIDE_BUILD_TRIGGERS, SLIDE_BUILD_TRIGGER_LABELS, build.trigger)}
+              </select>
+
+              <select data-duration aria-label="Speed">
+                <option value="250" ${build.duration <= 300 ? 'selected' : ''}>Fast</option>
+                <option value="500" ${build.duration > 300 && build.duration <= 750 ? 'selected' : ''}>Normal</option>
+                <option value="1100" ${build.duration > 750 ? 'selected' : ''}>Slow</option>
               </select>
             </div>
 
-            <div class="yanta-slide-anim-step-meta">${escapeHtml(stepSummary(slide, build))}</div>
-          </div>
+            <div class="yanta-slide-anim-step-foot">
+              <span class="yanta-slide-anim-step-meta">${escapeHtml(stepSummary(slide, build))}</span>
 
-          <div class="yanta-slide-anim-step-actions">
-            <button class="icon-btn" data-move="up" title="Move earlier" ${index === 0 ? 'disabled' : ''}>${lucide('chevron-up', 14)}</button>
-            <button class="icon-btn" data-move="down" title="Move later" ${index === animation.builds.length - 1 ? 'disabled' : ''}>${lucide('chevron-down', 14)}</button>
-            <button class="icon-btn danger" data-remove title="Remove step">${lucide('x', 14)}</button>
+              <span class="yanta-slide-anim-step-actions">
+                <button class="icon-btn" data-preview title="Preview this step">${lucide('play', 14)}</button>
+                <button class="icon-btn" data-move="up" title="Move earlier" ${index === 0 ? 'disabled' : ''}>${lucide('chevron-up', 14)}</button>
+                <button class="icon-btn" data-move="down" title="Move later" ${index === animation.builds.length - 1 ? 'disabled' : ''}>${lucide('chevron-down', 14)}</button>
+                <button class="icon-btn danger" data-remove title="Remove step">${lucide('x', 14)}</button>
+              </span>
+            </div>
           </div>
         </div>
-      `).join('')
+      `;
+      }).join('')
     : `
         <div class="yanta-slide-anim-empty">
-          No build steps yet. Select objects on the board and press
-          <strong>Add selection as step</strong> — during the presentation they
-          appear one click at a time.
+          No animation yet. Select objects on the board and press
+          <strong>Add selection as step</strong> — each step plays on its own
+          click, or together with the one before it.
         </div>
       `;
 
@@ -539,6 +590,11 @@ function onBodyClick(e) {
 
   const buildId = stepEl.dataset.build;
 
+  if (e.target.closest('[data-preview]')) {
+    previewBuild(buildId);
+    return;
+  }
+
   if (e.target.closest('[data-remove]')) {
     updateBuilds((builds) => builds.filter((b) => b.id !== buildId));
     return;
@@ -579,13 +635,72 @@ function onBodyChange(e) {
     return;
   }
 
+  if (e.target.matches('[data-direction]')) {
+    const direction = e.target.value;
+
+    updateBuilds((builds) =>
+      builds.map((b) => (b.id === buildId ? { ...b, direction } : b))
+    );
+
+    return;
+  }
+
+  if (e.target.matches('[data-trigger]')) {
+    const trigger = e.target.value;
+
+    updateBuilds((builds) =>
+      builds.map((b) => (b.id === buildId ? { ...b, trigger } : b))
+    );
+
+    return;
+  }
+
   if (e.target.matches('[data-duration]')) {
-    const duration = Number(e.target.value) || 420;
+    const duration = Number(e.target.value) || 500;
 
     updateBuilds((builds) =>
       builds.map((b) => (b.id === buildId ? { ...b, duration } : b))
     );
   }
+}
+
+/**
+ * Plays one step right where the user is editing it.
+ *
+ * Authoring an animation you cannot see is guesswork, so the preview runs the
+ * real runtime — same animator, same effects — on a throwaway slide holding
+ * only this step. Nothing about it is persisted, and it always ends by putting
+ * the board back.
+ */
+function previewBuild(buildId) {
+  const slide = currentSlide();
+  if (!slide || panel.previewing) return;
+
+  const build = slideAnimation(slide).builds.find((b) => b.id === buildId);
+  if (!build) return;
+
+  const animator = createSlideAnimator({ getApi: () => panel?.getApi?.() });
+
+  // A one-step slide: hidden first, then played on its own timeline.
+  const solo = {
+    animation: {
+      transition: 'cut',
+      builds: [{ ...build, order: 0, trigger: 'click', delay: 0 }],
+    },
+  };
+
+  panel.previewing = true;
+
+  animator.showStep(solo, 0);
+
+  requestAnimationFrame(() => {
+    animator.revealStep(solo, 0);
+
+    window.setTimeout(() => {
+      animator.restore();
+      panel.previewing = false;
+    }, build.duration + 260);
+  });
 }
 
 export function closeSlideAnimationPanel({ fromHistory = false } = {}) {
@@ -612,7 +727,7 @@ export function openSlideAnimationPanel({
   root.className = 'yanta-slide-anim-panel';
 
   root.innerHTML = `
-    <div class="yanta-slide-anim-head">
+    <div class="yanta-slide-anim-head" data-anim-drag>
       <span>${lucide('sparkles', 16)}</span>
       <h3 data-anim-title>Animation</h3>
       <button class="icon-btn" data-anim-close title="Close">${lucide('x', 16)}</button>
@@ -633,8 +748,13 @@ export function openSlideAnimationPanel({
     drawingId,
     slideId,
     getApi: getApi || (() => null),
+    previewing: false,
     release: null,
   };
+
+  makePanelDraggable(root, root.querySelector('[data-anim-drag]'), {
+    key: 'slide-animation',
+  });
 
   root.querySelector('[data-anim-close]')?.addEventListener('click', () => {
     closeSlideAnimationPanel();

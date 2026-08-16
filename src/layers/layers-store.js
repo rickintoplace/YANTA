@@ -139,6 +139,79 @@ export function reorderLayer(noteId, drawingId, layerId, delta, { api } = {}) {
 }
 
 /**
+ * Drops `layerId` next to `targetId` — the drag & drop counterpart of
+ * reorderLayer.
+ *
+ * @param {boolean} options.after  place it in front of the target instead of behind
+ */
+export function moveLayerBefore(noteId, drawingId, layerId, targetId, {
+  after = false,
+  api,
+} = {}) {
+  const layers = listLayers(noteId, drawingId);
+
+  if (layerId === BASE_LAYER_ID || targetId === BASE_LAYER_ID) return layers;
+
+  const from = layers.findIndex((l) => l.id === layerId);
+  const to = layers.findIndex((l) => l.id === targetId);
+
+  if (from <= 0 || to <= 0 || from === to) return layers;
+
+  const next = [...layers];
+  const [moved] = next.splice(from, 1);
+
+  // Recompute after the removal so the target keeps its meaning.
+  const targetIndex = next.findIndex((l) => l.id === targetId);
+
+  next.splice(after ? targetIndex + 1 : targetIndex, 0, moved);
+
+  return commit(noteId, drawingId, {
+    layers: next.map((layer, i) => ({ ...layer, order: i })),
+    elements: sceneElements(noteId, drawingId, api),
+    api,
+  });
+}
+
+/**
+ * "Edit only the active layer": locks every other layer in one commit.
+ *
+ * Deliberately implemented with the normal, persisted layer lock rather than a
+ * hidden view state — the panel's lock icons then tell the truth, and a
+ * selection can never reach across layers behind the user's back (which is
+ * what made group/ungroup misbehave).
+ */
+export function applyLayerIsolation(noteId, drawingId, activeLayerId, {
+  isolate = true,
+  api,
+} = {}) {
+  const layers = listLayers(noteId, drawingId);
+
+  const lockedById = new Map(
+    layers.map((layer) => [
+      layer.id,
+      isolate ? layer.id !== activeLayerId : false,
+    ])
+  );
+
+  const elements = sceneElements(noteId, drawingId, api).map((el) => {
+    const shouldLock = lockedById.get(layerIdOfElement(el));
+
+    if (shouldLock === undefined) return el;
+
+    return shouldLock ? lockElementForLayer(el) : unlockElementForLayer(el);
+  });
+
+  return commit(noteId, drawingId, {
+    layers: layers.map((layer) => ({
+      ...layer,
+      locked: !!lockedById.get(layer.id),
+    })),
+    elements,
+    api,
+  });
+}
+
+/**
  * Deletes a layer. Its elements are not destroyed — they move to the base
  * layer, because losing work to a panel click is never acceptable.
  */

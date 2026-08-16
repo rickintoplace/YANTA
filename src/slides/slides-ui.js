@@ -106,6 +106,15 @@ import {
 } from '../presentation/presentation-pairing.js';
 
 import {
+  makePanelDraggable,
+} from '../draggable-panel.js';
+
+import {
+  keepMenuInViewport,
+  positionMenuAt,
+} from '../menu-position.js';
+
+import {
   registerOverlayRoute,
   pushOverlayState,
   closeTopOverlay,
@@ -1709,23 +1718,6 @@ function isTextInputTarget(target) {
   );
 }
 
-function clampPanelPosition(panel, left, top) {
-  const rect = panel.getBoundingClientRect();
-  const margin = 10;
-
-  return {
-    left: clamp(
-      left,
-      margin,
-      Math.max(margin, window.innerWidth - rect.width - margin)
-    ),
-    top: clamp(
-      top,
-      margin,
-      Math.max(margin, window.innerHeight - rect.height - margin)
-    ),
-  };
-}
 
 function sceneElementsForApi(api) {
   try {
@@ -2933,10 +2925,18 @@ function makeSlidesContextButton({ icon, label, onClick }) {
 function injectSlidesItemsIntoNativeContextMenu(container) {
   const ctx = slidesContextState.get(container);
   if (!ctx?.api) return;
-  if (!ctx.frame && !ctx.hasSelection) return;
 
   const menu = findOpenExcalidrawContextMenu(ctx);
   if (!menu) return;
+
+  /*
+    Excalidraw places its context menu at the pointer without checking that it
+    fits, so a right-click near the bottom of a drawing loses the lower half of
+    the menu. Correct that for every menu, not just the ones we extend.
+  */
+  keepMenuInViewport(menu);
+
+  if (!ctx.frame && !ctx.hasSelection) return;
   if (menu.querySelector('[data-yanta-slides-context-item="1"]')) return;
 
   const separator = document.createElement('div');
@@ -2987,18 +2987,32 @@ function injectSlidesItemsIntoNativeContextMenu(container) {
 
     menu.append(makeSlidesContextButton({
       icon: 'sparkles',
-      label: 'YANTA: Animate on click',
+      label: 'YANTA: Animate…',
       onClick: () => {
-        addSelectionAsBuildStep({
+        const slide = addSelectionAsBuildStep({
           noteId: ctx.noteId,
           drawingId: ctx.drawingId,
           api: ctx.api,
         });
 
         refresh();
+
+        // Straight into the editor for the step that was just created — the
+        // effect and its timing are the point, not the bare "it appears".
+        if (slide) {
+          openSlideAnimationPanel({
+            noteId: ctx.noteId,
+            drawingId: ctx.drawingId,
+            slideId: slide.id,
+            getApi: () => currentApiForDrawing(ctx.noteId, ctx.drawingId) || ctx.api,
+          });
+        }
       },
     }));
   }
+
+  // The menu just grew; make sure all of it is still on screen.
+  requestAnimationFrame(() => keepMenuInViewport(menu));
 }
 
 function bindSlidesNativeContextMenu(container, {
@@ -3358,8 +3372,6 @@ function openSlideMiniMenu(x, y, {
   const menu = document.createElement('div');
   menu.className = 'ctx-menu';
   menu.style.zIndex = '540';
-  menu.style.left = `${x}px`;
-  menu.style.top = `${y}px`;
 
   menu.innerHTML = `
     <button data-action="rename">${lucide('pencil', 14)} Rename</button>
@@ -3370,6 +3382,7 @@ function openSlideMiniMenu(x, y, {
   `;
 
   document.body.append(menu);
+  positionMenuAt(menu, x, y);
 
   const close = () => {
     menu.remove();
@@ -4112,89 +4125,6 @@ function laserPointerMove(e) {
   }
 }
 
-function makePresenterNotesDraggable(panel) {
-  const handle = panel?.querySelector('.yanta-slideshow-notes-head');
-  if (!panel || !handle || panel.dataset.dragBound === '1') return;
-
-  panel.dataset.dragBound = '1';
-
-  let dragging = false;
-  let pointerId = null;
-  let startX = 0;
-  let startY = 0;
-  let startLeft = 0;
-  let startTop = 0;
-
-  const stop = () => {
-    if (!dragging) return;
-
-    dragging = false;
-    pointerId = null;
-
-    panel.classList.remove('is-dragging');
-
-    document.removeEventListener('pointermove', onMove, true);
-    document.removeEventListener('pointerup', onUp, true);
-    document.removeEventListener('pointercancel', onUp, true);
-  };
-
-  const onMove = (e) => {
-    if (!dragging) return;
-    if (pointerId != null && e.pointerId !== pointerId) return;
-
-    e.preventDefault();
-
-    const next = clampPanelPosition(
-      panel,
-      startLeft + (e.clientX - startX),
-      startTop + (e.clientY - startY)
-    );
-
-    panel.style.left = `${next.left}px`;
-    panel.style.top = `${next.top}px`;
-    panel.style.right = 'auto';
-  };
-
-  const onUp = (e) => {
-    if (pointerId != null && e.pointerId !== pointerId) return;
-    stop();
-  };
-
-  handle.addEventListener('pointerdown', (e) => {
-    if (e.button != null && e.button !== 0) return;
-
-    if (
-      e.target.closest?.(
-        'button, input, textarea, select, a, [contenteditable="true"]'
-      )
-    ) {
-      return;
-    }
-
-    e.preventDefault();
-    e.stopPropagation();
-
-    const rect = panel.getBoundingClientRect();
-
-    dragging = true;
-    pointerId = e.pointerId;
-    startX = e.clientX;
-    startY = e.clientY;
-    startLeft = rect.left;
-    startTop = rect.top;
-
-    panel.classList.add('is-dragging');
-
-    try {
-      handle.setPointerCapture?.(e.pointerId);
-    } catch {}
-
-    document.addEventListener('pointermove', onMove, true);
-    document.addEventListener('pointerup', onUp, true);
-    document.addEventListener('pointercancel', onUp, true);
-  }, true);
-}
-
 function toggleNotes() {
   if (!slideshow) return;
 
@@ -4239,7 +4169,9 @@ function toggleNotes() {
   slideshow.root.append(panel);
   slideshow.notesEl = panel;
 
-  makePresenterNotesDraggable(panel);
+  makePanelDraggable(panel, panel.querySelector('.yanta-slideshow-notes-head'), {
+    key: 'slideshow-notes',
+  });
 
   updateNotesPanel();
 }

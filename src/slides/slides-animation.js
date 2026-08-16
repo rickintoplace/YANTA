@@ -31,21 +31,75 @@ export const SLIDE_TRANSITION_LABELS = {
   fade: 'Fade',
 };
 
-export const SLIDE_BUILD_EFFECTS = ['fade', 'rise', 'drift'];
+/*
+  Entrance effects, PowerPoint's vocabulary plus the one a drawing app owes
+  its users: Draw, which retraces a stroke the way it was drawn.
+
+  Not every effect fits every element — you cannot wipe a line, and scaling a
+  text box re-wraps it — so `effectForElement()` degrades to the closest thing
+  that always looks right instead of rendering something broken.
+*/
+export const SLIDE_BUILD_EFFECTS = ['appear', 'fade', 'fly', 'wipe', 'zoom', 'draw'];
 
 export const SLIDE_BUILD_EFFECT_LABELS = {
+  appear: 'Appear',
   fade: 'Fade in',
-  rise: 'Rise up',
-  drift: 'Drift in',
+  fly: 'Fly in',
+  wipe: 'Wipe',
+  zoom: 'Zoom in',
+  draw: 'Draw',
 };
 
-const DEFAULT_BUILD_DURATION = 420;
+export const SLIDE_BUILD_DIRECTIONS = ['left', 'right', 'up', 'down'];
+
+export const SLIDE_BUILD_DIRECTION_LABELS = {
+  left: 'From left',
+  right: 'From right',
+  up: 'From top',
+  down: 'From bottom',
+};
+
+/*
+  When a step starts, exactly like PowerPoint's animation pane:
+  - click: waits for the presenter
+  - with:  starts together with the previous step
+  - after: starts when the previous step has finished
+*/
+export const SLIDE_BUILD_TRIGGERS = ['click', 'with', 'after'];
+
+export const SLIDE_BUILD_TRIGGER_LABELS = {
+  click: 'On click',
+  with: 'With previous',
+  after: 'After previous',
+};
+
+const DEFAULT_BUILD_DURATION = 500;
 const DEFAULT_TRANSITION_DURATION = 520;
 
 // Scene-unit travel of the moving effects, scaled by the element's own size so
 // a sticker and a full-width headline both move a sensible distance.
-const TRAVEL_BASE = 28;
-const TRAVEL_MAX = 90;
+const TRAVEL_BASE = 40;
+const TRAVEL_MAX = 260;
+
+const BOXY_TYPES = new Set(['rectangle', 'ellipse', 'diamond', 'image', 'frame', 'embeddable']);
+const LINEAR_TYPES = new Set(['freedraw', 'line', 'arrow']);
+
+/** The effect that will actually be used for one element. */
+export function effectForElement(el, effect) {
+  const type = el?.type;
+
+  if (effect === 'draw') {
+    if (LINEAR_TYPES.has(type)) return 'draw';
+    return BOXY_TYPES.has(type) ? 'wipe' : 'fade';
+  }
+
+  if (effect === 'wipe' || effect === 'zoom') {
+    // Geometry effects re-wrap text and do not move linear points with the box.
+    return BOXY_TYPES.has(type) ? effect : 'fade';
+  }
+
+  return SLIDE_BUILD_EFFECTS.includes(effect) ? effect : 'fade';
+}
 
 // ------------------------------------------------------------
 // Model
@@ -60,17 +114,28 @@ function normalizeBuild(raw = {}, index = 0) {
 
   if (!elementIds.length) return null;
 
-  const effect = SLIDE_BUILD_EFFECTS.includes(raw.effect) ? raw.effect : 'fade';
   const duration = Number(raw.duration);
+  const delay = Number(raw.delay);
 
   return {
     id: String(raw.id || uid()),
     order: Number.isFinite(Number(raw.order)) ? Number(raw.order) : index,
     elementIds,
-    effect,
+
+    effect: SLIDE_BUILD_EFFECTS.includes(raw.effect) ? raw.effect : 'fade',
+
+    direction: SLIDE_BUILD_DIRECTIONS.includes(raw.direction)
+      ? raw.direction
+      : 'left',
+
+    // The very first step has nothing to run with or after.
+    trigger: SLIDE_BUILD_TRIGGERS.includes(raw.trigger) ? raw.trigger : 'click',
+
     duration: Number.isFinite(duration)
-      ? Math.max(0, Math.min(3000, duration))
+      ? Math.max(0, Math.min(5000, duration))
       : DEFAULT_BUILD_DURATION,
+
+    delay: Number.isFinite(delay) ? Math.max(0, Math.min(5000, delay)) : 0,
   };
 }
 
@@ -83,7 +148,11 @@ export function normalizeSlideAnimation(raw = {}) {
     .map(normalizeBuild)
     .filter(Boolean)
     .sort((a, b) => a.order - b.order)
-    .map((build, index) => ({ ...build, order: index }));
+    .map((build, index) => ({
+      ...build,
+      order: index,
+      trigger: index === 0 ? 'click' : build.trigger,
+    }));
 
   return {
     transition,
@@ -95,11 +164,53 @@ export function slideAnimation(slide) {
   return normalizeSlideAnimation(slide?.animation || {});
 }
 
-export function slideBuildCount(slide) {
-  return slideAnimation(slide).builds.length;
+/**
+ * Groups a slide's build steps into what one click plays.
+ *
+ * A group starts at every "on click" step and swallows the following
+ * "with previous" / "after previous" steps, each with the start time those
+ * triggers imply. This is the whole timeline model — everything else just
+ * reads it.
+ *
+ * @returns {Array<{ steps: Array<{build, startAt, endAt}>, duration: number }>}
+ */
+export function slideBuildGroups(slide) {
+  const { builds } = slideAnimation(slide);
+  const groups = [];
+
+  for (const build of builds) {
+    const startsGroup = !groups.length || build.trigger === 'click';
+
+    if (startsGroup) {
+      groups.push({ steps: [], duration: 0 });
+    }
+
+    const group = groups[groups.length - 1];
+    const previous = group.steps[group.steps.length - 1];
+
+    let startAt = build.delay;
+
+    if (previous) {
+      startAt = build.trigger === 'with'
+        ? previous.startAt + build.delay
+        : previous.endAt + build.delay;
+    }
+
+    const endAt = startAt + build.duration;
+
+    group.steps.push({ build, startAt, endAt });
+    group.duration = Math.max(group.duration, endAt);
+  }
+
+  return groups;
 }
 
-/** Total presentation steps of a slide: the base view plus one per build. */
+/** Number of clicks a slide takes before it is done. */
+export function slideBuildCount(slide) {
+  return slideBuildGroups(slide).length;
+}
+
+/** Total presentation steps of a slide: the base view plus one per click. */
 export function slideStepCount(slide) {
   return slideBuildCount(slide) + 1;
 }
@@ -167,25 +278,120 @@ function prefersReducedMotion() {
   }
 }
 
-function travelFor(el, effect) {
-  if (effect === 'rise' || effect === 'drift') {
-    const size = effect === 'rise'
-      ? Math.abs(Number(el?.height) || 0)
-      : Math.abs(Number(el?.width) || 0);
+function travelFor(el, direction) {
+  const size = direction === 'up' || direction === 'down'
+    ? Math.abs(Number(el?.height) || 0)
+    : Math.abs(Number(el?.width) || 0);
 
-    return Math.min(TRAVEL_MAX, TRAVEL_BASE + size * 0.25);
+  return Math.min(TRAVEL_MAX, TRAVEL_BASE + size * 0.6);
+}
+
+/**
+ * The presentation-only patch for one element at progress `k`.
+ *
+ * Returns null once the element has arrived, which is the signal to drop the
+ * override and let the original values stand again — bit-for-bit, never a
+ * recomputed approximation.
+ */
+function effectPatch(original, effect, direction, k) {
+  if (k >= 1) return null;
+
+  switch (effect) {
+    case 'appear':
+      return { opacity: 0, locked: true };
+
+    case 'fly': {
+      const travel = travelFor(original, direction) * (1 - k);
+
+      const patch = {
+        // Fly-ins fade in faster than they travel, as they do in Keynote.
+        opacity: Math.max(1, Math.round(original.opacity * Math.min(1, k * 1.6))),
+        locked: true,
+      };
+
+      if (direction === 'left') patch.x = original.x - travel;
+      else if (direction === 'right') patch.x = original.x + travel;
+      else if (direction === 'up') patch.y = original.y - travel;
+      else patch.y = original.y + travel;
+
+      return patch;
+    }
+
+    case 'wipe': {
+      const patch = { opacity: original.opacity, locked: true };
+
+      if (direction === 'up' || direction === 'down') {
+        patch.height = Math.max(1, original.height * k);
+        patch.y = direction === 'down'
+          ? original.y + original.height - patch.height
+          : original.y;
+      } else {
+        patch.width = Math.max(1, original.width * k);
+        patch.x = direction === 'right'
+          ? original.x + original.width - patch.width
+          : original.x;
+      }
+
+      return patch;
+    }
+
+    case 'zoom': {
+      // Scales around the element's own centre so it grows in place.
+      const scale = 0.35 + 0.65 * k;
+
+      const width = Math.max(1, original.width * scale);
+      const height = Math.max(1, original.height * scale);
+
+      return {
+        opacity: Math.max(1, Math.round(original.opacity * Math.min(1, k * 1.6))),
+        x: original.x + (original.width - width) / 2,
+        y: original.y + (original.height - height) / 2,
+        width,
+        height,
+        locked: true,
+      };
+    }
+
+    case 'draw': {
+      const points = original.points || [];
+
+      if (points.length < 2) {
+        return { opacity: Math.max(1, Math.round(original.opacity * k)), locked: true };
+      }
+
+      // At least two points, or Excalidraw has nothing to render.
+      const count = Math.max(2, Math.ceil(points.length * k));
+      const sliced = points.slice(0, count);
+
+      const patch = {
+        opacity: original.opacity,
+        points: sliced,
+        locked: true,
+      };
+
+      if (Array.isArray(original.pressures) && original.pressures.length) {
+        patch.pressures = original.pressures.slice(0, count);
+      }
+
+      return patch;
+    }
+
+    case 'fade':
+    default:
+      return {
+        opacity: Math.max(1, Math.round(original.opacity * k)),
+        locked: true,
+      };
   }
-
-  return 0;
 }
 
 /**
  * Drives build steps for one running presentation.
  *
  * The animator owns no elements of its own. It keeps a set of *overrides* —
- * the presentation-only opacity/offset each animated element should currently
- * have — plus the untouched original of everything it ever overrode, and
- * applies the difference to the live scene.
+ * the presentation-only values each animated element should currently have —
+ * plus the untouched original of everything it ever overrode, and applies the
+ * difference to the live scene.
  *
  * Why overrides instead of patching straight through: Excalidraw commits
  * updateScene() through React, so two read-modify-write passes in the same
@@ -195,7 +401,7 @@ function travelFor(el, effect) {
  * frame, which reads a scene that has settled.
  */
 export function createSlideAnimator({ getApi }) {
-  // elementId -> untouched { opacity, x, y, locked }
+  // elementId -> untouched geometry/appearance the presentation may change
   const originals = new Map();
 
   // elementId -> presentation-only patch currently in force
@@ -223,10 +429,16 @@ export function createSlideAnimator({ getApi }) {
     if (originals.has(el.id)) return originals.get(el.id);
 
     const snapshot = {
+      id: el.id,
+      type: el.type,
       opacity: el.opacity,
       x: el.x,
       y: el.y,
+      width: el.width,
+      height: el.height,
       locked: el.locked === true,
+      points: el.points,
+      pressures: el.pressures,
     };
 
     originals.set(el.id, snapshot);
@@ -234,13 +446,35 @@ export function createSlideAnimator({ getApi }) {
     return snapshot;
   }
 
+  /*
+    points/pressures are compared by reference on purpose: restoring always
+    puts the original array back, so identity is both correct and far cheaper
+    than comparing thousands of freehand coordinates every frame.
+  */
   function differs(el, target) {
     return (
       el.opacity !== target.opacity ||
       el.x !== target.x ||
       el.y !== target.y ||
-      el.locked !== target.locked
+      el.width !== target.width ||
+      el.height !== target.height ||
+      el.locked !== target.locked ||
+      el.points !== target.points ||
+      el.pressures !== target.pressures
     );
+  }
+
+  function restoreTarget(original) {
+    return {
+      opacity: original.opacity,
+      x: original.x,
+      y: original.y,
+      width: original.width,
+      height: original.height,
+      locked: original.locked,
+      points: original.points,
+      pressures: original.pressures,
+    };
   }
 
   /** Writes the current overrides — and only them — into the live scene. */
@@ -261,7 +495,7 @@ export function createSlideAnimator({ getApi }) {
         // Snapshot before the first override, while the element is still the
         // one the user drew.
         const original = remember(el);
-        const target = { ...original, ...override };
+        const target = { ...restoreTarget(original), ...override };
 
         if (differs(el, target)) patches.set(el.id, target);
 
@@ -270,8 +504,10 @@ export function createSlideAnimator({ getApi }) {
 
       const original = originals.get(el.id);
 
-      if (original && differs(el, original)) {
-        patches.set(el.id, { ...original });
+      if (original) {
+        const target = restoreTarget(original);
+
+        if (differs(el, target)) patches.set(el.id, target);
       }
     }
 
@@ -296,12 +532,13 @@ export function createSlideAnimator({ getApi }) {
     animationRaf = 0;
   }
 
-  function idsForSteps(slide, fromIndex) {
-    const { builds } = slideAnimation(slide);
+  function idsFromGroups(groups, fromIndex) {
     const ids = new Set();
 
-    for (let i = fromIndex; i < builds.length; i++) {
-      for (const id of builds[i].elementIds) ids.add(id);
+    for (let i = fromIndex; i < groups.length; i++) {
+      for (const { build } of groups[i].steps) {
+        for (const id of build.elementIds) ids.add(id);
+      }
     }
 
     return ids;
@@ -317,7 +554,7 @@ export function createSlideAnimator({ getApi }) {
 
     overrides.clear();
 
-    for (const id of idsForSteps(slide, step)) {
+    for (const id of idsFromGroups(slideBuildGroups(slide), step)) {
       // opacity 0 + locked is the marker a scene re-hydration keeps hidden
       // (see applyPersistedDrawingToApi), so a sync mid-presentation cannot
       // flash the rest of the slide.
@@ -327,37 +564,45 @@ export function createSlideAnimator({ getApi }) {
     scheduleApply();
   }
 
-  /** Reveals one build step with its effect. */
-  function revealStep(slide, stepIndex) {
+  /** Plays one click's worth of animation: the whole group, on its timeline. */
+  function revealStep(slide, groupIndex) {
     cancelAnimation();
 
-    const build = slideAnimation(slide).builds[stepIndex];
-    if (!build) return;
+    const group = slideBuildGroups(slide)[groupIndex];
+    if (!group) return;
 
     const { elements } = readElements();
+    const byId = new Map(elements.map((el) => [el.id, el]));
 
-    const targets = elements
-      .filter((el) => el && !el.isDeleted && build.elementIds.includes(el.id))
-      .map((el) => ({
-        id: el.id,
-        original: remember(el),
-        travel: travelFor(el, build.effect),
-      }));
+    // Resolve every element once: which effect it really gets, and its
+    // untouched values to animate towards.
+    const timeline = [];
+
+    for (const { build, startAt } of group.steps) {
+      for (const id of build.elementIds) {
+        const el = byId.get(id);
+        if (!el || el.isDeleted) continue;
+
+        timeline.push({
+          id,
+          startAt,
+          duration: build.duration,
+          direction: build.direction,
+          effect: effectForElement(el, build.effect),
+          original: remember(el),
+        });
+      }
+    }
 
     const finish = () => {
       animationRaf = 0;
 
-      for (const target of targets) overrides.delete(target.id);
+      for (const entry of timeline) overrides.delete(entry.id);
 
       scheduleApply();
     };
 
-    if (!targets.length) {
-      finish();
-      return;
-    }
-
-    if (!build.duration || prefersReducedMotion()) {
+    if (!timeline.length || prefersReducedMotion() || !group.duration) {
       finish();
       return;
     }
@@ -365,28 +610,28 @@ export function createSlideAnimator({ getApi }) {
     const start = performance.now();
 
     const tick = () => {
-      const t = Math.min(1, (performance.now() - start) / build.duration);
+      const elapsed = performance.now() - start;
 
-      if (t >= 1) {
+      if (elapsed >= group.duration) {
         finish();
         return;
       }
 
-      const k = easeOutCubic(t);
+      for (const entry of timeline) {
+        const local = entry.duration > 0
+          ? (elapsed - entry.startAt) / entry.duration
+          : (elapsed >= entry.startAt ? 1 : 0);
 
-      for (const target of targets) {
-        const override = {
-          opacity: Math.max(1, Math.round(target.original.opacity * k)),
-          locked: true,
-        };
+        // Before its slot a step stays hidden; after it, it is simply done.
+        const k = local <= 0 ? 0 : easeOutCubic(Math.min(1, local));
 
-        if (build.effect === 'rise') {
-          override.y = target.original.y + target.travel * (1 - k);
-        } else if (build.effect === 'drift') {
-          override.x = target.original.x - target.travel * (1 - k);
+        const patch = effectPatch(entry.original, entry.effect, entry.direction, local >= 1 ? 1 : k);
+
+        if (patch) {
+          overrides.set(entry.id, local <= 0 ? { opacity: 0, locked: true } : patch);
+        } else {
+          overrides.delete(entry.id);
         }
-
-        overrides.set(target.id, override);
       }
 
       applyNow();

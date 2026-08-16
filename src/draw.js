@@ -43,6 +43,8 @@ import {
   runDrawingApiUpdateWithoutSaving,
 } from './draw-scene-sync.js';
 
+import { layerSortedElements } from './layers/layers-order.js';
+
 import { cloudFetchExcalidrawLibrary } from './cloud/cloud-api.js';
 import { insertAtCursor } from './editor.js';
 import { openNote } from './notes.js';
@@ -53,6 +55,7 @@ import { showMenu } from './tree.js';
 import {
   getNoteDoc,
   getDrawing,
+  getDrawingLayers,
   findDrawing,
   setDrawing,
   updateDrawingMeta,
@@ -2527,6 +2530,39 @@ function buildPersistedDrawingSceneFromApi(api, {
 }
 
 /**
+ * Re-establishes layer stacking after a change that reordered the scene.
+ *
+ * Excalidraw's own "send backward" / "bring to front" reorder the flat element
+ * array with no notion of layers. Layer order has to win, or an element from a
+ * lower layer can end up covering a higher one. Sorting is stable, so the
+ * user's ordering *inside* a layer — which is what those actions really mean —
+ * is preserved.
+ *
+ * Cost: skipped outright for drawings with fewer than two layers (nearly all
+ * of them) and while a stroke is in progress, so the hot path stays free.
+ */
+function enforceLayerOrder(api, noteId, drawingId, elements, appState) {
+  if (!api || appState?.cursorButton === 'down') return;
+
+  const layers = getDrawingLayers(noteId, drawingId);
+  if (layers.length < 2) return;
+
+  const sorted = layerSortedElements(elements, layers);
+  if (!sorted) return;
+
+  /*
+    Written without suppression on purpose: this IS a user-intended change to
+    the scene (they asked for a z-order change), so it must be persisted like
+    any other edit — the surface's own onChange picks it up.
+  */
+  try {
+    api.updateScene({ elements: sorted });
+  } catch (err) {
+    console.warn('[YANTA Draw] layer reorder failed', err);
+  }
+}
+
+/**
  * Creates the autosave for one mounted Excalidraw surface.
  *
  * The surface only has to forward onChange into `writer.note()` and route
@@ -4868,6 +4904,7 @@ async function mountInlineDrawing(embed, sourceNoteId, drawingId, drawing) {
 
     const saveScene = (elements, appState, files) => {
       rememberDrawToolLock(appState?.activeTool?.locked);
+      enforceLayerOrder(apiRef.current, sourceNoteId, drawingId, elements, appState);
       writerRef.current?.note(elements, appState, files);
     };
 
@@ -5433,6 +5470,7 @@ export async function openDrawModal(
 
     const onChange = (elements, appState, files) => {
       rememberDrawToolLock(appState?.activeTool?.locked);
+      enforceLayerOrder(apiRef.current, sourceNoteId, drawingId, elements, appState);
       writerRef.current?.note(elements, appState, files);
     };
 

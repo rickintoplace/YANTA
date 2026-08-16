@@ -497,6 +497,21 @@ export function getDrawing(noteId, drawingId) {
 }
 
 /**
+ * The drawing's layer list only.
+ *
+ * getDrawing() normalizes and clones the whole scene, which is far too much
+ * for a check that runs on Excalidraw change events — this reads just the one
+ * field.
+ */
+export function getDrawingLayers(noteId, drawingId) {
+  if (!noteId || !drawingId) return [];
+
+  const layers = getDrawingsMap(noteId).get(drawingId)?.layers;
+
+  return Array.isArray(layers) ? layers : [];
+}
+
+/**
  * Note-übergreifende Drawing-Auflösung.
  *
  * Wichtig für:

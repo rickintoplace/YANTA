@@ -28,17 +28,27 @@ import {
 } from '../overlay-history.js';
 
 import {
+  makePanelDraggable,
+} from '../draggable-panel.js';
+
+import {
+  positionMenuAt,
+} from '../menu-position.js';
+
+import {
   BASE_LAYER_ID,
   layerIdOfElement,
 } from './layers-model.js';
 
 import {
   adoptNewElements,
+  applyLayerIsolation,
   createLayer,
   deleteLayer,
   layerElementCounts,
   listLayers,
   liveElementIds,
+  moveLayerBefore,
   moveSelectionToLayer,
   reorderLayer,
   selectLayer,
@@ -100,6 +110,11 @@ body.yanta-slideshow-active .yanta-layers-panel {
   }
 }
 
+.yanta-layers-panel.is-dragging {
+  box-shadow: 0 30px 70px rgba(0, 0, 0, 0.42);
+  user-select: none;
+}
+
 .yanta-layers-head {
   display: flex;
   align-items: center;
@@ -115,6 +130,11 @@ body.yanta-slideshow-active .yanta-layers-panel {
   font-weight: 700;
 }
 
+.yanta-layers-head .icon-btn[aria-pressed="true"] {
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+}
+
 .yanta-layers-list {
   padding: 8px;
   overflow: auto;
@@ -128,7 +148,7 @@ body.yanta-slideshow-active .yanta-layers-panel {
 
 .yanta-layer-row {
   display: grid;
-  grid-template-columns: auto auto 1fr auto;
+  grid-template-columns: auto auto auto 1fr auto;
   align-items: center;
   gap: 8px;
 
@@ -141,6 +161,34 @@ body.yanta-slideshow-active .yanta-layers-panel {
 
 .yanta-layer-row:hover {
   border-color: var(--border);
+}
+
+.yanta-layer-grip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  color: var(--muted);
+  cursor: grab;
+  touch-action: none;
+}
+
+.yanta-layer-row[data-layer="base"] .yanta-layer-grip {
+  /* The base layer is the floor of the stack — it never moves. */
+  visibility: hidden;
+  cursor: default;
+}
+
+.yanta-layer-row.is-dragging {
+  opacity: 0.5;
+}
+
+.yanta-layer-row.is-drop-before {
+  box-shadow: 0 -2px 0 0 var(--accent);
+}
+
+.yanta-layer-row.is-drop-after {
+  box-shadow: 0 2px 0 0 var(--accent);
 }
 
 .yanta-layer-row.is-active {
@@ -247,6 +295,15 @@ function refresh() {
     panel.activeLayerId = BASE_LAYER_ID;
   }
 
+  const isolateBtn = panel.root.querySelector('[data-layers-isolate]');
+
+  if (isolateBtn) {
+    isolateBtn.setAttribute('aria-pressed', panel.isolate ? 'true' : 'false');
+    isolateBtn.title = panel.isolate
+      ? 'Editing only the active layer'
+      : 'Edit only the active layer';
+  }
+
   list.innerHTML = layers.map((layer, index) => {
     const count = counts.get(layer.id) || 0;
     const isBase = layer.id === BASE_LAYER_ID;
@@ -254,7 +311,9 @@ function refresh() {
     return `
       <div class="yanta-layer-row ${layer.id === panel.activeLayerId ? 'is-active' : ''} ${layer.visible ? '' : 'is-hidden'}"
            data-layer="${escapeAttr(layer.id)}"
+           ${isBase ? '' : 'draggable="true"'}
            title="Click to make this the active layer">
+        <span class="yanta-layer-grip" data-grip title="Drag to reorder">${lucide('grip-vertical', 13)}</span>
         <span class="yanta-layer-swatch" style="background:${escapeAttr(layer.color)}"></span>
 
         <span class="yanta-layer-toggles">
@@ -285,6 +344,94 @@ function refresh() {
   }).join('');
 }
 
+// ------------------------------------------------------------
+// Drag & drop reordering
+//
+// The list is rendered column-reverse (front layer on top), so "above in the
+// list" means "later in the layer order". The base layer is the floor and is
+// neither draggable nor a valid drop target.
+// ------------------------------------------------------------
+
+function clearDropMarkers(list) {
+  for (const row of list.querySelectorAll('.yanta-layer-row')) {
+    row.classList.remove('is-drop-before', 'is-drop-after');
+  }
+}
+
+function bindLayerDragAndDrop(list) {
+  let draggedId = '';
+
+  list.addEventListener('dragstart', (e) => {
+    const row = e.target.closest?.('[data-layer]');
+
+    if (!row || row.dataset.layer === BASE_LAYER_ID) {
+      e.preventDefault();
+      return;
+    }
+
+    draggedId = row.dataset.layer;
+    row.classList.add('is-dragging');
+
+    e.dataTransfer.effectAllowed = 'move';
+    // Firefox refuses to start a drag without payload.
+    e.dataTransfer.setData('text/plain', draggedId);
+  });
+
+  list.addEventListener('dragover', (e) => {
+    const row = e.target.closest?.('[data-layer]');
+    if (!draggedId || !row || row.dataset.layer === BASE_LAYER_ID) return;
+
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+
+    clearDropMarkers(list);
+
+    if (row.dataset.layer === draggedId) return;
+
+    const rect = row.getBoundingClientRect();
+    const above = e.clientY < rect.top + rect.height / 2;
+
+    row.classList.add(above ? 'is-drop-before' : 'is-drop-after');
+  });
+
+  list.addEventListener('dragleave', (e) => {
+    if (e.target === list) clearDropMarkers(list);
+  });
+
+  list.addEventListener('drop', (e) => {
+    const row = e.target.closest?.('[data-layer]');
+    if (!draggedId || !row) return;
+
+    e.preventDefault();
+
+    const targetId = row.dataset.layer;
+
+    clearDropMarkers(list);
+
+    if (targetId === draggedId || targetId === BASE_LAYER_ID) return;
+
+    const rect = row.getBoundingClientRect();
+    const dropAbove = e.clientY < rect.top + rect.height / 2;
+
+    moveLayerBefore(panel.noteId, panel.drawingId, draggedId, targetId, {
+      // "Above" in a column-reverse list is one step further to the front.
+      after: dropAbove,
+      api: api(),
+    });
+
+    refresh();
+  });
+
+  list.addEventListener('dragend', () => {
+    draggedId = '';
+    clearDropMarkers(list);
+
+    for (const row of list.querySelectorAll('.is-dragging')) {
+      row.classList.remove('is-dragging');
+    }
+  });
+}
+
 function openLayerMenu(anchor, layerId) {
   const { noteId, drawingId } = panel;
   const layer = listLayers(noteId, drawingId).find((l) => l.id === layerId);
@@ -296,8 +443,6 @@ function openLayerMenu(anchor, layerId) {
   const menu = document.createElement('div');
   menu.className = 'ctx-menu';
   menu.style.zIndex = '560';
-  menu.style.left = `${Math.round(rect.left)}px`;
-  menu.style.top = `${Math.round(rect.bottom + 6)}px`;
 
   menu.innerHTML = `
     <button data-act="move">${lucide('between-vertical-start', 14)} Move selection here</button>
@@ -307,6 +452,7 @@ function openLayerMenu(anchor, layerId) {
   `;
 
   document.body.append(menu);
+  positionMenuAt(menu, Math.round(rect.left), Math.round(rect.bottom + 6));
 
   const close = () => {
     menu.remove();
@@ -423,9 +569,24 @@ function onListClick(e) {
     return;
   }
 
-  // Plain row click: this is where new strokes go from now on.
+  setActiveLayer(layerId);
+}
+
+/** The layer new strokes join — and, with isolation on, the only editable one. */
+function setActiveLayer(layerId) {
+  const { noteId, drawingId } = panel;
+
   panel.activeLayerId = layerId;
+
+  if (panel.isolate) {
+    applyLayerIsolation(noteId, drawingId, layerId, {
+      isolate: true,
+      api: api(),
+    });
+  }
+
   panel.knownIds = liveElementIds(noteId, drawingId, api());
+
   refresh();
 }
 
@@ -485,9 +646,11 @@ export function openLayersPanel({ noteId, drawingId, getApi }) {
   root.className = 'yanta-layers-panel';
 
   root.innerHTML = `
-    <div class="yanta-layers-head">
+    <div class="yanta-layers-head" data-layers-drag>
       <span>${lucide('layers', 16)}</span>
       <h3>Layers</h3>
+      <button class="icon-btn" data-layers-isolate aria-pressed="false"
+              title="Edit only the active layer">${lucide('focus', 15)}</button>
       <button class="icon-btn" data-layers-close title="Close">${lucide('x', 16)}</button>
     </div>
 
@@ -495,7 +658,7 @@ export function openLayersPanel({ noteId, drawingId, getApi }) {
 
     <div class="yanta-layers-hint">
       The highlighted layer collects what you draw next. Top row is the front
-      of the board.
+      of the board — drag a row to restack it.
     </div>
 
     <div class="yanta-layers-foot">
@@ -528,6 +691,7 @@ export function openLayersPanel({ noteId, drawingId, getApi }) {
     drawingId,
     getApi: getApi || (() => null),
     activeLayerId: BASE_LAYER_ID,
+    isolate: false,
     knownIds: new Set(),
     onDrawingUpdated,
     onLayersUpdated,
@@ -538,6 +702,28 @@ export function openLayersPanel({ noteId, drawingId, getApi }) {
 
   root.querySelector('[data-layers-close]')?.addEventListener('click', () => {
     closeLayersPanel();
+  });
+
+  root.querySelector('[data-layers-isolate]')?.addEventListener('click', () => {
+    panel.isolate = !panel.isolate;
+
+    applyLayerIsolation(noteId, drawingId, panel.activeLayerId, {
+      isolate: panel.isolate,
+      api: api(),
+    });
+
+    toast(
+      panel.isolate
+        ? 'Only the active layer is editable'
+        : 'All layers unlocked',
+      'success'
+    );
+
+    refresh();
+  });
+
+  makePanelDraggable(root, root.querySelector('[data-layers-drag]'), {
+    key: 'draw-layers',
   });
 
   root.querySelector('[data-layers-add]')?.addEventListener('click', async () => {
@@ -558,14 +744,16 @@ export function openLayersPanel({ noteId, drawingId, getApi }) {
 
     // A layer you just made is the one you want to draw into.
     if (layer) {
-      panel.activeLayerId = layer.id;
-      panel.knownIds = liveElementIds(noteId, drawingId, api());
+      setActiveLayer(layer.id);
+    } else {
+      refresh();
     }
-
-    refresh();
   });
 
-  root.querySelector('[data-layers-list]')?.addEventListener('click', onListClick);
+  const list = root.querySelector('[data-layers-list]');
+
+  list?.addEventListener('click', onListClick);
+  if (list) bindLayerDragAndDrop(list);
 
   window.addEventListener('yanta-drawing-updated', onDrawingUpdated);
   window.addEventListener('yanta-draw-layers-updated', onLayersUpdated);

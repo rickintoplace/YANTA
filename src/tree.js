@@ -21,6 +21,7 @@ import {
 
 import { updateStorageMeter } from './core.js';
 import { inlineTextEdit } from './inline-ui.js';
+import { positionMenuAt } from './menu-position.js';
 
 import {
   openFolderInDashboard,
@@ -2577,32 +2578,7 @@ export function showMenu(x, y, items, {
     bindMenuOutsideClose();
   }, 0);
 
-  const r = m.getBoundingClientRect();
-
-  let left = align === 'end'
-    ? x - r.width
-    : x;
-
-  let top = y;
-
-  if (left + r.width > window.innerWidth - margin) {
-    left = window.innerWidth - r.width - margin;
-  }
-
-  if (left < margin) {
-    left = margin;
-  }
-
-  if (top + r.height > window.innerHeight - margin) {
-    top = y - r.height - 6;
-  }
-
-  if (top < margin) {
-    top = margin;
-  }
-
-  m.style.left = `${Math.round(left)}px`;
-  m.style.top = `${Math.round(top)}px`;
+  positionMenuAt(m, x, y, { align, margin });
 
   return m;
 }

@@ -1023,6 +1023,7 @@ import {
       },
       {
         label: folderId ? 'New checklist in this folder' : 'New checklist',
+        icon: 'list-checks',
         action: () => runCreateAction('list', {
           folderId,
           source: 'dashboard-context-menu-empty',
@@ -1044,6 +1045,7 @@ import {
       },
       {
         label: 'New event',
+        icon: 'calendar-plus',
         action: () => runCreateAction('event', {
           folderId,
           source: 'dashboard-context-menu-empty',

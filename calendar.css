@@ -3414,6 +3414,24 @@
   min-width: 76px;
 }
 
+/*
+  All-day rows ask a different pair of questions — "how many days ahead"
+  and "at what time" — so the label sits between the two controls instead
+  of after them.
+*/
+.yanta-calendar-reminder-row.is-all-day {
+  grid-template-columns: auto minmax(0, 1fr) auto 112px auto;
+}
+
+/* Day 0 hides the time, and the remove button must not slide left. */
+.yanta-calendar-reminder-row.is-all-day [data-reminder-remove] {
+  grid-column: -2;
+}
+
+.yanta-calendar-reminder-time {
+  min-width: 96px;
+}
+
 .yanta-calendar-reminder-unit {
   color: var(--text-faint);
   font-size: 11px;
@@ -3426,8 +3444,18 @@
   }
 
   .yanta-calendar-reminder-custom,
+  .yanta-calendar-reminder-time,
   .yanta-calendar-reminder-unit {
     grid-column: 2 / -1;
+  }
+
+  .yanta-calendar-reminder-row.is-all-day {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+  }
+
+  .yanta-calendar-reminder-row.is-all-day [data-reminder-remove] {
+    grid-column: 3;
+    grid-row: 1;
   }
 
   .yanta-calendar-native-notification-hint {

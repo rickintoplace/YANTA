@@ -57,6 +57,17 @@ import {
   const MOVE_CANCEL_PX = 9;
   const RECT_START_PX = 5;
   
+  /*
+    Dashboard regions a rectangle selection must never start in. They hold
+    no cards, so dragging there is the user reaching for text, not for a
+    marquee.
+  */
+  const NON_SELECTABLE_DASHBOARD_REGIONS = [
+    '.yanta-dashboard-widgets',
+    '.yanta-dashboard-nudge-host',
+    '.yanta-dashboard-head',
+  ].join(',');
+  
   let initialized = false;
   let mutationObserver = null;
   let syncRaf = 0;
@@ -269,10 +280,11 @@ import {
     }
 
     /*
-      Header nicht als blank tap behandeln.
-      Dort liegen Navigation, Breadcrumbs, Search/Create etc.
+      Header, Widgets und Nudge-Slot sind kein leerer Hintergrund:
+      dort liegen Navigation, Breadcrumbs, Search/Create und eigene
+      Inhalte. Ein Tap darin darf die Auswahl nicht verwerfen.
     */
-    if (node.closest?.('.yanta-dashboard-head')) {
+    if (node.closest?.(NON_SELECTABLE_DASHBOARD_REGIONS)) {
       return false;
     }
 
@@ -521,6 +533,15 @@ import {
     */
     if (cardFromTarget(target)) return false;
     if (isInteractiveTarget(target)) return false;
+  
+    /*
+      Widgets are not part of the selectable surface — nothing in them is
+      a card, so a rectangle there can only ever select nothing. What it
+      did do was swallow every drag: selecting a line of text in Today,
+      Pulse or the feed widget painted a marquee instead. Same for the
+      header and the nudge slot.
+    */
+    if (target.closest?.(NON_SELECTABLE_DASHBOARD_REGIONS)) return false;
   
     /*
       Important:

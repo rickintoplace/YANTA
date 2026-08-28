@@ -230,12 +230,39 @@ export async function openTodayNote() {
 
 // ---------------- capture ------------------------------------------
 
+/*
+  Provenance marker for entries a background run wrote.
+
+  It sits in the markdown itself rather than in note metadata, because a
+  daily note is a plain file that gets synced, exported and read in other
+  editors — a flag stored beside it would not survive any of that. The
+  form is stable and parseable, so the Today widget can collapse these
+  entries to their headline instead of repeating what the Pulse widget
+  already shows properly formatted.
+
+    - **07:12** [Pulse · morning-brief] **Three meetings, one conflict**
+*/
+const JOURNAL_AI_LABEL = 'Pulse';
+const JOURNAL_AI_MARKER_RE = /^\[Pulse(?:\s*·\s*([^\]]+))?\]\s*/;
+
+function journalAiMarker(source = '') {
+  const routine = /^pulse:(.+)$/.exec(String(source || ''))?.[1]?.trim();
+
+  return routine
+    ? `[${JOURNAL_AI_LABEL} · ${routine}] `
+    : `[${JOURNAL_AI_LABEL}] `;
+}
+
 /**
  * Append a timestamped bullet to today's note. Multi-line input keeps
  * following lines indented so markdown treats them as one list item.
+ *
+ * `ai: true` prefixes the entry with the Pulse marker, so a result a
+ * routine filed here is never mistaken for something the user wrote.
  */
 export async function captureToJournal(text, {
   source = 'unknown',
+  ai = false,
 } = {}) {
   const trimmed = String(text || '').trim();
 
@@ -253,8 +280,9 @@ export async function captureToJournal(text, {
   const ytext = entry.doc.getText('markdown');
 
   const lines = trimmed.split('\n');
+  const marker = ai ? journalAiMarker(source) : '';
   const bullet = [
-    `- **${timeChip()}** ${lines[0]}`,
+    `- **${timeChip()}** ${marker}${lines[0]}`,
     ...lines.slice(1).map((line) => `  ${line}`),
   ].join('\n');
 
@@ -282,9 +310,32 @@ export async function captureToJournal(text, {
 }
 
 /**
+ * Splits the Pulse marker off an entry.
+ *
+ * @returns {{ai: boolean, routine: string, text: string}}
+ */
+function readJournalEntryProvenance(text) {
+  const match = JOURNAL_AI_MARKER_RE.exec(text);
+
+  if (!match) return { ai: false, routine: '', text };
+
+  return {
+    ai: true,
+    routine: (match[1] || '').trim(),
+    text: text.slice(match[0].length),
+  };
+}
+
+/**
  * Parse today's note into displayable entries. Timestamped bullets get
  * a time chip; plain bullets (user edits) render without one. Anything
  * that isn't a bullet is left to the real note view.
+ *
+ * Entries carry `ai` and `routine`, so callers can show what a routine
+ * wrote as a routine's work. An AI entry also keeps its continuation
+ * lines out of `text`: the body already exists, properly formatted, in
+ * the Pulse Inbox — repeating it in a one-line preview only crowds out
+ * what the user wrote themselves.
  */
 export async function listTodayEntries() {
   const note = await findTodayNote();
@@ -301,19 +352,19 @@ export async function listTodayEntries() {
     const timed = line.match(/^-\s+\*\*([^*\n]{1,12})\*\*\s*(.*)$/);
 
     if (timed) {
-      out.push({ time: timed[1], text: timed[2] });
+      out.push({ time: timed[1], ...readJournalEntryProvenance(timed[2]) });
       continue;
     }
 
     const plain = line.match(/^-\s+(?!\[[ xX]\])(.+)$/);
 
     if (plain) {
-      out.push({ time: null, text: plain[1] });
+      out.push({ time: null, ...readJournalEntryProvenance(plain[1]) });
       continue;
     }
 
     // Indented continuation belongs to the previous entry.
-    if (/^\s{2,}\S/.test(line) && out.length) {
+    if (/^\s{2,}\S/.test(line) && out.length && !out[out.length - 1].ai) {
       out[out.length - 1].text += ' ' + line.trim();
     }
   }

@@ -239,13 +239,71 @@ const CALENDAR_REMINDER_PRESETS = Object.freeze([
   { id: '1d', label: '1 day before', minutesBefore: 24 * 60 },
 ]);
 
+/*
+  All-day notifications think in days plus a time of day, not in minutes.
+
+  An all-day event starts at 00:00, so "10 minutes before" means 23:50 the
+  night before — technically a lead time, practically a notification nobody
+  asked for. The editor therefore asks the two questions that make sense
+  ("how many days ahead" and "at what time") and folds the answer back into
+  the one number everything else already speaks:
+
+    minutesBefore = days × 1440 − timeOfDayMinutes
+
+  So "1 day before at 09:00" is 900, which the ICS export, the web
+  scheduler and the Android alarm path handle unchanged. The offset stays
+  non-negative, which every one of those consumers requires — hence day 0
+  only ever means 00:00, and the editor hides the time field there.
+*/
+const ALLDAY_REMINDER_DAY_OPTIONS = Object.freeze([0, 1, 2, 3, 7]);
+const ALLDAY_REMINDER_DEFAULT_DAYS = 1;
+const ALLDAY_REMINDER_DEFAULT_TIME_MINUTES = 9 * 60;
+
+function clockToMinutes(value, fallback = 0) {
+  const m = /^(\d{1,2}):(\d{2})$/.exec(String(value || '').trim());
+  if (!m) return fallback;
+
+  const minutes = Number(m[1]) * 60 + Number(m[2]);
+
+  return Number.isFinite(minutes) && minutes >= 0 && minutes < 1440
+    ? minutes
+    : fallback;
+}
+
+function minutesToClock(minutes) {
+  const n = Math.max(0, Math.min(1439, Math.round(Number(minutes) || 0)));
+
+  return `${String(Math.floor(n / 60)).padStart(2, '0')}:${String(n % 60).padStart(2, '0')}`;
+}
+
+/** minutesBefore → the day count and time of day the editor shows. */
+function splitAllDayReminder(minutesBefore) {
+  const total = Math.max(0, Math.round(Number(minutesBefore) || 0));
+  const days = Math.ceil(total / 1440);
+
+  return { days, timeMinutes: days * 1440 - total };
+}
+
+/** The inverse, clamped so the offset never goes negative. */
+function joinAllDayReminder(days, timeMinutes) {
+  const d = Math.max(0, Math.round(Number(days) || 0));
+  const t = Math.max(0, Math.min(1439, Math.round(Number(timeMinutes) || 0)));
+
+  return Math.max(0, d * 1440 - t);
+}
+
 function defaultCalendarRemindersForEvent(ev = {}) {
   if (ev.allDay) {
+    const minutesBefore = joinAllDayReminder(
+      ALLDAY_REMINDER_DEFAULT_DAYS,
+      ALLDAY_REMINDER_DEFAULT_TIME_MINUTES
+    );
+
     return [
       {
-        id: 'default-1d',
-        label: '1 day before',
-        minutesBefore: 24 * 60,
+        id: 'default-allday',
+        label: reminderLabelForMinutes(minutesBefore, { allDay: true }),
+        minutesBefore,
         enabled: true,
       },
     ];
@@ -261,7 +319,7 @@ function defaultCalendarRemindersForEvent(ev = {}) {
   ];
 }
 
-function normalizeCalendarReminder(raw) {
+function normalizeCalendarReminder(raw, { allDay = false } = {}) {
   if (!raw || typeof raw !== 'object') return null;
 
   const minutesBefore = Number(raw.minutesBefore);
@@ -271,7 +329,7 @@ function normalizeCalendarReminder(raw) {
 
   return {
     id: String(raw.id || `rem_${rounded}_${uid()}`),
-    label: String(raw.label || reminderLabelForMinutes(rounded)),
+    label: String(raw.label || reminderLabelForMinutes(rounded, { allDay })),
     minutesBefore: rounded,
     enabled: raw.enabled !== false,
   };
@@ -280,13 +338,29 @@ function normalizeCalendarReminder(raw) {
 function normalizeCalendarReminders(raw, ev = {}) {
   if (!Array.isArray(raw)) return [];
   return raw
-    .map(normalizeCalendarReminder)
+    .map((reminder) => normalizeCalendarReminder(reminder, { allDay: !!ev.allDay }))
     .filter(Boolean)
     .slice(0, 12);
 }
 
-function reminderLabelForMinutes(minutes) {
+function allDayReminderLabel(days, timeMinutes) {
+  if (days <= 0) return 'At the start of the day';
+
+  const lead = days === 7
+    ? '1 week before'
+    : `${days} day${days === 1 ? '' : 's'} before`;
+
+  return `${lead} at ${minutesToClock(timeMinutes)}`;
+}
+
+function reminderLabelForMinutes(minutes, { allDay = false } = {}) {
   const n = Number(minutes || 0);
+
+  if (allDay) {
+    const { days, timeMinutes } = splitAllDayReminder(n);
+    return allDayReminderLabel(days, timeMinutes);
+  }
+
   if (n === 0) return 'At time of event';
   if (n < 60) return `${n} minute${n === 1 ? '' : 's'} before`;
   if (n % 1440 === 0) {
@@ -361,9 +435,10 @@ function remindersEditorHtml(ev = {}, {
   shared = false,
 } = {}) {
   const reminders = normalizeCalendarReminders(ev.reminders || [], ev);
+  const allDay = !!ev.allDay;
 
   return `
-    <section class="yanta-calendar-reminders-box" data-reminders-box>
+    <section class="yanta-calendar-reminders-box" data-reminders-box data-all-day="${allDay ? '1' : '0'}">
       <div class="yanta-calendar-reminders-head">
         <strong>${lucide('bell', 14)} Notifications</strong>
         <button type="button" class="btn compact" data-reminder-add>
@@ -385,7 +460,7 @@ function remindersEditorHtml(ev = {}, {
       <div class="yanta-calendar-reminders-list" data-reminders-list>
         ${
           reminders.length
-            ? reminders.map((reminder) => reminderRowHtml(reminder)).join('')
+            ? reminders.map((reminder) => reminderRowHtml(reminder, { allDay })).join('')
             : `<div class="yanta-calendar-reminders-empty">No notifications set.</div>`
         }
       </div>
@@ -478,8 +553,11 @@ function deviceRowHtml({ tone, icon, label, text, tooltip }) {
   `;
 }
 
-function reminderRowHtml(reminder = {}) {
+function reminderRowHtml(reminder = {}, { allDay = false } = {}) {
   const value = Number(reminder.minutesBefore || 0);
+
+  if (allDay) return allDayReminderRowHtml(value, reminder);
+
   const isPreset = CALENDAR_REMINDER_PRESETS.some((p) => p.minutesBefore === value);
 
   return `
@@ -518,12 +596,82 @@ function reminderRowHtml(reminder = {}) {
   `;
 }
 
+/*
+  All-day row: how many days ahead, and at what time on that day. An
+  imported reminder that lands on a day count we do not offer keeps its
+  own option rather than being silently rounded to one we do.
+*/
+function allDayReminderRowHtml(value, reminder = {}) {
+  const { days, timeMinutes } = splitAllDayReminder(value);
+
+  const dayOptions = [...new Set([...ALLDAY_REMINDER_DAY_OPTIONS, days])]
+    .sort((a, b) => a - b);
+
+  const atStart = days <= 0;
+
+  return `
+    <div class="yanta-calendar-reminder-row is-all-day" data-reminder-row>
+      <label class="switch yanta-calendar-switch yanta-calendar-reminder-enabled">
+        <input type="checkbox" data-reminder-enabled ${reminder.enabled !== false ? 'checked' : ''} />
+        <span></span>
+      </label>
+
+      <select class="text-input" data-reminder-days>
+        ${dayOptions.map((option) => `
+          <option value="${option}" ${option === days ? 'selected' : ''}>
+            ${escapeHtml(allDayReminderDayLabel(option))}
+          </option>
+        `).join('')}
+      </select>
+
+      <span class="yanta-calendar-reminder-unit" ${atStart ? 'hidden' : ''}>at</span>
+
+      <input
+        class="text-input yanta-calendar-reminder-time"
+        data-reminder-time
+        type="time"
+        value="${escapeAttr(minutesToClock(timeMinutes))}"
+        ${atStart ? 'hidden' : ''} />
+
+      <button type="button" class="icon-btn danger" data-reminder-remove title="Remove notification">
+        ${lucide('trash', 14)}
+      </button>
+    </div>
+  `;
+}
+
+function allDayReminderDayLabel(days) {
+  if (days <= 0) return 'At the start of the day';
+  if (days === 1) return 'The day before';
+  if (days === 7) return 'A week before';
+  return `${days} days before`;
+}
+
+/**
+ * Wires up the notifications box.
+ *
+ * @returns {{setAllDay(boolean): void, touched(): boolean}|undefined}
+ *   `setAllDay` re-renders the rows for the other event kind — the
+ *   editor calls it when the All-day switch flips.
+ */
 function setupRemindersEditor(modal, ev = {}, {
   editingExisting = false,
 } = {}) {
   const box = modal.querySelector('[data-reminders-box]');
   const list = modal.querySelector('[data-reminders-list]');
-  if (!box || !list) return;
+  if (!box || !list) return undefined;
+
+  let allDay = box.dataset.allDay === '1';
+
+  /*
+    Whether the user has said anything about notifications on this event.
+    Untouched rows are still just our defaults, so flipping All-day may
+    replace them outright; once the user has changed something, their
+    values are converted rather than discarded.
+  */
+  let touched = false;
+
+  const markTouched = () => { touched = true; };
 
   const refreshDeviceList = () => {
     const host = box.querySelector('[data-notification-devices]');
@@ -563,9 +711,30 @@ function setupRemindersEditor(modal, ev = {}, {
       if (custom) custom.hidden = !isCustom;
       if (unit) unit.hidden = !isCustom;
       if (!isCustom && custom) custom.value = e.target.value;
+      markTouched();
     });
 
+    /*
+      All-day rows: day 0 is the start of the day, which is 00:00 by
+      definition — a time field there could only ask for an offset after
+      the event has started, which the stored format cannot express.
+    */
+    row.querySelector('[data-reminder-days]')?.addEventListener('change', (e) => {
+      const time = row.querySelector('[data-reminder-time]');
+      const unit = row.querySelector('.yanta-calendar-reminder-unit');
+      const atStart = Number(e.target.value) <= 0;
+
+      if (time) time.hidden = atStart;
+      if (unit) unit.hidden = atStart;
+      markTouched();
+    });
+
+    row.querySelector('[data-reminder-time]')?.addEventListener('change', markTouched);
+    row.querySelector('[data-reminder-custom]')?.addEventListener('input', markTouched);
+    row.querySelector('[data-reminder-enabled]')?.addEventListener('change', markTouched);
+
     row.querySelector('[data-reminder-remove]')?.addEventListener('click', () => {
+      markTouched();
       row.remove();
       renderEmptyState();
     });
@@ -573,29 +742,88 @@ function setupRemindersEditor(modal, ev = {}, {
 
   list.querySelectorAll('[data-reminder-row]').forEach(bindRow);
 
-  box.querySelector('[data-reminder-add]')?.addEventListener('click', () => {
-    list.querySelector('.yanta-calendar-reminders-empty')?.remove();
-
-    const currentCount = list.querySelectorAll('[data-reminder-row]').length;
-    const preset =
-      currentCount === 0
-        ? CALENDAR_REMINDER_PRESETS[1]
-        : currentCount === 1
-          ? CALENDAR_REMINDER_PRESETS[3]
-          : CALENDAR_REMINDER_PRESETS[4];
-
+  const appendRow = (minutesBefore) => {
     const wrap = document.createElement('template');
+
     wrap.innerHTML = reminderRowHtml({
       id: `rem_${uid()}`,
-      label: preset.label,
-      minutesBefore: preset.minutesBefore,
+      label: reminderLabelForMinutes(minutesBefore, { allDay }),
+      minutesBefore,
       enabled: true,
-    }).trim();
+    }, { allDay }).trim();
 
     const row = wrap.content.firstElementChild;
     list.append(row);
     bindRow(row);
+
+    return row;
+  };
+
+  /*
+    Each added notification lands further from the event than the last, so
+    tapping "Add" twice gives a useful ladder instead of two rows the user
+    has to edit apart.
+  */
+  const nextOffsetForCount = (count) => {
+    if (allDay) {
+      const days = ALLDAY_REMINDER_DAY_OPTIONS[
+        Math.min(count + 1, ALLDAY_REMINDER_DAY_OPTIONS.length - 1)
+      ];
+
+      return joinAllDayReminder(days, ALLDAY_REMINDER_DEFAULT_TIME_MINUTES);
+    }
+
+    const preset =
+      count === 0
+        ? CALENDAR_REMINDER_PRESETS[1]
+        : count === 1
+          ? CALENDAR_REMINDER_PRESETS[3]
+          : CALENDAR_REMINDER_PRESETS[4];
+
+    return preset.minutesBefore;
+  };
+
+  box.querySelector('[data-reminder-add]')?.addEventListener('click', () => {
+    list.querySelector('.yanta-calendar-reminders-empty')?.remove();
+
+    markTouched();
+    appendRow(nextOffsetForCount(list.querySelectorAll('[data-reminder-row]').length));
   });
+
+  /**
+   * Re-renders the rows for the other event kind.
+   *
+   * Untouched rows are still our defaults, so they are replaced with the
+   * ones that make sense for the new kind — that is what turns
+   * "10 minutes before" into "the day before at 09:00" the moment All-day
+   * is switched on. Rows the user edited are converted instead: the offset
+   * is kept and simply re-presented in the other vocabulary, so nothing
+   * they typed is thrown away behind their back.
+   */
+  const setAllDay = (nextAllDay) => {
+    if (!!nextAllDay === allDay) return;
+
+    const existing = readRemindersFromModal(modal, { allDay });
+
+    allDay = !!nextAllDay;
+    box.dataset.allDay = allDay ? '1' : '0';
+
+    const next = touched
+      ? existing
+      : defaultCalendarRemindersForEvent({ allDay });
+
+    list.replaceChildren();
+
+    for (const reminder of next) {
+      const toggle = appendRow(reminder.minutesBefore)
+        ?.querySelector('[data-reminder-enabled]');
+
+      if (toggle) toggle.checked = reminder.enabled !== false;
+    }
+
+    renderEmptyState();
+    refreshDeviceList();
+  };
 
   box.querySelector('[data-native-notification-permission]')?.addEventListener('click', () => {
     window.yantaAndroidBridge?.requestNotifications?.();
@@ -621,23 +849,42 @@ function setupRemindersEditor(modal, ev = {}, {
     The observer unhooks itself once this editor DOM is replaced.
   */
   observeNotificationSyncStatus(refreshDeviceList, () => box.isConnected);
+
+  return {
+    setAllDay,
+    touched: () => touched,
+  };
 }
 
-function readRemindersFromModal(modal) {
+function readRemindersFromModal(modal, { allDay } = {}) {
+  const box = modal.querySelector('[data-reminders-box]');
+  const isAllDay = allDay === undefined
+    ? box?.dataset.allDay === '1'
+    : !!allDay;
+
   return [...modal.querySelectorAll('[data-reminder-row]')]
     .map((row) => {
-      const preset = row.querySelector('[data-reminder-preset]')?.value || '10';
-      const customValue = row.querySelector('[data-reminder-custom]')?.value || '0';
-      const minutesBefore = preset === 'custom'
-        ? Number(customValue)
-        : Number(preset);
+      const minutesBefore = isAllDay
+        ? joinAllDayReminder(
+            row.querySelector('[data-reminder-days]')?.value || 0,
+            clockToMinutes(
+              row.querySelector('[data-reminder-time]')?.value,
+              ALLDAY_REMINDER_DEFAULT_TIME_MINUTES
+            )
+          )
+        : (() => {
+            const preset = row.querySelector('[data-reminder-preset]')?.value || '10';
+            const customValue = row.querySelector('[data-reminder-custom]')?.value || '0';
+
+            return preset === 'custom' ? Number(customValue) : Number(preset);
+          })();
 
       return normalizeCalendarReminder({
         id: row.dataset.reminderId || `rem_${minutesBefore}_${uid()}`,
         minutesBefore,
-        label: reminderLabelForMinutes(minutesBefore),
+        label: reminderLabelForMinutes(minutesBefore, { allDay: isAllDay }),
         enabled: !!row.querySelector('[data-reminder-enabled]')?.checked,
-      });
+      }, { allDay: isAllDay });
     })
     .filter(Boolean);
 }
@@ -11343,7 +11590,7 @@ function openEventEditor(input = {}) {
       pickerTitle: 'Pick start date/time',
       onInput: () => updateDatePreviews(),
       onChange: () => {
-        autoFillEndFromStart();
+        syncEndToStart();
         updateDatePreviews();
       },
       onPicker: () => openPickerForField('start'),
@@ -11504,6 +11751,13 @@ function openEventEditor(input = {}) {
 
   let endTouched = !!endField.value.trim();
 
+  /*
+    Set further down by setupRemindersEditor(). The All-day handler is
+    registered before that call and only ever reaches it on a user
+    interaction, so a null here just means "nothing to convert yet".
+  */
+  let remindersEditor = null;
+
   const updateDatePreviews = () => {
     const allDay = !!allDayInput?.checked;
 
@@ -11570,6 +11824,67 @@ function openEventEditor(input = {}) {
     updateDatePreviews();
   };
 
+  /**
+   * Moves an end that the new start just invalidated.
+   *
+   * Picking 15:00 for a meeting that ended at 10:30 used to leave the
+   * editor in an error state the user had to clear by hand, on a field
+   * they had not touched. Instead the end follows, in the two steps that
+   * match what people actually mean:
+   *
+   *   1. keep the clock time, move it onto the start's day —
+   *      "10:30, but of course the new day";
+   *   2. if that is still not after the start, 30 minutes after it.
+   *
+   * All-day events have no clock, so there only step 1 applies: an end
+   * date before the start date collapses onto the start.
+   *
+   * Only ever runs on a start change. Typing an end earlier than the
+   * start is a statement about the end, and gets the validation message
+   * rather than a value the user did not ask for.
+   */
+  const repairEndAfterStartChange = () => {
+    const allDay = !!allDayInput?.checked;
+
+    const startIso = parseCalendarEditorInput(startField.value, allDay);
+    const endIso = parseCalendarEditorInput(endField.value, allDay);
+
+    if (!startIso || !endField.value.trim() || !endIso) return;
+
+    const startDate = dateLikeToLocalDate(startIso);
+    const endDate = dateLikeToLocalDate(endIso);
+
+    if (!startDate || !endDate) return;
+
+    if (allDay) {
+      if (startOfLocalDay(endDate).getTime() >= startOfLocalDay(startDate).getTime()) return;
+
+      endField.value = calendarEditorInputValue(startIso, true);
+      updateDatePreviews();
+      return;
+    }
+
+    if (endDate.getTime() > startDate.getTime()) return;
+
+    const moved = new Date(startDate);
+    moved.setHours(endDate.getHours(), endDate.getMinutes(), 0, 0);
+
+    const nextIso = moved.getTime() > startDate.getTime()
+      ? moved.toISOString()
+      : addMinutesIso(startIso, 30);
+
+    if (!nextIso) return;
+
+    endField.value = calendarEditorInputValue(nextIso, false);
+    updateDatePreviews();
+  };
+
+  /** Everything the end field owes the start field after a start change. */
+  const syncEndToStart = () => {
+    autoFillEndFromStart();
+    repairEndAfterStartChange();
+  };
+
   const readPatchFromModal = () => {
     const allDay = !!modal.querySelector('[data-field="allDay"]')?.checked;
     const nextRecurrence = readRecurrenceFromModal(modal);
@@ -11601,7 +11916,7 @@ function openEventEditor(input = {}) {
       _appearanceTouched: appearanceTouched,
 
       recurrence: nextRecurrence,
-      reminders: readRemindersFromModal(modal),
+      reminders: readRemindersFromModal(modal, { allDay }),
       recurrenceExceptions: nextRecurrence
         ? (ev.recurrenceExceptions || [])
         : [],
@@ -11697,7 +12012,7 @@ function openEventEditor(input = {}) {
           ? calendarEditorInputValue(iso, nextAllDay)
           : '';
         if (which === 'start') {
-          autoFillEndFromStart();
+          syncEndToStart();
         }
         updateDatePreviews();
       },
@@ -11751,6 +12066,11 @@ function openEventEditor(input = {}) {
       startField.value = calendarEditorInputValue(startIso, true);
       endField.value = endIso ? calendarEditorInputValue(endIso, true) : '';
     }
+    /*
+      "10 minutes before" on an all-day event means 23:50 the night before —
+      a lead time nobody chose. The notifications follow the switch.
+    */
+    remindersEditor?.setAllDay(allDay);
     updateDatePreviews();
   });
 
@@ -11895,7 +12215,7 @@ function openEventEditor(input = {}) {
   });
 
   setupRecurrenceEditor(modal, ev);
-  setupRemindersEditor(modal, ev, { editingExisting });
+  remindersEditor = setupRemindersEditor(modal, ev, { editingExisting });
 
   renderNoteSection();
   updateDatePreviews();

@@ -98,6 +98,13 @@ export function sanitizeNoteMeta(note) {
     archived: note.archived === true ? true : undefined,
     system: note.system === true ? true : undefined,
     aiBrain: note.aiBrain === true ? true : undefined,
+
+    // Provenance. Must travel: a note written by a background run has to
+    // look AI-written on every device, not only the one that made it.
+    aiGenerated: note.aiGenerated === true ? true : undefined,
+    aiSource: note.aiGenerated === true && note.aiSource
+      ? String(note.aiSource)
+      : undefined,
     dashboardHidden: note.dashboardHidden === true ? true : undefined,
     hiddenFromDashboard: note.hiddenFromDashboard === true ? true : undefined,
 

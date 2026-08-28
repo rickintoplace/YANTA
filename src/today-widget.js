@@ -178,6 +178,52 @@ function injectCss() {
 
   overflow-wrap: anywhere;
 }
+
+/*
+  Pulse entries: same row, visibly not the user's own. Only the headline
+  is shown — the formatted result already lives in the Pulse widget.
+*/
+.yanta-today-row.is-ai .yanta-today-text {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.yanta-today-ai-badge {
+  flex: 0 0 auto;
+  align-self: center;
+
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+
+  padding: 1px 6px 1px 5px;
+
+  border-radius: 999px;
+
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  color: var(--accent);
+
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+
+.yanta-today-ai-badge svg {
+  width: 11px;
+  height: 11px;
+}
+
+.yanta-today-ai-headline {
+  min-width: 0;
+
+  color: var(--text-dim);
+
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 `;
 
   document.head.append(style);
@@ -250,7 +296,7 @@ async function renderEntries(body) {
 
   for (const entry of entries.slice(-MAX_ROWS)) {
     const row = el('div', {
-      class: 'yanta-today-row',
+      class: 'yanta-today-row' + (entry.ai ? ' is-ai' : ''),
       role: 'button',
       tabindex: '0',
       onclick: open,
@@ -262,9 +308,29 @@ async function renderEntries(body) {
       },
     });
 
+    const text = el('span', { class: 'yanta-today-text' });
+
+    if (entry.ai) {
+      const badge = el('span', {
+        class: 'yanta-today-ai-badge',
+        title: entry.routine
+          ? t('today.aiEntryFrom', { routine: entry.routine })
+          : t('today.aiEntry'),
+      });
+
+      badge.innerHTML = `${lucide('sparkles', 11)}<span>${escapeHtml(t('today.aiBadge'))}</span>`;
+
+      text.append(
+        badge,
+        el('span', { class: 'yanta-today-ai-headline' }, previewText(entry.text)),
+      );
+    } else {
+      text.textContent = previewText(entry.text);
+    }
+
     row.append(
       el('span', { class: 'yanta-today-time' }, entry.time || '·'),
-      el('span', { class: 'yanta-today-text' }, previewText(entry.text)),
+      text,
     );
 
     rows.push(row);

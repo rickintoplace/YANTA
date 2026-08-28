@@ -2210,6 +2210,23 @@ color-mix(in srgb, var(--accent) 36%, transparent);
   color: var(--ok, #4ade80);
 }
 
+/* Written by a background run, not by the user. */
+.yanta-dash-ai-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+
+  width: 18px;
+  height: 18px;
+  margin-left: 4px;
+
+  border-radius: 999px;
+
+  color: var(--accent, #6ea8fe);
+  background: color-mix(in srgb, var(--accent, #6ea8fe) 14%, transparent);
+}
+
 /* ===========================================================
    Sharing strip
    Wer sieht diese Karte — und wer hat zuletzt daran gearbeitet.

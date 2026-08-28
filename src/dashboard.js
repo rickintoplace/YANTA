@@ -3545,6 +3545,21 @@ function renderCardHeader(item) {
 
   head.append(icon, title);
 
+  /*
+    Provenance, at a glance. A reading list a routine assembled and a note
+    the user wrote by hand were indistinguishable on the dashboard, which
+    made the whole grid feel less trustworthy than it is.
+  */
+  if (item.kind === 'note' && item.note?.aiGenerated) {
+    const ai = el('span', {
+      class: 'yanta-dash-ai-badge',
+      title: aiProvenanceTitle(item.note),
+    });
+
+    ai.innerHTML = lucide('sparkles', 12);
+    head.append(ai);
+  }
+
   if (item.kind === 'folder') {
     const share = folderShareStatus(item.folder);
 
@@ -3569,6 +3584,18 @@ function renderCardHeader(item) {
   }
 
   return head;
+}
+
+/**
+ * Tooltip for the AI badge. Names the routine when the note records one,
+ * so "why is this here" is answerable without opening anything.
+ */
+function aiProvenanceTitle(note) {
+  const routine = /^pulse:(.+)$/.exec(String(note?.aiSource || ''))?.[1]?.trim();
+
+  return routine
+    ? i18n('dashboard.aiGeneratedBy', { routine })
+    : i18n('dashboard.aiGenerated');
 }
 
 /**

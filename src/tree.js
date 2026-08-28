@@ -2342,6 +2342,20 @@ function noteRow(n, depth = 0, {
     }
   }
 
+  if (n.aiGenerated) {
+    const routine = /^pulse:(.+)$/.exec(String(n.aiSource || ''))?.[1]?.trim();
+
+    const aiDot = el('span', {
+      class: 'ai-generated-dot',
+      title: routine
+        ? t('dashboard.aiGeneratedBy', { routine })
+        : t('dashboard.aiGenerated'),
+    });
+
+    aiDot.innerHTML = lucide('sparkles', 11);
+    row.append(aiDot);
+  }
+
   if (isPublicShareActive(publicShareStateForNote(n.id))) {
     const publicDot = el('span', {
       class: 'public-share-dot',

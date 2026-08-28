@@ -139,6 +139,40 @@ export async function setPulseOutputLocale(code) {
   return clean;
 }
 
+const OUTPUT_FOLDER_KEY = 'outputFolderId';
+
+/**
+ * The folder every note a background run creates is filed into.
+ *
+ * Shared-document state for the same reason as the output language: the
+ * folder is a property of the vault, and which device happened to be
+ * awake when a routine ran must not decide where its notes land.
+ *
+ * Empty means "not chosen yet" — pulse-output.js then creates and
+ * records the default "Pulse" folder on first use.
+ */
+export async function getPulseOutputFolderId() {
+  const { config } = await maps();
+
+  return String(config.get(OUTPUT_FOLDER_KEY) || '').trim();
+}
+
+export async function setPulseOutputFolderId(folderId) {
+  const { config } = await maps();
+  const clean = String(folderId || '').trim();
+
+  if (clean === String(config.get(OUTPUT_FOLDER_KEY) || '')) return clean;
+
+  config.set(OUTPUT_FOLDER_KEY, clean);
+  await touchPulseNote();
+
+  window.dispatchEvent(new CustomEvent('yanta-pulse-settings-changed', {
+    detail: { outputFolderId: clean },
+  }));
+
+  return clean;
+}
+
 // ---------------- run state ---------------------------------------
 
 export async function getRoutineState(name, now = Date.now()) {

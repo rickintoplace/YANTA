@@ -12,6 +12,7 @@
 
 import {
   el,
+  state,
   toast,
 } from '../core.js';
 
@@ -40,7 +41,46 @@ import { listRoutines } from './pulse-routines.js';
 import {
   getPulseOutputLocale,
   setPulseOutputLocale,
+  getPulseOutputFolderId,
+  setPulseOutputFolderId,
 } from './pulse-store.js';
+
+import { findPulseOutputFolder } from './pulse-output.js';
+
+import { folderPathIds, folderPathNames, isFolderInTrash } from '../trash.js';
+
+const AUTO_FOLDER_VALUE = '';
+
+/**
+ * Every folder a routine could file into, deepest path spelled out so two
+ * folders called "Reading" are told apart.
+ *
+ * System folders are left out: the AI Brain and its Skills folder steer
+ * every later run, and a reading list dropped in there would be read back
+ * as instructions. Shared folders are out too — a background run must not
+ * publish to other people without anyone having said so.
+ */
+function isSelectableOutputFolder(folder) {
+  return !!folder &&
+    !isFolderInTrash(folder) &&
+    !folder.spaceId &&
+    folder.system !== true &&
+    folder.aiBrain !== true &&
+    !folderPathIds(folder.id).some((id) => {
+      const ancestor = state.folders.get(id);
+      return ancestor?.system === true || ancestor?.aiBrain === true;
+    });
+}
+
+function outputFolderOptions() {
+  return [...state.folders.values()]
+    .filter(isSelectableOutputFolder)
+    .map((folder) => ({
+      value: folder.id,
+      label: folderPathNames(folder.id).join(' / '),
+    }))
+    .sort((a, b) => a.label.localeCompare(b.label));
+}
 
 function group(title) {
   const wrap = el('div', { class: 'yanta-settings-group' });
@@ -132,6 +172,7 @@ export function pulseSettingsElement() {
   const render = async () => {
     const settings = await getPulseSettings();
     const outputLocale = await getPulseOutputLocale().catch(() => '');
+    const outputFolderId = await getPulseOutputFolderId().catch(() => '');
     const allowance = await getPulseAllowance();
     const { active } = partitionByAllowance(await listRoutines(), allowance);
 
@@ -184,6 +225,38 @@ export function pulseSettingsElement() {
     language.append(el('div', { class: 'yanta-settings-toggle-hint' }, t('pulse.settings.languageHint')));
 
     fragment.append(language);
+
+    // ---- where notes a routine creates are filed ----
+    //
+    // Only notes. `output: [journal]` means "today's note" by definition,
+    // and pointing that somewhere else would make the output meaningless —
+    // those entries carry the Pulse marker instead.
+    const output = group(t('pulse.settings.outputFolder'));
+
+    const outputRow = el('div');
+    outputRow.style.cssText = 'display:flex;align-items:center;gap:10px;flex-wrap:wrap;';
+
+    const currentFolder = await findPulseOutputFolder();
+
+    outputRow.append(
+      el('span', { class: 'yanta-settings-toggle-hint' }, t('pulse.settings.outputFolderLabel')),
+      selectField(
+        currentFolder && outputFolderId ? currentFolder.id : AUTO_FOLDER_VALUE,
+        [
+          { value: AUTO_FOLDER_VALUE, label: t('pulse.settings.outputFolderAuto') },
+          ...outputFolderOptions(),
+        ],
+        async (value) => {
+          await setPulseOutputFolderId(value);
+          onChange();
+        },
+      ),
+    );
+
+    output.append(outputRow);
+    output.append(el('div', { class: 'yanta-settings-toggle-hint' }, t('pulse.settings.outputFolderHint')));
+
+    fragment.append(output);
 
     // ---- quiet hours ----
     const quiet = group(t('pulse.settings.quietHours'));

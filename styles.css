@@ -4421,8 +4421,28 @@ input.yanta-task-checkbox {
 
 /* Public share indicators */
 .public-share-dot,
-.live-dot {
+.live-dot,
+.ai-generated-dot {
   flex: 0 0 auto;
+}
+
+/*
+  Tree marker for notes a Pulse routine wrote. Same shape language as the
+  share dots — the sidebar already teaches "small round chip = something
+  about this note you should know".
+*/
+.ai-generated-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+
+  width: 17px;
+  height: 17px;
+
+  border-radius: 999px;
+
+  color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 
 .public-share-dot {

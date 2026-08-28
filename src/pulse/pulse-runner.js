@@ -44,6 +44,14 @@ import {
 } from './pulse-config.js';
 
 import { readSensors } from './pulse-sensors.js';
+import { prefetchForRoutine } from './pulse-prefetch.js';
+
+import {
+  PULSE_NOTE_CREATING_TOOLS,
+  ensurePulseOutputFolder,
+  markNoteAiGenerated,
+  noteIdsFromToolResult,
+} from './pulse-output.js';
 
 import {
   toolsForProfile,
@@ -147,7 +155,7 @@ async function buildRunSystemMessage(routine) {
   };
 }
 
-function buildRunUserMessage(routine, sensors, now) {
+function buildRunUserMessage(routine, sensors, prefetched, now) {
   const localNow = describeLocalNow(now);
 
   return {
@@ -164,8 +172,14 @@ function buildRunUserMessage(routine, sensors, now) {
         ? `# What the sensors detected since the last run\n${sensors.summary}`
         : '# Sensors\nNo specific change was detected. Run the routine on the current state.',
       '',
+      // Only worth saying when it is true: a routine told "sources are
+      // current" while the fetch quietly failed would call day-old
+      // articles new.
+      prefetched.rss?.fetched
+        ? '# Sources\nThe feeds were fetched moments ago, so what the RSS tools return is current.'
+        : '',
       'Follow the routine above and deliver the result with pulse_emit, or stay silent.',
-    ].join('\n'),
+    ].filter(Boolean).join('\n'),
   };
 }
 
@@ -188,7 +202,7 @@ async function deliver(routine, run, { title, body }) {
   if (outputs.has(PULSE_OUTPUTS.JOURNAL)) {
     await captureToJournal(
       [`**${title}**`, body].filter(Boolean).join('\n'),
-      { source: `pulse:${routine.name}` }
+      { source: `pulse:${routine.name}`, ai: true }
     ).catch((err) => console.warn('[YANTA Pulse] journal write failed', err));
 
     delivered.push(PULSE_OUTPUTS.JOURNAL);
@@ -225,6 +239,34 @@ async function deliver(routine, run, { title, body }) {
 }
 
 /**
+ * Points a note-creating tool call at the Pulse output folder.
+ *
+ * A background run has no user to pick a destination, and the tool
+ * defaults — the feed's folder, the vault root — put AI output straight
+ * into the user's own filing. An explicit `folderId` from the routine is
+ * left alone: a routine that says where its notes go means it.
+ *
+ * Mutates `call.function.arguments`, which is what executeToolCall
+ * re-parses; `args` is only the pre-parsed copy the hook was handed.
+ */
+async function fileIntoPulseFolder({ name, args, call }) {
+  if (!PULSE_NOTE_CREATING_TOOLS.includes(name)) return;
+  if (args.folderId) return;
+
+  try {
+    const folder = await ensurePulseOutputFolder();
+    if (!folder) return;
+
+    call.function.arguments = JSON.stringify({
+      ...args,
+      folderId: folder.id,
+    });
+  } catch (err) {
+    console.warn('[YANTA Pulse] could not resolve the output folder', err);
+  }
+}
+
+/**
  * Runs one routine end to end.
  *
  * @param {object} routine  from pulse-routines.js
@@ -239,6 +281,13 @@ export async function runRoutine(routine, {
   const now = Date.now();
   const settings = await getPulseSettings();
   const routineState = await getRoutineState(routine.name, now);
+
+  // Pull the sources this routine reads before anyone looks at them.
+  // Feeds are otherwise only fetched at app startup, so a run on a
+  // long-lived tab reported yesterday's articles as "new overnight".
+  // Must happen before readSensors(): the rss-new sensor reads the same
+  // cache and would otherwise gate the run on stale data.
+  const prefetched = await prefetchForRoutine(routine);
 
   const sensors = routine.events.length
     ? await readSensors(routine.events, routineState.lastRunAt, now)
@@ -271,7 +320,7 @@ export async function runRoutine(routine, {
     loop = await runAgentLoop({
       messages: [
         await buildRunSystemMessage(routine),
-        buildRunUserMessage(routine, sensors, now),
+        buildRunUserMessage(routine, sensors, prefetched, now),
       ],
       tools: toolsForProfile(profile, { permissions }),
       maxRounds,
@@ -279,9 +328,21 @@ export async function runRoutine(routine, {
       permissions,
       source: `pulse:${routine.name}`,
       budgetSource: 'pulse',
-      beforeToolCall: ({ name, args }) => {
-        if (!isPulseTool(name)) return undefined;
-        return { result: handlePulseTool({ name, args, run }) };
+      beforeToolCall: async ({ name, args, call }) => {
+        if (isPulseTool(name)) {
+          return { result: handlePulseTool({ name, args, run }) };
+        }
+
+        await fileIntoPulseFolder({ name, args, call });
+
+        return undefined;
+      },
+      onToolResult: async ({ name, result }) => {
+        if (!PULSE_NOTE_CREATING_TOOLS.includes(name)) return;
+
+        for (const noteId of noteIdsFromToolResult(result)) {
+          await markNoteAiGenerated(noteId, `pulse:${routine.name}`);
+        }
       },
     });
   } catch (err) {

@@ -11,19 +11,17 @@
 
 import { WebrtcProvider } from 'y-webrtc';
 import { getNoteDoc } from './yjs.js';
+import { DEFAULT_SIGNALING as RELAY } from './signaling.js';
 
-// Public signaling servers maintained by the y-webrtc project.
-// Users can override via settings (see core.js settings.signalingServers).
-// Also used as a lightweight pub/sub "poke" channel by shared spaces.
-export const DEFAULT_SIGNALING = [
-  'wss://yanta-signaling-932960946294.europe-west1.run.app/'
-];
+// YANTA's own relay (see signaling.js). Users can override via
+// settings (see core.js settings.signalingServers).
+export { DEFAULT_SIGNALING } from './signaling.js';
 
 export function createWebRTCProvider({ noteId, room, password, signaling }) {
   const { doc } = getNoteDoc(noteId);
 
   const provider = new WebrtcProvider(room, doc, {
-    signaling: signaling && signaling.length ? signaling : DEFAULT_SIGNALING,
+    signaling: signaling && signaling.length ? signaling : RELAY,
     password,
     maxConns: 20,
     filterBcConns: true,

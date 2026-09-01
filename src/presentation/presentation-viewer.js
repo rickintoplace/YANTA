@@ -29,9 +29,7 @@ import {
   isSlideFrameElement,
 } from '../slides/slides-model.js';
 
-const SIGNALING_URL =
-  import.meta.env.VITE_YANTA_SIGNALING_URL ||
-  'wss://yanta-signaling-932960946294.europe-west1.run.app';
+import { SIGNALING_URL, keepSignalingAlive } from '../signaling.js';
 
 let payload = null;
 let sessionResponse = null;
@@ -423,6 +421,8 @@ function connectSocket() {
   if (!sig?.topic || !sig?.token) return;
 
   ws = new WebSocket(SIGNALING_URL);
+
+  keepSignalingAlive(ws);
 
   ws.addEventListener('open', () => {
     ws.send(JSON.stringify({

@@ -4,6 +4,12 @@ compatibility_date = "2025-01-01"
 
 workers_dev = true
 
+# IMPORTANT: this block is the single source of truth for the Worker's
+# plain-text vars. `wrangler deploy` replaces ALL of them with what is
+# here — a var set only in the Cloudflare dashboard is silently wiped
+# on the next deploy. Add new vars here, never only in the dashboard.
+# (Secrets are separate and survive deploys; set them with
+# `wrangler secret put`.)
 [vars]
 APP_ORIGIN = "https://yanta.page"
 APP_NAME = "YANTA"
@@ -23,6 +29,20 @@ MATRIX_SERVER_NAME = "yanta.me"
 # Optional: set to "1" if /register/available is not exposed by the HS.
 MATRIX_SKIP_AVAILABLE_CHECK = "0"
 
+# Matrix admin room the Worker posts deactivation commands into.
+MATRIX_ADMIN_ROOM_ID = "!RG0NROW79OwcCWkdYp:yanta.me"
+MATRIX_ADMIN_DEACTIVATE_COMMAND = "!admin users deactivate {userId}"
+
+# ---- Billing (Paddle) ----
+PADDLE_ENVIRONMENT = "live"
+PADDLE_PLUS_PRICE_IDS = "pri_01kwvmjf1473f66nkx956e04xz,pri_01kwvmhvbsjej1g13bf1pc4kgw"
+BILLING_PUBLIC_ORIGIN = "https://yanta.page"
+BILLING_GRACE_DAYS = "7"
+
+# ---- RSS fetch limits ----
+RSS_FEED_MAX_BYTES = "33554432"
+RSS_FEED_MAX_ITEMS = "20"
+
 # ---- Funnel metrics ----
 # The /metrics dashboard is gated by a single shared secret. Set it with
 #   wrangler secret put METRICS_TOKEN
@@ -38,10 +58,19 @@ MATRIX_SKIP_AVAILABLE_CHECK = "0"
 # public key is non-secret; the private key is set via `wrangler secret put
 # VAPID_PRIVATE_KEY` (JWK JSON). Generate both with scripts/gen-vapid.mjs.
 VAPID_SUBJECT = "mailto:rick@yanta.page"
-VAPID_PUBLIC_KEY = ""
+VAPID_PUBLIC_KEY = "BNai7PuwggIL7_0ONauV_Ke8V6MdD3fRoeaAnQJ9W8PhiybErg8j5tIdXaFQPj_Lle79Pu4tyrL_QMfvkqSdAqw"
 # URL the Matrix homeserver posts chat pushes to (this Worker, direct — not
 # via the Vercel /cloud-api proxy). Set to the deployed worker origin.
 PUSH_GATEWAY_URL = "https://yanta-cloud.rickintoplace.workers.dev/_matrix/push/v1/notify"
+
+# ---- Signaling relay ----
+# Comma-separated origins allowed to open a relay WebSocket
+# (/relay). "https://*.vercel.app" style wildcards are supported.
+# Leave empty to allow every origin, which is how the old Cloud Run
+# relay behaved — the allowlist only keeps other sites from using
+# the relay for free, it is not what protects payloads (topics are
+# unguessable and the content is end-to-end encrypted).
+RELAY_ALLOWED_ORIGINS = "https://yanta.page,https://www.yanta.page,https://*.vercel.app,http://localhost:5173,http://localhost:4173,http://127.0.0.1:5173,http://127.0.0.1:4173,https://localhost,capacitor://localhost,ionic://localhost"
 
 # Fire scheduled calendar reminder pushes every minute.
 [triggers]
@@ -55,3 +84,15 @@ database_id = "30d0c5f8-22fb-41bf-beef-dd8b3dfba245"
 [[r2_buckets]]
 binding = "OBJECTS"
 bucket_name = "yanta-cloud-objects"
+
+# ---- Signaling relay (Durable Object) ----
+# Replaces the Cloud Run WebSocket relay. Hibernatable sockets are
+# not billed while idle, and client pings are answered by the
+# runtime without waking the object (see src/signal-relay.js).
+[[durable_objects.bindings]]
+name = "SIGNAL_RELAY"
+class_name = "SignalRelay"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["SignalRelay"]

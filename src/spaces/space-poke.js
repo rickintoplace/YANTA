@@ -11,7 +11,7 @@
 // best-effort: engines keep a slow polling fallback regardless.
 // ============================================================
 
-import { DEFAULT_SIGNALING } from '../providers.js';
+import { DEFAULT_SIGNALING } from '../signaling.js';
 
 const RECONNECT_MIN_MS = 1_000;
 const RECONNECT_MAX_MS = 60_000;

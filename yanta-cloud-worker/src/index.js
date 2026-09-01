@@ -1,3 +1,5 @@
+import { SignalRelay, RELAY_PATH, RELAY_STATS_PATH, handleRelayRequest } from "./signal-relay.js";
+
 var __defProp = Object.defineProperty;
 var __name = (target, value) => __defProp(target, "name", { value, configurable: true });
 
@@ -8771,6 +8773,14 @@ async function handleMetricsSummary(env, req, url, headers) {
 }
 
 async function route(req, env) {
+  const url = new URL(req.url);
+
+  // The relay speaks WebSocket, not the JSON API: no CORS preflight,
+  // and its own origin rule (see signal-relay.js).
+  if (url.pathname === RELAY_PATH || url.pathname === RELAY_STATS_PATH) {
+    return handleRelayRequest(req, env, url);
+  }
+
   const headers = corsHeaders(env, req);
   if (!originAllowed(env, req)) {
     return json({ error: "origin_not_allowed" }, 403, headers);
@@ -8778,7 +8788,6 @@ async function route(req, env) {
   if (req.method === "OPTIONS") {
     return new Response(null, { status: 204, headers });
   }
-  const url = new URL(req.url);
   try {
     if (url.pathname === "/" || url.pathname === "/healthz") {
       return text("ok\n", 200, headers);
@@ -9096,6 +9105,7 @@ var index_default = {
   }
 };
 export {
-  index_default as default
+  index_default as default,
+  SignalRelay
 };
 //# sourceMappingURL=index.js.map

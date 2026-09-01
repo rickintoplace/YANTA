@@ -49,9 +49,7 @@ import {
   yantaConfirm,
 } from '../dialogs.js';
 
-const SIGNALING_URL =
-  import.meta.env.VITE_YANTA_SIGNALING_URL ||
-  'wss://yanta-signaling-932960946294.europe-west1.run.app';
+import { SIGNALING_URL, keepSignalingAlive } from '../signaling.js';
 
 let modal = null;
 let releaseSession = null;
@@ -531,6 +529,8 @@ function openOwnerSocket() {
   closeOwnerSocket();
 
   ownerSocket = new WebSocket(SIGNALING_URL);
+
+  keepSignalingAlive(ownerSocket);
 
   ownerSocket.addEventListener('open', () => {
     ownerSocket.send(JSON.stringify({

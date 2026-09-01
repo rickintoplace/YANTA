@@ -32,10 +32,39 @@ Your notes are encrypted on your device before they sync anywhere. YANTA Cloud (
 | Path | What it is |
 | --- | --- |
 | `src/` | The web app (vanilla JS + Vite; React only where Excalidraw needs it) |
-| `yanta-cloud-worker/` | Cloudflare Worker: accounts, encrypted object storage (D1/R2), public shares, shared spaces, billing webhooks |
-| `signaling/` | WebRTC signaling server for live collaboration |
+| `yanta-cloud-worker/` | Cloudflare Worker: accounts, encrypted object storage (D1/R2), public shares, shared spaces, billing webhooks, signaling relay (`/relay`) |
+| `signaling/` | Standalone signaling server (legacy). The relay now runs as a Durable Object in the Worker; this stays as a self-hosting option |
 | `sync-broker/` | Generic encrypted-object sync broker (self-hostable storage backend) |
 | `yanta-agent-bridge/` | Local bridge for driving the app in automated tests |
+
+## Deploying the Cloud Worker
+
+```sh
+cd yanta-cloud-worker && npm run deploy
+```
+
+The wrapper (`scripts/deploy-worker.sh`) handles three traps:
+
+- **Auth.** Uses `CLOUDFLARE_API_TOKEN` if set, else `~/.config/yanta/cloudflare-token`,
+  else the stored OAuth login. An API token (dashboard → My Profile → API Tokens →
+  template *Edit Cloudflare Workers*) needs no browser and does not expire —
+  the recommended setup: `set -Ux CLOUDFLARE_API_TOKEN <token>` (fish), or drop
+  the token into that file.
+- **The OAuth callback.** wrangler binds `[::1]:8976` only; browsers that resolve
+  `localhost` to `127.0.0.1` fail with "unable to connect". The script bridges
+  IPv4 → IPv6 for the login. By hand, replacing `localhost` with `[::1]` in the
+  callback URL does the same.
+- **Vars.** A deploy replaces *all* plain-text vars with what `wrangler.toml`
+  declares — vars set only in the dashboard are wiped silently (this cost us the
+  Paddle billing config, the VAPID public key, the Matrix admin room and the RSS
+  limits once). `scripts/check-worker-vars.mjs` diffs the live version against
+  the config and aborts the deploy if anything would be dropped or changed.
+  Run it alone with `npm run check:vars`. Secrets are a separate mechanism and
+  survive deploys; set them with `wrangler secret put`.
+
+Editing the Worker in the Cloudflare dashboard is not a supported path any more:
+the code is split across modules and the signaling relay needs a Durable Object
+migration, neither of which the dashboard editor can express.
 
 ## Development
 

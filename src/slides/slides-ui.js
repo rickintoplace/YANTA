@@ -129,9 +129,7 @@ import {
   showMenu,
 } from '../tree.js';
 
-const SIGNALING_URL =
-  import.meta.env.VITE_YANTA_SIGNALING_URL ||
-  'wss://yanta-signaling-932960946294.europe-west1.run.app';
+import { SIGNALING_URL, keepSignalingAlive } from '../signaling.js';
 
 // Overlay-history id of a running presentation, so Back/ESC exit the
 // slideshow before they touch the drawing or note underneath it.
@@ -4390,6 +4388,8 @@ function openRemotePresenterSocket() {
 
   remoteSocket = new WebSocket(SIGNALING_URL);
 
+  keepSignalingAlive(remoteSocket);
+
   remoteSocket.addEventListener('open', () => {
     remoteSocket.send(JSON.stringify({
       type: 'subscribe',
@@ -4532,6 +4532,8 @@ function mountRemoteControl(payload) {
   document.body.append(screen);
 
   const ws = new WebSocket(SIGNALING_URL);
+
+  keepSignalingAlive(ws);
 
   const send = (kind, extra = {}) => {
     if (ws.readyState !== WebSocket.OPEN) return;

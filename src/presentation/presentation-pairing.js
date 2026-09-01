@@ -25,9 +25,7 @@ import {
 
 import { openBoundOverlay } from '../overlay-history.js';
 
-const SIGNALING_URL =
-  import.meta.env.VITE_YANTA_SIGNALING_URL ||
-  'wss://yanta-signaling-932960946294.europe-west1.run.app';
+import { SIGNALING_URL, keepSignalingAlive } from '../signaling.js';
 
 let modal = null;
 let releasePairing = null;
@@ -467,6 +465,8 @@ function connectPairingSocket() {
   closeSocket();
 
   socket = new WebSocket(SIGNALING_URL);
+
+  keepSignalingAlive(socket);
 
   socket.addEventListener('open', () => {
     socket.send(JSON.stringify({

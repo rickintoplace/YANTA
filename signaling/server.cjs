@@ -1,5 +1,16 @@
 'use strict';
 
+// ============================================================
+// Standalone signaling relay (legacy / self-hosting).
+//
+// YANTA's own relay moved into the Cloud Worker as a hibernating
+// Durable Object (yanta-cloud-worker/src/signal-relay.js): a
+// container bills an open WebSocket as a running request, so idle
+// clients kept it awake around the clock. The wire protocol here
+// is identical, so this still works as a drop-in relay for
+// self-hosters — point VITE_YANTA_SIGNALING_URL at it.
+// ============================================================
+
 const http = require('http');
 const WebSocket = require('ws');
 

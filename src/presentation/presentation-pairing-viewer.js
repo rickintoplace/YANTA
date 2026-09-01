@@ -13,9 +13,7 @@ import {
   BRAND_LOGO_SVG,
 } from '../brand-logo.js';
 
-const SIGNALING_URL =
-  import.meta.env.VITE_YANTA_SIGNALING_URL ||
-  'wss://yanta-signaling-932960946294.europe-west1.run.app';
+import { SIGNALING_URL, keepSignalingAlive } from '../signaling.js';
 
 function base64UrlEncodeString(text) {
   const bytes = new TextEncoder().encode(String(text || ''));
@@ -279,6 +277,8 @@ function setStatus(message, className = '') {
 
 function connectDisplaySocket(payload) {
   const ws = new WebSocket(SIGNALING_URL);
+
+  keepSignalingAlive(ws);
 
   ws.addEventListener('open', () => {
     ws.send(JSON.stringify({

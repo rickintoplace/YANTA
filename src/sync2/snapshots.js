@@ -13,7 +13,6 @@ import * as Y from 'yjs';
 
 import {
   encryptBytes,
-  decryptBytes,
 } from './crypto.js';
 
 import {
@@ -33,6 +32,12 @@ import {
   getNoteDoc,
   encodeNoteState,
 } from '../yjs.js';
+
+import {
+  mapOrdered,
+  runSyncDownload,
+  SYNC2_DOWNLOAD_CONCURRENCY,
+} from './download-pool.js';
 
 function sortEntriesOldestFirst(entries) {
   return [...entries].sort((a, b) => {
@@ -144,21 +149,33 @@ export async function downloadVaultSnapshots(engine) {
 
   let applied = 0;
 
+  const pending = [];
+
   for (const entry of entries) {
     if (await engine.hasSeen(entry.path)) continue;
+    pending.push(entry);
+  }
 
-    const encrypted = await engine.remote.get(entry.path);
+  const seenWrites = [];
 
-    const plain = await decryptBytes(
-      engine.keys.contentKey,
-      encrypted,
-      entry.path
-    );
-
+  /*
+    Parallel fetch, sequential apply: snapshots are sorted oldest-first
+    and applied as last-write-wins vault updates, so their order decides
+    the result.
+  */
+  for await (const { item: entry, value: plain } of mapOrdered(
+    pending,
+    (item) => engine.fetchAndDecrypt(item.path),
+    {
+      limit: SYNC2_DOWNLOAD_CONCURRENCY,
+      run: runSyncDownload,
+    }
+  )) {
     engine.noteIncomingVaultBytes?.(plain);
     applyVaultUpdate(plain, 'sync2-remote');
 
-    await engine.markSeen(entry.path, {
+    seenWrites.push({
+      path: entry.path,
       type: 'vault-snapshot',
       size: entry.size,
       etag: entry.etag,
@@ -166,6 +183,8 @@ export async function downloadVaultSnapshots(engine) {
 
     applied++;
   }
+
+  await engine.markManySeen(seenWrites);
 
   return {
     applied,
@@ -194,20 +213,27 @@ export async function downloadNoteSnapshots(engine, noteId) {
 
   const { doc } = getNoteDoc(noteId);
 
+  const pending = [];
+
   for (const entry of entries) {
     if (await engine.hasSeen(entry.path)) continue;
+    pending.push(entry);
+  }
 
-    const encrypted = await engine.remote.get(entry.path);
+  const seenWrites = [];
 
-    const plain = await decryptBytes(
-      engine.keys.contentKey,
-      encrypted,
-      entry.path
-    );
-
+  for await (const { item: entry, value: plain } of mapOrdered(
+    pending,
+    (item) => engine.fetchAndDecrypt(item.path),
+    {
+      limit: SYNC2_DOWNLOAD_CONCURRENCY,
+      run: runSyncDownload,
+    }
+  )) {
     Y.applyUpdate(doc, plain, 'sync2-remote');
 
-    await engine.markSeen(entry.path, {
+    seenWrites.push({
+      path: entry.path,
       type: 'note-snapshot',
       noteId,
       size: entry.size,
@@ -216,6 +242,8 @@ export async function downloadNoteSnapshots(engine, noteId) {
 
     applied++;
   }
+
+  await engine.markManySeen(seenWrites);
 
   return {
     noteId,

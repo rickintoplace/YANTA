@@ -38,6 +38,12 @@ import {
   utf8Decode,
 } from './crypto.js';
 
+import {
+  mapOrdered,
+  runSyncDownload,
+  SYNC2_ASSET_CONCURRENCY,
+} from './download-pool.js';
+
 function cleanUndefined(obj) {
   const out = {};
 
@@ -400,6 +406,12 @@ export async function downloadMissingAssets(engine) {
   let bytesPlain = 0;
   let bytesEncrypted = 0;
 
+  /*
+    Pass 1 — decide locally what actually has to come down. remoteStat
+    reads the cached remote index, so this pass makes no network calls.
+  */
+  const pending = [];
+
   for (const assetId of ids) {
     checked++;
 
@@ -439,14 +451,44 @@ export async function downloadMissingAssets(engine) {
       continue;
     }
 
-    const encrypted = await readRemote(engine, meta.objectPath);
-    const assetKeyBytes = await unwrapAssetKeyForVault(engine, meta);
+    pending.push({
+      assetId,
+      meta,
+      stat,
+    });
+  }
 
-    const plain = await decryptAssetBlobWithRawKey(
-      assetKeyBytes,
-      encrypted,
-      meta.objectPath
-    );
+  /*
+    Pass 2 — fetch and decrypt in parallel, write to IndexedDB in order.
+    Assets are the only large payloads in a sync, so the window here is
+    deliberately smaller than for update packs.
+  */
+  const seenWrites = [];
+
+  for await (const { item, value } of mapOrdered(
+    pending,
+    async (task) => {
+      const encrypted = await readRemote(engine, task.meta.objectPath);
+      const assetKeyBytes = await unwrapAssetKeyForVault(engine, task.meta);
+
+      const plain = await decryptAssetBlobWithRawKey(
+        assetKeyBytes,
+        encrypted,
+        task.meta.objectPath
+      );
+
+      return {
+        plain,
+        encryptedLength: encrypted.byteLength,
+      };
+    },
+    {
+      limit: SYNC2_ASSET_CONCURRENCY,
+      run: runSyncDownload,
+    }
+  )) {
+    const { assetId, meta, stat } = item;
+    const { plain, encryptedLength } = value;
 
     const blob = new Blob([plain], {
       type: meta.type || 'application/octet-stream',
@@ -477,7 +519,8 @@ export async function downloadMissingAssets(engine) {
 
     state.imageBlobs.set(assetId, URL.createObjectURL(blob));
 
-    await engine.markSeen(meta.objectPath, {
+    seenWrites.push({
+      path: meta.objectPath,
       type: 'asset-blob-v2',
       assetId,
       objectId: meta.objectId,
@@ -488,8 +531,10 @@ export async function downloadMissingAssets(engine) {
 
     downloaded++;
     bytesPlain += plain.byteLength;
-    bytesEncrypted += encrypted.byteLength;
+    bytesEncrypted += encryptedLength;
   }
+
+  await engine.markManySeen(seenWrites);
 
   return {
     checked,

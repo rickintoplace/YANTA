@@ -142,7 +142,13 @@ export class Sync2LocalStateStore {
     await txDone(tx);
   }
 
-  async markManySeen(paths, extra = {}) {
+  /*
+    Accepts plain paths or per-entry records ({ path, size, etag, ... }).
+    One transaction for the whole batch: a fresh device marks ~1000 objects
+    seen, and one IndexedDB transaction each is a measurable part of the
+    first sync.
+  */
+  async markManySeen(entries, extra = {}) {
     await this.init();
     await this.loadSeenCache();
 
@@ -150,16 +156,21 @@ export class Sync2LocalStateStore {
     const store = tx.objectStore('seen');
     const seenAt = Date.now();
 
-    for (const path of paths) {
-      const p = String(path || '');
+    for (const entry of entries) {
+      const record = typeof entry === 'string'
+        ? { path: entry }
+        : (entry || {});
+
+      const p = String(record.path || '');
       if (!p) continue;
 
       this.seenCache.add(p);
 
       store.put({
+        ...extra,
+        ...record,
         path: p,
         seenAt,
-        ...extra,
       });
     }
 
@@ -211,4 +222,33 @@ export class Sync2LocalStateStore {
     this.seenCache.clear();
     this.seenLoaded = true;
   }
+}
+
+/*
+  Buffered writer for the seen store.
+
+  The parallel download loops apply objects in order and record each one
+  here instead of opening an IndexedDB transaction per object. The batch
+  flushes every `size` entries, so an interrupted first sync keeps most of
+  its progress rather than re-downloading everything on the next attempt.
+*/
+export function createSeenBatch(engine, { size = 128 } = {}) {
+  let buffer = [];
+
+  const flush = async () => {
+    if (!buffer.length) return;
+
+    const batch = buffer;
+    buffer = [];
+
+    await engine.markManySeen(batch);
+  };
+
+  return {
+    async add(record) {
+      buffer.push(record);
+      if (buffer.length >= size) await flush();
+    },
+    flush,
+  };
 }

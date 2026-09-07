@@ -54,7 +54,7 @@ import {
 } from './vault-doc.js';
 
 import { IndexedDBObjectStore } from './indexeddb-object-store.js';
-import { Sync2LocalStateStore } from './state.js';
+import { Sync2LocalStateStore, createSeenBatch } from './state.js';
 import { BrokerObjectStore } from './broker-object-store.js';
 
 import {
@@ -112,6 +112,13 @@ import {
   uploadNotificationAckIfChanged,
   downloadNotificationAcks,
 } from './notification-ack-sync.js';
+
+import {
+  mapOrdered,
+  runSyncDownload,
+  SYNC2_DOWNLOAD_CONCURRENCY,
+  SYNC2_NOTE_CONCURRENCY,
+} from './download-pool.js';
 
 import {
   createCalendarVersionCollector,
@@ -1162,6 +1169,26 @@ export class Sync2AppEngine {
     return this.localState.markSeen(path, extra);
   }
 
+  async markManySeen(entries, extra = {}) {
+    if (!entries?.length) return;
+    return this.localState.markManySeen(entries, extra);
+  }
+
+  /*
+    The latency-bound half of every download loop, isolated so it can be
+    handed to the parallel pool. Decoding and applying stays with the
+    caller, which keeps it sequential and in list order.
+  */
+  async fetchAndDecrypt(path) {
+    const encrypted = await this.remote.get(path);
+
+    return decryptBytes(
+      this.keys.contentKey,
+      encrypted,
+      path
+    );
+  }
+
   async updateDeviceRecord(patch = {}, {
     queue = false,
   } = {}) {
@@ -1330,6 +1357,15 @@ export class Sync2AppEngine {
 
     const entry = getNoteDoc(noteId);
     await entry.ready;
+
+    /*
+      Re-check after the await: the per-note download loops run several
+      notes concurrently, so a second call for the same note can arrive
+      while this one waits for IndexedDB persistence. Registering the
+      update handler twice would queue every local edit into the outbox
+      twice.
+    */
+    if (this.noteObservers.has(noteId)) return;
 
     const doc = entry.doc;
 
@@ -2867,20 +2903,41 @@ export class Sync2AppEngine {
       total: entries.length,
     });
 
+    const pending = [];
+
     for (const entry of entries) {
-      processed++;
-
       if (await this.hasSeen(entry.path)) {
-        this.progress({
-          phase: 'downloadVaultUpdates',
-          direction: 'down',
-          current: processed,
-          total: entries.length,
-          message: 'Already seen.',
-        });
-
+        processed++;
         continue;
       }
+
+      pending.push(entry);
+    }
+
+    this.progress({
+      phase: 'downloadVaultUpdates',
+      direction: 'down',
+      current: processed,
+      total: entries.length,
+      message: 'Already seen.',
+    });
+
+    const seen = createSeenBatch(this);
+
+    /*
+      Fetch and decrypt in parallel, apply strictly in list order.
+      Vault updates are last-write-wins, so the apply order decides the
+      outcome and must stay exactly what the sequential version produced.
+    */
+    for await (const { item: entry, value: plain } of mapOrdered(
+      pending,
+      (item) => this.fetchAndDecrypt(item.path),
+      {
+        limit: SYNC2_DOWNLOAD_CONCURRENCY,
+        run: runSyncDownload,
+      }
+    )) {
+      processed++;
 
       this.progress({
         phase: 'downloadVaultUpdates',
@@ -2890,18 +2947,11 @@ export class Sync2AppEngine {
         message: 'Downloading vault update…',
       });
 
-      const encrypted = await this.remote.get(entry.path);
-
-      const plain = await decryptBytes(
-        this.keys.contentKey,
-        encrypted,
-        entry.path
-      );
-
       const pack = decodePack(plain);
 
       if (pack.kind !== 'vault') {
-        await this.markSeen(entry.path, {
+        await seen.add({
+          path: entry.path,
           type: 'ignored',
         });
 
@@ -2913,7 +2963,8 @@ export class Sync2AppEngine {
         applyVaultUpdate(update, SYNC2_REMOTE_ORIGIN);
       }
 
-      await this.markSeen(entry.path, {
+      await seen.add({
+        path: entry.path,
         type: 'vault-update',
         size: entry.size,
         etag: entry.etag,
@@ -2921,6 +2972,8 @@ export class Sync2AppEngine {
 
       applied++;
     }
+
+    await seen.flush();
 
     return {
       applied,
@@ -2947,7 +3000,19 @@ export class Sync2AppEngine {
       total: noteIds.length,
     });
 
-    for (const noteId of noteIds) {
+    /*
+      Notes are processed several at a time; their object fetches still
+      queue on the shared download limiter. No limiter slot is held here,
+      otherwise an outer note would wait for inner fetches that can never
+      start.
+    */
+    for await (const { item: noteId, value: res } of mapOrdered(
+      noteIds,
+      (id) => downloadNoteSnapshots(this, id),
+      {
+        limit: SYNC2_NOTE_CONCURRENCY,
+      }
+    )) {
       processed++;
 
       this.progress({
@@ -2957,8 +3022,6 @@ export class Sync2AppEngine {
         total: noteIds.length,
         noteId,
       });
-
-      const res = await downloadNoteSnapshots(this, noteId);
 
       applied += res.applied;
 
@@ -2992,7 +3055,13 @@ export class Sync2AppEngine {
       total: noteIds.length,
     });
 
-    for (const noteId of noteIds) {
+    for await (const { item: noteId, value: res } of mapOrdered(
+      noteIds,
+      (id) => this.downloadNoteUpdates(id),
+      {
+        limit: SYNC2_NOTE_CONCURRENCY,
+      }
+    )) {
       processed++;
 
       this.progress({
@@ -3002,8 +3071,6 @@ export class Sync2AppEngine {
         total: noteIds.length,
         noteId,
       });
-
-      const res = await this.downloadNoteUpdates(noteId);
 
       applied += res.applied;
 
@@ -3048,7 +3115,37 @@ export class Sync2AppEngine {
     const updatesToApply = [];
     const seenToMark = [];
 
+    const pending = [];
+
     for (const entry of entries) {
+      if (await this.hasSeen(entry.path)) {
+        processed++;
+        continue;
+      }
+
+      if (vaultTombstonesMap().has(noteId)) {
+        processed++;
+
+        seenToMark.push({
+          path: entry.path,
+          type: 'skipped-tombstoned-note-update',
+          noteId,
+        });
+
+        continue;
+      }
+
+      pending.push(entry);
+    }
+
+    for await (const { item: entry, value: plain } of mapOrdered(
+      pending,
+      (item) => this.fetchAndDecrypt(item.path),
+      {
+        limit: SYNC2_DOWNLOAD_CONCURRENCY,
+        run: runSyncDownload,
+      }
+    )) {
       processed++;
 
       this.progress({
@@ -3059,29 +3156,11 @@ export class Sync2AppEngine {
         total: entries.length,
       });
 
-      if (await this.hasSeen(entry.path)) continue;
-
-      if (vaultTombstonesMap().has(noteId)) {
-        await this.markSeen(entry.path, {
-          type: 'skipped-tombstoned-note-update',
-          noteId,
-        });
-
-        continue;
-      }
-
-      const encrypted = await this.remote.get(entry.path);
-
-      const plain = await decryptBytes(
-        this.keys.contentKey,
-        encrypted,
-        entry.path
-      );
-
       const pack = decodePack(plain);
 
       if (pack.kind !== 'note') {
-        await this.markSeen(entry.path, {
+        seenToMark.push({
+          path: entry.path,
           type: 'ignored',
           noteId,
         });
@@ -3097,7 +3176,10 @@ export class Sync2AppEngine {
 
       seenToMark.push({
         path: entry.path,
-        entry,
+        type: 'note-update',
+        noteId,
+        size: entry.size,
+        etag: entry.etag,
       });
 
       appliedPacks++;
@@ -3117,14 +3199,7 @@ export class Sync2AppEngine {
       Y.applyUpdate(doc, merged, SYNC2_REMOTE_ORIGIN);
     }
 
-    for (const item of seenToMark) {
-      await this.markSeen(item.path, {
-        type: 'note-update',
-        noteId,
-        size: item.entry.size,
-        etag: item.entry.etag,
-      });
-    }
+    await this.markManySeen(seenToMark);
 
     return {
       noteId,

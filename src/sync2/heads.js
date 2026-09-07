@@ -38,6 +38,13 @@ import {
   encodeNoteState,
 } from '../yjs.js';
 
+import {
+  mapOrdered,
+  runSyncDownload,
+  SYNC2_DOWNLOAD_CONCURRENCY,
+  SYNC2_NOTE_CONCURRENCY,
+} from './download-pool.js';
+
 function headSeenKey(path) {
   return `sync2.headSeen.${path}.etag`;
 }
@@ -218,12 +225,34 @@ export async function downloadNoteHeads(engine, noteId) {
     total: entries.length,
   });
 
-  for (const entry of entries) {
-    processed++;
+  const pending = [];
 
+  for (const entry of entries) {
     const etag = entryEtag(entry);
     const seenKey = headSeenKey(entry.path);
     const seenEtag = await readLocalState(engine.localState, seenKey, '');
+
+    if (etag && seenEtag === etag) {
+      processed++;
+      continue;
+    }
+
+    pending.push({
+      entry,
+      etag,
+      seenKey,
+    });
+  }
+
+  for await (const { item, value: plain } of mapOrdered(
+    pending,
+    (task) => engine.fetchAndDecrypt(task.entry.path),
+    {
+      limit: SYNC2_DOWNLOAD_CONCURRENCY,
+      run: runSyncDownload,
+    }
+  )) {
+    processed++;
 
     engine.progress?.({
       phase: 'downloadNoteHeads',
@@ -233,20 +262,10 @@ export async function downloadNoteHeads(engine, noteId) {
       total: entries.length,
     });
 
-    if (etag && seenEtag === etag) continue;
-
-    const encrypted = await engine.remote.get(entry.path);
-
-    const plain = await decryptBytes(
-      engine.keys.contentKey,
-      encrypted,
-      entry.path
-    );
-
     updatesToApply.push(plain);
     seenWrites.push({
-      key: seenKey,
-      etag,
+      key: item.seenKey,
+      etag: item.etag,
     });
 
     applied++;
@@ -288,7 +307,13 @@ export async function downloadKnownNoteHeads(engine, noteIds = []) {
     message: 'Checking latest note heads…',
   });
 
-  for (const noteId of noteIds) {
+  for await (const { item: noteId, value: res } of mapOrdered(
+    noteIds,
+    (id) => downloadNoteHeads(engine, id),
+    {
+      limit: SYNC2_NOTE_CONCURRENCY,
+    }
+  )) {
     current++;
 
     engine.progress?.({
@@ -298,8 +323,6 @@ export async function downloadKnownNoteHeads(engine, noteIds = []) {
       total,
       noteId,
     });
-
-    const res = await downloadNoteHeads(engine, noteId);
 
     applied += res.applied;
     entries += res.entries;

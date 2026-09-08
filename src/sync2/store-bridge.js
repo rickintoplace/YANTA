@@ -24,6 +24,7 @@ import {
   vaultNotesMap,
   vaultFoldersMap,
   vaultImagesMap,
+  vaultSpacesMap,
   vaultTombstonesMap,
   addVaultTombstone,
   safeJsonClone,
@@ -354,6 +355,100 @@ export function deleteVaultFolderMeta(folderId, extra = {}, origin = VAULT_ORIGI
   }, origin);
 }
 
+/*
+  Shared-space records.
+
+  Unlike notes/folders/images there is no allowlist of fields here: a
+  space record is opaque session state (keys, tokens, epoch, source ids,
+  per-type extras), and a record restored with fields missing would mount
+  a share that then misbehaves in ways that are very hard to trace. So we
+  keep whatever the space layer wrote, minus anything not JSON-safe.
+*/
+export function sanitizeSpaceRecord(record) {
+  if (!record || typeof record !== 'object') return null;
+
+  const spaceId = String(record.spaceId || '').trim();
+  if (!spaceId) return null;
+
+  const clone = safeJsonClone(record);
+  if (!clone || typeof clone !== 'object') return null;
+
+  return cleanUndefined({
+    ...clone,
+    spaceId,
+  });
+}
+
+export function putVaultSpaceRecord(record, origin = VAULT_ORIGINS.STORE_BRIDGE) {
+  const meta = sanitizeSpaceRecord(record);
+  if (!meta?.spaceId) return;
+
+  const doc = getVaultDoc();
+  const spaces = vaultSpacesMap();
+
+  doc.transact(() => {
+    /*
+      A stopped share must never come back. Mounted sessions re-put their
+      record routinely, so without this a device that had not yet seen
+      the unshare would resurrect it.
+    */
+    if (vaultTombstonesMap().has(meta.spaceId)) return;
+
+    const existing = spaces.get(meta.spaceId);
+
+    if (jsonEqual(existing, meta)) return;
+
+    spaces.set(meta.spaceId, meta);
+  }, origin);
+}
+
+/*
+  Local-only removal, for cleanup that must NOT reach other devices.
+
+  Pruning a mount whose local source is missing is a decision about this
+  device, not an unshare. If it wrote a vault tombstone, a single device
+  with incomplete local state would stop the share everywhere — and since
+  the keys exist nowhere else, nothing could undo it. Stopping or leaving
+  a share goes through the wrapped store.spaces.del and does propagate.
+*/
+export async function removeLocalSpaceRecordOnly(spaceId) {
+  const id = String(spaceId || '').trim();
+  if (!id) return;
+
+  const del = originals?.spaces?.del || store.spaces.del.bind(store.spaces);
+
+  await del(id);
+}
+
+/*
+  Stopping a share is a tombstone, not a value in the spaces map.
+
+  A "deleted: true" record under the same key loses a concurrent merge:
+  any device that still has the space mounted re-puts its live record
+  routinely, and if it had not seen the unshare yet, last-writer-wins
+  hands the key back to the live value — the share silently resurrects.
+  A tombstone is only ever added, so it cannot be overwritten, which is
+  exactly why notes, folders and images already work this way.
+*/
+export function deleteVaultSpaceRecord(spaceId, extra = {}, origin = VAULT_ORIGINS.STORE_BRIDGE) {
+  const id = String(spaceId || '').trim();
+  if (!id) return;
+
+  const doc = getVaultDoc();
+
+  doc.transact(() => {
+    const existing = vaultSpacesMap().get(id);
+
+    vaultSpacesMap().delete(id);
+
+    addVaultTombstone(id, 'space', {
+      role: existing?.role || '',
+      sourceType: existing?.sourceType || '',
+      ...extra,
+    }, origin);
+  }, origin);
+}
+
 export function deleteVaultImageMeta(imageId, extra = {}, origin = VAULT_ORIGINS.STORE_BRIDGE) {
   if (!imageId) return;
 
@@ -379,6 +474,18 @@ export async function seedVaultFromLocalState() {
 
   const doc = getVaultDoc();
 
+  /*
+    Read before the transaction: store.spaces is IndexedDB-backed and the
+    Yjs transaction body has to stay synchronous.
+  */
+  let spaceRecords = [];
+
+  try {
+    spaceRecords = await store.spaces.all();
+  } catch {
+    spaceRecords = [];
+  }
+
   doc.transact(() => {
     for (const note of state.notes.values()) {
       putVaultNoteMeta(note, VAULT_ORIGINS.LOCAL_SEED);
@@ -390,6 +497,15 @@ export async function seedVaultFromLocalState() {
 
     for (const image of state.imagesMeta.values()) {
       putVaultImageMeta(image, VAULT_ORIGINS.LOCAL_SEED);
+    }
+
+    /*
+      Existing shares created before space records were durable: seeding
+      them here is what carries them into the cloud on this device's next
+      sync, so the next device to pair inherits them.
+    */
+    for (const record of spaceRecords) {
+      putVaultSpaceRecord(record, VAULT_ORIGINS.LOCAL_SEED);
     }
   }, VAULT_ORIGINS.LOCAL_SEED);
 }
@@ -418,6 +534,22 @@ export async function installVaultStoreBridge() {
       put: store.images.put.bind(store.images),
       del: store.images.del.bind(store.images),
     },
+    spaces: {
+      put: store.spaces.put.bind(store.spaces),
+      del: store.spaces.del.bind(store.spaces),
+    },
+  };
+
+  store.spaces.put = async (record) => {
+    const res = await originals.spaces.put(record);
+    putVaultSpaceRecord(record);
+    return res;
+  };
+
+  store.spaces.del = async (spaceId) => {
+    const res = await originals.spaces.del(spaceId);
+    deleteVaultSpaceRecord(spaceId);
+    return res;
   };
 
   store.notes.put = async (note) => {

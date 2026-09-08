@@ -3575,6 +3575,15 @@
   flex: 0 0 auto;
 }
 
+/*
+  A share whose keys this device lost. Full opacity and a warning colour:
+  the whole point is that it must not read as a working share.
+*/
+.yanta-cal-event-share-broken {
+  opacity: 1;
+  color: var(--yellow, #fbbf24);
+}
+
 /* Shared note banner (edit + preview panes) */
 .yanta-calendar-shared-note-banner {
   display: flex;

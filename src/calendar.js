@@ -211,6 +211,8 @@ import {
 
 import { eventLinksToNote } from './spaces/shared-events.js';
 
+import { brokenShareForCategory } from './spaces/space-health.js';
+
 import {
   loadCalendarPersonal,
   applyCategoryOverlay,
@@ -8204,8 +8206,29 @@ function calendarEventContent(info) {
       wrap.append(repeatSpan);
     }
 
-    // Shared calendars are visible at a glance, on every single chip.
-    if (kind === 'event' && raw && categoryIsSharedAnyRole(raw.categoryId)) {
+    /*
+      A share this device can no longer open must never look like a
+      working one. The entry is saved locally and is not lost — but it
+      reaches nobody, and that has to be visible where the user is
+      looking, not only in a settings screen.
+    */
+    const brokenShare = kind === 'event' && raw
+      ? brokenShareForCategory(raw.categoryId)
+      : null;
+
+    if (brokenShare) {
+      const cat = state.calendarCategories.get(raw.categoryId);
+      const brokenSpan = document.createElement('span');
+
+      brokenSpan.className = 'yanta-cal-event-shared yanta-cal-event-share-broken';
+      brokenSpan.title =
+        `"${cat?.name || ''}" is no longer being shared from this device — ` +
+        'this entry stays private until you share the calendar again.';
+      brokenSpan.innerHTML = lucide('user-x', 11);
+
+      wrap.append(brokenSpan);
+    } else if (kind === 'event' && raw && categoryIsSharedAnyRole(raw.categoryId)) {
+      // Shared calendars are visible at a glance, on every single chip.
       const cat = state.calendarCategories.get(raw.categoryId);
       const sharedSpan = document.createElement('span');
 
@@ -13401,6 +13424,16 @@ export function setupCalendarVaultBridge() {
 
   window.addEventListener('yanta-calendar-feed-updated', () => {
     refreshCalendarFeedChip().catch(() => {});
+  });
+
+  /*
+    A share turned out to be unopenable (or was cleaned up). The event
+    chips carry that state, so they have to be redrawn.
+  */
+  window.addEventListener('yanta-space-health-changed', () => {
+    hydrateCalendarStateFromVault({
+      silent: true,
+    });
   });
 
   window.addEventListener('yanta-vault-hydrated', (e) => {

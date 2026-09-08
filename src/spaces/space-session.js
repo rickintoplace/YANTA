@@ -19,6 +19,7 @@ import { state, store, toast } from '../core.js';
 import { createWebRTCProvider } from '../providers.js';
 import { YANTA_CLOUD_BASE_URL } from '../cloud/cloud-api.js';
 import { fetchWithRetry, errorFromResponse } from '../cloud/cloud-fetch.js';
+import { removeLocalSpaceRecordOnly } from '../sync2/store-bridge.js';
 
 import { SpaceObjectStore } from './space-object-store.js';
 import { SpaceEngine } from './space-engine.js';
@@ -1101,7 +1102,17 @@ async function cleanupCalendarSpaceLocal(spaceId, record) {
 
 // ---------------- startup restore --------------------------------
 
-export async function restoreSpaces() {
+/**
+ * Mount every persisted space.
+ *
+ * @param {object} options
+ * @param {boolean} options.prune  Drop records whose local source is gone.
+ *   Only the startup pass may do this. When shares arrive later through
+ *   vault sync, the note or folder they point at can still be on its way,
+ *   and pruning then would delete a perfectly good share — including its
+ *   keys, which nothing can hand back.
+ */
+export async function restoreSpaces({ prune = true } = {}) {
   let records = [];
 
   try {
@@ -1111,6 +1122,14 @@ export async function restoreSpaces() {
   }
 
   for (const record of records) {
+    if (!prune) {
+      mountSpace(record).catch((err) => {
+        console.warn('[YANTA Spaces] restore failed', record.spaceId, err);
+      });
+
+      continue;
+    }
+
     // A stale share: its local source is gone (owner deleted the note
     // or folder, recipient deleted their materialized copy). Calendar
     // categories are not hydrated yet at this point, so calendar spaces
@@ -1131,7 +1150,8 @@ export async function restoreSpaces() {
       !record.rootFolderId;
 
     if (sourceGone && !notYetMaterialized) {
-      await store.spaces.del(record.spaceId);
+      // Local cleanup only — see removeLocalSpaceRecordOnly.
+      await removeLocalSpaceRecordOnly(record.spaceId);
       await store.settings.set(`space.${record.spaceId}.state`, null).catch(() => {});
       continue;
     }
@@ -1142,6 +1162,39 @@ export async function restoreSpaces() {
   }
 
   scheduleOwnedSpaceHealthCheck(records);
+}
+
+/*
+  Shares that arrive with the vault — a device that was just paired, or
+  one that lost its storage and got everything back from the recovery
+  key — land in store.spaces after the sync engine hydrated the vault.
+  Mount them as soon as they show up instead of only on the next reload,
+  and never prune on this path (see restoreSpaces).
+*/
+let vaultSpaceListenerInstalled = false;
+
+export function installVaultSpaceRestore() {
+  if (vaultSpaceListenerInstalled) return;
+  vaultSpaceListenerInstalled = true;
+
+  window.addEventListener('yanta-vault-spaces-changed', (e) => {
+    /*
+      A share stopped on another device: tear the live session down here
+      too, or this device would keep writing into a space it has already
+      been removed from.
+    */
+    for (const spaceId of e.detail?.removed || []) {
+      try {
+        unmountSpace(spaceId);
+      } catch (err) {
+        console.warn('[YANTA Spaces] unmount after unshare failed', spaceId, err);
+      }
+    }
+
+    restoreSpaces({ prune: false }).catch((err) => {
+      console.warn('[YANTA Spaces] restore after vault sync failed', err);
+    });
+  });
 }
 
 // ---------------- owner link-health notice -----------------------

@@ -28,6 +28,7 @@ const VAULT_MAP_NAMES = [
   'events',
   'calendarCategories',
   'rssFeeds',
+  'spaces',
   'settings',
   'devices',
   'tombstones',
@@ -215,6 +216,28 @@ export function vaultRssFeedsMap() {
   return vaultMap('rssFeeds');
 }
 
+/*
+  Shared-space memberships, keyed by spaceId.
+
+  These records carry the space's encryption keys, and they are the only
+  copy that exists: a space is zero-knowledge, so the server can never
+  hand them back. Before they lived here, losing local browser storage
+  silently and permanently orphaned every share the device owned — the
+  category kept working locally while nothing reached the other side.
+
+  Storing share secrets in the VaultDoc follows what public shares already
+  do (`sanitizePublicShareMeta` mirrors shareKey the same way): the vault
+  is end-to-end encrypted with the user's sync key, so this stays
+  zero-knowledge towards the server while surviving device loss.
+
+  Soft-deleted rather than removed on unshare, for the same reason as
+  rssFeeds: a device that still holds the record locally must not be able
+  to resurrect a share that another device stopped.
+*/
+export function vaultSpacesMap() {
+  return vaultMap('spaces');
+}
+
 export function vaultSettingsMap() {
   return vaultMap('settings');
 }
@@ -320,6 +343,22 @@ export function vaultJsonSnapshot() {
   const devices = Object.fromEntries(vaultDevicesMap());
   const tombstones = Object.fromEntries(vaultTombstonesMap());
 
+  /*
+    Deliberately redacted: this snapshot hangs off a window debug handle
+    and ends up pasted into bug reports. Which shares exist is the useful
+    part; their keys are not, and a share secret must never leave the app
+    through a diagnostic surface.
+  */
+  const spaces = Object.fromEntries(
+    [...vaultSpacesMap()].map(([id, raw]) => [id, {
+      spaceId: raw?.spaceId || id,
+      role: raw?.role || '',
+      sourceType: raw?.sourceType || '',
+      deleted: !!raw?.deleted,
+      keys: '[redacted]',
+    }])
+  );
+
   return safeJsonClone({
     notes,
     folders,
@@ -327,6 +366,7 @@ export function vaultJsonSnapshot() {
     events,
     calendarCategories,
     rssFeeds,
+    spaces,
     settings,
     devices,
     tombstones,
@@ -367,6 +407,7 @@ export function encodeCompactVaultState({
   copyVaultMapToCompactDoc(compact, 'events', vaultEventsMap);
   copyVaultMapToCompactDoc(compact, 'calendarCategories', vaultCalendarCategoriesMap);
   copyVaultMapToCompactDoc(compact, 'rssFeeds', vaultRssFeedsMap);
+  copyVaultMapToCompactDoc(compact, 'spaces', vaultSpacesMap);
   copyVaultMapToCompactDoc(compact, 'tombstones', vaultTombstonesMap);
 
   if (includeDevices) {

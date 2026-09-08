@@ -44,6 +44,7 @@ import {
   vaultEventsMap,
   vaultCalendarCategoriesMap,
   vaultRssFeedsMap,
+  vaultSpacesMap,
   vaultDevicesMap,
   vaultSettingsMap,
   VAULT_SYNCED_SETTING_KEYS,
@@ -55,6 +56,7 @@ import {
 
 import { IndexedDBObjectStore } from './indexeddb-object-store.js';
 import { Sync2LocalStateStore, createSeenBatch } from './state.js';
+import { removeLocalSpaceRecordOnly } from './store-bridge.js';
 import { BrokerObjectStore } from './broker-object-store.js';
 
 import {
@@ -3505,12 +3507,96 @@ export class Sync2AppEngine {
   
     for (const [id, raw] of vaultImagesMap()) {
       if (tombstones.has(id)) continue;
-  
+
       const incoming = sanitizeImageMeta(raw);
       if (!incoming?.id) continue;
-  
+
       state.imagesMeta.set(id, safeJsonClone(incoming));
     }
+
+    await this.persistVaultSpacesToLocalStore();
+  }
+
+  /*
+    Shared-space records travel with the vault so a device that lost its
+    local storage — or a brand new one — gets its shares back instead of
+    silently orphaning them.
+
+    Announces arrivals rather than mounting them here: mounting belongs to
+    the spaces layer, and pulling it into the sync engine would tie the
+    engine to the whole space/Matrix stack.
+  */
+  async persistVaultSpacesToLocalStore() {
+    const records = vaultSpacesMap();
+    const tombstones = vaultTombstonesMap();
+
+    const added = [];
+    const removed = [];
+
+    // Stopped shares first, so a tombstone always beats a stale record.
+    for (const [id, t] of tombstones) {
+      if (t?.type !== 'space') continue;
+
+      /*
+        A device that had the space mounted may have re-put its live
+        record before the tombstone reached it. The tombstone wins on
+        read, but leaving the entry would keep the keys of a stopped
+        share in the synced vault forever. Every device runs this, so
+        the deletion converges.
+      */
+      if (records.has(id)) {
+        try {
+          getVaultDoc().transact(() => {
+            records.delete(id);
+          }, SYNC2_REMOTE_ORIGIN);
+        } catch {}
+      }
+
+      let existing = null;
+
+      try {
+        existing = await store.spaces.get(id);
+      } catch {
+        continue;
+      }
+
+      if (!existing) continue;
+
+      try {
+        // The tombstone is already in the vault; only drop the local copy.
+        await removeLocalSpaceRecordOnly(id);
+        removed.push(id);
+      } catch {}
+    }
+
+    for (const [id, raw] of records) {
+      const spaceId = String(raw?.spaceId || id || '').trim();
+      if (!spaceId || tombstones.has(spaceId)) continue;
+
+      let existing = null;
+
+      try {
+        existing = await store.spaces.get(spaceId);
+      } catch {
+        continue;
+      }
+
+      const next = safeJsonClone(raw);
+      if (!next || jsonEqualForSync2(existing, next)) continue;
+
+      try {
+        await store.spaces.put(next);
+        added.push(spaceId);
+      } catch {}
+    }
+
+    if (!added.length && !removed.length) return;
+
+    try {
+      window.dispatchEvent(new CustomEvent('yanta-vault-spaces-changed', {
+        detail: { added, removed },
+      }));
+    } catch {}
   }
 
   async status() {

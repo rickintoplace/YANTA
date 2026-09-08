@@ -3,7 +3,13 @@
 // pane divider, history navigation, view modes.
 // ============================================================
 
-import { $, state, store, openDB, toast, cssColorToHex, safeCssColor, lucide, lucideCalendarDay, debounce } from './core.js';
+import { $, state, store, openDB, toast, actionToast, cssColorToHex, safeCssColor, lucide, lucideCalendarDay, debounce } from './core.js';
+
+import {
+  reconcileOwnedSpaces,
+  unreportedBrokenShares,
+  markBrokenSharesReported,
+} from './spaces/space-health.js';
 import { initI18n, t } from './i18n/index.js';
 import {
   loadAppearance,
@@ -49,6 +55,7 @@ import {
 import {
   handleSpaceUrl,
   restoreSpaces,
+  installVaultSpaceRestore,
   spaceSessionForNote,
   stopSpaceShare,
 } from './spaces/space-session.js';
@@ -504,6 +511,55 @@ function installChatSidebarBadgeListener() {
     if (last > 0) {
       updateChatSidebarBadge(last);
     }
+  });
+}
+
+/*
+  Shares the server still lists but this device can no longer open.
+
+  A space is zero-knowledge: its keys exist only on the participants'
+  devices, so storage loss can orphan a share permanently. That must
+  never be silent — the calendar would keep accepting entries that reach
+  nobody. Reported once per share (the inline markers stay), with the
+  action that actually repairs it.
+*/
+async function reportBrokenSharesOnce() {
+  await reconcileOwnedSpaces();
+
+  const pending = await unreportedBrokenShares();
+  if (!pending.length) return;
+
+  await markBrokenSharesReported(pending.map((b) => b.spaceId));
+
+  const first = pending[0];
+  const others = pending.length - 1;
+
+  const what = first.sourceType === 'calendar'
+    ? `the calendar "${first.label}"`
+    : first.sourceType === 'folder'
+      ? `the folder "${first.label}"`
+      : `"${first.label}"`;
+
+  const message = others > 0
+    ? `Sharing stopped for ${what} and ${others} more: this device no longer has the keys, so changes reach nobody.`
+    : `Sharing stopped for ${what}: this device no longer has the keys, so changes reach nobody.`;
+
+  actionToast(message, {
+    actionLabel: 'Share again',
+    duration: 20000,
+    onAction: async () => {
+      if (first.sourceType === 'calendar') {
+        await openUnifiedShareModal({ calendarCategoryId: first.sourceId });
+        return;
+      }
+
+      if (first.sourceType === 'folder') {
+        await openUnifiedShareModal({ folderId: first.sourceId });
+        return;
+      }
+
+      await openUnifiedShareModal({ noteId: first.sourceId });
+    },
   });
 }
 
@@ -2716,6 +2772,16 @@ async function init() {
   // Inbox and history live in a synced doc — reflect other devices' writes.
   watchPulseDocForInbox().catch(() => {});
   setupSpaceMatrix();
+  installVaultSpaceRestore();
+  reportBrokenSharesOnce().catch(() => {});
+
+  /*
+    Shares that arrive with the vault repair themselves — re-check so the
+    warning markers disappear as soon as the keys are actually back.
+  */
+  window.addEventListener('yanta-vault-spaces-changed', () => {
+    reconcileOwnedSpaces({ force: true }).catch(() => {});
+  });
   await ensureAiSessionsFolder();
   // Suggested routines are seeded disabled — see pulse-starters.js.
   ensureStarterRoutines().catch(() => {});

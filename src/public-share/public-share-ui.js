@@ -1,4 +1,6 @@
 import { renderBrandedQrSvg } from '../qr.js';
+
+import { isChatEnabled } from '../chat/chat-enabled.js';
 import { BRAND_LOGO_SVG } from '../brand-logo.js';
 
 import {
@@ -2573,7 +2575,7 @@ export async function openUnifiedShareModal({
         <div class="yanta-share-tabs">
           ${isNote ? '<button data-share-tab="public" class="active">Public link</button>' : ''}
           <button data-share-tab="live" ${isNote ? '' : 'class="active"'}>Live collaboration</button>
-          <button data-share-tab="people">People</button>
+          ${isChatEnabled() ? '<button data-share-tab="people">People</button>' : ''}
         </div>
 
         <div data-share-body></div>

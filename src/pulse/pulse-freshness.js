@@ -32,7 +32,15 @@ const SYNC_PROVIDER_KEY = 'sync2.provider';
 const WAIT_MS = 90_000;
 
 let completedAt = 0;
+
+/*
+  Resolvers of everyone currently blocked in isPulseStateFresh({wait:true}),
+  drained by the sync listener below. `waitOnce` is the single shared
+  promise they are all waiting on — one bounded wait per session, not one
+  per caller.
+*/
 const waiting = new Set();
+let waitOnce = null;
 
 // Installed at module load, not on first ask: the sync cycle that makes
 // this device fresh can complete before the scheduler first runs.
@@ -75,18 +83,22 @@ export async function isPulseStateFresh({ wait = false } = {}) {
   // elapsed without a sync, waiting again would only keep an offline
   // device from running the slots it *can* run — and the moment sync
   // does land, the check above answers without blocking anyone.
-  if (!waiting) {
-    let settle;
+  //
+  // The pending resolver goes into `waiting`, which the sync listener at
+  // the top of this file drains: that Set is the handoff between the two.
+  if (!waitOnce) {
+    waitOnce = new Promise((resolve) => {
+      const settle = () => {
+        waiting.delete(settle);
+        resolve();
+      };
 
-    const promise = new Promise((resolve) => {
-      settle = resolve;
+      waiting.add(settle);
+      window.setTimeout(settle, WAIT_MS);
     });
-
-    waiting = { promise, resolve: settle };
-    window.setTimeout(settle, WAIT_MS);
   }
 
-  await waiting.promise;
+  await waitOnce;
 
   return completedAt > 0;
 }

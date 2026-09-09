@@ -31,6 +31,7 @@ object NotificationScheduler {
             val eventId = event.optString("id")
             val title = event.optString("title", "Calendar event")
             val startIso = event.optString("start")
+            val allDay = event.optBoolean("allDay", false)
             val startMs = parseIsoMs(startIso) ?: continue
             val reminders = event.optJSONArray("reminders") ?: continue
 
@@ -51,6 +52,7 @@ object NotificationScheduler {
                     eventId = eventId,
                     title = title,
                     startIso = startIso,
+                    allDay = allDay,
                     triggerAt = triggerAt,
                     minutesBefore = minutesBefore
                 )
@@ -67,6 +69,7 @@ object NotificationScheduler {
         eventId: String,
         title: String,
         startIso: String,
+        allDay: Boolean,
         triggerAt: Long,
         minutesBefore: Int
     ) {
@@ -75,6 +78,9 @@ object NotificationScheduler {
             putExtra("eventId", eventId)
             putExtra("title", title)
             putExtra("startIso", startIso)
+            // Without this the receiver cannot tell an all-day event from one
+            // that genuinely starts at midnight, and shows "00:00" for both.
+            putExtra("allDay", allDay)
             putExtra("minutesBefore", minutesBefore)
             putExtra("requestCode", requestCode)
         }

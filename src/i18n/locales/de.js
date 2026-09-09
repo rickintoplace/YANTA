@@ -26,6 +26,7 @@ export default {
       note: 'Neue Notiz',
       ai: 'KI fragen',
       event: 'Neuer Termin',
+      ics: 'Zum Kalender hinzufügen',
       rss: 'Quelle hinzufügen',
     },
   },

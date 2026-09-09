@@ -1,4 +1,5 @@
 import { lucide } from './core.js';
+import { isChatEnabled } from './chat/chat-enabled.js';
 import { t } from './i18n/index.js';
 
 const DEFAULT_ICON_SIZE = 20;
@@ -21,14 +22,14 @@ export function createSidebarFootActions({
       title: t('sidebar.commandPaletteTitle'),
       onClick: () => openPalette?.(),
     },
-    {
+    ...(isChatEnabled() ? [{
       id: 'btn-chat',
       key: 'chat',
       icon: 'messages-square',
       label: t('sidebar.chat'),
       title: t('sidebar.chat'),
       onClick: () => openChat?.(),
-    },
+    }] : []),
     {
       id: 'btn-graph',
       key: 'graph',

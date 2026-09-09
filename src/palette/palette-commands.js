@@ -9,6 +9,7 @@
 // has to import the heavy feature modules (calendar, sync, sharing, …).
 // ============================================================
 
+import { isChatEnabled } from '../chat/chat-enabled.js';
 import { $, state } from '../core.js';
 import { cycleAppearanceMode } from '../settings.js';
 import { deleteCurrentNote, newNote, newFolder, togglePin } from '../notes.js';
@@ -166,22 +167,27 @@ export function buildCommandList({
     { label: 'Open calendar', icon: 'calendar-days', hint: 'Ctrl+Shift+C', action: openCalendar },
     { label: 'Open calendar in side pane', icon: 'panel-right', action: openCalendarPane },
     { label: 'Open Sources', icon: 'rss', hint: 'RSS / feeds', action: openSources },
-    { label: 'Open chat', icon: 'messages-square', action: () => openChat?.() },
+    // Chat commands are omitted while chat is off — see chat/chat-enabled.js.
+    ...(isChatEnabled()
+      ? [{ label: 'Open chat', icon: 'messages-square', action: () => openChat?.() }]
+      : []),
     { label: 'Open AI assistant', icon: 'sparkles', hint: 'Ctrl+J', action: openAssistant },
     { label: 'Open AI assistant as floating window', icon: 'picture-in-picture-2', action: openAssistantFloating },
     { label: 'Open graph view', icon: 'network', hint: 'Ctrl+G', action: openGraph },
     { label: 'Filter notes in sidebar', icon: 'list-filter', hint: 'Ctrl+K', action: () => $('search')?.focus() },
-    {
-      label: 'Search chat messages',
-      icon: 'messages-square',
-      hint: 'Local E2EE index',
-      action: () => openChatSearch?.(),
-    },
-    {
-      label: 'Import YANTA chat archive…',
-      icon: 'archive',
-      action: () => importChatArchive?.(),
-    },
+    ...(isChatEnabled() ? [
+      {
+        label: 'Search chat messages',
+        icon: 'messages-square',
+        hint: 'Local E2EE index',
+        action: () => openChatSearch?.(),
+      },
+      {
+        label: 'Import YANTA chat archive…',
+        icon: 'archive',
+        action: () => importChatArchive?.(),
+      },
+    ] : []),
     { label: 'Toggle preview/edit/split', icon: 'eye', hint: 'Ctrl+/', action: () => window.dispatchEvent(new CustomEvent('yanta-cycle-view')) },
     { label: 'Insert image', icon: 'image', hint: 'Ctrl+I', action: openImageModal },
     { label: 'Insert citation', icon: 'quote', hint: '/cite', action: openCitationManager },

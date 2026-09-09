@@ -33,6 +33,7 @@ export default {
       note: 'New note',
       ai: 'Ask AI',
       event: 'New event',
+      ics: 'Add to calendar',
       rss: 'Add source',
     },
   },

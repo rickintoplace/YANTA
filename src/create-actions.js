@@ -12,6 +12,8 @@ import {
   toast,
 } from './core.js';
 
+import { isChatEnabled } from './chat/chat-enabled.js';
+
 import {
   newNote,
   newFolder,
@@ -100,12 +102,16 @@ export const CREATE_ACTIONS = [
     icon: 'rss',
     resultType: 'sources',
   },
-  {
+  /*
+    Chat entry omitted while chat is off — see chat/chat-enabled.js. The
+    action below stays so a stored shortcut cannot land on a dead id.
+  */
+  ...(isChatEnabled() ? [{
     id: 'chat',
     label: 'Open Chat',
     icon: 'messages-square',
     resultType: 'chat',
-  },
+  }] : []),
 ];
 
 export function isGraphVisible() {
@@ -356,6 +362,7 @@ export async function runCreateAction(actionId, {
     }
 
     if (actionId === 'chat') {
+      if (!isChatEnabled()) return null;
       return await openChatAction();
     }
 

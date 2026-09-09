@@ -110,7 +110,7 @@ import {
 } from './sync2/vault-doc.js';
 
 import {
-  parseIcsEvents,
+  parseIcsCalendar,
   exportEventsAsIcs,
   eventsToIcs,
   googleCalendarEventUrl,
@@ -6784,6 +6784,65 @@ export function sanitizeCalendarCategory(raw) {
   });
 }
 
+const ATTENDEE_STATUSES = new Set([
+  'accepted',
+  'declined',
+  'tentative',
+  'delegated',
+  'pending',
+]);
+
+const ATTENDEE_ROLES = new Set(['chair', 'required', 'optional', 'observer']);
+
+/*
+  Scheduling participants from an imported invitation (RFC 5545
+  ORGANIZER/ATTENDEE). Kept deliberately small and JSON-safe: these ride
+  along in the vault CRDT like the rest of the event.
+*/
+function normalizeCalendarParticipant(raw) {
+  if (!raw || typeof raw !== 'object') return null;
+
+  const email = String(raw.email || '').trim();
+  const uri = String(raw.uri || '').trim();
+  const name = String(raw.name || '').trim();
+
+  if (!email && !uri && !name) return null;
+
+  const status = String(raw.status || 'pending').toLowerCase();
+  const role = String(raw.role || 'required').toLowerCase();
+
+  return cleanUndefined({
+    email: email || undefined,
+    uri: uri || undefined,
+    name: name || email || uri,
+    status: ATTENDEE_STATUSES.has(status) ? status : 'pending',
+    role: ATTENDEE_ROLES.has(role) ? role : 'required',
+    rsvp: raw.rsvp === true ? true : undefined,
+    type: raw.type === 'resource' ? 'resource' : undefined,
+  });
+}
+
+function normalizeCalendarAttendees(raw) {
+  if (!Array.isArray(raw)) return [];
+
+  const seen = new Set();
+  const out = [];
+
+  for (const entry of raw) {
+    const person = normalizeCalendarParticipant(entry);
+    if (!person) continue;
+
+    // One row per person: duplicate ATTENDEE lines are common in replies.
+    const key = (person.email || person.uri || person.name).toLowerCase();
+    if (seen.has(key)) continue;
+
+    seen.add(key);
+    out.push(person);
+  }
+
+  return out;
+}
+
 export function sanitizeCalendarEvent(raw) {
   if (!raw || typeof raw !== 'object') return null;
 
@@ -6839,6 +6898,17 @@ export function sanitizeCalendarEvent(raw) {
     reminders: normalizeCalendarReminders(raw.reminders, raw),
 
     externalUid: raw.externalUid || '',
+
+    /*
+      Scheduling data from an imported invitation. `sequence` is what
+      tells a later REQUEST/REPLY for the same UID apart from a stale
+      copy; `startTzid` keeps the sender's zone so the event can be shown
+      in its original time as well as the reader's.
+    */
+    organizer: normalizeCalendarParticipant(raw.organizer) || undefined,
+    attendees: normalizeCalendarAttendees(raw.attendees),
+    sequence: Number.isFinite(Number(raw.sequence)) ? Number(raw.sequence) : undefined,
+    startTzid: raw.startTzid ? String(raw.startTzid) : undefined,
 
     created: Number(raw.created || now()),
     updated: Number(raw.updated || now()),
@@ -9814,21 +9884,232 @@ function openCalendarImportPicker() {
   input.click();
 }
 
+const PARTICIPANT_STATUS_LABEL = {
+  accepted: 'Accepted',
+  declined: 'Declined',
+  tentative: 'Maybe',
+  delegated: 'Delegated',
+  pending: 'Awaiting reply',
+};
+
+/*
+  Who was invited and who has answered.
+
+  This is the half of an invitation that made YANTA look like it had simply
+  lost information: ORGANIZER and ATTENDEE were parsed away, so an
+  invitation arrived as a bare appointment. Read-only for now — answering
+  needs a way to send the reply back, which is a transport question, not a
+  rendering one.
+*/
+function participantsHtml(ev) {
+  const attendees = Array.isArray(ev?.attendees) ? ev.attendees : [];
+  const organizer = ev?.organizer || null;
+
+  if (!organizer && !attendees.length) return '';
+
+  const counts = attendees.reduce((acc, a) => {
+    const key = a.status || 'pending';
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+
+  const summary = ['accepted', 'declined', 'tentative', 'pending']
+    .filter((k) => counts[k])
+    .map((k) => `${counts[k]} ${PARTICIPANT_STATUS_LABEL[k].toLowerCase()}`)
+    .join(' · ');
+
+  const row = (person, isOrganizer) => `
+    <li class="yanta-cal-participant" data-status="${escapeAttr(person.status || 'pending')}">
+      <span class="yanta-cal-participant-dot" aria-hidden="true"></span>
+      <span class="yanta-cal-participant-name">
+        ${escapeHtml(person.name || person.email || person.uri || '')}
+        ${isOrganizer ? '<em>organizer</em>' : ''}
+      </span>
+      <span class="yanta-cal-participant-status">
+        ${escapeHtml(
+          isOrganizer && person.status === 'pending'
+            ? ''
+            : PARTICIPANT_STATUS_LABEL[person.status] || ''
+        )}
+      </span>
+    </li>`;
+
+  const rows = [
+    organizer ? row(organizer, true) : '',
+    ...attendees.map((a) => row(a, false)),
+  ].join('');
+
+  return `
+    <div class="yanta-cal-participants">
+      <div class="yanta-cal-participants-head">
+        <strong>Participants</strong>
+        ${summary ? `<small>${escapeHtml(summary)}</small>` : ''}
+      </div>
+      <ul>${rows}</ul>
+    </div>`;
+}
+
+/*
+  Find the stored event an incoming iTIP message refers to. Matching is by
+  UID, which is what the standard guarantees to be stable across the
+  organizer's and every attendee's copy — titles and times are not.
+*/
+function eventsByExternalUid(uid) {
+  const wanted = String(uid || '').trim();
+  if (!wanted) return [];
+
+  const out = [];
+
+  for (const ev of state.calendarEvents.values()) {
+    if (String(ev.externalUid || '').trim() === wanted) out.push(ev);
+  }
+
+  return out;
+}
+
+/**
+ * Apply METHOD:REPLY — somebody answered an invitation.
+ *
+ * A reply carries only the responder's own ATTENDEE line, so this updates
+ * exactly that person's status on the event we already hold and leaves the
+ * rest of the roster untouched.
+ */
+export function applyIcsReplies(parsedEvents) {
+  let updated = 0;
+  let ignoredStale = 0;
+
+  for (const incoming of parsedEvents) {
+    const targets = eventsByExternalUid(incoming.externalUid);
+    if (!targets.length) continue;
+
+    for (const target of targets) {
+      /*
+        SEQUENCE guards against a reply to a version of the event that has
+        since been revised: answering an old invitation must not overwrite
+        the current answer.
+      */
+      const targetSeq = Number(target.sequence || 0);
+      const replySeq = Number(incoming.sequence || 0);
+
+      if (replySeq < targetSeq) {
+        ignoredStale++;
+        continue;
+      }
+
+      const roster = Array.isArray(target.attendees) ? [...target.attendees] : [];
+      let touched = false;
+
+      for (const responder of incoming.attendees || []) {
+        const key = String(responder.email || responder.uri || '').toLowerCase();
+        if (!key) continue;
+
+        const idx = roster.findIndex(
+          (a) => String(a.email || a.uri || '').toLowerCase() === key
+        );
+
+        if (idx >= 0) {
+          if (roster[idx].status === responder.status) continue;
+
+          roster[idx] = { ...roster[idx], status: responder.status };
+        } else {
+          // Somebody the local copy did not know about — a forwarded invite.
+          roster.push(responder);
+        }
+
+        touched = true;
+      }
+
+      if (!touched) continue;
+
+      putCalendarEvent({ id: target.id, attendees: roster });
+      updated++;
+    }
+  }
+
+  return { updated, ignoredStale };
+}
+
+/**
+ * Apply METHOD:CANCEL — the organizer withdrew the event.
+ *
+ * Marked cancelled rather than deleted: a meeting that was called off is
+ * something you may still want to see, and silently removing an entry from
+ * someone's calendar is worse than showing it struck through.
+ */
+export function applyIcsCancellations(parsedEvents) {
+  let cancelled = 0;
+
+  for (const incoming of parsedEvents) {
+    for (const target of eventsByExternalUid(incoming.externalUid)) {
+      if (target.status === 'cancelled') continue;
+
+      putCalendarEvent({ id: target.id, status: 'cancelled' });
+      cancelled++;
+    }
+  }
+
+  return cancelled;
+}
+
 export async function importCalendarFile(file, {
   categoryId = null,
 } = {}) {
   if (!file) return;
 
-  const lower = file.name.toLowerCase();
+  const lower = String(file.name || '').toLowerCase();
+  const mime = String(file.type || '').toLowerCase();
 
-  if (lower.endsWith('.ics')) {
+  /*
+    Files arriving through the share target are not guaranteed to keep a
+    useful name — several mail clients hand over "attachment" with an
+    octet-stream type — so the MIME type counts as well.
+  */
+  const looksLikeCalendar =
+    /\.(ics|ical|ifb|vcs)$/.test(lower) ||
+    mime === 'text/calendar' ||
+    mime === 'application/ics' ||
+    mime === 'text/x-vcalendar';
+
+  if (looksLikeCalendar) {
     toast('Reading ICS…');
 
     const text = await file.text();
-    const parsedEvents = parseIcsEvents(text);
+    const { method, events: parsedEvents } = parseIcsCalendar(text);
 
     if (!parsedEvents.length) {
       toast('No VEVENT entries found', 'error');
+      return;
+    }
+
+    /*
+      METHOD says what the file MEANS (RFC 5546). A reply is somebody
+      answering an invitation you already have, and a cancellation
+      withdraws one — importing either as "a new event" is how calendars
+      end up with duplicates and with cancelled meetings still in them.
+    */
+    if (method === 'REPLY') {
+      const applied = applyIcsReplies(parsedEvents);
+
+      toast(
+        applied.updated
+          ? `Updated ${applied.updated} response${applied.updated === 1 ? '' : 's'}`
+          : 'This reply belongs to an event that is not in your calendar.',
+        applied.updated ? 'success' : 'error'
+      );
+
+      return;
+    }
+
+    if (method === 'CANCEL') {
+      const cancelled = applyIcsCancellations(parsedEvents);
+
+      toast(
+        cancelled
+          ? `Cancelled ${cancelled} event${cancelled === 1 ? '' : 's'}`
+          : 'Nothing to cancel — the event is not in your calendar.',
+        cancelled ? 'success' : 'error'
+      );
+
       return;
     }
 
@@ -11269,6 +11550,18 @@ function openEventEditor(input = {}) {
         ? input.reminders
         : [],
 
+    /*
+      Scheduling data from an imported invitation. Carried explicitly
+      because this rebuilds the event field by field: without these the
+      editor would not only fail to show the participants, it would drop
+      them — and the UID with them — the next time the event was saved.
+    */
+    externalUid: sourceForEditor?.externalUid || input.externalUid || '',
+    organizer: sourceForEditor?.organizer || input.organizer || undefined,
+    attendees: sourceForEditor?.attendees || input.attendees || [],
+    sequence: sourceForEditor?.sequence ?? input.sequence,
+    startTzid: sourceForEditor?.startTzid || input.startTzid || undefined,
+
     created: sourceForEditor?.created || now(),
     updated: sourceForEditor?.updated || now(),
   });
@@ -11512,6 +11805,8 @@ function openEventEditor(input = {}) {
         </label>
 
         <div class="yanta-calendar-shared-banner" data-shared-banner hidden></div>
+
+        ${participantsHtml(ev)}
 
         <div class="yanta-calendar-appearance-box">
           <input type="hidden" data-field="color" value="${escapeAttr(ev.color || '')}" />

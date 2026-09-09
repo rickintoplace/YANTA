@@ -32,6 +32,7 @@ class AlarmReceiver : BroadcastReceiver() {
         val eventId = intent.getStringExtra("eventId") ?: return
         val title = intent.getStringExtra("title") ?: "Calendar event"
         val startIso = intent.getStringExtra("startIso") ?: ""
+        val allDay = intent.getBooleanExtra("allDay", false)
         val requestCode = intent.getIntExtra("requestCode", eventId.hashCode())
 
         val openIntent = Intent(context, MainActivity::class.java).apply {
@@ -47,7 +48,7 @@ class AlarmReceiver : BroadcastReceiver() {
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val whenText = formatStart(startIso)
+        val whenText = formatStart(startIso, allDay)
 
         val notification = NotificationCompat.Builder(context, NotificationChannels.CALENDAR)
             .setSmallIcon(R.drawable.ic_stat_yanta)
@@ -65,12 +66,23 @@ class AlarmReceiver : BroadcastReceiver() {
             .notify(requestCode, notification)
     }
 
-    private fun formatStart(startIso: String): String {
+    /**
+     * An all-day event has no meaningful clock time — its start is stored as
+     * midnight, so formatting it with HH:mm produced a confident, wrong
+     * "00:00". All-day entries get the date and say so instead.
+     */
+    private fun formatStart(startIso: String, allDay: Boolean): String {
         return try {
             val instant = Instant.parse(startIso)
-            val fmt = DateTimeFormatter.ofPattern("EEE, dd MMM · HH:mm")
-                .withZone(ZoneId.systemDefault())
-            "Starts ${fmt.format(instant)}"
+            val zone = ZoneId.systemDefault()
+
+            if (allDay) {
+                val dayFmt = DateTimeFormatter.ofPattern("EEE, dd MMM").withZone(zone)
+                "All-day · ${dayFmt.format(instant)}"
+            } else {
+                val fmt = DateTimeFormatter.ofPattern("EEE, dd MMM · HH:mm").withZone(zone)
+                "Starts ${fmt.format(instant)}"
+            }
         } catch (_: Throwable) {
             "Event reminder"
         }

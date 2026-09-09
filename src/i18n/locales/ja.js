@@ -25,6 +25,7 @@ export default {
       note: '新規ノート',
       ai: 'AI に質問',
       event: '新規イベント',
+      ics: 'カレンダーに追加',
       rss: 'ソースを追加',
     },
   },

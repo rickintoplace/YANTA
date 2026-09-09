@@ -24,6 +24,7 @@ import {
 import { t } from '../i18n/index.js';
 import { openBoundOverlay } from '../overlay-history.js';
 
+import { isChatEnabled } from '../chat/chat-enabled.js';
 import { resolveMatrixClient } from '../chat/chat-actions.js';
 
 import {
@@ -67,23 +68,44 @@ function composeText(payload) {
   return parts.join('\n').trim();
 }
 
+/*
+  Calendar files arrive with an honest MIME type from most senders, but
+  plenty of mail clients hand over application/octet-stream — so the file
+  name decides too.
+*/
+function isCalendarFile(file) {
+  const type = String(file?.type || '').toLowerCase();
+  const name = String(file?.name || '').toLowerCase();
+
+  return type === 'text/calendar' ||
+    type === 'application/ics' ||
+    type === 'text/x-vcalendar' ||
+    /\.(ics|ical|ifb|vcs)$/.test(name);
+}
+
 function shapePayload(payload) {
   const files = Array.isArray(payload?.files) ? payload.files : [];
   const imageFile =
     files.find((f) => String(f?.type || '').startsWith('image/')) || null;
+  const calendarFile = files.find(isCalendarFile) || null;
 
   const title = String(payload?.title || '').trim();
   const text = composeText(payload);
   const linkUrl = String(payload?.url || '').trim() || firstUrl(payload?.text);
   const hasSnippet = Boolean(title || (payload?.text || '').trim());
 
-  const kind = imageFile ? 'image' : (linkUrl ? 'link' : 'text');
+  const kind = calendarFile
+    ? 'calendar'
+    : imageFile ? 'image' : (linkUrl ? 'link' : 'text');
 
-  return { title, text, linkUrl, imageFile, hasSnippet, kind };
+  return { title, text, linkUrl, imageFile, calendarFile, hasSnippet, kind };
 }
 
 /** Short label for the preview chip. */
 function previewLabel(shaped) {
+  if (shaped.kind === 'calendar') {
+    return shaped.calendarFile?.name || 'Calendar file';
+  }
   if (shaped.kind === 'image') {
     return shaped.imageFile?.name || t('shareTarget.previewImage');
   }
@@ -91,6 +113,7 @@ function previewLabel(shaped) {
 }
 
 function previewIcon(shaped) {
+  if (shaped.kind === 'calendar') return 'calendar-plus';
   if (shaped.kind === 'image') return 'image';
   if (shaped.kind === 'link') return 'link';
   return 'file-text';
@@ -99,6 +122,17 @@ function previewIcon(shaped) {
 // Context-ranked target list. Background targets carry mode:'background'.
 function buildTargets(shaped) {
   const targets = [];
+
+  /*
+    A shared .ics has exactly one sensible destination, so it leads and
+    the generic text targets stay out of the way.
+  */
+  if (shaped.kind === 'calendar') {
+    targets.push({ id: 'ics', icon: 'calendar-plus', mode: 'open' });
+    targets.push({ id: 'note', icon: 'file-text', mode: 'open' });
+
+    return targets;
+  }
 
   if (shaped.kind !== 'image' && shaped.text) {
     targets.push({ id: 'capture', icon: 'zap', mode: 'background' });
@@ -126,6 +160,15 @@ function buildTargets(shaped) {
 // ---------------------------------------------------------------
 
 async function runTarget(id, shaped) {
+  if (id === 'ics') {
+    const { importCalendarFile } = await import('../calendar.js');
+
+    location.hash = '#calendar';
+    await importCalendarFile(shaped.calendarFile);
+
+    return;
+  }
+
   if (id === 'capture') {
     const { captureToJournal } = await import('../journal.js');
     await captureToJournal(shaped.text, { source: 'share-target' });
@@ -542,9 +585,15 @@ export function openShareRouter(payload) {
     document.body.append(overlay);
     render();
 
-    // Resolve the Matrix client lazily; re-render to reveal the chats zone
-    // once it's ready (a share must not wait on chat to be usable).
-    resolveMatrixClient()
+    /*
+      Resolve the Matrix client lazily; re-render to reveal the chats zone
+      once it's ready (a share must not wait on chat to be usable).
+
+      With chat off there is no homeserver to reach, so this is skipped
+      entirely: no SDK load, no failing login, and the chats zone simply
+      never appears. Every other share target is unaffected.
+    */
+    if (isChatEnabled()) resolveMatrixClient()
       .then((c) => {
         if (!c || !overlay.isConnected) return;
         client = c;

@@ -8744,6 +8744,47 @@ async function handleMetricsSummary(env, req, url, headers) {
     7 * DAY, since(120)
   );
 
+  /*
+    Revenue, from the transactions Paddle already sent us via webhook.
+    Reading our own rows rather than calling Paddle keeps this to one
+    source of truth, needs no extra credential, and works when Paddle's
+    API is slow or down.
+
+    Amounts are Paddle's minor units (cents) and are grouped by currency:
+    summing across currencies would invent a number that does not exist.
+  */
+  const revenue = await all(
+    `SELECT currency,
+            COUNT(*) AS n,
+            SUM(amount) AS gross
+       FROM billing_transactions
+      WHERE status IN ('completed', 'paid', 'billed')
+      GROUP BY currency`
+  );
+
+  const revenue30 = await all(
+    `SELECT currency,
+            COUNT(*) AS n,
+            SUM(amount) AS gross
+       FROM billing_transactions
+      WHERE status IN ('completed', 'paid', 'billed')
+        AND created_at >= ?
+      GROUP BY currency`,
+    since(30)
+  );
+
+  /*
+    Recurring revenue as currently contracted: the active subscriptions,
+    counted per plan. Turning that into an amount needs the price, which
+    lives on the transaction, so the honest figure here is the count and
+    the last 30 days of actual receipts above.
+  */
+  const activeSubs = await one(
+    `SELECT COUNT(*) AS n
+       FROM billing_subscriptions
+      WHERE status IN ('active', 'trialing')`
+  );
+
   // The sharing loop: shared spaces and public shares are how YANTA spreads.
   const spaces = await one(
     `SELECT COUNT(*) AS total FROM spaces`
@@ -8763,6 +8804,11 @@ async function handleMetricsSummary(env, req, url, headers) {
     plans,
     subscriptions,
     cancelPending: Number(cancelPending?.n || 0),
+    billing: {
+      activeSubscriptions: Number(activeSubs?.n || 0),
+      revenueAllTime: revenue,
+      revenue30d: revenue30
+    },
     retention,
     reach: {
       spaces: Number(spaces?.total || 0),

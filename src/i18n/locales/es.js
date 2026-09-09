@@ -26,6 +26,7 @@ export default {
       note: 'Nueva nota',
       ai: 'Preguntar a la IA',
       event: 'Nuevo evento',
+      ics: 'Añadir al calendario',
       rss: 'Añadir fuente',
     },
   },

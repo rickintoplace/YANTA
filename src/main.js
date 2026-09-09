@@ -3,6 +3,7 @@
 // pane divider, history navigation, view modes.
 // ============================================================
 
+import { isChatEnabled } from './chat/chat-enabled.js';
 import { $, state, store, openDB, toast, actionToast, cssColorToHex, safeCssColor, lucide, lucideCalendarDay, debounce } from './core.js';
 
 import {
@@ -2760,8 +2761,14 @@ async function init() {
   setupAssistant();
   setupFloatingCreate();
   setupRss();
-  setupChat();
-  setupChatNotifications();
+  /*
+    Chat is off (see chat/chat-enabled.js): no session, no notification
+    listeners, no Matrix SDK load. Everything below still runs.
+  */
+  if (isChatEnabled()) {
+    setupChat();
+    setupChatNotifications();
+  }
   setupCalendarWebReminders();
   setupCalendarPushScheduler();
   // Reconcile the stored push flag with the real browser subscription.
@@ -2771,7 +2778,13 @@ async function init() {
   setupPulseEngine();
   // Inbox and history live in a synced doc — reflect other devices' writes.
   watchPulseDocForInbox().catch(() => {});
-  setupSpaceMatrix();
+  /*
+    Space invites travel over Matrix DMs. With chat off there is no
+    homeserver to send or receive them, so the listeners stay uninstalled
+    and sharing falls back to links — which work regardless.
+  */
+  if (isChatEnabled()) setupSpaceMatrix();
+
   installVaultSpaceRestore();
   reportBrokenSharesOnce().catch(() => {});
 
@@ -2913,11 +2926,21 @@ async function init() {
     }
 
     else if (route.surface === 'chat') {
-      await openChatRoute(route.roomId || null, {
-        replace: true,
-      });
+      /*
+        A bookmarked #chat link must not open a surface that cannot work.
+        Send it to the dashboard instead of failing halfway in.
+      */
+      if (!isChatEnabled()) {
+        history.replaceState({}, '', '#dashboard');
+        showDashboard({ push: false });
+        initialRouteHandled = true;
+      } else {
+        await openChatRoute(route.roomId || null, {
+          replace: true,
+        });
+      }
 
-      if (route.dmUserId) {
+      if (route.dmUserId && isChatEnabled()) {
         // QR-/Link-Einstieg: neuen DM-Flow starten (mit Nutzer-Bestätigung).
         import('./chat/chat-ui.js')
           .then(({ startDmFromDeepLink }) => startDmFromDeepLink(route.dmUserId))
@@ -3050,6 +3073,17 @@ async function init() {
     }
 
     if (st.surface === 'chat' || route.surface === 'chat') {
+      /*
+        Also guard the runtime router, not just the boot route: a stored
+        history entry or a pasted #chat link would otherwise open a surface
+        that cannot work.
+      */
+      if (!isChatEnabled()) {
+        history.replaceState({}, '', '#dashboard');
+        showDashboard({ push: false });
+        return;
+      }
+
       closeGraph();
       closeCalendarPane({ silent: true });
       closeCalendar({

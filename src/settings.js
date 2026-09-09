@@ -6,6 +6,7 @@
 // Users can toggle "this device only" per settings group.
 // ============================================================
 
+import { isChatEnabled } from './chat/chat-enabled.js';
 import { $, el, state, store, toast, lucide, safeCssColor, cssColorToHex } from './core.js';
 import { LOCALES, getLocale, hasExplicitLocale, setLocale, clearLocale, t } from './i18n/index.js';
 import {
@@ -1060,7 +1061,10 @@ const SETTINGS_SECTIONS = [
   { id: 'ai',           label: 'AI',              icon: 'bot',            keywords: 'assistant model provider' },
   { id: 'semantic',     label: 'Semantic search', icon: 'brain-circuit',  keywords: 'embeddings vector search' },
   { id: 'pulse',        label: 'Pulse',           icon: 'activity',       keywords: 'routine automation background proactive agent heartbeat schedule digest' },
-  { id: 'chat',         label: 'Chat',            icon: 'message-circle', keywords: 'messages conversation' },
+  // Chat section hidden while chat is off — see chat/chat-enabled.js.
+  ...(isChatEnabled()
+    ? [{ id: 'chat', label: 'Chat', icon: 'message-circle', keywords: 'messages conversation' }]
+    : []),
   { id: 'sync',         label: 'Sync & Backup',   icon: 'refresh-cw',     keywords: 'cloud backup devices encrypted google drive' },
   { id: 'notifications', label: 'Notifications',  icon: 'bell',           keywords: 'alerts push reminders' },
   { id: 'install',      label: 'Install app',     icon: 'smartphone',     keywords: 'pwa install app native' },

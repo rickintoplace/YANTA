@@ -9,6 +9,8 @@ import {
   normalizeLucideName,
 } from './core.js';
 
+import { isChatEnabled } from './chat/chat-enabled.js';
+
 export const FLOATING_CREATE_SETTINGS_KEY = 'yanta.floatingCreate.v2';
 
 export const FLOATING_CREATE_MIN_DISTANCE = 58;
@@ -72,11 +74,17 @@ export const FLOATING_CREATE_ACTION_CATALOG = [
     defaultLabel: 'AI',
     defaultIcon: 'bot',
   },
-  {
+  /*
+    Chat omitted while chat is off — see chat/chat-enabled.js. The catalog
+    is the single source: normalizeFloatingCreateSettings() filters stored
+    actions against it, so a button someone had enabled disappears too
+    rather than becoming a dead tap target.
+  */
+  ...(isChatEnabled() ? [{
     id: 'chat',
     defaultLabel: 'Chat',
     defaultIcon: 'messages-square',
-  },
+  }] : []),
 ];
 
 export const DEFAULT_FLOATING_CREATE_SETTINGS = {

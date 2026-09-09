@@ -99,7 +99,208 @@ function subtractOneDayKey(dateKey) {
   return addDaysKey(dateKey, -1);
 }
 
-function parseIcsDate(value, params = {}) {
+/* ============================================================
+   Time zones
+
+   A `DTSTART;TZID=Europe/Berlin:20260928T150000` is a wall time in that
+   zone, not in the reader's zone. Treating it as local — which is what
+   a naive parser does — silently shifts every imported invitation for
+   anyone whose device is not in the sender's zone.
+
+   Two resolution paths, in the order real clients use them:
+
+   1. The TZID is an IANA name: ask Intl. That covers historic rules and
+      every DST change without us shipping a rule table.
+   2. It is not (Outlook writes "W. Europe Standard Time"): fall back to
+      the VTIMEZONE component the file carries with it, evaluating its
+      STANDARD/DAYLIGHT observances for the date in question.
+   ============================================================ */
+
+const zoneOffsetCache = new Map();
+
+function isKnownTimeZone(tz) {
+  const name = String(tz || '').trim();
+  if (!name) return false;
+
+  if (zoneOffsetCache.has(name)) return zoneOffsetCache.get(name);
+
+  let ok = false;
+
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: name });
+    ok = true;
+  } catch {
+    ok = false;
+  }
+
+  zoneOffsetCache.set(name, ok);
+
+  return ok;
+}
+
+/*
+  Offset of `timeZone` at a given absolute instant, in minutes east of UTC.
+  Derived by formatting the instant in that zone and diffing against the
+  same wall-clock read as UTC — the standard trick, and exact because
+  Intl owns the rules.
+*/
+function zoneOffsetMinutesAt(instantMs, timeZone) {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone,
+    hour12: false,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+
+  const parts = {};
+
+  for (const p of dtf.formatToParts(new Date(instantMs))) {
+    if (p.type !== 'literal') parts[p.type] = p.value;
+  }
+
+  const asUtc = Date.UTC(
+    Number(parts.year),
+    Number(parts.month) - 1,
+    Number(parts.day),
+    Number(parts.hour === '24' ? '00' : parts.hour),
+    Number(parts.minute),
+    Number(parts.second)
+  );
+
+  return Math.round((asUtc - instantMs) / 60000);
+}
+
+/*
+  Wall time in a zone -> absolute instant.
+
+  Two passes: the first offset guess can be wrong when the wall time sits
+  on the far side of a DST transition, so we re-derive the offset at the
+  candidate instant and correct once. A third pass never changes anything
+  for real zones.
+*/
+function wallTimeToInstant(y, mo, d, h, mi, s, timeZone) {
+  const naive = Date.UTC(y, mo - 1, d, h, mi, s);
+
+  let offset = zoneOffsetMinutesAt(naive, timeZone);
+  let instant = naive - offset * 60000;
+
+  const corrected = zoneOffsetMinutesAt(instant, timeZone);
+
+  if (corrected !== offset) {
+    offset = corrected;
+    instant = naive - offset * 60000;
+  }
+
+  return instant;
+}
+
+function parseUtcOffset(raw) {
+  const m = String(raw || '').trim().match(/^([+-])(\d{2})(\d{2})(\d{2})?$/);
+  if (!m) return null;
+
+  const sign = m[1] === '-' ? -1 : 1;
+  const minutes = Number(m[2]) * 60 + Number(m[3]);
+
+  return sign * minutes;
+}
+
+/*
+  Nth weekday of a month, e.g. BYDAY=-1SU (last Sunday). Returns the day
+  of month. n < 0 counts back from the end.
+*/
+function nthWeekdayOfMonth(year, month, weekday, n) {
+  if (n > 0) {
+    const first = new Date(Date.UTC(year, month - 1, 1)).getUTCDay();
+    return 1 + ((weekday - first + 7) % 7) + (n - 1) * 7;
+  }
+
+  const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  const last = new Date(Date.UTC(year, month - 1, lastDay)).getUTCDay();
+
+  return lastDay - ((last - weekday + 7) % 7) + (n + 1) * 7;
+}
+
+const ICS_WEEKDAYS = { SU: 0, MO: 1, TU: 2, WE: 3, TH: 4, FR: 5, SA: 6 };
+
+/*
+  The UTC instant at which an observance takes effect in `year`.
+  Transitions are given in the wall time of the offset being left, so the
+  switch instant is that wall time minus TZOFFSETFROM.
+*/
+function observanceTransitionMs(observance, year) {
+  const rule = observance.rrule || {};
+
+  let month = Number(rule.BYMONTH || 0);
+  let day = 0;
+
+  const start = observance.dtstart || {};
+
+  if (!month) month = start.month || 0;
+  if (!month) return null;
+
+  const byday = String(rule.BYDAY || '').trim();
+  const m = byday.match(/^(-?\d)?([A-Z]{2})$/);
+
+  if (m && ICS_WEEKDAYS[m[2]] !== undefined) {
+    day = nthWeekdayOfMonth(year, month, ICS_WEEKDAYS[m[2]], Number(m[1] || 1));
+  } else {
+    day = start.day || 1;
+  }
+
+  const wall = Date.UTC(
+    year,
+    month - 1,
+    day,
+    start.hour || 0,
+    start.minute || 0,
+    start.second || 0
+  );
+
+  return wall - (observance.offsetFrom || 0) * 60000;
+}
+
+/*
+  Resolve a wall time using the file's own VTIMEZONE: pick the observance
+  whose most recent transition precedes the instant. Checks the previous
+  year too, so January dates land on the observance that started in
+  October.
+*/
+function wallTimeViaVtimezone(y, mo, d, h, mi, s, vtimezone) {
+  const observances = vtimezone?.observances || [];
+  if (!observances.length) return null;
+
+  const naive = Date.UTC(y, mo - 1, d, h, mi, s);
+
+  let best = null;
+
+  for (const year of [y - 1, y]) {
+    for (const obs of observances) {
+      const at = observanceTransitionMs(obs, year);
+      if (at == null) continue;
+
+      // Compare in the same frame: the naive wall time minus this
+      // observance's offset is the instant it would represent.
+      const candidate = naive - (obs.offsetTo || 0) * 60000;
+
+      if (candidate >= at && (!best || at > best.at)) {
+        best = { at, offset: obs.offsetTo || 0 };
+      }
+    }
+  }
+
+  if (!best) {
+    const fallback = observances.find((o) => o.type === 'STANDARD') || observances[0];
+    return naive - (fallback.offsetTo || 0) * 60000;
+  }
+
+  return naive - best.offset * 60000;
+}
+
+function parseIcsDate(value, params = {}, vtimezones = null) {
   const raw = String(value || '').trim();
 
   if (!raw) return null;
@@ -138,18 +339,46 @@ function parseIcsDate(value, params = {}) {
     };
   }
 
-  // Floating/local: 20260103T120000
+  // Zoned or floating: 20260103T120000
   m = raw.match(/^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})$/);
 
   if (m) {
-    const date = new Date(
-      Number(m[1]),
-      Number(m[2]) - 1,
-      Number(m[3]),
-      Number(m[4]),
-      Number(m[5]),
-      Number(m[6])
-    );
+    const [, ys, mos, ds, hs, mis, ss] = m;
+    const y = Number(ys);
+    const mo = Number(mos);
+    const d = Number(ds);
+    const h = Number(hs);
+    const mi = Number(mis);
+    const s = Number(ss);
+
+    const tzid = String(params.TZID || '').trim();
+
+    if (tzid) {
+      if (isKnownTimeZone(tzid)) {
+        return {
+          iso: new Date(wallTimeToInstant(y, mo, d, h, mi, s, tzid)).toISOString(),
+          allDay: false,
+          tzid,
+        };
+      }
+
+      /*
+        Not an IANA name (Outlook and friends). The file has to carry a
+        VTIMEZONE for it — that is what it is for.
+      */
+      const viaFile = wallTimeViaVtimezone(y, mo, d, h, mi, s, vtimezones?.get(tzid));
+
+      if (viaFile != null) {
+        return {
+          iso: new Date(viaFile).toISOString(),
+          allDay: false,
+          tzid,
+        };
+      }
+    }
+
+    // Genuinely floating: RFC 5545 says interpret in the local zone.
+    const date = new Date(y, mo - 1, d, h, mi, s);
 
     return {
       iso: date.toISOString(),
@@ -158,6 +387,82 @@ function parseIcsDate(value, params = {}) {
   }
 
   return null;
+}
+
+/*
+  Collect VTIMEZONE components so a non-IANA TZID can still be resolved.
+  Only what the fallback needs: each observance's offsets and its yearly
+  transition rule.
+*/
+function parseVtimezones(lines) {
+  const zones = new Map();
+
+  let zone = null;
+  let observance = null;
+
+  for (const line of lines) {
+    const prop = parseProperty(line);
+    const upper = String(prop.value || '').toUpperCase();
+
+    if (prop.name === 'BEGIN' && upper === 'VTIMEZONE') {
+      zone = { tzid: '', observances: [] };
+      continue;
+    }
+
+    if (prop.name === 'END' && upper === 'VTIMEZONE') {
+      if (zone?.tzid) zones.set(zone.tzid, zone);
+      zone = null;
+      continue;
+    }
+
+    if (!zone) continue;
+
+    if (prop.name === 'BEGIN' && (upper === 'STANDARD' || upper === 'DAYLIGHT')) {
+      observance = { type: upper, rrule: {}, dtstart: null, offsetFrom: 0, offsetTo: 0 };
+      continue;
+    }
+
+    if (prop.name === 'END' && (upper === 'STANDARD' || upper === 'DAYLIGHT')) {
+      if (observance) zone.observances.push(observance);
+      observance = null;
+      continue;
+    }
+
+    if (!observance) {
+      if (prop.name === 'TZID') zone.tzid = String(prop.value || '').trim();
+      continue;
+    }
+
+    if (prop.name === 'TZOFFSETFROM') {
+      observance.offsetFrom = parseUtcOffset(prop.value) ?? 0;
+    } else if (prop.name === 'TZOFFSETTO') {
+      observance.offsetTo = parseUtcOffset(prop.value) ?? 0;
+    } else if (prop.name === 'DTSTART') {
+      const m = String(prop.value || '').match(
+        /^(\d{4})(\d{2})(\d{2})T(\d{2})(\d{2})(\d{2})$/
+      );
+
+      if (m) {
+        observance.dtstart = {
+          year: Number(m[1]),
+          month: Number(m[2]),
+          day: Number(m[3]),
+          hour: Number(m[4]),
+          minute: Number(m[5]),
+          second: Number(m[6]),
+        };
+      }
+    } else if (prop.name === 'RRULE') {
+      for (const part of String(prop.value || '').split(';')) {
+        const eq = part.indexOf('=');
+        if (eq < 0) continue;
+
+        observance.rrule[part.slice(0, eq).toUpperCase()] = part.slice(eq + 1);
+      }
+    }
+  }
+
+  return zones;
 }
 
 function unfoldIcs(text) {
@@ -235,7 +540,7 @@ function parseIcsGeo(raw, locationRaw = '') {
   }) || undefined;
 }
 
-function parseIcsExdates(values = [], allDay = false) {
+function parseIcsExdates(values = [], allDay = false, vtimezones = null) {
   const list = Array.isArray(values)
     ? values
     : values
@@ -251,7 +556,7 @@ function parseIcsExdates(values = [], allDay = false) {
       .filter(Boolean);
 
     for (const raw of rawValues) {
-      const parsed = parseIcsDate(raw, prop?.params || {});
+      const parsed = parseIcsDate(raw, prop?.params || {}, vtimezones);
 
       if (!parsed?.iso) continue;
 
@@ -262,17 +567,119 @@ function parseIcsExdates(values = [], allDay = false) {
   return out;
 }
 
-export function parseIcsEvents(text) {
-  const lines = unfoldIcs(text);
-  const events = [];
+/* ============================================================
+   Scheduling participants (RFC 5545 / iTIP)
 
-  let current = null;
+   ORGANIZER and ATTENDEE carry who was invited and how each of them
+   answered. PARTSTAT is the answer; without it an invitation looks like
+   a plain appointment and the whole point of receiving it is lost.
+   ============================================================ */
+
+const PARTSTAT_TO_STATUS = {
+  'NEEDS-ACTION': 'pending',
+  ACCEPTED: 'accepted',
+  DECLINED: 'declined',
+  TENTATIVE: 'tentative',
+  DELEGATED: 'delegated',
+  COMPLETED: 'accepted',
+  'IN-PROCESS': 'pending',
+};
+
+const ROLE_TO_ROLE = {
+  CHAIR: 'chair',
+  'REQ-PARTICIPANT': 'required',
+  'OPT-PARTICIPANT': 'optional',
+  'NON-PARTICIPANT': 'observer',
+};
+
+/*
+  CAL-ADDRESS values are URIs — "mailto:a@b.c" in practice, but the
+  scheme is not guaranteed, so keep the raw value alongside the address.
+*/
+function parseCalAddress(prop) {
+  if (!prop) return null;
+
+  const raw = String(prop.value || '').trim();
+  if (!raw) return null;
+
+  const params = prop.params || {};
+  const email = /^mailto:/i.test(raw) ? raw.slice(7).trim() : '';
+
+  const name = unescapeIcsText(String(params.CN || '').trim());
+
+  return {
+    email,
+    uri: raw,
+    name: name || email || raw,
+    status: PARTSTAT_TO_STATUS[String(params.PARTSTAT || '').toUpperCase()] || 'pending',
+    role: ROLE_TO_ROLE[String(params.ROLE || '').toUpperCase()] || 'required',
+    rsvp: String(params.RSVP || '').toUpperCase() === 'TRUE',
+    type: String(params.CUTYPE || 'INDIVIDUAL').toUpperCase() === 'RESOURCE'
+      ? 'resource'
+      : 'individual',
+  };
+}
+
+/**
+ * Full parse: calendar-level METHOD plus the events it carries.
+ *
+ * METHOD decides what the file MEANS — REQUEST is an invitation, REPLY is
+ * somebody answering one, CANCEL withdraws it. Importing all three as
+ * "a new event" is the classic way to end up with duplicates and with
+ * cancelled meetings still sitting in the calendar.
+ */
+export function parseIcsCalendar(text) {
+  const lines = unfoldIcs(text);
+  const vtimezones = parseVtimezones(lines);
+
+  let method = '';
 
   for (const line of lines) {
     const prop = parseProperty(line);
 
+    if (prop.name === 'METHOD') {
+      method = String(prop.value || '').trim().toUpperCase();
+      break;
+    }
+
+    if (prop.name === 'BEGIN' && String(prop.value).toUpperCase() === 'VEVENT') break;
+  }
+
+  return {
+    method: method || 'PUBLISH',
+    events: parseIcsEvents(text, { vtimezones }),
+  };
+}
+
+export function parseIcsEvents(text, { vtimezones: providedZones = null } = {}) {
+  const lines = unfoldIcs(text);
+  const vtimezones = providedZones || parseVtimezones(lines);
+  const events = [];
+
+  let current = null;
+  let inVevent = false;
+
+  for (const line of lines) {
+    const prop = parseProperty(line);
+
+    /*
+      Skip nested components (VALARM, and VTIMEZONE handled separately):
+      their DTSTART must never be mistaken for the event's.
+    */
     if (prop.name === 'BEGIN' && prop.value.toUpperCase() === 'VEVENT') {
       current = {};
+      inVevent = true;
+      continue;
+    }
+
+    if (inVevent && prop.name === 'BEGIN' && prop.value.toUpperCase() !== 'VEVENT') {
+      inVevent = false;
+      continue;
+    }
+
+    if (!inVevent && prop.name === 'END' && current &&
+        prop.value.toUpperCase() !== 'VEVENT') {
+      inVevent = true;
       continue;
     }
 
@@ -282,11 +689,11 @@ export function parseIcsEvents(text) {
         const endProp = firstProp(current.DTEND);
 
         const start = startProp
-          ? parseIcsDate(startProp.value, startProp.params)
+          ? parseIcsDate(startProp.value, startProp.params, vtimezones)
           : null;
 
         const end = endProp
-          ? parseIcsDate(endProp.value, endProp.params)
+          ? parseIcsDate(endProp.value, endProp.params, vtimezones)
           : null;
 
         if (start?.iso) {
@@ -308,9 +715,25 @@ export function parseIcsEvents(text) {
           const locationProp = firstProp(current.LOCATION);
           const statusProp = firstProp(current.STATUS);
           const geoProp = firstProp(current.GEO);
+          const sequenceProp = firstProp(current.SEQUENCE);
+
+          const organizer = parseCalAddress(firstProp(current.ORGANIZER));
+
+          const attendees = (Array.isArray(current.ATTENDEE)
+            ? current.ATTENDEE
+            : current.ATTENDEE ? [current.ATTENDEE] : []
+          )
+            .map(parseCalAddress)
+            .filter(Boolean);
 
           events.push({
             externalUid: uidProp?.value || '',
+            sequence: Number.isFinite(Number(sequenceProp?.value))
+              ? Number(sequenceProp.value)
+              : 0,
+            organizer,
+            attendees,
+            startTzid: start.tzid || '',
             title: unescapeIcsText(summaryProp?.value || 'Imported event'),
             description: unescapeIcsText(descriptionProp?.value || ''),
             location: unescapeIcsText(locationProp?.value || ''),
@@ -322,7 +745,11 @@ export function parseIcsEvents(text) {
             recurrence: rruleProp?.value
               ? { rrule: rruleProp.value }
               : null,
-            recurrenceExceptions: parseIcsExdates(current.EXDATE || [], !!start.allDay),
+            recurrenceExceptions: parseIcsExdates(
+              current.EXDATE || [],
+              !!start.allDay,
+              vtimezones
+            ),
             recurrenceOverrides: {},
           });
         }
@@ -334,9 +761,10 @@ export function parseIcsEvents(text) {
 
     if (!current) continue;
 
-    if (prop.name === 'EXDATE') {
-      if (!current.EXDATE) current.EXDATE = [];
-      current.EXDATE.push({
+    // Properties that may legitimately repeat.
+    if (prop.name === 'EXDATE' || prop.name === 'ATTENDEE') {
+      if (!current[prop.name]) current[prop.name] = [];
+      current[prop.name].push({
         value: prop.value,
         params: prop.params,
       });

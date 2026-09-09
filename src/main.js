@@ -2378,17 +2378,23 @@ async function init() {
     };
   };
 
-  try {
-    /*
-      Chat auto-resume must be installed even without local Matrix credentials.
-      Why:
-      On a newly synced device, Matrix credentials are intentionally absent.
-      The synced Vault chatAccount entry is the real cross-device signal.
-    */
-    scheduleChatAutoResume();
-  } catch (err) {
-    console.warn('[YANTA Chat] auto-resume setup failed', err);
-    toast('Could not set up Chat auto-resume.', 'error');
+  /*
+    Chat auto-resume must be installed even without local Matrix credentials.
+    Why:
+    On a newly synced device, Matrix credentials are intentionally absent.
+    The synced Vault chatAccount entry is the real cross-device signal.
+
+    With chat off there is no homeserver to resume against, so this stays
+    uninstalled — otherwise every boot ends in a "Could not resume Chat."
+    toast about a feature the user cannot even see.
+  */
+  if (isChatEnabled()) {
+    try {
+      scheduleChatAutoResume();
+    } catch (err) {
+      console.warn('[YANTA Chat] auto-resume setup failed', err);
+      toast('Could not set up Chat auto-resume.', 'error');
+    }
   }
 
   registerServiceWorker();

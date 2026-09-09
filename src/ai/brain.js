@@ -566,7 +566,15 @@ await ensureNote(
   DEFAULT_AI_BRAIN_EXCALIDRAW_SLIDESHOW_SKILL
 );
 
-  state.expandedFolders.add(AI_BRAIN_IDS.rootFolder);
+  /*
+    Deliberately NOT expanded.
+
+    The AI brain is scaffolding — skills and past sessions the user rarely
+    opens. Auto-expanding it put a dozen extra rows in the tree on every
+    boot, which is exactly the "too much at once" the sidebar suffers
+    from. Anyone who wants it open expands it once and that choice is
+    remembered.
+  */
 
   return {
     root,

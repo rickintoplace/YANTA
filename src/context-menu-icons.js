@@ -61,11 +61,18 @@ function cleanLabel(label = '') {
     // ----------------------------------------------------------------
     if (startsAny(label, ['new note'])) return 'file-plus';
     if (startsAny(label, ['new text note'])) return 'file-plus';
-    if (startsAny(label, ['New checklist'])) return 'list-checks';
+    /*
+      cleanLabel() lowercases, so patterns must be lowercase too — these
+      two carried capitals and therefore never matched, which is why
+      "New checklist here" came up with no icon at all.
+    */
+    if (startsAny(label, ['new checklist', 'new check list', 'new list', 'new task list'])) {
+      return 'list-checks';
+    }
     if (startsAny(label, ['new drawing'])) return 'line-squiggle';
     if (startsAny(label, ['new image'])) return 'image-plus';
     if (startsAny(label, ['new folder', 'new subfolder', 'new sub-folder'])) return 'folder-plus';
-    if (startsAny(label, ['New event'])) return 'calendar-plus';
+    if (startsAny(label, ['new event'])) return 'calendar-plus';
     if (startsAny(label, ['create event'])) return 'calendar-plus';
     if (startsAny(label, ['create'])) return 'plus';
   

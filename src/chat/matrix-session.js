@@ -26,6 +26,8 @@ import {
   chatSettings,
 } from './chat-store.js';
 
+import { isChatEnabled } from './chat-enabled.js';
+
 import {
   bootstrapChatCrypto,
   ingestChatAccountSecrets,
@@ -1421,6 +1423,18 @@ function isChatPendingError(err) {
 }
 
 function requestChatAutoResume(reason = 'auto-resume', delay = 500) {
+  /*
+    Guard at the source rather than at every caller.
+
+    Auto-resume is requested from boot, from the vault chat-account
+    listener, from the device-revoked listener and from the chat UI. With
+    chat off there is no homeserver to resume against, and each of those
+    paths would end in a "Could not resume Chat." toast about a feature
+    the user cannot even see. One check here covers all of them, now and
+    for callers added later.
+  */
+  if (!isChatEnabled()) return;
+
   clearTimeout(chatAutoResumeTimer);
 
   const waitMs = Math.max(

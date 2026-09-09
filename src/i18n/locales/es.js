@@ -161,6 +161,13 @@ export default {
     welcomeVault: 'Bóveda de bienvenida creada',
   },
 
+  tabbar: {
+    ariaLabel: 'Secciones principales',
+    notes: 'Notas',
+    calendar: 'Calendario',
+    ai: 'IA',
+    more: 'Más',
+  },
   tree: {
     section: {
       pinned: 'Fijadas',

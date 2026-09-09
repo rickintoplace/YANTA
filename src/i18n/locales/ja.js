@@ -160,6 +160,13 @@ export default {
     welcomeVault: 'ようこそボルトを作成しました',
   },
 
+  tabbar: {
+    ariaLabel: 'メインセクション',
+    notes: 'ノート',
+    calendar: 'カレンダー',
+    ai: 'AI',
+    more: 'その他',
+  },
   tree: {
     section: {
       pinned: 'ピン留め',

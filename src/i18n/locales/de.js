@@ -161,6 +161,13 @@ export default {
     welcomeVault: 'Willkommens-Tresor erstellt',
   },
 
+  tabbar: {
+    ariaLabel: 'Hauptbereiche',
+    notes: 'Notizen',
+    calendar: 'Kalender',
+    ai: 'KI',
+    more: 'Mehr',
+  },
   tree: {
     section: {
       pinned: 'Angeheftet',

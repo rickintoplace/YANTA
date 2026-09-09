@@ -4,6 +4,7 @@
 // ============================================================
 
 import { isChatEnabled } from './chat/chat-enabled.js';
+import { installMobileTabBar } from './mobile-tab-bar.js';
 import { $, state, store, openDB, toast, actionToast, cssColorToHex, safeCssColor, lucide, lucideCalendarDay, debounce } from './core.js';
 
 import {
@@ -3605,6 +3606,19 @@ function bindEvents() {
       afterAction: closeMobileAfterSidebarAction,
     }
   );
+
+  /*
+    The same destinations as the sidebar foot, but reachable without
+    opening the drawer first. On the phone that drawer was the reason the
+    app felt like it had no map: everything was one tap away, behind a tap
+    nobody knew to make.
+  */
+  installMobileTabBar({
+    openNotes: () => showDashboard({ push: true }),
+    openCalendar: () => openCalendarRoute(),
+    openAssistant: () => openAssistantSmart(),
+    openMore: (anchor) => openSidebarFootMenu(anchor),
+  });
 
   updateChatSidebarBadge(
     Number(document.querySelector('.has-chat-unread')?.dataset?.chatUnreadCount || 0)

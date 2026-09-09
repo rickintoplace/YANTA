@@ -161,6 +161,13 @@ export default {
     welcomeVault: 'Coffre de bienvenue créé',
   },
 
+  tabbar: {
+    ariaLabel: 'Sections principales',
+    notes: 'Notes',
+    calendar: 'Agenda',
+    ai: 'IA',
+    more: 'Plus',
+  },
   tree: {
     section: {
       pinned: 'Épinglées',

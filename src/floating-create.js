@@ -226,7 +226,14 @@ function injectCss() {
 .yanta-qc {
   position: fixed;
   right: max(18px, env(safe-area-inset-right));
-  bottom: max(18px, env(safe-area-inset-bottom));
+  /*
+    Lifted clear of the mobile tab bar when it is up. --mobile-tabbar-h is
+    only defined while the bar is shown, so the fallback of 0 keeps the
+    original resting place everywhere else.
+  */
+  bottom: calc(
+    max(18px, env(safe-area-inset-bottom)) + var(--mobile-tabbar-h, 0px)
+  );
 
   z-index: 80;
 

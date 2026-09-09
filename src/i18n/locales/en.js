@@ -168,6 +168,13 @@ export default {
     welcomeVault: 'Welcome vault created',
   },
 
+  tabbar: {
+    ariaLabel: 'Main sections',
+    notes: 'Notes',
+    calendar: 'Calendar',
+    ai: 'AI',
+    more: 'More',
+  },
   tree: {
     section: {
       pinned: 'Pinned',

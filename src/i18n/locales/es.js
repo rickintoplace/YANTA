@@ -495,6 +495,9 @@ export default {
   },
 
   infoPanel: {
+    cloudSignedOutTitle: 'Sesión cerrada en YANTA Cloud',
+    cloudSignedOutText: 'La sincronización está en pausa y no se puede comprobar tu plan hasta que vuelvas a iniciar sesión. No se pierde nada en este dispositivo.',
+    cloudSignedOutCta: 'Iniciar sesión',
     pulsePausedTitle: {
       one: 'Tu plan tiene {count} rutina en pausa',
       other: 'Tu plan tiene {count} rutinas en pausa',

@@ -488,6 +488,9 @@ export default {
   },
 
   infoPanel: {
+    cloudSignedOutTitle: 'YANTA Cloud からサインアウト中',
+    cloudSignedOutText: '再度サインインするまで同期は一時停止し、プランを確認できません。この端末のデータは失われません。',
+    cloudSignedOutCta: 'サインイン',
     pulsePausedTitle: {
       other: 'プランにより {count} 件のルーティンが停止中です',
     },

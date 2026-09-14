@@ -2012,6 +2012,25 @@ async function sendLoginEmail(env, { email, code, magicUrl }) {
   });
 }
 __name(sendLoginEmail, "sendLoginEmail");
+/*
+  Sessions renew themselves while they are in use.
+
+  The cookie used to be stamped once at login with a fixed 90-day life and
+  never touched again, so an active user was logged out mid-work exactly
+  90 days later — and being logged out did not announce itself, it just
+  made the app quietly behave as if the account were on the free plan.
+  A session that is still being used should not expire out from under
+  someone.
+
+  The token itself is unchanged; only its lifetime moves. The refreshed
+  Set-Cookie is stashed per request and attached by the outer handler,
+  because getSession() runs deep inside route handlers that do not own
+  the response headers.
+*/
+const SESSION_TTL_MS = 90 * 24 * 60 * 60 * 1e3;
+const SESSION_RENEW_BELOW_MS = 60 * 24 * 60 * 60 * 1e3;
+const pendingSessionRenewal = new WeakMap();
+
 async function getSession(env, req) {
   const cookies = parseCookies(req);
   const token = cookies[env.COOKIE_NAME || "yanta_cloud_session"];
@@ -2031,6 +2050,16 @@ async function getSession(env, req) {
   await env.DB.prepare(
     `UPDATE users SET last_seen_at = ? WHERE id = ?`
   ).bind(now(), row.user_id).run();
+  if (Number(row.expires_at) - now() < SESSION_RENEW_BELOW_MS) {
+    const nextExpiry = now() + SESSION_TTL_MS;
+    await env.DB.prepare(
+      `UPDATE sessions SET expires_at = ? WHERE id = ?`
+    ).bind(nextExpiry, row.session_id).run();
+    pendingSessionRenewal.set(
+      req,
+      cookieHeader(env, token, Math.floor(SESSION_TTL_MS / 1e3))
+    );
+  }
   const plan = await resolveBillingPlan(env, row.user_id, row.plan || "free");
 
   return {
@@ -2727,6 +2756,23 @@ async function handleRevokeDevice(env, req, url, headers) {
       ok: false,
       message: "Device not found"
     }, 404, headers);
+  }
+  /*
+    Removing an already-removed device clears the row for good.
+
+    Revoking is a soft delete so the device keeps failing closed, but the
+    rows were then listed forever with no way to dismiss them — device
+    lists filled up with "Removed" entries nobody could clear. A second
+    Remove is the obvious gesture for "and take it off my list", and it
+    is safe: access was already cut when it was revoked.
+  */
+  if (target.revoked_at) {
+    await env.DB.prepare(
+      `DELETE FROM devices
+       WHERE user_id = ? AND vault_id = ? AND device_id = ?`
+    ).bind(user.userId, vaultId, targetDeviceId).run();
+    await audit(env, req, "device_deleted", user.userId, { vaultId, targetDeviceId });
+    return json({ ok: true, deleted: true }, 200, headers);
   }
   await env.DB.prepare(
     `UPDATE devices
@@ -9126,7 +9172,18 @@ __name(route, "route");
 var index_default = {
   async fetch(req, env) {
     try {
-      return await route(req, env);
+      const res = await route(req, env);
+      const renewal = pendingSessionRenewal.get(req);
+
+      if (!renewal) return res;
+
+      pendingSessionRenewal.delete(req);
+
+      // Responses are immutable; copy it to append the refreshed cookie.
+      const withCookie = new Response(res.body, res);
+      withCookie.headers.append("set-cookie", renewal);
+
+      return withCookie;
     } catch (err) {
       console.error("[YANTA Cloud Worker FATAL]", safeErrorForLog(err));
 

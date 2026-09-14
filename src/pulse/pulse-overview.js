@@ -997,5 +997,13 @@ export async function pausedByPlanRoutines() {
 
   const allowance = await getPulseAllowance();
 
+  /*
+    Only claim the PLAN paused something when the server actually told us
+    what the plan is. With an expired session or no network the allowance
+    is a remembered guess, and announcing "your plan paused 4 routines"
+    off a guess is how a paying customer gets told they were downgraded.
+  */
+  if (allowance.confirmed === false) return [];
+
   return partitionByAllowance(await listRoutines(), allowance).overCap;
 }

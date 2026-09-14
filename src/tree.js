@@ -2654,6 +2654,7 @@ function noteMenu(e, n) {
   showMenu(e.clientX, e.clientY, [
     {
       label: n.pinned ? t('tree.menu.unpin') : t('tree.menu.pin'),
+      icon: n.pinned ? 'pin-off' : 'pin',
       action: async () => {
         n.pinned = !n.pinned;
         n.updated = Date.now();
@@ -2668,10 +2669,12 @@ function noteMenu(e, n) {
     },
     {
       label: t('tree.menu.iconColor'),
+      icon: 'palette',
       action: () => editItemsIconColor([noteKey(n.id)]),
     },
     {
       label: t('tree.menu.rename'),
+      icon: 'pencil',
       action: () => renameTreeNote(n.id),
     },
     'hr',
@@ -2686,6 +2689,7 @@ function noteMenu(e, n) {
     'hr',
     {
       label: n.archived ? t('tree.menu.unarchive') : t('tree.menu.archive'),
+      icon: n.archived ? 'archive-restore' : 'archive',
       action: async () => {
         const nowArchived = !n.archived;
 
@@ -2699,15 +2703,18 @@ function noteMenu(e, n) {
     },
     {
       label: t('tree.menu.moveToFolder'),
+      icon: 'folder-input',
       action: () => moveSelectedToFolder([noteKey(n.id)]),
     },
     {
       label: t('tree.menu.duplicate'),
+      icon: 'copy',
       action: () => duplicateNote(n),
     },
     'hr',
     {
       label: t('tree.menu.moveToTrash'),
+      icon: 'trash',
       danger: true,
       action: async () => {
         await trashItemsWithUndo({
@@ -2750,19 +2757,23 @@ function folderMenu(e, f) {
   showMenu(e.clientX, e.clientY, [
     {
       label: t('tree.menu.open'),
+      icon: 'folder-open',
       action: () => openFolderInDashboard(f.id, { push: true }),
     },
     'hr',
     {
       label: t('tree.menu.newNoteHere'),
+      icon: 'file-plus',
       action: () => newNote(f.id),
     },
     {
       label: t('tree.menu.newSubFolder'),
+      icon: 'folder-plus',
       action: () => newFolder(f.id),
     },
     {
       label: t('tree.menu.selectFolderContents'),
+      icon: 'square-check-big',
       action: () => selectFolderSubtree(f.id),
     },
     'hr',
@@ -2777,14 +2788,17 @@ function folderMenu(e, f) {
     'hr',
     {
       label: t('tree.menu.iconColor'),
+      icon: 'palette',
       action: () => editItemsIconColor([folderKey(f.id)]),
     },
     {
       label: t('tree.menu.rename'),
+      icon: 'pencil',
       action: () => renameTreeFolder(f.id),
     },
     {
       label: f.archived ? t('tree.menu.unarchiveFolder') : t('tree.menu.archiveFolder'),
+      icon: f.archived ? 'archive-restore' : 'archive',
       action: async () => {
         const nowArchived = !f.archived;
 
@@ -2798,11 +2812,13 @@ function folderMenu(e, f) {
     },
     {
       label: t('tree.menu.moveToFolder'),
+      icon: 'folder-input',
       action: () => moveSelectedToFolder([folderKey(f.id)]),
     },
     'hr',
     {
       label: t('tree.menu.moveFolderToTrash'),
+      icon: 'trash',
       danger: true,
       action: async () => {
         await trashItemsWithUndo({
@@ -2837,12 +2853,14 @@ function bulkMenu(e, items) {
   if (noteCount) {
     menu.push({
       label: t('tree.bulk.pinSelected', { count: noteCount }),
+      icon: 'pin',
       disabled: !anyUnpinned,
       action: () => bulkSetPinned(notes, true),
     });
 
     menu.push({
       label: t('tree.bulk.unpinSelected', { count: noteCount }),
+      icon: 'pin-off',
       disabled: !anyPinned,
       action: () => bulkSetPinned(notes, false),
     });
@@ -2850,17 +2868,20 @@ function bulkMenu(e, items) {
 
   menu.push({
     label: t('tree.bulk.iconColorSelected'),
+    icon: 'palette',
     action: () => editItemsIconColor(items.map((x) => x.key)),
   });
 
   menu.push({
     label: t('tree.bulk.moveSelectedToFolder'),
+    icon: 'folder-input',
     action: () => moveSelectedToFolder(items.map((x) => x.key)),
   });
 
   if (noteCount) {
     menu.push({
       label: t('tree.bulk.duplicateSelected', { count: noteCount }),
+      icon: 'copy',
       action: () => duplicateNotes(notes),
     });
   }
@@ -2869,6 +2890,7 @@ function bulkMenu(e, items) {
 
   menu.push({
     label: t('tree.bulk.clearSelection'),
+    icon: 'x',
     action: () => {
       selection.keys.clear();
       selection.anchorKey = null;
@@ -2878,6 +2900,7 @@ function bulkMenu(e, items) {
 
   menu.push({
     label: t('tree.bulk.deleteSelected'),
+    icon: 'trash',
     danger: true,
     action: () => deleteSelectedItems(items),
   });

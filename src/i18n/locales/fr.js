@@ -495,6 +495,9 @@ export default {
   },
 
   infoPanel: {
+    cloudSignedOutTitle: 'Déconnecté de YANTA Cloud',
+    cloudSignedOutText: 'La synchronisation est en pause et votre formule ne peut pas être vérifiée tant que vous ne vous reconnectez pas. Rien n’est perdu sur cet appareil.',
+    cloudSignedOutCta: 'Se connecter',
     pulsePausedTitle: {
       one: '{count} routine est en pause à cause de votre formule',
       other: '{count} routines sont en pause à cause de votre formule',

@@ -502,6 +502,9 @@ export default {
   },
 
   infoPanel: {
+    cloudSignedOutTitle: 'Signed out of YANTA Cloud',
+    cloudSignedOutText: 'Sync is paused and your plan cannot be checked until you sign in again. Nothing on this device is lost.',
+    cloudSignedOutCta: 'Sign in',
     pulsePausedTitle: {
       one: '{count} routine is paused by your plan',
       other: '{count} routines are paused by your plan',

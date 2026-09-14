@@ -6,6 +6,16 @@
 // - Explicit item.icon always wins.
 // - Label heuristics cover dynamic labels like "Pin / Unpin",
 //   "Archive / Unarchive", "New note here", "Delete folder…".
+//
+// IMPORTANT — the heuristics below match ENGLISH text and nothing else.
+// A menu whose labels come from t() therefore gets NO icon for any of the
+// other four locales, silently: the app looks finished in English and
+// half-drawn in German. That is not fixable by adding translated patterns
+// (five locales × every label, drifting forever).
+//
+// So: menu items with localized labels MUST carry an explicit `icon:`.
+// What is left here is a fallback for the handful of call sites that
+// still pass hardcoded English strings.
 // ============================================================
 
 function cleanLabel(label = '') {

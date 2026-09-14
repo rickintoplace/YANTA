@@ -1518,18 +1518,29 @@ function hasActiveCloudDevices(devices = []) {
   return devices.some((d) => d.active !== false);
 }
 
+/*
+  Two very different situations used to arrive here as one:
+
+    a) this browser has no running sync runtime — usually because the
+       cloud session expired, so the runtime could not start;
+    b) the server actually revoked this device.
+
+  Only (b) is "Device removed". Reporting (a) the same way told people
+  their device had been removed when nothing had been, and pushed them
+  into re-pairing with the Recovery Key — which mints a NEW device id and
+  leaves the old one behind. That is where duplicate device entries come
+  from, and why the list slowly fills up.
+*/
 async function loadVaultDevicesForHome(vaultId, currentDeviceId) {
   if (!vaultId) {
-    return {
-      devices: [],
-      accessError: '',
-    };
+    return { devices: [], accessError: '', blockReason: '' };
   }
 
   if (!currentDeviceId) {
     return {
       devices: [],
-      accessError: 'This browser has no active YANTA Cloud device session for this vault.',
+      accessError: 'This browser is not connected to this vault yet.',
+      blockReason: 'no-local-session',
     };
   }
 
@@ -1538,14 +1549,16 @@ async function loadVaultDevicesForHome(vaultId, currentDeviceId) {
       deviceId: currentDeviceId,
     });
 
-    return {
-      devices: res.devices || [],
-      accessError: '',
-    };
+    return { devices: res.devices || [], accessError: '', blockReason: '' };
   } catch (err) {
+    const revoked =
+      err?.code === 'EDEVICE_REVOKED' ||
+      /revoked|removed/i.test(String(err?.message || ''));
+
     return {
       devices: [],
       accessError: err?.message || 'Device access denied.',
+      blockReason: revoked ? 'revoked' : 'unreachable',
     };
   }
 }
@@ -1586,18 +1599,35 @@ function cloudDevicesHtml({
   limits = {},
   currentDeviceId = '',
   accessError = '',
+  blockReason = '',
   vaultId = '',
 } = {}) {
   if (accessError) {
+    /*
+      Say which of the two it is. "Your device was removed" sends people
+      to the Recovery Key, which creates a second device entry — the
+      wrong cure for an expired session, and the reason device lists
+      collect duplicates.
+    */
+    const revoked = blockReason === 'revoked';
+
     return `
       <section class="yanta-cloud-section">
         <h4>Connected devices</h4>
 
         <div class="yanta-cloud-warning">
-          <strong>This device no longer has access to this cloud vault.</strong><br>
+          <strong>${
+            revoked
+              ? 'This device no longer has access to this cloud vault.'
+              : 'This browser is not connected to this vault yet.'
+          }</strong><br>
           ${escapeHtml(accessError)}
           <br><br>
-          Cloud sync and device management are blocked on this device until it is connected again with the Recovery Key or a pairing QR.
+          ${
+            revoked
+              ? 'Cloud sync and device management are blocked on this device until it is connected again with the Recovery Key or a pairing QR.'
+              : 'If you were signed out, signing in again is usually enough — you only need the Recovery Key when connecting this browser for the first time.'
+          }
         </div>
 
         ${
@@ -1606,7 +1636,7 @@ function cloudDevicesHtml({
               <div class="compress-actions" style="margin-top:10px;justify-content:flex-start;flex-wrap:wrap">
                 <button class="btn primary" data-reconnect-current-device="${escapeHtml(vaultId)}">
                   ${lucide('key-round', 14)}
-                  Reconnect this device
+                  ${revoked ? 'Reconnect this device' : 'Connect this device'}
                 </button>
               </div>
             `
@@ -1674,7 +1704,12 @@ function cloudDevicesHtml({
                 current
                   ? '<span class="yanta-cloud-device-current">Current device</span>'
                   : revoked
-                    ? ''
+                    ? `
+                      <button class="btn" data-remove-cloud-device="${escapeHtml(d.deviceId)}" data-device-already-revoked="1">
+                        ${lucide('x', 14)}
+                        Clear from list
+                      </button>
+                    `
                     : `
                       <button class="btn danger" data-remove-cloud-device="${escapeHtml(d.deviceId)}">
                         ${lucide('trash', 14)}
@@ -1740,6 +1775,7 @@ async function renderCloudHome(me) {
   const {
     devices: activeDevices,
     accessError: deviceAccessError,
+    blockReason: deviceBlockReason,
   } = await loadVaultDevicesForHome(configuredVaultId, currentDeviceId);
 
   const canManageActiveVault =
@@ -1826,7 +1862,13 @@ async function renderCloudHome(me) {
                   ${
                     active
                       ? `<span style="font-size:11px;color:${activeButBlocked ? 'var(--yellow)' : 'var(--accent)'};font-weight:800">
-                          ${activeButBlocked ? 'Access blocked' : 'Active'}
+                          ${
+                            !activeButBlocked
+                              ? 'Active'
+                              : deviceBlockReason === 'revoked'
+                                ? 'Access blocked'
+                                : 'Not connected here'
+                          }
                         </span>`
                       : ''
                   }
@@ -1861,7 +1903,7 @@ async function renderCloudHome(me) {
                       </button>
 
                     `
-                      : active && activeButBlocked
+                      : active && activeButBlocked && deviceBlockReason === 'revoked'
                         ? `
                           <button class="btn" disabled>
                             ${lucide('ban', 14)}
@@ -1926,6 +1968,7 @@ ${
             limits: me.limits || {},
             currentDeviceId,
             accessError: deviceAccessError,
+            blockReason: deviceBlockReason,
             vaultId: configuredVaultId,
           })
         : ''
@@ -2093,7 +2136,28 @@ ${
 
       if (!configuredVaultId || !deviceId) return;
 
-      const ok = await yantaConfirm({
+      /*
+        Clearing an entry that was already removed only tidies the list —
+        access was cut when it was revoked. Asking the full scary
+        question again would be theatre.
+      */
+      const alreadyRevoked = btn.dataset.deviceAlreadyRevoked === '1';
+
+      const ok = alreadyRevoked
+        ? await yantaConfirm({
+            title: 'Clear from list?',
+            message: [
+              'Remove this already-removed device from the list?',
+              '',
+              `Device ID: ${deviceId}`,
+              '',
+              'It lost access when it was removed. This only tidies the list.',
+            ].join('\n'),
+            confirmLabel: 'Clear',
+            cancelLabel: 'Cancel',
+            icon: 'x',
+          })
+        : await yantaConfirm({
         title: 'Remove device?',
         message: [
           'Remove this device from the selected YANTA Cloud vault?',
@@ -2113,20 +2177,29 @@ ${
       if (!ok) return;
 
       try {
-        setStatus('Removing device…');
+        setStatus(alreadyRevoked ? 'Clearing…' : 'Removing device…');
 
         await cloudRemoveVaultDevice(configuredVaultId, deviceId, {
           currentDeviceId,
         });
 
-        // Cut the removed device off from Chat too. Revoking the cloud device
-        // alone leaves its independent Matrix session intact, so we rotate the
-        // shared Chat password (revokes all other Matrix devices; remaining
-        // trusted devices silently re-login from the synced Vault).
-        await revokeChatAccessAfterDeviceRemoval();
+        /*
+          Cut the removed device off from Chat too. Revoking the cloud
+          device alone leaves its independent Matrix session intact, so we
+          rotate the shared Chat password (revokes all other Matrix
+          devices; remaining trusted devices silently re-login from the
+          synced Vault).
 
-        setStatus('Device removed', 'success');
-        toast('Device removed', 'success');
+          Skipped when only tidying an already-revoked row: its Chat access
+          was cut at the time, and rotating again would sign every other
+          device out for nothing.
+        */
+        if (!alreadyRevoked) {
+          await revokeChatAccessAfterDeviceRemoval();
+        }
+
+        setStatus(alreadyRevoked ? 'Cleared' : 'Device removed', 'success');
+        toast(alreadyRevoked ? 'Cleared from list' : 'Device removed', 'success');
 
         await renderCloudHome(await cloudMe());
       } catch (err) {

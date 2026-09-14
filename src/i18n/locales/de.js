@@ -495,6 +495,9 @@ export default {
   },
 
   infoPanel: {
+    cloudSignedOutTitle: 'Von YANTA Cloud abgemeldet',
+    cloudSignedOutText: 'Die Synchronisierung pausiert und dein Tarif kann nicht geprüft werden, bis du dich wieder anmeldest. Auf diesem Gerät geht nichts verloren.',
+    cloudSignedOutCta: 'Anmelden',
     pulsePausedTitle: {
       one: '{count} Routine ist durch deinen Tarif pausiert',
       other: '{count} Routinen sind durch deinen Tarif pausiert',

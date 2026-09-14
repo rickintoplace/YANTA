@@ -14,7 +14,10 @@ import {
   el,
   lucide,
   escapeHtml,
+  store,
 } from './core.js';
+
+import { cloudMe } from './cloud/cloud-api.js';
 
 import {
   registerDashboardWidget,
@@ -68,6 +71,61 @@ function dismissInstallHint(id) {
   is where you find out — which is what this panel is for.
 */
 let pulsePaused = [];
+
+/*
+  Being signed out of YANTA Cloud used to announce itself only through its
+  consequences — routines "paused by your plan", a free-plan billing page,
+  a vault card claiming the device had been removed. Three symptoms, none
+  of them the cause, each pointing somewhere unhelpful.
+
+  Say the actual thing once, here, where "things you should know" live.
+*/
+let cloudSignedOut = false;
+
+async function refreshCloudSession() {
+  try {
+    const configured = await store.settings.get('sync2.provider', null);
+
+    // Only a configured cloud user can be signed OUT of it.
+    if (configured !== 'yanta-cloud') {
+      cloudSignedOut = false;
+      return false;
+    }
+
+    const me = await cloudMe();
+    const next = !me?.authenticated;
+    const changed = next !== cloudSignedOut;
+
+    cloudSignedOut = next;
+
+    return changed;
+  } catch {
+    /*
+      Offline is not signed out. Claiming otherwise would be the same
+      mistake in a new place.
+    */
+    return false;
+  }
+}
+
+function collectCloudSessionItems() {
+  if (!cloudSignedOut) return [];
+
+  return [{
+    id: 'cloud-signed-out',
+    tone: 'warn',
+    icon: 'cloud-off',
+    title: t('infoPanel.cloudSignedOutTitle'),
+    text: t('infoPanel.cloudSignedOutText'),
+    action: {
+      label: t('infoPanel.cloudSignedOutCta'),
+      onClick: async () => {
+        const { openYantaCloudSetup } = await import('./sync2/yanta-cloud-setup-ui.js');
+        await openYantaCloudSetup({});
+      },
+    },
+  }];
+}
 
 async function refreshPulsePaused() {
   try {
@@ -302,6 +360,7 @@ function collectInfoItems() {
   // most important recommendation so the panel never feels naggy. Kept
   // independent of the reminder report so it shows before the vault loads.
   items.push(...collectInstallItems());
+  items.push(...collectCloudSessionItems());
   items.push(...collectPulseItems());
 
   let report;
@@ -492,10 +551,15 @@ async function renderInfoPanel() {
     }
 
     refreshPulsePaused().then(refresh).catch(() => {});
+    refreshCloudSession().then(refresh).catch(() => {});
   };
 
   window.addEventListener('yanta-pulse-routines-changed', onPulseChanged);
   window.addEventListener('yanta-pulse-settings-changed', onPulseChanged);
+
+  refreshCloudSession().then((changed) => {
+    if (changed) refresh();
+  }).catch(() => {});
 
   refreshPulsePaused().then((changed) => {
     if (changed && alive()) refresh();

@@ -71,6 +71,9 @@ CREATE TABLE IF NOT EXISTS devices (
   browser TEXT,
   os TEXT,
   device_type TEXT,
+  revoked_by_device_id TEXT,
+  -- The session this device signs in with; removing the device ends it.
+  session_id TEXT,
   UNIQUE(vault_id, device_id),
   FOREIGN KEY(user_id) REFERENCES users(id),
   FOREIGN KEY(vault_id) REFERENCES vaults(id)

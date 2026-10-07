@@ -34,7 +34,13 @@ var PLAN_LIMITS = {
     maxActiveSpaces: 10,
     spaceBytes: 20 * 1024 * 1024,
     spaceObjects: 2_000,
-    spaceMembersMax: 5
+    spaceMembersMax: 5,
+
+    // Public pages and live presentations live outside the vault quota,
+    // so they get their own ceilings.
+    maxActivePublicShares: 25,
+    publicShareBytes: 25 * 1024 * 1024,
+    maxActivePresentations: 3
   },
 
   // Internal name. User-facing label is "YANTA Plus".
@@ -62,7 +68,11 @@ var PLAN_LIMITS = {
     maxActiveSpaces: 100,
     spaceBytes: 512 * 1024 * 1024,
     spaceObjects: 50_000,
-    spaceMembersMax: 50
+    spaceMembersMax: 50,
+
+    maxActivePublicShares: 1_000,
+    publicShareBytes: 1024 * 1024 * 1024,
+    maxActivePresentations: 20
   }
 };
 const INCLUDED_AI_POLICY = {
@@ -657,6 +667,7 @@ async function matrixRegisterWithRegistrationToken(env, {
   if (res.status !== 401) {
     const err = new Error(matrixErrorMessage(res.data, `Matrix registration failed: HTTP ${res.status}`));
     err.status = res.status;
+    err.upstream = true;
     err.matrixErrcode = res.data?.errcode || "";
     throw err;
   }
@@ -714,6 +725,7 @@ async function matrixRegisterWithRegistrationToken(env, {
     if (res.status !== 401) {
       const err = new Error(matrixErrorMessage(res.data, `Matrix registration failed: HTTP ${res.status}`));
       err.status = res.status;
+      err.upstream = true;
       err.matrixErrcode = res.data?.errcode || "";
       throw err;
     }
@@ -782,6 +794,7 @@ async function matrixSendAdminRoomMessage(env, body) {
   if (!res.ok) {
     const err = new Error(matrixErrorMessage(res.data, `Matrix admin room send failed: HTTP ${res.status}`));
     err.status = res.status;
+    err.upstream = true;
     err.matrixErrcode = res.data?.errcode || "";
     throw err;
   }
@@ -813,6 +826,7 @@ async function matrixFetchAdminRoomRecentMessages(env, limit = 8) {
   if (!res.ok) {
     const err = new Error(matrixErrorMessage(res.data, `Matrix admin room read failed: HTTP ${res.status}`));
     err.status = res.status;
+    err.upstream = true;
     err.matrixErrcode = res.data?.errcode || "";
     throw err;
   }
@@ -933,6 +947,7 @@ async function matrixDeactivateUser(env, matrixUserId, reason = "YANTA Chat depr
 
   const err = new Error(matrixErrorMessage(res.data, `Matrix deactivate failed: HTTP ${res.status}`));
   err.status = res.status;
+  err.upstream = true;
   err.matrixErrcode = res.data?.errcode || "";
   throw err;
 }
@@ -1276,7 +1291,13 @@ async function handleChatProvision(env, req, headers) {
       now()
     ).run();
   } catch (err) {
-    if (registered?.user_id || matrixUserId) {
+    /*
+      Only undo an account this request actually created. The derived id
+      also exists when registration itself failed — e.g. because the name
+      was taken by someone else — and deactivating it then disabled a
+      stranger's account.
+    */
+    if (registered?.user_id) {
       try {
         await matrixDeactivateUser(
           env,
@@ -1472,6 +1493,7 @@ async function paddleApi(env, path, {
     );
 
     err.status = res.status;
+    err.upstream = true;
     err.response = data;
 
     throw err;
@@ -1844,7 +1866,14 @@ function parseCookies(req) {
   for (const part of raw.split(";")) {
     const idx = part.indexOf("=");
     if (idx < 0) continue;
-    out[part.slice(0, idx).trim()] = decodeURIComponent(part.slice(idx + 1).trim());
+    const value = part.slice(idx + 1).trim();
+    // A malformed cookie of some other app on the domain must not turn
+    // every authenticated call into a 500 (seen as a sudden sign-out).
+    try {
+      out[part.slice(0, idx).trim()] = decodeURIComponent(value);
+    } catch {
+      out[part.slice(0, idx).trim()] = value;
+    }
   }
   return out;
 }
@@ -2041,6 +2070,9 @@ __name(sendLoginEmail, "sendLoginEmail");
 */
 const SESSION_TTL_MS = 90 * 24 * 60 * 60 * 1e3;
 const SESSION_RENEW_BELOW_MS = 60 * 24 * 60 * 60 * 1e3;
+// Sliding renewal must still end somewhere: a stolen cookie that keeps
+// being used would otherwise live forever.
+const SESSION_MAX_LIFETIME_MS = 365 * 24 * 60 * 60 * 1e3;
 const pendingSessionRenewal = new WeakMap();
 
 async function getSession(env, req) {
@@ -2049,7 +2081,7 @@ async function getSession(env, req) {
   if (!token) return null;
   const tokenHash = await hashToken(env, token);
   const row = await env.DB.prepare(
-    `SELECT s.id AS session_id, s.user_id, s.expires_at, s.revoked_at,
+    `SELECT s.id AS session_id, s.user_id, s.expires_at, s.revoked_at, s.created_at,
             u.email, u.plan, u.disabled_at
      FROM sessions s
      JOIN users u ON u.id = s.user_id
@@ -2059,17 +2091,21 @@ async function getSession(env, req) {
   if (row.revoked_at) return null;
   if (row.disabled_at) return null;
   if (row.expires_at < now()) return null;
+  const hardEnd = Number(row.created_at || 0) + SESSION_MAX_LIFETIME_MS;
+  if (row.created_at && hardEnd < now()) return null;
   await env.DB.prepare(
     `UPDATE users SET last_seen_at = ? WHERE id = ?`
   ).bind(now(), row.user_id).run();
-  if (Number(row.expires_at) - now() < SESSION_RENEW_BELOW_MS) {
-    const nextExpiry = now() + SESSION_TTL_MS;
+  if (Number(row.expires_at) - now() < SESSION_RENEW_BELOW_MS && (!row.created_at || hardEnd > row.expires_at)) {
+    const nextExpiry = row.created_at
+      ? Math.min(now() + SESSION_TTL_MS, hardEnd)
+      : now() + SESSION_TTL_MS;
     await env.DB.prepare(
       `UPDATE sessions SET expires_at = ? WHERE id = ?`
     ).bind(nextExpiry, row.session_id).run();
     pendingSessionRenewal.set(
       req,
-      cookieHeader(env, token, Math.floor(SESSION_TTL_MS / 1e3))
+      cookieHeader(env, token, Math.floor((nextExpiry - now()) / 1e3))
     );
   }
   const plan = await resolveBillingPlan(env, row.user_id, row.plan || "free");
@@ -2330,6 +2366,30 @@ async function requireActiveVaultDevice(env, user, vaultId, deviceId, req = null
   return row;
 }
 __name(requireActiveVaultDevice, "requireActiveVaultDevice");
+/*
+  devices.session_id ties a device row to the session that uses it, so
+  removing the device can end that session. There is no migration runner,
+  so the column is added on first use (schema.sql has it for new DBs).
+*/
+let deviceSessionColumnReady = null;
+
+function ensureDeviceSessionColumn(env) {
+  if (!deviceSessionColumnReady) {
+    deviceSessionColumnReady = env.DB.prepare(
+      `ALTER TABLE devices ADD COLUMN session_id TEXT`
+    ).run().catch(() => {});
+  }
+  return deviceSessionColumnReady;
+}
+
+async function rememberDeviceSession(env, user, rowId) {
+  if (!user?.sessionId || !rowId) return;
+  await ensureDeviceSessionColumn(env);
+  await env.DB.prepare(
+    `UPDATE devices SET session_id = ? WHERE id = ? AND COALESCE(session_id, '') != ?`
+  ).bind(user.sessionId, rowId, user.sessionId).run().catch(() => {});
+}
+
 async function ensureDevice(env, user, vaultId, deviceId, req = null) {
   if (!deviceId) {
     const err = new Error("Device id missing");
@@ -2380,6 +2440,7 @@ async function ensureDevice(env, user, vaultId, deviceId, req = null) {
       deviceDisplayName(deviceId, info),
       existing.id
     ).run();
+    await rememberDeviceSession(env, user, existing.id);
     return existing;
   }
   const createdAt = await getUserCreatedAt(env, user.userId);
@@ -2422,6 +2483,7 @@ async function ensureDevice(env, user, vaultId, deviceId, req = null) {
     info.os || "",
     info.deviceType || ""
   ).run();
+  await rememberDeviceSession(env, user, rec.id);
   return rec;
 }
 __name(ensureDevice, "ensureDevice");
@@ -2823,10 +2885,21 @@ async function handleRevokeDevice(env, req, url, headers) {
     vaultId,
     targetDeviceId
   ).run();
+  /*
+    Also end the session the removed device signed in with. Revoking only
+    the device row did not cut access: the same session simply sent a new
+    device id and was let back in. Signing in again needs the mailbox.
+  */
+  if (target.session_id && target.session_id !== user.sessionId) {
+    await env.DB.prepare(
+      `UPDATE sessions SET revoked_at = ? WHERE id = ? AND revoked_at IS NULL`
+    ).bind(now(), target.session_id).run();
+  }
   await audit(env, req, "device_revoked", user.userId, {
     vaultId,
     targetDeviceId,
-    currentDeviceId
+    currentDeviceId,
+    sessionRevoked: !!(target.session_id && target.session_id !== user.sessionId)
   });
   return json({ ok: true }, 200, headers);
 }
@@ -3012,6 +3085,54 @@ async function handleStorageGet(env, req, url, headers) {
   });
 }
 __name(handleStorageGet, "handleStorageGet");
+/*
+  One conditional UPDATE: either every limit holds and the usage is
+  counted, or nothing changes. Returns the 403 body on refusal.
+*/
+async function reserveStorageQuota(env, userId, limits, {
+  deltaStorage = 0,
+  deltaObjects = 0,
+  uploadBytes = 0,
+} = {}) {
+  const row = await env.DB.prepare(
+    `UPDATE usage_current
+     SET storage_bytes = storage_bytes + ?1,
+         object_count = object_count + ?2,
+         upload_bytes_day = upload_bytes_day + ?3,
+         upload_bytes_month = upload_bytes_month + ?3,
+         writes_today = writes_today + 1
+     WHERE user_id = ?4
+       AND storage_bytes + ?1 <= ?5
+       AND object_count + ?2 <= ?6
+       AND upload_bytes_day + ?3 <= ?7
+       AND writes_today + 1 <= ?8
+     RETURNING user_id`
+  ).bind(
+    deltaStorage,
+    deltaObjects,
+    uploadBytes,
+    userId,
+    limits.storageBytes,
+    limits.objects,
+    limits.uploadBytesDay,
+    limits.writesDay
+  ).first();
+  if (row) return { ok: true };
+  const usage = await env.DB.prepare(
+    `SELECT * FROM usage_current WHERE user_id = ?`
+  ).bind(userId).first() || {};
+  if (Number(usage.storage_bytes || 0) + deltaStorage > limits.storageBytes) {
+    return { ok: false, body: { error: "storage_quota_exceeded", maxBytes: limits.storageBytes } };
+  }
+  if (Number(usage.object_count || 0) + deltaObjects > limits.objects) {
+    return { ok: false, body: { error: "object_quota_exceeded", maxObjects: limits.objects } };
+  }
+  if (Number(usage.upload_bytes_day || 0) + uploadBytes > limits.uploadBytesDay) {
+    return { ok: false, body: { error: "upload_day_quota_exceeded", maxBytes: limits.uploadBytesDay } };
+  }
+  return { ok: false, body: { error: "writes_day_quota_exceeded", maxWrites: limits.writesDay } };
+}
+__name(reserveStorageQuota, "reserveStorageQuota");
 async function handleStoragePut(env, req, url, headers) {
   const user = await requireUser(env, req);
   const { vaultId } = await vaultAndDeviceFromHeaders(env, req, user);
@@ -3033,20 +3154,26 @@ async function handleStoragePut(env, req, url, headers) {
   }
   const path = normalizeRemotePath(url.searchParams.get("path") || "");
   const ifAbsent = url.searchParams.get("ifAbsent") === "1";
-  const body = new Uint8Array(await req.arrayBuffer());
-  const size = body.byteLength;
   const createdAt = await getUserCreatedAt(env, user.userId);
   const limits = effectiveLimits(user, createdAt);
-  if (size > limits.objectSizeBytes) {
-    return json({
-      error: "object_too_large",
-      code: "object_too_large",
-      message: `Object too large. Maximum object size is ${limits.objectSizeBytes} bytes.`,
-      maxBytes: limits.objectSizeBytes,
-      gotBytes: size,
-    }, 413, headers);
+  const tooLarge = (gotBytes) => json({
+    error: "object_too_large",
+    code: "object_too_large",
+    message: `Object too large. Maximum object size is ${limits.objectSizeBytes} bytes.`,
+    maxBytes: limits.objectSizeBytes,
+    gotBytes,
+  }, 413, headers);
+  // Reject before buffering the body when the client says it is too big.
+  const declared = Number(req.headers.get("content-length") || 0);
+  if (declared > limits.objectSizeBytes) {
+    return tooLarge(declared);
   }
-  const usage = await ensureUsageRow(env, user.userId);
+  const body = new Uint8Array(await req.arrayBuffer());
+  const size = body.byteLength;
+  if (size > limits.objectSizeBytes) {
+    return tooLarge(size);
+  }
+  await ensureUsageRow(env, user.userId);
   const existing = await env.DB.prepare(
     `SELECT id,size FROM objects
      WHERE user_id = ? AND vault_id = ? AND path = ?`
@@ -3056,101 +3183,93 @@ async function handleStoragePut(env, req, url, headers) {
   }
   const deltaStorage = existing ? size - existing.size : size;
   const deltaObjects = existing ? 0 : 1;
-  if (usage.storage_bytes + deltaStorage > limits.storageBytes) {
-    return json({ error: "storage_quota_exceeded", maxBytes: limits.storageBytes }, 403, headers);
+  /*
+    Reserve the quota atomically, then write. Checking a usage row read
+    earlier and incrementing after the upload let parallel uploads all pass
+    against the same old numbers.
+  */
+  const reserved = await reserveStorageQuota(env, user.userId, limits, {
+    deltaStorage,
+    deltaObjects,
+    uploadBytes: size,
+  });
+  if (!reserved.ok) {
+    return json(reserved.body, 403, headers);
   }
-  if (usage.object_count + deltaObjects > limits.objects) {
-    return json({ error: "object_quota_exceeded", maxObjects: limits.objects }, 403, headers);
-  }
-  if (usage.upload_bytes_day + size > limits.uploadBytesDay) {
-    return json({ error: "upload_day_quota_exceeded", maxBytes: limits.uploadBytesDay }, 403, headers);
-  }
-  if (usage.writes_today + 1 > limits.writesDay) {
-    return json({ error: "writes_day_quota_exceeded", maxWrites: limits.writesDay }, 403, headers);
-  }
+  const refund = (storage, objects) => env.DB.prepare(
+    `UPDATE usage_current
+     SET storage_bytes = MAX(0, storage_bytes - ?),
+         object_count = MAX(0, object_count - ?)
+     WHERE user_id = ?`
+  ).bind(storage, objects, user.userId).run();
   const objectKey = r2Key(user.userId, vaultId, path);
-  if (ifAbsent) {
-    const existingR2 = await env.OBJECTS.head(objectKey);
-    if (existingR2) {
-      return json({ error: "already_exists" }, 409, headers);
-    }
-  }
   const etag = `"${size}-${now()}-${randomToken(6)}"`;
   const updatedAt = now();
-  await env.OBJECTS.put(objectKey, body, {
-    httpMetadata: {
-      contentType: "application/octet-stream"
-    },
-    customMetadata: {
-      userId: user.userId,
-      vaultId,
-      path
-    }
-  });
-  let actuallyCreated = false;
   let actualDeltaStorage = deltaStorage;
   let actualDeltaObjects = deltaObjects;
-  if (existing) {
-    await env.DB.prepare(
-      `UPDATE objects SET size = ?, etag = ?, updated_at = ?
-     WHERE id = ?`
-    ).bind(size, etag, updatedAt, existing.id).run();
+  if (ifAbsent) {
+    /*
+      Claim the path in the index first: the UNIQUE row decides between
+      concurrent writers. Writing R2 first left objects the index never
+      learned about (invisible to every device) and let the losing writer
+      overwrite the winner's bytes.
+    */
+    const rowId = id("obj");
+    const claimed = await env.DB.prepare(
+      `INSERT INTO objects
+       (id,user_id,vault_id,path,size,etag,updated_at,created_at)
+       VALUES (?,?,?,?,?,?,?,?)
+       ON CONFLICT(vault_id, path) DO NOTHING
+       RETURNING id`
+    ).bind(rowId, user.userId, vaultId, path, size, etag, updatedAt, updatedAt).first();
+    if (!claimed) {
+      await refund(deltaStorage, deltaObjects);
+      return json({ error: "already_exists" }, 409, headers);
+    }
+    try {
+      await env.OBJECTS.put(objectKey, body, {
+        httpMetadata: { contentType: "application/octet-stream" },
+        customMetadata: { userId: user.userId, vaultId, path }
+      });
+    } catch (err) {
+      await env.DB.prepare(`DELETE FROM objects WHERE id = ?`).bind(rowId).run();
+      await refund(deltaStorage, deltaObjects);
+      throw err;
+    }
   } else {
     try {
-      await env.DB.prepare(
-        `INSERT INTO objects
-       (id,user_id,vault_id,path,size,etag,updated_at,created_at)
-       VALUES (?,?,?,?,?,?,?,?)`
-      ).bind(
-        id("obj"),
-        user.userId,
-        vaultId,
-        path,
-        size,
-        etag,
-        updatedAt,
-        updatedAt
-      ).run();
-      actuallyCreated = true;
+      await env.OBJECTS.put(objectKey, body, {
+        httpMetadata: { contentType: "application/octet-stream" },
+        customMetadata: { userId: user.userId, vaultId, path }
+      });
     } catch (err) {
-      const msg = String(err?.message || err || "");
-      if (msg.includes("UNIQUE") || msg.includes("constraint") || msg.includes("objects.vault_id") || msg.includes("objects.path")) {
-        if (ifAbsent) {
-          return json({ error: "already_exists" }, 409, headers);
-        }
-        const current = await env.DB.prepare(
-          `SELECT id,size FROM objects
-         WHERE user_id = ? AND vault_id = ? AND path = ?`
-        ).bind(user.userId, vaultId, path).first();
-        if (!current) {
-          throw err;
-        }
-        actualDeltaStorage = size - Number(current.size || 0);
-        actualDeltaObjects = 0;
-        await env.DB.prepare(
-          `UPDATE objects SET size = ?, etag = ?, updated_at = ?
-         WHERE id = ?`
-        ).bind(size, etag, updatedAt, current.id).run();
-      } else {
-        throw err;
-      }
+      await refund(deltaStorage, deltaObjects);
+      throw err;
+    }
+    const previous = await env.DB.prepare(
+      `SELECT size FROM objects WHERE vault_id = ? AND path = ?`
+    ).bind(vaultId, path).first();
+    await env.DB.prepare(
+      `INSERT INTO objects
+       (id,user_id,vault_id,path,size,etag,updated_at,created_at)
+       VALUES (?,?,?,?,?,?,?,?)
+       ON CONFLICT(vault_id, path) DO UPDATE SET
+         size = excluded.size, etag = excluded.etag, updated_at = excluded.updated_at`
+    ).bind(id("obj"), user.userId, vaultId, path, size, etag, updatedAt, updatedAt).run();
+    // Another writer may have created/changed the row since we read it.
+    actualDeltaStorage = previous ? size - Number(previous.size || 0) : size;
+    actualDeltaObjects = previous ? 0 : 1;
+    const storageFix = actualDeltaStorage - deltaStorage;
+    const objectsFix = actualDeltaObjects - deltaObjects;
+    if (storageFix || objectsFix) {
+      await env.DB.prepare(
+        `UPDATE usage_current
+         SET storage_bytes = MAX(0, storage_bytes + ?),
+             object_count = MAX(0, object_count + ?)
+         WHERE user_id = ?`
+      ).bind(storageFix, objectsFix, user.userId).run();
     }
   }
-  await env.DB.prepare(
-    `UPDATE usage_current
-   SET storage_bytes = storage_bytes + ?,
-       object_count = object_count + ?,
-       upload_bytes_day = upload_bytes_day + ?,
-       upload_bytes_month = upload_bytes_month + ?,
-       writes_today = writes_today + 1
-   WHERE user_id = ?`
-  ).bind(
-    actualDeltaStorage,
-    actualDeltaObjects,
-    size,
-    size,
-    user.userId
-  ).run();
   await env.DB.prepare(
     `UPDATE vaults SET last_sync_at = ? WHERE id = ?`
   ).bind(now(), vaultId).run();
@@ -3175,16 +3294,19 @@ async function handleStorageDelete(env, req, url, headers) {
   ).bind(user.userId, vaultId, path).first();
   if (existing) {
     await env.OBJECTS.delete(r2Key(user.userId, vaultId, path));
-    await env.DB.prepare(
-      `DELETE FROM objects WHERE id = ?`
-    ).bind(existing.id).run();
-    await env.DB.prepare(
-      `UPDATE usage_current
-       SET storage_bytes = MAX(0, storage_bytes - ?),
-           object_count = MAX(0, object_count - 1),
-           writes_today = writes_today + 1
-       WHERE user_id = ?`
-    ).bind(existing.size, user.userId).run();
+    // Only the request that actually removed the row gives the quota back.
+    const removed = await env.DB.prepare(
+      `DELETE FROM objects WHERE id = ? RETURNING size`
+    ).bind(existing.id).first();
+    if (removed) {
+      await env.DB.prepare(
+        `UPDATE usage_current
+         SET storage_bytes = MAX(0, storage_bytes - ?),
+             object_count = MAX(0, object_count - 1),
+             writes_today = writes_today + 1
+         WHERE user_id = ?`
+      ).bind(Number(removed.size || 0), user.userId).run();
+    }
   }
   return json({ ok: true }, 200, headers);
 }
@@ -3440,7 +3562,9 @@ async function purgeUserData(env, userId) {
     on the constraint and silently leave the vault behind.
   */
   const statements = [
-    // Children of vaults.
+    // Children of vaults — and of owned spaces, whose objects carry the
+    // owner's user_id but a space id as vault_id.
+    `DELETE FROM objects WHERE user_id = ?`,
     `DELETE FROM objects WHERE vault_id IN (SELECT id FROM vaults WHERE user_id = ?)`,
     `DELETE FROM public_share_assets WHERE share_id IN (SELECT id FROM public_shares WHERE owner_user_id = ?)`,
     `DELETE FROM public_shares WHERE owner_user_id = ?`,
@@ -3493,14 +3617,19 @@ async function handleAccountDelete(env, req, headers) {
 
   const email = user.email;
 
-  // An active subscription must not keep billing a deleted account.
-  const sub = await env.DB.prepare(
+  /*
+    An active subscription must not keep billing a deleted account. If
+    Paddle cannot be reached, stop here: after deletion the user could no
+    longer sign in to cancel, and would keep paying for nothing.
+  */
+  const subs = await env.DB.prepare(
     `SELECT * FROM billing_subscriptions
-     WHERE user_id = ? AND status IN ('active','trialing','past_due')
-     ORDER BY updated_at DESC LIMIT 1`
-  ).bind(user.userId).first();
+     WHERE user_id = ? AND status IN ('active','trialing','past_due')`
+  ).bind(user.userId).all();
 
-  if (sub?.paddle_subscription_id) {
+  for (const sub of subs?.results || []) {
+    if (!sub?.paddle_subscription_id) continue;
+
     try {
       await paddleApi(
         env,
@@ -3509,6 +3638,11 @@ async function handleAccountDelete(env, req, headers) {
       );
     } catch (err) {
       console.error("[account-delete] paddle cancel failed", safeErrorForLog(err));
+      return json({
+        ok: false,
+        error: "subscription_cancel_failed",
+        message: `Your subscription could not be cancelled with our payment provider, so nothing was deleted. Please try again in a few minutes or contact ${supportEmail(env)}.`
+      }, 502, headers);
     }
   }
 
@@ -4089,6 +4223,13 @@ async function handleBillingSync(env, req, headers) {
   });
 }
 
+/*
+  Paddle does not deliver webhooks in order. Each subscription entity
+  carries its own updated_at (RFC 3339, compares as a string); an event
+  older than the stored state is ignored, so a late "active" can no longer
+  undo a cancellation. The reconciliation path fetches the live entity,
+  which is always the newest.
+*/
 async function upsertBillingSubscriptionFromPaddle(env, data = {}) {
   const userId = await findUserIdForPaddleEvent(env, data);
 
@@ -4142,7 +4283,9 @@ async function upsertBillingSubscriptionFromPaddle(env, data = {}) {
        current_period_ends_at = excluded.current_period_ends_at,
        cancel_at_period_end = excluded.cancel_at_period_end,
        updated_at = excluded.updated_at,
-       raw_json = excluded.raw_json`
+       raw_json = excluded.raw_json
+     WHERE COALESCE(json_extract(excluded.raw_json, '$.updated_at'), '')
+        >= COALESCE(json_extract(billing_subscriptions.raw_json, '$.updated_at'), '')`
   ).bind(
     id("sub"),
     userId,
@@ -4660,20 +4803,42 @@ async function handleAiCompletions(env, req, headers) {
   });
 }
 __name(handleAiCompletions, "handleAiCompletions");
-function isPrivateIpLiteral(hostname) {
-  const h = String(hostname || "").toLowerCase();
-  if (h === "localhost" || h === "0.0.0.0" || h === "127.0.0.1" || h === "::1" || h === "[::1]") {
-    return true;
-  }
-  const m = h.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
-  if (!m) return false;
-  const a = Number(m[1]);
-  const b = Number(m[2]);
-  if (a === 10) return true;
-  if (a === 127) return true;
+/*
+  Host literals a server-side fetch must never reach. Workers cannot reach
+  a private network, so this is defence in depth; it covers IPv4 private,
+  loopback, link-local and carrier-grade NAT ranges, IPv6 loopback,
+  unique-local and link-local addresses, and IPv4-mapped IPv6. Names that
+  resolve to such addresses are out of reach of a hostname check.
+*/
+function isPrivateIpv4(a, b) {
+  if (a === 0 || a === 10 || a === 127) return true;
+  if (a === 100 && b >= 64 && b <= 127) return true;
   if (a === 169 && b === 254) return true;
   if (a === 172 && b >= 16 && b <= 31) return true;
   if (a === 192 && b === 168) return true;
+  if (a >= 224) return true;
+  return false;
+}
+function isPrivateIpLiteral(hostname) {
+  let h = String(hostname || "").toLowerCase().replace(/\.$/, "");
+  if (h === "localhost" || h.endsWith(".localhost") || h.endsWith(".local") || h.endsWith(".internal")) {
+    return true;
+  }
+  const v4 = h.match(/^(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (v4) return isPrivateIpv4(Number(v4[1]), Number(v4[2]));
+  if (h.startsWith("[") && h.endsWith("]")) h = h.slice(1, -1);
+  if (!h.includes(":")) return false;
+  if (h === "::" || h === "::1") return true;
+  // IPv4-mapped (::ffff:a.b.c.d, or hex form after URL normalization)
+  const mapped = h.match(/^::ffff:(\d+)\.(\d+)\.\d+\.\d+$/);
+  if (mapped) return isPrivateIpv4(Number(mapped[1]), Number(mapped[2]));
+  const mappedHex = h.match(/^::ffff:([0-9a-f]{1,4}):[0-9a-f]{1,4}$/);
+  if (mappedHex) {
+    const hi = parseInt(mappedHex[1], 16);
+    return isPrivateIpv4(hi >> 8, hi & 255);
+  }
+  if (/^f[cd][0-9a-f]{0,2}:/.test(h)) return true;
+  if (/^fe[89ab][0-9a-f]?:/.test(h)) return true;
   return false;
 }
 __name(isPrivateIpLiteral, "isPrivateIpLiteral");
@@ -5145,6 +5310,7 @@ async function youtubeApiFetch(env, path, params = {}) {
     );
 
     err.status = res.status;
+    err.upstream = true;
     err.response = data;
 
     throw err;
@@ -6270,7 +6436,10 @@ async function handleRssImage(env, req, url, headers) {
       ...headers,
       "content-type": type,
       "cache-control": "public, max-age=21600",
-      "x-content-type-options": "nosniff"
+      "x-content-type-options": "nosniff",
+      // Feed images are served from the app's own origin (/cloud-api). An
+      // SVG opened directly would otherwise run its scripts there.
+      "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox"
     }
   });
   try {
@@ -6492,6 +6661,27 @@ async function handleCreatePublicShare(env, req, headers) {
     }
   }
 
+  const createRl = await rateLimit(env, `public-share:create:${user.userId}`, 120, 60 * 60 * 1e3);
+  if (!createRl.ok) {
+    return json({ ok: false, message: 'Too many new public pages. Try again later.' }, 429, headers);
+  }
+
+  const shareLimits = effectiveLimits(user, await getUserCreatedAt(env, user.userId));
+  const activeShares = await env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM public_shares
+     WHERE owner_user_id = ? AND status = 'active' AND revoked_at IS NULL
+       AND (expires_at IS NULL OR expires_at > ?)`
+  ).bind(user.userId, now()).first();
+
+  if (Number(activeShares?.n || 0) >= shareLimits.maxActivePublicShares) {
+    return json({
+      ok: false,
+      error: 'public_share_limit',
+      message: `You can have up to ${shareLimits.maxActivePublicShares} public pages. Unpublish one first.`,
+      max: shareLimits.maxActivePublicShares,
+    }, 403, headers);
+  }
+
   const shareId = publicShareId();
   const t = now();
 
@@ -6594,6 +6784,27 @@ async function handlePutPublicSharePayload(env, req, url, headers) {
   if (payloadBytes.byteLength > 4 * 1024 * 1024) {
     return json({ ok: false, message: 'Public share payload too large' }, 413, headers);
   }
+  /*
+    Public payloads are not part of the vault quota; without their own
+    ceiling a free account could store any amount in public pages.
+  */
+  {
+    const limits = effectiveLimits(user, await getUserCreatedAt(env, user.userId));
+    const others = await env.DB.prepare(
+      `SELECT COALESCE(SUM(payload_size_bytes), 0) AS bytes FROM public_shares
+       WHERE owner_user_id = ? AND id != ? AND status = 'active' AND revoked_at IS NULL`
+    ).bind(user.userId, share.id).first();
+
+    if (Number(others?.bytes || 0) + payloadBytes.byteLength > limits.publicShareBytes) {
+      return json({
+        ok: false,
+        error: 'public_share_storage_limit',
+        message: 'Public pages have reached their storage limit. Unpublish some first.',
+        maxBytes: limits.publicShareBytes,
+      }, 403, headers);
+    }
+  }
+
 
   const objectKey = publicSharePayloadKey(shareId);
 
@@ -7169,6 +7380,22 @@ async function handleCreatePresentationSession(env, req, headers) {
   }
 
   const t = now();
+
+  const presentationLimits = effectiveLimits(user, await getUserCreatedAt(env, user.userId));
+  const activePresentations = await env.DB.prepare(
+    `SELECT COUNT(*) AS n FROM presentation_sessions
+     WHERE owner_user_id = ? AND status = 'active' AND revoked_at IS NULL AND expires_at > ?`
+  ).bind(user.userId, t).first();
+
+  if (Number(activePresentations?.n || 0) >= presentationLimits.maxActivePresentations) {
+    return json({
+      ok: false,
+      error: 'presentation_limit',
+      message: 'Too many live presentations. End one first.',
+      max: presentationLimits.maxActivePresentations,
+    }, 403, headers);
+  }
+
   const sessionId = presentationSessionId();
   const topic = `present-${sessionId}-${randomToken(10)}`;
   const token = randomToken(24);
@@ -8129,11 +8356,25 @@ async function handleSpaceStoragePut(env, req, url, headers, spaceId) {
 
   const path = spaceNormalizeRemotePath(url.searchParams.get("path") || "");
   const ifAbsent = url.searchParams.get("ifAbsent") === "1";
-  const body = new Uint8Array(await req.arrayBuffer());
-  const size = body.byteLength;
 
   const ownerId = access.space.owner_user_id;
   const limits = await spaceOwnerLimits(env, access.space);
+
+  const tooLarge = (gotBytes) => json({
+    error: "object_too_large",
+    code: "object_too_large",
+    message: `Object too large. Maximum object size is ${limits.objectSizeBytes} bytes.`,
+    maxBytes: limits.objectSizeBytes,
+    gotBytes
+  }, 413, headers);
+
+  const declared = Number(req.headers.get("content-length") || 0);
+  if (declared > limits.objectSizeBytes) {
+    return tooLarge(declared);
+  }
+
+  const body = new Uint8Array(await req.arrayBuffer());
+  const size = body.byteLength;
 
   // Cap the update journal per doc. Writers answer a 409 by uploading a
   // full-state head and pruning the packs it covers, which keeps a space
@@ -8156,16 +8397,10 @@ async function handleSpaceStoragePut(env, req, url, headers, spaceId) {
   }
 
   if (size > limits.objectSizeBytes) {
-    return json({
-      error: "object_too_large",
-      code: "object_too_large",
-      message: `Object too large. Maximum object size is ${limits.objectSizeBytes} bytes.`,
-      maxBytes: limits.objectSizeBytes,
-      gotBytes: size
-    }, 413, headers);
+    return tooLarge(size);
   }
 
-  const usage = await ensureUsageRow(env, ownerId);
+  await ensureUsageRow(env, ownerId);
   const existing = await env.DB.prepare(
     `SELECT id,size FROM objects WHERE vault_id = ? AND path = ?`
   ).bind(spaceId, path).first();
@@ -8177,83 +8412,113 @@ async function handleSpaceStoragePut(env, req, url, headers, spaceId) {
   const deltaStorage = existing ? size - existing.size : size;
   const deltaObjects = existing ? 0 : 1;
 
-  if (Number(access.space.storage_bytes || 0) + deltaStorage > limits.spaceBytes) {
-    return json({ error: "space_quota_exceeded", maxBytes: limits.spaceBytes }, 403, headers);
+  // Atomic reservations (space, then owner), refunded if anything fails.
+  const spaceReserved = await env.DB.prepare(
+    `UPDATE spaces
+     SET storage_bytes = storage_bytes + ?1,
+         object_count = object_count + ?2
+     WHERE id = ?3
+       AND storage_bytes + ?1 <= ?4
+       AND object_count + ?2 <= ?5
+     RETURNING id`
+  ).bind(deltaStorage, deltaObjects, spaceId, limits.spaceBytes, limits.spaceObjects).first();
+
+  if (!spaceReserved) {
+    return json({ error: "space_quota_exceeded", maxBytes: limits.spaceBytes, maxObjects: limits.spaceObjects }, 403, headers);
   }
-  if (Number(access.space.object_count || 0) + deltaObjects > limits.spaceObjects) {
-    return json({ error: "space_quota_exceeded", maxObjects: limits.spaceObjects }, 403, headers);
+
+  const refundSpace = (storage, objects) => env.DB.prepare(
+    `UPDATE spaces
+     SET storage_bytes = MAX(0, storage_bytes - ?),
+         object_count = MAX(0, object_count - ?)
+     WHERE id = ?`
+  ).bind(storage, objects, spaceId).run();
+
+  const ownerReserved = await reserveStorageQuota(env, ownerId, {
+    ...limits,
+    // Spaces are capped by spaceObjects above, not by the owner's count.
+    objects: Number.MAX_SAFE_INTEGER,
+  }, {
+    deltaStorage,
+    deltaObjects,
+    uploadBytes: size,
+  });
+
+  if (!ownerReserved.ok) {
+    await refundSpace(deltaStorage, deltaObjects);
+    return json(ownerReserved.body, 403, headers);
   }
-  if (usage.storage_bytes + deltaStorage > limits.storageBytes) {
-    return json({ error: "storage_quota_exceeded", maxBytes: limits.storageBytes }, 403, headers);
-  }
-  if (usage.upload_bytes_day + size > limits.uploadBytesDay) {
-    return json({ error: "upload_day_quota_exceeded", maxBytes: limits.uploadBytesDay }, 403, headers);
-  }
-  if (usage.writes_today + 1 > limits.writesDay) {
-    return json({ error: "writes_day_quota_exceeded", maxWrites: limits.writesDay }, 403, headers);
-  }
+
+  const refundAll = async (storage, objects) => {
+    await refundSpace(storage, objects);
+    await env.DB.prepare(
+      `UPDATE usage_current
+       SET storage_bytes = MAX(0, storage_bytes - ?),
+           object_count = MAX(0, object_count - ?)
+       WHERE user_id = ?`
+    ).bind(storage, objects, ownerId).run();
+  };
 
   const objectKey = r2Key(ownerId, spaceId, path);
   const etag = `"${size}-${now()}-${randomToken(6)}"`;
   const updatedAt = now();
-
-  await env.OBJECTS.put(objectKey, body, {
+  const r2Put = () => env.OBJECTS.put(objectKey, body, {
     httpMetadata: { contentType: "application/octet-stream" },
     customMetadata: { userId: ownerId, vaultId: spaceId, path }
   });
 
-  let actualDeltaStorage = deltaStorage;
-  let actualDeltaObjects = deltaObjects;
+  if (ifAbsent) {
+    // Index row first: it decides between concurrent writers.
+    const rowId = id("obj");
+    const claimed = await env.DB.prepare(
+      `INSERT INTO objects
+       (id,user_id,vault_id,path,size,etag,updated_at,created_at)
+       VALUES (?,?,?,?,?,?,?,?)
+       ON CONFLICT(vault_id, path) DO NOTHING
+       RETURNING id`
+    ).bind(rowId, ownerId, spaceId, path, size, etag, updatedAt, updatedAt).first();
 
-  if (existing) {
-    await env.DB.prepare(
-      `UPDATE objects SET size = ?, etag = ?, updated_at = ? WHERE id = ?`
-    ).bind(size, etag, updatedAt, existing.id).run();
+    if (!claimed) {
+      await refundAll(deltaStorage, deltaObjects);
+      return json({ error: "already_exists" }, 409, headers);
+    }
+
+    try {
+      await r2Put();
+    } catch (err) {
+      await env.DB.prepare(`DELETE FROM objects WHERE id = ?`).bind(rowId).run();
+      await refundAll(deltaStorage, deltaObjects);
+      throw err;
+    }
   } else {
     try {
-      await env.DB.prepare(
-        `INSERT INTO objects
-         (id,user_id,vault_id,path,size,etag,updated_at,created_at)
-         VALUES (?,?,?,?,?,?,?,?)`
-      ).bind(id("obj"), ownerId, spaceId, path, size, etag, updatedAt, updatedAt).run();
+      await r2Put();
     } catch (err) {
-      const msg = String(err?.message || err || "");
-      if (msg.includes("UNIQUE") || msg.includes("constraint")) {
-        if (ifAbsent) {
-          return json({ error: "already_exists" }, 409, headers);
-        }
-        const current = await env.DB.prepare(
-          `SELECT id,size FROM objects WHERE vault_id = ? AND path = ?`
-        ).bind(spaceId, path).first();
-        if (!current) throw err;
-        actualDeltaStorage = size - Number(current.size || 0);
-        actualDeltaObjects = 0;
-        await env.DB.prepare(
-          `UPDATE objects SET size = ?, etag = ?, updated_at = ? WHERE id = ?`
-        ).bind(size, etag, updatedAt, current.id).run();
-      } else {
-        throw err;
-      }
+      await refundAll(deltaStorage, deltaObjects);
+      throw err;
+    }
+
+    const previous = await env.DB.prepare(
+      `SELECT size FROM objects WHERE vault_id = ? AND path = ?`
+    ).bind(spaceId, path).first();
+
+    await env.DB.prepare(
+      `INSERT INTO objects
+       (id,user_id,vault_id,path,size,etag,updated_at,created_at)
+       VALUES (?,?,?,?,?,?,?,?)
+       ON CONFLICT(vault_id, path) DO UPDATE SET
+         size = excluded.size, etag = excluded.etag, updated_at = excluded.updated_at`
+    ).bind(id("obj"), ownerId, spaceId, path, size, etag, updatedAt, updatedAt).run();
+
+    const storageFix = (previous ? size - Number(previous.size || 0) : size) - deltaStorage;
+    const objectsFix = (previous ? 0 : 1) - deltaObjects;
+
+    if (storageFix || objectsFix) {
+      await refundAll(-storageFix, -objectsFix);
     }
   }
 
-  await env.DB.prepare(
-    `UPDATE usage_current
-     SET storage_bytes = storage_bytes + ?,
-         object_count = object_count + ?,
-         upload_bytes_day = upload_bytes_day + ?,
-         upload_bytes_month = upload_bytes_month + ?,
-         writes_today = writes_today + 1
-     WHERE user_id = ?`
-  ).bind(actualDeltaStorage, actualDeltaObjects, size, size, ownerId).run();
-
-  await env.DB.prepare(
-    `UPDATE spaces
-     SET storage_bytes = MAX(0, storage_bytes + ?),
-         object_count = MAX(0, object_count + ?),
-         updated_at = ?
-     WHERE id = ?`
-  ).bind(actualDeltaStorage, actualDeltaObjects, updatedAt, spaceId).run();
+  await env.DB.prepare(`UPDATE spaces SET updated_at = ? WHERE id = ?`).bind(updatedAt, spaceId).run();
 
   return json({
     ok: true,
@@ -8273,7 +8538,11 @@ async function handleSpaceStorageDelete(env, req, url, headers, spaceId) {
   if (existing) {
     const ownerId = access.space.owner_user_id;
     await env.OBJECTS.delete(r2Key(ownerId, spaceId, path));
-    await env.DB.prepare(`DELETE FROM objects WHERE id = ?`).bind(existing.id).run();
+    const removed = await env.DB.prepare(
+      `DELETE FROM objects WHERE id = ? RETURNING size`
+    ).bind(existing.id).first();
+    // A concurrent delete already gave the quota back.
+    if (!removed) return json({ ok: true }, 200, headers);
     await ensureUsageRow(env, ownerId);
     await env.DB.prepare(
       `UPDATE usage_current
@@ -8439,8 +8708,41 @@ async function handlePushConfig(env, req, headers) {
   }, 200, headers);
 }
 
+/*
+  Subscriptions may only point at real push services: the cron POSTs to
+  whatever endpoint is stored, which otherwise made the Worker a POST
+  reflector against any URL.
+*/
+const PUSH_SERVICE_HOST_SUFFIXES = [
+  "fcm.googleapis.com",
+  "android.googleapis.com",
+  "push.apple.com",
+  "push.services.mozilla.com",
+  "notify.windows.com",
+];
+
+function isAllowedPushEndpoint(endpoint) {
+  try {
+    const url = new URL(endpoint);
+    if (url.protocol !== "https:") return false;
+    const host = url.hostname.toLowerCase();
+    return PUSH_SERVICE_HOST_SUFFIXES.some((suffix) => host === suffix || host.endsWith(`.${suffix}`));
+  } catch {
+    return false;
+  }
+}
+
+// Per user. Past the cap the least recently seen device is replaced, so a
+// real user is never locked out — only unbounded fan-out is.
+const PUSH_MAX_DEVICES_PER_USER = 10;
+const PUSH_MAX_PER_USER_PER_CRON_TICK = 5;
+
 async function handlePushSubscribe(env, req, headers) {
   const user = await requireUser(env, req);
+
+  const rl = await rateLimit(env, `push:subscribe:${user.userId}`, 60, 60 * 60 * 1e3);
+  if (!rl.ok) return json({ ok: false, message: "rate_limited" }, 429, headers);
+
   const body = await bodyJson(req);
   const deviceId = String(body.deviceId || "").slice(0, 128);
   const pushkey = String(body.pushkey || "").slice(0, 256);
@@ -8451,6 +8753,23 @@ async function handlePushSubscribe(env, req, headers) {
 
   if (!deviceId || !pushkey || !endpoint || !p256dh || !auth) {
     return json({ ok: false, message: "invalid_subscription" }, 400, headers);
+  }
+
+  if (!isAllowedPushEndpoint(endpoint)) {
+    return json({ ok: false, message: "unsupported_push_service" }, 400, headers);
+  }
+
+  const existing = await env.DB.prepare(
+    `SELECT device_id FROM push_subscriptions WHERE user_id = ? ORDER BY COALESCE(last_seen_at, created_at) DESC`
+  ).bind(user.userId).all();
+
+  const others = (existing?.results || []).filter((row) => row.device_id !== deviceId);
+
+  for (const row of others.slice(PUSH_MAX_DEVICES_PER_USER - 1)) {
+    await env.DB.batch([
+      env.DB.prepare(`DELETE FROM push_subscriptions WHERE user_id=? AND device_id=?`).bind(user.userId, row.device_id),
+      env.DB.prepare(`DELETE FROM scheduled_pushes WHERE user_id=? AND device_id=?`).bind(user.userId, row.device_id),
+    ]);
   }
 
   await env.DB.prepare(
@@ -8477,6 +8796,10 @@ async function handlePushUnsubscribe(env, req, headers) {
 
 async function handlePushSchedule(env, req, headers) {
   const user = await requireUser(env, req);
+
+  const rl = await rateLimit(env, `push:schedule:${user.userId}`, 240, 60 * 60 * 1e3);
+  if (!rl.ok) return json({ ok: false, message: "rate_limited" }, 429, headers);
+
   const body = await bodyJson(req);
   const deviceId = String(body.deviceId || "");
   if (!deviceId) return json({ ok: false, message: "device_required" }, 400, headers);
@@ -8511,6 +8834,9 @@ async function handlePushSchedule(env, req, headers) {
 // encryption + endpoint) from the cron and the Matrix gateway.
 async function handlePushTest(env, req, headers) {
   const user = await requireUser(env, req);
+
+  const rl = await rateLimit(env, `push:test:${user.userId}`, 10, 60 * 60 * 1e3);
+  if (!rl.ok) return json({ ok: false, message: "rate_limited" }, 429, headers);
 
   const subs = await env.DB.prepare(
     `SELECT endpoint, p256dh, auth FROM push_subscriptions WHERE user_id = ?`
@@ -8570,18 +8896,68 @@ async function handleMatrixNotify(env, req, headers) {
   return json({ rejected, results }, 200, headers);
 }
 
+/*
+  Payloads of ended presentations and of expired public pages were never
+  deleted. Revoking already removes them; expiry did not.
+*/
+async function cleanupExpiredPayloads(env) {
+  const t = now();
+  const graceMs = 24 * 60 * 60 * 1e3;
+
+  const sessions = await env.DB.prepare(
+    `SELECT id, payload_object_key FROM presentation_sessions
+     WHERE (expires_at < ? OR revoked_at IS NOT NULL) AND updated_at < ?
+     LIMIT 200`
+  ).bind(t, t - graceMs).all();
+
+  for (const row of sessions?.results || []) {
+    if (row.payload_object_key) {
+      await env.OBJECTS.delete(row.payload_object_key).catch(() => {});
+    }
+    await env.DB.prepare(`DELETE FROM presentation_sessions WHERE id = ?`).bind(row.id).run();
+  }
+
+  const shares = await env.DB.prepare(
+    `SELECT id, payload_object_key FROM public_shares
+     WHERE expires_at IS NOT NULL AND expires_at < ? AND payload_object_key IS NOT NULL
+     LIMIT 200`
+  ).bind(t - graceMs).all();
+
+  for (const row of shares?.results || []) {
+    await env.OBJECTS.delete(row.payload_object_key).catch(() => {});
+    await env.DB.prepare(
+      `UPDATE public_shares SET payload_object_key = NULL, payload_size_bytes = 0, status = 'expired', updated_at = ? WHERE id = ?`
+    ).bind(t, row.id).run();
+  }
+
+  return {
+    presentations: sessions?.results?.length || 0,
+    publicShares: shares?.results?.length || 0,
+  };
+}
+
 async function runScheduledPushes(env) {
   const nowMs = now();
 
+  /*
+    A few per user per tick, then oldest first. Globally oldest-first let
+    one account with a huge backlog (fire times set in the past) take every
+    slot until real reminders expired.
+  */
   const rows = await env.DB.prepare(
-    `SELECT sp.id AS sid, sp.enc_payload AS enc, ps.endpoint, ps.p256dh, ps.auth
-     FROM scheduled_pushes sp
-     JOIN push_subscriptions ps
-       ON ps.user_id = sp.user_id AND ps.device_id = sp.device_id
-     WHERE sp.sent_at IS NULL AND sp.fire_at <= ?
-     ORDER BY sp.fire_at
+    `SELECT sid, enc, endpoint, p256dh, auth FROM (
+       SELECT sp.id AS sid, sp.enc_payload AS enc, sp.fire_at AS fire_at,
+              ps.endpoint, ps.p256dh, ps.auth,
+              ROW_NUMBER() OVER (PARTITION BY sp.user_id ORDER BY sp.fire_at) AS rn
+       FROM scheduled_pushes sp
+       JOIN push_subscriptions ps
+         ON ps.user_id = sp.user_id AND ps.device_id = sp.device_id
+       WHERE sp.sent_at IS NULL AND sp.fire_at <= ?
+     )
+     WHERE rn <= ?
+     ORDER BY fire_at
      LIMIT 200`
-  ).bind(nowMs).all();
+  ).bind(nowMs, PUSH_MAX_PER_USER_PER_CRON_TICK).all();
 
   for (const row of rows?.results || []) {
     try {
@@ -8708,9 +9084,9 @@ function metricsTokenOk(env, req, url) {
   const expected = String(env.METRICS_TOKEN || "").trim();
   if (!expected) return false;
 
+  // Header only: a token in the query string ends up in access logs.
   const provided =
-    String(req.headers.get("x-yanta-metrics-token") || "").trim() ||
-    String(url.searchParams.get("token") || "").trim();
+    String(req.headers.get("x-yanta-metrics-token") || "").trim();
 
   if (!provided || provided.length !== expected.length) return false;
 
@@ -9195,12 +9571,26 @@ async function route(req, env) {
     return json({ error: "not_found" }, 404, headers);
   } catch (err) {
     console.error("[YANTA Cloud Worker]", safeErrorForLog(err));
+    /*
+      Statuses our own code set (401 sign-in, 403 limits, 404 …) pass
+      through. A status copied from Paddle/YouTube/Matrix does not: an
+      upstream 401 made the app show "sign in" for a valid session. And
+      unexpected errors keep their details in the log, not the response.
+    */
+    const status = err?.upstream
+      ? 502
+      : Number(err?.status) || 500;
+    const message = err?.upstream
+      ? "An upstream service failed. Please try again later."
+      : status >= 500
+        ? "Internal error."
+        : err?.message || String(err);
     return json({
-      error: "internal_error",
-      message: err?.message || String(err),
-      status: err?.status || 500,
+      error: err?.upstream ? "upstream_error" : "internal_error",
+      message,
+      status,
       code: err?.code || err?.serverCode || ""
-    }, err.status || 500, headers);
+    }, status, headers);
   }
 }
 __name(route, "route");
@@ -9240,6 +9630,13 @@ var index_default = {
     ctx.waitUntil(
       runScheduledPushes(env).catch((err) => console.error("[push cron]", safeErrorForLog(err)))
     );
+
+    // Once an hour (the cron itself runs every minute).
+    if (new Date(event?.scheduledTime || Date.now()).getUTCMinutes() === 7) {
+      ctx.waitUntil(
+        cleanupExpiredPayloads(env).catch((err) => console.error("[cleanup cron]", safeErrorForLog(err)))
+      );
+    }
   }
 };
 export {

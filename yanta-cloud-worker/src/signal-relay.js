@@ -21,6 +21,9 @@
 
 const MAX_PAYLOAD = 512 * 1024;
 const MAX_CLIENTS = 4_000;
+// One relay instance serves everyone, so a single client must not be able
+// to take all 4000 slots. Generous for offices and NAT, tiny next to 4000.
+const MAX_CLIENTS_PER_IP = 64;
 const MAX_TOPICS_PER_CONN = 32;
 const MAX_TOPIC_LEN = 256;
 const MAX_MSGS_PER_10S = 300;
@@ -94,6 +97,13 @@ export function handleRelayRequest(req, env, url) {
   }
 
   return stub.fetch(req);
+}
+
+async function clientTag(req) {
+  const ip = req.headers.get('cf-connecting-ip') || req.headers.get('x-real-ip') || 'unknown';
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(`relay:${ip}`));
+  const hex = [...new Uint8Array(digest).slice(0, 8)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  return `ip:${hex}`;
 }
 
 function readTopics(ws) {
@@ -179,11 +189,19 @@ export class SignalRelay {
       return new Response('relay overloaded\n', { status: 503 });
     }
 
+    // Hibernation tags count sockets per client address without keeping
+    // any other state; the address itself is only kept as a short hash.
+    const ipTag = await clientTag(req);
+
+    if (this.ctx.getWebSockets(ipTag).length >= MAX_CLIENTS_PER_IP) {
+      return new Response('too many connections\n', { status: 429 });
+    }
+
     const pair = new WebSocketPair();
     const client = pair[0];
     const server = pair[1];
 
-    this.ctx.acceptWebSocket(server);
+    this.ctx.acceptWebSocket(server, [ipTag]);
     writeTopics(server, []);
 
     return new Response(null, { status: 101, webSocket: client });

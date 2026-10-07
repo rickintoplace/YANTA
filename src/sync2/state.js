@@ -117,6 +117,15 @@ export class Sync2LocalStateStore {
     this.seenLoaded = true;
   }
 
+  /*
+    Other tabs of this origin write to the same seen store; the in-memory
+    cache only knows what this tab loaded or marked itself.
+  */
+  async reloadSeenCache() {
+    this.seenLoaded = false;
+    await this.loadSeenCache();
+  }
+
   async hasSeen(path) {
     await this.loadSeenCache();
     return this.seenCache.has(path);
@@ -175,6 +184,26 @@ export class Sync2LocalStateStore {
     }
 
     await txDone(tx);
+  }
+
+  async deleteSeen(paths = []) {
+    const list = [...paths].map(String).filter(Boolean);
+    if (!list.length) return 0;
+
+    await this.init();
+    await this.loadSeenCache();
+
+    const tx = this.tx('seen', 'readwrite');
+    const store = tx.objectStore('seen');
+
+    for (const p of list) {
+      store.delete(p);
+      this.seenCache.delete(p);
+    }
+
+    await txDone(tx);
+
+    return list.length;
   }
 
   async seenCount() {

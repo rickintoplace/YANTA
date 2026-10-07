@@ -171,6 +171,8 @@ export async function downloadVaultSnapshots(engine) {
       run: runSyncDownload,
     }
   )) {
+    if (plain == null) continue;
+
     engine.noteIncomingVaultBytes?.(plain);
     applyVaultUpdate(plain, 'sync2-remote');
 
@@ -230,6 +232,8 @@ export async function downloadNoteSnapshots(engine, noteId) {
       run: runSyncDownload,
     }
   )) {
+    if (plain == null) continue;
+
     Y.applyUpdate(doc, plain, 'sync2-remote');
 
     seenWrites.push({

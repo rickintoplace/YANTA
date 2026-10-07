@@ -138,7 +138,24 @@ function makeEtag(file) {
   return file.md5Checksum || `${file.size || 0}-${file.modifiedTime || ''}`;
 }
 
+async function driveErrorReason(res) {
+  try {
+    const json = await res.clone().json();
+    return String(json?.error?.errors?.[0]?.reason || json?.error?.status || '');
+  } catch {
+    return '';
+  }
+}
+
+/*
+  Drive answers both rate limiting and a full Drive with 403; only the
+  error reason tells them apart (and both apart from a real 403).
+*/
+const DRIVE_RATE_LIMIT_REASONS = new Set(['rateLimitExceeded', 'userRateLimitExceeded']);
+const DRIVE_QUOTA_REASONS = new Set(['storageQuotaExceeded', 'quotaExceeded']);
+
 async function responseError(res, fallback) {
+  const reason = await driveErrorReason(res);
   let msg = fallback;
 
   try {
@@ -152,6 +169,13 @@ async function responseError(res, fallback) {
 
   const err = new Error(`${fallback}: ${res.status} ${msg}`);
   err.status = res.status;
+  err.reason = reason;
+
+  if (DRIVE_QUOTA_REASONS.has(reason)) {
+    err.code = 'EQUOTA';
+  } else if (res.status === 429 || DRIVE_RATE_LIMIT_REASONS.has(reason)) {
+    err.code = 'ERATE_LIMIT';
+  }
 
   return err;
 }
@@ -194,6 +218,15 @@ function retryAfterMs(res) {
   }
 
   return 0;
+}
+
+/*
+  A fixed 30 s killed large asset uploads on slow links: allow ~50 KB/s on
+  top of the base, capped at ten minutes.
+*/
+function timeoutForBody(body) {
+  const bytes = Number(body?.size ?? body?.byteLength ?? 0) || 0;
+  return Math.min(10 * 60_000, 30_000 + Math.ceil(bytes / 50_000) * 1000);
 }
 
 async function fetchWithTimeout(url, options = {}, timeoutMs = 30_000) {
@@ -374,6 +407,14 @@ export class GoogleDriveObjectStore extends RemoteObjectStore {
 
     let lastError = null;
 
+    /*
+      A create (POST) that timed out may still have been executed: retrying
+      it blindly left two files with the same name. Only retry a POST when
+      Drive said it did not process it (rate limiting); otherwise surface
+      the error and let the next sync find whatever landed.
+    */
+    const isCreate = String(options.method || 'GET').toUpperCase() === 'POST';
+
     for (let attempt = 0; attempt < 4; attempt++) {
       let res;
 
@@ -384,9 +425,11 @@ export class GoogleDriveObjectStore extends RemoteObjectStore {
             ...(options.headers || {}),
             authorization: `Bearer ${this.accessToken}`,
           },
-        }, 30_000);
+        }, options.body ? timeoutForBody(options.body) : 30_000);
       } catch (err) {
         lastError = err;
+
+        if (isCreate) throw err;
 
         const backoff = 500 * Math.pow(2, attempt) + Math.random() * 300;
         await sleep(backoff);
@@ -409,7 +452,14 @@ export class GoogleDriveObjectStore extends RemoteObjectStore {
         );
       }
 
-      if (isRetryableStatus(res.status) && attempt < 3) {
+      const reason = res.status === 403 ? await driveErrorReason(res) : '';
+      const rateLimited = res.status === 429 || DRIVE_RATE_LIMIT_REASONS.has(reason);
+
+      const retryable = isCreate
+        ? rateLimited
+        : (rateLimited || isRetryableStatus(res.status));
+
+      if (retryable && attempt < 3) {
         lastError = await responseError(res, 'Google Drive transient error');
 
         const fromHeader = retryAfterMs(res);
@@ -526,7 +576,27 @@ export class GoogleDriveObjectStore extends RemoteObjectStore {
       pageToken = json.nextPageToken || '';
     } while (pageToken);
 
-    return out.sort(remoteEntrySort);
+    /*
+      Drive allows several files with one name (left behind by retried
+      creates). Report one entry per path — the newest, which is also what
+      get() reads — or callers see the path flip between two etags.
+    */
+    const byPath = new Map();
+
+    for (const entry of out) {
+      const prev = byPath.get(entry.path);
+      if (!prev || entry.updated > prev.updated) byPath.set(entry.path, entry);
+    }
+
+    return [...byPath.values()].sort(remoteEntrySort);
+  }
+
+  /*
+    The whole listing in one go. Without it the engine listed per prefix,
+    and every per-note listing paged through all files again.
+  */
+  async index() {
+    return this.list('');
   }
 
   async listAllYantaFiles() {
@@ -650,7 +720,13 @@ export class GoogleDriveObjectStore extends RemoteObjectStore {
     const p = assertSafeRemotePath(path);
     const bytes = await bytesFromData(data);
 
-    const existing = await this.findFile(p);
+    const matches = await this.findFilesByPath(p);
+
+    matches.sort((a, b) =>
+      String(b.modifiedTime || '').localeCompare(String(a.modifiedTime || ''))
+    );
+
+    const existing = matches[0] || null;
 
     if (options.ifAbsent && existing) {
       const err = new Error(`Remote object already exists: ${p}`);
@@ -672,6 +748,11 @@ export class GoogleDriveObjectStore extends RemoteObjectStore {
 
       if (!res.ok) {
         throw await responseError(res, 'Google Drive update failed');
+      }
+
+      // Drop duplicates of this path; the newest now holds the data.
+      for (const dup of matches.slice(1)) {
+        await this.deleteFileId(dup.id).catch(() => {});
       }
 
       return;

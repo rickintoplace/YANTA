@@ -22,7 +22,7 @@
 
 import * as Y from 'yjs';
 
-import { $, state, store, toast, isSpaceMountedNote } from '../core.js';
+import { $, state, store, toast, uid, isSpaceMountedNote } from '../core.js';
 import { isNoteTitleFieldFocused, rebuildWikilinkIndex } from '../notes.js';
 import { renderTree } from '../tree.js';
 
@@ -30,6 +30,7 @@ import {
   getNoteDoc,
   encodeNoteState,
   noteMarkdown,
+  refreshLoadedNoteDocsFromStorage,
 } from '../yjs.js';
 
 import {
@@ -52,11 +53,18 @@ import {
   vaultJsonSnapshot,
   VAULT_ORIGINS,
   safeJsonClone,
+  refreshVaultDocFromStorage,
+  isVaultPersistenceOrigin,
 } from './vault-doc.js';
 
 import { IndexedDBObjectStore } from './indexeddb-object-store.js';
 import { Sync2LocalStateStore, createSeenBatch } from './state.js';
 import { removeLocalSpaceRecordOnly } from './store-bridge.js';
+import {
+  sanitizeNoteMeta,
+  sanitizeFolderMeta,
+  sanitizeImageMeta,
+} from './meta-sanitize.js';
 import { BrokerObjectStore } from './broker-object-store.js';
 
 import {
@@ -108,6 +116,7 @@ import {
   downloadVaultHeads,
   downloadKnownNoteHeads,
   pruneSeenUpdatesCoveredByHeads,
+  forgetSeenObjectsGoneFromRemote,
 } from './heads.js';
 
 import {
@@ -123,10 +132,10 @@ import {
 } from './download-pool.js';
 
 import {
-  createCalendarVersionCollector,
-  collectCalendarVersionsFromUpdate,
-  reconcileCalendarVersions,
-} from './calendar-version-guard.js';
+  createVaultVersionCollector,
+  collectVaultVersionsFromUpdate,
+  reconcileVaultVersions,
+} from './vault-version-guard.js';
 
 export const SYNC2_REMOTE_ORIGIN = 'sync2-remote';
 export const SYNC2_LOCAL_ORIGIN = 'sync2-local';
@@ -140,6 +149,15 @@ export const SYNC2_DEVICE_PRESENCE_ORIGIN = 'sync2-device-presence';
 // the local CRDT history to megabytes and froze boot. 30 min keeps the
 // device-list "last seen" useful while making history growth negligible.
 const DEVICE_PRESENCE_PERSIST_MS = 30 * 60 * 1000;
+
+/*
+  One sync operation per origin at a time. Tabs (and an installed PWA
+  window) share the device id, seq and seen-state through IndexedDB but
+  each has its own in-memory VaultDoc and outbox; two of them syncing at
+  once reused seq numbers, dropped their own updates as "already
+  uploaded" and overwrote each other's heads.
+*/
+const SYNC2_LOCK_NAME = 'yanta-sync2';
 
 function emitSync2Progress(detail = {}) {
   try {
@@ -161,13 +179,110 @@ export async function getSync2SyncKey() {
   return getOrCreateSyncKey();
 }
 
+const PREVIOUS_SYNC_KEY_SETTING = 'sync2.syncKey.previous';
+const KEY_CHECK_PLAINTEXT = 'yanta-sync-key-ok-v1';
+
 export async function setSync2SyncKey(syncKey) {
   syncKeyToBytes(syncKey);
+
+  /*
+    Keep the key being replaced. With zero knowledge nothing else can bring
+    it back, and a mistaken import (wrong vault, wrong paste) would
+    otherwise orphan everything encrypted with it.
+  */
+  const current = await storedSync2SyncKey();
+
+  if (current && current !== syncKey) {
+    await store.settings.set(PREVIOUS_SYNC_KEY_SETTING, {
+      syncKey: current,
+      replacedAt: Date.now(),
+    });
+  }
 
   await store.settings.set(SYNC_KEY_SETTING, syncKey);
   await store.settings.set(LEGACY_DEBUG_SYNC_KEY_SETTING, syncKey);
 
   return syncKey;
+}
+
+async function storedSync2SyncKey() {
+  return (
+    await store.settings.get(SYNC_KEY_SETTING, null) ||
+    await store.settings.get(LEGACY_DEBUG_SYNC_KEY_SETTING, null) ||
+    null
+  );
+}
+
+/** True when this device already holds a sync key other than syncKey. */
+export async function hasDifferentStoredSync2SyncKey(syncKey) {
+  const current = await storedSync2SyncKey();
+  return !!current && current !== syncKey;
+}
+
+function wrongSyncKeyError(cause = null) {
+  const e = new Error(
+    'Wrong Sync Key. This sync vault already contains encrypted YANTA data that this key cannot decrypt.'
+  );
+
+  e.code = 'EWRONGKEY';
+  if (cause) e.cause = cause;
+
+  return e;
+}
+
+/**
+ * Check a sync key against a vault's key-check object, without storing
+ * anything. Resolves 'match' or 'absent' (vault has no key check yet);
+ * rejects with EWRONGKEY when the key cannot decrypt it. Any other error
+ * (network, auth) propagates as is — it says nothing about the key.
+ */
+export async function checkSyncKeyAgainstRemote(remote, syncKey, {
+  keys = null,
+} = {}) {
+  const path = keyCheckPath();
+  const contentKey = (keys || await deriveKeys(syncKey)).contentKey;
+
+  let encrypted;
+
+  try {
+    encrypted = await remote.get(path);
+  } catch (err) {
+    if (isMissingObjectError(err)) return 'absent';
+    throw err;
+  }
+
+  let text = '';
+
+  try {
+    text = new TextDecoder().decode(await decryptBytes(contentKey, encrypted, path));
+  } catch (err) {
+    throw wrongSyncKeyError(err);
+  }
+
+  if (text !== KEY_CHECK_PLAINTEXT) {
+    throw wrongSyncKeyError();
+  }
+
+  return 'match';
+}
+
+/** checkSyncKeyAgainstRemote for a YANTA Cloud vault. */
+export async function verifyYantaCloudSyncKey({
+  baseUrl = '',
+  vaultId = '',
+  syncKey,
+} = {}) {
+  syncKeyToBytes(syncKey);
+
+  const remote = new YantaCloudObjectStore({
+    baseUrl,
+    vaultId,
+    deviceId: await getOrCreateDeviceId(),
+  });
+
+  await remote.init();
+
+  return checkSyncKeyAgainstRemote(remote, syncKey);
 }
 
 export async function clearSync2SyncKeyForDebugOnly() {
@@ -218,11 +333,6 @@ function cleanUndefined(obj) {
   return out;
 }
 
-function finiteNumberOrUndefined(value) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : undefined;
-}
-
 function seqFromRemoteObjectPath(path, deviceId) {
   const safeDevice = String(deviceId || '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
@@ -236,6 +346,10 @@ function seqFromRemoteObjectPath(path, deviceId) {
   return Number.isFinite(n) ? n : 0;
 }
 
+function isMissingObjectError(err) {
+  return err?.code === 'ENOENT' || err?.status === 404;
+}
+
 function isObjectTooLargeError(err) {
   return (
     err?.status === 413 ||
@@ -245,120 +359,13 @@ function isObjectTooLargeError(err) {
   );
 }
 
-function sanitizeNoteMeta(note) {
-  if (!note || typeof note !== 'object') return null;
-
-  return cleanUndefined({
-    id: String(note.id || ''),
-    title: String(note.title || 'Untitled'),
-    type: String(note.type || 'markdown'),
-    folderId: note.folderId || null,
-    tags: Array.isArray(note.tags) ? [...note.tags].map(String) : [],
-    pinned: !!note.pinned,
-    icon: note.icon || undefined,
-    color: note.color || undefined,
-    created: Number(note.created || Date.now()),
-    updated: Number(note.updated || Date.now()),
-    bodyMigrated: note.bodyMigrated === true ? true : undefined,
-
-    // Dashboard layout/user preferences.
-    dashboardOrder: finiteNumberOrUndefined(note.dashboardOrder),
-    dashboardPinnedOrder: finiteNumberOrUndefined(note.dashboardPinnedOrder),
-    dashboardHeightPx: finiteNumberOrUndefined(note.dashboardHeightPx),
-
-    // Legacy compatibility. New code should prefer dashboardHeightPx.
-    dashboardHeight: finiteNumberOrUndefined(note.dashboardHeight),
-
-    hidden: note.hidden === true ? true : undefined,    archived: note.archived === true ? true : undefined,
-    system: note.system === true ? true : undefined,
-    aiBrain: note.aiBrain === true ? true : undefined,
-
-    // Provenance. Must travel: a note written by a background run has to
-    // look AI-written on every device, not only the one that made it.
-    aiGenerated: note.aiGenerated === true ? true : undefined,
-    aiSource: note.aiGenerated === true && note.aiSource
-      ? String(note.aiSource)
-      : undefined,
-    dashboardHidden: note.dashboardHidden === true ? true : undefined,
-    hiddenFromDashboard: note.hiddenFromDashboard === true ? true : undefined,
-
-    trashed: note.trashed === true ? true : undefined,
-    deletedAt: finiteNumberOrUndefined(note.deletedAt),
-    deletedBy: note.deletedBy ? String(note.deletedBy) : undefined,
-    trashOriginalFolderId: note.trashOriginalFolderId || undefined,
-    trashOriginalFolderPath: Array.isArray(note.trashOriginalFolderPath)
-      ? note.trashOriginalFolderPath.map(String)
-      : undefined,
-  });
-}
-
-function sanitizeFolderMeta(folder) {
-  if (!folder || typeof folder !== 'object') return null;
-
-  return cleanUndefined({
-    id: String(folder.id || ''),
-    name: String(folder.name || 'Folder'),
-    parentId: folder.parentId || null,
-    icon: folder.icon || undefined,
-    color: folder.color || undefined,
-    created: Number(folder.created || Date.now()),
-    updated: Number(folder.updated || folder.created || Date.now()),
-
-    // Dashboard layout/user preferences.
-    dashboardOrder: finiteNumberOrUndefined(folder.dashboardOrder),
-    dashboardHeightPx: finiteNumberOrUndefined(folder.dashboardHeightPx),
-
-    // Legacy compatibility. New code should prefer dashboardHeightPx.
-    dashboardHeight: finiteNumberOrUndefined(folder.dashboardHeight),
-
-    hidden: folder.hidden === true ? true : undefined,    archived: folder.archived === true ? true : undefined,
-    system: folder.system === true ? true : undefined,
-    aiBrain: folder.aiBrain === true ? true : undefined,
-    dashboardHidden: folder.dashboardHidden === true ? true : undefined,
-    hiddenFromDashboard: folder.hiddenFromDashboard === true ? true : undefined,
-
-    trashed: folder.trashed === true ? true : undefined,
-    deletedAt: finiteNumberOrUndefined(folder.deletedAt),
-    deletedBy: folder.deletedBy ? String(folder.deletedBy) : undefined,
-    trashOriginalParentId: folder.trashOriginalParentId || undefined,
-    trashOriginalParentPath: Array.isArray(folder.trashOriginalParentPath)
-      ? folder.trashOriginalParentPath.map(String)
-      : undefined,
-  });
-}
-
-function sanitizeImageMeta(image) {
-  if (!image || typeof image !== 'object') return null;
-
-  const { blob, data, ...rest } = image;
-
-  return cleanUndefined({
-    id: String(rest.id || ''),
-    name: rest.name ? String(rest.name) : undefined,
-    size: Number(rest.size || 0),
-    type: rest.type ? String(rest.type) : undefined,
-    ts: Number(rest.ts || rest.updated || Date.now()),
-    updated: Number(rest.updated || rest.ts || Date.now()),
-
-    // Asset-key architecture v2.
-    encryptionVersion: Number(rest.encryptionVersion || 1),
-    objectId: rest.objectId ? String(rest.objectId) : undefined,
-    objectPath: rest.objectPath ? String(rest.objectPath) : undefined,
-    keyVersion: Number(rest.keyVersion || 1),
-    keyAlg: rest.keyAlg ? String(rest.keyAlg) : undefined,
-    encryptedAssetKeyForVault: rest.encryptedAssetKeyForVault
-      ? String(rest.encryptedAssetKeyForVault)
-      : undefined,
-  });
-}
-
-function preferIncoming(existing, incoming) {
-  if (!existing) return true;
-
-  const exUpdated = Number(existing.updated || existing.ts || existing.created || 0);
-  const inUpdated = Number(incoming.updated || incoming.ts || incoming.created || 0);
-
-  return inUpdated >= exUpdated;
+async function readCacheById(cacheStore) {
+  try {
+    const rows = await cacheStore.all();
+    return new Map((rows || []).map((row) => [row.id, row]));
+  } catch {
+    return new Map();
+  }
 }
 
 function stableJsonStringifyForSync2(value) {
@@ -534,10 +541,21 @@ export async function sync2LocalVaultContentFingerprint() {
     events: {},
     calendarCategories: {},
     rssFeeds: {},
+    spaces: {},
     tombstones: {},
     settings: {},
   };
 
+  /*
+    Every synced map must be in here: a vault update whose map is missing
+    leaves the fingerprint unchanged, is dropped as "redundant" and never
+    uploaded. Shared-space records (the only copy of their keys) were
+    missing, so a new share reached other devices only if something else
+    in the vault happened to change too.
+
+    A partial snapshot could match the last uploaded fingerprint and get a
+    real change skipped, so any failure yields no fingerprint at all.
+  */
   try {
     for (const [id, note] of vaultNotesMap()) {
       snapshot.notes[id] = stripVolatileVaultFingerprintFields(note);
@@ -563,19 +581,24 @@ export async function sync2LocalVaultContentFingerprint() {
       snapshot.rssFeeds[id] = stripVolatileVaultFingerprintFields(feed);
     }
 
+    for (const [id, space] of vaultSpacesMap()) {
+      snapshot.spaces[id] = stripVolatileVaultFingerprintFields(space);
+    }
+
     for (const [id, tombstone] of vaultTombstonesMap()) {
       snapshot.tombstones[id] = stripVolatileVaultFingerprintFields(tombstone);
     }
-  } catch {}
 
-  try {
     for (const [key, value] of vaultSettingsMap()) {
       if (!VAULT_SYNCED_SETTING_KEYS.has(String(key))) continue;
 
       snapshot.settings[String(key)] =
         stripVolatileVaultFingerprintFields(value);
     }
-  } catch {}
+  } catch (err) {
+    console.warn('[YANTA Sync2] vault fingerprint unavailable', err);
+    return '';
+  }
 
   const stable = stableJsonStringifyForSync2(snapshot);
   const digest = await sha256(utf8Encode(stable));
@@ -868,6 +891,11 @@ export class Sync2AppEngine {
     this.seq = 0;
     this.outbox = [];
 
+    this.syncQueued = false;
+
+    // path -> { reason, message, at } for objects downloads had to skip.
+    this.skippedObjects = new Map();
+
     this.unobserveVault = null;
     this.noteObservers = new Map();
   }
@@ -955,7 +983,8 @@ export class Sync2AppEngine {
   }
 
   async commitSeq(seq) {
-    this.seq = seq;
+    // Never move backwards: a reused seq collides with an existing object.
+    this.seq = Math.max(this.seq, Number(seq) || 0);
     await this.localState.set('seq', this.seq);
     await store.settings.set('sync2.seq', this.seq);
     return this.seq;
@@ -1085,6 +1114,52 @@ export class Sync2AppEngine {
     throw err;
   }
 
+  /**
+   * Run fn holding the origin-wide sync lock. Not reentrant: code running
+   * under the lock calls the *Locked variants, never a public entry point.
+   */
+  async withSyncLock(fn) {
+    const locks = globalThis.navigator?.locks;
+
+    const run = async () => {
+      await this.adoptSharedLocalState();
+      return fn();
+    };
+
+    if (typeof locks?.request !== 'function') {
+      return run();
+    }
+
+    return locks.request(SYNC2_LOCK_NAME, run);
+  }
+
+  /*
+    Take over what other tabs of this origin did since this tab last held
+    the lock: their seq, the paths they marked seen, and their local
+    VaultDoc/note edits (persisted to IndexedDB, but not in this tab's
+    in-memory docs).
+  */
+  async adoptSharedLocalState() {
+    try {
+      const storedSeq = Number(await this.localState.get('seq', 0)) || 0;
+
+      if (storedSeq > this.seq) {
+        this.seq = storedSeq;
+      }
+
+      await this.localState.reloadSeenCache?.();
+    } catch (err) {
+      console.warn('[YANTA Sync2] could not adopt shared sync state', err);
+    }
+
+    try {
+      await refreshVaultDocFromStorage();
+      await refreshLoadedNoteDocsFromStorage();
+    } catch (err) {
+      console.warn('[YANTA Sync2] could not refresh local docs from storage', err);
+    }
+  }
+
   async init() {
     await this.remote.init();
     await this.localState.init();
@@ -1152,15 +1227,15 @@ export class Sync2AppEngine {
   }
 
   /**
-   * Calendar version guard hook: download paths (heads, snapshots,
+   * Vault version guard hook: download paths (heads, snapshots,
    * update packs) report every incoming vault payload here before
-   * applying it, so reconcileCalendarVersions() can restore entries
+   * applying it, so reconcileVaultVersions() can restore entries
    * the CRDT merge left stale. No-op outside a pull cycle.
    */
   noteIncomingVaultBytes(bytes) {
-    if (!this.activeCalendarGuard) return;
+    if (!this.activeVersionGuard) return;
 
-    collectCalendarVersionsFromUpdate(this.activeCalendarGuard, bytes);
+    collectVaultVersionsFromUpdate(this.activeVersionGuard, bytes);
   }
 
   async hasSeen(path) {
@@ -1181,14 +1256,64 @@ export class Sync2AppEngine {
     handed to the parallel pool. Decoding and applying stays with the
     caller, which keeps it sequential and in list order.
   */
+  /*
+    Returns null for an object that cannot be used, instead of throwing:
+    - missing: listed, but deleted meanwhile (other devices prune their
+      journals all the time, so this is routine with several devices);
+    - unreadable: does not decrypt or decode (truncated upload, written
+      with another key).
+    One such object used to abort every sync before heads were uploaded,
+    stalling the device for good. Callers skip null and do NOT mark the
+    path seen — nothing was applied, so nothing may treat it as covered.
+    Network errors still throw: they would hit every object alike.
+  */
   async fetchAndDecrypt(path) {
-    const encrypted = await this.remote.get(path);
+    let encrypted;
 
-    return decryptBytes(
-      this.keys.contentKey,
-      encrypted,
-      path
-    );
+    try {
+      encrypted = await this.remote.get(path);
+    } catch (err) {
+      if (isMissingObjectError(err)) {
+        this.noteSkippedObject(path, 'missing', err);
+        return null;
+      }
+
+      throw err;
+    }
+
+    try {
+      return await decryptBytes(
+        this.keys.contentKey,
+        encrypted,
+        path
+      );
+    } catch (err) {
+      this.noteSkippedObject(path, 'unreadable', err);
+      return null;
+    }
+  }
+
+  noteSkippedObject(path, reason, err = null) {
+    const known = this.skippedObjects.get(path);
+
+    this.skippedObjects.set(path, {
+      reason,
+      message: err?.message || String(err || ''),
+      at: Date.now(),
+    });
+
+    if (!known && reason !== 'missing') {
+      console.warn(`[YANTA Sync2] skipped ${reason} remote object`, path, err);
+    }
+  }
+
+  decodePackOrSkip(path, plain) {
+    try {
+      return decodePack(plain);
+    } catch (err) {
+      this.noteSkippedObject(path, 'unreadable', err);
+      return null;
+    }
   }
 
   async updateDeviceRecord(patch = {}, {
@@ -1260,49 +1385,35 @@ export class Sync2AppEngine {
     return next;
   }
 
+  /*
+    Only a key that fails to decrypt the key check is a wrong key. A failed
+    download used to be reported as one too — right next to the button
+    that deletes the cloud vault.
+  */
   async ensureKeyCheck() {
+    const status = await checkSyncKeyAgainstRemote(this.remote, this.syncKey, {
+      keys: this.keys,
+    });
+
+    if (status === 'match') return;
+
     const path = keyCheckPath();
-    const existing = await this.remote.stat(path);
-  
-    if (!existing) {
-      const encrypted = await encryptBytes(
-        this.keys.contentKey,
-        utf8Encode('yanta-sync-key-ok-v1'),
-        path
-      );
-  
-      try {
-        await this.remote.put(path, encrypted, { ifAbsent: true });
-      } catch (err) {
-        if (err?.code !== 'EEXIST') throw err;
-      }
-  
-      return;
-    }
-  
+
+    const encrypted = await encryptBytes(
+      this.keys.contentKey,
+      utf8Encode(KEY_CHECK_PLAINTEXT),
+      path
+    );
+
     try {
-      const encrypted = await this.remote.get(path);
-  
-      const plain = await decryptBytes(
-        this.keys.contentKey,
-        encrypted,
-        path
-      );
-  
-      const text = new TextDecoder().decode(plain);
-  
-      if (text !== 'yanta-sync-key-ok-v1') {
-        throw new Error('Wrong Sync Key');
-      }
+      await this.remote.put(path, encrypted, { ifAbsent: true });
     } catch (err) {
-      const e = new Error(
-        'Wrong Sync Key. Google Drive already contains encrypted YANTA Sync data that cannot be decrypted with this local key.'
-      );
-  
-      e.code = 'EWRONGKEY';
-      e.cause = err;
-  
-      throw e;
+      if (err?.code !== 'EEXIST') throw err;
+
+      // Another device created it first: this key must still match it.
+      await checkSyncKeyAgainstRemote(this.remote, this.syncKey, {
+        keys: this.keys,
+      });
     }
   }
 
@@ -1320,6 +1431,11 @@ export class Sync2AppEngine {
       // Notification acks travel as dedicated per-device objects
       // (notification-ack-sync.js), never as vault update packs.
       if (origin === 'native-notification-ack') return;
+
+      // Another tab's edits, read back from IndexedDB. That tab uploads
+      // them; if it never does, this tab's head and the fingerprint
+      // markers still carry them.
+      if (isVaultPersistenceOrigin(origin)) return;
 
       /*
         Wichtig:
@@ -1374,6 +1490,7 @@ export class Sync2AppEngine {
     const handler = (update, origin) => {
       if (origin === SYNC2_REMOTE_ORIGIN) return;
       if (origin === 'sync-folder') return;
+      if (origin === entry.persistence) return;
 
       // If the note is tombstoned, do not queue body changes.
       if (vaultTombstonesMap().has(noteId)) return;
@@ -1778,7 +1895,11 @@ export class Sync2AppEngine {
     };
   }
 
-  async pushFullStateNow({
+  async pushFullStateNow(options = {}) {
+    return this.withSyncLock(() => this.pushFullStateNowLocked(options));
+  }
+
+  async pushFullStateNowLocked({
     includeSnapshots = true,
     verbose = true,
   } = {}) {
@@ -1907,7 +2028,23 @@ export class Sync2AppEngine {
     return this.status();
   }
 
-  async syncNow({
+  async syncNow(options = {}) {
+    // A sync already running or waiting in this tab covers this request.
+    if (this.syncing || this.syncQueued) return this.status();
+
+    this.syncQueued = true;
+
+    try {
+      return await this.withSyncLock(() => {
+        this.syncQueued = false;
+        return this.syncNowLocked(options);
+      });
+    } finally {
+      this.syncQueued = false;
+    }
+  }
+
+  async syncNowLocked({
     verbose = true,
     pullSnapshots = true,
   } = {}) {
@@ -1943,6 +2080,11 @@ export class Sync2AppEngine {
     };
 
     const appliedRemoteNoteBodyIds = new Set();
+
+    // What this device had before the pull, to spot notes deleted elsewhere.
+    const notesBeforePull = new Map(
+      [...state.notes].filter(([id]) => !vaultTombstonesMap().has(id))
+    );
   
     try {
       await this.updateDeviceRecord({
@@ -1997,11 +2139,11 @@ export class Sync2AppEngine {
       };
 
       /*
-        Calendar version guard: remember the newest event/category
-        versions across the local state and everything this pull
-        applies, then repair stale CRDT merge winners afterwards.
+        Vault version guard: remember the newest version of every
+        guarded vault entry across the local state and everything this
+        pull applies, then repair stale CRDT merge winners afterwards.
       */
-      this.activeCalendarGuard = createCalendarVersionCollector();
+      this.activeVersionGuard = createVaultVersionCollector();
 
       this.progress({
         phase: 'downloadVaultHeads',
@@ -2064,19 +2206,22 @@ export class Sync2AppEngine {
         local write that must propagate, so every device converges on
         the newest version instead of a random CRDT merge winner.
       */
-      const calendarRestores = reconcileCalendarVersions(
-        this.activeCalendarGuard,
+      const versionRestores = reconcileVaultVersions(
+        this.activeVersionGuard,
         SYNC2_LOCAL_ORIGIN
       );
 
-      this.activeCalendarGuard = null;
+      this.activeVersionGuard = null;
 
-      if (calendarRestores > 0) {
+      if (versionRestores > 0) {
         console.info(
-          '[YANTA Sync2] calendar version guard restored stale entries:',
-          calendarRestores
+          '[YANTA Sync2] vault version guard restored stale entries:',
+          versionRestores
         );
       }
+
+      // Before hydration drops them from state.
+      await this.rescueNotesDeletedElsewhere(notesBeforePull);
 
       await this.withVaultOutboxSuppressed(async () => {
         this.hydrateAppStateFromVault();
@@ -2245,6 +2390,10 @@ export class Sync2AppEngine {
       reason: 'syncNow-complete',
     });
 
+    await forgetSeenObjectsGoneFromRemote(this).catch((err) => {
+      console.warn('[YANTA Sync2] could not trim seen-state', err);
+    });
+
     state.globalSyncStatus = 'synced';
 
     if (verbose) {
@@ -2298,7 +2447,7 @@ export class Sync2AppEngine {
   
       throw err;
     } finally {
-      this.activeCalendarGuard = null;
+      this.activeVersionGuard = null;
       this.syncing = false;
     }
   }
@@ -2819,22 +2968,20 @@ export class Sync2AppEngine {
         } catch (err) {
           if (err?.code === 'EEXIST') {
             /*
-              Remote hat diese Sequenz schon. Das passiert nach alten
-              fehlgeschlagenen/retry-lastigen Sessions. Seq committen,
-              Item aus Outbox entfernen und weiter.
+              Something else already wrote this seq (another tab, or our own
+              earlier upload whose response was lost). Skip the seq and
+              retry the item. Never mark the existing object seen or drop
+              the item: neither was ever applied/uploaded by this tab, and
+              treating them as such silently lost both updates.
             */
             await this.commitSeq(seq);
 
-            await this.markSeen(path, cleanUndefined({
-              type: item.kind + '-update',
-              own: true,
-              existedRemote: true,
-              noteId: item.kind === 'note' ? item.noteId : undefined,
-            }));
+            item.seqCollisions = (item.seqCollisions || 0) + 1;
 
-            await this.applyOutboxUploadMarkers(item);
+            if (item.seqCollisions > 100) {
+              throw err;
+            }
 
-            this.outbox.shift();
             continue;
           }
 
@@ -2949,7 +3096,10 @@ export class Sync2AppEngine {
         message: 'Downloading vault update…',
       });
 
-      const pack = decodePack(plain);
+      if (plain == null) continue;
+
+      const pack = this.decodePackOrSkip(entry.path, plain);
+      if (!pack) continue;
 
       if (pack.kind !== 'vault') {
         await seen.add({
@@ -3158,7 +3308,10 @@ export class Sync2AppEngine {
         total: entries.length,
       });
 
-      const pack = decodePack(plain);
+      if (plain == null) continue;
+
+      const pack = this.decodePackOrSkip(entry.path, plain);
+      if (!pack) continue;
 
       if (pack.kind !== 'note') {
         seenToMark.push({
@@ -3287,6 +3440,92 @@ export class Sync2AppEngine {
     }));
   }
 
+  /*
+    Edit vs. delete: a permanent delete is final, but work this device did on
+    the note after the delete (its local `updated` is newer than the
+    tombstone — body edits bump it) must not vanish with it. Such a note is
+    copied, body and drawings included, into a new "(recovered)" note that
+    syncs like any other. A device that merely had the note lets it go.
+  */
+  async rescueNotesDeletedElsewhere(notesBeforePull) {
+    const tombstones = vaultTombstonesMap();
+    const rescued = [];
+
+    for (const [id, note] of notesBeforePull) {
+      const tombstone = tombstones.get(id);
+      if (tombstone?.type !== 'note') continue;
+      if (Number(note?.updated || 0) <= Number(tombstone.deletedAt || 0)) continue;
+
+      try {
+        const source = getNoteDoc(id);
+        await source.ready;
+
+        const copyId = uid();
+        const folderId =
+          note.folderId &&
+          state.folders.has(note.folderId) &&
+          !tombstones.has(note.folderId)
+            ? note.folderId
+            : null;
+
+        const copy = {
+          ...sanitizeNoteMeta(note),
+          id: copyId,
+          title: `${note.title || 'Untitled'} (recovered)`,
+          folderId,
+          created: Date.now(),
+          updated: Date.now(),
+          trashed: undefined,
+          deletedAt: undefined,
+          deletedBy: undefined,
+          publicShare: undefined,
+        };
+
+        state.notes.set(copyId, copy);
+        await store.notes.put(copy);
+
+        await this.observeNote(copyId);
+
+        const target = getNoteDoc(copyId);
+        await target.ready;
+
+        Y.applyUpdate(target.doc, Y.encodeStateAsUpdate(source.doc), SYNC2_LOCAL_ORIGIN);
+
+        rescued.push({ from: id, to: copyId, title: copy.title });
+      } catch (err) {
+        console.warn('[YANTA Sync2] could not rescue note deleted elsewhere', id, err);
+      }
+    }
+
+    if (!rescued.length) return rescued;
+
+    // A notice must never fail the sync.
+    try {
+      toast(
+        rescued.length === 1
+          ? `A note you changed was deleted on another device. Your version was kept as "${rescued[0].title}".`
+          : `${rescued.length} notes you changed were deleted on another device. Your versions were kept as "(recovered)" copies.`,
+        'info'
+      );
+    } catch {}
+
+    try {
+      window.dispatchEvent(new CustomEvent('yanta-notes-rescued', {
+        detail: { rescued },
+      }));
+    } catch {}
+
+    return rescued;
+  }
+
+  /*
+    The VaultDoc is the source of truth for metadata; state mirrors it.
+
+    Why no newest-wins check here: note.updated is bumped by body edits that
+    never reach the vault, so a local "newer" timestamp says nothing about
+    the metadata. Stale CRDT merge winners are repaired before this runs, by
+    the vault version guard.
+  */
   hydrateAppStateFromVault() {
     const tombstones = vaultTombstonesMap();
 
@@ -3337,16 +3576,13 @@ export class Sync2AppEngine {
       if (!incoming?.id) continue;
 
       const existing = state.notes.get(id);
+      const next = safeJsonClone(incoming);
 
-      if (preferIncoming(existing, incoming)) {
-        const next = safeJsonClone(incoming);
-
-        if (!jsonEqualForSync2(existing, next)) {
-          changed = true;
-        }
-
-        state.notes.set(id, next);
+      if (!jsonEqualForSync2(existing, next)) {
+        changed = true;
       }
+
+      state.notes.set(id, next);
     }
 
     // Folders.
@@ -3357,16 +3593,13 @@ export class Sync2AppEngine {
       if (!incoming?.id) continue;
 
       const existing = state.folders.get(id);
+      const next = safeJsonClone(incoming);
 
-      if (preferIncoming(existing, incoming)) {
-        const next = safeJsonClone(incoming);
-
-        if (!jsonEqualForSync2(existing, next)) {
-          changed = true;
-        }
-
-        state.folders.set(id, next);
+      if (!jsonEqualForSync2(existing, next)) {
+        changed = true;
       }
+
+      state.folders.set(id, next);
     }
 
     // Images metadata only; blobs come later through asset sync.
@@ -3377,16 +3610,13 @@ export class Sync2AppEngine {
       if (!incoming?.id) continue;
 
       const existing = state.imagesMeta.get(id);
+      const next = safeJsonClone(incoming);
 
-      if (preferIncoming(existing, incoming)) {
-        const next = safeJsonClone(incoming);
-
-        if (!jsonEqualForSync2(existing, next)) {
-          changed = true;
-        }
-
-        state.imagesMeta.set(id, next);
+      if (!jsonEqualForSync2(existing, next)) {
+        changed = true;
       }
+
+      state.imagesMeta.set(id, next);
     }
 
     if (changed) {
@@ -3469,18 +3699,29 @@ export class Sync2AppEngine {
       }
     }
   
+    /*
+      Compare against the stored cache records, not against state:
+      hydrateAppStateFromVault() has already put the vault values into
+      state, so a state comparison never saw a difference and the cache
+      kept the old values. At the next boot that stale cache was seeded
+      back into the vault and reverted remote renames/trash everywhere.
+    */
+    const cachedNotes = await readCacheById(store.notes);
+    const cachedFolders = await readCacheById(store.folders);
+
     for (const [id, raw] of vaultNotesMap()) {
       if (tombstones.has(id)) continue;
   
       const incoming = sanitizeNoteMeta(raw);
       if (!incoming?.id) continue;
   
-      const existingState = state.notes.get(id);
       const nextNote = safeJsonClone(incoming);
 
       state.notes.set(id, nextNote);
 
-      if (!jsonEqualForSync2(existingState, nextNote)) {
+      const cached = cachedNotes.get(id);
+
+      if (!cached || !jsonEqualForSync2(sanitizeNoteMeta(cached), nextNote)) {
         try {
           await store.notes.put(safeJsonClone(nextNote));
         } catch {}
@@ -3493,12 +3734,13 @@ export class Sync2AppEngine {
       const incoming = sanitizeFolderMeta(raw);
       if (!incoming?.id) continue;
   
-      const existingState = state.folders.get(id);
       const nextFolder = safeJsonClone(incoming);
 
       state.folders.set(id, nextFolder);
 
-      if (!jsonEqualForSync2(existingState, nextFolder)) {
+      const cached = cachedFolders.get(id);
+
+      if (!cached || !jsonEqualForSync2(sanitizeFolderMeta(cached), nextFolder)) {
         try {
           await store.folders.put(safeJsonClone(nextFolder));
         } catch {}

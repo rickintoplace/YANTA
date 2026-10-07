@@ -714,21 +714,31 @@ export function isNoteTitleFieldFocused() {
   );
 }
 
-export async function saveCurrentNote() {
-  const noteId = state.currentNoteId;
+/*
+  noteId/title: a debounced save passes the note and the title captured
+  when it was scheduled. Reading both at fire time instead let a save that
+  landed during openNote() write the old note's title into the new note
+  (currentNoteId had already switched, the field not yet).
+*/
+export async function saveCurrentNote({
+  noteId = state.currentNoteId,
+  title = null,
+} = {}) {
   if (!noteId) return;
 
   const note = state.notes.get(noteId);
   if (!note) return;
 
-  const titleInput = $('noteTitle');
-  const newTitle = titleInput?.value?.trim() || note.title || 'Untitled';
+  let newTitle;
 
-  /*
-    If a debounced title save fires after navigation, never write the old
-    title input into the newly opened note or vice versa.
-  */
-  if (state.currentNoteId !== noteId) return;
+  if (title != null) {
+    newTitle = String(title).trim() || note.title || 'Untitled';
+  } else {
+    // The field belongs to the current note only.
+    if (state.currentNoteId !== noteId) return;
+    newTitle = $('noteTitle')?.value?.trim() || note.title || 'Untitled';
+  }
+
   const titleChanged = note.title !== newTitle;
   note.title = newTitle;
   note.updated = Date.now();
@@ -1029,6 +1039,10 @@ export async function createWelcomeNote({ open = true } = {}) {
     if (open) await openNote(WELCOME_IDS.notes.welcome);
     return;
   }
+
+  // Permanently deleted on some device: a deliberate choice, not an empty
+  // workspace to fill. (Re-seeding would only flicker until the next pull.)
+  if (vaultTombstonesMap().has(WELCOME_IDS.notes.welcome)) return;
 
   const folderId = WELCOME_IDS.folders.welcome;
 

@@ -158,8 +158,15 @@ export function parseSync2PairingPayload(text) {
 }
 
 export async function importSync2PairingPayload(text) {
-  const payload = parseSync2PairingPayload(text);
+  return applySync2PairingPayload(parseSync2PairingPayload(text));
+}
 
+/*
+  Stores a parsed payload. Callers that can reach the target vault should
+  verify the key first (verifyYantaCloudSyncKey) and only then apply:
+  storing replaces this device's sync key.
+*/
+export async function applySync2PairingPayload(payload) {
   await setSync2SyncKey(payload.syncKey);
   await store.settings.set('sync2.provider', payload.provider || 'google-drive');
 

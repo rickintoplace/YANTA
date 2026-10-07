@@ -1,40 +1,47 @@
 // ============================================================
-// YANTA Sync2 — calendar version guard
+// YANTA Sync2 — vault version guard
 //
 // Vault heads and compacted update packs are encoded from fresh
 // Y.Docs, so concurrent writes to the same map key resolve by
-// random clientID, not by recency: a stale copy of an event can
+// random clientID, not by recency: a stale copy of an entry can
 // permanently shadow a newer one after a pull (and every device
 // republishes its own copy in its head, so staleness spreads).
-// Notes/folders/images survive this because app-state hydration
-// prefers the newer local-cache copy — calendar events and
-// categories live only in the VaultDoc and had no protection: a
-// reminder added on the desktop could silently vanish on the
-// phone.
+// A rename made on the desktop could silently revert on the phone,
+// a reminder vanish, an unsubscribed feed come back.
 //
 // The guard tracks the newest version (by `updated`) of every
-// event/category seen during a pull — the local pre-pull state
-// plus every incoming payload, probed in a throwaway doc — and
-// re-asserts entries the CRDT merge left stale as a normal local
-// write: causally after every integrated item, so it wins
+// entry in the guarded maps seen during a pull — the local pre-pull
+// state plus every incoming payload, probed in a throwaway doc —
+// and re-asserts entries the CRDT merge left stale as a normal
+// local write: causally after every integrated item, so it wins
 // deterministically here and, via the queued update, everywhere.
+//
+// Entries without an `updated` stamp are not guarded. Tombstones
+// are add-only and need no guard; they always beat a version.
 // ============================================================
 
 import * as Y from 'yjs';
 
 import {
   getVaultDoc,
-  vaultEventsMap,
-  vaultCalendarCategoriesMap,
+  vaultMap,
   vaultTombstonesMap,
   safeJsonClone,
 } from './vault-doc.js';
 
-const GUARDED_MAPS = Object.freeze(['events', 'calendarCategories']);
-
-function guardedMap(name) {
-  return name === 'events' ? vaultEventsMap() : vaultCalendarCategoriesMap();
-}
+/*
+  Every synced vault map whose values carry an `updated` stamp.
+  If a new synced entity map is added to the VaultDoc, add it here.
+*/
+const GUARDED_MAPS = Object.freeze([
+  'notes',
+  'folders',
+  'images',
+  'events',
+  'calendarCategories',
+  'rssFeeds',
+  'spaces',
+]);
 
 function noteMapVersions(collector, name, entries) {
   const bucket = collector.get(name);
@@ -61,12 +68,12 @@ function noteMapVersions(collector, name, entries) {
  * Start a collection for one pull cycle, seeded with the local
  * pre-pull state (the local copy may already be the newest).
  */
-export function createCalendarVersionCollector() {
+export function createVaultVersionCollector() {
   const collector = new Map(GUARDED_MAPS.map((name) => [name, new Map()]));
 
   try {
     for (const name of GUARDED_MAPS) {
-      noteMapVersions(collector, name, guardedMap(name).entries());
+      noteMapVersions(collector, name, vaultMap(name).entries());
     }
   } catch {}
 
@@ -74,10 +81,10 @@ export function createCalendarVersionCollector() {
 }
 
 /**
- * Record the calendar versions carried by an incoming vault payload
+ * Record the entry versions carried by an incoming vault payload
  * (update pack content, head, or snapshot) before it is applied.
  */
-export function collectCalendarVersionsFromUpdate(collector, updateBytes) {
+export function collectVaultVersionsFromUpdate(collector, updateBytes) {
   if (!collector || !updateBytes) return;
 
   try {
@@ -97,14 +104,14 @@ export function collectCalendarVersionsFromUpdate(collector, updateBytes) {
  * After all pulls: re-assert every entry whose merged value is older
  * than the newest version seen. Returns the number of restores.
  */
-export function reconcileCalendarVersions(collector, origin) {
+export function reconcileVaultVersions(collector, origin) {
   if (!collector) return 0;
 
   const tombstones = vaultTombstonesMap();
   const restores = [];
 
   for (const name of GUARDED_MAPS) {
-    const map = guardedMap(name);
+    const map = vaultMap(name);
 
     for (const [id, newest] of collector.get(name)) {
       // Deletions win over any version.

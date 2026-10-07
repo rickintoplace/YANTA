@@ -251,7 +251,7 @@ import {
   openPresentationPairingInputModal,
 } from './presentation/presentation-pairing.js';
 
-import { revokeImageObjectUrl } from './media/object-url-cache.js';
+import { hydrateLocalMetadataFromVaultDocOnStartup } from './sync2/startup-hydrate.js';
 
 import {
   consumeNativeQuickAction,
@@ -305,8 +305,12 @@ let noteTitleSaveTimer = 0;
 function scheduleCurrentNoteTitleSave() {
   clearTimeout(noteTitleSaveTimer);
 
+  // Captured now: by the time the timer fires another note may be opening.
+  const noteId = state.currentNoteId;
+  const title = $('noteTitle')?.value ?? null;
+
   noteTitleSaveTimer = window.setTimeout(() => {
-    saveCurrentNote().catch((err) => {
+    saveCurrentNote({ noteId, title }).catch((err) => {
       console.warn('[YANTA] title autosave failed', err);
     });
   }, 450);
@@ -755,6 +759,9 @@ let sync2Auto = {
   running: false,
   started: false,
 
+  // A request that arrived while a sync was running (reason), run after it.
+  rerunReason: '',
+
   catchupTimer: 0,
   catchupRunning: false,
 
@@ -922,16 +929,21 @@ async function runSync2Now(reason = 'manual', {
     return engine.status?.();
   }
 
-  if (sync2Auto.running) {
-    return engine.status?.();
-  }
-
-  if (engine.uploading) {
-    console.info('[YANTA Sync2] upload already running; skipping sync:', reason);
+  /*
+    Remember requests that arrive mid-sync instead of dropping them: the
+    running pass may already be past its upload step, and a dropped
+    request (the visibility-hidden flush on mobile, for one) left local
+    edits waiting for the next periodic sync.
+  */
+  if (sync2Auto.running || engine.uploading) {
+    if (!catchUp) sync2Auto.rerunReason = reason;
     return engine.status?.();
   }
 
   sync2Auto.running = true;
+  sync2Auto.rerunReason = '';
+
+  let succeeded = false;
 
   try {
     console.debug('[YANTA Sync2] sync start:', reason);
@@ -987,6 +999,8 @@ async function runSync2Now(reason = 'manual', {
 
     console.debug('[YANTA Sync2] sync done:', reason);
 
+    succeeded = true;
+
     return engine.status();
   } catch (err) {
     console.warn('[YANTA Sync2] sync failed:', reason, err);
@@ -1004,6 +1018,14 @@ async function runSync2Now(reason = 'manual', {
     throw err;
   } finally {
     sync2Auto.running = false;
+
+    const rerun = sync2Auto.rerunReason;
+    sync2Auto.rerunReason = '';
+
+    // After a failure the regular retry schedule takes over.
+    if (rerun && succeeded) {
+      requestSync2AutoSync(`${rerun}+rerun`, 300);
+    }
   }
 }
 
@@ -1544,268 +1566,6 @@ function buildSearchIndexInBackground() {
     };
     scheduleNext(step);
   });
-}
-
-function cleanUndefinedForStartupHydrate(obj = {}) {
-  const out = {};
-
-  for (const [key, value] of Object.entries(obj || {})) {
-    if (value !== undefined) out[key] = value;
-  }
-
-  return out;
-}
-
-function finiteNumberOrUndefinedForStartupHydrate(value) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : undefined;
-}
-
-function sanitizeStartupPublicShareMeta(share) {
-  if (!share || typeof share !== 'object') return undefined;
-
-  const shareId = String(share.shareId || share.id || '').trim();
-  if (!shareId) return undefined;
-
-  return cleanUndefinedForStartupHydrate({
-    enabled: share.enabled !== false,
-    shareId,
-    shareKey: share.shareKey ? String(share.shareKey) : undefined,
-    url: share.url ? String(share.url) : undefined,
-
-    status: share.status ? String(share.status) : undefined,
-    expiresAt: share.expiresAt || share.expires_at || null,
-    revokedAt: share.revokedAt || share.revoked_at || null,
-
-    lastPublishedAt: share.lastPublishedAt || share.last_published_at || null,
-    lastPayloadHash: share.lastPayloadHash || undefined,
-  });
-}
-
-function sanitizeStartupNoteMeta(note) {
-  if (!note || typeof note !== 'object') return null;
-
-  return cleanUndefinedForStartupHydrate({
-    id: String(note.id || ''),
-    title: String(note.title || 'Untitled'),
-    type: String(note.type || 'markdown'),
-    folderId: note.folderId || null,
-    tags: Array.isArray(note.tags) ? note.tags.map(String) : [],
-    pinned: !!note.pinned,
-    icon: note.icon || undefined,
-    color: note.color || undefined,
-    publicShare: sanitizeStartupPublicShareMeta(note.publicShare),
-    created: Number(note.created || Date.now()),
-    updated: Number(note.updated || Date.now()),
-    layoutUpdated: finiteNumberOrUndefinedForStartupHydrate(note.layoutUpdated),
-    bodyMigrated: note.bodyMigrated === true ? true : undefined,
-
-    dashboardOrder: finiteNumberOrUndefinedForStartupHydrate(note.dashboardOrder),
-    dashboardPinnedOrder: finiteNumberOrUndefinedForStartupHydrate(note.dashboardPinnedOrder),
-    dashboardHeightPx: finiteNumberOrUndefinedForStartupHydrate(note.dashboardHeightPx),
-    dashboardHeight: finiteNumberOrUndefinedForStartupHydrate(note.dashboardHeight),
-
-    hidden: note.hidden === true ? true : undefined,
-    archived: note.archived === true ? true : undefined,
-    system: note.system === true ? true : undefined,
-    aiBrain: note.aiBrain === true ? true : undefined,
-    dashboardHidden: note.dashboardHidden === true ? true : undefined,
-    hiddenFromDashboard: note.hiddenFromDashboard === true ? true : undefined,
-
-    trashed: note.trashed === true ? true : undefined,
-    deletedAt: finiteNumberOrUndefinedForStartupHydrate(note.deletedAt),
-    deletedBy: note.deletedBy ? String(note.deletedBy) : undefined,
-    trashOriginalFolderId: note.trashOriginalFolderId || undefined,
-    trashOriginalFolderPath: Array.isArray(note.trashOriginalFolderPath)
-      ? note.trashOriginalFolderPath.map(String)
-      : undefined,
-  });
-}
-
-function sanitizeStartupFolderMeta(folder) {
-  if (!folder || typeof folder !== 'object') return null;
-
-  return cleanUndefinedForStartupHydrate({
-    id: String(folder.id || ''),
-    name: String(folder.name || 'Folder'),
-    parentId: folder.parentId || null,
-    icon: folder.icon || undefined,
-    color: folder.color || undefined,
-    created: Number(folder.created || Date.now()),
-    updated: Number(folder.updated || folder.created || Date.now()),
-    layoutUpdated: finiteNumberOrUndefinedForStartupHydrate(folder.layoutUpdated),
-
-    dashboardOrder: finiteNumberOrUndefinedForStartupHydrate(folder.dashboardOrder),
-    dashboardHeightPx: finiteNumberOrUndefinedForStartupHydrate(folder.dashboardHeightPx),
-    dashboardHeight: finiteNumberOrUndefinedForStartupHydrate(folder.dashboardHeight),
-
-    hidden: folder.hidden === true ? true : undefined,
-    archived: folder.archived === true ? true : undefined,
-    system: folder.system === true ? true : undefined,
-    aiBrain: folder.aiBrain === true ? true : undefined,
-    dashboardHidden: folder.dashboardHidden === true ? true : undefined,
-    hiddenFromDashboard: folder.hiddenFromDashboard === true ? true : undefined,
-
-    trashed: folder.trashed === true ? true : undefined,
-    deletedAt: finiteNumberOrUndefinedForStartupHydrate(folder.deletedAt),
-    deletedBy: folder.deletedBy ? String(folder.deletedBy) : undefined,
-    trashOriginalParentId: folder.trashOriginalParentId || undefined,
-    trashOriginalParentPath: Array.isArray(folder.trashOriginalParentPath)
-      ? folder.trashOriginalParentPath.map(String)
-      : undefined,
-  });
-}
-
-function sanitizeStartupImageMeta(image) {
-  if (!image || typeof image !== 'object') return null;
-
-  const { blob, data, ...rest } = image;
-
-  return cleanUndefinedForStartupHydrate({
-    id: String(rest.id || ''),
-    name: rest.name ? String(rest.name) : undefined,
-    size: Number(rest.size || 0),
-    type: rest.type ? String(rest.type) : undefined,
-    ts: Number(rest.ts || rest.updated || Date.now()),
-    updated: Number(rest.updated || rest.ts || Date.now()),
-
-    // Asset-key architecture v2.
-    encryptionVersion: Number(rest.encryptionVersion || 1),
-    objectId: rest.objectId ? String(rest.objectId) : undefined,
-    objectPath: rest.objectPath ? String(rest.objectPath) : undefined,
-    keyVersion: Number(rest.keyVersion || 1),
-    keyAlg: rest.keyAlg ? String(rest.keyAlg) : undefined,
-    encryptedAssetKeyForVault: rest.encryptedAssetKeyForVault
-      ? String(rest.encryptedAssetKeyForVault)
-      : undefined,
-  });
-}
-
-function jsonEqualForStartupHydrate(a, b) {
-  try {
-    return JSON.stringify(a || null) === JSON.stringify(b || null);
-  } catch {
-    return false;
-  }
-}
-
-async function hydrateLocalMetadataFromVaultDocOnStartup() {
-  /*
-    Critical startup path:
-    store.notes may not yet contain metadata for notes created on another device.
-    VaultDoc is persisted locally by y-indexeddb and is available before cloud sync.
-    Hydrate state/store from VaultDoc now, before route/dashboard render.
-  */
-
-  const tombstones = vaultTombstonesMap();
-
-  let changed = false;
-
-  for (const [id, t] of tombstones) {
-    if (t?.type === 'note') {
-      if (state.notes.has(id) || state.searchIndex.has(id)) {
-        changed = true;
-      }
-
-      state.notes.delete(id);
-      state.searchIndex.delete(id);
-
-      try {
-        await store.notes.del(id);
-      } catch {}
-    }
-
-    if (t?.type === 'folder') {
-      if (state.folders.has(id) || state.expandedFolders.has(id)) {
-        changed = true;
-      }
-
-      state.folders.delete(id);
-      state.expandedFolders.delete(id);
-
-      try {
-        await store.folders.del(id);
-      } catch {}
-    }
-
-    if (t?.type === 'image') {
-      if (state.imagesMeta.has(id) || state.imageBlobs.has(id)) {
-        changed = true;
-      }
-
-      state.imagesMeta.delete(id);
-
-      revokeImageObjectUrl(id);
-
-      try {
-        await store.images.del(id);
-      } catch {}
-    }
-  }
-
-  for (const [id, raw] of vaultFoldersMap()) {
-    if (tombstones.has(id)) continue;
-
-    const incoming = sanitizeStartupFolderMeta(raw);
-    if (!incoming?.id) continue;
-
-    const existing = state.folders.get(id);
-    const next = safeJsonClone(incoming);
-
-    if (!jsonEqualForStartupHydrate(existing, next)) {
-      changed = true;
-      state.folders.set(id, next);
-
-      try {
-        await store.folders.put(safeJsonClone(next));
-      } catch {}
-    }
-  }
-
-  for (const [id, raw] of vaultNotesMap()) {
-    if (tombstones.has(id)) continue;
-
-    const incoming = sanitizeStartupNoteMeta(raw);
-    if (!incoming?.id) continue;
-
-    const existing = state.notes.get(id);
-    const next = safeJsonClone(incoming);
-
-    if (!jsonEqualForStartupHydrate(existing, next)) {
-      changed = true;
-      state.notes.set(id, next);
-
-      try {
-        await store.notes.put(safeJsonClone(next));
-      } catch {}
-    }
-  }
-
-  for (const [id, raw] of vaultImagesMap()) {
-    if (tombstones.has(id)) continue;
-
-    const incoming = sanitizeStartupImageMeta(raw);
-    if (!incoming?.id) continue;
-
-    const existing = state.imagesMeta.get(id);
-    const next = safeJsonClone(incoming);
-
-    if (!jsonEqualForStartupHydrate(existing, next)) {
-      changed = true;
-      state.imagesMeta.set(id, next);
-    }
-  }
-
-  if (changed) {
-    rebuildWikilinkIndex();
-  }
-
-  return {
-    changed,
-    notes: state.notes.size,
-    folders: state.folders.size,
-    images: state.imagesMeta.size,
-  };
 }
 
 function registerServiceWorker() {

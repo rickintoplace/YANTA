@@ -12,7 +12,7 @@
 // ============================================================
 
 import * as Y from 'yjs';
-import { IndexeddbPersistence, clearDocument } from 'y-indexeddb';
+import { IndexeddbPersistence, fetchUpdates } from 'y-indexeddb';
 
 const VAULT_DOC_KEY = 'yanta-vault-v1';
 
@@ -129,36 +129,50 @@ export async function prepareVaultDoc() {
   let persistence = new IndexeddbPersistence(VAULT_DOC_KEY, doc);
   await whenPersistenceSynced(persistence);
 
-  try {
-    const encoded = Y.encodeStateAsUpdate(doc);
-    const compact = encodeCompactFromDoc(doc);
+  await withVaultAccess(async (exclusive) => {
+    /*
+      Another tab has the VaultDoc open: its in-memory doc keeps writing
+      updates that build on the old history, which a rebuild throws away.
+      Leave the history alone; the next boot without other tabs heals it.
+    */
+    if (!exclusive) return;
 
-    const bloated =
-      encoded.length > VAULT_BLOAT_MIN_BYTES &&
-      encoded.length > compact.length * VAULT_BLOAT_FACTOR;
+    let compact;
+    let beforeBytes = 0;
 
-    if (bloated) {
-      // Replace the bloated persistence with the history-less compact state.
-      // Close our connection, then await the DB deletion explicitly:
-      // y-indexeddb's clearData() does not await the delete, which would race
-      // the fresh persistence we open right after.
-      await persistence.destroy();
-      await clearDocument(VAULT_DOC_KEY);
+    try {
+      const encoded = Y.encodeStateAsUpdate(doc);
+      compact = encodeCompactFromDoc(doc);
+      beforeBytes = encoded.length;
 
-      doc = newVaultDoc();
-      persistence = new IndexeddbPersistence(VAULT_DOC_KEY, doc);
-      await whenPersistenceSynced(persistence);
+      const bloated =
+        encoded.length > VAULT_BLOAT_MIN_BYTES &&
+        encoded.length > compact.length * VAULT_BLOAT_FACTOR;
 
-      Y.applyUpdate(doc, compact, VAULT_ORIGINS.LOCAL_SEED);
+      if (!bloated) return;
 
-      console.info('[YANTA Sync2] VaultDoc history compacted', {
-        beforeBytes: encoded.length,
-        afterBytes: compact.length,
-      });
+      // One transaction: a crash leaves either the old log or the compact
+      // state, never an empty vault (it holds events, tombstones, settings
+      // and the only copy of shared-space keys).
+      await replacePersistedUpdates(persistence, compact);
+    } catch (err) {
+      console.warn('[YANTA Sync2] VaultDoc compaction skipped', err);
+      return;
     }
-  } catch (err) {
-    console.warn('[YANTA Sync2] VaultDoc compaction skipped', err);
-  }
+
+    // The store now holds the compact state; reload the doc from it.
+    await persistence.destroy();
+    doc.destroy();
+
+    doc = newVaultDoc();
+    persistence = new IndexeddbPersistence(VAULT_DOC_KEY, doc);
+    await whenPersistenceSynced(persistence);
+
+    console.info('[YANTA Sync2] VaultDoc history compacted', {
+      beforeBytes,
+      afterBytes: compact.length,
+    });
+  });
 
   vaultEntry = {
     doc,
@@ -167,6 +181,64 @@ export async function prepareVaultDoc() {
   };
 
   return vaultEntry;
+}
+
+function replacePersistedUpdates(persistence, update) {
+  return new Promise((resolve, reject) => {
+    const tx = persistence.db.transaction(['updates'], 'readwrite');
+    const updates = tx.objectStore('updates');
+
+    updates.clear();
+    updates.add(update);
+
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error);
+    tx.onabort = () => reject(tx.error || new Error('VaultDoc compaction aborted'));
+  });
+}
+
+/*
+  Every tab holds a shared lock on the VaultDoc for its lifetime. Only a
+  tab that gets it exclusively — no other tab open — may rewrite the
+  persisted history. Without Web Locks the old behaviour stays.
+*/
+const VAULT_ACCESS_LOCK = 'yanta-vault-doc';
+
+async function withVaultAccess(fn) {
+  const locks = globalThis.navigator?.locks;
+
+  if (typeof locks?.request !== 'function') {
+    return fn(true);
+  }
+
+  return locks.request(VAULT_ACCESS_LOCK, { ifAvailable: true }, async (lock) => {
+    try {
+      return await fn(!!lock);
+    } finally {
+      // Queued while still holding the exclusive lock, so no other tab can
+      // slip in between and rewrite the history under this one.
+      locks.request(VAULT_ACCESS_LOCK, { mode: 'shared' }, () => new Promise(() => {}));
+    }
+  });
+}
+
+/*
+  Pull VaultDoc updates other tabs of this origin persisted since this tab
+  last read the store. y-indexeddb does not sync live between tabs, so
+  without this a tab works on — and uploads heads of — a stale copy.
+  Applied with the persistence as origin, which the sync engine ignores.
+*/
+export async function refreshVaultDocFromStorage() {
+  const entry = getVaultEntry();
+  await entry.ready;
+
+  if (!entry.persistence?.db || entry.persistence._destroyed) return;
+
+  await fetchUpdates(entry.persistence);
+}
+
+export function isVaultPersistenceOrigin(origin) {
+  return !!origin && origin === vaultEntry?.persistence;
 }
 
 export function getVaultDoc() {

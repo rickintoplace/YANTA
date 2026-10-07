@@ -31,179 +31,18 @@ import {
   VAULT_ORIGINS,
 } from './vault-doc.js';
 
+import {
+  cleanUndefined,
+  sanitizeNoteMeta,
+  sanitizeFolderMeta,
+  sanitizeImageMeta,
+  jsonEqual,
+} from './meta-sanitize.js';
+
+export { sanitizeNoteMeta, sanitizeFolderMeta };
+
 let installed = false;
 let originals = null;
-
-function cleanUndefined(obj) {
-  const out = {};
-
-  for (const [k, v] of Object.entries(obj || {})) {
-    if (v !== undefined) out[k] = v;
-  }
-
-  return out;
-}
-
-function finiteNumberOrUndefined(value) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : undefined;
-}
-
-function sanitizePublicShareMeta(share) {
-  if (!share || typeof share !== 'object') return undefined;
-
-  const shareId = String(share.shareId || share.id || '').trim();
-  if (!shareId) return undefined;
-
-  return cleanUndefined({
-    enabled: share.enabled !== false,
-    shareId,
-    shareKey: share.shareKey ? String(share.shareKey) : undefined,
-    url: share.url ? String(share.url) : undefined,
-
-    status: share.status ? String(share.status) : undefined,
-    expiresAt: share.expiresAt || share.expires_at || null,
-    revokedAt: share.revokedAt || share.revoked_at || null,
-
-    lastPublishedAt: share.lastPublishedAt || share.last_published_at || null,
-    lastPayloadHash: share.lastPayloadHash || undefined,
-  });
-}
-
-export function sanitizeNoteMeta(note) {
-  if (!note || typeof note !== 'object') return null;
-
-  return cleanUndefined({
-    id: String(note.id || ''),
-    title: String(note.title || 'Untitled'),
-    type: String(note.type || 'markdown'),
-    folderId: note.folderId || null,
-    tags: Array.isArray(note.tags) ? [...note.tags].map(String) : [],
-    pinned: !!note.pinned,
-    icon: note.icon || undefined,
-    color: note.color || undefined,
-    publicShare: sanitizePublicShareMeta(note.publicShare),
-    created: Number(note.created || Date.now()),
-    updated: Number(note.updated || Date.now()),
-    bodyMigrated: note.bodyMigrated === true ? true : undefined,
-
-    // Dashboard layout/user preferences.
-    dashboardOrder: finiteNumberOrUndefined(note.dashboardOrder),
-    dashboardPinnedOrder: finiteNumberOrUndefined(note.dashboardPinnedOrder),
-    dashboardHeightPx: finiteNumberOrUndefined(note.dashboardHeightPx),
-
-    // Legacy compatibility. New code should prefer dashboardHeightPx.
-    dashboardHeight: finiteNumberOrUndefined(note.dashboardHeight),
-
-    hidden: note.hidden === true ? true : undefined,
-    archived: note.archived === true ? true : undefined,
-    system: note.system === true ? true : undefined,
-    aiBrain: note.aiBrain === true ? true : undefined,
-
-    // Provenance. Must travel: a note written by a background run has to
-    // look AI-written on every device, not only the one that made it.
-    aiGenerated: note.aiGenerated === true ? true : undefined,
-    aiSource: note.aiGenerated === true && note.aiSource
-      ? String(note.aiSource)
-      : undefined,
-    dashboardHidden: note.dashboardHidden === true ? true : undefined,
-    hiddenFromDashboard: note.hiddenFromDashboard === true ? true : undefined,
-
-    trashed: note.trashed === true ? true : undefined,
-    deletedAt: finiteNumberOrUndefined(note.deletedAt),
-    deletedBy: note.deletedBy ? String(note.deletedBy) : undefined,
-    trashOriginalFolderId: note.trashOriginalFolderId || undefined,
-    trashOriginalFolderPath: Array.isArray(note.trashOriginalFolderPath)
-      ? note.trashOriginalFolderPath.map(String)
-      : undefined,
-  });
-}
-
-export function sanitizeFolderMeta(folder) {
-  if (!folder || typeof folder !== 'object') return null;
-
-  return cleanUndefined({
-    id: String(folder.id || ''),
-    name: String(folder.name || 'Folder'),
-    parentId: folder.parentId || null,
-    icon: folder.icon || undefined,
-    color: folder.color || undefined,
-    created: Number(folder.created || Date.now()),
-    updated: Number(folder.updated || folder.created || Date.now()),
-
-    // Dashboard layout/user preferences.
-    dashboardOrder: finiteNumberOrUndefined(folder.dashboardOrder),
-    dashboardHeightPx: finiteNumberOrUndefined(folder.dashboardHeightPx),
-
-    // Legacy compatibility. New code should prefer dashboardHeightPx.
-    dashboardHeight: finiteNumberOrUndefined(folder.dashboardHeight),
-
-    hidden: folder.hidden === true ? true : undefined,    archived: folder.archived === true ? true : undefined,
-    system: folder.system === true ? true : undefined,
-    aiBrain: folder.aiBrain === true ? true : undefined,
-    dashboardHidden: folder.dashboardHidden === true ? true : undefined,
-    hiddenFromDashboard: folder.hiddenFromDashboard === true ? true : undefined,
-
-    trashed: folder.trashed === true ? true : undefined,
-    deletedAt: finiteNumberOrUndefined(folder.deletedAt),
-    deletedBy: folder.deletedBy ? String(folder.deletedBy) : undefined,
-    trashOriginalParentId: folder.trashOriginalParentId || undefined,
-    trashOriginalParentPath: Array.isArray(folder.trashOriginalParentPath)
-      ? folder.trashOriginalParentPath.map(String)
-      : undefined,
-  });
-}
-
-function sanitizeImageMeta(image) {
-  if (!image || typeof image !== 'object') return null;
-
-  const { blob, data, ...rest } = image;
-
-  return cleanUndefined({
-    id: String(rest.id || ''),
-    name: rest.name ? String(rest.name) : undefined,
-    size: Number(rest.size || 0),
-    type: rest.type ? String(rest.type) : undefined,
-    ts: Number(rest.ts || rest.updated || Date.now()),
-    updated: Number(rest.updated || rest.ts || Date.now()),
-
-    // Asset-key architecture v2.
-    encryptionVersion: Number(rest.encryptionVersion || 1),
-    objectId: rest.objectId ? String(rest.objectId) : undefined,
-    objectPath: rest.objectPath ? String(rest.objectPath) : undefined,
-    keyVersion: Number(rest.keyVersion || 1),
-    keyAlg: rest.keyAlg ? String(rest.keyAlg) : undefined,
-    encryptedAssetKeyForVault: rest.encryptedAssetKeyForVault
-      ? String(rest.encryptedAssetKeyForVault)
-      : undefined,
-  });
-}
-
-function stableJsonStringify(value) {
-  if (value == null) return String(value);
-
-  if (typeof value !== 'object') {
-    return JSON.stringify(value);
-  }
-
-  if (Array.isArray(value)) {
-    return '[' + value.map(stableJsonStringify).join(',') + ']';
-  }
-
-  const keys = Object.keys(value).sort();
-
-  return '{' + keys
-    .map((key) => JSON.stringify(key) + ':' + stableJsonStringify(value[key]))
-    .join(',') + '}';
-}
-
-function jsonEqual(a, b) {
-  try {
-    return stableJsonStringify(a) === stableJsonStringify(b);
-  } catch {
-    return false;
-  }
-}
 
 // Fields that are useful for local UI/cache freshness but must not create
 // durable VaultDoc history by themselves.
@@ -237,13 +76,27 @@ function onlyVolatileVaultMetaChanged(existing, incoming) {
   );
 }
 
-function shouldKeepExistingByUpdated(existing, incoming) {
-  if (!existing) return false;
+/*
+  A permanent delete is final. Any write to a tombstoned id used to clear
+  the tombstone, so an incidental metadata write — pin, dashboard layout,
+  a late title autosave on a device that had not pulled the delete yet —
+  brought the note back, without its body (body edits to tombstoned notes
+  are not synced). Work done after a delete is rescued into a new note by
+  the sync engine instead; imports re-add deleted items under new ids
+  (isVaultTombstoned).
+*/
+function isPermanentlyDeleted(id) {
+  return vaultTombstonesMap().has(String(id));
+}
 
-  const exUpdated = Number(existing.updated || existing.ts || existing.created || 0);
-  const inUpdated = Number(incoming.updated || incoming.ts || incoming.created || 0);
-
-  return exUpdated > inUpdated;
+/**
+ * Is this id permanently deleted in the vault? Importers re-adding items
+ * under their original ids (backups, frontmatter ids) must use a new id
+ * for those: a tombstone cannot be lifted reliably — every older head
+ * still carries it and re-applies it on the next pull.
+ */
+export function isVaultTombstoned(id) {
+  return isPermanentlyDeleted(id);
 }
 
 export function putVaultNoteMeta(note, origin = VAULT_ORIGINS.STORE_BRIDGE) {
@@ -254,6 +107,8 @@ export function putVaultNoteMeta(note, origin = VAULT_ORIGINS.STORE_BRIDGE) {
   const notes = vaultNotesMap();
 
   doc.transact(() => {
+    if (isPermanentlyDeleted(meta.id)) return;
+
     const existing = notes.get(meta.id);
 
     if (jsonEqual(existing, meta)) return;
@@ -274,7 +129,6 @@ export function putVaultNoteMeta(note, origin = VAULT_ORIGINS.STORE_BRIDGE) {
       store write must reach VaultDoc.
     */
     notes.set(meta.id, safeJsonClone(meta));
-    vaultTombstonesMap().delete(meta.id);
   }, origin);
 }
 
@@ -286,6 +140,8 @@ export function putVaultFolderMeta(folder, origin = VAULT_ORIGINS.STORE_BRIDGE) 
   const folders = vaultFoldersMap();
 
   doc.transact(() => {
+    if (isPermanentlyDeleted(meta.id)) return;
+
     const existing = folders.get(meta.id);
 
     if (jsonEqual(existing, meta)) return;
@@ -302,7 +158,6 @@ export function putVaultFolderMeta(folder, origin = VAULT_ORIGINS.STORE_BRIDGE) 
       not be blocked by a newer timestamp from another device.
     */
     folders.set(meta.id, safeJsonClone(meta));
-    vaultTombstonesMap().delete(meta.id);
   }, origin);
 }
 
@@ -314,6 +169,8 @@ export function putVaultImageMeta(image, origin = VAULT_ORIGINS.STORE_BRIDGE) {
   const images = vaultImagesMap();
 
   doc.transact(() => {
+    if (isPermanentlyDeleted(meta.id)) return;
+
     const existing = images.get(meta.id);
 
     if (jsonEqual(existing, meta)) return;
@@ -324,10 +181,13 @@ export function putVaultImageMeta(image, origin = VAULT_ORIGINS.STORE_BRIDGE) {
     */
     if (onlyVolatileVaultMetaChanged(existing, meta)) return;
 
-    if (shouldKeepExistingByUpdated(existing, meta)) return;
-
+    /*
+      No newer-timestamp veto, same as notes/folders: a device whose clock
+      runs ahead used to block asset migrations (objectPath, encrypted
+      asset key) from every other device without a trace. Recency across
+      devices is settled on pull by the vault version guard.
+    */
     images.set(meta.id, safeJsonClone(meta));
-    vaultTombstonesMap().delete(meta.id);
   }, origin);
 }
 
@@ -486,17 +346,35 @@ export async function seedVaultFromLocalState() {
     spaceRecords = [];
   }
 
+  /*
+    Additive only: the seed carries cache entries the VaultDoc has never
+    seen (data from before the bridge existed) into it. It must never
+    overwrite an existing entry or clear a tombstone — the cache can lag
+    behind the VaultDoc (a sync that stopped before refreshing it), and a
+    stale cache written back here would revert remote renames, undo a
+    trash or resurrect a deleted note, then propagate that everywhere.
+    Startup hydration refreshes the cache from the VaultDoc right after.
+  */
+  const isNewToVault = (map, id) =>
+    !!id && !map.has(id) && !vaultTombstonesMap().has(id);
+
   doc.transact(() => {
     for (const note of state.notes.values()) {
-      putVaultNoteMeta(note, VAULT_ORIGINS.LOCAL_SEED);
+      if (isNewToVault(vaultNotesMap(), note?.id) && !isSpaceMountedNote(note)) {
+        putVaultNoteMeta(note, VAULT_ORIGINS.LOCAL_SEED);
+      }
     }
 
     for (const folder of state.folders.values()) {
-      putVaultFolderMeta(folder, VAULT_ORIGINS.LOCAL_SEED);
+      if (isNewToVault(vaultFoldersMap(), folder?.id) && !isSpaceMountedFolder(folder)) {
+        putVaultFolderMeta(folder, VAULT_ORIGINS.LOCAL_SEED);
+      }
     }
 
     for (const image of state.imagesMeta.values()) {
-      putVaultImageMeta(image, VAULT_ORIGINS.LOCAL_SEED);
+      if (isNewToVault(vaultImagesMap(), image?.id)) {
+        putVaultImageMeta(image, VAULT_ORIGINS.LOCAL_SEED);
+      }
     }
 
     /*

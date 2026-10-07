@@ -43,6 +43,7 @@ import {
 } from '../notes.js';
 
 import { openBoundOverlay } from '../overlay-history.js';
+import { yantaPrompt } from '../dialogs.js';
 
 import {
   syncKeyToBytes,
@@ -362,16 +363,38 @@ async function deleteAllGoogleDriveSyncObjects() {
   return result.deleted;
 }
 
+/*
+  Only the engine's key check decides this. Matching on messages turned
+  network and download failures into "wrong key" — and that view offers
+  deleting the cloud vault.
+*/
 function isWrongKeyError(err) {
-  const msg = String(err?.message || err || '');
+  return err?.code === 'EWRONGKEY';
+}
 
-  return (
-    err?.code === 'EWRONGKEY' ||
-    err?.name === 'OperationError' ||
-    msg.includes('Wrong Sync Key') ||
-    msg.includes('OperationError') ||
-    msg.toLowerCase().includes('decrypt')
-  );
+/*
+  Deleting the remote vault is irreversible and destroys every other
+  device's copy of anything not synced locally. Make the user type it.
+*/
+async function confirmRemoteVaultDeletion() {
+  const word = 'DELETE';
+
+  const typed = await yantaPrompt({
+    title: 'Delete cloud sync data?',
+    message:
+      'This permanently deletes all encrypted YANTA Sync data in this Google Drive. ' +
+      'Devices that have not synced recently lose their unsynced changes, and data that exists only in the cloud is gone. ' +
+      `Type ${word} to continue.`,
+    placeholder: word,
+    confirmLabel: 'Delete permanently',
+    danger: true,
+    required: true,
+    select: false,
+    validate: (value) =>
+      String(value || '').trim() === word ? true : `Type ${word} to confirm.`,
+  });
+
+  return String(typed || '').trim() === word;
 }
 
 async function importKeyOrPairingText(text) {
@@ -550,7 +573,9 @@ function renderWrongKeyResetView() {
 
   m.querySelector('[data-action="connect-existing"]')?.addEventListener('click', renderConnectExistingView);
 
-  m.querySelector('[data-action="delete-create"]')?.addEventListener('click', () => {
+  m.querySelector('[data-action="delete-create"]')?.addEventListener('click', async () => {
+    if (!await confirmRemoteVaultDeletion()) return;
+
     withBusy('Deleting encrypted YANTA Sync data from Google Drive…', async () => {
       const deleted = await deleteAllGoogleDriveSyncObjects();
 
@@ -670,7 +695,9 @@ function renderStartView() {
     });
   });
 
-  m.querySelector('[data-action="reset"]')?.addEventListener('click', () => {
+  m.querySelector('[data-action="reset"]')?.addEventListener('click', async () => {
+    if (!await confirmRemoteVaultDeletion()) return;
+
     withBusy('Connecting to Google Drive to delete sync data…', resetGoogleDriveSyncData);
   });
 

@@ -21,6 +21,7 @@
 // ============================================================
 
 import { $, el, state, store, toast, lucide, uid, safeFilename, escapeHtml } from './core.js';
+import { vaultTombstonesMap } from './sync2/vault-doc.js';
 import { getNoteDoc, encodeNoteState, applyNoteUpdate, noteMarkdown } from './yjs.js';
 import { isNoteTitleFieldFocused } from './notes.js';
 import * as Y from 'yjs';
@@ -134,13 +135,20 @@ export async function syncWriteNote(note) {
     const dir = await ensureDir(sync.handle, segs);
     const filename = noteFilename(note);
     const newPath = [...segs, filename].join('/');
+    /*
+      Read the body from a loaded doc only, before touching any file. A
+      doc that has not finished loading reads as empty, and a failed read
+      is not an empty note either: both used to overwrite the user's file
+      with frontmatter only (and the snapshot with an empty state).
+    */
+    const entry = getNoteDoc(note.id);
+    await entry.ready;
+    let body = noteMarkdown(note.id);
     const prevPath = sync.knownFiles.get(note.id);
     if (prevPath && prevPath !== newPath) {
       await syncDeleteFileAtPath(prevPath);
       sync.fileMtimes.delete(prevPath);
     }
-    let body = '';
-    try { body = noteMarkdown(note.id); } catch {}
     // Rewrite image refs to relative paths so the .md is portable.
     body = body.replace(/yanta-img:\/\/([a-z0-9]+)/gi, (full, id) => {
       const meta = state.imagesMeta.get(id);
@@ -357,6 +365,17 @@ async function ingestMdFile(file, path, segs, filename, result) {
   const fileTime = file.lastModified || Date.now();
   const title = stripIdSuffix(filename);
 
+  /*
+    Deleted through sync2 (on any device): the vault tombstone is
+    permanent, unlike this folder's 30-day local list. A stale mirror file
+    must neither bring the note back nor — via the store bridge, which
+    clears vault tombstones on write — resurrect it on every device.
+  */
+  if (meta.id && vaultTombstonesMap().has(meta.id)) {
+    try { await syncDeleteFileAtPath(path); } catch {}
+    return;
+  }
+
   if (meta.id && sync.tombstones.has(meta.id)) {
     const t = sync.tombstones.get(meta.id);
     if (fileTime <= t.at + 1000) {
@@ -369,6 +388,19 @@ async function ingestMdFile(file, path, segs, filename, result) {
 
   const id = meta.id || uid();
   const existing = state.notes.get(id);
+
+  /*
+    fileMtimes lives in memory only, so the first pull of every session
+    re-reads every file. A file not newer than the note is this device's
+    own earlier mirror; taking its metadata would revert renames, moves or
+    tags that arrived through sync2 since — and push the revert everywhere.
+  */
+  if (existing && fileTime <= Number(existing.updated || 0) + 1000) {
+    sync.knownFiles.set(id, path);
+    sync.fileMtimes.set(path, fileTime);
+    return;
+  }
+
   if (existing) {
     // The snapshot pass has already applied Y.Doc content; we only refresh
     // metadata (title/folder/tags/pin) from the .md frontmatter.

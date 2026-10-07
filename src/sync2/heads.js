@@ -17,7 +17,6 @@ import * as Y from 'yjs';
 
 import {
   encryptBytes,
-  decryptBytes,
 } from './crypto.js';
 
 import {
@@ -88,8 +87,29 @@ function entrySize(entry) {
   return Number(entry?.size || 0) || 0;
 }
 
+/*
+  When this device last encoded each of its heads. A head contains every
+  update this device had applied before that moment, so a seen pack is
+  covered by the head iff it was marked seen before the head was encoded.
+  This — not object timestamps — is what makes deleting a pack safe.
+*/
+const HEAD_ENCODED_AT_VAULT_KEY = 'sync2.headEncodedAt.vault';
+
+function noteHeadEncodedAtKey(noteId) {
+  return `sync2.headEncodedAt.note.${noteId}`;
+}
+
+async function readHeadEncodedAt(localState, key) {
+  try {
+    return Number(await localState.get(key, 0)) || 0;
+  } catch {
+    return 0;
+  }
+}
+
 export async function uploadVaultHead(engine) {
   const path = vaultHeadPath(engine.deviceId);
+  const encodedAt = Date.now();
   const plain = encodeCompactVaultState();
 
   const encrypted = await encryptBytes(
@@ -106,6 +126,8 @@ export async function uploadVaultHead(engine) {
     own: true,
   });
 
+  await engine.localState.set(HEAD_ENCODED_AT_VAULT_KEY, encodedAt);
+
   return {
     path,
     size: encrypted.byteLength,
@@ -119,6 +141,7 @@ export async function uploadNoteHead(engine, noteId) {
     engine.deviceId
   );
 
+  const encodedAt = Date.now();
   const plain = encodeNoteState(noteId);
 
   const encrypted = await encryptBytes(
@@ -135,6 +158,8 @@ export async function uploadNoteHead(engine, noteId) {
     noteId,
     own: true,
   });
+
+  await engine.localState.set(noteHeadEncodedAtKey(noteId), encodedAt);
 
   return {
     path,
@@ -173,13 +198,9 @@ export async function downloadVaultHeads(engine) {
 
     if (etag && seenEtag === etag) continue;
 
-    const encrypted = await engine.remote.get(entry.path);
-
-    const plain = await decryptBytes(
-      engine.keys.contentKey,
-      encrypted,
-      entry.path
-    );
+    // null: missing or unreadable — skipped, retried next sync.
+    const plain = await engine.fetchAndDecrypt(entry.path);
+    if (plain == null) continue;
 
     engine.noteIncomingVaultBytes?.(plain);
     applyVaultUpdate(plain, 'sync2-remote');
@@ -262,6 +283,8 @@ export async function downloadNoteHeads(engine, noteId) {
       total: entries.length,
     });
 
+    if (plain == null) continue;
+
     updatesToApply.push(plain);
     seenWrites.push({
       key: item.seenKey,
@@ -339,52 +362,95 @@ export async function downloadKnownNoteHeads(engine, noteIds = []) {
   };
 }
 
-export async function pruneSeenUpdatesCoveredByHeads(engine, {
-  noteIdsWithHeads = [],
-  vaultHeadUploaded = false,
-  maxDeletes = 2500,
+/**
+ * Remote update packs this device's uploaded heads provably contain:
+ * seen (applied) by this device before the covering head was encoded.
+ *
+ * vault: consider vault update packs.
+ * noteIds: note ids whose packs to consider; null = every note that has
+ *   a recorded head.
+ */
+export async function collectHeadCoveredSeenEntries(engine, index, {
+  vault = true,
+  noteIds = null,
 } = {}) {
   const seen = typeof engine.localState?.listSeen === 'function'
     ? await engine.localState.listSeen()
     : [];
 
-  if (!seen.length) {
-    return {
-      deleted: 0,
-      bytes: 0,
-    };
-  }
+  if (!seen.length || !index?.length) return [];
 
-  const noteSet = new Set(noteIdsWithHeads.map(String));
+  const remoteByPath = new Map(index.map((entry) => [entry.path, entry]));
+  const noteSet = noteIds ? new Set([...noteIds].map(String)) : null;
 
-  const index = await engine.loadRemoteIndex({
-    force: true,
-  });
+  const vaultEncodedAt = vault
+    ? await readHeadEncodedAt(engine.localState, HEAD_ENCODED_AT_VAULT_KEY)
+    : 0;
 
-  const remoteByPath = new Map(
-    (index || []).map((entry) => [entry.path, entry])
-  );
+  const noteEncodedAt = new Map();
 
-  const candidates = [];
+  const encodedAtForNote = async (noteId) => {
+    if (!noteEncodedAt.has(noteId)) {
+      noteEncodedAt.set(
+        noteId,
+        await readHeadEncodedAt(engine.localState, noteHeadEncodedAtKey(noteId))
+      );
+    }
+
+    return noteEncodedAt.get(noteId);
+  };
+
+  const covered = [];
 
   for (const rec of seen) {
     const path = String(rec?.path || '');
-    if (!path) continue;
+    const entry = remoteByPath.get(path);
+    if (!entry) continue;
 
-    if (!remoteByPath.has(path)) continue;
+    const seenAt = Number(rec.seenAt || 0);
+    if (!seenAt) continue;
 
-    if (vaultHeadUploaded && isVaultUpdateSeenRecord(rec)) {
-      candidates.push(remoteByPath.get(path));
+    if (isVaultUpdateSeenRecord(rec)) {
+      if (vaultEncodedAt && seenAt < vaultEncodedAt) covered.push(entry);
       continue;
     }
 
     if (isNoteUpdateSeenRecord(rec)) {
       const noteId = String(rec.noteId || '');
+      if (!noteId) continue;
+      if (noteSet && !noteSet.has(noteId)) continue;
 
-      if (noteId && noteSet.has(noteId)) {
-        candidates.push(remoteByPath.get(path));
-      }
+      // Skipped (never applied) packs are covered by nothing.
+      if (rec.type === 'skipped-tombstoned-note-update') continue;
+
+      const encodedAt = await encodedAtForNote(noteId);
+
+      if (encodedAt && seenAt < encodedAt) covered.push(entry);
     }
+  }
+
+  return covered;
+}
+
+export async function pruneSeenUpdatesCoveredByHeads(engine, {
+  noteIdsWithHeads = [],
+  vaultHeadUploaded = false,
+  maxDeletes = 2500,
+} = {}) {
+  const index = await engine.loadRemoteIndex({
+    force: true,
+  });
+
+  const candidates = await collectHeadCoveredSeenEntries(engine, index, {
+    vault: vaultHeadUploaded,
+    noteIds: noteIdsWithHeads,
+  });
+
+  if (!candidates.length) {
+    return {
+      deleted: 0,
+      bytes: 0,
+    };
   }
 
   const unique = [];
@@ -402,6 +468,7 @@ export async function pruneSeenUpdatesCoveredByHeads(engine, {
   let deleted = 0;
   let bytes = 0;
   let current = 0;
+  const deletedPaths = [];
 
   for (const entry of unique) {
     current++;
@@ -421,13 +488,44 @@ export async function pruneSeenUpdatesCoveredByHeads(engine, {
 
       deleted++;
       bytes += entrySize(entry);
+      deletedPaths.push(entry.path);
     } catch (err) {
       console.warn('[YANTA Sync2] covered update prune failed', entry.path, err);
     }
   }
 
+  // Gone for good (seq numbers are never reused): stop tracking them.
+  await engine.localState.deleteSeen?.(deletedPaths);
+
   return {
     deleted,
     bytes,
   };
+}
+
+/*
+  Seen records of update packs and snapshots other devices have deleted
+  meanwhile. Without this the seen store only ever grew, and it is read in
+  full at boot and on every prune. Needs a complete remote index; without
+  one (Google Drive) nothing is dropped. Dropping a record for an object
+  that does still exist only costs a re-download: applying is idempotent.
+*/
+export async function forgetSeenObjectsGoneFromRemote(engine) {
+  if (typeof engine.localState?.listSeen !== 'function') return 0;
+
+  const index = await engine.loadRemoteIndex({ force: true });
+  if (!Array.isArray(index)) return 0;
+
+  const present = new Set(index.map((entry) => entry.path));
+  const seen = await engine.localState.listSeen();
+
+  const gone = seen
+    .map((rec) => String(rec?.path || ''))
+    .filter((path) =>
+      path &&
+      !present.has(path) &&
+      (path.includes('/updates/') || path.includes('/snapshots/'))
+    );
+
+  return engine.localState.deleteSeen?.(gone) || 0;
 }

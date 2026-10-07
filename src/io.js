@@ -10,6 +10,7 @@ import { t } from './i18n/index.js';
 import { getNoteDoc, noteMarkdown, listDrawingsForNote, listCitationsForNote, setDrawing, normalizeDrawingScene } from './yjs.js';
 import { rebuildWikilinkIndex } from './notes.js';
 import { renderTree } from './tree.js';
+import { isVaultTombstoned } from './sync2/store-bridge.js';
 import {
   yantaConfirm,
 } from './dialogs.js';
@@ -185,13 +186,41 @@ export async function importBundleFile(file) {
     throw new Error('Not a YANTA bundle');
   }
 
+  /*
+    Items permanently deleted since the backup was made come back under new
+    ids (a vault tombstone is final), with every reference remapped.
+  */
+  const idMap = new Map();
+  const newIdIfDeleted = (id) => {
+    if (!id || !isVaultTombstoned(id)) return id;
+    if (!idMap.has(id)) idMap.set(id, uid());
+    return idMap.get(id);
+  };
+
+  for (const im of data.images || []) im.id = newIdIfDeleted(im.id);
+
+  const remapImageRefs = (text) =>
+    String(text || '').replace(/yanta-img:\/\/([a-z0-9]+)/gi, (full, id) =>
+      idMap.has(id) ? `yanta-img://${idMap.get(id)}` : full
+    );
+
   for (const f of data.folders || []) {
+    f.id = newIdIfDeleted(f.id);
+  }
+
+  for (const f of data.folders || []) {
+    if (f.parentId) f.parentId = newIdIfDeleted(f.parentId);
     state.folders.set(f.id, f);
     await store.folders.put(f);
   }
 
   for (const n of data.notes || []) {
-    const { body = '', ...meta } = n;
+    const { body: rawBody = '', ...meta } = n;
+
+    meta.id = newIdIfDeleted(meta.id);
+    if (meta.folderId) meta.folderId = newIdIfDeleted(meta.folderId);
+
+    const body = remapImageRefs(rawBody);
 
     state.notes.set(meta.id, meta);
     await store.notes.put(meta);
@@ -370,7 +399,8 @@ export async function importItems(items) {
 
         const title = file.name.replace(/\.(md|markdown|txt)$/i, '');
         const fileTime = file.lastModified || Date.now();
-        const id = meta.id || uid();
+        // Permanently deleted ids come back as new notes (tombstones are final).
+        const id = meta.id && !isVaultTombstoned(meta.id) ? meta.id : uid();
 
         const note = state.notes.get(id) || {
           id,
@@ -720,13 +750,14 @@ export async function importZipBlob(blob) {
 
     const exportedId = meta.id || '';
     const importedId =
-      exportedId && !state.notes.has(exportedId)
+      exportedId && !state.notes.has(exportedId) && !isVaultTombstoned(exportedId)
         ? exportedId
         : uid();
 
     if (exportedId) {
       noteIdMap.set(exportedId, importedId);
     }
+
 
     const note = {
       id: importedId,

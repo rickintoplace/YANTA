@@ -48,7 +48,14 @@ import {
   uploadVaultHead,
   uploadNoteHead,
   pruneSeenUpdatesCoveredByHeads,
+  collectHeadCoveredSeenEntries,
 } from './heads.js';
+
+import {
+  docUpdatesPrefix,
+  docHeadsPrefix,
+  docSnapshotsPrefix,
+} from './ids.js';
 
 const DEFAULT_MIN_HEADROOM_BYTES = 3 * 1024 * 1024;
 const DEFAULT_KEEP_SNAPSHOTS_PER_DOC = 2;
@@ -100,147 +107,16 @@ function docSnapshotGroup(path = '') {
   return m ? `doc:${m[1]}` : '';
 }
 
-function docUpdateGroup(path = '') {
-  const m = String(path || '').match(/^yanta-sync-v1\/docs\/([^/]+)\/updates\//);
-
-  return m ? `doc:${m[1]}` : '';
-}
-
-function docHeadGroup(path = '') {
-  const m = String(path || '').match(/^yanta-sync-v1\/docs\/([^/]+)\/heads\//);
-
-  return m ? `doc:${m[1]}` : '';
-}
-
-function headCoveredUpdateEntriesFromIndex(index = [], {
-  safetyDelayMs = 30_000,
-} = {}) {
-  const entries = index || [];
-  const cutoffNow = Date.now() - Math.max(0, Number(safetyDelayMs || 0));
-
-  const deleteEntries = [];
-
-  const vaultHeads = sortNewestFirst(
-    entries.filter((entry) => objectKind(entry.path) === 'vault-head')
-  );
-
-  const latestVaultHeadUpdated = Math.min(
-    entryUpdated(vaultHeads[0]) || 0,
-    cutoffNow
-  );
-
-  if (latestVaultHeadUpdated > 0) {
-    for (const entry of entries) {
-      if (
-        objectKind(entry.path) === 'vault-update' &&
-        entryUpdated(entry) <= latestVaultHeadUpdated
-      ) {
-        deleteEntries.push(entry);
-      }
-    }
-  }
-
-  const latestNoteHeadUpdatedByDoc = new Map();
-
-  for (const entry of entries) {
-    if (objectKind(entry.path) !== 'note-head') continue;
-
-    const group = docHeadGroup(entry.path);
-    if (!group) continue;
-
-    latestNoteHeadUpdatedByDoc.set(
-      group,
-      Math.max(
-        latestNoteHeadUpdatedByDoc.get(group) || 0,
-        entryUpdated(entry)
-      )
-    );
-  }
-
-  for (const entry of entries) {
-    if (objectKind(entry.path) !== 'note-update') continue;
-
-    const group = docUpdateGroup(entry.path);
-    const latestHeadUpdated = Math.min(
-      latestNoteHeadUpdatedByDoc.get(group) || 0,
-      cutoffNow
-    );
-
-    if (latestHeadUpdated > 0 && entryUpdated(entry) <= latestHeadUpdated) {
-      deleteEntries.push(entry);
-    }
-  }
-
-  const seen = new Set();
-
-  return sortOldestFirst(deleteEntries).filter((entry) => {
-    if (!entry?.path) return false;
-    if (seen.has(entry.path)) return false;
-
-    seen.add(entry.path);
-    return true;
-  });
-}
-
-function orphanNoteUpdateEntriesFromIndex(index = [], {
-  safetyDelayMs = 60_000,
-} = {}) {
-  /*
-    Explicit compaction cleanup for deleted/old note-doc journals.
-    
-    If a docs/<hash>/updates group has no corresponding docs/<hash>/heads
-    and no docs/<hash>/snapshots object, then no active known note state is
-    represented for that doc group anymore.
-
-    After pre-compaction sync + fresh heads/snapshots for all active notes,
-    those orphan update groups are stale history and can be removed.
-  */
-  const entries = index || [];
-  const cutoff = Date.now() - Math.max(0, Number(safetyDelayMs || 0));
-
-  const docGroupsWithCanonicalState = new Set();
-
-  for (const entry of entries) {
-    const kind = objectKind(entry.path);
-
-    if (kind === 'note-head') {
-      const group = docHeadGroup(entry.path);
-      if (group) docGroupsWithCanonicalState.add(group);
-      continue;
-    }
-
-    if (kind === 'note-snapshot') {
-      const group = docSnapshotGroup(entry.path);
-      if (group) docGroupsWithCanonicalState.add(group);
-      continue;
-    }
-  }
-
-  const deleteEntries = [];
-
-  for (const entry of entries) {
-    if (objectKind(entry.path) !== 'note-update') continue;
-    if (entryUpdated(entry) > cutoff) continue;
-
-    const group = docUpdateGroup(entry.path);
-
-    if (!group) continue;
-
-    if (!docGroupsWithCanonicalState.has(group)) {
-      deleteEntries.push(entry);
-    }
-  }
-
-  const seen = new Set();
-
-  return sortOldestFirst(deleteEntries).filter((entry) => {
-    if (!entry?.path) return false;
-    if (seen.has(entry.path)) return false;
-
-    seen.add(entry.path);
-    return true;
-  });
-}
+/*
+  Deleting by object timestamps is not safe and is gone: "older than the
+  newest head (of any device)" says nothing about whether that head
+  contains the pack. A pack uploaded by another device between this
+  device's pull and its head upload is in no head at all; deleting it
+  lost the change whenever that device never got to upload its own head.
+  Packs are only deleted when this device provably applied them before
+  encoding its head (collectHeadCoveredSeenEntries), or when they belong
+  to a permanently deleted note.
+*/
 
 function entryUpdated(entry) {
   return Number(entry?.updated || 0) || 0;
@@ -433,72 +309,6 @@ async function deleteRemoteEntries(engine, entries = [], {
   };
 }
 
-function existingSnapshotCoveredUpdateEntriesFromIndex(index = []) {
-  const entries = index || [];
-  const deleteEntries = [];
-
-  const vaultSnapshots = sortNewestFirst(
-    entries.filter((entry) => objectKind(entry.path) === 'vault-snapshot')
-  );
-
-  const latestVaultSnapshotUpdated = entryUpdated(vaultSnapshots[0]);
-
-  if (latestVaultSnapshotUpdated > 0) {
-    for (const entry of entries) {
-      if (
-        objectKind(entry.path) === 'vault-update' &&
-        entryUpdated(entry) <= latestVaultSnapshotUpdated
-      ) {
-        deleteEntries.push(entry);
-      }
-    }
-  }
-
-  const snapshotsByDoc = new Map();
-
-  for (const entry of entries) {
-    if (objectKind(entry.path) !== 'note-snapshot') continue;
-
-    const group = docSnapshotGroup(entry.path);
-    if (!group) continue;
-
-    if (!snapshotsByDoc.has(group)) {
-      snapshotsByDoc.set(group, []);
-    }
-
-    snapshotsByDoc.get(group).push(entry);
-  }
-
-  const latestSnapshotUpdatedByDoc = new Map();
-
-  for (const [group, list] of snapshotsByDoc) {
-    const sorted = sortNewestFirst(list);
-
-    latestSnapshotUpdatedByDoc.set(group, entryUpdated(sorted[0]));
-  }
-
-  for (const entry of entries) {
-    if (objectKind(entry.path) !== 'note-update') continue;
-
-    const group = docUpdateGroup(entry.path);
-    const latestSnapshotUpdated = latestSnapshotUpdatedByDoc.get(group) || 0;
-
-    if (latestSnapshotUpdated > 0 && entryUpdated(entry) <= latestSnapshotUpdated) {
-      deleteEntries.push(entry);
-    }
-  }
-
-  const seen = new Set();
-
-  return sortOldestFirst(deleteEntries).filter((entry) => {
-    if (!entry?.path) return false;
-    if (seen.has(entry.path)) return false;
-
-    seen.add(entry.path);
-    return true;
-  });
-}
-
 async function createEmergencyHeadroom(engine, {
   minHeadroomBytes = DEFAULT_MIN_HEADROOM_BYTES,
 } = {}) {
@@ -506,7 +316,13 @@ async function createEmergencyHeadroom(engine, {
     force: true,
   });
 
-  const coveredUpdates = existingSnapshotCoveredUpdateEntriesFromIndex(index || []);
+  // Packs the heads this device already uploaded contain.
+  const coveredUpdates = sortOldestFirst(
+    await collectHeadCoveredSeenEntries(engine, index || [], {
+      vault: true,
+      noteIds: null,
+    })
+  );
 
   const selected = [];
   let selectedBytes = 0;
@@ -529,7 +345,7 @@ async function createEmergencyHeadroom(engine, {
     phase: 'compactHeadroom',
     direction: 'up',
     detailed: true,
-    message: 'Creating safe upload headroom by pruning history already covered by snapshots…',
+    message: 'Creating safe upload headroom by pruning history already covered by heads…',
   });
 
   return deleteRemoteEntries(engine, selected, {
@@ -547,20 +363,8 @@ function cleanupPlanFromIndex(index = [], {
     entries.filter((entry) => objectKind(entry.path) === 'vault-snapshot')
   );
 
-  const latestVaultSnapshotUpdated = entryUpdated(vaultSnapshots[0]);
-
+  // Snapshot retention only; update packs are never deleted by timestamp.
   const deleteEntries = [];
-
-  if (latestVaultSnapshotUpdated > 0) {
-    for (const entry of entries) {
-      if (
-        objectKind(entry.path) === 'vault-update' &&
-        entryUpdated(entry) <= latestVaultSnapshotUpdated
-      ) {
-        deleteEntries.push(entry);
-      }
-    }
-  }
 
   // Delete old vault snapshots, keep newest N.
   for (const entry of vaultSnapshots.slice(keepSnapshotsPerDoc)) {
@@ -583,26 +387,9 @@ function cleanupPlanFromIndex(index = [], {
     snapshotsByDoc.get(group).push(entry);
   }
 
-  const latestSnapshotUpdatedByDoc = new Map();
-
-  for (const [group, list] of snapshotsByDoc) {
-    const sorted = sortNewestFirst(list);
-
-    latestSnapshotUpdatedByDoc.set(group, entryUpdated(sorted[0]));
-
-    for (const oldSnapshot of sorted.slice(keepSnapshotsPerDoc)) {
+  for (const list of snapshotsByDoc.values()) {
+    for (const oldSnapshot of sortNewestFirst(list).slice(keepSnapshotsPerDoc)) {
       deleteEntries.push(oldSnapshot);
-    }
-  }
-
-  for (const entry of entries) {
-    if (objectKind(entry.path) !== 'note-update') continue;
-
-    const group = docUpdateGroup(entry.path);
-    const latestSnapshotUpdated = latestSnapshotUpdatedByDoc.get(group) || 0;
-
-    if (latestSnapshotUpdated > 0 && entryUpdated(entry) <= latestSnapshotUpdated) {
-      deleteEntries.push(entry);
     }
   }
 
@@ -617,16 +404,47 @@ function cleanupPlanFromIndex(index = [], {
   });
 }
 
-export async function compactYantaCloudStorage(engine, {
+async function tombstonedNoteEntriesFromIndex(engine, index = []) {
+  const prefixes = [];
+
+  for (const [id, tombstone] of vaultTombstonesMap()) {
+    if (tombstone?.type !== 'note') continue;
+
+    prefixes.push(
+      await docUpdatesPrefix(engine.keys.nameKey, id),
+      await docHeadsPrefix(engine.keys.nameKey, id),
+      await docSnapshotsPrefix(engine.keys.nameKey, id)
+    );
+  }
+
+  if (!prefixes.length) return [];
+
+  return sortOldestFirst(
+    (index || []).filter((entry) =>
+      prefixes.some((prefix) => String(entry.path || '').startsWith(prefix))
+    )
+  );
+}
+
+export async function compactYantaCloudStorage(engine, options = {}) {
+  if (!engine) {
+    throw new Error('Sync engine missing.');
+  }
+
+  /*
+    Holds the sync lock for the whole run: a sync in this or another tab
+    marking packs seen, or uploading from the outbox, while heads are
+    encoded and covered packs deleted would delete what no head contains.
+  */
+  return engine.withSyncLock(() => compactLocked(engine, options));
+}
+
+async function compactLocked(engine, {
   emergencyHeadroom = true,
   minHeadroomBytes = DEFAULT_MIN_HEADROOM_BYTES,
   keepSnapshotsPerDoc = DEFAULT_KEEP_SNAPSHOTS_PER_DOC,
   dropCoveredLocalOutbox = true,
 } = {}) {
-  if (!engine) {
-    throw new Error('Sync engine missing.');
-  }
-
   await engine.start();
 
   /*
@@ -664,7 +482,7 @@ export async function compactYantaCloudStorage(engine, {
         message: 'Synchronizing before storage optimization…',
       });
 
-      await engine.syncNow({
+      await engine.syncNowLocked({
         verbose: false,
         pullSnapshots: true,
       });
@@ -837,27 +655,7 @@ export async function compactYantaCloudStorage(engine, {
   });
 
   /*
-    Strong cleanup:
-    After fresh latest-state heads are uploaded, older update-journal entries
-    are redundant for normal clients. This reduces Note Sync Journal even when
-    historical updates were not individually marked as seen by this device.
-  */
-  const indexAfterHeads = await engine.loadRemoteIndex({
-    force: true,
-  });
-
-  const headCoveredPlan = headCoveredUpdateEntriesFromIndex(indexAfterHeads, {
-    safetyDelayMs: 30_000,
-  });
-
-  const headCoveredCleanup = await deleteRemoteEntries(engine, headCoveredPlan, {
-    phase: 'compactDelete',
-    message: 'Deleting sync journal covered by latest states…',
-  });
-
-  /*
-    Also clean old legacy snapshots/updates using timestamp-based compatibility
-    cleanup for objects covered by snapshots.
+    Trim old compatibility snapshots (keep the newest per doc).
   */
   const indexAfterSnapshots = await engine.loadRemoteIndex({
     force: true,
@@ -873,21 +671,18 @@ export async function compactYantaCloudStorage(engine, {
   });
 
   /*
-    Final explicit compaction pass:
-    remove stale note-update journals for doc groups that no longer have
-    any head or snapshot after this fresh compaction run.
+    Permanently deleted notes: their journal, heads and snapshots are
+    garbage on every device (a tombstone always wins).
   */
   const indexAfterCleanup = await engine.loadRemoteIndex({
     force: true,
   });
 
-  const orphanPlan = orphanNoteUpdateEntriesFromIndex(indexAfterCleanup, {
-    safetyDelayMs: 60_000,
-  });
+  const orphanPlan = await tombstonedNoteEntriesFromIndex(engine, indexAfterCleanup);
 
   const orphanCleanup = await deleteRemoteEntries(engine, orphanPlan, {
     phase: 'compactDelete',
-    message: 'Deleting orphaned note sync journal…',
+    message: 'Deleting sync data of deleted notes…',
   });
 
   await engine.loadRemoteIndex({
@@ -920,14 +715,12 @@ export async function compactYantaCloudStorage(engine, {
     assets,
 
     journalCleanup,
-    headCoveredCleanup,
     cleanup,
     orphanCleanup,
 
     freedBytes:
       Number(headroom.bytes || 0) +
       Number(journalCleanup.bytes || 0) +
-      Number(headCoveredCleanup.bytes || 0) +
       Number(cleanup.bytes || 0) +
       Number(orphanCleanup.bytes || 0),
   };

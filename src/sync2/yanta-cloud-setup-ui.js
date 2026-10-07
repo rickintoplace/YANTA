@@ -25,13 +25,15 @@ import {
   createSync2YantaCloudAppRuntime,
   getSync2SyncKey,
   setSync2SyncKey,
+  verifyYantaCloudSyncKey,
+  hasDifferentStoredSync2SyncKey,
 } from './app-engine.js';
 
 import {
   createSync2PairingPayload,
   createSync2PairingUrl,
   renderSync2QrSvg,
-  importSync2PairingPayload,
+  applySync2PairingPayload,
   parseSync2PairingPayload,
   scanQrWithCamera,
 } from './pairing.js';
@@ -2341,12 +2343,13 @@ function renderExistingVaultStep(vaultId, {
     }
 
     try {
-      setStatus('Importing key…');
+      setStatus('Reading key…');
 
       let payload = null;
+      let key = '';
 
       if (raw.startsWith('yanta-sync2:') || raw.includes('#sync2=')) {
-        payload = await importSync2PairingPayload(raw);
+        payload = parseSync2PairingPayload(raw);
 
         if (payload.provider !== 'yanta-cloud') {
           throw new Error('This pairing payload is not for YANTA Cloud.');
@@ -2355,22 +2358,19 @@ function renderExistingVaultStep(vaultId, {
         if (payload.cloud?.vaultId && payload.cloud.vaultId !== vaultId) {
           throw new Error('This QR code belongs to a different cloud vault.');
         }
+
+        key = payload.syncKey;
       } else {
         // Tolerates the printed Recovery Kit form (grouped with spaces)
         // and a pasted recovery JSON file, not just the bare key.
-        const key = extractSyncKeyFromRecoveryInput(raw);
+        key = extractSyncKeyFromRecoveryInput(raw);
 
         syncKeyToBytes(key);
-        await setSync2SyncKey(key);
       }
 
       const baseUrl =
         payload?.cloud?.baseUrl ||
         YANTA_CLOUD_BASE_URL;
-
-      await store.settings.set('sync2.provider', 'yanta-cloud');
-      await store.settings.set('sync2.yantaCloud.vaultId', vaultId);
-      await store.settings.set('sync2.yantaCloud.baseUrl', baseUrl);
 
       /*
         This is the key part:
@@ -2382,6 +2382,25 @@ function renderExistingVaultStep(vaultId, {
           ? 'reconnect-existing-vault'
           : 'connect-existing-vault',
       });
+
+      // Verify before storing: storing replaces this device's key.
+      setStatus('Checking the key against your cloud vault…');
+
+      await verifyYantaCloudSyncKey({
+        baseUrl,
+        vaultId,
+        syncKey: key,
+      });
+
+      if (payload) {
+        await applySync2PairingPayload(payload);
+      } else {
+        await setSync2SyncKey(key);
+      }
+
+      await store.settings.set('sync2.provider', 'yanta-cloud');
+      await store.settings.set('sync2.yantaCloud.vaultId', vaultId);
+      await store.settings.set('sync2.yantaCloud.baseUrl', baseUrl);
 
       setStatus('Removing untouched local Welcome vault if present…');
 
@@ -2424,8 +2443,10 @@ function renderExistingVaultStep(vaultId, {
     } catch (err) {
       console.error(err);
       setStatus(
-        err?.message ||
-          (reconnect ? 'Could not reconnect device' : 'Could not connect vault'),
+        err?.code === 'EWRONGKEY'
+          ? 'This key does not belong to this cloud vault. Nothing was changed on this device.'
+          : err?.message ||
+            (reconnect ? 'Could not reconnect device' : 'Could not connect vault'),
         'error'
       );
       toast(
@@ -2870,7 +2891,7 @@ async function connectYantaCloudFromPairing(pairingText) {
   try {
     setStatus('Reading pairing code…');
 
-    const payload = await importSync2PairingPayload(pairingText);
+    const payload = parseSync2PairingPayload(pairingText);
 
     if (payload.provider !== 'yanta-cloud') {
       throw new Error('Pairing payload is not for YANTA Cloud.');
@@ -2883,6 +2904,38 @@ async function connectYantaCloudFromPairing(pairingText) {
     }
 
     const baseUrl = payload.cloud?.baseUrl || YANTA_CLOUD_BASE_URL;
+
+    /*
+      A pairing link replaces this device's sync key. Opening one must
+      never silently swap out the key of a device that already syncs.
+    */
+    const alreadySyncing = !!(await store.settings.get('sync2.provider', null));
+
+    if (alreadySyncing && await hasDifferentStoredSync2SyncKey(payload.syncKey)) {
+      const replace = await yantaConfirm({
+        title: 'Replace this device\'s sync key?',
+        message:
+          'This device already syncs with a different key. Pairing switches it to the vault in this link. ' +
+          'Changes that have not synced yet stay on this device only. Continue only if you opened this link yourself.',
+        confirmLabel: 'Switch vault',
+        danger: true,
+      });
+
+      if (!replace) {
+        setStatus('Pairing cancelled. Nothing was changed.');
+        return;
+      }
+    }
+
+    setStatus('Checking the key against the cloud vault…');
+
+    await verifyYantaCloudSyncKey({
+      baseUrl,
+      vaultId,
+      syncKey: payload.syncKey,
+    });
+
+    await applySync2PairingPayload(payload);
 
     await store.settings.set('sync2.provider', 'yanta-cloud');
     await store.settings.set('sync2.yantaCloud.vaultId', vaultId);
@@ -2919,7 +2972,12 @@ async function connectYantaCloudFromPairing(pairingText) {
     renderConnected(vaultId, runtime.syncKey);
   } catch (err) {
     console.error(err);
-    setStatus(err?.message || 'Could not connect this device', 'error');
+    setStatus(
+      err?.code === 'EWRONGKEY'
+        ? 'This pairing code does not match the cloud vault. Nothing was changed on this device.'
+        : err?.message || 'Could not connect this device',
+      'error'
+    );
     toast('Cloud pairing failed', 'error');
   }
 }

@@ -6,7 +6,7 @@
 // ============================================================
 
 import * as Y from 'yjs';
-import { IndexeddbPersistence } from 'y-indexeddb';
+import { IndexeddbPersistence, fetchUpdates } from 'y-indexeddb';
 import { state, store, uid } from './core.js';
 
 const docs = new Map();       // noteId -> { doc, persistence, ready }
@@ -25,6 +25,21 @@ export function getNoteDoc(noteId) {
   const entry = { doc, persistence, ready };
   docs.set(noteId, entry);
   return entry;
+}
+
+/*
+  Pull note updates other tabs of this origin persisted into the docs this
+  tab has loaded (see refreshVaultDocFromStorage in sync2/vault-doc.js).
+  Docs not loaded yet read the store fresh when first opened.
+*/
+export async function refreshLoadedNoteDocsFromStorage() {
+  for (const entry of docs.values()) {
+    try {
+      await entry.ready;
+      if (!entry.persistence?.db || entry.persistence._destroyed) continue;
+      await fetchUpdates(entry.persistence);
+    } catch {}
+  }
 }
 
 export function getMarkdownText(noteId) {

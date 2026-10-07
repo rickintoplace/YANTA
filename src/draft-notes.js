@@ -158,7 +158,19 @@ export async function discardAbandonedDraftNotes({
 
   try {
     for (const noteId of abandoned) {
+      /*
+        Re-checked right before each delete: earlier deletes await, and
+        meanwhile the user may have reopened the draft and typed into it.
+      */
+      const reopened =
+        state.surface === 'note' &&
+        String(state.currentNoteId || '') === noteId;
+
+      const stillAbandoned = !reopened && isAbandonedDraft(noteId);
+
       draftTitles.delete(noteId);
+
+      if (!stillAbandoned) continue;
 
       try {
         await permanentlyDeleteNote(noteId, {

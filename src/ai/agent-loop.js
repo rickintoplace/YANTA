@@ -1,13 +1,12 @@
 // ============================================================
-// YANTA AI — headless agent loop
+// YANTA AI — the agent loop
 //
-// The provider round-trip + tool-execution cycle without any UI.
-// Callers observe progress through hooks and decide what to render.
-//
-// The chat surface (assistant-ui.js) keeps its own streaming loop
-// because it renders partial deltas into live message objects. This
-// module serves unattended callers — Pulse routines — where there is
-// no one watching and every tool call must pass a policy gate.
+// The provider round-trip + tool-execution cycle without any UI. Both
+// agents run on it: the chat (assistant-ui.js) streams each round
+// through `requestRound` and asks for approvals in `beforeToolCall`;
+// Pulse routines run headless with a policy gate in the same hook.
+// One loop, so a fix to argument handling, result budgets or the
+// wrap-up round reaches both.
 // ============================================================
 
 import {
@@ -55,7 +54,12 @@ function toolErrorPayload(err) {
  * provider request for server-side budgeting. They are separate because
  * the server must not learn the routine name.
  *
- * @returns {Promise<{text: string, rounds: number, stop: string, toolCalls: Array}>}
+ * `requestRound({ messages, tools, round, final, signal })` replaces the
+ * plain provider call — the chat streams and renders there. It must
+ * return the assistant message ({ content, tool_calls, finish_reason,
+ * reasoning_details }).
+ *
+ * @returns {Promise<{text: string, finalText: string, rounds: number, stop: string, toolCalls: Array}>}
  */
 export async function runAgentLoop({
   messages,
@@ -73,26 +77,26 @@ export async function runAgentLoop({
   // of being dropped mid-research.
   finalTools = [],
   finalInstruction = ROUND_BUDGET_SPENT_INSTRUCTION,
+  requestRound = null,
 } = {}) {
   const thread = [...messages];
   const executed = [];
+
+  const request = (msgs, toolList, round, final) => (requestRound
+    ? requestRound({ messages: msgs, tools: toolList, round, final, signal })
+    : openRouterChatCompletion({ messages: msgs, tools: toolList, signal, source: budgetSource }));
 
   let text = '';
   let round = 0;
 
   for (; round < maxRounds; round++) {
     if (signal?.aborted) {
-      return { text, rounds: round, stop: AGENT_STOP.ABORTED, toolCalls: executed };
+      return { text, finalText: '', rounds: round, stop: AGENT_STOP.ABORTED, toolCalls: executed };
     }
 
     await onRound?.({ round, maxRounds });
 
-    const message = await openRouterChatCompletion({
-      messages: thread,
-      tools: typeof tools === 'function' ? tools() : tools,
-      signal,
-      source: budgetSource,
-    });
+    const message = await request(thread, typeof tools === 'function' ? tools() : tools, round, false);
 
     const content = String(message.content || '').trim();
     const toolCalls = message.tool_calls || [];
@@ -100,7 +104,7 @@ export async function runAgentLoop({
     if (content) text = content;
 
     if (!toolCalls.length) {
-      return { text, rounds: round + 1, stop: AGENT_STOP.COMPLETE, toolCalls: executed };
+      return { text, finalText: content, rounds: round + 1, stop: AGENT_STOP.COMPLETE, toolCalls: executed };
     }
 
     thread.push(assistantToolTurn(message));
@@ -128,6 +132,7 @@ export async function runAgentLoop({
       const args = parsed.args;
 
       let payload;
+      let ran = false;
 
       try {
         const gate = await beforeToolCall?.({ name, args, call });
@@ -143,13 +148,15 @@ export async function runAgentLoop({
         } else {
           const done = await executeToolCall(call, { permissions, source });
           payload = done.result;
+          ran = true;
           executed.push({ name, args, result: payload });
         }
       } catch (err) {
         payload = toolErrorPayload(err);
       }
 
-      await onToolResult?.({ name, args, result: payload });
+      // `ran`: the registry executed it (not refused, short-circuited or failed).
+      await onToolResult?.({ name, args, result: payload, ran });
 
       thread.push({
         role: 'tool',
@@ -161,20 +168,22 @@ export async function runAgentLoop({
   }
 
   if (signal?.aborted) {
-    return { text, rounds: round, stop: AGENT_STOP.ABORTED, toolCalls: executed };
+    return { text, finalText: '', rounds: round, stop: AGENT_STOP.ABORTED, toolCalls: executed };
   }
 
   const finalToolList = typeof finalTools === 'function' ? finalTools() : finalTools;
+  let finalText = '';
 
   try {
-    const final = await openRouterChatCompletion({
-      messages: [...thread, { role: 'user', content: finalInstruction }],
-      tools: finalToolList || [],
-      signal,
-      source: budgetSource,
-    });
+    const final = await request(
+      [...thread, { role: 'user', content: finalInstruction }],
+      finalToolList || [],
+      round,
+      true
+    );
 
-    if (String(final.content || '').trim()) text = String(final.content).trim();
+    finalText = String(final.content || '').trim();
+    if (finalText) text = finalText;
 
     for (const call of final.tool_calls || []) {
       const name = call?.function?.name || '';
@@ -191,8 +200,9 @@ export async function runAgentLoop({
       }
     }
   } catch (err) {
+    if (err?.name === 'AbortError') throw err;
     console.warn('[YANTA AI] final round failed', err);
   }
 
-  return { text, rounds: round + 1, stop: AGENT_STOP.MAX_ROUNDS, toolCalls: executed };
+  return { text, finalText, rounds: round + 1, stop: AGENT_STOP.MAX_ROUNDS, toolCalls: executed };
 }

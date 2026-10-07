@@ -1,9 +1,8 @@
 // ============================================================
 // YANTA AI — shared agent-loop helpers
 //
-// The chat loop (assistant-ui.js, streaming + approvals) and the headless
-// loop (agent-loop.js, Pulse) are separate loops; these helpers are what
-// both must do the same way, so they stop drifting apart:
+// Used by the agent loop (agent-loop.js), which the chat and Pulse both
+// run on, and by anything else that talks tools with a model:
 //
 //   - serialize tool results within a size budget,
 //   - parse tool arguments with errors a model can recover from,

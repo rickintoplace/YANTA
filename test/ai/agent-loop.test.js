@@ -101,4 +101,62 @@ describe('headless agent loop', () => {
     expect(calls[2].messages.at(-1)).toEqual({ role: 'user', content: 'decide now' });
     expect(emitted).toEqual([{ title: 'T', body: 'B' }]);
   });
+
+  it('runs the chat through requestRound: refusals, synthetic results and the wrap-up text', async () => {
+    const rounds = [];
+    const seen = [];
+    const replies = [
+      { content: 'Looking.', tool_calls: [toolCall('tools_load', { groups: ['notes'] }, 'l'), toolCall('delete_note', { noteId: 'n1' }, 'd')] },
+      { content: '', tool_calls: [toolCall('search_notes', { q: 'x' }, 's')] },
+      { content: 'Here is what I found.', tool_calls: [] },
+    ];
+
+    let toolsRound = 0;
+    const res = await runAgentLoop({
+      messages: [{ role: 'user', content: 'go' }],
+      tools: () => [{ type: 'function', function: { name: `round${toolsRound++}` } }],
+      maxRounds: 2,
+      requestRound: async ({ messages, tools, round, final }) => {
+        rounds.push({ round, final, tools: tools.map((t) => t.function.name), last: messages.at(-1) });
+        return replies.shift();
+      },
+      beforeToolCall: async ({ name }) => {
+        if (name === 'tools_load') return { result: { loaded: ['notes'] } };
+        if (name === 'delete_note') return { allowed: false, reason: 'Blocked by user', code: 'EAI_HUMAN_BLOCKED' };
+        return undefined;
+      },
+      onToolResult: (r) => seen.push({ name: r.name, ran: r.ran, error: r.result?.error || null }),
+    });
+
+    // No provider call of its own: everything went through requestRound.
+    expect(calls).toHaveLength(0);
+    expect(rounds.map((r) => [r.round, r.final])).toEqual([[0, false], [1, false], [2, true]]);
+    // The tool list is re-read each round (tools_load widens it).
+    expect(rounds[0].tools).toEqual(['round0']);
+    expect(rounds[1].tools).toEqual(['round1']);
+    expect(rounds[2].tools).toEqual([]);
+    expect(rounds[2].last.role).toBe('user');
+
+    expect(seen).toEqual([
+      { name: 'tools_load', ran: false, error: null },
+      { name: 'delete_note', ran: false, error: 'Blocked by user' },
+      { name: 'search_notes', ran: true, error: null },
+    ]);
+    expect(executed.map((e) => e.name)).toEqual(['search_notes']);
+
+    expect(res.stop).toBe(AGENT_STOP.MAX_ROUNDS);
+    expect(res.finalText).toBe('Here is what I found.');
+  });
+
+  it('lets an abort in the wrap-up round reach the caller', async () => {
+    const abort = Object.assign(new Error('aborted'), { name: 'AbortError' });
+    await expect(runAgentLoop({
+      messages: [{ role: 'user', content: 'go' }],
+      maxRounds: 1,
+      requestRound: async ({ final }) => {
+        if (final) throw abort;
+        return { content: '', tool_calls: [toolCall('search_notes', {})] };
+      },
+    })).rejects.toBe(abort);
+  });
 });

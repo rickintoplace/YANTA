@@ -42,13 +42,11 @@ import {
 } from '../agent/agent-bridge-client.js';
 
 import {
-  openRouterChatCompletion,
   openRouterChatCompletionStream,
 } from './openrouter-client.js';
 
 import {
   openAiToolsForModel,
-  executeToolCall,
   getTool,
 } from './tool-registry.js';
 
@@ -73,11 +71,9 @@ import {
 } from './untrusted-content.js';
 
 import {
-  serializeToolResult,
-  parseToolArguments,
-  assistantToolTurn,
-  ROUND_BUDGET_SPENT_INSTRUCTION,
-} from './agent-runtime.js';
+  runAgentLoop,
+  AGENT_STOP,
+} from './agent-loop.js';
 
 import {
   openNote,
@@ -177,14 +173,6 @@ let externalSourceWriteAllowAll = false;
 */
 let conversationLoadout = null;
 let conversationLoadoutKey = '';
-
-function toolCallArgsForUi(call) {
-  try {
-    return JSON.parse(call?.function?.arguments || '{}');
-  } catch {
-    return {};
-  }
-}
 
 function appendUniqueText(current = '', delta = '') {
   const a = String(current || '');
@@ -2923,6 +2911,7 @@ async function runAssistant(userText) {
   setAssistantBusy(true, 'Thinking…');
 
   const runtimeSettings = getEffectiveAiRuntimeSettings();
+  const modelLabel = () => runtimeSettings.includedModel || runtimeSettings.model || getAiSettings().model;
 
   const maxRounds = Math.max(
     1,
@@ -2932,19 +2921,30 @@ async function runAssistant(userText) {
     )
   );
 
-  for (let round = 0; round < maxRounds; round++) {
+  /*
+    One round as the chat sees it: stream the reply into a live message,
+    then keep it, drop it (an empty preamble before tool calls) or say
+    there was no response. The final wrap-up round is not streamed — its
+    text is added once the loop returns.
+  */
+  const requestRound = async ({ messages: thread, tools: roundTools, round, final, signal }) => {
     streamingReasoning = '';
+    rememberUserUrls(thread);
+
+    if (final) {
+      setAssistantBusy(true, 'Summarizing…');
+      return openRouterChatCompletionStream({ messages: thread, tools: roundTools, signal });
+    }
+
     setAssistantBusy(true, round === 0 ? 'Thinking…' : `Tool round ${round + 1}/${maxRounds}…`);
 
     let streamedMsg = null;
     let hasVisibleContent = false;
 
     const assistantMessage = await openRouterChatCompletionStream({
-      messages,
-      // Re-read each round: a tools_load call in the previous round
-      // widens what the model may call in this one.
-      tools: loadout.specs(),
-      signal: abortController.signal,
+      messages: thread,
+      tools: roundTools,
+      signal,
       onDelta: (delta) => {
         if (delta.type === 'reasoning') {
           streamingReasoning = appendUniqueText(streamingReasoning, delta.text || '');
@@ -2964,7 +2964,7 @@ async function runAssistant(userText) {
 
           if (!streamedMsg) {
             streamedMsg = pushAssistantStreamMessage({
-              model: runtimeSettings.includedModel || runtimeSettings.model || getAiSettings().model,
+              model: modelLabel(),
               reasoning: streamingReasoning,
             });
           }
@@ -2984,9 +2984,7 @@ async function runAssistant(userText) {
 
     if (finalContent) {
       if (!streamedMsg) {
-        streamedMsg = pushAssistantStreamMessage({
-          model: runtimeSettings.includedModel || runtimeSettings.model || getAiSettings().model,
-        });
+        streamedMsg = pushAssistantStreamMessage({ model: modelLabel() });
       }
 
       streamedMsg.content = finalContent;
@@ -2996,170 +2994,69 @@ async function runAssistant(userText) {
       streamedMsg.reasoning = finalReasoning;
     }
 
-    const toolCalls = assistantMessage.tool_calls || [];
-
-    if (!toolCalls.length) {
-      if (streamedMsg && hasVisibleContent) {
-        finalizeAssistantStreamMessage(streamedMsg);
-      } else if (streamedMsg) {
-        removeConversationMessageObject(streamedMsg);
-      } else {
-        addMessage('assistant', '[No response]', {
-          model: runtimeSettings.includedModel || runtimeSettings.model || getAiSettings().model,
-        });
-      }
-
-      streamingReasoning = '';
-      return;
-    }
-
     if (streamedMsg && hasVisibleContent) {
       finalizeAssistantStreamMessage(streamedMsg);
     } else if (streamedMsg) {
       removeConversationMessageObject(streamedMsg);
+    } else if (!(assistantMessage.tool_calls || []).length) {
+      addMessage('assistant', '[No response]', { model: modelLabel() });
     }
 
     streamingReasoning = '';
 
-    messages.push(assistantToolTurn(assistantMessage));
+    return assistantMessage;
+  };
 
-    rememberUserUrls(messages);
+  const result = await runAgentLoop({
+    messages,
+    // Re-read each round: a tools_load call in the previous round
+    // widens what the model may call in this one.
+    tools: () => loadout.specs(),
+    maxRounds,
+    signal: abortController.signal,
+    source: 'assistant',
+    requestRound,
+    beforeToolCall: async ({ name, args }) => {
+      setAssistantBusy(true, `Using ${toolDisplayName(name)}…`);
 
-    for (const call of toolCalls) {
-      const toolName = call?.function?.name || '';
-      const args = toolCallArgsForUi(call);
-
-      setAssistantBusy(true, `Using ${toolDisplayName(toolName)}…`);
-
-      try {
-        // Resolves inside the run: it changes what the next round may
-        // call, so it never reaches the registry.
-        if (loadout.isLoadTool(toolName)) {
-          const result = loadout.load(args);
-
-          messages.push({
-            role: 'tool',
-            tool_call_id: call.id,
-            name: toolName,
-            content: serializeToolResult(result),
-          });
-
-          addMessage('tool', JSON.stringify({ args, result }, null, 2), {
-            toolName,
-          });
-
-          continue;
-        }
-
-        // Cut-off or broken arguments: tell the model, run nothing.
-        const parsedArgs = parseToolArguments(call, { finishReason: assistantMessage.finish_reason });
-
-        if (!parsedArgs.ok) {
-          messages.push({
-            role: 'tool',
-            tool_call_id: call.id,
-            name: toolName,
-            content: serializeToolResult(parsedArgs.error),
-          });
-
-          addMessage('tool', JSON.stringify(parsedArgs.error, null, 2), {
-            toolName,
-          });
-
-          continue;
-        }
-
-        if (toolRequiresExternalSourceApproval(toolName, args)) {
-          const approval = await requestExternalSourceToolApproval({
-            toolName,
-            args,
-          });
-
-          if (approval.allowAll) {
-            externalSourceWriteAllowAll = true;
-          }
-
-          if (!approval.allowed) {
-            const blocked = {
-              error: 'Blocked by user because external content (web, feeds or messages) is present in this chat.',
-              code: 'EAI_HUMAN_BLOCKED_EXTERNAL_SOURCE_WRITE',
-            };
-
-            messages.push({
-              role: 'tool',
-              tool_call_id: call.id,
-              name: toolName,
-              content: serializeToolResult(blocked),
-            });
-
-            addMessage('tool', JSON.stringify(blocked, null, 2), {
-              toolName,
-            });
-
-            continue;
-          }
-        }
-
-        const executed = await executeToolCall(call);
-
-        noteToolResult(chatTaint, executed.name, executed.result);
-
-        messages.push({
-          role: 'tool',
-          tool_call_id: call.id,
-          name: executed.name,
-          content: serializeToolResult(executed.result),
-        });
-
-        addMessage('tool', JSON.stringify({
-          args: executed.args,
-          result: executed.result,
-        }, null, 2), {
-          toolName: executed.name,
-        });
-      } catch (err) {
-        const result = {
-          error: err?.message || String(err),
-          code: err?.code || null,
-          permission: err?.permission || null,
-        };
-
-        messages.push({
-          role: 'tool',
-          tool_call_id: call.id,
-          name: toolName,
-          content: serializeToolResult(result),
-        });
-
-        addMessage('tool', JSON.stringify(result, null, 2), {
-          toolName,
-        });
+      // Resolves inside the run: it changes what the next round may
+      // call, so it never reaches the registry.
+      if (loadout.isLoadTool(name)) {
+        return { result: loadout.load(args) };
       }
-    }
-  }
 
-  /*
-    Round budget spent: one last call without tools so the user gets a
-    real summary of what happened, not a canned line.
-  */
-  streamingReasoning = '';
-  setAssistantBusy(true, 'Summarizing…');
+      if (toolRequiresExternalSourceApproval(name, args)) {
+        const approval = await requestExternalSourceToolApproval({ toolName: name, args });
 
-  try {
-    const final = await openRouterChatCompletionStream({
-      messages: [...messages, { role: 'user', content: ROUND_BUDGET_SPENT_INSTRUCTION }],
-      tools: [],
-      signal: abortController.signal,
+        if (approval.allowAll) {
+          externalSourceWriteAllowAll = true;
+        }
+
+        if (!approval.allowed) {
+          return {
+            allowed: false,
+            reason: 'Blocked by user because external content (web, feeds or messages) is present in this chat.',
+            code: 'EAI_HUMAN_BLOCKED_EXTERNAL_SOURCE_WRITE',
+          };
+        }
+      }
+
+      return undefined;
+    },
+    onToolResult: ({ name, args, result: toolResult, ran }) => {
+      if (ran) noteToolResult(chatTaint, name, toolResult);
+
+      addMessage('tool', JSON.stringify({ args, result: toolResult }, null, 2), {
+        toolName: name,
+      });
+    },
+  });
+
+  // Round budget spent: the wrap-up round's text is the user's summary.
+  if (result.stop === AGENT_STOP.MAX_ROUNDS) {
+    addMessage('assistant', result.finalText || `I stopped after ${maxRounds} tool rounds without finishing. Ask me to continue.`, {
+      model: modelLabel(),
     });
-
-    const text = String(final.content || '').trim();
-
-    addMessage('assistant', text || `I stopped after ${maxRounds} tool rounds without finishing. Ask me to continue.`, {
-      model: runtimeSettings.includedModel || runtimeSettings.model || getAiSettings().model,
-    });
-  } catch (err) {
-    if (err?.name === 'AbortError') throw err;
-    addMessage('assistant', `I stopped after ${maxRounds} tool rounds without finishing. Ask me to continue.`);
   }
 }
 

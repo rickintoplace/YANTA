@@ -54,6 +54,61 @@ import { countFirstNoteIfActivation } from './metrics/funnel.js';
 let _navSuppress = false;
 let _unsubDoc = null;
 
+/*
+  Typing used to do all of this on every keystroke: stringify + lowercase
+  the whole note for search, write the note record to IndexedDB, and fire
+  yanta-note-updated — whose listeners re-render the dashboard, calendar,
+  graph and note header. It now happens once the user pauses. The body
+  itself is not delayed: it lives in the Y.Doc, persisted and synced on
+  its own.
+*/
+const BODY_CHANGE_SETTLE_MS = 400;
+let pendingBodyChange = null;
+
+function flushPendingBodyChange() {
+  const pending = pendingBodyChange;
+  if (!pending) return;
+
+  pendingBodyChange = null;
+  clearTimeout(pending.timer);
+
+  const { note, reason } = pending;
+
+  updateSearchIndexFor(note);
+  store.notes.put(note);
+
+  window.dispatchEvent(new CustomEvent('yanta-note-updated', {
+    detail: {
+      noteId: note.id,
+      reason,
+    },
+  }));
+
+  if (reason === 'body-change') {
+    markNoteSyncStatus(note.id, 'local');
+    refreshGlobalSyncStatus();
+  }
+}
+
+function scheduleBodyChange(note, reason) {
+  if (pendingBodyChange && pendingBodyChange.note.id !== note.id) {
+    flushPendingBodyChange();
+  }
+
+  clearTimeout(pendingBodyChange?.timer);
+
+  pendingBodyChange = {
+    note,
+    // A drawing change in the same burst still counts as one.
+    reason: pendingBodyChange?.reason === 'drawing-change' ? 'drawing-change' : reason,
+    timer: setTimeout(flushPendingBodyChange, BODY_CHANGE_SETTLE_MS),
+  };
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', flushPendingBodyChange);
+}
+
 // ------------------------------------------------------------
 // Built-in Welcome Vault
 //
@@ -456,6 +511,7 @@ export async function openNote(id) {
 
   // Tear down previous subscription / editor
   if (_unsubDoc) {
+    flushPendingBodyChange();
     _unsubDoc();
     _unsubDoc = null;
   }
@@ -521,42 +577,19 @@ export async function openNote(id) {
         detail: { noteId: id },
       }));
     
-      updateSearchIndexFor(note);
-    
       note.updated = Date.now();
-      store.notes.put(note);
-    
-      window.dispatchEvent(new CustomEvent('yanta-note-updated', {
-        detail: {
-          noteId: id,
-          reason: 'drawing-change',
-        },
-      }));
-    
+      scheduleBodyChange(note, 'drawing-change');
       scheduleMirror(note);
     
       return;
     }
 
     schedulePreview();
-    updateSearchIndexFor(note);
-    
     markDirty();
     
     note.updated = Date.now();
-    store.notes.put(note);
-    
-    window.dispatchEvent(new CustomEvent('yanta-note-updated', {
-      detail: {
-        noteId: id,
-        reason: 'body-change',
-      },
-    }));
-    
+    scheduleBodyChange(note, 'body-change');
     scheduleMirror(note);
-    
-    markNoteSyncStatus(id, 'local');
-    refreshGlobalSyncStatus();
   });
 
   preloadImagesFor(noteMarkdown(id));
@@ -674,7 +707,7 @@ function setPreviewHtmlPreservingVideos(previewEl, html) {
 }
 
 export function clearEditor() {
-  if (_unsubDoc) { _unsubDoc(); _unsubDoc = null; }
+  if (_unsubDoc) { flushPendingBodyChange(); _unsubDoc(); _unsubDoc = null; }
   state.currentNoteId = null;
   const titleInput = $('noteTitle');
 

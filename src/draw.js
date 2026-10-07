@@ -3623,16 +3623,42 @@ function bindNativeExcalidrawContextMenuPatch(container, apiRef, editable) {
     setTimeout(() => injectYantaItemsIntoNativeContextMenu(container), 0);
     setTimeout(() => injectYantaItemsIntoNativeContextMenu(container), 40);
     setTimeout(() => injectYantaItemsIntoNativeContextMenu(container), 120);
+
+    startObserving();
   }, true);
 
-  ctx.observer = new MutationObserver(() => {
-    injectYantaItemsIntoNativeContextMenu(container);
-  });
+  /*
+    Observe only while the native menu is opening (same as slides-ui.js).
+    One permanent document-wide subtree observer per embed ran on every DOM
+    change in the app, typing included, and was never disconnected — it
+    kept detached drawings alive after their note closed.
+  */
+  const stopObserving = () => {
+    ctx.observer?.disconnect();
+    ctx.observer = null;
+    clearTimeout(ctx.observerStopTimer);
+    ctx.observerStopTimer = 0;
+  };
 
-  ctx.observer.observe(document.body, {
-    childList: true,
-    subtree: true,
-  });
+  const startObserving = () => {
+    if (ctx.observer) return;
+
+    ctx.observer = new MutationObserver(() => {
+      if (!container.isConnected) {
+        stopObserving();
+        return;
+      }
+
+      injectYantaItemsIntoNativeContextMenu(container);
+    });
+
+    ctx.observer.observe(document.body, {
+      childList: true,
+      subtree: true,
+    });
+
+    ctx.observerStopTimer = window.setTimeout(stopObserving, 1200);
+  };
 }
 
 let drawAutocompleteEl = null;

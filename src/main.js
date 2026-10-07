@@ -3868,7 +3868,17 @@ function bindEvents() {
   });
 
   // Persist expanded folders
-  setInterval(() => store.settings.set('expandedFolders', [...state.expandedFolders]), 5000);
+  // Persist folder expansion only when it changed (was an IndexedDB write
+  // every 5 s for the whole session).
+  let lastExpandedFolders = '';
+
+  setInterval(() => {
+    const next = JSON.stringify([...state.expandedFolders].sort());
+    if (next === lastExpandedFolders) return;
+
+    lastExpandedFolders = next;
+    store.settings.set('expandedFolders', [...state.expandedFolders]);
+  }, 5000);
 
   // Unload
   // Primary flush triggers. beforeunload is too late/unreliable for async writes.

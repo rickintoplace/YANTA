@@ -1,0 +1,27 @@
+# CI for the web app: i18n catalogs, lint, sync tests, production build.
+# The worker deploys separately (yanta-cloud-worker, see README).
+
+image: node:24
+
+stages:
+  - check
+
+cache:
+  key:
+    files:
+      - package-lock.json
+  paths:
+    - .npm/
+
+check:
+  stage: check
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_COMMIT_BRANCH
+  script:
+    # Install scripts are not needed to lint, test or build (sharp/onnxruntime
+    # postinstalls only fetch native binaries for server-side use).
+    - npm ci --cache .npm --prefer-offline --ignore-scripts --no-audit --no-fund
+    - npm run check
+    - npm run build
+    - node --check yanta-cloud-worker/src/index.js

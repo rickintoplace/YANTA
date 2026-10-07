@@ -40,8 +40,9 @@ function parseDateMs(value) {
 }
 
 function htmlToText(html = '') {
-  const tmp = document.createElement('div');
-  tmp.innerHTML = String(html || '');
+  // Inert document: parsing here must not fetch the feed's images
+  // (tracking pixels, IP leak) the way a live element would.
+  const tmp = new DOMParser().parseFromString(String(html || ''), 'text/html').body;
 
   tmp.querySelectorAll('script, style, noscript, iframe, object, embed').forEach((n) => n.remove());
 
@@ -53,11 +54,16 @@ function htmlToText(html = '') {
     .trim();
 }
 
+/*
+  Feed URLs end up as link targets and in window.open(): anything but
+  http(s) — javascript:, data:, file: — is dropped here, at the source.
+*/
 function absolutizeUrl(raw, baseUrl = '') {
   try {
-    return new URL(String(raw || '').trim(), baseUrl || location.href).href;
+    const url = new URL(String(raw || '').trim(), baseUrl || location.href);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.href : '';
   } catch {
-    return String(raw || '').trim();
+    return '';
   }
 }
 
@@ -168,8 +174,9 @@ function imageLooksTinyOrTracking(img) {
 }
 
 function findImageUrlFromHtml(html, baseUrl) {
-  const tmp = document.createElement('div');
-  tmp.innerHTML = String(html || '');
+  // Inert document: parsing here must not fetch the feed's images
+  // (tracking pixels, IP leak) the way a live element would.
+  const tmp = new DOMParser().parseFromString(String(html || ''), 'text/html').body;
 
   for (const img of tmp.querySelectorAll('img[src], img[data-src]')) {
     if (imageLooksTinyOrTracking(img)) continue;

@@ -90,9 +90,9 @@ function mdEscape(value = '') {
 }
 
 function stripHtml(html = '') {
-  const tmp = document.createElement('div');
-
-  tmp.innerHTML = String(html || '');
+  // Inert document: parsing here must not fetch the feed's images
+  // (tracking pixels, IP leak) the way a live element would.
+  const tmp = new DOMParser().parseFromString(String(html || ''), 'text/html').body;
 
   tmp.querySelectorAll('script, style, noscript, iframe, object, embed').forEach((n) => n.remove());
 
@@ -105,8 +105,9 @@ function stripHtml(html = '') {
 }
 
 function htmlToMarkdown(html = '') {
-  const tmp = document.createElement('div');
-  tmp.innerHTML = String(html || '');
+  // Inert document: parsing here must not fetch the feed's images
+  // (tracking pixels, IP leak) the way a live element would.
+  const tmp = new DOMParser().parseFromString(String(html || ''), 'text/html').body;
 
   tmp.querySelectorAll('script, style, noscript, iframe, object, embed').forEach((n) => n.remove());
 

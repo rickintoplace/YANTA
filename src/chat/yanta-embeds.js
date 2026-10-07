@@ -775,6 +775,12 @@ import {
   
     try {
       const u = new URL(clean, location.href);
+
+      // Embeds arrive from other people's messages.
+      if (u.protocol !== 'http:' && u.protocol !== 'https:') {
+        toast('Link is not supported.', 'error');
+        return;
+      }
   
       if (u.origin === location.origin) {
         location.href = u.href;

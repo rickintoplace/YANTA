@@ -7,7 +7,7 @@
 // read state, archive.
 // ============================================================
 
-import { toast } from '../core.js';
+import { toast, safeUrl } from '../core.js';
 import { openNote } from '../notes.js';
 
 import {
@@ -111,11 +111,15 @@ export async function openRssItemContextMenu({
     });
   }
 
-  if (item.url) {
+  // Items cached before feed URLs were restricted to http(s) may still
+  // carry another scheme.
+  const originalUrl = safeUrl(item.url);
+
+  if (originalUrl && /^https?:/i.test(originalUrl)) {
     entries.push({
       label: 'Open original',
       icon: 'external-link',
-      action: () => window.open(item.url, '_blank', 'noopener'),
+      action: () => window.open(originalUrl, '_blank', 'noopener'),
     });
   }
 

@@ -3,6 +3,7 @@ import {
   escapeAttr,
   lucide,
   uid,
+  safeUrl,
 } from '../core.js';
 
 import {
@@ -300,11 +301,17 @@ function connectDisplaySocket(payload) {
 
     if (!data || data.token !== payload.token) return;
 
-    if (data.kind === 'presentation-link' && data.url) {
+    // The link arrives over the relay: only follow it into this app.
+    const target = data.kind === 'presentation-link' ? safeUrl(data.url) : null;
+    const sameOrigin = (() => {
+      try { return !!target && new URL(target).origin === location.origin; } catch { return false; }
+    })();
+
+    if (data.kind === 'presentation-link' && sameOrigin) {
       setStatus(`${lucide('check', 15)} Presentation received. Opening…`, 'connected');
 
       window.setTimeout(() => {
-        location.assign(data.url);
+        location.assign(target);
       }, 450);
     }
 

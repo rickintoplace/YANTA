@@ -13,6 +13,7 @@ import {
   toast,
   lucide,
   state,
+  safeUrl,
 } from '../core.js';
 
 import {
@@ -1836,7 +1837,7 @@ function renderToolRichContent(name, data) {
     for (const result of results.slice(0, 10)) {
       const row = document.createElement('a');
       row.className = 'yanta-ai-tool-row';
-      row.href = result.url || '#';
+      row.href = safeUrl(result.url) || '#';
       row.target = '_blank';
       row.rel = 'noopener noreferrer';
 
@@ -1865,7 +1866,7 @@ function renderToolRichContent(name, data) {
 
     const row = document.createElement('a');
     row.className = 'yanta-ai-tool-row';
-    row.href = data.url;
+    row.href = safeUrl(data.url) || '#';
     row.target = '_blank';
     row.rel = 'noopener noreferrer';
 
@@ -2042,7 +2043,7 @@ function renderToolRichContent(name, data) {
 
     const row = document.createElement('a');
     row.className = 'yanta-ai-tool-row';
-    row.href = source.siteUrl || source.feedUrl || '#';
+    row.href = safeUrl(source.siteUrl || source.feedUrl) || '#';
     row.target = '_blank';
     row.rel = 'noopener noreferrer';
 

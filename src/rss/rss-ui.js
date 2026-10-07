@@ -127,8 +127,9 @@ function fmtDate(ms) {
 }
 
 function stripHtml(html = '') {
-  const tmp = document.createElement('div');
-  tmp.innerHTML = String(html || '');
+  // Inert document: parsing here must not fetch the feed's images
+  // (tracking pixels, IP leak) the way a live element would.
+  const tmp = new DOMParser().parseFromString(String(html || ''), 'text/html').body;
 
   tmp.querySelectorAll('script, style, noscript, iframe, object, embed').forEach((n) => n.remove());
 
@@ -265,10 +266,21 @@ function cleanFeedHtml(html = '') {
       'preload',
       'open',
     ],
+
+    /*
+      A feed author must not be able to style or address the app: inline
+      styles can draw full-screen overlays (a fake "enter your recovery key"
+      dialog), and ids/classes can collide with the app's own.
+    */
+    FORBID_ATTR: ['style', 'id', 'class'],
   });
 
   const tpl = document.createElement('template');
   tpl.innerHTML = clean;
+
+  // <picture> sources would load straight from the feed's server; the
+  // <img> fallback inside goes through the proxy below.
+  tpl.content.querySelectorAll('picture source').forEach((source) => source.remove());
 
   tpl.content.querySelectorAll('img').forEach((img) => {
     if (isTinyTrackingImage(img)) {
@@ -278,6 +290,13 @@ function cleanFeedHtml(html = '') {
 
     img.setAttribute('loading', 'lazy');
     img.setAttribute('referrerpolicy', 'no-referrer');
+
+    // Loaded later through imageSrc() (proxy, image setting, tracking
+    // filter) — never straight from the feed's server.
+    const src = img.getAttribute('src') || '';
+    img.removeAttribute('src');
+    img.removeAttribute('srcset');
+    if (src) img.setAttribute('data-src', src);
   });
 
   tpl.content.querySelectorAll('a[href]').forEach((a) => {
@@ -1322,6 +1341,16 @@ async function renderReader(itemId, { fromHistory = false } = {}) {
   const mainContent = el('div', { class: 'yanta-rss-original-html' });
 
   mainContent.innerHTML = cleanHtml || textToReaderHtml(text);
+
+  for (const img of mainContent.querySelectorAll('img[data-src]')) {
+    const src = await imageSrc(img.getAttribute('data-src'));
+
+    if (src) {
+      img.setAttribute('src', src);
+    } else {
+      img.remove();
+    }
+  }
 
   content.append(mainContent);
 

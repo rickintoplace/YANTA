@@ -10,6 +10,7 @@ import {
   lucide,
   toast,
   uid,
+  escapeHtml,
 } from './core.js';
 import { t } from './i18n/index.js';
 
@@ -127,7 +128,7 @@ function renderTagsPopoverBody(body) {
         },
       });
 
-      pill.innerHTML = `<span>#${tag}</span>${lucide('x', 13)}`;
+      pill.innerHTML = `<span>#${escapeHtml(tag)}</span>${lucide('x', 13)}`;
       pills.append(pill);
     }
   }
@@ -1109,7 +1110,7 @@ function openNoteLinkPicker(anchor) {
 
       btn.innerHTML = `
         <span>${lucide(note.icon || 'file-text', 15)}</span>
-        <strong>${note.title || t('note.untitled')}</strong>
+        <strong>${escapeHtml(note.title || t('note.untitled'))}</strong>
       `;
 
       list.append(btn);

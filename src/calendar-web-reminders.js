@@ -134,7 +134,6 @@ async function fireReminder(ev, minutesBefore, key) {
   }
 
   try {
-    // eslint-disable-next-line no-new
     new Notification(title, options);
   } catch (err) {
     console.warn('[YANTA Calendar Reminders] Web notification failed', err);

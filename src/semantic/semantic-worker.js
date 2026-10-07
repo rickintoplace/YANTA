@@ -11,8 +11,6 @@
 // is a plain dot product.
 // ============================================================
 
-/* eslint-env worker */
-
 const DB_NAME = 'yanta-semantic';
 const DB_VERSION = 1;
 

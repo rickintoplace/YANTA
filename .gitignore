@@ -81,3 +81,6 @@ keystore.properties
 android/local.properties
 android/.gradle/
 android/**/build/
+
+# Local review / to-do notes (not part of the product)
+todo/

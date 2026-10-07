@@ -7,6 +7,7 @@ import {
   lucide,
   safeCssColor,
   toast,
+  escapeHtml,
 } from './core.js';
 import { t as i18n } from './i18n/index.js';
 
@@ -4234,7 +4235,7 @@ function renderDashboardVideo(block) {
     wrap.innerHTML = `
       <div class="yanta-dash-video-fallback">
         ${lucide('play', 24)}
-        <span>${block.title || i18n('dashboard.video')}</span>
+        <span>${escapeHtml(block.title || i18n('dashboard.video'))}</span>
       </div>
     `;
   }

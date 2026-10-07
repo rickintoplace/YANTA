@@ -359,6 +359,18 @@ function randomToken(bytes = 32) {
   return base64url(b);
 }
 __name(randomToken, "randomToken");
+// Why: several unauthenticated forms mail user input as HTML from our own
+// domain; unescaped, that turns them into a trusted-sender phishing relay.
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;",
+    "<": "&lt;",
+    ">": "&gt;",
+    '"': "&quot;",
+    "'": "&#39;"
+  })[c]);
+}
+__name(escapeHtml, "escapeHtml");
 function id(prefix) {
   return `${prefix}_${randomToken(18)}`;
 }
@@ -2413,6 +2425,24 @@ async function ensureDevice(env, user, vaultId, deviceId, req = null) {
   return rec;
 }
 __name(ensureDevice, "ensureDevice");
+function randomLoginCode() {
+  const buf = new Uint32Array(1);
+  const limit = 4294967296 - 4294967296 % 9e5;
+  do {
+    crypto.getRandomValues(buf);
+  } while (buf[0] >= limit);
+  return String(1e5 + buf[0] % 9e5);
+}
+__name(randomLoginCode, "randomLoginCode");
+async function consumeLoginChallenge(env, challengeId) {
+  const row = await env.DB.prepare(
+    `UPDATE login_challenges SET used_at = ?
+     WHERE id = ? AND used_at IS NULL
+     RETURNING id`
+  ).bind(now(), challengeId).first();
+  return !!row;
+}
+__name(consumeLoginChallenge, "consumeLoginChallenge");
 async function handleSendCode(env, req, headers) {
   const body = await bodyJson(req);
   const email = normalizeEmail(body.email);
@@ -2439,7 +2469,7 @@ async function handleSendCode(env, req, headers) {
   if (!turnstileOk) {
     return json(generic, 200, headers);
   }
-  const code = String(Math.floor(1e5 + Math.random() * 9e5));
+  const code = randomLoginCode();
   const magicToken = randomToken(32);
   const codeHash = await hmacHex(env.SESSION_SECRET, `code:${email}:${code}`);
   const magicHash = await hmacHex(env.SESSION_SECRET, `magic:${magicToken}`);
@@ -2534,19 +2564,24 @@ async function handleVerifyCode(env, req, headers) {
   if (!challenge || challenge.expires_at < now()) {
     return json({ ok: false, message: "Code expired" }, 400, headers);
   }
-  if (challenge.attempts >= 5) {
+  // Why: the attempt is claimed atomically *before* comparing. Reading
+  // `attempts` and incrementing after a miss let parallel requests all pass
+  // the < 5 check and brute-force far more guesses per challenge.
+  const claimed = await env.DB.prepare(
+    `UPDATE login_challenges SET attempts = attempts + 1
+     WHERE id = ? AND used_at IS NULL AND attempts < 5
+     RETURNING attempts`
+  ).bind(challenge.id).first();
+  if (!claimed) {
     return json({ ok: false, message: "Too many attempts" }, 400, headers);
   }
   const expected = await hmacHex(env.SESSION_SECRET, `code:${email}:${code}`);
-  if (expected !== challenge.code_hash) {
-    await env.DB.prepare(
-      `UPDATE login_challenges SET attempts = attempts + 1 WHERE id = ?`
-    ).bind(challenge.id).run();
+  if (!timingSafeEqualHex(expected, challenge.code_hash)) {
     return json({ ok: false, message: "Invalid code" }, 400, headers);
   }
-  await env.DB.prepare(
-    `UPDATE login_challenges SET used_at = ? WHERE id = ?`
-  ).bind(now(), challenge.id).run();
+  if (!await consumeLoginChallenge(env, challenge.id)) {
+    return json({ ok: false, message: "Code expired" }, 400, headers);
+  }
   const user = await getOrCreateUser(env, email);
   const responseHeaders = await createSession(env, req, user.id, headers);
   await audit(env, req, "auth_login_code_success", user.id, {});
@@ -2575,9 +2610,9 @@ async function handleMagic(env, req, url, headers) {
   if (!challenge || challenge.expires_at < now()) {
     return Response.redirect(`${appOrigin}/#login-expired`, 302);
   }
-  await env.DB.prepare(
-    `UPDATE login_challenges SET used_at = ? WHERE id = ?`
-  ).bind(now(), challenge.id).run();
+  if (!await consumeLoginChallenge(env, challenge.id)) {
+    return Response.redirect(`${appOrigin}/#login-expired`, 302);
+  }
   const user = await getOrCreateUser(env, challenge.email);
   const responseHeaders = await createSession(env, req, user.id, headers);
   return new Response(null, {
@@ -3640,11 +3675,11 @@ async function handleContentNotice(env, req, headers) {
       replyTo: reporterEmail || undefined,
       html: `
         <h3>Notice ${reference}</h3>
-        <p><strong>URL:</strong> ${shareUrl}</p>
-        <p><strong>Share id:</strong> ${shareId || "not recognised"}</p>
-        <p><strong>Category:</strong> ${category}</p>
-        <p><strong>Reporter:</strong> ${reporterName || "—"} ${reporterEmail || "(no address given)"}</p>
-        <pre style="white-space:pre-wrap">${explanation}</pre>
+        <p><strong>URL:</strong> ${escapeHtml(shareUrl)}</p>
+        <p><strong>Share id:</strong> ${escapeHtml(shareId || "not recognised")}</p>
+        <p><strong>Category:</strong> ${escapeHtml(category)}</p>
+        <p><strong>Reporter:</strong> ${escapeHtml(reporterName || "—")} ${escapeHtml(reporterEmail || "(no address given)")}</p>
+        <pre style="white-space:pre-wrap">${escapeHtml(explanation)}</pre>
       `
     });
   } catch (err) {
@@ -3789,7 +3824,7 @@ function cancellationConfirmationHtml({
     <p style="margin-top:18px;color:#625a49;font-size:13px">
       Your declaration as submitted:
     </p>
-    <blockquote style="margin:6px 0 0;padding:10px 14px;border-left:3px solid #d8c7a5;color:#625a49;font-size:13px;white-space:pre-wrap">${declaration}</blockquote>
+    <blockquote style="margin:6px 0 0;padding:10px 14px;border-left:3px solid #d8c7a5;color:#625a49;font-size:13px;white-space:pre-wrap">${escapeHtml(declaration)}</blockquote>
 
     <p style="margin-top:20px;color:#666;font-size:12px">
       Did not request this? Contact
@@ -3919,8 +3954,8 @@ async function handleCancellationRequest(env, req, headers) {
         replyTo: email,
         html: `
           <h3>Cancellation ${reference}</h3>
-          <p>Status: <strong>${status}</strong>${error ? ` — ${error}` : ""}</p>
-          <pre style="white-space:pre-wrap">${declaration}</pre>
+          <p>Status: <strong>${status}</strong>${error ? ` — ${escapeHtml(error)}` : ""}</p>
+          <pre style="white-space:pre-wrap">${escapeHtml(declaration)}</pre>
         `
       });
     } catch (err) {

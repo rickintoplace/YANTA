@@ -61,6 +61,7 @@ import {
   escapeHtml,
   escapeAttr,
   safeFilename,
+  downloadBlob,
   lucide,
   lucideCalendarDay,
   cssColorToHex,

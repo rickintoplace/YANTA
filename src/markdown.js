@@ -1151,7 +1151,7 @@ export function renderPreview(md) {
           }      
         } else if (fn) {
           extraClass = 'pv-fn-def';
-          inner = `<div id="fn-${fn[1]}"><strong>[${fn[1]}]</strong> ${renderInline(fn[2])}</div>`;
+          inner = `<div id="fn-${escapeAttr(fn[1])}"><strong>[${escapeHtml(fn[1])}]</strong> ${renderInline(fn[2])}</div>`;
         } else inner = `<blockquote>${renderInline(line.replace(/^\s*>\s?/, ''))}</blockquote>`;
       } else if (info.type === 'task') {
         const m = /^(\s*)([-*+])\s+\[([ xX])\]\s+(.*)$/.exec(line);
@@ -1170,7 +1170,7 @@ export function renderPreview(md) {
       else if (info.type === 'table') { inner = `<pre style="margin:0;font-size:0.9em;color:var(--text-dim)"><code>${escapeHtml(line)}</code></pre>`; }
       else {
         const fn = /^\[\^([^\]\s]+)\]:\s*(.*)$/.exec(line);
-        if (fn) { extraClass = 'pv-fn-def'; inner = `<div id="fn-${fn[1]}"><strong>[${fn[1]}]</strong> ${renderInline(fn[2])}</div>`; }
+        if (fn) { extraClass = 'pv-fn-def'; inner = `<div id="fn-${escapeAttr(fn[1])}"><strong>[${escapeHtml(fn[1])}]</strong> ${renderInline(fn[2])}</div>`; }
         else inner = renderInline(line) || '&nbsp;';
       }
       pieces.push(`<div class="pv-line ${extraClass}" data-line="${i}" data-type="${info.type}">${inner}</div>`);

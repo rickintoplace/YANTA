@@ -423,7 +423,15 @@ async function extractPdfText(file) {
   } catch {}
 
   const data = new Uint8Array(await file.arrayBuffer());
-  const pdf = await pdfjs.getDocument({ data }).promise;
+  /*
+    Why: text extraction never renders, so eval-compiled font programs and
+    injected @font-face rules are pure attack surface for hostile PDFs.
+  */
+  const pdf = await pdfjs.getDocument({
+    data,
+    isEvalSupported: false,
+    disableFontFace: true,
+  }).promise;
 
   const pages = [];
   const maxPages = Math.min(pdf.numPages, 80);

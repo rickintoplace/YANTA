@@ -7,7 +7,7 @@
 // ============================================================
 
 import { isChatEnabled } from './chat/chat-enabled.js';
-import { $, el, state, store, toast, lucide, safeCssColor, cssColorToHex } from './core.js';
+import { $, el, state, store, toast, lucide, safeCssColor, cssColorToHex, fmtBytes, updateStorageMeter } from './core.js';
 import { LOCALES, getLocale, hasExplicitLocale, setLocale, clearLocale, t } from './i18n/index.js';
 import {
   getDashboardCardDisplayPrefs,

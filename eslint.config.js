@@ -51,9 +51,24 @@ export default [
     languageOptions: {
       ecmaVersion: 2023,
       sourceType: 'module',
-      globals: { ...globals.browser, ...globals.serviceworker },
+      globals: {
+        ...globals.browser,
+        ...globals.serviceworker,
+        // Feature-detected before use (QR scanning, Google Identity Services).
+        BarcodeDetector: 'readonly',
+        google: 'readonly',
+      },
     },
     plugins: { yanta: { rules: { 'no-untranslated-literal': noUntranslatedLiteral } } },
-    rules: { 'yanta/no-untranslated-literal': 'error' },
+    rules: {
+      'yanta/no-untranslated-literal': 'error',
+      // Why: without it a missing import only surfaces as a ReferenceError
+      // when the code path runs (calendar's "Export all JSON" shipped that way).
+      'no-undef': 'error',
+    },
+  },
+  {
+    files: ['src/semantic/semantic-worker.js'],
+    languageOptions: { globals: { ...globals.worker } },
   },
 ];

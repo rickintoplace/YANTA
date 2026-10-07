@@ -204,7 +204,6 @@ export async function sendTestNotification() {
 
   // Fallback: page-scoped Notification (works whenever bennish-style tests do).
   try {
-    // eslint-disable-next-line no-new
     new Notification(title, options);
     return { ok: true, via: 'page' };
   } catch (err) {

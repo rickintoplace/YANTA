@@ -79,8 +79,8 @@ const INCLUDED_AI_POLICY = {
   free: {
     includedAi: true,
 
-    model: "deepseek/deepseek-v4-flash-0731",
-    modelLabel: "YANTA Cloud Fast (deepseek-v4-flash-0731)",
+    model: INCLUDED_AI_DEFAULT_MODEL,
+    modelLabel: "YANTA Cloud (DeepSeek V4.1 Flash)",
 
     aiRequestsDay: 25,
     aiSpendMicrosDay: 180_000,
@@ -94,11 +94,13 @@ const INCLUDED_AI_POLICY = {
     // which is why the client-supplied flag needs no defending.
     aiPulseRequestsDay: 6,
 
-    maxPromptChars: 70_000,
-    maxToolsChars: 45_000,
+    // Real-cost metering keeps the monthly dollar the actual limit, so the
+    // per-request ceilings can fit real work (a whole note, a slide deck).
+    maxPromptChars: 120_000,
+    maxToolsChars: 60_000,
     maxTools: 80,
-    maxMessages: 40,
-    maxTokens: 1024,
+    maxMessages: 80,
+    maxTokens: 4096,
 
     userBurstPerMinute: 4,
     ipBurstPerMinute: 20
@@ -107,8 +109,8 @@ const INCLUDED_AI_POLICY = {
   premium: {
     includedAi: true,
 
-    model: "deepseek/deepseek-v4-flash-0731",
-    modelLabel: "YANTA Cloud Fast (deepseek-v4-flash-0731)",
+    model: INCLUDED_AI_DEFAULT_MODEL,
+    modelLabel: "YANTA Cloud (DeepSeek V4.1 Flash)",
 
     aiRequestsDay: 500,
     aiSpendMicrosDay: 3_000_000,
@@ -116,11 +118,11 @@ const INCLUDED_AI_POLICY = {
 
     aiPulseRequestsDay: 150,
 
-    maxPromptChars: 220_000,
+    maxPromptChars: 400_000,
     maxToolsChars: 120_000,
     maxTools: 120,
-    maxMessages: 100,
-    maxTokens: 4096,
+    maxMessages: 200,
+    maxTokens: 8192,
 
     userBurstPerMinute: 24,
     ipBurstPerMinute: 120
@@ -243,6 +245,12 @@ function sanitizeIncludedAiMessages(messages, policy) {
       out.tool_calls = m.tool_calls.slice(0, 16);
     }
 
+    // Thinking-mode tool loops (DeepSeek V4.x, Gemini 3) reject the next
+    // round unless the reasoning of the previous one comes back unchanged.
+    if (role === "assistant" && Array.isArray(m?.reasoning_details) && m.reasoning_details.length) {
+      out.reasoning_details = m.reasoning_details.slice(0, 64);
+    }
+
     return out;
   });
 }
@@ -271,23 +279,119 @@ function sanitizeIncludedAiTools(tools, policy) {
   return selected;
 }
 
+// Overridable for local end-to-end tests against a fake upstream only.
+function openRouterChatUrl(env) {
+  const base = String(env.OPENROUTER_BASE_URL || "https://openrouter.ai/api/v1").replace(/\/+$/, "");
+  return `${base}/chat/completions`;
+}
 function openRouterZdrProviderPreferences() {
   return {
     zdr: true
   };
 }
-function estimatePreflightAiCostMicros(messages = [], maxTokens = 768) {
-  const promptChars = jsonSize(messages);
-  const promptTokensApprox = Math.ceil(promptChars / 4);
-  const outputTokensApprox = Math.max(1, Number(maxTokens || 768));
+/*
+  Zero data retention, no training on prompts, only hosts that support
+  every parameter we send (tools, reasoning), and never above our price
+  ceiling. OpenRouter's Auto Exacto (on by default for tool requests)
+  then orders the remaining hosts by tool-call reliability.
+*/
+function includedAiProviderPreferences(models = []) {
+  const ceiling = includedAiPriceCeiling(models);
+  return {
+    zdr: true,
+    data_collection: "deny",
+    require_parameters: true,
+    ...(ceiling.prompt && ceiling.completion
+      ? { max_price: { prompt: ceiling.prompt, completion: ceiling.completion } }
+      : {})
+  };
+}
+const INCLUDED_AI_REASONING_EFFORTS = /* @__PURE__ */ new Set(["minimal", "low", "medium", "high"]);
+/*
+  Thinking is off unless the client asks for a bounded effort. Unmanaged
+  reasoning used to eat the whole output budget before a tool call, and
+  thinking-mode tool loops need the reasoning echoed back each round.
+*/
+function sanitizeIncludedAiReasoning(reasoning) {
+  const effort = String(reasoning?.effort || "").toLowerCase();
+  if (INCLUDED_AI_REASONING_EFFORTS.has(effort)) {
+    return { effort };
+  }
+  return { enabled: false };
+}
+/*
+  Credits are real money now: micro-USD = tokens x USD-per-million. The
+  old flat meter charged 5 micro-USD per token whatever the model — 10 to
+  80 times the actual price of the included models — so a free account's
+  monthly dollar lasted a handful of conversations.
 
+  The preflight is an upper bound (generous token estimate, full output
+  budget at the price ceiling); the real cost from OpenRouter replaces it
+  once the response is done.
+*/
+function includedAiPriceCeiling(models = []) {
+  let prompt = 0;
+  let completion = 0;
+  for (const id of models) {
+    const price = INCLUDED_AI_MODELS[id];
+    if (!price) continue;
+    prompt = Math.max(prompt, price.prompt);
+    completion = Math.max(completion, price.completion);
+  }
+  return { prompt, completion };
+}
+function estimatePreflightAiCostMicros(messages = [], maxTokens = 1024, tools = null, models = []) {
+  const price = includedAiPriceCeiling(models.length ? models : [INCLUDED_AI_DEFAULT_MODEL]);
+  const promptTokensApprox = Math.ceil((jsonSize(messages) + jsonSize(tools || [])) / 3);
+  const outputTokens = Math.max(1, Number(maxTokens || 1024));
   return Math.max(
-    1000,
-    Math.ceil((promptTokensApprox + outputTokensApprox) * 5)
+    100,
+    Math.ceil(promptTokensApprox * price.prompt + outputTokens * price.completion)
   );
 }
+function actualAiCostMicros(usage, models = []) {
+  const cost = Number(usage?.cost);
+  if (Number.isFinite(cost) && cost > 0) {
+    return Math.max(1, Math.ceil(cost * 1e6));
+  }
+  // No cost reported: price the reported tokens at the ceiling.
+  const price = includedAiPriceCeiling(models);
+  const prompt = Number(usage?.prompt_tokens || 0);
+  const completion = Number(usage?.completion_tokens || 0);
+  if (!prompt && !completion) return 0;
+  return Math.max(1, Math.ceil(prompt * price.prompt + completion * price.completion));
+}
 __name(estimatePreflightAiCostMicros, "estimatePreflightAiCostMicros");
-var AI_MODEL_ALLOWLIST = /* @__PURE__ */ new Set([
+/*
+  Included AI models (checked 2026-10-07). Prices are the most we are
+  willing to pay per million tokens, in USD; they double as OpenRouter's
+  provider.max_price, so Auto Exacto can prefer the reliable tool-calling
+  hosts without landing on a 10x-priced one. Keep in sync with
+  src/ai/ai-models.js.
+*/
+var INCLUDED_AI_MODELS = {
+  // Default: fast, strong at tool loops (τ²-Airline 76%), open weights.
+  "deepseek/deepseek-v4.1-flash": { prompt: 0.3, completion: 1.2 },
+  // Best τ² score of the cheap tier, MIT, vision — but slower (~60 tok/s).
+  "xiaomi/mimo-v2.6-flash": { prompt: 0.15, completion: 0.3 },
+  // Cheapest of the strong open models.
+  "z-ai/glm-5.3-flash": { prompt: 0.15, completion: 0.5 },
+  // Strongest open model (Artificial Analysis 46); costs ~3x per run.
+  "xiaomi/mimo-v2.6-pro": { prompt: 0.45, completion: 0.9 },
+  // PDFs and images natively; replaces gemini-2.5-flash-lite (retired 2026-10-16).
+  "google/gemini-3.1-flash-lite": { prompt: 0.25, completion: 1.5 }
+};
+var AI_MODEL_ALLOWLIST = /* @__PURE__ */ new Set(Object.keys(INCLUDED_AI_MODELS));
+var INCLUDED_AI_DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash";
+// Tried in order when the chosen model's providers fail (down, rate limit,
+// context overflow). Open-weight only, each with ZDR hosts.
+var INCLUDED_AI_FALLBACKS = [
+  "deepseek/deepseek-v4.1-flash",
+  "z-ai/glm-5.3-flash",
+  "xiaomi/mimo-v2.6-flash"
+];
+// Models known to have shut down; requests for them use the default.
+var RETIRED_AI_MODELS = /* @__PURE__ */ new Set([
   "google/gemini-2.5-flash-lite",
   "deepseek/deepseek-v4-flash-0731",
   "tencent/hy3-preview",
@@ -4441,24 +4545,46 @@ async function handlePaddleWebhook(env, req, headers) {
   return json({ ok: true, eventType, processed }, 200, headers);
 }
 
-function estimateAiCostMicros(openRouterJson) {
-  const usage = openRouterJson?.usage || {};
+/*
+  Pass an OpenRouter SSE stream through unchanged while reading the usage
+  that arrives in its last chunk; onDone runs when the stream ends.
+*/
+function meterAiStream(body, onDone) {
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let usage = null;
+  let model = "";
 
-  const total = Number(
-    usage.total_tokens ||
-    Number(usage.prompt_tokens || 0) + Number(usage.completion_tokens || 0) ||
-    0
-  );
+  const scan = (line) => {
+    if (!line.startsWith("data:")) return;
+    const data = line.slice(5).trim();
+    if (!data || data === "[DONE]" || !data.includes('"usage"') && !data.includes('"model"')) return;
+    try {
+      const chunk = JSON.parse(data);
+      if (chunk?.usage) usage = chunk.usage;
+      if (chunk?.model) model = String(chunk.model);
+    } catch {}
+  };
 
-  if (!Number.isFinite(total) || total <= 0) {
-    return 1_000;
-  }
-
-  // Conservative internal credit accounting.
-  // This is not exact OpenRouter billing; it is an abuse-control credit meter.
-  return Math.max(1_000, Math.ceil(total * 5));
+  return body.pipeThrough(new TransformStream({
+    transform(chunk, controller) {
+      controller.enqueue(chunk);
+      buffer += decoder.decode(chunk, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+      for (const line of lines) scan(line);
+    },
+    async flush() {
+      if (buffer) scan(buffer);
+      try {
+        await onDone({ usage, model });
+      } catch (err) {
+        console.error("[ai meter]", safeErrorForLog(err));
+      }
+    }
+  }));
 }
-__name(estimateAiCostMicros, "estimateAiCostMicros");
+__name(meterAiStream, "meterAiStream");
 async function handleAiCompletions(env, req, headers) {
   const user = await requireUser(env, req);
   const usage = await ensureUsageRow(env, user.userId);
@@ -4483,7 +4609,9 @@ async function handleAiCompletions(env, req, headers) {
 
   const body = await bodyJson(req);
 
-  const requestedModel = String(body.model || policy.model || "").trim();
+  let requestedModel = String(body.model || policy.model || "").trim();
+  // Clients that still have a shut-down model saved get the default.
+  if (RETIRED_AI_MODELS.has(requestedModel)) requestedModel = INCLUDED_AI_DEFAULT_MODEL;
   const selectedModel = AI_MODEL_ALLOWLIST.has(requestedModel)
     ? requestedModel
     : "";
@@ -4594,10 +4722,13 @@ async function handleAiCompletions(env, req, headers) {
     }, err?.status || 400, headers);
   }
 
+  // The client picks among allowlisted models; the fallback chain and the
+  // price ceiling are the server's.
+  const modelChain = [selectedModel, ...INCLUDED_AI_FALLBACKS.filter((m) => m !== selectedModel)];
+
   const forwardBody = {
-    // Authoritative server-side model.
-    // Client model is intentionally ignored.
     model: selectedModel,
+    models: modelChain,
 
     messages,
 
@@ -4614,13 +4745,16 @@ async function handleAiCompletions(env, req, headers) {
       Math.max(1, Number(body.max_tokens || policy.maxTokens))
     ),
 
-    // OpenRouter Zero Data Retention routing.
-    provider: openRouterZdrProviderPreferences()
+    reasoning: sanitizeIncludedAiReasoning(body.reasoning),
+
+    provider: includedAiProviderPreferences(modelChain)
   };
 
   const preflightCostMicros = estimatePreflightAiCostMicros(
     messages,
-    forwardBody.max_tokens || policy.maxTokens
+    forwardBody.max_tokens || policy.maxTokens,
+    tools,
+    modelChain
   );
 
   if (
@@ -4646,7 +4780,7 @@ async function handleAiCompletions(env, req, headers) {
     let streamRes;
 
     try {
-      streamRes = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+      streamRes = await fetch(openRouterChatUrl(env), {
         method: "POST",
         signal: streamController.signal,
         headers: {
@@ -4671,6 +4805,7 @@ async function handleAiCompletions(env, req, headers) {
       return json(errJson, streamRes.status, headers);
     }
 
+    // Reserve the upper bound now; settle to the real cost when the stream ends.
     await env.DB.prepare(
       `UPDATE usage_current
        SET ai_requests_day = ai_requests_day + 1,
@@ -4683,22 +4818,38 @@ async function handleAiCompletions(env, req, headers) {
       user.userId
     ).run();
 
-    await env.DB.prepare(
-      `INSERT INTO ai_usage_events
-       (id,user_id,model,prompt_tokens,completion_tokens,total_tokens,cost_micros,created_at)
-       VALUES (?,?,?,?,?,?,?,?)`
-    ).bind(
-      id("aiu"),
-      user.userId,
-      selectedModel,
-      0,
-      0,
-      0,
-      preflightCostMicros,
-      now()
-    ).run();
+    const metered = meterAiStream(streamRes.body, async ({ usage: streamUsage, model: usedModel }) => {
+      const actual = actualAiCostMicros(streamUsage, modelChain);
+      // Without a usage chunk (client aborted early) the reservation stands.
+      const charged = actual > 0 ? actual : preflightCostMicros;
+      const delta = charged - preflightCostMicros;
 
-    return new Response(streamRes.body, {
+      if (delta) {
+        await env.DB.prepare(
+          `UPDATE usage_current
+           SET ai_spend_micros_day = MAX(0, ai_spend_micros_day + ?),
+               ai_spend_micros_month = MAX(0, ai_spend_micros_month + ?)
+           WHERE user_id = ?`
+        ).bind(delta, delta, user.userId).run();
+      }
+
+      await env.DB.prepare(
+        `INSERT INTO ai_usage_events
+         (id,user_id,model,prompt_tokens,completion_tokens,total_tokens,cost_micros,created_at)
+         VALUES (?,?,?,?,?,?,?,?)`
+      ).bind(
+        id("aiu"),
+        user.userId,
+        usedModel || selectedModel,
+        Number(streamUsage?.prompt_tokens || 0),
+        Number(streamUsage?.completion_tokens || 0),
+        Number(streamUsage?.total_tokens || 0),
+        charged,
+        now()
+      ).run();
+    });
+
+    return new Response(metered, {
       status: 200,
       headers: {
         ...headers,
@@ -4716,7 +4867,7 @@ async function handleAiCompletions(env, req, headers) {
   let jsonResponse;
 
   try {
-    res = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+    res = await fetch(openRouterChatUrl(env), {
       method: "POST",
       signal: controller.signal,
       headers: {
@@ -4742,9 +4893,8 @@ async function handleAiCompletions(env, req, headers) {
     return json(jsonResponse, res.status, headers);
   }
 
-  const costMicros = estimateAiCostMicros(jsonResponse);
-
   const u = jsonResponse.usage || {};
+  const costMicros = actualAiCostMicros(u, modelChain) || preflightCostMicros;
 
   await env.DB.prepare(
     `UPDATE usage_current
@@ -4765,7 +4915,7 @@ async function handleAiCompletions(env, req, headers) {
   ).bind(
     id("aiu"),
     user.userId,
-    selectedModel,
+    jsonResponse.model || selectedModel,
     Number(u.prompt_tokens || 0),
     Number(u.completion_tokens || 0),
     Number(u.total_tokens || 0),
@@ -4783,8 +4933,8 @@ async function handleAiCompletions(env, req, headers) {
         completionsStoredByYanta: false,
         openRouterZdrRequested: true
       },
-      modelLabel: selectedModel,
-      model: selectedModel,
+      modelLabel: jsonResponse.model || selectedModel,
+      model: jsonResponse.model || selectedModel,
       limits: {
         requestsDay: policy.aiRequestsDay,
         maxPromptChars: policy.maxPromptChars,

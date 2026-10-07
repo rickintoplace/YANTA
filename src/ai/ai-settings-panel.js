@@ -397,6 +397,22 @@ function includedAiModelOptionsHtml(selectedModel) {
   `).join('');
 }
 
+function thinkingSelectHtml(settings) {
+  const value = String(settings.reasoningEffort || 'off');
+  const option = (v, label) => `<option value="${v}" ${value === v ? 'selected' : ''}>${label}</option>`;
+
+  return `
+    <label class="wide">
+      Thinking
+      <select class="text-input" data-ai-reasoning>
+        ${option('off', 'Off · fastest, most of the budget goes to the answer')}
+        ${option('low', 'Low · a short plan before acting')}
+        ${option('medium', 'Medium · for harder tasks, slower and costlier')}
+      </select>
+    </label>
+  `;
+}
+
 function aiAccessSettingsHtml(settings, apiKey) {
   const includedMode = isIncludedAiMode(settings);
 
@@ -417,6 +433,8 @@ function aiAccessSettingsHtml(settings, apiKey) {
             ${includedAiModelOptionsHtml(settings.includedModel || settings.model)}
           </select>
         </label>
+
+        ${thinkingSelectHtml(settings)}
 
         <label class="wide" style="display:none;">
           Privacy
@@ -467,6 +485,8 @@ function aiAccessSettingsHtml(settings, apiKey) {
         Model
         <input class="text-input" data-ai-model value="${escapeHtml(settings.model)}" />
       </label>
+
+      ${thinkingSelectHtml(settings)}
 
       <label style="display:none;">
         Privacy
@@ -1002,6 +1022,7 @@ export function renderAiSettingsPanel(panel) {
       billingMode,
       maxContextChars,
       maxToolRounds,
+      reasoningEffort: panel.querySelector('[data-ai-reasoning]')?.value || currentSettings.reasoningEffort || 'off',
     });
 
     if (!includedModeNext) {

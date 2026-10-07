@@ -59,10 +59,12 @@ import {
   sendSpaceLinkMessage,
 } from '../spaces/space-matrix.js';
 
-import {
-  resolveMatrixClient,
-  normalizeUserId,
-} from '../chat/chat-actions.js';
+// Loaded on use: chat is optional and heavy (see chat/chat-enabled.js).
+const chatActions = () => import('../chat/chat-actions.js');
+
+async function resolveMatrixClient() {
+  return (await chatActions()).resolveMatrixClient();
+}
 
 import {
   createOrGetPublicShare,
@@ -2096,7 +2098,7 @@ async function renderPeopleTab() {
     const input = body.querySelector('[data-people-input]');
     const role = body.querySelector('[data-people-role]')?.value === 'write' ? 'write' : 'read';
 
-    const matrixUserId = normalizeUserId(input?.value || '', {
+    const matrixUserId = (await chatActions()).normalizeUserId(input?.value || '', {
       defaultServer: await ownMatrixServer(),
     });
 

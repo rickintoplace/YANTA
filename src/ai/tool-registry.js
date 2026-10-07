@@ -27,12 +27,14 @@ import {
   getWeatherAction,
 } from './app-actions.js';
 
-import {
-  chatListRoomsAction,
-  chatReadRecentMessagesAction,
-  chatSearchMessagesAction,
-  chatSendMessageAction,
-} from '../chat/chat-ai-actions.js';
+// Chat actions load on first call (chat is optional and heavy).
+const chatAiAction = (name) => async (...args) =>
+  (await import('../chat/chat-ai-actions.js'))[name](...args);
+
+const chatListRoomsAction = chatAiAction('chatListRoomsAction');
+const chatReadRecentMessagesAction = chatAiAction('chatReadRecentMessagesAction');
+const chatSearchMessagesAction = chatAiAction('chatSearchMessagesAction');
+const chatSendMessageAction = chatAiAction('chatSendMessageAction');
 
 import {
   rssSearchItemsAction,

@@ -73,6 +73,13 @@ import {
 } from './untrusted-content.js';
 
 import {
+  serializeToolResult,
+  parseToolArguments,
+  assistantToolTurn,
+  ROUND_BUDGET_SPENT_INSTRUCTION,
+} from './agent-runtime.js';
+
+import {
   openNote,
 } from '../notes.js';
 
@@ -162,6 +169,14 @@ let streamingReasoning = '';
 // What this conversation has read (see ../ai/untrusted-content.js).
 let chatTaint = createTaintTracker();
 let externalSourceWriteAllowAll = false;
+
+/*
+  Tool groups loaded with tools_load stay loaded for the conversation.
+  Rebuilt every turn, a calendar conversation paid an extra tools_load
+  round (and its credits) on every single message.
+*/
+let conversationLoadout = null;
+let conversationLoadoutKey = '';
 
 function toolCallArgsForUi(call) {
   try {
@@ -528,6 +543,7 @@ function ensureRoot() {
     streamingReasoning = '';
     chatTaint = createTaintTracker();
     externalSourceWriteAllowAll = false;
+    conversationLoadout = null;
 
     clearTransientConversation();
 
@@ -2844,10 +2860,20 @@ function requestExternalSourceToolApproval({
 }
 
 async function runAssistant(userText) {
-  const loadout = createToolLoadout({
-    permissions: getAiSettings().permissions,
-    enabled: getAiSettings().progressiveTools !== false,
-  });
+  const loadoutKey = JSON.stringify([
+    getAiSettings().permissions || null,
+    getAiSettings().progressiveTools !== false,
+  ]);
+
+  if (!conversationLoadout || conversationLoadoutKey !== loadoutKey) {
+    conversationLoadout = createToolLoadout({
+      permissions: getAiSettings().permissions,
+      enabled: getAiSettings().progressiveTools !== false,
+    });
+    conversationLoadoutKey = loadoutKey;
+  }
+
+  const loadout = conversationLoadout;
 
   const tools = loadout.specs();
 
@@ -2862,20 +2888,34 @@ async function runAssistant(userText) {
     },
   }));
 
+  /*
+    Stable first, volatile last: system prompt, then the append-only
+    history, then this turn's context (time, file tree, current note) right
+    before the latest user message. With the context ahead of the history,
+    prompt caching could never cover more than the system prompt.
+  */
+  const history = conversation
+    .filter((m) => m.role === 'user' || m.role === 'assistant')
+    .map((m) => ({
+      role: m.role,
+      content: m.content,
+    }));
+
+  let lastUserIndex = -1;
+  history.forEach((m, i) => { if (m.role === 'user') lastUserIndex = i; });
+
+  const contextMessage = await buildContextMessage({
+    attachments: activeContextItems,
+  });
+
   const messages = [
     await buildSystemMessage({
       userText,
       toolIndex: loadout.indexMarkdown(),
     }),
-    await buildContextMessage({
-      attachments: activeContextItems,
-    }),
-    ...conversation
-      .filter((m) => m.role === 'user' || m.role === 'assistant')
-      .map((m) => ({
-        role: m.role,
-        content: m.content,
-      })),
+    ...(lastUserIndex >= 0
+      ? [...history.slice(0, lastUserIndex), contextMessage, ...history.slice(lastUserIndex)]
+      : [contextMessage, ...history]),
   ];
 
   abortController = new AbortController();
@@ -2981,11 +3021,7 @@ async function runAssistant(userText) {
 
     streamingReasoning = '';
 
-    messages.push({
-      role: 'assistant',
-      content: assistantMessage.content || null,
-      tool_calls: toolCalls,
-    });
+    messages.push(assistantToolTurn(assistantMessage));
 
     rememberUserUrls(messages);
 
@@ -3005,10 +3041,28 @@ async function runAssistant(userText) {
             role: 'tool',
             tool_call_id: call.id,
             name: toolName,
-            content: JSON.stringify(result),
+            content: serializeToolResult(result),
           });
 
           addMessage('tool', JSON.stringify({ args, result }, null, 2), {
+            toolName,
+          });
+
+          continue;
+        }
+
+        // Cut-off or broken arguments: tell the model, run nothing.
+        const parsedArgs = parseToolArguments(call, { finishReason: assistantMessage.finish_reason });
+
+        if (!parsedArgs.ok) {
+          messages.push({
+            role: 'tool',
+            tool_call_id: call.id,
+            name: toolName,
+            content: serializeToolResult(parsedArgs.error),
+          });
+
+          addMessage('tool', JSON.stringify(parsedArgs.error, null, 2), {
             toolName,
           });
 
@@ -3035,7 +3089,7 @@ async function runAssistant(userText) {
               role: 'tool',
               tool_call_id: call.id,
               name: toolName,
-              content: JSON.stringify(blocked),
+              content: serializeToolResult(blocked),
             });
 
             addMessage('tool', JSON.stringify(blocked, null, 2), {
@@ -3054,7 +3108,7 @@ async function runAssistant(userText) {
           role: 'tool',
           tool_call_id: call.id,
           name: executed.name,
-          content: JSON.stringify(executed.result),
+          content: serializeToolResult(executed.result),
         });
 
         addMessage('tool', JSON.stringify({
@@ -3074,7 +3128,7 @@ async function runAssistant(userText) {
           role: 'tool',
           tool_call_id: call.id,
           name: toolName,
-          content: JSON.stringify(result),
+          content: serializeToolResult(result),
         });
 
         addMessage('tool', JSON.stringify(result, null, 2), {
@@ -3084,8 +3138,29 @@ async function runAssistant(userText) {
     }
   }
 
+  /*
+    Round budget spent: one last call without tools so the user gets a
+    real summary of what happened, not a canned line.
+  */
   streamingReasoning = '';
-  addMessage('assistant', `I stopped after ${maxRounds} tool round${maxRounds === 1 ? '' : 's'}. I should summarize or ask you to continue instead of searching more.`);
+  setAssistantBusy(true, 'Summarizing…');
+
+  try {
+    const final = await openRouterChatCompletionStream({
+      messages: [...messages, { role: 'user', content: ROUND_BUDGET_SPENT_INSTRUCTION }],
+      tools: [],
+      signal: abortController.signal,
+    });
+
+    const text = String(final.content || '').trim();
+
+    addMessage('assistant', text || `I stopped after ${maxRounds} tool rounds without finishing. Ask me to continue.`, {
+      model: runtimeSettings.includedModel || runtimeSettings.model || getAiSettings().model,
+    });
+  } catch (err) {
+    if (err?.name === 'AbortError') throw err;
+    addMessage('assistant', `I stopped after ${maxRounds} tool rounds without finishing. Ask me to continue.`);
+  }
 }
 
 async function maybeHandleAssistantSlashCommand(text) {

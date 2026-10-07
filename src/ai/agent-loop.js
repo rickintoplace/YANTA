@@ -18,19 +18,18 @@ import {
   executeToolCall,
 } from './tool-registry.js';
 
+import {
+  serializeToolResult,
+  parseToolArguments,
+  assistantToolTurn,
+  ROUND_BUDGET_SPENT_INSTRUCTION,
+} from './agent-runtime.js';
+
 export const AGENT_STOP = Object.freeze({
   COMPLETE: 'complete',
   MAX_ROUNDS: 'max-rounds',
   ABORTED: 'aborted',
 });
-
-function parseToolArgs(call) {
-  try {
-    return JSON.parse(call?.function?.arguments || '{}');
-  } catch {
-    return {};
-  }
-}
 
 function toolErrorPayload(err) {
   return {
@@ -69,6 +68,11 @@ export async function runAgentLoop({
   beforeToolCall = null,
   onToolResult = null,
   onRound = null,
+  // When the rounds run out: one more request with only these tools (e.g.
+  // Pulse's pulse_emit) or none, so the run ends with a decision instead
+  // of being dropped mid-research.
+  finalTools = [],
+  finalInstruction = ROUND_BUDGET_SPENT_INSTRUCTION,
 } = {}) {
   const thread = [...messages];
   const executed = [];
@@ -99,15 +103,29 @@ export async function runAgentLoop({
       return { text, rounds: round + 1, stop: AGENT_STOP.COMPLETE, toolCalls: executed };
     }
 
-    thread.push({
-      role: 'assistant',
-      content: message.content || null,
-      tool_calls: toolCalls,
-    });
+    thread.push(assistantToolTurn(message));
 
     for (const call of toolCalls) {
       const name = call?.function?.name || '';
-      const args = parseToolArgs(call);
+      const parsed = parseToolArguments(call, { finishReason: message.finish_reason });
+
+      /*
+        Unparseable arguments used to become {} and run anyway — a cut-off
+        create_note became an empty "Untitled" note. Now nothing runs and
+        the model is told why.
+      */
+      if (!parsed.ok) {
+        await onToolResult?.({ name, args: {}, result: parsed.error });
+        thread.push({
+          role: 'tool',
+          tool_call_id: call.id,
+          name,
+          content: serializeToolResult(parsed.error),
+        });
+        continue;
+      }
+
+      const args = parsed.args;
 
       let payload;
 
@@ -137,10 +155,44 @@ export async function runAgentLoop({
         role: 'tool',
         tool_call_id: call.id,
         name,
-        content: JSON.stringify(payload ?? null),
+        content: serializeToolResult(payload),
       });
     }
   }
 
-  return { text, rounds: round, stop: AGENT_STOP.MAX_ROUNDS, toolCalls: executed };
+  if (signal?.aborted) {
+    return { text, rounds: round, stop: AGENT_STOP.ABORTED, toolCalls: executed };
+  }
+
+  const finalToolList = typeof finalTools === 'function' ? finalTools() : finalTools;
+
+  try {
+    const final = await openRouterChatCompletion({
+      messages: [...thread, { role: 'user', content: finalInstruction }],
+      tools: finalToolList || [],
+      signal,
+      source: budgetSource,
+    });
+
+    if (String(final.content || '').trim()) text = String(final.content).trim();
+
+    for (const call of final.tool_calls || []) {
+      const name = call?.function?.name || '';
+      const parsed = parseToolArguments(call, { finishReason: final.finish_reason });
+      if (!parsed.ok) continue;
+
+      const gate = await beforeToolCall?.({ name, args: parsed.args, call });
+
+      // Only short-circuited (synthetic) results are taken here: the final
+      // round exists to report, not to start new work.
+      if (gate && 'result' in gate) {
+        executed.push({ name, args: parsed.args, result: gate.result, synthetic: true });
+        await onToolResult?.({ name, args: parsed.args, result: gate.result });
+      }
+    }
+  } catch (err) {
+    console.warn('[YANTA AI] final round failed', err);
+  }
+
+  return { text, rounds: round + 1, stop: AGENT_STOP.MAX_ROUNDS, toolCalls: executed };
 }

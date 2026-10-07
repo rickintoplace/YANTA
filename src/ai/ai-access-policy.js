@@ -42,7 +42,9 @@ export const INCLUDED_AI_CLIENT_POLICY = Object.freeze({
   // Client-side UX/safety clamp.
   // Server enforces authoritative limits.
   maxContextChars: 50000,
-  maxToolRounds: 5,
+  // Credits are metered at real cost now, so a task may take a few more
+  // rounds; the server's daily/monthly spend caps stay the real limit.
+  maxToolRounds: 8,
   maxOutputTokens: 10768,
 });
 

@@ -63,6 +63,7 @@ import {
 
 import {
   toolsForProfile,
+  pulseFinalTools,
   handlePulseTool,
   isPulseTool,
 } from './pulse-tools.js';
@@ -345,6 +346,8 @@ export async function runRoutine(routine, {
       ],
       tools: toolsForProfile(profile, { permissions }),
       maxRounds,
+      finalTools: pulseFinalTools(),
+      finalInstruction: 'The tool budget for this run is used up. Decide now: call pulse_emit with what you found, or reply in one line that nothing is worth reporting.',
       signal,
       permissions,
       source: `pulse:${routine.name}`,

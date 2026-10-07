@@ -463,7 +463,7 @@ export async function buildContextMessage({
     attached.text || 'User-attached context: [none]',
     '',
     'YANTA context:',
-    JSON.stringify(payload, null, 2),
+    JSON.stringify(payload), // compact: indentation only costs tokens
     '',
     currentNoteMarkdown
       ? `Current note markdown:\n${truncateMiddle(currentNoteMarkdown, max)}`

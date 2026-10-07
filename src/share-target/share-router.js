@@ -25,14 +25,10 @@ import { t } from '../i18n/index.js';
 import { openBoundOverlay } from '../overlay-history.js';
 
 import { isChatEnabled } from '../chat/chat-enabled.js';
-import { resolveMatrixClient } from '../chat/chat-actions.js';
 
-import {
-  roomDisplayName,
-  sendFileToRoom,
-  sendTextToRoom,
-  visibleRooms,
-} from '../chat/chat-send.js';
+// Chat modules load only when chat is on (see chat/chat-enabled.js); the
+// chats zone renders once the client is there, by which time this is set.
+let chatSend = null;
 
 const raf = () => new Promise((r) => requestAnimationFrame(r));
 
@@ -453,8 +449,8 @@ export function openShareRouter(payload) {
       renderSendBtn();
       try {
         for (const roomId of selected) {
-          if (shaped.text) await sendTextToRoom(client, roomId, shaped.text);
-          if (shaped.imageFile) await sendFileToRoom(client, roomId, shaped.imageFile);
+          if (shaped.text) await chatSend.sendTextToRoom(client, roomId, shaped.text);
+          if (shaped.imageFile) await chatSend.sendFileToRoom(client, roomId, shaped.imageFile);
         }
         toast(t('shareTarget.sentToChats', { count: selected.size }), 'success');
         close(true);
@@ -479,9 +475,9 @@ export function openShareRouter(payload) {
       const list = overlay.querySelector('[data-list]');
       if (!list) return;
 
-      const rooms = visibleRooms(client)
+      const rooms = chatSend.visibleRooms(client)
         .filter((room) =>
-          !query || roomDisplayName(client, room).toLowerCase().includes(query))
+          !query || chatSend.roomDisplayName(client, room).toLowerCase().includes(query))
         .sort((a, b) =>
           Number(b.getLastActiveTimestamp?.() || 0) -
           Number(a.getLastActiveTimestamp?.() || 0))
@@ -489,7 +485,7 @@ export function openShareRouter(payload) {
 
       list.innerHTML = rooms.length
         ? rooms.map((room) => {
-            const name = roomDisplayName(client, room);
+            const name = chatSend.roomDisplayName(client, room);
             const on = selected.has(room.roomId);
             return `
               <button class="yanta-share-row${on ? ' is-selected' : ''}" type="button" data-room-id="${escapeHtml(room.roomId)}" aria-pressed="${on}">
@@ -593,7 +589,14 @@ export function openShareRouter(payload) {
       entirely: no SDK load, no failing login, and the chats zone simply
       never appears. Every other share target is unaffected.
     */
-    if (isChatEnabled()) resolveMatrixClient()
+    if (isChatEnabled()) Promise.all([
+      import('../chat/chat-actions.js'),
+      import('../chat/chat-send.js'),
+    ])
+      .then(([actions, send]) => {
+        chatSend = send;
+        return actions.resolveMatrixClient();
+      })
       .then((c) => {
         if (!c || !overlay.isConnected) return;
         client = c;

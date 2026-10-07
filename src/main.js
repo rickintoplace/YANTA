@@ -261,42 +261,37 @@ import {
 
 import { installPredictiveBack } from './native/predictive-back.js';
 
-import {
-  scheduleChatAutoResume,
-  installChatAccountReadyListener,
-  installChatDeviceRevokedListener,
-  startChatSession,
-  repairChatEncryptionBackupNow,
-} from './chat/matrix-session.js';
+/*
+  Chat (≈0.5 MB incl. the Matrix glue) loads on first use only. It is
+  paused (chat/chat-enabled.js), and even when on it is not needed to paint
+  the first screen. Synchronous callers (closeChat on route changes, Escape)
+  use the module only if it is already loaded: an unloaded chat cannot be
+  open.
+*/
+let chatUiModule = null;
 
-import {
-  ensureChatAccountAndOpen,
-} from './chat/chat-onboarding-ui.js';
+async function loadChatUi() {
+  chatUiModule ||= await import('./chat/chat-ui.js');
+  return chatUiModule;
+}
 
-import {
-  setupChat,
-  openChat,
-  openChatFloating,
-  closeChat,
-  closeActiveChatRoom,
-  jumpToMessageFromSearch,
-} from './chat/chat-ui.js';
+const loadChatSession = () => import('./chat/matrix-session.js');
 
-import {
-  resolveMatrixClient,
-} from './chat/chat-actions.js';
+async function openChat(options) {
+  return (await loadChatUi()).openChat(options);
+}
 
-import {
-  openGlobalChatSearch,
-} from './chat/chat-search.js';
+async function openChatFloating(...args) {
+  return (await loadChatUi()).openChatFloating(...args);
+}
 
-import {
-  pickAndImportYantaChatExport,
-} from './chat/chat-export.js';
+function closeChat(options) {
+  return chatUiModule?.closeChat(options);
+}
 
-import {
-  setupChatNotifications,
-} from './chat/chat-notifications.js';
+function closeActiveChatRoom() {
+  return chatUiModule?.closeActiveChatRoom() ?? false;
+}
 
 let sharePreviewLocked = false;
 
@@ -2076,14 +2071,18 @@ async function init() {
   // before any chat/sync code touches the doc.
   await prepareVaultDoc();
 
-  installChatAccountReadyListener();
-  installChatDeviceRevokedListener();
+  if (isChatEnabled()) {
+    const chatSession = await loadChatSession();
+    chatSession.installChatAccountReadyListener();
+    chatSession.installChatDeviceRevokedListener();
+  }
 
   window.yantaOpenChat = async ({
     account = null,
     source = 'manual',
   } = {}) => {
     if (account) {
+      const { startChatSession } = await loadChatSession();
       const session = await startChatSession({
         account,
         firstDevice: source === 'chat-provision',
@@ -2097,6 +2096,8 @@ async function init() {
       return session;
     }
 
+    const { ensureChatAccountAndOpen } = await import('./chat/chat-onboarding-ui.js');
+
     return ensureChatAccountAndOpen({
       source,
     });
@@ -2109,6 +2110,7 @@ async function init() {
    *   await window.yantaChatRepairEncryptionNow()
    */
   window.yantaChatRepairEncryptionNow = async () => {
+    const { repairChatEncryptionBackupNow } = await loadChatSession();
     return repairChatEncryptionBackupNow({
       reason: 'manual-console',
     });
@@ -2151,7 +2153,7 @@ async function init() {
   */
   if (isChatEnabled()) {
     try {
-      scheduleChatAutoResume();
+      (await loadChatSession()).scheduleChatAutoResume();
     } catch (err) {
       console.warn('[YANTA Chat] auto-resume setup failed', err);
       toast('Could not set up Chat auto-resume.', 'error');
@@ -2457,6 +2459,12 @@ async function init() {
 
   async function openChatSearchFromPalette() {
     try {
+      const [{ resolveMatrixClient }, { openGlobalChatSearch }, { jumpToMessageFromSearch }] = await Promise.all([
+        import('./chat/chat-actions.js'),
+        import('./chat/chat-search.js'),
+        loadChatUi(),
+      ]);
+
       const client = await resolveMatrixClient();
 
       if (!client) {
@@ -2512,7 +2520,8 @@ async function init() {
     },
     openPublicSharesManager,
     openChatSearch: openChatSearchFromPalette,
-    importChatArchive: pickAndImportYantaChatExport,
+    importChatArchive: (...args) =>
+      import('./chat/chat-export.js').then((m) => m.pickAndImportYantaChatExport(...args)),
   });
   setupGraphInteractions();
   setupWikilinkHover();
@@ -2533,8 +2542,8 @@ async function init() {
     listeners, no Matrix SDK load. Everything below still runs.
   */
   if (isChatEnabled()) {
-    setupChat();
-    setupChatNotifications();
+    (await loadChatUi()).setupChat();
+    (await import('./chat/chat-notifications.js')).setupChatNotifications();
   }
   setupCalendarWebReminders();
   setupCalendarPushScheduler();

@@ -264,9 +264,17 @@ export function createToolLoadout({
       }
 
       const names = [...new Set([...CORE_TOOLS, ...loaded])].filter(permits);
+      const specByName = new Map(
+        openAiToolsForModel({ permissions, names }).map((spec) => [spec.function?.name, spec])
+      );
 
+      /*
+        Core first, then loaded tools in the order they were loaded. In
+        registry order a load inserted tools mid-list, which changed the
+        request prefix and threw away the provider's prompt cache.
+      */
       return [
-        ...openAiToolsForModel({ permissions, names }),
+        ...names.map((name) => specByName.get(name)).filter(Boolean),
         TOOLS_LOAD_DEFINITION,
       ];
     },

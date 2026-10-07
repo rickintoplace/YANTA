@@ -115,6 +115,11 @@ export function toolsForProfile(profile, { permissions = null } = {}) {
   return [...registryTools, ...PULSE_TOOL_DEFINITIONS];
 }
 
+/** For the run's final, tool-budget-spent round: report or stay silent. */
+export function pulseFinalTools() {
+  return PULSE_TOOL_DEFINITIONS.filter((def) => def.function.name === PULSE_TOOL_NAMES.EMIT);
+}
+
 export function isPulseTool(name) {
   return name === PULSE_TOOL_NAMES.EMIT || name === PULSE_TOOL_NAMES.PROPOSE;
 }

@@ -47,7 +47,20 @@ async function parseErrorResponse(res, fallback) {
 function openRouterProviderPreferences() {
   return {
     zdr: true,
+    data_collection: 'deny',
   };
+}
+
+/*
+  Thinking stays off unless the user picks an effort: unmanaged reasoning
+  ate the output budget before a tool call was written. When on, the tool
+  loops echo reasoning_details back each round (see agent-runtime.js).
+*/
+const REASONING_EFFORTS = new Set(['minimal', 'low', 'medium', 'high']);
+
+function reasoningParam(settings) {
+  const effort = String(settings.reasoningEffort || 'off').toLowerCase();
+  return REASONING_EFFORTS.has(effort) ? { effort } : { enabled: false };
 }
 
 function buildRequestBody({ messages, tools = [], stream = false, source = '' } = {}) {
@@ -60,7 +73,8 @@ function buildRequestBody({ messages, tools = [], stream = false, source = '' } 
       temperature: Number(settings.temperature ?? 0.2),
       tools: tools.length ? tools : undefined,
       tool_choice: tools.length ? 'auto' : undefined,
-      max_tokens: Number(settings.maxOutputTokens || 768),
+      max_tokens: Number(settings.maxOutputTokens || 4096),
+      reasoning: reasoningParam(settings),
       provider: openRouterProviderPreferences(),
       stream,
 
@@ -76,6 +90,7 @@ function buildRequestBody({ messages, tools = [], stream = false, source = '' } 
     temperature: Number(settings.temperature ?? 0.2),
     tools: tools.length ? tools : undefined,
     tool_choice: tools.length ? 'auto' : undefined,
+    reasoning: reasoningParam(settings),
     provider: openRouterProviderPreferences(),
     stream,
   };
@@ -145,10 +160,35 @@ export async function openRouterChatCompletion({
   const message = json?.choices?.[0]?.message;
 
   if (!message) {
-    throw new Error('AI provider returned no assistant message.');
+    throw new Error(json?.error?.message || 'AI provider returned no assistant message.');
   }
 
-  return message;
+  return {
+    ...message,
+    finish_reason: json.choices[0].finish_reason || '',
+  };
+}
+
+/*
+  Streamed reasoning_details arrive in pieces, keyed by index. Rebuild each
+  entry as one object (text concatenated, last signature kept) so it can be
+  sent back unchanged in the next tool round.
+*/
+function mergeReasoningDetails(target, deltas = []) {
+  for (const delta of deltas) {
+    if (!delta || typeof delta !== 'object') continue;
+
+    const idx = Number.isInteger(delta.index) ? delta.index : target.length;
+    const entry = target[idx] || (target[idx] = {});
+
+    for (const [key, value] of Object.entries(delta)) {
+      if ((key === 'text' || key === 'summary' || key === 'data') && typeof value === 'string') {
+        entry[key] = (entry[key] || '') + value;
+      } else if (value != null) {
+        entry[key] = value;
+      }
+    }
+  }
 }
 
 function mergeToolCallDelta(target, delta = {}) {
@@ -318,15 +358,28 @@ export async function openRouterChatCompletionStream({
 
   const contentParts = [];
   const reasoningParts = [];
+  const reasoningDetails = [];
   const toolCalls = [];
+  let finishReason = '';
 
   await readSseStream(res, {
     signal,
     onEvent: ({ json }) => {
       if (!json) return;
 
+      // A provider failure after the stream started arrives as an event.
+      if (json.error) {
+        throw new Error(json.error.message || 'The AI provider failed mid-response.');
+      }
+
       const choice = json.choices?.[0];
       const delta = choice?.delta || {};
+
+      if (choice?.finish_reason) finishReason = choice.finish_reason;
+
+      if (Array.isArray(delta.reasoning_details)) {
+        mergeReasoningDetails(reasoningDetails, delta.reasoning_details);
+      }
 
       const content = typeof delta.content === 'string'
         ? delta.content
@@ -362,6 +415,8 @@ export async function openRouterChatCompletionStream({
     role: 'assistant',
     content: contentParts.join(''),
     reasoning: reasoningParts.join(''),
+    reasoning_details: reasoningDetails.filter(Boolean),
     tool_calls: toolCalls.filter((call) => call?.function?.name),
+    finish_reason: finishReason,
   };
 }

@@ -18,10 +18,16 @@
 // ============================================================
 
 import { store } from '../core.js';
-import {
-  resolveMatrixClient,
-  createDm,
-} from '../chat/chat-actions.js';
+// Loaded on use: chat is optional and heavy (see chat/chat-enabled.js).
+const chatActions = () => import('../chat/chat-actions.js');
+
+async function resolveMatrixClient() {
+  return (await chatActions()).resolveMatrixClient();
+}
+
+async function createDm(matrixUserId) {
+  return (await chatActions()).createDm(matrixUserId);
+}
 
 import {
   mountSpaceFromInvite,

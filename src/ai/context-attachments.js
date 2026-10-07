@@ -3,6 +3,7 @@
 // Notes, folders, calendar events, uploads, PDFs, DOCX, images.
 // ============================================================
 
+import { includedAiModelInfo } from './ai-models.js';
 import {
   uid,
   state,
@@ -732,16 +733,13 @@ export function aiContextTotals(items = []) {
 }
 
 export function modelSupportsImages(model = getEffectiveAiRuntimeSettings().model) {
+  // Included models declare it; BYOK ids fall back to a name heuristic.
+  const known = includedAiModelInfo(model);
+  if (known) return known.vision === true;
+
   const id = String(model || '').toLowerCase();
 
-  return (
-    id.includes('gpt-4o') ||
-    id.includes('vision') ||
-    id.includes('gemini') ||
-    id.includes('claude-3') ||
-    id.includes('qwen-vl') ||
-    id.includes('llava')
-  );
+  return /gpt-4o|gpt-4\.1|gpt-5|vision|gemini|claude|qwen[\d.]*-?vl|llava|llama-4|pixtral|mimo-v2\.6-flash|glm-5\.\d-flash|deepseek-v4\.1|-vl\b/.test(id);
 }
 
 async function imagePartForContextItem(item) {

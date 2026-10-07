@@ -54,12 +54,6 @@ import {
   YANTA_CLOUD_BASE_URL,
 } from '../cloud/cloud-api.js';
 
-export {
-  chatListRoomsAction,
-  chatReadRecentMessagesAction,
-  chatSearchMessagesAction,
-  chatSendMessageAction,
-} from '../chat/chat-ai-actions.js';
 
 function now() {
   return Date.now();

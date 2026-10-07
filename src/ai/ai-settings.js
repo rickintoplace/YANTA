@@ -72,8 +72,12 @@ export const DEFAULT_AI_SETTINGS = {
   billingMode: 'included', // byok | included
   includedModel: DEFAULT_INCLUDED_AI_MODEL,
   baseUrl: 'https://openrouter.ai/api/v1',
-  model: 'deepseek/deepseek-v4-flash-0731',
+  model: 'deepseek/deepseek-v4.1-flash',
   temperature: 0.2,
+
+  // off | low | medium — model "thinking" before answering. Off keeps
+  // replies fast and the output budget for the actual answer.
+  reasoningEffort: 'off',
   maxToolRounds: 6,
   maxContextChars: 30000,
   apiKeyStorage: 'session', // session | local | none

@@ -8,6 +8,7 @@
 // the title doesn't shuffle on every re-render.
 // ============================================================
 
+import { isChatEnabled } from './chat/chat-enabled.js';
 import { store } from './core.js';
 import { yantaPrompt } from './dialogs.js';
 
@@ -220,6 +221,9 @@ function pickTemplate() {
 }
 
 async function matrixDisplayName() {
+  // Chat is off: don't load the chat stack (and the Matrix SDK) for a name.
+  if (!isChatEnabled()) return '';
+
   try {
     const { resolveMatrixClient } = await import('./chat/chat-actions.js');
     const client = await resolveMatrixClient();

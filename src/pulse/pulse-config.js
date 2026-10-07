@@ -78,21 +78,8 @@ export const PULSE_PROPOSE_DENYLIST = Object.freeze([
   'pulse_manage',
 ]);
 
-/**
- * Tools whose results a run may read but never act on unreviewed.
- *
- * Not a denylist — a routine that cannot read feeds is useless. This is
- * what marks a run as having consumed untrusted input, which the run log
- * records so a later review can tell which conclusions to trust.
- */
-export const PULSE_UNTRUSTED_INPUT_TOOLS = Object.freeze([
-  'web_search',
-  'web_read',
-  'rss_search_items',
-  'rss_read_item',
-  'chat_read_recent_messages',
-  'chat_search_messages',
-]);
+// Which tools count as untrusted input, and what a run may still do after
+// reading them, lives in src/ai/untrusted-content.js (shared with the chat).
 
 /** Sensor-backed event triggers a routine can subscribe to. */
 export const PULSE_EVENTS = Object.freeze({

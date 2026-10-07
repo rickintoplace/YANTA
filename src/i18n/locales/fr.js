@@ -1345,6 +1345,11 @@ export default {
       running: 'En cours…',
       skip: 'Ignorer',
       executed: 'Fait.',
+      runs: 'Exécute : {tool}',
+      details: 'Afficher les détails',
+      confirmTitle: 'Exécuter cette action ?',
+      confirmMessage: 'Cette proposition de « {routine} » exécutera {tool} avec les détails ci-dessous. Elle a été rédigée par une exécution en arrière-plan : vérifiez-la d’abord.',
+      confirmAction: 'Exécuter',
     },
 
     time: {

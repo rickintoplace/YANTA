@@ -1366,6 +1366,11 @@ export default {
       running: 'Working…',
       skip: 'Skip',
       executed: 'Done.',
+      runs: 'Runs: {tool}',
+      details: 'Show details',
+      confirmTitle: 'Run this action?',
+      confirmMessage: 'This proposal from “{routine}” will run {tool} with the details below. A background run wrote it, so check it first.',
+      confirmAction: 'Run it',
     },
 
     time: {

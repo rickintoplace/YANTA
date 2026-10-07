@@ -31,6 +31,13 @@ import {
 } from '../ai/brain.js';
 
 import { runAgentLoop } from '../ai/agent-loop.js';
+import { getTool } from '../ai/tool-registry.js';
+
+import {
+  createTaintTracker,
+  noteToolResult,
+  untrustedContentGate,
+} from '../ai/untrusted-content.js';
 
 import {
   aiTimeRules,
@@ -39,6 +46,7 @@ import {
 
 import {
   PULSE_OUTPUTS,
+  PULSE_EVENTS,
   getPulseSettings,
   clampToolProfile,
 } from './pulse-config.js';
@@ -307,6 +315,19 @@ export async function runRoutine(routine, {
     proposals: [],
   };
 
+  /*
+    Nobody watches a run, so after it has read untrusted content (feeds,
+    the web, messages — new-article headlines arrive in the prompt itself)
+    it may still create things but not change, delete or send: those go
+    through pulse_propose, where the user sees them first.
+  */
+  const taint = createTaintTracker([routine.markdown]);
+
+  if (sensors.signals?.[PULSE_EVENTS.RSS_NEW] || sensors.signals?.[PULSE_EVENTS.CHAT_UNREAD]) {
+    taint.tainted = true;
+    taint.taintedBy.add('sensors');
+  }
+
   const runtime = getEffectiveAiRuntimeSettings();
 
   const maxRounds = Math.max(1, Math.min(
@@ -333,11 +354,27 @@ export async function runRoutine(routine, {
           return { result: handlePulseTool({ name, args, run }) };
         }
 
+        const blocked = untrustedContentGate(taint, {
+          name,
+          args,
+          risk: getTool(name)?.risk,
+        });
+
+        if (blocked) {
+          return {
+            allowed: false,
+            code: 'EAI_UNTRUSTED_CONTENT',
+            reason: `Not run: this call ${blocked}. Propose it with pulse_propose so the user can review it.`,
+          };
+        }
+
         await fileIntoPulseFolder({ name, args, call });
 
         return undefined;
       },
       onToolResult: async ({ name, result }) => {
+        noteToolResult(taint, name, result);
+
         if (!PULSE_NOTE_CREATING_TOOLS.includes(name)) return;
 
         for (const noteId of noteIdsFromToolResult(result)) {

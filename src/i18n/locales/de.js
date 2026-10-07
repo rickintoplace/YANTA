@@ -1345,6 +1345,11 @@ export default {
       running: 'Wird ausgeführt…',
       skip: 'Überspringen',
       executed: 'Erledigt.',
+      runs: 'Führt aus: {tool}',
+      details: 'Details anzeigen',
+      confirmTitle: 'Diese Aktion ausführen?',
+      confirmMessage: 'Dieser Vorschlag von „{routine}“ führt {tool} mit den Details unten aus. Ein Hintergrund-Lauf hat ihn erstellt – bitte vorher prüfen.',
+      confirmAction: 'Ausführen',
     },
 
     time: {

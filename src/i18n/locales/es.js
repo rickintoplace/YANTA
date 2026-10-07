@@ -1345,6 +1345,11 @@ export default {
       running: 'Trabajando…',
       skip: 'Omitir',
       executed: 'Hecho.',
+      runs: 'Ejecuta: {tool}',
+      details: 'Ver detalles',
+      confirmTitle: '¿Ejecutar esta acción?',
+      confirmMessage: 'Esta propuesta de «{routine}» ejecutará {tool} con los detalles de abajo. La creó una ejecución en segundo plano; revísala antes.',
+      confirmAction: 'Ejecutar',
     },
 
     time: {

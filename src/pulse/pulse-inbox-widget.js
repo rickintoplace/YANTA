@@ -22,10 +22,12 @@ import {
   registerDashboardWidget,
   setDashboardWidgetEmpty,
 } from '../dashboard-widgets.js';
-import { renderBlocksInline } from '../markdown.js';
+import { renderBlocksInlineWithContext } from '../markdown.js';
 import { t } from '../i18n/index.js';
 
-import { executeToolCall } from '../ai/tool-registry.js';
+import { executeToolCall, getTool } from '../ai/tool-registry.js';
+import { ADDITIVE_WRITE_TOOLS } from '../ai/untrusted-content.js';
+import { yantaConfirm } from '../dialogs.js';
 import { writeBrainNote } from '../ai/brain.js';
 
 import {
@@ -171,6 +173,28 @@ function injectCss() {
   color: var(--red, #ef4444);
   font-size: 11px;
 }
+
+.yanta-pulse-proposal-details {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+.yanta-pulse-proposal-details summary {
+  cursor: pointer;
+  font-family: var(--font-mono, ui-monospace, monospace);
+}
+
+.yanta-pulse-proposal-details pre {
+  margin: 4px 0 0;
+  padding: 6px 8px;
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  border-radius: 6px;
+  background: var(--bg);
+}
 `;
 
   document.head.append(style);
@@ -208,7 +232,43 @@ async function recordFeedback(item, verdict) {
   }).catch((err) => console.warn('[YANTA Pulse] feedback write failed', err));
 }
 
+/*
+  The button label is written by the model — by a run that may have read
+  a hostile feed item. So the card always shows what will actually run
+  (tool and arguments), and anything beyond adding something new asks
+  once more with those details in front of the user.
+*/
+function proposalArgsPreview(args = {}) {
+  let text = '';
+
+  try {
+    text = JSON.stringify(args, null, 2);
+  } catch {
+    text = String(args);
+  }
+
+  return text.length > 1200 ? `${text.slice(0, 1200)}\n…` : text;
+}
+
+function proposalNeedsConfirm(toolName) {
+  const risk = getTool(toolName)?.risk || 'write';
+  return risk !== 'read' && !ADDITIVE_WRITE_TOOLS.includes(toolName);
+}
+
+function renderProposalDetails(proposal) {
+  const details = el('details', { class: 'yanta-pulse-proposal-details' });
+  const summary = el('summary');
+  summary.textContent = t('pulse.proposal.runs', { tool: proposal.tool });
+
+  const pre = el('pre');
+  pre.textContent = proposalArgsPreview(proposal.args);
+
+  details.append(summary, pre);
+  return details;
+}
+
 function renderProposal(item, proposal, onChange) {
+  const wrap = el('div', { class: 'yanta-pulse-proposal' });
   const row = el('div', { class: 'yanta-pulse-actions' });
 
   const run = el('button', {
@@ -223,6 +283,21 @@ function renderProposal(item, proposal, onChange) {
   run.disabled = proposal.status === 'done';
 
   run.addEventListener('click', async () => {
+    if (proposalNeedsConfirm(proposal.tool)) {
+      const ok = await yantaConfirm({
+        title: t('pulse.proposal.confirmTitle'),
+        message:
+          t('pulse.proposal.confirmMessage', {
+            routine: item.routineTitle || item.routineName || 'Pulse',
+            tool: proposal.tool,
+          }) + '\n\n' + proposalArgsPreview(proposal.args),
+        confirmLabel: t('pulse.proposal.confirmAction'),
+        danger: getTool(proposal.tool)?.risk === 'destructive',
+      });
+
+      if (!ok) return;
+    }
+
     run.disabled = true;
     run.textContent = t('pulse.proposal.running');
 
@@ -257,14 +332,15 @@ function renderProposal(item, proposal, onChange) {
   });
 
   row.append(run, skip);
+  wrap.append(row, renderProposalDetails(proposal));
 
   if (proposal.error) {
     const error = el('div', { class: 'yanta-pulse-proposal-error' });
     error.textContent = proposal.error;
-    row.append(error);
+    wrap.append(error);
   }
 
-  return row;
+  return wrap;
 }
 
 function renderCard(item, onChange) {
@@ -293,7 +369,7 @@ function renderCard(item, onChange) {
 
   if (item.body) {
     const body = el('div', { class: 'yanta-pulse-body' });
-    body.innerHTML = renderBlocksInline(item.body);
+    body.innerHTML = renderBlocksInlineWithContext(item.body, { remoteMedia: 'link' });
     card.append(body);
   }
 

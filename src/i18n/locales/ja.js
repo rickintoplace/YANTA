@@ -1331,6 +1331,11 @@ export default {
       running: '実行中…',
       skip: 'スキップ',
       executed: '完了しました。',
+      runs: '実行内容: {tool}',
+      details: '詳細を表示',
+      confirmTitle: 'この操作を実行しますか？',
+      confirmMessage: '「{routine}」からのこの提案は、下記の内容で {tool} を実行します。バックグラウンド実行が作成した提案なので、先に確認してください。',
+      confirmAction: '実行する',
     },
 
     time: {

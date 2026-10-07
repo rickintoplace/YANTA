@@ -61,8 +61,15 @@ import {
 } from './context-builder.js';
 
 import {
-  renderBlocksInline,
+  renderBlocksInlineWithContext,
 } from '../markdown.js';
+
+import {
+  createTaintTracker,
+  noteToolResult,
+  untrustedContentGate,
+  collectUrls,
+} from './untrusted-content.js';
 
 import {
   openNote,
@@ -151,16 +158,9 @@ let assistantBusyLabel = 'Thinking…';
 let assistantBusySince = 0;
 
 let streamingReasoning = '';
-let externalSourceContextActive = false;
+// What this conversation has read (see ../ai/untrusted-content.js).
+let chatTaint = createTaintTracker();
 let externalSourceWriteAllowAll = false;
-
-const EXTERNAL_SOURCE_TOOL_NAMES = new Set([
-  'web_search',
-  'web_read',
-  'rss_search_items',
-  'rss_read_item',
-  'add_rss_source',
-]);
 
 function toolCallArgsForUi(call) {
   try {
@@ -525,7 +525,7 @@ function ensureRoot() {
     activeContextItems = [];
 
     streamingReasoning = '';
-    externalSourceContextActive = false;
+    chatTaint = createTaintTracker();
     externalSourceWriteAllowAll = false;
 
     clearTransientConversation();
@@ -2399,7 +2399,7 @@ function renderAssistantMessageNode(msg) {
   content.className = 'yanta-ai-msg-content yanta-ai-rich';
 
   if (parsed.text) {
-    content.innerHTML = renderBlocksInline(parsed.text);
+    content.innerHTML = renderBlocksInlineWithContext(parsed.text, { remoteMedia: 'link' });
     enhanceAiCodeCopy(content);
   } else if (!parsed.notes.length && !parsed.events.length && !parsed.chips.length) {
     content.textContent = '[No response]';
@@ -2682,20 +2682,28 @@ function renderSettings() {
   renderAiSettingsPanel(settingsPanel);
 }
 
-function toolRequiresExternalSourceApproval(toolName) {
-  if (!externalSourceContextActive) return false;
+/*
+  After untrusted content entered the chat, every write/delete asks first
+  (the user is here, so even creating a note is cheap to confirm), and so
+  does opening a web address the model composed itself — a URL with your
+  notes appended is how injected text would smuggle them out.
+*/
+function toolRequiresExternalSourceApproval(toolName, args = {}) {
+  if (!chatTaint.tainted) return false;
   if (externalSourceWriteAllowAll) return false;
 
   const tool = getTool(toolName);
 
   if (!tool) return false;
 
-  return tool.risk === 'write' || tool.risk === 'destructive';
+  if (tool.risk === 'write' || tool.risk === 'destructive') return true;
+
+  return !!untrustedContentGate(chatTaint, { name: toolName, args, risk: tool.risk });
 }
 
-function markExternalSourceToolSeen(toolName) {
-  if (EXTERNAL_SOURCE_TOOL_NAMES.has(toolName)) {
-    externalSourceContextActive = true;
+function rememberUserUrls(messages = []) {
+  for (const message of messages) {
+    if (message?.role === 'user') collectUrls(message.content, chatTaint.knownUrls);
   }
 }
 
@@ -2732,6 +2740,10 @@ function externalApprovalToolLabel(toolName, args = {}) {
     return `create calendar event "${args.title || 'Untitled event'}"`;
   }
 
+  if (toolName === 'web_read') {
+    return `open ${args.url || 'a web page'}`;
+  }
+
   return toolDisplayName(toolName);
 }
 
@@ -2758,8 +2770,8 @@ function requestExternalSourceToolApproval({
             <div>
               <strong>YANTA AI wants to ${escapeHtml(externalApprovalToolLabel(toolName, args))}.</strong>
               <p>
-                This chat contains external web/RSS content. External pages can contain prompt-injection attempts.
-                Please review write/delete actions before YANTA executes them.
+                This chat contains external content (web, feeds or messages). It can contain prompt-injection attempts.
+                Please review this action before YANTA executes it.
               </p>
             </div>
           </div>
@@ -2974,6 +2986,8 @@ async function runAssistant(userText) {
       tool_calls: toolCalls,
     });
 
+    rememberUserUrls(messages);
+
     for (const call of toolCalls) {
       const toolName = call?.function?.name || '';
       const args = toolCallArgsForUi(call);
@@ -3000,7 +3014,7 @@ async function runAssistant(userText) {
           continue;
         }
 
-        if (toolRequiresExternalSourceApproval(toolName)) {
+        if (toolRequiresExternalSourceApproval(toolName, args)) {
           const approval = await requestExternalSourceToolApproval({
             toolName,
             args,
@@ -3012,7 +3026,7 @@ async function runAssistant(userText) {
 
           if (!approval.allowed) {
             const blocked = {
-              error: 'Blocked by user because external web/RSS content is present in this chat.',
+              error: 'Blocked by user because external content (web, feeds or messages) is present in this chat.',
               code: 'EAI_HUMAN_BLOCKED_EXTERNAL_SOURCE_WRITE',
             };
 
@@ -3033,7 +3047,7 @@ async function runAssistant(userText) {
 
         const executed = await executeToolCall(call);
 
-        markExternalSourceToolSeen(executed.name);
+        noteToolResult(chatTaint, executed.name, executed.result);
 
         messages.push({
           role: 'tool',

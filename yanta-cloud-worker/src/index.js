@@ -57,7 +57,9 @@ var PLAN_LIMITS = {
 
     includedAi: true,
     aiRequestsDay: 500,
-    aiSpendMicrosMonth: 50_000_000,
+    // Credits, not dollars: real API cost x AI_CREDIT_MARKUP. $3 of
+    // credits = at most $2 of real cost against a €6 subscription.
+    aiSpendMicrosMonth: 3_000_000,
 
     pulseRoutines: 25,
 
@@ -79,7 +81,7 @@ const INCLUDED_AI_POLICY = {
   free: {
     includedAi: true,
 
-    model: INCLUDED_AI_DEFAULT_MODEL,
+    model: "deepseek/deepseek-v4.1-flash", // = INCLUDED_AI_DEFAULT_MODEL (declared further down)
     modelLabel: "YANTA Cloud (DeepSeek V4.1 Flash)",
 
     aiRequestsDay: 25,
@@ -109,12 +111,12 @@ const INCLUDED_AI_POLICY = {
   premium: {
     includedAi: true,
 
-    model: INCLUDED_AI_DEFAULT_MODEL,
+    model: "deepseek/deepseek-v4.1-flash", // = INCLUDED_AI_DEFAULT_MODEL (declared further down)
     modelLabel: "YANTA Cloud (DeepSeek V4.1 Flash)",
 
     aiRequestsDay: 500,
-    aiSpendMicrosDay: 3_000_000,
-    aiSpendMicrosMonth: 50_000_000,
+    aiSpendMicrosDay: 600_000,
+    aiSpendMicrosMonth: 3_000_000,
 
     aiPulseRequestsDay: 150,
 
@@ -382,6 +384,43 @@ var INCLUDED_AI_MODELS = {
   "google/gemini-3.1-flash-lite": { prompt: 0.25, completion: 1.5 }
 };
 var AI_MODEL_ALLOWLIST = /* @__PURE__ */ new Set(Object.keys(INCLUDED_AI_MODELS));
+/*
+  Users spend credits; a credit is real API cost times this markup, which
+  is the buffer for everything around the API bill (payment fees, Workers,
+  storage). Overridable per environment without a code change.
+*/
+var AI_CREDIT_MARKUP_DEFAULT = 1.5;
+function aiCreditMarkup(env) {
+  const v = Number(env?.AI_CREDIT_MARKUP);
+  return Number.isFinite(v) && v >= 1 ? v : AI_CREDIT_MARKUP_DEFAULT;
+}
+/*
+  All free accounts together may cost at most this much real money per
+  UTC day. Per-user caps bound one account; this bounds the sum, however
+  many free accounts there are. When it is reached, free Included AI
+  pauses until tomorrow (BYOK and Plus are unaffected).
+*/
+var AI_FREE_DAILY_BUDGET_USD_DEFAULT = 3;
+function aiFreeDailyBudgetMicros(env) {
+  const v = Number(env?.AI_FREE_DAILY_BUDGET_USD);
+  return Math.round((Number.isFinite(v) && v > 0 ? v : AI_FREE_DAILY_BUDGET_USD_DEFAULT) * 1e6);
+}
+function freeAiSpendKey() {
+  return `ai:free:spend:${new Date().toISOString().slice(0, 10)}`;
+}
+async function freeAiSpentToday(env) {
+  const row = await env.DB.prepare(
+    `SELECT count FROM rate_limits WHERE key = ?`
+  ).bind(freeAiSpendKey()).first().catch(() => null);
+  return Number(row?.count || 0);
+}
+async function addFreeAiSpend(env, realMicros) {
+  if (!(realMicros > 0)) return;
+  await env.DB.prepare(
+    `INSERT INTO rate_limits (key, window_start, count) VALUES (?, ?, ?)
+     ON CONFLICT(key) DO UPDATE SET count = count + excluded.count`
+  ).bind(freeAiSpendKey(), Date.now(), Math.ceil(realMicros)).run();
+}
 var INCLUDED_AI_DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash";
 // Tried in order when the chosen model's providers fail (down, rate limit,
 // context overflow). Open-weight only, each with ZDR hosts.
@@ -4607,9 +4646,21 @@ async function handleAiCompletions(env, req, headers) {
     }, 503, headers);
   }
 
+  const isFreePlan = policy === INCLUDED_AI_POLICY.free;
+  const markup = aiCreditMarkup(env);
+
+  if (isFreePlan && await freeAiSpentToday(env) >= aiFreeDailyBudgetMicros(env)) {
+    return json({
+      error: {
+        message: "Free Included AI has reached today's capacity and resumes tomorrow. YANTA Plus or your own OpenRouter key keep working.",
+        code: "free_ai_capacity"
+      }
+    }, 503, headers);
+  }
+
   const body = await bodyJson(req);
 
-  let requestedModel = String(body.model || policy.model || "").trim();
+  let requestedModel = String(body.model || policy.model || INCLUDED_AI_DEFAULT_MODEL).trim();
   // Clients that still have a shut-down model saved get the default.
   if (RETIRED_AI_MODELS.has(requestedModel)) requestedModel = INCLUDED_AI_DEFAULT_MODEL;
   const selectedModel = AI_MODEL_ALLOWLIST.has(requestedModel)
@@ -4750,12 +4801,13 @@ async function handleAiCompletions(env, req, headers) {
     provider: includedAiProviderPreferences(modelChain)
   };
 
-  const preflightCostMicros = estimatePreflightAiCostMicros(
+  // In credits: upper-bound real cost times the markup.
+  const preflightCostMicros = Math.ceil(markup * estimatePreflightAiCostMicros(
     messages,
     forwardBody.max_tokens || policy.maxTokens,
     tools,
     modelChain
-  );
+  ));
 
   if (
     Number(usage.ai_spend_micros_day || 0) + preflightCostMicros > policy.aiSpendMicrosDay ||
@@ -4821,8 +4873,12 @@ async function handleAiCompletions(env, req, headers) {
     const metered = meterAiStream(streamRes.body, async ({ usage: streamUsage, model: usedModel }) => {
       const actual = actualAiCostMicros(streamUsage, modelChain);
       // Without a usage chunk (client aborted early) the reservation stands.
-      const charged = actual > 0 ? actual : preflightCostMicros;
+      const charged = actual > 0 ? Math.ceil(actual * markup) : preflightCostMicros;
       const delta = charged - preflightCostMicros;
+
+      if (isFreePlan) {
+        await addFreeAiSpend(env, actual > 0 ? actual : preflightCostMicros / markup);
+      }
 
       if (delta) {
         await env.DB.prepare(
@@ -4894,7 +4950,12 @@ async function handleAiCompletions(env, req, headers) {
   }
 
   const u = jsonResponse.usage || {};
-  const costMicros = actualAiCostMicros(u, modelChain) || preflightCostMicros;
+  const realCostMicros = actualAiCostMicros(u, modelChain);
+  const costMicros = realCostMicros ? Math.ceil(realCostMicros * markup) : preflightCostMicros;
+
+  if (isFreePlan) {
+    await addFreeAiSpend(env, realCostMicros || preflightCostMicros / markup);
+  }
 
   await env.DB.prepare(
     `UPDATE usage_current

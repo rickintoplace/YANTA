@@ -21,6 +21,7 @@ import {
   serializeToolResult,
   parseToolArguments,
   assistantToolTurn,
+  compactThread,
   ROUND_BUDGET_SPENT_INSTRUCTION,
 } from './agent-runtime.js';
 
@@ -82,9 +83,16 @@ export async function runAgentLoop({
   const thread = [...messages];
   const executed = [];
 
-  const request = (msgs, toolList, round, final) => (requestRound
-    ? requestRound({ messages: msgs, tools: toolList, round, final, signal })
-    : openRouterChatCompletion({ messages: msgs, tools: toolList, signal, source: budgetSource }));
+  // The final round sends one extra instruction after the thread.
+  const request = (toolList, round, final = null) => {
+    compactThread(thread);
+
+    const msgs = final ? [...thread, final] : thread;
+
+    return requestRound
+      ? requestRound({ messages: msgs, tools: toolList, round, final: !!final, signal })
+      : openRouterChatCompletion({ messages: msgs, tools: toolList, signal, source: budgetSource });
+  };
 
   let text = '';
   let round = 0;
@@ -96,7 +104,7 @@ export async function runAgentLoop({
 
     await onRound?.({ round, maxRounds });
 
-    const message = await request(thread, typeof tools === 'function' ? tools() : tools, round, false);
+    const message = await request(typeof tools === 'function' ? tools() : tools, round);
 
     const content = String(message.content || '').trim();
     const toolCalls = message.tool_calls || [];
@@ -175,12 +183,7 @@ export async function runAgentLoop({
   let finalText = '';
 
   try {
-    const final = await request(
-      [...thread, { role: 'user', content: finalInstruction }],
-      finalToolList || [],
-      round,
-      true
-    );
+    const final = await request(finalToolList || [], round, { role: 'user', content: finalInstruction });
 
     finalText = String(final.content || '').trim();
     if (finalText) text = finalText;

@@ -75,6 +75,8 @@ import {
   AGENT_STOP,
 } from './agent-loop.js';
 
+import { fitHistory } from './agent-runtime.js';
+
 import {
   openNote,
 } from '../notes.js';
@@ -2882,12 +2884,12 @@ async function runAssistant(userText) {
     before the latest user message. With the context ahead of the history,
     prompt caching could never cover more than the system prompt.
   */
-  const history = conversation
+  const history = fitHistory(conversation
     .filter((m) => m.role === 'user' || m.role === 'assistant')
     .map((m) => ({
       role: m.role,
       content: m.content,
-    }));
+    })));
 
   let lastUserIndex = -1;
   history.forEach((m, i) => { if (m.role === 'user') lastUserIndex = i; });

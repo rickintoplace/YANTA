@@ -1407,6 +1407,8 @@ export default {
       noSignal: 'Nichts verändert — übersprungen.',
       repeat: 'Gleiches Ergebnis wie zuletzt — nicht wiederholt.',
       failed: 'Der Lauf ist fehlgeschlagen.',
+      checkSkipped: 'Die Prüfung fand nichts Relevantes — übersprungen.',
+      filed: 'Nebensächlich — in der heutigen Notiz abgelegt statt im Posteingang.',
     },
 
     wake: {

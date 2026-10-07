@@ -605,6 +605,8 @@ const OUTCOME_ICON = {
   'no-signal': ['moon', ''],
   repeat: ['repeat', ''],
   failed: ['triangle-alert', 'err'],
+  'check-skipped': ['funnel', ''],
+  filed: ['notebook-pen', 'ok'],
 };
 
 async function renderHistoryTab(host, onChange) {
@@ -635,6 +637,7 @@ async function renderHistoryTab(host, onChange) {
         entry.routineName,
         t(`pulse.outcome.${outcomeKey}`),
         entry.manual ? t('pulse.history.manual') : '',
+        entry.note || '',
         entry.error || '',
       ].filter(Boolean).join(' · ')
     ));

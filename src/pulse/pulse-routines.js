@@ -16,7 +16,13 @@
 //     tools: read
 //     cooldown: 4h
 //     maxPerDay: 2
+//     check: "a meeting today needs preparation"
+//     rank: true
 //   ---
+//
+// `check` and `rank` call a decision model (see pulse-decider.js): one
+// asks before the run whether the sensor data matches a condition, the
+// other grades the finished card and sends minor ones to the journal.
 // ============================================================
 
 import { state, store } from '../core.js';
@@ -51,6 +57,8 @@ const VALID_OUTPUTS = new Set(Object.values(PULSE_OUTPUTS));
 const DEFAULT_COOLDOWN_MS = 30 * 60 * 1000;
 const MIN_COOLDOWN_MS = 5 * 60 * 1000;
 const DEFAULT_MAX_PER_DAY = 4;
+const DEFAULT_CHECK_MIN = 0.5;
+const DEFAULT_INBOX_MIN = 2;
 
 // ---------------- frontmatter -------------------------------------
 
@@ -99,6 +107,19 @@ function stripQuotes(value) {
   return String(value ?? '').trim().replace(/^["']|["']$/g, '');
 }
 
+function clampNumber(value, min, max, fallback) {
+  const n = Number(stripQuotes(value));
+  if (value === undefined || stripQuotes(value) === '' || !Number.isFinite(n)) return fallback;
+  return Math.max(min, Math.min(max, n));
+}
+
+function decisionQuestion(value) {
+  const raw = stripQuotes(value);
+  if (!raw || /^(false|0|no|off)$/i.test(raw)) return '';
+  if (/^(true|yes|on)$/i.test(raw)) return true;
+  return raw.slice(0, 400);
+}
+
 // ---------------- model -------------------------------------------
 
 /**
@@ -144,6 +165,13 @@ export function routineFromSkill(skill, markdown = skill?.markdown || '') {
 
   const maxPerDay = Math.max(1, Math.min(24, Number(block.maxPerDay) || DEFAULT_MAX_PER_DAY));
 
+  const check = decisionQuestion(block.check);
+  const rank = decisionQuestion(block.rank);
+
+  if (check && !events.length) {
+    invalid.push('"check" needs sensor triggers ("on") to look at');
+  }
+
   return {
     name: skill.name,
     noteId: skill.noteId,
@@ -165,6 +193,11 @@ export function routineFromSkill(skill, markdown = skill?.markdown || '') {
     language: stripQuotes(block.language),
     cooldownMs,
     maxPerDay,
+    // '' = off, true = the default question, else the user's own wording.
+    check,
+    checkMin: clampNumber(block.checkMin, 0, 1, DEFAULT_CHECK_MIN),
+    rank,
+    inboxMin: clampNumber(block.inboxMin, 0, 3, DEFAULT_INBOX_MIN),
     invalid,
   };
 }

@@ -1407,6 +1407,8 @@ export default {
       noSignal: 'Nada ha cambiado: se omitió.',
       repeat: 'El mismo resultado que la última vez: no se repite.',
       failed: 'La ejecución ha fallado.',
+      checkSkipped: 'La comprobación no encontró nada relevante: omitido.',
+      filed: 'Poco importante: guardado en la nota de hoy en lugar de la bandeja.',
     },
 
     wake: {

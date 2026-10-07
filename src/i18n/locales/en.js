@@ -1428,6 +1428,8 @@ export default {
       noSignal: 'Nothing changed — skipped.',
       repeat: 'Same result as last time — not repeated.',
       failed: 'The run failed.',
+      checkSkipped: 'The check found nothing relevant — skipped.',
+      filed: 'Minor — filed in today’s note instead of the Inbox.',
     },
 
     wake: {

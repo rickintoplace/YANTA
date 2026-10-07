@@ -45,7 +45,26 @@ const PULSE_KEYS = [
   'cooldown',
   'maxPerDay',
   'language',
+  'check',
+  'checkMin',
+  'rank',
+  'inboxMin',
 ];
+
+/** true → the default question, false/'' → off, text → the user's wording. */
+function decisionValue(value) {
+  if (value === true || /^\s*true\s*$/i.test(value)) return 'true';
+  if (value === false || /^\s*(false|off)\s*$/i.test(value)) return 'false';
+  const text = String(value ?? '').replace(/\s+/g, ' ').replace(/"/g, "'").trim();
+  return text ? `"${text.slice(0, 400)}"` : '';
+}
+
+function pulseValue(key, value) {
+  if (key === 'on' || key === 'output') return listValue(value);
+  if (key === 'when') return `"${String(value).trim()}"`;
+  if (key === 'check' || key === 'rank') return decisionValue(value);
+  return String(value).trim();
+}
 
 function slug(value) {
   return String(value || '')
@@ -84,6 +103,10 @@ function pulseBlockLines(args) {
   push('cooldown', args.cooldown ? String(args.cooldown).trim() : '');
   push('language', args.language ? String(args.language).trim() : '');
   push('maxPerDay', Number(args.maxPerDay) > 0 ? String(Math.round(args.maxPerDay)) : '');
+  push('check', args.check === undefined ? '' : decisionValue(args.check));
+  push('checkMin', Number.isFinite(Number(args.checkMin)) && args.checkMin !== undefined ? String(args.checkMin) : '');
+  push('rank', args.rank === undefined ? '' : decisionValue(args.rank));
+  push('inboxMin', Number.isFinite(Number(args.inboxMin)) && args.inboxMin !== undefined ? String(args.inboxMin) : '');
 
   return lines;
 }
@@ -135,6 +158,10 @@ function routineSummary(routine, state = null) {
     tools: routine.toolProfile,
     cooldownMinutes: Math.round(routine.cooldownMs / 60000),
     maxPerDay: routine.maxPerDay,
+    check: routine.check || null,
+    checkMin: routine.check ? routine.checkMin : undefined,
+    rank: routine.rank || null,
+    inboxMin: routine.rank ? routine.inboxMin : undefined,
     problems: routine.invalid,
     lastRunAt: state ? state.lastRunAt || null : undefined,
     runsToday: state ? state.runsToday : undefined,
@@ -257,11 +284,7 @@ export async function pulseManageAction(args = {}) {
     for (const key of PULSE_KEYS) {
       if (args[key] === undefined) continue;
 
-      const value = key === 'on' || key === 'output'
-        ? listValue(args[key])
-        : key === 'when'
-          ? `"${String(args[key]).trim()}"`
-          : String(args[key]).trim();
+      const value = pulseValue(key, args[key]);
 
       if (value) markdown = patchPulseBlock(markdown, key, value);
     }
@@ -326,6 +349,11 @@ export const PULSE_MANAGE_TOOL = {
     '',
     `Outputs: ${Object.values(PULSE_OUTPUTS).join(', ')}. Default is inbox. Add journal to also append the result to today's note.`,
     `Tool profiles: ${PULSE_TOOL_PROFILE_ORDER.join(', ')}. Default and preferred is read. Only ask for more when the routine genuinely must write.`,
+    '',
+    'Decision checks (optional, a small fast model, a fraction of a cent each):',
+    '- check: a condition judged on what the sensors saw before the run, e.g. "a new article is about local politics in Göttingen". If it is unlikely (below checkMin, default 0.5) the run is skipped before it costs anything. Needs "on" triggers. Use it when the user wants to hear about something only under a specific condition; true uses a generic "anything worth reporting?" check.',
+    '- rank: grades the finished card 0–3 (irrelevant, minor, notable, urgent); below inboxMin (default 2) it goes to today\'s note instead of the Inbox. true uses a generic attention question, or pass the user\'s own criterion, e.g. "Does this affect my travel plans this week?".',
+    'Pass "false" to switch either off. "Run now" ignores check.',
     '',
     'After creating a routine, tell the user in plain language when it will run and what it will do. Never show them the cron string.',
   ].join('\n'),
@@ -393,6 +421,22 @@ export const PULSE_MANAGE_TOOL = {
           'Set it only when the user explicitly wants this routine in a different language.',
       },
       enabled: { type: 'boolean' },
+      check: {
+        type: 'string',
+        description: 'Condition the sensor data must likely meet for the run to happen, phrased as a statement. "true" = generic check, "false" = off.',
+      },
+      checkMin: {
+        type: 'number',
+        description: 'Probability (0–1) the check must reach. Default 0.5; lower runs more often. 0 only logs the probability.',
+      },
+      rank: {
+        type: 'string',
+        description: 'Question or criterion for grading the finished card 0–3. "true" = generic attention grade, "false" = off.',
+      },
+      inboxMin: {
+        type: 'number',
+        description: 'Grade (0–3) a card needs to reach the Inbox; below it goes to today\'s note. Default 2.',
+      },
     },
     required: ['action'],
   },

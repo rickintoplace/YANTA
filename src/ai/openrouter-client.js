@@ -420,3 +420,60 @@ export async function openRouterChatCompletionStream({
     finish_reason: finishReason,
   };
 }
+/*
+  Decision models (OpenRouter Decisions API): typed answers with
+  probabilities instead of text. Questions are { key: { type, instructions,
+  criteria? } } with type noul (P(yes)), choice or score. Only OpenRouter
+  serves this, so a BYOK setup pointed elsewhere has no decider.
+*/
+export const DECISION_MODEL = 'perplexity/pplx-decider-v1.1-27b';
+
+function decisionEndpoint(settings) {
+  if (isIncludedAiMode(settings)) return apiUrl('/api/ai/decide');
+
+  const baseUrl = String(settings.baseUrl || 'https://openrouter.ai/api/v1');
+  if (!/^https:\/\/openrouter\.ai\//.test(baseUrl)) return '';
+
+  return 'https://openrouter.ai/api/alpha/decisions';
+}
+
+export function decisionsAvailable(settings = getEffectiveAiRuntimeSettings()) {
+  return !!decisionEndpoint(settings);
+}
+
+/** Returns { answers, model, cost }. Throws when unavailable or on failure. */
+export async function openRouterDecide({ state, questions, signal = null } = {}) {
+  const settings = getEffectiveAiRuntimeSettings();
+  const endpoint = decisionEndpoint(settings);
+
+  if (!endpoint) {
+    throw new Error('Decision models need OpenRouter or YANTA Included AI.');
+  }
+
+  const res = await fetch(endpoint, {
+    method: 'POST',
+    signal,
+    credentials: isIncludedAiMode(settings) ? 'include' : 'omit',
+    headers: headersForSettings(settings),
+    body: JSON.stringify({
+      model: DECISION_MODEL,
+      state,
+      questions,
+      provider: openRouterProviderPreferences(),
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error(await parseErrorResponse(res, `Decision request failed: HTTP ${res.status}`));
+  }
+
+  const json = await res.json();
+
+  if (!json?.answers) throw new Error('Decision model returned no answers.');
+
+  return {
+    answers: json.answers,
+    model: json.model || DECISION_MODEL,
+    cost: Number(json.usage?.cost || 0),
+  };
+}

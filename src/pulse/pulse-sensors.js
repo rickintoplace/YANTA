@@ -38,6 +38,12 @@ async function rssNewSensor(since, now) {
     count: fresh.length,
     summary: `${fresh.length} new unread article${fresh.length === 1 ? '' : 's'} since the last run`,
     sample: fresh.slice(0, 8).map((item) => item.title || '').filter(Boolean),
+    // For a routine's `check`: enough to judge relevance, not whole articles.
+    detail: fresh.slice(0, 40).map((item) => ({
+      title: item.title || '',
+      feed: item.feedTitle || '',
+      text: String(item.summaryText || item.contentText || '').slice(0, 240),
+    })),
     unreadTotal: items.length,
     now,
   };

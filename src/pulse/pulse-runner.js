@@ -52,6 +52,7 @@ import {
 } from './pulse-config.js';
 
 import { readSensors } from './pulse-sensors.js';
+import { runCheck, rankResult } from './pulse-decider.js';
 import { prefetchForRoutine } from './pulse-prefetch.js';
 
 import {
@@ -87,7 +88,13 @@ export const RUN_OUTCOME = Object.freeze({
   NO_SIGNAL: 'no-signal',
   REPEAT: 'repeat',
   FAILED: 'failed',
+  // The routine's `check` found nothing matching — skipped before the agent.
+  CHECK_SKIPPED: 'check-skipped',
+  // Delivered, but `rank` judged it minor: journal instead of Inbox.
+  FILED: 'filed',
 });
+
+const percent = (p) => `${Math.round(p * 100)}%`;
 
 /**
  * The language the result should be written in.
@@ -192,8 +199,9 @@ function buildRunUserMessage(routine, sensors, prefetched, now) {
   };
 }
 
-async function deliver(routine, run, { title, body }) {
-  const outputs = new Set(routine.outputs);
+async function deliver(routine, run, { title, body }, { quiet = false } = {}) {
+  // Ranked minor: only today's note, wherever the routine usually reports.
+  const outputs = new Set(quiet ? [PULSE_OUTPUTS.JOURNAL] : routine.outputs);
   const delivered = [];
 
   if (outputs.has(PULSE_OUTPUTS.INBOX) || !outputs.size) {
@@ -308,6 +316,22 @@ export async function runRoutine(routine, {
     return { outcome: RUN_OUTCOME.NO_SIGNAL };
   }
 
+  // The routine's own condition, judged by a decision model on what the
+  // sensors saw. "Run now" skips it: the user asked for a run.
+  const check = force ? null : await runCheck(routine, sensors, { now, signal });
+
+  if (check && !check.run) {
+    await recordRun(routine.name, { dueAt: dueAt || now, counted: false }, now);
+
+    await recordHistory({
+      routineName: routine.name,
+      outcome: RUN_OUTCOME.CHECK_SKIPPED,
+      note: `check ${percent(check.probability)}`,
+    });
+
+    return { outcome: RUN_OUTCOME.CHECK_SKIPPED, probability: check.probability };
+  }
+
   const profile = clampToolProfile(routine.toolProfile, settings);
   const permissions = getAiSettings().permissions;
 
@@ -413,12 +437,15 @@ export async function runRoutine(routine, {
       .filter((name) => !isPulseTool(name))
   )];
 
+  const notes = check ? [`check ${percent(check.probability)}`] : [];
+
   const finish = async (outcome, extra = {}) => {
     await recordHistory({
       routineName: routine.name,
       outcome,
       tools: toolsUsed,
       manual: force,
+      note: notes.join(' · '),
       ...extra,
     });
 
@@ -439,7 +466,13 @@ export async function runRoutine(routine, {
     return finish(RUN_OUTCOME.REPEAT, { title });
   }
 
-  const delivered = await deliver(routine, run, { title, body });
+  const rank = await rankResult(routine, { title, body }, { now, signal });
+  if (rank) notes.push(`rank ${rank.score.toFixed(1)}/3`);
+
+  // A parked proposal needs its Inbox card, so it is never filed away.
+  const quiet = !!rank && !rank.inbox && !run.proposals.length;
+
+  const delivered = await deliver(routine, run, { title, body }, { quiet });
 
   // Only what actually interrupts counts against the attention budget.
   // A journal-only routine files into today's note and asks for nothing,
@@ -451,5 +484,5 @@ export async function runRoutine(routine, {
 
   await recordRun(routine.name, { dueAt: dueAt || now, digest }, now);
 
-  return finish(RUN_OUTCOME.DELIVERED, { title, delivered });
+  return finish(quiet ? RUN_OUTCOME.FILED : RUN_OUTCOME.DELIVERED, { title, delivered });
 }

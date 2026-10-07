@@ -4624,6 +4624,139 @@ function meterAiStream(body, onDone) {
   }));
 }
 __name(meterAiStream, "meterAiStream");
+/*
+  Decision models (OpenRouter Decisions API): typed answers with
+  probabilities instead of text — yes/no (noul), pick one (choice), rank
+  on a scale (score). Used by Pulse to skip runs with nothing to report
+  and to grade results. Output tokens are free; input costs fractions of
+  a cent. Perplexity Decider has open weights and is served with zero
+  data retention (checked 2026-10-07).
+*/
+var DECISION_MODELS = {
+  "perplexity/pplx-decider-v1.1-27b": { prompt: 0.02 }
+};
+var DECISION_DEFAULT_MODEL = "perplexity/pplx-decider-v1.1-27b";
+var DECISION_QUESTION_TYPES = /* @__PURE__ */ new Set(["noul", "choice", "score"]);
+function openRouterDecisionsUrl(env) {
+  return String(env.OPENROUTER_DECISIONS_URL || "https://openrouter.ai/api/alpha/decisions");
+}
+function sanitizeDecisionRequest(body) {
+  const fail = (message) => {
+    const err = new Error(message);
+    err.status = 400;
+    throw err;
+  };
+  const state = body?.state;
+  if (!state || typeof state !== "object" || Array.isArray(state)) fail("state must be an object");
+  if (jsonSize(state) > 24000) fail("state too large");
+  const questions = body?.questions;
+  if (!questions || typeof questions !== "object") fail("questions must be an object");
+  const entries = Object.entries(questions);
+  if (!entries.length || entries.length > 8) fail("1-8 questions");
+  const out = {};
+  for (const [key, q] of entries) {
+    if (!/^[a-z0-9_]{1,40}$/i.test(key)) fail("invalid question key");
+    if (!DECISION_QUESTION_TYPES.has(q?.type)) fail("question type must be noul, choice or score");
+    const clean = { type: q.type, instructions: String(q.instructions || "").slice(0, 600) };
+    if (!clean.instructions) fail("question instructions required");
+    if (q.type === "choice") {
+      if (!q.criteria || typeof q.criteria !== "object" || Array.isArray(q.criteria)) fail("choice needs criteria {option: description}");
+      const options = Object.entries(q.criteria).slice(0, 20);
+      if (options.length < 2) fail("choice needs at least two options");
+      clean.criteria = Object.fromEntries(options.map(([k, v]) => [String(k).slice(0, 40), String(v).slice(0, 300)]));
+    }
+    if (q.type === "score") {
+      if (!Array.isArray(q.criteria) || q.criteria.length < 2) fail("score needs criteria [level0, level1, …]");
+      clean.criteria = q.criteria.slice(0, 10).map((v) => String(v).slice(0, 120));
+    }
+    out[key] = clean;
+  }
+  return { state, questions: out };
+}
+async function handleAiDecide(env, req, headers) {
+  const user = await requireUser(env, req);
+  const usage = await ensureUsageRow(env, user.userId);
+  const policy = includedAiPolicyForPlan(user.plan);
+
+  if (!policy.includedAi || !env.OPENROUTER_API_KEY) {
+    return json({ error: { message: "Included AI is not available." } }, 503, headers);
+  }
+
+  const isFreePlan = policy === INCLUDED_AI_POLICY.free;
+  const markup = aiCreditMarkup(env);
+
+  if (isFreePlan && await freeAiSpentToday(env) >= aiFreeDailyBudgetMicros(env)) {
+    return json({ error: { message: "Free Included AI has reached today's capacity.", code: "free_ai_capacity" } }, 503, headers);
+  }
+
+  if (
+    Number(usage.ai_spend_micros_day || 0) >= policy.aiSpendMicrosDay ||
+    Number(usage.ai_spend_micros_month || 0) >= policy.aiSpendMicrosMonth
+  ) {
+    return json({ error: { message: "Included AI credits reached." } }, 403, headers);
+  }
+
+  const burst = await rateLimit(env, `ai:decide:user:${user.userId}`, 30, 60 * 1000);
+  const daily = await rateLimit(env, `ai:decide:day:${user.userId}`, isFreePlan ? 200 : 2000, 24 * 60 * 60 * 1000);
+  if (!burst.ok || !daily.ok) {
+    return json({ error: { message: "Too many decisions. Please wait a moment." } }, 429, { ...headers, "retry-after": "60" });
+  }
+
+  const body = await bodyJson(req);
+  let decision;
+  try {
+    decision = sanitizeDecisionRequest(body);
+  } catch (err) {
+    return json({ error: { message: err.message } }, 400, headers);
+  }
+
+  const model = DECISION_MODELS[body.model] ? body.model : DECISION_DEFAULT_MODEL;
+
+  const res = await fetch(openRouterDecisionsUrl(env), {
+    method: "POST",
+    headers: {
+      authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
+      "content-type": "application/json",
+      "HTTP-Referer": env.OPENROUTER_SITE_URL || env.APP_ORIGIN || "",
+      "X-Title": env.OPENROUTER_APP_TITLE || "YANTA"
+    },
+    body: JSON.stringify({
+      model,
+      ...decision,
+      provider: { zdr: true, data_collection: "deny" }
+    })
+  });
+
+  const out = await res.json().catch(() => null);
+
+  if (!res.ok || !out?.answers) {
+    const err = new Error(out?.error?.message || `Decision request failed: HTTP ${res.status}`);
+    err.status = res.status;
+    err.upstream = true;
+    throw err;
+  }
+
+  // usage.cost in USD; without it, input tokens × list price ($/M = µ$/token).
+  const reported = Number(out.usage?.cost);
+  const realMicros = Math.max(1, Math.ceil(
+    Number.isFinite(reported) && reported > 0
+      ? reported * 1e6
+      : Number(out.usage?.input_tokens || 0) * DECISION_MODELS[model].prompt
+  ));
+  const charged = Math.ceil(realMicros * markup);
+
+  await env.DB.prepare(
+    `UPDATE usage_current
+     SET ai_spend_micros_day = ai_spend_micros_day + ?,
+         ai_spend_micros_month = ai_spend_micros_month + ?
+     WHERE user_id = ?`
+  ).bind(charged, charged, user.userId).run();
+
+  if (isFreePlan) await addFreeAiSpend(env, realMicros);
+
+  return json({ model: out.model || model, answers: out.answers, usage: { cost: realMicros / 1e6 } }, 200, headers);
+}
+__name(handleAiDecide, "handleAiDecide");
 async function handleAiCompletions(env, req, headers) {
   const user = await requireUser(env, req);
   const usage = await ensureUsageRow(env, user.userId);
@@ -9595,6 +9728,9 @@ async function route(req, env) {
     }
     if (url.pathname === "/api/ai/chat/completions" && req.method === "POST") {
       return handleAiCompletions(env, req, headers);
+    }
+    if (url.pathname === "/api/ai/decide" && req.method === "POST") {
+      return handleAiDecide(env, req, headers);
     }
     if (url.pathname === "/api/search/brave" && req.method === "GET") {
       return handleBraveSearch(env, req, url, headers);

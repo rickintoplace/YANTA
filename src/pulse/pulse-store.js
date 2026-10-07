@@ -315,6 +315,7 @@ export async function recordHistory({
   tools = [],
   error = '',
   manual = false,
+  note = '',
 } = {}) {
   const { history } = await maps();
 
@@ -328,6 +329,7 @@ export async function recordHistory({
     tools: tools.slice(0, 12),
     error,
     manual,
+    note,
   }]);
 
   const overflow = history.length - HISTORY_MAX;

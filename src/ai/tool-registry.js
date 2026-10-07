@@ -17,6 +17,7 @@ import {
   webReadAction,
   updateNoteAppearanceAction,
   appendToNoteAction,
+  replaceInNoteAction,
   replaceCurrentSelectionAction,
   deleteNoteAction,
   searchEventsAction,
@@ -569,16 +570,38 @@ export const TOOL_REGISTRY = [
     name: 'append_to_note',
     permission: 'allowEditNotes',
     risk: 'write',
-    description: 'Append Markdown text to an existing note.',
+    description: 'Append Markdown text to the end of an existing note. To change text that is already there, use replace_in_note.',
     parameters: {
       type: 'object',
       properties: {
-        noteId: { type: 'string' },
-        text: { type: 'string' },
+        noteId: { type: 'string', description: 'Id of the note, from search_notes or read_note.' },
+        text: { type: 'string', description: 'Markdown to add at the end.' },
       },
       required: ['noteId', 'text'],
     },
     execute: appendToNoteAction,
+  },
+
+  {
+    name: 'replace_in_note',
+    permission: 'allowEditNotes',
+    risk: 'write',
+    description: [
+      'Edit an existing note by replacing exact text: fix a sentence, update a value, rewrite a section, tick a checkbox, delete a paragraph (replace with "").',
+      'Read the note first and copy `find` exactly from it, including line breaks and Markdown. It must occur once — add surrounding words if it is not unique — or set replaceAll.',
+      'Example: {"noteId":"n_42","find":"- [ ] Call the plumber","replace":"- [x] Call the plumber"}',
+    ].join('\n'),
+    parameters: {
+      type: 'object',
+      properties: {
+        noteId: { type: 'string', description: 'Id of the note, from search_notes or read_note.' },
+        find: { type: 'string', description: 'Exact text currently in the note.' },
+        replace: { type: 'string', description: 'New text. Empty string deletes the found text.' },
+        replaceAll: { type: 'boolean', description: 'Replace every occurrence instead of requiring a unique match. Default false.' },
+      },
+      required: ['noteId', 'find', 'replace'],
+    },
+    execute: replaceInNoteAction,
   },
 
   {

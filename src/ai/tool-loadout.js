@@ -56,8 +56,9 @@ const TOOL_GROUPS = Object.freeze([
   {
     id: 'notes',
     label: 'Note editing',
-    when: 'changing, styling or deleting an existing note, or replacing the user\'s current selection',
+    when: 'editing text inside an existing note, styling or deleting a note, or replacing the user\'s current selection',
     tools: [
+      'replace_in_note',
       'update_note_appearance',
       'replace_current_selection',
       'delete_note',

@@ -22,6 +22,8 @@ import {
   isIncludedAiMode,
 } from './ai-access-policy.js';
 
+import { includedAiModelInfo } from './ai-models.js';
+
 function apiUrl(path) {
   const base = String(YANTA_CLOUD_BASE_URL || '/cloud-api').replace(/\/+$/, '');
   const cleanPath = String(path || '').replace(/^\/+/, '');
@@ -58,9 +60,10 @@ function openRouterProviderPreferences() {
 */
 const REASONING_EFFORTS = new Set(['minimal', 'low', 'medium', 'high']);
 
-function reasoningParam(settings) {
+function reasoningParam(settings, model = '') {
   const effort = String(settings.reasoningEffort || 'off').toLowerCase();
-  return REASONING_EFFORTS.has(effort) ? { effort } : { enabled: false };
+  if (REASONING_EFFORTS.has(effort)) return { effort };
+  return includedAiModelInfo(model)?.reasoningRequired ? { effort: 'minimal' } : { enabled: false };
 }
 
 function buildRequestBody({ messages, tools = [], stream = false, source = '' } = {}) {
@@ -74,7 +77,7 @@ function buildRequestBody({ messages, tools = [], stream = false, source = '' } 
       tools: tools.length ? tools : undefined,
       tool_choice: tools.length ? 'auto' : undefined,
       max_tokens: Number(settings.maxOutputTokens || 4096),
-      reasoning: reasoningParam(settings),
+      reasoning: reasoningParam(settings, settings.includedModel || settings.model),
       provider: openRouterProviderPreferences(),
       stream,
 
@@ -90,7 +93,7 @@ function buildRequestBody({ messages, tools = [], stream = false, source = '' } 
     temperature: Number(settings.temperature ?? 0.2),
     tools: tools.length ? tools : undefined,
     tool_choice: tools.length ? 'auto' : undefined,
-    reasoning: reasoningParam(settings),
+    reasoning: reasoningParam(settings, settings.model),
     provider: openRouterProviderPreferences(),
     stream,
   };

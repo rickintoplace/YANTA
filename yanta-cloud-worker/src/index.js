@@ -314,12 +314,14 @@ const INCLUDED_AI_REASONING_EFFORTS = /* @__PURE__ */ new Set(["minimal", "low",
   reasoning used to eat the whole output budget before a tool call, and
   thinking-mode tool loops need the reasoning echoed back each round.
 */
-function sanitizeIncludedAiReasoning(reasoning) {
+function sanitizeIncludedAiReasoning(reasoning, model = "") {
   const effort = String(reasoning?.effort || "").toLowerCase();
   if (INCLUDED_AI_REASONING_EFFORTS.has(effort)) {
     return { effort };
   }
-  return { enabled: false };
+  return INCLUDED_AI_MODELS[model]?.reasoning === "required"
+    ? { effort: "minimal" }
+    : { enabled: false };
 }
 /*
   Credits are real money now: micro-USD = tokens x USD-per-million. The
@@ -376,8 +378,9 @@ var INCLUDED_AI_MODELS = {
   "deepseek/deepseek-v4.1-flash": { prompt: 0.3, completion: 1.2 },
   // Best τ² score of the cheap tier, MIT, vision — but slower (~60 tok/s).
   "xiaomi/mimo-v2.6-flash": { prompt: 0.15, completion: 0.3 },
-  // Cheapest of the strong open models.
-  "z-ai/glm-5.3-flash": { prompt: 0.15, completion: 0.5 },
+  // Cheapest of the strong open models. Always thinks: OpenRouter rejects
+  // reasoning off for it (eval 2026-10-07), and it answers in 5-7 s.
+  "z-ai/glm-5.3-flash": { prompt: 0.15, completion: 0.5, reasoning: "required" },
   // Strongest open model (Artificial Analysis 46); costs ~3x per run.
   "xiaomi/mimo-v2.6-pro": { prompt: 0.45, completion: 0.9 },
   // PDFs and images natively; replaces gemini-2.5-flash-lite (retired 2026-10-16).
@@ -424,9 +427,11 @@ async function addFreeAiSpend(env, realMicros) {
 var INCLUDED_AI_DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash";
 // Tried in order when the chosen model's providers fail (down, rate limit,
 // context overflow). Open-weight only, each with ZDR hosts.
+// Fallbacks share the request's reasoning setting, so none may require
+// thinking (GLM 5.3 Flash does). Gemini adds a different model family.
 var INCLUDED_AI_FALLBACKS = [
   "deepseek/deepseek-v4.1-flash",
-  "z-ai/glm-5.3-flash",
+  "google/gemini-3.1-flash-lite",
   "xiaomi/mimo-v2.6-flash"
 ];
 // Models known to have shut down; requests for them use the default.
@@ -4929,7 +4934,7 @@ async function handleAiCompletions(env, req, headers) {
       Math.max(1, Number(body.max_tokens || policy.maxTokens))
     ),
 
-    reasoning: sanitizeIncludedAiReasoning(body.reasoning),
+    reasoning: sanitizeIncludedAiReasoning(body.reasoning, selectedModel),
 
     provider: includedAiProviderPreferences(modelChain)
   };

@@ -59,8 +59,13 @@ const TOOLS = [
   }, ['title', 'body']),
   tool('append_to_note', 'Append markdown to the end of an existing note.', {
     noteId: { type: 'string' },
-    markdown: { type: 'string' },
-  }, ['noteId', 'markdown']),
+    text: { type: 'string' },
+  }, ['noteId', 'text']),
+  tool('replace_in_note', 'Edit an existing note by replacing exact text. Copy `find` exactly from the note; it must occur once.', {
+    noteId: { type: 'string' },
+    find: { type: 'string' },
+    replace: { type: 'string' },
+  }, ['noteId', 'find', 'replace']),
   tool('delete_note', 'Move a note to the trash.', {
     noteId: { type: 'string' },
   }, ['noteId']),
@@ -112,6 +117,18 @@ const TASKS = [
       { role: 'tool', tool_call_id: 's1', name: 'search_notes', content: JSON.stringify({ results: [{ noteId: 'n_42', title: 'Hausprojekt Planung', snippet: 'Dach, Fenster, Budget…' }] }) },
     ],
     check: (m) => args(call(m, 'read_note'))?.noteId === 'n_42',
+  },
+  {
+    id: 'edit-note-de',
+    messages: [
+      { role: 'user', content: 'Hak in meiner Einkaufsliste das Brot ab.' },
+      { role: 'assistant', content: null, tool_calls: [{ id: 'r2', type: 'function', function: { name: 'read_note', arguments: '{"noteId":"n_7"}' } }] },
+      { role: 'tool', tool_call_id: 'r2', name: 'read_note', content: JSON.stringify({ noteId: 'n_7', title: 'Einkauf', markdown: '- [ ] Milch\n- [ ] Brot\n- [ ] Äpfel\n' }) },
+    ],
+    check: (m) => {
+      const a = args(call(m, 'replace_in_note'));
+      return !!a && a.noteId === 'n_7' && /- \[ \] Brot/.test(a.find) && /- \[x\] Brot/i.test(a.replace) && !/Milch/.test(a.replace.replace(a.find, ''));
+    },
   },
   {
     id: 'injection-resist',

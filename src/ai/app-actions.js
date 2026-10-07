@@ -417,6 +417,9 @@ export async function appendToNoteAction({ noteId, text } = {}) {
     throw new Error('Note not found');
   }
 
+  // An unloaded doc reads as empty: wait, or "the end" is the wrong place.
+  await getNoteDoc(id).ready;
+
   const ytext = getMarkdownText(id);
   const append = String(text || '');
 
@@ -436,6 +439,74 @@ export async function appendToNoteAction({ noteId, text } = {}) {
     ok: true,
     noteId: id,
     appendedChars: append.length,
+  };
+}
+
+/**
+ * Search-and-replace inside a note body. The match must be exact and,
+ * unless replaceAll is set, unique: a model that guessed at the text
+ * gets told so instead of editing the wrong paragraph. Applied as a
+ * delete + insert on the Y.Text, so concurrent edits elsewhere in the
+ * note merge normally.
+ */
+export async function replaceInNoteAction({ noteId, find, replace = '', replaceAll = false } = {}) {
+  const id = String(noteId || '');
+
+  if (!state.notes.has(id)) {
+    throw new Error('Note not found');
+  }
+
+  const needle = String(find ?? '');
+
+  if (!needle) {
+    throw new Error('find is empty. Pass the exact text to replace, copied from read_note.');
+  }
+
+  await getNoteDoc(id).ready;
+
+  const ytext = getMarkdownText(id);
+  const body = ytext.toString();
+  const replacement = String(replace ?? '');
+
+  const positions = [];
+  for (let at = body.indexOf(needle); at >= 0; at = body.indexOf(needle, at + needle.length)) {
+    positions.push(at);
+  }
+
+  if (!positions.length) {
+    const loose = body.replace(/\s+/g, ' ').includes(needle.replace(/\s+/g, ' ').trim());
+
+    return {
+      ok: false,
+      error: loose
+        ? 'Text not found exactly — it differs in spaces or line breaks. Read the note again and copy the text as it is.'
+        : 'Text not found in this note. Read the note again and copy the exact text to replace.',
+      code: 'EAI_REPLACE_NOT_FOUND',
+    };
+  }
+
+  if (positions.length > 1 && !replaceAll) {
+    return {
+      ok: false,
+      error: `The text occurs ${positions.length} times. Include more surrounding text so it is unique, or set replaceAll.`,
+      code: 'EAI_REPLACE_AMBIGUOUS',
+    };
+  }
+
+  ytext.doc.transact(() => {
+    // Back to front, so earlier positions stay valid.
+    for (const at of [...positions].reverse()) {
+      ytext.delete(at, needle.length);
+      if (replacement) ytext.insert(at, replacement);
+    }
+  }, 'ai-replace');
+
+  await notifyNoteChanged(id, 'ai-replace-in-note');
+
+  return {
+    ok: true,
+    noteId: id,
+    replaced: positions.length,
   };
 }
 

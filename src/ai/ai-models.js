@@ -27,8 +27,10 @@ export const INCLUDED_AI_MODELS = Object.freeze([
   {
     id: 'z-ai/glm-5.3-flash',
     label: 'GLM 5.3 Flash',
-    hint: 'Strong and very economical.',
+    hint: 'Strong and very economical. Always thinks first, so replies take a few seconds.',
     vision: true,
+    // OpenRouter rejects reasoning off for it; "off" is sent as minimal.
+    reasoningRequired: true,
   },
   {
     id: 'xiaomi/mimo-v2.6-pro',

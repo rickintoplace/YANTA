@@ -1481,6 +1481,7 @@ function toolDisplayName(name) {
     update_drawing: 'Update drawing',
     update_note_appearance: 'Update note appearance',
     append_to_note: 'Append to note',
+    replace_in_note: 'Edit note',
     replace_current_selection: 'Replace selection',
     delete_note: 'Delete note',
 
@@ -1597,6 +1598,12 @@ function summarizeToolResult(name, data, rawContent = '') {
 
   if (name === 'append_to_note') {
     return `Appended ${data.appendedChars || 0} characters to note.`;
+  }
+
+  if (name === 'replace_in_note') {
+    return data.ok === false
+      ? (data.error || 'Text not found in note.')
+      : `Replaced ${data.replaced || 0} passage${data.replaced === 1 ? '' : 's'} in note.`;
   }
 
   if (name === 'replace_current_selection') {
@@ -2721,6 +2728,10 @@ function externalApprovalToolLabel(toolName, args = {}) {
 
   if (toolName === 'append_to_note') {
     return `append text to note ${args.noteId || ''}`.trim();
+  }
+
+  if (toolName === 'replace_in_note') {
+    return `edit text in note ${args.noteId || ''}`.trim();
   }
 
   if (toolName === 'replace_current_selection') {

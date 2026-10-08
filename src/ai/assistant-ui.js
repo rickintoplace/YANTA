@@ -2566,6 +2566,8 @@ function renderAssistantMessageNode(msg) {
         return msg.widgetState[i];
       },
       save: saveWidgetStateSoon,
+      // A "choices" widget answers on the user's behalf when clicked.
+      ask: (text) => submitUserText(text),
     });
   } else if (!parsed.notes.length && !parsed.events.length && !parsed.chips.length) {
     content.textContent = '[No response]';
@@ -3925,7 +3927,8 @@ function injectCss() {
   flex: 0 0 auto;
   max-height: min(62vh, 720px);
   min-height: 0;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: 12px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-elev);
@@ -4058,7 +4061,7 @@ function injectCss() {
 .yanta-ai-msg {
   border-radius: 12px;
   padding: 10px 12px;
-  background: var(--bg-elev-2);
+  /* background: var(--bg-elev-2); */
 }
 
 .yanta-ai-msg.user {
@@ -4077,7 +4080,7 @@ function injectCss() {
     width: -moz-fit-content;
     width: fit-content;
     margin-right: auto;
-    border: 1px solid var(--border);
+    /* border: 1px solid var(--border); */
     border-radius: 4px 24px 24px 24px;
 }
 

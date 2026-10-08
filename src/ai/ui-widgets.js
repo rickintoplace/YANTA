@@ -3,7 +3,8 @@
 //
 // An answer may contain one fenced block with the language `yanta-ui`
 // holding JSON. It is rendered as a widget from a fixed catalogue —
-// calculator, chart, table, checklist, events, stats — with YANTA's own
+// calculator, chart, table, checklist, events, stats, progress, steps,
+// pros/cons, choices, flashcards, timer — with YANTA's own
 // components and CSS. Nothing in the block is executed: formulas go
 // through the evaluator in ui-expr.js, text is always escaped, and the
 // only side effects are the ones the user clicks (save as note, add an
@@ -18,6 +19,8 @@
 import { lucide, escapeHtml, toast, actionToast } from '../core.js';
 import { getLocale } from '../i18n/index.js';
 import { compileFormula } from './ui-expr.js';
+import { chartElement } from './ui-widget-charts.js';
+import { WIDGET_CSS } from './ui-widget-styles.js';
 
 export const WIDGET_LANG = 'yanta-ui';
 
@@ -39,6 +42,12 @@ export const WIDGET_INSTRUCTIONS = [
   '- checklist: {"type":"checklist","title":"…","items":[{"text":"Passport","done":false}]}',
   '- events: {"type":"events","title":"…","items":[{"title":"Flight","start":"2026-11-12T07:40","end":"2026-11-12T10:15","location":"FRA"}]} — local times; the user adds them with one click, so do not also call create_event.',
   '- stats: {"type":"stats","title":"…","items":[{"label":"Notes","value":"128","delta":"+12 this week"}]}',
+  '- progress: {"type":"progress","title":"…","items":[{"label":"Budget used","value":620,"target":800,"format":"currency","currency":"EUR"}]}',
+  '- steps: {"type":"steps","title":"…","items":[{"title":"Book flights","text":"…","status":"done|current|todo"}]} — instructions or a plan in order; the user ticks steps off.',
+  '- proscons: {"type":"proscons","title":"…","pros":["…"],"cons":["…"],"verdict":"…"} — for a decision.',
+  '- choices: {"type":"choices","question":"…","options":[{"label":"…","description":"…","prompt":"what the user says when picking it"}]} — when you need the user to choose before you can continue.',
+  '- flashcards: {"type":"flashcards","title":"…","cards":[{"front":"question","back":"answer"}]} — for learning or revising.',
+  '- timer: {"type":"timer","title":"…","label":"Focus","minutes":25,"presets":[5,25,50]} — when the user wants a countdown.',
   'The user can save any widget as a note.',
 ].join('\n');
 
@@ -203,6 +212,61 @@ function normalizeSpec(raw) {
     return { ...base, items };
   }
 
+  if (type === 'steps') {
+    const items = (Array.isArray(raw.items) ? raw.items : []).slice(0, 20).map((i) => (typeof i === 'string'
+      ? { title: str(i, 140), text: '', status: 'todo' }
+      : { title: str(i?.title, 140), text: str(i?.text, 400), status: ['done', 'current', 'todo'].includes(i?.status) ? i.status : 'todo' }
+    )).filter((i) => i.title);
+    if (!items.length) throw new Error('No steps');
+    return { ...base, items };
+  }
+
+  if (type === 'proscons') {
+    const list = (v) => (Array.isArray(v) ? v : []).slice(0, 12).map((x) => str(x, 200)).filter(Boolean);
+    const pros = list(raw.pros);
+    const cons = list(raw.cons);
+    if (!pros.length && !cons.length) throw new Error('No pros or cons');
+    return { ...base, pros, cons, verdict: str(raw.verdict, 300) };
+  }
+
+  if (type === 'choices') {
+    const options = (Array.isArray(raw.options) ? raw.options : []).slice(0, 6).map((o) => (typeof o === 'string'
+      ? { label: str(o, 80), description: '', prompt: str(o, 300) }
+      : { label: str(o?.label, 80), description: str(o?.description, 200), prompt: str(o?.prompt || o?.label, 300) }
+    )).filter((o) => o.label);
+    if (options.length < 2) throw new Error('Choices need at least two options');
+    return { ...base, question: str(raw.question, 200), options };
+  }
+
+  if (type === 'flashcards') {
+    const cards = (Array.isArray(raw.cards) ? raw.cards : []).slice(0, 60)
+      .map((c) => ({ front: str(c?.front, 300), back: str(c?.back, 600) }))
+      .filter((c) => c.front && c.back);
+    if (!cards.length) throw new Error('No cards');
+    return { ...base, cards };
+  }
+
+  if (type === 'timer') {
+    const seconds = Math.round(num(raw.seconds, 0) || num(raw.minutes, 0) * 60);
+    if (!(seconds > 0 && seconds <= 24 * 3600)) throw new Error('Timer needs 1 s to 24 h');
+    const presets = (Array.isArray(raw.presets) ? raw.presets : []).slice(0, 5)
+      .map((m) => Math.round(num(m) * 60)).filter((s) => s > 0 && s <= 24 * 3600);
+    return { ...base, label: str(raw.label, 80), seconds, presets };
+  }
+
+  if (type === 'progress') {
+    const items = (Array.isArray(raw.items) ? raw.items : []).slice(0, 12).map((i) => ({
+      label: str(i?.label, 80),
+      value: num(i?.value, NaN),
+      target: num(i?.target, NaN),
+      unit: str(i?.unit, 12),
+      format: ['number', 'integer', 'currency', 'percent'].includes(i?.format) ? i.format : 'number',
+      currency: /^[A-Z]{3}$/.test(String(i?.currency || '')) ? i.currency : 'EUR',
+    })).filter((i) => i.label && Number.isFinite(i.value) && Number.isFinite(i.target) && i.target !== 0);
+    if (!items.length) throw new Error('No progress items');
+    return { ...base, items };
+  }
+
   throw new Error(`Unknown widget type "${type}"`);
 }
 
@@ -246,163 +310,63 @@ function el(tag, cls = '', html = '') {
   return node;
 }
 
-const PALETTE = ['var(--accent)', '#e8833a', '#3f9fd8', '#b06ad9', '#d9b23f', '#3fae7e'];
+function button(cls, html, onClick, title = '') {
+  const b = el('button', cls, html);
+  b.type = 'button';
+  if (title) {
+    b.title = title;
+    b.setAttribute('aria-label', title);
+  }
+  if (onClick) b.addEventListener('click', onClick);
+  return b;
+}
 
-// ----------------------------------------------------------------- charts
+const reducedMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-/** An SVG chart. `series` values may contain NaN (gaps). */
-function renderChartSvg({ kind = 'bar', labels, series, format, currency }, width = 520) {
-  // Drawn at the width it is shown at, so text stays 11 px on a phone and
-  // on a wide pane alike (see responsiveChart).
-  const W = Math.max(260, Math.min(900, Math.round(width)));
-  const H = Math.round(Math.max(170, Math.min(260, W * 0.42)));
-  const pad = { l: 34, r: 12, t: 12, b: 28 };
-  const ns = 'http://www.w3.org/2000/svg';
-  const fmt = (v) => formatValue(v, { format, currency });
+/** Counts a number from its last shown value to the new one. */
+function tweenNumber(node, to, format) {
+  const from = Number(node.dataset.v);
+  node.dataset.v = String(to);
 
-  const svg = document.createElementNS(ns, 'svg');
-  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-  svg.setAttribute('class', 'yw-chart-svg');
-  svg.setAttribute('role', 'img');
+  if (!Number.isFinite(from) || !Number.isFinite(to) || from === to || reducedMotion()) {
+    node.textContent = format(to);
+    return;
+  }
 
-  const add = (name, attrs, text) => {
-    const n = document.createElementNS(ns, name);
-    for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v);
-    if (text != null) n.textContent = text;
-    svg.append(n);
-    return n;
+  const start = performance.now();
+  const ms = 320;
+  cancelAnimationFrame(Number(node.dataset.raf) || 0);
+
+  const step = (now) => {
+    const k = Math.min(1, (now - start) / ms);
+    const e = 1 - (1 - k) ** 3;
+    node.textContent = format(from + (to - from) * e);
+    if (k < 1) node.dataset.raf = String(requestAnimationFrame(step));
   };
 
-  if (kind === 'donut') {
-    const values = series[0].values.map((v) => Math.max(0, num(v)));
-    const total = values.reduce((a, b) => a + b, 0) || 1;
-    const r = Math.min(80, H / 2 - 12);
-    const ir = r * 0.6;
-    const cx = r + 12;
-    const cy = H / 2;
-    let angle = -Math.PI / 2;
+  node.dataset.raf = String(requestAnimationFrame(step));
+  node.closest('.yw-output, .yw-stat')?.animate?.(
+    [{ boxShadow: '0 0 0 0 color-mix(in srgb, var(--accent) 35%, transparent)' }, { boxShadow: '0 0 0 6px transparent' }],
+    { duration: 500, easing: 'ease-out' }
+  );
+}
 
-    values.forEach((v, i) => {
-      const a2 = angle + (v / total) * Math.PI * 2;
-      const large = a2 - angle > Math.PI ? 1 : 0;
-      const p = (rad, rr) => `${cx + rr * Math.cos(rad)},${cy + rr * Math.sin(rad)}`;
-      const d = v / total >= 0.9999
-        ? `M${cx - r},${cy} a${r},${r} 0 1,0 ${2 * r},0 a${r},${r} 0 1,0 ${-2 * r},0 M${cx - ir},${cy} a${ir},${ir} 0 1,1 ${2 * ir},0 a${ir},${ir} 0 1,1 ${-2 * ir},0`
-        : `M${p(angle, r)} A${r},${r} 0 ${large} 1 ${p(a2, r)} L${p(a2, ir)} A${ir},${ir} 0 ${large} 0 ${p(angle, ir)} Z`;
-      const path = add('path', { d, fill: PALETTE[i % PALETTE.length], 'fill-rule': 'evenodd' });
-      const t = document.createElementNS(ns, 'title');
-      t.textContent = `${labels[i]}: ${fmt(v)} (${Math.round((v / total) * 100)} %)`;
-      path.append(t);
-      angle = a2;
-    });
-
-    const lx = cx + r + 24;
-    labels.slice(0, 10).forEach((label, i) => {
-      const y = cy - (Math.min(labels.length, 10) * 19) / 2 + 14 + i * 19;
-      add('rect', { x: lx, y: y - 9, width: 10, height: 10, rx: 2, fill: PALETTE[i % PALETTE.length] });
-      add('text', { x: lx + 16, y, class: 'yw-chart-legend' }, `${label} · ${fmt(values[i])} (${Math.round((values[i] / total) * 100)} %)`);
-    });
-
-    return svg;
-  }
-
-  const all = series.flatMap((s) => s.values).filter(Number.isFinite);
-  let min = Math.min(0, ...all);
-  let max = Math.max(0, ...all);
-  if (min === max) max = min + 1;
-
-  // Round the axis to a readable step.
-  const span = max - min;
-  const step = 10 ** Math.floor(Math.log10(span / 4));
-  const nice = [1, 2, 2.5, 5, 10].map((m) => m * step).find((s) => span / s <= 5) || step * 10;
-  min = Math.floor(min / nice) * nice;
-  max = Math.ceil(max / nice) * nice;
-
-  // Room for the longest tick label (about 6.3 px per character at 11 px).
-  const tickLabel = (v) => formatValue(v, { format, currency, decimals: Math.abs(nice) < 1 ? 2 : 0 });
-  pad.l = Math.max(pad.l, 10 + Math.max(tickLabel(min).length, tickLabel(max).length) * 6.3);
-
-  const iw = W - pad.l - pad.r;
-  const ih = H - pad.t - pad.b;
-  const sy = (v) => pad.t + ih - ((v - min) / (max - min)) * ih;
-
-  for (let v = min; v <= max + nice / 2; v += nice) {
-    add('line', { x1: pad.l, x2: W - pad.r, y1: sy(v), y2: sy(v), class: v === 0 ? 'yw-chart-zero' : 'yw-chart-grid' });
-    add('text', { x: pad.l - 6, y: sy(v) + 4, class: 'yw-chart-axis', 'text-anchor': 'end' }, tickLabel(v));
-  }
-
-  const n = labels.length;
-  const every = Math.ceil(n / Math.max(3, Math.floor(iw / 56)));
-  const bandX = (i) => pad.l + (iw / n) * i;
-
-  labels.forEach((label, i) => {
-    if (i % every) return;
-    add('text', { x: bandX(i) + iw / n / 2, y: H - 8, class: 'yw-chart-axis', 'text-anchor': 'middle' }, label.length > 10 ? `${label.slice(0, 9)}…` : label);
-  });
-
-  if (kind === 'line') {
-    series.forEach((s, si) => {
-      const pts = s.values.map((v, i) => (Number.isFinite(v) ? [bandX(i) + iw / n / 2, sy(v)] : null));
-      const d = pts.reduce((acc, p, i) => (p ? `${acc}${acc && pts[i - 1] ? 'L' : 'M'}${p[0].toFixed(1)},${p[1].toFixed(1)}` : acc), '');
-      add('path', { d, fill: 'none', stroke: PALETTE[si % PALETTE.length], 'stroke-width': 2.2, 'stroke-linejoin': 'round', 'stroke-linecap': 'round' });
-      if (n <= 31) {
-        pts.forEach((p, i) => {
-          if (!p) return;
-          const c = add('circle', { cx: p[0], cy: p[1], r: 3, fill: PALETTE[si % PALETTE.length] });
-          const t = document.createElementNS(ns, 'title');
-          t.textContent = `${s.name} · ${labels[i]}: ${fmt(s.values[i])}`;
-          c.append(t);
-        });
-      }
-    });
+/** Sets a bar's width after first paint, so it grows instead of appearing. */
+function growTo(node, pct) {
+  const clamped = `${Math.max(0, Math.min(100, pct))}%`;
+  if (!node.isConnected) {
+    node.style.width = '0%';
+    requestAnimationFrame(() => requestAnimationFrame(() => { node.style.width = clamped; }));
   } else {
-    const groupW = (iw / n) * 0.78;
-    const barW = groupW / series.length;
-    series.forEach((s, si) => {
-      s.values.forEach((v, i) => {
-        if (!Number.isFinite(v)) return;
-        const x = bandX(i) + (iw / n - groupW) / 2 + si * barW;
-        const y0 = sy(Math.max(0, v));
-        const h = Math.max(1, Math.abs(sy(v) - sy(0)));
-        const r = add('rect', { x: x.toFixed(1), y: y0.toFixed(1), width: Math.max(1, barW - 2).toFixed(1), height: h.toFixed(1), rx: 2, fill: PALETTE[si % PALETTE.length] });
-        const t = document.createElementNS(ns, 'title');
-        t.textContent = `${s.name} · ${labels[i]}: ${fmt(v)}`;
-        r.append(t);
-      });
-    });
+    node.style.width = clamped;
   }
-
-  return svg;
 }
 
-/** A chart that redraws when its box changes width. */
-function responsiveChart(opts) {
-  const box = el('div', 'yw-chart-box');
-  let drawnAt = 0;
-
-  const draw = (width) => {
-    if (!width || Math.abs(width - drawnAt) < 24) return;
-    drawnAt = width;
-    box.replaceChildren(renderChartSvg(opts, width));
-  };
-
-  draw(520);
-
-  if (typeof ResizeObserver === 'function') {
-    const ro = new ResizeObserver((entries) => draw(entries[0]?.contentRect?.width));
-    ro.observe(box);
-  }
-
-  return box;
-}
-
-function chartLegend(series) {
-  if (series.length < 2) return null;
-  const legend = el('div', 'yw-legend');
-  series.forEach((s, i) => {
-    legend.append(el('span', '', `<i style="background:${PALETTE[i % PALETTE.length]}"></i>${escapeHtml(s.name)}`));
-  });
-  return legend;
+function sliderFill(input) {
+  const min = Number(input.min || 0);
+  const max = Number(input.max || 100);
+  const v = Number(input.value);
+  input.style.setProperty('--fill', `${max > min ? ((v - min) / (max - min)) * 100 : 0}%`);
 }
 
 // ---------------------------------------------------------------- widgets
@@ -437,50 +401,49 @@ function renderCalculator(spec, state, save) {
   const root = el('div', 'yw-calc');
   const form = el('div', 'yw-inputs');
   const outputs = el('div', 'yw-outputs');
-  const chartBox = el('div', 'yw-calc-chart');
-
   const values = calculatorState(spec, state);
 
-  const update = () => {
-    const results = computeOutputs(spec, values);
+  // Output cards are built once and only their numbers change.
+  const outNodes = spec.outputs.map((o) => {
+    const card = el('div', `yw-output${o.primary ? ' is-primary' : ''}`);
+    card.append(el('span', 'yw-output-label', escapeHtml(o.label)));
+    const value = el('strong', 'yw-output-value');
+    card.append(value);
+    outputs.append(card);
+    return value;
+  });
 
-    outputs.replaceChildren(...results.map((r) => {
-      const node = el('div', `yw-output${r.primary ? ' is-primary' : ''}`);
-      node.append(el('span', 'yw-output-label', escapeHtml(r.label)));
-      node.append(el('strong', 'yw-output-value', escapeHtml(formatValue(r.v, r))));
-      return node;
-    }));
+  let chart = null;
 
-    if (spec.chart) {
-      const xs = Array.from({ length: spec.chart.steps }, (_, i) => spec.chart.from + ((spec.chart.to - spec.chart.from) * i) / (spec.chart.steps - 1));
-      const ys = spec.chart.y.map((id) => ({
+  const chartData = () => {
+    const xs = Array.from({ length: spec.chart.steps }, (_, i) => spec.chart.from + ((spec.chart.to - spec.chart.from) * i) / (spec.chart.steps - 1));
+    const first = spec.outputs.find((o) => o.id === spec.chart.y[0]) || {};
+    return {
+      kind: 'line',
+      labels: xs.map((x) => formatValue(x, { decimals: Number.isInteger(x) ? 0 : 1 })),
+      series: spec.chart.y.map((id) => ({
         name: spec.outputs.find((o) => o.id === id)?.label || id,
         values: xs.map((x) => computeOutputs(spec, { ...values, [spec.chart.input]: x }).find((r) => r.id === id)?.v ?? NaN),
-      }));
-      const firstOut = spec.outputs.find((o) => o.id === spec.chart.y[0]) || {};
-      chartBox.replaceChildren(responsiveChart({
-        kind: 'line',
-        labels: xs.map((x) => formatValue(x, { decimals: Number.isInteger(x) ? 0 : 1 })),
-        series: ys,
-        format: firstOut.format,
-        currency: firstOut.currency,
-      }));
-      const legend = chartLegend(ys);
-      if (legend) chartBox.append(legend);
-    }
+      })),
+      fmt: (v) => formatValue(v, first),
+      tickFmt: (v) => formatValue(v, { ...first, decimals: 0 }),
+    };
+  };
 
+  const update = () => {
+    computeOutputs(spec, values).forEach((r, i) => tweenNumber(outNodes[i], r.v, (v) => formatValue(v, r)));
+    if (chart) chart.update(chartData());
     state.values = { ...values };
     save();
   };
 
   for (const input of spec.inputs) {
     const row = el('label', `yw-input yw-input-${input.type}`);
-    row.append(el('span', 'yw-input-label', escapeHtml(input.label)));
-
-    let control;
+    const label = el('span', 'yw-input-label', escapeHtml(input.label));
+    row.append(label);
 
     if (input.type === 'select' && input.options.length) {
-      control = document.createElement('select');
+      const control = document.createElement('select');
       for (const o of input.options) {
         const opt = document.createElement('option');
         opt.value = String(o.value);
@@ -491,46 +454,65 @@ function renderCalculator(spec, state, save) {
       control.addEventListener('change', () => { values[input.id] = Number(control.value); update(); });
       row.append(control);
     } else if (input.type === 'toggle') {
-      control = document.createElement('input');
+      const control = document.createElement('input');
       control.type = 'checkbox';
+      control.className = 'yw-switch';
       control.checked = !!values[input.id];
       control.addEventListener('change', () => { values[input.id] = control.checked ? 1 : 0; update(); });
       row.append(control);
+    } else if (input.type === 'slider') {
+      const readout = el('output', 'yw-slider-value');
+      const show = () => {
+        readout.textContent = `${formatValue(values[input.id], { decimals: input.step && input.step < 1 ? 2 : 0 })}${input.unit ? ` ${input.unit}` : ''}`;
+      };
+      label.append(readout);
+      const control = document.createElement('input');
+      control.type = 'range';
+      control.className = 'yw-range';
+      control.min = String(input.min ?? 0);
+      control.max = String(input.max ?? Math.max(100, values[input.id] * 2));
+      control.step = String(input.step ?? 1);
+      control.value = String(values[input.id]);
+      sliderFill(control);
+      show();
+      control.addEventListener('input', () => {
+        values[input.id] = Number(control.value);
+        sliderFill(control);
+        show();
+        update();
+      });
+      row.append(control);
     } else {
-      const wrap = el('span', 'yw-input-field');
-      control = document.createElement('input');
-      control.type = input.type === 'slider' ? 'range' : 'number';
+      const field = el('span', 'yw-field');
+      const control = document.createElement('input');
+      control.type = 'number';
+      control.inputMode = 'decimal';
       if (input.min != null) control.min = String(input.min);
       if (input.max != null) control.max = String(input.max);
-      control.step = String(input.step ?? (input.type === 'slider' ? 1 : 'any'));
+      control.step = String(input.step ?? 'any');
       control.value = String(values[input.id]);
-
-      const readout = input.type === 'slider' ? el('output', 'yw-slider-value') : null;
-      const showReadout = () => {
-        if (readout) readout.textContent = `${formatValue(values[input.id], { decimals: input.step && input.step < 1 ? 2 : 0 })}${input.unit ? ` ${input.unit}` : ''}`;
-      };
-      showReadout();
-
       control.addEventListener('input', () => {
         const v = Number(control.value);
-        if (Number.isFinite(v)) {
+        if (control.value !== '' && Number.isFinite(v)) {
           values[input.id] = v;
-          showReadout();
           update();
         }
       });
-
-      wrap.append(control);
-      if (readout) wrap.append(readout);
-      else if (input.unit) wrap.append(el('span', 'yw-unit', escapeHtml(input.unit)));
-      row.append(wrap);
+      field.append(control);
+      if (input.unit) field.append(el('span', 'yw-unit', escapeHtml(input.unit)));
+      row.append(field);
     }
 
     form.append(row);
   }
 
   root.append(form, outputs);
-  if (spec.chart) root.append(chartBox);
+
+  if (spec.chart) {
+    chart = chartElement(chartData());
+    chart.classList.add('yw-calc-chart');
+    root.append(chart);
+  }
 
   update();
 
@@ -544,10 +526,13 @@ function renderCalculator(spec, state, save) {
 }
 
 function renderChart(spec) {
-  const root = el('div', 'yw-chart');
-  root.append(responsiveChart(spec));
-  const legend = chartLegend(spec.series);
-  if (legend) root.append(legend);
+  const root = chartElement({
+    kind: spec.kind,
+    labels: spec.labels,
+    series: spec.series,
+    fmt: (v) => formatValue(v, spec),
+    tickFmt: (v) => formatValue(v, { ...spec, decimals: 0 }),
+  });
 
   root.toMarkdown = () => [
     `| | ${spec.series.map((s) => s.name).join(' | ')} |`,
@@ -572,14 +557,11 @@ function renderTable(spec, state, save) {
   if (spec.best) {
     const vals = spec.rows.map((r) => numeric(r[spec.best.column]));
     const ok = vals.filter((v) => v != null);
-    if (ok.length) {
-      const target = spec.best.direction === 'min' ? Math.min(...ok) : Math.max(...ok);
-      bestRow = vals.indexOf(target);
-    }
+    if (ok.length) bestRow = vals.indexOf(spec.best.direction === 'min' ? Math.min(...ok) : Math.max(...ok));
   }
 
   const draw = () => {
-    const order = spec.rows.map((r, i) => i);
+    const order = spec.rows.map((_, i) => i);
     if (sort) {
       order.sort((a, b) => {
         const x = spec.rows[a][sort.column] ?? '';
@@ -593,26 +575,35 @@ function renderTable(spec, state, save) {
 
     const head = el('tr');
     spec.columns.forEach((c, i) => {
-      const th = el('th', '', `${escapeHtml(c)}${sort?.column === i ? (sort.dir === 'desc' ? ' ↓' : ' ↑') : ''}`);
-      th.addEventListener('click', () => {
+      const th = el('th', sort?.column === i ? 'is-sorted' : '', `<span>${escapeHtml(c)}</span>${lucide(sort?.column === i && sort.dir === 'desc' ? 'arrow-down' : 'arrow-up', 11)}`);
+      th.tabIndex = 0;
+      const toggle = () => {
         sort = sort?.column === i && sort.dir === 'asc' ? { column: i, dir: 'desc' } : { column: i, dir: 'asc' };
         state.sort = sort;
         save();
         draw();
-      });
+      };
+      th.addEventListener('click', toggle);
+      th.addEventListener('keydown', (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); } });
       head.append(th);
     });
 
-    const body = order.map((ri) => {
+    const thead = el('thead');
+    thead.append(head);
+    const tbody = el('tbody');
+
+    for (const ri of order) {
       const tr = el('tr', ri === bestRow ? 'is-best' : '');
       spec.columns.forEach((_, ci) => {
         const v = spec.rows[ri][ci] ?? '';
-        tr.append(el('td', numeric(v) != null && ci > 0 ? 'is-num' : '', escapeHtml(v)));
+        const td = el('td', numeric(v) != null && ci > 0 ? 'is-num' : '', escapeHtml(v));
+        if (ri === bestRow && ci === 0) td.insertAdjacentHTML('beforeend', ` <span class="yw-badge">${lucide('trophy', 11)} best</span>`);
+        tr.append(td);
       });
-      return tr;
-    });
+      tbody.append(tr);
+    }
 
-    table.replaceChildren(head, ...body);
+    table.replaceChildren(thead, tbody);
   };
 
   draw();
@@ -627,20 +618,37 @@ function renderTable(spec, state, save) {
   return root;
 }
 
+function progressBar(pct, cls = '') {
+  const bar = el('div', `yw-bar ${cls}`.trim());
+  const fill = el('span');
+  bar.append(fill);
+  growTo(fill, pct);
+  bar.set = (p) => growTo(fill, p);
+  return bar;
+}
+
 function renderChecklist(spec, state, save) {
   const root = el('div', 'yw-checklist');
   const done = Array.isArray(state.done) ? state.done : spec.items.map((i) => i.done);
-  const progress = el('div', 'yw-progress');
+  const head = el('div', 'yw-progress-row');
+  const bar = progressBar(0);
+  const count = el('span', 'yw-progress-count');
+  head.append(bar, count);
+  root.append(head);
 
   const showProgress = () => {
     const n = done.filter(Boolean).length;
-    progress.innerHTML = `<span style="width:${Math.round((n / spec.items.length) * 100)}%"></span><em>${n}/${spec.items.length}</em>`;
+    bar.set((n / spec.items.length) * 100);
+    count.textContent = `${n}/${spec.items.length}`;
+    root.classList.toggle('is-complete', n === spec.items.length);
   };
 
+  const list = el('div', 'yw-checks');
   spec.items.forEach((item, i) => {
     const row = el('label', `yw-check${done[i] ? ' is-done' : ''}`);
     const box = document.createElement('input');
     box.type = 'checkbox';
+    box.className = 'yw-checkbox';
     box.checked = !!done[i];
     box.addEventListener('change', () => {
       done[i] = box.checked;
@@ -649,12 +657,12 @@ function renderChecklist(spec, state, save) {
       save();
       showProgress();
     });
-    row.append(box, el('span', '', escapeHtml(item.text)));
-    root.append(row);
+    row.append(box, el('span', 'yw-check-text', escapeHtml(item.text)));
+    list.append(row);
   });
+  root.append(list);
 
   showProgress();
-  root.prepend(progress);
 
   root.toMarkdown = () => spec.items.map((item, i) => `- [${done[i] ? 'x' : ' '}] ${item.text}`).join('\n');
 
@@ -666,9 +674,8 @@ function formatEventTime(e) {
   const start = new Date(e.start);
   try {
     if (e.allDay) return new Intl.DateTimeFormat(loc, { weekday: 'short', day: 'numeric', month: 'short' }).format(start);
-    const day = new Intl.DateTimeFormat(loc, { weekday: 'short', day: 'numeric', month: 'short' }).format(start);
     const t = (d) => new Intl.DateTimeFormat(loc, { hour: '2-digit', minute: '2-digit' }).format(d);
-    return `${day}, ${t(start)}${e.end && !Number.isNaN(Date.parse(e.end)) ? `–${t(new Date(e.end))}` : ''}`;
+    return `${t(start)}${e.end && !Number.isNaN(Date.parse(e.end)) ? ` – ${t(new Date(e.end))}` : ''}`;
   } catch {
     return e.start;
   }
@@ -678,51 +685,54 @@ function renderEvents(spec, state, save) {
   const root = el('div', 'yw-events');
   const added = Array.isArray(state.added) ? state.added : spec.items.map(() => false);
   const buttons = [];
+  const loc = intlLocale();
+
+  const markAdded = (i) => {
+    const done = el('span', 'yw-added', `${lucide('check', 13)} Added`);
+    buttons[i].replaceWith(done);
+    buttons[i] = done;
+  };
 
   const add = async (i) => {
     if (added[i]) return;
     const e = spec.items[i];
     try {
       const { createEventAction } = await import('./app-actions.js');
-      await createEventAction({
-        title: e.title,
-        start: e.start,
-        end: e.end || null,
-        allDay: e.allDay,
-        location: e.location || undefined,
-      });
+      await createEventAction({ title: e.title, start: e.start, end: e.end || null, allDay: e.allDay, location: e.location || undefined });
       added[i] = true;
       state.added = [...added];
       save();
-      buttons[i].replaceWith(el('span', 'yw-added', `${lucide('check', 13)} Added`));
+      markAdded(i);
     } catch (err) {
       toast(`Could not add the event: ${err?.message || err}`, 'error');
     }
   };
 
   spec.items.forEach((e, i) => {
+    const d = new Date(e.start);
     const row = el('div', 'yw-event');
-    row.append(el('span', 'yw-event-icon', lucide('calendar-days', 15)));
-    const main = el('div', 'yw-event-main');
-    main.append(el('strong', '', escapeHtml(e.title)));
-    main.append(el('small', '', escapeHtml([formatEventTime(e), e.location].filter(Boolean).join(' · '))));
-    row.append(main);
 
-    if (added[i]) {
-      buttons[i] = el('span', 'yw-added', `${lucide('check', 13)} Added`);
-    } else {
-      buttons[i] = el('button', 'yw-btn', `${lucide('calendar-plus', 13)} Add`);
-      buttons[i].type = 'button';
-      buttons[i].addEventListener('click', () => add(i));
+    const date = el('div', 'yw-event-date');
+    try {
+      date.innerHTML = `<small>${escapeHtml(new Intl.DateTimeFormat(loc, { month: 'short' }).format(d))}</small><strong>${d.getDate()}</strong><small>${escapeHtml(new Intl.DateTimeFormat(loc, { weekday: 'short' }).format(d))}</small>`;
+    } catch {
+      date.textContent = e.start.slice(5, 10);
     }
 
-    row.append(buttons[i]);
+    const main = el('div', 'yw-event-main');
+    main.append(el('strong', '', escapeHtml(e.title)));
+    main.append(el('small', '', escapeHtml([e.allDay ? 'All day' : formatEventTime(e), e.location].filter(Boolean).join(' · '))));
+
+    buttons[i] = button('yw-btn yw-btn-soft', `${lucide('calendar-plus', 13)}<span>Add</span>`, () => add(i), 'Add to calendar');
+
+    row.append(date, main, buttons[i]);
     root.append(row);
+    if (added[i]) markAdded(i);
   });
 
   root.extraActions = spec.items.length > 1
     ? [{
-        label: 'Add all to calendar',
+        label: 'Add all',
         icon: 'calendar-plus',
         run: async () => {
           for (let i = 0; i < spec.items.length; i++) await add(i);
@@ -731,7 +741,7 @@ function renderEvents(spec, state, save) {
       }]
     : [];
 
-  root.toMarkdown = () => spec.items.map((e) => `- **${e.title}** — ${formatEventTime(e)}${e.location ? ` · ${e.location}` : ''}`).join('\n');
+  root.toMarkdown = () => spec.items.map((e) => `- **${e.title}** — ${e.start.replace('T', ' ')}${e.end ? ` – ${e.end.replace('T', ' ')}` : ''}${e.location ? ` · ${e.location}` : ''}`).join('\n');
 
   return root;
 }
@@ -742,11 +752,282 @@ function renderStats(spec) {
     const card = el('div', 'yw-stat');
     if (s.hint) card.title = s.hint;
     card.append(el('span', 'yw-stat-label', escapeHtml(s.label)));
-    card.append(el('strong', 'yw-stat-value', escapeHtml(s.value)));
-    if (s.delta) card.append(el('small', `yw-stat-delta${/^[-−]/.test(s.delta) ? ' is-down' : /^\+/.test(s.delta) ? ' is-up' : ''}`, escapeHtml(s.delta)));
+    const value = el('strong', 'yw-stat-value', escapeHtml(s.value));
+    card.append(value);
+    if (s.delta) {
+      const up = /^\+/.test(s.delta);
+      const down = /^[-−]/.test(s.delta);
+      card.append(el('small', `yw-stat-delta${up ? ' is-up' : down ? ' is-down' : ''}`, `${up ? lucide('trending-up', 12) : down ? lucide('trending-down', 12) : ''}${escapeHtml(s.delta)}`));
+    }
     root.append(card);
+
+    // Count up purely numeric values.
+    const n = Number(String(s.value).replace(/[^\d.,-]/g, '').replace(',', '.'));
+    if (/^[\d.,\s]+$/.test(s.value) && Number.isFinite(n) && !reducedMotion()) {
+      value.dataset.v = '0';
+      requestAnimationFrame(() => tweenNumber(value, n, (v) => formatValue(v, { decimals: Number.isInteger(n) ? 0 : 1 })));
+    }
   }
   root.toMarkdown = () => spec.items.map((s) => `- ${s.label}: **${s.value}**${s.delta ? ` (${s.delta})` : ''}`).join('\n');
+  return root;
+}
+
+function renderProgress(spec) {
+  const root = el('div', 'yw-progress-list');
+  for (const item of spec.items) {
+    const pct = (item.value / item.target) * 100;
+    const row = el('div', `yw-progress-item${pct >= 100 ? ' is-full' : ''}`);
+    const top = el('div', 'yw-progress-top');
+    top.append(el('span', '', escapeHtml(item.label)));
+    top.append(el('span', 'yw-progress-num', `<b>${escapeHtml(formatValue(item.value, item))}</b> / ${escapeHtml(formatValue(item.target, item))} · ${Math.round(pct)} %`));
+    row.append(top, progressBar(pct, pct > 100 ? 'is-over' : ''));
+    root.append(row);
+  }
+  root.toMarkdown = () => spec.items.map((i) => `- ${i.label}: ${formatValue(i.value, i)} / ${formatValue(i.target, i)} (${Math.round((i.value / i.target) * 100)} %)`).join('\n');
+  return root;
+}
+
+function renderSteps(spec, state, save) {
+  const root = el('ol', 'yw-steps');
+  const status = Array.isArray(state.status) ? state.status : spec.items.map((i) => i.status);
+
+  const paint = () => {
+    [...root.children].forEach((li, i) => {
+      li.className = `yw-step is-${status[i]}`;
+      li.querySelector('.yw-step-dot').innerHTML = status[i] === 'done' ? lucide('check', 12) : String(i + 1);
+    });
+  };
+
+  spec.items.forEach((item, i) => {
+    const li = el('li');
+    const dot = button('yw-step-dot', '', () => {
+      status[i] = status[i] === 'done' ? 'todo' : 'done';
+      // The first open step after a done one is "current".
+      const next = status.findIndex((s) => s !== 'done');
+      status.forEach((s, j) => { if (s !== 'done') status[j] = j === next ? 'current' : 'todo'; });
+      state.status = [...status];
+      save();
+      paint();
+    }, 'Mark as done');
+    const body = el('div', 'yw-step-body');
+    body.append(el('strong', '', escapeHtml(item.title)));
+    if (item.text) body.append(el('p', '', escapeHtml(item.text)));
+    li.append(dot, body);
+    root.append(li);
+  });
+
+  paint();
+  root.toMarkdown = () => spec.items.map((item, i) => `${i + 1}. ${status[i] === 'done' ? '~~' : ''}**${item.title}**${status[i] === 'done' ? '~~' : ''}${item.text ? ` — ${item.text}` : ''}`).join('\n');
+  return root;
+}
+
+function renderProsCons(spec) {
+  const root = el('div', 'yw-proscons');
+  const col = (title, items, cls, icon) => {
+    const c = el('div', `yw-pc ${cls}`);
+    c.append(el('div', 'yw-pc-head', `${lucide(icon, 14)}<span>${title}</span><em>${items.length}</em>`));
+    const ul = el('ul');
+    for (const t of items) ul.append(el('li', '', escapeHtml(t)));
+    c.append(ul);
+    return c;
+  };
+  root.append(col('Pros', spec.pros, 'is-pro', 'thumbs-up'), col('Cons', spec.cons, 'is-con', 'thumbs-down'));
+  if (spec.verdict) root.append(el('div', 'yw-verdict', `${lucide('scale', 14)}<span>${escapeHtml(spec.verdict)}</span>`));
+  root.toMarkdown = () => [
+    '**Pros**', ...spec.pros.map((p) => `- ${p}`), '', '**Cons**', ...spec.cons.map((c) => `- ${c}`),
+    ...(spec.verdict ? ['', `**Verdict:** ${spec.verdict}`] : []),
+  ].join('\n');
+  return root;
+}
+
+function renderChoices(spec, state, save, ctx) {
+  const root = el('div', 'yw-choices');
+  if (spec.question) root.append(el('p', 'yw-question', escapeHtml(spec.question)));
+  const grid = el('div', 'yw-choice-grid');
+
+  spec.options.forEach((o, i) => {
+    const b = button(`yw-choice${state.picked === i ? ' is-picked' : ''}`, `<strong>${escapeHtml(o.label)}</strong>${o.description ? `<small>${escapeHtml(o.description)}</small>` : ''}<span class="yw-choice-go">${lucide('arrow-right', 14)}</span>`, () => {
+      if (state.picked != null || !ctx.ask) return;
+      state.picked = i;
+      save();
+      grid.querySelectorAll('.yw-choice').forEach((n, j) => n.classList.toggle(j === i ? 'is-picked' : 'is-dimmed', true));
+      ctx.ask(o.prompt);
+    });
+    if (state.picked != null && state.picked !== i) b.classList.add('is-dimmed');
+    grid.append(b);
+  });
+
+  root.append(grid);
+  root.noSave = true;
+  return root;
+}
+
+function renderFlashcards(spec, state, save) {
+  const root = el('div', 'yw-cards');
+  let order = Array.isArray(state.order) && state.order.length === spec.cards.length ? state.order : spec.cards.map((_, i) => i);
+  let pos = Math.min(state.pos || 0, spec.cards.length - 1);
+  let flipped = false;
+
+  const card = button('yw-card', '', () => {
+    flipped = !flipped;
+    card.classList.toggle('is-flipped', flipped);
+  }, 'Flip card');
+  const front = el('div', 'yw-card-face yw-card-front');
+  const back = el('div', 'yw-card-face yw-card-back');
+  const inner = el('div', 'yw-card-inner');
+  inner.append(front, back);
+  card.append(inner);
+
+  const nav = el('div', 'yw-card-nav');
+  const counter = el('span', 'yw-card-count');
+  const bar = progressBar(0, 'is-thin');
+
+  const show = () => {
+    const c = spec.cards[order[pos]];
+    flipped = false;
+    card.classList.remove('is-flipped');
+    front.innerHTML = `<small>Question</small><p>${escapeHtml(c.front)}</p><em>${lucide('rotate-3d', 12)} Tap to flip</em>`;
+    back.innerHTML = `<small>Answer</small><p>${escapeHtml(c.back)}</p>`;
+    counter.textContent = `${pos + 1} / ${spec.cards.length}`;
+    bar.set(((pos + 1) / spec.cards.length) * 100);
+    state.pos = pos;
+    state.order = order;
+    save();
+  };
+
+  nav.append(
+    button('yw-icon-btn', lucide('chevron-left', 16), () => { pos = (pos - 1 + spec.cards.length) % spec.cards.length; show(); }, 'Previous'),
+    counter,
+    button('yw-icon-btn', lucide('chevron-right', 16), () => { pos = (pos + 1) % spec.cards.length; show(); }, 'Next'),
+    button('yw-icon-btn', lucide('shuffle', 15), () => {
+      order = [...order].sort(() => Math.random() - 0.5);
+      pos = 0;
+      show();
+    }, 'Shuffle'),
+  );
+
+  root.append(card, bar, nav);
+  show();
+
+  root.toMarkdown = () => spec.cards.map((c) => `**Q:** ${c.front}\n**A:** ${c.back}`).join('\n\n');
+  return root;
+}
+
+// Timers keep running across re-renders: their clock lives here, keyed by
+// the state object of the widget that started them.
+const runningTimers = new WeakMap();
+
+function chime() {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    [0, 0.18, 0.36].forEach((t, i) => {
+      const o = ctx.createOscillator();
+      const g = ctx.createGain();
+      o.frequency.value = [880, 1046, 1318][i];
+      g.gain.setValueAtTime(0.0001, ctx.currentTime + t);
+      g.gain.exponentialRampToValueAtTime(0.2, ctx.currentTime + t + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + t + 0.3);
+      o.connect(g).connect(ctx.destination);
+      o.start(ctx.currentTime + t);
+      o.stop(ctx.currentTime + t + 0.32);
+    });
+  } catch {}
+}
+
+function renderTimer(spec, state, save) {
+  const root = el('div', 'yw-timer');
+  let total = state.total || spec.seconds;
+  const R = 52;
+  const C = 2 * Math.PI * R;
+
+  const ring = el('div', 'yw-timer-ring', `
+    <svg viewBox="0 0 120 120"><circle class="yw-timer-track" cx="60" cy="60" r="${R}"/><circle class="yw-timer-arc" cx="60" cy="60" r="${R}" stroke-dasharray="${C}" stroke-dashoffset="0"/></svg>
+    <div class="yw-timer-text"><strong></strong><small>${escapeHtml(spec.label || '')}</small></div>`);
+  const arc = ring.querySelector('.yw-timer-arc');
+  const text = ring.querySelector('strong');
+
+  const controls = el('div', 'yw-timer-controls');
+  const play = button('yw-btn yw-btn-primary', '', () => toggle());
+  const reset = button('yw-icon-btn', lucide('rotate-ccw', 15), () => { stop(); state.left = total; state.endsAt = null; save(); paint(); }, 'Reset');
+  controls.append(play, reset);
+
+  if (spec.presets.length) {
+    const presets = el('div', 'yw-timer-presets');
+    for (const p of spec.presets) {
+      presets.append(button('yw-chip', `${Math.round(p / 60)} min`, () => {
+        stop();
+        total = p;
+        state.total = p;
+        state.left = p;
+        state.endsAt = null;
+        save();
+        paint();
+      }));
+    }
+    root.append(presets);
+  }
+
+  const left = () => (state.endsAt ? Math.max(0, (state.endsAt - Date.now()) / 1000) : state.left ?? total);
+
+  const paint = () => {
+    const l = left();
+    const m = Math.floor(l / 60);
+    const s = Math.floor(l % 60);
+    text.textContent = `${m >= 60 ? `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}` : m}:${String(s).padStart(2, '0')}`;
+    arc.setAttribute('stroke-dashoffset', String(C * (1 - l / total)));
+    const running = !!state.endsAt;
+    play.innerHTML = `${lucide(running ? 'pause' : 'play', 14)}<span>${running ? 'Pause' : l < total ? 'Resume' : 'Start'}</span>`;
+    root.classList.toggle('is-running', running);
+    root.classList.toggle('is-finished', l <= 0);
+  };
+
+  const tick = () => {
+    if (!root.isConnected && !state.endsAt) return;
+    paint();
+    if (state.endsAt && left() <= 0) {
+      state.endsAt = null;
+      state.left = 0;
+      save();
+      paint();
+      chime();
+      try {
+        if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+          new Notification(spec.label || spec.title || 'Timer', { body: 'Time is up.' });
+        }
+      } catch {}
+      toast(`${spec.label || spec.title || 'Timer'}: time is up`, 'success');
+      return;
+    }
+    if (state.endsAt) runningTimers.set(state, requestAnimationFrame(tick));
+  };
+
+  const stop = () => {
+    if (state.endsAt) {
+      state.left = left();
+      state.endsAt = null;
+    }
+    cancelAnimationFrame(runningTimers.get(state));
+  };
+
+  const toggle = () => {
+    if (state.endsAt) {
+      stop();
+    } else {
+      const l = left() > 0 ? left() : total;
+      state.endsAt = Date.now() + l * 1000;
+      if (typeof Notification !== 'undefined' && Notification.permission === 'default') Notification.requestPermission().catch?.(() => {});
+      runningTimers.set(state, requestAnimationFrame(tick));
+    }
+    save();
+    paint();
+  };
+
+  root.prepend(ring);
+  root.append(controls);
+  paint();
+  if (state.endsAt) runningTimers.set(state, requestAnimationFrame(tick));
+
+  root.toMarkdown = () => `- Timer: ${Math.round(total / 60)} min${spec.label ? ` (${spec.label})` : ''}`;
   return root;
 }
 
@@ -757,6 +1038,27 @@ const RENDERERS = {
   checklist: renderChecklist,
   events: renderEvents,
   stats: renderStats,
+  progress: renderProgress,
+  steps: renderSteps,
+  proscons: renderProsCons,
+  choices: renderChoices,
+  flashcards: renderFlashcards,
+  timer: renderTimer,
+};
+
+const DEFAULT_TITLES = {
+  calculator: 'Calculator',
+  chart: 'Chart',
+  table: 'Comparison',
+  checklist: 'Checklist',
+  events: 'Schedule',
+  stats: 'At a glance',
+  progress: 'Progress',
+  steps: 'Steps',
+  proscons: 'Pros and cons',
+  choices: 'Pick one',
+  flashcards: 'Flashcards',
+  timer: 'Timer',
 };
 
 const ICONS = {
@@ -766,76 +1068,84 @@ const ICONS = {
   checklist: 'list-checks',
   events: 'calendar-days',
   stats: 'gauge',
+  progress: 'target',
+  steps: 'list-ordered',
+  proscons: 'scale',
+  choices: 'messages-square',
+  flashcards: 'layers',
+  timer: 'timer',
 };
 
 /**
  * The widget for one extracted block. `state` is a plain object kept on
- * the message; `save()` persists it.
+ * the message; `save()` persists it; `ask(text)` sends a user message.
  */
-export function renderWidget(block, { state = {}, save = () => {} } = {}) {
+export function renderWidget(block, { state = {}, save = () => {}, ask = null } = {}) {
   injectWidgetStyles();
 
   if (block.pending) {
-    return el('div', 'yw yw-pending', `${lucide('sparkles', 14)}<span>Building an interactive view…</span>`);
+    const node = el('div', 'yw yw--pending');
+    node.innerHTML = `<div class="yw-head"><span class="yw-icon">${lucide('sparkles', 14)}</span><span class="yw-skel" style="width:40%"></span></div><span class="yw-skel"></span><span class="yw-skel" style="width:75%"></span>`;
+    return node;
   }
 
   if (block.error || !block.spec) {
-    const node = el('details', 'yw yw-error');
+    const node = el('details', 'yw yw--error');
     node.innerHTML = `<summary>${lucide('triangle-alert', 13)} This interactive view could not be shown</summary><pre>${escapeHtml(String(block.raw || block.error || '').slice(0, 2000))}</pre>`;
     return node;
   }
 
   const { spec } = block;
-  const card = el('div', `yw yw-${spec.type}`);
+  const card = el('section', `yw yw--${spec.type}`);
 
-  const head = el('div', 'yw-head');
-  head.append(el('span', 'yw-icon', lucide(ICONS[spec.type] || 'sparkles', 14)));
-  head.append(el('strong', 'yw-title', escapeHtml(spec.title || spec.type)));
+  const head = el('header', 'yw-head');
+  head.append(el('span', 'yw-icon', lucide(ICONS[spec.type] || 'sparkles', 15)));
+  const titles = el('div', 'yw-titles');
+  titles.append(el('strong', 'yw-title', escapeHtml(spec.title || DEFAULT_TITLES[spec.type] || spec.type)));
+  if (spec.note) titles.append(el('span', 'yw-sub', escapeHtml(spec.note)));
+  head.append(titles);
   card.append(head);
 
   let body;
   try {
-    body = RENDERERS[spec.type](spec, state, save);
+    body = RENDERERS[spec.type](spec, state, save, { ask });
   } catch (err) {
     console.warn('[YANTA AI] widget failed', err);
-    card.append(el('p', 'yw-note', 'This view could not be built.'));
+    card.append(el('p', 'yw-sub', 'This view could not be built.'));
     return card;
   }
 
+  body.classList.add('yw-body');
   card.append(body);
-  if (spec.note) card.append(el('p', 'yw-note', escapeHtml(spec.note)));
 
   const actions = el('div', 'yw-actions');
 
   for (const extra of body.extraActions || []) {
-    const b = el('button', 'yw-btn', `${lucide(extra.icon, 13)} ${escapeHtml(extra.label)}`);
-    b.type = 'button';
-    b.addEventListener('click', () => extra.run());
-    actions.append(b);
+    actions.append(button('yw-btn', `${lucide(extra.icon, 13)}<span>${escapeHtml(extra.label)}</span>`, () => extra.run(), extra.label));
   }
 
-  const saveBtn = el('button', 'yw-btn', `${lucide('file-plus', 13)} Save as note`);
-  saveBtn.type = 'button';
-  saveBtn.addEventListener('click', async () => {
-    try {
-      const { createNoteAction } = await import('./app-actions.js');
-      const note = await createNoteAction({
-        title: spec.title || 'From YANTA AI',
-        body: body.toMarkdown ? body.toMarkdown() : '',
-      });
-      actionToast(`Saved “${spec.title || 'note'}”`, {
-        actionLabel: 'Open',
-        onAction: async () => {
-          const { openNote } = await import('../notes.js');
-          openNote(note.id);
-        },
-      });
-    } catch (err) {
-      toast(`Could not save: ${err?.message || err}`, 'error');
-    }
-  });
-  actions.append(saveBtn);
-  card.append(actions);
+  if (!body.noSave) {
+    actions.append(button('yw-btn', `${lucide('file-plus', 13)}<span>Save as note</span>`, async () => {
+      try {
+        const { createNoteAction } = await import('./app-actions.js');
+        const note = await createNoteAction({
+          title: spec.title || 'From YANTA AI',
+          body: body.toMarkdown ? body.toMarkdown() : '',
+        });
+        actionToast(`Saved “${spec.title || 'note'}”`, {
+          actionLabel: 'Open',
+          onAction: async () => {
+            const { openNote } = await import('../notes.js');
+            openNote(note.id);
+          },
+        });
+      } catch (err) {
+        toast(`Could not save: ${err?.message || err}`, 'error');
+      }
+    }, 'Save as note'));
+  }
+
+  if (actions.children.length) head.append(actions);
 
   return card;
 }
@@ -844,7 +1154,7 @@ export function renderWidget(block, { state = {}, save = () => {} } = {}) {
  * Replaces the markers in rendered markdown with widgets.
  * `stateFor(i)` returns the persisted state object for widget i.
  */
-export function mountWidgets(root, widgets, { stateFor, save }) {
+export function mountWidgets(root, widgets, { stateFor, save, ask = null }) {
   if (!widgets.length) return;
 
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
@@ -855,7 +1165,7 @@ export function mountWidgets(root, widgets, { stateFor, save }) {
 
   for (const textNode of hits) {
     const i = Number(MARK_RE.exec(textNode.nodeValue)[1]);
-    const widget = renderWidget(widgets[i] || { error: 'missing' }, { state: stateFor(i), save });
+    const widget = renderWidget(widgets[i] || { error: 'missing' }, { state: stateFor(i), save, ask });
     // Replace the whole paragraph the marker sits in.
     const block = textNode.parentElement?.closest('p, div') || textNode.parentElement;
     if (block && block !== root && block.textContent.trim() === textNode.nodeValue.trim()) block.replaceWith(widget);
@@ -873,116 +1183,6 @@ function injectWidgetStyles() {
 
   const style = document.createElement('style');
   style.id = 'yanta-ai-widget-styles';
-  style.textContent = `
-.yanta-ai-msg.assistant:has(.yw) { width: 100%; }
-.yw {
-  margin: 10px 0;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background: var(--bg-elev-2, var(--bg));
-  padding: 12px 14px;
-  display: grid;
-  gap: 10px;
-  max-width: 100%;
-  overflow: hidden;
-}
-.yw-head { display: flex; align-items: center; gap: 8px; }
-.yw-icon {
-  width: 26px; height: 26px; border-radius: 8px;
-  display: inline-flex; align-items: center; justify-content: center;
-  color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent);
-}
-.yw-title { font-size: 13.5px; }
-.yw-note { margin: 0; font-size: 12px; color: var(--text-faint); }
-.yw-actions { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
-.yw-btn {
-  display: inline-flex; align-items: center; gap: 5px;
-  border: 1px solid var(--border); border-radius: 999px;
-  background: transparent; color: var(--text-dim);
-  font-size: 12px; padding: 4px 10px; cursor: pointer;
-}
-.yw-btn:hover { color: var(--text); border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); }
-.yw-pending {
-  grid-auto-flow: column; justify-content: start; align-items: center; gap: 8px;
-  color: var(--text-faint); font-size: 12.5px;
-  animation: yw-pulse 1.4s ease-in-out infinite;
-}
-@keyframes yw-pulse { 50% { opacity: .5; } }
-.yw-error summary { cursor: pointer; font-size: 12px; color: var(--text-faint); }
-.yw-error pre { font-size: 11px; white-space: pre-wrap; max-height: 200px; overflow: auto; }
-
-.yw-calc { display: grid; gap: 12px; }
-.yw-inputs { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px 12px; }
-.yw-input { display: grid; gap: 4px; font-size: 12px; color: var(--text-dim); }
-.yw-input-toggle { grid-template-columns: 1fr auto; align-items: center; }
-.yw-input-field { display: flex; align-items: center; gap: 6px; }
-.yw-input input[type="number"], .yw-input select {
-  width: 100%; min-width: 0; box-sizing: border-box;
-  border: 1px solid var(--border); border-radius: 8px;
-  background: var(--bg); color: var(--text);
-  padding: 6px 8px; font: inherit; font-size: 13px;
-}
-.yw-input input[type="range"] { flex: 1; accent-color: var(--accent); min-width: 0; }
-.yw-slider-value { font-variant-numeric: tabular-nums; color: var(--text); font-size: 12.5px; min-width: 52px; text-align: right; }
-.yw-unit { color: var(--text-faint); }
-.yw-outputs { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; }
-.yw-output {
-  border-radius: 10px; padding: 8px 10px;
-  background: color-mix(in srgb, var(--accent) 6%, transparent);
-  display: grid; gap: 2px;
-}
-.yw-output.is-primary { background: color-mix(in srgb, var(--accent) 16%, transparent); }
-.yw-output-label { font-size: 11.5px; color: var(--text-faint); }
-.yw-output-value { font-size: 17px; font-variant-numeric: tabular-nums; }
-.yw-output.is-primary .yw-output-value { font-size: 21px; }
-
-.yw-chart-box { width: 100%; }
-.yw-chart-svg { width: 100%; height: auto; display: block; }
-.yw-chart-grid { stroke: var(--border); stroke-width: 1; }
-.yw-chart-zero { stroke: var(--text-faint); stroke-width: 1; }
-.yw-chart-axis, .yw-chart-legend { fill: var(--text-faint); font-size: 11px; font-family: inherit; }
-.yw-chart-legend { fill: var(--text-dim); font-size: 12px; }
-.yw-legend { display: flex; flex-wrap: wrap; gap: 10px; font-size: 12px; color: var(--text-dim); }
-.yw-legend i { display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 5px; vertical-align: -1px; }
-
-.yw-table-wrap { overflow-x: auto; }
-.yw-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-.yw-table th {
-  text-align: left; font-weight: 600; color: var(--text-dim);
-  padding: 6px 10px 6px 0; border-bottom: 1px solid var(--border);
-  cursor: pointer; white-space: nowrap; user-select: none;
-}
-.yw-table td { padding: 6px 10px 6px 0; border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
-.yw-table td.is-num { font-variant-numeric: tabular-nums; }
-.yw-table tr.is-best td { background: color-mix(in srgb, var(--accent) 10%, transparent); font-weight: 600; }
-
-.yw-checklist { display: grid; gap: 4px; }
-.yw-check { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; cursor: pointer; padding: 3px 0; }
-.yw-check input { accent-color: var(--accent); margin-top: 3px; }
-.yw-check.is-done span { color: var(--text-faint); text-decoration: line-through; }
-.yw-progress {
-  position: relative; height: 6px; border-radius: 999px; margin: 2px 40px 6px 0;
-  background: color-mix(in srgb, var(--accent) 12%, transparent);
-}
-.yw-progress span { position: absolute; inset: 0 auto 0 0; border-radius: 999px; background: var(--accent); transition: width .2s; }
-.yw-progress em { position: absolute; right: -40px; top: -6px; font-size: 11px; font-style: normal; color: var(--text-faint); }
-
-.yw-events { display: grid; gap: 6px; }
-.yw-event { display: flex; align-items: center; gap: 10px; padding: 6px 0; border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
-.yw-event:last-child { border-bottom: 0; }
-.yw-event-icon { color: var(--accent); display: inline-flex; }
-.yw-event-main { flex: 1; min-width: 0; display: grid; }
-.yw-event-main strong { font-size: 13px; }
-.yw-event-main small { font-size: 11.5px; color: var(--text-faint); }
-.yw-added { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; color: var(--success, #3fb950); }
-
-.yw-stats { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 8px; }
-.yw-stat { border-radius: 10px; padding: 8px 10px; background: color-mix(in srgb, var(--accent) 6%, transparent); display: grid; gap: 2px; }
-.yw-stat-label { font-size: 11.5px; color: var(--text-faint); }
-.yw-stat-value { font-size: 18px; font-variant-numeric: tabular-nums; }
-.yw-stat-delta { font-size: 11.5px; color: var(--text-dim); }
-.yw-stat-delta.is-up { color: var(--success, #3fb950); }
-.yw-stat-delta.is-down { color: var(--warning, #d29922); }
-`;
+  style.textContent = WIDGET_CSS;
   document.head.append(style);
 }

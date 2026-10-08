@@ -597,7 +597,9 @@ function injectAiSettingsPanelCss() {
 
 .yanta-ai-settings-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  /* minmax(0, …): a select sizes itself to its longest option, and with
+     plain 1fr that pushed the panel wider than a phone screen. */
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   gap: 10px;
 }
 
@@ -605,8 +607,19 @@ function injectAiSettingsPanelCss() {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
   font-size: 11px;
   color: var(--text-dim);
+}
+
+.yanta-ai-settings-grid select,
+.yanta-ai-settings-grid input,
+.yanta-ai-settings-grid textarea {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  text-overflow: ellipsis;
 }
 
 .yanta-ai-settings-grid .wide {
@@ -820,7 +833,7 @@ function injectAiSettingsPanelCss() {
 @media (max-width: 880px) {
   .yanta-ai-settings-grid,
   .yanta-ai-location-grid {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .yanta-ai-settings-grid .wide {

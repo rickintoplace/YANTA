@@ -58,4 +58,27 @@ describe('widget blocks', () => {
     expect(formatValue(1234.5, { format: 'integer' })).toMatch(/1.?235/);
     expect(formatValue(7, { format: 'percent' })).toMatch(/7 %/);
   });
+
+  it('accepts the newer widget types and rejects broken ones', () => {
+    const block = (o) => '```yanta-ui\n' + JSON.stringify(o) + '\n```';
+    const text = [
+      block({ type: 'steps', items: ['A', { title: 'B', status: 'done' }] }),
+      block({ type: 'proscons', pros: ['fast'], cons: [] }),
+      block({ type: 'choices', options: ['Only one'] }),
+      block({ type: 'flashcards', cards: [{ front: 'Q', back: 'A' }] }),
+      block({ type: 'timer', minutes: 25, presets: [5, 25] }),
+      block({ type: 'timer', minutes: 0 }),
+      block({ type: 'progress', items: [{ label: 'Budget', value: 620, target: 800 }, { label: 'bad', value: 1, target: 0 }] }),
+    ].join('\n\n');
+    const { widgets } = extractWidgets(text);
+
+    expect(widgets[0].spec.items.map((i) => i.status)).toEqual(['todo', 'done']);
+    expect(widgets[1].spec.pros).toEqual(['fast']);
+    expect(widgets[2].error).toMatch(/two options/);
+    expect(widgets[3].spec.cards).toHaveLength(1);
+    expect(widgets[4].spec.seconds).toBe(1500);
+    expect(widgets[4].spec.presets).toEqual([300, 1500]);
+    expect(widgets[5].error).toBeTruthy();
+    expect(widgets[6].spec.items).toHaveLength(1);
+  });
 });

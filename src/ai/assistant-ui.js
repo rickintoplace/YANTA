@@ -2492,12 +2492,40 @@ function renderAssistantMessageNode(msg) {
     const cards = document.createElement('div');
     cards.className = 'yanta-ai-link-cards';
 
-    for (const noteId of parsed.notes) {
-      cards.append(renderAiNoteCard(noteId));
+    const all = [
+      ...parsed.notes.map((noteId) => renderAiNoteCard(noteId)),
+      ...parsed.events.map((eventId) => renderAiEventCard(eventId)),
+    ];
+
+    /*
+      One card gets the full preview. Several become compact rows in a
+      grid (title and folder/time; the excerpt moves into the tooltip),
+      and past six the rest folds behind "Show N more".
+    */
+    if (all.length > 1) {
+      cards.classList.add('is-compact');
+
+      for (const card of all) {
+        const excerpt = card.querySelector('.yanta-ai-link-card-excerpt');
+        if (excerpt) {
+          card.title = excerpt.textContent;
+          excerpt.remove();
+        }
+      }
     }
 
-    for (const eventId of parsed.events) {
-      cards.append(renderAiEventCard(eventId));
+    const VISIBLE = 6;
+    all.slice(0, VISIBLE).forEach((card) => cards.append(card));
+
+    if (all.length > VISIBLE) {
+      const more = document.createElement('button');
+      more.type = 'button';
+      more.className = 'yanta-ai-link-cards-more';
+      more.textContent = `Show ${all.length - VISIBLE} more`;
+      more.addEventListener('click', () => {
+        more.replaceWith(...all.slice(VISIBLE));
+      });
+      cards.append(more);
     }
 
     wrap.append(cards);
@@ -2716,7 +2744,7 @@ function renderAiNoteCard(noteId) {
     <span class="yanta-ai-link-card-icon">${lucide(icon, 18)}</span>
     <span class="yanta-ai-link-card-main">
       <strong>${escapeHtml(note.title || 'Untitled')}</strong>
-      ${folder ? `<small>${escapeHtml(folder)}</small>` : `<small>No folder</small>`}
+      ${folder ? `<small>${escapeHtml(folder)}</small>` : `<small class="is-empty">No folder</small>`}
       ${excerpt ? `<span class="yanta-ai-link-card-excerpt">${escapeHtml(excerpt)}</span>` : ''}
     </span>
   `;
@@ -4417,6 +4445,77 @@ function injectCss() {
   font-size: 12px;
   line-height: 1.4;
   overflow-wrap: anywhere;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* Several cards: compact rows, two columns where there is room. */
+.yanta-ai-msg.assistant:has(.yanta-ai-link-cards.is-compact) {
+  width: 100%;
+}
+
+.yanta-ai-link-cards.is-compact small.is-empty {
+  display: none;
+}
+
+.yanta-ai-link-cards.is-compact {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: 6px;
+}
+
+.yanta-ai-link-cards.is-compact .yanta-ai-link-card {
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px;
+  border-radius: 9px;
+}
+
+.yanta-ai-link-cards.is-compact .yanta-ai-link-card:hover {
+  transform: none;
+}
+
+.yanta-ai-link-cards.is-compact .yanta-ai-link-card-icon {
+  width: 24px;
+  height: 24px;
+  flex-basis: 24px;
+}
+
+.yanta-ai-link-cards.is-compact .yanta-ai-link-card-icon svg {
+  width: 14px;
+  height: 14px;
+}
+
+.yanta-ai-link-cards.is-compact .yanta-ai-link-card-main {
+  gap: 1px;
+}
+
+.yanta-ai-link-cards.is-compact .yanta-ai-link-card-main strong,
+.yanta-ai-link-cards.is-compact .yanta-ai-link-card-main small {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.yanta-ai-link-cards.is-compact .yanta-ai-link-card-main strong {
+  font-size: 12.5px;
+}
+
+.yanta-ai-link-cards-more {
+  border: 1px dashed var(--border);
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 12px;
+  padding: 6px 9px;
+  cursor: pointer;
+}
+
+.yanta-ai-link-cards-more:hover {
+  color: var(--text);
+  border-color: var(--text-faint);
 }
 
 .yanta-ai-chips {

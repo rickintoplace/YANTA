@@ -700,8 +700,10 @@ function dayKey(ts = now()) {
   return new Date(ts).toISOString().slice(0, 10);
 }
 __name(dayKey, "dayKey");
+// Compact: indentation cost CPU and bytes on every response (an object
+// index of a few thousand entries is a few hundred KB).
 function json(data, status = 200, headers = {}) {
-  return new Response(JSON.stringify(data, null, 2), {
+  return new Response(JSON.stringify(data), {
     status,
     headers: {
       "content-type": "application/json; charset=utf-8",
@@ -1905,7 +1907,29 @@ function subscriptionGrantsPlus(row, env) {
   return false;
 }
 
+/*
+  The plan is checked on every authenticated request; it changes a few
+  times in an account's life. Cached per isolate for a minute — a new
+  subscription applies within that, and webhooks clear their isolate's
+  entry at once.
+*/
+var billingPlanCache = new Map();
+var BILLING_PLAN_CACHE_MS = 60 * 1000;
+function forgetBillingPlan(userId) {
+  for (const key of billingPlanCache.keys()) {
+    if (key.startsWith(`${userId}|`)) billingPlanCache.delete(key);
+  }
+}
 async function resolveBillingPlan(env, userId, fallbackPlan = "free") {
+  const key = `${userId}|${fallbackPlan}`;
+  const hit = billingPlanCache.get(key);
+  if (hit && hit.until > Date.now()) return hit.plan;
+  const plan = await resolveBillingPlanUncached(env, userId, fallbackPlan);
+  if (billingPlanCache.size > 5000) billingPlanCache.clear();
+  billingPlanCache.set(key, { plan, until: Date.now() + BILLING_PLAN_CACHE_MS });
+  return plan;
+}
+async function resolveBillingPlanUncached(env, userId, fallbackPlan = "free") {
   const row = await env.DB.prepare(
     `SELECT *
      FROM billing_subscriptions
@@ -1928,6 +1952,7 @@ async function resolveBillingPlan(env, userId, fallbackPlan = "free") {
 }
 
 async function refreshUserPlanFromBilling(env, userId) {
+  forgetBillingPlan(userId);
   const user = await env.DB.prepare(
     `SELECT plan FROM users WHERE id = ?`
   ).bind(userId).first();
@@ -2199,15 +2224,22 @@ function validEmail(email) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 }
 __name(validEmail, "validEmail");
+// Imported once per isolate and secret: an importKey on every request
+// (session check, IP hash) was CPU spent on the same bytes each time.
+var hmacKeyCache = new Map();
 async function hmacHex(secret, message) {
   const enc = new TextEncoder();
-  const key = await crypto.subtle.importKey(
-    "raw",
-    enc.encode(secret),
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"]
-  );
+  let key = hmacKeyCache.get(secret);
+  if (!key) {
+    key = await crypto.subtle.importKey(
+      "raw",
+      enc.encode(secret),
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["sign"]
+    );
+    hmacKeyCache.set(secret, key);
+  }
   const sig = await crypto.subtle.sign("HMAC", key, enc.encode(message));
   return [...new Uint8Array(sig)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
@@ -9835,7 +9867,22 @@ async function opsSummary(env, nowMs) {
         `SELECT COALESCE(SUM(ai_spend_micros_day), 0) AS micros, COUNT(*) AS users
            FROM usage_current WHERE ai_day_key = ? AND ai_spend_micros_day > 0`
       ).bind(day).first();
+      // Last 30 days, for the financial balance. Events hold what users were
+      // charged (credits = real cost × markup at the time).
+      await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_ai_usage_events_created ON ai_usage_events(created_at)`).run();
+      const byModel = await env.DB.prepare(
+        `SELECT model, COUNT(*) AS n, COALESCE(SUM(cost_micros), 0) AS micros
+           FROM ai_usage_events WHERE created_at > ? GROUP BY model ORDER BY micros DESC LIMIT 12`
+      ).bind(nowMs - 30 * 24 * 60 * 60 * 1000).all();
+      const models = (byModel?.results || []).map((r) => ({
+        model: r.model, requests: Number(r.n || 0), chargedUsd: Number(r.micros || 0) / 1e6
+      }));
+      const charged30 = models.reduce((sum, m) => sum + m.chargedUsd, 0);
       return {
+        charged30dUsd: charged30,
+        realCost30dUsdEstimate: charged30 / aiCreditMarkup(env),
+        requests30d: models.reduce((sum, m) => sum + m.requests, 0),
+        byModel30d: models,
         freeRealSpentTodayUsd: (await freeAiSpentToday(env)) / 1e6,
         freeDailyBudgetUsd: aiFreeDailyBudgetMicros(env) / 1e6,
         creditsChargedTodayUsd: Number(charged?.micros || 0) / 1e6,
@@ -10403,10 +10450,79 @@ async function route(req, env) {
   }
 }
 __name(route, "route");
+/*
+  Usage accounting for the status dashboard: one Analytics Engine data
+  point per request — route pattern, status class, wall time, and how
+  many D1 statements and R2 operations it took. No user, IP, query
+  string or id: paths are reduced to their pattern ("/api/spaces/:id/
+  storage/index"). Analytics Engine writes are free of subrequests and
+  do not touch D1; the Free plan includes 100k data points a day.
+*/
+function routePattern(req) {
+  const url = new URL(req.url);
+  const path = url.pathname
+    .split("/")
+    .map((seg) => (/\d/.test(seg) && seg.length >= 6) || seg.length > 24 || /^[a-z]{2,4}_[A-Za-z0-9_-]{6,}$/.test(seg) ? ":id" : seg)
+    .join("/")
+    .replace(/^\/(s|p|share|present)\/[^/]+/, "/$1/:id")
+    .slice(0, 80);
+  return `${req.method} ${path || "/"}`;
+}
+function meteredEnv(env, meter) {
+  const db = env.DB;
+  const objects = env.OBJECTS;
+  const stmt = (inner) => ({
+    __stmt: inner,
+    bind: (...args) => stmt(inner.bind(...args)),
+    first: (...args) => (meter.d1++, inner.first(...args)),
+    all: (...args) => (meter.d1++, inner.all(...args)),
+    run: (...args) => (meter.d1++, inner.run(...args)),
+    raw: (...args) => (meter.d1++, inner.raw(...args))
+  });
+  const meteredDb = db && {
+    prepare: (sql) => stmt(db.prepare(sql)),
+    batch: (list) => (meter.d1 += list.length, db.batch(list.map((s2) => s2?.__stmt || s2))),
+    exec: (...args) => (meter.d1++, db.exec(...args)),
+    dump: (...args) => db.dump(...args)
+  };
+  const classA = new Set(["put", "list", "createMultipartUpload", "resumeMultipartUpload"]);
+  const classB = new Set(["get", "head"]);
+  const meteredObjects = objects && new Proxy(objects, {
+    get(target, key) {
+      const value = target[key];
+      if (typeof value !== "function") return value;
+      return (...args) => {
+        if (classA.has(key)) meter.r2a++;
+        else if (classB.has(key)) meter.r2b++;
+        return value.apply(target, args);
+      };
+    }
+  });
+  return new Proxy(env, {
+    get(target, key) {
+      if (key === "DB" && meteredDb) return meteredDb;
+      if (key === "OBJECTS" && meteredObjects) return meteredObjects;
+      return target[key];
+    }
+  });
+}
+function recordUsagePoint(env, label, status, meter, startedAt) {
+  try {
+    env.USAGE?.writeDataPoint({
+      indexes: [label.slice(0, 96)],
+      blobs: [label, String(Math.floor(Number(status || 0) / 100)) + "xx"],
+      doubles: [1, Date.now() - startedAt, meter.d1, meter.r2a, meter.r2b]
+    });
+  } catch {}
+}
 var index_default = {
-  async fetch(req, env) {
+  async fetch(req, rawEnv) {
+    const meter = { d1: 0, r2a: 0, r2b: 0 };
+    const env = meteredEnv(rawEnv, meter);
+    const startedAt = Date.now();
     try {
       const res = await route(req, env);
+      recordUsagePoint(rawEnv, routePattern(req), res.status, meter, startedAt);
       const renewal = pendingSessionRenewal.get(req);
 
       if (!renewal) return res;
@@ -10427,6 +10543,8 @@ var index_default = {
         headers = corsHeaders(env, req);
       } catch {}
 
+      recordUsagePoint(rawEnv, routePattern(req), err?.status || 500, meter, startedAt);
+
       return json({
         error: "internal_error",
         message: err?.message || String(err),
@@ -10435,39 +10553,36 @@ var index_default = {
       }, err?.status || 500, headers);
     }
   },
-  async scheduled(event, env, ctx) {
+  async scheduled(event, rawEnv, ctx) {
+    const meter = { d1: 0, r2a: 0, r2b: 0 };
+    const env = meteredEnv(rawEnv, meter);
+    const startedAt = Date.now();
+    const minute = new Date(event?.scheduledTime || Date.now()).getUTCMinutes();
+    const tasks = [];
+    const task = (label, fn) => tasks.push(fn().catch((err) => console.error(`[${label}]`, safeErrorForLog(err))));
+
     // Heartbeat every ten minutes, so the dashboard can tell a dead cron
     // from a quiet one (one D1 write, not 1,440 a day).
-    if (new Date(event?.scheduledTime || Date.now()).getUTCMinutes() % 10 === 0) {
-      ctx.waitUntil(writeCronHeartbeat(env).catch(() => {}));
-    }
+    if (minute % 10 === 0) task("heartbeat", () => writeCronHeartbeat(env));
 
-    ctx.waitUntil(
-      runScheduledPushes(env).catch((err) => console.error("[push cron]", safeErrorForLog(err)))
-    );
+    task("push cron", () => runScheduledPushes(env));
 
     // The model catalog, in its own minute so its CPU does not stack on
     // the push run's (it checks a timestamp and usually does nothing).
-    if (new Date(event?.scheduledTime || Date.now()).getUTCMinutes() === 23) {
-      ctx.waitUntil(
-        maybeRefreshAiModelIndex(env).catch((err) => console.error("[model index cron]", safeErrorForLog(err)))
-      );
+    if (minute === 23) task("model index cron", () => maybeRefreshAiModelIndex(env));
+
+    // Once an hour each (the cron itself runs every minute).
+    if (minute === 7) task("cleanup cron", () => cleanupExpiredPayloads(env));
+    if (minute === 37) {
+      task("push expiry cron", () => deleteExpiredPushes(env));
+      task("rate limit prune", () => pruneRateLimits(env));
     }
 
-    // Once an hour (the cron itself runs every minute).
-    if (new Date(event?.scheduledTime || Date.now()).getUTCMinutes() === 7) {
-      ctx.waitUntil(
-        cleanupExpiredPayloads(env).catch((err) => console.error("[cleanup cron]", safeErrorForLog(err)))
-      );
-    }
-    if (new Date(event?.scheduledTime || Date.now()).getUTCMinutes() === 37) {
-      ctx.waitUntil(
-        deleteExpiredPushes(env).catch((err) => console.error("[push expiry cron]", safeErrorForLog(err)))
-      );
-      ctx.waitUntil(
-        pruneRateLimits(env).catch((err) => console.error("[rate limit prune]", safeErrorForLog(err)))
-      );
-    }
+    // One usage point per run, after its work, labelled by what ran.
+    ctx.waitUntil(Promise.allSettled(tasks).then(() => {
+      const label = minute === 23 ? "CRON model-index" : minute === 7 ? "CRON cleanup" : minute === 37 ? "CRON expiry" : "CRON push";
+      recordUsagePoint(rawEnv, label, 200, meter, startedAt);
+    }));
   }
 };
 export {

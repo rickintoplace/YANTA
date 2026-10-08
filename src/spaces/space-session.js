@@ -29,7 +29,7 @@ import {
   generateSpaceToken,
   deriveWriterRoomCredentials,
 } from './space-keys.js';
-import { subscribeSpacePoke, publishSpacePoke } from './space-poke.js';
+import { subscribeSpacePoke, publishSpacePoke, spacePokeConnected } from './space-poke.js';
 import {
   WORKSPACE_REMOTE_KEY,
   waitForWorkspaceDoc,
@@ -59,6 +59,10 @@ import {
 } from './space-people.js';
 
 const POLL_INTERVAL_MS = 60_000;
+// While the poke channel is up, every remote change announces itself; the
+// poll is only a safety net then. Each poll is a request against the
+// Cloudflare quota, per mounted space, per open tab.
+const POLL_INTERVAL_POKED_MS = 5 * 60_000;
 const POKE_PULL_DEBOUNCE_MS = 400;
 
 // Remote key of a note-space's single document. Local note IDs differ
@@ -327,9 +331,29 @@ async function mountSpace(record) {
     }, POKE_PULL_DEBOUNCE_MS);
   });
 
-  session.pollTimer = setInterval(() => {
+  /*
+    Safety-net polling: never while the tab is hidden (a pull runs when
+    it becomes visible again), and only every five minutes while the poke
+    channel is connected.
+  */
+  let lastPollAt = Date.now();
+
+  const poll = (force = false) => {
+    if (document.hidden) return;
+
+    const every = spacePokeConnected() ? POLL_INTERVAL_POKED_MS : POLL_INTERVAL_MS;
+    if (!force && Date.now() - lastPollAt < every - 1_000) return;
+
+    lastPollAt = Date.now();
     engine.pull().catch(() => {});
-  }, POLL_INTERVAL_MS);
+  };
+
+  session.pollTimer = setInterval(() => poll(), POLL_INTERVAL_MS);
+
+  session.onVisible = () => {
+    if (!document.hidden && Date.now() - lastPollAt > POLL_INTERVAL_MS) poll(true);
+  };
+  document.addEventListener('visibilitychange', session.onVisible);
 
   // Real-time fast path between writers only. Readers never receive
   // the writer secret, so they cannot join (or inject into) this room.
@@ -379,6 +403,7 @@ function unmountSpace(spaceId) {
   } catch {}
 
   clearInterval(session.pollTimer);
+  if (session.onVisible) document.removeEventListener('visibilitychange', session.onVisible);
 
   try {
     session.provider?.disconnect();

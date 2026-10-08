@@ -87,12 +87,10 @@ bucket_name = "yanta-cloud-objects"
 
 # Per-route usage accounting for the status dashboard (route pattern,
 # status class, wall time, D1 statements, R2 ops — no user data).
-# Analytics Engine has to be enabled once in the dashboard first
-# (Workers & Pages › Analytics Engine); deploying with this binding fails
-# until then, so it stays commented out. The worker runs without it.
-# [[analytics_engine_datasets]]
-# binding = "USAGE"
-# dataset = "yanta_usage"
+# (Analytics Engine must be enabled for the account — done 2026-10-09.)
+[[analytics_engine_datasets]]
+binding = "USAGE"
+dataset = "yanta_usage"
 
 # ---- Signaling relay (Durable Object) ----
 # Replaces the Cloud Run WebSocket relay. Hibernatable sockets are

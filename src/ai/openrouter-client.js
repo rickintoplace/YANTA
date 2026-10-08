@@ -22,7 +22,13 @@ import {
   isIncludedAiMode,
 } from './ai-access-policy.js';
 
-import { includedAiModelInfo } from './ai-models.js';
+import {
+  reasoningFor,
+  learnFromModelError,
+  refreshModelCapabilities,
+} from './model-capabilities.js';
+
+import { recordAiUsage } from './ai-usage-stats.js';
 
 function apiUrl(path) {
   const base = String(YANTA_CLOUD_BASE_URL || '/cloud-api').replace(/\/+$/, '');
@@ -57,13 +63,99 @@ function openRouterProviderPreferences() {
   Thinking stays off unless the user picks an effort: unmanaged reasoning
   ate the output budget before a tool call was written. When on, the tool
   loops echo reasoning_details back each round (see agent-runtime.js).
+  Models that cannot switch it off get their cheapest effort — what each
+  model allows comes from model-capabilities.js, not from this file.
 */
-const REASONING_EFFORTS = new Set(['minimal', 'low', 'medium', 'high']);
-
 function reasoningParam(settings, model = '') {
-  const effort = String(settings.reasoningEffort || 'off').toLowerCase();
-  if (REASONING_EFFORTS.has(effort)) return { effort };
-  return includedAiModelInfo(model)?.reasoningRequired ? { effort: 'minimal' } : { enabled: false };
+  return reasoningFor(model, settings.reasoningEffort || 'off');
+}
+
+function requestModel(settings) {
+  return isIncludedAiMode(settings) ? (settings.includedModel || settings.model) : settings.model;
+}
+
+/** Keeps model metadata fresh in the background; see model-capabilities.js. */
+export function refreshModelCapabilitiesForSettings(settings = getEffectiveAiRuntimeSettings(), { force = false } = {}) {
+  if (isIncludedAiMode(settings)) {
+    return refreshModelCapabilities({ source: 'included', url: apiUrl('/api/ai/models'), credentials: 'include', force });
+  }
+
+  const baseUrl = String(settings.baseUrl || 'https://openrouter.ai/api/v1').replace(/\/+$/, '');
+  if (!/^https:\/\/openrouter\.ai\//.test(baseUrl)) return Promise.resolve(false);
+
+  return refreshModelCapabilities({ source: 'openrouter', url: `${baseUrl}/models`, force });
+}
+
+/*
+  Transient failures (network, 429, 5xx) are retried twice with backoff
+  before the user sees an error; a 400 the model metadata can explain
+  (e.g. "reasoning is mandatory") is learned and retried once with the
+  corrected request. Nothing is retried once a response has started:
+  a half-streamed answer is not repeatable.
+*/
+const RETRY_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504, 520, 522, 524, 529]);
+const MAX_TRANSIENT_RETRIES = 2;
+
+function sleep(ms, signal) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(resolve, ms);
+    signal?.addEventListener('abort', () => {
+      clearTimeout(timer);
+      reject(new DOMException('Aborted', 'AbortError'));
+    }, { once: true });
+  });
+}
+
+function retryDelayMs(attempt, res) {
+  const header = Number(res?.headers?.get?.('retry-after'));
+  if (Number.isFinite(header) && header >= 0) return header * 1000;
+  return 700 * 2 ** attempt + Math.floor(Math.random() * 400);
+}
+
+async function sendAiRequest({ settings, signal, buildBody, label }) {
+  const model = requestModel(settings);
+  let learnedRetry = false;
+
+  for (let attempt = 0; ; attempt++) {
+    let res;
+
+    try {
+      res = await fetch(endpointForSettings(settings), {
+        method: 'POST',
+        signal,
+        credentials: isIncludedAiMode(settings) ? 'include' : 'omit',
+        headers: headersForSettings(settings),
+        body: JSON.stringify(buildBody()),
+      });
+    } catch (err) {
+      if (err?.name === 'AbortError' || attempt >= MAX_TRANSIENT_RETRIES) throw err;
+      await sleep(retryDelayMs(attempt), signal);
+      continue;
+    }
+
+    if (res.ok) return res;
+
+    const msg = await parseErrorResponse(res, `${label} failed: HTTP ${res.status}`);
+
+    // The server's own "come back tomorrow" or a long rate-limit window is
+    // an answer, not a hiccup.
+    const delay = retryDelayMs(attempt, res);
+    const transient = RETRY_STATUSES.has(res.status) && !/capacity|credits/i.test(msg) && delay <= 10_000;
+
+    if (transient && attempt < MAX_TRANSIENT_RETRIES) {
+      await sleep(delay, signal);
+      continue;
+    }
+
+    if (res.status === 400 && !learnedRetry && learnFromModelError(model, msg)) {
+      learnedRetry = true;
+      continue;
+    }
+
+    const err = new Error(msg);
+    err.status = res.status;
+    throw err;
+  }
 }
 
 function buildRequestBody({ messages, tools = [], stream = false, source = '' } = {}) {
@@ -136,30 +228,17 @@ export async function openRouterChatCompletion({
   source = '',
 } = {}) {
   const settings = getEffectiveAiRuntimeSettings();
+  refreshModelCapabilitiesForSettings(settings);
 
-  const res = await fetch(endpointForSettings(settings), {
-    method: 'POST',
+  const res = await sendAiRequest({
+    settings,
     signal,
-    credentials: isIncludedAiMode(settings) ? 'include' : 'omit',
-    headers: headersForSettings(settings),
-    body: JSON.stringify(buildRequestBody({
-      messages,
-      tools,
-      stream: false,
-      source,
-    })),
+    label: `${isIncludedAiMode(settings) ? 'YANTA Included AI' : 'OpenRouter'} request`,
+    buildBody: () => buildRequestBody({ messages, tools, stream: false, source }),
   });
 
-  if (!res.ok) {
-    const msg = await parseErrorResponse(
-      res,
-      `${isIncludedAiMode(settings) ? 'YANTA Included AI' : 'OpenRouter'} request failed: HTTP ${res.status}`
-    );
-
-    throw new Error(msg);
-  }
-
   const json = await res.json();
+  recordAiUsage(json?.model || requestModel(settings), json?.usage, { source });
   const message = json?.choices?.[0]?.message;
 
   if (!message) {
@@ -337,28 +416,17 @@ export async function openRouterChatCompletionStream({
   onDelta = null,
 } = {}) {
   const settings = getEffectiveAiRuntimeSettings();
+  refreshModelCapabilitiesForSettings(settings);
 
-  const res = await fetch(endpointForSettings(settings), {
-    method: 'POST',
+  const res = await sendAiRequest({
+    settings,
     signal,
-    credentials: isIncludedAiMode(settings) ? 'include' : 'omit',
-    headers: headersForSettings(settings),
-    body: JSON.stringify(buildRequestBody({
-      messages,
-      tools,
-      stream: true,
-    })),
+    label: `${isIncludedAiMode(settings) ? 'YANTA Included AI' : 'OpenRouter'} streaming request`,
+    buildBody: () => buildRequestBody({ messages, tools, stream: true }),
   });
 
-  if (!res.ok) {
-    const msg = await parseErrorResponse(
-      res,
-      `${isIncludedAiMode(settings) ? 'YANTA Included AI' : 'OpenRouter'} streaming request failed: HTTP ${res.status}`
-    );
-
-    throw new Error(msg);
-  }
-
+  let usage = null;
+  let servedModel = '';
   const contentParts = [];
   const reasoningParts = [];
   const reasoningDetails = [];
@@ -374,6 +442,9 @@ export async function openRouterChatCompletionStream({
       if (json.error) {
         throw new Error(json.error.message || 'The AI provider failed mid-response.');
       }
+
+      if (json.usage) usage = json.usage;
+      if (json.model) servedModel = json.model;
 
       const choice = json.choices?.[0];
       const delta = choice?.delta || {};
@@ -414,6 +485,8 @@ export async function openRouterChatCompletionStream({
     },
   });
 
+  recordAiUsage(servedModel || requestModel(settings), usage);
+
   return {
     role: 'assistant',
     content: contentParts.join(''),
@@ -423,6 +496,7 @@ export async function openRouterChatCompletionStream({
     finish_reason: finishReason,
   };
 }
+
 /*
   Decision models (OpenRouter Decisions API): typed answers with
   probabilities instead of text. Questions are { key: { type, instructions,

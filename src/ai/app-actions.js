@@ -51,6 +51,8 @@ import {
   moveNoteToTrash,
 } from '../trash.js';
 
+import { isAiSessionNote } from './ai-sessions.js';
+
 import {
   YANTA_CLOUD_BASE_URL,
 } from '../cloud/cloud-api.js';
@@ -257,11 +259,26 @@ export function getCurrentSelectionText() {
   return view.state.sliceDoc(sel.from, sel.to);
 }
 
+/*
+  The assistant's own conversation is stored as a note; without this the
+  first hit for any question was the chat that asked it. Trashed notes
+  and system notes are not the user's notes either.
+*/
+function searchableByAssistant(note) {
+  return !!note &&
+    !note.trashed &&
+    !note.aiSession &&
+    note.type !== 'ai-session' &&
+    !String(note.id || '').startsWith('system_');
+}
+
 export async function searchNotesAction({ query = '', limit = 10 } = {}) {
   const q = String(query || '').trim().toLowerCase();
+  const terms = q.split(/\s+/).filter((t) => t.length > 1);
   const max = Math.max(1, Math.min(50, Number(limit || 10)));
 
   const scored = [...state.notes.values()]
+    .filter((note) => searchableByAssistant(note) && !isAiSessionNote(note))
     .map((note) => {
       const title = (note.title || '').toLowerCase();
       const tags = (note.tags || []).join(' ').toLowerCase();
@@ -271,9 +288,15 @@ export async function searchNotesAction({ query = '', limit = 10 } = {}) {
 
       if (!q) score = 1;
       else {
+        // The whole phrase counts most; otherwise every word must occur
+        // somewhere ("Q3 budget" finds "budget for Q3").
         if (title.includes(q)) score += 50;
         if (tags.includes(q)) score += 20;
         if (hay.includes(q)) score += 10;
+
+        if (!score && terms.length > 1 && terms.every((t) => hay.includes(t) || title.includes(t))) {
+          score += 5 + terms.filter((t) => title.includes(t)).length * 5;
+        }
       }
 
       return { note, score };

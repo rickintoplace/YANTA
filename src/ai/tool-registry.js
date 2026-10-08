@@ -231,12 +231,16 @@ export const TOOL_REGISTRY = [
     name: 'search_notes',
     permission: 'allowReadNotes',
     risk: 'read',
-    description: 'Search notes by title, tags and indexed body text.',
+    description: [
+      'Keyword search over the user\'s notes (title, tags, body). Returns ids, titles, folders and tags — read a note to see its text.',
+      'Use the words the note would contain; all words must occur. For meaning-based queries prefer semantic_search_notes.',
+      'Example: {"query":"budget Q3","limit":5}',
+    ].join('\n'),
     parameters: {
       type: 'object',
       properties: {
-        query: { type: 'string' },
-        limit: { type: 'number', default: 10 },
+        query: { type: 'string', description: 'One or more keywords; case-insensitive.' },
+        limit: { type: 'number', default: 10, description: 'Max results, 1-50.' },
       },
       required: ['query'],
     },
@@ -263,7 +267,7 @@ export const TOOL_REGISTRY = [
     name: 'read_note',
     permission: 'allowReadNotes',
     risk: 'read',
-    description: 'Read one note including Markdown body.',
+    description: 'Read one note: metadata and its full Markdown body. Use an id from search results or the context; to read several at once use read_notes.',
     parameters: {
       type: 'object',
       properties: {
@@ -278,7 +282,7 @@ export const TOOL_REGISTRY = [
     name: 'read_notes',
     permission: 'allowReadNotes',
     risk: 'read',
-    description: 'Read multiple notes including Markdown bodies.',
+    description: 'Read several notes at once (metadata and Markdown bodies). Keep it to the few you need — long bodies are truncated in the result.',
     parameters: {
       type: 'object',
       properties: {
@@ -296,13 +300,17 @@ export const TOOL_REGISTRY = [
     name: 'create_note',
     permission: 'allowCreateNotes',
     risk: 'write',
-    description: 'Create a new Markdown note.',
+    description: [
+      'Create a new Markdown note. Put the content in body without repeating the title as a heading.',
+      'For long content create the note with the first part, then add the rest with append_to_note — very long arguments can be cut off.',
+      'Example: {"title":"Shopping","body":"- [ ] Milk\\n- [ ] Bread"}',
+    ].join('\n'),
     parameters: {
       type: 'object',
       properties: {
-        title: { type: 'string' },
-        body: { type: 'string' },
-        folderId: { type: ['string', 'null'] },
+        title: { type: 'string', description: 'Short title shown in the tree.' },
+        body: { type: 'string', description: 'Markdown content.' },
+        folderId: { type: ['string', 'null'], description: 'Folder id from the file tree in the context; omit for the default location.' },
         tags: {
           type: 'array',
           items: { type: 'string' },

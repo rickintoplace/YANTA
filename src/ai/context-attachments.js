@@ -3,7 +3,7 @@
 // Notes, folders, calendar events, uploads, PDFs, DOCX, images.
 // ============================================================
 
-import { includedAiModelInfo } from './ai-models.js';
+import { modelCapabilities } from './model-capabilities.js';
 import {
   uid,
   state,
@@ -733,9 +733,9 @@ export function aiContextTotals(items = []) {
 }
 
 export function modelSupportsImages(model = getEffectiveAiRuntimeSettings().model) {
-  // Included models declare it; BYOK ids fall back to a name heuristic.
-  const known = includedAiModelInfo(model);
-  if (known) return known.vision === true;
+  // Live metadata or the catalog say so; unknown ids fall back to a name heuristic.
+  const caps = modelCapabilities(model);
+  if (caps.vision !== null) return caps.vision === true;
 
   const id = String(model || '').toLowerCase();
 

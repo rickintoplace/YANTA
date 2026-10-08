@@ -48,22 +48,58 @@ export const INCLUDED_AI_MODELS = Object.freeze([
 
 export const DEFAULT_INCLUDED_AI_MODEL = 'deepseek/deepseek-v4.1-flash';
 
+/*
+  The worker serves the current menu (/api/ai/models), cached by
+  model-capabilities.js under this key. Read straight from storage so
+  this file keeps no imports: a model added or retired on the server
+  shows up here without an app release. The list above is the fallback
+  for a first start or an offline device.
+*/
+const MODEL_CAPS_CACHE_KEY = 'yanta.ai.modelCaps.v1';
+
+function serverMenu() {
+  try {
+    const menu = JSON.parse(localStorage.getItem(MODEL_CAPS_CACHE_KEY) || 'null')?.menu;
+    return Array.isArray(menu?.models) && menu.models.length ? menu : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The included models offered right now. */
+export function includedAiModels() {
+  const menu = serverMenu();
+  if (!menu) return INCLUDED_AI_MODELS;
+
+  return menu.models.map((m) => ({
+    ...(INCLUDED_AI_MODELS.find((known) => known.id === m.id) || {}),
+    ...m,
+  }));
+}
+
+function defaultIncludedModel() {
+  const menu = serverMenu();
+  return menu?.default && menu.models.some((m) => m.id === menu.default)
+    ? menu.default
+    : DEFAULT_INCLUDED_AI_MODEL;
+}
+
 export function includedAiModelInfo(model) {
-  return INCLUDED_AI_MODELS.find((m) => m.id === String(model || '').trim()) || null;
+  return includedAiModels().find((m) => m.id === String(model || '').trim()) || null;
 }
 
 export function normalizeIncludedAiModel(model) {
   const clean = String(model || '').trim();
 
-  if (INCLUDED_AI_MODELS.some((m) => m.id === clean)) {
+  if (includedAiModels().some((m) => m.id === clean)) {
     return clean;
   }
 
-  return DEFAULT_INCLUDED_AI_MODEL;
+  return defaultIncludedModel();
 }
 
 export function includedAiModelLabel(model) {
   const clean = normalizeIncludedAiModel(model);
 
-  return INCLUDED_AI_MODELS.find((m) => m.id === clean)?.label || clean;
+  return includedAiModels().find((m) => m.id === clean)?.label || clean;
 }

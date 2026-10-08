@@ -159,4 +159,31 @@ describe('headless agent loop', () => {
       },
     })).rejects.toBe(abort);
   });
+
+  it('notes the second identical call, refuses the third and stops a loop', async () => {
+    const same = () => toolCall('search_notes', { q: 'x', limit: 5 });
+    const sameReordered = () => toolCall('search_notes', '{"limit":5,"q":"x"}');
+    script = [
+      { content: '', tool_calls: [same()] },
+      { content: '', tool_calls: [sameReordered()] },
+      { content: '', tool_calls: [same()] },
+      { content: '', tool_calls: [same()] },
+      { content: '', tool_calls: [same()] },
+      { content: 'Stopped.', tool_calls: [] },
+    ];
+
+    const results = [];
+    const res = await runAgentLoop({
+      messages: [{ role: 'user', content: 'go' }],
+      maxRounds: 10,
+      onToolResult: (r) => results.push(r),
+    });
+
+    expect(executed).toHaveLength(2);
+    expect(results[1].result.harnessNote).toMatch(/already made this exact call/);
+    expect(results.slice(2).every((r) => r.result.code === 'EAI_REPEATED_CALL')).toBe(true);
+    expect(res.stop).toBe(AGENT_STOP.LOOP);
+    expect(res.finalText).toBe('Stopped.');
+    expect(calls).toHaveLength(6);
+  });
 });

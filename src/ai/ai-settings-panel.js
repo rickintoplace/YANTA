@@ -44,7 +44,7 @@ import {
 
 import {
   INCLUDED_AI_CLIENT_POLICY,
-  INCLUDED_AI_MODELS,
+  includedAiModels,
   OPENROUTER_ZDR_POLICY,
   isIncludedAiMode,
   canUseIncludedAi,
@@ -390,7 +390,7 @@ async function runLocationSearch(panel, rerender, { saveFirst = false } = {}) {
 function includedAiModelOptionsHtml(selectedModel) {
   const selected = normalizeIncludedAiModel(selectedModel);
 
-  return INCLUDED_AI_MODELS.map((model) => `
+  return includedAiModels().map((model) => `
     <option value="${escapeHtml(model.id)}" ${model.id === selected ? 'selected' : ''}>
       ${escapeHtml(model.label)} · ${escapeHtml(model.hint)}
     </option>

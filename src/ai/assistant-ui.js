@@ -3065,9 +3065,14 @@ async function runAssistant(userText) {
     },
   });
 
-  // Round budget spent: the wrap-up round's text is the user's summary.
-  if (result.stop === AGENT_STOP.MAX_ROUNDS) {
-    addMessage('assistant', result.finalText || `I stopped after ${maxRounds} tool rounds without finishing. Ask me to continue.`, {
+  // Round budget spent, or stopped going in circles: the wrap-up round's
+  // text is the user's summary.
+  if (result.stop === AGENT_STOP.MAX_ROUNDS || result.stop === AGENT_STOP.LOOP) {
+    const fallback = result.stop === AGENT_STOP.LOOP
+      ? 'I kept repeating the same steps without getting further, so I stopped. Try rephrasing or narrowing the request.'
+      : `I stopped after ${maxRounds} tool rounds without finishing. Ask me to continue.`;
+
+    addMessage('assistant', result.finalText || fallback, {
       model: modelLabel(),
     });
   }

@@ -276,6 +276,25 @@ export async function buildSystemMessage({
     soul = '';
   }
 
+  /*
+    Profile and memory change rarely, so they sit here in the system
+    prompt, where they are part of the cached prefix — not in the
+    per-turn context message, which is rebuilt every turn. Soul and the
+    skill index already have their own sections below.
+  */
+  let brainContext = '';
+
+  if (settings.permissions?.allowReadAiBrain !== false) {
+    try {
+      brainContext = await buildAiBrainContextBlock({
+        maxChars: 12000,
+        sections: ['user', 'memory'],
+      });
+    } catch {
+      brainContext = '';
+    }
+  }
+
   let skillIndexContext = '';
 
   try {
@@ -345,6 +364,8 @@ export async function buildSystemMessage({
         ? `# Soul\n${soul.trim()}`
         : '',
       '',
+      brainContext,
+      '',
       skillIndexContext,
       '',
       toolIndex,
@@ -385,18 +406,6 @@ export async function buildContextMessage({
       currentNoteMarkdown = noteMarkdown(currentNote.id);
     } catch {
       currentNoteMarkdown = '';
-    }
-  }
-
-  let aiBrainContext = '';
-
-  if (settings.permissions.allowReadAiBrain !== false) {
-    try {
-      aiBrainContext = await buildAiBrainContextBlock({
-        maxChars: Math.min(16000, Math.max(6000, Math.floor(max * 0.35))),
-      });
-    } catch {
-      aiBrainContext = '';
     }
   }
 
@@ -456,10 +465,6 @@ export async function buildContextMessage({
   };
 
   const baseText = [
-    aiBrainContext
-      ? aiBrainContext
-      : 'YANTA AI Brain: [not available]',
-    '',
     attached.text || 'User-attached context: [none]',
     '',
     'YANTA context:',

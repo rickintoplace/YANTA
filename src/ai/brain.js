@@ -981,10 +981,18 @@ function makeExcerpt(md, q) {
   return (start > 0 ? '…' : '') + s.slice(start, end) + (end < s.length ? '…' : '');
 }
 
+/**
+ * The Brain as prompt text. `sections` picks what to include: the chat
+ * puts Soul and the skill index elsewhere in its system prompt and asks
+ * only for the profile and memory, so nothing is sent twice.
+ */
 export async function buildAiBrainContextBlock({
   maxChars = 14000,
+  sections = ['soul', 'user', 'memory', 'skills'],
 } = {}) {
   await ensureAiBrain();
+
+  const want = new Set(sections);
 
   const soul = await readBrainNoteMarkdown(AI_BRAIN_IDS.soul);
   const user = await readBrainNoteMarkdown(AI_BRAIN_IDS.user);
@@ -1015,21 +1023,15 @@ export async function buildAiBrainContextBlock({
 
   const block = [
     '# YANTA AI Brain',
-    '',
-    '## Soul',
-    soul.trim(),
-    '',
-    '## User Profile',
-    user.trim(),
-    '',
-    '## Memory',
-    memory.trim(),
-    '',
-    '## Available Skills',
-    skills.length
-      ? skills.map((s) => `- ${s.title} (${s.id}): ${s.description}`).join('\n')
-      : '- No skills yet.',
-  ].join('\n');
+    want.has('soul') ? `\n## Soul\n${soul.trim()}` : '',
+    want.has('user') ? `\n## User Profile\n${user.trim()}` : '',
+    want.has('memory') ? `\n## Memory\n${memory.trim()}` : '',
+    want.has('skills')
+      ? `\n## Available Skills\n${skills.length
+        ? skills.map((s) => `- ${s.title} (${s.id}): ${s.description}`).join('\n')
+        : '- No skills yet.'}`
+      : '',
+  ].filter(Boolean).join('\n');
 
   return truncateMiddle(block, Number(maxChars || 14000));
 }

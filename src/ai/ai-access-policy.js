@@ -24,6 +24,7 @@ export const AI_BILLING_MODES = Object.freeze({
 
 import {
   INCLUDED_AI_MODELS,
+  includedAiModels,
   DEFAULT_INCLUDED_AI_MODEL,
   normalizeIncludedAiModel,
   includedAiModelLabel,
@@ -31,6 +32,7 @@ import {
 
 export {
   INCLUDED_AI_MODELS,
+  includedAiModels,
   DEFAULT_INCLUDED_AI_MODEL,
   normalizeIncludedAiModel,
   includedAiModelLabel,

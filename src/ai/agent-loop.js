@@ -29,7 +29,34 @@ export const AGENT_STOP = Object.freeze({
   COMPLETE: 'complete',
   MAX_ROUNDS: 'max-rounds',
   ABORTED: 'aborted',
+  // Kept repeating calls it already had the results of; wrapped up early.
+  LOOP: 'loop',
 });
+
+/*
+  Doom loops: a model that calls the same tool with the same arguments
+  again rarely learns anything new, and cheap models do it until the
+  budget is gone. The second identical call runs but carries a note; the
+  third and later are not run; after three refusals the run wraps up.
+*/
+const REPEAT_NOTE_AT = 2;
+const REPEAT_BLOCK_AT = 3;
+const REPEAT_STOP_AFTER = 3;
+
+function stableStringify(value) {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((k) => `${JSON.stringify(k)}:${stableStringify(value[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(value ?? null);
+}
+
+function withRepeatNote(payload) {
+  const note = 'You already made this exact call earlier in this run; this is the same result. Use it, change the arguments, or answer.';
+  return payload && typeof payload === 'object' && !Array.isArray(payload)
+    ? { ...payload, harnessNote: note }
+    : { result: payload, harnessNote: note };
+}
 
 function toolErrorPayload(err) {
   return {
@@ -82,6 +109,9 @@ export async function runAgentLoop({
 } = {}) {
   const thread = [...messages];
   const executed = [];
+  const callCounts = new Map();
+  let repeatBlocks = 0;
+  let stop = AGENT_STOP.MAX_ROUNDS;
 
   // The final round sends one extra instruction after the thread.
   const request = (toolList, round, final = null) => {
@@ -142,6 +172,22 @@ export async function runAgentLoop({
       let payload;
       let ran = false;
 
+      const signature = `${name}:${stableStringify(args)}`;
+      const repeat = (callCounts.get(signature) || 0) + 1;
+      callCounts.set(signature, repeat);
+
+      if (repeat >= REPEAT_BLOCK_AT) {
+        repeatBlocks++;
+        payload = {
+          error: `Not run: you have made this exact call ${repeat - 1} times already and have its result. Use it, try different arguments, or answer.`,
+          code: 'EAI_REPEATED_CALL',
+        };
+
+        await onToolResult?.({ name, args, result: payload, ran: false });
+        thread.push({ role: 'tool', tool_call_id: call.id, name, content: serializeToolResult(payload) });
+        continue;
+      }
+
       try {
         const gate = await beforeToolCall?.({ name, args, call });
 
@@ -163,6 +209,8 @@ export async function runAgentLoop({
         payload = toolErrorPayload(err);
       }
 
+      if (repeat >= REPEAT_NOTE_AT) payload = withRepeatNote(payload);
+
       // `ran`: the registry executed it (not refused, short-circuited or failed).
       await onToolResult?.({ name, args, result: payload, ran });
 
@@ -172,6 +220,12 @@ export async function runAgentLoop({
         name,
         content: serializeToolResult(payload),
       });
+    }
+
+    if (repeatBlocks >= REPEAT_STOP_AFTER) {
+      stop = AGENT_STOP.LOOP;
+      round++;
+      break;
     }
   }
 
@@ -207,5 +261,5 @@ export async function runAgentLoop({
     console.warn('[YANTA AI] final round failed', err);
   }
 
-  return { text, finalText, rounds: round + 1, stop: AGENT_STOP.MAX_ROUNDS, toolCalls: executed };
+  return { text, finalText, rounds: round + 1, stop, toolCalls: executed };
 }

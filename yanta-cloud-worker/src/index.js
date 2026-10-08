@@ -314,15 +314,216 @@ const INCLUDED_AI_REASONING_EFFORTS = /* @__PURE__ */ new Set(["minimal", "low",
   reasoning used to eat the whole output budget before a tool call, and
   thinking-mode tool loops need the reasoning echoed back each round.
 */
-function sanitizeIncludedAiReasoning(reasoning, model = "") {
+function sanitizeIncludedAiReasoning(reasoning, model = "", live = null) {
   const effort = String(reasoning?.effort || "").toLowerCase();
   if (INCLUDED_AI_REASONING_EFFORTS.has(effort)) {
     return { effort };
   }
-  return INCLUDED_AI_MODELS[model]?.reasoning === "required"
-    ? { effort: "minimal" }
-    : { enabled: false };
+  const info = live?.models?.[model];
+  const mandatory = info ? info.reasoning?.mandatory === true : INCLUDED_AI_MODELS[model]?.reasoning === "required";
+  return mandatory ? { effort: lowestReasoningEffort(info?.reasoning?.efforts) } : { enabled: false };
 }
+// The cheapest effort a model offers; "minimal" when it does not say.
+function lowestReasoningEffort(efforts = []) {
+  const order = ["minimal", "low", "medium", "high", "max"];
+  const offered = (Array.isArray(efforts) ? efforts : []).map((e) => String(e).toLowerCase());
+  return order.find((e) => offered.includes(e)) || "minimal";
+}
+/*
+  Live model metadata from OpenRouter's public catalog: context size,
+  whether thinking can be turned off, accepted efforts, current prices,
+  and deprecation dates. Refreshed by the cron every six hours into one
+  D1 row, so a model that changes its rules or is about to be shut down
+  is noticed without a deploy — and shows up on the status dashboard.
+
+  The catalog is ~800 KB of JSON for ~500 models. Parsing all of it
+  costs several ms of CPU, so only the objects for our own models are
+  cut out of the text and parsed.
+*/
+var AI_MODEL_INDEX_KEY = "ai:model-index:v1";
+var AI_MODEL_INDEX_TTL_MS = 6 * 60 * 60 * 1000;
+function aiIndexedModelIds() {
+  return Object.keys(INCLUDED_AI_MODELS);
+}
+// The JSON object that contains `"id":"<id>"`, cut out by brace matching.
+function sliceJsonObjectWithId(text, id) {
+  const at = text.indexOf(`"id":${JSON.stringify(id)}`);
+  if (at < 0) return null;
+  const start = text.lastIndexOf("{", at);
+  let depth = 0;
+  let inString = false;
+  for (let i = start; i < text.length; i++) {
+    const c = text[i];
+    if (inString) {
+      if (c === "\\") i++;
+      else if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') inString = true;
+    else if (c === "{") depth++;
+    else if (c === "}" && --depth === 0) {
+      try {
+        return JSON.parse(text.slice(start, i + 1));
+      } catch {
+        return null;
+      }
+    }
+  }
+  return null;
+}
+function reduceOpenRouterModel(m) {
+  const perM = (v) => Number.isFinite(Number(v)) ? Math.round(Number(v) * 1e6 * 1e4) / 1e4 : null;
+  return {
+    contextTokens: Number(m.context_length || m.top_provider?.context_length || 0) || null,
+    maxOutputTokens: Number(m.top_provider?.max_completion_tokens || 0) || null,
+    inputModalities: Array.isArray(m.architecture?.input_modalities) ? m.architecture.input_modalities : [],
+    tools: Array.isArray(m.supported_parameters) ? m.supported_parameters.includes("tools") : null,
+    reasoning: {
+      mandatory: m.reasoning?.mandatory === true,
+      efforts: Array.isArray(m.reasoning?.supported_efforts) ? m.reasoning.supported_efforts : []
+    },
+    price: { prompt: perM(m.pricing?.prompt), completion: perM(m.pricing?.completion), cacheRead: perM(m.pricing?.input_cache_read) },
+    expiresAt: m.expiration_date || null
+  };
+}
+async function refreshAiModelIndex(env) {
+  const res = await fetch("https://openrouter.ai/api/v1/models", {
+    headers: { "HTTP-Referer": env.OPENROUTER_SITE_URL || env.APP_ORIGIN || "", "X-Title": "YANTA" }
+  });
+  if (!res.ok) throw new Error(`model catalog HTTP ${res.status}`);
+  const text = await res.text();
+  const models = {};
+  const missing = [];
+  for (const id of aiIndexedModelIds()) {
+    const m = sliceJsonObjectWithId(text, id);
+    if (m) models[id] = reduceOpenRouterModel(m);
+    else missing.push(id);
+  }
+  // Decision models are not in the chat catalog; their endpoint list is small.
+  const decision = {};
+  for (const id of Object.keys(DECISION_MODELS)) {
+    try {
+      const r = await fetch(`https://openrouter.ai/api/v1/models/${id}/endpoints`);
+      const eps = r.ok ? (await r.json())?.data?.endpoints || [] : [];
+      decision[id] = {
+        endpoints: eps.length,
+        uptime1d: eps.length ? Math.max(...eps.map((e) => Number(e.uptime_last_1d || 0))) : 0
+      };
+    } catch {
+      decision[id] = { endpoints: 0, uptime1d: 0 };
+    }
+  }
+  const index = { checkedAt: Date.now(), models, missing, decision };
+  await ensureAppStateTable(env);
+  await env.DB.prepare(
+    `INSERT INTO app_state (key, value, updated_at) VALUES (?, ?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`
+  ).bind(AI_MODEL_INDEX_KEY, JSON.stringify(index), index.checkedAt).run();
+  return index;
+}
+var CRON_HEARTBEAT_KEY = "cron:heartbeat";
+async function writeCronHeartbeat(env) {
+  await ensureAppStateTable(env);
+  await env.DB.prepare(
+    `INSERT INTO app_state (key, value, updated_at) VALUES (?, '', ?)
+     ON CONFLICT(key) DO UPDATE SET updated_at = excluded.updated_at`
+  ).bind(CRON_HEARTBEAT_KEY, Date.now()).run();
+}
+var appStateTableReady = false;
+async function ensureAppStateTable(env) {
+  if (appStateTableReady) return;
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS app_state (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at INTEGER NOT NULL)`
+  ).run();
+  appStateTableReady = true;
+}
+// Per isolate: one D1 read per minute at most on the request path.
+var aiModelIndexMemo = { at: 0, value: null };
+async function readAiModelIndex(env) {
+  if (Date.now() - aiModelIndexMemo.at < 60 * 1000) return aiModelIndexMemo.value;
+  let value = null;
+  try {
+    await ensureAppStateTable(env);
+    const row = await env.DB.prepare(`SELECT value FROM app_state WHERE key = ?`).bind(AI_MODEL_INDEX_KEY).first();
+    value = row?.value ? JSON.parse(row.value) : null;
+  } catch {
+    value = null;
+  }
+  aiModelIndexMemo = { at: Date.now(), value };
+  return value;
+}
+async function maybeRefreshAiModelIndex(env) {
+  const index = await readAiModelIndex(env);
+  if (index && Date.now() - Number(index.checkedAt || 0) < AI_MODEL_INDEX_TTL_MS) return;
+  aiModelIndexMemo = { at: 0, value: null };
+  await refreshAiModelIndex(env);
+}
+// A model OpenRouter no longer lists, or whose shutdown date has passed.
+function aiModelGone(id, live) {
+  if (!live?.models) return false;
+  if (live.missing?.includes(id)) return true;
+  const expires = Date.parse(live.models[id]?.expiresAt || "");
+  return Number.isFinite(expires) && expires <= Date.now();
+}
+/*
+  What the dashboard needs to know about the catalog: anything gone or
+  going, priced above what we are willing to pay (requests would then
+  fail on max_price), or behaving differently than configured.
+*/
+function aiCatalogHealth(live) {
+  const soon = Date.now() + 30 * 24 * 60 * 60 * 1000;
+  const problems = [];
+  if (!live) return { checkedAt: null, problems: ["model index has never been refreshed"] };
+  for (const [id, cfg] of Object.entries(INCLUDED_AI_MODELS)) {
+    const m = live.models?.[id];
+    if (!m) {
+      problems.push(`${id}: no longer listed by OpenRouter`);
+      continue;
+    }
+    const expires = Date.parse(m.expiresAt || "");
+    if (Number.isFinite(expires) && expires <= soon) problems.push(`${id}: shuts down ${m.expiresAt}`);
+    if (m.price?.prompt > cfg.prompt || m.price?.completion > cfg.completion) {
+      problems.push(`${id}: list price ${m.price.prompt}/${m.price.completion} above ceiling ${cfg.prompt}/${cfg.completion}`);
+    }
+    if (m.reasoning?.mandatory && cfg.reasoning !== "required") problems.push(`${id}: thinking became mandatory`);
+  }
+  for (const id of Object.keys(DECISION_MODELS)) {
+    const d = live.decision?.[id];
+    if (d && !d.endpoints) problems.push(`${id}: decision model has no endpoints (Pulse check/rank fall back to running everything)`);
+  }
+  const stale = Date.now() - Number(live.checkedAt || 0) > 2 * AI_MODEL_INDEX_TTL_MS;
+  if (stale) problems.push("model index is stale (cron refresh failing?)");
+  return { checkedAt: live.checkedAt, problems };
+}
+/*
+  The included-model menu, served to the app so a catalog change needs
+  only a worker deploy. Public: it is the same for everyone.
+*/
+async function handleAiModels(env, headers) {
+  const live = await readAiModelIndex(env);
+  const models = Object.entries(INCLUDED_AI_MODELS)
+    .filter(([id]) => !aiModelGone(id, live))
+    .map(([id, cfg]) => {
+      const m = live?.models?.[id];
+      return {
+        id,
+        label: cfg.label,
+        hint: cfg.hint,
+        vision: m ? m.inputModalities.includes("image") : true,
+        contextTokens: m?.contextTokens || null,
+        maxOutputTokens: m?.maxOutputTokens || null,
+        reasoning: m?.reasoning || { mandatory: cfg.reasoning === "required", efforts: [] },
+        expiresAt: m?.expiresAt || null
+      };
+    });
+  return json({
+    default: aiModelGone(INCLUDED_AI_DEFAULT_MODEL, live) ? models[0]?.id || INCLUDED_AI_DEFAULT_MODEL : INCLUDED_AI_DEFAULT_MODEL,
+    models,
+    decisionModel: DECISION_DEFAULT_MODEL,
+    checkedAt: live?.checkedAt || null
+  }, 200, { ...headers, "cache-control": "public, max-age=3600" });
+}
+__name(handleAiModels, "handleAiModels");
 /*
   Credits are real money now: micro-USD = tokens x USD-per-million. The
   old flat meter charged 5 micro-USD per token whatever the model — 10 to
@@ -375,16 +576,31 @@ __name(estimatePreflightAiCostMicros, "estimatePreflightAiCostMicros");
 */
 var INCLUDED_AI_MODELS = {
   // Default: fast, strong at tool loops (τ²-Airline 76%), open weights.
-  "deepseek/deepseek-v4.1-flash": { prompt: 0.3, completion: 1.2 },
+  "deepseek/deepseek-v4.1-flash": {
+    prompt: 0.3, completion: 1.2,
+    label: "DeepSeek V4.1 Flash", hint: "Fast and reliable with tools. Recommended."
+  },
   // Best τ² score of the cheap tier, MIT, vision — but slower (~60 tok/s).
-  "xiaomi/mimo-v2.6-flash": { prompt: 0.15, completion: 0.3 },
+  "xiaomi/mimo-v2.6-flash": {
+    prompt: 0.15, completion: 0.3,
+    label: "Xiaomi MiMo V2.6 Flash", hint: "Best tool use in its class, reads images. Slower."
+  },
   // Cheapest of the strong open models. Always thinks: OpenRouter rejects
   // reasoning off for it (eval 2026-10-07), and it answers in 5-7 s.
-  "z-ai/glm-5.3-flash": { prompt: 0.15, completion: 0.5, reasoning: "required" },
+  "z-ai/glm-5.3-flash": {
+    prompt: 0.15, completion: 0.5, reasoning: "required",
+    label: "GLM 5.3 Flash", hint: "Strong and very economical. Always thinks first, so replies take a few seconds."
+  },
   // Strongest open model (Artificial Analysis 46); costs ~3x per run.
-  "xiaomi/mimo-v2.6-pro": { prompt: 0.45, completion: 0.9 },
+  "xiaomi/mimo-v2.6-pro": {
+    prompt: 0.45, completion: 0.9,
+    label: "Xiaomi MiMo V2.6 Pro", hint: "Strongest open model. Uses about 3× the credits."
+  },
   // PDFs and images natively; replaces gemini-2.5-flash-lite (retired 2026-10-16).
-  "google/gemini-3.1-flash-lite": { prompt: 0.25, completion: 1.5 }
+  "google/gemini-3.1-flash-lite": {
+    prompt: 0.25, completion: 1.5,
+    label: "Gemini 3.1 Flash Lite", hint: "Best for PDFs and images."
+  }
 };
 var AI_MODEL_ALLOWLIST = /* @__PURE__ */ new Set(Object.keys(INCLUDED_AI_MODELS));
 /*
@@ -4799,8 +5015,11 @@ async function handleAiCompletions(env, req, headers) {
   const body = await bodyJson(req);
 
   let requestedModel = String(body.model || policy.model || INCLUDED_AI_DEFAULT_MODEL).trim();
+  const liveModels = await readAiModelIndex(env);
   // Clients that still have a shut-down model saved get the default.
-  if (RETIRED_AI_MODELS.has(requestedModel)) requestedModel = INCLUDED_AI_DEFAULT_MODEL;
+  if (RETIRED_AI_MODELS.has(requestedModel) || aiModelGone(requestedModel, liveModels)) {
+    requestedModel = INCLUDED_AI_DEFAULT_MODEL;
+  }
   const selectedModel = AI_MODEL_ALLOWLIST.has(requestedModel)
     ? requestedModel
     : "";
@@ -4913,7 +5132,7 @@ async function handleAiCompletions(env, req, headers) {
 
   // The client picks among allowlisted models; the fallback chain and the
   // price ceiling are the server's.
-  const modelChain = [selectedModel, ...INCLUDED_AI_FALLBACKS.filter((m) => m !== selectedModel)];
+  const modelChain = [selectedModel, ...INCLUDED_AI_FALLBACKS.filter((m) => m !== selectedModel && !aiModelGone(m, liveModels))];
 
   const forwardBody = {
     model: selectedModel,
@@ -4934,7 +5153,7 @@ async function handleAiCompletions(env, req, headers) {
       Math.max(1, Number(body.max_tokens || policy.maxTokens))
     ),
 
-    reasoning: sanitizeIncludedAiReasoning(body.reasoning, selectedModel),
+    reasoning: sanitizeIncludedAiReasoning(body.reasoning, selectedModel, liveModels),
 
     provider: includedAiProviderPreferences(modelChain)
   };
@@ -9448,6 +9667,62 @@ function metricsTokenOk(env, req, url) {
   return diff === 0;
 }
 
+/*
+  Operational numbers for the status dashboard (rickops): what money the
+  free tier is burning today, whether the model catalog still matches
+  OpenRouter, whether the cron is alive, and how much is stored. Each
+  part fails on its own, so one broken query does not blank the rest.
+*/
+async function opsSummary(env, nowMs) {
+  const safe = async (fn) => {
+    try {
+      return await fn();
+    } catch (err) {
+      return { error: String(err?.message || err).slice(0, 160) };
+    }
+  };
+  const day = new Date(nowMs).toISOString().slice(0, 10);
+
+  // The dashboard polls hourly: a second chance to refresh the catalog
+  // if the cron minute was missed.
+  await maybeRefreshAiModelIndex(env).catch(() => {});
+
+  return {
+    ai: await safe(async () => {
+      const charged = await env.DB.prepare(
+        `SELECT COALESCE(SUM(ai_spend_micros_day), 0) AS micros, COUNT(*) AS users
+           FROM usage_current WHERE ai_day_key = ? AND ai_spend_micros_day > 0`
+      ).bind(day).first();
+      return {
+        freeRealSpentTodayUsd: (await freeAiSpentToday(env)) / 1e6,
+        freeDailyBudgetUsd: aiFreeDailyBudgetMicros(env) / 1e6,
+        creditsChargedTodayUsd: Number(charged?.micros || 0) / 1e6,
+        usersWithAiToday: Number(charged?.users || 0),
+        markup: aiCreditMarkup(env)
+      };
+    }),
+    catalog: await safe(async () => aiCatalogHealth(await readAiModelIndex(env))),
+    cron: await safe(async () => {
+      await ensureAppStateTable(env);
+      const row = await env.DB.prepare(`SELECT updated_at FROM app_state WHERE key = ?`).bind(CRON_HEARTBEAT_KEY).first();
+      return { lastRunAt: Number(row?.updated_at || 0) || null };
+    }),
+    push: await safe(async () => {
+      const row = await env.DB.prepare(
+        `SELECT COUNT(*) AS pending,
+                SUM(CASE WHEN fire_at < ? THEN 1 ELSE 0 END) AS overdue
+           FROM scheduled_pushes WHERE sent_at IS NULL AND expires_at > ?`
+      ).bind(nowMs - 5 * 60 * 1000, nowMs).first();
+      return { pending: Number(row?.pending || 0), overdue: Number(row?.overdue || 0) };
+    }),
+    storage: await safe(async () => {
+      const row = await env.DB.prepare(
+        `SELECT COALESCE(SUM(storage_bytes), 0) AS bytes, COALESCE(SUM(object_count), 0) AS objects FROM usage_current`
+      ).first();
+      return { bytes: Number(row?.bytes || 0), objects: Number(row?.objects || 0) };
+    })
+  };
+}
 async function handleMetricsSummary(env, req, url, headers) {
   if (!metricsTokenOk(env, req, url)) {
     return json({ error: "unauthorized" }, 401, headers);
@@ -9620,7 +9895,8 @@ async function handleMetricsSummary(env, req, url, headers) {
       spaces: Number(spaces?.total || 0),
       spaceMembers: Number(spaceMembers?.total || 0),
       publicShares: Number(publicShares?.total || 0)
-    }
+    },
+    ops: await opsSummary(env, nowMs)
   }, 200, headers);
 }
 
@@ -9733,6 +10009,9 @@ async function route(req, env) {
     }
     if (url.pathname === "/api/ai/chat/completions" && req.method === "POST") {
       return handleAiCompletions(env, req, headers);
+    }
+    if (url.pathname === "/api/ai/models" && req.method === "GET") {
+      return handleAiModels(env, headers);
     }
     if (url.pathname === "/api/ai/decide" && req.method === "POST") {
       return handleAiDecide(env, req, headers);
@@ -9979,9 +10258,23 @@ var index_default = {
     }
   },
   async scheduled(event, env, ctx) {
+    // Heartbeat every ten minutes, so the dashboard can tell a dead cron
+    // from a quiet one (one D1 write, not 1,440 a day).
+    if (new Date(event?.scheduledTime || Date.now()).getUTCMinutes() % 10 === 0) {
+      ctx.waitUntil(writeCronHeartbeat(env).catch(() => {}));
+    }
+
     ctx.waitUntil(
       runScheduledPushes(env).catch((err) => console.error("[push cron]", safeErrorForLog(err)))
     );
+
+    // The model catalog, in its own minute so its CPU does not stack on
+    // the push run's (it checks a timestamp and usually does nothing).
+    if (new Date(event?.scheduledTime || Date.now()).getUTCMinutes() === 23) {
+      ctx.waitUntil(
+        maybeRefreshAiModelIndex(env).catch((err) => console.error("[model index cron]", safeErrorForLog(err)))
+      );
+    }
 
     // Once an hour (the cron itself runs every minute).
     if (new Date(event?.scheduledTime || Date.now()).getUTCMinutes() === 7) {

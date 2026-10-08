@@ -5,7 +5,7 @@
 
 import { isChatEnabled } from './chat/chat-enabled.js';
 import { installMobileTabBar } from './mobile-tab-bar.js';
-import { $, state, store, openDB, toast, actionToast, cssColorToHex, safeCssColor, lucide, lucideCalendarDay, debounce } from './core.js';
+import { $, state, store, openDB, toast, actionToast, cssColorToHex, safeCssColor, lucide, lucideCalendarDay, ensureLucideIcons, debounce } from './core.js';
 
 import {
   reconcileOwnedSpaces,
@@ -2979,6 +2979,15 @@ async function init() {
 
   // First surface is rendered and interactive — release the boot loader.
   bootDone();
+
+  // The rest of the icon set (boot ships only the app's own icons), while
+  // idle and online, so pickers and user icons are ready — and cached for
+  // offline — before anyone asks.
+  setTimeout(() => {
+    const load = () => ensureLucideIcons();
+    if ('requestIdleCallback' in window) requestIdleCallback(load, { timeout: 10_000 });
+    else load();
+  }, 3000);
 
   // Boot splash is gone: run any Excalidraw library import queued during boot
   // (and let later hashchange/launchQueue deep links run immediately from now).

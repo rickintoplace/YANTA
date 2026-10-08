@@ -10,6 +10,7 @@ import {
   lucide,
   lucideIconNames,
   normalizeLucideName,
+  ensureLucideIcons,
   safeCssColor,
   cssColorToHex,
   toast,
@@ -301,6 +302,11 @@ export function openIconPicker({
 
   modal.hidden = false;
   renderGrid();
+
+  // The boot bundle only has the icons the app itself uses.
+  ensureLucideIcons().then(() => {
+    if (!modal.hidden) renderGrid();
+  });
 
   setTimeout(() => searchInput.focus(), 0);
 }

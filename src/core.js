@@ -4,7 +4,7 @@
 // stores only note METADATA, folders, image blobs and settings.
 // ============================================================
 
-import { icons as LUCIDE_ICONS } from 'lucide';
+import { LUCIDE_SUBSET } from './icons/lucide-subset.js';
 
 export const $ = (id) => document.getElementById(id);
 
@@ -352,12 +352,64 @@ const SVG_TAGS = new Set([
   'ellipse',
 ]);
 
-const LUCIDE_KEY_BY_KEBAB = new Map([
-  ...Object.keys(LUCIDE_ICONS || {}).map((key) => [keyToKebab(key), key]),
+/*
+  Boot ships only the icons the code names (src/icons/lucide-subset.js,
+  generated). Anything else — an icon a user picked for a note, a name
+  built at runtime — renders as an empty placeholder, pulls the full set
+  in, and is filled in place once it arrives. The full set also loads
+  on its own shortly after boot, so placeholders are rare.
+*/
+let LUCIDE_ICONS = LUCIDE_SUBSET;
+let lucideFullLoaded = false;
+let lucideFullPromise = null;
+
+const LUCIDE_KEY_BY_KEBAB = new Map();
+
+function indexLucideKeys() {
+  LUCIDE_KEY_BY_KEBAB.clear();
+
+  for (const key of Object.keys(LUCIDE_ICONS || {})) {
+    LUCIDE_KEY_BY_KEBAB.set(keyToKebab(key), key);
+  }
 
   // Custom icons use kebab-case keys directly.
-  ...Object.keys(CUSTOM_LUCIDE_ICONS).map((key) => [keyToKebab(key), key]),
-]);
+  for (const key of Object.keys(CUSTOM_LUCIDE_ICONS)) {
+    LUCIDE_KEY_BY_KEBAB.set(keyToKebab(key), key);
+  }
+}
+
+indexLucideKeys();
+
+function fillPendingLucideIcons() {
+  if (typeof document === 'undefined') return;
+
+  for (const svg of document.querySelectorAll('svg[data-lucide-pending]')) {
+    const def = getLucideDef(svg.getAttribute('data-lucide-pending'));
+    svg.removeAttribute('data-lucide-pending');
+    // Only the body: callers may have added classes or styles to the <svg>.
+    svg.innerHTML = renderIconNode(def);
+  }
+}
+
+/** Loads the full Lucide set once. Resolves when names outside the subset render. */
+export function ensureLucideIcons() {
+  if (lucideFullLoaded) return Promise.resolve();
+
+  lucideFullPromise ||= import('lucide')
+    .then(({ icons }) => {
+      LUCIDE_ICONS = icons;
+      lucideFullLoaded = true;
+      indexLucideKeys();
+      fillPendingLucideIcons();
+      window.dispatchEvent(new CustomEvent('yanta-lucide-loaded'));
+    })
+    .catch((err) => {
+      lucideFullPromise = null;
+      console.warn('[YANTA] full icon set failed to load', err);
+    });
+
+  return lucideFullPromise;
+}
 
 function lucideDefByKey(key) {
   const kebab = keyToKebab(key);
@@ -406,7 +458,7 @@ function iconDefLooksValid(def) {
   return nodeList(def).length > 0;
 }
 
-function findLucideKey(name) {
+function findLucideKey(name, { fallback = true } = {}) {
   const raw = String(name || '').trim();
   const alias = ICON_ALIASES[raw] || ICON_ALIASES[raw.toLowerCase()];
 
@@ -430,6 +482,8 @@ function findLucideKey(name) {
       return c;
     }
   }
+
+  if (!fallback) return null;
 
   return (
     LUCIDE_KEY_BY_KEBAB.get('square') ||
@@ -488,7 +542,10 @@ function renderIconNode(defOrNodes) {
   return nodeList(defOrNodes).map(renderSvgEntry).join('');
 }
 
+/** All icon names. Before the full set has loaded, only the boot subset — pickers re-render on 'yanta-lucide-loaded'. */
 export function lucideIconNames() {
+  ensureLucideIcons();
+
   const names = [
     ...Object.keys(LUCIDE_ICONS || {})
       .filter((key) => iconDefLooksValid(LUCIDE_ICONS[key]))
@@ -502,25 +559,42 @@ export function lucideIconNames() {
   return [...new Set(names)].sort((a, b) => a.localeCompare(b));
 }
 
+/** Known only to the full set, which has not loaded yet. */
+function lucidePending(raw) {
+  if (lucideFullLoaded || !raw || findLucideKey(raw, { fallback: false })) return false;
+
+  ensureLucideIcons();
+  return true;
+}
+
 export function normalizeLucideName(name) {
   const raw = String(name || '').trim();
   if (!raw) return 'square';
+
+  // Cannot tell a real icon from a typo yet: keep what the user chose
+  // rather than saving "square" over it.
+  if (lucidePending(raw)) return keyToKebab(raw);
 
   const key = findLucideKey(raw);
   return key ? keyToKebab(key) : 'square';
 }
 
+/** Exact check; call ensureLucideIcons() first for names outside the boot subset. */
 export function lucideExists(name) {
-  const key = findLucideKey(name);
-  return !!key && iconDefLooksValid(LUCIDE_ICONS[key]);
+  return !!findLucideKey(name, { fallback: false });
 }
 
 export function lucide(name, size = 14) {
-  const normalized = normalizeLucideName(name);
-  const def = getLucideDef(normalized);
-  const body = renderIconNode(def);
+  const open = `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"`;
+  const raw = String(name || '').trim();
 
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
+  if (lucidePending(raw)) {
+    return `${open} data-lucide-pending="${escapeSvgAttr(raw)}"></svg>`;
+  }
+
+  const def = getLucideDef(normalizeLucideName(raw));
+
+  return `${open}>${renderIconNode(def)}</svg>`;
 }
 
 export function lucideCalendarDay(size = 14, day = new Date().getDate()) {

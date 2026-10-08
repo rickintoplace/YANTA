@@ -13,6 +13,7 @@ import {
   store,
   lucide,
   lucideIconNames,
+  ensureLucideIcons,
   safeCssColor,
   escapeHtml,
   toast,
@@ -22,7 +23,6 @@ import { renderTree } from '../tree.js';
 import { openBoundOverlay } from '../overlay-history.js';
 import { injectGraphCss } from './graph-css.js';
 
-const APPEARANCE_ICONS = lucideIconNames();
 
 const COLOR_SWATCHES = [
   // Blues
@@ -599,9 +599,10 @@ export function openAppearancePicker(opts) {
 
   function refreshIconGrid() {
     const q = local.iconSearch.trim().toLowerCase();
+    const names = lucideIconNames();
     const list = q
-      ? APPEARANCE_ICONS.filter((name) => name.includes(q))
-      : APPEARANCE_ICONS;
+      ? names.filter((name) => name.includes(q))
+      : names;
     const html = [
       `<button type="button" class="${local.icon === defaultIcon ? 'selected' : ''}" data-yap-icon="${escapeHtml(defaultIcon)}" title="Default (${escapeHtml(defaultIcon)})">${lucide(defaultIcon, 18)}</button>`,
     ];
@@ -624,6 +625,11 @@ export function openAppearancePicker(opts) {
   refreshSwatches();
   refreshIconGrid();
   syncSectionDisabled();
+
+  // The boot bundle only has the icons the app itself uses.
+  ensureLucideIcons().then(() => {
+    if (iconSearchEl.isConnected) refreshIconGrid();
+  });
 
   iconSearchEl.addEventListener('input', (e) => {
     local.iconSearch = e.target.value || '';

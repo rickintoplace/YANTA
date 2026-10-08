@@ -5,9 +5,9 @@
   "license": "AGPL-3.0-only",
   "type": "module",
   "scripts": {
-    "predev": "node scripts/copy-excalidraw-assets.mjs && node scripts/copy-ort-assets.mjs",
+    "predev": "node scripts/copy-excalidraw-assets.mjs && node scripts/copy-ort-assets.mjs && node scripts/gen-lucide-subset.mjs",
     "dev": "vite --host 0.0.0.0",
-    "prebuild": "node scripts/copy-excalidraw-assets.mjs && node scripts/copy-ort-assets.mjs",
+    "prebuild": "node scripts/copy-excalidraw-assets.mjs && node scripts/copy-ort-assets.mjs && node scripts/gen-lucide-subset.mjs",
     "build": "vite build",
     "postbuild": "node scripts/csp-hashes.mjs && node scripts/sw-precache.mjs",
     "csp:check": "node scripts/csp-hashes.mjs",
@@ -18,7 +18,8 @@
     "format": "prettier --write .",
     "build:rss-catalog": "node scripts/build-rss-catalog-from-plenary.mjs vendor/awesome-rss-feeds src/rss/rss-catalog.js",
     "test": "vitest run",
-    "ai:eval": "node scripts/ai-eval.mjs"
+    "ai:eval": "node scripts/ai-eval.mjs",
+    "icons:subset": "node scripts/gen-lucide-subset.mjs"
   },
   "dependencies": {
     "@codemirror/autocomplete": "6.16.2",

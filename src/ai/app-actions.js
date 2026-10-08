@@ -7,6 +7,7 @@ import {
   state,
   store,
   normalizeLucideName,
+  ensureLucideIcons,
   safeCssColor,
   cssColorToHex,
   toast as appActionToast,
@@ -336,6 +337,10 @@ export async function createNoteAction({
 } = {}) {
   const id = uid();
 
+  // A model may pick any Lucide name; check it against the full set.
+
+  await ensureLucideIcons();
+
   const appearance = normalizeAppearancePatch({
     ...(icon !== undefined ? { icon } : {}),
     ...(color !== undefined ? { color } : {}),
@@ -385,6 +390,10 @@ export async function updateNoteAppearanceAction(args = {}) {
   if (!note) {
     throw new Error('Note not found');
   }
+
+  // A model may pick any Lucide name; check it against the full set.
+
+  await ensureLucideIcons();
 
   const patch = normalizeAppearancePatch(args, {
     allowReset: true,
@@ -920,6 +929,10 @@ export async function createEventAction(args = {}) {
 
   hydrateCalendarStateFromVault({ silent: true });
 
+  // A model may pick any Lucide name; check it against the full set.
+
+  await ensureLucideIcons();
+
   const appearance = normalizeAppearancePatch({
     ...(args.icon !== undefined ? { icon: args.icon } : {}),
     ...(args.color !== undefined ? { color: args.color } : {}),
@@ -992,6 +1005,10 @@ export async function updateEventAppearanceAction(args = {}) {
   if (!existing) {
     throw new Error('Calendar event not found');
   }
+
+  // A model may pick any Lucide name; check it against the full set.
+
+  await ensureLucideIcons();
 
   const patch = normalizeAppearancePatch(args, {
     allowReset: true,

@@ -98,6 +98,12 @@ import {
 } from './citation-check.js';
 
 import {
+  WIDGET_INSTRUCTIONS,
+  extractWidgets,
+  mountWidgets,
+} from './ui-widgets.js';
+
+import {
   openNote,
 } from '../notes.js';
 
@@ -405,6 +411,7 @@ function compactStoredMessage(msg) {
     covers: msg.covers || undefined,
     // A check still running when the page closed never finishes.
     citeCheck: msg.citeCheck && !msg.citeCheck.pending ? msg.citeCheck : undefined,
+    widgetState: msg.widgetState || undefined,
     ts: Number(msg.ts || Date.now()),
   };
 }
@@ -2468,7 +2475,10 @@ function renderAssistantMessageNode(msg) {
     wrap.append(details);
   }
 
-  const parsed = extractAssistantUiTokens(stripForDisplay(keepClaimMarkers(String(msg.content || ''))));
+  // Interactive widgets (```yanta-ui blocks) become markers here and are
+  // mounted after the markdown is rendered; see ui-widgets.js.
+  const { text: withWidgetMarks, widgets } = extractWidgets(stripForDisplay(keepClaimMarkers(String(msg.content || ''))));
+  const parsed = extractAssistantUiTokens(withWidgetMarks);
 
   const content = document.createElement('div');
   content.className = 'yanta-ai-msg-content yanta-ai-rich';
@@ -2477,6 +2487,14 @@ function renderAssistantMessageNode(msg) {
     content.innerHTML = renderBlocksInlineWithContext(parsed.text, { remoteMedia: 'link' });
     enhanceAiCodeCopy(content);
     markCitations(content, msg.citeCheck);
+    mountWidgets(content, widgets, {
+      stateFor: (i) => {
+        msg.widgetState ||= {};
+        msg.widgetState[i] ||= {};
+        return msg.widgetState[i];
+      },
+      save: saveWidgetStateSoon,
+    });
   } else if (!parsed.notes.length && !parsed.events.length && !parsed.chips.length) {
     content.textContent = '[No response]';
   }
@@ -2615,6 +2633,16 @@ function markCitations(root, check) {
     frag.append(text.slice(last).replace(/⟦c\d+⟧/g, ''));
     node.replaceWith(frag);
   }
+}
+
+// Sliders fire on every pixel; persist what the user set once they pause.
+let widgetSaveTimer = 0;
+function saveWidgetStateSoon() {
+  clearTimeout(widgetSaveTimer);
+  widgetSaveTimer = setTimeout(() => {
+    saveTransientConversation();
+    scheduleAiSessionSave();
+  }, 600);
 }
 
 /** "3 of 4 citations checked out", with each claim, its quote and source. */
@@ -3175,6 +3203,8 @@ async function runAssistant(userText) {
     userText,
     toolIndex: loadout.indexMarkdown(),
   });
+
+  systemMessage.content = [systemMessage.content, WIDGET_INSTRUCTIONS].join('\n\n');
 
   if (citeSources) {
     systemMessage.content = [

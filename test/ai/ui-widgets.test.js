@@ -1,0 +1,61 @@
+import { describe, it, expect } from 'vitest';
+import { compileFormula, evaluateFormula } from '../../src/ai/ui-expr.js';
+import { extractWidgets, stripWidgets, formatValue } from '../../src/ai/ui-widgets.js';
+
+describe('formula evaluator', () => {
+  it('computes arithmetic, precedence, functions and conditionals', () => {
+    expect(evaluateFormula('price * qty * (1 + vat / 100)', { price: 10, qty: 3, vat: 19 })).toBeCloseTo(35.7);
+    expect(evaluateFormula('2 + 3 * 4 ^ 2')).toBe(50);
+    expect(evaluateFormula('round(10 / 3, 2)')).toBe(3.33);
+    expect(evaluateFormula('a > 5 ? 1 : 0', { a: 7 })).toBe(1);
+    expect(evaluateFormula('if(a, 10, 20)', { a: 0 })).toBe(20);
+    expect(evaluateFormula('max(1, 4, 2) + min(3, -1)')).toBe(3);
+    expect(evaluateFormula('pmt(0.05 / 12, 240, 100000)')).toBeCloseTo(659.96, 1);
+  });
+
+  it('refuses anything that is not a formula', () => {
+    for (const bad of ['alert(1)', 'constructor', 'a.b', 'this', '`x`', '"s"', 'x = 1', '1 +', '__proto__']) {
+      expect(Number.isNaN(evaluateFormula(bad, { x: 1 }))).toBe(true);
+    }
+    expect(() => compileFormula('a['.repeat(10))).toThrow();
+  });
+
+  it('gives NaN for division by zero and unknown values', () => {
+    expect(Number.isNaN(evaluateFormula('1 / 0'))).toBe(true);
+    expect(Number.isNaN(evaluateFormula('missing + 1'))).toBe(true);
+  });
+});
+
+describe('widget blocks', () => {
+  const calc = '```yanta-ui\n{"type":"calculator","title":"Savings","inputs":[{"id":"monthly","label":"Monthly","value":200}],"outputs":[{"id":"year","label":"Per year","formula":"monthly * 12"}]}\n```';
+
+  it('extracts complete, broken and still-streaming blocks', () => {
+    const text = `Here you go:\n\n${calc}\n\nAnd a broken one:\n\n\`\`\`yanta-ui\n{nope}\n\`\`\`\n\nStreaming:\n\n\`\`\`yanta-ui\n{"type":"chart",`;
+    const { text: out, widgets } = extractWidgets(text);
+
+    expect(widgets).toHaveLength(3);
+    expect(widgets[0].spec.type).toBe('calculator');
+    expect(widgets[0].spec.inputs[0].id).toBe('monthly');
+    expect(widgets[1].error).toBeTruthy();
+    expect(widgets[2].pending).toBe(true);
+    expect(out).toMatch(/⟦w0⟧[\s\S]*⟦w1⟧[\s\S]*⟦w2⟧/);
+    expect(out).not.toMatch(/yanta-ui/);
+  });
+
+  it('validates specs: bad ids dropped, limits applied, unknown types rejected', () => {
+    const { widgets } = extractWidgets('```yanta-ui\n{"type":"calculator","inputs":[{"id":"ok","value":1},{"id":"no way","value":2}],"outputs":[{"label":"x","formula":"ok*2"}]}\n```\n```yanta-ui\n{"type":"iframe","src":"https://evil"}\n```');
+    expect(widgets[0].spec.inputs.map((i) => i.id)).toEqual(['ok']);
+    expect(widgets[0].spec.outputs[0].id).toBe('out1');
+    expect(widgets[1].error).toMatch(/Unknown widget type/);
+  });
+
+  it('summarises widgets for prose-only contexts', () => {
+    expect(stripWidgets(`a\n${calc}\nb`)).toMatch(/\[Savings: interactive calculator\]/);
+  });
+
+  it('formats values', () => {
+    expect(formatValue(NaN)).toBe('—');
+    expect(formatValue(1234.5, { format: 'integer' })).toMatch(/1.?235/);
+    expect(formatValue(7, { format: 'percent' })).toMatch(/7 %/);
+  });
+});

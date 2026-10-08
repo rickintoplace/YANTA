@@ -171,6 +171,7 @@ function compactMessage(msg) {
     model: msg.model || undefined,
     covers: msg.covers || undefined,
     citeCheck: msg.citeCheck && !msg.citeCheck.pending ? msg.citeCheck : undefined,
+    widgetState: msg.widgetState || undefined,
     ts: Number(msg.ts || Date.now()),
   };
 }

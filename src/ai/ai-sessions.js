@@ -161,7 +161,7 @@ function compactMessage(msg) {
 
   const role = String(msg.role || '');
 
-  if (!['user', 'assistant', 'tool'].includes(role)) return null;
+  if (!['user', 'assistant', 'tool', 'summary'].includes(role)) return null;
 
   return {
     role,
@@ -169,6 +169,7 @@ function compactMessage(msg) {
     reasoning: msg.reasoning ? String(msg.reasoning || '') : undefined,
     toolName: msg.toolName || undefined,
     model: msg.model || undefined,
+    covers: msg.covers || undefined,
     ts: Number(msg.ts || Date.now()),
   };
 }

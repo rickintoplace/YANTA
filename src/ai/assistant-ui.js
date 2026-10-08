@@ -42,8 +42,16 @@ import {
 } from '../agent/agent-bridge-client.js';
 
 import {
+  openRouterChatCompletion,
   openRouterChatCompletionStream,
 } from './openrouter-client.js';
+
+import {
+  needsCompaction,
+  compactConversation,
+  historySinceSummary,
+  summaryMessages,
+} from './conversation-compaction.js';
 
 import {
   openAiToolsForModel,
@@ -366,7 +374,7 @@ function compactStoredMessage(msg) {
 
   const role = String(msg.role || '');
 
-  if (!['user', 'assistant', 'tool'].includes(role)) return null;
+  if (!['user', 'assistant', 'tool', 'summary'].includes(role)) return null;
 
   return {
     role,
@@ -374,6 +382,7 @@ function compactStoredMessage(msg) {
     reasoning: msg.reasoning ? String(msg.reasoning || '') : undefined,
     toolName: msg.toolName || undefined,
     model: msg.model || undefined,
+    covers: msg.covers || undefined,
     ts: Number(msg.ts || Date.now()),
   };
 }
@@ -2224,7 +2233,9 @@ function renderMessages() {
 
     const roleLabel = messageRoleLabel(msg);
 
-    if (msg.toolName) {
+    if (msg.role === 'summary') {
+      node.append(renderSummaryMessageNode(msg));
+    } else if (msg.toolName) {
       node.append(renderToolMessageNode(msg));
     } else if (msg.role === 'assistant') {
       node.append(renderAssistantMessageNode(msg));
@@ -2247,6 +2258,25 @@ function renderMessages() {
   }
 
   messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+/** The fold-out marking where older messages stopped being sent. */
+function renderSummaryMessageNode(msg) {
+  const details = document.createElement('details');
+  details.className = 'yanta-ai-summary';
+
+  const summary = document.createElement('summary');
+  summary.innerHTML = `${lucide('fold-vertical', 13)}<span>${escapeHtml(
+    `Earlier conversation summarized${msg.covers ? ` (${msg.covers} messages)` : ''} — only the summary is sent from here on`
+  )}</span>`;
+
+  const body = document.createElement('div');
+  body.className = 'yanta-ai-summary-body yanta-ai-rich';
+  body.innerHTML = renderBlocksInlineWithContext(String(msg.content || ''), { remoteMedia: 'link' });
+
+  details.append(summary, body);
+
+  return details;
 }
 
 function messageRoleLabel(msg) {
@@ -2860,7 +2890,41 @@ function requestExternalSourceToolApproval({
   });
 }
 
+/**
+ * Folds everything but the latest turns into a summary message (see
+ * conversation-compaction.js). Returns the summary, or null.
+ */
+async function compactAssistantConversation({ signal = null } = {}) {
+  setAssistantBusy(true, 'Compacting the conversation…');
+
+  const summary = await compactConversation(conversation, {
+    signal,
+    complete: ({ messages, signal: s }) => openRouterChatCompletion({ messages, tools: [], signal: s }),
+  });
+
+  if (summary) {
+    saveTransientConversation();
+    scheduleAiSessionSave();
+    renderMessages();
+  }
+
+  return summary;
+}
+
 async function runAssistant(userText) {
+  abortController = new AbortController();
+
+  // Long chat: summarise the older part before this turn is sent. If that
+  // fails, fitHistory below still keeps the request within limits.
+  if (needsCompaction(conversation)) {
+    try {
+      await compactAssistantConversation({ signal: abortController.signal });
+    } catch (err) {
+      if (err?.name === 'AbortError') throw err;
+      console.warn('[YANTA AI] compaction failed; sending the newest messages only', err);
+    }
+  }
+
   const loadoutKey = JSON.stringify([
     getAiSettings().permissions || null,
     getAiSettings().progressiveTools !== false,
@@ -2895,12 +2959,12 @@ async function runAssistant(userText) {
     before the latest user message. With the context ahead of the history,
     prompt caching could never cover more than the system prompt.
   */
-  const history = fitHistory(conversation
-    .filter((m) => m.role === 'user' || m.role === 'assistant')
-    .map((m) => ({
-      role: m.role,
-      content: m.content,
-    })));
+  const sinceSummary = historySinceSummary(conversation);
+
+  const history = fitHistory(sinceSummary.messages.map((m) => ({
+    role: m.role,
+    content: m.content,
+  })));
 
   let lastUserIndex = -1;
   history.forEach((m, i) => { if (m.role === 'user') lastUserIndex = i; });
@@ -2914,12 +2978,11 @@ async function runAssistant(userText) {
       userText,
       toolIndex: loadout.indexMarkdown(),
     }),
+    ...summaryMessages(sinceSummary.summary),
     ...(lastUserIndex >= 0
       ? [...history.slice(0, lastUserIndex), contextMessage, ...history.slice(lastUserIndex)]
       : [contextMessage, ...history]),
   ];
-
-  abortController = new AbortController();
 
   setAssistantBusy(true, 'Thinking…');
 
@@ -3124,6 +3187,27 @@ async function maybeHandleAssistantSlashCommand(text) {
         model: 'YANTA',
       }
     );
+
+    return true;
+  }
+
+  if (command === 'compact') {
+    if (abortController) {
+      toast('YANTA AI is already working', 'error');
+      return true;
+    }
+
+    abortController = new AbortController();
+
+    try {
+      const summary = await compactAssistantConversation({ signal: abortController.signal });
+      if (!summary) toast('Nothing to compact yet');
+    } catch (err) {
+      toast(`Could not compact: ${err?.message || err}`, 'error');
+    } finally {
+      abortController = null;
+      setAssistantBusy(false);
+    }
 
     return true;
   }
@@ -3619,6 +3703,38 @@ function injectCss() {
   background: transparent;
   color: var(--text-dim);
   padding: 0px 12px 0 0;
+}
+
+.yanta-ai-msg.summary {
+  background: transparent;
+  padding: 0;
+  width: 100%;
+}
+
+.yanta-ai-summary {
+  border-top: 1px dashed var(--border);
+  border-bottom: 1px dashed var(--border);
+  padding: 6px 2px;
+  color: var(--text-faint);
+  font-size: 12px;
+}
+
+.yanta-ai-summary > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.yanta-ai-summary > summary::-webkit-details-marker {
+  display: none;
+}
+
+.yanta-ai-summary-body {
+  margin-top: 8px;
+  color: var(--text-dim);
+  font-size: 13px;
 }
 
 .yanta-ai-msg-role {

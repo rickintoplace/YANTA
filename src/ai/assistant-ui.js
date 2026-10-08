@@ -1791,6 +1791,68 @@ function formatToolDateTime(value, allDay = false) {
   }
 }
 
+// Which activity groups the user opened, so re-renders keep them open.
+const openToolActivity = new Set();
+
+const TOOL_VERBS = {
+  search_notes: 'Searched notes',
+  semantic_search_notes: 'Searched notes',
+  read_note: 'Read a note',
+  read_notes: 'Read notes',
+  create_note: 'Created a note',
+  append_to_note: 'Added to a note',
+  replace_in_note: 'Edited a note',
+  delete_note: 'Moved a note to Trash',
+  web_search: 'Searched the web',
+  web_read: 'Read a web page',
+  search_events: 'Looked at the calendar',
+  create_event: 'Added an event',
+  update_event: 'Updated an event',
+  rss_search_items: 'Searched feeds',
+  rss_read_item: 'Read an article',
+  tools_load: 'Loaded tools',
+  skill_view: 'Opened a skill',
+  skills_list: 'Listed skills',
+};
+
+function renderToolActivityNode(run) {
+  const key = String(run[0]?.ts || '');
+  const errors = run.filter((m) => toolResultIsError(safeJsonForTool(m.content)?.result ?? safeJsonForTool(m.content))).length;
+
+  const labels = [];
+  for (const m of run) {
+    if (m.toolName === 'tools_load') continue;
+    const label = TOOL_VERBS[m.toolName] || toolDisplayName(m.toolName);
+    if (!labels.includes(label)) labels.push(label);
+  }
+  if (!labels.length) labels.push('Loaded tools');
+
+  const details = document.createElement('details');
+  details.className = `yanta-ai-msg tool yanta-ai-activity${errors ? ' has-error' : ''}`;
+  details.open = openToolActivity.has(key);
+  details.addEventListener('toggle', () => {
+    if (details.open) openToolActivity.add(key);
+    else openToolActivity.delete(key);
+  });
+
+  const summary = document.createElement('summary');
+  summary.innerHTML = `
+    <span class="yanta-ai-activity-icon">${lucide(errors ? 'triangle-alert' : 'sparkles', 13)}</span>
+    <span class="yanta-ai-activity-text">${escapeHtml(labels.slice(0, 3).join(' · '))}${labels.length > 3 ? ` · +${labels.length - 3}` : ''}</span>
+    ${errors ? `<span class="yanta-ai-activity-err">${errors} failed</span>` : ''}
+    <span class="yanta-ai-activity-count">${run.length} step${run.length === 1 ? '' : 's'}</span>
+    ${lucide('chevron-down', 12)}
+  `;
+  details.append(summary);
+
+  const body = document.createElement('div');
+  body.className = 'yanta-ai-activity-body';
+  for (const m of run) body.append(renderToolMessageNode(m));
+  details.append(body);
+
+  return details;
+}
+
 function renderToolMessageNode(msg) {
   const rawData = safeJsonForTool(msg.content);
   const data =
@@ -2265,7 +2327,19 @@ function renderMessages() {
     return;
   }
 
-  for (const msg of conversation) {
+  for (let i = 0; i < conversation.length; i++) {
+    const msg = conversation[i];
+
+    // A run of tool calls is one quiet line ("Searched notes · Read note"),
+    // expandable to the full results, instead of a card per call.
+    if (msg.toolName) {
+      const run = [];
+      while (i < conversation.length && conversation[i].toolName) run.push(conversation[i++]);
+      i--;
+      messagesEl.append(renderToolActivityNode(run));
+      continue;
+    }
+
     const node = document.createElement('div');
     node.className = `yanta-ai-msg ${msg.role}`;
 
@@ -2273,8 +2347,6 @@ function renderMessages() {
 
     if (msg.role === 'summary') {
       node.append(renderSummaryMessageNode(msg));
-    } else if (msg.toolName) {
-      node.append(renderToolMessageNode(msg));
     } else if (msg.role === 'assistant') {
       node.append(renderAssistantMessageNode(msg));
     } else {
@@ -2729,6 +2801,10 @@ function noteExcerptForAi(noteId) {
 
     return String(md || '')
       .replace(/```[\s\S]*?```/g, ' ')
+      // Task markers: "- [x] Bread" reads "✓ Bread", "- [ ] Milk" reads "Milk".
+      .replace(/^\s*[-*+]\s+\[[xX]\]\s+/gm, '✓ ')
+      .replace(/^\s*[-*+]\s+\[ \]\s+/gm, '')
+      .replace(/\n+/g, ' · ')
       .replace(/!\[[^\]]*\]\([^)]+\)/g, ' ')
       .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
       .replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (_m, target, alias) => alias || target)
@@ -4096,6 +4172,63 @@ function injectCss() {
 .yanta-ai-citecheck-note {
   margin: 8px 0 0;
   font-size: 11px;
+}
+
+.yanta-ai-msg.tool.yanta-ai-activity {
+  padding: 0;
+  font-size: 12.5px;
+  color: var(--text-faint);
+}
+
+.yanta-ai-activity > summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  cursor: pointer;
+  list-style: none;
+  padding: 4px 10px 4px 6px;
+  border-radius: 999px;
+  max-width: 100%;
+}
+
+.yanta-ai-activity > summary::-webkit-details-marker {
+  display: none;
+}
+
+.yanta-ai-activity > summary:hover {
+  background: color-mix(in srgb, var(--accent) 8%, transparent);
+  color: var(--text-dim);
+}
+
+.yanta-ai-activity-icon {
+  display: inline-flex;
+  color: var(--accent);
+}
+
+.yanta-ai-activity.has-error .yanta-ai-activity-icon,
+.yanta-ai-activity-err {
+  color: var(--warning, #d29922);
+}
+
+.yanta-ai-activity-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.yanta-ai-activity-count {
+  opacity: 0.7;
+  white-space: nowrap;
+}
+
+.yanta-ai-activity[open] > summary > svg:last-child {
+  transform: rotate(180deg);
+}
+
+.yanta-ai-activity-body {
+  display: grid;
+  gap: 8px;
+  margin-top: 6px;
 }
 
 .yanta-ai-msg.summary {

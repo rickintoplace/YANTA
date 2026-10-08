@@ -160,6 +160,14 @@ let floatingShell = null;
 let floatingBody = null;
 
 let conversation = [];
+
+/*
+  Follow the conversation only while the reader is at the bottom. Every
+  streamed token re-renders the list, and pinning to the bottom on each
+  one made it impossible to scroll up and read while an answer was still
+  being written.
+*/
+let pinChatToBottom = true;
 let activeContextItems = [];
 let contextTrayEl = null;
 let contextMeterEl = null;
@@ -395,7 +403,8 @@ function compactStoredMessage(msg) {
     toolName: msg.toolName || undefined,
     model: msg.model || undefined,
     covers: msg.covers || undefined,
-    citeCheck: msg.citeCheck || undefined,
+    // A check still running when the page closed never finishes.
+    citeCheck: msg.citeCheck && !msg.citeCheck.pending ? msg.citeCheck : undefined,
     ts: Number(msg.ts || Date.now()),
   };
 }
@@ -1092,6 +1101,7 @@ async function openAiSession(sessionId) {
 
   currentSessionId = session.id;
   conversation = Array.isArray(session.messages) ? session.messages : [];
+  pinChatToBottom = true;
   activeContextItems = Array.isArray(session.contextItems) ? session.contextItems : [];
 
   saveTransientConversation();
@@ -1312,6 +1322,9 @@ function contextItemStatsLabel(item) {
 }
 
 function addMessage(role, content, extra = {}) {
+  // Sending something always brings the conversation into view.
+  if (role === 'user') pinChatToBottom = true;
+
   conversation.push({
     role,
     content: String(content || ''),
@@ -2225,6 +2238,11 @@ function renderToolBrainRow(hit) {
 function renderMessages() {
   if (!messagesEl) return;
 
+  const previousTop = messagesEl.scrollTop;
+  const wasAtBottom = messagesEl.scrollHeight - messagesEl.scrollTop - messagesEl.clientHeight < 64;
+  const stick = pinChatToBottom || wasAtBottom;
+  pinChatToBottom = false;
+
   renderContextMeter();
 
   messagesEl.replaceChildren();
@@ -2270,7 +2288,7 @@ function renderMessages() {
     messagesEl.append(contextMeterEl);
   }
 
-  messagesEl.scrollTop = messagesEl.scrollHeight;
+  messagesEl.scrollTop = stick ? messagesEl.scrollHeight : previousTop;
 }
 
 /** The fold-out marking where older messages stopped being sent. */
@@ -2450,7 +2468,7 @@ function renderAssistantMessageNode(msg) {
     wrap.append(details);
   }
 
-  const parsed = extractAssistantUiTokens(stripForDisplay(String(msg.content || '')));
+  const parsed = extractAssistantUiTokens(stripForDisplay(keepClaimMarkers(String(msg.content || ''))));
 
   const content = document.createElement('div');
   content.className = 'yanta-ai-msg-content yanta-ai-rich';
@@ -2458,11 +2476,17 @@ function renderAssistantMessageNode(msg) {
   if (parsed.text) {
     content.innerHTML = renderBlocksInlineWithContext(parsed.text, { remoteMedia: 'link' });
     enhanceAiCodeCopy(content);
+    markCitations(content, msg.citeCheck);
   } else if (!parsed.notes.length && !parsed.events.length && !parsed.chips.length) {
     content.textContent = '[No response]';
   }
 
   wrap.append(content);
+
+  // Right under the text it is about, before note cards and chips.
+  if (msg.citeCheck) {
+    wrap.append(renderCitationCheckNode(msg.citeCheck));
+  }
 
   if (parsed.notes.length || parsed.events.length) {
     const cards = document.createElement('div');
@@ -2477,10 +2501,6 @@ function renderAssistantMessageNode(msg) {
     }
 
     wrap.append(cards);
-  }
-
-  if (msg.citeCheck) {
-    wrap.append(renderCitationCheckNode(msg.citeCheck));
   }
 
   if (parsed.chips.length) {
@@ -2503,9 +2523,82 @@ function renderAssistantMessageNode(msg) {
   return wrap;
 }
 
+/*
+  Citation markers in the rendered answer. The model writes "[2]{c3}"
+  (source 2 backs claim 3); VeriQuote's display stripping drops the
+  claim part, so it is first rewritten to an invisible-to-markdown
+  "[2]⟦c3⟧", rendered, and then turned into a coloured marker that
+  carries the check's verdict for that claim.
+*/
+const CLAIM_MARK = /((?:\[\d+\])+)⟦c(\d+)⟧/g;
+
+function keepClaimMarkers(text) {
+  return text.replace(/((?:\[\d+\])+)\{c(\d+)\}/g, '$1⟦c$2⟧');
+}
+
+function markCitations(root, check) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const nodes = [];
+
+  while (walker.nextNode()) {
+    if (walker.currentNode.nodeValue.includes('⟦c')) nodes.push(walker.currentNode);
+  }
+
+  const byClaim = new Map();
+  for (const item of check?.items || []) {
+    const list = byClaim.get(item.claimId) || [];
+    list.push(item);
+    byClaim.set(item.claimId, list);
+  }
+
+  for (const node of nodes) {
+    const frag = document.createDocumentFragment();
+    const text = node.nodeValue;
+    let last = 0;
+
+    for (const m of text.matchAll(CLAIM_MARK)) {
+      frag.append(text.slice(last, m.index));
+      last = m.index + m[0].length;
+
+      const items = byClaim.get(`c${m[2]}`) || [];
+      const state = check?.pending
+        ? 'pending'
+        : !items.length
+          ? 'plain'
+          : items.every((i) => i.ok) ? 'ok' : items.some((i) => i.problems?.length || !i.matched) ? 'bad' : 'unknown';
+
+      const sup = document.createElement('sup');
+      sup.className = `yanta-ai-cite ${state}`;
+      sup.textContent = m[1];
+
+      if (items.length) {
+        sup.title = items.map((i) => [
+          i.ok ? '✓ Backed by the source' : `⚠ ${i.problems?.join(', ') || 'not confirmed'}`,
+          `“${i.quote}”`,
+          i.source?.title ? `— ${i.source.title}` : '',
+        ].filter(Boolean).join('\n')).join('\n\n');
+      } else if (check?.pending) {
+        sup.title = 'Checking this citation against its source…';
+      }
+
+      frag.append(sup);
+    }
+
+    frag.append(text.slice(last).replace(/⟦c\d+⟧/g, ''));
+    node.replaceWith(frag);
+  }
+}
+
 /** "3 of 4 citations checked out", with each claim, its quote and source. */
 function renderCitationCheckNode(check) {
   const details = document.createElement('details');
+
+  if (check.pending) {
+    details.className = 'yanta-ai-citecheck pending';
+    details.innerHTML = `<summary>${lucide('shield', 13)}<span>Checking ${check.total || ''} citation${check.total === 1 ? '' : 's'} against the sources…</span></summary>`;
+    return details;
+  }
+
   const bad = check.total - check.passed;
   const tone = check.verdict === 'pass' ? 'ok' : bad ? 'bad' : 'unknown';
 
@@ -2514,13 +2607,14 @@ function renderCitationCheckNode(check) {
   const headline = check.error
     ? 'Citations could not be checked'
     : check.verdict === 'pass'
-      ? `All ${check.total} citation${check.total === 1 ? '' : 's'} match their sources`
+      ? `${check.total}/${check.total} citation${check.total === 1 ? '' : 's'} verified`
       : bad
         ? `${bad} of ${check.total} citation${check.total === 1 ? '' : 's'} not backed by the source`
-        : `Quotes found in the sources; support not judged`;
+        : `Quotes found in the sources · support not judged`;
 
   const summary = document.createElement('summary');
-  summary.innerHTML = `${lucide(tone === 'ok' ? 'shield-check' : tone === 'bad' ? 'shield-alert' : 'shield-question', 13)}<span>${escapeHtml(headline)}${check.revised ? ' · revised once' : ''}</span>`;
+  summary.title = 'VeriQuote: each quote was matched against what was actually read, and a judge checked that it supports the sentence. Click for details.';
+  summary.innerHTML = `${lucide(tone === 'ok' ? 'shield-check' : tone === 'bad' ? 'shield-alert' : 'shield-question', 13)}<span>${escapeHtml(headline)}${check.revised ? ' · fixed once' : ''}</span>${lucide('chevron-down', 12)}`;
   details.append(summary);
 
   const list = document.createElement('ol');
@@ -3249,6 +3343,11 @@ async function checkAnswerCitations({ sources, thread, mode, signal }) {
 
   setAssistantBusy(true, 'Checking citations…');
 
+  // Shown at once: the badge and the markers say "checking" until the
+  // verdicts arrive.
+  msg.citeCheck = { pending: true, total: (String(msg.content).match(/\{c\d+\}/g) || []).length };
+  renderMessages();
+
   try {
     let check = await checkCitations(msg.content, sources, { signal });
 
@@ -3277,6 +3376,8 @@ async function checkAnswerCitations({ sources, thread, mode, signal }) {
     if (check) {
       const { instructionsForModel, ...stored } = check;
       msg.citeCheck = stored;
+    } else {
+      delete msg.citeCheck;
     }
   } catch (err) {
     if (err?.name === 'AbortError') throw err;
@@ -3860,12 +3961,46 @@ function injectCss() {
 }
 
 .yanta-ai-citecheck > summary {
-  display: flex;
+  display: inline-flex;
   align-items: center;
   gap: 6px;
   cursor: pointer;
   list-style: none;
+  padding: 3px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, currentColor 8%, transparent);
+  font-weight: 550;
 }
+
+.yanta-ai-citecheck[open] > summary > svg:last-child {
+  transform: rotate(180deg);
+}
+
+.yanta-ai-citecheck.pending > summary {
+  cursor: default;
+  animation: yanta-cite-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes yanta-cite-pulse {
+  50% { opacity: 0.45; }
+}
+
+.yanta-ai-cite {
+  font-size: 0.72em;
+  font-weight: 650;
+  padding: 0 2px;
+  border-radius: 4px;
+  cursor: help;
+}
+
+.yanta-ai-cite.ok { color: var(--success, #3fb950); }
+.yanta-ai-cite.bad {
+  color: var(--warning, #d29922);
+  background: color-mix(in srgb, var(--warning, #d29922) 14%, transparent);
+}
+.yanta-ai-cite.pending { color: var(--text-faint); animation: yanta-cite-pulse 1.4s ease-in-out infinite; }
+.yanta-ai-cite.unknown, .yanta-ai-cite.plain { color: var(--text-faint); }
 
 .yanta-ai-citecheck > summary::-webkit-details-marker {
   display: none;
@@ -3873,6 +4008,8 @@ function injectCss() {
 
 .yanta-ai-citecheck.ok > summary { color: var(--success, #3fb950); }
 .yanta-ai-citecheck.bad > summary { color: var(--warning, #d29922); }
+.yanta-ai-citecheck.pending > summary,
+.yanta-ai-citecheck.unknown > summary { color: var(--text-dim); }
 
 .yanta-ai-citecheck-list {
   margin: 8px 0 0;

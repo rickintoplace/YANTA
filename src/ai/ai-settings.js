@@ -78,6 +78,10 @@ export const DEFAULT_AI_SETTINGS = {
   // off | low | medium — model "thinking" before answering. Off keeps
   // replies fast and the output budget for the actual answer.
   reasoningEffort: 'off',
+
+  // check | revise | off — answers that cite web pages, articles or notes
+  // carry a verbatim quote per citation, checked by citation-check.js.
+  citationCheck: 'check',
   maxToolRounds: 6,
   maxContextChars: 30000,
   apiKeyStorage: 'session', // session | local | none

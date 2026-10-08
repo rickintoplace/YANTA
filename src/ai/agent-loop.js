@@ -87,7 +87,7 @@ function toolErrorPayload(err) {
  * return the assistant message ({ content, tool_calls, finish_reason,
  * reasoning_details }).
  *
- * @returns {Promise<{text: string, finalText: string, rounds: number, stop: string, toolCalls: Array}>}
+ * @returns {Promise<{text: string, finalText: string, rounds: number, stop: string, toolCalls: Array, thread: Array}>}
  */
 export async function runAgentLoop({
   messages,
@@ -142,7 +142,7 @@ export async function runAgentLoop({
     if (content) text = content;
 
     if (!toolCalls.length) {
-      return { text, finalText: content, rounds: round + 1, stop: AGENT_STOP.COMPLETE, toolCalls: executed };
+      return { text, finalText: content, rounds: round + 1, stop: AGENT_STOP.COMPLETE, toolCalls: executed, thread };
     }
 
     thread.push(assistantToolTurn(message));
@@ -212,7 +212,10 @@ export async function runAgentLoop({
       if (repeat >= REPEAT_NOTE_AT) payload = withRepeatNote(payload);
 
       // `ran`: the registry executed it (not refused, short-circuited or failed).
-      await onToolResult?.({ name, args, result: payload, ran });
+      // A hook may return a replacement for what the model sees (e.g. the
+      // same result with citation numbers added).
+      const replaced = await onToolResult?.({ name, args, result: payload, ran });
+      if (replaced !== undefined) payload = replaced;
 
       thread.push({
         role: 'tool',
@@ -261,5 +264,5 @@ export async function runAgentLoop({
     console.warn('[YANTA AI] final round failed', err);
   }
 
-  return { text, finalText, rounds: round + 1, stop, toolCalls: executed };
+  return { text, finalText, rounds: round + 1, stop, toolCalls: executed, thread };
 }

@@ -397,6 +397,22 @@ function includedAiModelOptionsHtml(selectedModel) {
   `).join('');
 }
 
+function citationCheckSelectHtml(settings) {
+  const value = String(settings.citationCheck || 'check');
+  const option = (v, label) => `<option value="${v}" ${value === v ? 'selected' : ''}>${label}</option>`;
+
+  return `
+    <label class="wide">
+      Check citations
+      <select class="text-input" data-ai-citation-check>
+        ${option('check', 'Check · every quote from a web page, article or note is verified against it')}
+        ${option('revise', 'Check and fix · failed citations go back to the model once')}
+        ${option('off', 'Off · no citation rules, no checking')}
+      </select>
+    </label>
+  `;
+}
+
 function thinkingSelectHtml(settings) {
   const value = String(settings.reasoningEffort || 'off');
   const option = (v, label) => `<option value="${v}" ${value === v ? 'selected' : ''}>${label}</option>`;
@@ -435,6 +451,7 @@ function aiAccessSettingsHtml(settings, apiKey) {
         </label>
 
         ${thinkingSelectHtml(settings)}
+        ${citationCheckSelectHtml(settings)}
 
         <label class="wide" style="display:none;">
           Privacy
@@ -487,6 +504,7 @@ function aiAccessSettingsHtml(settings, apiKey) {
       </label>
 
       ${thinkingSelectHtml(settings)}
+        ${citationCheckSelectHtml(settings)}
 
       <label style="display:none;">
         Privacy
@@ -1023,6 +1041,7 @@ export function renderAiSettingsPanel(panel) {
       maxContextChars,
       maxToolRounds,
       reasoningEffort: panel.querySelector('[data-ai-reasoning]')?.value || currentSettings.reasoningEffort || 'off',
+      citationCheck: panel.querySelector('[data-ai-citation-check]')?.value || currentSettings.citationCheck || 'check',
     });
 
     if (!includedModeNext) {

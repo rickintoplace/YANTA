@@ -170,6 +170,7 @@ function compactMessage(msg) {
     toolName: msg.toolName || undefined,
     model: msg.model || undefined,
     covers: msg.covers || undefined,
+    citeCheck: msg.citeCheck || undefined,
     ts: Number(msg.ts || Date.now()),
   };
 }

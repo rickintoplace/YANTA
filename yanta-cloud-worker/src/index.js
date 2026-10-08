@@ -4917,8 +4917,10 @@ async function handleAiDecide(env, req, headers) {
     return json({ error: { message: "Included AI credits reached." } }, 403, headers);
   }
 
-  const burst = await rateLimit(env, `ai:decide:user:${user.userId}`, 30, 60 * 1000);
-  const daily = await rateLimit(env, `ai:decide:day:${user.userId}`, isFreePlan ? 200 : 2000, 24 * 60 * 60 * 1000);
+  // One decision per Pulse check/rank and one per checked citation (up to
+  // 15 per answer), so bursts are short but real.
+  const burst = await rateLimit(env, `ai:decide:user:${user.userId}`, 60, 60 * 1000);
+  const daily = await rateLimit(env, `ai:decide:day:${user.userId}`, isFreePlan ? 400 : 4000, 24 * 60 * 60 * 1000);
   if (!burst.ok || !daily.ok) {
     return json({ error: { message: "Too many decisions. Please wait a moment." } }, 429, { ...headers, "retry-after": "60" });
   }

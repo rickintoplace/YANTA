@@ -85,6 +85,18 @@ import {
 
 import { fitHistory } from './agent-runtime.js';
 
+import { buildCitationInstructions, stripForDisplay } from 'veriquote';
+
+import {
+  createSourceRegistry,
+  YANTA_CITATION_PREAMBLE,
+} from './citation-sources.js';
+
+import {
+  checkCitations,
+  hasCitations,
+} from './citation-check.js';
+
 import {
   openNote,
 } from '../notes.js';
@@ -383,6 +395,7 @@ function compactStoredMessage(msg) {
     toolName: msg.toolName || undefined,
     model: msg.model || undefined,
     covers: msg.covers || undefined,
+    citeCheck: msg.citeCheck || undefined,
     ts: Number(msg.ts || Date.now()),
   };
 }
@@ -2437,7 +2450,7 @@ function renderAssistantMessageNode(msg) {
     wrap.append(details);
   }
 
-  const parsed = extractAssistantUiTokens(msg.content);
+  const parsed = extractAssistantUiTokens(stripForDisplay(String(msg.content || '')));
 
   const content = document.createElement('div');
   content.className = 'yanta-ai-msg-content yanta-ai-rich';
@@ -2466,6 +2479,10 @@ function renderAssistantMessageNode(msg) {
     wrap.append(cards);
   }
 
+  if (msg.citeCheck) {
+    wrap.append(renderCitationCheckNode(msg.citeCheck));
+  }
+
   if (parsed.chips.length) {
     const chips = document.createElement('div');
     chips.className = 'yanta-ai-chips';
@@ -2484,6 +2501,60 @@ function renderAssistantMessageNode(msg) {
   }
 
   return wrap;
+}
+
+/** "3 of 4 citations checked out", with each claim, its quote and source. */
+function renderCitationCheckNode(check) {
+  const details = document.createElement('details');
+  const bad = check.total - check.passed;
+  const tone = check.verdict === 'pass' ? 'ok' : bad ? 'bad' : 'unknown';
+
+  details.className = `yanta-ai-citecheck ${tone}`;
+
+  const headline = check.error
+    ? 'Citations could not be checked'
+    : check.verdict === 'pass'
+      ? `All ${check.total} citation${check.total === 1 ? '' : 's'} match their sources`
+      : bad
+        ? `${bad} of ${check.total} citation${check.total === 1 ? '' : 's'} not backed by the source`
+        : `Quotes found in the sources; support not judged`;
+
+  const summary = document.createElement('summary');
+  summary.innerHTML = `${lucide(tone === 'ok' ? 'shield-check' : tone === 'bad' ? 'shield-alert' : 'shield-question', 13)}<span>${escapeHtml(headline)}${check.revised ? ' · revised once' : ''}</span>`;
+  details.append(summary);
+
+  const list = document.createElement('ol');
+  list.className = 'yanta-ai-citecheck-list';
+
+  for (const item of check.items || []) {
+    const li = document.createElement('li');
+    li.className = item.ok ? 'ok' : 'bad';
+
+    const source = item.source
+      ? item.source.url
+        ? `<a href="${escapeHtml(item.source.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.source.title)}</a>`
+        : escapeHtml(item.source.title)
+      : 'unknown source';
+
+    li.innerHTML = `
+      <div class="yanta-ai-citecheck-claim">${lucide(item.ok ? 'check' : 'x', 12)} <span>${escapeHtml(item.claim)}</span> <b>[${item.n}]</b></div>
+      <blockquote>${escapeHtml(item.quote)}</blockquote>
+      <small>${source}${item.problems?.length ? ` · ${escapeHtml(item.problems.join(', '))}` : ''}</small>
+    `;
+
+    list.append(li);
+  }
+
+  if (check.items?.length) details.append(list);
+
+  const note = document.createElement('p');
+  note.className = 'yanta-ai-citecheck-note';
+  note.textContent = check.judged === false
+    ? 'Quotes were matched against the sources. Whether they support each sentence needs YANTA Included AI or an OpenRouter key.'
+    : 'Each quote was matched against the text that was actually read, and a decision model judged whether it supports the sentence. A match means "backed by the source", not "true".';
+  details.append(note);
+
+  return details;
 }
 
 function noteFolderPathForAi(folderId) {
@@ -2961,9 +3032,11 @@ async function runAssistant(userText) {
   */
   const sinceSummary = historySinceSummary(conversation);
 
+  // Citation markers and quote appendices of earlier answers are for the
+  // checker, not worth resending.
   const history = fitHistory(sinceSummary.messages.map((m) => ({
     role: m.role,
-    content: m.content,
+    content: m.role === 'assistant' ? stripForDisplay(String(m.content || '')) : m.content,
   })));
 
   let lastUserIndex = -1;
@@ -2973,11 +3046,24 @@ async function runAssistant(userText) {
     attachments: activeContextItems,
   });
 
+  const citationMode = String(getAiSettings().citationCheck || 'check');
+  const citeSources = citationMode === 'off' ? null : createSourceRegistry();
+
+  const systemMessage = await buildSystemMessage({
+    userText,
+    toolIndex: loadout.indexMarkdown(),
+  });
+
+  if (citeSources) {
+    systemMessage.content = [
+      systemMessage.content,
+      YANTA_CITATION_PREAMBLE,
+      buildCitationInstructions({ maxCitedClaims: 12 }),
+    ].join('\n\n');
+  }
+
   const messages = [
-    await buildSystemMessage({
-      userText,
-      toolIndex: loadout.indexMarkdown(),
-    }),
+    systemMessage,
     ...summaryMessages(sinceSummary.summary),
     ...(lastUserIndex >= 0
       ? [...history.slice(0, lastUserIndex), contextMessage, ...history.slice(lastUserIndex)]
@@ -3125,6 +3211,9 @@ async function runAssistant(userText) {
       addMessage('tool', JSON.stringify({ args, result: toolResult }, null, 2), {
         toolName: name,
       });
+
+      // Numbered for citing; the model sees the result with `cite` fields.
+      return ran && citeSources ? citeSources.register(name, toolResult) : undefined;
     },
   });
 
@@ -3139,6 +3228,65 @@ async function runAssistant(userText) {
       model: modelLabel(),
     });
   }
+
+  if (citeSources?.size) {
+    await checkAnswerCitations({
+      sources: citeSources,
+      thread: result.thread,
+      mode: citationMode,
+      signal: abortController?.signal,
+    });
+  }
+}
+
+/**
+ * Checks the quotes of the turn's final answer (citation-check.js) and,
+ * in "revise" mode, sends failed citations back to the model once.
+ */
+async function checkAnswerCitations({ sources, thread, mode, signal }) {
+  const msg = [...conversation].reverse().find((m) => m.role === 'assistant');
+  if (!msg || !hasCitations(msg.content)) return;
+
+  setAssistantBusy(true, 'Checking citations…');
+
+  try {
+    let check = await checkCitations(msg.content, sources, { signal });
+
+    if (check?.verdict === 'revise' && mode === 'revise' && check.instructionsForModel) {
+      setAssistantBusy(true, 'Fixing citations…');
+
+      const revised = await openRouterChatCompletion({
+        messages: [
+          ...thread,
+          { role: 'assistant', content: msg.content },
+          { role: 'user', content: check.instructionsForModel },
+        ],
+        tools: [],
+        signal,
+      });
+
+      const text = String(revised?.content || '').trim();
+
+      if (text) {
+        msg.content = text;
+        check = await checkCitations(text, sources, { signal });
+        if (check) check.revised = true;
+      }
+    }
+
+    if (check) {
+      const { instructionsForModel, ...stored } = check;
+      msg.citeCheck = stored;
+    }
+  } catch (err) {
+    if (err?.name === 'AbortError') throw err;
+    console.warn('[YANTA AI] citation check failed', err);
+    msg.citeCheck = { verdict: 'unverified', error: String(err?.message || err).slice(0, 160), items: [], passed: 0, total: 0 };
+  }
+
+  saveTransientConversation();
+  scheduleAiSessionSave();
+  renderMessages();
 }
 
 async function maybeHandleAssistantSlashCommand(text) {
@@ -3703,6 +3851,56 @@ function injectCss() {
   background: transparent;
   color: var(--text-dim);
   padding: 0px 12px 0 0;
+}
+
+.yanta-ai-citecheck {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--text-faint);
+}
+
+.yanta-ai-citecheck > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.yanta-ai-citecheck > summary::-webkit-details-marker {
+  display: none;
+}
+
+.yanta-ai-citecheck.ok > summary { color: var(--success, #3fb950); }
+.yanta-ai-citecheck.bad > summary { color: var(--warning, #d29922); }
+
+.yanta-ai-citecheck-list {
+  margin: 8px 0 0;
+  padding-left: 18px;
+  display: grid;
+  gap: 8px;
+}
+
+.yanta-ai-citecheck-claim {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  color: var(--text-dim);
+}
+
+.yanta-ai-citecheck-list li.bad .yanta-ai-citecheck-claim svg { color: var(--warning, #d29922); }
+.yanta-ai-citecheck-list li.ok .yanta-ai-citecheck-claim svg { color: var(--success, #3fb950); }
+
+.yanta-ai-citecheck blockquote {
+  margin: 4px 0;
+  padding-left: 8px;
+  border-left: 2px solid var(--border);
+  font-style: italic;
+}
+
+.yanta-ai-citecheck-note {
+  margin: 8px 0 0;
+  font-size: 11px;
 }
 
 .yanta-ai-msg.summary {

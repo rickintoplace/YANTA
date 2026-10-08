@@ -7,6 +7,11 @@
 //   - Plurals: an object of CLDR categories ({ one, other, ... }) selected by
 //     a `count` param. Interpolate values as `{name}`.
 
+import aiChat from './ai/chat.en.js';
+import aiSettings from './ai/settings.en.js';
+import aiWidgets from './ai/widgets.en.js';
+import aiContext from './ai/context.en.js';
+
 export default {
   shareTarget: {
     title: 'Share to YANTA',
@@ -1526,5 +1531,11 @@ export default {
       cancel: 'Cancel',
       continue: 'Continue to checkout',
     },
+  },
+  ai: {
+    chat: aiChat,
+    settings: aiSettings,
+    widgets: aiWidgets,
+    context: aiContext,
   },
 };

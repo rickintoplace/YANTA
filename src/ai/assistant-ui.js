@@ -8,6 +8,10 @@
 // Uses View Transition API for dock/undock when available.
 // ============================================================
 
+// @i18n-locked
+
+import { t } from '../i18n/index.js';
+
 import {
   escapeHtml,
   toast,
@@ -95,6 +99,7 @@ import {
 import {
   checkCitations,
   hasCitations,
+  CITATION_PROBLEM_TYPES,
 } from './citation-check.js';
 
 import {
@@ -194,7 +199,7 @@ let abortController = null;
 let settingsOpen = false;
 
 let assistantBusy = false;
-let assistantBusyLabel = 'Thinking…';
+let assistantBusyLabel = '';
 let assistantBusySince = 0;
 
 let streamingReasoning = '';
@@ -246,10 +251,12 @@ const AI_CHAT_MAX_CHARS = 240000;
 
 function supportsViewTransition() {
   return !!document.startViewTransition &&
+    // eslint-disable-next-line yanta/no-untranslated-literal -- media query
     !window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
 }
 
 function isMobileAssistantViewport() {
+  // eslint-disable-next-line yanta/no-untranslated-literal -- media query
   return window.matchMedia?.('(max-width: 880px)')?.matches;
 }
 
@@ -486,6 +493,7 @@ function ensureRoot() {
   root.className = 'yanta-ai-root';
   root.dataset.aiRoot = '1';
   root.dataset.aiContextDropTarget = '1';
+  root.dataset.aiDropLabel = t('ai.chat.context.dropHint');
 
   root.innerHTML = `
     <header class="yanta-ai-head" data-ai-drag-handle>
@@ -494,19 +502,19 @@ function ensureRoot() {
         <strong>YANTA AI</strong>
       </div>
 
-      <button class="icon-btn" data-ai-settings title="AI settings">
+      <button class="icon-btn" data-ai-settings title="${escapeHtml(t('ai.chat.header.settings'))}">
         ${lucide('settings', 16)}
       </button>
 
-      <button class="icon-btn" data-ai-detach title="Detach assistant">
+      <button class="icon-btn" data-ai-detach title="${escapeHtml(t('ai.chat.header.detach'))}">
         ${lucide('picture-in-picture-2', 16)}
       </button>
 
-      <button class="icon-btn" data-ai-clear title="New Chat">
+      <button class="icon-btn" data-ai-clear title="${escapeHtml(t('ai.chat.header.newChat'))}">
         ${lucide('message-circle-plus', 16)}
       </button>
 
-      <button class="icon-btn" data-ai-close title="Close assistant">
+      <button class="icon-btn" data-ai-close title="${escapeHtml(t('ai.chat.header.close'))}">
         ${lucide('x', 16)}
       </button>
     </header>
@@ -523,7 +531,7 @@ function ensureRoot() {
       <div class="yanta-ai-context-tray" data-ai-context-tray hidden></div>
 
       <div class="yanta-ai-input-shell" data-ai-input-shell>
-        <button class="yanta-ai-input-btn yanta-ai-plus" data-ai-add-context title="Add context" aria-label="Add context">
+        <button class="yanta-ai-input-btn yanta-ai-plus" data-ai-add-context title="${escapeHtml(t('ai.chat.input.addContext'))}" aria-label="${escapeHtml(t('ai.chat.input.addContext'))}">
           ${lucide('plus', 18)}
         </button>
 
@@ -531,10 +539,10 @@ function ensureRoot() {
           class="yanta-ai-input"
           data-ai-input
           rows="1"
-          placeholder="Write something…"
+          placeholder="${escapeHtml(t('ai.chat.input.placeholder'))}"
           enterkeyhint="send"></textarea>
 
-        <button class="yanta-ai-input-btn yanta-ai-send" data-ai-send title="Send" aria-label="Send message" disabled>
+        <button class="yanta-ai-input-btn yanta-ai-send" data-ai-send title="${escapeHtml(t('ai.chat.input.send'))}" aria-label="${escapeHtml(t('ai.chat.input.sendMessage'))}" disabled>
           ${lucide('arrow-up', 18)}
         </button>
       </div>
@@ -678,7 +686,7 @@ function ensureRoot() {
   root.addEventListener('click', (e) => {
     handleAiMessageClick(e).catch((err) => {
       console.error(err);
-      toast('AI chat action failed', 'error');
+      toast(t('ai.chat.toast.actionFailed'), 'error');
     });
   });
 
@@ -706,10 +714,10 @@ function updateModeButton() {
   if (!btn) return;
 
   if (mode === 'floating') {
-    btn.title = 'Dock assistant to side pane';
+    btn.title = t('ai.chat.header.dock');
     btn.innerHTML = lucide('panel-right', 16);
   } else {
-    btn.title = 'Detach assistant';
+    btn.title = t('ai.chat.header.detach');
     btn.innerHTML = lucide('picture-in-picture-2', 16);
   }
 }
@@ -719,12 +727,12 @@ function updateCloseButton() {
   if (!btn) return;
 
   if (settingsOpen) {
-    btn.title = 'Back to chat';
-    btn.setAttribute('aria-label', 'Back to chat');
+    btn.title = t('ai.chat.header.backToChat');
+    btn.setAttribute('aria-label', t('ai.chat.header.backToChat'));
     btn.innerHTML = lucide('arrow-left', 16);
   } else {
-    btn.title = 'Close assistant';
-    btn.setAttribute('aria-label', 'Close assistant');
+    btn.title = t('ai.chat.header.close');
+    btn.setAttribute('aria-label', t('ai.chat.header.close'));
     btn.innerHTML = lucide('x', 16);
   }
 }
@@ -735,6 +743,7 @@ function createFloatingShell() {
   floatingShell = document.createElement('div');
   floatingShell.className = 'yanta-ai-floating';
   floatingShell.hidden = true;
+  // eslint-disable-next-line yanta/no-untranslated-literal -- CSS value
   floatingShell.style.left = 'calc(100vw - 700px)';
   floatingShell.style.top = '84px';
 
@@ -803,6 +812,7 @@ function bindFloatingDrag() {
     const handle = e.target.closest?.('[data-ai-drag-handle]');
     if (!handle) return;
 
+    // eslint-disable-next-line yanta/no-untranslated-literal -- CSS selector
     if (e.target.closest?.('button, input, textarea, select')) return;
     if (e.button != null && e.button !== 0) return;
 
@@ -835,6 +845,7 @@ async function withAiViewTransition(mutator) {
   }
 
   node.style.viewTransitionName = VT_NAME;
+  // eslint-disable-next-line yanta/no-untranslated-literal -- CSS value
   node.style.contain = 'layout paint';
 
   try {
@@ -867,7 +878,7 @@ export async function openAssistantPane() {
 
     const body = openSidePane({
       kind: 'ai',
-      title: 'Assistant',
+      title: t('ai.chat.paneTitle'),
       icon: 'sparkles',
       className: 'yanta-ai-side-pane',
       onClose: () => {
@@ -1086,6 +1097,7 @@ function scheduleAiSessionSave() {
 
   sessionSaveTimer = window.setTimeout(() => {
     saveCurrentAiSessionQueued().catch((err) => {
+      // eslint-disable-next-line yanta/no-untranslated-literal -- console
       console.warn('[YANTA AI] session save failed', err);
     });
   }, 700);
@@ -1119,7 +1131,7 @@ async function openAiSession(sessionId) {
   renderContextTray();
   renderContextMeter();
 
-  toast('AI session opened', 'success');
+  toast(t('ai.chat.toast.sessionOpened'), 'success');
 }
 
 async function addAiContextRefs(refs = []) {
@@ -1132,7 +1144,7 @@ async function addAiContextRefs(refs = []) {
 
   const totals = aiContextTotals(items);
   toast(
-    `Added ${items.length} context item${items.length === 1 ? '' : 's'} · ${totals.words.toLocaleString()} words`,
+    `${t('ai.chat.context.addedItems', { count: items.length })} · ${t('ai.chat.context.words', { count: totals.words })}`,
     'success'
   );
 }
@@ -1147,7 +1159,7 @@ async function addAiContextFiles(files = []) {
 
   const totals = aiContextTotals(items);
   toast(
-    `Added ${items.length} upload${items.length === 1 ? '' : 's'} · ${totals.words.toLocaleString()} words`,
+    `${t('ai.chat.context.addedUploads', { count: items.length })} · ${t('ai.chat.context.words', { count: totals.words })}`,
     'success'
   );
 }
@@ -1238,21 +1250,21 @@ function renderContextTray() {
     totals.images > 0 && !modelSupportsImages(getEffectiveAiRuntimeSettings().model);
 
   const mediaBits = [
-    totals.images ? `${totals.images.toLocaleString()} image${totals.images === 1 ? '' : 's'}` : '',
-    totals.audio ? `${totals.audio.toLocaleString()} audio` : '',
+    totals.images ? t('ai.chat.context.images', { count: totals.images }) : '',
+    totals.audio ? t('ai.chat.context.audio', { count: totals.audio }) : '',
   ].filter(Boolean);
 
   head.innerHTML = `
     <span>
       ${lucide('paperclip', 13)}
-      <strong>${totals.items}</strong> item${totals.items === 1 ? '' : 's'}
-      · ${totals.words.toLocaleString()} words
-      · ${totals.chars.toLocaleString()} chars
+      ${escapeHtml(t('ai.chat.context.items', { count: totals.items }))}
+      · ${escapeHtml(t('ai.chat.context.words', { count: totals.words }))}
+      · ${escapeHtml(t('ai.chat.context.chars', { count: totals.chars }))}
       ${mediaBits.length ? ` · ${escapeHtml(mediaBits.join(' · '))}` : ''}
     </span>
 
     <button type="button" class="yanta-ai-context-clear" data-ai-clear-context>
-      Clear
+      ${escapeHtml(t('ai.chat.context.clear'))}
     </button>
   `;
 
@@ -1261,7 +1273,7 @@ function renderContextTray() {
   if (nonMultimodalImages) {
     const warn = document.createElement('div');
     warn.className = 'yanta-ai-context-warning';
-    warn.textContent = 'Images are attached, but the selected model may not be multimodal. Non-multimodal models may ignore images.';
+    warn.textContent = t('ai.chat.context.imagesWarning');
     contextTrayEl.append(warn);
   }
 
@@ -1288,11 +1300,11 @@ function renderContextTray() {
       <span class="yanta-ai-context-chip-icon">${lucide(icon, 13)}</span>
 
       <span class="yanta-ai-context-chip-main">
-        <strong>${escapeHtml(item.title || 'Context item')}</strong>
+        <strong>${escapeHtml(item.title || t('ai.chat.context.untitledItem'))}</strong>
         <small>${escapeHtml(contextItemStatsLabel(item))}</small>
       </span>
 
-      <button type="button" class="icon-btn" data-ai-remove-context="${escapeHtml(item.id)}" title="Remove">
+      <button type="button" class="icon-btn" data-ai-remove-context="${escapeHtml(item.id)}" title="${escapeHtml(t('ai.chat.context.remove'))}">
         ${lucide('x', 13)}
       </button>
     `;
@@ -1321,7 +1333,7 @@ function contextItemStatsLabel(item) {
         : Number(item.meta?.includedNoteCount || 0);
 
     if (count > 0) {
-      return `${count.toLocaleString()} note${count === 1 ? '' : 's'} · ${base}`;
+      return `${t('ai.chat.context.notes', { count })} · ${base}`;
     }
   }
 
@@ -1366,6 +1378,7 @@ export function postAssistantNotice({
     : '';
 
   addMessage('assistant', [heading, body].filter(Boolean).join('\n\n') + source, {
+    // eslint-disable-next-line yanta/no-untranslated-literal -- product name
     model: 'YANTA Pulse',
     pulseRoutine: routineName || null,
   });
@@ -1416,7 +1429,7 @@ function removeConversationMessageObject(target) {
 function finalizeAssistantStreamMessage(msg) {
   if (!msg) return;
 
-  msg.content = String(msg.content || '').trim() || '[No response]';
+  msg.content = String(msg.content || '').trim() || t('ai.chat.noResponse');
   msg.reasoning = String(msg.reasoning || '').trim();
 
   saveTransientConversation();
@@ -1425,9 +1438,9 @@ function finalizeAssistantStreamMessage(msg) {
   renderContextMeter();
 }
 
-function setAssistantBusy(next, label = 'Thinking…') {
+function setAssistantBusy(next, label = '') {
   assistantBusy = !!next;
-  assistantBusyLabel = String(label || 'Thinking…');
+  assistantBusyLabel = String(label || t('ai.chat.busy.thinking'));
 
   if (assistantBusy && !assistantBusySince) {
     assistantBusySince = Date.now();
@@ -1448,6 +1461,7 @@ function updateAssistantWorkingNode() {
 
   if (!workingNodeEl) {
     workingNodeEl = document.createElement('div');
+    // eslint-disable-next-line yanta/no-untranslated-literal -- CSS class
     workingNodeEl.className = 'yanta-ai-msg assistant yanta-ai-working-msg';
     workingNodeEl.innerHTML = `
       <div class="yanta-ai-msg-role"></div>
@@ -1457,7 +1471,7 @@ function updateAssistantWorkingNode() {
         <span class="yanta-ai-working-dots" aria-hidden="true"><span></span><span></span><span></span></span>
       </div>
       <details class="yanta-ai-working-thinking" hidden>
-        <summary>${lucide('brain-circuit', 12)}<span>Thinking</span></summary>
+        <summary>${lucide('brain-circuit', 12)}<span>${escapeHtml(t('ai.chat.reasoning.label'))}</span></summary>
         <pre></pre>
       </details>
       <div class="yanta-ai-working-bar"><span></span></div>
@@ -1470,10 +1484,11 @@ function updateAssistantWorkingNode() {
   };
 
   set('.yanta-ai-msg-role', `YANTA AI · ${getEffectiveAiRuntimeSettings().model || getAiSettings().model || 'LLM'}`);
-  set('.yanta-ai-working-text', assistantBusyLabel || 'Thinking…');
+  set('.yanta-ai-working-text', assistantBusyLabel || t('ai.chat.busy.thinking'));
 
   const thinking = workingNodeEl.querySelector('.yanta-ai-working-thinking');
   thinking.hidden = !reasoning;
+  // eslint-disable-next-line yanta/no-untranslated-literal -- CSS selector
   if (reasoning) set('.yanta-ai-working-thinking pre', reasoning);
 
   return workingNodeEl;
@@ -1510,53 +1525,53 @@ function toolResultCount(data) {
 
 function toolDisplayName(name) {
   const map = {
-    search_notes: 'Search notes',
-    read_note: 'Read note',
-    read_notes: 'Read notes',
-    create_note: 'Create note',
-    create_drawing_note: 'Create drawing',
-    update_drawing: 'Update drawing',
-    update_note_appearance: 'Update note appearance',
-    append_to_note: 'Append to note',
-    replace_in_note: 'Edit note',
-    replace_current_selection: 'Replace selection',
-    delete_note: 'Delete note',
+    search_notes: t('ai.chat.tool.name.searchNotes'),
+    read_note: t('ai.chat.tool.name.readNote'),
+    read_notes: t('ai.chat.tool.name.readNotes'),
+    create_note: t('ai.chat.tool.name.createNote'),
+    create_drawing_note: t('ai.chat.tool.name.createDrawingNote'),
+    update_drawing: t('ai.chat.tool.name.updateDrawing'),
+    update_note_appearance: t('ai.chat.tool.name.updateNoteAppearance'),
+    append_to_note: t('ai.chat.tool.name.appendToNote'),
+    replace_in_note: t('ai.chat.tool.name.replaceInNote'),
+    replace_current_selection: t('ai.chat.tool.name.replaceCurrentSelection'),
+    delete_note: t('ai.chat.tool.name.deleteNote'),
 
-    search_events: 'Search calendar',
-    create_event: 'Create event',
-    update_event: 'Update event',
-    update_event_appearance: 'Update event appearance',
-    link_event_to_note: 'Link event to note',
+    search_events: t('ai.chat.tool.name.searchEvents'),
+    create_event: t('ai.chat.tool.name.createEvent'),
+    update_event: t('ai.chat.tool.name.updateEvent'),
+    update_event_appearance: t('ai.chat.tool.name.updateEventAppearance'),
+    link_event_to_note: t('ai.chat.tool.name.linkEventToNote'),
 
-    add_rss_source: 'Add Source',
+    add_rss_source: t('ai.chat.tool.name.addRssSource'),
 
-    ai_brain_list: 'List AI Brain',
-    ai_brain_read: 'Read AI Brain',
-    ai_brain_search: 'Search AI Brain',
-    ai_brain_write: 'Write AI Brain',
+    ai_brain_list: t('ai.chat.tool.name.aiBrainList'),
+    ai_brain_read: t('ai.chat.tool.name.aiBrainRead'),
+    ai_brain_search: t('ai.chat.tool.name.aiBrainSearch'),
+    ai_brain_write: t('ai.chat.tool.name.aiBrainWrite'),
 
-    get_weather: 'Weather',
-    web_search: 'Web search',
-    web_read: 'Read web page',
+    get_weather: t('ai.chat.tool.name.getWeather'),
+    web_search: t('ai.chat.tool.name.webSearch'),
+    web_read: t('ai.chat.tool.name.webRead'),
 
-    create_excalidraw_slideshow: 'Create slideshow',
-    update_excalidraw_slideshow: 'Update slideshow',
-    read_excalidraw_drawing_json: 'Read Excalidraw JSON',
-    validate_excalidraw_slideshow_json: 'Validate slideshow JSON',
+    create_excalidraw_slideshow: t('ai.chat.tool.name.createExcalidrawSlideshow'),
+    update_excalidraw_slideshow: t('ai.chat.tool.name.updateExcalidrawSlideshow'),
+    read_excalidraw_drawing_json: t('ai.chat.tool.name.readExcalidrawDrawingJson'),
+    validate_excalidraw_slideshow_json: t('ai.chat.tool.name.validateExcalidrawSlideshowJson'),
 
-    skills_list: 'List skills',
-    skill_view: 'View skill',
-    skill_manage: 'Manage skill',
+    skills_list: t('ai.chat.tool.name.skillsList'),
+    skill_view: t('ai.chat.tool.name.skillView'),
+    skill_manage: t('ai.chat.tool.name.skillManage'),
 
-    chat_find_contact: 'Find Chat contact',
-    chat_list_rooms: 'List chats',
-    chat_read_recent_messages: 'Read recent Chat messages',
-    chat_search_messages: 'Search Chat messages',
-    chat_send_message: 'Send Chat message',
+    chat_find_contact: t('ai.chat.tool.name.chatFindContact'),
+    chat_list_rooms: t('ai.chat.tool.name.chatListRooms'),
+    chat_read_recent_messages: t('ai.chat.tool.name.chatReadRecentMessages'),
+    chat_search_messages: t('ai.chat.tool.name.chatSearchMessages'),
+    chat_send_message: t('ai.chat.tool.name.chatSendMessage'),
 
   };
 
-  return map[name] || name || 'Tool';
+  return map[name] || name || t('ai.chat.tool.name.fallback');
 }
 
 function summarizeToolResult(name, data, rawContent = '') {
@@ -1565,38 +1580,38 @@ function summarizeToolResult(name, data, rawContent = '') {
 
     return text
       ? text.slice(0, 160)
-      : 'Tool returned no structured result.';
+      : t('ai.chat.tool.result.noStructured');
   }
 
   if (toolResultIsError(data)) {
-    return data.error || data.message || 'Tool failed.';
+    return data.error || data.message || t('ai.chat.tool.result.failed');
   }
 
   if (name === 'chat_find_contact' || name === 'chat_list_rooms') {
     const rooms = Array.isArray(data?.rooms) ? data.rooms : [];
-    return `${rooms.length} Chat contact${rooms.length === 1 ? '' : 's'} / room${rooms.length === 1 ? '' : 's'} found.`;
+    return t('ai.chat.tool.result.chatRoomsFound', { count: rooms.length });
   }
 
   if (name === 'chat_read_recent_messages') {
     const messages = Array.isArray(data?.messages) ? data.messages : [];
-    const roomName = data?.roomName || data?.roomId || 'chat';
-    return `Read ${messages.length} recent message${messages.length === 1 ? '' : 's'} from ${roomName}.`;
+    const roomName = data?.roomName || data?.roomId || t('ai.chat.tool.result.chatFallback');
+    return t('ai.chat.tool.result.chatMessagesRead', { count: messages.length, room: roomName });
   }
 
   if (name === 'chat_search_messages') {
     const results = Array.isArray(data?.results) ? data.results : [];
-    return `${results.length} Chat message result${results.length === 1 ? '' : 's'} found for "${data?.query || ''}".`;
+    return t('ai.chat.tool.result.chatSearchFound', { count: results.length, query: data?.query || '' });
   }
 
   if (name === 'chat_send_message') {
-    if (data.cancelled) return 'Chat message cancelled.';
+    if (data.cancelled) return t('ai.chat.tool.result.chatSendCancelled');
     if (data.ok) {
       return data.autonomous
-        ? 'Chat message sent automatically and marked as sent by YANTA AI.'
-        : 'Chat message sent and marked as sent by YANTA AI.';
+        ? t('ai.chat.tool.result.chatSentAuto')
+        : t('ai.chat.tool.result.chatSent');
     }
 
-    return 'Chat message was not sent.';
+    return t('ai.chat.tool.result.chatNotSent');
   }
 
   if (name === 'search_events') {
@@ -1607,138 +1622,149 @@ function summarizeToolResult(name, data, rawContent = '') {
       ? ` · ${formatToolDate(range.start)} – ${formatToolDate(range.end)}`
       : '';
 
-    return `${events.length} calendar item${events.length === 1 ? '' : 's'} found${rangeText}.`;
+    return t('ai.chat.tool.result.eventsFound', { count: events.length, range: rangeText });
   }
 
   if (name === 'search_notes') {
     const notes = Array.isArray(data) ? data : data.notes || data.results || [];
-    return `${notes.length} note${notes.length === 1 ? '' : 's'} found.`;
+    return t('ai.chat.tool.result.notesFound', { count: notes.length });
   }
 
   if (name === 'read_note') {
-    return `Read note: ${data.title || data.id || 'Untitled'}.`;
+    return t('ai.chat.tool.result.noteRead', { title: data.title || data.id || t('ai.chat.common.untitled') });
   }
 
   if (name === 'read_notes') {
     const count = Array.isArray(data) ? data.length : toolResultCount(data);
-    return `Read ${count || 0} note${count === 1 ? '' : 's'}.`;
+    return t('ai.chat.tool.result.notesRead', { count: count || 0 });
   }
 
   if (name === 'create_note') {
-    return `Created note: ${data.title || data.id || 'Untitled'}.`;
+    return t('ai.chat.tool.result.noteCreated', { title: data.title || data.id || t('ai.chat.common.untitled') });
   }
 
   if (name === 'update_note_appearance') {
     const note = data.note || data;
-    return `Updated note appearance: ${note.title || note.id || 'Untitled'}.`;
+    return t('ai.chat.tool.result.noteAppearanceUpdated', { title: note.title || note.id || t('ai.chat.common.untitled') });
   }
 
   if (name === 'append_to_note') {
-    return `Appended ${data.appendedChars || 0} characters to note.`;
+    return t('ai.chat.tool.result.noteAppended', { count: Number(data.appendedChars || 0) });
   }
 
   if (name === 'replace_in_note') {
     return data.ok === false
-      ? (data.error || 'Text not found in note.')
-      : `Replaced ${data.replaced || 0} passage${data.replaced === 1 ? '' : 's'} in note.`;
+      ? (data.error || t('ai.chat.tool.result.textNotFound'))
+      : t('ai.chat.tool.result.passagesReplaced', { count: Number(data.replaced || 0) });
   }
 
   if (name === 'replace_current_selection') {
-    return `Replaced selection with ${data.insertedChars || 0} characters.`;
+    return t('ai.chat.tool.result.selectionReplaced', { count: Number(data.insertedChars || 0) });
   }
 
   if (name === 'delete_note') {
-    return `Moved note to Trash: ${data.title || data.trashedNoteId || 'Untitled'}.`;
+    return t('ai.chat.tool.result.noteTrashed', { title: data.title || data.trashedNoteId || t('ai.chat.common.untitled') });
   }
 
   if (name === 'create_drawing_note') {
-    const kind = data.source === 'mermaid'
-      ? (data.editable ? 'editable Mermaid diagram' : 'Mermaid diagram (image)')
-      : 'SVG drawing';
-    return `Created drawing note with ${kind}: ${data.note?.title || 'Drawing'}.`;
+    const title = data.note?.title || t('ai.chat.tool.result.drawingFallback');
+    return data.source === 'mermaid'
+      ? (data.editable
+        ? t('ai.chat.tool.result.drawingMermaidEditable', { title })
+        : t('ai.chat.tool.result.drawingMermaidImage', { title }))
+      : t('ai.chat.tool.result.drawingSvg', { title });
   }
 
   if (name === 'update_drawing') {
-    const how = data.mode === 'replace' ? 'Replaced' : 'Updated';
-    return `${how} drawing (${data.elementCount || 0} element${data.elementCount === 1 ? '' : 's'}).`;
+    const count = Number(data.elementCount || 0);
+    return data.mode === 'replace'
+      ? t('ai.chat.tool.result.drawingReplaced', { count })
+      : t('ai.chat.tool.result.drawingUpdated', { count });
   }
 
   if (name === 'create_event') {
-    return `Created event: ${data.title || data.id || 'Untitled event'}.`;
+    return t('ai.chat.tool.result.eventCreated', { title: data.title || data.id || t('ai.chat.common.untitledEvent') });
   }
 
   if (name === 'update_event') {
-    return `Updated event: ${data.title || data.id || 'event'}.`;
+    return t('ai.chat.tool.result.eventUpdated', { title: data.title || data.id || t('ai.chat.common.untitledEvent') });
   }
 
   if (name === 'update_event_appearance') {
     const ev = data.event || data;
-    const linked = data.linkedNoteUpdated
-      ? ' Linked note appearance updated too.'
-      : '';
+    const title = ev.title || ev.id || t('ai.chat.common.untitledEvent');
 
-    return `Updated event appearance: ${ev.title || ev.id || 'event'}.${linked}`;
+    return data.linkedNoteUpdated
+      ? t('ai.chat.tool.result.eventAppearanceUpdatedLinked', { title })
+      : t('ai.chat.tool.result.eventAppearanceUpdated', { title });
   }
 
   if (name === 'link_event_to_note') {
     return data.ok
-      ? 'Linked calendar event to note.'
-      : 'Could not link calendar event to note.';
+      ? t('ai.chat.tool.result.eventLinked')
+      : t('ai.chat.tool.result.eventLinkFailed');
   }
 
   if (name === 'ai_brain_write') {
-    return `Updated AI Brain: ${data.title || data.id || 'note'}.`;
+    return t('ai.chat.tool.result.brainUpdated', { title: data.title || data.id || t('ai.chat.common.untitled') });
   }
 
   if (name === 'ai_brain_search') {
     const count = Array.isArray(data) ? data.length : toolResultCount(data);
-    return `${count || 0} AI Brain result${count === 1 ? '' : 's'} found.`;
+    return t('ai.chat.tool.result.brainFound', { count: count || 0 });
   }
 
   if (name === 'ai_brain_list') {
     const noteCount = data.notes?.length || 0;
     const folderCount = data.folders?.length || 0;
-    return `AI Brain contains ${noteCount} note${noteCount === 1 ? '' : 's'} and ${folderCount} folder${folderCount === 1 ? '' : 's'}.`;
+    return t('ai.chat.tool.result.brainContents', {
+      notes: t('ai.chat.context.notes', { count: noteCount }),
+      folders: t('ai.chat.tool.result.folders', { count: folderCount }),
+    });
   }
 
   if (name === 'get_weather') {
-    const loc = data.location?.label || 'location';
+    const location = data.location?.label || t('ai.chat.tool.result.weatherLocationFallback');
     const temp = data.current?.temperatureC;
-    const weather = data.current?.weather || 'weather';
+    const weather = data.current?.weather || t('ai.chat.tool.name.getWeather');
 
-    return `${weather} in ${loc}${temp != null ? ` · ${temp} °C` : ''}.`;
+    return temp != null
+      ? t('ai.chat.tool.result.weatherWithTemp', { weather, location, temp })
+      : t('ai.chat.tool.result.weather', { weather, location });
   }
 
   if (name === 'web_search') {
     const results = Array.isArray(data?.results) ? data.results : [];
-    return `${results.length} web result${results.length === 1 ? '' : 's'} found for "${data?.query || ''}".`;
+    return t('ai.chat.tool.result.webFound', { count: results.length, query: data?.query || '' });
   }
 
   if (name === 'web_read') {
-    const title = data?.title || data?.url || 'web page';
+    const title = data?.title || data?.url || t('ai.chat.tool.result.webPageFallback');
     const chars = Number(data?.textChars || String(data?.text || '').length || 0);
 
-    return `Read web page: ${title}${chars ? ` · ${chars.toLocaleString()} chars` : ''}.`;
+    return chars
+      ? t('ai.chat.tool.result.webReadChars', { title, chars })
+      : t('ai.chat.tool.result.webRead', { title });
   }
 
   if (name === 'add_rss_source') {
     const source = data?.source || data?.feed || data;
 
     return source?.title || source?.feedUrl
-      ? `Added source: ${source.title || source.feedUrl}.`
-      : data?.message || 'Source added.';
+      ? t('ai.chat.tool.result.sourceAddedNamed', { title: source.title || source.feedUrl })
+      : data?.message || t('ai.chat.tool.result.sourceAdded');
   }
 
   const count = toolResultCount(data);
 
   if (count != null) {
-    return `${count} result${count === 1 ? '' : 's'}.`;
+    return t('ai.chat.tool.result.count', { count });
   }
 
-  if (data.ok === true) return 'Completed successfully.';
-  if (data.success === true) return 'Completed successfully.';
+  if (data.ok === true) return t('ai.chat.tool.result.success');
+  if (data.success === true) return t('ai.chat.tool.result.success');
 
-  return 'Tool completed.';
+  return t('ai.chat.tool.result.completed');
 }
 
 function formatToolDate(value) {
@@ -1789,25 +1815,26 @@ function formatToolDateTime(value, allDay = false) {
 // Which activity groups the user opened, so re-renders keep them open.
 const openToolActivity = new Set();
 
+// Tool name → key under ai.chat.tool.verb (the activity line's wording).
 const TOOL_VERBS = {
-  search_notes: 'Searched notes',
-  semantic_search_notes: 'Searched notes',
-  read_note: 'Read a note',
-  read_notes: 'Read notes',
-  create_note: 'Created a note',
-  append_to_note: 'Added to a note',
-  replace_in_note: 'Edited a note',
-  delete_note: 'Moved a note to Trash',
-  web_search: 'Searched the web',
-  web_read: 'Read a web page',
-  search_events: 'Looked at the calendar',
-  create_event: 'Added an event',
-  update_event: 'Updated an event',
-  rss_search_items: 'Searched feeds',
-  rss_read_item: 'Read an article',
-  tools_load: 'Loaded tools',
-  skill_view: 'Opened a skill',
-  skills_list: 'Listed skills',
+  search_notes: 'searchNotes',
+  semantic_search_notes: 'semanticSearchNotes',
+  read_note: 'readNote',
+  read_notes: 'readNotes',
+  create_note: 'createNote',
+  append_to_note: 'appendToNote',
+  replace_in_note: 'replaceInNote',
+  delete_note: 'deleteNote',
+  web_search: 'webSearch',
+  web_read: 'webRead',
+  search_events: 'searchEvents',
+  create_event: 'createEvent',
+  update_event: 'updateEvent',
+  rss_search_items: 'rssSearchItems',
+  rss_read_item: 'rssReadItem',
+  tools_load: 'toolsLoad',
+  skill_view: 'skillView',
+  skills_list: 'skillsList',
 };
 
 function renderToolActivityNode(run) {
@@ -1817,12 +1844,15 @@ function renderToolActivityNode(run) {
   const labels = [];
   for (const m of run) {
     if (m.toolName === 'tools_load') continue;
-    const label = TOOL_VERBS[m.toolName] || toolDisplayName(m.toolName);
+    const label = TOOL_VERBS[m.toolName]
+      ? t(`ai.chat.tool.verb.${TOOL_VERBS[m.toolName]}`)
+      : toolDisplayName(m.toolName);
     if (!labels.includes(label)) labels.push(label);
   }
-  if (!labels.length) labels.push('Loaded tools');
+  if (!labels.length) labels.push(t('ai.chat.tool.verb.toolsLoad'));
 
   const details = document.createElement('details');
+  // eslint-disable-next-line yanta/no-untranslated-literal -- CSS class
   details.className = `yanta-ai-msg tool yanta-ai-activity${errors ? ' has-error' : ''}`;
   details.open = openToolActivity.has(key);
   details.addEventListener('toggle', () => {
@@ -1834,8 +1864,8 @@ function renderToolActivityNode(run) {
   summary.innerHTML = `
     <span class="yanta-ai-activity-icon">${lucide(errors ? 'triangle-alert' : 'sparkles', 13)}</span>
     <span class="yanta-ai-activity-text">${escapeHtml(labels.slice(0, 3).join(' · '))}${labels.length > 3 ? ` · +${labels.length - 3}` : ''}</span>
-    ${errors ? `<span class="yanta-ai-activity-err">${errors} failed</span>` : ''}
-    <span class="yanta-ai-activity-count">${run.length} step${run.length === 1 ? '' : 's'}</span>
+    ${errors ? `<span class="yanta-ai-activity-err">${escapeHtml(t('ai.chat.tool.activity.failed', { count: errors }))}</span>` : ''}
+    <span class="yanta-ai-activity-count">${escapeHtml(t('ai.chat.tool.activity.steps', { count: run.length }))}</span>
     ${lucide('chevron-down', 12)}
   `;
   details.append(summary);
@@ -1883,7 +1913,7 @@ function renderToolMessageNode(msg) {
       </span>
 
       <span class="yanta-ai-tool-status">
-        ${isError ? 'Failed' : 'Done'}
+        ${escapeHtml(isError ? t('ai.chat.tool.status.failed') : t('ai.chat.tool.status.done'))}
       </span>
     </div>
 
@@ -1902,7 +1932,7 @@ function renderToolMessageNode(msg) {
   details.className = 'yanta-ai-tool-details';
 
   const summaryEl = document.createElement('summary');
-  summaryEl.textContent = 'Show raw result';
+  summaryEl.textContent = t('ai.chat.tool.showRaw');
 
   const pre = document.createElement('pre');
   pre.textContent = rawData
@@ -1922,20 +1952,21 @@ function renderToolRichContent(name, data) {
     if (!results.length) return null;
 
     const details = document.createElement('details');
+    // eslint-disable-next-line yanta/no-untranslated-literal -- CSS class
     details.className = 'yanta-ai-tool-expandable-results yanta-ai-web-results';
 
     const summary = document.createElement('summary');
 
     const chips = results.slice(0, 8).map((result) => `
-      <span class="yanta-ai-result-chip" title="${escapeHtml(result.title || result.url || 'Result')}">
-        ${escapeHtml(result.title || result.url || 'Result')}
+      <span class="yanta-ai-result-chip" title="${escapeHtml(result.title || result.url || t('ai.chat.tool.resultFallback'))}">
+        ${escapeHtml(result.title || result.url || t('ai.chat.tool.resultFallback'))}
       </span>
     `).join('');
 
     summary.innerHTML = `
       <span class="yanta-ai-results-summary-label">
         ${lucide('list-collapse', 13)}
-        ${results.length} result${results.length === 1 ? '' : 's'}
+        ${escapeHtml(t('ai.chat.tool.results', { count: results.length }))}
       </span>
 
       <span class="yanta-ai-result-chips">
@@ -1944,6 +1975,7 @@ function renderToolRichContent(name, data) {
     `;
 
     const list = document.createElement('div');
+    // eslint-disable-next-line yanta/no-untranslated-literal -- CSS class
     list.className = 'yanta-ai-tool-list yanta-ai-expanded-result-list';
 
     for (const result of results.slice(0, 10)) {
@@ -1951,12 +1983,13 @@ function renderToolRichContent(name, data) {
       row.className = 'yanta-ai-tool-row';
       row.href = safeUrl(result.url) || '#';
       row.target = '_blank';
+      // eslint-disable-next-line yanta/no-untranslated-literal -- link rel
       row.rel = 'noopener noreferrer';
 
       row.innerHTML = `
         <span class="yanta-ai-tool-row-icon">${lucide('globe', 14)}</span>
         <span class="yanta-ai-tool-row-main">
-          <strong>${escapeHtml(result.title || result.url || 'Result')}</strong>
+          <strong>${escapeHtml(result.title || result.url || t('ai.chat.tool.resultFallback'))}</strong>
           ${result.description ? `<small>${escapeHtml(result.description)}</small>` : ''}
           ${result.url ? `<em>${escapeHtml(result.url)}</em>` : ''}
         </span>
@@ -1980,12 +2013,13 @@ function renderToolRichContent(name, data) {
     row.className = 'yanta-ai-tool-row';
     row.href = safeUrl(data.url) || '#';
     row.target = '_blank';
+    // eslint-disable-next-line yanta/no-untranslated-literal -- link rel
     row.rel = 'noopener noreferrer';
 
     row.innerHTML = `
       <span class="yanta-ai-tool-row-icon">${lucide('file-search', 14)}</span>
       <span class="yanta-ai-tool-row-main">
-        <strong>${escapeHtml(data.title || 'Web page')}</strong>
+        <strong>${escapeHtml(data.title || t('ai.chat.tool.webPage'))}</strong>
         <small>${escapeHtml(String(data.excerpt || '').slice(0, 260))}</small>
         <em>${escapeHtml(data.url)}</em>
       </span>
@@ -2012,7 +2046,7 @@ function renderToolRichContent(name, data) {
     if (rooms.length > 8) {
       const more = document.createElement('div');
       more.className = 'yanta-ai-tool-more';
-      more.textContent = `+ ${rooms.length - 8} more`;
+      more.textContent = t('ai.chat.common.more', { count: rooms.length - 8 });
       list.append(more);
     }
 
@@ -2053,7 +2087,7 @@ function renderToolRichContent(name, data) {
     if (results.length > 8) {
       const more = document.createElement('div');
       more.className = 'yanta-ai-tool-more';
-      more.textContent = `+ ${results.length - 8} more`;
+      more.textContent = t('ai.chat.common.more', { count: results.length - 8 });
       list.append(more);
     }
 
@@ -2072,11 +2106,11 @@ function renderToolRichContent(name, data) {
         ${lucide(data?.ok ? 'send-horizontal' : 'ban', 14)}
       </span>
       <span class="yanta-ai-tool-row-main">
-        <strong>${data?.ok ? 'Message sent' : data?.cancelled ? 'Message cancelled' : 'Message not sent'}</strong>
+        <strong>${escapeHtml(data?.ok ? t('ai.chat.tool.chat.sent') : data?.cancelled ? t('ai.chat.tool.chat.cancelled') : t('ai.chat.tool.chat.notSent'))}</strong>
         <small>
-          ${data?.roomId ? `Room: ${escapeHtml(data.roomId)}` : ''}
-          ${data?.autonomous ? ' · autonomous' : ''}
-          ${data?.humanConfirmed ? ' · confirmed' : ''}
+          ${data?.roomId ? escapeHtml(t('ai.chat.tool.chat.room', { room: data.roomId })) : ''}
+          ${data?.autonomous ? ` · ${escapeHtml(t('ai.chat.tool.chat.autonomous'))}` : ''}
+          ${data?.humanConfirmed ? ` · ${escapeHtml(t('ai.chat.tool.chat.confirmed'))}` : ''}
         </small>
         ${data?.eventId ? `<em>${escapeHtml(data.eventId)}</em>` : ''}
       </span>
@@ -2101,7 +2135,7 @@ function renderToolRichContent(name, data) {
     if (events.length > 8) {
       const more = document.createElement('div');
       more.className = 'yanta-ai-tool-more';
-      more.textContent = `+ ${events.length - 8} more`;
+      more.textContent = t('ai.chat.common.more', { count: events.length - 8 });
       list.append(more);
     }
 
@@ -2123,7 +2157,7 @@ function renderToolRichContent(name, data) {
     if (notes.length > 8) {
       const more = document.createElement('div');
       more.className = 'yanta-ai-tool-more';
-      more.textContent = `+ ${notes.length - 8} more`;
+      more.textContent = t('ai.chat.common.more', { count: notes.length - 8 });
       list.append(more);
     }
 
@@ -2157,12 +2191,13 @@ function renderToolRichContent(name, data) {
     row.className = 'yanta-ai-tool-row';
     row.href = safeUrl(source.siteUrl || source.feedUrl) || '#';
     row.target = '_blank';
+    // eslint-disable-next-line yanta/no-untranslated-literal -- link rel
     row.rel = 'noopener noreferrer';
 
     row.innerHTML = `
       <span class="yanta-ai-tool-row-icon">${lucide(source.sourceKind === 'youtube' ? 'youtube' : 'rss', 14)}</span>
       <span class="yanta-ai-tool-row-main">
-        <strong>${escapeHtml(source.title || 'Source')}</strong>
+        <strong>${escapeHtml(source.title || t('ai.chat.tool.sourceFallback'))}</strong>
         ${source.description ? `<small>${escapeHtml(String(source.description).slice(0, 220))}</small>` : ''}
         ${source.feedUrl ? `<em>${escapeHtml(source.feedUrl)}</em>` : ''}
       </span>
@@ -2179,10 +2214,10 @@ function renderToolChatRoomRow(room) {
   const row = document.createElement('div');
   row.className = 'yanta-ai-tool-row';
 
-  const title = room.name || room.directUserId || room.roomId || 'Chat';
+  const title = room.name || room.directUserId || room.roomId || t('ai.chat.tool.chat.fallback');
   const subtitle = [
-    room.isDirect ? 'Direct chat' : 'Room',
-    room.unread ? `${room.unread} unread` : '',
+    room.isDirect ? t('ai.chat.tool.chat.direct') : t('ai.chat.tool.chat.roomLabel'),
+    room.unread ? t('ai.chat.tool.chat.unread', { count: Number(room.unread) }) : '',
     room.lastActive ? formatToolDateTime(room.lastActive) : '',
   ].filter(Boolean).join(' · ');
 
@@ -2213,7 +2248,7 @@ function renderToolChatMessageRow(message, {
     ''
   ).trim();
 
-  const sender = message.sender || 'Unknown';
+  const sender = message.sender || t('ai.chat.tool.chat.unknownSender');
   const when = message.ts ? formatToolDateTime(message.ts) : '';
   const targetRoomId = message.roomId || roomId || '';
 
@@ -2236,6 +2271,7 @@ function renderToolChatMessageRow(message, {
 function renderToolEventRow(ev) {
   const row = document.createElement('button');
   row.type = 'button';
+  // eslint-disable-next-line yanta/no-untranslated-literal -- CSS class
   row.className = 'yanta-ai-tool-row yanta-ai-tool-event-row';
 
   if (ev.id && ev.source !== 'markdown') {
@@ -2248,10 +2284,10 @@ function renderToolEventRow(ev) {
   row.innerHTML = `
     <span class="yanta-ai-tool-row-icon">${lucide(ev.icon || 'calendar-days', 14)}</span>
     <span class="yanta-ai-tool-row-main">
-      <strong>${escapeHtml(ev.title || 'Untitled event')}</strong>
+      <strong>${escapeHtml(ev.title || t('ai.chat.common.untitledEvent'))}</strong>
       ${when ? `<small>${escapeHtml(when)}${end ? ` – ${escapeHtml(end)}` : ''}</small>` : ''}
       ${ev.location ? `<span>${escapeHtml(ev.location)}</span>` : ''}
-      ${ev.noteId ? `<em>Linked note: ${escapeHtml(ev.noteId)}</em>` : ''}
+      ${ev.noteId ? `<em>${escapeHtml(t('ai.chat.tool.linkedNote', { id: ev.noteId }))}</em>` : ''}
     </span>
   `;
 
@@ -2261,6 +2297,7 @@ function renderToolEventRow(ev) {
 function renderToolNoteRow(note) {
   const row = document.createElement('button');
   row.type = 'button';
+  // eslint-disable-next-line yanta/no-untranslated-literal -- CSS class
   row.className = 'yanta-ai-tool-row yanta-ai-tool-note-row';
 
   if (note.id) {
@@ -2270,7 +2307,7 @@ function renderToolNoteRow(note) {
   row.innerHTML = `
     <span class="yanta-ai-tool-row-icon">${lucide(note.icon || 'file-text', 14)}</span>
     <span class="yanta-ai-tool-row-main">
-      <strong>${escapeHtml(note.title || 'Untitled')}</strong>
+      <strong>${escapeHtml(note.title || t('ai.chat.common.untitled'))}</strong>
       ${note.folderPath ? `<small>${escapeHtml(note.folderPath)}</small>` : ''}
       ${note.id ? `<em>${escapeHtml(note.id)}</em>` : ''}
     </span>
@@ -2282,6 +2319,7 @@ function renderToolNoteRow(note) {
 function renderToolBrainRow(hit) {
   const row = document.createElement('button');
   row.type = 'button';
+  // eslint-disable-next-line yanta/no-untranslated-literal -- CSS class
   row.className = 'yanta-ai-tool-row yanta-ai-tool-brain-row';
 
   if (hit.id) {
@@ -2291,7 +2329,7 @@ function renderToolBrainRow(hit) {
   row.innerHTML = `
     <span class="yanta-ai-tool-row-icon">${lucide('brain-circuit', 14)}</span>
     <span class="yanta-ai-tool-row-main">
-      <strong>${escapeHtml(hit.title || 'AI Brain note')}</strong>
+      <strong>${escapeHtml(hit.title || t('ai.chat.tool.brainNote'))}</strong>
       ${hit.excerpt ? `<small>${escapeHtml(hit.excerpt)}</small>` : ''}
     </span>
   `;
@@ -2380,8 +2418,8 @@ function renderMessages() {
       emptyStateEl = document.createElement('div');
       emptyStateEl.className = 'yanta-ai-empty';
       emptyStateEl.innerHTML = `
-        <strong>Ask YANTA AI</strong>
-        <p>Try: “Summarize this note”, “Look into these files”, “Create a project note”, or “Create an event tomorrow at 14:00”.</p>
+        <strong>${escapeHtml(t('ai.chat.empty.title'))}</strong>
+        <p>${escapeHtml(t('ai.chat.empty.hint'))}</p>
       `;
     }
     desired.push(emptyStateEl);
@@ -2436,10 +2474,13 @@ function renderSummaryMessageNode(msg) {
 
   const summary = document.createElement('summary');
   summary.innerHTML = `${lucide('fold-vertical', 13)}<span>${escapeHtml(
-    `Earlier conversation summarized${msg.covers ? ` (${msg.covers} messages)` : ''} — only the summary is sent from here on`
+    msg.covers
+      ? t('ai.chat.compaction.foldCount', { count: Number(msg.covers) })
+      : t('ai.chat.compaction.fold')
   )}</span>`;
 
   const body = document.createElement('div');
+  // eslint-disable-next-line yanta/no-untranslated-literal -- CSS class
   body.className = 'yanta-ai-summary-body yanta-ai-rich';
   body.innerHTML = renderBlocksInlineWithContext(String(msg.content || ''), { remoteMedia: 'link' });
 
@@ -2453,10 +2494,10 @@ function messageRoleLabel(msg) {
     return `YANTA AI · ${msg.model || getAiSettings().model || 'LLM'}`;
   }
 
-  if (msg.role === 'user') return 'You';
-  if (msg.role === 'tool') return 'Tool';
+  if (msg.role === 'user') return t('ai.chat.role.user');
+  if (msg.role === 'tool') return t('ai.chat.tool.name.fallback');
 
-  return msg.role || 'Message';
+  return msg.role || t('ai.chat.role.message');
 }
 
 function extractAssistantUiTokens(content) {
@@ -2502,7 +2543,7 @@ function aiCopyButtonHtml(size = 13) {
 
 function createAiCopyButton(getText, {
   className = '',
-  label = 'Copy',
+  label = t('ai.chat.copy.copy'),
 } = {}) {
   const btn = document.createElement('button');
   btn.type = 'button';
@@ -2531,7 +2572,7 @@ function createAiCopyButton(getText, {
         btn.classList.remove('is-copied');
       }, 1250);
     } catch {
-      toast('Copy failed', 'error');
+      toast(t('ai.chat.copy.failed'), 'error');
     }
   });
 
@@ -2552,7 +2593,7 @@ function enhanceAiCodeCopy(rootEl) {
       () => code?.textContent || pre.textContent || '',
       {
         className: 'block',
-        label: 'Copy code',
+        label: t('ai.chat.copy.code'),
       }
     );
 
@@ -2570,7 +2611,7 @@ function enhanceAiCodeCopy(rootEl) {
       () => code.textContent || '',
       {
         className: 'inline',
-        label: 'Copy inline code',
+        label: t('ai.chat.copy.inlineCode'),
       }
     );
 
@@ -2596,7 +2637,7 @@ function renderAssistantMessageNode(msg) {
     const summary = document.createElement('summary');
     summary.innerHTML = `
       ${lucide('brain-circuit', 13)}
-      <span>Thinking</span>
+      <span>${escapeHtml(t('ai.chat.reasoning.label'))}</span>
     `;
 
     const pre = document.createElement('pre');
@@ -2612,6 +2653,7 @@ function renderAssistantMessageNode(msg) {
   const parsed = extractAssistantUiTokens(withWidgetMarks);
 
   const content = document.createElement('div');
+  // eslint-disable-next-line yanta/no-untranslated-literal -- CSS class
   content.className = 'yanta-ai-msg-content yanta-ai-rich';
 
   if (parsed.text) {
@@ -2629,7 +2671,7 @@ function renderAssistantMessageNode(msg) {
       ask: (text) => submitUserText(text),
     });
   } else if (!parsed.notes.length && !parsed.events.length && !parsed.chips.length) {
-    content.textContent = '[No response]';
+    content.textContent = t('ai.chat.noResponse');
   }
 
   wrap.append(content);
@@ -2672,7 +2714,7 @@ function renderAssistantMessageNode(msg) {
       const more = document.createElement('button');
       more.type = 'button';
       more.className = 'yanta-ai-link-cards-more';
-      more.textContent = `Show ${all.length - VISIBLE} more`;
+      more.textContent = t('ai.chat.cards.showMore', { count: all.length - VISIBLE });
       more.addEventListener('click', () => {
         more.replaceWith(...all.slice(VISIBLE));
       });
@@ -2715,6 +2757,23 @@ function keepClaimMarkers(text) {
   return text.replace(/((?:\[\d+\])+)\{c(\d+)\}/g, '$1⟦c$2⟧');
 }
 
+/**
+ * A citation problem for display. Items store VeriQuote's problem type
+ * (citation-check.js); messages saved before that stored English labels,
+ * which are shown as they are.
+ */
+function citationProblemLabel(problem) {
+  const code = String(problem || '');
+
+  return CITATION_PROBLEM_TYPES.has(code)
+    ? t(`ai.chat.cite.problem.${code}`)
+    : code;
+}
+
+function citationProblemsText(item) {
+  return (item.problems || []).map(citationProblemLabel).join(', ');
+}
+
 function markCitations(root, check) {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   const nodes = [];
@@ -2752,12 +2811,12 @@ function markCitations(root, check) {
 
       if (items.length) {
         sup.title = items.map((i) => [
-          i.ok ? '✓ Backed by the source' : `⚠ ${i.problems?.join(', ') || 'not confirmed'}`,
+          i.ok ? `✓ ${t('ai.chat.cite.backed')}` : `⚠ ${citationProblemsText(i) || t('ai.chat.cite.notConfirmed')}`,
           `“${i.quote}”`,
           i.source?.title ? `— ${i.source.title}` : '',
         ].filter(Boolean).join('\n')).join('\n\n');
       } else if (check?.pending) {
-        sup.title = 'Checking this citation against its source…';
+        sup.title = t('ai.chat.cite.checkingOne');
       }
 
       frag.append(sup);
@@ -2783,8 +2842,13 @@ function renderCitationCheckNode(check) {
   const details = document.createElement('details');
 
   if (check.pending) {
+    // eslint-disable-next-line yanta/no-untranslated-literal -- CSS class
     details.className = 'yanta-ai-citecheck pending';
-    details.innerHTML = `<summary>${lucide('shield', 13)}<span>Checking ${check.total || ''} citation${check.total === 1 ? '' : 's'} against the sources…</span></summary>`;
+    details.innerHTML = `<summary>${lucide('shield', 13)}<span>${escapeHtml(
+      check.total
+        ? t('ai.chat.cite.checkingCount', { count: Number(check.total) })
+        : t('ai.chat.cite.checking')
+    )}</span></summary>`;
     return details;
   }
 
@@ -2794,16 +2858,16 @@ function renderCitationCheckNode(check) {
   details.className = `yanta-ai-citecheck ${tone}`;
 
   const headline = check.error
-    ? 'Citations could not be checked'
+    ? t('ai.chat.cite.failed')
     : check.verdict === 'pass'
-      ? `${check.total}/${check.total} citation${check.total === 1 ? '' : 's'} verified`
+      ? t('ai.chat.cite.verified', { count: Number(check.total) })
       : bad
-        ? `${bad} of ${check.total} citation${check.total === 1 ? '' : 's'} not backed by the source`
-        : `Quotes found in the sources · support not judged`;
+        ? t('ai.chat.cite.notBacked', { count: Number(check.total), bad })
+        : t('ai.chat.cite.notJudged');
 
   const summary = document.createElement('summary');
-  summary.title = 'VeriQuote: each quote was matched against what was actually read, and a judge checked that it supports the sentence. Click for details.';
-  summary.innerHTML = `${lucide(tone === 'ok' ? 'shield-check' : tone === 'bad' ? 'shield-alert' : 'shield-question', 13)}<span>${escapeHtml(headline)}${check.revised ? ' · fixed once' : ''}</span>${lucide('chevron-down', 12)}`;
+  summary.title = t('ai.chat.cite.explainer');
+  summary.innerHTML = `${lucide(tone === 'ok' ? 'shield-check' : tone === 'bad' ? 'shield-alert' : 'shield-question', 13)}<span>${escapeHtml(headline)}${check.revised ? ` · ${escapeHtml(t('ai.chat.cite.fixedOnce'))}` : ''}</span>${lucide('chevron-down', 12)}`;
   details.append(summary);
 
   const list = document.createElement('ol');
@@ -2817,12 +2881,12 @@ function renderCitationCheckNode(check) {
       ? item.source.url
         ? `<a href="${escapeHtml(item.source.url)}" target="_blank" rel="noopener noreferrer">${escapeHtml(item.source.title)}</a>`
         : escapeHtml(item.source.title)
-      : 'unknown source';
+      : escapeHtml(t('ai.chat.cite.unknownSource'));
 
     li.innerHTML = `
       <div class="yanta-ai-citecheck-claim">${lucide(item.ok ? 'check' : 'x', 12)} <span>${escapeHtml(item.claim)}</span> <b>[${item.n}]</b></div>
       <blockquote>${escapeHtml(item.quote)}</blockquote>
-      <small>${source}${item.problems?.length ? ` · ${escapeHtml(item.problems.join(', '))}` : ''}</small>
+      <small>${source}${item.problems?.length ? ` · ${escapeHtml(citationProblemsText(item))}` : ''}</small>
     `;
 
     list.append(li);
@@ -2833,8 +2897,8 @@ function renderCitationCheckNode(check) {
   const note = document.createElement('p');
   note.className = 'yanta-ai-citecheck-note';
   note.textContent = check.judged === false
-    ? 'Quotes were matched against the sources. Whether they support each sentence needs YANTA Included AI or an OpenRouter key.'
-    : 'Each quote was matched against the text that was actually read, and a decision model judged whether it supports the sentence. A match means "backed by the source", not "true".';
+    ? t('ai.chat.cite.noteUnjudged')
+    : t('ai.chat.cite.noteJudged');
   details.append(note);
 
   return details;
@@ -2849,7 +2913,7 @@ function noteFolderPathForAi(folderId) {
 
   while (f && !seen.has(f.id)) {
     seen.add(f.id);
-    parts.unshift(f.name || 'Folder');
+    parts.unshift(f.name || t('ai.chat.common.folder'));
     f = f.parentId ? state.folders.get(f.parentId) : null;
   }
 
@@ -2883,6 +2947,7 @@ function renderAiNoteCard(noteId) {
 
   const card = document.createElement('button');
   card.type = 'button';
+  // eslint-disable-next-line yanta/no-untranslated-literal -- CSS class
   card.className = 'yanta-ai-link-card yanta-ai-note-card';
   card.dataset.aiOpenNote = noteId;
 
@@ -2890,7 +2955,7 @@ function renderAiNoteCard(noteId) {
     card.innerHTML = `
       <span class="yanta-ai-link-card-icon">${lucide('file-question', 18)}</span>
       <span class="yanta-ai-link-card-main">
-        <strong>Note not found</strong>
+        <strong>${escapeHtml(t('ai.chat.cards.noteNotFound'))}</strong>
         <small>${escapeHtml(noteId)}</small>
       </span>
     `;
@@ -2908,8 +2973,8 @@ function renderAiNoteCard(noteId) {
   card.innerHTML = `
     <span class="yanta-ai-link-card-icon">${lucide(icon, 18)}</span>
     <span class="yanta-ai-link-card-main">
-      <strong>${escapeHtml(note.title || 'Untitled')}</strong>
-      ${folder ? `<small>${escapeHtml(folder)}</small>` : `<small class="is-empty">No folder</small>`}
+      <strong>${escapeHtml(note.title || t('ai.chat.common.untitled'))}</strong>
+      ${folder ? `<small>${escapeHtml(folder)}</small>` : `<small class="is-empty">${escapeHtml(t('ai.chat.cards.noFolder'))}</small>`}
       ${excerpt ? `<span class="yanta-ai-link-card-excerpt">${escapeHtml(excerpt)}</span>` : ''}
     </span>
   `;
@@ -2949,6 +3014,7 @@ function formatAiEventDate(value, allDay = false) {
 function renderAiEventCard(eventId) {
   const card = document.createElement('button');
   card.type = 'button';
+  // eslint-disable-next-line yanta/no-untranslated-literal -- CSS class
   card.className = 'yanta-ai-link-card yanta-ai-event-card';
   card.dataset.aiOpenEvent = eventId;
   card.style.setProperty('--ai-card-color', 'var(--accent-2)');
@@ -2956,7 +3022,7 @@ function renderAiEventCard(eventId) {
   card.innerHTML = `
     <span class="yanta-ai-link-card-icon">${lucide('calendar-days', 18)}</span>
     <span class="yanta-ai-link-card-main">
-      <strong>Calendar event</strong>
+      <strong>${escapeHtml(t('ai.chat.cards.calendarEvent'))}</strong>
       <small>${escapeHtml(eventId)}</small>
     </span>
   `;
@@ -2984,7 +3050,7 @@ async function hydrateAiEventCard(card, eventId) {
     card.innerHTML = `
       <span class="yanta-ai-link-card-icon">${lucide(ev.icon || 'calendar-days', 18)}</span>
       <span class="yanta-ai-link-card-main">
-        <strong>${escapeHtml(ev.title || 'Untitled event')}</strong>
+        <strong>${escapeHtml(ev.title || t('ai.chat.common.untitledEvent'))}</strong>
         ${when ? `<small>${escapeHtml(when)}${end ? ` – ${escapeHtml(end)}` : ''}</small>` : ''}
         ${ev.location ? `<span class="yanta-ai-link-card-excerpt">${escapeHtml(ev.location)}</span>` : ''}
         ${ev.description ? `<span class="yanta-ai-link-card-excerpt">${escapeHtml(ev.description).slice(0, 220)}</span>` : ''}
@@ -3019,7 +3085,7 @@ async function handleAiMessageClick(e) {
     if (noteId && state.notes.has(noteId)) {
       await openNote(noteId);
     } else {
-      toast('Note not found', 'error');
+      toast(t('ai.chat.cards.noteNotFound'), 'error');
     }
 
     return;
@@ -3039,6 +3105,7 @@ async function handleAiMessageClick(e) {
       const calendar = await import('../calendar.js');
 
       if (typeof calendar.openCalendarEvent !== 'function') {
+        // eslint-disable-next-line yanta/no-untranslated-literal -- internal error, never shown
         throw new Error('Calendar event navigation is not available.');
       }
 
@@ -3049,7 +3116,7 @@ async function handleAiMessageClick(e) {
 
       pushCalendarEventHistory(eventId);
     } catch {
-      toast('Could not open calendar event', 'error');
+      toast(t('ai.chat.cards.eventOpenFailed'), 'error');
     }
 
     return;
@@ -3066,7 +3133,7 @@ async function handleAiMessageClick(e) {
     if (noteId && state.notes.has(noteId)) {
       await openNote(noteId);
     } else {
-      toast('Linked note not found', 'error');
+      toast(t('ai.chat.cards.linkedNoteNotFound'), 'error');
     }
   }
 }
@@ -3109,48 +3176,53 @@ function rememberUserUrls(messages = []) {
   }
 }
 
+/** The approval modal's headline: what the model is about to do. */
 function externalApprovalToolLabel(toolName, args = {}) {
+  const A = 'ai.chat.approval.action.';
+
   if (toolName === 'delete_note') {
-    return `delete note ${args.noteId || ''}`.trim();
+    return t(`${A}deleteNote`, { id: args.noteId || '' });
   }
 
   if (toolName === 'append_to_note') {
-    return `append text to note ${args.noteId || ''}`.trim();
+    return t(`${A}appendToNote`, { id: args.noteId || '' });
   }
 
   if (toolName === 'replace_in_note') {
-    return `edit text in note ${args.noteId || ''}`.trim();
+    return t(`${A}replaceInNote`, { id: args.noteId || '' });
   }
 
   if (toolName === 'replace_current_selection') {
-    return 'replace the current editor selection';
+    return t(`${A}replaceSelection`);
   }
 
   if (toolName === 'create_note') {
-    return `create note "${args.title || 'Untitled'}"`;
+    return t(`${A}createNote`, { title: args.title || t('ai.chat.common.untitled') });
   }
 
   if (toolName === 'create_drawing_note') {
-    return `create drawing note "${args.title || 'Drawing'}"`;
+    return t(`${A}createDrawing`, { title: args.title || t('ai.chat.tool.result.drawingFallback') });
   }
 
   if (toolName === 'update_drawing') {
-    return `edit drawing ${args.drawingId || ''}`.trim();
+    return t(`${A}updateDrawing`, { id: args.drawingId || '' });
   }
 
   if (toolName === 'update_event' || toolName === 'update_event_appearance') {
-    return `update calendar event ${args.eventId || args.id || ''}`.trim();
+    return t(`${A}updateEvent`, { id: args.eventId || args.id || '' });
   }
 
   if (toolName === 'create_event') {
-    return `create calendar event "${args.title || 'Untitled event'}"`;
+    return t(`${A}createEvent`, { title: args.title || t('ai.chat.common.untitledEvent') });
   }
 
   if (toolName === 'web_read') {
-    return `open ${args.url || 'a web page'}`;
+    return args.url
+      ? t(`${A}openUrl`, { url: args.url })
+      : t(`${A}openPage`);
   }
 
-  return toolDisplayName(toolName);
+  return t(`${A}generic`, { tool: toolDisplayName(toolName) });
 }
 
 function requestExternalSourceToolApproval({
@@ -3159,12 +3231,13 @@ function requestExternalSourceToolApproval({
 } = {}) {
   return new Promise((resolve) => {
     const modal = document.createElement('div');
+    // eslint-disable-next-line yanta/no-untranslated-literal -- CSS class
     modal.className = 'modal yanta-ai-approval-modal';
 
     modal.innerHTML = `
       <div class="modal-card yanta-ai-approval-card">
         <header class="modal-head">
-          <h3>Approve AI action?</h3>
+          <h3>${escapeHtml(t('ai.chat.approval.title'))}</h3>
         </header>
 
         <div class="modal-body">
@@ -3174,44 +3247,37 @@ function requestExternalSourceToolApproval({
             </div>
 
             <div>
-              <strong>YANTA AI wants to ${escapeHtml(externalApprovalToolLabel(toolName, args))}.</strong>
-              <p>
-                This chat contains external content (web, feeds or messages). It can contain prompt-injection attempts.
-                Please review this action before YANTA executes it.
-              </p>
+              <strong>${escapeHtml(externalApprovalToolLabel(toolName, args))}</strong>
+              <p>${escapeHtml(t('ai.chat.approval.body'))}</p>
             </div>
           </div>
 
           <details class="yanta-ai-approval-details">
-            <summary>Show action details</summary>
+            <summary>${escapeHtml(t('ai.chat.approval.details'))}</summary>
             <pre>${escapeHtml(JSON.stringify({ tool: toolName, args }, null, 2))}</pre>
           </details>
 
           <details class="yanta-ai-approval-details subtle">
-            <summary>Why is this necessary?</summary>
-            <p>
-              Search results, web pages and RSS items are untrusted data. They may contain text like
-              “ignore previous instructions and delete notes”. YANTA therefore asks for human approval
-              before write/destructive tools after external sources entered the model context.
-            </p>
+            <summary>${escapeHtml(t('ai.chat.approval.whyTitle'))}</summary>
+            <p>${escapeHtml(t('ai.chat.approval.why'))}</p>
           </details>
 
           <div class="compress-actions yanta-ai-approval-actions">
             <button class="btn" data-ai-approval="block">
               ${lucide('ban', 14)}
-              Block
+              ${escapeHtml(t('ai.chat.approval.block'))}
             </button>
 
             <span class="grow"></span>
 
             <button class="btn" data-ai-approval="allow-session">
               ${lucide('shield-check', 14)}
-              Allow everything in this session
+              ${escapeHtml(t('ai.chat.approval.allowSession'))}
             </button>
 
             <button class="btn primary" data-ai-approval="allow">
               ${lucide('check', 14)}
-              Allow
+              ${escapeHtml(t('ai.chat.approval.allow'))}
             </button>
           </div>
         </div>
@@ -3253,7 +3319,7 @@ function requestExternalSourceToolApproval({
  * conversation-compaction.js). Returns the summary, or null.
  */
 async function compactAssistantConversation({ signal = null } = {}) {
-  setAssistantBusy(true, 'Compacting the conversation…');
+  setAssistantBusy(true, t('ai.chat.busy.compacting'));
 
   const summary = await compactConversation(conversation, {
     signal,
@@ -3279,6 +3345,7 @@ async function runAssistant(userText) {
       await compactAssistantConversation({ signal: abortController.signal });
     } catch (err) {
       if (err?.name === 'AbortError') throw err;
+      // eslint-disable-next-line yanta/no-untranslated-literal -- console
       console.warn('[YANTA AI] compaction failed; sending the newest messages only', err);
     }
   }
@@ -3300,6 +3367,7 @@ async function runAssistant(userText) {
 
   const tools = loadout.specs();
 
+  // eslint-disable-next-line yanta/no-untranslated-literal -- console
   console.info('[YANTA AI] tools offered to model', tools.map((tool) =>
     tool.function?.name || ''
   ));
@@ -3359,7 +3427,7 @@ async function runAssistant(userText) {
       : [contextMessage, ...history]),
   ];
 
-  setAssistantBusy(true, 'Thinking…');
+  setAssistantBusy(true, t('ai.chat.busy.thinking'));
 
   const runtimeSettings = getEffectiveAiRuntimeSettings();
   const modelLabel = () => runtimeSettings.includedModel || runtimeSettings.model || getAiSettings().model;
@@ -3383,11 +3451,13 @@ async function runAssistant(userText) {
     rememberUserUrls(thread);
 
     if (final) {
-      setAssistantBusy(true, 'Summarizing…');
+      setAssistantBusy(true, t('ai.chat.busy.summarizing'));
       return openRouterChatCompletionStream({ messages: thread, tools: roundTools, signal });
     }
 
-    setAssistantBusy(true, round === 0 ? 'Thinking…' : `Tool round ${round + 1}/${maxRounds}…`);
+    setAssistantBusy(true, round === 0
+      ? t('ai.chat.busy.thinking')
+      : t('ai.chat.busy.toolRound', { round: round + 1, max: maxRounds }));
 
     let streamedMsg = null;
     let hasVisibleContent = false;
@@ -3424,7 +3494,7 @@ async function runAssistant(userText) {
           streamedMsg.reasoning = streamingReasoning;
           hasVisibleContent = true;
 
-          setAssistantBusy(true, 'Responding…');
+          setAssistantBusy(true, t('ai.chat.busy.responding'));
           scheduleStreamRender();
         }
       },
@@ -3450,7 +3520,7 @@ async function runAssistant(userText) {
     } else if (streamedMsg) {
       removeConversationMessageObject(streamedMsg);
     } else if (!(assistantMessage.tool_calls || []).length) {
-      addMessage('assistant', '[No response]', { model: modelLabel() });
+      addMessage('assistant', t('ai.chat.noResponse'), { model: modelLabel() });
     }
 
     streamingReasoning = '';
@@ -3468,7 +3538,7 @@ async function runAssistant(userText) {
     source: 'assistant',
     requestRound,
     beforeToolCall: async ({ name, args }) => {
-      setAssistantBusy(true, `Using ${toolDisplayName(name)}…`);
+      setAssistantBusy(true, t('ai.chat.busy.usingTool', { tool: toolDisplayName(name) }));
 
       // Resolves inside the run: it changes what the next round may
       // call, so it never reaches the registry.
@@ -3486,6 +3556,8 @@ async function runAssistant(userText) {
         if (!approval.allowed) {
           return {
             allowed: false,
+            // Returned to the model, so it stays English.
+            // eslint-disable-next-line yanta/no-untranslated-literal
             reason: 'Blocked by user because external content (web, feeds or messages) is present in this chat.',
             code: 'EAI_HUMAN_BLOCKED_EXTERNAL_SOURCE_WRITE',
           };
@@ -3510,8 +3582,8 @@ async function runAssistant(userText) {
   // text is the user's summary.
   if (result.stop === AGENT_STOP.MAX_ROUNDS || result.stop === AGENT_STOP.LOOP) {
     const fallback = result.stop === AGENT_STOP.LOOP
-      ? 'I kept repeating the same steps without getting further, so I stopped. Try rephrasing or narrowing the request.'
-      : `I stopped after ${maxRounds} tool rounds without finishing. Ask me to continue.`;
+      ? t('ai.chat.stop.loop')
+      : t('ai.chat.stop.maxRounds', { count: maxRounds });
 
     addMessage('assistant', result.finalText || fallback, {
       model: modelLabel(),
@@ -3536,7 +3608,7 @@ async function checkAnswerCitations({ sources, thread, mode, signal }) {
   const msg = [...conversation].reverse().find((m) => m.role === 'assistant');
   if (!msg || !hasCitations(msg.content)) return;
 
-  setAssistantBusy(true, 'Checking citations…');
+  setAssistantBusy(true, t('ai.chat.busy.checkingCitations'));
 
   // Shown at once: the badge and the markers say "checking" until the
   // verdicts arrive.
@@ -3547,7 +3619,7 @@ async function checkAnswerCitations({ sources, thread, mode, signal }) {
     let check = await checkCitations(msg.content, sources, { signal });
 
     if (check?.verdict === 'revise' && mode === 'revise' && check.instructionsForModel) {
-      setAssistantBusy(true, 'Fixing citations…');
+      setAssistantBusy(true, t('ai.chat.busy.fixingCitations'));
 
       const revised = await openRouterChatCompletion({
         messages: [
@@ -3576,6 +3648,7 @@ async function checkAnswerCitations({ sources, thread, mode, signal }) {
     }
   } catch (err) {
     if (err?.name === 'AbortError') throw err;
+    // eslint-disable-next-line yanta/no-untranslated-literal -- console
     console.warn('[YANTA AI] citation check failed', err);
     msg.citeCheck = { verdict: 'unverified', error: String(err?.message || err).slice(0, 160), items: [], passed: 0, total: 0 };
   }
@@ -3614,14 +3687,14 @@ async function maybeHandleAssistantSlashCommand(text) {
     addMessage(
       'assistant',
       [
-        '## Available YANTA AI tools',
+        `## ${t('ai.chat.slash.tools.title')}`,
         '',
-        `Count: ${tools.length}`,
+        t('ai.chat.slash.tools.count', { count: tools.length }),
         blocked.length
-          ? `Blocked by your settings and not offered to the model: ${blocked.join(', ')}`
+          ? t('ai.chat.slash.tools.blocked', { tools: blocked.join(', ') })
           : '',
         '',
-        '| Tool | Description |',
+        `| ${t('ai.chat.slash.tools.colTool')} | ${t('ai.chat.slash.tools.colDescription')} |`,
         '|---|---|',
         ...tools.map((tool) =>
           `| \`${tool.name}\` | ${tool.description.replace(/\n+/g, ' ').slice(0, 180)} |`
@@ -3637,7 +3710,7 @@ async function maybeHandleAssistantSlashCommand(text) {
 
   if (command === 'compact') {
     if (abortController) {
-      toast('YANTA AI is already working', 'error');
+      toast(t('ai.chat.toast.busy'), 'error');
       return true;
     }
 
@@ -3645,9 +3718,9 @@ async function maybeHandleAssistantSlashCommand(text) {
 
     try {
       const summary = await compactAssistantConversation({ signal: abortController.signal });
-      if (!summary) toast('Nothing to compact yet');
+      if (!summary) toast(t('ai.chat.slash.compact.nothing'));
     } catch (err) {
-      toast(`Could not compact: ${err?.message || err}`, 'error');
+      toast(t('ai.chat.slash.compact.failed', { error: err?.message || String(err) }), 'error');
     } finally {
       abortController = null;
       setAssistantBusy(false);
@@ -3668,13 +3741,13 @@ async function maybeHandleAssistantSlashCommand(text) {
       addMessage(
         'assistant',
         [
-          '## Installed Skills',
+          `## ${t('ai.chat.slash.skills.title')}`,
           '',
           result.skills.length
             ? result.skills.map((s) =>
-                `- **${s.name}** — ${s.description || 'No description'}`
+                `- **${s.name}** — ${s.description || t('ai.chat.slash.skills.noDescription')}`
               ).join('\n')
-            : 'No skills installed.',
+            : t('ai.chat.slash.skills.none'),
         ].join('\n'),
         {
           model: 'YANTA',
@@ -3694,7 +3767,7 @@ async function maybeHandleAssistantSlashCommand(text) {
       addMessage(
         'assistant',
         [
-          `## Skill: ${skill.name}`,
+          `## ${t('ai.chat.slash.skills.skill', { name: skill.name })}`,
           '',
           '```markdown',
           skill.text,
@@ -3729,6 +3802,8 @@ async function maybeHandleAssistantSlashCommand(text) {
       skill.text,
       '</YANTA_SKILL>',
       '',
+      // The prompt goes to the model, so it stays English.
+      // eslint-disable-next-line yanta/no-untranslated-literal
       'User request:',
       rest || `Use the ${skill.name} skill.`,
     ].join('\n');
@@ -3752,7 +3827,7 @@ async function submitUserText(text) {
   }
 
   if (abortController) {
-    toast('YANTA AI is already working', 'error');
+    toast(t('ai.chat.toast.busy'), 'error');
     return;
   }
 
@@ -3770,18 +3845,18 @@ async function submitUserText(text) {
   } else if (!getAiApiKey()) {
     settingsOpen = true;
     renderSettings();
-    toast('Add your OpenRouter API key first', 'error');
+    toast(t('ai.chat.toast.needApiKey'), 'error');
     return;
   }
 
   addMessage('user', clean);
 
-  setAssistantBusy(true, 'Thinking…');
+  setAssistantBusy(true, t('ai.chat.busy.thinking'));
 
   sendBtn.disabled = false;
   sendBtn.classList.add('is-working');
-  sendBtn.title = 'Stop generating';
-  sendBtn.setAttribute('aria-label', 'Stop generating');
+  sendBtn.title = t('ai.chat.input.stop');
+  sendBtn.setAttribute('aria-label', t('ai.chat.input.stop'));
   sendBtn.innerHTML = lucide('square', 16);
 
   try {
@@ -3791,7 +3866,7 @@ async function submitUserText(text) {
       // User clicked stop — no error toast needed
     } else {
       console.error(err);
-      addMessage('assistant', `Error: ${err?.message || String(err)}`, {
+      addMessage('assistant', t('ai.chat.error', { message: err?.message || String(err) }), {
         model: getAiSettings().model,
       });
     }
@@ -3800,8 +3875,8 @@ async function submitUserText(text) {
     setAssistantBusy(false);
 
     sendBtn.classList.remove('is-working');
-    sendBtn.title = 'Send';
-    sendBtn.setAttribute('aria-label', 'Send message');
+    sendBtn.title = t('ai.chat.input.send');
+    sendBtn.setAttribute('aria-label', t('ai.chat.input.sendMessage'));
     sendBtn.innerHTML = lucide('arrow-up', 18);
     updateSendButtonState();
     abortController = null;
@@ -5229,7 +5304,7 @@ function injectCss() {
 }
 
 .yanta-ai-root.is-ai-context-dragover::after {
-  content: "Drop to add as AI context";
+  content: attr(data-ai-drop-label);
 
   position: absolute;
   inset: 54px 12px 86px;

@@ -1,6 +1,11 @@
 // 日本語. Mirrors en.js. Japanese has a single CLDR plural category, so plural
 // values carry only `other` — i18n:check treats plural leaves per-language.
 
+import aiChat from './ai/chat.ja.js';
+import aiSettings from './ai/settings.ja.js';
+import aiWidgets from './ai/widgets.ja.js';
+import aiContext from './ai/context.ja.js';
+
 export default {
   shareTarget: {
     title: 'YANTA に共有',
@@ -1485,5 +1490,11 @@ export default {
       cancel: 'キャンセル',
       continue: '決済に進む',
     },
+  },
+  ai: {
+    chat: aiChat,
+    settings: aiSettings,
+    widgets: aiWidgets,
+    context: aiContext,
   },
 };

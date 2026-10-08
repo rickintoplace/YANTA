@@ -9,9 +9,12 @@
 //     and the centre shows the segment,
 //   - a legend that dims the other series while one is hovered.
 // No library: the whole thing is a few kB and matches YANTA's theme.
+//
+// @i18n-locked — user-facing text goes through t('ai.widgets.…').
 // ============================================================
 
 import { escapeHtml } from '../core.js';
+import { t } from '../i18n/index.js';
 
 export const PALETTE = ['var(--accent)', '#e8833a', '#3f9fd8', '#b06ad9', '#d9b23f', '#3fae7e', '#e05d7a', '#6c7ae0'];
 
@@ -160,6 +163,7 @@ function drawCartesian(box, { kind, labels, series, fmt, tickFmt }, width) {
           height: h.toFixed(1),
           rx: Math.min(4, barW / 3).toFixed(1),
           fill: color,
+          // eslint-disable-next-line yanta/no-untranslated-literal -- CSS class
           class: `ywc-bar${v < 0 ? ' is-neg' : ''}`,
           'data-series': si,
           style: `animation-delay:${Math.min(400, i * 30)}ms`,
@@ -226,6 +230,7 @@ function drawDonut(box, { labels, series, fmt }, width) {
   const cx = size / 2;
   const cy = H / 2;
 
+  // eslint-disable-next-line yanta/no-untranslated-literal -- CSS classes
   const svg = svgEl('svg', { viewBox: `0 0 ${W} ${H}`, class: 'ywc-svg ywc-donut', role: 'img', style: wide ? '' : `max-width:${size}px;margin:0 auto` });
   const center = svgEl('text', { x: cx, y: cy - 2, class: 'ywc-center', 'text-anchor': 'middle' });
   const centerSub = svgEl('text', { x: cx, y: cy + 16, class: 'ywc-center-sub', 'text-anchor': 'middle' });
@@ -233,7 +238,7 @@ function drawDonut(box, { labels, series, fmt }, width) {
   const showCenter = (i) => {
     if (i < 0) {
       center.textContent = fmt(total === 1 && !values.some(Boolean) ? 0 : values.reduce((a, b) => a + b, 0));
-      centerSub.textContent = series[0].name || 'Total';
+      centerSub.textContent = series[0].name || t('ai.widgets.chart.total');
     } else {
       center.textContent = `${Math.round((values[i] / total) * 100)} %`;
       centerSub.textContent = labels[i].length > 16 ? `${labels[i].slice(0, 15)}…` : labels[i];

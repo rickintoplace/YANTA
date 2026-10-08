@@ -1,4 +1,5 @@
 // ============================================================
+// @i18n-locked
 // YANTA AI — Add Context Picker
 // ============================================================
 
@@ -16,6 +17,8 @@ import {
   closeTopOverlay,
   overlayIdFromState,
 } from '../overlay-history.js';
+
+import { t } from '../i18n/index.js';
 
 let modal = null;
 
@@ -189,6 +192,7 @@ function ensureModal() {
   ensureCss();
 
   modal = el('div', {
+    // eslint-disable-next-line yanta/no-untranslated-literal -- CSS classes
     class: 'modal yanta-ai-context-picker-modal',
     hidden: true,
   });
@@ -272,7 +276,7 @@ function matchesAiContextQuery(values, query) {
 
 function aiContextRowsHtml(rows) {
   if (!rows.length) {
-    return `<div class="tree-empty">No results.</div>`;
+    return `<div class="tree-empty">${escapeHtml(t('ai.context.picker.noResults'))}</div>`;
   }
 
   return rows.map((row) => `
@@ -298,10 +302,10 @@ function aiContextSearchPanelHtml(query) {
       class="text-input"
       data-ai-context-search
       value="${escapeHtml(query)}"
-      placeholder="Search…"
+      placeholder="${escapeHtml(t('ai.context.picker.searchPlaceholder'))}"
       autocomplete="off"
       spellcheck="false"
-      aria-label="Search AI context"
+      aria-label="${escapeHtml(t('ai.context.picker.searchLabel'))}"
     />
 
     <div class="yanta-ai-context-list" data-ai-context-list></div>
@@ -311,11 +315,11 @@ function aiContextSearchPanelHtml(query) {
 function aiContextUploadPanelHtml() {
   return `
     <div class="yanta-ai-context-upload-box" data-upload-box>
-      <strong>Upload files as AI context</strong>
-      <p>Text, Markdown, JSON, CSV, PDF, DOCX and images are supported. Images are compressed to WEBP.</p>
+      <strong>${escapeHtml(t('ai.context.picker.uploadTitle'))}</strong>
+      <p>${escapeHtml(t('ai.context.picker.uploadHint'))}</p>
 
       <button type="button" class="btn primary" data-upload-pick>
-        ${lucide('upload', 14)} Pick files
+        ${lucide('upload', 14)} ${escapeHtml(t('ai.context.picker.pickFiles'))}
       </button>
 
       <input
@@ -412,8 +416,8 @@ export async function openAiContextPicker({
         .map(({ note, path }) => ({
           kind: 'note',
           id: note.id,
-          title: note.title || 'Untitled',
-          subtitle: path || 'Home',
+          title: note.title || t('ai.context.picker.untitledNote'),
+          subtitle: path || t('ai.context.picker.home'),
           icon: note.icon || 'file-text',
         }));
     }
@@ -436,8 +440,8 @@ export async function openAiContextPicker({
         .map(({ folder, path }) => ({
           kind: 'folder',
           id: folder.id,
-          title: folder.name || 'Folder',
-          subtitle: path || 'Home',
+          title: folder.name || t('ai.context.picker.untitledFolder'),
+          subtitle: path || t('ai.context.picker.home'),
           icon: folder.icon || 'folder',
         }));
     }
@@ -455,7 +459,7 @@ export async function openAiContextPicker({
         .map((ev) => ({
           kind: 'event',
           id: ev.id,
-          title: ev.title || 'Untitled event',
+          title: ev.title || t('ai.context.picker.untitledEvent'),
           subtitle: [ev.start, ev.location].filter(Boolean).join(' · '),
           icon: ev.icon || 'calendar-days',
         }));
@@ -519,30 +523,30 @@ export async function openAiContextPicker({
   m.innerHTML = `
     <div class="modal-card yanta-ai-context-picker-card">
       <header class="modal-head">
-        <h3>Add to AI Context</h3>
-        <button type="button" class="icon-btn" data-ai-context-close>&times;</button>
+        <h3>${escapeHtml(t('ai.context.picker.title'))}</h3>
+        <button type="button" class="icon-btn" data-ai-context-close aria-label="${escapeHtml(t('ai.context.picker.close'))}">&times;</button>
       </header>
 
       <div class="modal-body yanta-ai-context-picker-body">
         <div
           class="yanta-ai-context-tabs"
           role="tablist"
-          aria-label="AI context source"
+          aria-label="${escapeHtml(t('ai.context.picker.tabsLabel'))}"
         >
           <button type="button" class="active" data-tab="notes" role="tab" aria-selected="true">
-            ${lucide('file-text', 14)} Notes
+            ${lucide('file-text', 14)} ${escapeHtml(t('ai.context.picker.tabs.notes'))}
           </button>
 
           <button type="button" data-tab="folders" role="tab" aria-selected="false">
-            ${lucide('folder', 14)} Folders
+            ${lucide('folder', 14)} ${escapeHtml(t('ai.context.picker.tabs.folders'))}
           </button>
 
           <button type="button" data-tab="events" role="tab" aria-selected="false">
-            ${lucide('calendar-days', 14)} Events
+            ${lucide('calendar-days', 14)} ${escapeHtml(t('ai.context.picker.tabs.events'))}
           </button>
 
           <button type="button" data-tab="upload" role="tab" aria-selected="false">
-            ${lucide('upload', 14)} Upload
+            ${lucide('upload', 14)} ${escapeHtml(t('ai.context.picker.tabs.upload'))}
           </button>
         </div>
 
@@ -595,7 +599,7 @@ export async function openAiContextPicker({
 
       await onPickRefs?.([ref]);
 
-      toast('Added AI context', 'success');
+      toast(t('ai.context.picker.added'), 'success');
       closeAiContextPicker();
     }
   }, {
@@ -629,10 +633,7 @@ export async function openAiContextPicker({
 
     await onPickFiles?.(files);
 
-    toast(
-      `Added ${files.length} upload${files.length === 1 ? '' : 's'} to AI context`,
-      'success'
-    );
+    toast(t('ai.context.picker.addedUploads', { count: files.length }), 'success');
 
     closeAiContextPicker();
   }, {

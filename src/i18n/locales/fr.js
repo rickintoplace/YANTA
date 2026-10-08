@@ -1,5 +1,10 @@
 // Français. Mirrors the key structure of en.js exactly (see i18n:check).
 
+import aiChat from './ai/chat.fr.js';
+import aiSettings from './ai/settings.fr.js';
+import aiWidgets from './ai/widgets.fr.js';
+import aiContext from './ai/context.fr.js';
+
 export default {
   shareTarget: {
     title: 'Partager vers YANTA',
@@ -1502,5 +1507,11 @@ export default {
       cancel: 'Annuler',
       continue: 'Continuer vers le paiement',
     },
+  },
+  ai: {
+    chat: aiChat,
+    settings: aiSettings,
+    widgets: aiWidgets,
+    context: aiContext,
   },
 };

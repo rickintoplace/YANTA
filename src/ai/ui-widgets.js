@@ -14,42 +14,22 @@
 // Widget state (inputs, ticks, added events) lives on the message, so a
 // re-render while another answer streams keeps what the user entered,
 // and "Save as note" saves what is on screen.
+//
+// @i18n-locked — user-facing text goes through t('ai.widgets.…')
+// (src/i18n/locales/ai/widgets.en.js). Data from the model (titles,
+// labels, values) is shown as it came.
 // ============================================================
 
 import { lucide, escapeHtml, toast, actionToast } from '../core.js';
-import { getLocale } from '../i18n/index.js';
+import { getLocale, t } from '../i18n/index.js';
 import { compileFormula } from './ui-expr.js';
 import { chartElement } from './ui-widget-charts.js';
 import { WIDGET_CSS } from './ui-widget-styles.js';
 
 export const WIDGET_LANG = 'yanta-ui';
 
-/** For the system prompt. Compact on purpose: it is sent with every turn (cached). */
-export const WIDGET_INSTRUCTIONS = [
-  '# Interactive answers',
-  '',
-  'Some answers work better as something the user can use than as text. Add ONE interactive widget — a fenced code block with the language yanta-ui containing JSON — when the answer is:',
-  '- a calculation with parameters the user could vary (savings, loans, budgets, prices, conversions, durations): always a calculator, with the given values as defaults;',
-  '- several options compared on the same attributes: a table; numbers over time or by category: a chart;',
-  '- a plan with dates: events; steps or items to tick off: a checklist.',
-  'Then write one or two sentences with the key result; do not repeat the widget\'s contents or show the working in text. Never use a widget for a simple factual or conversational answer.',
-  '',
-  'Types:',
-  '- calculator: {"type":"calculator","title":"…","inputs":[{"id":"price","label":"Price","type":"number|slider|select|toggle","value":100,"min":0,"max":1000,"step":10,"unit":"€","options":[{"label":"…","value":1}]}],"outputs":[{"id":"total","label":"Total","formula":"price * qty","format":"number|integer|currency|percent","currency":"EUR","decimals":2,"primary":true}],"chart":{"x":{"input":"years","from":1,"to":30},"y":["balance"]}}',
-  '  Formulas: + - * / % ^, comparisons, c ? a : b, min max round(x,d) floor ceil abs sqrt pow log exp clamp sum avg pmt(rate,n,pv). Outputs may use earlier outputs. Toggles are 1 or 0; percentages are plain numbers (7 means 7 %). "chart" (optional) plots outputs while one input runs from..to.',
-  '- chart: {"type":"chart","kind":"bar|line|donut","title":"…","labels":["Jan","Feb"],"series":[{"name":"Spend","values":[120,90]}],"format":"number|currency|percent","currency":"EUR"}',
-  '- table: {"type":"table","title":"…","columns":["Option","Price","Rating"],"rows":[["A","19","4.5"]],"best":{"column":2,"direction":"max"}}',
-  '- checklist: {"type":"checklist","title":"…","items":[{"text":"Passport","done":false}]}',
-  '- events: {"type":"events","title":"…","items":[{"title":"Flight","start":"2026-11-12T07:40","end":"2026-11-12T10:15","location":"FRA"}]} — local times; the user adds them with one click, so do not also call create_event.',
-  '- stats: {"type":"stats","title":"…","items":[{"label":"Notes","value":"128","delta":"+12 this week"}]}',
-  '- progress: {"type":"progress","title":"…","items":[{"label":"Budget used","value":620,"target":800,"format":"currency","currency":"EUR"}]}',
-  '- steps: {"type":"steps","title":"…","items":[{"title":"Book flights","text":"…","status":"done|current|todo"}]} — instructions or a plan in order; the user ticks steps off.',
-  '- proscons: {"type":"proscons","title":"…","pros":["…"],"cons":["…"],"verdict":"…"} — for a decision.',
-  '- choices: {"type":"choices","question":"…","options":[{"label":"…","description":"…","prompt":"what the user says when picking it"}]} — when you need the user to choose before you can continue.',
-  '- flashcards: {"type":"flashcards","title":"…","cards":[{"front":"question","back":"answer"}]} — for learning or revising.',
-  '- timer: {"type":"timer","title":"…","label":"Focus","minutes":25,"presets":[5,25,50]} — when the user wants a countdown.',
-  'The user can save any widget as a note.',
-].join('\n');
+// The model-facing prompt lives in its own module (it stays English).
+export { WIDGET_INSTRUCTIONS } from './ui-widget-prompt.js';
 
 const FENCE_RE = /```yanta-ui[^\n]*\n([\s\S]*?)(```|$)/g;
 const MARK = (i) => `⟦w${i}⟧`;
@@ -103,6 +83,9 @@ const str = (v, max = 200) => String(v ?? '').replace(/\s+/g, ' ').trim().slice(
 const num = (v, fallback = 0) => (Number.isFinite(Number(v)) ? Number(v) : fallback);
 const ident = (v) => (/^[A-Za-z_][A-Za-z0-9_]{0,40}$/.test(String(v || '')) ? String(v) : '');
 
+// Validation messages below are developer-facing: they end up in logs and
+// tests, never in the UI (the error fold-out shows the raw block instead).
+/* eslint-disable yanta/no-untranslated-literal */
 function normalizeSpec(raw) {
   if (!raw || typeof raw !== 'object') throw new Error('Widget is not an object');
 
@@ -159,7 +142,7 @@ function normalizeSpec(raw) {
   if (type === 'chart') {
     const labels = (Array.isArray(raw.labels) ? raw.labels : []).slice(0, LIMITS.points).map((l) => str(l, 40));
     const series = (Array.isArray(raw.series) ? raw.series : []).slice(0, LIMITS.series).map((s, n) => ({
-      name: str(s?.name || `Series ${n + 1}`, 40),
+      name: str(s?.name || t('ai.widgets.chart.seriesName', { n: n + 1 }), 40),
       values: (Array.isArray(s?.values) ? s.values : []).slice(0, labels.length).map((v) => num(v, NaN)),
     }));
     if (!labels.length || !series.length) throw new Error('A chart needs labels and series');
@@ -269,6 +252,7 @@ function normalizeSpec(raw) {
 
   throw new Error(`Unknown widget type "${type}"`);
 }
+/* eslint-enable yanta/no-untranslated-literal */
 
 // --------------------------------------------------------------- formatting
 
@@ -321,6 +305,7 @@ function button(cls, html, onClick, title = '') {
   return b;
 }
 
+// eslint-disable-next-line yanta/no-untranslated-literal -- media query
 const reducedMotion = () => typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /** Counts a number from its last shown value to the new one. */
@@ -345,7 +330,9 @@ function tweenNumber(node, to, format) {
   };
 
   node.dataset.raf = String(requestAnimationFrame(step));
+  // eslint-disable-next-line yanta/no-untranslated-literal -- CSS selector
   node.closest('.yw-output, .yw-stat')?.animate?.(
+    // eslint-disable-next-line yanta/no-untranslated-literal -- CSS values
     [{ boxShadow: '0 0 0 0 color-mix(in srgb, var(--accent) 35%, transparent)' }, { boxShadow: '0 0 0 6px transparent' }],
     { duration: 500, easing: 'ease-out' }
   );
@@ -405,6 +392,7 @@ function renderCalculator(spec, state, save) {
 
   // Output cards are built once and only their numbers change.
   const outNodes = spec.outputs.map((o) => {
+    // eslint-disable-next-line yanta/no-untranslated-literal -- CSS class
     const card = el('div', `yw-output${o.primary ? ' is-primary' : ''}`);
     card.append(el('span', 'yw-output-label', escapeHtml(o.label)));
     const value = el('strong', 'yw-output-value');
@@ -517,7 +505,7 @@ function renderCalculator(spec, state, save) {
   update();
 
   root.toMarkdown = () => [
-    ...spec.inputs.map((i) => `- ${i.label}: ${i.type === 'toggle' ? (values[i.id] ? 'yes' : 'no') : formatValue(values[i.id], { unit: i.unit })}`),
+    ...spec.inputs.map((i) => `- ${i.label}: ${i.type === 'toggle' ? (values[i.id] ? t('ai.widgets.calculator.yes') : t('ai.widgets.calculator.no')) : formatValue(values[i.id], { unit: i.unit })}`),
     '',
     ...computeOutputs(spec, values).map((r) => `- **${r.label}: ${formatValue(r.v, r)}**`),
   ].join('\n');
@@ -597,7 +585,7 @@ function renderTable(spec, state, save) {
       spec.columns.forEach((_, ci) => {
         const v = spec.rows[ri][ci] ?? '';
         const td = el('td', numeric(v) != null && ci > 0 ? 'is-num' : '', escapeHtml(v));
-        if (ri === bestRow && ci === 0) td.insertAdjacentHTML('beforeend', ` <span class="yw-badge">${lucide('trophy', 11)} best</span>`);
+        if (ri === bestRow && ci === 0) td.insertAdjacentHTML('beforeend', ` <span class="yw-badge">${lucide('trophy', 11)} ${escapeHtml(t('ai.widgets.table.best'))}</span>`);
         tr.append(td);
       });
       tbody.append(tr);
@@ -645,6 +633,7 @@ function renderChecklist(spec, state, save) {
 
   const list = el('div', 'yw-checks');
   spec.items.forEach((item, i) => {
+    // eslint-disable-next-line yanta/no-untranslated-literal -- CSS class
     const row = el('label', `yw-check${done[i] ? ' is-done' : ''}`);
     const box = document.createElement('input');
     box.type = 'checkbox';
@@ -674,8 +663,8 @@ function formatEventTime(e) {
   const start = new Date(e.start);
   try {
     if (e.allDay) return new Intl.DateTimeFormat(loc, { weekday: 'short', day: 'numeric', month: 'short' }).format(start);
-    const t = (d) => new Intl.DateTimeFormat(loc, { hour: '2-digit', minute: '2-digit' }).format(d);
-    return `${t(start)}${e.end && !Number.isNaN(Date.parse(e.end)) ? ` – ${t(new Date(e.end))}` : ''}`;
+    const time = (d) => new Intl.DateTimeFormat(loc, { hour: '2-digit', minute: '2-digit' }).format(d);
+    return `${time(start)}${e.end && !Number.isNaN(Date.parse(e.end)) ? ` – ${time(new Date(e.end))}` : ''}`;
   } catch {
     return e.start;
   }
@@ -688,7 +677,7 @@ function renderEvents(spec, state, save) {
   const loc = intlLocale();
 
   const markAdded = (i) => {
-    const done = el('span', 'yw-added', `${lucide('check', 13)} Added`);
+    const done = el('span', 'yw-added', `${lucide('check', 13)} ${escapeHtml(t('ai.widgets.events.added'))}`);
     buttons[i].replaceWith(done);
     buttons[i] = done;
   };
@@ -704,7 +693,7 @@ function renderEvents(spec, state, save) {
       save();
       markAdded(i);
     } catch (err) {
-      toast(`Could not add the event: ${err?.message || err}`, 'error');
+      toast(t('ai.widgets.events.addFailed', { error: String(err?.message || err) }), 'error');
     }
   };
 
@@ -721,9 +710,10 @@ function renderEvents(spec, state, save) {
 
     const main = el('div', 'yw-event-main');
     main.append(el('strong', '', escapeHtml(e.title)));
-    main.append(el('small', '', escapeHtml([e.allDay ? 'All day' : formatEventTime(e), e.location].filter(Boolean).join(' · '))));
+    main.append(el('small', '', escapeHtml([e.allDay ? t('ai.widgets.events.allDay') : formatEventTime(e), e.location].filter(Boolean).join(' · '))));
 
-    buttons[i] = button('yw-btn yw-btn-soft', `${lucide('calendar-plus', 13)}<span>Add</span>`, () => add(i), 'Add to calendar');
+    // eslint-disable-next-line yanta/no-untranslated-literal -- CSS classes
+    buttons[i] = button('yw-btn yw-btn-soft', `${lucide('calendar-plus', 13)}<span>${escapeHtml(t('ai.widgets.events.add'))}</span>`, () => add(i), t('ai.widgets.events.addToCalendar'));
 
     row.append(date, main, buttons[i]);
     root.append(row);
@@ -732,11 +722,11 @@ function renderEvents(spec, state, save) {
 
   root.extraActions = spec.items.length > 1
     ? [{
-        label: 'Add all',
+        label: t('ai.widgets.events.addAll'),
         icon: 'calendar-plus',
         run: async () => {
           for (let i = 0; i < spec.items.length; i++) await add(i);
-          toast('Events added to your calendar', 'success');
+          toast(t('ai.widgets.events.allAdded'), 'success');
         },
       }]
     : [];
@@ -757,6 +747,7 @@ function renderStats(spec) {
     if (s.delta) {
       const up = /^\+/.test(s.delta);
       const down = /^[-−]/.test(s.delta);
+      // eslint-disable-next-line yanta/no-untranslated-literal -- CSS classes
       card.append(el('small', `yw-stat-delta${up ? ' is-up' : down ? ' is-down' : ''}`, `${up ? lucide('trending-up', 12) : down ? lucide('trending-down', 12) : ''}${escapeHtml(s.delta)}`));
     }
     root.append(card);
@@ -776,6 +767,7 @@ function renderProgress(spec) {
   const root = el('div', 'yw-progress-list');
   for (const item of spec.items) {
     const pct = (item.value / item.target) * 100;
+    // eslint-disable-next-line yanta/no-untranslated-literal -- CSS class
     const row = el('div', `yw-progress-item${pct >= 100 ? ' is-full' : ''}`);
     const top = el('div', 'yw-progress-top');
     top.append(el('span', '', escapeHtml(item.label)));
@@ -808,7 +800,7 @@ function renderSteps(spec, state, save) {
       state.status = [...status];
       save();
       paint();
-    }, 'Mark as done');
+    }, t('ai.widgets.steps.markDone'));
     const body = el('div', 'yw-step-body');
     body.append(el('strong', '', escapeHtml(item.title)));
     if (item.text) body.append(el('p', '', escapeHtml(item.text)));
@@ -825,17 +817,22 @@ function renderProsCons(spec) {
   const root = el('div', 'yw-proscons');
   const col = (title, items, cls, icon) => {
     const c = el('div', `yw-pc ${cls}`);
-    c.append(el('div', 'yw-pc-head', `${lucide(icon, 14)}<span>${title}</span><em>${items.length}</em>`));
+    c.append(el('div', 'yw-pc-head', `${lucide(icon, 14)}<span>${escapeHtml(title)}</span><em>${items.length}</em>`));
     const ul = el('ul');
-    for (const t of items) ul.append(el('li', '', escapeHtml(t)));
+    for (const item of items) ul.append(el('li', '', escapeHtml(item)));
     c.append(ul);
     return c;
   };
-  root.append(col('Pros', spec.pros, 'is-pro', 'thumbs-up'), col('Cons', spec.cons, 'is-con', 'thumbs-down'));
+  root.append(
+    col(t('ai.widgets.proscons.pros'), spec.pros, 'is-pro', 'thumbs-up'),
+    col(t('ai.widgets.proscons.cons'), spec.cons, 'is-con', 'thumbs-down'),
+  );
   if (spec.verdict) root.append(el('div', 'yw-verdict', `${lucide('scale', 14)}<span>${escapeHtml(spec.verdict)}</span>`));
   root.toMarkdown = () => [
-    '**Pros**', ...spec.pros.map((p) => `- ${p}`), '', '**Cons**', ...spec.cons.map((c) => `- ${c}`),
-    ...(spec.verdict ? ['', `**Verdict:** ${spec.verdict}`] : []),
+    `**${t('ai.widgets.proscons.pros')}**`, ...spec.pros.map((p) => `- ${p}`),
+    '',
+    `**${t('ai.widgets.proscons.cons')}**`, ...spec.cons.map((c) => `- ${c}`),
+    ...(spec.verdict ? ['', t('ai.widgets.proscons.verdictMarkdown', { verdict: spec.verdict })] : []),
   ].join('\n');
   return root;
 }
@@ -846,6 +843,7 @@ function renderChoices(spec, state, save, ctx) {
   const grid = el('div', 'yw-choice-grid');
 
   spec.options.forEach((o, i) => {
+    // eslint-disable-next-line yanta/no-untranslated-literal -- CSS class
     const b = button(`yw-choice${state.picked === i ? ' is-picked' : ''}`, `<strong>${escapeHtml(o.label)}</strong>${o.description ? `<small>${escapeHtml(o.description)}</small>` : ''}<span class="yw-choice-go">${lucide('arrow-right', 14)}</span>`, () => {
       if (state.picked != null || !ctx.ask) return;
       state.picked = i;
@@ -871,8 +869,10 @@ function renderFlashcards(spec, state, save) {
   const card = button('yw-card', '', () => {
     flipped = !flipped;
     card.classList.toggle('is-flipped', flipped);
-  }, 'Flip card');
+  }, t('ai.widgets.flashcards.flip'));
+  // eslint-disable-next-line yanta/no-untranslated-literal -- CSS classes
   const front = el('div', 'yw-card-face yw-card-front');
+  // eslint-disable-next-line yanta/no-untranslated-literal -- CSS classes
   const back = el('div', 'yw-card-face yw-card-back');
   const inner = el('div', 'yw-card-inner');
   inner.append(front, back);
@@ -886,8 +886,8 @@ function renderFlashcards(spec, state, save) {
     const c = spec.cards[order[pos]];
     flipped = false;
     card.classList.remove('is-flipped');
-    front.innerHTML = `<small>Question</small><p>${escapeHtml(c.front)}</p><em>${lucide('rotate-3d', 12)} Tap to flip</em>`;
-    back.innerHTML = `<small>Answer</small><p>${escapeHtml(c.back)}</p>`;
+    front.innerHTML = `<small>${escapeHtml(t('ai.widgets.flashcards.question'))}</small><p>${escapeHtml(c.front)}</p><em>${lucide('rotate-3d', 12)} ${escapeHtml(t('ai.widgets.flashcards.tapToFlip'))}</em>`;
+    back.innerHTML = `<small>${escapeHtml(t('ai.widgets.flashcards.answer'))}</small><p>${escapeHtml(c.back)}</p>`;
     counter.textContent = `${pos + 1} / ${spec.cards.length}`;
     bar.set(((pos + 1) / spec.cards.length) * 100);
     state.pos = pos;
@@ -896,20 +896,20 @@ function renderFlashcards(spec, state, save) {
   };
 
   nav.append(
-    button('yw-icon-btn', lucide('chevron-left', 16), () => { pos = (pos - 1 + spec.cards.length) % spec.cards.length; show(); }, 'Previous'),
+    button('yw-icon-btn', lucide('chevron-left', 16), () => { pos = (pos - 1 + spec.cards.length) % spec.cards.length; show(); }, t('ai.widgets.flashcards.previous')),
     counter,
-    button('yw-icon-btn', lucide('chevron-right', 16), () => { pos = (pos + 1) % spec.cards.length; show(); }, 'Next'),
+    button('yw-icon-btn', lucide('chevron-right', 16), () => { pos = (pos + 1) % spec.cards.length; show(); }, t('ai.widgets.flashcards.next')),
     button('yw-icon-btn', lucide('shuffle', 15), () => {
       order = [...order].sort(() => Math.random() - 0.5);
       pos = 0;
       show();
-    }, 'Shuffle'),
+    }, t('ai.widgets.flashcards.shuffle')),
   );
 
   root.append(card, bar, nav);
   show();
 
-  root.toMarkdown = () => spec.cards.map((c) => `**Q:** ${c.front}\n**A:** ${c.back}`).join('\n\n');
+  root.toMarkdown = () => spec.cards.map((c) => t('ai.widgets.flashcards.cardMarkdown', { front: c.front, back: c.back })).join('\n\n');
   return root;
 }
 
@@ -920,16 +920,16 @@ const runningTimers = new WeakMap();
 function chime() {
   try {
     const ctx = new (window.AudioContext || window.webkitAudioContext)();
-    [0, 0.18, 0.36].forEach((t, i) => {
+    [0, 0.18, 0.36].forEach((at, i) => {
       const o = ctx.createOscillator();
       const g = ctx.createGain();
       o.frequency.value = [880, 1046, 1318][i];
-      g.gain.setValueAtTime(0.0001, ctx.currentTime + t);
-      g.gain.exponentialRampToValueAtTime(0.2, ctx.currentTime + t + 0.02);
-      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + t + 0.3);
+      g.gain.setValueAtTime(0.0001, ctx.currentTime + at);
+      g.gain.exponentialRampToValueAtTime(0.2, ctx.currentTime + at + 0.02);
+      g.gain.exponentialRampToValueAtTime(0.0001, ctx.currentTime + at + 0.3);
       o.connect(g).connect(ctx.destination);
-      o.start(ctx.currentTime + t);
-      o.stop(ctx.currentTime + t + 0.32);
+      o.start(ctx.currentTime + at);
+      o.stop(ctx.currentTime + at + 0.32);
     });
   } catch {}
 }
@@ -947,14 +947,15 @@ function renderTimer(spec, state, save) {
   const text = ring.querySelector('strong');
 
   const controls = el('div', 'yw-timer-controls');
+  // eslint-disable-next-line yanta/no-untranslated-literal -- CSS classes
   const play = button('yw-btn yw-btn-primary', '', () => toggle());
-  const reset = button('yw-icon-btn', lucide('rotate-ccw', 15), () => { stop(); state.left = total; state.endsAt = null; save(); paint(); }, 'Reset');
+  const reset = button('yw-icon-btn', lucide('rotate-ccw', 15), () => { stop(); state.left = total; state.endsAt = null; save(); paint(); }, t('ai.widgets.timer.reset'));
   controls.append(play, reset);
 
   if (spec.presets.length) {
     const presets = el('div', 'yw-timer-presets');
     for (const p of spec.presets) {
-      presets.append(button('yw-chip', `${Math.round(p / 60)} min`, () => {
+      presets.append(button('yw-chip', escapeHtml(t('ai.widgets.timer.minutes', { count: Math.round(p / 60) })), () => {
         stop();
         total = p;
         state.total = p;
@@ -976,10 +977,13 @@ function renderTimer(spec, state, save) {
     text.textContent = `${m >= 60 ? `${Math.floor(m / 60)}:${String(m % 60).padStart(2, '0')}` : m}:${String(s).padStart(2, '0')}`;
     arc.setAttribute('stroke-dashoffset', String(C * (1 - l / total)));
     const running = !!state.endsAt;
-    play.innerHTML = `${lucide(running ? 'pause' : 'play', 14)}<span>${running ? 'Pause' : l < total ? 'Resume' : 'Start'}</span>`;
+    const playLabel = t(running ? 'ai.widgets.timer.pause' : l < total ? 'ai.widgets.timer.resume' : 'ai.widgets.timer.start');
+    play.innerHTML = `${lucide(running ? 'pause' : 'play', 14)}<span>${escapeHtml(playLabel)}</span>`;
     root.classList.toggle('is-running', running);
     root.classList.toggle('is-finished', l <= 0);
   };
+
+  const name = spec.label || spec.title || t('ai.widgets.titles.timer');
 
   const tick = () => {
     if (!root.isConnected && !state.endsAt) return;
@@ -992,10 +996,10 @@ function renderTimer(spec, state, save) {
       chime();
       try {
         if (typeof Notification !== 'undefined' && Notification.permission === 'granted') {
-          new Notification(spec.label || spec.title || 'Timer', { body: 'Time is up.' });
+          new Notification(name, { body: t('ai.widgets.timer.notificationBody') });
         }
       } catch {}
-      toast(`${spec.label || spec.title || 'Timer'}: time is up`, 'success');
+      toast(t('ai.widgets.timer.timeUp', { label: name }), 'success');
       return;
     }
     if (state.endsAt) runningTimers.set(state, requestAnimationFrame(tick));
@@ -1027,7 +1031,7 @@ function renderTimer(spec, state, save) {
   paint();
   if (state.endsAt) runningTimers.set(state, requestAnimationFrame(tick));
 
-  root.toMarkdown = () => `- Timer: ${Math.round(total / 60)} min${spec.label ? ` (${spec.label})` : ''}`;
+  root.toMarkdown = () => `- ${t('ai.widgets.timer.noteLine', { duration: t('ai.widgets.timer.minutes', { count: Math.round(total / 60) }) })}${spec.label ? ` (${spec.label})` : ''}`;
   return root;
 }
 
@@ -1044,21 +1048,6 @@ const RENDERERS = {
   choices: renderChoices,
   flashcards: renderFlashcards,
   timer: renderTimer,
-};
-
-const DEFAULT_TITLES = {
-  calculator: 'Calculator',
-  chart: 'Chart',
-  table: 'Comparison',
-  checklist: 'Checklist',
-  events: 'Schedule',
-  stats: 'At a glance',
-  progress: 'Progress',
-  steps: 'Steps',
-  proscons: 'Pros and cons',
-  choices: 'Pick one',
-  flashcards: 'Flashcards',
-  timer: 'Timer',
 };
 
 const ICONS = {
@@ -1084,14 +1073,16 @@ export function renderWidget(block, { state = {}, save = () => {}, ask = null } 
   injectWidgetStyles();
 
   if (block.pending) {
+    // eslint-disable-next-line yanta/no-untranslated-literal -- CSS classes
     const node = el('div', 'yw yw--pending');
     node.innerHTML = `<div class="yw-head"><span class="yw-icon">${lucide('sparkles', 14)}</span><span class="yw-skel" style="width:40%"></span></div><span class="yw-skel"></span><span class="yw-skel" style="width:75%"></span>`;
     return node;
   }
 
   if (block.error || !block.spec) {
+    // eslint-disable-next-line yanta/no-untranslated-literal -- CSS classes
     const node = el('details', 'yw yw--error');
-    node.innerHTML = `<summary>${lucide('triangle-alert', 13)} This interactive view could not be shown</summary><pre>${escapeHtml(String(block.raw || block.error || '').slice(0, 2000))}</pre>`;
+    node.innerHTML = `<summary>${lucide('triangle-alert', 13)} ${escapeHtml(t('ai.widgets.error.notShown'))}</summary><pre>${escapeHtml(String(block.raw || block.error || '').slice(0, 2000))}</pre>`;
     return node;
   }
 
@@ -1101,7 +1092,7 @@ export function renderWidget(block, { state = {}, save = () => {}, ask = null } 
   const head = el('header', 'yw-head');
   head.append(el('span', 'yw-icon', lucide(ICONS[spec.type] || 'sparkles', 15)));
   const titles = el('div', 'yw-titles');
-  titles.append(el('strong', 'yw-title', escapeHtml(spec.title || DEFAULT_TITLES[spec.type] || spec.type)));
+  titles.append(el('strong', 'yw-title', escapeHtml(spec.title || (RENDERERS[spec.type] ? t(`ai.widgets.titles.${spec.type}`) : spec.type))));
   if (spec.note) titles.append(el('span', 'yw-sub', escapeHtml(spec.note)));
   head.append(titles);
   card.append(head);
@@ -1110,8 +1101,9 @@ export function renderWidget(block, { state = {}, save = () => {}, ask = null } 
   try {
     body = RENDERERS[spec.type](spec, state, save, { ask });
   } catch (err) {
+    // eslint-disable-next-line yanta/no-untranslated-literal -- console log
     console.warn('[YANTA AI] widget failed', err);
-    card.append(el('p', 'yw-sub', 'This view could not be built.'));
+    card.append(el('p', 'yw-sub', escapeHtml(t('ai.widgets.error.notBuilt'))));
     return card;
   }
 
@@ -1125,24 +1117,24 @@ export function renderWidget(block, { state = {}, save = () => {}, ask = null } 
   }
 
   if (!body.noSave) {
-    actions.append(button('yw-btn', `${lucide('file-plus', 13)}<span>Save as note</span>`, async () => {
+    actions.append(button('yw-btn', `${lucide('file-plus', 13)}<span>${escapeHtml(t('ai.widgets.actions.saveAsNote'))}</span>`, async () => {
       try {
         const { createNoteAction } = await import('./app-actions.js');
         const note = await createNoteAction({
-          title: spec.title || 'From YANTA AI',
+          title: spec.title || t('ai.widgets.actions.noteTitleFallback'),
           body: body.toMarkdown ? body.toMarkdown() : '',
         });
-        actionToast(`Saved “${spec.title || 'note'}”`, {
-          actionLabel: 'Open',
+        actionToast(spec.title ? t('ai.widgets.toast.saved', { title: spec.title }) : t('ai.widgets.toast.savedUntitled'), {
+          actionLabel: t('ai.widgets.toast.open'),
           onAction: async () => {
             const { openNote } = await import('../notes.js');
             openNote(note.id);
           },
         });
       } catch (err) {
-        toast(`Could not save: ${err?.message || err}`, 'error');
+        toast(t('ai.widgets.toast.saveFailed', { error: String(err?.message || err) }), 'error');
       }
-    }, 'Save as note'));
+    }, t('ai.widgets.actions.saveAsNote')));
   }
 
   if (actions.children.length) head.append(actions);
@@ -1167,6 +1159,7 @@ export function mountWidgets(root, widgets, { stateFor, save, ask = null }) {
     const i = Number(MARK_RE.exec(textNode.nodeValue)[1]);
     const widget = renderWidget(widgets[i] || { error: 'missing' }, { state: stateFor(i), save, ask });
     // Replace the whole paragraph the marker sits in.
+    // eslint-disable-next-line yanta/no-untranslated-literal -- CSS selector
     const block = textNode.parentElement?.closest('p, div') || textNode.parentElement;
     if (block && block !== root && block.textContent.trim() === textNode.nodeValue.trim()) block.replaceWith(widget);
     else textNode.replaceWith(widget);

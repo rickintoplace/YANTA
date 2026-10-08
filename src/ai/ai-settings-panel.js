@@ -5,6 +5,8 @@
 // - Main YANTA settings → AI category
 // ============================================================
 
+// @i18n-locked
+
 import {
   escapeHtml,
   lucide,
@@ -51,6 +53,8 @@ import {
   normalizeIncludedAiModel,
 } from './ai-access-policy.js';
 
+import { t } from '../i18n/index.js';
+
 let locationSearchResults = [];
 let locationSearchBusy = false;
 let locationSearchError = '';
@@ -68,7 +72,7 @@ function checkboxValue(panel, key) {
 }
 
 function permissionCheckboxHtml(key, label, badge, checked) {
-  const recommended = /recommended/i.test(badge) && !/not/i.test(badge);
+  const recommended = badge === t('ai.settings.badges.recommended');
 
   return `
     <label class="yanta-ai-permission">
@@ -82,7 +86,7 @@ function permissionCheckboxHtml(key, label, badge, checked) {
 }
 
 function externalAgentPermissionHtml(key, label, badge, checked) {
-  const recommended = /recommended/i.test(badge) && !/not/i.test(badge);
+  const recommended = badge === t('ai.settings.badges.recommended');
 
   return `
     <label class="yanta-ai-permission compact">
@@ -102,7 +106,7 @@ function approxLocationSettingsHtml() {
     ? `
       <div class="yanta-ai-location-state">
         <span class="yanta-ai-spinner small"></span>
-        Searching locations…
+        ${escapeHtml(t('ai.settings.location.searching'))}
       </div>
     `
     : locationSearchError
@@ -120,7 +124,7 @@ function approxLocationSettingsHtml() {
                 class="yanta-ai-location-result"
                 data-ai-location-pick="${i}">
                 <span class="yanta-ai-location-result-main">
-                  <strong>${escapeHtml(r.label || 'Location')}</strong>
+                  <strong>${escapeHtml(r.label || t('ai.settings.location.resultFallback'))}</strong>
                   <small>
                     ${escapeHtml(String(r.latitude))}, ${escapeHtml(String(r.longitude))}
                     ${r.countryCode ? ` · ${escapeHtml(r.countryCode)}` : ''}
@@ -136,34 +140,33 @@ function approxLocationSettingsHtml() {
 
   return `
     <section class="yanta-ai-settings-section">
-      <h4>Approximate location</h4>
+      <h4>${escapeHtml(t('ai.settings.location.heading'))}</h4>
 
       <div class="yanta-ai-warning">
-        Used for weather questions like “weather here”.
-        Enter a city, region or postcode instead.
+        ${escapeHtml(t('ai.settings.location.intro'))}
         ${loc
-          ? `<br><br>Stored:
+          ? `<br><br>${escapeHtml(t('ai.settings.location.stored'))}
              ${loc.label ? `${escapeHtml(loc.label)} · ` : ''}
              ${escapeHtml(String(loc.latitude))}, ${escapeHtml(String(loc.longitude))}
              ${loc.timezone ? ` · ${escapeHtml(loc.timezone)}` : ''}
              ${loc.updatedAt ? ` · ${escapeHtml(loc.updatedAt)}` : ''}`
-          : '<br><br>No approximate location stored.'}
+          : `<br><br>${escapeHtml(t('ai.settings.location.none'))}`}
       </div>
 
       <div class="yanta-ai-location-grid">
         <label class="wide">
-          City, region or postcode
+          ${escapeHtml(t('ai.settings.location.placeLabel'))}
           <input
             class="text-input"
             data-ai-location-place
             value=""
-            placeholder="e.g. Göttingen, 37073, 10001, SW1A 1AA"
+            placeholder="${escapeHtml(t('ai.settings.location.placePlaceholder'))}"
             autocomplete="postal-code"
             spellcheck="false" />
         </label>
 
         <label>
-          Country code optional
+          ${escapeHtml(t('ai.settings.location.countryLabel'))}
           <input
             class="text-input"
             data-ai-location-country
@@ -176,17 +179,17 @@ function approxLocationSettingsHtml() {
       <div class="compress-actions">
         <button class="btn primary" data-ai-location-search>
           ${lucide('search', 14)}
-          Find matches
+          ${escapeHtml(t('ai.settings.location.find'))}
         </button>
 
         <button style="display:none;" class="btn primary" data-ai-location-save-best>
           ${lucide('map-pin', 14)}
-          Save best match
+          ${escapeHtml(t('ai.settings.location.saveBest'))}
         </button>
 
         <button class="btn" data-ai-location-clear>
           ${lucide('trash', 14)}
-          Clear location
+          ${escapeHtml(t('ai.settings.location.clear'))}
         </button>
       </div>
 
@@ -204,13 +207,13 @@ function externalAgentSettingsHtml() {
 
   return `
     <section class="yanta-ai-settings-section yanta-ai-external-agent">
-      <h4>External Agents</h4>
+      <h4>${escapeHtml(t('ai.settings.externalAgents.heading'))}</h4>
 
       <label class="yanta-ai-permission">
         <input type="checkbox" data-agent-enabled ${enabled ? 'checked' : ''} />
         <span>
-          <strong>Allow external AI agents to connect</strong>
-          <small class="${enabled ? 'good' : 'warn'}">${enabled ? 'Enabled' : 'Disabled'}</small>
+          <strong>${escapeHtml(t('ai.settings.externalAgents.allow'))}</strong>
+          <small class="${enabled ? 'good' : 'warn'}">${escapeHtml(enabled ? t('ai.settings.externalAgents.enabled') : t('ai.settings.externalAgents.disabled'))}</small>
         </span>
       </label>
 
@@ -219,43 +222,42 @@ function externalAgentSettingsHtml() {
           ? `
             <div class="yanta-ai-settings-grid">
               <label class="wide">
-                Local bridge URL
+                ${escapeHtml(t('ai.settings.externalAgents.bridgeUrl'))}
                 <input class="text-input" data-agent-url value="${escapeHtml(s.bridgeUrl)}" />
               </label>
 
               <label class="wide">
-                Session token
+                ${escapeHtml(t('ai.settings.externalAgents.token'))}
                 <input class="text-input" data-agent-token value="${escapeHtml(s.token)}" readonly />
               </label>
             </div>
 
             <div class="yanta-ai-agent-status ${status.connected ? 'connected' : ''}">
-              ${status.connected ? 'Connected to local bridge' : 'Not connected'}
+              ${escapeHtml(status.connected ? t('ai.settings.externalAgents.connected') : t('ai.settings.externalAgents.notConnected'))}
               ${status.lastError ? ` · ${escapeHtml(status.lastError)}` : ''}
             </div>
 
             <div class="yanta-ai-settings-section-sub">
-              ${externalAgentPermissionHtml('allowReadNotes', 'Allow external agents to read notes', 'Recommended', p.allowReadNotes)}
-              ${externalAgentPermissionHtml('allowCreateNotes', 'Allow external agents to create notes', 'Recommended', p.allowCreateNotes)}
-              ${externalAgentPermissionHtml('allowEditNotes', 'Allow external agents to edit notes', 'Recommended', p.allowEditNotes)}
-              ${externalAgentPermissionHtml('allowDeleteNotes', 'Allow external agents to delete notes', 'Recommended', p.allowDeleteNotes)}
-              ${externalAgentPermissionHtml('allowManageCalendar', 'Allow external agents to manage calendar events', 'Recommended', p.allowManageCalendar)}
+              ${externalAgentPermissionHtml('allowReadNotes', t('ai.settings.externalAgents.permissions.readNotes'), t('ai.settings.badges.recommended'), p.allowReadNotes)}
+              ${externalAgentPermissionHtml('allowCreateNotes', t('ai.settings.externalAgents.permissions.createNotes'), t('ai.settings.badges.recommended'), p.allowCreateNotes)}
+              ${externalAgentPermissionHtml('allowEditNotes', t('ai.settings.externalAgents.permissions.editNotes'), t('ai.settings.badges.recommended'), p.allowEditNotes)}
+              ${externalAgentPermissionHtml('allowDeleteNotes', t('ai.settings.externalAgents.permissions.deleteNotes'), t('ai.settings.badges.recommended'), p.allowDeleteNotes)}
+              ${externalAgentPermissionHtml('allowManageCalendar', t('ai.settings.externalAgents.permissions.manageCalendar'), t('ai.settings.badges.recommended'), p.allowManageCalendar)}
             </div>
 
             <textarea class="text-input yanta-ai-agent-readme" data-agent-readme rows="8" readonly>${escapeHtml(buildAgentReadmeText())}</textarea>
 
             <div class="compress-actions">
-              <button class="btn" data-agent-copy-readme>${lucide('copy', 14)} Copy setup text</button>
-              <button class="btn" data-agent-regenerate-token>${lucide('rotate-ccw', 14)} Regenerate token</button>
+              <button class="btn" data-agent-copy-readme>${lucide('copy', 14)} ${escapeHtml(t('ai.settings.externalAgents.copySetup'))}</button>
+              <button class="btn" data-agent-regenerate-token>${lucide('rotate-ccw', 14)} ${escapeHtml(t('ai.settings.externalAgents.regenerateToken'))}</button>
               <span class="grow"></span>
-              <button class="btn" data-agent-disconnect>Disconnect</button>
-              <button class="btn primary" data-agent-connect>Connect</button>
+              <button class="btn" data-agent-disconnect>${escapeHtml(t('ai.settings.externalAgents.disconnect'))}</button>
+              <button class="btn primary" data-agent-connect>${escapeHtml(t('ai.settings.externalAgents.connect'))}</button>
             </div>
           `
           : `
             <div class="yanta-ai-warning">
-              External agent bridge settings are hidden while external agent access is disabled.
-              Enable this option to show bridge URL, token, permissions and setup text.
+              ${escapeHtml(t('ai.settings.externalAgents.hidden'))}
             </div>
           `
       }
@@ -314,15 +316,15 @@ function wireExternalAgentSettingsPanel(panel, rerender) {
   panel.querySelector('[data-agent-copy-readme]')?.addEventListener('click', async () => {
     try {
       await navigator.clipboard.writeText(buildAgentReadmeText());
-      toast('External agent setup text copied', 'success');
+      toast(t('ai.settings.externalAgents.setupCopied'), 'success');
     } catch {
-      toast('Copy failed', 'error');
+      toast(t('ai.settings.copyFailed'), 'error');
     }
   });
 
   panel.querySelector('[data-agent-regenerate-token]')?.addEventListener('click', () => {
     regenerateExternalAgentToken();
-    toast('External agent token regenerated', 'success');
+    toast(t('ai.settings.externalAgents.tokenRegenerated'), 'success');
     rerender();
   });
 
@@ -331,9 +333,9 @@ function wireExternalAgentSettingsPanel(panel, rerender) {
 
     try {
       await connectAgentBridge();
-      toast('External agent bridge connected', 'success');
+      toast(t('ai.settings.externalAgents.bridgeConnected'), 'success');
     } catch (err) {
-      toast(err?.message || 'Could not connect bridge', 'error');
+      toast(err?.message || t('ai.settings.externalAgents.connectFailed'), 'error');
     }
 
     rerender();
@@ -341,7 +343,7 @@ function wireExternalAgentSettingsPanel(panel, rerender) {
 
   panel.querySelector('[data-agent-disconnect]')?.addEventListener('click', () => {
     disconnectAgentBridge();
-    toast('External agent disconnected', 'success');
+    toast(t('ai.settings.externalAgents.disconnected'), 'success');
     rerender();
   });
 }
@@ -354,7 +356,7 @@ async function runLocationSearch(panel, rerender, { saveFirst = false } = {}) {
   const countryCode = countryInput?.value?.trim().toUpperCase() || '';
 
   if (!query) {
-    toast('Enter a city, region or postcode', 'error');
+    toast(t('ai.settings.location.enterQuery'), 'error');
     return;
   }
 
@@ -375,11 +377,13 @@ async function runLocationSearch(panel, rerender, { saveFirst = false } = {}) {
     if (saveFirst && results[0]) {
       setApproxUserLocationFromCandidate(results[0]);
       locationSearchResults = [];
-      toast('Approximate location saved', 'success');
+      toast(t('ai.settings.location.saved'), 'success');
     }
   } catch (err) {
+    // Developer log, not UI.
+    // eslint-disable-next-line yanta/no-untranslated-literal
     console.warn('[YANTA AI] location search failed', err);
-    locationSearchError = err?.message || 'Could not find location';
+    locationSearchError = err?.message || t('ai.settings.location.notFound');
     locationSearchResults = [];
   } finally {
     locationSearchBusy = false;
@@ -399,15 +403,15 @@ function includedAiModelOptionsHtml(selectedModel) {
 
 function citationCheckSelectHtml(settings) {
   const value = String(settings.citationCheck || 'check');
-  const option = (v, label) => `<option value="${v}" ${value === v ? 'selected' : ''}>${label}</option>`;
+  const option = (v, label) => `<option value="${v}" ${value === v ? 'selected' : ''}>${escapeHtml(label)}</option>`;
 
   return `
     <label class="wide">
-      Check citations
+      ${escapeHtml(t('ai.settings.citations.label'))}
       <select class="text-input" data-ai-citation-check>
-        ${option('check', 'Check · every quote from a web page, article or note is verified against it')}
-        ${option('revise', 'Check and fix · failed citations go back to the model once')}
-        ${option('off', 'Off · no citation rules, no checking')}
+        ${option('check', t('ai.settings.citations.check'))}
+        ${option('revise', t('ai.settings.citations.revise'))}
+        ${option('off', t('ai.settings.citations.off'))}
       </select>
     </label>
   `;
@@ -415,15 +419,15 @@ function citationCheckSelectHtml(settings) {
 
 function thinkingSelectHtml(settings) {
   const value = String(settings.reasoningEffort || 'off');
-  const option = (v, label) => `<option value="${v}" ${value === v ? 'selected' : ''}>${label}</option>`;
+  const option = (v, label) => `<option value="${v}" ${value === v ? 'selected' : ''}>${escapeHtml(label)}</option>`;
 
   return `
     <label class="wide">
-      Thinking
+      ${escapeHtml(t('ai.settings.thinking.label'))}
       <select class="text-input" data-ai-reasoning>
-        ${option('off', 'Off · fastest, most of the budget goes to the answer')}
-        ${option('low', 'Low · a short plan before acting')}
-        ${option('medium', 'Medium · for harder tasks, slower and costlier')}
+        ${option('off', t('ai.settings.thinking.off'))}
+        ${option('low', t('ai.settings.thinking.low'))}
+        ${option('medium', t('ai.settings.thinking.medium'))}
       </select>
     </label>
   `;
@@ -436,15 +440,15 @@ function aiAccessSettingsHtml(settings, apiKey) {
     return `
       <div class="yanta-ai-settings-grid">
         <label class="wide">
-          AI access
+          ${escapeHtml(t('ai.settings.access.label'))}
           <select class="text-input" data-ai-billing-mode>
-            <option value="included" selected>Included AI: YANTA Cloud credits</option>
-            <option value="byok">BYOK: my OpenRouter key</option>
+            <option value="included" selected>${escapeHtml(t('ai.settings.access.included'))}</option>
+            <option value="byok">${escapeHtml(t('ai.settings.access.byok'))}</option>
           </select>
         </label>
 
         <label class="wide">
-          Included AI model
+          ${escapeHtml(t('ai.settings.access.includedModel'))}
           <select class="text-input" data-ai-included-model>
             ${includedAiModelOptionsHtml(settings.includedModel || settings.model)}
           </select>
@@ -454,25 +458,24 @@ function aiAccessSettingsHtml(settings, apiKey) {
         ${citationCheckSelectHtml(settings)}
 
         <label class="wide" style="display:none;">
-          Privacy
+          ${escapeHtml(t('ai.settings.privacy.label'))}
           <select class="text-input" data-ai-privacy>
-            <option value="current-note" ${settings.privacyMode === 'current-note' ? 'selected' : ''}>Include current note</option>
-            <option value="metadata-only" ${settings.privacyMode === 'metadata-only' ? 'selected' : ''}>Metadata only</option>
+            <option value="current-note" ${settings.privacyMode === 'current-note' ? 'selected' : ''}>${escapeHtml(t('ai.settings.privacy.currentNote'))}</option>
+            <option value="metadata-only" ${settings.privacyMode === 'metadata-only' ? 'selected' : ''}>${escapeHtml(t('ai.settings.privacy.metadataOnly'))}</option>
           </select>
         </label>
       </div>
 
       <section class="yanta-ai-settings-section">
-        <h4>Included AI limits</h4>
+        <h4>${escapeHtml(t('ai.settings.includedLimits.heading'))}</h4>
         <div class="yanta-ai-warning">
-          Included AI uses managed YANTA Cloud credits.
-          You can choose one of the YANTA-approved models.
-          Context size, output size, daily credits and rate limits are controlled by YANTA Cloud for abuse protection.
+          ${escapeHtml(t('ai.settings.includedLimits.body'))}
           <br><br>
-          Current client-side limits:
-          ${Number(INCLUDED_AI_CLIENT_POLICY.maxContextChars).toLocaleString()} context chars,
-          ${Number(INCLUDED_AI_CLIENT_POLICY.maxToolRounds).toLocaleString()} tool rounds,
-          ${Number(INCLUDED_AI_CLIENT_POLICY.maxOutputTokens).toLocaleString()} max output tokens.
+          ${escapeHtml(t('ai.settings.includedLimits.current', {
+            context: Number(INCLUDED_AI_CLIENT_POLICY.maxContextChars),
+            rounds: Number(INCLUDED_AI_CLIENT_POLICY.maxToolRounds),
+            output: Number(INCLUDED_AI_CLIENT_POLICY.maxOutputTokens),
+          }))}
         </div>
       </section>
     `;
@@ -481,25 +484,25 @@ function aiAccessSettingsHtml(settings, apiKey) {
   return `
     <div class="yanta-ai-settings-grid">
       <label>
-        AI access
+        ${escapeHtml(t('ai.settings.access.label'))}
         <select class="text-input" data-ai-billing-mode>
-          <option value="included">Included AI: YANTA Cloud credits</option>
-          <option value="byok" selected>BYOK: my OpenRouter key</option>
+          <option value="included">${escapeHtml(t('ai.settings.access.included'))}</option>
+          <option value="byok" selected>${escapeHtml(t('ai.settings.access.byok'))}</option>
         </select>
       </label>
 
       <label>
-        Provider
+        ${escapeHtml(t('ai.settings.access.provider'))}
         <input class="text-input" value="OpenRouter" disabled />
       </label>
 
       <label>
-        Base URL
+        ${escapeHtml(t('ai.settings.access.baseUrl'))}
         <input class="text-input" data-ai-base-url value="${escapeHtml(settings.baseUrl)}" />
       </label>
 
       <label>
-        Model
+        ${escapeHtml(t('ai.settings.access.model'))}
         <input class="text-input" data-ai-model value="${escapeHtml(settings.model)}" />
       </label>
 
@@ -507,52 +510,51 @@ function aiAccessSettingsHtml(settings, apiKey) {
         ${citationCheckSelectHtml(settings)}
 
       <label style="display:none;">
-        Privacy
+        ${escapeHtml(t('ai.settings.privacy.label'))}
         <select class="text-input" data-ai-privacy>
-          <option value="current-note" ${settings.privacyMode === 'current-note' ? 'selected' : ''}>Include current note</option>
-          <option value="metadata-only" ${settings.privacyMode === 'metadata-only' ? 'selected' : ''}>Metadata only</option>
+          <option value="current-note" ${settings.privacyMode === 'current-note' ? 'selected' : ''}>${escapeHtml(t('ai.settings.privacy.currentNote'))}</option>
+          <option value="metadata-only" ${settings.privacyMode === 'metadata-only' ? 'selected' : ''}>${escapeHtml(t('ai.settings.privacy.metadataOnly'))}</option>
         </select>
       </label>
 
       <label>
-        API key storage
+        ${escapeHtml(t('ai.settings.access.keyStorage'))}
         <select class="text-input" data-ai-key-storage>
-          <option value="session" ${settings.apiKeyStorage === 'session' ? 'selected' : ''}>Session only</option>
-          <option value="local" ${settings.apiKeyStorage === 'local' ? 'selected' : ''}>Remember on this device (localStorage)</option>
-          <option value="none" ${settings.apiKeyStorage === 'none' ? 'selected' : ''}>Do not store</option>
+          <option value="session" ${settings.apiKeyStorage === 'session' ? 'selected' : ''}>${escapeHtml(t('ai.settings.access.keyStorageSession'))}</option>
+          <option value="local" ${settings.apiKeyStorage === 'local' ? 'selected' : ''}>${escapeHtml(t('ai.settings.access.keyStorageLocal'))}</option>
+          <option value="none" ${settings.apiKeyStorage === 'none' ? 'selected' : ''}>${escapeHtml(t('ai.settings.access.keyStorageNone'))}</option>
         </select>
       </label>
 
       <label class="wide">
-        OpenRouter API key
+        ${escapeHtml(t('ai.settings.access.apiKey'))}
         <div class="yanta-ai-key-row">
           <input class="text-input" data-ai-key type="password" value="${escapeHtml(apiKey)}" placeholder="sk-or-..." />
           <button class="btn" type="button" data-ai-clear-key>
             ${lucide('trash', 14)}
-            Clear key
+            ${escapeHtml(t('ai.settings.access.clearKey'))}
           </button>
         </div>
       </label>
     </div>
 
     <section class="yanta-ai-settings-section">
-      <h4>BYOK advanced limits</h4>
+      <h4>${escapeHtml(t('ai.settings.byokLimits.heading'))}</h4>
 
       <div class="yanta-ai-settings-grid">
         <label>
-          Max context characters
+          ${escapeHtml(t('ai.settings.byokLimits.maxContext'))}
           <input class="text-input" data-ai-max-context value="${escapeHtml(settings.maxContextChars)}" inputmode="numeric" />
         </label>
 
         <label>
-          Max tool rounds
+          ${escapeHtml(t('ai.settings.byokLimits.maxToolRounds'))}
           <input class="text-input" data-ai-max-tool-rounds value="${escapeHtml(settings.maxToolRounds)}" inputmode="numeric" />
         </label>
       </div>
 
       <div class="yanta-ai-warning">
-        BYOK uses your own OpenRouter key.
-        Model, base URL and limits are freely configurable.
+        ${escapeHtml(t('ai.settings.byokLimits.body'))}
       </div>
     </section>
   `;
@@ -563,20 +565,20 @@ function advancedAiOptionsHtml(settings) {
     <details class="yanta-ai-advanced-options">
       <summary>
         ${lucide('sliders-horizontal', 14)}
-        Advanced options
+        ${escapeHtml(t('ai.settings.advanced'))}
       </summary>
 
       <div class="yanta-ai-advanced-body">
         ${externalAgentSettingsHtml()}
 
         <section class="yanta-ai-settings-section">
-          <h4>Assistant prompt</h4>
+          <h4>${escapeHtml(t('ai.settings.prompt.heading'))}</h4>
           <textarea class="text-input yanta-ai-prompt-editor" data-ai-prompt rows="10">${escapeHtml(settings.assistantPrompt)}</textarea>
 
           <div class="compress-actions">
             <button class="btn" data-ai-reset-prompt>
               ${lucide('rotate-ccw', 14)}
-              Reset to default
+              ${escapeHtml(t('ai.settings.prompt.reset'))}
             </button>
           </div>
         </section>
@@ -922,27 +924,28 @@ export function renderAiSettingsPanel(panel) {
       ${aiAccessSettingsHtml(settings, key)}
 
       <section class="yanta-ai-settings-section">
-        <h4>Permissions</h4>
+        <h4>${escapeHtml(t('ai.settings.permissions.heading'))}</h4>
 
-        ${permissionCheckboxHtml('allowReadNotes', 'Allow assistant to read notes', 'Recommended', p.allowReadNotes)}
-        ${permissionCheckboxHtml('allowCreateNotes', 'Allow assistant to create notes', 'Recommended', p.allowCreateNotes)}
-        ${permissionCheckboxHtml('allowEditNotes', 'Allow assistant to edit notes', 'Recommended', p.allowEditNotes)}
-        ${permissionCheckboxHtml('allowDeleteNotes', 'Allow assistant to delete notes', 'Recommended', p.allowDeleteNotes)}
-        ${permissionCheckboxHtml('allowManageCalendar', 'Allow assistant to manage calendar events', 'Recommended', p.allowManageCalendar)}
-        ${permissionCheckboxHtml('allowReadAiBrain', 'Allow assistant to read AI Brain', 'Recommended', p.allowReadAiBrain)}
-        ${permissionCheckboxHtml('allowWriteAiBrain', 'Allow assistant to write AI Brain', 'Recommended', p.allowWriteAiBrain)}
-        ${permissionCheckboxHtml('allowWeather', 'Allow assistant to fetch weather via Open-Meteo', 'Recommended', p.allowWeather)}
-        ${permissionCheckboxHtml('allowWebSearch', 'Allow assistant to search the web', 'Optional', p.allowWebSearch)}
-        ${permissionCheckboxHtml('allowApproxLocationContext', 'Allow assistant to receive approximate location context', 'Optional', p.allowApproxLocationContext)}
-        ${permissionCheckboxHtml('allowReadRss', 'Allow assistant to read Sources/RSS items', 'Recommended', p.allowReadRss)}
-        ${permissionCheckboxHtml('allowManageRss', 'Allow assistant to refresh/manage Sources', 'Optional', p.allowManageRss)}
-        ${permissionCheckboxHtml('allowAddRssSources', 'Allow assistant to add RSS feeds and YouTube channels to Sources', 'Recommended', p.allowAddRssSources)}
-        ${permissionCheckboxHtml('allowSaveRssToNotes', 'Allow assistant to save Sources items as notes', 'Recommended', p.allowSaveRssToNotes)}
-        ${permissionCheckboxHtml('allowReadChatMessages', 'Allow assistant to read Chat messages', 'Optional', p.allowReadChatMessages)}
-        ${permissionCheckboxHtml('allowSendChatMessages', 'Allow assistant to send Chat messages after confirmation', 'Optional', p.allowSendChatMessages)}
+        ${permissionCheckboxHtml('allowReadNotes', t('ai.settings.permissions.readNotes'), t('ai.settings.badges.recommended'), p.allowReadNotes)}
+        ${permissionCheckboxHtml('allowCreateNotes', t('ai.settings.permissions.createNotes'), t('ai.settings.badges.recommended'), p.allowCreateNotes)}
+        ${permissionCheckboxHtml('allowEditNotes', t('ai.settings.permissions.editNotes'), t('ai.settings.badges.recommended'), p.allowEditNotes)}
+        ${permissionCheckboxHtml('allowDeleteNotes', t('ai.settings.permissions.deleteNotes'), t('ai.settings.badges.recommended'), p.allowDeleteNotes)}
+        ${permissionCheckboxHtml('allowManageCalendar', t('ai.settings.permissions.manageCalendar'), t('ai.settings.badges.recommended'), p.allowManageCalendar)}
+        ${permissionCheckboxHtml('allowReadAiBrain', t('ai.settings.permissions.readAiBrain'), t('ai.settings.badges.recommended'), p.allowReadAiBrain)}
+        ${permissionCheckboxHtml('allowWriteAiBrain', t('ai.settings.permissions.writeAiBrain'), t('ai.settings.badges.recommended'), p.allowWriteAiBrain)}
+        ${permissionCheckboxHtml('allowWeather', t('ai.settings.permissions.weather'), t('ai.settings.badges.recommended'), p.allowWeather)}
+        ${permissionCheckboxHtml('allowWebSearch', t('ai.settings.permissions.webSearch'), t('ai.settings.badges.optional'), p.allowWebSearch)}
+        ${permissionCheckboxHtml('allowApproxLocationContext', t('ai.settings.permissions.approxLocation'), t('ai.settings.badges.optional'), p.allowApproxLocationContext)}
+        ${permissionCheckboxHtml('allowReadRss', t('ai.settings.permissions.readRss'), t('ai.settings.badges.recommended'), p.allowReadRss)}
+        ${permissionCheckboxHtml('allowManageRss', t('ai.settings.permissions.manageRss'), t('ai.settings.badges.optional'), p.allowManageRss)}
+        ${permissionCheckboxHtml('allowAddRssSources', t('ai.settings.permissions.addRssSources'), t('ai.settings.badges.recommended'), p.allowAddRssSources)}
+        ${permissionCheckboxHtml('allowSaveRssToNotes', t('ai.settings.permissions.saveRssToNotes'), t('ai.settings.badges.recommended'), p.allowSaveRssToNotes)}
+        ${permissionCheckboxHtml('allowReadChatMessages', t('ai.settings.permissions.readChat'), t('ai.settings.badges.optional'), p.allowReadChatMessages)}
+        ${permissionCheckboxHtml('allowSendChatMessages', t('ai.settings.permissions.sendChat'), t('ai.settings.badges.optional'), p.allowSendChatMessages)}
         ${permissionCheckboxHtml(
           'allowAutonomousChatMessages',
-          'Allow assistant to send Chat messages without review',
+          t('ai.settings.permissions.sendChatAutonomous'),
+          t('ai.settings.badges.optional'),
           p.allowAutonomousChatMessages
         )}
       </section>
@@ -953,29 +956,25 @@ export function renderAiSettingsPanel(panel) {
 
 
       <div class="yanta-ai-warning">
-        <strong>${escapeHtml(OPENROUTER_ZDR_POLICY.label)} enabled.</strong>
+        <strong>${escapeHtml(t('ai.settings.privacyNote.zdrEnabled', { label: OPENROUTER_ZDR_POLICY.label }))}</strong>
         ${escapeHtml(OPENROUTER_ZDR_POLICY.description)}
         <br><br>
         ${
           includedMode
             ? `
-              Included AI privacy note:
-              Prompts and selected context are processed transiently by YANTA Cloud only to forward them to OpenRouter with ZDR enabled.
-              YANTA does not store prompts, completions or tool results on the server.
-              Your encrypted sync vault remains zero-knowledge.
+              ${escapeHtml(t('ai.settings.privacyNote.includedTitle'))}
+              ${escapeHtml(t('ai.settings.privacyNote.includedBody'))}
             `
             : `
-              BYOK privacy note:
-              Your API key stays in this browser.
-              Prompts and selected context are sent directly to OpenRouter with ZDR enabled.
-              Persistent localStorage is convenient but less safe than session-only.
+              ${escapeHtml(t('ai.settings.privacyNote.byokTitle'))}
+              ${escapeHtml(t('ai.settings.privacyNote.byokBody'))}
             `
         }
       </div>
 
       <div class="compress-actions yanta-ai-settings-actions">
         <span class="grow"></span>
-        <button class="btn primary" data-ai-save-settings>Save AI settings</button>
+        <button class="btn primary" data-ai-save-settings>${escapeHtml(t('ai.settings.save'))}</button>
       </div>
     </div>
   `;
@@ -1063,19 +1062,19 @@ export function renderAiSettingsPanel(panel) {
 
     saveExternalAgentSettings(readExternalAgentSettingsFromPanel(panel));
 
-    toast('AI settings saved', 'success');
+    toast(t('ai.settings.saved'), 'success');
     rerender();
   });
 
   panel.querySelector('[data-ai-clear-key]')?.addEventListener('click', () => {
     clearAiApiKey();
-    toast('AI key cleared', 'success');
+    toast(t('ai.settings.keyCleared'), 'success');
     rerender();
   });
 
   panel.querySelector('[data-ai-reset-prompt]')?.addEventListener('click', () => {
     resetAssistantPrompt();
-    toast('Assistant prompt reset', 'success');
+    toast(t('ai.settings.prompt.resetDone'), 'success');
     rerender();
   });
 
@@ -1109,17 +1108,17 @@ export function renderAiSettingsPanel(panel) {
         locationSearchResults = [];
         locationSearchError = '';
 
-        toast('Approximate location saved', 'success');
+        toast(t('ai.settings.location.saved'), 'success');
         rerender();
       } catch (err) {
-        toast(err?.message || 'Could not save location', 'error');
+        toast(err?.message || t('ai.settings.location.saveFailed'), 'error');
       }
     });
   });
 
   panel.querySelector('[data-ai-location-clear]')?.addEventListener('click', () => {
     clearApproxUserLocation();
-    toast('Approximate location cleared', 'success');
+    toast(t('ai.settings.location.cleared'), 'success');
     rerender();
   });
 
@@ -1150,7 +1149,7 @@ export function renderAiSettingsPanel(panel) {
       ),
     });
 
-    toast('Included AI enabled with YANTA Cloud credits', 'success');
+    toast(t('ai.settings.includedEnabled'), 'success');
     rerender();
   });
 

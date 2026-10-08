@@ -17,6 +17,8 @@ import {
   cloudMe,
 } from '../cloud/cloud-api.js';
 
+import { t } from '../i18n/index.js';
+
 export const AI_BILLING_MODES = Object.freeze({
   BYOK: 'byok',
   INCLUDED: 'included',
@@ -39,7 +41,10 @@ export {
 };
 
 export const INCLUDED_AI_CLIENT_POLICY = Object.freeze({
-  modelLabel: 'YANTA Cloud credits',
+  // Getter: resolved at read time, after the locale catalog has loaded.
+  get modelLabel() {
+    return t('ai.settings.policy.includedModelLabel');
+  },
 
   // Client-side UX/safety clamp.
   // Server enforces authoritative limits.
@@ -53,8 +58,9 @@ export const INCLUDED_AI_CLIENT_POLICY = Object.freeze({
 export const OPENROUTER_ZDR_POLICY = Object.freeze({
   enabled: true,
   label: 'OpenRouter ZDR',
-  description:
-    'YANTA requests Zero Data Retention routing from OpenRouter. Prompts are routed only to endpoints with a Zero Data Retention policy.',
+  get description() {
+    return t('ai.settings.policy.zdrDescription');
+  },
 });
 
 export function isIncludedAiMode(settings = getAiSettings()) {
@@ -108,7 +114,7 @@ export async function canUseIncludedAi() {
   if (!(await hasConfiguredYantaCloudSync())) {
     return {
       ok: false,
-      reason: 'YANTA Cloud Sync is not active on this device.',
+      reason: t('ai.settings.policy.syncInactive'),
     };
   }
 
@@ -118,14 +124,14 @@ export async function canUseIncludedAi() {
     if (!me?.authenticated) {
       return {
         ok: false,
-        reason: 'Sign in to YANTA Cloud first.',
+        reason: t('ai.settings.policy.signIn'),
       };
     }
 
     if (me?.limits?.includedAi === false) {
       return {
         ok: false,
-        reason: 'Included AI is not available on your current plan.',
+        reason: t('ai.settings.policy.notOnPlan'),
       };
     }
 
@@ -136,7 +142,7 @@ export async function canUseIncludedAi() {
   } catch {
     return {
       ok: false,
-      reason: 'Could not verify YANTA Cloud status.',
+      reason: t('ai.settings.policy.verifyFailed'),
     };
   }
 }

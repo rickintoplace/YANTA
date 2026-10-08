@@ -1,5 +1,10 @@
 // Deutsch. Mirrors the key structure of en.js exactly (see i18n:check).
 
+import aiChat from './ai/chat.de.js';
+import aiSettings from './ai/settings.de.js';
+import aiWidgets from './ai/widgets.de.js';
+import aiContext from './ai/context.de.js';
+
 export default {
   shareTarget: {
     title: 'In YANTA teilen',
@@ -777,7 +782,7 @@ export default {
     badgeLinks: 'Links',
     badgeCitation: 'Zitat',
     couldNotOpenEvent: 'Kalendertermin konnte nicht geöffnet werden',
-    couldNotAddAiContext: 'Element konnte nicht zum AI-Kontext hinzugefügt werden',
+    couldNotAddAiContext: 'Element konnte nicht zum KI-Kontext hinzugefügt werden',
     movedIntoFolder: { one: 'In Ordner verschoben', other: '{count} Elemente in Ordner verschoben' },
     couldNotCompleteDrag: 'Ziehen konnte nicht abgeschlossen werden',
     resizeDrawingTitle: 'Ziehen zum Skalieren · Doppelklick zum Zurücksetzen',
@@ -1502,5 +1507,11 @@ export default {
       cancel: 'Abbrechen',
       continue: 'Weiter zur Kasse',
     },
+  },
+  ai: {
+    chat: aiChat,
+    settings: aiSettings,
+    widgets: aiWidgets,
+    context: aiContext,
   },
 };

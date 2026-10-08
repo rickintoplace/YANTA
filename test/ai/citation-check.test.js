@@ -66,7 +66,7 @@ describe('checkCitations', () => {
     expect(check.total).toBe(2);
     expect(check.passed).toBe(1);
     expect(check.verdict).toBe('revise');
-    expect(check.items[1].problems.join()).toMatch(/says otherwise/);
+    expect(check.items[1].problems).toContain('contradicted_by_source');
     expect(check.items[0].source.url).toBe('https://x/ozone');
     expect(check.instructionsForModel).toBeTruthy();
   });
@@ -80,7 +80,7 @@ describe('checkCitations', () => {
 
     expect(check.items[1].matched).toBe(false);
     expect(check.items[1].ok).toBe(false);
-    expect(check.items[1].problems.join()).toMatch(/not found/);
+    expect(check.items[1].problems).toContain('quote_not_in_source');
   });
 
   it('ignores answers without citations', async () => {

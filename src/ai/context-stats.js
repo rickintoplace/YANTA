@@ -1,9 +1,12 @@
 // ============================================================
+// @i18n-locked
 // YANTA AI — Local context/history stats
 //
 // No API calls. No costs.
 // Token count is intentionally an estimate because tokenizers are model-specific.
 // ============================================================
+
+import { t } from '../i18n/index.js';
 
 export function countWords(text = '') {
   const clean = String(text || '')
@@ -119,40 +122,25 @@ export function computeAiContextMeterStats({
   };
 }
 
-function plural(n, one, many = `${one}s`) {
-  return `${Number(n || 0).toLocaleString()} ${Number(n || 0) === 1 ? one : many}`;
-}
 
 export function formatAiContextMeterStats(stats) {
   const history = stats?.history || {};
   const context = stats?.context || {};
   const total = stats?.total || {};
 
+  const n = (v) => Number(v || 0);
+
   const parts = [
-    `~${Number(total.estimatedTokens || 0).toLocaleString()} tokens`,
-    plural(total.words || 0, 'word'),
-    plural(total.chars || 0, 'char'),
+    t('ai.context.meter.tokens', { count: n(total.estimatedTokens) }),
+    t('ai.context.meter.words', { count: n(total.words) }),
+    t('ai.context.meter.chars', { count: n(total.chars) }),
   ];
 
-  if (context.items) {
-    parts.push(plural(context.items, 'context item'));
-  }
-
-  if (total.images) {
-    parts.push(plural(total.images, 'image'));
-  }
-
-  if (total.audio) {
-    parts.push(plural(total.audio, 'audio'));
-  }
-
-  if (total.unsupported) {
-    parts.push(`${Number(total.unsupported).toLocaleString()} unsupported`);
-  }
-
-  if (history.messages) {
-    parts.push(plural(history.messages, 'message'));
-  }
+  if (context.items) parts.push(t('ai.context.meter.items', { count: n(context.items) }));
+  if (total.images) parts.push(t('ai.context.meter.images', { count: n(total.images) }));
+  if (total.audio) parts.push(t('ai.context.meter.audio', { count: n(total.audio) }));
+  if (total.unsupported) parts.push(t('ai.context.meter.unsupported', { count: n(total.unsupported) }));
+  if (history.messages) parts.push(t('ai.context.meter.messages', { count: n(history.messages) }));
 
   return parts.join(' · ');
 }
@@ -162,15 +150,17 @@ export function aiContextMeterTitle(stats) {
   const context = stats?.context || {};
   const total = stats?.total || {};
 
+  const n = (v) => Number(v || 0);
+
   return [
-    `Estimated total: ~${Number(total.estimatedTokens || 0).toLocaleString()} tokens`,
-    `Total: ${Number(total.words || 0).toLocaleString()} words · ${Number(total.chars || 0).toLocaleString()} chars`,
-    `History: ${Number(history.messages || 0).toLocaleString()} messages · ${Number(history.words || 0).toLocaleString()} words · ${Number(history.chars || 0).toLocaleString()} chars`,
-    `Attached context: ${Number(context.items || 0).toLocaleString()} items · ${Number(context.words || 0).toLocaleString()} words · ${Number(context.chars || 0).toLocaleString()} chars`,
-    context.images ? `Images: ${Number(context.images).toLocaleString()}` : '',
-    context.audio ? `Audio: ${Number(context.audio).toLocaleString()}` : '',
-    context.unsupported ? `Unsupported: ${Number(context.unsupported).toLocaleString()}` : '',
+    t('ai.context.meter.titleEstimated', { tokens: n(total.estimatedTokens) }),
+    t('ai.context.meter.titleTotal', { words: n(total.words), chars: n(total.chars) }),
+    t('ai.context.meter.titleHistory', { messages: n(history.messages), words: n(history.words), chars: n(history.chars) }),
+    t('ai.context.meter.titleAttached', { items: n(context.items), words: n(context.words), chars: n(context.chars) }),
+    context.images ? t('ai.context.meter.titleImages', { count: n(context.images) }) : '',
+    context.audio ? t('ai.context.meter.titleAudio', { count: n(context.audio) }) : '',
+    context.unsupported ? t('ai.context.meter.titleUnsupported', { count: n(context.unsupported) }) : '',
     '',
-    'Token count is a local estimate. Exact tokens are model-specific.',
+    t('ai.context.meter.titleNote'),
   ].filter(Boolean).join('\n');
 }

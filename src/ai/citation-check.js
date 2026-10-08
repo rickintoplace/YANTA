@@ -99,13 +99,16 @@ export function hasCitations(text) {
   return /\]\{c\d+\}/.test(String(text || '')) && /EVI1/.test(String(text || ''));
 }
 
-const PROBLEM_LABEL = {
-  quote_not_in_source: 'quote not found in the source',
-  contradicted_by_source: 'the source says otherwise',
-  overstated: 'claim is stronger than the source',
-  weakly_supported: 'only weakly supported',
-  ellipsis_hides_qualifier: 'the quote leaves out a qualifier',
-};
+// Problem types a stored item can carry in `problems`. The UI translates
+// them at render time (ai.chat.cite.problem.<type>); entries stored before
+// this change are English labels and are shown as they are.
+export const CITATION_PROBLEM_TYPES = new Set([
+  'quote_not_in_source',
+  'contradicted_by_source',
+  'overstated',
+  'weakly_supported',
+  'ellipsis_hides_qualifier',
+]);
 
 /**
  * Checks `answer` against the registry's sources. Returns a compact,
@@ -135,7 +138,7 @@ export async function checkCitations(answer, sources, { signal = null } = {}) {
   for (const problem of gate.problems || []) {
     const key = `${problem.claimId}|${problem.sourceIndex}`;
     const list = problemsByClaim.get(key) || [];
-    list.push(PROBLEM_LABEL[problem.type] || problem.type);
+    list.push(problem.type);
     problemsByClaim.set(key, list);
   }
 

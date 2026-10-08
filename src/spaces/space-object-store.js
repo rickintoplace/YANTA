@@ -63,8 +63,11 @@ export class SpaceObjectStore extends RemoteObjectStore {
   }
 
   async index() {
+    // See YantaCloudObjectStore.index(): "unchanged" for one row read.
+    const cached = this.indexCache;
+
     const res = await fetchWithRetry(
-      this.url('index'),
+      this.url('index', cached ? { rev: cached.rev } : {}),
       {
         method: 'GET',
         credentials: 'include',
@@ -78,7 +81,18 @@ export class SpaceObjectStore extends RemoteObjectStore {
     }
 
     const json = await res.json();
-    return (json.entries || []).sort(remoteEntrySort);
+
+    if (json.unchanged && cached && Number(json.rev) === cached.rev) {
+      return cached.entries.map((entry) => ({ ...entry }));
+    }
+
+    const entries = (json.entries || []).sort(remoteEntrySort);
+
+    this.indexCache = Number(json.rev) > 0
+      ? { rev: Number(json.rev), entries: entries.map((entry) => ({ ...entry })) }
+      : null;
+
+    return entries;
   }
 
   async list(prefix = '') {

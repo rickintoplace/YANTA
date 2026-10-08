@@ -178,6 +178,16 @@ async function idbPut(key, value) {
  * Ensures a device-local AES-GCM key exists (stored as raw bytes so the
  * Service Worker can read it too) and returns it as a CryptoKey.
  */
+/*
+  push-schedule.js skips uploading a schedule it already uploaded. A new
+  key or subscription invalidates what the server holds, so forget that.
+*/
+function forgetUploadedSchedule() {
+  try {
+    localStorage.removeItem('yanta.push.scheduleFp.v1');
+  } catch {}
+}
+
 export async function ensureCalendarPushKey() {
   let raw = await idbGet(CAL_KEY_ID);
 
@@ -185,6 +195,7 @@ export async function ensureCalendarPushKey() {
     const key = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt', 'decrypt']);
     raw = new Uint8Array(await crypto.subtle.exportKey('raw', key));
     await idbPut(CAL_KEY_ID, raw);
+    forgetUploadedSchedule();
   }
 
   return crypto.subtle.importKey('raw', raw, { name: 'AES-GCM' }, false, ['encrypt', 'decrypt']);
@@ -308,6 +319,7 @@ export async function subscribeWebPush() {
     },
   });
 
+  forgetUploadedSchedule();
   setActive(true);
   return true;
 }
@@ -325,6 +337,7 @@ export async function unsubscribeWebPush() {
     });
   } catch {}
 
+  forgetUploadedSchedule();
   setActive(false);
   return true;
 }

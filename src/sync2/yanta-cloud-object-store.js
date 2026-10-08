@@ -129,8 +129,15 @@ export class YantaCloudObjectStore extends RemoteObjectStore {
    * This is the fast path used by Sync2AppEngine.
    */
   async index() {
+    /*
+      The server numbers each state of the index. Sending the number we
+      hold lets it answer "unchanged" for one row read instead of sending
+      every entry again — most syncs change nothing remotely.
+    */
+    const cached = this.indexCache;
+
     const res = await this.fetchWithRetry(
-      this.url('/api/storage/index'),
+      this.url('/api/storage/index', cached ? { rev: cached.rev } : {}),
       {
         method: 'GET',
         credentials: 'include',
@@ -147,7 +154,17 @@ export class YantaCloudObjectStore extends RemoteObjectStore {
 
     const json = await res.json();
 
-    return (json.entries || []).sort(remoteEntrySort);
+    if (json.unchanged && cached && Number(json.rev) === cached.rev) {
+      return cached.entries.map((entry) => ({ ...entry }));
+    }
+
+    const entries = (json.entries || []).sort(remoteEntrySort);
+
+    this.indexCache = Number(json.rev) > 0
+      ? { rev: Number(json.rev), entries: entries.map((entry) => ({ ...entry })) }
+      : null;
+
+    return entries;
   }
 
   async list(prefix = '') {

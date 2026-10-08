@@ -91,8 +91,24 @@ CREATE TABLE IF NOT EXISTS objects (
   UNIQUE(vault_id, path)
 );
 
-CREATE INDEX IF NOT EXISTS idx_objects_vault_path
-ON objects(vault_id, path);
+-- (vault_id, path) is covered by the UNIQUE constraint's index. A second
+-- index on the same columns cost one extra D1 row write per object write;
+-- dropped from production on 2026-10-08.
+DROP INDEX IF EXISTS idx_objects_vault_path;
+
+-- Per-vault (and per-space) index revision: bumped after every object
+-- change so an unchanged index costs one row read (see handleStorageIndex).
+CREATE TABLE IF NOT EXISTS vault_revs (
+  vault_id TEXT PRIMARY KEY,
+  rev INTEGER NOT NULL
+);
+
+-- Small operational state: the live model index, the cron heartbeat.
+CREATE TABLE IF NOT EXISTS app_state (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
 
 CREATE TABLE IF NOT EXISTS usage_current (
   user_id TEXT PRIMARY KEY,
@@ -122,6 +138,9 @@ CREATE TABLE IF NOT EXISTS rate_limits (
   window_start INTEGER NOT NULL,
   count INTEGER NOT NULL
 );
+
+CREATE INDEX IF NOT EXISTS idx_rate_limits_window
+ON rate_limits(window_start);
 
 CREATE TABLE IF NOT EXISTS audit_events (
   id TEXT PRIMARY KEY,
@@ -465,6 +484,12 @@ CREATE TABLE IF NOT EXISTS scheduled_pushes (
 
 CREATE INDEX IF NOT EXISTS idx_scheduled_pushes_due
 ON scheduled_pushes(sent_at, fire_at);
+
+CREATE INDEX IF NOT EXISTS idx_scheduled_pushes_expires
+ON scheduled_pushes(expires_at);
+
+CREATE INDEX IF NOT EXISTS idx_scheduled_pushes_device
+ON scheduled_pushes(user_id, device_id);
 
 -- Cancellation declarations submitted through the public § 312k BGB
 -- cancellation page. Recorded verbatim: the declaration and its time of

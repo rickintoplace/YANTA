@@ -106,15 +106,18 @@ async function collectPulseWakeItems() {
     if (lastAt && wake.at - lastAt < COALESCE_MS) continue;
 
     try {
+      const payload = {
+        kind: 'pulse-wake',
+        id: `pulse-${wake.routine.name}-${wake.at}`,
+        title: t('pulse.wake.title'),
+        body: t('pulse.wake.body', { routine: wake.routine.description || wake.routine.name }),
+        url: wakeUrl(),
+      };
+
       items.push({
         fireAt: Math.round(wake.at),
-        enc: await encryptReminderPayload({
-          kind: 'pulse-wake',
-          id: `pulse-${wake.routine.name}-${wake.at}`,
-          title: t('pulse.wake.title'),
-          body: t('pulse.wake.body', { routine: wake.routine.description || wake.routine.name }),
-          url: wakeUrl(),
-        }),
+        enc: await encryptReminderPayload(payload),
+        fp: `${payload.id}|${payload.body}`,
       });
 
       lastAt = wake.at;

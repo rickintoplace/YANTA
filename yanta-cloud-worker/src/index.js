@@ -2322,24 +2322,30 @@ async function audit(env, req, kind, userId = null, meta = {}) {
   }
 }
 __name(audit, "audit");
+// One statement per check (was a read plus a write): count in the current
+// window, or start a new window. SET expressions see the old row.
 async function rateLimit(env, key, limit, windowMs) {
   const t = now();
-  const existing = await env.DB.prepare(
-    `SELECT key, window_start, count FROM rate_limits WHERE key = ?`
-  ).bind(key).first();
-  if (!existing || t - existing.window_start > windowMs) {
-    await env.DB.prepare(
-      `INSERT OR REPLACE INTO rate_limits (key, window_start, count) VALUES (?,?,?)`
-    ).bind(key, t, 1).run();
-    return { ok: true, remaining: limit - 1 };
-  }
-  if (existing.count >= limit) {
-    return { ok: false, remaining: 0 };
-  }
-  await env.DB.prepare(
-    `UPDATE rate_limits SET count = count + 1 WHERE key = ?`
-  ).bind(key).run();
-  return { ok: true, remaining: limit - existing.count - 1 };
+  const row = await env.DB.prepare(
+    `INSERT INTO rate_limits (key, window_start, count) VALUES (?1, ?2, 1)
+     ON CONFLICT(key) DO UPDATE SET
+       count = CASE WHEN ?2 - window_start > ?3 THEN 1 ELSE count + 1 END,
+       window_start = CASE WHEN ?2 - window_start > ?3 THEN ?2 ELSE window_start END
+     RETURNING count`
+  ).bind(key, t, windowMs).first();
+  const count = Number(row?.count || 1);
+  return count <= limit
+    ? { ok: true, remaining: limit - count }
+    : { ok: false, remaining: 0 };
+}
+/*
+  Rate-limit rows were never deleted, and several keys are per day or
+  per IP, so the table only grew. Windows are at most a day long; the
+  free-tier spend counter is read for the current day only.
+*/
+async function pruneRateLimits(env) {
+  await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_rate_limits_window ON rate_limits(window_start)`).run();
+  await env.DB.prepare(`DELETE FROM rate_limits WHERE window_start < ?`).bind(now() - 3 * 24 * 60 * 60 * 1000).run();
 }
 __name(rateLimit, "rateLimit");
 async function verifyTurnstile(env, token, req) {
@@ -2439,6 +2445,7 @@ const SESSION_RENEW_BELOW_MS = 60 * 24 * 60 * 60 * 1e3;
 const SESSION_MAX_LIFETIME_MS = 365 * 24 * 60 * 60 * 1e3;
 const pendingSessionRenewal = new WeakMap();
 
+var LAST_SEEN_TOUCH_MS = 15 * 60 * 1000;
 async function getSession(env, req) {
   const cookies = parseCookies(req);
   const token = cookies[env.COOKIE_NAME || "yanta_cloud_session"];
@@ -2446,7 +2453,7 @@ async function getSession(env, req) {
   const tokenHash = await hashToken(env, token);
   const row = await env.DB.prepare(
     `SELECT s.id AS session_id, s.user_id, s.expires_at, s.revoked_at, s.created_at,
-            u.email, u.plan, u.disabled_at
+            u.email, u.plan, u.disabled_at, u.last_seen_at
      FROM sessions s
      JOIN users u ON u.id = s.user_id
      WHERE s.token_hash = ?`
@@ -2457,9 +2464,13 @@ async function getSession(env, req) {
   if (row.expires_at < now()) return null;
   const hardEnd = Number(row.created_at || 0) + SESSION_MAX_LIFETIME_MS;
   if (row.created_at && hardEnd < now()) return null;
-  await env.DB.prepare(
-    `UPDATE users SET last_seen_at = ? WHERE id = ?`
-  ).bind(now(), row.user_id).run();
+  // "Last seen" is for activity metrics; to the quarter hour is enough.
+  // Writing it on every request was the largest single source of D1 writes.
+  if (Number(row.last_seen_at || 0) < now() - LAST_SEEN_TOUCH_MS) {
+    await env.DB.prepare(
+      `UPDATE users SET last_seen_at = ? WHERE id = ?`
+    ).bind(now(), row.user_id).run();
+  }
   if (Number(row.expires_at) - now() < SESSION_RENEW_BELOW_MS && (!row.created_at || hardEnd > row.expires_at)) {
     const nextExpiry = row.created_at
       ? Math.min(now() + SESSION_TTL_MS, hardEnd)
@@ -2697,7 +2708,13 @@ async function requireActiveVaultDevice(env, user, vaultId, deviceId, req = null
     err.code = "DEVICE_REVOKED";
     throw err;
   }
-  if (req) {
+  // Same quarter-hour rule as users.last_seen_at; the descriptive columns
+  // only change when a device is first seen or its browser changes.
+  const fresh = Number(row.last_seen_at || 0) >= now() - LAST_SEEN_TOUCH_MS &&
+    row.name && row.name !== row.device_id;
+  if (fresh) {
+    // nothing to write
+  } else if (req) {
     const info = deviceInfoFromRequest(req);
     await env.DB.prepare(
       `UPDATE devices
@@ -3305,9 +3322,51 @@ async function handleStorageList(env, req, url, headers) {
   }, 200, headers);
 }
 __name(handleStorageList, "handleStorageList");
+/*
+  Index revisions. Every sync used to download the vault's whole object
+  index — one D1 row read per object, ~90 times a day per active user,
+  which made reads the first free-plan limit to break. Each change to a
+  vault's objects now bumps a counter; a client that already has the
+  index for that counter (`?rev=`) gets {unchanged:true} for one row read.
+
+  Ordering keeps it safe: writers bump AFTER changing objects, readers
+  read the counter BEFORE the rows. A client can then only ever hold a
+  newer index than its counter claims, never an older one.
+*/
+var vaultRevTableReady = null;
+function ensureVaultRevTable(env) {
+  if (!vaultRevTableReady) {
+    vaultRevTableReady = env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS vault_revs (vault_id TEXT PRIMARY KEY, rev INTEGER NOT NULL)`
+    ).run().catch((err) => {
+      vaultRevTableReady = null;
+      throw err;
+    });
+  }
+  return vaultRevTableReady;
+}
+async function bumpVaultRev(env, vaultId) {
+  await ensureVaultRevTable(env);
+  await env.DB.prepare(
+    `INSERT INTO vault_revs (vault_id, rev) VALUES (?, 1)
+     ON CONFLICT(vault_id) DO UPDATE SET rev = rev + 1`
+  ).bind(vaultId).run();
+}
+async function readVaultRev(env, vaultId) {
+  await ensureVaultRevTable(env);
+  const row = await env.DB.prepare(`SELECT rev FROM vault_revs WHERE vault_id = ?`).bind(vaultId).first();
+  return Number(row?.rev || 0);
+}
+function indexUnchanged(url, rev) {
+  return rev > 0 && Number(url.searchParams.get("rev") || -1) === rev;
+}
 async function handleStorageIndex(env, req, url, headers) {
   const user = await requireUser(env, req);
   const { vaultId } = await vaultAndDeviceFromHeaders(env, req, user);
+  const rev = await readVaultRev(env, vaultId);
+  if (indexUnchanged(url, rev)) {
+    return json({ unchanged: true, rev }, 200, { ...headers, "cache-control": "no-store" });
+  }
   const rows = await env.DB.prepare(
     `SELECT path,size,etag,updated_at FROM objects
      WHERE user_id = ?
@@ -3322,6 +3381,7 @@ async function handleStorageIndex(env, req, url, headers) {
     "yanta-sync-v1/\uF8FF"
   ).all();
   return json({
+    rev,
     entries: (rows.results || []).map((r) => ({
       path: r.path,
       size: Number(r.size || 0),
@@ -3634,9 +3694,11 @@ async function handleStoragePut(env, req, url, headers) {
       ).bind(storageFix, objectsFix, user.userId).run();
     }
   }
+  await bumpVaultRev(env, vaultId);
+  // Informational ("last synced"); to the quarter hour is enough.
   await env.DB.prepare(
-    `UPDATE vaults SET last_sync_at = ? WHERE id = ?`
-  ).bind(now(), vaultId).run();
+    `UPDATE vaults SET last_sync_at = ? WHERE id = ? AND COALESCE(last_sync_at, 0) < ?`
+  ).bind(now(), vaultId, now() - LAST_SEEN_TOUCH_MS).run();
   return json({
     ok: true,
     entry: {
@@ -3663,6 +3725,7 @@ async function handleStorageDelete(env, req, url, headers) {
       `DELETE FROM objects WHERE id = ? RETURNING size`
     ).bind(existing.id).first();
     if (removed) {
+      await bumpVaultRev(env, vaultId);
       await env.DB.prepare(
         `UPDATE usage_current
          SET storage_bytes = MAX(0, storage_bytes - ?),
@@ -4815,10 +4878,17 @@ function meterAiStream(body, onDone) {
   let usage = null;
   let model = "";
 
+  // Every chunk names the model, so parsing each one cost CPU in
+  // proportion to the answer length. Only the usage chunk is parsed; the
+  // model is read once with a regex.
   const scan = (line) => {
     if (!line.startsWith("data:")) return;
+    if (!model) {
+      const m = /"model"\s*:\s*"([^"]+)"/.exec(line);
+      if (m) model = m[1];
+    }
+    if (!line.includes('"usage"')) return;
     const data = line.slice(5).trim();
-    if (!data || data === "[DONE]" || !data.includes('"usage"') && !data.includes('"model"')) return;
     try {
       const chunk = JSON.parse(data);
       if (chunk?.usage) usage = chunk.usage;
@@ -8616,10 +8686,16 @@ async function handleDeleteSpace(env, req, url, headers) {
   let freedBytes = 0;
   let freedObjects = 0;
 
+  // R2 deletes up to 1,000 keys per call. One call per object hit the
+  // 50-subrequest cap of the Free plan past ~45 objects.
+  const keys = [];
   for (const row of rows.results || []) {
-    await env.OBJECTS.delete(r2Key(space.owner_user_id, spaceId, row.path)).catch(() => {});
+    keys.push(r2Key(space.owner_user_id, spaceId, row.path));
     freedBytes += Number(row.size || 0);
     freedObjects += 1;
+  }
+  for (let i = 0; i < keys.length; i += 1000) {
+    await env.OBJECTS.delete(keys.slice(i, i + 1000)).catch(() => {});
   }
 
   await env.DB.prepare(`DELETE FROM objects WHERE vault_id = ?`).bind(spaceId).run();
@@ -8796,6 +8872,11 @@ async function handleSpaceStorageIndex(env, req, url, headers, spaceId) {
     return json({ error: "read_rate_limited" }, 429, { ...headers, "retry-after": "120" });
   }
 
+  const rev = await readVaultRev(env, spaceId);
+  if (indexUnchanged(url, rev)) {
+    return json({ unchanged: true, rev }, 200, { ...headers, "cache-control": "no-store" });
+  }
+
   const rows = await env.DB.prepare(
     `SELECT path,size,etag,updated_at FROM objects
      WHERE vault_id = ? AND path >= ? AND path < ?
@@ -8803,6 +8884,7 @@ async function handleSpaceStorageIndex(env, req, url, headers, spaceId) {
   ).bind(spaceId, SPACE_NAMESPACE, SPACE_NAMESPACE + PATH_RANGE_END).all();
 
   return json({
+    rev,
     entries: (rows.results || []).map((r) => ({
       path: r.path,
       size: Number(r.size || 0),
@@ -9088,6 +9170,7 @@ async function handleSpaceStoragePut(env, req, url, headers, spaceId) {
     }
   }
 
+  await bumpVaultRev(env, spaceId);
   await env.DB.prepare(`UPDATE spaces SET updated_at = ? WHERE id = ?`).bind(updatedAt, spaceId).run();
 
   return json({
@@ -9113,6 +9196,7 @@ async function handleSpaceStorageDelete(env, req, url, headers, spaceId) {
     ).bind(existing.id).first();
     // A concurrent delete already gave the quota back.
     if (!removed) return json({ ok: true }, 200, headers);
+    await bumpVaultRev(env, spaceId);
     await ensureUsageRow(env, ownerId);
     await env.DB.prepare(
       `UPDATE usage_current
@@ -9209,7 +9293,21 @@ async function webPushEncrypt(p256dhB64, authB64, plaintext) {
   return concatBytes(header, ct);
 }
 
+/*
+  A VAPID token is valid for 12 h per push-service origin; signing a new
+  one for every push cost a key import and an ECDSA signature each time.
+  Cached per isolate for 11 h.
+*/
+var vapidHeaderCache = new Map();
 async function vapidAuthHeader(env, endpoint) {
+  const origin = new URL(endpoint).origin;
+  const cached = vapidHeaderCache.get(origin);
+  if (cached && cached.until > Date.now()) return cached.value;
+  const value = await signVapidAuthHeader(env, endpoint);
+  vapidHeaderCache.set(origin, { value, until: Date.now() + 11 * 3600 * 1000 });
+  return value;
+}
+async function signVapidAuthHeader(env, endpoint) {
   const enc = new TextEncoder();
   const header = { typ: "JWT", alg: "ES256" };
   const payload = {
@@ -9514,6 +9612,8 @@ async function runScheduledPushes(env) {
     one account with a huge backlog (fire times set in the past) take every
     slot until real reminders expired.
   */
+  await ensurePushIndexes(env);
+
   const rows = await env.DB.prepare(
     `SELECT sid, enc, endpoint, p256dh, auth FROM (
        SELECT sp.id AS sid, sp.enc_payload AS enc, sp.fire_at AS fire_at,
@@ -9526,10 +9626,26 @@ async function runScheduledPushes(env) {
      )
      WHERE rn <= ?
      ORDER BY fire_at
-     LIMIT 200`
-  ).bind(nowMs, PUSH_MAX_PER_USER_PER_CRON_TICK).all();
+     LIMIT ?`
+  ).bind(nowMs, PUSH_MAX_PER_USER_PER_CRON_TICK, pushMaxPerTick(env)).all();
 
-  for (const row of rows?.results || []) {
+  const candidates = rows?.results || [];
+  if (!candidates.length) return;
+
+  /*
+    Claim, then send. Marking rows sent after each push meant a tick that
+    died halfway (CPU or subrequest limit) sent the same reminders again
+    next minute. One UPDATE claims the batch; only claimed rows are sent.
+  */
+  const claimed = await env.DB.prepare(
+    `UPDATE scheduled_pushes SET sent_at = ?
+     WHERE sent_at IS NULL AND id IN (${candidates.map(() => "?").join(",")})
+     RETURNING id`
+  ).bind(nowMs, ...candidates.map((row) => row.sid)).all();
+  const mine = new Set((claimed?.results || []).map((row) => row.id));
+
+  for (const row of candidates) {
+    if (!mine.has(row.sid)) continue;
     try {
       await sendWebPush(
         env,
@@ -9540,10 +9656,34 @@ async function runScheduledPushes(env) {
     } catch (err) {
       console.warn("[push cron] send failed", safeErrorForLog(err));
     }
-    await env.DB.prepare(`UPDATE scheduled_pushes SET sent_at = ? WHERE id = ?`).bind(nowMs, row.sid).run();
   }
-
-  await env.DB.prepare(`DELETE FROM scheduled_pushes WHERE expires_at < ?`).bind(nowMs).run();
+}
+// Expired rows go once an hour; deleting every minute scanned the table.
+async function deleteExpiredPushes(env) {
+  await ensurePushIndexes(env);
+  await env.DB.prepare(`DELETE FROM scheduled_pushes WHERE expires_at < ?`).bind(now()).run();
+}
+/*
+  Each push is a fetch, and the Workers Free plan allows 50 subrequests
+  (fetches and D1 calls together) per invocation; Paid allows 10,000.
+  PUSH_MAX_PER_TICK raises it on Paid.
+*/
+function pushMaxPerTick(env) {
+  const v = Number(env?.PUSH_MAX_PER_TICK);
+  return Number.isFinite(v) && v > 0 ? Math.min(500, v) : 30;
+}
+var pushIndexesReady = null;
+function ensurePushIndexes(env) {
+  if (!pushIndexesReady) {
+    pushIndexesReady = env.DB.batch([
+      env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_scheduled_pushes_expires ON scheduled_pushes(expires_at)`),
+      env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_scheduled_pushes_device ON scheduled_pushes(user_id, device_id)`)
+    ]).catch((err) => {
+      pushIndexesReady = null;
+      throw err;
+    });
+  }
+  return pushIndexesReady;
 }
 
 // ============================================================
@@ -10282,6 +10422,14 @@ var index_default = {
     if (new Date(event?.scheduledTime || Date.now()).getUTCMinutes() === 7) {
       ctx.waitUntil(
         cleanupExpiredPayloads(env).catch((err) => console.error("[cleanup cron]", safeErrorForLog(err)))
+      );
+    }
+    if (new Date(event?.scheduledTime || Date.now()).getUTCMinutes() === 37) {
+      ctx.waitUntil(
+        deleteExpiredPushes(env).catch((err) => console.error("[push expiry cron]", safeErrorForLog(err)))
+      );
+      ctx.waitUntil(
+        pruneRateLimits(env).catch((err) => console.error("[rate limit prune]", safeErrorForLog(err)))
       );
     }
   }

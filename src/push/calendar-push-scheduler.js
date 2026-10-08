@@ -73,15 +73,19 @@ async function collectCalendarPushItems() {
     if (rem.fireAt < now - GRACE_MS) continue;
 
     try {
-      const enc = await encryptReminderPayload({
+      const payload = {
         kind: 'calendar-reminder',
         id: rem.key,
         title: rem.ev.title || 'Event reminder',
         body: reminderBody(rem.ev, rem.minutesBefore),
         url: reminderUrl(),
-      });
+      };
 
-      items.push({ fireAt: Math.round(rem.fireAt), enc });
+      const enc = await encryptReminderPayload(payload);
+
+      // `fp` never leaves the device; it lets push-schedule.js skip
+      // re-uploading an unchanged schedule (the ciphertext always differs).
+      items.push({ fireAt: Math.round(rem.fireAt), enc, fp: `${payload.id}|${payload.title}|${payload.body}` });
     } catch (err) {
       console.warn('[YANTA Calendar Push] encrypt failed', err);
     }

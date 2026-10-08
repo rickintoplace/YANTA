@@ -23,6 +23,39 @@ const MAX_ITEMS = 500;
 
 const providers = new Map();
 
+/*
+  The schedule is re-collected every 30 minutes and on every calendar
+  change, but usually nothing changed — and each upload deletes and
+  re-inserts every row on the server. Items carry a local fingerprint
+  (`fp`, never uploaded); an identical set is not sent again, except
+  every few hours so a server that lost it gets it back.
+*/
+const FP_KEY = 'yanta.push.scheduleFp.v1';
+const FP_MAX_AGE_MS = 6 * 60 * 60 * 1000;
+
+function scheduleFingerprint(deviceId, items) {
+  if (items.some((item) => !item.fp)) return '';
+
+  const text = `${deviceId}\n${items.map((item) => `${item.fireAt}:${item.fp}`).join('\n')}`;
+
+  // FNV-1a; collisions only cost a skipped upload until FP_MAX_AGE_MS.
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+
+  return `${items.length}:${(h >>> 0).toString(36)}`;
+}
+
+function lastUpload() {
+  try {
+    return JSON.parse(localStorage.getItem(FP_KEY) || 'null') || {};
+  } catch {
+    return {};
+  }
+}
+
 let debounce = 0;
 let inFlight = null;
 
@@ -71,12 +104,23 @@ export async function refreshPushSchedule() {
 
   inFlight = (async () => {
     const items = await collectAll();
+    const deviceId = pushDeviceId();
+    const fp = scheduleFingerprint(deviceId, items);
+    const last = lastUpload();
+
+    if (fp && last.fp === fp && Date.now() - Number(last.at || 0) < FP_MAX_AGE_MS) {
+      return { ok: true, count: items.length, unchanged: true };
+    }
 
     try {
       await apiFetch('/api/push/schedule', {
         method: 'POST',
-        body: { deviceId: pushDeviceId(), items },
+        body: { deviceId, items: items.map(({ fireAt, enc }) => ({ fireAt, enc })) },
       });
+
+      try {
+        localStorage.setItem(FP_KEY, JSON.stringify({ fp, at: Date.now() }));
+      } catch {}
 
       return { ok: true, count: items.length };
     } catch (err) {

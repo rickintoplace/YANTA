@@ -1440,50 +1440,45 @@ function setAssistantBusy(next, label = 'Thinking…') {
   renderMessages();
 }
 
-function renderAssistantWorkingNode() {
+let workingNodeEl = null;
+
+/** The "Thinking… / Responding…" row: one element, updated in place. */
+function updateAssistantWorkingNode() {
   const reasoning = String(streamingReasoning || '').trim();
 
-  const node = document.createElement('div');
-  node.className = 'yanta-ai-msg assistant yanta-ai-working-msg';
+  if (!workingNodeEl) {
+    workingNodeEl = document.createElement('div');
+    workingNodeEl.className = 'yanta-ai-msg assistant yanta-ai-working-msg';
+    workingNodeEl.innerHTML = `
+      <div class="yanta-ai-msg-role"></div>
+      <div class="yanta-ai-working">
+        <span class="yanta-ai-spinner"></span>
+        <span class="yanta-ai-working-text"></span>
+        <span class="yanta-ai-working-dots" aria-hidden="true"><span></span><span></span><span></span></span>
+      </div>
+      <details class="yanta-ai-working-thinking" hidden>
+        <summary>${lucide('brain-circuit', 12)}<span>Thinking</span></summary>
+        <pre></pre>
+      </details>
+      <div class="yanta-ai-working-bar"><span></span></div>
+    `;
+  }
 
-  node.innerHTML = `
-    <div class="yanta-ai-msg-role">
-      YANTA AI · ${escapeHtml(getEffectiveAiRuntimeSettings().model || getAiSettings().model || 'LLM')}
-    </div>
+  const set = (sel, text) => {
+    const n = workingNodeEl.querySelector(sel);
+    if (n.textContent !== text) n.textContent = text;
+  };
 
-    <div class="yanta-ai-working">
-      <span class="yanta-ai-spinner"></span>
+  set('.yanta-ai-msg-role', `YANTA AI · ${getEffectiveAiRuntimeSettings().model || getAiSettings().model || 'LLM'}`);
+  set('.yanta-ai-working-text', assistantBusyLabel || 'Thinking…');
 
-      <span class="yanta-ai-working-text">
-        ${escapeHtml(assistantBusyLabel || 'Thinking…')}
-      </span>
+  const thinking = workingNodeEl.querySelector('.yanta-ai-working-thinking');
+  thinking.hidden = !reasoning;
+  if (reasoning) set('.yanta-ai-working-thinking pre', reasoning);
 
-      <span class="yanta-ai-working-dots" aria-hidden="true">
-        <span></span><span></span><span></span>
-      </span>
-    </div>
-
-    ${
-      reasoning
-        ? `
-          <details class="yanta-ai-working-thinking">
-            <summary>
-              ${lucide('brain-circuit', 12)}
-              <span>Thinking</span>
-            </summary>
-            <pre>${escapeHtml(reasoning)}</pre>
-          </details>
-        `
-        : ''
-    }
-
-    <div class="yanta-ai-working-bar">
-      <span></span>
-    </div>
-  `;
-
-  return node;
+  return workingNodeEl;
 }
+
 
 function safeJsonForTool(content) {
   try {
@@ -2304,6 +2299,70 @@ function renderToolBrainRow(hit) {
   return row;
 }
 
+/*
+  Incremental rendering. Every streamed token used to rebuild the whole
+  list, so the spinner, the dots and the progress bar restarted their
+  animations dozens of times a second (the "nervous" loader), and
+  widgets in earlier answers replayed their entrance. Now each message
+  keeps its element; only messages whose content changed are rebuilt
+  (inside the same outer element), the working indicator is one
+  persistent element whose text is updated, and the list is reconciled
+  with as few DOM moves as possible.
+*/
+const messageNodes = new WeakMap(); // message (or first of a tool run) -> { sig, node }
+let emptyStateEl = null;
+
+function messageSignature(msg) {
+  const c = String(msg.content || '');
+  return [
+    msg.role,
+    c.length,
+    c.slice(-32),
+    String(msg.reasoning || '').length,
+    msg.citeCheck ? `${msg.citeCheck.pending ? 'p' : 'd'}${JSON.stringify(msg.citeCheck).length}` : '',
+    msg.covers || 0,
+    msg.model || '',
+  ].join('|');
+}
+
+function messageInner(msg) {
+  if (msg.role === 'summary') return [renderSummaryMessageNode(msg)];
+  if (msg.role === 'assistant') return [renderAssistantMessageNode(msg)];
+
+  const wrap = document.createElement('div');
+  wrap.innerHTML = `
+    <div class="yanta-ai-msg-role" style="display:none">${escapeHtml(messageRoleLabel(msg))}</div>
+    <div class="yanta-ai-msg-content">${escapeHtml(msg.content).replace(/\n/g, '<br>')}</div>
+  `;
+  return [...wrap.childNodes];
+}
+
+function nodeForMessage(msg) {
+  const sig = messageSignature(msg);
+  const cached = messageNodes.get(msg);
+
+  if (cached && cached.sig === sig) return cached.node;
+
+  const node = cached?.node || document.createElement('div');
+  node.className = `yanta-ai-msg ${msg.role}`;
+  node.replaceChildren(...messageInner(msg));
+  messageNodes.set(msg, { sig, node });
+
+  return node;
+}
+
+function nodeForToolRun(run) {
+  const sig = `${run.length}|${String(run.at(-1)?.content || '').length}`;
+  const cached = messageNodes.get(run[0]);
+
+  if (cached && cached.sig === sig) return cached.node;
+
+  const node = renderToolActivityNode(run);
+  messageNodes.set(run[0], { sig, node });
+
+  return node;
+}
+
 function renderMessages() {
   if (!messagesEl) return;
 
@@ -2314,17 +2373,18 @@ function renderMessages() {
 
   renderContextMeter();
 
-  messagesEl.replaceChildren();
+  const desired = [];
 
   if (!conversation.length) {
-    const empty = document.createElement('div');
-    empty.className = 'yanta-ai-empty';
-    empty.innerHTML = `
-      <strong>Ask YANTA AI</strong>
-      <p>Try: “Summarize this note”, “Look into these files”, “Create a project note”, or “Create an event tomorrow at 14:00”.</p>
-    `;
-    messagesEl.append(empty);
-    return;
+    if (!emptyStateEl) {
+      emptyStateEl = document.createElement('div');
+      emptyStateEl.className = 'yanta-ai-empty';
+      emptyStateEl.innerHTML = `
+        <strong>Ask YANTA AI</strong>
+        <p>Try: “Summarize this note”, “Look into these files”, “Create a project note”, or “Create an event tomorrow at 14:00”.</p>
+      `;
+    }
+    desired.push(emptyStateEl);
   }
 
   for (let i = 0; i < conversation.length; i++) {
@@ -2336,35 +2396,34 @@ function renderMessages() {
       const run = [];
       while (i < conversation.length && conversation[i].toolName) run.push(conversation[i++]);
       i--;
-      messagesEl.append(renderToolActivityNode(run));
+      desired.push(nodeForToolRun(run));
       continue;
     }
 
-    const node = document.createElement('div');
-    node.className = `yanta-ai-msg ${msg.role}`;
+    desired.push(nodeForMessage(msg));
+  }
 
-    const roleLabel = messageRoleLabel(msg);
+  if (assistantBusy && conversation.length) {
+    desired.push(updateAssistantWorkingNode());
+  }
 
-    if (msg.role === 'summary') {
-      node.append(renderSummaryMessageNode(msg));
-    } else if (msg.role === 'assistant') {
-      node.append(renderAssistantMessageNode(msg));
-    } else {
-      node.innerHTML = `
-        <div class="yanta-ai-msg-role" style="display:none">${escapeHtml(roleLabel)}</div>
-        <div class="yanta-ai-msg-content">${escapeHtml(msg.content).replace(/\n/g, '<br>')}</div>
-      `;
+  if (contextMeterEl && conversation.length) {
+    desired.push(contextMeterEl);
+  }
+
+  // Reconcile: keep nodes that are already in place, insert the rest.
+  let ref = messagesEl.firstChild;
+  for (const node of desired) {
+    if (node === ref) {
+      ref = ref.nextSibling;
+      continue;
     }
-
-    messagesEl.append(node);
+    messagesEl.insertBefore(node, ref);
   }
-
-  if (assistantBusy) {
-    messagesEl.append(renderAssistantWorkingNode());
-  }
-
-  if (contextMeterEl) {
-    messagesEl.append(contextMeterEl);
+  while (ref) {
+    const next = ref.nextSibling;
+    ref.remove();
+    ref = next;
   }
 
   messagesEl.scrollTop = stick ? messagesEl.scrollHeight : previousTop;

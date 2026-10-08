@@ -9865,6 +9865,39 @@ async function opsSummary(env, nowMs) {
     })
   };
 }
+/*
+  Public health for the status monitor (rickops probes it every five
+  minutes and alerts on the transition). Answers 200 {"ok":true} or 503
+  with problem codes only — details are behind the metrics token.
+  Problems: the cron stopped, the model catalog no longer matches
+  OpenRouter, reminders are piling up unsent.
+*/
+var healthMemo = { at: 0, value: null };
+async function handleHealth(env, headers) {
+  if (Date.now() - healthMemo.at > 60 * 1000) {
+    const problems = [];
+    const nowMs = now();
+    try {
+      await ensureAppStateTable(env);
+      const beat = await env.DB.prepare(`SELECT updated_at FROM app_state WHERE key = ?`).bind(CRON_HEARTBEAT_KEY).first();
+      if (!beat || Number(beat.updated_at) < nowMs - 25 * 60 * 1000) problems.push("cron-stopped");
+    } catch {
+      problems.push("database");
+    }
+    try {
+      const catalog = aiCatalogHealth(await readAiModelIndex(env));
+      if (catalog.problems.length) problems.push("ai-catalog");
+    } catch {}
+    try {
+      const row = await env.DB.prepare(
+        `SELECT COUNT(*) AS n FROM scheduled_pushes WHERE sent_at IS NULL AND fire_at < ? AND expires_at > ?`
+      ).bind(nowMs - 10 * 60 * 1000, nowMs).first();
+      if (Number(row?.n || 0) > 0) problems.push("push-backlog");
+    } catch {}
+    healthMemo = { at: Date.now(), value: { ok: problems.length === 0, problems } };
+  }
+  return json(healthMemo.value, healthMemo.value.ok ? 200 : 503, { ...headers, "cache-control": "no-store" });
+}
 async function handleMetricsSummary(env, req, url, headers) {
   if (!metricsTokenOk(env, req, url)) {
     return json({ error: "unauthorized" }, 401, headers);
@@ -10151,6 +10184,9 @@ async function route(req, env) {
     }
     if (url.pathname === "/api/ai/chat/completions" && req.method === "POST") {
       return handleAiCompletions(env, req, headers);
+    }
+    if (url.pathname === "/api/health" && req.method === "GET") {
+      return handleHealth(env, headers);
     }
     if (url.pathname === "/api/ai/models" && req.method === "GET") {
       return handleAiModels(env, headers);

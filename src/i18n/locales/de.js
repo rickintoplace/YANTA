@@ -1411,6 +1411,7 @@ export default {
       silent: 'Nichts Berichtenswertes.',
       noSignal: 'Nichts verändert — übersprungen.',
       repeat: 'Gleiches Ergebnis wie zuletzt — nicht wiederholt.',
+      nearRepeat: 'Nichts Neues seit einer früheren Karte — nicht wiederholt.',
       failed: 'Der Lauf ist fehlgeschlagen.',
       checkSkipped: 'Die Prüfung fand nichts Relevantes — übersprungen.',
       filed: 'Nebensächlich — in der heutigen Notiz abgelegt statt im Posteingang.',

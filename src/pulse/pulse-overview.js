@@ -604,6 +604,7 @@ const OUTCOME_ICON = {
   silent: ['minus', ''],
   'no-signal': ['moon', ''],
   repeat: ['repeat', ''],
+  'near-repeat': ['copy', ''],
   failed: ['triangle-alert', 'err'],
   'check-skipped': ['funnel', ''],
   filed: ['notebook-pen', 'ok'],

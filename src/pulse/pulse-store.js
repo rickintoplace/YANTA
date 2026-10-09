@@ -394,6 +394,8 @@ export async function addInboxItem({
   title = '',
   body = '',
   proposals = [],
+  citeCheck = null,
+  sources = [],
 } = {}) {
   const { inbox } = await maps();
 
@@ -413,6 +415,16 @@ export async function addInboxItem({
       args: proposal.args && typeof proposal.args === 'object' ? proposal.args : {},
       status: 'pending',
       error: '',
+    })),
+    // VeriQuote result for cited cards (see pulse-runner.js), and the
+    // sources [n] refers to — title and link only, never their text.
+    citeCheck: citeCheck || null,
+    sources: (sources || []).slice(0, 20).map((s) => ({
+      n: Number(s.n),
+      title: String(s.title || '').slice(0, 200),
+      url: /^https?:\/\//.test(String(s.url || '')) ? String(s.url) : '',
+      kind: String(s.kind || ''),
+      id: String(s.id || ''),
     })),
   };
 

@@ -1432,6 +1432,7 @@ export default {
       silent: 'Nothing worth reporting.',
       noSignal: 'Nothing changed — skipped.',
       repeat: 'Same result as last time — not repeated.',
+      nearRepeat: 'Nothing new since an earlier card — not repeated.',
       failed: 'The run failed.',
       checkSkipped: 'The check found nothing relevant — skipped.',
       filed: 'Minor — filed in today’s note instead of the Inbox.',

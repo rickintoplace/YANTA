@@ -23,6 +23,8 @@ import {
   setDashboardWidgetEmpty,
 } from '../dashboard-widgets.js';
 import { renderBlocksInlineWithContext } from '../markdown.js';
+import { stripForDisplay } from 'veriquote';
+import { keepClaimMarkers, markCitations, renderCitationCheckNode } from '../ai/citation-ui.js';
 import { t } from '../i18n/index.js';
 
 import { executeToolCall, getTool } from '../ai/tool-registry.js';
@@ -122,6 +124,20 @@ function injectCss() {
 }
 
 .yanta-pulse-body > :first-child { margin-top: 0; }
+
+.yanta-pulse-sources {
+  margin: 6px 0 0;
+  padding-left: 22px;
+  font-size: 11.5px;
+  color: var(--text-faint);
+  display: grid;
+  gap: 2px;
+}
+
+.yanta-pulse-sources a {
+  color: var(--text-dim);
+  overflow-wrap: anywhere;
+}
 .yanta-pulse-body > :last-child { margin-bottom: 0; }
 
 .yanta-pulse-actions {
@@ -369,8 +385,34 @@ function renderCard(item, onChange) {
 
   if (item.body) {
     const body = el('div', { class: 'yanta-pulse-body' });
-    body.innerHTML = renderBlocksInlineWithContext(item.body, { remoteMedia: 'link' });
+    // Cited cards carry [n]{cX} markers and a quote appendix: show the
+    // text, colour each [n] by its check, list the sources below.
+    body.innerHTML = renderBlocksInlineWithContext(
+      stripForDisplay(keepClaimMarkers(String(item.body))),
+      { remoteMedia: 'link' }
+    );
+    markCitations(body, item.citeCheck);
     card.append(body);
+
+    const cited = (item.sources || []).filter((s) => String(item.body).includes(`[${s.n}]`));
+    if (cited.length) {
+      const list = el('ol', { class: 'yanta-pulse-sources' });
+      for (const source of cited) {
+        const li = el('li');
+        li.value = source.n;
+        if (source.url) {
+          const a = el('a', { href: source.url, target: '_blank', rel: 'noopener noreferrer' });
+          a.textContent = source.title;
+          li.append(a);
+        } else {
+          li.textContent = source.title;
+        }
+        list.append(li);
+      }
+      card.append(list);
+    }
+
+    if (item.citeCheck) card.append(renderCitationCheckNode(item.citeCheck));
   }
 
   for (const proposal of item.proposals || []) {

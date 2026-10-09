@@ -52,6 +52,13 @@ import {
 } from './pulse-config.js';
 
 import { readSensors } from './pulse-sensors.js';
+import { findNearDuplicate } from './pulse-novelty.js';
+import { planRoutineTools, needsPlan } from './pulse-tool-plan.js';
+
+import { buildCitationInstructions, stripForDisplay } from 'veriquote';
+import { createSourceRegistry, YANTA_CITATION_PREAMBLE } from '../ai/citation-sources.js';
+import { checkCitations, hasCitations } from '../ai/citation-check.js';
+import { openRouterChatCompletion } from '../ai/openrouter-client.js';
 import { runCheck, rankResult } from './pulse-decider.js';
 import { prefetchForRoutine } from './pulse-prefetch.js';
 
@@ -87,6 +94,8 @@ export const RUN_OUTCOME = Object.freeze({
   SILENT: 'silent',
   NO_SIGNAL: 'no-signal',
   REPEAT: 'repeat',
+  // Not identical, but nothing the user had not already been told.
+  NEAR_REPEAT: 'near-repeat',
   FAILED: 'failed',
   // The routine's `check` found nothing matching — skipped before the agent.
   CHECK_SKIPPED: 'check-skipped',
@@ -135,7 +144,7 @@ async function outputLanguage(routine) {
   return LOCALES.find((locale) => locale.code === code)?.native || 'English';
 }
 
-async function buildRunSystemMessage(routine) {
+async function buildRunSystemMessage(routine, { cite = false } = {}) {
   let soul = '';
 
   try {
@@ -167,6 +176,8 @@ async function buildRunSystemMessage(routine) {
       soul ? `# Soul\n${soul}` : '',
       rules,
       aiTimeRules(),
+      // Cited cards are checked before delivery (VeriQuote), like chat answers.
+      cite ? `${YANTA_CITATION_PREAMBLE}\nIn this run, cite in the pulse_emit body.\n\n${buildCitationInstructions({ maxCitedClaims: 8 })}` : '',
     ].filter(Boolean).join('\n\n'),
   };
 }
@@ -199,10 +210,19 @@ function buildRunUserMessage(routine, sensors, prefetched, now) {
   };
 }
 
+/** A cited body for places without the check UI: markers kept as [n], sources listed. */
+function bodyWithSources(body, sources = []) {
+  const clean = stripForDisplay(String(body || '')).trim();
+  const cited = sources.filter((s) => clean.includes(`[${s.n}]`));
+  if (!cited.length) return clean;
+  return [clean, '', ...cited.map((s) => `[${s.n}] ${s.url ? `[${s.title}](${s.url})` : s.title}`)].join('\n');
+}
+
 async function deliver(routine, run, { title, body }, { quiet = false } = {}) {
   // Ranked minor: only today's note, wherever the routine usually reports.
   const outputs = new Set(quiet ? [PULSE_OUTPUTS.JOURNAL] : routine.outputs);
   const delivered = [];
+  const cite = { citeCheck: run.citeCheck || null, sources: run.sources || [] };
 
   if (outputs.has(PULSE_OUTPUTS.INBOX) || !outputs.size) {
     await addInboxItem({
@@ -211,6 +231,7 @@ async function deliver(routine, run, { title, body }, { quiet = false } = {}) {
       title,
       body,
       proposals: run.proposals,
+      ...cite,
     });
 
     delivered.push(PULSE_OUTPUTS.INBOX);
@@ -218,7 +239,7 @@ async function deliver(routine, run, { title, body }, { quiet = false } = {}) {
 
   if (outputs.has(PULSE_OUTPUTS.JOURNAL)) {
     await captureToJournal(
-      [`**${title}**`, body].filter(Boolean).join('\n'),
+      [`**${title}**`, bodyWithSources(body, cite.sources)].filter(Boolean).join('\n'),
       { source: `pulse:${routine.name}`, ai: true }
     ).catch((err) => console.warn('[YANTA Pulse] journal write failed', err));
 
@@ -230,7 +251,7 @@ async function deliver(routine, run, { title, body }, { quiet = false } = {}) {
 
     postAssistantNotice({
       title,
-      body,
+      body: bodyWithSources(body, cite.sources),
       routineName: routine.name,
       routineTitle: routine.title,
     });
@@ -247,6 +268,7 @@ async function deliver(routine, run, { title, body }, { quiet = false } = {}) {
       title,
       body,
       proposals: run.proposals,
+      ...cite,
     });
 
     delivered.push(PULSE_OUTPUTS.INBOX);
@@ -338,7 +360,24 @@ export async function runRoutine(routine, {
   const run = {
     emitted: null,
     proposals: [],
+    citeCheck: null,
+    sources: [],
   };
+
+  const offered = toolsForProfile(profile, { permissions });
+
+  // What this routine may change or reach, decided from its own text
+  // before anything untrusted is read (pulse-tool-plan.js).
+  let toolPlan = null;
+  try {
+    toolPlan = await planRoutineTools(routine, offered, { signal });
+  } catch (err) {
+    if (err?.name === 'AbortError') throw err;
+  }
+  const notPlanned = new Set();
+
+  const citationMode = String(getAiSettings().citationCheck || 'check');
+  const citeSources = citationMode === 'off' ? null : createSourceRegistry();
 
   /*
     Nobody watches a run, so after it has read untrusted content (feeds,
@@ -365,10 +404,10 @@ export async function runRoutine(routine, {
   try {
     loop = await runAgentLoop({
       messages: [
-        await buildRunSystemMessage(routine),
+        await buildRunSystemMessage(routine, { cite: !!citeSources }),
         buildRunUserMessage(routine, sensors, prefetched, now),
       ],
-      tools: toolsForProfile(profile, { permissions }),
+      tools: offered,
       maxRounds,
       finalTools: pulseFinalTools(),
       finalInstruction: 'The tool budget for this run is used up. Decide now: call pulse_emit with what you found, or reply in one line that nothing is worth reporting.',
@@ -379,6 +418,15 @@ export async function runRoutine(routine, {
       beforeToolCall: async ({ name, args, call }) => {
         if (isPulseTool(name)) {
           return { result: handlePulseTool({ name, args, run }) };
+        }
+
+        if (toolPlan && needsPlan(name) && !toolPlan.tools.includes(name)) {
+          notPlanned.add(name);
+          return {
+            allowed: false,
+            code: 'EAI_NOT_PLANNED',
+            reason: `Not run: ${name} is not part of what this routine was planned to do (decided from its instructions before anything was read). If the user should do it, propose it with pulse_propose.`,
+          };
         }
 
         const blocked = untrustedContentGate(taint, {
@@ -399,14 +447,17 @@ export async function runRoutine(routine, {
 
         return undefined;
       },
-      onToolResult: async ({ name, result }) => {
+      onToolResult: async ({ name, result, ran }) => {
         noteToolResult(taint, name, result);
 
-        if (!PULSE_NOTE_CREATING_TOOLS.includes(name)) return;
-
-        for (const noteId of noteIdsFromToolResult(result)) {
-          await markNoteAiGenerated(noteId, `pulse:${routine.name}`);
+        if (PULSE_NOTE_CREATING_TOOLS.includes(name)) {
+          for (const noteId of noteIdsFromToolResult(result)) {
+            await markNoteAiGenerated(noteId, `pulse:${routine.name}`);
+          }
         }
+
+        // Numbered for citing; the model sees the result with `cite` fields.
+        return ran && citeSources ? citeSources.register(name, result) : undefined;
       },
     });
   } catch (err) {
@@ -438,6 +489,7 @@ export async function runRoutine(routine, {
   )];
 
   const notes = check ? [`check ${percent(check.probability)}`] : [];
+  if (notPlanned.size) notes.push(`not planned: ${[...notPlanned].join(', ')}`);
 
   const finish = async (outcome, extra = {}) => {
     await recordHistory({
@@ -457,8 +509,46 @@ export async function runRoutine(routine, {
     return finish(RUN_OUTCOME.SILENT);
   }
 
-  const { title, body } = run.emitted;
-  const digest = contentDigest(`${title}\n${body}`);
+  const { title } = run.emitted;
+  let { body } = run.emitted;
+
+  // Cited card: check every quote against what the run actually read; in
+  // "revise" mode send failed citations back once (citation-check.js).
+  if (citeSources?.size && hasCitations(body)) {
+    try {
+      let checked = await checkCitations(body, citeSources, { signal });
+
+      if (checked?.verdict === 'revise' && citationMode === 'revise' && checked.instructionsForModel) {
+        const revised = await openRouterChatCompletion({
+          signal,
+          source: 'pulse',
+          tools: [],
+          messages: [
+            ...loop.thread,
+            { role: 'user', content: `${checked.instructionsForModel}\n\nReply with only the corrected card body (markdown, with the EVI1 appendix).` },
+          ],
+        });
+        const text = String(revised?.content || '').trim();
+        if (text && hasCitations(text)) {
+          body = text;
+          checked = await checkCitations(body, citeSources, { signal });
+          if (checked) checked.revised = true;
+        }
+      }
+
+      if (checked) {
+        const { instructionsForModel, ...stored } = checked;
+        run.citeCheck = stored;
+        run.sources = citeSources.list();
+        notes.push(`citations ${checked.passed}/${checked.total}`);
+      }
+    } catch (err) {
+      if (err?.name === 'AbortError') throw err;
+      console.warn('[YANTA Pulse] citation check failed', err);
+    }
+  }
+
+  const digest = contentDigest(`${title}\n${stripForDisplay(body)}`);
 
   // Same result as last time — the user already read it once.
   if (!force && digest && digest === routineState.lastDigest) {
@@ -466,7 +556,19 @@ export async function runRoutine(routine, {
     return finish(RUN_OUTCOME.REPEAT, { title });
   }
 
-  const rank = await rankResult(routine, { title, body }, { now, signal });
+  // Close enough to a recent card, or nothing new in other words.
+  if (!force) {
+    const dup = await findNearDuplicate(routine.name, { title, body }, { now, signal });
+    if (dup) {
+      notes.push(dup.reason === 'similar'
+        ? `${Math.round(dup.similarity * 100)} % like an earlier card`
+        : `nothing new (${percent(1 - dup.probability)} sure)`);
+      await recordRun(routine.name, { dueAt: dueAt || now, digest }, now);
+      return finish(RUN_OUTCOME.NEAR_REPEAT, { title });
+    }
+  }
+
+  const rank = await rankResult(routine, { title, body: stripForDisplay(body) }, { now, signal });
   if (rank) notes.push(`rank ${rank.score.toFixed(1)}/3`);
 
   // A parked proposal needs its Inbox card, so it is never filed away.

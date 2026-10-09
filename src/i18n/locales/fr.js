@@ -1411,6 +1411,7 @@ export default {
       silent: 'Rien qui mérite d’être signalé.',
       noSignal: 'Rien n’a changé — ignoré.',
       repeat: 'Même résultat que la dernière fois — non répété.',
+      nearRepeat: 'Rien de nouveau depuis une carte précédente — non répété.',
       failed: 'L’exécution a échoué.',
       checkSkipped: 'La vérification n’a rien trouvé de pertinent — ignoré.',
       filed: 'Mineur — classé dans la note du jour plutôt que dans la boîte de réception.',

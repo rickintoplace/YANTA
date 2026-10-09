@@ -11,7 +11,7 @@
 import { $ } from './core.js';
 import { getView } from './editor.js';
 import { applyFormatAction, formatToolbarButton } from './editor/format-actions.js';
-import { parseLine } from './editor/markdown-commands.js';
+import { parseLine } from './editor/markdown-lines.js';
 
 let tb;
 let raf = 0;

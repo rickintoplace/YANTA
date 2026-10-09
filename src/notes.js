@@ -542,7 +542,10 @@ export async function openNote(id) {
   const host = $('editor');
   host.replaceChildren();
 
-  mountEditor(host, { noteId: id });
+  await mountEditor(host, { noteId: id });
+
+  // Another note was opened while the editor was loading.
+  if (state.currentNoteId !== id) return;
 
   // Notes mounted from a shared space with a read role are hard
   // read-only: the server rejects their writes anyway, this keeps

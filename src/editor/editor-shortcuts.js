@@ -20,19 +20,28 @@
 // depends on the keyboard in front of you, not on the account.
 // ============================================================
 
-import { keymap } from '@codemirror/view';
-import { Compartment, Prec } from '@codemirror/state';
 
 import { t } from '../i18n/index.js';
 
-import {
-  insertLink,
-  setHeading,
-  toggleBlockKind,
-  toggleCodeBlock,
-  toggleInlineMark,
-  toggleTaskDone,
-} from './markdown-commands.js';
+/*
+  The commands themselves (markdown-commands.js) need CodeMirror, which
+  loads with the editor (editor-cm.js). The catalogue below stays free
+  of it so Settings › Shortcuts and the format menu do not pull
+  CodeMirror into the boot bundle: commands run only on an editor view,
+  and the editor module provides them before it creates one.
+*/
+let md = null;
+
+export function provideMarkdownCommands(commands) {
+  md = commands;
+}
+
+const insertLink = (...a) => md.insertLink(...a);
+const setHeading = (...a) => md.setHeading(...a);
+const toggleBlockKind = (...a) => md.toggleBlockKind(...a);
+const toggleCodeBlock = (...a) => md.toggleCodeBlock(...a);
+const toggleInlineMark = (...a) => md.toggleInlineMark(...a);
+const toggleTaskDone = (...a) => md.toggleTaskDone(...a);
 
 const STORAGE_KEY = 'yanta.settings.device.editorShortcuts';
 
@@ -235,7 +244,7 @@ function parseChord(chord) {
 }
 
 /** Chord rewritten so its base token names a physical key, or `null`. */
-function physicalChord(chord) {
+export function physicalChord(chord) {
   const { mods, base } = parseChord(chord);
   const code = tokenToCode(base);
   if (!code) return null;
@@ -244,7 +253,7 @@ function physicalChord(chord) {
 }
 
 /** Physical form of a keydown, used for the layout-independent fallback. */
-function physicalChordFromEvent(event) {
+export function physicalChordFromEvent(event) {
   if (!event.code || MODIFIER_KEYS.has(event.key)) return null;
 
   return [...chordParts(event), `[${event.code}]`].join('-');
@@ -370,67 +379,18 @@ export function resetAllEditorShortcuts() {
 // CodeMirror extension
 // ------------------------------------------------------------
 
-const shortcutsCompartment = new Compartment();
-const liveViews = new Set();
+/*
+  The CodeMirror side (keymap, live reconfigure) is in
+  editor-shortcuts-cm.js; it registers here to hear about rebinds.
+*/
+let shortcutsChangedHook = null;
 
-function buildKeymap() {
-  const bindings = editorShortcuts();
-  const byPhysical = new Map();
-  const keyBindings = [];
-
-  for (const cmd of EDITOR_COMMANDS) {
-    for (const chord of bindings[cmd.id] || []) {
-      // Named chords go through CodeMirror, which already handles Mod →
-      // Ctrl/Cmd and the common layout quirks for letters and digits.
-      // No `preventDefault` flag: a command that declines (Ctrl+Enter
-      // outside a task list) must leave the key to whoever wants it.
-      if (!chord.includes('[')) {
-        keyBindings.push({ key: chord, run: cmd.run });
-      }
-
-      const physical = physicalChord(chord);
-      if (physical && !byPhysical.has(physical)) byPhysical.set(physical, cmd.run);
-    }
-  }
-
-  // Runs only when no named binding matched, so it never double-fires.
-  keyBindings.push({
-    any(view, event) {
-      if (!(event.ctrlKey || event.metaKey || event.altKey)) return false;
-
-      const run = byPhysical.get(physicalChordFromEvent(event));
-      return Boolean(run && run(view));
-    },
-  });
-
-  // Beats the stock editing keymaps, so a user rebind always wins.
-  return Prec.high(keymap.of(keyBindings));
-}
-
-/** The editor extension, live-reconfigured whenever bindings change. */
-export function editorShortcutsExtension() {
-  return shortcutsCompartment.of(buildKeymap());
-}
-
-/** Editors must register so a rebind reaches them without a remount. */
-export function attachEditorShortcuts(view) {
-  liveViews.add(view);
-}
-
-export function detachEditorShortcuts(view) {
-  liveViews.delete(view);
+export function onEditorShortcutsChanged(fn) {
+  shortcutsChangedHook = fn;
 }
 
 function notifyShortcutsChanged() {
-  const next = buildKeymap();
-
-  for (const view of liveViews) {
-    try {
-      view.dispatch({ effects: shortcutsCompartment.reconfigure(next) });
-    } catch {
-      liveViews.delete(view);
-    }
-  }
+  shortcutsChangedHook?.();
 }
 
 /** Runs a command by id — used by menus and the selection toolbar. */

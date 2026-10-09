@@ -39,7 +39,7 @@ import { renderBacklinks, renderOutline, setupWikilinkHover, handleWikilinkClick
 import { openPalette, closePalette, buildCommandList, paletteMove, paletteAccept, paletteFilter } from './palette/palette.js';
 import { openImageModal, closeImageModal, setupImage, pickImageFile, cleanupUnusedImages, insertImageAsRef } from './image.js';
 import { openIconInsertPicker, openIconPicker } from './icon-picker.js';
-import { focusEditorEnd, getView } from './editor.js';
+import { focusEditorEnd, getView, ensureEditor } from './editor.js';
 import { setupFormatToolbar } from './format-menu.js';
 import { exportAsZip, exportNoteAsMd, exportBundle, exportEveryNoteMd, openExportMenu, importFiles, importItems, walkEntry } from './io.js';
 import { syncRestore, syncConnect, syncDisconnect, syncFull, openSyncSetup, closeSyncSetup, syncMenu } from './sync.js';
@@ -2989,6 +2989,8 @@ async function init() {
       ensureLucideIcons();
       // The calendar view's FullCalendar (~600 KB source), so opening it is instant.
       ensureFullCalendar().catch(() => {});
+      // The note editor (CodeMirror, ~1.2 MB source), likewise.
+      ensureEditor().catch(() => {});
     };
     if ('requestIdleCallback' in window) requestIdleCallback(load, { timeout: 10_000 });
     else load();

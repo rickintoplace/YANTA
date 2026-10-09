@@ -11,6 +11,7 @@
 import { isChatEnabled } from './chat/chat-enabled.js';
 import { store } from './core.js';
 import { yantaPrompt } from './dialogs.js';
+import { getLocale, tList } from './i18n/index.js';
 
 export const DISPLAY_NAME_SETTING = 'user.displayName';
 
@@ -21,167 +22,27 @@ export const DISPLAY_NAME_SETTING = 'user.displayName';
 */
 const MATRIX_NAME_CACHE_SETTING = 'chat.displayNameCache';
 
-// "{name}" is optional in every template: without a known name the
-// ", {name}" (or " {name}") segment is stripped, punctuation intact.
-const GREETINGS = {
-  morning: [
-    'Good morning, {name}',
-    'Morning, {name}',
-    'Rise and write, {name}',
-    'Fresh page, fresh day, {name}',
-    'Morning, {name} — coffee and notes?',
-    'Sun’s up, notes out',
-    'Fresh page energy',
-    'Fresh brew, fresh view',
-    'Early bird vibes, {name}?',
-    'Awake and aware, {name}',
-    'A calm start, {name}',
-    'Soft start, clear mind',
-    'Morning stillness, {name}',
-  ],
+// The greetings live in the locale catalogs (src/i18n/locales/greeting/):
+// each language has its own lists, with its own wordplay. "{name}" is
+// optional in every entry; without a known name the name segment is
+// stripped, punctuation intact.
 
-  midday: [
-    'Good day, {name}',
-    'Midday check-in',
-    'Pause and breathe, {name}',
-    'Midday mindfulness',
-  ],
- 
-  afternoon: [
-    'Good afternoon, {name}',
-    'Afternoon, {name}',
-    'Coffee and YANTA time?',
-  ],
+const WEEKDAY_KEYS = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
 
-  evening: [
-    'Good evening, {name}',
-    'Evening, {name}',
-    'Evening thoughts, {name}?',
-    'Wind down and write down',
-    'Letting the day settle',
-  ],
-
-  night: [
-    'Late-night ideas, {name}?',
-    'The best notes happen after dark',
-    'Midnight muse reporting for duty',
-    'Moonlit mindfulness',
-    'Rest in stillness, {name}',
-  ],
-
-  generic: [
-    'Hey there, {name}',
-    'Welcome back, {name}',
-    'What’s on your mind, {name}?',
-    'Good to see you, {name}',
-    'It’s note-orious {name}',
-    'Notably glad to see you, {name}',
-    "Let's get textual",
-    'What’s the plan, {name}?',
-    'Let’s get down to business',
-    'Decrypted and ready',
-    'Only you can see this, {name}',
-    'Back at it, {name}',
-    'Be here now, {name}',
-    'A calm mind begins',
-    'Present and ready',
-    'Mindful {weekday}, {name}',
-    'Clarity starts here',
-  ],
-
-  puns: [
-    'Ready to take note, {name}?',
-    'Let’s make today noteworthy, {name}',
-    'Your notes missed you, {name}',
-    'Duly noted, {name}',
-    'Yet another great idea, {name}?',
-    'Note bad, huh?',
-    'Safe and sound, {name}',
-    'Encrypted with love',
-    'The cloud can’t read this',
-    'Note the moment',
-  ],
-};
-
-const WEEKDAY_GREETINGS = {
-  monday: [
-    'Fresh week, fresh notes, {name}',
-    'Monday momentum',
-    'Start the week strong, {name}',
-    'One calm step into the week',
-  ],
-
-  tuesday: [
-    'Tuesday tune-up',
-    'Tiny wins Tuesday',
-    'Tuesday is for tidy notes',
-  ],
-
-  wednesday: [
-    'Midweek momentum',
-    'Wednesday check-in',
-    'Midweek notes, fresh thoughts',
-  ],
-
-  thursday: [
-    'Thursday thoughts',
-    'One more push before Friday',
-    'Make Thursday count',
-  ],
-
-  friday: [
-    'That Friday feeling',
-    'Friday focus, {name}',
-    'Finish-line Friday',
-    'End the week on a note',
-    'Friday notes, weekend loading',
-  ],
-
-  saturday: [
-    'Happy weekend, {name}',
-    'Saturday reset',
-    'Weekend mode, {name}',
-    'Make space for ideas this Saturday',
-  ],
-
-  sunday: [
-    'Happy weekend, {name}',
-    'Soft landing Sunday',
-    'Plan the week gently, {name}',
-  ],
-};
-
-const WEEKDAY_GENERIC_GREETINGS = [
-  'Happy {weekday}, {name}',
-  'Make this {weekday} count',
-  'Own this {weekday}',
-  'A good {weekday} for good notes',
-  'Small steps this {weekday}',
-  'Make room for ideas this {weekday}',
-  'What does this {weekday} need?',
-  'Fresh notes for {weekday}',
-  'Let’s make {weekday} noteworthy',
-  'New thoughts for this {weekday}?',
-];
-
-function timeOfDayPool(hour) {
-  if (hour >= 5 && hour < 11) return GREETINGS.morning;
-  if (hour >= 11 && hour < 13) return GREETINGS.midday;
-  if (hour >= 13 && hour < 17) return GREETINGS.afternoon;
-  if (hour >= 17 && hour < 22) return GREETINGS.evening;
-  return GREETINGS.night;
+function timeOfDayKey(hour) {
+  if (hour >= 5 && hour < 11) return 'morning';
+  if (hour >= 11 && hour < 13) return 'midday';
+  if (hour >= 13 && hour < 17) return 'afternoon';
+  if (hour >= 17 && hour < 22) return 'evening';
+  return 'night';
 }
 
-function weekdayGreetingPool(date) {
-  const weekday = date.toLocaleDateString('en-US', { weekday: 'long' });
-  const key = weekday.toLowerCase();
-
-  return [
-    ...WEEKDAY_GENERIC_GREETINGS.map((template) =>
-      template.replaceAll('{weekday}', weekday)
-    ),
-    ...(WEEKDAY_GREETINGS[key] || []),
-  ];
+function localWeekday(date) {
+  try {
+    return date.toLocaleDateString(getLocale(), { weekday: 'long' });
+  } catch {
+    return date.toLocaleDateString('en-US', { weekday: 'long' });
+  }
 }
 
 function fillName(template, name) {
@@ -192,7 +53,8 @@ function fillName(template, name) {
   // Strip the name segment but keep trailing punctuation:
   // "Back at it, {name}" -> "Back at it" · "…oil, {name}?" -> "…oil?"
   return template
-    .replace(/[,\s]*\{name\}/, '')
+    // Japanese: "…、{name}さん" loses the honorific along with the name.
+    .replace(/[,、\s]*\{name\}(さん)?/, '')
     .replace(/\s+([?!.])/, '$1');
 }
 
@@ -205,17 +67,17 @@ function pickTemplate() {
   const now = new Date();
 
   const pool = [
-    ...timeOfDayPool(now.getHours()),
-    ...GREETINGS.generic,
-    ...GREETINGS.puns,
-    ...weekdayGreetingPool(now),
+    ...tList(`greeting.${timeOfDayKey(now.getHours())}`),
+    ...tList('greeting.generic'),
+    ...tList('greeting.puns'),
+    ...tList('greeting.weekdayGeneric'),
+    ...tList(`greeting.${WEEKDAY_KEYS[now.getDay()]}`),
   ];
 
-  // Templates outside the weekday pools may use {weekday} too.
-  const weekday = now.toLocaleDateString('en-US', { weekday: 'long' });
+  if (!pool.length) return 'YANTA';
 
   sessionTemplate = pool[Math.floor(Math.random() * pool.length)]
-    .replaceAll('{weekday}', weekday);
+    .replaceAll('{weekday}', localWeekday(now));
 
   return sessionTemplate;
 }

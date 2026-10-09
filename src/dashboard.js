@@ -2677,7 +2677,7 @@ function renderDashboardHeader() {
   const home = el('button', {
     type: 'button',
     onclick: () => navigateDashboardFolder(null),
-  }, 'Home');
+  }, i18n('dashboard.home'));
 
   crumb.append(home);
 
@@ -2744,7 +2744,7 @@ function renderDashboardHeader() {
     },
   });
 
-  newBtn.innerHTML = `${lucide('plus', 17)} <span>New</span>`;
+  newBtn.innerHTML = `${lucide('plus', 17)} <span>${escapeHtml(i18n('dashboard.newItem'))}</span>`;
 
   // Widgets live on the dashboard root only — hide the manager inside
   // folders and when no widget module registered itself.
@@ -2772,8 +2772,8 @@ function renderDashboardHeader() {
     */
     box.innerHTML = `
       <div class="yanta-dashboard-empty-icon">${lucide('sparkles', 34)}</div>
-      <strong>Nothing here yet</strong>
-      <p>Start from a ready-made page, or with an empty one.</p>
+      <strong>${escapeHtml(i18n('dashboard.emptyTitle'))}</strong>
+      <p>${escapeHtml(i18n('dashboard.emptyHint'))}</p>
     `;
 
     const templateBtn = el('button', {
@@ -2781,7 +2781,7 @@ function renderDashboardHeader() {
       onclick: () => {
         openTemplatePicker();
       },
-    }, 'Start from a template');
+    }, i18n('dashboard.startFromTemplate'));
 
     const blankBtn = el('button', {
       class: 'btn',
@@ -3610,7 +3610,7 @@ function folderShareStatus(folder) {
   if (folder.spaceId) {
     return {
       mounted: true,
-      title: `Shared with you${folder.spaceRole === 'write' ? ' · you can edit' : ' · view only'}`,
+      title: folder.spaceRole === 'write' ? i18n('dashboard.sharedCanEdit') : i18n('dashboard.sharedViewOnly'),
     };
   }
 

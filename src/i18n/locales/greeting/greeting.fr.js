@@ -1,0 +1,68 @@
+// Salutations du tableau de bord (français).
+
+export default {
+  morning: [
+    "Bonjour, {name}",
+    "Café et notes, {name} ?",
+    "Nouveau jour, page blanche, {name}",
+    "Matinal, {name} ?",
+    "Un début en douceur, {name}",
+    "Le soleil est levé, les notes aussi",
+  ],
+  midday: [
+    "Bon midi, {name}",
+    "Une pause pour respirer, {name}",
+    "Mi-journée, idées fraîches",
+  ],
+  afternoon: [
+    "Bon après-midi, {name}",
+    "Café et YANTA ?",
+    "L’après-midi est à vous, {name}",
+  ],
+  evening: [
+    "Bonsoir, {name}",
+    "Pensées du soir, {name} ?",
+    "Faire le tri de la journée, {name}",
+    "Ralentir et tout noter",
+  ],
+  night: [
+    "Encore debout, {name} ?",
+    "Idées nocturnes, {name} ?",
+    "Les meilleures notes naissent la nuit",
+    "La muse de minuit est de garde",
+  ],
+  generic: [
+    "Bonjour, {name}",
+    "Content de vous revoir, {name}",
+    "Qu’avez-vous en tête, {name} ?",
+    "Quel est le programme, {name} ?",
+    "Chiffré et prêt",
+    "Personne d’autre ne peut lire ceci, {name}",
+    "La clarté commence ici",
+    "Bon {weekday}, {name}",
+  ],
+  puns: [
+    "On prend des notes, {name} ?",
+    "Rendons cette journée notable, {name}",
+    "Vos notes vous attendaient, {name}",
+    "C’est noté, {name}",
+    "Encore une bonne idée, {name} ?",
+    "En lieu sûr, {name}",
+    "Chiffré avec amour",
+    "Le cloud ne peut pas lire ceci",
+  ],
+  monday: ["Nouvelle semaine, nouvelles notes, {name}", "Un lundi plein d’élan"],
+  tuesday: ["Mardi des petites victoires", "Mardi, on range"],
+  wednesday: ["Milieu de semaine, {name}", "Point du mercredi"],
+  thursday: ["Pensées du jeudi", "Encore un effort avant vendredi"],
+  friday: ["Enfin vendredi, {name}", "Finir la semaine sur une bonne note"],
+  saturday: ["Bon week-end, {name}", "Samedi pour souffler"],
+  sunday: ["Bon dimanche, {name}", "Préparer la semaine en douceur, {name}"],
+  weekdayGeneric: [
+    "Faites compter ce {weekday}",
+    "Un bon {weekday} pour de bonnes notes",
+    "De petits pas ce {weekday}",
+    "De quoi ce {weekday} a-t-il besoin ?",
+    "Des notes fraîches pour ce {weekday}",
+  ],
+};

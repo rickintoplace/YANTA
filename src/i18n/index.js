@@ -182,6 +182,16 @@ export function t(key, params) {
   return typeof value === 'string' ? interpolate(value, params) : key;
 }
 
+/**
+ * A list from the catalog (active locale, else English), e.g. the
+ * dashboard greetings, where each language has its own entries and
+ * lists differ in length. [] when missing.
+ */
+export function tList(key) {
+  const value = lookup(active, key) ?? lookup(fallback, key);
+  return Array.isArray(value) ? value.filter((v) => typeof v === 'string') : [];
+}
+
 // ---------------------------------------------------------------
 // Static markup ([data-i18n*] in index.html and injected shells)
 // ---------------------------------------------------------------

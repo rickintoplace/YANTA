@@ -391,12 +391,19 @@ async function runLocationSearch(panel, rerender, { saveFirst = false } = {}) {
   }
 }
 
+/** The model's description in the app language; the server's text for models the catalogs do not know. */
+function includedModelHint(model) {
+  const key = `ai.settings.modelHints.${String(model.id).replace(/[^a-z0-9]+/gi, '_')}`;
+  const text = t(key);
+  return text === key ? model.hint : text;
+}
+
 function includedAiModelOptionsHtml(selectedModel) {
   const selected = normalizeIncludedAiModel(selectedModel);
 
   return includedAiModels().map((model) => `
     <option value="${escapeHtml(model.id)}" ${model.id === selected ? 'selected' : ''}>
-      ${escapeHtml(model.label)} · ${escapeHtml(model.hint)}
+      ${escapeHtml(model.label)} · ${escapeHtml(includedModelHint(model))}
     </option>
   `).join('');
 }

@@ -6,6 +6,7 @@ import aiSettings from './ai/settings.ja.js';
 import aiWidgets from './ai/widgets.ja.js';
 import aiContext from './ai/context.ja.js';
 
+import greeting from './greeting/greeting.ja.js';
 export default {
   shareTarget: {
     title: 'YANTA に共有',
@@ -748,6 +749,13 @@ export default {
 
   dashboard: {
     title: 'ダッシュボード',
+    home: 'ホーム',
+    newItem: '新規',
+    startFromTemplate: 'テンプレートから始める',
+    sharedCanEdit: '共有されています · 編集できます',
+    sharedViewOnly: '共有されています · 閲覧のみ',
+    emptyTitle: 'まだ何もありません',
+    emptyHint: '用意されたページから、または空のページから始めましょう。',
     loadingPreview: 'ノートプレビューを読み込み中',
     openSidebar: 'サイドバーを開く',
     tapToRename: 'タップしてフォルダー名を変更',
@@ -1498,4 +1506,5 @@ export default {
     widgets: aiWidgets,
     context: aiContext,
   },
+  greeting,
 };

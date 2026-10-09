@@ -155,4 +155,13 @@ export default {
     notOnPlan: 'La IA incluida no está disponible en tu plan actual.',
     verifyFailed: 'No se pudo verificar el estado de YANTA Cloud.',
   },
+  // Short descriptions in the included-model menu, by model id
+  // (non-alphanumerics → _). Unknown models show the server's text.
+  modelHints: {
+    deepseek_deepseek_v4_1_flash: 'Rápido y fiable con herramientas. Recomendado.',
+    xiaomi_mimo_v2_6_flash: 'El mejor uso de herramientas de su clase, lee imágenes. Más lento.',
+    z_ai_glm_5_3_flash: 'Potente y muy económico. Siempre razona primero, así que tarda unos segundos.',
+    xiaomi_mimo_v2_6_pro: 'El modelo abierto más potente. Usa unas 3× más créditos.',
+    google_gemini_3_1_flash_lite: 'Lo mejor para PDF e imágenes.',
+  },
 };

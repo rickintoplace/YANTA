@@ -12,6 +12,7 @@ import aiSettings from './ai/settings.en.js';
 import aiWidgets from './ai/widgets.en.js';
 import aiContext from './ai/context.en.js';
 
+import greeting from './greeting/greeting.en.js';
 export default {
   shareTarget: {
     title: 'Share to YANTA',
@@ -765,6 +766,13 @@ export default {
 
   dashboard: {
     title: 'Dashboard',
+    home: 'Home',
+    newItem: 'New',
+    startFromTemplate: 'Start from a template',
+    sharedCanEdit: 'Shared with you · you can edit',
+    sharedViewOnly: 'Shared with you · view only',
+    emptyTitle: 'Nothing here yet',
+    emptyHint: 'Start from a ready-made page, or with an empty one.',
     loadingPreview: 'Loading note preview',
     openSidebar: 'Open sidebar',
     tapToRename: 'Tap to rename folder',
@@ -1539,4 +1547,5 @@ export default {
     widgets: aiWidgets,
     context: aiContext,
   },
+  greeting,
 };

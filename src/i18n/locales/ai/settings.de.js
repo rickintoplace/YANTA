@@ -156,4 +156,13 @@ export default {
     notOnPlan: 'Included AI ist in deinem aktuellen Tarif nicht verfügbar.',
     verifyFailed: 'Der YANTA-Cloud-Status konnte nicht überprüft werden.',
   },
+  // Short descriptions in the included-model menu, by model id
+  // (non-alphanumerics → _). Unknown models show the server's text.
+  modelHints: {
+    deepseek_deepseek_v4_1_flash: 'Schnell und zuverlässig mit Tools. Empfohlen.',
+    xiaomi_mimo_v2_6_flash: 'Beste Tool-Nutzung seiner Klasse, liest Bilder. Langsamer.',
+    z_ai_glm_5_3_flash: 'Stark und sehr sparsam. Denkt immer erst nach, Antworten dauern einige Sekunden.',
+    xiaomi_mimo_v2_6_pro: 'Stärkstes offenes Modell. Verbraucht etwa 3× so viel Guthaben.',
+    google_gemini_3_1_flash_lite: 'Am besten für PDFs und Bilder.',
+  },
 };

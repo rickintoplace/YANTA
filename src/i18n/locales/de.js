@@ -5,6 +5,7 @@ import aiSettings from './ai/settings.de.js';
 import aiWidgets from './ai/widgets.de.js';
 import aiContext from './ai/context.de.js';
 
+import greeting from './greeting/greeting.de.js';
 export default {
   shareTarget: {
     title: 'In YANTA teilen',
@@ -758,6 +759,13 @@ export default {
 
   dashboard: {
     title: 'Dashboard',
+    home: 'Start',
+    newItem: 'Neu',
+    startFromTemplate: 'Mit einer Vorlage beginnen',
+    sharedCanEdit: 'Mit dir geteilt · du kannst bearbeiten',
+    sharedViewOnly: 'Mit dir geteilt · nur ansehen',
+    emptyTitle: 'Noch nichts hier',
+    emptyHint: 'Beginne mit einer fertigen Seite oder einer leeren.',
     loadingPreview: 'Notizvorschau wird geladen',
     openSidebar: 'Seitenleiste öffnen',
     tapToRename: 'Zum Umbenennen des Ordners tippen',
@@ -1515,4 +1523,5 @@ export default {
     widgets: aiWidgets,
     context: aiContext,
   },
+  greeting,
 };

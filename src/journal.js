@@ -25,6 +25,7 @@ import {
 } from './yjs.js';
 
 import { openBoundOverlay } from './overlay-history.js';
+import { getLocale } from './i18n/index.js';
 import { countFirstNoteIfActivation } from './metrics/funnel.js';
 
 import {
@@ -55,7 +56,8 @@ export function dailyKey(d = new Date()) {
 
 /** Human date for headers: "Wednesday, July 16". */
 export function friendlyDayLabel(d = new Date()) {
-  return d.toLocaleDateString([], {
+  // In the app's language, not the browser's.
+  return d.toLocaleDateString(getLocale(), {
     weekday: 'long',
     month: 'long',
     day: 'numeric',

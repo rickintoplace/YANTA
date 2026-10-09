@@ -384,6 +384,50 @@ function computeOutputs(spec, values) {
   return results;
 }
 
+/*
+  What the user did with the widgets of an earlier answer, for the model.
+  The model only ever saw the JSON it wrote; without this, "and what if I
+  save 400 instead?" after moving the slider to 400 got an answer about
+  the default. Model-facing, so English. Only changes are reported.
+*/
+const plain = (v) => (Number.isFinite(v) ? String(Math.round(v * 1e4) / 1e4) : 'n/a');
+
+export function widgetStateForModel(text, widgetState) {
+  if (!widgetState || typeof widgetState !== 'object') return '';
+
+  const { widgets } = extractWidgets(text);
+  const lines = [];
+
+  widgets.forEach((block, i) => {
+    const spec = block.spec;
+    const state = widgetState[i];
+    if (!spec || !state) return;
+    const name = spec.title || spec.type;
+
+    if (spec.type === 'calculator' && state.values) {
+      const values = calculatorState(spec, state);
+      const changed = spec.inputs.filter((inp) => values[inp.id] !== inp.value);
+      if (!changed.length) return;
+      const inputs = spec.inputs.map((inp) => `${inp.id}=${plain(values[inp.id])}`).join(', ');
+      const outputs = computeOutputs(spec, values).map((o) => `${o.id}=${plain(o.v)}`).join(', ');
+      lines.push(`${name}: the user set ${inputs}; it now shows ${outputs}.`);
+    } else if (spec.type === 'checklist' && Array.isArray(state.done)) {
+      const done = spec.items.filter((_, j) => state.done[j]).map((it) => it.text);
+      lines.push(`${name}: ticked off ${done.length}/${spec.items.length}${done.length ? ` (${done.join('; ')})` : ''}.`);
+    } else if (spec.type === 'steps' && Array.isArray(state.status)) {
+      const done = spec.items.filter((_, j) => state.status[j] === 'done').map((it) => it.title);
+      lines.push(`${name}: steps done ${done.length}/${spec.items.length}${done.length ? ` (${done.join('; ')})` : ''}.`);
+    } else if (spec.type === 'events' && Array.isArray(state.added)) {
+      const added = spec.items.filter((_, j) => state.added[j]).map((it) => it.title);
+      if (added.length) lines.push(`${name}: the user added to their calendar: ${added.join('; ')}.`);
+    } else if (spec.type === 'choices' && Number.isInteger(state.picked)) {
+      lines.push(`${name}: the user picked "${spec.options[state.picked]?.label || ''}".`);
+    }
+  });
+
+  return lines.length ? `[Widget state now: ${lines.join(' ')}]` : '';
+}
+
 function renderCalculator(spec, state, save) {
   const root = el('div', 'yw-calc');
   const form = el('div', 'yw-inputs');

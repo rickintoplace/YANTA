@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { compileFormula, evaluateFormula } from '../../src/ai/ui-expr.js';
-import { extractWidgets, stripWidgets, formatValue } from '../../src/ai/ui-widgets.js';
+import { extractWidgets, stripWidgets, formatValue, widgetStateForModel } from '../../src/ai/ui-widgets.js';
 
 describe('formula evaluator', () => {
   it('computes arithmetic, precedence, functions and conditionals', () => {
@@ -80,5 +80,21 @@ describe('widget blocks', () => {
     expect(widgets[4].spec.presets).toEqual([300, 1500]);
     expect(widgets[5].error).toBeTruthy();
     expect(widgets[6].spec.items).toHaveLength(1);
+  });
+
+  it('reports what the user changed in widgets, for the next turn', () => {
+    const block = (o) => '```yanta-ui\n' + JSON.stringify(o) + '\n```';
+    const text = [
+      block({ type: 'calculator', title: 'Savings', inputs: [{ id: 'monthly', value: 250 }, { id: 'years', value: 15 }], outputs: [{ id: 'total', formula: 'monthly * 12 * years' }] }),
+      block({ type: 'checklist', title: 'Packing', items: ['Passport', 'Charger'] }),
+      block({ type: 'events', title: 'Trip', items: [{ title: 'Flight', start: '2026-11-12T07:40' }] }),
+    ].join('\n\n');
+
+    expect(widgetStateForModel(text, { 0: { values: { monthly: 250, years: 15 } } })).toBe('');
+
+    const note = widgetStateForModel(text, { 0: { values: { monthly: 400, years: 15 } }, 1: { done: [true, false] }, 2: { added: [true] } });
+    expect(note).toMatch(/Savings: the user set monthly=400, years=15; it now shows total=72000/);
+    expect(note).toMatch(/Packing: ticked off 1\/2 \(Passport\)/);
+    expect(note).toMatch(/Trip: the user added to their calendar: Flight/);
   });
 });

@@ -111,6 +111,7 @@ import {
   WIDGET_INSTRUCTIONS,
   extractWidgets,
   mountWidgets,
+  widgetStateForModel,
 } from './ui-widgets.js';
 
 import {
@@ -3244,10 +3245,13 @@ async function runAssistant(userText) {
 
   // Citation markers and quote appendices of earlier answers are for the
   // checker, not worth resending.
-  const history = fitHistory(sinceSummary.messages.map((m) => ({
-    role: m.role,
-    content: m.role === 'assistant' ? stripForDisplay(String(m.content || '')) : m.content,
-  })));
+  // Widgets the user changed are reported with the answer they belong to.
+  const history = fitHistory(sinceSummary.messages.map((m) => {
+    if (m.role !== 'assistant') return { role: m.role, content: m.content };
+    const text = stripForDisplay(String(m.content || ''));
+    const widgetNote = widgetStateForModel(text, m.widgetState);
+    return { role: m.role, content: widgetNote ? `${text}\n\n${widgetNote}` : text };
+  }));
 
   let lastUserIndex = -1;
   history.forEach((m, i) => { if (m.role === 'user') lastUserIndex = i; });

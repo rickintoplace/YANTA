@@ -6,6 +6,7 @@
 // the copy differ, so the chrome lives here.
 // ============================================================
 
+import { getLocale, t } from '../i18n/index.js';
 import { escapeHtml } from './legal-links.js';
 
 export function ensureSiteFormCss() {
@@ -142,6 +143,50 @@ export function ensureSiteFormCss() {
   color: var(--red, #a13b2f);
 }
 
+.yanta-form input[type="date"] {
+  padding: 9px 12px;
+  border: 1px solid var(--border, #d8c7a5);
+  border-radius: 10px;
+  background: var(--bg, #fff8ef);
+  color: var(--text, #29251d);
+  font: inherit;
+  font-size: 15px;
+}
+
+.yanta-form__choice input[type="date"] {
+  margin-top: 8px;
+  accent-color: auto;
+}
+
+.yanta-receipt__declaration {
+  margin: 8px 0 0;
+  padding: 12px 16px;
+  border-inline-start: 3px solid var(--border, #d8c7a5);
+  background: var(--bg-elev, #f7efd8);
+  border-radius: 0 10px 10px 0;
+  white-space: pre-wrap;
+  font-size: 14px;
+}
+
+.yanta-receipt__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 16px 0 6px;
+}
+
+@media print {
+  .yanta-site-header,
+  .yanta-legal-footer,
+  .yanta-receipt__actions {
+    display: none !important;
+  }
+}
+
+.yanta-receipt p {
+  margin: 0 0 12px;
+}
+
 .yanta-receipt h2 {
   margin-top: 0;
 }
@@ -179,17 +224,21 @@ export function textField({
   hint = '',
   optional = false,
   autocomplete = '',
+  required = false,
+  min = '',
 }) {
   return `
     <div class="yanta-form__field">
       <label for="${escapeHtml(id)}">
-        ${escapeHtml(label)}${optional ? ' <span class="yanta-form__optional">(optional)</span>' : ''}
+        ${escapeHtml(label)}${optional ? ` <span class="yanta-form__optional">(${escapeHtml(t('site.form.optional'))})</span>` : ''}
       </label>
       <input
         type="${escapeHtml(type)}"
         id="${escapeHtml(id)}"
         name="${escapeHtml(id.replace(/^yanta-[a-z]+-/, ''))}"
         ${autocomplete ? `autocomplete="${escapeHtml(autocomplete)}"` : ''}
+        ${required ? 'required aria-required="true"' : ''}
+        ${min ? `min="${escapeHtml(min)}"` : ''}
       >
       ${hint ? `<p class="yanta-form__hint">${hint}</p>` : ''}
     </div>
@@ -221,6 +270,7 @@ export function wireSiteForm({
   validate = () => '',
   errorMessage,
   busyLabel = 'Sending…',
+  afterReceipt = null,
 }) {
   const form = document.getElementById(formId);
 
@@ -252,11 +302,89 @@ export function wireSiteForm({
 
     try {
       const res = await submit(data);
-      form.outerHTML = receipt(res);
+      form.outerHTML = receipt(res, data);
+      afterReceipt?.(res, data);
     } catch (err) {
       console.error(err);
       button.disabled = false;
       setStatus(errorMessage(err), 'error');
     }
+  });
+}
+
+/** Date and time as the sender's locale writes them, with the zone named. */
+export function formatReceiptTime(ts) {
+  try {
+    return new Intl.DateTimeFormat(getLocale(), {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+      second: '2-digit',
+      timeZoneName: 'short',
+    }).format(new Date(ts));
+  } catch {
+    return new Date(ts).toISOString();
+  }
+}
+
+/*
+  The receipt for a legal declaration: what was declared, when it was
+  received, and a way to keep it. § 312k Abs. 3 BGB wants the consumer able
+  to store the declaration with its date and time on a durable medium, so
+  the page offers both a file and print (which also covers "save as PDF").
+*/
+export function declarationReceiptHtml({
+  heading,
+  intro = '',
+  receivedLabel,
+  receivedAt,
+  refLabel,
+  reference,
+  declarationLabel,
+  declaration,
+  saveLabel,
+  printLabel,
+  after = '',
+}) {
+  return `
+    <div class="yanta-receipt">
+      <h2>${escapeHtml(heading)}</h2>
+      ${intro ? `<p>${intro}</p>` : ''}
+      <p>
+        ${escapeHtml(receivedLabel)}: <strong>${escapeHtml(formatReceiptTime(receivedAt))}</strong><br>
+        ${escapeHtml(refLabel)}: <span class="yanta-receipt__reference">${escapeHtml(reference || '—')}</span>
+      </p>
+      <p><strong>${escapeHtml(declarationLabel)}</strong></p>
+      <div class="yanta-receipt__declaration">${escapeHtml(declaration || '')}</div>
+      <div class="yanta-receipt__actions">
+        <button type="button" class="yanta-site-btn" data-receipt-save>${escapeHtml(saveLabel)}</button>
+        <button type="button" class="yanta-site-btn" data-receipt-print>${escapeHtml(printLabel)}</button>
+      </div>
+      ${after}
+    </div>
+  `;
+}
+
+/** Wires the save/print buttons of a declaration receipt. */
+export function wireDeclarationReceipt({ filename, lines }) {
+  const root = document.querySelector('.yanta-receipt');
+  if (!root) return;
+
+  root.querySelector('[data-receipt-save]')?.addEventListener('click', () => {
+    const blob = new Blob([`${lines.join('\n')}\n`], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.append(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  });
+
+  root.querySelector('[data-receipt-print]')?.addEventListener('click', () => {
+    window.print();
   });
 }

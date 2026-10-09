@@ -3,6 +3,7 @@ import {
 } from '../core.js';
 
 import {
+  CONTRACT_LINKS,
   LEGAL_LINKS,
   legalLinkLabel,
   legalLinkUrl,
@@ -53,6 +54,30 @@ function ensureCss() {
   text-decoration: none;
   text-underline-offset: 3px;
   vertical-align: middle;
+}
+
+.yanta-sidebar-legal__contract {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  column-gap: 10px;
+  padding: 0 6px 3px;
+  white-space: normal;
+}
+
+.yanta-sidebar-legal__contract a {
+  color: color-mix(in srgb, var(--accent) 62%, var(--text));
+  font-weight: 650;
+  text-decoration: none;
+  text-underline-offset: 3px;
+}
+
+.yanta-sidebar-legal__contract a:hover {
+  text-decoration: underline;
+}
+
+.app.sidebar-collapsed .yanta-sidebar-legal__contract {
+  display: none;
 }
 
 .yanta-sidebar-legal__link:hover {
@@ -118,6 +143,8 @@ function ensureCss() {
   document.head.append(style);
 }
 
+const OTHER_LINKS = LEGAL_LINKS.filter((link) => !CONTRACT_LINKS.includes(link));
+
 function makeMenuItems(links) {
   return links.map((link) => ({
     label: legalLinkLabel(link),
@@ -159,7 +186,23 @@ export function mountSidebarLegalLinks({
   linksWrap.className = 'yanta-sidebar-legal__links';
   linksWrap.setAttribute('aria-label', 'Legal links');
 
-  const linkNodes = LEGAL_LINKS.map((link, index) => {
+  /*
+    Cancel and withdraw get their own row that wraps instead of truncating:
+    they have to stay visible however narrow the sidebar is. The rest share
+    the row below and fold into the overflow menu when they do not fit.
+  */
+  const contractRow = document.createElement('nav');
+  contractRow.className = 'yanta-sidebar-legal__contract';
+  contractRow.setAttribute('aria-label', 'Contract');
+
+  for (const link of CONTRACT_LINKS) {
+    const a = document.createElement('a');
+    a.href = legalLinkUrl(link.href);
+    a.textContent = legalLinkLabel(link);
+    contractRow.append(a);
+  }
+
+  const linkNodes = OTHER_LINKS.map((link, index) => {
     const a = document.createElement('a');
 
     a.className = 'yanta-sidebar-legal__link';
@@ -212,7 +255,7 @@ export function mountSidebarLegalLinks({
   });
 
   row.append(linksWrap, moreBtn);
-  root.append(row);
+  root.append(contractRow, row);
   container.append(root);
 
   /* Outer width of a link including the gap the stylesheet puts after it. */
@@ -263,7 +306,7 @@ export function mountSidebarLegalLinks({
     );
 
     /*
-      Keep the highest-priority links that still fit — LEGAL_LINKS is ordered
+      Keep the highest-priority links that still fit — OTHER_LINKS is ordered
       by priority, so Imprint and Privacy are the last to move into the menu.
       Everything that does not fit stays reachable through the overflow menu,
       including the case where nothing fits at all.
@@ -280,7 +323,7 @@ export function mountSidebarLegalLinks({
       node.hidden = index >= visibleCount;
     });
 
-    overflowLinks = LEGAL_LINKS.slice(visibleCount);
+    overflowLinks = OTHER_LINKS.slice(visibleCount);
   };
 
   schedule(fit);

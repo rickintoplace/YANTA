@@ -1472,10 +1472,15 @@ export default {
       pricing: 'Precios',
     },
 
+    form: {
+      optional: 'opcional',
+    },
+
     legal: {
       imprint: 'Aviso legal',
       privacy: 'Privacidad',
       cancel: 'Cancelar contrato',
+      withdraw: 'Desistir del contrato',
       terms: 'Términos',
       refunds: 'Reembolsos',
       accessibility: 'Accesibilidad',
@@ -1488,6 +1493,7 @@ export default {
 
     title: {
       pricing: 'Precios',
+      withdraw: 'Desistir del contrato',
       terms: 'Términos del servicio',
       privacy: 'Política de privacidad',
       refund: 'Derecho de desistimiento y reembolsos',

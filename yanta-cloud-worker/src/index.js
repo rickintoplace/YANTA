@@ -4047,7 +4047,8 @@ async function purgeUserData(env, userId) {
     `DELETE FROM audit_events WHERE user_id = ?`,
 
     // Legal records: keep the row, drop the link to the person.
-    `UPDATE cancellation_requests SET user_id = NULL WHERE user_id = ?`
+    `UPDATE cancellation_requests SET user_id = NULL WHERE user_id = ?`,
+    `UPDATE withdrawal_requests SET user_id = NULL WHERE user_id = ?`
   ];
 
   for (const sql of statements) {
@@ -4309,28 +4310,75 @@ async function handleContentNotice(env, req, headers) {
 }
 
 /* ============================================================
-   § 312k BGB cancellation button
+   § 312k BGB cancellation button and § 356a BGB withdrawal function
 
-   The declaration has to be possible without logging in, so this endpoint
-   is unauthenticated. That means anyone who knows an address could submit
-   a cancellation for it — accepted deliberately, and bounded:
+   Both declarations have to be possible without logging in, so these
+   endpoints are unauthenticated. That means anyone who knows an address
+   could submit one for it — accepted deliberately, because the law allows
+   no hurdle in front of the declaration (no login, no password, no
+   confirmation click), and bounded:
 
-   - it only ever schedules the end of the *current paid period*, so nothing
-     already paid for is lost and the owner can resubscribe,
-   - the account owner is emailed immediately, so a hostile submission is
-     visible rather than silent,
+   - a cancellation only ever schedules the end of a paid period, so nothing
+     already paid for is lost; a withdrawal changes nothing automatically —
+     a person processes it (refund through Paddle) within the 14 days the
+     law allows,
+   - the address is emailed immediately, so a hostile submission is visible
+     rather than silent, and the cancellation email carries a link that
+     keeps the subscription in one click,
    - the HTTP response is identical whether or not the address has an
-     account, so the endpoint cannot be used to enumerate customers. The
-     specifics § 312k Abs. 3 requires (time of receipt, end of contract)
-     travel in the email, which only the real owner receives.
+     account, so the endpoints cannot be used to enumerate customers. The
+     response repeats only what the sender typed (the declaration and its
+     time of receipt, which § 312k Abs. 3 wants them to be able to save);
+     whether a contract was found travels in the email, which only the
+     real owner receives.
    ============================================================ */
 
 const CANCELLATION_KINDS = new Set(["ordinary", "extraordinary"]);
+const DAY_MS = 24 * 60 * 60 * 1000;
 
-function formatUtc(ts) {
+/* Confirmation language: German for German-speaking senders, else English. */
+function legalLang(value) {
+  return String(value || "").toLowerCase().startsWith("de") ? "de" : "en";
+}
+
+/* Times in the provider's zone, with the zone named so nothing is ambiguous. */
+function formatLegalTime(ts, lang) {
   if (!ts) return "";
 
-  return `${new Date(ts).toISOString().replace("T", " ").slice(0, 16)} UTC`;
+  return new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "en-GB", {
+    timeZone: "Europe/Berlin",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    timeZoneName: "short"
+  }).format(new Date(ts));
+}
+
+function formatLegalDate(ts, lang) {
+  if (!ts) return "";
+
+  return new Intl.DateTimeFormat(lang === "de" ? "de-DE" : "en-GB", {
+    timeZone: "Europe/Berlin",
+    dateStyle: "long"
+  }).format(new Date(ts));
+}
+
+/* "YYYY-MM-DD" from the form, or null for "as soon as possible". */
+function requestedEndDate(value) {
+  const text = String(value || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return null;
+
+  const ms = Date.parse(`${text}T00:00:00Z`);
+  if (!Number.isFinite(ms)) return null;
+
+  // A date in the past means "as soon as possible", which is what it can mean.
+  return ms < now() - DAY_MS ? null : { text, ms };
+}
+
+async function undoToken(env, reference) {
+  return (await hmacHex(env.SESSION_SECRET, `cancel-undo:${reference}`)).slice(0, 32);
 }
 
 async function findCancellableSubscription(env, email) {
@@ -4367,63 +4415,187 @@ async function cancelSubscriptionAtPeriodEnd(env, subscription) {
   ).bind(now(), subscription.id).run();
 }
 
+/*
+  Columns added after the table first shipped. There is no migration runner,
+  so they are added on first use (schema.sql has them for new databases).
+*/
+let cancellationColumnsReady = null;
+
+function ensureCancellationColumns(env) {
+  if (!cancellationColumnsReady) {
+    cancellationColumnsReady = Promise.all([
+      env.DB.prepare(`ALTER TABLE cancellation_requests ADD COLUMN lang TEXT`).run().catch(() => {}),
+      env.DB.prepare(`ALTER TABLE cancellation_requests ADD COLUMN resolved_at INTEGER`).run().catch(() => {})
+    ]);
+  }
+  return cancellationColumnsReady;
+}
+
+let withdrawalTableReady = null;
+
+function ensureWithdrawalTable(env) {
+  if (!withdrawalTableReady) {
+    withdrawalTableReady = env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS withdrawal_requests (
+         id TEXT PRIMARY KEY,
+         user_id TEXT,
+         email TEXT NOT NULL,
+         name TEXT NOT NULL,
+         contract_ref TEXT,
+         paddle_subscription_id TEXT,
+         contract_started_at INTEGER,
+         status TEXT NOT NULL,
+         lang TEXT,
+         ip_hash TEXT,
+         created_at INTEGER NOT NULL,
+         resolved_at INTEGER
+       )`
+    ).run().catch((err) => {
+      withdrawalTableReady = null;
+      throw err;
+    });
+  }
+  return withdrawalTableReady;
+}
+
+const CANCEL_TEXT = {
+  de: {
+    declaration: (extraordinary) =>
+      `Hiermit kündige ich meinen YANTA-Plus-Vertrag (${extraordinary ? "außerordentliche" : "ordentliche"} Kündigung).`,
+    endAsap: "Beendigung: zum nächstmöglichen Zeitpunkt",
+    endNow: "Beendigung: mit sofortiger Wirkung",
+    endDate: (date) => `Beendigung: zum ${date}`,
+    name: "Name",
+    email: "E-Mail",
+    ref: "Vertragsnummer",
+    reason: "Grund",
+    subject: "Eingangsbestätigung Ihrer Kündigung",
+    heading: "Ihre Kündigung ist bei uns eingegangen",
+    intro: "Dies ist die Bestätigung nach § 312k Abs. 4 BGB. Bewahren Sie sie auf — sie belegt Ihre Kündigung und den Zeitpunkt ihres Eingangs.",
+    received: "Eingegangen",
+    reference: "Vorgangsnummer",
+    type: "Art",
+    ordinary: "Ordentliche Kündigung",
+    extraordinary: "Außerordentliche Kündigung",
+    endsLabel: "Vertragsende",
+    wishedEndLabel: "Gewünschtes Vertragsende",
+    noSubscription: "Unter dieser Adresse haben wir kein laufendes kostenpflichtiges Abonnement gefunden. Ihre Erklärung ist trotzdem bei uns hinterlegt — läuft ein Abonnement unter einer anderen Adresse, antworten Sie einfach auf diese E-Mail, dann wenden wir sie dort an.",
+    ends: (date) => `Ihr Abonnement endet am <strong>${date}</strong> und verlängert sich nicht mehr. Bis dahin behalten Sie YANTA Plus; danach läuft das Konto im kostenlosen Tarif weiter. Es wird nichts gelöscht.`,
+    endsAtPeriod: "Ihr Abonnement endet zum Ende des laufenden Abrechnungszeitraums und verlängert sich nicht mehr. Es wird nichts gelöscht.",
+    yearlyEarly: (date) => `Ihr Jahrestarif hat sich bereits verlängert; nach der Verlängerung können Sie ihn mit einer Frist von einem Monat kündigen. Ihr Vertrag endet daher am <strong>${date}</strong>, und den bereits bezahlten Rest des Jahres erstatten wir Ihnen anteilig über Paddle. Es wird nichts gelöscht.`,
+    deferred: (date) => `Sie haben als Beendigungszeitpunkt den <strong>${date}</strong> gewählt. Ihr Abonnement endet mit dem Ablauf des Abrechnungszeitraums, in den dieser Tag fällt; bis dahin läuft es unverändert weiter. Es wird nichts gelöscht.`,
+    extraordinaryNote: (date) => `Ihr Abonnement verlängert sich nicht mehr (spätestens Ende am <strong>${date}</strong>). Sie haben außerordentlich gekündigt: Wir prüfen den genannten Grund und melden uns wegen eines früheren Endes und einer anteiligen Erstattung.`,
+    asSubmitted: "Ihre Erklärung im Wortlaut:",
+    notYou: (link, mail) => `Sie haben das nicht veranlasst oder möchten Ihr Abonnement doch behalten? <a href="${link}">Abonnement behalten</a> — oder schreiben Sie an <a href="mailto:${mail}">${mail}</a>.`
+  },
+  en: {
+    declaration: (extraordinary) =>
+      `I hereby terminate my YANTA Plus contract (${extraordinary ? "extraordinary" : "ordinary"} termination).`,
+    endAsap: "End: at the earliest possible date",
+    endNow: "End: with immediate effect",
+    endDate: (date) => `End: on ${date}`,
+    name: "Name",
+    email: "Email",
+    ref: "Contract reference",
+    reason: "Reason",
+    subject: "We have received your cancellation",
+    heading: "Your cancellation has been received",
+    intro: "This is the confirmation required by § 312k (4) BGB. Keep it — it is your proof of the cancellation and its time of receipt.",
+    received: "Received",
+    reference: "Reference",
+    type: "Type",
+    ordinary: "Ordinary termination",
+    extraordinary: "Extraordinary termination",
+    endsLabel: "Contract ends",
+    wishedEndLabel: "Requested end",
+    noSubscription: "We could not find an active paid subscription for this address. Your declaration is on file regardless — if a subscription exists under a different address, reply to this email and we will apply it there.",
+    ends: (date) => `Your subscription ends on <strong>${date}</strong> and will not renew. You keep YANTA Plus until then; afterwards the account continues on the Free plan. Nothing is deleted.`,
+    endsAtPeriod: "Your subscription ends at the end of the current billing period and will not renew. Nothing is deleted.",
+    yearlyEarly: (date) => `Your yearly plan has already renewed; after a renewal you can end it with one month's notice. Your contract therefore ends on <strong>${date}</strong>, and we refund the rest of the year you already paid for pro rata through Paddle. Nothing is deleted.`,
+    deferred: (date) => `You chose <strong>${date}</strong> as the end date. Your subscription ends with the billing period that day falls in; until then it continues unchanged. Nothing is deleted.`,
+    extraordinaryNote: (date) => `Your subscription will not renew (it ends on <strong>${date}</strong> at the latest). You declared an extraordinary termination: we are reviewing the reason you gave and will come back to you about an earlier end and a pro-rata refund.`,
+    asSubmitted: "Your declaration as submitted:",
+    notYou: (link, mail) => `Did not request this, or want to keep your subscription after all? <a href="${link}">Keep my subscription</a> — or write to <a href="mailto:${mail}">${mail}</a>.`
+  }
+};
+
+function legalReceiptTable(rows) {
+  return `
+    <table style="border-collapse:collapse;margin:18px 0;font-size:14px">
+      ${rows.map(([label, value]) => `
+        <tr>
+          <td style="padding:4px 14px 4px 0;color:#625a49;vertical-align:top">${label}</td>
+          <td style="padding:4px 0">${value}</td>
+        </tr>`).join("")}
+    </table>
+  `;
+}
+
+function declarationQuote(text) {
+  return `<blockquote style="margin:6px 0 0;padding:10px 14px;border-left:3px solid #d8c7a5;color:#625a49;font-size:13px;white-space:pre-wrap">${escapeHtml(text)}</blockquote>`;
+}
+
 function cancellationConfirmationHtml({
+  lang,
   reference,
   receivedAt,
   declaration,
+  outcome,
   effectiveAt,
-  hadSubscription,
+  requestedEnd,
   extraordinary,
+  undoUrl,
   supportAddress
 }) {
-  const outcome = !hadSubscription
-    ? `<p>We could not find an active paid subscription for this address.
-        Your declaration is on file regardless — if a subscription exists under a
-        different address, reply to this email and we will apply it there.</p>`
-    : extraordinary
-      ? `<p>Your subscription is scheduled to end on <strong>${formatUtc(effectiveAt)}</strong>,
-          so it cannot renew. You declared an extraordinary termination: we are reviewing
-          the reason you gave and will come back to you about an earlier end date.</p>`
-      : `<p>Your subscription is cancelled with effect from
-          <strong>${effectiveAt ? formatUtc(effectiveAt) : "the end of your current billing period"}</strong>.
-          You keep YANTA Plus until then; afterwards the account returns to the Free plan.
-          Nothing is deleted.</p>`;
+  const s = CANCEL_TEXT[lang];
+
+  const endsValue = outcome === "deferred"
+    ? escapeHtml(requestedEnd ? formatLegalDate(requestedEnd.ms, lang) : "")
+    : effectiveAt ? escapeHtml(formatLegalDate(effectiveAt, lang)) : "—";
+
+  const body = outcome === "no_subscription"
+    ? s.noSubscription
+    : outcome === "yearly_early"
+      ? s.yearlyEarly(endsValue)
+    : outcome === "deferred"
+      ? s.deferred(escapeHtml(formatLegalDate(requestedEnd.ms, lang)))
+      : extraordinary
+        ? s.extraordinaryNote(endsValue)
+        : effectiveAt ? s.ends(endsValue) : s.endsAtPeriod;
 
   return `
-    <h2>Your cancellation has been received</h2>
+    <h2>${s.heading}</h2>
+    <p>${s.intro}</p>
 
-    <p>
-      This is the confirmation required by § 312k (3) BGB. Keep it —
-      it is your proof of the cancellation and its time of receipt.
-    </p>
+    ${legalReceiptTable([
+      [s.received, `<strong>${escapeHtml(formatLegalTime(receivedAt, lang))}</strong>`],
+      [s.reference, `<strong>${reference}</strong>`],
+      [s.type, extraordinary ? s.extraordinary : s.ordinary],
+      ...(outcome === "no_subscription" ? [] : [[outcome === "deferred" ? s.wishedEndLabel : s.endsLabel, endsValue]])
+    ])}
 
-    <table style="border-collapse:collapse;margin:18px 0;font-size:14px">
-      <tr>
-        <td style="padding:4px 14px 4px 0;color:#625a49">Received</td>
-        <td style="padding:4px 0"><strong>${formatUtc(receivedAt)}</strong></td>
-      </tr>
-      <tr>
-        <td style="padding:4px 14px 4px 0;color:#625a49">Reference</td>
-        <td style="padding:4px 0"><strong>${reference}</strong></td>
-      </tr>
-      <tr>
-        <td style="padding:4px 14px 4px 0;color:#625a49">Type</td>
-        <td style="padding:4px 0">${extraordinary ? "Extraordinary termination" : "Ordinary termination"}</td>
-      </tr>
-    </table>
+    <p>${body}</p>
 
-    ${outcome}
-
-    <p style="margin-top:18px;color:#625a49;font-size:13px">
-      Your declaration as submitted:
-    </p>
-    <blockquote style="margin:6px 0 0;padding:10px 14px;border-left:3px solid #d8c7a5;color:#625a49;font-size:13px;white-space:pre-wrap">${escapeHtml(declaration)}</blockquote>
+    <p style="margin-top:18px;color:#625a49;font-size:13px">${s.asSubmitted}</p>
+    ${declarationQuote(declaration)}
 
     <p style="margin-top:20px;color:#666;font-size:12px">
-      Did not request this? Contact
-      <a href="mailto:${supportAddress}">${supportAddress}</a> and we will reverse it.
+      ${s.notYou(undoUrl, supportAddress)}
     </p>
   `;
+}
+
+function cancellationDeclaration(lang, { extraordinary, requestedEnd, name, email, contractRef, reason }) {
+  const s = CANCEL_TEXT[lang];
+
+  return [
+    s.declaration(extraordinary),
+    extraordinary ? s.endNow : requestedEnd ? s.endDate(formatLegalDate(requestedEnd.ms, lang)) : s.endAsap,
+    name ? `${s.name}: ${name}` : "",
+    `${s.email}: ${email}`,
+    contractRef ? `${s.ref}: ${contractRef}` : "",
+    reason ? `${s.reason}: ${reason}` : ""
+  ].filter(Boolean).join("\n");
 }
 
 async function handleCancellationRequest(env, req, headers) {
@@ -4434,6 +4606,10 @@ async function handleCancellationRequest(env, req, headers) {
   const contractRef = String(body.contractRef || "").trim().slice(0, 200);
   const kind = CANCELLATION_KINDS.has(body.kind) ? body.kind : "ordinary";
   const reason = String(body.reason || "").trim().slice(0, 4000);
+  const lang = legalLang(body.lang);
+  const extraordinary = kind === "extraordinary";
+  // An extraordinary termination is immediate by nature; a date only applies to an ordinary one.
+  const requestedEnd = extraordinary ? null : requestedEndDate(body.endDate);
 
   if (!validEmail(email)) {
     return json({ ok: false, error: "A valid email address is required." }, 400, headers);
@@ -4453,26 +4629,49 @@ async function handleCancellationRequest(env, req, headers) {
     }, 429, headers);
   }
 
+  await ensureCancellationColumns(env);
+
   const receivedAt = now();
   const reference = id("cxl");
-  const extraordinary = kind === "extraordinary";
-
-  const declaration = [
-    `I hereby terminate my YANTA Plus contract (${extraordinary ? "extraordinary" : "ordinary"} termination).`,
-    name ? `Name: ${name}` : "",
-    `Email: ${email}`,
-    contractRef ? `Contract reference: ${contractRef}` : "",
-    reason ? `Reason: ${reason}` : ""
-  ].filter(Boolean).join("\n");
+  const declaration = cancellationDeclaration(lang, { extraordinary, requestedEnd, name, email, contractRef, reason });
 
   const match = await findCancellableSubscription(env, email);
   const subscription = match?.sub || null;
+  const periodEnd = subscription?.current_period_ends_at || null;
 
-  let status = subscription ? "scheduled" : "no_subscription";
+  /*
+    A requested date later than the current period's end cannot be handed to
+    Paddle yet (it only cancels at the next renewal); the cron applies it
+    once the period that contains the date has begun.
+  */
+  /*
+    § 309 Nr. 9 BGB: once a yearly plan has renewed, the consumer may end it
+    with at most one month's notice. Paddle can only stop the renewal, so the
+    subscription is cancelled at period end as usual and a person ends Plus
+    on the earlier date and refunds the rest pro rata.
+  */
+  const periodStart = subscription?.current_period_starts_at || null;
+  const yearlyRenewed = !!(
+    subscription && !extraordinary && periodStart && periodEnd &&
+    periodEnd - periodStart > 60 * DAY_MS &&
+    subscription.created_at && periodStart - subscription.created_at > 30 * DAY_MS
+  );
+  const monthNotice = (() => {
+    const d = new Date(receivedAt);
+    d.setUTCMonth(d.getUTCMonth() + 1);
+    return d.getTime();
+  })();
+  const yearlyEnd = yearlyRenewed ? Math.max(monthNotice, requestedEnd?.ms || 0) : null;
+  const yearlyEarly = !!(yearlyEnd && yearlyEnd < periodEnd);
+
+  const deferred = !yearlyEarly && !!(subscription && requestedEnd && periodEnd && requestedEnd.ms > periodEnd);
+
+  let status = !subscription ? "no_subscription" : deferred ? "deferred" : "scheduled";
   let error = "";
-  let effectiveAt = subscription?.current_period_ends_at || null;
+  const effectiveAt = yearlyEarly ? yearlyEnd : deferred ? null : periodEnd;
 
-  if (subscription?.paddle_subscription_id) {
+  // A repeated declaration (a second click, a second tab) finds the renewal already stopped.
+  if (subscription?.paddle_subscription_id && !deferred && !subscription.cancel_at_period_end) {
     try {
       await cancelSubscriptionAtPeriodEnd(env, subscription);
     } catch (err) {
@@ -4486,11 +4685,16 @@ async function handleCancellationRequest(env, req, headers) {
     }
   }
 
+  if (yearlyEarly && status === "scheduled") {
+    status = "manual_review";
+    error = `Yearly plan after renewal: end Plus on ${formatLegalDate(yearlyEnd, "en")} and refund the rest of the period pro rata (§ 309 Nr. 9 BGB).`;
+  }
+
   await env.DB.prepare(
     `INSERT INTO cancellation_requests
        (id,user_id,email,name,contract_ref,kind,reason,requested_effective,
-        paddle_subscription_id,effective_at,status,error,ip_hash,created_at)
-     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
+        paddle_subscription_id,effective_at,status,error,ip_hash,created_at,lang)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`
   ).bind(
     reference,
     match?.user?.id || null,
@@ -4499,13 +4703,14 @@ async function handleCancellationRequest(env, req, headers) {
     contractRef || null,
     kind,
     reason || null,
-    "period_end",
+    requestedEnd ? `date:${requestedEnd.text}` : "period_end",
     subscription?.paddle_subscription_id || null,
     effectiveAt,
     status,
     error || null,
     await ipHash(env, req),
-    receivedAt
+    receivedAt,
+    lang
   ).run();
 
   await audit(env, req, "cancellation_request", match?.user?.id || null, {
@@ -4515,23 +4720,28 @@ async function handleCancellationRequest(env, req, headers) {
   });
 
   const supportAddress = supportEmail(env);
+  const origin = env.BILLING_PUBLIC_ORIGIN || env.APP_ORIGIN || "https://yanta.page";
+  const undoUrl = `${origin}/cancel?undo=${encodeURIComponent(reference)}&t=${await undoToken(env, reference)}`;
 
   /*
-    Confirmation on a durable medium (§ 312k Abs. 3) — and the only channel
+    Confirmation on a durable medium (§ 312k Abs. 4) — and the only channel
     that reveals whether a subscription existed.
   */
   try {
     await sendEmail(env, {
       to: email,
-      subject: "Your YANTA cancellation — confirmation",
+      subject: `${CANCEL_TEXT[lang].subject} — ${reference}`,
       replyTo: supportAddress,
       html: cancellationConfirmationHtml({
+        lang,
         reference,
         receivedAt,
         declaration,
+        outcome: yearlyEarly ? "yearly_early" : status === "manual_review" ? "scheduled" : status,
         effectiveAt,
-        hadSubscription: !!subscription,
+        requestedEnd,
         extraordinary,
+        undoUrl,
         supportAddress
       })
     });
@@ -4560,7 +4770,260 @@ async function handleCancellationRequest(env, req, headers) {
   return json({
     ok: true,
     reference,
+    receivedAt,
+    declaration
+  }, 200, headers);
+}
+
+/*
+  "Keep my subscription" from the confirmation email. The link alone does
+  nothing (mail scanners open links); the page it leads to posts here.
+  Undoing is a new agreement to continue, offered only to whoever holds the
+  confirmation email, so it needs no further identification.
+*/
+async function handleCancellationUndo(env, req, headers) {
+  const body = await bodyJson(req);
+  const reference = String(body.reference || "");
+  const token = String(body.token || "");
+
+  if (!reference.startsWith("cxl") || token.length !== 32 || token !== await undoToken(env, reference)) {
+    return json({ ok: false, error: "This link is not valid." }, 400, headers);
+  }
+
+  await ensureCancellationColumns(env);
+
+  const row = await env.DB.prepare(
+    `SELECT * FROM cancellation_requests WHERE id = ?`
+  ).bind(reference).first();
+
+  if (!row) return json({ ok: false, error: "This link is not valid." }, 400, headers);
+  if (row.status === "reverted") return json({ ok: true, already: true }, 200, headers);
+
+  if (["scheduled", "manual_review"].includes(row.status) && row.paddle_subscription_id) {
+    if (row.effective_at && row.effective_at < now()) {
+      return json({ ok: false, error: "The subscription has already ended." }, 409, headers);
+    }
+
+    try {
+      await paddleApi(env, `/subscriptions/${encodeURIComponent(row.paddle_subscription_id)}`, {
+        method: "PATCH",
+        body: { scheduled_change: null }
+      });
+    } catch (err) {
+      console.error("[cancellation] undo failed", safeErrorForLog(err));
+      return json({ ok: false, error: "That did not work. Please write to us instead." }, 502, headers);
+    }
+
+    await env.DB.prepare(
+      `UPDATE billing_subscriptions SET cancel_at_period_end = 0, updated_at = ? WHERE paddle_subscription_id = ?`
+    ).bind(now(), row.paddle_subscription_id).run();
+  }
+
+  await env.DB.prepare(
+    `UPDATE cancellation_requests SET status = 'reverted', resolved_at = ? WHERE id = ?`
+  ).bind(now(), reference).run();
+
+  await audit(env, req, "cancellation_undo", row.user_id || null, { reference });
+
+  return json({ ok: true }, 200, headers);
+}
+
+/*
+  Cancellations for a date beyond the current billing period. Once the
+  period that contains the date is running, cancelling "at the next billing
+  period" ends the contract exactly there. Hourly is plenty: periods are
+  months long, and a renewal moves current_period_ends_at only after the
+  previous period ended.
+*/
+async function applyDeferredCancellations(env) {
+  await ensureCancellationColumns(env);
+
+  const { results = [] } = await env.DB.prepare(
+    `SELECT c.id, c.requested_effective, c.paddle_subscription_id,
+            s.id AS sub_row, s.status AS sub_status, s.current_period_ends_at,
+            s.cancel_at_period_end
+     FROM cancellation_requests c
+     LEFT JOIN billing_subscriptions s ON s.paddle_subscription_id = c.paddle_subscription_id
+     WHERE c.status = 'deferred'
+     LIMIT 50`
+  ).all();
+
+  for (const row of results) {
+    const wanted = requestedEndDate(String(row.requested_effective || "").replace(/^date:/, ""));
+
+    if (!row.sub_row || !["active", "trialing", "past_due"].includes(row.sub_status)) {
+      await env.DB.prepare(
+        `UPDATE cancellation_requests SET status = 'ended', resolved_at = ? WHERE id = ?`
+      ).bind(now(), row.id).run();
+      continue;
+    }
+
+    if (wanted && row.current_period_ends_at && wanted.ms > row.current_period_ends_at) continue;
+
+    try {
+      // Another declaration may already have stopped the renewal.
+      if (!row.cancel_at_period_end) {
+        await cancelSubscriptionAtPeriodEnd(env, {
+          id: row.sub_row,
+          paddle_subscription_id: row.paddle_subscription_id
+        });
+      }
+
+      await env.DB.prepare(
+        `UPDATE cancellation_requests SET status = 'scheduled', effective_at = ? WHERE id = ?`
+      ).bind(row.current_period_ends_at, row.id).run();
+    } catch (err) {
+      console.error("[cancellation] deferred apply failed", row.id, safeErrorForLog(err));
+    }
+  }
+}
+
+const WITHDRAW_TEXT = {
+  de: {
+    declaration: "Hiermit widerrufe ich den von mir abgeschlossenen Vertrag über YANTA Plus.",
+    name: "Name",
+    email: "E-Mail",
+    ref: "Bestell- oder Belegnummer",
+    subject: "Eingangsbestätigung: Ihre Widerrufserklärung",
+    heading: "Ihre Widerrufserklärung ist bei uns eingegangen",
+    intro: "Wir bestätigen hiermit den Eingang Ihrer Widerrufserklärung (§ 356a Abs. 4 BGB). Bewahren Sie diese E-Mail auf.",
+    received: "Eingegangen",
+    reference: "Vorgangsnummer",
+    next: "Wir bearbeiten Ihren Widerruf und melden uns innerhalb weniger Tage. Ist er wirksam, erstatten wir Ihre Zahlung spätestens 14 Tage nach Eingang über denselben Zahlungsweg (über unseren Zahlungsdienstleister Paddle). Haben Sie verlangt, dass wir schon während der Widerrufsfrist mit der Leistung beginnen, wird der Anteil für die bereits erbrachte Zeit abgezogen.",
+    asSubmitted: "Ihre Erklärung im Wortlaut:",
+    contact: (mail) => `Fragen oder nicht von Ihnen? Schreiben Sie an <a href="mailto:${mail}">${mail}</a>.`
+  },
+  en: {
+    declaration: "I hereby withdraw from the contract for YANTA Plus that I concluded.",
+    name: "Name",
+    email: "Email",
+    ref: "Order or receipt number",
+    subject: "Receipt of your notice of withdrawal",
+    heading: "We have received your notice of withdrawal",
+    intro: "This confirms that your notice of withdrawal has reached us (§ 356a (4) BGB). Please keep this email.",
+    received: "Received",
+    reference: "Reference",
+    next: "We will process your withdrawal and get back to you within a few days. If it is valid, we refund your payment no later than 14 days after receipt, by the same means of payment (through our payment provider Paddle). If you asked us to start providing the service during the withdrawal period, the share for the time already provided is deducted.",
+    asSubmitted: "Your declaration as submitted:",
+    contact: (mail) => `Questions, or was this not you? Write to <a href="mailto:${mail}">${mail}</a>.`
+  }
+};
+
+async function handleWithdrawalRequest(env, req, headers) {
+  const body = await bodyJson(req);
+
+  const email = normalizeEmail(body.email);
+  const name = String(body.name || "").trim().slice(0, 200);
+  const contractRef = String(body.contractRef || "").trim().slice(0, 200);
+  const lang = legalLang(body.lang);
+
+  if (!validEmail(email) || !name) {
+    return json({ ok: false, error: "Name and a valid email address are required." }, 400, headers);
+  }
+
+  const byIp = await rateLimit(env, `withdraw:ip:${await ipHash(env, req)}`, 20, 60 * 60 * 1000);
+  const byEmail = await rateLimit(env, `withdraw:mail:${email}`, 5, 24 * 60 * 60 * 1000);
+
+  if (!byIp.ok || !byEmail.ok) {
+    return json({
+      ok: false,
+      error: "Too many requests. Please email us instead."
+    }, 429, headers);
+  }
+
+  await ensureWithdrawalTable(env);
+
+  const s = WITHDRAW_TEXT[lang];
+  const receivedAt = now();
+  const reference = id("wdr");
+  const declaration = [
+    s.declaration,
+    `${s.name}: ${name}`,
+    `${s.email}: ${email}`,
+    contractRef ? `${s.ref}: ${contractRef}` : ""
+  ].filter(Boolean).join("\n");
+
+  const match = await findCancellableSubscription(env, email);
+  const subscription = match?.sub || null;
+
+  await env.DB.prepare(
+    `INSERT INTO withdrawal_requests
+       (id,user_id,email,name,contract_ref,paddle_subscription_id,contract_started_at,status,lang,ip_hash,created_at)
+     VALUES (?,?,?,?,?,?,?,?,?,?,?)`
+  ).bind(
+    reference,
+    match?.user?.id || null,
+    email,
+    name,
+    contractRef || null,
+    subscription?.paddle_subscription_id || null,
+    subscription?.created_at || null,
+    "received",
+    lang,
+    await ipHash(env, req),
     receivedAt
+  ).run();
+
+  await audit(env, req, "withdrawal_request", match?.user?.id || null, { reference });
+
+  const supportAddress = supportEmail(env);
+
+  // Eingangsbestätigung (§ 356a Abs. 4): content, date and time of receipt.
+  try {
+    await sendEmail(env, {
+      to: email,
+      subject: `${s.subject} — ${reference}`,
+      replyTo: supportAddress,
+      html: `
+        <h2>${s.heading}</h2>
+        <p>${s.intro}</p>
+        ${legalReceiptTable([
+          [s.received, `<strong>${escapeHtml(formatLegalTime(receivedAt, lang))}</strong>`],
+          [s.reference, `<strong>${reference}</strong>`]
+        ])}
+        <p>${s.next}</p>
+        <p style="margin-top:18px;color:#625a49;font-size:13px">${s.asSubmitted}</p>
+        ${declarationQuote(declaration)}
+        <p style="margin-top:20px;color:#666;font-size:12px">${s.contact(supportAddress)}</p>
+      `
+    });
+  } catch (err) {
+    console.error("[withdrawal] receipt email failed", safeErrorForLog(err));
+  }
+
+  /*
+    Every withdrawal goes to a person: whether it is in time, and how much
+    of the period was already provided, decides the refund — and an
+    unauthenticated form must not be able to end someone else's plan.
+  */
+  const startedAt = subscription?.created_at || null;
+  const inTime = startedAt ? receivedAt - startedAt <= 14 * DAY_MS : null;
+
+  try {
+    await sendEmail(env, {
+      to: supportAddress,
+      subject: `[YANTA] Withdrawal to process — ${reference}`,
+      replyTo: email,
+      html: `
+        <h3>Withdrawal ${reference}</h3>
+        <p>
+          Subscription: <strong>${escapeHtml(subscription?.paddle_subscription_id || "none found for this address")}</strong><br>
+          Started: ${startedAt ? escapeHtml(formatLegalTime(startedAt, "en")) : "—"}<br>
+          Within 14 days: <strong>${inTime === null ? "unknown" : inTime ? "yes" : "no"}</strong>
+        </p>
+        <p>To do: confirm with the customer, cancel the subscription immediately in Paddle and refund (pro rata if they asked to start early) within 14 days of receipt.</p>
+        <pre style="white-space:pre-wrap">${escapeHtml(declaration)}</pre>
+      `
+    });
+  } catch (err) {
+    console.error("[withdrawal] operator notice failed", safeErrorForLog(err));
+  }
+
+  return json({
+    ok: true,
+    reference,
+    receivedAt,
+    declaration
   }, 200, headers);
 }
 
@@ -10333,6 +10796,14 @@ async function route(req, env) {
       return handleCancellationRequest(env, req, headers);
     }
 
+    if (url.pathname === "/api/cancellation/undo" && req.method === "POST") {
+      return handleCancellationUndo(env, req, headers);
+    }
+
+    if (url.pathname === "/api/withdrawal" && req.method === "POST") {
+      return handleWithdrawalRequest(env, req, headers);
+    }
+
     if (url.pathname === "/api/content-notice" && req.method === "POST") {
       return handleContentNotice(env, req, headers);
     }
@@ -10573,6 +11044,7 @@ var index_default = {
 
     // Once an hour each (the cron itself runs every minute).
     if (minute === 7) task("cleanup cron", () => cleanupExpiredPayloads(env));
+    if (minute === 52) task("deferred cancellations", () => applyDeferredCancellations(env));
     if (minute === 37) {
       task("push expiry cron", () => deleteExpiredPushes(env));
       task("rate limit prune", () => pruneRateLimits(env));

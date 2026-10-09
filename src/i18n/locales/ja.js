@@ -1455,10 +1455,15 @@ export default {
       pricing: '料金',
     },
 
+    form: {
+      optional: '任意',
+    },
+
     legal: {
       imprint: '事業者情報',
       privacy: 'プライバシー',
       cancel: '契約を解約',
+      withdraw: '契約を撤回',
       terms: '利用規約',
       refunds: '返金',
       accessibility: 'アクセシビリティ',
@@ -1471,6 +1476,7 @@ export default {
 
     title: {
       pricing: '料金',
+      withdraw: '契約を撤回',
       terms: '利用規約',
       privacy: 'プライバシーポリシー',
       refund: '撤回権と返金',

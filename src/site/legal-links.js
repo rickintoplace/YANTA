@@ -45,15 +45,24 @@ export const YANTA_LEGAL = {
 export const SOURCE_URL = YANTA_LEGAL.sourceUrl;
 
 /*
+  The two contract buttons. § 312k BGB (cancel) and § 356a BGB (withdraw)
+  want them permanently available, easy to reach and — in a footer —
+  set apart from the other links, so every surface renders these first,
+  highlighted, and never folds them into an overflow menu.
+*/
+export const CONTRACT_LINKS = [
+  { key: 'cancel', href: '/cancel' },
+  { key: 'withdraw', href: '/withdraw' },
+];
+
+/*
   Priority order — surfaces that truncate drop from the end. Imprint and
-  Privacy come first because they are the classic prominence duties, and
-  "Cancel contract" is third because § 312k BGB wants it permanently
-  available and easy to reach, not buried in an overflow menu.
+  Privacy come first because they are the classic prominence duties.
 */
 export const LEGAL_LINKS = [
+  ...CONTRACT_LINKS,
   { key: 'imprint', href: '/imprint' },
   { key: 'privacy', href: '/privacy' },
-  { key: 'cancel', href: '/cancel' },
   { key: 'terms', href: '/terms' },
   { key: 'refunds', href: '/refund' },
   { key: 'accessibility', href: '/accessibility' },

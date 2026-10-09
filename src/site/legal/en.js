@@ -190,7 +190,9 @@ function termsDocument() {
       <p>
         As a consumer you have a statutory right to withdraw from the contract
         within 14 days. The full notice and the model withdrawal form are on
-        the <a href="/withdrawal">Right of withdrawal</a> page. It is separate
+        the <a href="/withdrawal">Right of withdrawal</a> page, and you can
+        withdraw online through <a href="/withdraw">Withdraw from
+        contract</a>, without signing in. It is separate
         from, and unaffected by, our voluntary
         <a href="/refund">refund policy</a>.
       </p>
@@ -199,8 +201,11 @@ function termsDocument() {
       <p>
         You can cancel at any time through
         <a href="/cancel">Cancel contract</a> — no login required — or in
-        Settings → Sync → Manage billing. Unless stated otherwise, Plus stays
-        available until the end of the period you have paid for; afterwards
+        Settings → Sync → Manage billing, with effect at the end of a billing
+        period (that is, at the end of the current month or year). Once a
+        yearly plan has renewed, you can end it at any time with one month's
+        notice, and we refund the unused part of the year pro rata. Plus stays
+        available until the contract ends; afterwards
         Free limits apply. If your usage then exceeds the Free limits, new
         uploads and some cloud features may be blocked until you reduce usage
         or subscribe again. <strong>Existing data is not deleted because of a
@@ -392,7 +397,7 @@ function privacyDocument() {
           ['Public share metadata and encrypted payloads', 'Delivering shares you create', 'Art. 6(1)(b)'],
           ['Feed URLs and lookup requests (Sources)', 'Fetching what you subscribed to', 'Art. 6(1)(b)'],
           ['AI prompts and the context you select', 'Answering your request', 'Art. 6(1)(b)'],
-          ['Cancellation declarations, content notices', 'Legal duties under § 312k BGB and the DSA', 'Art. 6(1)(c)'],
+          ['Cancellation and withdrawal declarations, content notices', 'Legal duties under §§ 312k, 356a BGB and the DSA', 'Art. 6(1)(c)'],
         ]
       )}
       <p>
@@ -493,7 +498,7 @@ function privacyDocument() {
           ['Usage counters', 'Rolling, up to 14 months'],
           ['Daily page totals (no personal data)', 'Kept as aggregate totals'],
           ['Invoices, payment and accounting records', '10 years (§ 147 AO, § 257 HGB)'],
-          ['Cancellation declarations', '3 years (limitation period)'],
+          ['Cancellation and withdrawal declarations', '3 years (limitation period)'],
           ['Content notices under the DSA', 'Up to 3 years'],
           ['Public shares', 'Until revoked or the account is deleted'],
         ]
@@ -586,6 +591,15 @@ function withdrawalDocument() {
         below, but it is not obligatory.
       </p>
       <p>
+        You can also exercise your right of withdrawal online at
+        <a href="/withdraw">yanta.page/withdraw</a> (the “Withdraw from
+        contract” link at the bottom of every page and in the app’s sidebar).
+        If you use this online function, we will send you a confirmation of
+        receipt on a durable medium (for example by email) without delay,
+        with the content of your notice of withdrawal and the date and time
+        it was received.
+      </p>
+      <p>
         To meet the withdrawal deadline, it is sufficient for you to send your
         communication concerning your exercise of the right of withdrawal
         before the withdrawal period has expired.
@@ -612,15 +626,15 @@ function withdrawalDocument() {
         coverage of the contract.
       </p>
 
-      <h3>Early expiry of the right of withdrawal</h3>
+      <h3>Expiry of the right of withdrawal</h3>
       <p>
-        Your right of withdrawal expires early in the case of a contract for
-        the supply of digital content not supplied on a tangible medium if we
-        have begun performance after you have expressly consented to us
-        beginning performance before the end of the withdrawal period and you
-        have acknowledged that you thereby lose your right of withdrawal. We
-        ask for both explicitly before checkout, and we confirm them to you in
-        writing.
+        For a contract for services, the right of withdrawal expires once we
+        have fully provided the service, if we began only after you expressly
+        consented to that and at the same time acknowledged that you lose
+        your right of withdrawal once we have fully performed the contract
+        (§ 356(4) BGB). With a monthly or yearly subscription this is
+        normally not the case within the 14 days. We ask for the consent and
+        the acknowledgement explicitly before checkout.
       </p>
 
       <h2>Model withdrawal form</h2>
@@ -758,32 +772,74 @@ function licensesDocument() {
 export const forms = {
   cancel: {
     heading: 'Cancel contract',
-    statute: 'Verträge hier kündigen (§ 312k BGB)',
-    intro: 'Cancel your YANTA Plus subscription here. You do not need to sign in. We confirm every cancellation by email, including the time we received it and the date your contract ends — keep that email, it is your proof.',
-    keepsData: 'Cancelling ends the paid plan only. <strong>Nothing is deleted.</strong> You keep YANTA Plus until the end of the period you already paid for, and the account then continues on the Free plan. To remove the account itself, use <a href="/delete-account">Delete account</a>.',
     typeLegend: 'Type of termination',
     ordinary: 'Ordinary termination',
-    ordinaryHint: 'Ends at the end of your current billing period. This is the usual choice.',
+    ordinaryHint: 'The usual choice. Takes effect at the end of a billing period.',
     extraordinary: 'Extraordinary termination',
-    extraordinaryHint: 'For good cause, with immediate effect. Please state the reason below.',
+    extraordinaryHint: 'For good cause, with immediate effect. Please state the reason.',
+    reasonLabel: 'Reason for the extraordinary termination',
+    endLegend: 'When should the contract end?',
+    endAsap: 'At the earliest possible date',
+    endAsapHint: 'Usually at the end of the current billing period.',
+    endDate: 'On a specific date',
+    endDateHint: 'The contract ends with the billing period this date falls in.',
     emailLabel: 'Email address of your YANTA account',
-    emailHint: 'We send the confirmation here. Use the address your subscription runs on.',
+    emailHint: 'Identifies your contract. We send the confirmation here.',
     nameLabel: 'Name',
     refLabel: 'Contract or invoice reference',
-    refHint: 'Helps us find the right contract if you have more than one.',
-    reasonLabel: 'Reason for the extraordinary termination',
-    declaration: 'By submitting this form I declare that I terminate my YANTA Plus contract at the earliest possible date.',
+    refHint: 'Only needed if you have more than one contract.',
+    declaration: 'I terminate my YANTA Plus contract (ordinary termination) at the earliest possible date.',
+    declarationDate: 'I terminate my YANTA Plus contract (ordinary termination) as of {date}.',
+    declarationExtraordinary: 'I terminate my YANTA Plus contract for good cause with immediate effect.',
     submit: 'Cancel now',
     busy: 'Submitting your cancellation…',
     needEmail: 'Please enter the email address of your YANTA account.',
-    otherHeading: 'Other ways to cancel',
-    otherBody: 'A cancellation is valid in any clear form. You can also email {mail} or write to {address}. Signed-in customers can also cancel under <strong>Settings → Sync → Manage billing</strong>.',
-    notWithdrawal: 'Cancelling is not the same as withdrawing. Within 14 days of your first purchase you may also have a statutory right of withdrawal — see <a href="/withdrawal">Right of withdrawal</a>.',
-    receiptHeading: 'Cancellation received',
-    receiptRef: 'Your reference is {ref}.',
-    receiptBody: 'We have sent the confirmation to the address you gave, with the exact time we received your declaration and the date your contract ends. If it has not arrived in a few minutes, check your spam folder and then contact {mail}.',
+    needDate: 'Please pick a date, or choose “At the earliest possible date”.',
+    receiptHeading: 'Your cancellation has been received',
+    receiptIntro: 'Save or print this page as your proof. We also send you the same details by email.',
+    receivedLabel: 'Received',
+    referenceLabel: 'Reference',
+    declarationLabel: 'Your declaration',
+    save: 'Save as file',
+    print: 'Print',
+    fileName: 'YANTA-cancellation',
+    receiptBody: 'The confirmation goes to the address you gave, with the time we received your declaration and the date your contract ends. If it has not arrived in a few minutes, check your spam folder and then write to {mail}.',
+    keepsData: 'Cancelling ends the paid plan only. <strong>Nothing is deleted.</strong> You keep YANTA Plus until the contract ends, and the account then continues on the Free plan. To remove the account itself, use <a href="/delete-account">Delete account</a>.',
+    notWithdrawal: 'Cancelling is not the same as withdrawing. Within 14 days of concluding the contract you can also <a href="/withdraw">withdraw from it</a>.',
     errRate: 'Too many attempts from this device. Please email {mail} instead — that is equally valid.',
     errGeneric: 'We could not record your cancellation. Please email {mail}: a cancellation by email is equally valid and takes effect when it reaches us.',
+    undoHeading: 'Keep your subscription?',
+    undoBody: 'This takes back cancellation {ref}: your YANTA Plus subscription continues and renews as before.',
+    undoButton: 'Keep my subscription',
+    undoBusy: 'One moment…',
+    undoDone: 'Done. Your subscription continues; the cancellation has been taken back.',
+    undoInvalid: 'This link is not valid. Please write to {mail}.',
+    undoFailed: 'That did not work. Please write to {mail} and we will take care of it.',
+  },
+
+  withdraw: {
+    heading: 'Withdraw from contract',
+    nameLabel: 'Your name',
+    emailLabel: 'Email address of your YANTA account',
+    emailHint: 'Identifies your contract. We send the confirmation of receipt here.',
+    refLabel: 'Order or receipt number',
+    refHint: 'Shown on your Paddle receipt. Only needed if you have more than one contract.',
+    declaration: 'I hereby withdraw from the contract for YANTA Plus that I concluded.',
+    submit: 'Confirm withdrawal',
+    busy: 'Submitting your withdrawal…',
+    needName: 'Please enter your name.',
+    needEmail: 'Please enter the email address of your YANTA account.',
+    receiptHeading: 'Your notice of withdrawal has been received',
+    receiptIntro: 'Save or print this page as your proof. We also email you a confirmation of receipt with the same details.',
+    receivedLabel: 'Received',
+    referenceLabel: 'Reference',
+    declarationLabel: 'Your declaration',
+    save: 'Save as file',
+    print: 'Print',
+    fileName: 'YANTA-withdrawal',
+    receiptBody: 'We will process your withdrawal and get back to you within a few days. If it is valid, we refund your payment no later than 14 days after receipt. If the email does not arrive, please write to {mail}.',
+    errRate: 'Too many attempts from this device. Please email {mail} instead — a withdrawal by email is equally valid.',
+    errGeneric: 'We could not record your withdrawal. Please email {mail}: a withdrawal by email is equally valid.',
   },
 
   report: {
@@ -848,7 +904,7 @@ export const forms = {
     staysCols: ['Data', 'Reason'],
     stays: [
       ['Invoices and payment records', 'German commercial and tax law requires up to 10 years (§ 147 AO, § 257 HGB). They are kept for that and nothing else.'],
-      ['Cancellation declarations and content notices', 'Legal records; the link to your person is removed.'],
+      ['Cancellation and withdrawal declarations, content notices', 'Legal records; the link to your person is removed.'],
       ['Anything stored only on your devices', 'We never had it. Clear it in the app or in your browser settings.'],
     ],
     doItHeading: 'Delete it',

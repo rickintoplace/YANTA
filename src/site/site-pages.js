@@ -34,6 +34,11 @@ import {
 } from './cancel-content.js';
 
 import {
+  withdrawContent,
+  wireWithdrawPage,
+} from './withdraw-content.js';
+
+import {
   reportContent,
   wireReportPage,
 } from './report-content.js';
@@ -608,7 +613,7 @@ function siteNavHtml(currentPath) {
   }).join('\n');
 }
 
-function shell(content, { title = '', currentPath = '' } = {}) {
+function shell(content, { title = '', currentPath = '', bare = false } = {}) {
   injectCss();
   ensureLegalFooterCss();
 
@@ -629,9 +634,9 @@ function shell(content, { title = '', currentPath = '' } = {}) {
               </div>
             </div>
           </a>
-          <div class="yanta-site-nav-links">
+          ${bare ? '' : `<div class="yanta-site-nav-links">
             ${siteNavHtml(currentPath)}
-          </div>
+          </div>`}
         </nav>
       </header>
 
@@ -945,10 +950,22 @@ const SITE_ROUTES = new Map([
     titleKey: 'site.title.accessibility',
     render: accessibilityContent,
   }],
+  /*
+    The two contract pages render without the product nav: § 312k (and the
+    BGH reading of it) allows the form and its button there, not offers or
+    detours. The legal footer stays — the imprint has to be reachable.
+  */
   ['/cancel', {
     titleKey: 'site.title.cancel',
     render: cancelContent,
     wire: wireCancelPage,
+    bare: true,
+  }],
+  ['/withdraw', {
+    titleKey: 'site.title.withdraw',
+    render: withdrawContent,
+    wire: wireWithdrawPage,
+    bare: true,
   }],
   ['/delete-account', {
     titleKey: 'site.title.deleteAccount',
@@ -988,6 +1005,7 @@ export async function mountSitePage() {
   shell(content, {
     title: route.titleText || t(route.titleKey),
     currentPath: path,
+    bare: !!route.bare,
   });
 
   route.wire?.();

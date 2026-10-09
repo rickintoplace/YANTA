@@ -51,6 +51,10 @@
       "destination": "/index.html"
     },
     {
+      "source": "/withdraw",
+      "destination": "/index.html"
+    },
+    {
       "source": "/delete-account",
       "destination": "/index.html"
     },

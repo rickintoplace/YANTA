@@ -509,11 +509,29 @@ CREATE TABLE IF NOT EXISTS cancellation_requests (
   status TEXT NOT NULL,
   error TEXT,
   ip_hash TEXT,
-  created_at INTEGER NOT NULL
+  created_at INTEGER NOT NULL,
+  lang TEXT,
+  resolved_at INTEGER
 );
 
 CREATE INDEX IF NOT EXISTS idx_cancellation_requests_email
 ON cancellation_requests(email, created_at);
+
+-- § 356a BGB withdrawals. Processed by a person (refund through Paddle).
+CREATE TABLE IF NOT EXISTS withdrawal_requests (
+  id TEXT PRIMARY KEY,
+  user_id TEXT,
+  email TEXT NOT NULL,
+  name TEXT NOT NULL,
+  contract_ref TEXT,
+  paddle_subscription_id TEXT,
+  contract_started_at INTEGER,
+  status TEXT NOT NULL,
+  lang TEXT,
+  ip_hash TEXT,
+  created_at INTEGER NOT NULL,
+  resolved_at INTEGER
+);
 
 -- DSA Art. 16 notices about public shares. Kept for the statement-of-reasons
 -- duty (Art. 17) and so repeat notices about one share are traceable.

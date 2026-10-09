@@ -1472,10 +1472,15 @@ export default {
       pricing: 'Tarifs',
     },
 
+    form: {
+      optional: 'facultatif',
+    },
+
     legal: {
       imprint: 'Mentions légales',
       privacy: 'Confidentialité',
       cancel: 'Résilier le contrat',
+      withdraw: 'Se rétracter du contrat',
       terms: 'CGU',
       refunds: 'Remboursements',
       accessibility: 'Accessibilité',
@@ -1488,6 +1493,7 @@ export default {
 
     title: {
       pricing: 'Tarifs',
+      withdraw: 'Se rétracter du contrat',
       terms: 'Conditions d’utilisation',
       privacy: 'Politique de confidentialité',
       refund: 'Droit de rétractation et remboursements',

@@ -1,4 +1,5 @@
 import {
+  CONTRACT_LINKS,
   escapeHtml,
   LEGAL_LINKS,
   legalLinkLabel,
@@ -49,6 +50,12 @@ export function ensureLegalFooterCss() {
 .yanta-legal-footer__links a:hover {
   color: var(--text, #29251d);
   text-decoration: underline;
+}
+
+/* The contract buttons stand out from the other links (§ 312k / § 356a BGB). */
+.yanta-legal-footer__links a.yanta-legal-footer__contract {
+  color: color-mix(in srgb, var(--accent, #8FA31E) 62%, var(--text, #29251d));
+  font-weight: 650;
 }
 
 .yanta-legal-footer__meta {
@@ -121,8 +128,11 @@ export function legalFooterHtml({
   const linksHtml = LEGAL_LINKS.map((link) => {
     const href = legalLinkUrl(link.href) +
       (link.href === '/report' ? reportContext : '');
+    const contract = CONTRACT_LINKS.includes(link)
+      ? ' class="yanta-legal-footer__contract"'
+      : '';
 
-    return `<a href="${escapeHtml(href)}">${escapeHtml(legalLinkLabel(link))}</a>`;
+    return `<a href="${escapeHtml(href)}"${contract}>${escapeHtml(legalLinkLabel(link))}</a>`;
   }).join('');
 
   return `

@@ -201,7 +201,9 @@ function termsDocument() {
       <p>
         Als Verbraucher steht Ihnen ein gesetzliches Widerrufsrecht von 14
         Tagen zu. Die vollständige Belehrung und das Muster-Widerrufsformular
-        finden Sie unter <a href="/withdrawal">Widerrufsrecht</a>. Es besteht
+        finden Sie unter <a href="/withdrawal">Widerrufsrecht</a>; widerrufen
+        können Sie online über <a href="/withdraw">Vertrag widerrufen</a>, ohne
+        Anmeldung. Es besteht
         unabhängig von unserer freiwilligen
         <a href="/refund">Erstattungsregelung</a> und wird durch sie nicht
         eingeschränkt.
@@ -211,8 +213,11 @@ function termsDocument() {
       <p>
         Sie können jederzeit über <a href="/cancel">Verträge hier kündigen</a>
         — ohne Anmeldung — oder unter Einstellungen → Sync → Abrechnung
-        verwalten kündigen. Soweit nichts anderes angegeben ist, bleibt Plus
-        bis zum Ende des bereits bezahlten Zeitraums verfügbar; danach gelten
+        verwalten kündigen, ordentlich zum Ende eines Abrechnungszeitraums
+        (also mit einer Frist bis zum Ende des laufenden Monats bzw. Jahres).
+        Hat sich ein Jahrestarif bereits verlängert, können Sie ihn jederzeit
+        mit einer Frist von einem Monat kündigen; den nicht genutzten Teil des
+        bezahlten Jahres erstatten wir anteilig. Plus bleibt bis zum Vertragsende verfügbar; danach gelten
         die Grenzen des kostenlosen Tarifs. Übersteigt Ihre Nutzung diese
         Grenzen, können neue Uploads und einzelne Cloud-Funktionen gesperrt
         werden, bis Sie Ihre Nutzung verringern oder erneut abonnieren.
@@ -418,7 +423,7 @@ function privacyDocument() {
           ['Metadaten und verschlüsselte Inhalte öffentlicher Freigaben', 'Auslieferung Ihrer Freigaben', 'Art. 6 Abs. 1 lit. b'],
           ['Feed-URLs und Abrufe (Quellen)', 'Abruf der von Ihnen abonnierten Inhalte', 'Art. 6 Abs. 1 lit. b'],
           ['KI-Eingaben und der von Ihnen gewählte Kontext', 'Beantwortung Ihrer Anfrage', 'Art. 6 Abs. 1 lit. b'],
-          ['Kündigungserklärungen, Inhaltsmeldungen', 'Gesetzliche Pflichten nach § 312k BGB und DSA', 'Art. 6 Abs. 1 lit. c'],
+          ['Kündigungs- und Widerrufserklärungen, Inhaltsmeldungen', 'Gesetzliche Pflichten nach §§ 312k, 356a BGB und DSA', 'Art. 6 Abs. 1 lit. c'],
         ]
       )}
       <p>
@@ -524,7 +529,7 @@ function privacyDocument() {
           ['Nutzungszähler', 'Rollierend, bis zu 14 Monate'],
           ['Tages-Seitensummen (ohne Personenbezug)', 'Bleiben als aggregierte Summen'],
           ['Rechnungen, Zahlungs- und Buchhaltungsunterlagen', '10 Jahre (§ 147 AO, § 257 HGB)'],
-          ['Kündigungserklärungen', '3 Jahre (Verjährungsfrist)'],
+          ['Kündigungs- und Widerrufserklärungen', '3 Jahre (Verjährungsfrist)'],
           ['Inhaltsmeldungen nach dem DSA', 'Bis zu 3 Jahre'],
           ['Öffentliche Freigaben', 'Bis zum Widerruf oder zur Kontolöschung'],
         ]
@@ -621,6 +626,15 @@ function withdrawalDocument() {
         vorgeschrieben ist.
       </p>
       <p>
+        Sie können Ihr Widerrufsrecht auch online unter
+        <a href="/withdraw">yanta.page/withdraw</a> (Link „Vertrag widerrufen“
+        am Ende jeder Seite und in der Seitenleiste der App) ausüben. Wenn Sie
+        diese Online-Funktion nutzen, übermitteln wir Ihnen auf einem
+        dauerhaften Datenträger (z. B. durch eine E-Mail) unverzüglich eine
+        Eingangsbestätigung mit Informationen zum Inhalt der
+        Widerrufserklärung sowie dem Datum und der Uhrzeit ihres Eingangs.
+      </p>
+      <p>
         Zur Wahrung der Widerrufsfrist reicht es aus, dass Sie die Mitteilung
         über die Ausübung des Widerrufsrechts vor Ablauf der Widerrufsfrist
         absenden.
@@ -649,16 +663,17 @@ function withdrawalDocument() {
         vorgesehenen Dienstleistungen entspricht.
       </p>
 
-      <h3>Vorzeitiges Erlöschen des Widerrufsrechts</h3>
+      <h3>Erlöschen des Widerrufsrechts</h3>
       <p>
-        Bei einem Vertrag über die Lieferung von nicht auf einem körperlichen
-        Datenträger befindlichen digitalen Inhalten erlischt Ihr Widerrufsrecht
-        vorzeitig, wenn wir mit der Ausführung begonnen haben, nachdem Sie
-        ausdrücklich zugestimmt haben, dass wir vor Ablauf der Widerrufsfrist
-        mit der Ausführung beginnen, und Sie Ihre Kenntnis davon bestätigt
-        haben, dass Sie durch Ihre Zustimmung Ihr Widerrufsrecht verlieren. Wir
-        holen beides vor dem Checkout ausdrücklich ein und bestätigen es Ihnen
-        anschließend in Textform.
+        Bei einem Vertrag über Dienstleistungen erlischt das Widerrufsrecht,
+        wenn wir die Dienstleistung vollständig erbracht haben und mit der
+        Ausführung erst begonnen haben, nachdem Sie dazu Ihre ausdrückliche
+        Zustimmung gegeben und gleichzeitig Ihre Kenntnis davon bestätigt
+        haben, dass Sie Ihr Widerrufsrecht bei vollständiger Vertragserfüllung
+        durch uns verlieren (§ 356 Abs. 4 BGB). Bei einem Abonnement mit
+        monatlicher oder jährlicher Laufzeit ist das innerhalb der 14 Tage in
+        aller Regel nicht der Fall. Zustimmung und Bestätigung holen wir vor
+        dem Checkout ausdrücklich ein.
       </p>
 
       <h2>Muster-Widerrufsformular</h2>
@@ -792,32 +807,74 @@ function licensesDocument() {
 export const forms = {
   cancel: {
     heading: 'Vertrag kündigen',
-    statute: 'Verträge hier kündigen (§ 312k BGB)',
-    intro: 'Kündigen Sie hier Ihr YANTA-Plus-Abonnement. Eine Anmeldung ist nicht nötig. Wir bestätigen jede Kündigung per E-Mail, mit Eingangszeitpunkt und dem Datum, zu dem Ihr Vertrag endet — bewahren Sie diese E-Mail auf, sie ist Ihr Nachweis.',
-    keepsData: 'Die Kündigung beendet nur den kostenpflichtigen Tarif. <strong>Es wird nichts gelöscht.</strong> YANTA Plus bleibt bis zum Ende des bereits bezahlten Zeitraums verfügbar, danach läuft das Konto im kostenlosen Tarif weiter. Um das Konto selbst zu entfernen, nutzen Sie <a href="/delete-account">Konto löschen</a>.',
     typeLegend: 'Art der Kündigung',
     ordinary: 'Ordentliche Kündigung',
-    ordinaryHint: 'Wirkt zum Ende Ihres laufenden Abrechnungszeitraums. Das ist der Regelfall.',
+    ordinaryHint: 'Der Regelfall. Wirkt zum Ende eines Abrechnungszeitraums.',
     extraordinary: 'Außerordentliche Kündigung',
-    extraordinaryHint: 'Aus wichtigem Grund, mit sofortiger Wirkung. Bitte nennen Sie den Grund unten.',
+    extraordinaryHint: 'Aus wichtigem Grund, mit sofortiger Wirkung. Bitte nennen Sie den Grund.',
+    reasonLabel: 'Grund für die außerordentliche Kündigung',
+    endLegend: 'Zu wann soll der Vertrag enden?',
+    endAsap: 'Zum nächstmöglichen Zeitpunkt',
+    endAsapHint: 'In der Regel zum Ende des laufenden Abrechnungszeitraums.',
+    endDate: 'Zu einem bestimmten Datum',
+    endDateHint: 'Der Vertrag endet mit dem Abrechnungszeitraum, in den dieses Datum fällt.',
     emailLabel: 'E-Mail-Adresse Ihres YANTA-Kontos',
-    emailHint: 'Hierhin senden wir die Bestätigung. Bitte die Adresse verwenden, auf die das Abonnement läuft.',
+    emailHint: 'Zur Zuordnung Ihres Vertrags. Hierhin senden wir die Bestätigung.',
     nameLabel: 'Name',
     refLabel: 'Vertrags- oder Rechnungsnummer',
-    refHint: 'Hilft uns, den richtigen Vertrag zu finden, wenn Sie mehrere haben.',
-    reasonLabel: 'Grund für die außerordentliche Kündigung',
-    declaration: 'Mit dem Absenden dieses Formulars erkläre ich, dass ich meinen YANTA-Plus-Vertrag zum nächstmöglichen Zeitpunkt kündige.',
+    refHint: 'Nur nötig, wenn Sie mehrere Verträge haben.',
+    declaration: 'Ich kündige meinen YANTA-Plus-Vertrag ordentlich zum nächstmöglichen Zeitpunkt.',
+    declarationDate: 'Ich kündige meinen YANTA-Plus-Vertrag ordentlich zum {date}.',
+    declarationExtraordinary: 'Ich kündige meinen YANTA-Plus-Vertrag außerordentlich mit sofortiger Wirkung.',
     submit: 'Jetzt kündigen',
     busy: 'Kündigung wird übermittelt…',
     needEmail: 'Bitte geben Sie die E-Mail-Adresse Ihres YANTA-Kontos an.',
-    otherHeading: 'Andere Wege zu kündigen',
-    otherBody: 'Eine Kündigung ist in jeder eindeutigen Form wirksam. Sie können auch an {mail} schreiben oder per Post an {address}. Angemeldete Kundinnen und Kunden können außerdem unter <strong>Einstellungen → Sync → Abrechnung verwalten</strong> kündigen.',
-    notWithdrawal: 'Kündigung und Widerruf sind nicht dasselbe. Innerhalb von 14 Tagen nach Ihrem Erstkauf steht Ihnen zusätzlich ein gesetzliches Widerrufsrecht zu — siehe <a href="/withdrawal">Widerrufsrecht</a>.',
-    receiptHeading: 'Kündigung eingegangen',
-    receiptRef: 'Ihre Vorgangsnummer lautet {ref}.',
-    receiptBody: 'Wir haben die Bestätigung an die angegebene Adresse gesendet, mit dem genauen Eingangszeitpunkt Ihrer Erklärung und dem Datum, zu dem Ihr Vertrag endet. Sollte sie nicht in wenigen Minuten ankommen, prüfen Sie bitte den Spam-Ordner und wenden Sie sich dann an {mail}.',
+    needDate: 'Bitte wählen Sie ein Datum oder „Zum nächstmöglichen Zeitpunkt“.',
+    receiptHeading: 'Ihre Kündigung ist eingegangen',
+    receiptIntro: 'Speichern oder drucken Sie diese Seite als Nachweis. Dieselben Angaben senden wir Ihnen per E-Mail.',
+    receivedLabel: 'Eingegangen',
+    referenceLabel: 'Vorgangsnummer',
+    declarationLabel: 'Ihre Erklärung',
+    save: 'Als Datei speichern',
+    print: 'Drucken',
+    fileName: 'YANTA-Kuendigung',
+    receiptBody: 'Die Bestätigung geht an die angegebene Adresse — mit dem Eingangszeitpunkt und dem Datum, zu dem Ihr Vertrag endet. Kommt sie nicht in wenigen Minuten an, prüfen Sie bitte den Spam-Ordner und schreiben Sie dann an {mail}.',
+    keepsData: 'Die Kündigung beendet nur den kostenpflichtigen Tarif. <strong>Es wird nichts gelöscht.</strong> Bis zum Vertragsende behalten Sie YANTA Plus, danach läuft das Konto im kostenlosen Tarif weiter. Um das Konto selbst zu entfernen, nutzen Sie <a href="/delete-account">Konto löschen</a>.',
+    notWithdrawal: 'Kündigung und Widerruf sind nicht dasselbe. Innerhalb von 14 Tagen nach Vertragsschluss können Sie außerdem <a href="/withdraw">den Vertrag widerrufen</a>.',
     errRate: 'Zu viele Versuche von diesem Gerät. Bitte schreiben Sie stattdessen an {mail} — das ist genauso wirksam.',
     errGeneric: 'Wir konnten Ihre Kündigung nicht erfassen. Bitte schreiben Sie an {mail}: Eine Kündigung per E-Mail ist genauso wirksam und wird mit Zugang bei uns wirksam.',
+    undoHeading: 'Abonnement behalten?',
+    undoBody: 'Damit nehmen Sie die Kündigung {ref} zurück: Ihr YANTA-Plus-Abonnement läuft weiter und verlängert sich wie bisher.',
+    undoButton: 'Abonnement behalten',
+    undoBusy: 'Einen Moment…',
+    undoDone: 'Erledigt. Ihr Abonnement läuft weiter; die Kündigung ist zurückgenommen.',
+    undoInvalid: 'Dieser Link ist nicht gültig. Schreiben Sie uns bitte an {mail}.',
+    undoFailed: 'Das hat nicht geklappt. Schreiben Sie uns bitte an {mail}, dann erledigen wir es.',
+  },
+
+  withdraw: {
+    heading: 'Vertrag widerrufen',
+    nameLabel: 'Ihr Name',
+    emailLabel: 'E-Mail-Adresse Ihres YANTA-Kontos',
+    emailHint: 'Zur Zuordnung Ihres Vertrags. Hierhin senden wir die Eingangsbestätigung.',
+    refLabel: 'Bestell- oder Belegnummer',
+    refHint: 'Steht auf dem Beleg von Paddle. Nur nötig, wenn Sie mehrere Verträge haben.',
+    declaration: 'Hiermit widerrufe ich den von mir abgeschlossenen Vertrag über YANTA Plus.',
+    submit: 'Widerruf bestätigen',
+    busy: 'Widerruf wird übermittelt…',
+    needName: 'Bitte geben Sie Ihren Namen an.',
+    needEmail: 'Bitte geben Sie die E-Mail-Adresse Ihres YANTA-Kontos an.',
+    receiptHeading: 'Ihre Widerrufserklärung ist eingegangen',
+    receiptIntro: 'Speichern oder drucken Sie diese Seite als Nachweis. Eine Eingangsbestätigung mit denselben Angaben senden wir Ihnen per E-Mail.',
+    receivedLabel: 'Eingegangen',
+    referenceLabel: 'Vorgangsnummer',
+    declarationLabel: 'Ihre Erklärung',
+    save: 'Als Datei speichern',
+    print: 'Drucken',
+    fileName: 'YANTA-Widerruf',
+    receiptBody: 'Wir bearbeiten Ihren Widerruf und melden uns innerhalb weniger Tage. Ist er wirksam, erstatten wir Ihre Zahlung spätestens 14 Tage nach Eingang. Kommt die E-Mail nicht an, schreiben Sie bitte an {mail}.',
+    errRate: 'Zu viele Versuche von diesem Gerät. Bitte schreiben Sie stattdessen an {mail} — ein Widerruf per E-Mail ist genauso wirksam.',
+    errGeneric: 'Wir konnten Ihren Widerruf nicht erfassen. Bitte schreiben Sie an {mail}: Ein Widerruf per E-Mail ist genauso wirksam.',
   },
 
   report: {
@@ -882,7 +939,7 @@ export const forms = {
     staysCols: ['Daten', 'Grund'],
     stays: [
       ['Rechnungen und Zahlungsunterlagen', 'Handels- und Steuerrecht verlangen bis zu 10 Jahre (§ 147 AO, § 257 HGB). Sie werden nur dafür aufbewahrt.'],
-      ['Kündigungserklärungen und Inhaltsmeldungen', 'Rechtsdokumente; der Bezug zu Ihrer Person wird entfernt.'],
+      ['Kündigungs- und Widerrufserklärungen, Inhaltsmeldungen', 'Rechtsdokumente; der Bezug zu Ihrer Person wird entfernt.'],
       ['Alles, was nur auf Ihren Geräten liegt', 'Das hatten wir nie. Löschen Sie es in der App oder in den Browsereinstellungen.'],
     ],
     doItHeading: 'Jetzt löschen',

@@ -1496,10 +1496,15 @@ export default {
       pricing: 'Pricing',
     },
 
+    form: {
+      optional: 'optional',
+    },
+
     legal: {
       imprint: 'Imprint',
       privacy: 'Privacy',
       cancel: 'Cancel contract',
+      withdraw: 'Withdraw from contract',
       terms: 'Terms',
       refunds: 'Refunds',
       accessibility: 'Accessibility',
@@ -1512,6 +1517,7 @@ export default {
 
     title: {
       pricing: 'Pricing',
+      withdraw: 'Withdraw from contract',
       terms: 'Terms of Service',
       privacy: 'Privacy Policy',
       refund: 'Right of withdrawal & refunds',

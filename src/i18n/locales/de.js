@@ -1472,10 +1472,15 @@ export default {
       pricing: 'Preise',
     },
 
+    form: {
+      optional: 'optional',
+    },
+
     legal: {
       imprint: 'Impressum',
       privacy: 'Datenschutz',
-      cancel: 'Vertrag kündigen',
+      cancel: 'Verträge hier kündigen',
+      withdraw: 'Vertrag widerrufen',
       terms: 'AGB',
       refunds: 'Erstattungen',
       accessibility: 'Barrierefreiheit',
@@ -1488,6 +1493,7 @@ export default {
 
     title: {
       pricing: 'Preise',
+      withdraw: 'Vertrag widerrufen',
       terms: 'Allgemeine Geschäftsbedingungen',
       privacy: 'Datenschutzerklärung',
       refund: 'Widerrufsrecht & Erstattungen',

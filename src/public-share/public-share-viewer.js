@@ -322,7 +322,7 @@ html.yanta-public-share-page[data-public-share-theme="light"] {
 }
 
 .yps-btn.primary {
-  color: white;
+  color: var(--accent-contrast, #fff);
   background: var(--accent);
   border-color: var(--accent);
 }

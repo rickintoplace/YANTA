@@ -1079,7 +1079,7 @@ import {
     border-radius: 999px;
     border: 2px solid var(--bg-elev-2);
     background: var(--accent);
-    color: #fff;
+    color: var(--accent-contrast, #fff);
     pointer-events: none;
   }
 

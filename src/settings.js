@@ -110,8 +110,8 @@ export const DEFAULT_THEMES = {
     'green': '#4ADE80',
     'yellow': '#FFD65A',
     'red': '#FF5A5A',
-    'selection': 'rgba(93, 248, 216, 0.28)',
-    'selection-text': '#000000',
+    'selection': 'rgba(74, 197, 172, 0.3)',
+    'selection-text': '#F2F2F2',
   },
   light: {
     'bg': '#fff8ef',
@@ -135,51 +135,50 @@ export const DEFAULT_THEMES = {
 
 export const COLOR_PRESETS = {
   light: [
-
     {
       id: 'misty-quartz',
       name: 'Misty Quartz',
-      description: 'Crisp professional slate with icy blue accents.',
+      description: 'Soft stone grey with a calm blue — quiet and professional.',
       colors: {
-        'bg': '#F7F9FB',
-        'bg-elev': '#EDF1F5',
-        'bg-elev-2': '#E2E8EE',
-        'bg-elev-3': '#D5DDE5',
-        'border': '#B8C5D1',
-        'border-strong': '#94A5B5',
-        'text': '#1A202B',
-        'text-dim': '#4D5666',
-        'text-faint': '#7E8A9C',
-        'accent': '#3E7CB1',
-        'accent-2': '#81A4CD',
-        'green': '#3B8C5A',
-        'yellow': '#D9A22B',
-        'red': '#CD5C5C',
-        'selection': 'rgba(62, 124, 177, 0.20)',
-        'selection-text': '#0E1B2A',
+        'bg': '#F8F8F6',
+        'bg-elev': '#F0EFEC',
+        'bg-elev-2': '#E6E4E0',
+        'bg-elev-3': '#DBD8D3',
+        'border': '#D2CEC7',
+        'border-strong': '#B3AEA5',
+        'text': '#1D1F24',
+        'text-dim': '#4F535B',
+        'text-faint': '#7F838B',
+        'accent': '#3B6CAB',
+        'accent-2': '#8A7DB8',
+        'green': '#3B8558',
+        'yellow': '#B98419',
+        'red': '#C44D48',
+        'selection': 'rgba(59, 108, 171, 0.2)',
+        'selection-text': '#1D1F24',
       },
     },
     {
       id: 'golden-hour',
       name: 'Golden Hour',
-      description: 'Warm radiant beige with rich amber and rust accents.',
+      description: 'Warm beige late-afternoon light with amber and rust.',
       colors: {
-        'bg': '#FFF8E7',
-        'bg-elev': '#FBEFD3',
-        'bg-elev-2': '#F2DFB0',
-        'bg-elev-3': '#E9CD8C',
-        'border': '#D6B566',
-        'border-strong': '#B08D3E',
+        'bg': '#FFF9EC',
+        'bg-elev': '#F8EEDA',
+        'bg-elev-2': '#F0E2C6',
+        'bg-elev-3': '#E6D4B1',
+        'border': '#DCC59D',
+        'border-strong': '#BFA272',
         'text': '#2B2415',
-        'text-dim': '#6B5E40',
-        'text-faint': '#9B8A64',
-        'accent': '#E08A1E',
+        'text-dim': '#665A3E',
+        'text-faint': '#978862',
+        'accent': '#A35D0B',
         'accent-2': '#C2452D',
         'green': '#5E8C3A',
-        'yellow': '#E0AC10',
-        'red': '#C8452D',
-        'selection': 'rgba(224, 138, 30, 0.22)',
-        'selection-text': '#2A1B0A',
+        'yellow': '#C99410',
+        'red': '#C0442C',
+        'selection': 'rgba(163, 93, 11, 0.2)',
+        'selection-text': '#2B2415',
       },
     },
     {
@@ -201,8 +200,8 @@ export const COLOR_PRESETS = {
         'green': '#4A7340',
         'yellow': '#B8862B',
         'red': '#9E3B3B',
-        'selection': 'rgba(142, 74, 47, 0.20)',
-        'selection-text': '#1E120A',
+        'selection': 'rgba(142, 74, 47, 0.2)',
+        'selection-text': '#2A1F12',
       },
     },
     {
@@ -231,24 +230,24 @@ export const COLOR_PRESETS = {
     {
       id: 'paper-boat-wash',
       name: 'Paper Boat Wash',
-      description: 'Gentle paper neutrals with watercolor-blue edges.',
+      description: 'Bright paper white with a watercolour blue and a dash of coral.',
       colors: {
-        'bg': '#F9F8F6',
-        'bg-elev': '#EFE9E3',
-        'bg-elev-2': '#E4DAD2',
-        'bg-elev-3': '#D9CFC7',
-        'border': '#C9B59C',
-        'border-strong': '#A99178',
-        'text': '#2E2924',
-        'text-dim': '#665D54',
-        'text-faint': '#94887B',
-        'accent': '#3B7597',
-        'accent-2': '#D86B65',
-        'green': '#4F7D46',
-        'yellow': '#C58B32',
-        'red': '#B8504C',
-        'selection': 'rgba(59, 117, 151, 0.20)',
-        'selection-text': '#172331',
+        'bg': '#FFFCF6',
+        'bg-elev': '#F6F1E8',
+        'bg-elev-2': '#EDE6DA',
+        'bg-elev-3': '#E2D9CA',
+        'border': '#DAD0BF',
+        'border-strong': '#BCAF98',
+        'text': '#23211D',
+        'text-dim': '#5A554C',
+        'text-faint': '#8C867A',
+        'accent': '#2B6CA3',
+        'accent-2': '#D9655B',
+        'green': '#43804A',
+        'yellow': '#C2861F',
+        'red': '#C24E44',
+        'selection': 'rgba(43, 108, 163, 0.2)',
+        'selection-text': '#23211D',
       },
     },
     {
@@ -270,54 +269,54 @@ export const COLOR_PRESETS = {
         'green': '#306D29',
         'yellow': '#B8862B',
         'red': '#A94D42',
-        'selection': 'rgba(91, 126, 60, 0.22)',
-        'selection-text': '#1f2718',
+        'selection': 'rgba(91, 126, 60, 0.2)',
+        'selection-text': '#2D261C',
       },
     },
     {
       id: 'fernlight-butterglass',
       name: 'Fernlight Butterglass',
-      description: 'Fresh green-gold light with a botanical note.',
+      description: 'Morning light through ferns: near-white with a whisper of green.',
       colors: {
-        'bg': '#FBF5DD',
-        'bg-elev': '#EFE8C9',
-        'bg-elev-2': '#E7E1B1',
-        'bg-elev-3': '#D7D68E',
-        'border': '#C8C083',
-        'border-strong': '#A2A15E',
-        'text': '#1F2A18',
-        'text-dim': '#4F5E3E',
-        'text-faint': '#7E8A68',
-        'accent': '#306D29',
-        'accent-2': '#8FA31E',
-        'green': '#0D530E',
-        'yellow': '#D39A22',
-        'red': '#B74D42',
-        'selection': 'rgba(48, 109, 41, 0.22)',
-        'selection-text': '#142010',
+        'bg': '#FCFBF5',
+        'bg-elev': '#F3F3E9',
+        'bg-elev-2': '#E9EADC',
+        'bg-elev-3': '#DEE0CF',
+        'border': '#D3D6C2',
+        'border-strong': '#B1B59B',
+        'text': '#232B21',
+        'text-dim': '#535D4D',
+        'text-faint': '#848D7D',
+        'accent': '#3F7A2B',
+        'accent-2': '#B5891C',
+        'green': '#3B772A',
+        'yellow': '#B9861A',
+        'red': '#BD513E',
+        'selection': 'rgba(63, 122, 43, 0.2)',
+        'selection-text': '#232B21',
       },
     },
     {
       id: 'lagoon-postcard',
       name: 'Lagoon Postcard',
-      description: 'Cool aquatic paper tones with clean blue-cyan accents.',
+      description: 'Sun-warmed sand with clear teal water and a coral sunset.',
       colors: {
-        'bg': '#F3FBFA',
-        'bg-elev': '#E3F4F4',
-        'bg-elev-2': '#D1EAEA',
-        'bg-elev-3': '#BEE0E1',
-        'border': '#A5CACD',
-        'border-strong': '#7FAEB5',
-        'text': '#102C3D',
-        'text-dim': '#3F6575',
-        'text-faint': '#7896A1',
-        'accent': '#3B7597',
-        'accent-2': '#0EA5A8',
-        'green': '#2F8F72',
-        'yellow': '#D39B2C',
-        'red': '#D65A58',
-        'selection': 'rgba(59, 117, 151, 0.22)',
-        'selection-text': '#092638',
+        'bg': '#FCF9F2',
+        'bg-elev': '#F4EFE4',
+        'bg-elev-2': '#EAE3D5',
+        'bg-elev-3': '#DFD6C5',
+        'border': '#D5CAB6',
+        'border-strong': '#B7A991',
+        'text': '#1C2829',
+        'text-dim': '#4D5B5A',
+        'text-faint': '#7F8888',
+        'accent': '#0B7A80',
+        'accent-2': '#DC6A50',
+        'green': '#2F8466',
+        'yellow': '#C08A22',
+        'red': '#C9554F',
+        'selection': 'rgba(11, 122, 128, 0.2)',
+        'selection-text': '#1C2829',
       },
     },
     {
@@ -334,13 +333,13 @@ export const COLOR_PRESETS = {
         'text': '#25231E',
         'text-dim': '#5F5A4D',
         'text-faint': '#928875',
-        'accent': '#4A8FB8',
+        'accent': '#33739B',
         'accent-2': '#6F9F4A',
         'green': '#3E7A3A',
         'yellow': '#C7922C',
         'red': '#C95A52',
-        'selection': 'rgba(74, 143, 184, 0.20)',
-        'selection-text': '#102838',
+        'selection': 'rgba(51, 115, 155, 0.2)',
+        'selection-text': '#25231E',
       },
     },
     {
@@ -348,22 +347,22 @@ export const COLOR_PRESETS = {
       name: 'Peach Soda Paper',
       description: 'Warm peach paper with fizzy coral and apricot highlights.',
       colors: {
-        'bg': '#FFF3EA',
-        'bg-elev': '#F5E3D6',
-        'bg-elev-2': '#EBCFBE',
-        'bg-elev-3': '#DEB8A3',
-        'border': '#CFA18A',
-        'border-strong': '#AF7D66',
+        'bg': '#FFF5EE',
+        'bg-elev': '#F7E7DC',
+        'bg-elev-2': '#EED6C7',
+        'bg-elev-3': '#E3C3B0',
+        'border': '#D6AE98',
+        'border-strong': '#B58771',
         'text': '#30231E',
         'text-dim': '#6D5148',
         'text-faint': '#9D7769',
-        'accent': '#E06F4F',
-        'accent-2': '#F5A33B',
+        'accent': '#B44D32',
+        'accent-2': '#E8932C',
         'green': '#5E8A43',
         'yellow': '#C98922',
         'red': '#C94E4E',
-        'selection': 'rgba(224, 111, 79, 0.22)',
-        'selection-text': '#2A1711',
+        'selection': 'rgba(180, 77, 50, 0.2)',
+        'selection-text': '#30231E',
       },
     },
     {
@@ -385,8 +384,8 @@ export const COLOR_PRESETS = {
         'green': '#4F8A5A',
         'yellow': '#C79534',
         'red': '#C85868',
-        'selection': 'rgba(123, 97, 184, 0.22)',
-        'selection-text': '#1D1730',
+        'selection': 'rgba(123, 97, 184, 0.2)',
+        'selection-text': '#272331',
       },
     },
     {
@@ -403,13 +402,13 @@ export const COLOR_PRESETS = {
         'text': '#302129',
         'text-dim': '#6D5360',
         'text-faint': '#9B7587',
-        'accent': '#D95C83',
+        'accent': '#B8406B',
         'accent-2': '#8A6FB5',
         'green': '#5D8F64',
         'yellow': '#C99236',
         'red': '#C94F66',
-        'selection': 'rgba(217, 92, 131, 0.22)',
-        'selection-text': '#2B1520',
+        'selection': 'rgba(184, 64, 107, 0.2)',
+        'selection-text': '#302129',
       },
     },
     {
@@ -431,8 +430,54 @@ export const COLOR_PRESETS = {
         'green': '#5F7F3A',
         'yellow': '#C58A2E',
         'red': '#B85A4A',
-        'selection': 'rgba(155, 94, 46, 0.22)',
-        'selection-text': '#24170F',
+        'selection': 'rgba(155, 94, 46, 0.2)',
+        'selection-text': '#2D2118',
+      },
+    },
+    {
+      id: 'clean-slate',
+      name: 'Clean Slate',
+      description: 'Plain white pages and soft grey panels, like the tidiest notes apps.',
+      colors: {
+        'bg': '#FFFFFF',
+        'bg-elev': '#F7F7F5',
+        'bg-elev-2': '#EFEFEC',
+        'bg-elev-3': '#E6E5E1',
+        'border': '#E3E2DE',
+        'border-strong': '#C7C5BF',
+        'text': '#2F2E2A',
+        'text-dim': '#5E5D58',
+        'text-faint': '#8F8D87',
+        'accent': '#2470B0',
+        'accent-2': '#D9730D',
+        'green': '#3D8A5A',
+        'yellow': '#C88A12',
+        'red': '#D44C47',
+        'selection': 'rgba(36, 112, 176, 0.2)',
+        'selection-text': '#2F2E2A',
+      },
+    },
+    {
+      id: 'rosewater-dawn',
+      name: 'Rosewater Dawn',
+      description: 'Dusky rose and soft iris on warm paper — gentle on the eyes.',
+      colors: {
+        'bg': '#FBF6F0',
+        'bg-elev': '#F3EAE1',
+        'bg-elev-2': '#EBDFD4',
+        'bg-elev-3': '#E1D3C7',
+        'border': '#DDCFC4',
+        'border-strong': '#BFAEA2',
+        'text': '#2D2940',
+        'text-dim': '#575270',
+        'text-faint': '#88839B',
+        'accent': '#7A5FA0',
+        'accent-2': '#C9706B',
+        'green': '#3E8590',
+        'yellow': '#C98A2D',
+        'red': '#B4637A',
+        'selection': 'rgba(122, 95, 160, 0.2)',
+        'selection-text': '#2D2940',
       },
     },
   ],
@@ -451,14 +496,14 @@ export const COLOR_PRESETS = {
         'border-strong': '#42426B',
         'text': '#E6E6F0',
         'text-dim': '#A0A0C0',
-        'text-faint': '#686880',
-        'accent': '#FF2A6D',
+        'text-faint': '#6E6E8A',
+        'accent': '#FF3D7A',
         'accent-2': '#05D9E8',
         'green': '#45D96A',
         'yellow': '#FFD65A',
         'red': '#FF4D5E',
-        'selection': 'rgba(255, 42, 109, 0.28)',
-        'selection-text': '#0A0A12',
+        'selection': 'rgba(255, 61, 122, 0.3)',
+        'selection-text': '#E6E6F0',
       },
     },
     {
@@ -475,13 +520,13 @@ export const COLOR_PRESETS = {
         'text': '#F2EAF8',
         'text-dim': '#C0A8D1',
         'text-faint': '#8A7799',
-        'accent': '#C026D3',
-        'accent-2': '#9333EA',
+        'accent': '#D04BE0',
+        'accent-2': '#9D5CF0',
         'green': '#4ADE80',
         'yellow': '#FACC15',
         'red': '#EF4444',
-        'selection': 'rgba(192, 38, 211, 0.28)',
-        'selection-text': '#0C0810',
+        'selection': 'rgba(208, 75, 224, 0.3)',
+        'selection-text': '#F2EAF8',
       },
     },
     {
@@ -503,8 +548,8 @@ export const COLOR_PRESETS = {
         'green': '#85C040',
         'yellow': '#FDB813',
         'red': '#E04C2D',
-        'selection': 'rgba(253, 184, 19, 0.28)',
-        'selection-text': '#080604',
+        'selection': 'rgba(253, 184, 19, 0.3)',
+        'selection-text': '#FFF8E7',
       },
     },
     {
@@ -526,8 +571,8 @@ export const COLOR_PRESETS = {
         'green': '#4ADE80',
         'yellow': '#FFD65A',
         'red': '#FF5A5A',
-        'selection': 'rgba(93, 248, 216, 0.28)',
-        'selection-text': '#000000',
+        'selection': 'rgba(74, 197, 172, 0.3)',
+        'selection-text': '#F2F2F2',
       },
     },
     {
@@ -536,9 +581,9 @@ export const COLOR_PRESETS = {
       description: 'Deep blue-green ink with clear lagoon highlights.',
       colors: {
         'bg': '#06131B',
-        'bg-elev': '#092235',
-        'bg-elev-2': '#0D2F46',
-        'bg-elev-3': '#123B55',
+        'bg-elev': '#0A1D29',
+        'bg-elev-2': '#0F2735',
+        'bg-elev-3': '#143243',
         'border': '#1E4B63',
         'border-strong': '#3B7597',
         'text': '#E7F7F8',
@@ -549,123 +594,123 @@ export const COLOR_PRESETS = {
         'green': '#62D18E',
         'yellow': '#FFD65A',
         'red': '#EA7070',
-        'selection': 'rgba(111, 209, 215, 0.26)',
-        'selection-text': '#031016',
+        'selection': 'rgba(111, 209, 215, 0.3)',
+        'selection-text': '#E7F7F8',
       },
     },
     {
       id: 'hearth-fox',
       name: 'Hearth Fox',
-      description: 'Warm dark reds, embers and candlelit cream text.',
+      description: 'Fireside browns and ember orange with candlelit cream text.',
       colors: {
-        'bg': '#120302',
-        'bg-elev': '#160403',
-        'bg-elev-2': '#230603',
-        'bg-elev-3': '#46100A',
-        'border': '#521510',
-        'border-strong': '#720d06',
-        'text': '#FFF0C4',
-        'text-dim': '#D8B98A',
-        'text-faint': '#9B765D',
-        'accent': '#FF9D23',
-        'accent-2': '#FFD65A',
-        'green': '#9DBB62',
-        'yellow': '#FFD65A',
-        'red': '#EA5252',
-        'selection': 'rgba(255, 157, 35, 0.28)',
-        'selection-text': '#160403',
+        'bg': '#171311',
+        'bg-elev': '#1E1916',
+        'bg-elev-2': '#26201C',
+        'bg-elev-3': '#302824',
+        'border': '#3D332D',
+        'border-strong': '#5B4B41',
+        'text': '#F3E6D3',
+        'text-dim': '#C4B099',
+        'text-faint': '#8E7C6A',
+        'accent': '#F5974A',
+        'accent-2': '#E9C46A',
+        'green': '#A3BE6E',
+        'yellow': '#E9C46A',
+        'red': '#EC6B5E',
+        'selection': 'rgba(245, 151, 74, 0.3)',
+        'selection-text': '#F3E6D3',
       },
     },
     {
       id: 'firefly-forest',
       name: 'Firefly Forest',
-      description: 'Dark woodland greens with glowing firefly accents.',
+      description: 'Mossy woodland dusk with soft firefly glow.',
       colors: {
-        'bg': '#070B05',
-        'bg-elev': '#10170B',
-        'bg-elev-2': '#18210E',
-        'bg-elev-3': '#202C13',
-        'border': '#354520',
-        'border-strong': '#556B2F',
-        'text': '#EFF5D2',
-        'text-dim': '#C6D870',
-        'text-faint': '#87965A',
-        'accent': '#C6D870',
-        'accent-2': '#8FA31E',
-        'green': '#7EBF52',
-        'yellow': '#FFD65A',
-        'red': '#EA6A5F',
-        'selection': 'rgba(198, 216, 112, 0.25)',
-        'selection-text': '#080C05',
+        'bg': '#1A1F1B',
+        'bg-elev': '#20261F',
+        'bg-elev-2': '#283026',
+        'bg-elev-3': '#31392E',
+        'border': '#3C4638',
+        'border-strong': '#566350',
+        'text': '#E3DEC8',
+        'text-dim': '#AAB09A',
+        'text-faint': '#7B8371',
+        'accent': '#B5CF6B',
+        'accent-2': '#E3C16F',
+        'green': '#8CC26A',
+        'yellow': '#E3C16F',
+        'red': '#E67E6E',
+        'selection': 'rgba(181, 207, 107, 0.2)',
+        'selection-text': '#E3DEC8',
       },
     },
     {
       id: 'midnight-herbarium',
       name: 'Midnight Herbarium',
-      description: 'Quiet earthy dark mode for long writing sessions.',
+      description: 'Pressed herbs and paper by lamplight — calm for long writing.',
       colors: {
-        'bg': '#0D1009',
-        'bg-elev': '#171B11',
-        'bg-elev-2': '#202719',
-        'bg-elev-3': '#2A3321',
-        'border': '#3B4630',
-        'border-strong': '#596647',
-        'text': '#E8E1D3',
-        'text-dim': '#AAA08D',
-        'text-faint': '#746B5B',
-        'accent': '#8FA31E',
-        'accent-2': '#C58B45',
-        'green': '#6FAE4F',
-        'yellow': '#D9A441',
-        'red': '#C45A4E',
-        'selection': 'rgba(143, 163, 30, 0.25)',
-        'selection-text': '#0D1009',
+        'bg': '#141512',
+        'bg-elev': '#1A1C18',
+        'bg-elev-2': '#22251F',
+        'bg-elev-3': '#2A2E27',
+        'border': '#363A31',
+        'border-strong': '#505648',
+        'text': '#E7E2D5',
+        'text-dim': '#B2AC9C',
+        'text-faint': '#7F7B6F',
+        'accent': '#A9BB60',
+        'accent-2': '#D3A05E',
+        'green': '#7DB35F',
+        'yellow': '#D9AB4E',
+        'red': '#D06B5C',
+        'selection': 'rgba(169, 187, 96, 0.3)',
+        'selection-text': '#E7E2D5',
       },
     },
     {
       id: 'midnight-blood',
       name: 'Midnight Blood',
-      description: 'Blackened crimson night tones with sharp blood-red accents.',
+      description: 'Ink-black night with a single sharp crimson.',
       colors: {
-        'bg': '#080204',
-        'bg-elev': '#130407',
-        'bg-elev-2': '#21070B',
-        'bg-elev-3': '#310B12',
-        'border': '#4A121B',
-        'border-strong': '#7A1C2A',
-        'text': '#F7E7E4',
-        'text-dim': '#C9A2A0',
-        'text-faint': '#8B6668',
-        'accent': '#D7263D',
-        'accent-2': '#FFB45E',
+        'bg': '#121011',
+        'bg-elev': '#191617',
+        'bg-elev-2': '#211D1E',
+        'bg-elev-3': '#2A2526',
+        'border': '#363031',
+        'border-strong': '#554A4C',
+        'text': '#F2EAEA',
+        'text-dim': '#BCAFAF',
+        'text-faint': '#867A7B',
+        'accent': '#EF4B55',
+        'accent-2': '#F2A65A',
         'green': '#6FCF8F',
-        'yellow': '#FFD166',
-        'red': '#FF4D5E',
-        'selection': 'rgba(215, 38, 61, 0.28)',
-        'selection-text': '#080204',
+        'yellow': '#F2C66D',
+        'red': '#FF6369',
+        'selection': 'rgba(239, 75, 85, 0.3)',
+        'selection-text': '#F2EAEA',
       },
     },
     {
       id: 'violet-afterglow',
       name: 'Violet Afterglow',
-      description: 'Deep violet dusk with electric lavender and blue highlights.',
+      description: 'Soft violet dusk with lavender and sky-blue highlights.',
       colors: {
-        'bg': '#090714',
-        'bg-elev': '#121026',
-        'bg-elev-2': '#1B1836',
-        'bg-elev-3': '#262047',
-        'border': '#3B315F',
-        'border-strong': '#5D4A8F',
-        'text': '#F0ECFF',
-        'text-dim': '#B9AEDB',
-        'text-faint': '#80749F',
-        'accent': '#A78BFA',
-        'accent-2': '#6FD1D7',
-        'green': '#67D391',
-        'yellow': '#FFD65A',
-        'red': '#F06A7A',
-        'selection': 'rgba(167, 139, 250, 0.28)',
-        'selection-text': '#090714',
+        'bg': '#17151F',
+        'bg-elev': '#1E1B29',
+        'bg-elev-2': '#262233',
+        'bg-elev-3': '#2F2A3F',
+        'border': '#3B354E',
+        'border-strong': '#574E72',
+        'text': '#ECE8F7',
+        'text-dim': '#B6AFCC',
+        'text-faint': '#817B98',
+        'accent': '#B69CFF',
+        'accent-2': '#7FC8F8',
+        'green': '#8BD5A0',
+        'yellow': '#F2CF7A',
+        'red': '#F3889A',
+        'selection': 'rgba(182, 156, 255, 0.3)',
+        'selection-text': '#ECE8F7',
       },
     },
     {
@@ -687,8 +732,8 @@ export const COLOR_PRESETS = {
         'green': '#78C06A',
         'yellow': '#FFD166',
         'red': '#E86B5F',
-        'selection': 'rgba(240, 168, 58, 0.26)',
-        'selection-text': '#0B0B0A',
+        'selection': 'rgba(240, 168, 58, 0.3)',
+        'selection-text': '#F2EBDD',
       },
     },
     {
@@ -710,35 +755,172 @@ export const COLOR_PRESETS = {
         'green': '#5FE08B',
         'yellow': '#F4CF5D',
         'red': '#EF646E',
-        'selection': 'rgba(40, 215, 196, 0.26)',
-        'selection-text': '#030A0F',
+        'selection': 'rgba(40, 215, 196, 0.3)',
+        'selection-text': '#E5F8FF',
       },
     },
     {
       id: 'mocha-chocolate',
       name: 'Mocha Chocolate',
-      description: 'Dark mocha coffee tones with bittersweet chocolate depth and roasted warmth.',
+      description: 'Dark mocha coffee tones with bittersweet chocolate depth.',
       colors: {
-        'bg': '#070302',
-        'bg-elev': '#100706',
-        'bg-elev-2': '#1A0D0A',
-        'bg-elev-3': '#26140F',
-        'border': '#3B2119',
-        'border-strong': '#654032',
+        'bg': '#110C0A',
+        'bg-elev': '#18110E',
+        'bg-elev-2': '#201714',
+        'bg-elev-3': '#2A1F1A',
+        'border': '#3B2C24',
+        'border-strong': '#5E4638',
         'text': '#F3E7D8',
         'text-dim': '#C2A895',
         'text-faint': '#8B6E5E',
-        'accent': '#B47A4A',
+        'accent': '#C98B57',
         'accent-2': '#D6A15F',
         'green': '#8A9B58',
         'yellow': '#D8A64A',
         'red': '#C76052',
-        'selection': 'rgba(180, 122, 74, 0.28)',
-        'selection-text': '#070302',
+        'selection': 'rgba(201, 139, 87, 0.3)',
+        'selection-text': '#F3E7D8',
+      },
+    },
+    {
+      id: 'polar-night',
+      name: 'Polar Night',
+      description: 'Arctic blue-grey with frost and aurora — cool, calm, legible.',
+      colors: {
+        'bg': '#242933',
+        'bg-elev': '#2A303C',
+        'bg-elev-2': '#313744',
+        'bg-elev-3': '#39404E',
+        'border': '#434C5E',
+        'border-strong': '#566078',
+        'text': '#ECEFF4',
+        'text-dim': '#C3CAD8',
+        'text-faint': '#8B95AA',
+        'accent': '#88C0D0',
+        'accent-2': '#B48EAD',
+        'green': '#A3BE8C',
+        'yellow': '#EBCB8B',
+        'red': '#D08770',
+        'selection': 'rgba(136, 192, 208, 0.22)',
+        'selection-text': '#ECEFF4',
+      },
+    },
+    {
+      id: 'tokyo-rain',
+      name: 'Tokyo Rain',
+      description: 'City lights on a rainy night: deep navy with soft neon blues.',
+      colors: {
+        'bg': '#16161E',
+        'bg-elev': '#1A1B26',
+        'bg-elev-2': '#20212E',
+        'bg-elev-3': '#272A3A',
+        'border': '#30344D',
+        'border-strong': '#454B6E',
+        'text': '#C9D1F5',
+        'text-dim': '#A2AAD0',
+        'text-faint': '#6E759B',
+        'accent': '#7AA2F7',
+        'accent-2': '#BB9AF7',
+        'green': '#9ECE6A',
+        'yellow': '#E0AF68',
+        'red': '#F7768E',
+        'selection': 'rgba(122, 162, 247, 0.24)',
+        'selection-text': '#C9D1F5',
+      },
+    },
+    {
+      id: 'graphite',
+      name: 'Graphite',
+      description: 'Neutral graphite with a crisp indigo — the look of modern work tools.',
+      colors: {
+        'bg': '#141517',
+        'bg-elev': '#1A1B1E',
+        'bg-elev-2': '#212226',
+        'bg-elev-3': '#292A2F',
+        'border': '#323339',
+        'border-strong': '#484A52',
+        'text': '#EDEDEF',
+        'text-dim': '#A9AAB2',
+        'text-faint': '#74767F',
+        'accent': '#8D92FF',
+        'accent-2': '#4CC38A',
+        'green': '#4CC38A',
+        'yellow': '#F0C062',
+        'red': '#F2555A',
+        'selection': 'rgba(141, 146, 255, 0.3)',
+        'selection-text': '#EDEDEF',
       },
     },
   ],
 };
+
+/*
+  Earlier versions of the presets above, by a hash of all their colours.
+  Applying a preset copies its palette into the settings, so a palette that
+  still matches an old version exactly was never customised and is moved
+  to the current one on load. Anything the user edited stays as it is.
+*/
+const SUPERSEDED_PRESETS = {
+  '1j0vwxt': 'misty-quartz',
+  '1fu0n08': 'golden-hour',
+  '1er137r': 'antique-manuscript',
+  'cz8n1l': 'paper-boat-wash',
+  'f4srgl': 'moss-mug-clay',
+  'edpy5m': 'fernlight-butterglass',
+  '1w3tg11': 'lagoon-postcard',
+  '1s756my': 'linen-sky-garden',
+  '12cxhi': 'peach-soda-paper',
+  '199h13o': 'porcelain-lilac',
+  'evpjeq': 'sakura-milk-glass',
+  'ha3mmq': 'cafe-crema-paper',
+  'ztvz87': 'neo-tokyo-dusk',
+  'a7g6cn': 'carbon-plum',
+  'w1ktb6': 'solar-eclipse',
+  'h0ky9k': 'amoled-starwell',
+  'qt1ikx': 'ink-lagoon',
+  'mm7htn': 'hearth-fox',
+  '1l3gbgl': 'firefly-forest',
+  '1w7y26u': 'midnight-herbarium',
+  '1snjzm2': 'midnight-blood',
+  '4qoccv': 'violet-afterglow',
+  '17869zs': 'charcoal-amber',
+  'suyr0c': 'deep-sea-terminal',
+  '8isekr': 'mocha-chocolate',
+};
+
+function paletteHash(colors = {}) {
+  const text = Object.keys(colors)
+    .sort()
+    .map((key) => `${key}:${String(colors[key]).toLowerCase().replace(/\s+/g, '')}`)
+    .join(';');
+
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+
+  return hash.toString(36);
+}
+
+/** Moves palettes that are an untouched older preset to that preset's current colours. */
+function upgradeSupersededPalettes(source) {
+  if (!source?.colors) return false;
+
+  let changed = false;
+
+  for (const mode of ['dark', 'light']) {
+    const id = SUPERSEDED_PRESETS[paletteHash(source.colors[mode] || {})];
+    const preset = id && COLOR_PRESETS[mode].find((p) => p.id === id);
+
+    if (preset) {
+      source.colors[mode] = { ...preset.colors };
+      changed = true;
+    }
+  }
+
+  return changed;
+}
 
 // Font stacks the user can pick from.
 export const FONT_OPTIONS = [
@@ -890,6 +1072,13 @@ export async function loadAppearance() {
     appearance = deepMerge(DEFAULT_APPEARANCE, {});
   }
 
+  if (upgradeSupersededPalettes(appearance)) {
+    try {
+      if (appearance.deviceOnly) writeDeviceSettings(appearance);
+      else await writeSyncedSettings(appearance);
+    } catch {}
+  }
+
   applyAppearance();
 }
 
@@ -925,6 +1114,44 @@ export function resolveEffectiveMode() {
   } catch {
     return 'dark';
   }
+}
+
+function parseRgb(color) {
+  const value = String(color || '').trim();
+  const hex = value.match(/^#([0-9a-f]{3}|[0-9a-f]{6})$/i);
+
+  if (hex) {
+    const h = hex[1].length === 3 ? hex[1].replace(/./g, '$&$&') : hex[1];
+    return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16));
+  }
+
+  const rgb = value.match(/^rgba?\(\s*([\d.]+)[\s,]+([\d.]+)[\s,]+([\d.]+)/i);
+  return rgb ? rgb.slice(1, 4).map(Number) : null;
+}
+
+function relativeLuminance([r, g, b]) {
+  const lin = (v) => {
+    const c = v / 255;
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  };
+
+  return 0.2126 * lin(r) + 0.7152 * lin(g) + 0.0722 * lin(b);
+}
+
+/*
+  White text unless the background is light enough that it stops being
+  readable (WCAG 4.5:1); then whichever of white and near-black contrasts more.
+  Light accents in dark themes — lavender, lime, cyan — get dark text.
+*/
+export function textColorOn(background) {
+  const rgb = parseRgb(background);
+  if (!rgb) return '#fff';
+
+  const lum = relativeLuminance(rgb);
+  const onWhite = 1.05 / (lum + 0.05);
+  const onDark = (lum + 0.05) / (relativeLuminance([17, 17, 17]) + 0.05);
+
+  return onWhite >= 4.5 || onWhite >= onDark ? '#fff' : '#111';
 }
 
 function tryReadSystemAccent() {
@@ -986,12 +1213,18 @@ export function applyAppearance() {
     root.style.setProperty('--' + tok.key, safe);
   }
 
+  let accent = palette.accent || DEFAULT_THEMES[mode].accent;
+
   if (a.mode === 'system-colors') {
     const sys = tryReadSystemAccent();
     if (sys) {
       root.style.setProperty('--accent', sys);
+      accent = sys;
     }
   }
+
+  // Text on accent-coloured buttons and badges: white or near-black, whichever reads.
+  root.style.setProperty('--accent-contrast', textColorOn(accent));
 
   const font = FONT_OPTIONS.find((f) => f.id === a.fontId) || FONT_OPTIONS[0];
   const mono = MONO_OPTIONS.find((f) => f.id === a.monoId) || MONO_OPTIONS[0];
@@ -1049,9 +1282,8 @@ let settingsOverlayRegistered = false;
 // Section registry — drives the rail, the mobile drill-down list and search.
 // `keywords` widens search matches beyond the visible label.
 const SETTINGS_SECTIONS = [
-  { id: 'appearance',   label: 'Appearance',      icon: 'palette',        keywords: 'theme dark light mode look' },
+  { id: 'appearance',   label: 'Appearance',      icon: 'palette',        keywords: 'theme dark light mode look colors colours palette accent color scheme farben' },
   { id: 'language',     label: 'Language',        icon: 'languages',      keywords: 'language locale english deutsch german español spanish français french 日本語 japanese translation' },
-  { id: 'colors',       label: 'Colors',          icon: 'paintbrush',     keywords: 'palette accent color scheme' },
   { id: 'typography',   label: 'Typography',      icon: 'type',           keywords: 'font size text' },
   { id: 'shortcuts',    label: 'Shortcuts',       icon: 'keyboard',       keywords: 'keyboard hotkey key binding shortcut editor formatting bold heading' },
   { id: 'dashboard',    label: 'Dashboard',       icon: 'layout-dashboard', keywords: 'home widgets greeting' },
@@ -1135,6 +1367,9 @@ export function openSettings({
   const wasClosed = modal.hidden !== false;
 
   // Deep link from another surface, e.g. the Pulse overview's gear.
+  // Colours used to be a section of their own; old deep links land on Appearance.
+  if (section === 'colors') section = 'appearance';
+
   if (section && SETTINGS_SECTIONS.some((s) => s.id === section)) {
     activeSection = section;
   }
@@ -1262,7 +1497,6 @@ function renderSettingsBody() {
 
   if (activeSection === 'appearance') renderAppearanceSection(content);
   else if (activeSection === 'language') renderLanguageSection(content);
-  else if (activeSection === 'colors') renderColorsSection(content);
   else if (activeSection === 'typography') renderTypographySection(content);
   else if (activeSection === 'shortcuts') renderShortcutsSection(content);
   else if (activeSection === 'dashboard') renderDashboardSection(content);
@@ -1368,39 +1602,93 @@ function renderLanguageSection(host) {
 }
 
 // ---- Appearance section ----
+/*
+  Appearance: one place for how YANTA looks. Light or dark first (the
+  question everyone has), then a colour scheme for each of the two, shown
+  as small pictures of the app rather than swatches, and the per-colour
+  editor folded away for the few who want it.
+*/
 function renderAppearanceSection(host) {
   const a = getAppearance();
 
   host.append(sectionHeader(t('settings.sections.appearance.title'), t('settings.sections.appearance.subtitle')));
 
-  // Mode picker
+  // Light or dark
   const modeGroup = el('div', { class: 'yanta-settings-group' });
-  modeGroup.append(el('div', { class: 'yanta-settings-group-title' }, t('settings.appearance.theme')));
+  modeGroup.append(el('div', { class: 'yanta-settings-group-title' }, t('settings.appearance.modeTitle')));
 
   const modes = [
-    { id: 'auto', key: 'auto' },
-    { id: 'dark', key: 'dark' },
-    { id: 'light', key: 'light' },
-    { id: 'system-colors', key: 'systemColors' },
+    { id: 'auto', key: 'auto', icon: 'sun-moon' },
+    { id: 'light', key: 'light', icon: 'sun' },
+    { id: 'dark', key: 'dark', icon: 'moon' },
+    { id: 'system-colors', key: 'systemColors', icon: 'monitor' },
   ];
 
-  const modeRow = el('div', { class: 'yanta-settings-mode-row' });
+  const modeRow = el('div', { class: 'yanta-settings-segmented', role: 'radiogroup' });
+  const current = modes.find((m) => m.id === a.mode) || modes[0];
+
   for (const m of modes) {
-    const card = el('button', {
-      class: 'yanta-settings-mode' + (a.mode === m.id ? ' active' : ''),
-onclick: async () => {
-  await saveAppearance({ mode: m.id });
-  rerenderSettingsBody();
-},
+    const btn = el('button', {
+      type: 'button',
+      role: 'radio',
+      'aria-checked': String(m.id === current.id),
+      class: 'yanta-settings-segment' + (m.id === current.id ? ' active' : ''),
+      onclick: async () => {
+        await saveAppearance({ mode: m.id });
+        rerenderSettingsBody();
+      },
     });
-    card.innerHTML = `
-      <div class="yanta-settings-mode-label">${t(`settings.appearance.modes.${m.key}.label`)}</div>
-      <div class="yanta-settings-mode-hint">${t(`settings.appearance.modes.${m.key}.hint`)}</div>
-    `;
-    modeRow.append(card);
+    btn.innerHTML = lucide(m.icon, 15);
+    btn.append(el('span', {}, t(`settings.appearance.modes.${m.key}.label`)));
+    modeRow.append(btn);
   }
-  modeGroup.append(modeRow);
+
+  modeGroup.append(
+    modeRow,
+    el('p', { class: 'yanta-settings-hint yanta-settings-segment-hint' }, t(`settings.appearance.modes.${current.key}.hint`))
+  );
   host.append(modeGroup);
+
+  // Colour scheme, separately for light and dark
+  const targetMode = host.dataset.colorMode || resolveEffectiveMode();
+  host.dataset.colorMode = targetMode;
+
+  const schemeGroup = el('div', { class: 'yanta-settings-group yanta-settings-presets-group' });
+  schemeGroup.append(el('div', { class: 'yanta-settings-group-title' }, t('settings.appearance.schemeTitle')));
+
+  const tabs = el('div', { class: 'yanta-settings-color-tabs', role: 'tablist' });
+
+  for (const m of ['light', 'dark']) {
+    tabs.append(el('button', {
+      type: 'button',
+      role: 'tab',
+      'aria-selected': String(targetMode === m),
+      class: 'yanta-settings-color-tab' + (targetMode === m ? ' active' : ''),
+      onclick: () => {
+        host.dataset.colorMode = m;
+        rerenderSettingsBody();
+      },
+    }, m === 'dark' ? t('settings.colors.tabDark') : t('settings.colors.tabLight')));
+  }
+
+  schemeGroup.append(
+    tabs,
+    el('p', { class: 'yanta-settings-hint' },
+      t('settings.colors.presetsHint', { mode: t(`settings.colors.modeNoun.${targetMode}`) })),
+    renderColorPresetPicker(targetMode, a)
+  );
+  host.append(schemeGroup);
+
+  // Fine-tuning, folded away
+  const details = el('details', { class: 'yanta-settings-details' });
+  details.open = host.dataset.colorDetails === 'open';
+  details.addEventListener('toggle', () => {
+    host.dataset.colorDetails = details.open ? 'open' : '';
+  });
+
+  details.append(el('summary', {}, t('settings.appearance.customize', { mode: t(`settings.colors.modeNoun.${targetMode}`) })));
+  renderColorTokenEditors(details, targetMode, a);
+  host.append(details);
 
   // Device-only toggle for appearance
   host.append(renderDeviceOnlyToggle(a));
@@ -1428,22 +1716,31 @@ onclick: async () => {
   host.append(reset);
 }
 
-// ---- Colors section ----
+// ---- Colour schemes ----
 
-function colorPresetPreviewSwatches(preset) {
-  const keys = ['bg', 'bg-elev-2', 'accent', 'accent-2', 'text'];
+/*
+  A thumbnail of the app in a palette: sidebar, a heading, two lines of
+  text, a card with a button. Built from DOM styles, not markup, because a
+  custom palette holds whatever the user typed.
+*/
+function themePreview(colors) {
+  const c = (key) => safeCssColor(colors[key]) || 'transparent';
+  const block = (cls, style) => el('span', { class: cls, style });
 
-  return el(
-    'div',
-    { class: 'yanta-settings-preset-swatches' },
-    keys.map((key) =>
-      el('span', {
-        class: 'yanta-settings-preset-swatch',
-        title: key,
-        style: {
-          background: preset.colors[key] || 'transparent',
-        },
-      })
+  return el('span', { class: 'yanta-theme-preview', style: { background: c('bg'), borderColor: c('border') } },
+    el('span', { class: 'ytp-side', style: { background: c('bg-elev'), borderColor: c('border') } },
+      block('ytp-dot', { background: c('accent') }),
+      block('ytp-line', { background: c('text-faint') }),
+      block('ytp-line ytp-short', { background: c('text-faint') })
+    ),
+    el('span', { class: 'ytp-main' },
+      block('ytp-title', { background: c('text') }),
+      block('ytp-line', { background: c('text-dim') }),
+      block('ytp-line ytp-short', { background: c('text-faint') }),
+      el('span', { class: 'ytp-card', style: { background: c('bg-elev-2'), borderColor: c('border') } },
+        block('ytp-btn', { background: c('accent') }),
+        block('ytp-chip', { background: c('accent-2') })
+      )
     )
   );
 }
@@ -1476,75 +1773,62 @@ async function applyColorPreset(mode, preset) {
   rerenderSettingsBody();
 }
 
-function renderColorPresetPicker(targetMode, appearanceSettings) {
-  const presets = COLOR_PRESETS[targetMode] || [];
+function schemeCard({ colors, name, description, active, onclick }) {
+  const card = el('button', {
+    type: 'button',
+    class: 'yanta-settings-preset-card' + (active ? ' active' : ''),
+    title: description || name,
+    'aria-pressed': String(!!active),
+    onclick,
+  });
 
-  const group = el('div', { class: 'yanta-settings-group yanta-settings-presets-group' });
-
-  group.append(
-    el('div', { class: 'yanta-settings-group-title' }, t('settings.colors.presets')),
-    el('p', { class: 'yanta-settings-hint' },
-      t('settings.colors.presetsHint', { mode: t(`settings.colors.modeNoun.${targetMode}`) })
-    )
+  card.append(
+    themePreview(colors),
+    el('span', { class: 'yanta-settings-preset-name' }, name),
+    el('span', { class: 'yanta-settings-preset-description' }, description || '')
   );
 
-  const grid = el('div', { class: 'yanta-settings-preset-grid' });
-
-  for (const preset of presets) {
-    const active = paletteMatchesPreset(
-      appearanceSettings.colors?.[targetMode],
-      preset.colors
-    );
-
-    const card = el('button', {
-      class: 'yanta-settings-preset-card' + (active ? ' active' : ''),
-      type: 'button',
-      onclick: () => applyColorPreset(targetMode, preset),
-    });
-
-    card.append(
-      colorPresetPreviewSwatches(preset),
-      el('div', { class: 'yanta-settings-preset-name' }, preset.name),
-      el('div', { class: 'yanta-settings-preset-description' }, preset.description)
-    );
-
-    grid.append(card);
+  if (active) {
+    const badge = el('span', { class: 'yanta-settings-preset-check', title: t('settings.appearance.active') });
+    badge.innerHTML = lucide('check', 13);
+    card.append(badge);
   }
 
-  group.append(grid);
-
-  return group;
+  return card;
 }
 
-function renderColorsSection(host) {
-  host.replaceChildren();
+function renderColorPresetPicker(targetMode, appearanceSettings) {
+  const presets = COLOR_PRESETS[targetMode] || [];
+  const palette = appearanceSettings.colors?.[targetMode] || DEFAULT_THEMES[targetMode];
+  const grid = el('div', { class: 'yanta-settings-preset-grid' });
 
-  const a = getAppearance();
+  const matched = presets.find((preset) => paletteMatchesPreset(palette, preset.colors));
 
-  host.append(sectionHeader(t('settings.sections.colors.title'), t('settings.sections.colors.subtitle')));
-
-  // Sub-tabs: dark / light
-  const targetMode = host.dataset.colorMode || resolveEffectiveMode();
-  host.dataset.colorMode = targetMode;
-
-  const tabs = el('div', { class: 'yanta-settings-color-tabs' });
-
-  for (const m of ['dark', 'light']) {
-    tabs.append(el('button', {
-      class: 'yanta-settings-color-tab' + (targetMode === m ? ' active' : ''),
-      onclick: () => {
-        host.dataset.colorMode = m;
-        rerenderSettingsBody();
-      },
-    }, m === 'dark' ? t('settings.colors.tabDark') : t('settings.colors.tabLight')));
+  // An edited palette is a scheme of its own; show it first so it is not lost from view.
+  if (!matched) {
+    grid.append(schemeCard({
+      colors: palette,
+      name: t('settings.appearance.customScheme'),
+      description: t('settings.appearance.customSchemeHint'),
+      active: true,
+      onclick: () => {},
+    }));
   }
 
-  host.append(tabs);
+  for (const preset of presets) {
+    grid.append(schemeCard({
+      colors: preset.colors,
+      name: preset.name,
+      description: preset.description,
+      active: preset === matched,
+      onclick: () => applyColorPreset(targetMode, preset),
+    }));
+  }
 
-  // Mode-specific presets
-  host.append(renderColorPresetPicker(targetMode, a));
+  return grid;
+}
 
-  // Grouped color editors
+function renderColorTokenEditors(host, targetMode, a) {
   const grouped = {};
 
   for (const tok of COLOR_TOKENS) {
@@ -1636,7 +1920,7 @@ function updateColorToken(mode, key, value) {
   // Use a microtask so the input event finishes first.
   requestAnimationFrame(() => {
     const host = modal?.querySelector('.yanta-settings-content');
-    if (host && activeSection === 'colors') {
+    if (host && activeSection === 'appearance') {
       // Only update visible swatches in place for smoothness; full rerender is fine too.
       for (const sw of host.querySelectorAll('.yanta-settings-swatch')) {
         const inp = sw.querySelector('input[type="color"]');
@@ -4088,6 +4372,128 @@ function injectSettingsCss() {
   color: var(--text);
 }
 
+/* Light/dark picker: one segmented control */
+.yanta-settings-segmented {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 4px;
+  background: var(--bg-elev-2);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.yanta-settings-segment {
+  flex: 1 1 0;
+  min-width: max-content;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.yanta-settings-segment:hover {
+  color: var(--text);
+}
+
+.yanta-settings-segment.active {
+  background: var(--bg);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12), 0 0 0 1px var(--border);
+}
+
+.yanta-settings-segment svg {
+  flex: none;
+}
+
+.yanta-settings-segment-hint {
+  margin-top: 8px;
+}
+
+/* Fine-tuning, folded */
+.yanta-settings-details {
+  margin: 4px 0 22px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg-elev);
+}
+
+.yanta-settings-details > summary {
+  padding: 12px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+  list-style-position: inside;
+}
+
+.yanta-settings-details[open] > summary {
+  border-bottom: 1px solid var(--border);
+}
+
+.yanta-settings-details > .yanta-settings-group {
+  margin: 14px;
+}
+
+/* Scheme thumbnails */
+.yanta-theme-preview {
+  display: flex;
+  height: 74px;
+  border: 1px solid;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.ytp-side {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 26%;
+  padding: 9px 7px;
+  border-right: 1px solid;
+}
+
+.ytp-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  flex: 1;
+  padding: 9px 10px;
+  min-width: 0;
+}
+
+.yanta-theme-preview span[class^="ytp-"]:not(.ytp-side):not(.ytp-main):not(.ytp-card) {
+  display: block;
+  border-radius: 999px;
+}
+
+.ytp-dot { width: 9px; height: 9px; }
+.ytp-line { height: 4px; width: 80%; opacity: 0.85; }
+.ytp-short { width: 52%; }
+.ytp-title { height: 6px; width: 58%; }
+
+.ytp-card {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  margin-top: auto;
+  padding: 5px 6px;
+  border: 1px solid;
+  border-radius: 6px;
+}
+
+.ytp-btn { height: 8px; width: 30px; }
+.ytp-chip { height: 8px; width: 14px; }
+
 /* Mode picker */
 .yanta-settings-mode-row {
   display: grid;
@@ -4172,8 +4578,9 @@ function injectSettingsCss() {
 
 .yanta-settings-preset-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(168px, 1fr));
   gap: 10px;
+  margin-top: 12px;
 }
 
 .yanta-settings-preset-card {
@@ -4182,11 +4589,11 @@ function injectSettingsCss() {
   align-items: stretch;
   gap: 8px;
 
+  position: relative;
   width: 100%;
-  min-height: 120px;
 
-  padding: 12px;
-  border-radius: 10px;
+  padding: 8px 8px 10px;
+  border-radius: 12px;
 
   background: var(--bg-elev-2);
   border: 1px solid var(--border);
@@ -4229,15 +4636,35 @@ function injectSettingsCss() {
 }
 
 .yanta-settings-preset-name {
+  padding: 0 2px;
   font-size: 13px;
-  font-weight: 700;
+  font-weight: 650;
   color: var(--text);
 }
 
 .yanta-settings-preset-description {
+  display: -webkit-box;
+  padding: 0 2px;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
   font-size: 11px;
-  line-height: 1.45;
+  line-height: 1.4;
   color: var(--text-dim);
+}
+
+.yanta-settings-preset-check {
+  position: absolute;
+  top: 13px;
+  right: 13px;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-contrast, #fff);
+  box-shadow: 0 0 0 2px var(--bg-elev-2);
 }
 
 /* Colors */
@@ -4460,7 +4887,7 @@ function injectSettingsCss() {
   border-radius: 999px;
 
   background: var(--accent);
-  color: white;
+  color: var(--accent-contrast, #fff);
 
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
 }
@@ -4607,7 +5034,7 @@ function injectSettingsCss() {
   border-radius: 999px;
 
   background: var(--accent);
-  color: white;
+  color: var(--accent-contrast, #fff);
 
   box-shadow: 0 10px 28px rgba(0,0,0,0.22);
   pointer-events: none;
@@ -4634,7 +5061,7 @@ function injectSettingsCss() {
   border-radius: 999px;
 
   background: var(--accent);
-  color: white;
+  color: var(--accent-contrast, #fff);
 
   box-shadow: 0 8px 24px rgba(0,0,0,0.20);
 

@@ -226,7 +226,7 @@ body.yanta-slideshow-active .yanta-slide-anim-panel {
 
 .yanta-slide-anim-segmented button[aria-pressed="true"] {
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast, #fff);
 }
 
 .yanta-slide-anim-steps {

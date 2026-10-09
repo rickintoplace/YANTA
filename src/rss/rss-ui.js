@@ -3072,7 +3072,7 @@ function injectCss() {
   width: 40px;
   height: 40px;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast, #fff);
   border-radius: 50%;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }

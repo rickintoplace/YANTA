@@ -234,7 +234,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .btn.danger { color: var(--red); border-color: rgba(248,113,113,0.3); }
 .btn.danger:hover { background: rgba(248,113,113,0.1); }
 .btn.primary {
-  background: var(--accent); color: white; border-color: transparent; font-weight: 600;
+  background: var(--accent); color: var(--accent-contrast, #fff); border-color: transparent; font-weight: 600;
   justify-content: center;
 }
 .btn.primary:hover { filter: brightness(1.08); }
@@ -490,7 +490,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 
 .tag-pill.active {
   background: var(--accent);
-  color: white;
+  color: var(--accent-contrast, #fff);
   border-color: transparent;
   font-weight: 600;
 }
@@ -2292,7 +2292,7 @@ input.yanta-task-checkbox {
 }
 
 .yanta-inline-edit-btn.primary {
-  color: white;
+  color: var(--accent-contrast, #fff);
   background: var(--accent);
   border-color: transparent;
 }
@@ -2351,7 +2351,7 @@ input.yanta-task-checkbox {
 .yanta-inline-confirm-btn.primary {
   background: var(--accent);
   border-color: transparent;
-  color: white;
+  color: var(--accent-contrast, #fff);
 }
 
 .yanta-inline-confirm-btn.danger {
@@ -4928,7 +4928,7 @@ input.yanta-task-checkbox {
 }
 
 .head-actions .icon-btn.primary-ish {
-  color: white;
+  color: var(--accent-contrast, #fff);
   background: var(--accent);
 }
 
@@ -5393,7 +5393,7 @@ input.yanta-task-checkbox {
 }
 
 .yanta-tags-pill.active {
-  color: white;
+  color: var(--accent-contrast, #fff);
   background: var(--accent);
   border-color: transparent;
 }

@@ -915,6 +915,12 @@ export default {
 
     appearance: {
       theme: 'Thème',
+      modeTitle: 'Clair ou sombre',
+      schemeTitle: 'Palette de couleurs',
+      customize: 'Ajuster en détail les couleurs du {mode}',
+      customScheme: 'Personnalisée',
+      customSchemeHint: 'Les couleurs que vous avez ajustées vous-même.',
+      active: 'Utilisée',
       modes: {
         auto: { label: 'Suivre le système', hint: 'Correspondre au clair/sombre du système' },
         dark: { label: 'Sombre', hint: 'Toujours sombre' },

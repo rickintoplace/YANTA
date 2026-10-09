@@ -301,7 +301,7 @@ function injectCss() {
   border: 0;
   border-radius: 999px;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast, #fff);
   font-size: 12px;
   font-weight: 800;
   cursor: pointer;
@@ -1118,7 +1118,7 @@ body:not(.yanta-slideshow-immersive) .yanta-slideshow-immersive-hint {
 .yanta-slides-remote-screen .btn.primary {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast, #fff);
 }
 .yanta-slides-remote-screen .text-input {
   width: 100%;

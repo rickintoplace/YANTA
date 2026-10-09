@@ -915,6 +915,12 @@ export default {
 
     appearance: {
       theme: 'Tema',
+      modeTitle: 'Claro u oscuro',
+      schemeTitle: 'Esquema de colores',
+      customize: 'Ajustar en detalle los colores del {mode}',
+      customScheme: 'Propio',
+      customSchemeHint: 'Los colores que has ajustado tú.',
+      active: 'En uso',
       modes: {
         auto: { label: 'Seguir al sistema', hint: 'Coincidir con claro/oscuro del SO' },
         dark: { label: 'Oscuro', hint: 'Siempre oscuro' },

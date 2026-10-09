@@ -228,7 +228,7 @@
 .fc .fc-button-primary:not(:disabled):active {
   border-color: var(--accent);
   background: var(--accent);
-  color: white;
+  color: var(--accent-contrast, #fff);
 }
 
 /* Header dates */
@@ -1598,7 +1598,7 @@
 .yanta-dtp-day.selected {
   background: var(--accent);
   border-color: var(--accent);
-  color: white;
+  color: var(--accent-contrast, #fff);
   font-weight: 900;
 }
 
@@ -1733,7 +1733,7 @@
 
 .yanta-dtp-wheel-item.selected {
   background: var(--accent);
-  color: white;
+  color: var(--accent-contrast, #fff);
 }
 
 .yanta-dtp-ampm {
@@ -2710,7 +2710,7 @@
 .yanta-calendar-weekday-row button.active {
   border-color: var(--accent);
   background: var(--accent);
-  color: white;
+  color: var(--accent-contrast, #fff);
 }
 
 .yanta-calendar-weekday-row button:active {
@@ -3126,7 +3126,7 @@
     border-radius: 999px;
 
     background: var(--accent);
-    color: white;
+    color: var(--accent-contrast, #fff);
 
     cursor: pointer;
 

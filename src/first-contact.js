@@ -130,7 +130,7 @@ function injectCss() {
 .yanta-fc-steps li[data-done="1"] .yanta-fc-step-mark {
   background: var(--accent);
   border-color: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast, #fff);
 }
 
 .yanta-fc-steps li > button {

@@ -310,7 +310,7 @@ function registerDialogOverlayRoute() {
   }
   
   .yanta-dialog-btn.primary {
-    color: white;
+    color: var(--accent-contrast, #fff);
     background: var(--accent);
     border-color: var(--accent);
   }

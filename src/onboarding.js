@@ -134,7 +134,7 @@ function injectCss() {
 
   padding: 8px 13px;
 
-  color: white;
+  color: var(--accent-contrast, #fff);
   background: var(--accent);
   border: none;
   border-radius: 9px;
@@ -364,7 +364,7 @@ function injectCss() {
 
   padding: 9px 17px;
 
-  color: white;
+  color: var(--accent-contrast, #fff);
   background: var(--accent);
   border: none;
   border-radius: 10px;

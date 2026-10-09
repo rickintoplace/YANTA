@@ -5179,7 +5179,7 @@ function injectCss() {
   grid-area: trailing-actions;
   justify-self: end;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast, #fff);
 }
 
 .yanta-ai-send:hover:not(:disabled):not(.is-working) {

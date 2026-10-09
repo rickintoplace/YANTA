@@ -905,6 +905,12 @@ export default {
 
     appearance: {
       theme: 'テーマ',
+      modeTitle: 'ライト／ダーク',
+      schemeTitle: '配色',
+      customize: '{mode}の色を細かく調整',
+      customScheme: 'カスタム',
+      customSchemeHint: '自分で調整した色です。',
+      active: '使用中',
       modes: {
         auto: { label: 'システムに合わせる', hint: 'OS のライト/ダークに合わせる' },
         dark: { label: 'ダーク', hint: '常にダーク' },

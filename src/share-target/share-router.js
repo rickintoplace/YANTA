@@ -348,7 +348,7 @@ function ensureCss() {
   border: 0;
   border-radius: 12px;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast, #fff);
   font-weight: 800;
   cursor: pointer;
 }

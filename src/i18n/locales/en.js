@@ -928,6 +928,12 @@ export default {
 
     appearance: {
       theme: 'Theme',
+      modeTitle: 'Light or dark',
+      schemeTitle: 'Color scheme',
+      customize: 'Fine-tune the colors of {mode}',
+      customScheme: 'Your own',
+      customSchemeHint: 'The colors you adjusted yourself.',
+      active: 'In use',
       modes: {
         auto: { label: 'Follow system', hint: 'Match OS light/dark' },
         dark: { label: 'Dark', hint: 'Always dark' },

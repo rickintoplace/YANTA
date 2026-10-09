@@ -915,6 +915,12 @@ export default {
 
     appearance: {
       theme: 'Design',
+      modeTitle: 'Hell oder dunkel',
+      schemeTitle: 'Farbschema',
+      customize: 'Farben für den {mode} im Detail anpassen',
+      customScheme: 'Eigenes Schema',
+      customSchemeHint: 'Die Farben, die du selbst angepasst hast.',
+      active: 'Aktiv',
       modes: {
         auto: { label: 'System folgen', hint: 'Hell/Dunkel des Systems übernehmen' },
         dark: { label: 'Dunkel', hint: 'Immer dunkel' },

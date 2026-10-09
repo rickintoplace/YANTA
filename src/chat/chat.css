@@ -239,7 +239,7 @@
 
   border-radius: 999px;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast, #fff);
 
   font-size: 10px;
   font-weight: 850;
@@ -716,7 +716,7 @@
   border-radius: 999px;
 
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast, #fff);
 
   cursor: pointer;
 

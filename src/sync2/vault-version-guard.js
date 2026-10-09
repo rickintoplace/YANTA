@@ -43,6 +43,26 @@ const GUARDED_MAPS = Object.freeze([
   'spaces',
 ]);
 
+/*
+  Two writes can carry the same `updated` stamp (same millisecond, or a
+  coarse clock). "Newest" alone then leaves each device keeping its own
+  copy forever — found by the randomised convergence test. Ties go to the
+  value that sorts last in a stable serialisation: arbitrary, but the
+  same answer on every device.
+*/
+function stableString(value) {
+  if (Array.isArray(value)) return `[${value.map(stableString).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value).sort().map((k) => `${JSON.stringify(k)}:${stableString(value[k])}`).join(',')}}`;
+  }
+  return JSON.stringify(value ?? null);
+}
+
+function isNewer(updated, value, than) {
+  if (updated !== than.updated) return updated > than.updated;
+  return stableString(value) > (than.key ??= stableString(than.value));
+}
+
 function noteMapVersions(collector, name, entries) {
   const bucket = collector.get(name);
 
@@ -55,7 +75,7 @@ function noteMapVersions(collector, name, entries) {
     const key = String(id);
     const prev = bucket.get(key);
 
-    if (!prev || updated > prev.updated) {
+    if (!prev || isNewer(updated, value, prev)) {
       bucket.set(key, {
         updated,
         value: safeJsonClone(value),
@@ -118,8 +138,10 @@ export function reconcileVaultVersions(collector, origin) {
       if (tombstones.has(id)) continue;
 
       const current = map.get(id);
+      const currentUpdated = Number(current?.updated || 0);
 
-      if (Number(current?.updated || 0) >= newest.updated) continue;
+      if (currentUpdated > newest.updated) continue;
+      if (currentUpdated === newest.updated && !isNewer(newest.updated, newest.value, { updated: currentUpdated, value: current })) continue;
 
       restores.push({ map, id, value: newest.value });
     }

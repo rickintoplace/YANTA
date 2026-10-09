@@ -21,7 +21,7 @@ export const YANTA_CITATION_PREAMBLE = [
   '# Citing sources',
   '',
   'Tool results that carry a `cite` number are sources: web pages, search results, feed articles and notes you read.',
-  'When your answer states facts taken from them, cite them as [n] with that number, following the rules below.',
+  'When your answer states facts taken from them, cite them as [n] with that number (and follow the citation rules below, if there are any).',
   'Content without a `cite` number cannot be cited. Answers that use no sources need no citations and no appendix.',
 ].join('\n');
 

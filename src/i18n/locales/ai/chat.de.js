@@ -47,6 +47,8 @@ export default {
   },
 
   noResponse: '[Keine Antwort]',
+  emptyReply: 'Das Modell hat keine Antwort geliefert, auch nicht beim zweiten Versuch.',
+  retryLabel: 'Nochmal versuchen',
   error: 'Fehler: {message}',
   stop: {
     loop: 'Ich habe mich wiederholt, ohne weiterzukommen, deshalb habe ich aufgehört. Formuliere die Anfrage anders oder grenze sie ein.',

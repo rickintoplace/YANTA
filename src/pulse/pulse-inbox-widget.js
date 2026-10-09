@@ -375,7 +375,7 @@ function renderCard(item, onChange) {
     // Cited cards carry [n]{cX} markers and a quote appendix: show the
     // text, colour each [n] by its check, list the sources below.
     body.innerHTML = renderBlocksInlineWithContext(
-      stripForDisplay(keepClaimMarkers(String(item.body))),
+      stripForDisplay(keepClaimMarkers(String(item.body), { sources: item.sources })),
       { remoteMedia: 'link' }
     );
     const marks = markCitations(body, item.citeCheck, { sources: item.sources });

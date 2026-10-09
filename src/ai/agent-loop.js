@@ -89,6 +89,10 @@ function toolErrorPayload(err) {
  *
  * @returns {Promise<{text: string, finalText: string, rounds: number, stop: string, toolCalls: Array, thread: Array}>}
  */
+// Sent after an empty reply. Model-facing, so English.
+const EMPTY_REPLY_INSTRUCTION =
+  'Your last reply was empty. Answer the user now, in their language, using what you already have; call a tool only if you truly need one.';
+
 export async function runAgentLoop({
   messages,
   tools = [],
@@ -126,6 +130,7 @@ export async function runAgentLoop({
 
   let text = '';
   let round = 0;
+  let emptyRetried = false;
 
   for (; round < maxRounds; round++) {
     if (signal?.aborted) {
@@ -140,6 +145,18 @@ export async function runAgentLoop({
     const toolCalls = message.tool_calls || [];
 
     if (content) text = content;
+
+    /*
+      An empty reply — no text, no tool call — happens now and then (a
+      model that spent its output on thinking, a provider hiccup). Asking
+      once more with the thread as it is usually gets the answer; showing
+      the user "no response" never helps.
+    */
+    if (!toolCalls.length && !content && !emptyRetried && !signal?.aborted) {
+      emptyRetried = true;
+      thread.push({ role: 'user', content: EMPTY_REPLY_INSTRUCTION });
+      continue;
+    }
 
     if (!toolCalls.length) {
       return { text, finalText: content, rounds: round + 1, stop: AGENT_STOP.COMPLETE, toolCalls: executed, thread };

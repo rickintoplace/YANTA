@@ -46,6 +46,8 @@ export default {
   },
 
   noResponse: '[Aucune réponse]',
+  emptyReply: 'Le modèle n’a renvoyé aucune réponse, même au second essai.',
+  retryLabel: 'Réessayer',
   error: 'Erreur : {message}',
   stop: {
     loop: 'Je répétais les mêmes étapes sans progresser, alors je me suis arrêté. Essayez de reformuler ou de préciser la demande.',

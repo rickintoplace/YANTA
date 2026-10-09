@@ -35,6 +35,32 @@ beforeEach(() => {
 });
 
 describe('headless agent loop', () => {
+  it('asks once more after an empty reply instead of ending with nothing', async () => {
+    script = [
+      { content: '', tool_calls: [] },
+      { content: 'Here it is.', tool_calls: [] },
+    ];
+
+    const res = await runAgentLoop({ messages: [{ role: 'user', content: 'go' }], tools: [] });
+
+    expect(res.finalText).toBe('Here it is.');
+    expect(calls[1].messages.at(-1)).toMatchObject({ role: 'user' });
+    expect(calls[1].messages.at(-1).content).toMatch(/empty/i);
+  });
+
+  it('gives up after the one retry', async () => {
+    script = [
+      { content: '', tool_calls: [] },
+      { content: '', tool_calls: [] },
+    ];
+
+    const res = await runAgentLoop({ messages: [{ role: 'user', content: 'go' }], tools: [] });
+
+    expect(calls).toHaveLength(2);
+    expect(res.stop).toBe(AGENT_STOP.COMPLETE);
+    expect(res.finalText).toBe('');
+  });
+
   it('does not run a tool whose arguments were cut off, and says why', async () => {
     script = [
       { content: '', finish_reason: 'length', tool_calls: [toolCall('create_note', '{"title":"Digest","body":"## Long')] },

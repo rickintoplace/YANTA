@@ -48,6 +48,8 @@ export default {
   },
 
   noResponse: '[応答なし]',
+  emptyReply: '2 回試しましたが、モデルから回答がありませんでした。',
+  retryLabel: 'もう一度試す',
   error: 'エラー: {message}',
   stop: {
     loop: '同じ手順を繰り返すだけで先に進めなかったため、停止しました。言い方を変えるか、依頼内容を絞り込んでください。',

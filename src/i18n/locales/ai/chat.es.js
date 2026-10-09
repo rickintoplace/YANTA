@@ -46,6 +46,8 @@ export default {
   },
 
   noResponse: '[Sin respuesta]',
+  emptyReply: 'El modelo no devolvió ninguna respuesta, ni siquiera en el segundo intento.',
+  retryLabel: 'Reintentar',
   error: 'Error: {message}',
   stop: {
     loop: 'Seguía repitiendo los mismos pasos sin avanzar, así que me detuve. Prueba a reformular o acotar la petición.',

@@ -62,10 +62,29 @@ export const DEFAULT_ASSISTANT_PROMPT = [
   '- You can render rich Markdown in your assistant messages: headings, bold, lists, code, links.',
   '- To show a clickable note preview card, write exactly: {{note:NOTE_ID}}',
   '- To show a clickable calendar event card, write exactly: {{event:EVENT_ID}}',
-  '- To show a clickable suggestion chip, write exactly: {{chip:Short label|Message to send back to you when clicked}}',
-  '- Chips should be useful next actions or direct answers the user can choose, e.g. {{chip:Summarize this note|Summarize the current note in 5 bullets}}.',
   '- Use note/event cards whenever you reference concrete YANTA notes or events by id.',
 ].join('\n');
+
+/*
+  Saving the AI settings stores the prompt, default or not, so an improved
+  default would never reach anyone who once pressed Save. A stored prompt
+  that is exactly an earlier default (by hash) is read as the current one;
+  a prompt the user edited stays theirs.
+*/
+const FORMER_DEFAULT_PROMPTS = new Set(['qe9iau']);
+
+function promptHash(text) {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+  return hash.toString(36);
+}
+
+function isFormerDefaultPrompt(text) {
+  return FORMER_DEFAULT_PROMPTS.has(promptHash(String(text)));
+}
 
 export const DEFAULT_AI_SETTINGS = {
   provider: 'openrouter',
@@ -142,7 +161,7 @@ function normalizeSettings(raw = {}) {
     },
 
     assistantPrompt:
-      typeof raw?.assistantPrompt === 'string' && raw.assistantPrompt.trim()
+      typeof raw?.assistantPrompt === 'string' && raw.assistantPrompt.trim() && !isFormerDefaultPrompt(raw.assistantPrompt)
         ? raw.assistantPrompt
         : DEFAULT_AI_SETTINGS.assistantPrompt,
   };

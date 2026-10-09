@@ -2365,6 +2365,7 @@ function messageSignature(msg) {
     c.slice(-32),
     String(msg.reasoning || '').length,
     msg.citeCheck ? `${msg.citeCheck.pending ? 'p' : 'd'}${JSON.stringify(msg.citeCheck).length}` : '',
+    msg.sources?.length || 0,
     msg.covers || 0,
     msg.model || '',
   ].join('|');
@@ -2656,7 +2657,7 @@ function renderAssistantMessageNode(msg) {
 
   // Interactive widgets (```yanta-ui blocks) become markers here and are
   // mounted after the markdown is rendered; see ui-widgets.js.
-  const { text: withWidgetMarks, widgets } = extractWidgets(stripForDisplay(keepClaimMarkers(String(msg.content || ''))));
+  const { text: withWidgetMarks, widgets } = extractWidgets(stripForDisplay(keepClaimMarkers(String(msg.content || ''), { sources: msg.sources })));
   const parsed = extractAssistantUiTokens(withWidgetMarks);
 
   const content = document.createElement('div');
@@ -2924,11 +2925,26 @@ async function handleAiMessageClick(e) {
     e.preventDefault();
     e.stopPropagation();
 
-    const prompt = chip.dataset.aiChipPrompt || '';
-    if (prompt.trim()) {
-      await submitUserText(prompt.trim());
+    const prompt = (chip.dataset.aiChipPrompt || '').trim();
+    if (!prompt) return;
+
+    /*
+      A chip that still needs the user's part ("Move it to …", "Another
+      time:") goes into the input box to be finished, not sent half-done.
+    */
+    if (/(\u2026|\.\.\.|:)$/.test(prompt)) {
+      const input = document.querySelector('.yanta-ai-input');
+
+      if (input) {
+        input.value = `${prompt.replace(/\s*(\u2026|\.\.\.)$/, '')} `;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.focus();
+        input.setSelectionRange?.(input.value.length, input.value.length);
+        return;
+      }
     }
 
+    await submitUserText(prompt);
     return;
   }
 
@@ -3263,7 +3279,8 @@ async function runAssistant(userText) {
   });
 
   const citationMode = String(getAiSettings().citationCheck || 'check');
-  const citeSources = citationMode === 'off' ? null : createSourceRegistry();
+  // Sources are numbered even with checking off, so [n] still links to them.
+  const citeSources = createSourceRegistry();
 
   const systemMessage = await buildSystemMessage({
     userText,
@@ -3272,13 +3289,11 @@ async function runAssistant(userText) {
 
   systemMessage.content = [systemMessage.content, WIDGET_INSTRUCTIONS].join('\n\n');
 
-  if (citeSources) {
-    systemMessage.content = [
-      systemMessage.content,
-      YANTA_CITATION_PREAMBLE,
-      buildCitationInstructions({ maxCitedClaims: 12 }),
-    ].join('\n\n');
-  }
+  systemMessage.content = [
+    systemMessage.content,
+    YANTA_CITATION_PREAMBLE,
+    citationMode === 'off' ? '' : buildCitationInstructions({ maxCitedClaims: 12 }),
+  ].filter(Boolean).join('\n\n');
 
   const messages = [
     systemMessage,
@@ -3322,6 +3337,7 @@ async function runAssistant(userText) {
 
     let streamedMsg = null;
     let hasVisibleContent = false;
+    let pendingWhitespace = '';
 
     const assistantMessage = await openRouterChatCompletionStream({
       messages: thread,
@@ -3344,6 +3360,13 @@ async function runAssistant(userText) {
 
           if (!text) return;
 
+          // Leading whitespace (often all a tool-call round sends) waits
+          // for real text, so no empty bubble flashes up.
+          if (!streamedMsg && !text.trim()) {
+            pendingWhitespace += text;
+            return;
+          }
+
           if (!streamedMsg) {
             streamedMsg = pushAssistantStreamMessage({
               model: modelLabel(),
@@ -3351,9 +3374,11 @@ async function runAssistant(userText) {
             });
           }
 
-          streamedMsg.content = appendUniqueText(streamedMsg.content, text);
+          streamedMsg.content = appendUniqueText(streamedMsg.content, pendingWhitespace + text);
+          pendingWhitespace = '';
           streamedMsg.reasoning = streamingReasoning;
-          hasVisibleContent = true;
+          // Whitespace before a tool call is not an answer.
+          hasVisibleContent = !!streamedMsg.content.trim();
 
           setAssistantBusy(true, t('ai.chat.busy.responding'));
           scheduleStreamRender();
@@ -3376,13 +3401,13 @@ async function runAssistant(userText) {
       streamedMsg.reasoning = finalReasoning;
     }
 
-    if (streamedMsg && hasVisibleContent) {
+    if (streamedMsg && hasVisibleContent && String(streamedMsg.content || '').trim()) {
       finalizeAssistantStreamMessage(streamedMsg);
     } else if (streamedMsg) {
       removeConversationMessageObject(streamedMsg);
-    } else if (!(assistantMessage.tool_calls || []).length) {
-      addMessage('assistant', t('ai.chat.noResponse'), { model: modelLabel() });
     }
+    // An empty reply gets one retry in the agent loop; the turn's end
+    // decides whether anything has to be said about it.
 
     streamingReasoning = '';
 
@@ -3451,6 +3476,13 @@ async function runAssistant(userText) {
     });
   }
 
+  // Still nothing after the retry: say so once, with a way to try again.
+  if (result.stop === AGENT_STOP.COMPLETE && !result.finalText) {
+    addMessage('assistant', `${t('ai.chat.emptyReply')}\n\n{{chip:${t('ai.chat.retryLabel')}|${String(userText).replace(/[{}|]/g, ' ')}}}`, {
+      model: modelLabel(),
+    });
+  }
+
   if (citeSources?.size) {
     await checkAnswerCitations({
       sources: citeSources,
@@ -3467,12 +3499,28 @@ async function runAssistant(userText) {
  */
 async function checkAnswerCitations({ sources, thread, mode, signal }) {
   const msg = [...conversation].reverse().find((m) => m.role === 'assistant');
-  if (!msg || !hasCitations(msg.content)) return;
+  if (!msg) return;
+
+  /*
+    Kept with the message whenever it cites anything — with the protocol
+    or as a bare [n] — so the marks link to their sources and the list
+    survives a failed check and a reload.
+  */
+  const known = sources.list();
+  if (known.some((s) => String(msg.content || '').includes(`[${s.n}]`))) {
+    msg.sources = known;
+  }
+
+  if (mode === 'off' || !hasCitations(msg.content)) {
+    if (msg.sources) {
+      saveTransientConversation();
+      scheduleAiSessionSave();
+      renderMessages();
+    }
+    return;
+  }
 
   setAssistantBusy(true, t('ai.chat.busy.checkingCitations'));
-
-  // Kept with the message, so the source list survives a failed check and a reload.
-  msg.sources = sources.list();
 
   // Shown at once: the badge and the markers say "checking" until the
   // verdicts arrive.

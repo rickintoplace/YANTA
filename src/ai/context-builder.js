@@ -344,6 +344,21 @@ export async function buildSystemMessage({
     'Never store secrets, API keys, passwords, private credentials, or sensitive personal data unless the user explicitly asks.',
   ].join('\n');
 
+  // Always current, whatever assistant prompt the user saved.
+  const conversationRules = [
+    '# Conversation',
+    '',
+    '- Write everything the user sees in the language of their last message — including any short remark before a tool call. Usually just call the tool without announcing it.',
+    '',
+    '# Suggestion chips',
+    '',
+    '{{chip:Short label|Message}} shows a button under your answer. Tapping it sends Message as the user\'s next message, exactly as written.',
+    '- Write Message as the user would type it: their language, first person, complete. "Verschieb den Zahnarzt auf Montag, 10 Uhr", not "Verschiebe den Termin (ev_123) auf …".',
+    '- Prefer concrete options that finish the task in one tap: two or three likely times, the two candidates, yes/no.',
+    '- If the user must still add something only they know, end Message with "…": the app puts it into the input box to be completed instead of sending it.',
+    '- Never put IDs, tool names or notes to yourself into a chip. At most three chips, and none when nothing obvious comes next.',
+  ].join('\n');
+
   const toolBudgetRules = [
     '# Tool budget',
     '',
@@ -373,6 +388,8 @@ export async function buildSystemMessage({
       brainRules,
       '',
       aiTimeRules(),
+      '',
+      conversationRules,
       '',
       toolBudgetRules,
     ].filter(Boolean).join('\n\n'),

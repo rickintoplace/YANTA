@@ -26,8 +26,24 @@ const EXTERNAL_REL = 'noopener noreferrer';
 
 export const CLAIM_MARK = /((?:\[\d+\])+)⟦c(\d+)⟧/g;
 
-export function keepClaimMarkers(text) {
-  return text.replace(/((?:\[\d+\])+)\{c(\d+)\}/g, '$1⟦c$2⟧');
+export function keepClaimMarkers(text, { sources = null } = {}) {
+  let out = text.replace(/((?:\[\d+\])+)\{c(\d+)\}/g, '$1⟦c$2⟧');
+
+  /*
+    Models do not always follow the protocol and write a bare [2]. When 2
+    is a source this answer read, it still becomes a citation mark (claim
+    0: nothing was checked), so it links to its source like the others.
+  */
+  if (sources?.length) {
+    const known = new Set(sources.map((s) => Number(s.n)));
+
+    out = out.replace(/((?:\[\d{1,3}\])+)(?![[({⟦:])/g, (marker) => {
+      const numbers = [...marker.matchAll(/\d+/g)].map(Number);
+      return numbers.every((n) => known.has(n)) ? `${marker}⟦c0⟧` : marker;
+    });
+  }
+
+  return out;
 }
 
 /**

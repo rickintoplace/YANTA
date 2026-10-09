@@ -63,6 +63,8 @@ export default {
 
   // Shown as the assistant's answer when the model returned nothing
   noResponse: '[No response]',
+  emptyReply: 'The model returned no answer, even on a second try.',
+  retryLabel: 'Try again',
   // Shown as the assistant's answer when a request failed
   error: 'Error: {message}',
   stop: {

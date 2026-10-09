@@ -161,6 +161,7 @@ import {
   closeCalendarPane,
   calendarChoiceDialog,
   setupCalendarVaultBridge,
+  ensureFullCalendar,
 } from './calendar.js';
 import {
   loadCalendarPreferences,
@@ -2984,7 +2985,11 @@ async function init() {
   // idle and online, so pickers and user icons are ready — and cached for
   // offline — before anyone asks.
   setTimeout(() => {
-    const load = () => ensureLucideIcons();
+    const load = () => {
+      ensureLucideIcons();
+      // The calendar view's FullCalendar (~600 KB source), so opening it is instant.
+      ensureFullCalendar().catch(() => {});
+    };
     if ('requestIdleCallback' in window) requestIdleCallback(load, { timeout: 10_000 });
     else load();
   }, 3000);

@@ -8,26 +8,46 @@
 // FullCalendar is UI only. VaultDoc is source of truth.
 // ============================================================
 
-import { Calendar } from '@fullcalendar/core';
-import dayGridPlugin from '@fullcalendar/daygrid';
-import timeGridPlugin from '@fullcalendar/timegrid';
-import listPlugin from '@fullcalendar/list';
-import interactionPlugin from '@fullcalendar/interaction';
-
 /*
-  Warum kein locales-all-Import: das Gesamtpaket (~65 Sprachen) hängt sonst
-  im Main-Bundle. fullCalendarLocale() mappt ohnehin fast immer auf diese
-  Kernsprachen; nur für exotischere navigator.language-Werte wird das volle
-  Paket nachgeladen und per setOption nachgereicht.
+  FullCalendar is loaded on demand (calendar-fc.js): the view needs it,
+  the rest of this module — events state, recurrence, the vault bridge —
+  does not. `fcLib` is set once the import resolved; the view open paths
+  wait for it, everything else treats a missing `fc` as "not mounted",
+  as before.
 */
-import deLocale from '@fullcalendar/core/locales/de';
-import frLocale from '@fullcalendar/core/locales/fr';
-import esLocale from '@fullcalendar/core/locales/es';
-import itLocale from '@fullcalendar/core/locales/it';
-import nlLocale from '@fullcalendar/core/locales/nl';
-import enGbLocale from '@fullcalendar/core/locales/en-gb';
+let fcLib = null;
+let fcLibPromise = null;
 
-const CORE_FC_LOCALES = [deLocale, frLocale, esLocale, itLocale, nlLocale, enGbLocale];
+export function ensureFullCalendar() {
+  if (fcLib) return Promise.resolve(fcLib);
+
+  fcLibPromise ||= import('./calendar-fc.js')
+    .then((mod) => {
+      fcLib = mod;
+      return mod;
+    })
+    .catch((err) => {
+      fcLibPromise = null;
+      throw err;
+    });
+
+  return fcLibPromise;
+}
+
+/** Runs `fn` now if FullCalendar is loaded, else once it is. */
+function withFullCalendar(fn) {
+  if (fcLib) {
+    fn();
+    return;
+  }
+
+  ensureFullCalendar()
+    .then(() => fn())
+    .catch((err) => {
+      console.warn('[YANTA Calendar] could not load the calendar view', err);
+      toast('The calendar could not be loaded. Check your connection and try again.', 'error');
+    });
+}
 
 // 'en' is FullCalendar's built-in default and needs no locale module.
 const CORE_FC_LOCALE_CODES = new Set(['en', 'en-gb', 'de', 'fr', 'es', 'it', 'nl']);
@@ -2088,22 +2108,28 @@ export function openCalendarPane() {
     hydrateCalendarStateFromVault();
   }
 
-  if (!fc) {
-    setupCalendar();
-  }
-
   renderCalendarTopbar();
 
-  applyCalendarThemeIfChanged();
-  applyCalendarThemeToDom();
+  withFullCalendar(() => {
+    if (calendarMode !== 'pane') return;
 
-  resizeCalendarNow({ render: true });
+    if (!fc) {
+      setupCalendar();
+    }
 
-  requestAnimationFrame(() => {
-    resizeCalendarNow();
-    fc?.updateSize?.();
-    applyMountedCalendarEventsTheme();
-    scheduleCalendarSwipePrewarm();
+    renderCalendarTopbar();
+
+    applyCalendarThemeIfChanged();
+    applyCalendarThemeToDom();
+
+    resizeCalendarNow({ render: true });
+
+    requestAnimationFrame(() => {
+      resizeCalendarNow();
+      fc?.updateSize?.();
+      applyMountedCalendarEventsTheme();
+      scheduleCalendarSwipePrewarm();
+    });
   });
 }
 
@@ -2836,15 +2862,10 @@ async function createAdjacentCalendarViewSnapshot(dir, {
 
   const prefs = getCalendarPreferences();
 
-  const snapshotCalendar = new Calendar(host, {
-    plugins: [
-      dayGridPlugin,
-      timeGridPlugin,
-      listPlugin,
-      interactionPlugin,
-    ],
+  const snapshotCalendar = new fcLib.Calendar(host, {
+    plugins: fcLib.FC_PLUGINS,
 
-    locales: CORE_FC_LOCALES,
+    locales: fcLib.CORE_FC_LOCALES,
     locale: fullCalendarLocale(prefs),
     firstDay: Number(prefs.weekStart),
     weekNumbers: !!prefs.weekNumbers,
@@ -13449,23 +13470,30 @@ export function openCalendar({
     hydrateCalendarStateFromVault();
   }
 
-  if (!fc) {
-    setupCalendar();
-  }
-
   renderCalendarTopbar();
 
-  setupCalendarResizeObserver();
+  withFullCalendar(() => {
+    // Closed again while FullCalendar was loading.
+    if (surface.hidden) return;
 
-  applyCalendarThemeIfChanged();
-  applyCalendarThemeToDom();
+    if (!fc) {
+      setupCalendar();
+    }
 
-  resizeCalendarNow({ render: true });
+    renderCalendarTopbar();
 
-  requestAnimationFrame(() => {
-    resizeCalendarNow();
-    applyMountedCalendarEventsTheme();
-    scheduleCalendarSwipePrewarm();
+    setupCalendarResizeObserver();
+
+    applyCalendarThemeIfChanged();
+    applyCalendarThemeToDom();
+
+    resizeCalendarNow({ render: true });
+
+    requestAnimationFrame(() => {
+      resizeCalendarNow();
+      applyMountedCalendarEventsTheme();
+      scheduleCalendarSwipePrewarm();
+    });
   });
 }
 
@@ -13797,15 +13825,10 @@ export function setupCalendar() {
 
   applyCalendarThemeVarsTo(host);
 
-  fc = new Calendar(host, {
-    plugins: [
-      dayGridPlugin,
-      timeGridPlugin,
-      listPlugin,
-      interactionPlugin,
-    ],
+  fc = new fcLib.Calendar(host, {
+    plugins: fcLib.FC_PLUGINS,
 
-    locales: CORE_FC_LOCALES,
+    locales: fcLib.CORE_FC_LOCALES,
     locale: fullCalendarLocale(getCalendarPreferences()),
     firstDay: Number(getCalendarPreferences().weekStart),
     weekNumbers: !!getCalendarPreferences().weekNumbers,

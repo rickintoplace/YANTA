@@ -1,0 +1,29 @@
+# CI for the web app: i18n catalogs, lint, sync tests, production build.
+# Mirrors .gitlab-ci.yml; the worker deploys separately (see README).
+
+name: check
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      # Install scripts are not needed to lint, test or build (sharp/onnxruntime
+      # postinstalls only fetch native binaries for server-side use).
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run check
+      - run: npm run build
+      - run: node --check yanta-cloud-worker/src/index.js

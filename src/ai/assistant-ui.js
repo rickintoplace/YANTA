@@ -424,6 +424,7 @@ function compactStoredMessage(msg) {
     covers: msg.covers || undefined,
     // A check still running when the page closed never finishes.
     citeCheck: msg.citeCheck && !msg.citeCheck.pending ? msg.citeCheck : undefined,
+    sources: Array.isArray(msg.sources) && msg.sources.length ? msg.sources : undefined,
     widgetState: msg.widgetState || undefined,
     ts: Number(msg.ts || Date.now()),
   };
@@ -2661,11 +2662,12 @@ function renderAssistantMessageNode(msg) {
   const content = document.createElement('div');
   // eslint-disable-next-line yanta/no-untranslated-literal -- CSS class
   content.className = 'yanta-ai-msg-content yanta-ai-rich';
+  let citeMarks = null;
 
   if (parsed.text) {
     content.innerHTML = renderBlocksInlineWithContext(parsed.text, { remoteMedia: 'link' });
     enhanceAiCodeCopy(content);
-    markCitations(content, msg.citeCheck);
+    citeMarks = markCitations(content, msg.citeCheck, { sources: msg.sources });
     mountWidgets(content, widgets, {
       stateFor: (i) => {
         msg.widgetState ||= {};
@@ -2683,8 +2685,8 @@ function renderAssistantMessageNode(msg) {
   wrap.append(content);
 
   // Right under the text it is about, before note cards and chips.
-  if (msg.citeCheck) {
-    wrap.append(renderCitationCheckNode(msg.citeCheck));
+  if (msg.citeCheck || (citeMarks?.order.size && msg.sources?.length)) {
+    wrap.append(renderCitationCheckNode(msg.citeCheck, { ...citeMarks, sources: msg.sources }));
   }
 
   if (parsed.notes.length || parsed.events.length) {
@@ -3468,6 +3470,9 @@ async function checkAnswerCitations({ sources, thread, mode, signal }) {
   if (!msg || !hasCitations(msg.content)) return;
 
   setAssistantBusy(true, t('ai.chat.busy.checkingCitations'));
+
+  // Kept with the message, so the source list survives a failed check and a reload.
+  msg.sources = sources.list();
 
   // Shown at once: the badge and the markers say "checking" until the
   // verdicts arrive.

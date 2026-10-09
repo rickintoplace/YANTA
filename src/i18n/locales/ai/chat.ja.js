@@ -109,6 +109,16 @@ export default {
   },
 
   cite: {
+    open: 'ソースを開く',
+    openNote: 'ノートを開く',
+    copyLink: 'リンクをコピー',
+    linkCopied: 'リンクをコピーしました',
+    addCitation: 'ノートに引用…',
+    showInSources: '出典一覧で表示',
+    checkedWith: 'VeriQuote で引用を検証',
+    aboutVeriquote: 'VeriQuote について',
+    sourcesCount: { other: '{count} 件の出典' },
+    kind: { web: 'ウェブページ', note: 'ノート', rss: 'フィード記事' },
     backed: '出典で裏付けあり',
     notConfirmed: '未確認',
     checkingOne: 'この引用を出典と照合しています…',

@@ -107,6 +107,16 @@ export default {
   },
 
   cite: {
+    open: 'Ouvrir la source',
+    openNote: 'Ouvrir la note',
+    copyLink: 'Copier le lien',
+    linkCopied: 'Lien copié',
+    addCitation: 'Citer dans une note…',
+    showInSources: 'Voir dans les sources',
+    checkedWith: 'Citations vérifiées avec VeriQuote',
+    aboutVeriquote: 'À propos de VeriQuote',
+    sourcesCount: { one: '{count} source', other: '{count} sources' },
+    kind: { web: 'Page web', note: 'Note', rss: 'Article de flux' },
     backed: 'Confirmé par la source',
     notConfirmed: 'non confirmé',
     checkingOne: 'Vérification de cette citation par rapport à sa source…',

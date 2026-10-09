@@ -125,19 +125,6 @@ function injectCss() {
 
 .yanta-pulse-body > :first-child { margin-top: 0; }
 
-.yanta-pulse-sources {
-  margin: 6px 0 0;
-  padding-left: 22px;
-  font-size: 11.5px;
-  color: var(--text-faint);
-  display: grid;
-  gap: 2px;
-}
-
-.yanta-pulse-sources a {
-  color: var(--text-dim);
-  overflow-wrap: anywhere;
-}
 .yanta-pulse-body > :last-child { margin-bottom: 0; }
 
 .yanta-pulse-actions {
@@ -391,28 +378,13 @@ function renderCard(item, onChange) {
       stripForDisplay(keepClaimMarkers(String(item.body))),
       { remoteMedia: 'link' }
     );
-    markCitations(body, item.citeCheck);
+    const marks = markCitations(body, item.citeCheck, { sources: item.sources });
     card.append(body);
 
-    const cited = (item.sources || []).filter((s) => String(item.body).includes(`[${s.n}]`));
-    if (cited.length) {
-      const list = el('ol', { class: 'yanta-pulse-sources' });
-      for (const source of cited) {
-        const li = el('li');
-        li.value = source.n;
-        if (source.url) {
-          const a = el('a', { href: source.url, target: '_blank', rel: 'noopener noreferrer' });
-          a.textContent = source.title;
-          li.append(a);
-        } else {
-          li.textContent = source.title;
-        }
-        list.append(li);
-      }
-      card.append(list);
+    // The check's verdict and the cited sources, numbered as in the text.
+    if (item.citeCheck || (marks.order.size && item.sources?.length)) {
+      card.append(renderCitationCheckNode(item.citeCheck, { ...marks, sources: item.sources }));
     }
-
-    if (item.citeCheck) card.append(renderCitationCheckNode(item.citeCheck));
   }
 
   for (const proposal of item.proposals || []) {

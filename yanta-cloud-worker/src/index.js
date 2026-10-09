@@ -8201,6 +8201,57 @@ async function handleGetPublicShareAsset(env, req, url, headers) {
   });
 }
 
+/*
+  Search results, lightly re-ranked against SEO filler. Sites that only
+  wall off or scrape other people's answers are dropped; titles shaped like
+  listicles and "best … 2026" round-ups sink to the end and are marked, so
+  the model can still see them but reaches for something better first.
+  Primary sources (authorities, universities, papers, reference works,
+  official docs) rise a little. Brave's order decides everything else.
+*/
+const SEARCH_DROP_SITES = /(^|\.)(pinterest\.[a-z.]+|coursehero\.com|chegg\.com|brainly\.[a-z.]+|studocu\.com|scribd\.com|answers\.com|ask\.com|ehow\.com)$/i;
+const SEARCH_PRIMARY_SITES = /(^|\.)(gov|gov\.[a-z]{2}|gv\.at|admin\.ch|bund\.de|europa\.eu|edu|ac\.[a-z]{2}|uni-[a-z-]+\.de|wikipedia\.org|arxiv\.org|doi\.org|ncbi\.nlm\.nih\.gov|who\.int|w3\.org|ietf\.org|developer\.mozilla\.org|gesetze-im-internet\.de|github\.com)$/i;
+const SEARCH_LISTICLE = [
+  /\b(top|best)\s+\d{1,3}\b/i,
+  /\b\d{1,3}\s+(best|top|ways|tips|tricks|reasons|things|mistakes|hacks)\b/i,
+  /\b(best|top|cheapest)\b[^|]*\b20\d\d\b/i,
+  /\b(ultimate guide|everything you need to know|must-haves?|you won'?t believe|promo codes?|coupons?)\b/i,
+  /\b(die \d{1,3} besten|testsieger|bestenliste|gutscheine?|im test 20\d\d|vergleich 20\d\d)\b/i,
+];
+
+function searchResultSite(url) {
+  try {
+    return new URL(url).hostname.replace(/^www\./, '');
+  } catch {
+    return '';
+  }
+}
+
+function rankSearchResults(results, limit) {
+  const scored = [];
+
+  for (const [index, item] of results.entries()) {
+    if (SEARCH_DROP_SITES.test(item.site)) continue;
+
+    let score = 0;
+
+    if (SEARCH_LISTICLE.some((re) => re.test(item.title))) {
+      item.quality = 'listicle';
+      score -= 2;
+    } else if (SEARCH_PRIMARY_SITES.test(item.site)) {
+      score += 1;
+    }
+
+    // Brave's rank still matters most: one place is worth a quarter point.
+    scored.push({ item, score: score - index * 0.25 });
+  }
+
+  return scored
+    .sort((a, b) => b.score - a.score)
+    .slice(0, limit)
+    .map(({ item }) => item);
+}
+
 async function handleBraveSearch(env, req, url, headers) {
   const user = await requireUser(env, req);
 
@@ -8241,7 +8292,7 @@ async function handleBraveSearch(env, req, url, headers) {
 
   const cache = caches.default;
   const cacheKey = new Request(
-    `https://yanta-brave-cache.local/search?q=${encodeURIComponent(q)}&limit=${limit}&country=${encodeURIComponent(country)}&freshness=${encodeURIComponent(freshness)}`
+    `https://yanta-brave-cache.local/search?v=2&q=${encodeURIComponent(q)}&limit=${limit}&country=${encodeURIComponent(country)}&freshness=${encodeURIComponent(freshness)}`
   );
 
   const cached = await cache.match(cacheKey);
@@ -8262,7 +8313,9 @@ async function handleBraveSearch(env, req, url, headers) {
 
   const braveUrl = new URL('https://api.search.brave.com/res/v1/web/search');
   braveUrl.searchParams.set('q', q);
-  braveUrl.searchParams.set('count', String(limit));
+  // Brave bills per request, not per result: fetch extra to have room after dropping filler.
+  braveUrl.searchParams.set('count', String(Math.min(20, limit * 2 + 2)));
+  braveUrl.searchParams.set('result_filter', 'web');
   braveUrl.searchParams.set('text_decorations', 'false');
   braveUrl.searchParams.set('spellcheck', 'true');
 
@@ -8289,17 +8342,20 @@ async function handleBraveSearch(env, req, url, headers) {
     }, res.status, headers);
   }
 
-  const results = (data?.web?.results || [])
-    .slice(0, limit)
-    .map((item) => ({
-      title: item.title || '',
-      url: item.url || '',
-      description: item.description || '',
-      age: item.age || '',
-      language: item.language || '',
-      familyFriendly: item.family_friendly ?? null,
-    }))
-    .filter((item) => item.title && item.url);
+  const results = rankSearchResults(
+    (data?.web?.results || [])
+      .map((item) => ({
+        title: item.title || '',
+        url: item.url || '',
+        site: searchResultSite(item.url),
+        description: item.description || '',
+        age: item.age || '',
+        language: item.language || '',
+        familyFriendly: item.family_friendly ?? null,
+      }))
+      .filter((item) => item.title && item.url),
+    limit
+  );
 
   const payload = {
     provider: 'Brave Search',

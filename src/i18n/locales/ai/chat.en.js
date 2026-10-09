@@ -137,6 +137,18 @@ export default {
   },
 
   cite: {
+    open: 'Open source',
+    openNote: 'Open note',
+    copyLink: 'Copy link',
+    linkCopied: 'Link copied',
+    // Opens the citation manager with this source, to cite it in a note
+    addCitation: 'Cite in note…',
+    showInSources: 'Show in sources',
+    // Small link to the checker's project page
+    checkedWith: 'Quotes checked with VeriQuote',
+    aboutVeriquote: 'About VeriQuote',
+    sourcesCount: { one: '{count} source', other: '{count} sources' },
+    kind: { web: 'Web page', note: 'Note', rss: 'Feed article' },
     backed: 'Backed by the source',
     notConfirmed: 'not confirmed',
     checkingOne: 'Checking this citation against its source…',

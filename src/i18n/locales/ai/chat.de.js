@@ -108,6 +108,16 @@ export default {
   },
 
   cite: {
+    open: 'Quelle öffnen',
+    openNote: 'Notiz öffnen',
+    copyLink: 'Link kopieren',
+    linkCopied: 'Link kopiert',
+    addCitation: 'In Notiz zitieren…',
+    showInSources: 'In Quellen zeigen',
+    checkedWith: 'Zitate geprüft mit VeriQuote',
+    aboutVeriquote: 'Über VeriQuote',
+    sourcesCount: { one: '{count} Quelle', other: '{count} Quellen' },
+    kind: { web: 'Webseite', note: 'Notiz', rss: 'Feed-Artikel' },
     backed: 'Von der Quelle gestützt',
     notConfirmed: 'nicht bestätigt',
     checkingOne: 'Dieses Zitat wird mit seiner Quelle abgeglichen…',

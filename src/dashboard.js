@@ -2750,11 +2750,33 @@ function renderDashboardHeader() {
   // folders and when no widget module registered itself.
   const showWidgetsBtn = !dashboard.folderId && hasDashboardWidgets();
 
+  // Inside a folder: its settings (rename, icon, share, AI visibility …),
+  // the same menu as a right-click on it in the sidebar.
+  const folderOptionsBtn = dashboard.folderId
+    ? el('button', {
+        class: 'icon-btn yanta-dashboard-icon-btn yanta-dashboard-folder-options',
+        title: i18n('dashboard.folderOptions'),
+        'aria-label': i18n('dashboard.folderOptions'),
+        onclick: async (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          const folder = state.folders.get(dashboard.folderId);
+          if (!folder) return;
+          const r = e.currentTarget.getBoundingClientRect();
+          const { openItemMenu } = await import('./tree.js');
+          openItemMenu({ clientX: Math.max(8, r.right - 220), clientY: r.bottom + 6 }, { folder, inside: true });
+        },
+      })
+    : null;
+
+  if (folderOptionsBtn) folderOptionsBtn.innerHTML = lucide('ellipsis-vertical', 21);
+
   header.append(
     menuBtn,
     titleWrap,
     searchBtn,
     ...(showWidgetsBtn ? [widgetsBtn] : []),
+    ...(folderOptionsBtn ? [folderOptionsBtn] : []),
     newBtn
   );
 
@@ -5429,6 +5451,16 @@ function bindCardPointerInteractions(card, item) {
 
     e.preventDefault();
     e.stopPropagation();
+
+    // Right-click: the same menu as in the sidebar. A long press on touch
+    // stays "select" (it also fires contextmenu on some browsers).
+    if (touchGesture || dashboard.dragging || e.pointerType === 'touch') return;
+    if (isMobile()) return;
+
+    import('./tree.js').then(({ openItemMenu }) => openItemMenu(e, {
+      note: item.kind === 'note' ? state.notes.get(item.note?.id) : null,
+      folder: item.kind !== 'note' ? state.folders.get(item.folder?.id) : null,
+    }));
   }, true);
 
   /*

@@ -5,7 +5,7 @@
 // password (or the recovery key) is entered: at start, after a stretch
 // without input, after a while in the background, or when the user locks
 // on purpose (sidebar button, Ctrl+Shift+L). Every open tab locks
-// together.
+// together. Background work — sync, Pulse, reminders — carries on.
 //
 // What it is today: a lock on the app. The workspace is still stored on
 // this device unencrypted (the next step encrypts it with the key the

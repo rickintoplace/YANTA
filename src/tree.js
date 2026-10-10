@@ -2678,6 +2678,16 @@ export function closeMenu() {
   activeMenu = null;
 }
 
+/**
+ * The sidebar's context menu for a note or folder, opened from elsewhere
+ * (dashboard cards, the folder header) so every surface offers the same
+ * actions.
+ */
+export function openItemMenu(e, { note = null, folder = null, inside = false } = {}) {
+  if (note) noteMenu(e, note);
+  else if (folder) folderMenu(e, folder, { inside });
+}
+
 function noteMenu(e, n) {
 
   if (isAiSessionNote(n)) {
@@ -2799,7 +2809,7 @@ function noteMenu(e, n) {
   ]);
 }
 
-function folderMenu(e, f) {
+function folderMenu(e, f, { inside = false } = {}) {
 
   if (isAiSessionsRootFolder(f)) {
     showMenu(e.clientX, e.clientY, [
@@ -2828,12 +2838,13 @@ function folderMenu(e, f) {
   }
 
   showMenu(e.clientX, e.clientY, [
-    {
+    // Opened from inside the folder (its header): "Open" would go nowhere.
+    ...(inside ? [] : [{
       label: t('tree.menu.open'),
       icon: 'folder-open',
       action: () => openFolderInDashboard(f.id, { push: true }),
     },
-    'hr',
+    'hr']),
     {
       label: t('tree.menu.newNoteHere'),
       icon: 'file-plus',

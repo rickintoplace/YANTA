@@ -1,19 +1,20 @@
 // ============================================================
 // YANTA — Settings › Security
 //
-// App lock for this device (password, auto-lock, lock now), and
+// App lock for this device (password, passkeys, auto-lock, lock now), and
 // "sign out and remove everything from this device". Honest about what
 // the lock does today: it keeps the workspace off the screen; the data
 // on this device is not encrypted yet.
 // ============================================================
 
 import { el, toast } from '../core.js';
-import { t } from '../i18n/index.js';
+import { getLocale, t } from '../i18n/index.js';
 
 import {
   disableLock,
   getLockConfig,
   isUnlocked,
+  removePasskeyWrap,
   setLockPassword,
   setLockTimers,
   unlockWithPassword,
@@ -79,6 +80,83 @@ async function recoveryKeyForWrap() {
   }
 }
 
+function passkeyLabel(passkey) {
+  const where = passkey.attachment === 'platform' ? t('lock.passkeys.platform') : passkey.attachment === 'cross-platform' ? t('lock.passkeys.roaming') : t('lock.passkeys.generic');
+  const when = new Date(passkey.createdAt || Date.now()).toLocaleDateString(getLocale(), { year: 'numeric', month: 'short', day: 'numeric' });
+  return t('lock.passkeys.label', { where, date: when });
+}
+
+/**
+ * Passkeys that unlock instead of the password. Adding one asks for the
+ * password first: an unlocked, unattended device must not let someone
+ * register their own way in.
+ */
+async function passkeyGroup(config, rerender) {
+  const { passkeyUnlockSupported } = await import('./passkey-unlock.js');
+  const passkeys = config.passkeys || [];
+
+  const list = el('div', { class: 'yanta-security-passkeys' },
+    ...passkeys.map((passkey) => {
+      const remove = el('button', { type: 'button', class: 'btn' }, t('lock.passkeys.remove'));
+      remove.addEventListener('click', async () => {
+        await removePasskeyWrap(passkey.id);
+        toast(t('lock.passkeys.removed'), 'success');
+        rerender();
+      });
+      return el('div', { class: 'yanta-security-row' }, el('span', { class: 'yanta-security-passkey-name' }, passkeyLabel(passkey)), remove);
+    })
+  );
+
+  if (!(await passkeyUnlockSupported())) {
+    return group(t('lock.passkeys.title'), hint(t('lock.passkeys.unsupported')), list);
+  }
+
+  const add = el('button', { type: 'button', class: 'btn' }, t('lock.passkeys.add'));
+
+  add.addEventListener('click', () => {
+    const input = el('input', { type: 'password', class: 'text-input', placeholder: t('lock.settings.currentPassword'), autocomplete: 'current-password' });
+    const error = el('p', { class: 'yanta-settings-hint', style: { color: 'var(--red)' }, role: 'alert' });
+    const submit = el('button', { type: 'submit', class: 'btn primary' }, t('lock.passkeys.create'));
+    const form = el('form', { class: 'yanta-security-form' }, hint(t('lock.passkeys.confirmHint')), input, error, submit);
+    let verified = false;
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      error.textContent = '';
+      submit.disabled = true;
+
+      try {
+        if (!verified) {
+          if (!(await unlockWithPassword(input.value))) {
+            error.textContent = t('lock.wrong');
+            return;
+          }
+          verified = true;
+          input.remove();
+        }
+
+        const { addPasskey } = await import('./passkey-unlock.js');
+        await addPasskey({ userName: t('lock.passkeys.userName') });
+        toast(t('lock.passkeys.added'), 'success');
+        rerender();
+      } catch (err) {
+        if (err?.code === 'ENOPRF') error.textContent = t('lock.passkeys.noPrf');
+        else if (err?.name === 'NotAllowedError' || err?.name === 'AbortError') error.textContent = t('lock.passkeys.cancelled');
+        else error.textContent = t('lock.passkeys.failed');
+        // The browser may want a fresh click for the passkey dialog: the button says so.
+        if (verified) submit.textContent = t('lock.passkeys.retry');
+      } finally {
+        submit.disabled = false;
+      }
+    });
+
+    add.replaceWith(form);
+    input.focus();
+  });
+
+  return group(t('lock.passkeys.title'), hint(t('lock.passkeys.hint')), list, el('div', { class: 'yanta-security-row' }, add));
+}
+
 export function securitySettingsElement({ rerender }) {
   const root = el('div', { class: 'yanta-security-settings' });
 
@@ -89,6 +167,7 @@ export function securitySettingsElement({ rerender }) {
 .yanta-security-form { display: grid; gap: 8px; max-width: 360px; margin-top: 8px; }
 .yanta-security-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
 .yanta-security-row label { min-width: 180px; color: var(--text); font-size: 13px; }
+.yanta-security-passkey-name { flex: 1; min-width: 160px; color: var(--text); font-size: 13px; }
 .yanta-security-note { padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elev-2); color: var(--text-dim); font-size: 12.5px; line-height: 1.5; }
 `;
     document.head.append(style);
@@ -157,6 +236,8 @@ export function securitySettingsElement({ rerender }) {
         config.recovery ? null : hint(t('lock.settings.noRecovery')),
         el('div', { class: 'yanta-security-row' }, turnOff)
       ));
+
+      root.append(await passkeyGroup(config, rerender));
 
       root.append(group(t('lock.settings.changeTitle'),
         passwordForm({

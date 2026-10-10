@@ -55,4 +55,29 @@ describe('app lock keys', () => {
     expect(stored).not.toContain('correct horse');
     expect(stored).not.toContain(Buffer.from(keys.localDataKey()).toString('base64url'));
   }, 30_000);
+
+  it('a passkey unwraps the same data key, survives a password change and can be removed', async () => {
+    await keys.setLockPassword('correct horse');
+    const ldk = new Uint8Array(keys.localDataKey());
+    const prfOutput = crypto.getRandomValues(new Uint8Array(32));
+
+    await keys.addPasskeyWrap({ credentialId: 'cred1', prfSalt: new Uint8Array(32), prfOutput, attachment: 'platform' });
+    await keys.setLockPassword('battery staple');
+    keys.forgetUnlockedKey();
+
+    expect(await keys.unlockWithPasskeyOutput('cred1', crypto.getRandomValues(new Uint8Array(32)))).toBe(false);
+    expect(await keys.unlockWithPasskeyOutput('other', prfOutput)).toBe(false);
+    expect(await keys.unlockWithPasskeyOutput('cred1', prfOutput)).toBe(true);
+    expect([...keys.localDataKey()]).toEqual([...ldk]);
+
+    await keys.removePasskeyWrap('cred1');
+    keys.forgetUnlockedKey();
+    expect(await keys.unlockWithPasskeyOutput('cred1', prfOutput)).toBe(false);
+  }, 30_000);
+
+  it('adding a passkey needs the device unlocked', async () => {
+    await keys.setLockPassword('correct horse');
+    keys.forgetUnlockedKey();
+    await expect(keys.addPasskeyWrap({ credentialId: 'c', prfSalt: new Uint8Array(32), prfOutput: new Uint8Array(32) })).rejects.toThrow('locked');
+  }, 30_000);
 });

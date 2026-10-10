@@ -8,6 +8,7 @@
 //   It is wrapped (AES-GCM) by:
 //     - the password:   PBKDF2-SHA256, 600 000 rounds, random salt
 //     - the recovery key (the Sync Key from the Recovery Kit): HKDF
+//     - optionally passkeys: HKDF of the passkey's PRF output
 //
 // Unlocking means unwrapping the LDK. A wrong password fails the GCM
 // tag, so there is no separate hash to attack. Forgetting the password
@@ -168,6 +169,60 @@ export async function unlockWithRecoveryKey(syncKey) {
   try {
     const kek = await recoveryKek(syncKey, base64UrlDecode(config.recovery.salt));
     unlockedLdk = await unwrap(kek, config.recovery, 'recovery');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// ---- Passkeys: a third wrapper of the same LDK
+//
+// The authenticator's PRF output (WebAuthn "prf" extension) is a secret
+// only that passkey can produce for this salt; HKDF turns it into the key
+// that wraps the LDK. No server checks the assertion — nothing to check:
+// whoever cannot produce the PRF output cannot unwrap.
+
+async function passkeyKek(prfOutput) {
+  const base = await crypto.subtle.importKey('raw', prfOutput, 'HKDF', false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    { name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(32), info: utf8Encode('yanta-lock-passkey-v1') },
+    base,
+    { name: 'AES-GCM', length: 256 },
+    false,
+    ['encrypt', 'decrypt']
+  );
+}
+
+/** Adds a passkey wrapper. Requires the device to be unlocked. */
+export async function addPasskeyWrap({ credentialId, prfSalt, prfOutput, attachment = '' }) {
+  if (!unlockedLdk) throw new Error('locked');
+  const config = await getLockConfig();
+
+  const entry = {
+    id: credentialId,
+    prfSalt: base64UrlEncode(prfSalt),
+    attachment,
+    createdAt: Date.now(),
+    ...(await wrap(await passkeyKek(prfOutput), unlockedLdk, 'passkey')),
+  };
+
+  const passkeys = (config.passkeys || []).filter((p) => p.id !== credentialId);
+  return saveLockConfig({ ...config, passkeys: [...passkeys, entry] });
+}
+
+export async function removePasskeyWrap(credentialId) {
+  const config = await getLockConfig();
+  return saveLockConfig({ ...config, passkeys: (config.passkeys || []).filter((p) => p.id !== credentialId) });
+}
+
+/** Unlocks with a passkey's PRF output. Resolves true/false. */
+export async function unlockWithPasskeyOutput(credentialId, prfOutput) {
+  const config = await getLockConfig();
+  const entry = (config.passkeys || []).find((p) => p.id === credentialId);
+  if (!entry) return false;
+
+  try {
+    unlockedLdk = await unwrap(await passkeyKek(prfOutput), entry, 'passkey');
     return true;
   } catch {
     return false;

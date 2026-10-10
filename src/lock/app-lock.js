@@ -2,7 +2,7 @@
 // YANTA — app lock: the lock screen, auto-lock and "remove from this device"
 //
 // With the lock on, this device shows nothing of the workspace until the
-// password (or the recovery key) is entered: at start, after a stretch
+// password, a passkey or the recovery key is entered: at start, after a stretch
 // without input, after a while in the background, or when the user locks
 // on purpose (sidebar button, Ctrl+Shift+L). Every open tab locks
 // together. Background work — sync, Pulse, reminders — carries on.
@@ -121,6 +121,12 @@ html[data-locked] body > *:not(.yanta-lock-screen) {
   color: var(--red, #c44d48) !important;
 }
 
+.yanta-lock-card .btn.yanta-lock-passkey {
+  justify-content: center;
+  gap: 8px;
+  min-height: 44px;
+}
+
 .yanta-lock-link {
   justify-self: center;
   padding: 4px;
@@ -211,6 +217,37 @@ function renderPasswordStep(card) {
 
   card.replaceChildren(form);
   requestAnimationFrame(() => input.focus());
+
+  addPasskeyButton(form, { before: forgot, error });
+}
+
+/** "Unlock with passkey" under the password, when this device has one. */
+async function addPasskeyButton(form, { before, error }) {
+  const { passkeys = [] } = await getLockConfig();
+  if (!passkeys.length || !form.isConnected) return;
+
+  const icon = el('span', { 'aria-hidden': 'true' });
+  icon.innerHTML = lucide('fingerprint', 16);
+  const button = el('button', { type: 'button', class: 'btn yanta-lock-passkey' }, icon, t('lock.passkeyUnlock'));
+  form.insertBefore(button, before);
+
+  button.addEventListener('click', async () => {
+    button.disabled = true;
+    error.textContent = '';
+    try {
+      const { unlockWithPasskey } = await import('./passkey-unlock.js');
+      if (await unlockWithPasskey()) {
+        finishUnlock();
+        return;
+      }
+      error.textContent = t('lock.passkeyFailed');
+    } catch (err) {
+      // Closing the browser's passkey dialog is not an error worth a message.
+      if (err?.name !== 'NotAllowedError' && err?.name !== 'AbortError') error.textContent = t('lock.passkeyFailed');
+    } finally {
+      button.disabled = false;
+    }
+  });
 }
 
 function renderRecoveryStep(card) {

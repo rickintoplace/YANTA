@@ -44,6 +44,7 @@ import {
 import {
   setupRssFeedSync,
 } from './rss-feed-sync.js';
+import { setupRssItemSync } from './rss-item-sync.js';
 
 import {
   listRssItems,
@@ -3963,6 +3964,9 @@ export function setupRss() {
   // Subscriptions are workspace state, not browser state — keep this
   // device's list reconciled with the vault's.
   setupRssFeedSync();
+
+  // Read, starred and saved articles too, keyed by the shared item ids.
+  setupRssItemSync();
 
   // Self-heal the local item cache against the (synced) source list.
   // Covers: items left behind by a source deleted before this cleanup

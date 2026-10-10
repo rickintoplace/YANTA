@@ -107,17 +107,30 @@ export async function upsertRssItems(items = []) {
   return count;
 }
 
-export async function patchRssItem(itemId, patch = {}) {
+// What the user did with an article — the part that syncs (rss-item-sync.js).
+const USER_STATE_KEYS = ['read', 'starred', 'archived', 'savedNoteId'];
+
+export async function patchRssItem(itemId, patch = {}, { fromSync = false } = {}) {
   const item = await getRssItem(itemId);
   if (!item) return null;
+
+  const userChange = !fromSync && USER_STATE_KEYS.some((key) =>
+    key in patch && (patch[key] ?? null) !== (item[key] ?? null)
+  );
 
   const next = {
     ...item,
     ...patch,
+    ...(userChange ? { stateUpdatedAt: now() } : {}),
     updatedAt: now(),
   };
 
   await putRssItem(next);
+
+  if (userChange) {
+    window.dispatchEvent(new CustomEvent('yanta-rss-item-state', { detail: { item: next } }));
+  }
+
   return next;
 }
 

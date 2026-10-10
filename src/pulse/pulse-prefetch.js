@@ -67,6 +67,12 @@ async function refreshRssSources() {
 
   if (result === 'timeout') return { skipped: 'timeout' };
 
+  // Articles read on another device must not come back as new here.
+  try {
+    const { applyRssItemStateFromVault } = await import('../rss/rss-item-sync.js');
+    await applyRssItemStateFromVault();
+  } catch {}
+
   const fetched = Array.isArray(result)
     ? result.filter((entry) => !entry?.error && !entry?.skipped).length
     : 0;

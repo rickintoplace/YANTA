@@ -10052,6 +10052,57 @@ export function applyIcsReplies(parsedEvents) {
 }
 
 /**
+ * A newer version of an event you already have — an updated invitation,
+ * a re-exported calendar — updates it in place.
+ *
+ * Without this the import skipped it as a duplicate (same UID), so a
+ * meeting moved by its organizer stayed at the old time. SEQUENCE decides
+ * what "newer" means (RFC 5546); the same version stays a duplicate.
+ * What YANTA added locally — category, linked notes, tags, reminders —
+ * is kept.
+ *
+ * @returns {{updated: number, rest: object[]}} rest goes on to the import
+ */
+export function applyIcsUpdates(parsedEvents) {
+  let updated = 0;
+  const rest = [];
+
+  for (const incoming of parsedEvents) {
+    const targets = eventsByExternalUid(incoming.externalUid);
+    const newerThan = (target) => Number(incoming.sequence || 0) > Number(target.sequence || 0);
+
+    if (!targets.length || !targets.some(newerThan)) {
+      rest.push(incoming);
+      continue;
+    }
+
+    for (const target of targets.filter(newerThan)) {
+      putCalendarEvent({
+        id: target.id,
+        title: incoming.title,
+        description: incoming.description,
+        location: incoming.location,
+        place: incoming.place || undefined,
+        start: incoming.start,
+        end: incoming.end,
+        allDay: incoming.allDay,
+        status: incoming.status,
+        recurrence: incoming.recurrence,
+        recurrenceExceptions: incoming.recurrenceExceptions || [],
+        recurrenceOverrides: incoming.recurrenceOverrides || {},
+        organizer: incoming.organizer || undefined,
+        attendees: incoming.attendees || [],
+        sequence: incoming.sequence,
+        startTzid: incoming.startTzid || '',
+      });
+      updated++;
+    }
+  }
+
+  return { updated, rest };
+}
+
+/**
  * Apply METHOD:CANCEL — the organizer withdrew the event.
  *
  * Marked cancelled rather than deleted: a meeting that was called off is
@@ -10135,10 +10186,21 @@ export async function importCalendarFile(file, {
       return;
     }
 
+    const { updated, rest } = applyIcsUpdates(parsedEvents);
+
+    if (!rest.length) {
+      toast(`Updated ${updated} event${updated === 1 ? '' : 's'}`, 'success');
+      return;
+    }
+
+    if (updated) {
+      toast(`Updated ${updated} event${updated === 1 ? '' : 's'}`, 'success');
+    }
+
     const plan = await openCalendarImportOptions({
       filename: file.name,
       fileSize: file.size || text.length || 0,
-      rawEvents: parsedEvents,
+      rawEvents: rest,
       forcedCategoryId: categoryId,
     });
 

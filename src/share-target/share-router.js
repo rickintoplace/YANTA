@@ -21,7 +21,7 @@ import {
   toast,
 } from '../core.js';
 
-import { t } from '../i18n/index.js';
+import { getLocale, t } from '../i18n/index.js';
 import { openBoundOverlay } from '../overlay-history.js';
 
 import { isChatEnabled } from '../chat/chat-enabled.js';
@@ -100,7 +100,7 @@ function shapePayload(payload) {
 /** Short label for the preview chip. */
 function previewLabel(shaped) {
   if (shaped.kind === 'calendar') {
-    return shaped.calendarFile?.name || 'Calendar file';
+    return shaped.calendarSummary || shaped.calendarFile?.name || 'Calendar file';
   }
   if (shaped.kind === 'image') {
     return shaped.imageFile?.name || t('shareTarget.previewImage');
@@ -231,7 +231,8 @@ function ensureCss() {
   backdrop-filter: blur(14px);
 }
 .yanta-share-card {
-  width: min(480px, 96vw);
+  /* 100% of the padded overlay, not 96vw: on a phone that ran off the right edge. */
+  width: min(480px, 100%);
   max-height: min(720px, 94vh);
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
@@ -390,8 +391,32 @@ export function openShareRouter(payload) {
   return new Promise((resolve) => {
     const shaped = shapePayload(payload);
 
-    // Nothing usable was shared — do not open an empty router.
-    if (!shaped.text && !shaped.imageFile && !shaped.linkUrl) {
+    /*
+      A calendar file is named by what is in it ("Dentist, Tue 14 Oct"),
+      not by whatever filename the sender gave it ("attachment").
+    */
+    if (shaped.calendarFile) {
+      shaped.calendarFile.text()
+        .then(async (text) => {
+          const { parseIcsEvents } = await import('../calendar-ics.js');
+          const events = parseIcsEvents(text);
+          if (!events.length) return;
+
+          const first = events[0];
+          const when = new Date(first.allDay ? `${first.start}T12:00:00` : first.start).toLocaleString(getLocale(), first.allDay
+            ? { weekday: 'short', day: 'numeric', month: 'short' }
+            : { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+
+          shaped.calendarSummary = `${first.title} · ${when}${events.length > 1 ? ` (+${events.length - 1})` : ''}`;
+          const label = overlay.querySelector('.yanta-share-preview span');
+          if (label) label.textContent = shaped.calendarSummary;
+        })
+        .catch(() => {});
+    }
+
+    // Nothing usable was shared — do not open an empty router. (A lone
+    // .ics carries no text, image or link: it used to end here unseen.)
+    if (!shaped.text && !shaped.imageFile && !shaped.linkUrl && !shaped.calendarFile) {
       resolve(false);
       return;
     }

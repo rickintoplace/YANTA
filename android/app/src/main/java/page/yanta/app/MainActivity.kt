@@ -528,6 +528,12 @@ class MainActivity : ComponentActivity() {
             val type = intent.type.orEmpty()
             if (type == "text/plain" && handleSharedText(intent)) return
             if (type.startsWith("image/") && handleSharedImage(intent)) return
+            if (isCalendarType(type) && handleSharedFile(sharedStreamUri(intent), intent)) return
+        }
+
+        // "Open with YANTA" on an .ics: same route as sharing it.
+        if (intent.action == Intent.ACTION_VIEW && isCalendarType(intent.type.orEmpty())) {
+            if (handleSharedFile(intent.data, intent)) return
         }
 
         val uri = intent.data
@@ -549,13 +555,24 @@ class MainActivity : ComponentActivity() {
         return true
     }
 
-    private fun handleSharedImage(intent: Intent): Boolean {
-        val uri = sharedStreamUri(intent) ?: return false
+    private fun isCalendarType(type: String): Boolean =
+        type == "text/calendar" || type == "application/ics" || type == "text/x-vcalendar"
+
+    private fun handleSharedImage(intent: Intent): Boolean =
+        handleSharedFile(sharedStreamUri(intent), intent)
+
+    /**
+     * Any shared file the web layer's share router understands (images,
+     * calendar files) travels the same way: read, base64, stashed for the
+     * web layer to pull.
+     */
+    private fun handleSharedFile(uri: Uri?, intent: Intent): Boolean {
+        if (uri == null) return false
         val subject = intent.getStringExtra(Intent.EXTRA_SUBJECT).orEmpty().trim()
 
         // Read + base64 off the UI thread; a shared photo can be several MB.
         Thread {
-            val json = buildImagePayloadJson(uri, subject)
+            val json = buildImagePayloadJson(uri, subject, intent.type)
             runOnUiThread {
                 if (json != null) {
                     pendingSharedPayload = json
@@ -598,10 +615,21 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun buildImagePayloadJson(uri: Uri, subject: String): String? {
+    private fun buildImagePayloadJson(uri: Uri, subject: String, intentType: String? = null): String? {
         return try {
-            val type = contentResolver.getType(uri) ?: "image/*"
-            val name = queryDisplayName(uri) ?: "shared-image"
+            val resolved = contentResolver.getType(uri)
+            // Some mail apps label an .ics octet-stream; the intent's type is what matched.
+            val type = resolved?.takeUnless { it == "application/octet-stream" }
+                ?: intentType?.takeUnless { it.isBlank() || it.contains('*') }
+                ?: resolved
+                ?: "application/octet-stream"
+            val name = queryDisplayName(uri)
+                ?: uri.lastPathSegment?.takeIf { it.contains('.') }
+                ?: when {
+                    type.startsWith("image/") -> "shared-image"
+                    isCalendarType(type) -> "event.ics"
+                    else -> "shared-file"
+                }
             val bytes = contentResolver.openInputStream(uri)?.use { it.readBytes() } ?: return null
             if (bytes.isEmpty() || bytes.size > MAX_SHARE_IMAGE_BYTES) return null
 
@@ -618,7 +646,8 @@ class MainActivity : ComponentActivity() {
                         .put("data", data)
                 )
                 .toString()
-        } catch (_: Throwable) {
+        } catch (err: Throwable) {
+            android.util.Log.w("YantaShare", "could not read shared file $uri", err)
             null
         }
     }

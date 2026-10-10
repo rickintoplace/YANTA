@@ -1,11 +1,12 @@
 // ============================================================
 // YANTA — Calendar ICS import/export helpers
-// Minimal VEVENT-compatible iCalendar support.
-// Supports:
-// - DTSTART / DTEND
-// - all-day VALUE=DATE
-// - SUMMARY, DESCRIPTION, LOCATION, GEO, STATUS, UID
-// - RRULE preserved
+// VEVENT import/export. Supports:
+// - DTSTART / DTEND or DURATION, all-day VALUE=DATE, TZID + VTIMEZONE
+// - SUMMARY, DESCRIPTION, LOCATION, GEO, STATUS, UID, URL
+// - RRULE, EXDATE, and RECURRENCE-ID (moved or cancelled single
+//   occurrences become overrides/exceptions of their series)
+// - VALARM (relative triggers become reminders)
+// - ORGANIZER / ATTENDEE and METHOD (REQUEST / REPLY / CANCEL)
 // ============================================================
 
 import {
@@ -651,6 +652,42 @@ export function parseIcsCalendar(text) {
   };
 }
 
+/** RFC 5545 DURATION ("PT1H30M", "-P1D", "P2W") in milliseconds, or null. */
+function parseIcsDuration(raw) {
+  const m = String(raw || '').trim().match(/^([+-])?P(?:(\d+)W)?(?:(\d+)D)?(?:T(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?)?$/i);
+  if (!m || m[0].length <= 2) return null;
+
+  const [, sign, w, d, h, mi, sec] = m;
+  const ms = ((Number(w || 0) * 7 + Number(d || 0)) * 86400 +
+    Number(h || 0) * 3600 + Number(mi || 0) * 60 + Number(sec || 0)) * 1000;
+
+  return sign === '-' ? -ms : ms;
+}
+
+/*
+  A VALARM with a relative TRIGGER ("-PT15M", "-P1D") is a reminder YANTA
+  understands: minutes before the start. Alarms relative to the end, or
+  at an absolute time, have no equivalent and are left out.
+*/
+function remindersFromAlarms(alarms = []) {
+  const out = [];
+
+  for (const alarm of alarms) {
+    const trigger = alarm.TRIGGER;
+    if (!trigger) continue;
+    if (String(trigger.params?.VALUE || '').toUpperCase() === 'DATE-TIME') continue;
+    if (String(trigger.params?.RELATED || 'START').toUpperCase() !== 'START') continue;
+
+    const ms = parseIcsDuration(trigger.value);
+    if (ms == null || ms > 0) continue;
+
+    const minutesBefore = Math.round(-ms / 60000);
+    if (!out.some((r) => r.minutesBefore === minutesBefore)) out.push({ minutesBefore });
+  }
+
+  return out.slice(0, 12);
+}
+
 export function parseIcsEvents(text, { vtimezones: providedZones = null } = {}) {
   const lines = unfoldIcs(text);
   const vtimezones = providedZones || parseVtimezones(lines);
@@ -674,12 +711,23 @@ export function parseIcsEvents(text, { vtimezones: providedZones = null } = {}) 
 
     if (inVevent && prop.name === 'BEGIN' && prop.value.toUpperCase() !== 'VEVENT') {
       inVevent = false;
+      // An alarm's TRIGGER is kept; everything else nested is skipped.
+      if (prop.value.toUpperCase() === 'VALARM' && current) {
+        current.__alarm = {};
+        (current.__alarms ||= []).push(current.__alarm);
+      }
       continue;
     }
 
     if (!inVevent && prop.name === 'END' && current &&
         prop.value.toUpperCase() !== 'VEVENT') {
       inVevent = true;
+      current.__alarm = null;
+      continue;
+    }
+
+    if (!inVevent && current?.__alarm && prop.name === 'TRIGGER') {
+      current.__alarm.TRIGGER = { value: prop.value, params: prop.params };
       continue;
     }
 
@@ -692,9 +740,21 @@ export function parseIcsEvents(text, { vtimezones: providedZones = null } = {}) 
           ? parseIcsDate(startProp.value, startProp.params, vtimezones)
           : null;
 
-        const end = endProp
+        let end = endProp
           ? parseIcsDate(endProp.value, endProp.params, vtimezones)
           : null;
+
+        // No DTEND: RFC 5545 allows a DURATION instead.
+        const durationMs = !end ? parseIcsDuration(firstProp(current.DURATION)?.value) : null;
+
+        if (start?.iso && durationMs > 0) {
+          if (start.allDay) {
+            const days = Math.max(1, Math.round(durationMs / 86400000));
+            end = { iso: addDaysKey(start.iso, days), allDay: true };
+          } else {
+            end = { iso: new Date(new Date(start.iso).getTime() + durationMs).toISOString(), allDay: false };
+          }
+        }
 
         if (start?.iso) {
           let storedEnd = end?.iso || null;
@@ -716,6 +776,15 @@ export function parseIcsEvents(text, { vtimezones: providedZones = null } = {}) 
           const statusProp = firstProp(current.STATUS);
           const geoProp = firstProp(current.GEO);
           const sequenceProp = firstProp(current.SEQUENCE);
+          const urlProp = firstProp(current.URL);
+          const recurrenceIdProp = firstProp(current['RECURRENCE-ID']);
+
+          // YANTA has no URL field; the link goes where people will see it.
+          const url = String(urlProp?.value || '').trim();
+          let description = unescapeIcsText(descriptionProp?.value || '');
+          if (/^https?:\/\//i.test(url) && !description.includes(url)) {
+            description = description ? `${description}\n\n${url}` : url;
+          }
 
           const organizer = parseCalAddress(firstProp(current.ORGANIZER));
 
@@ -735,7 +804,7 @@ export function parseIcsEvents(text, { vtimezones: providedZones = null } = {}) 
             attendees,
             startTzid: start.tzid || '',
             title: unescapeIcsText(summaryProp?.value || 'Imported event'),
-            description: unescapeIcsText(descriptionProp?.value || ''),
+            description,
             location: unescapeIcsText(locationProp?.value || ''),
             place: parseIcsGeo(geoProp?.value, locationProp?.value),
             status: String(statusProp?.value || 'confirmed').toLowerCase(),
@@ -751,6 +820,12 @@ export function parseIcsEvents(text, { vtimezones: providedZones = null } = {}) 
               vtimezones
             ),
             recurrenceOverrides: {},
+            reminders: remindersFromAlarms(current.__alarms),
+            // Set on a single changed occurrence of a series; folded into
+            // its master below.
+            recurrenceId: recurrenceIdProp
+              ? parseIcsExdates([recurrenceIdProp], !!start.allDay, vtimezones)[0] || ''
+              : '',
           });
         }
       }
@@ -759,7 +834,9 @@ export function parseIcsEvents(text, { vtimezones: providedZones = null } = {}) 
       continue;
     }
 
-    if (!current) continue;
+    // Inside a nested component (VALARM …): its DESCRIPTION, DTSTART and
+    // so on belong to it, not to the event. They used to leak through.
+    if (!current || !inVevent) continue;
 
     // Properties that may legitimately repeat.
     if (prop.name === 'EXDATE' || prop.name === 'ATTENDEE') {
@@ -779,7 +856,54 @@ export function parseIcsEvents(text, { vtimezones: providedZones = null } = {}) 
     }
   }
 
-  return events;
+  return foldRecurrenceInstances(events);
+}
+
+/*
+  RECURRENCE-ID: Outlook, Google and Apple export a moved or edited
+  occurrence as its own VEVENT with the series' UID. Imported as is, the
+  series shows the occurrence at its old time *and* the copy at the new
+  one. Folded into the master, it becomes what YANTA's own editor makes:
+  an override for that occurrence, or an exception when it is cancelled.
+*/
+function foldRecurrenceInstances(events) {
+  const masters = new Map();
+
+  for (const ev of events) {
+    if (ev.recurrence && !ev.recurrenceId && ev.externalUid) masters.set(ev.externalUid, ev);
+  }
+
+  const out = [];
+
+  for (const ev of events) {
+    const master = ev.recurrenceId ? masters.get(ev.externalUid) : null;
+
+    if (!master) {
+      delete ev.recurrenceId;
+      out.push(ev);
+      continue;
+    }
+
+    const key = ev.recurrenceId;
+
+    if (ev.status === 'cancelled') {
+      if (!master.recurrenceExceptions.includes(key)) master.recurrenceExceptions.push(key);
+      continue;
+    }
+
+    master.recurrenceOverrides[key] = {
+      start: ev.start,
+      end: ev.end,
+      allDay: ev.allDay,
+      title: ev.title,
+      description: ev.description,
+      location: ev.location,
+      ...(ev.place ? { place: ev.place } : {}),
+      status: ev.status,
+    };
+  }
+
+  return out;
 }
 
 function icsAlarmTrigger(reminder) {
@@ -880,8 +1004,12 @@ export function eventsToIcs(events, {
     if (!e?.start) continue;
     if (e.status === 'cancelled') continue;
 
+    // An imported event keeps its original UID, so the other calendar
+    // recognises it as the same event; YANTA's own events get a stable one.
+    const uid = e.externalUid || `${e.id || crypto.randomUUID()}@yanta`;
+
     lines.push('BEGIN:VEVENT');
-    lines.push(`UID:${escapeIcsText(e.externalUid || e.id || crypto.randomUUID())}@yanta`);
+    lines.push(`UID:${escapeIcsText(uid)}`);
 
     lines.push(`SUMMARY:${escapeIcsText(e.title || 'Untitled event')}`);
 
@@ -944,6 +1072,35 @@ export function eventsToIcs(events, {
     }
 
     lines.push('END:VEVENT');
+
+    // Moved or edited single occurrences: one VEVENT each, tied to the
+    // series by UID and RECURRENCE-ID (what the importer folds back).
+    if (e.recurrence?.rrule) {
+      for (const [key, o] of Object.entries(e.recurrenceOverrides || {})) {
+        if (!o) continue;
+        const allDay = o.allDay ?? !!e.allDay;
+        const start = o.start || key;
+
+        lines.push('BEGIN:VEVENT');
+        lines.push(`UID:${escapeIcsText(uid)}`);
+        lines.push(`RECURRENCE-ID${e.allDay ? ';VALUE=DATE' : ''}:${toIcsDate(key, !!e.allDay)}`);
+        lines.push(`SUMMARY:${escapeIcsText(o.title || e.title || 'Untitled event')}`);
+        if (allDay) {
+          lines.push(`DTSTART;VALUE=DATE:${toIcsDate(start, true)}`);
+          if (o.end) lines.push(`DTEND;VALUE=DATE:${toIcsDate(addDaysKey(localDateKey(o.end), 1), true)}`);
+        } else {
+          lines.push(`DTSTART:${toIcsDate(start)}`);
+          if (o.end) lines.push(`DTEND:${toIcsDate(o.end)}`);
+        }
+        const location = o.location ?? e.location;
+        if (location) lines.push(`LOCATION:${escapeIcsText(location)}`);
+        const description = o.description ?? e.description;
+        if (description) lines.push(`DESCRIPTION:${escapeIcsText(description)}`);
+        if (o.status) lines.push(`STATUS:${String(o.status).toUpperCase()}`);
+        lines.push(`DTSTAMP:${toIcsDate(Date.now())}`);
+        lines.push('END:VEVENT');
+      }
+    }
   }
 
   lines.push('END:VCALENDAR');

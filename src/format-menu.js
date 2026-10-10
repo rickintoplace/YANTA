@@ -21,8 +21,17 @@ export function setupFormatToolbar() {
   tb = $('formatToolbar');
   if (!tb) return;
 
-  // Do not let toolbar clicks steal the CodeMirror selection.
+  // Do not let toolbar clicks (or taps) steal the CodeMirror selection.
   tb.addEventListener('mousedown', (e) => e.preventDefault());
+  tb.addEventListener('pointerdown', (e) => e.preventDefault());
+
+  // The docked toolbar follows the on-screen keyboard.
+  window.visualViewport?.addEventListener('resize', () => {
+    if (!tb.hidden) refreshSoon();
+  });
+  window.visualViewport?.addEventListener('scroll', () => {
+    if (!tb.hidden) refreshSoon();
+  });
 
   tb.addEventListener('click', (e) => {
     const btn = e.target.closest('button[data-fmt]');
@@ -123,8 +132,32 @@ function refresh() {
     return;
   }
 
+  /*
+    On touch screens the system draws its own selection menu (Cut, Copy,
+    Paste …) right next to the selection — above it on Android and iOS —
+    and it always wins. Instead of fighting it for that spot, the toolbar
+    docks to the bottom of the visible area, just above the keyboard,
+    where formatting bars live in most mobile editors.
+  */
+  const docked = isTouchScreen();
+  tb.classList.toggle('is-docked', docked);
+
   requestAnimationFrame(() => {
     if (!tb || tb.hidden) return;
+
+    if (docked) {
+      const vv = window.visualViewport;
+      const bottom = vv ? vv.offsetTop + vv.height : window.innerHeight;
+      const left = vv ? vv.offsetLeft : 0;
+      const width = vv ? vv.width : window.innerWidth;
+
+      tb.style.left = `${Math.round(left + 8)}px`;
+      tb.style.width = `${Math.round(width - 16)}px`;
+      tb.style.top = `${Math.round(bottom - tb.offsetHeight - 8)}px`;
+      return;
+    }
+
+    tb.style.width = '';
 
     const tw = tb.offsetWidth;
     const th = tb.offsetHeight;
@@ -138,6 +171,10 @@ function refresh() {
     tb.style.left = x + 'px';
     tb.style.top = y + 'px';
   });
+}
+
+function isTouchScreen() {
+  return !!window.matchMedia?.('(pointer: coarse)').matches;
 }
 
 function hide() {

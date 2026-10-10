@@ -65,9 +65,14 @@ function ensureCss() {
   white-space: normal;
 }
 
+/*
+  Set apart from the other links by contrast and weight, as § 356a BGB
+  asks of a footer placement — but in the text colours, not the accent:
+  visible and findable, without shouting.
+*/
 .yanta-sidebar-legal__contract a {
-  color: color-mix(in srgb, var(--accent) 62%, var(--text));
-  font-weight: 650;
+  color: var(--text-dim);
+  font-weight: 600;
   text-decoration: none;
   text-underline-offset: 3px;
 }

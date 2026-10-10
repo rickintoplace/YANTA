@@ -529,11 +529,17 @@ function ensureDetailedRoot() {
   detailRoot.className = 'yanta-sync2-progress-sidebar';
   detailRoot.hidden = true;
 
+  /*
+    Above the tag cloud, right under the tree: the tree gives up the room
+    while a sync runs, and the shortcut buttons, tags and legal links
+    below stay exactly where the thumb expects them. (Placed above the
+    footer it pushed the buttons up and down on every sync.)
+  */
   const sidebar = document.getElementById('sidebar');
-  const toe = sidebar?.querySelector('.sidebar-toe');
+  const anchor = sidebar?.querySelector('#tagCloud') || sidebar?.querySelector('.sidebar-toe');
 
-  if (sidebar && toe) {
-    sidebar.insertBefore(detailRoot, toe);
+  if (sidebar && anchor) {
+    anchor.parentNode.insertBefore(detailRoot, anchor);
   } else if (sidebar) {
     sidebar.append(detailRoot);
   } else {

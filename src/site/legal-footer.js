@@ -54,8 +54,8 @@ export function ensureLegalFooterCss() {
 
 /* The contract buttons stand out from the other links (§ 312k / § 356a BGB). */
 .yanta-legal-footer__links a.yanta-legal-footer__contract {
-  color: color-mix(in srgb, var(--accent, #8FA31E) 62%, var(--text, #29251d));
-  font-weight: 650;
+  color: var(--text, #29251d);
+  font-weight: 600;
 }
 
 .yanta-legal-footer__meta {

@@ -1330,7 +1330,7 @@ button.link { background: 0; border: 0; color: var(--accent); cursor: pointer; p
 
 /* ---------- Context menu ---------- */
 .ctx-menu {
-  position: fixed; z-index: 500;
+  position: fixed; z-index: 1450; /* above modals: a menu opened from a dialog belongs on top */
   background: var(--bg-elev-3); border: 1px solid var(--border);
   border-radius: var(--r-sm); box-shadow: var(--shadow);
   padding: 4px; min-width: 160px;
@@ -1633,6 +1633,23 @@ button.link { background: 0; border: 0; color: var(--accent); cursor: pointer; p
 .format-toolbar button:hover {
   background: var(--bg-elev-2);
   color: var(--accent);
+}
+
+/* Touch: docked above the keyboard, out of the system selection menu's way. */
+.format-toolbar.is-docked {
+  justify-content: flex-start;
+  padding: 5px;
+  border-radius: 12px;
+  scrollbar-width: none;
+}
+
+.format-toolbar.is-docked::-webkit-scrollbar {
+  display: none;
+}
+
+.format-toolbar.is-docked button {
+  width: 40px;
+  height: 38px;
 }
 
 .format-toolbar .sep {

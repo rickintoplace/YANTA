@@ -7,7 +7,8 @@
 // summarised with other words. Two checks, cheapest first:
 //
 //   1. Text similarity (character trigrams) against the routine's recent
-//      cards. Very similar → a repeat, no model asked.
+//      cards and other routines' cards from the last day. Very similar →
+//      a repeat, no model asked.
 //   2. In the grey zone, a decision model is asked whether the new card
 //      tells the user something the earlier one did not.
 //
@@ -21,6 +22,8 @@ import { listInboxItems } from './pulse-store.js';
 
 const LOOKBACK_MS = 14 * 24 * 60 * 60 * 1000;
 const LOOKBACK_CARDS = 8;
+const OTHERS_LOOKBACK_MS = 24 * 60 * 60 * 1000;
+const OTHERS_CARDS = 5;
 const SAME = 0.82;
 const ASK_FROM = 0.4;
 const NEW_ENOUGH = 0.25;
@@ -44,9 +47,17 @@ export async function findNearDuplicate(routineName, { title, body }, { now = Da
   let recent;
 
   try {
-    recent = (await listInboxItems({ includeArchived: true }))
-      .filter((item) => item.routineName === routineName && now - Number(item.createdAt || 0) < LOOKBACK_MS)
-      .slice(0, LOOKBACK_CARDS);
+    const all = await listInboxItems({ includeArchived: true });
+
+    recent = [
+      ...all
+        .filter((item) => item.routineName === routineName && now - Number(item.createdAt || 0) < LOOKBACK_MS)
+        .slice(0, LOOKBACK_CARDS),
+      // Another routine's card from today can say the same thing too.
+      ...all
+        .filter((item) => item.routineName !== routineName && now - Number(item.createdAt || 0) < OTHERS_LOOKBACK_MS)
+        .slice(0, OTHERS_CARDS),
+    ];
   } catch {
     return null;
   }

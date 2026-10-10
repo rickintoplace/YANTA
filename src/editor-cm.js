@@ -26,6 +26,7 @@ import {
   detachEditorShortcuts,
   editorShortcutsExtension,
 } from './editor/editor-shortcuts-cm.js';
+import { tableEditing } from './editor/table-cm.js';
 
 let view = null;
 let currentNoteId = null;
@@ -2155,6 +2156,9 @@ export function mountEditor(host, { noteId, awarenessUser }) {
     // Markdown formatting (rebindable) takes precedence over the stock
     // editing keymaps below it — see editor/editor-shortcuts.js.
     editorShortcutsExtension(),
+    // Tab/Enter between table cells and the grid button; before the
+    // stock Tab (indent / completion) below.
+    tableEditing(),
     keymap.of([
       ...defaultKeymap,
       ...historyKeymap,

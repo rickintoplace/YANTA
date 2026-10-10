@@ -834,6 +834,33 @@ export default {
     },
   },
 
+  table: {
+    title: 'Edit table',
+    editGrid: 'Edit as grid',
+    alignLeft: 'Align left',
+    alignCenter: 'Center',
+    alignRight: 'Align right',
+    sortAsc: 'Sort ascending',
+    sortDesc: 'Sort descending',
+    insertLeft: 'Insert column left',
+    insertRight: 'Insert column right',
+    moveLeft: 'Move left',
+    moveRight: 'Move right',
+    deleteColumn: 'Delete column',
+    insertAbove: 'Insert row above',
+    insertBelow: 'Insert row below',
+    moveUp: 'Move up',
+    moveDown: 'Move down',
+    deleteRow: 'Delete row',
+    headerCell: 'Header, column {col}',
+    cell: 'Row {row}, column {col}',
+    columnMenu: 'Column options',
+    rowMenu: 'Row options',
+    addRow: 'Row',
+    addColumn: 'Column',
+    apply: 'Apply',
+  },
+
   palette: {
     // Command entries themselves stay English (power-user / keyboard feature,
     // consistent with the keyboard shortcuts). Only the chrome is localized.

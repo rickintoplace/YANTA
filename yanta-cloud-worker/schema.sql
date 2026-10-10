@@ -517,6 +517,18 @@ CREATE TABLE IF NOT EXISTS cancellation_requests (
 CREATE INDEX IF NOT EXISTS idx_cancellation_requests_email
 ON cancellation_requests(email, created_at);
 
+-- Remote wipe: a removed device asks with its secret whether to delete its local copy.
+CREATE TABLE IF NOT EXISTS device_wipe_secrets (
+  user_id TEXT NOT NULL,
+  vault_id TEXT NOT NULL,
+  device_id TEXT NOT NULL,
+  secret_hash TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  wipe_requested_at INTEGER,
+  wiped_at INTEGER,
+  PRIMARY KEY (vault_id, device_id)
+);
+
 -- § 356a BGB withdrawals. Processed by a person (refund through Paddle).
 CREATE TABLE IF NOT EXISTS withdrawal_requests (
   id TEXT PRIMARY KEY,

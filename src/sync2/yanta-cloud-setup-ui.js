@@ -874,6 +874,7 @@ function renderTurnstile(container) {
 
 export async function openYantaCloudSetup({
   fromHistory = false,
+  focus = '',
 } = {}) {
   lastPairingTextForHistory = '';
 
@@ -886,6 +887,11 @@ export async function openYantaCloudSetup({
 
     if (me.authenticated) {
       await renderCloudHome(me);
+
+      // Deep link, e.g. Settings › Security › "Manage devices".
+      if (focus === 'devices') {
+        requestAnimationFrame(() => document.getElementById('yanta-cloud-devices')?.scrollIntoView({ block: 'start', behavior: 'smooth' }));
+      }
     } else {
       renderLogin();
     }
@@ -1680,7 +1686,7 @@ function cloudDevicesHtml({
   }
 
   return `
-    <section class="yanta-cloud-section">
+    <section class="yanta-cloud-section" id="yanta-cloud-devices">
       <h4>Connected devices</h4>
       <p>
         ${active.length}${max ? ` / ${max}` : ''} active device${active.length === 1 ? '' : 's'}
@@ -2167,6 +2173,8 @@ ${
           `Device ID: ${deviceId}`,
           '',
           'The removed device can no longer sync this cloud vault or manage its connected devices unless it is connected again with the Recovery Key or pairing QR.',
+          '',
+          'The next time it is opened, it also deletes everything YANTA stored on it. Changes made there that were never synced are lost.',
           '',
           'If you use Chat, this also signs the removed device out of Chat by rotating your Chat password. Your other devices reconnect automatically.',
         ].join('\n'),

@@ -181,6 +181,15 @@ export function securitySettingsElement({ rerender }) {
     });
 
     root.append(group(t('lock.settings.deviceTitle'), hint(t('lock.settings.deviceHint')), wipe));
+
+    // ---- Other devices: managed where YANTA Cloud lists them.
+    const manage = el('button', { type: 'button', class: 'btn' }, t('lock.settings.manageDevices'));
+    manage.addEventListener('click', async () => {
+      const { openYantaCloudSetup } = await import('../sync2/yanta-cloud-setup-ui.js');
+      openYantaCloudSetup({ focus: 'devices' });
+    });
+
+    root.append(group(t('lock.settings.otherDevicesTitle'), hint(t('lock.settings.otherDevicesHint')), manage));
   })();
 
   return root;

@@ -4,6 +4,7 @@
 // ============================================================
 
 import { ensureUnlockedAtBoot, lockNow, setupAutoLock } from './lock/app-lock.js';
+import { setupRemoteWipe } from './lock/remote-wipe.js';
 import { isChatEnabled } from './chat/chat-enabled.js';
 import { installMobileTabBar } from './mobile-tab-bar.js';
 import { $, state, store, openDB, toast, actionToast, cssColorToHex, safeCssColor, lucide, lucideCalendarDay, ensureLucideIcons, debounce } from './core.js';
@@ -2067,6 +2068,9 @@ async function init() {
   bootStage(t('boot.stage.vault'), 48);
 
   await openDB();
+
+  // Removed elsewhere? Then this copy goes, locked or not (remote-wipe.js).
+  setupRemoteWipe();
 
   // App lock: nothing of the workspace is read before the password.
   await ensureUnlockedAtBoot();

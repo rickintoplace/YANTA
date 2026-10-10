@@ -3235,6 +3235,96 @@ async function handleListDevices(env, req, url, headers) {
   }, 200, headers);
 }
 __name(handleListDevices, "handleListDevices");
+/* ============================================================
+   Remote wipe
+
+   Removing a device also asks it to delete its local copy of the
+   workspace. The removed device has lost its session by then, so it
+   proves who it is with a secret it registered earlier (only the hash is
+   stored) and learns nothing but yes or no.
+   ============================================================ */
+let deviceWipeTableReady = null;
+
+function ensureDeviceWipeTable(env) {
+  if (!deviceWipeTableReady) {
+    deviceWipeTableReady = env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS device_wipe_secrets (
+         user_id TEXT NOT NULL,
+         vault_id TEXT NOT NULL,
+         device_id TEXT NOT NULL,
+         secret_hash TEXT NOT NULL,
+         created_at INTEGER NOT NULL,
+         wipe_requested_at INTEGER,
+         wiped_at INTEGER,
+         PRIMARY KEY (vault_id, device_id)
+       )`
+    ).run().catch((err) => {
+      deviceWipeTableReady = null;
+      throw err;
+    });
+  }
+  return deviceWipeTableReady;
+}
+
+async function handleRegisterWipeSecret(env, req, headers) {
+  const user = await requireUser(env, req);
+  const body = await bodyJson(req);
+  const vaultId = String(body.vaultId || req.headers.get("x-yanta-vault-id") || "");
+  const deviceId = req.headers.get("x-yanta-device-id") || "";
+  const secretHash = String(body.secretHash || "");
+
+  if (!vaultId || !deviceId || !/^[a-f0-9]{64}$/.test(secretHash)) {
+    return json({ ok: false, message: "vaultId, device and secretHash are required" }, 400, headers);
+  }
+
+  await requireVault(env, user, vaultId);
+  await requireActiveVaultDevice(env, user, vaultId, deviceId, req);
+  await ensureDeviceWipeTable(env);
+
+  await env.DB.prepare(
+    `INSERT INTO device_wipe_secrets (user_id, vault_id, device_id, secret_hash, created_at)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT(vault_id, device_id) DO UPDATE SET secret_hash = excluded.secret_hash
+     WHERE device_wipe_secrets.wipe_requested_at IS NULL`
+  ).bind(user.userId, vaultId, deviceId, secretHash, now()).run();
+
+  return json({ ok: true }, 200, headers);
+}
+
+async function wipeRowForSecret(env, body) {
+  const vaultId = String(body.vaultId || "");
+  const deviceId = String(body.deviceId || "");
+  const secret = String(body.secret || "");
+  if (!vaultId || !deviceId || secret.length < 32) return null;
+
+  await ensureDeviceWipeTable(env);
+  const row = await env.DB.prepare(
+    `SELECT * FROM device_wipe_secrets WHERE vault_id = ? AND device_id = ?`
+  ).bind(vaultId, deviceId).first();
+
+  if (!row || row.secret_hash !== await sha256Hex(secret)) return null;
+  return row;
+}
+
+async function handleDeviceWipeCheck(env, req, headers) {
+  const limit = await rateLimit(env, `wipecheck:${await ipHash(env, req)}`, 240, 60 * 60 * 1000);
+  if (!limit.ok) return json({ ok: false, wipe: false }, 429, headers);
+
+  const row = await wipeRowForSecret(env, await bodyJson(req));
+  return json({ ok: true, wipe: !!(row && row.wipe_requested_at && !row.wiped_at) }, 200, headers);
+}
+
+async function handleDeviceWipeDone(env, req, headers) {
+  const row = await wipeRowForSecret(env, await bodyJson(req));
+  if (!row) return json({ ok: false }, 404, headers);
+
+  await env.DB.prepare(
+    `UPDATE device_wipe_secrets SET wiped_at = ? WHERE vault_id = ? AND device_id = ?`
+  ).bind(now(), row.vault_id, row.device_id).run();
+
+  return json({ ok: true }, 200, headers);
+}
+
 async function handleRevokeDevice(env, req, url, headers) {
   const user = await requireUser(env, req);
   const vaultId = url.searchParams.get("vaultId") || req.headers.get("x-yanta-vault-id") || "";
@@ -3284,6 +3374,15 @@ async function handleRevokeDevice(env, req, url, headers) {
     await audit(env, req, "device_deleted", user.userId, { vaultId, targetDeviceId });
     return json({ ok: true, deleted: true }, 200, headers);
   }
+  // The removed device deletes its local copy the next time it is opened
+  // (handleDeviceWipeCheck); its session ends below, so it cannot ask
+  // through the authenticated API any more.
+  await ensureDeviceWipeTable(env);
+  await env.DB.prepare(
+    `UPDATE device_wipe_secrets SET wipe_requested_at = COALESCE(wipe_requested_at, ?)
+     WHERE user_id = ? AND vault_id = ? AND device_id = ?`
+  ).bind(now(), user.userId, vaultId, targetDeviceId).run();
+
   await env.DB.prepare(
     `UPDATE devices
      SET revoked_at = COALESCE(revoked_at, ?),
@@ -4048,7 +4147,8 @@ async function purgeUserData(env, userId) {
 
     // Legal records: keep the row, drop the link to the person.
     `UPDATE cancellation_requests SET user_id = NULL WHERE user_id = ?`,
-    `UPDATE withdrawal_requests SET user_id = NULL WHERE user_id = ?`
+    `UPDATE withdrawal_requests SET user_id = NULL WHERE user_id = ?`,
+    `DELETE FROM device_wipe_secrets WHERE user_id = ?`
   ];
 
   for (const sql of statements) {
@@ -10705,6 +10805,16 @@ async function route(req, env) {
     }
     if (url.pathname === "/api/devices" && req.method === "DELETE") {
       return handleRevokeDevice(env, req, url, headers);
+    }
+    if (url.pathname === "/api/devices/wipe-secret" && req.method === "POST") {
+      return handleRegisterWipeSecret(env, req, headers);
+    }
+    // Unauthenticated on purpose: a removed device has no session left.
+    if (url.pathname === "/api/devices/wipe-check" && req.method === "POST") {
+      return handleDeviceWipeCheck(env, req, headers);
+    }
+    if (url.pathname === "/api/devices/wipe-done" && req.method === "POST") {
+      return handleDeviceWipeDone(env, req, headers);
     }
     if (url.pathname === "/api/usage" && req.method === "GET") {
       return handleUsage(env, req, headers);

@@ -726,14 +726,16 @@
 
     <nav class="tree" id="tree"></nav>
 
-    <div class="tag-cloud" id="tagCloud"></div>
-
-    <div class="sidebar-foot" id="sidebarFoot" aria-label="Workspace shortcuts"></div>
-
+    <!-- Sync state and storage sit with the sync progress, right under the
+         tree, so nothing below them moves when a sync starts. -->
     <div class="sidebar-toe">
        <button class="storage-meter vault-indicator" id="vaultIndicator" hidden></button>
        <span class="storage-meter" id="storageMeter" title="Storage used"></span>
     </div>
+
+    <div class="tag-cloud" id="tagCloud"></div>
+
+    <div class="sidebar-foot" id="sidebarFoot" aria-label="Workspace shortcuts"></div>
 
   </aside>
 

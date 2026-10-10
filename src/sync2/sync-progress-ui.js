@@ -530,13 +530,13 @@ function ensureDetailedRoot() {
   detailRoot.hidden = true;
 
   /*
-    Above the tag cloud, right under the tree: the tree gives up the room
-    while a sync runs, and the shortcut buttons, tags and legal links
-    below stay exactly where the thumb expects them. (Placed above the
-    footer it pushed the buttons up and down on every sync.)
+    Right under the tree, above the sync/storage line: the tree gives up
+    the room while a sync runs, and the tags, shortcut buttons and legal
+    links below stay exactly where the thumb expects them. (Placed above
+    the footer it pushed the buttons up and down on every sync.)
   */
   const sidebar = document.getElementById('sidebar');
-  const anchor = sidebar?.querySelector('#tagCloud') || sidebar?.querySelector('.sidebar-toe');
+  const anchor = sidebar?.querySelector('.sidebar-toe') || sidebar?.querySelector('#tagCloud');
 
   if (sidebar && anchor) {
     anchor.parentNode.insertBefore(detailRoot, anchor);

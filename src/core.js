@@ -1000,6 +1000,20 @@ export function isSpaceMountedFolder(folder) {
   return !!folder?.spaceId;
 }
 
+// An item of an unlocked private folder (private/private-folders.js): it
+// lives in its folder's encrypted container, never in the vault or the
+// local stores — the same isolation as space-mounted items.
+export function isPrivateItem(item) {
+  return !!item?.privateFolderId;
+}
+
+// The hidden note that carries a private folder's sealed content. It
+// syncs like any note but never enters app state, so no list, search,
+// menu or delete can reach it.
+export function isPrivateCarrier(note) {
+  return !!note?.privateCarrierFor;
+}
+
 // ----------------------------------------------------------------
 // State
 // ----------------------------------------------------------------

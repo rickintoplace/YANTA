@@ -157,6 +157,10 @@ function setTab(name) {
   if (name === 'library') renderLibrary();
 }
 
+function currentNoteIsPrivate() {
+  return !!state.notes.get(state.currentNoteId)?.privateFolderId;
+}
+
 // Drop-in helper: take a raw image File, compress it lightly and
 // insert as a library reference at the current cursor position.
 // Used by drag-drop directly onto the editor (no modal).
@@ -180,6 +184,15 @@ export async function insertImageAsRef(file) {
   }
 
   const blob = compressed.blob || file;
+
+  // In a private folder the picture goes into the note itself, so it is
+  // encrypted with it — the image library is outside the folder password.
+  if (currentNoteIsPrivate()) {
+    const altBase = (file.name || 'image').replace(/\.[^.]+$/, '');
+    insertAtCursor(`\n![${altBase}](${await blobToDataURL(blob)})\n`);
+    return;
+  }
+
   const id = uid();
 
   const meta = {
@@ -258,8 +271,9 @@ function updateBase64Warning(size) {
 
 async function insertCompressedImage() {
   if (!imgCompressedBlob) { toast(t('image.pickImageFirst'), 'error'); return; }
-  const asRef = $('asReference').checked;
-  const asBase64 = $('asBase64').checked;
+  // A private folder's notes keep pictures inside, encrypted (see insertImageAsRef).
+  const asRef = $('asReference').checked && !currentNoteIsPrivate();
+  const asBase64 = $('asBase64').checked || ($('asReference').checked && currentNoteIsPrivate());
   let md;
   if (asRef) {
     const id = uid();

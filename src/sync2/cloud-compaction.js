@@ -193,7 +193,7 @@ function localVaultContentVersion() {
 function knownNoteIdsForSnapshots() {
   const ids = new Set();
 
-  for (const id of state.notes.keys()) ids.add(id);
+  for (const [id, note] of state.notes) if (!note?.privateFolderId) ids.add(id);
   for (const id of vaultNotesMap().keys()) ids.add(id);
 
   for (const id of vaultTombstonesMap().keys()) {

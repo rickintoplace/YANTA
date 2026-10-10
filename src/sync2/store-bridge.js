@@ -16,7 +16,7 @@
 //   browser-native objects such as FileSystemDirectoryHandle
 // ============================================================
 
-import { state, store, isSpaceMountedNote, isSpaceMountedFolder } from '../core.js';
+import { state, store, isSpaceMountedNote, isSpaceMountedFolder, isPrivateItem } from '../core.js';
 
 import {
   waitForVaultDoc,
@@ -360,13 +360,13 @@ export async function seedVaultFromLocalState() {
 
   doc.transact(() => {
     for (const note of state.notes.values()) {
-      if (isNewToVault(vaultNotesMap(), note?.id) && !isSpaceMountedNote(note)) {
+      if (isNewToVault(vaultNotesMap(), note?.id) && !isSpaceMountedNote(note) && !isPrivateItem(note)) {
         putVaultNoteMeta(note, VAULT_ORIGINS.LOCAL_SEED);
       }
     }
 
     for (const folder of state.folders.values()) {
-      if (isNewToVault(vaultFoldersMap(), folder?.id) && !isSpaceMountedFolder(folder)) {
+      if (isNewToVault(vaultFoldersMap(), folder?.id) && !isSpaceMountedFolder(folder) && !isPrivateItem(folder)) {
         putVaultFolderMeta(folder, VAULT_ORIGINS.LOCAL_SEED);
       }
     }
@@ -435,7 +435,7 @@ export async function installVaultStoreBridge() {
 
     // Notes mounted from someone else's shared space stay out of the
     // private vault CRDT — their metadata/content belong to the space.
-    if (!isSpaceMountedNote(note)) {
+    if (!isSpaceMountedNote(note) && !isPrivateItem(note)) {
       putVaultNoteMeta(note);
     }
 
@@ -460,7 +460,7 @@ export async function installVaultStoreBridge() {
   store.folders.put = async (folder) => {
     const res = await originals.folders.put(folder);
 
-    if (!isSpaceMountedFolder(folder)) {
+    if (!isSpaceMountedFolder(folder) && !isPrivateItem(folder)) {
       putVaultFolderMeta(folder);
     }
 

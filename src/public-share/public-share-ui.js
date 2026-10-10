@@ -2561,6 +2561,16 @@ export async function openUnifiedShareModal({
     shareTarget = { kind: 'note', id: noteId };
   }
 
+  // A private folder's content never leaves it (private/private-folders.js).
+  const privateTarget = shareTarget.kind === 'note'
+    ? state.notes.get(shareTarget.id)?.privateFolderId
+    : shareTarget.kind === 'folder' && state.folders.get(shareTarget.id)?.privateFolderId;
+  if (privateTarget) {
+    const { t } = await import('../i18n/index.js');
+    toast(t('private.noShare'), 'error');
+    return;
+  }
+
   const isNote = shareTarget.kind === 'note';
   const isFolder = targetIsFolder();
   const targetId = shareTarget.id;

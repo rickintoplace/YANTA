@@ -5,6 +5,12 @@
 
 import { isFolderHiddenFromAi } from './ai/ai-visibility.js';
 import { $, el, uid, state, store, lucide, safeCssColor, toast, actionToast, isSpaceMountedFolder } from './core.js';
+import {
+  makePrivateMenuItem,
+  openUnlockPrivateDialog,
+  privateFolderIcon,
+  privateRootMenuItems,
+} from './private/private-ui.js';
 
 import { t } from './i18n/index.js';
 
@@ -1613,6 +1619,8 @@ function folderRow(f, visibleNotes, depth, {
 
   const isCurrentPath = currentFolderTrailSet().has(f.id);
   const lockedAiSessionsFolder = isAiSessionsRootFolder(f);
+  // A locked private folder has nothing to show: clicking it asks to unlock.
+  const lockedPrivate = !!f.privateLocked;
 
   const childFolders = [...state.folders.values()]
     .filter((x) => x.parentId === f.id)
@@ -1638,11 +1646,15 @@ function folderRow(f, visibleNotes, depth, {
     tabindex: '0',
     style: { paddingLeft: (12 + depth * 12) + 'px' },
     onclick: (e) => handleTreeSelectionClick(e, key, () => {
+      if (lockedPrivate) {
+        openUnlockPrivateDialog(f.privateFolderId);
+        return;
+      }
       toggleFolderAnimated(f.id, expanded);
     }),
     oncontextmenu: (e) => openTreeContextMenu(e, key, () => folderMenu(e, f)),
     ondragover: (e) => {
-      if (lockedAiSessionsFolder) return;
+      if (lockedAiSessionsFolder || lockedPrivate) return;
 
       const types = [...(e.dataTransfer.types || [])];
       if (!types.includes('text/yanta-note') && !types.includes('text/yanta-folder')) return;
@@ -1715,7 +1727,9 @@ function folderRow(f, visibleNotes, depth, {
     }, String(childCount)));
   }
 
-  if (f.aiHidden) {
+  if (f.privateRoot) {
+    row.append(privateFolderIcon(f));
+  } else if (f.aiHidden && !f.privateFolderId) {
     const privateDot = el('span', { class: 'ai-hidden-dot', title: t('privacy.badgeFolder') });
     privateDot.innerHTML = lucide('eye-off', 11);
     row.append(privateDot);
@@ -1740,7 +1754,7 @@ function folderRow(f, visibleNotes, depth, {
     }
   }
 
-  if (!lockedAiSessionsFolder) {
+  if (!lockedAiSessionsFolder && !lockedPrivate) {
     row.append(el('span', {
       class: 'menu-trigger',
       title: t('tree.addNote'),
@@ -1753,7 +1767,7 @@ function folderRow(f, visibleNotes, depth, {
 
   wrap.append(row);
 
-  if (expanded) {
+  if (expanded && !lockedPrivate) {
     const kids = el('div', {
       class:
         'tree-children' +
@@ -2760,7 +2774,7 @@ function noteMenu(e, n) {
       action: () => renameTreeNote(n.id),
     },
     'hr',
-    {
+    ...(n.privateFolderId ? [] : [{
       label: n.spaceId ? t('tree.menu.sharedNote') : t('tree.menu.shareNote'),
       icon: 'users',
       action: async () => {
@@ -2768,7 +2782,7 @@ function noteMenu(e, n) {
         openUnifiedShareModal({ noteId: n.id });
       },
     },
-    'hr',
+    'hr']),
     {
       label: n.archived ? t('tree.menu.unarchive') : t('tree.menu.archive'),
       icon: n.archived ? 'archive-restore' : 'archive',
@@ -2793,7 +2807,7 @@ function noteMenu(e, n) {
       icon: 'copy',
       action: () => duplicateNote(n),
     },
-    aiVisibilityMenuItem(n),
+    ...(n.privateFolderId ? [] : [aiVisibilityMenuItem(n)]),
     'hr',
     {
       label: t('tree.menu.moveToTrash'),
@@ -2837,6 +2851,28 @@ function folderMenu(e, f, { inside = false } = {}) {
     return;
   }
 
+  // A private folder's root: unlock, or its own set of actions.
+  if (f.privateRoot) {
+    showMenu(e.clientX, e.clientY, f.privateLocked ? privateRootMenuItems(f) : [
+      ...(inside ? [] : [{
+        label: t('tree.menu.open'),
+        icon: 'folder-open',
+        action: () => openFolderInDashboard(f.id, { push: true }),
+      },
+      'hr']),
+      { label: t('tree.menu.newNoteHere'), icon: 'file-plus', action: () => newNote(f.id) },
+      { label: t('tree.menu.newSubFolder'), icon: 'folder-plus', action: () => newFolder(f.id) },
+      'hr',
+      { label: t('tree.menu.iconColor'), icon: 'palette', action: () => editItemsIconColor([folderKey(f.id)]) },
+      { label: t('tree.menu.rename'), icon: 'pencil', action: () => renameTreeFolder(f.id) },
+      'hr',
+      ...privateRootMenuItems(f, { inside: true }),
+    ]);
+    return;
+  }
+
+  const insidePrivate = !!f.privateFolderId;
+
   showMenu(e.clientX, e.clientY, [
     // Opened from inside the folder (its header): "Open" would go nowhere.
     ...(inside ? [] : [{
@@ -2861,7 +2897,7 @@ function folderMenu(e, f, { inside = false } = {}) {
       action: () => selectFolderSubtree(f.id),
     },
     'hr',
-    {
+    ...(insidePrivate ? [] : [{
       label: f.spaceId ? t('tree.menu.sharedWorkspace') : t('tree.menu.shareFolder'),
       icon: 'users',
       action: async () => {
@@ -2869,7 +2905,7 @@ function folderMenu(e, f, { inside = false } = {}) {
         openUnifiedShareModal({ folderId: f.id });
       },
     },
-    'hr',
+    'hr']),
     {
       label: t('tree.menu.iconColor'),
       icon: 'palette',
@@ -2899,7 +2935,7 @@ function folderMenu(e, f, { inside = false } = {}) {
       icon: 'folder-input',
       action: () => moveSelectedToFolder([folderKey(f.id)]),
     },
-    aiVisibilityMenuItem(f, { folder: true }),
+    ...(insidePrivate ? [] : [aiVisibilityMenuItem(f, { folder: true }), makePrivateMenuItem(f)]),
     'hr',
     {
       label: t('tree.menu.moveFolderToTrash'),

@@ -79,6 +79,11 @@ export function sanitizeNoteMeta(note) {
     // Hidden from YANTA AI (ai-visibility.js).
     aiHidden: note.aiHidden === true ? true : undefined,
 
+    // The carrier of a private folder (private/private-folders.js) and
+    // where that folder sits in the tree.
+    privateCarrierFor: note.privateCarrierFor ? String(note.privateCarrierFor) : undefined,
+    privateParentId: note.privateCarrierFor && note.privateParentId ? String(note.privateParentId) : undefined,
+
     // Provenance. Must travel: a note written by a background run has to
     // look AI-written on every device, not only the one that made it.
     aiGenerated: note.aiGenerated === true ? true : undefined,

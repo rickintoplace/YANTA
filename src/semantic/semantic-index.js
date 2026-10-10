@@ -16,6 +16,7 @@
 import {
   state,
   isSpaceMountedNote,
+  isPrivateItem,
 } from '../core.js';
 
 import {
@@ -286,6 +287,8 @@ function indexableNote(note) {
   return note &&
     !isNoteInTrash(note) &&
     !isSpaceMountedNote(note) &&
+    // The index is stored on this device: private notes stay out.
+    !isPrivateItem(note) &&
     !inSystemTree(note);
 }
 

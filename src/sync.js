@@ -130,6 +130,8 @@ function notePath(note) {
 // ---------------- write one note --------------------------------
 export async function syncWriteNote(note) {
   if (!sync.handle) return;
+  // A private folder's notes never become readable files (private-folders.js).
+  if (note?.privateFolderId) return;
   try {
     const segs = ['notes', ...folderPathSegments(note.folderId)];
     const dir = await ensureDir(sync.handle, segs);

@@ -10,6 +10,7 @@
 // happened since `since`, and how would you describe it in one line?
 // ============================================================
 
+import { isEventHiddenFromAi, isNoteHiddenFromAi } from '../ai/ai-visibility.js';
 import { state } from '../core.js';
 
 import { PULSE_EVENTS } from './pulse-config.js';
@@ -74,7 +75,7 @@ function calendarSoonSensor(since, now) {
 
 function calendarChangedSensor(since) {
   const changed = [...state.calendarEvents.values()]
-    .filter((ev) => Number(ev.updated || 0) > since);
+    .filter((ev) => Number(ev.updated || 0) > since && !isEventHiddenFromAi(ev));
 
   if (!changed.length) return null;
 
@@ -91,7 +92,9 @@ function notesChangedSensor(since) {
     .filter((note) =>
       Number(note.updated || 0) > since &&
       !note.trashed &&
-      !note.aiBrain
+      !note.aiBrain &&
+      // Titles go into the run's prompt: hidden and private notes stay out.
+      !isNoteHiddenFromAi(note)
     );
 
   if (!changed.length) return null;

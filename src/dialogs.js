@@ -10,6 +10,7 @@
 // - yantaChoice({ title, message, choices })
 // - yantaAlert({ title, message, icon })
 // - yantaFolderPicker({ title, allowNone, noneLabel, isDisabled })
+// - yantaDialog({ title, icon, danger, build }) — custom content
 //
 // Return values:
 // - yantaConfirm -> boolean
@@ -762,6 +763,34 @@ function makeModal({
     return btn;
   }
   
+  /**
+   * A dialog with custom content, on the same frame, overlay history and
+   * keyboard handling as the others. `build({ body, actions, done, button })`
+   * fills it; `done(value)` closes it and resolves the promise (null when
+   * dismissed).
+   */
+  export function yantaDialog({
+    title = 'YANTA',
+    message = '',
+    icon = 'info',
+    danger = false,
+    kicker = '',
+    closeOnBackdrop = false,
+    build,
+  } = {}) {
+    return new Promise((resolve) => {
+      const dialog = makeModal({ title, message, icon, danger, kicker, closeOnBackdrop });
+      dialog.setFinish(resolve);
+      build?.({
+        body: dialog.body,
+        actions: dialog.actions,
+        card: dialog.card,
+        done: (value) => dialog.close(value),
+        button,
+      });
+    });
+  }
+
   export function yantaConfirm({
     title = t('dialog.confirmTitle'),
     message = '',

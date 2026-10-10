@@ -22,7 +22,7 @@
 
 import * as Y from 'yjs';
 
-import { $, state, store, toast, uid, isSpaceMountedNote } from '../core.js';
+import { $, state, store, toast, uid, isSpaceMountedNote, isPrivateItem, isPrivateCarrier } from '../core.js';
 import { isNoteTitleFieldFocused, rebuildWikilinkIndex } from '../notes.js';
 import { renderTree } from '../tree.js';
 
@@ -1457,7 +1457,7 @@ export class Sync2AppEngine {
   async observeAllKnownNotes() {
     const ids = new Set();
 
-    for (const id of state.notes.keys()) ids.add(id);
+    for (const [id, note] of state.notes) if (!isPrivateItem(note)) ids.add(id);
     for (const id of vaultNotesMap().keys()) ids.add(id);
 
     for (const id of ids) {
@@ -1472,6 +1472,8 @@ export class Sync2AppEngine {
     // them out here prevents shared content from leaking into the
     // user's private vault storage.
     if (isSpaceMountedNote(state.notes.get(noteId))) return;
+    // Notes of a private folder travel only sealed, in its carrier.
+    if (isPrivateItem(state.notes.get(noteId))) return;
 
     const entry = getNoteDoc(noteId);
     await entry.ready;
@@ -1666,7 +1668,7 @@ export class Sync2AppEngine {
 
     const noteIds = new Set();
 
-    for (const id of state.notes.keys()) noteIds.add(id);
+    for (const [id, note] of state.notes) if (!isPrivateItem(note)) noteIds.add(id);
     for (const id of vaultNotesMap().keys()) noteIds.add(id);
 
     let uploadedNotes = 0;
@@ -1824,7 +1826,7 @@ export class Sync2AppEngine {
 
     const noteIds = new Set();
 
-    for (const id of state.notes.keys()) noteIds.add(id);
+    for (const [id, note] of state.notes) if (!isPrivateItem(note)) noteIds.add(id);
     for (const id of vaultNotesMap().keys()) noteIds.add(id);
 
     let queuedNotes = 0;
@@ -1914,7 +1916,7 @@ export class Sync2AppEngine {
 
     const ids = new Set();
 
-    for (const id of state.notes.keys()) ids.add(id);
+    for (const [id, note] of state.notes) if (!isPrivateItem(note)) ids.add(id);
     for (const id of vaultNotesMap().keys()) ids.add(id);
 
     const noteIds = [...ids].filter((noteId) => !vaultTombstonesMap().has(noteId));
@@ -2247,7 +2249,7 @@ export class Sync2AppEngine {
       {
         const ids = new Set();
 
-        for (const id of state.notes.keys()) ids.add(id);
+        for (const [id, note] of state.notes) if (!isPrivateItem(note)) ids.add(id);
         for (const id of vaultNotesMap().keys()) ids.add(id);
 
         const noteIds = [...ids].filter((noteId) =>
@@ -3136,7 +3138,7 @@ export class Sync2AppEngine {
   async downloadKnownNoteSnapshots() {
     const ids = new Set();
 
-    for (const id of state.notes.keys()) ids.add(id);
+    for (const [id, note] of state.notes) if (!isPrivateItem(note)) ids.add(id);
     for (const id of vaultNotesMap().keys()) ids.add(id);
 
     const noteIds = [...ids].filter((noteId) => !vaultTombstonesMap().has(noteId));
@@ -3191,7 +3193,7 @@ export class Sync2AppEngine {
   async downloadKnownNoteUpdates() {
     const ids = new Set();
 
-    for (const id of state.notes.keys()) ids.add(id);
+    for (const [id, note] of state.notes) if (!isPrivateItem(note)) ids.add(id);
     for (const id of vaultNotesMap().keys()) ids.add(id);
 
     const noteIds = [...ids].filter((noteId) => !vaultTombstonesMap().has(noteId));
@@ -3575,6 +3577,9 @@ export class Sync2AppEngine {
       const incoming = sanitizeNoteMeta(raw);
       if (!incoming?.id) continue;
 
+      // A private folder's carrier stays out of app state (core.js).
+      if (isPrivateCarrier(incoming)) continue;
+
       const existing = state.notes.get(id);
       const next = safeJsonClone(incoming);
 
@@ -3717,7 +3722,7 @@ export class Sync2AppEngine {
   
       const nextNote = safeJsonClone(incoming);
 
-      state.notes.set(id, nextNote);
+      if (!isPrivateCarrier(nextNote)) state.notes.set(id, nextNote);
 
       const cached = cachedNotes.get(id);
 

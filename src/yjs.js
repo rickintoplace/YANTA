@@ -109,6 +109,29 @@ export function encodeNoteUpdateFrom(noteId, stateVector) {
 }
 
 // Release a doc when a note is deleted.
+/*
+  Docs that live somewhere else than this note's own IndexedDB database:
+  the notes of an unlocked private folder (private/private-folders.js),
+  held in memory and stored only encrypted. getNoteDoc hands them out
+  like any other; unloading leaves them alone, destroying only lets go.
+*/
+const EXTERNAL_PERSISTENCE = Object.freeze({
+  db: null,
+  _destroyed: false,
+  destroy: async () => {},
+  clearData: async () => {},
+  whenWritten: async () => {},
+  once: () => {},
+});
+
+export function adoptExternalNoteDoc(noteId, doc) {
+  docs.set(noteId, { doc, persistence: EXTERNAL_PERSISTENCE, ready: Promise.resolve(), external: true });
+}
+
+export function releaseExternalNoteDoc(noteId) {
+  if (docs.get(noteId)?.external) docs.delete(noteId);
+}
+
 export function isNoteDocLoaded(noteId) {
   return docs.has(noteId);
 }
@@ -123,7 +146,7 @@ export function isNoteDocLoaded(noteId) {
  */
 export function unloadNoteDoc(noteId) {
   const entry = docs.get(noteId);
-  if (!entry) return;
+  if (!entry || entry.external) return;
 
   try { entry.persistence.destroy(); } catch {}
   try { entry.doc.destroy(); } catch {}
@@ -133,6 +156,12 @@ export function unloadNoteDoc(noteId) {
 
 export async function destroyNoteDoc(noteId) {
   const entry = docs.get(noteId);
+
+  // Its owner deletes the content (a private folder drops the note).
+  if (entry?.external) {
+    docs.delete(noteId);
+    return;
+  }
 
   // If the doc is open in memory, clear its y-indexeddb data directly.
   if (entry) {

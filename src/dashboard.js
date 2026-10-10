@@ -2771,13 +2771,16 @@ function renderDashboardHeader() {
 
   if (folderOptionsBtn) folderOptionsBtn.innerHTML = lucide('ellipsis-vertical', 21);
 
+  // Nothing can be added to a locked private folder.
+  const lockedFolder = !!state.folders.get(dashboard.folderId)?.privateLocked;
+
   header.append(
     menuBtn,
     titleWrap,
     searchBtn,
     ...(showWidgetsBtn ? [widgetsBtn] : []),
     ...(folderOptionsBtn ? [folderOptionsBtn] : []),
-    newBtn
+    ...(lockedFolder ? [] : [newBtn])
   );
 
   return header;
@@ -2820,6 +2823,25 @@ function renderDashboardHeader() {
   
   function renderEmptyFolderState() {
     const box = el('div', { class: 'yanta-dashboard-empty compact' });
+
+    // A locked private folder is not empty: it asks for its password.
+    const current = state.folders.get(dashboard.folderId);
+    if (current?.privateLocked) {
+      box.innerHTML = `
+        <div class="yanta-dashboard-empty-icon">${lucide('lock', 30)}</div>
+        <strong>${escapeHtml(i18n('private.lockedName'))}</strong>
+        <p>${escapeHtml(i18n('private.panel.text'))}</p>
+      `;
+      const unlock = el('button', {
+        class: 'btn primary',
+        onclick: async () => {
+          const { openUnlockPrivateDialog } = await import('./private/private-ui.js');
+          await openUnlockPrivateDialog(current.privateFolderId);
+        },
+      }, i18n('private.panel.button'));
+      box.append(unlock);
+      return box;
+    }
   
     box.innerHTML = `
       <div class="yanta-dashboard-empty-icon">${lucide('folder-open', 30)}</div>

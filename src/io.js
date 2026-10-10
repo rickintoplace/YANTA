@@ -19,6 +19,16 @@ import {
   isFolderInTrash,
 } from './trash.js';
 
+// A private folder's content is never exported in the clear
+// (private/private-folders.js); its sealed carrier travels with sync.
+function exportableNotes() {
+  return [...state.notes.values()].filter((n) => !n.privateFolderId);
+}
+
+function exportableFolders() {
+  return [...state.folders.values()].filter((f) => !f.privateFolderId);
+}
+
 export function noteToFrontmatter(n) {
   const meta = { id: n.id };
   if (n.icon) meta.icon = n.icon;
@@ -90,18 +100,18 @@ export async function exportBundle() {
     }
   }
   const notes = [];
-  for (const n of state.notes.values()) {
+  for (const n of exportableNotes()) {
     let body = '';
     try { body = noteMarkdown(n.id); } catch {}
     notes.push({ ...n, body });
   }
-  const bundle = { yanta: 2, exported: new Date().toISOString(), notes, folders: [...state.folders.values()], images };
+  const bundle = { yanta: 2, exported: new Date().toISOString(), notes, folders: exportableFolders(), images };
   downloadBlob(new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' }), `yanta-${new Date().toISOString().slice(0, 10)}.json`);
   toast(t('io.exportedBundle'), 'success');
 }
 
 export async function exportEveryNoteMd() {
-  const notes = [...state.notes.values()]
+  const notes = exportableNotes()
     .filter((n) => !isNoteInTrash(n));
 
   if (!notes.length) {
@@ -551,7 +561,7 @@ async function readZip(blob) {
 
 export async function exportAsZip() {
   const used = new Set();
-  for (const note of state.notes.values()) {
+  for (const note of exportableNotes()) {
     if (isNoteInTrash(note)) continue;
 
     let body = ''; try { body = noteMarkdown(note.id); } catch {}
@@ -572,7 +582,7 @@ export async function exportAsZip() {
     }
     return p;
   };
-  for (const note of state.notes.values()) {
+  for (const note of exportableNotes()) {
     if (isNoteInTrash(note)) continue;
     const segs = folderPathSegments(note.folderId);
     const fname = `${safeFilename(note.title)}__${note.id.slice(0, 8)}.md`;
@@ -593,7 +603,7 @@ export async function exportAsZip() {
   }
   let totalCitationCount = 0;
 
-  for (const note of state.notes.values()) {
+  for (const note of exportableNotes()) {
     if (isNoteInTrash(note)) continue;
     const citations = listCitationsForNote(note.id);
 
@@ -612,7 +622,7 @@ export async function exportAsZip() {
       data: _enc.encode(JSON.stringify(csl, null, 2)),
     });
   }
-  for (const note of state.notes.values()) {
+  for (const note of exportableNotes()) {
     if (isNoteInTrash(note)) continue;
     for (const d of listDrawingsForNote(note.id)) {
       const json = {
@@ -655,9 +665,9 @@ export async function exportAsZip() {
     yanta: 2,
     exported: new Date().toISOString(),
     counts: {
-      notes: [...state.notes.values()].filter((n) => !isNoteInTrash(n)).length,
-      trashNotesExcluded: [...state.notes.values()].filter(isNoteInTrash).length,
-      folders: [...state.folders.values()].filter((folder) => !isFolderInTrash(folder)).length,
+      notes: exportableNotes().filter((n) => !isNoteInTrash(n)).length,
+      trashNotesExcluded: exportableNotes().filter(isNoteInTrash).length,
+      folders: exportableFolders().filter((folder) => !isFolderInTrash(folder)).length,
       images: used.size,
       citations: totalCitationCount || 0,
       calendarEvents: state.calendarEvents?.size || 0,

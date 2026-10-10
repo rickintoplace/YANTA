@@ -6186,8 +6186,10 @@ async function readPersistedThumb(key) {
   }).then((stored) => (stored ? openRecord(stored, 'thumbs') : null)).catch(() => null);
 }
 
-// Sealed while the app lock is on: a thumbnail shows the drawing.
+// Sealed while the app lock is on: a thumbnail shows the drawing. A
+// private folder's drawings get none at all (they stay in memory only).
 function writePersistedThumb(entry) {
+  if (state.notes.get(String(entry?.key || '').split(':')[0])?.privateFolderId) return;
   Promise.all([thumbDb(), sealRecord(entry, ['key'], 'thumbs')]).then(([db, sealed]) => {
     if (!db) return;
     try {

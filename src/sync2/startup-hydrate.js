@@ -9,7 +9,7 @@
 // first render.
 // ============================================================
 
-import { state, store } from '../core.js';
+import { state, store, isPrivateCarrier } from '../core.js';
 import { rebuildWikilinkIndex } from '../notes.js';
 import { revokeImageObjectUrl } from '../media/object-url-cache.js';
 
@@ -100,6 +100,7 @@ export async function hydrateLocalMetadataFromVaultDocOnStartup() {
 
     const next = sanitizeNoteMeta(raw);
     if (!next?.id) continue;
+    if (isPrivateCarrier(next)) continue;
 
     const existing = state.notes.get(id);
 

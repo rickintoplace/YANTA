@@ -5,9 +5,10 @@
 
 import { ensureUnlockedAtBoot, lockNow, setupAutoLock } from './lock/app-lock.js';
 import { setupRemoteWipe } from './lock/remote-wipe.js';
+import { setupPrivateFolders } from './private/private-folders.js';
 import { isChatEnabled } from './chat/chat-enabled.js';
 import { installMobileTabBar } from './mobile-tab-bar.js';
-import { $, state, store, openDB, toast, actionToast, cssColorToHex, safeCssColor, lucide, lucideCalendarDay, ensureLucideIcons, debounce } from './core.js';
+import { $, state, store, openDB, toast, actionToast, cssColorToHex, safeCssColor, lucide, lucideCalendarDay, ensureLucideIcons, debounce, isPrivateCarrier } from './core.js';
 
 import {
   reconcileOwnedSpaces,
@@ -2217,13 +2218,16 @@ async function init() {
     store.settings.get('sidebarCollapsed', false),
   ]);
 
-  for (const n of notes) state.notes.set(n.id, n);
+  for (const n of notes) if (!isPrivateCarrier(n)) state.notes.set(n.id, n);
   for (const f of folders) state.folders.set(f.id, f);
   for (const im of images) state.imagesMeta.set(im.id, im);
 
   await seedVaultFromLocalState();
 
   await hydrateLocalMetadataFromVaultDocOnStartup();
+
+  // Private folders: route their writes, show each as "Private folder" until unlocked.
+  await setupPrivateFolders();
 
   // Debug helper. Maybe remove later.
   window.yantaVaultDebug = {

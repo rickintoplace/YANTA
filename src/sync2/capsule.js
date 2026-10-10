@@ -143,6 +143,11 @@ function sanitizeNoteMeta(note) {
     // Hidden from YANTA AI (ai-visibility.js).
     aiHidden: note.aiHidden === true ? true : undefined,
 
+    // The carrier of a private folder (private/private-folders.js) and
+    // where that folder sits in the tree.
+    privateCarrierFor: note.privateCarrierFor ? String(note.privateCarrierFor) : undefined,
+    privateParentId: note.privateCarrierFor && note.privateParentId ? String(note.privateParentId) : undefined,
+
     // Provenance. Must travel: a note written by a background run has to
     // look AI-written on every device, not only the one that made it.
     aiGenerated: note.aiGenerated === true ? true : undefined,
@@ -376,7 +381,8 @@ export async function exportSyncCapsule({
   // ----------------------------------------------------------------
   const noteIds = new Set();
 
-  for (const id of state.notes.keys()) noteIds.add(id);
+  // Private folder notes are in the backup only sealed, inside their carrier.
+  for (const [id, note] of state.notes) if (!note?.privateFolderId) noteIds.add(id);
   for (const id of vaultNotesMap().keys()) noteIds.add(id);
 
   for (const noteId of noteIds) {
@@ -762,7 +768,7 @@ async function persistVaultMetadataToLocalCache() {
     const existing = state.notes.get(id);
 
     if (preferIncoming(existing, incoming)) {
-      state.notes.set(id, safeJsonClone(incoming));
+      if (!incoming.privateCarrierFor) state.notes.set(id, safeJsonClone(incoming));
       await store.notes.put(safeJsonClone(incoming));
     }
   }

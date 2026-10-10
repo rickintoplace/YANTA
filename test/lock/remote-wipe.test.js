@@ -69,7 +69,7 @@ describe('remote wipe', () => {
 
     wipeAnswer = true;
     expect(await checkRemoteWipe()).toBe(true);
-    expect(wipeThisDevice).toHaveBeenCalledWith({ syncFirst: false });
+    expect(wipeThisDevice).toHaveBeenCalledWith({ syncFirst: false, leave: false });
 
     const paths = calls.map((c) => c.path);
     expect(paths.lastIndexOf('/api/devices/wipe-done')).toBeGreaterThan(paths.lastIndexOf('/api/devices/wipe-check'));

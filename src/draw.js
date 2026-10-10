@@ -45,6 +45,7 @@ import {
 } from './draw-scene-sync.js';
 
 import { layerSortedElements } from './layers/layers-order.js';
+import { openRecord, sealRecord } from './lock/at-rest.js';
 import { menuTopSection, watchExcalidrawContextMenus } from './menu-position.js';
 
 import { cloudFetchExcalidrawLibrary } from './cloud/cloud-api.js';
@@ -6182,16 +6183,17 @@ async function readPersistedThumb(key) {
     } catch {
       resolve(null);
     }
-  });
+  }).then((stored) => (stored ? openRecord(stored, 'thumbs') : null)).catch(() => null);
 }
 
+// Sealed while the app lock is on: a thumbnail shows the drawing.
 function writePersistedThumb(entry) {
-  thumbDb().then((db) => {
+  Promise.all([thumbDb(), sealRecord(entry, ['key'], 'thumbs')]).then(([db, sealed]) => {
     if (!db) return;
     try {
-      db.transaction('thumbs', 'readwrite').objectStore('thumbs').put(entry);
+      db.transaction('thumbs', 'readwrite').objectStore('thumbs').put(sealed);
     } catch {}
-  });
+  }).catch(() => {});
 }
 
 function deletePersistedThumb(key) {

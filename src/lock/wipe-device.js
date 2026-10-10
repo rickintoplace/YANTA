@@ -25,6 +25,22 @@ async function finalSync() {
   }
 }
 
+/** Removes this device from its YANTA Cloud vault (read before the settings are deleted). */
+async function leaveCloudVault(apiFetch, { leave }) {
+  if (!leave) return;
+
+  const { store } = await import('../core.js');
+  const provider = await store.settings.get('sync2.provider', '').catch(() => '');
+  const vaultId = await store.settings.get('sync2.yantaCloud.vaultId', '').catch(() => '');
+  const deviceId = await store.settings.get('sync2.deviceId', '').catch(() => '');
+  if (provider !== 'yanta-cloud' || !vaultId || !deviceId) return;
+
+  await apiFetch(`/api/devices?vaultId=${encodeURIComponent(vaultId)}&deviceId=${encodeURIComponent(deviceId)}&leave=1`, {
+    method: 'DELETE',
+    headers: { 'x-yanta-device-id': deviceId, 'x-yanta-vault-id': vaultId },
+  }).catch(() => {});
+}
+
 async function deleteDatabase(name) {
   await new Promise((resolve) => {
     const req = indexedDB.deleteDatabase(name);
@@ -36,16 +52,18 @@ async function deleteDatabase(name) {
  * Removes every trace of the workspace from this browser and reloads.
  * `syncFirst` tries to upload pending changes before deleting.
  */
-export async function wipeThisDevice({ syncFirst = true } = {}) {
+export async function wipeThisDevice({ syncFirst = true, leave = true } = {}) {
   if (syncFirst) await finalSync();
 
   // Other open tabs hold the databases open (blocking the delete) and could
   // write again: they reload into an empty app instead.
   try { new BroadcastChannel('yanta-lock').postMessage({ type: 'wiped' }); } catch {}
 
-  // The cloud session ends on the server too, not just in this browser.
+  // This device leaves the YANTA Cloud device list (no unused slot stays
+  // behind), and the session ends on the server too, not just here.
   try {
-    const { cloudLogout } = await import('../cloud/cloud-api.js');
+    const { apiFetch, cloudLogout } = await import('../cloud/cloud-api.js');
+    await leaveCloudVault(apiFetch, { leave });
     await cloudLogout();
   } catch {}
 

@@ -140,6 +140,9 @@ export async function bootApp(origin, {
   // Extra src-relative modules this app instance needs (loaded into its
   // own module graph; importing later would hit another device's graph).
   modules = [],
+  // A Local Data Key: this device runs with the app lock on, so
+  // everything it stores is sealed (lock/at-rest.js).
+  atRestLdk = null,
 } = {}) {
   activateOrigin(origin);
 
@@ -150,6 +153,9 @@ export async function bootApp(origin, {
 
   vi.resetModules();
   stubUiModules();
+
+  const atRest = await import(src('lock/at-rest.js'));
+  if (atRestLdk) await atRest.setAtRestKeyFromLdk(atRestLdk);
 
   const core = await import(src('core.js'));
   const vaultDoc = await import(src('sync2/vault-doc.js'));
@@ -192,6 +198,7 @@ export async function bootApp(origin, {
     compaction,
     mods,
     modules,
+    atRestLdk,
     engine: null,
     remote,
     deviceId,
@@ -299,6 +306,7 @@ export async function restartApp(app) {
     deviceId: app.deviceId,
     startEngine: !!app.engine,
     modules: app.modules,
+    atRestLdk: app.atRestLdk,
   });
 }
 

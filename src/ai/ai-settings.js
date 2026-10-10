@@ -10,6 +10,7 @@ import {
 import {
   toast,
 } from '../core.js';
+import { getSealedItem, removeSealedItem, setSealedItem } from '../lock/sealed-local.js';
 
 const AI_SETTINGS_KEY = 'yanta.ai.settings.v2';
 const AI_KEY_SESSION_KEY = 'yanta.ai.openrouter.key.session';
@@ -278,7 +279,7 @@ export function getAiApiKey() {
   const settings = getAiSettings();
 
   if (settings.apiKeyStorage === 'local') {
-    return localStorage.getItem(AI_KEY_LOCAL_KEY) || '';
+    return getSealedItem(AI_KEY_LOCAL_KEY) || '';
   }
 
   if (settings.apiKeyStorage === 'session') {
@@ -292,10 +293,10 @@ export function setAiApiKey(key, storage = getAiSettings().apiKeyStorage || 'ses
   const clean = String(key || '').trim();
 
   sessionStorage.removeItem(AI_KEY_SESSION_KEY);
-  localStorage.removeItem(AI_KEY_LOCAL_KEY);
+  removeSealedItem(AI_KEY_LOCAL_KEY);
 
   if (storage === 'local' && clean) {
-    localStorage.setItem(AI_KEY_LOCAL_KEY, clean);
+    setSealedItem(AI_KEY_LOCAL_KEY, clean);
   } else if (storage === 'session' && clean) {
     sessionStorage.setItem(AI_KEY_SESSION_KEY, clean);
   }
@@ -307,6 +308,6 @@ export function setAiApiKey(key, storage = getAiSettings().apiKeyStorage || 'ses
 
 export function clearAiApiKey() {
   sessionStorage.removeItem(AI_KEY_SESSION_KEY);
-  localStorage.removeItem(AI_KEY_LOCAL_KEY);
+  removeSealedItem(AI_KEY_LOCAL_KEY);
 }
 

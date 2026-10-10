@@ -5,6 +5,16 @@
 // ============================================================
 
 import { LUCIDE_SUBSET } from './icons/lucide-subset.js';
+import {
+  atRestActive,
+  isSealed,
+  openBytes,
+  openRecord,
+  openValue,
+  sealBytes,
+  sealRecord,
+  sealValue,
+} from './lock/at-rest.js';
 
 export const $ = (id) => document.getElementById(id);
 
@@ -769,7 +779,9 @@ function req(r) {
   return new Promise((res, rej) => { r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); });
 }
 
-function cursorAllImageMeta() {
+// Rows without their (possibly large) blob: plain rows drop `blob`,
+// sealed rows drop the sealed blob `b`.
+function cursorAllImageRows() {
   return new Promise((res, rej) => {
     const out = [];
     const r = tx('images').openCursor();
@@ -781,8 +793,8 @@ function cursorAllImageMeta() {
         return;
       }
 
-      const { blob, ...meta } = cur.value;
-      out.push(meta);
+      const { blob, b, ...row } = cur.value;
+      out.push(row);
       cur.continue();
     };
 
@@ -790,41 +802,190 @@ function cursorAllImageMeta() {
   });
 }
 
+// ---- Encryption at rest (lock/at-rest.js)
+//
+// While the app lock is on, records are sealed before they are written
+// and opened after they are read. Key paths and index fields stay in the
+// clear (IndexedDB needs them; they are random ids and timestamps).
+// Writes are queued per store: encrypting is async, and two quick puts of
+// the same note must land in the order they were made. Reads wait for
+// the queue, so a read after a write sees it.
+
+const KEEP_FIELDS = {
+  notes: ['id', 'folderId', 'updated'],
+  folders: ['id'],
+  shares: ['noteId'],
+  spaces: ['spaceId'],
+  settings: ['key'],
+};
+
+// Settings that stay readable without the password: what the lock screen,
+// remote wipe and the first paint need before unlocking, none of it personal.
+// A directory handle cannot be sealed (it is not data, it is a permission).
+export const PLAIN_SETTINGS = new Set([
+  'lock.v1',
+  'wipe.v1',
+  'sync2.provider',
+  'sync2.yantaCloud.vaultId',
+  'sync2.yantaCloud.baseUrl',
+  'sync2.deviceId',
+  'deviceId',
+  'theme',
+  'syncFolderHandle',
+]);
+
+const writeQueues = new Map();
+
+function queueWrite(storeName, fn) {
+  const next = (writeQueues.get(storeName) || Promise.resolve()).catch(() => {}).then(fn);
+  writeQueues.set(storeName, next);
+  return next;
+}
+
+async function writesSettled(storeName) {
+  await (writeQueues.get(storeName) || Promise.resolve()).catch(() => {});
+}
+
+async function openAll(storeName, rows) {
+  if (!rows.some(isSealed)) return rows;
+  return Promise.all(rows.map((row) => openRecord(row, storeName)));
+}
+
+/** Seals a record for `storeName`; falls back to plain for values JSON cannot carry. */
+async function sealFor(storeName, record) {
+  try {
+    return await sealRecord(record, KEEP_FIELDS[storeName] || [], storeName);
+  } catch (err) {
+    if (err?.code !== 'EUNSEALABLE') throw err;
+    console.warn(`[YANTA] ${storeName}: stored unsealed (${err.message})`);
+    return record;
+  }
+}
+
+function sealedStore(storeName) {
+  return {
+    all: async () => {
+      if (!atRestActive()) return openAll(storeName, await req(tx(storeName).getAll()));
+      await writesSettled(storeName);
+      return openAll(storeName, await req(tx(storeName).getAll()));
+    },
+    get: async (id) => {
+      if (atRestActive()) await writesSettled(storeName);
+      return openRecord(await req(tx(storeName).get(id)), storeName);
+    },
+    put: (record) => {
+      if (!atRestActive()) return req(tx(storeName, 'readwrite').put(record));
+      // Sealing starts at once (many puts seal in parallel); the writes
+      // land in call order, each sealed before its transaction opens.
+      const sealing = sealFor(storeName, record);
+      sealing.catch(() => {});
+      return queueWrite(storeName, async () => {
+        const sealed = await sealing;
+        return req(tx(storeName, 'readwrite').put(sealed));
+      });
+    },
+    del: (id) => {
+      if (!atRestActive()) return req(tx(storeName, 'readwrite').delete(id));
+      return queueWrite(storeName, () => req(tx(storeName, 'readwrite').delete(id)));
+    },
+  };
+}
+
+// Images: the metadata and the blob are sealed apart, so listing the
+// metadata (boot) does not decrypt every picture.
+async function sealImage(image) {
+  if (!atRestActive() || !image || isSealed(image)) return image;
+
+  const { blob, ...meta } = image;
+  const sealed = await sealValue({ ...meta, blobType: blob?.type || '' }, 'images');
+  sealed.id = image.id;
+  if (blob) sealed.b = await sealBytes(new Uint8Array(await blob.arrayBuffer()), 'images.blob');
+  return sealed;
+}
+
+async function openImageMeta(stored) {
+  if (!isSealed(stored)) {
+    const { blob, ...meta } = stored;
+    return meta;
+  }
+  const { blobType, ...meta } = await openValue({ __yse: 1, k: stored.k, iv: stored.iv, ct: stored.ct }, 'images');
+  return meta;
+}
+
+async function openImage(stored) {
+  if (!isSealed(stored)) return stored;
+
+  const meta = await openValue({ __yse: 1, k: stored.k, iv: stored.iv, ct: stored.ct }, 'images');
+  const { blobType, ...rest } = meta;
+  if (!stored.b) return rest;
+  return { ...rest, blob: new Blob([await openBytes(stored.b, 'images.blob')], { type: blobType || '' }) };
+}
+
+async function settingsGet(key, fallback) {
+  if (atRestActive()) await writesSettled('settings');
+  const row = await req(tx('settings').get(key));
+  if (!row) return fallback;
+  const value = isSealed(row) ? (await openRecord(row, 'settings')).value : row.value;
+  return value ?? fallback;
+}
+
+function settingsSet(key, value) {
+  if (!atRestActive() || PLAIN_SETTINGS.has(key)) return req(tx('settings', 'readwrite').put({ key, value }));
+  const sealing = sealFor('settings', { key, value });
+  sealing.catch(() => {});
+  return queueWrite('settings', async () => {
+    const sealed = await sealing;
+    return req(tx('settings', 'readwrite').put(sealed));
+  });
+}
+
 export const store = {
-  notes: {
-    all: () => req(tx('notes').getAll()),
-    get: (id) => req(tx('notes').get(id)),
-    put: (n) => req(tx('notes', 'readwrite').put(n)),
-    del: (id) => req(tx('notes', 'readwrite').delete(id)),
-  },
-  folders: {
-    all: () => req(tx('folders').getAll()),
-    put: (f) => req(tx('folders', 'readwrite').put(f)),
-    del: (id) => req(tx('folders', 'readwrite').delete(id)),
-  },
+  notes: sealedStore('notes'),
+  folders: sealedStore('folders'),
   images: {
-    all: () => req(tx('images').getAll()),
-    allMeta: () => cursorAllImageMeta(),
-    get: (id) => req(tx('images').get(id)),
-    put: (i) => req(tx('images', 'readwrite').put(i)),
-    del: (id) => req(tx('images', 'readwrite').delete(id)),
+    all: async () => {
+      if (atRestActive()) await writesSettled('images');
+      return Promise.all((await req(tx('images').getAll())).map(openImage));
+    },
+    allMeta: async () => {
+      if (atRestActive()) await writesSettled('images');
+      return Promise.all((await cursorAllImageRows()).map(openImageMeta));
+    },
+    get: async (id) => {
+      if (atRestActive()) await writesSettled('images');
+      const row = await req(tx('images').get(id));
+      return row ? openImage(row) : row;
+    },
+    put: (image) => {
+      if (!atRestActive()) return req(tx('images', 'readwrite').put(image));
+      const sealing = sealImage(image);
+      sealing.catch(() => {});
+      return queueWrite('images', async () => {
+        const sealed = await sealing;
+        return req(tx('images', 'readwrite').put(sealed));
+      });
+    },
+    del: (id) => {
+      if (!atRestActive()) return req(tx('images', 'readwrite').delete(id));
+      return queueWrite('images', () => req(tx('images', 'readwrite').delete(id)));
+    },
   },
   settings: {
-    get: async (k, d) => (await req(tx('settings').get(k)))?.value ?? d,
-    set: (k, v) => req(tx('settings', 'readwrite').put({ key: k, value: v })),
+    get: settingsGet,
+    set: settingsSet,
   },
-  shares: {
-    all: () => req(tx('shares').getAll()),
-    get: (id) => req(tx('shares').get(id)),
-    put: (s) => req(tx('shares', 'readwrite').put(s)),
-    del: (id) => req(tx('shares', 'readwrite').delete(id)),
-  },
-  spaces: {
-    all: () => req(tx('spaces').getAll()),
-    get: (id) => req(tx('spaces').get(id)),
-    put: (s) => req(tx('spaces', 'readwrite').put(s)),
-    del: (id) => req(tx('spaces', 'readwrite').delete(id)),
-  },
+  shares: sealedStore('shares'),
+  spaces: sealedStore('spaces'),
+};
+
+/** For the at-rest migration: the raw database handle and the sealers. */
+export const atRestStoreInternals = {
+  db: () => db,
+  KEEP_FIELDS,
+  PLAIN_SETTINGS,
+  sealFor,
+  sealImage,
+  queueWrite,
 };
 
 // An item materialized from someone else's shared space. Such items

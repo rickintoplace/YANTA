@@ -3338,6 +3338,24 @@ async function handleRevokeDevice(env, req, url, headers) {
   }
   await requireVault(env, user, vaultId);
   await requireActiveVaultDevice(env, user, vaultId, currentDeviceId, req);
+  /*
+    A device removing itself on purpose ("leave"): a guest session ending,
+    or "remove YANTA from this device". It takes itself off the list
+    instead of lingering there as a device slot nobody uses any more.
+  */
+  if (targetDeviceId === currentDeviceId && url.searchParams.get("leave") === "1") {
+    await env.DB.prepare(
+      `DELETE FROM devices
+       WHERE user_id = ? AND vault_id = ? AND device_id = ?`
+    ).bind(user.userId, vaultId, currentDeviceId).run();
+    await ensureDeviceWipeTable(env);
+    await env.DB.prepare(
+      `DELETE FROM device_wipe_secrets
+       WHERE user_id = ? AND vault_id = ? AND device_id = ?`
+    ).bind(user.userId, vaultId, currentDeviceId).run();
+    await audit(env, req, "device_left", user.userId, { vaultId, deviceId: currentDeviceId });
+    return json({ ok: true, left: true }, 200, headers);
+  }
   if (targetDeviceId === currentDeviceId) {
     return json({
       ok: false,

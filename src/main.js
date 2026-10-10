@@ -3325,13 +3325,20 @@ function bindEvents() {
   $('btn-new-folder')?.addEventListener('click', () => newFolder(null));
   $('btn-theme')?.addEventListener('click', cycleAppearanceMode);
 
-  // The lock button exists only while the lock is on.
+  // The lock button exists only while the lock is on; the guest chip only in guest mode.
   const syncLockButton = async () => {
     const { getLockConfig } = await import('./lock/lock-keys.js');
+    const config = await getLockConfig();
     const btn = $('btn-lock');
-    if (btn) btn.hidden = !(await getLockConfig()).enabled;
+    if (btn) btn.hidden = !config.enabled;
+    const guest = $('btn-guest');
+    if (guest) guest.hidden = !config.guest;
   };
   $('btn-lock')?.addEventListener('click', () => lockNow());
+  $('btn-guest')?.addEventListener('click', async () => {
+    const { confirmAndWipeThisDevice } = await import('./lock/wipe-device.js');
+    await confirmAndWipeThisDevice();
+  });
   window.addEventListener('yanta-lock-config-changed', syncLockButton);
   syncLockButton();
   setupAutoLock();

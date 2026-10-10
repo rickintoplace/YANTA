@@ -2,11 +2,11 @@
 // YANTA — Yjs document registry.
 // One Y.Doc per note. Markdown notes use a Y.Text named 'markdown'.
 // Shopping-list notes use a Y.Array named 'items'.
-// Persistence: y-indexeddb (per-doc keyed by 'yanta-note-<id>').
+// Persistence: sync2/y-idb-persistence.js (per-doc keyed by 'yanta-note-<id>').
 // ============================================================
 
 import * as Y from 'yjs';
-import { IndexeddbPersistence, fetchUpdates } from 'y-indexeddb';
+import { IndexeddbPersistence, fetchUpdates } from './sync2/y-idb-persistence.js';
 import { state, store, uid } from './core.js';
 
 const docs = new Map();       // noteId -> { doc, persistence, ready }

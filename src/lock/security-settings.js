@@ -1,10 +1,10 @@
 // ============================================================
 // YANTA — Settings › Security
 //
-// App lock for this device (password, passkeys, auto-lock, lock now), and
-// "sign out and remove everything from this device". Honest about what
-// the lock does today: it keeps the workspace off the screen; the data
-// on this device is not encrypted yet.
+// App lock for this device (password, passkeys, auto-lock, lock now),
+// which also encrypts what YANTA stores here (at-rest.js), and "sign out
+// and remove everything from this device". Honest about the limits:
+// feeds and system notifications stay plain.
 // ============================================================
 
 import { el, toast } from '../core.js';
@@ -157,6 +157,53 @@ async function passkeyGroup(config, rerender) {
   return group(t('lock.passkeys.title'), hint(t('lock.passkeys.hint')), list, el('div', { class: 'yanta-security-row' }, add));
 }
 
+/** Guest mode for a computer that is not the user's (lock-keys.js). */
+function guestGroup(config, rerender) {
+  if (config.guest) {
+    const end = el('button', { type: 'button', class: 'btn danger' }, t('lock.guest.end'));
+    end.addEventListener('click', async () => {
+      const { confirmAndWipeThisDevice } = await import('./wipe-device.js');
+      await confirmAndWipeThisDevice();
+    });
+    return group(t('lock.guest.title'), el('p', { class: 'yanta-security-status' }, t('lock.guest.onHint')), end);
+  }
+
+  const start = el('button', { type: 'button', class: 'btn' }, t('lock.guest.start'));
+  start.addEventListener('click', async () => {
+    const { yantaConfirm } = await import('../dialogs.js');
+    const synced = !!window.yantaSync2?.engine;
+    const ok = await yantaConfirm({
+      title: t('lock.guest.confirmTitle'),
+      message: synced ? t('lock.guest.confirmSynced') : t('lock.guest.confirmLocal'),
+      confirmLabel: t('lock.guest.confirm'),
+      danger: !synced,
+    });
+    if (!ok) return;
+
+    const { startGuestMode } = await import('./lock-keys.js');
+    await startGuestMode();
+    const { shareKeyWithOpenTabs } = await import('./app-lock.js');
+    shareKeyWithOpenTabs();
+    toast(t('lock.guest.started'), 'success');
+    rerender();
+    sealStoredData(rerender);
+  });
+
+  return group(t('lock.guest.title'), hint(t('lock.guest.offHint')), start);
+}
+
+/** Seals what was stored before the lock; the status line follows. */
+async function sealStoredData(rerender) {
+  try {
+    const { migrateAtRest } = await import('./at-rest-migrate.js');
+    await migrateAtRest();
+  } catch (err) {
+    console.warn('[YANTA] Sealing stored data paused', err);
+    toast(t('lock.settings.sealFailed'), 'error');
+  }
+  rerender();
+}
+
 export function securitySettingsElement({ rerender }) {
   const root = el('div', { class: 'yanta-security-settings' });
 
@@ -168,13 +215,16 @@ export function securitySettingsElement({ rerender }) {
 .yanta-security-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 8px; }
 .yanta-security-row label { min-width: 180px; color: var(--text); font-size: 13px; }
 .yanta-security-passkey-name { flex: 1; min-width: 160px; color: var(--text); font-size: 13px; }
-.yanta-security-note { padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elev-2); color: var(--text-dim); font-size: 12.5px; line-height: 1.5; }
+.yanta-security-status { margin: 6px 0 0; font-size: 12.5px; color: var(--accent, var(--text)); }
+.yanta-security-note { margin: 12px 0 18px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elev-2); color: var(--text-dim); font-size: 12.5px; line-height: 1.5; }
 `;
     document.head.append(style);
   }
 
   (async () => {
     const config = await getLockConfig();
+
+    if (config.guest) root.append(guestGroup(config));
 
     // ---- App lock
     if (!config.enabled) {
@@ -184,8 +234,11 @@ export function securitySettingsElement({ rerender }) {
           submitLabel: t('lock.settings.turnOn'),
           onSubmit: async (password) => {
             await setLockPassword(password, { syncKey: await recoveryKeyForWrap() });
+            const { shareKeyWithOpenTabs } = await import('./app-lock.js');
+            shareKeyWithOpenTabs();
             toast(t('lock.settings.turnedOn'), 'success');
             rerender();
+            sealStoredData(rerender);
           },
         })
       ));
@@ -230,6 +283,7 @@ export function securitySettingsElement({ rerender }) {
 
       root.append(group(t('lock.settings.lockTitle'),
         hint(t('lock.settings.lockOnHint')),
+        el('p', { class: 'yanta-security-status' }, config.atRest?.migratedAt ? t('lock.settings.sealedStatus') : t('lock.settings.sealingStatus')),
         el('div', { class: 'yanta-security-row' }, lockNowBtn, el('span', { class: 'yanta-settings-hint' }, 'Ctrl+Shift+L')),
         el('div', { class: 'yanta-security-row' }, el('label', {}, t('lock.settings.idle')), idle),
         el('div', { class: 'yanta-security-row' }, el('label', {}, t('lock.settings.hidden')), hidden),
@@ -251,6 +305,8 @@ export function securitySettingsElement({ rerender }) {
         })
       ));
     }
+
+    if (!config.enabled && !config.guest) root.append(guestGroup(config, rerender));
 
     root.append(el('p', { class: 'yanta-security-note' }, t('lock.settings.honest')));
 

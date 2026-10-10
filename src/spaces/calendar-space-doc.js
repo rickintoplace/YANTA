@@ -21,7 +21,7 @@
 // ============================================================
 
 import * as Y from 'yjs';
-import { IndexeddbPersistence } from 'y-indexeddb';
+import { IndexeddbPersistence } from '../sync2/y-idb-persistence.js';
 
 export const CALENDAR_REMOTE_KEY = 'calendar';
 

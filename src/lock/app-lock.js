@@ -18,8 +18,12 @@ import { BRAND_LOGO_SVG } from '../brand-logo.js';
 import { extractSyncKeyFromRecoveryInput } from '../sync2/recovery-kit.js';
 
 import {
-  forgetUnlockedKey,
+  adoptUnlockedKey,
+  exportUnlockedKey,
   getLockConfig,
+  loadGuestKey,
+  loadStoredAtRestKey,
+  rememberGuestKey,
   setLockPassword,
   unlockWithPassword,
   unlockWithRecoveryKey,
@@ -348,12 +352,14 @@ function renderNewPasswordStep(card, syncKey) {
   requestAnimationFrame(() => first.focus());
 }
 
-/** Shows the lock screen (if not already) and resolves once unlocked. */
+/**
+ * Shows the lock screen (if not already) and resolves once unlocked.
+ * The key stays in memory behind it: background work goes on.
+ */
 export function showLockScreen() {
   if (screen) return waitForUnlock();
 
   ensureCss();
-  forgetUnlockedKey();
 
   screen = el('div', { class: 'yanta-lock-screen', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('lock.title') });
   const card = el('div');
@@ -370,12 +376,75 @@ export function showLockScreen() {
   return waitForUnlock();
 }
 
+/** Once the key is known: open what is sealed in localStorage, finish sealing the rest. */
+async function afterKey() {
+  const { loadSealedLocal } = await import('./sealed-local.js');
+  await loadSealedLocal();
+
+  const { resumeAtRestMigration } = await import('./at-rest-migrate.js');
+  resumeAtRestMigration();
+}
+
+/**
+ * Another tab of YANTA on this device is open and unlocked: take the key
+ * from it instead of asking again (same origin, same device — the key is
+ * in that tab's memory anyway).
+ */
+function keyFromOpenTab(timeoutMs = 350) {
+  if (!channel) return Promise.resolve(false);
+
+  return new Promise((resolve) => {
+    const id = Math.random().toString(36).slice(2);
+
+    const done = (result) => {
+      clearTimeout(timer);
+      channel.removeEventListener('message', onMessage);
+      resolve(result);
+    };
+
+    const onMessage = async (e) => {
+      if (e.data?.type !== 'key' || e.data.id !== id || !e.data.ldk) return;
+      await adoptUnlockedKey(new Uint8Array(e.data.ldk));
+      done(true);
+    };
+
+    const timer = setTimeout(() => done(false), timeoutMs);
+    channel.addEventListener('message', onMessage);
+    channel.postMessage({ type: 'key-request', id });
+  });
+}
+
+/** Gives the key to the other open tabs (the lock was just turned on here). */
+export function shareKeyWithOpenTabs() {
+  const ldk = exportUnlockedKey();
+  if (ldk) channel?.postMessage({ type: 'key', id: 'all', ldk });
+}
+
 /** At boot, before anything of the workspace is read: wait for the password when the lock is on. */
 export async function ensureUnlockedAtBoot() {
   const config = await getLockConfig();
-  if (!config.enabled || !config.password) return;
 
-  await showLockScreen();
+  if (config.guest) {
+    if ((await loadGuestKey()) || (await keyFromOpenTab())) {
+      rememberGuestKey();
+      await afterKey();
+      return;
+    }
+
+    // The guest session ended with the browser: nothing of it may stay.
+    const { wipeThisDevice } = await import('./wipe-device.js');
+    await wipeThisDevice({ syncFirst: false });
+    await new Promise(() => {}); // the page is reloading
+  }
+
+  if (!config.enabled || !config.password) {
+    // Lock off, but data sealed while it was on: the key is stored with it.
+    if (await loadStoredAtRestKey()) await afterKey();
+    return;
+  }
+
+  if (!(await keyFromOpenTab())) await showLockScreen();
+  await afterKey();
 }
 
 /** Locks every tab of YANTA on this device. */
@@ -444,7 +513,16 @@ export function setupAutoLock() {
     }
   }, true);
 
-  channel?.addEventListener('message', (e) => {
+  channel?.addEventListener('message', async (e) => {
+    // A tab starting up asks for the key; only an unlocked tab gives it.
+    if (e.data?.type === 'key-request' && !screen) {
+      const ldk = exportUnlockedKey();
+      if (ldk) channel.postMessage({ type: 'key', id: e.data.id, ldk });
+    }
+    // The lock was turned on in another tab: seal from now on here too.
+    if (e.data?.type === 'key' && e.data.id === 'all' && e.data.ldk && !exportUnlockedKey()) {
+      await adoptUnlockedKey(new Uint8Array(e.data.ldk));
+    }
     if (e.data?.type === 'lock') showLockScreen();
     if (e.data?.type === 'unlocked' && screen) finishUnlock({ broadcast: false });
     if (e.data?.type === 'wiped') location.replace('/');

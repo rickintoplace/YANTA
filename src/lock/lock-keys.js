@@ -15,12 +15,15 @@
 // costs nothing as long as the Recovery Kit exists: the recovery key
 // unwraps the LDK and a new password re-wraps it.
 //
+// The LDK also seals what this device stores (at-rest.js).
+//
 // Device-local on purpose (store.settings, not the vault): a lock is
 // "this device asks before showing anything", and a work laptop may
 // want one while the phone does not.
 // ============================================================
 
 import { store } from '../core.js';
+import { clearAtRestKey, setAtRestKeyFromLdk } from './at-rest.js';
 
 import {
   base64UrlDecode,
@@ -98,8 +101,18 @@ async function unwrap(kek, wrapped, label) {
   return new Uint8Array(plain);
 }
 
-// The unwrapped key, while unlocked. Never written anywhere.
+// The unwrapped key, once unlocked. Never written anywhere (unless the
+// lock is turned off, see disableLock). It stays in memory while the tab
+// is open, also while the lock screen shows: sync, Pulse and reminders
+// keep reading and writing the sealed data in the background.
 let unlockedLdk = null;
+
+async function adoptLdk(ldk) {
+  const first = !unlockedLdk;
+  unlockedLdk = ldk;
+  await setAtRestKeyFromLdk(ldk);
+  if (first) window.dispatchEvent(new CustomEvent('yanta-at-rest-key'));
+}
 
 export function isUnlocked() {
   return !!unlockedLdk;
@@ -110,9 +123,88 @@ export function localDataKey() {
   return unlockedLdk;
 }
 
+/** Takes the key from another open tab (app-lock.js). */
+export async function adoptUnlockedKey(ldk) {
+  if (!(ldk instanceof Uint8Array) || ldk.length !== 32) return false;
+  await adoptLdk(ldk);
+  return true;
+}
+
+/** A copy of the key, for another open tab; null while none is known. */
+export function exportUnlockedKey() {
+  return unlockedLdk ? new Uint8Array(unlockedLdk) : null;
+}
+
+/** Drops the key from memory (wipe, guest end): sealed data is unreadable afterwards. */
 export function forgetUnlockedKey() {
   if (unlockedLdk) unlockedLdk.fill(0);
   unlockedLdk = null;
+  clearAtRestKey();
+}
+
+/**
+ * With the lock off but data sealed earlier, the key is kept in the clear
+ * (see disableLock): load it at start so the workspace reads as before.
+ */
+export async function loadStoredAtRestKey() {
+  const config = await getLockConfig();
+  if (config.enabled || !config.atRest?.rawKey) return false;
+  await adoptLdk(base64UrlDecode(config.atRest.rawKey));
+  return true;
+}
+
+// ---- Guest mode: a foreign device keeps nothing past the browser session
+//
+// The key lives only in this tab's sessionStorage (and other open tabs'
+// memory). The browser closed, the key is gone: the next start finds
+// sealed data it cannot read and removes all of it (app-lock.js).
+
+const GUEST_SESSION_KEY = 'yanta.guest.key';
+
+export async function startGuestMode() {
+  const config = await getLockConfig();
+  if (config.enabled) throw new Error('lock-on');
+
+  // Lock off with data sealed earlier: keep that key, but no longer stored.
+  const ldk = unlockedLdk ? new Uint8Array(unlockedLdk) : randomBytes(32);
+  await adoptLdk(ldk);
+  rememberGuestKey();
+
+  const { rawKey, ...atRest } = config.atRest || {};
+  return saveLockConfig({
+    ...config,
+    guest: { since: Date.now() },
+    atRest: { ...atRest, on: true, since: atRest.since || Date.now() },
+  });
+}
+
+/** Keeps the key for reloads of this tab (sessionStorage dies with the browser session). */
+export function rememberGuestKey() {
+  if (!unlockedLdk) return;
+  try { sessionStorage.setItem(GUEST_SESSION_KEY, base64UrlEncode(unlockedLdk)); } catch {}
+}
+
+export async function loadGuestKey() {
+  let stored = null;
+  try { stored = sessionStorage.getItem(GUEST_SESSION_KEY); } catch {}
+  if (!stored) return false;
+  await adoptLdk(base64UrlDecode(stored));
+  return true;
+}
+
+function forgetGuestKey() {
+  try { sessionStorage.removeItem(GUEST_SESSION_KEY); } catch {}
+}
+
+/** Whether data written before the lock was turned on still waits to be sealed. */
+export function atRestMigrationPending(config) {
+  // A lock turned on before sealing existed counts as on.
+  return !!(config?.enabled || config?.atRest?.on) && !config.atRest?.migratedAt;
+}
+
+export async function markAtRestMigrated() {
+  const config = await getLockConfig();
+  return saveLockConfig({ ...config, atRest: { since: Date.now(), ...config.atRest, on: true, migratedAt: Date.now() } });
 }
 
 /**
@@ -128,10 +220,18 @@ export async function setLockPassword(password, { syncKey } = {}) {
   const passwordSalt = randomBytes(16);
   const recoverySalt = randomBytes(16);
 
+  const { rawKey, ...atRest } = config.atRest || {};
+
+  // A password makes this the user's own device: guest mode ends, the data stays.
+  const { guest, ...rest } = config;
+
   const next = {
-    ...config,
+    ...rest,
     enabled: true,
     v: 1,
+    // The lock seals what this device stores (at-rest.js); a key kept in
+    // the clear while the lock was off is dropped now.
+    atRest: { ...atRest, on: true, since: atRest.since || Date.now() },
     password: {
       salt: base64UrlEncode(passwordSalt),
       rounds: PBKDF2_ROUNDS,
@@ -143,8 +243,10 @@ export async function setLockPassword(password, { syncKey } = {}) {
     updatedAt: Date.now(),
   };
 
-  unlockedLdk = ldk;
-  return saveLockConfig(next);
+  await adoptLdk(ldk);
+  await saveLockConfig(next);
+  forgetGuestKey();
+  return next;
 }
 
 /** Unlocks with the password. Resolves true/false. */
@@ -154,7 +256,7 @@ export async function unlockWithPassword(password) {
 
   try {
     const kek = await passwordKek(password, base64UrlDecode(config.password.salt));
-    unlockedLdk = await unwrap(kek, config.password, 'password');
+    await adoptLdk(await unwrap(kek, config.password, 'password'));
     return true;
   } catch {
     return false;
@@ -168,7 +270,7 @@ export async function unlockWithRecoveryKey(syncKey) {
 
   try {
     const kek = await recoveryKek(syncKey, base64UrlDecode(config.recovery.salt));
-    unlockedLdk = await unwrap(kek, config.recovery, 'recovery');
+    await adoptLdk(await unwrap(kek, config.recovery, 'recovery'));
     return true;
   } catch {
     return false;
@@ -222,16 +324,30 @@ export async function unlockWithPasskeyOutput(credentialId, prfOutput) {
   if (!entry) return false;
 
   try {
-    unlockedLdk = await unwrap(await passkeyKek(prfOutput), entry, 'passkey');
+    await adoptLdk(await unwrap(await passkeyKek(prfOutput), entry, 'passkey'));
     return true;
   } catch {
     return false;
   }
 }
 
-/** Turns the lock off. Requires the device to be unlocked. */
+/**
+ * Turns the lock off. Requires the device to be unlocked.
+ *
+ * What is sealed stays sealed, but the key is now kept in the clear next
+ * to it — no protection any more, as the settings say — so nothing has to
+ * be rewritten, and turning the lock on again only wraps the same key.
+ */
 export async function disableLock() {
   if (!unlockedLdk) throw new Error('locked');
   const config = await getLockConfig();
-  return saveLockConfig({ ...DEFAULT_LOCK_CONFIG, idleMinutes: config.idleMinutes, hiddenMinutes: config.hiddenMinutes, enabled: false });
+  const atRest = config.atRest?.on ? { ...config.atRest, rawKey: base64UrlEncode(unlockedLdk) } : null;
+
+  return saveLockConfig({
+    ...DEFAULT_LOCK_CONFIG,
+    idleMinutes: config.idleMinutes,
+    hiddenMinutes: config.hiddenMinutes,
+    enabled: false,
+    ...(atRest ? { atRest } : {}),
+  });
 }

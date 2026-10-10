@@ -81,6 +81,7 @@ import {
   untrustedContentGate,
   collectUrls,
 } from './untrusted-content.js';
+import { getSealedItem, removeSealedItem, setSealedItem } from '../lock/sealed-local.js';
 
 import {
   runAgentLoop,
@@ -431,7 +432,7 @@ function compactStoredMessage(msg) {
 }
 
 function loadTransientConversation() {
-  const raw = localStorage.getItem(AI_CHAT_TRANSIENT_KEY);
+  const raw = getSealedItem(AI_CHAT_TRANSIENT_KEY);
   if (!raw) return [];
 
   const parsed = safeJsonParse(raw, null);
@@ -441,7 +442,7 @@ function loadTransientConversation() {
   const savedAt = Number(parsed.savedAt || 0);
 
   if (!savedAt || Date.now() - savedAt > AI_CHAT_TRANSIENT_TTL_MS) {
-    localStorage.removeItem(AI_CHAT_TRANSIENT_KEY);
+    removeSealedItem(AI_CHAT_TRANSIENT_KEY);
     return [];
   }
 
@@ -474,11 +475,11 @@ function saveTransientConversation() {
     }
 
     if (!messages.length) {
-      localStorage.removeItem(AI_CHAT_TRANSIENT_KEY);
+      removeSealedItem(AI_CHAT_TRANSIENT_KEY);
       return;
     }
 
-    localStorage.setItem(AI_CHAT_TRANSIENT_KEY, JSON.stringify({
+    setSealedItem(AI_CHAT_TRANSIENT_KEY, JSON.stringify({
       savedAt: Date.now(),
       messages,
     }));
@@ -487,7 +488,7 @@ function saveTransientConversation() {
 
 function clearTransientConversation() {
   try {
-    localStorage.removeItem(AI_CHAT_TRANSIENT_KEY);
+    removeSealedItem(AI_CHAT_TRANSIENT_KEY);
   } catch {}
 }
 

@@ -38,6 +38,7 @@ import {
   saveSemanticConfig,
   semanticModelById,
 } from './semantic-config.js';
+import { currentAtRestKey } from '../lock/at-rest.js';
 
 // ---------------- status -------------------------------------------
 
@@ -459,6 +460,11 @@ function bindListeners() {
   if (listenersBound) return;
   listenersBound = true;
 
+  // The lock was turned on while the worker runs: it seals from now on.
+  window.addEventListener('yanta-at-rest-key', () => {
+    if (worker) request({ type: 'at-rest-key', key: currentAtRestKey() }).catch(() => {});
+  });
+
   window.addEventListener('yanta-note-updated', (e) => {
     if (!semanticEnabled() || !semanticReady()) return;
 
@@ -496,6 +502,7 @@ async function start() {
       type: 'init',
       model,
       forceDevice,
+      atRestKey: currentAtRestKey(),
     });
 
     try {

@@ -11,7 +11,15 @@
 // is a plain dot product.
 // ============================================================
 
+import { adoptAtRestKey, atRestActive, isSealed, openRecord, sealRecord } from '../lock/at-rest.js';
+
 const DB_NAME = 'yanta-semantic';
+
+// Sealed while the app lock is on (lock/at-rest.js): previews are note
+// text, and embeddings can be turned back into something close to it.
+// Ids, hashes and timestamps stay readable for the indexes.
+const CHUNK_KEEP = ['key', 'noteId', 'ix', 'hash', 'updated'];
+const NOTE_KEEP = ['noteId', 'updated', 'chunkCount'];
 const DB_VERSION = 1;
 
 let db = null;
@@ -138,9 +146,11 @@ async function loadIndexFromDb() {
   index.vectors.length = 0;
   noteStamps.clear();
 
-  const chunks = await reqAsPromise(
+  const storedChunks = await reqAsPromise(
     d.transaction('chunks').objectStore('chunks').getAll()
   );
+  const aligned = await openChunksAligned(storedChunks);
+  const chunks = aligned.filter(Boolean);
 
   for (const c of chunks) {
     indexAdd(c.key, c.noteId, c.preview || '', new Float32Array(c.vec));
@@ -153,6 +163,47 @@ async function loadIndexFromDb() {
   for (const n of notes) {
     noteStamps.set(n.noteId, n.updated || 0);
   }
+
+  await sealPlainRows(d, storedChunks, aligned, notes);
+}
+
+/** Opens stored chunks; unreadable ones (sealed under an old key) are left out. */
+async function openChunks(stored) {
+  return (await openChunksAligned(stored)).filter(Boolean);
+}
+
+/** Same, but position for position (null where unreadable). */
+function openChunksAligned(stored) {
+  return Promise.all(stored.map((c) => openRecord(c, 'semantic.chunk').catch(() => null)));
+}
+
+/** The lock was turned on after these were written: seal them now. */
+async function sealPlainRows(d, storedChunks, openedChunks, notes) {
+  // openedChunks[i] belongs to storedChunks[i] (null: unreadable).
+  if (!atRestActive()) return;
+
+  const plainChunks = openedChunks.filter((c, i) => c && !isSealed(storedChunks[i]));
+  const plainNotes = notes.filter((n) => !isSealed(n));
+  if (!plainChunks.length && !plainNotes.length) return;
+
+  const sealedChunks = await Promise.all(plainChunks.map((c) => sealRecord(c, CHUNK_KEEP, 'semantic.chunk')));
+  const sealedNotes = await Promise.all(plainNotes.map((n) => sealRecord(n, NOTE_KEEP, 'semantic.note')));
+
+  const tx = d.transaction(['chunks', 'notes'], 'readwrite');
+  const chunkStore = tx.objectStore('chunks');
+  const noteStore = tx.objectStore('notes');
+
+  // Only rows still plain: one rewritten meanwhile is already sealed.
+  for (const sealed of sealedChunks) {
+    const r = chunkStore.get(sealed.key);
+    r.onsuccess = () => { if (r.result && !isSealed(r.result)) chunkStore.put(sealed); };
+  }
+  for (const sealed of sealedNotes) {
+    const r = noteStore.get(sealed.noteId);
+    r.onsuccess = () => { if (r.result && !isSealed(r.result)) noteStore.put(sealed); };
+  }
+
+  await txDone(tx);
 }
 
 // ---------------- model -------------------------------------------
@@ -251,9 +302,9 @@ async function embed(texts, kind) {
 async function handleSyncNote({ noteId, updated, title, chunks }) {
   const d = await openDb();
 
-  const stored = await reqAsPromise(
+  const stored = await openChunks(await reqAsPromise(
     d.transaction('chunks').objectStore('chunks').index('byNote').getAll(noteId)
-  );
+  ));
 
   const storedByKey = new Map(stored.map((c) => [c.key, c]));
   const wantedKeys = new Set(chunks.map((c) => `${noteId}:${c.ix}`));
@@ -280,6 +331,24 @@ async function handleSyncNote({ noteId, updated, title, chunks }) {
     }
   }
 
+  // Sealed before the transaction opens: it would not survive the await.
+  const chunkRows = await Promise.all(embedded.map(({ chunk, vector }) => sealRecord({
+    key: `${noteId}:${chunk.ix}`,
+    noteId,
+    ix: chunk.ix,
+    hash: chunk.hash,
+    preview: chunk.preview || '',
+    vec: vector.buffer.slice(0),
+    updated: Date.now(),
+  }, CHUNK_KEEP, 'semantic.chunk')));
+
+  const noteRow = await sealRecord({
+    noteId,
+    updated: updated || 0,
+    title: title || '',
+    chunkCount: chunks.length,
+  }, NOTE_KEEP, 'semantic.note');
+
   const tx = d.transaction(['chunks', 'notes'], 'readwrite');
   const chunkStore = tx.objectStore('chunks');
 
@@ -287,24 +356,11 @@ async function handleSyncNote({ noteId, updated, title, chunks }) {
     chunkStore.delete(c.key);
   }
 
-  for (const { chunk, vector } of embedded) {
-    chunkStore.put({
-      key: `${noteId}:${chunk.ix}`,
-      noteId,
-      ix: chunk.ix,
-      hash: chunk.hash,
-      preview: chunk.preview || '',
-      vec: vector.buffer.slice(0),
-      updated: Date.now(),
-    });
+  for (const row of chunkRows) {
+    chunkStore.put(row);
   }
 
-  tx.objectStore('notes').put({
-    noteId,
-    updated: updated || 0,
-    title: title || '',
-    chunkCount: chunks.length,
-  });
+  tx.objectStore('notes').put(noteRow);
 
   await txDone(tx);
 
@@ -644,7 +700,21 @@ self.onmessage = async (e) => {
   };
 
   try {
+    if (type === 'at-rest-key') {
+      adoptAtRestKey(msg.key || null);
+      // Rows written before the lock was turned on are sealed right away.
+      if (msg.key && db) {
+        const stored = await reqAsPromise(db.transaction('chunks').objectStore('chunks').getAll());
+        const notes = await reqAsPromise(db.transaction('notes').objectStore('notes').getAll());
+        await sealPlainRows(db, stored, await openChunksAligned(stored), notes);
+      }
+      reply({});
+      return;
+    }
+
     if (type === 'init') {
+      if ('atRestKey' in msg) adoptAtRestKey(msg.atRestKey || null);
+
       // Concurrent init calls share one promise (settings UI + boot).
       if (!initPromise) {
         initPromise = (async () => {

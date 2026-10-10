@@ -81,7 +81,7 @@ export async function checkRemoteWipe() {
 
   const { wipeThisDevice } = await import('./wipe-device.js');
   // Removed means this device may not push anything any more: no final sync.
-  await wipeThisDevice({ syncFirst: false });
+  await wipeThisDevice({ syncFirst: false, leave: false });
   return true;
 }
 

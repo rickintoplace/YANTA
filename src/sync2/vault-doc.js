@@ -12,7 +12,7 @@
 // ============================================================
 
 import * as Y from 'yjs';
-import { IndexeddbPersistence, fetchUpdates } from 'y-indexeddb';
+import { IndexeddbPersistence, fetchUpdates, sealUpdateFor } from './y-idb-persistence.js';
 
 const VAULT_DOC_KEY = 'yanta-vault-v1';
 
@@ -183,13 +183,16 @@ export async function prepareVaultDoc() {
   return vaultEntry;
 }
 
-function replacePersistedUpdates(persistence, update) {
+async function replacePersistedUpdates(persistence, update) {
+  const sealed = await sealUpdateFor(persistence, update);
+  await persistence.whenWritten();
+
   return new Promise((resolve, reject) => {
     const tx = persistence.db.transaction(['updates'], 'readwrite');
     const updates = tx.objectStore('updates');
 
     updates.clear();
-    updates.add(update);
+    updates.add(sealed);
 
     tx.oncomplete = () => resolve();
     tx.onerror = () => reject(tx.error);

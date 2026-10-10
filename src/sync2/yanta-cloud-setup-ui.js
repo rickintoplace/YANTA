@@ -2,6 +2,7 @@
 // YANTA Sync2 — YANTA Cloud setup UI
 // ============================================================
 
+import { t } from '../i18n/index.js';
 import {
   el,
   store,
@@ -372,6 +373,18 @@ function ensureCss() {
   color: var(--text-dim);
   line-height: 1.45;
 }
+
+.yanta-cloud-guest-option {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  font-size: 12.5px;
+  color: var(--text-dim);
+  line-height: 1.4;
+  cursor: pointer;
+}
+
+.yanta-cloud-guest-option input { margin-top: 2px; }
 
 .yanta-cloud-grid {
   display: grid;
@@ -900,6 +913,36 @@ export async function openYantaCloudSetup({
   }
 }
 
+// "Not my device": guest mode starts right after signing in, before the
+// workspace arrives, so all of it is stored sealed (lock/lock-keys.js).
+let guestRequested = false;
+
+function guestOptionHtml() {
+  return `
+    <label class="yanta-cloud-guest-option" data-guest-option>
+      <input type="checkbox" data-guest ${guestRequested ? 'checked' : ''} />
+      <span>${escapeHtml(t('lock.guest.loginOption'))}</span>
+    </label>`;
+}
+
+async function hideGuestOptionOnOwnDevice() {
+  const { getLockConfig } = await import('../lock/lock-keys.js');
+  const config = await getLockConfig();
+  if (config.enabled || config.guest) modal?.querySelector('[data-guest-option]')?.remove();
+}
+
+async function enterGuestMode() {
+  const { getLockConfig, startGuestMode } = await import('../lock/lock-keys.js');
+  const config = await getLockConfig();
+  if (config.enabled || config.guest) return;
+
+  await startGuestMode();
+  const { shareKeyWithOpenTabs } = await import('../lock/app-lock.js');
+  shareKeyWithOpenTabs();
+  const { migrateAtRest } = await import('../lock/at-rest-migrate.js');
+  migrateAtRest().catch((err) => console.warn('[YANTA] Sealing stored data paused', err));
+}
+
 function renderLogin() {
   renderShell('YANTA Cloud Login', `
     <div class="yanta-cloud-hero">
@@ -915,12 +958,14 @@ function renderLogin() {
       <div class="yanta-cloud-grid">
         <input class="text-input" data-email placeholder="you@example.com" autocomplete="email" />
         <div data-turnstile></div>
+        ${guestOptionHtml()}
         <button class="btn primary" data-send-code>${lucide('mail', 14)} Send code</button>
       </div>
     </section>
   `);
 
   renderTurnstile(modal.querySelector('[data-turnstile]'));
+  hideGuestOptionOnOwnDevice();
 
   modal.querySelector('[data-send-code]')?.addEventListener('click', async () => {
     const email = modal.querySelector('[data-email]')?.value?.trim();
@@ -933,6 +978,7 @@ function renderLogin() {
     try {
       setStatus('Sending code…');
 
+      guestRequested = !!modal.querySelector('[data-guest]')?.checked;
       await cloudSendCode(email, turnstileToken);
 
       renderCode(email);
@@ -983,6 +1029,7 @@ function renderCode(email) {
       setStatus('Verifying…');
 
       await cloudVerifyCode(email, code);
+      if (guestRequested) await enterGuestMode();
 
       const me = await cloudMe();
       await renderCloudHome(me);
@@ -2815,12 +2862,14 @@ function renderLoginForPendingPairing(pairingText) {
       <div class="yanta-cloud-grid">
         <input class="text-input" data-email placeholder="you@example.com" autocomplete="email" />
         <div data-turnstile></div>
+        ${guestOptionHtml()}
         <button class="btn primary" data-send-code>${lucide('mail', 14)} Send code</button>
       </div>
     </section>
   `);
 
   renderTurnstile(modal.querySelector('[data-turnstile]'));
+  hideGuestOptionOnOwnDevice();
 
   modal.querySelector('[data-send-code]')?.addEventListener('click', async () => {
     const email = modal.querySelector('[data-email]')?.value?.trim();
@@ -2833,6 +2882,7 @@ function renderLoginForPendingPairing(pairingText) {
     try {
       setStatus('Sending code…');
 
+      guestRequested = !!modal.querySelector('[data-guest]')?.checked;
       await cloudSendCode(email, turnstileToken);
 
       renderCodeForPendingPairing(email, pairingText);
@@ -2885,6 +2935,7 @@ function renderCodeForPendingPairing(email, pairingText) {
       setStatus('Verifying…');
 
       await cloudVerifyCode(email, code);
+      if (guestRequested) await enterGuestMode();
 
       await connectYantaCloudFromPairing(pairingText);
     } catch (err) {

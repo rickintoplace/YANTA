@@ -16,7 +16,7 @@
 // ============================================================
 
 import * as Y from 'yjs';
-import { IndexeddbPersistence } from 'y-indexeddb';
+import { IndexeddbPersistence } from '../sync2/y-idb-persistence.js';
 
 export const WORKSPACE_REMOTE_KEY = 'workspace';
 

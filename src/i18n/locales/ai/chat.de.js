@@ -110,6 +110,7 @@ export default {
   },
 
   cite: {
+    sourceMissing: 'Diese Quelle wurde nicht mit der Nachricht gespeichert – meist bei älteren Antworten oder Karten.',
     open: 'Quelle öffnen',
     openNote: 'Notiz öffnen',
     copyLink: 'Link kopieren',

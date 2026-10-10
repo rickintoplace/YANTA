@@ -273,7 +273,7 @@ function openCitePopover(sup, { byN, byClaim, order, group }) {
         ${lucide(KIND_ICON[kind] || 'globe', 13)}
         <div class="yanta-cite-pop-title">
           <span>${escapeHtml(source?.title || t('ai.chat.cite.unknownSource'))}</span>
-          <small>${escapeHtml(host || t(`ai.chat.cite.kind.${KIND_ICON[kind] ? kind : 'web'}`))}</small>
+          ${source ? `<small>${escapeHtml(host || t(`ai.chat.cite.kind.${KIND_ICON[kind] ? kind : 'web'}`))}</small>` : ''}
         </div>
       </div>
     `;
@@ -325,12 +325,22 @@ function openCitePopover(sup, { byN, byClaim, order, group }) {
       }));
     }
 
-    actions.append(actionButton('list', t('ai.chat.cite.showInSources'), () => {
-      closeCitePopover();
-      revealInSources(group, display);
-    }));
+    // Only when there is a list to show it in.
+    if (source && document.querySelector(`details[data-cite-group="${group}"]`)) {
+      actions.append(actionButton('list', t('ai.chat.cite.showInSources'), () => {
+        closeCitePopover();
+        revealInSources(group, display);
+      }));
+    }
 
-    section.append(actions);
+    if (!source) {
+      const missing = document.createElement('p');
+      missing.className = 'yanta-cite-pop-missing';
+      missing.textContent = t('ai.chat.cite.sourceMissing');
+      section.append(missing);
+    }
+
+    if (actions.childElementCount) section.append(actions);
     pop.append(section);
   }
 
@@ -800,6 +810,12 @@ function injectCitationStyles() {
 
 .yanta-cite-pop-action svg {
   color: var(--text-dim);
+}
+
+.yanta-cite-pop-missing {
+  margin: 8px 0 0;
+  color: var(--text-dim);
+  font-size: 12px;
 }
 
 .yanta-cite-pop-foot {

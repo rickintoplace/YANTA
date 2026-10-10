@@ -9,8 +9,9 @@
 // Settings → Pulse presents them as one-tap suggestions.
 // ============================================================
 
-import { getRoutine } from './pulse-routines.js';
+import { getRoutine, patchPulseBlock } from './pulse-routines.js';
 import { skillManageAction } from '../ai/skills.js';
+import { writeBrainNote } from '../ai/brain.js';
 
 const SEEDED_KEY = 'yanta.pulse.starters.seeded.v1';
 
@@ -20,7 +21,7 @@ export const STARTER_ROUTINES = [
     markdown: `---
 name: morning-brief
 description: A short weekday overview before the day starts
-version: 1.0.0
+version: 1.1.0
 metadata:
   yanta:
     category: pulse
@@ -44,12 +45,13 @@ Give the user a calm, honest picture of the day in the time it takes to drink th
 
 1. Call \`search_events\` with range "today" to get the day's calendar.
 2. Call \`rss_search_items\` with unreadOnly=true, limit 20, to see what arrived overnight.
-3. Look for the two or three things that actually change how the day should go: a first meeting earlier than usual, a conflict, a deadline, something genuinely notable in the feeds.
-4. Call \`pulse_emit\` with a headline naming the shape of the day and a body of at most five short lines.
+3. Find what changes how the day should go: the first appointment, overlaps, a tight gap, a deadline, a free afternoon worth protecting.
+4. From the feeds take at most two items, and only ones that need attention today (a security issue, a disruption, something the user's notes show they follow). General news belongs in the feed digest, not here.
+5. Call \`pulse_emit\` with a headline naming the shape of the day and a body of at most five short lines, calendar first.
 
 ## Stay silent when
 
-- There are no events and nothing unread.
+- There are no events and nothing unread that needs attention today.
 - The day is unremarkable and the brief would just restate an empty calendar.
 `,
   },
@@ -59,7 +61,7 @@ Give the user a calm, honest picture of the day in the time it takes to drink th
     markdown: `---
 name: loose-ends
 description: Weekly sweep for things that were started and quietly dropped
-version: 1.0.0
+version: 1.1.0
 metadata:
   yanta:
     category: pulse
@@ -80,10 +82,11 @@ Surface work that was begun and abandoned, before it turns into a pile the user 
 
 ## Procedure
 
-1. Use \`semantic_search_notes\` for open questions, decisions that were never made, and drafts that trail off.
-2. Use \`search_events\` over the past week to find meetings that produced no note.
-3. Pick at most five items. Prefer the ones that are cheap to finish or expensive to forget.
-4. Call \`pulse_emit\` with a short list. For each item, one line: what it is, and the smallest next step.
+1. Call \`search_notes\` with an empty query and limit 30 to get the most recently edited notes, then \`read_notes\` on the ones edited in the last 30 days. Skip Pulse logs, AI Brain notes and plain lists like shopping lists.
+2. In them, look for: open questions and undecided choices, TODOs, deadlines in the next weeks, and drafts that stop mid-sentence.
+3. Call \`search_events\` for the past 7 days. For meetings and workshops, check with \`search_notes\` (the event's key words) whether any note records the outcome; a meeting without one is a loose end.
+4. Pick at most five items. Prefer the ones with a date coming up, or that are cheap to finish, or expensive to forget.
+5. Call \`pulse_emit\` with one line per item: what it is, the smallest next step, and the date if there is one.
 
 ## Stay silent when
 
@@ -97,7 +100,7 @@ Surface work that was begun and abandoned, before it turns into a pile the user 
     markdown: `---
 name: feed-digest
 description: Groups new unread articles into one digest instead of many alerts
-version: 1.0.0
+version: 1.1.0
 metadata:
   yanta:
     category: pulse
@@ -119,9 +122,9 @@ Turn a stream of unread articles into one thing worth reading, so the feed never
 ## Procedure
 
 1. Call \`rss_search_items\` with unreadOnly=true, limit 30.
-2. Group the items by topic, not by source.
-3. Drop anything that is a rewrite of a story already covered by another item.
-4. Call \`pulse_emit\` with one line per topic: what happened, and which item to read if the user only reads one.
+2. Group the items by topic, not by source; several articles on one story are one topic.
+3. Keep at most five topics, the ones the user is most likely to act on or talk about. Leave out sports results, gossip and routine product news unless the user's notes show they follow it.
+4. Call \`pulse_emit\` with one line per topic, most important first: what happened, in one sentence, with its citation. No intro, no "if you read only one", no list of what was left out.
 
 ## Stay silent when
 
@@ -130,6 +133,63 @@ Turn a stream of unread articles into one thing worth reading, so the feed never
 `,
   },
 ];
+
+/*
+  Earlier versions of the starters, by a hash of their text with the
+  enabled flag normalised. A seeded starter that still matches one was
+  never edited, so it moves to the current version (keeping on/off);
+  one the user changed is left alone.
+*/
+const FORMER_STARTERS = {
+  'morning-brief': new Set(['im1wru']),
+  'loose-ends': new Set(['85we1g']),
+  'feed-digest': new Set(['18v85m']),
+};
+
+function starterHash(markdown) {
+  const text = String(markdown || '')
+    .replace(/^(\s+enabled\s*:\s*)(true|false)\s*$/m, '$1false')
+    .trim();
+
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193) >>> 0;
+  }
+
+  return hash.toString(36);
+}
+
+/** Brings untouched seeded starters up to the current version. */
+export async function upgradeStarterRoutines() {
+  let upgraded = 0;
+
+  for (const starter of STARTER_ROUTINES) {
+    const routine = await getRoutine(starter.name);
+    if (!routine?.noteId) continue;
+    if (!FORMER_STARTERS[starter.name]?.has(starterHash(routine.markdown))) continue;
+
+    try {
+      await writeBrainNote({
+        noteId: routine.noteId,
+        body: patchPulseBlock(starter.markdown, 'enabled', routine.enabled ? 'true' : 'false'),
+        mode: 'replace',
+        target: 'skill',
+      });
+      upgraded++;
+    } catch (err) {
+      console.warn('[YANTA Pulse] starter upgrade failed', starter.name, err);
+    }
+  }
+
+  if (upgraded) {
+    window.dispatchEvent(new CustomEvent('yanta-pulse-routines-changed', {
+      detail: { upgraded },
+    }));
+  }
+
+  return upgraded;
+}
 
 /** Grace period for a first sync to deliver routines another device seeded. */
 const HYDRATION_TIMEOUT_MS = 20_000;
@@ -166,7 +226,11 @@ function vaultHydrated() {
 export async function ensureStarterRoutines() {
   const { store } = await import('../core.js');
 
-  if (await store.settings.get(SEEDED_KEY, false).catch(() => false)) return;
+  if (await store.settings.get(SEEDED_KEY, false).catch(() => false)) {
+    await vaultHydrated();
+    await upgradeStarterRoutines();
+    return;
+  }
 
   await vaultHydrated();
 

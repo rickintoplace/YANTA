@@ -3529,6 +3529,7 @@ async function checkAnswerCitations({ sources, thread, mode, signal }) {
 
   try {
     let check = await checkCitations(msg.content, sources, { signal });
+    if (check?.text) msg.content = check.text;
 
     if (check?.verdict === 'revise' && mode === 'revise' && check.instructionsForModel) {
       setAssistantBusy(true, t('ai.chat.busy.fixingCitations'));
@@ -3548,12 +3549,13 @@ async function checkAnswerCitations({ sources, thread, mode, signal }) {
       if (text) {
         msg.content = text;
         check = await checkCitations(text, sources, { signal });
+        if (check?.text) msg.content = check.text;
         if (check) check.revised = true;
       }
     }
 
     if (check) {
-      const { instructionsForModel, ...stored } = check;
+      const { instructionsForModel, text: _text, ...stored } = check;
       msg.citeCheck = stored;
     } else {
       delete msg.citeCheck;

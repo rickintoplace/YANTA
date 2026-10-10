@@ -180,7 +180,10 @@ export async function hasAnyDailyNote() {
 }
 
 export async function getOrCreateTodayNote() {
-  const folder = await ensureJournalFolder();
+  return getOrCreateDailyNoteIn(await ensureJournalFolder());
+}
+
+async function getOrCreateDailyNoteIn(folder) {
   const key = dailyKey();
 
   const existing = findDailyNoteIn(folder.id, key);
@@ -307,6 +310,90 @@ export async function captureToJournal(text, {
   }));
 
   window.dispatchEvent(new CustomEvent('yanta-dashboard-refresh'));
+
+  return note;
+}
+
+// ---------------- routine logs ------------------------------------
+
+/*
+  What a Pulse routine files "to the journal" goes into its own log, not
+  into the user's daily note: Journal / Pulse / <routine> / YYYY-MM-DD.
+  A daily note is the user's own page; a morning brief every weekday
+  turned it into a feed, and on days the user wrote nothing it created
+  daily notes that held nothing but briefs.
+*/
+const PULSE_LOG_FOLDER_NAME = 'Pulse';
+const PULSE_LOG_ICON = 'activity';
+const ROUTINE_LOG_ICON = 'scroll-text';
+
+async function ensureChildFolder(parent, name, icon, key) {
+  const config = await store.settings.get(SETTING_KEY, {});
+  const known = config?.logFolders?.[key];
+
+  // By id first, so a folder the user renamed keeps receiving entries.
+  let folder = usableFolder(known ? state.folders.get(known) : null);
+  if (folder && folder.parentId !== parent.id) folder = null;
+
+  folder ||= [...state.folders.values()].find((f) =>
+    usableFolder(f) && f.parentId === parent.id && f.name === name
+  ) || null;
+
+  if (!folder) {
+    folder = await newFolder(parent.id, { name, focusRename: false, source: 'pulse' });
+    folder.icon = icon;
+    folder.updated = Date.now();
+    state.folders.set(folder.id, folder);
+    await store.folders.put(folder);
+    // Logs are for looking things up later, not for the sidebar to unfold.
+    state.expandedFolders.delete(folder.id);
+    renderTree();
+  }
+
+  if (known !== folder.id) {
+    await store.settings.set(SETTING_KEY, {
+      ...config,
+      logFolders: { ...(config?.logFolders || {}), [key]: folder.id },
+    });
+  }
+
+  return folder;
+}
+
+/**
+ * Appends a timestamped entry to today's page of a routine's log
+ * (Journal / Pulse / <routine title> / YYYY-MM-DD).
+ */
+export async function captureToRoutineLog(text, { routineName, routineTitle = '' } = {}) {
+  const trimmed = String(text || '').trim();
+  if (!trimmed || !routineName) return null;
+
+  const journal = await ensureJournalFolder();
+  const pulse = await ensureChildFolder(journal, PULSE_LOG_FOLDER_NAME, PULSE_LOG_ICON, 'pulse');
+  const folder = await ensureChildFolder(pulse, routineTitle || routineName, ROUTINE_LOG_ICON, `pulse:${routineName}`);
+  const note = await getOrCreateDailyNoteIn(folder);
+
+  const entry = getNoteDoc(note.id);
+  await entry.ready;
+
+  const ytext = entry.doc.getText('markdown');
+  const lines = trimmed.split('\n');
+  const bullet = [
+    `- **${timeChip()}** ${lines[0]}`,
+    ...lines.slice(1).map((line) => `  ${line}`),
+  ].join('\n');
+
+  const body = ytext.toString();
+  const prefix = body.length > 0 && !body.endsWith('\n') ? '\n' : '';
+  ytext.insert(ytext.length, prefix + bullet + '\n');
+
+  note.updated = Date.now();
+  await store.notes.put(note);
+  state.searchIndex.set(note.id, searchHaystack(note, ytext.toString()));
+
+  window.dispatchEvent(new CustomEvent('yanta-note-updated', {
+    detail: { noteId: note.id, reason: 'pulse-log', source: `pulse:${routineName}` },
+  }));
 
   return note;
 }

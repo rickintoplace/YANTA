@@ -111,6 +111,7 @@ export default {
   },
 
   cite: {
+    sourceMissing: 'この出典はメッセージと一緒に保存されていません（主に古い回答やカード）。',
     open: 'ソースを開く',
     openNote: 'ノートを開く',
     copyLink: 'リンクをコピー',

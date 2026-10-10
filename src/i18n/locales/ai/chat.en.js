@@ -139,6 +139,7 @@ export default {
   },
 
   cite: {
+    sourceMissing: 'This source was not saved with the message — usually an older answer or card.',
     open: 'Open source',
     openNote: 'Open note',
     copyLink: 'Copy link',

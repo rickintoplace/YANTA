@@ -109,6 +109,7 @@ export default {
   },
 
   cite: {
+    sourceMissing: 'Cette source n’a pas été enregistrée avec le message — en général une réponse ou une carte plus ancienne.',
     open: 'Ouvrir la source',
     openNote: 'Ouvrir la note',
     copyLink: 'Copier le lien',

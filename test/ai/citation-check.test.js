@@ -89,3 +89,39 @@ describe('checkCitations', () => {
     expect(await checkCitations('Just an answer.', reg)).toBeNull();
   });
 });
+
+describe('citation number repair', () => {
+  it('moves a quote cited under the wrong number to the one source that holds it', async () => {
+    const reg = createSourceRegistry();
+    reg.register('rss_search_items', { items: [
+      { id: 'a', title: 'iPad mini', summary: 'Apple hat ein neues iPad mini vorgestellt.' },
+      { id: 'b', title: 'Ticket', summary: 'Das Deutschlandticket kostet ab Januar 2027 63 Euro pro Monat.' },
+    ] });
+
+    const answer = [
+      'Das Ticket kostet ab 2027 63 Euro.[1]{c1}',
+      '',
+      'EVI1',
+      'c1|1|"Das Deutschlandticket kostet ab Januar 2027 63 Euro pro Monat."',
+      'END_EVI1',
+    ].join('\n');
+
+    const check = await checkCitations(answer, reg);
+
+    expect(check.renumbered).toBe(1);
+    expect(check.text).toContain('63 Euro.[2]{c1}');
+    expect(check.text).toContain('c1|2|');
+    expect(check.items[0]).toMatchObject({ n: 2, matched: true, ok: true });
+  });
+
+  it('leaves a quote found nowhere alone', async () => {
+    const reg = createSourceRegistry();
+    reg.register('web_read', { url: 'https://x', title: 'X', text: PAGE });
+
+    const answer = 'Made up.[1]{c1}\n\nEVI1\nc1|1|"This sentence is not in any source at all."\nEND_EVI1';
+    const check = await checkCitations(answer, reg);
+
+    expect(check.text).toBeNull();
+    expect(check.items[0].matched).toBe(false);
+  });
+});

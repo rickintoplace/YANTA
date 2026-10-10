@@ -73,27 +73,37 @@ export function createSourceRegistry() {
 
     switch (toolName) {
       case 'web_read':
-        return { ...result, ...note(add('web', result, result.text)) };
+        return { ...note(add('web', result, result.text)), ...result };
 
       case 'web_search':
         if (!Array.isArray(result.results)) return undefined;
         return {
           ...result,
           results: result.results.map((r) => ({
-            ...r,
             ...note(add('web', r, [r.title, r.description].filter(Boolean).join('\n'))),
+            ...r,
+          })),
+        };
+
+      case 'rss_search_items':
+        if (!Array.isArray(result.items)) return undefined;
+        return {
+          ...result,
+          items: result.items.map((item) => ({
+            ...note(add('rss', item, [item.title, item.summary].filter(Boolean).join('\n'))),
+            ...item,
           })),
         };
 
       case 'rss_read_item':
-        return { ...result, ...note(add('rss', result, result.fullText || result.contentText || result.summaryText)) };
+        return { ...note(add('rss', result, result.fullText || result.contentText || result.summaryText)), ...result };
 
       case 'read_note':
-        return { ...result, ...note(add('note', result, result.markdown)) };
+        return { ...note(add('note', result, result.markdown)), ...result };
 
       case 'read_notes':
         if (!Array.isArray(result)) return undefined;
-        return result.map((r) => (r && typeof r === 'object' ? { ...r, ...note(add('note', r, r.markdown)) } : r));
+        return result.map((r) => (r && typeof r === 'object' ? { ...note(add('note', r, r.markdown)), ...r } : r));
 
       default:
         return undefined;

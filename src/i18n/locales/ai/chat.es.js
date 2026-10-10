@@ -109,6 +109,7 @@ export default {
   },
 
   cite: {
+    sourceMissing: 'Esta fuente no se guardó con el mensaje; suele pasar con respuestas o tarjetas antiguas.',
     open: 'Abrir fuente',
     openNote: 'Abrir nota',
     copyLink: 'Copiar enlace',

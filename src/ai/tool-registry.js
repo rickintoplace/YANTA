@@ -234,15 +234,16 @@ export const TOOL_REGISTRY = [
     description: [
       'Keyword search over the user\'s notes (title, tags, body). Returns ids, titles, folders and tags — read a note to see its text.',
       'Use the words the note would contain; all words must occur. For meaning-based queries prefer semantic_search_notes.',
+      'An empty query ("") lists the most recently edited notes, newest first — use it for sweeps over recent work.',
       'Example: {"query":"budget Q3","limit":5}',
     ].join('\n'),
     parameters: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: 'One or more keywords; case-insensitive.' },
+        query: { type: 'string', description: 'One or more keywords; case-insensitive. Empty for the most recently edited notes.' },
         limit: { type: 'number', default: 10, description: 'Max results, 1-50.' },
       },
-      required: ['query'],
+      required: [],
     },
     execute: searchNotesAction,
   },

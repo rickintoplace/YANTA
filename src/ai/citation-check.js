@@ -110,14 +110,62 @@ export const CITATION_PROBLEM_TYPES = new Set([
   'ellipsis_hides_qualifier',
 ]);
 
+/*
+  Small models often quote the right text under the wrong number — they
+  count the items themselves instead of reading each one's `cite`. When a
+  quote is not in the source it names but is found, verbatim or nearly,
+  in exactly one other source the run read, the number is corrected in
+  both the text and the appendix. Nothing is invented: a quote found
+  nowhere, or in several places, stays as written and fails the check.
+*/
+function repairCitationNumbers(answer, documents, { parseAnswer, matchQuoteAgainstText }) {
+  const parsed = parseAnswer(answer);
+  let text = answer;
+  let repaired = 0;
+
+  const found = (quote, doc) => {
+    const m = matchQuoteAgainstText(quote, doc?.text || '');
+    return m.method !== 'not_found' && m.score >= 0.9;
+  };
+
+  for (const ev of parsed.evidence || []) {
+    const n = Number(ev.sourceIndex);
+    if (!ev.quote || found(ev.quote, documents[n - 1])) continue;
+
+    const hits = documents
+      .map((doc, i) => (found(ev.quote, doc) ? i + 1 : 0))
+      .filter(Boolean);
+
+    if (hits.length !== 1) continue;
+
+    const to = hits[0];
+    const claim = ev.claimId.replace(/^c/, '');
+
+    // The marker: "[n]" inside the bracket run right before {cX}.
+    text = text.replace(new RegExp(`((?:\\[\\d+\\])*)\\{c${claim}\\}`), (run) =>
+      run.replace(`[${n}]`, `[${to}]`)
+    );
+    // The appendix line for this claim and number.
+    text = text.replace(new RegExp(`^(c${claim}\\|)${n}(\\|)`, 'm'), `$1${to}$2`);
+    repaired++;
+  }
+
+  return { text, repaired };
+}
+
 /**
  * Checks `answer` against the registry's sources. Returns a compact,
- * storable result, or null when the answer cites nothing.
+ * storable result, or null when the answer cites nothing. When citation
+ * numbers had to be corrected, `text` holds the corrected answer — store
+ * that instead of the original.
  */
 export async function checkCitations(answer, sources, { signal = null } = {}) {
   if (!hasCitations(answer) || !sources?.size) return null;
 
-  const { verifyAnswer, gateReport, parseAnswer } = await import('veriquote');
+  const { verifyAnswer, gateReport, parseAnswer, matchQuoteAgainstText } = await import('veriquote');
+
+  const fixed = repairCitationNumbers(answer, sources.documents(), { parseAnswer, matchQuoteAgainstText });
+  answer = fixed.text;
 
   // Never more citations than the protocol allows; extra ones stay unchecked.
   const parsed = parseAnswer(answer);
@@ -174,6 +222,8 @@ export async function checkCitations(answer, sources, { signal = null } = {}) {
       : 'pass';
 
   return {
+    text: fixed.repaired ? answer : null,
+    renumbered: fixed.repaired,
     verdict, // pass | revise | unverified
     judged: decisionsAvailable(),
     passed: items.filter((i) => i.ok).length,

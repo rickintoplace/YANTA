@@ -3,6 +3,7 @@
 // pane divider, history navigation, view modes.
 // ============================================================
 
+import { ensureUnlockedAtBoot, lockNow, setupAutoLock } from './lock/app-lock.js';
 import { isChatEnabled } from './chat/chat-enabled.js';
 import { installMobileTabBar } from './mobile-tab-bar.js';
 import { $, state, store, openDB, toast, actionToast, cssColorToHex, safeCssColor, lucide, lucideCalendarDay, ensureLucideIcons, debounce } from './core.js';
@@ -2067,6 +2068,9 @@ async function init() {
 
   await openDB();
 
+  // App lock: nothing of the workspace is read before the password.
+  await ensureUnlockedAtBoot();
+
   // Create the VaultDoc first, healing any bloated local CRDT history before
   // anything else references it. Must run before installVaultStoreBridge and
   // before any chat/sync code touches the doc.
@@ -3316,6 +3320,17 @@ function bindEvents() {
   });
   $('btn-new-folder')?.addEventListener('click', () => newFolder(null));
   $('btn-theme')?.addEventListener('click', cycleAppearanceMode);
+
+  // The lock button exists only while the lock is on.
+  const syncLockButton = async () => {
+    const { getLockConfig } = await import('./lock/lock-keys.js');
+    const btn = $('btn-lock');
+    if (btn) btn.hidden = !(await getLockConfig()).enabled;
+  };
+  $('btn-lock')?.addEventListener('click', () => lockNow());
+  window.addEventListener('yanta-lock-config-changed', syncLockButton);
+  syncLockButton();
+  setupAutoLock();
 
   const openImportMenuFrom = (anchor) => {
     if (!anchor) return;

@@ -815,6 +815,35 @@ export default {
     },
   },
 
+  lock: {
+    title: 'YANTA はロックされています',
+    hint: '続けるにはパスワードを入力してください。',
+    password: 'パスワード',
+    unlock: 'ロック解除',
+    forgot: 'パスワードを忘れた場合',
+    wait: '試行回数が多すぎます。{seconds} 秒後に再試行してください。',
+    wrong: 'パスワードが違います。',
+    recoveryKey: '回復キー',
+    useRecovery: '回復キーで解除',
+    recoveryTitle: '回復キーを使う',
+    recoveryHint: '回復キーは Recovery Kit（設定 › 同期とバックアップ）に記載されています。新しいパスワードを設定できます。',
+    recoveryWrong: 'この回復キーはこのデバイスに対応していません。',
+    wipeInstead: 'どちらもない場合：このデバイスから YANTA を削除',
+    newPassword: '新しいパスワード',
+    repeatPassword: 'パスワードを再入力',
+    saveAndUnlock: '保存して解除',
+    newPasswordTitle: '新しいパスワードを設定',
+    tooShort: '6 文字以上にしてください。',
+    mismatch: 'パスワードが一致しません。',
+    lockNow: '今すぐロック',
+    wipeTitle: 'サインアウトしてこのデバイスから削除',
+    wipeMessageSynced: 'このブラウザーに YANTA が保存しているノート、図、カレンダー、キー、設定をすべて削除します。同期済みのワークスペースはクラウドに（暗号化されて）残り、Recovery Kit でどのデバイスにも復元できます。未同期の変更は失われます。',
+    wipeMessageLocal: 'このブラウザーに YANTA が保存しているものをすべて削除します。このワークスペースは同期されていないため、ここにしかないデータは完全に失われます。必要なら先にバックアップをエクスポートしてください。',
+    wipeConfirm: 'すべて削除',
+    wiping: '削除中…',
+    settings: { never: 'しない', immediately: 'すぐに', minutes: { other: '{count} 分後' }, currentPassword: '現在のパスワード', lockTitle: 'このデバイスのアプリロック', lockOffHint: '起動時、休憩後、または手動でロックしたときに、YANTA は何かを表示する前にパスワードを求めます。設定はデバイスごとです。', turnOn: 'アプリロックをオンにする', turnedOn: 'アプリロックがオンになりました', lockOnHint: '起動時と下の時間が経過したときに YANTA はパスワードを求めます。忘れた場合は回復キーで解除し、新しいパスワードを設定できます。', idle: '操作がないときにロック', hidden: 'バックグラウンドでロック', noRecovery: '回復キーがまだ紐付いていません。同期を設定したらパスワードを再設定するか、パスワードを大切に保管してください。', turnOff: 'アプリロックをオフにする', turnedOff: 'アプリロックがオフになりました', changeTitle: 'パスワードを変更', change: 'パスワードを変更', changed: 'パスワードを変更しました', honest: '現在のロックの働き：ロック解除まで画面からワークスペースを隠し、バックグラウンド処理を止めます。このデバイス上のデータはまだ暗号化されていないため、このコンピューターに完全にアクセスできる人は読むことができます。パスワードによる暗号化が次のステップです。', deviceTitle: '借りたパソコンや共有パソコンですか？', deviceHint: 'サインアウトして、このブラウザーに YANTA が保存したものをすべて削除します。同期済みのワークスペースはクラウドで安全に保たれます。' },
+  },
+
   privacy: {
     hideFromAi: 'YANTA AI から隠す',
     showToAi: 'YANTA AI に再び表示',
@@ -897,6 +926,7 @@ export default {
 
     nav: {
       appearance: '外観',
+      security: 'セキュリティ',
       language: '言語',
       colors: '配色',
       typography: 'タイポグラフィ',
@@ -918,6 +948,7 @@ export default {
 
     sections: {
       appearance: { title: '外観', subtitle: 'YANTA の見た目を選びます。' },
+      security: { title: 'セキュリティ', subtitle: 'このデバイスで YANTA をロックし、使わなくなったデバイスから削除します。' },
       colors: { title: '配色', subtitle: 'カラーパレットをカスタマイズします。ダークモードとライトモードは個別に設定します。' },
       typography: { title: 'タイポグラフィ', subtitle: 'フォントとサイズを選びます。' },
       shortcuts: { title: 'ショートカット', subtitle: 'エディターの書式コマンドのキーを変更します。' },

@@ -825,6 +825,35 @@ export default {
     },
   },
 
+  lock: {
+    title: 'YANTA ist gesperrt',
+    hint: 'Gib dein Passwort ein, um weiterzumachen.',
+    password: 'Passwort',
+    unlock: 'Entsperren',
+    forgot: 'Passwort vergessen?',
+    wait: 'Zu viele Versuche. Nochmal in {seconds} s.',
+    wrong: 'Das ist nicht das Passwort.',
+    recoveryKey: 'Wiederherstellungsschlüssel',
+    useRecovery: 'Mit Wiederherstellungsschlüssel entsperren',
+    recoveryTitle: 'Wiederherstellungsschlüssel verwenden',
+    recoveryHint: 'Der Wiederherstellungsschlüssel steht in deinem Recovery Kit (Einstellungen › Sync & Backup). Damit kannst du ein neues Passwort festlegen.',
+    recoveryWrong: 'Dieser Wiederherstellungsschlüssel passt nicht zu diesem Gerät.',
+    wipeInstead: 'Beides nicht zur Hand? YANTA von diesem Gerät entfernen',
+    newPassword: 'Neues Passwort',
+    repeatPassword: 'Passwort wiederholen',
+    saveAndUnlock: 'Speichern und entsperren',
+    newPasswordTitle: 'Neues Passwort festlegen',
+    tooShort: 'Mindestens 6 Zeichen.',
+    mismatch: 'Die Passwörter stimmen nicht überein.',
+    lockNow: 'Jetzt sperren',
+    wipeTitle: 'Abmelden und von diesem Gerät entfernen',
+    wipeMessageSynced: 'Alles, was YANTA in diesem Browser gespeichert hat, wird gelöscht: Notizen, Zeichnungen, Kalender, Schlüssel und Einstellungen. Dein synchronisierter Workspace bleibt (verschlüsselt) in der Cloud und kommt mit deinem Recovery Kit auf jedes Gerät zurück. Noch nicht synchronisierte Änderungen gehen verloren.',
+    wipeMessageLocal: 'Alles, was YANTA in diesem Browser gespeichert hat, wird gelöscht. Dieser Workspace wird nicht synchronisiert – was nur hier existiert, ist danach endgültig weg. Exportiere vorher ein Backup, falls du es brauchst.',
+    wipeConfirm: 'Alles entfernen',
+    wiping: 'Wird entfernt…',
+    settings: { never: 'Nie', immediately: 'Sofort', minutes: { one: 'Nach {count} Minute', other: 'Nach {count} Minuten' }, currentPassword: 'Aktuelles Passwort', lockTitle: 'App-Sperre auf diesem Gerät', lockOffHint: 'YANTA fragt nach einem Passwort, bevor es auf diesem Gerät etwas zeigt – beim Start, nach einer Pause oder wenn du sperrst. Jedes Gerät entscheidet für sich.', turnOn: 'App-Sperre einschalten', turnedOn: 'App-Sperre ist an', lockOnHint: 'YANTA fragt beim Start und nach den unten gewählten Zeiten nach dem Passwort. Vergessen? Dein Wiederherstellungsschlüssel entsperrt und lässt dich ein neues festlegen.', idle: 'Sperren ohne Eingabe nach', hidden: 'Sperren im Hintergrund', noRecovery: 'Noch kein Wiederherstellungsschlüssel hinterlegt: Setze das Passwort erneut, sobald Sync eingerichtet ist, oder bewahre es gut auf.', turnOff: 'App-Sperre ausschalten', turnedOff: 'App-Sperre ist aus', changeTitle: 'Passwort ändern', change: 'Passwort ändern', changed: 'Passwort geändert', honest: 'Was die Sperre heute leistet: Sie hält deinen Workspace vom Bildschirm fern und stoppt Hintergrund-Läufe, bis du entsperrst. Die Daten auf diesem Gerät sind noch nicht verschlüsselt – wer vollen Zugriff auf diesen Rechner hat, kann sie weiterhin lesen. Sie mit deinem Passwort zu verschlüsseln, ist der nächste Schritt.', deviceTitle: 'Fremder oder geteilter Rechner?', deviceHint: 'Melde dich ab und lösche alles, was YANTA in diesem Browser gespeichert hat. Dein synchronisierter Workspace bleibt sicher in der Cloud.' },
+  },
+
   privacy: {
     hideFromAi: 'Für YANTA AI sperren',
     showToAi: 'Für YANTA AI wieder freigeben',
@@ -907,6 +936,7 @@ export default {
 
     nav: {
       appearance: 'Darstellung',
+      security: 'Sicherheit',
       language: 'Sprache',
       colors: 'Farben',
       typography: 'Typografie',
@@ -928,6 +958,7 @@ export default {
 
     sections: {
       appearance: { title: 'Darstellung', subtitle: 'Lege fest, wie YANTA aussieht.' },
+      security: { title: 'Sicherheit', subtitle: 'Sperre YANTA auf diesem Gerät und entferne es von Geräten, die du nicht mehr nutzt.' },
       colors: { title: 'Farben', subtitle: 'Passe die Farbpalette an. Heller und dunkler Modus werden getrennt konfiguriert.' },
       typography: { title: 'Typografie', subtitle: 'Wähle Schriften und Schriftgrößen.' },
       shortcuts: { title: 'Tastenkürzel', subtitle: 'Belege die Formatierungsbefehle des Editors neu.' },

@@ -55,6 +55,7 @@ import { editorShortcutsSettingsElement } from './editor/shortcuts-settings.js';
 import { installCardElement } from './install/install-ui.js';
 import { notificationsSettingsElement } from './install/notifications-settings.js';
 import { pulseSettingsElement } from './pulse/pulse-settings-panel.js';
+import { securitySettingsElement } from './lock/security-settings.js';
 
 // ----------------------------------------------------------------
 // Theme tokens — these map 1:1 to CSS custom properties.
@@ -1298,6 +1299,7 @@ const SETTINGS_SECTIONS = [
     ? [{ id: 'chat', label: 'Chat', icon: 'message-circle', keywords: 'messages conversation' }]
     : []),
   { id: 'sync',         label: 'Sync & Backup',   icon: 'refresh-cw',     keywords: 'cloud backup devices encrypted google drive' },
+  { id: 'security',     label: 'Security',        icon: 'lock',           keywords: 'password lock passkey privacy sign out remove device wipe sperre passwort' },
   { id: 'notifications', label: 'Notifications',  icon: 'bell',           keywords: 'alerts push reminders' },
   { id: 'install',      label: 'Install app',     icon: 'smartphone',     keywords: 'pwa install app native' },
   { id: 'billing',      label: 'Plan & Billing',  icon: 'credit-card',    keywords: 'subscription plus upgrade payment invoice plan paddle' },
@@ -1508,6 +1510,7 @@ function renderSettingsBody() {
   else if (activeSection === 'pulse') renderPulseSection(content);
   else if (activeSection === 'chat') renderChatSection(content);
   else if (activeSection === 'sync') renderSyncSection(content);
+  else if (activeSection === 'security') renderSecuritySection(content);
   else if (activeSection === 'notifications') renderNotificationsSection(content);
   else if (activeSection === 'install') renderInstallSection(content);
   else if (activeSection === 'billing') renderBillingSection(content);
@@ -1561,6 +1564,12 @@ function renderPulseSection(host) {
   ));
 
   host.append(pulseSettingsElement());
+}
+
+// ---- Security section ----
+function renderSecuritySection(host) {
+  host.append(sectionHeader(t('settings.sections.security.title'), t('settings.sections.security.subtitle')));
+  host.append(securitySettingsElement({ rerender: rerenderSettingsBody }));
 }
 
 // ---- Install app section ----

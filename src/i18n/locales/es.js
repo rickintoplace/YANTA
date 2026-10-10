@@ -825,6 +825,35 @@ export default {
     },
   },
 
+  lock: {
+    title: 'YANTA está bloqueado',
+    hint: 'Introduce tu contraseña para continuar.',
+    password: 'Contraseña',
+    unlock: 'Desbloquear',
+    forgot: '¿Has olvidado la contraseña?',
+    wait: 'Demasiados intentos. Vuelve a probar en {seconds} s.',
+    wrong: 'Esa no es la contraseña.',
+    recoveryKey: 'Clave de recuperación',
+    useRecovery: 'Desbloquear con la clave de recuperación',
+    recoveryTitle: 'Usar la clave de recuperación',
+    recoveryHint: 'La clave de recuperación está en tu Recovery Kit (Ajustes › Sync y copia). Con ella puedes elegir una contraseña nueva.',
+    recoveryWrong: 'Esa clave de recuperación no corresponde a este dispositivo.',
+    wipeInstead: '¿No tienes ninguna de las dos? Eliminar YANTA de este dispositivo',
+    newPassword: 'Contraseña nueva',
+    repeatPassword: 'Repite la contraseña',
+    saveAndUnlock: 'Guardar y desbloquear',
+    newPasswordTitle: 'Elige una contraseña nueva',
+    tooShort: 'Al menos 6 caracteres.',
+    mismatch: 'Las contraseñas no coinciden.',
+    lockNow: 'Bloquear ahora',
+    wipeTitle: 'Cerrar sesión y eliminar de este dispositivo',
+    wipeMessageSynced: 'Se borra todo lo que YANTA guarda en este navegador: notas, dibujos, calendario, claves y ajustes. Tu espacio sincronizado sigue en la nube (cifrado) y vuelve a cualquier dispositivo con tu Recovery Kit. Los cambios aún no sincronizados se pierden.',
+    wipeMessageLocal: 'Se borra todo lo que YANTA guarda en este navegador. Este espacio no está sincronizado: lo que solo existe aquí se perderá para siempre. Exporta antes una copia si la necesitas.',
+    wipeConfirm: 'Eliminarlo todo',
+    wiping: 'Eliminando…',
+    settings: { never: 'Nunca', immediately: 'De inmediato', minutes: { one: 'Tras {count} minuto', other: 'Tras {count} minutos' }, currentPassword: 'Contraseña actual', lockTitle: 'Bloqueo de la app en este dispositivo', lockOffHint: 'YANTA pide una contraseña antes de mostrar nada en este dispositivo: al iniciar, tras una pausa o cuando lo bloqueas. Cada dispositivo decide por sí mismo.', turnOn: 'Activar bloqueo', turnedOn: 'El bloqueo está activado', lockOnHint: 'YANTA pide la contraseña al iniciar y tras los tiempos de abajo. ¿La olvidaste? Tu clave de recuperación desbloquea y te deja elegir una nueva.', idle: 'Bloquear sin actividad', hidden: 'Bloquear en segundo plano', noRecovery: 'Aún no hay clave de recuperación asociada: vuelve a poner la contraseña cuando configures la sincronización, o guárdala bien.', turnOff: 'Desactivar bloqueo', turnedOff: 'El bloqueo está desactivado', changeTitle: 'Cambiar contraseña', change: 'Cambiar contraseña', changed: 'Contraseña cambiada', honest: 'Lo que hace el bloqueo hoy: mantiene tu espacio fuera de la pantalla y detiene las tareas en segundo plano hasta que desbloqueas. Los datos de este dispositivo aún no están cifrados: quien tenga acceso completo a este ordenador todavía puede leerlos. Cifrarlos con tu contraseña es el siguiente paso.', deviceTitle: '¿Ordenador ajeno o compartido?', deviceHint: 'Cierra sesión y borra todo lo que YANTA guardó en este navegador. Tu espacio sincronizado sigue seguro en la nube.' },
+  },
+
   privacy: {
     hideFromAi: 'Ocultar a YANTA AI',
     showToAi: 'Volver a mostrar a YANTA AI',
@@ -907,6 +936,7 @@ export default {
 
     nav: {
       appearance: 'Apariencia',
+      security: 'Seguridad',
       language: 'Idioma',
       colors: 'Colores',
       typography: 'Tipografía',
@@ -928,6 +958,7 @@ export default {
 
     sections: {
       appearance: { title: 'Apariencia', subtitle: 'Elige el aspecto de YANTA.' },
+      security: { title: 'Seguridad', subtitle: 'Bloquea YANTA en este dispositivo y elimínalo de los dispositivos que ya no usas.' },
       colors: { title: 'Colores', subtitle: 'Personaliza la paleta de colores. Los modos claro y oscuro se configuran por separado.' },
       typography: { title: 'Tipografía', subtitle: 'Elige las fuentes y los tamaños.' },
       shortcuts: { title: 'Atajos', subtitle: 'Reasigna los comandos de formato del editor.' },

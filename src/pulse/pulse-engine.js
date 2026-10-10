@@ -106,6 +106,9 @@ async function isDue(routine, now, { catchUp = true } = {}) {
 export async function pulseTick({ reason = 'tick', waitForSync = false } = {}) {
   if (ticking) return { ran: 0, skipped: 'busy' };
 
+  // Locked device: no background runs until someone unlocks it.
+  if (document.documentElement.hasAttribute('data-locked')) return { ran: 0, skipped: 'locked' };
+
   ticking = true;
 
   try {

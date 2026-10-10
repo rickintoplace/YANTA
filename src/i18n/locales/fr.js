@@ -825,6 +825,35 @@ export default {
     },
   },
 
+  lock: {
+    title: 'YANTA est verrouillé',
+    hint: 'Saisissez votre mot de passe pour continuer.',
+    password: 'Mot de passe',
+    unlock: 'Déverrouiller',
+    forgot: 'Mot de passe oublié ?',
+    wait: 'Trop de tentatives. Réessayez dans {seconds} s.',
+    wrong: 'Ce n’est pas le mot de passe.',
+    recoveryKey: 'Clé de récupération',
+    useRecovery: 'Déverrouiller avec la clé de récupération',
+    recoveryTitle: 'Utiliser la clé de récupération',
+    recoveryHint: 'La clé de récupération figure dans votre Recovery Kit (Réglages › Sync et sauvegarde). Elle permet de choisir un nouveau mot de passe.',
+    recoveryWrong: 'Cette clé de récupération ne correspond pas à cet appareil.',
+    wipeInstead: 'Ni l’un ni l’autre ? Retirer YANTA de cet appareil',
+    newPassword: 'Nouveau mot de passe',
+    repeatPassword: 'Répétez le mot de passe',
+    saveAndUnlock: 'Enregistrer et déverrouiller',
+    newPasswordTitle: 'Choisissez un nouveau mot de passe',
+    tooShort: 'Au moins 6 caractères.',
+    mismatch: 'Les mots de passe ne correspondent pas.',
+    lockNow: 'Verrouiller maintenant',
+    wipeTitle: 'Se déconnecter et retirer de cet appareil',
+    wipeMessageSynced: 'Tout ce que YANTA conserve dans ce navigateur est supprimé : notes, dessins, calendrier, clés et réglages. Votre espace synchronisé reste dans le cloud (chiffré) et revient sur n’importe quel appareil avec votre Recovery Kit. Les modifications non encore synchronisées sont perdues.',
+    wipeMessageLocal: 'Tout ce que YANTA conserve dans ce navigateur est supprimé. Cet espace n’est pas synchronisé : ce qui n’existe qu’ici sera perdu définitivement. Exportez d’abord une sauvegarde si besoin.',
+    wipeConfirm: 'Tout supprimer',
+    wiping: 'Suppression…',
+    settings: { never: 'Jamais', immediately: 'Immédiatement', minutes: { one: 'Après {count} minute', other: 'Après {count} minutes' }, currentPassword: 'Mot de passe actuel', lockTitle: 'Verrouillage de l’app sur cet appareil', lockOffHint: 'YANTA demande un mot de passe avant d’afficher quoi que ce soit sur cet appareil : au démarrage, après une pause ou quand vous verrouillez. Chaque appareil décide pour lui-même.', turnOn: 'Activer le verrouillage', turnedOn: 'Le verrouillage est activé', lockOnHint: 'YANTA demande le mot de passe au démarrage et après les délais ci-dessous. Oublié ? Votre clé de récupération déverrouille et permet d’en choisir un nouveau.', idle: 'Verrouiller sans activité', hidden: 'Verrouiller en arrière-plan', noRecovery: 'Aucune clé de récupération n’est encore liée : redéfinissez le mot de passe une fois la synchronisation configurée, ou conservez-le précieusement.', turnOff: 'Désactiver le verrouillage', turnedOff: 'Le verrouillage est désactivé', changeTitle: 'Changer le mot de passe', change: 'Changer le mot de passe', changed: 'Mot de passe changé', honest: 'Ce que fait le verrouillage aujourd’hui : il garde votre espace hors de l’écran et suspend les tâches en arrière-plan jusqu’au déverrouillage. Les données de cet appareil ne sont pas encore chiffrées : une personne ayant un accès complet à cet ordinateur peut toujours les lire. Les chiffrer avec votre mot de passe est la prochaine étape.', deviceTitle: 'Ordinateur emprunté ou partagé ?', deviceHint: 'Déconnectez-vous et supprimez tout ce que YANTA a stocké dans ce navigateur. Votre espace synchronisé reste en sécurité dans le cloud.' },
+  },
+
   privacy: {
     hideFromAi: 'Masquer à YANTA AI',
     showToAi: 'Montrer de nouveau à YANTA AI',
@@ -907,6 +936,7 @@ export default {
 
     nav: {
       appearance: 'Apparence',
+      security: 'Sécurité',
       language: 'Langue',
       colors: 'Couleurs',
       typography: 'Typographie',
@@ -928,6 +958,7 @@ export default {
 
     sections: {
       appearance: { title: 'Apparence', subtitle: 'Choisissez l’apparence de YANTA.' },
+      security: { title: 'Sécurité', subtitle: 'Verrouillez YANTA sur cet appareil et retirez-le des appareils que vous n’utilisez plus.' },
       colors: { title: 'Couleurs', subtitle: 'Personnalisez la palette de couleurs. Les modes clair et sombre se configurent séparément.' },
       typography: { title: 'Typographie', subtitle: 'Choisissez les polices et les tailles.' },
       shortcuts: { title: 'Raccourcis', subtitle: 'Réattribuez les commandes de mise en forme de l’éditeur.' },

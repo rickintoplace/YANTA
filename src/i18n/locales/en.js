@@ -834,6 +834,35 @@ export default {
     },
   },
 
+  lock: {
+    title: 'YANTA is locked',
+    hint: 'Enter your password to continue.',
+    password: 'Password',
+    unlock: 'Unlock',
+    forgot: 'Forgot your password?',
+    wait: 'Too many attempts. Try again in {seconds} s.',
+    wrong: 'That is not the password.',
+    recoveryKey: 'Recovery key',
+    useRecovery: 'Unlock with recovery key',
+    recoveryTitle: 'Use your recovery key',
+    recoveryHint: 'The recovery key is in your Recovery Kit (Settings › Sync & Backup). With it you can set a new password.',
+    recoveryWrong: 'That recovery key does not fit this device.',
+    wipeInstead: 'Neither at hand? Remove YANTA from this device',
+    newPassword: 'New password',
+    repeatPassword: 'Repeat password',
+    saveAndUnlock: 'Save and unlock',
+    newPasswordTitle: 'Choose a new password',
+    tooShort: 'At least 6 characters.',
+    mismatch: 'The passwords do not match.',
+    lockNow: 'Lock now',
+    wipeTitle: 'Sign out and remove from this device',
+    wipeMessageSynced: 'Everything YANTA keeps in this browser is deleted: notes, drawings, calendar, keys and settings. Your synced workspace stays in the cloud (encrypted) and comes back on any device with your Recovery Kit. Changes not yet synced are lost.',
+    wipeMessageLocal: 'Everything YANTA keeps in this browser is deleted. This workspace is not synced, so what exists only here is gone for good. Export a backup first if you need it.',
+    wipeConfirm: 'Remove everything',
+    wiping: 'Removing…',
+    settings: { never: 'Never', immediately: 'Immediately', minutes: { one: 'After {count} minute', other: 'After {count} minutes' }, currentPassword: 'Current password', lockTitle: 'App lock on this device', lockOffHint: 'Ask for a password before YANTA shows anything on this device — at start, after a break, or when you lock it. Each device decides for itself.', turnOn: 'Turn on app lock', turnedOn: 'App lock is on', lockOnHint: 'YANTA asks for the password at start and after the times below. Forgot it? Your recovery key unlocks and lets you set a new one.', idle: 'Lock after no input', hidden: 'Lock when in the background', noRecovery: 'No recovery key is attached yet: set the password again once sync is set up, or keep it safe.', turnOff: 'Turn off app lock', turnedOff: 'App lock is off', changeTitle: 'Change password', change: 'Change password', changed: 'Password changed', honest: 'What the lock does today: it keeps your workspace off the screen and stops background runs until you unlock. The data on this device is not encrypted yet — someone with full access to this computer can still read it. Encrypting it with your password is the next step.', deviceTitle: 'Borrowed or shared computer?', deviceHint: 'Sign out and delete everything YANTA stored in this browser. Your synced workspace stays safe in the cloud.' },
+  },
+
   privacy: {
     hideFromAi: 'Hide from YANTA AI',
     showToAi: 'Show to YANTA AI again',
@@ -919,6 +948,7 @@ export default {
     // Left-rail labels (may differ from the in-page section heading).
     nav: {
       appearance: 'Appearance',
+      security: 'Security',
       language: 'Language',
       colors: 'Colors',
       typography: 'Typography',
@@ -941,6 +971,7 @@ export default {
     // Section headings (title + subtitle) shown at the top of each pane.
     sections: {
       appearance: { title: 'Appearance', subtitle: 'Choose how YANTA looks.' },
+      security: { title: 'Security', subtitle: 'Lock YANTA on this device, and remove it from devices you no longer use.' },
       colors: { title: 'Colors', subtitle: 'Customize the color palette. Dark and light modes are configured separately.' },
       typography: { title: 'Typography', subtitle: 'Choose fonts and sizing.' },
       shortcuts: { title: 'Shortcuts', subtitle: 'Rebind the editor’s formatting commands.' },

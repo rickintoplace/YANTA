@@ -834,6 +834,20 @@ export default {
     },
   },
 
+  privacy: {
+    hideFromAi: 'Hide from YANTA AI',
+    showToAi: 'Show to YANTA AI again',
+    hiddenViaFolder: 'Hidden from YANTA AI by its folder',
+    noteHidden: 'YANTA AI can no longer see this note',
+    noteVisible: 'YANTA AI can see this note again',
+    folderHidden: 'YANTA AI can no longer see this folder or anything in it',
+    folderVisible: 'YANTA AI can see this folder again',
+    calendarHidden: 'YANTA AI can no longer see this calendar',
+    calendarVisible: 'YANTA AI can see this calendar again',
+    badge: 'Hidden from YANTA AI',
+    badgeFolder: 'Hidden from YANTA AI, with everything inside',
+  },
+
   table: {
     title: 'Edit table',
     editGrid: 'Edit as grid',

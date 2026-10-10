@@ -825,6 +825,20 @@ export default {
     },
   },
 
+  privacy: {
+    hideFromAi: 'Für YANTA AI sperren',
+    showToAi: 'Für YANTA AI wieder freigeben',
+    hiddenViaFolder: 'Über den Ordner für YANTA AI gesperrt',
+    noteHidden: 'YANTA AI sieht diese Notiz nicht mehr',
+    noteVisible: 'YANTA AI sieht diese Notiz wieder',
+    folderHidden: 'YANTA AI sieht diesen Ordner und alles darin nicht mehr',
+    folderVisible: 'YANTA AI sieht diesen Ordner wieder',
+    calendarHidden: 'YANTA AI sieht diesen Kalender nicht mehr',
+    calendarVisible: 'YANTA AI sieht diesen Kalender wieder',
+    badge: 'Für YANTA AI gesperrt',
+    badgeFolder: 'Für YANTA AI gesperrt, samt Inhalt',
+  },
+
   table: {
     title: 'Tabelle bearbeiten',
     editGrid: 'Als Raster bearbeiten',

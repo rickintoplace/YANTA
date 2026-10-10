@@ -72,6 +72,7 @@ function ensureAllFullCalendarLocales(fc, localeCode) {
     });
 }
 
+import { t as i18n } from './i18n/index.js';
 import {
   $,
   uid,
@@ -6784,6 +6785,8 @@ export function sanitizeCalendarCategory(raw) {
 
     readonly: raw.readonly === true,
     source: sanitizeCalendarCategorySource(raw.source),
+    // Hidden from YANTA AI (ai-visibility.js).
+    aiHidden: raw.aiHidden === true ? true : undefined,
 
     share: {
       enabled: raw.share?.enabled === true,
@@ -7206,6 +7209,7 @@ export function putCalendarCategory(patch) {
     setCategoryPersonalPrefs(cat.id, {
       color: patch.color !== undefined ? cat.color : undefined,
       visible: patch.visible !== undefined ? cat.visible : undefined,
+      aiHidden: patch.aiHidden !== undefined ? !!cat.aiHidden : undefined,
     });
 
     const merged = applyCategoryOverlay({
@@ -7236,6 +7240,7 @@ export function putCalendarCategory(patch) {
     setCategoryPersonalPrefs(cat.id, {
       color: patch.color !== undefined ? cat.color : undefined,
       visible: patch.visible !== undefined ? cat.visible : undefined,
+      aiHidden: patch.aiHidden !== undefined ? !!cat.aiHidden : undefined,
     });
 
     const shared = bridge.category();
@@ -13064,6 +13069,7 @@ function renderCategoriesModal({
           <span class="yanta-calendar-cat-count" title="${escapeAttr(sourceDesc || `${count} stored event(s)`)}">
             ${sourceDesc ? 'source' : count}
           </span>
+          <button class="icon-btn${cat.aiHidden ? ' is-active' : ''}" data-cat-ai title="${escapeAttr(cat.aiHidden ? i18n('privacy.showToAi') : i18n('privacy.hideFromAi'))}" aria-pressed="${cat.aiHidden ? 'true' : 'false'}">${lucide(cat.aiHidden ? 'eye-off' : 'eye', 15)}</button>
           <button class="icon-btn" data-cat-export-ics title="Export category as .ics">${lucide('calendar-arrow-down', 15)}</button>
           <button class="icon-btn" data-cat-export-json title="Export category as JSON">${lucide('download', 15)}</button>
           <button class="icon-btn danger" data-cat-delete title="${mounted ? 'Leave shared calendar' : 'Delete category'}" ${cat.id === DEFAULT_CATEGORY_ID ? 'disabled' : ''}>${lucide('trash', 15)}</button>
@@ -13155,6 +13161,15 @@ function renderCategoriesModal({
     row.querySelector('[data-cat-visible]')?.addEventListener('change', save);
     row.querySelector('[data-cat-color]')?.addEventListener('input', save);
     row.querySelector('[data-cat-name]')?.addEventListener('change', save);
+
+    // Hidden from YANTA AI: every event in this calendar (ai-visibility.js).
+    row.querySelector('[data-cat-ai]')?.addEventListener('click', () => {
+      const cat = state.calendarCategories.get(catId);
+      if (!cat) return;
+      putCalendarCategory({ ...cat, aiHidden: !cat.aiHidden });
+      toast(cat.aiHidden ? i18n('privacy.calendarVisible') : i18n('privacy.calendarHidden'), 'success');
+      renderCategoriesModal();
+    });
 
     row.querySelector('[data-cat-export-ics]')?.addEventListener('click', () => {
       const cat = state.calendarCategories.get(catId);

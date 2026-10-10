@@ -815,6 +815,20 @@ export default {
     },
   },
 
+  privacy: {
+    hideFromAi: 'YANTA AI から隠す',
+    showToAi: 'YANTA AI に再び表示',
+    hiddenViaFolder: 'フォルダーにより YANTA AI から非表示',
+    noteHidden: 'YANTA AI はこのノートを参照できなくなりました',
+    noteVisible: 'YANTA AI は再びこのノートを参照できます',
+    folderHidden: 'YANTA AI はこのフォルダーとその中身を参照できなくなりました',
+    folderVisible: 'YANTA AI は再びこのフォルダーを参照できます',
+    calendarHidden: 'YANTA AI はこのカレンダーを参照できなくなりました',
+    calendarVisible: 'YANTA AI は再びこのカレンダーを参照できます',
+    badge: 'YANTA AI から非表示',
+    badgeFolder: '中身ごと YANTA AI から非表示',
+  },
+
   table: {
     title: '表を編集',
     editGrid: 'グリッドで編集',

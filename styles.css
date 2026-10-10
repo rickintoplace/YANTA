@@ -4439,8 +4439,20 @@ input.yanta-task-checkbox {
 /* Public share indicators */
 .public-share-dot,
 .live-dot,
-.ai-generated-dot {
+.ai-generated-dot,
+.ai-hidden-dot {
   flex: 0 0 auto;
+}
+
+/* Hidden from YANTA AI: quiet, but there when you look for it. */
+.ai-hidden-dot {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  margin-left: 2px;
+  color: var(--text-faint);
 }
 
 /*

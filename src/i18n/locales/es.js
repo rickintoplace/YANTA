@@ -825,6 +825,20 @@ export default {
     },
   },
 
+  privacy: {
+    hideFromAi: 'Ocultar a YANTA AI',
+    showToAi: 'Volver a mostrar a YANTA AI',
+    hiddenViaFolder: 'Oculto a YANTA AI por su carpeta',
+    noteHidden: 'YANTA AI ya no ve esta nota',
+    noteVisible: 'YANTA AI vuelve a ver esta nota',
+    folderHidden: 'YANTA AI ya no ve esta carpeta ni su contenido',
+    folderVisible: 'YANTA AI vuelve a ver esta carpeta',
+    calendarHidden: 'YANTA AI ya no ve este calendario',
+    calendarVisible: 'YANTA AI vuelve a ver este calendario',
+    badge: 'Oculto a YANTA AI',
+    badgeFolder: 'Oculto a YANTA AI, con todo su contenido',
+  },
+
   table: {
     title: 'Editar tabla',
     editGrid: 'Editar como cuadrícula',

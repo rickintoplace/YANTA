@@ -2,6 +2,7 @@
 // YANTA AI — Tool registry + permission policy
 // ============================================================
 
+import { assertArgsVisible, scrubResultForAi } from './ai-visibility.js';
 import {
   getAiSettings,
 } from './ai-settings.js';
@@ -1419,9 +1420,14 @@ export async function executeToolCall(toolCall, {
     throw new Error(`Tool "${name}" has no execute handler.`);
   }
 
-  const result = await execute(args, {
+  // Private notes, folders and calendars: refused by name, scrubbed from results.
+  assertArgsVisible(args, name);
+
+  const raw = await execute(args, {
     source,
   });
+
+  const result = scrubResultForAi(raw);
 
   return {
     name,

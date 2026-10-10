@@ -3,6 +3,7 @@
 // menus, drag-and-drop reorganisation, multi-select + bulk ops.
 // ============================================================
 
+import { isFolderHiddenFromAi } from './ai/ai-visibility.js';
 import { $, el, uid, state, store, lucide, safeCssColor, toast, actionToast, isSpaceMountedFolder } from './core.js';
 
 import { t } from './i18n/index.js';
@@ -1335,6 +1336,64 @@ async function setNoteArchived(note, archived) {
   }));
 }
 
+/*
+  "Hidden from YANTA AI" (ai-visibility.js). Only the item's own flag is
+  set; a folder's flag covers its contents without touching them, so
+  clearing it later restores exactly what was there before.
+*/
+async function setNoteAiHidden(note, hidden) {
+  if (!note) return;
+
+  note.aiHidden = hidden ? true : undefined;
+  note.updated = Date.now();
+  await store.notes.put(note);
+  renderTree();
+
+  window.dispatchEvent(new CustomEvent('yanta-note-updated', {
+    detail: { noteId: note.id, reason: hidden ? 'ai-hidden' : 'ai-visible' },
+  }));
+
+  actionToast(hidden ? t('privacy.noteHidden') : t('privacy.noteVisible'), {
+    actionLabel: t('common.undo'),
+    onAction: () => setNoteAiHidden(note, !hidden),
+  });
+}
+
+async function setFolderAiHidden(folder, hidden) {
+  if (!folder) return;
+
+  folder.aiHidden = hidden ? true : undefined;
+  folder.updated = Date.now();
+  await store.folders.put(folder);
+  renderTree();
+
+  window.dispatchEvent(new CustomEvent('yanta-folder-updated', {
+    detail: { folderId: folder.id, reason: hidden ? 'ai-hidden' : 'ai-visible' },
+  }));
+
+  actionToast(hidden ? t('privacy.folderHidden') : t('privacy.folderVisible'), {
+    actionLabel: t('common.undo'),
+    onAction: () => setFolderAiHidden(folder, !hidden),
+  });
+}
+
+/** Menu entry for the AI flag; inherited from a folder it explains instead of toggling. */
+function aiVisibilityMenuItem(item, { folder = false } = {}) {
+  const inherited = !item.aiHidden && (folder
+    ? isFolderHiddenFromAi(item.parentId)
+    : isFolderHiddenFromAi(item.folderId));
+
+  if (inherited) {
+    return { label: t('privacy.hiddenViaFolder'), icon: 'eye-off', disabled: true };
+  }
+
+  return {
+    label: item.aiHidden ? t('privacy.showToAi') : t('privacy.hideFromAi'),
+    icon: item.aiHidden ? 'eye' : 'eye-off',
+    action: () => (folder ? setFolderAiHidden(item, !item.aiHidden) : setNoteAiHidden(item, !item.aiHidden)),
+  };
+}
+
 async function setFolderArchived(folder, archived) {
   if (!folder) return;
 
@@ -1654,6 +1713,12 @@ function folderRow(f, visibleNotes, depth, {
       class: 'tree-folder-count',
       title: t('tree.itemCount', { count: childCount }),
     }, String(childCount)));
+  }
+
+  if (f.aiHidden) {
+    const privateDot = el('span', { class: 'ai-hidden-dot', title: t('privacy.badgeFolder') });
+    privateDot.innerHTML = lucide('eye-off', 11);
+    row.append(privateDot);
   }
 
   if (f.spaceId) {
@@ -2356,6 +2421,13 @@ function noteRow(n, depth = 0, {
     row.append(aiDot);
   }
 
+  // Only the note's own mark: a hidden folder already shows its own.
+  if (n.aiHidden) {
+    const privateDot = el('span', { class: 'ai-hidden-dot', title: t('privacy.badge') });
+    privateDot.innerHTML = lucide('eye-off', 11);
+    row.append(privateDot);
+  }
+
   if (isPublicShareActive(publicShareStateForNote(n.id))) {
     const publicDot = el('span', {
       class: 'public-share-dot',
@@ -2711,6 +2783,7 @@ function noteMenu(e, n) {
       icon: 'copy',
       action: () => duplicateNote(n),
     },
+    aiVisibilityMenuItem(n),
     'hr',
     {
       label: t('tree.menu.moveToTrash'),
@@ -2815,6 +2888,7 @@ function folderMenu(e, f) {
       icon: 'folder-input',
       action: () => moveSelectedToFolder([folderKey(f.id)]),
     },
+    aiVisibilityMenuItem(f, { folder: true }),
     'hr',
     {
       label: t('tree.menu.moveFolderToTrash'),

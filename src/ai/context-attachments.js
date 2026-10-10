@@ -8,6 +8,7 @@
 
 // @i18n-locked
 
+import { isEventHiddenFromAi, isFolderHiddenFromAi, isNoteHiddenFromAi } from './ai-visibility.js';
 import { t } from '../i18n/index.js';
 
 import { modelCapabilities } from './model-capabilities.js';
@@ -16,6 +17,7 @@ import {
   state,
   store,
   escapeHtml,
+  toast,
 } from '../core.js';
 
 import {
@@ -228,6 +230,8 @@ export async function createAiContextItemFromFolder(folderId) {
   for (const noteId of noteIds) {
     const note = state.notes.get(noteId);
     if (!note) continue;
+    // A private note inside an attached folder stays private.
+    if (isNoteHiddenFromAi(note)) continue;
 
     let md = '';
 
@@ -387,10 +391,23 @@ function loadFailedTitle(kind) {
   return t(`ai.chat.context.loadFailed.${key}`);
 }
 
+function refHiddenFromAi(ref = {}) {
+  if (ref.kind === 'note') return isNoteHiddenFromAi(ref.id);
+  if (ref.kind === 'folder') return isFolderHiddenFromAi(ref.id);
+  if (ref.kind === 'event') return isEventHiddenFromAi(ref.id);
+  return false;
+}
+
 export async function createAiContextItemsFromRefs(refs = []) {
   const out = [];
 
   for (const ref of refs || []) {
+    // Hidden from YANTA AI: attaching it explicitly does not override that.
+    if (refHiddenFromAi(ref)) {
+      toast(t('ai.chat.context.hiddenFromAi'), 'error');
+      continue;
+    }
+
     try {
       if (ref.kind === 'note') {
         out.push(await createAiContextItemFromNote(ref.id));
@@ -801,7 +818,8 @@ export async function buildAiContextPromptParts(items = [], {
   maxChars = 20_000,
   includeImages = modelSupportsImages(),
 } = {}) {
-  const clean = dedupeContextItems(items || []);
+  // Marked private after it was attached: dropped here, at the last door.
+  const clean = dedupeContextItems(items || []).filter((item) => !refHiddenFromAi({ kind: item.kind, id: item.sourceId }));
   const imageParts = [];
 
   let remaining = Math.max(2000, Number(maxChars || 20_000));

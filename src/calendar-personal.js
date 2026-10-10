@@ -125,6 +125,7 @@ export function applyCategoryOverlay(cat) {
 
   if (prefs.color) out.color = prefs.color;
   if (typeof prefs.visible === 'boolean') out.visible = prefs.visible;
+  if (typeof prefs.aiHidden === 'boolean') out.aiHidden = prefs.aiHidden;
 
   return out;
 }

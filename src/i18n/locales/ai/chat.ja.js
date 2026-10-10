@@ -64,6 +64,7 @@ export default {
   },
 
   context: {
+    hiddenFromAi: 'この項目は YANTA AI から非表示のため、添付されませんでした。',
     addedItems: { other: '{count} 件のコンテキスト項目を追加しました' },
     addedUploads: { other: '{count} 件のアップロードを追加しました' },
     images: { other: '{count} 件の画像' },

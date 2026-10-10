@@ -82,6 +82,7 @@ export default {
   },
 
   context: {
+    hiddenFromAi: 'This item is hidden from YANTA AI and was not attached.',
     // Toast after attaching notes/folders/events (followed by " · 120 words")
     addedItems: { one: 'Added {count} context item', other: 'Added {count} context items' },
     // Toast after attaching uploaded files (followed by " · 120 words")

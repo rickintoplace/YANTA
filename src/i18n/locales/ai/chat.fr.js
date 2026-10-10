@@ -62,6 +62,7 @@ export default {
   },
 
   context: {
+    hiddenFromAi: 'Cet élément est masqué à YANTA AI et n’a pas été joint.',
     addedItems: { one: '{count} élément de contexte ajouté', other: '{count} éléments de contexte ajoutés' },
     addedUploads: { one: '{count} fichier importé ajouté', other: '{count} fichiers importés ajoutés' },
     images: { one: '{count} image', other: '{count} images' },

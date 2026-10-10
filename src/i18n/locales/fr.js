@@ -825,6 +825,20 @@ export default {
     },
   },
 
+  privacy: {
+    hideFromAi: 'Masquer à YANTA AI',
+    showToAi: 'Montrer de nouveau à YANTA AI',
+    hiddenViaFolder: 'Masqué à YANTA AI par son dossier',
+    noteHidden: 'YANTA AI ne voit plus cette note',
+    noteVisible: 'YANTA AI voit de nouveau cette note',
+    folderHidden: 'YANTA AI ne voit plus ce dossier ni son contenu',
+    folderVisible: 'YANTA AI voit de nouveau ce dossier',
+    calendarHidden: 'YANTA AI ne voit plus ce calendrier',
+    calendarVisible: 'YANTA AI voit de nouveau ce calendrier',
+    badge: 'Masqué à YANTA AI',
+    badgeFolder: 'Masqué à YANTA AI, avec tout son contenu',
+  },
+
   table: {
     title: 'Modifier le tableau',
     editGrid: 'Modifier en grille',

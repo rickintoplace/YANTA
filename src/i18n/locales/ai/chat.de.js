@@ -63,6 +63,7 @@ export default {
   },
 
   context: {
+    hiddenFromAi: 'Dieses Element ist für YANTA AI gesperrt und wurde nicht angehängt.',
     addedItems: { one: '{count} Kontextelement hinzugefügt', other: '{count} Kontextelemente hinzugefügt' },
     addedUploads: { one: '{count} Upload hinzugefügt', other: '{count} Uploads hinzugefügt' },
     images: { one: '{count} Bild', other: '{count} Bilder' },

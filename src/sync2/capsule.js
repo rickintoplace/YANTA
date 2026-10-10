@@ -140,6 +140,8 @@ function sanitizeNoteMeta(note) {
     hidden: note.hidden === true ? true : undefined,    archived: note.archived === true ? true : undefined,
     system: note.system === true ? true : undefined,
     aiBrain: note.aiBrain === true ? true : undefined,
+    // Hidden from YANTA AI (ai-visibility.js).
+    aiHidden: note.aiHidden === true ? true : undefined,
 
     // Provenance. Must travel: a note written by a background run has to
     // look AI-written on every device, not only the one that made it.
@@ -182,6 +184,7 @@ function sanitizeFolderMeta(folder) {
     hidden: folder.hidden === true ? true : undefined,    archived: folder.archived === true ? true : undefined,
     system: folder.system === true ? true : undefined,
     aiBrain: folder.aiBrain === true ? true : undefined,
+    aiHidden: folder.aiHidden === true ? true : undefined,
     dashboardHidden: folder.dashboardHidden === true ? true : undefined,
     hiddenFromDashboard: folder.hiddenFromDashboard === true ? true : undefined,
 

@@ -2,6 +2,7 @@
 // YANTA AI — Context builder
 // ============================================================
 
+import { isNoteHiddenFromAi, scrubResultForAi } from './ai-visibility.js';
 import {
   state,
 } from '../core.js';
@@ -244,7 +245,7 @@ export async function buildCurrentNoteContext({ includeMarkdown = true } = {}) {
     ? state.notes.get(state.currentNoteId)
     : null;
 
-  if (!note) {
+  if (!note || isNoteHiddenFromAi(note)) {
     return {
       currentNote: null,
     };
@@ -402,15 +403,19 @@ export async function buildContextMessage({
   const settings = getEffectiveAiRuntimeSettings();
   const max = Number(settings.maxContextChars || 30000);
 
-  const currentNote = state.surface === 'note' && state.currentNoteId
+  const openNote = state.surface === 'note' && state.currentNoteId
     ? state.notes.get(state.currentNoteId)
     : null;
 
-  const selection = state.surface === 'note'
+  // A private note is open: the model learns that much and nothing else.
+  const currentNoteHidden = !!openNote && isNoteHiddenFromAi(openNote);
+  const currentNote = currentNoteHidden ? null : openNote;
+
+  const selection = state.surface === 'note' && !currentNoteHidden
     ? getCurrentSelectionText()
     : '';
 
-  const fileTree = await buildFileTreeContext();
+  const fileTree = scrubResultForAi(await buildFileTreeContext());
 
   let currentNoteMarkdown = '';
 
@@ -454,6 +459,7 @@ export async function buildContextMessage({
         }
       : null,
     selectedText: selection || '',
+    ...(currentNoteHidden ? { currentNotePrivate: 'The user has hidden the open note from YANTA AI (it or its folder is marked "Hide from YANTA AI"). You cannot see it. If they want your help with it, they can choose "Show to YANTA AI again" in its context menu in the sidebar. Do not ask them to paste it.' } : {}),
     fileTree,
     privacyMode: settings.privacyMode,
     noteBodyIncluded: !!currentNoteMarkdown,

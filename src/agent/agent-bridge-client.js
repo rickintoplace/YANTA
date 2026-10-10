@@ -11,6 +11,7 @@
 // - YANTA page is open
 // ============================================================
 
+import { scrubResultForAi } from '../ai/ai-visibility.js';
 import {
   state,
 } from '../core.js';
@@ -334,17 +335,18 @@ export function buildAgentReadmeText() {
 }
 
 async function readResource(uri) {
+  // Same privacy rules as the tools: hidden notes and folders never leave.
   if (uri === 'yanta://file-tree') {
     return {
       mimeType: 'application/json',
-      text: JSON.stringify(await fileTreeResource(), null, 2),
+      text: JSON.stringify(scrubResultForAi(await fileTreeResource()), null, 2),
     };
   }
 
   if (uri === 'yanta://current-note') {
     return {
       mimeType: 'application/json',
-      text: JSON.stringify(await currentNoteResource(), null, 2),
+      text: JSON.stringify(scrubResultForAi(await currentNoteResource()), null, 2),
     };
   }
 

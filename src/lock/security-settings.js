@@ -87,6 +87,66 @@ function passkeyLabel(passkey) {
 }
 
 /**
+ * Fingerprint or face in the Android app (biometric-unlock.js). Turning it
+ * on asks for the password first, like adding a passkey.
+ */
+async function biometricGroup(config, rerender) {
+  const bio = await import('./biometric-unlock.js');
+  const status = bio.biometricStatus();
+  if (!status.native) return null;
+
+  if (config.biometric?.ct) {
+    const off = el('button', { type: 'button', class: 'btn' }, t('lock.biometric.turnOff'));
+    off.addEventListener('click', async () => {
+      await bio.disableBiometricUnlock();
+      toast(t('lock.biometric.turnedOff'), 'success');
+      rerender();
+    });
+    return group(t('lock.biometric.title'),
+      el('p', { class: 'yanta-security-status' }, t('lock.biometric.on')),
+      el('div', { class: 'yanta-security-row' }, off));
+  }
+
+  if (!status.available) {
+    return group(t('lock.biometric.title'), hint(t('lock.biometric.hint')), hint(t('lock.biometric.unavailable')));
+  }
+
+  const on = el('button', { type: 'button', class: 'btn' }, t('lock.biometric.turnOn'));
+  on.addEventListener('click', () => {
+    const input = el('input', { type: 'password', class: 'text-input', placeholder: t('lock.settings.currentPassword'), autocomplete: 'current-password' });
+    const error = el('p', { class: 'yanta-settings-hint', style: { color: 'var(--red)' }, role: 'alert' });
+    const submit = el('button', { type: 'submit', class: 'btn primary' }, t('lock.biometric.turnOn'));
+    const form = el('form', { class: 'yanta-security-form' }, hint(t('lock.biometric.confirmHint')), input, error, submit);
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      error.textContent = '';
+      submit.disabled = true;
+      try {
+        if (!(await unlockWithPassword(input.value))) {
+          error.textContent = t('lock.wrong');
+          return;
+        }
+        const result = await bio.enableBiometricUnlock();
+        if (result === 'ok') {
+          toast(t('lock.biometric.turnedOn'), 'success');
+          rerender();
+        } else {
+          error.textContent = t('lock.biometric.notCreated');
+        }
+      } finally {
+        submit.disabled = false;
+      }
+    });
+
+    on.replaceWith(form);
+    input.focus();
+  });
+
+  return group(t('lock.biometric.title'), hint(t('lock.biometric.hint')), el('div', { class: 'yanta-security-row' }, on));
+}
+
+/**
  * Passkeys that unlock instead of the password. Adding one asks for the
  * password first: an unlocked, unattended device must not let someone
  * register their own way in.
@@ -408,6 +468,7 @@ export function securitySettingsElement({ rerender }) {
             return;
           }
           await disableLock();
+          try { window.YantaAndroid?.biometricRemove?.(); } catch {}
           toast(t('lock.settings.turnedOff'), 'success');
           rerender();
         });
@@ -426,6 +487,8 @@ export function securitySettingsElement({ rerender }) {
         el('div', { class: 'yanta-security-row' }, turnOff)
       ));
 
+      const biometric = await biometricGroup(config, rerender);
+      if (biometric) root.append(biometric);
       root.append(await passkeyGroup(config, rerender));
 
       root.append(group(t('lock.settings.changeTitle'),

@@ -62,7 +62,10 @@
     // share keys, slides-remote). Those are always app entries.
     if (location.hash && location.hash !== '#') return false;
 
-    // Installed PWA / Android TWA never sees the landing page.
+    // Installed PWA / Android TWA never sees the landing page — nor the
+    // Android app, whose WebView shows the site in a normal browser mode.
+    if (window.YantaAndroid) return false;
+
     try {
       if (
         window.matchMedia?.('(display-mode: standalone)')?.matches ||

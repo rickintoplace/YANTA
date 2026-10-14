@@ -190,4 +190,41 @@ class YantaJsBridge(
             .put("storageGranted", true)
             .toString()
     }
+
+    // ------------------------------------------------------------
+    // App lock: fingerprint / face (src/lock/biometric-unlock.js)
+    // ------------------------------------------------------------
+
+    @JavascriptInterface
+    fun getBiometricStatus(): String = NativeBiometric.statusJson(activity)
+
+    /**
+     * Wraps the lock's key after a biometric check. The result arrives as
+     * window.__yantaNativeResult(requestId, json).
+     */
+    @JavascriptInterface
+    fun biometricEnroll(requestId: String, secretB64: String, title: String, subtitle: String, cancel: String) {
+        NativeBiometric.encrypt(activity, secretB64, title, subtitle, cancel) { deliver(requestId, it) }
+    }
+
+    @JavascriptInterface
+    fun biometricUnlock(requestId: String, ivB64: String, ctB64: String, title: String, subtitle: String, cancel: String) {
+        NativeBiometric.decrypt(activity, ivB64, ctB64, title, subtitle, cancel) { deliver(requestId, it) }
+    }
+
+    @JavascriptInterface
+    fun biometricRemove() {
+        NativeBiometric.remove()
+    }
+
+    private fun deliver(requestId: String, json: String) {
+        val id = JSONObject.quote(requestId)
+        val payload = JSONObject.quote(json)
+        activity.runOnUiThread {
+            webView.evaluateJavascript(
+                "window.__yantaNativeResult&&window.__yantaNativeResult($id,$payload)",
+                null
+            )
+        }
+    }
 }

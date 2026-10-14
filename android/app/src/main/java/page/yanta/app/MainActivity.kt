@@ -21,7 +21,6 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import androidx.activity.BackEventCompat
-import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.content.ContextCompat
@@ -39,8 +38,9 @@ import page.yanta.app.notifications.ChatNotifier
 import page.yanta.app.notifications.NotificationScheduler
 import page.yanta.app.push.PushTokenStore
 import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
+import androidx.fragment.app.FragmentActivity
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
 
     private lateinit var root: FrameLayout
     private lateinit var webView: WebView
@@ -242,6 +242,17 @@ class MainActivity : ComponentActivity() {
         }
         if (WebViewFeature.isFeatureSupported(WebViewFeature.FORCE_DARK)) {
             WebSettingsCompat.setForceDark(webView.settings, WebSettingsCompat.FORCE_DARK_AUTO)
+        }
+        /*
+         * Passkeys from the phone's password manager (Credential Manager)
+         * inside the WebView, for yanta.page — linked to this app by
+         * /.well-known/assetlinks.json (get_login_creds).
+         */
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_AUTHENTICATION)) {
+            WebSettingsCompat.setWebAuthenticationSupport(
+                webView.settings,
+                WebSettingsCompat.WEB_AUTHENTICATION_SUPPORT_FOR_APP
+            )
         }
 
         webView.webChromeClient = createChromeClient()

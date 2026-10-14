@@ -13,8 +13,8 @@ android {
         applicationId = "page.yanta.app"
         minSdk = 29
         targetSdk = 35
-        versionCode = 1
-        versionName = "1.0.0"
+        versionCode = 2
+        versionName = "1.1.0"
         buildConfigField("String", "YANTA_URL", "\"https://yanta.page\"")
         // Sygnal (Matrix push gateway) notify endpoint.
         buildConfigField(
@@ -43,6 +43,10 @@ dependencies {
     implementation("androidx.activity:activity-ktx:1.9.3")
     implementation("androidx.webkit:webkit:1.12.1")
     implementation("androidx.core:core-splashscreen:1.0.1")
+
+    // App lock: fingerprint / face via Keystore-bound keys (NativeBiometric.kt).
+    implementation("androidx.biometric:biometric:1.1.0")
+    implementation("androidx.fragment:fragment-ktx:1.8.5")
 
     // Push notifications while the app is closed.
     implementation(platform("com.google.firebase:firebase-bom:34.16.0"))

@@ -223,6 +223,42 @@ function renderPasswordStep(card) {
   requestAnimationFrame(() => input.focus());
 
   addPasskeyButton(form, { before: forgot, error });
+  addBiometricButton(form, { before: forgot, error });
+}
+
+/**
+ * In the Android app with fingerprint/face set up: a button, and the
+ * prompt right away — the phone's own dialog, nothing to type.
+ */
+async function addBiometricButton(form, { before, error }) {
+  const { biometricUnlockConfigured, unlockWithBiometric } = await import('./biometric-unlock.js');
+  if (!(await biometricUnlockConfigured()) || !form.isConnected) return;
+
+  const icon = el('span', { 'aria-hidden': 'true' });
+  icon.innerHTML = lucide('fingerprint', 16);
+  const button = el('button', { type: 'button', class: 'btn yanta-lock-passkey yanta-lock-biometric' }, icon, t('lock.biometric.unlock'));
+  form.insertBefore(button, before);
+
+  const run = async () => {
+    button.disabled = true;
+    error.textContent = '';
+    const result = await unlockWithBiometric().catch(() => 'failed');
+    button.disabled = false;
+
+    if (result === 'ok') {
+      finishUnlock();
+      return;
+    }
+    if (result === 'invalidated') {
+      error.textContent = t('lock.biometric.invalidated');
+      button.remove();
+    } else if (result === 'failed') {
+      error.textContent = t('lock.biometric.failed');
+    }
+  };
+
+  button.addEventListener('click', run);
+  run();
 }
 
 /** "Unlock with passkey" under the password, when this device has one. */

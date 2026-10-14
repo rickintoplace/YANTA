@@ -331,6 +331,17 @@ export async function unlockWithPasskeyOutput(credentialId, prfOutput) {
   }
 }
 
+// ---- Fingerprint / face in the Android app: a fourth wrapper
+//
+// The phone's Keystore (hardware, biometric-gated) encrypts the LDK; the
+// app stores what comes back (biometric-unlock.js). The native side does
+// the crypto, this keeps the record.
+
+export async function setBiometricWrap(wrap) {
+  const config = await getLockConfig();
+  return saveLockConfig({ ...config, biometric: wrap ? { iv: wrap.iv, ct: wrap.ct, createdAt: Date.now() } : null });
+}
+
 /**
  * Turns the lock off. Requires the device to be unlocked.
  *

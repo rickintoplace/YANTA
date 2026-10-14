@@ -200,6 +200,8 @@ import {
 // A magic-link sign-in that still needs the second factor (2FA). Read at
 // load, before the hash router rewrites the hash; resumed once the app runs.
 const BOOT_CLOUD_MFA_HASH = /^#cloud-login-mfa=/.test(location.hash) ? location.hash : '';
+// Read before the router rewrites the hash to its own route.
+const BOOT_PRESENT_SCREEN_HASH = /^#present-screen=/.test(location.hash) ? location.hash : '';
 
 // Inside the Android app: no purchase or pricing calls to action (Google
 // Play's payments policy) — styles.css hides them, billing-ui.js says so.
@@ -259,9 +261,6 @@ import {
   setupSlides,
 } from './slides/slides-ui.js';
 
-import {
-  openPresentationPairingInputModal,
-} from './presentation/presentation-pairing.js';
 
 import { hydrateLocalMetadataFromVaultDocOnStartup } from './sync2/startup-hydrate.js';
 
@@ -1676,35 +1675,24 @@ function consumePendingPublicShareCalendarEvent() {
   return true;
 }
 
-function presentPairPayloadFromHash(hash = location.hash) {
-  const raw = String(hash || '').replace(/^#/, '');
+/*
+  A phone scanned the QR code on a screen waiting at yanta.page/present:
+  …/?app#present-screen=<key>. Pick a drawing and it goes to that screen.
+*/
+async function handlePresentScreenHashIfNeeded(hash = location.hash) {
+  const match = /^#?present-screen=([A-Za-z0-9_-]{40,})/.exec(String(hash || ''));
+  if (!match) return false;
 
-  if (!raw.startsWith('present-pair=')) return '';
-
-  try {
-    return decodeURIComponent(raw.slice('present-pair='.length));
-  } catch {
-    return raw.slice('present-pair='.length);
+  if (/^#?present-screen=/.test(location.hash)) {
+    history.replaceState({}, '', location.pathname + location.search);
   }
-}
-
-async function handlePresentPairHashIfNeeded(hash = location.hash) {
-  const payload = presentPairPayloadFromHash(hash);
-
-  if (!payload) return false;
-
-  history.replaceState({}, '', location.pathname + location.search);
 
   try {
-    const {
-      handlePresentationPairingPayload,
-    } = await import('./presentation/presentation-pairing.js');
-
-    await handlePresentationPairingPayload(payload);
+    const { openPresentPicker } = await import('./present/present-pick.js');
+    await openPresentPicker({ screenKey: match[1] });
     return true;
   } catch (err) {
-    console.error('[YANTA Presentation] pairing failed', err);
-    toast(err?.message || 'Could not read presentation pairing code', 'error');
+    console.error('[YANTA Present] could not open the drawing picker', err);
     return false;
   }
 }
@@ -2409,18 +2397,6 @@ async function init() {
     }
   })();
 
-  const presentationPairingHashPayload = (() => {
-    const raw = String(location.hash || '').replace(/^#/, '');
-
-    if (!raw.startsWith('present-pair=')) return '';
-
-    try {
-      return decodeURIComponent(raw.slice('present-pair='.length));
-    } catch {
-      return raw.slice('present-pair='.length);
-    }
-  })();
-  
   if (sync2HashPayload) {
     // Remove secret from browser URL/history as soon as possible.
     history.replaceState({}, '', location.pathname + location.search);
@@ -2454,7 +2430,7 @@ async function init() {
     }, 700);
   }
 
-  handlePresentPairHashIfNeeded(location.hash).catch(() => {});
+  handlePresentScreenHashIfNeeded(BOOT_PRESENT_SCREEN_HASH).catch(() => {});
 
   await loadAppearance();
   await loadCalendarPreferences();
@@ -2520,7 +2496,7 @@ async function init() {
     openAssistantFloating,
     openSources: () => openSourcesRoute('command-palette'),
     openCitationManager,
-    openPresentationPairing: openPresentationPairingInputModal,
+    openPresentationPairing: () => import('./present/present-pick.js').then((m) => m.openPresentPicker()),
     exportAsZip,
     exportNoteAsMd,
     exportBundle,
@@ -3904,8 +3880,14 @@ function bindEvents() {
     openCitationManager();
   });
 
-  window.addEventListener('hashchange', () => {
-    handlePresentPairHashIfNeeded(location.hash).catch(() => {});
+  window.addEventListener('hashchange', (e) => {
+    let hash = location.hash;
+
+    try {
+      hash = new URL(e.newURL).hash;
+    } catch {}
+
+    handlePresentScreenHashIfNeeded(hash).catch(() => {});
   });
 
   window.addEventListener('yanta-note-opened', () => {
@@ -4603,8 +4585,7 @@ const normalizedPath = location.pathname.replace(/\/+$/, '') || '/';
 const isStandalonePage =
   SITE_PAGE_PATHS.has(normalizedPath) ||
   location.pathname.startsWith('/share/') ||
-  location.pathname.startsWith('/present') ||
-  String(location.hash || '').replace(/^#/, '').startsWith('slides-remote=');
+  location.pathname.startsWith('/present');
 
 // Standalone pages (site, share viewer, presenter, slides remote) manage
 // their own mount UX — the app boot loader must not sit on top of them.
@@ -4645,74 +4626,22 @@ if (SITE_PAGE_PATHS.has(normalizedPath)) {
         variant: 'public',
       });
     });
-} else if (location.pathname === '/present' || location.pathname === '/present/') {
-  import('./presentation/presentation-pairing-viewer.js')
-    .then(async (m) => {
-      await m.mountPresentationPairingViewer();
-
-      ensureLegalFooter({
-        parent: document.body,
-        id: 'yanta-presentation-pairing-legal-footer',
-        variant: 'public',
-      });
-    })
+} else if (location.pathname === '/present' || location.pathname.startsWith('/present/')) {
+  // Screens and remotes: no vault, no account — the standalone join page.
+  initI18n()
+    .catch(() => {})
+    .then(() => import('./present/present-join.js'))
+    .then((m) => m.mountPresentJoinPage())
     .catch((e) => {
       console.error(e);
-      document.body.innerHTML = '<main style="padding:24px;font-family:system-ui">Could not open presentation pairing.</main>';
+      document.body.innerHTML = '<main style="padding:24px;font-family:system-ui">Could not open YANTA Present.</main>';
 
       ensureLegalFooter({
         parent: document.body,
-        id: 'yanta-presentation-pairing-error-legal-footer',
+        id: 'yanta-present-error-legal-footer',
         variant: 'public',
       });
     });
-} else if (location.pathname.startsWith('/present/')) {
-  import('./presentation/presentation-viewer.js')
-    .then(async (m) => {
-      await m.mountPresentationViewer();
-
-      ensureLegalFooter({
-        parent: document.body,
-        id: 'yanta-presentation-legal-footer',
-        variant: 'public',
-      });
-    })
-    .catch((e) => {
-      console.error(e);
-      document.body.innerHTML = '<main style="padding:24px;font-family:system-ui">Could not load presentation.</main>';
-
-      ensureLegalFooter({
-        parent: document.body,
-        id: 'yanta-presentation-error-legal-footer',
-        variant: 'public',
-      });
-    });
-  } else if (String(location.hash || '').replace(/^#/, '').startsWith('slides-remote=')) {
-    // The remote-control page runs standalone: init() never executes here, so
-    // the theme CSS variables (--bg, --text, --accent, …) would be undefined and
-    // the control UI would render invisibly. Load appearance first, then mount.
-    loadAppearance()
-      .catch(() => {})
-      .then(() => import('./slides/slides-ui.js'))
-      .then((m) => {
-        if (!m.mountSlidesRemoteFromHash()) {
-          document.body.innerHTML = '<main style="padding:24px;font-family:system-ui">Invalid slideshow remote link.</main>';
-        }
-        ensureLegalFooter({
-          parent: document.body,
-          id: 'yanta-slides-remote-legal-footer',
-          variant: 'public',
-        });
-      })
-      .catch((e) => {
-        console.error(e);
-        document.body.innerHTML = '<main style="padding:24px;font-family:system-ui">Could not open slideshow remote.</main>';
-        ensureLegalFooter({
-          parent: document.body,
-          id: 'yanta-slides-remote-error-legal-footer',
-          variant: 'public',
-        });
-      });
   } else {
   init().catch((e) => {
     console.error(e);

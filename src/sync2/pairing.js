@@ -20,6 +20,7 @@ import { openBoundOverlay } from '../overlay-history.js';
 
 import {
   store,
+  escapeHtml,
 } from '../core.js';
 
 import {
@@ -189,7 +190,11 @@ export function renderSync2QrSvg(text, size = 220) {
   });
 }
 
-export async function scanQrWithCamera() {
+export async function scanQrWithCamera({
+  title = 'Scan YANTA Sync QR',
+  hint = 'Point the camera at the Sync QR code from your first device.',
+  zIndex = 400,
+} = {}) {
   if (!('BarcodeDetector' in window)) {
     throw new Error('QR scanning is not supported in this browser. Paste the pairing link manually.');
   }
@@ -210,17 +215,17 @@ export async function scanQrWithCamera() {
 
   const modal = document.createElement('div');
   modal.className = 'modal';
-  modal.style.zIndex = '400';
+  modal.style.zIndex = String(zIndex);
   modal.innerHTML = `
     <div class="modal-card" style="width:min(420px,94vw)">
       <header class="modal-head">
-        <h3>Scan YANTA Sync QR</h3>
+        <h3>${escapeHtml(title)}</h3>
         <button class="icon-btn" data-close>&times;</button>
       </header>
       <div class="modal-body">
         <video autoplay playsinline muted style="width:100%;border-radius:12px;background:#000"></video>
         <p style="font-size:12px;color:var(--text-dim);margin-top:10px">
-          Point the camera at the Sync QR code from your first device.
+          ${escapeHtml(hint)}
         </p>
       </div>
     </div>

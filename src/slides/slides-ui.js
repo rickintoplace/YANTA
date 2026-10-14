@@ -67,6 +67,7 @@ import {
   accentColor,
   slideFramePatchFor,
   SLIDE_FRAME_VISIBILITY,
+  presentationSlidesFor,
 } from './slides-model.js';
 
 import {
@@ -100,13 +101,7 @@ import {
   runDrawingApiUpdateWithoutSaving,
 } from '../draw-scene-sync.js';
 
-import {
-  openPresentationSessionModal,
-} from '../presentation/presentation-ui.js';
 
-import {
-  openPresentationPairingInputModal,
-} from '../presentation/presentation-pairing.js';
 
 import {
   makePanelDraggable,
@@ -129,7 +124,17 @@ import {
   showMenu,
 } from '../tree.js';
 
-import { SIGNALING_URL, keepSignalingAlive } from '../signaling.js';
+import { t } from '../i18n/index.js';
+import { currentPresentHost, presentHostFor, resumePresentHost } from '../present/present-host.js';
+import { buildDeck } from '../present/present-deck.js';
+
+import {
+  cancelCameraAnimation,
+  screenToScene,
+  screenToSlidePoint,
+  scrollToSlide,
+  slidePointToScreen,
+} from './slide-camera.js';
 
 // Overlay-history id of a running presentation, so Back/ESC exit the
 // slideshow before they touch the drawing or note underneath it.
@@ -137,15 +142,11 @@ const SLIDESHOW_OVERLAY_ID = 'drawing-slideshow';
 
 let cssInjected = false;
 let slideshow = null;
-let remoteSocket = null;
-let remoteTopic = '';
-let remoteToken = '';
 
 let fullscreenSlidesDock = null;
 let fullscreenSlidesCtx = null;
 
 const slidePreviewCache = new Map();
-const REMOTE_PREVIEW_MAX_CHARS = 650_000;
 
 // Tracks slide-frame opacity/lock state hidden during presentation so it can
 // be restored afterwards. One entry per Excalidraw API instance.
@@ -156,7 +157,6 @@ const middleMousePanBindings = new WeakSet();
 
 const pendingPanelRefreshes = new Set();
 let panelRefreshRaf = 0;
-let cameraAnimationRaf = 0;
 
 const DRAW_MOBILE_MQ = window.matchMedia?.('(pointer: coarse), (max-width: 760px)');
 
@@ -538,6 +538,21 @@ function injectCss() {
   inset: 0;
   z-index: 620;
   pointer-events: none;
+}
+
+/* "Blank screen" from a remote (B on a clicker): black, toolbar still usable. */
+.yanta-slideshow::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background: #000;
+  opacity: 0;
+  transition: opacity 0.25s ease;
+  pointer-events: none;
+}
+
+.yanta-slideshow.is-blank::before {
+  opacity: 1;
 }
 
 .yanta-slideshow-progress {
@@ -1339,12 +1354,9 @@ function openSlidesOverflowMenu(anchor, ctx, { getApi, refresh, hasSlides } = {}
     },
     'hr',
     {
-      label: 'Connect a device…',
-      icon: 'screen-share',
-      action: requireSlides(() => openConnectDeviceModal({
-        ...ctx,
-        api: api(),
-      })),
+      label: t('present.connect.menu'),
+      icon: 'cast',
+      action: () => openConnectForDrawing(ctx),
     },
     {
       label: 'Export as PDF',
@@ -1420,137 +1432,6 @@ function wireSlidesBar(root, ctx, {
 }
 
 // ============================================================
-// Connect a device — merged remote + present-on-another-screen
-// ============================================================
-
-const CONNECT_OVERLAY_ID = 'slides-connect';
-
-function openConnectDeviceModal(ctx) {
-  injectCss();
-
-  openSlidesOverlay(CONNECT_OVERLAY_ID, () => {
-    const modal = document.createElement('div');
-    modal.className = 'yanta-slides-connect-modal';
-
-    modal.innerHTML = `
-      <div class="yanta-slides-connect-card">
-        <header>
-          ${lucide('screen-share', 18)}
-          <h3>Connect a device</h3>
-          <button class="icon-btn" data-connect-close>${lucide('x', 16)}</button>
-        </header>
-
-        <div class="yanta-slides-connect-body">
-          <button class="yanta-slides-connect-option" data-connect-option="phone-remote">
-            <span class="yanta-slides-connect-icon">${lucide('smartphone', 20)}</span>
-            <span class="yanta-slides-connect-text">
-              <strong>Use your phone as a remote</strong>
-              <small>Slides stay on this screen. Scan a QR with your phone to flip slides and point a laser.</small>
-            </span>
-            ${lucide('chevron-right', 16)}
-          </button>
-
-          <button class="yanta-slides-connect-option" data-connect-option="send-to-screen">
-            <span class="yanta-slides-connect-icon">${lucide('cast', 20)}</span>
-            <span class="yanta-slides-connect-text">
-              <strong>Send the slides to another screen</strong>
-              <small>Open yanta.page/present on a TV or projector, then scan or paste its code to hand off the presentation.</small>
-            </span>
-            ${lucide('chevron-right', 16)}
-          </button>
-
-          <button class="yanta-slides-connect-option" data-connect-option="share-link">
-            <span class="yanta-slides-connect-icon">${lucide('link', 20)}</span>
-            <span class="yanta-slides-connect-text">
-              <strong>Get a shareable display link</strong>
-              <small>Generate an encrypted link or QR to open on any other device yourself.</small>
-            </span>
-            ${lucide('chevron-right', 16)}
-          </button>
-        </div>
-      </div>
-    `;
-
-    const close = () => closeSlidesOverlay(CONNECT_OVERLAY_ID);
-
-    modal.querySelector('[data-connect-close]')?.addEventListener('click', close);
-    modal.addEventListener('click', (e) => {
-      if (e.target === modal) close();
-    });
-
-    modal.querySelector('[data-connect-option="phone-remote"]')?.addEventListener('click', () => {
-      close();
-      ensureSlideshowForRemote({
-        ...ctx,
-        api: ctx.api || currentApiForDrawing(ctx.noteId, ctx.drawingId),
-      });
-      openRemoteQrModal();
-    });
-
-    modal.querySelector('[data-connect-option="send-to-screen"]')?.addEventListener('click', () => {
-      close();
-      // Join a waiting display (scan/paste its pairing code).
-      openPresentationPairingInputModal();
-    });
-
-    modal.querySelector('[data-connect-option="share-link"]')?.addEventListener('click', async () => {
-      close();
-      // Host: generate a link/QR. This requires YANTA Cloud — guard with a
-      // clear, actionable error instead of a cryptic failure.
-      await openShareDisplayLinkGuarded(ctx);
-    });
-
-    return modal;
-  });
-}
-
-/**
- * "Share a display link" needs a configured YANTA Cloud vault (the encrypted
- * session is stored there). If it isn't set up, explain why and offer to open
- * the setup instead of throwing a vague error deep inside the session code.
- */
-async function openShareDisplayLinkGuarded(ctx) {
-  let vaultId = '';
-
-  try {
-    vaultId = await store.settings.get('sync2.yantaCloud.vaultId', '');
-  } catch {}
-
-  if (!vaultId) {
-    const setup = await yantaConfirm({
-      title: 'YANTA Cloud needed for display links',
-      message: [
-        'Sending slides to another device uses an end-to-end-encrypted session that lives in your YANTA Cloud vault.',
-        '',
-        'You are not signed in to YANTA Cloud yet, so there is nowhere to store the session.',
-        '',
-        'Set up YANTA Cloud now? It only takes a moment, and “Use your phone as a remote” works without it.',
-      ].join('\n'),
-      confirmLabel: 'Set up YANTA Cloud',
-      cancelLabel: 'Not now',
-      icon: 'cloud',
-    });
-
-    if (setup) {
-      try {
-        const { openYantaCloudSetup } = await import('../sync2/yanta-cloud-setup-ui.js');
-        await openYantaCloudSetup();
-      } catch (err) {
-        console.error('[YANTA Slides] could not open cloud setup', err);
-        toast('Could not open YANTA Cloud setup', 'error');
-      }
-    }
-
-    return;
-  }
-
-  openPresentationSessionModal({
-    noteId: ctx.noteId,
-    drawingId: ctx.drawingId,
-  });
-}
-
-// ============================================================
 // Present entry point
 //
 // Present does NOT enter browser fullscreen. It ensures the drawing is shown
@@ -1560,10 +1441,10 @@ async function openShareDisplayLinkGuarded(ctx) {
 // ============================================================
 
 async function presentSlides(ctx, { fromFullscreen = false, getApi } = {}) {
-  const slides = listSlides(ctx.noteId, ctx.drawingId).filter((s) => !s.hidden);
+  const slides = presentationSlidesFor(getDrawing(ctx.noteId, ctx.drawingId));
 
   if (!slides.length) {
-    toast('Create at least one slide before presenting', 'error');
+    toast(t('present.nothingToPresent'), 'error');
     return;
   }
 
@@ -1639,62 +1520,9 @@ function scheduleSlidesPanelRefresh(embed) {
   });
 }
 
-function slidesPanelOpen(embed) {
-  return embed?.dataset?.slidesPanelOpen === '1';
-}
-
-function setSlidesPanelOpen(embed, open) {
-  if (!embed) return;
-  embed.dataset.slidesPanelOpen = open ? '1' : '0';
-}
-
-function prefersReducedMotion() {
-  try {
-    return window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
-  } catch {
-    return false;
-  }
-}
 
 function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
-}
-
-function easeInOutCubic(t) {
-  const x = clamp(t, 0, 1);
-
-  return x < 0.5
-    ? 4 * x * x * x
-    : 1 - Math.pow(-2 * x + 2, 3) / 2;
-}
-
-function finiteNumber(value, fallback = 0) {
-  const n = Number(value);
-  return Number.isFinite(n) ? n : fallback;
-}
-
-function drawingViewportRect(container = null) {
-  const rect =
-    container?.querySelector?.('.excalidraw')?.getBoundingClientRect?.() ||
-    container?.getBoundingClientRect?.() ||
-    null;
-
-  if (rect && rect.width > 0 && rect.height > 0) {
-    return rect;
-  }
-
-  return {
-    left: 0,
-    top: 0,
-    right: window.innerWidth,
-    bottom: window.innerHeight,
-    width: window.innerWidth,
-    height: window.innerHeight,
-  };
-}
-
-function zoomValue(appState = {}) {
-  return finiteNumber(appState.zoom?.value ?? appState.zoom, 1) || 1;
 }
 
 function isTextInputTarget(target) {
@@ -1738,19 +1566,12 @@ function sceneElementsForApi(api) {
 const slideFrameVisibilityByApi = new WeakMap();
 
 function slideModeActiveForDrawing(noteId, drawingId) {
-  // Fullscreen dock counts as slide-mode when docked open.
-  if (
+  // Slide mode is the fullscreen dock, docked open.
+  return (
     isFullscreenSlidesDockVisible() &&
     fullscreenSlidesCtx?.noteId === noteId &&
     fullscreenSlidesCtx?.drawingId === drawingId
-  ) {
-    return true;
-  }
-  // Any inline embed for this drawing with its Slides panel open.
-  const embed = document.querySelector(
-    `.yanta-draw-embed[data-draw-id="${CSS.escape(drawingId)}"][data-note-id="${CSS.escape(noteId)}"]`
   );
-  return !!embed && slidesPanelOpen(embed);
 }
 
 function slideshowRunningForDrawing(noteId, drawingId) {
@@ -2003,237 +1824,27 @@ function bindSlideFrameMiddleMousePan(container, api) {
 /**
  * Browser client coords -> Excalidraw infinite-board scene coords.
  */
-function screenToScene({
-  api,
-  container,
-  clientX,
-  clientY,
-}) {
-  if (!Number.isFinite(Number(clientX)) || !Number.isFinite(Number(clientY))) {
-    console.warn('[YANTA Slides] invalid screenToScene input', {
-      clientX,
-      clientY,
-      container,
-    });
-
-    return {
-      x: 0,
-      y: 0,
-      invalid: true,
-    };
-  }
-
-  try {
-    if (api?.screenToSceneCoords) {
-      const p = api.screenToSceneCoords({
-        clientX,
-        clientY,
-      });
-
-      if (
-        p &&
-        Number.isFinite(Number(p.x)) &&
-        Number.isFinite(Number(p.y))
-      ) {
-        return {
-          x: Number(p.x),
-          y: Number(p.y),
-        };
-      }
-
-      const p2 = api.screenToSceneCoords({
-        x: clientX,
-        y: clientY,
-      });
-
-      if (
-        p2 &&
-        Number.isFinite(Number(p2.x)) &&
-        Number.isFinite(Number(p2.y))
-      ) {
-        return {
-          x: Number(p2.x),
-          y: Number(p2.y),
-        };
-      }
-    }
-  } catch {}
-
-  const rect = drawingViewportRect(container);
-  const appState = api?.getAppState?.() || {};
-  const zoom = zoomValue(appState);
-  const scrollX = finiteNumber(appState.scrollX, 0);
-  const scrollY = finiteNumber(appState.scrollY, 0);
-
-  return {
-    x: (clientX - rect.left) / zoom - scrollX,
-    y: (clientY - rect.top) / zoom - scrollY,
-  };
-}
-
-function sceneToScreen({
-  api,
-  container,
-  sceneX,
-  sceneY,
-}) {
-  const rect = drawingViewportRect(container);
-  const appState = api?.getAppState?.() || {};
-  const zoom = zoomValue(appState);
-  const scrollX = finiteNumber(appState.scrollX, 0);
-  const scrollY = finiteNumber(appState.scrollY, 0);
-
-  return {
-    x: rect.left + (sceneX + scrollX) * zoom,
-    y: rect.top + (sceneY + scrollY) * zoom,
-  };
-}
-
 function slideUnitToScreen(data = {}) {
   if (!slideshow) return null;
 
-  const slide = slideshow.slides[slideshow.index];
-  const api =
-    currentApiForDrawing(slideshow.noteId, slideshow.drawingId) ||
-    slideshow.api;
-
-  if (!slide || !api) return null;
-
-  const bounds = normalizeSlideBounds(slide.bounds);
-
-  const sceneX = bounds.x + clamp(Number(data.x || 0), 0, 1) * bounds.width;
-  const sceneY = bounds.y + clamp(Number(data.y || 0), 0, 1) * bounds.height;
-
-  return sceneToScreen({
-    api,
+  return slidePointToScreen({
+    api: currentApiForDrawing(slideshow.noteId, slideshow.drawingId) || slideshow.api,
     container: slideshow.container,
-    sceneX,
-    sceneY,
+    slide: slideshow.slides[slideshow.index],
+    x: data.x,
+    y: data.y,
   });
 }
 
 function screenToSlideUnit(clientX, clientY) {
   if (!slideshow) return null;
 
-  const slide = slideshow.slides[slideshow.index];
-  const api =
-    currentApiForDrawing(slideshow.noteId, slideshow.drawingId) ||
-    slideshow.api;
-
-  if (!slide || !api) return null;
-
-  const scene = screenToScene({
-    api,
+  return screenToSlidePoint({
+    api: currentApiForDrawing(slideshow.noteId, slideshow.drawingId) || slideshow.api,
     container: slideshow.container,
+    slide: slideshow.slides[slideshow.index],
     clientX,
     clientY,
-  });
-
-  const bounds = normalizeSlideBounds(slide.bounds);
-
-  return {
-    x: clamp((scene.x - bounds.x) / Math.max(1, bounds.width), 0, 1),
-    y: clamp((scene.y - bounds.y) / Math.max(1, bounds.height), 0, 1),
-  };
-}
-
-function slideCameraTarget(api, container, slide, {
-  viewportZoomFactor = 0.84,
-} = {}) {
-  const rect = drawingViewportRect(container);
-  const bounds = normalizeSlideBounds(slide.bounds);
-
-  const safeWidth = Math.max(1, bounds.width);
-  const safeHeight = Math.max(1, bounds.height);
-
-  const zoom = clamp(
-    Math.min(
-      (rect.width * viewportZoomFactor) / safeWidth,
-      (rect.height * viewportZoomFactor) / safeHeight
-    ),
-    0.04,
-    4
-  );
-
-  const centerX = bounds.x + bounds.width / 2;
-  const centerY = bounds.y + bounds.height / 2;
-
-  return {
-    scrollX: rect.width / (2 * zoom) - centerX,
-    scrollY: rect.height / (2 * zoom) - centerY,
-    zoom,
-  };
-}
-
-function updateCamera(api, camera) {
-  if (!api || !camera) return;
-
-  runDrawingApiUpdateWithoutSaving(api, {
-    appState: {
-      scrollX: camera.scrollX,
-      scrollY: camera.scrollY,
-      zoom: {
-        value: camera.zoom,
-      },
-    },
-  }, {
-    releaseMs: 260,
-  });
-}
-
-function animateCameraToSlide(api, container, slide, {
-  duration = 520,
-} = {}) {
-  if (!api || !slide) return;
-
-  duration = Number.isFinite(duration) ? duration : 520;
-
-  cancelAnimationFrame(cameraAnimationRaf);
-  cameraAnimationRaf = 0;
-
-  const appState = api.getAppState?.() || {};
-
-  const from = {
-    scrollX: finiteNumber(appState.scrollX, 0),
-    scrollY: finiteNumber(appState.scrollY, 0),
-    zoom: zoomValue(appState),
-  };
-
-  const to = slideCameraTarget(api, container, slide);
-
-  if (prefersReducedMotion() || duration <= 0) {
-    updateCamera(api, to);
-    return;
-  }
-
-  const start = performance.now();
-
-  const tick = () => {
-    const t = clamp((performance.now() - start) / duration, 0, 1);
-    const k = easeInOutCubic(t);
-
-    updateCamera(api, {
-      scrollX: from.scrollX + (to.scrollX - from.scrollX) * k,
-      scrollY: from.scrollY + (to.scrollY - from.scrollY) * k,
-      zoom: from.zoom + (to.zoom - from.zoom) * k,
-    });
-
-    if (t < 1) {
-      cameraAnimationRaf = requestAnimationFrame(tick);
-    } else {
-      cameraAnimationRaf = 0;
-      updateCamera(api, to);
-    }
-  };
-
-  cameraAnimationRaf = requestAnimationFrame(tick);
-}
-
-function scrollToSlide(api, slide, container = null, { animate = true } = {}) {
-  if (!api || !slide) return;
-
-  animateCameraToSlide(api, container, slide, {
-    duration: animate ? undefined : 0,
   });
 }
 
@@ -2604,141 +2215,23 @@ function bindSlideChipInteractions(root, ctx, {
 // Inline embed panel + fullscreen dock
 // ============================================================
 
-function ensureInlineSlidesHeadButton(embed) {
-  const head = embed.querySelector('.yanta-draw-embed-head');
-  if (!head || head.querySelector('[data-slides-head-toggle]')) return;
-
-  const btn = document.createElement('button');
-  btn.type = 'button';
-  btn.className = 'icon-btn yanta-slides-head-btn';
-  btn.dataset.slidesHeadToggle = '1';
-  btn.title = 'Slides';
-  btn.setAttribute('aria-pressed', 'false');
-  btn.innerHTML = lucide('presentation', 20);
-
-  btn.addEventListener('click', (e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    setSlidesPanelOpen(embed, !slidesPanelOpen(embed));
-    refreshSlidesPanel(embed);
-  });
-
-  // Insert into the existing actions cluster if present, else into the head.
-  const actions = head.querySelector('.yanta-draw-embed-actions');
-  if (actions) {
-    actions.insertBefore(btn, actions.firstChild);
-  } else {
-    head.append(btn);
-  }
-}
-
+/*
+  Inline embeds no longer carry a slides panel of their own: slides are made
+  in the fullscreen editor, where there is room for them, and an embed with
+  slides offers "Present" in its header (draw.js). What an inline canvas
+  still needs is the right slide-frame visibility.
+*/
 function enhanceDrawingEmbed(embed) {
   injectCss();
   if (!embed) return;
-
-  if (embed.dataset.slidesEnhanced === '1') {
-    scheduleSlidesPanelRefresh(embed);
-    return;
-  }
-  embed.dataset.slidesEnhanced = '1';
-
-  // Slides toggle button lives in the embed head, next to the other actions.
-  ensureInlineSlidesHeadButton(embed);
-
-  // The panel is created lazily and stays hidden until the user opens Slides.
-  const panel = document.createElement('div');
-  panel.className = 'yanta-slides-panel';
-  panel.dataset.slidesPanel = '1';
-  panel.hidden = true;
-
-  const host = embed.querySelector('.yanta-draw-inline-host');
-  if (host) {
-    embed.insertBefore(panel, host);
-  } else {
-    embed.append(panel);
-  }
-
-  refreshSlidesPanel(embed);
+  scheduleSlidesPanelRefresh(embed);
 }
 
 function refreshSlidesPanel(embed) {
-  if (!embed) return;
-  const panel = embed.querySelector('[data-slides-panel]');
-  if (!panel) return;
   const ctx = contextFromEmbed(embed);
-  const headBtn = embed.querySelector('[data-slides-head-toggle]');
-  const open = slidesPanelOpen(embed);
+  if (!ctx?.api) return;
 
-  headBtn?.classList.toggle('is-active', open);
-  headBtn?.setAttribute('aria-pressed', open ? 'true' : 'false');
-
-  if (!ctx) {
-    panel.hidden = true;
-    panel.innerHTML = '';
-    return;
-  }
-
-  // Keep the head badge count fresh even while the panel is closed.
-  const slides = syncSlidesFromScene(ctx.noteId, ctx.drawingId, ctx.api);
-
-  // Slide-mode visibility depends on panel open-state; sync it now,
-  // before any early return for the closed state.
   reconcileSlideFrameVisibility(ctx.noteId, ctx.drawingId, ctx.api);
-
-  if (headBtn) {
-    headBtn.title = slides.length
-      ? `Slides · ${slides.length}`
-      : 'Slides';
-  }
-
-  if (!open) {
-    panel.hidden = true;
-    panel.innerHTML = '';
-    return;
-  }
-
-  panel.hidden = false;
-  panel.innerHTML = `
-    ${renderSlidesBarHtml(slides, { open: true, fullscreen: false })}
-    ${renderSlidesStripHtml(slides)}
-  `;
-
-  const getApi = () => getDrawingApiForEmbed(embed);
-  const refresh = () => {
-    setSlidesPanelOpen(embed, true);
-    refreshSlidesPanel(embed);
-  };
-
-  wireSlidesBar(panel, ctx, {
-    fullscreen: false,
-    getApi,
-    refresh,
-    hasSlides: slides.length > 0,
-    onToggle: () => {
-      setSlidesPanelOpen(embed, false);
-      refreshSlidesPanel(embed);
-    },
-  });
-
-  hydrateSlideThumbnails(panel, ctx.drawing, slides).catch((err) => {
-    console.warn('[YANTA Slides] could not hydrate thumbnails', err);
-  });
-
-  bindSlideStripReorder(panel.querySelector('.yanta-slides-strip'), {
-    noteId: ctx.noteId,
-    drawingId: ctx.drawingId,
-    refresh,
-  });
-
-  bindSlideChipInteractions(panel, ctx, {
-    getApi,
-    refresh,
-  });
-
-  // After the open/closed state is settled, sync frame visibility.
-  if (ctx) {
-    reconcileSlideFrameVisibility(ctx.noteId, ctx.drawingId, ctx.api);
-  }
 }
 
 function removeFullscreenSlidesDock() {
@@ -3698,19 +3191,6 @@ function startSlideDrawMode({
   requestAnimationFrame(() => overlay.focus());
 }
 
-function ensureSlideshowForRemote(ctx) {
-  if (!slideshow || slideshow.noteId !== ctx.noteId || slideshow.drawingId !== ctx.drawingId) {
-    startSlideshow({
-      noteId: ctx.noteId,
-      drawingId: ctx.drawingId,
-      api: ctx.api,
-      container: ctx.container,
-      silent: true,
-    });
-  }
-}
-
-
 // ============================================================
 // Slideshow
 // ============================================================
@@ -3812,11 +3292,11 @@ export function startSlideshow({
 } = {}) {
   injectCss();
 
-  const slides = listSlides(noteId, drawingId).filter((s) => !s.hidden);
   const drawing = getDrawing(noteId, drawingId);
+  const slides = presentationSlidesFor(drawing);
 
   if (!drawing || !slides.length) {
-    if (!silent) toast('No slides defined yet', 'error');
+    if (!silent) toast(t('present.nothingToPresent'), 'error');
     return null;
   }
 
@@ -3844,7 +3324,8 @@ export function startSlideshow({
     <button class="icon-btn" data-slide-next title="Next (→)">${lucide('chevron-right', 18)}</button>
     <button class="icon-btn" data-slide-laser title="Laser pointer (L)">${lucide('mouse-pointer-2', 17)}</button>
     <button class="icon-btn" data-slide-notes title="Speaker notes (N)">${lucide('notebook-text', 17)}</button>
-    <button class="icon-btn" data-slide-connect title="Connect a device">${lucide('screen-share', 17)}</button>
+    <button class="icon-btn" data-slide-connect title="${escapeAttr(t('present.connect.menu'))}">${lucide('cast', 17)}</button>
+    <button class="icon-btn" data-slide-presenter hidden title="${escapeAttr(t('present.remote.presenterView'))}">${lucide('tablet-smartphone', 17)}</button>
     <button class="icon-btn" data-slide-immersive title="Browser fullscreen">${lucide('maximize', 17)}</button>
     <button class="icon-btn" data-slide-exit title="Exit slideshow (Esc)">${lucide('x', 17)}</button>
   `;
@@ -3873,6 +3354,10 @@ export function startSlideshow({
     notesEl: null,
     laserHideTimer: 0,
     immersive: true,
+    blank: false,
+    startedAt: Date.now(),
+    presenterView: null,
+    presenterViewDismissed: false,
 
     animator: createSlideAnimator({
       // Resolved per call: the fullscreen stage can remount underneath a
@@ -3915,13 +3400,10 @@ export function startSlideshow({
   toolbar.querySelector('[data-slide-notes]')?.addEventListener('click', toggleNotes);
 
   toolbar.querySelector('[data-slide-connect]')?.addEventListener('click', () => {
-    openConnectDeviceModal({
-      noteId,
-      drawingId,
-      api: slideshow.api,
-      container: slideshow.container,
-    });
+    openConnectForDrawing({ noteId, drawingId });
   });
+
+  toolbar.querySelector('[data-slide-presenter]')?.addEventListener('click', togglePresenterView);
 
   toolbar.querySelector('[data-slide-immersive]')?.addEventListener('click', () => {
     if (document.fullscreenElement) {
@@ -3938,6 +3420,18 @@ export function startSlideshow({
   goToSlide(slideshow.index, {
     notifyRemote: false,
   });
+
+  // Devices already connected to this drawing follow from the first slide on.
+  const presentHost = currentPresentHost();
+  if (slideshowShowsHostDrawing(presentHost)) {
+    bindPresentHost(presentHost);
+    publishRemoteState();
+    syncPresenterButton(presentHost.peers.some((p) => p.role === 'screen' && !p.offline));
+
+    if (isMobileSlidesUx() && presentHost.peers.some((p) => p.role === 'screen' && !p.offline)) {
+      openPresenterView();
+    }
+  }
 
   return slideshow;
 }
@@ -4004,7 +3498,12 @@ export function stopSlideshow() {
   document.removeEventListener('pointermove', laserPointerMove, true);
   slideshow.notesEl?.remove();
   slideshow.root?.remove();
-  closeRemoteSocket();
+  closePresenterView();
+
+  const presentHost = currentPresentHost();
+  if (presentHost?.noteId === noteId && presentHost?.drawingId === drawingId) {
+    presentHost.setPosition({ presenting: false });
+  }
   document.body.classList.remove('yanta-slideshow-active');
   document.body.classList.remove('yanta-slideshow-immersive');
   fullscreenSlidesDock?.classList.remove('is-hidden-during-slideshow');
@@ -4012,8 +3511,7 @@ export function stopSlideshow() {
   document
     .querySelectorAll('.yanta-slideshow-immersive-hint')
     .forEach((node) => node.remove());
-  cancelAnimationFrame(cameraAnimationRaf);
-  cameraAnimationRaf = 0;
+  cancelCameraAnimation();
   exitSlideshowFullscreen();
 
   // Cleared before releasing the history entry: the resulting popstate routes
@@ -4097,6 +3595,13 @@ function slideshowKeyHandler(e) {
   if (e.key.toLowerCase() === 'n') {
     consume();
     toggleNotes();
+    return;
+  }
+
+  // Blank the screen, as every presentation app and clicker does.
+  if (e.key.toLowerCase() === 'b' || e.key === '.') {
+    consume();
+    setSlideshowBlank(!slideshow.blank);
   }
 }
 
@@ -4198,16 +3703,15 @@ function laserPointerMove(e) {
 
   showLaserDot(e.clientX, e.clientY);
 
+  // Every connected screen shows the presenter's laser too (throttled).
+  const host = currentPresentHost();
+  if (!slideshowShowsHostDrawing(host) || performance.now() - (slideshow.laserSentAt || 0) < 50) return;
+
   const unit = screenToSlideUnit(e.clientX, e.clientY);
 
   if (unit) {
-    publishRemote({
-      kind: 'laser',
-      unit: 'slide',
-      x: unit.x,
-      y: unit.y,
-      ts: Date.now(),
-    });
+    slideshow.laserSentAt = performance.now();
+    host.laser({ x: unit.x, y: unit.y, on: true });
   }
 }
 
@@ -4277,358 +3781,232 @@ function updateNotesPanel() {
 }
 
 // ------------------------------------------------------------
-// Remote QR via signaling server
+// Connected devices (src/present/)
 // ------------------------------------------------------------
 
-function remotePayload() {
-  return {
-    v: 1,
-    kind: 'yanta-slides-remote',
-    topic: `slides-${uid()}-${Date.now()}`,
-    token: uid() + uid(),
-    origin: location.origin,
-  };
+function slideshowShowsHostDrawing(host) {
+  return !!slideshow && !!host &&
+    slideshow.noteId === host.noteId &&
+    slideshow.drawingId === host.drawingId;
 }
 
-function remoteUrl(payload) {
-  const encoded = btoa(JSON.stringify(payload))
-    .replace(/\+/g, '-')
-    .replace(/\//g, '_')
-    .replace(/=+$/, '');
+/** Tells connected screens and remotes where the presentation is. */
+function publishRemoteState() {
+  const host = currentPresentHost();
 
-  return `${location.origin}${location.pathname}${location.search}#slides-remote=${encoded}`;
-}
-
-function decodeRemoteHash(hash = location.hash) {
-  const raw = String(hash || '').replace(/^#/, '');
-
-  if (!raw.startsWith('slides-remote=')) return null;
-
-  let b64 = raw.slice('slides-remote='.length)
-    .replace(/-/g, '+')
-    .replace(/_/g, '/');
-
-  while (b64.length % 4) b64 += '=';
-
-  try {
-    return JSON.parse(atob(b64));
-  } catch {
-    return null;
-  }
-}
-
-export function isSlidesRemoteHash(hash = location.hash) {
-  const payload = decodeRemoteHash(hash);
-  return payload?.kind === 'yanta-slides-remote';
-}
-
-export function mountSlidesRemoteFromHash(hash = location.hash) {
-  const payload = decodeRemoteHash(hash);
-
-  if (payload?.kind !== 'yanta-slides-remote') {
-    return false;
+  if (slideshowShowsHostDrawing(host)) {
+    host.setPosition({
+      presenting: true,
+      index: slideshow.index,
+      step: slideshow.step,
+      blank: !!slideshow.blank,
+      slides: slideshow.slides,
+    });
   }
 
-  mountRemoteControl(payload);
-  return true;
+  updatePresenterView();
 }
 
-function openRemoteQrModal() {
-  if (!slideshow) {
-    toast('Start a slideshow first', 'error');
+function setSlideshowBlank(on) {
+  if (!slideshow) return;
+
+  slideshow.blank = !!on;
+  slideshow.root?.classList.toggle('is-blank', slideshow.blank);
+  publishRemoteState();
+}
+
+/** Presses from a remote, applied as if made on this device. */
+function handleRemoteCommand(host, cmd = {}) {
+  const running = slideshowShowsHostDrawing(host);
+
+  if (cmd.op === 'start') {
+    if (!running) {
+      presentSlides({
+        noteId: host.noteId,
+        drawingId: host.drawingId,
+        api: currentApiForDrawing(host.noteId, host.drawingId),
+        container: getActiveDrawingHost?.() || null,
+      }, { fromFullscreen: !!getActiveDrawingApiFor?.(host.noteId, host.drawingId) });
+    }
     return;
   }
 
-  const payload = remotePayload();
+  if (!running) return;
 
-  remoteTopic = payload.topic;
-  remoteToken = payload.token;
-
-  openRemotePresenterSocket();
-
-  const modal = document.createElement('div');
-  modal.className = 'yanta-slides-remote-modal';
-
-  const url = remoteUrl(payload);
-
-  modal.innerHTML = `
-    <div class="yanta-slides-remote-card">
-      <header>
-        <h3>Remote Control</h3>
-        <button class="icon-btn" data-close>${lucide('x', 16)}</button>
-      </header>
-
-      <div class="yanta-slides-remote-body">
-        <div class="yanta-slides-remote-qr" data-qr></div>
-        <input class="text-input" readonly value="${escapeAttr(url)}">
-
-        <p style="margin:0;color:var(--text-dim);font-size:13px;line-height:1.45">
-          Scan with your phone to control slide navigation and laser pointer.
-        </p>
-      </div>
-    </div>
-  `;
-
-  modal.querySelector('[data-qr]')?.append(renderBrandedQrSvg(url, {
-    size: 240,
-    logo: BRAND_LOGO_SVG,
-  }));
-
-  modal.querySelector('[data-close]')?.addEventListener('click', () => modal.remove());
-
-  modal.addEventListener('click', (e) => {
-    if (e.target === modal) modal.remove();
-  });
-
-  document.body.append(modal);
+  if (cmd.op === 'next') nextSlide();
+  else if (cmd.op === 'prev') previousSlide();
+  else if (cmd.op === 'goto' && Number.isInteger(cmd.index)) goToSlide(cmd.index);
+  else if (cmd.op === 'blank') setSlideshowBlank(cmd.blank);
 }
 
-function openRemotePresenterSocket() {
-  closeRemoteSocket();
+function bindPresentHost(host) {
+  if (!host || host.boundBySlides) return host;
 
-  remoteSocket = new WebSocket(SIGNALING_URL);
+  host.boundBySlides = true;
+  host.setHandlers({
+    command: (cmd) => handleRemoteCommand(host, cmd),
+    laser: (point) => {
+      if (!slideshowShowsHostDrawing(host)) return;
 
-  keepSignalingAlive(remoteSocket);
-
-  remoteSocket.addEventListener('open', () => {
-    remoteSocket.send(JSON.stringify({
-      type: 'subscribe',
-      topics: [remoteTopic],
-    }));
-
-    publishRemoteState();
-  });
-
-  remoteSocket.addEventListener('message', (event) => {
-    let msg = null;
-
-    try {
-      msg = JSON.parse(event.data);
-    } catch {}
-
-    const data = msg?.data;
-
-    if (!data || data.token !== remoteToken) return;
-
-    if (data.kind === 'next') nextSlide();
-    if (data.kind === 'prev') previousSlide();
-
-    if (data.kind === 'laser') {
-      showLaserDotFromRemote(data);
-    }
-  });
-}
-
-function publishRemote(data) {
-  if (!remoteSocket || remoteSocket.readyState !== WebSocket.OPEN || !remoteTopic) return;
-
-  remoteSocket.send(JSON.stringify({
-    type: 'publish',
-    topic: remoteTopic,
-    data: {
-      ...data,
-      token: remoteToken,
-    },
-  }));
-}
-
-async function publishRemoteState() {
-  if (!slideshow) return;
-
-  const slide = slideshow.slides[slideshow.index];
-  const drawing = getDrawing(slideshow.noteId, slideshow.drawingId);
-
-  let previewSvg = '';
-
-  if (drawing && slide) {
-    try {
-      const svg = await renderSlideSvgString(drawing, slide);
-
-      if (svg.length <= REMOTE_PREVIEW_MAX_CHARS) {
-        previewSvg = svg;
+      if (point?.on === false) {
+        slideshow.root?.querySelector('[data-laser-dot]')?.classList.remove('visible');
+        return;
       }
-    } catch (err) {
-      console.warn('[YANTA Slides] could not render remote preview', err);
+
+      showLaserDotFromRemote({ unit: 'slide', x: point?.x, y: point?.y });
+    },
+  });
+
+  host.onChange(() => {
+    if (!slideshowShowsHostDrawing(host)) return;
+
+    const screens = host.peers.some((p) => p.role === 'screen' && !p.offline);
+    syncPresenterButton(screens);
+
+    // A phone that sends its slides to a screen becomes their remote.
+    if (screens && isMobileSlidesUx() && !slideshow.presenterView && !slideshow.presenterViewDismissed) {
+      openPresenterView();
     }
+  });
+
+  return host;
+}
+
+/**
+ * From the drawing picker: send this drawing to the screen whose QR code was
+ * scanned and start presenting; without a screen, open the connect panel.
+ */
+export async function presentDrawingOnScreen({ noteId, drawingId, screenKey = '' }) {
+  if (!screenKey) {
+    await openConnectForDrawing({ noteId, drawingId });
+    return;
   }
 
-  publishRemote({
-    kind: 'state',
-    index: slideshow.index,
-    total: slideshow.slides.length,
-    title: slide?.title || '',
-    notes: slide?.notes?.markdown || '',
-    previewSvg,
-    slideId: slide?.id || '',
+  const host = bindPresentHost(presentHostFor(noteId, drawingId));
+
+  toast(t('present.connect.connecting'));
+  const screen = await host.connectScreen(screenKey);
+  toast(t('present.connect.screenConnected', { name: screen.name }), 'success');
+
+  await presentSlides({ noteId, drawingId }, { fromFullscreen: false });
+}
+
+async function openConnectForDrawing(ctx) {
+  const { openConnectPanel } = await import('../present/present-connect-ui.js');
+  const host = await openConnectPanel({ noteId: ctx.noteId, drawingId: ctx.drawingId });
+
+  bindPresentHost(host);
+  publishRemoteState();
+}
+
+// ---- Presenter view: the remote, on the presenting device itself
+
+function presenterDeck() {
+  if (!slideshow) return null;
+
+  const drawing = getDrawing(slideshow.noteId, slideshow.drawingId);
+  if (!drawing) return null;
+
+  const signature = `${slideshow.noteId}:${slideshow.drawingId}:${drawing.updated || ''}`;
+
+  if (slideshow.presenterDeck?.signature !== signature) {
+    slideshow.presenterDeck = {
+      signature,
+      deck: buildDeck(drawing, { theme: document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light' }),
+    };
+  }
+
+  return slideshow.presenterDeck.deck;
+}
+
+/** The presenter view only makes sense while the slides are on another screen. */
+function syncPresenterButton(screens) {
+  const btn = slideshow?.toolbar?.querySelector('[data-slide-presenter]');
+  if (btn) btn.hidden = !screens && !slideshow?.presenterView;
+}
+
+function updatePresenterView() {
+  if (!slideshow?.presenterView) return;
+
+  const host = currentPresentHost();
+
+  slideshow.presenterView.update({
+    deck: presenterDeck(),
+    status: host && slideshowShowsHostDrawing(host) && host.status !== 'online' ? 'reconnecting' : 'online',
+    state: {
+      presenting: true,
+      title: getDrawing(slideshow.noteId, slideshow.drawingId)?.title || '',
+      index: slideshow.index,
+      step: slideshow.step,
+      blank: !!slideshow.blank,
+      counts: slideshow.slides.map(slideBuildCount),
+      startedAt: slideshow.startedAt,
+    },
   });
 }
 
-function closeRemoteSocket() {
-  if (!remoteSocket) return;
+async function openPresenterView() {
+  if (!slideshow || slideshow.presenterView) return;
 
-  try {
-    remoteSocket.close();
-  } catch {}
+  // Placeholder first: a second call while the module loads is a no-op.
+  slideshow.presenterView = { update: () => {}, destroy: () => {} };
 
-  remoteSocket = null;
-  remoteTopic = '';
-  remoteToken = '';
-}
+  const [{ mountRemote }, { injectPresentCss }] = await Promise.all([
+    import('../present/present-remote.js'),
+    import('../present/present-styles.js'),
+  ]);
 
-function remotePreviewSvgRect(screen) {
-  const preview = screen.querySelector('[data-remote-slide-preview]');
-  const svg = preview?.querySelector('svg');
+  if (!slideshow) return;
 
-  return svg?.getBoundingClientRect?.() || preview?.getBoundingClientRect?.() || null;
-}
+  injectPresentCss();
 
-function showRemoteLaserDot(screen, x, y) {
-  const pad = screen.querySelector('[data-laserpad]');
-  const dot = screen.querySelector('[data-remote-laser-dot]');
-  const svgRect = remotePreviewSvgRect(screen);
-  const padRect = pad?.getBoundingClientRect?.();
+  const box = document.createElement('div');
+  document.body.append(box);
 
-  if (!dot || !svgRect || !padRect) return;
+  const view = mountRemote(box, {
+    command: (op) => {
+      if (op === 'next') nextSlide();
+      else if (op === 'prev') previousSlide();
+      else if (op === 'blank') setSlideshowBlank(!slideshow?.blank);
+    },
+    laser: (point) => {
+      currentPresentHost()?.laser(point);
 
-  dot.style.left = `${svgRect.left - padRect.left + clamp(x, 0, 1) * svgRect.width}px`;
-  dot.style.top = `${svgRect.top - padRect.top + clamp(y, 0, 1) * svgRect.height}px`;
-  dot.classList.add('visible');
-
-  clearTimeout(dot._hideTimer);
-  dot._hideTimer = window.setTimeout(() => {
-    dot.classList.remove('visible');
-  }, 850);
-}
-
-function mountRemoteControl(payload) {
-  document.body.innerHTML = '';
-  injectCss();
-
-  const screen = document.createElement('div');
-  screen.className = 'yanta-slides-remote-screen';
-
-  screen.innerHTML = `
-    <div class="yanta-slides-remote-phone">
-      <header>
-        <h3 data-title>YANTA Remote</h3>
-      </header>
-
-      <div class="yanta-slides-remote-controls">
-        <div class="yanta-slides-remote-preview" data-laserpad>
-          <div class="yanta-slides-remote-preview-empty" data-remote-slide-preview>
-            Waiting for slide…
-          </div>
-          <div class="yanta-slides-remote-laser-dot" data-remote-laser-dot></div>
-        </div>
-
-        <button class="btn" data-prev>${lucide('chevron-left', 26)} Prev</button>
-        <button class="btn primary" data-next>Next ${lucide('chevron-right', 26)}</button>
-
-        <textarea class="text-input" data-notes rows="7" readonly placeholder="Presenter notes"></textarea>
-      </div>
-    </div>
-  `;
-
-  document.body.append(screen);
-
-  const ws = new WebSocket(SIGNALING_URL);
-
-  keepSignalingAlive(ws);
-
-  const send = (kind, extra = {}) => {
-    if (ws.readyState !== WebSocket.OPEN) return;
-
-    ws.send(JSON.stringify({
-      type: 'publish',
-      topic: payload.topic,
-      data: {
-        kind,
-        token: payload.token,
-        ...extra,
-      },
-    }));
-  };
-
-  ws.addEventListener('open', () => {
-    ws.send(JSON.stringify({
-      type: 'subscribe',
-      topics: [payload.topic],
-    }));
-  });
-
-  ws.addEventListener('message', (event) => {
-    let msg = null;
-
-    try {
-      msg = JSON.parse(event.data);
-    } catch {}
-
-    const data = msg?.data;
-    if (!data || data.token !== payload.token) return;
-
-    if (data.kind === 'state') {
-      screen.querySelector('[data-title]').textContent =
-        `${data.index + 1}/${data.total} · ${data.title || 'Slide'}`;
-
-      screen.querySelector('[data-notes]').value = data.notes || '';
-
-      const preview = screen.querySelector('[data-remote-slide-preview]');
-
-      if (preview) {
-        if (data.previewSvg) {
-          preview.classList.remove('yanta-slides-remote-preview-empty');
-          preview.innerHTML = data.previewSvg;
-        } else {
-          preview.classList.add('yanta-slides-remote-preview-empty');
-          preview.textContent = 'Slide preview unavailable';
-        }
+      if (point?.on === false) {
+        slideshow?.root?.querySelector('[data-laser-dot]')?.classList.remove('visible');
+      } else {
+        showLaserDotFromRemote({ unit: 'slide', x: point.x, y: point.y });
       }
-    }
-
-    if (data.kind === 'laser' && data.unit === 'slide') {
-      showRemoteLaserDot(
-        screen,
-        Number(data.x || 0),
-        Number(data.y || 0)
-      );
-    }
+    },
+    connect: () => openConnectForDrawing({ noteId: slideshow.noteId, drawingId: slideshow.drawingId }),
+    leave: () => closePresenterView({ dismissed: true }),
+    closeLabel: t('present.remote.showSlidesHere'),
   });
 
-  screen.querySelector('[data-prev]')?.addEventListener('click', () => send('prev'));
-  screen.querySelector('[data-next]')?.addEventListener('click', () => send('next'));
-
-  const pad = screen.querySelector('[data-laserpad]');
-
-  const sendLaserFromPointer = (e) => {
-    const svgRect = remotePreviewSvgRect(screen);
-
-    if (!svgRect || svgRect.width <= 0 || svgRect.height <= 0) return;
-
-    const x = clamp((e.clientX - svgRect.left) / svgRect.width, 0, 1);
-    const y = clamp((e.clientY - svgRect.top) / svgRect.height, 0, 1);
-
-    showRemoteLaserDot(screen, x, y);
-
-    send('laser', {
-      unit: 'slide',
-      x,
-      y,
-      ts: Date.now(),
-    });
+  slideshow.presenterView = {
+    update: view.update,
+    destroy: () => {
+      view.destroy();
+      box.remove();
+    },
   };
 
-  pad?.addEventListener('pointermove', (e) => {
-    if (!(e.buttons & 1)) return;
-    sendLaserFromPointer(e);
-  });
+  slideshow.toolbar?.querySelector('[data-slide-presenter]')?.classList.add('active');
+  updatePresenterView();
+}
 
-  pad?.addEventListener('pointerdown', (e) => {
-    try {
-      pad.setPointerCapture?.(e.pointerId);
-    } catch {}
+function closePresenterView({ dismissed = false } = {}) {
+  if (!slideshow?.presenterView) return;
 
-    sendLaserFromPointer(e);
-  });
+  slideshow.presenterView.destroy();
+  slideshow.presenterView = null;
+  slideshow.presenterViewDismissed = dismissed || slideshow.presenterViewDismissed;
+  slideshow.toolbar?.querySelector('[data-slide-presenter]')?.classList.remove('active');
+}
+
+function togglePresenterView() {
+  if (slideshow?.presenterView) closePresenterView({ dismissed: true });
+  else openPresenterView();
 }
 
 // ------------------------------------------------------------
@@ -4784,4 +4162,27 @@ window.addEventListener('yanta-draw-fullscreen-closed', () => {
   window.addEventListener('yanta-toggle-fullscreen-slides', (e) => {
     toggleFullscreenSlidesDock(e.detail || {});
   });
+
+  // "Present" in an embed or in the fullscreen header (draw.js).
+  window.addEventListener('yanta-present-drawing', (e) => {
+    const { noteId, drawingId, fromFullscreen } = e.detail || {};
+    if (!noteId || !drawingId) return;
+
+    presentSlides({
+      noteId,
+      drawingId,
+      api: currentApiForDrawing(noteId, drawingId),
+      container: fromFullscreen ? getActiveDrawingHost?.() : null,
+    }, {
+      fromFullscreen: !!fromFullscreen,
+      getApi: () => currentApiForDrawing(noteId, drawingId),
+    });
+  });
+
+  // The presenting tab reloaded: its screens and remotes are still waiting.
+  resumePresentHost()
+    .then((host) => {
+      if (host) bindPresentHost(host);
+    })
+    .catch(() => {});
 }

@@ -119,6 +119,12 @@ function refresh() {
     return;
   }
 
+  // A selected drawing (its draw:// line) is not text to format.
+  if (/^\s*draw:\/\/[a-z0-9_-]+\s*$/i.test(v.state.sliceDoc(sel.from, sel.to))) {
+    hide();
+    return;
+  }
+
   tb.innerHTML = actionsForSelection(v.state.sliceDoc(sel.from, sel.to))
     .map((id) => (id === 'hr' ? '<span class="sep"></span>' : formatToolbarButton(id)))
     .join('');

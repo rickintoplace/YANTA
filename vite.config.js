@@ -1,6 +1,28 @@
 import { defineConfig } from 'vite';
 
+/*
+  Excalidraw lists every font twice: under window.EXCALIDRAW_ASSET_PATH (our
+  self-hosted copy, see scripts/copy-excalidraw-assets.mjs) and under a
+  hard-coded esm.sh fallback. Our CSP rightly blocks esm.sh, so Chrome logged
+  a CSP violation per font face on every drawing — dozens of red errors — and
+  a font missing locally would have tried a third-party host. The fallback
+  points at our own copy instead.
+*/
+function selfHostedExcalidrawFonts() {
+  return {
+    name: 'yanta-self-hosted-excalidraw-fonts',
+    enforce: 'pre',
+    transform(code, id) {
+      if (!id.includes('@excalidraw/excalidraw') || !code.includes('esm.sh/')) return null;
+
+      const next = code.replace(/`https:\/\/esm\.sh\/\$\{.*?\}\/dist\/(?:prod|dev)\/`/g, '"/excalidraw-assets/"');
+      return next === code ? null : { code: next, map: null };
+    },
+  };
+}
+
 export default defineConfig({
+  plugins: [selfHostedExcalidrawFonts()],
   // Warum: der Semantic-Worker lädt transformers.js per dynamic import —
   // das klassische iife-Worker-Format kann keine Mehr-Chunk-Worker bündeln.
   worker: {

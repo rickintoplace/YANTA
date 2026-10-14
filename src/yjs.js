@@ -136,6 +136,34 @@ export function isNoteDocLoaded(noteId) {
   return docs.has(noteId);
 }
 
+/*
+  Something on screen holds this doc (a drawing embed, the open note): the
+  semantic indexer's bulk crawl must not unload it underneath. An unloaded
+  doc comes back as a fresh, still-empty instance — a drawing on screen then
+  read as "not found" until a reload. Returns the release function.
+*/
+const retained = new Map(); // noteId -> count
+
+export function retainNoteDoc(noteId) {
+  if (!noteId) return () => {};
+
+  retained.set(noteId, (retained.get(noteId) || 0) + 1);
+  let released = false;
+
+  return () => {
+    if (released) return;
+    released = true;
+
+    const left = (retained.get(noteId) || 1) - 1;
+    if (left > 0) retained.set(noteId, left);
+    else retained.delete(noteId);
+  };
+}
+
+export function isNoteDocRetained(noteId) {
+  return retained.has(noteId);
+}
+
 /**
  * Unload a note's Y.Doc from memory WITHOUT touching persisted data.
  * (destroyNoteDoc below DELETES the stored doc — not the same thing.)
@@ -146,7 +174,7 @@ export function isNoteDocLoaded(noteId) {
  */
 export function unloadNoteDoc(noteId) {
   const entry = docs.get(noteId);
-  if (!entry || entry.external) return;
+  if (!entry || entry.external || retained.has(noteId)) return;
 
   try { entry.persistence.destroy(); } catch {}
   try { entry.doc.destroy(); } catch {}
@@ -565,12 +593,17 @@ export function getDrawingLayers(noteId, drawingId) {
 export function findDrawing(drawingId, preferredNoteId = state.currentNoteId) {
   if (!drawingId) return null;
 
-  const ids = [];
+  /*
+    The preferred note first, then only docs already in memory. Loading every
+    note's doc to find one drawing (what this used to do) opened an IndexedDB
+    database per note — and a doc opened that way is still empty, so the
+    answer was wrong anyway. The full search is resolveDrawingRefAsync in
+    draw.js, which waits for each doc.
+  */
+  const ids = preferredNoteId ? [preferredNoteId] : [];
 
-  if (preferredNoteId) ids.push(preferredNoteId);
-
-  for (const noteId of state.notes.keys()) {
-    if (!ids.includes(noteId)) ids.push(noteId);
+  for (const noteId of docs.keys()) {
+    if (noteId !== preferredNoteId && state.notes.has(noteId)) ids.push(noteId);
   }
 
   for (const noteId of ids) {

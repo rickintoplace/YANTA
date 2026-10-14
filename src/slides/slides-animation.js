@@ -459,6 +459,31 @@ function effectPatch(original, effect, direction, k) {
  * visibility pass. Writes are therefore coalesced into one per animation
  * frame, which reads a scene that has settled.
  */
+/**
+ * Elements that are not on screen yet at one position of a deck.
+ *
+ * Past slides keep everything they revealed; the current one hides from its
+ * next step on; later ones are hidden completely. Pure, so a connected
+ * remote can draw "what the audience sees now" without a running animator.
+ */
+export function hiddenIdsAt(slides, index, step = 0) {
+  const deck = Array.isArray(slides) ? slides : [];
+  const hidden = new Set();
+
+  deck.forEach((slide, i) => {
+    const groups = slideBuildGroups(slide);
+    const from = i < index ? groups.length : (i === index ? step : 0);
+
+    for (let g = from; g < groups.length; g++) {
+      for (const { build } of groups[g].steps) {
+        for (const id of build.elementIds) hidden.add(id);
+      }
+    }
+  });
+
+  return hidden;
+}
+
 export function createSlideAnimator({ getApi }) {
   // elementId -> untouched geometry/appearance the presentation may change
   const originals = new Map();
@@ -629,14 +654,6 @@ export function createSlideAnimator({ getApi }) {
     animationRaf = 0;
   }
 
-  function collectHiddenIds(groups, fromIndex, into) {
-    for (let i = fromIndex; i < groups.length; i++) {
-      for (const { build } of groups[i].steps) {
-        for (const id of build.elementIds) into.add(id);
-      }
-    }
-  }
-
   /**
    * Sets the visibility of the whole deck for one position in it.
    *
@@ -655,20 +672,7 @@ export function createSlideAnimator({ getApi }) {
 
     overrides.clear();
 
-    const deck = Array.isArray(slides) ? slides : [];
-    const hidden = new Set();
-
-    deck.forEach((slide, i) => {
-      const groups = slideBuildGroups(slide);
-
-      // Past slides keep everything they revealed; the current one hides from
-      // its next step on; later ones are hidden completely.
-      const from = i < index ? groups.length : (i === index ? step : 0);
-
-      collectHiddenIds(groups, from, hidden);
-    });
-
-    for (const id of hidden) {
+    for (const id of hiddenIdsAt(slides, index, step)) {
       // opacity 0 + locked is the marker a scene re-hydration keeps hidden
       // (see applyPersistedDrawingToApi), so a sync mid-presentation cannot
       // flash the rest of the deck.

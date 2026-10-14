@@ -45,10 +45,12 @@ import {
 } from './draw-scene-sync.js';
 
 import { layerSortedElements } from './layers/layers-order.js';
+import { isSlideFrameElement } from './slides/slides-model.js';
 import { openRecord, sealRecord } from './lock/at-rest.js';
 import { menuTopSection, watchExcalidrawContextMenus } from './menu-position.js';
 
 import { cloudFetchExcalidrawLibrary } from './cloud/cloud-api.js';
+import { t } from './i18n/index.js';
 import { insertAtCursor } from './editor.js';
 import { openNote } from './notes.js';
 import { renderPreview } from './markdown.js';
@@ -57,6 +59,9 @@ import { showMenu } from './tree.js';
 
 import {
   getNoteDoc,
+  isNoteDocLoaded,
+  retainNoteDoc,
+  unloadNoteDoc,
   getDrawing,
   getDrawingLayers,
   findDrawing,
@@ -483,121 +488,34 @@ async function withDrawingViewTransition(drawingId, mutate, {
   }
 }
 
+/*
+  The live canvas mounts underneath whatever the embed showed before (its
+  static card), so swapping a card for the editor never flashes empty: the
+  card goes once Excalidraw has painted (see dropEmbedCardSoon).
+*/
 function ensureInlineReactMount(inlineHost) {
   let mount = inlineHost.querySelector(':scope > .yanta-draw-react-mount');
 
   if (!mount) {
-    inlineHost.replaceChildren();
+    [...inlineHost.children].forEach((child) => {
+      if (!child.classList.contains('yanta-draw-card')) child.remove();
+    });
 
     mount = document.createElement('div');
     mount.className = 'yanta-draw-react-mount';
 
-    inlineHost.append(mount);
+    inlineHost.prepend(mount);
   }
 
   return mount;
 }
 
-function activateMobileDrawing(embed, { announce = true } = {}) {
-  if (!embed || !isMobileDrawUx()) return;
-
-  document.querySelectorAll('.yanta-draw-embed.is-mobile-interactive').forEach((n) => {
-    if (n !== embed) n.classList.remove('is-mobile-interactive');
-  });
-
-  embed.classList.add('is-active');
-  embed.classList.add('is-mobile-interactive');
-
-  const api = inlineApis.get(embed);
-
-  requestAnimationFrame(() => {
-    try {
-      api?.refresh?.();
-    } catch {}
-  });
-
-  if (announce) {
-    toast('Drawing edit mode · tap Done to scroll normally', 'success');
-  }
-}
-
-function deactivateMobileDrawing(embed) {
-  if (!embed) return;
-
-  embed.classList.remove('is-mobile-interactive');
-
-  const api = inlineApis.get(embed);
-
-  requestAnimationFrame(() => {
-    try {
-      api?.refresh?.();
-    } catch {}
-  });
-}
-
-function ensureMobileDrawingGate(embed, inlineHost, editable) {
-  if (!embed || !inlineHost || inlineHost.dataset.mobileGateBound === '1') return;
-
-  inlineHost.dataset.mobileGateBound = '1';
-
-  const shield = document.createElement('div');
-  shield.className = 'yanta-draw-mobile-shield';
-  shield.innerHTML = `
-    <div class="yanta-draw-mobile-shield-card">
-      <div class="yanta-draw-mobile-shield-icon">${lucide(editable ? 'pencil' : 'hand', 18)}</div>
-      <div class="yanta-draw-mobile-shield-title">
-        ${editable ? 'Tap to edit drawing' : 'Tap to interact'}
-      </div>
-      <div class="yanta-draw-mobile-shield-hint">
-        Swipe here to keep scrolling
-      </div>
-    </div>
-  `;
-
-  let downX = 0;
-  let downY = 0;
-  let downT = 0;
-  let pointerId = null;
-
-  shield.addEventListener('pointerdown', (e) => {
-    if (!isMobileDrawUx()) return;
-
-    downX = e.clientX;
-    downY = e.clientY;
-    downT = performance.now();
-    pointerId = e.pointerId;
-
-    // Wichtig:
-    // Kein preventDefault() hier.
-    // Dadurch bleibt normales vertikales Scrollen möglich.
-  }, { passive: true });
-
-  shield.addEventListener('pointerup', (e) => {
-    if (!isMobileDrawUx()) return;
-    if (pointerId != null && e.pointerId !== pointerId) return;
-
-    const dist = Math.hypot(e.clientX - downX, e.clientY - downY);
-    const dt = performance.now() - downT;
-
-    pointerId = null;
-
-    // Nur echter Tap aktiviert. Scroll-Gesten nicht.
-    if (dist > 8 || dt > 450) return;
-
-    e.preventDefault();
-    e.stopPropagation();
-
-    activateMobileDrawing(embed);
-  }, true);
-
-  shield.addEventListener('click', (e) => {
-    if (!isMobileDrawUx()) return;
-
-    e.preventDefault();
-    e.stopPropagation();
-  }, true);
-
-  inlineHost.append(shield);
+function dropEmbedCardSoon(inlineHost) {
+  setTimeout(() => {
+    if (!inlineRoots.has(inlineHost)) return;
+    inlineHost.querySelector(':scope > .yanta-draw-card')?.remove();
+    inlineHost.closest('.yanta-draw-embed')?.classList.remove('is-card', 'is-card-fluid');
+  }, 90);
 }
 
 let drawLibraryItems = [];
@@ -1030,7 +948,7 @@ export async function drawLibraryItemPngBlob(itemId, {
   });
 }
 
-function unmountInlineHost(inlineHost) {
+function unmountInlineHost(inlineHost, { keepCard = false } = {}) {
   if (!inlineHost) return;
 
   const existing = inlineRoots.get(inlineHost);
@@ -1041,11 +959,25 @@ function unmountInlineHost(inlineHost) {
     } catch {}
     inlineRoots.delete(inlineHost);
   }
+
+  const embed = inlineHost.closest('.yanta-draw-embed');
+  if (embed) inlineApis.delete(embed);
+
+  if (keepCard) {
+    inlineHost.querySelector(':scope > .yanta-draw-react-mount')?.remove();
+    embed?.classList.add('is-card');
+  }
 }
 
+/** Everything an embed holds goes with it: its editor, watchers and doc pin. */
 function unmountDrawEmbeds(root = document) {
-  for (const inlineHost of root.querySelectorAll?.('.yanta-draw-inline-host') || []) {
-    unmountInlineHost(inlineHost);
+  const embeds = root.matches?.('.yanta-draw-embed')
+    ? [root]
+    : [...root.querySelectorAll?.('.yanta-draw-embed') || []];
+
+  for (const embed of embeds) {
+    releaseEmbed(embed);
+    unmountInlineHost(embed.querySelector('.yanta-draw-inline-host'));
   }
 }
 
@@ -1141,6 +1073,14 @@ function injectDrawCss() {
   border-style: dashed;
 }
 
+.yanta-draw-embed.missing .yanta-draw-inline-host {
+  height: auto !important;
+}
+
+.yanta-draw-embed.missing .yanta-draw-resize-handle {
+  display: none;
+}
+
 .yanta-draw-embed-head {
   min-height: 38px;
   display: flex;
@@ -1214,11 +1154,6 @@ function injectDrawCss() {
   min-height: 0;
 }
 
-.yanta-draw-mobile-shield,
-.yanta-draw-mobile-done {
-  display: none;
-}
-
 .yanta-draw-is-resizing,
 .yanta-draw-is-resizing * {
   cursor: ns-resize !important;
@@ -1226,195 +1161,161 @@ function injectDrawCss() {
   -webkit-user-select: none !important;
 }
 
-@keyframes yanta-draw-mobile-hint {
-  0% {
-    opacity: 0;
-    transform: translateY(8px) scale(0.98);
-    visibility: visible;
-  }
+/* The card: a picture of the drawing, one tap away from the editor. */
+.yanta-draw-card {
+  all: unset;
+  box-sizing: border-box;
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  background: var(--bg);
+  overflow: hidden;
+  -webkit-tap-highlight-color: transparent;
+}
 
-  12% {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-    visibility: visible;
-  }
+.yanta-draw-card-img {
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  pointer-events: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
 
-  72% {
-    opacity: 1;
-    transform: translateY(0) scale(1);
-    visibility: visible;
-  }
+.yanta-draw-card.is-empty .yanta-draw-card-img,
+.yanta-draw-card-img:not([src]) {
+  display: none;
+}
 
-  100% {
-    opacity: 0;
-    transform: translateY(-4px) scale(0.98);
-    visibility: hidden;
-  }
+.yanta-draw-card-hint {
+  position: absolute;
+  right: 10px;
+  bottom: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg-elev) 90%, transparent);
+  color: var(--text-dim);
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: 0 6px 18px rgba(0,0,0,0.12);
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 0.16s ease, transform 0.16s ease;
+  pointer-events: none;
+}
+
+.yanta-draw-card:hover .yanta-draw-card-hint,
+.yanta-draw-card:focus-visible .yanta-draw-card-hint,
+.yanta-draw-card.is-empty .yanta-draw-card-hint {
+  opacity: 1;
+  transform: none;
+}
+
+.yanta-draw-card.is-empty .yanta-draw-card-hint {
+  position: static;
+  font-size: 13px;
+  padding: 9px 14px;
+  color: var(--accent);
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--border));
+}
+
+.yanta-draw-card:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* Phones and the reading pane: the card takes the drawing's own shape. */
+.yanta-draw-embed.is-card-fluid .yanta-draw-inline-host {
+  height: auto !important;
+  min-height: 0;
+}
+
+.yanta-draw-embed.is-card-fluid .yanta-draw-card {
+  position: relative;
+  inset: auto;
+  min-height: 120px;
+}
+
+.yanta-draw-embed.is-card-fluid .yanta-draw-card-img {
+  width: 100%;
+  height: auto;
+  max-height: min(var(--yanta-draw-card-max-h, 420px), 62vh);
+}
+
+.yanta-draw-embed.is-card-fluid .yanta-draw-resize-handle {
+  display: none;
+}
+
+.yanta-draw-present-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  height: 26px;
+  padding: 0 10px;
+  margin-right: 2px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, var(--border));
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+  color: var(--accent);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.yanta-draw-present-btn:hover {
+  background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.yanta-draw-present-btn[hidden] {
+  display: none !important;
 }
 
 @media (pointer: coarse), (max-width: 760px) {
-  .yanta-draw-inline-host {
-    position: relative;
-    touch-action: pan-y;
+  .yanta-draw-embed-actions .icon-btn {
+    width: 34px;
+    height: 34px;
   }
 
-  /*
-    Unsichtbare Tap-Schicht:
-    - blockiert nicht die Sicht
-    - erlaubt vertikales Scrollen
-    - erkennt Tap zum Aktivieren des Drawing-Modus
-  */
-  .yanta-draw-mobile-shield {
-    position: absolute;
-    inset: 0;
-    z-index: 8;
-
-    display: block;
-
-    background: transparent;
-    touch-action: pan-y;
-
-    user-select: none;
-    -webkit-user-select: none;
+  .yanta-draw-present-btn {
+    height: 32px;
   }
 
-  /*
-    Nur der Hinweis ist sichtbar — und nur kurz.
-    Danach bleibt die Shield-Fläche transparent aktiv.
-  */
-  .yanta-draw-mobile-shield-card {
-    position: absolute;
-    left: 50%;
-    bottom: 14px;
-
-    width: max-content;
-    max-width: calc(100% - 28px);
-
-    display: flex;
-    align-items: center;
-    gap: 8px;
-
-    padding: 8px 11px;
-    border-radius: 999px;
-    border: 1px solid color-mix(in srgb, var(--accent) 38%, var(--border));
-
-    background: color-mix(in srgb, var(--bg-elev) 92%, transparent);
-    color: var(--text);
-
-    box-shadow:
-      0 10px 28px rgba(0,0,0,0.28),
-      0 0 0 1px rgba(255,255,255,0.03) inset;
-
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
-
-    text-align: left;
-    pointer-events: none;
-
-    animation: yanta-draw-mobile-hint 1.8s ease forwards;
-  }
-
-  .yanta-draw-mobile-shield-icon {
-    color: var(--accent);
-    width: 22px;
-    height: 22px;
-    flex: 0 0 22px;
-
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .yanta-draw-mobile-shield-title {
-    font-size: 12px;
-    font-weight: 700;
-    line-height: 1.15;
-    white-space: nowrap;
-  }
-
-  .yanta-draw-mobile-shield-hint {
-    display: none;
-  }
-
-  .yanta-draw-embed.is-mobile-interactive {
-    border-color: var(--accent);
-    box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 22%, transparent);
-  }
-
-  .yanta-draw-embed.is-mobile-interactive .yanta-draw-mobile-shield {
-    display: none;
-  }
-
-  .yanta-draw-embed.is-mobile-interactive .yanta-draw-inline-host {
-    touch-action: none;
-  }
-
-  .yanta-draw-mobile-done {
-    display: none;
-    min-height: 26px;
-    padding: 0 10px;
-    flex: 0 0 auto;
-  }
-
-  .yanta-draw-embed.is-mobile-interactive .yanta-draw-mobile-done {
-    display: inline-flex;
-  }
-
-  /*
-    Auf Mobile: Resize nur bewusst im aktiven Drawing-Modus.
-    Sonst bleibt Scrollen zuverlässig.
-  */
-  .yanta-draw-embed:not(.is-mobile-interactive) .yanta-draw-resize-handle {
-    display: none;
-  }
-
-  .yanta-draw-resize-handle {
-    height: 30px;
-    min-height: 30px;
-    touch-action: none;
-    user-select: none;
-    -webkit-user-select: none;
-    cursor: ns-resize;
-  }
-
-  .yanta-draw-resize-handle::before {
-    content: "";
-    display: block;
-    height: 100%;
-    margin: 0 auto;
-    width: 72px;
-    background:
-      radial-gradient(circle, var(--text-faint) 1.5px, transparent 2px)
-      center / 10px 10px repeat-x;
-    opacity: 0.75;
+  .yanta-draw-card-hint {
+    opacity: 1;
+    transform: none;
   }
 }
 
 /* Preview: keine Excalidraw-Write-UI, aber Canvas bleibt pointerfähig für Pan/Zoom. */
-.yanta-draw-embed.preview-surface .excalidraw .App-toolbar,
-.yanta-draw-embed.preview-surface .excalidraw .FixedSideContainer,
-.yanta-draw-embed.preview-surface .excalidraw .HintViewer,
-.yanta-draw-embed.preview-surface .excalidraw .help-icon,
-.yanta-draw-embed.preview-surface .excalidraw .layer-ui__wrapper__top-right,
-.yanta-draw-embed.preview-surface .excalidraw .layer-ui__wrapper__footer-right,
-.yanta-draw-embed.preview-surface .excalidraw .layer-ui__wrapper__footer-left,
-.yanta-draw-embed.preview-surface .excalidraw .Island,
-.yanta-draw-embed.preview-surface .excalidraw .App-menu,
-.yanta-draw-embed.preview-surface .excalidraw .Stack_vertical {
+.yanta-draw-embed.preview-surface:not(.is-live-edit) .excalidraw .App-toolbar,
+.yanta-draw-embed.preview-surface:not(.is-live-edit) .excalidraw .FixedSideContainer,
+.yanta-draw-embed.preview-surface:not(.is-live-edit) .excalidraw .HintViewer,
+.yanta-draw-embed.preview-surface:not(.is-live-edit) .excalidraw .help-icon,
+.yanta-draw-embed.preview-surface:not(.is-live-edit) .excalidraw .layer-ui__wrapper__top-right,
+.yanta-draw-embed.preview-surface:not(.is-live-edit) .excalidraw .layer-ui__wrapper__footer-right,
+.yanta-draw-embed.preview-surface:not(.is-live-edit) .excalidraw .layer-ui__wrapper__footer-left,
+.yanta-draw-embed.preview-surface:not(.is-live-edit) .excalidraw .Island,
+.yanta-draw-embed.preview-surface:not(.is-live-edit) .excalidraw .App-menu,
+.yanta-draw-embed.preview-surface:not(.is-live-edit) .excalidraw .Stack_vertical {
   display: none !important;
   pointer-events: none !important;
 }
 
-/* Preview: YANTA-Actions dezent, aber keine Schreib-UI */
-.yanta-draw-embed.preview-surface:not(:hover):not(:focus-within):not(.is-active) .yanta-draw-embed-actions {
-  opacity: 0;
-  pointer-events: none;
-}
-
-.yanta-draw-embed.preview-surface [data-draw-action="link-note"],
-.yanta-draw-embed.preview-surface [data-draw-action="rename"],
-.yanta-draw-embed.preview-surface [data-draw-action="delete"] {
-  display: none !important;
+/* Reading pane on a computer: actions appear on hover. Touch has no hover. */
+@media (hover: hover) {
+  .yanta-draw-embed.preview-surface:not(:hover):not(:focus-within):not(.is-active) .yanta-draw-embed-actions {
+    opacity: 0;
+  }
 }
 
 /* Editor-only explicit resize handle */
@@ -1439,10 +1340,16 @@ function injectDrawCss() {
 }
 
 .yanta-draw-missing-body {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 120px;
+  height: 100%;
   padding: 18px;
   color: var(--text-faint);
+  font-size: 13px;
   text-align: center;
-  font-style: italic;
   background: var(--bg);
 }
 
@@ -1489,6 +1396,11 @@ function injectDrawCss() {
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+
+.yanta-draw-editor-embed.is-selected .yanta-draw-embed {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .yanta-draw-editor-embed {
@@ -1887,9 +1799,14 @@ function drawingWidthMode(drawing) {
 function initialDataForDrawing(drawing, extra = {}) {
   const { appState: extraAppState, ...restExtra } = extra || {};
 
+  // A drawing that never stored a view (imported, made by the AI, synced
+  // from an older version) opens on its content instead of on empty paper.
+  const neverViewed = !Number.isFinite(Number(drawing?.appState?.scrollX));
+
   return {
     elements: drawing?.elements || [],
     files: drawing?.files || {},
+    scrollToContent: neverViewed && liveDrawingElements(drawing).length > 0,
     ...restExtra,
 
     appState: withDrawingDefaults(
@@ -2054,40 +1971,17 @@ function cleanStaleSceneWikiData(elements = []) {
 
 function updateEmbedHeader(embed, drawing) {
   const title = embed.querySelector('[data-draw-title]');
-  const info = embed.querySelector('[data-draw-info]');
+  if (title) title.textContent = drawing?.title || t('draw.untitled');
 
-  if (title) title.textContent = drawing?.title || 'Drawing';
-
-  if (info) {
-    if (!drawing) {
-      info.textContent = 'missing';
-    } else {
-      const count = (drawing.elements || []).filter((x) => !x?.isDeleted).length;
-      const links = extractWikiTargetsFromScene(drawing).length;
-      const { width, height } = canvasSizeOf(drawing);
-      const wide = drawingWidthMode(drawing) === 'wide';
-
-      info.textContent =
-        `${width}×${height}` +
-        (wide ? ' · wide' : '') +
-        ` · ${count} element${count === 1 ? '' : 's'}` +
-        (links ? ` · ${links} wiki link${links === 1 ? '' : 's'}` : '');
-    }
+  // "Present" only where there is something to present: a drawing with slides.
+  const present = embed.querySelector('[data-draw-action="present"]');
+  if (present) {
+    const slides = (drawing?.slides || []).filter((slide) => slide && !slide.hidden);
+    present.hidden = !slides.length;
   }
 
-  const widthBtn = embed.querySelector('[data-draw-action="toggle-width"]');
-
-  if (widthBtn) {
-    const wide = drawingWidthMode(drawing) === 'wide';
-
-    widthBtn.title = wide
-      ? 'Shrink drawing to text width'
-      : 'Expand drawing to pane width';
-
-    widthBtn.setAttribute('aria-pressed', wide ? 'true' : 'false');
-
-    widthBtn.innerHTML = lucide(wide ? 'fold-horizontal' : 'unfold-horizontal', 14);
-  }
+  embed.querySelector('[data-draw-action="more"]')?.toggleAttribute('disabled', !drawing);
+  embed.querySelector('[data-draw-action="fullscreen"]')?.toggleAttribute('disabled', !drawing);
 }
 
 function applyCanvasSize(embed, drawing) {
@@ -2145,14 +2039,50 @@ async function resolveDrawingRefAsync(drawingId, preferredNoteId = state.current
   let hit = findDrawing(drawingId, preferredNoteId);
   if (hit) return hit;
 
-  for (const noteId of state.notes.keys()) {
-    try {
-      const entry = getNoteDoc(noteId);
-      await entry.ready;
-    } catch {}
+  // Almost always the drawing lives in the note that shows it, whose doc
+  // may simply not have finished loading yet.
+  if (preferredNoteId && state.notes.has(preferredNoteId)) {
+    await whenDocReady(preferredNoteId);
+
+    hit = findDrawing(drawingId, preferredNoteId);
+    if (hit) return hit;
   }
 
-  return findDrawing(drawingId, preferredNoteId);
+  // A draw:// reference to a drawing that lives in another note.
+  for (const noteId of state.notes.keys()) {
+    if (noteId === preferredNoteId) continue;
+
+    const loaded = isNoteDocLoaded(noteId);
+    await whenDocReady(noteId);
+
+    try {
+      const d = getDrawing(noteId, drawingId);
+      if (d) return { noteId, drawingId, drawing: d };
+    } catch {}
+
+    // Do not leave every note's doc in memory behind a failed search (same
+    // guards as the semantic indexer: nothing else may hold it by now).
+    if (
+      !loaded &&
+      noteId !== state.currentNoteId &&
+      !state.liveShares?.has?.(noteId) &&
+      !window.yantaSync2?.engine?.noteObservers?.has?.(noteId)
+    ) {
+      unloadNoteDoc(noteId);
+    }
+  }
+
+  return null;
+}
+
+/** Waits for a note doc's stored state, but never forever (a doc that fails to load). */
+function whenDocReady(noteId, timeoutMs = 4000) {
+  let timer = 0;
+
+  return Promise.race([
+    Promise.resolve(getNoteDoc(noteId).ready).catch(() => {}),
+    new Promise((resolve) => { timer = setTimeout(resolve, timeoutMs); }),
+  ]).finally(() => clearTimeout(timer));
 }
 
 function sceneCoordsForClient(api, container, clientX, clientY) {
@@ -4490,6 +4420,7 @@ function confirmDeleteDrawing(noteId, drawingId, {
     onConfirm: async () => {
       deleteDrawing(noteId, drawingId);
       deletePersistedThumb(`${noteId}:${drawingId}`);
+      deletePersistedThumb(`preview:${noteId}:${drawingId}`);
       thumbnailCache.delete(`${noteId}:${drawingId}`);
       toast('Drawing deleted');
 
@@ -4516,8 +4447,8 @@ function ensureModal() {
 
   titleEl = document.createElement('div');
   titleEl.className = 'yanta-draw-title';
-  titleEl.textContent = 'Drawing';
-  titleEl.title = 'Click to rename drawing';
+  titleEl.textContent = t('draw.untitled');
+  titleEl.title = t('draw.rename');
 
   titleEl.addEventListener('click', async (e) => {
     e.preventDefault();
@@ -4535,12 +4466,12 @@ function ensureModal() {
 
   const slidesBtn = document.createElement('button');
     slidesBtn.className = 'btn yanta-draw-head-btn';
-    slidesBtn.title = 'Slides';
+    slidesBtn.title = t('draw.slidesTitle');
     slidesBtn.setAttribute('data-draw-head-slides', '1');
     slidesBtn.setAttribute('aria-pressed', 'false');
     slidesBtn.innerHTML = `
-      ${lucide('presentation', 14)}
-      <span class="yanta-draw-btn-label">Slides</span>
+      ${lucide('gallery-horizontal', 14)}
+      <span class="yanta-draw-btn-label">${escapeHtml(t('draw.slides'))}</span>
     `;
 
     slidesBtn.addEventListener('click', () => {
@@ -4554,17 +4485,7 @@ function ensureModal() {
       }));
     });
 
-  const layersBtn = document.createElement('button');
-  layersBtn.className = 'btn yanta-draw-head-btn';
-  layersBtn.title = 'Layers';
-  layersBtn.setAttribute('data-draw-head-layers', '1');
-  layersBtn.setAttribute('aria-pressed', 'false');
-  layersBtn.innerHTML = `
-    ${lucide('layers', 14)}
-    <span class="yanta-draw-btn-label">Layers</span>
-  `;
-
-  layersBtn.addEventListener('click', async () => {
+  const openLayers = async () => {
     if (!active.noteId || !active.drawingId) return;
 
     const { openLayersPanel, closeLayersPanel, isLayersPanelOpen } =
@@ -4580,52 +4501,90 @@ function ensureModal() {
       drawingId: active.drawingId,
       getApi: () => active.api,
     });
-  });
+  };
 
-  const exportBtn = document.createElement('button');
-  exportBtn.className = 'btn yanta-draw-head-btn';
-  exportBtn.title = 'Download drawing';
-  exportBtn.innerHTML = `
-    ${lucide('download', 14)}
-    <span class="yanta-draw-btn-label">Download</span>
+  // Present is the one action that deserves a label: everything else about
+  // a drawing is one menu away.
+  const presentBtn = document.createElement('button');
+  presentBtn.className = 'btn primary yanta-draw-head-btn yanta-draw-head-present';
+  presentBtn.title = t('draw.presentTitle');
+  presentBtn.setAttribute('data-draw-head-present', '1');
+  presentBtn.innerHTML = `
+    ${lucide('play', 14)}
+    <span class="yanta-draw-btn-label">${escapeHtml(t('draw.present'))}</span>
   `;
 
-  exportBtn.addEventListener('click', (e) => {
+  presentBtn.addEventListener('click', () => {
+    if (!active.noteId || !active.drawingId) return;
+
+    window.dispatchEvent(new CustomEvent('yanta-present-drawing', {
+      detail: {
+        noteId: active.noteId,
+        drawingId: active.drawingId,
+        fromFullscreen: true,
+      },
+    }));
+  });
+
+  const moreBtn = document.createElement('button');
+  moreBtn.className = 'icon-btn yanta-draw-head-more';
+  moreBtn.title = t('draw.more');
+  moreBtn.setAttribute('aria-label', t('draw.more'));
+  moreBtn.innerHTML = lucide('ellipsis', 18);
+
+  moreBtn.addEventListener('click', (e) => {
     e.preventDefault();
     e.stopPropagation();
 
     if (!active.noteId || !active.drawingId) return;
 
-    clearDrawingViewTransitionNames(active.drawingId);
+    const rect = moreBtn.getBoundingClientRect();
+    const readOnly = state.notes.get(active.noteId)?.spaceRole === 'read';
 
-    openDrawingExportMenu(exportBtn, active.noteId, active.drawingId);
-  });
-
-  const deleteBtn = document.createElement('button');
-  deleteBtn.className = 'btn danger yanta-draw-head-btn';
-  deleteBtn.title = 'Delete drawing';
-  deleteBtn.innerHTML = `
-    ${lucide('trash', 14)}
-    <span class="yanta-draw-btn-label">Delete</span>
-  `;
-
-  deleteBtn.addEventListener('click', async () => {
-    if (!active.noteId || !active.drawingId) return;
-
-    confirmDeleteDrawing(active.noteId, active.drawingId, {
-      anchor: deleteBtn,
-      onDeleted: async () => {
-        await closeDrawModal({
-          transition: true,
-        });
+    const items = [
+      {
+        label: t('draw.layers'),
+        icon: 'layers',
+        action: openLayers,
       },
-    });
+      {
+        label: t('draw.download'),
+        icon: 'download',
+        action: () => {
+          clearDrawingViewTransitionNames(active.drawingId);
+          openDrawingExportMenu(moreBtn, active.noteId, active.drawingId);
+        },
+      },
+    ];
+
+    if (!readOnly) {
+      items.push('hr', {
+        label: t('draw.delete'),
+        icon: 'trash',
+        danger: true,
+        action: () => confirmDeleteDrawing(active.noteId, active.drawingId, {
+          anchor: moreBtn,
+          onDeleted: async () => {
+            await closeDrawModal({
+              transition: true,
+            });
+          },
+        }),
+      });
+    }
+
+    showMenu(rect.right, rect.bottom + 6, items, { align: 'end' });
+
+    // The drawing modal sits at z-index 220; menus must open above it.
+    const menu = [...document.querySelectorAll('body > .ctx-menu')].at(-1);
+    if (menu) menu.style.zIndex = '640';
   });
 
   const closeBtn = document.createElement('button');
   closeBtn.className = 'icon-btn';
-  closeBtn.title = 'Close';
-  closeBtn.innerHTML = lucide('x', 16);
+  closeBtn.title = t('draw.close');
+  closeBtn.setAttribute('aria-label', t('draw.close'));
+  closeBtn.innerHTML = lucide('x', 18);
 
   closeBtn.addEventListener('click', () => {
     closeDrawModal({
@@ -4636,7 +4595,7 @@ function ensureModal() {
   host = document.createElement('div');
   host.className = 'yanta-draw-body';
 
-  head.append(titleEl, spacer, layersBtn, slidesBtn, exportBtn, deleteBtn, closeBtn);
+  head.append(titleEl, spacer, slidesBtn, presentBtn, moreBtn, closeBtn);
   modal.append(head, host);
   document.body.append(modal);
 
@@ -4683,8 +4642,6 @@ export async function createDrawingAndInsert({
 
   setDrawing(noteId, drawingId, emptyScene, 'draw-create');
   insertAtCursor(`\n\ndraw://${drawingId}\n\n`);
-
-  toast('Drawing inserted', 'success');
 
   requestAnimationFrame(() => {
     window.dispatchEvent(new CustomEvent('yanta-drawing-updated', {
@@ -4804,10 +4761,6 @@ function bindResizeHandle(embed, sourceNoteId, drawingId) {
     e.preventDefault();
     e.stopPropagation();
 
-    if (isMobileDrawUx()) {
-      activateMobileDrawing(embed, { announce: false });
-    }
-
     dragging = true;
     pointerId = e.pointerId;
     startY = e.clientY;
@@ -4861,9 +4814,7 @@ async function mountInlineDrawing(embed, sourceNoteId, drawingId, drawing) {
 
   const surface = embed.getAttribute('data-draw-surface') || 'preview';
   const readOnlyShare = state.notes.get(sourceNoteId)?.spaceRole === 'read';
-  const editable = surface === 'editor' && !readOnlyShare;
-
-  ensureMobileDrawingGate(embed, inlineHost, editable);
+  const editable = (surface === 'editor' || embed.dataset.drawLive === '1') && !readOnlyShare;
 
   embed.setAttribute('data-note-id', sourceNoteId);
 
@@ -5016,6 +4967,7 @@ async function mountInlineDrawing(embed, sourceNoteId, drawingId, drawing) {
       excalidrawAPI: (api) => {
         apiRef.current = api;
         inlineApis.set(embed, api);
+        dropEmbedCardSoon(inlineHost);
 
         dispatchDrawApiReadyDeferred({
           noteId: sourceNoteId,
@@ -5071,28 +5023,264 @@ async function mountInlineDrawing(embed, sourceNoteId, drawingId, drawing) {
   root.render(React.createElement(InlineDrawing));
 }
 
+// ------------------------------------------------------------
+// Embeds: a live canvas or a static card
+//
+// A drawing in a note is either the live Excalidraw editor or a card — a
+// rendered picture of it. Phones always show the card; a tap opens the
+// fullscreen editor, which is the only place drawing on a phone works well.
+// On a computer the editor pane draws in place (while the text around it
+// stays readable), and the reading pane shows the card until it is clicked.
+//
+// Live editors mount only near the viewport and fall back to their card
+// after a minute off screen: every live Excalidraw is a React tree, a canvas
+// and a scene writer, and a long note with several drawings used to keep
+// them all running.
+// ------------------------------------------------------------
+
+const DRAW_EMBED_PARK_AFTER_MS = 60_000;
+
+let liveEmbedObserver = null;
+
+function wantsLiveEmbed(embed) {
+  if (isMobileDrawUx()) return false;
+
+  return (
+    embed.getAttribute('data-draw-surface') === 'editor' ||
+    embed.dataset.drawLive === '1'
+  );
+}
+
+function embedRef(embed) {
+  return {
+    drawingId: embed.getAttribute('data-draw-id') || '',
+    noteId: embed.getAttribute('data-note-id') || state.currentNoteId || '',
+  };
+}
+
+function observeLiveEmbed(embed) {
+  liveEmbedObserver ||= new IntersectionObserver((entries) => {
+    for (const entry of entries) {
+      const target = entry.target;
+
+      if (entry.isIntersecting) {
+        clearTimeout(target._drawParkTimer);
+        target._drawParkTimer = 0;
+        mountLiveEmbed(target).catch((err) => console.warn('[YANTA Draw] could not mount drawing', err));
+        continue;
+      }
+
+      if (!liveEmbedMounted(target)) continue;
+
+      clearTimeout(target._drawParkTimer);
+      target._drawParkTimer = setTimeout(() => parkLiveEmbed(target), DRAW_EMBED_PARK_AFTER_MS);
+    }
+  }, { rootMargin: '600px 0px' });
+
+  liveEmbedObserver.observe(embed);
+}
+
+function liveEmbedMounted(embed) {
+  const inlineHost = embed.querySelector('.yanta-draw-inline-host');
+  return !!inlineHost && inlineRoots.has(inlineHost);
+}
+
+async function mountLiveEmbed(embed) {
+  if (!embed.isConnected || !wantsLiveEmbed(embed) || liveEmbedMounted(embed)) return;
+
+  const { drawingId, noteId } = embedRef(embed);
+  const hit = findDrawing(drawingId, noteId);
+
+  if (!hit) {
+    await hydrateDrawEmbed(embed);
+    return;
+  }
+
+  await mountInlineDrawing(embed, hit.noteId, drawingId, hit.drawing);
+}
+
+/** Puts a live editor that has been off screen for a while back to its card. */
+function parkLiveEmbed(embed) {
+  embed._drawParkTimer = 0;
+
+  if (!embed.isConnected || !liveEmbedMounted(embed)) return;
+
+  // Never under the user's hands.
+  if (embed.classList.contains('is-active') || embed.contains(document.activeElement)) return;
+
+  const { drawingId, noteId } = embedRef(embed);
+  const hit = findDrawing(drawingId, noteId);
+  if (!hit) return;
+
+  renderDrawCard(embed, hit);
+  unmountInlineHost(embed.querySelector('.yanta-draw-inline-host'), { keepCard: true });
+}
+
+/** Last stored picture of a drawing, or a quiet placeholder for an empty one. */
+function renderDrawCard(embed, hit) {
+  const inlineHost = embed.querySelector('.yanta-draw-inline-host');
+  if (!inlineHost) return;
+
+  let card = inlineHost.querySelector(':scope > .yanta-draw-card');
+
+  if (!card) {
+    card = document.createElement('button');
+    card.type = 'button';
+    card.className = 'yanta-draw-card';
+    card.setAttribute('data-draw-action', 'open-card');
+    card.innerHTML = `
+      <img class="yanta-draw-card-img" alt="" decoding="async" draggable="false">
+      <span class="yanta-draw-card-hint"></span>
+    `;
+
+    if (!inlineRoots.has(inlineHost)) inlineHost.replaceChildren(card);
+    else inlineHost.append(card);
+  }
+
+  const mobile = isMobileDrawUx();
+  const empty = !liveDrawingElements(hit.drawing).length;
+  const hint = card.querySelector('.yanta-draw-card-hint');
+
+  embed.classList.add('is-card');
+  embed.classList.toggle('is-card-fluid', !wantsLiveEmbed(embed));
+  card.classList.toggle('is-empty', empty);
+  card.setAttribute('aria-label', t('draw.openDrawing', { title: hit.drawing.title || t('draw.untitled') }));
+
+  const { height } = canvasSizeOf(hit.drawing);
+  embed.style.setProperty('--yanta-draw-card-max-h', `${height}px`);
+
+  if (hint) {
+    hint.innerHTML = empty
+      ? `${lucide('pencil', 15)}<span>${escapeHtml(mobile ? t('draw.tapToDraw') : t('draw.clickToDraw'))}</span>`
+      : `${lucide(mobile ? 'maximize-2' : 'pencil', 14)}<span>${escapeHtml(mobile ? t('draw.tapToOpen') : t('draw.clickToEdit'))}</span>`;
+  }
+
+  const img = card.querySelector('.yanta-draw-card-img');
+  if (!img) return;
+
+  if (empty) {
+    img.removeAttribute('src');
+    return;
+  }
+
+  drawingPreviewUrl(hit.noteId, hit.drawingId).then((url) => {
+    if (url && img.getAttribute('src') !== url) img.src = url;
+  }).catch(() => {});
+}
+
+/*
+  A drawing that is not there (yet): the note arrived before the drawing
+  synced, or its doc is still loading. Never a dead end — the embed watches
+  the note's drawings and fills in by itself the moment the drawing shows up.
+*/
+function showMissingEmbed(embed, drawingId, noteId) {
+  const inlineHost = embed.querySelector('.yanta-draw-inline-host');
+  const linksHost = embed.querySelector('.yanta-draw-links');
+
+  embed.classList.add('missing');
+  embed.classList.remove('is-card', 'is-card-fluid');
+  updateEmbedHeader(embed, null);
+
+  if (linksHost) linksHost.replaceChildren();
+
+  if (inlineHost) {
+    unmountInlineHost(inlineHost);
+    inlineHost.innerHTML = `
+      <div class="yanta-draw-missing-body">
+        ${lucide('cloud-download', 18)}
+        <span>${escapeHtml(t('draw.missing'))}</span>
+      </div>
+    `;
+  }
+
+  if (!noteId || !state.notes.has(noteId) || embed._drawMissingWatch) return;
+
+  const drawings = getNoteDoc(noteId).doc.getMap('drawings');
+  const watch = (event) => {
+    if (!event.keysChanged.has(drawingId)) return;
+    stopWatchingMissing(embed);
+    hydrateDrawEmbed(embed).catch(() => {});
+  };
+
+  drawings.observe(watch);
+  embed._drawMissingWatch = () => {
+    try {
+      drawings.unobserve(watch);
+    } catch {}
+  };
+}
+
+function stopWatchingMissing(embed) {
+  embed._drawMissingWatch?.();
+  embed._drawMissingWatch = null;
+}
+
+/*
+  Cards follow the drawing too — edits from another device, or from the same
+  drawing open fullscreen — without anything live on screen.
+*/
+function watchCardDrawing(embed, noteId, drawingId) {
+  if (embed._drawCardWatch?.noteId === noteId) return;
+
+  embed._drawCardWatch?.stop();
+
+  const drawings = getNoteDoc(noteId).doc.getMap('drawings');
+  let timer = 0;
+
+  const watch = (event) => {
+    if (!event.keysChanged.has(drawingId) || liveEmbedMounted(embed)) return;
+
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      const hit = findDrawing(drawingId, noteId);
+      if (!hit) return;
+
+      updateEmbedFromDrawing(embed, hit.drawing);
+      renderDrawCard(embed, hit);
+    }, 350);
+  };
+
+  drawings.observe(watch);
+
+  embed._drawCardWatch = {
+    noteId,
+    stop: () => {
+      clearTimeout(timer);
+      try {
+        drawings.unobserve(watch);
+      } catch {}
+    },
+  };
+}
+
+function releaseEmbed(embed) {
+  stopWatchingMissing(embed);
+  embed._drawCardWatch?.stop();
+  embed._drawCardWatch = null;
+  clearTimeout(embed._drawParkTimer);
+  embed._drawParkTimer = 0;
+  liveEmbedObserver?.unobserve(embed);
+  embed._drawReleaseDoc?.();
+  embed._drawReleaseDoc = null;
+  embed._drawHydrated = false;
+}
+
 function refreshDrawEmbeds(root = document) {
   const nodes = [...root.querySelectorAll?.('.yanta-draw-embed[data-draw-id]') || []];
 
   for (const embed of nodes) {
-    const preferredNoteId = embed.getAttribute('data-note-id') || state.currentNoteId;
-    const drawingId = embed.getAttribute('data-draw-id');
+    const { drawingId, noteId } = embedRef(embed);
     if (!drawingId) continue;
 
-    const hit = findDrawing(drawingId, preferredNoteId);
-    const inlineHost = embed.querySelector('.yanta-draw-inline-host');
-    const linksHost = embed.querySelector('.yanta-draw-links');
+    const hit = findDrawing(drawingId, noteId);
 
+    /*
+      A synchronous miss proves nothing — the doc may still be loading, or
+      was swapped out by the indexer. The old code tore the live editor down
+      right here and printed "Drawing not found" until the next reload.
+    */
     if (!hit) {
-      embed.classList.add('missing');
-      updateEmbedHeader(embed, null);
-      if (linksHost) linksHost.replaceChildren();
-
-      if (inlineHost) {
-        unmountInlineHost(inlineHost);
-        inlineHost.innerHTML = `<div class="yanta-draw-missing-body">Drawing not found: draw://${escapeHtml(drawingId)}</div>`;
-      }
-
+      hydrateDrawEmbed(embed).catch(() => {});
       continue;
     }
 
@@ -5100,6 +5288,10 @@ function refreshDrawEmbeds(root = document) {
     embed.setAttribute('data-note-id', hit.noteId);
     updateEmbedFromDrawing(embed, hit.drawing);
     bindResizeHandle(embed, hit.noteId, drawingId);
+
+    if (!liveEmbedMounted(embed) && embed.querySelector('.yanta-draw-card')) {
+      renderDrawCard(embed, hit);
+    }
   }
 }
 
@@ -5108,42 +5300,156 @@ export async function hydrateDrawEmbeds(root = document) {
 
   const nodes = [...root.querySelectorAll?.('.yanta-draw-embed[data-draw-id]') || []];
 
-  for (const embed of nodes) {
-    const preferredNoteId = embed.getAttribute('data-note-id') || state.currentNoteId;
-    const drawingId = embed.getAttribute('data-draw-id');
-    if (!drawingId) continue;
+  await Promise.all(nodes.map((embed) => hydrateDrawEmbed(embed).catch((err) => {
+    console.warn('[YANTA Draw] could not show drawing', err);
+  })));
+}
 
-    const inlineHost = embed.querySelector('.yanta-draw-inline-host');
-    const linksHost = embed.querySelector('.yanta-draw-links');
+async function hydrateDrawEmbed(embed) {
+  const { drawingId, noteId: preferredNoteId } = embedRef(embed);
+  if (!drawingId) return;
 
-    bindEmbedActions(embed);
+  bindEmbedActions(embed);
 
-    const hit = await resolveDrawingRefAsync(drawingId, preferredNoteId);
+  const hit = await resolveDrawingRefAsync(drawingId, preferredNoteId);
 
-    if (!hit) {
-      embed.classList.add('missing');
-      updateEmbedHeader(embed, null);
+  if (!embed.isConnected) return;
 
-      if (linksHost) linksHost.replaceChildren();
-
-      if (inlineHost) {
-        unmountInlineHost(inlineHost);
-        inlineHost.innerHTML = `<div class="yanta-draw-missing-body">Drawing not found: draw://${escapeHtml(drawingId)}</div>`;
-      }
-
-      continue;
-    }
-
-    embed.classList.remove('missing');
-    embed.setAttribute('data-note-id', hit.noteId);
-    updateEmbedFromDrawing(embed, hit.drawing);
-    bindResizeHandle(embed, hit.noteId, drawingId);
-
-    if (!inlineHost) continue;
-    if (inlineRoots.has(inlineHost)) continue;
-
-    await mountInlineDrawing(embed, hit.noteId, drawingId, hit.drawing);
+  if (!hit) {
+    showMissingEmbed(embed, drawingId, preferredNoteId);
+    return;
   }
+
+  stopWatchingMissing(embed);
+
+  embed.classList.remove('missing');
+  embed.setAttribute('data-note-id', hit.noteId);
+
+  if (!embed._drawReleaseDoc) embed._drawReleaseDoc = retainNoteDoc(hit.noteId);
+
+  updateEmbedFromDrawing(embed, hit.drawing);
+  bindResizeHandle(embed, hit.noteId, drawingId);
+  watchCardDrawing(embed, hit.noteId, drawingId);
+
+  const inlineHost = embed.querySelector('.yanta-draw-inline-host');
+  if (!inlineHost) return;
+
+  if (inlineRoots.has(inlineHost)) return;
+
+  if (!embed.querySelector('.yanta-draw-card')) renderDrawCard(embed, hit);
+
+  if (wantsLiveEmbed(embed)) observeLiveEmbed(embed);
+}
+
+/** Desktop reading pane: the card turns into the editor where it stands. */
+function activateLiveEmbed(embed) {
+  embed.dataset.drawLive = '1';
+  embed.classList.add('is-live-edit');
+  embed.classList.add('is-active');
+  observeLiveEmbed(embed);
+  mountLiveEmbed(embed).catch(() => {});
+}
+
+function openEmbedMoreMenu(embed, anchor, hit) {
+  const rect = anchor.getBoundingClientRect();
+  const { drawingId } = embedRef(embed);
+  const wide = drawingWidthMode(hit.drawing) === 'wide';
+  const editorSurface = embed.getAttribute('data-draw-surface') === 'editor' || embed.dataset.drawLive === '1';
+  const readOnly = state.notes.get(hit.noteId)?.spaceRole === 'read';
+
+  const items = [
+    {
+      label: t('draw.rename'),
+      icon: 'pencil',
+      disabled: readOnly,
+      action: () => renameDrawing(hit.noteId, drawingId, {
+        anchor: embed.querySelector('[data-draw-title]') || anchor,
+      }),
+    },
+  ];
+
+  if (!isMobileDrawUx()) {
+    items.push({
+      label: wide ? t('draw.widthNormal') : t('draw.widthWide'),
+      icon: wide ? 'fold-horizontal' : 'unfold-horizontal',
+      action: () => {
+        updateDrawingMeta(hit.noteId, drawingId, {
+          widthMode: wide ? 'normal' : 'wide',
+        }, 'draw-width-mode');
+
+        window.dispatchEvent(new CustomEvent('yanta-drawing-updated', {
+          detail: { noteId: hit.noteId, drawingId },
+        }));
+      },
+    });
+  }
+
+  if (editorSurface && liveEmbedMounted(embed) && !readOnly) {
+    items.push({
+      label: t('draw.linkSelection'),
+      icon: 'file-plus',
+      action: async () => {
+        const api = inlineApis.get(embed);
+        const note = await openNoteReferencePicker();
+
+        if (!note || !api) return;
+
+        if (await linkSelectedElementsToNote(api, note)) {
+          toast(`Linked ${note.title || 'Untitled'}`, 'success');
+        }
+      },
+    });
+  }
+
+  items.push({
+    label: t('draw.download'),
+    icon: 'download',
+    action: () => openDrawingExportMenu(anchor, hit.noteId, drawingId),
+  });
+
+  if (!readOnly) {
+    items.push('hr', {
+      label: t('draw.delete'),
+      icon: 'trash',
+      danger: true,
+      action: () => confirmDeleteDrawing(hit.noteId, drawingId, { anchor }),
+    });
+  }
+
+  showMenu(rect.right, rect.bottom + 6, items, { align: 'end' });
+}
+
+async function openEmbedFullscreen(embed, hit) {
+  const drawingId = hit.drawingId;
+
+  /*
+    Vorladen vor der Transition.
+    Dadurch ist openDrawModal() im Transition-Callback schnell
+    und kann den Fullscreen-Host synchron erzeugen.
+  */
+  await Promise.allSettled([
+    loadReact(),
+    loadExcalidraw(),
+    getNoteDoc(hit.noteId).ready,
+  ]);
+
+  await withDrawingViewTransition(
+    drawingId,
+    () => {
+      openDrawModal(drawingId, hit.noteId, {
+        transition: false,
+        preparedHit: hit,
+        initialTool: isMobileDrawUx() ? 'freedraw' : null,
+      }).catch((err) => {
+        console.error('[YANTA Draw] could not open fullscreen drawing', err);
+        toast(t('draw.openFailed'), 'error');
+      });
+    },
+    {
+      source: embed,
+      targetGetter: () => document.querySelector('.yanta-draw-fullscreen-host'),
+    }
+  );
 }
 
 function bindEmbedActions(embed) {
@@ -5163,18 +5469,27 @@ function bindEmbedActions(embed) {
 
     document.addEventListener('pointerdown', (e) => {
       document.querySelectorAll('.yanta-draw-embed.is-active').forEach((n) => {
-        if (!n.contains(e.target)) {
-          n.classList.remove('is-active');
-          n.classList.remove('is-mobile-interactive');
-        }
+        if (!n.contains(e.target)) n.classList.remove('is-active');
       });
     }, true);
 
-    window.addEventListener('keydown', (e) => {
-      if (e.key !== 'Escape') return;
+    // Rotating a tablet or resizing past the phone breakpoint changes which
+    // embeds are live.
+    DRAW_MOBILE_MQ?.addEventListener?.('change', () => {
+      document.querySelectorAll('.yanta-draw-embed[data-draw-id]').forEach((n) => {
+        if (wantsLiveEmbed(n)) {
+          observeLiveEmbed(n);
+          return;
+        }
 
-      document.querySelectorAll('.yanta-draw-embed.is-mobile-interactive').forEach((n) => {
-        deactivateMobileDrawing(n);
+        if (liveEmbedMounted(n)) {
+          const { drawingId, noteId } = embedRef(n);
+          const hit = findDrawing(drawingId, noteId);
+          if (!hit) return;
+
+          renderDrawCard(n, hit);
+          unmountInlineHost(n.querySelector('.yanta-draw-inline-host'), { keepCard: true });
+        }
       });
     });
   }
@@ -5187,124 +5502,52 @@ function bindEmbedActions(embed) {
 
     const action = btn?.getAttribute('data-draw-action') || '';
 
-    if (action === 'mobile-done') {
-      e.preventDefault();
-      e.stopPropagation();
-
-      deactivateMobileDrawing(embed);
-      return;
-    }
-
     e.preventDefault();
     e.stopPropagation();
 
-    const drawingId = embed.getAttribute('data-draw-id');
-    const preferredNoteId = embed.getAttribute('data-note-id') || state.currentNoteId;
+    const { drawingId, noteId: preferredNoteId } = embedRef(embed);
     const hit = await resolveDrawingRefAsync(drawingId, preferredNoteId);
 
     if (!hit) {
-      toast(`Drawing not found: draw://${drawingId}`, 'error');
+      toast(t('draw.missing'), 'error');
       return;
     }
 
     if (title && !btn) {
+      if (state.notes.get(hit.noteId)?.spaceRole === 'read') return;
+
       await renameDrawing(hit.noteId, drawingId, {
         anchor: title,
       });
       return;
     }
 
-    if (action === 'link-note') {
-      const api = inlineApis.get(embed);
-      const note = await openNoteReferencePicker();
-
-      if (!note) return;
-
-      if (!api) {
-        toast('Drawing is not ready yet', 'error');
-        return;
+    if (action === 'open-card') {
+      if (wantsLiveEmbed(embed) || (!isMobileDrawUx() && embed.getAttribute('data-draw-surface') !== 'editor')) {
+        if (!isMobileDrawUx() && state.notes.get(hit.noteId)?.spaceRole !== 'read') {
+          activateLiveEmbed(embed);
+          return;
+        }
       }
 
-      if (await linkSelectedElementsToNote(api, note)) {
-        toast(`Linked ${note.title || 'Untitled'}`, 'success');
-      }
-
+      await openEmbedFullscreen(embed, hit);
       return;
     }
 
-    if (action === 'rename') {
-      const titleAnchor = embed.querySelector('[data-draw-title]') || btn;
-
-      await renameDrawing(hit.noteId, drawingId, {
-        anchor: titleAnchor,
-      });
-
+    if (action === 'more') {
+      openEmbedMoreMenu(embed, btn, hit);
       return;
     }
 
-    if (action === 'toggle-width') {
-      const current = hit.drawing;
-      const wide = drawingWidthMode(current) === 'wide';
-
-      updateDrawingMeta(hit.noteId, drawingId, {
-        widthMode: wide ? 'normal' : 'wide',
-      }, 'draw-width-mode');
-
-      window.dispatchEvent(new CustomEvent('yanta-drawing-updated', {
+    if (action === 'present') {
+      window.dispatchEvent(new CustomEvent('yanta-present-drawing', {
         detail: { noteId: hit.noteId, drawingId },
       }));
-
-      toast(
-        wide
-          ? 'Drawing width: text column'
-          : 'Drawing width: full pane',
-        'success'
-      );
-
       return;
     }
 
     if (action === 'fullscreen') {
-      /*
-        Vorladen vor der Transition.
-        Dadurch ist openDrawModal() im Transition-Callback schnell
-        und kann den Fullscreen-Host synchron erzeugen.
-      */
-      await Promise.allSettled([
-        loadReact(),
-        loadExcalidraw(),
-        getNoteDoc(hit.noteId).ready,
-      ]);
-
-      await withDrawingViewTransition(
-        drawingId,
-        () => {
-          openDrawModal(drawingId, hit.noteId, {
-            transition: false,
-            preparedHit: hit,
-          }).catch((err) => {
-            console.error('[YANTA Draw] could not open fullscreen drawing', err);
-            toast('Could not open drawing', 'error');
-          });
-        },
-        {
-          source: embed,
-          targetGetter: () => document.querySelector('.yanta-draw-fullscreen-host'),
-        }
-      );
-
-      return;
-    }
-
-    if (action === 'export') {
-      openDrawingExportMenu(btn, hit.noteId, drawingId);
-      return;
-    }
-
-    if (action === 'delete') {
-      confirmDeleteDrawing(hit.noteId, drawingId, {
-        anchor: btn,
-      });
+      await openEmbedFullscreen(embed, hit);
     }
   });
 }
@@ -6224,6 +6467,70 @@ function drawingThumbSignature(d) {
   ].join(':');
 }
 
+/*
+  The picture a drawing card shows. Raster on purpose: an SVG in an <img>
+  cannot reach the page's fonts, so handwriting turned into a system font;
+  a canvas export draws with the fonts Excalidraw loaded. Stored per drawing
+  and theme next to the thumbnails, so a card never needs Excalidraw again
+  until the drawing changes.
+*/
+const previewUrls = new Map(); // key -> { sig, url }
+const previewRenders = new Map(); // key -> Promise<string>
+
+export async function drawingPreviewUrl(noteId, drawingId) {
+  const d = getDrawing(noteId, drawingId);
+  if (!d || !liveDrawingElements(d).length) return '';
+
+  const key = `preview:${noteId}:${drawingId}`;
+  const sig = drawingThumbSignature(d);
+
+  const memo = previewUrls.get(key);
+  if (memo?.sig === sig) return memo.url;
+
+  const pending = previewRenders.get(key);
+  if (pending?.sig === sig) return pending.promise;
+
+  const promise = (async () => {
+    const remember = (blob) => {
+      const url = URL.createObjectURL(blob);
+      const old = previewUrls.get(key);
+      previewUrls.set(key, { sig, url });
+      if (old?.url) setTimeout(() => URL.revokeObjectURL(old.url), 30_000);
+      return url;
+    };
+
+    const persisted = await readPersistedThumb(key);
+    if (persisted?.sig === sig && persisted.blob instanceof Blob) return remember(persisted.blob);
+
+    const { exportToBlob } = await loadExcalidraw();
+    const dark = currentExcalidrawTheme() === 'dark';
+    const scale = Math.min(3, Math.max(1, window.devicePixelRatio || 1));
+
+    const blob = await exportToBlob({
+      elements: liveDrawingElements(d).filter((el) => !isSlideFrameElement(el)),
+      appState: {
+        ...cleanAppState(d.appState || {}),
+        exportBackground: true,
+        exportWithDarkMode: dark,
+        viewBackgroundColor: d.appState?.viewBackgroundColor || '#ffffff',
+      },
+      files: d.files || {},
+      mimeType: 'image/webp',
+      quality: 0.9,
+      exportPadding: 18,
+      maxWidthOrHeight: Math.round(1100 * scale),
+    });
+
+    writePersistedThumb({ key, sig, blob, updated: Date.now() });
+    return remember(blob);
+  })().finally(() => {
+    if (previewRenders.get(key)?.promise === promise) previewRenders.delete(key);
+  });
+
+  previewRenders.set(key, { sig, promise });
+  return promise;
+}
+
 export async function drawingThumbnailUrl(noteId, drawingId) {
   const key = `${noteId}:${drawingId}`;
   const d = getDrawing(noteId, drawingId);
@@ -6465,6 +6772,9 @@ export function setupDraw() {
     thumbnailCache.clear();
     refreshDrawEmbeds(document);
   });
+
+  // Slides added or removed: "Present" appears or goes in the embed header.
+  window.addEventListener('yanta-slides-updated', () => refreshDrawEmbeds(document));
 }
 
 export function drawingsAsZipEntries(noteId, enc = new TextEncoder()) {

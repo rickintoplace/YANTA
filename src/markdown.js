@@ -10,6 +10,7 @@ import DOMPurify from 'dompurify';
 import { state, store, escapeHtml, escapeAttr, decodeEntities, safeUrl, lucide, safeCssColor } from './core.js';
 import { wikilinkIndex } from './features-state.js';
 import { noteMarkdown } from './yjs.js';
+import { t } from './i18n/index.js';
 import { videoEmbedUrl, audioEmbedUrl } from './media/video-embeds.js';
 import { getImageObjectUrl, putImageObjectUrl } from './media/object-url-cache.js';
 
@@ -67,8 +68,9 @@ function sanitizeHtml(html) {
       'role',
       'data-draw-id',
       'data-draw-title',
-      'data-draw-info',
       'data-draw-action',
+      'aria-label',
+      'hidden',
      'data-draw-surface',
 
       // YANTA data attrs
@@ -609,30 +611,15 @@ export function renderDrawEmbedHtml(id, label = 'Drawing', surface = 'preview') 
   return `<div class="yanta-draw-embed ${cleanSurface}-surface" data-draw-surface="${escapeAttr(cleanSurface)}" data-draw-id="${escapeAttr(cleanId)}" data-note-id="${escapeAttr(state.currentNoteId || '')}" contenteditable="false">
     <div class="yanta-draw-embed-head">
       <span class="yanta-draw-embed-icon" aria-hidden="true">${previewLucide('line-squiggle', 13)}</span>
-      <div class="yanta-draw-embed-title" data-draw-title title="Rename drawing">${escapeHtml(label || 'Drawing')}</div>
-      <div class="yanta-draw-embed-meta" data-draw-info>draw://${escapeHtml(cleanId)}</div>
-
-      <button type="button" class="btn yanta-draw-mobile-done" data-draw-action="mobile-done" title="Leave drawing mode">
-        ${previewLucide('check', 14)}
-      </button>
-
+      <div class="yanta-draw-embed-title" data-draw-title title="${escapeAttr(t('draw.rename'))}">${escapeHtml(label || t('draw.untitled'))}</div>
       <div class="yanta-draw-embed-actions">
-        <button type="button" class="icon-btn" data-draw-action="export" title="Export .excalidraw">${previewLucide('download', 14)}</button>
-        <button type="button" class="icon-btn" data-draw-action="link-note" title="Link selected element to note">${previewLucide('file-plus', 14)}</button>
-        <button type="button" class="icon-btn" data-draw-action="toggle-width" title="Expand drawing width">${previewLucide('unfold-horizontal', 14)}</button>
-        <button type="button" class="icon-btn" data-draw-action="fullscreen" title="Open fullscreen">${previewLucide('expand', 14)}</button>
-        <div style="
-            border-right: 1px solid var(--text-dim);
-            width: 2px;
-            margin-right: 2px;
-            max-height: 22px;
-        ">
-        </div>
-        <button type="button" class="icon-btn danger" data-draw-action="delete" title="Delete drawing">${previewLucide('trash', 14)}</button>
+        <button type="button" class="yanta-draw-present-btn" data-draw-action="present" hidden title="${escapeAttr(t('draw.presentTitle'))}">${previewLucide('play', 13)}<span>${escapeHtml(t('draw.present'))}</span></button>
+        <button type="button" class="icon-btn" data-draw-action="fullscreen" title="${escapeAttr(t('draw.openFullscreen'))}" aria-label="${escapeAttr(t('draw.openFullscreen'))}">${previewLucide('maximize-2', 15)}</button>
+        <button type="button" class="icon-btn" data-draw-action="more" title="${escapeAttr(t('draw.more'))}" aria-label="${escapeAttr(t('draw.more'))}">${previewLucide('ellipsis', 16)}</button>
       </div>
     </div>
     <div class="yanta-draw-inline-host"></div>
-    <div class="yanta-draw-resize-handle" title="Resize drawing"></div>
+    <div class="yanta-draw-resize-handle" title="${escapeAttr(t('draw.resize'))}"></div>
     <div class="yanta-draw-links"></div>
   </div>`;
 }

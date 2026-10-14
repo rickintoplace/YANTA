@@ -277,3 +277,25 @@ export function slideFramePatchFor(visibility) {
     strokeColor: accentColor(),
   };
 }
+/**
+ * What "Present" shows: the drawing's visible slides — or, for a drawing
+ * without any, the whole board as one slide. Present always works; slides
+ * are something you add when one picture is not enough.
+ */
+export function presentationSlidesFor(drawing) {
+  const slides = normalizeSlides(drawing?.slides || []).filter((slide) => !slide.hidden);
+  if (slides.length) return slides;
+
+  const bounds = slideBoundsAroundElements(drawing?.elements || [], 64);
+  if (!bounds) return [];
+
+  return [normalizeSlide({
+    id: BOARD_SLIDE_ID,
+    title: drawing?.title || 'Drawing',
+    bounds,
+    created: 0,
+    updated: 0,
+  }, 0)];
+}
+
+export const BOARD_SLIDE_ID = '__board';

@@ -644,8 +644,67 @@ function syncAttrs(target, source) {
   }
 }
 
+/*
+  Drawings survive a re-render. The preview re-renders after every pause in
+  typing; replacing its HTML used to throw each drawing away and build it
+  again — card, watchers and all — and left the old ones running detached.
+  Matched by drawing id and occurrence, the existing node simply moves into
+  the new markup.
+*/
+function collectDrawEmbeds(root) {
+  const byKey = new Map();
+  const seen = new Map();
+
+  for (const node of root.querySelectorAll('.yanta-draw-embed[data-draw-id]')) {
+    const id = node.dataset.drawId;
+    const n = seen.get(id) || 0;
+    seen.set(id, n + 1);
+    byKey.set(`${id}#${n}`, node);
+  }
+
+  return byKey;
+}
+
+function restoreDrawEmbeds(root, old) {
+  if (!old.size) return;
+
+  const seen = new Map();
+  const reused = new Set();
+
+  for (const node of [...root.querySelectorAll('.yanta-draw-embed[data-draw-id]')]) {
+    const id = node.dataset.drawId;
+    const n = seen.get(id) || 0;
+    seen.set(id, n + 1);
+
+    const prev = old.get(`${id}#${n}`);
+    if (!prev) continue;
+
+    reused.add(prev);
+    if (prev !== node) node.replaceWith(prev);
+  }
+
+  for (const prev of old.values()) {
+    if (reused.has(prev)) continue;
+
+    window.dispatchEvent(new CustomEvent('yanta-draw-unmount', {
+      detail: { root: prev },
+    }));
+  }
+}
+
 function setPreviewHtmlPreservingVideos(previewEl, html) {
   if (!previewEl) return;
+
+  const drawEmbeds = collectDrawEmbeds(previewEl);
+
+  try {
+    setPreviewHtml(previewEl, html);
+  } finally {
+    restoreDrawEmbeds(previewEl, drawEmbeds);
+  }
+}
+
+function setPreviewHtml(previewEl, html) {
 
   const hasOldVideo = !!previewEl.querySelector('.pv-embed-video iframe[src]');
 
@@ -719,6 +778,7 @@ export function clearEditor() {
   }
   destroyEditor();
   $('editor').replaceChildren();
+  restoreDrawEmbeds(document.createElement('div'), collectDrawEmbeds($('preview')));
   $('preview').innerHTML = '';
   $('paneEdit')
     ?.querySelectorAll(':scope > .yanta-event-note-card')

@@ -5,7 +5,7 @@
 // widget, image preview widget, live cursors (when shared).
 // ============================================================
 
-import { EditorState, Compartment, RangeSetBuilder, StateField, StateEffect, Transaction } from '@codemirror/state';
+import { EditorState, EditorSelection, Compartment, RangeSetBuilder, StateField, StateEffect, Transaction } from '@codemirror/state';
 import { EditorView, keymap, drawSelection, placeholder, ViewPlugin, Decoration, WidgetType, MatchDecorator } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
@@ -1099,6 +1099,7 @@ class DrawWidget extends WidgetType {
   toDOM() {
     const node = document.createElement('div');
     node.className = 'yanta-draw-editor-embed';
+    node.dataset.drawId = this.id;
     node.innerHTML = renderDrawEmbedHtml(this.id, i18n('image.drawingFallback'), 'editor');
 
     requestAnimationFrame(() => {
@@ -1124,7 +1125,13 @@ class DrawWidget extends WidgetType {
 }
 /*
   Block-Widgets müssen über StateField kommen, nicht über ViewPlugin.
+
+  The drawing *replaces* its draw://<id> line: the reference is plumbing,
+  not something to read or type into. The range is atomic, so the caret
+  steps over it like over a picture.
 */
+const DRAW_LINE_RE = /^\s*draw:\/\/([a-z0-9_-]+)\s*$/i;
+
 const drawPreviewField = StateField.define({
   create(state) {
     return buildDrawDecos(state);
@@ -1138,7 +1145,10 @@ const drawPreviewField = StateField.define({
     return deco.map(tr.changes);
   },
 
-  provide: (field) => EditorView.decorations.from(field),
+  provide: (field) => [
+    EditorView.decorations.from(field),
+    EditorView.atomicRanges.of((view) => view.state.field(field)),
+  ],
 });
 
 function buildDrawDecos(state) {
@@ -1146,12 +1156,11 @@ function buildDrawDecos(state) {
 
   for (let p = 0; p < state.doc.length;) {
     const line = state.doc.lineAt(p);
-    const m = /^\s*draw:\/\/([a-z0-9_-]+)\s*$/i.exec(line.text);
+    const m = DRAW_LINE_RE.exec(line.text);
 
     if (m) {
-      b.add(line.to, line.to, Decoration.widget({
+      b.add(line.from, line.to, Decoration.replace({
         widget: new DrawWidget(m[1]),
-        side: 1,
         block: true,
       }));
     }
@@ -1162,6 +1171,66 @@ function buildDrawDecos(state) {
 
   return b.finish();
 }
+
+/*
+  Backspace at the start of the line below a drawing (or Delete at the end
+  of the line above) would glue that text onto draw://<id> — the drawing
+  vanishes and raw syntax appears. Like a picture in any editor, the first
+  press selects the drawing; a second one removes it (and Undo brings it
+  back).
+*/
+const drawLineGuard = EditorState.transactionFilter.of((tr) => {
+  if (!tr.docChanged) return tr;
+  if (!tr.isUserEvent('delete.backward') && !tr.isUserEvent('delete.forward')) return tr;
+
+  const start = tr.startState;
+  let guard = null;
+
+  tr.changes.iterChanges((fromA, toA, _fromB, _toB, inserted) => {
+    if (guard || inserted.length || toA - fromA !== 1) return;
+    if (start.sliceDoc(fromA, toA) !== '\n') return;
+
+    const above = start.doc.lineAt(fromA);
+    const below = start.doc.lineAt(toA);
+
+    if (DRAW_LINE_RE.test(above.text) && below.text.trim()) guard = above;
+    else if (DRAW_LINE_RE.test(below.text) && above.text.trim()) guard = below;
+  });
+
+  if (!guard) return tr;
+
+  return {
+    selection: EditorSelection.single(guard.from, guard.to),
+    scrollIntoView: true,
+    userEvent: 'select',
+  };
+});
+
+/** Outlines a drawing whose line is selected (so a second Backspace is no surprise). */
+const drawSelectionMarker = ViewPlugin.fromClass(class {
+  constructor(view) {
+    this.sync(view);
+  }
+
+  update(update) {
+    if (update.selectionSet || update.docChanged) this.sync(update.view);
+  }
+
+  sync(view) {
+    const sel = view.state.selection.main;
+    let selectedId = '';
+
+    if (!sel.empty) {
+      const line = view.state.doc.lineAt(sel.from);
+      const m = line.from === sel.from && line.to === sel.to ? DRAW_LINE_RE.exec(line.text) : null;
+      if (m) selectedId = m[1];
+    }
+
+    for (const node of view.dom.querySelectorAll('.yanta-draw-editor-embed')) {
+      node.classList.toggle('is-selected', !!selectedId && node.dataset.drawId === selectedId);
+    }
+  }
+});
 
 // ============================================================
 // Autocomplete: wikilinks, tags, slash commands.
@@ -2127,6 +2196,8 @@ export function mountEditor(host, { noteId, awarenessUser }) {
     imagePreviewField,
     videoPreviewField,
     drawPreviewField,
+    drawLineGuard,
+    drawSelectionMarker,
     wikilinkClickHandler(),
     inlineLucideEditClickHandler(),
     pasteHandler(),

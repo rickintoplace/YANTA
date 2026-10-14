@@ -140,6 +140,12 @@ import {
     const style = document.createElement('style');
     style.id = 'yanta-sync-reminder-css';
     style.textContent = `
+  /* Never over a drawing or a presentation: it covered the drawing tools. */
+  body:has(.yanta-draw-modal:not([hidden])) .yanta-sync-reminder,
+  body.yanta-slideshow-active .yanta-sync-reminder {
+    display: none !important;
+  }
+
   .yanta-sync-reminder {
     position: fixed;
     right: max(18px, env(safe-area-inset-right));

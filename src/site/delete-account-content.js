@@ -16,6 +16,7 @@
 import {
   apiFetch,
   cloudMe,
+  cloudMfaStatus,
 } from '../cloud/cloud-api.js';
 
 import {
@@ -111,7 +112,7 @@ function signedOutPanelHtml() {
   `;
 }
 
-function signedInPanelHtml(email) {
+function signedInPanelHtml(email, { mfa = false } = {}) {
   return `
     <p>${fill(s.signedIn, { email: escapeHtml(email) })}</p>
 
@@ -120,6 +121,12 @@ function signedInPanelHtml(email) {
         <label for="yanta-delete-confirm">${escapeHtml(s.confirmLabel)}</label>
         <input type="text" id="yanta-delete-confirm" name="confirm" autocomplete="off" spellcheck="false">
       </div>
+      ${mfa ? `
+      <div class="yanta-form__field">
+        <label for="yanta-delete-mfa">${escapeHtml(s.mfaLabel)}</label>
+        <input type="text" id="yanta-delete-mfa" name="mfa" autocomplete="one-time-code" inputmode="text" spellcheck="false">
+        <small>${escapeHtml(s.mfaHint)}</small>
+      </div>` : ''}
 
       <div class="yanta-btn-row">
         <button type="submit" class="yanta-site-btn yanta-form__submit danger">
@@ -144,21 +151,28 @@ export async function wireDeleteAccountPage() {
     return;
   }
 
-  panel.innerHTML = signedInPanelHtml(me?.user?.email || '');
+  // Two-factor sign-in on: deleting the account needs a code too.
+  const mfa = !!(await cloudMfaStatus().catch(() => null))?.enabled;
+  panel.innerHTML = signedInPanelHtml(me?.user?.email || '', { mfa });
 
   wireSiteForm({
     formId: 'yanta-delete-account-form',
     busyLabel: s.busy,
 
-    validate: (data) => (
-      String(data.get('confirm') || '').trim().toUpperCase() === 'DELETE'
-        ? ''
-        : { message: s.needConfirm, focus: 'yanta-delete-confirm' }
-    ),
+    validate: (data) => {
+      if (String(data.get('confirm') || '').trim().toUpperCase() !== 'DELETE') {
+        return { message: s.needConfirm, focus: 'yanta-delete-confirm' };
+      }
+      if (mfa && !String(data.get('mfa') || '').trim()) {
+        return { message: s.needMfa, focus: 'yanta-delete-mfa' };
+      }
+      return '';
+    },
 
     submit: (data) => apiFetch('/api/account', {
       method: 'DELETE',
       body: { confirm: data.get('confirm') },
+      headers: mfa ? { 'x-yanta-mfa': String(data.get('mfa') || '').trim() } : {},
     }),
 
     receipt: () => `

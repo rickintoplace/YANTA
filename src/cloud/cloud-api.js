@@ -18,10 +18,23 @@ function apiUrl(path) {
   return `${base}/${cleanPath}`;
 }
 
+/*
+  Two-factor sign-in: destructive account actions (removing a device,
+  deleting the account) answer 403 mfa_required when 2FA is on. The app
+  registers a prompter (an input for the authenticator code); the request
+  is then repeated with the code — so every caller gets it for free.
+*/
+let mfaPrompter = null;
+
+export function setMfaPrompter(fn) {
+  mfaPrompter = typeof fn === 'function' ? fn : null;
+}
+
 export async function apiFetch(path, {
   method = 'GET',
   body = null,
   headers = {},
+  mfaAttempt = 0,
 } = {}) {
   const res = await fetch(apiUrl(path), {
     method,
@@ -38,6 +51,23 @@ export async function apiFetch(path, {
   try {
     json = await res.json();
   } catch {}
+
+  if (
+    res.status === 403 &&
+    (json?.code === 'mfa_required' || json?.code === 'mfa_invalid') &&
+    mfaPrompter &&
+    mfaAttempt < 3
+  ) {
+    const code = await mfaPrompter({ invalid: json.code === 'mfa_invalid' });
+    if (code) {
+      return apiFetch(path, {
+        method,
+        body,
+        headers: { ...headers, 'x-yanta-mfa': String(code).trim() },
+        mfaAttempt: mfaAttempt + 1,
+      });
+    }
+  }
 
   if (!res.ok) {
     const err = new Error(
@@ -78,6 +108,34 @@ export function cloudVerifyCode(email, code) {
       code,
     },
   });
+}
+
+/** Second step of a sign-in with 2FA. */
+export function cloudVerifyMfa(mfaToken, code) {
+  return apiFetch('/api/auth/verify-mfa', {
+    method: 'POST',
+    body: { mfaToken, code },
+  });
+}
+
+export function cloudMfaStatus() {
+  return apiFetch('/api/mfa');
+}
+
+export function cloudMfaSetup() {
+  return apiFetch('/api/mfa/setup', { method: 'POST' });
+}
+
+export function cloudMfaEnable(code) {
+  return apiFetch('/api/mfa/enable', { method: 'POST', body: { code } });
+}
+
+export function cloudMfaDisable(code) {
+  return apiFetch('/api/mfa/disable', { method: 'POST', body: { code } });
+}
+
+export function cloudMfaRenewBackupCodes(code) {
+  return apiFetch('/api/mfa/backup-codes', { method: 'POST', body: { code } });
 }
 
 export function cloudLogout() {

@@ -592,3 +592,23 @@ CREATE TABLE IF NOT EXISTS metric_counters (
 
 CREATE INDEX IF NOT EXISTS idx_metric_counters_day
 ON metric_counters(day, name);
+
+-- Two-factor sign-in (TOTP). The secret is AES-GCM sealed with a key
+-- derived from SESSION_SECRET; backup codes are HMACs, each used once.
+CREATE TABLE IF NOT EXISTS user_mfa (
+  user_id TEXT PRIMARY KEY,
+  secret_enc TEXT NOT NULL,
+  enabled_at INTEGER,
+  created_at INTEGER NOT NULL,
+  last_step INTEGER NOT NULL DEFAULT 0,
+  backup_hashes TEXT NOT NULL DEFAULT '[]'
+);
+
+-- A sign-in whose email code was right and that waits for the second factor.
+CREATE TABLE IF NOT EXISTS mfa_pending_logins (
+  token_hash TEXT PRIMARY KEY,
+  user_id TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  attempts INTEGER NOT NULL DEFAULT 0
+);

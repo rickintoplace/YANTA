@@ -197,6 +197,10 @@ import {
   notifySyncAuthRequired,
 } from './sync2/sync-auth-notice.js';
 
+// A magic-link sign-in that still needs the second factor (2FA). Read at
+// load, before the hash router rewrites the hash; resumed once the app runs.
+const BOOT_CLOUD_MFA_HASH = /^#cloud-login-mfa=/.test(location.hash) ? location.hash : '';
+
 // Registers the calendar dashboard widget (side effect).
 import './calendar-widget.js';
 import './today-widget.js';
@@ -3346,6 +3350,25 @@ function bindEvents() {
   window.addEventListener('yanta-lock-config-changed', syncLockButton);
   syncLockButton();
   setupAutoLock();
+
+  // Destructive YANTA Cloud actions ask for the authenticator code (2FA).
+  import('./cloud/cloud-api.js').then(({ setMfaPrompter }) => {
+    setMfaPrompter(async ({ invalid }) => {
+      const { yantaPrompt } = await import('./dialogs.js');
+      return yantaPrompt({
+        title: t('mfa.stepUp.title'),
+        message: invalid ? t('mfa.stepUp.invalid') : t('mfa.stepUp.hint'),
+        label: t('mfa.login.code'),
+        placeholder: '123456',
+        required: true,
+      });
+    });
+  }).catch(() => {});
+
+  if (BOOT_CLOUD_MFA_HASH) {
+    if (location.hash !== BOOT_CLOUD_MFA_HASH) history.replaceState(history.state, '', BOOT_CLOUD_MFA_HASH);
+    import('./sync2/yanta-cloud-setup-ui.js').then((m) => m.resumeCloudLoginFromHash()).catch(() => {});
+  }
 
   const openImportMenuFrom = (anchor) => {
     if (!anchor) return;

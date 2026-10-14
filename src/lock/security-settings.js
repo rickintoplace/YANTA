@@ -192,6 +192,138 @@ function guestGroup(config, rerender) {
   return group(t('lock.guest.title'), hint(t('lock.guest.offHint')), start);
 }
 
+// ---- Two-factor sign-in for the YANTA Cloud account (worker: user_mfa)
+
+function backupCodesBlock(codes, onDone) {
+  const list = el('pre', { class: 'yanta-security-codes' }, codes.join('\n'));
+  const copy = el('button', { type: 'button', class: 'btn' }, t('mfa.settings.copy'));
+  copy.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(codes.join('\n'));
+      toast(t('mfa.settings.copied'), 'success');
+    } catch {}
+  });
+  const save = el('button', { type: 'button', class: 'btn' }, t('mfa.settings.download'));
+  save.addEventListener('click', async () => {
+    const { downloadBlob } = await import('../core.js');
+    downloadBlob(new Blob([`YANTA — ${t('mfa.settings.backupTitle')}\n\n${codes.join('\n')}\n`], { type: 'text/plain' }), 'yanta-backup-codes.txt');
+  });
+  const done = el('button', { type: 'button', class: 'btn primary' }, t('mfa.settings.done'));
+  done.addEventListener('click', onDone);
+
+  return el('div', { class: 'yanta-security-form' },
+    el('strong', {}, t('mfa.settings.backupTitle')),
+    hint(t('mfa.settings.backupHint')),
+    list,
+    el('div', { class: 'yanta-security-row' }, copy, save, done)
+  );
+}
+
+async function askMfaCode() {
+  const { yantaPrompt } = await import('../dialogs.js');
+  return yantaPrompt({
+    title: t('mfa.stepUp.title'),
+    message: t('mfa.settings.codePrompt'),
+    label: t('mfa.login.code'),
+    placeholder: '123456',
+    required: true,
+  });
+}
+
+async function mfaGroup(rerender) {
+  const api = await import('../cloud/cloud-api.js');
+  const me = await api.cloudMe().catch(() => null);
+
+  if (!me?.authenticated) {
+    return group(t('mfa.settings.title'), hint(t('mfa.settings.offHint')), hint(t('mfa.settings.notSignedIn')));
+  }
+
+  const status = await api.cloudMfaStatus().catch(() => null);
+  const body = el('div');
+
+  if (status?.enabled) {
+    const renew = el('button', { type: 'button', class: 'btn' }, t('mfa.settings.renew'));
+    renew.addEventListener('click', async () => {
+      const code = await askMfaCode();
+      if (!code) return;
+      try {
+        const result = await api.cloudMfaRenewBackupCodes(code);
+        body.replaceChildren(backupCodesBlock(result.backupCodes || [], rerender));
+      } catch {
+        toast(t('mfa.settings.invalid'), 'error');
+      }
+    });
+
+    const off = el('button', { type: 'button', class: 'btn danger' }, t('mfa.settings.turnOff'));
+    off.addEventListener('click', async () => {
+      const code = await askMfaCode();
+      if (!code) return;
+      try {
+        await api.cloudMfaDisable(code);
+        toast(t('mfa.settings.turnedOff'), 'success');
+        rerender();
+      } catch {
+        toast(t('mfa.settings.invalid'), 'error');
+      }
+    });
+
+    body.append(
+      el('p', { class: 'yanta-security-status' }, t('mfa.settings.onHint', { count: status.backupRemaining })),
+      el('div', { class: 'yanta-security-row' }, renew, off)
+    );
+    return group(t('mfa.settings.title'), body);
+  }
+
+  const setup = el('button', { type: 'button', class: 'btn' }, t('mfa.settings.turnOn'));
+  setup.addEventListener('click', async () => {
+    setup.disabled = true;
+    let secret;
+    try {
+      secret = await api.cloudMfaSetup();
+    } catch (err) {
+      toast(err?.message || String(err), 'error');
+      setup.disabled = false;
+      return;
+    }
+
+    const { renderBrandedQrSvg } = await import('../qr.js');
+    const qr = el('div', { class: 'yanta-security-qr' });
+    qr.append(renderBrandedQrSvg(secret.uri, { size: 180 }));
+
+    const code = el('input', { type: 'text', class: 'text-input', placeholder: t('mfa.settings.confirmCode'), inputmode: 'numeric', autocomplete: 'one-time-code', maxlength: '6' });
+    const error = el('p', { class: 'yanta-settings-hint', style: { color: 'var(--red)' }, role: 'alert' });
+    const confirm = el('button', { type: 'submit', class: 'btn primary' }, t('mfa.settings.confirm'));
+    const form = el('form', { class: 'yanta-security-form' },
+      hint(t('mfa.settings.scan')),
+      qr,
+      el('code', { class: 'yanta-security-secret' }, secret.secret.match(/.{1,4}/g).join(' ')),
+      code,
+      error,
+      confirm
+    );
+
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      error.textContent = '';
+      confirm.disabled = true;
+      try {
+        const result = await api.cloudMfaEnable(code.value.trim());
+        toast(t('mfa.settings.turnedOn'), 'success');
+        body.replaceChildren(backupCodesBlock(result.backupCodes || [], rerender));
+      } catch {
+        error.textContent = t('mfa.settings.invalid');
+        confirm.disabled = false;
+      }
+    });
+
+    body.replaceChildren(form);
+    code.focus();
+  });
+
+  body.append(hint(t('mfa.settings.offHint')), el('div', { class: 'yanta-security-row' }, setup));
+  return group(t('mfa.settings.title'), body);
+}
+
 /** Seals what was stored before the lock; the status line follows. */
 async function sealStoredData(rerender) {
   try {
@@ -216,6 +348,9 @@ export function securitySettingsElement({ rerender }) {
 .yanta-security-row label { min-width: 180px; color: var(--text); font-size: 13px; }
 .yanta-security-passkey-name { flex: 1; min-width: 160px; color: var(--text); font-size: 13px; }
 .yanta-security-status { margin: 6px 0 0; font-size: 12.5px; color: var(--accent, var(--text)); }
+.yanta-security-qr { display: inline-block; padding: 10px; background: #fff; border-radius: 12px; width: max-content; }
+.yanta-security-secret { font-family: var(--font-mono, monospace); font-size: 13px; letter-spacing: .05em; user-select: all; word-break: break-all; }
+.yanta-security-codes { margin: 0; padding: 10px 12px; border: 1px dashed var(--border); border-radius: 10px; background: var(--bg); font-family: var(--font-mono, monospace); font-size: 14px; line-height: 1.7; user-select: all; }
 .yanta-security-note { margin: 12px 0 18px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; background: var(--bg-elev-2); color: var(--text-dim); font-size: 12.5px; line-height: 1.5; }
 `;
     document.head.append(style);
@@ -327,6 +462,9 @@ export function securitySettingsElement({ rerender }) {
     });
 
     root.append(group(t('lock.settings.otherDevicesTitle'), hint(t('lock.settings.otherDevicesHint')), manage));
+
+    // ---- YANTA Cloud account: two-factor sign-in
+    root.append(await mfaGroup(rerender));
   })();
 
   return root;

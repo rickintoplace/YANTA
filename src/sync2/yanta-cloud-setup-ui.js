@@ -15,6 +15,7 @@ import {
   cloudMe,
   cloudSendCode,
   cloudVerifyCode,
+  cloudVerifyMfa,
   cloudCreateVault,
   cloudListVaultDevices,
   cloudRemoveVaultDevice,
@@ -1028,7 +1029,14 @@ function renderCode(email) {
     try {
       setStatus('Verifying…');
 
-      await cloudVerifyCode(email, code);
+      const verified = await cloudVerifyCode(email, code);
+      if (verified?.mfaRequired) {
+        renderMfaLogin(verified.mfaToken, async () => {
+          if (guestRequested) await enterGuestMode();
+          await renderCloudHome(await cloudMe());
+        });
+        return;
+      }
       if (guestRequested) await enterGuestMode();
 
       const me = await cloudMe();
@@ -1039,6 +1047,75 @@ function renderCode(email) {
   });
 
   setTimeout(() => modal.querySelector('[data-code]')?.focus(), 0);
+}
+
+/*
+  Second step of a sign-in with two-factor sign-in on: the email code was
+  right, now the authenticator code (or a backup code). `onSignedIn` runs
+  once the session exists.
+*/
+function renderMfaLogin(mfaToken, onSignedIn) {
+  renderShell(t('mfa.login.title'), `
+    <div class="yanta-cloud-hero">
+      <div class="yanta-cloud-hero-icon">${lucide('shield-check', 28)}</div>
+      <div>
+        <strong>${escapeHtml(t('mfa.login.title'))}</strong>
+        <p>${escapeHtml(t('mfa.login.hint'))}</p>
+      </div>
+    </div>
+
+    <section class="yanta-cloud-section">
+      <h4>${escapeHtml(t('mfa.login.code'))}</h4>
+      <input class="text-input" data-mfa-code placeholder="123456" inputmode="text" autocomplete="one-time-code" maxlength="16" />
+      <div class="compress-actions" style="margin-top:10px">
+        <span class="grow"></span>
+        <button class="btn primary" data-mfa-verify>${lucide('check', 14)} ${escapeHtml(t('mfa.login.submit'))}</button>
+      </div>
+    </section>
+  `);
+
+  const input = modal.querySelector('[data-mfa-code]');
+  const submit = modal.querySelector('[data-mfa-verify]');
+
+  input?.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') submit?.click();
+  });
+
+  submit?.addEventListener('click', async () => {
+    const code = input?.value?.trim();
+    if (!code) return;
+
+    submit.disabled = true;
+    try {
+      setStatus(t('mfa.login.checking'));
+      const result = await cloudVerifyMfa(mfaToken, code);
+      if (Number.isFinite(result?.backupRemaining)) {
+        toast(t('mfa.login.backupLeft', { count: result.backupRemaining }), 'success');
+      }
+      await onSignedIn();
+    } catch (err) {
+      const expired = err?.response?.code === 'mfa_expired';
+      setStatus(expired ? t('mfa.login.expired') : t('mfa.login.invalid'), 'error');
+      if (expired) renderLogin();
+    } finally {
+      submit.disabled = false;
+    }
+  });
+
+  setTimeout(() => input?.focus(), 0);
+}
+
+/** A magic link that needs the second factor lands on #cloud-login-mfa=<token>. */
+export async function resumeCloudLoginFromHash() {
+  const match = String(location.hash || '').match(/^#cloud-login-mfa=([^&]+)/);
+  if (!match) return false;
+
+  history.replaceState(history.state, '', location.pathname + location.search);
+  await openYantaCloudSetup();
+  renderMfaLogin(decodeURIComponent(match[1]), async () => {
+    await renderCloudHome(await cloudMe());
+  });
+  return true;
 }
 
 function fmtBytesCompact(n) {
@@ -2934,7 +3011,14 @@ function renderCodeForPendingPairing(email, pairingText) {
     try {
       setStatus('Verifying…');
 
-      await cloudVerifyCode(email, code);
+      const verified = await cloudVerifyCode(email, code);
+      if (verified?.mfaRequired) {
+        renderMfaLogin(verified.mfaToken, async () => {
+          if (guestRequested) await enterGuestMode();
+          await connectYantaCloudFromPairing(pairingText);
+        });
+        return;
+      }
       if (guestRequested) await enterGuestMode();
 
       await connectYantaCloudFromPairing(pairingText);

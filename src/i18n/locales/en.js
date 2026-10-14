@@ -888,6 +888,11 @@ export default {
     panel: { text: 'Its notes and names are encrypted with the folder password. Unlock it to see what is inside.', button: 'Unlock' },
     print: { title: 'YANTA — recovery code for a private folder', body: 'With this code, the private folder “{name}” can be opened without its password. Keep this page somewhere safe; whoever has it can open the folder.', created: 'Created {date}' },
   },
+  mfa: {
+    login: { title: 'Two-factor sign-in', hint: 'Enter the 6-digit code from your authenticator app — or one of your backup codes.', code: 'Code', submit: 'Sign in', checking: 'Checking…', invalid: 'That code is not valid.', expired: 'This sign-in expired. Start again.', backupLeft: { one: 'Backup code used — {count} left.', other: 'Backup code used — {count} left.' } },
+    stepUp: { title: 'Confirm with your authenticator', hint: 'This needs a code from your authenticator app (or a backup code).', invalid: 'That code was not valid. Try again.' },
+    settings: { title: 'Two-factor sign-in (YANTA Cloud)', offHint: 'Today the email code alone signs in — whoever controls your mailbox controls your account: they cannot read your notes (end-to-end encrypted), but could remove your devices or delete the account. With two-factor sign-in they also need a code from an authenticator app (Aegis, 2FAS, Google Authenticator, a password manager …). Removing devices and deleting the account ask for it too.', notSignedIn: 'Sign in to YANTA Cloud to turn it on.', turnOn: 'Set up two-factor sign-in', scan: 'Scan this with your authenticator app, or enter the key by hand:', confirmCode: 'Code from the app', confirm: 'Turn on', onHint: { one: 'Two-factor sign-in is on. {count} backup code left.', other: 'Two-factor sign-in is on. {count} backup codes left.' }, backupTitle: 'Backup codes', backupHint: 'Each code works once, when your phone is not at hand. Keep them safe, like your Recovery Kit — they are shown only now.', copy: 'Copy', copied: 'Backup codes copied', download: 'Save as file', done: 'Done', turnOff: 'Turn off', renew: 'New backup codes', codePrompt: 'Code from your authenticator app or a backup code', turnedOn: 'Two-factor sign-in is on', turnedOff: 'Two-factor sign-in is off', invalid: 'That code is not valid.' },
+  },
   privacy: {
     hideFromAi: 'Hide from YANTA AI',
     showToAi: 'Show to YANTA AI again',

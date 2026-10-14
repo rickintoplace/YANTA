@@ -2338,7 +2338,7 @@ function corsHeaders(env, req) {
   return {
     "access-control-allow-origin": origin,
     "access-control-allow-methods": "GET,POST,PUT,PATCH,DELETE,OPTIONS",
-    "access-control-allow-headers": "content-type,x-yanta-vault-id,x-yanta-device-id,x-yanta-platform,x-csrf-token,x-yanta-space-read-token,x-yanta-space-write-token,x-yanta-metrics-token",
+    "access-control-allow-headers": "content-type,x-yanta-vault-id,x-yanta-device-id,x-yanta-platform,x-yanta-mfa,x-csrf-token,x-yanta-space-read-token,x-yanta-space-write-token,x-yanta-metrics-token",
     "access-control-allow-credentials": "true",
     "access-control-max-age": "86400",
     vary: "Origin"
@@ -3082,6 +3082,12 @@ async function handleVerifyCode(env, req, headers) {
     return json({ ok: false, message: "Code expired" }, 400, headers);
   }
   const user = await getOrCreateUser(env, email);
+  // With 2FA on, the email code alone does not sign in: the app asks for
+  // the authenticator code next (handleVerifyMfaLogin).
+  if (await mfaEnabled(env, user.id)) {
+    await audit(env, req, "auth_login_code_mfa_pending", user.id, {});
+    return json({ ok: true, mfaRequired: true, mfaToken: await createMfaPendingLogin(env, user.id) }, 200, headers);
+  }
   const responseHeaders = await createSession(env, req, user.id, headers);
   await audit(env, req, "auth_login_code_success", user.id, {});
   return json({
@@ -3113,6 +3119,10 @@ async function handleMagic(env, req, url, headers) {
     return Response.redirect(`${appOrigin}/#login-expired`, 302);
   }
   const user = await getOrCreateUser(env, challenge.email);
+  if (await mfaEnabled(env, user.id)) {
+    const mfaToken = await createMfaPendingLogin(env, user.id);
+    return Response.redirect(`${appOrigin}/#cloud-login-mfa=${encodeURIComponent(mfaToken)}`, 302);
+  }
   const responseHeaders = await createSession(env, req, user.id, headers);
   return new Response(null, {
     status: 302,
@@ -3123,6 +3133,332 @@ async function handleMagic(env, req, url, headers) {
   });
 }
 __name(handleMagic, "handleMagic");
+/*
+  Two-factor sign-in (TOTP, RFC 6238) for YANTA Cloud accounts.
+
+  The email code proves the mailbox; with 2FA on, whoever takes over the
+  mailbox still needs the authenticator (or one of the backup codes).
+  The notes are end-to-end encrypted either way — what 2FA guards is the
+  account: signing in, removing devices (which then wipe themselves) and
+  deleting the account ask for a code too.
+
+  The TOTP secret is stored encrypted (AES-GCM, key derived from
+  SESSION_SECRET); backup codes only as HMACs, each usable once. A code
+  step is accepted once (replay), ±30 s of clock drift.
+*/
+var MFA_PENDING_TTL_MS = 10 * 60 * 1e3;
+var MFA_BACKUP_CODES = 10;
+var mfaTablesReady = false;
+async function ensureMfaTables(env) {
+  if (mfaTablesReady) return;
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS user_mfa (
+       user_id TEXT PRIMARY KEY,
+       secret_enc TEXT NOT NULL,
+       enabled_at INTEGER,
+       created_at INTEGER NOT NULL,
+       last_step INTEGER NOT NULL DEFAULT 0,
+       backup_hashes TEXT NOT NULL DEFAULT '[]'
+     )`
+  ).run();
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS mfa_pending_logins (
+       token_hash TEXT PRIMARY KEY,
+       user_id TEXT NOT NULL,
+       created_at INTEGER NOT NULL,
+       expires_at INTEGER NOT NULL,
+       attempts INTEGER NOT NULL DEFAULT 0
+     )`
+  ).run();
+  mfaTablesReady = true;
+}
+__name(ensureMfaTables, "ensureMfaTables");
+var BASE32_ALPHABET = "ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+function base32Encode(bytes) {
+  let bits = 0, value = 0, out = "";
+  for (const byte of bytes) {
+    value = value << 8 | byte;
+    bits += 8;
+    while (bits >= 5) {
+      out += BASE32_ALPHABET[value >>> bits - 5 & 31];
+      bits -= 5;
+    }
+    value &= (1 << bits) - 1;
+  }
+  if (bits > 0) out += BASE32_ALPHABET[value << 5 - bits & 31];
+  return out;
+}
+__name(base32Encode, "base32Encode");
+function base32Decode(text) {
+  const clean = String(text || "").toUpperCase().replace(/[\s=-]/g, "");
+  const out = [];
+  let bits = 0, value = 0;
+  for (const ch of clean) {
+    const v = BASE32_ALPHABET.indexOf(ch);
+    if (v < 0) return null;
+    value = value << 5 | v;
+    bits += 5;
+    if (bits >= 8) {
+      out.push(value >>> bits - 8 & 255);
+      bits -= 8;
+    }
+    value &= (1 << bits) - 1;
+  }
+  return new Uint8Array(out);
+}
+__name(base32Decode, "base32Decode");
+async function mfaSecretKey(env) {
+  const base = await crypto.subtle.importKey("raw", new TextEncoder().encode(env.SESSION_SECRET), "HKDF", false, ["deriveKey"]);
+  return crypto.subtle.deriveKey(
+    { name: "HKDF", hash: "SHA-256", salt: new Uint8Array(32), info: new TextEncoder().encode("yanta-mfa-secret-v1") },
+    base,
+    { name: "AES-GCM", length: 256 },
+    false,
+    ["encrypt", "decrypt"]
+  );
+}
+__name(mfaSecretKey, "mfaSecretKey");
+async function sealMfaSecret(env, userId, secretBytes) {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = new Uint8Array(await crypto.subtle.encrypt(
+    { name: "AES-GCM", iv, additionalData: new TextEncoder().encode(`mfa:${userId}`) },
+    await mfaSecretKey(env),
+    secretBytes
+  ));
+  return `${base64url(iv)}.${base64url(ct)}`;
+}
+__name(sealMfaSecret, "sealMfaSecret");
+function base64urlDecode(text) {
+  const b64 = String(text || "").replace(/-/g, "+").replace(/_/g, "/");
+  const bin = atob(b64 + "=".repeat((4 - b64.length % 4) % 4));
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+__name(base64urlDecode, "base64urlDecode");
+async function openMfaSecret(env, userId, sealed) {
+  const [iv, ct] = String(sealed || "").split(".");
+  const plain = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: base64urlDecode(iv), additionalData: new TextEncoder().encode(`mfa:${userId}`) },
+    await mfaSecretKey(env),
+    base64urlDecode(ct)
+  );
+  return new Uint8Array(plain);
+}
+__name(openMfaSecret, "openMfaSecret");
+async function totpAt(secretBytes, step) {
+  const counter = new Uint8Array(8);
+  let v = step;
+  for (let i = 7; i >= 0; i--) {
+    counter[i] = v & 255;
+    v = Math.floor(v / 256);
+  }
+  const key = await crypto.subtle.importKey("raw", secretBytes, { name: "HMAC", hash: "SHA-1" }, false, ["sign"]);
+  const mac = new Uint8Array(await crypto.subtle.sign("HMAC", key, counter));
+  const offset = mac[mac.length - 1] & 15;
+  const bin = (mac[offset] & 127) << 24 | mac[offset + 1] << 16 | mac[offset + 2] << 8 | mac[offset + 3];
+  return String(bin % 1e6).padStart(6, "0");
+}
+__name(totpAt, "totpAt");
+/** The step a TOTP code belongs to (now ±1), or null. */
+async function matchTotpStep(secretBytes, code, atMs = now()) {
+  const current = Math.floor(atMs / 3e4);
+  for (const step of [current, current - 1, current + 1]) {
+    if (timingSafeEqualHex(await totpAt(secretBytes, step), code)) return step;
+  }
+  return null;
+}
+__name(matchTotpStep, "matchTotpStep");
+function normalizeBackupCode(code) {
+  return String(code || "").toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+__name(normalizeBackupCode, "normalizeBackupCode");
+async function backupCodeHash(env, userId, code) {
+  return hmacHex(env.SESSION_SECRET, `mfa-backup:${userId}:${normalizeBackupCode(code)}`);
+}
+__name(backupCodeHash, "backupCodeHash");
+async function newBackupCodes(env, userId) {
+  const alphabet = "abcdefghjkmnpqrstuvwxyz23456789";
+  const codes = [];
+  for (let i = 0; i < MFA_BACKUP_CODES; i++) {
+    const bytes = crypto.getRandomValues(new Uint8Array(10));
+    let code = "";
+    for (const b of bytes) code += alphabet[b % alphabet.length];
+    codes.push(`${code.slice(0, 5)}-${code.slice(5)}`);
+  }
+  const hashes = await Promise.all(codes.map((c) => backupCodeHash(env, userId, c)));
+  return { codes, hashes };
+}
+__name(newBackupCodes, "newBackupCodes");
+async function mfaRow(env, userId) {
+  await ensureMfaTables(env);
+  return env.DB.prepare(`SELECT * FROM user_mfa WHERE user_id = ?`).bind(userId).first();
+}
+__name(mfaRow, "mfaRow");
+async function mfaEnabled(env, userId) {
+  const row = await mfaRow(env, userId);
+  return !!row?.enabled_at;
+}
+__name(mfaEnabled, "mfaEnabled");
+/**
+ * Checks a TOTP or backup code for a user with 2FA (or a pending setup
+ * when `pending`). Rate limited per user; a TOTP step and a backup code
+ * each work once.
+ */
+async function checkMfaCode(env, userId, code, { pending = false } = {}) {
+  const rl = await rateLimit(env, `mfa:verify:user:${userId}`, 10, 15 * 60 * 1e3);
+  if (!rl.ok) {
+    const err = new Error("Too many attempts. Try again in a few minutes.");
+    err.status = 429;
+    err.code = "mfa_rate_limited";
+    throw err;
+  }
+  const row = await mfaRow(env, userId);
+  if (!row || (!pending && !row.enabled_at)) return { ok: false };
+  const clean = String(code || "").replace(/\s+/g, "");
+  if (/^\d{6}$/.test(clean)) {
+    const step = await matchTotpStep(await openMfaSecret(env, userId, row.secret_enc), clean);
+    if (step === null || step <= Number(row.last_step || 0)) return { ok: false };
+    const claimed = await env.DB.prepare(
+      `UPDATE user_mfa SET last_step = ? WHERE user_id = ? AND last_step < ? RETURNING last_step`
+    ).bind(step, userId, step).first();
+    return { ok: !!claimed, method: "totp" };
+  }
+  if (pending) return { ok: false };
+  const hash = await backupCodeHash(env, userId, clean);
+  const hashes = JSON.parse(row.backup_hashes || "[]");
+  if (!hashes.includes(hash)) return { ok: false };
+  const rest = hashes.filter((h) => h !== hash);
+  const claimed = await env.DB.prepare(
+    `UPDATE user_mfa SET backup_hashes = ? WHERE user_id = ? AND backup_hashes = ? RETURNING user_id`
+  ).bind(JSON.stringify(rest), userId, row.backup_hashes).first();
+  return { ok: !!claimed, method: "backup", backupRemaining: rest.length };
+}
+__name(checkMfaCode, "checkMfaCode");
+function mfaError(code, message) {
+  const err = new Error(message);
+  err.status = 403;
+  err.code = code;
+  return err;
+}
+__name(mfaError, "mfaError");
+/**
+ * Destructive account actions ask for a second-factor code (header
+ * x-yanta-mfa) when 2FA is on. The app asks the user and retries.
+ */
+async function requireMfaStepUp(env, req, user) {
+  if (!await mfaEnabled(env, user.userId)) return;
+  const code = req.headers.get("x-yanta-mfa") || "";
+  if (!code) throw mfaError("mfa_required", "A code from your authenticator app is required.");
+  const result = await checkMfaCode(env, user.userId, code);
+  if (!result.ok) throw mfaError("mfa_invalid", "That code is not valid.");
+}
+__name(requireMfaStepUp, "requireMfaStepUp");
+async function createMfaPendingLogin(env, userId) {
+  await ensureMfaTables(env);
+  const token = randomToken(32);
+  await env.DB.prepare(
+    `INSERT INTO mfa_pending_logins (token_hash, user_id, created_at, expires_at) VALUES (?,?,?,?)`
+  ).bind(await hashToken(env, `mfa:${token}`), userId, now(), now() + MFA_PENDING_TTL_MS).run();
+  return token;
+}
+__name(createMfaPendingLogin, "createMfaPendingLogin");
+async function handleMfaStatus(env, req, headers) {
+  const user = await requireUser(env, req);
+  const row = await mfaRow(env, user.userId);
+  return json({
+    ok: true,
+    enabled: !!row?.enabled_at,
+    enabledAt: row?.enabled_at || null,
+    backupRemaining: row?.enabled_at ? JSON.parse(row.backup_hashes || "[]").length : 0
+  }, 200, headers);
+}
+__name(handleMfaStatus, "handleMfaStatus");
+async function handleMfaSetup(env, req, headers) {
+  const user = await requireUser(env, req);
+  if (await mfaEnabled(env, user.userId)) {
+    return json({ ok: false, message: "Two-factor sign-in is already on." }, 409, headers);
+  }
+  const secret = crypto.getRandomValues(new Uint8Array(20));
+  await env.DB.prepare(
+    `INSERT INTO user_mfa (user_id, secret_enc, enabled_at, created_at, last_step, backup_hashes)
+     VALUES (?, ?, NULL, ?, 0, '[]')
+     ON CONFLICT(user_id) DO UPDATE SET secret_enc = excluded.secret_enc, created_at = excluded.created_at, last_step = 0`
+  ).bind(user.userId, await sealMfaSecret(env, user.userId, secret), now()).run();
+  const b32 = base32Encode(secret);
+  const label = encodeURIComponent(`YANTA:${user.email}`);
+  return json({
+    ok: true,
+    secret: b32,
+    uri: `otpauth://totp/${label}?secret=${b32}&issuer=YANTA&algorithm=SHA1&digits=6&period=30`
+  }, 200, headers);
+}
+__name(handleMfaSetup, "handleMfaSetup");
+async function handleMfaEnable(env, req, headers) {
+  const user = await requireUser(env, req);
+  const body = await bodyJson(req);
+  const row = await mfaRow(env, user.userId);
+  if (!row) return json({ ok: false, message: "Start the setup first." }, 400, headers);
+  if (row.enabled_at) return json({ ok: false, message: "Two-factor sign-in is already on." }, 409, headers);
+  const result = await checkMfaCode(env, user.userId, body.code, { pending: true });
+  if (!result.ok) return json({ ok: false, code: "mfa_invalid", message: "That code is not valid." }, 400, headers);
+  const { codes, hashes } = await newBackupCodes(env, user.userId);
+  await env.DB.prepare(
+    `UPDATE user_mfa SET enabled_at = ?, backup_hashes = ? WHERE user_id = ?`
+  ).bind(now(), JSON.stringify(hashes), user.userId).run();
+  await audit(env, req, "mfa_enabled", user.userId, {});
+  return json({ ok: true, backupCodes: codes }, 200, headers);
+}
+__name(handleMfaEnable, "handleMfaEnable");
+async function handleMfaDisable(env, req, headers) {
+  const user = await requireUser(env, req);
+  const body = await bodyJson(req);
+  const result = await checkMfaCode(env, user.userId, body.code);
+  if (!result.ok) return json({ ok: false, code: "mfa_invalid", message: "That code is not valid." }, 400, headers);
+  await env.DB.prepare(`DELETE FROM user_mfa WHERE user_id = ?`).bind(user.userId).run();
+  await audit(env, req, "mfa_disabled", user.userId, { method: result.method });
+  return json({ ok: true }, 200, headers);
+}
+__name(handleMfaDisable, "handleMfaDisable");
+async function handleMfaBackupCodes(env, req, headers) {
+  const user = await requireUser(env, req);
+  const body = await bodyJson(req);
+  const result = await checkMfaCode(env, user.userId, body.code);
+  if (!result.ok) return json({ ok: false, code: "mfa_invalid", message: "That code is not valid." }, 400, headers);
+  const { codes, hashes } = await newBackupCodes(env, user.userId);
+  await env.DB.prepare(`UPDATE user_mfa SET backup_hashes = ? WHERE user_id = ?`).bind(JSON.stringify(hashes), user.userId).run();
+  await audit(env, req, "mfa_backup_codes_renewed", user.userId, {});
+  return json({ ok: true, backupCodes: codes }, 200, headers);
+}
+__name(handleMfaBackupCodes, "handleMfaBackupCodes");
+/** Second step of a sign-in with 2FA: the email code was right, now the authenticator. */
+async function handleVerifyMfaLogin(env, req, headers) {
+  const body = await bodyJson(req);
+  const token = String(body.mfaToken || "");
+  if (!token) return json({ ok: false, message: "Sign-in expired. Start again." }, 400, headers);
+  await ensureMfaTables(env);
+  const tokenHash = await hashToken(env, `mfa:${token}`);
+  const pending = await env.DB.prepare(
+    `UPDATE mfa_pending_logins SET attempts = attempts + 1
+     WHERE token_hash = ? AND attempts < 5 AND expires_at > ?
+     RETURNING user_id`
+  ).bind(tokenHash, now()).first();
+  if (!pending) return json({ ok: false, code: "mfa_expired", message: "Sign-in expired. Start again." }, 400, headers);
+  const result = await checkMfaCode(env, pending.user_id, body.code);
+  if (!result.ok) return json({ ok: false, code: "mfa_invalid", message: "That code is not valid." }, 400, headers);
+  const used = await env.DB.prepare(`DELETE FROM mfa_pending_logins WHERE token_hash = ? RETURNING user_id`).bind(tokenHash).first();
+  if (!used) return json({ ok: false, code: "mfa_expired", message: "Sign-in expired. Start again." }, 400, headers);
+  const user = await env.DB.prepare(`SELECT * FROM users WHERE id = ?`).bind(pending.user_id).first();
+  if (!user || user.disabled_at) return json({ ok: false, message: "Account not available." }, 403, headers);
+  const responseHeaders = await createSession(env, req, user.id, headers);
+  await audit(env, req, "auth_login_mfa_success", user.id, { method: result.method });
+  return json({
+    ok: true,
+    user: { id: user.id, email: user.email, plan: user.plan },
+    backupRemaining: result.backupRemaining
+  }, 200, responseHeaders);
+}
+__name(handleVerifyMfaLogin, "handleVerifyMfaLogin");
 async function handleMe(env, req, headers) {
   const user = await getSession(env, req);
   if (!user) {
@@ -3362,6 +3698,10 @@ async function handleRevokeDevice(env, req, url, headers) {
   }
   await requireVault(env, user, vaultId);
   await requireActiveVaultDevice(env, user, vaultId, currentDeviceId, req);
+  // Removing another device wipes it: with 2FA on, that needs a code.
+  if (!(targetDeviceId === currentDeviceId && url.searchParams.get("leave") === "1")) {
+    await requireMfaStepUp(env, req, user);
+  }
   /*
     A device removing itself on purpose ("leave"): a guest session ending,
     or "remove YANTA from this device". It takes itself off the list
@@ -4190,7 +4530,9 @@ async function purgeUserData(env, userId) {
     // Legal records: keep the row, drop the link to the person.
     `UPDATE cancellation_requests SET user_id = NULL WHERE user_id = ?`,
     `UPDATE withdrawal_requests SET user_id = NULL WHERE user_id = ?`,
-    `DELETE FROM device_wipe_secrets WHERE user_id = ?`
+    `DELETE FROM device_wipe_secrets WHERE user_id = ?`,
+    `DELETE FROM user_mfa WHERE user_id = ?`,
+    `DELETE FROM mfa_pending_logins WHERE user_id = ?`
   ];
 
   for (const sql of statements) {
@@ -4216,6 +4558,8 @@ async function handleAccountDelete(env, req, headers) {
       error: 'Type DELETE to confirm.'
     }, 400, headers);
   }
+
+  await requireMfaStepUp(env, req, user);
 
   const email = user.email;
 
@@ -10811,6 +11155,24 @@ async function route(req, env) {
     }
     if (url.pathname === "/api/auth/magic" && req.method === "GET") {
       return handleMagic(env, req, url, headers);
+    }
+    if (url.pathname === "/api/auth/verify-mfa" && req.method === "POST") {
+      return handleVerifyMfaLogin(env, req, headers);
+    }
+    if (url.pathname === "/api/mfa" && req.method === "GET") {
+      return handleMfaStatus(env, req, headers);
+    }
+    if (url.pathname === "/api/mfa/setup" && req.method === "POST") {
+      return handleMfaSetup(env, req, headers);
+    }
+    if (url.pathname === "/api/mfa/enable" && req.method === "POST") {
+      return handleMfaEnable(env, req, headers);
+    }
+    if (url.pathname === "/api/mfa/disable" && req.method === "POST") {
+      return handleMfaDisable(env, req, headers);
+    }
+    if (url.pathname === "/api/mfa/backup-codes" && req.method === "POST") {
+      return handleMfaBackupCodes(env, req, headers);
     }
     if (url.pathname === "/api/auth/logout" && req.method === "POST") {
       return handleLogout(env, req, headers);

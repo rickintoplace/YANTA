@@ -25,7 +25,7 @@ const PROCESSOR_PURPOSES = {
   resend: 'Login and notification emails',
   openrouter: 'AI processing for Included AI',
   brave: 'Web search',
-  google: 'Video sources; optional Drive sync',
+  google: 'Video sources; optional Drive sync; push delivery in the Android app (Firebase Cloud Messaging)',
   weather: 'Weather',
   geo: 'Manual location lookup',
   citations: 'Citation metadata',
@@ -398,6 +398,7 @@ function privacyDocument() {
           ['Feed URLs and lookup requests (Sources)', 'Fetching what you subscribed to', 'Art. 6(1)(b)'],
           ['AI prompts and the context you select', 'Answering your request', 'Art. 6(1)(b)'],
           ['Cancellation and withdrawal declarations, content notices', 'Legal duties under §§ 312k, 356a BGB and the DSA', 'Art. 6(1)(c)'],
+          ['An AI answer you report: its text, your reason and comment', 'Reviewing reports of harmful AI output', 'Art. 6(1)(f) — safe AI features'],
         ]
       )}
       <p>
@@ -420,6 +421,20 @@ function privacyDocument() {
         exists in two versions so we can tell which one explains YANTA better,
         but which one you see is decided fresh each time and never written down
         — so there is no marker on your device and nothing to consent to.
+      </p>
+
+      <h3>The Android app</h3>
+      <p>
+        The app shows the same web app and keeps its data the same way, inside
+        the app. It asks only for what a feature you use needs:
+        <strong>notifications</strong> and <strong>exact alarms</strong> for
+        calendar reminders on time, the <strong>camera</strong> when you scan a
+        pairing code or take a photo for a note. If you unlock with your
+        <strong>fingerprint or face</strong>, Android checks it on the phone;
+        YANTA only learns whether the check passed, and the key it unlocks
+        never leaves the phone's secure hardware. No biometric data reaches
+        the app or us. To deliver push messages, the app registers with
+        Google's Firebase Cloud Messaging, which gives it a device token.
       </p>
 
       <h2>4. Encryption and what we can actually see</h2>
@@ -466,6 +481,11 @@ function privacyDocument() {
         your content to train models. Please do not put secrets or other
         people's sensitive data into prompts.
       </p>
+      <p>
+        If you report an AI answer as offensive, harmful or wrong, its text,
+        the reason you chose and your comment are sent to us so we can review
+        it — nothing else from your chat or your notes.
+      </p>
 
       <h2>8. Cookies and how we count</h2>
       <p>
@@ -500,6 +520,7 @@ function privacyDocument() {
           ['Invoices, payment and accounting records', '10 years (§ 147 AO, § 257 HGB)'],
           ['Cancellation and withdrawal declarations', '3 years (limitation period)'],
           ['Content notices under the DSA', 'Up to 3 years'],
+          ['Reports of AI answers', 'Up to 12 months'],
           ['Public shares', 'Until revoked or the account is deleted'],
         ]
       )}

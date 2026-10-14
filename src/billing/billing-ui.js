@@ -82,6 +82,8 @@ export function yantaPlusPriceLabel({
 export async function openYantaPlusUpgrade({
   interval = 'yearly',
 } = {}) {
+  if (inStoreApp()) return false;
+
   const priceId = preferredYantaPlusPriceId({
     interval,
   });
@@ -106,6 +108,7 @@ export async function openYantaPlusUpgrade({
 }
 
 export async function openYantaBillingPortal() {
+  if (inStoreApp()) return;
   await openBillingPortal();
 }
 
@@ -212,6 +215,17 @@ function ensureCss() {
   document.head.append(style);
 }
 
+/*
+  Inside the Android app (Google Play) there is no purchase, upgrade or
+  billing call to action: Play's payments policy allows digital
+  subscriptions only through Play Billing (or an enrolled alternative).
+  A plan bought on the web still works in the app; it is just not sold or
+  managed there. Cancelling stays reachable (legal footer links).
+*/
+export function inStoreApp() {
+  return typeof window !== 'undefined' && !!window.YantaAndroid;
+}
+
 export function showCloudQuotaDialog(detail = {}) {
   ensureCss();
 
@@ -259,9 +273,9 @@ export function showCloudQuotaDialog(detail = {}) {
             First try optimizing cloud storage. YANTA will upload latest encrypted states
             and prune old sync journal objects that are already covered.
           </p>
-          <p>
+          ${inStoreApp() ? '' : `<p>
             If your vault simply needs more room, upgrade to YANTA Plus.
-          </p>
+          </p>`}
           ${
             maxBytes
               ? `<p>Current limit: ${escapeHtml(fmtBytes(maxBytes))}</p>`
@@ -282,19 +296,19 @@ export function showCloudQuotaDialog(detail = {}) {
             Optimize storage
           </button>
 
-          <button class="btn" data-manage>
+          ${inStoreApp() ? '' : `<button class="btn" data-manage>
             ${lucide('credit-card', 14)}
             Manage billing
-          </button>
+          </button>`}
 
           <span class="grow"></span>
 
           <button class="btn" data-close>Later</button>
 
-          <button class="btn primary" data-upgrade>
+          ${inStoreApp() ? '' : `<button class="btn primary" data-upgrade>
             ${lucide('sparkles', 14)}
             Upgrade to YANTA Plus
-          </button>
+          </button>`}
         </div>
       </div>
     </div>
@@ -455,9 +469,11 @@ export function describeBillingState({ plan, billing } = {}, { afterReconcile = 
     return {
       isPlus: false,
       stale: false,
-      showUpgrade: true,
-      showManage: !!sub,
-      html: `
+      showUpgrade: !inStoreApp(),
+      showManage: !!sub && !inStoreApp(),
+      html: inStoreApp()
+        ? `<strong>Free plan.</strong>`
+        : `
         <strong>Free plan.</strong>
         Upgrade when you need more encrypted cloud storage, more devices, or higher Included AI limits.
       `,
@@ -482,7 +498,9 @@ export function describeBillingState({ plan, billing } = {}, { afterReconcile = 
         ${endsLabel ? `Free until ${endsLabel}, then your subscription begins automatically.` : `Your subscription begins automatically when the trial ends.`}
       `;
   } else if (status === 'past_due') {
-    html = `
+    html = inStoreApp()
+      ? `<strong style="color:var(--yellow)">Payment needs attention.</strong>`
+      : `
       <strong style="color:var(--yellow)">Payment needs attention.</strong>
       Update your payment method to keep YANTA Plus.
     `;
@@ -509,7 +527,7 @@ export function describeBillingState({ plan, billing } = {}, { afterReconcile = 
     isPlus: true,
     stale,
     showUpgrade: false,
-    showManage: true,
+    showManage: !inStoreApp(),
     html,
   };
 }

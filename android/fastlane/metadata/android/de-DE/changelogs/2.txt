@@ -1,0 +1,1 @@
+Erste Version bei Google Play: Notizen, Kalender, Zeichnungen und Tagebuch in einer privaten App – mit App-Sperre (Fingerabdruck oder Gesicht), privaten Ordnern und verschlüsselter Synchronisierung.

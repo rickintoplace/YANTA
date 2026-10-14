@@ -2686,6 +2686,24 @@ function renderAssistantMessageNode(msg) {
 
   wrap.append(content);
 
+  // Flag an offensive or harmful answer (Play policy for generative AI).
+  if (String(msg.content || '').trim()) {
+    const actions = document.createElement('div');
+    actions.className = 'yanta-ai-msg-actions';
+    const report = document.createElement('button');
+    report.type = 'button';
+    report.className = 'yanta-ai-msg-report';
+    report.title = t('aiReport.button');
+    report.setAttribute('aria-label', t('aiReport.button'));
+    report.innerHTML = lucide('flag', 12);
+    report.addEventListener('click', (e) => {
+      e.stopPropagation();
+      openAiReportDialog(msg);
+    });
+    actions.append(report);
+    wrap.append(actions);
+  }
+
   // Right under the text it is about, before note cards and chips.
   if (msg.citeCheck || (citeMarks?.order.size && msg.sources?.length)) {
     wrap.append(renderCitationCheckNode(msg.citeCheck, { ...citeMarks, sources: msg.sources }));
@@ -2752,6 +2770,76 @@ function renderAssistantMessageNode(msg) {
   }
 
   return wrap;
+}
+
+/*
+  Reporting an answer sends its text (the user's choice — chats stay on
+  the device otherwise), a reason and an optional comment to YANTA.
+*/
+async function openAiReportDialog(msg) {
+  const { yantaDialog } = await import('../dialogs.js');
+  const reasons = ['offensive', 'harmful', 'wrong', 'other'];
+
+  await yantaDialog({
+    title: t('aiReport.title'),
+    icon: 'flag',
+    build: ({ body, actions, done, button }) => {
+      const list = document.createElement('div');
+      list.className = 'yanta-ai-report-reasons';
+      for (const reason of reasons) {
+        const label = document.createElement('label');
+        label.innerHTML = `<input type="radio" name="yanta-ai-report" value="${reason}"> <span>${escapeHtml(t(`aiReport.reason.${reason}`))}</span>`;
+        list.append(label);
+      }
+
+      const comment = document.createElement('textarea');
+      comment.className = 'yanta-dialog-input';
+      comment.rows = 3;
+      comment.placeholder = t('aiReport.comment');
+      comment.style.minHeight = '70px';
+      comment.style.fontFamily = 'inherit';
+      comment.style.fontSize = '13px';
+
+      const note = document.createElement('p');
+      note.className = 'yanta-dialog-message';
+      note.textContent = t('aiReport.privacy');
+
+      body.append(list, comment, note);
+
+      const cancel = button({ label: t('common.cancel'), kind: 'ghost' });
+      cancel.addEventListener('click', () => done(null));
+      const send = button({ label: t('aiReport.send'), icon: 'flag', kind: 'primary' });
+      send.disabled = true;
+      list.addEventListener('change', () => { send.disabled = false; });
+
+      send.addEventListener('click', async () => {
+        const reason = list.querySelector('input:checked')?.value;
+        if (!reason) return;
+        send.disabled = true;
+        try {
+          const { apiFetch } = await import('../cloud/cloud-api.js');
+          await apiFetch('/api/ai/report', {
+            method: 'POST',
+            body: {
+              reason,
+              comment: comment.value.trim(),
+              model: msg.model || getAiSettings().model || '',
+              excerpt: String(msg.content || '').slice(0, 4000),
+            },
+          });
+          toast(t('aiReport.thanks'), 'success');
+          done(true);
+        } catch {
+          toast(t('aiReport.failed'), 'error');
+          send.disabled = false;
+        }
+      });
+
+      const grow = document.createElement('span');
+      grow.className = 'grow';
+      actions.append(cancel, grow, send);
+    },
+  });
 }
 
 // Sliders fire on every pixel; persist what the user set once they pause.
@@ -5702,6 +5790,47 @@ function injectCss() {
 /* AI code copy UX */
 .yanta-ai-codeblock {
   position: relative;
+}
+
+.yanta-ai-msg-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 2px;
+}
+
+.yanta-ai-msg-report {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-faint);
+  opacity: .55;
+  cursor: pointer;
+}
+
+.yanta-ai-msg-report:hover,
+.yanta-ai-msg-report:focus-visible {
+  opacity: 1;
+  color: var(--text);
+  background: var(--bg-elev-3);
+}
+
+.yanta-ai-report-reasons {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 10px;
+  font-size: 13px;
+}
+
+.yanta-ai-report-reasons label {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  cursor: pointer;
 }
 
 .yanta-ai-copy-btn {

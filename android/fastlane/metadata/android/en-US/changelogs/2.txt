@@ -1,0 +1,1 @@
+First release on Google Play: notes, calendar, drawings and journal in one private app — with app lock (fingerprint or face), private folders and encrypted sync.

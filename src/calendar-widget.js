@@ -20,7 +20,7 @@ import {
   setDashboardWidgetEmpty,
 } from './dashboard-widgets.js';
 import { categoryIsShared } from './spaces/calendar-registry.js';
-import { t } from './i18n/index.js';
+import { getLocale, t } from './i18n/index.js';
 
 import {
   dateLikeToDate,
@@ -111,7 +111,7 @@ function timeLabel(ev) {
   const d = eventStartDate(ev);
   if (!d) return '';
 
-  return d.toLocaleTimeString([], {
+  return d.toLocaleTimeString(getLocale(), {
     hour: '2-digit',
     minute: '2-digit',
   });
@@ -128,14 +128,14 @@ function continuingLabel(ev, refDay) {
 
   if (!ev.allDay && ev._end && sameDay(lastDay, refDay)) {
     return t('calendarWidget.until', {
-      when: ev._end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      when: ev._end.toLocaleTimeString(getLocale(), { hour: '2-digit', minute: '2-digit' }),
     });
   }
 
   if (sameDay(lastDay, refDay)) return t('calendarWidget.lastDay');
 
   return t('calendarWidget.until', {
-    when: lastDay.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }),
+    when: lastDay.toLocaleDateString(getLocale(), { weekday: 'short', day: 'numeric', month: 'short' }),
   });
 }
 
@@ -362,11 +362,11 @@ function periodLabel(view) {
   const ref = navAnchor();
 
   if (view === 'month') {
-    return ref.toLocaleDateString([], { month: 'long', year: 'numeric' });
+    return ref.toLocaleDateString(getLocale(), { month: 'long', year: 'numeric' });
   }
 
   if (view === 'day') {
-    return ref.toLocaleDateString([], {
+    return ref.toLocaleDateString(getLocale(), {
       weekday: 'long',
       day: 'numeric',
       month: 'long',
@@ -829,7 +829,7 @@ function eventRow(ev, { showDate = true, refDay = startOfDay(new Date()) } = {})
     // A run that is already on says so instead of its past start day.
     when.append(el('strong', {}, ev._continuing
       ? t('calendarWidget.ongoing')
-      : ev._start.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })
+      : ev._start.toLocaleDateString(getLocale(), { weekday: 'short', day: 'numeric', month: 'short' })
     ));
   }
 
@@ -954,7 +954,7 @@ async function renderWeekView(body, ref = navAnchor()) {
     });
 
     const head = el('div', { class: 'yanta-cal-dash-weekday-head' });
-    head.innerHTML = `${escapeHtml(day.toLocaleDateString([], { weekday: 'short' }))}<strong>${day.getDate()}</strong>`;
+    head.innerHTML = `${escapeHtml(day.toLocaleDateString(getLocale(), { weekday: 'short' }))}<strong>${day.getDate()}</strong>`;
     cell.append(head);
 
     for (const ev of dayEvents.slice(0, 3)) {
@@ -1015,7 +1015,7 @@ async function renderMonthView(body, ref = navAnchor()) {
   const monday = startOfWeek(new Date());
   for (let i = 0; i < 7; i++) {
     heads.append(el('div', { class: 'yanta-cal-dash-month-head' },
-      addDays(monday, i).toLocaleDateString([], { weekday: 'narrow' })
+      addDays(monday, i).toLocaleDateString(getLocale(), { weekday: 'narrow' })
     ));
   }
   grid.append(heads);

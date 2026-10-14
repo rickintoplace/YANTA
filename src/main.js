@@ -201,6 +201,10 @@ import {
 // load, before the hash router rewrites the hash; resumed once the app runs.
 const BOOT_CLOUD_MFA_HASH = /^#cloud-login-mfa=/.test(location.hash) ? location.hash : '';
 
+// Inside the Android app: no purchase or pricing calls to action (Google
+// Play's payments policy) — styles.css hides them, billing-ui.js says so.
+if (window.YantaAndroid) document.documentElement.dataset.storeApp = '1';
+
 // Registers the calendar dashboard widget (side effect).
 import './calendar-widget.js';
 import './today-widget.js';

@@ -5938,3 +5938,12 @@ html.yanta-back-gesture-active body {
 @media (prefers-reduced-motion: reduce) {
   .mobile-tab-icon { transition: none; }
 }
+
+/* Android app (Google Play): no purchase or pricing calls to action — see
+   inStoreApp() in src/billing/billing-ui.js. Plans bought on the web work. */
+html[data-store-app] [data-yanta-plus-upgrade],
+html[data-store-app] [data-yanta-plus-manage],
+html[data-store-app] [data-branding-upgrade],
+html[data-store-app] a[href="/pricing"] {
+  display: none !important;
+}

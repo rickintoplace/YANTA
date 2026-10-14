@@ -878,6 +878,8 @@ export default {
     stepUp: { title: '認証アプリで確認', hint: 'この操作には認証アプリのコード(またはバックアップコード)が必要です。', invalid: 'コードが無効でした。もう一度お試しください。' },
     settings: { title: '2 段階認証(YANTA Cloud)', offHint: '現在はメールのコードだけでサインインできます。メールボックスを乗っ取った人はアカウントも操作できます。ノートは読めません(エンドツーエンド暗号化)が、デバイスの削除やアカウントの削除はできてしまいます。2 段階認証を有効にすると、認証アプリ(Aegis、2FAS、Google Authenticator、パスワードマネージャーなど)のコードも必要になります。デバイスの削除とアカウントの削除でも求められます。', notSignedIn: '有効にするには YANTA Cloud にサインインしてください。', turnOn: '2 段階認証を設定', scan: '認証アプリでスキャンするか、キーを手入力してください:', confirmCode: 'アプリのコード', confirm: '有効にする', onHint: { one: '2 段階認証は有効です。バックアップコードは残り {count} 個です。', other: '2 段階認証は有効です。バックアップコードは残り {count} 個です。' }, backupTitle: 'バックアップコード', backupHint: 'スマートフォンが手元にないときに、各コードを 1 回だけ使えます。復旧キットと同じように安全に保管してください。表示されるのは今だけです。', copy: 'コピー', copied: 'バックアップコードをコピーしました', download: 'ファイルに保存', done: '完了', turnOff: '無効にする', renew: '新しいバックアップコード', codePrompt: '認証アプリのコードまたはバックアップコード', turnedOn: '2 段階認証を有効にしました', turnedOff: '2 段階認証を無効にしました', invalid: 'このコードは無効です。' },
   },
+  aiReport: { button: 'この回答を報告', title: 'この回答を報告', reason: { offensive: '攻撃的・差別的', harmful: '有害・危険', wrong: '誤り・誤解を招く', other: 'その他' }, comment: 'どこが問題ですか?(任意)', privacy: 'この回答の本文、理由、コメントが確認のため YANTA に送信されます。チャットやノートのその他の内容は送信されません。', send: '報告を送信', thanks: 'ありがとうございます。回答を報告しました。', failed: '報告を送信できませんでした。接続を確認して、もう一度お試しください。' },
+  outline: { label: { one: 'アウトライン · 見出し {count} 個', other: 'アウトライン · 見出し {count} 個' } },
   privacy: {
     hideFromAi: 'YANTA AI から隠す',
     showToAi: 'YANTA AI に再び表示',

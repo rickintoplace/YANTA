@@ -5,11 +5,15 @@
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
+    <!-- Scanning pairing QR codes and taking photos for notes. -->
     <uses-permission android:name="android.permission.CAMERA" />
 
-    <!-- Chat voice messages (getUserMedia in the WebView). -->
-    <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!--
+      Chat voice messages needed RECORD_AUDIO + MODIFY_AUDIO_SETTINGS. Chat is
+      paused (no homeserver), so the app does not ask for the microphone —
+      one sensitive permission less to declare on Google Play. Add both back
+      when chat returns.
+    -->
     <!--
       Gallery access needs NO storage permission:
       onShowFileChooser uses the system picker (scoped storage, API 29+).

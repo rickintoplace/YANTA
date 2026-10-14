@@ -612,3 +612,16 @@ CREATE TABLE IF NOT EXISTS mfa_pending_logins (
   expires_at INTEGER NOT NULL,
   attempts INTEGER NOT NULL DEFAULT 0
 );
+
+-- "Report this AI response" (Play policy for generative AI): what the user
+-- chose to send, for review.
+CREATE TABLE IF NOT EXISTS ai_reports (
+  id TEXT PRIMARY KEY,
+  user_id TEXT,
+  model TEXT,
+  reason TEXT NOT NULL,
+  comment TEXT,
+  excerpt TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'received',
+  created_at INTEGER NOT NULL
+);

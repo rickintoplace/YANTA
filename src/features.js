@@ -11,6 +11,7 @@ import { openNote, createNoteWithTitle } from './notes.js';
 import { renderBlocksInline, classifyLine, headingSlug } from './markdown.js';
 import { noteMarkdown, drawingWikilinksForNote } from './yjs.js';
 import { inlineConfirm } from './inline-ui.js';
+import { t } from './i18n/index.js';
 
 const WIKILINK_RE = /\[\[([^\]|\n]+)(?:\|[^\]\n]+)?\]\]/g;
 
@@ -145,7 +146,7 @@ export function renderOutline(md) {
   const chev = el('span', { class: 'pv-outline-chev' });
   chev.innerHTML = lucide('chevron-down', 12);
 
-  head.append(chev, el('span', {}, `Outline · ${headings.length} headings`));
+  head.append(chev, el('span', {}, t('outline.label', { count: headings.length })));
   wrap.append(head);
 
   const list = el('div', { class: 'pv-outline-list' });

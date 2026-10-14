@@ -1,0 +1,29 @@
+YANTA keeps your notes, your calendar and your ideas in one app — so the thing you wrote down sits right next to the day it belongs to.
+
+WORKS WITHOUT INTERNET
+Everything runs on your phone. Trains, planes, dead zones: you keep writing. A connection is for syncing, not for working.
+
+ONE APP INSTEAD OF SIX
+• Markdown notes with checklists, tables and links between notes
+• Calendar with reminders, recurring events and .ics import
+• A daily journal: capture a thought in one tap, it lands in today's note
+• Drawings and sketches right inside your notes
+• Reading list for RSS feeds, podcasts and YouTube channels
+• Search across everything
+• Home-screen widgets for your calendar and quick capture
+
+PRIVATE BY DESIGN
+• Your notes are encrypted on your device before they are synced — we cannot read them
+• App lock with password, fingerprint or face; what YANTA stores on the phone is encrypted too
+• Private folders with a password of their own
+• Guest mode for a computer that is not yours, and remote wipe for a lost device
+• Optional two-factor sign-in for your YANTA Cloud account
+• Open source (AGPL-3.0): anyone can check these claims
+
+YOUR DATA, YOUR CHOICE
+Use YANTA without any account and keep everything on the phone, sync it through your own Google Drive or a folder, or use YANTA Cloud for zero-setup sync across your devices.
+
+AI ASSISTANT, ON YOUR TERMS
+Ask questions about your notes, plan your week or draft a text. You decide what the assistant may see: notes, folders and calendars can be hidden from it, and private folders never reach it. Bring your own API key if you prefer.
+
+YANTA is free to use. No ads, no tracking.

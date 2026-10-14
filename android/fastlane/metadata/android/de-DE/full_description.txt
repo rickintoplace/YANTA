@@ -1,0 +1,29 @@
+YANTA hält deine Notizen, deinen Kalender und deine Ideen in einer App zusammen – so steht das, was du aufgeschrieben hast, direkt neben dem Tag, zu dem es gehört.
+
+FUNKTIONIERT OHNE INTERNET
+Alles läuft auf deinem Handy. Zug, Flugzeug, Funkloch: Du schreibst einfach weiter. Eine Verbindung braucht es zum Synchronisieren, nicht zum Arbeiten.
+
+EINE APP STATT SECHS
+• Markdown-Notizen mit Checklisten, Tabellen und Links zwischen Notizen
+• Kalender mit Erinnerungen, Serienterminen und .ics-Import
+• Ein Tagebuch für jeden Tag: Gedanken mit einem Tipp festhalten, sie landen in der heutigen Notiz
+• Zeichnungen und Skizzen direkt in deinen Notizen
+• Leseliste für RSS-Feeds, Podcasts und YouTube-Kanäle
+• Suche über alles
+• Widgets für Kalender und schnelles Festhalten auf dem Startbildschirm
+
+PRIVAT VON GRUND AUF
+• Deine Notizen werden auf deinem Gerät verschlüsselt, bevor sie synchronisiert werden – wir können sie nicht lesen
+• App-Sperre mit Passwort, Fingerabdruck oder Gesicht; was YANTA auf dem Handy speichert, ist ebenfalls verschlüsselt
+• Private Ordner mit eigenem Passwort
+• Gastmodus für fremde Rechner und Fernlöschen für ein verlorenes Gerät
+• Optionale Zwei-Faktor-Anmeldung für dein YANTA-Cloud-Konto
+• Open Source (AGPL-3.0): Jede und jeder kann diese Versprechen nachprüfen
+
+DEINE DATEN, DEINE WAHL
+Nutze YANTA ganz ohne Konto und behalte alles auf dem Handy, synchronisiere über dein eigenes Google Drive oder einen Ordner, oder nutze YANTA Cloud für Synchronisierung ohne Einrichtung über alle deine Geräte.
+
+KI-ASSISTENT NACH DEINEN REGELN
+Stell Fragen zu deinen Notizen, plane deine Woche oder entwirf einen Text. Du entscheidest, was der Assistent sehen darf: Notizen, Ordner und Kalender lassen sich vor ihm verbergen, private Ordner erreichen ihn nie. Auf Wunsch mit deinem eigenen API-Schlüssel.
+
+YANTA ist kostenlos nutzbar. Keine Werbung, kein Tracking.

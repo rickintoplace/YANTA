@@ -3459,6 +3459,63 @@ async function handleVerifyMfaLogin(env, req, headers) {
   }, 200, responseHeaders);
 }
 __name(handleVerifyMfaLogin, "handleVerifyMfaLogin");
+/*
+  "Report this AI response" (Google Play's policy for generative AI apps:
+  users must be able to flag offensive output from inside the app). The
+  user chooses to send the response text — chats are otherwise private —
+  plus a reason and an optional comment. Stored for review and mailed to
+  support; no account needed (own-key users report too).
+*/
+var aiReportsTableReady = false;
+var AI_REPORT_REASONS = new Set(["offensive", "harmful", "wrong", "other"]);
+async function handleAiReport(env, req, headers) {
+  const body = await bodyJson(req);
+  const reason = String(body.reason || "");
+  if (!AI_REPORT_REASONS.has(reason)) return json({ ok: false, message: "Choose a reason." }, 400, headers);
+  const excerpt = String(body.excerpt || "").slice(0, 4e3);
+  if (!excerpt.trim()) return json({ ok: false, message: "Nothing to report." }, 400, headers);
+  const comment = String(body.comment || "").slice(0, 2e3);
+  const model = String(body.model || "").slice(0, 120);
+  const rl = await rateLimit(env, `ai-report:ip:${await ipHash(env, req)}`, 20, 60 * 60 * 1e3);
+  if (!rl.ok) return json({ ok: false, message: "Too many reports. Try again later." }, 429, headers);
+  if (!aiReportsTableReady) {
+    await env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS ai_reports (
+         id TEXT PRIMARY KEY,
+         user_id TEXT,
+         model TEXT,
+         reason TEXT NOT NULL,
+         comment TEXT,
+         excerpt TEXT NOT NULL,
+         status TEXT NOT NULL DEFAULT 'received',
+         created_at INTEGER NOT NULL
+       )`
+    ).run();
+    aiReportsTableReady = true;
+  }
+  const user = await getSession(env, req).catch(() => null);
+  const reference = id("air");
+  await env.DB.prepare(
+    `INSERT INTO ai_reports (id, user_id, model, reason, comment, excerpt, created_at) VALUES (?,?,?,?,?,?,?)`
+  ).bind(reference, user?.userId || null, model, reason, comment || null, excerpt, now()).run();
+  await audit(env, req, "ai_report", user?.userId || null, { reference, reason, model });
+  try {
+    await sendEmail(env, {
+      to: supportEmail(env),
+      subject: `[YANTA] AI response reported (${reference}) — ${reason}`,
+      html: `
+        <h3>AI report ${reference}</h3>
+        <p><strong>Reason:</strong> ${escapeHtml(reason)} · <strong>Model:</strong> ${escapeHtml(model || "—")}</p>
+        <p><strong>Comment:</strong> ${escapeHtml(comment || "—")}</p>
+        <pre style="white-space:pre-wrap">${escapeHtml(excerpt)}</pre>
+      `
+    });
+  } catch (err) {
+    console.error("[ai-report] notice failed", safeErrorForLog(err));
+  }
+  return json({ ok: true, reference }, 200, headers);
+}
+__name(handleAiReport, "handleAiReport");
 async function handleMe(env, req, headers) {
   const user = await getSession(env, req);
   if (!user) {
@@ -4532,7 +4589,8 @@ async function purgeUserData(env, userId) {
     `UPDATE withdrawal_requests SET user_id = NULL WHERE user_id = ?`,
     `DELETE FROM device_wipe_secrets WHERE user_id = ?`,
     `DELETE FROM user_mfa WHERE user_id = ?`,
-    `DELETE FROM mfa_pending_logins WHERE user_id = ?`
+    `DELETE FROM mfa_pending_logins WHERE user_id = ?`,
+    `UPDATE ai_reports SET user_id = NULL WHERE user_id = ?`
   ];
 
   for (const sql of statements) {
@@ -11155,6 +11213,9 @@ async function route(req, env) {
     }
     if (url.pathname === "/api/auth/magic" && req.method === "GET") {
       return handleMagic(env, req, url, headers);
+    }
+    if (url.pathname === "/api/ai/report" && req.method === "POST") {
+      return handleAiReport(env, req, headers);
     }
     if (url.pathname === "/api/auth/verify-mfa" && req.method === "POST") {
       return handleVerifyMfaLogin(env, req, headers);

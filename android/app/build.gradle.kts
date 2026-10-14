@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
@@ -7,12 +9,13 @@ plugins {
 
 android {
     namespace = "page.yanta.app"
-    compileSdk = 35
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "page.yanta.app"
         minSdk = 29
-        targetSdk = 35
+        // Google Play: new apps and updates must target API 36 from 2026-08-31.
+        targetSdk = 36
         versionCode = 2
         versionName = "1.1.0"
         buildConfigField("String", "YANTA_URL", "\"https://yanta.page\"")
@@ -22,6 +25,43 @@ android {
             "YANTA_PUSH_GATEWAY_URL",
             "\"https://push.yanta.page/_matrix/push/v1/notify\""
         )
+    }
+
+    /*
+     * Release signing: the Play *upload* key. With Play App Signing, Google
+     * signs what users install; this key only proves uploads come from us.
+     * It lives outside the repo (~/.yanta-release, see PLAY_RELEASE.md);
+     * without it, release builds stay unsigned and debug builds still work.
+     */
+    val releaseKeystore = Properties().apply {
+        val file = listOf(
+            rootProject.file("keystore.properties"),
+            File(System.getProperty("user.home"), ".yanta-release/keystore.properties"),
+        ).firstOrNull { it.exists() }
+        if (file != null) file.inputStream().use { load(it) }
+    }
+
+    signingConfigs {
+        if (releaseKeystore.getProperty("storeFile") != null) {
+            create("release") {
+                storeFile = file(releaseKeystore.getProperty("storeFile"))
+                storePassword = releaseKeystore.getProperty("storePassword")
+                keyAlias = releaseKeystore.getProperty("keyAlias")
+                keyPassword = releaseKeystore.getProperty("keyPassword")
+            }
+        }
+    }
+
+    buildTypes {
+        getByName("release") {
+            isMinifyEnabled = true
+            isShrinkResources = true
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "proguard-rules.pro"
+            )
+            signingConfigs.findByName("release")?.let { signingConfig = it }
+        }
     }
 
     buildFeatures {

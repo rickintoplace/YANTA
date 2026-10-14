@@ -32,7 +32,7 @@ const PROCESSOR_PURPOSES = {
   resend: 'Login- und Benachrichtigungs-E-Mails',
   openrouter: 'KI-Verarbeitung für „Included AI“',
   brave: 'Websuche',
-  google: 'Video-Quellen; optionale Drive-Synchronisierung',
+  google: 'Video-Quellen; optionale Drive-Synchronisierung; Push-Zustellung in der Android-App (Firebase Cloud Messaging)',
   weather: 'Wetter',
   geo: 'Manuelle Ortssuche',
   citations: 'Metadaten für Zitationen',
@@ -424,6 +424,7 @@ function privacyDocument() {
           ['Feed-URLs und Abrufe (Quellen)', 'Abruf der von Ihnen abonnierten Inhalte', 'Art. 6 Abs. 1 lit. b'],
           ['KI-Eingaben und der von Ihnen gewählte Kontext', 'Beantwortung Ihrer Anfrage', 'Art. 6 Abs. 1 lit. b'],
           ['Kündigungs- und Widerrufserklärungen, Inhaltsmeldungen', 'Gesetzliche Pflichten nach §§ 312k, 356a BGB und DSA', 'Art. 6 Abs. 1 lit. c'],
+          ['Eine KI-Antwort, die Sie melden: ihr Text, Ihr Grund und Kommentar', 'Prüfung gemeldeter schädlicher KI-Ausgaben', 'Art. 6 Abs. 1 lit. f — sichere KI-Funktionen'],
         ]
       )}
       <p>
@@ -449,6 +450,22 @@ function privacyDocument() {
         welche YANTA besser erklärt — welche Sie sehen, wird bei jedem Aufruf
         neu entschieden und nirgends vermerkt. Es bleibt also keine Markierung
         auf Ihrem Gerät zurück, und es gibt nichts einzuwilligen.
+      </p>
+
+      <h3>Die Android-App</h3>
+      <p>
+        Die App zeigt dieselbe Web-App und speichert ihre Daten genauso, nur
+        innerhalb der App. Sie fragt nur nach dem, was eine Funktion braucht,
+        die Sie nutzen: <strong>Benachrichtigungen</strong> und
+        <strong>exakte Wecker</strong> für pünktliche Kalender-Erinnerungen,
+        die <strong>Kamera</strong>, wenn Sie einen Kopplungscode scannen oder
+        ein Foto für eine Notiz aufnehmen. Wenn Sie mit
+        <strong>Fingerabdruck oder Gesicht</strong> entsperren, prüft Android
+        das auf dem Telefon; YANTA erfährt nur, ob die Prüfung bestanden wurde,
+        und der damit freigegebene Schlüssel verlässt die sichere Hardware des
+        Telefons nie. Biometrische Daten erreichen weder die App noch uns. Für
+        Push-Nachrichten meldet sich die App bei Googles Firebase Cloud
+        Messaging an und erhält dafür ein Geräte-Token.
       </p>
 
       <h2>4. Verschlüsselung und was wir tatsächlich sehen</h2>
@@ -496,6 +513,11 @@ function privacyDocument() {
         verwenden Ihre Inhalte niemals zum Training von Modellen. Geben Sie
         bitte keine Geheimnisse oder sensiblen Daten Dritter in Eingaben ein.
       </p>
+      <p>
+        Wenn Sie eine KI-Antwort als beleidigend, schädlich oder falsch melden,
+        werden ihr Text, der gewählte Grund und Ihr Kommentar zur Prüfung an
+        uns gesendet – sonst nichts aus Ihrem Chat oder Ihren Notizen.
+      </p>
 
       <h2>8. Cookies und wie wir zählen</h2>
       <p>
@@ -531,6 +553,7 @@ function privacyDocument() {
           ['Rechnungen, Zahlungs- und Buchhaltungsunterlagen', '10 Jahre (§ 147 AO, § 257 HGB)'],
           ['Kündigungs- und Widerrufserklärungen', '3 Jahre (Verjährungsfrist)'],
           ['Inhaltsmeldungen nach dem DSA', 'Bis zu 3 Jahre'],
+          ['Meldungen zu KI-Antworten', 'Bis zu 12 Monate'],
           ['Öffentliche Freigaben', 'Bis zum Widerruf oder zur Kontolöschung'],
         ]
       )}

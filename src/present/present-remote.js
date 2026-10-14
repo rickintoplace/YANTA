@@ -78,6 +78,8 @@ function formatElapsed(ms) {
  *   command(op, extra)   next | prev | goto | blank | start
  *   laser(point)         { x, y, on }
  *   leave()              optional: "Disconnect"
+ *   editNotes(id, text)  optional: save a presenter note
+ *   notesPending(id)     optional: an edit is still on its way
  *   switchToScreen()     optional: "Show slides on this device"
  *   connect()            optional: open "Connect devices" (presenter view)
  *   closeLabel           optional label for leave (presenter view: "Exit")
@@ -116,12 +118,16 @@ export function mountRemote(container, adapter) {
         </div>
       </div>
 
-      <div class="yanta-pr-notes" data-notes></div>
+      <div class="yanta-pr-notes-box">
+        <textarea class="yanta-pr-notes" data-notes spellcheck="true" aria-label="${escapeHtml(t('present.remote.notesLabel'))}"></textarea>
+        <span class="yanta-pr-notes-status" data-notes-status></span>
+      </div>
     </main>
 
     <footer class="yanta-pr-controls">
       <button type="button" class="yanta-pr-btn" data-prev aria-label="${escapeHtml(t('present.remote.previous'))}">${lucide('chevron-left', 30)}</button>
-      <button type="button" class="yanta-pr-btn is-blank" data-blank aria-label="${escapeHtml(t('present.remote.blank'))}" title="${escapeHtml(t('present.remote.blank'))}">${lucide('monitor-off', 20)}</button>
+      <button type="button" class="yanta-pr-btn is-tool" data-laser-btn aria-pressed="false" aria-label="${escapeHtml(t('present.remote.laser'))}" title="${escapeHtml(t('present.remote.laser'))}">${lucide('mouse-pointer-2', 20)}</button>
+      <button type="button" class="yanta-pr-btn is-tool" data-blank aria-label="${escapeHtml(t('present.remote.blank'))}" title="${escapeHtml(t('present.remote.blank'))}">${lucide('monitor-off', 20)}</button>
       <button type="button" class="yanta-pr-btn is-next" data-next-btn aria-label="${escapeHtml(t('present.remote.next'))}">${lucide('chevron-right', 34)}</button>
     </footer>
 
@@ -138,6 +144,25 @@ export function mountRemote(container, adapter) {
   let state = null;
   let status = 'online';
   let renderToken = 0;
+  let laserMode = false;
+
+  const laserBtn = $('[data-laser-btn]');
+
+  // The laser button: while on, a finger on the slide is the laser pointer.
+  laserBtn.addEventListener('click', () => {
+    laserMode = !laserMode;
+    laserBtn.setAttribute('aria-pressed', laserMode ? 'true' : 'false');
+    laserBtn.classList.toggle('is-on', laserMode);
+    now.classList.toggle('is-laser', laserMode);
+
+    if (!laserMode) {
+      laserDot.classList.remove('is-visible');
+      adapter.laser({ on: false });
+    }
+  });
+
+  // A long press must not open the browser's context menu (it cancels the touch).
+  now.addEventListener('contextmenu', (e) => e.preventDefault());
 
   const press = (op, extra) => {
     navigator.vibrate?.(8);
@@ -219,6 +244,19 @@ export function mountRemote(container, adapter) {
       now.setPointerCapture(e.pointerId);
     } catch {}
 
+    if (laserMode) {
+      gesture.laser = true;
+
+      const p = pointInSlide(e);
+      if (p) {
+        showLaser(p);
+        laserSentAt = Date.now();
+        adapter.laser({ x: p.x, y: p.y, on: true });
+      }
+      return;
+    }
+
+    // Without the laser button: holding still for a moment also points.
     gesture.holdTimer = setTimeout(() => {
       if (!gesture) return;
       gesture.laser = true;
@@ -317,6 +355,60 @@ export function mountRemote(container, adapter) {
     }
   }
 
+  // ---- Presenter notes: readable and, where the presenter allows, editable.
+
+  const notesEl = $('[data-notes]');
+  const notesStatus = $('[data-notes-status]');
+  let notesSlideId = null;
+  let notesTimer = 0;
+  let notesDirty = false;
+  let statusTimer = 0;
+
+  const setNotesStatus = (text) => {
+    clearTimeout(statusTimer);
+    notesStatus.textContent = text;
+    if (text) statusTimer = setTimeout(() => { notesStatus.textContent = ''; }, 2200);
+  };
+
+  const flushNotes = () => {
+    clearTimeout(notesTimer);
+    notesTimer = 0;
+    if (!notesDirty || !notesSlideId) return;
+
+    notesDirty = false;
+    adapter.editNotes?.(notesSlideId, notesEl.value);
+    setNotesStatus(t('present.remote.notesSaved'));
+  };
+
+  notesEl.addEventListener('input', () => {
+    notesDirty = true;
+    notesStatus.textContent = t('present.remote.notesSaving');
+    clearTimeout(notesTimer);
+    notesTimer = setTimeout(flushNotes, 600);
+  });
+
+  notesEl.addEventListener('blur', flushNotes);
+
+  function renderNotes(slide) {
+    const slideId = slide?.id || '';
+    const editable = !!adapter.editNotes && !!slideId && slideId !== '__board';
+    const incoming = slideId ? deck?.notes?.[slideId] || '' : '';
+
+    notesEl.readOnly = !editable;
+    notesEl.placeholder = editable ? t('present.remote.notesPlaceholder') : t('present.remote.noNotes');
+
+    if (slideId !== notesSlideId) {
+      flushNotes();
+      notesSlideId = slideId;
+      notesEl.value = incoming;
+      return;
+    }
+
+    // Never under the presenter's fingers: their own text wins until saved.
+    const busy = document.activeElement === notesEl || notesDirty || adapter.notesPending?.(slideId);
+    if (!busy && notesEl.value !== incoming) notesEl.value = incoming;
+  }
+
   function renderText() {
     $('[data-title]').textContent = state?.title || deck?.title || '';
 
@@ -345,11 +437,7 @@ export function mountRemote(container, adapter) {
         ? t('present.remote.nextBuild')
         : t('present.remote.nextSlide', { title: deck?.slides?.[next.index]?.title || String(next.index + 1) });
 
-    const notes = slide ? deck?.notes?.[slide.id] || '' : '';
-    const notesEl = $('[data-notes]');
-    notesEl.textContent = notes;
-    notesEl.classList.toggle('is-empty', !notes);
-    notesEl.dataset.empty = t('present.remote.noNotes');
+    renderNotes(slide);
 
     $('[data-paused]').hidden = !!state.presenting;
     $('[data-blank]').classList.toggle('is-on', !!state.blank);
@@ -359,6 +447,23 @@ export function mountRemote(container, adapter) {
   }
 
   return {
+    /** A laser point from another device (slide units), shown on the slide here too. */
+    laser(point) {
+      if (gesture?.laser) return;
+
+      if (point?.on === false) {
+        laserDot.classList.remove('is-visible');
+        return;
+      }
+
+      const rect = nowImg.getBoundingClientRect();
+      if (!rect.width) return;
+
+      showLaser({ x: Number(point.x) || 0, y: Number(point.y) || 0, rect });
+      clearTimeout(laserDot._hide);
+      laserDot._hide = setTimeout(() => laserDot.classList.remove('is-visible'), 900);
+    },
+
     update(next = {}) {
       if ('deck' in next) deck = next.deck;
       if ('state' in next) state = next.state;
@@ -369,6 +474,7 @@ export function mountRemote(container, adapter) {
     },
 
     destroy() {
+      flushNotes();
       clearInterval(timer);
       document.removeEventListener('keydown', onKey);
       container.replaceChildren();

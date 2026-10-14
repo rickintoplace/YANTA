@@ -36,11 +36,24 @@ export function deckVersionOf(drawing) {
     h = fnv(`${el.id}:${el.version}:${el.versionNonce}|`, h);
   }
 
-  h = fnv(JSON.stringify(presentationSlidesFor(drawing).map((s) => [s.id, s.bounds, s.animation, s.title, s.notes?.markdown || ''])), h);
+  // Notes are left out on purpose: they travel on their own (notesOf), so
+  // typing a note mid-talk does not resend the whole board to every device.
+  h = fnv(JSON.stringify(presentationSlidesFor(drawing).map((s) => [s.id, s.bounds, s.animation, s.title])), h);
   h = fnv(Object.keys(drawing.files || {}).sort().join(','), h);
   h = fnv(String(drawing.appState?.viewBackgroundColor || ''), h);
 
   return h.toString(36);
+}
+
+/** Presenter notes by slide id. */
+export function notesOf(drawing) {
+  const notes = {};
+
+  for (const slide of presentationSlidesFor(drawing)) {
+    if (slide.notes?.markdown) notes[slide.id] = slide.notes.markdown;
+  }
+
+  return notes;
 }
 
 /**
@@ -49,11 +62,7 @@ export function deckVersionOf(drawing) {
 export function buildDeck(drawing, { haveFiles = [], theme = 'light' } = {}) {
   const have = new Set(haveFiles);
   const slides = presentationSlidesFor(drawing);
-  const notes = {};
-
-  for (const slide of slides) {
-    if (slide.notes?.markdown) notes[slide.id] = slide.notes.markdown;
-  }
+  const notes = notesOf(drawing);
 
   const files = {};
 

@@ -50,7 +50,7 @@ export async function openConnectPanel({ noteId, drawingId }) {
   injectPresentCss();
 
   const host = presentHostFor(noteId, drawingId);
-  watchApprovals(host);
+  watchPresentHost(host);
 
   if (panel) {
     render(host);
@@ -83,6 +83,24 @@ export async function openConnectPanel({ noteId, drawingId }) {
   return host;
 }
 
+/*
+  The footer line says something only the presenter cannot see otherwise:
+  whether this device reaches the relay, and how many devices are with it.
+*/
+function statusState(host) {
+  if (!navigator.onLine) return 'offline';
+  return host.status === 'online' ? 'online' : 'reconnecting';
+}
+
+function statusText(host) {
+  const state = statusState(host);
+  if (state === 'offline') return t('present.connect.statusOffline');
+  if (state === 'reconnecting') return t('present.status.reconnecting');
+
+  const live = host.peers.filter((p) => !p.offline).length;
+  return live ? t('present.connect.statusDevices', { count: live }) : t('present.connect.statusWaiting');
+}
+
 function roleLabel(role) {
   return role === 'screen' ? t('present.role.screen') : t('present.role.remote');
 }
@@ -102,7 +120,6 @@ function render(host) {
 
   const peers = host.peers;
   const pending = host.pending;
-  const online = host.status === 'online';
 
   card.innerHTML = `
     <div class="yanta-pc-head">
@@ -117,7 +134,10 @@ function render(host) {
         <div>
           <p>${escapeHtml(t('present.connect.scan'))}</p>
           <p>${escapeHtml(t('present.connect.orCode', { site: `${location.host}/present` }))}</p>
-          <div class="yanta-pc-code">${escapeHtml(host.code ? formatCode(host.code) : '··· ···')}</div>
+          <div class="yanta-pc-code-row">
+            <div class="yanta-pc-code">${escapeHtml(host.code ? formatCode(host.code) : '··· ···')}</div>
+            <button type="button" class="icon-btn" data-rotate title="${escapeHtml(t('present.connect.newCode'))}" aria-label="${escapeHtml(t('present.connect.newCode'))}">${lucide('refresh-cw', 16)}</button>
+          </div>
         </div>
       </div>
 
@@ -160,7 +180,7 @@ function render(host) {
       </div>
 
       <div class="yanta-pc-foot">
-        <span class="yanta-pc-status"><span class="yanta-present-dot" data-state="${online ? 'online' : 'reconnecting'}"></span>${escapeHtml(online ? t('present.connect.ready') : t('present.status.reconnecting'))}</span>
+        <span class="yanta-pc-status"><span class="yanta-present-dot" data-state="${statusState(host)}"></span>${escapeHtml(statusText(host))}</span>
         ${peers.length ? `<button type="button" class="btn danger" data-end>${escapeHtml(t('present.connect.end'))}</button>` : ''}
       </div>
     </div>
@@ -170,6 +190,11 @@ function render(host) {
   if (host.ticketUrl) qr.append(renderBrandedQrSvg(host.ticketUrl, { size: 168, logo: BRAND_LOGO_SVG }));
 
   card.querySelector('[data-close]').addEventListener('click', () => closeConnectPanel());
+
+  // A code that was read out loud or seen by the wrong people: replace it.
+  card.querySelector('[data-rotate]')?.addEventListener('click', () => {
+    host.rotateCode().catch(() => {});
+  });
 
   card.querySelectorAll('[data-pending]').forEach((row) => {
     const id = row.dataset.pending;
@@ -218,7 +243,7 @@ function render(host) {
       const text = await scanQrWithCamera({
         title: t('present.connect.scanScreen'),
         hint: t('present.connect.scanScreenHint'),
-        zIndex: 760,
+        zIndex: 1800, // above this panel (1600)
       });
 
       await connect(text);
@@ -229,21 +254,42 @@ function render(host) {
 }
 
 /*
-  A device typed the code while the panel was closed (the presenter is in
-  the middle of the talk): ask right there, small and out of the way.
+  Watches one session from anywhere in the app:
+  - a device that typed the code waits for an OK: a small card at the top,
+    even mid-presentation, that never blocks the slides;
+  - a device that got in (QR, approval, screen) is announced with a toast,
+    and the connect panel closes — the presenter wants to start, not
+    admire the device list.
 */
-function watchApprovals(host) {
+export function watchPresentHost(host) {
   if (askers.has(host)) return;
 
   let box = null;
+  const known = new Set(host.peers.map((p) => p.id));
 
   const sync = () => {
+    if (host.ended) {
+      stop();
+      return;
+    }
+
+    const joined = host.peers.filter((p) => !known.has(p.id) && !p.offline);
+    for (const peer of host.peers) known.add(peer.id);
+    for (const id of [...known]) {
+      if (!host.peers.some((p) => p.id === id)) known.delete(id);
+    }
+
+    if (joined.length) {
+      const peer = joined[0];
+      toast(t('present.connect.joined', { name: peer.name || roleLabel(peer.role), role: roleLabel(peer.role) }), 'success');
+      if (isConnectPanelOpen()) closeConnectPanel();
+    }
+
     const request = isConnectPanelOpen() ? null : host.pending[0];
 
-    if (!request || host.ended) {
+    if (!request) {
       box?.remove();
       box = null;
-      if (host.ended) stop();
       return;
     }
 
@@ -253,13 +299,15 @@ function watchApprovals(host) {
     box = document.createElement('div');
     box.className = 'yanta-pc-ask';
     box.dataset.id = request.id;
+    box.setAttribute('role', 'alert');
     box.innerHTML = `
-      <div>${escapeHtml(t('present.connect.wantsToJoin', { name: request.name, role: roleLabel(request.role) }))}</div>
-      <small style="color:var(--text-faint)">${escapeHtml(t('present.connect.checkDigits'))} <span class="yanta-pc-check">${escapeHtml(request.check)}</span></small>
-      <div class="yanta-pc-ask-row">
-        <button type="button" class="btn" data-deny>${escapeHtml(t('present.connect.deny'))}</button>
-        <button type="button" class="btn primary" data-allow>${escapeHtml(t('present.connect.allow'))}</button>
+      ${lucide(request.role === 'screen' ? 'monitor' : 'smartphone', 18)}
+      <div class="yanta-pc-ask-text">
+        ${escapeHtml(t('present.connect.wantsToJoin', { name: request.name, role: roleLabel(request.role) }))}
+        <small>${escapeHtml(t('present.connect.checkDigits'))} <span class="yanta-pc-check">${escapeHtml(request.check)}</span></small>
       </div>
+      <button type="button" class="btn" data-deny>${escapeHtml(t('present.connect.deny'))}</button>
+      <button type="button" class="btn primary" data-allow>${escapeHtml(t('present.connect.allow'))}</button>
     `;
 
     box.querySelector('[data-allow]').addEventListener('click', () => host.approve(request.id));
@@ -267,6 +315,7 @@ function watchApprovals(host) {
 
     injectPresentCss();
     document.body.append(box);
+    navigator.vibrate?.([10, 60, 10]);
   };
 
   const off = host.onChange(sync);

@@ -278,6 +278,7 @@ function runSession(joined) {
     },
     onLaser: (point) => {
       if (ui?.kind === 'screen') ui.stage?.laser(point);
+      if (ui?.kind === 'remote') ui.laser?.(point);
     },
     onStatus: (next) => {
       status = next;
@@ -320,6 +321,8 @@ function runSession(joined) {
         const remote = mountRemote(box, {
           command: (op, extra) => session.send(op, extra),
           laser: (point) => session.laser(point),
+          editNotes: (slideId, text) => session.editNotes(slideId, text),
+          notesPending: (slideId) => session.notesPending(slideId),
           switchToScreen: () => switchRole('screen'),
           leave: () => {
             session.leave();
@@ -330,7 +333,7 @@ function runSession(joined) {
           },
         });
 
-        ui = { kind: 'remote', update: remote.update, destroy: remote.destroy };
+        ui = { kind: 'remote', update: remote.update, laser: remote.laser, destroy: remote.destroy };
       }
 
       ui.update({ state, deck, status });

@@ -767,6 +767,11 @@ export default {
       generic: 'Browser',
     },
     connect: {
+      newCode: 'New code',
+      statusOffline: 'No internet connection',
+      statusDevices: { one: '{count} device connected', other: '{count} devices connected' },
+      statusWaiting: 'Online · waiting for devices',
+      joined: '{name} connected as {role}',
       menu: 'Connect devices…',
       title: 'Connect devices',
       scan: 'Scan with a phone to control the slides, or with any device to show them.',
@@ -826,6 +831,11 @@ export default {
       useAsRemote: 'Use as remote',
     },
     remote: {
+      laser: 'Laser pointer',
+      notesLabel: 'Presenter notes',
+      notesPlaceholder: 'Notes for this slide…',
+      notesSaving: 'Saving…',
+      notesSaved: 'Saved',
       more: 'More',
       previous: 'Previous',
       next: 'Next',

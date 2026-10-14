@@ -25,10 +25,7 @@ body.yanta-present-page {
   display: grid;
   place-items: center;
   padding: max(20px, env(safe-area-inset-top)) 16px max(20px, env(safe-area-inset-bottom));
-  background:
-    radial-gradient(circle at 20% 0%, rgba(150, 170, 60, 0.16), transparent 42%),
-    radial-gradient(circle at 100% 100%, rgba(110, 168, 254, 0.10), transparent 40%),
-    #101010;
+  background: #111;
 }
 
 .yanta-pj-wrap {
@@ -58,11 +55,10 @@ body.yanta-present-page {
 }
 
 .yanta-pj-card {
-  border: 1px solid #2c2c2c;
-  border-radius: 22px;
+  border: 1px solid #262626;
+  border-radius: 18px;
   padding: 22px;
-  background: rgba(26, 26, 26, 0.9);
-  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.35);
+  background: #181818;
   display: flex;
   flex-direction: column;
   gap: 14px;
@@ -552,6 +548,7 @@ body.yanta-present-page {
 }
 
 .yanta-pr-now {
+  -webkit-touch-callout: none;
   position: relative;
   flex: 0 0 auto;
   aspect-ratio: 16 / 9;
@@ -676,29 +673,52 @@ body.yanta-present-page {
   font-variant-numeric: tabular-nums;
 }
 
-.yanta-pr-notes {
+.yanta-pr-notes-box {
   flex: 1 0 auto;
-  min-height: 80px;
-  padding: 14px;
+  position: relative;
+  display: flex;
+  min-height: 110px;
+}
+
+.yanta-pr-notes {
+  flex: 1;
+  box-sizing: border-box;
+  width: 100%;
+  min-height: 110px;
+  resize: none;
+  padding: 14px 14px 26px;
+  border: 1px solid transparent;
   border-radius: 14px;
   background: #171717;
-  font-size: 17px;
-  line-height: 1.5;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
+  color: #ecebe8;
+  font: 17px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  outline: none;
   user-select: text;
   -webkit-user-select: text;
 }
 
-.yanta-pr-notes.is-empty::before {
-  content: attr(data-empty);
+.yanta-pr-notes:not([readonly]):focus {
+  border-color: #3a3a3a;
+  background: #1b1b1b;
+}
+
+.yanta-pr-notes::placeholder {
   color: #6f6c68;
   font-size: 14px;
 }
 
+.yanta-pr-notes-status {
+  position: absolute;
+  right: 12px;
+  bottom: 8px;
+  font-size: 11px;
+  color: #8d8a85;
+  pointer-events: none;
+}
+
 .yanta-pr-controls {
   display: grid;
-  grid-template-columns: 1fr auto 1.6fr;
+  grid-template-columns: 1fr auto auto 1.6fr;
   gap: 10px;
   padding: 12px 12px max(12px, env(safe-area-inset-bottom));
 }
@@ -734,14 +754,24 @@ body.yanta-present-page {
   background: #b1c64a;
 }
 
-.yanta-pr-btn.is-blank {
-  min-width: 64px;
+.yanta-pr-btn.is-tool {
+  min-width: 60px;
   color: #a9a6a1;
 }
 
-.yanta-pr-btn.is-blank.is-on {
+.yanta-pr-btn.is-tool.is-on {
   background: #ecebe8;
   color: #111;
+}
+
+.yanta-pr-btn[data-laser-btn].is-on {
+  background: #ff3b30;
+  color: #fff;
+}
+
+.yanta-pr-now.is-laser {
+  box-shadow: 0 0 0 2px #ff3b30;
+  cursor: crosshair;
 }
 
 .yanta-pr-progress {
@@ -771,9 +801,8 @@ body.yanta-present-page {
     max-height: none;
   }
 
-  .yanta-pr-notes {
+  .yanta-pr-notes-box {
     min-height: 0;
-    overflow: auto;
   }
 
   .yanta-pr-controls {
@@ -961,28 +990,54 @@ body.yanta-present-page {
   }
 }
 
-/* Asked from anywhere: a device wants in. */
+/* Asked from anywhere: a device wants in. Top of the screen, out of the
+   slides' way; the slideshow toolbar lives at the bottom. */
 .yanta-pc-ask {
   position: fixed;
   left: 50%;
-  bottom: max(18px, env(safe-area-inset-bottom));
+  top: max(12px, env(safe-area-inset-top));
   transform: translateX(-50%);
   z-index: 1700;
-  width: min(440px, calc(100vw - 24px));
-  display: grid;
+  width: min(520px, calc(100vw - 24px));
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
   gap: 10px;
-  padding: 14px;
-  border-radius: 16px;
+  padding: 10px 10px 10px 14px;
+  border-radius: 14px;
   border: 1px solid var(--border);
   background: var(--bg-elev);
   color: var(--text);
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+  font-size: 13px;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.3);
+  animation: yanta-pc-ask-in 0.18s ease;
 }
 
-.yanta-pc-ask-row {
+.yanta-pc-ask-text {
+  flex: 1;
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+  font-weight: 600;
+}
+
+.yanta-pc-ask-text small {
+  font-weight: 500;
+  color: var(--text-faint);
+}
+
+@keyframes yanta-pc-ask-in {
+  from { opacity: 0; transform: translate(-50%, -8px); }
+}
+
+.yanta-pc-code-row {
   display: flex;
-  gap: 8px;
-  justify-content: flex-end;
+  align-items: center;
+  gap: 6px;
+}
+
+.yanta-present-dot[data-state="online"] {
+  background: #4caf50;
 }
 `;
 

@@ -709,7 +709,27 @@ function injectCss() {
   position: fixed;
   inset: 0;
   z-index: 621;
-  pointer-events: none;
+
+  /*
+    The stage itself is not editable while presenting: this layer takes
+    every touch and click on it. Tap or click = next, swipe = next/previous,
+    and with the laser on, a finger or the mouse is the pointer. Without it,
+    a laser stroke on a phone also drew a rectangle with Excalidraw's last
+    tool.
+  */
+  pointer-events: auto;
+  touch-action: none;
+  -webkit-touch-callout: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.yanta-slideshow.is-laser .yanta-laser-layer {
+  cursor: crosshair;
+}
+
+.yanta-slideshow-notes {
+  z-index: 623;
 }
 
 .yanta-laser-dot {
@@ -1005,8 +1025,7 @@ body.yanta-slideshow-active .yanta-slides-fullscreen-dock,
   no reliable Esc key and users otherwise get stuck.
 */
 body.yanta-slideshow-active.yanta-slideshow-immersive .yanta-draw-head,
-body.yanta-slideshow-active.yanta-slideshow-immersive .yanta-slides-fullscreen-dock,
-body.yanta-slideshow-active.yanta-slideshow-immersive .yanta-slideshow-notes {
+body.yanta-slideshow-active.yanta-slideshow-immersive .yanta-slides-fullscreen-dock {
   display: none !important;
 }
 
@@ -3336,6 +3355,7 @@ export function startSlideshow({
 
   root.append(progressEl, toolbar, laserLayer);
   document.body.append(root);
+  bindStageGestures(laserLayer);
 
   slideshow = {
     noteId,
@@ -3654,11 +3674,67 @@ function toggleLaser() {
 
   const btn = slideshow.toolbar.querySelector('[data-slide-laser]');
   btn?.classList.toggle('active', slideshow.laserEnabled);
+  slideshow.root?.classList.toggle('is-laser', slideshow.laserEnabled);
 
   if (!slideshow.laserEnabled) {
     const dot = slideshow.root.querySelector('[data-laser-dot]');
     dot?.classList.remove('visible');
+    currentPresentHost()?.laser({ on: false });
   }
+}
+
+/**
+ * Touches and clicks on the stage. Tap = next, horizontal swipe = next or
+ * previous; with the laser on, the finger draws the laser instead (a mouse
+ * points by hovering, see laserPointerMove).
+ */
+function bindStageGestures(layer) {
+  let start = null;
+
+  layer.addEventListener('contextmenu', (e) => e.preventDefault());
+
+  layer.addEventListener('pointerdown', (e) => {
+    if (!slideshow) return;
+
+    start = { x: e.clientX, y: e.clientY, at: performance.now(), id: e.pointerId };
+
+    try {
+      layer.setPointerCapture(e.pointerId);
+    } catch {}
+
+    if (slideshow.laserEnabled) laserPointerMove(e);
+  });
+
+  layer.addEventListener('pointerup', (e) => {
+    if (!slideshow || !start || e.pointerId !== start.id) return;
+
+    const dx = e.clientX - start.x;
+    const dy = e.clientY - start.y;
+    const quick = performance.now() - start.at < 600;
+    start = null;
+
+    if (slideshow.laserEnabled) {
+      if (e.pointerType !== 'mouse') {
+        slideshow.root.querySelector('[data-laser-dot]')?.classList.remove('visible');
+        currentPresentHost()?.laser({ on: false });
+      }
+      return;
+    }
+
+    if (e.button > 0) return;
+
+    if (quick && Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.3) {
+      if (dx < 0) nextSlide();
+      else previousSlide();
+      return;
+    }
+
+    if (Math.hypot(dx, dy) < 10) nextSlide();
+  });
+
+  layer.addEventListener('pointercancel', () => {
+    start = null;
+  });
 }
 
 function showLaserDot(x, y) {
@@ -3754,6 +3830,7 @@ function toggleNotes() {
       .filter((s) => !s.hidden);
 
     publishRemoteState();
+    currentPresentHost()?.notesChanged();
   });
 
   slideshow.root.append(panel);
@@ -3807,6 +3884,14 @@ function publishRemoteState() {
   updatePresenterView();
 }
 
+/** Re-reads the running deck's slides (notes changed) without moving. */
+function refreshSlideshowSlides() {
+  if (!slideshow) return;
+
+  const fresh = presentationSlidesFor(getDrawing(slideshow.noteId, slideshow.drawingId));
+  if (fresh.length === slideshow.slides.length) slideshow.slides = fresh;
+}
+
 function setSlideshowBlank(on) {
   if (!slideshow) return;
 
@@ -3843,10 +3928,18 @@ function bindPresentHost(host) {
   if (!host || host.boundBySlides) return host;
 
   host.boundBySlides = true;
+
+  // Join requests and new devices are announced wherever the presenter is.
+  import('../present/present-connect-ui.js')
+    .then((m) => m.watchPresentHost(host))
+    .catch(() => {});
+
   host.setHandlers({
     command: (cmd) => handleRemoteCommand(host, cmd),
     laser: (point) => {
       if (!slideshowShowsHostDrawing(host)) return;
+
+      slideshow.presenterView?.laser?.(point);
 
       if (point?.on === false) {
         slideshow.root?.querySelector('[data-laser-dot]')?.classList.remove('visible');
@@ -3854,6 +3947,15 @@ function bindPresentHost(host) {
       }
 
       showLaserDotFromRemote({ unit: 'slide', x: point?.x, y: point?.y });
+    },
+    // A remote wrote a presenter note: the open notes panel and the
+    // presenter view show it.
+    notesEdited: () => {
+      if (!slideshowShowsHostDrawing(host)) return;
+
+      refreshSlideshowSlides();
+      updateNotesPanel();
+      updatePresenterView();
     },
   });
 
@@ -3979,12 +4081,21 @@ async function openPresenterView() {
       }
     },
     connect: () => openConnectForDrawing({ noteId: slideshow.noteId, drawingId: slideshow.drawingId }),
+    editNotes: (slideId, text) => {
+      if (!slideshow) return;
+
+      setSlideNotes(slideshow.noteId, slideshow.drawingId, slideId, text);
+      refreshSlideshowSlides();
+      updateNotesPanel();
+      currentPresentHost()?.notesChanged();
+    },
     leave: () => closePresenterView({ dismissed: true }),
     closeLabel: t('present.remote.showSlidesHere'),
   });
 
   slideshow.presenterView = {
     update: view.update,
+    laser: view.laser,
     destroy: () => {
       view.destroy();
       box.remove();

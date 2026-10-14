@@ -760,6 +760,11 @@ export default {
       generic: 'Navigateur',
     },
     connect: {
+      newCode: 'Nouveau code',
+      statusOffline: 'Pas de connexion internet',
+      statusDevices: { one: '{count} appareil connecté', other: '{count} appareils connectés' },
+      statusWaiting: 'En ligne · en attente d’appareils',
+      joined: '{name} connecté en tant que {role}',
       menu: 'Connecter des appareils…',
       title: 'Connecter des appareils',
       scan: 'Scannez avec un téléphone pour piloter les diapositives, ou avec n’importe quel appareil pour les afficher.',
@@ -819,6 +824,11 @@ export default {
       useAsRemote: 'Utiliser comme télécommande',
     },
     remote: {
+      laser: 'Pointeur laser',
+      notesLabel: 'Notes du présentateur',
+      notesPlaceholder: 'Notes pour cette diapositive…',
+      notesSaving: 'Enregistrement…',
+      notesSaved: 'Enregistré',
       more: 'Plus',
       previous: 'Précédent',
       next: 'Suivant',

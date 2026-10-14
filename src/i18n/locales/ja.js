@@ -750,6 +750,11 @@ export default {
       generic: 'ブラウザ',
     },
     connect: {
+      newCode: '新しいコード',
+      statusOffline: 'インターネットに接続されていません',
+      statusDevices: { one: '{count} 台のデバイスが接続中', other: '{count} 台のデバイスが接続中' },
+      statusWaiting: 'オンライン · デバイスを待機中',
+      joined: '{name} が{role}として接続しました',
       menu: 'デバイスを接続…',
       title: 'デバイスを接続',
       scan: 'スマートフォンでスキャンするとスライドを操作でき、他の端末でスキャンするとそこに表示できます。',
@@ -809,6 +814,11 @@ export default {
       useAsRemote: 'リモコンとして使う',
     },
     remote: {
+      laser: 'レーザーポインター',
+      notesLabel: '発表者メモ',
+      notesPlaceholder: 'このスライドのメモ…',
+      notesSaving: '保存中…',
+      notesSaved: '保存しました',
       more: 'その他',
       previous: '前へ',
       next: '次へ',

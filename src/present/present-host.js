@@ -30,7 +30,9 @@ import {
   sealJson,
   topicFor,
 } from './present-crypto.js';
-import { buildDeck, deckVersionOf } from './present-deck.js';
+import { buildDeck, deckVersionOf, notesOf } from './present-deck.js';
+import { setSlideNotes } from '../slides/slides-store.js';
+import { BOARD_SLIDE_ID } from '../slides/slides-model.js';
 import { deviceName, tabDeviceId } from './present-device.js';
 import { HELLO_EVERY_MS, clampPosition, createCommandLog, createPeerTable } from './present-protocol.js';
 
@@ -131,6 +133,8 @@ function createPresentHost({ noteId, drawingId, saved }) {
 
   let onCommand = null;
   let onLaser = null;
+  let onNotesEdited = null;
+  let notesJson = JSON.stringify(notesOf(getDrawing(noteId, drawingId)));
 
   const emit = () => {
     listeners.forEach((fn) => {
@@ -252,7 +256,28 @@ function createPresentHost({ noteId, drawingId, saved }) {
 
     if (kind === 'laser') {
       onLaser?.(body);
+      return;
     }
+
+    // A remote wrote a presenter note during the talk: into the drawing it
+    // goes, like a note typed on this device.
+    if (kind === 'notes-edit') {
+      const slideId = String(body.slideId || '');
+      if (!slideId || slideId === BOARD_SLIDE_ID) return;
+
+      setSlideNotes(noteId, drawingId, slideId, String(body.text ?? '').slice(0, 20_000));
+      onNotesEdited?.(slideId);
+      publishNotes();
+    }
+  }
+
+  /** Sends the notes when they changed (from any device, or edited here). */
+  function publishNotes({ force = false } = {}) {
+    const json = JSON.stringify(notesOf(getDrawing(noteId, drawingId)));
+    if (!force && json === notesJson) return;
+
+    notesJson = json;
+    session?.post('notes', { notes: JSON.parse(json) });
   }
 
   // ---- Admitting devices
@@ -478,6 +503,8 @@ function createPresentHost({ noteId, drawingId, saved }) {
 
     clearTimeout(deckTimer);
     deckTimer = setTimeout(() => {
+      publishNotes();
+
       const drawing = getDrawing(noteId, drawingId);
       const version = deckVersionOf(drawing);
       if (version === deckVersion) return;
@@ -596,9 +623,20 @@ function createPresentHost({ noteId, drawingId, saved }) {
       publishStateSoon();
     },
 
-    setHandlers({ command = null, laser = null } = {}) {
+    setHandlers({ command = null, laser = null, notesEdited = null } = {}) {
       onCommand = command;
       onLaser = laser;
+      onNotesEdited = notesEdited;
+    },
+
+    /** Notes changed on this device (presenter view, notes panel). */
+    notesChanged() {
+      publishNotes();
+    },
+
+    /** Generates a new typed code; the old one stops working. */
+    rotateCode() {
+      return refreshCode();
     },
 
     /** The presenter's own laser, mirrored on every screen. */

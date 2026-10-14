@@ -760,6 +760,11 @@ export default {
       generic: 'Browser',
     },
     connect: {
+      newCode: 'Neuer Code',
+      statusOffline: 'Keine Internetverbindung',
+      statusDevices: { one: '{count} Gerät verbunden', other: '{count} Geräte verbunden' },
+      statusWaiting: 'Online · wartet auf Geräte',
+      joined: '{name} als {role} verbunden',
       menu: 'Geräte verbinden…',
       title: 'Geräte verbinden',
       scan: 'Mit dem Handy scannen, um die Folien zu steuern – oder mit einem beliebigen Gerät, um sie dort zu zeigen.',
@@ -819,6 +824,11 @@ export default {
       useAsRemote: 'Als Fernbedienung nutzen',
     },
     remote: {
+      laser: 'Laserpointer',
+      notesLabel: 'Notizen',
+      notesPlaceholder: 'Notizen zu dieser Folie…',
+      notesSaving: 'Speichere…',
+      notesSaved: 'Gespeichert',
       more: 'Mehr',
       previous: 'Zurück',
       next: 'Weiter',

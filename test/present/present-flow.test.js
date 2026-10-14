@@ -232,6 +232,19 @@ describe('presenting to connected devices', () => {
     expect(deck.files.img1.dataURL.length).toBe(bigImage.length); // kept, not resent
   });
 
+  it('a note written on the remote lands in the drawing and on every device', async () => {
+    const decksBefore = tv.seen.decks.length;
+
+    remote.session.editNotes('s2', 'Mention the Q3 dip');
+
+    await until(() => getDrawing(noteId, drawingId).slides.find((s) => s.id === 's2')?.notes?.markdown === 'Mention the Q3 dip');
+    await until(() => tv.seen.decks.at(-1)?.notes?.s2 === 'Mention the Q3 dip');
+    await until(() => !remote.session.notesPending('s2'));
+
+    // Notes travel alone: the board was not resent for them.
+    expect(tv.seen.decks.at(-1).elements.length).toBe(tv.seen.decks[decksBefore - 1].elements.length);
+  });
+
   it('a removed device is cut off; the others carry on with a new key', async () => {
     const laptopId = host.peers.find((p) => p.role === 'screen' && p.name)?.id;
     const remoteId = host.peers.find((p) => p.role === 'remote')?.id;

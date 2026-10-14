@@ -760,6 +760,11 @@ export default {
       generic: 'Navegador',
     },
     connect: {
+      newCode: 'Código nuevo',
+      statusOffline: 'Sin conexión a internet',
+      statusDevices: { one: '{count} dispositivo conectado', other: '{count} dispositivos conectados' },
+      statusWaiting: 'En línea · esperando dispositivos',
+      joined: '{name} conectado como {role}',
       menu: 'Conectar dispositivos…',
       title: 'Conectar dispositivos',
       scan: 'Escanéalo con un móvil para controlar las diapositivas, o con cualquier dispositivo para mostrarlas.',
@@ -819,6 +824,11 @@ export default {
       useAsRemote: 'Usar como mando',
     },
     remote: {
+      laser: 'Puntero láser',
+      notesLabel: 'Notas del presentador',
+      notesPlaceholder: 'Notas para esta diapositiva…',
+      notesSaving: 'Guardando…',
+      notesSaved: 'Guardado',
       more: 'Más',
       previous: 'Anterior',
       next: 'Siguiente',

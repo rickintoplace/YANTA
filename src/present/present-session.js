@@ -246,6 +246,7 @@ export function runJoinedSession(joined, { onState, onDeck, onLaser, onStatus, o
   let deckAskedAt = 0;
   let ended = false;
   let firstHello = true;
+  const pendingNotes = new Map(); // slideId -> text not yet confirmed
 
   const report = (status) => onStatus?.(status);
 
@@ -319,6 +320,21 @@ export function runJoinedSession(joined, { onState, onDeck, onLaser, onStatus, o
       return;
     }
 
+    if (kind === 'notes') {
+      const notes = body.notes && typeof body.notes === 'object' ? body.notes : {};
+
+      // An edit counts as saved once the presenter sends it back.
+      for (const [slideId, text] of pendingNotes) {
+        if ((notes[slideId] || '') === text) pendingNotes.delete(slideId);
+      }
+
+      if (deck) {
+        deck = { ...deck, notes };
+        onDeck?.(deck);
+      }
+      return;
+    }
+
     if (kind === 'rekey') {
       const grant = body.grants?.[deviceId];
       if (!grant) return;
@@ -347,6 +363,11 @@ export function runJoinedSession(joined, { onState, onDeck, onLaser, onStatus, o
 
   const commandTimer = setInterval(flushCommands, 600);
 
+  // Unconfirmed note edits go out again until the presenter has them.
+  const notesTimer = setInterval(() => {
+    for (const [slideId, text] of pendingNotes) session?.post('notes-edit', { slideId, text });
+  }, 2500);
+
   const stopStatus = channel.onStatus((status) => {
     if (status === 'online') {
       hello();
@@ -364,6 +385,7 @@ export function runJoinedSession(joined, { onState, onDeck, onLaser, onStatus, o
     ended = true;
     clearInterval(helloTimer);
     clearInterval(commandTimer);
+    clearInterval(notesTimer);
     stopStatus();
     forgetJoinedSession();
 
@@ -395,6 +417,17 @@ export function runJoinedSession(joined, { onState, onDeck, onLaser, onStatus, o
 
     laser(point) {
       session?.post('laser', point);
+    },
+
+    /** Saves a presenter note into the presenter's drawing. */
+    editNotes(slideId, text) {
+      pendingNotes.set(slideId, String(text ?? ''));
+      session?.post('notes-edit', { slideId, text: String(text ?? '') });
+    },
+
+    /** Whether an edit of this slide's notes is still on its way. */
+    notesPending(slideId) {
+      return pendingNotes.has(slideId);
     },
 
     leave() {

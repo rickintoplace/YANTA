@@ -117,6 +117,28 @@ function timeLabel(ev) {
   });
 }
 
+/**
+ * For a run that began before the shown day: when it ends, seen from that
+ * day — "until 14:00" when it ends that day, "until Fri 16 Oct" after.
+ */
+function continuingLabel(ev, refDay) {
+  const lastDay = ev.allDay
+    ? addDays(ev._span.endExclusive, -1)
+    : (ev._end ? startOfDay(new Date(ev._end.getTime() - 1)) : refDay);
+
+  if (!ev.allDay && ev._end && sameDay(lastDay, refDay)) {
+    return t('calendarWidget.until', {
+      when: ev._end.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    });
+  }
+
+  if (sameDay(lastDay, refDay)) return t('calendarWidget.lastDay');
+
+  return t('calendarWidget.until', {
+    when: lastDay.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' }),
+  });
+}
+
 function eventColor(ev) {
   if (ev.color) return ev.color;
 
@@ -129,24 +151,39 @@ function eventColor(ev) {
 
 // ---------------- data -------------------------------------------
 
+/*
+  Everything that is on during the range, not only what starts inside it:
+  a three-day trip that began yesterday is still today's event. Events
+  that began before the range carry `_continuing` (the rows then say
+  "until …" instead of a start time) and lead the list — they are on now.
+*/
+const RUN_LOOKBACK_DAYS = 14;
+
 async function eventsForRange(rangeStart, rangeEnd) {
   const { expandedCalendarRawEventsForRange } = await import('./calendar.js');
 
-  const events = expandedCalendarRawEventsForRange(rangeStart, rangeEnd)
+  // Recurring series expand only occurrences starting in the asked range:
+  // look back a little so a running occurrence is found too.
+  const events = expandedCalendarRawEventsForRange(addDays(rangeStart, -RUN_LOOKBACK_DAYS), rangeEnd)
     .map((ev) => ({
       ...ev,
       _start: eventStartDate(ev),
     }))
-    .filter((ev) =>
-      ev._start &&
-      ev._start >= rangeStart &&
-      ev._start < rangeEnd &&
-      // Unexpanded recurring masters outside the range would duplicate
-      // their own occurrences.
-      !isUnexpandedRecurrenceMaster(ev)
-    );
+    // Unexpanded recurring masters outside the range would duplicate
+    // their own occurrences.
+    .filter((ev) => ev._start && !isUnexpandedRecurrenceMaster(ev))
+    .map((ev) => ({ ...ev, _span: eventDaySpan(ev), _end: eventEndDate(ev) }))
+    .filter((ev) => {
+      if (ev._start >= rangeStart) return ev._start < rangeEnd;
+      // Began before: still on at the start of the range?
+      return ev.allDay
+        ? ev._span.endExclusive > rangeStart
+        : !!ev._end && ev._end > rangeStart;
+    })
+    .map((ev) => ({ ...ev, _continuing: ev._start < rangeStart }));
 
   return events.sort((a, b) => {
+    if (a._continuing !== b._continuing) return a._continuing ? -1 : 1;
     // Chronological first — the nearest event must lead, whether it is
     // all-day or timed. All-day only wins as a same-day tiebreak so it
     // sits atop that day's timed events.
@@ -155,6 +192,13 @@ async function eventsForRange(rangeStart, rangeEnd) {
     if (!!a.allDay !== !!b.allDay) return a.allDay ? -1 : 1;
     return 0;
   });
+}
+
+/** When a timed event ends (null without an end); all-day ends use `_span`. */
+function eventEndDate(ev) {
+  if (!ev.end || ev.allDay) return null;
+  const end = dateLikeToDate(ev.end);
+  return end && end > ev._start ? end : null;
 }
 
 const DAY_MS = 86400000;
@@ -201,7 +245,7 @@ function isMultiDayEvent(ev) {
 async function gridEventsForRange(rangeStart, rangeEnd) {
   const { expandedCalendarRawEventsForRange } = await import('./calendar.js');
 
-  return expandedCalendarRawEventsForRange(rangeStart, rangeEnd)
+  return expandedCalendarRawEventsForRange(addDays(rangeStart, -RUN_LOOKBACK_DAYS), rangeEnd)
     .map((ev) => ({ ...ev, _start: eventStartDate(ev) }))
     // Unexpanded recurring masters would duplicate their own occurrences.
     .filter((ev) => ev._start && !isUnexpandedRecurrenceMaster(ev))
@@ -774,7 +818,7 @@ function injectCss() {
 
 // ---------------- view renderers ----------------------------------
 
-function eventRow(ev, { showDate = true } = {}) {
+function eventRow(ev, { showDate = true, refDay = startOfDay(new Date()) } = {}) {
   const row = el('div', { class: 'yanta-cal-dash-row', role: 'button', tabindex: '0' });
 
   const when = el('div', { class: 'yanta-cal-dash-when' });
@@ -782,12 +826,14 @@ function eventRow(ev, { showDate = true } = {}) {
   if (showDate) {
     // Weekday + day alone was ambiguous across month boundaries — the
     // month short-name keeps "Sat 18" from meaning two different days.
-    when.append(el('strong', {},
-      ev._start.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })
+    // A run that is already on says so instead of its past start day.
+    when.append(el('strong', {}, ev._continuing
+      ? t('calendarWidget.ongoing')
+      : ev._start.toLocaleDateString([], { weekday: 'short', day: 'numeric', month: 'short' })
     ));
   }
 
-  when.append(el('span', {}, timeLabel(ev)));
+  when.append(el('span', {}, ev._continuing ? continuingLabel(ev, refDay) : timeLabel(ev)));
 
   const what = el('div', { class: 'yanta-cal-dash-what' });
   const dot = el('span', { class: 'yanta-cal-dash-dot' });
@@ -852,7 +898,7 @@ async function renderDayView(body, ref = navAnchor()) {
   const rows = el('div', { class: 'yanta-cal-dash-rows' });
 
   for (const ev of events) {
-    rows.append(eventRow(ev, { showDate: false }));
+    rows.append(eventRow(ev, { showDate: false, refDay: day }));
   }
 
   body.append(rows);

@@ -343,6 +343,9 @@ export default {
   calendarWidget: {
     title: 'Kalender',
     allDay: 'Ganztägig',
+    ongoing: 'Läuft',
+    until: 'bis {when}',
+    lastDay: 'endet heute',
     untitledEvent: 'Termin ohne Titel',
     sharedCalendar: 'Geteilter Kalender „{name}“',
     noUpcoming: 'Keine anstehenden Termine in den nächsten 30 Tagen.',

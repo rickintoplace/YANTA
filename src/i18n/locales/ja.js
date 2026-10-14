@@ -339,6 +339,9 @@ export default {
   calendarWidget: {
     title: 'カレンダー',
     allDay: '終日',
+    ongoing: '進行中',
+    until: '{when} まで',
+    lastDay: '本日終了',
     untitledEvent: 'タイトルなしのイベント',
     sharedCalendar: '共有カレンダー「{name}」',
     noUpcoming: '今後 30 日間に予定されているイベントはありません。',

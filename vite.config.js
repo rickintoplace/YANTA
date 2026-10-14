@@ -6,7 +6,8 @@ import { defineConfig } from 'vite';
   hard-coded esm.sh fallback. Our CSP rightly blocks esm.sh, so Chrome logged
   a CSP violation per font face on every drawing — dozens of red errors — and
   a font missing locally would have tried a third-party host. The fallback
-  points at our own copy instead.
+  points at our own copy instead — as an absolute URL, because Excalidraw
+  uses it as the base of new URL().
 */
 function selfHostedExcalidrawFonts() {
   return {
@@ -15,7 +16,7 @@ function selfHostedExcalidrawFonts() {
     transform(code, id) {
       if (!id.includes('@excalidraw/excalidraw') || !code.includes('esm.sh/')) return null;
 
-      const next = code.replace(/`https:\/\/esm\.sh\/\$\{.*?\}\/dist\/(?:prod|dev)\/`/g, '"/excalidraw-assets/"');
+      const next = code.replace(/`https:\/\/esm\.sh\/\$\{.*?\}\/dist\/(?:prod|dev)\/`/g, '(location.origin + "/excalidraw-assets/")');
       return next === code ? null : { code: next, map: null };
     },
   };

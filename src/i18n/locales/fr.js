@@ -740,6 +740,22 @@ export default {
   },
 
   present: {
+    watch: {
+      title: 'Lien spectateur',
+      text: 'Pour ceux qui suivent à distance : ils voient les diapositives, sans notes ni commandes.',
+      create: 'Créer le lien',
+      copy: 'Copier',
+      share: 'Partager',
+      stop: 'Arrêter',
+      copied: 'Lien copié',
+      viewers: { one: '{count} personne regarde', other: '{count} personnes regardent' },
+    },
+    edit: {
+      button: 'Corriger cette diapositive',
+      hint: 'Correction de la diapositive {n} – les écrans affichent les changements en direct',
+      done: 'Terminé',
+      remoteBanner: 'La diapositive est en cours de correction',
+    },
     nothingToPresent: 'Dessinez d’abord quelque chose, puis présentez-le.',
     role: {
       remote: 'Télécommande',
@@ -824,6 +840,7 @@ export default {
       useAsRemote: 'Utiliser comme télécommande',
     },
     remote: {
+      overview: 'Toutes les diapositives',
       laser: 'Pointeur laser',
       notesLabel: 'Notes du présentateur',
       notesPlaceholder: 'Notes pour cette diapositive…',

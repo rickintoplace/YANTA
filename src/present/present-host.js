@@ -151,6 +151,7 @@ function createPresentHost({ noteId, drawingId, saved }) {
         noteId,
         drawingId,
         sessionKey: sessionKeyString,
+        audienceKey: audience?.keyString || '',
         peers: peers.list()
           .filter((p) => pairKeys.has(p.id))
           .map((p) => ({ id: p.id, name: p.name, role: p.role, pairKey: pairKeys.get(p.id) })),
@@ -196,6 +197,7 @@ function createPresentHost({ noteId, drawingId, saved }) {
       index: position.index,
       step: position.step,
       blank: position.blank,
+      editing: !!position.editing,
       startedAt: position.startedAt,
       counts,
       slideIds: slides.map((s) => s.id),
@@ -203,6 +205,99 @@ function createPresentHost({ noteId, drawingId, saved }) {
       acks,
       peers: peers.list().map(({ id, name, role }) => ({ id, name, role })),
     });
+
+    publishAudienceState(counts);
+  }
+
+  // ---- Audience: a link to watch, nothing more
+
+  /*
+    Anyone with the link sees the slides as they are presented — remote
+    participants of a call, say. It is a topic and key of its own: viewers
+    never learn the session key, so they cannot press "next", and they never
+    get the presenter notes. Many viewers are expected, so the deck goes out
+    as one broadcast (at most every few seconds per version), not per viewer.
+  */
+  let audience = null;
+  const viewers = createPeerTable();
+
+  async function openAudience(keyString = randomKeyString()) {
+    audience?.topic.close();
+
+    const topic = openSecureTopic(channel, {
+      topic: await topicFor('watch', keyString),
+      key: await importKeyString(keyString),
+      deviceId,
+      onMessage: (kind, body, envelope) => {
+        if (kind === 'hello') {
+          if (viewers.seen(envelope.from, { role: 'audience' })) emit();
+          publishStateSoon();
+          return;
+        }
+
+        if (kind === 'bye') {
+          viewers.remove(envelope.from);
+          emit();
+          return;
+        }
+
+        if (kind === 'need-deck') sendAudienceDeck();
+      },
+    });
+
+    audience = { keyString, topic, deckSentAt: 0, deckSentVersion: '' };
+    save();
+    emit();
+    publishStateSoon();
+  }
+
+  function sendAudienceDeck() {
+    if (!audience) return;
+
+    const drawing = getDrawing(noteId, drawingId);
+    if (!drawing) return;
+
+    if (audience.deckSentVersion === deckVersion && Date.now() - audience.deckSentAt < 3000) return;
+
+    audience.deckSentAt = Date.now();
+    audience.deckSentVersion = deckVersion;
+
+    const deck = buildDeck(drawing, { theme: currentExcalidrawTheme() });
+    audience.topic.post('deck', { ...deck, notes: {} });
+  }
+
+  function publishAudienceState(counts) {
+    if (!audience) return;
+
+    audience.topic.post('state', {
+      epoch,
+      rev,
+      title: title(),
+      presenting: position.presenting,
+      index: position.index,
+      step: position.step,
+      blank: position.blank,
+      counts,
+      slideIds: slides.map((s) => s.id),
+      deckVersion,
+    });
+  }
+
+  async function closeAudience() {
+    if (!audience) return;
+
+    try {
+      await audience.topic.post('end', {});
+    } catch {}
+
+    const { topic } = audience;
+    audience = null;
+    setTimeout(() => topic.close(), 300);
+
+    for (const viewer of viewers.list()) viewers.remove(viewer.id);
+
+    save();
+    emit();
   }
 
   function onSessionMessage(kind, body, envelope) {
@@ -256,6 +351,7 @@ function createPresentHost({ noteId, drawingId, saved }) {
 
     if (kind === 'laser') {
       onLaser?.(body);
+      audience?.topic.post('laser', body); // viewers see the remote's laser too
       return;
     }
 
@@ -524,6 +620,7 @@ function createPresentHost({ noteId, drawingId, saved }) {
     if (ended) return;
 
     const gone = peers.prune();
+    const viewersGone = viewers.prune();
 
     // A device that went quiet stays listed (dimmed) while its key is valid:
     // it will be back when its screen wakes up.
@@ -536,7 +633,7 @@ function createPresentHost({ noteId, drawingId, saved }) {
     }
 
     publishState();
-    if (gone.length) emit();
+    if (gone.length || viewersGone.length) emit();
   }, HELLO_EVERY_MS);
 
   const stopStatus = channel.onStatus(() => {
@@ -545,6 +642,8 @@ function createPresentHost({ noteId, drawingId, saved }) {
   });
 
   openSession().then(publishState).catch((err) => console.warn('[YANTA Present] session failed', err));
+
+  if (saved?.audienceKey) openAudience(saved.audienceKey).catch(() => {});
 
   const api = {
     noteId,
@@ -566,6 +665,17 @@ function createPresentHost({ noteId, drawingId, saved }) {
     get peers() {
       return peers.list();
     },
+
+    get audienceUrl() {
+      return audience ? `${location.origin}/present#watch=${audience.keyString}` : '';
+    },
+
+    get viewerCount() {
+      return viewers.list().length;
+    },
+
+    openAudience: () => openAudience(),
+    closeAudience,
 
     get pending() {
       return [...pending.values()].map(({ id, name, role, check }) => ({ id, name, role, check }));
@@ -617,6 +727,7 @@ function createPresentHost({ noteId, drawingId, saved }) {
         index,
         step,
         blank: presenting ? (next.blank ?? position.blank) : false,
+        editing: presenting ? (next.editing ?? position.editing ?? false) : false,
         startedAt: presenting ? (position.startedAt || Date.now()) : 0,
       };
 
@@ -642,6 +753,7 @@ function createPresentHost({ noteId, drawingId, saved }) {
     /** The presenter's own laser, mirrored on every screen. */
     laser(body) {
       session?.post('laser', body);
+      audience?.topic.post('laser', body);
     },
 
     onChange(fn) {
@@ -670,6 +782,7 @@ function createPresentHost({ noteId, drawingId, saved }) {
 
       ticket?.rendezvous.close();
       code?.rendezvous.close();
+      await closeAudience();
       session?.close();
 
       setTimeout(() => channel.close(), 300);

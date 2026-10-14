@@ -16,6 +16,7 @@ import { loadExcalidraw } from '../draw-runtime.js';
 import { hiddenIdsAt } from '../slides/slides-animation.js';
 import { makeVirtualElementForSlide, visibleElementsInSlide } from '../slides/slides-model.js';
 import { nextPosition, progressOf } from './present-protocol.js';
+import { createLaser } from './present-laser.js';
 
 const LASER_EVERY_MS = 60;
 
@@ -93,21 +94,17 @@ export function mountRemote(container, adapter) {
       <span class="yanta-pr-status" data-status title=""></span>
       <div class="yanta-pr-title" data-title></div>
       <span class="yanta-pr-timer" data-timer>0:00</span>
+      <button type="button" class="yanta-pr-icon" data-overview aria-label="${escapeHtml(t('present.remote.overview'))}" title="${escapeHtml(t('present.remote.overview'))}">${lucide('layout-grid', 19)}</button>
       <button type="button" class="yanta-pr-icon" data-menu aria-label="${escapeHtml(t('present.remote.more'))}">${lucide('ellipsis', 20)}</button>
     </header>
 
     <div class="yanta-pr-banner" data-banner hidden></div>
 
     <main class="yanta-pr-main">
-      <div class="yanta-pr-now" data-now>
-        <img alt="" data-now-img draggable="false">
-        <div class="yanta-pr-laser" data-laser></div>
-        <div class="yanta-pr-paused" data-paused hidden>
-          <p>${escapeHtml(t('present.remote.notPresenting'))}</p>
-          <button type="button" class="yanta-pr-start" data-start>${lucide('play', 18)} ${escapeHtml(t('present.remote.start'))}</button>
-        </div>
+      <div class="yanta-pr-notes-box">
+        <textarea class="yanta-pr-notes" data-notes spellcheck="true" aria-label="${escapeHtml(t('present.remote.notesLabel'))}"></textarea>
+        <span class="yanta-pr-notes-status" data-notes-status></span>
       </div>
-
       <div class="yanta-pr-next-row">
         <div class="yanta-pr-next" data-next>
           <img alt="" data-next-img draggable="false">
@@ -118,10 +115,14 @@ export function mountRemote(container, adapter) {
         </div>
       </div>
 
-      <div class="yanta-pr-notes-box">
-        <textarea class="yanta-pr-notes" data-notes spellcheck="true" aria-label="${escapeHtml(t('present.remote.notesLabel'))}"></textarea>
-        <span class="yanta-pr-notes-status" data-notes-status></span>
+      <div class="yanta-pr-now" data-now>
+        <img alt="" data-now-img draggable="false">
+        <div class="yanta-pr-paused" data-paused hidden>
+          <p>${escapeHtml(t('present.remote.notPresenting'))}</p>
+          <button type="button" class="yanta-pr-start" data-start>${lucide('play', 18)} ${escapeHtml(t('present.remote.start'))}</button>
+        </div>
       </div>
+
     </main>
 
     <footer class="yanta-pr-controls">
@@ -138,7 +139,7 @@ export function mountRemote(container, adapter) {
   const nowImg = $('[data-now-img]');
   const nextImg = $('[data-next-img]');
   const now = $('[data-now]');
-  const laserDot = $('[data-laser]');
+  const laserDot = createLaser(now);
 
   let deck = null;
   let state = null;
@@ -156,7 +157,7 @@ export function mountRemote(container, adapter) {
     now.classList.toggle('is-laser', laserMode);
 
     if (!laserMode) {
-      laserDot.classList.remove('is-visible');
+      laserDot.hide();
       adapter.laser({ on: false });
     }
   });
@@ -179,6 +180,10 @@ export function mountRemote(container, adapter) {
 
     if (adapter.connect) {
       items.push({ label: t('present.connect.menu'), icon: 'cast', action: adapter.connect });
+    }
+
+    if (adapter.edit) {
+      items.push({ label: t('present.edit.button'), icon: 'pencil', action: adapter.edit });
     }
 
     if (adapter.switchToScreen) {
@@ -231,8 +236,7 @@ export function mountRemote(container, adapter) {
 
   const showLaser = (p) => {
     const host = now.getBoundingClientRect();
-    laserDot.style.transform = `translate(${p.rect.left - host.left + p.x * p.rect.width}px, ${p.rect.top - host.top + p.y * p.rect.height}px)`;
-    laserDot.classList.add('is-visible');
+    laserDot.moveTo(p.rect.left - host.left + p.x * p.rect.width, p.rect.top - host.top + p.y * p.rect.height);
   };
 
   now.addEventListener('pointerdown', (e) => {
@@ -301,7 +305,7 @@ export function mountRemote(container, adapter) {
     clearTimeout(gesture.holdTimer);
 
     if (gesture.laser) {
-      laserDot.classList.remove('is-visible');
+      laserDot.hide();
       adapter.laser({ on: false });
     } else {
       const dx = e.clientX - gesture.x;
@@ -321,6 +325,62 @@ export function mountRemote(container, adapter) {
 
   now.addEventListener('pointerup', endGesture);
   now.addEventListener('pointercancel', endGesture);
+
+  // ---- All slides at a glance: tap one to go there.
+
+  let overview = null;
+
+  function closeOverview() {
+    overview?.remove();
+    overview = null;
+  }
+
+  function openOverview() {
+    if (!deck || !state || overview) return;
+
+    const counts = state.counts || deck.slides.map(() => 0);
+
+    overview = document.createElement('div');
+    overview.className = 'yanta-pr-overview';
+    overview.innerHTML = `
+      <div class="yanta-pr-overview-head">
+        <strong>${escapeHtml(t('present.remote.overview'))}</strong>
+        <button type="button" class="yanta-pr-icon" data-close aria-label="${escapeHtml(t('common.close'))}">${lucide('x', 20)}</button>
+      </div>
+      <div class="yanta-pr-overview-grid">
+        ${deck.slides.map((slide, i) => `
+          <button type="button" class="yanta-pr-overview-item ${i === state.index ? 'is-current' : ''}" data-goto="${i}">
+            <span class="yanta-pr-overview-thumb"><img alt="" data-thumb="${i}" draggable="false"></span>
+            <span class="yanta-pr-overview-title"><b>${i + 1}</b> ${escapeHtml(slide.title || '')}</span>
+          </button>
+        `).join('')}
+      </div>
+    `;
+
+    overview.querySelector('[data-close]').addEventListener('click', closeOverview);
+    overview.querySelectorAll('[data-goto]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        press('goto', { index: Number(btn.dataset.goto) });
+        closeOverview();
+      });
+    });
+
+    container.append(overview);
+    overview.querySelector('.is-current')?.scrollIntoView({ block: 'center' });
+
+    // One slide after another: a phone renders a whole deck without stalling.
+    (async () => {
+      for (let i = 0; i < deck.slides.length; i++) {
+        if (!overview) return;
+
+        const url = await renderPosition(deck, { index: i, step: counts[i] || 0 }, { maxSize: 360 });
+        const img = overview?.querySelector(`[data-thumb="${i}"]`);
+        if (img && url) img.src = url;
+      }
+    })();
+  }
+
+  $('[data-overview]').addEventListener('click', openOverview);
 
   // ---- Timer
 
@@ -417,7 +477,9 @@ export function mountRemote(container, adapter) {
     statusEl.title = t(`present.status.${status}`);
 
     const banner = $('[data-banner]');
-    const bannerText = status === 'online' ? '' : t(`present.status.${status}`);
+    const bannerText = status !== 'online'
+      ? t(`present.status.${status}`)
+      : state?.editing ? t('present.edit.remoteBanner') : '';
     banner.hidden = !bannerText;
     banner.textContent = bannerText;
 
@@ -452,7 +514,7 @@ export function mountRemote(container, adapter) {
       if (gesture?.laser) return;
 
       if (point?.on === false) {
-        laserDot.classList.remove('is-visible');
+        laserDot.hide();
         return;
       }
 
@@ -460,8 +522,6 @@ export function mountRemote(container, adapter) {
       if (!rect.width) return;
 
       showLaser({ x: Number(point.x) || 0, y: Number(point.y) || 0, rect });
-      clearTimeout(laserDot._hide);
-      laserDot._hide = setTimeout(() => laserDot.classList.remove('is-visible'), 900);
     },
 
     update(next = {}) {
@@ -475,6 +535,7 @@ export function mountRemote(container, adapter) {
 
     destroy() {
       flushNotes();
+      closeOverview();
       clearInterval(timer);
       document.removeEventListener('keydown', onKey);
       container.replaceChildren();

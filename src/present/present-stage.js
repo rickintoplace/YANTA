@@ -11,9 +11,10 @@
 
 import { loadExcalidraw, loadReact } from '../draw-runtime.js';
 import { runDrawingApiUpdateWithoutSaving } from '../draw-scene-sync.js';
-import { createSlideAnimator, removeTransitionVeil, runSlideTransition } from '../slides/slides-animation.js';
+import { createSlideAnimator, hiddenIdsAt, removeTransitionVeil, runSlideTransition } from '../slides/slides-animation.js';
 import { cancelCameraAnimation, scrollToSlide, slidePointToScreen } from '../slides/slide-camera.js';
 import { motionBetween } from './present-protocol.js';
+import { createLaser } from './present-laser.js';
 
 function filesArray(files = {}) {
   return Object.values(files || {}).filter((f) => f?.id && f?.dataURL);
@@ -27,19 +28,16 @@ export async function mountPresentStage(container, { deck, theme = 'light' }) {
   const mount = document.createElement('div');
   mount.className = 'yanta-present-stage-canvas';
 
-  const laser = document.createElement('div');
-  laser.className = 'yanta-present-laser';
-
   const blank = document.createElement('div');
   blank.className = 'yanta-present-blank';
 
-  container.append(mount, laser, blank);
+  container.append(mount, blank);
+  const laser = createLaser(container);
 
   let api = null;
   let currentDeck = deck;
   let shown = null; // { index, step }
   let animator = null;
-  let laserTimer = 0;
   let pendingShow = null;
 
   const root = ReactDOM.createRoot(mount);
@@ -146,22 +144,30 @@ export async function mountPresentStage(container, { deck, theme = 'light' }) {
       currentDeck = next;
       if (!api) return;
 
-      animator?.dispose();
+      const slides = next.slides || [];
+      const index = shown ? Math.min(shown.index, Math.max(0, slides.length - 1)) : 0;
+      const step = shown?.step || 0;
+
+      /*
+        Written already hidden where the presentation hides things: swapping
+        in the plain scene first made every later build and slide flash up
+        for a frame (the screen blinked whenever the presenter edited).
+      */
+      const hidden = shown ? hiddenIdsAt(slides, index, step) : new Set();
+      const elements = (next.elements || []).map((el) => (hidden.has(el.id) ? { ...el, opacity: 0, locked: true } : el));
+
+      animator.rebase(next.elements || []);
 
       runDrawingApiUpdateWithoutSaving(api, {
-        elements: next.elements || [],
+        elements,
         appState: { viewBackgroundColor: next.appState?.viewBackgroundColor || '#ffffff' },
       });
 
       const files = filesArray(next.files);
       if (files.length) api.addFiles?.(files);
 
-      animator = createSlideAnimator({ getApi: () => api });
-
       if (shown) {
-        const slides = next.slides || [];
-        const index = Math.min(shown.index, Math.max(0, slides.length - 1));
-        animator.applyDeckState(slides, index, shown.step);
+        animator.applyDeckState(slides, index, step);
 
         const slide = slides[index];
         if (slide) scrollToSlide(api, slide, container, { animate: false });
@@ -173,7 +179,7 @@ export async function mountPresentStage(container, { deck, theme = 'light' }) {
       if (!shown || !api) return;
 
       if (point?.on === false) {
-        laser.classList.remove('is-visible');
+        laser.hide();
         return;
       }
 
@@ -182,11 +188,7 @@ export async function mountPresentStage(container, { deck, theme = 'light' }) {
       if (!p) return;
 
       const rect = container.getBoundingClientRect();
-      laser.style.transform = `translate(${p.x - rect.left}px, ${p.y - rect.top}px)`;
-      laser.classList.add('is-visible');
-
-      clearTimeout(laserTimer);
-      laserTimer = setTimeout(() => laser.classList.remove('is-visible'), 900);
+      laser.moveTo(p.x - rect.left, p.y - rect.top);
     },
 
     setBlank(on) {
@@ -195,7 +197,7 @@ export async function mountPresentStage(container, { deck, theme = 'light' }) {
 
     destroy() {
       ro.disconnect();
-      clearTimeout(laserTimer);
+      laser.destroy();
       cancelCameraAnimation();
       removeTransitionVeil();
       animator?.dispose();

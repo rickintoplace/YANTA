@@ -730,6 +730,22 @@ export default {
   },
 
   present: {
+    watch: {
+      title: '視聴リンク',
+      text: '離れた場所から見る人向け：メモや操作なしでスライドだけを表示します。',
+      create: 'リンクを作成',
+      copy: 'コピー',
+      share: '共有',
+      stop: '停止',
+      copied: 'リンクをコピーしました',
+      viewers: { one: '{count} 人が視聴中', other: '{count} 人が視聴中' },
+    },
+    edit: {
+      button: 'このスライドを修正',
+      hint: 'スライド {n} を修正中 — 変更はすぐに画面に反映されます',
+      done: '完了',
+      remoteBanner: '発表者がこのスライドを修正しています',
+    },
     nothingToPresent: 'まず何か描いてください。その後プレゼンできます。',
     role: {
       remote: 'リモコン',
@@ -814,6 +830,7 @@ export default {
       useAsRemote: 'リモコンとして使う',
     },
     remote: {
+      overview: 'すべてのスライド',
       laser: 'レーザーポインター',
       notesLabel: '発表者メモ',
       notesPlaceholder: 'このスライドのメモ…',

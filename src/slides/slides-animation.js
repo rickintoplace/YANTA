@@ -823,11 +823,27 @@ export function createSlideAnimator({ getApi }) {
     originals.clear();
   }
 
+  /**
+   * The scene is about to be replaced by `elements` (their untouched values)
+   * — a connected screen receiving an edited deck. They become the
+   * originals, so the caller can write the new scene already hidden where
+   * the presentation hides things, and nothing flashes in between.
+   */
+  function rebase(elements = []) {
+    cancelAnimation();
+    originals.clear();
+
+    for (const el of elements) {
+      if (el?.id) remember(el);
+    }
+  }
+
   return {
     applyDeckState,
     showStep,
     revealStep,
     restore,
+    rebase,
 
     /** Restores the board and stops protecting saves. Call when done for good. */
     dispose() {

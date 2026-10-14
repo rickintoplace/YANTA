@@ -740,6 +740,22 @@ export default {
   },
 
   present: {
+    watch: {
+      title: 'Enlace para espectadores',
+      text: 'Para quien sigue desde otro lugar: ve las diapositivas, sin notas ni controles.',
+      create: 'Crear enlace',
+      copy: 'Copiar',
+      share: 'Compartir',
+      stop: 'Detener',
+      copied: 'Enlace copiado',
+      viewers: { one: '{count} persona mirando', other: '{count} personas mirando' },
+    },
+    edit: {
+      button: 'Corregir esta diapositiva',
+      hint: 'Corrigiendo la diapositiva {n}: las pantallas muestran los cambios al instante',
+      done: 'Listo',
+      remoteBanner: 'Se está corrigiendo esta diapositiva',
+    },
     nothingToPresent: 'Dibuja algo primero; después se podrá presentar.',
     role: {
       remote: 'Mando',
@@ -824,6 +840,7 @@ export default {
       useAsRemote: 'Usar como mando',
     },
     remote: {
+      overview: 'Todas las diapositivas',
       laser: 'Puntero láser',
       notesLabel: 'Notas del presentador',
       notesPlaceholder: 'Notas para esta diapositiva…',

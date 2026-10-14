@@ -127,6 +127,7 @@ import {
 import { t } from '../i18n/index.js';
 import { currentPresentHost, presentHostFor, resumePresentHost } from '../present/present-host.js';
 import { buildDeck } from '../present/present-deck.js';
+import { createLaser } from '../present/present-laser.js';
 
 import {
   cancelCameraAnimation,
@@ -538,6 +539,44 @@ function injectCss() {
   inset: 0;
   z-index: 620;
   pointer-events: none;
+}
+
+/* Correcting a slide: the editor is live again, the stage does not catch touches. */
+body.yanta-slideshow-editing .yanta-laser-layer,
+body.yanta-slideshow-editing .yanta-slideshow-toolbar,
+body.yanta-slideshow-editing .yanta-slideshow-progress {
+  display: none !important;
+}
+
+.yanta-slideshow-editbar {
+  position: fixed;
+  left: 50%;
+  bottom: max(18px, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 624;
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: calc(100vw - 20px);
+  box-sizing: border-box;
+  padding: 7px 7px 7px 14px;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--bg-elev) 94%, transparent);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 16px 50px rgba(0,0,0,.3);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.yanta-slideshow-editbar span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* "Blank screen" from a remote (B on a clicker): black, toolbar still usable. */
@@ -3343,6 +3382,7 @@ export function startSlideshow({
     <button class="icon-btn" data-slide-next title="Next (→)">${lucide('chevron-right', 18)}</button>
     <button class="icon-btn" data-slide-laser title="Laser pointer (L)">${lucide('mouse-pointer-2', 17)}</button>
     <button class="icon-btn" data-slide-notes title="Speaker notes (N)">${lucide('notebook-text', 17)}</button>
+    <button class="icon-btn" data-slide-edit title="${escapeAttr(t('present.edit.button'))}">${lucide('pencil', 17)}</button>
     <button class="icon-btn" data-slide-connect title="${escapeAttr(t('present.connect.menu'))}">${lucide('cast', 17)}</button>
     <button class="icon-btn" data-slide-presenter hidden title="${escapeAttr(t('present.remote.presenterView'))}">${lucide('tablet-smartphone', 17)}</button>
     <button class="icon-btn" data-slide-immersive title="Browser fullscreen">${lucide('maximize', 17)}</button>
@@ -3351,11 +3391,11 @@ export function startSlideshow({
 
   const laserLayer = document.createElement('div');
   laserLayer.className = 'yanta-laser-layer';
-  laserLayer.innerHTML = `<div class="yanta-laser-dot" data-laser-dot></div>`;
 
   root.append(progressEl, toolbar, laserLayer);
   document.body.append(root);
   bindStageGestures(laserLayer);
+  const laser = createLaser(laserLayer);
 
   slideshow = {
     noteId,
@@ -3369,6 +3409,7 @@ export function startSlideshow({
     toolbar,
     progressEl,
     laserLayer,
+    laser,
     laserEnabled: false,
     notesOpen: false,
     notesEl: null,
@@ -3424,6 +3465,7 @@ export function startSlideshow({
   });
 
   toolbar.querySelector('[data-slide-presenter]')?.addEventListener('click', togglePresenterView);
+  toolbar.querySelector('[data-slide-edit]')?.addEventListener('click', () => startSlideshowEditing());
 
   toolbar.querySelector('[data-slide-immersive]')?.addEventListener('click', () => {
     if (document.fullscreenElement) {
@@ -3517,8 +3559,11 @@ export function stopSlideshow() {
   document.removeEventListener('keydown', slideshowKeyHandler, true);
   document.removeEventListener('pointermove', laserPointerMove, true);
   slideshow.notesEl?.remove();
+  slideshow.laser?.destroy();
   slideshow.root?.remove();
   closePresenterView();
+  slideshow.editBar?.remove();
+  document.body.classList.remove('yanta-slideshow-editing');
 
   const presentHost = currentPresentHost();
   if (presentHost?.noteId === noteId && presentHost?.drawingId === drawingId) {
@@ -3553,6 +3598,18 @@ function slideshowKeyHandler(e) {
     normal typing, arrows, Space, N/L etc. from native inputs.
   */
   if (isTextInputTarget(e.target)) {
+    return;
+  }
+
+  // Correcting a slide: the keys belong to the editor — except Escape,
+  // which finishes the correction (and never ends the presentation).
+  if (slideshow.editing) {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      stopSlideshowEditing();
+    }
     return;
   }
 
@@ -3618,6 +3675,12 @@ function slideshowKeyHandler(e) {
     return;
   }
 
+  if (e.key.toLowerCase() === 'e') {
+    consume();
+    startSlideshowEditing();
+    return;
+  }
+
   // Blank the screen, as every presentation app and clicker does.
   if (e.key.toLowerCase() === 'b' || e.key === '.') {
     consume();
@@ -3677,8 +3740,7 @@ function toggleLaser() {
   slideshow.root?.classList.toggle('is-laser', slideshow.laserEnabled);
 
   if (!slideshow.laserEnabled) {
-    const dot = slideshow.root.querySelector('[data-laser-dot]');
-    dot?.classList.remove('visible');
+    hideLaserDot();
     currentPresentHost()?.laser({ on: false });
   }
 }
@@ -3715,7 +3777,7 @@ function bindStageGestures(layer) {
 
     if (slideshow.laserEnabled) {
       if (e.pointerType !== 'mouse') {
-        slideshow.root.querySelector('[data-laser-dot]')?.classList.remove('visible');
+        hideLaserDot();
         currentPresentHost()?.laser({ on: false });
       }
       return;
@@ -3738,19 +3800,11 @@ function bindStageGestures(layer) {
 }
 
 function showLaserDot(x, y) {
-  if (!slideshow) return;
+  slideshow?.laser?.moveTo(x, y);
+}
 
-  const dot = slideshow.root.querySelector('[data-laser-dot]');
-  if (!dot) return;
-
-  dot.style.left = `${x}px`;
-  dot.style.top = `${y}px`;
-  dot.classList.add('visible');
-
-  clearTimeout(slideshow.laserHideTimer);
-  slideshow.laserHideTimer = window.setTimeout(() => {
-    dot.classList.remove('visible');
-  }, 850);
+function hideLaserDot() {
+  slideshow?.laser?.hide();
 }
 
 function showLaserDotFromRemote(data = {}) {
@@ -3877,11 +3931,67 @@ function publishRemoteState() {
       index: slideshow.index,
       step: slideshow.step,
       blank: !!slideshow.blank,
+      editing: !!slideshow.editing,
       slides: slideshow.slides,
     });
   }
 
   updatePresenterView();
+}
+
+/*
+  Correcting a slide mid-talk. Someone spots a mistake; the presenter fixes
+  it on the spot and carries on. The presentation stays where it is, the
+  editor tools come back, and every connected screen shows the fix as it
+  is made (the deck follows the drawing). Done — or Escape — puts the
+  presentation back exactly on this slide and step, now corrected.
+*/
+function startSlideshowEditing({ reopenPresenterView = false } = {}) {
+  if (!slideshow || slideshow.editing) return;
+
+  if (slideshow.laserEnabled) toggleLaser();
+  hideLaserDot();
+
+  slideshow.editing = { wasImmersive: slideshow.immersive, reopenPresenterView };
+  document.body.classList.add('yanta-slideshow-editing');
+  setSlideshowImmersive(false);
+
+  try {
+    (currentApiForDrawing(slideshow.noteId, slideshow.drawingId) || slideshow.api)?.setActiveTool?.({ type: 'selection' });
+  } catch {}
+
+  const bar = document.createElement('div');
+  bar.className = 'yanta-slideshow-editbar';
+  bar.innerHTML = `
+    ${lucide('pencil', 16)}
+    <span>${escapeHtml(t('present.edit.hint', { n: slideshow.index + 1 }))}</span>
+    <button type="button" class="btn primary" data-edit-done>${escapeHtml(t('present.edit.done'))}</button>
+  `;
+  bar.querySelector('[data-edit-done]').addEventListener('click', stopSlideshowEditing);
+  slideshow.root.append(bar);
+  slideshow.editBar = bar;
+
+  publishRemoteState();
+}
+
+function stopSlideshowEditing() {
+  if (!slideshow?.editing) return;
+
+  const { wasImmersive, reopenPresenterView } = slideshow.editing;
+  slideshow.editing = null;
+
+  slideshow.editBar?.remove();
+  slideshow.editBar = null;
+  document.body.classList.remove('yanta-slideshow-editing');
+
+  // Picks up what was added or moved, and frames the slide again.
+  const fresh = presentationSlidesFor(getDrawing(slideshow.noteId, slideshow.drawingId));
+  if (fresh.length) slideshow.slides = fresh;
+
+  goToSlide(Math.min(slideshow.index, slideshow.slides.length - 1), { step: slideshow.step });
+
+  if (wasImmersive) setSlideshowImmersive(true);
+  if (reopenPresenterView) openPresenterView();
 }
 
 /** Re-reads the running deck's slides (notes changed) without moving. */
@@ -3942,7 +4052,7 @@ function bindPresentHost(host) {
       slideshow.presenterView?.laser?.(point);
 
       if (point?.on === false) {
-        slideshow.root?.querySelector('[data-laser-dot]')?.classList.remove('visible');
+        hideLaserDot();
         return;
       }
 
@@ -4066,21 +4176,26 @@ async function openPresenterView() {
   document.body.append(box);
 
   const view = mountRemote(box, {
-    command: (op) => {
+    command: (op, extra = {}) => {
       if (op === 'next') nextSlide();
       else if (op === 'prev') previousSlide();
       else if (op === 'blank') setSlideshowBlank(!slideshow?.blank);
+      else if (op === 'goto' && Number.isInteger(extra.index)) goToSlide(extra.index);
     },
     laser: (point) => {
       currentPresentHost()?.laser(point);
 
       if (point?.on === false) {
-        slideshow?.root?.querySelector('[data-laser-dot]')?.classList.remove('visible');
+        hideLaserDot();
       } else {
         showLaserDotFromRemote({ unit: 'slide', x: point.x, y: point.y });
       }
     },
     connect: () => openConnectForDrawing({ noteId: slideshow.noteId, drawingId: slideshow.drawingId }),
+    edit: () => {
+      closePresenterView();
+      startSlideshowEditing({ reopenPresenterView: true });
+    },
     editNotes: (slideId, text) => {
       if (!slideshow) return;
 

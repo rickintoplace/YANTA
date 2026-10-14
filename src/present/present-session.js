@@ -253,7 +253,8 @@ export function runJoinedSession(joined, { onState, onDeck, onLaser, onStatus, o
   async function openSession() {
     session?.close();
     session = openSecureTopic(channel, {
-      topic: await topicFor('session', sessionKey),
+      // A watch link opens the audience topic; everyone else the session.
+      topic: await topicFor(joined.role === 'audience' ? 'watch' : 'session', sessionKey),
       key: await importKeyString(sessionKey),
       deviceId,
       onMessage,
@@ -275,6 +276,11 @@ export function runJoinedSession(joined, { onState, onDeck, onLaser, onStatus, o
 
     deckAskedAt = Date.now();
     session?.post('need-deck', { have: deck?.version || '', files: Object.keys(deck?.files || {}) }, { to: hostId });
+  }
+
+  /** Audience decks arrive as broadcasts: one that is not newer changes nothing. */
+  function isStaleBroadcastDeck(body) {
+    return joined.role === 'audience' && deck?.version === body.version;
   }
 
   function flushCommands() {
@@ -309,6 +315,8 @@ export function runJoinedSession(joined, { onState, onDeck, onLaser, onStatus, o
     }
 
     if (kind === 'deck') {
+      if (isStaleBroadcastDeck(body)) return;
+
       deck = mergeDeck(deck, body);
       deckAskedAt = 0;
       onDeck?.(deck);

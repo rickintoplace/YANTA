@@ -234,6 +234,7 @@ describe('presenting to connected devices', () => {
 
   it('a note written on the remote lands in the drawing and on every device', async () => {
     const decksBefore = tv.seen.decks.length;
+    const versionBefore = tv.last().deckVersion;
 
     remote.session.editNotes('s2', 'Mention the Q3 dip');
 
@@ -243,6 +244,12 @@ describe('presenting to connected devices', () => {
 
     // Notes travel alone: the board was not resent for them.
     expect(tv.seen.decks.at(-1).elements.length).toBe(tv.seen.decks[decksBefore - 1].elements.length);
+
+    // …and the board version stays: screens do not swap their scene (that
+    // swap is what made a screen flicker while the presenter typed notes).
+    await sleep(1500);
+    expect(tv.last().deckVersion).toBe(versionBefore);
+    expect(tv.seen.decks.at(-1).version).toBe(versionBefore);
   });
 
   it('a removed device is cut off; the others carry on with a new key', async () => {
@@ -261,9 +268,30 @@ describe('presenting to connected devices', () => {
     expect(host.peers.some((p) => p.id === remoteId)).toBe(false);
   });
 
+  let viewer;
+
+  it('a watch link shows the slides — no notes, no control', async () => {
+    await host.openAudience();
+    const key = host.audienceUrl.split('#watch=')[1];
+    expect(key).toBeTruthy();
+
+    asNewDevice();
+    viewer = joinSession({ sessionKey: key, role: 'audience', title: '', host: '' });
+
+    await until(() => viewer.last() && viewer.seen.decks.length);
+    expect(viewer.seen.decks.at(-1).notes).toEqual({});
+    expect(viewer.seen.decks.at(-1).elements.length).toBeGreaterThan(0);
+    await until(() => host.viewerCount === 1);
+
+    const before = applied.length;
+    viewer.session.send('next');
+    await sleep(1500);
+    expect(applied.length).toBe(before);
+  });
+
   it('ending the session tells every device', async () => {
     await host.end();
-    await until(() => tv.seen.ends.includes('ended') && laptop.seen.ends.includes('ended'));
+    await until(() => tv.seen.ends.includes('ended') && laptop.seen.ends.includes('ended') && viewer.seen.ends.includes('ended'));
     host = null;
   });
 });

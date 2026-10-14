@@ -45,6 +45,11 @@ function view(html) {
   return root;
 }
 
+function watchKeyFromHash() {
+  const match = /(?:^|[#&])watch=([A-Za-z0-9_-]{40,})/.exec(location.hash || '');
+  return match ? match[1] : '';
+}
+
 function ticketFromHash() {
   const match = /(?:^|[#&])join=([A-Za-z0-9_-]{40,})/.exec(location.hash || '');
   return match ? match[1] : '';
@@ -59,6 +64,14 @@ export function mountPresentJoinPage() {
 
   root = document.createElement('div');
   document.body.replaceChildren(root);
+
+  // A watch link: the slides, nothing else — no pairing, no controls.
+  const watchKey = watchKeyFromHash();
+
+  if (watchKey) {
+    runSession({ sessionKey: watchKey, role: 'audience', title: '', host: '' });
+    return;
+  }
 
   const ticket = ticketFromHash();
 
@@ -253,7 +266,8 @@ function joinWith({ ticketKey = '', code = '', role }) {
 // ---------- In a session
 
 function runSession(joined) {
-  let role = joined.role === 'screen' ? 'screen' : 'remote';
+  const audience = joined.role === 'audience';
+  let role = joined.role === 'screen' || audience ? 'screen' : 'remote';
   let state = null;
   let deck = null;
   let status = 'online';
@@ -270,10 +284,12 @@ function runSession(joined) {
       render();
     },
     onDeck: (next) => {
-      const first = !deck;
+      // Only a new board is swapped in; a notes update changes nothing a
+      // screen shows.
+      const boardChanged = !!deck && next.version !== deck.version;
       deck = next;
 
-      if (ui?.kind === 'screen' && ui.stage && !first) ui.stage.setDeck(deck);
+      if (ui?.kind === 'screen' && ui.stage && boardChanged) ui.stage.setDeck(deck);
       render();
     },
     onLaser: (point) => {
@@ -355,7 +371,7 @@ function runSession(joined) {
             <span class="yanta-present-dot" data-dot></span>
             <span data-pill-text></span>
             <button type="button" data-fullscreen title="${escapeHtml(t('present.remote.fullscreen'))}">${lucide('maximize', 15)}</button>
-            <button type="button" data-as-remote title="${escapeHtml(t('present.screen.useAsRemote'))}">${lucide('smartphone', 15)}</button>
+            ${audience ? '' : `<button type="button" data-as-remote title="${escapeHtml(t('present.screen.useAsRemote'))}">${lucide('smartphone', 15)}</button>`}
             <button type="button" data-leave title="${escapeHtml(t('present.remote.disconnect'))}">${lucide('log-out', 15)}</button>
           </div>
         </div>
@@ -378,7 +394,7 @@ function runSession(joined) {
         document.documentElement.requestFullscreen?.().catch(() => {});
       });
 
-      host.querySelector('[data-as-remote]').addEventListener('click', () => switchRole('remote'));
+      host.querySelector('[data-as-remote]')?.addEventListener('click', () => switchRole('remote'));
 
       host.querySelector('[data-leave]').addEventListener('click', () => {
         session.leave();
@@ -390,9 +406,11 @@ function runSession(joined) {
 
       // Clicker / keyboard on the screen device itself.
       const onKey = (e) => {
+        if (e.key === 'f' || e.key === 'F') document.documentElement.requestFullscreen?.().catch(() => {});
+        if (audience) return;
+
         if (['ArrowRight', 'PageDown', ' '].includes(e.key)) session.send('next');
         else if (['ArrowLeft', 'PageUp'].includes(e.key)) session.send('prev');
-        else if (e.key === 'f' || e.key === 'F') document.documentElement.requestFullscreen?.().catch(() => {});
       };
 
       document.addEventListener('keydown', onKey);

@@ -747,6 +747,22 @@ export default {
   },
 
   present: {
+    watch: {
+      title: 'Watch link',
+      text: 'For people following from elsewhere: they see the slides, without notes or controls.',
+      create: 'Create link',
+      copy: 'Copy',
+      share: 'Share',
+      stop: 'Stop',
+      copied: 'Link copied',
+      viewers: { one: '{count} person watching', other: '{count} people watching' },
+    },
+    edit: {
+      button: 'Correct this slide',
+      hint: 'Correcting slide {n} — screens show your changes live',
+      done: 'Done',
+      remoteBanner: 'The presenter is correcting this slide',
+    },
     nothingToPresent: 'Draw something first — then it can be presented.',
     role: {
       remote: 'Remote',
@@ -831,6 +847,7 @@ export default {
       useAsRemote: 'Use as remote',
     },
     remote: {
+      overview: 'All slides',
       laser: 'Laser pointer',
       notesLabel: 'Presenter notes',
       notesPlaceholder: 'Notes for this slide…',

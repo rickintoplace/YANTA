@@ -674,10 +674,10 @@ body.yanta-present-page {
 }
 
 .yanta-pr-notes-box {
-  flex: 1 0 auto;
+  flex: 1 1 auto;
   position: relative;
   display: flex;
-  min-height: 110px;
+  min-height: 90px;
 }
 
 .yanta-pr-notes {
@@ -770,8 +770,89 @@ body.yanta-present-page {
 }
 
 .yanta-pr-now.is-laser {
-  box-shadow: 0 0 0 2px #ff3b30;
   cursor: crosshair;
+}
+
+/* Inside the box: an outer ring was cut off at the top of the scroller. */
+.yanta-pr-now.is-laser::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border: 2px solid #ff3b30;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 6;
+}
+
+.yanta-pr-overview {
+  position: absolute;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  background: #0f0f0f;
+}
+
+.yanta-pr-overview-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: max(10px, env(safe-area-inset-top)) 12px 6px 16px;
+  font-size: 16px;
+}
+
+.yanta-pr-overview-grid {
+  flex: 1;
+  overflow: auto;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+  padding: 6px 12px max(16px, env(safe-area-inset-bottom));
+  align-content: start;
+}
+
+.yanta-pr-overview-item {
+  all: unset;
+  display: grid;
+  gap: 6px;
+  cursor: pointer;
+  border-radius: 12px;
+}
+
+.yanta-pr-overview-thumb {
+  aspect-ratio: 16 / 9;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #1b1b1b;
+  display: grid;
+  place-items: center;
+  border: 2px solid transparent;
+}
+
+.yanta-pr-overview-item.is-current .yanta-pr-overview-thumb {
+  border-color: #9fb33a;
+}
+
+.yanta-pr-overview-thumb img {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.yanta-pr-overview-thumb img:not([src]) {
+  visibility: hidden;
+}
+
+.yanta-pr-overview-title {
+  font-size: 13px;
+  color: #cfccc7;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.yanta-pr-overview-title b {
+  color: #8d8a85;
+  margin-right: 4px;
 }
 
 .yanta-pr-progress {
@@ -797,8 +878,19 @@ body.yanta-present-page {
   }
 
   .yanta-pr-now {
+    grid-column: 1;
     grid-row: 1 / span 2;
     max-height: none;
+  }
+
+  .yanta-pr-next-row {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .yanta-pr-notes-box {
+    grid-column: 2;
+    grid-row: 2;
   }
 
   .yanta-pr-notes-box {

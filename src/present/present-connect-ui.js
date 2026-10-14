@@ -179,6 +179,23 @@ function render(host) {
         <p class="yanta-pc-url" style="margin:6px 0 0">${escapeHtml(t('present.connect.screenHint', { site: `${location.host}/present` }))}</p>
       </div>
 
+      <div>
+        <div class="yanta-pc-section-title">${escapeHtml(t('present.watch.title'))}</div>
+        ${host.audienceUrl ? `
+          <div class="yanta-pc-screen">
+            <input class="text-input" readonly value="${escapeHtml(host.audienceUrl)}" data-watch-url aria-label="${escapeHtml(t('present.watch.title'))}" style="text-transform:none;letter-spacing:0;font-weight:500">
+            <button type="button" class="btn primary" data-watch-copy>${escapeHtml(navigator.share ? t('present.watch.share') : t('present.watch.copy'))}</button>
+            <button type="button" class="btn" data-watch-stop>${escapeHtml(t('present.watch.stop'))}</button>
+          </div>
+          <p class="yanta-pc-url" style="margin:6px 0 0">${escapeHtml(t('present.watch.viewers', { count: host.viewerCount }))}</p>
+        ` : `
+          <div class="yanta-pc-foot">
+            <p class="yanta-pc-url" style="margin:0">${escapeHtml(t('present.watch.text'))}</p>
+            <button type="button" class="btn" data-watch-create>${lucide('link', 15)} ${escapeHtml(t('present.watch.create'))}</button>
+          </div>
+        `}
+      </div>
+
       <div class="yanta-pc-foot">
         <span class="yanta-pc-status"><span class="yanta-present-dot" data-state="${statusState(host)}"></span>${escapeHtml(statusText(host))}</span>
         ${peers.length ? `<button type="button" class="btn danger" data-end>${escapeHtml(t('present.connect.end'))}</button>` : ''}
@@ -190,6 +207,29 @@ function render(host) {
   if (host.ticketUrl) qr.append(renderBrandedQrSvg(host.ticketUrl, { size: 168, logo: BRAND_LOGO_SVG }));
 
   card.querySelector('[data-close]').addEventListener('click', () => closeConnectPanel());
+
+  card.querySelector('[data-watch-create]')?.addEventListener('click', () => {
+    host.openAudience().catch(() => toast(t('present.connect.offline'), 'error'));
+  });
+
+  card.querySelector('[data-watch-stop]')?.addEventListener('click', () => host.closeAudience());
+
+  card.querySelector('[data-watch-copy]')?.addEventListener('click', async () => {
+    const url = host.audienceUrl;
+    if (!url) return;
+
+    try {
+      if (navigator.share) {
+        await navigator.share({ title: t('present.watch.title'), url });
+        return;
+      }
+
+      await navigator.clipboard.writeText(url);
+      toast(t('present.watch.copied'), 'success');
+    } catch (err) {
+      if (err?.name !== 'AbortError') card.querySelector('[data-watch-url]')?.select();
+    }
+  });
 
   // A code that was read out loud or seen by the wrong people: replace it.
   card.querySelector('[data-rotate]')?.addEventListener('click', () => {

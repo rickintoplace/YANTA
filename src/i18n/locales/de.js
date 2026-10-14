@@ -740,6 +740,22 @@ export default {
   },
 
   present: {
+    watch: {
+      title: 'Zuschauer-Link',
+      text: 'Für alle, die von woanders zuschauen: Sie sehen die Folien, ohne Notizen und ohne Steuerung.',
+      create: 'Link erstellen',
+      copy: 'Kopieren',
+      share: 'Teilen',
+      stop: 'Beenden',
+      copied: 'Link kopiert',
+      viewers: { one: '{count} Person schaut zu', other: '{count} Personen schauen zu' },
+    },
+    edit: {
+      button: 'Diese Folie korrigieren',
+      hint: 'Folie {n} wird korrigiert – Bildschirme zeigen die Änderung sofort',
+      done: 'Fertig',
+      remoteBanner: 'Die Folie wird gerade korrigiert',
+    },
     nothingToPresent: 'Zeichne zuerst etwas – dann lässt es sich präsentieren.',
     role: {
       remote: 'Fernbedienung',
@@ -824,6 +840,7 @@ export default {
       useAsRemote: 'Als Fernbedienung nutzen',
     },
     remote: {
+      overview: 'Alle Folien',
       laser: 'Laserpointer',
       notesLabel: 'Notizen',
       notesPlaceholder: 'Notizen zu dieser Folie…',

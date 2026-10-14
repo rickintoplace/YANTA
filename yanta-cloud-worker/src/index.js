@@ -342,6 +342,8 @@ function lowestReasoningEffort(efforts = []) {
 */
 var AI_MODEL_INDEX_KEY = "ai:model-index:v1";
 var AI_MODEL_INDEX_TTL_MS = 6 * 60 * 60 * 1000;
+// 2: hosts within the price ceiling per model (refreshAiModelIndex).
+var AI_MODEL_INDEX_VERSION = 2;
 function aiIndexedModelIds() {
   return Object.keys(INCLUDED_AI_MODELS);
 }
@@ -399,6 +401,23 @@ async function refreshAiModelIndex(env) {
     if (m) models[id] = reduceOpenRouterModel(m);
     else missing.push(id);
   }
+  /*
+    The list price is one provider's — OpenRouter shows the host with the
+    cheapest input, which can charge more for output than everyone else.
+    What decides whether requests go through is whether any host sits
+    within our ceiling (max_price filters per host), so count those.
+  */
+  for (const [id, cfg] of Object.entries(INCLUDED_AI_MODELS)) {
+    if (!models[id]) continue;
+    try {
+      const r = await fetch(`https://openrouter.ai/api/v1/models/${id}/endpoints`);
+      if (!r.ok) continue;
+      const eps = (await r.json())?.data?.endpoints || [];
+      const perM = (v) => Number(v) * 1e6;
+      const within = eps.filter((e) => perM(e.pricing?.prompt) <= cfg.prompt + 1e-9 && perM(e.pricing?.completion) <= cfg.completion + 1e-9);
+      models[id].endpoints = { total: eps.length, withinCeiling: within.length };
+    } catch {}
+  }
   // Decision models are not in the chat catalog; their endpoint list is small.
   const decision = {};
   for (const id of Object.keys(DECISION_MODELS)) {
@@ -413,7 +432,7 @@ async function refreshAiModelIndex(env) {
       decision[id] = { endpoints: 0, uptime1d: 0 };
     }
   }
-  const index = { checkedAt: Date.now(), models, missing, decision };
+  const index = { v: AI_MODEL_INDEX_VERSION, checkedAt: Date.now(), models, missing, decision };
   await ensureAppStateTable(env);
   await env.DB.prepare(
     `INSERT INTO app_state (key, value, updated_at) VALUES (?, ?, ?)
@@ -454,7 +473,8 @@ async function readAiModelIndex(env) {
 }
 async function maybeRefreshAiModelIndex(env) {
   const index = await readAiModelIndex(env);
-  if (index && Date.now() - Number(index.checkedAt || 0) < AI_MODEL_INDEX_TTL_MS) return;
+  // An index of an older shape is refreshed right away (after a deploy).
+  if (index?.v === AI_MODEL_INDEX_VERSION && Date.now() - Number(index.checkedAt || 0) < AI_MODEL_INDEX_TTL_MS) return;
   aiModelIndexMemo = { at: 0, value: null };
   await refreshAiModelIndex(env);
 }
@@ -482,7 +502,11 @@ function aiCatalogHealth(live) {
     }
     const expires = Date.parse(m.expiresAt || "");
     if (Number.isFinite(expires) && expires <= soon) problems.push(`${id}: shuts down ${m.expiresAt}`);
-    if (m.price?.prompt > cfg.prompt || m.price?.completion > cfg.completion) {
+    if (m.endpoints) {
+      if (m.endpoints.withinCeiling === 0) {
+        problems.push(`${id}: none of ${m.endpoints.total} hosts within ceiling ${cfg.prompt}/${cfg.completion}`);
+      }
+    } else if (m.price?.prompt > cfg.prompt || m.price?.completion > cfg.completion) {
       problems.push(`${id}: list price ${m.price.prompt}/${m.price.completion} above ceiling ${cfg.prompt}/${cfg.completion}`);
     }
     if (m.reasoning?.mandatory && cfg.reasoning !== "required") problems.push(`${id}: thinking became mandatory`);

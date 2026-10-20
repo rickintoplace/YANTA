@@ -343,7 +343,8 @@ function lowestReasoningEffort(efforts = []) {
 var AI_MODEL_INDEX_KEY = "ai:model-index:v1";
 var AI_MODEL_INDEX_TTL_MS = 6 * 60 * 60 * 1000;
 // 2: hosts within the price ceiling per model (refreshAiModelIndex).
-var AI_MODEL_INDEX_VERSION = 2;
+// 3: Decider V1.2 replaced V1.1 (which lost its last host 2026-10-17).
+var AI_MODEL_INDEX_VERSION = 3;
 function aiIndexedModelIds() {
   return Object.keys(INCLUDED_AI_MODELS);
 }
@@ -511,9 +512,10 @@ function aiCatalogHealth(live) {
     }
     if (m.reasoning?.mandatory && cfg.reasoning !== "required") problems.push(`${id}: thinking became mandatory`);
   }
-  for (const id of Object.keys(DECISION_MODELS)) {
-    const d = live.decision?.[id];
-    if (d && !d.endpoints) problems.push(`${id}: decision model has no endpoints (Pulse check/rank fall back to running everything)`);
+  // Only a problem when no decision model is left: the others stand in.
+  const decisionIds = Object.keys(DECISION_MODELS);
+  if (decisionIds.every((id) => live.decision?.[id] && !live.decision[id].endpoints)) {
+    problems.push(`${decisionIds.join(", ")}: no decision model has endpoints (Pulse check/rank/novelty fall back to running everything)`);
   }
   const stale = Date.now() - Number(live.checkedAt || 0) > 2 * AI_MODEL_INDEX_TTL_MS;
   if (stale) problems.push("model index is stale (cron refresh failing?)");
@@ -543,7 +545,7 @@ async function handleAiModels(env, headers) {
   return json({
     default: aiModelGone(INCLUDED_AI_DEFAULT_MODEL, live) ? models[0]?.id || INCLUDED_AI_DEFAULT_MODEL : INCLUDED_AI_DEFAULT_MODEL,
     models,
-    decisionModel: DECISION_DEFAULT_MODEL,
+    decisionModel: pickDecisionModel(null, live),
     checkedAt: live?.checkedAt || null
   }, 200, { ...headers, "cache-control": "public, max-age=3600" });
 }
@@ -5960,12 +5962,23 @@ __name(meterAiStream, "meterAiStream");
   on a scale (score). Used by Pulse to skip runs with nothing to report
   and to grade results. Output tokens are free; input costs fractions of
   a cent. Perplexity Decider has open weights and is served with zero
-  data retention (checked 2026-10-07).
+  data retention (checked 2026-10-20, /api/v1/endpoints/zdr).
+
+  In order of preference. Checkpoints are retired without notice — V1.1
+  lost its last host on 2026-10-17 and every Pulse check silently failed
+  open — so a request goes to the first one that still has a host.
 */
 var DECISION_MODELS = {
-  "perplexity/pplx-decider-v1.1-27b": { prompt: 0.02 }
+  "perplexity/pplx-decider-v1.2": { prompt: 0.02 },
+  "perplexity/pplx-decider-flash-v1.2": { prompt: 0.01 }
 };
-var DECISION_DEFAULT_MODEL = "perplexity/pplx-decider-v1.1-27b";
+var DECISION_DEFAULT_MODEL = "perplexity/pplx-decider-v1.2";
+// Older clients ask for a retired checkpoint by name; they get the default.
+function pickDecisionModel(requested, live) {
+  const hosted = (id) => !live?.decision?.[id] || live.decision[id].endpoints > 0;
+  if (DECISION_MODELS[requested] && hosted(requested)) return requested;
+  return Object.keys(DECISION_MODELS).find(hosted) || DECISION_DEFAULT_MODEL;
+}
 var DECISION_QUESTION_TYPES = /* @__PURE__ */ new Set(["noul", "choice", "score"]);
 function openRouterDecisionsUrl(env) {
   return String(env.OPENROUTER_DECISIONS_URL || "https://openrouter.ai/api/alpha/decisions");
@@ -6042,7 +6055,7 @@ async function handleAiDecide(env, req, headers) {
     return json({ error: { message: err.message } }, 400, headers);
   }
 
-  const model = DECISION_MODELS[body.model] ? body.model : DECISION_DEFAULT_MODEL;
+  const model = pickDecisionModel(body.model, await readAiModelIndex(env));
 
   const res = await fetch(openRouterDecisionsUrl(env), {
     method: "POST",

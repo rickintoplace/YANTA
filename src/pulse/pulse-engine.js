@@ -44,6 +44,19 @@ import { refreshPulseWakeSchedule } from './pulse-wake.js';
 
 import { isPulseStateFresh } from './pulse-freshness.js';
 
+import {
+  pulseMaps,
+  refreshPulseDocFromStorage,
+  touchPulseNote,
+} from './pulse-doc.js';
+
+import {
+  CLAIM_SETTLE_MS,
+  claimedElsewhere,
+  claimWinner,
+  writeClaim,
+} from './pulse-claims.js';
+
 const TICK_MS = 60_000;
 const BOOT_DELAY_MS = 12_000;
 
@@ -96,7 +109,50 @@ async function isDue(routine, now, { catchUp = true } = {}) {
 }
 
 /**
- * One scheduler pass. Safe to call at any time; never overlaps itself.
+ * Claims a due routine for this device and waits for the other devices
+ * to answer (see pulse-claims.js). True when this device should run it.
+ */
+async function claimRoutine(name) {
+  // Without sync there is no other device to race.
+  const deviceId = window.yantaSync2?.deviceId;
+  if (!deviceId) return true;
+
+  const { claims } = await pulseMaps();
+
+  if (claimedElsewhere(claims, name, deviceId)) return false;
+
+  writeClaim(claims, name, deviceId);
+  await touchPulseNote();
+
+  window.dispatchEvent(new CustomEvent('yanta-sync2-request', {
+    detail: { reason: 'pulse-claim' },
+  }));
+
+  await new Promise((resolve) => window.setTimeout(resolve, CLAIM_SETTLE_MS));
+
+  return claimWinner(claims, name)?.deviceId === deviceId;
+}
+
+/*
+  Tabs of one origin share the device id, so claims cannot tell them
+  apart: one tab at a time runs passes, and each pass starts from what
+  the others persisted.
+*/
+function withPassLock(fn) {
+  if (!navigator.locks?.request) return fn();
+
+  return navigator.locks.request('yanta-pulse-pass', { ifAvailable: true }, async (lock) => {
+    if (!lock) return { ran: 0, skipped: 'other-tab' };
+
+    await refreshPulseDocFromStorage().catch(() => {});
+
+    return fn();
+  });
+}
+
+/**
+ * One scheduler pass. Safe to call at any time; never overlaps itself,
+ * nor a pass in another tab.
  *
  * `waitForSync` marks a pass that starts with possibly stale state — on
  * boot, or on return from the background. Such a pass waits for the run
@@ -106,9 +162,16 @@ async function isDue(routine, now, { catchUp = true } = {}) {
 export async function pulseTick({ reason = 'tick', waitForSync = false } = {}) {
   if (ticking) return { ran: 0, skipped: 'busy' };
 
-
   ticking = true;
 
+  try {
+    return await withPassLock(() => runPass({ reason, waitForSync }));
+  } finally {
+    ticking = false;
+  }
+}
+
+async function runPass({ reason, waitForSync }) {
   try {
     const settings = await getPulseSettings();
 
@@ -139,6 +202,13 @@ export async function pulseTick({ reason = 'tick', waitForSync = false } = {}) {
     const results = [];
 
     for (const routine of active) {
+      if (await blockedReason(routine, settings, Date.now())) continue;
+
+      if (!(await isDue(routine, Date.now(), { catchUp })).due) continue;
+
+      if (!await claimRoutine(routine.name)) continue;
+
+      // The wait may have brought in another device's run of this slot.
       if (await blockedReason(routine, settings, Date.now())) continue;
 
       const { due, dueAt } = await isDue(routine, Date.now(), { catchUp });
@@ -175,8 +245,6 @@ export async function pulseTick({ reason = 'tick', waitForSync = false } = {}) {
   } catch (err) {
     console.warn('[YANTA Pulse] tick failed', err);
     return { ran: 0, error: err?.message || String(err) };
-  } finally {
-    ticking = false;
   }
 }
 

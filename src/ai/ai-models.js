@@ -84,6 +84,18 @@ function defaultIncludedModel() {
     : DEFAULT_INCLUDED_AI_MODEL;
 }
 
+/*
+  Decider checkpoints get retired without notice; the worker names the
+  one that still has a host. BYOK requests go straight to OpenRouter and
+  use the same answer.
+*/
+export const DEFAULT_DECISION_MODEL = 'perplexity/pplx-decider-v1.2';
+
+export function decisionModel() {
+  const id = serverMenu()?.decisionModel;
+  return typeof id === 'string' && id.startsWith('perplexity/pplx-decider') ? id : DEFAULT_DECISION_MODEL;
+}
+
 export function includedAiModelInfo(model) {
   return includedAiModels().find((m) => m.id === String(model || '').trim()) || null;
 }

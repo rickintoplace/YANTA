@@ -30,6 +30,8 @@ import {
 
 import { recordAiUsage } from './ai-usage-stats.js';
 
+import { decisionModel } from './ai-models.js';
+
 function apiUrl(path) {
   const base = String(YANTA_CLOUD_BASE_URL || '/cloud-api').replace(/\/+$/, '');
   const cleanPath = String(path || '').replace(/^\/+/, '');
@@ -503,8 +505,6 @@ export async function openRouterChatCompletionStream({
   criteria? } } with type noul (P(yes)), choice or score. Only OpenRouter
   serves this, so a BYOK setup pointed elsewhere has no decider.
 */
-export const DECISION_MODEL = 'perplexity/pplx-decider-v1.1-27b';
-
 function decisionEndpoint(settings) {
   if (isIncludedAiMode(settings)) return apiUrl('/api/ai/decide');
 
@@ -533,7 +533,7 @@ export async function openRouterDecide({ state, questions, signal = null } = {})
     credentials: isIncludedAiMode(settings) ? 'include' : 'omit',
     headers: headersForSettings(settings),
     body: JSON.stringify({
-      model: DECISION_MODEL,
+      model: decisionModel(),
       state,
       questions,
       provider: openRouterProviderPreferences(),
@@ -550,7 +550,7 @@ export async function openRouterDecide({ state, questions, signal = null } = {})
 
   return {
     answers: json.answers,
-    model: json.model || DECISION_MODEL,
+    model: json.model || decisionModel(),
     cost: Number(json.usage?.cost || 0),
   };
 }

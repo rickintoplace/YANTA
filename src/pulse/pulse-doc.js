@@ -18,11 +18,13 @@
 // nothing. What last-writer-wins cannot fix is a device acting on a copy
 // that has not arrived yet — a duplicate delivery is not suppressible
 // after the fact, since two runs of the same routine produce different
-// prose. That is gated on sync instead; see pulse-freshness.js.
+// prose. That is gated on sync instead; see pulse-freshness.js, and for two
+// devices open at the same moment, pulse-claims.js.
 // ============================================================
 
 import { state, store } from '../core.js';
 import { getNoteDoc } from '../yjs.js';
+import { fetchUpdates } from '../sync2/y-idb-persistence.js';
 
 import {
   ensureAiBrain,
@@ -93,10 +95,27 @@ export async function pulseMaps() {
     runs: entry.doc.getMap('pulseRuns'),
     history: entry.doc.getArray('pulseHistory'),
 
+    // Which device is about to run which routine; see pulse-claims.js.
+    claims: entry.doc.getMap('pulseClaims'),
+
     // Settings that describe the *result* rather than the device that
     // produced it, so every device produces the same one.
     config: entry.doc.getMap('pulseConfig'),
   };
+}
+
+/**
+ * Pulls in what other tabs of this origin persisted to the Pulse
+ * document. Tabs share IndexedDB but not their in-memory Y.Docs, so a
+ * pass that follows another tab's run would otherwise decide on a copy
+ * that has not seen it.
+ */
+export async function refreshPulseDocFromStorage() {
+  const entry = await ensurePulseNote();
+
+  if (!entry.persistence?.db || entry.persistence._destroyed) return;
+
+  await fetchUpdates(entry.persistence);
 }
 
 /** Marks the note updated so sync picks the change up promptly. */

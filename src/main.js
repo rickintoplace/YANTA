@@ -1181,6 +1181,12 @@ function startSync2AutoSync(engine, {
     requestSync2AutoSync('notification-ack', 1000);
   });
 
+  // A module that needs its change on the other devices promptly (a
+  // Pulse run claim) asks for a sync without knowing how it happens.
+  window.addEventListener('yanta-sync2-request', (e) => {
+    requestSync2AutoSync(String(e.detail?.reason || 'request'), 300);
+  });
+
   /*
     Do not sync from yanta-vault-hydrated.
     syncNow() hydrates the vault after pull. Syncing again from that event

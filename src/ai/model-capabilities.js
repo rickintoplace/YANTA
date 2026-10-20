@@ -109,6 +109,7 @@ export function refreshModelCapabilities({ source, url, credentials = 'omit', fo
 
         menu = {
           default: json?.default || '',
+          decisionModel: json?.decisionModel || '',
           models: (json?.models || []).map((m) => ({
             id: m.id,
             label: m.label || m.id,

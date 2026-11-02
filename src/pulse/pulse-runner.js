@@ -53,6 +53,7 @@ import {
 
 import { readSensors } from './pulse-sensors.js';
 import { findNearDuplicate } from './pulse-novelty.js';
+import { toldCards, toldIndex, describeTold, markAlreadyReported } from './pulse-told.js';
 import { planRoutineTools, needsPlan } from './pulse-tool-plan.js';
 
 import { buildCitationInstructions, stripForDisplay } from 'veriquote';
@@ -183,90 +184,6 @@ async function buildRunSystemMessage(routine, { cite = false } = {}) {
       cite ? `${YANTA_CITATION_PREAMBLE}\nIn this run, cite in the pulse_emit body, and put the EVI1 appendix at the end of that body — a card whose quotes are missing cannot be checked.\n\n${buildCitationInstructions({ maxCitedClaims: 8 })}` : '',
     ].filter(Boolean).join('\n\n'),
   };
-}
-
-const TOLD_WINDOW_MS = 24 * 60 * 60 * 1000;
-const TOLD_MAX_CARDS = 5;
-
-/*
-  What other routines already put in front of the user today. Routines
-  overlap by nature — the morning brief mentions the security issue the
-  feed digest is about to cover, the loose-ends sweep finds the meeting
-  conflict the brief already flagged — and each run alone cannot know.
-  Showing the run those cards lets it leave out what was said, or say
-  only what changed.
-*/
-async function recentOtherCards(routine, now) {
-  try {
-    return (await listInboxItems({ includeArchived: true }))
-      .filter((item) => item.routineName !== routine.name && now - Number(item.createdAt || 0) < TOLD_WINDOW_MS)
-      .slice(0, TOLD_MAX_CARDS);
-  } catch {
-    return [];
-  }
-}
-
-/**
- * The feed items and pages those cards cited, by item id and URL, so a
- * search result can say "already reported" on the item itself — a
- * marker on the data is followed far more reliably than a summary.
- */
-function toldSourceKeys(cards) {
-  const told = new Map();
-
-  for (const card of cards) {
-    const body = String(card.body || '');
-    for (const source of card.sources || []) {
-      if (!body.includes(`[${source.n}]`)) continue;
-      if (source.id) told.set(`id:${source.id}`, card.routineName);
-      if (source.url) told.set(`url:${source.url}`, card.routineName);
-    }
-  }
-
-  return told;
-}
-
-function markAlreadyReported(name, result, told) {
-  if (!told.size || !result || typeof result !== 'object') return result;
-
-  const mark = (item) => {
-    const by = told.get(`id:${item?.id}`) || told.get(`url:${item?.url}`);
-    return by ? { ...item, alreadyReported: by } : item;
-  };
-
-  if (name === 'rss_search_items' && Array.isArray(result.items)) {
-    return { ...result, items: result.items.map(mark) };
-  }
-
-  if (name === 'web_search' && Array.isArray(result.results)) {
-    return { ...result, results: result.results.map(mark) };
-  }
-
-  return result;
-}
-
-async function alreadyToldToday(items) {
-  try {
-    if (!items.length) return '';
-
-    const lines = items.map((item) => {
-      const time = new Date(Number(item.createdAt)).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
-      const body = stripForDisplay(String(item.body || ''))
-        .replace(/\[\d+\]/g, '')
-        .replace(/\s+/g, ' ')
-        .trim()
-        .slice(0, 500);
-      return `- ${item.routineName}, ${time} — "${item.title}": ${body}`;
-    });
-
-    return [
-      '# Already told the user today (by other routines)',
-      'Do not repeat these points, and leave out search results marked `alreadyReported`. Mention one only if something about it changed, and then say what changed. If nothing new is left after removing them, stay silent.',
-      ...lines,
-    ].join('\n');
-  } catch {
-    return '';
-  }
 }
 
 function buildRunUserMessage(routine, sensors, prefetched, now, told = '') {
@@ -496,10 +413,11 @@ export async function runRoutine(routine, {
     Number(runtime.maxToolRounds || MAX_ROUNDS)
   ));
 
-  // Today's cards from other routines: summarised for the run, and their
-  // sources marked in search results (see alreadyToldToday).
-  const otherCards = await recentOtherCards(routine, now);
-  const told = toldSourceKeys(otherCards);
+  // What the user was already told — this routine's recent cards and
+  // other routines' from today — summarised for the run and marked on
+  // search results (pulse-told.js).
+  const toldSoFar = toldCards(await listInboxItems({ includeArchived: true }).catch(() => []), routine.name, now);
+  const told = toldIndex(toldSoFar);
 
   let loop;
 
@@ -507,7 +425,7 @@ export async function runRoutine(routine, {
     loop = await runAgentLoop({
       messages: [
         await buildRunSystemMessage(routine, { cite: !!citeSources }),
-        buildRunUserMessage(routine, sensors, prefetched, now, await alreadyToldToday(otherCards)),
+        buildRunUserMessage(routine, sensors, prefetched, now, describeTold(toldSoFar)),
       ],
       tools: offered,
       maxRounds,

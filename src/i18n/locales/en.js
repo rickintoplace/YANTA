@@ -14,6 +14,24 @@ import aiContext from './ai/context.en.js';
 
 import greeting from './greeting/greeting.en.js';
 export default {
+  eventText: {
+    moveLabel: 'Move “{title}”: {from} → {to}',
+    cancelLabel: 'Cancel “{title}” · {when}',
+    severalLabel: { one: '{count} event: {titles}', other: '{count} events: {titles}' },
+    severalTitle: 'Add these events?',
+    severalMessage: 'Found in the text — untick what you don’t want.',
+    severalAdd: { one: 'Add {count} event', other: 'Add {count} events' },
+    severalAdded: { one: '{count} event added', other: '{count} events added' },
+    titleLabel: 'Title',
+    moveTitle: 'Move this event?',
+    moveAction: 'Move it',
+    moveDone: '“{title}” moved to {when}',
+    cancelTitle: 'Cancel this event?',
+    cancelAction: 'Cancel the event',
+    cancelDone: '“{title}” cancelled',
+    asNew: 'Add as a new event instead',
+    undo: 'Undo',
+  },
   drop: {
     title: 'Add to YANTA?',
     rootFolder: 'Notes (no folder)',

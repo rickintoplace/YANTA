@@ -7,6 +7,24 @@ import aiContext from './ai/context.de.js';
 
 import greeting from './greeting/greeting.de.js';
 export default {
+  eventText: {
+    moveLabel: '„{title}“ verschieben: {from} → {to}',
+    cancelLabel: '„{title}“ absagen · {when}',
+    severalLabel: { one: '{count} Termin: {titles}', other: '{count} Termine: {titles}' },
+    severalTitle: 'Diese Termine übernehmen?',
+    severalMessage: 'Im Text gefunden – abwählen, was nicht übernommen werden soll.',
+    severalAdd: { one: '{count} Termin hinzufügen', other: '{count} Termine hinzufügen' },
+    severalAdded: { one: '{count} Termin hinzugefügt', other: '{count} Termine hinzugefügt' },
+    titleLabel: 'Titel',
+    moveTitle: 'Diesen Termin verschieben?',
+    moveAction: 'Verschieben',
+    moveDone: '„{title}“ auf {when} verschoben',
+    cancelTitle: 'Diesen Termin absagen?',
+    cancelAction: 'Termin absagen',
+    cancelDone: '„{title}“ abgesagt',
+    asNew: 'Stattdessen als neuen Termin anlegen',
+    undo: 'Rückgängig',
+  },
   drop: {
     title: 'In YANTA übernehmen?',
     rootFolder: 'Notizen (ohne Ordner)',

@@ -19,7 +19,7 @@ import { actionToast, state, toast } from '../core.js';
 import { getLocale, t } from '../i18n/index.js';
 import { draftEventFromText } from '../calendar-text-event.js';
 import { dateOrderForLocale } from '../calendar-text-parse.js';
-import { openEventFromText } from './share-router.js';
+import { handleEventText } from './share-router.js';
 
 const TITLE_MAX = 80;
 
@@ -124,7 +124,7 @@ export async function routeDroppedText({ text = '', uriList = '', folderId = und
   const draft = url ? null : draftEventFromText(source, { dateOrder: dateOrderForLocale(getLocale()) });
 
   if (draft) {
-    await openEventFromText(source, { draft });
+    await handleEventText(source, { draft });
     return 'event';
   }
 

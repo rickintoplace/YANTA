@@ -7,6 +7,24 @@ import aiContext from './ai/context.fr.js';
 
 import greeting from './greeting/greeting.fr.js';
 export default {
+  eventText: {
+    moveLabel: 'Déplacer « {title} » : {from} → {to}',
+    cancelLabel: 'Annuler « {title} » · {when}',
+    severalLabel: { one: '{count} événement : {titles}', other: '{count} événements : {titles}' },
+    severalTitle: 'Ajouter ces événements ?',
+    severalMessage: 'Trouvés dans le texte — décochez ceux que vous ne voulez pas.',
+    severalAdd: { one: 'Ajouter {count} événement', other: 'Ajouter {count} événements' },
+    severalAdded: { one: '{count} événement ajouté', other: '{count} événements ajoutés' },
+    titleLabel: 'Titre',
+    moveTitle: 'Déplacer cet événement ?',
+    moveAction: 'Le déplacer',
+    moveDone: '« {title} » déplacé au {when}',
+    cancelTitle: 'Annuler cet événement ?',
+    cancelAction: 'Annuler l’événement',
+    cancelDone: '« {title} » annulé',
+    asNew: 'L’ajouter plutôt comme nouvel événement',
+    undo: 'Annuler',
+  },
   drop: {
     title: 'Ajouter à YANTA ?',
     rootFolder: 'Notes (sans dossier)',

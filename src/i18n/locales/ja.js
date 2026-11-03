@@ -8,6 +8,24 @@ import aiContext from './ai/context.ja.js';
 
 import greeting from './greeting/greeting.ja.js';
 export default {
+  eventText: {
+    moveLabel: '「{title}」を移動: {from} → {to}',
+    cancelLabel: '「{title}」を取り消し · {when}',
+    severalLabel: { one: '{count}件の予定: {titles}', other: '{count}件の予定: {titles}' },
+    severalTitle: 'これらの予定を追加しますか？',
+    severalMessage: 'テキストから見つかりました。不要なものはチェックを外してください。',
+    severalAdd: { one: '{count}件の予定を追加', other: '{count}件の予定を追加' },
+    severalAdded: { one: '{count}件の予定を追加しました', other: '{count}件の予定を追加しました' },
+    titleLabel: 'タイトル',
+    moveTitle: 'この予定を移動しますか？',
+    moveAction: '移動する',
+    moveDone: '「{title}」を{when}に移動しました',
+    cancelTitle: 'この予定を取り消しますか？',
+    cancelAction: '予定を取り消す',
+    cancelDone: '「{title}」を取り消しました',
+    asNew: '新しい予定として追加する',
+    undo: '元に戻す',
+  },
   drop: {
     title: 'YANTAに追加しますか？',
     rootFolder: 'ノート（フォルダなし）',

@@ -27,6 +27,7 @@ import { openBoundOverlay } from '../overlay-history.js';
 import { isChatEnabled } from '../chat/chat-enabled.js';
 import { draftEventFromText } from '../calendar-text-event.js';
 import { dateOrderForLocale } from '../calendar-text-parse.js';
+import { planEventText, planLabel, runEventPlan } from './event-text-actions.js';
 
 // Chat modules load only when chat is on (see chat/chat-enabled.js); the
 // chats zone renders once the client is there, by which time this is set.
@@ -179,18 +180,44 @@ function within(promise, ms) {
  * look by the AI (at most REFINE_WAIT_MS). Used by drag and drop too.
  * Resolves false when the text names no moment.
  */
-export async function openEventFromText(text, { draft = null } = {}) {
+export async function openEventFromText(text, { draft = null, refined = false } = {}) {
   const local = draft || draftEventFromText(text, { dateOrder: dateOrderForLocale(getLocale()) });
   if (!local) return false;
 
   let chosen = local;
-  await within(
-    refineSharedEventDraft(text, local).then((next) => { chosen = next || local; }).catch(() => {}),
-    REFINE_WAIT_MS
-  );
+  if (!refined) {
+    await within(
+      refineSharedEventDraft(text, local).then((next) => { chosen = next || local; }).catch(() => {}),
+      REFINE_WAIT_MS
+    );
+  }
 
   await openEventDraft(chosen);
   return true;
+}
+
+/**
+ * Text that names events, end to end: the AI's second look (at most
+ * REFINE_WAIT_MS), then a move or cancellation of an existing event,
+ * a checklist of several, or the editor for one (event-text-actions.js).
+ * Used by the share sheet, drag and drop and paste.
+ */
+export async function handleEventText(text, { draft = null, plan = null, refined = false } = {}) {
+  let chosen = draft || draftEventFromText(text, { dateOrder: dateOrderForLocale(getLocale()) });
+  if (!chosen) return false;
+
+  if (!refined && !plan) {
+    await within(
+      refineSharedEventDraft(text, chosen).then((next) => { chosen = next || chosen; }).catch(() => {}),
+      REFINE_WAIT_MS
+    );
+  }
+
+  const resolved = plan || await planEventText(text, { draft: chosen });
+
+  return runEventPlan(resolved, {
+    openSingle: (d) => openEventFromText(text, { draft: d, refined: true }),
+  });
 }
 
 function openEventDraft(draft) {
@@ -261,8 +288,8 @@ function buildTargets(shaped) {
       icon: 'calendar-check',
       mode: 'open',
       wide: true,
-      label: eventDraftLabel(shaped.eventDraft),
-      hint: eventDraftHint(shaped.eventDraft),
+      label: planLabel(shaped.eventPlan) || eventDraftLabel(shaped.eventDraft),
+      hint: shaped.eventPlan && shaped.eventPlan.mode !== 'single' ? '' : eventDraftHint(shaped.eventDraft),
     });
   } else if (shaped.hasSnippet) {
     targets.push({ id: 'event', icon: 'calendar', mode: 'open' });
@@ -311,7 +338,7 @@ async function runTarget(id, shaped) {
   }
 
   if (id === 'event' && shaped.eventDraft) {
-    await openEventDraft(shaped.eventDraft);
+    await handleEventText(shaped.text, { draft: shaped.eventDraft, plan: shaped.eventPlan, refined: true });
     return;
   }
 
@@ -577,12 +604,16 @@ export function openShareRouter(payload) {
     const refining = shaped.eventDraft
       ? refineSharedEventDraft(shaped.text, shaped.eventDraft)
         .then((next) => { shaped.eventDraft = next || shaped.eventDraft; })
+        // What the text does with the calendar: one event, several, or a
+        // change to one already there — the chip says which.
+        .then(() => planEventText(shaped.text, { draft: shaped.eventDraft }))
+        .then((plan) => { shaped.eventPlan = plan; })
         .catch((err) => console.warn('[YANTA Share] event refinement failed', err))
       : null;
 
     if (payload?.intent === 'event' && shaped.eventDraft) {
       within(refining, REFINE_WAIT_MS)
-        .then(() => openEventDraft(shaped.eventDraft))
+        .then(() => handleEventText(shaped.text, { draft: shaped.eventDraft, plan: shaped.eventPlan, refined: true }))
         .then(() => resolve(true))
         .catch((err) => {
           console.error('[YANTA Share] event draft failed', err);
@@ -779,10 +810,11 @@ export function openShareRouter(payload) {
     const renderEventChip = (busy) => {
       const host = overlay.querySelector('.yanta-share-target.is-wide .yanta-share-target-text');
       if (!host || !shaped.eventDraft) return;
-      const hint = busy ? t('shareTarget.eventRefining') : eventDraftHint(shaped.eventDraft);
+      const changes = shaped.eventPlan && shaped.eventPlan.mode !== 'single';
+      const hint = busy ? t('shareTarget.eventRefining') : changes ? '' : eventDraftHint(shaped.eventDraft);
       host.innerHTML = `
         <small>${escapeHtml(t('shareTarget.target.eventDetected'))}</small>
-        <b>${escapeHtml(eventDraftLabel(shaped.eventDraft))}</b>
+        <b>${escapeHtml(planLabel(shaped.eventPlan) || eventDraftLabel(shaped.eventDraft))}</b>
         ${hint ? `<small>${escapeHtml(hint)}</small>` : ''}`;
     };
 

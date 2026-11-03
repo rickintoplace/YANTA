@@ -3739,6 +3739,7 @@ function bindEvents() {
 
   // Drop import
   setupGlobalDropImport();
+  setupGlobalPaste();
 
   // Click anywhere in the editor pane that is BELOW the last line of
   // text (or in the gutter) → focus the end of the document. CM6 only
@@ -4326,6 +4327,44 @@ function setupGlobalDropImport() {
     );
     if (importable.length) await importFiles(importable);
     else toast('Drop .yanta, .md, .markdown, .txt, .ics, .zip, or YANTA .json files', 'error');
+  });
+}
+
+/*
+  Ctrl+V on the dashboard or the calendar does what dropping the same
+  thing would: events, sources, notes (drop-router.js), calendar files
+  import. Only where nothing else takes a paste — a focused field, an
+  editor or an open dialog keeps it.
+*/
+function setupGlobalPaste() {
+  document.addEventListener('paste', async (e) => {
+    if (e.defaultPrevented) return;
+    if (!['dashboard', 'calendar'].includes(state.surface)) return;
+    if (history.state?.yantaOverlay) return;
+    if (document.querySelector('.modal:not([hidden]), .yanta-dialog-modal, .yanta-share-overlay')) return;
+    if (externalDropTarget(e.target).ownHandler || externalDropTarget(document.activeElement).ownHandler) return;
+
+    const data = e.clipboardData;
+    if (!data) return;
+
+    const files = [...(data.files || [])];
+    const calendarFiles = files.filter(isCalendarDropFile);
+    if (calendarFiles.length) {
+      e.preventDefault();
+      await importFiles(calendarFiles);
+      return;
+    }
+    if (files.length) return;
+
+    const text = data.getData('text/plain');
+    if (!text.trim()) return;
+
+    e.preventDefault();
+    const { routeDroppedText } = await import('./share-target/drop-router.js');
+    await routeDroppedText({ text, uriList: data.getData('text/uri-list') }).catch((err) => {
+      console.error('[YANTA Paste] failed', err);
+      toast(t('shareTarget.failed'), 'error');
+    });
   });
 }
 

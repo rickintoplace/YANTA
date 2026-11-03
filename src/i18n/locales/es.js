@@ -7,6 +7,24 @@ import aiContext from './ai/context.es.js';
 
 import greeting from './greeting/greeting.es.js';
 export default {
+  eventText: {
+    moveLabel: 'Mover «{title}»: {from} → {to}',
+    cancelLabel: 'Cancelar «{title}» · {when}',
+    severalLabel: { one: '{count} evento: {titles}', other: '{count} eventos: {titles}' },
+    severalTitle: '¿Añadir estos eventos?',
+    severalMessage: 'Encontrados en el texto: desmarca los que no quieras.',
+    severalAdd: { one: 'Añadir {count} evento', other: 'Añadir {count} eventos' },
+    severalAdded: { one: '{count} evento añadido', other: '{count} eventos añadidos' },
+    titleLabel: 'Título',
+    moveTitle: '¿Mover este evento?',
+    moveAction: 'Moverlo',
+    moveDone: '«{title}» movido a {when}',
+    cancelTitle: '¿Cancelar este evento?',
+    cancelAction: 'Cancelar el evento',
+    cancelDone: '«{title}» cancelado',
+    asNew: 'Añadirlo como evento nuevo',
+    undo: 'Deshacer',
+  },
   drop: {
     title: '¿Añadir a YANTA?',
     rootFolder: 'Notas (sin carpeta)',

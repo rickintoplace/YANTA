@@ -27,7 +27,7 @@ const STREET_RX = /(?<![\p{L}])((?:[A-ZÄÖÜ][\p{L}ß.-]*\s)?[A-ZÄÖÜ]?[\p{L}
 const FILLER_RX = /\b(?:aber|but|ok(?:ay)?|passt(?:\s+(?:das|dir|euch))?|geht(?:\s+das)?|einverstanden|ja|nein|hi|hallo|hey|moin|servus|lg|vg|liebe\s+grüße|viele\s+grüße|grüße|bis\s+dann|bitte|danke|thanks|thank\s+you|please|cheers|see\s+you|does\s+that\s+work(?:\s+for\s+you)?|works\s+for\s+you|ok\s+for\s+you|sounds\s+good|hast\s+du\s+(?:da\s+)?zeit|haben\s+sie\s+(?:da\s+)?zeit|are\s+you\s+free|nur)\b/giu;
 
 // Words a leftover title should not start with.
-const LEADING_RX = /^(?:(?:am|um|ab|bis|vom|von|den|dem|der|die|das|ein|eine|einen|einem|im|und|dann|also|noch|wir|ich|du|sie|es|uns|haben|habe|hab|hast|hat|ist|sind|bin|bist|wäre|kannst|könntest|kann|lass|lasst|wollen|sollen|on|at|the|a|an|and|then|we|i|you|is|are|am|have|has|let's|lets|let|us|can|could|shall|ihr|ihre|ihren|your|my|mein|meine|dein|deine|unser|unsere|next|nächster|nächste|neuer|neue)\s+)+/iu;
+const LEADING_RX = /^(?:(?:am|um|ab|bis|vom|von|den|dem|der|die|das|ein|eine|einen|einem|im|und|dann|also|noch|wir|ich|du|sie|es|uns|haben|habe|hab|hast|hat|ist|sind|bin|bist|wäre|kannst|könntest|kann|lass|lasst|wollen|sollen|on|at|the|a|an|and|then|we|i|you|is|are|am|have|has|let's|lets|let|us|can|could|shall|ihr|ihre|ihren|your|my|mein|meine|dein|deine|unser|unsere|next|nächster|nächste|neuer|neue|findet|gibt|beginnt|startet|steht|folgende|folgender)\s+)+/iu;
 
 // "Erinnerung: …", "Re: …" — a label, not the subject.
 const LABEL_RX = /^\s*(?:(?:erinnerung|reminder|termin|betreff|subject|re|aw|fwd|wg|info|hinweis)\s*:\s*)+/iu;
@@ -40,9 +40,10 @@ const DATE_GLUE_RX = /(?:(?<![\p{L}])(?:am|um|ab|bis|vom|von|zum|den|gegen|zwisc
 
 const VENUE_RX = /(?<![\p{L}])(?:(?:in\s+der|im|in|bei|at\s+the|at)\s+)?((?:Praxis|Restaurant|Café|Cafe|Kanzlei|Klinik|Krankenhaus|Hotel|Gemeindehaus|Mensa|Bar|Kneipe|Turnhalle|Aula|Saal|Raum|Room|Studio)(?:\s+(?:(?:Dr|Prof)\.\s*)?[\p{Lu}\d][\p{L}\d\-.]*){0,3})/u;
 
-const RESCHEDULE_RX = /\b(?:verschoben\s+(?:auf|nach|zu)|verlegt\s+(?:auf|nach)|neuer\s+termin|moved\s+to|rescheduled\s+(?:to|for)|postponed\s+to)\b/iu;
+// "verschoben vom 3.12. auf den 10.12." splits the phrase like German does.
+const RESCHEDULE_RX = /\b(?:(?:verschoben|verlegt)\b[^!?\n]{0,40}?\b(?:auf|nach|zu)\b|(?:auf|nach)\b[^!?\n]{0,40}?\b(?:verschoben|verlegt)\b|neuer\s+termin|moved\s+to|rescheduled\s+(?:to|for)|postponed\s+to)\b/iu;
 // German splits the verb: "fällt am Donnerstag aus".
-const CANCEL_RX = /\b(?:abgesagt|(?:fällt|faellt)\b[^.!?\n]{0,40}?\baus|entfällt|storniert|cancell?ed|called\s+off)\b/iu;
+const CANCEL_RX = /\b(?:abgesagt|(?:fällt|faellt)\b[^!?\n]{0,40}?\baus|entfällt|storniert|cancell?ed|called\s+off)\b/iu;
 
 // "Termin beim Zahnarzt", "appointment with Dr. Lee" …
 const TITLE_PATTERNS = [
@@ -123,7 +124,8 @@ function tidyTitle(raw) {
     .replace(FILLER_RX, ' ')
     .replace(/[?!]+/g, ' ');
   t = clean(t).replace(/^[,.;:–\-\s]+|[,.;:–\-\s]+$/g, '');
-  t = t.replace(/(?:\s+(?:am|um|ab|bis|vom|von|den|on|at|from|by|zum|zur|auf|for|für|und|and|oder|or|ist|is))+$/iu, '');
+  t = t.replace(/\s*\((?:ganztägig|ganztags|all[- ]day)\)/giu, '');
+  t = t.replace(/(?:\s+(?:am|um|ab|bis|vom|von|den|on|at|from|by|zum|zur|auf|for|für|und|and|oder|or|ist|is|statt))+$/iu, '');
   t = t.replace(LEADING_RX, '');
   t = t.replace(/\b(?:termin|appointment)\b\s*/iu, (m, offset) => (offset === 0 ? '' : m));
   t = clean(t).replace(/^[,.;:–\-\s]+|[,.;:–\-\s]+$/g, '');
@@ -315,4 +317,111 @@ export function draftEventFromText(text, options = {}) {
     // Further moments in the same text (a school letter with five dates).
     others: found.filter((c) => c !== when && !c.past),
   };
+}
+
+/*
+  Where one moment's part of the text ends: the last clause break
+  (comma, semicolon, full stop, line break) between it and the next
+  moment. "Elternabend 12.11. 19 Uhr, Sportfest 20.11." splits after
+  "19 Uhr"; "Am 12.11. ist Elternabend. Am 20.11. Sportfest." after
+  "Elternabend.".
+*/
+function segmentBounds(text, moments) {
+  // A list: each moment on its own line owns that line.
+  const lineOf = (pos) => [text.lastIndexOf('\n', pos - 1) + 1, (text.indexOf('\n', pos) + 1 || text.length + 1) - 1];
+  const lines = moments.map((m) => lineOf(m.from));
+  if (new Set(lines.map(([a]) => a)).size === moments.length) return lines;
+
+  const bounds = [];
+  let from = 0;
+
+  moments.forEach((m, i) => {
+    const next = moments[i + 1];
+    let to = text.length;
+
+    if (next) {
+      const gap = text.slice(m.to, next.from);
+      const breaks = [...gap.matchAll(/[,;.!?]\s|\n/g)];
+      to = breaks.length ? m.to + breaks[breaks.length - 1].index + 1 : next.from;
+    }
+
+    bounds.push([from, to]);
+    from = to;
+  });
+
+  return bounds;
+}
+
+/**
+ * One draft per moment the text names, in text order, each titled from
+ * its own part of the text — for a message that lists several events
+ * (a school letter, a match schedule). Moments said as past or ruled
+ * out are left out, as in draftEventFromText.
+ */
+export function draftEventsFromText(text, options = {}) {
+  const source = String(text || '').trim();
+  const moments = findWhen(source, options)
+    .filter((c) => !c.past)
+    .sort((a, b) => a.from - b.from);
+
+  if (moments.length < 2) {
+    const single = draftEventFromText(source, options);
+    return single ? [single] : [];
+  }
+
+  return segmentBounds(source, moments).map(([from, to], i) => {
+    const m = moments[i];
+    const part = source.slice(from, to).trim();
+    const offset = from + (source.slice(from, to).length - source.slice(from, to).trimStart().length);
+    const local = {
+      ...m,
+      from: m.from - offset,
+      to: m.to - offset,
+      spans: m.spans.map(([a, b]) => [a - offset, b - offset]),
+    };
+    const location = findLocation(part);
+    const titles = titleOptions(part, local, location, [local]);
+
+    let end = m.end;
+    if (!m.allDay && !end) end = new Date(m.start.getTime() + DEFAULT_DURATION_MIN * 60 * 1000);
+
+    return {
+      title: titles[0]?.title || '',
+      start: m.start.toISOString(),
+      end: end ? end.toISOString() : null,
+      allDay: m.allDay,
+      recurrence: m.recurrence,
+      location: location?.value || '',
+      description: source,
+      status: isTentative(part, local) ? 'tentative' : 'confirmed',
+      titleSource: titles[0]?.source || 'none',
+      titleOptions: titles.map((o) => o.title),
+      source: { text: m.text, from: m.from, to: m.to, spans: m.spans },
+      flags: [...m.flags],
+      alternatives: m.alternatives,
+      others: [],
+    };
+  });
+}
+
+/*
+  Several separate events, not one event and its alternatives: every
+  part has a title of its own and they differ, and the text does not
+  weigh one against another ("nicht … lieber", "oder", "instead") or
+  move or cancel one.
+*/
+const ALTERNATIVES_RX = /\b(?:oder|lieber|stattdessen|alternativ|anstatt|nicht|kein(?:e|en)?|or|instead|rather|alternatively|not|can't|cannot)\b/iu;
+
+export function looksLikeSeveral(drafts, text) {
+  if (!Array.isArray(drafts) || drafts.length < 2) return false;
+  if (RESCHEDULE_RX.test(text) || CANCEL_RX.test(text)) return false;
+
+  const titles = drafts.map((d) => d.title.toLowerCase());
+  if (titles.some((t) => !t) || new Set(titles).size < titles.length) return false;
+
+  // A list, one event per line, is several whatever its words.
+  const lines = String(text || '').split(/\n/).filter((l) => l.trim());
+  if (lines.length >= drafts.length && drafts.every((d) => lines.some((l) => l.includes(d.source.text)))) return true;
+
+  return !ALTERNATIVES_RX.test(text);
 }

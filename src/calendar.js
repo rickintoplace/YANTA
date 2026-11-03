@@ -7572,6 +7572,38 @@ function openDeleteCalendarCategoryDialog(categoryId) {
 // Event CRUD
 // ============================================================
 
+/**
+ * Saves new events drafted from text (calendar-text-event.js) as they
+ * are, each with the default reminders a new event gets in the editor.
+ * Returns the saved events.
+ */
+export function createCalendarEventsFromDrafts(drafts = []) {
+  if (!calendarHydrated) hydrateCalendarStateFromVault({ silent: true });
+  ensureDefaultCalendarCategory();
+
+  const saved = [];
+
+  withCalendarBatch(() => {
+    for (const draft of drafts) {
+      const ev = putCalendarEvent({
+        title: draft.title || 'Untitled event',
+        // All-day drafts already start at local midnight, like the editor's.
+        start: draft.start,
+        end: draft.end || null,
+        allDay: !!draft.allDay,
+        location: draft.location || '',
+        description: draft.description || '',
+        status: draft.status === 'tentative' ? 'tentative' : 'confirmed',
+        recurrence: draft.recurrence || null,
+        reminders: defaultCalendarRemindersForEvent({ allDay: !!draft.allDay }),
+      });
+      if (ev) saved.push(ev);
+    }
+  });
+
+  return saved;
+}
+
 export function putCalendarEvent(patch) {
   const existing = patch.id
     ? state.calendarEvents.get(patch.id)

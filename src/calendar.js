@@ -12659,6 +12659,18 @@ function openEventEditor(input = {}) {
   modal.hidden = false;
   armCalendarModalInputGuard();
 
+  /*
+    An event opened by link (#calendar/<id>: dashboard, notification, AI)
+    leaves an app entry that names the event. Every later Back onto that
+    entry — closing this editor, closing a new-event editor opened from
+    the calendar afterwards — made the app router open the event again.
+    The editor's own overlay entry carries the event from here on; the
+    entry underneath becomes the plain calendar.
+  */
+  if (!history.state?.yantaOverlay && history.state?.surface === 'calendar' && history.state?.eventId) {
+    replaceCalendarHistory();
+  }
+
   if (!fromHistory && shouldPushOverlay && wasClosed) {
     const overlayData =
       editingExisting && !isMarkdownEvent

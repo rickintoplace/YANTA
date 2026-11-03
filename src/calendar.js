@@ -518,6 +518,7 @@ function notificationDeviceListHtml(ev = {}, {
   // No notification-capable device known: the hint above already
   // explains how to get one — an empty list adds nothing.
   if (!status.hasNotificationDevices) return '';
+  if (editingExisting && !status.upcoming) return '';
 
   const rows = status.devices.map((device) => {
     const label = device.current
@@ -544,12 +545,29 @@ function notificationDeviceListHtml(ev = {}, {
       });
     }
 
+    /*
+      This very device: nothing for the user to do. It hands the reminders
+      to Android on its own a moment after a change; ask for that now, and
+      the observer flips the row once the ack is written.
+    */
+    if (device.current) {
+      if (editingExisting) window.yantaAndroidBridge?.syncSoon?.(300);
+
+      return deviceRowHtml({
+        tone: 'pending',
+        icon: 'refresh-cw',
+        label,
+        text: editingExisting ? 'Scheduling on this device…' : 'Will be scheduled after saving',
+        tooltip: 'This device schedules the reminders with Android by itself.',
+      });
+    }
+
     return deviceRowHtml({
       tone: 'pending',
       icon: 'refresh-cw',
       label,
       text: editingExisting
-        ? 'Not synced yet — open YANTA on this device'
+        ? 'Not synced yet — open YANTA there'
         : 'Will sync after saving',
       tooltip: editingExisting
         ? `"${device.name}" does not know this event's notifications yet. Open YANTA there once — it syncs automatically and schedules the reminders.`
@@ -577,6 +595,15 @@ function deviceRowHtml({ tone, icon, label, text, tooltip }) {
   `;
 }
 
+/*
+  A row keeps its reminder's id through a save. Without it every save gave
+  each reminder a fresh id — and the Android scheduler keyed its alarms by
+  that id, so an alarm it failed to cancel fired next to its replacement.
+*/
+function reminderIdAttr(reminder = {}) {
+  return reminder.id ? `data-reminder-id="${escapeAttr(reminder.id)}"` : '';
+}
+
 function reminderRowHtml(reminder = {}, { allDay = false } = {}) {
   const value = Number(reminder.minutesBefore || 0);
 
@@ -585,7 +612,7 @@ function reminderRowHtml(reminder = {}, { allDay = false } = {}) {
   const isPreset = CALENDAR_REMINDER_PRESETS.some((p) => p.minutesBefore === value);
 
   return `
-    <div class="yanta-calendar-reminder-row" data-reminder-row>
+    <div class="yanta-calendar-reminder-row" data-reminder-row ${reminderIdAttr(reminder)}>
       <label class="switch yanta-calendar-switch yanta-calendar-reminder-enabled">
         <input type="checkbox" data-reminder-enabled ${reminder.enabled !== false ? 'checked' : ''} />
         <span></span>
@@ -634,7 +661,7 @@ function allDayReminderRowHtml(value, reminder = {}) {
   const atStart = days <= 0;
 
   return `
-    <div class="yanta-calendar-reminder-row is-all-day" data-reminder-row>
+    <div class="yanta-calendar-reminder-row is-all-day" data-reminder-row ${reminderIdAttr(reminder)}>
       <label class="switch yanta-calendar-switch yanta-calendar-reminder-enabled">
         <input type="checkbox" data-reminder-enabled ${reminder.enabled !== false ? 'checked' : ''} />
         <span></span>

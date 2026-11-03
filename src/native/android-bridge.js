@@ -78,8 +78,29 @@ function reminderSafe(reminder = {}) {
   };
 }
 
+/*
+  The native scheduler reads `start` with java.time's Instant.parse, which
+  takes only UTC instants ("…Z"). All-day events store a plain date key,
+  which it rejected — so their reminders were never scheduled at all,
+  while the ack below still reported them as covered. Both kinds go over
+  as an instant: all-day as local midnight, which is what the all-day
+  reminder offsets count back from (see joinAllDayReminder in calendar.js).
+*/
+function nativeStartIso(start) {
+  const raw = String(start || '').trim();
+
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(raw)
+    ? new Date(`${raw}T00:00:00`)
+    : new Date(raw);
+
+  return Number.isFinite(d.getTime()) ? d.toISOString() : null;
+}
+
 function eventForNative(ev = {}) {
   if (!ev?.id || !ev?.start) return null;
+
+  const start = nativeStartIso(ev.start);
+  if (!start) return null;
 
   // What actually fires for THIS user: the event's own reminders (or
   // the personal overlay for shared-calendar events) plus the personal
@@ -93,7 +114,7 @@ function eventForNative(ev = {}) {
   return {
     id: String(ev.id),
     title: String(ev.title || 'Untitled event'),
-    start: ev.start,
+    start,
     end: ev.end || null,
     allDay: !!ev.allDay,
     reminders,
@@ -112,10 +133,25 @@ async function collectCalendarEvents() {
       includeSources: false,
     });
 
-    return events.map(eventForNative).filter(Boolean);
+    const native = [];
+    const versions = {};
+
+    for (const ev of events) {
+      const out = eventForNative(ev);
+      if (!out) continue;
+
+      native.push(out);
+
+      // What the ack reports: exactly the event versions handed over,
+      // shared-calendar events included (they live outside the vault).
+      const id = String(ev.recurrenceMasterId || ev.id);
+      versions[id] = Math.max(versions[id] || 0, Number(ev.updated || 0));
+    }
+
+    return { native, versions };
   } catch (err) {
     console.warn('[YANTA Android Bridge] calendar collect failed', err);
-    return [];
+    return { native: [], versions: null };
   }
 }
 
@@ -258,7 +294,7 @@ async function syncCalendarWidgetDataNow() {
 export async function syncNativeSnapshotNow() {
   if (!isAndroidApp()) return;
 
-  const [calendarEvents, rssItems] = await Promise.all([
+  const [calendar, rssItems] = await Promise.all([
     collectCalendarEvents(),
     collectRssItems(),
   ]);
@@ -269,7 +305,7 @@ export async function syncNativeSnapshotNow() {
     version: 1,
     exportedAt: new Date().toISOString(),
     notificationStatus,
-    calendarEvents,
+    calendarEvents: calendar.native,
     notes: collectNotes(),
     folders: collectFolders(),
     rssItems,
@@ -285,7 +321,7 @@ export async function syncNativeSnapshotNow() {
     show whether reminders are actually covered somewhere.
   */
   try {
-    recordNativeNotificationAck(notificationStatus);
+    recordNativeNotificationAck(notificationStatus, calendar.versions);
   } catch (err) {
     console.warn('[YANTA Android Bridge] notification ack failed', err);
   }

@@ -317,7 +317,7 @@ class MainActivity : FragmentActivity() {
 
     override fun onResume() {
         super.onResume()
-        NotificationScheduler.rescheduleFromStore(this)
+        NotificationScheduler.rescheduleFromStoreAsync(this)
         dispatchNotificationStatus()
         dispatchPushTokenIfChanged()
         // Token rotations while the app is open reach the web layer immediately.

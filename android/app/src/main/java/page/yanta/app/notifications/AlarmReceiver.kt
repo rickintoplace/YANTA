@@ -33,7 +33,17 @@ class AlarmReceiver : BroadcastReceiver() {
         val title = intent.getStringExtra("title") ?: "Calendar event"
         val startIso = intent.getStringExtra("startIso") ?: ""
         val allDay = intent.getBooleanExtra("allDay", false)
+        val minutesBefore = intent.getIntExtra("minutesBefore", -1)
         val requestCode = intent.getIntExtra("requestCode", eventId.hashCode())
+
+        // An alarm from an older version of the event, or one that escaped
+        // cancellation, says nothing true any more.
+        if (
+            minutesBefore >= 0 &&
+            !NotificationScheduler.isCurrent(context, eventId, startIso, minutesBefore)
+        ) {
+            return
+        }
 
         val openIntent = Intent(context, MainActivity::class.java).apply {
             action = Intent.ACTION_VIEW
@@ -62,8 +72,10 @@ class AlarmReceiver : BroadcastReceiver() {
             .setContentIntent(contentIntent)
             .build()
 
+        // One notification per event and reminder: should two alarms ever
+        // fire for the same one, the second replaces the first.
         context.getSystemService(NotificationManager::class.java)
-            .notify(requestCode, notification)
+            .notify("calendar:$eventId", minutesBefore, notification)
     }
 
     /**

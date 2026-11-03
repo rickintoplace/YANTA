@@ -143,7 +143,7 @@ function currentDeviceId() {
  * Skips the write when nothing changed — device-record churn would
  * otherwise queue a remote sync cycle for every heartbeat.
  */
-export function recordNativeNotificationAck(status = {}) {
+export function recordNativeNotificationAck(status = {}, eventVersions = null) {
   const deviceId = currentDeviceId();
   if (!deviceId) return null;
 
@@ -160,7 +160,9 @@ export function recordNativeNotificationAck(status = {}) {
     isAndroidApp: true,
     notificationsGranted: status.notificationsGranted !== false,
     exactAlarmAllowed: status.exactAlarmAllowed !== false,
-    eventVersions: reminderEventVersions(),
+    // The caller passes what it handed the native scheduler; the vault
+    // view is only the fallback.
+    eventVersions: eventVersions || reminderEventVersions(),
   };
 
   const prev = existing.notificationSync || null;
@@ -196,9 +198,25 @@ export function recordNativeNotificationAck(status = {}) {
   return next;
 }
 
+/*
+  Reinstalling the app — moving to the Play Store build, say — starts a
+  new device record under the same name. The old one never acks again,
+  and the event editor kept listing it as "Not synced yet" right next to
+  the phone in the user's hand. A record is replaced when another one of
+  the same name was created after it last showed any sign of life.
+*/
+function isReplaced(device, devices) {
+  if (device.current) return false;
+
+  return devices.some((other) =>
+    other.id !== device.id &&
+    other.name === device.name &&
+    other.created > device.lastActiveAt);
+}
+
 /**
- * All devices that ever reported native notification capability,
- * newest activity first.
+ * Devices that report native notification capability, newest activity
+ * first. Records left behind by a reinstall are not included.
  */
 export function notificationCapableDevices() {
   const current = currentDeviceId();
@@ -209,6 +227,8 @@ export function notificationCapableDevices() {
       const ack = record?.notificationSync;
       if (!ack?.isAndroidApp) continue;
 
+      const updatedAt = Number(ack.updatedAt || 0);
+
       out.push({
         id: String(record.id || ''),
         name: String(record.name || record.id || 'Android device'),
@@ -216,14 +236,18 @@ export function notificationCapableDevices() {
         notificationsGranted: ack.notificationsGranted !== false,
         exactAlarmAllowed: ack.exactAlarmAllowed !== false,
         eventVersions: ack.eventVersions || {},
-        updatedAt: Number(ack.updatedAt || 0),
+        updatedAt,
+        created: Number(record.created || 0),
+        lastActiveAt: Math.max(updatedAt, Number(record.lastSeenAt || 0)),
       });
     }
   } catch {
     return [];
   }
 
-  return out.sort((a, b) => b.updatedAt - a.updatedAt);
+  return out
+    .filter((device, _, all) => !isReplaced(device, all))
+    .sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
 function deviceKnowsEvent(device, eventId, updated) {
@@ -252,6 +276,9 @@ export function notificationSyncStatusForEvent(ev = {}) {
 
   return {
     hasNotificationDevices: devices.length > 0,
+    // A past event has nothing left to schedule, so no device ever
+    // reports it — "not synced" would be a lie that never resolves.
+    upcoming: hasUpcomingOccurrence(ev, Date.now()),
     devices: devices.map((device) => {
       const synced = id && deviceKnowsEvent(device, id, updated);
 

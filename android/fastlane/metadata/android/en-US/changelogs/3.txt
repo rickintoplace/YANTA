@@ -1,0 +1,1 @@
+Reminders now ring exactly once — also after editing an event — and all-day events remind reliably. New: select text in any app and choose “YANTA event”: the date and time are recognised on the device and the event is filled in for you.

@@ -16,8 +16,8 @@ android {
         minSdk = 29
         // Google Play: new apps and updates must target API 36 from 2026-08-31.
         targetSdk = 36
-        versionCode = 2
-        versionName = "1.1.0"
+        versionCode = 3
+        versionName = "1.2.0"
         buildConfigField("String", "YANTA_URL", "\"https://yanta.page\"")
         // Sygnal (Matrix push gateway) notify endpoint.
         buildConfigField(

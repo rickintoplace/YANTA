@@ -33,6 +33,16 @@ export default {
       event: '新規イベント',
       ics: 'カレンダーに追加',
       rss: 'ソースを追加',
+      eventDetected: '予定を検出',
+    },
+    eventHint: {
+      'weekday-mismatch': '曜日と日付が一致しません。日付を確認してください',
+      'meridiem-guessed': '午前・午後を推測しました。時刻を確認してください',
+      'next-weekday-ambiguous': '「次の」を今週として読み取りました。日付を確認してください',
+      'date-assumed': '日付がありません。日付を確認してください',
+      'month-assumed': '月がありません。日付を確認してください',
+      'regional-time': '地域的な時刻表現です。時刻を確認してください',
+      'time-missing': '正確な時刻がありません',
     },
   },
 

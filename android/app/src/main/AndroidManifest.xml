@@ -68,6 +68,13 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:mimeType="image/*" />
             </intent-filter>
+            <!-- Text selection menu in any app: "YANTA event" turns the selected
+                 text into a prefilled event (date recognised on the device). -->
+            <intent-filter android:label="@string/process_text_event">
+                <action android:name="android.intent.action.PROCESS_TEXT" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <data android:mimeType="text/plain" />
+            </intent-filter>
             <!-- Calendar files: "Share" or "Open with" an .ics from mail, chat or files. -->
             <intent-filter>
                 <action android:name="android.intent.action.SEND" />

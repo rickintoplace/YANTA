@@ -9,4 +9,5 @@
 
     <string name="shortcut_ai_short">YANTA AI</string>
     <string name="shortcut_ai_long">Open YANTA AI</string>
+    <string name="process_text_event">YANTA event</string>
 </resources>

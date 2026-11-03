@@ -41,6 +41,16 @@ export default {
       event: 'New event',
       ics: 'Add to calendar',
       rss: 'Add source',
+      eventDetected: 'Event found',
+    },
+    eventHint: {
+      'weekday-mismatch': 'Weekday and date do not match — check the day',
+      'meridiem-guessed': 'Morning or afternoon was a guess — check the time',
+      'next-weekday-ambiguous': '“Next” read as this week — check the day',
+      'date-assumed': 'No date in the text — check the day',
+      'month-assumed': 'No month in the text — check the date',
+      'regional-time': 'Regional time phrase — check the time',
+      'time-missing': 'No exact time in the text',
     },
   },
 

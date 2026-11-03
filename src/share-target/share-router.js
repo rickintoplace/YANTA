@@ -25,6 +25,8 @@ import { getLocale, t } from '../i18n/index.js';
 import { openBoundOverlay } from '../overlay-history.js';
 
 import { isChatEnabled } from '../chat/chat-enabled.js';
+import { draftEventFromText } from '../calendar-text-event.js';
+import { dateOrderForLocale } from '../calendar-text-parse.js';
 
 // Chat modules load only when chat is on (see chat/chat-enabled.js); the
 // chats zone renders once the client is there, by which time this is set.
@@ -94,7 +96,69 @@ function shapePayload(payload) {
     ? 'calendar'
     : imageFile ? 'image' : (linkUrl ? 'link' : 'text');
 
-  return { title, text, linkUrl, imageFile, calendarFile, hasSnippet, kind };
+  /*
+    A message that names a moment ("3.12. Um 17:15 uhr, ok?") gets a
+    ready event draft. Parsed here, on the device — the text goes nowhere
+    to find its date.
+  */
+  const eventDraft = !calendarFile && !imageFile && text
+    ? draftEventFromText(text, { dateOrder: dateOrderForLocale(getLocale()) })
+    : null;
+
+  return { title, text, linkUrl, imageFile, calendarFile, hasSnippet, kind, eventDraft };
+}
+
+/** "Thu 3 Dec, 17:15 · Zahnarzt" — what the event chip promises. */
+function eventDraftLabel(draft) {
+  const start = new Date(draft.start);
+  const day = { weekday: 'short', day: 'numeric', month: 'short' };
+  let when = start.toLocaleString(getLocale(), draft.allDay ? day : { ...day, hour: '2-digit', minute: '2-digit' });
+
+  if (draft.allDay && draft.end) {
+    when += ` – ${new Date(draft.end).toLocaleDateString(getLocale(), day)}`;
+  } else if (!draft.allDay && draft.end) {
+    const end = new Date(draft.end);
+    // Only a range the text actually gave, not the default hour.
+    if (draft.source.text.match(/[-–]|bis|und|to|until|zwischen|between/i)) {
+      when += `–${end.toLocaleTimeString(getLocale(), { hour: '2-digit', minute: '2-digit' })}`;
+    }
+  }
+
+  return draft.title ? `${when} · ${draft.title}` : when;
+}
+
+// The guesses worth a second look before saving, most important first.
+const EVENT_HINT_FLAGS = [
+  'weekday-mismatch',
+  'meridiem-guessed',
+  'next-weekday-ambiguous',
+  'date-assumed',
+  'month-assumed',
+  'regional-time',
+  'time-missing',
+];
+
+function eventDraftHint(draft) {
+  const flag = EVENT_HINT_FLAGS.find((f) => draft.flags.includes(f));
+  return flag ? t(`shareTarget.eventHint.${flag}`) : '';
+}
+
+function openEventDraft(draft) {
+  return import('../calendar.js').then(async ({ openCalendar, openNewCalendarEvent }) => {
+    openCalendar?.({ push: true });
+    await raf();
+    await raf();
+    openNewCalendarEvent({
+      title: draft.title,
+      start: draft.start,
+      end: draft.end,
+      allDay: draft.allDay,
+      location: draft.location,
+      description: draft.description,
+      status: draft.status,
+      recurrence: draft.recurrence || null,
+    });
+  });
 }
 
 /** Short label for the preview chip. */
@@ -140,7 +204,17 @@ function buildTargets(shaped) {
     targets.push({ id: 'ai', icon: 'sparkles', mode: 'open' });
   }
 
-  if (shaped.hasSnippet) {
+  if (shaped.eventDraft) {
+    // A recognised date is the most likely reason to share this text.
+    targets.unshift({
+      id: 'event',
+      icon: 'calendar-check',
+      mode: 'open',
+      wide: true,
+      label: eventDraftLabel(shaped.eventDraft),
+      hint: eventDraftHint(shaped.eventDraft),
+    });
+  } else if (shaped.hasSnippet) {
     targets.push({ id: 'event', icon: 'calendar', mode: 'open' });
   }
 
@@ -183,6 +257,11 @@ async function runTarget(id, shaped) {
       const { insertAtCursor } = await import('../editor.js');
       insertAtCursor(shaped.text + '\n');
     }
+    return;
+  }
+
+  if (id === 'event' && shaped.eventDraft) {
+    await openEventDraft(shaped.eventDraft);
     return;
   }
 
@@ -236,6 +315,9 @@ function ensureCss() {
   max-height: min(720px, 94vh);
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
+  /* Without it the column grows to the target grid's widest layout and
+     the card's right side is cut off on a phone. */
+  grid-template-columns: minmax(0, 1fr);
   overflow: hidden;
   border: 1px solid var(--border);
   border-radius: 22px;
@@ -379,6 +461,22 @@ function ensureCss() {
   background: color-mix(in srgb, var(--accent) 8%, transparent);
 }
 .yanta-share-target svg { color: var(--accent); flex: 0 0 auto; }
+.yanta-share-target.is-wide {
+  grid-column: 1 / -1;
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--border));
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg));
+}
+.yanta-share-target-text { display: grid; gap: 2px; min-width: 0; }
+.yanta-share-target-text small {
+  color: var(--text-faint);
+  font-size: 12px;
+  font-weight: 600;
+}
+.yanta-share-target-text b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 `;
   document.head.append(style);
 }
@@ -418,6 +516,21 @@ export function openShareRouter(payload) {
     // .ics carries no text, image or link: it used to end here unseen.)
     if (!shaped.text && !shaped.imageFile && !shaped.linkUrl && !shaped.calendarFile) {
       resolve(false);
+      return;
+    }
+
+    /*
+      "As event" from the text selection menu (Android PROCESS_TEXT): the
+      user already said what they want — straight to the prefilled editor,
+      which is the confirmation. Without a date the router opens as usual.
+    */
+    if (payload?.intent === 'event' && shaped.eventDraft) {
+      openEventDraft(shaped.eventDraft)
+        .then(() => resolve(true))
+        .catch((err) => {
+          console.error('[YANTA Share] event draft failed', err);
+          resolve(false);
+        });
       return;
     }
 
@@ -568,9 +681,15 @@ export function openShareRouter(payload) {
 
           <div class="yanta-share-targets">
             ${targets.map((target) => `
-              <button class="yanta-share-target" type="button" data-target="${escapeHtml(target.id)}">
+              <button class="yanta-share-target${target.wide ? ' is-wide' : ''}" type="button" data-target="${escapeHtml(target.id)}">
                 ${lucide(target.icon, 17)}
-                <span>${escapeHtml(t(`shareTarget.target.${target.id}`))}</span>
+                ${target.label
+                  ? `<span class="yanta-share-target-text">
+                      <small>${escapeHtml(t('shareTarget.target.eventDetected'))}</small>
+                      <b>${escapeHtml(target.label)}</b>
+                      ${target.hint ? `<small>${escapeHtml(target.hint)}</small>` : ''}
+                    </span>`
+                  : `<span>${escapeHtml(t(`shareTarget.target.${target.id}`))}</span>`}
               </button>`).join('')}
           </div>
         </section>`;

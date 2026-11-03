@@ -34,6 +34,16 @@ export default {
       event: 'Nuevo evento',
       ics: 'Añadir al calendario',
       rss: 'Añadir fuente',
+      eventDetected: 'Evento detectado',
+    },
+    eventHint: {
+      'weekday-mismatch': 'El día de la semana no coincide con la fecha: revisa el día',
+      'meridiem-guessed': 'Mañana o tarde supuesto: revisa la hora',
+      'next-weekday-ambiguous': '“Próximo” interpretado como esta semana: revisa el día',
+      'date-assumed': 'El texto no indica fecha: revisa el día',
+      'month-assumed': 'El texto no indica mes: revisa la fecha',
+      'regional-time': 'Expresión horaria regional: revisa la hora',
+      'time-missing': 'El texto no indica una hora exacta',
     },
   },
 

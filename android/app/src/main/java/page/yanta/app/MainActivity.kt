@@ -542,6 +542,10 @@ class MainActivity : FragmentActivity() {
             if (isCalendarType(type) && handleSharedFile(sharedStreamUri(intent), intent)) return
         }
 
+        // Text selection menu → "YANTA event": the shared-text route, marked
+        // so the web layer goes straight to the event editor.
+        if (intent.action == Intent.ACTION_PROCESS_TEXT && handleProcessText(intent)) return
+
         // "Open with YANTA" on an .ics: same route as sharing it.
         if (intent.action == Intent.ACTION_VIEW && isCalendarType(intent.type.orEmpty())) {
             if (handleSharedFile(intent.data, intent)) return
@@ -561,6 +565,20 @@ class MainActivity : FragmentActivity() {
             .put("title", subject)
             .put("text", text)
             .put("url", "")
+            .toString()
+        deliverSharedPayload()
+        return true
+    }
+
+    private fun handleProcessText(intent: Intent): Boolean {
+        val text = intent.getCharSequenceExtra(Intent.EXTRA_PROCESS_TEXT)?.toString().orEmpty().trim()
+        if (text.isEmpty()) return false
+
+        pendingSharedPayload = JSONObject()
+            .put("title", "")
+            .put("text", text)
+            .put("url", "")
+            .put("intent", "event")
             .toString()
         deliverSharedPayload()
         return true

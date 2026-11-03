@@ -362,6 +362,8 @@ function openNativeShare(data) {
     title: String(data?.title || ''),
     text: String(data?.text || ''),
     url: String(data?.url || ''),
+    // "event" when it came from the text selection menu's YANTA entry.
+    intent: String(data?.intent || ''),
     files,
   };
 

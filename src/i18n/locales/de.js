@@ -34,6 +34,16 @@ export default {
       event: 'Neuer Termin',
       ics: 'Zum Kalender hinzufügen',
       rss: 'Quelle hinzufügen',
+      eventDetected: 'Termin erkannt',
+    },
+    eventHint: {
+      'weekday-mismatch': 'Wochentag und Datum passen nicht zusammen – Tag prüfen',
+      'meridiem-guessed': 'Vormittag oder Nachmittag geraten – Uhrzeit prüfen',
+      'next-weekday-ambiguous': '„Nächsten“ als diese Woche gelesen – Tag prüfen',
+      'date-assumed': 'Kein Datum im Text – Tag prüfen',
+      'month-assumed': 'Kein Monat im Text – Datum prüfen',
+      'regional-time': 'Regionale Zeitangabe – Uhrzeit prüfen',
+      'time-missing': 'Keine genaue Uhrzeit im Text',
     },
   },
 

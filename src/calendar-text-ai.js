@@ -141,7 +141,7 @@ function pick(answer) {
  * Applies the answers. Confident picks change the draft; unsure ones are
  * kept in `choices` for the confirmation sheet to ask about.
  */
-export function applyDecision(draft, answers = {}) {
+export function applyDecision(draft, answers = {}, { now = Date.now() } = {}) {
   let next = { ...draft, choices: [], ai: { model: 'decision' } };
   const moments = [draft, ...draft.others];
 
@@ -168,6 +168,7 @@ export function applyDecision(draft, answers = {}) {
         allDay: chosen.allDay,
         recurrence: chosen.recurrence || null,
         source: { text: chosen.text, from: chosen.from, to: chosen.to, spans: chosen.spans },
+        sameTimeFrom: chosen.allDay && !draft.allDay ? draft : null,
         flags: [...chosen.flags, ...next.flags.filter((f) => f === 'reschedule' || f === 'cancel')],
         others: moments.filter((m) => m !== chosen && m !== draft).concat([{ ...draft, start: new Date(draft.start), end: draft.end ? new Date(draft.end) : null, text: draft.source.text }]),
       };
@@ -176,12 +177,31 @@ export function applyDecision(draft, answers = {}) {
     }
   }
 
+  // "nicht heute um 18 Uhr, lieber morgen gleiche Zeit": the day moved,
+  // the time stays.
+  if (next.sameTimeFrom && /\b(?:gleiche[nr]?|selbe[nr]?|same)\s+(?:zeit|uhrzeit|time)\b/iu.test(draft.description || '')) {
+    const from = new Date(next.sameTimeFrom.start);
+    const start = new Date(next.start);
+    start.setHours(from.getHours(), from.getMinutes(), 0, 0);
+    const length = next.sameTimeFrom.end ? new Date(next.sameTimeFrom.end) - from : 60 * 60 * 1000;
+    next = { ...next, allDay: false, start: start.toISOString(), end: new Date(start.getTime() + length).toISOString() };
+  }
+  delete next.sameTimeFrom;
+
   const half = pick(answers.half);
   if (half) {
-    const isAfternoon = new Date(next.start).getHours() >= 12;
+    const hour = new Date(next.start).getHours();
+    const isAfternoon = hour >= 12;
     const wantAfternoon = half.choice === 'afternoon';
-    if (half.p >= CONFIDENT) {
+    // "10 vor 4" is no call at 03:50: the model may not move an
+    // appointment into the night.
+    const intoNight = !wantAfternoon && isAfternoon && hour - 12 < 6;
+    if (intoNight) {
+      // keep the afternoon reading and its flag
+    } else if (half.p >= CONFIDENT) {
       if (isAfternoon !== wantAfternoon) next = shiftDraft(next, (wantAfternoon ? 12 : -12) * 60 * 60 * 1000);
+      // Only a clock time was given: 07:15 when it is 10:00 means tomorrow.
+      if (draft.flags.includes('date-assumed') && new Date(next.start).getTime() < now) next = shiftDraft(next, DAY_MS);
       next.flags = next.flags.filter((f) => f !== 'meridiem-guessed');
     } else {
       next.choices.push({ kind: 'half', probabilities: half.probabilities });
@@ -205,7 +225,7 @@ export function applyDecision(draft, answers = {}) {
     next.ai.title = title.p;
     if (chosen && title.p >= bar) next.title = chosen;
     if (title.p < 0.4) next.titleUnsure = true;
-  } else if (draft.titleSource !== 'pattern') {
+  } else if (!draft.title) {
     next.titleUnsure = true;
   }
 
@@ -224,9 +244,13 @@ export function applyDecision(draft, answers = {}) {
   or more appears in the message (compared on its first five letters, so
   "Kontrolltermin" may come from "Kontrolle").
 */
-export function titleFromMessage(title, text) {
+export function titleFromMessage(title, text, dateSpans = []) {
   const clean = String(title || '').replace(/["„“”]/g, '').replace(/\s+/g, ' ').trim();
-  if (!clean || clean.length > 60) return '';
+  if (!clean || clean.length > 60 || /\d/.test(clean)) return '';
+  // Words of the date ("morgen", "Donnerstag") do not count as the subject.
+  let rest = String(text || '');
+  for (const [from, to] of dateSpans) rest = rest.slice(0, from) + ' '.repeat(to - from) + rest.slice(to);
+  text = rest;
   const haystack = String(text || '').toLowerCase();
   const words = clean.toLowerCase().match(/[\p{L}]{4,}/gu) || [];
   if (!words.length) return '';
@@ -248,11 +272,11 @@ export function titlePrompt(text, locale = 'en') {
   ];
 }
 
-export function parseTitleReply(content, text) {
+export function parseTitleReply(content, text, dateSpans = []) {
   const raw = String(content || '');
   const json = raw.match(/\{[\s\S]*\}/)?.[0];
   try {
-    return titleFromMessage(JSON.parse(json).title, text);
+    return titleFromMessage(JSON.parse(json).title, text, dateSpans);
   } catch {
     return '';
   }
@@ -277,7 +301,7 @@ export async function refineEventDraft(text, draft, {
   if (decide) {
     try {
       const { answers } = await decide(buildDecision(text, draft, { now, locale }));
-      next = applyDecision(draft, answers);
+      next = applyDecision(draft, answers, { now });
     } catch (err) {
       console.warn('[YANTA] event decision failed, keeping the local draft', err?.message || err);
     }
@@ -286,7 +310,8 @@ export async function refineEventDraft(text, draft, {
   if (complete && (next.titleUnsure || !next.title)) {
     try {
       const reply = await complete(titlePrompt(text, locale));
-      const title = parseTitleReply(reply?.content, text);
+      const spans = [draft, ...draft.others].flatMap((m) => m.source?.spans || m.spans || []);
+      const title = parseTitleReply(reply?.content, text, spans);
       if (title) next = { ...next, title, titleUnsure: false, ai: { ...(next.ai || {}), titleWritten: true } };
     } catch (err) {
       console.warn('[YANTA] event title request failed', err?.message || err);

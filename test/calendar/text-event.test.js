@@ -24,9 +24,10 @@ describe('event from shared text — corpus', () => {
       }
 
       expect(draft).not.toBeNull();
-      const allDay = !/\d:\d/.test(want.start);
+      const allDay = !/\d:\d/.test([].concat(want.start)[0]);
       expect(draft.allDay).toBe(allDay);
-      expect(local(draft.start, allDay)).toBe(want.start);
+      // The parser's reading is the first of several acceptable ones.
+      expect(local(draft.start, allDay)).toBe([].concat(want.start)[0]);
       if (want.end) expect(local(draft.end, allDay)).toBe(want.end);
       if (want.title !== undefined) expect(draft.title).toBe(want.title);
       if (want.location !== undefined) expect(draft.location).toBe(want.location);

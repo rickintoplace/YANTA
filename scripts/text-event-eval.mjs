@@ -70,13 +70,18 @@ const cases = [
 
 const PROVIDER = { zdr: true, data_collection: 'deny' };
 
-async function post(url, body) {
+async function post(url, body, attempt = 0) {
   const t0 = performance.now();
   const res = await fetch(url, {
     method: 'POST',
     headers: { Authorization: `Bearer ${KEY}`, 'Content-Type': 'application/json', 'X-Title': 'YANTA eval' },
     body: JSON.stringify(body),
   });
+  // Rate limits are the eval's problem, not the model's.
+  if (res.status === 429 && attempt < 4) {
+    await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+    return post(url, body, attempt + 1);
+  }
   const json = await res.json().catch(() => ({}));
   const ms = performance.now() - t0;
   if (!res.ok) throw Object.assign(new Error(json?.error?.message || `HTTP ${res.status}`), { ms });

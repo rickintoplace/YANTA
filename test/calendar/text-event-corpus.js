@@ -95,7 +95,8 @@ export const CASES = [
   ['Kontrolle um vierzehn Uhr am Freitag', { start: '2026-11-06 14:00', title: 'Kontrolle' }],
   ['morgen zwölf uhr dreißig Mittagspause', { start: '2026-11-04 12:30', title: 'Mittagspause' }],
   ['um 8 morgens Laufen', { start: '2026-11-04 08:00', title: 'Laufen' }],
-  ['Regional: Bus um viertel 8', { start: '2026-11-03 19:15', flags: ['regional-time'] }],
+  // "viertel 8" is 7:15; whether a bus is meant in the morning is open.
+  ['Regional: Bus um viertel 8', { start: ['2026-11-03 19:15', '2026-11-04 07:15'], flags: ['regional-time'] }],
   ['Elternbrief: der morgige Wandertag beginnt um 8 Uhr', { start: '2026-11-04 08:00' }],
 
   // --- no event in here

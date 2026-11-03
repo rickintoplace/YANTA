@@ -147,6 +147,7 @@ const NOT_A_TITLE = new Set([
   'ich', 'du', 'er', 'sie', 'es', 'wir', 'ihr', 'hallo', 'hi', 'hey', 'liebe', 'lieber', 'termin', 'erinnerung',
   'bitte', 'danke', 'ok', 'okay', 'nur', 'aber', 'und', 'oder', 'dann', 'am', 'um', 'ab', 'bis', 'von', 'vom',
   'the', 'a', 'an', 'and', 'or', 'but', 'please', 'thanks', 'hello', 'dear', 'reminder', 'appointment',
+  'sorry', 'leider', 'gleiche', 'selbe', 'zeit', 'uhrzeit', 'same', 'time', 'raum', 'room',
   'kannst', 'können', 'lass', 'hast', 'habe', 'haben', 'sind', 'ist', 'wird', 'gibt', 'mal', 'noch', 'schon',
 ]);
 
@@ -198,6 +199,10 @@ function titleOptions(text, when, location, allWhen = []) {
 
   // "Zahnarzttermin" → "Zahnarzt"; "Gesprächstermin" → "Gespräch" (the
   // linking s goes after -ch, -ung, -heit, -keit, -ion, -tät).
+  // "Gesprächstermin mit Frau Dr. Klein" → "Gespräch mit Dr. Klein"
+  const withName = /([\p{Lu}][\p{L}]{2,}?)(?:s)?(?:termin|treffen)\s+mit\s+(?:(?:Frau|Herrn?|Mr|Mrs|Ms)\.?\s+)?((?:(?:Dr|Prof)\.\s*)?[\p{Lu}][\p{L}\-]+)/u.exec(rest);
+  if (withName) add(`${withName[1]} mit ${withName[2]}`, 'pattern');
+
   const compound = COMPOUND_RX.exec(rest);
   if (compound) add(compound[1].replace(/(ch|ung|heit|keit|ion|tät)s$/u, '$1'), 'pattern');
 
@@ -244,9 +249,10 @@ function titleOptions(text, when, location, allWhen = []) {
     }
   }
 
-  // A short combination of the first two candidates ("Zahnarzt – Kontrolle").
+  // A short combination of the first two candidates ("Zahnarzt – Kontrolle"),
+  // only when the first one comes from a recognised phrase.
   const [a, b] = options.filter((o) => o.title.split(' ').length <= 2);
-  if (a && b && !a.title.toLowerCase().includes(b.title.toLowerCase()) && !b.title.toLowerCase().includes(a.title.toLowerCase())) {
+  if (a?.source === 'pattern' && b && !a.title.toLowerCase().includes(b.title.toLowerCase()) && !b.title.toLowerCase().includes(a.title.toLowerCase())) {
     add(`${a.title} – ${b.title}`, 'combined');
   }
 

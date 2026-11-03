@@ -19,7 +19,7 @@ import {
 } from './shared.js';
 
 const PROCESSOR_PURPOSES = {
-  cloudflare: 'Workers, D1, R2 — API and encrypted object storage',
+  cloudflare: 'Workers, D1, R2 — API and encrypted object storage; delivery of yanta.page through its network (content delivery, protection against attacks)',
   vercel: 'Hosting of the web app',
   paddle: 'Merchant of Record: payments, tax, invoices',
   resend: 'Login and notification emails',
@@ -506,6 +506,18 @@ function privacyDocument() {
         nothing in these totals can be traced back to a person, they are not
         personal data, and there is nothing here to consent to, request or
         delete.
+      </p>
+      <p>
+        We also see aggregated statistics that Cloudflare compiles from the
+        access data it already processes to deliver yanta.page: page views per
+        day, the page requested, country, browser type and device class. No
+        script runs for this, nothing is stored on or read from your device, and
+        nothing is loaded from third parties. We only ever see totals — never IP
+        addresses, never individual visits, and nothing is linked across
+        visits. The legal basis is Art. 6(1)(f) GDPR; our legitimate interest is
+        knowing which pages are read and whether the site is reachable.
+        Cloudflare processes the access data as our processor and keeps the
+        statistics according to its own retention periods.
       </p>
 
       <h2>9. How long we keep things</h2>

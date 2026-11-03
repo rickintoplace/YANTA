@@ -19,7 +19,7 @@ export {
 };
 
 /** Bumped by hand when a document changes in substance. */
-export const UPDATED = '2026-10-14';
+export const UPDATED = '2026-11-03';
 
 export const CONTACT_EMAIL = YANTA_LEGAL.contactEmail;
 

@@ -26,7 +26,7 @@ import {
 } from './shared.js';
 
 const PROCESSOR_PURPOSES = {
-  cloudflare: 'Workers, D1, R2 — API und verschlüsselter Objektspeicher',
+  cloudflare: 'Workers, D1, R2 — API und verschlüsselter Objektspeicher; Auslieferung von yanta.page über sein Netzwerk (Content Delivery, Schutz vor Angriffen)',
   vercel: 'Hosting der Web-App',
   paddle: 'Merchant of Record: Zahlungen, Steuern, Rechnungen',
   resend: 'Login- und Benachrichtigungs-E-Mails',
@@ -539,6 +539,19 @@ function privacyDocument() {
         Da sich aus diesen Summen keine Person ermitteln lässt, sind es keine
         personenbezogenen Daten; es gibt hier also nichts einzuwilligen,
         auszukunften oder zu löschen.
+      </p>
+      <p>
+        Außerdem sehen wir zusammengefasste Statistiken, die Cloudflare aus den
+        Zugriffsdaten bildet, die es zur Auslieferung von yanta.page ohnehin
+        verarbeitet: Seitenaufrufe pro Tag, die aufgerufene Seite, Land,
+        Browsertyp und Geräteklasse. Dafür läuft kein Skript, es wird nichts auf
+        Ihrem Gerät gespeichert oder ausgelesen, und nichts wird von Dritten
+        nachgeladen. Wir sehen nur Summen — nie IP-Adressen, nie einzelne
+        Besuche, und nichts wird über Besuche hinweg verknüpft. Rechtsgrundlage
+        ist Art. 6 Abs. 1 lit. f DSGVO; unser berechtigtes Interesse ist zu
+        wissen, welche Seiten gelesen werden und ob die Seite erreichbar ist.
+        Cloudflare verarbeitet die Zugriffsdaten als Auftragsverarbeiter und
+        bewahrt die Statistiken nach seinen eigenen Fristen auf.
       </p>
 
       <h2>9. Speicherdauer</h2>

@@ -414,31 +414,42 @@ function nativeNotificationStatus() {
   }
 }
 
+/*
+  Only says something when there is something to do. A working Android
+  app needs no banner, and neither does a browser whose account already
+  has a phone that rings (the device rows below say so per event). The
+  hidden element stays: the status listener swaps it in place.
+*/
 function nativeNotificationHintHtml() {
   const status = nativeNotificationStatus();
   const isAndroid = !!status.isAndroidApp;
   const ok = !!status.notificationsGranted && !!status.exactAlarmAllowed;
 
   if (!isAndroid) {
+    let hasPhone = false;
+    try {
+      hasPhone = notificationSyncStatusForEvent({}).hasNotificationDevices;
+    } catch {}
+
     return `
-      <div class="yanta-calendar-native-notification-hint">
+      <div class="yanta-calendar-native-notification-hint" ${hasPhone ? 'hidden' : ''}>
         ${lucide('smartphone', 14)}
         <span>
-          <strong>Notifications work in the Android app.</strong>
-          <small>Browser/PWA notifications are not reliable for calendar alarms. Install/open the YANTA Android app for event reminders.</small>
+          <strong>Reminders ring in the YANTA Android app.</strong>
+          <small>Browsers cannot reliably wake up for calendar alarms.</small>
         </span>
       </div>
     `;
   }
 
+  if (ok) return '<div class="yanta-calendar-native-notification-hint ok" hidden></div>';
+
   return `
-    <div class="yanta-calendar-native-notification-hint ${ok ? 'ok' : 'warn'}">
-      ${lucide(ok ? 'bell' : 'bell-off', 14)}
+    <div class="yanta-calendar-native-notification-hint warn">
+      ${lucide('bell-off', 14)}
       <span>
-        <strong>${ok ? 'Android notifications are ready.' : 'Android notification permission is missing.'}</strong>
-        <small>
-          Event notifications only work in the app and only when notification/exact-alarm permissions are allowed.
-        </small>
+        <strong>Reminders cannot ring yet.</strong>
+        <small>Allow notifications and exact alarms for YANTA.</small>
       </span>
       ${
         !status.notificationsGranted
@@ -11900,6 +11911,12 @@ function openEventEditor(input = {}) {
     });
   };
 
+  /*
+    Layout, top to bottom, in the order people fill it in: what (icon +
+    title), when (with All day beside it), where, notes, then the
+    settings most events never touch (calendar, repeat, notifications).
+    Actions stay in a footer that does not scroll away.
+  */
   modal.innerHTML = `
     <div class="modal-card yanta-calendar-event-card">
       <header class="modal-head">
@@ -11908,13 +11925,77 @@ function openEventEditor(input = {}) {
       </header>
 
       <div class="modal-body yanta-calendar-event-body">
-        <label>
-          Title
-          <input class="text-input" data-field="title" value="${escapeAttr(rawTitle)}" placeholder="Event title" />
+        <div class="yanta-calendar-title-row">
+          <div class="yanta-calendar-appearance-box">
+            <input type="hidden" data-field="color" value="${escapeAttr(ev.color || '')}" />
+            <input type="hidden" data-field="icon" value="${escapeAttr(ev.icon || '')}" />
+            <input type="hidden" data-field="appearanceTouched" value="0" />
+
+            <button
+              type="button"
+              class="yanta-calendar-appearance-picker"
+              data-action="pick-icon"
+              title="Icon & color"
+              aria-label="Icon & color"
+              style="--appearance-color:${escapeAttr(initialAppearanceColor)}">
+              <span class="yanta-calendar-appearance-picker-icon" data-icon-preview>
+                ${lucide(initialAppearanceIcon, 17)}
+              </span>
+
+              <span class="yanta-calendar-appearance-picker-text">
+                <strong>Icon & color</strong>
+                <small data-appearance-preview-text>
+                  ${
+                    linkedNote
+                      ? 'Uses linked note appearance'
+                      : ev.icon || ev.color
+                        ? 'Custom event appearance'
+                        : 'Default event appearance'
+                  }
+                </small>
+              </span>
+            </button>
+          </div>
+
+          <input class="text-input yanta-calendar-title-input" data-field="title" value="${escapeAttr(rawTitle)}" placeholder="Add a title" aria-label="Title" />
+        </div>
+
+        <section class="yanta-calendar-when">
+          <div class="yanta-calendar-section-head">
+            <span>${lucide('clock', 14)} When</span>
+            <label class="switch yanta-calendar-switch">
+              <input type="checkbox" data-field="allDay" ${ev.allDay ? 'checked' : ''} />
+              <span>All day</span>
+            </label>
+          </div>
+
+          <div class="yanta-calendar-date-grid">
+            <div class="yanta-calendar-date-cell">
+              <span class="yanta-calendar-date-label">Start</span>
+              <div class="yanta-calendar-date-input-row" data-datetime-field="start"></div>
+              <div class="yanta-calendar-date-preview" data-date-preview="start"></div>
+            </div>
+
+            <div class="yanta-calendar-date-cell">
+              <span class="yanta-calendar-date-label">End</span>
+              <div class="yanta-calendar-date-input-row" data-datetime-field="end"></div>
+              <div class="yanta-calendar-date-preview" data-date-preview="end"></div>
+            </div>
+          </div>
+        </section>
+
+        <label class="yanta-calendar-field-with-icon">
+          <span class="yanta-calendar-field-label">${lucide('map-pin', 13)} Location</span>
+          <input class="text-input" data-field="location" value="${escapeAttr(ev.location || '')}" placeholder="Room, address, link…" autocomplete="off" spellcheck="false" />
         </label>
 
-        <label>
-          Category
+        <label class="yanta-calendar-field-with-icon">
+          <span class="yanta-calendar-field-label">${lucide('align-left', 13)} Description</span>
+          <textarea class="text-input" data-field="description" rows="3" placeholder="Agenda, notes, links…">${escapeHtml(ev.description || '')}</textarea>
+        </label>
+
+        <label class="yanta-calendar-field-with-icon">
+          <span class="yanta-calendar-field-label">${lucide('calendar', 13)} Calendar</span>
           <select class="text-input" data-field="categoryId">
             ${categoryOptionsHtml(ev.categoryId)}
           </select>
@@ -11924,85 +12005,27 @@ function openEventEditor(input = {}) {
 
         ${participantsHtml(ev)}
 
-        <div class="yanta-calendar-appearance-box">
-          <input type="hidden" data-field="color" value="${escapeAttr(ev.color || '')}" />
-          <input type="hidden" data-field="icon" value="${escapeAttr(ev.icon || '')}" />
-          <input type="hidden" data-field="appearanceTouched" value="0" />
+        ${recurrenceEditorHtml(ev)}
 
-          <button
-            type="button"
-            class="yanta-calendar-appearance-picker"
-            data-action="pick-icon"
-            style="--appearance-color:${escapeAttr(initialAppearanceColor)}">
-            <span class="yanta-calendar-appearance-picker-icon" data-icon-preview>
-              ${lucide(initialAppearanceIcon, 17)}
-            </span>
-
-            <span class="yanta-calendar-appearance-picker-text">
-              <strong>Icon & color</strong>
-              <small data-appearance-preview-text>
-                ${
-                  linkedNote
-                    ? 'Uses linked note appearance'
-                    : ev.icon || ev.color
-                      ? 'Custom event appearance'
-                      : 'Default event appearance'
-                }
-              </small>
-            </span>
-          </button>
-        </div>
-
-        <label class="switch yanta-calendar-switch">
-          <input type="checkbox" data-field="allDay" ${ev.allDay ? 'checked' : ''} />
-          <span>All day</span>
-        </label>
-
-        <div class="yanta-calendar-date-grid">
-          <div class="yanta-calendar-date-cell">
-            <span class="yanta-calendar-date-label">Start</span>
-            <div class="yanta-calendar-date-input-row" data-datetime-field="start"></div>
-            <div class="yanta-calendar-date-preview" data-date-preview="start"></div>
-          </div>
-
-          <div class="yanta-calendar-date-cell">
-            <span class="yanta-calendar-date-label">End</span>
-            <div class="yanta-calendar-date-input-row" data-datetime-field="end"></div>
-            <div class="yanta-calendar-date-preview" data-date-preview="end"></div>
-          </div>
-        </div>
-
-      ${recurrenceEditorHtml(ev)}
-
-      ${remindersEditorHtml(ev, {
-        editingExisting,
-        shared: sharedSpaceEvent || categoryIsSharedAnyRole(ev.categoryId),
-      })}
-
-        <label>
-          Location
-          <input class="text-input" data-field="location" value="${escapeAttr(ev.location || '')}" placeholder="Room, address, link…" autocomplete="off" spellcheck="false" />
-        </label>
-
-        <label>
-          Description
-          <textarea class="text-input" data-field="description" rows="4" placeholder="Description, agenda, notes…">${escapeHtml(ev.description || '')}</textarea>
-        </label>
+        ${remindersEditorHtml(ev, {
+          editingExisting,
+          shared: sharedSpaceEvent || categoryIsSharedAnyRole(ev.categoryId),
+        })}
 
         <input type="hidden" data-field="noteId" value="${escapeAttr(ev.noteId || '')}" />
 
         <section class="yanta-calendar-note-link-box" data-note-section></section>
-
-        <div class="compress-actions">
-          ${editingExisting ? `<button class="btn danger" data-action="delete">${lucide('trash', 14)} Delete</button>` : ''}
-          <span class="grow"></span>
-          <button class="btn" data-action="export" title="Export event or add it to another calendar">
-            ${lucide('calendar-arrow-down', 14)} Export ${lucide('chevron-down', 12)}
-          </button>
-          <button class="btn" data-cal-close>Cancel</button>
-          <button class="btn primary" data-action="save">${lucide('check', 14)} Save</button>
-        </div>
       </div>
+
+      <footer class="compress-actions yanta-calendar-event-actions">
+        ${editingExisting ? `<button class="btn danger" data-action="delete" title="Delete event">${lucide('trash', 14)}<span>Delete</span></button>` : ''}
+        <span class="grow"></span>
+        <button class="btn" data-action="export" title="Export event or add it to another calendar">
+          ${lucide('calendar-arrow-down', 14)}<span>Export</span> ${lucide('chevron-down', 12)}
+        </button>
+        <button class="btn" data-cal-close>Cancel</button>
+        <button class="btn primary" data-action="save">${lucide('check', 14)} Save</button>
+      </footer>
     </div>
   `;
 

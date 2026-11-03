@@ -67,6 +67,7 @@ export default {
     readAiBrain: 'Autoriser l’assistant à lire AI Brain',
     writeAiBrain: 'Autoriser l’assistant à écrire dans AI Brain',
     weather: 'Autoriser l’assistant à récupérer la météo via Open-Meteo',
+    refineSharedEvents: 'Vérifier les rendez-vous des messages partagés (le message est envoyé à l’IA)',
     webSearch: 'Autoriser l’assistant à effectuer des recherches sur le web',
     approxLocation: 'Autoriser l’assistant à recevoir une position approximative comme contexte',
     readRss: 'Autoriser l’assistant à lire les éléments Sources/RSS',

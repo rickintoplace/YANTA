@@ -142,7 +142,20 @@ function nameOnly(capture) {
   return second[0] === second[0].toUpperCase() && /\p{L}/u.test(second[0]) ? words.slice(0, 2).join(' ') : words[0];
 }
 
-function titleFrom(text, when, location, allWhen = []) {
+// Words that start sentences in German or carry no subject of their own.
+const NOT_A_TITLE = new Set([
+  'ich', 'du', 'er', 'sie', 'es', 'wir', 'ihr', 'hallo', 'hi', 'hey', 'liebe', 'lieber', 'termin', 'erinnerung',
+  'bitte', 'danke', 'ok', 'okay', 'nur', 'aber', 'und', 'oder', 'dann', 'am', 'um', 'ab', 'bis', 'von', 'vom',
+  'the', 'a', 'an', 'and', 'or', 'but', 'please', 'thanks', 'hello', 'dear', 'reminder', 'appointment',
+  'kannst', 'können', 'lass', 'hast', 'habe', 'haben', 'sind', 'ist', 'wird', 'gibt', 'mal', 'noch', 'schon',
+]);
+
+/*
+  Every plausible title, best first, and where the first one came from.
+  The share sheet uses the first; a decision model may pick another —
+  but only from this list, so a title is always words from the message.
+*/
+function titleOptions(text, when, location, allWhen = []) {
   // Every date the text names goes, not only the chosen one.
   const spans = [
     ...withGlue(text, allWhen.flatMap((c) => c.spans)),
@@ -156,30 +169,40 @@ function titleFrom(text, when, location, allWhen = []) {
   }
   const rest = blank(text, spans);
 
+  const options = [];
+  const add = (title, source) => {
+    const t = capitalize(clean(title));
+    if (/[\p{L}]{2,}/u.test(t) && !options.some((o) => o.title.toLowerCase() === t.toLowerCase())) {
+      options.push({ title: t, source });
+    }
+  };
+
   for (const rx of TITLE_PATTERNS) {
     const m = rx.exec(clean(rest));
-    if (m) return tidyTitle(nameOnly(m[1]));
+    if (m) add(tidyTitle(nameOnly(m[1])), 'pattern');
   }
 
   // "Ihre Impfung ist am …", "your flight is on …"
   const subject = /\b(?:ihre?|ihren|deine?|dein|your)\s+([\p{L}][\p{L}\-]+)\s+(?:ist|findet|beginnt|startet|is|starts|begins)\b/iu.exec(clean(rest));
-  if (subject) return capitalize(subject[1]);
+  if (subject) add(subject[1], 'pattern');
 
   // A table booked at a place: the place is what the user will look for.
   if (location?.venue && /\b(?:tisch|reservierung|reserviert|table|reservation|booking|gebucht|booked)\b/iu.test(text)) {
-    return clean(location.venue);
+    add(location.venue, 'pattern');
   }
 
   // "Wir sehen uns Mittwoch!" names no subject — it is a meeting.
   if (/\b(?:sehen\s+uns|treffen\s+uns|see\s+you|meet\s+up)\b/iu.test(rest)) {
-    return /\b(?:see|meet)\b/i.test(rest) ? 'Meet-up' : 'Treffen';
+    add(/\b(?:see|meet)\b/i.test(rest) ? 'Meet-up' : 'Treffen', 'pattern');
   }
 
+  // "Zahnarzttermin" → "Zahnarzt"; "Gesprächstermin" → "Gespräch" (the
+  // linking s goes after -ch, -ung, -heit, -keit, -ion, -tät).
   const compound = COMPOUND_RX.exec(rest);
-  if (compound) return compound[1];
+  if (compound) add(compound[1].replace(/(ch|ung|heit|keit|ion|tät)s$/u, '$1'), 'pattern');
 
   const english = ENGLISH_COMPOUND_RX.exec(rest);
-  if (english && !/^(?:an?|the|my|your|our)$/i.test(english[1])) return capitalize(english[1]);
+  if (english && !/^(?:an?|the|my|your|our)$/i.test(english[1])) add(english[1], 'pattern');
 
   /*
     Otherwise the sentence the date sits in, minus the date: "Abendessen
@@ -206,12 +229,28 @@ function titleFrom(text, when, location, allWhen = []) {
     const mine = when ? clauses.filter((c) => c.from <= when.to && when.from <= c.from + c.text.length) : [];
     for (const clause of [...mine, ...clauses.filter((c) => !mine.includes(c))]) {
       if (GREETING_RX.test(clause.text)) continue;
-      const t = tidyTitle(clause.text);
-      if (/[\p{L}]{2,}/u.test(t)) return capitalize(t);
+      add(tidyTitle(clause.text), 'clause');
     }
   }
 
-  return '';
+  // German nouns are capitalised: single nouns make short candidates
+  // ("Zahnarzt", "Kontrolle"). Lower-case words after a sentence start
+  // are often nouns typed in a hurry ("nur kontrolle"), so they count too.
+  for (const m of rest.matchAll(/(?<![\p{L}\d])([\p{L}][\p{L}\-]{3,})(?![\p{L}])/gu)) {
+    const word = m[1];
+    if (NOT_A_TITLE.has(word.toLowerCase())) continue;
+    if (/^[\p{Lu}]/u.test(word) || /^(?:nur|kurz|zur|zum)\s+$/iu.test(rest.slice(Math.max(0, m.index - 5), m.index))) {
+      add(word, 'word');
+    }
+  }
+
+  // A short combination of the first two candidates ("Zahnarzt – Kontrolle").
+  const [a, b] = options.filter((o) => o.title.split(' ').length <= 2);
+  if (a && b && !a.title.toLowerCase().includes(b.title.toLowerCase()) && !b.title.toLowerCase().includes(a.title.toLowerCase())) {
+    add(`${a.title} – ${b.title}`, 'combined');
+  }
+
+  return options.slice(0, 10);
 }
 
 function isTentative(text, when) {
@@ -242,7 +281,8 @@ export function draftEventFromText(text, options = {}) {
   if (!when) return null;
 
   const location = findLocation(source);
-  const title = titleFrom(source, when, location, found);
+  const titles = titleOptions(source, when, location, found);
+  const title = titles[0]?.title || '';
   const flags = [...when.flags];
   if (RESCHEDULE_RX.test(source)) flags.push('reschedule');
   if (CANCEL_RX.test(source)) flags.push('cancel');
@@ -259,6 +299,10 @@ export function draftEventFromText(text, options = {}) {
     location: location?.value || '',
     description: source,
     status: isTentative(source, when) ? 'tentative' : 'confirmed',
+    // How the title was found: 'pattern' is a recognised phrase ("Termin
+    // beim …"); 'clause' and 'word' are leftovers worth a second look.
+    titleSource: titles[0]?.source || 'none',
+    titleOptions: titles.map((o) => o.title),
     source: { text: when.text, from: when.from, to: when.to, spans: when.spans },
     flags,
     alternatives: when.alternatives,

@@ -127,6 +127,10 @@ export const DEFAULT_AI_SETTINGS = {
     brainAutonomy: true,
 
     allowWeather: true,
+
+    // A shared message with a date gets a second look by a decision model
+    // (calendar-text-ai.js). The message text leaves the device for it.
+    allowRefineSharedEvents: true,
     allowWebSearch: true,
     allowApproxLocationContext: true,
 

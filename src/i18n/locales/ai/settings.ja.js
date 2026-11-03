@@ -66,6 +66,7 @@ export default {
     readAiBrain: 'アシスタントに AI Brain の読み取りを許可',
     writeAiBrain: 'アシスタントに AI Brain への書き込みを許可',
     weather: 'アシスタントに Open-Meteo 経由での天気の取得を許可',
+    refineSharedEvents: '共有メッセージの予定を確認（メッセージはAIに送信されます）',
     webSearch: 'アシスタントにウェブ検索を許可',
     approxLocation: 'アシスタントにおおよその位置情報の受け取りを許可',
     readRss: 'アシスタントにソース／RSS 項目の読み取りを許可',

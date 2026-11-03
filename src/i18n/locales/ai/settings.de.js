@@ -67,6 +67,7 @@ export default {
     readAiBrain: 'Assistent darf AI Brain lesen',
     writeAiBrain: 'Assistent darf in AI Brain schreiben',
     weather: 'Assistent darf Wetterdaten über Open-Meteo abrufen',
+    refineSharedEvents: 'Termine in geteilten Nachrichten prüfen (die Nachricht geht an die KI)',
     webSearch: 'Assistent darf im Web suchen',
     approxLocation: 'Assistent darf ungefähren Standortkontext erhalten',
     readRss: 'Assistent darf Einträge aus Quellen/RSS lesen',

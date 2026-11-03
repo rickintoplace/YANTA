@@ -36,6 +36,7 @@ export default {
       rss: 'Ajouter une source',
       eventDetected: 'Événement détecté',
     },
+    eventRefining: 'L’IA vérifie…',
     eventHint: {
       'weekday-mismatch': 'Le jour de la semaine ne correspond pas à la date — vérifiez',
       'meridiem-guessed': 'Matin ou après-midi supposé — vérifiez l’heure',

@@ -66,6 +66,7 @@ export default {
     readAiBrain: 'Permitir al asistente leer AI Brain',
     writeAiBrain: 'Permitir al asistente escribir en AI Brain',
     weather: 'Permitir al asistente consultar el tiempo a través de Open-Meteo',
+    refineSharedEvents: 'Revisar citas en mensajes compartidos (el mensaje se envía a la IA)',
     webSearch: 'Permitir al asistente buscar en la web',
     approxLocation: 'Permitir al asistente recibir contexto de ubicación aproximada',
     readRss: 'Permitir al asistente leer elementos de Fuentes/RSS',

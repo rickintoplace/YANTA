@@ -36,6 +36,7 @@ export default {
       rss: 'Quelle hinzufügen',
       eventDetected: 'Termin erkannt',
     },
+    eventRefining: 'KI prüft…',
     eventHint: {
       'weekday-mismatch': 'Wochentag und Datum passen nicht zusammen – Tag prüfen',
       'meridiem-guessed': 'Vormittag oder Nachmittag geraten – Uhrzeit prüfen',

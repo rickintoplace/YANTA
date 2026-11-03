@@ -143,6 +143,37 @@ function eventDraftHint(draft) {
   return flag ? t(`shareTarget.eventHint.${flag}`) : '';
 }
 
+/*
+  The second look (calendar-text-ai.js): a decision model picks among
+  the parser's own options — which date, which title, morning or
+  afternoon — and only writes a title when none fits. Off when the user
+  turned it off in the AI settings; any failure keeps the local draft.
+*/
+async function refineSharedEventDraft(text, draft) {
+  const [{ getAiSettings }, { refineEventDraft, needsRefinement }, client] = await Promise.all([
+    import('../ai/ai-settings.js'),
+    import('../calendar-text-ai.js'),
+    import('../ai/openrouter-client.js'),
+  ]);
+
+  if (getAiSettings().permissions?.allowRefineSharedEvents === false) return draft;
+  if (!needsRefinement(draft) || !client.decisionsAvailable()) return draft;
+
+  return refineEventDraft(text, draft, {
+    decide: (request) => client.openRouterDecide(request),
+    complete: (messages) => client.openRouterChatCompletion({ messages, source: 'share-event' }),
+    locale: getLocale(),
+  });
+}
+
+// How long a tap on the chip waits for the second look before it goes
+// ahead with the local draft.
+const REFINE_WAIT_MS = 1500;
+
+function within(promise, ms) {
+  return Promise.race([promise, new Promise((resolve) => setTimeout(resolve, ms))]);
+}
+
 function openEventDraft(draft) {
   return import('../calendar.js').then(async ({ openCalendar, openNewCalendarEvent }) => {
     openCalendar?.({ push: true });
@@ -524,8 +555,15 @@ export function openShareRouter(payload) {
       user already said what they want — straight to the prefilled editor,
       which is the confirmation. Without a date the router opens as usual.
     */
+    const refining = shaped.eventDraft
+      ? refineSharedEventDraft(shaped.text, shaped.eventDraft)
+        .then((next) => { shaped.eventDraft = next || shaped.eventDraft; })
+        .catch((err) => console.warn('[YANTA Share] event refinement failed', err))
+      : null;
+
     if (payload?.intent === 'event' && shaped.eventDraft) {
-      openEventDraft(shaped.eventDraft)
+      within(refining, REFINE_WAIT_MS)
+        .then(() => openEventDraft(shaped.eventDraft))
         .then(() => resolve(true))
         .catch((err) => {
           console.error('[YANTA Share] event draft failed', err);
@@ -544,6 +582,7 @@ export function openShareRouter(payload) {
     });
 
     let client = null;
+    let refiningBusy = !!refining;
     let query = '';
     let sending = false;
     const selected = new Set();
@@ -570,6 +609,7 @@ export function openShareRouter(payload) {
     // A background target routes silently; an open target navigates away.
     const applyTarget = async (target) => {
       try {
+        if (target.id === 'event' && refining) await within(refining, REFINE_WAIT_MS);
         await runTarget(target.id, shaped);
         if (target.mode === 'background') {
           toast(t(`shareTarget.saved.${target.id}`), 'success');
@@ -713,6 +753,18 @@ export function openShareRouter(payload) {
 
       renderRows();
       renderSendBtn();
+      if (refiningBusy) renderEventChip(true);
+    };
+
+    // The chip says the AI is still looking, then shows what it settled on.
+    const renderEventChip = (busy) => {
+      const host = overlay.querySelector('.yanta-share-target.is-wide .yanta-share-target-text');
+      if (!host || !shaped.eventDraft) return;
+      const hint = busy ? t('shareTarget.eventRefining') : eventDraftHint(shaped.eventDraft);
+      host.innerHTML = `
+        <small>${escapeHtml(t('shareTarget.target.eventDetected'))}</small>
+        <b>${escapeHtml(eventDraftLabel(shaped.eventDraft))}</b>
+        ${hint ? `<small>${escapeHtml(hint)}</small>` : ''}`;
     };
 
     overlay.addEventListener('click', (e) => {
@@ -724,6 +776,11 @@ export function openShareRouter(payload) {
     window.addEventListener('keydown', onKey, true);
     document.body.append(overlay);
     render();
+
+    refining?.finally(() => {
+      refiningBusy = false;
+      if (overlay.isConnected) renderEventChip(false);
+    });
 
     /*
       Resolve the Matrix client lazily; re-render to reveal the chats zone

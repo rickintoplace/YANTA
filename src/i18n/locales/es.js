@@ -36,6 +36,7 @@ export default {
       rss: 'Añadir fuente',
       eventDetected: 'Evento detectado',
     },
+    eventRefining: 'La IA está revisando…',
     eventHint: {
       'weekday-mismatch': 'El día de la semana no coincide con la fecha: revisa el día',
       'meridiem-guessed': 'Mañana o tarde supuesto: revisa la hora',

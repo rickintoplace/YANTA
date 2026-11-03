@@ -941,6 +941,7 @@ export function renderAiSettingsPanel(panel) {
         ${permissionCheckboxHtml('allowReadAiBrain', t('ai.settings.permissions.readAiBrain'), t('ai.settings.badges.recommended'), p.allowReadAiBrain)}
         ${permissionCheckboxHtml('allowWriteAiBrain', t('ai.settings.permissions.writeAiBrain'), t('ai.settings.badges.recommended'), p.allowWriteAiBrain)}
         ${permissionCheckboxHtml('allowWeather', t('ai.settings.permissions.weather'), t('ai.settings.badges.recommended'), p.allowWeather)}
+        ${permissionCheckboxHtml('allowRefineSharedEvents', t('ai.settings.permissions.refineSharedEvents'), t('ai.settings.badges.recommended'), p.allowRefineSharedEvents)}
         ${permissionCheckboxHtml('allowWebSearch', t('ai.settings.permissions.webSearch'), t('ai.settings.badges.optional'), p.allowWebSearch)}
         ${permissionCheckboxHtml('allowApproxLocationContext', t('ai.settings.permissions.approxLocation'), t('ai.settings.badges.optional'), p.allowApproxLocationContext)}
         ${permissionCheckboxHtml('allowReadRss', t('ai.settings.permissions.readRss'), t('ai.settings.badges.recommended'), p.allowReadRss)}
@@ -1036,6 +1037,7 @@ export function renderAiSettingsPanel(panel) {
       allowReadAiBrain: checkboxValue(panel, 'allowReadAiBrain'),
       allowWriteAiBrain: checkboxValue(panel, 'allowWriteAiBrain'),
       allowWeather: checkboxValue(panel, 'allowWeather'),
+      allowRefineSharedEvents: checkboxValue(panel, 'allowRefineSharedEvents'),
       allowWebSearch: checkboxValue(panel, 'allowWebSearch'),
       allowApproxLocationContext: checkboxValue(panel, 'allowApproxLocationContext'),
       allowReadRss: checkboxValue(panel, 'allowReadRss'),

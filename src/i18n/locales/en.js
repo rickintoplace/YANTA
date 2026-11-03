@@ -43,6 +43,7 @@ export default {
       rss: 'Add source',
       eventDetected: 'Event found',
     },
+    eventRefining: 'AI is checking…',
     eventHint: {
       'weekday-mismatch': 'Weekday and date do not match — check the day',
       'meridiem-guessed': 'Morning or afternoon was a guess — check the time',

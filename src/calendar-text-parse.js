@@ -176,6 +176,8 @@ function scan(text, { dateOrder }) {
   // ISO 2026-12-03
   each(`${B}(\\d{4})-(\\d{2})-(\\d{2})(?![\\d])`, (m) => {
     const [, y, mo, d] = m;
+    // "Rechnung Nr. 2026-11-03" is a reference, not a day.
+    if (/(?:nr|no|nummer|number|#|id|az)\.?:?\s*$/i.test(text.slice(Math.max(0, m.index - 10), m.index))) return;
     if (validDayMonth(+d, +mo)) add('date', m, { d: +d, m: +mo, y: +y });
   });
   // 3.12. / 03.12.2026 / 3.12.26 — never "1.2.3" (a version number),
@@ -284,12 +286,14 @@ function scan(text, { dateOrder }) {
   // 17:15 (Uhr) / 5:30 pm
   each(`${B}(\\d{1,2}):(\\d{2})(?:${ampm}|${uhr})?${E}`, (m) => {
     const [, h, mi, mer] = m;
-    if (+h <= 24 && +mi < 60) add('time', m, { h: +h, mi: +mi, mer: meridiem(mer), lead0: h.length === 2 && h[0] === '0' });
+    if (+h <= 24 && +mi < 60) add('time', m, { h: +h, mi: +mi, mer: meridiem(mer), lead0: h.length === 2 && h[0] === '0', written: true });
   });
   // 17.15 Uhr / um 17.15
   each(`${B}(?:(um|ab|gegen|bis)\\s+)?(\\d{1,2})\\.(\\d{2})${uhr}?${E}`, (m) => {
     const [, prep, h, mi, u] = m;
     if (!prep && !u) return;
+    // "bis 17.11." closes with a dot: a date, not 17:11.
+    if (!u && text[m.index + m[0].length] === '.') return;
     if (+h <= 24 && +mi < 60) add('time', m, { h: +h, mi: +mi, mer: null });
   });
   // 17 Uhr / 5pm / um 5 / gegen 9 / at 5
@@ -299,7 +303,8 @@ function scan(text, { dateOrder }) {
   });
   each(`${B}(um|gegen|at)\\s+(\\d{1,2}|${NUMWORD_RX})(?![\\d.:/])${E}(?!\\s*(?:tage|tagen|wochen|minuten|min|stunden|jahre|euro|€|%|days|weeks|minutes|hours|years|uhr|am|pm|h${E}))`, (m) => {
     const h = num(m[2]);
-    if (h <= 24) add('time', m, { h, mi: 0, mer: null });
+    // "um 8" (no "Uhr", no minutes) leaves the half of the day open.
+    if (h <= 24) add('time', m, { h, mi: 0, mer: null, bare: true });
   });
   // vierzehn Uhr / zwölf Uhr dreißig / 17 Uhr 30
   each(`${B}(?:(um|ab|gegen)\\s+)?(${HOUR_RX})\\s+uhr(?:\\s+(\\d{2}|${Object.keys(MINUTE_WORDS).join('|')}))?${E}`, (m) => {
@@ -566,11 +571,17 @@ function resolveHour(t, part, flags) {
   if (part === 'noon') return h <= 2 ? h + 12 : h;
   if (part === 'afternoon' || part === 'evening' || part === 'night') return h === 12 ? 12 : h + 12;
   if (h === 12) return 12;
+  // "7:30" with minutes is usually written as meant (24-hour habit);
+  // "um 5" without them usually means the afternoon. Both are guesses.
+  if (h <= 7 && t.written) {
+    flags.add('meridiem-guessed');
+    return h;
+  }
   if (h <= 7) {
     flags.add('meridiem-guessed');
     return h + 12;
   }
-  if (t.colloquial) flags.add('meridiem-guessed');
+  if (t.colloquial || t.bare) flags.add('meridiem-guessed');
   return h;
 }
 

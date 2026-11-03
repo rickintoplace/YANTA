@@ -35,6 +35,7 @@ export default {
       rss: 'ソースを追加',
       eventDetected: '予定を検出',
     },
+    eventRefining: 'AIが確認中…',
     eventHint: {
       'weekday-mismatch': '曜日と日付が一致しません。日付を確認してください',
       'meridiem-guessed': '午前・午後を推測しました。時刻を確認してください',

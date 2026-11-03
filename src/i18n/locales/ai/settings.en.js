@@ -82,6 +82,7 @@ export default {
     readAiBrain: 'Allow assistant to read AI Brain',
     writeAiBrain: 'Allow assistant to write AI Brain',
     weather: 'Allow assistant to fetch weather via Open-Meteo',
+    refineSharedEvents: 'Check events in shared messages (the message is sent to the AI)',
     webSearch: 'Allow assistant to search the web',
     approxLocation: 'Allow assistant to receive approximate location context',
     // "Sources" is the name of YANTA's feed reader (RSS feeds, YouTube channels).

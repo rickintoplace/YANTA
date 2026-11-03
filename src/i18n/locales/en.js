@@ -14,6 +14,22 @@ import aiContext from './ai/context.en.js';
 
 import greeting from './greeting/greeting.en.js';
 export default {
+  drop: {
+    title: 'Add to YANTA?',
+    rootFolder: 'Notes (no folder)',
+    untitled: 'Dropped text',
+    noteCreated: 'Note created in “{folder}”',
+    openNote: 'Open',
+    createNoteIn: 'Note in “{folder}”',
+    capture: 'Quick capture',
+    captureHint: 'Into today’s journal',
+    addSource: 'Add as source',
+    addSourceHint: 'If the site has a feed',
+    sourceFailed: 'No feed found for this link',
+    overlayTitle: 'Drop to add to YANTA',
+    overlayText: 'Dates become events · feed and channel links become sources · anything else a note',
+    overlayFolder: 'Drop on a folder to file it there',
+  },
   shareTarget: {
     title: 'Share to YANTA',
     previewImage: 'Image',

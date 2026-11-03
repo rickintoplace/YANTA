@@ -1288,6 +1288,25 @@ button.link { background: 0; border: 0; color: var(--accent); cursor: pointer; p
   display: flex; flex-direction: column; align-items: center; gap: 10px;
 }
 .drop-overlay-title { font-size: 18px; font-weight: 700; }
+/* Text drags: the app stays visible, so a folder can be aimed at. */
+.drop-overlay.is-text {
+  background: transparent;
+  backdrop-filter: none;
+  align-items: flex-end;
+  padding-bottom: 28px;
+}
+.drop-overlay.is-text .drop-overlay-inner {
+  padding: 14px 22px;
+  max-width: min(560px, calc(100vw - 32px));
+  background: var(--bg-elev);
+  box-shadow: var(--shadow);
+}
+.drop-overlay.is-text .drop-overlay-title { font-size: 15px; }
+.yanta-drop-folder {
+  outline: 2px dashed var(--accent);
+  outline-offset: 2px;
+  background: color-mix(in srgb, var(--accent) 12%, transparent) !important;
+}
 .drop-overlay-hint { font-size: 12px; color: var(--text-dim); }
 
 /* ---------- Toast ---------- */

@@ -174,6 +174,25 @@ function within(promise, ms) {
   return Promise.race([promise, new Promise((resolve) => setTimeout(resolve, ms))]);
 }
 
+/**
+ * Opens the event editor for text that names a moment, after a second
+ * look by the AI (at most REFINE_WAIT_MS). Used by drag and drop too.
+ * Resolves false when the text names no moment.
+ */
+export async function openEventFromText(text, { draft = null } = {}) {
+  const local = draft || draftEventFromText(text, { dateOrder: dateOrderForLocale(getLocale()) });
+  if (!local) return false;
+
+  let chosen = local;
+  await within(
+    refineSharedEventDraft(text, local).then((next) => { chosen = next || local; }).catch(() => {}),
+    REFINE_WAIT_MS
+  );
+
+  await openEventDraft(chosen);
+  return true;
+}
+
 function openEventDraft(draft) {
   return import('../calendar.js').then(async ({ openCalendar, openNewCalendarEvent }) => {
     openCalendar?.({ push: true });

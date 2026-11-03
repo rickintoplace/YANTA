@@ -3782,7 +3782,7 @@ function bindEvents() {
         await importSvgFileAsDrawing(f);
       } else if (f.type.startsWith('image/')) {
         await insertImageAsRef(f);
-      } else if (/\.(yanta|md|markdown|txt|json|zip)$/i.test(f.name)) {
+      } else if (isCalendarDropFile(f) || /\.(yanta|md|markdown|txt|json|zip)$/i.test(f.name)) {
         await importFiles([f]);
       }
     }
@@ -4174,23 +4174,131 @@ function handleGlobalKey(e) {
   }
 }
 
+/*
+  Where an external drop lands, as far as routing cares: a folder (tree
+  row or dashboard card), a calendar day, or a place that handles drops
+  itself (editors, inputs, drawings, the AI panel) and must be left alone.
+*/
+function externalDropTarget(target) {
+  const el = target?.closest ? target : target?.parentElement;
+  if (!el?.closest) return { ownHandler: false, folderId: undefined, date: '' };
+
+  const ownHandler = !!el.closest(
+    '.cm-editor, input, textarea, select, [contenteditable=""], [contenteditable="true"], ' +
+    '.excalidraw, .yanta-ai-panel, .yanta-ai-assistant, .yanta-chat-composer, [data-own-drop]'
+  );
+
+  const treeFolder = el.closest('.tree-folder-node[data-folder-id]');
+  const dashFolder = el.closest('.yanta-dash-card[data-kind="folder"][data-folder-id]');
+  const folderId = treeFolder?.dataset.folderId || dashFolder?.dataset.folderId || undefined;
+
+  const dayCell = el.closest('.fc [data-date]');
+  const date = /^\d{4}-\d{2}-\d{2}/.test(dayCell?.dataset.date || '') ? dayCell.dataset.date.slice(0, 10) : '';
+
+  return { ownHandler, folderId, date, folderEl: treeFolder?.querySelector(':scope > .tree-row') || dashFolder || null };
+}
+
 function setupGlobalDropImport() {
   const overlay = $('dropOverlay');
+  const overlayTitle = overlay?.querySelector('.drop-overlay-title');
+  const overlayHint = overlay?.querySelector('.drop-overlay-hint');
+  const fileTitle = overlayTitle?.textContent || '';
+  const fileHint = overlayHint?.textContent || '';
+
   let hideTimer = null;
-  const isFileDrag = (e) => e.dataTransfer && [...(e.dataTransfer.types || [])].includes('Files');
+  let highlighted = null;
+
+  /*
+    Drags that start inside the page are YANTA's own — moving notes,
+    text within the editor — and keep their own handling.
+  */
+  let internalDrag = false;
+  document.addEventListener('dragstart', () => { internalDrag = true; }, true);
+  document.addEventListener('dragend', () => { internalDrag = false; }, true);
+
+  const types = (e) => [...(e.dataTransfer?.types || [])];
+  const isFileDrag = (e) => types(e).includes('Files');
+  const isTextDrag = (e) => {
+    if (internalDrag || isFileDrag(e)) return false;
+    const list = types(e);
+    if (list.some((type) => type.startsWith('text/yanta'))) return false;
+    return list.includes('text/plain') || list.includes('text/uri-list');
+  };
+
+  const highlight = (el) => {
+    if (highlighted === el) return;
+    highlighted?.classList.remove('yanta-drop-folder');
+    highlighted = el;
+    highlighted?.classList.add('yanta-drop-folder');
+  };
+
+  const hide = () => {
+    overlay.hidden = true;
+    highlight(null);
+  };
+
   window.addEventListener('dragover', (e) => {
-    if (!isFileDrag(e)) return;
+    const file = isFileDrag(e);
+    const text = !file && isTextDrag(e);
+    if (!file && !text) return;
+
+    const target = externalDropTarget(e.target);
+    if (text && target.ownHandler) {
+      hide();
+      return;
+    }
+
     e.preventDefault();
     e.dataTransfer.dropEffect = 'copy';
+
+    // Text drops keep the app visible: the folder under the pointer is
+    // where the note goes, so it must stay readable.
+    overlay.classList.toggle('is-text', text);
+    if (overlayTitle) overlayTitle.textContent = text ? t('drop.overlayTitle') : fileTitle;
+    if (overlayHint) overlayHint.textContent = text ? `${t('drop.overlayText')} · ${t('drop.overlayFolder')}` : fileHint;
     overlay.hidden = false;
+    highlight(text ? target.folderEl : null);
+
     clearTimeout(hideTimer);
-    hideTimer = setTimeout(() => { overlay.hidden = true; }, 120);
+    hideTimer = setTimeout(hide, 120);
   });
+
   window.addEventListener('drop', async (e) => {
-    if (!isFileDrag(e)) return;
+    const file = isFileDrag(e);
+    const text = !file && isTextDrag(e);
+    internalDrag = false;
+    if (!file && !text) return;
+
+    // Someone closer to the drop (the editor, the AI panel) took it.
+    if (e.defaultPrevented) {
+      hide();
+      return;
+    }
+
+    const target = externalDropTarget(e.target);
+
+    if (text) {
+      if (target.ownHandler) return;
+      e.preventDefault();
+      clearTimeout(hideTimer);
+      hide();
+
+      const { routeDroppedText } = await import('./share-target/drop-router.js');
+      await routeDroppedText({
+        text: e.dataTransfer.getData('text/plain'),
+        uriList: e.dataTransfer.getData('text/uri-list'),
+        folderId: target.folderId,
+        date: target.date,
+      }).catch((err) => {
+        console.error('[YANTA Drop] failed', err);
+        toast(t('shareTarget.failed'), 'error');
+      });
+      return;
+    }
+
     e.preventDefault();
     clearTimeout(hideTimer);
-    overlay.hidden = true;
+    hide();
     const items = e.dataTransfer.items ? [...e.dataTransfer.items] : [];
     const entries = items.map((it) => it.webkitGetAsEntry?.()).filter(Boolean);
     const hasDir = entries.some((en) => en && en.isDirectory);
@@ -4210,14 +4318,26 @@ function setupGlobalDropImport() {
     }
     const importable = files.filter((f) =>
       /\.(yanta|md|markdown|txt|json|zip|excalidraw|svg)$/i.test(f.name) ||
+      isCalendarDropFile(f) ||
       /\.excalidraw\.json$/i.test(f.name) ||
       f.type === 'application/json' || f.type === 'application/zip' ||
       f.type === 'text/markdown' || f.type === 'text/plain' ||
       f.type === 'image/svg+xml'
     );
     if (importable.length) await importFiles(importable);
-    else toast('Drop .yanta, .md, .markdown, .txt, .zip, or YANTA .json files', 'error');
+    else toast('Drop .yanta, .md, .markdown, .txt, .ics, .zip, or YANTA .json files', 'error');
   });
+}
+
+/*
+  Calendar files arrive as text/calendar from most senders and as
+  application/octet-stream from plenty of mail clients — the name decides
+  too (same rule as the share router).
+*/
+function isCalendarDropFile(f) {
+  const type = String(f?.type || '').toLowerCase();
+  return type === 'text/calendar' || type === 'application/ics' || type === 'text/x-vcalendar' ||
+    /\.(ics|ical|ifb|vcs)$/i.test(String(f?.name || ''));
 }
 
 function setupDivider() {

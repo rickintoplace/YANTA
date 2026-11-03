@@ -8,6 +8,22 @@ import aiContext from './ai/context.ja.js';
 
 import greeting from './greeting/greeting.ja.js';
 export default {
+  drop: {
+    title: 'YANTAに追加しますか？',
+    rootFolder: 'ノート（フォルダなし）',
+    untitled: 'ドロップしたテキスト',
+    noteCreated: '「{folder}」にノートを作成しました',
+    openNote: '開く',
+    createNoteIn: '「{folder}」にノート',
+    capture: 'クイックキャプチャ',
+    captureHint: '今日のジャーナルへ',
+    addSource: 'ソースとして追加',
+    addSourceHint: 'サイトにフィードがある場合',
+    sourceFailed: 'このリンクのフィードが見つかりません',
+    overlayTitle: 'ドロップしてYANTAに追加',
+    overlayText: '日時は予定に・フィードやチャンネルのリンクはソースに・それ以外はノートに',
+    overlayFolder: 'フォルダにドロップするとそこに保存します',
+  },
   shareTarget: {
     title: 'YANTA に共有',
     previewImage: '画像',

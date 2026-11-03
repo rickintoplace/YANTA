@@ -7,6 +7,22 @@ import aiContext from './ai/context.de.js';
 
 import greeting from './greeting/greeting.de.js';
 export default {
+  drop: {
+    title: 'In YANTA übernehmen?',
+    rootFolder: 'Notizen (ohne Ordner)',
+    untitled: 'Abgelegter Text',
+    noteCreated: 'Notiz in „{folder}“ angelegt',
+    openNote: 'Öffnen',
+    createNoteIn: 'Notiz in „{folder}“',
+    capture: 'Schnellnotiz',
+    captureHint: 'Ins heutige Journal',
+    addSource: 'Als Quelle hinzufügen',
+    addSourceHint: 'Falls die Seite einen Feed hat',
+    sourceFailed: 'Für diesen Link wurde kein Feed gefunden',
+    overlayTitle: 'Loslassen, um es in YANTA zu übernehmen',
+    overlayText: 'Termine werden Events · Feed- und Kanal-Links werden Quellen · alles andere eine Notiz',
+    overlayFolder: 'Auf einen Ordner ziehen, um es dort abzulegen',
+  },
   shareTarget: {
     title: 'In YANTA teilen',
     previewImage: 'Bild',

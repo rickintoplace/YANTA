@@ -696,6 +696,8 @@ function resolve(groupItem, text, now) {
     /^\s*(?:war|waren|hatten|was|were)\b/iu.test(after) ||
     // "Am 3.12. habe ich keine Zeit": a day ruled out, not proposed.
     /\b(?:keine zeit|kann ich nicht|geht (?:es |das )?nicht|nicht da|can't|cannot|can not|not available|doesn't work)\b/iu.test(clauseAfter) ||
+    // "Ich kann am 3.12. nicht": the verb's negation comes right after.
+    /^\s*(?:leider\s+)?(?:nicht|not)\b/iu.test(clauseAfter) ||
     (start < startOfDay(now) && !allDay) ||
     (allDay && (end || start) < startOfDay(now));
 

@@ -376,7 +376,7 @@ export async function importItems(items) {
         bundleCount++;
       }
       else if (lower.endsWith('.zip')) { await importZipBlob(file); zipCount++; }
-      else if (lower.endsWith('.ics')) {
+      else if (/\.(ics|ical|ifb|vcs)$/.test(lower) || file.type === 'text/calendar') {
         const { importCalendarFile } = await import('./calendar.js');
         await importCalendarFile(file);
         bundleCount++;

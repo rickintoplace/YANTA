@@ -7,6 +7,22 @@ import aiContext from './ai/context.fr.js';
 
 import greeting from './greeting/greeting.fr.js';
 export default {
+  drop: {
+    title: 'Ajouter à YANTA ?',
+    rootFolder: 'Notes (sans dossier)',
+    untitled: 'Texte déposé',
+    noteCreated: 'Note créée dans « {folder} »',
+    openNote: 'Ouvrir',
+    createNoteIn: 'Note dans « {folder} »',
+    capture: 'Capture rapide',
+    captureHint: 'Dans le journal du jour',
+    addSource: 'Ajouter comme source',
+    addSourceHint: 'Si le site a un flux',
+    sourceFailed: 'Aucun flux trouvé pour ce lien',
+    overlayTitle: 'Déposez pour ajouter à YANTA',
+    overlayText: 'Les dates deviennent des événements · les liens de flux et de chaînes des sources · le reste une note',
+    overlayFolder: 'Déposez sur un dossier pour le ranger là',
+  },
   shareTarget: {
     title: 'Partager vers YANTA',
     previewImage: 'Image',

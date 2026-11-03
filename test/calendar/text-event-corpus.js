@@ -106,6 +106,7 @@ export const CASES = [
   ['Ich komme in 5 Minuten', null],
   ['Ruf mich an: 0551 39 12345', null],
   ['so ein Mist', null],
+  ['Ich kann am 3.12. nicht', null],
 ];
 
 

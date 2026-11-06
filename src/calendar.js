@@ -1703,7 +1703,7 @@ function renderCalendarTopbar() {
 
     <span class="grow"></span>
 
-    <button class="btn compact yanta-calendar-feed-chip" data-cal-feed hidden title="Shared calendars: people, changes, sync status">
+    <button class="btn compact yanta-calendar-feed-chip" data-cal-feed title="Shared calendars: people, changes, sync status">
       ${lucide('users', 14)}
       <span data-cal-feed-count></span>
     </button>
@@ -2013,8 +2013,9 @@ async function refreshCalendarFeedChip() {
 
   const { unseen } = await calendarFeedSummary();
 
-  // Always there while any calendar is shared: who, what changed, in sync.
-  chip.hidden = !calendarBridges().length;
+  // Always there: who a calendar is shared with, what changed, whether
+  // it is in sync — and, on a device where a share cannot be opened, why.
+  chip.hidden = false;
 
   const countEl = chip.querySelector('[data-cal-feed-count]');
   if (countEl) {
@@ -13906,6 +13907,10 @@ export function setupCalendarVaultBridge() {
     });
 
     refreshCalendarShareIntroBanner();
+
+    // Bridges mount after the toolbar is drawn: the people button has to
+    // appear when the first one arrives, not on the next redraw.
+    refreshCalendarFeedChip().catch(() => {});
 
     if (state.currentNoteId) {
       requestAnimationFrame(() => {

@@ -127,8 +127,21 @@ export async function openCalendarSharePanel() {
   const render = async (host) => {
     const sections = [];
     for (const bridge of bridges) sections.push(sectionHtml(bridge, await calendarFeedFor(bridge.spaceId)));
-    host.innerHTML = sections.join('') ||
-      '<p class="muted">No shared calendars yet. Share one from the calendar list (⋯ → Share).</p>';
+    // Shares the server knows but this device cannot open.
+    let broken = [];
+    try {
+      const health = await import('./space-health.js');
+      broken = health.brokenShares().filter((b) => b.sourceType === 'calendar');
+    } catch {}
+
+    const brokenHtml = broken.map((b) => `
+      <section class="yanta-cal-share-section">
+        <header>${lucide('alert-triangle', 15)}<strong>${escapeHtml(b.name || b.title || 'A shared calendar')}</strong></header>
+        <div class="sync bad"><span>This calendar is shared, but this device cannot open the share (its keys are missing here). Entries made here do not reach anyone. Share it again from the calendar list (⋯ → Share) and send the new link.</span></div>
+      </section>`).join('');
+
+    host.innerHTML = sections.join('') + brokenHtml ||
+      `<p class="muted">No calendar on this device is shared yet. Share one from the calendar list (⋯ → Share) and send the link — everyone with an edit link can add entries.</p>`;
   };
 
   await yantaDialog({

@@ -17,6 +17,7 @@
 // ============================================================
 
 import { store } from '../core.js';
+import { isChatEnabled } from '../chat/chat-enabled.js';
 
 const CACHE_KEY = 'spaces.identity.v1';
 
@@ -105,7 +106,9 @@ export async function resolveOwnIdentity() {
   const live = peekOwnMatrixUserId();
   if (live) return remember(live);
 
-  try {
+  // With chat off there is no homeserver: loading the Matrix SDK only
+  // delays mounting a shared calendar.
+  if (isChatEnabled()) try {
     const { resolveMatrixClient } = await import('../chat/chat-actions.js');
     const client = await resolveMatrixClient();
     const userId = client?.getUserId?.();

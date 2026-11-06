@@ -7110,6 +7110,9 @@ function mergeMountedCalendarSpaces() {
 function mergeMountedSpaceEventProviders() {
   for (const provider of mountedSpaceEventProviders()) {
     for (const raw of provider.categories()) {
+      // Joined as a calendar too: that bridge owns the category.
+      if (calendarBridgeForCategory(raw?.id)) continue;
+
       const cat = sanitizeCalendarCategory({
         ...raw,
         color: '#8ab4f8',
@@ -7130,6 +7133,9 @@ function mergeMountedSpaceEventProviders() {
     for (const raw of provider.events()) {
       const ev = sanitizeCalendarEvent(raw);
       if (!ev) continue;
+
+      // The calendar bridge merges this one, writable, right after.
+      if (calendarBridgeForCategory(ev.categoryId)) continue;
 
       ev.spaceId = provider.spaceId;
       ev.spaceRole = provider.role;

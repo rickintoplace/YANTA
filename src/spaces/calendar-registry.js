@@ -85,6 +85,16 @@ export function spaceEventProviderForSpace(spaceId) {
 export function mountedSpaceEventProviderForCategory(categoryId) {
   if (!categoryId) return null;
 
+  /*
+    A calendar joined as a calendar is the stronger claim. The same
+    category often arrives twice — as the shared calendar itself, and
+    through a shared folder whose notes link to its events (the owner's
+    category ID is canonical in both). The folder's claim is read-only;
+    letting it win made every entry in a calendar the user had joined
+    with an edit link fail with "shared through a folder are read-only".
+  */
+  if (calendarBridgeForCategory(categoryId)) return null;
+
   for (const provider of mountedSpaceEventProviders()) {
     if (provider.categories().some((cat) => cat.id === categoryId)) return provider;
   }

@@ -5314,16 +5314,6 @@ function fcExclusiveAllDayEndToStoredInclusive(value) {
   return localInputValue(d, true);
 }
 
-function calendarEventSpansMultipleLocalDays({
-  start,
-  end,
-  allDay = false,
-} = {}) {
-  if (!start || !end) return false;
-
-  return !sameLocalDay(start, end);
-}
-
 function normalizeCalendarEventEnd({ start, end, allDay }) {
   if (!end) return null;
 
@@ -6678,10 +6668,6 @@ function recurrenceValidationMessageForPatch(patch, modal) {
     if (untilDate && startDate && untilDate.getTime() < startOfLocalDay(startDate).getTime()) {
       return 'Repeat end date must be on or after the start date.';
     }
-  }
-
-  if (patch.end && calendarEventSpansMultipleLocalDays(patch)) {
-    return 'Repeating multi-day events are not supported yet. Create a one-time multi-day event, or repeat a single-day event.';
   }
 
   return '';

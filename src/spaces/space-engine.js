@@ -51,13 +51,16 @@ function entryEtag(entry) {
 }
 
 export class SpaceEngine {
-  constructor({ spaceId, rootKey, role, remote, onDidUpload = null, onDidApply = null }) {
+  constructor({ spaceId, rootKey, role, remote, onDidUpload = null, onDidApply = null, onUploadFailed = null }) {
     this.spaceId = String(spaceId);
     this.rootKey = rootKey;
     this.role = role;
     this.remote = remote;
     this.onDidUpload = onDidUpload;
     this.onDidApply = onDidApply;
+    this.onUploadFailed = onUploadFailed;
+    this.lastUploadError = null;
+    this.pendingTimer = null;
 
     this.keys = null;
     this.state = null;
@@ -96,6 +99,54 @@ export class SpaceEngine {
     }
 
     return this;
+  }
+
+  persistPendingSoon() {
+    clearTimeout(this.pendingTimer);
+    this.pendingTimer = setTimeout(() => {
+      this.pendingTimer = null;
+      this.state.pending = {};
+      for (const record of this.docs.values()) {
+        if (!record.buffer.length) continue;
+        const merged = record.buffer.length === 1 ? record.buffer[0] : Y.mergeUpdates(record.buffer);
+        this.state.pending[record.remoteKey] = merged;
+      }
+      this.persistState();
+    }, 250);
+  }
+
+  async flushPendingNow() {
+    if (!this.canWrite || !this.hasUnsent()) return;
+    if (this.pendingTimer) {
+      clearTimeout(this.pendingTimer);
+      this.pendingTimer = null;
+      this.state.pending = {};
+      for (const record of this.docs.values()) {
+        if (record.buffer.length) this.state.pending[record.remoteKey] = Y.mergeUpdates(record.buffer);
+      }
+      await this.persistState();
+    }
+    clearTimeout(this.flushTimer);
+    this.flushTimer = null;
+    await this.flush();
+  }
+
+  /** Something is waiting to be uploaded (UI: "not sent yet"). */
+  hasUnsent() {
+    for (const record of this.docs.values()) if (record.buffer.length) return true;
+    return false;
+  }
+
+  /**
+   * Once per space and participant: publish a full head of what this
+   * participant has. Recovers edits lost from the old in-memory queue
+   * — the head carries every local change, uploaded or not.
+   */
+  async recoverUnsentOnce() {
+    if (!this.canWrite || this.state.headRecoveredV1) return;
+    await this.uploadHeads();
+    this.state.headRecoveredV1 = true;
+    await this.persistState();
   }
 
   async persistState() {
@@ -148,8 +199,22 @@ export class SpaceEngine {
       record.handler = (update, origin) => {
         if (origin === SPACE_REMOTE_ORIGIN) return;
         record.buffer.push(new Uint8Array(update));
+        this.persistPendingSoon();
         this.scheduleFlush();
       };
+
+      /*
+        Edits that were made but never reached the server — the app was
+        closed within the flush delay, or the upload failed — come back
+        from the persisted queue. Before this, the queue lived in memory
+        only: a member saw their own event forever while nobody else
+        ever received it.
+      */
+      const pending = this.state.pending?.[remoteKey];
+      if (pending?.length) {
+        record.buffer.push(new Uint8Array(pending));
+        this.scheduleFlush();
+      }
 
       target.on('update', record.handler);
     }
@@ -247,6 +312,8 @@ export class SpaceEngine {
         this.state.seen[path] = entry ? entryEtag(entry) : 'own';
         this.state.packsSinceHead += 1;
         uploadedKeys.push(record.remoteKey);
+        if (!record.buffer.length && this.state.pending) delete this.state.pending[record.remoteKey];
+        this.lastUploadError = null;
       } catch (err) {
         if (err?.code === 'ECOMPACTION_REQUIRED') {
           // The doc's journal is full. Publish a head (which covers every
@@ -268,7 +335,10 @@ export class SpaceEngine {
         // Put the batch back so nothing is lost; retry on next change/poll.
         record.buffer = [merged, ...record.buffer];
         this.state.seq -= 1;
+        this.state.pending = { ...(this.state.pending || {}), [record.remoteKey]: Y.mergeUpdates(record.buffer) };
+        this.lastUploadError = err;
         await this.persistState();
+        this.onUploadFailed?.(err);
         throw err;
       }
     }
@@ -387,6 +457,9 @@ export class SpaceEngine {
       await this.pulling;
     } finally {
       this.pulling = null;
+
+      // Every pull is also a retry for anything still waiting to go up.
+      if (this.canWrite && this.hasUnsent()) this.scheduleFlush();
 
       if (this.pullAgain && !this.destroyed) {
         this.pullAgain = false;

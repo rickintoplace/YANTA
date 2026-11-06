@@ -259,6 +259,20 @@ async function mountSpace(record) {
         recordSpaceActivity(record.spaceId, key).catch(() => {});
       }
     },
+    /*
+      Edits that cannot reach the server must not look saved. Told once
+      per session and space; the queue keeps them and retries.
+    */
+    onUploadFailed: (err) => {
+      if (session.uploadFailureShown) return;
+      session.uploadFailureShown = true;
+      const status = Number(err?.status || 0);
+      const name = record.title || 'the shared item';
+      toast(status === 401 || status === 403
+        ? `Changes to "${name}" were not sent: this link no longer allows editing. Ask for a new edit link.`
+        : `Changes to "${name}" are not sent yet — YANTA retries automatically.`, 'error');
+      emitSpaceChanged(record.spaceId);
+    },
     onDidApply: (docKey) => {
       session.lastPullAt = Date.now();
 
@@ -316,7 +330,9 @@ async function mountSpace(record) {
     });
   }
 
-  engine.pull().catch(() => {});
+  engine.pull()
+    .then(() => engine.recoverUnsentOnce())
+    .catch((err) => console.warn('[YANTA Spaces] first pull/recovery failed', err));
 
   // Near-live pull triggers: poke channel + slow polling safety net.
   let pokeTimer = null;
@@ -351,7 +367,13 @@ async function mountSpace(record) {
   session.pollTimer = setInterval(() => poll(), POLL_INTERVAL_MS);
 
   session.onVisible = () => {
-    if (!document.hidden && Date.now() - lastPollAt > POLL_INTERVAL_MS) poll(true);
+    // Leaving the app (Android: switching away, then the process dies):
+    // send what is waiting now instead of after the flush delay.
+    if (document.hidden) {
+      engine.flushPendingNow().catch(() => {});
+      return;
+    }
+    if (Date.now() - lastPollAt > POLL_INTERVAL_MS) poll(true);
   };
   document.addEventListener('visibilitychange', session.onVisible);
 
@@ -361,7 +383,7 @@ async function mountSpace(record) {
   // Note spaces only: a folder space has many docs, and one WebRTC room
   // per note would be costly. Its writers converge over the poke channel
   // instead (a couple of seconds rather than sub-second).
-  if (!isFolder && engine.canWrite && record.writerSecret) {
+  if (!isFolder && !isCalendar && engine.canWrite && record.writerSecret) {
     try {
       const creds = await deriveWriterRoomCredentials(record.writerSecret, record.epoch || 1);
 

@@ -9532,6 +9532,20 @@ async function resolveSpaceAccess(env, req, spaceId) {
 
   let viaToken = false;
 
+  /*
+    A member granted read access who also holds the edit link may edit:
+    the link is the stronger grant. The member row used to win, so such
+    a member's uploads were refused while their app showed the edits as
+    saved.
+  */
+  if (role === "read") {
+    const writeToken = req.headers.get("x-yanta-space-write-token") || "";
+    if (writeToken && space.write_token_hash) {
+      const h = await hashToken(env, writeToken);
+      if (timingSafeEqualStr(h, space.write_token_hash)) role = "write";
+    }
+  }
+
   if (!role) {
     const writeToken = req.headers.get("x-yanta-space-write-token") || "";
     if (writeToken && space.write_token_hash) {

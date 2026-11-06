@@ -41,12 +41,13 @@ let brokenList = [];
 let lastCheckedAt = 0;
 let checking = null;
 
+/** Shares that are dead and not replaced by a live one — the real losses. */
 export function brokenShares() {
-  return brokenList;
+  return brokenList.filter((b) => !b.supersededBy);
 }
 
 export function hasBrokenShares() {
-  return brokenList.length > 0;
+  return brokenShares().length > 0;
 }
 
 /**
@@ -58,7 +59,7 @@ export function brokenShareForCategory(categoryId) {
   const id = String(categoryId || '');
   if (!id) return null;
 
-  return brokenList.find(
+  return brokenShares().find(
     (b) => b.sourceType === 'calendar' && b.sourceId === id
   ) || null;
 }
@@ -67,7 +68,7 @@ export function brokenShareForFolder(folderId) {
   const id = String(folderId || '');
   if (!id) return null;
 
-  return brokenList.find(
+  return brokenShares().find(
     (b) => b.sourceType === 'folder' && b.sourceId === id
   ) || null;
 }
@@ -182,7 +183,30 @@ export async function reconcileOwnedSpaces({ force = false } = {}) {
         createdAt: Number(space?.createdAt || 0),
         objectCount: Number(space?.objectCount || 0),
         label: labelForSource(sourceType, sourceId),
+        supersededBy: space?.supersededBy || null,
       });
+    }
+
+    /*
+      A dead share of something this device shares again under another
+      space is a predecessor, not a loss: mark it superseded on the
+      server, and members' devices move their entries over to the live
+      one and leave the old (calendar-bridge repair in calendar.js).
+    */
+    for (const b of next) {
+      if (b.supersededBy) continue;
+      const live = localRecords.find((r) =>
+        r?.role === 'owner' &&
+        r.sourceType === b.sourceType &&
+        (r.categoryId === b.sourceId || r.rootFolderId === b.sourceId || r.noteId === b.sourceId));
+      if (!live) continue;
+      try {
+        const { apiPatchSpace } = await import('./space-session.js');
+        await apiPatchSpace(b.spaceId, { supersededBy: live.spaceId });
+        b.supersededBy = live.spaceId;
+      } catch (err) {
+        console.warn('[YANTA Spaces] could not mark predecessor share', b.spaceId, err);
+      }
     }
 
     const changed =
@@ -216,7 +240,7 @@ export async function reconcileOwnedSpaces({ force = false } = {}) {
  * the inline markers that stay visible anyway.
  */
 export async function unreportedBrokenShares() {
-  if (!brokenList.length) return [];
+  if (!brokenShares().length) return [];
 
   let notified = [];
 
@@ -228,7 +252,7 @@ export async function unreportedBrokenShares() {
 
   const seen = new Set(Array.isArray(notified) ? notified : []);
 
-  return brokenList.filter((b) => !seen.has(b.spaceId));
+  return brokenShares().filter((b) => !seen.has(b.spaceId));
 }
 
 export async function markBrokenSharesReported(spaceIds = []) {

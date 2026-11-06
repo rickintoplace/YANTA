@@ -132,9 +132,14 @@ async function brokenHtml() {
     return health.brokenShares()
       .filter((b) => b.sourceType === 'calendar')
       .map((b) => `
-        <section class="ycs-calendar">
-          <div class="ycs-calendar-head"><span class="ycs-dot is-broken" aria-hidden="true"></span><h3>${escapeHtml(b.name || t('calendarShare.untitled'))}</h3></div>
+        <section class="ycs-calendar" data-broken="${escapeAttr(b.spaceId)}">
+          <div class="ycs-calendar-head">
+            <span class="ycs-dot is-broken" aria-hidden="true"></span>
+            <h3>${escapeHtml(b.label && b.label !== 'a calendar' ? b.label : t('calendarShare.untitled'))}</h3>
+            <span class="ycs-role">${escapeHtml(t('calendarShare.sharedOn', { date: new Date(b.createdAt || Date.now()).toLocaleDateString(getLocale(), { day: 'numeric', month: 'short', year: 'numeric' }) }))}</span>
+          </div>
           <p class="ycs-status is-bad">${lucide('circle-alert', 14)}<span>${escapeHtml(t('calendarShare.broken'))}</span></p>
+          <button type="button" class="ycs-link" data-discard>${lucide('trash-2', 14)}<span>${escapeHtml(t('calendarShare.discard'))}</span></button>
         </section>`).join('');
   } catch {
     return '';
@@ -258,6 +263,13 @@ export async function openCalendarSharePanel(anchor) {
     const space = e.target.closest('[data-space]')?.dataset.space;
     if (e.target.closest('[data-sync]') && space) return syncSpace(space);
     if (e.target.closest('[data-copy-link]') && space) return copyLink(space);
+
+    const broken = e.target.closest('[data-broken]')?.dataset.broken;
+    if (broken && e.target.closest('[data-discard]')) {
+      const health = await import('./space-health.js');
+      await health.discardBrokenShare(broken);
+      return render();
+    }
 
     const eventId = e.target.closest('[data-event]')?.dataset.event;
     if (eventId && state.calendarEvents.has(eventId)) {

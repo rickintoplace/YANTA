@@ -252,6 +252,8 @@ import {
   markCalendarFeedSeen,
 } from './spaces/calendar-feed.js';
 
+import { spacePeople } from './spaces/space-people.js';
+
 const ORIGIN = 'calendar';
 const DEFAULT_CATEGORY_ID = 'cal_default';
 
@@ -1628,7 +1630,7 @@ function openCalendarMenu(anchor) {
 
   showMenu(r.left, r.bottom + 6, [
     {
-      label: 'Categories',
+      label: i18n('calendarList.title'),
       icon: 'calendar-fold',
       action: renderCategoriesModal,
     },
@@ -1919,7 +1921,7 @@ function mountedCalendarInvites() {
     out.push({
       spaceId: session.spaceId,
       name: cat?.name || session.record?.title || 'a calendar',
-      sharer: friendlySharerName(session.record?.invitedBy || ''),
+      sharer: sharedOwnerNames.get(categoryId) || friendlySharerName(session.record?.invitedBy || ''),
       role: session.role,
     });
   }
@@ -6973,6 +6975,56 @@ export function sanitizeCalendarEvent(raw) {
   });
 }
 
+/*
+  Entries made in a shared calendar while its share is still connecting
+  (startup, offline): kept on this device — never in the private vault,
+  where they would stay private for good — and handed to the share as
+  soon as it is there. Shown meanwhile like any other entry.
+*/
+const PENDING_SHARED_KEY = 'calendar.pendingShared.v1';
+let pendingShared = null; // spaceId -> { [eventId]: event }
+
+async function loadPendingShared() {
+  if (pendingShared) return pendingShared;
+  try { pendingShared = (await store.settings.get(PENDING_SHARED_KEY, null)) || {}; } catch { pendingShared = {}; }
+  return pendingShared;
+}
+
+function persistPendingShared() {
+  store.settings.set(PENDING_SHARED_KEY, pendingShared || {}).catch(() => {});
+}
+
+function queuePendingSharedEvent(spaceId, ev) {
+  pendingShared = pendingShared || {};
+  pendingShared[spaceId] = { ...(pendingShared[spaceId] || {}), [ev.id]: safeJsonClone(ev) };
+  persistPendingShared();
+  state.calendarEvents.set(ev.id, { ...safeJsonClone(ev), spaceId, pendingShare: true });
+}
+
+function mergePendingSharedEvents() {
+  for (const [spaceId, events] of Object.entries(pendingShared || {})) {
+    for (const ev of Object.values(events)) {
+      if (!state.calendarEvents.has(ev.id)) state.calendarEvents.set(ev.id, { ...ev, spaceId, pendingShare: true });
+    }
+  }
+}
+
+async function flushPendingSharedEvents() {
+  await loadPendingShared();
+  let changed = false;
+  for (const [spaceId, events] of Object.entries(pendingShared)) {
+    const bridge = calendarBridgeForSpace(spaceId);
+    if (!bridge?.canWrite) continue;
+    for (const ev of Object.values(events)) bridge.putEventFromLocal(safeJsonClone({ ...ev, categoryId: bridge.categoryId }));
+    delete pendingShared[spaceId];
+    changed = true;
+  }
+  if (changed) {
+    persistPendingShared();
+    hydrateCalendarStateFromVault({ silent: false });
+  }
+}
+
 /** The space record of a calendar someone else shared with this account. */
 function memberShareForCategory(categoryId) {
   const id = String(categoryId || '');
@@ -6999,11 +7051,54 @@ function memberShareForCategory(categoryId) {
 */
 let repairingSharedCalendars = false;
 
+/*
+  The owner lost the keys of an older share and shares the calendar
+  again; their device marks the old space "superseded by" the new one
+  (space-health.js). A member who has both moves what only the old one
+  has into the new one, then leaves the old one.
+*/
+const supersededChecked = new Map(); // spaceId -> checkedAt
+
+async function migrateSupersededShares() {
+  const { apiGetSpace, leaveSpace } = await import('./spaces/space-session.js');
+
+  for (const old of mountedCalendarBridges()) {
+    if (Date.now() - (supersededChecked.get(old.spaceId) || 0) < 10 * 60_000) continue;
+    supersededChecked.set(old.spaceId, Date.now());
+
+    let meta = null;
+    try {
+      meta = await apiGetSpace(old.spaceId, state.spaces.get(old.spaceId)?.record);
+    } catch {
+      continue;
+    }
+    if (!meta?.supersededBy) continue;
+
+    const live = calendarBridgeForSpace(meta.supersededBy);
+    if (!live?.canWrite) continue;
+
+    const liveEvents = new Map(live.events().map((ev) => [ev.id, ev]));
+    let moved = 0;
+    for (const ev of old.events()) {
+      const there = liveEvents.get(ev.id);
+      if (there && Number(there.updated || 0) >= Number(ev.updated || 0)) continue;
+      live.putEventFromLocal(safeJsonClone({ ...ev, categoryId: live.categoryId }));
+      moved += 1;
+    }
+
+    await leaveSpace(old.spaceId);
+    if (moved) toast(i18n('calendarShare.movedIn', { count: moved, name: live.category()?.name || '' }), 'success');
+    hydrateCalendarStateFromVault({ silent: false });
+  }
+}
+
 async function repairDuplicateSharedCalendars() {
   if (repairingSharedCalendars) return;
   repairingSharedCalendars = true;
 
   try {
+    await migrateSupersededShares();
+
     for (const bridge of mountedCalendarBridges()) {
       const catId = bridge.categoryId;
       if (!catId || !bridge.canWrite) continue;
@@ -7063,12 +7158,128 @@ async function repairDuplicateSharedCalendars() {
   }
 }
 
+const normName = (name) => String(name || '').trim().toLocaleLowerCase();
+
+/**
+ * Own calendars that carry the same name as a calendar someone shares
+ * with you — the trap behind "my entries never arrive": two "Couple
+ * Calendar"s, and the entries went into the private one. Each pair is
+ * { own: category, bridge, count } for a writable shared calendar.
+ */
+export function sameNameCalendarPairs() {
+  const pairs = [];
+
+  for (const bridge of mountedCalendarBridges()) {
+    if (!bridge.canWrite) continue;
+    const shared = state.calendarCategories.get(bridge.categoryId) || bridge.category();
+    const name = normName(shared?.name);
+    if (!name) continue;
+
+    for (const cat of state.calendarCategories.values()) {
+      if (cat.id === bridge.categoryId || cat.spaceId || cat.source || cat.readonly) continue;
+      if (normName(cat.name) !== name) continue;
+      if (!vaultCalendarCategoriesMap().has(cat.id)) continue;
+
+      const count = [...vaultEventsMap().values()].filter((ev) => ev?.categoryId === cat.id && !vaultTombstonesMap().has(ev.id)).length;
+      pairs.push({ own: cat, bridge, sharedName: shared.name, count });
+    }
+  }
+
+  return pairs;
+}
+
+/**
+ * Moves an own calendar into the shared one of the same name: its
+ * entries go into the share (everyone in it sees them), an own share of
+ * it is stopped, the own calendar is removed. Returns the number moved.
+ */
+export async function mergeOwnCalendarIntoShared(ownCategoryId, bridge) {
+  const ownId = String(ownCategoryId || '');
+  if (!ownId || !bridge?.canWrite || ownId === bridge.categoryId) return 0;
+
+  const { spaceSessionForCalendarCategory, stopSpaceShare } = await import('./spaces/space-session.js');
+  const ownShare = spaceSessionForCalendarCategory(ownId);
+  if (ownShare && ownShare.role === 'owner') await stopSpaceShare(ownShare.spaceId, { silent: true }).catch(() => {});
+
+  const tombstones = vaultTombstonesMap();
+  const entries = [...vaultEventsMap().values()].filter((raw) => raw?.categoryId === ownId && !tombstones.has(raw.id));
+  let moved = 0;
+
+  for (const raw of entries) {
+    const ev = sanitizeCalendarEvent({ ...raw, categoryId: bridge.categoryId, updated: now() });
+    if (!ev) continue;
+    bridge.putEventFromLocal(safeJsonClone(ev));
+    moved += 1;
+  }
+
+  getVaultDoc().transact(() => {
+    for (const raw of entries) {
+      vaultEventsMap().delete(raw.id);
+      vaultTombstonesMap().set(raw.id, { id: raw.id, type: 'calendar-event', title: raw.title || '', deletedAt: now() });
+    }
+    vaultCalendarCategoriesMap().delete(ownId);
+    vaultTombstonesMap().set(ownId, { id: ownId, type: 'calendar-category', title: '', deletedAt: now() });
+  }, ORIGIN);
+
+  state.calendarCategories.delete(ownId);
+  hydrateCalendarStateFromVault({ silent: false });
+  return moved;
+}
+
+/** Asks once per pair, with the facts, whether to merge. */
+export async function offerSameNameMerge(pair) {
+  const { yantaChoice } = await import('./dialogs.js');
+  const choice = await yantaChoice({
+    title: i18n('calendarShare.twinTitle', { name: pair.sharedName }),
+    message: i18n('calendarShare.twinMessage', { name: pair.sharedName, count: pair.count, owner: sharedOwnerNames.get(pair.bridge.categoryId) || i18n('calendarShare.twinSomeone') }),
+    icon: 'merge',
+    choices: [
+      { id: 'merge', icon: 'merge', primary: true, label: i18n('calendarShare.twinMerge', { count: pair.count }), hint: i18n('calendarShare.twinMergeHint') },
+      { id: 'keep', icon: 'copy', label: i18n('calendarShare.twinKeep'), hint: i18n('calendarShare.twinKeepHint') },
+    ],
+    cancelLabel: i18n('common.cancel'),
+  });
+
+  if (choice === 'keep') {
+    putCalendarCategory({ id: pair.own.id, name: i18n('calendarShare.twinOwnName', { name: pair.own.name }) });
+    return 'kept';
+  }
+  if (choice !== 'merge') return null;
+
+  const moved = await mergeOwnCalendarIntoShared(pair.own.id, pair.bridge);
+  toast(i18n('calendarShare.movedIn', { count: moved, name: pair.sharedName }), 'success');
+  return 'merged';
+}
+
+const TWIN_ASKED_KEY = 'calendar.twinsAsked.v1';
+
+async function promptSameNameTwins() {
+  const pairs = sameNameCalendarPairs();
+  if (!pairs.length) return;
+
+  let asked = [];
+  try { asked = await store.settings.get(TWIN_ASKED_KEY, []); } catch {}
+  const pair = pairs.find((p) => !asked.includes(`${p.own.id}>${p.bridge.categoryId}`));
+  if (!pair) return;
+
+  try { await store.settings.set(TWIN_ASKED_KEY, [...asked, `${pair.own.id}>${pair.bridge.categoryId}`]); } catch {}
+
+  actionToast(i18n('calendarShare.twinToast', { name: pair.sharedName }), {
+    actionLabel: i18n('calendarShare.twinToastAction'),
+    onAction: () => offerSameNameMerge(pair),
+    duration: 15000,
+  });
+}
+
 let repairTimer = 0;
 function scheduleSharedCalendarRepair() {
   clearTimeout(repairTimer);
-  repairTimer = setTimeout(() => repairDuplicateSharedCalendars().catch((err) => {
-    console.warn('[YANTA Calendar] shared calendar repair failed', err);
-  }), 2500);
+  repairTimer = setTimeout(() => flushPendingSharedEvents()
+    .then(() => repairDuplicateSharedCalendars())
+    .then(() => promptSameNameTwins())
+    .catch((err) => {
+      console.warn('[YANTA Calendar] shared calendar repair failed', err);
+    }), 2500);
 }
 
 export function ensureDefaultCalendarCategory() {
@@ -7156,10 +7367,16 @@ function mergeMountedCalendarSpaces() {
   // claim (it can be written to), so it wins where both deliver the same
   // event.
   mergeMountedSpaceEventProviders();
+  mergePendingSharedEvents();
 
   for (const bridge of mountedCalendarBridges()) {
     const shared = bridge.category();
     if (!shared) continue;
+
+    try {
+      const owner = spacePeople(bridge.spaceId, { includeSelf: true }).find((p) => p.role === 'owner');
+      if (owner?.name) setSharedCalendarOwnerName(bridge.categoryId, owner.name);
+    } catch {}
 
     const cat = sanitizeCalendarCategory({
       ...shared,
@@ -7753,9 +7970,12 @@ export function putCalendarEvent(patch) {
     the entry into the private vault, where it never reaches anyone —
     this is how a member's entries got lost. Say so instead.
   */
-  if (!calendarBridgeForCategory(ev.categoryId) && memberShareForCategory(ev.categoryId)) {
-    toast(i18n('calendarShare.connecting'), 'error');
-    return null;
+  const waitingShare = !calendarBridgeForCategory(ev.categoryId) && memberShareForCategory(ev.categoryId);
+  if (waitingShare) {
+    // Kept on this device and sent the moment the share connects.
+    queuePendingSharedEvent(waitingShare.spaceId, ev);
+    finishPutCalendarEvent(state.calendarEvents.get(ev.id), existing);
+    return state.calendarEvents.get(ev.id);
   }
 
   const sourceBridge = existing ? calendarBridgeForCategory(existing.categoryId) : null;
@@ -11730,14 +11950,37 @@ export function openNewCalendarEvent(input = {}) {
   });
 }
 
+/*
+  Two calendars with one name — your own "Couple Calendar" and the one
+  someone shares with you — must not look alike where an entry is filed:
+  that is how entries ended up in the private one. Shared calendars say
+  whose they are; your own says it is yours.
+*/
+let sharedOwnerNames = new Map();
+export function setSharedCalendarOwnerName(categoryId, name) {
+  if (categoryId && name) sharedOwnerNames.set(categoryId, name);
+}
+
+function calendarDisplayName(cat, all = [...state.calendarCategories.values()]) {
+  const name = cat?.name || 'Calendar';
+  const twin = all.some((other) => other.id !== cat.id && normName(other.name) === normName(name));
+  if (!twin) return name;
+  if (cat.spaceId && !calendarBridgeForCategory(cat.id)?.isOwner) {
+    const owner = sharedOwnerNames.get(cat.id);
+    return owner ? i18n('calendarShare.sharedBy', { name, owner }) : i18n('calendarShare.sharedWithYou', { name });
+  }
+  return i18n('calendarShare.yours', { name });
+}
+
 function categoryOptionsHtml(selectedId) {
   ensureDefaultCalendarCategory();
+  const all = [...state.calendarCategories.values()];
 
-  return [...state.calendarCategories.values()]
+  return all
     .sort((a, b) => String(a.name).localeCompare(String(b.name)))
     .map((cat) => `
       <option value="${escapeAttr(cat.id)}" ${cat.id === selectedId ? 'selected' : ''}>
-        ${escapeHtml(cat.name || 'Calendar')}
+        ${escapeHtml(calendarDisplayName(cat, all))}
       </option>
     `)
     .join('');
@@ -13215,167 +13458,199 @@ function renderCategoriesModal({
       .join('');
   };
 
-  const rows = [...state.calendarCategories.values()]
-    .sort((a, b) => String(a.name).localeCompare(String(b.name)))
-    .map((cat) => {
-      const count = [...state.calendarEvents.values()]
-        .filter((ev) => ev.categoryId === cat.id)
-        .length;
+  const all = [...state.calendarCategories.values()]
+    .sort((a, b) => String(a.name).localeCompare(String(b.name)));
 
-      const sourceDesc = calendarCategorySourceDescription(cat.source);
+  /*
+    One line per calendar, in the order of what people look for: is it
+    on (the swatch is the switch, as in every calendar app), what is it
+    called, who sees it. Everything else lives behind the row's menu.
+  */
+  const statusFor = (cat) => {
+    const sourceDesc = calendarCategorySourceDescription(cat.source);
+    if (sourceDesc) return { icon: 'calendar-days', text: sourceDesc };
 
-      const mounted = !!cat.spaceId;
-      const folderProvider = mountedSpaceEventProviderForCategory(cat.id);
-      const shareInfo = calendarCategoryShareInfo(cat.id);
-      const shared = mounted || shareInfo.shared;
-      const canShare = !sourceDesc && !cat.readonly && !mounted;
+    const folderProvider = mountedSpaceEventProviderForCategory(cat.id);
+    if (folderProvider) {
+      return { icon: 'folder', text: i18n('calendarList.fromFolder', { folder: folderProvider.title || '…' }) };
+    }
 
-      /*
-        A category that came in with a shared FOLDER is not a calendar
-        you joined — you cannot leave it here, you leave the folder.
-      */
-      const shareLine = folderProvider
-        ? `
-          <span class="yanta-calendar-cat-shared-badge is-mounted">
-            ${lucide('folder', 13)}
-            From shared folder${folderProvider.title ? ` “${escapeHtml(folderProvider.title)}”` : ''} · view only
-          </span>
-        `
-        : mounted
-          ? `
-            <span class="yanta-calendar-cat-shared-badge is-mounted">
-              ${lucide('users', 13)}
-              Shared with you${cat.readonly ? ' · view only' : ' · you can edit'}
-            </span>
-            <button class="btn compact danger" data-cat-leave>${lucide('log-out', 13)} Leave</button>
-          `
-          : shareInfo.shared
-            ? `
-              <span class="yanta-calendar-cat-shared-badge">
-                ${lucide('users', 13)}
-                Live shared${shareInfo.memberCount ? ` · ${shareInfo.memberCount} ${shareInfo.memberCount === 1 ? 'person' : 'people'}` : ''}${shareInfo.hasLink ? ` · ${lucide('globe', 12)} link` : ''}
-              </span>
-              <button class="btn compact" data-cat-share>${lucide('share-2', 13)} Manage sharing</button>
-            `
-            : canShare
-              ? `
-                <span>${lucide('lock', 13)} Private — only you</span>
-                <button class="btn compact" data-cat-share>${lucide('share-2', 13)} Share…</button>
-              `
-              : `
-                <span>
-                  ${
-                    sourceDesc
-                      ? `${lucide('calendar-days', 13)} ${escapeHtml(sourceDesc)}`
-                      : `${lucide('lock', 13)} Private`
-                  }
-                </span>
-              `;
+    if (cat.spaceId && !calendarCategoryShareInfo(cat.id).shared) {
+      const owner = sharedOwnerNames.get(cat.id) || i18n('calendarShare.twinSomeone');
+      return { icon: 'users', text: cat.readonly ? i18n('calendarList.sharedByView', { owner }) : i18n('calendarList.sharedByEdit', { owner }), shared: true };
+    }
 
-      return `
-        <div class="yanta-calendar-cat-row ${shared ? 'is-shared' : ''}" data-cat-id="${escapeAttr(cat.id)}">
-          <input type="checkbox" data-cat-visible ${cat.visible !== false ? 'checked' : ''} title="Visible" />
-          <input type="color" data-cat-color value="${escapeAttr(cat.color || '#6ea8fe')}" title="${mounted ? 'Your personal color for this shared calendar' : 'Category color'}" />
-          <input class="text-input" data-cat-name value="${escapeAttr(cat.name || '')}" ${cat.readonly && !mounted ? '' : ''} ${mounted && cat.readonly ? 'readonly title="Only people with edit access can rename this shared calendar"' : ''} />
-          ${shared ? `<span class="yanta-calendar-cat-share-icon" title="${mounted ? 'Shared with you' : 'You are sharing this calendar'}">${lucide('users', 14)}</span>` : ''}
-          <span class="yanta-calendar-cat-count" title="${escapeAttr(sourceDesc || `${count} stored event(s)`)}">
-            ${sourceDesc ? 'source' : count}
-          </span>
-          <button class="icon-btn${cat.aiHidden ? ' is-active' : ''}" data-cat-ai title="${escapeAttr(cat.aiHidden ? i18n('privacy.showToAi') : i18n('privacy.hideFromAi'))}" aria-pressed="${cat.aiHidden ? 'true' : 'false'}">${lucide(cat.aiHidden ? 'eye-off' : 'eye', 15)}</button>
-          <button class="icon-btn" data-cat-export-ics title="Export category as .ics">${lucide('calendar-arrow-down', 15)}</button>
-          <button class="icon-btn" data-cat-export-json title="Export category as JSON">${lucide('download', 15)}</button>
-          <button class="icon-btn danger" data-cat-delete title="${mounted ? 'Leave shared calendar' : 'Delete category'}" ${cat.id === DEFAULT_CATEGORY_ID ? 'disabled' : ''}>${lucide('trash', 15)}</button>
+    const info = calendarCategoryShareInfo(cat.id);
+    if (info.shared) {
+      let names = [];
+      try {
+        names = spacePeople(info.session.spaceId).map((p) => p.name).filter(Boolean);
+      } catch {}
+      return {
+        icon: 'users',
+        text: names.length ? i18n('calendarList.sharedWith', { names: names.slice(0, 3).join(', ') }) : i18n('calendarList.sharedByLink'),
+        shared: true,
+      };
+    }
+
+    return { icon: 'lock', text: i18n('calendarList.private') };
+  };
+
+  const rows = all.map((cat) => {
+    const count = [...state.calendarEvents.values()].filter((ev) => ev.categoryId === cat.id).length;
+    const status = statusFor(cat);
+    const visible = cat.visible !== false;
+    const color = cat.color || '#6ea8fe';
+    const renamable = !(cat.spaceId && cat.readonly) && !mountedSpaceEventProviderForCategory(cat.id);
+
+    return `
+      <li class="ycl-row ${visible ? '' : 'is-hidden'}" data-cat-id="${escapeAttr(cat.id)}">
+        <button type="button" class="ycl-swatch" data-cat-visible role="switch" aria-checked="${visible}"
+          style="--c:${escapeAttr(color)}" title="${escapeAttr(visible ? i18n('calendarList.hide') : i18n('calendarList.show'))}">
+          ${visible ? lucide('check', 12) : ''}
+        </button>
+        <div class="ycl-main">
+          <input class="ycl-name" data-cat-name value="${escapeAttr(cat.name || '')}" ${renamable ? '' : 'readonly'} aria-label="${escapeAttr(i18n('calendarList.name'))}" />
+          <span class="ycl-status">${lucide(status.icon, 12)}<span>${escapeHtml(status.text)}</span>${cat.aiHidden ? `<span class="ycl-dot-sep">·</span>${lucide('eye-off', 12)}<span>${escapeHtml(i18n('calendarList.hiddenFromAi'))}</span>` : ''}</span>
         </div>
-
-        <div class="yanta-calendar-cat-share ${shared ? 'is-shared' : ''}" data-cat-id="${escapeAttr(cat.id)}">
-          <span class="yanta-calendar-cat-share-main">${shareLine}</span>
-          <label class="yanta-calendar-cat-default-reminder" title="Your personal default reminder for events in this calendar — it never affects other people">
-            ${lucide('bell', 12)}
-            <select class="text-input" data-cat-default-reminder>
-              ${defaultReminderOptions(cat.id)}
-            </select>
-          </label>
-        </div>
-      `;
-    })
-    .join('');
+        <span class="ycl-count" title="${escapeAttr(i18n('calendarList.entries', { count }))}">${calendarCategorySourceDescription(cat.source) ? '' : count}</span>
+        <button type="button" class="icon-btn ycl-more" data-cat-menu aria-label="${escapeAttr(i18n('calendarList.more'))}">${lucide('ellipsis', 16)}</button>
+        <input type="color" data-cat-color value="${escapeAttr(color)}" hidden />
+      </li>`;
+  }).join('');
 
   modal.innerHTML = `
-    <div class="modal-card yanta-calendar-categories-card">
-      <header class="modal-head">
-        <h3>Calendar categories</h3>
-        <button class="icon-btn" data-cal-cat-close>&times;</button>
+    <div class="modal-card yanta-calendar-categories-card ycl">
+      <header class="modal-head ycl-head">
+        <h3>${escapeHtml(i18n('calendarList.title'))}</h3>
+        <span class="grow"></span>
+        <button class="btn primary ycl-add" data-action="add-category">${lucide('plus', 14)} ${escapeHtml(i18n('calendarList.add'))}</button>
+        <button class="icon-btn" data-action="more" aria-label="${escapeAttr(i18n('calendarList.more'))}">${lucide('ellipsis', 18)}</button>
+        <button class="icon-btn" data-cal-cat-close aria-label="${escapeAttr(i18n('common.close'))}">${lucide('x', 18)}</button>
       </header>
-
-      <div class="modal-body">
-        <div class="yanta-calendar-cat-toolbar">
-          <button class="btn primary" data-action="add-category">${lucide('plus', 14)} Add category</button>
-          <button class="btn" data-action="sources">${lucide('calendar-plus', 14)} Add data source</button>
-          <button class="btn" data-action="import">${lucide('calendar-arrow-up', 14)} Import .ics / JSON</button>
-          <button class="btn" data-action="export-all-ics">${lucide('calendar-arrow-down', 14)} Export all .ics</button>
-          <button class="btn" data-action="export-all-json">${lucide('download', 14)} Export all JSON</button>
-        </div>
-
-        <div class="yanta-calendar-cat-list">
-          ${rows || '<div class="tree-empty">No categories yet.</div>'}
-        </div>
+      <div class="modal-body ycl-body">
+        <ul class="ycl-list">${rows}</ul>
       </div>
     </div>
   `;
 
+  const menuAt = (el) => {
+    const r = el.getBoundingClientRect();
+    return [Math.max(8, r.right - 220), r.bottom + 4];
+  };
+
+  // "Shared with …" needs the people of each own share, folded per person.
+  for (const row of modal.querySelectorAll('.ycl-row')) {
+    const info = calendarCategoryShareInfo(row.dataset.catId);
+    if (!info.shared) continue;
+    import('./spaces/space-people.js')
+      .then(({ spaceParticipants }) => spaceParticipants(info.session.spaceId))
+      .then((people) => {
+        const names = people.filter((p) => !p.isMe).map((p) => p.name);
+        const target = row.querySelector('.ycl-status > span');
+        if (names.length && target) target.textContent = i18n('calendarList.sharedWith', { names: names.slice(0, 3).join(', ') });
+      })
+      .catch(() => {});
+  }
+
+  modal.querySelector('[data-action="more"]')?.addEventListener('click', (e) => {
+    showMenu(...menuAt(e.currentTarget), [
+      { label: i18n('calendarList.addSource'), icon: 'calendar-plus', action: () => renderCalendarSourcesModal() },
+      { label: i18n('calendarList.importFile'), icon: 'calendar-arrow-up', action: openCalendarImportPicker },
+      'hr',
+      { label: i18n('calendarList.exportAllIcs'), icon: 'calendar-arrow-down', action: () => exportEventsAsIcs(currentEventsForCategory(null), { filename: 'yanta-calendar.ics', calendarName: 'YANTA' }) },
+      { label: i18n('calendarList.exportAllJson'), icon: 'download', action: () => exportCalendarJson({ filename: 'yanta-calendar.calendar.json' }) },
+    ]);
+  });
+
+  // A new calendar appears in the list, its name selected for typing.
   modal.querySelector('[data-action="add-category"]')?.addEventListener('click', () => {
-    const name = prompt('Category name:', 'New calendar');
-    if (!name) return;
-
-    putCalendarCategory({
-      name: name.trim(),
-      color: '#6ea8fe',
-      visible: true,
-    });
-
+    const palette = ['#6ea8fe', '#f59f00', '#37b24d', '#e8590c', '#ae3ec9', '#1098ad', '#d6336c'];
+    const cat = putCalendarCategory({ name: i18n('calendarList.newName'), color: palette[state.calendarCategories.size % palette.length], visible: true });
     renderCategoriesModal();
-  });
-
-  modal.querySelector('[data-action="sources"]')?.addEventListener('click', () => {
-    renderCalendarSourcesModal();
-  });
-
-  modal.querySelector('[data-action="import"]')?.addEventListener('click', openCalendarImportPicker);
-
-  modal.querySelector('[data-action="export-all-ics"]')?.addEventListener('click', () => {
-    exportEventsAsIcs(currentEventsForCategory(null), {
-      filename: 'yanta-calendar.ics',
-      calendarName: 'YANTA',
+    requestAnimationFrame(() => {
+      const input = modal.querySelector(`.ycl-row[data-cat-id="${CSS.escape(cat?.id || '')}"] [data-cat-name]`);
+      input?.focus();
+      input?.select();
     });
   });
 
-  modal.querySelector('[data-action="export-all-json"]')?.addEventListener('click', () => {
-    exportCalendarJson({
-      filename: 'yanta-calendar.calendar.json',
+  const defaultReminderChoice = async (catId) => {
+    const { yantaChoice } = await import('./dialogs.js');
+    const current = defaultRemindersForCategory(catId)[0]?.minutesBefore;
+    const options = [
+      [-1, i18n('calendarList.reminderNone')], [0, i18n('calendarList.reminderAt')], [10, i18n('calendarList.reminder10')],
+      [30, i18n('calendarList.reminder30')], [60, i18n('calendarList.reminder60')], [1440, i18n('calendarList.reminderDay')],
+    ];
+    const choice = await yantaChoice({
+      title: i18n('calendarList.reminderTitle'),
+      message: i18n('calendarList.reminderHint'),
+      icon: 'bell',
+      choices: options.map(([v, label]) => ({ id: String(v), label, icon: (current ?? -1) === v ? 'check' : 'circle' })),
+      cancelLabel: i18n('common.cancel'),
     });
-  });
+    if (choice == null) return;
+    const minutes = Number(choice);
+    setDefaultRemindersForCategory(catId, minutes >= 0 ? [{ id: `rem_default_${minutes}`, label: '', minutesBefore: minutes, enabled: true }] : []);
+  };
 
-  for (const row of modal.querySelectorAll('.yanta-calendar-cat-row')) {
+  for (const row of modal.querySelectorAll('.ycl-row')) {
+    const catId = row.dataset.catId;
+    const cat = () => state.calendarCategories.get(catId);
+
+    row.querySelector('[data-cat-visible]')?.addEventListener('click', () => {
+      const c = cat();
+      if (!c) return;
+      putCalendarCategory({ ...c, visible: c.visible === false });
+      renderCategoriesModal();
+    });
+
+    const nameInput = row.querySelector('[data-cat-name]');
+    nameInput?.addEventListener('change', () => {
+      const c = cat();
+      if (c) putCalendarCategory({ ...c, name: nameInput.value.trim() || c.name || 'Calendar' });
+    });
+    nameInput?.addEventListener('keydown', (e) => { if (e.key === 'Enter') nameInput.blur(); });
+
+    const colorInput = row.querySelector('[data-cat-color]');
+    colorInput?.addEventListener('input', () => {
+      const c = cat();
+      if (!c) return;
+      putCalendarCategory({ ...c, color: colorInput.value });
+      row.querySelector('.ycl-swatch')?.style.setProperty('--c', colorInput.value);
+    });
+
+    row.querySelector('[data-cat-menu]')?.addEventListener('click', (e) => {
+      const c = cat();
+      if (!c) return;
+      const mounted = !!c.spaceId && !calendarCategoryShareInfo(catId).shared;
+      const folder = !!mountedSpaceEventProviderForCategory(catId);
+      const source = !!calendarCategorySourceDescription(c.source);
+      const owned = calendarCategoryShareInfo(catId).shared;
+
+      showMenu(...menuAt(e.currentTarget), [
+        ...(!mounted && !folder && !source ? [{ label: owned ? i18n('calendarList.manageSharing') : i18n('calendarList.share'), icon: 'share-2', action: () => row.dispatchEvent(new CustomEvent('ycl-share')) }] : []),
+        { label: i18n('calendarList.color'), icon: 'palette', action: () => colorInput?.click() },
+        { label: i18n('calendarList.defaultReminder'), icon: 'bell', action: () => defaultReminderChoice(catId) },
+        { label: c.aiHidden ? i18n('privacy.showToAi') : i18n('privacy.hideFromAi'), icon: c.aiHidden ? 'eye' : 'eye-off', action: () => row.dispatchEvent(new CustomEvent('ycl-ai')) },
+        'hr',
+        { label: i18n('calendarList.exportIcs'), icon: 'calendar-arrow-down', action: () => row.dispatchEvent(new CustomEvent('ycl-export-ics')) },
+        { label: i18n('calendarList.exportJson'), icon: 'download', action: () => row.dispatchEvent(new CustomEvent('ycl-export-json')) },
+        ...(catId === DEFAULT_CATEGORY_ID || folder ? [] : ['hr', {
+          label: mounted ? i18n('calendarList.leave') : i18n('calendarList.delete'),
+          icon: mounted ? 'log-out' : 'trash-2',
+          danger: true,
+          action: () => row.dispatchEvent(new CustomEvent('ycl-delete')),
+        }]),
+      ]);
+    });
+  }
+
+  for (const row of modal.querySelectorAll('.ycl-row')) {
     const catId = row.dataset.catId;
 
-    const save = () => {
-      const cat = state.calendarCategories.get(catId);
-      if (!cat) return;
-
-      putCalendarCategory({
-        ...cat,
-        visible: !!row.querySelector('[data-cat-visible]').checked,
-        color: row.querySelector('[data-cat-color]').value || cat.color,
-        name: row.querySelector('[data-cat-name]').value.trim() || 'Calendar',
-      });
-    };
-
-    row.querySelector('[data-cat-visible]')?.addEventListener('change', save);
-    row.querySelector('[data-cat-color]')?.addEventListener('input', save);
-    row.querySelector('[data-cat-name]')?.addEventListener('change', save);
-
     // Hidden from YANTA AI: every event in this calendar (ai-visibility.js).
-    row.querySelector('[data-cat-ai]')?.addEventListener('click', () => {
+    row.addEventListener('ycl-ai', () => {
       const cat = state.calendarCategories.get(catId);
       if (!cat) return;
       putCalendarCategory({ ...cat, aiHidden: !cat.aiHidden });
@@ -13383,7 +13658,7 @@ function renderCategoriesModal({
       renderCategoriesModal();
     });
 
-    row.querySelector('[data-cat-export-ics]')?.addEventListener('click', () => {
+    row.addEventListener('ycl-export-ics', () => {
       const cat = state.calendarCategories.get(catId);
       exportEventsAsIcs(currentEventsForCategory(catId), {
         filename: `${cat?.name || 'calendar'}.ics`,
@@ -13391,7 +13666,7 @@ function renderCategoriesModal({
       });
     });
 
-    row.querySelector('[data-cat-export-json]')?.addEventListener('click', () => {
+    row.addEventListener('ycl-export-json', () => {
       const cat = state.calendarCategories.get(catId);
       exportCalendarJson({
         categoryId: catId,
@@ -13399,7 +13674,7 @@ function renderCategoriesModal({
       });
     });
 
-    row.querySelector('[data-cat-delete]')?.addEventListener('click', async () => {
+    row.addEventListener('ycl-delete', async () => {
       const cat = state.calendarCategories.get(catId);
       if (!cat || cat.id === DEFAULT_CATEGORY_ID) return;
 
@@ -13459,41 +13734,12 @@ function renderCategoriesModal({
     });
   }
 
-  for (const shareRow of modal.querySelectorAll('.yanta-calendar-cat-share')) {
-    const catId = shareRow.dataset.catId;
+  for (const row of modal.querySelectorAll('.ycl-row')) {
+    const catId = row.dataset.catId;
 
-    shareRow.querySelector('[data-cat-share]')?.addEventListener('click', async () => {
+    row.addEventListener('ycl-share', async () => {
       const { openUnifiedShareModal } = await import('./public-share/public-share-ui.js');
-
-      await openUnifiedShareModal({
-        calendarCategoryId: catId,
-      });
-    });
-
-    shareRow.querySelector('[data-cat-leave]')?.addEventListener('click', async () => {
-      const cat = state.calendarCategories.get(catId);
-      if (!cat?.spaceId) return;
-
-      await leaveMountedCalendar(cat);
-      renderCategoriesModal();
-    });
-
-    shareRow.querySelector('[data-cat-default-reminder]')?.addEventListener('change', (e) => {
-      const minutes = Number(e.target.value);
-
-      setDefaultRemindersForCategory(
-        catId,
-        minutes >= 0
-          ? [{
-              id: `rem_default_${minutes}`,
-              label: '',
-              minutesBefore: minutes,
-              enabled: true,
-            }]
-          : []
-      );
-
-      toast('Personal default reminder saved — it only affects you', 'success');
+      await openUnifiedShareModal({ calendarCategoryId: catId });
     });
   }
 
@@ -14021,6 +14267,11 @@ export function setupCalendarVaultBridge() {
     Mounted categories/events live outside the vault, so a full re-merge
     of vault + mounted spaces is the simplest correct refresh.
   */
+  // Entries waiting for a share that was still connecting at the last run.
+  loadPendingShared().then((pending) => {
+    if (Object.keys(pending).length) hydrateCalendarStateFromVault({ silent: true });
+  }).catch(() => {});
+
   window.addEventListener('yanta-calendar-space-applied', () => {
     hydrateCalendarStateFromVault({
       silent: false,

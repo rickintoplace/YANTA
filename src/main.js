@@ -2023,6 +2023,34 @@ async function init() {
     consumePulseRoutineFrom('hashchange', event.newURL);
   });
 
+  /*
+    A share link opened while YANTA is already running (pasted into the
+    address bar, a link tapped in the same tab, the Android app routing
+    it in): only the fragment changes, nothing reloads, and the link used
+    to do nothing at all. Same handling as at boot.
+  */
+  let joiningSpace = false;
+  window.addEventListener('hashchange', async (event) => {
+    if (joiningSpace || !String(event.newURL || '').includes('#space=')) return;
+    joiningSpace = true;
+    try {
+      const opened = await handleSpaceUrl({ url: event.newURL });
+      if (opened?.noteId) {
+        await openNote(opened.noteId);
+        setView(opened.role === 'read' ? 'preview' : 'split');
+      } else if (opened?.sourceType === 'calendar') {
+        history.replaceState({}, '', '#calendar');
+        openCalendar({ push: false });
+      } else if (opened?.sourceType === 'folder' && opened.folderId) {
+        showDashboard({ folderId: opened.folderId, replace: true });
+      }
+    } catch (err) {
+      console.warn('[YANTA Spaces] joining from link failed', err);
+    } finally {
+      joiningSpace = false;
+    }
+  });
+
   window.addEventListener('focus', () => consumePulseRoutineFrom('focus'));
   document.addEventListener('visibilitychange', () => {
     if (document.visibilityState === 'visible') consumePulseRoutineFrom('visible');

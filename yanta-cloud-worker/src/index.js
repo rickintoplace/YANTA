@@ -9487,8 +9487,26 @@ function spaceMetaJson(space, role) {
     storageBytes: Number(space.storage_bytes || 0),
     objectCount: Number(space.object_count || 0),
     createdAt: space.created_at,
-    updatedAt: space.updated_at
+    updatedAt: space.updated_at,
+    // An older share of the same thing whose keys the owner lost: members
+    // move their entries to this one and let the old one go.
+    supersededBy: space.superseded_by || null
   };
+}
+
+/*
+  spaces.superseded_by, added on first use like devices.session_id
+  (no migration runner; schema.sql has it for new databases).
+*/
+let spaceSupersededColumnReady = null;
+
+function ensureSpaceSupersededColumn(env) {
+  if (!spaceSupersededColumnReady) {
+    spaceSupersededColumnReady = env.DB.prepare(
+      `ALTER TABLE spaces ADD COLUMN superseded_by TEXT`
+    ).run().catch(() => {});
+  }
+  return spaceSupersededColumnReady;
 }
 
 async function spaceOwnerLimits(env, space) {
@@ -9673,6 +9691,7 @@ async function handleCreateSpace(env, req, headers) {
 }
 
 async function handleListSpaces(env, req, url, headers) {
+  await ensureSpaceSupersededColumn(env);
   const user = await requireUser(env, req);
 
   const owned = await env.DB.prepare(
@@ -9698,6 +9717,7 @@ async function handleListSpaces(env, req, url, headers) {
 }
 
 async function handleGetSpace(env, req, url, headers) {
+  await ensureSpaceSupersededColumn(env);
   const spaceId = url.pathname.match(/^\/api\/spaces\/([^/]+)$/)?.[1] || "";
   const access = await resolveSpaceAccess(env, req, spaceId);
   requireSpaceRole(access, ["owner", "write", "read"]);
@@ -9753,6 +9773,18 @@ async function handlePatchSpace(env, req, url, headers) {
   }
   if (body.bumpEpoch) {
     sets.push("webrtc_epoch = webrtc_epoch + 1");
+  }
+  if ("supersededBy" in body) {
+    await ensureSpaceSupersededColumn(env);
+    const target = body.supersededBy ? String(body.supersededBy) : null;
+    if (target) {
+      const other = await env.DB.prepare(
+        `SELECT id FROM spaces WHERE id = ? AND owner_user_id = ? AND status = 'active' AND source_type = ?`
+      ).bind(target, user.userId, space.source_type).first();
+      if (!other || target === spaceId) return json({ error: "invalid_superseded_by" }, 400, headers);
+    }
+    sets.push("superseded_by = ?");
+    binds.push(target);
   }
   if (body.status === "revoked" || body.status === "active") {
     sets.push("status = ?");

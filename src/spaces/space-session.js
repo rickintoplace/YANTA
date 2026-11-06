@@ -113,7 +113,7 @@ export async function apiGetSpace(spaceId, record = null) {
   return (await apiJson(res, 'Could not load shared space')).space;
 }
 
-async function apiPatchSpace(spaceId, body) {
+export async function apiPatchSpace(spaceId, body) {
   const res = await fetchWithRetry(apiUrl(`/api/spaces/${encodeURIComponent(spaceId)}`), {
     method: 'PATCH',
     credentials: 'include',
@@ -870,8 +870,11 @@ export async function rotateSpaceWriteAccess(spaceId) {
  *   mounted and only its content is still on the way — the caller uses
  *   it to say so (boot stage text) instead of showing a frozen screen.
  */
-export async function handleSpaceUrl({ onProgress } = {}) {
-  const parsed = parseSpaceFragment(location.hash);
+export async function handleSpaceUrl({ onProgress, url = '' } = {}) {
+  // `url`: the link as it arrived — by the time a hashchange handler runs,
+  // the app's own router may already have rewritten location.hash.
+  const hash = url ? (String(url).split('#')[1] ? `#${String(url).split('#').slice(1).join('#')}` : '') : location.hash;
+  const parsed = parseSpaceFragment(hash);
   if (!parsed) return null;
 
   // Ask the server for live metadata (signaling topic, epoch, and the

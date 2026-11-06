@@ -377,6 +377,7 @@ CREATE TABLE IF NOT EXISTS spaces (
   created_at INTEGER NOT NULL,
   updated_at INTEGER NOT NULL,
   revoked_at INTEGER,
+  superseded_by TEXT,
   FOREIGN KEY(owner_user_id) REFERENCES users(id)
 );
 

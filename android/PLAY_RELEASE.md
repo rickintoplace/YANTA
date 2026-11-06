@@ -151,3 +151,25 @@ Google. Android cannot update one with the other: switching to the Play
 version means uninstalling the APK first, which deletes the app's local
 data. With sync (YANTA Cloud, Drive or a folder) everything comes back after
 signing in; without sync, export a backup first (Settings → Sync & Backup).
+
+## Uploading from this machine
+
+`node scripts/play-release.mjs` checks access and changes nothing;
+`--apply` uploads `app-release.aab` to the internal track (`--track=production`
+for production) with the release notes from `fastlane/.../changelogs/<versionCode>.txt`;
+`--assetlinks` writes the Play signing key's SHA-256 into
+`public/.well-known/assetlinks.json`.
+
+The key is the Play Developer API service account also used by StepTale
+(`play-publisher@cardio-kart.iam.gserviceaccount.com`), linked at
+`~/.yanta-release/play-service-account.json`. Two things the API cannot do:
+
+1. **Create the app.** Play Console → *Create app*.
+2. **The very first bundle.** Play learns the package name from the first
+   upload, so that one goes through the Console by hand (Test and release →
+   Internal testing → Create new release). Every later one goes through the script.
+
+Then invite the service account (Users and permissions → Invite new users →
+the address above; app permission for YANTA with "Release to testing tracks"
+and "Release to production"). It works across developer accounts — the
+invitation is all it needs.

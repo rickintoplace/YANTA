@@ -115,6 +115,20 @@ export class SpaceEngine {
     }, 250);
   }
 
+  /**
+   * "Sync now": send what is waiting, publish a full head of everything
+   * this participant has (so nothing local can be missing on the server),
+   * then pull.
+   */
+  async syncNow() {
+    await this.flushPendingNow().catch(() => {});
+    if (this.canWrite && [...this.docs.values()].some((r) => r.doc.store.clients.size)) {
+      await this.uploadHeads();
+    }
+    await this.pull();
+    if (this.lastPullError) throw this.lastPullError;
+  }
+
   async flushPendingNow() {
     if (!this.canWrite || !this.hasUnsent()) return;
     if (this.pendingTimer) {
@@ -144,6 +158,8 @@ export class SpaceEngine {
    */
   async recoverUnsentOnce() {
     if (!this.canWrite || this.state.headRecoveredV1) return;
+    // Only after a pull that worked, and only with something to carry.
+    if (this.lastPullError || ![...this.docs.values()].some((r) => r.doc.store.clients.size)) return;
     await this.uploadHeads();
     this.state.headRecoveredV1 = true;
     await this.persistState();
@@ -475,16 +491,28 @@ export class SpaceEngine {
       index = await this.remote.index();
     } catch (err) {
       console.warn('[YANTA Spaces] index failed', err);
+      this.lastPullError = err;
       return;
     }
+
+    this.lastPullError = null;
+    this.lastPullAt = Date.now();
 
     for (const [noteId, record] of this.docs) {
       const prefix = await spaceDocPrefix(this.keys.nameKey, record.remoteKey);
 
+      /*
+        A local doc that is empty while the seen-list says everything was
+        fetched (its IndexedDB copy was cleared, the space remounted) would
+        never be filled again: nothing on the server looks new. An empty
+        doc takes everything.
+      */
+      const empty = record.doc.store.clients.size === 0;
+
       const fresh = index.filter((entry) => {
         const path = String(entry.path || '');
         if (!path.startsWith(prefix)) return false;
-        return this.state.seen[path] !== entryEtag(entry);
+        return empty || this.state.seen[path] !== entryEtag(entry);
       });
 
       if (!fresh.length) continue;

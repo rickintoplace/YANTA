@@ -79,6 +79,7 @@ import {
   state,
   store,
   toast,
+  actionToast,
   escapeHtml,
   escapeAttr,
   safeFilename,
@@ -1702,8 +1703,8 @@ function renderCalendarTopbar() {
 
     <span class="grow"></span>
 
-    <button class="btn compact yanta-calendar-feed-chip" data-cal-feed hidden>
-      ${lucide('bell-ring', 14)}
+    <button class="btn compact yanta-calendar-feed-chip" data-cal-feed hidden title="Shared calendars: people, changes, sync status">
+      ${lucide('users', 14)}
       <span data-cal-feed-count></span>
     </button>
 
@@ -1842,8 +1843,10 @@ function renderCalendarTopbar() {
     toggleCalendarFindTime();
   });
 
-  bar.querySelector('[data-cal-feed]')?.addEventListener('click', (e) => {
-    openCalendarFeedPopover(e.currentTarget);
+  bar.querySelector('[data-cal-feed]')?.addEventListener('click', async () => {
+    const { openCalendarSharePanel } = await import('./spaces/calendar-share-panel.js');
+    await openCalendarSharePanel();
+    refreshCalendarFeedChip();
   });
 
   refreshCalendarFeedChip();
@@ -2010,11 +2013,13 @@ async function refreshCalendarFeedChip() {
 
   const { unseen } = await calendarFeedSummary();
 
-  chip.hidden = unseen === 0;
+  // Always there while any calendar is shared: who, what changed, in sync.
+  chip.hidden = !calendarBridges().length;
 
   const countEl = chip.querySelector('[data-cal-feed-count]');
   if (countEl) {
-    countEl.textContent = unseen > 9 ? '9+' : String(unseen);
+    countEl.textContent = unseen ? (unseen > 9 ? '9+' : String(unseen)) : '';
+    countEl.hidden = !unseen;
   }
 }
 
@@ -13909,8 +13914,31 @@ export function setupCalendarVaultBridge() {
     }
   });
 
-  window.addEventListener('yanta-calendar-feed-updated', () => {
+  window.addEventListener('yanta-calendar-feed-updated', async (e) => {
     refreshCalendarFeedChip().catch(() => {});
+
+    /*
+      Someone else changed a shared calendar: say so, wherever the user
+      is, with a way straight to it. One toast per batch.
+    */
+    const spaceId = e.detail?.spaceId;
+    if (!spaceId) return;
+    const feed = await calendarFeedFor(spaceId).catch(() => null);
+    const fresh = (feed?.entries || []).filter((entry) => entry.ts > (feed.lastSeenAt || 0) && Date.now() - entry.ts < 60_000);
+    const last = fresh[fresh.length - 1];
+    if (!last) return;
+    const verb = last.action === 'added' ? 'added' : last.action === 'removed' ? 'removed' : 'changed';
+    actionToast(
+      fresh.length > 1
+        ? `${last.actor || 'Someone'} changed ${fresh.length} shared events`
+        : `${last.actor || 'Someone'} ${verb} “${last.title || 'an event'}”`,
+      {
+        actionLabel: 'Show',
+        onAction: () => (last.eventId && last.action !== 'removed' && state.calendarEvents.has(last.eventId)
+          ? openCalendarEvent(last.eventId)
+          : openCalendar({ push: true })),
+      }
+    );
   });
 
   /*

@@ -124,10 +124,13 @@ export async function resolveOwnIdentity() {
     if (name) return String(name);
   } catch {}
 
+  // Without chat, the account e-mail is the identity: remembered, so
+  // attribution and the people list name this participant consistently.
   try {
     const { cloudMe } = await import('../cloud/cloud-api.js');
     const me = await cloudMe();
-    if (me?.user?.email) return String(me.user.email);
+    const email = me?.user?.email || me?.email;
+    if (email) return remember(String(email));
   } catch {}
 
   return ANONYMOUS_IDENTITY_LABEL;

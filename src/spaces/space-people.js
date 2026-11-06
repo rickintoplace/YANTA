@@ -29,12 +29,13 @@
 import * as Y from 'yjs';
 import { IndexeddbPersistence } from '../sync2/y-idb-persistence.js';
 
-import { state } from '../core.js';
+import { state, store } from '../core.js';
 
 import {
   peekMatrixClient,
   peekOwnIdentity,
   hydrateOwnIdentity,
+  resolveOwnIdentity,
   ownIdentityOrLabel,
 } from './space-identity.js';
 
@@ -120,6 +121,12 @@ export async function attachSpacePeople(session) {
   emitPeopleChanged(spaceId);
 
   publishOwnProfile(spaceId);
+
+  // First mount on a device without chat: the identity (account e-mail)
+  // needs one request; publish once it is known.
+  if (!peekOwnIdentity()) {
+    resolveOwnIdentity().then(() => publishOwnProfile(spaceId)).catch(() => {});
+  }
 
   if (session.role === 'owner') {
     // Deferred: the roster needs the network, and a mount happens during
@@ -212,6 +219,11 @@ function writeProfile(doc, id, profile, { self = false } = {}) {
  * until the chat session is up — `yanta-chat-ready` retries it, and a
  * read-only member cannot write to the space at all.
  */
+let plainDisplayName = '';
+if (typeof window !== 'undefined') {
+  store.settings.get('userName', '').then((name) => { plainDisplayName = String(name || '').trim(); }).catch(() => {});
+}
+
 export function publishOwnProfile(spaceId) {
   const session = state.spaces.get(spaceId);
   const doc = docFor(spaceId);
@@ -221,9 +233,12 @@ export function publishOwnProfile(spaceId) {
   const client = peekMatrixClient();
   const id = peekOwnIdentity();
 
-  if (!client || !id) return;
+  if (!id) return;
 
-  const profile = matrixProfile(client, id);
+  // No chat: a plain profile — the display name, or the e-mail's name part.
+  const profile = client
+    ? matrixProfile(client, id)
+    : { name: plainDisplayName || String(id).split('@')[0] || id, avatar: '' };
   if (!profile) return;
 
   doc.transact(() => {
@@ -378,6 +393,35 @@ export function spacePeople(spaceId, { includeSelf = false } = {}) {
     (ROLE_ORDER[a.role] ?? 3) - (ROLE_ORDER[b.role] ?? 3) ||
     a.name.localeCompare(b.name)
   );
+}
+
+/**
+ * Everyone known to take part, self included: invited members (roster),
+ * plus whoever joined by link and published a profile or edited. Each
+ * with when they were last active.
+ */
+export function spaceParticipants(spaceId) {
+  const doc = docFor(spaceId);
+  if (!doc) return [];
+
+  const roster = rosterMap(doc);
+  const ids = new Set([...roster.keys(), ...profilesMap(doc).keys()]);
+  const lastActive = new Map();
+
+  for (const [, value] of activityMap(doc)) {
+    const by = String(value?.by || '');
+    if (!by) continue;
+    ids.add(by);
+    lastActive.set(by, Math.max(lastActive.get(by) || 0, Number(value?.at || 0)));
+  }
+
+  return [...ids]
+    .filter(Boolean)
+    .map((id) => ({
+      ...personFrom(doc, id, roster.get(id)?.role || (lastActive.has(id) ? 'write' : 'read')),
+      lastActive: lastActive.get(id) || Number(profilesMap(doc).get(id)?.at || 0),
+    }))
+    .sort((a, b) => (ROLE_ORDER[a.role] ?? 3) - (ROLE_ORDER[b.role] ?? 3) || b.lastActive - a.lastActive);
 }
 
 /**

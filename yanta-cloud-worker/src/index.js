@@ -9877,13 +9877,41 @@ async function handleSpaceMembersList(env, req, url, headers, spaceId) {
   await requireOwnedSpace(env, user, spaceId);
 
   const rows = await env.DB.prepare(
-    `SELECT * FROM space_members
-     WHERE space_id = ? AND revoked_at IS NULL
-     ORDER BY created_at ASC`
+    `SELECT m.*, u.email AS email FROM space_members m
+       LEFT JOIN users u ON u.id = m.user_id
+     WHERE m.space_id = ? AND m.revoked_at IS NULL
+     ORDER BY m.created_at ASC`
   ).bind(spaceId).all();
 
+  /*
+    One person may appear under several names in a space — a Matrix ID
+    from the chat era, the account e-mail since. A hash of the e-mail
+    lets the participants recognise each other's aliases without the
+    owner learning anyone's address.
+  */
+  const emailHash = async (email) => {
+    const clean = String(email || "").trim().toLowerCase();
+    if (!clean) return "";
+    const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(clean));
+    return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  };
+
+  const ownerChat = await env.DB.prepare(
+    `SELECT matrix_user_id FROM chat_accounts WHERE user_id = ?`
+  ).bind(user.userId).first().catch(() => null);
+  const ownerRow = await env.DB.prepare(`SELECT email FROM users WHERE id = ?`).bind(user.userId).first();
+
+  const members = [];
+  for (const row of rows.results || []) {
+    members.push({ ...spaceMemberJson(row), emailHash: await emailHash(row.email) });
+  }
+
   return json({
-    members: (rows.results || []).map(spaceMemberJson)
+    members,
+    owner: {
+      matrixUserId: ownerChat?.matrix_user_id || "",
+      emailHash: await emailHash(ownerRow?.email)
+    }
   }, 200, { ...headers, "cache-control": "no-store" });
 }
 

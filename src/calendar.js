@@ -129,6 +129,7 @@ import {
   vaultEventsMap,
   vaultCalendarCategoriesMap,
   vaultTombstonesMap,
+  vaultSpacesMap,
   safeJsonClone,
 } from './sync2/vault-doc.js';
 
@@ -1703,9 +1704,9 @@ function renderCalendarTopbar() {
 
     <span class="grow"></span>
 
-    <button class="btn compact yanta-calendar-feed-chip" data-cal-feed title="Shared calendars: people, changes, sync status">
-      ${lucide('users', 14)}
-      <span data-cal-feed-count></span>
+    <button class="icon-btn yanta-calendar-feed-chip" data-cal-feed title="${escapeAttr(i18n('calendarShare.title'))}" aria-label="${escapeAttr(i18n('calendarShare.title'))}">
+      ${lucide('users', 18)}
+      <span class="yanta-calendar-feed-badge" data-cal-feed-count hidden></span>
     </button>
 
     <button
@@ -1843,10 +1844,10 @@ function renderCalendarTopbar() {
     toggleCalendarFindTime();
   });
 
-  bar.querySelector('[data-cal-feed]')?.addEventListener('click', async () => {
+  bar.querySelector('[data-cal-feed]')?.addEventListener('click', async (e) => {
+    const anchor = e.currentTarget;
     const { openCalendarSharePanel } = await import('./spaces/calendar-share-panel.js');
-    await openCalendarSharePanel();
-    refreshCalendarFeedChip();
+    await openCalendarSharePanel(anchor);
   });
 
   refreshCalendarFeedChip();
@@ -6972,6 +6973,104 @@ export function sanitizeCalendarEvent(raw) {
   });
 }
 
+/** The space record of a calendar someone else shared with this account. */
+function memberShareForCategory(categoryId) {
+  const id = String(categoryId || '');
+  if (!id) return null;
+
+  try {
+    const tombstones = vaultTombstonesMap();
+    for (const [spaceId, record] of vaultSpacesMap()) {
+      if (tombstones.has(spaceId)) continue;
+      if (record?.sourceType !== 'calendar' || record.role === 'owner') continue;
+      if (record.categoryId === id) return record;
+    }
+  } catch {}
+
+  return null;
+}
+
+/*
+  Repair for one shared calendar that ended up in two places on a
+  member's device: their own vault (entries that never left the device)
+  and, often, an own second share of it. The real share — someone else's
+  — gets the entries; the own duplicate share is stopped and the private
+  copy of the category removed. Runs whenever shared calendars mount.
+*/
+let repairingSharedCalendars = false;
+
+async function repairDuplicateSharedCalendars() {
+  if (repairingSharedCalendars) return;
+  repairingSharedCalendars = true;
+
+  try {
+    for (const bridge of mountedCalendarBridges()) {
+      const catId = bridge.categoryId;
+      if (!catId || !bridge.canWrite) continue;
+
+      // 1. An own share of the same calendar: a duplicate. Stop it.
+      for (const other of calendarBridges()) {
+        if (other !== bridge && other.isOwner && other.categoryId === catId) {
+          const { stopSpaceShare } = await import('./spaces/space-session.js');
+          await stopSpaceShare(other.spaceId, { silent: true }).catch((err) => {
+            console.warn('[YANTA Calendar] could not stop duplicate share', other.spaceId, err);
+          });
+        }
+      }
+
+      // 1b. An own share of it that this device cannot even open (its
+      //     record is gone) is the same duplicate: remove it on the server.
+      try {
+        const health = await import('./spaces/space-health.js');
+        for (const b of health.brokenShares()) {
+          if (b.sourceType === 'calendar' && b.sourceId === catId) await health.discardBrokenShare(b.spaceId);
+        }
+      } catch (err) {
+        console.warn('[YANTA Calendar] could not remove a broken duplicate share', err);
+      }
+
+      // 2. Entries stuck in the private vault: into the real share.
+      const stuck = [...vaultEventsMap().values()].filter((raw) => raw?.categoryId === catId);
+      const tombstones = vaultTombstonesMap();
+      let moved = 0;
+
+      for (const raw of stuck) {
+        if (tombstones.has(raw.id)) continue;
+        const ev = sanitizeCalendarEvent(raw);
+        if (!ev) continue;
+        bridge.putEventFromLocal(safeJsonClone({ ...ev, updated: Math.max(Number(ev.updated || 0), now()) }));
+        moved += 1;
+      }
+
+      // 3. The private copy goes; the share is the calendar now.
+      const doc = getVaultDoc();
+      doc.transact(() => {
+        for (const raw of stuck) {
+          vaultEventsMap().delete(raw.id);
+          vaultTombstonesMap().set(raw.id, { id: raw.id, type: 'calendar-event', title: raw.title || '', deletedAt: now() });
+        }
+        if (vaultCalendarCategoriesMap().has(catId)) vaultCalendarCategoriesMap().delete(catId);
+      }, ORIGIN);
+
+      if (moved) {
+        const name = bridge.category()?.name || 'the shared calendar';
+        toast(i18n('calendarShare.movedIn', { count: moved, name }), 'success');
+        hydrateCalendarStateFromVault({ silent: false });
+      }
+    }
+  } finally {
+    repairingSharedCalendars = false;
+  }
+}
+
+let repairTimer = 0;
+function scheduleSharedCalendarRepair() {
+  clearTimeout(repairTimer);
+  repairTimer = setTimeout(() => repairDuplicateSharedCalendars().catch((err) => {
+    console.warn('[YANTA Calendar] shared calendar repair failed', err);
+  }), 2500);
+}
+
 export function ensureDefaultCalendarCategory() {
   if (state.calendarCategories.has(DEFAULT_CATEGORY_ID)) {
     return state.calendarCategories.get(DEFAULT_CATEGORY_ID);
@@ -7266,6 +7365,16 @@ export function putCalendarCategory(patch) {
   }
 
   const bridge = calendarBridgeForCategory(cat.id);
+
+  // Someone else's calendar whose share is still connecting: personal
+  // settings only — never a private copy in the vault.
+  if (!bridge && memberShareForCategory(cat.id)) {
+    setCategoryPersonalPrefs(cat.id, {
+      color: patch.color !== undefined ? cat.color : undefined,
+      visible: patch.visible !== undefined ? cat.visible : undefined,
+    });
+    return state.calendarCategories.get(cat.id) || cat;
+  }
 
   if (bridge && !bridge.isOwner) {
     /*
@@ -7635,6 +7744,17 @@ export function putCalendarEvent(patch) {
     mountedSpaceEventProviderForCategory(ev.categoryId)
   ) {
     toast('Events shared through a folder are read-only', 'error');
+    return null;
+  }
+
+  /*
+    A calendar someone shared with this account whose share is not
+    connected yet (startup, offline first load): saving now would put
+    the entry into the private vault, where it never reaches anyone —
+    this is how a member's entries got lost. Say so instead.
+  */
+  if (!calendarBridgeForCategory(ev.categoryId) && memberShareForCategory(ev.categoryId)) {
+    toast(i18n('calendarShare.connecting'), 'error');
     return null;
   }
 
@@ -13912,6 +14032,8 @@ export function setupCalendarVaultBridge() {
     // appear when the first one arrives, not on the next redraw.
     refreshCalendarFeedChip().catch(() => {});
 
+    scheduleSharedCalendarRepair();
+
     if (state.currentNoteId) {
       requestAnimationFrame(() => {
         renderCalendarNoteAttachments(state.currentNoteId);
@@ -13932,13 +14054,16 @@ export function setupCalendarVaultBridge() {
     const fresh = (feed?.entries || []).filter((entry) => entry.ts > (feed.lastSeenAt || 0) && Date.now() - entry.ts < 60_000);
     const last = fresh[fresh.length - 1];
     if (!last) return;
+    const { spaceParticipants } = await import('./spaces/space-people.js');
+    const people = await spaceParticipants(spaceId).catch(() => []);
+    const who = people.find((p) => p.ids.includes(last.actor))?.name || last.actor || i18n('calendarShare.someone');
     const verb = last.action === 'added' ? 'added' : last.action === 'removed' ? 'removed' : 'changed';
     actionToast(
       fresh.length > 1
-        ? `${last.actor || 'Someone'} changed ${fresh.length} shared events`
-        : `${last.actor || 'Someone'} ${verb} “${last.title || 'an event'}”`,
+        ? i18n('calendarShare.changedMany', { who, count: fresh.length })
+        : i18n(`calendarShare.change.${verb}`, { who, title: last.title || i18n('calendarShare.untitledEvent') }),
       {
-        actionLabel: 'Show',
+        actionLabel: i18n('calendarShare.show'),
         onAction: () => (last.eventId && last.action !== 'removed' && state.calendarEvents.has(last.eventId)
           ? openCalendarEvent(last.eventId)
           : openCalendar({ push: true })),

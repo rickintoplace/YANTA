@@ -3757,13 +3757,15 @@
   color: var(--text-dim);
 }
 
-/* Change-feed chip + popover */
-.yanta-calendar-feed-chip {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  color: var(--accent, #6ea8fe);
-  font-weight: 700;
+/* Shared calendars button: an icon like its neighbours, a dot-count when others changed something. */
+.yanta-calendar-feed-chip { position: relative; }
+.yanta-calendar-feed-badge {
+  position: absolute; top: 2px; right: 1px;
+  min-width: 16px; height: 16px; padding: 0 4px;
+  border-radius: 8px; display: grid; place-items: center;
+  background: var(--accent); color: var(--accent-contrast, #fff);
+  font-size: 10px; font-weight: 700; font-variant-numeric: tabular-nums;
+  box-shadow: 0 0 0 2px var(--bg-elev);
 }
 
 .yanta-calendar-feed-popover {

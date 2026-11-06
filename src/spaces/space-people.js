@@ -37,6 +37,7 @@ import {
   hydrateOwnIdentity,
   resolveOwnIdentity,
   ownIdentityOrLabel,
+  ANONYMOUS_IDENTITY_LABEL,
 } from './space-identity.js';
 
 // Space-stable remote key — identical on every participant.
@@ -261,25 +262,38 @@ export async function publishSpaceRoster(spaceId, members = []) {
   const me = await ownIdentityOrLabel();
   const client = peekMatrixClient();
 
+  // id -> { role, emailHash, aliases }: the hashes and aliases let every
+  // participant fold one person's several names into one entry.
   const next = new Map();
 
-  if (me) next.set(me, 'owner');
+  if (me && me !== ANONYMOUS_IDENTITY_LABEL) {
+    next.set(me, {
+      role: 'owner',
+      emailHash: members.owner?.emailHash || '',
+      aliases: [members.owner?.matrixUserId].filter((a) => a && a !== me),
+    });
+  }
 
   for (const member of members) {
     const id = String(member.matrixUserId || '').trim();
     if (!id || id === me) continue;
 
-    next.set(id, member.role === 'write' ? 'write' : 'read');
+    next.set(id, { role: member.role === 'write' ? 'write' : 'read', emailHash: member.emailHash || '', aliases: [] });
   }
 
   doc.transact(() => {
     const roster = rosterMap(doc);
 
-    for (const [id, role] of next) {
+    for (const [id, entry] of next) {
+      const { role } = entry;
       const existing = roster.get(id);
 
-      if (existing?.role !== role) {
-        roster.set(id, { role, at: existing?.at || Date.now() });
+      if (
+        existing?.role !== role ||
+        (entry.emailHash && existing?.emailHash !== entry.emailHash) ||
+        JSON.stringify(existing?.aliases || []) !== JSON.stringify(entry.aliases)
+      ) {
+        roster.set(id, { role, at: existing?.at || Date.now(), emailHash: entry.emailHash || existing?.emailHash || '', aliases: entry.aliases });
       }
 
       // Give members without a published profile a name and a face by
@@ -395,33 +409,104 @@ export function spacePeople(spaceId, { includeSelf = false } = {}) {
   );
 }
 
+async function sha256Hex(text) {
+  const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(String(text).trim().toLowerCase()));
+  return [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 /**
- * Everyone known to take part, self included: invited members (roster),
- * plus whoever joined by link and published a profile or edited. Each
- * with when they were last active.
+ * Everyone who takes part, one entry per person, self included.
+ *
+ * A person can be known by several names in one space — a Matrix ID
+ * from the chat era, the account e-mail since, "Someone" on a device
+ * that knew neither. Names are folded together where the roster says
+ * they are aliases or where an e-mail hashes to a member's e-mail hash;
+ * the anonymous label is never a person.
  */
-export function spaceParticipants(spaceId) {
+export async function spaceParticipants(spaceId) {
   const doc = docFor(spaceId);
   if (!doc) return [];
 
-  const roster = rosterMap(doc);
-  const ids = new Set([...roster.keys(), ...profilesMap(doc).keys()]);
-  const lastActive = new Map();
+  return foldParticipants({
+    roster: new Map(rosterMap(doc).entries()),
+    profiles: new Map(profilesMap(doc).entries()),
+    activity: [...activityMap(doc).values()],
+    me: peekOwnIdentity(),
+  });
+}
 
-  for (const [, value] of activityMap(doc)) {
+/** Pure core of spaceParticipants (tested with real space data). */
+export async function foldParticipants({ roster, profiles, activity, me = '' }) {
+  const lastActive = new Map();
+  for (const value of activity) {
     const by = String(value?.by || '');
-    if (!by) continue;
-    ids.add(by);
-    lastActive.set(by, Math.max(lastActive.get(by) || 0, Number(value?.at || 0)));
+    if (by) lastActive.set(by, Math.max(lastActive.get(by) || 0, Number(value?.at || 0)));
   }
 
-  return [...ids]
-    .filter(Boolean)
-    .map((id) => ({
-      ...personFrom(doc, id, roster.get(id)?.role || (lastActive.has(id) ? 'write' : 'read')),
-      lastActive: lastActive.get(id) || Number(profilesMap(doc).get(id)?.at || 0),
-    }))
-    .sort((a, b) => (ROLE_ORDER[a.role] ?? 3) - (ROLE_ORDER[b.role] ?? 3) || b.lastActive - a.lastActive);
+  const ids = new Set([...roster.keys(), ...profiles.keys(), ...lastActive.keys()]);
+  ids.delete('');
+  ids.delete(ANONYMOUS_IDENTITY_LABEL);
+
+  // Union-find over names and e-mail hashes.
+  const parent = new Map();
+  const find = (x) => {
+    if (!parent.has(x)) parent.set(x, x);
+    while (parent.get(x) !== x) x = parent.get(x);
+    return x;
+  };
+  const join = (a, b) => { if (a && b) parent.set(find(a), find(b)); };
+
+  for (const id of ids) find(id);
+  for (const [id, value] of roster) {
+    if (value?.emailHash) join(id, `hash:${value.emailHash}`);
+    for (const alias of value?.aliases || []) join(id, alias);
+  }
+  for (const id of ids) {
+    if (/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(id)) join(id, `hash:${await sha256Hex(id)}`);
+  }
+
+  const groups = new Map();
+  for (const id of ids) {
+    const root = find(id);
+    if (!groups.has(root)) groups.set(root, []);
+    groups.get(root).push(id);
+  }
+
+  const rank = { owner: 0, write: 1, read: 2 };
+  const people = [];
+
+  for (const members of groups.values()) {
+    const named = members
+      .map((id) => ({ id, profile: profiles.get(id) }))
+      .sort((a, b) => Number(b.profile?.at || 0) - Number(a.profile?.at || 0));
+    const role = members
+      .map((id) => roster.get(id)?.role || (lastActive.has(id) ? 'write' : ''))
+      .filter(Boolean)
+      .sort((a, b) => rank[a] - rank[b])[0] || 'write';
+    // A name someone chose ("Rick") beats one derived from an address
+    // ("rickintoplace"); among equals the most recent.
+    const chosen = (n) => {
+      const name = String(n.profile?.name || '').trim().toLowerCase();
+      return !!name && name !== localpart(n.id).toLowerCase() && name !== String(n.id).split('@')[0].toLowerCase();
+    };
+    const isEmail = (id) => /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(id);
+    const best = named.find(chosen) ||
+      named.find((n) => n.profile?.name && !isEmail(n.id)) ||
+      named.find((n) => n.profile?.name) ||
+      named[0];
+
+    people.push({
+      id: best.id,
+      ids: members,
+      role,
+      name: String(best.profile?.name || '').trim() || localpart(best.id),
+      avatar: String(best.profile?.avatar || ''),
+      isMe: !!me && members.includes(me),
+      lastActive: Math.max(0, ...members.map((id) => lastActive.get(id) || Number(profiles.get(id)?.at || 0))),
+    });
+  }
+
+  return people.sort((a, b) => (rank[a.role] ?? 3) - (rank[b.role] ?? 3) || b.lastActive - a.lastActive);
 }
 
 /**

@@ -28,11 +28,21 @@ export function calendarBridgeForSpace(spaceId) {
 export function calendarBridgeForCategory(categoryId) {
   if (!categoryId) return null;
 
+  /*
+    Someone else's share of this calendar wins over an own one: an own
+    share of a calendar you were invited to is a duplicate (it happens
+    when a member re-shares what they see), and writing into it would
+    keep the entries away from the real owner.
+  */
+  let own = null;
+
   for (const bridge of bridges.values()) {
-    if (bridge.categoryId === categoryId) return bridge;
+    if (bridge.categoryId !== categoryId) continue;
+    if (!bridge.isOwner) return bridge;
+    own = own || bridge;
   }
 
-  return null;
+  return own;
 }
 
 /** Bridges whose category was mounted from someone else's share. */

@@ -139,7 +139,11 @@ export async function apiListSpaceMembers(spaceId) {
     credentials: 'include',
   }, { label: 'List members' });
 
-  return (await apiJson(res, 'Could not load members')).members || [];
+  const json = await apiJson(res, 'Could not load members');
+  const members = json.members || [];
+  // The owner's own aliases ride along (see publishSpaceRoster).
+  members.owner = json.owner || null;
+  return members;
 }
 
 export async function apiAddSpaceMember(spaceId, { matrixUserId, role }) {
@@ -791,7 +795,7 @@ export async function createSpaceForCalendarCategory(categoryId) {
   return mountSpace(record);
 }
 
-export async function stopSpaceShare(spaceId) {
+export async function stopSpaceShare(spaceId, { silent = false } = {}) {
   const session = state.spaces.get(spaceId);
   const record = session?.record || await store.spaces.get(spaceId);
 
@@ -814,11 +818,11 @@ export async function stopSpaceShare(spaceId) {
     await apiDeleteSpace(spaceId);
   } catch (err) {
     console.warn('[YANTA Spaces] server delete failed', err);
-    toast('Share stopped locally — server cleanup failed', 'error');
+    if (!silent) toast('Share stopped locally — server cleanup failed', 'error');
     return;
   }
 
-  toast('Stopped live sharing');
+  if (!silent) toast('Stopped live sharing');
 }
 
 /**

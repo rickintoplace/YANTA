@@ -1,183 +1,384 @@
 // ============================================================
-// YANTA — "Shared calendars": who, what changed, is it in sync
+// YANTA — shared calendars at a glance
 //
-// One panel for the three questions a shared calendar raises:
-//   - who is it shared with (and who edited last),
-//   - what did the others change,
-//   - did my own entries actually reach everyone?
-// The last one is answered honestly — unsent changes, the last error,
-// when this device last heard from the server — with a "Sync now" that
-// sends a full copy of everything this device has. A share that
-// silently drops edits is the worst thing it can do.
+// Anchored to the people button in the calendar toolbar: a popover on
+// wide screens, a sheet from the bottom on phones. Per shared calendar
+// it answers three questions in reading order — is it working, who is
+// in it, what did they change — and offers the two actions that matter:
+// sync now, and (for the owner) send the link again.
+//
+// "Is it working" is stated honestly; a share that silently drops
+// entries is the worst thing it can do. "Sync now" reports in place,
+// on the line it acts on, never by a toast behind the panel.
 // ============================================================
 
-import { state, escapeHtml, lucide, toast } from '../core.js';
+import { state, escapeHtml, escapeAttr, lucide, toast } from '../core.js';
+import { t, getLocale } from '../i18n/index.js';
+import { openBoundOverlay } from '../overlay-history.js';
 import { calendarBridges } from './calendar-registry.js';
 import { calendarFeedFor, markCalendarFeedSeen } from './calendar-feed.js';
 import { spaceParticipants } from './space-people.js';
-import { peekOwnIdentity } from './space-identity.js';
 
-const ROLE_LABEL = { owner: 'Owner', write: 'Can edit', read: 'Can view' };
+const PHONE = '(max-width: 640px)';
 
-function ago(ts) {
-  if (!ts) return 'never';
-  const s = Math.max(0, Math.round((Date.now() - ts) / 1000));
-  if (s < 60) return 'just now';
-  if (s < 3600) return `${Math.round(s / 60)} min ago`;
-  if (s < 86400) return `${Math.round(s / 3600)} h ago`;
-  return new Date(ts).toLocaleDateString(undefined, { day: 'numeric', month: 'short' });
+let panel = null;
+let releaseOverlay = null;
+
+function relative(ts) {
+  if (!ts) return '';
+  const diff = (ts - Date.now()) / 1000;
+  const rtf = new Intl.RelativeTimeFormat(getLocale(), { numeric: 'auto' });
+  const abs = Math.abs(diff);
+  if (abs < 60) return rtf.format(0, 'second');
+  if (abs < 3600) return rtf.format(Math.round(diff / 60), 'minute');
+  if (abs < 86400) return rtf.format(Math.round(diff / 3600), 'hour');
+  return rtf.format(Math.round(diff / 86400), 'day');
 }
 
-function syncLine(session) {
+function initials(name) {
+  const parts = String(name || '?').trim().split(/[\s._-]+/).filter(Boolean);
+  return ((parts[0]?.[0] || '?') + (parts[1]?.[0] || '')).toUpperCase();
+}
+
+// Hue per person, stable across renders.
+function hueFor(id) {
+  let h = 0;
+  for (const ch of String(id)) h = (h * 31 + ch.charCodeAt(0)) % 360;
+  return h;
+}
+
+/** idle | busy | done | error — per space, while the panel is open. */
+const syncUi = new Map();
+
+function statusHtml(bridge, session, count) {
   const engine = session?.engine;
-  if (!engine) return { tone: 'warn', text: 'Not connected on this device.' };
+  const ui = syncUi.get(bridge.spaceId) || { state: 'idle' };
+  const action = (label) => `<button type="button" class="ycs-link" data-sync>${escapeHtml(label)}</button>`;
+  const line = (tone, icon, text, extra = '') =>
+    `<p class="ycs-status is-${tone}" aria-live="polite">${lucide(icon, 14)}<span>${escapeHtml(text)}</span>${extra}</p>`;
+
+  if (ui.state === 'busy') return line('busy', 'loader-circle', t('calendarShare.syncing'));
+  if (ui.state === 'error') return line('bad', 'circle-alert', ui.message, action(t('calendarShare.tryAgain')));
+  if (!engine) return line('warn', 'circle-alert', t('calendarShare.notConnected'));
 
   if (engine.hasUnsent?.()) {
-    const err = engine.lastUploadError;
-    const status = Number(err?.status || 0);
-    return {
-      tone: 'bad',
-      text: status === 401 || status === 403
-        ? 'Your changes were refused: this device has no edit access any more. Ask for a new edit link.'
-        : `Your latest changes are not sent yet${err ? ` (${escapeHtml(err.message || 'error')})` : ''}.`,
-    };
+    const status = Number(engine.lastUploadError?.status || 0);
+    return line('bad', 'circle-alert', status === 401 || status === 403 ? t('calendarShare.refused') : t('calendarShare.unsent'), action(t('calendarShare.sendNow')));
   }
 
-  if (engine.lastPullError) {
-    return { tone: 'warn', text: `Cannot reach the server right now (${escapeHtml(engine.lastPullError.message || 'offline')}).` };
-  }
+  if (engine.lastPullError) return line('warn', 'wifi-off', t('calendarShare.offline'), action(t('calendarShare.tryAgain')));
 
-  return { tone: 'ok', text: `Up to date · last checked ${ago(engine.lastPullAt || session.lastPullAt)}.` };
+  const when = engine.lastPullAt || session.lastPullAt;
+  const text = ui.state === 'done'
+    ? t('calendarShare.syncedNow', { count })
+    : t('calendarShare.upToDate', { count, when: when ? relative(when) : '—' });
+
+  return line('ok', 'check', text, action(t('calendarShare.syncNow')));
 }
 
-function sectionHtml(bridge, feed) {
+async function sectionHtml(bridge) {
   const session = state.spaces.get(bridge.spaceId);
   const cat = state.calendarCategories.get(bridge.categoryId);
-  const name = cat?.name || session?.record?.title || 'Shared calendar';
-  const me = peekOwnIdentity();
-  const people = spaceParticipants(bridge.spaceId);
-  const sync = syncLine(session);
+  const name = cat?.name || session?.record?.title || t('calendarShare.untitled');
+  const color = cat?.color || 'var(--accent)';
+  const [people, feed] = await Promise.all([spaceParticipants(bridge.spaceId), calendarFeedFor(bridge.spaceId)]);
+  const names = new Map(people.flatMap((p) => p.ids.map((id) => [id, p.name])));
   const count = bridge.events().length;
+  const role = (r) => t(`calendarShare.role.${r}`);
 
-  const peopleHtml = people.length
-    ? people.map((p) => `
-        <li>
-          <span class="avatar">${escapeHtml((p.name || '?').slice(0, 2).toUpperCase())}</span>
-          <span class="who">${escapeHtml(p.name)}${p.id === me ? ' (you)' : ''}</span>
-          <small>${escapeHtml(ROLE_LABEL[p.role] || '')}${p.lastActive ? ` · active ${escapeHtml(ago(p.lastActive))}` : ''}</small>
-        </li>`).join('')
-    : '<li class="muted">Only people invited by name are listed. Anyone with the link can open it.</li>';
+  const peopleHtml = people.map((p) => `
+    <li class="ycs-person">
+      <span class="ycs-avatar" style="--h:${hueFor(p.id)}" aria-hidden="true">${escapeHtml(initials(p.name))}</span>
+      <span class="ycs-person-name">${escapeHtml(p.isMe ? t('calendarShare.you', { name: p.name }) : p.name)}</span>
+      <span class="ycs-person-meta">${escapeHtml(role(p.role))}${!p.isMe && p.lastActive ? ` · ${escapeHtml(relative(p.lastActive))}` : ''}</span>
+    </li>`).join('');
 
-  const names = new Map(people.map((p) => [p.id, p.name]));
-  const changes = [...feed.entries].reverse().slice(0, 8);
+  const changes = [...feed.entries].reverse().slice(0, 5);
   const changesHtml = changes.length
-    ? changes.map((e) => `
+    ? `<ul class="ycs-changes">${changes.map((e) => `
         <li class="${e.ts > feed.lastSeenAt ? 'is-new' : ''}">
-          <strong>${escapeHtml(names.get(e.actor) || e.actor || 'Someone')}</strong>
-          ${e.action === 'added' ? 'added' : e.action === 'removed' ? 'removed' : 'changed'}
-          “${escapeHtml(e.title || 'Untitled event')}”
-          <small>${escapeHtml(ago(e.ts))}</small>
-        </li>`).join('')
-    : '<li class="muted">No changes by others yet.</li>';
+          <button type="button" data-event="${escapeAttr(e.action !== 'removed' ? e.eventId || '' : '')}">
+            <span>${escapeHtml(t(`calendarShare.change.${e.action === 'added' ? 'added' : e.action === 'removed' ? 'removed' : 'changed'}`, {
+              who: names.get(e.actor) || e.actor || t('calendarShare.someone'),
+              title: e.title || t('calendarShare.untitledEvent'),
+            }))}</span>
+            <time>${escapeHtml(relative(e.ts))}</time>
+          </button>
+        </li>`).join('')}</ul>`
+    : `<p class="ycs-quiet">${escapeHtml(t('calendarShare.noChanges'))}</p>`;
+
+  const ownerAction = bridge.isOwner
+    ? `<button type="button" class="ycs-link" data-copy-link>${lucide('link', 14)}<span>${escapeHtml(t('calendarShare.copyLink'))}</span></button>`
+    : '';
 
   return `
-    <section class="yanta-cal-share-section" data-space="${escapeHtml(bridge.spaceId)}">
-      <header>
-        ${lucide('users', 15)}
-        <strong>${escapeHtml(name)}</strong>
-        <span class="role">${escapeHtml(ROLE_LABEL[bridge.role] || '')}</span>
-      </header>
-      <div class="sync ${sync.tone}">
-        ${lucide(sync.tone === 'ok' ? 'check-circle-2' : 'alert-triangle', 14)}
-        <span>${sync.text} ${count} event${count === 1 ? '' : 's'} in the shared calendar.</span>
-        <button type="button" class="btn compact" data-sync-now>${lucide('refresh-cw', 13)} Sync now</button>
+    <section class="ycs-calendar" data-space="${escapeAttr(bridge.spaceId)}">
+      <div class="ycs-calendar-head">
+        <span class="ycs-dot" style="background:${escapeAttr(color)}" aria-hidden="true"></span>
+        <h3>${escapeHtml(name)}</h3>
+        <span class="ycs-role">${escapeHtml(role(bridge.role))}</span>
       </div>
-      <h4>People</h4>
-      <ul class="people">${peopleHtml}</ul>
-      <h4>Recent changes by others</h4>
-      <ul class="changes">${changesHtml}</ul>
+      ${statusHtml(bridge, session, count)}
+      <ul class="ycs-people" aria-label="${escapeAttr(t('calendarShare.people'))}">${peopleHtml}</ul>
+      ${ownerAction}
+      <h4>${escapeHtml(t('calendarShare.recent'))}</h4>
+      ${changesHtml}
     </section>`;
 }
 
-const CSS = `
-.yanta-cal-share-panel { display: grid; gap: 14px; max-height: 70vh; overflow: auto; }
-.yanta-cal-share-section { border: 1px solid var(--border); border-radius: 13px; padding: 12px; display: grid; gap: 8px; }
-.yanta-cal-share-section header { display: flex; align-items: center; gap: 8px; }
-.yanta-cal-share-section header svg { color: var(--accent); }
-.yanta-cal-share-section .role { margin-left: auto; font-size: 12px; color: var(--text-faint); }
-.yanta-cal-share-section h4 { margin: 4px 0 0; font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-faint); }
-.yanta-cal-share-section ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 13px; }
-.yanta-cal-share-section .people li { display: flex; align-items: center; gap: 8px; }
-.yanta-cal-share-section .avatar { width: 26px; height: 26px; border-radius: 999px; display: inline-grid; place-items: center; font-size: 11px; font-weight: 800; background: color-mix(in srgb, var(--accent) 14%, transparent); color: var(--accent); }
-.yanta-cal-share-section .people small { margin-left: auto; color: var(--text-faint); }
-.yanta-cal-share-section .changes li.is-new strong::before { content: '● '; color: var(--accent); }
-.yanta-cal-share-section .changes small, .yanta-cal-share-section .muted { color: var(--text-faint); }
-.yanta-cal-share-section .sync { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: 8px 10px; border-radius: 10px; font-size: 13px; }
-.yanta-cal-share-section .sync span { flex: 1; min-width: 180px; }
-.yanta-cal-share-section .sync.ok { background: color-mix(in srgb, var(--green, #22c55e) 9%, transparent); }
-.yanta-cal-share-section .sync.warn { background: color-mix(in srgb, var(--yellow, #eab308) 12%, transparent); }
-.yanta-cal-share-section .sync.bad { background: color-mix(in srgb, var(--red, #ef4444) 12%, transparent); }
-`;
+async function brokenHtml() {
+  try {
+    const health = await import('./space-health.js');
+    return health.brokenShares()
+      .filter((b) => b.sourceType === 'calendar')
+      .map((b) => `
+        <section class="ycs-calendar">
+          <div class="ycs-calendar-head"><span class="ycs-dot is-broken" aria-hidden="true"></span><h3>${escapeHtml(b.name || t('calendarShare.untitled'))}</h3></div>
+          <p class="ycs-status is-bad">${lucide('circle-alert', 14)}<span>${escapeHtml(t('calendarShare.broken'))}</span></p>
+        </section>`).join('');
+  } catch {
+    return '';
+  }
+}
 
-/** Opens the panel; marks the change feeds seen. */
-export async function openCalendarSharePanel() {
-  const { yantaDialog } = await import('../dialogs.js');
-  const bridges = calendarBridges();
+async function render() {
+  if (!panel) return;
+  const body = panel.querySelector('.ycs-body');
+  const sections = await Promise.all(calendarBridges().map(sectionHtml));
+  const html = sections.join('') + await brokenHtml();
+  if (!panel) return;
 
-  const render = async (host) => {
-    const sections = [];
-    for (const bridge of bridges) sections.push(sectionHtml(bridge, await calendarFeedFor(bridge.spaceId)));
-    // Shares the server knows but this device cannot open.
-    let broken = [];
-    try {
-      const health = await import('./space-health.js');
-      broken = health.brokenShares().filter((b) => b.sourceType === 'calendar');
-    } catch {}
+  body.innerHTML = html || `
+    <div class="ycs-empty">
+      <p>${escapeHtml(t('calendarShare.emptyTitle'))}</p>
+      <p class="ycs-quiet">${escapeHtml(t('calendarShare.emptyHint'))}</p>
+    </div>`;
+}
 
-    const brokenHtml = broken.map((b) => `
-      <section class="yanta-cal-share-section">
-        <header>${lucide('alert-triangle', 15)}<strong>${escapeHtml(b.name || b.title || 'A shared calendar')}</strong></header>
-        <div class="sync bad"><span>This calendar is shared, but this device cannot open the share (its keys are missing here). Entries made here do not reach anyone. Share it again from the calendar list (⋯ → Share) and send the new link.</span></div>
-      </section>`).join('');
+function onKey(e) {
+  if (e.key === 'Escape' && e.isTrusted) {
+    e.preventDefault();
+    e.stopPropagation();
+    close();
+  }
+}
 
-    host.innerHTML = sections.join('') + brokenHtml ||
-      `<p class="muted">No calendar on this device is shared yet. Share one from the calendar list (⋯ → Share) and send the link — everyone with an edit link can add entries.</p>`;
-  };
+function close({ fromHistory = false } = {}) {
+  if (!panel) return;
+  const el = panel;
+  panel = null;
+  el.classList.add('is-leaving');
+  setTimeout(() => el.remove(), 160);
+  document.removeEventListener('keydown', onKey, true);
+  window.removeEventListener('yanta-calendar-feed-updated', render);
+  window.removeEventListener('yanta-space-changed', render);
+  const release = releaseOverlay;
+  releaseOverlay = null;
+  if (!fromHistory) release?.();
+  Promise.all(calendarBridges().map((b) => markCalendarFeedSeen(b.spaceId).catch(() => {})))
+    .then(() => window.dispatchEvent(new CustomEvent('yanta-calendar-feed-updated', { detail: {} })));
+}
 
-  await yantaDialog({
-    title: 'Shared calendars',
-    icon: 'users',
-    closeOnBackdrop: true,
-    build: async ({ body, actions, done, button }) => {
-      const style = document.createElement('style');
-      style.textContent = CSS;
-      const host = document.createElement('div');
-      host.className = 'yanta-cal-share-panel';
-      body.append(style, host);
-      await render(host);
+async function syncSpace(spaceId) {
+  const engine = state.spaces.get(spaceId)?.engine;
+  if (!engine) return;
 
-      host.addEventListener('click', async (e) => {
-        const btn = e.target.closest?.('[data-sync-now]');
-        if (!btn) return;
-        const spaceId = btn.closest('[data-space]')?.dataset.space;
-        const engine = state.spaces.get(spaceId)?.engine;
-        if (!engine) return;
-        btn.disabled = true;
-        try {
-          await engine.syncNow();
-          toast('Shared calendar synced', 'success');
-        } catch (err) {
-          toast(`Sync failed: ${err?.message || err}`, 'error');
-        }
-        await render(host);
-      });
+  syncUi.set(spaceId, { state: 'busy' });
+  await render();
 
-      const close = button({ label: 'Close', kind: 'primary' });
-      close.addEventListener('click', () => done(null));
-      actions.append(close);
-    },
+  const started = Date.now();
+  try {
+    await engine.syncNow();
+    syncUi.set(spaceId, { state: 'done' });
+  } catch (err) {
+    const status = Number(err?.status || 0);
+    syncUi.set(spaceId, {
+      state: 'error',
+      message: status === 401 || status === 403 ? t('calendarShare.refused') : t('calendarShare.failed', { reason: err?.message || String(err) }),
+    });
+  }
+
+  // Long enough to be seen: a sync that "does nothing" is a sync nobody trusts.
+  await new Promise((r) => setTimeout(r, Math.max(0, 450 - (Date.now() - started))));
+  window.dispatchEvent(new CustomEvent('yanta-calendar-space-applied', { detail: { spaceId } }));
+  await render();
+}
+
+async function copyLink(spaceId) {
+  const { spaceLinksFor } = await import('./space-session.js');
+  const session = state.spaces.get(spaceId);
+  const link = session && spaceLinksFor(session).write;
+  if (!link) return;
+
+  try {
+    await navigator.clipboard.writeText(link);
+    toast(t('calendarShare.linkCopied'), 'success');
+  } catch {
+    window.prompt(t('calendarShare.copyLink'), link);
+  }
+}
+
+/** Opens (or closes) the panel at the toolbar button. */
+export async function openCalendarSharePanel(anchor) {
+  if (panel) {
+    close();
+    return;
+  }
+
+  ensureCss();
+  syncUi.clear();
+
+  const phone = window.matchMedia(PHONE).matches;
+  panel = document.createElement('div');
+  panel.className = `ycs ${phone ? 'is-sheet' : 'is-popover'}`;
+  panel.setAttribute('role', 'dialog');
+  panel.setAttribute('aria-label', t('calendarShare.title'));
+  panel.innerHTML = `
+    ${phone ? '<div class="ycs-scrim" data-close></div>' : ''}
+    <div class="ycs-surface">
+      ${phone ? '<div class="ycs-grip" aria-hidden="true"></div>' : ''}
+      <header class="ycs-head">
+        <h2>${escapeHtml(t('calendarShare.title'))}</h2>
+        <button type="button" class="icon-btn" data-close aria-label="${escapeAttr(t('common.close'))}">${lucide('x', 16)}</button>
+      </header>
+      <div class="ycs-body"></div>
+    </div>`;
+  document.body.append(panel);
+
+  if (!phone && anchor) {
+    const r = anchor.getBoundingClientRect();
+    const surface = panel.querySelector('.ycs-surface');
+    surface.style.top = `${Math.round(r.bottom + 8)}px`;
+    surface.style.left = `${Math.round(Math.max(12, Math.min(r.left, window.innerWidth - 392)))}px`;
+  }
+
+  panel.addEventListener('click', async (e) => {
+    if (e.target.closest('[data-close]')) return close();
+
+    const space = e.target.closest('[data-space]')?.dataset.space;
+    if (e.target.closest('[data-sync]') && space) return syncSpace(space);
+    if (e.target.closest('[data-copy-link]') && space) return copyLink(space);
+
+    const eventId = e.target.closest('[data-event]')?.dataset.event;
+    if (eventId && state.calendarEvents.has(eventId)) {
+      close();
+      const { openCalendarEvent } = await import('../calendar.js');
+      openCalendarEvent(eventId);
+    }
   });
 
-  for (const bridge of bridges) await markCalendarFeedSeen(bridge.spaceId).catch(() => {});
-  window.dispatchEvent(new CustomEvent('yanta-calendar-feed-changed'));
+  if (!phone) {
+    setTimeout(() => {
+      document.addEventListener('pointerdown', function outside(e) {
+        if (!panel) return document.removeEventListener('pointerdown', outside, true);
+        if (panel.contains(e.target) || anchor?.contains(e.target)) return;
+        document.removeEventListener('pointerdown', outside, true);
+        close();
+      }, true);
+    }, 0);
+  }
+
+  document.addEventListener('keydown', onKey, true);
+  window.addEventListener('yanta-calendar-feed-updated', render);
+  window.addEventListener('yanta-space-changed', render);
+  releaseOverlay = openBoundOverlay('calendar-share-panel', { close, isOpen: () => !!panel });
+
+  await render();
+}
+
+function ensureCss() {
+  if (document.getElementById('ycs-css')) return;
+  const style = document.createElement('style');
+  style.id = 'ycs-css';
+  style.textContent = `
+.ycs { position: fixed; inset: 0; z-index: 1300; pointer-events: none; }
+.ycs-surface {
+  pointer-events: auto;
+  position: absolute;
+  display: flex; flex-direction: column;
+  background: var(--bg-elev);
+  color: var(--text);
+  box-shadow: 0 18px 48px -12px rgba(0,0,0,.32), 0 2px 6px rgba(0,0,0,.06);
+}
+.ycs.is-popover .ycs-surface {
+  width: 380px; max-height: min(620px, calc(100vh - 96px));
+  border-radius: 14px;
+  animation: ycs-pop .18s cubic-bezier(.16,1,.3,1);
+  transform-origin: top left;
+}
+.ycs.is-sheet { pointer-events: auto; }
+.ycs-scrim { position: absolute; inset: 0; background: rgba(0,0,0,.32); animation: ycs-fade .18s ease-out; }
+.ycs.is-sheet .ycs-surface {
+  left: 0; right: 0; bottom: 0; max-height: 86vh;
+  border-radius: 16px 16px 0 0;
+  padding-bottom: env(safe-area-inset-bottom);
+  animation: ycs-rise .26s cubic-bezier(.16,1,.3,1);
+}
+.ycs-grip { width: 36px; height: 4px; border-radius: 2px; background: var(--border-strong, var(--border)); margin: 8px auto 0; }
+.ycs.is-leaving .ycs-surface, .ycs.is-leaving .ycs-scrim { opacity: 0; transition: opacity .14s ease-in; }
+@keyframes ycs-pop { from { opacity: 0; transform: translateY(-4px) scale(.985); } }
+@keyframes ycs-rise { from { transform: translateY(28px); opacity: .5; } }
+@keyframes ycs-fade { from { opacity: 0; } }
+
+.ycs-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 12px 4px 20px; }
+.ycs-head h2 { margin: 0; font-size: 15px; font-weight: 650; letter-spacing: -0.01em; }
+.ycs-body { overflow: auto; overscroll-behavior: contain; padding: 0 20px 18px; }
+
+.ycs-calendar { padding: 14px 0 18px; }
+.ycs-calendar + .ycs-calendar { border-top: 1px solid var(--border); }
+.ycs-calendar-head { display: flex; align-items: center; gap: 10px; }
+.ycs-calendar-head h3 { margin: 0; flex: 1; min-width: 0; font-size: 17px; font-weight: 650; letter-spacing: -0.015em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ycs-dot { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.ycs-dot.is-broken { background: var(--red, #d64545); }
+.ycs-role { font-size: 12px; color: var(--text-dim); }
+
+.ycs-status { display: flex; align-items: center; gap: 8px; margin: 6px 0 0; font-size: 13px; line-height: 1.45; color: var(--text-dim); }
+.ycs-status > svg { flex: none; }
+.ycs-status span { flex: 1; min-width: 0; }
+.ycs-status.is-ok > svg { color: var(--green, #2f9e5b); }
+.ycs-status.is-warn { color: color-mix(in srgb, var(--yellow, #b7791f) 70%, var(--text)); }
+.ycs-status.is-bad { color: color-mix(in srgb, var(--red, #d64545) 78%, var(--text)); }
+.ycs-status.is-busy > svg { animation: ycs-spin 0.9s linear infinite; color: var(--accent); }
+@keyframes ycs-spin { to { transform: rotate(360deg); } }
+
+.ycs-link {
+  display: inline-flex; align-items: center; gap: 6px; flex: none;
+  padding: 4px 2px; border: 0; background: none;
+  color: var(--accent); font: inherit; font-weight: 600; font-size: 13px;
+  cursor: pointer; border-radius: 6px;
+}
+.ycs-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+.ycs-link:focus-visible, .ycs-changes button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ycs-calendar > .ycs-link { margin-top: 12px; }
+
+.ycs-people { list-style: none; margin: 16px 0 0; padding: 0; display: grid; gap: 10px; }
+.ycs-person { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 10px; font-size: 14px; }
+.ycs-avatar {
+  width: 28px; height: 28px; border-radius: 50%;
+  display: grid; place-items: center;
+  font-size: 11px; font-weight: 700; letter-spacing: .02em;
+  background: hsl(var(--h) 42% 88%); color: hsl(var(--h) 48% 26%);
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .ycs-avatar { background: hsl(var(--h) 28% 26%); color: hsl(var(--h) 60% 86%); } }
+:root[data-theme="dark"] .ycs-avatar { background: hsl(var(--h) 28% 26%); color: hsl(var(--h) 60% 86%); }
+.ycs-person-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ycs-person-meta { font-size: 12px; color: var(--text-dim); white-space: nowrap; }
+
+.ycs-calendar h4 { margin: 20px 0 4px; font-size: 13px; font-weight: 650; color: var(--text); }
+.ycs-changes { list-style: none; margin: 0; padding: 0; }
+.ycs-changes button {
+  width: 100%; display: flex; align-items: baseline; gap: 12px;
+  padding: 6px 0; border: 0; background: none; color: var(--text);
+  text-align: left; font: inherit; font-size: 13px; line-height: 1.4; cursor: pointer; border-radius: 6px;
+}
+.ycs-changes button span { flex: 1; min-width: 0; }
+.ycs-changes time { font-size: 12px; color: var(--text-dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ycs-changes li.is-new span { font-weight: 600; }
+.ycs-changes button:hover span { text-decoration: underline; text-underline-offset: 3px; }
+.ycs-quiet { margin: 0; font-size: 13px; color: var(--text-dim); }
+.ycs-empty { padding: 16px 0 6px; display: grid; gap: 6px; font-size: 14px; }
+.ycs-empty p { margin: 0; max-width: 34ch; }
+@media (prefers-reduced-motion: reduce) { .ycs * { animation: none !important; } }
+`;
+  document.head.append(style);
 }

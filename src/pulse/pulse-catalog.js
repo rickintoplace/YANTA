@@ -17,6 +17,16 @@
 //   whole point is to write.
 // ============================================================
 
+/*
+  Catalog routines the user installed and never edited are moved to the
+  current text (pulse-starters.js, upgradeCatalogRoutines). Keyed by a
+  hash of the body below the frontmatter, so the user's own schedule and
+  on/off settings are kept.
+*/
+export const FORMER_CATALOG_BODIES = {
+  'birthday-watch': new Set(['1p58887']),
+};
+
 export const PULSE_CATEGORIES = Object.freeze({
   DAILY: 'daily',
   FOCUS: 'focus',
@@ -184,14 +194,16 @@ export const PULSE_CATALOG = [
     goal: 'Catch the birthday while a card can still arrive, not on the morning of.',
     procedure: [
       '1. Call `search_events` for the next seven days.',
-      '2. Keep entries that are birthdays or anniversaries.',
-      '3. For each person, use `semantic_search_notes` for anything you know about them.',
-      '4. Call `pulse_emit` with the date, the person, and one concrete idea grounded in those notes.',
-      '5. If a message would be the right move, use `pulse_propose` with `chat_send_message` and a draft — never send it yourself.',
+      '2. Keep only occasions that say what they are: the title names a birthday, anniversary, wedding, jubilee or name day (Geburtstag, Hochzeit, Jahrestag, Jubiläum, Namenstag, birthday, anniversary, wedding, 🎂), or the entry repeats every year. A bare name or an unclear title is not an occasion — leave it out, do not ask about it.',
+      '3. Drop every occasion marked `alreadyReported`: it was already reported, and once is enough.',
+      '4. For each remaining person, use `semantic_search_notes` for anything you know about them.',
+      '5. Call `pulse_emit` with the date, the person, and one concrete idea grounded in those notes. Do not mention occasions you dropped, not even as a side note.',
+      '6. If a message would be the right move, use `pulse_propose` with `chat_send_message` and a draft — never send it yourself.',
     ].join('\n'),
     silentWhen: [
-      '- Nothing is coming up in the next seven days.',
-      '- The same occasion was already reported this week.',
+      '- No new occasion is coming up in the next seven days.',
+      '- Everything coming up was already reported (`alreadyReported`).',
+      '- The only candidates are entries whose meaning is unclear.',
     ].join('\n'),
   }),
 

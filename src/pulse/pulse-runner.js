@@ -53,7 +53,7 @@ import {
 
 import { readSensors } from './pulse-sensors.js';
 import { findNearDuplicate } from './pulse-novelty.js';
-import { toldCards, toldIndex, describeTold, markAlreadyReported } from './pulse-told.js';
+import { toldCards, toldIndex, describeTold, markAlreadyReported, noteSeenEvents, onlyRepeatsEvents } from './pulse-told.js';
 import { planRoutineTools, needsPlan } from './pulse-tool-plan.js';
 
 import { buildCitationInstructions, stripForDisplay } from 'veriquote';
@@ -418,6 +418,8 @@ export async function runRoutine(routine, {
   // search results (pulse-told.js).
   const toldSoFar = toldCards(await listInboxItems({ includeArchived: true }).catch(() => []), routine.name, now);
   const told = toldIndex(toldSoFar);
+  // Calendar events this run saw, and whether a card already named them.
+  const seenEvents = new Map();
 
   let loop;
 
@@ -481,6 +483,7 @@ export async function runRoutine(routine, {
         if (!ran || !told.size) return numbered;
 
         const marked = markAlreadyReported(name, numbered || result, told);
+        if (ran) noteSeenEvents(seenEvents, name, marked);
         return marked === (numbered || result) ? numbered : marked;
       },
     });
@@ -584,6 +587,16 @@ export async function runRoutine(routine, {
   if (!force && digest && digest === routineState.lastDigest) {
     await recordRun(routine.name, { dueAt: dueAt || now, digest }, now);
     return finish(RUN_OUTCOME.REPEAT, { title });
+  }
+
+  // Only events an earlier card already reported: a repeat in new words.
+  if (!force) {
+    const repeated = onlyRepeatsEvents({ title, body }, seenEvents);
+    if (repeated) {
+      notes.push(`already reported: ${repeated.join(', ')}`);
+      await recordRun(routine.name, { dueAt: dueAt || now, digest }, now);
+      return finish(RUN_OUTCOME.NEAR_REPEAT, { title });
+    }
   }
 
   // Close enough to a recent card, or nothing new in other words.

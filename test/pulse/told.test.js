@@ -5,6 +5,8 @@ import {
   toldIndex,
   describeTold,
   markAlreadyReported,
+  noteSeenEvents,
+  onlyRepeatsEvents,
 } from '../../src/pulse/pulse-told.js';
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -70,5 +72,25 @@ describe('what a run is told it already said', () => {
 
     expect(result.items[0].alreadyReported).toBe('feed-digest, 2026-10-30');
     expect(result.items[1].alreadyReported).toBeUndefined();
+  });
+});
+
+describe('a card that only repeats reported events', () => {
+  const told = toldIndex(toldCards(inbox, 'birthday-watch', NOW));
+  const seen = new Map();
+  noteSeenEvents(seen, 'search_events', markAlreadyReported('search_events', {
+    events: [
+      { id: 'e1', title: 'Großeltern steinerne Hochzeit', start: '2026-11-06' },
+      { id: 'e4', title: 'Max', start: '2026-11-10' },
+    ],
+  }, told));
+
+  it('is a repeat when every event it names was reported', () => {
+    expect(onlyRepeatsEvents({ title: 'Steinerne Hochzeit am Freitag', body: 'Großeltern: steinerne Hochzeit, Karte schreiben!' }, seen))
+      .toEqual(['Großeltern steinerne Hochzeit']);
+  });
+
+  it('is new as soon as it names one unreported event', () => {
+    expect(onlyRepeatsEvents({ title: 'Max am Dienstag', body: 'Großeltern steinerne Hochzeit war schon dran.' }, seen)).toBeNull();
   });
 });

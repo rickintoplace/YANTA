@@ -191,6 +191,50 @@ export async function upgradeStarterRoutines() {
   return upgraded;
 }
 
+function routineBody(markdown) {
+  const text = String(markdown || '');
+  const end = text.indexOf('\n---', 4);
+  return end < 0 ? text.trim() : text.slice(end + 4).trim();
+}
+
+function routineFrontmatter(markdown) {
+  const text = String(markdown || '');
+  const end = text.indexOf('\n---', 4);
+  return end < 0 ? '' : text.slice(0, end + 4);
+}
+
+/** Installed catalog routines with an untouched body get the current text. */
+export async function upgradeCatalogRoutines() {
+  const { PULSE_CATALOG, FORMER_CATALOG_BODIES } = await import('./pulse-catalog.js');
+  let upgraded = 0;
+
+  for (const entry of PULSE_CATALOG) {
+    const former = FORMER_CATALOG_BODIES[entry.name];
+    if (!former) continue;
+
+    const routine = await getRoutine(entry.name);
+    if (!routine?.noteId || !former.has(starterHash(routineBody(routine.markdown)))) continue;
+
+    try {
+      await writeBrainNote({
+        noteId: routine.noteId,
+        body: `${routineFrontmatter(routine.markdown)}\n\n${routineBody(entry.markdown)}\n`,
+        mode: 'replace',
+        target: 'skill',
+      });
+      upgraded++;
+    } catch (err) {
+      console.warn('[YANTA Pulse] catalog upgrade failed', entry.name, err);
+    }
+  }
+
+  if (upgraded) {
+    window.dispatchEvent(new CustomEvent('yanta-pulse-routines-changed', { detail: { upgraded } }));
+  }
+
+  return upgraded;
+}
+
 /** Grace period for a first sync to deliver routines another device seeded. */
 const HYDRATION_TIMEOUT_MS = 20_000;
 
@@ -229,6 +273,7 @@ export async function ensureStarterRoutines() {
   if (await store.settings.get(SEEDED_KEY, false).catch(() => false)) {
     await vaultHydrated();
     await upgradeStarterRoutines();
+    await upgradeCatalogRoutines().catch(() => {});
     return;
   }
 

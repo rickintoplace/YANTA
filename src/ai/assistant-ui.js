@@ -4002,6 +4002,48 @@ export function setupAssistant() {
   });
   window.addEventListener('yanta-open-ai-floating', () => openAssistantFloating());
 
+  /*
+    "Reply" on a Pulse card: a fresh chat with the card attached, so the
+    answer ("Max ist ein Kollege", "mach Punkt 1 und 3") reaches an agent
+    that can act on it — store it in the AI Brain, change the routine,
+    carry out what the card suggested.
+  */
+  window.addEventListener('yanta-ai-reply-to-pulse', async (e) => {
+    const card = e?.detail?.card;
+    if (!card) return;
+
+    openAssistantSmart();
+    await new Promise((resolve) => requestAnimationFrame(resolve));
+    if (conversation.length || activeContextItems.length) root?.querySelector('[data-ai-clear]')?.click();
+
+    // Written for the model, not shown in the UI: stays English.
+    /* eslint-disable yanta/no-untranslated-literal */
+    const text = [
+      `# Pulse card from the routine "${card.routineName}"`,
+      '',
+      'The user is replying to this card from their Pulse Inbox. Treat their message as the answer to it:',
+      '- facts about people, occasions or preferences → remember them in the AI Brain;',
+      '- "do this" about something the card suggested → do it with your tools (ask first for anything that deletes or sends);',
+      '- "don\'t tell me about this" → adjust the routine with pulse_manage so it stays quiet about it next time.',
+      '',
+      `## ${card.title}`,
+      '',
+      String(card.body || ''),
+      ...(card.proposals?.length
+        ? ['', '## Proposed actions', ...card.proposals.map((p) => `- ${p.label} (${p.tool}, ${p.status})`)]
+        : []),
+    ].join('\n');
+    /* eslint-enable yanta/no-untranslated-literal */
+
+    await addAiContextFiles([new File([text], `pulse-${card.routineName || 'card'}.md`, { type: 'text/markdown' })]);
+
+    requestAnimationFrame(() => {
+      if (!inputEl) return;
+      inputEl.placeholder = t('pulse.replyPlaceholder', { routine: card.routineName || 'Pulse' });
+      inputEl.focus();
+    });
+  });
+
   window.addEventListener('keydown', (e) => {
     const meta = e.ctrlKey || e.metaKey;
 

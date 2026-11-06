@@ -1594,6 +1594,8 @@ export default {
     untitledResult: 'Résultat Pulse',
     unknownRoutine: 'Routine inconnue',
     dismiss: 'Masquer',
+    reply: 'Répondre',
+    replyPlaceholder: 'Répondre à {routine}…',
     pauseRoutine: 'Mettre la routine en pause',
     routinePaused: '« {routine} » mise en pause. Vous pouvez la réactiver dans Réglages → Pulse.',
     runNow: 'Exécuter maintenant',

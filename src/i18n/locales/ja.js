@@ -1584,6 +1584,8 @@ export default {
     untitledResult: 'Pulse の結果',
     unknownRoutine: '不明なルーティン',
     dismiss: '閉じる',
+    reply: '返信',
+    replyPlaceholder: '{routine} に返信…',
     pauseRoutine: 'ルーティンを一時停止',
     routinePaused: '「{routine}」を一時停止しました。設定 → Pulse から再開できます。',
     runNow: '今すぐ実行',

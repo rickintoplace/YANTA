@@ -155,3 +155,33 @@ export function markAlreadyReported(name, result, told) {
 
   return result;
 }
+
+/*
+  Calendar events a run saw, and whether an earlier card already named
+  them. Collected from search_events results after marking.
+*/
+export function noteSeenEvents(seen, name, result) {
+  if (name !== 'search_events' || !Array.isArray(result?.events)) return;
+  for (const event of result.events) {
+    const title = String(event?.title || '').trim();
+    if (!title) continue;
+    // Reported if any sighting carried the mark.
+    seen.set(title, !!seen.get(title) || !!event.alreadyReported);
+  }
+}
+
+/**
+ * A card that only talks about events earlier cards already reported
+ * says nothing new, however it is worded. Returns the titles it repeats
+ * when that is all it does, else null. Words are compared whole, like
+ * the marking itself.
+ */
+export function onlyRepeatsEvents(card, seen) {
+  if (!seen?.size) return null;
+
+  const cardWords = new Set(words(`${card.title}\n${stripForDisplay(String(card.body || ''))}`));
+  const mentioned = [...seen.entries()].filter(([title]) => mentions(cardWords, title));
+  if (!mentioned.length) return null;
+
+  return mentioned.every(([, reported]) => reported) ? mentioned.map(([title]) => title) : null;
+}

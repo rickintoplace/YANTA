@@ -435,7 +435,17 @@ function renderCard(item, onChange) {
     }
   });
 
-  source.append(spacer, useful, notUseful, pause);
+  // Answer the card — questions it asks, suggestions it makes — in a
+  // chat with the assistant, which can act on the answer.
+  const reply = el('button', { type: 'button', class: 'yanta-pulse-reply' });
+  reply.innerHTML = `${lucide('message-square-reply', 12)} ${escapeHtml(t('pulse.reply'))}`;
+  reply.addEventListener('click', () => {
+    window.dispatchEvent(new CustomEvent('yanta-ai-reply-to-pulse', {
+      detail: { card: { routineName: item.routineName, title: item.title, body: stripForDisplay(String(item.body || '')), proposals: item.proposals || [] } },
+    }));
+  });
+
+  source.append(spacer, reply, useful, notUseful, pause);
   card.append(source);
 
   return card;

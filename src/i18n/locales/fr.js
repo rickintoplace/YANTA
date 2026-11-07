@@ -190,6 +190,7 @@ export default {
     disclaimer: 'Une estimation à partir des dates notées, pas une méthode de contraception. Les jours fertiles calculés au calendrier sont souvent faux ; les tests LH ou la température sont plus fiables.',
   },
   peek: {
+    viewOnly: 'lecture seule',
     copy: 'Copier dans mon calendrier',
   },
   subscribe: {

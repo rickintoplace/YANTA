@@ -82,12 +82,19 @@ export function openCalendarPeek(ev, anchor, { onCopy } = {}) {
       <p class="ypk-when">${escapeHtml(dateLine(ev))}</p>
       ${ev.location ? `<p class="ypk-line">${lucide('map-pin', 14)}<span>${escapeHtml(ev.location)}</span></p>` : ''}
       ${ev.description ? `<p class="ypk-desc">${linkify(ev.description.slice(0, 1200))}</p>` : ''}
-      <p class="ypk-cal"><span class="ypk-dot" style="background:${escapeAttr(cat?.color || 'var(--accent)')}"></span>${escapeHtml(cat?.name || '')}</p>
+      <p class="ypk-cal"><span class="ypk-dot" style="background:${escapeAttr(cat?.color || 'var(--accent)')}"></span>${escapeHtml(cat?.name || '')}${cat?.spaceId && !cat?.source ? ` · ${escapeHtml(t('peek.viewOnly'))}` : ''}</p>
       ${onCopy ? `<button type="button" class="ypk-link" data-copy>${lucide('calendar-plus', 14)}<span>${escapeHtml(t('peek.copy'))}</span></button>` : ''}
     </div>`;
   document.body.append(peek);
 
-  if (!phone && anchor) {
+  if (!phone && !anchor?.isConnected) {
+    // Opened without a tap (a notification, the sharing panel): centered.
+    const surface = peek.querySelector('.ypk-surface');
+    surface.style.left = `${Math.round(Math.max(12, (window.innerWidth - 320) / 2))}px`;
+    surface.style.top = `${Math.round(window.innerHeight * 0.18)}px`;
+  }
+
+  if (!phone && anchor && anchor.isConnected) {
     const r = anchor.getBoundingClientRect();
     const surface = peek.querySelector('.ypk-surface');
     const w = 320;
@@ -109,8 +116,20 @@ export function openCalendarPeek(ev, anchor, { onCopy } = {}) {
   peek.addEventListener('click', (e) => {
     if (e.target.closest('[data-close]')) return close();
     if (e.target.closest('[data-copy]')) {
+      /*
+        Closing goes back in history; opening the editor in the same tick
+        would be undone by that popstate. Open once it has happened.
+      */
+      let done = false;
+      const go = () => {
+        if (done) return;
+        done = true;
+        window.removeEventListener('popstate', go);
+        setTimeout(() => onCopy?.(ev), 0);
+      };
+      window.addEventListener('popstate', go);
+      setTimeout(go, 350);
       close();
-      onCopy?.(ev);
     }
   });
   document.addEventListener('keydown', onKey, true);

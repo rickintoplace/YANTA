@@ -190,6 +190,7 @@ export default {
     disclaimer: 'Eine Schätzung aus den eingetragenen Daten – nicht zur Verhütung geeignet. Fruchtbare Tage nach Kalender liegen oft daneben; LH-Tests oder Temperaturmessung sind verlässlicher.',
   },
   peek: {
+    viewOnly: 'nur ansehen',
     copy: 'In meinen Kalender übernehmen',
   },
   subscribe: {

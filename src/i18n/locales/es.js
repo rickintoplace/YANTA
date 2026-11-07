@@ -190,6 +190,7 @@ export default {
     disclaimer: 'Una estimación a partir de las fechas registradas, no apta como anticonceptivo. Los días fértiles calculados por calendario fallan a menudo; los tests LH o la temperatura son más fiables.',
   },
   peek: {
+    viewOnly: 'solo lectura',
     copy: 'Copiar a mi calendario',
   },
   subscribe: {

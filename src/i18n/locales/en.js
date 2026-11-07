@@ -197,6 +197,7 @@ export default {
     disclaimer: 'An estimate from the logged dates — not suitable as contraception. Calendar-based fertile days are often wrong; LH tests or temperature are more reliable.',
   },
   peek: {
+    viewOnly: 'view only',
     copy: 'Copy to my calendar',
   },
   subscribe: {

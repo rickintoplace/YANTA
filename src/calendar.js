@@ -12096,8 +12096,69 @@ function categoryOptionsHtml(selectedId) {
     .join('');
 }
 
+/*
+  Entries nobody here may change — holidays, subscriptions, calendars
+  shared for viewing only — open a look at them, not an editor that
+  lets you type and then refuses to save. `ev` is in the generated
+  (FullCalendar) shape: all-day end exclusive.
+*/
+function openReadOnlyPeek(ev, anchor = null) {
+  import('./calendar-peek.js').then(({ openCalendarPeek }) => openCalendarPeek(ev, anchor, {
+    // A copy in an own calendar: to change it, or to be reminded.
+    onCopy: (e) => openNewCalendarEvent({
+      title: e.title,
+      start: e.allDay ? fromLocalInput(String(e.start).slice(0, 10), true) : e.start,
+      end: e.allDay
+        ? (e.end ? fcExclusiveAllDayEndToStoredInclusive(new Date(`${String(e.end).slice(0, 10)}T00:00:00`)) : null)
+        : e.end,
+      allDay: !!e.allDay,
+      location: e.location || '',
+      description: e.description || '',
+      categoryId: DEFAULT_CATEGORY_ID,
+    }),
+  })).catch((err) => console.warn('[Calendar] peek failed', err));
+}
+
+/** A stored entry in a calendar this person may only view. */
+function storedEventIsReadOnlyForMe(ev) {
+  if (!ev?.categoryId) return false;
+  if (mountedSpaceEventProviderForCategory(ev.categoryId)) return true;
+  const cat = state.calendarCategories.get(ev.categoryId);
+  return !!cat?.readonly;
+}
+
+/** The stored (inclusive-end) entry in the shape the peek reads. */
+function peekShapeForStoredEvent(ev) {
+  if (!ev.allDay) return { ...ev };
+  const startKey = localDateKeyFromDate(dateLikeToLocalDate(ev.start) || new Date(ev.start));
+  const endDate = ev.end ? dateLikeToLocalDate(ev.end) : null;
+  let endKey = null;
+  if (endDate) {
+    endDate.setDate(endDate.getDate() + 1);
+    endKey = localDateKeyFromDate(endDate);
+  }
+  return { ...ev, start: startKey, end: endKey };
+}
+
 function openEventEditor(input = {}) {
   registerCalendarEventOverlayRoute();
+
+  // View-only entries never reach the editor, whichever way they come in
+  // (tap, notification, the sharing panel's list of changes).
+  if (!input.markdownRef && input.id) {
+    const parsed = parseOccurrenceId(input.id);
+    const stored = state.calendarEvents.get(input.id) ||
+      (parsed.isOccurrence ? state.calendarEvents.get(input.recurrenceMasterId || parsed.masterId) : null);
+    if (stored && storedEventIsReadOnlyForMe(stored)) {
+      // Stepping back onto an old event route: nothing to reopen (a look
+      // keeps its own history entry, so this would loop).
+      if (input._fromHistory === true) return;
+      const shown = { ...stored, ...(parsed.isOccurrence || input.recurrenceOccurrence ? input : {}), categoryId: stored.categoryId };
+      const anchor = document.querySelector(`[data-yanta-event-id="${CSS.escape(input.id)}"]`);
+      openReadOnlyPeek(peekShapeForStoredEvent(shown), anchor);
+      return;
+    }
+  }
 
   const fromHistory = input._fromHistory === true;
   const shouldPushOverlay = input._pushOverlay !== false;
@@ -14148,7 +14209,16 @@ export function openCalendarEvent(eventId, {
     return;
   }
 
-  if (push) {
+  /*
+    A view-only entry opens as a look, which keeps its own history entry;
+    an event route underneath would reopen it on every way back.
+  */
+  const parsedId = parseOccurrenceId(id);
+  const storedForPeek = state.calendarEvents.get(id) ||
+    (parsedId.isOccurrence ? state.calendarEvents.get(parsedId.masterId) : null);
+  const viewOnly = !!storedForPeek && storedEventIsReadOnlyForMe(storedForPeek);
+
+  if (push && !viewOnly) {
     if (replace) {
       replaceCalendarEventHistory(id);
     } else {
@@ -14157,8 +14227,8 @@ export function openCalendarEvent(eventId, {
   }
 
   openCalendar({
-    push: false,
-    replace: false,
+    push: viewOnly ? push : false,
+    replace: viewOnly ? replace : false,
   });
 
   requestAnimationFrame(() => {
@@ -14639,21 +14709,7 @@ export function setupCalendar() {
         info.jsEvent?.preventDefault?.();
 
         const raw = info.event.extendedProps?.raw;
-        if (!raw) return;
-
-        import('./calendar-peek.js').then(({ openCalendarPeek }) => openCalendarPeek(raw, info.el, {
-          // A copy in an own calendar: to change it, or to be reminded.
-          onCopy: (ev) => openNewCalendarEvent({
-            title: ev.title,
-            start: ev.allDay ? fromLocalInput(String(ev.start).slice(0, 10), true) : ev.start,
-            end: ev.allDay
-              ? (ev.end ? fcExclusiveAllDayEndToStoredInclusive(new Date(`${String(ev.end).slice(0, 10)}T00:00:00`)) : null)
-              : ev.end,
-            allDay: !!ev.allDay,
-            location: ev.location || '',
-            description: ev.description || '',
-          }),
-        })).catch((err) => console.warn('[Calendar] peek failed', err));
+        if (raw) openReadOnlyPeek(raw, info.el);
 
         return;
       }

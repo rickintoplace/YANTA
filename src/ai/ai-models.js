@@ -7,7 +7,7 @@
 // ============================================================
 
 /*
-  Included models (checked 2026-10-07; see yanta-cloud-worker INCLUDED_AI_MODELS,
+  Included models (checked 2026-11-07; see yanta-cloud-worker INCLUDED_AI_MODELS,
   which holds the prices and must list the same ids). All open-weight except
   Gemini, all served with zero data retention.
 */
@@ -21,13 +21,13 @@ export const INCLUDED_AI_MODELS = Object.freeze([
   {
     id: 'xiaomi/mimo-v2.6-flash',
     label: 'Xiaomi MiMo V2.6 Flash',
-    hint: 'Best tool use in its class, reads images. Slower.',
+    hint: 'Cheapest, reads images. Less exact when editing notes.',
     vision: true,
   },
   {
     id: 'z-ai/glm-5.3-flash',
     label: 'GLM 5.3 Flash',
-    hint: 'Strong and very economical. Always thinks first, so replies take a few seconds.',
+    hint: 'Strong and the most economical. Thinks briefly before it answers.',
     vision: true,
     // OpenRouter rejects reasoning off for it; "off" is sent as minimal.
     reasoningRequired: true,
@@ -91,9 +91,17 @@ function defaultIncludedModel() {
 */
 export const DEFAULT_DECISION_MODEL = 'perplexity/pplx-decider-v1.2';
 
-export function decisionModel() {
+// The quick one, for a person waiting (share sheet): as exact on text →
+// event, half the latency (scripts/text-event-eval.mjs, 2026-11-07).
+export const FAST_DECISION_MODEL = 'perplexity/pplx-decider-flash-v1.2';
+
+const DECISION_ID = /^(perplexity\/pplx-decider|liquid\/d1)/;
+
+export function decisionModel({ fast = false } = {}) {
   const id = serverMenu()?.decisionModel;
-  return typeof id === 'string' && id.startsWith('perplexity/pplx-decider') ? id : DEFAULT_DECISION_MODEL;
+  const fallback = typeof id === 'string' && DECISION_ID.test(id) ? id : DEFAULT_DECISION_MODEL;
+  // The worker swaps in a hosted one when the fast checkpoint has none.
+  return fast ? FAST_DECISION_MODEL : fallback;
 }
 
 export function includedAiModelInfo(model) {

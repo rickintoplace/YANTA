@@ -160,8 +160,8 @@ export default {
   // (non-alphanumerics → _). Unknown models show the server's text.
   modelHints: {
     deepseek_deepseek_v4_1_flash: '高速でツール操作が安定。おすすめ。',
-    xiaomi_mimo_v2_6_flash: '同クラスで最高のツール操作、画像も読めます。やや低速。',
-    z_ai_glm_5_3_flash: '高性能でとても経済的。常に先に考えるため、応答に数秒かかります。',
+    xiaomi_mimo_v2_6_flash: '最も安価で画像も読めます。ノートの編集はやや不正確です。',
+    z_ai_glm_5_3_flash: '高性能で最も経済的。答える前に少しだけ考えます。',
     xiaomi_mimo_v2_6_pro: '最も高性能なオープンモデル。クレジットを約 3 倍消費します。',
     google_gemini_3_1_flash_lite: 'PDF と画像に最適。',
   },

@@ -519,7 +519,7 @@ export function decisionsAvailable(settings = getEffectiveAiRuntimeSettings()) {
 }
 
 /** Returns { answers, model, cost }. Throws when unavailable or on failure. */
-export async function openRouterDecide({ state, questions, signal = null } = {}) {
+export async function openRouterDecide({ state, questions, signal = null, fast = false } = {}) {
   const settings = getEffectiveAiRuntimeSettings();
   const endpoint = decisionEndpoint(settings);
 
@@ -533,7 +533,7 @@ export async function openRouterDecide({ state, questions, signal = null } = {})
     credentials: isIncludedAiMode(settings) ? 'include' : 'omit',
     headers: headersForSettings(settings),
     body: JSON.stringify({
-      model: decisionModel(),
+      model: decisionModel({ fast }),
       state,
       questions,
       provider: openRouterProviderPreferences(),
@@ -550,7 +550,7 @@ export async function openRouterDecide({ state, questions, signal = null } = {})
 
   return {
     answers: json.answers,
-    model: json.model || decisionModel(),
+    model: json.model || decisionModel({ fast }),
     cost: Number(json.usage?.cost || 0),
   };
 }

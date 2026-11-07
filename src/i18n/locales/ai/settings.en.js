@@ -188,8 +188,8 @@ export default {
   // (non-alphanumerics → _). Unknown models show the server's text.
   modelHints: {
     deepseek_deepseek_v4_1_flash: 'Fast and reliable with tools. Recommended.',
-    xiaomi_mimo_v2_6_flash: 'Best tool use in its class, reads images. Slower.',
-    z_ai_glm_5_3_flash: 'Strong and very economical. Always thinks first, so replies take a few seconds.',
+    xiaomi_mimo_v2_6_flash: 'Cheapest, reads images. Less exact when editing notes.',
+    z_ai_glm_5_3_flash: 'Strong and the most economical. Thinks briefly before it answers.',
     xiaomi_mimo_v2_6_pro: 'Strongest open model. Uses about 3× the credits.',
     google_gemini_3_1_flash_lite: 'Best for PDFs and images.',
   },

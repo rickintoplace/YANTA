@@ -606,16 +606,18 @@ var INCLUDED_AI_MODELS = {
     prompt: 0.3, completion: 1.2,
     label: "DeepSeek V4.1 Flash", hint: "Fast and reliable with tools. Recommended."
   },
-  // Best τ² score of the cheap tier, MIT, vision — but slower (~60 tok/s).
+  // Cheapest per token, MIT, vision. Eval 2026-11-07: 82 % (misses the
+  // note edit, once followed an injected instruction).
   "xiaomi/mimo-v2.6-flash": {
     prompt: 0.15, completion: 0.3,
-    label: "Xiaomi MiMo V2.6 Flash", hint: "Best tool use in its class, reads images. Slower."
+    label: "Xiaomi MiMo V2.6 Flash", hint: "Cheapest, reads images. Less exact when editing notes."
   },
-  // Cheapest of the strong open models. Always thinks: OpenRouter rejects
-  // reasoning off for it (eval 2026-10-07), and it answers in 5-7 s.
+  // Always thinks: OpenRouter rejects reasoning off for it. Eval
+  // 2026-11-07 with minimal thinking: 100 %, ~0.5 s median (was 5-7 s on
+  // 2026-10-07), the lowest cost per task of all included models.
   "z-ai/glm-5.3-flash": {
     prompt: 0.15, completion: 0.5, reasoning: "required",
-    label: "GLM 5.3 Flash", hint: "Strong and very economical. Always thinks first, so replies take a few seconds."
+    label: "GLM 5.3 Flash", hint: "Strong and the most economical. Thinks briefly before it answers."
   },
   // Strongest open model (Artificial Analysis 46); costs ~3x per run.
   "xiaomi/mimo-v2.6-pro": {
@@ -5970,7 +5972,13 @@ __name(meterAiStream, "meterAiStream");
 */
 var DECISION_MODELS = {
   "perplexity/pplx-decider-v1.2": { prompt: 0.02 },
-  "perplexity/pplx-decider-flash-v1.2": { prompt: 0.01 }
+  // Half the price, twice as fast; as exact on text → event (eval
+  // 2026-11-07), weaker at spotting contradictions (datasheet-check):
+  // asked for by name where speed matters, not the default.
+  "perplexity/pplx-decider-flash-v1.2": { prompt: 0.01 },
+  // Another vendor, so one retirement cannot take every decision down.
+  // ZDR, same price, as exact as v1.2 on text → event (2026-11-07).
+  "liquid/d1.1": { prompt: 0.02 }
 };
 var DECISION_DEFAULT_MODEL = "perplexity/pplx-decider-v1.2";
 // Older clients ask for a retired checkpoint by name; they get the default.

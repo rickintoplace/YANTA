@@ -51,7 +51,7 @@ const arg = (name, fallback) => {
 };
 const list = (v) => String(v || '').split(',').map((s) => s.trim()).filter(Boolean);
 
-const DECIDERS = list(arg('decide', 'perplexity/pplx-decider-v1.2,perplexity/pplx-decider-flash-v1.2'));
+const DECIDERS = list(arg('decide', 'perplexity/pplx-decider-v1.2,perplexity/pplx-decider-flash-v1.2,liquid/d1.1'));
 const HYBRID = list(arg('hybrid', 'perplexity/pplx-decider-v1.2'));
 const TITLE_MODEL = arg('title-model', 'deepseek/deepseek-v4.1-flash');
 const LLMS = list(arg('llm', 'deepseek/deepseek-v4.1-flash,google/gemini-3.1-flash-lite'));

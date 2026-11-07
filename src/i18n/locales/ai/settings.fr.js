@@ -161,8 +161,8 @@ export default {
   // (non-alphanumerics → _). Unknown models show the server's text.
   modelHints: {
     deepseek_deepseek_v4_1_flash: 'Rapide et fiable avec les outils. Recommandé.',
-    xiaomi_mimo_v2_6_flash: 'Meilleure utilisation des outils de sa catégorie, lit les images. Plus lent.',
-    z_ai_glm_5_3_flash: 'Puissant et très économique. Réfléchit toujours d’abord, les réponses prennent quelques secondes.',
+    xiaomi_mimo_v2_6_flash: 'Le moins cher, lit les images. Moins précis pour modifier des notes.',
+    z_ai_glm_5_3_flash: 'Puissant et le plus économique. Réfléchit brièvement avant de répondre.',
     xiaomi_mimo_v2_6_pro: 'Le modèle ouvert le plus puissant. Consomme environ 3× plus de crédits.',
     google_gemini_3_1_flash_lite: 'Idéal pour les PDF et les images.',
   },

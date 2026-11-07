@@ -161,7 +161,7 @@ async function refineSharedEventDraft(text, draft) {
   if (!needsRefinement(draft) || !client.decisionsAvailable()) return draft;
 
   return refineEventDraft(text, draft, {
-    decide: (request) => client.openRouterDecide(request),
+    decide: (request) => client.openRouterDecide({ ...request, fast: true }),
     complete: (messages) => client.openRouterChatCompletion({ messages, source: 'share-event' }),
     locale: getLocale(),
   });

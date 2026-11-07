@@ -155,7 +155,7 @@ export async function collectUpcomingReminders({ now = Date.now(), horizonMs = S
     occurrences = expandedCalendarRawEventsForRange(
       new Date(now - GRACE_MS),
       new Date(now + horizonMs),
-      { includeStored: true, includeMarkdownDerived: true, includeSources: false },
+      { includeStored: true, includeMarkdownDerived: true, includeSources: false, includeCycle: 'reminders' },
     );
   } catch (err) {
     console.warn('[YANTA Calendar Reminders] Could not read calendar', err);

@@ -8083,6 +8083,106 @@ async function handleRssFetch(env, req, url, headers) {
   });
 }
 __name(handleRssFetch, "handleRssFetch");
+// ---------------- calendar subscriptions ----------------------------
+//
+// Subscribed calendars are fetched per device through here: browsers
+// cannot read most ICS hosts (no CORS), and the app's CSP only talks to
+// this API. The URL itself is private (it lives E2E-encrypted in the
+// vault); it is forwarded and never stored.
+async function handleCalendarFeed(env, req, url, headers) {
+  const user = await requireUser(env, req);
+  const rl = await rateLimit(env, `cal:feed:${user.userId}`, 400, 24 * 60 * 60 * 1e3);
+  if (!rl.ok) {
+    return json({ error: "calendar_feed_rate_limited", message: "Too many calendar refreshes today." }, 429, headers);
+  }
+
+  let raw = String(url.searchParams.get("url") || "").trim();
+  if (/^webcals?:\/\//i.test(raw)) raw = raw.replace(/^webcal(s?):\/\//i, "https://");
+  const targetUrl = safeExternalRssUrl(raw);
+
+  const fetched = await fetchExternal(targetUrl, {
+    accept: "text/calendar, application/ics, text/plain, */*",
+    etag: url.searchParams.get("etag") || "",
+    lastModified: url.searchParams.get("lastModified") || "",
+    maxBytes: 8 * 1024 * 1024,
+    timeoutMs: 18e3,
+    userAgent: env.RSS_USER_AGENT || "",
+  });
+
+  if (fetched.status === 304) return json({ notModified: true }, 200, headers);
+
+  if (fetched.status < 200 || fetched.status >= 400) {
+    return json({
+      error: "fetch_failed",
+      message: `The calendar server answered HTTP ${fetched.status}.`,
+      status: fetched.status,
+    }, 502, headers);
+  }
+
+  const body = decodeUtf8(fetched.bytes);
+  if (!/BEGIN:VCALENDAR/i.test(body.slice(0, 4096))) {
+    return json({
+      error: "not_a_calendar",
+      message: "This address does not return a calendar (.ics).",
+      contentType: fetched.headers.get("content-type") || "",
+    }, 400, headers);
+  }
+
+  return json({
+    body,
+    etag: fetched.headers.get("etag") || "",
+    lastModified: fetched.headers.get("last-modified") || "",
+    finalUrl: fetched.finalUrl || targetUrl,
+  }, 200, { ...headers, "cache-control": "no-store" });
+}
+__name(handleCalendarFeed, "handleCalendarFeed");
+
+/*
+  OpenHolidays (openholidaysapi.org, open data): school holidays for ~35
+  countries, and the subdivisions to pick from. Public, identical for
+  everyone — cached at the edge for a day, no account needed.
+*/
+const OPEN_HOLIDAYS_ENDPOINTS = new Set(["Countries", "Subdivisions", "Groups", "SchoolHolidays", "PublicHolidays"]);
+const OPEN_HOLIDAYS_PARAMS = ["countryIsoCode", "subdivisionCode", "groupCode", "languageIsoCode", "validFrom", "validTo"];
+
+async function handleOpenHolidays(env, req, url, headers) {
+  const endpoint = url.pathname.split("/").pop();
+  if (!OPEN_HOLIDAYS_ENDPOINTS.has(endpoint)) return json({ error: "not_found" }, 404, headers);
+
+  const target = new URL(`https://openholidaysapi.org/${endpoint}`);
+  for (const key of OPEN_HOLIDAYS_PARAMS) {
+    const v = String(url.searchParams.get(key) || "").trim();
+    if (!v) continue;
+    if (!/^[\p{L}\p{N}_-]{1,32}$/u.test(v)) return json({ error: "bad_request" }, 400, headers);
+    target.searchParams.set(key, v);
+  }
+
+  const cacheKey = new Request(`https://yanta-openholidays-cache.local/${endpoint}?${target.searchParams.toString()}`);
+  const cache = caches.default;
+  const cached = await cache.match(cacheKey);
+  if (cached) {
+    return new Response(cached.body, { status: 200, headers: { ...headers, "content-type": "application/json", "cache-control": "public, max-age=3600" } });
+  }
+
+  const rl = await rateLimit(env, `cal:openholidays:${await ipHash(env, req)}`, 300, 24 * 60 * 60 * 1e3);
+  if (!rl.ok) return json({ error: "rate_limited" }, 429, headers);
+
+  let res;
+  try {
+    res = await fetch(target.href, { headers: { accept: "application/json" }, signal: AbortSignal.timeout(15e3) });
+  } catch {
+    return json({ error: "fetch_failed", message: "The holiday service did not answer." }, 502, headers);
+  }
+  if (!res.ok) {
+    return json({ error: "fetch_failed", status: res.status, message: `The holiday service answered HTTP ${res.status}.` }, 502, headers);
+  }
+  const text = await res.text();
+  const out = new Response(text, { status: 200, headers: { "content-type": "application/json", "cache-control": "public, max-age=86400" } });
+  try { await cache.put(cacheKey, out.clone()); } catch {}
+  return new Response(text, { status: 200, headers: { ...headers, "content-type": "application/json", "cache-control": "public, max-age=3600" } });
+}
+__name(handleOpenHolidays, "handleOpenHolidays");
+
 async function handleRssImage(env, req, url, headers) {
   const user = await requireUser(env, req);
   const limits = effectiveLimits(user, await getUserCreatedAt(env, user.userId));
@@ -11433,6 +11533,12 @@ async function route(req, env) {
     }
     if (url.pathname === "/api/rss/fetch" && req.method === "GET") {
       return handleRssFetch(env, req, url, headers);
+    }
+    if (url.pathname === "/api/calendar/feed" && req.method === "GET") {
+      return handleCalendarFeed(env, req, url, headers);
+    }
+    if (url.pathname.startsWith("/api/calendar/openholidays/") && req.method === "GET") {
+      return handleOpenHolidays(env, req, url, headers);
     }
     if (url.pathname === "/api/rss/image" && req.method === "GET") {
       return handleRssImage(env, req, url, headers);

@@ -543,21 +543,35 @@ async function reportBrokenSharesOnce() {
 
   await markBrokenSharesReported(pending.map((b) => b.spaceId));
 
+  const { t } = await import('./i18n/index.js');
   const first = pending[0];
   const others = pending.length - 1;
 
-  const what = first.sourceType === 'calendar'
-    ? `the calendar "${first.label}"`
-    : first.sourceType === 'folder'
-      ? `the folder "${first.label}"`
-      : `"${first.label}"`;
+  /*
+    A share of something that no longer exists here (deleted, or never
+    on this device) is a leftover: the useful action is removing it, not
+    sharing a thing that is gone again.
+  */
+  if (!first.known && pending.every((b) => !b.known)) {
+    actionToast(t('brokenShare.leftover', { count: pending.length }), {
+      actionLabel: t('brokenShare.remove'),
+      duration: 20000,
+      onAction: async () => {
+        const { discardBrokenShare } = await import('./spaces/space-health.js');
+        const results = await Promise.all(pending.map((b) => discardBrokenShare(b.spaceId)));
+        const failed = results.filter((r) => !r.ok).length;
+        toast(failed ? t('brokenShare.removeFailed', { count: failed }) : t('brokenShare.removed', { count: pending.length }), failed ? 'error' : 'success');
+      },
+    });
+    return;
+  }
 
-  const message = others > 0
-    ? `Sharing stopped for ${what} and ${others} more: this device no longer has the keys, so changes reach nobody.`
-    : `Sharing stopped for ${what}: this device no longer has the keys, so changes reach nobody.`;
+  const kind = first.sourceType === 'calendar' ? 'calendar' : first.sourceType === 'folder' ? 'folder' : 'note';
+  const message = t(`brokenShare.stopped.${kind}`, { name: first.label }) +
+    (others > 0 ? ` ${t('brokenShare.more', { count: others })}` : '');
 
   actionToast(message, {
-    actionLabel: 'Share again',
+    actionLabel: t('brokenShare.shareAgain'),
     duration: 20000,
     onAction: async () => {
       if (first.sourceType === 'calendar') {

@@ -131,7 +131,13 @@ async function brokenHtml() {
     const health = await import('./space-health.js');
     return health.brokenShares()
       .filter((b) => b.sourceType === 'calendar')
-      .map((b) => `
+      .map((b) => {
+        const ui = discardUi.get(b.spaceId) || { state: 'idle' };
+        const action = ui.state === 'busy'
+          ? `<p class="ycs-status is-busy" aria-live="polite">${lucide('loader-circle', 14)}<span>${escapeHtml(t('calendarShare.discarding'))}</span></p>`
+          : `${ui.state === 'error' ? `<p class="ycs-status is-bad" aria-live="polite">${lucide('circle-alert', 14)}<span>${escapeHtml(ui.message)}</span></p>` : ''}
+             <button type="button" class="ycs-link" data-discard>${lucide('trash-2', 14)}<span>${escapeHtml(ui.state === 'error' ? t('calendarShare.tryAgain') : t('calendarShare.discard'))}</span></button>`;
+        return `
         <section class="ycs-calendar" data-broken="${escapeAttr(b.spaceId)}">
           <div class="ycs-calendar-head">
             <span class="ycs-dot is-broken" aria-hidden="true"></span>
@@ -139,19 +145,43 @@ async function brokenHtml() {
             <span class="ycs-role">${escapeHtml(t('calendarShare.sharedOn', { date: new Date(b.createdAt || Date.now()).toLocaleDateString(getLocale(), { day: 'numeric', month: 'short', year: 'numeric' }) }))}</span>
           </div>
           <p class="ycs-status is-bad">${lucide('circle-alert', 14)}<span>${escapeHtml(t('calendarShare.broken'))}</span></p>
-          <button type="button" class="ycs-link" data-discard>${lucide('trash-2', 14)}<span>${escapeHtml(t('calendarShare.discard'))}</span></button>
-        </section>`).join('');
+          ${action}
+        </section>`;
+      }).join('');
   } catch {
     return '';
   }
 }
 
+/** idle | busy | error — per broken share, while the panel is open. */
+const discardUi = new Map();
+
+/*
+  The panel re-renders on every sync and presence change. Replacing the
+  buttons between pointerdown and pointerup swallows the click (it then
+  lands on their parent) — so nothing is replaced while a pointer is
+  down in the panel, and nothing at all when the markup did not change.
+*/
+let pointerDown = false;
+let renderPending = false;
+let lastHtml = '';
+
 async function render() {
   if (!panel) return;
+  if (pointerDown) {
+    renderPending = true;
+    return;
+  }
   const body = panel.querySelector('.ycs-body');
   const sections = await Promise.all(calendarBridges().map(sectionHtml));
   const html = sections.join('') + await brokenHtml();
   if (!panel) return;
+  if (pointerDown) {
+    renderPending = true;
+    return;
+  }
+  if (html === lastHtml && body.childElementCount) return;
+  lastHtml = html;
 
   body.innerHTML = html || `
     <div class="ycs-empty">
@@ -209,6 +239,26 @@ async function syncSpace(spaceId) {
   await render();
 }
 
+async function discard(spaceId) {
+  if (discardUi.get(spaceId)?.state === 'busy') return;
+  discardUi.set(spaceId, { state: 'busy' });
+  await render();
+
+  const health = await import('./space-health.js');
+  const result = await health.discardBrokenShare(spaceId);
+
+  if (result.ok) {
+    discardUi.delete(spaceId);
+    toast(t('calendarShare.discarded'), 'success');
+  } else {
+    discardUi.set(spaceId, {
+      state: 'error',
+      message: result.offline ? t('calendarShare.offline') : t('calendarShare.failed', { reason: result.message || String(result.status || '') }),
+    });
+  }
+  await render();
+}
+
 async function copyLink(spaceId) {
   const { spaceLinksFor } = await import('./space-session.js');
   const session = state.spaces.get(spaceId);
@@ -232,6 +282,10 @@ export async function openCalendarSharePanel(anchor) {
 
   ensureCss();
   syncUi.clear();
+  discardUi.clear();
+  lastHtml = '';
+  pointerDown = false;
+  renderPending = false;
 
   const phone = window.matchMedia(PHONE).matches;
   panel = document.createElement('div');
@@ -257,6 +311,16 @@ export async function openCalendarSharePanel(anchor) {
     surface.style.left = `${Math.round(Math.max(12, Math.min(r.left, window.innerWidth - 392)))}px`;
   }
 
+  panel.addEventListener('pointerdown', () => { pointerDown = true; });
+  const release = () => {
+    if (!pointerDown) return;
+    pointerDown = false;
+    // After the click has been dispatched.
+    if (renderPending) setTimeout(() => { renderPending = false; render(); }, 0);
+  };
+  panel.addEventListener('pointerup', release);
+  panel.addEventListener('pointercancel', release);
+
   panel.addEventListener('click', async (e) => {
     if (e.target.closest('[data-close]')) return close();
 
@@ -265,11 +329,7 @@ export async function openCalendarSharePanel(anchor) {
     if (e.target.closest('[data-copy-link]') && space) return copyLink(space);
 
     const broken = e.target.closest('[data-broken]')?.dataset.broken;
-    if (broken && e.target.closest('[data-discard]')) {
-      const health = await import('./space-health.js');
-      await health.discardBrokenShare(broken);
-      return render();
-    }
+    if (broken && e.target.closest('[data-discard]')) return discard(broken);
 
     const eventId = e.target.closest('[data-event]')?.dataset.event;
     if (eventId && state.calendarEvents.has(eventId)) {

@@ -73,7 +73,7 @@ export function setupImage() {
   compressPanel = $('compressPanel');
   imgModal.addEventListener('click', (e) => {
     if (e.target === imgModal) closeImageModal();
-    if (e.target.matches('[data-close]')) closeImageModal();
+    if (e.target.closest('[data-close]')) closeImageModal();
     if (e.target.matches('.tab')) setTab(e.target.dataset.tab);
   });
   $('pickFile').addEventListener('click', () => $('fileInput').click());

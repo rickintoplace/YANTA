@@ -131,6 +131,7 @@ async function collectCalendarEvents() {
       includeStored: true,
       includeMarkdownDerived: false,
       includeSources: false,
+      includeCycle: 'reminders',
     });
 
     const native = [];
@@ -152,6 +153,23 @@ async function collectCalendarEvents() {
   } catch (err) {
     console.warn('[YANTA Android Bridge] calendar collect failed', err);
     return { native: [], versions: null };
+  }
+}
+
+/*
+  Launcher shortcuts that only make sense for some people — right now
+  the cycle calendar's. Its label stays neutral: a long-press on the
+  app icon is something others see.
+*/
+async function collectQuickActions() {
+  try {
+    const { cycleCalendarForQuickLog } = await import('../calendar.js');
+    const { t } = await import('../i18n/index.js');
+    return cycleCalendarForQuickLog()
+      ? [{ id: 'cycle', label: t('cycle.shortcut'), longLabel: t('cycle.shortcutLong') }]
+      : [];
+  } catch {
+    return [];
   }
 }
 
@@ -309,6 +327,7 @@ export async function syncNativeSnapshotNow() {
     notes: collectNotes(),
     folders: collectFolders(),
     rssItems,
+    quickActions: await collectQuickActions(),
   };
 
   callAndroid('syncNativeSnapshot', safeJson(snapshot));
@@ -414,6 +433,19 @@ const LEGACY_NATIVE_ACTIONS = {
 function handleNativeQuickAction(action = '', params = {}) {
   const normalized = String(action || '').trim();
   if (!normalized) return;
+
+  // The cycle calendar's panel — offered only to those who keep one.
+  if (normalized === 'cycle') {
+    import('../calendar.js')
+      .then(async ({ openCalendar, cycleCalendarForQuickLog, openCyclePanel }) => {
+        const cat = cycleCalendarForQuickLog();
+        if (!cat) return;
+        openCalendar?.({ push: true });
+        await openCyclePanel(cat.id);
+      })
+      .catch((err) => console.warn('[YANTA Android Bridge] cycle action failed', err));
+    return;
+  }
 
   // Calendar targets are the only ones carrying parameters (date, event id).
   if (normalized.startsWith('calendar')) {

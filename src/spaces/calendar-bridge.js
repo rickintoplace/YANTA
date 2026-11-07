@@ -612,6 +612,7 @@ export class CalendarBridge {
             id: this.categoryId,
             name: meta.name || 'Calendar',
             icon: meta.icon,
+            cycle: meta.cycle,
             color: '#6ea8fe',
             visible: true,
             created: Number(meta.created || nowTs()),
@@ -623,6 +624,8 @@ export class CalendarBridge {
             ...safeJsonClone(cat),
             name: meta.name || cat.name,
             icon: meta.icon,
+            // The owner's own view settings stay; the shared ones follow.
+            cycle: meta.cycle ? { ...(cat.cycle || {}), ...meta.cycle } : undefined,
             updated: Number(meta.updated || nowTs()),
           });
         }

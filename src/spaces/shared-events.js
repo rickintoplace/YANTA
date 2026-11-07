@@ -20,6 +20,8 @@ import {
   safeJsonClone,
 } from '../sync2/vault-doc.js';
 
+import { sharedCycleSettings } from '../cycle/cycle-calendar.js';
+
 /**
  * The event as everyone shares it: reminders are personal and never
  * leave the device; createdBy/updatedBy travel for attribution.
@@ -44,6 +46,9 @@ export function sharedCategoryMeta(cat) {
     id: cat.id,
     name: cat.name || 'Calendar',
     icon: cat.icon || undefined,
+    // A cycle calendar stays one for everyone; only the owner's sharing
+    // choice and starting values travel, not how they look at it.
+    cycle: sharedCycleSettings(cat.cycle),
     created: cat.created || Date.now(),
     updated: cat.updated || Date.now(),
   };

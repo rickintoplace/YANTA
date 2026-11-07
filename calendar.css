@@ -3965,3 +3965,32 @@
 .ycl-more { opacity: .55; }
 .ycl-row:hover .ycl-more, .ycl-more:focus-visible { opacity: 1; }
 @media (max-width: 640px) { .ycl-more { opacity: 1; } }
+
+/* ------------------------------------------------------------
+   Cycle calendar forecasts (src/cycle/): a tint of the calendar's
+   color, as strong as the forecast is sure — never a solid block, so
+   a forecast cannot pass for a logged entry.
+   ------------------------------------------------------------ */
+.fc .fc-event.yanta-cal-cycle-forecast {
+  background: color-mix(in srgb, var(--cyc) var(--cyc-strength, 24%), var(--bg)) !important;
+  border: 1px dashed color-mix(in srgb, var(--cyc) 75%, transparent) !important;
+  color: color-mix(in srgb, var(--cyc) 50%, var(--text)) !important;
+  box-shadow: none !important;
+}
+.fc .fc-event.yanta-cal-cycle-forecast .fc-event-main,
+.fc .fc-event.yanta-cal-cycle-forecast .fc-event-title { color: inherit !important; font-weight: 550; }
+.fc .fc-event.yanta-cal-cycle-forecast.is-period-ongoing {
+  background: color-mix(in srgb, var(--cyc) 34%, var(--bg)) !important;
+  border-style: solid !important;
+}
+.fc .fc-event.yanta-cal-cycle-forecast.is-fertile {
+  background: color-mix(in srgb, var(--cyc) 9%, var(--bg)) !important;
+  border-color: color-mix(in srgb, var(--cyc) 35%, transparent) !important;
+}
+.fc .fc-event.yanta-cal-cycle-forecast.is-ovulation {
+  border-style: solid !important;
+  background: color-mix(in srgb, var(--cyc) 16%, var(--bg)) !important;
+}
+/* Fertile days and ovulation: their own hue, as in the cycle panel's strip. */
+.fc .fc-event.yanta-cal-cycle-forecast.is-fertile,
+.fc .fc-event.yanta-cal-cycle-forecast.is-ovulation { --cyc: #3b9b8f !important; }

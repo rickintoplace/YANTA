@@ -20,6 +20,9 @@
   Feiertage. Bis das Modul da ist, liefern Holiday-Quellen einfach
   keine Events; das yanta-calendar-updated-Event rendert dann nach.
 */
+import { sanitizeFeedSource, feedEventsForRange, feedStatus } from './calendar-feeds.js';
+import { t } from './i18n/index.js';
+
 let HolidaysCtor = null;
 let holidaysLoading = null;
 
@@ -357,6 +360,10 @@ export function sanitizeCalendarCategorySource(raw) {
     return sanitizeCustomDatesSource(raw);
   }
 
+  if (raw.type === 'feed') {
+    return sanitizeFeedSource(raw);
+  }
+
   // Future extension point:
   // - school-holidays-de
   // - ics-url
@@ -369,25 +376,24 @@ export function sanitizeCalendarCategorySource(raw) {
 // Source descriptions
 // ------------------------------------------------------------
 
-export function calendarCategorySourceDescription(source) {
+/** One line for the calendar list: what is subscribed, and whether it arrives. */
+export function calendarCategorySourceDescription(source, categoryId = '') {
   if (!source?.type) return '';
 
-  if (source.type === 'holidays') {
-    const parts = [
-      source.country || '',
-      source.state || '',
-      source.region || '',
-    ].filter(Boolean);
+  if (source.type === 'holidays') return t('subscribe.status.holidays');
+  if (source.type === 'custom-dates') return t('subscribe.status.custom', { count: Array.isArray(source.entries) ? source.entries.length : 0 });
 
-    return `Dynamic holidays · ${parts.join('-') || 'unknown'}`;
+  if (source.type === 'feed') {
+    const what = source.kind === 'school'
+      ? t('subscribe.status.school')
+      : (() => { try { return new URL(source.url).hostname.replace(/^www\./, ''); } catch { return t('subscribe.status.link'); } })();
+    const st = categoryId ? feedStatus(categoryId) : null;
+    if (st?.state === 'error') return t('subscribe.status.failed', { what });
+    if (st?.state === 'loading') return t('subscribe.status.loading', { what });
+    return t('subscribe.status.feed', { what });
   }
 
-  if (source.type === 'custom-dates') {
-    const n = Array.isArray(source.entries) ? source.entries.length : 0;
-    return `Custom date source · ${n} entr${n === 1 ? 'y' : 'ies'}`;
-  }
-
-  return `Source · ${source.type}`;
+  return t('subscribe.status.other');
 }
 
 // ------------------------------------------------------------
@@ -604,6 +610,8 @@ export function sourceEventsForRange(categories, rangeStart, rangeEnd) {
       continue;
     }
   }
+
+  out.push(...feedEventsForRange(categoriesArray(categories), start, end));
 
   return out;
 }

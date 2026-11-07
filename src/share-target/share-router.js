@@ -221,10 +221,31 @@ export async function handleEventText(text, { draft = null, plan = null, refined
 }
 
 function openEventDraft(draft) {
-  return import('../calendar.js').then(async ({ openCalendar, openNewCalendarEvent }) => {
+  return import('../calendar.js').then(async ({ openCalendar, openNewCalendarEvent, cycleCalendarForQuickLog }) => {
     openCalendar?.({ push: true });
     await raf();
     await raf();
+
+    // "Periode heute", "period started yesterday": an entry in the cycle
+    // calendar, for those who keep one.
+    const { looksLikePeriodText } = await import('../cycle/cycle-calendar.js');
+    const cycleCat = draft.allDay && looksLikePeriodText(`${draft.title} ${draft.description || ''}`)
+      ? cycleCalendarForQuickLog()
+      : null;
+    if (cycleCat) {
+      const { t } = await import('../i18n/index.js');
+      openNewCalendarEvent({
+        title: t('cycle.entry.period'),
+        start: draft.start,
+        end: draft.end,
+        allDay: true,
+        categoryId: cycleCat.id,
+        cycle: { kind: 'period' },
+        reminders: [],
+      });
+      return;
+    }
+
     openNewCalendarEvent({
       title: draft.title,
       start: draft.start,

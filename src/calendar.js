@@ -72,7 +72,7 @@ function ensureAllFullCalendarLocales(fc, localeCode) {
     });
 }
 
-import { t as i18n } from './i18n/index.js';
+import { t as i18n, getLocale } from './i18n/index.js';
 import {
   $,
   uid,
@@ -142,13 +142,9 @@ import {
 } from './calendar-ics.js';
 
 import {
-  DE_HOLIDAY_SOURCES,
-  makeHolidayCategoryPatch,
   sanitizeCalendarCategorySource,
   calendarCategorySourceDescription,
   sourceEventsForRange,
-  parseCustomDatesJson,
-  exampleCustomDatesJson,
 } from './calendar-sources.js';
 
 import {
@@ -238,9 +234,18 @@ import { eventLinksToNote } from './spaces/shared-events.js';
 import { brokenShareForCategory } from './spaces/space-health.js';
 
 import {
+  sanitizeCycleSettings,
+  sanitizeCycleEntry,
+  cycleAnalysisFor,
+  cycleViewFor,
+  cycleForecastEvents,
+} from './cycle/cycle-calendar.js';
+
+import {
   loadCalendarPersonal,
   applyCategoryOverlay,
   setCategoryPersonalPrefs,
+  categoryPersonalPrefs,
   defaultRemindersForCategory,
   setDefaultRemindersForCategory,
   personalEventReminders,
@@ -2555,6 +2560,26 @@ function applyThemeToMountedEvent(info) {
 
   const kind = info.event.extendedProps?.yantaKind;
   const raw = info.event.extendedProps?.raw;
+
+  /*
+    Cycle forecasts are drawn by CSS (calendar.css): a tint of the
+    calendar's color, as strong as the forecast is sure, so they follow
+    the theme and never pass for logged entries.
+  */
+  if (kind === 'cycle-forecast') {
+    const color = resolveCssColor(raw?.color || info.event.backgroundColor, cssVar('--accent', '#6ea8fe'));
+    const prob = Number(info.event.extendedProps?.cycleProb) || 0.5;
+    info.el.style.setProperty('--cyc', color);
+    info.el.style.setProperty('--cyc-strength', `${Math.round(14 + Math.min(1, prob) * 22)}%`);
+    if (raw?.cycleForecast) {
+      const f = raw.cycleForecast;
+      const fmt = (k) => new Date(`${k}T00:00:00`).toLocaleDateString(getLocale(), { weekday: 'short', day: 'numeric', month: 'short' });
+      info.el.title = f.range
+        ? i18n('cycle.forecast.tooltip', { title: info.event.title, likely: fmt(f.likely), from: fmt(f.range[0]), to: fmt(f.range[1]) })
+        : info.event.title;
+    }
+    return;
+  }
 
   let background =
     info.event.backgroundColor ||
@@ -6818,6 +6843,8 @@ export function sanitizeCalendarCategory(raw) {
 
     readonly: raw.readonly === true,
     source: sanitizeCalendarCategorySource(raw.source),
+    // A cycle calendar (src/cycle/): entries are periods, the rest is forecast.
+    cycle: sanitizeCycleSettings(raw.cycle),
     // Hidden from YANTA AI (ai-visibility.js).
     aiHidden: raw.aiHidden === true ? true : undefined,
 
@@ -6956,6 +6983,9 @@ export function sanitizeCalendarEvent(raw) {
     reminders: normalizeCalendarReminders(raw.reminders, raw),
 
     externalUid: raw.externalUid || '',
+
+    // What an entry in a cycle calendar is (period, pause, …).
+    cycle: sanitizeCycleEntry(raw.cycle),
 
     /*
       Scheduling data from an imported invitation. `sequence` is what
@@ -7516,7 +7546,7 @@ async function leaveMountedCalendar(cat) {
   }
 }
 
-function calendarCategoryShareInfo(categoryId) {
+export function calendarCategoryShareInfo(categoryId) {
   for (const session of state.spaces.values()) {
     if (session.sourceType === 'calendar' && session.record.categoryId === categoryId) {
       return {
@@ -9326,6 +9356,75 @@ function fcEventIntersectsRange(ev, rangeStart, rangeEnd) {
   return endMs > rangeStart && startMs < rangeEnd;
 }
 
+/*
+  Forecasts of every visible cycle calendar (src/cycle/). `forReminders`
+  keeps only those that carry a reminder — the reminder pipelines read
+  stored events only, and these are the one generated kind that nags.
+*/
+function cycleForecastsForRange(start, end, { forReminders = false } = {}) {
+  const out = [];
+  const events = [...state.calendarEvents.values()];
+
+  for (const cat of state.calendarCategories.values()) {
+    if (!cat?.cycle || cat.visible === false) continue;
+
+    try {
+      const analysis = cycleAnalysisFor(cat, events);
+      const view = cycleViewFor(cat, categoryPersonalPrefs(cat.id));
+      for (const ev of cycleForecastEvents(cat, analysis, view, start, end, { forReminders })) {
+        if (forReminders && !ev.reminders.length) continue;
+        out.push(ev);
+      }
+    } catch (err) {
+      console.warn('[Calendar] cycle forecast failed', err);
+    }
+  }
+
+  return out;
+}
+
+/** The cycle calendar a quick action or a text logs into: own first, writable. */
+export function cycleCalendarForQuickLog() {
+  const all = [...state.calendarCategories.values()].filter((c) => c?.cycle && !c.readonly);
+  return all.find((c) => !c.spaceId || c.spaceRole === 'owner') || all[0] || null;
+}
+
+/** The analysis behind a cycle calendar, for its panel. */
+export function cycleCalendarAnalysis(categoryId) {
+  const cat = state.calendarCategories.get(categoryId);
+  if (!cat?.cycle) return null;
+  return cycleAnalysisFor(cat, [...state.calendarEvents.values()]);
+}
+
+function fullCalendarEventFromCycleForecast(ev) {
+  const color = resolveCssColor(ev.color || defaultEventColorForCategory(categoryForEvent(ev)), cssVar('--accent', '#6ea8fe'));
+  const f = ev.cycleForecast;
+
+  return {
+    id: ev.id,
+    title: ev.title,
+    start: ev.start,
+    end: ev.end || undefined,
+    allDay: true,
+    backgroundColor: color,
+    borderColor: color,
+    textColor: readableTextColor(color),
+    editable: false,
+    startEditable: false,
+    durationEditable: false,
+    display: 'block',
+    classNames: ['yanta-cal-cycle-forecast', `is-${f.kind}`],
+    extendedProps: {
+      yantaKind: 'cycle-forecast',
+      raw: ev,
+      categoryId: ev.categoryId,
+      readonly: true,
+      generated: true,
+      cycleProb: f.prob,
+    },
+  };
+}
+
 function buildFullCalendarEventsForRange(start, end) {
   const rangeStart = start instanceof Date
     ? start.getTime()
@@ -9362,6 +9461,10 @@ function buildFullCalendarEventsForRange(start, end) {
     end
   )) {
     out.push(fullCalendarEventFromSourceEvent(ev));
+  }
+
+  for (const ev of cycleForecastsForRange(start, end)) {
+    out.push(fullCalendarEventFromCycleForecast(ev));
   }
 
   for (const ev of rawMarkdownCalendarEventsFromTasksAndNotes()) {
@@ -9491,6 +9594,9 @@ export function expandedCalendarRawEventsForRange(start, end, {
   includeStored = true,
   includeMarkdownDerived = true,
   includeSources = true,
+  // true: all cycle forecasts (with the sources); 'reminders': only
+  // those that carry a reminder (for the reminder pipelines).
+  includeCycle = includeSources,
 } = {}) {
   hydrateCalendarStateFromVault({
     silent: true,
@@ -9516,6 +9622,10 @@ export function expandedCalendarRawEventsForRange(start, end, {
       start,
       end
     ));
+  }
+
+  if (includeCycle) {
+    out.push(...cycleForecastsForRange(start, end, { forReminders: includeCycle === 'reminders' }));
   }
 
   if (includeMarkdownDerived !== false) {
@@ -11881,7 +11991,7 @@ function ensureEventModal() {
 
   eventModal.addEventListener('click', (e) => {
     if (e.target === eventModal) closeEventModal();
-    if (e.target.matches('[data-cal-close]')) closeEventModal();
+    if (e.target.closest('[data-cal-close]')) closeEventModal();
   });
 
   return eventModal;
@@ -13124,24 +13234,6 @@ function openEventEditor(input = {}) {
 // Calendar source modal
 // ============================================================
 
-function sourceKey(source = {}) {
-  return [
-    source.type || '',
-    source.country || '',
-    source.state || '',
-    source.region || '',
-    source.builtinId || '',
-  ].join(':');
-}
-
-function categoryWithSourceExists(source) {
-  const key = sourceKey(source);
-
-  return [...state.calendarCategories.values()].some((cat) =>
-    sourceKey(cat.source) === key
-  );
-}
-
 function closeCalendarSourcesModal({
   fromHistory = false,
 } = {}) {
@@ -13167,42 +13259,12 @@ function ensureCalendarSourcesModal() {
 
   calendarSourcesModal.addEventListener('click', (e) => {
     if (e.target === calendarSourcesModal) closeCalendarSourcesModal();
-    if (e.target.matches('[data-cal-source-close]')) closeCalendarSourcesModal();
+    if (e.target.closest('[data-cal-source-close]')) closeCalendarSourcesModal();
   });
 
   document.body.append(calendarSourcesModal);
 
   return calendarSourcesModal;
-}
-
-function addHolidaySourceCategory(source) {
-  const patch = makeHolidayCategoryPatch(source);
-
-  const existing = [...state.calendarCategories.values()]
-    .find((cat) => sourceKey(cat.source) === sourceKey(patch.source));
-
-  if (existing) {
-    putCalendarCategory({
-      ...existing,
-      visible: true,
-      readonly: true,
-      source: patch.source,
-      name: existing.name || patch.name,
-      color: existing.color || patch.color,
-    });
-
-    return {
-      added: false,
-      category: existing,
-    };
-  }
-
-  const cat = putCalendarCategory(patch);
-
-  return {
-    added: true,
-    category: cat,
-  };
 }
 
 function renderCalendarSourcesModal({
@@ -13220,168 +13282,23 @@ function renderCalendarSourcesModal({
     }
   );
 
-  const sourceButtons = DE_HOLIDAY_SOURCES
-    .map((source, index) => {
-      const exists = categoryWithSourceExists({
-        type: 'holidays',
-        country: source.country,
-        state: source.state || null,
-        region: source.region || null,
-        builtinId: source.id || null,
-      });
-
-      return `
-        <button class="btn ${exists ? '' : 'primary'}" data-add-de-source="${index}" ${exists ? 'data-existing="1"' : ''}>
-          ${lucide(exists ? 'check' : 'calendar-plus', 14)}
-          ${escapeHtml(source.label)}
-        </button>
-      `;
-    })
-    .join('');
-
-  modal.innerHTML = `
-    <div class="modal-card yanta-calendar-categories-card">
-      <header class="modal-head">
-        <h3>Add calendar data source</h3>
-        <button class="icon-btn" data-cal-source-close>&times;</button>
-      </header>
-
-      <div class="modal-body">
-        <div class="yanta-calendar-share-hint">
-          <strong>Dynamic source categories:</strong>
-          YANTA stores only the category/source definition. Events are generated for the visible date range.
-          These events are read-only and do not clutter your stored calendar events.
-        </div>
-
-        <section style="margin-top:14px">
-          <h4 style="margin:0 0 8px;font-size:13px">German public holidays</h4>
-
-          <div class="compress-actions" style="justify-content:flex-start;margin-bottom:10px">
-            <button class="btn primary" data-add-all-de-holidays>
-              ${lucide('calendar-plus', 14)} Add all German holiday categories
-            </button>
-          </div>
-
-          <div style="
-            display:grid;
-            grid-template-columns:repeat(auto-fit,minmax(230px,1fr));
-            gap:8px;
-          ">
-            ${sourceButtons}
-          </div>
-        </section>
-
-        <section style="margin-top:20px">
-          <h4 style="margin:0 0 8px;font-size:13px">Custom date ranges</h4>
-
-          <p class="hint" style="margin:0 0 8px;color:var(--text-dim);font-size:12px">
-            Use this for school holidays, institution-specific closing days, conferences, semester breaks, etc.
-            End dates are interpreted as inclusive.
-          </p>
-
-          <label style="display:block;margin-bottom:8px;font-size:12px;color:var(--text-dim)">
-            Category name
-            <input class="text-input" data-custom-source-name value="Schulferien Niedersachsen" />
-          </label>
-
-          <label style="display:block;margin-bottom:8px;font-size:12px;color:var(--text-dim)">
-            Color
-            <input type="color" data-custom-source-color value="#4ade80" />
-          </label>
-
-          <label style="display:block;font-size:12px;color:var(--text-dim)">
-            JSON date entries
-            <textarea class="text-input" data-custom-source-json rows="10" spellcheck="false">${escapeHtml(exampleCustomDatesJson())}</textarea>
-          </label>
-
-          <div class="compress-actions" style="margin-top:10px">
-            <button class="btn primary" data-add-custom-source>
-              ${lucide('plus', 14)} Add custom source
-            </button>
-          </div>
-        </section>
-      </div>
-    </div>
-  `;
-
-  modal.querySelector('[data-add-all-de-holidays]')?.addEventListener('click', () => {
-    let added = 0;
-    let existing = 0;
-
-    for (const source of DE_HOLIDAY_SOURCES) {
-      const res = addHolidaySourceCategory(source);
-
-      if (res.added) added++;
-      else existing++;
-    }
-
-    renderCalendarSourcesModal();
-    renderCategoriesModal();
-
-    toast(
-      `Holiday sources: ${added} added${existing ? ` · ${existing} already existed` : ''}`,
-      'success'
-    );
-  });
-
-  for (const btn of modal.querySelectorAll('[data-add-de-source]')) {
-    btn.addEventListener('click', () => {
-      const index = parseInt(btn.dataset.addDeSource || '-1', 10);
-      const source = DE_HOLIDAY_SOURCES[index];
-
-      if (!source) return;
-
-      const res = addHolidaySourceCategory(source);
-
-      renderCalendarSourcesModal();
-      renderCategoriesModal();
-
-      toast(
-        res.added
-          ? `Added ${source.name || source.label}`
-          : `${source.name || source.label} already exists`,
-        'success'
-      );
-    });
-  }
-
-  modal.querySelector('[data-add-custom-source]')?.addEventListener('click', () => {
-    const name = modal.querySelector('[data-custom-source-name]')?.value?.trim() ||
-      'Custom calendar source';
-
-    const color = modal.querySelector('[data-custom-source-color]')?.value ||
-      '#4ade80';
-
-    const jsonText = modal.querySelector('[data-custom-source-json]')?.value || '';
-
-    let entries;
-
-    try {
-      entries = parseCustomDatesJson(jsonText);
-    } catch (err) {
-      toast(err?.message || 'Invalid custom source JSON', 'error');
-      return;
-    }
-
-    putCalendarCategory({
-      name,
-      color,
-      visible: true,
-      readonly: true,
-      source: {
-        type: 'custom-dates',
-        title: name,
-        entries,
-      },
-    });
-
-    renderCategoriesModal();
-
-    toast(`Added custom source: ${name}`, 'success');
-  });
-
+  // In front of the calendar list it was opened from.
+  document.body.append(modal);
   modal.hidden = false;
-  armCalendarModalInputGuard();
+
+  import('./calendar-subscribe.js')
+    .then(({ renderSubscribeDialog }) => renderSubscribeDialog(modal, {
+      putCalendarCategory,
+      // Re-render the list underneath in place: it must not push its
+      // overlay state on top of this dialog's.
+      onAdded: () => {
+        if (categoriesModal && !categoriesModal.hidden) renderCategoriesModal({ fromHistory: true });
+      },
+    }))
+    .catch((err) => {
+      console.error(err);
+      toast(err?.message || 'Could not open subscriptions', 'error');
+    });
 }
 
 // ============================================================
@@ -13397,7 +13314,7 @@ function ensureCategoriesModal() {
 
   categoriesModal.addEventListener('click', (e) => {
     if (e.target === categoriesModal) closeCategoriesModal();
-    if (e.target.matches('[data-cal-cat-close]')) closeCategoriesModal();
+    if (e.target.closest('[data-cal-cat-close]')) closeCategoriesModal();
   });
 
   document.body.append(categoriesModal);
@@ -13417,6 +13334,45 @@ function closeCategoriesModal({
       fromHistory,
     }
   );
+}
+
+// ---------------- cycle calendars (src/cycle/) ----------------------
+
+async function openCyclePanelFor(categoryId) {
+  if (!categoryId || !state.calendarCategories.get(categoryId)?.cycle) return;
+  const { openCyclePanel } = await import('./cycle/cycle-panel.js');
+  openCyclePanel(categoryId);
+}
+
+export { openCyclePanelFor as openCyclePanel };
+
+/** Re-draw the calendar after a change that is not an event write (e.g. personal view prefs). */
+export function refreshCalendarSoon() {
+  scheduleCalendarRender();
+  window.dispatchEvent(new CustomEvent('yanta-calendar-updated'));
+}
+
+/** A new cycle calendar: private, hidden from nobody, opened right away. */
+export function createCycleCalendar() {
+  const existing = [...state.calendarCategories.values()].find((c) => c.cycle && !c.spaceId);
+  if (existing) return openCyclePanelFor(existing.id);
+  const cat = putCalendarCategory({ name: i18n('cycle.defaultName'), color: '#d6336c', visible: true, cycle: {} });
+  if (!cat) return null;
+  if (categoriesModal && !categoriesModal.hidden) renderCategoriesModal();
+  return openCyclePanelFor(cat.id);
+}
+
+/*
+  An existing calendar becomes a cycle calendar. Its all-day entries
+  become period starts; "repeats monthly" placeholders are what this
+  replaces, so the panel offers to remove them.
+*/
+async function convertToCycleCalendar(categoryId) {
+  const cat = state.calendarCategories.get(categoryId);
+  if (!cat) return;
+  putCalendarCategory({ ...cat, cycle: {} });
+  if (categoriesModal && !categoriesModal.hidden) renderCategoriesModal();
+  await openCyclePanelFor(categoryId);
 }
 
 function renderCategoriesModal({
@@ -13467,8 +13423,8 @@ function renderCategoriesModal({
     called, who sees it. Everything else lives behind the row's menu.
   */
   const statusFor = (cat) => {
-    const sourceDesc = calendarCategorySourceDescription(cat.source);
-    if (sourceDesc) return { icon: 'calendar-days', text: sourceDesc };
+    const sourceDesc = calendarCategorySourceDescription(cat.source, cat.id);
+    if (sourceDesc) return { icon: cat.source?.type === 'feed' ? 'rss' : 'calendar-days', text: sourceDesc };
 
     const folderProvider = mountedSpaceEventProviderForCategory(cat.id);
     if (folderProvider) {
@@ -13511,7 +13467,7 @@ function renderCategoriesModal({
         </button>
         <div class="ycl-main">
           <input class="ycl-name" data-cat-name value="${escapeAttr(cat.name || '')}" ${renamable ? '' : 'readonly'} aria-label="${escapeAttr(i18n('calendarList.name'))}" />
-          <span class="ycl-status">${lucide(status.icon, 12)}<span>${escapeHtml(status.text)}</span>${cat.aiHidden ? `<span class="ycl-dot-sep">·</span>${lucide('eye-off', 12)}<span>${escapeHtml(i18n('calendarList.hiddenFromAi'))}</span>` : ''}</span>
+          <span class="ycl-status">${lucide(status.icon, 12)}<span>${escapeHtml(status.text)}</span>${cat.cycle ? `<span class="ycl-dot-sep">·</span>${lucide('droplet', 12)}<span>${escapeHtml(i18n('cycle.listBadge'))}</span>` : ''}${cat.aiHidden ? `<span class="ycl-dot-sep">·</span>${lucide('eye-off', 12)}<span>${escapeHtml(i18n('calendarList.hiddenFromAi'))}</span>` : ''}</span>
         </div>
         <span class="ycl-count" title="${escapeAttr(i18n('calendarList.entries', { count }))}">${calendarCategorySourceDescription(cat.source) ? '' : count}</span>
         <button type="button" class="icon-btn ycl-more" data-cat-menu aria-label="${escapeAttr(i18n('calendarList.more'))}">${lucide('ellipsis', 16)}</button>
@@ -13555,7 +13511,8 @@ function renderCategoriesModal({
 
   modal.querySelector('[data-action="more"]')?.addEventListener('click', (e) => {
     showMenu(...menuAt(e.currentTarget), [
-      { label: i18n('calendarList.addSource'), icon: 'calendar-plus', action: () => renderCalendarSourcesModal() },
+      { label: i18n('calendarList.addSource'), icon: 'rss', action: () => renderCalendarSourcesModal() },
+      { label: i18n('cycle.add'), icon: 'droplet', action: () => createCycleCalendar() },
       { label: i18n('calendarList.importFile'), icon: 'calendar-arrow-up', action: openCalendarImportPicker },
       'hr',
       { label: i18n('calendarList.exportAllIcs'), icon: 'calendar-arrow-down', action: () => exportEventsAsIcs(currentEventsForCategory(null), { filename: 'yanta-calendar.ics', calendarName: 'YANTA' }) },
@@ -13627,18 +13584,28 @@ function renderCategoriesModal({
       const folder = !!mountedSpaceEventProviderForCategory(catId);
       const source = !!calendarCategorySourceDescription(c.source);
       const owned = calendarCategoryShareInfo(catId).shared;
+      // Offered where it plausibly fits only: nobody else needs to see it.
+      const cycleCandidate = !c.cycle && !mounted && !folder && !source && catId !== DEFAULT_CATEGORY_ID &&
+        /period|perioden?|zyklus|cycle|menstru|regel|règles|regla|cicl|生理/i.test(c.name || '');
+
+      const feed = c.source?.type === 'feed';
 
       showMenu(...menuAt(e.currentTarget), [
+        ...(feed ? [{ label: i18n('subscribe.refresh'), icon: 'refresh-cw', action: () => row.dispatchEvent(new CustomEvent('ycl-refresh')) }] : []),
+        ...(feed && c.source.kind === 'ics' ? [{ label: i18n('subscribe.copyLink'), icon: 'link', action: () => navigator.clipboard?.writeText(c.source.url).then(() => toast(i18n('subscribe.linkCopied'), 'success')).catch(() => {}) }, 'hr'] : feed ? ['hr'] : []),
+        ...(c.cycle ? [{ label: i18n('cycle.open'), icon: 'droplet', action: () => openCyclePanelFor(catId) }, 'hr'] : []),
+        ...(cycleCandidate ? [{ label: i18n('cycle.convert'), icon: 'droplet', action: () => convertToCycleCalendar(catId) }, 'hr'] : []),
         ...(!mounted && !folder && !source ? [{ label: owned ? i18n('calendarList.manageSharing') : i18n('calendarList.share'), icon: 'share-2', action: () => row.dispatchEvent(new CustomEvent('ycl-share')) }] : []),
         { label: i18n('calendarList.color'), icon: 'palette', action: () => colorInput?.click() },
         { label: i18n('calendarList.defaultReminder'), icon: 'bell', action: () => defaultReminderChoice(catId) },
         { label: c.aiHidden ? i18n('privacy.showToAi') : i18n('privacy.hideFromAi'), icon: c.aiHidden ? 'eye' : 'eye-off', action: () => row.dispatchEvent(new CustomEvent('ycl-ai')) },
         'hr',
+        ...(c.cycle && !mounted ? [{ label: i18n('cycle.unconvert'), icon: 'calendar', action: () => { putCalendarCategory({ ...c, cycle: undefined }); renderCategoriesModal(); } }] : []),
         { label: i18n('calendarList.exportIcs'), icon: 'calendar-arrow-down', action: () => row.dispatchEvent(new CustomEvent('ycl-export-ics')) },
         { label: i18n('calendarList.exportJson'), icon: 'download', action: () => row.dispatchEvent(new CustomEvent('ycl-export-json')) },
         ...(catId === DEFAULT_CATEGORY_ID || folder ? [] : ['hr', {
-          label: mounted ? i18n('calendarList.leave') : i18n('calendarList.delete'),
-          icon: mounted ? 'log-out' : 'trash-2',
+          label: mounted ? i18n('calendarList.leave') : source ? i18n('subscribe.end') : i18n('calendarList.delete'),
+          icon: mounted ? 'log-out' : source ? 'calendar-x' : 'trash-2',
           danger: true,
           action: () => row.dispatchEvent(new CustomEvent('ycl-delete')),
         }]),
@@ -13655,6 +13622,18 @@ function renderCategoriesModal({
       if (!cat) return;
       putCalendarCategory({ ...cat, aiHidden: !cat.aiHidden });
       toast(cat.aiHidden ? i18n('privacy.calendarVisible') : i18n('privacy.calendarHidden'), 'success');
+      renderCategoriesModal();
+    });
+
+    row.addEventListener('ycl-refresh', async () => {
+      const cat = state.calendarCategories.get(catId);
+      if (!cat) return;
+      const { refreshFeed, feedStatus } = await import('./calendar-feeds.js');
+      const target = row.querySelector('.ycl-status > span');
+      if (target) target.textContent = i18n('subscribe.refreshing');
+      await refreshFeed(cat, { force: true });
+      const st = feedStatus(catId);
+      toast(st.state === 'error' ? i18n('subscribe.refreshFailed', { reason: st.error }) : i18n('subscribe.refreshed', { count: st.count }), st.state === 'error' ? 'error' : 'success');
       renderCategoriesModal();
     });
 
@@ -13712,6 +13691,23 @@ function renderCategoriesModal({
           toast(err?.message || 'Could not stop the share', 'error');
           return;
         }
+      }
+
+      // A subscription holds no entries of its own: ending it is all there is.
+      if (cat.source?.type) {
+        const ok = await yantaConfirm({
+          title: i18n('subscribe.endTitle', { name: cat.name || '' }),
+          message: i18n('subscribe.endMessage'),
+          confirmLabel: i18n('subscribe.end'),
+          cancelLabel: i18n('common.cancel'),
+          danger: true,
+          icon: 'calendar-x',
+        });
+        if (!ok) return;
+        deleteCalendarCategory(catId, { eventAction: 'delete' });
+        import('./calendar-feeds.js').then(({ forgetFeed }) => forgetFeed(catId)).catch(() => {});
+        renderCategoriesModal();
+        return;
       }
 
       const choice = await openDeleteCalendarCategoryDialog(catId);
@@ -14633,15 +14629,31 @@ export function setupCalendar() {
         return;
       }
 
+      if (kind === 'cycle-forecast') {
+        info.jsEvent?.preventDefault?.();
+        openCyclePanelFor(info.event.extendedProps?.categoryId);
+        return;
+      }
+
       if (kind === 'holiday' || kind === 'calendar-source') {
         info.jsEvent?.preventDefault?.();
 
         const raw = info.event.extendedProps?.raw;
-        const sourceText = raw?.source?.type === 'holidays'
-          ? 'Holiday'
-          : 'Calendar source';
+        if (!raw) return;
 
-        toast(`${sourceText}: ${info.event.title}`, 'success');
+        import('./calendar-peek.js').then(({ openCalendarPeek }) => openCalendarPeek(raw, info.el, {
+          // A copy in an own calendar: to change it, or to be reminded.
+          onCopy: (ev) => openNewCalendarEvent({
+            title: ev.title,
+            start: ev.allDay ? fromLocalInput(String(ev.start).slice(0, 10), true) : ev.start,
+            end: ev.allDay
+              ? (ev.end ? fcExclusiveAllDayEndToStoredInclusive(new Date(`${String(ev.end).slice(0, 10)}T00:00:00`)) : null)
+              : ev.end,
+            allDay: !!ev.allDay,
+            location: ev.location || '',
+            description: ev.description || '',
+          }),
+        })).catch((err) => console.warn('[Calendar] peek failed', err));
 
         return;
       }

@@ -183,6 +183,8 @@ export async function reconcileOwnedSpaces({ force = false } = {}) {
         createdAt: Number(space?.createdAt || 0),
         objectCount: Number(space?.objectCount || 0),
         label: labelForSource(sourceType, sourceId),
+        // Is what it shared still here? If not, the share is a leftover.
+        known: !!labelForSource(sourceType, sourceId) && !/^an? (calendar|folder|note)$/.test(labelForSource(sourceType, sourceId)),
         supersededBy: space?.supersededBy || null,
       });
     }
@@ -284,17 +286,24 @@ export async function markBrokenSharesReported(spaceIds = []) {
  */
 export async function discardBrokenShare(spaceId) {
   const id = String(spaceId || '');
-  if (!id) return false;
+  if (!id) return { ok: false };
 
+  let res;
   try {
-    const res = await fetchWithRetry(apiUrl(`/api/spaces/${encodeURIComponent(id)}`), {
+    res = await fetchWithRetry(apiUrl(`/api/spaces/${encodeURIComponent(id)}`), {
       method: 'DELETE',
       credentials: 'include',
     }, { label: 'Delete shared space', attempts: 2 });
+  } catch (err) {
+    console.warn('[YANTA Spaces] discard failed', id, err);
+    return { ok: false, offline: true, message: err?.message || '' };
+  }
 
-    if (!res.ok) throw await errorFromResponse(res, 'Could not delete shared space');
-  } catch {
-    return false;
+  // 404: already gone (another device removed it) — just as good.
+  if (!res.ok && res.status !== 404) {
+    const err = await errorFromResponse(res, 'Could not delete shared space').catch(() => null);
+    console.warn('[YANTA Spaces] discard refused', id, res.status, err?.message);
+    return { ok: false, status: res.status, message: err?.message || `HTTP ${res.status}` };
   }
 
   brokenList = brokenList.filter((b) => b.spaceId !== id);
@@ -305,5 +314,5 @@ export async function discardBrokenShare(spaceId) {
     }));
   } catch {}
 
-  return true;
+  return { ok: true };
 }

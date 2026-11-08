@@ -11,6 +11,8 @@ import {
   import {
     getDrawing,
   } from '../yjs.js';
+
+  import { t } from '../i18n/index.js';
   
   import {
     listSlides,
@@ -64,18 +66,18 @@ import {
   } = {}) {
     const drawing = getDrawing(noteId, drawingId);
     if (!drawing) {
-      toast('Drawing not found', 'error');
+      toast(t('draw.notFound'), 'error');
       return;
     }
   
     const slides = listSlides(noteId, drawingId).filter((s) => !s.hidden);
   
     if (!slides.length) {
-      toast('No slides to export', 'error');
+      toast(t('slides.export.none'), 'error');
       return;
     }
   
-    toast('Preparing PDF…', 'success');
+    toast(t('slides.export.preparing'), 'success');
   
     const rendered = [];
   
@@ -91,7 +93,7 @@ import {
     const win = window.open('', '_blank');
   
     if (!win) {
-      toast('Popup blocked · allow popups to export PDF', 'error');
+      toast(t('slides.export.popupBlocked'), 'error');
       return;
     }
   
@@ -100,7 +102,7 @@ import {
   <html>
   <head>
   <meta charset="utf-8">
-  <title>${escapeHtml(drawing.title || 'Slideshow')}</title>
+  <title>${escapeHtml(drawing.title || t('slides.slideshow'))}</title>
   <style>
     @page {
       size: landscape;
@@ -162,7 +164,7 @@ import {
   <body>
   ${rendered.map(({ slide, svg }, index) => `
     <section class="slide-page">
-      <div class="slide-title">${index + 1}. ${escapeHtml(slide.title || `Slide ${index + 1}`)}</div>
+      <div class="slide-title">${index + 1}. ${escapeHtml(slide.title || t('slides.defaultTitle', { n: index + 1 }))}</div>
       <div class="slide-canvas">
         ${svg}
       </div>

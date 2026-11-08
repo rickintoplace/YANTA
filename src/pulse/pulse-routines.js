@@ -50,6 +50,8 @@ import {
 } from './pulse-config.js';
 
 import { parseDuration } from './pulse-schedule.js';
+// Imported as i18n: describeTrigger() and friends take a `t` parameter.
+import { t as i18n } from '../i18n/index.js';
 
 const VALID_EVENTS = new Set(Object.values(PULSE_EVENTS));
 const VALID_OUTPUTS = new Set(Object.values(PULSE_OUTPUTS));
@@ -139,24 +141,24 @@ export function routineFromSkill(skill, markdown = skill?.markdown || '') {
   const when = stripQuotes(block.when);
   const events = coerceList(block.on).filter((name) => {
     if (VALID_EVENTS.has(name)) return true;
-    invalid.push(`Unknown trigger "${name}"`);
+    invalid.push(i18n('pulse.invalid.unknownTrigger', { name }));
     return false;
   });
 
   if (!when && !events.length) {
-    invalid.push('No schedule and no trigger');
+    invalid.push(i18n('pulse.invalid.noSchedule'));
   }
 
   const outputs = coerceList(block.output).filter((name) => {
     if (VALID_OUTPUTS.has(name)) return true;
-    invalid.push(`Unknown output "${name}"`);
+    invalid.push(i18n('pulse.invalid.unknownOutput', { name }));
     return false;
   });
 
   const requestedProfile = String(block.tools || '').trim().toLowerCase();
 
   if (requestedProfile && !PULSE_TOOL_PROFILE_ORDER.includes(requestedProfile)) {
-    invalid.push(`Unknown tool profile "${requestedProfile}"`);
+    invalid.push(i18n('pulse.invalid.unknownToolProfile', { name: requestedProfile }));
   }
 
   const cooldownMs = block.cooldown
@@ -169,7 +171,7 @@ export function routineFromSkill(skill, markdown = skill?.markdown || '') {
   const rank = decisionQuestion(block.rank);
 
   if (check && !events.length) {
-    invalid.push('"check" needs sensor triggers ("on") to look at');
+    invalid.push(i18n('pulse.invalid.checkWithoutTriggers'));
   }
 
   return {

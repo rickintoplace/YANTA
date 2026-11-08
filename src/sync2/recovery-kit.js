@@ -14,6 +14,7 @@ import {
 } from './pairing.js';
 
 import { BRAND_LOGO_SVG } from '../brand-logo.js';
+import { t, getLocale } from '../i18n/index.js';
 
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>"']/g, (char) => ({
@@ -61,22 +62,24 @@ export function extractSyncKeyFromRecoveryInput(raw) {
 function providerLabel(provider) {
   return provider === 'yanta-cloud'
     ? 'YANTA Cloud'
-    : 'Google Drive (own storage)';
+    : t('sync.recoveryKit.driveStorage');
 }
 
 function restoreStepsHtml(provider) {
   const origin = escapeHtml(location.origin);
 
-  const commonFirst = `Open <strong>${origin}</strong> on the new device.`;
+  const strong = (s) => `<strong>${escapeHtml(s)}</strong>`;
+  const commonFirst = t('sync.recoveryKit.stepOpen', { origin: `<strong>${origin}</strong>` });
+  const stepsTail = `
+        <li>${escapeHtml(t('sync.recoveryKit.stepScan'))}</li>
+        <li>${escapeHtml(t('sync.recoveryKit.stepDone'))}</li>`;
 
   if (provider === 'yanta-cloud') {
     return `
       <ol>
         <li>${commonFirst}</li>
-        <li>Go to <strong>Settings → YANTA Cloud Sync</strong> and choose <strong>Connect existing vault</strong>.</li>
-        <li>Sign in with the account email shown on this page.</li>
-        <li>Scan the QR code below — or type the Recovery Key (spaces don't matter).</li>
-        <li>Your encrypted vault is pulled and decrypted on the device.</li>
+        <li>${t('sync.recoveryKit.stepGoTo', { path: strong(t('sync.recoveryKit.pathCloud')), button: strong(t('sync.recoveryKit.connectExisting')) })}</li>
+        <li>${escapeHtml(t('sync.recoveryKit.stepSignInCloud'))}</li>${stepsTail}
       </ol>
     `;
   }
@@ -84,10 +87,8 @@ function restoreStepsHtml(provider) {
   return `
     <ol>
       <li>${commonFirst}</li>
-      <li>Go to <strong>Settings → Advanced: Google Drive Sync</strong> and choose <strong>Enter Sync Key</strong>.</li>
-      <li>Sign in to the same Google account that holds the encrypted sync data.</li>
-      <li>Scan the QR code below — or type the Recovery Key (spaces don't matter).</li>
-      <li>Your encrypted vault is pulled and decrypted on the device.</li>
+      <li>${t('sync.recoveryKit.stepGoTo', { path: strong(t('sync.recoveryKit.pathDrive')), button: strong(t('sync.setup.enterKey')) })}</li>
+      <li>${escapeHtml(t('sync.recoveryKit.stepSignInDrive'))}</li>${stepsTail}
     </ol>
   `;
 }
@@ -99,10 +100,10 @@ function recoveryKitHtml({
   accountEmail,
   qrSvgHtml,
 }) {
-  const createdAt = new Date().toLocaleString();
+  const createdAt = new Date().toLocaleString(getLocale());
 
   return `<!DOCTYPE html>
-<html lang="en">
+<html lang="${escapeHtml(getLocale())}">
 <head>
 <meta charset="utf-8">
 <title>YANTA Recovery Kit</title>
@@ -272,55 +273,52 @@ function recoveryKitHtml({
     ${BRAND_LOGO_SVG}
     <div>
       <h1>YANTA Recovery Kit</h1>
-      <p>Your encrypted vault's master key — keep this page safe and offline.</p>
+      <p>${escapeHtml(t('sync.recoveryKit.subtitle'))}</p>
     </div>
     <span class="spacer"></span>
     <div class="created">
-      Created<br>${escapeHtml(createdAt)}
+      ${escapeHtml(t('sync.recoveryKit.created'))}<br>${escapeHtml(createdAt)}
     </div>
   </header>
 
   <div class="warning">
-    <strong>Anyone with this page can read your notes.</strong>
-    YANTA is zero-knowledge: your notes are encrypted with this key before they leave your device,
-    and YANTA cannot reset or recover it. Store this page like a passport — a safe, a locked drawer,
-    or a sealed envelope. Do not photograph it into a cloud photo library.
+    <strong>${escapeHtml(t('sync.recoveryKit.warningTitle'))}</strong>
+    ${escapeHtml(t('sync.recoveryKit.warningBody'))}
   </div>
 
-  <h2>Vault details</h2>
+  <h2>${escapeHtml(t('sync.recoveryKit.details'))}</h2>
   <table class="facts">
     <tr>
-      <td>Storage</td>
+      <td>${escapeHtml(t('sync.recoveryKit.storage'))}</td>
       <td>${escapeHtml(providerLabel(provider))}</td>
     </tr>
     ${
       accountEmail
-        ? `<tr><td>Account email</td><td>${escapeHtml(accountEmail)}</td></tr>`
+        ? `<tr><td>${escapeHtml(t('sync.recoveryKit.email'))}</td><td>${escapeHtml(accountEmail)}</td></tr>`
         : ''
     }
     ${
       vaultId
-        ? `<tr><td>Vault ID</td><td>${escapeHtml(vaultId)}</td></tr>`
+        ? `<tr><td>${escapeHtml(t('sync.recoveryKit.vaultId'))}</td><td>${escapeHtml(vaultId)}</td></tr>`
         : ''
     }
     <tr>
-      <td>App</td>
+      <td>${escapeHtml(t('sync.recoveryKit.app'))}</td>
       <td>${escapeHtml(location.origin)}</td>
     </tr>
   </table>
 
-  <h2>Recovery Key</h2>
+  <h2>${escapeHtml(t('sync.recoveryKit.key'))}</h2>
   <div class="key">${escapeHtml(formatKeyForPrint(syncKey))}</div>
 
-  <h2>How to restore your vault</h2>
+  <h2>${escapeHtml(t('sync.recoveryKit.howTo'))}</h2>
   <div class="restore">
     ${restoreStepsHtml(provider)}
     <div class="qr">${qrSvgHtml}</div>
   </div>
 
   <footer>
-    The QR code contains the Recovery Key as a pairing link — scanning it is equivalent to typing the key.
-    If you stop using YANTA, destroy this page.
+    ${escapeHtml(t('sync.recoveryKit.footer'))}
   </footer>
 </body>
 </html>`;

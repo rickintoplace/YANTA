@@ -18,6 +18,8 @@ import {
   openNote,
 } from '../notes.js';
 
+import { t } from '../i18n/index.js';
+
 import {
   semanticEnabled,
   semanticReady,
@@ -47,7 +49,7 @@ function renderSection(noteId, results) {
 
   wrap.append(
     el('div', { class: 'backlinks-title' },
-      'Related notes',
+      t('palette.group.related'),
       el('span', { class: 'badge' }, String(rows.length))
     )
   );

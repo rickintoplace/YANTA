@@ -48,6 +48,7 @@ import {
 } from './public-share-viewer-enhancements.js';
 
 import { BRAND_LOGO_SVG } from '../brand-logo.js';
+import { t, initI18n } from '../i18n/index.js';
 import { countFunnelEvent } from '../metrics/funnel.js';
 
 import {
@@ -874,17 +875,17 @@ async function hydratePublicDrawings(drawingsById) {
     if (!body) continue;
 
     if (!drawing) {
-      body.innerHTML = `<div class="yps-public-draw-error">Drawing unavailable: ${escapeHtml(id)}</div>`;
+      body.innerHTML = `<div class="yps-public-draw-error">${escapeHtml(t('publicShare.viewer.drawingUnavailable', { id }))}</div>`;
       continue;
     }
 
     try {
-      body.innerHTML = `<div class="yps-public-draw-loading">Rendering drawing…</div>`;
+      body.innerHTML = `<div class="yps-public-draw-loading">${escapeHtml(t('publicShare.viewer.rendering'))}</div>`;
 
       const svg = await publicDrawingSvg(drawing);
 
       if (!svg) {
-        body.innerHTML = `<div class="yps-public-draw-error">Empty drawing</div>`;
+        body.innerHTML = `<div class="yps-public-draw-error">${escapeHtml(t('publicShare.viewer.emptyDrawing'))}</div>`;
       } else {
         body.replaceChildren(svg);
       }
@@ -894,14 +895,14 @@ async function hydratePublicDrawings(drawingsById) {
           ? drawing.elements.filter((el) => el && !el.isDeleted).length
           : 0;
 
-        meta.textContent = `${count} element${count === 1 ? '' : 's'}`;
+        meta.textContent = t('publicShare.viewer.elements', { count });
       }
     } catch (err) {
       console.warn('[YANTA Public Share] drawing render failed', err);
 
       body.innerHTML = `
         <div class="yps-public-draw-error">
-          Drawing preview unavailable
+          ${escapeHtml(t('publicShare.viewer.previewUnavailable'))}
         </div>
       `;
     }
@@ -975,7 +976,7 @@ async function savePublicShareAsLocalNote() {
 
   const note = {
     id: noteId,
-    title: noteData.title || 'Shared note',
+    title: noteData.title || t('sharing.sharedNoteTitle'),
     type: 'markdown',
     folderId: null,
     tags: Array.isArray(noteData.tags) ? noteData.tags : [],
@@ -1016,7 +1017,7 @@ async function savePublicShareAsLocalNote() {
 
 async function shareCurrentPage() {
   const url = location.href;
-  const title = currentPayload?.note?.title || 'YANTA Public Share';
+  const title = currentPayload?.note?.title || t('publicShare.viewer.shareTitle');
 
   await sharePublicPage({
     url,
@@ -1027,16 +1028,10 @@ async function shareCurrentPage() {
 
 async function showAboutYanta() {
   await yantaAlert({
-    title: 'About YANTA',
+    title: t('publicShare.viewer.aboutTitle'),
     icon: 'sparkles',
-    confirmLabel: 'Close',
-    message: [
-      'YANTA is a local-first workspace for practical notes, drawings, tasks, images, sources, calendar context and encrypted sync.',
-      '',
-      'This page is a public read-only share. The note was decrypted in your browser using the private key in the link fragment.',
-      '',
-      'You can save this note into your own local YANTA workspace with “Save as note”.'
-    ].join('\n'),
+    confirmLabel: t('common.close'),
+    message: t('publicShare.viewer.aboutMessage'),
   });
 }
 
@@ -1054,15 +1049,15 @@ function toggleMenu() {
 function renderMenu() {
   return `
     <div class="yps-menu" data-yps-menu hidden>
-        <button type="button" data-yps-save-menu>${lucide('file-plus', 15)} Save as note</button>
-        <button type="button" data-yps-share-menu>${lucide('share-2', 15)} Share</button>
+        <button type="button" data-yps-save-menu>${lucide('file-plus', 15)} ${escapeHtml(t('publicShare.viewer.saveAsNote'))}</button>
+        <button type="button" data-yps-share-menu>${lucide('share-2', 15)} ${escapeHtml(t('publicShare.viewer.share'))}</button>
         <button type="button" data-yps-theme-toggle>
             ${lucide('sun', 15)}
-            <span data-yps-theme-label>Light mode</span>
+            <span data-yps-theme-label>${escapeHtml(t('publicShare.viewer.lightMode'))}</span>
         </button>
         <hr>
-        <a href="${escapeAttr(location.origin)}">${lucide('external-link', 15)} Open your YANTA</a>
-        <button type="button" data-yps-about>${lucide('info', 15)} About YANTA</button>
+        <a href="${escapeAttr(location.origin)}">${lucide('external-link', 15)} ${escapeHtml(t('publicShare.viewer.openYourYanta'))}</a>
+        <button type="button" data-yps-about>${lucide('info', 15)} ${escapeHtml(t('publicShare.viewer.aboutTitle'))}</button>
     </div>
   `;
 }
@@ -1070,11 +1065,11 @@ function renderMenu() {
 function renderHeader() {
   return `
     <header class="yps-top">
-      <a class="yps-brand-link" href="${escapeAttr(location.origin)}" title="Open YANTA">
+      <a class="yps-brand-link" href="${escapeAttr(location.origin)}" title="${escapeAttr(t('publicShare.viewer.openYanta'))}">
         <span class="brand-mark">${brandLogoSvg()}</span>
         <span class="yps-brand-title">
           <strong>YANTA</strong>
-          <span>Public Share</span>
+          <span>${escapeHtml(t('publicShare.viewer.brandSub'))}</span>
         </span>
       </a>
 
@@ -1083,19 +1078,19 @@ function renderHeader() {
       <div class="yps-header-actions">
         <button class="yps-btn accent desktop-only" type="button" data-yps-save>
           ${lucide('file-plus', 15)}
-          <span>Save as note</span>
+          <span>${escapeHtml(t('publicShare.viewer.saveAsNote'))}</span>
         </button>
 
         <button class="yps-btn desktop-only" type="button" data-yps-share>
           ${lucide('share-2', 15)}
-          <span>Share</span>
+          <span>${escapeHtml(t('publicShare.viewer.share'))}</span>
         </button>
 
         <button class="yps-icon-btn" type="button" data-yps-theme-toggle>
           ${lucide('sun', 15)}
         </button>
 
-        <button class="yps-icon-btn" type="button" data-yps-menu-button title="Menu">
+        <button class="yps-icon-btn" type="button" data-yps-menu-button title="${escapeAttr(t('publicShare.viewer.menu'))}">
           ${lucide('menu', 18)}
         </button>
       </div>
@@ -1109,7 +1104,7 @@ function bindKeepNoteAction() {
 
   btn.addEventListener('click', async () => {
     btn.disabled = true;
-    btn.innerHTML = `${lucide('loader-circle', 15)} <span>Keeping…</span>`;
+    btn.innerHTML = `${lucide('loader-circle', 15)} <span>${escapeHtml(t('publicShare.viewer.keeping'))}</span>`;
 
     countFunnelEvent('share_keep');
 
@@ -1119,10 +1114,10 @@ function bindKeepNoteAction() {
       console.error(err);
 
       btn.disabled = false;
-      btn.innerHTML = `${lucide('bookmark-plus', 15)} <span>Keep this note</span>`;
+      btn.innerHTML = `${lucide('bookmark-plus', 15)} <span>${escapeHtml(t('publicShare.viewer.keep'))}</span>`;
 
       await yantaAlert({
-        title: 'Could not keep this note',
+        title: t('publicShare.viewer.keepFailed'),
         message: err?.message || String(err),
         icon: 'triangle-alert',
       });
@@ -1134,7 +1129,7 @@ function bindHeaderActions() {
   document.querySelector('[data-yps-save]')?.addEventListener('click', async () => {
     const btn = document.querySelector('[data-yps-save]');
     btn.disabled = true;
-    btn.innerHTML = `${lucide('loader-circle', 15)} <span>Saving…</span>`;
+    btn.innerHTML = `${lucide('loader-circle', 15)} <span>${escapeHtml(t('publicShare.viewer.saving'))}</span>`;
 
     try {
       await savePublicShareAsLocalNote();
@@ -1142,10 +1137,10 @@ function bindHeaderActions() {
       console.error(err);
 
       btn.disabled = false;
-      btn.innerHTML = `${lucide('file-plus', 15)} <span>Save as note</span>`;
+      btn.innerHTML = `${lucide('file-plus', 15)} <span>${escapeHtml(t('publicShare.viewer.saveAsNote'))}</span>`;
 
       await yantaAlert({
-        title: 'Could not save note',
+        title: t('publicShare.viewer.saveFailed'),
         message: err?.message || String(err),
         icon: 'triangle-alert',
       });
@@ -1194,8 +1189,7 @@ function renderFooter(payload) {
   */
   const showBadge = payload?.branding?.madeWithYanta !== false;
 
-  const privacyNote =
-    'Decrypted in your browser — the private key stayed in the link fragment and was never sent to the server.';
+  const privacyNote = escapeHtml(t('publicShare.viewer.privacyNote'));
 
   if (!showBadge) {
     return `
@@ -1210,12 +1204,12 @@ function renderFooter(payload) {
       <a
         class="yps-made-with"
         href="${escapeAttr(location.origin)}"
-        title="Create your own private workspace with YANTA"
+        title="${escapeAttr(t('publicShare.viewer.badgeTitle'))}"
       >
         <span class="brand-mark">${brandLogoSvg()}</span>
-        <strong>Made with YANTA</strong>
+        <strong>${escapeHtml(t('publicShare.viewer.madeWith'))}</strong>
         <span class="yps-made-with-sep">·</span>
-        <span>Private by design</span>
+        <span>${escapeHtml(t('publicShare.viewer.privateByDesign'))}</span>
       </a>
 
       <p>${privacyNote}</p>
@@ -1243,9 +1237,9 @@ function renderKeepNoteAction(note) {
     <div class="yps-keep-row">
       <button class="yps-btn primary" type="button" data-yps-keep-note>
         ${lucide('bookmark-plus', 15)}
-        <span>Keep this note</span>
+        <span>${escapeHtml(t('publicShare.viewer.keep'))}</span>
       </button>
-      <span class="yps-keep-hint">Copies it into your own YANTA. Free, no account.</span>
+      <span class="yps-keep-hint">${escapeHtml(t('publicShare.viewer.keepHint'))}</span>
     </div>
   `;
 }
@@ -1267,20 +1261,20 @@ function renderPage(payload, imageResolver) {
       return url;
     },
 
-    renderDrawEmbedHtml(id, label = 'Drawing') {
+    renderDrawEmbedHtml(id, label = t('draw.untitled')) {
       const drawing = drawingsById.get(id);
-      const title = drawing?.title || label || 'Drawing';
+      const title = drawing?.title || label || t('draw.untitled');
 
       return `
         <section class="yps-public-draw" data-public-draw-id="${escapeAttr(id)}" contenteditable="false">
           <div class="yps-public-draw-head">
             <span class="yps-public-draw-icon">${lucide('line-squiggle', 13)}</span>
             <span class="yps-public-draw-title">${escapeHtml(title)}</span>
-            <span class="yps-public-draw-meta" data-public-draw-meta>Drawing</span>
+            <span class="yps-public-draw-meta" data-public-draw-meta>${escapeHtml(t('draw.untitled'))}</span>
           </div>
 
           <div class="yps-public-draw-body" data-public-draw-body>
-            <div class="yps-public-draw-loading">Drawing loading…</div>
+            <div class="yps-public-draw-loading">${escapeHtml(t('publicShare.viewer.drawingLoading'))}</div>
           </div>
         </section>
       `;
@@ -1305,14 +1299,14 @@ function renderPage(payload, imageResolver) {
         <header class="yps-note-head" style="--note-color:${escapeHtml(color)}">
           <div class="yps-title-row">
             <div class="yps-note-icon">${lucide(note.icon || 'file-text', 23)}</div>
-            <h1>${escapeHtml(note.title || 'Untitled')}</h1>
+            <h1>${escapeHtml(note.title || t('note.untitled'))}</h1>
           </div>
 
           <div class="yps-subline">
-            <span class="yps-pill accent">${lucide('share-2', 12)} Public read-only share</span>
+            <span class="yps-pill accent">${lucide('share-2', 12)} ${escapeHtml(t('publicShare.viewer.readOnlyPill'))}</span>
             ${
               updated
-                ? `<span class="yps-pill">${lucide('clock', 12)} Updated ${escapeHtml(updated)}</span>`
+                ? `<span class="yps-pill">${lucide('clock', 12)} ${escapeHtml(t('publicShare.viewer.updated', { date: updated }))}</span>`
                 : ''
             }
             ${tagHtml}
@@ -1341,25 +1335,33 @@ function renderPage(payload, imageResolver) {
   bindMediaTimestampClicks(document.querySelector('.yps-content'), {
     onError: async (message) => {
       await yantaAlert({
-        title: 'Media timestamp',
+        title: t('publicShare.viewer.mediaTimestamp'),
         message,
         icon: 'circle-alert',
-        confirmLabel: 'OK',
+        confirmLabel: t('common.ok'),
       });
     },
   });
 }
 
 export async function mountPublicShareViewer() {
+  /*
+    The /share/ route never reaches the app boot, so it loads the locale
+    catalogue itself (in parallel with the appearance setup) — otherwise t()
+    would render raw keys. A failed load leaves t() on its key fallback.
+  */
+  const i18nReady = initI18n().catch(() => {});
+
   addPublicSharePageClasses();
   await setupPublicShareAppearance();
   injectCss();
+  await i18nReady;
 
   document.body.innerHTML = `
     <div class="yps-state-wrap">
       <main class="yps-state">
-        <h1>Loading shared note…</h1>
-        <p>Decrypting in your browser.</p>
+        <h1>${escapeHtml(t('publicShare.viewer.loadingTitle'))}</h1>
+        <p>${escapeHtml(t('publicShare.viewer.loadingText'))}</p>
       </main>
     </div>
   `;
@@ -1403,6 +1405,6 @@ export async function mountPublicShareViewer() {
     mountPublicShareSlides(payload);
   } catch (err) {
     console.error('[YANTA Public Share] viewer failed', err);
-    renderState('Could not open shared note', err?.message || String(err));
+    renderState(t('publicShare.viewer.openFailed'), err?.message || String(err));
   }
 }

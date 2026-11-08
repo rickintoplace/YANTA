@@ -25,6 +25,7 @@
 // ============================================================
 
 import { state, store } from '../core.js';
+import { t } from '../i18n/index.js';
 
 import {
   getVaultDoc,
@@ -749,7 +750,7 @@ export class CalendarBridge {
 
       const note = {
         id,
-        title: meta.title || 'Shared note',
+        title: meta.title || t('sharing.sharedNoteTitle'),
         type: meta.type || 'markdown',
         folderId: null,
         tags: Array.isArray(meta.tags) ? [...meta.tags] : ['shared'],

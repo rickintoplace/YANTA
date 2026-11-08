@@ -22,6 +22,7 @@ import { getNoteDoc, noteMarkdown } from '../yjs.js';
 import { countFirstNoteIfActivation } from '../metrics/funnel.js';
 import { openBoundOverlay } from '../overlay-history.js';
 import { yantaPrompt } from '../dialogs.js';
+import { t } from '../i18n/index.js';
 import { eventStartDate } from './template-event.js';
 
 import { BUNDLED_TEMPLATES } from './bundled-templates.js';
@@ -258,7 +259,7 @@ export async function turnCurrentNoteIntoTemplate() {
   const note = state.notes.get(state.currentNoteId);
 
   if (!note) {
-    toast('Open a note first.', 'error');
+    toast(t('templates.openNoteFirst'), 'error');
     return;
   }
 
@@ -269,27 +270,27 @@ export async function turnCurrentNoteIntoTemplate() {
   const markdown = ytext.toString();
 
   if (parseTemplateBlock(markdown)) {
-    toast('This note is already a template.', 'info');
+    toast(t('templates.alreadyTemplate'), 'info');
     return;
   }
 
   const name = await yantaPrompt({
-    title: 'Make this a template',
-    message: 'It will appear under “Start from a template”, and you can share it like any other note.',
-    label: 'Template name',
-    initial: note.title || 'My template',
-    confirmLabel: 'Make template',
+    title: t('templates.make.title'),
+    message: t('templates.make.message'),
+    label: t('templates.make.label'),
+    initial: note.title || t('templates.make.defaultName'),
+    confirmLabel: t('templates.make.confirm'),
   });
 
   if (name === null) return;
 
-  const clean = String(name || '').trim() || note.title || 'My template';
+  const clean = String(name || '').trim() || note.title || t('templates.make.defaultName');
 
   const description = await yantaPrompt({
-    title: 'One line about it',
-    label: 'Description (optional)',
+    title: t('templates.describe.title'),
+    label: t('templates.describe.label'),
     initial: '',
-    confirmLabel: 'Done',
+    confirmLabel: t('common.done'),
   });
 
   if (description === null) return;
@@ -316,7 +317,7 @@ export async function turnCurrentNoteIntoTemplate() {
   note.updated = Date.now();
   await store.notes.put(note);
 
-  toast('Saved as a template.', 'success');
+  toast(t('templates.saved'), 'success');
 }
 
 export function openTemplatePicker() {
@@ -332,15 +333,15 @@ export function openTemplatePicker() {
   // Anything with an unknown category still has to be reachable.
   const known = new Set(TEMPLATE_CATEGORIES.map((c) => c.id));
   const rest = templates.filter((tpl) => !known.has(tpl.meta.category));
-  if (rest.length) groups.push({ id: 'other', label: 'Other', items: rest });
+  if (rest.length) groups.push({ id: 'other', label: t('templates.category.other'), items: rest });
 
   const overlay = el('div', { class: 'modal' });
 
   overlay.innerHTML = `
     <div class="modal-card" style="width:min(760px,94vw);max-height:84vh">
       <header class="modal-head">
-        <h3>Start from a template</h3>
-        <button class="icon-btn" data-tpl-close type="button">&times;</button>
+        <h3>${escapeHtml(t('templates.picker.title'))}</h3>
+        <button class="icon-btn" data-tpl-close type="button" aria-label="${escapeHtml(t('common.close'))}" title="${escapeHtml(t('common.close'))}">&times;</button>
       </header>
 
       <div class="modal-body">
@@ -359,12 +360,12 @@ export function openTemplatePicker() {
                       ? `<span class="yanta-tpl-card-desc">${escapeHtml(tpl.meta.description)}</span>`
                       : ''}
                     ${tpl.event
-                      ? `<span class="yanta-tpl-card-meta">${lucide('calendar-plus', 12)}<span>Brings a date with it</span></span>`
+                      ? `<span class="yanta-tpl-card-meta">${lucide('calendar-plus', 12)}<span>${escapeHtml(t('templates.picker.bringsDate'))}</span></span>`
                       : ''}
                     ${tpl.slides
-                      ? `<span class="yanta-tpl-card-meta">${lucide('presentation', 12)}<span>Five slides, ready to present</span></span>`
+                      ? `<span class="yanta-tpl-card-meta">${lucide('presentation', 12)}<span>${escapeHtml(t('templates.picker.fiveSlides'))}</span></span>`
                       : ''}
-                    ${tpl.own ? '<span class="yanta-tpl-card-badge">Yours</span>' : ''}
+                    ${tpl.own ? `<span class="yanta-tpl-card-badge">${escapeHtml(t('templates.picker.yours'))}</span>` : ''}
                   </button>
                 `).join('')}
               </div>
@@ -405,7 +406,7 @@ export function openTemplatePicker() {
         await createNoteFromTemplate(entry);
       } catch (err) {
         console.error(err);
-        toast('Could not create the note from that template.', 'error');
+        toast(t('templates.createFailed'), 'error');
       }
     });
   });

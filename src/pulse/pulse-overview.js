@@ -710,6 +710,15 @@ async function renderLibraryTab(host, onChange) {
   host.append(pasteLinkRow(onChange));
 }
 
+// Catalog descriptions are shown in the app language; the English text
+// stays the routine's own description once installed (it is note data).
+function catalogDescription(item) {
+  const id = String(item.name || '').replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+  const key = `pulse.library.desc.${id}`;
+  const text = t(key);
+  return text === key ? item.description : text;
+}
+
 function catalogCard(item, onChange) {
   const card = el('div', {
     class: `yanta-pulse-lib-card${item.installed ? ' is-installed' : ''}`,
@@ -719,7 +728,7 @@ function catalogCard(item, onChange) {
   head.innerHTML = `${lucide(item.icon, 15)}<strong>${escapeHtml(item.name)}</strong>`;
   card.append(head);
 
-  card.append(el('p', {}, item.description));
+  card.append(el('p', {}, catalogDescription(item)));
 
   const action = el('button', {
     type: 'button',

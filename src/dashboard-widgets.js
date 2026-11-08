@@ -313,6 +313,18 @@ function injectRegistryCss() {
   cursor: grabbing;
 }
 
+/* The handle is there when reaching for the card, not all the time. On
+   touch screens the order is changed in "Manage widgets". */
+@media (hover: hover) {
+  .yanta-dash-widget-grip { opacity: 0; transition: opacity .12s ease; }
+  .yanta-dash-widget-slot:hover .yanta-dash-widget-grip,
+  .yanta-dash-widget-grip:focus-visible,
+  .yanta-dash-widget-dragging .yanta-dash-widget-grip { opacity: 1; }
+}
+@media (hover: none) {
+  .yanta-dash-widget-grip { display: none !important; }
+}
+
 .yanta-dash-widget-dragging {
   opacity: 0.55;
 }

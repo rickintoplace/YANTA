@@ -9,6 +9,8 @@ import {
   toast,
 } from '../core.js';
 
+import { t } from '../i18n/index.js';
+
 import {
   getNoteDoc,
 } from '../yjs.js';
@@ -811,7 +813,7 @@ export async function addRssFeedCandidate(candidate, {
   tags = [],
 } = {}) {
   if (!candidate) {
-    throw new Error('No RSS/Atom/JSON feed found.');
+    throw new Error(t('rss.err.noFeed'));
   }
 
   const feedUrl = candidate.feedUrl || candidate.url;
@@ -883,7 +885,7 @@ export async function findRssSourceCandidates(input, {
   const normalized = cleanUniversalSourceInput(input);
 
   if (!normalized.value) {
-    throw new Error('Enter a source name, website, domain, YouTube channel or feed URL.');
+    throw new Error(t('rss.err.emptyInput'));
   }
 
   const directFeed = directFeedCandidateFromUrl(normalized.value);
@@ -973,7 +975,7 @@ export async function addRssFeedFromUniversalInput(input, {
   const first = candidates[0];
 
   if (!first) {
-    throw new Error('No RSS/Atom/JSON/YouTube source found. Try a website URL, feed URL, YouTube channel URL, @handle or channel ID.');
+    throw new Error(t('rss.err.noSource'));
   }
 
   return addRssFeedCandidate(first, {
@@ -1015,7 +1017,7 @@ export async function addRssFeedFromUrl(inputUrl, {
   const first = candidates[0];
 
   if (!first) {
-    throw new Error('No RSS/Atom/JSON feed found.');
+    throw new Error(t('rss.err.noFeed'));
   }
 
   return addRssFeedCandidate(first, {
@@ -1149,17 +1151,17 @@ export async function loadMoreRssFeedItems(feedId) {
   if (!feed) throw new Error('Feed not found.');
 
   if (!isYoutubeFeed(feed)) {
-    throw new Error('Load more is currently available for YouTube sources.');
+    throw new Error(t('rss.err.loadMoreYoutubeOnly'));
   }
 
   if (!feed.channelId) {
-    throw new Error('This YouTube source has no channel id. Re-add the channel once.');
+    throw new Error(t('rss.err.noChannelId'));
   }
 
   const minMs = 20_000;
 
   if (feed.lastYoutubeMoreAt && Date.now() - feed.lastYoutubeMoreAt < minMs) {
-    throw new Error('Please wait a few seconds before loading more videos.');
+    throw new Error(t('rss.err.waitBeforeMore'));
   }
 
   /*
@@ -1542,14 +1544,14 @@ export async function saveRssItemAsNote(itemId, {
     },
   }));
 
-  toast('Saved source item as note', 'success');
+  toast(t('rss.savedAsNote'), 'success');
 
   return note;
 }
 
 export async function appendRssItemToCurrentNote(itemId) {
   if (!state.currentNoteId) {
-    throw new Error('Open a note first.');
+    throw new Error(t('rss.err.openNoteFirst'));
   }
 
   const item = await getRssItem(itemId);
@@ -1590,7 +1592,7 @@ export async function appendRssItemToCurrentNote(itemId) {
     },
   }));
 
-  toast('Added source item to current note', 'success');
+  toast(t('rss.appendedToNote'), 'success');
 }
 
 /*
@@ -1749,7 +1751,7 @@ export async function sendRssItemAsChatEmbedAction({
     const client = await resolveMatrixClient();
 
     if (!client) {
-      toast('Chat is not connected.', 'error');
+      toast(t('rss.chatNotConnected'), 'error');
       throw new Error('Matrix client is not available.');
     }
 
@@ -1774,7 +1776,7 @@ export async function sendRssItemAsChatEmbedAction({
       },
     }));
 
-    toast('Source sent to Chat', 'success');
+    toast(t('rss.sentToChat'), 'success');
 
     return {
       ok: true,
@@ -1783,7 +1785,7 @@ export async function sendRssItemAsChatEmbedAction({
     };
   } catch (err) {
     console.warn('[YANTA RSS] Could not send source item to Chat', err);
-    toast('Could not send source to Chat.', 'error');
+    toast(t('rss.sendToChatFailed'), 'error');
     throw err;
   }
 }

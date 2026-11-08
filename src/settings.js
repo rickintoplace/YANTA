@@ -7,7 +7,7 @@
 // ============================================================
 
 import { isChatEnabled } from './chat/chat-enabled.js';
-import { $, el, state, store, toast, lucide, safeCssColor, cssColorToHex, fmtBytes, updateStorageMeter } from './core.js';
+import { $, el, state, store, toast, lucide, escapeHtml, safeCssColor, cssColorToHex, fmtBytes, updateStorageMeter } from './core.js';
 import { LOCALES, getLocale, hasExplicitLocale, setLocale, clearLocale, t } from './i18n/index.js';
 import {
   getDashboardCardDisplayPrefs,
@@ -27,6 +27,9 @@ import {
 
 import {
   FLOATING_CREATE_ACTION_CATALOG,
+  floatingCreateActionLabel,
+  floatingCreateDefaultLabel,
+  floatingCreateLabelToStore,
   FLOATING_CREATE_MIN_DISTANCE,
   FLOATING_CREATE_BOUNDS,
   getFloatingCreateSettings,
@@ -925,16 +928,16 @@ function upgradeSupersededPalettes(source) {
 
 // Font stacks the user can pick from.
 export const FONT_OPTIONS = [
-  { id: 'system',     label: 'System sans',        stack: '-apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif' },
+  { id: 'system',     label: 'System sans',        labelKey: 'settings.typography.fontSystemSans', stack: '-apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, Helvetica, Arial, sans-serif' },
   { id: 'inter',      label: 'Inter',              stack: '"Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif' },
-  { id: 'serif',      label: 'Serif',              stack: 'Georgia, "Times New Roman", "Iowan Old Style", serif' },
+  { id: 'serif',      label: 'Serif',              labelKey: 'settings.typography.fontSerif', stack: 'Georgia, "Times New Roman", "Iowan Old Style", serif' },
   { id: 'merriweather', label: 'Merriweather-ish', stack: '"Charter", "Iowan Old Style", "Apple Garamond", Georgia, serif' },
-  { id: 'humanist',   label: 'Humanist',           stack: 'Optima, Candara, "Trebuchet MS", sans-serif' },
-  { id: 'rounded',    label: 'Rounded',            stack: 'ui-rounded, "SF Pro Rounded", "Nunito", system-ui, sans-serif' },
+  { id: 'humanist',   label: 'Humanist',           labelKey: 'settings.typography.fontHumanist', stack: 'Optima, Candara, "Trebuchet MS", sans-serif' },
+  { id: 'rounded',    label: 'Rounded',            labelKey: 'settings.typography.fontRounded', stack: 'ui-rounded, "SF Pro Rounded", "Nunito", system-ui, sans-serif' },
 ];
 
 export const MONO_OPTIONS = [
-  { id: 'system',   label: 'System mono',  stack: 'ui-monospace, SFMono-Regular, "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace' },
+  { id: 'system',   label: 'System mono',  labelKey: 'settings.typography.fontSystemMono', stack: 'ui-monospace, SFMono-Regular, "JetBrains Mono", "Cascadia Code", Menlo, Consolas, monospace' },
   { id: 'jetbrains', label: 'JetBrains-ish', stack: '"JetBrains Mono", "Fira Code", ui-monospace, monospace' },
   { id: 'fira',     label: 'Fira-ish',     stack: '"Fira Code", "JetBrains Mono", ui-monospace, monospace' },
   { id: 'iaWriter', label: 'iA Writer-ish', stack: '"iA Writer Mono S", "iA Writer Duo S", "JetBrains Mono", ui-monospace, monospace' },
@@ -1171,6 +1174,12 @@ function tryReadSystemAccent() {
   return null;
 }
 
+// 'system-colors' is camelCased in the catalog (settings.appearance.modes).
+function appearanceModeLabel(mode) {
+  const key = mode === 'system-colors' ? 'systemColors' : mode;
+  return t(`settings.appearance.modes.${key}.label`);
+}
+
 export async function cycleAppearanceMode() {
   const order = ['auto', 'dark', 'light'];
   const a = getAppearance();
@@ -1179,7 +1188,7 @@ export async function cycleAppearanceMode() {
   const next = order[(order.indexOf(current) + 1) % order.length];
 
   await saveAppearance({ mode: next });
-  toast(`Theme: ${next}`, 'success');
+  toast(t('settings.appearance.themeToast', { mode: appearanceModeLabel(next) }), 'success');
 }
 
 export function applyAppearance() {
@@ -1195,7 +1204,10 @@ export function applyAppearance() {
 
   const themeBtn = $('btn-theme');
   if (themeBtn) {
-    themeBtn.title = `Theme: ${a.mode} → ${mode} (click to cycle)`;
+    themeBtn.title = t('settings.appearance.themeButtonTitleResolved', {
+      setting: appearanceModeLabel(a.mode || 'auto'),
+      mode: appearanceModeLabel(mode),
+    });
   }
 
   const palette = (a.colors && a.colors[mode]) || DEFAULT_THEMES[mode];
@@ -1828,13 +1840,27 @@ function renderColorPresetPicker(targetMode, appearanceSettings) {
     grid.append(schemeCard({
       colors: preset.colors,
       name: preset.name,
-      description: preset.description,
+      description: presetDescription(preset),
       active: preset === matched,
       onclick: () => applyColorPreset(targetMode, preset),
     }));
   }
 
   return grid;
+}
+
+// Preset names are proper names and stay as they are; the one-line
+// descriptions come from the catalog by preset id (camelCased).
+function presetDescription(preset) {
+  const id = String(preset.id || '').replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+  const key = `settings.presets.${id}`;
+  const text = t(key);
+  return text === key ? preset.description : text;
+}
+
+// Generic font names are translated; named families (Inter, Fira-ish…) are not.
+function fontLabel(f) {
+  return f.labelKey ? t(f.labelKey) : f.label;
 }
 
 function renderColorTokenEditors(host, targetMode, a) {
@@ -1959,7 +1985,7 @@ onclick: async () => {
 },
     });
     card.innerHTML = `
-      <div class="yanta-settings-font-name">${f.label}</div>
+      <div class="yanta-settings-font-name">${escapeHtml(fontLabel(f))}</div>
       <div class="yanta-settings-font-sample">${t('settings.typography.bodySample')}</div>
     `;
     fontGrid.append(card);
@@ -1981,7 +2007,7 @@ onclick: async () => {
 },
     });
     card.innerHTML = `
-      <div class="yanta-settings-font-name">${f.label}</div>
+      <div class="yanta-settings-font-name">${escapeHtml(fontLabel(f))}</div>
       <div class="yanta-settings-font-sample">const x = 42;</div>
     `;
     monoGrid.append(card);
@@ -2097,6 +2123,16 @@ function renderQuickCreateSection(host) {
 
   const settings = getFloatingCreateSettings();
 
+  const showGroup = el('div', { class: 'yanta-settings-group' });
+  showGroup.append(renderSettingsToggleRow({
+    checked: settings.visible !== false,
+    label: t('settings.quickCreate.showButton'),
+    hint: t('settings.quickCreate.showButtonHint'),
+    onChange: (checked) => persistQuickCreateSettings({ ...cloneQuickCreateSettings(settings), visible: checked }),
+  }));
+  host.append(showGroup);
+  if (settings.visible === false) return;
+
   host.append(renderQuickCreateIconGroup(settings));
   host.append(renderQuickCreateActionsGroup(settings));
   host.append(renderQuickCreateLayoutEditor(settings));
@@ -2207,7 +2243,7 @@ function renderQuickCreateActionsGroup(settings) {
           const pos = suggestFloatingCreatePosition(next.actions);
 
           action.enabled = true;
-          action.label = action.label || cat.defaultLabel;
+          action.label = floatingCreateLabelToStore(cat.id, action.label);
           action.icon = action.icon || cat.defaultIcon;
           action.x = pos.x;
           action.y = pos.y;
@@ -2224,7 +2260,8 @@ function renderQuickCreateActionsGroup(settings) {
         },
       });
 
-      btn.innerHTML = `${lucide(cat.defaultIcon, 14)} ${cat.defaultLabel}`;
+      btn.innerHTML = `${lucide(cat.defaultIcon, 14)} `;
+      btn.append(floatingCreateDefaultLabel(cat.id));
       addRow.append(btn);
     }
 
@@ -2236,7 +2273,7 @@ function renderQuickCreateActionsGroup(settings) {
 
 function renderQuickCreateActionRow(settings, action) {
   const cat = quickCreateCatalogItem(action.id);
-  const label = action.label || cat?.defaultLabel || action.id;
+  const label = floatingCreateActionLabel(action);
 
   const row = el('div', {
     class: 'yanta-qc-settings-row',
@@ -2290,7 +2327,7 @@ function renderQuickCreateActionRow(settings, action) {
     const a = quickCreateActionById(next, action.id);
     if (!a) return;
 
-    a.label = labelInput.value.trim() || cat?.defaultLabel || action.id;
+    a.label = floatingCreateLabelToStore(action.id, labelInput.value);
 
     persistQuickCreateSettings(next, {
       rerender: false,

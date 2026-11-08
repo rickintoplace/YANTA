@@ -13,6 +13,7 @@ import {
 } from './core.js';
 
 import { isChatEnabled } from './chat/chat-enabled.js';
+import { t } from './i18n/index.js';
 
 import {
   newNote,
@@ -57,48 +58,56 @@ export const CREATE_ACTIONS = [
   {
     id: 'capture',
     label: 'Quick capture',
+    labelKey: 'floatingCreate.action.capture',
     icon: 'zap',
     resultType: 'capture',
   },
   {
     id: 'folder',
     label: 'New folder',
+    labelKey: 'floatingCreate.action.folder',
     icon: 'folder-plus',
     resultType: 'folder',
   },
   {
     id: 'note',
     label: 'New note',
+    labelKey: 'floatingCreate.action.note',
     icon: 'file-text',
     resultType: 'note',
   },
   {
     id: 'list',
     label: 'New checklist',
+    labelKey: 'floatingCreate.action.list',
     icon: 'list-checks',
     resultType: 'note',
   },
   {
     id: 'drawing',
     label: 'New drawing',
+    labelKey: 'floatingCreate.action.drawing',
     icon: 'line-squiggle',
     resultType: 'note',
   },
   {
     id: 'image',
     label: 'New image',
+    labelKey: 'floatingCreate.action.image',
     icon: 'image',
     resultType: 'note',
   },
   {
     id: 'event',
     label: 'New event',
+    labelKey: 'floatingCreate.action.event',
     icon: 'calendar-plus',
     resultType: 'calendar-event',
   },
   {
     id: 'rss',
     label: 'Open Sources',
+    labelKey: 'createActions.openSources',
     icon: 'rss',
     resultType: 'sources',
   },
@@ -109,6 +118,7 @@ export const CREATE_ACTIONS = [
   ...(isChatEnabled() ? [{
     id: 'chat',
     label: 'Open Chat',
+    labelKey: 'createActions.openChat',
     icon: 'messages-square',
     resultType: 'chat',
   }] : []),
@@ -170,7 +180,7 @@ async function createFolder(folderId, {
     dashboardSidePaneOpen();
 
   const folder = await newFolder(folderId || null, {
-    name: 'New folder',
+    name: t('tree.newFolder'),
     focusRename: !renameInDashboard,
     source,
   });
@@ -383,7 +393,7 @@ export async function runCreateAction(actionId, {
       err,
     });
 
-    toast('Create action failed', 'error');
+    toast(t('createActions.failed'), 'error');
 
     throw err;
   }
@@ -408,7 +418,7 @@ export function openCreateMenu(anchor, {
     x,
     rect.bottom + 6,
     CREATE_ACTIONS.map((action) => ({
-      label: action.label,
+      label: t(action.labelKey),
       icon: action.icon,
       action: async () => {
         const result = await runCreateAction(action.id, {

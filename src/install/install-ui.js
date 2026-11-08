@@ -15,6 +15,7 @@ import {
 } from '../core.js';
 
 import { BRAND_LOGO_SVG } from '../brand-logo.js';
+import { t } from '../i18n/index.js';
 
 import { renderBrandedQrSvg } from '../qr.js';
 import { openBoundOverlay } from '../overlay-history.js';
@@ -164,22 +165,23 @@ function injectCss() {
   document.head.append(style);
 }
 
+// Catalog keys, resolved at render time.
 const PERFECT_COPY = {
   'android-app': {
-    title: 'You’re all set',
-    body: 'You’re using the YANTA Android app — reminders and chat arrive as reliable system notifications.',
+    title: 'install.perfect.allSet',
+    body: 'install.perfect.androidApp',
   },
   'desktop-pwa': {
-    title: 'Great setup',
-    body: 'YANTA is installed and notifications are on. Everything will reach you as system notifications.',
+    title: 'install.perfect.greatSetup',
+    body: 'install.perfect.desktopPwa',
   },
   'ios-pwa': {
-    title: 'You’re all set',
-    body: 'YANTA is on your Home Screen with notifications enabled.',
+    title: 'install.perfect.allSet',
+    body: 'install.perfect.iosPwa',
   },
   default: {
-    title: 'You’re all set',
-    body: 'Nothing to do here — your setup already delivers reliable notifications.',
+    title: 'install.perfect.allSet',
+    body: 'install.perfect.default',
   },
 };
 
@@ -190,13 +192,13 @@ function notificationStatusRow(rec) {
   if (!notifications.supported) {
     return el('div', { class: 'yanta-install-status' },
       lucideEl('bell-off'),
-      el('span', {}, 'This browser can’t show notifications. Install YANTA or use a different browser.'));
+      el('span', {}, t('install.status.unsupported')));
   }
 
   if (notifications.permission === 'denied') {
     return el('div', { class: 'yanta-install-status' },
       lucideEl('bell-off'),
-      el('span', {}, 'Notifications are blocked. Re-enable them in your browser’s site settings for YANTA.'));
+      el('span', {}, t('install.status.blocked')));
   }
 
   if (notifications.permission === 'granted') {
@@ -204,7 +206,7 @@ function notificationStatusRow(rec) {
     // this a simple confirmation so the two surfaces don't duplicate.
     return el('div', { class: 'yanta-install-status ok' },
       lucideEl('bell-ring'),
-      el('span', {}, 'Notifications are enabled on this device.'));
+      el('span', {}, t('install.status.enabled')));
   }
 
   return null;
@@ -244,8 +246,8 @@ function qrElement(url) {
 
   const body = el('div', { class: 'yanta-install-qr-body' });
   body.append(
-    el('strong', {}, 'Scan with your phone'),
-    el('small', {}, 'Point your camera at the code to open the install page on your phone.'),
+    el('strong', {}, t('install.qr.title')),
+    el('small', {}, t('install.qr.hint')),
     el('small', {}, url),
   );
 
@@ -315,11 +317,11 @@ async function runCta(cta, ctx) {
     case 'prompt-install': {
       const outcome = await promptInstall();
       if (outcome === 'accepted') {
-        toast('Installing YANTA…', 'success');
+        toast(t('install.toast.installing'), 'success');
       } else if (outcome === 'unavailable') {
         // No programmatic prompt (or already used) — show manual steps.
         expanded.add(rec.id);
-        toast('Follow the steps to finish installing.');
+        toast(t('install.toast.followSteps'));
       }
       rerender();
       return;
@@ -346,8 +348,8 @@ async function runCta(cta, ctx) {
 
     case 'enable-notifications': {
       const result = await requestWebNotificationPermission();
-      if (result === 'granted') toast('Notifications enabled.', 'success');
-      else if (result === 'denied') toast('Notifications are blocked in your browser settings.', 'error');
+      if (result === 'granted') toast(t('install.toast.enabled'), 'success');
+      else if (result === 'denied') toast(t('install.toast.blocked'), 'error');
       rerender();
       return;
     }
@@ -383,8 +385,8 @@ export function installCardElement({ onResolved } = {}) {
       card.append(el('div', { class: 'yanta-install-perfect' },
         lucideEl('check-circle-2', 22),
         el('div', {},
-          el('strong', {}, copy.title),
-          el('small', {}, copy.body))));
+          el('strong', {}, t(copy.title)),
+          el('small', {}, t(copy.body)))));
 
       if (statusRow) card.append(statusRow);
       onResolved?.();
@@ -435,8 +437,8 @@ export function openInstallModal() {
   const card = el('div', { class: 'modal-card' });
 
   const head = el('header', { class: 'modal-head' },
-    el('h3', {}, 'Install YANTA'),
-    el('button', { class: 'icon-btn', title: 'Close', onclick: closeInstallModal }, '✕'));
+    el('h3', {}, t('install.title')),
+    el('button', { class: 'icon-btn', title: t('common.close'), 'aria-label': t('common.close'), onclick: closeInstallModal }, '✕'));
 
   const body = el('div', { class: 'modal-body' });
   body.append(installCardElement({

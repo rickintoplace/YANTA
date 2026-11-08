@@ -10,6 +10,7 @@ import {
   escapeHtml,
 } from './core.js';
 import { t as i18n } from './i18n/index.js';
+import { folderLabel } from './folder-labels.js';
 
 import {
   openNote,
@@ -839,7 +840,7 @@ import { EVT, emit, shouldIgnoreInvisibleSyncEvent } from './events.js';
   
   function itemTitle(item) {
     if (item.kind === 'note') return item.note.title || i18n('note.untitled');
-    return item.folder.name || i18n('items.folderFallback');
+    return folderLabel(item.folder);
   }
   
   function itemIcon(item) {
@@ -2663,7 +2664,7 @@ function renderDashboardHeader() {
       }
     },
   }, dashboard.folderId
-    ? (path.at(-1)?.name || i18n('items.folderFallback'))
+    ? folderLabel(path.at(-1))
     : currentGreeting({
         // The name resolves async (settings/Matrix) — patch in place.
         onUpdate: (text) => {
@@ -2687,10 +2688,13 @@ function renderDashboardHeader() {
       type: 'button',
       'data-dashboard-folder-crumb': f.id,
       onclick: () => navigateDashboardFolder(f.id),
-    }, f.name || i18n('items.folderFallback')));
+    }, folderLabel(f)));
   }
 
-  titleWrap.append(title, crumb);
+  // At the top level the greeting is the title; a breadcrumb that only
+  // says "Start" under it would name the place twice.
+  titleWrap.append(title);
+  if (path.length) titleWrap.append(crumb);
 
   // "Alice shared this folder with you" — only ever on a folder you did
   // not create yourself.
@@ -2845,8 +2849,8 @@ function renderDashboardHeader() {
   
     box.innerHTML = `
       <div class="yanta-dashboard-empty-icon">${lucide('folder-open', 30)}</div>
-      <strong>This folder is empty</strong>
-      <p>Add a note here.</p>
+      <strong>${escapeHtml(i18n('dashboard.folderEmptyTitle'))}</strong>
+      <p>${escapeHtml(i18n('dashboard.folderEmptyHint'))}</p>
     `;
   
     const btn = el('button', {
@@ -3676,7 +3680,7 @@ function folderPreviewItems(folderId) {
     kind: 'folder',
     id: folder.id,
     folder,
-    title: folder.name || i18n('items.folderFallback'),
+    title: folderLabel(folder),
     icon: defaultIconForFolder(folder),
     color: safeCssColor(folder.color) || '',
     order: fallbackOrderForFolder(folder),
@@ -3988,7 +3992,7 @@ function renderFolderMiniNoteBlock(noteId, block) {
       class: 'yanta-dash-folder-mini-media video',
     });
 
-    media.innerHTML = `${lucide('play', 12)} <span>Video</span>`;
+    media.innerHTML = `${lucide('play', 12)} <span>${escapeHtml(i18n('dashboard.video'))}</span>`;
 
     return media;
   }
@@ -4005,7 +4009,7 @@ function renderFolderMiniImage(block) {
     class: 'yanta-dash-folder-mini-media image',
   });
 
-  media.innerHTML = `${lucide('image', 12)} <span>Image</span>`;
+  media.innerHTML = `${lucide('image', 12)} <span>${escapeHtml(i18n('dashboard.mediaImage'))}</span>`;
 
   resolveDashboardImageUrl(block.url)
     .then((src) => {
@@ -4030,7 +4034,7 @@ function renderFolderMiniDrawing(noteId, block) {
     class: 'yanta-dash-folder-mini-media drawing',
   });
 
-  media.innerHTML = `${lucide('line-squiggle', 12)} <span>Drawing</span>`;
+  media.innerHTML = `${lucide('line-squiggle', 12)} <span>${escapeHtml(i18n('dashboard.mediaDrawing'))}</span>`;
 
   import('./draw.js')
     .then(async ({ drawingThumbnailUrl }) => {

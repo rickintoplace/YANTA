@@ -25,6 +25,9 @@ import {
   listOwnPublicShares,
 } from './public-share-api.js';
 
+// `t` is a local timestamp further down — the translator is i18n here.
+import { t as i18n } from '../i18n/index.js';
+
 const LOCAL_PUBLIC_SHARE_STATUS_KEY = 'yanta.publicShares.local.v1';
 
 export const PUBLIC_SHARE_BRANDING_SETTING = 'publicShare.showBranding';
@@ -386,7 +389,7 @@ export async function stopPublicShareById(shareId, {
   }
 
   if (showToast) {
-    toast('Public sharing stopped', 'success');
+    toast(i18n('publicShare.publisher.stopped'), 'success');
   }
 
   return true;
@@ -447,9 +450,9 @@ export async function stopAllPublicShares({
 
   if (showToast) {
     if (failed) {
-      toast(`Stopped ${stopped}; ${failed} failed`, 'error');
+      toast(i18n('publicShare.publisher.stoppedSome', { stopped, failed }), 'error');
     } else {
-      toast(`Stopped sharing for ${stopped} note${stopped === 1 ? '' : 's'}`, 'success');
+      toast(i18n('publicShare.publisher.stoppedAll', { count: stopped }), 'success');
     }
   }
 

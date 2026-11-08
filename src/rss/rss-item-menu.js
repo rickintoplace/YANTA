@@ -9,6 +9,7 @@
 
 import { toast, safeUrl } from '../core.js';
 import { openNote } from '../notes.js';
+import { t } from '../i18n/index.js';
 
 import {
   saveRssItemAsNote,
@@ -49,7 +50,7 @@ export async function pickChatRoomAndSendRssItem(item, x, y) {
   } catch {}
 
   if (!client) {
-    toast('Chat is not connected — enable Chat first', 'error');
+    toast(t('rss.menu.chatNotConnected'), 'error');
     return;
   }
 
@@ -61,26 +62,26 @@ export async function pickChatRoomAndSendRssItem(item, x, y) {
     .slice(0, 14);
 
   if (!rooms.length) {
-    toast('No chats yet — start a chat first', 'error');
+    toast(t('rss.menu.noChats'), 'error');
     return;
   }
 
   await menuAt(x, y, [
     {
-      label: `Send "${(item.title || 'Untitled').slice(0, 40)}" to…`,
+      label: t('rss.menu.sendTo', { title: (item.title || t('note.untitled')).slice(0, 40) }),
       disabled: true,
       meta: true,
     },
     'hr',
     ...rooms.map((room) => ({
-      label: room.name || 'Chat',
+      label: room.name || t('rss.menu.chatFallback'),
       icon: 'message-circle',
       action: guarded(
         () => sendRssItemAsChatEmbedAction({
           itemId: item.id,
           roomId: room.roomId,
         }),
-        'Could not send to chat'
+        t('rss.menu.sendFailed')
       ),
     })),
   ]);
@@ -105,9 +106,9 @@ export async function openRssItemContextMenu({
 
   if (onOpen) {
     entries.push({
-      label: 'Open',
+      label: t('rss.menu.open'),
       icon: 'book-open',
-      action: guarded(() => onOpen(item), 'Could not open item'),
+      action: guarded(() => onOpen(item), t('rss.menu.openFailed')),
     });
   }
 
@@ -117,7 +118,7 @@ export async function openRssItemContextMenu({
 
   if (originalUrl && /^https?:/i.test(originalUrl)) {
     entries.push({
-      label: 'Open original',
+      label: t('rss.menu.openOriginal'),
       icon: 'external-link',
       action: () => window.open(originalUrl, '_blank', 'noopener'),
     });
@@ -126,58 +127,58 @@ export async function openRssItemContextMenu({
   entries.push(
     'hr',
     {
-      label: 'Save as note',
+      label: t('rss.menu.saveAsNote'),
       icon: 'file-plus',
       action: guarded(async () => {
         const note = await saveRssItemAsNote(item.id);
         if (note?.id) await openNote(note.id);
-      }, 'Could not save item'),
+      }, t('rss.menu.saveFailed')),
     },
     {
-      label: 'Append to current note',
+      label: t('rss.menu.appendToNote'),
       icon: 'list-plus',
-      action: guarded(() => appendRssItemToCurrentNote(item.id), 'Could not append item'),
+      action: guarded(() => appendRssItemToCurrentNote(item.id), t('rss.menu.appendFailed')),
     },
     {
-      label: 'Send to chat…',
+      label: t('rss.menu.sendToChat'),
       icon: 'send',
       action: () => pickChatRoomAndSendRssItem(item, x, y),
     },
     'hr',
     {
-      label: item.starred ? 'Unstar' : 'Star',
+      label: item.starred ? t('rss.menu.unstar') : t('rss.menu.star'),
       icon: 'star',
       action: guarded(async () => {
         await toggleRssItemStar(item.id);
         await changed();
-      }, 'Could not update item'),
+      }, t('rss.menu.updateFailed')),
     },
     {
-      label: item.read ? 'Mark as unread' : 'Mark as read',
+      label: item.read ? t('rss.menu.markUnread') : t('rss.menu.markRead'),
       icon: item.read ? 'mail' : 'mail-open',
       action: guarded(async () => {
         await markRssItemRead(item.id, !item.read);
         await changed();
-      }, 'Could not update item'),
+      }, t('rss.menu.updateFailed')),
     },
     {
-      label: item.archived ? 'Restore' : 'Archive',
+      label: item.archived ? t('rss.menu.restore') : t('rss.menu.archive'),
       icon: item.archived ? 'archive-restore' : 'archive',
       action: guarded(async () => {
         await archiveRssItem(item.id, !item.archived);
         await changed();
-      }, 'Could not archive item'),
+      }, t('rss.menu.archiveFailed')),
     }
   );
 
   if (item.url) {
     entries.push('hr', {
-      label: 'Copy link',
+      label: t('rss.menu.copyLink'),
       icon: 'link',
       action: guarded(async () => {
         await navigator.clipboard.writeText(item.url);
-        toast('Link copied', 'success');
-      }, 'Copy failed'),
+        toast(t('rss.menu.linkCopied'), 'success');
+      }, t('rss.menu.copyFailed')),
     });
   }
 

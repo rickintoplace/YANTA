@@ -27,6 +27,8 @@ import {
   yantaAlert,
 } from '../dialogs.js';
 
+import { t } from '../i18n/index.js';
+
 const PENDING_YANTA_EVENT_KEY = 'yanta.publicShare.pendingCalendarEvent.v1';
 
 let shareModal = null;
@@ -460,23 +462,23 @@ export function updatePublicShareThemeButtons(root = document) {
   document.documentElement.setAttribute('data-public-share-theme', mode);
 
   let icon = 'laptop';
-  let label = 'System theme';
+  let label = t('publicShare.theme.system');
   if (configMode === 'light') {
     icon = 'sun';
-    label = 'Light theme';
+    label = t('publicShare.theme.lightTheme');
   } else if (configMode === 'dark') {
     icon = 'moon';
-    label = 'Dark theme';
+    label = t('publicShare.theme.darkTheme');
   }
 
   root.querySelectorAll('[data-yps-theme-toggle]').forEach((btn) => {
     const visibleLabel = btn.querySelector('[data-yps-theme-label]');
 
-    btn.title = `Theme: ${label}`;
-    btn.setAttribute('aria-label', `Theme: ${label}`);
+    btn.title = t('publicShare.theme.label', { label });
+    btn.setAttribute('aria-label', t('publicShare.theme.label', { label }));
 
     if (visibleLabel) {
-      btn.innerHTML = `${lucide(icon, 15)} <span data-yps-theme-label>${label}</span>`;
+      btn.innerHTML = `${lucide(icon, 15)} <span data-yps-theme-label>${escapeHtml(label)}</span>`;
     } else {
       btn.innerHTML = lucide(icon, 16);
     }
@@ -527,9 +529,9 @@ export function showThemeDropdown(buttonEl) {
   const currentMode = safeGetAppearanceMode();
 
   const options = [
-    { value: 'light', label: 'Light', icon: 'sun' },
-    { value: 'dark', label: 'Dark', icon: 'moon' },
-    { value: 'auto', label: 'System', icon: 'laptop' },
+    { value: 'light', label: t('publicShare.theme.light'), icon: 'sun' },
+    { value: 'dark', label: t('publicShare.theme.dark'), icon: 'moon' },
+    { value: 'auto', label: t('publicShare.theme.auto'), icon: 'laptop' },
   ];
 
   menu.innerHTML = options.map((opt) => {
@@ -538,7 +540,7 @@ export function showThemeDropdown(buttonEl) {
       <button type="button" class="yps-theme-menu-item ${isActive ? 'is-active' : ''}" data-yps-theme-set="${opt.value}">
         <span class="radio-dot"></span>
         ${lucide(opt.icon, 14)}
-        <span>${opt.label}</span>
+        <span>${escapeHtml(opt.label)}</span>
       </button>
     `;
   }).join('');
@@ -685,7 +687,7 @@ function closeShareFallbackModal() {
 }
 
 function setButtonCopied(btn, {
-  copiedLabel = 'Copied',
+  copiedLabel = t('publicShare.copied'),
   duration = 1300,
 } = {}) {
   if (!btn) return;
@@ -723,10 +725,10 @@ async function copyTextWithButtonFeedback(text, btn) {
     console.warn('[YANTA Public Share] copy failed', err);
 
     await yantaAlert({
-      title: 'Copy failed',
+      title: t('publicShare.copyFailed'),
       message: text,
       icon: 'copy',
-      confirmLabel: 'Close',
+      confirmLabel: t('common.close'),
     });
 
     return false;
@@ -735,15 +737,15 @@ async function copyTextWithButtonFeedback(text, btn) {
 
 export async function openShareFallbackModal({
   url = location.href,
-  title = 'YANTA Public Share',
+  title = t('publicShare.viewer.shareTitle'),
 } = {}) {
   const modal = ensureShareFallbackModal();
 
   modal.innerHTML = `
     <div class="yps-modal-card">
       <header class="yps-modal-head">
-        <h3>${escapeHtml(title || 'Share')}</h3>
-        <button class="yps-icon-btn" type="button" data-yps-share-fallback-close title="Close">
+        <h3>${escapeHtml(title || t('publicShare.viewer.share'))}</h3>
+        <button class="yps-icon-btn" type="button" data-yps-share-fallback-close title="${escapeAttr(t('common.close'))}">
           ${lucide('x', 16)}
         </button>
       </header>
@@ -755,7 +757,7 @@ export async function openShareFallbackModal({
           <input readonly value="${escapeAttr(url)}" data-yps-share-link />
           <button class="yps-btn primary" type="button" data-yps-copy-share-link>
             ${lucide('copy', 14)}
-            <span>Copy link</span>
+            <span>${escapeHtml(t('publicShare.viewer.copyLink'))}</span>
           </button>
         </div>
       </div>
@@ -773,7 +775,7 @@ export async function openShareFallbackModal({
 
 export async function sharePublicPage({
   url = location.href,
-  title = 'YANTA Public Share',
+  title = t('publicShare.viewer.shareTitle'),
   text = title,
 } = {}) {
   if (navigator.share) {
@@ -914,7 +916,7 @@ function providerDates(ev = {}) {
 }
 
 function eventUrlParams(ev = {}) {
-  const title = ev.title || 'Untitled event';
+  const title = ev.title || t('publicShare.untitledEvent');
   const details = ev.description || '';
   const location = ev.location || '';
 
@@ -971,7 +973,7 @@ function yahooCalendarUrl(ev) {
 function normalizePublicEvent(raw = {}) {
   return {
     id: String(raw.id || raw.externalUid || uid()),
-    title: String(raw.title || raw.summary || 'Untitled event'),
+    title: String(raw.title || raw.summary || t('publicShare.untitledEvent')),
     start: raw.start || '',
     end: raw.end || null,
     allDay: !!raw.allDay,
@@ -1037,7 +1039,7 @@ function publicEventForYantaCalendar(raw = {}) {
 
   return {
     id: 'evt_' + uid(),
-    title: ev.title || 'Untitled event',
+    title: ev.title || t('publicShare.untitledEvent'),
     start: ev.start,
     end: ev.end || null,
     allDay: !!ev.allDay,
@@ -1072,12 +1074,12 @@ async function addEventToYantaCalendar(raw) {
   const saved = calendar.putCalendarEvent?.(ev);
 
   await yantaAlert({
-    title: saved ? 'Added to YANTA Calendar' : 'Could not add event',
+    title: saved ? t('publicShare.calendar.added') : t('publicShare.calendar.addFailed'),
     message: saved
-      ? `"${ev.title}" was saved to your local YANTA Calendar.`
-      : 'The event could not be saved.',
+      ? t('publicShare.calendar.addedMessage', { title: ev.title })
+      : t('publicShare.calendar.addFailedMessage'),
     icon: saved ? 'calendar-check' : 'triangle-alert',
-    confirmLabel: 'Done',
+    confirmLabel: t('common.done'),
   });
 
   return saved;
@@ -1106,19 +1108,19 @@ export function renderPublicShareCalendarSectionHtml(payload = {}) {
     <section class="yps-calendar-section" data-yps-calendar-section>
       <header class="yps-calendar-section-head">
         ${lucide('calendar-days', 18)}
-        <h2>Calendar event${events.length === 1 ? '' : 's'}</h2>
+        <h2>${escapeHtml(t('publicShare.calendar.title', { count: events.length }))}</h2>
       </header>
 
       ${events.map((ev, index) => {
         const when = formatEventRange(ev);
         const kind =
           ev.linkedToSharedNote
-            ? 'Linked to this note'
+            ? t('publicShare.calendar.kindLinked')
             : ev.markdownDerived
-              ? 'Mentioned as calendar link'
+              ? t('publicShare.calendar.kindMarkdown')
               : ev.mentionedInSharedNote
-                ? 'Mentioned in this note'
-                : 'Shared with this note';
+                ? t('publicShare.calendar.kindMentioned')
+                : t('publicShare.calendar.kindShared');
 
         return `
           <article class="yps-event-card" data-yps-event-index="${index}">
@@ -1128,7 +1130,7 @@ export function renderPublicShareCalendarSectionHtml(payload = {}) {
               </span>
 
               <span class="yps-event-card-title">
-                <strong>${escapeHtml(ev.title || 'Untitled event')}</strong>
+                <strong>${escapeHtml(ev.title || t('publicShare.untitledEvent'))}</strong>
                 <small>${escapeHtml(kind)}</small>
               </span>
             </header>
@@ -1157,21 +1159,21 @@ export function renderPublicShareCalendarSectionHtml(payload = {}) {
               <div class="yps-event-actions">
                 <button class="yps-btn primary" type="button" data-yps-event-action="add-yanta">
                   ${lucide('calendar-plus', 14)}
-                  <span>Add to YANTA Calendar</span>
+                  <span>${escapeHtml(t('publicShare.calendar.addYanta'))}</span>
                 </button>
 
                 <button class="yps-btn" type="button" data-yps-event-action="edit-yanta">
                   ${lucide('pencil', 14)}
-                  <span>Edit and add</span>
+                  <span>${escapeHtml(t('publicShare.calendar.editAdd'))}</span>
                 </button>
 
                 <button class="yps-btn" type="button" data-yps-event-action="download-ics">
                   ${lucide('download', 14)}
-                  <span>Download .ics</span>
+                  <span>${escapeHtml(t('publicShare.calendar.downloadIcs'))}</span>
                 </button>
 
                 <span class="yps-event-more-wrap">
-                  <button class="yps-icon-btn" type="button" data-yps-event-more title="More calendar options" aria-label="More calendar options">
+                  <button class="yps-icon-btn" type="button" data-yps-event-more title="${escapeAttr(t('publicShare.calendar.moreOptions'))}" aria-label="${escapeAttr(t('publicShare.calendar.moreOptions'))}">
                     ${lucide('ellipsis', 17)}
                   </button>
 

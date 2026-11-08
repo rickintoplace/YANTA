@@ -9,6 +9,8 @@ import {
     uid,
   } from '../core.js';
 
+  import { t } from '../i18n/index.js';
+
   import {
     normalizeSlideAnimation,
   } from './slides-animation.js';
@@ -291,7 +293,7 @@ export function presentationSlidesFor(drawing) {
 
   return [normalizeSlide({
     id: BOARD_SLIDE_ID,
-    title: drawing?.title || 'Drawing',
+    title: drawing?.title || t('draw.untitled'),
     bounds,
     created: 0,
     updated: 0,

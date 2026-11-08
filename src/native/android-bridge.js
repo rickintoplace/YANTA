@@ -1,4 +1,5 @@
 import { state, toast, } from '../core.js';
+import { t } from '../i18n/index.js';
 
 import { recordNativeNotificationAck } from '../notification-sync-status.js';
 import { effectiveRemindersForEvent } from '../calendar-personal.js';
@@ -113,7 +114,7 @@ function eventForNative(ev = {}) {
 
   return {
     id: String(ev.id),
-    title: String(ev.title || 'Untitled event'),
+    title: String(ev.title || t('calendarWidget.untitledEvent')),
     start,
     end: ev.end || null,
     allDay: !!ev.allDay,
@@ -164,7 +165,6 @@ async function collectCalendarEvents() {
 async function collectQuickActions() {
   try {
     const { cycleCalendarForQuickLog } = await import('../calendar.js');
-    const { t } = await import('../i18n/index.js');
     return cycleCalendarForQuickLog()
       ? [{ id: 'cycle', label: t('cycle.shortcut'), longLabel: t('cycle.shortcutLong') }]
       : [];
@@ -180,7 +180,7 @@ function collectNotes() {
     .slice(0, 24)
     .map((n) => ({
       id: n.id,
-      title: n.title || 'Untitled',
+      title: n.title || t('note.untitled'),
       folderId: n.folderId || null,
       icon: n.icon || 'file-text',
       color: n.color || '',
@@ -195,7 +195,7 @@ function collectFolders() {
     .slice(0, 24)
     .map((f) => ({
       id: f.id,
-      title: f.name || 'Folder',
+      title: f.name || t('items.folderFallback'),
       parentId: f.parentId || null,
       icon: f.icon || 'folder',
       color: f.color || '',
@@ -214,7 +214,7 @@ async function collectRssItems() {
 
     return items.map((item) => ({
       id: item.id,
-      title: item.title || 'Untitled',
+      title: item.title || t('note.untitled'),
       feedTitle: item.feedTitle || '',
       imageUrl: item.imageUrl || '',
       url: item.url || '',
@@ -457,7 +457,7 @@ function handleNativeQuickAction(action = '', params = {}) {
       }))
       .catch((err) => {
         console.warn('[YANTA Android Bridge] calendar action failed', err);
-        toast('Could not open the calendar.', 'error');
+        toast(t('native.openCalendarFailed'), 'error');
       });
 
     return;
@@ -651,7 +651,7 @@ export function androidChatPushConfig() {
       : null;
   } catch (err) {
     console.warn('[YANTA Android Bridge] getChatPushConfig parse failed', err);
-    toast('Could not read Android chat push configuration.', 'error');
+    toast(t('native.chatPushConfigFailed'), 'error');
     return null;
   }
 }
@@ -699,7 +699,7 @@ export function handleAndroidDeepLink(urlOrHash = '') {
         .then(({ startDmFromDeepLink }) => startDmFromDeepLink(handle))
         .catch((err) => {
           console.warn('[YANTA Android Bridge] Could not start chat from deep link', err);
-          toast('Could not start chat from link.', 'error');
+          toast(t('native.chatFromLinkFailed'), 'error');
         });
 
       return true;
@@ -720,7 +720,7 @@ export function handleAndroidDeepLink(urlOrHash = '') {
         }))
         .catch((err) => {
           console.warn('[YANTA Android Bridge] Could not open chat deep link', err);
-          toast('Could not open chat.', 'error');
+          toast(t('native.openChatFailed'), 'error');
         });
 
       return true;
@@ -730,7 +730,7 @@ export function handleAndroidDeepLink(urlOrHash = '') {
     return true;
   } catch (err) {
     console.warn('[YANTA Android Bridge] Invalid deep link', err);
-    toast('Could not open Android link.', 'error');
+    toast(t('native.openLinkFailed'), 'error');
     return false;
   }
 }

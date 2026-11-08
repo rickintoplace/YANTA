@@ -33,6 +33,8 @@ import {
   yantaPrompt,
 } from '../dialogs.js';
 
+import { t as i18n } from '../i18n/index.js';
+
 import {
   getNoteDoc,
   encodeNoteState,
@@ -496,7 +498,7 @@ export async function exportSyncCapsule({
 
   downloadBlob(blob, filename);
 
-  toast(`Sync Capsule exported: ${filename}`, 'success');
+  toast(i18n('sync.capsule.exported', { filename }), 'success');
 
   return {
     filename,
@@ -543,13 +545,13 @@ export async function importSyncCapsuleFile(file, {
     if (!askForKey) throw err;
 
     const entered = await yantaPrompt({
-      title: 'Recovery key required',
-      message: 'This encrypted backup was created with a different Sync Key.\n\nPaste the Recovery Key for this backup.',
-      label: 'Recovery Key',
-      placeholder: 'Paste Recovery Key…',
+      title: i18n('sync.capsule.keyTitle'),
+      message: i18n('sync.capsule.keyMessage'),
+      label: i18n('sync.recoveryKit.key'),
+      placeholder: i18n('sync.capsule.keyPlaceholder'),
       required: true,
       multiline: true,
-      confirmLabel: 'Unlock backup',
+      confirmLabel: i18n('sync.capsule.unlock'),
       icon: 'key-round',
     });
     
@@ -675,7 +677,10 @@ export async function importSyncCapsuleFile(file, {
   window.dispatchEvent(new CustomEvent('yanta-vault-hydrated'));
 
   toast(
-    `Sync Capsule imported: ${notesApplied} note snapshot${notesApplied === 1 ? '' : 's'}, ${assetsApplied} asset${assetsApplied === 1 ? '' : 's'}`,
+    i18n('sync.capsule.imported', {
+      notes: i18n('sync.capsule.importedNotes', { count: notesApplied }),
+      assets: i18n('sync.capsule.importedAssets', { count: assetsApplied }),
+    }),
     'success'
   );
 
@@ -825,7 +830,7 @@ export async function pickAndImportSyncCapsule() {
         resolve(res);
       } catch (err) {
         console.error(err);
-        toast('Sync Capsule import failed: ' + (err?.message || String(err)), 'error');
+        toast(i18n('sync.capsule.importFailed', { error: err?.message || String(err) }), 'error');
         reject(err);
       }
     };
@@ -839,9 +844,9 @@ export async function copySyncCapsuleRecoveryKey() {
 
   try {
     await navigator.clipboard.writeText(key);
-    toast('Sync key copied. Keep it private.', 'success');
+    toast(i18n('sync.capsule.keyCopied'), 'success');
   } catch {
-    prompt('Copy your Sync Key and keep it private:', key);
+    prompt(i18n('sync.capsule.copyKeyPrompt'), key);
   }
 
   return key;

@@ -11,6 +11,7 @@
 // ============================================================
 
 import { escapeHtml } from './core.js';
+import { t } from './i18n/index.js';
 
 const EPMC = 'https://www.ebi.ac.uk/europepmc/webservices/rest';
 
@@ -417,7 +418,7 @@ export function mapEpmcToModel(rr) {
 
 export async function resolveDOI(doi) {
   const d = cleanDOI(doi);
-  if (!d) throw new Error('No DOI found');
+  if (!d) throw new Error(t('citations.error.noDoi'));
 
   try {
     const msg = await fetchCrossrefByDOI(d);
@@ -463,7 +464,7 @@ export async function resolvePMID(pmid) {
     } catch {}
   }
 
-  if (!model) throw new Error('No PMID metadata found');
+  if (!model) throw new Error(t('citations.error.noPmid'));
   return model;
 }
 
@@ -479,13 +480,13 @@ export async function resolvePMCID(pmcid) {
     } catch {}
   }
 
-  if (!model) throw new Error('No PMCID metadata found');
+  if (!model) throw new Error(t('citations.error.noPmcid'));
   return model;
 }
 
 async function resolveISBN(isbn) {
   const clean = extractISBN(isbn);
-  if (!clean) throw new Error('No ISBN found');
+  if (!clean) throw new Error(t('citations.error.noIsbn'));
 
   const book = await fetchJSON(`https://openlibrary.org/isbn/${encodeURIComponent(clean)}.json`);
 
@@ -631,13 +632,13 @@ export async function resolveURL(url) {
     isbn: '',
     accessDate: todayISO(),
     resolver: 'url-manual',
-    warning: 'Generic website metadata cannot be fetched reliably in-browser without a server-side metadata proxy. Please verify author/title/date manually.',
+    warning: t('citations.urlWarning'),
   };
 }
 
 export async function resolveCitation(input) {
   const raw = String(input || '').trim();
-  if (!raw) throw new Error('Enter DOI, PMID, PMCID, ISBN or URL');
+  if (!raw) throw new Error(t('citations.error.noInput'));
 
   const pmcid = extractPMCID(raw);
   if (pmcid) return resolvePMCID(pmcid);

@@ -9,7 +9,10 @@ import {
   el,
   lucide,
   toast,
+  escapeHtml,
 } from '../core.js';
+
+import { t } from '../i18n/index.js';
 
 import {
   getSemanticConfig,
@@ -120,9 +123,19 @@ function injectCss() {
 }
 
 function deviceLabel(device) {
-  if (device === 'webgpu') return 'WebGPU (GPU-accelerated)';
-  if (device === 'wasm') return 'WASM (CPU)';
+  if (device === 'webgpu') return t('settings.semantic.deviceWebgpu');
+  if (device === 'wasm') return t('settings.semantic.deviceWasm');
   return null;
+}
+
+// Catalog copy marks emphasis as **…** (the catalogs hold no markup);
+// everything else is escaped.
+function emphasisHtml(text) {
+  return escapeHtml(text).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+}
+
+function modelLanguages(model) {
+  return model.languagesKey ? t(model.languagesKey) : model.languages;
 }
 
 export function renderSemanticSettingsPanel(mount) {
@@ -140,30 +153,24 @@ export function renderSemanticSettingsPanel(mount) {
 
     if (!config.enabled) {
       const copy = el('div', { class: 'yanta-semantic-copy' });
-      copy.innerHTML = `
-        Find notes by <strong>meaning</strong>, not just keywords — across
-        languages, including text inside your drawings.
-        A one-time model download (${model.sizeHint}) runs the AI
-        <strong>entirely on this device</strong>: your notes and your
-        searches never leave it, and the index is never synced.
-      `;
+      copy.innerHTML = emphasisHtml(t('settings.semantic.intro', { size: model.sizeHint }));
 
       const meta = el('div', { class: 'yanta-semantic-meta' });
       meta.append(
-        chip('languages', model.languages),
-        chip('shield-check', 'On-device only'),
-        chip('download', `${model.sizeHint} one-time`),
+        chip('languages', modelLanguages(model)),
+        chip('shield-check', t('settings.semantic.onDeviceOnly')),
+        chip('download', t('settings.semantic.oneTime', { size: model.sizeHint })),
       );
 
       const actions = el('div', { class: 'yanta-semantic-actions' });
-      const enable = el('button', { class: 'btn primary' }, 'Enable semantic search');
+      const enable = el('button', { class: 'btn primary' }, t('settings.semantic.enable'));
 
       enable.addEventListener('click', () => {
         enable.disabled = true;
 
         enableSemantic().catch((err) => {
           console.error(err);
-          toast('Could not enable semantic search', 'error');
+          toast(t('settings.semantic.enableFailed'), 'error');
         });
       });
 
@@ -177,15 +184,15 @@ export function renderSemanticSettingsPanel(mount) {
     const copy = el('div', { class: 'yanta-semantic-copy' });
 
     if (status.state === 'downloading') {
-      copy.textContent = `Downloading the model… ${status.downloadPct}% — you can keep working, this happens in the background.`;
+      copy.textContent = t('settings.semantic.downloading', { pct: status.downloadPct });
     } else if (status.state === 'starting') {
-      copy.textContent = 'Starting the on-device model…';
+      copy.textContent = t('settings.semantic.starting');
     } else if (status.state === 'indexing') {
-      copy.textContent = `Indexing your notes in idle time — ${status.indexedDone} of ${status.indexedTotal} done. YANTA stays fully responsive.`;
+      copy.textContent = t('settings.semantic.indexing', { done: status.indexedDone, total: status.indexedTotal });
     } else if (status.state === 'error') {
-      copy.textContent = `Something went wrong: ${status.error || 'unknown error'}. Keyword search keeps working normally.`;
+      copy.textContent = t('settings.semantic.error', { error: status.error || t('settings.semantic.unknownError') });
     } else {
-      copy.innerHTML = `Ready. Search results now include <strong>Related matches</strong> found by meaning.`;
+      copy.innerHTML = emphasisHtml(t('settings.semantic.ready', { related: t('tree.section.relatedMatches') }));
     }
 
     card.append(copy);
@@ -204,13 +211,16 @@ export function renderSemanticSettingsPanel(mount) {
     }
 
     const meta = el('div', { class: 'yanta-semantic-meta' });
-    meta.append(chip('languages', model.languages));
+    meta.append(chip('languages', modelLanguages(model)));
 
     const dev = deviceLabel(status.device);
     if (dev) meta.append(chip(status.device === 'webgpu' ? 'zap' : 'cpu', dev));
 
     if (status.chunks) {
-      meta.append(chip('database', `${status.notes} notes · ${status.chunks} chunks indexed`));
+      meta.append(chip('database', t('settings.semantic.indexedStats', {
+        notes: t('tree.bulk.notesLabel', { count: status.notes }),
+        count: status.chunks,
+      })));
     }
 
     card.append(meta);
@@ -218,7 +228,7 @@ export function renderSemanticSettingsPanel(mount) {
     const actions = el('div', { class: 'yanta-semantic-actions' });
 
     if (status.state === 'ready' || status.state === 'error') {
-      const reindex = el('button', { class: 'btn' }, 'Re-index everything');
+      const reindex = el('button', { class: 'btn' }, t('settings.semantic.reindex'));
 
       reindex.addEventListener('click', async () => {
         reindex.disabled = true;
@@ -227,20 +237,20 @@ export function renderSemanticSettingsPanel(mount) {
           await reindexSemantic();
         } catch (err) {
           console.error(err);
-          toast('Re-index failed', 'error');
+          toast(t('settings.semantic.reindexFailed'), 'error');
         }
       });
 
       actions.append(reindex);
     }
 
-    const disable = el('button', { class: 'btn' }, 'Disable');
+    const disable = el('button', { class: 'btn' }, t('settings.semantic.disable'));
 
     disable.addEventListener('click', async () => {
       const ok = await yantaConfirm({
-        title: 'Disable semantic search?',
-        message: 'The local index is kept, so re-enabling is instant. Keyword search is not affected.',
-        confirmLabel: 'Disable',
+        title: t('settings.semantic.disableTitle'),
+        message: t('settings.semantic.disableMessage'),
+        confirmLabel: t('settings.semantic.disable'),
       });
 
       if (!ok) return;
@@ -248,13 +258,13 @@ export function renderSemanticSettingsPanel(mount) {
       await disableSemantic({ wipe: false });
     });
 
-    const wipeBtn = el('button', { class: 'btn' }, 'Disable & delete index');
+    const wipeBtn = el('button', { class: 'btn' }, t('settings.semantic.wipe'));
 
     wipeBtn.addEventListener('click', async () => {
       const ok = await yantaConfirm({
-        title: 'Delete the semantic index?',
-        message: 'Removes all vectors from this device. The downloaded model stays in the browser cache. Re-enabling will re-index from scratch.',
-        confirmLabel: 'Delete & disable',
+        title: t('settings.semantic.wipeTitle'),
+        message: t('settings.semantic.wipeMessage'),
+        confirmLabel: t('settings.semantic.wipeConfirm'),
         danger: true,
       });
 
@@ -269,7 +279,7 @@ export function renderSemanticSettingsPanel(mount) {
 
   function chip(icon, text) {
     const c = el('span', { class: 'yanta-semantic-chip' });
-    c.innerHTML = `${lucide(icon, 12)} <span>${text}</span>`;
+    c.innerHTML = `${lucide(icon, 12)} <span>${escapeHtml(text)}</span>`;
     return c;
   }
 

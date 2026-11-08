@@ -37,6 +37,8 @@ import {
   import {
     renderTree,
   } from './tree.js';
+
+  import { getLocale, t } from './i18n/index.js';
   
   import {
     openFolderInDashboard,
@@ -1117,7 +1119,7 @@ import {
       bulkBar = el('div', {
         class: 'yanta-dashboard-selection-tray',
         role: 'toolbar',
-        'aria-label': 'Dashboard bulk actions',
+        'aria-label': t('dashboardMultiselect.trayLabel'),
         onpointerdown: (e) => {
           e.stopPropagation();
         },
@@ -1135,8 +1137,8 @@ import {
   
     summary.innerHTML = `
       <strong>${items.length}</strong>
-      <span>selected</span>
-      <small>${notes.length} note${notes.length === 1 ? '' : 's'} · ${folders.length} folder${folders.length === 1 ? '' : 's'}</small>
+      <span>${escapeHtml(t('dashboardMultiselect.selected', { count: items.length }))}</span>
+      <small>${escapeHtml(t('tree.bulk.notesLabel', { count: notes.length }))} · ${escapeHtml(t('tree.bulk.foldersLabel', { count: folders.length }))}</small>
     `;
   
     const actions = el('div', { class: 'yanta-dashboard-selection-actions' });
@@ -1144,8 +1146,8 @@ import {
     actions.append(
       trayButton({
         icon: 'palette',
-        label: 'Appearance',
-        description: 'Change icon and color for all selected items.',
+        label: t('dashboardMultiselect.appearance'),
+        description: t('dashboardMultiselect.appearanceHint'),
         onClick: () => editAppearance(items),
       }),
     );
@@ -1157,24 +1159,24 @@ import {
       actions.append(
         trayButton({
           icon: 'pin',
-          label: 'Pin',
-          description: 'Pin selected notes to the dashboard top area.',
+          label: t('note.toolbar.pin'),
+          description: t('dashboardMultiselect.pinHint'),
           disabled: !anyUnpinned,
           onClick: () => setPinned(notes, true),
         }),
   
         trayButton({
           icon: 'pin-off',
-          label: 'Unpin',
-          description: 'Remove selected notes from the dashboard top area.',
+          label: t('note.toolbar.unpin'),
+          description: t('dashboardMultiselect.unpinHint'),
           disabled: !anyPinned,
           onClick: () => setPinned(notes, false),
         }),
   
         trayButton({
           icon: 'copy',
-          label: 'Duplicate',
-          description: 'Duplicate selected notes including markdown content.',
+          label: t('note.more.duplicate'),
+          description: t('dashboardMultiselect.duplicateHint'),
           onClick: () => duplicateNotes(notes),
         }),
       );
@@ -1183,23 +1185,23 @@ import {
     actions.append(
       trayButton({
         icon: 'folder-input',
-        label: 'Move',
-        description: 'Move selected items to another folder or Home.',
+        label: t('dashboardMultiselect.move'),
+        description: t('dashboardMultiselect.moveHint'),
         onClick: () => moveItems(items),
       }),
   
       trayButton({
         icon: 'trash',
-        label: 'Delete',
+        label: t('common.delete'),
         danger: true,
-        description: 'Delete selected items. Folders include their contents.',
+        description: t('dashboardMultiselect.deleteHint'),
         onClick: () => deleteItems(items),
       }),
   
       trayButton({
         icon: 'x',
-        label: 'Clear',
-        description: 'Clear selection.',
+        label: t('dashboardMultiselect.clear'),
+        description: t('tree.bulk.clearSelection'),
         onClick: () => clearSelection(),
       }),
     );
@@ -1241,7 +1243,7 @@ import {
           await onClick?.();
         } catch (err) {
           console.error(err);
-          toast('Action failed', 'error');
+          toast(t('note.actionFailed'), 'error');
         }
       },
     });
@@ -1268,7 +1270,7 @@ import {
     }
   
     toast(
-      `${pinned ? 'Pinned' : 'Unpinned'} ${notes.length} note${notes.length === 1 ? '' : 's'}`,
+      t(pinned ? 'tree.bulk.pinnedToast' : 'tree.bulk.unpinnedToast', { count: notes.length }),
       'success'
     );
   
@@ -1293,7 +1295,7 @@ import {
     rebuildWikilinkIndex();
     renderTree();
   
-    toast(`Duplicated ${count} note${count === 1 ? '' : 's'}`, 'success');
+    toast(t('tree.bulk.duplicatedToast', { count }), 'success');
   
     window.dispatchEvent(new CustomEvent('yanta-dashboard-refresh'));
   }
@@ -1304,7 +1306,7 @@ import {
     const copy = {
       ...src,
       id,
-      title: `${src.title || 'Untitled'} (copy)`,
+      title: t('items.copySuffix', { title: src.title || t('note.untitled') }),
       pinned: false,
       dashboardOrder: Date.now(),
       dashboardPinnedOrder: undefined,
@@ -1350,7 +1352,7 @@ import {
     } = await import('./graph.js');
   
     editTreeAppearanceTargets(keys, {
-      title: `Icon & color for ${items.length} selected items`,
+      title: t('tree.bulk.iconColorForCount', { count: items.length }),
     });
   }
   
@@ -1364,7 +1366,7 @@ import {
   
     while (f && !seen.has(f.id)) {
       seen.add(f.id);
-      parts.unshift(f.name || 'Folder');
+      parts.unshift(f.name || t('items.folderFallback'));
       f = f.parentId ? state.folders.get(f.parentId) : null;
     }
   
@@ -1389,7 +1391,7 @@ import {
   
   async function moveItems(items) {
     const targetFolderId = await folderPickerPopover({
-      title: 'Move selected items',
+      title: t('tree.move.selectedItems'),
       items,
     });
   
@@ -1439,8 +1441,8 @@ import {
   
     toast(
       skipped
-        ? `Moved ${moved}; skipped ${skipped} invalid folder move${skipped === 1 ? '' : 's'}`
-        : `Moved ${moved} item${moved === 1 ? '' : 's'}`,
+        ? t('dashboardMultiselect.movedSkipped', { moved, count: skipped })
+        : t('tree.move.movedToast', { count: moved }),
       skipped ? 'error' : 'success'
     );
   
@@ -1506,20 +1508,23 @@ import {
         }
       }
 
-      const what = [
-        directNoteIds.size ? `${directNoteIds.size} note${directNoteIds.size === 1 ? '' : 's'}` : '',
-        directFolderIds.size ? `${directFolderIds.size} folder${directFolderIds.size === 1 ? '' : 's'}` : '',
-      ].filter(Boolean).join(' and ');
+      const what = new Intl.ListFormat(getLocale(), { type: 'conjunction' }).format([
+        directNoteIds.size ? t('tree.bulk.notesLabel', { count: directNoteIds.size }) : '',
+        directFolderIds.size ? t('tree.bulk.foldersLabel', { count: directFolderIds.size }) : '',
+      ].filter(Boolean));
 
       const extra =
         descendantFolderCount || descendantNoteCount
-          ? `\n\nSelected folders include ${descendantFolderCount} sub-folder${descendantFolderCount === 1 ? '' : 's'} and ${descendantNoteCount} note${descendantNoteCount === 1 ? '' : 's'}.`
+          ? '\n\n' + t('dashboardMultiselect.deleteIncludes', {
+            folders: t('dashboardMultiselect.subfolders', { count: descendantFolderCount }),
+            notes: t('tree.bulk.notesLabel', { count: descendantNoteCount }),
+          })
           : '';
 
       const ok = await confirmPopover({
-        title: 'Delete selected items permanently',
-        message: `Permanently delete ${what}?${extra}\n\nThis cannot be undone.`,
-        confirmLabel: 'Delete permanently',
+        title: t('dashboardMultiselect.deleteTitle'),
+        message: `${t('dashboardMultiselect.deleteMessage', { what })}${extra}\n\n${t('dashboardMultiselect.cannotUndo')}`,
+        confirmLabel: t('dashboardMultiselect.deleteConfirm'),
         danger: true,
       });
 
@@ -1584,10 +1589,10 @@ import {
   }
   
   function confirmPopover({
-    title = 'Confirm',
+    title = t('dialog.confirmTitle'),
     message = '',
-    confirmLabel = 'Confirm',
-    cancelLabel = 'Cancel',
+    confirmLabel = t('dialog.confirmAction'),
+    cancelLabel = t('common.cancel'),
     danger = false,
   } = {}) {
     return new Promise((resolve) => {
@@ -1651,7 +1656,7 @@ import {
   }
   
   function folderPickerPopover({
-    title = 'Choose folder',
+    title = t('dialog.folderPicker.title'),
     items = [],
   } = {}) {
     return new Promise((resolve) => {
@@ -1687,7 +1692,7 @@ import {
             <div class="yanta-dashboard-folder-list">
               <button class="yanta-dashboard-folder-option" data-folder-id="">
                 ${lucide('home', 15)}
-                <span>Home / no folder</span>
+                <span>${escapeHtml(t('tree.move.noFolderHome'))}</span>
               </button>
   
               ${folders.map((folder) => {
@@ -1698,7 +1703,7 @@ import {
                     data-folder-id="${escapeHtml(folder.id)}"
                     ${disabled ? 'disabled' : ''}>
                     ${lucide(folder.icon || 'folder', 15)}
-                    <span>${escapeHtml(folderPath(folder.id) || folder.name || 'Folder')}</span>
+                    <span>${escapeHtml(folderPath(folder.id) || folder.name || t('items.folderFallback'))}</span>
                   </button>
                 `;
               }).join('')}

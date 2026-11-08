@@ -25,9 +25,10 @@ import esLocale from '@fullcalendar/core/locales/es';
 import itLocale from '@fullcalendar/core/locales/it';
 import nlLocale from '@fullcalendar/core/locales/nl';
 import enGbLocale from '@fullcalendar/core/locales/en-gb';
+import jaLocale from '@fullcalendar/core/locales/ja';
 
 export { Calendar };
 
 export const FC_PLUGINS = [dayGridPlugin, timeGridPlugin, listPlugin, interactionPlugin];
 
-export const CORE_FC_LOCALES = [deLocale, frLocale, esLocale, itLocale, nlLocale, enGbLocale];
+export const CORE_FC_LOCALES = [deLocale, frLocale, esLocale, itLocale, nlLocale, enGbLocale, jaLocale];

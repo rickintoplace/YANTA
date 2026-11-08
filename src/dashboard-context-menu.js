@@ -22,6 +22,8 @@ import {
     lucide,
     escapeHtml,
   } from './core.js';
+
+  import { t } from './i18n/index.js';
   
   import {
     openNote,
@@ -272,7 +274,7 @@ import {
   
     while (f && !seen.has(f.id)) {
       seen.add(f.id);
-      parts.unshift(f.name || 'Folder');
+      parts.unshift(f.name || t('dashMenu.folderFallback'));
       f = f.parentId ? state.folders.get(f.parentId) : null;
     }
   
@@ -329,12 +331,12 @@ import {
     showMenu(e.clientX, e.clientY, items);
   }
   
-  async function copyText(text, success = 'Copied') {
+  async function copyText(text, success = t('dashMenu.copied')) {
     try {
       await navigator.clipboard.writeText(String(text || ''));
       toast(success, 'success');
     } catch {
-      toast('Copy failed', 'error');
+      toast(t('graph.copyFailed'), 'error');
     }
   }
   
@@ -372,7 +374,7 @@ import {
   }
   
   function folderPickerPopover({
-    title = 'Choose folder',
+    title = t('dashMenu.chooseFolder'),
     keys = [],
   } = {}) {
     return new Promise((resolve) => {
@@ -409,7 +411,7 @@ import {
             <div class="yanta-dashboard-folder-list">
               <button class="yanta-dashboard-folder-option" data-folder-id="">
                 ${lucide('home', 15)}
-                <span>Home / no folder</span>
+                <span>${escapeHtml(t('tree.trash.homeNoFolder'))}</span>
               </button>
   
               ${folders.map((folder) => {
@@ -421,7 +423,7 @@ import {
                     data-folder-id="${escapeHtml(folder.id)}"
                     ${disabled ? 'disabled' : ''}>
                     ${lucide(folder.icon || 'folder', 15)}
-                    <span>${escapeHtml(folderPath(folder.id) || folder.name || 'Folder')}</span>
+                    <span>${escapeHtml(folderPath(folder.id) || folder.name || t('dashMenu.folderFallback'))}</span>
                   </button>
                 `;
               }).join('')}
@@ -505,7 +507,7 @@ import {
     }));
   
     toast(
-      `${pinned ? 'Pinned' : 'Unpinned'} ${count} note${count === 1 ? '' : 's'}`,
+      pinned ? t('tree.bulk.pinnedToast', { count }) : t('tree.bulk.unpinnedToast', { count }),
       'success'
     );
   }
@@ -561,7 +563,7 @@ import {
     });
   
     toast(
-      `${archived ? 'Archived' : 'Unarchived'} ${count} item${count === 1 ? '' : 's'}`,
+      archived ? t('dashMenu.archivedToast', { count }) : t('dashMenu.unarchivedToast', { count }),
       'success'
     );
   }
@@ -572,7 +574,7 @@ import {
     const copy = {
       ...note,
       id,
-      title: `${note.title || 'Untitled'} (copy)`,
+      title: t('items.copySuffix', { title: note.title || t('note.untitled') }),
       pinned: false,
       dashboardOrder: Date.now(),
       dashboardPinnedOrder: undefined,
@@ -628,12 +630,12 @@ import {
       reason: 'context-duplicate',
     });
   
-    toast(`Duplicated ${count} note${count === 1 ? '' : 's'}`, 'success');
+    toast(t('tree.bulk.duplicatedToast', { count }), 'success');
   }
   
   async function moveKeysToFolder(keys) {
     const targetFolderId = await folderPickerPopover({
-      title: 'Move items',
+      title: t('dashMenu.moveItems'),
       keys,
     });
   
@@ -691,8 +693,8 @@ import {
   
     toast(
       skipped
-        ? `Moved ${moved}; skipped ${skipped} invalid folder move${skipped === 1 ? '' : 's'}`
-        : `Moved ${moved} item${moved === 1 ? '' : 's'}`,
+        ? t('tree.movedSkipped', { moved, skipped, count: skipped })
+        : t('tree.move.movedToast', { count: moved }),
       skipped ? 'error' : 'success'
     );
   }
@@ -771,7 +773,7 @@ import {
     const clean = keys.filter(keyExists);
   
     if (!clean.length) {
-      toast('Nothing selected', 'error');
+      toast(t('tree.bulk.nothingSelected'), 'error');
       return;
     }
   
@@ -781,8 +783,8 @@ import {
   
     editTreeAppearanceTargets(clean, {
       title: clean.length === 1
-        ? 'Icon & color'
-        : `Icon & color for ${clean.length} selected items`,
+        ? t('appearance.title')
+        : t('tree.bulk.iconColorForCount', { count: clean.length }),
     });
   }
   
@@ -794,7 +796,7 @@ import {
         push: true,
       });
     } catch {
-      toast('Could not open calendar event', 'error');
+      toast(t('dashMenu.openEventFailed'), 'error');
     }
   }
   
@@ -803,9 +805,9 @@ import {
       const calendar = await import('./calendar.js');
   
       calendar.unlinkEventNote?.(eventId);
-      toast('Event unlinked from note', 'success');
+      toast(t('dashMenu.eventUnlinked'), 'success');
     } catch {
-      toast('Could not unlink calendar event', 'error');
+      toast(t('dashMenu.unlinkEventFailed'), 'error');
     }
   }
   
@@ -833,13 +835,13 @@ import {
   
     const items = [
       {
-        label: 'Open',
+        label: t('tree.menu.open'),
         // icon: 'file-text', <-- still possible, but handled centrally
         // danger: true, <-- would give it danger color
         action: () => openNote(note.id),
       },
       {
-        label: 'Rename…',
+        label: t('tree.menu.rename'),
         action: () => {
           window.dispatchEvent(new CustomEvent('yanta-dashboard-rename-note', {
             detail: {
@@ -849,33 +851,33 @@ import {
         },
       },
       {
-        label: 'Icon & color…',
+        label: t('tree.menu.iconColor'),
         action: () => editAppearance([key]),
       },
       {
-        label: note.pinned ? 'Unpin' : 'Pin',
+        label: note.pinned ? t('tree.menu.unpin') : t('tree.menu.pin'),
         action: () => setPinned([key], !note.pinned),
       },
       'hr',
       {
-        label: 'Move to folder…',
+        label: t('tree.menu.moveToFolder'),
         action: () => moveKeysToFolder([key]),
       },
       {
-        label: 'Duplicate',
+        label: t('tree.menu.duplicate'),
         action: () => duplicateNotes([key]),
       },
       {
-        label: 'Copy wikilink',
-        action: () => copyText(`[[${note.title || 'Untitled'}]]`, 'Wikilink copied'),
+        label: t('graph.menu.copyWikilink'),
+        action: () => copyText(`[[${note.title || t('note.untitled')}]]`, t('graph.wikilinkCopied')),
       },
       {
-        label: 'Copy note ID',
-        action: () => copyText(note.id, 'Note ID copied'),
+        label: t('dashMenu.copyNoteId'),
+        action: () => copyText(note.id, t('dashMenu.noteIdCopied')),
       },
       'hr',
       {
-        label: note.spaceId ? 'Shared note…' : 'Share note…',
+        label: note.spaceId ? t('tree.menu.sharedNote') : t('tree.menu.shareNote'),
         action: async () => {
           const { openUnifiedShareModal } = await import('./public-share/public-share-ui.js');
           openUnifiedShareModal({ noteId: note.id });
@@ -887,11 +889,11 @@ import {
       items.push(
         'hr',
         {
-          label: 'Open linked calendar event',
+          label: t('dashMenu.openLinkedEvent'),
           action: () => openLinkedEvent(ev.id),
         },
         {
-          label: 'Unlink calendar event',
+          label: t('dashMenu.unlinkEvent'),
           action: () => unlinkLinkedEvent(ev.id),
         }
       );
@@ -900,11 +902,11 @@ import {
     items.push(
       'hr',
       {
-        label: note.archived ? 'Unarchive' : 'Archive',
+        label: note.archived ? t('tree.menu.unarchive') : t('tree.menu.archive'),
         action: () => archiveKeys([key], !note.archived),
       },
       {
-        label: 'Delete…',
+        label: t('dashMenu.delete'),
         danger: true,
         action: () => deleteKeys([key]),
       }
@@ -918,35 +920,35 @@ import {
   
     return [
       {
-        label: 'Open folder',
+        label: t('dashMenu.openFolder'),
         action: () => openFolderInDashboard(folder.id, {
           push: true,
         }),
       },
       'hr',
       {
-        label: 'New note here',
+        label: t('tree.menu.newNoteHere'),
         action: () => runCreateAction('note', {
           folderId: folder.id,
           source: 'dashboard-context-menu',
         }),
       },
       {
-        label: 'New checklist here',
+        label: t('dashMenu.newChecklistHere'),
         action: () => runCreateAction('list', {
           folderId: folder.id,
           source: 'dashboard-context-menu',
         }),
       },
       {
-        label: 'New drawing here',
+        label: t('dashMenu.newDrawingHere'),
         action: () => runCreateAction('drawing', {
           folderId: folder.id,
           source: 'dashboard-context-menu',
         }),
       },
       {
-        label: 'New subfolder',
+        label: t('tree.menu.newSubFolder'),
         action: () => runCreateAction('folder', {
           folderId: folder.id,
           source: 'dashboard-context-menu',
@@ -954,7 +956,7 @@ import {
       },
       'hr',
       {
-        label: 'Rename…',
+        label: t('tree.menu.rename'),
         action: () => {
           window.dispatchEvent(new CustomEvent('yanta-dashboard-rename-folder', {
             detail: {
@@ -964,22 +966,22 @@ import {
         },
       },
       {
-        label: 'Icon & color…',
+        label: t('tree.menu.iconColor'),
         action: () => editAppearance([key]),
       },
       {
-        label: 'Move to folder…',
+        label: t('tree.menu.moveToFolder'),
         action: () => moveKeysToFolder([key]),
       },
       {
-        label: folder.spaceId ? 'Shared workspace…' : 'Share folder…',
+        label: folder.spaceId ? t('tree.menu.sharedWorkspace') : t('tree.menu.shareFolder'),
         action: async () => {
           const { openUnifiedShareModal } = await import('./public-share/public-share-ui.js');
           openUnifiedShareModal({ folderId: folder.id });
         },
       },
       {
-        label: 'Select contents',
+        label: t('dashMenu.selectContents'),
         action: () => {
           const keys = [key];
   
@@ -998,11 +1000,11 @@ import {
       },
       'hr',
       {
-        label: folder.archived ? 'Unarchive folder' : 'Archive folder',
+        label: folder.archived ? t('tree.menu.unarchiveFolder') : t('tree.menu.archiveFolder'),
         action: () => archiveKeys([key], !folder.archived),
       },
       {
-        label: 'Delete folder…',
+        label: t('dashMenu.deleteFolder'),
         danger: true,
         action: () => deleteKeys([key]),
       },
@@ -1015,14 +1017,14 @@ import {
   
     const items = [
       {
-        label: folderId ? 'New note in this folder' : 'New note',
+        label: folderId ? t('graph.menu.newNoteInFolder') : t('shareTarget.target.note'),
         action: () => runCreateAction('note', {
           folderId,
           source: 'dashboard-context-menu-empty',
         }),
       },
       {
-        label: folderId ? 'New checklist in this folder' : 'New checklist',
+        label: folderId ? t('dashMenu.newChecklistInFolder') : t('dashMenu.newChecklist'),
         icon: 'list-checks',
         action: () => runCreateAction('list', {
           folderId,
@@ -1030,21 +1032,21 @@ import {
         }),
       },
       {
-        label: folderId ? 'New drawing in this folder' : 'New drawing',
+        label: folderId ? t('dashMenu.newDrawingInFolder') : t('dashMenu.newDrawing'),
         action: () => runCreateAction('drawing', {
           folderId,
           source: 'dashboard-context-menu-empty',
         }),
       },
       {
-        label: folderId ? 'New folder here' : 'New folder',
+        label: folderId ? t('dashMenu.newFolderHere') : t('tree.newFolder'),
         action: () => runCreateAction('folder', {
           folderId,
           source: 'dashboard-context-menu-empty',
         }),
       },
       {
-        label: 'New event',
+        label: t('shareTarget.target.event'),
         icon: 'calendar-plus',
         action: () => runCreateAction('event', {
           folderId,
@@ -1053,20 +1055,20 @@ import {
       },
       'hr',
       {
-        label: 'Search notes',
+        label: t('dashMenu.searchNotes'),
         action: () => {
           window.dispatchEvent(new CustomEvent('yanta-expand-sidebar-search'));
         },
       },
       {
-        label: 'Select all visible',
+        label: t('dashMenu.selectAllVisible'),
         action: () => selectAllVisibleDashboardItems(),
       },
     ];
   
     if (hasSelection) {
       items.push({
-        label: 'Clear selection',
+        label: t('tree.bulk.clearSelection'),
         action: () => clearDashboardSelection(),
       });
     }
@@ -1088,45 +1090,45 @@ import {
   
     return [
       {
-        label: `${items.length} selected`,
+        label: t('tree.bulk.selectedHeader', { count: items.length }),
         disabled: true,
         meta: true,
       },
       'hr',
       {
-        label: 'Icon & color…',
+        label: t('tree.menu.iconColor'),
         action: () => editAppearance(keys),
       },
       {
-        label: 'Pin selected notes',
+        label: t('dashMenu.pinSelected'),
         disabled: !anyUnpinned,
         action: () => setPinned(keys, true),
       },
       {
-        label: 'Unpin selected notes',
+        label: t('dashMenu.unpinSelected'),
         disabled: !anyPinned,
         action: () => setPinned(keys, false),
       },
       {
-        label: 'Move selected to folder…',
+        label: t('tree.bulk.moveSelectedToFolder'),
         action: () => moveKeysToFolder(keys),
       },
       {
-        label: 'Duplicate selected notes',
+        label: t('dashMenu.duplicateSelected'),
         disabled: notes.length === 0,
         action: () => duplicateNotes(keys),
       },
       {
-        label: anyArchived ? 'Unarchive selected' : 'Archive selected',
+        label: anyArchived ? t('dashMenu.unarchiveSelected') : t('dashMenu.archiveSelected'),
         action: () => archiveKeys(keys, !anyArchived),
       },
       'hr',
       {
-        label: 'Clear selection',
+        label: t('tree.bulk.clearSelection'),
         action: () => clearDashboardSelection(),
       },
       {
-        label: 'Delete selected…',
+        label: t('dashMenu.deleteSelected'),
         danger: true,
         action: () => deleteKeys(keys),
       },
@@ -1212,7 +1214,7 @@ import {
     document.addEventListener('contextmenu', (e) => {
       handleDashboardContextMenu(e).catch((err) => {
         console.error('[YANTA Dashboard Context Menu] failed', err);
-        toast('Context menu failed', 'error');
+        toast(t('dashMenu.failed'), 'error');
       });
     }, true);
 

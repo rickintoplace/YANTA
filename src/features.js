@@ -76,13 +76,13 @@ export function renderBacklinks(noteId) {
 
   wrap.append(
     el('div', { class: 'backlinks-title' },
-      'Linked from',
+      t('features.backlinks.title'),
       el('span', { class: 'badge' }, String(back.length))
     )
   );
 
   if (!back.length) {
-    wrap.append(el('div', { class: 'backlinks-empty' }, 'No backlinks yet.'));
+    wrap.append(el('div', { class: 'backlinks-empty' }, t('features.backlinks.empty')));
   } else {
     for (const { note, line } of back) {
       const item = el('div', {
@@ -198,9 +198,9 @@ export function handleWikilinkClick(e) {
   }
 
   inlineConfirm(a, {
-    message: `Create "${target}"?`,
-    confirmLabel: 'Create',
-    cancelLabel: 'Cancel',
+    message: t('features.createLinkedNote', { title: target }),
+    confirmLabel: t('dashboard.create'),
+    cancelLabel: t('common.cancel'),
     danger: false,
     onConfirm: async () => {
       await createNoteWithTitle(target);

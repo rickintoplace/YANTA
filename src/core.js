@@ -5,6 +5,7 @@
 // ============================================================
 
 import { LUCIDE_SUBSET } from './icons/lucide-subset.js';
+import { t as i18n } from './i18n/index.js';
 import {
   atRestActive,
   isSealed,
@@ -714,7 +715,7 @@ export function actionToast(message, {
         await onAction();
       } catch (err) {
         console.error('[YANTA] action-toast action failed', err);
-        toast('Could not undo', 'error');
+        toast(i18n('core.undoFailed'), 'error');
       }
     });
 
@@ -1054,14 +1055,14 @@ export function setTheme(t) {
   document.documentElement.dataset.theme = t;
   store.settings.set('theme', t);
   const btn = $('btn-theme');
-  if (btn) btn.title = `Theme: ${t} (click to cycle)`;
+  if (btn) btn.title = i18n('settings.appearance.themeButtonTitle', { mode: i18n(`settings.appearance.modes.${t}.label`) });
 
   window.dispatchEvent(new CustomEvent('yanta-theme-change', { detail: { theme: t } }));
 }
 export function toggleTheme() {
   const i = THEMES.indexOf(state.theme);
   setTheme(THEMES[(i + 1) % THEMES.length]);
-  toast(`Theme: ${state.theme}`);
+  toast(i18n('settings.appearance.themeToast', { mode: i18n(`settings.appearance.modes.${state.theme}.label`) }));
 }
 
 // ----------------------------------------------------------------
@@ -1071,8 +1072,11 @@ export async function updateStorageMeter() {
   try {
     const est = await navigator.storage?.estimate?.();
     if (est) {
-      $('storageMeter').textContent = fmtBytes(est.usage || 0);
-      $('storageMeter').title = `Used ${fmtBytes(est.usage || 0)} of ~${fmtBytes(est.quota || 0)}`;
+      const meter = $('storageMeter');
+      meter.textContent = fmtBytes(est.usage || 0);
+      meter.title = i18n('core.storageUsed', { used: fmtBytes(est.usage || 0), quota: fmtBytes(est.quota || 0) });
+      // A number nobody needs day to day; it shows once space gets tight.
+      meter.hidden = !(est.quota > 0 && (est.usage || 0) / est.quota > 0.8);
     }
   } catch {}
 }

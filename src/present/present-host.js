@@ -14,6 +14,7 @@
 // ============================================================
 
 import { getDrawing, getNoteDoc } from '../yjs.js';
+import { t } from '../i18n/index.js';
 import { currentExcalidrawTheme } from '../draw-runtime.js';
 import { slideBuildCount } from '../slides/slides-animation.js';
 import { presentationSlidesFor } from '../slides/slides-model.js';
@@ -419,7 +420,7 @@ function createPresentHost({ noteId, drawingId, saved }) {
 
         const joiner = {
           id: envelope.from,
-          name: String(body.name || '').slice(0, 60) || 'Device',
+          name: String(body.name || '').slice(0, 60) || t('present.deviceFallback'),
           role: body.role === 'screen' ? 'screen' : 'remote',
           pub: String(body.pub || ''),
         };
@@ -538,7 +539,7 @@ function createPresentHost({ noteId, drawingId, saved }) {
 
           const screen = {
             id: envelope.from,
-            name: String(body.name || '').slice(0, 60) || 'Screen',
+            name: String(body.name || '').slice(0, 60) || t('present.role.screen'),
             role: 'screen',
             pub: String(body.pub),
           };

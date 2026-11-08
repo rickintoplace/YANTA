@@ -10,6 +10,7 @@ import {
 } from './core.js';
 
 import { isChatEnabled } from './chat/chat-enabled.js';
+import { t } from './i18n/index.js';
 
 export const FLOATING_CREATE_SETTINGS_KEY = 'yanta.floatingCreate.v2';
 
@@ -32,46 +33,55 @@ export const FLOATING_CREATE_ACTION_CATALOG = [
   {
     id: 'capture',
     defaultLabel: 'Quick capture',
+    labelKey: 'floatingCreate.action.capture',
     defaultIcon: 'zap',
   },
   {
     id: 'note',
     defaultLabel: 'New note',
+    labelKey: 'floatingCreate.action.note',
     defaultIcon: 'file-text',
   },
   {
     id: 'folder',
     defaultLabel: 'New folder',
+    labelKey: 'floatingCreate.action.folder',
     defaultIcon: 'folder-plus',
   },
   {
     id: 'list',
     defaultLabel: 'New checklist',
+    labelKey: 'floatingCreate.action.list',
     defaultIcon: 'list-checks',
   },
   {
     id: 'drawing',
     defaultLabel: 'New drawing',
+    labelKey: 'floatingCreate.action.drawing',
     defaultIcon: 'line-squiggle',
   },
   {
     id: 'image',
     defaultLabel: 'New image',
+    labelKey: 'floatingCreate.action.image',
     defaultIcon: 'image',
   },
   {
     id: 'event',
     defaultLabel: 'New event',
+    labelKey: 'floatingCreate.action.event',
     defaultIcon: 'calendar-plus',
   },
   {
     id: 'rss',
     defaultLabel: 'Sources',
+    labelKey: 'floatingCreate.action.rss',
     defaultIcon: 'rss',
   },
   {
     id: 'ai',
     defaultLabel: 'AI',
+    labelKey: 'floatingCreate.action.ai',
     defaultIcon: 'bot',
   },
   /*
@@ -83,6 +93,7 @@ export const FLOATING_CREATE_ACTION_CATALOG = [
   ...(isChatEnabled() ? [{
     id: 'chat',
     defaultLabel: 'Chat',
+    labelKey: 'floatingCreate.action.chat',
     defaultIcon: 'messages-square',
   }] : []),
 ];
@@ -208,6 +219,45 @@ function numberOr(value, fallback) {
 
 function clamp(n, min, max) {
   return Math.max(min, Math.min(max, n));
+}
+
+/*
+  Action labels. `defaultLabel` is the stored default (English, and what
+  older builds wrote into localStorage), so it doubles as the "not renamed"
+  marker: a stored label equal to it — or empty — shows the catalog label
+  in the app language, resolved at render time. Anything else is the user's
+  own name for the action and wins.
+*/
+export function floatingCreateDefaultLabel(actionId) {
+  const cat = FLOATING_CREATE_ACTION_CATALOG.find((a) => a.id === actionId);
+  if (!cat) return String(actionId || '');
+  const label = t(cat.labelKey);
+  return label === cat.labelKey ? cat.defaultLabel : label;
+}
+
+export function isCustomFloatingCreateLabel(actionId, label) {
+  const value = String(label || '').trim();
+  if (!value) return false;
+  const cat = FLOATING_CREATE_ACTION_CATALOG.find((a) => a.id === actionId);
+  if (!cat) return true;
+  return value !== cat.defaultLabel && value !== floatingCreateDefaultLabel(actionId);
+}
+
+export function floatingCreateActionLabel(action) {
+  return isCustomFloatingCreateLabel(action?.id, action?.label)
+    ? String(action.label).trim()
+    : floatingCreateDefaultLabel(action?.id);
+}
+
+/*
+  What to store for a label typed in Settings: the default marker when it
+  is empty or just the app-language default, so the action keeps following
+  the language; the typed text otherwise.
+*/
+export function floatingCreateLabelToStore(actionId, label) {
+  if (isCustomFloatingCreateLabel(actionId, label)) return String(label).trim();
+  const cat = FLOATING_CREATE_ACTION_CATALOG.find((a) => a.id === actionId);
+  return cat ? cat.defaultLabel : String(actionId || '');
 }
 
 function catalogById() {
@@ -464,6 +514,8 @@ export function normalizeFloatingCreateSettings(raw = {}) {
 
   return {
     version: 2,
+    // The round button itself; off for people who never use it.
+    visible: raw.visible !== false,
     minDistance: numberOr(raw.minDistance, FLOATING_CREATE_MIN_DISTANCE),
     iconStyle: FLOATING_CREATE_ICON_STYLES.includes(raw.iconStyle)
       ? raw.iconStyle
@@ -508,7 +560,7 @@ export function floatingCreateActionsForRuntime(settings = getFloatingCreateSett
     .sort((a, b) => a.order - b.order)
     .map((a) => ({
       id: a.id,
-      label: a.label,
+      label: floatingCreateActionLabel(a),
       icon: normalizeLucideName(a.icon),
       x: Math.round(a.x),
       y: Math.round(a.y),

@@ -13,6 +13,7 @@ import {
 } from './private/private-ui.js';
 
 import { t } from './i18n/index.js';
+import { folderLabel } from './folder-labels.js';
 
 import {
   openNote,
@@ -1716,7 +1717,7 @@ function folderRow(f, visibleNotes, depth, {
   icon.classList.add('tree-folder-icon');
   row.append(icon);
 
-  row.append(el('span', { class: 'label' }, f.name || t('items.folderFallback')));
+  row.append(el('span', { class: 'label' }, folderLabel(f)));
 
     const childCount = childFolders.length + childNotes.length;
 
@@ -2185,7 +2186,7 @@ function trashFolderRow(folder, depth = 0) {
   icon.classList.add('tree-folder-icon');
   row.append(icon);
 
-  row.append(el('span', { class: 'label' }, folder.name || t('items.folderFallback')));
+  row.append(el('span', { class: 'label' }, folderLabel(folder)));
   row.append(el('span', { class: 'tree-trash-meta' }, trashItemDeletedLabel(folder)));
 
   wrap.append(row);
@@ -3121,7 +3122,7 @@ function folderPath(folderId) {
 
   while (f && !seen.has(f.id)) {
     seen.add(f.id);
-    parts.unshift(f.name || t('items.folderFallback'));
+    parts.unshift(folderLabel(f));
     f = f.parentId ? state.folders.get(f.parentId) : null;
   }
 

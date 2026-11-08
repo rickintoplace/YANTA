@@ -23,6 +23,8 @@ import {
   yantaPrompt,
 } from '../dialogs.js';
 
+import { t } from '../i18n/index.js';
+
 import {
   openBoundOverlay,
 } from '../overlay-history.js';
@@ -272,6 +274,14 @@ function api() {
   return panel?.getApi?.() || null;
 }
 
+// The base layer is stored as "Base" (shared scene data); show it in the
+// viewer's language unless someone renamed it.
+function layerDisplayName(layer) {
+  return layer?.id === BASE_LAYER_ID && layer.name === 'Base'
+    ? t('layers.base')
+    : layer?.name || '';
+}
+
 function refresh() {
   if (!panel?.root?.isConnected) return;
 
@@ -300,8 +310,8 @@ function refresh() {
   if (isolateBtn) {
     isolateBtn.setAttribute('aria-pressed', panel.isolate ? 'true' : 'false');
     isolateBtn.title = panel.isolate
-      ? 'Editing only the active layer'
-      : 'Edit only the active layer';
+      ? t('layers.isolateOn')
+      : t('layers.isolateOff');
   }
 
   list.innerHTML = layers.map((layer, index) => {
@@ -312,32 +322,32 @@ function refresh() {
       <div class="yanta-layer-row ${layer.id === panel.activeLayerId ? 'is-active' : ''} ${layer.visible ? '' : 'is-hidden'}"
            data-layer="${escapeAttr(layer.id)}"
            ${isBase ? '' : 'draggable="true"'}
-           title="Click to make this the active layer">
-        <span class="yanta-layer-grip" data-grip title="Drag to reorder">${lucide('grip-vertical', 13)}</span>
+           title="${escapeAttr(t('layers.makeActive'))}">
+        <span class="yanta-layer-grip" data-grip title="${escapeAttr(t('layers.dragToReorder'))}">${lucide('grip-vertical', 13)}</span>
         <span class="yanta-layer-swatch" style="background:${escapeAttr(layer.color)}"></span>
 
         <span class="yanta-layer-toggles">
           <button class="icon-btn" data-toggle="visible" aria-pressed="${layer.visible ? 'false' : 'true'}"
-                  title="${layer.visible ? 'Hide layer' : 'Show layer'}">
+                  title="${escapeAttr(layer.visible ? t('layers.hide') : t('layers.show'))}">
             ${lucide(layer.visible ? 'eye' : 'eye-off', 14)}
           </button>
           <button class="icon-btn" data-toggle="locked" aria-pressed="${layer.locked ? 'true' : 'false'}"
-                  title="${layer.locked ? 'Unlock layer' : 'Lock layer'}">
+                  title="${escapeAttr(layer.locked ? t('layers.unlock') : t('layers.lock'))}">
             ${lucide(layer.locked ? 'lock' : 'lock-open', 14)}
           </button>
         </span>
 
         <span class="yanta-layer-main">
-          <div class="yanta-layer-name">${escapeHtml(layer.name)}</div>
-          <div class="yanta-layer-count">${count} object${count === 1 ? '' : 's'}</div>
+          <div class="yanta-layer-name">${escapeHtml(layerDisplayName(layer))}</div>
+          <div class="yanta-layer-count">${escapeHtml(t('layers.objectCount', { count }))}</div>
         </span>
 
         <span class="yanta-layer-actions">
-          <button class="icon-btn" data-action="up" title="Bring layer forward"
+          <button class="icon-btn" data-action="up" title="${escapeAttr(t('layers.forward'))}"
                   ${index >= layers.length - 1 || isBase ? 'disabled' : ''}>${lucide('chevron-up', 14)}</button>
-          <button class="icon-btn" data-action="down" title="Send layer backward"
+          <button class="icon-btn" data-action="down" title="${escapeAttr(t('layers.backward'))}"
                   ${index <= 1 ? 'disabled' : ''}>${lucide('chevron-down', 14)}</button>
-          <button class="icon-btn" data-action="menu" title="More">${lucide('ellipsis', 14)}</button>
+          <button class="icon-btn" data-action="menu" title="${escapeAttr(t('layers.more'))}">${lucide('ellipsis', 14)}</button>
         </span>
       </div>
     `;
@@ -445,10 +455,10 @@ function openLayerMenu(anchor, layerId) {
   menu.style.zIndex = '560';
 
   menu.innerHTML = `
-    <button data-act="move">${lucide('between-vertical-start', 14)} Move selection here</button>
-    <button data-act="select">${lucide('box-select', 14)} Select layer objects</button>
-    <button data-act="rename" ${isBase ? 'disabled' : ''}>${lucide('pencil', 14)} Rename</button>
-    ${isBase ? '' : `<hr><button class="danger" data-act="delete">${lucide('trash', 14)} Delete layer</button>`}
+    <button data-act="move">${lucide('between-vertical-start', 14)} ${escapeHtml(t('layers.moveSelectionHere'))}</button>
+    <button data-act="select">${lucide('box-select', 14)} ${escapeHtml(t('layers.selectObjects'))}</button>
+    <button data-act="rename" ${isBase ? 'disabled' : ''}>${lucide('pencil', 14)} ${escapeHtml(t('draw.rename'))}</button>
+    ${isBase ? '' : `<hr><button class="danger" data-act="delete">${lucide('trash', 14)} ${escapeHtml(t('layers.delete'))}</button>`}
   `;
 
   document.body.append(menu);
@@ -471,12 +481,12 @@ function openLayerMenu(anchor, layerId) {
     const moved = moveSelectionToLayer(noteId, drawingId, layerId, { api: api() });
 
     if (!moved) {
-      toast('Select objects on the board first', 'error');
+      toast(t('layers.selectFirst'), 'error');
       return;
     }
 
     panel.knownIds = liveElementIds(noteId, drawingId, api());
-    toast(`Moved ${moved} object${moved === 1 ? '' : 's'} to “${layer.name}”`, 'success');
+    toast(t('layers.moved', { count: moved, name: layerDisplayName(layer) }), 'success');
     refresh();
   });
 
@@ -485,17 +495,17 @@ function openLayerMenu(anchor, layerId) {
 
     const count = selectLayer(noteId, drawingId, layerId, { api: api() });
 
-    if (!count) toast('This layer has nothing selectable', 'error');
+    if (!count) toast(t('layers.nothingSelectable'), 'error');
   });
 
   menu.querySelector('[data-act="rename"]')?.addEventListener('click', async () => {
     close();
 
     const name = await yantaPrompt({
-      title: 'Rename layer',
-      label: 'Layer name',
+      title: t('layers.renameTitle'),
+      label: t('layers.nameLabel'),
       initial: layer.name,
-      confirmLabel: 'Rename',
+      confirmLabel: t('draw.rename'),
       icon: 'layers',
     });
 
@@ -512,9 +522,9 @@ function openLayerMenu(anchor, layerId) {
     close();
 
     const ok = await yantaConfirm({
-      title: 'Delete layer?',
-      message: `“${layer.name}” is removed. Its objects are kept and move to the base layer.`,
-      confirmLabel: 'Delete layer',
+      title: t('layers.deleteTitle'),
+      message: t('layers.deleteMessage', { name: layerDisplayName(layer) }),
+      confirmLabel: t('layers.delete'),
       danger: true,
       icon: 'trash',
     });
@@ -648,21 +658,20 @@ export function openLayersPanel({ noteId, drawingId, getApi }) {
   root.innerHTML = `
     <div class="yanta-layers-head" data-layers-drag>
       <span>${lucide('layers', 16)}</span>
-      <h3>Layers</h3>
+      <h3>${escapeHtml(t('draw.layers'))}</h3>
       <button class="icon-btn" data-layers-isolate aria-pressed="false"
-              title="Edit only the active layer">${lucide('focus', 15)}</button>
-      <button class="icon-btn" data-layers-close title="Close">${lucide('x', 16)}</button>
+              title="${escapeAttr(t('layers.isolateOff'))}">${lucide('focus', 15)}</button>
+      <button class="icon-btn" data-layers-close title="${escapeAttr(t('common.close'))}">${lucide('x', 16)}</button>
     </div>
 
     <div class="yanta-layers-list" data-layers-list></div>
 
     <div class="yanta-layers-hint">
-      The highlighted layer collects what you draw next. Top row is the front
-      of the board — drag a row to restack it.
+      ${escapeHtml(t('layers.hint'))}
     </div>
 
     <div class="yanta-layers-foot">
-      <button class="btn" data-layers-add>${lucide('plus', 14)} New layer</button>
+      <button class="btn" data-layers-add>${lucide('plus', 14)} ${escapeHtml(t('layers.newLayer'))}</button>
     </div>
   `;
 
@@ -714,8 +723,8 @@ export function openLayersPanel({ noteId, drawingId, getApi }) {
 
     toast(
       panel.isolate
-        ? 'Only the active layer is editable'
-        : 'All layers unlocked',
+        ? t('layers.isolatedToast')
+        : t('layers.unlockedToast'),
       'success'
     );
 
@@ -728,10 +737,10 @@ export function openLayersPanel({ noteId, drawingId, getApi }) {
 
   root.querySelector('[data-layers-add]')?.addEventListener('click', async () => {
     const name = await yantaPrompt({
-      title: 'New layer',
-      label: 'Layer name',
-      initial: `Layer ${listLayers(noteId, drawingId).length}`,
-      confirmLabel: 'Create',
+      title: t('layers.newLayer'),
+      label: t('layers.nameLabel'),
+      initial: t('layers.defaultName', { n: listLayers(noteId, drawingId).length }),
+      confirmLabel: t('layers.create'),
       icon: 'layers',
     });
 

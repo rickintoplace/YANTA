@@ -93,14 +93,15 @@ async function sectionHtml(bridge) {
       <span class="ycs-person-meta">${escapeHtml(role(p.role))}${!p.isMe && p.lastActive ? ` · ${escapeHtml(relative(p.lastActive))}` : ''}</span>
     </li>`).join('');
 
+  // The feed stores the English fallbacks 'Someone' / 'Untitled event'.
   const changes = [...feed.entries].reverse().slice(0, 5);
   const changesHtml = changes.length
     ? `<ul class="ycs-changes">${changes.map((e) => `
         <li class="${e.ts > feed.lastSeenAt ? 'is-new' : ''}">
           <button type="button" data-event="${escapeAttr(e.action !== 'removed' ? e.eventId || '' : '')}">
             <span>${escapeHtml(t(`calendarShare.change.${e.action === 'added' ? 'added' : e.action === 'removed' ? 'removed' : 'changed'}`, {
-              who: names.get(e.actor) || e.actor || t('calendarShare.someone'),
-              title: e.title || t('calendarShare.untitledEvent'),
+              who: names.get(e.actor) || (e.actor !== 'Someone' && e.actor) || t('calendarShare.someone'),
+              title: (e.title !== 'Untitled event' && e.title) || t('calendarShare.untitledEvent'),
             }))}</span>
             <time>${escapeHtml(relative(e.ts))}</time>
           </button>

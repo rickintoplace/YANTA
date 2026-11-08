@@ -23,6 +23,8 @@ import {
   actionToast,
 } from '../core.js';
 
+import { t, getLocale } from '../i18n/index.js';
+
 import {
   openSidePane,
   closeSidePane,
@@ -121,7 +123,7 @@ function fmtDate(ms) {
 
   if (Number.isNaN(d.getTime())) return '';
 
-  return d.toLocaleString([], {
+  return d.toLocaleString(getLocale(), {
     dateStyle: 'medium',
     timeStyle: 'short',
   });
@@ -395,7 +397,7 @@ function syncPreviewPaneSwitcherButton() {
   const btn = document.createElement('button');
   btn.className = 'icon-btn';
   btn.dataset.paneKind = 'rss';
-  btn.title = 'Sources';
+  btn.title = t('rssWidget.sources');
   btn.innerHTML = lucide('rss', 15);
 
   btn.addEventListener('click', (e) => {
@@ -404,7 +406,7 @@ function syncPreviewPaneSwitcherButton() {
 
     openRssPane().catch((err) => {
       console.error(err);
-      toast('Could not open Sources', 'error');
+      toast(t('rss.ui.openFailed'), 'error');
     });
   });
 
@@ -465,8 +467,8 @@ function isVideoItem(item) {
 }
 
 function mediaBadge(item) {
-  if (isAudioItem(item)) return { icon: 'podcast', label: 'Podcast' };
-  if (isVideoItem(item)) return { icon: 'play', label: 'Video' };
+  if (isAudioItem(item)) return { icon: 'podcast', label: t('rss.ui.podcast') };
+  if (isVideoItem(item)) return { icon: 'play', label: t('rss.ui.video') };
   return null;
 }
 
@@ -502,7 +504,7 @@ async function renderItemCard(item) {
 
     renderReader(item.id).catch((err) => {
       console.error(err);
-      toast('Could not open source item', 'error');
+      toast(t('rss.ui.openItemFailed'), 'error');
     });
   });
 
@@ -550,7 +552,7 @@ async function renderItemCard(item) {
 
   const titleRow = el('div', { class: 'yanta-rss-title-row' });
 
-  titleRow.append(el('div', { class: 'yanta-rss-title' }, item.title || 'Untitled'));
+  titleRow.append(el('div', { class: 'yanta-rss-title' }, item.title || t('note.untitled')));
 
   if (badge) {
     const media = el('span', { class: 'yanta-rss-media-badge' });
@@ -562,7 +564,7 @@ async function renderItemCard(item) {
     titleRow,
     el('div', { class: 'yanta-rss-meta' },
       [
-        item.feedTitle || 'Source',
+        item.feedTitle || t('rssWidget.sourceFallback'),
         item.author || '',
         fmtDate(item.publishedAt || item.discoveredAt),
       ].filter(Boolean).join(' · ')
@@ -577,7 +579,7 @@ async function renderItemCard(item) {
 
   const actions = el('div', { class: 'yanta-rss-actions' });
 
-  const star = el('button', { class: 'btn iconish', type: 'button', title: item.starred ? 'Unstar' : 'Star' });
+  const star = el('button', { class: 'btn iconish', type: 'button', title: item.starred ? t('rss.menu.unstar') : t('rss.menu.star') });
   star.innerHTML = lucide('star', 13);
   star.classList.toggle('active', !!item.starred);
 
@@ -589,12 +591,12 @@ async function renderItemCard(item) {
       await toggleRssItemStar(item.id);
       await renderInbox();
     } catch (err) {
-      toast(err?.message || 'Could not update item', 'error');
+      toast(err?.message || t('rss.menu.updateFailed'), 'error');
     }
   });
 
   const save = el('button', { class: 'btn primary compact', type: 'button' });
-  save.innerHTML = `${lucide('file-plus', 13)} Save`;
+  save.innerHTML = `${lucide('file-plus', 13)} ${escapeHtml(t('rss.ui.save'))}`;
 
   save.addEventListener('click', async (e) => {
     e.preventDefault();
@@ -604,14 +606,14 @@ async function renderItemCard(item) {
       const note = await saveRssItemAsNote(item.id);
       if (note?.id) await openNote(note.id);
     } catch (err) {
-      toast(err?.message || 'Could not save item', 'error');
+      toast(err?.message || t('rss.menu.saveFailed'), 'error');
     }
   });
 
   const archive = el('button', {
     class: 'btn iconish',
     type: 'button',
-    title: item.archived ? 'Restore' : 'Archive',
+    title: item.archived ? t('rss.menu.restore') : t('rss.menu.archive'),
   });
 
   archive.innerHTML = lucide(item.archived ? 'archive-restore' : 'archive', 13);
@@ -624,7 +626,7 @@ async function renderItemCard(item) {
       await archiveRssItem(item.id, !item.archived);
       await renderInbox();
     } catch (err) {
-      toast(err?.message || 'Could not archive item', 'error');
+      toast(err?.message || t('rss.menu.archiveFailed'), 'error');
     }
   });
 
@@ -764,10 +766,10 @@ async function renderLoadMoreFooter(feed) {
   const meta = el('div', { class: 'yanta-rss-load-more-meta' });
 
   meta.innerHTML = `
-    <strong>${escapeHtml(feed.title || 'YouTube source')}</strong>
+    <strong>${escapeHtml(feed.title || t('rss.ui.youtubeSource'))}</strong>
     <small>
-      ${feed.youtubeNextPageToken ? 'Load older videos from this channel.' : 'Find older videos from this channel.'}
-      Shorts are ${settings.youtubeHideShorts !== false ? 'hidden' : 'included'}.
+      ${escapeHtml(feed.youtubeNextPageToken ? t('rss.ui.loadOlder') : t('rss.ui.findOlder'))}
+      ${escapeHtml(settings.youtubeHideShorts !== false ? t('rss.ui.shortsHidden') : t('rss.ui.shortsIncluded'))}
     </small>
   `;
 
@@ -776,35 +778,35 @@ async function renderLoadMoreFooter(feed) {
     type: 'button',
   });
 
-  btn.innerHTML = `${lucide('list-plus', 14)} Load more videos`;
+  btn.innerHTML = `${lucide('list-plus', 14)} ${escapeHtml(t('rss.ui.loadMoreVideos'))}`;
 
   btn.addEventListener('click', async () => {
     btn.disabled = true;
-    btn.innerHTML = `${lucide('loader-circle', 14)} Loading…`;
+    btn.innerHTML = `${lucide('loader-circle', 14)} ${escapeHtml(t('rss.ui.loading'))}`;
 
     try {
       const result = await loadMoreRssFeedItems(feed.id);
 
       if (result.count) {
         toast(
-          `Loaded ${result.count} more video${result.count === 1 ? '' : 's'}`,
+          t('rss.ui.loadedVideos', { count: result.count }),
           'success'
         );
       } else if (result.skippedDuplicates) {
         toast(
-          `No new videos found · skipped ${result.skippedDuplicates} duplicate${result.skippedDuplicates === 1 ? '' : 's'}`,
+          t('rss.ui.noNewVideos', { count: result.skippedDuplicates }),
           'success'
         );
       } else {
-        toast('No more videos loaded', 'success');
+        toast(t('rss.ui.noMoreVideos'), 'success');
       }
 
       await renderInbox();
     } catch (err) {
-      toast(err?.message || 'Could not load more videos', 'error');
+      toast(err?.message || t('rss.ui.loadMoreFailed'), 'error');
 
       btn.disabled = false;
-      btn.innerHTML = `${lucide('list-plus', 14)} Load more videos`;
+      btn.innerHTML = `${lucide('list-plus', 14)} ${escapeHtml(t('rss.ui.loadMoreVideos'))}`;
     }
   });
 
@@ -845,10 +847,10 @@ async function renderInbox() {
     if (!items.length) {
       fragment.append(el('div', { class: 'yanta-rss-empty' },
         currentMode === 'unread'
-          ? 'No unread source items.'
+          ? t('rss.ui.emptyUnread')
           : searchQuery
-            ? 'No source items match your search.'
-            : 'No source items.'
+            ? t('rss.ui.emptySearch')
+            : t('rss.ui.empty')
       ));
     } else {
       const cards = await Promise.all(items.map((item) => renderItemCard(item)));
@@ -952,7 +954,7 @@ function bindCustomAudioPlayer(box, audio) {
 
     if (play) {
       play.innerHTML = lucide(audio.paused ? 'play' : 'pause', 16);
-      play.title = audio.paused ? 'Play' : 'Pause';
+      play.title = audio.paused ? t('rss.ui.play') : t('rss.ui.pause');
     }
   };
 
@@ -1008,23 +1010,23 @@ async function renderMediaBlock(item) {
       </div>
 
       <div class="yanta-rss-audio-main">
-        <div class="yanta-rss-audio-label">Podcast / Audio</div>
-        <div class="yanta-rss-audio-title">${escapeHtml(item.title || 'Audio')}</div>
+        <div class="yanta-rss-audio-label">${escapeHtml(t('rss.ui.audioLabel'))}</div>
+        <div class="yanta-rss-audio-title">${escapeHtml(item.title || t('rss.ui.audioFallback'))}</div>
         <div class="yanta-rss-audio-feed">${escapeHtml(item.feedTitle || '')}</div>
 
         <audio preload="metadata" src="${escapeAttr(mediaUrl)}"></audio>
 
         <div class="yanta-rss-audio-controls">
           <div class="yanta-rss-controls-group">
-            <button class="icon-btn" data-audio-back="" title="Back 15 seconds">
+            <button class="icon-btn" data-audio-back="" title="${escapeAttr(t('rss.ui.back15'))}">
               <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg>
             </button>
             
-            <button class="icon-btn primary-round" data-audio-play="" title="Play">
+            <button class="icon-btn primary-round" data-audio-play="" title="${escapeAttr(t('rss.ui.play'))}">
               <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="6 3 20 12 6 21 6 3"></polygon></svg>
             </button>
             
-            <button class="icon-btn" data-audio-fwd="" title="Forward 30 seconds">
+            <button class="icon-btn" data-audio-fwd="" title="${escapeAttr(t('rss.ui.forward30'))}">
               <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"></path><path d="M21 3v5h-5"></path></svg>
             </button>
           </div>
@@ -1053,7 +1055,7 @@ async function renderMediaBlock(item) {
     box.innerHTML = `
       <div class="yanta-rss-media-player-head" style="display:none;">
         ${lucide('play', 15)}
-        <strong>Video</strong>
+        <strong>${escapeHtml(t('rss.ui.video'))}</strong>
       </div>
       <iframe
         src="${escapeAttr(embedUrl)}"
@@ -1072,7 +1074,7 @@ async function renderMediaBlock(item) {
     box.innerHTML = `
       <div class="yanta-rss-media-player-head">
         ${lucide('play', 15)}
-        <strong>Video</strong>
+        <strong>${escapeHtml(t('rss.ui.video'))}</strong>
       </div>
       <video controls preload="metadata" src="${escapeAttr(mediaUrl)}"></video>
     `;
@@ -1119,7 +1121,7 @@ async function renderMoreFromSameFeed(item) {
   box.innerHTML = `
     <div class="yanta-rss-more-head">
       ${lucide('list-video', 15)}
-      <strong>More from ${escapeHtml(item.feedTitle || 'this source')}</strong>
+      <strong>${escapeHtml(item.feedTitle ? t('rss.ui.moreFrom', { source: item.feedTitle }) : t('rss.ui.moreFromThis'))}</strong>
     </div>
   `;
 
@@ -1142,7 +1144,7 @@ async function renderMoreFromSameFeed(item) {
         }
       </span>
       <span class="yanta-rss-more-main">
-        <strong>${escapeHtml(x.title || 'Untitled')}</strong>
+        <strong>${escapeHtml(x.title || t('note.untitled'))}</strong>
         <small>${escapeHtml(fmtDate(x.publishedAt || x.discoveredAt))}</small>
       </span>
     `;
@@ -1191,11 +1193,11 @@ async function renderReader(itemId, { fromHistory = false } = {}) {
 
   head.innerHTML = `
     <div class="yanta-rss-reader-kicker">
-      ${escapeHtml(item.feedTitle || 'Source')}
+      ${escapeHtml(item.feedTitle || t('rssWidget.sourceFallback'))}
       ${badge ? `<span>${lucide(badge.icon, 11)} ${escapeHtml(badge.label)}</span>` : ''}
     </div>
 
-    <h2>${escapeHtml(item.title || 'Untitled')}</h2>
+    <h2>${escapeHtml(item.title || t('note.untitled'))}</h2>
 
     <div class="yanta-rss-meta">
       ${escapeHtml([
@@ -1213,7 +1215,7 @@ async function renderReader(itemId, { fromHistory = false } = {}) {
 
   const back = el('button', {
     class: 'btn iconish',
-    title: 'Back to list',
+    title: t('rss.ui.backToList'),
   });
 
   back.innerHTML = lucide('arrow-left', 15);
@@ -1228,7 +1230,7 @@ async function renderReader(itemId, { fromHistory = false } = {}) {
     href: item.url || '#',
     target: '_blank',
     rel: 'noopener noreferrer',
-    title: 'Open original',
+    title: t('rss.menu.openOriginal'),
   });
 
   original.innerHTML = lucide('external-link', 15);
@@ -1239,7 +1241,7 @@ async function renderReader(itemId, { fromHistory = false } = {}) {
 
   const star = el('button', {
     class: 'btn iconish',
-    title: item.starred ? 'Unstar' : 'Star',
+    title: item.starred ? t('rss.menu.unstar') : t('rss.menu.star'),
   });
 
   star.innerHTML = lucide('star', 15);
@@ -1250,29 +1252,29 @@ async function renderReader(itemId, { fromHistory = false } = {}) {
       await toggleRssItemStar(item.id);
       await renderReader(item.id);
     } catch (err) {
-      toast(err?.message || 'Could not update item', 'error');
+      toast(err?.message || t('rss.menu.updateFailed'), 'error');
     }
   });
 
   const save = el('button', {
     class: 'btn primary compact',
-    title: 'Save as note',
+    title: t('rss.menu.saveAsNote'),
   });
 
-  save.innerHTML = `${lucide('file-plus', 14)} <span>Save</span>`;
+  save.innerHTML = `${lucide('file-plus', 14)} <span>${escapeHtml(t('rss.ui.save'))}</span>`;
 
   save.addEventListener('click', async () => {
     try {
       const note = await saveRssItemAsNote(item.id);
       if (note?.id) await openNote(note.id);
     } catch (err) {
-      toast(err?.message || 'Could not save item', 'error');
+      toast(err?.message || t('rss.menu.saveFailed'), 'error');
     }
   });
 
   const append = el('button', {
     class: 'btn iconish',
-    title: 'Append to current note',
+    title: t('rss.menu.appendToNote'),
   });
 
   append.innerHTML = lucide('list-plus', 15);
@@ -1281,13 +1283,13 @@ async function renderReader(itemId, { fromHistory = false } = {}) {
     try {
       await appendRssItemToCurrentNote(item.id);
     } catch (err) {
-      toast(err?.message || 'Could not append item', 'error');
+      toast(err?.message || t('rss.menu.appendFailed'), 'error');
     }
   });
 
   const sendChat = el('button', {
     class: 'btn iconish',
-    title: 'Send to chat',
+    title: t('rss.ui.sendToChat'),
   });
 
   sendChat.innerHTML = lucide('send', 15);
@@ -1436,7 +1438,7 @@ async function fillRelatedNotesStrip(host, item) {
   const strip = el('div', { class: 'yanta-rss-related-notes' });
 
   const title = el('div', { class: 'yanta-rss-related-notes-title' });
-  title.innerHTML = `${lucide('brain-circuit', 13)} <span>Related in your notes</span>`;
+  title.innerHTML = `${lucide('brain-circuit', 13)} <span>${escapeHtml(t('rss.ui.related'))}</span>`;
   strip.append(title);
 
   for (const { note, preview } of rows) {
@@ -1447,7 +1449,7 @@ async function fillRelatedNotesStrip(host, item) {
     });
 
     row.append(
-      el('strong', {}, note.title || 'Untitled'),
+      el('strong', {}, note.title || t('note.untitled')),
       el('span', {}, preview || ''),
     );
 
@@ -1484,10 +1486,9 @@ function renderRssCloudLoginNotice({
     </div>
 
     <div class="yanta-rss-cloud-notice-main">
-      <strong>Sign in to YANTA Cloud to use Sources</strong>
+      <strong>${escapeHtml(t('rss.settings.gateTitle'))}</strong>
       <p>
-        YANTA fetches RSS/Atom feeds through a privacy-protected cloud proxy.
-        This avoids browser CORS problems, strips request credentials, and protects the proxy from abuse.
+        ${escapeHtml(t('rss.ui.cloudText'))}
       </p>
       ${
         error
@@ -1498,7 +1499,7 @@ function renderRssCloudLoginNotice({
 
     <button class="btn primary" data-rss-cloud-login>
       ${lucide('log-in', 14)}
-      Sign in
+      ${escapeHtml(t('rss.settings.signIn'))}
     </button>
   `;
 
@@ -1508,7 +1509,7 @@ function renderRssCloudLoginNotice({
       await renderShell();
     } catch (err) {
       console.error('[YANTA RSS] Could not open YANTA Cloud setup', err);
-      toast('Could not open YANTA Cloud login', 'error');
+      toast(t('rss.settings.loginFailed'), 'error');
     }
   });
 
@@ -1563,7 +1564,7 @@ function sourceTagButton({ tag, count }) {
   const btn = el('button', {
     class: 'yanta-rss-tab yanta-rss-tag-tab' + (currentSourceTag === tag ? ' active' : ''),
     type: 'button',
-    title: `Filter sources tagged #${tag}`,
+    title: t('rss.ui.filterTag', { tag }),
   });
 
   btn.innerHTML = `
@@ -1593,7 +1594,7 @@ function renderSourceTagsEditor(feed, {
 
   const input = el('input', {
     class: 'yanta-rss-source-tags-input',
-    placeholder: '+ tag',
+    placeholder: t('rss.ui.tagPlaceholder'),
     list: `rss-tags-${feed.id}`,
     autocomplete: 'off',
     spellcheck: 'false',
@@ -1638,7 +1639,7 @@ function renderSourceTagsEditor(feed, {
       const chip = el('button', {
         type: 'button',
         class: 'yanta-rss-source-tag-chip',
-        title: `Remove #${tag}`,
+        title: t('rss.ui.removeTag', { tag }),
       });
 
       chip.innerHTML = `#${escapeHtml(tag)} ${lucide('x', 11)}`;
@@ -1650,7 +1651,7 @@ function renderSourceTagsEditor(feed, {
         try {
           await save();
         } catch (err) {
-          toast(err?.message || 'Could not save source tags', 'error');
+          toast(err?.message || t('rss.ui.tagsSaveFailed'), 'error');
         }
       });
 
@@ -1670,7 +1671,7 @@ function renderSourceTagsEditor(feed, {
       try {
         await save();
       } catch (err) {
-        toast(err?.message || 'Could not save source tags', 'error');
+        toast(err?.message || t('rss.ui.tagsSaveFailed'), 'error');
       }
     }
 
@@ -1691,7 +1692,7 @@ function renderSourceTagsEditor(feed, {
       try {
         await save();
       } catch (err) {
-        toast(err?.message || 'Could not save source tags', 'error');
+        toast(err?.message || t('rss.ui.tagsSaveFailed'), 'error');
       }
     }
   });
@@ -1742,8 +1743,8 @@ async function openRssSourcesManagerInternal() {
   modal.innerHTML = `
     <div class="modal-card yanta-rss-sources-card">
       <header class="modal-head">
-        <h3>Manage Sources</h3>
-        <button class="icon-btn" data-rss-sources-close>&times;</button>
+        <h3>${escapeHtml(t('rss.ui.manageTitle'))}</h3>
+        <button class="icon-btn" data-rss-sources-close aria-label="${escapeAttr(t('common.close'))}">&times;</button>
       </header>
 
       <div class="modal-body yanta-rss-sources-body">
@@ -1751,8 +1752,8 @@ async function openRssSourcesManagerInternal() {
           <label class="yanta-rss-source-toggle">
             <input type="checkbox" data-youtube-hide-shorts ${settings.youtubeHideShorts !== false ? 'checked' : ''} />
             <span>
-              <strong>Hide YouTube Shorts</strong>
-              <small>Only load normal videos from YouTube channels. Uses YouTube video metadata and is applied on refresh/load-more.</small>
+              <strong>${escapeHtml(t('rss.ui.hideShorts'))}</strong>
+              <small>${escapeHtml(t('rss.ui.hideShortsHint'))}</small>
             </span>
           </label>
         </section>
@@ -1768,7 +1769,7 @@ async function openRssSourcesManagerInternal() {
                     </span>
 
                     <span class="yanta-rss-source-row-main">
-                      <strong>${escapeHtml(feed.title || 'Source')}</strong>
+                      <strong>${escapeHtml(feed.title || t('rssWidget.sourceFallback'))}</strong>
                       <small>${escapeHtml(feed.feedUrl || '')}</small>
 
                       <div data-source-tags-host="${escapeAttr(feed.id)}"></div>
@@ -1784,9 +1785,9 @@ async function openRssSourcesManagerInternal() {
                       ${
                         isYoutubeFeed(feed)
                           ? `
-                            <button class="btn" data-source-load-more="${escapeAttr(feed.id)}" title="Load more videos">
+                            <button class="btn" data-source-load-more="${escapeAttr(feed.id)}" title="${escapeAttr(t('rss.ui.loadMoreVideos'))}">
                               ${lucide('list-plus', 14)}
-                              More
+                              ${escapeHtml(t('rss.ui.more'))}
                             </button>
                           `
                           : ''
@@ -1794,12 +1795,12 @@ async function openRssSourcesManagerInternal() {
 
                       <button class="btn danger" data-source-delete="${escapeAttr(feed.id)}">
                         ${lucide('trash', 14)}
-                        Delete
+                        ${escapeHtml(t('rss.ui.delete'))}
                       </button>
                     </span>
                   </div>
                 `).join('')
-                : `<div class="tree-empty">No sources yet.</div>`
+                : `<div class="tree-empty">${escapeHtml(t('rss.settings.noSources'))}</div>`
             }
           </div>
         </section>
@@ -1831,8 +1832,8 @@ async function openRssSourcesManagerInternal() {
 
     toast(
       e.target.checked
-        ? 'YouTube Shorts will be hidden'
-        : 'YouTube Shorts will be included',
+        ? t('rss.ui.shortsWillHide')
+        : t('rss.ui.shortsWillInclude'),
       'success'
     );
   });
@@ -1854,8 +1855,8 @@ async function openRssSourcesManagerInternal() {
       await renderShell();
       await openRssSourcesManager();
 
-      actionToast(`Removed "${feed.title || 'Source'}"`, {
-        actionLabel: 'Undo',
+      actionToast(t('rss.removed', { title: feed.title || t('rssWidget.sourceFallback') }), {
+        actionLabel: t('common.undo'),
         onAction: async () => {
           await restoreRssSource(undo);
           await renderShell();
@@ -1870,25 +1871,25 @@ async function openRssSourcesManagerInternal() {
       const feedId = btn.dataset.sourceLoadMore || '';
 
       btn.disabled = true;
-      btn.innerHTML = `${lucide('loader-circle', 14)} Loading…`;
+      btn.innerHTML = `${lucide('loader-circle', 14)} ${escapeHtml(t('rss.ui.loading'))}`;
 
       try {
         const result = await loadMoreRssFeedItems(feedId);
 
         toast(
           result.count
-            ? `Loaded ${result.count} more video${result.count === 1 ? '' : 's'}`
-            : 'No more videos loaded',
+            ? t('rss.ui.loadedVideos', { count: result.count })
+            : t('rss.ui.noMoreVideos'),
           'success'
         );
 
         await renderShell();
         await openRssSourcesManager();
       } catch (err) {
-        toast(err?.message || 'Could not load more videos', 'error');
+        toast(err?.message || t('rss.ui.loadMoreFailed'), 'error');
 
         btn.disabled = false;
-        btn.innerHTML = `${lucide('list-plus', 14)} More`;
+        btn.innerHTML = `${lucide('list-plus', 14)} ${escapeHtml(t('rss.ui.more'))}`;
       }
     });
   });
@@ -1929,8 +1930,8 @@ async function renderShell() {
     title.innerHTML = `
       ${lucide('rss', 17)}
       <span>
-        <strong>YANTA Sources</strong>
-        <small>RSS, Atom, Podcasts and Videos</small>
+        <strong>${escapeHtml(t('rss.ui.headTitle'))}</strong>
+        <small>${escapeHtml(t('rss.ui.headSubtitle'))}</small>
       </span>
     `;
 
@@ -1945,14 +1946,14 @@ async function renderShell() {
   const search = el('input', {
     class: 'text-input yanta-rss-search',
     type: 'search',
-    placeholder: inSidePane ? 'Search…' : 'Search in your Sources…',
+    placeholder: inSidePane ? t('rss.ui.searchShort') : t('rss.ui.searchLong'),
     value: searchQuery,
   });
 
   const searchClear = el('button', {
     class: 'yanta-rss-search-clear',
     type: 'button',
-    title: 'Clear search',
+    title: t('rss.ui.clearSearch'),
   });
   searchClear.innerHTML = lucide('x', 14);
   searchClear.style.display = searchQuery ? 'inline-flex' : 'none';
@@ -1990,7 +1991,7 @@ async function renderShell() {
 
   const refresh = el('button', {
     class: 'btn compact',
-    title: 'Refresh sources',
+    title: t('rss.ui.refresh'),
   });
 
   refresh.innerHTML = lucide('refresh-cw', 15);
@@ -2002,9 +2003,9 @@ async function renderShell() {
       await refreshAllRssFeeds({ force: true });
       await renderInbox();
 
-      toast('Sources refreshed', 'success');
+      toast(t('rss.ui.refreshed'), 'success');
     } catch (err) {
-      toast(err?.message || 'Refresh failed', 'error');
+      toast(err?.message || t('rss.ui.refreshFailed'), 'error');
     } finally {
       refresh.disabled = false;
     }
@@ -2012,26 +2013,26 @@ async function renderShell() {
 
   const manageBtn = el('button', {
     class: 'btn compact yanta-rss-manage-btn',
-    title: 'Manage sources',
+    title: t('rss.ui.manage'),
   });
 
-  manageBtn.innerHTML = `${lucide('settings-2', 14)} <span>Manage Sources</span>`;
+  manageBtn.innerHTML = `${lucide('settings-2', 14)} <span>${escapeHtml(t('rss.ui.manageTitle'))}</span>`;
 
   manageBtn.addEventListener('click', () => {
     openRssSourcesManager().catch((err) => {
       console.error(err);
-      toast('Could not open source manager', 'error');
+      toast(t('rss.ui.manageFailed'), 'error');
     });
   });
 
   const toggleAddBtn = el('button', {
     class: 'btn primary compact yanta-rss-add-toggle',
-    title: addToolbarOpen ? 'Close add source' : 'Add source',
+    title: addToolbarOpen ? t('rss.ui.closeAdd') : t('rss.ui.addSource'),
   });
 
   toggleAddBtn.innerHTML = addToolbarOpen
-    ? `${lucide('x', 14)} <span>Add</span>`
-    : `${lucide('grid-2x2-plus', 14)} <span>Add</span>`;
+    ? `${lucide('x', 14)} <span>${escapeHtml(t('rss.ui.add'))}</span>`
+    : `${lucide('grid-2x2-plus', 14)} <span>${escapeHtml(t('rss.ui.add'))}</span>`;
 
   toggleAddBtn.addEventListener('click', async () => {
     addToolbarOpen = !addToolbarOpen;
@@ -2050,7 +2051,7 @@ async function renderShell() {
   if (!inSidePane) {
     const expand = el('button', {
       class: mode === 'fullscreen' ? 'icon-btn panel-toggle isfullscreen' : 'icon-btn panel-toggle',
-      title: mode === 'fullscreen' ? 'Dock to side pane' : 'Open fullscreen',
+      title: mode === 'fullscreen' ? t('rss.ui.dock') : t('rss.ui.openFullscreen'),
     });
 
     expand.innerHTML = lucide(mode === 'fullscreen' ? 'panel-right' : 'maximize-2', 16);
@@ -2065,7 +2066,7 @@ async function renderShell() {
 
     const close = el('button', {
       class: 'icon-btn',
-      title: mode === 'fullscreen' ? 'Close Sources' : 'Close side pane',
+      title: mode === 'fullscreen' ? t('rss.ui.close') : t('rss.ui.closePane'),
     });
 
     close.innerHTML = lucide('x', 16);
@@ -2096,7 +2097,7 @@ async function renderShell() {
 
     const addInput = el('input', {
       class: 'text-input',
-      placeholder: 'Browse curated Sources or paste a feed / YouTube URL…',
+      placeholder: t('rss.ui.addPlaceholder'),
       autocomplete: 'off',
       spellcheck: 'false',
       dataset: {
@@ -2105,14 +2106,14 @@ async function renderShell() {
     });
 
     const addBtn = el('button', { class: 'btn primary compact' });
-    addBtn.innerHTML = `${lucide('grid-2x2-plus', 14)} Add`;
+    addBtn.innerHTML = `${lucide('grid-2x2-plus', 14)} ${escapeHtml(t('rss.ui.add'))}`;
 
     const browseBtn = el('button', {
       class: 'btn yanta-rss-browse-btn',
-      title: 'Browse curated sources',
+      title: t('rss.picker.browseTitle'),
     });
 
-    browseBtn.innerHTML = `${lucide('layout-grid', 14)} <span>Browse curated Sources</span>`;
+    browseBtn.innerHTML = `${lucide('layout-grid', 14)} <span>${escapeHtml(t('rss.ui.browseCurated'))}</span>`;
 
     browseBtn.addEventListener('click', async () => {
       await openRssSourceBrowser({
@@ -2141,7 +2142,7 @@ async function renderShell() {
         addToolbarOpen = false;
         await renderShell();
       } catch (err) {
-        toast(err?.message || 'Could not add source', 'error');
+        toast(err?.message || t('rss.settings.addFailed'), 'error');
       } finally {
         addBtn.disabled = false;
         addInput.disabled = false;
@@ -2178,10 +2179,10 @@ async function renderShell() {
   const tabs = el('div', { class: 'yanta-rss-tabs' });
 
   tabs.append(
-    tabButton('unread', 'Inbox', 'inbox'),
-    tabButton('all', 'All', 'list'),
-    tabButton('starred', 'Starred', 'star'),
-    tabButton('archived', 'Archived', 'archive')
+    tabButton('unread', t('rss.ui.tabInbox'), 'inbox'),
+    tabButton('all', t('rss.ui.tabAll'), 'list'),
+    tabButton('starred', t('rss.ui.tabStarred'), 'star'),
+    tabButton('archived', t('rss.ui.tabArchived'), 'archive')
   );
 
   const tagCounts = rssTagCountsFromFeeds(feeds);
@@ -2206,7 +2207,7 @@ async function renderShell() {
 
       btn.innerHTML = `
         ${lucide(isYoutubeFeed(feed) ? 'play' : 'rss', 12)}
-        <span>${escapeHtml(feed.title || 'Source')}</span>
+        <span>${escapeHtml(feed.title || t('rssWidget.sourceFallback'))}</span>
       `;
 
       btn.addEventListener('click', async () => {
@@ -2248,7 +2249,7 @@ export async function openRssPane() {
 
     const body = openSidePane({
       kind: 'rss',
-      title: 'Sources',
+      title: t('rssWidget.sources'),
       icon: 'rss',
       className: 'yanta-rss-side-pane',
       onClose: () => {},
@@ -4037,14 +4038,14 @@ export function setupRss() {
   window.addEventListener('yanta-open-rss', () => {
     openRssPane().catch((err) => {
       console.error(err);
-      toast('Could not open Sources', 'error');
+      toast(t('rss.ui.openFailed'), 'error');
     });
   });
 
   window.addEventListener('yanta-open-rss-fullscreen', () => {
     openRssFullscreen().catch((err) => {
       console.error(err);
-      toast('Could not open Sources', 'error');
+      toast(t('rss.ui.openFailed'), 'error');
     });
   });
 
@@ -4069,7 +4070,7 @@ export function setupRss() {
       .then(() => renderReader(itemId))
       .catch((err) => {
         console.error(err);
-        toast('Could not open source item', 'error');
+        toast(t('rss.ui.openItemFailed'), 'error');
       });
   });
 
@@ -4078,7 +4079,7 @@ export function setupRss() {
 
     openRssPane().catch((err) => {
       console.error(err);
-      toast('Could not open Sources', 'error');
+      toast(t('rss.ui.openFailed'), 'error');
     });
   });
 
@@ -4087,7 +4088,7 @@ export function setupRss() {
 
     openRssFullscreen().catch((err) => {
       console.error(err);
-      toast('Could not expand Sources', 'error');
+      toast(t('rss.ui.expandFailed'), 'error');
     });
   });
 

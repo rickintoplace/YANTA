@@ -16,6 +16,7 @@
 // ============================================================
 
 import { state, store, toast } from '../core.js';
+import { t } from '../i18n/index.js';
 import { createWebRTCProvider } from '../providers.js';
 import { YANTA_CLOUD_BASE_URL } from '../cloud/cloud-api.js';
 import { fetchWithRetry, errorFromResponse } from '../cloud/cloud-fetch.js';
@@ -271,10 +272,10 @@ async function mountSpace(record) {
       if (session.uploadFailureShown) return;
       session.uploadFailureShown = true;
       const status = Number(err?.status || 0);
-      const name = record.title || 'the shared item';
+      const name = record.title;
       toast(status === 401 || status === 403
-        ? `Changes to "${name}" were not sent: this link no longer allows editing. Ask for a new edit link.`
-        : `Changes to "${name}" are not sent yet — YANTA retries automatically.`, 'error');
+        ? (name ? t('spaces.upload.forbidden', { name }) : t('spaces.upload.forbiddenUnnamed'))
+        : (name ? t('spaces.upload.pending', { name }) : t('spaces.upload.pendingUnnamed')), 'error');
       emitSpaceChanged(record.spaceId);
     },
     onDidApply: (docKey) => {
@@ -547,20 +548,22 @@ export function sharingConflictForNote(noteId) {
   if (!note) return '';
 
   if (note.spaceId) {
-    return 'This note is shared with you. Only the person who shared it can manage its sharing.';
+    return t('spaces.conflict.noteSharedWithYou');
   }
 
   for (const id of folderChainIds(note.folderId)) {
     const folder = state.folders.get(id);
 
     if (folder?.spaceId) {
-      return 'This note is inside a folder that was shared with you. Only the person who shared it can manage its sharing.';
+      return t('spaces.conflict.noteInSharedFolder');
     }
 
     const session = spaceSessionForFolder(id);
 
     if (session) {
-      return `This note is already shared through the "${folder?.name || 'shared'}" workspace. Manage sharing on that folder instead.`;
+      return folder?.name
+        ? t('spaces.conflict.noteInWorkspace', { name: folder.name })
+        : t('spaces.conflict.noteInWorkspaceUnnamed');
     }
   }
 
@@ -572,7 +575,7 @@ export function sharingConflictForFolder(folderId) {
   if (!folder) return '';
 
   if (folder.spaceId && !spaceSessionForFolder(folderId)) {
-    return 'This folder is shared with you. Only the person who shared it can manage its sharing.';
+    return t('spaces.conflict.folderSharedWithYou');
   }
 
   // An ancestor is already a workspace root (or mounted from someone
@@ -581,11 +584,13 @@ export function sharingConflictForFolder(folderId) {
     const ancestor = state.folders.get(id);
 
     if (ancestor?.spaceId) {
-      return 'This folder is inside a folder that was shared with you. Only the person who shared it can manage its sharing.';
+      return t('spaces.conflict.folderInSharedFolder');
     }
 
     if (spaceSessionForFolder(id)) {
-      return `This folder is already shared through the "${ancestor?.name || 'shared'}" workspace. Manage sharing on that folder instead.`;
+      return ancestor?.name
+        ? t('spaces.conflict.folderInWorkspace', { name: ancestor.name })
+        : t('spaces.conflict.folderInWorkspaceUnnamed');
     }
   }
 
@@ -600,7 +605,9 @@ export function sharingConflictForFolder(folderId) {
     if (folderChainIds(rootId).includes(folderId)) {
       const root = state.folders.get(rootId);
 
-      return `The sub-folder "${root?.name || 'a sub-folder'}" inside this folder is already shared. Stop that share first, or share this folder's contents through it.`;
+      return root?.name
+        ? t('spaces.conflict.subfolderShared', { name: root.name })
+        : t('spaces.conflict.subfolderSharedUnnamed');
     }
   }
 
@@ -682,19 +689,19 @@ export function spaceSessionForCalendarCategory(categoryId) {
  */
 export function sharingConflictForCalendarCategory(categoryId) {
   const cat = state.calendarCategories.get(categoryId);
-  if (!cat) return 'Category not found';
+  if (!cat) return t('spaces.conflict.calendarNotFound');
 
   // Mounted categories carry the spaceId mark; the owner's own never do.
   if (cat.spaceId) {
-    return 'This calendar is shared with you. Only the person who shared it can manage its sharing.';
+    return t('spaces.conflict.calendarSharedWithYou');
   }
 
   if (cat.source) {
-    return 'Dynamic source categories (holidays, imported dates) cannot be shared — recipients can add the same source themselves.';
+    return t('spaces.conflict.calendarDynamic');
   }
 
   if (cat.readonly) {
-    return 'Read-only categories cannot be shared.';
+    return t('spaces.conflict.calendarReadonly');
   }
 
   return '';
@@ -818,11 +825,11 @@ export async function stopSpaceShare(spaceId, { silent = false } = {}) {
     await apiDeleteSpace(spaceId);
   } catch (err) {
     console.warn('[YANTA Spaces] server delete failed', err);
-    if (!silent) toast('Share stopped locally — server cleanup failed', 'error');
+    if (!silent) toast(t('spaces.stop.serverFailed'), 'error');
     return;
   }
 
-  if (!silent) toast('Stopped live sharing');
+  if (!silent) toast(t('spaces.stop.done'));
 }
 
 /**
@@ -886,7 +893,7 @@ export async function handleSpaceUrl({ onProgress, url = '' } = {}) {
     meta = await apiGetSpace(parsed.spaceId, parsed);
   } catch (err) {
     console.error('[YANTA Spaces] space link unavailable', err);
-    toast('This share link is no longer valid', 'error');
+    toast(t('spaces.link.invalid'), 'error');
     return null;
   }
 
@@ -967,7 +974,7 @@ async function ensurePlaceholderNote(record, title = '') {
 
   const note = {
     id: record.noteId,
-    title: title || record.title || 'Shared note',
+    title: title || record.title || t('sharing.sharedNoteTitle'),
     type: 'markdown',
     folderId: null,
     tags: ['shared'],
@@ -1068,11 +1075,11 @@ export async function mountSpaceFromInvite({
   const session = await mountSpace(record);
 
   if (!existing) {
-    const thing = kind === 'folder'
-      ? 'A folder'
-      : kind === 'calendar' ? 'A calendar' : 'A note';
+    const unnamed = kind === 'folder'
+      ? t('spaces.received.folder')
+      : kind === 'calendar' ? t('spaces.received.calendar') : t('spaces.received.note');
 
-    toast(`"${record.title || thing}" was shared with you`, 'success');
+    toast(record.title ? t('spaces.received.named', { name: record.title }) : unnamed, 'success');
   }
 
   return session;
@@ -1290,10 +1297,11 @@ function scheduleOwnedSpaceHealthCheck(records) {
 
       await store.settings.set(noticeKey, incidentAt).catch(() => {});
 
+      const count = Number(stats.linkOpens || 0);
       toast(
-        `Your share link for "${record.title || 'a shared item'}" is popular — ` +
-        `it was opened ≈${Number(stats.linkOpens || 0)} times and some readers were rate-limited. ` +
-        'Details in the share dialog.',
+        record.title
+          ? t('spaces.popular.named', { name: record.title, count })
+          : t('spaces.popular.unnamed', { count }),
         'success'
       );
     }

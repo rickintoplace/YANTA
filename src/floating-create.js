@@ -52,12 +52,16 @@ function isGraphVisible() {
   return !!graph && graph.hidden === false;
 }
 
+/*
+  Not on the calendar: there it sat on the last row of days, and the
+  calendar has its own "+" in the toolbar.
+*/
 function shouldShowFloatingCreate() {
   return (
     actions.length > 0 &&
+    getFloatingCreateSettings().visible !== false &&
     (
       state.surface === 'dashboard' ||
-      state.surface === 'calendar' ||
       (
         state.surface === 'note' &&
         !!state.currentNoteId

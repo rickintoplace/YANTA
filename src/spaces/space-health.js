@@ -21,6 +21,7 @@
 // ============================================================
 
 import { state, store } from '../core.js';
+import { t } from '../i18n/index.js';
 import { YANTA_CLOUD_BASE_URL } from '../cloud/cloud-api.js';
 import { fetchWithRetry, errorFromResponse } from '../cloud/cloud-fetch.js';
 
@@ -99,25 +100,35 @@ function fromVaultMap(readMap, id, field) {
   }
 }
 
-function labelForSource(sourceType, sourceId) {
+// The name of what a share shares, '' when this device no longer has it.
+function nameForSource(sourceType, sourceId) {
   const id = String(sourceId || '');
   if (!id) return '';
 
   if (sourceType === 'calendar') {
     return fromVaultMap(vaultCalendarCategoriesMap, id, 'name')
       || state.calendarCategories.get(id)?.name
-      || 'a calendar';
+      || '';
   }
 
   if (sourceType === 'folder') {
     return fromVaultMap(vaultFoldersMap, id, 'name')
       || state.folders.get(id)?.name
-      || 'a folder';
+      || '';
   }
 
   return fromVaultMap(vaultNotesMap, id, 'title')
     || state.notes.get(id)?.title
-    || 'a note';
+    || '';
+}
+
+function labelForSource(sourceType, sourceId) {
+  if (!String(sourceId || '')) return '';
+
+  return nameForSource(sourceType, sourceId)
+    || (sourceType === 'calendar'
+      ? t('spaces.fallback.calendar')
+      : sourceType === 'folder' ? t('spaces.fallback.folder') : t('spaces.fallback.note'));
 }
 
 /**
@@ -184,7 +195,7 @@ export async function reconcileOwnedSpaces({ force = false } = {}) {
         objectCount: Number(space?.objectCount || 0),
         label: labelForSource(sourceType, sourceId),
         // Is what it shared still here? If not, the share is a leftover.
-        known: !!labelForSource(sourceType, sourceId) && !/^an? (calendar|folder|note)$/.test(labelForSource(sourceType, sourceId)),
+        known: !!nameForSource(sourceType, sourceId) && !/^an? (calendar|folder|note)$/.test(nameForSource(sourceType, sourceId)),
         supersededBy: space?.supersededBy || null,
       });
     }

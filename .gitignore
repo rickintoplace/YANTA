@@ -84,3 +84,6 @@ android/**/build/
 
 # Local review / to-do notes (not part of the product)
 todo/
+
+# Visual check screenshots (scripts/visual-check.mjs)
+.visual/

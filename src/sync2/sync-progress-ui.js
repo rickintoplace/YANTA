@@ -12,6 +12,7 @@
 import {
   lucide,
 } from '../core.js';
+import { t } from '../i18n/index.js';
 
 let detailRoot = null;
 let hideTimer = 0;
@@ -551,46 +552,46 @@ function ensureDetailedRoot() {
 
 function phaseLabel(phase = '') {
   const map = {
-    start: 'Starting sync…',
-    init: 'Preparing sync…',
+    start: t('sync.progress.phase.start'),
+    init: t('sync.progress.phase.init'),
 
-    uploadOutbox: 'Uploading changes…',
-    uploadVaultSnapshot: 'Uploading vault snapshot…',
-    uploadNoteSnapshots: 'Uploading note snapshots…',
-    uploadAssets: 'Uploading assets…',
+    uploadOutbox: t('sync.progress.phase.uploadOutbox'),
+    uploadVaultSnapshot: t('sync.progress.phase.uploadVaultSnapshot'),
+    uploadNoteSnapshots: t('sync.progress.phase.uploadNoteSnapshots'),
+    uploadAssets: t('sync.progress.phase.uploadAssets'),
 
-    downloadVaultSnapshots: 'Checking vault snapshots…',
-    downloadVaultUpdates: 'Downloading vault updates…',
-    downloadNoteSnapshots: 'Checking note snapshots…',
-    downloadNoteUpdates: 'Checking note updates…',
-    downloadAssets: 'Downloading assets…',
+    downloadVaultSnapshots: t('sync.progress.phase.downloadVaultSnapshots'),
+    downloadVaultUpdates: t('sync.progress.phase.downloadVaultUpdates'),
+    downloadNoteSnapshots: t('sync.progress.phase.downloadNoteSnapshots'),
+    downloadNoteUpdates: t('sync.progress.phase.downloadNoteUpdates'),
+    downloadAssets: t('sync.progress.phase.downloadAssets'),
 
-    downloadVaultHeads: 'Checking latest vault state…',
-    downloadNoteHeads: 'Checking latest note states…',
-    uploadVaultHead: 'Uploading latest vault state…',
-    uploadNoteHead: 'Uploading latest note state…',
-    headsComplete: 'Latest states updated',
-    pruneCoveredUpdates: 'Optimizing sync journal…',
-    compactHeads: 'Uploading latest states…',
+    downloadVaultHeads: t('sync.progress.phase.downloadVaultHeads'),
+    downloadNoteHeads: t('sync.progress.phase.downloadNoteHeads'),
+    uploadVaultHead: t('sync.progress.phase.uploadVaultHead'),
+    uploadNoteHead: t('sync.progress.phase.uploadNoteHead'),
+    headsComplete: t('sync.progress.phase.headsComplete'),
+    pruneCoveredUpdates: t('sync.progress.phase.pruneCoveredUpdates'),
+    compactHeads: t('sync.progress.phase.compactHeads'),
 
-    hydrate: 'Updating local vault…',
-    finalize: 'Finalizing sync…',
+    hydrate: t('sync.progress.phase.hydrate'),
+    finalize: t('sync.progress.phase.finalize'),
 
-    compact: 'Compacting database…',
-    compacting: 'Compacting database…',
-    compactStart: 'Starting compaction…',
-    compactHeadroom: 'Creating upload headroom…',
-    compactSnapshots: 'Uploading compacted snapshots…',
-    compactAssets: 'Checking encrypted assets…',
-    compactDelete: 'Deleting covered history…',
-    compactOutbox: 'Cleaning local queue…',
-    compactComplete: 'Compaction complete',
+    compact: t('sync.progress.phase.compact'),
+    compacting: t('sync.progress.phase.compact'),
+    compactStart: t('sync.progress.phase.compactStart'),
+    compactHeadroom: t('sync.progress.phase.compactHeadroom'),
+    compactSnapshots: t('sync.progress.phase.compactSnapshots'),
+    compactAssets: t('sync.progress.phase.compactAssets'),
+    compactDelete: t('sync.progress.phase.compactDelete'),
+    compactOutbox: t('sync.progress.phase.compactOutbox'),
+    compactComplete: t('sync.progress.phase.compactComplete'),
 
-    complete: 'Sync complete',
-    error: 'Sync failed',
+    complete: t('sync.progress.phase.complete'),
+    error: t('sync.progress.phase.error'),
   };
 
-  return map[phase] || phase || 'Synchronizing…';
+  return map[phase] || phase || t('sync.progress.phase.fallback');
 }
 
 function directionIcon(detail) {
@@ -625,35 +626,35 @@ function directionIcon(detail) {
 function compactLabel(detail) {
   const phase = String(detail?.phase || '');
 
-  if (detail?.status === 'error' || phase === 'error') return 'Sync error';
+  if (detail?.status === 'error' || phase === 'error') return t('sync.progress.compact.error');
 
   if (
     detail?.status === 'done' ||
     phase === 'complete'
   ) {
-    return 'Synced';
+    return t('sync.progress.compact.synced');
   }
 
-  if (phase === 'compactComplete') return 'Compacted';
+  if (phase === 'compactComplete') return t('sync.progress.compact.compacted');
 
   if (isCompactionPhase(phase) || phase === 'compact' || phase === 'compacting') {
-    return 'Compacting…';
+    return t('sync.progress.compact.compacting');
   }
 
-  if (detail?.direction === 'up') return 'Syncing…';
-  if (detail?.direction === 'down') return 'Checking…';
+  if (detail?.direction === 'up') return t('sync.progress.compact.syncing');
+  if (detail?.direction === 'down') return t('sync.progress.compact.checking');
 
-  return 'Syncing…';
+  return t('sync.progress.compact.syncing');
 }
 
 function subtitle(detail) {
   const bits = [];
 
   if (detail.provider) bits.push(detail.provider.replace('ObjectStore', ''));
-  if (detail.direction === 'up') bits.push('upload');
-  if (detail.direction === 'down') bits.push('download');
+  if (detail.direction === 'up') bits.push(t('sync.progress.upload'));
+  if (detail.direction === 'down') bits.push(t('sync.progress.download'));
   if (detail.message) bits.push(detail.message);
-  if (detail.noteId) bits.push(`note ${String(detail.noteId).slice(0, 8)}…`);
+  if (detail.noteId) bits.push(t('sync.progress.noteShort', { id: String(detail.noteId).slice(0, 8) }));
 
   return bits.join(' · ');
 }
@@ -815,7 +816,7 @@ function updateCompact(detail = {}) {
   const title = [
     phaseLabel(detail.phase),
     detail.message,
-    detail.noteId ? `Note ${detail.noteId}` : '',
+    detail.noteId ? t('sync.progress.noteFull', { id: detail.noteId }) : '',
   ].filter(Boolean).join(' · ');
 
   indicator.title = title || label;
@@ -857,7 +858,7 @@ function resetCompact() {
     <span class="sync-sym sync-synced" style="display: inline-flex; align-items: center; justify-content: center; width: 13px; height: 13px;">
       ${getIconSvg('cloud', 13)}
     </span>
-    <span class="sync-indicator-text">Cloud</span>
+    <span class="sync-indicator-text">${escapeHtmlLocal(t('sync.progress.cloud'))}</span>
   `;
 
   indicator.title = 'YANTA Cloud Sync';

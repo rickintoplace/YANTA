@@ -34,7 +34,7 @@ function openTargetMenu(anchor, place) {
 
   showMenu(r.left, r.bottom + 4, [
     ...mapTargets(place).map((target) => ({
-      label: target.label,
+      label: target.id === 'geo' ? t('places.mapsApp') : target.label,
       icon: target.icon,
       action: () => window.open(target.url, '_blank', 'noopener,noreferrer'),
     })),

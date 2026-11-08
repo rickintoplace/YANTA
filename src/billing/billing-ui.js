@@ -10,6 +10,7 @@ import {
 } from '../cloud/cloud-api.js';
 
 import { openBoundOverlay } from '../overlay-history.js';
+import { getLocale, t } from '../i18n/index.js';
 
 import {
   openBillingCheckout,
@@ -89,7 +90,7 @@ export async function openYantaPlusUpgrade({
   });
 
   if (!priceId) {
-    toast('YANTA Plus checkout is not configured yet.', 'error');
+    toast(t('billing.notConfigured'), 'error');
     throw new Error('YANTA Plus price id missing.');
   }
 
@@ -246,12 +247,12 @@ export function showCloudQuotaDialog(detail = {}) {
 
   const message =
     detail.message ||
-    'YANTA Cloud could not upload because a plan limit was reached.';
+    t('billing.limit.defaultMessage');
 
   modal.innerHTML = `
     <div class="modal-card yanta-billing-modal-card">
       <header class="modal-head">
-        <h3>Cloud limit reached</h3>
+        <h3>${escapeHtml(t('billing.limit.title'))}</h3>
         <button class="icon-btn" data-close>&times;</button>
       </header>
 
@@ -262,28 +263,23 @@ export function showCloudQuotaDialog(detail = {}) {
           </div>
 
           <div>
-            <strong>YANTA could not upload new encrypted sync data.</strong>
+            <strong>${escapeHtml(t('billing.limit.uploadFailed'))}</strong>
             <p>${escapeHtml(message)}</p>
           </div>
         </div>
 
         <div class="yanta-billing-box">
-          <strong>What you can do</strong>
-          <p>
-            First try optimizing cloud storage. YANTA will upload latest encrypted states
-            and prune old sync journal objects that are already covered.
-          </p>
-          ${inStoreApp() ? '' : `<p>
-            If your vault simply needs more room, upgrade to YANTA Plus.
-          </p>`}
+          <strong>${escapeHtml(t('billing.limit.whatYouCanDo'))}</strong>
+          <p>${escapeHtml(t('billing.limit.optimizeHint'))}</p>
+          ${inStoreApp() ? '' : `<p>${escapeHtml(t('billing.limit.upgradeHint'))}</p>`}
           ${
             maxBytes
-              ? `<p>Current limit: ${escapeHtml(fmtBytes(maxBytes))}</p>`
+              ? `<p>${escapeHtml(t('billing.limit.currentLimit', { limit: fmtBytes(maxBytes) }))}</p>`
               : ''
           }
           ${
             errorCode
-              ? `<p>Server code: <code>${escapeHtml(errorCode)}</code></p>`
+              ? `<p>${escapeHtml(t('billing.limit.serverCode'))} <code>${escapeHtml(errorCode)}</code></p>`
               : ''
           }
         </div>
@@ -293,21 +289,21 @@ export function showCloudQuotaDialog(detail = {}) {
         <div class="compress-actions">
           <button class="btn" data-optimize>
             ${lucide('archive', 14)}
-            Optimize storage
+            ${escapeHtml(t('billing.limit.optimize'))}
           </button>
 
           ${inStoreApp() ? '' : `<button class="btn" data-manage>
             ${lucide('credit-card', 14)}
-            Manage billing
+            ${escapeHtml(t('billing.limit.manage'))}
           </button>`}
 
           <span class="grow"></span>
 
-          <button class="btn" data-close>Later</button>
+          <button class="btn" data-close>${escapeHtml(t('billing.limit.later'))}</button>
 
           ${inStoreApp() ? '' : `<button class="btn primary" data-upgrade>
             ${lucide('sparkles', 14)}
-            Upgrade to YANTA Plus
+            ${escapeHtml(t('settings.billing.upgrade'))}
           </button>`}
         </div>
       </div>
@@ -334,11 +330,11 @@ export function showCloudQuotaDialog(detail = {}) {
 
   modal.querySelector('[data-optimize]')?.addEventListener('click', async () => {
     try {
-      statusEl.textContent = 'Optimizing cloud storage…';
+      statusEl.textContent = t('billing.limit.optimizing');
       statusEl.className = 'yanta-billing-status';
 
       if (typeof window.yantaSync2CompactNow !== 'function') {
-        throw new Error('Cloud storage optimization is not available yet.');
+        throw new Error(t('billing.limit.optimizeUnavailable'));
       }
 
       const result = await window.yantaSync2CompactNow({
@@ -349,10 +345,10 @@ export function showCloudQuotaDialog(detail = {}) {
       const freed = Number(result?.freedBytes || 0);
 
       statusEl.textContent =
-        `Optimization complete. Freed ${(freed / 1024 / 1024).toFixed(2)} MB. Try syncing again.`;
+        t('billing.limit.optimized', { mb: (freed / 1024 / 1024).toFixed(2) });
       statusEl.className = 'yanta-billing-status success';
 
-      toast('Cloud storage optimized', 'success');
+      toast(t('billing.limit.optimizedToast'), 'success');
 
       try {
         await window.yantaSync2Now?.({
@@ -362,31 +358,31 @@ export function showCloudQuotaDialog(detail = {}) {
       } catch {}
     } catch (err) {
       console.error(err);
-      statusEl.textContent = err?.message || 'Optimization failed.';
+      statusEl.textContent = err?.message || t('billing.limit.optimizeFailed');
       statusEl.className = 'yanta-billing-status error';
     }
   });
 
   modal.querySelector('[data-upgrade]')?.addEventListener('click', async () => {
     try {
-      statusEl.textContent = 'Opening checkout…';
+      statusEl.textContent = t('billing.openingCheckout');
       await openYantaPlusUpgrade({
         interval: 'yearly',
       });
     } catch (err) {
       console.error(err);
-      statusEl.textContent = err?.message || 'Could not open checkout.';
+      statusEl.textContent = err?.message || t('settings.billing.checkoutError');
       statusEl.className = 'yanta-billing-status error';
     }
   });
 
   modal.querySelector('[data-manage]')?.addEventListener('click', async () => {
     try {
-      statusEl.textContent = 'Opening billing portal…';
+      statusEl.textContent = t('billing.openingPortal');
       await openYantaBillingPortal();
     } catch (err) {
       console.error(err);
-      statusEl.textContent = err?.message || 'Could not open billing portal.';
+      statusEl.textContent = err?.message || t('settings.billing.portalError');
       statusEl.className = 'yanta-billing-status error';
     }
   });
@@ -402,7 +398,7 @@ export async function currentBillingSummary() {
   return {
     me,
     plan: me?.user?.plan || 'free',
-    planLabel: me?.user?.planLabel || me?.billing?.label || (me?.user?.plan === 'premium' ? 'YANTA Plus' : 'Free'),
+    planLabel: me?.user?.planLabel || me?.billing?.label || (me?.user?.plan === 'premium' ? 'YANTA Plus' : t('billing.planFree')),
     billing: me?.billing || null,
     limits: me?.limits || {},
     usage: me?.usage || {},
@@ -422,7 +418,7 @@ export async function reconciledBillingSummary() {
   return {
     me: null,
     plan: billing?.plan || 'free',
-    planLabel: billing?.label || (billing?.plan === 'premium' ? 'YANTA Plus' : 'Free'),
+    planLabel: billing?.label || (billing?.plan === 'premium' ? 'YANTA Plus' : t('billing.planFree')),
     billing,
     limits: res?.limits || {},
     usage: {},
@@ -434,7 +430,7 @@ function fmtBillingDate(ms) {
   if (!value) return '';
 
   try {
-    return new Date(value).toLocaleDateString();
+    return new Date(value).toLocaleDateString(getLocale());
   } catch {
     return '';
   }
@@ -472,10 +468,10 @@ export function describeBillingState({ plan, billing } = {}, { afterReconcile = 
       showUpgrade: !inStoreApp(),
       showManage: !!sub && !inStoreApp(),
       html: inStoreApp()
-        ? `<strong>Free plan.</strong>`
+        ? `<strong>${escapeHtml(t('billing.state.freePlan'))}</strong>`
         : `
-        <strong>Free plan.</strong>
-        Upgrade when you need more encrypted cloud storage, more devices, or higher Included AI limits.
+        <strong>${escapeHtml(t('billing.state.freePlan'))}</strong>
+        ${escapeHtml(t('billing.state.freeUpsell'))}
       `,
     };
   }
@@ -484,42 +480,42 @@ export function describeBillingState({ plan, billing } = {}, { afterReconcile = 
 
   if (stale) {
     html = `
-      <strong style="color:var(--green)">YANTA Plus is active.</strong>
-      Refreshing your renewal date…
+      <strong style="color:var(--green)">${escapeHtml(t('billing.state.plusActive'))}</strong>
+      ${escapeHtml(t('billing.state.refreshing'))}
     `;
   } else if (status === 'trialing') {
     html = cancels
       ? `
-        <strong style="color:var(--green)">YANTA Plus trial is active.</strong>
-        ${endsLabel ? `Your trial ends ${endsLabel} and won't renew — you won't be charged.` : `Your trial won't renew.`}
+        <strong style="color:var(--green)">${escapeHtml(t('billing.state.trialActive'))}</strong>
+        ${endsLabel ? t('billing.state.trialEndsNoRenew', { date: endsLabel }) : escapeHtml(t('billing.state.trialNoRenew'))}
       `
       : `
-        <strong style="color:var(--green)">YANTA Plus trial is active.</strong>
-        ${endsLabel ? `Free until ${endsLabel}, then your subscription begins automatically.` : `Your subscription begins automatically when the trial ends.`}
+        <strong style="color:var(--green)">${escapeHtml(t('billing.state.trialActive'))}</strong>
+        ${endsLabel ? t('billing.state.trialFreeUntil', { date: endsLabel }) : escapeHtml(t('billing.state.trialBeginsAuto'))}
       `;
   } else if (status === 'past_due') {
     html = inStoreApp()
-      ? `<strong style="color:var(--yellow)">Payment needs attention.</strong>`
+      ? `<strong style="color:var(--yellow)">${escapeHtml(t('billing.state.paymentAttention'))}</strong>`
       : `
-      <strong style="color:var(--yellow)">Payment needs attention.</strong>
-      Update your payment method to keep YANTA Plus.
+      <strong style="color:var(--yellow)">${escapeHtml(t('billing.state.paymentAttention'))}</strong>
+      ${escapeHtml(t('billing.state.paymentUpdate'))}
     `;
   } else if (cancels || status === 'canceled') {
     html = endsLabel
       ? `
-        <strong style="color:var(--green)">YANTA Plus is active.</strong>
-        Your subscription is canceled — you keep Plus until ${endsLabel}.
+        <strong style="color:var(--green)">${escapeHtml(t('billing.state.plusActive'))}</strong>
+        ${t('billing.state.canceledUntil', { date: endsLabel })}
       `
-      : `<strong style="color:var(--green)">YANTA Plus is active.</strong>`;
+      : `<strong style="color:var(--green)">${escapeHtml(t('billing.state.plusActive'))}</strong>`;
   } else if (endsLabel) {
     html = `
-      <strong style="color:var(--green)">YANTA Plus is active.</strong>
-      Renews ${endsLabel}.
+      <strong style="color:var(--green)">${escapeHtml(t('billing.state.plusActive'))}</strong>
+      ${t('billing.state.renews', { date: endsLabel })}
     `;
   } else {
     html = `
-      <strong style="color:var(--green)">YANTA Plus is active.</strong>
-      Thank you for supporting YANTA.
+      <strong style="color:var(--green)">${escapeHtml(t('billing.state.plusActive'))}</strong>
+      ${escapeHtml(t('billing.state.thanks'))}
     `;
   }
 

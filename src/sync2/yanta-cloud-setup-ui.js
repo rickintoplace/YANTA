@@ -2,7 +2,7 @@
 // YANTA Sync2 — YANTA Cloud setup UI
 // ============================================================
 
-import { t } from '../i18n/index.js';
+import { t, getLocale } from '../i18n/index.js';
 import {
   el,
   store,
@@ -793,7 +793,7 @@ function renderShell(title, bodyHtml) {
     <div class="modal-card yanta-cloud-card">
       <header class="modal-head">
         <h3>${escapeHtml(title)}</h3>
-        <button class="icon-btn" data-yanta-cloud-close>&times;</button>
+        <button class="icon-btn" data-yanta-cloud-close aria-label="${escapeHtml(t('common.close'))}">&times;</button>
       </header>
 
       <div class="modal-body yanta-cloud-body">
@@ -882,7 +882,7 @@ function renderTurnstile(container) {
       },
     });
   }).catch(() => {
-    setStatus('Could not load Turnstile.', 'error');
+    setStatus(t('sync.cloudSetup.turnstileFailed'), 'error');
   });
 }
 
@@ -945,22 +945,22 @@ async function enterGuestMode() {
 }
 
 function renderLogin() {
-  renderShell('YANTA Cloud Login', `
+  renderShell(t('sync.cloudSetup.login.title'), `
     <div class="yanta-cloud-hero">
       <div class="yanta-cloud-hero-icon">${lucide('cloud', 28)}</div>
       <div>
-        <strong>Sign in to YANTA Cloud</strong>
-        <p>Use your email address. YANTA Cloud stores only encrypted sync objects.</p>
+        <strong>${escapeHtml(t('sync.cloudSetup.login.heading'))}</strong>
+        <p>${escapeHtml(t('sync.cloudSetup.login.lead'))}</p>
       </div>
     </div>
 
     <section class="yanta-cloud-section">
-      <h4>Email</h4>
+      <h4>${escapeHtml(t('sync.cloudSetup.login.email'))}</h4>
       <div class="yanta-cloud-grid">
-        <input class="text-input" data-email placeholder="you@example.com" autocomplete="email" />
+        <input class="text-input" data-email placeholder="${escapeHtml(t('sync.cloudSetup.login.emailPlaceholder'))}" autocomplete="email" />
         <div data-turnstile></div>
         ${guestOptionHtml()}
-        <button class="btn primary" data-send-code>${lucide('mail', 14)} Send code</button>
+        <button class="btn primary" data-send-code>${lucide('mail', 14)} ${escapeHtml(t('sync.cloudSetup.login.sendCode'))}</button>
       </div>
     </section>
   `);
@@ -972,40 +972,40 @@ function renderLogin() {
     const email = modal.querySelector('[data-email]')?.value?.trim();
 
     if (!email) {
-      setStatus('Enter your email address.', 'error');
+      setStatus(t('sync.cloudSetup.login.enterEmail'), 'error');
       return;
     }
 
     try {
-      setStatus('Sending code…');
+      setStatus(t('sync.cloudSetup.login.sending'));
 
       guestRequested = !!modal.querySelector('[data-guest]')?.checked;
       await cloudSendCode(email, turnstileToken);
 
       renderCode(email);
     } catch (err) {
-      setStatus(err?.message || 'Could not send code', 'error');
+      setStatus(err?.message || t('sync.cloudSetup.login.sendFailed'), 'error');
     }
   });
 }
 
 function renderCode(email) {
-  renderShell('Enter login code', `
+  renderShell(t('sync.cloudSetup.code.title'), `
     <div class="yanta-cloud-hero">
       <div class="yanta-cloud-hero-icon">${lucide('key-round', 28)}</div>
       <div>
-        <strong>We sent a 6-digit code</strong>
-        <p>Enter the code from your email. You can also open the magic link from the email.</p>
+        <strong>${escapeHtml(t('sync.cloudSetup.code.heading'))}</strong>
+        <p>${escapeHtml(t('sync.cloudSetup.code.lead'))}</p>
       </div>
     </div>
 
     <section class="yanta-cloud-section">
-      <h4>Code</h4>
+      <h4>${escapeHtml(t('sync.cloudSetup.code.label'))}</h4>
       <input class="text-input" data-code placeholder="XXXXXX" inputmode="numeric" maxlength="6" />
       <div class="compress-actions" style="margin-top:10px">
-        <button class="btn" data-back>Back</button>
+        <button class="btn" data-back>${escapeHtml(t('common.back'))}</button>
         <span class="grow"></span>
-        <button class="btn primary" data-verify>${lucide('check', 14)} Continue</button>
+        <button class="btn primary" data-verify>${lucide('check', 14)} ${escapeHtml(t('common.continue'))}</button>
       </div>
     </section>
   `);
@@ -1022,12 +1022,12 @@ function renderCode(email) {
     const code = modal.querySelector('[data-code]')?.value?.trim();
 
     if (!code) {
-      setStatus('Enter the code.', 'error');
+      setStatus(t('sync.cloudSetup.code.enter'), 'error');
       return;
     }
 
     try {
-      setStatus('Verifying…');
+      setStatus(t('sync.cloudSetup.code.verifying'));
 
       const verified = await cloudVerifyCode(email, code);
       if (verified?.mfaRequired) {
@@ -1042,7 +1042,7 @@ function renderCode(email) {
       const me = await cloudMe();
       await renderCloudHome(me);
     } catch (err) {
-      setStatus(err?.message || 'Login failed', 'error');
+      setStatus(err?.message || t('sync.cloudSetup.code.failed'), 'error');
     }
   });
 
@@ -1136,50 +1136,50 @@ function pctClass(pct) {
 
 function storageBreakdownLabel(group) {
   const map = {
-    'vault heads': 'Latest vault state',
-    'vault updates': 'Vault sync journal',
-    'vault snapshots': 'Vault compatibility snapshots',
+    'vault heads': t('sync.cloudSetup.storage.vaultHeads'),
+    'vault updates': t('sync.cloudSetup.storage.vaultUpdates'),
+    'vault snapshots': t('sync.cloudSetup.storage.vaultSnapshots'),
 
-    'note heads': 'Latest note states',
-    'note updates': 'Note sync journal',
-    'note snapshots': 'Note compatibility snapshots',
+    'note heads': t('sync.cloudSetup.storage.noteHeads'),
+    'note updates': t('sync.cloudSetup.storage.noteUpdates'),
+    'note snapshots': t('sync.cloudSetup.storage.noteSnapshots'),
 
-    'ai sessions': 'AI Sessions',
-    assets: 'Assets',
-    other: 'Other',
+    'ai sessions': t('sync.cloudSetup.storage.aiSessions'),
+    assets: t('sync.cloudSetup.storage.assets'),
+    other: t('sync.cloudSetup.storage.other'),
   };
 
-  return map[group] || group || 'Other';
+  return map[group] || group || t('sync.cloudSetup.storage.other');
 }
 
 function storageBreakdownCaption(group) {
   const map = {
     'vault heads':
-      'Small latest-state objects. One per device. This is the compact canonical vault metadata state.',
+      t('sync.cloudSetup.storage.vaultHeadsCaption'),
 
     'vault updates':
-      'Temporary metadata sync journal. YANTA prunes entries after latest-state heads cover them.',
+      t('sync.cloudSetup.storage.vaultUpdatesCaption'),
 
     'vault snapshots':
-      'Compatibility snapshots kept for migration and repair.',
+      t('sync.cloudSetup.storage.snapshotsCaption'),
 
     'note heads':
-      'Latest encrypted full note states. Usually one per note per device. These prevent note history from growing forever.',
+      t('sync.cloudSetup.storage.noteHeadsCaption'),
 
     'note updates':
-      'Temporary encrypted note-body sync journal. It may grow while devices are offline, then shrinks after they sync.',
+      t('sync.cloudSetup.storage.noteUpdatesCaption'),
 
     'note snapshots':
-      'Compatibility snapshots kept for migration and repair.',
+      t('sync.cloudSetup.storage.snapshotsCaption'),
 
     'ai sessions':
-      'Estimated encrypted AI chat/session note content. Exact server split is unavailable because sessions are stored zero-knowledge inside encrypted note objects.',
+      t('sync.cloudSetup.storage.aiSessionsCaption'),
 
     assets:
-      'Encrypted images and drawing assets.',
+      t('sync.cloudSetup.storage.assetsCaption'),
 
     other:
-      'Bootstrap, key check or unknown sync objects.',
+      t('sync.cloudSetup.storage.otherCaption'),
   };
 
   return map[group] || '';
@@ -1264,11 +1264,12 @@ function usageBarHtml({
       <div
         class="yanta-cloud-usage-bar segmented"
         style="--usage-pct:${pct}%;--usage-min:${u > 0 ? '4px' : '0px'}"
-        aria-label="${escapeHtml(label)} breakdown">
+        aria-label="${escapeHtml(t('sync.cloudSetup.usage.breakdownAria', { label }))}">
         ${segments.map((segment) => {
+          const objects = t('sync.cloudSetup.usage.objectCount', { count: segment.count });
           const title = [
             segment.label,
-            `${formatter(segment.bytes)} · ${segment.count} object${segment.count === 1 ? '' : 's'}`,
+            `${formatter(segment.bytes)} · ${objects}`,
             segment.caption,
           ].filter(Boolean).join('\n');
 
@@ -1277,9 +1278,9 @@ function usageBarHtml({
               class="yanta-cloud-usage-segment"
               tabindex="0"
               role="img"
-              aria-label="${escapeHtml(`${segment.label}: ${formatter(segment.bytes)} · ${segment.count} object${segment.count === 1 ? '' : 's'}`)}"
+              aria-label="${escapeHtml(`${segment.label}: ${formatter(segment.bytes)} · ${objects}`)}"
               style="--segment-pct:${segment.pct}%;--segment-color:${segment.color}"
-              data-cloud-usage-tip="${escapeHtml(`${segment.label}: ${formatter(segment.bytes)} · ${segment.count} object${segment.count === 1 ? '' : 's'}${segment.caption ? ` · ${segment.caption}` : ''}`)}">
+              data-cloud-usage-tip="${escapeHtml(`${segment.label}: ${formatter(segment.bytes)} · ${objects}${segment.caption ? ` · ${segment.caption}` : ''}`)}">
             </span>
           `;
         }).join('')}
@@ -1318,7 +1319,7 @@ function usageBarsHtml(me, storageBreakdown = null, {
   const usage = me.usage || {};
   const limits = me.limits || {};
   const plan = me.user?.plan || 'free';
-  const countFmt = (n) => String(Number(n || 0).toLocaleString());
+  const countFmt = (n) => String(Number(n || 0).toLocaleString(getLocale()));
 
   const storageSegments = normalizedStorageBreakdownSegments(
     storageBreakdown,
@@ -1330,13 +1331,13 @@ function usageBarsHtml(me, storageBreakdown = null, {
   );
 
   const storageCaption = storageSegments.length
-    ? 'Hover the colored sections to see what uses storage. Compaction mainly reduces update history.'
-    : 'Encrypted vault objects stored in YANTA Cloud. Breakdown loads after device/vault verification.';
+    ? t('sync.cloudSetup.usage.storageCaptionSegments')
+    : t('sync.cloudSetup.usage.storageCaption');
 
       // Plan-Name transformieren oder Fallback nutzen
   let displayPlan = plan;
   if (plan === 'free') {
-    displayPlan = 'Free';
+    displayPlan = t('sync.cloudSetup.plan.free');
   } else if (plan === 'premium') {
     displayPlan = 'Plus';
   }
@@ -1344,12 +1345,12 @@ function usageBarsHtml(me, storageBreakdown = null, {
   return `
     <div class="yanta-cloud-usage-list">
       <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:2px">
-        <strong style="color:var(--text)">Plan</strong>
+        <strong style="color:var(--text)">${escapeHtml(t('sync.cloudSetup.plan.title'))}</strong>
         <span style="color:var(--accent);font-weight:800;text-transform:capitalize">${escapeHtml(displayPlan)}</span>
       </div>
 
       ${usageBarHtml({
-        label: 'Storage',
+        label: t('sync.cloudSetup.usage.storage'),
         used: usage.storage_bytes,
         limit: limits.storageBytes,
         caption: storageCaption,
@@ -1357,27 +1358,27 @@ function usageBarsHtml(me, storageBreakdown = null, {
       })}
 
       ${usageBarHtml({
-        label: 'Objects',
+        label: t('sync.cloudSetup.usage.objects'),
         used: usage.object_count,
         limit: limits.objects,
         formatter: countFmt,
-        caption: 'Encrypted snapshots, updates and assets.',
+        caption: t('sync.cloudSetup.usage.objectsCaption'),
       })}
 
       ${usageBarHtml({
-        label: 'Download this month',
+        label: t('sync.cloudSetup.usage.downloadMonth'),
         used: usage.download_bytes_month,
         limit: limits.downloadBytesMonth,
       })}
 
       ${usageBarHtml({
-        label: 'Upload today',
+        label: t('sync.cloudSetup.usage.uploadToday'),
         used: usage.upload_bytes_day,
         limit: limits.uploadBytesDay,
       })}
 
       ${usageBarHtml({
-        label: 'Writes today',
+        label: t('sync.cloudSetup.usage.writesToday'),
         used: usage.writes_today,
         limit: limits.writesDay,
         formatter: countFmt,
@@ -1394,7 +1395,7 @@ function cloudPlanSectionHtml(me = {}) {
 
   return `
     <section class="yanta-cloud-section">
-      <h4>Plan</h4>
+      <h4>${escapeHtml(t('sync.cloudSetup.plan.title'))}</h4>
 
       <div class="yanta-cloud-limit-note">
         ${lucide(state.isPlus ? 'sparkles' : 'info', 14)}
@@ -1404,23 +1405,22 @@ function cloudPlanSectionHtml(me = {}) {
       <div class="compress-actions" style="margin-top:10px;justify-content:flex-start;flex-wrap:wrap">
         <button class="btn primary" data-yanta-plus-upgrade ${state.showUpgrade ? '' : 'hidden'}>
           ${lucide('sparkles', 14)}
-          Upgrade to YANTA Plus
+          ${escapeHtml(t('settings.billing.upgrade'))}
         </button>
 
         <button class="btn" data-yanta-plus-manage ${state.showManage ? '' : 'hidden'}>
           ${lucide('credit-card', 14)}
-          Manage subscription
+          ${escapeHtml(t('settings.billing.manage'))}
         </button>
 
         <a class="btn" href="/pricing" target="_blank" rel="noopener">
           ${lucide('external-link', 14)}
-          Pricing
+          ${escapeHtml(t('settings.billing.pricing'))}
         </a>
       </div>
 
       <p class="yanta-cloud-plan-fineprint" data-yanta-plus-fineprint ${state.isPlus ? '' : 'hidden'}>
-        Update your payment method or cancel anytime — your subscription stays
-        active until the end of the paid period.
+        ${escapeHtml(t('settings.billing.fineprint'))}
       </p>
     </section>
   `;
@@ -1512,7 +1512,7 @@ function storageBreakdownHtml(breakdown) {
     return `
       <div class="yanta-cloud-limit-note">
         ${lucide('info', 14)}
-        <span>No cloud storage objects found for this vault.</span>
+        <span>${escapeHtml(t('sync.cloudSetup.breakdown.empty'))}</span>
       </div>
     `;
   }
@@ -1531,7 +1531,7 @@ function storageBreakdownHtml(breakdown) {
               <span class="yanta-cloud-usage-label">${escapeHtml(storageBreakdownLabel(group.group))}</span>
               <span class="yanta-cloud-usage-value">
                 ${escapeHtml(fmtBytesCompact(bytes))}
-                · ${escapeHtml(String(group.count || 0))} object${group.count === 1 ? '' : 's'}
+                · ${escapeHtml(t('sync.cloudSetup.usage.objectCount', { count: Number(group.count || 0) }))}
               </span>
             </div>
 
@@ -1560,7 +1560,7 @@ async function hydrateStorageBreakdown({
     host.innerHTML = `
       <div class="yanta-cloud-limit-note">
         ${lucide('info', 14)}
-        <span>Connect this device to a cloud vault to see storage breakdown.</span>
+        <span>${escapeHtml(t('sync.cloudSetup.breakdown.connectFirst'))}</span>
       </div>
     `;
     return;
@@ -1568,7 +1568,7 @@ async function hydrateStorageBreakdown({
 
   try {
     host.innerHTML = `
-      <div class="tree-empty">Loading storage breakdown…</div>
+      <div class="tree-empty">${escapeHtml(t('sync.cloudSetup.breakdown.loading'))}</div>
     `;
 
     const breakdown = await cloudStorageBreakdown(vaultId, {
@@ -1581,7 +1581,7 @@ async function hydrateStorageBreakdown({
   } catch (err) {
     host.innerHTML = `
       <div class="yanta-cloud-warning">
-        <strong>Could not load storage breakdown.</strong><br>
+        <strong>${escapeHtml(t('sync.cloudSetup.breakdown.failed'))}</strong><br>
         ${escapeHtml(err?.message || String(err))}
       </div>
     `;
@@ -1671,7 +1671,7 @@ async function loadVaultDevicesForHome(vaultId, currentDeviceId) {
   if (!currentDeviceId) {
     return {
       devices: [],
-      accessError: 'This browser is not connected to this vault yet.',
+      accessError: t('sync.cloudSetup.devices.notConnected'),
       blockReason: 'no-local-session',
     };
   }
@@ -1689,7 +1689,7 @@ async function loadVaultDevicesForHome(vaultId, currentDeviceId) {
 
     return {
       devices: [],
-      accessError: err?.message || 'Device access denied.',
+      accessError: err?.message || t('sync.cloudSetup.devices.accessDenied'),
       blockReason: revoked ? 'revoked' : 'unreachable',
     };
   }
@@ -1703,12 +1703,12 @@ async function isLocalYantaCloudVault(vaultId) {
 }
 
 function fmtDeviceTime(ts) {
-  if (!ts) return 'never';
+  if (!ts) return t('sync.cloudSetup.devices.never');
 
   const d = new Date(Number(ts));
-  if (Number.isNaN(d.getTime())) return 'never';
+  if (Number.isNaN(d.getTime())) return t('sync.cloudSetup.devices.never');
 
-  return d.toLocaleString([], {
+  return d.toLocaleString(getLocale(), {
     dateStyle: 'short',
     timeStyle: 'short',
   });
@@ -1723,7 +1723,7 @@ function deviceInfoLine(d = {}) {
     .map((x) => String(x || '').trim())
     .filter(Boolean)
     .filter((x, i, arr) => arr.indexOf(x) === i)
-    .join(' · ') || 'Unknown device';
+    .join(' · ') || t('sync.cloudSetup.devices.unknown');
 }
 
 function cloudDevicesHtml({
@@ -1745,21 +1745,21 @@ function cloudDevicesHtml({
 
     return `
       <section class="yanta-cloud-section">
-        <h4>Connected devices</h4>
+        <h4>${escapeHtml(t('sync.cloudSetup.devices.title'))}</h4>
 
         <div class="yanta-cloud-warning">
-          <strong>${
+          <strong>${escapeHtml(
             revoked
-              ? 'This device no longer has access to this cloud vault.'
-              : 'This browser is not connected to this vault yet.'
-          }</strong><br>
+              ? t('sync.cloudSetup.devices.revokedTitle')
+              : t('sync.cloudSetup.devices.notConnected')
+          )}</strong><br>
           ${escapeHtml(accessError)}
           <br><br>
-          ${
+          ${escapeHtml(
             revoked
-              ? 'Cloud sync and device management are blocked on this device until it is connected again with the Recovery Key or a pairing QR.'
-              : 'If you were signed out, signing in again is usually enough — you only need the Recovery Key when connecting this browser for the first time.'
-          }
+              ? t('sync.cloudSetup.devices.revokedHint')
+              : t('sync.cloudSetup.devices.notConnectedHint')
+          )}
         </div>
 
         ${
@@ -1768,7 +1768,7 @@ function cloudDevicesHtml({
               <div class="compress-actions" style="margin-top:10px;justify-content:flex-start;flex-wrap:wrap">
                 <button class="btn primary" data-reconnect-current-device="${escapeHtml(vaultId)}">
                   ${lucide('key-round', 14)}
-                  ${revoked ? 'Reconnect this device' : 'Connect this device'}
+                  ${escapeHtml(revoked ? t('sync.cloudSetup.devices.reconnect') : t('sync.cloudSetup.devices.connect'))}
                 </button>
               </div>
             `
@@ -1784,22 +1784,22 @@ function cloudDevicesHtml({
   if (!devices.length) {
     return `
       <section class="yanta-cloud-section">
-        <h4>Connected devices</h4>
+        <h4>${escapeHtml(t('sync.cloudSetup.devices.title'))}</h4>
 
-        <p>No devices recorded for this vault yet.</p>
+        <p>${escapeHtml(t('sync.cloudSetup.devices.none'))}</p>
 
         ${
           vaultId
             ? `
               <div class="yanta-cloud-warning" style="margin-top:10px">
-                <strong>No active cloud device is registered for this vault.</strong><br>
-                To use this vault on this browser, reconnect this device with the Recovery Key or scan a pairing QR.
+                <strong>${escapeHtml(t('sync.cloudSetup.devices.noneActive'))}</strong><br>
+                ${escapeHtml(t('sync.cloudSetup.devices.noneActiveHint'))}
               </div>
 
               <div class="compress-actions" style="margin-top:10px;justify-content:flex-start;flex-wrap:wrap">
                 <button class="btn primary" data-reconnect-current-device="${escapeHtml(vaultId)}">
                   ${lucide('key-round', 14)}
-                  Reconnect this device
+                  ${escapeHtml(t('sync.cloudSetup.devices.reconnect'))}
                 </button>
               </div>
             `
@@ -1811,10 +1811,11 @@ function cloudDevicesHtml({
 
   return `
     <section class="yanta-cloud-section" id="yanta-cloud-devices">
-      <h4>Connected devices</h4>
+      <h4>${escapeHtml(t('sync.cloudSetup.devices.title'))}</h4>
       <p>
-        ${active.length}${max ? ` / ${max}` : ''} active device${active.length === 1 ? '' : 's'}
-        for this cloud vault.
+        ${escapeHtml(max
+          ? t('sync.cloudSetup.devices.activeOfMax', { count: active.length, max })
+          : t('sync.cloudSetup.devices.active', { count: active.length }))}
       </p>
 
       <div class="yanta-cloud-device-list">
@@ -1825,27 +1826,27 @@ function cloudDevicesHtml({
           return `
             <div class="yanta-cloud-device-row ${current ? 'current' : ''} ${revoked ? 'revoked' : ''}">
               <div>
-                <strong>${escapeHtml(d.name || deviceInfoLine(d) || d.deviceId || 'Device')}</strong>
+                <strong>${escapeHtml(d.name || deviceInfoLine(d) || d.deviceId || t('sync.cloudSetup.devices.device'))}</strong>
                 <small>${escapeHtml(deviceInfoLine(d))}</small>
                 <small>ID: ${escapeHtml(d.deviceId || '')}</small>
-                <small>Last seen: ${escapeHtml(fmtDeviceTime(d.lastSeenAt))}</small>
-                ${revoked ? '<small class="warn">Removed</small>' : ''}
+                <small>${escapeHtml(t('sync.cloudSetup.devices.lastSeen', { time: fmtDeviceTime(d.lastSeenAt) }))}</small>
+                ${revoked ? `<small class="warn">${escapeHtml(t('sync.cloudSetup.devices.removed'))}</small>` : ''}
               </div>
 
               ${
                 current
-                  ? '<span class="yanta-cloud-device-current">Current device</span>'
+                  ? `<span class="yanta-cloud-device-current">${escapeHtml(t('sync.cloudSetup.devices.current'))}</span>`
                   : revoked
                     ? `
                       <button class="btn" data-remove-cloud-device="${escapeHtml(d.deviceId)}" data-device-already-revoked="1">
                         ${lucide('x', 14)}
-                        Clear from list
+                        ${escapeHtml(t('sync.cloudSetup.devices.clear'))}
                       </button>
                     `
                     : `
                       <button class="btn danger" data-remove-cloud-device="${escapeHtml(d.deviceId)}">
                         ${lucide('trash', 14)}
-                        Remove
+                        ${escapeHtml(t('sync.cloudSetup.devices.remove'))}
                       </button>
                     `
               }
@@ -1860,20 +1861,16 @@ function cloudDevicesHtml({
 async function runRepairCloudSync() {
   try {
     const ok = await yantaConfirm({
-      title: 'Repair cloud sync?',
-      message: [
-        'Run a full encrypted snapshot catch-up?',
-        '',
-        'This can take longer, but it is useful if another device missed recently created notes or note-body updates.',
-      ].join('\n'),
-      confirmLabel: 'Repair sync',
-      cancelLabel: 'Cancel',
+      title: t('sync.cloudSetup.repair.title'),
+      message: t('sync.cloudSetup.repair.message'),
+      confirmLabel: t('sync.cloudSetup.repair.confirm'),
+      cancelLabel: t('common.cancel'),
       icon: 'wrench',
     });
 
     if (!ok) return;
 
-    setStatus('Running full sync repair…');
+    setStatus(t('sync.cloudSetup.repair.running'));
 
     if (typeof window.yantaSync2CatchupNow === 'function') {
       await window.yantaSync2CatchupNow({
@@ -1891,11 +1888,11 @@ async function runRepairCloudSync() {
       });
     }
 
-    setStatus('Sync repair complete', 'success');
-    toast('Sync repair complete', 'success');
+    setStatus(t('sync.cloudSetup.repair.done'), 'success');
+    toast(t('sync.cloudSetup.repair.done'), 'success');
   } catch (err) {
     console.error(err);
-    setStatus(err?.message || 'Sync repair failed', 'error');
+    setStatus(err?.message || t('sync.cloudSetup.repair.failed'), 'error');
   }
 }
 
@@ -1925,18 +1922,17 @@ async function renderCloudHome(me) {
     <div class="yanta-cloud-hero">
       <div class="yanta-cloud-hero-icon">${lucide('cloud-check', 28)}</div>
       <div>
-        <strong>Signed in as ${escapeHtml(me.user?.email || '')}</strong>
-        <p>Encrypted cloud sync is available for this account.</p>
+        <strong>${escapeHtml(t('sync.cloudSetup.home.signedInAs', { email: me.user?.email || '' }))}</strong>
+        <p>${escapeHtml(t('sync.cloudSetup.home.lead'))}</p>
       </div>
     </div>
 
     <div class="yanta-cloud-warning">
-      <strong>Important:</strong> Your email gives access to your YANTA Cloud account.
-      Your Recovery Key decrypts your notes. YANTA cannot recover encrypted notes without it.
+      <strong>${escapeHtml(t('sync.cloudSetup.home.importantLabel'))}</strong> ${escapeHtml(t('sync.cloudSetup.home.important'))}
     </div>
 
     <section class="yanta-cloud-section">
-      <h4>Usage</h4>
+      <h4>${escapeHtml(t('sync.cloudSetup.home.usage'))}</h4>
       <div data-cloud-usage-section>
         ${usageBarsHtml(me)}
       </div>
@@ -1945,27 +1941,25 @@ async function renderCloudHome(me) {
     ${cloudPlanSectionHtml(me)}
 
     <section class="yanta-cloud-section">
-      <h4>How sync storage works</h4>
+      <h4>${escapeHtml(t('sync.cloudSetup.home.howTitle'))}</h4>
 
       <div class="yanta-cloud-limit-note">
         ${lucide('info', 14)}
         <span>
-          YANTA keeps a latest encrypted state for each device and a short sync journal for recent changes.
-          When all known changes are covered by latest states, YANTA automatically prunes old journal objects.
+          ${escapeHtml(t('sync.cloudSetup.home.howJournal'))}
           <br><br>
-          More devices can briefly use more storage because each device keeps its own latest state and may be offline.
-          After devices come online and sync, storage is optimized automatically.
+          ${escapeHtml(t('sync.cloudSetup.home.howDevices'))}
         </span>
       </div>
     </section>
 
     <section class="yanta-cloud-section">
-      <h4>Cloud vaults</h4>
-      <p>${
+      <h4>${escapeHtml(t('sync.cloudSetup.vaults.title'))}</h4>
+      <p>${escapeHtml(
         vaults.length
-          ? 'Manage your cloud vaults and connect more devices.'
-          : 'No cloud vault exists yet. Create one to start syncing.'
-      }</p>
+          ? t('sync.cloudSetup.vaults.lead')
+          : t('sync.cloudSetup.vaults.none')
+      )}</p>
 
       <div class="yanta-cloud-grid">
         ${
@@ -1994,13 +1988,13 @@ async function renderCloudHome(me) {
                   ${
                     active
                       ? `<span style="font-size:11px;color:${activeButBlocked ? 'var(--yellow)' : 'var(--accent)'};font-weight:800">
-                          ${
+                          ${escapeHtml(
                             !activeButBlocked
-                              ? 'Active'
+                              ? t('sync.cloudSetup.vaults.active')
                               : deviceBlockReason === 'revoked'
-                                ? 'Access blocked'
-                                : 'Not connected here'
-                          }
+                                ? t('sync.cloudSetup.vaults.blocked')
+                                : t('sync.cloudSetup.vaults.notHere')
+                          )}
                         </span>`
                       : ''
                   }
@@ -2016,22 +2010,22 @@ async function renderCloudHome(me) {
                     ? `
                       <button class="btn primary" data-vault-action="connect-device" data-vault-id="${escapeHtml(v.id)}">
                         ${lucide('qr-code', 14)}
-                        Connect another device
+                        ${escapeHtml(t('sync.cloudSetup.vaults.connectAnother'))}
                       </button>
 
                       <button class="btn" data-vault-action="sync-now" data-vault-id="${escapeHtml(v.id)}">
                         ${lucide('refresh-cw', 14)}
-                        Sync now
+                        ${escapeHtml(t('settings.sync.syncNow'))}
                       </button>
 
                       <button class="btn" data-vault-action="repair-sync" data-vault-id="${escapeHtml(v.id)}">
                         ${lucide('wrench', 14)}
-                        Repair cloud sync
+                        ${escapeHtml(t('sync.cloudSetup.vaults.repair'))}
                       </button>
 
                       <button class="btn" data-vault-action="compact-sync" data-vault-id="${escapeHtml(v.id)}">
                         ${lucide('archive', 14)}
-                        Optimize cloud storage
+                        ${escapeHtml(t('sync.cloudSetup.vaults.optimize'))}
                       </button>
 
                     `
@@ -2039,18 +2033,18 @@ async function renderCloudHome(me) {
                         ? `
                           <button class="btn" disabled>
                             ${lucide('ban', 14)}
-                            Device removed
+                            ${escapeHtml(t('sync.cloudSetup.devices.removedButton'))}
                           </button>
 
                           <button class="btn primary" data-vault-action="connect-this-device" data-vault-id="${escapeHtml(v.id)}">
                             ${lucide('key', 14)}
-                            Reconnect this device
+                            ${escapeHtml(t('sync.cloudSetup.devices.reconnect'))}
                           </button>
                         `
                         : `
                           <button class="btn primary" data-vault-action="connect-this-device" data-vault-id="${escapeHtml(v.id)}">
                             ${lucide('key', 14)}
-                            Connect this device
+                            ${escapeHtml(t('sync.cloudSetup.devices.connect'))}
                           </button>
                         `
                   }
@@ -2065,23 +2059,22 @@ ${
     ? `
       <button class="btn primary" data-create-vault>
         ${lucide('plus', 14)}
-        Create cloud vault
+        ${escapeHtml(t('sync.cloudSetup.vaults.create'))}
       </button>
     `
     : canCreateAnotherVault
       ? `
         <details class="yanta-cloud-advanced">
-          <summary>Advanced</summary>
+          <summary>${escapeHtml(t('sync.cloudSetup.vaults.advanced'))}</summary>
 
           <div class="yanta-cloud-advanced-body">
             <p>
-              Create a separate encrypted sync vault with its own Recovery Key.
-              Most users only need one cloud vault.
+              ${escapeHtml(t('sync.cloudSetup.vaults.advancedHint'))}
             </p>
 
             <button class="btn" data-create-vault>
               ${lucide('plus', 14)}
-              Create another cloud vault
+              ${escapeHtml(t('sync.cloudSetup.vaults.createAnother'))}
             </button>
           </div>
         </details>
@@ -2119,23 +2112,23 @@ ${
 
   modal.querySelector('[data-create-vault]')?.addEventListener('click', async () => {
     try {
-      setStatus('Creating cloud vault…');
+      setStatus(t('sync.cloudSetup.vaults.creating'));
 
       const res = await cloudCreateVault({
-        name: 'My YANTA Vault',
+        name: t('sync.cloudSetup.vaults.defaultName'),
       });
 
       renderRecoveryStep(res.vault.id, {
         mode: 'new',
       });
     } catch (err) {
-      setStatus(err?.message || 'Could not create vault', 'error');
+      setStatus(err?.message || t('sync.cloudSetup.vaults.createFailed'), 'error');
     }
   });
 
   modal.querySelector('[data-yanta-plus-upgrade]')?.addEventListener('click', async () => {
     try {
-      setStatus('Opening checkout…');
+      setStatus(t('sync.cloudSetup.plan.openingCheckout'));
 
       const { openYantaPlusUpgrade } = await import('../billing/billing-ui.js');
 
@@ -2144,20 +2137,20 @@ ${
       });
     } catch (err) {
       console.error(err);
-      setStatus(err?.message || 'Could not open checkout', 'error');
+      setStatus(err?.message || t('settings.billing.checkoutError'), 'error');
     }
   });
 
   modal.querySelector('[data-yanta-plus-manage]')?.addEventListener('click', async () => {
     try {
-      setStatus('Opening billing portal…');
+      setStatus(t('sync.cloudSetup.plan.openingPortal'));
 
       const { openYantaBillingPortal } = await import('../billing/billing-ui.js');
 
       await openYantaBillingPortal();
     } catch (err) {
       console.error(err);
-      setStatus(err?.message || 'Could not open billing portal', 'error');
+      setStatus(err?.message || t('settings.billing.portalError'), 'error');
     }
   });
 
@@ -2178,7 +2171,7 @@ ${
   modal.querySelectorAll('[data-vault-action="sync-now"]').forEach((btn) => {
     btn.addEventListener('click', async () => {
       try {
-        setStatus('Synchronizing…');
+        setStatus(t('settings.sync.synchronizing'));
 
         if (typeof window.yantaSync2Now === 'function') {
           await window.yantaSync2Now({
@@ -2192,10 +2185,10 @@ ${
           });
         }
 
-        setStatus('Sync complete', 'success');
-        toast('Sync complete', 'success');
+        setStatus(t('settings.sync.syncCompleteToast'), 'success');
+        toast(t('settings.sync.syncCompleteToast'), 'success');
       } catch (err) {
-        setStatus(err?.message || 'Sync failed', 'error');
+        setStatus(err?.message || t('settings.sync.syncFailedToast'), 'error');
       }
     });
   });
@@ -2210,22 +2203,16 @@ ${
     btn.addEventListener('click', async () => {
       try {
         const ok = await yantaConfirm({
-          title: 'Optimize cloud storage?',
-          message: [
-            'YANTA will upload latest encrypted states and prune old sync journal entries that are already covered.',
-            '',
-            'This keeps cloud storage compact without decrypting your notes.',
-            '',
-            'Continue?',
-          ].join('\n'),
-          confirmLabel: 'Optimize storage',
-          cancelLabel: 'Cancel',
+          title: t('sync.cloudSetup.compact.title'),
+          message: t('sync.cloudSetup.compact.message'),
+          confirmLabel: t('sync.cloudSetup.compact.confirm'),
+          cancelLabel: t('common.cancel'),
           icon: 'archive',
         });
 
         if (!ok) return;
 
-        setStatus('Compacting cloud storage…');
+        setStatus(t('sync.cloudSetup.compact.running'));
 
         const result = await window.yantaSync2CompactNow?.({
           emergencyHeadroom: true,
@@ -2233,17 +2220,17 @@ ${
         });
 
         setStatus(
-          `Compaction complete. Freed ${(Number(result?.freedBytes || 0) / 1024 / 1024).toFixed(2)} MB.`,
+          t('sync.cloudSetup.compact.done', { mb: Math.round(Number(result?.freedBytes || 0) / 1024 / 1024 * 100) / 100 }),
           'success'
         );
 
-        toast('Cloud storage compacted', 'success');
+        toast(t('sync.cloudSetup.compact.doneToast'), 'success');
 
         await renderCloudHome(await cloudMe());
       } catch (err) {
         console.error(err);
-        setStatus(err?.message || 'Cloud storage compaction failed', 'error');
-        toast('Cloud storage compaction failed', 'error');
+        setStatus(err?.message || t('sync.cloudSetup.compact.failed'), 'error');
+        toast(t('sync.cloudSetup.compact.failed'), 'error');
       }
     });
   });
@@ -2254,11 +2241,7 @@ ${
       await mod.rotateChatPasswordForDeviceRemoval();
     } catch (err) {
       console.warn('[YANTA Cloud] Chat access rotation after device removal failed', err);
-      toast(
-        'Device removed, but its Chat access could not be revoked automatically. ' +
-        'Change your Chat password to be safe.',
-        'error'
-      );
+      toast(t('sync.cloudSetup.devices.chatRevokeFailed'), 'error');
     }
   }
 
@@ -2277,33 +2260,17 @@ ${
 
       const ok = alreadyRevoked
         ? await yantaConfirm({
-            title: 'Clear from list?',
-            message: [
-              'Remove this already-removed device from the list?',
-              '',
-              `Device ID: ${deviceId}`,
-              '',
-              'It lost access when it was removed. This only tidies the list.',
-            ].join('\n'),
-            confirmLabel: 'Clear',
-            cancelLabel: 'Cancel',
+            title: t('sync.cloudSetup.devices.clearTitle'),
+            message: t('sync.cloudSetup.devices.clearMessage', { id: deviceId }),
+            confirmLabel: t('sync.cloudSetup.devices.clearConfirm'),
+            cancelLabel: t('common.cancel'),
             icon: 'x',
           })
         : await yantaConfirm({
-        title: 'Remove device?',
-        message: [
-          'Remove this device from the selected YANTA Cloud vault?',
-          '',
-          `Device ID: ${deviceId}`,
-          '',
-          'The removed device can no longer sync this cloud vault or manage its connected devices unless it is connected again with the Recovery Key or pairing QR.',
-          '',
-          'The next time it is opened, it also deletes everything YANTA stored on it. Changes made there that were never synced are lost.',
-          '',
-          'If you use Chat, this also signs the removed device out of Chat by rotating your Chat password. Your other devices reconnect automatically.',
-        ].join('\n'),
-        confirmLabel: 'Remove device',
-        cancelLabel: 'Cancel',
+        title: t('sync.cloudSetup.devices.removeTitle'),
+        message: t('sync.cloudSetup.devices.removeMessage', { id: deviceId }),
+        confirmLabel: t('sync.cloudSetup.devices.removeConfirm'),
+        cancelLabel: t('common.cancel'),
         danger: true,
         icon: 'trash',
       });
@@ -2311,7 +2278,7 @@ ${
       if (!ok) return;
 
       try {
-        setStatus(alreadyRevoked ? 'Clearing…' : 'Removing device…');
+        setStatus(alreadyRevoked ? t('sync.cloudSetup.devices.clearing') : t('sync.cloudSetup.devices.removing'));
 
         await cloudRemoveVaultDevice(configuredVaultId, deviceId, {
           currentDeviceId,
@@ -2332,13 +2299,13 @@ ${
           await revokeChatAccessAfterDeviceRemoval();
         }
 
-        setStatus(alreadyRevoked ? 'Cleared' : 'Device removed', 'success');
-        toast(alreadyRevoked ? 'Cleared from list' : 'Device removed', 'success');
+        setStatus(alreadyRevoked ? t('sync.cloudSetup.devices.cleared') : t('sync.cloudSetup.devices.removedToast'), 'success');
+        toast(alreadyRevoked ? t('sync.cloudSetup.devices.clearedToast') : t('sync.cloudSetup.devices.removedToast'), 'success');
 
         await renderCloudHome(await cloudMe());
       } catch (err) {
         console.error(err);
-        setStatus(err?.message || 'Could not remove device', 'error');
+        setStatus(err?.message || t('sync.cloudSetup.devices.removeFailed'), 'error');
       }
     });
   });
@@ -2347,7 +2314,7 @@ ${
       const vaultId = btn.dataset.reconnectCurrentDevice || configuredVaultId;
   
       if (!vaultId) {
-        setStatus('No cloud vault selected.', 'error');
+        setStatus(t('sync.cloudSetup.vaults.noneSelected'), 'error');
         return;
       }
   
@@ -2360,7 +2327,7 @@ ${
 
 async function openConnectAnotherDeviceForVault(vaultId) {
   if (!vaultId) {
-    setStatus('No cloud vault selected.', 'error');
+    setStatus(t('sync.cloudSetup.vaults.noneSelected'), 'error');
     return;
   }
 
@@ -2368,7 +2335,7 @@ async function openConnectAnotherDeviceForVault(vaultId) {
 
   if (!local) {
     setStatus(
-      'This desktop is not locally connected to that vault yet. Connect this device first, then create a pairing QR.',
+      t('sync.cloudSetup.vaults.notLocal'),
       'error'
     );
     return;
@@ -2381,7 +2348,7 @@ async function openConnectAnotherDeviceForVault(vaultId) {
 
 async function connectThisDeviceToVault(vaultId) {
   if (!vaultId) {
-    setStatus('No cloud vault selected.', 'error');
+    setStatus(t('sync.cloudSetup.vaults.noneSelected'), 'error');
     return;
   }
 
@@ -2394,19 +2361,14 @@ function renderExistingVaultStep(vaultId, {
   reconnect = false,
 } = {}) {
   renderShell(
-    reconnect ? 'Reconnect this device' : 'Connect existing cloud vault',
+    reconnect ? t('sync.cloudSetup.devices.reconnect') : t('sync.cloudSetup.existing.title'),
     `
       <div class="yanta-cloud-hero">
         <div class="yanta-cloud-hero-icon">${lucide(reconnect ? 'rotate-ccw-key' : 'key', 28)}</div>
         <div>
-          <strong>${reconnect ? 'Reconnect this browser to the cloud vault' : 'Recovery Key required'}</strong>
+          <strong>${escapeHtml(reconnect ? t('sync.cloudSetup.existing.reconnectHeading') : t('sync.cloudSetup.existing.heading'))}</strong>
           <p>
-            Enter your Recovery Key, paste a YANTA pairing payload, or scan the QR code from another device.
-            ${
-              reconnect
-                ? ' YANTA will register this browser as a new active device for this vault.'
-                : ''
-            }
+            ${escapeHtml(reconnect ? t('sync.cloudSetup.existing.reconnectLead') : t('sync.cloudSetup.existing.lead'))}
           </p>
         </div>
       </div>
@@ -2415,31 +2377,30 @@ function renderExistingVaultStep(vaultId, {
         reconnect
           ? `
             <div class="yanta-cloud-warning">
-              <strong>Why this is needed:</strong>
-              This browser's previous device entry was removed or is missing.
-              Reconnecting creates a new device entry. The old removed entry stays invalid.
+              <strong>${escapeHtml(t('sync.cloudSetup.existing.whyLabel'))}</strong>
+              ${escapeHtml(t('sync.cloudSetup.existing.why'))}
             </div>
           `
           : ''
       }
 
       <section class="yanta-cloud-section">
-        <h4>Recovery Key or pairing payload</h4>
-        <textarea class="text-input" data-recovery rows="6" placeholder="Paste Recovery Key, pairing link, or yanta-sync2:..."></textarea>
+        <h4>${escapeHtml(t('sync.cloudSetup.existing.inputTitle'))}</h4>
+        <textarea class="text-input" data-recovery rows="6" placeholder="${escapeHtml(t('sync.cloudSetup.existing.inputPlaceholder'))}"></textarea>
 
         <div class="compress-actions" style="margin-top:10px;flex-wrap:wrap">
-          <button class="btn" data-back>Back</button>
+          <button class="btn" data-back>${escapeHtml(t('common.back'))}</button>
 
           <button class="btn" data-scan-qr>
             ${lucide('qr-code', 14)}
-            Scan QR
+            ${escapeHtml(t('sync.cloudSetup.existing.scanQr'))}
           </button>
 
           <span class="grow"></span>
 
           <button class="btn primary" data-connect>
             ${lucide('cloud-download', 14)}
-            ${reconnect ? 'Reconnect & Pull' : 'Connect & Pull'}
+            ${escapeHtml(reconnect ? t('sync.cloudSetup.existing.reconnectPull') : t('sync.cloudSetup.existing.connectPull'))}
           </button>
         </div>
       </section>
@@ -2452,17 +2413,17 @@ function renderExistingVaultStep(vaultId, {
 
   modal.querySelector('[data-scan-qr]')?.addEventListener('click', async () => {
     try {
-      setStatus('Opening camera…');
+      setStatus(t('sync.cloudSetup.existing.openingCamera'));
 
       const text = await scanQrWithCamera();
 
       const input = modal.querySelector('[data-recovery]');
       if (input) input.value = text || '';
 
-      setStatus('QR code scanned. Tap Connect & Pull.', 'success');
+      setStatus(t('sync.cloudSetup.existing.scanned'), 'success');
     } catch (err) {
       console.error(err);
-      setStatus(err?.message || 'Could not scan QR code', 'error');
+      setStatus(err?.message || t('sync.cloudSetup.existing.scanFailed'), 'error');
     }
   });
 
@@ -2470,12 +2431,12 @@ function renderExistingVaultStep(vaultId, {
     const raw = modal.querySelector('[data-recovery]')?.value?.trim();
 
     if (!raw) {
-      setStatus('Paste your Recovery Key, pairing link or scanned QR payload.', 'error');
+      setStatus(t('sync.cloudSetup.existing.inputMissing'), 'error');
       return;
     }
 
     try {
-      setStatus('Reading key…');
+      setStatus(t('sync.cloudSetup.existing.reading'));
 
       let payload = null;
       let key = '';
@@ -2484,11 +2445,11 @@ function renderExistingVaultStep(vaultId, {
         payload = parseSync2PairingPayload(raw);
 
         if (payload.provider !== 'yanta-cloud') {
-          throw new Error('This pairing payload is not for YANTA Cloud.');
+          throw new Error(t('sync.cloudSetup.pairing.notCloud'));
         }
 
         if (payload.cloud?.vaultId && payload.cloud.vaultId !== vaultId) {
-          throw new Error('This QR code belongs to a different cloud vault.');
+          throw new Error(t('sync.cloudSetup.pairing.otherVault'));
         }
 
         key = payload.syncKey;
@@ -2516,7 +2477,7 @@ function renderExistingVaultStep(vaultId, {
       });
 
       // Verify before storing: storing replaces this device's key.
-      setStatus('Checking the key against your cloud vault…');
+      setStatus(t('sync.cloudSetup.existing.checkingKey'));
 
       await verifyYantaCloudSyncKey({
         baseUrl,
@@ -2534,7 +2495,7 @@ function renderExistingVaultStep(vaultId, {
       await store.settings.set('sync2.yantaCloud.vaultId', vaultId);
       await store.settings.set('sync2.yantaCloud.baseUrl', baseUrl);
 
-      setStatus('Removing untouched local Welcome vault if present…');
+      setStatus(t('sync.cloudSetup.existing.removingWelcome'));
 
       await removePristineWelcomeVaultIfPresent({
         reason: reconnect
@@ -2542,7 +2503,7 @@ function renderExistingVaultStep(vaultId, {
           : 'yanta-cloud-connect-existing',
       });
 
-      setStatus('Connecting to YANTA Cloud…');
+      setStatus(t('sync.cloudSetup.connecting'));
 
       const runtime = await createSync2YantaCloudAppRuntime({
         baseUrl,
@@ -2557,7 +2518,7 @@ function renderExistingVaultStep(vaultId, {
           : 'yanta-cloud-connect-existing',
       });
 
-      setStatus('Pulling encrypted vault…');
+      setStatus(t('sync.cloudSetup.pulling'));
 
       await runtime.syncNow({
         verbose: false,
@@ -2566,8 +2527,8 @@ function renderExistingVaultStep(vaultId, {
 
       toast(
         reconnect
-          ? 'Device reconnected to YANTA Cloud'
-          : 'YANTA Cloud connected',
+          ? t('sync.cloudSetup.existing.reconnected')
+          : t('sync.cloudSetup.connected'),
         'success'
       );
 
@@ -2576,13 +2537,13 @@ function renderExistingVaultStep(vaultId, {
       console.error(err);
       setStatus(
         err?.code === 'EWRONGKEY'
-          ? 'This key does not belong to this cloud vault. Nothing was changed on this device.'
+          ? t('sync.cloudSetup.wrongKey')
           : err?.message ||
-            (reconnect ? 'Could not reconnect device' : 'Could not connect vault'),
+            (reconnect ? t('sync.cloudSetup.existing.reconnectFailed') : t('sync.cloudSetup.existing.connectFailed')),
         'error'
       );
       toast(
-        reconnect ? 'Cloud reconnect failed' : 'Cloud vault connect failed',
+        reconnect ? t('sync.cloudSetup.existing.reconnectFailedToast') : t('sync.cloudSetup.existing.connectFailedToast'),
         'error'
       );
     }
@@ -2592,30 +2553,30 @@ function renderExistingVaultStep(vaultId, {
 async function renderRecoveryStep(vaultId, { mode = 'new' } = {}) {
   const syncKey = await getSync2SyncKey();
 
-  renderShell('Save your Recovery Key', `
+  renderShell(t('sync.cloudSetup.recovery.title'), `
     <div class="yanta-cloud-warning">
-      <strong>Save this Recovery Key.</strong><br>
-      YANTA cannot recover encrypted notes without it.
+      <strong>${escapeHtml(t('sync.cloudSetup.recovery.warningTitle'))}</strong><br>
+      ${escapeHtml(t('sync.cloudSetup.recovery.warning'))}
     </div>
 
     <section class="yanta-cloud-section">
-      <h4>Recovery Key</h4>
+      <h4>${escapeHtml(t('sync.cloudSetup.recovery.key'))}</h4>
       <textarea class="text-input yanta-cloud-recovery" data-key rows="5" readonly>${escapeHtml(syncKey)}</textarea>
 
       <div class="compress-actions" style="margin-top:10px;flex-wrap:wrap">
-        <button class="btn" data-copy>${lucide('copy', 14)} Copy</button>
-        <button class="btn" data-download>${lucide('download', 14)} Download recovery file</button>
-        <button class="btn" data-print-kit>${lucide('printer', 14)} Print Recovery Kit</button>
+        <button class="btn" data-copy>${lucide('copy', 14)} ${escapeHtml(t('common.copy'))}</button>
+        <button class="btn" data-download>${lucide('download', 14)} ${escapeHtml(t('sync.cloudSetup.recovery.download'))}</button>
+        <button class="btn" data-print-kit>${lucide('printer', 14)} ${escapeHtml(t('sync.cloudSetup.printKit'))}</button>
       </div>
 
       <label class="yanta-cloud-warning" style="display:flex;gap:8px;align-items:flex-start;margin-top:12px">
         <input type="checkbox" data-confirm />
-        <span>I understand that YANTA cannot recover encrypted notes without this Recovery Key.</span>
+        <span>${escapeHtml(t('sync.cloudSetup.recovery.understand'))}</span>
       </label>
 
       <div class="compress-actions" style="margin-top:10px">
         <span class="grow"></span>
-        <button class="btn primary" data-enable>${lucide('cloud-upload', 14)} Enable Cloud Sync</button>
+        <button class="btn primary" data-enable>${lucide('cloud-upload', 14)} ${escapeHtml(t('sync.cloudSetup.recovery.enable'))}</button>
       </div>
     </section>
   `);
@@ -2623,9 +2584,9 @@ async function renderRecoveryStep(vaultId, { mode = 'new' } = {}) {
   modal.querySelector('[data-copy]')?.addEventListener('click', async () => {
     try {
       await navigator.clipboard.writeText(syncKey);
-      toast('Recovery Key copied', 'success');
+      toast(t('sync.cloudSetup.recovery.copied'), 'success');
     } catch {
-      toast('Copy failed', 'error');
+      toast(t('sync.cloudSetup.copyFailed'), 'error');
     }
   });
 
@@ -2669,18 +2630,18 @@ async function renderRecoveryStep(vaultId, { mode = 'new' } = {}) {
       });
     } catch (err) {
       console.error(err);
-      setStatus(err?.message || 'Could not open Recovery Kit', 'error');
+      setStatus(err?.message || t('sync.cloudSetup.printKitFailed'), 'error');
     }
   });
 
   modal.querySelector('[data-enable]')?.addEventListener('click', async () => {
     if (!modal.querySelector('[data-confirm]')?.checked) {
-      setStatus('Confirm that you saved the Recovery Key.', 'error');
+      setStatus(t('sync.cloudSetup.recovery.confirmSaved'), 'error');
       return;
     }
 
     try {
-      setStatus('Connecting to YANTA Cloud…');
+      setStatus(t('sync.cloudSetup.connecting'));
 
       await store.settings.set('sync2.provider', 'yanta-cloud');
       await store.settings.set('sync2.yantaCloud.vaultId', vaultId);
@@ -2697,23 +2658,23 @@ async function renderRecoveryStep(vaultId, { mode = 'new' } = {}) {
         reason: 'yanta-cloud-create-vault',
       });
 
-      setStatus('Uploading encrypted snapshot…');
+      setStatus(t('sync.cloudSetup.recovery.uploading'));
 
       await runtime.pushFullStateNow({
         includeSnapshots: true,
         verbose: false,
       });
 
-      setStatus('Finalizing cloud sync…');
+      setStatus(t('sync.cloudSetup.recovery.finalizing'));
 
       await runtime.engine?.uploadOutbox?.();
 
-      toast('YANTA Cloud Sync enabled', 'success');
+      toast(t('sync.cloudSetup.recovery.enabled'), 'success');
 
       renderConnected(vaultId, syncKey);
     } catch (err) {
       console.error(err);
-      setStatus(err?.message || 'Could not enable sync', 'error');
+      setStatus(err?.message || t('sync.cloudSetup.recovery.enableFailed'), 'error');
     }
   });
 }
@@ -2737,39 +2698,38 @@ async function renderConnected(vaultId, syncKey) {
     },
   });
 
-  renderShell('Connect another device', `
+  renderShell(t('sync.cloudSetup.vaults.connectAnother'), `
     <div class="yanta-cloud-hero">
       <div class="yanta-cloud-hero-icon">${lucide('qr-code', 28)}</div>
       <div>
-        <strong>Scan this QR code with your phone</strong>
-        <p>The phone will sign in to YANTA Cloud, import the Recovery Key and pull the encrypted vault.</p>
+        <strong>${escapeHtml(t('sync.cloudSetup.pair.heading'))}</strong>
+        <p>${escapeHtml(t('sync.cloudSetup.pair.lead'))}</p>
       </div>
     </div>
 
     <div class="yanta-cloud-warning">
-      <strong>Keep private:</strong> This QR/link contains your Recovery Key.
-      Anyone with it can decrypt your YANTA vault.
+      <strong>${escapeHtml(t('sync.cloudSetup.pair.privateLabel'))}</strong> ${escapeHtml(t('sync.cloudSetup.pair.private'))}
     </div>
 
     <div class="yanta-cloud-qr" data-qr></div>
 
     <section class="yanta-cloud-section">
-      <h4>Pairing link</h4>
+      <h4>${escapeHtml(t('sync.cloudSetup.pair.link'))}</h4>
       <textarea class="text-input" data-pairing-link rows="4" readonly>${escapeHtml(pairingUrl)}</textarea>
 
-      <h4 style="margin-top:14px">Raw pairing text</h4>
+      <h4 style="margin-top:14px">${escapeHtml(t('sync.cloudSetup.pair.raw'))}</h4>
       <textarea class="text-input" data-pairing rows="4" readonly>${escapeHtml(rawPayload)}</textarea>
 
       <div class="compress-actions" style="margin-top:10px;flex-wrap:wrap">
-        <button class="btn" data-copy-link>${lucide('copy', 14)} Copy Pairing Link</button>
-        <button class="btn" data-copy-pairing>${lucide('copy', 14)} Copy raw Text</button>
-        <button class="btn" data-print-kit>${lucide('printer', 14)} Print Recovery Kit</button>
-        <button class="btn" data-sync-now>${lucide('refresh-cw', 14)} Sync now</button>
-        <button class="btn" data-repair-sync>${lucide('wrench', 14)} Repair Cloud Sync</button>
-        <button class="btn" data-compact-sync>${lucide('archive', 14)} Optimize Cloud Storage</button>
+        <button class="btn" data-copy-link>${lucide('copy', 14)} ${escapeHtml(t('sync.cloudSetup.pair.copyLink'))}</button>
+        <button class="btn" data-copy-pairing>${lucide('copy', 14)} ${escapeHtml(t('sync.cloudSetup.pair.copyRaw'))}</button>
+        <button class="btn" data-print-kit>${lucide('printer', 14)} ${escapeHtml(t('sync.cloudSetup.printKit'))}</button>
+        <button class="btn" data-sync-now>${lucide('refresh-cw', 14)} ${escapeHtml(t('settings.sync.syncNow'))}</button>
+        <button class="btn" data-repair-sync>${lucide('wrench', 14)} ${escapeHtml(t('sync.cloudSetup.vaults.repair'))}</button>
+        <button class="btn" data-compact-sync>${lucide('archive', 14)} ${escapeHtml(t('sync.cloudSetup.vaults.optimize'))}</button>
         <span class="grow"></span>
-        <button class="btn" data-back-cloud-home>Back</button>
-        <button class="btn primary" data-yanta-cloud-close>Done</button>
+        <button class="btn" data-back-cloud-home>${escapeHtml(t('common.back'))}</button>
+        <button class="btn primary" data-yanta-cloud-close>${escapeHtml(t('common.done'))}</button>
       </div>
     </section>
   `);
@@ -2781,18 +2741,18 @@ async function renderConnected(vaultId, syncKey) {
   modal.querySelector('[data-copy-link]')?.addEventListener('click', async () => {
     try {
       await navigator.clipboard.writeText(pairingUrl);
-      toast('Pairing Link copied', 'success');
+      toast(t('sync.cloudSetup.pair.linkCopied'), 'success');
     } catch {
-      toast('Copy failed', 'error');
+      toast(t('sync.cloudSetup.copyFailed'), 'error');
     }
   });
 
   modal.querySelector('[data-copy-pairing]')?.addEventListener('click', async () => {
     try {
       await navigator.clipboard.writeText(rawPayload);
-      toast('Pairing text copied', 'success');
+      toast(t('sync.cloudSetup.pair.rawCopied'), 'success');
     } catch {
-      toast('Copy failed', 'error');
+      toast(t('sync.cloudSetup.copyFailed'), 'error');
     }
   });
 
@@ -2812,13 +2772,13 @@ async function renderConnected(vaultId, syncKey) {
       });
     } catch (err) {
       console.error(err);
-      setStatus(err?.message || 'Could not open Recovery Kit', 'error');
+      setStatus(err?.message || t('sync.cloudSetup.printKitFailed'), 'error');
     }
   });
 
   modal.querySelector('[data-sync-now]')?.addEventListener('click', async () => {
     try {
-      setStatus('Synchronizing…');
+      setStatus(t('settings.sync.synchronizing'));
 
       if (typeof window.yantaSync2Now === 'function') {
         await window.yantaSync2Now({
@@ -2832,10 +2792,10 @@ async function renderConnected(vaultId, syncKey) {
         });
       }
 
-      setStatus('Sync complete', 'success');
-      toast('Sync complete', 'success');
+      setStatus(t('settings.sync.syncCompleteToast'), 'success');
+      toast(t('settings.sync.syncCompleteToast'), 'success');
     } catch (err) {
-      setStatus(err?.message || 'Sync failed', 'error');
+      setStatus(err?.message || t('settings.sync.syncFailedToast'), 'error');
     }
   });
 
@@ -2846,22 +2806,16 @@ async function renderConnected(vaultId, syncKey) {
   modal.querySelector('[data-compact-sync]')?.addEventListener('click', async () => {
     try {
       const ok = await yantaConfirm({
-        title: 'Optimize cloud storage?',
-        message: [
-          'YANTA will upload fresh encrypted snapshots and delete old sync update history that is covered by those snapshots.',
-          '',
-          'This reduces cloud storage usage.',
-          '',
-          'Continue?',
-        ].join('\n'),
-        confirmLabel: 'Optimize Storage',
-        cancelLabel: 'Cancel',
+        title: t('sync.cloudSetup.compact.title'),
+        message: t('sync.cloudSetup.compact.messageSnapshots'),
+        confirmLabel: t('sync.cloudSetup.compact.confirm'),
+        cancelLabel: t('common.cancel'),
         icon: 'archive',
       });
 
       if (!ok) return;
 
-      setStatus('Compacting cloud storage…');
+      setStatus(t('sync.cloudSetup.compact.running'));
 
       const result = await window.yantaSync2CompactNow?.({
         emergencyHeadroom: true,
@@ -2869,15 +2823,15 @@ async function renderConnected(vaultId, syncKey) {
       });
 
       setStatus(
-        `Compaction complete. Freed ${(Number(result?.freedBytes || 0) / 1024 / 1024).toFixed(2)} MB.`,
+        t('sync.cloudSetup.compact.done', { mb: Math.round(Number(result?.freedBytes || 0) / 1024 / 1024 * 100) / 100 }),
         'success'
       );
 
-      toast('Cloud storage compacted', 'success');
+      toast(t('sync.cloudSetup.compact.doneToast'), 'success');
     } catch (err) {
       console.error(err);
-      setStatus(err?.message || 'Cloud storage compaction failed', 'error');
-      toast('Cloud storage compaction failed', 'error');
+      setStatus(err?.message || t('sync.cloudSetup.compact.failed'), 'error');
+      toast(t('sync.cloudSetup.compact.failed'), 'error');
     }
   });
 
@@ -2904,13 +2858,13 @@ export async function openYantaCloudSetupWithPayload(pairingText, {
     payload = parseSync2PairingPayload(pairingText);
   } catch (err) {
     renderLogin();
-    setStatus(err?.message || 'Invalid pairing payload', 'error');
+    setStatus(err?.message || t('sync.cloudSetup.pairing.invalid'), 'error');
     return;
   }
 
   if (payload.provider !== 'yanta-cloud') {
     renderLogin();
-    setStatus('This pairing code is not for YANTA Cloud.', 'error');
+    setStatus(t('sync.cloudSetup.pairing.notCloud'), 'error');
     return;
   }
 
@@ -2925,22 +2879,22 @@ export async function openYantaCloudSetupWithPayload(pairingText, {
 }
 
 function renderLoginForPendingPairing(pairingText) {
-  renderShell('Sign in to connect device', `
+  renderShell(t('sync.cloudSetup.pairing.loginTitle'), `
     <div class="yanta-cloud-hero">
       <div class="yanta-cloud-hero-icon">${lucide('smartphone', 28)}</div>
       <div>
-        <strong>Pair this device with YANTA Cloud</strong>
-        <p>First sign in with your email. Then YANTA will use the scanned QR code to connect this device.</p>
+        <strong>${escapeHtml(t('sync.cloudSetup.pairing.loginHeading'))}</strong>
+        <p>${escapeHtml(t('sync.cloudSetup.pairing.loginLead'))}</p>
       </div>
     </div>
 
     <section class="yanta-cloud-section">
-      <h4>Email</h4>
+      <h4>${escapeHtml(t('sync.cloudSetup.login.email'))}</h4>
       <div class="yanta-cloud-grid">
-        <input class="text-input" data-email placeholder="you@example.com" autocomplete="email" />
+        <input class="text-input" data-email placeholder="${escapeHtml(t('sync.cloudSetup.login.emailPlaceholder'))}" autocomplete="email" />
         <div data-turnstile></div>
         ${guestOptionHtml()}
-        <button class="btn primary" data-send-code>${lucide('mail', 14)} Send code</button>
+        <button class="btn primary" data-send-code>${lucide('mail', 14)} ${escapeHtml(t('sync.cloudSetup.login.sendCode'))}</button>
       </div>
     </section>
   `);
@@ -2952,40 +2906,40 @@ function renderLoginForPendingPairing(pairingText) {
     const email = modal.querySelector('[data-email]')?.value?.trim();
 
     if (!email) {
-      setStatus('Enter your email address.', 'error');
+      setStatus(t('sync.cloudSetup.login.enterEmail'), 'error');
       return;
     }
 
     try {
-      setStatus('Sending code…');
+      setStatus(t('sync.cloudSetup.login.sending'));
 
       guestRequested = !!modal.querySelector('[data-guest]')?.checked;
       await cloudSendCode(email, turnstileToken);
 
       renderCodeForPendingPairing(email, pairingText);
     } catch (err) {
-      setStatus(err?.message || 'Could not send code', 'error');
+      setStatus(err?.message || t('sync.cloudSetup.login.sendFailed'), 'error');
     }
   });
 }
 
 function renderCodeForPendingPairing(email, pairingText) {
-  renderShell('Enter login code', `
+  renderShell(t('sync.cloudSetup.code.title'), `
     <div class="yanta-cloud-hero">
       <div class="yanta-cloud-hero-icon">${lucide('key-round', 28)}</div>
       <div>
-        <strong>We sent a 6-digit code</strong>
-        <p>Enter the code from your email. After login, pairing continues automatically.</p>
+        <strong>${escapeHtml(t('sync.cloudSetup.code.heading'))}</strong>
+        <p>${escapeHtml(t('sync.cloudSetup.pairing.codeLead'))}</p>
       </div>
     </div>
 
     <section class="yanta-cloud-section">
-      <h4>Code</h4>
+      <h4>${escapeHtml(t('sync.cloudSetup.code.label'))}</h4>
       <input class="text-input" data-code placeholder="123456" inputmode="numeric" maxlength="6" />
       <div class="compress-actions" style="margin-top:10px">
-        <button class="btn" data-back>Back</button>
+        <button class="btn" data-back>${escapeHtml(t('common.back'))}</button>
         <span class="grow"></span>
-        <button class="btn primary" data-verify>${lucide('check', 14)} Continue</button>
+        <button class="btn primary" data-verify>${lucide('check', 14)} ${escapeHtml(t('common.continue'))}</button>
       </div>
     </section>
   `);
@@ -3004,12 +2958,12 @@ function renderCodeForPendingPairing(email, pairingText) {
     const code = modal.querySelector('[data-code]')?.value?.trim();
 
     if (!code) {
-      setStatus('Enter the code.', 'error');
+      setStatus(t('sync.cloudSetup.code.enter'), 'error');
       return;
     }
 
     try {
-      setStatus('Verifying…');
+      setStatus(t('sync.cloudSetup.code.verifying'));
 
       const verified = await cloudVerifyCode(email, code);
       if (verified?.mfaRequired) {
@@ -3023,7 +2977,7 @@ function renderCodeForPendingPairing(email, pairingText) {
 
       await connectYantaCloudFromPairing(pairingText);
     } catch (err) {
-      setStatus(err?.message || 'Login failed', 'error');
+      setStatus(err?.message || t('sync.cloudSetup.code.failed'), 'error');
     }
   });
 
@@ -3032,18 +2986,18 @@ function renderCodeForPendingPairing(email, pairingText) {
 
 async function connectYantaCloudFromPairing(pairingText) {
   try {
-    setStatus('Reading pairing code…');
+    setStatus(t('sync.cloudSetup.pairing.reading'));
 
     const payload = parseSync2PairingPayload(pairingText);
 
     if (payload.provider !== 'yanta-cloud') {
-      throw new Error('Pairing payload is not for YANTA Cloud.');
+      throw new Error(t('sync.cloudSetup.pairing.notCloud'));
     }
 
     const vaultId = payload.cloud?.vaultId;
 
     if (!vaultId) {
-      throw new Error('Cloud vault id missing.');
+      throw new Error(t('sync.cloudSetup.pairing.noVault'));
     }
 
     const baseUrl = payload.cloud?.baseUrl || YANTA_CLOUD_BASE_URL;
@@ -3056,21 +3010,19 @@ async function connectYantaCloudFromPairing(pairingText) {
 
     if (alreadySyncing && await hasDifferentStoredSync2SyncKey(payload.syncKey)) {
       const replace = await yantaConfirm({
-        title: 'Replace this device\'s sync key?',
-        message:
-          'This device already syncs with a different key. Pairing switches it to the vault in this link. ' +
-          'Changes that have not synced yet stay on this device only. Continue only if you opened this link yourself.',
-        confirmLabel: 'Switch vault',
+        title: t('sync.cloudSetup.pairing.replaceTitle'),
+        message: t('sync.cloudSetup.pairing.replaceMessage'),
+        confirmLabel: t('sync.cloudSetup.pairing.replaceConfirm'),
         danger: true,
       });
 
       if (!replace) {
-        setStatus('Pairing cancelled. Nothing was changed.');
+        setStatus(t('sync.cloudSetup.pairing.cancelled'));
         return;
       }
     }
 
-    setStatus('Checking the key against the cloud vault…');
+    setStatus(t('sync.cloudSetup.existing.checkingKey'));
 
     await verifyYantaCloudSyncKey({
       baseUrl,
@@ -3084,13 +3036,13 @@ async function connectYantaCloudFromPairing(pairingText) {
     await store.settings.set('sync2.yantaCloud.vaultId', vaultId);
     await store.settings.set('sync2.yantaCloud.baseUrl', baseUrl);
 
-    setStatus('Removing untouched local Welcome vault if present…');
+    setStatus(t('sync.cloudSetup.existing.removingWelcome'));
 
     await removePristineWelcomeVaultIfPresent({
       reason: 'yanta-cloud-pairing',
     });
 
-    setStatus('Connecting to YANTA Cloud…');
+    setStatus(t('sync.cloudSetup.connecting'));
 
     const runtime = await createSync2YantaCloudAppRuntime({
       baseUrl,
@@ -3103,24 +3055,24 @@ async function connectYantaCloudFromPairing(pairingText) {
       reason: 'yanta-cloud-pairing',
     });
 
-    setStatus('Pulling encrypted vault…');
+    setStatus(t('sync.cloudSetup.pulling'));
 
     await runtime.syncNow({
       verbose: false,
       pullSnapshots: true,
     });
 
-    toast('Device connected to YANTA Cloud', 'success');
+    toast(t('sync.cloudSetup.pairing.connected'), 'success');
 
     renderConnected(vaultId, runtime.syncKey);
   } catch (err) {
     console.error(err);
     setStatus(
       err?.code === 'EWRONGKEY'
-        ? 'This pairing code does not match the cloud vault. Nothing was changed on this device.'
-        : err?.message || 'Could not connect this device',
+        ? t('sync.cloudSetup.pairing.wrongKey')
+        : err?.message || t('sync.cloudSetup.pairing.failed'),
       'error'
     );
-    toast('Cloud pairing failed', 'error');
+    toast(t('sync.cloudSetup.pairing.failedToast'), 'error');
   }
 }

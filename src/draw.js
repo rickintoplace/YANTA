@@ -833,7 +833,7 @@ export async function listDrawLibraryItemsAsync() {
 
 export async function insertDrawLibraryItemIntoCurrent(itemId) {
   if (!state.currentNoteId) {
-    toast('Open a note first', 'error');
+    toast(t('draw.openNoteFirst'), 'error');
     return;
   }
 
@@ -842,7 +842,7 @@ export async function insertDrawLibraryItemIntoCurrent(itemId) {
   const item = drawLibraryItems.find((x) => String(x.id) === String(itemId));
 
   if (!item) {
-    toast('Library item not found', 'error');
+    toast(t('draw.libraryItemNotFound'), 'error');
     return;
   }
 
@@ -862,7 +862,7 @@ export async function insertDrawLibraryItemIntoCurrent(itemId) {
 
   setDrawing(state.currentNoteId, drawingId, {
     id: drawingId,
-    title: item.name || 'Library drawing',
+    title: item.name || t('draw.libraryDrawing'),
     canvas: { width: 760, height: 420 },
     elements,
     appState: {},
@@ -871,7 +871,7 @@ export async function insertDrawLibraryItemIntoCurrent(itemId) {
 
   insertAtCursor(`\n\ndraw://${drawingId}\n\n`);
 
-  toast('Library item inserted as drawing', 'success');
+  toast(t('draw.libraryItemInserted'), 'success');
 
   window.dispatchEvent(new CustomEvent('yanta-drawing-updated', {
     detail: { noteId: state.currentNoteId, drawingId },
@@ -2016,7 +2016,7 @@ function renderLinkPills(host, targets) {
     const btn = document.createElement('button');
     btn.className = 'yanta-draw-link-pill' + (note ? '' : ' missing');
     btn.type = 'button';
-    btn.title = note ? `Preview ${target}` : `Create ${target}`;
+    btn.title = note ? t('draw.linkPill.preview', { target }) : t('draw.linkPill.create', { target });
     btn.innerHTML = `${lucide(note ? 'link' : 'file-plus', 12)} <span>${escapeHtml(target)}</span>`;
 
     btn.addEventListener('click', (e) => {
@@ -3241,7 +3241,7 @@ const DRAW_SELECTION_MENU_OPTIONS = {
     if (!note) return;
 
     if (await linkSelectedElementsToNote(api, note)) {
-      toast(`Linked ${note.title || 'Untitled'}`, 'success');
+      toast(t('draw.linkedNote', { title: note.title || t('note.untitled') }), 'success');
     }
   },
 };
@@ -3339,7 +3339,7 @@ function bindNoteDropToDrawing(container, apiRef, enabled = true) {
     const api = apiRef?.current || apiRef;
     const ok = await addOrLinkNoteAt(api, container, note, e.clientX, e.clientY);
 
-    if (ok) toast(`Linked ${note.title || 'Untitled'}`, 'success');
+    if (ok) toast(t('draw.linkedNote', { title: note.title || t('note.untitled') }), 'success');
   }, true);
 }
 
@@ -3443,7 +3443,7 @@ function makeNativeContextButton({ icon, label, danger = false, onClick }) {
       await onClick?.();
     } catch (err) {
       console.error(err);
-      toast('Drawing action failed', 'error');
+      toast(t('draw.actionFailed'), 'error');
     }
   }, true);
 
@@ -3474,13 +3474,13 @@ function injectYantaItemsIntoNativeContextMenu(container) {
 
   const linkBtn = makeNativeContextButton({
     icon: 'link',
-    label: 'YANTA: Link note…',
+    label: t('draw.ctx.linkNote'),
     onClick: async () => {
       const note = await openNoteReferencePicker();
       if (!note) return;
 
       if (linkSpecificElementsToNote(ctx.api, ctx.targets, note)) {
-        toast(`Linked ${note.title || 'Untitled'}`, 'success');
+        toast(t('draw.linkedNote', { title: note.title || t('note.untitled') }), 'success');
       }
     },
   });
@@ -3490,7 +3490,7 @@ function injectYantaItemsIntoNativeContextMenu(container) {
   if (linkedNoteId && state.notes.has(linkedNoteId)) {
     const openBtn = makeNativeContextButton({
       icon: 'file-text',
-      label: 'YANTA: Open linked note',
+      label: t('draw.ctx.openLinkedNote'),
       onClick: async () => {
         await openNote(linkedNoteId);
       },
@@ -3502,11 +3502,11 @@ function injectYantaItemsIntoNativeContextMenu(container) {
   if (hasAnyWikiLink) {
     const removeBtn = makeNativeContextButton({
       icon: 'unlink',
-      label: 'YANTA: Remove wikilink',
+      label: t('draw.ctx.removeWikilink'),
       danger: true,
       onClick: async () => {
         if (unlinkSpecificElements(ctx.api, ctx.targets)) {
-          toast('Wikilink removed', 'success');
+          toast(t('draw.wikilinkRemoved'), 'success');
         }
       },
     });
@@ -3716,7 +3716,7 @@ function renderDrawAutocomplete() {
     btn.className = 'yanta-draw-autocomplete-item' + (i === st.active ? ' active' : '');
     btn.innerHTML = `
       ${lucide(note.icon || (note.type === 'list' ? 'list' : 'file'), 14)}
-      <span>${escapeHtml(note.title || 'Untitled')}</span>
+      <span>${escapeHtml(note.title || t('note.untitled'))}</span>
       <span class="meta">${escapeHtml(state.folders.get(note.folderId)?.name || '')}</span>
     `;
 
@@ -4096,14 +4096,14 @@ function showNotePreview(noteId, clientX, clientY) {
   pop.innerHTML = `
     <div class="yanta-draw-note-preview-head">
       <span>${lucide(note.icon || (note.type === 'list' ? 'list' : 'file'), 16)}</span>
-      <div class="yanta-draw-note-preview-title">${escapeHtml(note.title || 'Untitled')}</div>
-      <button class="btn" data-open>${lucide('file-text', 13)} Open</button>
+      <div class="yanta-draw-note-preview-title">${escapeHtml(note.title || t('note.untitled'))}</div>
+      <button class="btn" data-open>${lucide('file-text', 13)} ${escapeHtml(t('draw.notePreview.open'))}</button>
       <button class="icon-btn" data-close>${lucide('x', 15)}</button>
     </div>
     <div class="yanta-draw-note-preview-body">
       ${body.trim()
         ? `<article class="preview">${renderPreview(body)}</article>`
-        : `<div class="tree-empty">Empty note.</div>`
+        : `<div class="tree-empty">${escapeHtml(t('draw.notePreview.empty'))}</div>`
       }
     </div>
   `;
@@ -4170,7 +4170,7 @@ async function openNoteReferencePicker() {
 
     const head = document.createElement('div');
     head.className = 'yanta-draw-note-picker-head';
-    head.innerHTML = `<strong>Link note</strong>`;
+    head.innerHTML = `<strong>${escapeHtml(t('draw.notePicker.title'))}</strong>`;
 
     const close = document.createElement('button');
     close.className = 'icon-btn';
@@ -4184,7 +4184,7 @@ async function openNoteReferencePicker() {
 
     const search = document.createElement('input');
     search.className = 'text-input yanta-draw-note-picker-search';
-    search.placeholder = 'Search note…';
+    search.placeholder = t('draw.notePicker.search');
     search.autocomplete = 'off';
 
     const list = document.createElement('div');
@@ -4254,7 +4254,7 @@ async function openNoteReferencePicker() {
       if (!items.length) {
         const empty = document.createElement('div');
         empty.className = 'tree-empty';
-        empty.textContent = 'No notes found.';
+        empty.textContent = t('draw.notePicker.none');
         list.append(empty);
         return;
       }
@@ -4266,7 +4266,7 @@ async function openNoteReferencePicker() {
 
         btn.innerHTML = `
           ${lucide(note.icon || (note.type === 'list' ? 'list' : 'file'), 14)}
-          <span>${escapeHtml(note.title || 'Untitled')}</span>
+          <span>${escapeHtml(note.title || t('note.untitled'))}</span>
           <span class="yanta-draw-note-picker-meta">${escapeHtml(state.folders.get(note.folderId)?.name || '')}</span>
         `;
 
@@ -4367,18 +4367,18 @@ async function openNoteReferencePicker() {
 function setModalDrawingTitle(drawingId, drawing) {
   if (!titleEl) return;
 
-  const title = drawing?.title || 'Drawing';
+  const title = drawing?.title || t('draw.untitled');
 
   titleEl.textContent = title;
-  titleEl.title = 'Click to rename drawing';
+  titleEl.title = t('draw.clickToRename');
 }
 
 async function commitDrawingTitle(noteId, drawingId, title) {
-  const clean = String(title || '').trim() || 'Drawing';
+  const clean = String(title || '').trim() || t('draw.untitled');
 
   updateDrawingMeta(noteId, drawingId, { title: clean }, 'draw-rename');
 
-  toast('Drawing renamed', 'success');
+  toast(t('draw.renamed'), 'success');
 
   window.dispatchEvent(new CustomEvent('yanta-drawing-updated', {
     detail: { noteId, drawingId },
@@ -4395,9 +4395,9 @@ async function renameDrawing(noteId, drawingId, { anchor = null, prefix = '' } =
   if (!target) return;
 
   inlineTextEdit(target, {
-    initial: d.title || 'Drawing',
-    placeholder: 'Drawing title',
-    emptyFallback: 'Drawing',
+    initial: d.title || t('draw.untitled'),
+    placeholder: t('draw.titlePlaceholder'),
+    emptyFallback: t('draw.untitled'),
     displayValue: (value) => prefix + value,
     onCommit: async (value) => {
       await commitDrawingTitle(noteId, drawingId, value);
@@ -4413,16 +4413,16 @@ function confirmDeleteDrawing(noteId, drawingId, {
   if (!noteId || !drawingId || !anchor) return;
 
   inlineConfirm(anchor, {
-    message: 'Delete drawing?',
-    confirmLabel: 'Delete',
-    cancelLabel: 'Cancel',
+    message: t('draw.deleteConfirm'),
+    confirmLabel: t('common.delete'),
+    cancelLabel: t('common.cancel'),
     danger: true,
     onConfirm: async () => {
       deleteDrawing(noteId, drawingId);
       deletePersistedThumb(`${noteId}:${drawingId}`);
       deletePersistedThumb(`preview:${noteId}:${drawingId}`);
       thumbnailCache.delete(`${noteId}:${drawingId}`);
-      toast('Drawing deleted');
+      toast(t('draw.deleted'));
 
       window.dispatchEvent(new CustomEvent('yanta-drawing-updated', {
         detail: { noteId, drawingId },
@@ -4621,7 +4621,7 @@ export async function createDrawingAndInsert({
   openFullscreen = isMobileDrawUx(),
 } = {}) {
   if (!state.currentNoteId) {
-    toast('Open a note first', 'error');
+    toast(t('draw.openNoteFirst'), 'error');
     return;
   }
 
@@ -4630,7 +4630,7 @@ export async function createDrawingAndInsert({
 
   const emptyScene = {
     id: drawingId,
-    title: 'Drawing',
+    title: t('draw.untitled'),
     canvas: {
       width: 760,
       height: 420,
@@ -4663,7 +4663,7 @@ export async function createDrawingAndInsert({
       transition: false,
     }).catch((err) => {
       console.error('[YANTA Draw] could not open new drawing fullscreen', err);
-      toast('Could not open drawing', 'error');
+      toast(t('draw.openFailed'), 'error');
     });
   }
 }
@@ -4754,7 +4754,7 @@ function bindResizeHandle(embed, sourceNoteId, drawingId) {
       detail: { noteId: sourceNoteId, drawingId },
     }));
 
-    toast(`Drawing height: ${nextHeight}px`, 'success');
+    toast(t('draw.heightSet', { height: nextHeight }), 'success');
   };
 
   handle.addEventListener('pointerdown', (e) => {
@@ -4800,7 +4800,7 @@ function bindResizeHandle(embed, sourceNoteId, drawingId) {
       detail: { noteId: sourceNoteId, drawingId },
     }));
 
-    toast('Drawing height reset', 'success');
+    toast(t('draw.heightReset'), 'success');
   });
 }
 
@@ -4961,7 +4961,7 @@ async function mountInlineDrawing(embed, sourceNoteId, drawingId, drawing) {
         excalidrawLibraryInitialData()
       ),
       theme,
-      name: drawing.title || 'Drawing',
+      name: drawing.title || t('draw.untitled'),
       libraryReturnUrl: excalidrawLibraryReturnUrl(),
 
       excalidrawAPI: (api) => {
@@ -5395,7 +5395,7 @@ function openEmbedMoreMenu(embed, anchor, hit) {
         if (!note || !api) return;
 
         if (await linkSelectedElementsToNote(api, note)) {
-          toast(`Linked ${note.title || 'Untitled'}`, 'success');
+          toast(t('draw.linkedNote', { title: note.title || t('note.untitled') }), 'success');
         }
       },
     });
@@ -5609,7 +5609,7 @@ export async function openDrawModal(
   const hit = preparedHit || await resolveDrawingRefAsync(drawingId, noteId);
 
   if (!hit) {
-    toast(`Drawing not found: draw://${drawingId}`, 'error');
+    toast(t('draw.notFoundId', { id: `draw://${drawingId}` }), 'error');
     return;
   }
 
@@ -5832,7 +5832,7 @@ export async function openDrawModal(
         }
       ),
       theme,
-      name: current.title || 'Drawing',
+      name: current.title || t('draw.untitled'),
       libraryReturnUrl: excalidrawLibraryReturnUrl(),
 
       excalidrawAPI: (api) => {
@@ -6115,7 +6115,7 @@ function exportDrawingExcalidraw(noteId, drawingId) {
   const json = drawingToExcalidrawJson(noteId, drawingId);
 
   if (!json) {
-    toast('Drawing not found', 'error');
+    toast(t('draw.notFound'), 'error');
     return;
   }
 
@@ -6133,14 +6133,14 @@ async function exportDrawingSvg(noteId, drawingId) {
   const d = getDrawing(noteId, drawingId);
 
   if (!d) {
-    toast('Drawing not found', 'error');
+    toast(t('draw.notFound'), 'error');
     return;
   }
 
   const { exportToSvg } = await loadExcalidraw();
 
   if (typeof exportToSvg !== 'function') {
-    toast('SVG export unavailable in this Excalidraw build', 'error');
+    toast(t('draw.export.svgUnavailable'), 'error');
     return;
   }
 
@@ -6172,14 +6172,14 @@ async function exportDrawingWebp(noteId, drawingId) {
   const d = getDrawing(noteId, drawingId);
 
   if (!d) {
-    toast('Drawing not found', 'error');
+    toast(t('draw.notFound'), 'error');
     return;
   }
 
   const { exportToBlob } = await loadExcalidraw();
 
   if (typeof exportToBlob !== 'function') {
-    toast('WEBP export unavailable in this Excalidraw build', 'error');
+    toast(t('draw.export.webpUnavailable'), 'error');
     return;
   }
 
@@ -6266,7 +6266,7 @@ export async function exportDrawingPngBlob({
     return blob;
   } catch (err) {
     console.warn('[YANTA Draw] PNG blob export failed', err);
-    toast('Drawing export failed', 'error');
+    toast(t('draw.export.failed'), 'error');
     throw err;
   }
 }
@@ -6275,14 +6275,14 @@ async function exportDrawingPdf(noteId, drawingId) {
   const d = getDrawing(noteId, drawingId);
 
   if (!d) {
-    toast('Drawing not found', 'error');
+    toast(t('draw.notFound'), 'error');
     return;
   }
 
   const { exportToSvg } = await loadExcalidraw();
 
   if (typeof exportToSvg !== 'function') {
-    toast('PDF export unavailable because SVG export is unavailable', 'error');
+    toast(t('draw.export.pdfUnavailable'), 'error');
     return;
   }
 
@@ -6301,7 +6301,7 @@ async function exportDrawingPdf(noteId, drawingId) {
   const win = window.open('', '_blank');
 
   if (!win) {
-    toast('Popup blocked · allow popups to print PDF', 'error');
+    toast(t('draw.export.popupBlocked'), 'error');
     return;
   }
 
@@ -6310,7 +6310,7 @@ async function exportDrawingPdf(noteId, drawingId) {
     <html>
       <head>
         <meta charset="utf-8" />
-        <title>${escapeHtml(d.title || 'Drawing')}</title>
+        <title>${escapeHtml(d.title || t('draw.untitled'))}</title>
         <style>
           @page {
             size: auto;
@@ -6352,7 +6352,7 @@ async function exportDrawingPdf(noteId, drawingId) {
     } catch {}
   }, 200);
 
-  toast('Use print dialog to save as PDF', 'success');
+  toast(t('draw.export.printHint'), 'success');
 }
 
 export async function exportDrawing(noteId, drawingId, {
@@ -6382,7 +6382,7 @@ export async function exportDrawing(noteId, drawingId, {
     exportDrawingExcalidraw(noteId, drawingId);
   } catch (err) {
     console.error('[YANTA Draw] export failed', err);
-    toast('Drawing export failed', 'error');
+    toast(t('draw.export.failed'), 'error');
   }
 }
 
@@ -6544,7 +6544,7 @@ export async function drawingThumbnailUrl(noteId, drawingId) {
     const url = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(`
       <svg xmlns="http://www.w3.org/2000/svg" width="360" height="220" viewBox="0 0 360 220">
         <rect width="360" height="220" rx="14" fill="#121212"/>
-        <text x="180" y="112" dominant-baseline="middle" text-anchor="middle" fill="#6ea8fe" font-family="system-ui" font-size="20">Drawing</text>
+        <text x="180" y="112" dominant-baseline="middle" text-anchor="middle" fill="#6ea8fe" font-family="system-ui" font-size="20">${escapeHtml(t('draw.untitled'))}</text>
       </svg>
     `)}`;
     thumbnailCache.set(key, { sig, url });
@@ -6609,13 +6609,13 @@ export async function importExcalidrawFileIntoCurrent(file) {
 
   setDrawing(state.currentNoteId, drawingId, {
     id: drawingId,
-    title: file.name.replace(/\.excalidraw(\.json)?$/i, '') || 'Drawing',
+    title: file.name.replace(/\.excalidraw(\.json)?$/i, '') || t('draw.untitled'),
     canvas: scene.canvas || { width: 760, height: 420 },
     ...scene,
   }, 'draw-import');
 
   insertAtCursor(`\n\ndraw://${drawingId}\n\n`);
-  toast('Drawing imported', 'success');
+  toast(t('draw.imported'), 'success');
 
   window.dispatchEvent(new CustomEvent('yanta-drawing-updated', {
     detail: { noteId: state.currentNoteId, drawingId },
@@ -6624,12 +6624,12 @@ export async function importExcalidrawFileIntoCurrent(file) {
 
 export async function importSvgFileAsDrawing(file) {
   if (!state.currentNoteId) {
-    toast('Open a note first', 'error');
+    toast(t('draw.openNoteFirst'), 'error');
     return;
   }
 
   if (!file || file.type !== 'image/svg+xml') {
-    toast('Pick an SVG file', 'error');
+    toast(t('draw.pickSvg'), 'error');
     return;
   }
 
@@ -6688,7 +6688,7 @@ export async function importSvgFileAsDrawing(file) {
   }, 'draw-svg-import');
 
   insertAtCursor(`\n\ndraw://${drawingId}\n\n`);
-  toast('SVG imported as drawing', 'success');
+  toast(t('draw.svgImported'), 'success');
 
   window.dispatchEvent(new CustomEvent('yanta-drawing-updated', {
     detail: { noteId: state.currentNoteId, drawingId },
@@ -6700,11 +6700,11 @@ export async function importExcalidrawFileAsNote(file) {
 
   return importExcalidrawDataAsNote(
     data,
-    file.name.replace(/\.excalidraw(\.json)?$/i, '') || 'Drawing'
+    file.name.replace(/\.excalidraw(\.json)?$/i, '') || t('draw.untitled')
   );
 }
 
-export async function importExcalidrawDataAsNote(data, title = 'Drawing') {
+export async function importExcalidrawDataAsNote(data, title = t('draw.untitled')) {
   const scene = normalizeDrawingScene(data);
   const noteId = uid();
   const drawingId = uid();
@@ -6737,7 +6737,7 @@ export async function importExcalidrawDataAsNote(data, title = 'Drawing') {
 
   state.searchIndex.set(noteId, [title, scene.text || ''].join(' ').toLowerCase());
 
-  toast('Drawing imported as note', 'success');
+  toast(t('draw.importedAsNote'), 'success');
 
   return { noteId, drawingId };
 }

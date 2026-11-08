@@ -12,6 +12,7 @@ import {
   store,
   lucide,
 } from './core.js';
+import { t } from './i18n/index.js';
 
 let active = null;
 let hiddenChildren = [];
@@ -96,19 +97,19 @@ export function openSidePane({
       <span class="yanta-side-pane-icon">${lucide(icon, 15)}</span>
       <strong class="yanta-side-pane-title">${title || kind}</strong>
 
-      <div class="yanta-side-pane-tabs" role="tablist" aria-label="Right pane content">
-        <button class="icon-btn ${kind === 'preview' ? 'active' : ''}" data-side-pane-tab="preview" title="Markdown preview">${lucide('eye', 15)}</button>
-        <button class="icon-btn ${kind === 'dashboard' ? 'active' : ''}" data-side-pane-tab="dashboard" title="Dashboard">${lucide('layout-dashboard', 15)}</button>
-        <button class="icon-btn ${kind === 'graph' ? 'active' : ''}" data-side-pane-tab="graph" title="Graph">${lucide('network', 15)}</button>
-        <button class="icon-btn ${kind === 'calendar' ? 'active' : ''}" data-side-pane-tab="calendar" title="Calendar">${lucide('calendar-days', 15)}</button>
-        <button class="icon-btn ${kind === 'rss' ? 'active' : ''}" data-side-pane-tab="rss" title="Sources">${lucide('rss', 15)}</button>
-        <button class="icon-btn ${kind === 'ai' ? 'active' : ''}" data-side-pane-tab="ai" title="AI">${lucide('bot', 15)}</button>
+      <div class="yanta-side-pane-tabs" role="tablist" aria-label="${t('sidePane.tabs')}">
+        <button class="icon-btn ${kind === 'preview' ? 'active' : ''}" data-side-pane-tab="preview" title="${t('sidePane.preview')}">${lucide('eye', 15)}</button>
+        <button class="icon-btn ${kind === 'dashboard' ? 'active' : ''}" data-side-pane-tab="dashboard" title="${t('dashboard.title')}">${lucide('layout-dashboard', 15)}</button>
+        <button class="icon-btn ${kind === 'graph' ? 'active' : ''}" data-side-pane-tab="graph" title="${t('graph.title')}">${lucide('network', 15)}</button>
+        <button class="icon-btn ${kind === 'calendar' ? 'active' : ''}" data-side-pane-tab="calendar" title="${t('sidebar.calendar')}">${lucide('calendar-days', 15)}</button>
+        <button class="icon-btn ${kind === 'rss' ? 'active' : ''}" data-side-pane-tab="rss" title="${t('sidebar.sources')}">${lucide('rss', 15)}</button>
+        <button class="icon-btn ${kind === 'ai' ? 'active' : ''}" data-side-pane-tab="ai" title="${t('tabbar.ai')}">${lucide('bot', 15)}</button>
       </div>
 
       <span class="grow"></span>
 
-      <button class="icon-btn" data-side-pane-expand title="Expand">${lucide('maximize-2', 16)}</button>
-      <button class="icon-btn" data-side-pane-close title="Close side pane">${lucide('x', 16)}</button>
+      <button class="icon-btn" data-side-pane-expand title="${t('sidePane.expand')}">${lucide('maximize-2', 16)}</button>
+      <button class="icon-btn" data-side-pane-close title="${t('sidePane.close')}">${lucide('x', 16)}</button>
     </div>
 
     <div class="yanta-side-pane-body" data-side-pane-body></div>

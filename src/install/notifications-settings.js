@@ -14,8 +14,10 @@
 import {
   el,
   lucide,
+  escapeHtml,
   toast,
 } from '../core.js';
+import { t } from '../i18n/index.js';
 
 import {
   installEnvironment,
@@ -160,9 +162,9 @@ function chip(iconName, label, on) {
 
 function currentDeviceRow(env, notifications) {
   const kind = env.androidApp
-    ? 'Android app'
-    : env.standalone ? 'Installed app' : 'Browser';
-  const name = `This device · ${env.browser.name} on ${osLabel(env.os)}`;
+    ? t('install.notifications.kind.androidApp')
+    : env.standalone ? t('install.notifications.kind.installedApp') : t('install.notifications.kind.browser');
+  const name = t('install.notifications.thisDevice', { browser: env.browser.name, os: osLabel(env.os) });
 
   const granted = !notifications.applicable || notifications.permission === 'granted';
 
@@ -174,15 +176,15 @@ function currentDeviceRow(env, notifications) {
   const head = el('div', { class: 'yanta-notif-device-head' });
   head.append(el('strong', {}, name));
   head.append(badge(kind, 'muted'));
-  head.append(granted ? badge('Notifications on') : badge('Notifications off', 'warn'));
-  if (!env.androidApp && isPushActive()) head.append(badge('Background: on'));
+  head.append(granted ? badge(t('install.notifications.badge.on')) : badge(t('install.notifications.badge.off'), 'warn'));
+  if (!env.androidApp && isPushActive()) head.append(badge(t('install.notifications.badge.background')));
 
   const chips = el('div', { class: 'yanta-notif-device-chips' });
-  chips.append(chip('message-circle', 'Chat', granted && chatNotificationsEnabled()));
+  chips.append(chip('message-circle', t('install.notifications.chip.chat'), granted && chatNotificationsEnabled()));
   if (env.androidApp) {
-    chips.append(chip('calendar-clock', 'Reminders', true));
+    chips.append(chip('calendar-clock', t('install.notifications.chip.reminders'), true));
   } else {
-    chips.append(chip('calendar-clock', 'Reminders (while open)', granted && calendarNotificationsEnabled()));
+    chips.append(chip('calendar-clock', t('install.notifications.chip.remindersWhileOpen'), granted && calendarNotificationsEnabled()));
   }
 
   body.append(head, chips);
@@ -199,19 +201,19 @@ function androidDeviceRow(device) {
   const body = el('div', { class: 'yanta-notif-device-body' });
 
   const head = el('div', { class: 'yanta-notif-device-head' });
-  head.append(el('strong', {}, device.name || 'Android device'));
-  head.append(badge('Android app', 'muted'));
-  head.append(canNotify ? badge('Notifications on') : badge('Needs permission', 'warn'));
+  head.append(el('strong', {}, device.name || t('install.notifications.androidDevice')));
+  head.append(badge(t('install.notifications.kind.androidApp'), 'muted'));
+  head.append(canNotify ? badge(t('install.notifications.badge.on')) : badge(t('install.notifications.badge.needsPermission'), 'warn'));
 
   const chips = el('div', { class: 'yanta-notif-device-chips' });
-  chips.append(chip('message-circle', 'Chat', canNotify));
-  chips.append(chip('calendar-clock', 'Reminders', canNotify));
+  chips.append(chip('message-circle', t('install.notifications.chip.chat'), canNotify));
+  chips.append(chip('calendar-clock', t('install.notifications.chip.reminders'), canNotify));
 
   body.append(head, chips);
 
   if (!canNotify) {
     body.append(el('p', { class: 'yanta-notif-note' },
-      'Open YANTA on that phone and allow notifications and exact alarms.'));
+      t('install.notifications.phoneNeedsPermission')));
   }
 
   row.append(body);
@@ -233,7 +235,7 @@ function osLabel(os) {
   return {
     windows: 'Windows', macos: 'macOS', linux: 'Linux',
     android: 'Android', ios: 'iOS', chromeos: 'ChromeOS',
-  }[os] || 'this device';
+  }[os] || t('install.notifications.thisDeviceOs');
 }
 
 /**
@@ -260,21 +262,21 @@ export function notificationsSettingsElement() {
       perm.append(iconEl(granted ? 'bell-ring' : 'bell-off', 18));
       perm.append(el('span', {},
         !notifications.supported
-          ? 'This browser can’t show notifications. Install YANTA or try another browser.'
-          : granted ? 'Notifications are enabled on this device.'
-            : blocked ? 'Notifications are blocked. Re-enable them in your browser’s site settings for YANTA.'
-              : 'Notifications are not enabled yet on this device.'));
+          ? t('install.notifications.perm.unsupported')
+          : granted ? t('install.status.enabled')
+            : blocked ? t('install.status.blocked')
+              : t('install.notifications.perm.notYet')));
       card.append(perm);
 
       const actions = el('div', { class: 'yanta-notif-actions' });
 
       if (notifications.supported && !granted && !blocked) {
         const enableBtn = el('button', { class: 'btn primary', type: 'button' });
-        enableBtn.innerHTML = `${lucide('bell', 14)} Enable notifications`;
+        enableBtn.innerHTML = `${lucide('bell', 14)} ${escapeHtml(t('install.cta.enableNotifications'))}`;
         enableBtn.addEventListener('click', async () => {
           const result = await requestWebNotificationPermission();
-          if (result === 'granted') toast('Notifications enabled.', 'success');
-          else if (result === 'denied') toast('Notifications are blocked in your browser settings.', 'error');
+          if (result === 'granted') toast(t('install.toast.enabled'), 'success');
+          else if (result === 'denied') toast(t('install.toast.blocked'), 'error');
         });
         actions.append(enableBtn);
       }
@@ -286,16 +288,16 @@ export function notificationsSettingsElement() {
 
       if (granted) {
         const testBtn = el('button', { class: 'btn', type: 'button' });
-        testBtn.innerHTML = `${lucide('send', 14)} Send a test notification`;
+        testBtn.innerHTML = `${lucide('send', 14)} ${escapeHtml(t('install.notifications.test.button'))}`;
         testBtn.addEventListener('click', async () => {
           const result = await sendTestNotification();
-          if (result.ok) toast(`Test notification sent (${result.via}) — check your desktop.`, 'success');
-          else if (result.reason === 'permission') toast('Allow notifications first.', 'error');
-          else { toast('Could not send a test notification.', 'error'); troubleshoot.hidden = false; }
+          if (result.ok) toast(t('install.notifications.test.sent', { via: result.via }), 'success');
+          else if (result.reason === 'permission') toast(t('install.notifications.test.allowFirst'), 'error');
+          else { toast(t('install.notifications.test.failed'), 'error'); troubleshoot.hidden = false; }
         });
         actions.append(testBtn);
 
-        const troubleBtn = el('button', { class: 'btn', type: 'button' }, 'Not seeing them?');
+        const troubleBtn = el('button', { class: 'btn', type: 'button' }, t('install.notifications.test.notSeeing'));
         troubleBtn.addEventListener('click', () => { troubleshoot.hidden = !troubleshoot.hidden; });
         actions.append(troubleBtn);
       }
@@ -308,17 +310,17 @@ export function notificationsSettingsElement() {
       toggles.append(toggleRow({
         checked: chatNotificationsEnabled(),
         disabled,
-        label: 'Chat messages',
-        hint: 'Show a notification for new chat messages while YANTA is open.',
+        label: t('install.notifications.toggle.chat'),
+        hint: t('install.notifications.toggle.chatHint'),
         onChange: (v) => setChatNotificationsEnabled(v),
       }));
       toggles.append(toggleRow({
         checked: calendarNotificationsEnabled(),
         disabled: disabled || env.androidApp,
-        label: 'Calendar reminders',
+        label: t('install.notifications.toggle.calendar'),
         hint: env.androidApp
-          ? 'Handled by the app’s system alarms.'
-          : 'Remind me about upcoming events.',
+          ? t('install.notifications.toggle.calendarNative')
+          : t('install.notifications.toggle.calendarHint'),
         onChange: (v) => setCalendarNotificationsEnabled(v),
       }));
       card.append(toggles);
@@ -330,17 +332,17 @@ export function notificationsSettingsElement() {
         const bg = toggleRow({
           checked: isPushActive(),
           disabled,
-          label: 'Background delivery',
-          hint: 'Receive chat and reminders even when YANTA is closed. Requires a YANTA Cloud account.',
+          label: t('install.notifications.bg.label'),
+          hint: t('install.notifications.bg.hint'),
           onChange: async (wantOn) => {
             try {
               if (wantOn) await subscribeWebPush();
               else await unsubscribeWebPush();
             } catch (err) {
               if (err?.status === 401) {
-                toast('Sign in to YANTA Cloud to enable background delivery.', 'error');
+                toast(t('install.notifications.bg.signIn'), 'error');
               } else {
-                toast(err?.message || 'Could not change background delivery.', 'error');
+                toast(err?.message || t('install.notifications.bg.failed'), 'error');
               }
               render(); // revert the toggle to the real state
             }
@@ -351,21 +353,21 @@ export function notificationsSettingsElement() {
         if (isPushActive()) {
           const testActions = el('div', { class: 'yanta-notif-actions' });
           const testBtn = el('button', { class: 'btn', type: 'button' });
-          testBtn.innerHTML = `${lucide('send', 13)} Test background delivery`;
+          testBtn.innerHTML = `${lucide('send', 13)} ${escapeHtml(t('install.notifications.bg.test'))}`;
           testBtn.addEventListener('click', async () => {
             try {
               const res = await sendBackgroundTest();
               if (!res?.count) {
-                toast('No subscription stored on the server — toggle background delivery off and on again.', 'error');
+                toast(t('install.notifications.bg.noSubscription'), 'error');
               } else {
                 const ok = (res.results || []).some((r) => r.ok);
                 const detail = (res.results || [])
                   .map((r) => (r.ok ? `ok ${r.status || ''}`.trim() : (r.reason || `status ${r.status}`)))
                   .join(', ');
-                toast(`Background test → ${res.count} device(s): ${detail}`, ok ? 'success' : 'error');
+                toast(t('install.notifications.bg.testResult', { count: res.count, detail }), ok ? 'success' : 'error');
               }
             } catch (err) {
-              toast(err?.status === 401 ? 'Sign in to YANTA Cloud first.' : (err?.message || 'Test failed.'), 'error');
+              toast(err?.status === 401 ? t('install.notifications.bg.signInFirst') : (err?.message || t('install.notifications.bg.testFailed')), 'error');
             }
           });
           testActions.append(testBtn);
@@ -376,12 +378,12 @@ export function notificationsSettingsElement() {
       if (!env.androidApp) {
         card.append(el('p', { class: 'yanta-notif-note' },
           isPushActive()
-            ? 'Background delivery is on. Chat and reminders arrive even when YANTA is closed.'
-            : 'Without background delivery, web notifications only arrive while YANTA is open. Turn it on above, or install the app on your phone.'));
+            ? t('install.notifications.bg.on')
+            : t('install.notifications.bg.off')));
       }
     } else {
       card.append(el('p', { class: 'yanta-notif-note' },
-        'This device uses the app’s native notifications — reminders and chat are handled by the system.'));
+        t('install.notifications.native')));
     }
 
     root.append(card);
@@ -392,7 +394,7 @@ export function notificationsSettingsElement() {
       androidDevices = notificationCapableDevices().filter((d) => !d.current);
     } catch {}
 
-    root.append(el('div', { class: 'yanta-notif-section-title' }, 'Your devices'));
+    root.append(el('div', { class: 'yanta-notif-section-title' }, t('install.notifications.yourDevices')));
 
     const list = el('div', {});
     list.append(currentDeviceRow(env, notifications));

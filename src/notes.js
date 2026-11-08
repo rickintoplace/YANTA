@@ -417,7 +417,7 @@ export async function newNote(folderId = null, type = 'markdown') {
 }
 
 export async function newFolder(parentId = null, {
-  name = 'New folder',
+  name = '',
   focusRename = true,
   source = 'unknown',
 } = {}) {
@@ -425,7 +425,7 @@ export async function newFolder(parentId = null, {
 
   const f = {
     id: uid(),
-    name: String(name || '').trim() || 'New folder',
+    name: String(name || '').trim() || t('tree.newFolder'),
     parentId: parentId || null,
     created: now,
     updated: now,
@@ -872,12 +872,12 @@ export async function deleteCurrentNote() {
 
   if (linkedEvent && calendar?.calendarChoiceDialog) {
     const choice = await calendar.calendarChoiceDialog({
-      title: 'Delete note',
-      message: `This note is linked to the calendar event "${linkedEvent.title || 'Untitled event'}".`,
+      title: t('note.delete.title'),
+      message: t('note.delete.linkedMessage', { title: linkedEvent.title || t('calendarWidget.untitledEvent') }),
       choices: [
-        { id: 'note-only', label: 'Delete note only', primary: true, danger: true },
-        { id: 'note-and-event', label: 'Delete note and event', danger: true },
-        { id: 'cancel', label: 'Cancel' },
+        { id: 'note-only', label: t('note.delete.noteOnly'), primary: true, danger: true },
+        { id: 'note-and-event', label: t('note.delete.noteAndEvent'), danger: true },
+        { id: 'cancel', label: t('common.cancel') },
       ],
     });
 
@@ -890,22 +890,22 @@ export async function deleteCurrentNote() {
     }
   } else if (calendar?.calendarChoiceDialog) {
     const choice = await calendar.calendarChoiceDialog({
-      title: 'Delete note',
-      message: `Move "${note.title || 'Untitled'}" to Trash?`,
+      title: t('note.delete.title'),
+      message: t('note.delete.confirm', { title: note.title || t('note.untitled') }),
       choices: [
-        { id: 'delete', label: 'Move to Trash', primary: true, danger: true, icon: 'trash' },
-        { id: 'cancel', label: `No, keep ${note.title || 'Untitled'}`, icon: 'FileText' },
+        { id: 'delete', label: t('note.more.trash'), primary: true, danger: true, icon: 'trash' },
+        { id: 'cancel', label: t('note.delete.keep', { title: note.title || t('note.untitled') }), icon: 'FileText' },
       ],
     });
 
     if (choice !== 'delete') return;
   } else {
-    if (!confirm(`Move "${note.title || 'Untitled'}" to Trash?`)) return;
+    if (!confirm(t('note.delete.confirm', { title: note.title || t('note.untitled') }))) return;
   }
 
   await moveNoteToTrash(note.id, {
     source: 'note-delete-button',
-    toastMessage: 'Moved note to Trash',
+    toastMessage: t('note.delete.moved'),
   });
 
   try {
@@ -957,7 +957,7 @@ export function renderChips() {
   for (const tag of n.tags || []) {
     const chip = el('span', { class: 'chip' }, '#' + tag,
       el('button', {
-        title: 'Remove tag',
+        title: t('note.tags.removeTitle'),
         onclick: () => removeTag(tag),
       }, '<svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="lucide lucide-x-icon lucide-x"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>')
     );
@@ -1053,12 +1053,12 @@ function preloadImagesFor(md) {
 export function markDirty() {
   state.dirty = true;
   const e = $('statSaved');
-  if (e) { e.textContent = 'Saving…'; e.className = 'dirty'; }
+  if (e) { e.textContent = t('note.status.saving'); e.className = 'dirty'; }
 }
 export function markSaved() {
   state.dirty = false;
   const e = $('statSaved');
-  if (e) { e.textContent = 'Saved · ' + fmtDate(Date.now()); e.className = 'saved'; }
+  if (e) { e.textContent = t('note.status.savedAt', { time: fmtDate(Date.now()) }); e.className = 'saved'; }
 }
 
 function updateWordCount(md) {

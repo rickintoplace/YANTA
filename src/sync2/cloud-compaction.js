@@ -20,6 +20,7 @@ import {
   state,
   store,
 } from '../core.js';
+import { t } from '../i18n/index.js';
 
 import {
   vaultNotesMap,
@@ -345,12 +346,12 @@ async function createEmergencyHeadroom(engine, {
     phase: 'compactHeadroom',
     direction: 'up',
     detailed: true,
-    message: 'Creating safe upload headroom by pruning history already covered by heads…',
+    message: t('sync.compaction.headroomPruning'),
   });
 
   return deleteRemoteEntries(engine, selected, {
     phase: 'compactHeadroom',
-    message: 'Creating safe headroom…',
+    message: t('sync.compaction.headroom'),
   });
 }
 
@@ -463,7 +464,7 @@ async function compactLocked(engine, {
         phase: 'compactOutbox',
         direction: 'up',
         detailed: true,
-        message: `Dropped ${dropped} stale local vault metadata update${dropped === 1 ? '' : 's'} before compaction.`,
+        message: t('sync.compaction.droppedStale', { count: dropped }),
       });
     }
   }
@@ -479,7 +480,7 @@ async function compactLocked(engine, {
         phase: 'compactStart',
         direction: 'down',
         detailed: true,
-        message: 'Synchronizing before storage optimization…',
+        message: t('sync.compaction.syncFirst'),
       });
 
       await engine.syncNowLocked({
@@ -499,7 +500,7 @@ async function compactLocked(engine, {
     phase: 'compactStart',
     direction: 'up',
     detailed: true,
-    message: 'Starting cloud storage optimization…',
+    message: t('sync.compaction.starting'),
   });
 
   /*
@@ -518,7 +519,7 @@ async function compactLocked(engine, {
         phase: 'compactOutbox',
         direction: 'up',
         detailed: true,
-        message: `Dropped ${dropped} oversized/stale local vault metadata update${dropped === 1 ? '' : 's'} before compaction.`,
+        message: t('sync.compaction.droppedOversized', { count: dropped }),
       });
     }
   }
@@ -552,7 +553,7 @@ async function compactLocked(engine, {
     phase: 'compactAssets',
     direction: 'up',
     detailed: true,
-    message: 'Ensuring encrypted assets are present…',
+    message: t('sync.compaction.ensuringAssets'),
   });
 
   const assets = await uploadMissingAssets(engine);
@@ -567,7 +568,7 @@ async function compactLocked(engine, {
     phase: 'compactHeads',
     direction: 'up',
     detailed: true,
-    message: 'Uploading latest encrypted vault head…',
+    message: t('sync.engine.uploadingVaultHead'),
   });
 
   await uploadVaultHead(engine);
@@ -584,7 +585,7 @@ async function compactLocked(engine, {
       current: i,
       total: noteIds.length,
       noteId,
-      message: 'Uploading latest encrypted note heads…',
+      message: t('sync.compaction.uploadingNoteHeads'),
     });
 
     await engine.observeNote(noteId);
@@ -599,7 +600,7 @@ async function compactLocked(engine, {
     phase: 'compactSnapshots',
     direction: 'up',
     detailed: true,
-    message: 'Uploading encrypted compatibility snapshots…',
+    message: t('sync.compaction.compatSnapshots'),
   });
 
   await uploadVaultSnapshot(engine);
@@ -616,7 +617,7 @@ async function compactLocked(engine, {
       current: i,
       total: noteIds.length,
       noteId,
-      message: 'Uploading compatibility note snapshots…',
+      message: t('sync.compaction.compatNoteSnapshots'),
     });
 
     await engine.observeNote(noteId);
@@ -639,7 +640,7 @@ async function compactLocked(engine, {
         phase: 'compactOutbox',
         direction: 'up',
         detailed: true,
-        message: `Dropped ${removed} local queued update${removed === 1 ? '' : 's'} covered by fresh heads.`,
+        message: t('sync.compaction.droppedQueued', { count: removed }),
       });
     }
   }
@@ -667,7 +668,7 @@ async function compactLocked(engine, {
 
   const cleanup = await deleteRemoteEntries(engine, deletePlan, {
     phase: 'compactDelete',
-    message: 'Deleting sync history covered by snapshots…',
+    message: t('sync.compaction.deletingHistory'),
   });
 
   /*
@@ -682,7 +683,7 @@ async function compactLocked(engine, {
 
   const orphanCleanup = await deleteRemoteEntries(engine, orphanPlan, {
     phase: 'compactDelete',
-    message: 'Deleting sync data of deleted notes…',
+    message: t('sync.compaction.deletingDeleted'),
   });
 
   await engine.loadRemoteIndex({
@@ -694,7 +695,7 @@ async function compactLocked(engine, {
     status: 'done',
     direction: 'up',
     detailed: true,
-    message: 'Cloud storage optimization complete.',
+    message: t('sync.compaction.complete'),
   });
 
   return {

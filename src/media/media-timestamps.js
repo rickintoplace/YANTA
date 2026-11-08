@@ -10,6 +10,8 @@
 // the note contains at least one compatible audio/video embed.
 // ============================================================
 
+import { t } from '../i18n/index.js';
+
 const MEDIA_SELECTOR = [
   '.pv-embed-video iframe',
   '.pv-embed-video video',
@@ -129,13 +131,13 @@ export function bindMediaTimestampClicks(root = document, {
     const media = nearestPlayableMediaForTimestamp(timestamp, root);
 
     if (!media) {
-      onError?.('No compatible video or audio found in this note');
+      onError?.(t('media.noPlayable'));
       return;
     }
 
     if (media instanceof HTMLIFrameElement) {
       if (!jumpIframeToTimestamp(media, seconds)) {
-        onError?.('Could not jump this embedded player');
+        onError?.(t('media.jumpEmbedFailed'));
       }
 
       return;
@@ -143,7 +145,7 @@ export function bindMediaTimestampClicks(root = document, {
 
     if (media instanceof HTMLMediaElement) {
       if (!jumpHtmlMediaToTimestamp(media, seconds)) {
-        onError?.('Could not jump this media player');
+        onError?.(t('media.jumpMediaFailed'));
       }
     }
   }, {

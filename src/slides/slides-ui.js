@@ -503,7 +503,7 @@ function injectCss() {
 }
 
 .yanta-slide-draw-overlay::after {
-  content: "Drag to create a slide · Esc to cancel";
+  content: ${JSON.stringify(t('slides.drawOverlayHint'))};
   position: absolute;
   left: 50%;
   bottom: 14px;
@@ -1285,9 +1285,9 @@ function renderSlidesBarHtml(slides, { open, fullscreen }) {
   // instead of hiding it behind the ⋯ menu.
   const drawFrameBtn = fullscreen
     ? `
-      <button class="yanta-slides-drawframe" ${attr}="draw-frame" type="button" title="Draw a slide frame">
+      <button class="yanta-slides-drawframe" ${attr}="draw-frame" type="button" title="${escapeAttr(t('slides.drawFrame'))}">
         ${lucide('scan', 13)}
-        <span class="yanta-slides-drawframe-label">Draw slide</span>
+        <span class="yanta-slides-drawframe-label">${escapeHtml(t('slides.drawSlide'))}</span>
       </button>
     `
     : '';
@@ -1296,16 +1296,16 @@ function renderSlidesBarHtml(slides, { open, fullscreen }) {
     <div class="yanta-slides-bar">
       <button class="yanta-slides-toggle ${open ? 'is-open' : ''}" ${attr}="toggle" type="button" aria-expanded="${open ? 'true' : 'false'}">
         ${lucide('presentation', 14)}
-        <span>Slides</span>
+        <span>${escapeHtml(t('draw.slides'))}</span>
         <span class="yanta-slides-count">· ${slides.length}</span>
       </button>
       <span class="grow"></span>
       ${drawFrameBtn}
-      <button class="yanta-slides-primary" ${attr}="present" type="button" ${hasSlides ? '' : 'disabled'} title="${hasSlides ? 'Present slideshow' : 'Create a slide first'}">
+      <button class="yanta-slides-primary" ${attr}="present" type="button" ${hasSlides ? '' : 'disabled'} title="${escapeAttr(hasSlides ? t('slides.presentSlideshow') : t('slides.createFirst'))}">
         ${lucide('play', 13)}
-        <span>Present</span>
+        <span>${escapeHtml(t('draw.present'))}</span>
       </button>
-      <button class="yanta-slides-more" ${attr}="more" type="button" title="More slide actions" aria-label="More slide actions">
+      <button class="yanta-slides-more" ${attr}="more" type="button" title="${escapeAttr(t('slides.moreActions'))}" aria-label="${escapeAttr(t('slides.moreActions'))}">
         ${lucide('ellipsis', 16)}
       </button>
     </div>
@@ -1317,7 +1317,7 @@ function renderSlidesStripHtml(slides) {
     return `
       <div class="yanta-slides-strip">
         <div class="yanta-slides-empty-hint">
-          No slides yet. Open the ⋯ menu → “Create slide” to capture part of the board.
+          ${escapeHtml(t('slides.emptyStrip'))}
         </div>
       </div>
     `;
@@ -1328,7 +1328,7 @@ function renderSlidesStripHtml(slides) {
     const count = Math.min(6, slideBuildCount(slide));
     if (!count) return '';
 
-    return `<span class="yanta-slide-chip-builds" title="${count} build step${count === 1 ? '' : 's'}">${'<i></i>'.repeat(count)}</span>`;
+    return `<span class="yanta-slide-chip-builds" title="${escapeAttr(t('slides.buildSteps', { count }))}">${'<i></i>'.repeat(count)}</span>`;
   };
 
   return `
@@ -1364,7 +1364,7 @@ function openSlidesOverflowMenu(anchor, ctx, { getApi, refresh, hasSlides } = {}
 
   const requireSlides = (fn) => () => {
     if (!hasSlides) {
-      toast('Create at least one slide first', 'error');
+      toast(t('slides.createAtLeastOne'), 'error');
       return;
     }
     fn();
@@ -1372,12 +1372,12 @@ function openSlidesOverflowMenu(anchor, ctx, { getApi, refresh, hasSlides } = {}
 
   const items = [
     {
-      label: 'Draw a slide frame',
+      label: t('slides.drawFrame'),
       icon: 'scan',
       action: () => {
         const liveApi = api();
         if (!liveApi) {
-          toast('Drawing is still loading — try again in a moment', 'error');
+          toast(t('slides.stillLoading'), 'error');
           return;
         }
         startSlideDrawMode({
@@ -1390,7 +1390,7 @@ function openSlidesOverflowMenu(anchor, ctx, { getApi, refresh, hasSlides } = {}
       },
     },
     {
-      label: 'Slide from current view',
+      label: t('slides.fromCurrentView'),
       icon: 'focus',
       action: () => createSlideFromCurrentView({
         noteId: ctx.noteId,
@@ -1401,7 +1401,7 @@ function openSlidesOverflowMenu(anchor, ctx, { getApi, refresh, hasSlides } = {}
       }),
     },
     {
-      label: 'Slide from selection',
+      label: t('slides.fromSelection'),
       icon: 'scan-check',
       action: () => createSlideFromSelection({
         noteId: ctx.noteId,
@@ -1417,7 +1417,7 @@ function openSlidesOverflowMenu(anchor, ctx, { getApi, refresh, hasSlides } = {}
       action: () => openConnectForDrawing(ctx),
     },
     {
-      label: 'Export as PDF',
+      label: t('slides.exportPdf'),
       icon: 'file-down',
       action: requireSlides(() => exportDrawingSlidesToPdf(ctx.noteId, ctx.drawingId)),
     },
@@ -1475,7 +1475,7 @@ function wireSlidesBar(root, ctx, {
   q('draw-frame')?.addEventListener('click', () => {
     const liveApi = typeof getApi === 'function' ? getApi() : ctx.api;
     if (!liveApi) {
-      toast('Drawing is still loading — try again in a moment', 'error');
+      toast(t('slides.stillLoading'), 'error');
       return;
     }
     startSlideDrawMode({
@@ -1794,14 +1794,14 @@ function createSlideFromExcalidrawFrame({
   onDone,
 } = {}) {
   if (!api || !frame) {
-    toast('Drawing is not ready yet', 'error');
+    toast(t('slides.drawingNotReady'), 'error');
     return null;
   }
 
   const bounds = slideBoundsFromFrameElement(frame);
 
   if (bounds.width < 40 || bounds.height < 40) {
-    toast('Frame is too small for a slide', 'error');
+    toast(t('slides.frameTooSmall'), 'error');
     return null;
   }
 
@@ -1812,7 +1812,7 @@ function createSlideFromExcalidrawFrame({
   });
 
   if (slide) {
-    toast(`Created ${slide.title}`, 'success');
+    toast(t('slides.created', { title: slide.title }), 'success');
     onDone?.(slide);
   }
 
@@ -2037,7 +2037,7 @@ async function hydrateSlideThumbnails(root, drawing, slides = []) {
 
       const img = document.createElement('img');
       img.src = svgStringToDataUrl(svg);
-      img.alt = slide.title || 'Slide thumbnail';
+      img.alt = slide.title || t('slides.thumbnailAlt');
       img.draggable = false;
 
       host.append(img);
@@ -2488,7 +2488,7 @@ function makeSlidesContextButton({ icon, label, onClick }) {
       await onClick?.();
     } catch (err) {
       console.error('[YANTA Slides] context action failed', err);
-      toast('Slide action failed', 'error');
+      toast(t('slides.actionFailed'), 'error');
     }
   }, true);
 
@@ -2585,7 +2585,7 @@ function injectSlidesItemsIntoNativeContextMenu(container) {
   if (ctx.frame) {
     section.append(makeSlidesContextButton({
       icon: 'presentation',
-      label: 'YANTA: Make slide from frame',
+      label: t('slides.ctx.fromFrame'),
       onClick: () => {
         createSlideFromExcalidrawFrame({
           noteId: ctx.noteId,
@@ -2601,7 +2601,7 @@ function injectSlidesItemsIntoNativeContextMenu(container) {
   if (hasSelection) {
     section.append(makeSlidesContextButton({
       icon: 'scan-check',
-      label: 'YANTA: Slide from selection',
+      label: t('slides.ctx.fromSelection'),
       onClick: () => {
         createSlideFromSelection({
           noteId: ctx.noteId,
@@ -2622,8 +2622,8 @@ function injectSlidesItemsIntoNativeContextMenu(container) {
     section.append(makeSlidesContextButton({
       icon: 'sparkles',
       label: targetSlide
-        ? `YANTA: Animate on “${targetSlide.title}”`
-        : 'YANTA: Animate (creates a slide)',
+        ? t('slides.ctx.animateOn', { title: targetSlide.title })
+        : t('slides.ctx.animateNew'),
       onClick: () => {
         const slide = addSelectionAsBuildStep({
           noteId: ctx.noteId,
@@ -2884,7 +2884,7 @@ function createSlideFromSelection({
   onDone,
 } = {}) {
   if (!api) {
-    toast('Drawing is not ready yet', 'error');
+    toast(t('slides.drawingNotReady'), 'error');
     return null;
   }
 
@@ -2892,7 +2892,7 @@ function createSlideFromSelection({
   const selected = normalizeSelectedIds(appState.selectedElementIds);
 
   if (!selected.size) {
-    toast('Select objects first', 'error');
+    toast(t('slides.selectObjectsFirst'), 'error');
     return null;
   }
 
@@ -2908,7 +2908,7 @@ function createSlideFromSelection({
     .map(elementBounds);
 
   if (!boxes.length) {
-    toast('No selectable objects found', 'error');
+    toast(t('slides.noSelectable'), 'error');
     return null;
   }
 
@@ -2930,7 +2930,7 @@ function createSlideFromSelection({
   });
 
   if (slide) {
-    toast(`Created ${slide.title}`, 'success');
+    toast(t('slides.created', { title: slide.title }), 'success');
     onDone?.(slide);
   }
 
@@ -2945,7 +2945,7 @@ function createSlideFromCurrentView({
   onDone,
 } = {}) {
   if (!api || !container) {
-    toast('Drawing is not ready yet', 'error');
+    toast(t('slides.drawingNotReady'), 'error');
     return null;
   }
 
@@ -2954,7 +2954,7 @@ function createSlideFromCurrentView({
     container.getBoundingClientRect?.();
 
   if (!rect || rect.width < 20 || rect.height < 20) {
-    toast('Could not read current view', 'error');
+    toast(t('slides.readViewFailed'), 'error');
     return null;
   }
 
@@ -2985,7 +2985,7 @@ function createSlideFromCurrentView({
   });
 
   if (slide) {
-    toast(`Created ${slide.title}`, 'success');
+    toast(t('slides.created', { title: slide.title }), 'success');
     onDone?.(slide);
   }
 
@@ -3007,11 +3007,11 @@ function openSlideMiniMenu(x, y, {
   menu.style.zIndex = '540';
 
   menu.innerHTML = `
-    <button data-action="rename">${lucide('pencil', 14)} Rename</button>
-    <button data-action="notes">${lucide('notebook-text', 14)} Speaker notes</button>
-    <button data-action="animation">${lucide('sparkles', 14)} Animation…</button>
+    <button data-action="rename">${lucide('pencil', 14)} ${escapeHtml(t('draw.rename'))}</button>
+    <button data-action="notes">${lucide('notebook-text', 14)} ${escapeHtml(t('slides.speakerNotes'))}</button>
+    <button data-action="animation">${lucide('sparkles', 14)} ${escapeHtml(t('slides.animationMenu'))}</button>
     <hr>
-    <button class="danger" data-action="delete">${lucide('trash', 14)} Delete slide</button>
+    <button class="danger" data-action="delete">${lucide('trash', 14)} ${escapeHtml(t('slides.delete'))}</button>
   `;
 
   document.body.append(menu);
@@ -3035,11 +3035,11 @@ function openSlideMiniMenu(x, y, {
     close();
 
     const title = await yantaPrompt({
-      title: 'Rename slide',
-      label: 'Slide title',
+      title: t('slides.renameTitle'),
+      label: t('slides.titleLabel'),
       initial: slide.title,
-      placeholder: 'Slide title',
-      confirmLabel: 'Rename',
+      placeholder: t('slides.titleLabel'),
+      confirmLabel: t('draw.rename'),
       icon: 'presentation',
     });
 
@@ -3056,12 +3056,12 @@ function openSlideMiniMenu(x, y, {
     close();
 
     const notes = await yantaPrompt({
-      title: 'Speaker notes',
-      label: 'Notes',
+      title: t('slides.speakerNotes'),
+      label: t('slides.notesLabel'),
       initial: slide.notes?.markdown || '',
-      placeholder: 'Presenter notes for this slide…',
+      placeholder: t('slides.notesPlaceholder'),
       multiline: true,
-      confirmLabel: 'Save notes',
+      confirmLabel: t('slides.saveNotes'),
       icon: 'notebook-text',
       select: false,
     });
@@ -3087,9 +3087,9 @@ function openSlideMiniMenu(x, y, {
     close();
 
     const ok = await yantaConfirm({
-      title: 'Delete slide?',
-      message: `Delete "${slide.title}"?\n\nThe slide frame on the board will also be deleted.`,
-      confirmLabel: 'Delete slide',
+      title: t('slides.deleteTitle'),
+      message: t('slides.deleteMessage', { title: slide.title }),
+      confirmLabel: t('slides.delete'),
       danger: true,
       icon: 'trash',
     });
@@ -3115,13 +3115,13 @@ function startSlideDrawMode({
   injectCss();
 
   if (!container || !api) {
-    toast('Drawing is not ready yet', 'error');
+    toast(t('slides.drawingNotReady'), 'error');
     return;
   }
 
   const overlay = document.createElement('div');
   overlay.className = 'yanta-slide-draw-overlay';
-  overlay.title = 'Drag to create a slide';
+  overlay.title = t('slides.dragToCreate');
   overlay.tabIndex = 0;
 
   const rect = document.createElement('div');
@@ -3198,7 +3198,7 @@ function startSlideDrawMode({
 
     if (start.scene?.invalid || latest.scene?.invalid) {
       cleanup();
-      toast('Could not read drawing coordinates', 'error');
+      toast(t('slides.readCoordsFailed'), 'error');
 
       console.warn('[YANTA Slides] invalid slide drag coordinates', {
         start,
@@ -3224,7 +3224,7 @@ function startSlideDrawMode({
     cleanup();
 
     if (bounds.width < 80 || bounds.height < 60) {
-      toast('Slide is too small', 'error');
+      toast(t('slides.tooSmall'), 'error');
       return;
     }
 
@@ -3234,7 +3234,7 @@ function startSlideDrawMode({
     });
 
     if (slide) {
-      toast(`Created ${slide.title}`, 'success');
+      toast(t('slides.created', { title: slide.title }), 'success');
       onDone?.(slide);
     }
   });
@@ -3312,7 +3312,7 @@ function ensureSlideshowImmersiveHint() {
 
   const hint = document.createElement('div');
   hint.className = 'yanta-slideshow-immersive-hint';
-  hint.textContent = 'Press Esc for controls';
+  hint.textContent = t('slides.escHint');
 
   document.body.append(hint);
 
@@ -3377,16 +3377,16 @@ export function startSlideshow({
   toolbar.className = 'yanta-slideshow-toolbar';
 
   toolbar.innerHTML = `
-    <button class="icon-btn" data-slide-prev title="Previous (←)">${lucide('chevron-left', 18)}</button>
+    <button class="icon-btn" data-slide-prev title="${escapeAttr(t('slides.show.prev'))}">${lucide('chevron-left', 18)}</button>
     <span class="yanta-slideshow-count" data-slide-count></span>
-    <button class="icon-btn" data-slide-next title="Next (→)">${lucide('chevron-right', 18)}</button>
-    <button class="icon-btn" data-slide-laser title="Laser pointer (L)">${lucide('mouse-pointer-2', 17)}</button>
-    <button class="icon-btn" data-slide-notes title="Speaker notes (N)">${lucide('notebook-text', 17)}</button>
+    <button class="icon-btn" data-slide-next title="${escapeAttr(t('slides.show.next'))}">${lucide('chevron-right', 18)}</button>
+    <button class="icon-btn" data-slide-laser title="${escapeAttr(t('slides.show.laser'))}">${lucide('mouse-pointer-2', 17)}</button>
+    <button class="icon-btn" data-slide-notes title="${escapeAttr(t('slides.show.notes'))}">${lucide('notebook-text', 17)}</button>
     <button class="icon-btn" data-slide-edit title="${escapeAttr(t('present.edit.button'))}">${lucide('pencil', 17)}</button>
     <button class="icon-btn" data-slide-connect title="${escapeAttr(t('present.connect.menu'))}">${lucide('cast', 17)}</button>
     <button class="icon-btn" data-slide-presenter hidden title="${escapeAttr(t('present.remote.presenterView'))}">${lucide('tablet-smartphone', 17)}</button>
-    <button class="icon-btn" data-slide-immersive title="Browser fullscreen">${lucide('maximize', 17)}</button>
-    <button class="icon-btn" data-slide-exit title="Exit slideshow (Esc)">${lucide('x', 17)}</button>
+    <button class="icon-btn" data-slide-immersive title="${escapeAttr(t('slides.show.fullscreen'))}">${lucide('maximize', 17)}</button>
+    <button class="icon-btn" data-slide-exit title="${escapeAttr(t('slides.show.exit'))}">${lucide('x', 17)}</button>
   `;
 
   const laserLayer = document.createElement('div');
@@ -3861,10 +3861,10 @@ function toggleNotes() {
   panel.innerHTML = `
     <div class="yanta-slideshow-notes-head">
       ${lucide('notebook-text', 15)}
-      <strong data-notes-title>Speaker notes</strong>
-      <button class="icon-btn" data-close-notes>${lucide('x', 14)}</button>
+      <strong data-notes-title>${escapeHtml(t('slides.speakerNotes'))}</strong>
+      <button class="icon-btn" data-close-notes title="${escapeAttr(t('common.close'))}">${lucide('x', 14)}</button>
     </div>
-    <textarea data-notes-input placeholder="Presenter notes for this slide…"></textarea>
+    <textarea data-notes-input placeholder="${escapeAttr(t('slides.notesPlaceholder'))}"></textarea>
   `;
 
   panel.querySelector('[data-close-notes]')?.addEventListener('click', toggleNotes);
@@ -3904,7 +3904,7 @@ function updateNotesPanel() {
   const title = slideshow.notesEl.querySelector('[data-notes-title]');
   const input = slideshow.notesEl.querySelector('[data-notes-input]');
 
-  if (title) title.textContent = slide?.title || 'Speaker notes';
+  if (title) title.textContent = slide?.title || t('slides.speakerNotes');
 
   if (input && document.activeElement !== input) {
     input.value = slide?.notes?.markdown || '';
@@ -4247,7 +4247,7 @@ function hydrateSlidesEmbeds(root = document) {
     const ref = drawingRef(state.currentNoteId, drawingId);
 
     if (!ref) {
-      node.innerHTML = `<div class="tree-empty">Slideshow unavailable</div>`;
+      node.innerHTML = `<div class="tree-empty">${escapeHtml(t('slides.unavailable'))}</div>`;
       return;
     }
 
@@ -4256,9 +4256,9 @@ function hydrateSlidesEmbeds(root = document) {
     node.innerHTML = `
       <div class="yanta-slides-embed-head">
         ${lucide('presentation', 18)}
-        <strong>${escapeHtml(ref.drawing.title || 'Slideshow')}</strong>
-        <span style="color:var(--text-faint);font-size:12px">${slides.length} slide${slides.length === 1 ? '' : 's'}</span>
-        <button class="btn primary" data-start>${lucide('play', 13)} Start</button>
+        <strong>${escapeHtml(ref.drawing.title || t('slides.slideshow'))}</strong>
+        <span style="color:var(--text-faint);font-size:12px">${escapeHtml(t('present.pick.slides', { count: slides.length }))}</span>
+        <button class="btn primary" data-start>${lucide('play', 13)} ${escapeHtml(t('slides.start'))}</button>
       </div>
     `;
 

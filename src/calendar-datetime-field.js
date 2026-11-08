@@ -12,6 +12,7 @@
 
 import { el, lucide } from './core.js';
 import { getCalendarPreferences } from './calendar-preferences.js';
+import { t } from './i18n/index.js';
 
 import {
   calendarEditorDateFormat,
@@ -74,6 +75,12 @@ export function createCalendarTimeSegments({
   onInput = null,
   onChange = null,
 } = {}) {
+  // "Start hours" for the editor field, plain "Hours" in the picker.
+  const label = String(labelPrefix || '').trim();
+  const aria = (key) => (label
+    ? t(`calendar.field.${key}Of`, { label })
+    : t(`calendar.field.${key}`));
+
   const hourEl = el('input', {
     class: 'yanta-dtf-seg',
     type: 'text',
@@ -82,7 +89,7 @@ export function createCalendarTimeSegments({
     spellcheck: 'false',
     maxlength: '2',
     placeholder: hour12 ? 'hh' : 'HH',
-    'aria-label': `${labelPrefix}Hours`.trim(),
+    'aria-label': aria('hours'),
   });
 
   const minuteEl = el('input', {
@@ -93,14 +100,14 @@ export function createCalendarTimeSegments({
     spellcheck: 'false',
     maxlength: '2',
     placeholder: 'mm',
-    'aria-label': `${labelPrefix}Minutes`.trim(),
+    'aria-label': aria('minutes'),
   });
 
   const meridiemEl = hour12
     ? el('button', {
         type: 'button',
         class: 'yanta-dtf-meridiem',
-        'aria-label': `${labelPrefix}AM or PM`.trim(),
+        'aria-label': aria('meridiem'),
       }, 'AM')
     : null;
 
@@ -109,7 +116,7 @@ export function createCalendarTimeSegments({
     {
       class: 'yanta-dtf-time',
       role: 'group',
-      'aria-label': `${labelPrefix}Time`.trim(),
+      'aria-label': aria('time'),
     },
     hourEl,
     el('span', { class: 'yanta-dtf-colon', 'aria-hidden': 'true' }, ':'),
@@ -374,7 +381,7 @@ export function attachCalendarDateTimeField(host, {
   label = '',
   value = '',
   allDay = false,
-  pickerTitle = 'Pick date/time',
+  pickerTitle = t('calendar.field.pick'),
   onInput = null,
   onChange = null,
   onPicker = null,
@@ -395,7 +402,7 @@ export function attachCalendarDateTimeField(host, {
     autocomplete: 'off',
     spellcheck: 'false',
     placeholder: calendarEditorDateFormat(prefs),
-    'aria-label': `${label} date`.trim(),
+    'aria-label': label ? t('calendar.field.dateOf', { label }) : t('calendar.field.date'),
   });
 
   const time = createCalendarTimeSegments({

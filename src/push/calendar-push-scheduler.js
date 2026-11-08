@@ -13,6 +13,7 @@
 // ============================================================
 
 import { calendarNotificationsEnabled } from '../notification-preferences.js';
+import { t } from '../i18n/index.js';
 import { isAndroidApp } from '../install/install-environment.js';
 
 import {
@@ -76,7 +77,7 @@ async function collectCalendarPushItems() {
       const payload = {
         kind: 'calendar-reminder',
         id: rem.key,
-        title: rem.ev.title || 'Event reminder',
+        title: rem.ev.title || t('push.eventReminder'),
         body: reminderBody(rem.ev, rem.minutesBefore),
         url: reminderUrl(),
       };

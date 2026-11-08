@@ -41,6 +41,7 @@ import {
 } from '../spaces/calendar-registry.js';
 
 import { formatDateTime } from '../i18n/format.js';
+import { t } from '../i18n/index.js';
 
 import {
   publishSpaceRoster,
@@ -131,12 +132,12 @@ function targetThing() {
 
 function targetTitle() {
   if (targetIsCalendar()) {
-    return state.calendarCategories.get(shareTarget.id)?.name || 'Untitled calendar';
+    return state.calendarCategories.get(shareTarget.id)?.name || t('publicShare.untitledCalendar');
   }
 
   return targetIsFolder()
-    ? state.folders.get(shareTarget.id)?.name || 'Untitled folder'
-    : state.notes.get(shareTarget.id)?.title || 'Untitled';
+    ? state.folders.get(shareTarget.id)?.name || t('publicShare.untitledFolder')
+    : state.notes.get(shareTarget.id)?.title || t('note.untitled');
 }
 
 function targetSession() {
@@ -714,15 +715,15 @@ export function closeUnifiedShareModal({
 
 function statusText(status) {
   const map = {
-    active: 'Shared · active',
-    pending: 'Shared · changes pending',
-    publishing: 'Shared · publishing…',
-    'up-to-date': 'Shared · up to date',
-    failed: 'Shared · publish failed',
-    revoked: 'Sharing stopped',
+    active: t('publicShare.status.active'),
+    pending: t('publicShare.status.pending'),
+    publishing: t('publicShare.status.publishing'),
+    'up-to-date': t('publicShare.status.upToDate'),
+    failed: t('publicShare.status.failed'),
+    revoked: t('publicShare.status.revoked'),
   };
 
-  return map[status] || 'Not shared yet';
+  return map[status] || t('publicShare.status.none');
 }
 
 function statusClass(status) {
@@ -742,8 +743,8 @@ async function renderPublicTab(noteId) {
       body0.innerHTML = `
         <div class="yanta-public-share-box">
           <div class="yanta-public-share-info">
-            <strong>Shared with you</strong><br>
-            This note was shared with you. Only the person who shared it can publish it as a public page.
+            <strong>${escapeHtml(t('sharing.sharedWithYou'))}</strong><br>
+            ${escapeHtml(t('publicShare.public.recipientText'))}
           </div>
         </div>
       `;
@@ -781,9 +782,8 @@ async function renderPublicTab(noteId) {
   body.innerHTML = `
     <div class="yanta-public-share-box">
       <div class="yanta-public-share-info">
-        <strong>Public link</strong><br>
-        Anyone with the full link can read the latest published version.
-        The private key is after <code>#k=</code> and is not sent to the server.
+        <strong>${escapeHtml(t('publicShare.tab.public'))}</strong><br>
+        ${t('publicShare.public.info', { code: '<code>#k=</code>' })}
       </div>
 
       ${
@@ -793,7 +793,7 @@ async function renderPublicTab(noteId) {
               ${escapeHtml(
                 hasPrivateKey
                   ? statusText(share.status)
-                  : 'Shared · private link key not available on this device'
+                  : t('publicShare.status.noKey')
               )}
               ${
                 share.lastError
@@ -807,7 +807,7 @@ async function renderPublicTab(noteId) {
                 ? `
                   <div class="yanta-public-share-link-row">
                     <input class="text-input" data-public-share-link readonly value="${escapeHtml(url)}">
-                    <button class="btn primary" data-copy-public-share>${lucide('copy', 14)} Copy</button>
+                    <button class="btn primary" data-copy-public-share>${lucide('copy', 14)} ${escapeHtml(t('common.copy'))}</button>
                   </div>
 
                   <div class="yanta-public-share-qr" data-public-share-qr></div>
@@ -816,7 +816,7 @@ async function renderPublicTab(noteId) {
                     Array.isArray(share.missingAssets) && share.missingAssets.length
                       ? `
                         <div class="yanta-public-share-status warn">
-                          ${share.missingAssets.length} asset${share.missingAssets.length === 1 ? '' : 's'} missing and not included.
+                          ${escapeHtml(t('publicShare.public.missingAssets', { count: share.missingAssets.length }))}
                         </div>
                       `
                       : ''
@@ -825,35 +825,33 @@ async function renderPublicTab(noteId) {
                   <div class="compress-actions">
                     <button class="btn" data-publish-public-share>
                       ${lucide('refresh-cw', 14)}
-                      ${share.status === 'failed' ? 'Retry publish' : 'Publish pending changes'}
+                      ${escapeHtml(share.status === 'failed' ? t('publicShare.public.retry') : t('publicShare.public.publishPending'))}
                     </button>
                     <span class="grow"></span>
                     <button class="btn" data-open-public-shares-manager>
                       ${lucide('list', 14)}
-                      Manage public links
+                      ${escapeHtml(t('publicShare.public.manage'))}
                     </button>
                     <button class="btn danger" data-stop-public-share>
                       ${lucide('globe-off', 14)}
-                      Stop sharing
+                      ${escapeHtml(t('publicShare.public.stop'))}
                     </button>
                   </div>
                 `
                 : `
                   <div class="yanta-public-share-info">
-                    This note already has an active public link, created on another device.
-                    This device does not have the private link key yet, so it cannot copy or republish
-                    the exact link. You can still stop sharing immediately.
+                    ${escapeHtml(t('publicShare.public.otherDevice'))}
                   </div>
 
                   <div class="compress-actions">
                     <button class="btn" data-open-public-shares-manager>
                       ${lucide('list', 14)}
-                      Manage public links
+                      ${escapeHtml(t('publicShare.public.manage'))}
                     </button>
                     <span class="grow"></span>
                     <button class="btn danger" data-stop-public-share>
                       ${lucide('globe-off', 14)}
-                      Stop sharing
+                      ${escapeHtml(t('publicShare.public.stop'))}
                     </button>
                   </div>
                 `
@@ -861,32 +859,32 @@ async function renderPublicTab(noteId) {
 
             <div class="yanta-public-share-danger">
               <small style="color:var(--text-faint)">
-                Stopping sharing prevents future access through this link. It cannot remove copies already downloaded.
+                ${escapeHtml(t('publicShare.public.stopHint'))}
               </small>
             </div>
           `
           : `
             <label>
-              Expires
+              ${escapeHtml(t('publicShare.public.expires'))}
               <select class="text-input" data-public-share-expiry>
-                <option value="2592000000">30 days</option>
-                <option value="86400000">1 day</option>
-                <option value="0">Until revoked</option>
+                <option value="2592000000">${escapeHtml(t('publicShare.public.expiry30d'))}</option>
+                <option value="86400000">${escapeHtml(t('publicShare.public.expiry1d'))}</option>
+                <option value="0">${escapeHtml(t('publicShare.public.expiryNever'))}</option>
               </select>
             </label>
 
             <div class="compress-actions sharing-options">
               <button class="btn primary" data-create-public-share>
                 ${lucide('link', 14)}
-                Create public link
+                ${escapeHtml(t('publicShare.public.create'))}
               </button>
               <button class="btn" data-open-public-shares-manager>
                 ${lucide('list', 14)}
-                Manage public links
+                ${escapeHtml(t('publicShare.public.manage'))}
               </button>
               <button class="btn" data-open-cloud-setup>
                 ${lucide('cloud', 14)}
-                Set up YANTA Cloud
+                ${escapeHtml(t('publicShare.public.setupCloud'))}
               </button>
             </div>
           `
@@ -899,7 +897,7 @@ async function renderPublicTab(noteId) {
           ${brandingShown ? 'checked' : ''}
           ${brandingIsPlus ? '' : 'disabled'}
         >
-        <span>Show “Made with YANTA · Private by design” on the public page</span>
+        <span>${escapeHtml(t('publicShare.public.branding'))}</span>
         <span class="grow"></span>
         ${
           brandingIsPlus
@@ -909,7 +907,7 @@ async function renderPublicTab(noteId) {
                 type="button"
                 class="yanta-public-share-branding-plus"
                 data-branding-upgrade
-                title="Hiding the badge is part of YANTA Plus"
+                title="${escapeHtml(t('publicShare.public.brandingPlus'))}"
               >
                 ${lucide('sparkles', 11)} Plus
               </button>
@@ -928,7 +926,7 @@ async function renderPublicTab(noteId) {
 
   body.querySelector('[data-copy-public-share]')?.addEventListener('click', async (e) => {
     if (!url) {
-      toast('Private share key is not available on this device', 'error');
+      toast(t('publicShare.public.noKey'), 'error');
       return;
     }
 
@@ -946,7 +944,7 @@ async function renderPublicTab(noteId) {
 
       btn.disabled = true;
       btn.classList.add('success');
-      btn.innerHTML = `${lucide('check', 14)} Copied`;
+      btn.innerHTML = `${lucide('check', 14)} ${escapeHtml(t('publicShare.copied'))}`;
 
       window.setTimeout(() => {
         btn.disabled = false;
@@ -955,7 +953,7 @@ async function renderPublicTab(noteId) {
         btn.style.minWidth = previousMinWidth;
       }, 1300);
     } catch {
-      toast('Copy failed', 'error');
+      toast(t('publicShare.copyFailed'), 'error');
       btn.style.minWidth = previousMinWidth;
     }
   });
@@ -977,10 +975,10 @@ async function renderPublicTab(noteId) {
       });
 
       await renderPublicTab(noteId);
-      toast('Public link created', 'success');
+      toast(t('publicShare.public.created'), 'success');
     } catch (err) {
       console.error(err);
-      toast(err?.message || 'Could not create public link', 'error');
+      toast(err?.message || t('publicShare.public.createFailed'), 'error');
       await renderPublicTab(noteId);
     }
   });
@@ -992,25 +990,20 @@ async function renderPublicTab(noteId) {
       });
 
       await renderPublicTab(noteId);
-      toast('Public share published', 'success');
+      toast(t('publicShare.public.published'), 'success');
     } catch (err) {
       console.error(err);
-      toast(err?.message || 'Publish failed', 'error');
+      toast(err?.message || t('publicShare.public.publishFailed'), 'error');
       await renderPublicTab(noteId);
     }
   });
 
   body.querySelector('[data-stop-public-share]')?.addEventListener('click', async () => {
     const ok = await yantaConfirm({
-      title: 'Stop public sharing?',
-      message: [
-        'Stop public sharing for this note?',
-        '',
-        'Future access through this public link will be blocked.',
-        'Copies already downloaded cannot be removed.',
-      ].join('\n'),
-      confirmLabel: 'Stop sharing',
-      cancelLabel: 'Cancel',
+      title: t('publicShare.public.stopTitle'),
+      message: t('publicShare.public.stopMessage'),
+      confirmLabel: t('publicShare.public.stop'),
+      cancelLabel: t('common.cancel'),
       danger: true,
       icon: 'globe-off',
     });
@@ -1022,7 +1015,7 @@ async function renderPublicTab(noteId) {
       await renderPublicTab(noteId);
     } catch (err) {
       console.error(err);
-      toast(err?.message || 'Could not stop sharing', 'error');
+      toast(err?.message || t('publicShare.public.stopFailed'), 'error');
     }
   });
 
@@ -1033,7 +1026,7 @@ async function renderPublicTab(noteId) {
       await store.settings.set(PUBLIC_SHARE_BRANDING_SETTING, show);
     } catch (err) {
       console.error(err);
-      toast('Could not save badge preference', 'error');
+      toast(t('publicShare.public.badgeSaveFailed'), 'error');
       return;
     }
 
@@ -1055,8 +1048,8 @@ async function renderPublicTab(noteId) {
 
     toast(
       republished
-        ? `Badge ${show ? 'enabled' : 'hidden'} · updating ${republished} public page${republished === 1 ? '' : 's'}`
-        : `Badge ${show ? 'enabled' : 'hidden'}`,
+        ? t(show ? 'publicShare.public.badgeShownUpdating' : 'publicShare.public.badgeHiddenUpdating', { count: republished })
+        : t(show ? 'publicShare.public.badgeShown' : 'publicShare.public.badgeHidden'),
       'success'
     );
   });
@@ -1068,7 +1061,7 @@ async function renderPublicTab(noteId) {
       await openYantaPlusUpgrade();
     } catch (err) {
       console.error(err);
-      toast(err?.message || 'Could not open upgrade', 'error');
+      toast(err?.message || t('publicShare.public.upgradeFailed'), 'error');
     }
   });
 
@@ -1089,14 +1082,14 @@ function wireCopyButton(btn, value) {
       const originalHtml = btn.dataset.originalHtml || btn.innerHTML;
       btn.dataset.originalHtml = originalHtml;
       btn.classList.add('success');
-      btn.innerHTML = `${lucide('check', 14)} Copied`;
+      btn.innerHTML = `${lucide('check', 14)} ${escapeHtml(t('publicShare.copied'))}`;
 
       window.setTimeout(() => {
         btn.classList.remove('success');
         btn.innerHTML = originalHtml;
       }, 1300);
     } catch {
-      toast('Copy failed', 'error');
+      toast(t('publicShare.copyFailed'), 'error');
     }
   });
 }
@@ -1114,29 +1107,29 @@ async function renderLiveTab() {
   // Recipient view: mounted from someone else's space.
   if (session && session.role !== 'owner') {
     const roleLabel = session.role === 'write'
-      ? `You can read and edit this shared ${thing}.`
-      : `You have read-only access to this shared ${thing}.`;
+      ? t(`publicShare.live.recipient.write.${thing}`)
+      : t(`publicShare.live.recipient.read.${thing}`);
 
     body.innerHTML = `
       <div class="yanta-public-share-box">
         <div class="yanta-public-share-info">
-          <strong>Shared with you</strong><br>
-          ${roleLabel} Changes sync even while the owner is offline.
+          <strong>${escapeHtml(t('sharing.sharedWithYou'))}</strong><br>
+          ${escapeHtml(roleLabel)} ${escapeHtml(t('publicShare.live.recipientSync'))}
         </div>
 
         <div class="compress-actions">
           <span class="grow"></span>
-          <button class="btn danger" data-leave-space>${lucide('log-out', 14)} Leave share</button>
+          <button class="btn danger" data-leave-space>${lucide('log-out', 14)} ${escapeHtml(t('publicShare.live.leave'))}</button>
         </div>
       </div>
     `;
 
     body.querySelector('[data-leave-space]')?.addEventListener('click', async () => {
       const ok = await yantaConfirm({
-        title: 'Leave this share?',
-        message: `The shared ${thing} will be removed from this device. You can rejoin anytime with the link.`,
-        confirmLabel: 'Leave share',
-        cancelLabel: 'Cancel',
+        title: t('publicShare.live.leaveTitle'),
+        message: t(`publicShare.live.leaveMessage.${thing}`),
+        confirmLabel: t('publicShare.live.leave'),
+        cancelLabel: t('common.cancel'),
         danger: true,
         icon: 'log-out',
       });
@@ -1145,7 +1138,7 @@ async function renderLiveTab() {
 
       await leaveSpace(session.spaceId);
       closeUnifiedShareModal();
-      toast('Left the share');
+      toast(t('publicShare.live.left'));
     });
 
     return;
@@ -1166,7 +1159,7 @@ async function renderLiveTab() {
     body.innerHTML = `
       <div class="yanta-public-share-box">
         <div class="yanta-public-share-info">
-          <strong>Already covered by a share</strong><br>
+          <strong>${escapeHtml(t('publicShare.live.covered'))}</strong><br>
           ${escapeHtml(conflict)}
         </div>
       </div>
@@ -1180,25 +1173,25 @@ async function renderLiveTab() {
     body.innerHTML = `
       <div class="yanta-public-share-box">
         <div class="yanta-public-share-info">
-          <strong>Live share</strong><br>
-          ${
+          <strong>${escapeHtml(t('publicShare.live.title'))}</strong><br>
+          ${escapeHtml(
             isCalendar
-              ? 'Share this calendar live — invited people see events as they change, and editors can add and update events. Notes linked to events travel with them.'
+              ? t('publicShare.live.introCalendar')
               : isFolder
-                ? 'Share this folder as a live workspace — editors can add, change and remove notes inside it.'
-                : 'Invite people to read or edit this note in real time — drawings included.'
-          }
-          Everything is end-to-end encrypted — YANTA Cloud only ever stores ciphertext — and the share keeps working when you go offline.
+                ? t('publicShare.live.introFolder')
+                : t('publicShare.live.introNote')
+          )}
+          ${escapeHtml(t('publicShare.live.introE2ee'))}
         </div>
 
         <div class="compress-actions sharing-options">
           <button class="btn primary" data-start-space-share>
             ${lucide('users', 14)}
-            Start live share
+            ${escapeHtml(t('publicShare.live.start'))}
           </button>
           <button class="btn" data-open-cloud-setup>
             ${lucide('cloud', 14)}
-            Set up YANTA Cloud
+            ${escapeHtml(t('publicShare.public.setupCloud'))}
           </button>
         </div>
 
@@ -1206,11 +1199,11 @@ async function renderLiveTab() {
           legacy
             ? `
               <div class="yanta-public-share-status warn">
-                A legacy live share is still active for this note. It only works while this device is online.
+                ${escapeHtml(t('publicShare.live.legacyActive'))}
               </div>
               <div class="compress-actions">
                 <span class="grow"></span>
-                <button class="btn danger" data-stop-legacy-share>${lucide('x', 14)} Stop legacy share</button>
+                <button class="btn danger" data-stop-legacy-share>${lucide('x', 14)} ${escapeHtml(t('publicShare.live.stopLegacy'))}</button>
               </div>
             `
             : ''
@@ -1225,15 +1218,15 @@ async function renderLiveTab() {
       try {
         await createTargetSpace();
         await renderLiveTab();
-        toast('Live share started', 'success');
+        toast(t('publicShare.live.started'), 'success');
       } catch (err) {
         console.error(err);
         btn.disabled = false;
 
         if (err?.status === 401) {
-          toast('Sign in to YANTA Cloud to start a live share', 'error');
+          toast(t('publicShare.live.signIn'), 'error');
         } else {
-          toast(err?.message || 'Could not start live share', 'error');
+          toast(err?.message || t('publicShare.live.startFailed'), 'error');
         }
       }
     });
@@ -1257,27 +1250,27 @@ const peers = session.peers || 0;
 body.innerHTML = `
   <div class="yanta-public-share-box">
     <div class="yanta-public-share-status good">
-      ${
+      ${escapeHtml(
         isFolder
-          ? 'Workspace share active · changes sync for everyone with access'
+          ? t('publicShare.live.activeFolder')
           : isCalendar
-            ? 'Calendar share active · events sync live for everyone with access'
-            : `Live share active · ${peers} ${peers === 1 ? 'person' : 'people'} connected live`
-      }
+            ? t('publicShare.live.activeCalendar')
+            : t('publicShare.live.activePeers', { count: peers })
+      )}
     </div>
 
     <div class="yanta-public-share-info yanta-share-e2ee-note">
       ${lucide('shield-check', 14)}
-      End-to-end encrypted: keys travel only in the link itself or over encrypted chat — the cloud can never read this ${thing}.
+      ${escapeHtml(t(`publicShare.live.e2ee.${thing}`))}
     </div>
 
     <div class="yanta-share-link-section">
       <div class="yanta-public-share-info yanta-share-link-info">
         <div class="yanta-share-link-title">
           ${lucide('eye', 15)}
-          <strong>Read link</strong>
+          <strong>${escapeHtml(t('publicShare.live.readLink'))}</strong>
         </div>
-        <span>Anyone with it can view, near-live, but never edit.</span>
+        <span>${escapeHtml(t('publicShare.live.readLinkHint'))}</span>
       </div>
 
       <div class="yanta-public-share-link-row">
@@ -1288,7 +1281,7 @@ body.innerHTML = `
           data-space-qr-read
           type="button"
           aria-pressed="true"
-          title="Show read QR code"
+          title="${escapeHtml(t('publicShare.live.showReadQr'))}"
         >
           ${lucide('qr-code', 14)}
           <span>QR</span>
@@ -1298,10 +1291,10 @@ body.innerHTML = `
           class="btn primary yanta-copy-compact"
           data-copy-space-read
           type="button"
-          aria-label="Copy read link"
-          title="Copy read link"
+          aria-label="${escapeHtml(t('publicShare.live.copyReadLink'))}"
+          title="${escapeHtml(t('publicShare.live.copyReadLink'))}"
         >
-          ${lucide('copy', 14)} Copy read link
+          ${lucide('copy', 14)} ${escapeHtml(t('publicShare.live.copyReadLink'))}
         </button>
       </div>
     </div>
@@ -1313,9 +1306,9 @@ body.innerHTML = `
             <div class="yanta-public-share-info yanta-share-link-info">
               <div class="yanta-share-link-title">
                 ${lucide('pencil', 15)}
-                <strong>Edit link</strong>
+                <strong>${escapeHtml(t('publicShare.live.editLink'))}</strong>
               </div>
-              <span>Anyone with it can edit in real time. Share carefully.</span>
+              <span>${escapeHtml(t('publicShare.live.editLinkHint'))}</span>
             </div>
 
             <div class="yanta-public-share-link-row">
@@ -1326,7 +1319,7 @@ body.innerHTML = `
                 data-space-qr-write
                 type="button"
                 aria-pressed="false"
-                title="Show edit QR code"
+                title="${escapeHtml(t('publicShare.live.showEditQr'))}"
               >
                 ${lucide('qr-code', 14)}
                 <span>QR</span>
@@ -1336,10 +1329,10 @@ body.innerHTML = `
                 class="btn primary yanta-copy-compact"
                 data-copy-space-write
                 type="button"
-                aria-label="Copy edit link"
-                title="Copy edit link"
+                aria-label="${escapeHtml(t('publicShare.live.copyEditLink'))}"
+                title="${escapeHtml(t('publicShare.live.copyEditLink'))}"
               >
-                ${lucide('copy', 14)} Copy edit link
+                ${lucide('copy', 14)} ${escapeHtml(t('publicShare.live.copyEditLink'))}
               </button>
             </div>
           </div>
@@ -1359,13 +1352,13 @@ body.innerHTML = `
       <span class="grow"></span>
       <button class="btn danger" data-stop-space-share>
         ${lucide('x', 14)}
-        Stop live share
+        ${escapeHtml(t('publicShare.live.stopLive'))}
       </button>
     </div>
 
     <div class="yanta-public-share-danger">
       <small style="color:var(--text-faint)">
-        Stopping removes the encrypted share data from the cloud and blocks all links immediately.
+        ${escapeHtml(t('publicShare.live.stopLiveHint'))}
       </small>
     </div>
   </div>
@@ -1397,16 +1390,16 @@ const showQr = (mode) => {
       ? `
         <div class="yanta-share-qr-title">
           ${lucide('pencil', 16)}
-          <strong>Edit QR code</strong>
+          <strong>${escapeHtml(t('publicShare.live.editQr'))}</strong>
         </div>
-        <small>Scan to join with editing access.</small>
+        <small>${escapeHtml(t('publicShare.live.editQrHint'))}</small>
       `
       : `
         <div class="yanta-share-qr-title">
           ${lucide('eye', 16)}
-          <strong>Read QR code</strong>
+          <strong>${escapeHtml(t('publicShare.live.readQr'))}</strong>
         </div>
-        <small>Scan to open read-only access.</small>
+        <small>${escapeHtml(t('publicShare.live.readQrHint'))}</small>
       `;
   }
 
@@ -1439,15 +1432,10 @@ if (isFolder) {
 
 body.querySelector('[data-stop-space-share]')?.addEventListener('click', async () => {
   const ok = await yantaConfirm({
-    title: 'Stop live sharing?',
-    message: [
-      `Stop live sharing this ${thing}?`,
-      '',
-      'All links stop working and the encrypted share data is deleted from the cloud.',
-      'Copies already synced to other devices cannot be removed.',
-    ].join('\n'),
-    confirmLabel: 'Stop sharing',
-    cancelLabel: 'Cancel',
+    title: t('publicShare.live.stopLiveTitle'),
+    message: t(`publicShare.live.stopLiveMessage.${thing}`),
+    confirmLabel: t('publicShare.public.stop'),
+    cancelLabel: t('common.cancel'),
     danger: true,
     icon: 'x',
   });
@@ -1459,7 +1447,7 @@ body.querySelector('[data-stop-space-share]')?.addEventListener('click', async (
     await renderLiveTab();
   } catch (err) {
     console.error(err);
-    toast(err?.message || 'Could not stop sharing', 'error');
+    toast(err?.message || t('publicShare.public.stopFailed'), 'error');
   }
 });
 }
@@ -1482,7 +1470,7 @@ async function renderCalendarShareExtras(body, session) {
   const noteRows = referenced
     .map((noteId) => {
       const note = state.notes.get(noteId);
-      const title = note?.title || 'Untitled note';
+      const title = note?.title || t('publicShare.untitledNote');
       const checked = !excluded.has(noteId);
 
       return `
@@ -1492,7 +1480,7 @@ async function renderCalendarShareExtras(body, session) {
             ${lucide(note?.icon || 'file-text', 13)}
             ${escapeHtml(title)}
           </span>
-          <small>${checked ? 'shared with the calendar' : 'kept private'}</small>
+          <small>${escapeHtml(checked ? t('publicShare.live.noteShared') : t('publicShare.live.noteKeptPrivate'))}</small>
         </label>
       `;
     })
@@ -1512,15 +1500,15 @@ async function renderCalendarShareExtras(body, session) {
       statsHtml = `
         <div class="yanta-calendar-share-stats">
           ${lucide('eye', 13)}
-          Link opened ≈ ${Number(stats.linkOpens || 0)} time${Number(stats.linkOpens || 0) === 1 ? '' : 's'}
+          ${escapeHtml(t('publicShare.live.linkOpens', { count: Number(stats.linkOpens || 0) }))}
           ${
             throttled
-              ? `<span class="yanta-calendar-share-stats-warn">${lucide('flame', 12)} Your link is hot — some anonymous readers were rate-limited in the last 24 h.</span>`
+              ? `<span class="yanta-calendar-share-stats-warn">${lucide('flame', 12)} ${escapeHtml(t('publicShare.live.hot'))}</span>`
               : ''
           }
           ${
             quotaHit
-              ? `<span class="yanta-calendar-share-stats-warn">${lucide('triangle-alert', 12)} Readers hit your monthly download quota — consider YANTA Plus if this keeps happening.</span>`
+              ? `<span class="yanta-calendar-share-stats-warn">${lucide('triangle-alert', 12)} ${escapeHtml(t('publicShare.live.quotaHit'))}</span>`
               : ''
           }
         </div>
@@ -1536,14 +1524,14 @@ async function renderCalendarShareExtras(body, session) {
         <div class="yanta-public-share-info yanta-share-link-info">
           <div class="yanta-share-link-title">
             ${lucide('file-text', 15)}
-            <strong>Linked notes</strong>
+            <strong>${escapeHtml(t('publicShare.live.linkedNotes'))}</strong>
           </div>
           <span>
-            ${
+            ${escapeHtml(
               referenced.length
-                ? 'Notes linked to shared events are readable by everyone with access. Untick a note to keep it private.'
-                : 'No notes are linked to events in this calendar yet. When you link one, it shows up here and everyone with access can read it.'
-            }
+                ? t('publicShare.live.linkedNotesHint')
+                : t('publicShare.live.linkedNotesEmpty')
+            )}
           </span>
         </div>
 
@@ -1565,10 +1553,10 @@ async function renderCalendarShareExtras(body, session) {
 
       try {
         await bridge?.setExcludedNoteIds([...nextExcluded]);
-        toast(checkbox.checked ? 'Note is shared with the calendar' : 'Note stays private', 'success');
+        toast(checkbox.checked ? t('publicShare.live.noteSharedToast') : t('publicShare.live.notePrivateToast'), 'success');
       } catch (err) {
         console.error(err);
-        toast('Could not update note sharing', 'error');
+        toast(t('publicShare.live.noteToggleFailed'), 'error');
       }
 
       renderCalendarShareExtras(body, session).catch(() => {});
@@ -1604,9 +1592,9 @@ function renderFolderShareExtras(body, session) {
           <input type="checkbox" data-share-event-id="${escapeHtml(ev.id)}" ${checked ? 'checked' : ''} />
           <span class="yanta-calendar-share-note-title">
             ${lucide('calendar', 13)}
-            ${escapeHtml(ev.title || 'Untitled event')}
+            ${escapeHtml(ev.title || t('publicShare.untitledEvent'))}
           </span>
-          <small>${escapeHtml(when)}${checked ? '' : ' · kept private'}</small>
+          <small>${escapeHtml(when)}${checked ? '' : ` · ${escapeHtml(t('publicShare.live.eventKeptPrivate'))}`}</small>
         </label>
       `;
     })
@@ -1618,14 +1606,14 @@ function renderFolderShareExtras(body, session) {
         <div class="yanta-public-share-info yanta-share-link-info">
           <div class="yanta-share-link-title">
             ${lucide('calendar', 15)}
-            <strong>Linked events</strong>
+            <strong>${escapeHtml(t('publicShare.live.linkedEvents'))}</strong>
           </div>
           <span>
-            ${
+            ${escapeHtml(
               events.length
-                ? 'Events linked to notes in this folder are visible to everyone with access, so the notes make sense. Untick one to keep it private.'
-                : 'No events are linked to notes in this folder. When you link one, it travels with the folder and shows up here.'
-            }
+                ? t('publicShare.live.linkedEventsHint')
+                : t('publicShare.live.linkedEventsEmpty')
+            )}
           </span>
         </div>
 
@@ -1647,10 +1635,10 @@ function renderFolderShareExtras(body, session) {
 
       try {
         await provider.setExcludedEventIds([...nextExcluded]);
-        toast(checkbox.checked ? 'Event is shared with the folder' : 'Event stays private', 'success');
+        toast(checkbox.checked ? t('publicShare.live.eventSharedToast') : t('publicShare.live.eventPrivateToast'), 'success');
       } catch (err) {
         console.error(err);
-        toast('Could not update event sharing', 'error');
+        toast(t('publicShare.live.eventToggleFailed'), 'error');
       }
 
       renderFolderShareExtras(body, session);
@@ -1683,7 +1671,7 @@ async function renderShareGroupsRow(body, session, renderMembers) {
         `)
         .join('')}
       <button class="btn compact" data-share-groups-manage>
-        ${lucide('settings-2', 13)} Groups…
+        ${lucide('settings-2', 13)} ${escapeHtml(t('publicShare.groups.manage'))}
       </button>
     </div>
   `;
@@ -1696,14 +1684,14 @@ async function renderShareGroupsRow(body, session, renderMembers) {
       const role = body.querySelector('[data-people-role]')?.value === 'write' ? 'write' : 'read';
 
       const ok = await yantaConfirm({
-        title: `Share with "${group.name}"?`,
+        title: t('publicShare.groups.confirmTitle', { name: group.name }),
         message: [
-          `Give ${group.members.length} ${group.members.length === 1 ? 'person' : 'people'} ${role === 'write' ? 'edit' : 'view'} access:`,
+          t(role === 'write' ? 'publicShare.groups.confirmWrite' : 'publicShare.groups.confirmRead', { count: group.members.length }),
           '',
           group.members.join('\n'),
         ].join('\n'),
-        confirmLabel: 'Share with group',
-        cancelLabel: 'Cancel',
+        confirmLabel: t('publicShare.groups.shareWithGroup'),
+        cancelLabel: t('common.cancel'),
         icon: 'users',
       });
 
@@ -1720,23 +1708,23 @@ async function renderShareGroupsRow(body, session, renderMembers) {
           if (res.resolved) {
             await sendSpaceInvite(session.record, matrixUserId, role).catch((err) => {
               console.warn('[YANTA Spaces] group invite delivery failed', matrixUserId, err);
-              failed.push(`${matrixUserId} (keys not delivered — use "Resend invite")`);
+              failed.push(t('publicShare.groups.failKeys', { id: matrixUserId }));
             });
           } else {
-            failed.push(`${matrixUserId} (no YANTA account)`);
+            failed.push(t('publicShare.groups.failNoAccount', { id: matrixUserId }));
           }
         } catch (err) {
           console.error(err);
-          failed.push(`${matrixUserId} (${err?.message || 'failed'})`);
+          failed.push(`${matrixUserId} (${err?.message || t('publicShare.groups.failed')})`);
         }
       }
 
       btn.disabled = false;
 
       if (failed.length) {
-        toast(`Shared with "${group.name}" — issues: ${failed.join(' · ')}`, 'error');
+        toast(t('publicShare.groups.sharedIssues', { name: group.name, issues: failed.join(' · ') }), 'error');
       } else {
-        toast(`Shared with everyone in "${group.name}"`, 'success');
+        toast(t('publicShare.groups.sharedAll', { name: group.name }), 'success');
       }
 
       await renderMembers();
@@ -1761,7 +1749,7 @@ async function openShareGroupsManager() {
           <div class="yanta-share-group-editor" data-group-id="${escapeHtml(group.id)}">
             <div class="yanta-public-share-link-row">
               <input class="text-input" data-group-name value="${escapeHtml(group.name)}" />
-              <button class="btn danger" data-group-delete title="Delete group">${lucide('trash', 14)}</button>
+              <button class="btn danger" data-group-delete title="${escapeHtml(t('publicShare.groups.delete'))}">${lucide('trash', 14)}</button>
             </div>
             <textarea
               class="text-input"
@@ -1771,7 +1759,7 @@ async function openShareGroupsManager() {
             >${escapeHtml(group.members.join('\n'))}</textarea>
           </div>
         `).join('')
-      : '<div class="yanta-public-shares-empty">No groups yet — create one below.</div>';
+      : `<div class="yanta-public-shares-empty">${escapeHtml(t('publicShare.groups.empty'))}</div>`;
 
     wrap.querySelectorAll('[data-group-delete]').forEach((btn) => {
       btn.addEventListener('click', async () => {
@@ -1790,27 +1778,25 @@ async function openShareGroupsManager() {
     wrap.innerHTML = `
       <div class="modal-card yanta-share-groups-card">
         <header class="modal-head">
-          <h3>${lucide('users', 16)} Share groups</h3>
+          <h3>${lucide('users', 16)} ${escapeHtml(t('publicShare.groups.title'))}</h3>
           <button class="icon-btn" data-groups-close>&times;</button>
         </header>
 
         <div class="modal-body">
           <div class="yanta-public-share-info">
-            Groups are personal shortcuts for sharing: one Matrix ID per line.
-            Sharing with a group always grants access person by person, so you can
-            still remove individuals later.
+            ${escapeHtml(t('publicShare.groups.info'))}
           </div>
 
           <div data-groups-list></div>
 
           <div class="yanta-public-share-link-row" style="margin-top:10px">
-            <input class="text-input" data-new-group-name placeholder="New group name (e.g. Family)" />
-            <button class="btn primary" data-new-group-add>${lucide('plus', 14)} Create</button>
+            <input class="text-input" data-new-group-name placeholder="${escapeHtml(t('publicShare.groups.newPlaceholder'))}" />
+            <button class="btn primary" data-new-group-add>${lucide('plus', 14)} ${escapeHtml(t('publicShare.groups.create'))}</button>
           </div>
 
           <div class="compress-actions">
             <span class="grow"></span>
-            <button class="btn primary" data-groups-save>${lucide('check', 14)} Save & close</button>
+            <button class="btn primary" data-groups-save>${lucide('check', 14)} ${escapeHtml(t('publicShare.groups.saveClose'))}</button>
           </div>
         </div>
       </div>
@@ -1862,7 +1848,7 @@ async function openShareGroupsManager() {
         }
       }
 
-      toast('Groups saved', 'success');
+      toast(t('publicShare.groups.saved'), 'success');
       close();
     });
   });
@@ -1892,7 +1878,7 @@ async function rotateAndRedeliver(session) {
 
     await sendSpaceInvite(record, member.matrixUserId, 'write').catch((err) => {
       console.warn('[YANTA Spaces] re-delivery after rotation failed', member.matrixUserId, err);
-      toast(`Could not re-deliver keys to ${member.matrixUserId}`, 'error');
+      toast(t('publicShare.people.redeliverFailed', { id: member.matrixUserId }), 'error');
     });
   }
 }
@@ -1907,15 +1893,14 @@ async function renderPeopleTab() {
     body.innerHTML = `
       <div class="yanta-public-share-box">
         <div class="yanta-public-share-info">
-          <strong>People</strong><br>
-          Give specific people read or edit access via their Matrix ID.
-          Start a live share first — keys are delivered end-to-end encrypted over Chat.
+          <strong>${escapeHtml(t('publicShare.tab.people'))}</strong><br>
+          ${escapeHtml(t('publicShare.people.introNoShare'))}
         </div>
 
         <div class="compress-actions">
           <button class="btn primary" data-people-start-share>
             ${lucide('users', 14)}
-            Start live share
+            ${escapeHtml(t('publicShare.live.start'))}
           </button>
         </div>
       </div>
@@ -1929,8 +1914,8 @@ async function renderPeopleTab() {
       } catch (err) {
         console.error(err);
         toast(err?.status === 401
-          ? 'Sign in to YANTA Cloud to start a live share'
-          : err?.message || 'Could not start live share', 'error');
+          ? t('publicShare.live.signIn')
+          : err?.message || t('publicShare.live.startFailed'), 'error');
       }
 
       await renderPeopleTab();
@@ -1942,26 +1927,26 @@ async function renderPeopleTab() {
   body.innerHTML = `
     <div class="yanta-public-share-box">
       <div class="yanta-public-share-info">
-        <strong>People</strong><br>
-        Invite by Matrix ID (e.g. <code>@anna:yanta.me</code>) or YANTA handle.
-        Invited people automatically get this ${targetThing()} in their YANTA
-        ${targetIsCalendar() ? 'as a shared calendar' : 'under <em>Shared with me</em>'} — keys are delivered end-to-end encrypted over Chat,
-        and access is enforced by the server.
+        <strong>${escapeHtml(t('publicShare.tab.people'))}</strong><br>
+        ${t(`publicShare.people.intro.${targetThing()}`, {
+          example: '<code>@anna:yanta.me</code>',
+          sharedWithMe: `<em>${escapeHtml(t('tree.section.sharedWithMe'))}</em>`,
+        })}
       </div>
 
       <div class="yanta-public-share-link-row">
         <input class="text-input" data-people-input placeholder="@user:yanta.me">
         <select class="text-input" data-people-role style="max-width:120px">
-          <option value="read">Can view</option>
-          <option value="write">Can edit</option>
+          <option value="read">${escapeHtml(t('calendarShare.role.read'))}</option>
+          <option value="write">${escapeHtml(t('calendarShare.role.write'))}</option>
         </select>
-        <button class="btn primary" data-people-add>${lucide('user-plus', 14)} Add</button>
+        <button class="btn primary" data-people-add>${lucide('user-plus', 14)} ${escapeHtml(t('publicShare.people.add'))}</button>
       </div>
 
       <div class="yanta-share-groups" data-people-groups></div>
 
       <div class="yanta-public-shares-list" data-people-list>
-        <div class="yanta-public-shares-empty">Loading…</div>
+        <div class="yanta-public-shares-empty">${escapeHtml(t('publicShare.people.loading'))}</div>
       </div>
     </div>
   `;
@@ -1974,7 +1959,7 @@ async function renderPeopleTab() {
     try {
       members = await apiListSpaceMembers(session.spaceId);
     } catch (err) {
-      listHost.innerHTML = `<div class="yanta-public-shares-empty">${escapeHtml(err?.message || 'Could not load members')}</div>`;
+      listHost.innerHTML = `<div class="yanta-public-shares-empty">${escapeHtml(err?.message || t('publicShare.people.loadFailed'))}</div>`;
       return;
     }
 
@@ -1984,7 +1969,7 @@ async function renderPeopleTab() {
     publishSpaceRoster(session.spaceId, members).catch(() => {});
 
     if (!members.length) {
-      listHost.innerHTML = '<div class="yanta-public-shares-empty">Nobody has personal access yet.</div>';
+      listHost.innerHTML = `<div class="yanta-public-shares-empty">${escapeHtml(t('publicShare.people.none'))}</div>`;
       return;
     }
 
@@ -1997,15 +1982,15 @@ async function renderPeopleTab() {
       row.innerHTML = `
         <div class="yanta-public-share-row-main">
           <strong>${escapeHtml(member.matrixUserId || member.userId)}</strong>
-          <small>${member.role === 'write' ? 'Can edit' : 'Can view'}</small>
+          <small>${escapeHtml(member.role === 'write' ? t('calendarShare.role.write') : t('calendarShare.role.read'))}</small>
         </div>
         <div class="yanta-public-share-row-actions">
           <select class="text-input" data-member-role style="max-width:110px">
-            <option value="read" ${member.role === 'read' ? 'selected' : ''}>Can view</option>
-            <option value="write" ${member.role === 'write' ? 'selected' : ''}>Can edit</option>
+            <option value="read" ${member.role === 'read' ? 'selected' : ''}>${escapeHtml(t('calendarShare.role.read'))}</option>
+            <option value="write" ${member.role === 'write' ? 'selected' : ''}>${escapeHtml(t('calendarShare.role.write'))}</option>
           </select>
-          <button class="btn" data-member-resend title="Resend invite">${lucide('send', 14)}</button>
-          <button class="btn danger" data-member-remove title="Remove access">${lucide('user-x', 14)}</button>
+          <button class="btn" data-member-resend title="${escapeHtml(t('publicShare.people.resend'))}">${lucide('send', 14)}</button>
+          <button class="btn danger" data-member-remove title="${escapeHtml(t('publicShare.people.remove'))}">${lucide('user-x', 14)}</button>
         </div>
       `;
 
@@ -2015,10 +2000,10 @@ async function renderPeopleTab() {
 
         try {
           await sendSpaceInvite(session.record, member.matrixUserId, member.role);
-          toast(`Invite re-sent to ${member.matrixUserId}`, 'success');
+          toast(t('publicShare.people.resent', { id: member.matrixUserId }), 'success');
         } catch (err) {
           console.error(err);
-          toast(err?.message || 'Could not resend invite', 'error');
+          toast(err?.message || t('publicShare.people.resendFailed'), 'error');
         }
 
         resendBtn.disabled = false;
@@ -2045,10 +2030,10 @@ async function renderPeopleTab() {
             console.warn('[YANTA Spaces] role-change delivery failed', err);
           });
 
-          toast('Access updated', 'success');
+          toast(t('publicShare.people.updated'), 'success');
         } catch (err) {
           console.error(err);
-          toast(err?.message || 'Could not change access', 'error');
+          toast(err?.message || t('publicShare.people.changeFailed'), 'error');
         }
 
         await renderMembers();
@@ -2056,10 +2041,12 @@ async function renderPeopleTab() {
 
       row.querySelector('[data-member-remove]')?.addEventListener('click', async () => {
         const ok = await yantaConfirm({
-          title: 'Remove access?',
-          message: `Remove ${member.matrixUserId || 'this member'} from this share? They lose access immediately.`,
-          confirmLabel: 'Remove',
-          cancelLabel: 'Cancel',
+          title: t('publicShare.people.removeTitle'),
+          message: member.matrixUserId
+            ? t('publicShare.people.removeMessage', { id: member.matrixUserId })
+            : t('publicShare.people.removeMessageUnknown'),
+          confirmLabel: t('publicShare.people.removeConfirm'),
+          cancelLabel: t('common.cancel'),
           danger: true,
           icon: 'user-x',
         });
@@ -2077,10 +2064,10 @@ async function renderPeopleTab() {
             sendSpaceRevokeNotice(session.spaceId, member.matrixUserId);
           }
 
-          toast('Access removed', 'success');
+          toast(t('publicShare.people.removed'), 'success');
         } catch (err) {
           console.error(err);
-          toast(err?.message || 'Could not remove access', 'error');
+          toast(err?.message || t('publicShare.people.removeFailed'), 'error');
         }
 
         await renderMembers();
@@ -2103,7 +2090,7 @@ async function renderPeopleTab() {
     });
 
     if (!matrixUserId) {
-      toast('Enter a Matrix ID like @user:yanta.me', 'error');
+      toast(t('publicShare.people.invalidId'), 'error');
       return;
     }
 
@@ -2121,11 +2108,11 @@ async function renderPeopleTab() {
         */
         try {
           await sendSpaceInvite(session.record, matrixUserId, role);
-          toast(`Shared with ${matrixUserId} — it appears in their YANTA automatically`, 'success');
+          toast(t('publicShare.people.shared', { id: matrixUserId }), 'success');
         } catch (err) {
           console.error(err);
           toast(
-            `Access granted, but key delivery failed (${err?.message || 'chat unavailable'}). Use “Resend invite” next to their name.`,
+            t('publicShare.people.keyDeliveryFailed', { reason: err?.message || t('publicShare.people.chatUnavailable') }),
             'error'
           );
         }
@@ -2134,16 +2121,10 @@ async function renderPeopleTab() {
       } else {
         // Not a YANTA user — offer the link fallback over federation.
         const ok = await yantaConfirm({
-          title: 'Not a YANTA user',
-          message: [
-            `${matrixUserId} has no YANTA account, so access cannot be enforced per person.`,
-            '',
-            role === 'write'
-              ? 'Send them the edit link via chat instead? Anyone with that link can edit.'
-              : 'Send them the read link via chat instead? Anyone with that link can view.',
-          ].join('\n'),
-          confirmLabel: 'Send link',
-          cancelLabel: 'Cancel',
+          title: t('publicShare.people.notUserTitle'),
+          message: t(role === 'write' ? 'publicShare.people.notUserWrite' : 'publicShare.people.notUserRead', { id: matrixUserId }),
+          confirmLabel: t('publicShare.people.sendLink'),
+          cancelLabel: t('common.cancel'),
           icon: 'link',
         });
 
@@ -2152,15 +2133,17 @@ async function renderPeopleTab() {
           const url = role === 'write' && links.write ? links.write : links.read;
           await sendSpaceLinkMessage(
             matrixUserId,
-            `I shared "${session.record.title || 'a note'}" with you on YANTA: ${url}`
+            session.record.title
+              ? t('publicShare.people.linkMessage', { title: session.record.title, url })
+              : t('publicShare.people.linkMessageUntitled', { url })
           );
-          toast(`Link sent to ${matrixUserId}`, 'success');
+          toast(t('publicShare.people.linkSent', { id: matrixUserId }), 'success');
           if (input) input.value = '';
         }
       }
     } catch (err) {
       console.error(err);
-      toast(err?.message || 'Could not share', 'error');
+      toast(err?.message || t('publicShare.people.shareFailed'), 'error');
     }
 
     btn.disabled = false;
@@ -2332,24 +2315,24 @@ function publicShareRowStatus(row) {
   const status = row.share?.status || row.cloudStatus || 'active';
 
   if (status === 'up-to-date') {
-    parts.push('up to date');
+    parts.push(t('publicShare.manager.upToDate'));
   } else if (status === 'pending') {
-    parts.push('changes pending');
+    parts.push(t('publicShare.manager.pending'));
   } else if (status === 'publishing') {
-    parts.push('publishing');
+    parts.push(t('publicShare.manager.publishing'));
   } else if (status === 'failed') {
-    parts.push('publish failed');
+    parts.push(t('publicShare.manager.failed'));
   } else {
-    parts.push('active');
+    parts.push(t('publicShare.manager.active'));
   }
 
   if (row.share?.cloudOnly) {
-    parts.push('cloud-only on this device');
+    parts.push(t('publicShare.manager.cloudOnly'));
   }
 
   const published = row.lastPublishedAt || row.share?.lastPublishedAt;
   if (published) {
-    parts.push(`published ${formatPublicShareTime(published)}`);
+    parts.push(t('publicShare.manager.published', { time: formatPublicShareTime(published) }));
   }
 
   return parts.join(' · ');
@@ -2361,32 +2344,31 @@ async function renderPublicSharesManager() {
   m.innerHTML = `
     <div class="modal-card yanta-public-shares-manager-card">
       <header class="modal-head">
-        <h3>Shared public notes</h3>
+        <h3>${escapeHtml(t('publicShare.manager.title'))}</h3>
         <button class="icon-btn" data-public-shares-manager-close>&times;</button>
       </header>
 
       <div class="modal-body">
         <div class="yanta-public-share-info">
-          Notes listed here have an active public read-only link.
-          You can stop sharing individual notes or revoke all public links.
+          ${escapeHtml(t('publicShare.manager.info'))}
         </div>
 
         <div class="compress-actions" style="margin:12px 0;flex-wrap:wrap">
           <button class="btn" data-refresh-public-shares-manager>
             ${lucide('refresh-cw', 14)}
-            Refresh
+            ${escapeHtml(t('publicShare.manager.refresh'))}
           </button>
 
           <span class="grow"></span>
 
           <button class="btn danger" data-stop-all-public-shares>
             ${lucide('trash', 14)}
-            Stop sharing for all notes
+            ${escapeHtml(t('publicShare.manager.stopAll'))}
           </button>
         </div>
 
         <div data-public-shares-manager-body>
-          <div class="tree-empty">Loading shared notes…</div>
+          <div class="tree-empty">${escapeHtml(t('publicShare.manager.loading'))}</div>
         </div>
       </div>
     </div>
@@ -2398,7 +2380,7 @@ async function renderPublicSharesManager() {
   if (!rows.length) {
     body.innerHTML = `
       <div class="yanta-public-shares-empty">
-        No active public shares.
+        ${escapeHtml(t('publicShare.manager.empty'))}
       </div>
     `;
   } else {
@@ -2407,7 +2389,7 @@ async function renderPublicSharesManager() {
         ${rows.map((row) => {
           const title =
             row.note?.title ||
-            `Missing local note (${row.noteId})`;
+            t('publicShare.manager.missingNote', { id: row.noteId });
 
           const status = publicShareRowStatus(row);
           const shareId = row.shareId || row.share?.shareId || '';
@@ -2423,7 +2405,7 @@ async function renderPublicSharesManager() {
               <div class="yanta-public-share-row-actions">
                 <button class="btn danger" data-stop-public-share-row>
                   ${lucide('trash', 14)}
-                  Stop sharing
+                  ${escapeHtml(t('publicShare.public.stop'))}
                 </button>
               </div>
             </div>
@@ -2439,17 +2421,10 @@ async function renderPublicSharesManager() {
 
   m.querySelector('[data-stop-all-public-shares]')?.addEventListener('click', async () => {
     const ok = await yantaConfirm({
-      title: 'Stop sharing all notes?',
-      message: [
-        'Stop public sharing for all notes?',
-        '',
-        'All active public links will be revoked.',
-        'Future access through these links will be blocked.',
-        '',
-        'Copies already downloaded cannot be removed.',
-      ].join('\n'),
-      confirmLabel: 'Stop sharing all',
-      cancelLabel: 'Cancel',
+      title: t('publicShare.manager.stopAllTitle'),
+      message: t('publicShare.manager.stopAllMessage'),
+      confirmLabel: t('publicShare.manager.stopAllConfirm'),
+      cancelLabel: t('common.cancel'),
       danger: true,
       icon: 'trash',
     });
@@ -2461,7 +2436,7 @@ async function renderPublicSharesManager() {
       await renderPublicSharesManager();
     } catch (err) {
       console.error(err);
-      toast(err?.message || 'Could not stop all public sharing', 'error');
+      toast(err?.message || t('publicShare.manager.stopAllFailed'), 'error');
     }
   });
 
@@ -2476,15 +2451,12 @@ async function renderPublicSharesManager() {
       const note = state.notes.get(noteId);
 
       const ok = await yantaConfirm({
-        title: 'Stop public sharing?',
-        message: [
-          `Stop public sharing for "${note?.title || noteId || 'this note'}"?`,
-          '',
-          'Future access through this public link will be blocked.',
-          'Copies already downloaded cannot be removed.',
-        ].join('\n'),
-        confirmLabel: 'Stop sharing',
-        cancelLabel: 'Cancel',
+        title: t('publicShare.public.stopTitle'),
+        message: (note?.title || noteId)
+          ? t('publicShare.public.stopNamedMessage', { title: note?.title || noteId })
+          : t('publicShare.public.stopMessage'),
+        confirmLabel: t('publicShare.public.stop'),
+        cancelLabel: t('common.cancel'),
         danger: true,
         icon: 'trash',
       });
@@ -2499,7 +2471,7 @@ async function renderPublicSharesManager() {
         await renderPublicSharesManager();
       } catch (err) {
         console.error(err);
-        toast(err?.message || 'Could not stop sharing', 'error');
+        toast(err?.message || t('publicShare.public.stopFailed'), 'error');
       }
     });
   });
@@ -2538,14 +2510,14 @@ export async function openUnifiedShareModal({
 
   if (folderId) {
     if (!state.folders.has(folderId)) {
-      toast('Folder not found', 'error');
+      toast(t('publicShare.folderNotFound'), 'error');
       return;
     }
 
     shareTarget = { kind: 'folder', id: folderId };
   } else if (calendarCategoryId) {
     if (!state.calendarCategories.has(calendarCategoryId)) {
-      toast('Calendar not found', 'error');
+      toast(t('publicShare.calendarNotFound'), 'error');
       return;
     }
 
@@ -2554,7 +2526,7 @@ export async function openUnifiedShareModal({
     const noteId = explicitNoteId || state.currentNoteId;
 
     if (!noteId || !state.notes.has(noteId)) {
-      toast('Open a note first', 'error');
+      toast(t('publicShare.openNoteFirst'), 'error');
       return;
     }
 
@@ -2566,7 +2538,6 @@ export async function openUnifiedShareModal({
     ? state.notes.get(shareTarget.id)?.privateFolderId
     : shareTarget.kind === 'folder' && state.folders.get(shareTarget.id)?.privateFolderId;
   if (privateTarget) {
-    const { t } = await import('../i18n/index.js');
     toast(t('private.noShare'), 'error');
     return;
   }
@@ -2579,15 +2550,15 @@ export async function openUnifiedShareModal({
   m.innerHTML = `
     <div class="modal-card yanta-public-share-card">
       <header class="modal-head">
-        <h3>Share ${targetThing()}: ${escapeHtml(targetTitle())}</h3>
+        <h3>${escapeHtml(t(`publicShare.dialogTitle.${targetThing()}`, { title: targetTitle() }))}</h3>
         <button class="icon-btn" data-public-share-close>&times;</button>
       </header>
 
       <div class="modal-body">
         <div class="yanta-share-tabs">
-          ${isNote ? '<button data-share-tab="public" class="active">Public link</button>' : ''}
-          <button data-share-tab="live" ${isNote ? '' : 'class="active"'}>Live collaboration</button>
-          ${isChatEnabled() ? '<button data-share-tab="people">People</button>' : ''}
+          ${isNote ? `<button data-share-tab="public" class="active">${escapeHtml(t('publicShare.tab.public'))}</button>` : ''}
+          <button data-share-tab="live" ${isNote ? '' : 'class="active"'}>${escapeHtml(t('publicShare.tab.live'))}</button>
+          ${isChatEnabled() ? `<button data-share-tab="people">${escapeHtml(t('publicShare.tab.people'))}</button>` : ''}
         </div>
 
         <div data-share-body></div>

@@ -16,6 +16,7 @@
 // ============================================================
 
 import { swRegistrationReady } from '../core.js';
+import { t } from '../i18n/index.js';
 
 import {
   installEnvironment,
@@ -181,9 +182,9 @@ export async function sendTestNotification() {
     return { ok: false, reason: 'permission' };
   }
 
-  const title = 'YANTA test notification';
+  const title = t('install.test.title');
   const options = {
-    body: 'If you can see this, system notifications are working.',
+    body: t('install.test.body'),
     icon: '/android-chrome-192x192.png',
     badge: '/android-chrome-192x192.png',
     tag: 'yanta-test',
@@ -217,30 +218,30 @@ export async function sendTestNotification() {
  * Linux especially is almost always a desktop-side setting, not the app.
  */
 export function notificationTroubleshooting(os) {
-  const common = 'Make sure Do Not Disturb / Focus mode is turned off.';
+  const common = t('install.trouble.common');
 
   switch (os) {
     case 'linux':
       return [
-        'Linux desktops need a notification daemon running (GNOME/KDE have one built in; on a tiling WM start e.g. dunst or mako).',
-        'In Chromium, open Settings → Privacy & security → Site settings → Notifications and make sure this site is allowed and “Use quieter messaging” is off.',
+        t('install.trouble.linuxDaemon'),
+        t('install.trouble.linuxChromium'),
         common,
       ];
     case 'windows':
       return [
-        'Open Windows Settings → System → Notifications and make sure notifications are on for your browser.',
-        'Turn off Focus assist / Do Not Disturb.',
+        t('install.trouble.windowsSettings'),
+        t('install.trouble.windowsFocus'),
         common,
       ];
     case 'macos':
       return [
-        'Open System Settings → Notifications → your browser and allow notifications.',
-        'Turn off Do Not Disturb / any Focus.',
+        t('install.trouble.macosSettings'),
+        t('install.trouble.macosFocus'),
         common,
       ];
     default:
       return [
-        'Check your browser’s notification settings and allow this site.',
+        t('install.trouble.generic'),
         common,
       ];
   }
@@ -274,13 +275,13 @@ export function browserInstallGuide(env = installEnvironment()) {
   if (os === 'ios') {
     return {
       supported: true,
-      title: 'Add YANTA to your Home Screen',
+      title: t('install.guide.ios.title'),
       steps: [
-        'Open YANTA in Safari.',
-        'Tap the Share button (the square with an up arrow).',
-        'Choose “Add to Home Screen”, then tap “Add”.',
+        t('install.guide.ios.step1'),
+        t('install.guide.ios.step2'),
+        t('install.guide.ios.step3'),
       ],
-      note: 'Open YANTA from the new Home Screen icon to receive notifications.',
+      note: t('install.guide.ios.note'),
     };
   }
 
@@ -288,22 +289,22 @@ export function browserInstallGuide(env = installEnvironment()) {
     case 'edge':
       return {
         supported: true,
-        title: 'Install YANTA in Microsoft Edge',
+        title: t('install.guide.edge.title'),
         steps: [
-          'Open the “…” menu at the top right.',
-          'Choose “Apps” → “Install YANTA”.',
-          'Confirm with “Install”.',
+          t('install.guide.edge.step1'),
+          t('install.guide.edge.step2'),
+          t('install.guide.confirmInstall'),
         ],
       };
 
     case 'samsung':
       return {
         supported: true,
-        title: 'Install YANTA in Samsung Internet',
+        title: t('install.guide.samsung.title'),
         steps: [
-          'Tap the menu (≡) at the bottom right.',
-          'Choose “Add page to” → “Home screen”.',
-          'Confirm with “Add”.',
+          t('install.guide.samsung.step1'),
+          t('install.guide.samsung.step2'),
+          t('install.guide.samsung.step3'),
         ],
       };
 
@@ -311,63 +312,63 @@ export function browserInstallGuide(env = installEnvironment()) {
       return os === 'android'
         ? {
             supported: true,
-            title: 'Install YANTA in Firefox',
+            title: t('install.guide.firefox.title'),
             steps: [
-              'Tap the menu (⋮) at the top right.',
-              'Choose “Install” (or “Add to Home screen”).',
-              'Confirm the prompt.',
+              t('install.guide.firefox.step1'),
+              t('install.guide.firefox.step2'),
+              t('install.guide.confirmPrompt'),
             ],
           }
         : {
             supported: false,
-            title: 'Firefox on the desktop can’t install web apps',
+            title: t('install.guide.firefoxDesktop.title'),
             steps: [
-              'For reliable system notifications, open YANTA in Chrome, Edge, or Brave and install it there.',
-              'Or install YANTA on your phone — it works everywhere.',
+              t('install.guide.firefoxDesktop.step1'),
+              t('install.guide.firefoxDesktop.step2'),
             ],
           };
 
     case 'safari':
       return {
         supported: true,
-        title: 'Install YANTA in Safari',
+        title: t('install.guide.safari.title'),
         steps: [
-          'Open the Share menu (or the File menu).',
-          'Choose “Add to Dock”.',
-          'Open YANTA from the Dock from now on.',
+          t('install.guide.safari.step1'),
+          t('install.guide.safari.step2'),
+          t('install.guide.safari.step3'),
         ],
-        note: 'Requires macOS Sonoma or newer.',
+        note: t('install.guide.safari.note'),
       };
 
     case 'opera':
       return {
         supported: true,
-        title: 'Install YANTA in Opera',
+        title: t('install.guide.opera.title'),
         steps: [
-          'Open the menu and look for “Install YANTA…”.',
-          'Confirm with “Install”.',
+          t('install.guide.opera.step1'),
+          t('install.guide.confirmInstall'),
         ],
       };
 
     case 'chrome':
       return {
         supported: true,
-        title: 'Install YANTA',
+        title: t('install.title'),
         steps: [
-          'Click the install icon at the right end of the address bar (a monitor with a down arrow).',
-          'If it isn’t there, open the “⋮” menu → “Cast, save, and share” → “Install page as app…”.',
-          'Confirm with “Install”.',
+          t('install.guide.chrome.step1'),
+          t('install.guide.chrome.step2'),
+          t('install.guide.confirmInstall'),
         ],
       };
 
     default:
       return {
         supported: true,
-        title: 'Install YANTA',
+        title: t('install.title'),
         steps: [
-          'Open your browser’s main menu.',
-          'Look for “Install app”, “Install YANTA”, or “Add to Home screen”.',
-          'Confirm the prompt.',
+          t('install.guide.generic.step1'),
+          t('install.guide.generic.step2'),
+          t('install.guide.confirmPrompt'),
         ],
       };
   }
@@ -389,9 +390,9 @@ function recEnableNotifications() {
     kind: 'enable-notifications',
     tone: 'info',
     icon: 'bell',
-    title: 'Turn on notifications',
-    body: 'Allow notifications so chat messages and event reminders arrive as system notifications.',
-    cta: { label: 'Enable notifications', kind: 'enable-notifications' },
+    title: t('install.rec.notifications.title'),
+    body: t('install.rec.notifications.body'),
+    cta: { label: t('install.cta.enableNotifications'), kind: 'enable-notifications' },
   };
 }
 
@@ -401,9 +402,9 @@ function recAddPhone() {
     kind: 'add-phone',
     tone: 'info',
     icon: 'smartphone',
-    title: 'Install YANTA on your phone',
-    body: 'Add the app on a smartphone so reminders and messages reach you when you’re away from your computer.',
-    cta: { label: 'Get the mobile app', kind: 'open-get-app', url: getAppUrl() },
+    title: t('install.rec.phone.title'),
+    body: t('install.rec.phone.body'),
+    cta: { label: t('install.cta.getMobileApp'), kind: 'open-get-app', url: getAppUrl() },
   };
 }
 
@@ -450,9 +451,9 @@ export function computeInstallRecommendation() {
           kind: 'get-android-app',
           tone: 'info',
           icon: 'download',
-          title: 'Install the YANTA Android app',
-          body: 'The Android app delivers event reminders and chat messages as reliable, exactly-timed system notifications — the browser can’t guarantee that.',
-          cta: { label: 'Get the app', kind: 'open-get-app', url: getAppUrl() },
+          title: t('install.rec.android.title'),
+          body: t('install.rec.android.body'),
+          cta: { label: t('install.cta.getApp'), kind: 'open-get-app', url: getAppUrl() },
         },
       };
 
@@ -464,11 +465,11 @@ export function computeInstallRecommendation() {
           kind: 'install-desktop-pwa',
           tone: 'info',
           icon: 'monitor-down',
-          title: 'Install YANTA as a desktop app',
-          body: 'Installing YANTA lets it show system notifications for chat and reminders, even when no tab is open.',
+          title: t('install.rec.desktop.title'),
+          body: t('install.rec.desktop.body'),
           cta: canInstallDirectly()
-            ? { label: 'Install app', kind: 'prompt-install' }
-            : { label: 'How to install', kind: 'show-guide' },
+            ? { label: t('install.cta.installApp'), kind: 'prompt-install' }
+            : { label: t('install.cta.howToInstall'), kind: 'show-guide' },
         },
         secondary: hasPhone ? null : recAddPhone(),
       };
@@ -492,9 +493,9 @@ export function computeInstallRecommendation() {
           kind: 'ios-add-home',
           tone: 'info',
           icon: 'smartphone',
-          title: 'Add YANTA to your Home Screen',
-          body: 'Installed to the Home Screen, YANTA can send you notifications for chat and reminders.',
-          cta: { label: 'Show me how', kind: 'show-guide' },
+          title: t('install.guide.ios.title'),
+          body: t('install.rec.ios.body'),
+          cta: { label: t('install.cta.showMeHow'), kind: 'show-guide' },
         },
       };
 
@@ -515,9 +516,9 @@ export function computeInstallRecommendation() {
               kind: 'install-generic',
               tone: 'info',
               icon: 'download',
-              title: 'Install YANTA',
-              body: 'Install YANTA for a faster launch and reliable system notifications.',
-              cta: { label: 'Install app', kind: 'prompt-install' },
+              title: t('install.title'),
+              body: t('install.rec.generic.body'),
+              cta: { label: t('install.cta.installApp'), kind: 'prompt-install' },
             },
           }
         : { ...base, perfect: true };

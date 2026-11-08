@@ -5,6 +5,7 @@
 // ============================================================
 
 import { escapeHtml, lucide } from './core.js';
+import { t } from './i18n/index.js';
 
 function stop(e) {
   e.preventDefault();
@@ -18,9 +19,9 @@ function stopBubble(e) {
 export function inlineTextEdit(anchor, {
   initial = '',
   placeholder = '',
-  emptyFallback = 'Untitled',
-  commitLabel = 'Save',
-  cancelLabel = 'Cancel',
+  emptyFallback = t('note.untitled'),
+  commitLabel = t('common.save'),
+  cancelLabel = t('common.cancel'),
   select = true,
   displayValue,
   onCommit,
@@ -107,7 +108,7 @@ export function inlineTextEdit(anchor, {
     } catch (err) {
       console.error(err);
       form.classList.remove('is-saving');
-      errorEl.textContent = err?.message || 'Could not save';
+      errorEl.textContent = err?.message || t('inlineUi.saveFailed');
       errorEl.hidden = false;
     }
   });
@@ -157,9 +158,9 @@ export function inlineTextEdit(anchor, {
 }
 
 export function inlineConfirm(anchor, {
-  message = 'Are you sure?',
-  confirmLabel = 'Confirm',
-  cancelLabel = 'Cancel',
+  message = t('inlineUi.areYouSure'),
+  confirmLabel = t('dialog.confirmAction'),
+  cancelLabel = t('common.cancel'),
   danger = false,
   placement = 'after',
   onConfirm,
@@ -208,7 +209,7 @@ export function inlineConfirm(anchor, {
     } catch (err) {
       console.error(err);
       wrap.classList.remove('is-saving');
-      msgEl.textContent = err?.message || 'Action failed';
+      msgEl.textContent = err?.message || t('note.actionFailed');
     }
   });
 

@@ -6,6 +6,8 @@ import {
     escapeHtml,
     lucide,
   } from '../core.js';
+
+  import { t } from '../i18n/index.js';
   
   import {
     visibleElementsInSlide,
@@ -233,7 +235,7 @@ async function openPublicSlideshow(drawing) {
     <header class="yps-slides-top">
       ${lucide('presentation', 18)}
       <div class="yps-slides-title" data-title></div>
-      <button class="yps-icon-btn" data-close>${lucide('x', 16)}</button>
+      <button class="yps-icon-btn" data-close title="${escapeHtml(t('common.close'))}" aria-label="${escapeHtml(t('common.close'))}">${lucide('x', 16)}</button>
     </header>
 
     <main class="yps-slides-stage" data-stage>
@@ -241,9 +243,9 @@ async function openPublicSlideshow(drawing) {
     </main>
 
     <footer class="yps-slides-bottom">
-      <button class="yps-btn" data-prev>${lucide('chevron-left', 14)} Prev</button>
+      <button class="yps-btn" data-prev>${lucide('chevron-left', 14)} ${escapeHtml(t('slides.viewer.prev'))}</button>
       <span data-count style="color:var(--text-dim);font-size:12px;min-width:80px;text-align:center"></span>
-      <button class="yps-btn primary" data-next>Next ${lucide('chevron-right', 14)}</button>
+      <button class="yps-btn primary" data-next>${escapeHtml(t('slides.viewer.next'))} ${lucide('chevron-right', 14)}</button>
     </footer>
   `;
 
@@ -275,7 +277,7 @@ async function openPublicSlideshow(drawing) {
     const myToken = ++renderToken;
     const slide = slides[index];
 
-    modal.querySelector('[data-title]').textContent = slide.title || `Slide ${index + 1}`;
+    modal.querySelector('[data-title]').textContent = slide.title || t('slides.defaultTitle', { n: index + 1 });
     modal.querySelector('[data-count]').textContent = `${index + 1} / ${slides.length}`;
 
     let svg;
@@ -285,7 +287,7 @@ async function openPublicSlideshow(drawing) {
     } catch {
       if (myToken !== renderToken) return;
 
-      viewport.innerHTML = '<div class="yps-slides-error">Slide unavailable</div>';
+      viewport.innerHTML = `<div class="yps-slides-error">${escapeHtml(t('slides.viewer.unavailable'))}</div>`;
       return;
     }
 
@@ -405,8 +407,8 @@ async function openPublicSlideshow(drawing) {
       bar.className = 'yps-slides-bar';
       bar.innerHTML = `
         ${lucide('presentation', 15)}
-        <strong>${escapeHtml(slides.length)} slide${slides.length === 1 ? '' : 's'}</strong>
-        <button class="yps-btn primary" type="button">${lucide('play', 14)} Start slideshow</button>
+        <strong>${escapeHtml(t('present.pick.slides', { count: slides.length }))}</strong>
+        <button class="yps-btn primary" type="button">${lucide('play', 14)} ${escapeHtml(t('slides.viewer.start'))}</button>
       `;
   
       bar.querySelector('button')?.addEventListener('click', () => {

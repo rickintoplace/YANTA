@@ -20,6 +20,9 @@ import {
   } from '../sync.js';
 
   import { pendingNudgeId } from '../dashboard-nudges.js';
+  import { t } from '../i18n/index.js';
+
+  const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
   const REMINDER_STATE_KEY = 'yanta.syncReminder.state.v1';
   
@@ -317,15 +320,13 @@ import {
         </span>
   
         <span class="yanta-sync-reminder-main">
-          <strong>Protect your YANTA data</strong>
+          <strong>${esc(t('sync.reminder.title'))}</strong>
           <p>
-            Your notes are currently stored on this device only.
-            Set up sync or download an encrypted backup so you don't
-            lose your data.
+            ${esc(t('sync.reminder.body'))}
           </p>
         </span>
 
-        <button class="yanta-sync-reminder-close" data-sync-reminder-snooze title="Remind me later">
+        <button class="yanta-sync-reminder-close" data-sync-reminder-snooze title="${esc(t('sync.reminder.later'))}">
           ${lucide('x', 15)}
         </button>
       </div>
@@ -333,12 +334,12 @@ import {
       <div class="yanta-sync-reminder-actions">
         <button class="btn" data-sync-reminder-backup>
           ${lucide('download', 14)}
-          Download backup
+          ${esc(t('sync.reminder.backup'))}
         </button>
 
         <button class="btn primary" data-sync-reminder-cloud>
           ${lucide('cloud', 14)}
-          Set up Cloud Sync
+          ${esc(t('sync.reminder.setUp'))}
         </button>
       </div>
     `;
@@ -360,7 +361,7 @@ import {
         });
       } catch (err) {
         console.error('[YANTA Sync Reminder] could not open Cloud setup', err);
-        toast('Could not open Cloud Sync setup', 'error');
+        toast(t('sync.reminder.openFailed'), 'error');
       }
     });
   
@@ -377,10 +378,10 @@ import {
           snoozedUntil: now() + BACKUP_OK_MS,
         });
   
-        toast('Encrypted backup downloaded', 'success');
+        toast(t('sync.reminder.backupDone'), 'success');
       } catch (err) {
         console.error('[YANTA Sync Reminder] backup failed', err);
-        toast('Could not create backup', 'error');
+        toast(t('sync.reminder.backupFailed'), 'error');
       }
     });
   

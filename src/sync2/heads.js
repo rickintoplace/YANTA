@@ -14,6 +14,7 @@
 // ============================================================
 
 import * as Y from 'yjs';
+import { t } from '../i18n/index.js';
 
 import {
   encryptBytes,
@@ -179,7 +180,7 @@ export async function downloadVaultHeads(engine) {
     direction: 'down',
     current: 0,
     total: entries.length,
-    message: 'Checking latest vault heads…',
+    message: t('sync.engine.checkingVaultHeads'),
   });
 
   for (const entry of entries) {
@@ -327,7 +328,7 @@ export async function downloadKnownNoteHeads(engine, noteIds = []) {
     direction: 'down',
     current,
     total,
-    message: 'Checking latest note heads…',
+    message: t('sync.engine.checkingNoteHeads'),
   });
 
   for await (const { item: noteId, value: res } of mapOrdered(
@@ -479,7 +480,7 @@ export async function pruneSeenUpdatesCoveredByHeads(engine, {
       detailed: unique.length > 50,
       current,
       total: unique.length,
-      message: 'Pruning sync journal covered by latest heads…',
+      message: t('sync.heads.pruning'),
     });
 
     try {

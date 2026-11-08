@@ -1004,12 +1004,12 @@ function makeModal({
   }
   
   export function yantaChoice({
-    title = 'Choose',
+    title = t('dialog.choose'),
     message = '',
     icon = 'list-checks',
     danger = false,
     choices = [],
-    cancelLabel = 'Cancel',
+    cancelLabel = t('common.cancel'),
   } = {}) {
     return new Promise((resolve) => {
       const dlg = makeModal({
@@ -1086,7 +1086,7 @@ function makeModal({
   
     while (f && !seen.has(f.id)) {
       seen.add(f.id);
-      parts.unshift(f.name || 'Folder');
+      parts.unshift(f.name || t('items.folderFallback'));
       f = f.parentId ? state.folders.get(f.parentId) : null;
     }
   
@@ -1102,13 +1102,13 @@ function makeModal({
   }
   
   export function yantaFolderPicker({
-    title = 'Choose folder',
+    title = t('dialog.folderPicker.title'),
     message = '',
     allowNone = true,
-    noneLabel = 'No folder / Home',
+    noneLabel = t('tree.move.noFolderHome'),
     currentFolderId = '',
     isDisabled = null,
-    disabledHint = 'Not available',
+    disabledHint = t('dialog.folderPicker.notAvailable'),
   } = {}) {
     return new Promise((resolve) => {
       const dlg = makeModal({
@@ -1137,7 +1137,7 @@ function makeModal({
         dlg.body.innerHTML = `
           <div class="yanta-folder-picker-search-row">
             ${lucide('search', 15)}
-            <input class="yanta-dialog-input" data-folder-search value="${escapeAttr(query)}" placeholder="Search folders…" autocomplete="off" spellcheck="false" />
+            <input class="yanta-dialog-input" data-folder-search value="${escapeAttr(query)}" placeholder="${escapeAttr(t('dialog.folderPicker.search'))}" autocomplete="off" spellcheck="false" />
           </div>
   
           <div class="yanta-folder-picker-list">
@@ -1148,7 +1148,7 @@ function makeModal({
                     <span class="yanta-folder-picker-icon">${lucide('home', 16)}</span>
                     <span class="yanta-folder-picker-main">
                       <strong>${escapeHtml(noneLabel)}</strong>
-                      <small>Place item at the top level</small>
+                      <small>${escapeHtml(t('dialog.folderPicker.noneHint'))}</small>
                     </span>
                   </button>
                 `
@@ -1168,13 +1168,13 @@ function makeModal({
                         ${disabled ? 'disabled' : ''}>
                         <span class="yanta-folder-picker-icon">${lucide(f.icon || 'folder', 16)}</span>
                         <span class="yanta-folder-picker-main">
-                          <strong>${escapeHtml(f.name || 'Folder')}</strong>
-                          <small>${escapeHtml(disabled ? disabledHint : path || 'Top level')}</small>
+                          <strong>${escapeHtml(f.name || t('items.folderFallback'))}</strong>
+                          <small>${escapeHtml(disabled ? disabledHint : path || t('dialog.folderPicker.topLevel'))}</small>
                         </span>
                       </button>
                     `;
                   }).join('')
-                : `<div class="yanta-folder-picker-empty">No folders found.</div>`
+                : `<div class="yanta-folder-picker-empty">${escapeHtml(t('dialog.folderPicker.empty'))}</div>`
             }
           </div>
         `;
@@ -1218,7 +1218,7 @@ function makeModal({
       };
   
       const cancel = button({
-        label: 'Cancel',
+        label: t('common.cancel'),
         kind: 'ghost',
         icon: 'x',
       });

@@ -23,6 +23,7 @@
 import * as Y from 'yjs';
 
 import { $, state, store, toast, uid, isSpaceMountedNote, isPrivateItem, isPrivateCarrier } from '../core.js';
+import { t as i18n } from '../i18n/index.js';
 import { isNoteTitleFieldFocused, rebuildWikilinkIndex } from '../notes.js';
 import { renderTree } from '../tree.js';
 
@@ -1044,7 +1045,7 @@ export class Sync2AppEngine {
       phase: 'error',
       status: 'error',
       direction: 'up',
-      message: `Upload rate limited. Retrying in ${Math.ceil(retryMs / 1000)}s.`,
+      message: i18n('sync.engine.rateLimited', { seconds: Math.ceil(retryMs / 1000) }),
     });
   }
 
@@ -1063,7 +1064,7 @@ export class Sync2AppEngine {
     this.uploadBlockedUntil = Date.now() + retryMs;
 
     const message =
-      'Cloud storage limit reached. Optimize cloud storage or upgrade to YANTA Plus.';
+      i18n('sync.engine.quotaReached');
 
     this.progress({
       phase: 'error',
@@ -1600,7 +1601,7 @@ export class Sync2AppEngine {
       this.progress?.({
         phase: 'finalize',
         direction: 'sync',
-        message: 'Marked current vault metadata as synchronized.',
+        message: i18n('sync.engine.markedSynced'),
         reason,
       });
     }
@@ -1641,7 +1642,7 @@ export class Sync2AppEngine {
         phase: 'uploadVaultHead',
         direction: 'up',
         detailed: true,
-        message: 'Uploading latest encrypted vault head…',
+        message: i18n('sync.engine.uploadingVaultHead'),
         reason,
       });
 
@@ -1698,7 +1699,7 @@ export class Sync2AppEngine {
         current: uploadedNotes + 1,
         total: Math.min(maxNoteHeads, noteIds.size),
         noteId,
-        message: 'Uploading latest encrypted note head…',
+        message: i18n('sync.engine.uploadingNoteHead'),
         reason,
       });
 
@@ -1753,9 +1754,11 @@ export class Sync2AppEngine {
         direction: 'up',
         detailed: false,
         message:
-          `Latest heads updated` +
-          `${noteIdsWithHeads.length ? ` · ${noteIdsWithHeads.length} note${noteIdsWithHeads.length === 1 ? '' : 's'}` : ''}` +
-          `${prune.deleted ? ` · pruned ${prune.deleted} covered update${prune.deleted === 1 ? '' : 's'}` : ''}.`,
+          [
+            i18n('sync.engine.headsUpdated'),
+            noteIdsWithHeads.length ? i18n('sync.engine.headsNotes', { count: noteIdsWithHeads.length }) : '',
+            prune.deleted ? i18n('sync.engine.headsPruned', { count: prune.deleted }) : '',
+          ].filter(Boolean).join(' · '),
         reason,
       });
     }
@@ -1820,7 +1823,7 @@ export class Sync2AppEngine {
       this.progress({
         phase: 'uploadOutbox',
         direction: 'up',
-        message: 'Queued full vault metadata update.',
+        message: i18n('sync.engine.queuedVaultFull'),
       });
     }
 
@@ -1853,7 +1856,7 @@ export class Sync2AppEngine {
         this.progress({
           phase: 'uploadOutbox',
           direction: 'up',
-          message: `Queued ${queuedNotes} changed note full updates. Remaining notes will be queued on next sync.`,
+          message: i18n('sync.engine.queuedNotesLimit', { count: queuedNotes }),
         });
 
         break;
@@ -1887,7 +1890,7 @@ export class Sync2AppEngine {
       this.progress({
         phase: 'uploadOutbox',
         direction: 'up',
-        message: `Queued ${queuedNotes} changed note update${queuedNotes === 1 ? '' : 's'}.`,
+        message: i18n('sync.engine.queuedNotes', { count: queuedNotes }),
       });
     }
 
@@ -1911,7 +1914,7 @@ export class Sync2AppEngine {
       phase: 'start',
       direction: 'up',
       detailed: true,
-      message: 'Preparing full encrypted snapshot…',
+      message: i18n('sync.engine.preparingSnapshot'),
     });
 
     const ids = new Set();
@@ -1959,7 +1962,7 @@ export class Sync2AppEngine {
         phase: 'uploadAssets',
         direction: 'up',
         detailed: true,
-        message: 'Checking image and drawing assets…',
+        message: i18n('sync.engine.checkingMediaAssets'),
       });
 
       await uploadMissingAssets(this);
@@ -2002,7 +2005,7 @@ export class Sync2AppEngine {
         phase: 'uploadAssets',
         direction: 'up',
         detailed: true,
-        message: 'Checking image and drawing assets…',
+        message: i18n('sync.engine.checkingMediaAssets'),
       });
 
       await uploadMissingAssets(this);
@@ -2011,7 +2014,7 @@ export class Sync2AppEngine {
     this.progress({
       phase: 'finalize',
       direction: 'up',
-      message: 'Uploading final device state…',
+      message: i18n('sync.engine.uploadingFinal'),
     });
 
     await this.uploadOutbox();
@@ -2020,11 +2023,11 @@ export class Sync2AppEngine {
       phase: 'complete',
       status: 'done',
       direction: 'up',
-      message: 'Full encrypted snapshot uploaded.',
+      message: i18n('sync.engine.snapshotUploaded'),
     });
 
     if (verbose) {
-      toast('Sync: full state snapshot pushed', 'success');
+      toast(i18n('sync.engine.snapshotPushed'), 'success');
     }
 
     return this.status();
@@ -2056,7 +2059,7 @@ export class Sync2AppEngine {
 
     this.progress({
       phase: 'init',
-      message: 'Loading remote index…',
+      message: i18n('sync.engine.loadingIndex'),
     });
 
     await this.loadRemoteIndex({
@@ -2065,7 +2068,7 @@ export class Sync2AppEngine {
 
     this.progress({
       phase: 'start',
-      message: 'Starting sync…',
+      message: i18n('sync.engine.starting'),
     });
 
     if (this.syncing) return this.status();
@@ -2103,7 +2106,7 @@ export class Sync2AppEngine {
       this.progress({
         phase: 'uploadOutbox',
         direction: 'up',
-        message: 'Uploading queued changes…',
+        message: i18n('sync.engine.uploadingQueued'),
       });
   
       let firstPush = {
@@ -2123,7 +2126,7 @@ export class Sync2AppEngine {
           phase: 'uploadOutbox',
           status: 'error',
           direction: 'up',
-          message: 'One local sync object is too large. Continuing download first…',
+          message: i18n('sync.engine.oversizedContinue'),
         });
       }
 
@@ -2150,7 +2153,7 @@ export class Sync2AppEngine {
       this.progress({
         phase: 'downloadVaultHeads',
         direction: 'down',
-        message: 'Checking latest vault heads…',
+        message: i18n('sync.engine.checkingVaultHeads'),
       });
 
       const vaultHeads = await downloadVaultHeads(this);
@@ -2175,7 +2178,7 @@ export class Sync2AppEngine {
         this.progress({
           phase: 'downloadVaultSnapshots',
           direction: 'down',
-          message: 'Checking vault snapshots…',
+          message: i18n('sync.engine.checkingVaultSnapshots'),
         });
 
         const vaultSnapshots = await downloadVaultSnapshots(this);
@@ -2191,7 +2194,7 @@ export class Sync2AppEngine {
       this.progress({
         phase: 'downloadVaultUpdates',
         direction: 'down',
-        message: 'Checking vault updates…',
+        message: i18n('sync.engine.checkingVaultUpdates'),
       });
 
       vaultUpdates = await this.downloadVaultUpdates();
@@ -2232,7 +2235,7 @@ export class Sync2AppEngine {
         this.progress({
           phase: 'downloadAssets',
           direction: 'down',
-          message: 'Checking missing assets…',
+          message: i18n('sync.engine.checkingMissingAssets'),
         });
 
         await downloadMissingAssets(this);
@@ -2243,7 +2246,7 @@ export class Sync2AppEngine {
       this.progress({
         phase: 'downloadNoteHeads',
         direction: 'down',
-        message: 'Checking latest note heads…',
+        message: i18n('sync.engine.checkingNoteHeads'),
       });
 
       {
@@ -2277,7 +2280,7 @@ export class Sync2AppEngine {
         this.progress({
           phase: 'downloadNoteSnapshots',
           direction: 'down',
-          message: 'Checking note snapshots…',
+          message: i18n('sync.engine.checkingNoteSnapshots'),
         });
 
         const noteSnapshots = await this.downloadKnownNoteSnapshots();
@@ -2299,7 +2302,7 @@ export class Sync2AppEngine {
       this.progress({
         phase: 'downloadNoteUpdates',
         direction: 'down',
-        message: 'Checking note updates…',
+        message: i18n('sync.engine.checkingNoteUpdates'),
       });
 
       noteUpdates = await this.downloadKnownNoteUpdates();
@@ -2324,7 +2327,7 @@ export class Sync2AppEngine {
         this.progress({
           phase: 'downloadAssets',
           direction: 'down',
-          message: 'Checking missing assets…',
+          message: i18n('sync.engine.checkingMissingAssets'),
         });
 
         await downloadMissingAssets(this);
@@ -2361,7 +2364,7 @@ export class Sync2AppEngine {
           phase: 'uploadOutbox',
           status: 'error',
           direction: 'up',
-          message: 'Local upload still has an oversized object. Download completed; upload will retry after compaction.',
+          message: i18n('sync.engine.oversizedRetry'),
         });
       }
 
@@ -2399,13 +2402,13 @@ export class Sync2AppEngine {
     state.globalSyncStatus = 'synced';
 
     if (verbose) {
-      toast('Sync complete', 'success');
+      toast(i18n('settings.sync.syncCompleteToast'), 'success');
     }
 
     this.progress({
       phase: 'complete',
       status: 'done',
-      message: 'Sync complete.',
+      message: i18n('settings.sync.syncComplete'),
     });
 
     return this.status();
@@ -2444,7 +2447,7 @@ export class Sync2AppEngine {
       }
   
       if (verbose) {
-        toast('Sync2 failed: ' + (err?.message || String(err)), 'error');
+        toast(i18n('sync.engine.failedToast', { error: err?.message || String(err) }), 'error');
       }
   
       throw err;
@@ -2498,7 +2501,7 @@ export class Sync2AppEngine {
         phase: 'uploadOutbox',
         direction: 'up',
         detailed: false,
-        message: `Dropped ${dropped} redundant vault metadata update${dropped === 1 ? '' : 's'}.`,
+        message: i18n('sync.engine.droppedVault', { count: dropped }),
       });
     }
 
@@ -2580,7 +2583,7 @@ export class Sync2AppEngine {
         phase: 'uploadOutbox',
         direction: 'up',
         detailed: false,
-        message: `Dropped ${dropped} redundant note update${dropped === 1 ? '' : 's'}.`,
+        message: i18n('sync.engine.droppedNotes', { count: dropped }),
       });
     }
 
@@ -2766,7 +2769,7 @@ export class Sync2AppEngine {
         phase: 'uploadOutbox',
         direction: 'up',
         detailed: false,
-        message: `Coalesced ${before} queued changes into ${after} upload pack${after === 1 ? '' : 's'}.`,
+        message: i18n('sync.engine.coalesced', { before, count: after }),
       });
     }
 
@@ -2862,7 +2865,7 @@ export class Sync2AppEngine {
               direction: 'up',
               current: Math.min(processed, total),
               total,
-              message: 'Skipped redundant vault metadata update.',
+              message: i18n('sync.engine.skippedVault'),
             });
 
             continue;
@@ -2889,7 +2892,7 @@ export class Sync2AppEngine {
               current: Math.min(processed, total),
               total,
               noteId: item.noteId || null,
-              message: 'Skipped redundant note update.',
+              message: i18n('sync.engine.skippedNote'),
             });
 
             continue;
@@ -2929,8 +2932,8 @@ export class Sync2AppEngine {
           total,
           noteId: item.noteId || null,
           message: item.kind === 'vault'
-            ? 'Uploading vault update…'
-            : 'Uploading note update…',
+            ? i18n('sync.engine.uploadingVaultUpdate')
+            : i18n('sync.engine.uploadingNoteUpdate'),
         });
 
         const packBytes = createAndEncodeUpdatePack({
@@ -3031,7 +3034,7 @@ export class Sync2AppEngine {
           direction: 'up',
           current: total,
           total,
-          message: `${uploaded} update${uploaded === 1 ? '' : 's'} uploaded.`,
+          message: i18n('sync.engine.uploaded', { count: uploaded }),
         });
       }
 
@@ -3070,7 +3073,7 @@ export class Sync2AppEngine {
       direction: 'down',
       current: processed,
       total: entries.length,
-      message: 'Already seen.',
+      message: i18n('sync.engine.alreadySeen'),
     });
 
     const seen = createSeenBatch(this);
@@ -3095,7 +3098,7 @@ export class Sync2AppEngine {
         direction: 'down',
         current: processed,
         total: entries.length,
-        message: 'Downloading vault update…',
+        message: i18n('sync.engine.downloadingVaultUpdate'),
       });
 
       if (plain == null) continue;
@@ -3505,8 +3508,8 @@ export class Sync2AppEngine {
     try {
       toast(
         rescued.length === 1
-          ? `A note you changed was deleted on another device. Your version was kept as "${rescued[0].title}".`
-          : `${rescued.length} notes you changed were deleted on another device. Your versions were kept as "(recovered)" copies.`,
+          ? i18n('sync.engine.rescuedOne', { title: rescued[0].title })
+          : i18n('sync.engine.rescuedMany', { count: rescued.length }),
         'info'
       );
     } catch {}

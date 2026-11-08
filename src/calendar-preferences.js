@@ -13,6 +13,7 @@
 import {
   store,
 } from './core.js';
+import { getLocale } from './i18n/index.js';
 
 export const CALENDAR_PREFS_KEY = 'calendar.preferences.v1';
 
@@ -219,7 +220,16 @@ export function resolvedCalendarLocale(prefs = getCalendarPreferences()) {
     return prefs.locale;
   }
 
-  return navigator.language || 'en-GB';
+  /*
+    "Auto" follows the app's language, not the browser's: a German app in
+    an English browser should not name its months in English. The
+    browser's region still counts when the language matches (en-US
+    dates for an American, de-AT for an Austrian).
+  */
+  const app = String(getLocale() || '').toLowerCase();
+  const browser = String(navigator.language || '');
+  if (!app) return browser || 'en-GB';
+  return browser.toLowerCase().split('-')[0] === app.split('-')[0] ? browser : app;
 }
 
 export function fullCalendarLocale(prefs = getCalendarPreferences()) {

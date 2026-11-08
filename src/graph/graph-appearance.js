@@ -604,7 +604,7 @@ export function openAppearancePicker(opts) {
       ? names.filter((name) => name.includes(q))
       : names;
     const html = [
-      `<button type="button" class="${local.icon === defaultIcon ? 'selected' : ''}" data-yap-icon="${escapeHtml(defaultIcon)}" title="Default (${escapeHtml(defaultIcon)})">${lucide(defaultIcon, 18)}</button>`,
+      `<button type="button" class="${local.icon === defaultIcon ? 'selected' : ''}" data-yap-icon="${escapeHtml(defaultIcon)}" title="${escapeHtml(t('appearance.defaultIcon', { icon: defaultIcon }))}">${lucide(defaultIcon, 18)}</button>`,
     ];
     for (const name of list) {
       if (name === defaultIcon) continue;

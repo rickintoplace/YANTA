@@ -49,7 +49,8 @@ import {
   toast,
   debounce,
 } from './core.js';
-import { t } from './i18n/index.js';
+// `t` is shadowed by the theme object in the canvas code; i18n is the same function.
+import { t, t as i18n } from './i18n/index.js';
 import { wikilinkIndex } from './features-state.js';
 import { openNote, rebuildWikilinkIndex } from './notes.js';
 import { renderTree } from './tree.js';
@@ -438,14 +439,14 @@ function folderPath(folderId) {
   let f = state.folders.get(folderId);
   while (f && !seen.has(f.id)) {
     seen.add(f.id);
-    out.unshift(f.name || 'Folder');
+    out.unshift(f.name || i18n('items.folderFallback'));
     f = f.parentId ? state.folders.get(f.parentId) : null;
   }
   return out;
 }
 function noteFolderLabel(note) {
   const path = folderPath(note.folderId);
-  return path.length ? path.join(' / ') : 'No folder';
+  return path.length ? path.join(' / ') : i18n('graphPreview.noFolder');
 }
 function folderDepth(folderId) {
   let d = 0;
@@ -691,8 +692,8 @@ function buildGraph() {
         gid: graphIdForFolder(f.id),
         id: f.id,
         type: NODE.FOLDER,
-        title: f.name || 'Folder',
-        subtitle: folderPath(f.id).join(' / ') || 'Folder',
+        title: f.name || i18n('items.folderFallback'),
+        subtitle: folderPath(f.id).join(' / ') || i18n('items.folderFallback'),
         icon: f.icon || 'folder',
         color,
         x: pos.x,
@@ -1877,10 +1878,10 @@ function drawEmptyState(ctx, t, dpr) {
   ctx.textAlign = 'center';
   ctx.fillStyle = t.textDim;
   ctx.font = `600 15px ${t.font}`;
-  ctx.fillText('Nothing to show yet', w / 2, h / 2 - 10);
+  ctx.fillText(i18n('graph.emptyTitle'), w / 2, h / 2 - 10);
   ctx.fillStyle = t.textFaint;
   ctx.font = `12px ${t.font}`;
-  ctx.fillText('Right-click to create your first note or folder.', w / 2, h / 2 + 12);
+  ctx.fillText(i18n('graph.emptyHint'), w / 2, h / 2 + 12);
 }
 function drawGraph() {
   const c = graph.canvas;
@@ -2969,7 +2970,7 @@ function focusInsightNode(gid) {
     return;
   }
   const node = graph.nodes[idx];
-  setSpotlight(node.title || 'Focused note', [gid]);
+  setSpotlight(node.title || i18n('graph.focusedNote'), [gid]);
   centerOnNode(node, Math.max(1.3, graph.scale), { animated: true });
 }
 // ---- Panel assembly ----
@@ -3120,7 +3121,7 @@ function buildControlsPanel({ paneMode = false } = {}) {
     resetGraphForces();
     refreshControlsUI();
     kickSimulation(0.7);
-    toast('Forces reset to defaults', 'success');
+    toast(t('graph.forcesReset'), 'success');
   });
   const forcesGroup = ctlGroup(t('graph.controls.forces'), resetBtn);
   const pct = (v) => `${Math.round(v * 100)}%`;

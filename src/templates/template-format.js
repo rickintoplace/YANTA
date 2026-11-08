@@ -21,6 +21,7 @@
 */
 
 import { parseSkillFrontmatter } from '../ai/skills.js';
+import { t } from '../i18n/index.js';
 
 /*
   Same indented-block reader Pulse uses for its `pulse:` block. io.js's
@@ -46,12 +47,13 @@ function readIndentedBlock(rawFrontmatter, key) {
   return out;
 }
 
+// `label` is a getter so it reads the catalog at render time, not at import.
 export const TEMPLATE_CATEGORIES = [
-  { id: 'invite', label: 'Send to someone', icon: 'send' },
-  { id: 'freelance', label: 'Freelance & consulting', icon: 'briefcase' },
-  { id: 'teaching', label: 'Teaching', icon: 'graduation-cap' },
-  { id: 'research', label: 'Research & thesis', icon: 'microscope' },
-  { id: 'personal', label: 'Personal', icon: 'heart' },
+  { id: 'invite', get label() { return t('templates.category.invite'); }, icon: 'send' },
+  { id: 'freelance', get label() { return t('templates.category.freelance'); }, icon: 'briefcase' },
+  { id: 'teaching', get label() { return t('templates.category.teaching'); }, icon: 'graduation-cap' },
+  { id: 'research', get label() { return t('templates.category.research'); }, icon: 'microscope' },
+  { id: 'personal', get label() { return t('templates.category.personal'); }, icon: 'heart' },
 ];
 
 /**

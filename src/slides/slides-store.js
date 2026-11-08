@@ -7,6 +7,8 @@ import {
   state,
 } from '../core.js';
 
+import { t } from '../i18n/index.js';
+
 import {
   getDrawing,
   setDrawing,
@@ -174,7 +176,7 @@ function slidesFromSceneFrames(elements = []) {
     return normalizeSlide({
       id: slideId,
       order: index,
-      title: `Slide ${index + 1}`,
+      title: t('slides.defaultTitle', { n: index + 1 }),
       frameElementId: frame.id,
       bounds,
       aspectRatio: bounds.width / bounds.height,
@@ -245,7 +247,7 @@ export function createSlide(noteId, drawingId, {
   const slides = normalizeSlides(d.slides || []);
 
   const slide = normalizeSlide({
-    title: title || `Slide ${slides.length + 1}`,
+    title: title || t('slides.defaultTitle', { n: slides.length + 1 }),
     order: slides.length,
     bounds,
     created: now(),

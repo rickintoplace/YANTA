@@ -11,7 +11,7 @@
 import { isChatEnabled } from './chat/chat-enabled.js';
 import { store } from './core.js';
 import { yantaPrompt } from './dialogs.js';
-import { getLocale, tList } from './i18n/index.js';
+import { getLocale, t, tList } from './i18n/index.js';
 
 export const DISPLAY_NAME_SETTING = 'user.displayName';
 
@@ -187,11 +187,11 @@ export async function editGreetingDisplayName() {
   const current = String(await store.settings.get(DISPLAY_NAME_SETTING, '') || '');
 
   const next = await yantaPrompt({
-    title: 'Display name',
-    message: 'Used for the dashboard greeting. Leave empty to use your chat profile name.',
-    label: 'Name',
+    title: t('dashboard.displayName.title'),
+    message: t('dashboard.displayName.message'),
+    label: t('dashboard.displayName.label'),
     initial: current,
-    placeholder: 'e.g. Rick',
+    placeholder: t('dashboard.displayName.placeholder'),
   });
 
   if (next === null || next === current) return false;

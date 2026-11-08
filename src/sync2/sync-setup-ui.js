@@ -44,6 +44,7 @@ import {
 
 import { openBoundOverlay } from '../overlay-history.js';
 import { yantaPrompt } from '../dialogs.js';
+import { t, getLocale } from '../i18n/index.js';
 
 import {
   syncKeyToBytes,
@@ -87,12 +88,12 @@ function isStandalonePwa() {
 }
 
 function fmtTime(ts) {
-  if (!ts) return 'never';
+  if (!ts) return t('sync.setup.never');
 
   const d = new Date(ts);
-  if (Number.isNaN(d.getTime())) return 'never';
+  if (Number.isNaN(d.getTime())) return t('sync.setup.never');
 
-  return d.toLocaleString([], {
+  return d.toLocaleString(getLocale(), {
     dateStyle: 'short',
     timeStyle: 'short',
   });
@@ -117,7 +118,7 @@ function renderDevicesHtml() {
   const current = currentDeviceId();
 
   if (!devices.length) {
-    return `<div class="yanta-sync2-empty">No device activity recorded yet.</div>`;
+    return `<div class="yanta-sync2-empty">${escapeHtmlLocal(t('sync.setup.noDevices'))}</div>`;
   }
 
   return `
@@ -125,15 +126,15 @@ function renderDevicesHtml() {
       ${devices.map((d) => `
         <div class="yanta-sync2-device ${d.id === current ? 'current' : ''}">
           <div class="yanta-sync2-device-head">
-            <strong>${escapeHtmlLocal(d.name || d.id || 'Device')}</strong>
-            ${d.id === current ? '<span>Current device</span>' : ''}
+            <strong>${escapeHtmlLocal(d.name || d.id || t('sync.setup.device'))}</strong>
+            ${d.id === current ? `<span>${escapeHtmlLocal(t('sync.setup.currentDevice'))}</span>` : ''}
           </div>
           <div class="yanta-sync2-device-meta">
-            <div>Last seen: ${escapeHtmlLocal(fmtTime(d.lastSeenAt))}</div>
-            <div>Last sync: ${escapeHtmlLocal(fmtTime(d.lastSyncAt))}</div>
-            <div>Last push: ${escapeHtmlLocal(fmtTime(d.lastPushAt))}</div>
-            <div>Last pull: ${escapeHtmlLocal(fmtTime(d.lastPullAt))}</div>
-            <div>Status: ${escapeHtmlLocal(d.syncStatus || 'unknown')}</div>
+            <div>${escapeHtmlLocal(t('sync.setup.lastSeen', { time: fmtTime(d.lastSeenAt) }))}</div>
+            <div>${escapeHtmlLocal(t('sync.setup.lastSync', { time: fmtTime(d.lastSyncAt) }))}</div>
+            <div>${escapeHtmlLocal(t('sync.setup.lastPush', { time: fmtTime(d.lastPushAt) }))}</div>
+            <div>${escapeHtmlLocal(t('sync.setup.lastPull', { time: fmtTime(d.lastPullAt) }))}</div>
+            <div>${escapeHtmlLocal(t('sync.setup.status', { status: d.syncStatus || t('sync.setup.statusUnknown') }))}</div>
           </div>
         </div>
       `).join('')}
@@ -169,7 +170,7 @@ function copyFieldHtml({
   value,
   rows = 3,
   kind = 'textarea',
-  copyLabel = 'Copy',
+  copyLabel = t('common.copy'),
   placeholder = '',
   readonly = true,
 } = {}) {
@@ -216,9 +217,9 @@ function ensureModal() {
 
       try {
         await navigator.clipboard.writeText(field.value || field.textContent || '');
-        toast('Copied', 'success');
+        toast(t('sync.setup.copied'), 'success');
       } catch {
-        toast('Copy failed', 'error');
+        toast(t('sync.setup.copyFailed'), 'error');
       }
 
       return;
@@ -356,7 +357,7 @@ async function deleteAllGoogleDriveSyncObjects() {
 
   const result = await remote.deleteAllYantaFiles({
     onProgress({ deleted, total }) {
-      setStatus(`Deleting encrypted YANTA Sync data… ${deleted}/${total}`);
+      setStatus(t('sync.setup.deletingProgress', { deleted, total }));
     },
   });
 
@@ -380,18 +381,15 @@ async function confirmRemoteVaultDeletion() {
   const word = 'DELETE';
 
   const typed = await yantaPrompt({
-    title: 'Delete cloud sync data?',
-    message:
-      'This permanently deletes all encrypted YANTA Sync data in this Google Drive. ' +
-      'Devices that have not synced recently lose their unsynced changes, and data that exists only in the cloud is gone. ' +
-      `Type ${word} to continue.`,
+    title: t('sync.setup.deleteTitle'),
+    message: t('sync.setup.deleteMessage', { word }),
     placeholder: word,
-    confirmLabel: 'Delete permanently',
+    confirmLabel: t('tree.trash.deletePermanently'),
     danger: true,
     required: true,
     select: false,
     validate: (value) =>
-      String(value || '').trim() === word ? true : `Type ${word} to confirm.`,
+      String(value || '').trim() === word ? true : t('sync.setup.deleteTypeToConfirm', { word }),
   });
 
   return String(typed || '').trim() === word;
@@ -428,7 +426,7 @@ async function importKeyOrPairingText(text) {
 
 async function setupCreateNewSyncVault() {
   try {
-    setStatus('Connecting to Google Drive…');
+    setStatus(t('sync.setup.connectingDrive'));
 
     let runtime;
 
@@ -444,14 +442,14 @@ async function setupCreateNewSyncVault() {
       return;
     }
 
-    setStatus('Uploading encrypted full snapshot…');
+    setStatus(t('sync.setup.uploadingSnapshot'));
 
     await runtime.pushFullStateNow({
       includeSnapshots: true,
       verbose: false,
     });
 
-    setStatus('Creating pairing QR…');
+    setStatus(t('sync.setup.creatingQr'));
 
     const pairingUrl = await createSync2PairingUrl({
       provider: 'google-drive',
@@ -467,34 +465,34 @@ async function setupCreateNewSyncVault() {
       syncKey: runtime.syncKey,
     });
 
-    toast('Google Drive Sync enabled', 'success');
+    toast(t('sync.setup.driveEnabled'), 'success');
   } catch (err) {
     console.error(err);
     setStatus(err?.message || String(err), 'error');
-    toast('Google Drive Sync setup failed', 'error');
+    toast(t('sync.setup.driveSetupFailed'), 'error');
   }
 }
 
 async function connectExistingDeviceWithText(text) {
   try {
-    setStatus('Reading Sync Key or pairing link…');
+    setStatus(t('sync.setup.readingKey'));
 
     await importKeyOrPairingText(text);
 
-    setStatus('Removing untouched local Welcome vault if present…');
+    setStatus(t('sync.setup.removingWelcome'));
 
     await removePristineWelcomeVaultIfPresent({
       reason: 'cloud-sync-connect',
     });
 
-    setStatus('Connecting to Google Drive…');
+    setStatus(t('sync.setup.connectingDrive'));
 
     const runtime = await connectRuntime({
       providerId: 'google-drive',
       prompt: 'consent',
     });
 
-    setStatus('Pulling and decrypting vault…');
+    setStatus(t('sync.setup.pulling'));
 
     await runtime.syncNow({
       verbose: false,
@@ -515,20 +513,19 @@ async function connectExistingDeviceWithText(text) {
       syncKey: runtime.syncKey,
     });
 
-    setStatus('Sync complete', 'success');
-    toast('Device connected and pulled', 'success');
+    setStatus(t('settings.sync.syncCompleteToast'), 'success');
+    toast(t('sync.setup.devicePulled'), 'success');
   } catch (err) {
     console.error(err);
 
     const msg = isWrongKeyError(err)
       ? (
-          'Wrong Sync Key. This key or link does not match the encrypted data in this Google Drive account.\n\n' +
-          'Check that you selected the same Google account as the device that created the sync vault.'
+          t('sync.setup.wrongKey')
         )
       : err?.message || String(err);
 
     setStatus(msg, 'error');
-    toast('Cloud Sync connect failed', 'error');
+    toast(t('sync.setup.connectFailed'), 'error');
   }
 }
 
@@ -538,29 +535,29 @@ function renderWrongKeyResetView() {
   m.innerHTML = `
     <div class="modal-card yanta-sync2-setup-card">
       <header class="modal-head">
-        <h3>Existing encrypted sync data found</h3>
+        <h3>${escapeHtmlLocal(t('sync.setup.existingTitle'))}</h3>
         <button class="icon-btn" data-sync2-close>&times;</button>
       </header>
 
       <div class="modal-body yanta-sync2-setup-body">
         <div class="yanta-sync2-warning">
-          <strong>Wrong Sync Key:</strong>
-          Google Drive already contains encrypted YANTA Sync data that cannot be decrypted with this browser's local key.
+          <strong>${escapeHtmlLocal(t('sync.setup.wrongKeyLabel'))}</strong>
+          ${escapeHtmlLocal(t('sync.setup.wrongKeyBody'))}
         </div>
 
         <section class="yanta-sync2-choice">
-          <h4>Connect this device instead</h4>
-          <p>Use the Sync Key or pairing link from a device that already belongs to this sync vault.</p>
+          <h4>${escapeHtmlLocal(t('sync.setup.connectInsteadTitle'))}</h4>
+          <p>${escapeHtmlLocal(t('sync.setup.connectInsteadBody'))}</p>
           <button class="btn" data-action="connect-existing">
-            ${lucide('key', 14)} Enter Sync Key
+            ${lucide('key', 14)} ${escapeHtmlLocal(t('sync.setup.enterKey'))}
           </button>
         </section>
 
         <section class="yanta-sync2-choice danger-zone">
-          <h4>Delete old cloud sync data</h4>
-          <p>Only use this for old test data or if you are sure this Google Drive sync vault is no longer needed.</p>
+          <h4>${escapeHtmlLocal(t('sync.setup.deleteOldTitle'))}</h4>
+          <p>${escapeHtmlLocal(t('sync.setup.deleteOldBody'))}</p>
           <button class="btn danger" data-action="delete-create">
-            ${lucide('trash', 14)} Delete cloud sync data and create new
+            ${lucide('trash', 14)} ${escapeHtmlLocal(t('sync.setup.deleteAndCreate'))}
           </button>
         </section>
 
@@ -576,23 +573,23 @@ function renderWrongKeyResetView() {
   m.querySelector('[data-action="delete-create"]')?.addEventListener('click', async () => {
     if (!await confirmRemoteVaultDeletion()) return;
 
-    withBusy('Deleting encrypted YANTA Sync data from Google Drive…', async () => {
+    withBusy(t('sync.setup.deletingFromDrive'), async () => {
       const deleted = await deleteAllGoogleDriveSyncObjects();
 
-      setStatus(`Deleted ${deleted} object${deleted === 1 ? '' : 's'}. Creating new sync…`);
+      setStatus(t('sync.setup.deletedCreating', { count: deleted }));
 
       await setupCreateNewSyncVault();
     }).catch((err) => {
       console.error(err);
       setStatus(err?.message || String(err), 'error');
-      toast('Reset failed', 'error');
+      toast(t('sync.setup.resetFailed'), 'error');
     });
   });
 }
 
 async function resetGoogleDriveSyncData() {
   try {
-    setStatus('Connecting to Google Drive to delete sync data…');
+    setStatus(t('sync.setup.connectingToDelete'));
 
     const count = await deleteAllGoogleDriveSyncObjects();
 
@@ -604,12 +601,12 @@ async function resetGoogleDriveSyncData() {
 
     window.yantaSync2 = null;
 
-    setStatus(`Deleted ${count} Google Drive sync object${count === 1 ? '' : 's'}.`, 'success');
-    toast('Google Drive Sync data reset', 'success');
+    setStatus(t('sync.setup.deletedObjects', { count }), 'success');
+    toast(t('sync.setup.driveReset'), 'success');
   } catch (err) {
     console.error(err);
     setStatus(err?.message || String(err), 'error');
-    toast('Reset failed', 'error');
+    toast(t('sync.setup.resetFailed'), 'error');
   }
 }
 
@@ -619,7 +616,7 @@ function renderStartView() {
   m.innerHTML = `
     <div class="modal-card yanta-sync2-setup-card">
       <header class="modal-head">
-        <h3>Advanced: Google Drive Sync</h3>
+        <h3>${escapeHtmlLocal(t('sync.setup.startTitle'))}</h3>
         <button class="icon-btn" data-sync2-close>&times;</button>
       </header>
 
@@ -627,46 +624,44 @@ function renderStartView() {
         <div class="yanta-sync2-setup-hero">
           <div class="yanta-sync2-setup-icon">${lucide('cloud', 28)}</div>
           <div>
-            <strong>Advanced encrypted sync via Google Drive</strong>
+            <strong>${escapeHtmlLocal(t('sync.setup.startHeroTitle'))}</strong>
             <p>
-              Use this if you want to store encrypted YANTA sync data in your own Google Drive app data folder.
-              Most users should use YANTA Cloud Sync instead.
+              ${escapeHtmlLocal(t('sync.setup.startHeroBody'))}
             </p>
           </div>
         </div>
 
         <div class="yanta-sync2-warning">
-          <strong>Important:</strong> The Sync Key and pairing link can decrypt your YANTA vault.
-          Keep them private.
+          <strong>${escapeHtmlLocal(t('sync.setup.importantLabel'))}</strong> ${escapeHtmlLocal(t('sync.setup.importantBody'))}
         </div>
 
         <section class="yanta-sync2-choice">
-          <h4>Create a new encrypted sync vault</h4>
-          <p>Use this when this device should upload the current local vault as the starting point.</p>
+          <h4>${escapeHtmlLocal(t('sync.setup.createTitle'))}</h4>
+          <p>${escapeHtmlLocal(t('sync.setup.createBody'))}</p>
           <button class="btn primary" data-action="create-new">
-            ${lucide('cloud-upload', 14)} Create new sync vault
+            ${lucide('cloud-upload', 14)} ${escapeHtmlLocal(t('sync.setup.createButton'))}
           </button>
         </section>
 
         <section class="yanta-sync2-choice">
-          <h4>Connect this device to existing sync</h4>
-          <p>Sign in to the same Google account, enter the Sync Key, and pull the encrypted vault immediately.</p>
+          <h4>${escapeHtmlLocal(t('sync.setup.connectTitle'))}</h4>
+          <p>${escapeHtmlLocal(t('sync.setup.connectBody'))}</p>
 
           <div class="compress-actions" style="justify-content:flex-start;flex-wrap:wrap">
             <button class="btn primary" data-action="connect-existing">
-              ${lucide('key', 14)} Enter Sync Key
+              ${lucide('key', 14)} ${escapeHtmlLocal(t('sync.setup.enterKey'))}
             </button>
             <button class="btn" data-action="scan">
-              ${lucide('qr-code', 14)} Scan QR
+              ${lucide('qr-code', 14)} ${escapeHtmlLocal(t('sync.setup.scanQr'))}
             </button>
           </div>
         </section>
 
         <section class="yanta-sync2-choice danger-zone">
-          <h4>Reset cloud sync data</h4>
-          <p>Connect to Google and delete encrypted YANTA Sync data from the hidden appDataFolder.</p>
+          <h4>${escapeHtmlLocal(t('sync.setup.resetTitle'))}</h4>
+          <p>${escapeHtmlLocal(t('sync.setup.resetBody'))}</p>
           <button class="btn danger" data-action="reset">
-            ${lucide('trash', 14)} Connect and delete Google Drive Sync data
+            ${lucide('trash', 14)} ${escapeHtmlLocal(t('sync.setup.resetButton'))}
           </button>
         </section>
 
@@ -678,17 +673,17 @@ function renderStartView() {
   statusEl = m.querySelector('[data-status]');
 
   m.querySelector('[data-action="create-new"]')?.addEventListener('click', () => {
-    withBusy('Connecting to Google Drive…', setupCreateNewSyncVault);
+    withBusy(t('sync.setup.connectingDrive'), setupCreateNewSyncVault);
   });
 
   m.querySelector('[data-action="connect-existing"]')?.addEventListener('click', renderConnectExistingView);
 
   m.querySelector('[data-action="scan"]')?.addEventListener('click', () => {
-    withBusy('Starting camera…', async () => {
+    withBusy(t('sync.setup.startingCamera'), async () => {
       const text = await scanQrWithCamera();
       pendingPairingText = text;
       renderConnectExistingView(text);
-      setStatus('QR code read. Continue to pull.', 'success');
+      setStatus(t('sync.setup.qrRead'), 'success');
     }).catch((err) => {
       console.error(err);
       setStatus(err?.message || String(err), 'error');
@@ -698,7 +693,7 @@ function renderStartView() {
   m.querySelector('[data-action="reset"]')?.addEventListener('click', async () => {
     if (!await confirmRemoteVaultDeletion()) return;
 
-    withBusy('Connecting to Google Drive to delete sync data…', resetGoogleDriveSyncData);
+    withBusy(t('sync.setup.connectingToDelete'), resetGoogleDriveSyncData);
   });
 
   m.hidden = false;
@@ -712,7 +707,7 @@ function renderConnectExistingView(initialText = pendingPairingText) {
   m.innerHTML = `
     <div class="modal-card yanta-sync2-setup-card">
       <header class="modal-head">
-        <h3>Connect this device</h3>
+        <h3>${escapeHtmlLocal(t('sync.setup.connectDeviceTitle'))}</h3>
         <button class="icon-btn" data-sync2-close>&times;</button>
       </header>
 
@@ -720,8 +715,8 @@ function renderConnectExistingView(initialText = pendingPairingText) {
         <div class="yanta-sync2-setup-hero">
           <div class="yanta-sync2-setup-icon">${lucide('key', 28)}</div>
           <div>
-            <strong>Use an existing encrypted sync vault</strong>
-            <p>Enter the Sync Key or pairing link, sign in to the same Google account, and pull immediately.</p>
+            <strong>${escapeHtmlLocal(t('sync.setup.useExistingTitle'))}</strong>
+            <p>${escapeHtmlLocal(t('sync.setup.useExistingBody'))}</p>
           </div>
         </div>
 
@@ -730,25 +725,24 @@ function renderConnectExistingView(initialText = pendingPairingText) {
             ? ''
             : `
               <div class="yanta-sync2-browser-warning">
-                <strong>You are in a browser tab.</strong>
-                If you installed YANTA as a PWA but this opened in the wrong browser,
-                open the installed app and paste the key or scan the QR there.
+                <strong>${escapeHtmlLocal(t('sync.setup.browserTabLabel'))}</strong>
+                ${escapeHtmlLocal(t('sync.setup.browserTabBody'))}
               </div>
             `
         }
 
         <label class="yanta-sync2-copy-field">
-          <span>Sync Key or pairing link</span>
-          <textarea class="text-input" data-pairing rows="7" placeholder="Paste Sync Key, https://.../#sync2=..., or yanta-sync:...">${escapeHtmlLocal(initialText || '')}</textarea>
+          <span>${escapeHtmlLocal(t('sync.setup.keyOrLink'))}</span>
+          <textarea class="text-input" data-pairing rows="7" placeholder="${escapeHtmlLocal(t('sync.setup.keyPlaceholder'))}">${escapeHtmlLocal(initialText || '')}</textarea>
         </label>
 
         <div class="compress-actions">
-          <button class="btn" data-action="back">Back</button>
+          <button class="btn" data-action="back">${escapeHtmlLocal(t('common.back'))}</button>
           <button class="btn" data-action="paste-clipboard">
-            ${lucide('clipboard', 14)} Paste from clipboard
+            ${lucide('clipboard', 14)} ${escapeHtmlLocal(t('sync.setup.pasteClipboard'))}
           </button>
           <button class="btn primary" data-action="connect-pull">
-            ${lucide('cloud-download', 14)} Connect & Pull
+            ${lucide('cloud-download', 14)} ${escapeHtmlLocal(t('sync.setup.connectPull'))}
           </button>
         </div>
 
@@ -766,14 +760,14 @@ function renderConnectExistingView(initialText = pendingPairingText) {
       const text = await navigator.clipboard.readText();
       const input = m.querySelector('[data-pairing]');
       if (input) input.value = text || '';
-      toast('Pasted from clipboard', 'success');
+      toast(t('sync.setup.pasted'), 'success');
     } catch {
-      toast('Clipboard paste failed', 'error');
+      toast(t('sync.setup.pasteFailed'), 'error');
     }
   });
 
   m.querySelector('[data-action="connect-pull"]')?.addEventListener('click', () => {
-    withBusy('Connecting to Google Drive…', async () => {
+    withBusy(t('sync.setup.connectingDrive'), async () => {
       const text = m.querySelector('[data-pairing]')?.value || '';
       await connectExistingDeviceWithText(text);
     });
@@ -791,7 +785,7 @@ async function renderConnectedView({
   m.innerHTML = `
     <div class="modal-card yanta-sync2-setup-card">
       <header class="modal-head">
-        <h3>Cloud Sync is active</h3>
+        <h3>${escapeHtmlLocal(t('sync.setup.activeTitle'))}</h3>
         <button class="icon-btn" data-sync2-close>&times;</button>
       </header>
 
@@ -799,52 +793,51 @@ async function renderConnectedView({
         <div class="yanta-sync2-setup-hero">
           <div class="yanta-sync2-setup-icon ok">${lucide('check', 28)}</div>
           <div>
-            <strong>Encrypted sync enabled</strong>
-            <p>Use the pairing link, QR code, or Sync Key to connect another device.</p>
+            <strong>${escapeHtmlLocal(t('sync.setup.enabledTitle'))}</strong>
+            <p>${escapeHtmlLocal(t('sync.setup.enabledBody'))}</p>
           </div>
         </div>
 
         <div class="yanta-sync2-qr" data-qr></div>
 
         <div class="yanta-sync2-warning">
-          <strong>Keep private:</strong> This QR/link contains your Sync Key.
-          Anyone with it can decrypt your YANTA vault.
+          <strong>${escapeHtmlLocal(t('sync.setup.keepPrivateLabel'))}</strong> ${escapeHtmlLocal(t('sync.setup.keepPrivateBody'))}
         </div>
 
         <section class="yanta-sync2-choice">
-          <h4>Devices</h4>
+          <h4>${escapeHtmlLocal(t('sync.setup.devices'))}</h4>
           ${renderDevicesHtml()}
         </section>
 
         ${copyFieldHtml({
-          label: 'Pairing link',
+          label: t('sync.setup.pairingLink'),
           value: pairingUrl || '',
           rows: 4,
         })}
 
         ${copyFieldHtml({
-          label: 'Raw pairing text',
+          label: t('sync.setup.rawPairing'),
           value: rawPayload || '',
           rows: 4,
         })}
 
         ${copyFieldHtml({
-          label: 'Sync Key',
+          label: t('settings.sync.syncKeyTitle'),
           value: key,
           kind: 'input',
         })}
 
         <div class="compress-actions">
           <button class="btn" data-action="sync-now">
-            ${lucide('refresh-cw', 14)} Sync now
+            ${lucide('refresh-cw', 14)} ${escapeHtmlLocal(t('settings.sync.syncNow'))}
           </button>
           <button class="btn" data-action="new-device">
-            ${lucide('smartphone', 14)} Connect another device
+            ${lucide('smartphone', 14)} ${escapeHtmlLocal(t('sync.setup.connectAnother'))}
           </button>
           <button class="btn" data-action="print-kit">
-            ${lucide('printer', 14)} Print Recovery Kit
+            ${lucide('printer', 14)} ${escapeHtmlLocal(t('sync.setup.printKit'))}
           </button>
-          <button class="btn primary" data-sync2-close>Done</button>
+          <button class="btn primary" data-sync2-close>${escapeHtmlLocal(t('common.done'))}</button>
         </div>
 
         <div class="yanta-sync2-setup-status" data-status></div>
@@ -857,7 +850,7 @@ async function renderConnectedView({
   m.querySelector('[data-qr]')?.append(renderSync2QrSvg(pairingUrl, 240));
 
   m.querySelector('[data-action="sync-now"]')?.addEventListener('click', () => {
-    withBusy('Synchronizing…', async () => {
+    withBusy(t('settings.sync.synchronizing'), async () => {
       if (typeof window.yantaSync2Now === 'function') {
         await window.yantaSync2Now({
           interactive: true,
@@ -870,12 +863,12 @@ async function renderConnectedView({
         });
       }
 
-      setStatus('Sync complete', 'success');
-      toast('Sync complete', 'success');
+      setStatus(t('settings.sync.syncCompleteToast'), 'success');
+      toast(t('settings.sync.syncCompleteToast'), 'success');
     }).catch((err) => {
       console.error(err);
       setStatus(err?.message || String(err), 'error');
-      toast('Sync failed', 'error');
+      toast(t('settings.sync.syncFailedToast'), 'error');
     });
   });
 
@@ -891,7 +884,7 @@ async function renderConnectedView({
       });
     } catch (err) {
       console.error(err);
-      setStatus(err?.message || 'Could not open Recovery Kit', 'error');
+      setStatus(err?.message || t('sync.setup.kitFailed'), 'error');
     }
   });
 

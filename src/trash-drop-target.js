@@ -7,7 +7,9 @@
 
 import {
     lucide,
+    escapeHtml,
   } from './core.js';
+  import { t } from './i18n/index.js';
   
   let root = null;
   let resizeBound = false;
@@ -153,8 +155,8 @@ import {
         ${lucide('trash', 24)}
       </div>
       <div class="yanta-trash-drop-main">
-        <strong>Trash</strong>
-        <small>Drop to delete</small>
+        <strong>${escapeHtml(t('tree.section.trash'))}</strong>
+        <small>${escapeHtml(t('trashDrop.hint'))}</small>
       </div>
     `;
   

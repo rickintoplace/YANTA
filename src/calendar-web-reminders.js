@@ -17,6 +17,8 @@
 
 import { swRegistrationReady } from './core.js';
 
+import { t } from './i18n/index.js';
+
 import {
   calendarNotificationsEnabled,
 } from './notification-preferences.js';
@@ -85,12 +87,14 @@ function canDeliver() {
 export function reminderBody(ev, minutesBefore) {
   const startMs = eventStartMs(ev);
   const lead =
-    minutesBefore <= 0 ? 'now'
-      : minutesBefore < 60 ? `in ${minutesBefore} min`
-        : minutesBefore < 1440 ? `in ${Math.round(minutesBefore / 60)} h`
-          : `in ${Math.round(minutesBefore / 1440)} d`;
+    minutesBefore <= 0 ? t('calendar.notify.now')
+      : minutesBefore < 60 ? t('calendar.notify.inMinutes', { count: minutesBefore })
+        : minutesBefore < 1440 ? t('calendar.notify.inHours', { count: Math.round(minutesBefore / 60) })
+          : t('calendar.notify.inDays', { count: Math.round(minutesBefore / 1440) });
 
-  if (ev.allDay) return `All-day event · ${lead === 'now' ? 'today' : lead}`;
+  if (ev.allDay) {
+    return t('calendar.notify.allDay', { when: minutesBefore <= 0 ? t('calendar.notify.today') : lead });
+  }
 
   const time = Number.isFinite(startMs)
     ? new Date(startMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
@@ -109,7 +113,7 @@ async function fireReminder(ev, minutesBefore, key) {
   fired.set(key, Date.now());
   saveFired(fired);
 
-  const title = ev.title || 'Event reminder';
+  const title = ev.title || t('calendar.notify.title');
   const options = {
     body: reminderBody(ev, minutesBefore),
     tag: `yanta-reminder-${key}`,

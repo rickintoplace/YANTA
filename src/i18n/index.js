@@ -5,7 +5,7 @@
 // vanilla-JS, boot-budget-conscious architecture:
 //
 //   - t(key, params)      synchronous lookup — usable inside any render code
-//   - catalogs lazy-load  only the active locale (+ EN fallback) ship as chunks
+//   - catalogs lazy-load  only the active locale (+ EN fallback, after paint) ship as chunks
 //   - Intl.*              powers plurals & formatting (see ./format.js)
 //
 // Because YANTA builds DOM from template literals (no reactive framework),
@@ -100,13 +100,20 @@ async function loadCatalog(code) {
 export async function initI18n(code = resolveLocale()) {
   activeCode = SUPPORTED.includes(code) ? code : DEFAULT_LOCALE;
 
-  const [act, fb] = await Promise.all([
-    loadCatalog(activeCode),
-    activeCode === DEFAULT_LOCALE ? null : loadCatalog(DEFAULT_LOCALE),
-  ]);
-
+  const act = await loadCatalog(activeCode);
   active = act;
-  fallback = fb || act;
+  fallback = act;
+
+  /*
+    Every locale has every key (npm run i18n:check fails otherwise), so
+    English is only a safety net. It loads after first paint instead of
+    doubling what a non-English start has to fetch and parse.
+  */
+  if (activeCode !== DEFAULT_LOCALE) {
+    loadCatalog(DEFAULT_LOCALE)
+      .then((fb) => { if (fb) fallback = fb; })
+      .catch(() => {});
+  }
   pluralRules = new Intl.PluralRules(activeCode);
 
   document.documentElement.lang = activeCode;

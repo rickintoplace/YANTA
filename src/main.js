@@ -1335,7 +1335,7 @@ window.yantaSync2CompactNow = async (options = {}) => {
   });
 
   toast(
-    `Cloud storage compacted · freed ${(result.freedBytes / 1024 / 1024).toFixed(2)} MB`,
+    t('app.cloudCompacted', { mb: (result.freedBytes / 1024 / 1024).toFixed(2) }),
     'success'
   );
 
@@ -2210,7 +2210,7 @@ async function init() {
       (await loadChatSession()).scheduleChatAutoResume();
     } catch (err) {
       console.warn('[YANTA Chat] auto-resume setup failed', err);
-      toast('Could not set up Chat auto-resume.', 'error');
+      toast(t('app.chatResumeFailed'), 'error');
     }
   }
 
@@ -2473,7 +2473,7 @@ async function init() {
         await openGoogleDriveSyncSetupWithPayload(sync2HashPayload);
       } catch (err) {
         console.error('[YANTA Sync2] pairing payload failed', err);
-        toast(err?.message || 'Could not read pairing link', 'error');
+        toast(err?.message || t('app.pairingLinkFailed'), 'error');
       }
     }, 700);
   }
@@ -2513,7 +2513,7 @@ async function init() {
       const client = await resolveMatrixClient();
 
       if (!client) {
-        toast('Chat is not connected.', 'error');
+        toast(t('app.chatNotConnected'), 'error');
         console.warn('[YANTA Chat] Cannot open palette chat search without client');
         return;
       }
@@ -2524,7 +2524,7 @@ async function init() {
       });
     } catch (err) {
       console.warn('[YANTA Chat] Could not open chat search from palette', err);
-      toast('Could not open chat search.', 'error');
+      toast(t('app.chatSearchFailed'), 'error');
     }
   }
 
@@ -2767,7 +2767,7 @@ async function init() {
           .then(({ startDmFromDeepLink }) => startDmFromDeepLink(route.dmUserId))
           .catch((err) => {
             console.warn('[YANTA] Could not start chat from deep link', err);
-            toast('Could not start chat from link.', 'error');
+            toast(t('app.chatLinkFailed'), 'error');
           });
       }
 
@@ -3100,9 +3100,9 @@ function applySidebarCollapsed(collapsed, { persist = true } = {}) {
     btn.setAttribute('aria-expanded', effectiveCollapsed ? 'false' : 'true');
     btn.setAttribute(
       'aria-label',
-      effectiveCollapsed ? 'Expand sidebar' : 'Collapse sidebar'
+      effectiveCollapsed ? t('app.sidebar.expand') : t('app.sidebar.collapse')
     );
-    btn.title = effectiveCollapsed ? 'Expand sidebar' : 'Collapse sidebar';
+    btn.title = effectiveCollapsed ? t('app.sidebar.expand') : t('app.sidebar.collapse');
 
     btn.innerHTML = lucide(
       effectiveCollapsed ? 'panel-left-open' : 'panel-left-close',
@@ -3251,16 +3251,16 @@ function ensurePreviewPaneSwitcher() {
   switcher.setAttribute('data-preview-pane-switcher', '');
 
   switcher.innerHTML = `
-    <button class="icon-btn active" data-pane-kind="preview" title="Markdown preview">${lucide('eye', 15)}</button>
-    <button class="icon-btn" data-pane-kind="dashboard" title="Dashboard">${lucide('layout-dashboard', 15)}</button>
-    <button class="icon-btn" data-pane-kind="graph" title="Graph">${lucide('network', 15)}</button>
-    <button class="icon-btn" data-pane-kind="calendar" title="Calendar">${lucide('calendar-days', 15)}</button>
-    <button class="icon-btn" data-pane-kind="ai" title="AI Assistant">${lucide('sparkles', 15)}</button>
+    <button class="icon-btn active" data-pane-kind="preview" title="${t('app.pane.preview')}">${lucide('eye', 15)}</button>
+    <button class="icon-btn" data-pane-kind="dashboard" title="${t('dashboard.title')}">${lucide('layout-dashboard', 15)}</button>
+    <button class="icon-btn" data-pane-kind="graph" title="${t('graph.title')}">${lucide('network', 15)}</button>
+    <button class="icon-btn" data-pane-kind="calendar" title="${t('sidebar.calendar')}">${lucide('calendar-days', 15)}</button>
+    <button class="icon-btn" data-pane-kind="ai" title="${t('app.pane.ai')}">${lucide('sparkles', 15)}</button>
 
     <span class="yanta-preview-pane-switcher-sep"></span>
 
-    <button class="icon-btn" data-pane-expand="preview" title="Expand preview">${lucide('maximize-2', 15)}</button>
-    <button class="icon-btn" data-pane-close="preview" title="Close right pane">${lucide('x', 15)}</button>
+    <button class="icon-btn" data-pane-expand="preview" title="${t('app.pane.expand')}">${lucide('maximize-2', 15)}</button>
+    <button class="icon-btn" data-pane-close="preview" title="${t('app.pane.close')}">${lucide('x', 15)}</button>
   `;
 
   for (const btn of switcher.querySelectorAll('[data-pane-kind]')) {
@@ -3405,17 +3405,17 @@ function bindEvents() {
 
     showMenu(r.left, r.bottom + 4, [
       {
-        label: 'Restore / import files (.yanta / .md / .json / .zip)…',
+        label: t('app.import.files'),
         action: () => $('importFile')?.click(),
       },
       {
-        label: 'Import folder (with sub-folders)…',
+        label: t('app.import.folder'),
         action: () => $('importFolder')?.click(),
       },
       'hr',
       {
-        label: 'Or drop files/folders anywhere on the window',
-        action: () => toast('Drop files or a folder onto YANTA'),
+        label: t('app.import.dropHint'),
+        action: () => toast(t('app.import.dropToast')),
       },
     ]);
   };
@@ -3438,13 +3438,13 @@ function bindEvents() {
       menuOnlyActions: [
         {
           key: 'export',
-          label: 'Export…',
+          label: t('app.menu.export'),
           closeMobile: false,
           onClick: () => openExportMenu(anchor, showMenu),
         },
         {
           key: 'import',
-          label: 'Import…',
+          label: t('app.menu.import'),
           closeMobile: false,
           onClick: () => openImportMenuFrom(anchor),
         },
@@ -3698,7 +3698,7 @@ function bindEvents() {
   // Share modal
   $('btn-share-copy').addEventListener('click', async () => {
     const v = $('shareLink').value;
-    try { await navigator.clipboard.writeText(v); toast('Link copied', 'success'); } catch { toast('Copy failed', 'error'); }
+    try { await navigator.clipboard.writeText(v); toast(t('graph.linkCopied'), 'success'); } catch { toast(t('graph.copyFailed'), 'error'); }
   });
   $('btn-share-stop').addEventListener('click', async () => { await stopSharing(state.currentNoteId); closeShareModal(); });
   document.querySelectorAll('[data-share-close]').forEach((b) => {
@@ -3837,7 +3837,7 @@ function bindEvents() {
     const noteId = detail.noteId || state.currentNoteId || '';
 
     if (!eventId || !noteId) {
-      toast('Calendar event could not be linked here', 'error');
+      toast(t('app.eventLinkHere'), 'error');
       return;
     }
 
@@ -3849,7 +3849,7 @@ function bindEvents() {
       });
     } catch (err) {
       console.error(err);
-      toast('Could not link calendar event to note', 'error');
+      toast(t('app.eventLinkFailed'), 'error');
     }
   });
 
@@ -3869,7 +3869,7 @@ function bindEvents() {
     // In Editor/Drawing gibt es keinen sinnvollen lokalen Anchor.
     // Daher: bewusst direkte Aktion + Toast.
     await createNoteWithTitle(target);
-    toast(`Created "${target}"`, 'success');
+    toast(t('app.noteCreated', { title: target }), 'success');
   });
   // Cycle view from command palette
   window.addEventListener('yanta-cycle-view', () => {
@@ -3952,11 +3952,11 @@ function bindEvents() {
     if (d.tokenFrom == null || d.tokenTo == null) return;
 
     openIconPicker({
-      title: 'Edit Lucide icon',
+      title: t('app.editIcon'),
       initialIcon: d.icon || 'square',
       initialColor: d.color || '#6ea8fe',
       allowReset: false,
-      applyLabel: 'Update',
+      applyLabel: t('app.iconApply'),
       onApply: ({ icon, color }) => {
         if (!icon) return;
 
@@ -3964,7 +3964,7 @@ function bindEvents() {
         const insert = `:lucide[${icon}]${safeColor ? `{${safeColor}}` : ''}:`;
 
         replaceEditorRange(d.tokenFrom, d.tokenTo, insert);
-        toast('Icon updated', 'success');
+        toast(t('settings.quickCreate.iconUpdated'), 'success');
       },
     });
   });
@@ -4054,7 +4054,7 @@ function openNativeColorPickerForRange({ from, to, color }) {
   inlineColorInput.onchange = () => {
     const next = inlineColorInput.value;
     replaceEditorRange(from, to, next);
-    toast('Color updated', 'success');
+    toast(t('app.colorUpdated'), 'success');
   };
 
   try {
@@ -4105,7 +4105,7 @@ function handleGlobalKey(e) {
 
     saveCurrentNote()
       .then(async () => {
-        toast('Saved', 'success');
+        toast(t('appShell.status.saved'), 'success');
 
         try {
           await flushSync2AutoSync('manual-save', {
@@ -4113,15 +4113,15 @@ function handleGlobalKey(e) {
             catchUp: !sync2Auto.engine,
           });
 
-          toast('Saved and synced', 'success');
+          toast(t('app.savedSynced'), 'success');
         } catch (err) {
           console.warn('[YANTA Sync2] manual save sync failed', err);
-          toast('Saved locally · Cloud sign-in needed for sync', 'error');
+          toast(t('app.savedLocalOnly'), 'error');
         }
       })
       .catch((err) => {
         console.error(err);
-        toast('Save failed', 'error');
+        toast(t('app.saveFailed'), 'error');
       });
   }
   else if (meta && e.key === 'i') { e.preventDefault(); openImageModal(); }
@@ -4349,7 +4349,7 @@ function setupGlobalDropImport() {
       const collected = [];
       for (const en of entries) try { collected.push(...(await walkEntry(en, []))); } catch {}
       if (collected.length) await importItems(collected);
-      else toast('Folder was empty', 'error');
+      else toast(t('app.folderEmpty'), 'error');
       return;
     }
     const files = [...e.dataTransfer.files];
@@ -4368,7 +4368,7 @@ function setupGlobalDropImport() {
       f.type === 'image/svg+xml'
     );
     if (importable.length) await importFiles(importable);
-    else toast('Drop .yanta, .md, .markdown, .txt, .ics, .zip, or YANTA .json files', 'error');
+    else toast(t('app.dropUnsupported'), 'error');
   });
 }
 

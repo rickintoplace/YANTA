@@ -25,7 +25,7 @@ import {
 } from './yjs.js';
 
 import { openBoundOverlay } from './overlay-history.js';
-import { getLocale } from './i18n/index.js';
+import { getLocale, t } from './i18n/index.js';
 import { countFirstNoteIfActivation } from './metrics/funnel.js';
 
 import {
@@ -593,20 +593,20 @@ export function openQuickCapture({
   const head = el('div', { class: 'yanta-qcapture-head' });
   head.innerHTML = `
     ${lucide('zap', 14)}
-    <span>Quick capture</span>
+    <span>${escapeHtml(t('floatingCreate.action.capture'))}</span>
     <span class="date">· ${escapeHtml(friendlyDayLabel())}</span>
   `;
 
   const input = el('textarea', {
-    placeholder: 'What’s on your mind?',
+    placeholder: t('today.quickCapture.placeholder'),
     rows: '3',
   });
 
   const hint = el('div', { class: 'yanta-qcapture-hint' },
-    'Enter to capture · Shift+Enter for a new line · Esc to close');
+    t('today.quickCapture.hint'));
 
-  const openBtn = el('button', { class: 'btn', type: 'button' }, 'Open today’s note');
-  const saveBtn = el('button', { class: 'btn primary', type: 'button' }, 'Capture');
+  const openBtn = el('button', { class: 'btn', type: 'button' }, t('today.openNote'));
+  const saveBtn = el('button', { class: 'btn primary', type: 'button' }, t('today.capture'));
 
   const submit = async () => {
     const text = input.value.trim();
@@ -617,11 +617,11 @@ export function openQuickCapture({
     try {
       await captureToJournal(text, { source });
       closeQuickCapture();
-      toast('Captured to today’s note', 'success');
+      toast(t('today.quickCapture.captured'), 'success');
     } catch (err) {
       console.error('[YANTA Journal] capture failed', err);
       saveBtn.disabled = false;
-      toast('Capture failed', 'error');
+      toast(t('today.quickCapture.failed'), 'error');
     }
   };
 
@@ -634,7 +634,7 @@ export function openQuickCapture({
       await openTodayNote();
     } catch (err) {
       console.error('[YANTA Journal] open today failed', err);
-      toast('Could not open today’s note', 'error');
+      toast(t('today.quickCapture.openFailed'), 'error');
     }
   });
 

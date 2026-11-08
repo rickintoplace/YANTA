@@ -29,6 +29,8 @@ import {
   safeJsonClone,
 } from './sync2/vault-doc.js';
 
+import { t } from './i18n/index.js';
+
 /*
   Same horizon the Android bridge uses for its native snapshot —
   the ack must describe exactly what the native side was given.
@@ -231,7 +233,7 @@ export function notificationCapableDevices() {
 
       out.push({
         id: String(record.id || ''),
-        name: String(record.name || record.id || 'Android device'),
+        name: String(record.name || record.id || t('notificationSync.androidDevice')),
         current: record.id === current,
         notificationsGranted: ack.notificationsGranted !== false,
         exactAlarmAllowed: ack.exactAlarmAllowed !== false,
@@ -312,7 +314,7 @@ export function notificationSyncReport(now = Date.now()) {
     if (!covered) {
       pendingEvents.push({
         id: String(ev.id),
-        title: String(ev.title || 'Untitled event'),
+        title: String(ev.title || t('calendarWidget.untitledEvent')),
         start: ev.start,
         reminderCount: enabledReminderCount(ev),
       });

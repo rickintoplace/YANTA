@@ -16,6 +16,7 @@
 import { renderBrandedQrSvg } from '../qr.js';
 import { BRAND_LOGO_SVG } from '../brand-logo.js';
 import { openBoundOverlay } from '../overlay-history.js';
+import { t } from '../i18n/index.js';
 
 
 import {
@@ -191,8 +192,8 @@ export function renderSync2QrSvg(text, size = 220) {
 }
 
 export async function scanQrWithCamera({
-  title = 'Scan YANTA Sync QR',
-  hint = 'Point the camera at the Sync QR code from your first device.',
+  title = t('sync.pairing.scanTitle'),
+  hint = t('sync.pairing.scanHint'),
   zIndex = 400,
 } = {}) {
   if (!('BarcodeDetector' in window)) {

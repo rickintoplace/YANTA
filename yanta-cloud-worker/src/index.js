@@ -669,6 +669,13 @@ async function addFreeAiSpend(env, realMicros) {
   ).bind(freeAiSpendKey(), Date.now(), Math.ceil(realMicros)).run();
 }
 var INCLUDED_AI_DEFAULT_MODEL = "deepseek/deepseek-v4.1-flash";
+// Background routines (Pulse) wait for nobody: they run on the cheaper,
+// slower model, measured as good as the default on Pulse-shaped tasks
+// (scripts/pulse-eval.mjs, 2026-11-08: 97.5 % vs 98.8 %, ~16 % cheaper).
+// Only when the person kept the default; a model they chose wins.
+var INCLUDED_AI_PULSE_MODEL = "z-ai/glm-5.3-flash";
+// OpenRouter takes at most three models per request (HTTP 400 beyond).
+var INCLUDED_AI_CHAIN_MAX = 3;
 // Tried in order when the chosen model's providers fail (down, rate limit,
 // context overflow). Open-weight only, each with ZDR hosts.
 // Fallbacks share the request's reasoning setting, so none may require
@@ -6148,6 +6155,9 @@ async function handleAiCompletions(env, req, headers) {
 
   let requestedModel = String(body.model || policy.model || INCLUDED_AI_DEFAULT_MODEL).trim();
   const liveModels = await readAiModelIndex(env);
+  if (body.source === "pulse" && requestedModel === INCLUDED_AI_DEFAULT_MODEL && !aiModelGone(INCLUDED_AI_PULSE_MODEL, liveModels)) {
+    requestedModel = INCLUDED_AI_PULSE_MODEL;
+  }
   // Clients that still have a shut-down model saved get the default.
   if (RETIRED_AI_MODELS.has(requestedModel) || aiModelGone(requestedModel, liveModels)) {
     requestedModel = INCLUDED_AI_DEFAULT_MODEL;
@@ -6264,7 +6274,8 @@ async function handleAiCompletions(env, req, headers) {
 
   // The client picks among allowlisted models; the fallback chain and the
   // price ceiling are the server's.
-  const modelChain = [selectedModel, ...INCLUDED_AI_FALLBACKS.filter((m) => m !== selectedModel && !aiModelGone(m, liveModels))];
+  const modelChain = [selectedModel, ...INCLUDED_AI_FALLBACKS.filter((m) => m !== selectedModel && !aiModelGone(m, liveModels))]
+    .slice(0, INCLUDED_AI_CHAIN_MAX);
 
   const forwardBody = {
     model: selectedModel,

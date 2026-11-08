@@ -21,6 +21,8 @@ import {
   uid,
 } from '../core.js';
 
+import { t } from '../i18n/index.js';
+
 import {
   createSlide,
   listSlides,
@@ -518,7 +520,7 @@ function writeAnimation(noteId, drawingId, slide, animation) {
 export function addSelectionAsBuildStep({ noteId, drawingId, api, preferSlideId = '' }) {
   if (!api) {
     console.warn('[YANTA Slides] add step: no drawing API');
-    toast('Drawing is not ready yet', 'error');
+    toast(t('slides.drawingNotReady'), 'error');
     return null;
   }
 
@@ -534,7 +536,7 @@ export function addSelectionAsBuildStep({ noteId, drawingId, api, preferSlideId 
 
   if (!ids.length) {
     console.warn('[YANTA Slides] add step: nothing selected');
-    toast('Select something on the board first', 'error');
+    toast(t('slides.selectFirst'), 'error');
     return null;
   }
 
@@ -582,7 +584,7 @@ export function addSelectionAsBuildStep({ noteId, drawingId, api, preferSlideId 
     });
 
     if (!slide) {
-      toast('Could not create a slide for this selection', 'error');
+      toast(t('slides.createForSelectionFailed'), 'error');
       return null;
     }
 
@@ -623,10 +625,10 @@ export function addSelectionAsBuildStep({ noteId, drawingId, api, preferSlideId 
   */
   toast(
     createdSlide
-      ? `Created "${slide.title}" — animation step 1`
+      ? t('slides.anim.createdWithStep', { title: slide.title })
       : wasAnimated
-        ? `Moved to step ${builds.length} on "${slide.title}"`
-        : `Step ${builds.length} on "${slide.title}"`,
+        ? t('slides.anim.movedToStep', { n: builds.length, title: slide.title })
+        : t('slides.anim.stepOn', { n: builds.length, title: slide.title }),
     'success'
   );
 
@@ -741,7 +743,9 @@ function stepSummary(slide, build) {
   const count = known.length || build.elementIds.length;
   const missing = build.elementIds.length - known.length;
 
-  return `${count} object${count === 1 ? '' : 's'}${missing > 0 ? ' · some deleted' : ''}`;
+  return missing > 0
+    ? t('slides.anim.objectsSomeDeleted', { count })
+    : t('slides.anim.objects', { count });
 }
 
 /** Fills the "which slide" picker and keeps it on the panel's target. */
@@ -750,7 +754,7 @@ function renderSlidePicker(slides) {
   if (!select) return;
 
   if (!slides.length) {
-    select.innerHTML = '<option value="">No slide yet</option>';
+    select.innerHTML = `<option value="">${escapeHtml(t('slides.anim.noSlide'))}</option>`;
     select.disabled = true;
     return;
   }
@@ -762,7 +766,7 @@ function renderSlidePicker(slides) {
 
     return `
       <option value="${escapeAttr(slide.id)}" ${slide.id === panel.slideId ? 'selected' : ''}>
-        ${index + 1}. ${escapeHtml(slide.title)}${count ? ` · ${count} step${count === 1 ? '' : 's'}` : ''}
+        ${index + 1}. ${escapeHtml(slide.title)}${count ? ` · ${escapeHtml(t('slides.anim.stepCount', { count }))}` : ''}
       </option>
     `;
   }).join('');
@@ -786,14 +790,11 @@ function render() {
     the footer button creates the slide along with the first step.
   */
   if (!slide) {
-    if (title) title.textContent = 'Animation';
+    if (title) title.textContent = t('slides.anim.title');
 
     body.innerHTML = `
       <div class="yanta-slide-anim-empty">
-        Select the objects you want to animate on the board, then press
-        <strong>Add selection as step</strong>. They become the first step of a
-        slide — one is created around them if this part of the board is not a
-        slide yet.
+        ${t('slides.anim.emptyNoSlideHtml', { action: `<strong>${escapeHtml(t('slides.anim.addStep'))}</strong>` })}
       </div>
     `;
 
@@ -802,7 +803,7 @@ function render() {
 
   const animation = slideAnimation(slide);
 
-  if (title) title.textContent = `Animation · ${slide.title}`;
+  if (title) title.textContent = t('slides.anim.titleFor', { title: slide.title });
 
   const transitions = SLIDE_TRANSITIONS.map((kind) => `
     <button type="button"
@@ -835,32 +836,32 @@ function render() {
              data-build="${escapeAttr(build.id)}">
           <span class="yanta-slide-anim-step-lead">
             <span class="yanta-slide-anim-step-index"
-                  title="Plays on click ${clickNumber.get(build.id) || 1}">${clickNumber.get(build.id) || 1}</span>
+                  title="${escapeAttr(t('slides.anim.playsOnClick', { n: clickNumber.get(build.id) || 1 }))}">${clickNumber.get(build.id) || 1}</span>
             <span class="yanta-slide-anim-step-thumb" data-step-thumb="${escapeAttr(build.id)}"></span>
           </span>
 
           <div class="yanta-slide-anim-step-main">
             <div class="yanta-slide-anim-step-controls">
-              <select data-effect aria-label="Effect">
+              <select data-effect aria-label="${escapeAttr(t('slides.anim.effect'))}">
                 ${options(SLIDE_BUILD_EFFECTS, SLIDE_BUILD_EFFECT_LABELS, build.effect)}
               </select>
 
               ${directional ? `
-                <select data-direction aria-label="Direction">
+                <select data-direction aria-label="${escapeAttr(t('slides.anim.direction'))}">
                   ${options(SLIDE_BUILD_DIRECTIONS, SLIDE_BUILD_DIRECTION_LABELS, build.direction)}
                 </select>
               ` : ''}
             </div>
 
             <div class="yanta-slide-anim-step-controls">
-              <select data-trigger aria-label="Start" ${index === 0 ? 'disabled' : ''}>
+              <select data-trigger aria-label="${escapeAttr(t('slides.anim.start'))}" ${index === 0 ? 'disabled' : ''}>
                 ${options(SLIDE_BUILD_TRIGGERS, SLIDE_BUILD_TRIGGER_LABELS, build.trigger)}
               </select>
 
-              <select data-duration aria-label="Speed">
-                <option value="250" ${build.duration <= 300 ? 'selected' : ''}>Fast</option>
-                <option value="500" ${build.duration > 300 && build.duration <= 750 ? 'selected' : ''}>Normal</option>
-                <option value="1100" ${build.duration > 750 ? 'selected' : ''}>Slow</option>
+              <select data-duration aria-label="${escapeAttr(t('slides.anim.speed'))}">
+                <option value="250" ${build.duration <= 300 ? 'selected' : ''}>${escapeHtml(t('slides.anim.fast'))}</option>
+                <option value="500" ${build.duration > 300 && build.duration <= 750 ? 'selected' : ''}>${escapeHtml(t('slides.anim.normal'))}</option>
+                <option value="1100" ${build.duration > 750 ? 'selected' : ''}>${escapeHtml(t('slides.anim.slow'))}</option>
               </select>
             </div>
 
@@ -868,10 +869,10 @@ function render() {
               <span class="yanta-slide-anim-step-meta">${escapeHtml(stepSummary(slide, build))}</span>
 
               <span class="yanta-slide-anim-step-actions">
-                <button class="icon-btn" data-preview title="Preview this step">${lucide('play', 14)}</button>
-                <button class="icon-btn" data-move="up" title="Move earlier" ${index === 0 ? 'disabled' : ''}>${lucide('chevron-up', 14)}</button>
-                <button class="icon-btn" data-move="down" title="Move later" ${index === animation.builds.length - 1 ? 'disabled' : ''}>${lucide('chevron-down', 14)}</button>
-                <button class="icon-btn danger" data-remove title="Remove step">${lucide('x', 14)}</button>
+                <button class="icon-btn" data-preview title="${escapeAttr(t('slides.anim.preview'))}">${lucide('play', 14)}</button>
+                <button class="icon-btn" data-move="up" title="${escapeAttr(t('slides.anim.moveEarlier'))}" ${index === 0 ? 'disabled' : ''}>${lucide('chevron-up', 14)}</button>
+                <button class="icon-btn" data-move="down" title="${escapeAttr(t('slides.anim.moveLater'))}" ${index === animation.builds.length - 1 ? 'disabled' : ''}>${lucide('chevron-down', 14)}</button>
+                <button class="icon-btn danger" data-remove title="${escapeAttr(t('slides.anim.removeStep'))}">${lucide('x', 14)}</button>
               </span>
             </div>
           </div>
@@ -880,20 +881,18 @@ function render() {
       }).join('')
     : `
         <div class="yanta-slide-anim-empty">
-          No animation yet. Select objects on the board and press
-          <strong>Add selection as step</strong> — each step plays on its own
-          click, or together with the one before it.
+          ${t('slides.anim.emptyHtml', { action: `<strong>${escapeHtml(t('slides.anim.addStep'))}</strong>` })}
         </div>
       `;
 
   body.innerHTML = `
     <div>
-      <div class="yanta-slide-anim-section-label">Transition into this slide</div>
+      <div class="yanta-slide-anim-section-label">${escapeHtml(t('slides.anim.transitionLabel'))}</div>
       <div class="yanta-slide-anim-segmented" data-anim-transitions>${transitions}</div>
     </div>
 
     <div>
-      <div class="yanta-slide-anim-section-label">Build steps</div>
+      <div class="yanta-slide-anim-section-label">${escapeHtml(t('slides.anim.stepsLabel'))}</div>
       <div class="yanta-slide-anim-steps">${steps}</div>
     </div>
   `;
@@ -1043,7 +1042,7 @@ function previewBuild(buildId) {
   */
   if (!panelApi()) {
     console.warn('[YANTA Slides] preview: no drawing API');
-    toast('Drawing is not ready yet', 'error');
+    toast(t('slides.drawingNotReady'), 'error');
     return;
   }
 
@@ -1051,7 +1050,7 @@ function previewBuild(buildId) {
 
   if (!slide) {
     console.warn('[YANTA Slides] preview: panel has no slide', panel?.slideId);
-    toast('This step no longer belongs to a slide', 'error');
+    toast(t('slides.anim.stepOrphaned'), 'error');
     return;
   }
 
@@ -1059,7 +1058,7 @@ function previewBuild(buildId) {
 
   if (!build) {
     console.warn('[YANTA Slides] preview: step not found', buildId);
-    toast('Step not found', 'error');
+    toast(t('slides.anim.stepNotFound'), 'error');
     return;
   }
 
@@ -1166,19 +1165,19 @@ export function openSlideAnimationPanel({
   root.innerHTML = `
     <div class="yanta-slide-anim-head" data-anim-drag>
       <span>${lucide('sparkles', 16)}</span>
-      <h3 data-anim-title>Animation</h3>
-      <button class="icon-btn" data-anim-close title="Close">${lucide('x', 16)}</button>
+      <h3 data-anim-title>${escapeHtml(t('slides.anim.title'))}</h3>
+      <button class="icon-btn" data-anim-close title="${escapeAttr(t('common.close'))}">${lucide('x', 16)}</button>
     </div>
 
     <div class="yanta-slide-anim-target">
-      <label for="yanta-anim-slide">Slide</label>
+      <label for="yanta-anim-slide">${escapeHtml(t('slides.anim.slideLabel'))}</label>
       <select id="yanta-anim-slide" data-anim-slide></select>
     </div>
 
     <div class="yanta-slide-anim-body" data-anim-body></div>
 
     <div class="yanta-slide-anim-foot">
-      <button class="btn" data-anim-add>${lucide('plus', 14)} Add selection as step</button>
+      <button class="btn" data-anim-add>${lucide('plus', 14)} ${escapeHtml(t('slides.anim.addStep'))}</button>
     </div>
   `;
 

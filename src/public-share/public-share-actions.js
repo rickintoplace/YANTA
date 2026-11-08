@@ -24,9 +24,11 @@ import {
   import {
     makePublicShareUrl,
   } from './public-share-crypto.js';
+
+  import { t } from '../i18n/index.js';
   
   function noteTitle(noteId) {
-    return state.notes.get(noteId)?.title || 'Untitled';
+    return state.notes.get(noteId)?.title || t('note.untitled');
   }
   
   function publicShareUrlFromState(share = {}) {
@@ -62,7 +64,7 @@ import {
     });
   
     if (!id || !state.notes.has(id)) {
-      toast('Note not found.', 'error');
+      toast(t('sharing.noteNotFound'), 'error');
       throw new Error('Note not found.');
     }
   
@@ -126,7 +128,7 @@ import {
       };
     } catch (err) {
       console.warn('[YANTA Public Share Actions] Could not create public share', err);
-      toast(err?.message || 'Could not create public share link.', 'error');
+      toast(err?.message || t('publicShare.public.createFailed'), 'error');
       throw err;
     }
   }

@@ -23,6 +23,7 @@ export const SEMANTIC_MODELS = [
     hf: 'Xenova/multilingual-e5-small',
     label: 'Multilingual · compact',
     languages: 'English, German, Spanish, Chinese + ~90 more',
+    languagesKey: 'settings.semantic.languagesE5',
     dims: 384,
     dtype: 'q8',
     prefixes: { query: 'query: ', passage: 'passage: ' },

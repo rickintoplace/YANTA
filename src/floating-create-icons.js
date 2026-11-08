@@ -17,6 +17,7 @@ import {
   FLOATING_CREATE_ICON_STYLES,
   DEFAULT_FLOATING_CREATE_ICON_STYLE,
 } from './floating-create-settings.js';
+import { t as i18n } from './i18n/index.js';
 
 // ---- shared math -------------------------------------------------
 
@@ -348,15 +349,17 @@ function initGamepad(svg) {
 
 // ---- registry ----------------------------------------------------
 
+// `label` is a getter: the catalog may not be loaded when this module is
+// evaluated, so the style name is looked up when Settings renders it.
 export const FLOATING_CREATE_ICONS = Object.freeze({
-  bubbles: { label: 'Bubbles', markup: bubblesMarkup, init: initBubbles },
-  loader: { label: 'Radial', markup: loaderMarkup, init: initLoader },
-  gamepad: { label: 'D-Pad', markup: gamepadMarkup, init: initGamepad },
+  bubbles: { get label() { return i18n('floatingCreate.iconStyle.bubbles'); }, markup: bubblesMarkup, init: initBubbles },
+  loader: { get label() { return i18n('floatingCreate.iconStyle.loader'); }, markup: loaderMarkup, init: initLoader },
+  gamepad: { get label() { return i18n('floatingCreate.iconStyle.gamepad'); }, markup: gamepadMarkup, init: initGamepad },
 });
 
 export const FLOATING_CREATE_ICON_OPTIONS = FLOATING_CREATE_ICON_STYLES.map((id) => ({
   id,
-  label: FLOATING_CREATE_ICONS[id].label,
+  get label() { return FLOATING_CREATE_ICONS[id].label; },
 }));
 
 export function resolveFloatingCreateIcon(styleId) {

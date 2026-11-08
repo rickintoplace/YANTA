@@ -45,7 +45,7 @@ function withFullCalendar(fn) {
     .then(() => fn())
     .catch((err) => {
       console.warn('[YANTA Calendar] could not load the calendar view', err);
-      toast('The calendar could not be loaded. Check your connection and try again.', 'error');
+      toast(i18n('calendar.toast.loadFailed'), 'error');
     });
 }
 
@@ -268,11 +268,11 @@ const DEFAULT_CATEGORY_ID = 'cal_default';
 const CALENDAR_SWIPE_EDGE_GUARD_PX = 24;
 
 const CALENDAR_REMINDER_PRESETS = Object.freeze([
-  { id: 'at-time', label: 'At time of event', minutesBefore: 0 },
-  { id: '10m', label: '10 minutes before', minutesBefore: 10 },
-  { id: '30m', label: '30 minutes before', minutesBefore: 30 },
-  { id: '1h', label: '1 hour before', minutesBefore: 60 },
-  { id: '1d', label: '1 day before', minutesBefore: 24 * 60 },
+  { id: 'at-time', labelKey: 'calendar.reminders.atTime', minutesBefore: 0 },
+  { id: '10m', labelKey: 'calendarList.reminder10', minutesBefore: 10 },
+  { id: '30m', labelKey: 'calendarList.reminder30', minutesBefore: 30 },
+  { id: '1h', labelKey: 'calendarList.reminder60', minutesBefore: 60 },
+  { id: '1d', labelKey: 'calendarList.reminderDay', minutesBefore: 24 * 60 },
 ]);
 
 /*
@@ -447,8 +447,8 @@ function nativeNotificationHintHtml() {
       <div class="yanta-calendar-native-notification-hint" ${hasPhone ? 'hidden' : ''}>
         ${lucide('smartphone', 14)}
         <span>
-          <strong>Reminders ring in the YANTA Android app.</strong>
-          <small>Browsers cannot reliably wake up for calendar alarms.</small>
+          <strong>${escapeHtml(i18n('calendar.reminders.androidTitle'))}</strong>
+          <small>${escapeHtml(i18n('calendar.reminders.androidHint'))}</small>
         </span>
       </div>
     `;
@@ -460,17 +460,17 @@ function nativeNotificationHintHtml() {
     <div class="yanta-calendar-native-notification-hint warn">
       ${lucide('bell-off', 14)}
       <span>
-        <strong>Reminders cannot ring yet.</strong>
-        <small>Allow notifications and exact alarms for YANTA.</small>
+        <strong>${escapeHtml(i18n('calendar.reminders.blockedTitle'))}</strong>
+        <small>${escapeHtml(i18n('calendar.reminders.blockedHint'))}</small>
       </span>
       ${
         !status.notificationsGranted
-          ? `<button type="button" class="btn compact" data-native-notification-permission>${lucide('bell', 13)} Allow</button>`
+          ? `<button type="button" class="btn compact" data-native-notification-permission>${lucide('bell', 13)} ${escapeHtml(i18n('calendar.reminders.allow'))}</button>`
           : ''
       }
       ${
         !status.exactAlarmAllowed
-          ? `<button type="button" class="btn compact" data-native-exact-alarm>${lucide('alarm-clock', 13)} Exact alarms</button>`
+          ? `<button type="button" class="btn compact" data-native-exact-alarm>${lucide('alarm-clock', 13)} ${escapeHtml(i18n('calendar.reminders.exactAlarms'))}</button>`
           : ''
       }
     </div>
@@ -487,9 +487,9 @@ function remindersEditorHtml(ev = {}, {
   return `
     <section class="yanta-calendar-reminders-box" data-reminders-box data-all-day="${allDay ? '1' : '0'}">
       <div class="yanta-calendar-reminders-head">
-        <strong>${lucide('bell', 14)} Notifications</strong>
+        <strong>${lucide('bell', 14)} ${escapeHtml(i18n('calendar.reminders.title'))}</strong>
         <button type="button" class="btn compact" data-reminder-add>
-          ${lucide('plus', 13)} Add notification
+          ${lucide('plus', 13)} ${escapeHtml(i18n('calendar.reminders.add'))}
         </button>
       </div>
 
@@ -497,7 +497,7 @@ function remindersEditorHtml(ev = {}, {
         shared
           ? `<div class="yanta-calendar-reminders-personal-hint">
               ${lucide('lock', 12)}
-              Notifications are personal. They never affect other people in this shared calendar.
+              ${escapeHtml(i18n('calendar.reminders.personalHint'))}
             </div>`
           : ''
       }
@@ -508,7 +508,7 @@ function remindersEditorHtml(ev = {}, {
         ${
           reminders.length
             ? reminders.map((reminder) => reminderRowHtml(reminder, { allDay })).join('')
-            : `<div class="yanta-calendar-reminders-empty">No notifications set.</div>`
+            : `<div class="yanta-calendar-reminders-empty">${escapeHtml(i18n('calendar.reminders.empty'))}</div>`
         }
       </div>
 
@@ -545,7 +545,7 @@ function notificationDeviceListHtml(ev = {}, {
 
   const rows = status.devices.map((device) => {
     const label = device.current
-      ? `${device.name} (this device)`
+      ? i18n('calendar.reminders.thisDevice', { name: device.name })
       : device.name;
 
     if (device.state === 'permissions') {
@@ -553,8 +553,8 @@ function notificationDeviceListHtml(ev = {}, {
         tone: 'warn',
         icon: 'bell-off',
         label,
-        text: 'Notifications disabled in the app',
-        tooltip: `Open YANTA on "${device.name}" and allow notifications and exact alarms — until then reminders cannot fire there.`,
+        text: i18n('calendar.reminders.device.disabled'),
+        tooltip: i18n('calendar.reminders.device.disabledTip', { name: device.name }),
       });
     }
 
@@ -563,8 +563,8 @@ function notificationDeviceListHtml(ev = {}, {
         tone: 'ok',
         icon: 'check',
         label,
-        text: 'Notifications synced',
-        tooltip: `"${device.name}" has scheduled this event's notifications. You will be notified even while YANTA is closed.`,
+        text: i18n('calendar.reminders.device.synced'),
+        tooltip: i18n('calendar.reminders.device.syncedTip', { name: device.name }),
       });
     }
 
@@ -580,8 +580,8 @@ function notificationDeviceListHtml(ev = {}, {
         tone: 'pending',
         icon: 'refresh-cw',
         label,
-        text: editingExisting ? 'Scheduling on this device…' : 'Will be scheduled after saving',
-        tooltip: 'This device schedules the reminders with Android by itself.',
+        text: editingExisting ? i18n('calendar.reminders.device.scheduling') : i18n('calendar.reminders.device.scheduleAfterSave'),
+        tooltip: i18n('calendar.reminders.device.selfTip'),
       });
     }
 
@@ -590,11 +590,11 @@ function notificationDeviceListHtml(ev = {}, {
       icon: 'refresh-cw',
       label,
       text: editingExisting
-        ? 'Not synced yet — open YANTA there'
-        : 'Will sync after saving',
+        ? i18n('calendar.reminders.device.notSynced')
+        : i18n('calendar.reminders.device.syncAfterSave'),
       tooltip: editingExisting
-        ? `"${device.name}" does not know this event's notifications yet. Open YANTA there once — it syncs automatically and schedules the reminders.`
-        : `After saving, open YANTA on "${device.name}" once so it can schedule the reminders.`,
+        ? i18n('calendar.reminders.device.notSyncedTip', { name: device.name })
+        : i18n('calendar.reminders.device.openAfterSaveTip', { name: device.name }),
     });
   }).join('');
 
@@ -644,10 +644,10 @@ function reminderRowHtml(reminder = {}, { allDay = false } = {}) {
       <select class="text-input" data-reminder-preset>
         ${CALENDAR_REMINDER_PRESETS.map((preset) => `
           <option value="${preset.minutesBefore}" ${preset.minutesBefore === value ? 'selected' : ''}>
-            ${escapeHtml(preset.label)}
+            ${escapeHtml(i18n(preset.labelKey))}
           </option>
         `).join('')}
-        <option value="custom" ${isPreset ? '' : 'selected'}>Custom...</option>
+        <option value="custom" ${isPreset ? '' : 'selected'}>${escapeHtml(i18n('calendar.reminders.custom'))}</option>
       </select>
 
       <input
@@ -661,9 +661,9 @@ function reminderRowHtml(reminder = {}, { allDay = false } = {}) {
         value="${escapeAttr(value)}"
         ${isPreset ? 'hidden' : ''} />
 
-      <span class="yanta-calendar-reminder-unit" ${isPreset ? 'hidden' : ''}>min before</span>
+      <span class="yanta-calendar-reminder-unit" ${isPreset ? 'hidden' : ''}>${escapeHtml(i18n('calendar.reminders.minBefore'))}</span>
 
-      <button type="button" class="icon-btn danger" data-reminder-remove title="Remove notification">
+      <button type="button" class="icon-btn danger" data-reminder-remove title="${escapeAttr(i18n('calendar.reminders.remove'))}">
         ${lucide('trash', 14)}
       </button>
     </div>
@@ -698,7 +698,7 @@ function allDayReminderRowHtml(value, reminder = {}) {
         `).join('')}
       </select>
 
-      <span class="yanta-calendar-reminder-unit" ${atStart ? 'hidden' : ''}>at</span>
+      <span class="yanta-calendar-reminder-unit" ${atStart ? 'hidden' : ''}>${escapeHtml(i18n('calendar.reminders.at'))}</span>
 
       <input
         class="text-input yanta-calendar-reminder-time"
@@ -707,7 +707,7 @@ function allDayReminderRowHtml(value, reminder = {}) {
         value="${escapeAttr(minutesToClock(timeMinutes))}"
         ${atStart ? 'hidden' : ''} />
 
-      <button type="button" class="icon-btn danger" data-reminder-remove title="Remove notification">
+      <button type="button" class="icon-btn danger" data-reminder-remove title="${escapeAttr(i18n('calendar.reminders.remove'))}">
         ${lucide('trash', 14)}
       </button>
     </div>
@@ -715,10 +715,10 @@ function allDayReminderRowHtml(value, reminder = {}) {
 }
 
 function allDayReminderDayLabel(days) {
-  if (days <= 0) return 'At the start of the day';
-  if (days === 1) return 'The day before';
-  if (days === 7) return 'A week before';
-  return `${days} days before`;
+  if (days <= 0) return i18n('calendar.reminders.dayStart');
+  if (days === 1) return i18n('calendar.reminders.dayBefore');
+  if (days === 7) return i18n('calendar.reminders.weekBefore');
+  return i18n('calendar.reminders.daysBefore', { count: days });
 }
 
 /**
@@ -768,7 +768,7 @@ function setupRemindersEditor(modal, ev = {}, {
     const rows = list.querySelectorAll('[data-reminder-row]');
     const empty = list.querySelector('.yanta-calendar-reminders-empty');
     if (!rows.length && !empty) {
-      list.innerHTML = `<div class="yanta-calendar-reminders-empty">No notifications set.</div>`;
+      list.innerHTML = `<div class="yanta-calendar-reminders-empty">${escapeHtml(i18n('calendar.reminders.empty'))}</div>`;
     }
     if (rows.length && empty) empty.remove();
 
@@ -1508,22 +1508,22 @@ function calendarToolbarEl() {
 const CALENDAR_VIEW_BUTTONS = Object.freeze([
   {
     type: 'dayGridMonth',
-    label: 'Month',
+    get label() { return i18n('calendarWidget.viewLabels.month'); },
     icon: 'calendar-days',
   },
   {
     type: 'timeGridWeek',
-    label: 'Week',
+    get label() { return i18n('calendarWidget.viewLabels.week'); },
     icon: 'calendar-range',
   },
   {
     type: 'timeGridDay',
-    label: 'Day',
+    get label() { return i18n('calendarWidget.viewLabels.day'); },
     icon: 'dynamic-calendar-day',
   },
   {
     type: 'listWeek',
-    label: 'List',
+    get label() { return i18n('calendarWidget.viewLabels.list'); },
     icon: 'list',
   },
 ]);
@@ -1557,14 +1557,14 @@ function calendarViewButtonsHtml(activeView = '') {
       class="text-input yanta-calendar-view-select yanta-calendar-view-buttons"
       data-cal-view-group
       role="group"
-      aria-label="Calendar view"
+      aria-label="${escapeAttr(i18n('calendar.toolbar.view'))}"
       style="--active-index:${activeIndex}">
       <button
         type="button"
         class="yanta-calendar-view-current"
         data-cal-view-current
         title="${escapeAttr(active.label)}"
-        aria-label="Calendar view: ${escapeAttr(active.label)}"
+        aria-label="${escapeAttr(i18n('calendar.toolbar.viewCurrent', { view: active.label }))}"
         aria-haspopup="listbox"
         aria-expanded="false">
         ${calendarViewButtonIcon(active.icon, 18)}
@@ -1574,7 +1574,7 @@ function calendarViewButtonsHtml(activeView = '') {
         class="yanta-calendar-view-menu"
         data-cal-view-menu
         role="listbox"
-        aria-label="Calendar view options">
+        aria-label="${escapeAttr(i18n('calendar.toolbar.viewOptions'))}">
         ${CALENDAR_VIEW_BUTTONS.map((view) => `
           <button
             type="button"
@@ -1595,7 +1595,7 @@ function calendarViewButtonsHtml(activeView = '') {
 
 function setCalendarToolbarTitle(title = '') {
   const el = calendarToolbarEl()?.querySelector('[data-cal-title]');
-  if (el) el.textContent = title || fc?.view?.title || 'Calendar';
+  if (el) el.textContent = title || fc?.view?.title || i18n('calendarWidget.title');
 }
 
 function setCalendarToolbarView(viewType = '') {
@@ -1614,7 +1614,7 @@ function setCalendarToolbarView(viewType = '') {
   if (current) {
     current.innerHTML = calendarViewButtonIcon(active.icon, 18);
     current.title = active.label;
-    current.setAttribute('aria-label', `Calendar view: ${active.label}`);
+    current.setAttribute('aria-label', i18n('calendar.toolbar.viewCurrent', { view: active.label }));
   }
 
   const legacySelect = bar.querySelector('[data-cal-view]');
@@ -1643,13 +1643,13 @@ function openCalendarMenu(anchor) {
       action: renderCategoriesModal,
     },
     {
-      label: 'Import .ics / JSON',
+      label: i18n('calendarList.importFile'),
       icon: 'calendar-arrow-up',
       action: openCalendarImportPicker,
     },
     'hr',
     {
-      label: 'Export all .ics',
+      label: i18n('calendarList.exportAllIcs'),
       icon: 'calendar-arrow-down',
       action: () => {
         exportEventsAsIcs(currentEventsForCategory(null), {
@@ -1659,7 +1659,7 @@ function openCalendarMenu(anchor) {
       },
     },
     {
-      label: 'Export all JSON',
+      label: i18n('calendarList.exportAllJson'),
       icon: 'calendar-arrow-down',
       action: () => {
         exportCalendarJson({
@@ -1698,21 +1698,25 @@ function renderCalendarTopbar() {
     'dayGridMonth';
 
   bar.innerHTML = `
-    <button class="icon-btn" data-cal-nav="prev" title="Previous">
+    <button class="icon-btn" data-cal-nav="prev" title="${escapeAttr(i18n('calendarWidget.previous'))}">
       ${lucide('chevron-left', 18)}
     </button>
 
-    <button class="btn" data-cal-nav="today" title="Today">Today</button>
+    <button class="btn" data-cal-nav="today" title="${escapeAttr(i18n('calendarWidget.today'))}">${escapeHtml(i18n('calendarWidget.today'))}</button>
 
-    <button class="icon-btn" data-cal-nav="next" title="Next">
+    <button class="icon-btn" data-cal-nav="next" title="${escapeAttr(i18n('calendarWidget.next'))}">
       ${lucide('chevron-right', 18)}
     </button>
 
     <div class="yanta-calendar-title" data-cal-title>
-      ${escapeHtml(fc?.view?.title || 'Calendar')}
+      ${escapeHtml(fc?.view?.title || i18n('calendarWidget.title'))}
     </div>
 
     <span class="grow"></span>
+
+    <button class="icon-btn yanta-calendar-add" data-cal-add title="${escapeAttr(i18n('calendar.editor.newTitle'))}" aria-label="${escapeAttr(i18n('calendar.editor.newTitle'))}">
+      ${lucide('plus', 18)}
+    </button>
 
     <button class="icon-btn yanta-calendar-feed-chip" data-cal-feed title="${escapeAttr(i18n('calendarShare.title'))}" aria-label="${escapeAttr(i18n('calendarShare.title'))}">
       ${lucide('users', 18)}
@@ -1722,18 +1726,18 @@ function renderCalendarTopbar() {
     <button
       class="icon-btn ${calendarFindTimeActive ? 'active' : ''}"
       data-cal-findtime
-      title="Find a time — highlight free slots across your visible calendars"
+      title="${escapeAttr(i18n('calendar.toolbar.findTime'))}"
       aria-pressed="${calendarFindTimeActive ? 'true' : 'false'}">
       ${lucide('clock', 18)}
     </button>
 
     ${calendarViewButtonsHtml(activeView)}
 
-    <button class="icon-btn" data-cal-menu title="Calendar menu">
+    <button class="icon-btn" data-cal-menu title="${escapeAttr(i18n('calendar.toolbar.menu'))}">
       ${lucide('more-vertical', 18)}
     </button>
 
-    <button class="icon-btn" data-cal-close title="${calendarMode === 'pane' ? 'Close calendar pane' : 'Close calendar'}">
+    <button class="icon-btn" data-cal-close title="${escapeAttr(calendarMode === 'pane' ? i18n('calendar.toolbar.closePane') : i18n('calendar.toolbar.close'))}">
       ${lucide('x', 18)}
     </button>
   `;
@@ -1850,6 +1854,17 @@ function renderCalendarTopbar() {
     openCalendarMenu(e.currentTarget);
   });
 
+  // A new event: on the day shown when that is not this month, else now.
+  bar.querySelector('[data-cal-add]')?.addEventListener('click', () => {
+    const now = new Date();
+    const view = fc?.view;
+    const inView = view && now >= view.activeStart && now < view.activeEnd;
+    if (inView || !view) return openNewCalendarEvent({});
+    const start = new Date(view.currentStart);
+    start.setHours(9, 0, 0, 0);
+    openNewCalendarEvent({ start: start.toISOString() });
+  });
+
   bar.querySelector('[data-cal-findtime]')?.addEventListener('click', () => {
     toggleCalendarFindTime();
   });
@@ -1900,7 +1915,7 @@ function persistCalShareIntroDismissed() {
 
 /** Best-effort friendly name for a Matrix sharer id (@alice:hs → Alice). */
 function friendlySharerName(userId) {
-  if (!userId) return 'Someone';
+  if (!userId) return i18n('calendarShare.someone');
 
   try {
     const client = window.yantaChatSession?.client || window.yantaMatrixClient || null;
@@ -1928,7 +1943,7 @@ function mountedCalendarInvites() {
 
     out.push({
       spaceId: session.spaceId,
-      name: cat?.name || session.record?.title || 'a calendar',
+      name: cat?.name || session.record?.title || i18n('calendarShare.untitled'),
       sharer: sharedOwnerNames.get(categoryId) || friendlySharerName(session.record?.invitedBy || ''),
       role: session.role,
     });
@@ -1955,10 +1970,9 @@ function renderCalendarShareIntroBanner() {
     <div class="yanta-calendar-share-intro-row" data-space-id="${escapeAttr(inv.spaceId)}">
       ${lucide('users', 15)}
       <span class="yanta-calendar-share-intro-text">
-        <strong>${escapeHtml(inv.sharer)}</strong> shared the calendar
-        “${escapeHtml(inv.name)}” with you.${inv.role === 'write' ? ' You can edit it' : ' View only'}.
+        ${i18n(inv.role === 'write' ? 'calendar.shareIntro.canEdit' : 'calendar.shareIntro.viewOnly', { sharer: `<strong>${escapeHtml(inv.sharer)}</strong>`, name: escapeHtml(inv.name) })}
       </span>
-      <button class="icon-btn" data-share-intro-dismiss title="Dismiss">${lucide('x', 15)}</button>
+      <button class="icon-btn" data-share-intro-dismiss title="${escapeAttr(i18n('calendar.shareIntro.dismiss'))}">${lucide('x', 15)}</button>
     </div>
   `).join('');
 
@@ -2008,7 +2022,7 @@ async function calendarFeedSummary() {
     if (feed.entries.length) {
       sections.push({
         bridge,
-        name: state.calendarCategories.get(bridge.categoryId)?.name || 'Shared calendar',
+        name: state.calendarCategories.get(bridge.categoryId)?.name || i18n('calendarShare.untitled'),
         entries: [...feed.entries].reverse().slice(0, 12),
         lastSeenAt: feed.lastSeenAt,
       });
@@ -2062,16 +2076,14 @@ async function openCalendarFeedPopover(anchor) {
           ${section.entries.map((entry) => `
             <button class="yanta-calendar-feed-entry ${entry.ts > section.lastSeenAt ? 'is-new' : ''}" data-feed-event-id="${escapeAttr(entry.eventId || '')}">
               <span class="yanta-calendar-feed-entry-main">
-                <strong>${escapeHtml(entry.actor || 'Someone')}</strong>
-                ${entry.action === 'added' ? 'added' : entry.action === 'removed' ? 'removed' : 'updated'}
-                “${escapeHtml(entry.title || 'Untitled event')}”
+                ${i18n(`calendarShare.change.${entry.action === 'added' ? 'added' : entry.action === 'removed' ? 'removed' : 'changed'}`, { who: `<strong>${escapeHtml(entry.actor || i18n('calendarShare.someone'))}</strong>`, title: escapeHtml(entry.title || i18n('calendarWidget.untitledEvent')) })}
               </span>
               <small>${escapeHtml(formatCalendarDateTime(new Date(entry.ts).toISOString(), { editor: true }))}</small>
             </button>
           `).join('')}
         </div>
       `).join('')
-    : '<div class="yanta-calendar-feed-empty">No shared-calendar changes yet.</div>';
+    : `<div class="yanta-calendar-feed-empty">${escapeHtml(i18n('calendarShare.noChanges'))}</div>`;
 
   document.body.append(pop);
   calendarFeedPopover = pop;
@@ -2126,7 +2138,7 @@ export function openCalendarPane() {
 
   const body = openSidePane({
     kind: 'calendar',
-    title: 'Calendar',
+    title: i18n('calendarWidget.title'),
     icon: 'calendar-days',
     className: 'yanta-calendar-side-pane',
     onClose: () => {
@@ -5354,7 +5366,7 @@ function calendarEditorRangeIsValid({
   if (!start) {
     return {
       ok: false,
-      message: 'Start date required',
+      message: i18n('calendar.editor.startRequired'),
     };
   }
 
@@ -5371,7 +5383,7 @@ function calendarEditorRangeIsValid({
   if (!startDate || !endDate) {
     return {
       ok: false,
-      message: 'Invalid date range',
+      message: i18n('calendar.editor.invalidRange'),
     };
   }
 
@@ -5382,7 +5394,7 @@ function calendarEditorRangeIsValid({
     if (e < s) {
       return {
         ok: false,
-        message: 'End date must be on or after start date',
+        message: i18n('calendar.editor.endDateBeforeStart'),
       };
     }
 
@@ -5394,7 +5406,7 @@ function calendarEditorRangeIsValid({
   if (endDate.getTime() <= startDate.getTime()) {
     return {
       ok: false,
-      message: 'End time must be after start time',
+      message: i18n('calendar.editor.endTimeBeforeStart'),
     };
   }
 
@@ -5521,7 +5533,7 @@ function closeCalendarDateTimePicker({
 }
 
 function openCalendarDateTimePicker({
-  title = 'Pick date',
+  title = i18n('calendar.picker.pickDate'),
   value = null,
   allDay = false,
   allowClear = false,
@@ -5646,14 +5658,14 @@ function openCalendarDateTimePicker({
               }))}
             </div>
           </div>
-          <button class="icon-btn" data-ydtp-close title="Close">${lucide('x', 16)}</button>
+          <button class="icon-btn" data-ydtp-close title="${escapeAttr(i18n('common.close'))}">${lucide('x', 16)}</button>
         </header>
         <div class="yanta-dtp-tabs">
           <button class="${mode === 'date' ? 'active' : ''}" data-ydtp-mode="date">
-            ${lucide('calendar-days', 14)} Date
+            ${lucide('calendar-days', 14)} ${escapeHtml(i18n('calendar.picker.date'))}
           </button>
           <button class="${mode === 'time' ? 'active' : ''}" data-ydtp-mode="time">
-            ${lucide('clock', 14)} Time
+            ${lucide('clock', 14)} ${escapeHtml(i18n('calendar.picker.time'))}
           </button>
         </div>
         <div class="yanta-dtp-body">
@@ -5676,7 +5688,7 @@ function openCalendarDateTimePicker({
                 ? `
                   <label class="switch yanta-calendar-switch yanta-dtp-allday-row">
                     <input type="checkbox" data-ydtp-allday ${isAllDay ? 'checked' : ''} />
-                    <span>All day</span>
+                    <span>${escapeHtml(i18n('calendarWidget.allDay'))}</span>
                   </label>
                 `
                 : ''
@@ -5685,8 +5697,8 @@ function openCalendarDateTimePicker({
               isAllDay
                 ? `
                   <div class="yanta-dtp-allday-hint">
-                    All-day event — no time needed.<br>
-                    Turn off “All day” to pick a time.
+                    ${escapeHtml(i18n('calendar.picker.allDayHint'))}<br>
+                    ${escapeHtml(i18n('calendar.picker.allDayHint2'))}
                   </div>
                 `
                 : `
@@ -5699,11 +5711,11 @@ function openCalendarDateTimePicker({
                         </div>
                         <div class="yanta-dtp-time-wheels ${hour12 ? 'is-12h' : ''}">
                           <div class="yanta-dtp-wheel" data-wheel="hour">
-                            <div class="yanta-dtp-wheel-label">Hour</div>
+                            <div class="yanta-dtp-wheel-label">${escapeHtml(i18n('calendar.picker.hour'))}</div>
                             ${hoursHtml}
                           </div>
                           <div class="yanta-dtp-wheel" data-wheel="minute">
-                            <div class="yanta-dtp-wheel-label">Minute</div>
+                            <div class="yanta-dtp-wheel-label">${escapeHtml(i18n('calendar.picker.minute'))}</div>
                             ${minutesHtml}
                           </div>
                           ${hour12 ? `
@@ -5717,18 +5729,18 @@ function openCalendarDateTimePicker({
                   }
                   <button type="button" class="yanta-dtp-entry-toggle" data-ydtp-entry>
                     ${lucide(keyboardTimeEntry ? 'clock' : 'keyboard', 14)}
-                    ${keyboardTimeEntry ? 'Pick from list' : 'Enter time'}
+                    ${escapeHtml(keyboardTimeEntry ? i18n('calendar.picker.pickFromList') : i18n('calendar.picker.enterTime'))}
                   </button>
                 `
             }
           </section>
         </div>
         <footer class="yanta-dtp-foot">
-          ${allowClear ? `<button type="button" class="btn" data-ydtp-clear>Clear</button>` : ''}
-          <button type="button" class="btn" data-ydtp-today>${isAllDay ? 'Today' : 'Now'}</button>
+          ${allowClear ? `<button type="button" class="btn" data-ydtp-clear>${escapeHtml(i18n('calendar.picker.clear'))}</button>` : ''}
+          <button type="button" class="btn" data-ydtp-today>${escapeHtml(isAllDay ? i18n('calendarWidget.today') : i18n('calendar.picker.now'))}</button>
           <span class="grow"></span>
-          <button type="button" class="btn" data-ydtp-close>Cancel</button>
-          <button type="button" class="btn primary" data-ydtp-ok>OK</button>
+          <button type="button" class="btn" data-ydtp-close>${escapeHtml(i18n('common.cancel'))}</button>
+          <button type="button" class="btn primary" data-ydtp-ok>${escapeHtml(i18n('common.ok'))}</button>
         </footer>
       </div>
     `;
@@ -5892,21 +5904,35 @@ function openCalendarDateTimePicker({
 // Recurrence UX helpers
 // ============================================================
 
-const RECURRENCE_WEEKDAYS = [
-  { code: 'MO', label: 'Mon', longLabel: 'Monday' },
-  { code: 'TU', label: 'Tue', longLabel: 'Tuesday' },
-  { code: 'WE', label: 'Wed', longLabel: 'Wednesday' },
-  { code: 'TH', label: 'Thu', longLabel: 'Thursday' },
-  { code: 'FR', label: 'Fri', longLabel: 'Friday' },
-  { code: 'SA', label: 'Sat', longLabel: 'Saturday' },
-  { code: 'SU', label: 'Sun', longLabel: 'Sunday' },
-];
+/** Weekday name in the app language; i is 0 for Monday … 6 for Sunday. */
+function recurrenceWeekdayName(i, style, fallback) {
+  try {
+    // 2026-05-04 is a Monday.
+    return new Intl.DateTimeFormat(getLocale(), { weekday: style }).format(new Date(2026, 4, 4 + i));
+  } catch {
+    return fallback;
+  }
+}
 
-const RECURRENCE_UNIT_LABELS = {
-  DAILY: 'day',
-  WEEKLY: 'week',
-  MONTHLY: 'month',
-  YEARLY: 'year',
+const RECURRENCE_WEEKDAYS = [
+  ['MO', 'Mon', 'Monday'],
+  ['TU', 'Tue', 'Tuesday'],
+  ['WE', 'Wed', 'Wednesday'],
+  ['TH', 'Thu', 'Thursday'],
+  ['FR', 'Fri', 'Friday'],
+  ['SA', 'Sat', 'Saturday'],
+  ['SU', 'Sun', 'Sunday'],
+].map(([code, label, longLabel], i) => ({
+  code,
+  get label() { return recurrenceWeekdayName(i, 'short', label); },
+  get longLabel() { return recurrenceWeekdayName(i, 'long', longLabel); },
+}));
+
+const RECURRENCE_SUMMARY_KEYS = {
+  DAILY: 'calendar.recurrence.summary.daily',
+  WEEKLY: 'calendar.recurrence.summary.weekly',
+  MONTHLY: 'calendar.recurrence.summary.monthly',
+  YEARLY: 'calendar.recurrence.summary.yearly',
 };
 
 const RECURRENCE_CUSTOM_UNIT_TO_FREQ = {
@@ -5932,10 +5958,6 @@ function parseRRuleParts(rrule = '') {
   return out;
 }
 
-function pluralUnit(unit, n) {
-  return Number(n) === 1 ? unit : `${unit}s`;
-}
-
 function weekdayCodeForDate(value) {
   const d = dateLikeToLocalDate(value);
   if (!d) return '';
@@ -5950,7 +5972,8 @@ function weekdayLongLabel(code) {
 function ordinal(n) {
   const num = Number(n);
 
-  if (num === -1) return 'last';
+  if (num === -1) return i18n('calendar.recurrence.nth.last');
+  if (num >= 1 && num <= 5) return i18n(`calendar.recurrence.nth.${num}`);
 
   const abs = Math.abs(num);
   const suffix =
@@ -5979,10 +6002,10 @@ function monthDayLabel(dateLike) {
 
 function monthNameDayLabel(dateLike) {
   const d = dateLikeToLocalDate(dateLike);
-  if (!d) return 'this date';
+  if (!d) return '';
 
   try {
-    return new Intl.DateTimeFormat(fullCalendarLocale(getCalendarPreferences()), {
+    return new Intl.DateTimeFormat(getLocale(), {
       month: 'long',
       day: 'numeric',
     }).format(d);
@@ -6073,8 +6096,8 @@ function quickPresetDefinitions(ev = {}) {
   return [
     {
       id: 'daily',
-      title: 'Daily',
-      hint: 'Repeats every day',
+      title: i18n('calendar.recurrence.preset.daily'),
+      hint: i18n('calendar.recurrence.summary.daily', { count: 1 }),
       rrule: ({ count, until } = {}) => buildRRuleString({
         freq: 'DAILY',
         count,
@@ -6083,8 +6106,8 @@ function quickPresetDefinitions(ev = {}) {
     },
     {
       id: 'weekdays',
-      title: 'On weekdays',
-      hint: 'Monday to Friday',
+      title: i18n('calendar.recurrence.preset.weekdays'),
+      hint: i18n('calendar.recurrence.preset.weekdaysHint'),
       rrule: ({ count, until } = {}) => buildRRuleString({
         freq: 'WEEKLY',
         byday: ['MO', 'TU', 'WE', 'TH', 'FR'],
@@ -6094,8 +6117,8 @@ function quickPresetDefinitions(ev = {}) {
     },
     {
       id: 'weekly-on-day',
-      title: `Weekly on ${weekdayName}`,
-      hint: `Repeats every ${weekdayName}`,
+      title: i18n('calendar.recurrence.preset.weekly', { weekday: weekdayName }),
+      hint: i18n('calendar.recurrence.preset.weeklyHint', { weekday: weekdayName }),
       rrule: ({ count, until } = {}) => buildRRuleString({
         freq: 'WEEKLY',
         byday: [weekday],
@@ -6105,8 +6128,8 @@ function quickPresetDefinitions(ev = {}) {
     },
     {
       id: 'monthly-by-date',
-      title: `Monthly on day ${dayOfMonth}`,
-      hint: `Repeats on the ${dayOfMonth}${ordinal(dayOfMonth).replace(String(dayOfMonth), '')} day`,
+      title: i18n('calendar.recurrence.preset.monthlyDate', { day: dayOfMonth }),
+      hint: i18n('calendar.recurrence.preset.monthlyDateHint', { day: dayOfMonth }),
       rrule: ({ count, until } = {}) => buildRRuleString({
         freq: 'MONTHLY',
         bymonthday: dayOfMonth,
@@ -6116,8 +6139,8 @@ function quickPresetDefinitions(ev = {}) {
     },
     {
       id: 'monthly-by-nth-weekday',
-      title: `Monthly on the ${nthText} ${weekdayName}`,
-      hint: `Repeats on the ${nthText} ${weekdayName}`,
+      title: i18n('calendar.recurrence.preset.monthlyNth', { nth: nthText, weekday: weekdayName }),
+      hint: i18n('calendar.recurrence.preset.monthlyNthHint', { nth: nthText, weekday: weekdayName }),
       rrule: ({ count, until } = {}) => buildRRuleString({
         freq: 'MONTHLY',
         byday: [weekday],
@@ -6128,8 +6151,8 @@ function quickPresetDefinitions(ev = {}) {
     },
     {
       id: 'yearly',
-      title: 'Yearly',
-      hint: `Repeats every year on ${monthDay}`,
+      title: i18n('calendar.recurrence.preset.yearly'),
+      hint: i18n('calendar.recurrence.preset.yearlyHint', { date: monthDay }),
       rrule: ({ count, until } = {}) => buildRRuleString({
         freq: 'YEARLY',
         count,
@@ -6220,45 +6243,50 @@ function humanRecurrenceSummary(ev = {}) {
   const recurrence = normalizeRecurrence(ev.recurrence);
 
   if (!recurrence?.rrule) {
-    return 'This event happens once.';
+    return i18n('calendar.recurrence.summary.once');
   }
 
   const parts = parseRRuleParts(recurrence.rrule);
   const freq = parts.FREQ || 'WEEKLY';
   const interval = Math.max(1, Number(parts.INTERVAL || 1));
-  const unit = RECURRENCE_UNIT_LABELS[freq] || 'period';
-
-  const intro =
-    interval === 1
-      ? `Repeats every ${unit}`
-      : `Repeats every ${interval} ${pluralUnit(unit, interval)}`;
 
   const byday = parts.BYDAY
     ? parts.BYDAY.split(',').map((x) => x.trim()).filter(Boolean)
     : [];
 
-  let detail = '';
+  let intro = RECURRENCE_SUMMARY_KEYS[freq]
+    ? i18n(RECURRENCE_SUMMARY_KEYS[freq], { count: interval })
+    : i18n('calendar.recurrence.summary.regular');
 
   if (freq === 'WEEKLY' && byday.length) {
-    detail = ` on ${byday.map(weekdayLongLabel).join(', ')}`;
+    const names = byday.map(weekdayLongLabel);
+    let days = names.join(', ');
+    try {
+      days = new Intl.ListFormat(getLocale(), { style: 'long', type: 'conjunction' }).format(names);
+    } catch {}
+    intro = i18n('calendar.recurrence.summary.weeklyOn', { count: interval, days });
   }
 
   if (freq === 'MONTHLY' && parts.BYMONTHDAY) {
-    detail = ` on day ${parts.BYMONTHDAY}`;
+    intro = i18n('calendar.recurrence.summary.monthlyOnDay', { count: interval, day: parts.BYMONTHDAY });
   }
 
   if (freq === 'MONTHLY' && parts.BYDAY && parts.BYSETPOS) {
-    detail = ` on the ${ordinal(parts.BYSETPOS)} ${weekdayLongLabel(parts.BYDAY)}`;
+    intro = i18n('calendar.recurrence.summary.monthlyOnNth', {
+      count: interval,
+      nth: ordinal(parts.BYSETPOS),
+      weekday: weekdayLongLabel(parts.BYDAY),
+    });
   }
 
   const endText =
     parts.COUNT
-      ? ` · ends after ${parts.COUNT} time${Number(parts.COUNT) === 1 ? '' : 's'}`
+      ? i18n('calendar.recurrence.summary.endsAfter', { count: Number(parts.COUNT) })
       : parts.UNTIL
-        ? ' · ends on the selected date'
-        : ' · never ends';
+        ? i18n('calendar.recurrence.summary.endsOnDate')
+        : i18n('calendar.recurrence.summary.neverEnds');
 
-  return `${intro}${detail}${endText}`;
+  return `${intro} · ${endText}`;
 }
 
 function recurrenceEditorHtml(ev = {}) {
@@ -6280,15 +6308,15 @@ function recurrenceEditorHtml(ev = {}) {
       <label class="switch yanta-calendar-switch yanta-calendar-repeat-toggle">
         <input type="checkbox" data-field="recurrenceEnabled" ${ui.enabled ? 'checked' : ''} />
         <span>
-          <strong>Repeat</strong>
-          <small>Turn this into a recurring event.</small>
+          <strong>${escapeHtml(i18n('calendar.recurrence.repeat'))}</strong>
+          <small>${escapeHtml(i18n('calendar.recurrence.repeatHint'))}</small>
         </span>
       </label>
 
       <div class="yanta-calendar-recurrence-details" data-recurrence-details ${ui.enabled ? '' : 'hidden'}>
         <input type="hidden" data-field="recurrencePreset" value="${escapeAttr(selectedPreset)}" />
 
-        <div class="yanta-calendar-recurrence-section-title">Quick presets</div>
+        <div class="yanta-calendar-recurrence-section-title">${escapeHtml(i18n('calendar.recurrence.quickPresets'))}</div>
 
         <div class="yanta-calendar-preset-grid" data-recurrence-presets>
           ${presets.map((preset) => `
@@ -6305,16 +6333,16 @@ function recurrenceEditorHtml(ev = {}) {
             type="button"
             class="yanta-calendar-preset yanta-calendar-preset-custom ${selectedPreset === 'custom' ? 'active' : ''}"
             data-preset="custom">
-            <strong>Custom…</strong>
-            <small>Choose interval, days and end behavior</small>
+            <strong>${escapeHtml(i18n('calendar.recurrence.custom'))}</strong>
+            <small>${escapeHtml(i18n('calendar.recurrence.customHint'))}</small>
           </button>
         </div>
 
         <div class="yanta-calendar-custom-repeat" data-custom-repeat ${selectedPreset === 'custom' ? '' : 'hidden'}>
-          <div class="yanta-calendar-recurrence-section-title">Custom repeat</div>
+          <div class="yanta-calendar-recurrence-section-title">${escapeHtml(i18n('calendar.recurrence.customTitle'))}</div>
 
           <label class="yanta-calendar-recurrence-field">
-            <span>Repeats every</span>
+            <span>${escapeHtml(i18n('calendar.recurrence.every'))}</span>
 
             <div class="yanta-calendar-custom-every-row">
               <input
@@ -6327,16 +6355,16 @@ function recurrenceEditorHtml(ev = {}) {
                 value="${escapeAttr(ui.interval || '1')}" />
 
               <select class="text-input" data-field="recurrenceCustomUnit">
-                <option value="days" ${customUnit === 'days' ? 'selected' : ''}>Days</option>
-                <option value="weeks" ${customUnit === 'weeks' ? 'selected' : ''}>Weeks</option>
-                <option value="months" ${customUnit === 'months' ? 'selected' : ''}>Months</option>
-                <option value="years" ${customUnit === 'years' ? 'selected' : ''}>Years</option>
+                <option value="days" ${customUnit === 'days' ? 'selected' : ''}>${escapeHtml(i18n('calendar.recurrence.unit.days'))}</option>
+                <option value="weeks" ${customUnit === 'weeks' ? 'selected' : ''}>${escapeHtml(i18n('calendar.recurrence.unit.weeks'))}</option>
+                <option value="months" ${customUnit === 'months' ? 'selected' : ''}>${escapeHtml(i18n('calendar.recurrence.unit.months'))}</option>
+                <option value="years" ${customUnit === 'years' ? 'selected' : ''}>${escapeHtml(i18n('calendar.recurrence.unit.years'))}</option>
               </select>
             </div>
           </label>
 
           <div class="yanta-calendar-weekday-wrap" data-recurrence-weekday-wrap ${customUnit === 'weeks' ? '' : 'hidden'}>
-            <div class="yanta-calendar-recurrence-subtitle">Repeats on</div>
+            <div class="yanta-calendar-recurrence-subtitle">${escapeHtml(i18n('calendar.recurrence.repeatsOn'))}</div>
 
             <div class="yanta-calendar-weekday-row" data-recurrence-weekdays>
               ${RECURRENCE_WEEKDAYS.map((day) => `
@@ -6352,30 +6380,30 @@ function recurrenceEditorHtml(ev = {}) {
           </div>
 
           <label class="yanta-calendar-recurrence-field yanta-calendar-month-mode" data-recurrence-month-mode-wrap ${customUnit === 'months' ? '' : 'hidden'}>
-            <span>Monthly pattern</span>
+            <span>${escapeHtml(i18n('calendar.recurrence.monthlyPattern'))}</span>
 
             <select class="text-input" data-field="recurrenceMonthMode">
               <option value="date" ${customMonthMode === 'date' ? 'selected' : ''}>
-                Monthly on day ${escapeHtml(dayOfMonth)}
+                ${escapeHtml(i18n('calendar.recurrence.preset.monthlyDate', { day: dayOfMonth }))}
               </option>
               <option value="nth-weekday" ${customMonthMode === 'nth-weekday' ? 'selected' : ''}>
-                Monthly on the ${escapeHtml(ordinal(nth))} ${escapeHtml(weekdayName)}
+                ${escapeHtml(i18n('calendar.recurrence.preset.monthlyNth', { nth: ordinal(nth), weekday: weekdayName }))}
               </option>
             </select>
           </label>
         </div>
 
         <div class="yanta-calendar-recurrence-end-box">
-          <div class="yanta-calendar-recurrence-section-title">Ends</div>
+          <div class="yanta-calendar-recurrence-section-title">${escapeHtml(i18n('calendar.recurrence.ends'))}</div>
 
           <label class="yanta-calendar-radio-row">
             <input type="radio" name="recurrenceEndMode" value="never" ${ui.endMode === 'never' ? 'checked' : ''} />
-            <span>Never</span>
+            <span>${escapeHtml(i18n('calendar.recurrence.never'))}</span>
           </label>
 
           <label class="yanta-calendar-radio-row">
             <input type="radio" name="recurrenceEndMode" value="until" ${ui.endMode === 'until' ? 'checked' : ''} />
-            <span>On</span>
+            <span>${escapeHtml(i18n('calendar.recurrence.on'))}</span>
             <input
               class="text-input"
               data-field="recurrenceUntil"
@@ -6389,7 +6417,7 @@ function recurrenceEditorHtml(ev = {}) {
 
           <label class="yanta-calendar-radio-row">
             <input type="radio" name="recurrenceEndMode" value="count" ${ui.endMode === 'count' ? 'checked' : ''} />
-            <span>After</span>
+            <span>${escapeHtml(i18n('calendar.recurrence.after'))}</span>
             <input
               class="text-input"
               data-field="recurrenceCount"
@@ -6398,7 +6426,7 @@ function recurrenceEditorHtml(ev = {}) {
               min="1"
               max="9999"
               value="${escapeAttr(ui.count || '10')}" />
-            <span>events</span>
+            <span>${escapeHtml(i18n('calendar.recurrence.occurrences'))}</span>
           </label>
         </div>
 
@@ -6664,7 +6692,7 @@ function recurrenceValidationMessageForPatch(patch, modal) {
     );
 
     if (!Number.isFinite(interval) || interval < 1) {
-      return 'Repeat interval must be at least 1.';
+      return i18n('calendar.recurrence.intervalInvalid');
     }
   }
 
@@ -6672,7 +6700,7 @@ function recurrenceValidationMessageForPatch(patch, modal) {
 
   if (end.mode === 'count') {
     if (!Number.isFinite(end.count) || end.count < 1) {
-      return 'Number of events must be at least 1.';
+      return i18n('calendar.recurrence.countInvalid');
     }
   }
 
@@ -6681,14 +6709,14 @@ function recurrenceValidationMessageForPatch(patch, modal) {
     const parsed = parseCalendarEditorInput(raw, true);
 
     if (!raw.trim() || !parsed) {
-      return `End date required · expected ${calendarEditorDatePlaceholder(true)}`;
+      return i18n('calendar.recurrence.untilRequired', { format: calendarEditorDatePlaceholder(true) });
     }
 
     const untilDate = dateLikeToLocalDate(parsed);
     const startDate = dateLikeToLocalDate(patch.start);
 
     if (untilDate && startDate && untilDate.getTime() < startOfLocalDay(startDate).getTime()) {
-      return 'Repeat end date must be on or after the start date.';
+      return i18n('calendar.recurrence.untilBeforeStart');
     }
   }
 
@@ -6709,7 +6737,7 @@ function cleanUndefined(obj) {
 // ============================================================
 
 export function calendarChoiceDialog({
-  title = 'Confirm',
+  title = i18n('dialog.confirmTitle'),
   message = '',
   choices = [],
 } = {}) {
@@ -6718,13 +6746,13 @@ export function calendarChoiceDialog({
     : [
         {
           id: 'ok',
-          label: 'OK',
+          label: i18n('common.ok'),
           primary: true,
           icon: 'check',
         },
         {
           id: 'cancel',
-          label: 'Cancel',
+          label: i18n('common.cancel'),
           icon: 'x',
         },
       ];
@@ -6753,7 +6781,7 @@ export function calendarChoiceDialog({
       danger: !!choice.danger,
       disabled: !!choice.disabled,
     })),
-    cancelLabel: 'Cancel',
+    cancelLabel: i18n('common.cancel'),
   });
 }
 
@@ -6815,6 +6843,19 @@ export function defaultCalendarCategory() {
     created: now(),
     updated: now(),
   };
+}
+
+/*
+  "General" is the stored name of the default calendar, synced as data.
+  Only while it is untouched does it show in the app language; a calendar
+  the user renamed keeps its own name.
+*/
+function calendarCategoryLabel(cat) {
+  if (!cat) return i18n('calendarWidget.title');
+  if (cat.id === DEFAULT_CATEGORY_ID && (!cat.name || cat.name === 'General')) {
+    return i18n('calendar.defaultName');
+  }
+  return cat.name || i18n('calendarWidget.title');
 }
 
 export function sanitizeCalendarCategory(raw) {
@@ -7166,7 +7207,7 @@ async function repairDuplicateSharedCalendars() {
       }, ORIGIN);
 
       if (moved) {
-        const name = bridge.category()?.name || 'the shared calendar';
+        const name = bridge.category()?.name || i18n('calendarShare.untitled');
         toast(i18n('calendarShare.movedIn', { count: moved, name }), 'success');
         hydrateCalendarStateFromVault({ silent: false });
       }
@@ -7494,28 +7535,29 @@ async function confirmCalendarShareMove({ fromCategoryId, toCategoryId, title = 
 
   const cat = state.calendarCategories.get(toCategoryId);
 
+  const calendarName = cat ? calendarCategoryLabel(cat) : i18n('calendarShare.untitled');
+
   return yantaConfirm({
-    title: 'Move into shared calendar?',
-    message: [
-      title ? `"${title}"` : 'This event',
-      `will become visible to everyone with access to "${cat?.name || 'the shared calendar'}".`,
-    ].join(' '),
-    confirmLabel: 'Move & share',
-    cancelLabel: 'Cancel',
+    title: i18n('calendar.share.moveTitle'),
+    message: title
+      ? i18n('calendar.share.moveMessage', { title, name: calendarName })
+      : i18n('calendar.share.moveMessageUntitled', { name: calendarName }),
+    confirmLabel: i18n('calendar.share.moveConfirm'),
+    cancelLabel: i18n('common.cancel'),
     icon: 'users',
   });
 }
 
 async function leaveMountedCalendar(cat) {
   const ok = await yantaConfirm({
-    title: 'Leave shared calendar?',
+    title: i18n('calendar.share.leaveTitle'),
     message: [
-      `Leave "${cat.name || 'this shared calendar'}"?`,
+      i18n('calendar.share.leaveQuestion', { name: cat.name || i18n('calendarShare.untitled') }),
       '',
-      'It disappears from your calendar together with its shared notes. The owner and other members keep everything.',
+      i18n('calendar.share.leaveMessage'),
     ].join('\n'),
-    confirmLabel: 'Leave calendar',
-    cancelLabel: 'Cancel',
+    confirmLabel: i18n('calendarList.leave'),
+    cancelLabel: i18n('common.cancel'),
     danger: true,
     icon: 'log-out',
   });
@@ -7525,11 +7567,11 @@ async function leaveMountedCalendar(cat) {
   try {
     const { leaveSpace } = await import('./spaces/space-session.js');
     await leaveSpace(cat.spaceId);
-    toast('Left the shared calendar', 'success');
+    toast(i18n('calendar.share.left'), 'success');
     return true;
   } catch (err) {
     console.error(err);
-    toast(err?.message || 'Could not leave the shared calendar', 'error');
+    toast(err?.message || i18n('calendar.share.leaveFailed'), 'error');
     return false;
   }
 }
@@ -7780,7 +7822,7 @@ function categoryMoveTargetOptionsHtml(deletedCategoryId, selectedId = DEFAULT_C
     })
     .map((cat) => `
       <option value="${escapeAttr(cat.id)}" ${cat.id === selectedId ? 'selected' : ''}>
-        ${escapeHtml(cat.name || 'Calendar')}
+        ${escapeHtml(calendarCategoryLabel(cat))}
       </option>
     `)
     .join('');
@@ -7818,14 +7860,13 @@ function openDeleteCalendarCategoryDialog(categoryId) {
       modal.innerHTML = `
         <div class="modal-card yanta-calendar-category-delete-card">
           <header class="modal-head">
-            <h3>Delete category</h3>
-            <button class="icon-btn" data-category-delete-cancel>&times;</button>
+            <h3>${escapeHtml(i18n('calendar.deleteDialog.title'))}</h3>
+            <button class="icon-btn" data-category-delete-cancel aria-label="${escapeAttr(i18n('common.close'))}">&times;</button>
           </header>
 
           <div class="modal-body yanta-calendar-category-delete-body">
             <div class="yanta-calendar-delete-warning">
-              <strong>${escapeHtml(cat.name || 'Calendar')}</strong>
-              contains ${count} event${count === 1 ? '' : 's'}.
+              ${i18n('calendar.deleteDialog.contains', { name: `<strong>${escapeHtml(calendarCategoryLabel(cat))}</strong>`, count })}
             </div>
 
             ${
@@ -7839,8 +7880,8 @@ function openDeleteCalendarCategoryDialog(categoryId) {
                       ${mode === 'move' ? 'checked' : ''}
                       ${hasMoveTarget ? '' : 'disabled'} />
                     <span>
-                      <strong>Move events to another category</strong>
-                      <small>Recommended. Events stay in your calendar.</small>
+                      <strong>${escapeHtml(i18n('calendar.deleteDialog.move'))}</strong>
+                      <small>${escapeHtml(i18n('calendar.deleteDialog.moveHint'))}</small>
                     </span>
                   </label>
 
@@ -7851,13 +7892,13 @@ function openDeleteCalendarCategoryDialog(categoryId) {
                       value="delete"
                       ${mode === 'delete' ? 'checked' : ''} />
                     <span>
-                      <strong>Delete all events in this category</strong>
-                      <small>This moves the category’s events into calendar tombstones for sync.</small>
+                      <strong>${escapeHtml(i18n('calendar.deleteDialog.deleteAll'))}</strong>
+                      <small>${escapeHtml(i18n('calendar.deleteDialog.deleteAllHint'))}</small>
                     </span>
                   </label>
 
                   <label class="yanta-calendar-import-field ${mode !== 'move' ? 'is-disabled' : ''}">
-                    <span>Target category</span>
+                    <span>${escapeHtml(i18n('calendar.deleteDialog.target'))}</span>
                     <select
                       class="text-input"
                       data-category-delete-target
@@ -7868,17 +7909,17 @@ function openDeleteCalendarCategoryDialog(categoryId) {
                 `
                 : `
                   <div class="yanta-calendar-import-note">
-                    This category has no events. It can be deleted safely.
+                    ${escapeHtml(i18n('calendar.deleteDialog.empty'))}
                   </div>
                 `
             }
 
             <div class="compress-actions">
-              <button class="btn" data-category-delete-cancel>Cancel</button>
+              <button class="btn" data-category-delete-cancel>${escapeHtml(i18n('common.cancel'))}</button>
 
               <button class="btn danger" data-category-delete-confirm>
                 ${lucide('trash', 14)}
-                Delete category
+                ${escapeHtml(i18n('calendar.deleteDialog.confirm'))}
               </button>
             </div>
           </div>
@@ -7978,7 +8019,7 @@ export function putCalendarEvent(patch) {
     mountedSpaceEventProviderForCategory(existing?.categoryId || '') ||
     mountedSpaceEventProviderForCategory(ev.categoryId)
   ) {
-    toast('Events shared through a folder are read-only', 'error');
+    toast(i18n('calendar.toast.folderReadOnly'), 'error');
     return null;
   }
 
@@ -8002,7 +8043,7 @@ export function putCalendarEvent(patch) {
   const mountedTarget = targetBridge && !targetBridge.isOwner ? targetBridge : null;
 
   if ((mountedTarget && !mountedTarget.canWrite) || (mountedSource && !mountedSource.canWrite)) {
-    toast('This shared calendar is read-only for you', 'error');
+    toast(i18n('calendar.toast.sharedReadOnly'), 'error');
     return null;
   }
 
@@ -8094,7 +8135,7 @@ export function deleteCalendarEvent(eventId) {
   const oldNoteId = existing?.noteId || null;
 
   if (mountedSpaceEventProviderForCategory(existing?.categoryId || '')) {
-    toast('Events shared through a folder are read-only', 'error');
+    toast(i18n('calendar.toast.folderReadOnly'), 'error');
     return;
   }
 
@@ -8103,7 +8144,7 @@ export function deleteCalendarEvent(eventId) {
   if (bridge && !bridge.isOwner) {
     // Mounted shared calendar: the event lives in the space doc only.
     if (!bridge.canWrite) {
-      toast('This shared calendar is read-only for you', 'error');
+      toast(i18n('calendar.toast.sharedReadOnly'), 'error');
       return;
     }
 
@@ -8150,31 +8191,31 @@ async function chooseRecurringEditScope({
 } = {}) {
   return calendarChoiceDialog({
     title: action === 'delete'
-      ? 'Delete recurring event'
-      : 'Edit recurring event',
+      ? i18n('calendar.series.deleteTitle')
+      : i18n('calendar.series.editTitle'),
     message: title
-      ? `"${title}" is part of a recurring series.`
-      : 'This event is part of a recurring series.',
+      ? i18n('calendar.series.message', { title })
+      : i18n('calendar.series.messageUntitled'),
     choices: [
       {
         id: 'one',
-        label: action === 'delete' ? 'Only this event' : 'Only this event',
+        label: i18n('calendar.series.onlyThis'),
         primary: true,
         icon: 'calendar',
       },
       {
         id: 'future',
-        label: 'This and following events',
+        label: i18n('calendar.series.following'),
         icon: 'calendar-range',
       },
       {
         id: 'all',
-        label: 'All events in the series',
+        label: i18n('calendar.series.all'),
         icon: 'calendar-days',
       },
       {
         id: 'cancel',
-        label: 'Cancel',
+        label: i18n('common.cancel'),
         icon: 'x',
       },
     ],
@@ -8234,7 +8275,7 @@ async function splitRecurringSeriesFromOccurrence(master, occurrenceRaw, patch) 
   const until = untilBeforeOccurrence(occurrenceRaw);
 
   if (!recurrence?.rrule || !until) {
-    toast('Could not split recurring series', 'error');
+    toast(i18n('calendar.series.splitFailed'), 'error');
     return null;
   }
 
@@ -8392,7 +8433,7 @@ async function saveRecurringOccurrencePatch(occurrenceRaw, patch) {
   const master = state.calendarEvents.get(masterId);
 
   if (!master || !occurrenceKey) {
-    toast('Recurring event master not found', 'error');
+    toast(i18n('calendar.series.masterMissing'), 'error');
     return null;
   }
 
@@ -8430,7 +8471,7 @@ async function deleteRecurringOccurrence(occurrenceRaw) {
   const master = state.calendarEvents.get(masterId);
 
   if (!master || !occurrenceKey) {
-    toast('Recurring event master not found', 'error');
+    toast(i18n('calendar.series.masterMissing'), 'error');
     return false;
   }
 
@@ -8744,9 +8785,7 @@ function calendarEventContent(info) {
       const brokenSpan = document.createElement('span');
 
       brokenSpan.className = 'yanta-cal-event-shared yanta-cal-event-share-broken';
-      brokenSpan.title =
-        `"${cat?.name || ''}" is no longer being shared from this device — ` +
-        'this entry stays private until you share the calendar again.';
+      brokenSpan.title = i18n('calendar.share.brokenChip', { name: cat ? calendarCategoryLabel(cat) : '' });
       brokenSpan.innerHTML = lucide('user-x', 11);
 
       wrap.append(brokenSpan);
@@ -8757,8 +8796,8 @@ function calendarEventContent(info) {
 
       sharedSpan.className = 'yanta-cal-event-shared';
       sharedSpan.title = cat?.spaceId
-        ? `Shared calendar "${cat?.name || ''}" — shared with you`
-        : `Shared calendar "${cat?.name || ''}" — you are sharing this`;
+        ? i18n('calendar.share.chipWithYou', { name: cat ? calendarCategoryLabel(cat) : '' })
+        : i18n('calendar.share.chipByYou', { name: cat ? calendarCategoryLabel(cat) : '' });
       sharedSpan.innerHTML = lucide('users', 11);
 
       wrap.append(sharedSpan);
@@ -9872,12 +9911,19 @@ function filterCalendarEventsByImportCutoff(events, cutoffMs) {
 
 function formatCalendarImportBytes(bytes) {
   const n = Number(bytes || 0);
+  const num = (value, digits) => {
+    try {
+      return new Intl.NumberFormat(getLocale(), { minimumFractionDigits: digits, maximumFractionDigits: digits }).format(value);
+    } catch {
+      return value.toFixed(digits);
+    }
+  };
 
-  if (n < 1024) return `${Math.round(n)} B`;
-  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(2)} MB`;
+  if (n < 1024) return `${num(Math.round(n), 0)} B`;
+  if (n < 1024 * 1024) return `${num(n / 1024, 1)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${num(n / 1024 / 1024, 2)} MB`;
 
-  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+  return `${num(n / 1024 / 1024 / 1024, 2)} GB`;
 }
 
 function estimateCalendarImportBytes(events = [], {
@@ -9909,7 +9955,7 @@ async function getCalendarImportStorageInfo() {
       const quota = Number(est.quota || 0);
       const used = Number(est.usage || 0);
       browser = {
-        source: 'Browser storage',
+        source: i18n('calendar.import.storage.browser'),
         quota,
         used,
         available: Math.max(0, quota - used),
@@ -9931,7 +9977,7 @@ async function getCalendarImportStorageInfo() {
 
       if (quota > 0) {
         cloud = {
-          source: 'YANTA Cloud storage',
+          source: i18n('calendar.import.storage.cloud'),
           quota,
           used,
           available: Math.max(0, quota - used),
@@ -9949,7 +9995,7 @@ async function getCalendarImportStorageInfo() {
   }
 
   return cloud || browser || {
-    source: 'Storage',
+    source: i18n('calendar.import.storage.unknown'),
     quota: 0,
     used: 0,
     available: Infinity,
@@ -9964,7 +10010,7 @@ function storageBarHtml({ used = 0, quota = 0, importBytes = 0 } = {}) {
   if (!q || !Number.isFinite(q)) {
     return `
       <div class="yanta-calendar-import-storage-unknown">
-        Storage quota unavailable in this browser.
+        ${escapeHtml(i18n('calendar.import.storage.quotaUnknown'))}
       </div>
     `;
   }
@@ -9977,17 +10023,17 @@ function storageBarHtml({ used = 0, quota = 0, importBytes = 0 } = {}) {
   return `
     <div
       class="yanta-calendar-import-storage-bar ${overPct > 0 ? 'over' : ''}"
-      aria-label="Storage usage">
+      aria-label="${escapeAttr(i18n('calendar.import.storage.usage'))}">
       <span
         class="used"
         style="--segment-pct:${usedPct}%"
-        title="Currently used: ${escapeAttr(formatCalendarImportBytes(u))}">
+        title="${escapeAttr(i18n('calendar.import.storage.used', { size: formatCalendarImportBytes(u) }))}">
       </span>
 
       <span
         class="import"
         style="--segment-pct:${Math.max(0, importPct - overPct)}%"
-        title="Estimated import: ${escapeAttr(formatCalendarImportBytes(imp))}">
+        title="${escapeAttr(i18n('calendar.import.estimated', { size: formatCalendarImportBytes(imp) }))}">
       </span>
 
       ${
@@ -9996,7 +10042,7 @@ function storageBarHtml({ used = 0, quota = 0, importBytes = 0 } = {}) {
             <span
               class="over"
               style="--segment-pct:${overPct}%"
-              title="Exceeds available storage">
+              title="${escapeAttr(i18n('calendar.import.storage.over'))}">
             </span>
           `
           : ''
@@ -10005,7 +10051,7 @@ function storageBarHtml({ used = 0, quota = 0, importBytes = 0 } = {}) {
       <span
         class="remaining"
         style="--segment-pct:${remainingPct}%"
-        title="Remaining after import">
+        title="${escapeAttr(i18n('calendar.import.storage.remaining'))}">
       </span>
     </div>
   `;
@@ -10090,7 +10136,7 @@ function categoryOptionsHtmlForImport(selectedId) {
     .sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')))
     .map((cat) => `
       <option value="${escapeAttr(cat.id)}" ${cat.id === selectedId ? 'selected' : ''}>
-        ${escapeHtml(cat.name || 'Calendar')}
+        ${escapeHtml(calendarCategoryLabel(cat))}
       </option>
     `)
     .join('');
@@ -10145,7 +10191,7 @@ async function openCalendarImportOptions({
   const importName = filename
     .replace(/\.calendar\.json$/i, '')
     .replace(/\.(ics|json)$/i, '')
-    .trim() || 'Imported calendar';
+    .trim() || i18n('calendar.import.defaultName');
 
   let ui = {
     categoryMode: forcedCategoryId ? 'existing' : 'existing',
@@ -10187,7 +10233,7 @@ async function openCalendarImportOptions({
         } else {
           targetCategoryId = '';
           categoryPatch = {
-            name: String(ui.newCategoryName || '').trim() || importName || 'Imported calendar',
+            name: String(ui.newCategoryName || '').trim() || importName || i18n('calendar.import.defaultName'),
             color: ui.newCategoryColor || CALENDAR_IMPORT_DEFAULT_COLOR,
             visible: true,
           };
@@ -10237,8 +10283,8 @@ async function openCalendarImportOptions({
       modal.innerHTML = `
         <div class="modal-card yanta-calendar-import-card">
           <header class="modal-head">
-            <h3>Import calendar</h3>
-            <button class="icon-btn" data-calendar-import-cancel>&times;</button>
+            <h3>${escapeHtml(i18n('calendar.import.title'))}</h3>
+            <button class="icon-btn" data-calendar-import-cancel aria-label="${escapeAttr(i18n('common.close'))}">&times;</button>
           </header>
 
           <div class="modal-body yanta-calendar-import-body">
@@ -10248,19 +10294,19 @@ async function openCalendarImportOptions({
               </span>
 
               <div>
-                <strong>${escapeHtml(filename || 'Calendar file')}</strong>
+                <strong>${escapeHtml(filename || i18n('calendar.import.fileFallback'))}</strong>
                 <p>
-                  ${rawEvents.length} event${rawEvents.length === 1 ? '' : 's'} found
-                  ${fileSize ? ` · source file ${escapeHtml(formatCalendarImportBytes(fileSize))}` : ''}
+                  ${escapeHtml(i18n('calendar.import.found', { count: rawEvents.length }))}
+                  ${fileSize ? ` · ${escapeHtml(i18n('calendar.import.fileSize', { size: formatCalendarImportBytes(fileSize) }))}` : ''}
                 </p>
               </div>
             </div>
 
             <section class="yanta-calendar-import-section">
-              <h4>Import range</h4>
+              <h4>${escapeHtml(i18n('calendar.import.range'))}</h4>
 
               <label class="yanta-calendar-import-field">
-                <span>Only import events from</span>
+                <span>${escapeHtml(i18n('calendar.import.from'))}</span>
 
                 <div class="yanta-calendar-import-date-row">
                   <input
@@ -10270,42 +10316,42 @@ async function openCalendarImportOptions({
                     value="${escapeAttr(ui.cutoffValue)}" />
 
                   <button class="btn" type="button" data-import-today>
-                    Today
+                    ${escapeHtml(i18n('calendarWidget.today'))}
                   </button>
 
                   <button class="btn" type="button" data-import-clear-date>
-                    All
+                    ${escapeHtml(i18n('calendar.import.all'))}
                   </button>
                 </div>
 
                 <small>
-                  Leave empty to import all events. Events before this date/time are skipped.
+                  ${escapeHtml(i18n('calendar.import.rangeHint'))}
                 </small>
 
                 ${
                   plan.cutoffInvalid
-                    ? `<div class="yanta-calendar-import-error">Invalid date/time.</div>`
+                    ? `<div class="yanta-calendar-import-error">${escapeHtml(i18n('calendar.import.invalidDate'))}</div>`
                     : ''
                 }
               </label>
             </section>
 
             <section class="yanta-calendar-import-section">
-              <h4>Category</h4>
+              <h4>${escapeHtml(i18n('calendarWidget.title'))}</h4>
 
               <div class="yanta-calendar-import-tabs" role="tablist">
                 <button
                   type="button"
                   class="${ui.categoryMode === 'existing' ? 'active' : ''}"
                   data-import-category-mode="existing">
-                  Existing category
+                  ${escapeHtml(i18n('calendar.import.existing'))}
                 </button>
 
                 <button
                   type="button"
                   class="${ui.categoryMode === 'new' ? 'active' : ''}"
                   data-import-category-mode="new">
-                  New category
+                  ${escapeHtml(i18n('calendarList.newName'))}
                 </button>
               </div>
 
@@ -10313,26 +10359,26 @@ async function openCalendarImportOptions({
                 ui.categoryMode === 'existing'
                   ? `
                     <label class="yanta-calendar-import-field">
-                      <span>Import into</span>
+                      <span>${escapeHtml(i18n('calendar.import.into'))}</span>
                       <select class="text-input" data-import-category>
                         ${categoryOptionsHtmlForImport(ui.categoryId)}
                       </select>
-                      <small>Matching events already in this category are skipped.</small>
+                      <small>${escapeHtml(i18n('calendar.import.dedupeHint'))}</small>
                     </label>
                   `
                   : `
                     <div class="yanta-calendar-import-new-category">
                       <label class="yanta-calendar-import-field">
-                        <span>Category name</span>
+                        <span>${escapeHtml(i18n('calendarList.name'))}</span>
                         <input
                           class="text-input"
                           data-import-new-category-name
                           value="${escapeAttr(ui.newCategoryName)}"
-                          placeholder="Imported calendar" />
+                          placeholder="${escapeAttr(i18n('calendar.import.defaultName'))}" />
                       </label>
 
                       <label class="yanta-calendar-import-color-field">
-                        <span>Color</span>
+                        <span>${escapeHtml(i18n('calendar.import.color'))}</span>
                         <input
                           type="color"
                           data-import-new-category-color
@@ -10344,8 +10390,7 @@ async function openCalendarImportOptions({
                       plan.sameNameCategory
                         ? `
                           <div class="yanta-calendar-import-note">
-                            A category named “${escapeHtml(plan.sameNameCategory.name)}” already exists.
-                            YANTA will import into that existing category and deduplicate there.
+                            ${escapeHtml(i18n('calendar.import.sameName', { name: plan.sameNameCategory.name }))}
                           </div>
                         `
                         : ''
@@ -10355,19 +10400,18 @@ async function openCalendarImportOptions({
             </section>
 
             <section class="yanta-calendar-import-section">
-              <h4>Storage estimate</h4>
+              <h4>${escapeHtml(i18n('calendar.import.storageTitle'))}</h4>
 
               <div class="yanta-calendar-import-storage-head">
                 <span>
-                  Estimated import:
-                  <strong>${escapeHtml(formatCalendarImportBytes(plan.estimatedBytes))}</strong>
+                  ${i18n('calendar.import.estimated', { size: `<strong>${escapeHtml(formatCalendarImportBytes(plan.estimatedBytes))}</strong>` })}
                 </span>
 
                 <span>
                   ${escapeHtml(storage.source)}
                   ${
                     quotaKnown
-                      ? ` · free ${escapeHtml(formatCalendarImportBytes(storage.available))}`
+                      ? ` · ${escapeHtml(i18n('calendar.import.free', { size: formatCalendarImportBytes(storage.available) }))}`
                       : ''
                   }
                 </span>
@@ -10381,18 +10425,15 @@ async function openCalendarImportOptions({
 
               <div class="yanta-calendar-import-summary">
                 <span>
-                  ${plan.filtered.length}/${rawEvents.length}
-                  event${plan.filtered.length === 1 ? '' : 's'} after date filter
+                  ${escapeHtml(i18n('calendar.import.afterFilter', { count: plan.filtered.length, total: rawEvents.length }))}
                 </span>
 
                 <span>
-                  ${plan.deduped.skippedTotal}
-                  duplicate${plan.deduped.skippedTotal === 1 ? '' : 's'} skipped
+                  ${escapeHtml(i18n('calendar.import.duplicates', { count: plan.deduped.skippedTotal }))}
                 </span>
 
                 <span>
-                  <strong>${plan.deduped.events.length}</strong>
-                  will be imported
+                  ${i18n('calendar.import.willImport', { count: plan.deduped.events.length, n: `<strong>${plan.deduped.events.length}</strong>` })}
                 </span>
               </div>
 
@@ -10400,8 +10441,7 @@ async function openCalendarImportOptions({
                 plan.exceedsStorage
                   ? `
                     <div class="yanta-calendar-import-error">
-                      Import is larger than available ${escapeHtml(storage.source.toLowerCase())}.
-                      Free up storage or choose a later import date.
+                      ${escapeHtml(i18n('calendar.import.exceeds'))}
                     </div>
                   `
                   : ''
@@ -10409,14 +10449,14 @@ async function openCalendarImportOptions({
             </section>
 
             <div class="compress-actions yanta-calendar-import-actions">
-              <button class="btn" data-calendar-import-cancel>Cancel</button>
+              <button class="btn" data-calendar-import-cancel>${escapeHtml(i18n('common.cancel'))}</button>
 
               <button
                 class="btn primary"
                 data-calendar-import-confirm
                 ${plan.canImport ? '' : 'disabled'}>
                 ${lucide('upload', 14)}
-                Import ${plan.deduped.events.length} event${plan.deduped.events.length === 1 ? '' : 's'}
+                ${escapeHtml(i18n('calendar.import.confirm', { count: plan.deduped.events.length }))}
               </button>
             </div>
           </div>
@@ -10506,7 +10546,7 @@ function openCalendarImportPicker() {
         await importCalendarFile(file);
       } catch (err) {
         console.error(err);
-        toast(`Calendar import failed: ${err?.message || file.name}`, 'error');
+        toast(i18n('calendar.import.failed', { reason: err?.message || file.name }), 'error');
       }
     }
   };
@@ -10515,11 +10555,11 @@ function openCalendarImportPicker() {
 }
 
 const PARTICIPANT_STATUS_LABEL = {
-  accepted: 'Accepted',
-  declined: 'Declined',
-  tentative: 'Maybe',
-  delegated: 'Delegated',
-  pending: 'Awaiting reply',
+  get accepted() { return i18n('calendar.participants.status.accepted'); },
+  get declined() { return i18n('calendar.participants.status.declined'); },
+  get tentative() { return i18n('calendar.participants.status.tentative'); },
+  get delegated() { return i18n('calendar.participants.status.delegated'); },
+  get pending() { return i18n('calendar.participants.status.pending'); },
 };
 
 /*
@@ -10545,7 +10585,7 @@ function participantsHtml(ev) {
 
   const summary = ['accepted', 'declined', 'tentative', 'pending']
     .filter((k) => counts[k])
-    .map((k) => `${counts[k]} ${PARTICIPANT_STATUS_LABEL[k].toLowerCase()}`)
+    .map((k) => i18n(`calendar.participants.count.${k}`, { count: counts[k] }))
     .join(' · ');
 
   const row = (person, isOrganizer) => `
@@ -10553,7 +10593,7 @@ function participantsHtml(ev) {
       <span class="yanta-cal-participant-dot" aria-hidden="true"></span>
       <span class="yanta-cal-participant-name">
         ${escapeHtml(person.name || person.email || person.uri || '')}
-        ${isOrganizer ? '<em>organizer</em>' : ''}
+        ${isOrganizer ? `<em>${escapeHtml(i18n('calendar.participants.organizer'))}</em>` : ''}
       </span>
       <span class="yanta-cal-participant-status">
         ${escapeHtml(
@@ -10572,7 +10612,7 @@ function participantsHtml(ev) {
   return `
     <div class="yanta-cal-participants">
       <div class="yanta-cal-participants-head">
-        <strong>Participants</strong>
+        <strong>${escapeHtml(i18n('calendar.participants.title'))}</strong>
         ${summary ? `<small>${escapeHtml(summary)}</small>` : ''}
       </div>
       <ul>${rows}</ul>
@@ -10752,13 +10792,13 @@ export async function importCalendarFile(file, {
     mime === 'text/x-vcalendar';
 
   if (looksLikeCalendar) {
-    toast('Reading ICS…');
+    toast(i18n('calendar.import.reading'));
 
     const text = await file.text();
     const { method, events: parsedEvents } = parseIcsCalendar(text);
 
     if (!parsedEvents.length) {
-      toast('No VEVENT entries found', 'error');
+      toast(i18n('calendar.import.noEvents'), 'error');
       return;
     }
 
@@ -10773,8 +10813,8 @@ export async function importCalendarFile(file, {
 
       toast(
         applied.updated
-          ? `Updated ${applied.updated} response${applied.updated === 1 ? '' : 's'}`
-          : 'This reply belongs to an event that is not in your calendar.',
+          ? i18n('calendar.import.repliesUpdated', { count: applied.updated })
+          : i18n('calendar.import.replyUnknown'),
         applied.updated ? 'success' : 'error'
       );
 
@@ -10786,8 +10826,8 @@ export async function importCalendarFile(file, {
 
       toast(
         cancelled
-          ? `Cancelled ${cancelled} event${cancelled === 1 ? '' : 's'}`
-          : 'Nothing to cancel — the event is not in your calendar.',
+          ? i18n('calendar.import.cancelled', { count: cancelled })
+          : i18n('calendar.import.cancelUnknown'),
         cancelled ? 'success' : 'error'
       );
 
@@ -10797,12 +10837,12 @@ export async function importCalendarFile(file, {
     const { updated, rest } = applyIcsUpdates(parsedEvents);
 
     if (!rest.length) {
-      toast(`Updated ${updated} event${updated === 1 ? '' : 's'}`, 'success');
+      toast(i18n('calendar.import.updated', { count: updated }), 'success');
       return;
     }
 
     if (updated) {
-      toast(`Updated ${updated} event${updated === 1 ? '' : 's'}`, 'success');
+      toast(i18n('calendar.import.updated', { count: updated }), 'success');
     }
 
     const plan = await openCalendarImportOptions({
@@ -10819,17 +10859,15 @@ export async function importCalendarFile(file, {
       chunkSize: 300,
       onProgress: ({ done, total }) => {
         if (done === total || done % 900 === 0) {
-          toast(`Importing calendar… ${done}/${total}`, 'success');
+          toast(i18n('calendar.import.progress', { done, total }), 'success');
         }
       },
     });
 
     toast(
-      `Imported ${count} event${count === 1 ? '' : 's'}${
-        plan.skippedDuplicates
-          ? ` · ${plan.skippedDuplicates} duplicate${plan.skippedDuplicates === 1 ? '' : 's'} skipped`
-          : ''
-      }`,
+      plan.skippedDuplicates
+        ? `${i18n('calendar.import.done', { count })} · ${i18n('calendar.import.duplicates', { count: plan.skippedDuplicates })}`
+        : i18n('calendar.import.done', { count }),
       'success'
     );
 
@@ -10860,7 +10898,7 @@ export async function importCalendarJson(json, {
   const events = calendarJsonEventsFromPayload(json);
 
   if (!events.length) {
-    toast('No calendar events found in JSON', 'error');
+    toast(i18n('calendar.import.noJsonEvents'), 'error');
     return;
   }
 
@@ -10879,11 +10917,9 @@ export async function importCalendarJson(json, {
   });
 
   toast(
-    `Imported ${count} event${count === 1 ? '' : 's'}${
-      plan.skippedDuplicates
-        ? ` · ${plan.skippedDuplicates} duplicate${plan.skippedDuplicates === 1 ? '' : 's'} skipped`
-        : ''
-    }`,
+    plan.skippedDuplicates
+      ? `${i18n('calendar.import.done', { count })} · ${i18n('calendar.import.duplicates', { count: plan.skippedDuplicates })}`
+      : i18n('calendar.import.done', { count }),
     'success'
   );
 }
@@ -11050,7 +11086,7 @@ function createCalendarEventAttachmentNode(ev, {
 
     <div class="yanta-event-note-card-main">
       <div class="yanta-event-note-card-title">
-        ${escapeHtml(ev.title || 'Untitled event')}
+        ${escapeHtml(ev.title || i18n('calendarWidget.untitledEvent'))}
       </div>
 
       ${when ? `
@@ -11074,7 +11110,7 @@ function createCalendarEventAttachmentNode(ev, {
 
       ${cat?.name ? `
         <div class="yanta-event-note-card-calendar">
-          ${escapeHtml(cat.name)}
+          ${escapeHtml(calendarCategoryLabel(cat))}
         </div>
       ` : ''}
     </div>
@@ -11082,13 +11118,13 @@ function createCalendarEventAttachmentNode(ev, {
     <div class="yanta-event-note-card-actions">
       <button class="btn ${surface === 'editor' ? 'primary' : ''}" data-event-attachment-action="open">
         ${lucide('calendar-clock', 13)}
-        Open event
+        ${escapeHtml(i18n('calendar.link.openEvent'))}
       </button>
 
       ${surface === 'editor' && !ev.readonly ? `
         <button class="btn" data-event-attachment-action="unlink">
           ${lucide('unlink', 13)}
-          Unlink
+          ${escapeHtml(i18n('calendar.link.unlink'))}
         </button>
       ` : ''}
     </div>
@@ -11108,18 +11144,18 @@ function createCalendarEventAttachmentNode(ev, {
     e.stopPropagation();
 
     const choice = await calendarChoiceDialog({
-      title: 'Unlink calendar event',
-      message: `Unlink this note from "${ev.title || 'Untitled event'}"?`,
+      title: i18n('calendar.link.unlinkEventTitle'),
+      message: i18n('calendar.link.unlinkEventMessage', { title: ev.title || i18n('calendarWidget.untitledEvent') }),
       choices: [
-        { id: 'unlink', label: 'Unlink', primary: true },
-        { id: 'cancel', label: 'Cancel' },
+        { id: 'unlink', label: i18n('calendar.link.unlink'), primary: true },
+        { id: 'cancel', label: i18n('common.cancel') },
       ],
     });
 
     if (choice !== 'unlink') return;
 
     unlinkEventNote(ev.id);
-    toast('Event unlinked from note', 'success');
+    toast(i18n('calendar.link.unlinked'), 'success');
   });
 
   return node;
@@ -11164,7 +11200,7 @@ export function createLinkedCalendarEventDashboardHeader(noteId, {
   const titleHtml = show.title
     ? `
       <strong class="yanta-dash-event-header-title">
-        ${escapeHtml(ev.title || 'Untitled event')}
+        ${escapeHtml(ev.title || i18n('calendarWidget.untitledEvent'))}
       </strong>
     `
     : '';
@@ -11222,7 +11258,7 @@ export function createLinkedCalendarEventDashboardHeader(noteId, {
 
   const primaryHtml =
     visibleParts[0] ||
-    '<span class="yanta-dash-event-header-title">Calendar event</span>';
+    `<span class="yanta-dash-event-header-title">${escapeHtml(i18n('calendar.link.calendarEvent'))}</span>`;
 
   const secondaryHtml = visibleParts
     .slice(1)
@@ -11230,7 +11266,7 @@ export function createLinkedCalendarEventDashboardHeader(noteId, {
 
   const node = document.createElement('div');
   node.setAttribute('role', 'button');
-  node.setAttribute('aria-label', `Open calendar event: ${ev.title || 'Untitled event'}`);
+  node.setAttribute('aria-label', i18n('calendar.link.openEventAria', { title: ev.title || i18n('calendarWidget.untitledEvent') }));
   node.tabIndex = -1;
 
   node.className =
@@ -11390,7 +11426,7 @@ function renderCalendarSharedNoteBanner(noteId) {
     if (bridge) {
       const cat = state.calendarCategories.get(bridge.categoryId);
       info = {
-        name: cat?.name || 'a shared calendar',
+        name: cat ? calendarCategoryLabel(cat) : i18n('calendarShare.untitled'),
         mounted: true,
         via: 'calendar',
       };
@@ -11410,7 +11446,7 @@ function renderCalendarSharedNoteBanner(noteId) {
       if (shareInfo.shared && excluded.has(noteId)) continue;
 
       info = {
-        name: state.calendarCategories.get(ev.categoryId)?.name || 'a shared calendar',
+        name: state.calendarCategories.get(ev.categoryId)?.name || i18n('calendarShare.untitled'),
         mounted: !shareInfo.shared,
         via: 'calendar',
       };
@@ -11424,7 +11460,7 @@ function renderCalendarSharedNoteBanner(noteId) {
       if (!provider.events().some((ev) => eventLinksToNote(ev, noteId))) continue;
 
       info = {
-        name: provider.title || 'a shared folder',
+        name: provider.title || i18n('calendar.link.sharedFolder'),
         mounted: !provider.isOwner,
         via: 'folder',
       };
@@ -11436,11 +11472,11 @@ function renderCalendarSharedNoteBanner(noteId) {
 
   const message = info.via === 'folder'
     ? info.mounted
-      ? `Shared with you via folder “${escapeHtml(info.name)}”`
-      : `Linked events travel with the shared folder “${escapeHtml(info.name)}”`
+      ? escapeHtml(i18n('calendar.link.bannerFolderMounted', { name: info.name }))
+      : escapeHtml(i18n('calendar.link.bannerFolderOwned', { name: info.name }))
     : info.mounted
-      ? `Shared with you via calendar “${escapeHtml(info.name)}”`
-      : `Shared via calendar “${escapeHtml(info.name)}”. Everyone with access can read this note`;
+      ? escapeHtml(i18n('calendar.link.bannerCalendarMounted', { name: info.name }))
+      : escapeHtml(i18n('calendar.link.bannerCalendarOwned', { name: info.name }));
 
   for (const host of hosts) {
     const banner = document.createElement('div');
@@ -11546,12 +11582,12 @@ export async function linkCalendarEventToNote(eventId, noteId, {
   const note = state.notes.get(String(noteId || ''));
 
   if (!event || !note) {
-    toast('Could not link event to note', 'error');
+    toast(i18n('calendar.link.failed'), 'error');
     return false;
   }
 
   if (event.noteId === note.id) {
-    toast('Event is already linked to this note', 'success');
+    toast(i18n('calendar.link.already'), 'success');
     renderCalendarNoteAttachments(note.id);
     return true;
   }
@@ -11565,14 +11601,14 @@ export async function linkCalendarEventToNote(eventId, noteId, {
     const cat = state.calendarCategories.get(event.categoryId);
 
     const ok = await yantaConfirm({
-      title: 'Share this note?',
+      title: i18n('calendar.link.shareTitle'),
       message: [
-        `"${event.title || 'This event'}" lives in the shared calendar "${cat?.name || 'Shared'}".`,
+        i18n('calendar.link.shareLives', { title: event.title || i18n('calendarWidget.untitledEvent'), name: cat ? calendarCategoryLabel(cat) : i18n('calendarShare.untitled') }),
         '',
-        `Linking "${note.title || 'Untitled'}" makes the note readable for everyone with access to that calendar.`,
+        i18n('calendar.link.shareReadable', { note: note.title || i18n('note.untitled') }),
       ].join('\n'),
-      confirmLabel: 'Link & share note',
-      cancelLabel: 'Cancel',
+      confirmLabel: i18n('calendar.link.shareConfirm'),
+      cancelLabel: i18n('common.cancel'),
       icon: 'users',
     });
 
@@ -11586,28 +11622,28 @@ export async function linkCalendarEventToNote(eventId, noteId, {
     const parts = [];
 
     if (oldNote) {
-      parts.push(`This event is currently linked to "${oldNote.title || 'Untitled'}".`);
+      parts.push(i18n('calendar.link.eventLinkedTo', { note: oldNote.title || i18n('note.untitled') }));
     }
 
     if (noteExistingEvent) {
-      parts.push(`This note is already linked to "${noteExistingEvent.title || 'Untitled event'}".`);
+      parts.push(i18n('calendar.link.noteLinkedTo', { title: noteExistingEvent.title || i18n('calendarWidget.untitledEvent') }));
     }
 
-    parts.push(`Link "${event.title || 'Untitled event'}" to "${note.title || 'Untitled'}"?`);
+    parts.push(i18n('calendar.link.question', { title: event.title || i18n('calendarWidget.untitledEvent'), note: note.title || i18n('note.untitled') }));
 
     const choice = await calendarChoiceDialog({
-      title: 'Link calendar event',
+      title: i18n('calendar.link.linkTitle'),
       message: parts.join('\n\n'),
       choices: [
         {
           id: 'replace',
-          label: noteExistingEvent ? 'Replace link' : 'Move link',
+          label: noteExistingEvent ? i18n('calendar.link.replace') : i18n('calendar.link.move'),
           primary: true,
           icon: 'link',
         },
         {
           id: 'cancel',
-          label: 'Cancel',
+          label: i18n('common.cancel'),
         },
       ],
     });
@@ -11637,7 +11673,7 @@ export async function linkCalendarEventToNote(eventId, noteId, {
     renderCalendarNoteAttachments(oldNote.id);
   }
 
-  toast('Calendar event linked to note', 'success');
+  toast(i18n('calendar.link.linked'), 'success');
 
   return true;
 }
@@ -11648,7 +11684,7 @@ async function deleteLinkedNoteById(noteId) {
 
   await moveNoteToTrash(noteId, {
     source: 'calendar',
-    toastMessage: 'Moved linked note to Trash',
+    toastMessage: i18n('calendar.link.noteTrashed'),
   });
 
   return true;
@@ -11664,7 +11700,7 @@ async function createLinkedNoteForEvent(ev) {
     
   const note = {
     id: noteId,
-    title: ev.title || 'Event note',
+    title: ev.title || i18n('calendar.link.noteDefaultTitle'),
     type: 'markdown',
     folderId: null,
     tags: ['calendar'],
@@ -11724,7 +11760,7 @@ function noteFolderPathForPicker(folderId) {
 
   while (f && !seen.has(f.id)) {
     seen.add(f.id);
-    parts.unshift(f.name || 'Folder');
+    parts.unshift(f.name || i18n('items.folderFallback'));
     f = f.parentId ? state.folders.get(f.parentId) : null;
   }
 
@@ -11770,7 +11806,7 @@ function ensureCalendarNotePickerModal() {
 }
 
 function openCalendarNotePicker({
-  title = 'Link existing note',
+  title = i18n('calendar.notePicker.title'),
 } = {}) {
   return new Promise((resolve) => {
     const modal = ensureCalendarNotePickerModal();
@@ -11791,7 +11827,7 @@ function openCalendarNotePicker({
         <div class="modal-card yanta-calendar-note-picker-card">
           <header class="modal-head">
             <h3>${escapeHtml(title)}</h3>
-            <button class="icon-btn" data-picker-cancel>&times;</button>
+            <button class="icon-btn" data-picker-cancel aria-label="${escapeAttr(i18n('common.close'))}">&times;</button>
           </header>
 
           <div class="modal-body yanta-calendar-note-picker-body">
@@ -11801,7 +11837,7 @@ function openCalendarNotePicker({
                 class="text-input"
                 data-picker-search
                 value="${escapeAttr(query)}"
-                placeholder="Search notes by title, folder, tag…"
+                placeholder="${escapeAttr(i18n('calendar.notePicker.search'))}"
                 autocomplete="off"
                 spellcheck="false" />
             </div>
@@ -11823,21 +11859,21 @@ function openCalendarNotePicker({
                           style="${color ? `--note-color:${escapeAttr(color)}` : ''}">
                           <span class="yanta-calendar-note-picker-icon">${lucide(icon, 15)}</span>
                           <span class="yanta-calendar-note-picker-text">
-                            <strong>${escapeHtml(note.title || 'Untitled')}</strong>
-                            <small>${escapeHtml(folder || 'No folder')}</small>
+                            <strong>${escapeHtml(note.title || i18n('note.untitled'))}</strong>
+                            <small>${escapeHtml(folder || i18n('graphPreview.noFolder'))}</small>
                           </span>
                         </button>
                       `;
                     }).join('')
-                  : `<div class="tree-empty">No notes found.</div>`
+                  : `<div class="tree-empty">${escapeHtml(i18n('note.link.noNotes'))}</div>`
               }
             </div>
 
             <div class="compress-actions">
-              <button class="btn" data-picker-cancel>Cancel</button>
+              <button class="btn" data-picker-cancel>${escapeHtml(i18n('common.cancel'))}</button>
               <button class="btn primary" data-picker-choose ${notes.length ? '' : 'disabled'}>
                 ${lucide('link', 14)}
-                Link selected note
+                ${escapeHtml(i18n('calendar.notePicker.choose'))}
               </button>
             </div>
           </div>
@@ -11966,11 +12002,11 @@ function onEventExportMenuKeydown(e) {
 function exportProviderRowHtml({ id, icon, label }) {
   return `
     <div class="yanta-calendar-export-row">
-      <button type="button" class="has-icon" data-export-open="${escapeAttr(id)}" title="Open ${escapeAttr(label)} in a new tab">
+      <button type="button" class="has-icon" data-export-open="${escapeAttr(id)}" title="${escapeAttr(i18n('calendar.export.openIn', { provider: label }))}">
         <span class="ctx-menu-icon">${lucide(icon, 14)}</span>
         <span class="ctx-menu-label">${escapeHtml(label)}</span>
       </button>
-      <button type="button" class="icon-btn yanta-calendar-export-copy" data-export-copy="${escapeAttr(id)}" title="Copy ${escapeAttr(label)} link">
+      <button type="button" class="icon-btn yanta-calendar-export-copy" data-export-copy="${escapeAttr(id)}" title="${escapeAttr(i18n('calendar.export.copyLink', { provider: label }))}">
         ${lucide('copy', 13)}
       </button>
     </div>
@@ -11991,9 +12027,9 @@ function openEventExportMenu(anchor, ev) {
   menu.className = 'ctx-menu yanta-calendar-export-menu';
 
   menu.innerHTML = `
-    <button type="button" class="has-icon" data-export-ics title="Save this event as an .ics file">
+    <button type="button" class="has-icon" data-export-ics title="${escapeAttr(i18n('calendar.export.icsHint'))}">
       <span class="ctx-menu-icon">${lucide('download', 14)}</span>
-      <span class="ctx-menu-label">Download .ics</span>
+      <span class="ctx-menu-label">${escapeHtml(i18n('calendar.export.ics'))}</span>
     </button>
     <hr />
     ${exportProviderRowHtml({ id: 'google', icon: 'calendar-plus', label: 'Google Calendar' })}
@@ -12009,7 +12045,7 @@ function openEventExportMenu(anchor, ev) {
       calendarName: 'YANTA',
     });
 
-    toast('Event exported as .ics', 'success');
+    toast(i18n('calendar.export.done'), 'success');
   });
 
   menu.querySelectorAll('[data-export-open]').forEach((btn) => {
@@ -12031,10 +12067,10 @@ function openEventExportMenu(anchor, ev) {
 
       try {
         await navigator.clipboard.writeText(url);
-        toast('Calendar link copied', 'success');
+        toast(i18n('calendar.export.linkCopied'), 'success');
       } catch (err) {
         console.warn('[YANTA Calendar] Could not copy export link', err);
-        toast('Could not copy link.', 'error');
+        toast(i18n('calendar.export.copyFailed'), 'error');
       }
     });
   });
@@ -12157,8 +12193,9 @@ export function setSharedCalendarOwnerName(categoryId, name) {
 }
 
 function calendarDisplayName(cat, all = [...state.calendarCategories.values()]) {
-  const name = cat?.name || 'Calendar';
-  const twin = all.some((other) => other.id !== cat.id && normName(other.name) === normName(name));
+  const rawName = cat?.name || 'Calendar';
+  const name = calendarCategoryLabel(cat);
+  const twin = all.some((other) => other.id !== cat.id && normName(other.name) === normName(rawName));
   if (!twin) return name;
   if (cat.spaceId && !calendarBridgeForCategory(cat.id)?.isOwner) {
     const owner = sharedOwnerNames.get(cat.id);
@@ -12404,7 +12441,7 @@ function openEventEditor(input = {}) {
 
     host.innerHTML = `
       <div class="yanta-calendar-note-link-head">
-        <strong>${lucide('file-text', 14)} Notes</strong>
+        <strong>${lucide('file-text', 14)} ${escapeHtml(i18n('calendar.editor.notes'))}</strong>
       </div>
 
       ${
@@ -12412,33 +12449,33 @@ function openEventEditor(input = {}) {
           ? `
             <div class="yanta-calendar-linked-note">
               <span class="yanta-calendar-linked-note-icon">${lucide(linkedNoteMeta.icon || 'file-text', 15)}</span>
-              <span class="yanta-calendar-linked-note-title">${escapeHtml(linkedNoteMeta.title || 'Untitled')}</span>
+              <span class="yanta-calendar-linked-note-title">${escapeHtml(linkedNoteMeta.title || i18n('note.untitled'))}</span>
             </div>
 
             <div class="compress-actions" style="justify-content:flex-start;margin-top:8px">
-              ${editingExisting ? `<button class="btn" data-action="open-note">${lucide('corner-down-right', 14)} Open note</button>` : ''}
-              <button class="btn" data-action="unlink-note">${lucide('unlink', 14)} Unlink</button>
+              ${editingExisting ? `<button class="btn" data-action="open-note">${lucide('corner-down-right', 14)} ${escapeHtml(i18n('calendar.editor.openNote'))}</button>` : ''}
+              <button class="btn" data-action="unlink-note">${lucide('unlink', 14)} ${escapeHtml(i18n('calendar.link.unlink'))}</button>
             </div>
           `
           : creating
             ? `
               <label class="switch yanta-calendar-switch" style="margin-bottom:8px">
                 <input type="checkbox" data-field="createNote" checked />
-                <span>Create linked note</span>
+                <span>${escapeHtml(i18n('calendar.editor.createNote'))}</span>
               </label>
 
               <div class="compress-actions" style="justify-content:flex-start">
-                <button class="btn" data-action="link-existing-note">${lucide('link', 14)} Link existing note…</button>
+                <button class="btn" data-action="link-existing-note">${lucide('link', 14)} ${escapeHtml(i18n('calendar.editor.linkExisting'))}</button>
               </div>
             `
             : `
               <div class="hint" style="color:var(--text-dim);font-size:12px;margin-bottom:8px">
-                No note is linked to this event yet.
+                ${escapeHtml(i18n('calendar.editor.noNote'))}
               </div>
 
               <div class="compress-actions" style="justify-content:flex-start">
-                <button class="btn primary" data-action="add-note">${lucide('calendar-plus', 14)} Add to notes</button>
-                <button class="btn" data-action="link-existing-note">${lucide('link', 14)} Link existing note…</button>
+                <button class="btn primary" data-action="add-note">${lucide('calendar-plus', 14)} ${escapeHtml(i18n('calendar.editor.addToNotes'))}</button>
+                <button class="btn" data-action="link-existing-note">${lucide('link', 14)} ${escapeHtml(i18n('calendar.editor.linkExisting'))}</button>
               </div>
             `
       }
@@ -12446,7 +12483,7 @@ function openEventEditor(input = {}) {
 
     host.querySelector('[data-action="link-existing-note"]')?.addEventListener('click', async () => {
       const note = await openCalendarNotePicker({
-        title: 'Link existing note',
+        title: i18n('calendar.notePicker.title'),
       });
 
       if (!note) return;
@@ -12483,7 +12520,7 @@ function openEventEditor(input = {}) {
         }
 
         if (previewText) {
-          previewText.textContent = 'Uses linked note appearance';
+          previewText.textContent = i18n('calendar.editor.appearanceLinked');
         }
       }
 
@@ -12494,13 +12531,13 @@ function openEventEditor(input = {}) {
       const currentNoteId = modal.querySelector('[data-field="noteId"]').value || '';
 
       const choice = await calendarChoiceDialog({
-        title: 'Unlink note',
+        title: i18n('calendar.editor.unlinkNoteTitle'),
         message: currentNoteId && state.notes.has(currentNoteId)
-          ? `Unlink this event from "${state.notes.get(currentNoteId).title || 'Untitled'}"?`
-          : 'Unlink this event from the note?',
+          ? i18n('calendar.editor.unlinkNoteMessage', { note: state.notes.get(currentNoteId).title || i18n('note.untitled') })
+          : i18n('calendar.editor.unlinkNoteMessageGeneric'),
         choices: [
-          { id: 'unlink', label: 'Unlink', primary: true },
-          { id: 'cancel', label: 'Cancel' },
+          { id: 'unlink', label: i18n('calendar.link.unlink'), primary: true },
+          { id: 'cancel', label: i18n('common.cancel') },
         ],
       });
 
@@ -12513,7 +12550,7 @@ function openEventEditor(input = {}) {
         const saved = putCalendarEvent(patch);
 
         if (saved) {
-          toast('Event unlinked from note', 'success');
+          toast(i18n('calendar.link.unlinked'), 'success');
         }
       }
 
@@ -12536,7 +12573,7 @@ function openEventEditor(input = {}) {
       closeEventModal();
 
       if (saved) {
-        toast('Event note created', 'success');
+        toast(i18n('calendar.editor.noteCreated'), 'success');
       }
     });
 
@@ -12546,7 +12583,7 @@ function openEventEditor(input = {}) {
       const note = await ensureLinkedNoteAvailable(noteId);
 
       if (!note) {
-        toast('Linked note is not available on this device yet. Sync again or run Repair cloud sync.', 'error');
+        toast(i18n('calendar.editor.noteUnavailable'), 'error');
         return;
       }
 
@@ -12569,8 +12606,8 @@ function openEventEditor(input = {}) {
   modal.innerHTML = `
     <div class="modal-card yanta-calendar-event-card">
       <header class="modal-head">
-        <h3>${editingExisting ? 'Edit event' : 'New event'}</h3>
-        <button class="icon-btn" data-cal-close>&times;</button>
+        <h3>${escapeHtml(editingExisting ? i18n('calendar.editor.editTitle') : i18n('calendar.editor.newTitle'))}</h3>
+        <button class="icon-btn" data-cal-close aria-label="${escapeAttr(i18n('common.close'))}">&times;</button>
       </header>
 
       <div class="modal-body yanta-calendar-event-body">
@@ -12584,49 +12621,49 @@ function openEventEditor(input = {}) {
               type="button"
               class="yanta-calendar-appearance-picker"
               data-action="pick-icon"
-              title="Icon & color"
-              aria-label="Icon & color"
+              title="${escapeAttr(i18n('calendar.editor.appearance'))}"
+              aria-label="${escapeAttr(i18n('calendar.editor.appearance'))}"
               style="--appearance-color:${escapeAttr(initialAppearanceColor)}">
               <span class="yanta-calendar-appearance-picker-icon" data-icon-preview>
                 ${lucide(initialAppearanceIcon, 17)}
               </span>
 
               <span class="yanta-calendar-appearance-picker-text">
-                <strong>Icon & color</strong>
+                <strong>${escapeHtml(i18n('calendar.editor.appearance'))}</strong>
                 <small data-appearance-preview-text>
-                  ${
+                  ${escapeHtml(
                     linkedNote
-                      ? 'Uses linked note appearance'
+                      ? i18n('calendar.editor.appearanceLinked')
                       : ev.icon || ev.color
-                        ? 'Custom event appearance'
-                        : 'Default event appearance'
-                  }
+                        ? i18n('calendar.editor.appearanceCustom')
+                        : i18n('calendar.editor.appearanceDefault')
+                  )}
                 </small>
               </span>
             </button>
           </div>
 
-          <input class="text-input yanta-calendar-title-input" data-field="title" value="${escapeAttr(rawTitle)}" placeholder="Add a title" aria-label="Title" />
+          <input class="text-input yanta-calendar-title-input" data-field="title" value="${escapeAttr(rawTitle)}" placeholder="${escapeAttr(i18n('calendar.editor.titlePlaceholder'))}" aria-label="${escapeAttr(i18n('eventText.titleLabel'))}" />
         </div>
 
         <section class="yanta-calendar-when">
           <div class="yanta-calendar-section-head">
-            <span>${lucide('clock', 14)} When</span>
+            <span>${lucide('clock', 14)} ${escapeHtml(i18n('calendar.editor.when'))}</span>
             <label class="switch yanta-calendar-switch">
               <input type="checkbox" data-field="allDay" ${ev.allDay ? 'checked' : ''} />
-              <span>All day</span>
+              <span>${escapeHtml(i18n('calendarWidget.allDay'))}</span>
             </label>
           </div>
 
           <div class="yanta-calendar-date-grid">
             <div class="yanta-calendar-date-cell">
-              <span class="yanta-calendar-date-label">Start</span>
+              <span class="yanta-calendar-date-label">${escapeHtml(i18n('calendar.editor.start'))}</span>
               <div class="yanta-calendar-date-input-row" data-datetime-field="start"></div>
               <div class="yanta-calendar-date-preview" data-date-preview="start"></div>
             </div>
 
             <div class="yanta-calendar-date-cell">
-              <span class="yanta-calendar-date-label">End</span>
+              <span class="yanta-calendar-date-label">${escapeHtml(i18n('calendar.editor.end'))}</span>
               <div class="yanta-calendar-date-input-row" data-datetime-field="end"></div>
               <div class="yanta-calendar-date-preview" data-date-preview="end"></div>
             </div>
@@ -12634,17 +12671,17 @@ function openEventEditor(input = {}) {
         </section>
 
         <label class="yanta-calendar-field-with-icon">
-          <span class="yanta-calendar-field-label">${lucide('map-pin', 13)} Location</span>
-          <input class="text-input" data-field="location" value="${escapeAttr(ev.location || '')}" placeholder="Room, address, link…" autocomplete="off" spellcheck="false" />
+          <span class="yanta-calendar-field-label">${lucide('map-pin', 13)} ${escapeHtml(i18n('calendar.editor.location'))}</span>
+          <input class="text-input" data-field="location" value="${escapeAttr(ev.location || '')}" placeholder="${escapeAttr(i18n('calendar.editor.locationPlaceholder'))}" autocomplete="off" spellcheck="false" />
         </label>
 
         <label class="yanta-calendar-field-with-icon">
-          <span class="yanta-calendar-field-label">${lucide('align-left', 13)} Description</span>
-          <textarea class="text-input" data-field="description" rows="3" placeholder="Agenda, notes, links…">${escapeHtml(ev.description || '')}</textarea>
+          <span class="yanta-calendar-field-label">${lucide('align-left', 13)} ${escapeHtml(i18n('calendar.editor.description'))}</span>
+          <textarea class="text-input" data-field="description" rows="3" placeholder="${escapeAttr(i18n('calendar.editor.descriptionPlaceholder'))}">${escapeHtml(ev.description || '')}</textarea>
         </label>
 
         <label class="yanta-calendar-field-with-icon">
-          <span class="yanta-calendar-field-label">${lucide('calendar', 13)} Calendar</span>
+          <span class="yanta-calendar-field-label">${lucide('calendar', 13)} ${escapeHtml(i18n('calendarWidget.title'))}</span>
           <select class="text-input" data-field="categoryId">
             ${categoryOptionsHtml(ev.categoryId)}
           </select>
@@ -12667,13 +12704,13 @@ function openEventEditor(input = {}) {
       </div>
 
       <footer class="compress-actions yanta-calendar-event-actions">
-        ${editingExisting ? `<button class="btn danger" data-action="delete" title="Delete event">${lucide('trash', 14)}<span>Delete</span></button>` : ''}
+        ${editingExisting ? `<button class="btn danger" data-action="delete" title="${escapeAttr(i18n('calendar.editor.deleteEvent'))}">${lucide('trash', 14)}<span>${escapeHtml(i18n('common.delete'))}</span></button>` : ''}
         <span class="grow"></span>
-        <button class="btn" data-action="export" title="Export event or add it to another calendar">
-          ${lucide('calendar-arrow-down', 14)}<span>Export</span> ${lucide('chevron-down', 12)}
+        <button class="btn" data-action="export" title="${escapeAttr(i18n('calendar.editor.exportHint'))}">
+          ${lucide('calendar-arrow-down', 14)}<span>${escapeHtml(i18n('calendar.editor.export'))}</span> ${lucide('chevron-down', 12)}
         </button>
-        <button class="btn" data-cal-close>Cancel</button>
-        <button class="btn primary" data-action="save">${lucide('check', 14)} Save</button>
+        <button class="btn" data-cal-close>${escapeHtml(i18n('common.cancel'))}</button>
+        <button class="btn primary" data-action="save">${lucide('check', 14)} ${escapeHtml(i18n('common.save'))}</button>
       </footer>
     </div>
   `;
@@ -12690,10 +12727,10 @@ function openEventEditor(input = {}) {
     modal.querySelector('[data-datetime-field="start"]'),
     {
       name: 'start',
-      label: 'Start',
+      label: i18n('calendar.editor.start'),
       value: calendarEditorInputValue(ev.start, ev.allDay),
       allDay: !!ev.allDay,
-      pickerTitle: 'Pick start date/time',
+      pickerTitle: i18n('calendar.editor.pickStart'),
       onInput: () => updateDatePreviews(),
       onChange: () => {
         syncEndToStart();
@@ -12707,10 +12744,10 @@ function openEventEditor(input = {}) {
     modal.querySelector('[data-datetime-field="end"]'),
     {
       name: 'end',
-      label: 'End',
+      label: i18n('calendar.editor.end'),
       value: calendarEditorInputValue(ev.end, ev.allDay),
       allDay: !!ev.allDay,
-      pickerTitle: 'Pick end date/time',
+      pickerTitle: i18n('calendar.editor.pickEnd'),
       onInput: () => {
         endTouched = !!endField.value.trim();
         updateDatePreviews();
@@ -12765,20 +12802,21 @@ function openEventEditor(input = {}) {
 
     const mounted = bridge && !bridge.isOwner;
 
-    const who = mounted
-      ? `everyone in "${cat?.name || 'this shared calendar'}"`
-      : `everyone you shared "${cat?.name || 'this calendar'}" with`;
+    const calendarName = cat ? calendarCategoryLabel(cat) : i18n('calendarShare.untitled');
+    const visibleTo = mounted
+      ? i18n('calendar.editor.visibleMounted', { name: calendarName })
+      : i18n('calendar.editor.visibleOwned', { name: calendarName });
 
     const attribution =
       editingExisting && sourceForEditor?.updatedBy
-        ? `<small>Last edited by ${escapeHtml(sourceForEditor.updatedBy)}</small>`
+        ? `<small>${escapeHtml(i18n('calendar.editor.lastEditedBy', { name: sourceForEditor.updatedBy }))}</small>`
         : '';
 
     sharedBanner.hidden = false;
     sharedBanner.innerHTML = `
       <span class="yanta-calendar-shared-banner-main">
         ${lucide('users', 13)}
-        Visible to ${escapeHtml(who)}
+        ${escapeHtml(visibleTo)}
       </span>
       ${attribution}
     `;
@@ -12821,12 +12859,12 @@ function openEventEditor(input = {}) {
 
     await openCalendarAppearancePicker({
       title: linked
-        ? 'Icon & color for linked note'
-        : 'Icon & color for event',
+        ? i18n('calendar.editor.appearanceForNote')
+        : i18n('calendar.editor.appearanceForEvent'),
       initialIcon: currentIcon,
       initialColor: currentColor,
       allowReset: false,
-      applyLabel: 'Apply',
+      applyLabel: i18n('common.apply'),
       onApply: ({ icon, color }) => {
         const nextIcon = icon || currentIcon;
         const nextColor =
@@ -12848,8 +12886,8 @@ function openEventEditor(input = {}) {
 
         if (previewText) {
           previewText.textContent = linked
-            ? 'Will update linked note appearance'
-            : 'Will update event appearance';
+            ? i18n('calendar.editor.appearanceWillUpdateNote')
+            : i18n('calendar.editor.appearanceWillUpdateEvent');
         }
       },
     });
@@ -12875,7 +12913,7 @@ function openEventEditor(input = {}) {
 
     if (startPreview) {
       startPreview.textContent = startField.value && !startIso
-        ? `Invalid date · expected ${calendarEditorDatePlaceholder(allDay)}`
+        ? i18n('calendar.editor.invalidDateExpected', { format: calendarEditorDatePlaceholder(allDay) })
         : startIso
           ? formatCalendarDateTime(startIso, {
               allDay,
@@ -12887,7 +12925,7 @@ function openEventEditor(input = {}) {
 
     if (endPreview) {
       endPreview.textContent = endField.value && !endIso
-        ? `Invalid date · expected ${calendarEditorDatePlaceholder(allDay)}`
+        ? i18n('calendar.editor.invalidDateExpected', { format: calendarEditorDatePlaceholder(allDay) })
         : endIso
           ? formatCalendarDateTime(endIso, {
               allDay,
@@ -12911,7 +12949,7 @@ function openEventEditor(input = {}) {
     endPreview?.classList.toggle('invalid', endInvalid);
 
     if (endPreview && endHasValue && endIso && !rangeValidation.ok) {
-      endPreview.textContent = rangeValidation.message || 'Invalid date range';
+      endPreview.textContent = rangeValidation.message || i18n('calendar.editor.invalidRange');
     }
   };
 
@@ -13048,7 +13086,7 @@ function openEventEditor(input = {}) {
     const allDay = !!patch.allDay;
 
     if (!patch.start) {
-      toast(`Start date required · expected ${calendarEditorDatePlaceholder(allDay)}`, 'error');
+      toast(i18n('calendar.editor.startRequiredExpected', { format: calendarEditorDatePlaceholder(allDay) }), 'error');
       updateDatePreviews();
       return false;
     }
@@ -13057,7 +13095,7 @@ function openEventEditor(input = {}) {
     const parsedEnd = parseCalendarEditorInput(endRaw, allDay);
 
     if (endRaw && !parsedEnd) {
-      toast(`End date invalid · expected ${calendarEditorDatePlaceholder(allDay)}`, 'error');
+      toast(i18n('calendar.editor.endInvalidExpected', { format: calendarEditorDatePlaceholder(allDay) }), 'error');
       updateDatePreviews();
       return false;
     }
@@ -13069,7 +13107,7 @@ function openEventEditor(input = {}) {
     });
 
     if (!rangeValidation.ok) {
-      toast(rangeValidation.message || 'Invalid date range', 'error');
+      toast(rangeValidation.message || i18n('calendar.editor.invalidRange'), 'error');
       updateDatePreviews();
       return false;
     }
@@ -13093,7 +13131,7 @@ function openEventEditor(input = {}) {
       ev.start ||
       new Date().toISOString();
     openCalendarDateTimePicker({
-      title: which === 'start' ? 'Start' : 'End',
+      title: which === 'start' ? i18n('calendar.editor.start') : i18n('calendar.editor.end'),
       value: parsed,
       allDay,
       allowClear: which === 'end',
@@ -13208,7 +13246,7 @@ function openEventEditor(input = {}) {
       closeEventModal();
 
       if (saved) {
-        toast('Recurring event updated', 'success');
+        toast(i18n('calendar.toast.seriesUpdated'), 'success');
       }
 
       return;
@@ -13236,7 +13274,7 @@ function openEventEditor(input = {}) {
       closeEventModal();
 
       if (ok) {
-        toast('Calendar link updated', 'success');
+        toast(i18n('calendar.toast.linkUpdated'), 'success');
 
         window.dispatchEvent(new CustomEvent('yanta-calendar-markdown-changed', {
           detail: {
@@ -13247,7 +13285,7 @@ function openEventEditor(input = {}) {
 
         scheduleCalendarRender();
       } else {
-        toast('Could not update calendar link', 'error');
+        toast(i18n('calendar.toast.linkUpdateFailed'), 'error');
       }
 
       return;
@@ -13270,7 +13308,7 @@ function openEventEditor(input = {}) {
     closeEventModal();
 
     if (saved) {
-      toast('Event saved', 'success');
+      toast(i18n('calendar.toast.saved'), 'success');
     }
   });
 
@@ -13280,7 +13318,7 @@ function openEventEditor(input = {}) {
 
       if (deleted) {
         closeEventModal();
-        toast('Recurring event deleted', 'success');
+        toast(i18n('calendar.toast.seriesDeleted'), 'success');
       }
 
       return;
@@ -13290,19 +13328,19 @@ function openEventEditor(input = {}) {
     const note = noteId ? state.notes.get(noteId) : null;
 
     const choice = await calendarChoiceDialog({
-      title: 'Delete event',
+      title: i18n('calendar.editor.deleteEvent'),
       message: note
-        ? `This event is linked to the note "${note.title || 'Untitled'}".`
-        : `Delete "${ev.title || 'Untitled event'}"?`,
+        ? i18n('calendar.delete.linkedMessage', { note: note.title || i18n('note.untitled') })
+        : i18n('calendar.delete.message', { title: ev.title || i18n('calendarWidget.untitledEvent') }),
       choices: note
         ? [
-            { id: 'event-only', label: 'Delete event only', primary: true, danger: true },
-            { id: 'event-and-note', label: 'Delete event and note', danger: true },
-            { id: 'cancel', label: 'Cancel' },
+            { id: 'event-only', label: i18n('calendar.delete.eventOnly'), primary: true, danger: true },
+            { id: 'event-and-note', label: i18n('calendar.delete.eventAndNote'), danger: true },
+            { id: 'cancel', label: i18n('common.cancel') },
           ]
         : [
-            { id: 'event-only', label: 'Delete event', primary: true, danger: true },
-            { id: 'cancel', label: 'Cancel' },
+            { id: 'event-only', label: i18n('calendar.editor.deleteEvent'), primary: true, danger: true },
+            { id: 'cancel', label: i18n('common.cancel') },
           ],
     });
 
@@ -13317,7 +13355,7 @@ function openEventEditor(input = {}) {
 
     closeEventModal();
 
-    toast('Event deleted', 'success');
+    toast(i18n('calendar.toast.deleted'), 'success');
   });
 
   setupRecurrenceEditor(modal, ev);
@@ -13443,7 +13481,7 @@ function renderCalendarSourcesModal({
     }))
     .catch((err) => {
       console.error(err);
-      toast(err?.message || 'Could not open subscriptions', 'error');
+      toast(err?.message || i18n('calendar.toast.subscriptionsFailed'), 'error');
     });
 }
 
@@ -13543,12 +13581,12 @@ function renderCategoriesModal({
     const selected = current.length ? Number(current[0].minutesBefore) : -1;
 
     const options = [
-      { value: -1, label: 'No default reminder' },
-      { value: 0, label: 'At time of event' },
-      { value: 10, label: '10 min before' },
-      { value: 30, label: '30 min before' },
-      { value: 60, label: '1 hour before' },
-      { value: 24 * 60, label: '1 day before' },
+      { value: -1, label: i18n('calendar.reminders.noDefault') },
+      { value: 0, label: i18n('calendar.reminders.atTime') },
+      { value: 10, label: i18n('calendarList.reminder10') },
+      { value: 30, label: i18n('calendarList.reminder30') },
+      { value: 60, label: i18n('calendarList.reminder60') },
+      { value: 24 * 60, label: i18n('calendarList.reminderDay') },
     ];
 
     return options
@@ -13612,7 +13650,7 @@ function renderCategoriesModal({
           ${visible ? lucide('check', 12) : ''}
         </button>
         <div class="ycl-main">
-          <input class="ycl-name" data-cat-name value="${escapeAttr(cat.name || '')}" ${renamable ? '' : 'readonly'} aria-label="${escapeAttr(i18n('calendarList.name'))}" />
+          <input class="ycl-name" data-cat-name value="${escapeAttr(cat.id === DEFAULT_CATEGORY_ID ? calendarCategoryLabel(cat) : cat.name || '')}" ${renamable ? '' : 'readonly'} aria-label="${escapeAttr(i18n('calendarList.name'))}" />
           <span class="ycl-status">${lucide(status.icon, 12)}<span>${escapeHtml(status.text)}</span>${cat.cycle ? `<span class="ycl-dot-sep">·</span>${lucide('droplet', 12)}<span>${escapeHtml(i18n('cycle.listBadge'))}</span>` : ''}${cat.aiHidden ? `<span class="ycl-dot-sep">·</span>${lucide('eye-off', 12)}<span>${escapeHtml(i18n('calendarList.hiddenFromAi'))}</span>` : ''}</span>
         </div>
         <span class="ycl-count" title="${escapeAttr(i18n('calendarList.entries', { count }))}">${calendarCategorySourceDescription(cat.source) ? '' : count}</span>
@@ -13824,14 +13862,14 @@ function renderCategoriesModal({
 
       if (shareInfo.shared) {
         const ok = await yantaConfirm({
-          title: 'Delete shared calendar?',
+          title: i18n('calendar.deleteShared.title'),
           message: [
-            `"${cat.name || 'This calendar'}" is currently shared.`,
+            i18n('calendar.deleteShared.isShared', { name: cat.name || i18n('calendarShare.untitled') }),
             '',
-            'Deleting it stops the share for everyone: all links stop working and the encrypted share data is removed from the cloud.',
+            i18n('calendar.deleteShared.message'),
           ].join('\n'),
-          confirmLabel: 'Stop share & continue',
-          cancelLabel: 'Cancel',
+          confirmLabel: i18n('calendar.deleteShared.confirm'),
+          cancelLabel: i18n('common.cancel'),
           danger: true,
           icon: 'users',
         });
@@ -13843,7 +13881,7 @@ function renderCategoriesModal({
           await stopSpaceShare(shareInfo.session.spaceId);
         } catch (err) {
           console.error(err);
-          toast(err?.message || 'Could not stop the share', 'error');
+          toast(err?.message || i18n('calendar.deleteShared.stopFailed'), 'error');
           return;
         }
       }
@@ -13878,8 +13916,8 @@ function renderCategoriesModal({
 
       toast(
         choice.eventAction === 'delete'
-          ? 'Category and events deleted'
-          : 'Category deleted and events moved',
+          ? i18n('calendar.deleteDialog.deletedWithEvents')
+          : i18n('calendar.deleteDialog.deletedMoved'),
         'success'
       );
     });
@@ -14255,7 +14293,7 @@ function updateMarkdownEventFromFullCalendarInfo(info) {
 
   if (!ok) {
     info.revert?.();
-    toast('Could not update linked calendar event', 'error');
+    toast(i18n('calendar.toast.linkedEventUpdateFailed'), 'error');
     return false;
   }
 
@@ -14344,7 +14382,7 @@ export function openCalendarEvent(eventId, {
         : null);
 
     if (!ev) {
-      toast('Calendar event not found', 'error');
+      toast(i18n('calendar.toast.eventNotFound'), 'error');
       return;
     }
 
@@ -14673,28 +14711,28 @@ export function setupCalendar() {
     },
 
     buttonText: {
-      today: 'Today',
-      month: 'Month',
-      week: 'Week',
-      day: 'Day',
-      list: 'List',
+      today: i18n('calendarWidget.today'),
+      month: i18n('calendarWidget.viewLabels.month'),
+      week: i18n('calendarWidget.viewLabels.week'),
+      day: i18n('calendarWidget.viewLabels.day'),
+      list: i18n('calendarWidget.viewLabels.list'),
     },
 
     headerToolbar: false,
 
     customButtons: {
       categories: {
-        text: 'Categories',
+        text: i18n('calendarList.title'),
         click: renderCategoriesModal,
       },
 
       import: {
-        text: 'Import',
+        text: i18n('calendar.toolbar.import'),
         click: openCalendarImportPicker,
       },
 
       exportIcs: {
-        text: 'Export ICS',
+        text: i18n('calendarList.exportAllIcs'),
         click: () => {
           exportEventsAsIcs(currentEventsForCategory(null), {
             filename: 'yanta-calendar.ics',

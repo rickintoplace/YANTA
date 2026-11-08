@@ -11,6 +11,7 @@ import {
   toast,
 } from '../core.js';
 import { getSealedItem, removeSealedItem, setSealedItem } from '../lock/sealed-local.js';
+import { t } from '../i18n/index.js';
 
 const AI_SETTINGS_KEY = 'yanta.ai.settings.v2';
 const AI_KEY_SESSION_KEY = 'yanta.ai.openrouter.key.session';
@@ -221,7 +222,7 @@ export async function getAllowSendChatMessages() {
     return settings.permissions?.allowSendChatMessages === true;
   } catch (err) {
     console.warn('[YANTA AI Settings] Could not read chat send permission', err);
-    toast('Could not read AI chat permission.', 'error');
+    toast(t('ai.more.chatPermissionReadFailed'), 'error');
     return false;
   }
 }
@@ -245,7 +246,7 @@ export async function setAllowSendChatMessages(value) {
     return next.permissions.allowSendChatMessages === true;
   } catch (err) {
     console.warn('[YANTA AI Settings] Could not save chat send permission', err);
-    toast('Could not save AI chat permission.', 'error');
+    toast(t('ai.more.chatPermissionSaveFailed'), 'error');
     throw err;
   }
 }
@@ -264,7 +265,7 @@ export async function aiPermissionSnapshot() {
     };
   } catch (err) {
     console.warn('[YANTA AI Settings] Could not create permission snapshot', err);
-    toast('Could not read AI permissions.', 'error');
+    toast(t('ai.more.permissionsReadFailed'), 'error');
 
     return {
       ...DEFAULT_AI_SETTINGS.permissions,

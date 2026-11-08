@@ -1322,15 +1322,10 @@
   margin: 14px 0;
   padding: 30px 22px;
 
-  border: 1px dashed var(--border);
-  border-radius: 22px;
-
-  background:
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--bg-elev) 86%, transparent),
-      color-mix(in srgb, var(--bg-elev-2) 68%, transparent)
-    );
+  /* An empty place is quiet: no frame, no tinted box. */
+  border: 0;
+  border-radius: 0;
+  background: none;
 
   color: var(--text-dim);
   text-align: center;
@@ -1341,17 +1336,9 @@
 }
 
 .yanta-dashboard-empty-icon {
-  width: 62px;
-  height: 62px;
-
   display: inline-flex;
-  align-items: center;
-  justify-content: center;
-
-  border-radius: 22px;
-
-  background: color-mix(in srgb, var(--accent) 13%, transparent);
-  color: var(--accent);
+  color: var(--text-faint);
+  opacity: .7;
 }
 
 .yanta-dashboard-empty strong {

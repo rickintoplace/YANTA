@@ -363,6 +363,17 @@
   font-size: 11px;
 }
 
+/* The all-day label: FullCalendar caps it at 60px, which cut "Ganztägig"
+   and "Toute la journée". Smaller, like the hour labels, and wrapping. */
+.fc .fc-timegrid-axis-cushion {
+  max-width: 64px;
+  color: var(--text-faint);
+  font-size: 11px;
+  line-height: 1.2;
+  white-space: normal;
+  text-align: right;
+}
+
 .fc .fc-timegrid-slot-lane:hover {
   background: color-mix(in srgb, var(--accent) 4%, transparent);
 }
@@ -1255,8 +1266,10 @@
     font-size: 11px;
   }
 
+  /* The title takes what the buttons leave, and only then shortens. */
   .yanta-calendar-title {
-    max-width: 34vw;
+    flex: 0 1 auto;
+    min-width: 0;
     overflow: hidden;
     white-space: nowrap;
     text-overflow: ellipsis;
@@ -4014,3 +4027,21 @@
 .yanta-cal-cycle-line svg { flex: none; opacity: .5; }
 .yanta-cal-cycle-line:hover { background: color-mix(in srgb, var(--text) 4%, var(--bg-elev)); }
 .yanta-cal-cycle-line:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+
+/* Phone: compact toolbar buttons, so "November 2026" fits beside them. */
+@media (max-width: 640px) {
+  .yanta-calendar-topbar { gap: 2px; }
+  .yanta-calendar-topbar .icon-btn { width: 34px; height: 34px; padding: 0; }
+  .yanta-calendar-topbar .grow { flex: 1 1 0; min-width: 0; }
+}
+
+/* The calendar's own "+": the one primary action of the toolbar. */
+.yanta-calendar-topbar .yanta-calendar-add {
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-contrast, #fff);
+}
+.yanta-calendar-topbar .yanta-calendar-add:hover {
+  background: color-mix(in srgb, var(--accent) 86%, var(--text));
+  color: var(--accent-contrast, #fff);
+}

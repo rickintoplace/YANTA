@@ -10,6 +10,8 @@ import {
   toast,
 } from '../core.js';
 
+import { t } from '../i18n/index.js';
+
 import {
   addRssFeedFromUniversalInput,
   addRssFeedCandidate,
@@ -649,13 +651,13 @@ async function addCandidate(candidate, {
   onAdded,
 } = {}) {
   if (!candidate?.feedUrl) {
-    toast('Source has no feed URL', 'error');
+    toast(t('rss.picker.noFeedUrl'), 'error');
     return;
   }
 
   await addRssFeedFromUniversalInput(candidate.feedUrl);
 
-  toast('Source added', 'success');
+  toast(t('rss.picker.added'), 'success');
 
   await onAdded?.(candidate);
 }
@@ -805,14 +807,14 @@ function ensureYoutubeSearch(input, value, { onAdded } = {}) {
 
 async function addYoutubeChannel(channel, { onAdded } = {}) {
   if (!channel?.feedUrl) {
-    toast('Channel has no feed URL', 'error');
+    toast(t('rss.picker.channelNoFeedUrl'), 'error');
     return;
   }
 
   // All channel metadata already came from the search response, so adding costs
   // no further YouTube API quota.
   await addRssFeedCandidate({
-    title: channel.title || 'YouTube Channel',
+    title: channel.title || t('rss.picker.youtubeChannel'),
     feedUrl: channel.feedUrl,
     siteUrl: channel.siteUrl || '',
     description: channel.description || '',
@@ -822,7 +824,7 @@ async function addYoutubeChannel(channel, { onAdded } = {}) {
     originalInput: channel.title || '',
   });
 
-  toast('Channel added', 'success');
+  toast(t('rss.picker.channelAdded'), 'success');
 
   await onAdded?.(channel);
 }
@@ -834,7 +836,7 @@ function youtubeResultButton(channel, { onClick } = {}) {
   });
 
   const subs = formatSubscriberCount(channel.subscriberCount);
-  const meta = [channel.handle || '', subs ? `${subs} subscribers` : '']
+  const meta = [channel.handle || '', subs ? t('rss.picker.subscribers', { subs }) : '']
     .filter(Boolean)
     .join(' · ');
 
@@ -845,10 +847,10 @@ function youtubeResultButton(channel, { onClick } = {}) {
   btn.innerHTML = `
     <span class="yanta-rss-source-result-icon yanta-yt-avatar">${avatar}</span>
     <span class="yanta-rss-source-result-main">
-      <strong>${escapeHtml(channel.title || 'YouTube Channel')}</strong>
+      <strong>${escapeHtml(channel.title || t('rss.picker.youtubeChannel'))}</strong>
       ${meta ? `<small>${escapeHtml(meta)}</small>` : ''}
     </span>
-    <span class="yanta-rss-source-result-badge">Add</span>
+    <span class="yanta-rss-source-result-badge">${escapeHtml(t('rss.picker.add'))}</span>
   `;
 
   const img = btn.querySelector('img');
@@ -875,20 +877,21 @@ function youtubeLimitNote(state) {
   const isAuth = state.status === 'auth';
 
   const headline = isAuth
-    ? 'Sign in to search YouTube'
+    ? t('rss.picker.ytSignIn')
     : state.limited === 'global'
-      ? 'YouTube search is busy right now'
-      : 'Daily YouTube search limit reached';
+      ? t('rss.picker.ytBusy')
+      : t('rss.picker.ytLimit');
 
   const body = isAuth
-    ? 'Connect YANTA Cloud to search channels by name.'
-    : 'You can still add any channel directly — open it on '
-      + '<a href="https://www.youtube.com" target="_blank" rel="noopener noreferrer">YouTube</a>, '
-      + 'copy the URL from your browser’s address bar, and paste it here.';
+    ? escapeHtml(t('rss.picker.ytSignInBody'))
+    : escapeHtml(t('rss.picker.ytLimitBody', { youtube: '\u0000' })).replace(
+      '\u0000',
+      '<a href="https://www.youtube.com" target="_blank" rel="noopener noreferrer">YouTube</a>'
+    );
 
   note.innerHTML = `
     ${lucide(isAuth ? 'log-in' : 'info', 15)}
-    <span><strong>${escapeHtml(headline)}.</strong> ${body}</span>
+    <span><strong>${escapeHtml(headline)}</strong> ${body}</span>
   `;
 
   return note;
@@ -904,7 +907,7 @@ function renderYoutubeSection(list, input, value, { onAdded } = {}) {
 
   const title = el('div', { class: 'yanta-rss-source-section-title' });
   title.innerHTML = `
-    ${lucide('youtube', 12)} YouTube channels
+    ${lucide('youtube', 12)} ${escapeHtml(t('rss.picker.ytChannels'))}
     ${state.status === 'loading' ? `<span class="yanta-rss-source-section-spinner">${lucide('loader-circle', 12)}</span>` : ''}
   `;
   list.append(title);
@@ -916,14 +919,14 @@ function renderYoutubeSection(list, input, value, { onAdded } = {}) {
 
   if (state.status === 'error') {
     const note = el('div', { class: 'yanta-rss-source-empty' });
-    note.textContent = 'YouTube search is unavailable right now. Paste a channel URL to add it directly.';
+    note.textContent = t('rss.picker.ytUnavailable');
     list.append(note);
     return;
   }
 
   if (state.status === 'done' && !state.channels.length) {
     const note = el('div', { class: 'yanta-rss-source-empty' });
-    note.innerHTML = `No YouTube channels found for “${escapeHtml(value)}”.`;
+    note.textContent = t('rss.picker.ytNoResults', { query: value });
     list.append(note);
     return;
   }
@@ -937,7 +940,7 @@ function renderYoutubeSection(list, input, value, { onAdded } = {}) {
           try {
             await addYoutubeChannel(channel, { onAdded });
           } catch (err) {
-            toast(err?.message || 'Could not add channel', 'error');
+            toast(err?.message || t('rss.picker.channelAddFailed'), 'error');
           }
         },
       })
@@ -957,7 +960,7 @@ function renderDropdown(input, {
   const stats = rssCatalogStats();
 
   const head = el('div', { class: 'yanta-rss-source-dropdown-head' });
-  head.innerHTML = `${lucide('sparkles', 14)} Curated catalog · ${stats.count} sources`;
+  head.innerHTML = `${lucide('sparkles', 14)} ${escapeHtml(t('rss.picker.catalogHead', { count: stats.count }))}`;
   dd.append(head);
 
   const list = el('div', { class: 'yanta-rss-source-dropdown-list' });
@@ -970,9 +973,9 @@ function renderDropdown(input, {
     list.append(
       resultButton({
         icon: 'layout-grid',
-        title: 'Browse curated sources',
-        subtitle: 'Explore categories and countries',
-        badge: 'Browse',
+        title: t('rss.picker.browseTitle'),
+        subtitle: t('rss.picker.browseSubtitle'),
+        badge: t('rss.picker.browse'),
         onClick: async () => {
           closeRssSourceDropdown();
           await openRssSourceBrowser({
@@ -982,13 +985,13 @@ function renderDropdown(input, {
       })
     );
 
-    list.append(sectionTitle('Try searching', 'search'));
+    list.append(sectionTitle(t('rss.picker.trySearching'), 'search'));
 
     const empty = el('div', { class: 'yanta-rss-source-empty' });
     empty.innerHTML = `
-      <strong>Tip:</strong> Simply paste a YouTube Channel URL or search for topics.
+      ${t('rss.picker.tip')}
       <br>
-      Examples:
+      ${escapeHtml(t('rss.picker.examples'))}
       <div class="yanta-rss-source-examples">
         ${examples.map((x) => `<button class="yanta-rss-source-chip" data-example="${escapeAttr(x)}">${escapeHtml(x)}</button>`).join('')}
       </div>
@@ -1012,9 +1015,9 @@ function renderDropdown(input, {
     list.append(
       resultButton({
         icon: 'globe',
-        title: `Discover feeds from ${value}`,
-        subtitle: 'YANTA Cloud will inspect the website or feed URL',
-        badge: 'Discover',
+        title: t('rss.picker.discoverTitle', { site: value }),
+        subtitle: t('rss.picker.discoverSubtitle'),
+        badge: t('rss.picker.discover'),
         onClick: async () => {
           closeRssSourceDropdown();
 
@@ -1023,7 +1026,7 @@ function renderDropdown(input, {
               onAdded,
             });
           } catch (err) {
-            toast(err?.message || 'Could not add source', 'error');
+            toast(err?.message || t('rss.settings.addFailed'), 'error');
           }
         },
       })
@@ -1050,15 +1053,15 @@ function renderDropdown(input, {
   });
 
   if (facets.length) {
-    list.append(sectionTitle('Categories & countries', 'layout-list'));
+    list.append(sectionTitle(t('rss.picker.facetsTitle'), 'layout-list'));
 
     for (const facet of facets) {
       list.append(
         resultButton({
           icon: iconForRssCatalogFacet(facet),
           title: facet.label,
-          subtitle: `${facet.count} source${facet.count === 1 ? '' : 's'}`,
-          badge: 'Browse',
+          subtitle: t('rss.picker.sourceCount', { count: facet.count }),
+          badge: t('rss.picker.browse'),
           onClick: async () => {
             closeRssSourceDropdown();
 
@@ -1073,7 +1076,7 @@ function renderDropdown(input, {
   }
 
   if (feeds.length) {
-    list.append(sectionTitle('Matching sources', 'rss'));
+    list.append(sectionTitle(t('rss.picker.matching'), 'rss'));
 
     for (const feed of feeds) {
       list.append(
@@ -1081,7 +1084,7 @@ function renderDropdown(input, {
           icon: 'rss',
           title: feed.title,
           subtitle: metaLineForCandidate(feed),
-          badge: 'Add',
+          badge: t('rss.picker.add'),
           onClick: async () => {
             closeRssSourceDropdown();
 
@@ -1090,7 +1093,7 @@ function renderDropdown(input, {
                 onAdded,
               });
             } catch (err) {
-              toast(err?.message || 'Could not add source', 'error');
+              toast(err?.message || t('rss.settings.addFailed'), 'error');
             }
           },
         })
@@ -1101,9 +1104,7 @@ function renderDropdown(input, {
   if (!facets.length && !feeds.length && !isProbablyUrlOrDomain(value) && !offerYoutube) {
     const empty = el('div', { class: 'yanta-rss-source-empty' });
     empty.innerHTML = `
-      <strong>No curated source found for “${escapeHtml(value)}”.</strong><br>
-      Try a broader topic like <strong>tech</strong>, <strong>science</strong>, <strong>news</strong>,
-      or paste a website URL.
+      ${t('rss.picker.noCurated', { query: escapeHtml(value) })}
     `;
 
     list.append(empty);
@@ -1158,7 +1159,7 @@ export function attachRssSourcePicker(input, {
 
       input.value = '';
     } catch (err) {
-      toast(err?.message || 'Could not add source', 'error');
+      toast(err?.message || t('rss.settings.addFailed'), 'error');
     }
   });
 
@@ -1241,11 +1242,11 @@ export async function openRssSourceBrowser({
       <div class="yanta-rss-browser-card">
         <header class="yanta-rss-browser-head">
           <div class="yanta-rss-browser-title">
-            <strong>Browse Sources</strong>
-            <small>${escapeHtml(stats.count)} curated feeds · ${escapeHtml(stats.source.name)} · ${escapeHtml(stats.source.license)}</small>
+            <strong>${escapeHtml(t('rss.picker.browserTitle'))}</strong>
+            <small>${escapeHtml(t('rss.picker.browserMeta', { count: stats.count, name: stats.source.name, license: stats.source.license }))}</small>
           </div>
 
-          <button class="icon-btn" data-rss-browser-close title="Close">
+          <button class="icon-btn" data-rss-browser-close title="${escapeAttr(t('common.close'))}">
             ${lucide('x', 16)}
           </button>
         </header>
@@ -1253,7 +1254,7 @@ export async function openRssSourceBrowser({
         <main class="yanta-rss-browser-body">
           <aside class="yanta-rss-browser-sidebar">
             <div class="yanta-rss-source-section-title">
-              ${lucide('layout-grid', 12)} Recommended
+              ${lucide('layout-grid', 12)} ${escapeHtml(t('rss.picker.recommended'))}
             </div>
 
             ${categories.slice(0, 50).map((facet) => `
@@ -1267,7 +1268,7 @@ export async function openRssSourceBrowser({
             `).join('')}
 
             <div class="yanta-rss-source-section-title" style="margin-top:10px">
-              ${lucide('map-pin', 12)} Countries
+              ${lucide('map-pin', 12)} ${escapeHtml(t('rss.picker.countries'))}
             </div>
 
             ${countries.map((facet) => `
@@ -1283,14 +1284,14 @@ export async function openRssSourceBrowser({
 
           <section class="yanta-rss-browser-content">
             <div class="yanta-rss-browser-search">
-              <input class="text-input" data-rss-browser-search value="${escapeAttr(query)}" placeholder="Search curated sources…" />
-              <button class="btn" data-rss-browser-clear ${query ? '' : 'hidden'}>${lucide('x', 14)} Clear</button>
+              <input class="text-input" data-rss-browser-search value="${escapeAttr(query)}" placeholder="${escapeAttr(t('rss.picker.searchPlaceholder'))}" />
+              <button class="btn" data-rss-browser-clear ${query ? '' : 'hidden'}>${lucide('x', 14)} ${escapeHtml(t('rss.picker.clear'))}</button>
             </div>
 
             ${
               activeFacet && !query
-                ? `<div class="yanta-settings-group-title">${escapeHtml(activeFacet.label)} · ${sources.length} source${sources.length === 1 ? '' : 's'}</div>`
-                : `<div class="yanta-settings-group-title">${query ? `Search results · ${sources.length}` : 'Sources'}</div>`
+                ? `<div class="yanta-settings-group-title">${escapeHtml(t('rss.picker.facetCount', { label: activeFacet.label, count: sources.length }))}</div>`
+                : `<div class="yanta-settings-group-title">${escapeHtml(query ? t('rss.picker.searchResults', { count: sources.length }) : t('rss.settings.sourcesTitle'))}</div>`
             }
 
             <div data-rss-browser-sources>
@@ -1307,7 +1308,7 @@ export async function openRssSourceBrowser({
                           </span>
 
                           <span class="yanta-rss-browser-source-main">
-                            <strong>${escapeHtml(source.title || 'Untitled source')}</strong>
+                            <strong>${escapeHtml(source.title || t('rss.picker.untitledSource'))}</strong>
                             <small>${escapeHtml(meta || source.feedUrl || '')}</small>
                           </span>
 
@@ -1316,7 +1317,7 @@ export async function openRssSourceBrowser({
                               data-add-feed-url="${escapeAttr(source.feedUrl)}"
                               ${isAdded ? 'disabled' : ''}>
                               ${lucide(isAdded ? 'check' : 'plus', 14)}
-                              ${isAdded ? 'Added' : 'Add'}
+                              ${escapeHtml(isAdded ? t('rss.picker.addedBadge') : t('rss.picker.add'))}
                             </button>
                           </span>
                         </div>
@@ -1324,7 +1325,7 @@ export async function openRssSourceBrowser({
                     }).join('')
                   : `
                     <div class="yanta-rss-source-empty">
-                      No sources found. Try another query or paste a website/feed URL.
+                      ${escapeHtml(t('rss.picker.noSources'))}
                     </div>
                   `
               }
@@ -1336,7 +1337,7 @@ export async function openRssSourceBrowser({
 
           <span class="grow"></span>
 
-          <button class="btn primary" data-rss-browser-close>Done</button>
+          <button class="btn primary" data-rss-browser-close>${escapeHtml(t('common.done'))}</button>
         </footer>
       </div>
     `;
@@ -1385,19 +1386,19 @@ export async function openRssSourceBrowser({
         if (!feedUrl) return;
 
         btn.disabled = true;
-        btn.innerHTML = `${lucide('loader-circle', 14)} Adding…`;
+        btn.innerHTML = `${lucide('loader-circle', 14)} ${escapeHtml(t('rss.picker.adding'))}`;
 
         try {
           await addRssFeedFromUniversalInput(feedUrl);
 
           await onAdded?.();
 
-          toast('Source added', 'success');
+          toast(t('rss.picker.added'), 'success');
           await render();
         } catch (err) {
           btn.disabled = false;
-          btn.innerHTML = `${lucide('plus', 14)} Add`;
-          toast(err?.message || 'Could not add source', 'error');
+          btn.innerHTML = `${lucide('plus', 14)} ${escapeHtml(t('rss.picker.add'))}`;
+          toast(err?.message || t('rss.settings.addFailed'), 'error');
         }
       });
     });

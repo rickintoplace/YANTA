@@ -15,6 +15,8 @@ import {
   lucide,
 } from './core.js';
 
+import { t } from './i18n/index.js';
+
 import {
   getView,
   insertAtCursor,
@@ -406,13 +408,13 @@ function ensureModal() {
   modal.hidden = true;
 
   modal.innerHTML = `
-    <div class="yanta-cite-card" role="dialog" aria-modal="true" aria-label="Insert citation">
+    <div class="yanta-cite-card" role="dialog" aria-modal="true" aria-label="${escapeHtml(t('citations.insert'))}">
       <header class="yanta-cite-head">
         <div class="yanta-cite-title">
           <span>${lucide('quote', 17)}</span>
-          <strong>Insert citation</strong>
+          <strong>${escapeHtml(t('citations.insert'))}</strong>
         </div>
-        <button class="icon-btn" data-cite-close title="Close">${lucide('x', 16)}</button>
+        <button class="icon-btn" data-cite-close title="${escapeHtml(t('common.close'))}">${lucide('x', 16)}</button>
       </header>
 
       <div class="yanta-cite-body">
@@ -422,73 +424,73 @@ function ensureModal() {
               DOI / PMID / PMCID / ISBN / URL
               <input data-cite-input class="text-input" placeholder="10.1038/... · PMID:123456 · PMC123456 · ISBN · https://..." spellcheck="false" />
             </label>
-            <button class="btn primary" data-cite-fetch>${lucide('search', 14)} Fetch</button>
+            <button class="btn primary" data-cite-fetch>${lucide('search', 14)} ${escapeHtml(t('citations.fetch'))}</button>
           </div>
 
           <div class="yanta-cite-status" data-cite-status></div>
         </section>
 
         <section class="yanta-cite-panel">
-          <div class="yanta-cite-panel-title">Metadata</div>
+          <div class="yanta-cite-panel-title">${escapeHtml(t('citations.metadata'))}</div>
 
           <div class="yanta-cite-grid">
             <label>
-              Type
+              ${escapeHtml(t('citations.field.type'))}
               <select data-cite-type class="text-input">
-                <option value="journal-article">Journal article</option>
-                <option value="book">Book</option>
-                <option value="book-chapter">Book chapter</option>
-                <option value="website">Website</option>
-                <option value="video">Video</option>
-                <option value="post-weblog">Blog post</option>
-                <option value="social-post">Social / forum post</option>
-                <option value="other">Other</option>
+                <option value="journal-article">${escapeHtml(t('citations.type.journalArticle'))}</option>
+                <option value="book">${escapeHtml(t('citations.type.book'))}</option>
+                <option value="book-chapter">${escapeHtml(t('citations.type.bookChapter'))}</option>
+                <option value="website">${escapeHtml(t('citations.type.website'))}</option>
+                <option value="video">${escapeHtml(t('citations.type.video'))}</option>
+                <option value="post-weblog">${escapeHtml(t('citations.type.blogPost'))}</option>
+                <option value="social-post">${escapeHtml(t('citations.type.socialPost'))}</option>
+                <option value="other">${escapeHtml(t('citations.type.other'))}</option>
               </select>
             </label>
 
             <label>
-              Year
+              ${escapeHtml(t('citations.field.year'))}
               <input data-cite-year class="text-input" />
             </label>
 
             <label class="wide">
-              Authors <span class="hint">Last, First; Last, First</span>
+              ${escapeHtml(t('citations.field.authors'))} <span class="hint">${escapeHtml(t('citations.field.authorsHint'))}</span>
               <input data-cite-authors class="text-input" />
             </label>
 
             <label class="wide">
-              Title
+              ${escapeHtml(t('citations.field.title'))}
               <input data-cite-title-input class="text-input" />
             </label>
 
             <label>
-              Journal / Container / Site
+              ${escapeHtml(t('citations.field.container'))}
               <input data-cite-journal class="text-input" />
             </label>
 
             <label>
-              Publisher
+              ${escapeHtml(t('citations.field.publisher'))}
               <input data-cite-publisher class="text-input" />
             </label>
 
             <label>
-              Volume
+              ${escapeHtml(t('citations.field.volume'))}
               <input data-cite-volume class="text-input" />
             </label>
 
             <label>
-              Issue
+              ${escapeHtml(t('citations.field.issue'))}
               <input data-cite-issue class="text-input" />
             </label>
 
             <label>
-              Pages
+              ${escapeHtml(t('citations.field.pages'))}
               <input data-cite-pages class="text-input" />
             </label>
 
             <label>
-              Published date
-              <input data-cite-published class="text-input" placeholder="YYYY-MM-DD or YYYY" />
+              ${escapeHtml(t('citations.field.published'))}
+              <input data-cite-published class="text-input" placeholder="${escapeHtml(t('citations.field.publishedPlaceholder'))}" />
             </label>
 
             <label>
@@ -507,43 +509,43 @@ function ensureModal() {
             </label>
 
             <label>
-              Access date
-              <input data-cite-access class="text-input" placeholder="YYYY-MM-DD" />
+              ${escapeHtml(t('citations.field.accessDate'))}
+              <input data-cite-access class="text-input" placeholder="${escapeHtml(t('citations.field.datePlaceholder'))}" />
             </label>
 
             <label>
-              Citation key
+              ${escapeHtml(t('citations.field.key'))}
               <input data-cite-key class="text-input" />
             </label>
           </div>
 
           <div class="yanta-cite-style-row">
-            <span>Style</span>
+            <span>${escapeHtml(t('citations.style'))}</span>
             <button class="btn" data-cite-style="apa">APA 7</button>
             <button class="btn" data-cite-style="harvard">Harvard</button>
-            <button class="btn" data-cite-style="de">German</button>
-            <button class="btn" data-cite-refresh>${lucide('refresh-cw', 13)} Refresh preview</button>
+            <button class="btn" data-cite-style="de">${escapeHtml(t('citations.styleGerman'))}</button>
+            <button class="btn" data-cite-refresh>${lucide('refresh-cw', 13)} ${escapeHtml(t('citations.refreshPreview'))}</button>
           </div>
         </section>
 
         <section class="yanta-cite-panel">
-          <div class="yanta-cite-panel-title">Preview</div>
-          <div data-cite-preview class="yanta-cite-preview">No citation yet.</div>
+          <div class="yanta-cite-panel-title">${escapeHtml(t('citations.preview'))}</div>
+          <div data-cite-preview class="yanta-cite-preview">${escapeHtml(t('citations.empty'))}</div>
           <div data-cite-warning class="yanta-cite-warning" hidden></div>
         </section>
 
         <section class="yanta-cite-panel">
-          <div class="yanta-cite-panel-title">Citations in this note</div>
+          <div class="yanta-cite-panel-title">${escapeHtml(t('citations.inThisNote'))}</div>
           <div data-cite-existing class="yanta-cite-existing"></div>
         </section>
       </div>
 
       <footer class="yanta-cite-foot">
-        <button class="btn" data-cite-copy>${lucide('copy', 14)} Copy</button>
+        <button class="btn" data-cite-copy>${lucide('copy', 14)} ${escapeHtml(t('common.copy'))}</button>
         <button class="btn" data-cite-export>${lucide('download', 14)} CSL JSON</button>
         <span class="grow"></span>
-        <button class="btn" data-cite-insert-ref>${lucide('list-plus', 14)} Insert bibliography entry</button>
-        <button class="btn primary" data-cite-insert>${lucide('quote', 14)} Insert citation</button>
+        <button class="btn" data-cite-insert-ref>${lucide('list-plus', 14)} ${escapeHtml(t('image.insertBibliography'))}</button>
+        <button class="btn primary" data-cite-insert>${lucide('quote', 14)} ${escapeHtml(t('citations.insert'))}</button>
       </footer>
     </div>
   `;
@@ -616,9 +618,9 @@ function ensureModal() {
 
     try {
       await copyRich(currentFormatted);
-      toast('Citation copied', 'success');
+      toast(t('citations.copied'), 'success');
     } catch {
-      toast('Copy failed', 'error');
+      toast(t('graph.copyFailed'), 'error');
     }
   });
 
@@ -754,16 +756,16 @@ function refreshPreview({ quiet = false } = {}) {
   const preview = modal.querySelector('[data-cite-preview]');
 
   if (!currentModel) {
-    preview.textContent = 'No citation yet.';
+    preview.textContent = t('citations.empty');
     currentFormatted = '';
     return;
   }
 
   currentFormatted = formatCitation(currentModel, selectedStyle);
-  preview.innerHTML = currentFormatted || '<span class="muted">No citation yet.</span>';
+  preview.innerHTML = currentFormatted || `<span class="muted">${escapeHtml(t('citations.empty'))}</span>`;
 
   if (!quiet) {
-    setStatus(currentModel.resolver ? `Resolved via ${currentModel.resolver}` : '');
+    setStatus(currentModel.resolver ? t('citations.resolvedVia', { resolver: currentModel.resolver }) : '');
   }
 
   setWarning(currentModel.warning || '');
@@ -779,7 +781,7 @@ async function resolveIntoModal(raw) {
   fetching = true;
 
   try {
-    setStatus('Fetching metadata…');
+    setStatus(t('citations.fetching'));
     setWarning('');
 
     const input = normalizeSeed(raw);
@@ -790,7 +792,7 @@ async function resolveIntoModal(raw) {
     fillForm(model);
     refreshPreview();
 
-    setStatus(model.warning ? 'Metadata partially resolved — please verify manually.' : 'Metadata resolved.', model.warning ? 'warn' : 'ok');
+    setStatus(model.warning ? t('citations.partiallyResolved') : t('citations.resolved'), model.warning ? 'warn' : 'ok');
   } finally {
     fetching = false;
   }
@@ -803,7 +805,7 @@ function renderExistingCitations() {
   host.replaceChildren();
 
   if (!state.currentNoteId) {
-    host.innerHTML = `<div class="yanta-cite-empty">Open a note first.</div>`;
+    host.innerHTML = `<div class="yanta-cite-empty">${escapeHtml(t('citations.openNoteFirst'))}</div>`;
     return;
   }
 
@@ -814,7 +816,7 @@ function renderExistingCitations() {
     .filter((c) => usedKeys.has(String(c.key || '')));
 
   if (!list.length) {
-    host.innerHTML = `<div class="yanta-cite-empty">No citations saved in this note yet.</div>`;
+    host.innerHTML = `<div class="yanta-cite-empty">${escapeHtml(t('citations.noneInNote'))}</div>`;
     return;
   }
 
@@ -841,7 +843,7 @@ function renderExistingCitations() {
         upsertFootnoteDefinition(state.currentNoteId, c.key, c.formatted);
       }
 
-      toast('Existing citation inserted', 'success');
+      toast(t('citations.existingInserted'), 'success');
       closeCitationManager();
     });
 
@@ -854,7 +856,7 @@ function renderExistingCitations() {
         fillForm(currentModel);
         modal.querySelector('[data-cite-key]').value = c.key;
         refreshPreview();
-        toast('Citation loaded for editing', 'success');
+        toast(t('citations.loadedForEdit'), 'success');
       }
     });
 
@@ -864,7 +866,7 @@ function renderExistingCitations() {
 
 function insertCurrentCitation({ mode = 'footnote' } = {}) {
   if (!state.currentNoteId) {
-    toast('Open a note first', 'error');
+    toast(t('citations.openNoteFirst'), 'error');
     return;
   }
 
@@ -872,7 +874,7 @@ function insertCurrentCitation({ mode = 'footnote' } = {}) {
   refreshPreview();
 
   if (!currentModel || !currentFormatted) {
-    toast('Create or fetch a citation first', 'error');
+    toast(t('citations.needCitation'), 'error');
     return;
   }
 
@@ -895,7 +897,7 @@ function insertCurrentCitation({ mode = 'footnote' } = {}) {
 
   if (mode === 'bibliography') {
     insertAtCursor(`\n${stripHtmlToText(currentFormatted)}\n`);
-    toast('Bibliography entry inserted', 'success');
+    toast(t('citations.bibliographyInserted'), 'success');
     closeCitationManager();
     return;
   }
@@ -903,7 +905,7 @@ function insertCurrentCitation({ mode = 'footnote' } = {}) {
   insertAtCursor(`[^${currentKey}]`);
   upsertFootnoteDefinition(state.currentNoteId, currentKey, currentFormatted);
 
-  toast('Citation inserted', 'success');
+  toast(t('citations.inserted'), 'success');
   closeCitationManager();
 }
 
@@ -926,7 +928,7 @@ export function openCitationManager(seed = '', {
     });
   }
   modal.querySelector('[data-cite-input]').value = autoSeed || '';
-  modal.querySelector('[data-cite-preview]').textContent = 'No citation yet.';
+  modal.querySelector('[data-cite-preview]').textContent = t('citations.empty');
   setStatus('');
   setWarning('');
   renderExistingCitations();
@@ -1035,7 +1037,7 @@ export function collectCitationLibrary({ currentFirst = true } = {}) {
       out.push({
         ...c,
         sourceNoteId: noteId,
-        sourceNoteTitle: note.title || 'Untitled',
+        sourceNoteTitle: note.title || t('note.untitled'),
         isFromCurrentNote: noteId === state.currentNoteId,
       });
     }
@@ -1089,12 +1091,12 @@ function cslFromSavedCitation(citation) {
  */
 export function insertSavedCitationIntoCurrentNote(citation, { mode = 'footnote' } = {}) {
   if (!state.currentNoteId) {
-    toast('Open a note first', 'error');
+    toast(t('citations.openNoteFirst'), 'error');
     return;
   }
 
   if (!citation) {
-    toast('Citation not found', 'error');
+    toast(t('citations.notFound'), 'error');
     return;
   }
 
@@ -1111,7 +1113,7 @@ export function insertSavedCitationIntoCurrentNote(citation, { mode = 'footnote'
   }
 
   if (!formatted) {
-    toast('Citation has no formatted text', 'error');
+    toast(t('citations.noFormattedText'), 'error');
     return;
   }
 
@@ -1146,14 +1148,14 @@ export function insertSavedCitationIntoCurrentNote(citation, { mode = 'footnote'
 
   if (mode === 'bibliography') {
     insertAtCursor(`\n${stripHtmlToText(formatted)}\n`);
-    toast('Bibliography entry inserted', 'success');
+    toast(t('citations.bibliographyInserted'), 'success');
     return;
   }
 
   insertAtCursor(`[^${key}]`);
   upsertFootnoteDefinition(noteId, key, formatted);
 
-  toast('Citation inserted', 'success');
+  toast(t('citations.inserted'), 'success');
 }
 
 function injectCitationCss() {

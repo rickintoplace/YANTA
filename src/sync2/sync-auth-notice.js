@@ -11,6 +11,9 @@ import {
   lucide,
   toast,
 } from '../core.js';
+import { t } from '../i18n/index.js';
+
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
 let shownThisSession = false;
 let root = null;
@@ -162,14 +165,13 @@ export function notifySyncAuthRequired({
       </span>
 
       <span class="yanta-sync-auth-notice-main">
-        <strong>Sync is paused — sign-in needed</strong>
+        <strong>${esc(t('sync.authNotice.title'))}</strong>
         <p>
-          Google Drive signed this device out, so your changes are currently
-          only stored locally. Reconnect to resume encrypted sync.
+          ${esc(t('sync.authNotice.body'))}
         </p>
       </span>
 
-      <button class="yanta-sync-auth-notice-close" data-dismiss title="Dismiss">
+      <button class="yanta-sync-auth-notice-close" data-dismiss title="${esc(t('sync.authNotice.dismiss'))}">
         ${lucide('x', 15)}
       </button>
     </div>
@@ -177,7 +179,7 @@ export function notifySyncAuthRequired({
     <div class="yanta-sync-auth-notice-actions">
       <button class="btn primary" data-reconnect>
         ${lucide('refresh-cw', 14)}
-        Reconnect Google Drive
+        ${esc(t('sync.authNotice.reconnect'))}
       </button>
     </div>
   `;
@@ -199,7 +201,7 @@ export function notifySyncAuthRequired({
       }
     } catch (err) {
       console.error('[YANTA Sync2] could not open reconnect setup', err);
-      toast('Could not open sync setup', 'error');
+      toast(t('sync.authNotice.openFailed'), 'error');
     }
   });
 }

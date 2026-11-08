@@ -26,6 +26,7 @@ import { getNoteDoc, encodeNoteState, applyNoteUpdate, noteMarkdown } from './yj
 import { isNoteTitleFieldFocused } from './notes.js';
 import * as Y from 'yjs';
 import { openBoundOverlay } from './overlay-history.js';
+import { t as i18n } from './i18n/index.js';
 import { folderPathSegments, ensureFolderPath, parseFrontmatter, noteToFrontmatter, imageExt } from './io.js';
 import {
   yantaConfirm,
@@ -62,20 +63,20 @@ export async function syncRestore() {
 }
 
 export async function syncConnect() {
-  if (!sync.isAvailable) { toast("Sync needs HTTPS or localhost — file:// can't pick folders", 'error'); return; }
+  if (!sync.isAvailable) { toast(i18n('sync.legacy.needsHttps'), 'error'); return; }
   try {
     const handle = await window.showDirectoryPicker({ mode: 'readwrite', id: 'yanta-sync', startIn: 'documents' });
     const perm = await handle.requestPermission({ mode: 'readwrite' });
-    if (perm !== 'granted') { toast('Sync: permission denied', 'error'); return; }
+    if (perm !== 'granted') { toast(i18n('sync.legacy.permissionDenied'), 'error'); return; }
     sync.handle = handle;
     sync.fileMtimes.clear();
     sync.knownFiles.clear();
     await store.settings.set('syncFolderHandle', handle);
     updateSyncIndicator();
-    toast('Folder linked: ' + handle.name, 'success');
+    toast(i18n('sync.legacy.folderLinked', { name: handle.name }), 'success');
     await syncFull(true);
   } catch (e) {
-    if (e.name !== 'AbortError') toast('Sync connect failed: ' + e.message, 'error');
+    if (e.name !== 'AbortError') toast(i18n('sync.legacy.connectFailed', { error: e.message }), 'error');
   }
 }
 
@@ -85,7 +86,7 @@ export function syncDisconnect() {
   sync.knownFiles.clear();
   store.settings.set('syncFolderHandle', null);
   updateSyncIndicator();
-  toast('Sync folder disconnected');
+  toast(i18n('sync.legacy.disconnected'));
 }
 
 function rememberDeletion(id) {
@@ -269,9 +270,9 @@ export async function syncFull(verbose = false) {
     }
     if (externallyDeleted.length && verbose) {
       const ok = await yantaConfirm({
-        title: 'Delete missing synced notes?',
-        message: `${externallyDeleted.length} note file${externallyDeleted.length === 1 ? '' : 's'} were removed from the sync folder.\n\nDelete the matching notes in YANTA too?`,
-        confirmLabel: 'Delete matching notes',
+        title: i18n('sync.legacy.deleteMissingTitle'),
+        message: i18n('sync.legacy.deleteMissingMessage', { count: externallyDeleted.length }),
+        confirmLabel: i18n('sync.legacy.deleteMissingConfirm'),
         danger: true,
       });
       
@@ -298,7 +299,13 @@ export async function syncFull(verbose = false) {
       }
     }
     if (verbose || res.imported || res.updated || res.conflicts) {
-      toast(`Sync: ${res.imported} new · ${res.updated} updated · ${res.conflicts} conflict${res.conflicts === 1 ? '' : 's'}${pushed ? ` · ${pushed} pushed` : ''}`, res.conflicts ? 'error' : 'success');
+      const parts = [
+        i18n('sync.legacy.summaryNew', { count: res.imported }),
+        i18n('sync.legacy.summaryUpdated', { count: res.updated }),
+        i18n('sync.legacy.summaryConflicts', { count: res.conflicts }),
+      ];
+      if (pushed) parts.push(i18n('sync.legacy.summaryPushed', { count: pushed }));
+      toast(i18n('sync.legacy.summary', { parts: parts.join(' · ') }), res.conflicts ? 'error' : 'success');
     }
     if (res.conflictItems.length) showSyncConflictsModal(res.conflictItems);
   } finally {
@@ -485,9 +492,9 @@ function showSyncConflictsModal(conflicts) {
     const card = el('div', { class: 'conflict-card' });
     card.append(el('div', { class: 'conflict-head' }, c.path));
     const row = el('div', { class: 'conflict-actions' });
-    row.append(el('button', { class: 'btn', onclick: () => viewConflictFile(c) }, 'View'));
-    row.append(el('button', { class: 'btn', onclick: async () => { try { await c.dirHandle.removeEntry(c.name); } catch {} card.remove(); if (!list.children.length) closeConflictModal(); toast('Kept your version', 'success'); } }, 'Keep mine'));
-    row.append(el('button', { class: 'btn primary', onclick: async () => { await adoptConflict(c); card.remove(); if (!list.children.length) closeConflictModal(); } }, 'Both (keep as new note)'));
+    row.append(el('button', { class: 'btn', onclick: () => viewConflictFile(c) }, i18n('sync.legacy.view')));
+    row.append(el('button', { class: 'btn', onclick: async () => { try { await c.dirHandle.removeEntry(c.name); } catch {} card.remove(); if (!list.children.length) closeConflictModal(); toast(i18n('sync.legacy.keptMine'), 'success'); } }, i18n('sync.legacy.keepMine')));
+    row.append(el('button', { class: 'btn primary', onclick: async () => { await adoptConflict(c); card.remove(); if (!list.children.length) closeConflictModal(); } }, i18n('sync.legacy.keepBoth')));
     card.append(row);
     list.append(card);
   }
@@ -510,10 +517,10 @@ async function viewConflictFile(c) {
     win.document.body.textContent = text;
   } else {
     await yantaAlert({
-      title: 'Conflict file',
+      title: i18n('sync.legacy.conflictFile'),
       message: text.slice(0, 4000),
       icon: 'file-warning',
-      confirmLabel: 'Close',
+      confirmLabel: i18n('common.close'),
     });
   }
 }
@@ -526,7 +533,7 @@ async function adoptConflict(c) {
     c.name.replace(/\.sync-conflict-[^.]+\.(md|markdown)$/i, '.md')
   );
   const id = uid();
-  const note = { id, title: baseTitle + ' (from other device)', type: 'markdown', folderId, tags: Array.isArray(meta.tags) ? meta.tags : [], pinned: !!meta.pinned, created: Date.now(), updated: Date.now() };
+  const note = { id, title: i18n('sync.legacy.fromOtherDevice', { title: baseTitle }), type: 'markdown', folderId, tags: Array.isArray(meta.tags) ? meta.tags : [], pinned: !!meta.pinned, created: Date.now(), updated: Date.now() };
   state.notes.set(id, note);
   await store.notes.put(note);
   const entry = getNoteDoc(id);
@@ -538,7 +545,7 @@ async function adoptConflict(c) {
   const { rebuildWikilinkIndex } = await import('./notes.js');
   rebuildWikilinkIndex();
   renderTree();
-  toast('Adopted as new note', 'success');
+  toast(i18n('sync.legacy.adopted'), 'success');
 }
 function closeConflictModal() {
   const m = $('conflictModal');
@@ -574,12 +581,12 @@ export function updateSyncIndicator() {
     const sym = { synced: '✓', local: '●', remote: '↓', syncing: '↻', conflict: '⚠' }[state.globalSyncStatus] || '✓';
     e.innerHTML = `<span class="sync-sym sync-${state.globalSyncStatus}">${sym}</span><span>${escapeHtml(sync.handle.name)}</span>`;
     e.classList.add('connected');
-    e.title = `Sync folder: ${sync.handle.name} (${state.globalSyncStatus})`;
+    e.title = i18n('sync.legacy.indicatorTitle', { name: sync.handle.name, status: state.globalSyncStatus });
     e.hidden = false;
   } else if (sync.isAvailable) {
     e.innerHTML = lucide('refresh', 12);
     e.classList.remove('connected');
-    e.title = 'Set up sync';
+    e.title = i18n('sync.legacy.setUp');
     e.hidden = false;
   } else e.hidden = true;
 }
@@ -588,13 +595,13 @@ export function syncMenu(anchorEl, showMenuFn) {
   const r = anchorEl.getBoundingClientRect();
   const items = [];
   if (sync.handle) {
-    items.push({ label: 'Synchronize now (pull + push)', action: () => syncFull(true) });
-    items.push({ label: 'Pick a different folder…', action: syncConnect });
+    items.push({ label: i18n('sync.legacy.menuSyncNow'), action: () => syncFull(true) });
+    items.push({ label: i18n('sync.legacy.menuPickFolder'), action: syncConnect });
     items.push('hr');
-    items.push({ label: 'Disconnect folder', danger: true, action: syncDisconnect });
+    items.push({ label: i18n('sync.legacy.menuDisconnect'), danger: true, action: syncDisconnect });
   } else {
-    items.push({ label: 'Set up sync folder…', action: openSyncSetup });
-    if (!sync.isAvailable) items.push({ label: '(needs HTTPS or localhost)', action: () => {} });
+    items.push({ label: i18n('sync.legacy.menuSetUp'), action: openSyncSetup });
+    if (!sync.isAvailable) items.push({ label: i18n('sync.legacy.menuNeedsHttps'), action: () => {} });
   }
   showMenuFn(r.left, r.top - 4, items);
 }

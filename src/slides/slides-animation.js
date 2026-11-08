@@ -21,6 +21,7 @@
 // ============================================================
 
 import { uid } from '../core.js';
+import { t as i18n } from '../i18n/index.js';
 
 import {
   registerScenePersistSanitizer,
@@ -29,11 +30,19 @@ import {
 
 export const SLIDE_TRANSITIONS = ['auto', 'cut', 'fade'];
 
-export const SLIDE_TRANSITION_LABELS = {
-  auto: 'Move camera',
-  cut: 'Cut',
-  fade: 'Fade',
-};
+/*
+  Label maps resolve lazily (getters), so a module evaluated before the
+  catalogue has loaded still shows the active language at render time.
+*/
+function lazyLabels(prefix, ids) {
+  const out = {};
+  for (const id of ids) {
+    Object.defineProperty(out, id, { enumerable: true, get: () => i18n(`${prefix}.${id}`) });
+  }
+  return Object.freeze(out);
+}
+
+export const SLIDE_TRANSITION_LABELS = lazyLabels('slides.transition', SLIDE_TRANSITIONS);
 
 /*
   Entrance effects, PowerPoint's vocabulary plus the one a drawing app owes
@@ -45,23 +54,11 @@ export const SLIDE_TRANSITION_LABELS = {
 */
 export const SLIDE_BUILD_EFFECTS = ['appear', 'fade', 'fly', 'wipe', 'zoom', 'draw'];
 
-export const SLIDE_BUILD_EFFECT_LABELS = {
-  appear: 'Appear',
-  fade: 'Fade in',
-  fly: 'Fly in',
-  wipe: 'Wipe',
-  zoom: 'Zoom in',
-  draw: 'Draw',
-};
+export const SLIDE_BUILD_EFFECT_LABELS = lazyLabels('slides.effect', SLIDE_BUILD_EFFECTS);
 
 export const SLIDE_BUILD_DIRECTIONS = ['left', 'right', 'up', 'down'];
 
-export const SLIDE_BUILD_DIRECTION_LABELS = {
-  left: 'From left',
-  right: 'From right',
-  up: 'From top',
-  down: 'From bottom',
-};
+export const SLIDE_BUILD_DIRECTION_LABELS = lazyLabels('slides.direction', SLIDE_BUILD_DIRECTIONS);
 
 /*
   When a step starts, exactly like PowerPoint's animation pane:
@@ -71,11 +68,7 @@ export const SLIDE_BUILD_DIRECTION_LABELS = {
 */
 export const SLIDE_BUILD_TRIGGERS = ['click', 'with', 'after'];
 
-export const SLIDE_BUILD_TRIGGER_LABELS = {
-  click: 'On click',
-  with: 'With previous',
-  after: 'After previous',
-};
+export const SLIDE_BUILD_TRIGGER_LABELS = lazyLabels('slides.trigger', SLIDE_BUILD_TRIGGERS);
 
 const DEFAULT_BUILD_DURATION = 500;
 const DEFAULT_TRANSITION_DURATION = 520;

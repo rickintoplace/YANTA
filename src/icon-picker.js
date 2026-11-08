@@ -16,6 +16,7 @@ import {
   toast,
 } from './core.js';
 import { insertAtCursor } from './editor.js';
+import { t } from './i18n/index.js';
 
 import {
   pushOverlayState,
@@ -122,8 +123,8 @@ function ensurePicker() {
       e.stopPropagation();
       closeIconPicker();
     },
-    title: 'Close',
-    'aria-label': 'Close',
+    title: t('common.close'),
+    'aria-label': t('common.close'),
   });
 
   closeBtn.innerHTML = lucide('x', 18);
@@ -131,14 +132,14 @@ function ensurePicker() {
   const head = el(
     'header',
     { class: 'modal-head' },
-    (titleEl = el('h3', {}, 'Choose icon')),
+    (titleEl = el('h3', {}, t('iconPicker.title'))),
     closeBtn
   );
 
   searchInput = el('input', {
     class: 'text-input icon-picker-search',
     type: 'search',
-    placeholder: 'Search Lucide icons…',
+    placeholder: t('iconPicker.search'),
     autocomplete: 'off',
     oninput: () => renderGrid(),
   });
@@ -202,7 +203,7 @@ function ensurePicker() {
         closeIconPicker();
       },
     },
-    'Reset'
+    t('common.reset')
   );
 
   applyBtn = el(
@@ -217,7 +218,7 @@ function ensurePicker() {
         closeIconPicker();
       },
     },
-    'Apply'
+    t('common.apply')
   );
 
   const body = el(
@@ -277,11 +278,11 @@ function markSelection() {
 }
 
 export function openIconPicker({
-  title = 'Choose icon',
+  title = t('iconPicker.title'),
   initialIcon = 'square',
   initialColor = '#6ea8fe',
   allowReset = true,
-  applyLabel = 'Apply',
+  applyLabel = t('common.apply'),
   onApply,
 } = {}) {
   ensurePicker();
@@ -357,18 +358,18 @@ export function openIconInsertPicker({
   const wasClosed = !modal || modal.hidden !== false;
 
   openIconPicker({
-    title: 'Insert Lucide icon',
+    title: t('iconPicker.insertTitle'),
     initialIcon: 'shapes',
     initialColor: '#6ea8fe',
     allowReset: false,
-    applyLabel: 'Insert',
+    applyLabel: t('iconPicker.insert'),
     onApply: ({ icon, color }) => {
       if (!icon) return;
 
       const colorPart = color ? `{${color}}` : '';
 
       insertAtCursor(`:lucide[${icon}]${colorPart}:`);
-      toast('Icon inserted', 'success');
+      toast(t('iconPicker.inserted'), 'success');
     },
   });
 

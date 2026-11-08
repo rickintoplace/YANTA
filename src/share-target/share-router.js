@@ -262,7 +262,7 @@ function openEventDraft(draft) {
 /** Short label for the preview chip. */
 function previewLabel(shaped) {
   if (shaped.kind === 'calendar') {
-    return shaped.calendarSummary || shaped.calendarFile?.name || 'Calendar file';
+    return shaped.calendarSummary || shaped.calendarFile?.name || t('shareTarget.calendarFile');
   }
   if (shaped.kind === 'image') {
     return shaped.imageFile?.name || t('shareTarget.previewImage');

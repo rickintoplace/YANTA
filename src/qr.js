@@ -1,4 +1,5 @@
 import qrcode from 'qrcode-generator';
+import { t } from './i18n/index.js';
 
 /**
  * Renders a branded QR code as an inline SVG element.
@@ -38,7 +39,7 @@ export function renderBrandedQrSvg(text, options = {}) {
   svg.setAttribute('width', size);
   svg.setAttribute('height', size);
   svg.setAttribute('role', 'img');
-  svg.setAttribute('aria-label', 'QR code');
+  svg.setAttribute('aria-label', t('qr.ariaLabel'));
 
   // Background
   const bg = document.createElementNS(ns, 'rect');

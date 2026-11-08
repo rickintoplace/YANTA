@@ -10,6 +10,8 @@ import {
   actionToast,
 } from '../core.js';
 
+import { t } from '../i18n/index.js';
+
 import {
   getRssSettings,
   saveRssSettings,
@@ -159,10 +161,9 @@ function renderCloudGate({
       </div>
 
       <div class="yanta-rss-cloud-gate-main">
-        <strong>Sign in to YANTA Cloud to use Sources</strong>
+        <strong>${escapeHtml(t('rss.settings.gateTitle'))}</strong>
         <p>
-          Sources uses YANTA Cloud for feed discovery and fetching.
-          This avoids browser CORS problems and protects feed/image requests.
+          ${escapeHtml(t('rss.settings.gateText'))}
         </p>
         ${
           error
@@ -173,7 +174,7 @@ function renderCloudGate({
 
       <button class="btn primary" data-rss-cloud-login>
         ${lucide('log-in', 14)}
-        Sign in
+        ${escapeHtml(t('rss.settings.signIn'))}
       </button>
     </div>
   `;
@@ -210,7 +211,7 @@ export async function renderRssSettingsPanel(host) {
           await openYantaCloudLoginForSources();
           await renderRssSettingsPanel(host);
         } catch (err) {
-          toast(err?.message || 'Could not open YANTA Cloud login', 'error');
+          toast(err?.message || t('rss.settings.loginFailed'), 'error');
         }
       },
     }));
@@ -219,20 +220,20 @@ export async function renderRssSettingsPanel(host) {
   }
 
   const addBox = el('div', { class: 'yanta-settings-group' });
-  addBox.append(el('div', { class: 'yanta-settings-group-title' }, 'Add Source'));
+  addBox.append(el('div', { class: 'yanta-settings-group-title' }, t('rss.settings.addTitle')));
 
   const input = el('input', {
     class: 'text-input',
-    placeholder: 'Search or paste website/feed URL…',
+    placeholder: t('rss.settings.addPlaceholder'),
     autocomplete: 'off',
     spellcheck: 'false',
   });
 
   const addBtn = el('button', { class: 'btn primary' });
-  addBtn.innerHTML = `${lucide('rss', 14)} Add Source`;
+  addBtn.innerHTML = `${lucide('rss', 14)} ${escapeHtml(t('rss.settings.addTitle'))}`;
 
   const browseBtn = el('button', { class: 'btn' });
-  browseBtn.innerHTML = `${lucide('layout-grid', 14)} Browse`;
+  browseBtn.innerHTML = `${lucide('layout-grid', 14)} ${escapeHtml(t('rss.settings.browse'))}`;
 
   browseBtn.addEventListener('click', async () => {
     await openRssSourceBrowser({
@@ -259,7 +260,7 @@ export async function renderRssSettingsPanel(host) {
 
       await renderRssSettingsPanel(host);
     } catch (err) {
-      toast(err?.message || 'Could not add source', 'error');
+      toast(err?.message || t('rss.settings.addFailed'), 'error');
     } finally {
       addBtn.disabled = false;
       input.disabled = false;
@@ -294,36 +295,36 @@ export async function renderRssSettingsPanel(host) {
   host.append(addBox);
 
   const privacy = el('div', { class: 'yanta-settings-group' });
-  privacy.append(el('div', { class: 'yanta-settings-group-title' }, 'Privacy & Images'));
+  privacy.append(el('div', { class: 'yanta-settings-group-title' }, t('rss.settings.privacyTitle')));
 
   privacy.append(
     boolToggle({
       checked: settings.showImages,
-      label: 'Show images by default',
-      hint: 'Images are stored as URLs only. They do not consume YANTA Cloud storage.',
+      label: t('rss.settings.showImages'),
+      hint: t('rss.settings.showImagesHint'),
       onChange: async (checked) => {
         await saveRssSettings({ showImages: checked });
-        toast('Sources setting saved', 'success');
+        toast(t('rss.settings.saved'), 'success');
       },
     }),
 
     boolToggle({
       checked: settings.useImageProxy,
-      label: 'Use privacy-protected image loading',
-      hint: 'Loads feed images through YANTA Cloud without cookies or referrer. Protects privacy but uses bandwidth.',
+      label: t('rss.settings.imageProxy'),
+      hint: t('rss.settings.imageProxyHint'),
       onChange: async (checked) => {
         await saveRssSettings({ useImageProxy: checked });
-        toast('Sources setting saved', 'success');
+        toast(t('rss.settings.saved'), 'success');
       },
     }),
 
     boolToggle({
       checked: settings.stripTrackingParams,
-      label: 'Strip tracking parameters from saved links',
-      hint: 'Removes common utm/fbclid/gclid tracking parameters from RSS item links.',
+      label: t('rss.settings.stripTracking'),
+      hint: t('rss.settings.stripTrackingHint'),
       onChange: async (checked) => {
         await saveRssSettings({ stripTrackingParams: checked });
-        toast('Sources setting saved', 'success');
+        toast(t('rss.settings.saved'), 'success');
       },
     })
   );
@@ -331,16 +332,16 @@ export async function renderRssSettingsPanel(host) {
   host.append(privacy);
 
   const dashboardGroup = el('div', { class: 'yanta-settings-group' });
-  dashboardGroup.append(el('div', { class: 'yanta-settings-group-title' }, 'Dashboard'));
+  dashboardGroup.append(el('div', { class: 'yanta-settings-group-title' }, t('rss.settings.dashboardTitle')));
 
   dashboardGroup.append(
     boolToggle({
       checked: await isDashboardWidgetEnabled('rss-latest'),
-      label: 'Show "New from your sources" on the dashboard',
-      hint: 'A compact strip of unread items. Pick which sources appear via the widget’s gear icon.',
+      label: t('rss.settings.dashboardWidget'),
+      hint: t('rss.settings.dashboardWidgetHint'),
       onChange: async (checked) => {
         await setDashboardWidgetEnabled('rss-latest', checked);
-        toast('Sources setting saved', 'success');
+        toast(t('rss.settings.saved'), 'success');
       },
     })
   );
@@ -348,7 +349,7 @@ export async function renderRssSettingsPanel(host) {
   host.append(dashboardGroup);
 
   const refresh = el('div', { class: 'yanta-settings-group' });
-  refresh.append(el('div', { class: 'yanta-settings-group-title' }, 'Refresh'));
+  refresh.append(el('div', { class: 'yanta-settings-group-title' }, t('rss.settings.refreshTitle')));
 
   const interval = el('input', {
     class: 'text-input',
@@ -363,24 +364,24 @@ export async function renderRssSettingsPanel(host) {
       minRefreshIntervalMinutes: Number(interval.value || 30),
     });
 
-    toast('Refresh interval saved', 'success');
+    toast(t('rss.settings.intervalSaved'), 'success');
   });
 
   refresh.append(
     boolToggle({
       checked: settings.refreshOnStartup,
-      label: 'Refresh sources when YANTA opens',
-      hint: 'Only refreshes feeds older than the minimum refresh interval.',
+      label: t('rss.settings.refreshOnStartup'),
+      hint: t('rss.settings.refreshOnStartupHint'),
       onChange: async (checked) => {
         await saveRssSettings({ refreshOnStartup: checked });
-        toast('Sources setting saved', 'success');
+        toast(t('rss.settings.saved'), 'success');
       },
     }),
 
     el('label', { class: 'yanta-settings-field' },
-      el('div', { class: 'yanta-settings-field-label' }, 'Minimum refresh interval in minutes'),
+      el('div', { class: 'yanta-settings-field-label' }, t('rss.settings.minInterval')),
       interval,
-      el('div', { class: 'yanta-settings-field-hint' }, 'Lower values mean more network requests. Recommended: 30 minutes.')
+      el('div', { class: 'yanta-settings-field-hint' }, t('rss.settings.minIntervalHint'))
     )
   );
 
@@ -390,7 +391,7 @@ export async function renderRssSettingsPanel(host) {
   opml.append(el('div', { class: 'yanta-settings-group-title' }, 'OPML'));
 
   const importBtn = el('button', { class: 'btn' });
-  importBtn.innerHTML = `${lucide('upload', 14)} Import OPML`;
+  importBtn.innerHTML = `${lucide('upload', 14)} ${escapeHtml(t('rss.settings.importOpml'))}`;
 
   importBtn.addEventListener('click', () => {
     const picker = document.createElement('input');
@@ -417,11 +418,11 @@ export async function renderRssSettingsPanel(host) {
           })),
         ]);
 
-        toast(`Imported ${parsed.length} source${parsed.length === 1 ? '' : 's'}`, 'success');
+        toast(t('rss.settings.imported', { count: parsed.length }), 'success');
 
         await renderRssSettingsPanel(host);
       } catch (err) {
-        toast(err?.message || 'OPML import failed', 'error');
+        toast(err?.message || t('rss.settings.importFailed'), 'error');
       }
     };
 
@@ -429,7 +430,7 @@ export async function renderRssSettingsPanel(host) {
   });
 
   const exportBtn = el('button', { class: 'btn' });
-  exportBtn.innerHTML = `${lucide('download', 14)} Export OPML`;
+  exportBtn.innerHTML = `${lucide('download', 14)} ${escapeHtml(t('rss.settings.exportOpml'))}`;
 
   exportBtn.addEventListener('click', async () => {
     exportFeedsOpml(await getRssFeeds());
@@ -447,10 +448,10 @@ export async function renderRssSettingsPanel(host) {
   host.append(opml);
 
   const list = el('div', { class: 'yanta-settings-group' });
-  list.append(el('div', { class: 'yanta-settings-group-title' }, 'Sources'));
+  list.append(el('div', { class: 'yanta-settings-group-title' }, t('rss.settings.sourcesTitle')));
 
   if (!feeds.length) {
-    list.append(el('div', { class: 'tree-empty' }, 'No sources yet.'));
+    list.append(el('div', { class: 'tree-empty' }, t('rss.settings.noSources')));
   }
 
   for (const feed of feeds) {
@@ -476,15 +477,15 @@ export async function renderRssSettingsPanel(host) {
       ${feed.lastError ? `<div style="font-size:11px;color:var(--red)">${escapeHtml(feed.lastError)}</div>` : ''}
     `;
 
-    const remove = el('button', { class: 'btn danger' }, 'Remove');
+    const remove = el('button', { class: 'btn danger' }, t('rss.settings.remove'));
 
     remove.addEventListener('click', async () => {
       const { undo } = await removeRssSource(feed.id);
 
       await renderRssSettingsPanel(host);
 
-      actionToast(`Removed "${feed.title || 'Source'}"`, {
-        actionLabel: 'Undo',
+      actionToast(t('rss.removed', { title: feed.title || t('rssWidget.sourceFallback') }), {
+        actionLabel: t('common.undo'),
         onAction: async () => {
           await restoreRssSource(undo);
           await renderRssSettingsPanel(host);

@@ -7,6 +7,8 @@ import {
   safeCssColor,
 } from '../core.js';
 
+import { t } from '../i18n/index.js';
+
 function sanitize(html) {
   return DOMPurify.sanitize(html, {
     USE_PROFILES: { html: true, svg: true },
@@ -70,7 +72,7 @@ function renderImageLine(line, ctx) {
     return `<figure><img src="${escapeAttr(url)}" alt="${escapeAttr(alt)}" loading="lazy" draggable="false"></figure>`;
   }
 
-  return `<div class="yps-missing">Blocked image URL</div>`;
+  return `<div class="yps-missing">${escapeHtml(t('publicShare.renderer.blockedImage'))}</div>`;
 }
 
 export function renderPublicShareMarkdown(markdown, ctx = {}) {
@@ -128,7 +130,7 @@ export function renderPublicShareMarkdown(markdown, ctx = {}) {
           <section class="yps-drawing">
             <div class="yps-drawing-head">
               ${lucide('line-squiggle', 15)}
-              <strong>${escapeHtml(drawing.title || 'Drawing')}</strong>
+              <strong>${escapeHtml(drawing.title || t('draw.untitled'))}</strong>
             </div>
             <pre>${escapeHtml(JSON.stringify(drawing.elements || [], null, 2)).slice(0, 4000)}</pre>
           </section>

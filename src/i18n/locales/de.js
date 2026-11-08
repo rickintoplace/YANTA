@@ -9,7 +9,7 @@ import greeting from './greeting/greeting.de.js';
 export default {
   calendarList: {
     title: 'Kalender',
-    add: 'Neuer Kalender',
+    add: 'Hinzufügen',
     newName: 'Neuer Kalender',
     more: 'Mehr',
     name: 'Name des Kalenders',
@@ -63,11 +63,8 @@ export default {
       period: 'Periode (erwartet)',
       fertile: 'Fruchtbare Tage (geschätzt)',
       ovulation: 'Eisprung (geschätzt)',
-      tooltip: '{title} · am ehesten {likely} · zu 70 % zwischen {from} und {to}',
     },
     toast: {
-      alreadyLogged: 'An diesem Tag beginnt schon eine Periode.',
-      started: 'Periode ab {date} eingetragen.',
       ended: {
         one: 'Periode eingetragen: {count} Tag.',
         other: 'Periode eingetragen: {count} Tage.',
@@ -93,7 +90,7 @@ export default {
       afterPause: 'Pause beendet',
       afterPauseHint: 'Sobald die erste Periode danach eingetragen ist, geht die Vorhersage weiter.',
       emptyTitle: 'Wann hat die letzte Periode begonnen?',
-      emptyHint: 'Ein Datum reicht für den Anfang. Jede weitere Periode macht die Vorhersage genauer.',
+      emptyHint: 'Tippe unten im Monat auf ihren ersten Tag. Jede weitere Periode macht die Vorhersage genauer.',
       periodDay: 'Periode, Tag {day}',
       late: {
         one: '{count} Tag später als erwartet',
@@ -108,23 +105,18 @@ export default {
     legend: {
       period: 'Periode',
       fertile: 'Fruchtbare Tage',
-      ovulation: 'Eisprung ~{date}',
-      next: 'Nächste Periode',
+      expected: 'Erwartet',
+      ovulationShort: 'Eisprung',
     },
-    stripLabel: 'Tag {day} von etwa {total}',
     readOnly: 'Diesen Zykluskalender kannst du ansehen, aber nichts eintragen.',
     save: 'Speichern',
     act: {
       startedToday: 'Periode hat heute begonnen',
       endedToday: 'Periode ist heute vorbei',
-      otherDay: 'Anderer Tag …',
-      lastStart: 'Tag wählen …',
       ovulation: 'Bestätigten Eisprung eintragen',
       share: 'Teilen …',
     },
     pick: {
-      start: 'Erster Tag der Periode',
-      end: 'Letzter Tag der Periode',
       pause: 'Pause ab',
       ovulation: 'Tag des Eisprungs',
       ovulationHint: 'Zum Beispiel der Tag nach einem positiven LH-Test oder der letzte niedrige Tag vor dem Temperaturanstieg. Die nächste Periode wird dann von dort aus gerechnet.',
@@ -188,6 +180,30 @@ export default {
       removePlaceholders: 'Entfernen',
     },
     disclaimer: 'Eine Schätzung aus den eingetragenen Daten – nicht zur Verhütung geeignet. Fruchtbare Tage nach Kalender liegen oft daneben; LH-Tests oder Temperaturmessung sind verlässlicher.',
+    addMenuItem: 'Zykluskalender',
+    month: {
+      today: 'Dieser Monat',
+      prev: 'Vorheriger Monat',
+      next: 'Nächster Monat',
+      hint: 'Tippe auf einen Tag, um ihn als Periodentag einzutragen – noch einmal tippen entfernt ihn.',
+    },
+    line: {
+      paused: 'Zyklus pausiert',
+      afterPause: 'Zyklus: nächste Periode eintragen',
+      empty: 'Zyklus: ersten Tag der letzten Periode eintragen',
+      periodDay: 'Periode, Tag {day}',
+      cycleDay: 'Zyklustag {day}',
+      today: 'Periode heute erwartet',
+      nextIn: {
+        one: 'Periode morgen erwartet',
+        other: 'Periode in etwa {count} Tagen',
+      },
+      late: {
+        one: 'Periode seit {count} Tag erwartet',
+        other: 'Periode seit {count} Tagen erwartet',
+      },
+      fertile: 'fruchtbare Tage',
+    },
   },
   peek: {
     viewOnly: 'nur ansehen',

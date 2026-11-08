@@ -159,12 +159,16 @@ function eventColor(ev) {
 */
 const RUN_LOOKBACK_DAYS = 14;
 
+// The home screen is what others glance at: nothing from a cycle
+// calendar here, neither what is logged nor what is forecast.
+const HOME_SCREEN = { includeCycle: false, includeCycleEntries: false };
+
 async function eventsForRange(rangeStart, rangeEnd) {
   const { expandedCalendarRawEventsForRange } = await import('./calendar.js');
 
   // Recurring series expand only occurrences starting in the asked range:
   // look back a little so a running occurrence is found too.
-  const events = expandedCalendarRawEventsForRange(addDays(rangeStart, -RUN_LOOKBACK_DAYS), rangeEnd)
+  const events = expandedCalendarRawEventsForRange(addDays(rangeStart, -RUN_LOOKBACK_DAYS), rangeEnd, HOME_SCREEN)
     .map((ev) => ({
       ...ev,
       _start: eventStartDate(ev),
@@ -245,7 +249,7 @@ function isMultiDayEvent(ev) {
 async function gridEventsForRange(rangeStart, rangeEnd) {
   const { expandedCalendarRawEventsForRange } = await import('./calendar.js');
 
-  return expandedCalendarRawEventsForRange(addDays(rangeStart, -RUN_LOOKBACK_DAYS), rangeEnd)
+  return expandedCalendarRawEventsForRange(addDays(rangeStart, -RUN_LOOKBACK_DAYS), rangeEnd, HOME_SCREEN)
     .map((ev) => ({ ...ev, _start: eventStartDate(ev) }))
     // Unexpanded recurring masters would duplicate their own occurrences.
     .filter((ev) => ev._start && !isUnexpandedRecurrenceMaster(ev))

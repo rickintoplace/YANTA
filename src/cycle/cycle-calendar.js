@@ -227,3 +227,173 @@ export function cycleForecastEvents(cat, analysis, view, rangeStart, rangeEnd, {
 
   return out;
 }
+
+// ---------------- days -----------------------------------------------
+//
+// People think in days ("today I'm bleeding"), the calendar stores runs
+// of days. These two functions translate between the two.
+
+/**
+ * The days a logged period covers, as day numbers [s, e]. A period
+ * without a logged end runs for the usual length, but never past today:
+ * what comes after today is a forecast, not an entry.
+ */
+export function periodRanges(entries, { today = todayKey(), periodLength = 5 } = {}) {
+  const T = dayOf(today);
+  const L = Math.max(1, Math.round(periodLength) || 5);
+  const out = [];
+  for (const e of entries || []) {
+    if (e.kind !== 'period') continue;
+    const s = dayOf(e.start);
+    if (!Number.isFinite(s)) continue;
+    const logged = e.end ? dayOf(e.end) : null;
+    const end = Number.isFinite(logged) && logged >= s ? logged : Math.max(s, Math.min(T, s + L - 1));
+    out.push({ id: e.id, s, e: end, open: !e.end });
+  }
+  return out.sort((a, b) => a.s - b.s);
+}
+
+/**
+ * Marks or unmarks one day as a period day. Returns the changes to the
+ * stored entries — `updates` and `creates` as { start, end } date keys
+ * (end null: running), `deletes` as ids. Only entries next to the day
+ * are touched; the rest of the history stays as it was logged.
+ *
+ * A day on its own starts a period of the usual length (its end not yet
+ * logged); a run that reaches today stays open (running) unless someone
+ * said it ended today, so the forecast keeps counting its days.
+ */
+export function togglePeriodDay(entries, dayKey, { today = todayKey(), periodLength = 5 } = {}) {
+  const d = dayOf(dayKey);
+  const T = dayOf(today);
+  const L = Math.max(1, Math.round(periodLength) || 5);
+  const result = { updates: [], creates: [], deletes: [] };
+  if (!Number.isFinite(d) || d > T) return result;
+
+  const all = periodRanges(entries, { today, periodLength: L });
+  const touching = all.filter((r) => r.s <= d + 1 && r.e >= d - 1);
+
+  if (!touching.length) {
+    // A period begins a few days earlier than the one logged after it.
+    const later = all.find((r) => r.s > d && r.s - d < L);
+    if (later) {
+      result.updates.push({ id: later.id, start: keyOf(d), end: later.open ? null : keyOf(later.e) });
+      return result;
+    }
+    // A first day on its own: the period lasts the usual length until
+    // someone marks where it ended.
+    result.creates.push({ start: keyOf(d), end: null });
+    return result;
+  }
+
+  const days = new Set();
+  for (const r of touching) for (let x = r.s; x <= r.e; x++) days.add(x);
+  if (days.has(d)) days.delete(d);
+  else days.add(d);
+
+  const runs = [];
+  for (const x of [...days].sort((a, b) => a - b)) {
+    const last = runs.at(-1);
+    if (last && x === last.e + 1) last.e = x;
+    else runs.push({ s: x, e: x });
+  }
+
+  const endedToday = touching.some((r) => !r.open && r.e === T);
+  runs.forEach((run, i) => {
+    const open = run.e === T && run.e - run.s + 1 <= L && !endedToday;
+    const next = { start: keyOf(run.s), end: open ? null : keyOf(run.e) };
+    const was = touching[i];
+    if (!was) return result.creates.push(next);
+    const wasEnd = was.open ? null : keyOf(was.e);
+    if (was.s !== run.s || wasEnd !== next.end) result.updates.push({ id: was.id, ...next });
+  });
+  for (const r of touching.slice(runs.length)) result.deletes.push(r.id);
+  return result;
+}
+
+/**
+ * What each day shows in the calendar, by date key:
+ *   { period: 'logged'|'expected', strength (0..1, for expected),
+ *     fertile, ovulation, ovulationConfirmed, runStart, runEnd }
+ * Nothing here is an event: the calendar draws it as a quiet layer on
+ * the days, so it never pushes an appointment aside.
+ */
+export function cycleDayMarks(analysis, view, { today = todayKey() } = {}) {
+  const marks = new Map();
+  if (!analysis) return marks;
+  const get = (day) => {
+    const key = keyOf(day);
+    let m = marks.get(key);
+    if (!m) marks.set(key, (m = { key }));
+    return m;
+  };
+  const entries = analysis.entries || [];
+
+  for (const r of periodRanges(entries, { today, periodLength: analysis.stats?.period })) {
+    for (let x = r.s; x <= r.e; x++) {
+      const m = get(x);
+      m.period = 'logged';
+      delete m.strength;
+    }
+  }
+  for (const e of entries) {
+    if (e.kind === 'ovulation' && !view?.periodsOnly) {
+      const m = get(dayOf(e.start));
+      m.ovulation = true;
+      m.ovulationConfirmed = true;
+    }
+  }
+
+  for (const f of analysis.forecasts || []) {
+    const from = dayOf(f.start);
+    const to = dayOf(f.end);
+    if (f.kind === 'period' || f.kind === 'period-ongoing') {
+      const strength = f.kind === 'period-ongoing' ? 1 : Math.max(0.25, Math.min(1, f.prob || 0.5));
+      for (let x = from; x <= to; x++) {
+        const m = get(x);
+        if (m.period === 'logged') continue;
+        m.period = 'expected';
+        m.strength = Math.max(m.strength || 0, strength);
+      }
+    } else if (f.kind === 'fertile' && view?.showFertile) {
+      for (let x = from; x <= to; x++) get(x).fertile = true;
+    } else if (f.kind === 'ovulation' && view?.showOvulation) {
+      get(dayOf(f.likely)).ovulation = true;
+    }
+  }
+
+  // Where a run of period days begins and ends, for rounded ends.
+  for (const m of marks.values()) {
+    if (!m.period) continue;
+    const d = dayOf(m.key);
+    m.runStart = marks.get(keyOf(d - 1))?.period !== m.period;
+    m.runEnd = marks.get(keyOf(d + 1))?.period !== m.period;
+  }
+  return marks;
+}
+
+/**
+ * One line for the top of the calendar: where in the cycle today is and
+ * what comes next. `{ lead, rest }`, or null when there is nothing to say.
+ */
+export function cycleStatusLine(analysis, view, { today = todayKey() } = {}) {
+  if (!analysis) return null;
+  if (analysis.status === 'paused') return { lead: t('cycle.line.paused'), rest: '' };
+  if (analysis.status === 'after-pause') return { lead: t('cycle.line.afterPause'), rest: '' };
+  const c = analysis.current;
+  if (analysis.status === 'empty' || !c) return { lead: t('cycle.line.empty'), rest: '' };
+
+  if (c.inPeriod) return { lead: t('cycle.line.periodDay', { day: c.periodDay }), rest: '' };
+
+  const lead = t('cycle.line.cycleDay', { day: c.day });
+  const until = dayOf(c.nextLikely) - dayOf(today);
+  let rest = c.lateBy > 0
+    ? t('cycle.line.late', { count: c.lateBy })
+    : until <= 0 ? t('cycle.line.today') : t('cycle.line.nextIn', { count: until });
+
+  const T = dayOf(today);
+  const fertileNow = view?.showFertile && (analysis.forecasts || []).some((f) =>
+    f.kind === 'fertile' && dayOf(f.start) <= T && dayOf(f.end) >= T);
+  if (fertileNow) rest = `${t('cycle.line.fertile')} · ${rest}`;
+  return { lead, rest };
+}

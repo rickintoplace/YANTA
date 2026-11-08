@@ -1,12 +1,11 @@
 // ============================================================
 // YANTA — cycle calendar panel
 //
-// Opened from a forecast in the calendar or from the calendar list. In
-// reading order it answers: where in the cycle is it now, when is the
-// next period likely (as a range, with how sure), and what can be
-// logged right now — one tap for the common case ("started today"),
-// one more for another day. Below: the numbers it is based on, the
-// history (with gaps it suspects), and the few settings there are.
+// Opened from the line above the calendar or from the calendar list. In
+// reading order it answers: where in the cycle is it now and when is the
+// next period likely; then a month to tap days in — people think "today
+// I'm bleeding", not "a period from … to …". Below: the numbers it is
+// based on, the history (with gaps it suspects), and the few settings.
 //
 // Copy is neutral on purpose: the person reading may be the one whose
 // cycle it is, or a partner the calendar is shared with.
@@ -16,7 +15,8 @@ import { state, escapeHtml, escapeAttr, lucide, toast } from '../core.js';
 import { t, getLocale } from '../i18n/index.js';
 import { openBoundOverlay } from '../overlay-history.js';
 import { categoryPersonalPrefs, setCategoryPersonalPrefs } from '../calendar-personal.js';
-import { cycleViewFor, storedAllDay, todayKey, localKey } from './cycle-calendar.js';
+import { getCalendarPreferences } from '../calendar-preferences.js';
+import { cycleViewFor, cycleDayMarks, togglePeriodDay, storedAllDay, todayKey, localKey } from './cycle-calendar.js';
 import { dayOf } from './cycle-model.js';
 
 const PHONE = '(max-width: 640px)';
@@ -24,8 +24,9 @@ const PHONE = '(max-width: 640px)';
 let panel = null;
 let currentId = null;
 let releaseOverlay = null;
-let picking = null; // 'start' | 'end' | 'pause' | 'ovulation' | null
+let picking = null; // 'pause' | 'ovulation' | null
 let pauseReason = 'pregnancy';
+let month = null; // 'YYYY-MM' shown in the panel's month
 
 const calendarApi = () => import('../calendar.js');
 
@@ -66,26 +67,37 @@ async function put(patch) {
   return putCalendarEvent({ allDay: true, categoryId: currentId, reminders: [], ...patch });
 }
 
-async function logStart(key) {
-  const a = (await calendarApi()).cycleCalendarAnalysis(currentId);
-  const same = a?.periods?.find((p) => Math.abs(dayOf(p.start) - dayOf(key)) < 1);
-  if (same) {
-    toast(t('cycle.toast.alreadyLogged'), 'info');
-    return;
+/** A day tapped in the month: a period day now, or not any more. */
+async function toggleDay(key) {
+  const api = await calendarApi();
+  const a = api.cycleCalendarAnalysis(currentId);
+  if (!a) return;
+  const plan = togglePeriodDay((a.entries || []).filter((e) => e.kind === 'period'), key, {
+    today: todayKey(),
+    periodLength: a.stats?.period,
+  });
+  const at = (k) => (k ? storedAllDay(k) : null);
+  for (const u of plan.updates) {
+    const ev = entryEvent(u.id);
+    if (!ev) continue;
+    await put({ ...ev, id: ev.id, start: at(u.start), end: at(u.end), cycle: { ...(ev.cycle || {}), kind: 'period' } });
   }
-  const ev = await put({ title: t('cycle.entry.period'), start: storedAllDay(key), end: null, cycle: { kind: 'period' } });
-  if (ev) toast(t('cycle.toast.started', { date: fmt(key) }), 'success');
+  for (const c of plan.creates) {
+    await put({ title: t('cycle.entry.period'), start: at(c.start), end: at(c.end), cycle: { kind: 'period' } });
+  }
+  for (const id of plan.deletes) api.deleteCalendarEvent(id);
 }
 
-async function logEnd(key) {
+/** "It ended today": the running period gets today as its last day. */
+async function endToday() {
   const a = (await calendarApi()).cycleCalendarAnalysis(currentId);
   const last = a?.periods?.at(-1);
   if (!last) return;
-  const ev = entryEvent(last.ids[0]);
+  const ev = entryEvent(last.ids.at(-1)) || entryEvent(last.ids[0]);
   if (!ev) return;
-  const end = dayOf(key) > dayOf(last.start) ? storedAllDay(key) : null;
-  const saved = await put({ ...ev, id: ev.id, end });
-  if (saved) toast(t('cycle.toast.ended', { count: dayOf(key) - dayOf(last.start) + 1 }), 'success');
+  const today = todayKey();
+  await put({ ...ev, id: ev.id, start: storedAllDay(last.start), end: storedAllDay(today), cycle: { ...(ev.cycle || {}), kind: 'period' } });
+  toast(t('cycle.toast.ended', { count: dayOf(today) - dayOf(last.start) + 1 }), 'success');
 }
 
 async function confirmLong(periodId) {
@@ -167,63 +179,80 @@ function heroHtml(a, cat) {
   return `
     <p class="ycy-big">${escapeHtml(big)}</p>
     <p class="ycy-line">${escapeHtml(next)}</p>
-    ${c.inPeriod ? '' : `<p class="ycy-dim">${escapeHtml(range)}${sure ? ` · ${escapeHtml(sure)}` : ''}</p>`}
-    ${stripHtml(a, cat)}`;
+    ${c.inPeriod ? '' : `<p class="ycy-dim">${escapeHtml(range)}${sure ? ` · ${escapeHtml(sure)}` : ''}</p>`}`;
 }
 
 /*
-  The running cycle as a row of days: period, fertile days, the likely
-  ovulation, today, and where the next period is likely to start.
+  A month to tap days in. Logged period days are filled, expected ones
+  dashed, fertile days tinted, the likely ovulation ringed. Days after
+  today only show the forecast; nobody logs tomorrow.
 */
-function stripHtml(a, cat) {
-  const c = a.current;
-  if (!c) return '';
+function monthHtml(a, cat) {
   const view = cycleViewFor(cat, categoryPersonalPrefs(cat.id));
-  const start = dayOf(c.start);
-  const nextTo = dayOf(c.nextRange[1]);
-  const total = Math.max(c.day, Math.min(60, nextTo - start + 1));
-  const fertile = view.showFertile ? a.forecasts.find((f) => f.kind === 'fertile' && f.cycle === 1) : null;
-  const ov = view.showOvulation ? a.forecasts.find((f) => f.kind === 'ovulation' && f.cycle === 1) : null;
-  const nextFrom = dayOf(c.nextRange[0]);
-  const periodEnd = dayOf(c.periodEnd);
-  const today = dayOf(todayKey());
+  const today = todayKey();
+  const marks = cycleDayMarks(a, view, { today });
+  const [y, m] = month.split('-').map(Number);
+  const first = new Date(y, m - 1, 1);
+  const daysIn = new Date(y, m, 0).getDate();
+  const weekStart = Number(getCalendarPreferences()?.weekStart ?? 1) || 0;
+  const lead = (first.getDay() - weekStart + 7) % 7;
+  const locale = getLocale();
+  const canLog = !cat.readonly;
 
-  const cells = [];
-  for (let i = 0; i < total; i++) {
-    const d = start + i;
-    const cls = [];
-    if (d <= periodEnd) cls.push('is-period');
-    else if (d >= nextFrom) cls.push('is-next');
-    else if (fertile && d >= dayOf(fertile.start) && d <= dayOf(fertile.end)) cls.push('is-fertile');
-    if (ov && d === dayOf(ov.likely)) cls.push('is-ovulation');
-    if (d === today) cls.push('is-today');
-    if (d > today) cls.push('is-future');
-    cells.push(`<span class="${cls.join(' ')}"></span>`);
+  const weekdays = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(2026, 0, 4 + ((weekStart + i) % 7)); // 2026-01-04 is a Sunday
+    weekdays.push(`<span>${escapeHtml(d.toLocaleDateString(locale, { weekday: 'narrow' }))}</span>`);
   }
 
+  const cells = [];
+  for (let i = 0; i < lead; i++) cells.push('<span class="ycy-day is-blank"></span>');
+  for (let d = 1; d <= daysIn; d++) {
+    const key = `${month}-${String(d).padStart(2, '0')}`;
+    const mk = marks.get(key) || {};
+    const future = key > today;
+    const cls = ['ycy-day'];
+    if (mk.period === 'logged') cls.push('is-period');
+    if (mk.period === 'expected') cls.push('is-expected', (mk.strength || 0) >= 0.6 ? 'is-likely' : 'is-maybe');
+    if (mk.period && mk.runStart) cls.push('run-start');
+    if (mk.period && mk.runEnd) cls.push('run-end');
+    if (mk.fertile && !mk.period) cls.push('is-fertile');
+    if (mk.ovulation) cls.push(mk.ovulationConfirmed ? 'is-ovulation-confirmed' : 'is-ovulation');
+    if (key === today) cls.push('is-today');
+    const what = mk.period === 'logged' ? t('cycle.legend.period')
+      : mk.period === 'expected' ? t('cycle.legend.expected')
+        : mk.fertile ? t('cycle.legend.fertile') : '';
+    const label = `${fmt(key, { weekday: 'long', day: 'numeric', month: 'long' })}${what ? `: ${what}` : ''}`;
+    const tappable = canLog && !future;
+    cells.push(`<button type="button" class="${cls.join(' ')}" ${tappable ? `data-day="${key}" aria-pressed="${mk.period === 'logged'}"` : 'disabled'} aria-label="${escapeAttr(label)}"><span>${d}</span></button>`);
+  }
+
+  const title = first.toLocaleDateString(locale, { month: 'long', year: 'numeric' });
+  const thisMonth = today.slice(0, 7);
   const legend = [
     `<span><i class="is-period"></i>${escapeHtml(t('cycle.legend.period'))}</span>`,
-    fertile ? `<span><i class="is-fertile"></i>${escapeHtml(t('cycle.legend.fertile'))}</span>` : '',
-    ov ? `<span><i class="is-ovulation"></i>${escapeHtml(t('cycle.legend.ovulation', { date: fmtShort(ov.likely) }))}</span>` : '',
-    `<span><i class="is-next"></i>${escapeHtml(t('cycle.legend.next'))}</span>`,
+    `<span><i class="is-expected"></i>${escapeHtml(t('cycle.legend.expected'))}</span>`,
+    view.showFertile ? `<span><i class="is-fertile"></i>${escapeHtml(t('cycle.legend.fertile'))}</span>` : '',
+    view.showOvulation ? `<span><i class="is-ovulation"></i>${escapeHtml(t('cycle.legend.ovulationShort'))}</span>` : '',
   ].join('');
 
   return `
-    <div class="ycy-strip" style="--n:${total}" role="img" aria-label="${escapeAttr(t('cycle.stripLabel', { day: c.day, total }))}">${cells.join('')}</div>
-    <div class="ycy-legend">${legend}</div>`;
+    <section class="ycy-month" aria-label="${escapeAttr(title)}">
+      <div class="ycy-month-head">
+        <h3>${escapeHtml(title)}</h3>
+        ${month !== thisMonth ? `<button type="button" class="ycy-link" data-month="today">${escapeHtml(t('cycle.month.today'))}</button>` : ''}
+        <button type="button" class="icon-btn" data-month="-1" aria-label="${escapeAttr(t('cycle.month.prev'))}">${lucide('chevron-left', 16)}</button>
+        <button type="button" class="icon-btn" data-month="1" aria-label="${escapeAttr(t('cycle.month.next'))}">${lucide('chevron-right', 16)}</button>
+      </div>
+      <div class="ycy-weekdays" aria-hidden="true">${weekdays.join('')}</div>
+      <div class="ycy-days">${cells.join('')}</div>
+      <div class="ycy-legend">${legend}</div>
+      ${canLog ? `<p class="ycy-dim ycy-hint">${escapeHtml(t('cycle.month.hint'))}</p>` : ''}
+    </section>`;
 }
 
 function actionsHtml(a, cat) {
-  if (cat.readonly) return `<p class="ycy-dim">${escapeHtml(t('cycle.readOnly'))}</p>`;
-
-  const today = todayKey();
-  const pick = (what, label) => picking === what
-    ? `<form class="ycy-pick" data-pick-form="${what}">
-        <label><span>${escapeHtml(label)}</span><input type="date" name="day" value="${today}" max="${today}" required></label>
-        <button type="submit" class="btn primary">${escapeHtml(t('cycle.save'))}</button>
-        <button type="button" class="ycy-link" data-cancel-pick>${escapeHtml(t('common.cancel'))}</button>
-      </form>`
-    : '';
+  if (cat.readonly) return `<p class="ycy-dim ycy-note">${escapeHtml(t('cycle.readOnly'))}</p>`;
 
   if (a.status === 'paused') {
     return `
@@ -232,18 +261,22 @@ function actionsHtml(a, cat) {
       </div>`;
   }
 
+  // The one thing most likely to be logged right now; anything else is
+  // a tap in the month.
   const c = a.current;
-  const running = c?.inPeriod && !c.periodEndLogged;
-  const primary = running
-    ? `<button type="button" class="btn ${c.periodDay > 2 ? 'primary' : ''}" data-act="end-today">${escapeHtml(t('cycle.act.endedToday'))}</button>
-       <button type="button" class="ycy-link" data-pick="end">${escapeHtml(t('cycle.act.otherDay'))}</button>`
-    : `<button type="button" class="btn primary" data-act="start-today">${lucide('droplet', 15)} ${escapeHtml(t('cycle.act.startedToday'))}</button>
-       <button type="button" class="ycy-link" data-pick="start">${escapeHtml(a.status === 'empty' ? t('cycle.act.lastStart') : t('cycle.act.otherDay'))}</button>`;
-
+  const today = todayKey();
+  if (c?.inPeriod && !c.periodEndLogged) {
+    return `
+      <div class="ycy-actions">
+        <button type="button" class="btn ${c.periodDay > 2 ? 'primary' : ''}" data-act="end-today">${escapeHtml(t('cycle.act.endedToday'))}</button>
+      </div>`;
+  }
+  const todayLogged = (a.periods || []).some((p) => p.start <= today && (p.end || p.start) >= today);
+  if (todayLogged) return '';
   return `
-    <div class="ycy-actions">${primary}</div>
-    ${pick('start', t('cycle.pick.start'))}
-    ${pick('end', t('cycle.pick.end'))}`;
+    <div class="ycy-actions">
+      <button type="button" class="btn primary" data-act="start-today">${lucide('droplet', 15)} ${escapeHtml(t('cycle.act.startedToday'))}</button>
+    </div>`;
 }
 
 function factsHtml(a) {
@@ -368,6 +401,7 @@ async function render() {
   body.innerHTML = `
     <section class="ycy-hero" aria-live="polite">${heroHtml(a, cat)}</section>
     ${actionsHtml(a, cat)}
+    ${monthHtml(a, cat)}
     ${factsHtml(a)}
     ${historyHtml(a, cat)}
     ${settingsHtml(a, cat, api.calendarCategoryShareInfo(cat.id))}
@@ -417,8 +451,22 @@ async function onClick(e) {
 
   const act = e.target.closest('[data-act]')?.dataset.act;
   const today = todayKey();
-  if (act === 'start-today') { picking = null; return logStart(today); }
-  if (act === 'end-today') { picking = null; return logEnd(today); }
+  if (act === 'start-today') { picking = null; month = today.slice(0, 7); return toggleDay(today); }
+  if (act === 'end-today') { picking = null; return endToday(); }
+
+  const day = e.target.closest('[data-day]')?.dataset.day;
+  if (day) return toggleDay(day);
+
+  const nav = e.target.closest('[data-month]')?.dataset.month;
+  if (nav) {
+    if (nav === 'today') month = today.slice(0, 7);
+    else {
+      const [y, m] = month.split('-').map(Number);
+      const d = new Date(y, m - 1 + Number(nav), 1);
+      month = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`;
+    }
+    return render();
+  }
   if (act === 'end-pause') {
     const a = (await calendarApi()).cycleCalendarAnalysis(currentId);
     if (a?.pause?.id) await endPause(a.pause.id, today);
@@ -487,9 +535,7 @@ async function onSubmit(e) {
   if (!key) return;
   const what = form.dataset.pickForm;
   picking = null;
-  if (what === 'start') await logStart(key);
-  else if (what === 'end') await logEnd(key);
-  else if (what === 'pause') await startPause(key, pauseReason);
+  if (what === 'pause') await startPause(key, pauseReason);
   else if (what === 'ovulation') await logOvulation(key);
   render();
 }
@@ -499,6 +545,7 @@ export async function openCyclePanel(categoryId) {
   if (panel) close();
   currentId = categoryId;
   picking = null;
+  month = todayKey().slice(0, 7);
   ensureCss();
 
   const phone = window.matchMedia(PHONE).matches;
@@ -571,25 +618,58 @@ function ensureCss() {
 .ycy-dim { margin: 4px 0 0; font-size: 13px; line-height: 1.45; color: var(--text-dim); }
 .ycy-note { margin-top: 8px; }
 
-.ycy-strip {
-  --c: var(--cyc-color, #d6336c);
-  display: grid; grid-template-columns: repeat(var(--n), minmax(0, 1fr)); gap: 2px;
-  margin: 18px 0 0; height: 14px;
-}
-.ycy-strip span { border-radius: 3px; background: color-mix(in srgb, var(--text) 8%, transparent); position: relative; }
-.ycy-strip span.is-future { background: color-mix(in srgb, var(--text) 5%, transparent); }
-.ycy-strip span.is-period { background: color-mix(in srgb, var(--c) 78%, var(--bg-elev)); }
-.ycy-strip span.is-fertile { background: color-mix(in srgb, #3b9b8f 34%, var(--bg-elev)); }
-.ycy-strip span.is-ovulation { background: #3b9b8f; }
-.ycy-strip span.is-next { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--c) 40%, var(--bg-elev)) 0 3px, transparent 3px 6px); }
-.ycy-strip span.is-today { outline: 2px solid var(--text); outline-offset: 1px; z-index: 1; }
 .ycy-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 10px; font-size: 12px; color: var(--text-dim); }
 .ycy-legend span { display: inline-flex; align-items: center; gap: 6px; }
-.ycy-legend i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
-.ycy-legend i.is-period { background: color-mix(in srgb, var(--cyc-color, #d6336c) 78%, var(--bg-elev)); }
-.ycy-legend i.is-fertile { background: color-mix(in srgb, #3b9b8f 34%, var(--bg-elev)); }
-.ycy-legend i.is-ovulation { background: #3b9b8f; }
-.ycy-legend i.is-next { background: repeating-linear-gradient(135deg, color-mix(in srgb, var(--cyc-color, #d6336c) 40%, var(--bg-elev)) 0 3px, transparent 3px 6px); }
+.ycy-legend i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; box-sizing: border-box; }
+.ycy-legend i.is-period { background: var(--cyc-color, #d6336c); }
+.ycy-legend i.is-expected { border: 1.5px dashed var(--cyc-color, #d6336c); }
+.ycy-legend i.is-fertile { background: color-mix(in srgb, #3b9b8f 22%, var(--bg-elev)); }
+.ycy-legend i.is-ovulation { border: 1.5px solid #3b9b8f; }
+
+.ycy-month { margin: 22px 0 0; }
+.ycy-month-head { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }
+.ycy-month-head h3 { flex: 1; margin: 0; font-size: 14px; font-weight: 650; text-transform: capitalize; }
+.ycy-month-head .ycy-link { margin-right: 6px; }
+.ycy-weekdays, .ycy-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.ycy-weekdays span { text-align: center; font-size: 11px; color: var(--text-dim); padding: 2px 0 4px; }
+.ycy-days { row-gap: 4px; }
+.ycy-day {
+  --c: var(--cyc-color, #d6336c);
+  position: relative; display: grid; place-items: center; height: 38px; padding: 0;
+  border: 0; background: none; color: var(--text); font: inherit; font-size: 14px;
+  font-variant-numeric: tabular-nums; cursor: pointer;
+}
+.ycy-day.is-blank { cursor: default; }
+.ycy-day:disabled { cursor: default; color: var(--text-dim); }
+.ycy-day > span {
+  position: relative; z-index: 1; display: grid; place-items: center;
+  width: 34px; height: 34px; border-radius: 50%; box-sizing: border-box;
+  transition: background-color .12s ease, transform .12s ease;
+}
+/* Period days join into one band, like a run of days in a calendar. */
+.ycy-day.is-period::before, .ycy-day.is-expected::before {
+  content: ''; position: absolute; top: 2px; bottom: 2px; left: 0; right: 0;
+}
+.ycy-day.is-period::before { background: color-mix(in srgb, var(--c) 22%, transparent); }
+.ycy-day.is-period.run-start::before { left: 50%; }
+.ycy-day.is-period.run-end::before { right: 50%; }
+.ycy-day.is-period > span { background: var(--c); color: #fff; font-weight: 650; }
+.ycy-day.is-expected > span { border: 1.5px dashed var(--c); }
+.ycy-day.is-expected.is-maybe > span { border-color: color-mix(in srgb, var(--c) 45%, transparent); }
+.ycy-day.is-fertile > span { background: color-mix(in srgb, #3b9b8f 18%, transparent); }
+.ycy-day.is-ovulation > span { box-shadow: inset 0 0 0 1.5px #3b9b8f; }
+.ycy-day.is-ovulation-confirmed > span { box-shadow: inset 0 0 0 1.5px #3b9b8f; background: color-mix(in srgb, #3b9b8f 30%, transparent); }
+.ycy-day.is-today > span { font-weight: 750; }
+.ycy-day.is-today::after {
+  content: ''; position: absolute; bottom: 0; left: 50%; width: 4px; height: 4px; margin-left: -2px;
+  border-radius: 50%; background: var(--text);
+}
+.ycy-day[data-day]:hover > span { background: color-mix(in srgb, var(--text) 8%, transparent); }
+.ycy-day.is-period[data-day]:hover > span { background: color-mix(in srgb, var(--c) 85%, var(--text)); }
+.ycy-day[data-day]:active > span { transform: scale(.92); }
+.ycy-day:focus-visible { outline: none; }
+.ycy-day:focus-visible > span { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ycy-hint { margin-top: 8px; }
 
 .ycy-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 16px; margin: 20px 0 0; }
 .ycy-actions .btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; font-size: 14px; border-radius: 10px; }

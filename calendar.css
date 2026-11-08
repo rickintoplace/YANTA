@@ -3967,30 +3967,50 @@
 @media (max-width: 640px) { .ycl-more { opacity: 1; } }
 
 /* ------------------------------------------------------------
-   Cycle calendar forecasts (src/cycle/): a tint of the calendar's
-   color, as strong as the forecast is sure — never a solid block, so
-   a forecast cannot pass for a logged entry.
+   The cycle layer (src/cycle/, paintCycleLayer in calendar.js):
+   periods, forecasts and fertile days are a band along the top of the
+   days, not events — appointments keep the room. Logged days are solid,
+   expected ones dashed (fainter when less sure), fertile days a thin
+   teal line, the likely ovulation a ring by the date.
    ------------------------------------------------------------ */
-.fc .fc-event.yanta-cal-cycle-forecast {
-  background: color-mix(in srgb, var(--cyc) var(--cyc-strength, 24%), var(--bg)) !important;
-  border: 1px dashed color-mix(in srgb, var(--cyc) 75%, transparent) !important;
-  color: color-mix(in srgb, var(--cyc) 50%, var(--text)) !important;
-  box-shadow: none !important;
+.fc .fc-daygrid-day[data-cyc] .fc-daygrid-day-frame { position: relative; }
+.fc .fc-daygrid-day[data-cyc] .fc-daygrid-day-frame::before {
+  /* display: FullCalendar's clearfix makes the frame's ::before a table. */
+  content: ''; display: block; position: absolute; left: 0; right: 0; top: 0; height: 4px;
+  pointer-events: none;
 }
-.fc .fc-event.yanta-cal-cycle-forecast .fc-event-main,
-.fc .fc-event.yanta-cal-cycle-forecast .fc-event-title { color: inherit !important; font-weight: 550; }
-.fc .fc-event.yanta-cal-cycle-forecast.is-period-ongoing {
-  background: color-mix(in srgb, var(--cyc) 34%, var(--bg)) !important;
-  border-style: solid !important;
+.fc [data-cyc~="run-start"] .fc-daygrid-day-frame::before { left: 5px; border-top-left-radius: 3px; border-bottom-left-radius: 3px; }
+.fc [data-cyc~="run-end"] .fc-daygrid-day-frame::before { right: 5px; border-top-right-radius: 3px; border-bottom-right-radius: 3px; }
+
+.fc [data-cyc~="period"] .fc-daygrid-day-frame::before { background: var(--cyc-c, #d6336c); }
+.fc [data-cyc~="period"] .fc-daygrid-day-number { color: color-mix(in srgb, var(--cyc-c, #d6336c) 80%, var(--text)); font-weight: 650; }
+
+.fc [data-cyc~="expected"] .fc-daygrid-day-frame::before {
+  background: repeating-linear-gradient(90deg, var(--cyc-c, #d6336c) 0 6px, transparent 6px 10px);
+  opacity: .75;
 }
-.fc .fc-event.yanta-cal-cycle-forecast.is-fertile {
-  background: color-mix(in srgb, var(--cyc) 9%, var(--bg)) !important;
-  border-color: color-mix(in srgb, var(--cyc) 35%, transparent) !important;
+.fc [data-cyc~="maybe"] .fc-daygrid-day-frame::before { opacity: .4; }
+
+.fc [data-cyc~="fertile"] .fc-daygrid-day-frame::before { height: 2px; background: color-mix(in srgb, #3b9b8f 60%, transparent); }
+
+.fc [data-cyc~="ovulation"] .fc-daygrid-day-top::after,
+.fc [data-cyc~="ovulation-confirmed"] .fc-daygrid-day-top::after {
+  content: ''; align-self: center; width: 7px; height: 7px; margin-right: 1px; border-radius: 50%;
+  box-shadow: inset 0 0 0 1.5px #3b9b8f; flex: none;
 }
-.fc .fc-event.yanta-cal-cycle-forecast.is-ovulation {
-  border-style: solid !important;
-  background: color-mix(in srgb, var(--cyc) 16%, var(--bg)) !important;
+.fc [data-cyc~="ovulation-confirmed"] .fc-daygrid-day-top::after { background: #3b9b8f; }
+
+/* One line above the calendar: where in the cycle today is. */
+.yanta-cal-cycle-line {
+  flex: 0 0 auto; display: flex; align-items: center; gap: 8px;
+  width: 100%; box-sizing: border-box; padding: 7px 14px;
+  border: 0; border-bottom: 1px solid var(--border); border-radius: 0;
+  background: var(--bg-elev); color: var(--text-dim);
+  font: inherit; font-size: 13px; text-align: left; cursor: pointer;
 }
-/* Fertile days and ovulation: their own hue, as in the cycle panel's strip. */
-.fc .fc-event.yanta-cal-cycle-forecast.is-fertile,
-.fc .fc-event.yanta-cal-cycle-forecast.is-ovulation { --cyc: #3b9b8f !important; }
+.yanta-cal-cycle-line strong { color: var(--text); font-weight: 600; }
+.yanta-cal-cycle-line-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--cyc-c, #d6336c); flex: none; }
+.yanta-cal-cycle-line-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.yanta-cal-cycle-line svg { flex: none; opacity: .5; }
+.yanta-cal-cycle-line:hover { background: color-mix(in srgb, var(--text) 4%, var(--bg-elev)); }
+.yanta-cal-cycle-line:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }

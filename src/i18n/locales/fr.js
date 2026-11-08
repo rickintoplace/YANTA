@@ -9,7 +9,7 @@ import greeting from './greeting/greeting.fr.js';
 export default {
   calendarList: {
     title: 'Calendriers',
-    add: 'Nouveau calendrier',
+    add: 'Ajouter',
     newName: 'Nouveau calendrier',
     more: 'Plus',
     name: 'Nom du calendrier',
@@ -63,11 +63,8 @@ export default {
       period: 'Règles (prévues)',
       fertile: 'Jours fertiles (estimation)',
       ovulation: 'Ovulation (estimation)',
-      tooltip: '{title} · le plus probable {likely} · 70 % entre {from} et {to}',
     },
     toast: {
-      alreadyLogged: 'Des règles commencent déjà ce jour-là.',
-      started: 'Règles notées à partir du {date}.',
       ended: {
         one: 'Règles notées : {count} jour.',
         other: 'Règles notées : {count} jours.',
@@ -93,7 +90,7 @@ export default {
       afterPause: 'Pause terminée',
       afterPauseHint: 'Notez les premières règles qui suivent et les prévisions reprennent.',
       emptyTitle: 'Quand les dernières règles ont-elles commencé ?',
-      emptyHint: 'Une date suffit pour commencer. Chaque cycle noté ensuite rend la prévision plus précise.',
+      emptyHint: 'Touchez leur premier jour dans le mois ci-dessous. Chaque cycle noté ensuite rend la prévision plus précise.',
       periodDay: 'Règles, jour {day}',
       late: {
         one: '{count} jour de retard',
@@ -108,23 +105,18 @@ export default {
     legend: {
       period: 'Règles',
       fertile: 'Jours fertiles',
-      ovulation: 'Ovulation ~{date}',
-      next: 'Prochaines règles',
+      expected: 'Prévues',
+      ovulationShort: 'Ovulation',
     },
-    stripLabel: 'Jour {day} sur environ {total}',
     readOnly: 'Vous pouvez voir ce calendrier de cycle, mais pas y ajouter.',
     save: 'Enregistrer',
     act: {
       startedToday: 'Les règles ont commencé aujourd’hui',
       endedToday: 'Les règles sont finies aujourd’hui',
-      otherDay: 'Un autre jour…',
-      lastStart: 'Choisir le jour…',
       ovulation: 'Noter une ovulation confirmée',
       share: 'Partager…',
     },
     pick: {
-      start: 'Premier jour des règles',
-      end: 'Dernier jour des règles',
       pause: 'Pause à partir du',
       ovulation: 'Jour de l’ovulation',
       ovulationHint: 'Par exemple le lendemain d’un test LH positif, ou le dernier jour bas avant la montée de température. Les prochaines règles sont alors comptées à partir de là.',
@@ -188,6 +180,30 @@ export default {
       removePlaceholders: 'Supprimer',
     },
     disclaimer: 'Une estimation à partir des dates notées, pas une méthode de contraception. Les jours fertiles calculés au calendrier sont souvent faux ; les tests LH ou la température sont plus fiables.',
+    addMenuItem: 'Calendrier du cycle',
+    month: {
+      today: 'Ce mois-ci',
+      prev: 'Mois précédent',
+      next: 'Mois suivant',
+      hint: 'Touchez un jour pour le marquer comme jour de règles ; touchez-le à nouveau pour l’enlever.',
+    },
+    line: {
+      paused: 'Cycle en pause',
+      afterPause: 'Cycle : noter les prochaines règles',
+      empty: 'Cycle : noter le premier jour des dernières règles',
+      periodDay: 'Règles, jour {day}',
+      cycleDay: 'Jour {day} du cycle',
+      today: 'règles attendues aujourd’hui',
+      nextIn: {
+        one: 'règles attendues demain',
+        other: 'règles dans environ {count} jours',
+      },
+      late: {
+        one: 'règles attendues depuis {count} jour',
+        other: 'règles attendues depuis {count} jours',
+      },
+      fertile: 'jours fertiles',
+    },
   },
   peek: {
     viewOnly: 'lecture seule',

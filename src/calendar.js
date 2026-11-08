@@ -239,6 +239,9 @@ import {
   cycleAnalysisFor,
   cycleViewFor,
   cycleForecastEvents,
+  cycleDayMarks,
+  cycleStatusLine,
+  todayKey as cycleTodayKey,
 } from './cycle/cycle-calendar.js';
 
 import {
@@ -2561,26 +2564,6 @@ function applyThemeToMountedEvent(info) {
   const kind = info.event.extendedProps?.yantaKind;
   const raw = info.event.extendedProps?.raw;
 
-  /*
-    Cycle forecasts are drawn by CSS (calendar.css): a tint of the
-    calendar's color, as strong as the forecast is sure, so they follow
-    the theme and never pass for logged entries.
-  */
-  if (kind === 'cycle-forecast') {
-    const color = resolveCssColor(raw?.color || info.event.backgroundColor, cssVar('--accent', '#6ea8fe'));
-    const prob = Number(info.event.extendedProps?.cycleProb) || 0.5;
-    info.el.style.setProperty('--cyc', color);
-    info.el.style.setProperty('--cyc-strength', `${Math.round(14 + Math.min(1, prob) * 22)}%`);
-    if (raw?.cycleForecast) {
-      const f = raw.cycleForecast;
-      const fmt = (k) => new Date(`${k}T00:00:00`).toLocaleDateString(getLocale(), { weekday: 'short', day: 'numeric', month: 'short' });
-      info.el.title = f.range
-        ? i18n('cycle.forecast.tooltip', { title: info.event.title, likely: fmt(f.likely), from: fmt(f.range[0]), to: fmt(f.range[1]) })
-        : info.event.title;
-    }
-    return;
-  }
-
   let background =
     info.event.backgroundColor ||
     cssVar('--accent', '#6ea8fe');
@@ -2979,12 +2962,17 @@ async function createAdjacentCalendarViewSnapshot(dir, {
     eventDidMount(info) {
       applyThemeToMountedEvent(info);
     },
+
+    dayCellDidMount(info) {
+      paintCycleCell(info.el);
+    },
   });
 
   try {
     snapshotCalendar.render();
 
     applyCalendarThemeVarsTo(snapshotCalendar.el);
+    paintCycleLayer(snapshotCalendar.el);
 
     /*
       Zwei Frames warten:
@@ -9383,6 +9371,130 @@ function cycleForecastsForRange(start, end, { forReminders = false } = {}) {
   return out;
 }
 
+/**
+  An entry of a cycle calendar that the cycle layer draws (a period, a
+  pause, a confirmed ovulation) — not an appointment that happens to
+  live in that calendar, and not a repeating placeholder.
+*/
+function isCycleEntryEvent(ev, cat = categoryForEvent(ev)) {
+  if (!cat?.cycle || hasRecurrence(ev)) return false;
+  return !!(ev.cycle?.kind || ev.allDay);
+}
+
+// ---------------- the cycle layer ----------------------------------
+//
+// Periods, forecasts and fertile days are not events: they are drawn as
+// a quiet band on the days (calendar.css, [data-cyc]) and summed up in
+// one line above the calendar. Appointments keep the room.
+
+let cycleLayer = null; // { marks: Map, color, line, catId } | null
+
+function computeCycleLayer() {
+  const events = [...state.calendarEvents.values()];
+  const today = cycleTodayKey();
+  let layer = null;
+  for (const cat of state.calendarCategories.values()) {
+    if (!cat?.cycle || cat.visible === false) continue;
+    try {
+      const analysis = cycleAnalysisFor(cat, events);
+      const view = cycleViewFor(cat, categoryPersonalPrefs(cat.id));
+      const marks = cycleDayMarks(analysis, view, { today });
+      if (!layer) {
+        layer = { marks, color: cat.color || '#d6336c', catId: cat.id, line: cycleStatusLine(analysis, view, { today }) };
+      } else {
+        // A second cycle calendar (own and a shared one): days merge,
+        // the line stays with the first.
+        for (const [key, m] of marks) if (!layer.marks.has(key)) layer.marks.set(key, m);
+      }
+    } catch (err) {
+      console.warn('[Calendar] cycle layer failed', err);
+    }
+  }
+  cycleLayer = layer;
+  return layer;
+}
+
+function cycleMarkTokens(m) {
+  if (!m) return '';
+  const out = [];
+  if (m.period === 'logged') out.push('period');
+  if (m.period === 'expected') out.push('expected', (m.strength || 0) >= 0.6 ? 'likely' : 'maybe');
+  if (m.period && m.runStart) out.push('run-start');
+  if (m.period && m.runEnd) out.push('run-end');
+  if (m.fertile && !m.period) out.push('fertile');
+  if (m.ovulation) out.push(m.ovulationConfirmed ? 'ovulation-confirmed' : 'ovulation');
+  return out.join(' ');
+}
+
+/** Marks one day cell: the month grid, and the all-day row of week and day. */
+function paintCycleCell(el) {
+  if (!el) return;
+  const key = el.dataset?.date || '';
+  const tokens = cycleLayer && key ? cycleMarkTokens(cycleLayer.marks.get(key)) : '';
+  if (tokens) el.setAttribute('data-cyc', tokens);
+  else el.removeAttribute('data-cyc');
+}
+
+function paintCycleLayer(root = fc?.el) {
+  if (!root) return;
+  if (cycleLayer) root.style.setProperty('--cyc-c', resolveCssColor(cycleLayer.color, '#d6336c'));
+  for (const el of root.querySelectorAll('.fc-daygrid-day[data-date]')) {
+    paintCycleCell(el);
+  }
+}
+
+/*
+  The line under the toolbar: "Day 21 · period in about 4 days". Only
+  there while a cycle calendar is shown; a tap opens the panel.
+*/
+function renderCycleLine() {
+  const bar = calendarToolbarEl();
+  if (!bar) return;
+  let line = bar.nextElementSibling?.classList?.contains('yanta-cal-cycle-line') ? bar.nextElementSibling : null;
+  const info = cycleLayer?.line;
+
+  if (!info) {
+    if (line) {
+      line.remove();
+      scheduleCalendarResize({ render: true });
+    }
+    return;
+  }
+
+  const html = `
+    <span class="yanta-cal-cycle-line-dot" aria-hidden="true"></span>
+    <span class="yanta-cal-cycle-line-text"><strong>${escapeHtml(info.lead)}</strong>${info.rest ? ` · ${escapeHtml(info.rest)}` : ''}</span>
+    ${lucide('chevron-right', 14)}`;
+
+  if (!line) {
+    line = document.createElement('button');
+    line.type = 'button';
+    line.className = 'yanta-cal-cycle-line';
+    line.addEventListener('click', () => {
+      const id = line.dataset.catId;
+      if (id) openCyclePanelFor(id);
+    });
+    bar.after(line);
+    scheduleCalendarResize({ render: true });
+  }
+  line.dataset.catId = cycleLayer.catId;
+  line.style.setProperty('--cyc-c', resolveCssColor(cycleLayer.color, '#d6336c'));
+  line.setAttribute('aria-label', `${info.lead}${info.rest ? `, ${info.rest}` : ''}. ${i18n('cycle.open')}`);
+  if (line.dataset.html !== html) {
+    line.innerHTML = html;
+    line.dataset.html = html;
+  }
+}
+
+/** Called when the events were (re)fetched: the layer follows the data. */
+function refreshCycleLayer() {
+  computeCycleLayer();
+  requestAnimationFrame(() => {
+    paintCycleLayer();
+    renderCycleLine();
+  });
+}
+
 /** The cycle calendar a quick action or a text logs into: own first, writable. */
 export function cycleCalendarForQuickLog() {
   const all = [...state.calendarCategories.values()].filter((c) => c?.cycle && !c.readonly);
@@ -9394,35 +9506,6 @@ export function cycleCalendarAnalysis(categoryId) {
   const cat = state.calendarCategories.get(categoryId);
   if (!cat?.cycle) return null;
   return cycleAnalysisFor(cat, [...state.calendarEvents.values()]);
-}
-
-function fullCalendarEventFromCycleForecast(ev) {
-  const color = resolveCssColor(ev.color || defaultEventColorForCategory(categoryForEvent(ev)), cssVar('--accent', '#6ea8fe'));
-  const f = ev.cycleForecast;
-
-  return {
-    id: ev.id,
-    title: ev.title,
-    start: ev.start,
-    end: ev.end || undefined,
-    allDay: true,
-    backgroundColor: color,
-    borderColor: color,
-    textColor: readableTextColor(color),
-    editable: false,
-    startEditable: false,
-    durationEditable: false,
-    display: 'block',
-    classNames: ['yanta-cal-cycle-forecast', `is-${f.kind}`],
-    extendedProps: {
-      yantaKind: 'cycle-forecast',
-      raw: ev,
-      categoryId: ev.categoryId,
-      readonly: true,
-      generated: true,
-      cycleProb: f.prob,
-    },
-  };
 }
 
 function buildFullCalendarEventsForRange(start, end) {
@@ -9441,6 +9524,8 @@ function buildFullCalendarEventsForRange(start, end) {
 
     if (cat.visible === false) continue;
     if (ev.status === 'cancelled') continue;
+    // Drawn as the cycle layer on the days, not as entries.
+    if (isCycleEntryEvent(ev, cat)) continue;
 
     if (hasRecurrence(ev)) {
       for (const occurrence of expandRecurringEvent(ev, start, end)) {
@@ -9461,10 +9546,6 @@ function buildFullCalendarEventsForRange(start, end) {
     end
   )) {
     out.push(fullCalendarEventFromSourceEvent(ev));
-  }
-
-  for (const ev of cycleForecastsForRange(start, end)) {
-    out.push(fullCalendarEventFromCycleForecast(ev));
   }
 
   for (const ev of rawMarkdownCalendarEventsFromTasksAndNotes()) {
@@ -9597,6 +9678,9 @@ export function expandedCalendarRawEventsForRange(start, end, {
   // true: all cycle forecasts (with the sources); 'reminders': only
   // those that carry a reminder (for the reminder pipelines).
   includeCycle = includeSources,
+  // false: leave out what is logged in cycle calendars (periods, …) —
+  // for surfaces others glance at, like the home screen.
+  includeCycleEntries = true,
 } = {}) {
   hydrateCalendarStateFromVault({
     silent: true,
@@ -9607,6 +9691,7 @@ export function expandedCalendarRawEventsForRange(start, end, {
   if (includeStored !== false) {
     for (const ev of state.calendarEvents.values()) {
       if (ev.status === 'cancelled') continue;
+      if (!includeCycleEntries && isCycleEntryEvent(ev)) continue;
 
       if (hasRecurrence(ev)) {
         out.push(...expandRecurringEvent(ev, start, end));
@@ -13541,7 +13626,7 @@ function renderCategoriesModal({
       <header class="modal-head ycl-head">
         <h3>${escapeHtml(i18n('calendarList.title'))}</h3>
         <span class="grow"></span>
-        <button class="btn primary ycl-add" data-action="add-category">${lucide('plus', 14)} ${escapeHtml(i18n('calendarList.add'))}</button>
+        <button class="btn primary ycl-add" data-action="add-category" aria-haspopup="menu">${lucide('plus', 14)} ${escapeHtml(i18n('calendarList.add'))}</button>
         <button class="icon-btn" data-action="more" aria-label="${escapeAttr(i18n('calendarList.more'))}">${lucide('ellipsis', 18)}</button>
         <button class="icon-btn" data-cal-cat-close aria-label="${escapeAttr(i18n('common.close'))}">${lucide('x', 18)}</button>
       </header>
@@ -13572,25 +13657,34 @@ function renderCategoriesModal({
 
   modal.querySelector('[data-action="more"]')?.addEventListener('click', (e) => {
     showMenu(...menuAt(e.currentTarget), [
-      { label: i18n('calendarList.addSource'), icon: 'rss', action: () => renderCalendarSourcesModal() },
-      { label: i18n('cycle.add'), icon: 'droplet', action: () => createCycleCalendar() },
-      { label: i18n('calendarList.importFile'), icon: 'calendar-arrow-up', action: openCalendarImportPicker },
-      'hr',
       { label: i18n('calendarList.exportAllIcs'), icon: 'calendar-arrow-down', action: () => exportEventsAsIcs(currentEventsForCategory(null), { filename: 'yanta-calendar.ics', calendarName: 'YANTA' }) },
       { label: i18n('calendarList.exportAllJson'), icon: 'download', action: () => exportCalendarJson({ filename: 'yanta-calendar.calendar.json' }) },
     ]);
   });
 
   // A new calendar appears in the list, its name selected for typing.
-  modal.querySelector('[data-action="add-category"]')?.addEventListener('click', () => {
+  const addBlank = () => {
     const palette = ['#6ea8fe', '#f59f00', '#37b24d', '#e8590c', '#ae3ec9', '#1098ad', '#d6336c'];
     const cat = putCalendarCategory({ name: i18n('calendarList.newName'), color: palette[state.calendarCategories.size % palette.length], visible: true });
-    renderCategoriesModal();
+    renderCategoriesModal({ fromHistory: true });
     requestAnimationFrame(() => {
       const input = modal.querySelector(`.ycl-row[data-cat-id="${CSS.escape(cat?.id || '')}"] [data-cat-name]`);
       input?.focus();
       input?.select();
     });
+  };
+
+  // What can be added, in one place: an own calendar, a subscription
+  // (holidays, school holidays, a link), a cycle calendar, a file.
+  modal.querySelector('[data-action="add-category"]')?.addEventListener('click', (e) => {
+    const hasCycle = [...state.calendarCategories.values()].some((c) => c.cycle && !c.spaceId);
+    showMenu(...menuAt(e.currentTarget), [
+      { label: i18n('calendarList.newName'), icon: 'calendar-plus', action: addBlank },
+      { label: i18n('calendarList.addSource'), icon: 'rss', action: () => renderCalendarSourcesModal() },
+      { label: hasCycle ? i18n('cycle.open') : i18n('cycle.addMenuItem'), icon: 'droplet', action: () => createCycleCalendar() },
+      'hr',
+      { label: i18n('calendarList.importFile'), icon: 'calendar-arrow-up', action: openCalendarImportPicker },
+    ]);
   });
 
   const defaultReminderChoice = async (catId) => {
@@ -14564,6 +14658,7 @@ export function setupCalendar() {
       );
 
       successCallback(events);
+      refreshCycleLayer();
     },
 
     eventContent: calendarEventContent,
@@ -14571,6 +14666,10 @@ export function setupCalendar() {
     eventDidMount(info) {
       applyThemeToMountedEvent(info);
       bindCalendarEventDragToMarkdown(info);
+    },
+
+    dayCellDidMount(info) {
+      paintCycleCell(info.el);
     },
 
     buttonText: {
@@ -14617,6 +14716,7 @@ export function setupCalendar() {
       }
       setCalendarToolbarTitle(info.view.title);
       setCalendarToolbarView(info.view.type);
+      paintCycleLayer();
 
       invalidateCalendarSwipeCache();
       scheduleCalendarSwipePrewarm();
@@ -14696,12 +14796,6 @@ export function setupCalendar() {
           });
         }
 
-        return;
-      }
-
-      if (kind === 'cycle-forecast') {
-        info.jsEvent?.preventDefault?.();
-        openCyclePanelFor(info.event.extendedProps?.categoryId);
         return;
       }
 

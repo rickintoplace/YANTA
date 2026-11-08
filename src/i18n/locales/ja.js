@@ -10,7 +10,7 @@ import greeting from './greeting/greeting.ja.js';
 export default {
   calendarList: {
     title: 'カレンダー',
-    add: '新しいカレンダー',
+    add: '追加',
     newName: '新しいカレンダー',
     more: 'その他',
     name: 'カレンダー名',
@@ -64,11 +64,8 @@ export default {
       period: '生理（予測）',
       fertile: '妊娠しやすい日（推定）',
       ovulation: '排卵（推定）',
-      tooltip: '{title} · 最も可能性が高いのは{likely} · 70%の確率で{from}〜{to}',
     },
     toast: {
-      alreadyLogged: 'その日にはすでに生理が始まっています。',
-      started: '{date}からの生理を記録しました。',
       ended: {
         one: '生理を記録しました：{count}日間。',
         other: '生理を記録しました：{count}日間。',
@@ -94,7 +91,7 @@ export default {
       afterPause: '一時停止が終了しました',
       afterPauseHint: 'その後最初の生理を記録すると、予測が再開します。',
       emptyTitle: '最後の生理はいつ始まりましたか？',
-      emptyHint: '最初は日付ひとつで十分です。記録が増えるほど予測が正確になります。',
+      emptyHint: '下の月表示でその初日をタップしてください。記録が増えるほど予測が正確になります。',
       periodDay: '生理 {day}日目',
       late: {
         one: '予定より{count}日遅れています',
@@ -109,23 +106,18 @@ export default {
     legend: {
       period: '生理',
       fertile: '妊娠しやすい日',
-      ovulation: '排卵 ~{date}',
-      next: '次の生理',
+      expected: '予測',
+      ovulationShort: '排卵',
     },
-    stripLabel: '約{total}日中の{day}日目',
     readOnly: 'この生理周期カレンダーは閲覧のみで、記録はできません。',
     save: '保存',
     act: {
       startedToday: '今日生理が始まった',
       endedToday: '今日生理が終わった',
-      otherDay: '別の日…',
-      lastStart: '日付を選ぶ…',
       ovulation: '確認された排卵を記録',
       share: '共有…',
     },
     pick: {
-      start: '生理の初日',
-      end: '生理の最終日',
       pause: '一時停止の開始日',
       ovulation: '排卵日',
       ovulationHint: '例えばLH検査が陽性になった翌日や、体温が上がる前の最後の低温日です。次の生理はそこから計算されます。',
@@ -189,6 +181,28 @@ export default {
       removePlaceholders: '削除',
     },
     disclaimer: '記録した日付からの推定であり、避妊には使えません。カレンダー計算による妊娠しやすい日はよく外れます。LH検査や基礎体温のほうが信頼できます。',
+    addMenuItem: '周期カレンダー',
+    month: {
+      today: '今月',
+      prev: '前の月',
+      next: '次の月',
+      hint: '日付をタップすると生理日として記録され、もう一度タップすると取り消されます。',
+    },
+    line: {
+      paused: '周期は一時停止中',
+      afterPause: '周期：次の生理を記録',
+      empty: '周期：前回の生理の初日を記録',
+      periodDay: '生理 {day}日目',
+      cycleDay: '周期 {day}日目',
+      today: '今日が生理予定日',
+      nextIn: {
+        other: '約{count}日後に生理予定',
+      },
+      late: {
+        other: '予定日から{count}日経過',
+      },
+      fertile: '妊娠しやすい時期',
+    },
   },
   peek: {
     viewOnly: '閲覧のみ',

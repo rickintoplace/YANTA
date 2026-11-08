@@ -16,7 +16,7 @@ import greeting from './greeting/greeting.en.js';
 export default {
   calendarList: {
     title: 'Calendars',
-    add: 'New calendar',
+    add: 'Add',
     newName: 'New calendar',
     more: 'More',
     name: 'Calendar name',
@@ -70,11 +70,8 @@ export default {
       period: 'Period (expected)',
       fertile: 'Fertile days (estimate)',
       ovulation: 'Ovulation (estimate)',
-      tooltip: '{title} · most likely {likely} · 70% between {from} and {to}',
     },
     toast: {
-      alreadyLogged: 'A period already starts on that day.',
-      started: 'Period logged from {date}.',
       ended: {
         one: 'Period logged: {count} day.',
         other: 'Period logged: {count} days.',
@@ -100,7 +97,7 @@ export default {
       afterPause: 'Pause ended',
       afterPauseHint: 'Log the first period after it, and forecasts start again.',
       emptyTitle: 'When did the last period start?',
-      emptyHint: 'One date is enough to start. Every period logged after it makes the forecast more precise.',
+      emptyHint: 'Tap its first day in the month below. Every period logged after it makes the forecast more precise.',
       periodDay: 'Period, day {day}',
       late: {
         one: '{count} day later than expected',
@@ -115,23 +112,18 @@ export default {
     legend: {
       period: 'Period',
       fertile: 'Fertile days',
-      ovulation: 'Ovulation ~{date}',
-      next: 'Next period',
+      expected: 'Expected',
+      ovulationShort: 'Ovulation',
     },
-    stripLabel: 'Day {day} of about {total}',
     readOnly: 'You can view this cycle calendar but not add to it.',
     save: 'Save',
     act: {
       startedToday: 'Period started today',
       endedToday: 'Period ended today',
-      otherDay: 'Another day…',
-      lastStart: 'Choose the day…',
       ovulation: 'Log a confirmed ovulation',
       share: 'Share…',
     },
     pick: {
-      start: 'First day of the period',
-      end: 'Last day of the period',
       pause: 'Pause from',
       ovulation: 'Day of ovulation',
       ovulationHint: 'For example the day after a positive LH test, or the last low day before a temperature rise. The next period is then counted from it.',
@@ -195,6 +187,30 @@ export default {
       removePlaceholders: 'Remove',
     },
     disclaimer: 'An estimate from the logged dates — not suitable as contraception. Calendar-based fertile days are often wrong; LH tests or temperature are more reliable.',
+    addMenuItem: 'Cycle calendar',
+    month: {
+      today: 'This month',
+      prev: 'Previous month',
+      next: 'Next month',
+      hint: 'Tap a day to mark it as a period day, tap it again to remove it.',
+    },
+    line: {
+      paused: 'Cycle paused',
+      afterPause: 'Cycle: log the next period',
+      empty: 'Cycle: log the first day of the last period',
+      periodDay: 'Period, day {day}',
+      cycleDay: 'Cycle day {day}',
+      today: 'period likely today',
+      nextIn: {
+        one: 'period likely tomorrow',
+        other: 'period in about {count} days',
+      },
+      late: {
+        one: 'period expected {count} day ago',
+        other: 'period expected {count} days ago',
+      },
+      fertile: 'fertile days',
+    },
   },
   peek: {
     viewOnly: 'view only',

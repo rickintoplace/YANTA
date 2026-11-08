@@ -9,7 +9,7 @@ import greeting from './greeting/greeting.es.js';
 export default {
   calendarList: {
     title: 'Calendarios',
-    add: 'Nuevo calendario',
+    add: 'Añadir',
     newName: 'Nuevo calendario',
     more: 'Más',
     name: 'Nombre del calendario',
@@ -63,11 +63,8 @@ export default {
       period: 'Regla (prevista)',
       fertile: 'Días fértiles (estimación)',
       ovulation: 'Ovulación (estimación)',
-      tooltip: '{title} · lo más probable {likely} · 70 % entre {from} y {to}',
     },
     toast: {
-      alreadyLogged: 'Ese día ya empieza una regla.',
-      started: 'Regla registrada desde el {date}.',
       ended: {
         one: 'Regla registrada: {count} día.',
         other: 'Regla registrada: {count} días.',
@@ -93,7 +90,7 @@ export default {
       afterPause: 'Pausa terminada',
       afterPauseHint: 'Registra la primera regla después y las previsiones vuelven.',
       emptyTitle: '¿Cuándo empezó la última regla?',
-      emptyHint: 'Una fecha basta para empezar. Cada regla registrada después hace la previsión más precisa.',
+      emptyHint: 'Toca su primer día en el mes de abajo. Cada regla registrada después hace la previsión más precisa.',
       periodDay: 'Regla, día {day}',
       late: {
         one: '{count} día más tarde de lo esperado',
@@ -108,23 +105,18 @@ export default {
     legend: {
       period: 'Regla',
       fertile: 'Días fértiles',
-      ovulation: 'Ovulación ~{date}',
-      next: 'Próxima regla',
+      expected: 'Prevista',
+      ovulationShort: 'Ovulación',
     },
-    stripLabel: 'Día {day} de unos {total}',
     readOnly: 'Puedes ver este calendario de ciclo, pero no añadir nada.',
     save: 'Guardar',
     act: {
       startedToday: 'La regla empezó hoy',
       endedToday: 'La regla terminó hoy',
-      otherDay: 'Otro día…',
-      lastStart: 'Elegir el día…',
       ovulation: 'Registrar una ovulación confirmada',
       share: 'Compartir…',
     },
     pick: {
-      start: 'Primer día de la regla',
-      end: 'Último día de la regla',
       pause: 'Pausa desde',
       ovulation: 'Día de la ovulación',
       ovulationHint: 'Por ejemplo, el día después de un test LH positivo o el último día bajo antes de la subida de temperatura. La próxima regla se cuenta a partir de ahí.',
@@ -188,6 +180,30 @@ export default {
       removePlaceholders: 'Eliminar',
     },
     disclaimer: 'Una estimación a partir de las fechas registradas, no apta como anticonceptivo. Los días fértiles calculados por calendario fallan a menudo; los tests LH o la temperatura son más fiables.',
+    addMenuItem: 'Calendario del ciclo',
+    month: {
+      today: 'Este mes',
+      prev: 'Mes anterior',
+      next: 'Mes siguiente',
+      hint: 'Toca un día para marcarlo como día de regla; vuelve a tocarlo para quitarlo.',
+    },
+    line: {
+      paused: 'Ciclo en pausa',
+      afterPause: 'Ciclo: registra la próxima regla',
+      empty: 'Ciclo: registra el primer día de la última regla',
+      periodDay: 'Regla, día {day}',
+      cycleDay: 'Día {day} del ciclo',
+      today: 'regla prevista para hoy',
+      nextIn: {
+        one: 'regla prevista para mañana',
+        other: 'regla en unos {count} días',
+      },
+      late: {
+        one: 'regla esperada hace {count} día',
+        other: 'regla esperada hace {count} días',
+      },
+      fertile: 'días fértiles',
+    },
   },
   peek: {
     viewOnly: 'solo lectura',

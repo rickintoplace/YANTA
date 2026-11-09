@@ -35,7 +35,11 @@ export const CYCLE_PRIOR = Object.freeze({
   cycle: 29, // days, population median
   spread: 4, // days, typical within-person SD (Apple Women's Health Study: 4–6)
   period: 5, // days of bleeding
-  luteal: 12, // days from ovulation to the next period
+  // Days from ovulation to the next period. Measured, not the textbook 14:
+  // 12.4 (Bull et al. 2019, 612,613 BBT/LH-confirmed cycles,
+  // doi:10.1038/s41746-019-0152-7), 12.9 ± 1.7 (Waller et al. 1998,
+  // urine hormones, doi:10.1093/oxfordjournals.aje.a009401).
+  luteal: 12.5,
   lutealSpread: 2,
   weight: 1, // the prior counts like one observed cycle
 });
@@ -453,7 +457,13 @@ export function analyzeCycle(entries, options = {}) {
       ? { from: confirmedOvulation.day, p: [1] }
       : convolve(startDist, reversedLuteal);
     const ovLikely = quantile(ovDist, 0.5);
-    // Fertile on day x: ovulation on x … x+5 (the five days before and the day itself).
+    /*
+      The fertile window is the six days ending on ovulation day (Wilcox
+      et al. 1995), drawn around the most likely ovulation. How unsure
+      that day is shows in how strong the window is drawn, not in how
+      wide: a window widened by every day of doubt grew to two weeks and
+      read as nonsense.
+    */
     const fertile = confidentRun(
       (x) => windowProb(ovDist, x + 5, 6),
       quantile(ovDist, 0.02) - 5,
@@ -463,8 +473,8 @@ export function analyzeCycle(entries, options = {}) {
       fc.push({
         kind: 'fertile',
         cycle: k,
-        start: keyOf(Math.max(fertile.start, prevStart + 1)),
-        end: keyOf(fertile.end),
+        start: keyOf(Math.max(ovLikely - 5, prevStart + periodLength)),
+        end: keyOf(ovLikely),
         likely: keyOf(ovLikely),
         prob: Math.round(Math.min(1, fertile.peak) * 100) / 100,
         confirmed: k === 1 && !!confirmedOvulation,
@@ -491,11 +501,13 @@ export function analyzeCycle(entries, options = {}) {
     );
     const from = bar.start;
     const peak = bar.peak;
+    // Drawn as one usual period from the most likely first day; the
+    // spread is in `range` (and in how strong it is drawn).
     fc.push({
       kind: 'period',
       cycle: k,
-      start: keyOf(bar.start),
-      end: keyOf(bar.end),
+      start: keyOf(likely),
+      end: keyOf(likely + periodLength - 1),
       likely: keyOf(likely),
       range: [keyOf(quantile(startDist, 0.15)), keyOf(quantile(startDist, 0.85))],
       wide: [keyOf(quantile(startDist, 0.05)), keyOf(quantile(startDist, 0.95))],

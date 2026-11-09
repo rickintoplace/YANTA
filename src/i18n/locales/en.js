@@ -118,7 +118,6 @@ export default {
     readOnly: 'You can view this cycle calendar but not add to it.',
     save: 'Save',
     act: {
-      startedToday: 'Period started today',
       endedToday: 'Period ended today',
       ovulation: 'Log a confirmed ovulation',
       share: 'Share…',
@@ -167,8 +166,6 @@ export default {
       discreetOn: 'The lock screen only shows “Personal reminder”.',
       discreetOff: 'The notification says “Period (expected)”.',
       title: 'Settings',
-      showFertile: 'Show fertile days',
-      showOvulation: 'Show ovulation',
       remind: 'Reminder before the period',
       remindOff: 'Off',
       remind1: '1 day',
@@ -185,6 +182,13 @@ export default {
         other: '{count} repeating entries in this calendar are not counted.',
       },
       removePlaceholders: 'Remove',
+      fertile: 'Fertile days',
+      ovulation: 'Ovulation',
+      whereOff: 'Off',
+      whereHere: 'Only here',
+      whereCalendar: 'Also in calendar',
+      calPeriods: 'Periods in the calendar',
+      statusLine: 'Line at the top of the calendar',
     },
     disclaimer: 'An estimate from the logged dates — not suitable as contraception. Calendar-based fertile days are often wrong; LH tests or temperature are more reliable.',
     addMenuItem: 'Cycle calendar',
@@ -210,6 +214,11 @@ export default {
         other: 'period expected {count} days ago',
       },
       fertile: 'fertile days',
+    },
+    menu: {
+      open: 'Cycle overview',
+      show: 'Show cycle in calendar',
+      hide: 'Hide cycle in calendar',
     },
   },
   peek: {
@@ -337,6 +346,25 @@ export default {
     emptyHint: 'Open a calendar’s menu and choose Share. Everyone with the edit link can add entries.',
     role: { owner: 'Owner', write: 'Can edit', read: 'Can view' },
     change: { added: '{who} added “{title}”', removed: '{who} removed “{title}”', changed: '{who} changed “{title}”' },
+    changeGroup: {
+      added: {
+        one: '{who} added {count} entry',
+        other: '{who} added {count} entries',
+      },
+      removed: {
+        one: '{who} removed {count} entry',
+        other: '{who} removed {count} entries',
+      },
+      changed: {
+        one: '{who} changed {count} entry',
+        other: '{who} changed {count} entries',
+      },
+    },
+    changeRepeat: {
+      added: '{who} added “{title}” {count} times',
+      removed: '{who} removed “{title}” {count} times',
+      changed: '{who} changed “{title}” {count} times',
+    },
   },
   eventText: {
     moveLabel: 'Move “{title}”: {from} → {to}',

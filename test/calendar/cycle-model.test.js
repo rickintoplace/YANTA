@@ -16,6 +16,7 @@ function history(first, lengths, extra = {}) {
 }
 
 const span = (f) => dayOf(f.end) - dayOf(f.start) + 1;
+const rangeSpan = (f) => dayOf(f.range[1]) - dayOf(f.range[0]) + 1;
 
 describe('cycle arithmetic', () => {
   it('learns a regular cycle and predicts a narrow window around it', () => {
@@ -42,7 +43,7 @@ describe('cycle arithmetic', () => {
     expect(dayOf(fertile.end)).toBeGreaterThanOrEqual(dayOf(ov.likely));
   });
 
-  it('widens the window for irregular cycles and says so', () => {
+  it('is less sure about irregular cycles and says so', () => {
     const entries = history('2026-01-01', [24, 38, 27, 45, 22, 35, 30]);
     const a = analyzeCycle(entries, { today: add(entries.at(-1).start, 5) });
     expect(a.stats.regularity).toBe('irregular');
@@ -50,7 +51,11 @@ describe('cycle arithmetic', () => {
     const regular = analyzeCycle(history('2026-01-01', [28, 28, 29, 28, 28, 28, 29]), { today: add('2026-01-01', 200) });
     const wide = a.forecasts.find((f) => f.kind === 'period' && f.cycle === 1);
     const narrow = regular.forecasts.find((f) => f.kind === 'period' && f.cycle === 1);
-    expect(span(wide)).toBeGreaterThan(span(narrow));
+    // Drawn as one usual period either way; the doubt is in the range
+    // and in how strong it is drawn.
+    expect(span(wide)).toBe(span(narrow));
+    expect(rangeSpan(wide)).toBeGreaterThan(rangeSpan(narrow));
+    expect(wide.prob).toBeLessThan(narrow.prob);
   });
 
   it('gets less certain the further ahead it looks', () => {
@@ -58,7 +63,8 @@ describe('cycle arithmetic', () => {
     const a = analyzeCycle(entries, { today: add(entries.at(-1).start, 3) });
     const periods = a.forecasts.filter((f) => f.kind === 'period');
     expect(periods.length).toBeGreaterThan(10);
-    expect(span(periods[5])).toBeGreaterThan(span(periods[0]));
+    expect(rangeSpan(periods[5])).toBeGreaterThan(rangeSpan(periods[0]));
+    expect(periods[5].prob).toBeLessThan(periods[0].prob);
   });
 
   it('treats a gap of two cycles as a missed entry, not a 57-day cycle', () => {
@@ -200,5 +206,26 @@ describe('period text', () => {
     for (const s of ['Zahnarzt morgen 10 Uhr', 'Elternabend am 12.11.', 'Periodensystem lernen Freitag', 'Regelmäßiges Meeting Montag', 'Probezeit endet am 1.12.']) {
       expect(looksLikePeriodText(s), s).toBe(false);
     }
+  });
+});
+
+describe('what the forecasts look like', () => {
+  it('draws one usual period and a six-day fertile window ending on ovulation, even with one logged period', () => {
+    const a = analyzeCycle([{ id: 'a', kind: 'period', start: '2026-10-29', end: '2026-11-02' }], { today: '2026-11-09' });
+    for (const f of a.forecasts.filter((x) => x.kind === 'period')) expect(span(f)).toBe(a.stats.period);
+    for (const f of a.forecasts.filter((x) => x.kind === 'fertile')) {
+      expect(span(f)).toBeLessThanOrEqual(6);
+      expect(f.end).toBe(f.likely);
+    }
+  });
+
+  it('puts ovulation about 12–13 days before the next period, not on day 14', () => {
+    const entries = history('2026-03-01', [29, 30, 29, 30, 29, 30]);
+    const a = analyzeCycle(entries, { today: add(entries.at(-1).start, 5) });
+    const ov = a.forecasts.find((f) => f.kind === 'ovulation' && f.cycle === 1);
+    const next = a.forecasts.find((f) => f.kind === 'period' && f.cycle === 1);
+    const gap = dayOf(next.likely) - dayOf(ov.likely);
+    expect(gap).toBeGreaterThanOrEqual(12);
+    expect(gap).toBeLessThanOrEqual(14);
   });
 });

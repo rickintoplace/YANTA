@@ -7,6 +7,7 @@
 // ============================================================
 
 import { store } from '../core.js';
+import { t } from '../i18n/index.js';
 
 const FEED_CAP = 50;
 
@@ -77,4 +78,35 @@ export async function clearCalendarFeed(spaceId) {
   try {
     await store.settings.set(feedKey(spaceId), null);
   } catch {}
+}
+
+/*
+  Consecutive changes by the same person of the same kind, close in
+  time, read as one line ("Anna added 6 entries") — someone logging a
+  week of days or importing a file is one thing that happened, not six.
+  `entries` newest first; groups keep the newest entry's ts and eventId.
+*/
+const GROUP_GAP_MS = 60 * 60 * 1000;
+
+export function groupCalendarFeed(entries, { gapMs = GROUP_GAP_MS } = {}) {
+  const groups = [];
+  for (const e of entries || []) {
+    const action = e.action === 'added' ? 'added' : e.action === 'removed' ? 'removed' : 'changed';
+    const last = groups.at(-1);
+    if (last && last.actor === e.actor && last.action === action && last.oldestTs - Number(e.ts || 0) <= gapMs) {
+      last.count += 1;
+      last.oldestTs = Number(e.ts || 0);
+      if (last.title !== e.title) last.sameTitle = false;
+      continue;
+    }
+    groups.push({ ...e, action, count: 1, oldestTs: Number(e.ts || 0), sameTitle: true });
+  }
+  return groups;
+}
+
+/** One line for a group; `who` and `title` come prepared (escaped where HTML). */
+export function calendarChangeLine(group, who, title) {
+  if (group.count > 1 && group.sameTitle) return t(`calendarShare.changeRepeat.${group.action}`, { who, title, count: group.count });
+  if (group.count > 1) return t(`calendarShare.changeGroup.${group.action}`, { who, count: group.count });
+  return t(`calendarShare.change.${group.action}`, { who, title });
 }

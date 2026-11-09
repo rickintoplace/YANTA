@@ -21,6 +21,13 @@ import { analyzeCycle, dayOf, keyOf } from './cycle-model.js';
 import { t } from '../i18n/index.js';
 
 export const CYCLE_ENTRY_KINDS = ['period', 'spotting', 'ovulation', 'pause'];
+
+/*
+  The cycle's own colors, whatever color the calendar has in the list: a
+  period drawn sky blue because the calendar once was blue reads wrong.
+  Fertile days and ovulation keep their teal (calendar.css, cycle panel).
+*/
+export const CYCLE_PERIOD_COLOR = '#d6336c';
 const PAUSE_REASONS = ['pregnancy', 'hormonal', 'other'];
 
 // ---------------- records --------------------------------------------
@@ -38,6 +45,13 @@ export function sanitizeCycleSettings(raw) {
     showFertile: raw.showFertile !== false,
     discreet: raw.discreet !== false,
     remindDays: num(raw.remindDays, 0, 7) ?? 0,
+    // What the big calendar shows (the panel always shows everything
+    // allowed). Fertile days are off there by default: a band over a
+    // third of every month made the whole calendar look tinted.
+    calPeriods: raw.calPeriods !== false,
+    calFertile: raw.calFertile === true,
+    calOvulation: raw.calOvulation !== false,
+    statusLine: raw.statusLine !== false,
     typicalLength: num(raw.typicalLength, 18, 60),
     typicalPeriod: num(raw.typicalPeriod, 1, 12),
   };
@@ -150,6 +164,10 @@ export function cycleViewFor(cat, personal = null) {
     remindDays: Number(mine.remindDays) || 0,
     // What a reminder says on the lock screen: nothing telling, by default.
     discreet: mine.discreet !== false,
+    calPeriods: mine.calPeriods !== false,
+    calFertile: !periodsOnly && mine.showFertile !== false && mine.calFertile === true,
+    calOvulation: !periodsOnly && mine.showOvulation !== false && mine.calOvulation !== false,
+    statusLine: mine.statusLine !== false,
     typicalLength: s.typicalLength,
     typicalPeriod: s.typicalPeriod,
   };
@@ -337,7 +355,7 @@ export function cycleDayMarks(analysis, view, { today = todayKey() } = {}) {
     }
   }
   for (const e of entries) {
-    if (e.kind === 'ovulation' && !view?.periodsOnly) {
+    if (e.kind === 'ovulation' && !view?.periodsOnly && view?.showOvulation !== false) {
       const m = get(dayOf(e.start));
       m.ovulation = true;
       m.ovulationConfirmed = true;

@@ -9564,13 +9564,40 @@ function timingSafeEqualStr(a, b) {
 
 // ---- approximate link stats (counters only, never per-visitor) ----
 
+/*
+  The table came with a schema.sql change that never reached the
+  production database (2026-11: deleting a share failed with "no such
+  table"). Like the other late tables, it is created on first use.
+*/
+let spaceLinkStatsReady = null;
+function ensureSpaceLinkStatsTable(env) {
+  if (!spaceLinkStatsReady) {
+    spaceLinkStatsReady = env.DB.prepare(
+      `CREATE TABLE IF NOT EXISTS space_link_stats (
+         space_id TEXT PRIMARY KEY,
+         link_opens INTEGER NOT NULL DEFAULT 0,
+         last_open_at INTEGER,
+         throttled_at INTEGER,
+         quota_hit_at INTEGER,
+         FOREIGN KEY(space_id) REFERENCES spaces(id)
+       )`
+    ).run().catch((err) => {
+      spaceLinkStatsReady = null;
+      throw err;
+    });
+  }
+  return spaceLinkStatsReady;
+}
+
 async function spaceLinkStatsRow(env, spaceId) {
+  await ensureSpaceLinkStatsTable(env);
   return env.DB.prepare(
     `SELECT * FROM space_link_stats WHERE space_id = ?`
   ).bind(spaceId).first();
 }
 
 async function bumpSpaceLinkOpen(env, spaceId) {
+  await ensureSpaceLinkStatsTable(env);
   const t = now();
   await env.DB.prepare(
     `INSERT INTO space_link_stats (space_id, link_opens, last_open_at)
@@ -9583,6 +9610,7 @@ async function bumpSpaceLinkOpen(env, spaceId) {
 
 async function markSpaceLinkIncident(env, spaceId, column) {
   if (!["throttled_at", "quota_hit_at"].includes(column)) return;
+  await ensureSpaceLinkStatsTable(env);
   const t = now();
   await env.DB.prepare(
     `INSERT INTO space_link_stats (space_id, link_opens, ${column})
@@ -9973,6 +10001,7 @@ async function handleDeleteSpace(env, req, url, headers) {
 
   await env.DB.prepare(`DELETE FROM objects WHERE vault_id = ?`).bind(spaceId).run();
   await env.DB.prepare(`DELETE FROM space_members WHERE space_id = ?`).bind(spaceId).run();
+  await ensureSpaceLinkStatsTable(env);
   await env.DB.prepare(`DELETE FROM space_link_stats WHERE space_id = ?`).bind(spaceId).run();
   await env.DB.prepare(`DELETE FROM spaces WHERE id = ?`).bind(spaceId).run();
 

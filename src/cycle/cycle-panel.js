@@ -16,7 +16,7 @@ import { t, getLocale } from '../i18n/index.js';
 import { openBoundOverlay } from '../overlay-history.js';
 import { categoryPersonalPrefs, setCategoryPersonalPrefs } from '../calendar-personal.js';
 import { getCalendarPreferences } from '../calendar-preferences.js';
-import { cycleViewFor, cycleDayMarks, togglePeriodDay, storedAllDay, todayKey, localKey } from './cycle-calendar.js';
+import { cycleViewFor, cycleDayMarks, togglePeriodDay, storedAllDay, todayKey, localKey, CYCLE_PERIOD_COLOR } from './cycle-calendar.js';
 import { dayOf } from './cycle-model.js';
 
 const PHONE = '(max-width: 640px)';
@@ -131,6 +131,8 @@ async function setView(patch) {
   if (!cat) return;
   const view = cycleViewFor(cat, categoryPersonalPrefs(cat.id));
   const api = await calendarApi();
+  // A setting chosen here wins over a quick show/hide from the menu.
+  api.setCycleLayerOverride(null);
   if (view.member) {
     const prev = categoryPersonalPrefs(cat.id)?.cycleView || {};
     setCategoryPersonalPrefs(cat.id, { cycleView: { ...prev, ...patch } });
@@ -261,22 +263,18 @@ function actionsHtml(a, cat) {
       </div>`;
   }
 
-  // The one thing most likely to be logged right now; anything else is
-  // a tap in the month.
+  // Ending a running period today is the one thing a tap cannot say
+  // (its days up to today are already marked); everything else is a tap
+  // in the month.
   const c = a.current;
-  const today = todayKey();
   if (c?.inPeriod && !c.periodEndLogged) {
     return `
       <div class="ycy-actions">
         <button type="button" class="btn ${c.periodDay > 2 ? 'primary' : ''}" data-act="end-today">${escapeHtml(t('cycle.act.endedToday'))}</button>
       </div>`;
   }
-  const todayLogged = (a.periods || []).some((p) => p.start <= today && (p.end || p.start) >= today);
-  if (todayLogged) return '';
-  return `
-    <div class="ycy-actions">
-      <button type="button" class="btn primary" data-act="start-today">${lucide('droplet', 15)} ${escapeHtml(t('cycle.act.startedToday'))}</button>
-    </div>`;
+  // Starting a period is a tap on today in the month below.
+  return '';
 }
 
 function factsHtml(a) {
@@ -339,13 +337,20 @@ function settingsHtml(a, cat, shareInfo) {
   const owner = !view.member;
   const shared = !!shareInfo?.shared;
 
+  // Fertile days and ovulation: nowhere, only in this overview, or also
+  // in the calendar.
+  const where = [['off', t('cycle.settings.whereOff')], ['here', t('cycle.settings.whereHere')], ['calendar', t('cycle.settings.whereCalendar')]];
+  const whereValue = (show, inCalendar) => (!show ? 'off' : inCalendar ? 'calendar' : 'here');
+
   const placeholders = recurringPlaceholders();
 
   return `
     <h4>${escapeHtml(t('cycle.settings.title'))}</h4>
     ${view.periodsOnly ? `<p class="ycy-dim">${escapeHtml(t('cycle.settings.periodsOnlyShared'))}</p>` : `
-      ${toggle('showFertile', view.showFertile, t('cycle.settings.showFertile'))}
-      ${toggle('showOvulation', view.showOvulation, t('cycle.settings.showOvulation'))}`}
+      ${seg('fertile', where, whereValue(view.showFertile, view.calFertile), t('cycle.settings.fertile'))}
+      ${seg('ovulation', where, whereValue(view.showOvulation, view.calOvulation), t('cycle.settings.ovulation'))}`}
+    ${toggle('calPeriods', view.calPeriods, t('cycle.settings.calPeriods'))}
+    ${toggle('statusLine', view.statusLine, t('cycle.settings.statusLine'))}
     ${seg('remindDays', [[0, t('cycle.settings.remindOff')], [1, t('cycle.settings.remind1')], [2, t('cycle.settings.remind2')], [3, t('cycle.settings.remind3')]], view.remindDays, t('cycle.settings.remind'))}
     ${view.remindDays ? toggle('discreet', view.discreet, t('cycle.settings.discreet')) : ''}
     ${view.remindDays ? `<p class="ycy-dim ycy-note">${escapeHtml(view.discreet ? t('cycle.settings.discreetOn') : t('cycle.settings.discreetOff'))}</p>` : ''}
@@ -393,8 +398,8 @@ async function render() {
   if (!a || !panel) return;
 
   panel.querySelector('.ycy-title').textContent = cat.name || t('cycle.defaultName');
-  panel.querySelector('.ycy-dot').style.background = cat.color || 'var(--accent)';
-  panel.style.setProperty('--cyc-color', cat.color || '#d6336c');
+  panel.querySelector('.ycy-dot').style.background = CYCLE_PERIOD_COLOR;
+  panel.style.setProperty('--cyc-color', CYCLE_PERIOD_COLOR);
 
   const body = panel.querySelector('.ycy-body');
   const scroll = body.scrollTop;
@@ -451,7 +456,6 @@ async function onClick(e) {
 
   const act = e.target.closest('[data-act]')?.dataset.act;
   const today = todayKey();
-  if (act === 'start-today') { picking = null; month = today.slice(0, 7); return toggleDay(today); }
   if (act === 'end-today') { picking = null; return endToday(); }
 
   const day = e.target.closest('[data-day]')?.dataset.day;
@@ -490,6 +494,9 @@ async function onClick(e) {
     if (seg.dataset.seg === 'partnerSees') {
       const api = await calendarApi();
       api.putCalendarCategory({ ...cat, cycle: { ...(cat.cycle || {}), partnerSees: value } });
+    } else if (seg.dataset.seg === 'fertile' || seg.dataset.seg === 'ovulation') {
+      const name = seg.dataset.seg === 'fertile' ? 'Fertile' : 'Ovulation';
+      await setView({ [`show${name}`]: value !== 'off', [`cal${name}`]: value === 'calendar' });
     } else {
       await setView({ [seg.dataset.seg]: value });
     }

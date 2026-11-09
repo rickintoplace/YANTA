@@ -112,7 +112,6 @@ export default {
     readOnly: 'この生理周期カレンダーは閲覧のみで、記録はできません。',
     save: '保存',
     act: {
-      startedToday: '今日生理が始まった',
       endedToday: '今日生理が終わった',
       ovulation: '確認された排卵を記録',
       share: '共有…',
@@ -161,8 +160,6 @@ export default {
       discreetOn: 'ロック画面には「個人的なリマインダー」とだけ表示されます。',
       discreetOff: '通知には「生理（予測）」と表示されます。',
       title: '設定',
-      showFertile: '妊娠しやすい日を表示',
-      showOvulation: '排卵を表示',
       remind: '生理前のリマインダー',
       remindOff: 'オフ',
       remind1: '1日前',
@@ -179,6 +176,13 @@ export default {
         other: 'このカレンダーの繰り返し予定{count}件は計算に含めていません。',
       },
       removePlaceholders: '削除',
+      fertile: '妊娠しやすい時期',
+      ovulation: '排卵',
+      whereOff: 'オフ',
+      whereHere: 'ここだけ',
+      whereCalendar: 'カレンダーにも',
+      calPeriods: 'カレンダーに生理を表示',
+      statusLine: 'カレンダー上部の1行表示',
     },
     disclaimer: '記録した日付からの推定であり、避妊には使えません。カレンダー計算による妊娠しやすい日はよく外れます。LH検査や基礎体温のほうが信頼できます。',
     addMenuItem: '周期カレンダー',
@@ -202,6 +206,11 @@ export default {
         other: '予定日から{count}日経過',
       },
       fertile: '妊娠しやすい時期',
+    },
+    menu: {
+      open: '周期の概要',
+      show: 'カレンダーに周期を表示',
+      hide: 'カレンダーの周期を非表示',
     },
   },
   peek: {
@@ -329,6 +338,22 @@ export default {
     emptyHint: 'カレンダーのメニューから「共有」を選んでください。編集リンクを持つ人は予定を追加できます。',
     role: { owner: 'オーナー', write: '編集可', read: '閲覧のみ' },
     change: { added: '{who}が「{title}」を追加', removed: '{who}が「{title}」を削除', changed: '{who}が「{title}」を変更' },
+    changeGroup: {
+      added: {
+        other: '{who}が{count}件を追加',
+      },
+      removed: {
+        other: '{who}が{count}件を削除',
+      },
+      changed: {
+        other: '{who}が{count}件を変更',
+      },
+    },
+    changeRepeat: {
+      added: '{who}が「{title}」を{count}件追加',
+      removed: '{who}が「{title}」を{count}件削除',
+      changed: '{who}が「{title}」を{count}回変更',
+    },
   },
   eventText: {
     moveLabel: '「{title}」を移動: {from} → {to}',

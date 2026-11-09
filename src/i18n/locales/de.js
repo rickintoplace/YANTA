@@ -111,7 +111,6 @@ export default {
     readOnly: 'Diesen Zykluskalender kannst du ansehen, aber nichts eintragen.',
     save: 'Speichern',
     act: {
-      startedToday: 'Periode hat heute begonnen',
       endedToday: 'Periode ist heute vorbei',
       ovulation: 'Bestätigten Eisprung eintragen',
       share: 'Teilen …',
@@ -160,8 +159,6 @@ export default {
       discreetOn: 'Auf dem Sperrbildschirm steht nur „Persönliche Erinnerung“.',
       discreetOff: 'In der Benachrichtigung steht „Periode (erwartet)“.',
       title: 'Einstellungen',
-      showFertile: 'Fruchtbare Tage anzeigen',
-      showOvulation: 'Eisprung anzeigen',
       remind: 'Erinnerung vor der Periode',
       remindOff: 'Aus',
       remind1: '1 Tag',
@@ -178,6 +175,13 @@ export default {
         other: '{count} wiederkehrende Einträge in diesem Kalender werden nicht mitgezählt.',
       },
       removePlaceholders: 'Entfernen',
+      fertile: 'Fruchtbare Tage',
+      ovulation: 'Eisprung',
+      whereOff: 'Aus',
+      whereHere: 'Nur hier',
+      whereCalendar: 'Auch im Kalender',
+      calPeriods: 'Perioden im Kalender',
+      statusLine: 'Zeile oben im Kalender',
     },
     disclaimer: 'Eine Schätzung aus den eingetragenen Daten – nicht zur Verhütung geeignet. Fruchtbare Tage nach Kalender liegen oft daneben; LH-Tests oder Temperaturmessung sind verlässlicher.',
     addMenuItem: 'Zykluskalender',
@@ -203,6 +207,11 @@ export default {
         other: 'Periode seit {count} Tagen erwartet',
       },
       fertile: 'fruchtbare Tage',
+    },
+    menu: {
+      open: 'Zyklus-Übersicht',
+      show: 'Zyklus im Kalender einblenden',
+      hide: 'Zyklus im Kalender ausblenden',
     },
   },
   peek: {
@@ -330,6 +339,25 @@ export default {
     emptyHint: 'Öffne das Menü eines Kalenders und wähle Teilen. Alle mit dem Bearbeiten-Link können Einträge hinzufügen.',
     role: { owner: 'Eigentümer', write: 'Kann bearbeiten', read: 'Kann ansehen' },
     change: { added: '{who} hat „{title}“ hinzugefügt', removed: '{who} hat „{title}“ entfernt', changed: '{who} hat „{title}“ geändert' },
+    changeGroup: {
+      added: {
+        one: '{who} hat {count} Eintrag hinzugefügt',
+        other: '{who} hat {count} Einträge hinzugefügt',
+      },
+      removed: {
+        one: '{who} hat {count} Eintrag entfernt',
+        other: '{who} hat {count} Einträge entfernt',
+      },
+      changed: {
+        one: '{who} hat {count} Eintrag geändert',
+        other: '{who} hat {count} Einträge geändert',
+      },
+    },
+    changeRepeat: {
+      added: '{who} hat {count}× „{title}“ hinzugefügt',
+      removed: '{who} hat {count}× „{title}“ entfernt',
+      changed: '{who} hat „{title}“ {count}× geändert',
+    },
   },
   eventText: {
     moveLabel: '„{title}“ verschieben: {from} → {to}',

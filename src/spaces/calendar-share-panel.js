@@ -16,7 +16,7 @@ import { state, escapeHtml, escapeAttr, lucide, toast } from '../core.js';
 import { t, getLocale } from '../i18n/index.js';
 import { openBoundOverlay } from '../overlay-history.js';
 import { calendarBridges } from './calendar-registry.js';
-import { calendarFeedFor, markCalendarFeedSeen } from './calendar-feed.js';
+import { calendarFeedFor, markCalendarFeedSeen, groupCalendarFeed, calendarChangeLine } from './calendar-feed.js';
 import { spaceParticipants } from './space-people.js';
 
 const PHONE = '(max-width: 640px)';
@@ -94,15 +94,14 @@ async function sectionHtml(bridge) {
     </li>`).join('');
 
   // The feed stores the English fallbacks 'Someone' / 'Untitled event'.
-  const changes = [...feed.entries].reverse().slice(0, 5);
+  const changes = groupCalendarFeed([...feed.entries].reverse()).slice(0, 5);
   const changesHtml = changes.length
     ? `<ul class="ycs-changes">${changes.map((e) => `
         <li class="${e.ts > feed.lastSeenAt ? 'is-new' : ''}">
           <button type="button" data-event="${escapeAttr(e.action !== 'removed' ? e.eventId || '' : '')}">
-            <span>${escapeHtml(t(`calendarShare.change.${e.action === 'added' ? 'added' : e.action === 'removed' ? 'removed' : 'changed'}`, {
-              who: names.get(e.actor) || (e.actor !== 'Someone' && e.actor) || t('calendarShare.someone'),
-              title: (e.title !== 'Untitled event' && e.title) || t('calendarShare.untitledEvent'),
-            }))}</span>
+            <span>${escapeHtml(calendarChangeLine(e,
+              names.get(e.actor) || (e.actor !== 'Someone' && e.actor) || t('calendarShare.someone'),
+              (e.title !== 'Untitled event' && e.title) || t('calendarShare.untitledEvent')))}</span>
             <time>${escapeHtml(relative(e.ts))}</time>
           </button>
         </li>`).join('')}</ul>`

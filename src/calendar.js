@@ -242,6 +242,7 @@ import {
   cycleDayMarks,
   cycleStatusLine,
   todayKey as cycleTodayKey,
+  CYCLE_PERIOD_COLOR,
 } from './cycle/cycle-calendar.js';
 
 import {
@@ -258,6 +259,8 @@ import {
   calendarFeedFor,
   unseenCalendarFeedCount,
   markCalendarFeedSeen,
+  groupCalendarFeed,
+  calendarChangeLine,
 } from './spaces/calendar-feed.js';
 
 import { spacePeople } from './spaces/space-people.js';
@@ -1636,7 +1639,28 @@ function openCalendarMenu(anchor) {
 
   const r = anchor.getBoundingClientRect();
 
+  // The way to the cycle overview, whether or not its line is shown, and
+  // a quick look at (or away from) the cycle in the calendar.
+  const cycleCat = [...state.calendarCategories.values()].find((c) => c?.cycle && c.visible !== false);
+  const cycleItems = cycleCat ? [
+    {
+      label: i18n('cycle.menu.open'),
+      icon: 'droplet',
+      action: () => openCyclePanelFor(cycleCat.id),
+    },
+    {
+      label: cycleLayer?.showing ? i18n('cycle.menu.hide') : i18n('cycle.menu.show'),
+      icon: cycleLayer?.showing ? 'eye-off' : 'eye',
+      action: () => {
+        cycleLayerOverride = cycleLayer?.showing ? 'hide' : 'show';
+        refreshCycleLayer();
+      },
+    },
+    'hr',
+  ] : [];
+
   showMenu(r.left, r.bottom + 6, [
+    ...cycleItems,
     {
       label: i18n('calendarList.title'),
       icon: 'calendar-fold',
@@ -2023,7 +2047,7 @@ async function calendarFeedSummary() {
       sections.push({
         bridge,
         name: state.calendarCategories.get(bridge.categoryId)?.name || i18n('calendarShare.untitled'),
-        entries: [...feed.entries].reverse().slice(0, 12),
+        entries: groupCalendarFeed([...feed.entries].reverse()).slice(0, 12),
         lastSeenAt: feed.lastSeenAt,
       });
     }
@@ -2076,7 +2100,7 @@ async function openCalendarFeedPopover(anchor) {
           ${section.entries.map((entry) => `
             <button class="yanta-calendar-feed-entry ${entry.ts > section.lastSeenAt ? 'is-new' : ''}" data-feed-event-id="${escapeAttr(entry.eventId || '')}">
               <span class="yanta-calendar-feed-entry-main">
-                ${i18n(`calendarShare.change.${entry.action === 'added' ? 'added' : entry.action === 'removed' ? 'removed' : 'changed'}`, { who: `<strong>${escapeHtml(entry.actor || i18n('calendarShare.someone'))}</strong>`, title: escapeHtml(entry.title || i18n('calendarWidget.untitledEvent')) })}
+                ${calendarChangeLine(entry, `<strong>${escapeHtml(entry.actor || i18n('calendarShare.someone'))}</strong>`, escapeHtml(entry.title || i18n('calendarWidget.untitledEvent')))}
               </span>
               <small>${escapeHtml(formatCalendarDateTime(new Date(entry.ts).toISOString(), { editor: true }))}</small>
             </button>
@@ -9426,7 +9450,14 @@ function isCycleEntryEvent(ev, cat = categoryForEvent(ev)) {
 // a quiet band on the days (calendar.css, [data-cyc]) and summed up in
 // one line above the calendar. Appointments keep the room.
 
-let cycleLayer = null; // { marks: Map, color, line, catId } | null
+let cycleLayer = null; // { marks: Map, color, line, catId, showing } | null
+
+/*
+  For this session only, from the calendar menu: 'show' everything the
+  person may see, 'hide' it all — a quick look without changing the
+  settings. null: as set in the cycle panel.
+*/
+let cycleLayerOverride = null;
 
 function computeCycleLayer() {
   const events = [...state.calendarEvents.values()];
@@ -9437,9 +9468,27 @@ function computeCycleLayer() {
     try {
       const analysis = cycleAnalysisFor(cat, events);
       const view = cycleViewFor(cat, categoryPersonalPrefs(cat.id));
-      const marks = cycleDayMarks(analysis, view, { today });
+      const shown = cycleLayerOverride === 'show'
+        ? { periods: true, fertile: view.showFertile, ovulation: view.showOvulation, line: true }
+        : cycleLayerOverride === 'hide'
+          ? { periods: false, fertile: false, ovulation: false, line: false }
+          : { periods: view.calPeriods, fertile: view.calFertile, ovulation: view.calOvulation, line: view.statusLine };
+      const marks = cycleDayMarks(analysis, { ...view, showFertile: shown.fertile, showOvulation: shown.ovulation }, { today });
+      if (!shown.periods) {
+        for (const [key, m] of marks) {
+          delete m.period;
+          delete m.strength;
+          if (!m.fertile && !m.ovulation) marks.delete(key);
+        }
+      }
       if (!layer) {
-        layer = { marks, color: cat.color || '#d6336c', catId: cat.id, line: cycleStatusLine(analysis, view, { today }) };
+        layer = {
+          marks,
+          color: CYCLE_PERIOD_COLOR,
+          catId: cat.id,
+          line: shown.line ? cycleStatusLine(analysis, view, { today }) : null,
+          showing: shown.periods || shown.fertile || shown.ovulation || shown.line,
+        };
       } else {
         // A second cycle calendar (own and a shared one): days merge,
         // the line stays with the first.
@@ -9476,7 +9525,7 @@ function paintCycleCell(el) {
 
 function paintCycleLayer(root = fc?.el) {
   if (!root) return;
-  if (cycleLayer) root.style.setProperty('--cyc-c', resolveCssColor(cycleLayer.color, '#d6336c'));
+  if (cycleLayer) root.style.setProperty('--cyc-c', cycleLayer.color);
   for (const el of root.querySelectorAll('.fc-daygrid-day[data-date]')) {
     paintCycleCell(el);
   }
@@ -9489,7 +9538,11 @@ function paintCycleLayer(root = fc?.el) {
 function renderCycleLine() {
   const bar = calendarToolbarEl();
   if (!bar) return;
-  let line = bar.nextElementSibling?.classList?.contains('yanta-cal-cycle-line') ? bar.nextElementSibling : null;
+  // One line, right under the toolbar — whatever was inserted meanwhile.
+  const lines = [...(bar.parentElement?.querySelectorAll(':scope > .yanta-cal-cycle-line') || [])];
+  for (const extra of lines.slice(1)) extra.remove();
+  let line = lines[0] || null;
+  if (line && bar.nextElementSibling !== line) bar.after(line);
   const info = cycleLayer?.line;
 
   if (!info) {
@@ -9517,12 +9570,16 @@ function renderCycleLine() {
     scheduleCalendarResize({ render: true });
   }
   line.dataset.catId = cycleLayer.catId;
-  line.style.setProperty('--cyc-c', resolveCssColor(cycleLayer.color, '#d6336c'));
+  line.style.setProperty('--cyc-c', cycleLayer.color);
   line.setAttribute('aria-label', `${info.lead}${info.rest ? `, ${info.rest}` : ''}. ${i18n('cycle.open')}`);
   if (line.dataset.html !== html) {
     line.innerHTML = html;
     line.dataset.html = html;
   }
+}
+
+export function setCycleLayerOverride(value = null) {
+  cycleLayerOverride = value === 'show' || value === 'hide' ? value : null;
 }
 
 /** Called when the events were (re)fetched: the layer follows the data. */

@@ -111,7 +111,6 @@ export default {
     readOnly: 'Puedes ver este calendario de ciclo, pero no añadir nada.',
     save: 'Guardar',
     act: {
-      startedToday: 'La regla empezó hoy',
       endedToday: 'La regla terminó hoy',
       ovulation: 'Registrar una ovulación confirmada',
       share: 'Compartir…',
@@ -160,8 +159,6 @@ export default {
       discreetOn: 'En la pantalla de bloqueo solo aparece «Recordatorio personal».',
       discreetOff: 'La notificación dice «Regla (prevista)».',
       title: 'Ajustes',
-      showFertile: 'Mostrar días fértiles',
-      showOvulation: 'Mostrar ovulación',
       remind: 'Recordatorio antes de la regla',
       remindOff: 'No',
       remind1: '1 día',
@@ -178,6 +175,13 @@ export default {
         other: '{count} entradas repetidas de este calendario no se cuentan.',
       },
       removePlaceholders: 'Eliminar',
+      fertile: 'Días fértiles',
+      ovulation: 'Ovulación',
+      whereOff: 'No',
+      whereHere: 'Solo aquí',
+      whereCalendar: 'También en el calendario',
+      calPeriods: 'Reglas en el calendario',
+      statusLine: 'Línea arriba del calendario',
     },
     disclaimer: 'Una estimación a partir de las fechas registradas, no apta como anticonceptivo. Los días fértiles calculados por calendario fallan a menudo; los tests LH o la temperatura son más fiables.',
     addMenuItem: 'Calendario del ciclo',
@@ -203,6 +207,11 @@ export default {
         other: 'regla esperada hace {count} días',
       },
       fertile: 'días fértiles',
+    },
+    menu: {
+      open: 'Resumen del ciclo',
+      show: 'Mostrar el ciclo en el calendario',
+      hide: 'Ocultar el ciclo en el calendario',
     },
   },
   peek: {
@@ -330,6 +339,25 @@ export default {
     emptyHint: 'Abre el menú de un calendario y elige Compartir. Quien tenga el enlace de edición puede añadir entradas.',
     role: { owner: 'Propietario', write: 'Puede editar', read: 'Puede ver' },
     change: { added: '{who} añadió «{title}»', removed: '{who} eliminó «{title}»', changed: '{who} cambió «{title}»' },
+    changeGroup: {
+      added: {
+        one: '{who} añadió {count} entrada',
+        other: '{who} añadió {count} entradas',
+      },
+      removed: {
+        one: '{who} eliminó {count} entrada',
+        other: '{who} eliminó {count} entradas',
+      },
+      changed: {
+        one: '{who} cambió {count} entrada',
+        other: '{who} cambió {count} entradas',
+      },
+    },
+    changeRepeat: {
+      added: '{who} añadió «{title}» {count} veces',
+      removed: '{who} eliminó «{title}» {count} veces',
+      changed: '{who} cambió «{title}» {count} veces',
+    },
   },
   eventText: {
     moveLabel: 'Mover «{title}»: {from} → {to}',

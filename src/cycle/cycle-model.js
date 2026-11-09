@@ -60,11 +60,11 @@ export const CYCLE_LIMITS = Object.freeze({
   maxPeriod: 12,
   /*
     A day counts as "possibly fertile" when the chance that it lies in the
-    six-day window is at least this. Wilcox et al. 2000 use the same line
-    for the population: on every day from 6 to 21 at least 10 %
-    (doi:10.1136/bmj.321.7271.1259).
+    six-day window is at least this — the safety buffer someone chooses.
+    "medium" is the line Wilcox et al. 2000 draw for the population: on
+    every day from 6 to 21 at least 10 % (doi:10.1136/bmj.321.7271.1259).
   */
-  possiblyFertile: 0.1,
+  fertileBuffer: Object.freeze({ small: 0.25, medium: 0.1, large: 0.03 }),
 });
 
 // ---------------- days ----------------------------------------------
@@ -492,26 +492,35 @@ export function analyzeCycle(entries, options = {}) {
       quantile(ovDist, 0.98),
     );
     if (ovLikely > prevStart + 5) {
-      // The safety margin around it: every day with at least a 10 %
-      // chance of being one of the six fertile days.
+      /*
+        The safety buffer around it, for each size someone can choose:
+        every day whose chance of being one of the six fertile days
+        reaches the level.
+      */
       const P = (x) => windowProb(ovDist, x + 5, 6);
       const lo = quantile(ovDist, 0.001) - 5;
       const hi = quantile(ovDist, 0.999);
-      let mFrom = null;
-      let mTo = null;
-      for (let x = lo; x <= hi; x++) {
-        if (P(x) < CYCLE_LIMITS.possiblyFertile) continue;
-        if (mFrom == null) mFrom = x;
-        mTo = x;
+      const notBeforeBleeding = prevStart + periodLength;
+      const levels = {};
+      for (const [name, min] of Object.entries(CYCLE_LIMITS.fertileBuffer)) {
+        let from = null;
+        let to = null;
+        for (let x = lo; x <= hi; x++) {
+          if (P(x) < min) continue;
+          if (from == null) from = x;
+          to = x;
+        }
+        if (from != null) levels[name] = [keyOf(Math.max(from, notBeforeBleeding)), keyOf(to)];
       }
-      if (mFrom != null && !(k === 1 && confirmedOvulation)) {
+      if (levels.large && !(k === 1 && confirmedOvulation)) {
         fc.push({
           kind: 'fertile-possible',
           cycle: k,
-          start: keyOf(Math.max(mFrom, prevStart + periodLength)),
-          end: keyOf(mTo),
+          // The widest; `levels` has each size as [start, end] keys.
+          start: levels.large[0],
+          end: levels.large[1],
+          levels,
           likely: keyOf(ovLikely),
-          prob: CYCLE_LIMITS.possiblyFertile,
         });
       }
       fc.push({

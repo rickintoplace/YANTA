@@ -28,6 +28,15 @@ export const CYCLE_ENTRY_KINDS = ['period', 'spotting', 'ovulation', 'pause'];
   Fertile days and ovulation keep their teal (calendar.css, cycle panel).
 */
 export const CYCLE_PERIOD_COLOR = '#d6336c';
+
+export const FERTILE_BUFFERS = ['none', 'small', 'medium', 'large'];
+
+/** The [start, end] keys of the buffer someone chose, or null. */
+function bufferRange(f, view) {
+  const size = view?.fertileBuffer || 'medium';
+  if (size === 'none') return null;
+  return f.levels?.[size] || null;
+}
 const PAUSE_REASONS = ['pregnancy', 'hormonal', 'other'];
 
 // ---------------- records --------------------------------------------
@@ -52,6 +61,8 @@ export function sanitizeCycleSettings(raw) {
     calFertile: raw.calFertile === true,
     calOvulation: raw.calOvulation !== false,
     statusLine: raw.statusLine !== false,
+    // How many days around the fertile window count as "possibly fertile".
+    fertileBuffer: FERTILE_BUFFERS.includes(raw.fertileBuffer) ? raw.fertileBuffer : 'medium',
     typicalLength: num(raw.typicalLength, 18, 60),
     typicalPeriod: num(raw.typicalPeriod, 1, 12),
   };
@@ -168,6 +179,7 @@ export function cycleViewFor(cat, personal = null) {
     calFertile: !periodsOnly && mine.showFertile !== false && mine.calFertile === true,
     calOvulation: !periodsOnly && mine.showOvulation !== false && mine.calOvulation !== false,
     statusLine: mine.statusLine !== false,
+    fertileBuffer: FERTILE_BUFFERS.includes(mine.fertileBuffer) ? mine.fertileBuffer : 'medium',
     typicalLength: s.typicalLength,
     typicalPeriod: s.typicalPeriod,
   };
@@ -356,6 +368,26 @@ export function cycleDayMarks(analysis, view, { today = todayKey() } = {}) {
       delete m.strength;
     }
   }
+  /*
+    Past cycles keep their ovulation: counted back from the period that
+    followed, the same arithmetic as ahead. A cycle with a logged
+    (confirmed) ovulation shows that one instead; cycles with a gap in
+    tracking or a pause are left out — their "next start" is not theirs.
+  */
+  if (!view?.periodsOnly && view?.showOvulation !== false) {
+    const luteal = Math.round(analysis.stats?.luteal || 13.7);
+    const confirmed = entries.filter((e) => e.kind === 'ovulation').map((e) => dayOf(e.start));
+    for (const c of analysis.cycles || []) {
+      if (c.flag) continue;
+      const start = dayOf(c.start);
+      const next = dayOf(c.next);
+      if (confirmed.some((d) => d >= start && d < next)) continue;
+      const day = next - luteal;
+      if (day <= start + 5) continue;
+      get(day).ovulation = true;
+    }
+  }
+
   for (const e of entries) {
     if (e.kind === 'ovulation' && !view?.periodsOnly && view?.showOvulation !== false) {
       const m = get(dayOf(e.start));
@@ -378,8 +410,10 @@ export function cycleDayMarks(analysis, view, { today = todayKey() } = {}) {
     } else if (f.kind === 'fertile' && view?.showFertile) {
       for (let x = from; x <= to; x++) get(x).fertile = true;
     } else if (f.kind === 'fertile-possible' && view?.showFertile) {
-      // Days around the window with a ≥ 10 % chance of being fertile.
-      for (let x = from; x <= to; x++) get(x).fertileMaybe = true;
+      // Days around the window that may be fertile, as far as the chosen
+      // safety buffer reaches.
+      const range = bufferRange(f, view);
+      if (range) for (let x = dayOf(range[0]); x <= dayOf(range[1]); x++) get(x).fertileMaybe = true;
     } else if (f.kind === 'ovulation' && view?.showOvulation) {
       get(dayOf(f.likely)).ovulation = true;
     }
@@ -417,8 +451,11 @@ export function cycleStatusLine(analysis, view, { today = todayKey() } = {}) {
     : until <= 0 ? t('cycle.line.today') : t('cycle.line.nextIn', { count: until });
 
   const T = dayOf(today);
-  const covers = (kind) => (analysis.forecasts || []).some((f) =>
-    f.kind === kind && dayOf(f.start) <= T && dayOf(f.end) >= T);
+  const covers = (kind) => (analysis.forecasts || []).some((f) => {
+    if (f.kind !== kind) return false;
+    const [a, b] = kind === 'fertile-possible' ? bufferRange(f, view) || [] : [f.start, f.end];
+    return !!a && dayOf(a) <= T && dayOf(b) >= T;
+  });
   if (view?.showFertile && covers('fertile')) rest = `${t('cycle.line.fertile')} · ${rest}`;
   else if (view?.showFertile && covers('fertile-possible')) rest = `${t('cycle.line.fertileMaybe')} · ${rest}`;
   return { lead, rest };

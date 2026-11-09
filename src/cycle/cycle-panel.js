@@ -17,7 +17,7 @@ import { openSurface } from '../ui/surface.js';
 import { categoryPersonalPrefs, setCategoryPersonalPrefs } from '../calendar-personal.js';
 import { getCalendarPreferences } from '../calendar-preferences.js';
 import { cycleViewFor, cycleDayMarks, togglePeriodDay, storedAllDay, todayKey, localKey, CYCLE_PERIOD_COLOR } from './cycle-calendar.js';
-import { dayOf } from './cycle-model.js';
+import { dayOf, CYCLE_LIMITS } from './cycle-model.js';
 
 let panel = null;
 let currentId = null;
@@ -348,6 +348,11 @@ function settingsHtml(a, cat, shareInfo) {
     <h4>${escapeHtml(t('cycle.settings.title'))}</h4>
     ${view.periodsOnly ? `<p class="ycy-dim">${escapeHtml(t('cycle.settings.periodsOnlyShared'))}</p>` : `
       ${seg('fertile', where, whereValue(view.showFertile, view.calFertile), t('cycle.settings.fertile'))}
+      ${view.showFertile ? `
+        ${seg('fertileBuffer', [['none', t('cycle.settings.bufferNone')], ['small', t('cycle.settings.bufferSmall')], ['medium', t('cycle.settings.bufferMedium')], ['large', t('cycle.settings.bufferLarge')]], view.fertileBuffer, t('cycle.settings.buffer'))}
+        <p class="ycy-dim ycy-note">${escapeHtml(view.fertileBuffer === 'none'
+          ? t('cycle.settings.bufferHintNone')
+          : t('cycle.settings.bufferHint', { pct: Math.round(CYCLE_LIMITS.fertileBuffer[view.fertileBuffer] * 100) }))}</p>` : ''}
       ${seg('ovulation', where, whereValue(view.showOvulation, view.calOvulation), t('cycle.settings.ovulation'))}`}
     ${toggle('calPeriods', view.calPeriods, t('cycle.settings.calPeriods'))}
     ${toggle('statusLine', view.statusLine, t('cycle.settings.statusLine'))}

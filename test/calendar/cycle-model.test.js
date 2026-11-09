@@ -233,7 +233,8 @@ describe('what the forecasts look like', () => {
     const margin = (a) => {
       const f = a.forecasts.find((x) => x.kind === 'fertile-possible' && x.cycle === 1);
       const s = dayOf(a.current.start);
-      return [dayOf(f.start) - s + 1, dayOf(f.end) - s + 1];
+      const [from, to] = f.levels.medium;
+      return [dayOf(from) - s + 1, dayOf(to) - s + 1];
     };
     // Regular 28-day cycles: about days 7–19 (the Standard Days Method uses 8–19).
     const [rFrom, rTo] = margin(regular);
@@ -246,5 +247,15 @@ describe('what the forecasts look like', () => {
     expect(oTo - oFrom).toBeGreaterThan(rTo - rFrom);
     expect(oFrom).toBeLessThanOrEqual(7);
     expect(oTo).toBeGreaterThanOrEqual(21);
+  });
+
+  it('offers the buffer in three sizes, each inside the next', () => {
+    const a = analyzeCycle(history('2026-03-01', [28, 29, 27, 30, 28, 29]), { today: '2026-08-25' });
+    const f = a.forecasts.find((x) => x.kind === 'fertile-possible' && x.cycle === 1);
+    const w = (r) => dayOf(r[1]) - dayOf(r[0]);
+    expect(w(f.levels.small)).toBeLessThanOrEqual(w(f.levels.medium));
+    expect(w(f.levels.medium)).toBeLessThan(w(f.levels.large));
+    expect(dayOf(f.levels.large[0])).toBeLessThanOrEqual(dayOf(f.levels.medium[0]));
+    expect(dayOf(f.levels.large[1])).toBeGreaterThanOrEqual(dayOf(f.levels.medium[1]));
   });
 });

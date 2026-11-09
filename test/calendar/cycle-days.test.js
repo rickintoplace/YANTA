@@ -73,4 +73,30 @@ describe('day marks', () => {
     const quiet = cycleDayMarks(a, { showFertile: false, showOvulation: false }, { today: '2026-10-20' });
     expect([...quiet.values()].some((m) => m.fertile || m.ovulation)).toBe(false);
   });
+
+  it('shows the chosen safety buffer, or none', () => {
+    const entries = [P('a', '2026-08-15', '2026-08-19'), P('b', '2026-09-12', '2026-09-16'), P('c', '2026-10-10', '2026-10-14')];
+    const a = analyzeCycle(entries, { today: '2026-10-20' });
+    a.entries = entries;
+    const count = (fertileBuffer) => [...cycleDayMarks(a, { showFertile: true, showOvulation: true, fertileBuffer }, { today: '2026-10-20' }).values()]
+      .filter((m) => m.fertileMaybe).length;
+    expect(count('none')).toBe(0);
+    expect(count('small')).toBeLessThanOrEqual(count('medium'));
+    expect(count('medium')).toBeLessThan(count('large'));
+  });
+
+  it('keeps ovulation in past cycles, counted back from the period that followed', () => {
+    const entries = [P('a', '2026-08-15', '2026-08-19'), P('b', '2026-09-12', '2026-09-16'), P('c', '2026-10-10', '2026-10-14')];
+    const a = analyzeCycle(entries, { today: '2026-10-20' });
+    a.entries = entries;
+    const marks = cycleDayMarks(a, { showFertile: false, showOvulation: true }, { today: '2026-10-20' });
+    // 28-day cycles: next start minus ~14 days.
+    const aug = [...marks.values()].filter((m) => m.ovulation && m.key >= '2026-08-15' && m.key < '2026-09-12');
+    const sep = [...marks.values()].filter((m) => m.ovulation && m.key >= '2026-09-12' && m.key < '2026-10-10');
+    expect(aug.map((m) => m.key)).toEqual(['2026-08-29']);
+    expect(sep.map((m) => m.key)).toEqual(['2026-09-26']);
+    // Off when ovulation is not shown.
+    const off = cycleDayMarks(a, { showFertile: false, showOvulation: false }, { today: '2026-10-20' });
+    expect([...off.values()].some((m) => m.ovulation)).toBe(false);
+  });
 });

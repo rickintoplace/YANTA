@@ -1,6 +1,6 @@
 // ============================================================
 // YANTA Present — styles for the join page, the screen, the remote and the
-// presenter's connect panel. One sheet, injected once.
+// approval card. One sheet, injected once.
 // ============================================================
 
 const CSS = `
@@ -905,182 +905,8 @@ body.yanta-present-page {
   }
 }
 
-/* ---------- Connect panel (presenter) ---------- */
-
-.yanta-pc-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 1600; /* above the slideshow and the presenter view */
-  display: grid;
-  place-items: center;
-  padding: 16px;
-  background: rgba(0, 0, 0, 0.48);
-  animation: fade-in 0.12s ease;
-}
-
-.yanta-pc {
-  width: min(560px, 100%);
-  max-height: calc(100dvh - 32px);
-  overflow: auto;
-  border-radius: 20px;
-  border: 1px solid var(--border);
-  background: var(--bg-elev);
-  color: var(--text);
-  box-shadow: 0 30px 90px rgba(0, 0, 0, 0.4);
-}
-
-.yanta-pc-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 14px 14px 10px 18px;
-}
-
-.yanta-pc-head h3 {
-  flex: 1;
-  margin: 0;
-  font-size: 16px;
-}
-
-.yanta-pc-body {
-  padding: 0 18px 18px;
-  display: grid;
-  gap: 16px;
-}
-
-.yanta-pc-join {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 18px;
-  align-items: center;
-}
-
-.yanta-pc-qr {
-  width: 168px;
-  height: 168px;
-  padding: 8px;
-  border-radius: 14px;
-  background: #fff;
-  display: grid;
-  place-items: center;
-}
-
-.yanta-pc-qr svg {
-  width: 100%;
-  height: 100%;
-}
-
-.yanta-pc-join p {
-  margin: 0 0 8px;
-  font-size: 13px;
-  line-height: 1.5;
-  color: var(--text-dim);
-}
-
-.yanta-pc-code {
-  font: 800 30px/1.1 ui-monospace, "SF Mono", Menlo, monospace;
-  letter-spacing: 0.08em;
-  color: var(--text);
-}
-
-.yanta-pc-url {
-  font-size: 12px;
-  color: var(--text-faint);
-}
-
-.yanta-pc-section-title {
-  font-size: 12px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--text-faint);
-  margin: 0 0 6px;
-}
-
-.yanta-pc-devices {
-  display: grid;
-  gap: 6px;
-}
-
-.yanta-pc-device {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: var(--bg-elev-2);
-}
-
-.yanta-pc-device.is-offline {
-  opacity: 0.6;
-}
-
-.yanta-pc-device-name {
-  flex: 1;
-  min-width: 0;
-  display: grid;
-  gap: 2px;
-  font-size: 14px;
-  font-weight: 600;
-}
-
-.yanta-pc-device-name small {
-  font-weight: 500;
-  color: var(--text-faint);
-  font-size: 12px;
-}
-
-.yanta-pc-device.is-pending {
-  border: 1px solid color-mix(in srgb, var(--accent) 50%, var(--border));
-  background: color-mix(in srgb, var(--accent) 10%, var(--bg-elev-2));
-}
-
-.yanta-pc-check {
-  font: 800 16px/1 ui-monospace, Menlo, monospace;
-  letter-spacing: 0.12em;
-}
-
-.yanta-pc-empty {
-  font-size: 13px;
-  color: var(--text-faint);
-  padding: 4px 2px;
-}
-
-.yanta-pc-screen {
-  display: grid;
-  grid-template-columns: 1fr auto auto;
-  gap: 8px;
-}
-
-.yanta-pc-screen input {
-  min-width: 0;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-  font-weight: 700;
-}
-
-.yanta-pc-foot {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.yanta-pc-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 12px;
-  color: var(--text-faint);
-}
-
-@media (max-width: 560px) {
-  .yanta-pc-join {
-    grid-template-columns: 1fr;
-    justify-items: center;
-    text-align: center;
-  }
-}
+/* The connect panel and the drawing picker are surfaces (src/ui/surface.js);
+   their content styles live in styles.css (.ypc-*). */
 
 /* Asked from anywhere: a device wants in. Top of the screen, out of the
    slides' way; the slideshow toolbar lives at the bottom. */
@@ -1122,10 +948,9 @@ body.yanta-present-page {
   from { opacity: 0; transform: translate(-50%, -8px); }
 }
 
-.yanta-pc-code-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
+.yanta-pc-check {
+  font: 800 16px/1 ui-monospace, Menlo, monospace;
+  letter-spacing: 0.12em;
 }
 
 .yanta-present-dot[data-state="online"] {

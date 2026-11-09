@@ -14,32 +14,23 @@ import { escapeHtml, lucide, toast } from '../core.js';
 import { t } from '../i18n/index.js';
 import { renderBrandedQrSvg } from '../qr.js';
 import { BRAND_LOGO_SVG } from '../brand-logo.js';
-import { openBoundOverlay } from '../overlay-history.js';
+import { openSurface } from '../ui/surface.js';
 import { formatCode } from './present-crypto.js';
 import { presentHostFor } from './present-host.js';
 import { injectPresentCss } from './present-styles.js';
 
 let panel = null;
-let releaseOverlay = null;
+let currentHost = null; // the session the panel's buttons act on
 let stopWatching = null;
 
 const askers = new WeakMap(); // host -> stop function for its approval prompt
 
 export function isConnectPanelOpen() {
-  return !!panel?.isConnected;
+  return !!panel && !panel.closed;
 }
 
 export function closeConnectPanel({ fromHistory = false } = {}) {
-  if (!panel) return;
-
-  stopWatching?.();
-  stopWatching = null;
-  panel.remove();
-  panel = null;
-
-  const release = releaseOverlay;
-  releaseOverlay = null;
-  if (!fromHistory) release?.();
+  panel?.close({ fromHistory });
 }
 
 /**
@@ -53,25 +44,26 @@ export async function openConnectPanel({ noteId, drawingId }) {
   watchPresentHost(host);
 
   if (panel) {
+    currentHost = host;
     render(host);
     return host;
   }
 
-  panel = document.createElement('div');
-  panel.className = 'yanta-pc-backdrop';
-  panel.innerHTML = `<div class="yanta-pc" role="dialog" aria-modal="true" aria-label="${escapeHtml(t('present.connect.title'))}"></div>`;
-
-  panel.addEventListener('click', (e) => {
-    if (e.target === panel) closeConnectPanel();
+  panel = openSurface({
+    kind: 'dialog',
+    title: t('present.connect.title'),
+    width: 560,
+    className: 'ypc',
+    historyId: 'present-connect',
+    footer: true,
+    onClose: () => {
+      stopWatching?.();
+      stopWatching = null;
+      panel = null;
+    },
   });
 
-  document.body.append(panel);
-
-  releaseOverlay = openBoundOverlay('present-connect', {
-    close: ({ fromHistory } = {}) => closeConnectPanel({ fromHistory }),
-    isOpen: () => isConnectPanelOpen(),
-  });
-
+  wire(host);
   stopWatching = host.onChange(() => render(host));
   render(host);
 
@@ -106,8 +98,8 @@ function roleLabel(role) {
 }
 
 function render(host) {
-  const card = panel?.querySelector('.yanta-pc');
-  if (!card) return;
+  if (!panel) return;
+  const { body, foot } = panel;
 
   if (host.ended) {
     closeConnectPanel();
@@ -115,180 +107,171 @@ function render(host) {
   }
 
   // Keep what the presenter is typing across re-renders.
-  const typed = card.querySelector('[data-screen-input]')?.value || '';
+  const typed = body.querySelector('[data-screen-input]')?.value || '';
   const hadFocus = document.activeElement?.matches?.('[data-screen-input]');
 
   const peers = host.peers;
   const pending = host.pending;
+  const site = `${location.host}/present`;
 
-  card.innerHTML = `
-    <div class="yanta-pc-head">
-      ${lucide('cast', 18)}
-      <h3>${escapeHtml(t('present.connect.title'))}</h3>
-      <button type="button" class="icon-btn" data-close aria-label="${escapeHtml(t('common.close'))}">${lucide('x', 18)}</button>
-    </div>
-
-    <div class="yanta-pc-body">
-      <div class="yanta-pc-join">
-        <div class="yanta-pc-qr" data-qr></div>
-        <div>
-          <p>${escapeHtml(t('present.connect.scan'))}</p>
-          <p>${escapeHtml(t('present.connect.orCode', { site: `${location.host}/present` }))}</p>
-          <div class="yanta-pc-code-row">
-            <div class="yanta-pc-code">${escapeHtml(host.code ? formatCode(host.code) : '··· ···')}</div>
-            <button type="button" class="icon-btn" data-rotate title="${escapeHtml(t('present.connect.newCode'))}" aria-label="${escapeHtml(t('present.connect.newCode'))}">${lucide('refresh-cw', 16)}</button>
-          </div>
+  body.innerHTML = `
+    <section class="ys-section ypc-join">
+      <div class="ypc-qr" data-qr></div>
+      <div>
+        <p class="ys-dim">${escapeHtml(t('present.connect.scan'))}</p>
+        <p class="ys-dim">${escapeHtml(t('present.connect.orCode', { site }))}</p>
+        <div class="ypc-code-row">
+          <div class="ypc-code">${escapeHtml(host.code ? formatCode(host.code) : '··· ···')}</div>
+          <button type="button" class="icon-btn" data-rotate title="${escapeHtml(t('present.connect.newCode'))}" aria-label="${escapeHtml(t('present.connect.newCode'))}">${lucide('refresh-cw', 16)}</button>
         </div>
       </div>
+    </section>
 
-      <div>
-        <div class="yanta-pc-section-title">${escapeHtml(t('present.connect.devices'))}</div>
-        <div class="yanta-pc-devices">
-          ${pending.map((p) => `
-            <div class="yanta-pc-device is-pending" data-pending="${escapeHtml(p.id)}">
-              ${lucide(p.role === 'screen' ? 'monitor' : 'smartphone', 18)}
-              <div class="yanta-pc-device-name">
-                ${escapeHtml(t('present.connect.wantsToJoin', { name: p.name, role: roleLabel(p.role) }))}
-                <small>${escapeHtml(t('present.connect.checkDigits'))} <span class="yanta-pc-check">${escapeHtml(p.check)}</span></small>
-              </div>
-              <button type="button" class="btn" data-deny>${escapeHtml(t('present.connect.deny'))}</button>
-              <button type="button" class="btn primary" data-allow>${escapeHtml(t('present.connect.allow'))}</button>
+    <section class="ys-section">
+      <h3 class="ys-section-title">${escapeHtml(t('present.connect.devices'))}</h3>
+      <div class="ypc-list">
+        ${pending.map((p) => `
+          <div class="ypc-row is-pending" data-pending="${escapeHtml(p.id)}">
+            ${lucide(p.role === 'screen' ? 'monitor' : 'smartphone', 18)}
+            <div class="ypc-name">
+              ${escapeHtml(t('present.connect.wantsToJoin', { name: p.name, role: roleLabel(p.role) }))}
+              <small>${escapeHtml(t('present.connect.checkDigits'))} <span class="ypc-check">${escapeHtml(p.check)}</span></small>
             </div>
-          `).join('')}
-          ${peers.map((p) => `
-            <div class="yanta-pc-device ${p.offline ? 'is-offline' : ''}" data-peer="${escapeHtml(p.id)}">
-              ${lucide(p.role === 'screen' ? 'monitor' : 'smartphone', 18)}
-              <div class="yanta-pc-device-name">
-                ${escapeHtml(p.name || roleLabel(p.role))}
-                <small>${escapeHtml(roleLabel(p.role))} · ${escapeHtml(p.offline ? t('present.connect.away') : t('present.connect.connected'))}</small>
-              </div>
-              <button type="button" class="icon-btn" data-remove title="${escapeHtml(t('present.connect.remove'))}" aria-label="${escapeHtml(t('present.connect.remove'))}">${lucide('x', 16)}</button>
+            <button type="button" class="btn" data-deny>${escapeHtml(t('present.connect.deny'))}</button>
+            <button type="button" class="btn primary" data-allow>${escapeHtml(t('present.connect.allow'))}</button>
+          </div>
+        `).join('')}
+        ${peers.map((p) => `
+          <div class="ypc-row ${p.offline ? 'is-offline' : ''}" data-peer="${escapeHtml(p.id)}">
+            ${lucide(p.role === 'screen' ? 'monitor' : 'smartphone', 18)}
+            <div class="ypc-name">
+              ${escapeHtml(p.name || roleLabel(p.role))}
+              <small>${escapeHtml(roleLabel(p.role))} · ${escapeHtml(p.offline ? t('present.connect.away') : t('present.connect.connected'))}</small>
             </div>
-          `).join('')}
-          ${!peers.length && !pending.length ? `<div class="yanta-pc-empty">${escapeHtml(t('present.connect.none'))}</div>` : ''}
+            <button type="button" class="icon-btn" data-remove title="${escapeHtml(t('present.connect.remove'))}" aria-label="${escapeHtml(t('present.connect.remove'))}">${lucide('x', 16)}</button>
+          </div>
+        `).join('')}
+        ${!peers.length && !pending.length ? `<p class="ys-dim">${escapeHtml(t('present.connect.none'))}</p>` : ''}
+      </div>
+    </section>
+
+    <section class="ys-section">
+      <h3 class="ys-section-title">${escapeHtml(t('present.connect.toScreen'))}</h3>
+      <form class="ypc-field" data-screen-form autocomplete="off">
+        <input class="text-input ypc-screen-code" data-screen-input maxlength="9" placeholder="ABC 123" spellcheck="false" autocapitalize="characters" aria-label="${escapeHtml(t('present.connect.screenCode'))}">
+        <button type="submit" class="btn primary" data-screen-go>${escapeHtml(t('present.connect.show'))}</button>
+        ${'BarcodeDetector' in window ? `<button type="button" class="btn" data-scan title="${escapeHtml(t('present.connect.scanScreen'))}" aria-label="${escapeHtml(t('present.connect.scanScreen'))}">${lucide('scan-line', 16)}</button>` : ''}
+      </form>
+      <p class="ys-dim">${escapeHtml(t('present.connect.screenHint', { site }))}</p>
+    </section>
+
+    <section class="ys-section">
+      <h3 class="ys-section-title">${escapeHtml(t('present.watch.title'))}</h3>
+      ${host.audienceUrl ? `
+        <div class="ypc-field">
+          <input class="text-input" readonly value="${escapeHtml(host.audienceUrl)}" data-watch-url aria-label="${escapeHtml(t('present.watch.title'))}">
+          <button type="button" class="btn primary" data-watch-copy>${escapeHtml(navigator.share ? t('present.watch.share') : t('present.watch.copy'))}</button>
+          <button type="button" class="btn" data-watch-stop>${escapeHtml(t('present.watch.stop'))}</button>
         </div>
-      </div>
-
-      <div>
-        <div class="yanta-pc-section-title">${escapeHtml(t('present.connect.toScreen'))}</div>
-        <form class="yanta-pc-screen" data-screen-form autocomplete="off">
-          <input class="text-input" data-screen-input maxlength="9" placeholder="ABC 123" spellcheck="false" autocapitalize="characters" aria-label="${escapeHtml(t('present.connect.screenCode'))}">
-          <button type="submit" class="btn primary" data-screen-go>${escapeHtml(t('present.connect.show'))}</button>
-          ${'BarcodeDetector' in window ? `<button type="button" class="btn" data-scan title="${escapeHtml(t('present.connect.scanScreen'))}" aria-label="${escapeHtml(t('present.connect.scanScreen'))}">${lucide('scan-line', 16)}</button>` : ''}
-        </form>
-        <p class="yanta-pc-url" style="margin:6px 0 0">${escapeHtml(t('present.connect.screenHint', { site: `${location.host}/present` }))}</p>
-      </div>
-
-      <div>
-        <div class="yanta-pc-section-title">${escapeHtml(t('present.watch.title'))}</div>
-        ${host.audienceUrl ? `
-          <div class="yanta-pc-screen">
-            <input class="text-input" readonly value="${escapeHtml(host.audienceUrl)}" data-watch-url aria-label="${escapeHtml(t('present.watch.title'))}" style="text-transform:none;letter-spacing:0;font-weight:500">
-            <button type="button" class="btn primary" data-watch-copy>${escapeHtml(navigator.share ? t('present.watch.share') : t('present.watch.copy'))}</button>
-            <button type="button" class="btn" data-watch-stop>${escapeHtml(t('present.watch.stop'))}</button>
-          </div>
-          <p class="yanta-pc-url" style="margin:6px 0 0">${escapeHtml(t('present.watch.viewers', { count: host.viewerCount }))}</p>
-        ` : `
-          <div class="yanta-pc-foot">
-            <p class="yanta-pc-url" style="margin:0">${escapeHtml(t('present.watch.text'))}</p>
-            <button type="button" class="btn" data-watch-create>${lucide('link', 15)} ${escapeHtml(t('present.watch.create'))}</button>
-          </div>
-        `}
-      </div>
-
-      <div class="yanta-pc-foot">
-        <span class="yanta-pc-status"><span class="yanta-present-dot" data-state="${statusState(host)}"></span>${escapeHtml(statusText(host))}</span>
-        ${peers.length ? `<button type="button" class="btn danger" data-end>${escapeHtml(t('present.connect.end'))}</button>` : ''}
-      </div>
-    </div>
+        <p class="ys-dim">${escapeHtml(t('present.watch.viewers', { count: host.viewerCount }))}</p>
+      ` : `
+        <p class="ys-dim">${escapeHtml(t('present.watch.text'))}</p>
+        <button type="button" class="ys-link ypc-watch-create" data-watch-create>${lucide('link', 14)}<span>${escapeHtml(t('present.watch.create'))}</span></button>
+      `}
+    </section>
   `;
 
-  const qr = card.querySelector('[data-qr]');
+  foot.innerHTML = `
+    <span class="ypc-status"><span class="yanta-present-dot" data-state="${statusState(host)}"></span>${escapeHtml(statusText(host))}</span>
+    <span class="ys-grow"></span>
+    ${peers.length ? `<button type="button" class="btn danger" data-end>${escapeHtml(t('present.connect.end'))}</button>` : ''}
+  `;
+
+  const qr = body.querySelector('[data-qr]');
   if (host.ticketUrl) qr.append(renderBrandedQrSvg(host.ticketUrl, { size: 168, logo: BRAND_LOGO_SVG }));
 
-  card.querySelector('[data-close]').addEventListener('click', () => closeConnectPanel());
-
-  card.querySelector('[data-watch-create]')?.addEventListener('click', () => {
-    host.openAudience().catch(() => toast(t('present.connect.offline'), 'error'));
-  });
-
-  card.querySelector('[data-watch-stop]')?.addEventListener('click', () => host.closeAudience());
-
-  card.querySelector('[data-watch-copy]')?.addEventListener('click', async () => {
-    const url = host.audienceUrl;
-    if (!url) return;
-
-    try {
-      if (navigator.share) {
-        await navigator.share({ title: t('present.watch.title'), url });
-        return;
-      }
-
-      await navigator.clipboard.writeText(url);
-      toast(t('present.watch.copied'), 'success');
-    } catch (err) {
-      if (err?.name !== 'AbortError') card.querySelector('[data-watch-url]')?.select();
-    }
-  });
-
-  // A code that was read out loud or seen by the wrong people: replace it.
-  card.querySelector('[data-rotate]')?.addEventListener('click', () => {
-    host.rotateCode().catch(() => {});
-  });
-
-  card.querySelectorAll('[data-pending]').forEach((row) => {
-    const id = row.dataset.pending;
-    row.querySelector('[data-allow]').addEventListener('click', () => host.approve(id));
-    row.querySelector('[data-deny]').addEventListener('click', () => host.deny(id));
-  });
-
-  card.querySelectorAll('[data-peer]').forEach((row) => {
-    row.querySelector('[data-remove]').addEventListener('click', () => host.removePeer(row.dataset.peer));
-  });
-
-  card.querySelector('[data-end]')?.addEventListener('click', () => {
-    host.end();
-    closeConnectPanel();
-  });
-
-  const input = card.querySelector('[data-screen-input]');
+  const input = body.querySelector('[data-screen-input]');
   input.value = typed;
   if (hadFocus) input.focus({ preventScroll: true });
+}
+
+// One set of listeners on the surface; render() only replaces markup.
+function wire(host) {
+  currentHost = host;
+  const { root } = panel;
 
   const connect = async (value) => {
-    const go = card.querySelector('[data-screen-go]');
+    const go = panel?.body.querySelector('[data-screen-go]');
     if (go) go.disabled = true;
 
     try {
-      const screen = await host.connectScreen(value);
+      const screen = await currentHost.connectScreen(value);
       toast(t('present.connect.screenConnected', { name: screen.name }), 'success');
-      const field = panel?.querySelector('[data-screen-input]');
+      const field = panel?.body.querySelector('[data-screen-input]');
       if (field) field.value = '';
     } catch (err) {
       toast(err?.code === 'invalid' ? t('present.connect.badCode') : t('present.connect.noScreen'), 'error');
     } finally {
-      const again = panel?.querySelector('[data-screen-go]');
+      const again = panel?.body.querySelector('[data-screen-go]');
       if (again) again.disabled = false;
     }
   };
 
-  card.querySelector('[data-screen-form]').addEventListener('submit', (e) => {
+  root.addEventListener('submit', (e) => {
+    if (!e.target.matches('[data-screen-form]')) return;
     e.preventDefault();
-    if (input.value.trim()) connect(input.value);
+    const value = e.target.querySelector('[data-screen-input]').value;
+    if (value.trim()) connect(value);
   });
 
-  card.querySelector('[data-scan]')?.addEventListener('click', async () => {
-    try {
-      const { scanQrWithCamera } = await import('../sync2/pairing.js');
-      const text = await scanQrWithCamera({
-        title: t('present.connect.scanScreen'),
-        hint: t('present.connect.scanScreenHint'),
-        zIndex: 1800, // above this panel (1600)
-      });
+  root.addEventListener('click', async (e) => {
+    const h = currentHost;
+    const on = (sel) => e.target.closest(sel);
 
-      await connect(text);
-    } catch (err) {
-      if (!/cancel/i.test(String(err?.message || ''))) toast(String(err?.message || err), 'error');
+    if (on('[data-watch-create]')) {
+      h.openAudience().catch(() => toast(t('present.connect.offline'), 'error'));
+    } else if (on('[data-watch-stop]')) {
+      h.closeAudience();
+    } else if (on('[data-watch-copy]')) {
+      const url = h.audienceUrl;
+      if (!url) return;
+
+      try {
+        if (navigator.share) {
+          await navigator.share({ title: t('present.watch.title'), url });
+          return;
+        }
+
+        await navigator.clipboard.writeText(url);
+        toast(t('present.watch.copied'), 'success');
+      } catch (err) {
+        if (err?.name !== 'AbortError') panel?.body.querySelector('[data-watch-url]')?.select();
+      }
+    } else if (on('[data-rotate]')) {
+      // A code that was read out loud or seen by the wrong people: replace it.
+      h.rotateCode().catch(() => {});
+    } else if (on('[data-allow]')) {
+      h.approve(on('[data-pending]').dataset.pending);
+    } else if (on('[data-deny]')) {
+      h.deny(on('[data-pending]').dataset.pending);
+    } else if (on('[data-remove]')) {
+      h.removePeer(on('[data-peer]').dataset.peer);
+    } else if (on('[data-end]')) {
+      h.end();
+      closeConnectPanel();
+    } else if (on('[data-scan]')) {
+      try {
+        const { scanQrWithCamera } = await import('../sync2/pairing.js');
+        const text = await scanQrWithCamera({
+          title: t('present.connect.scanScreen'),
+          hint: t('present.connect.scanScreenHint'),
+          zIndex: 1800, // above every surface (1300)
+        });
+
+        await connect(text);
+      } catch (err) {
+        if (!/cancel/i.test(String(err?.message || ''))) toast(String(err?.message || err), 'error');
+      }
     }
   });
 }

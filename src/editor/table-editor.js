@@ -10,7 +10,7 @@
 
 import { el, lucide, escapeHtml } from '../core.js';
 import { getLocale, t } from '../i18n/index.js';
-import { openBoundOverlay } from '../overlay-history.js';
+import { openSurface } from '../ui/surface.js';
 
 import {
   deleteColumn,
@@ -28,144 +28,6 @@ import {
 
 import { tableRangeAt } from './table-cm.js';
 
-let cssInjected = false;
-
-function ensureCss() {
-  if (cssInjected) return;
-  cssInjected = true;
-
-  const style = document.createElement('style');
-  style.id = 'yanta-table-editor-css';
-  style.textContent = `
-.yanta-table-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 1300;
-  display: grid;
-  place-items: center;
-  padding: 16px;
-  background: rgba(0, 0, 0, 0.42);
-}
-
-.yanta-table-card {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
-  width: min(1000px, 100%);
-  max-height: min(820px, 100%);
-  border: 1px solid var(--border);
-  border-radius: 16px;
-  background: var(--bg-elev);
-  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.35);
-  overflow: hidden;
-}
-
-.yanta-table-head {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--border);
-}
-
-.yanta-table-head strong {
-  flex: 1;
-  color: var(--text);
-  font-size: 15px;
-}
-
-.yanta-table-scroll {
-  overflow: auto;
-  padding: 12px;
-}
-
-.yanta-table-grid {
-  border-collapse: separate;
-  border-spacing: 0;
-}
-
-.yanta-table-grid td,
-.yanta-table-grid th {
-  padding: 0;
-  border-right: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
-}
-
-.yanta-table-grid tr:first-child th { border-top: 1px solid var(--border); }
-.yanta-table-grid th:first-child,
-.yanta-table-grid td:first-child { border-left: 1px solid var(--border); }
-
-.yanta-table-grid .ctl {
-  border: 0 !important;
-  background: transparent;
-  text-align: center;
-}
-
-.yanta-table-grid input {
-  display: block;
-  width: 100%;
-  min-width: 120px;
-  padding: 8px 10px;
-  border: 0;
-  background: var(--bg);
-  color: var(--text);
-  font: inherit;
-  font-size: 14px;
-  outline: none;
-}
-
-.yanta-table-grid thead input {
-  font-weight: 650;
-  background: var(--bg-elev-2);
-}
-
-.yanta-table-grid input:focus {
-  box-shadow: inset 0 0 0 2px var(--accent);
-}
-
-.yanta-table-grid input[data-align="center"] { text-align: center; }
-.yanta-table-grid input[data-align="right"] { text-align: right; }
-
-.yanta-table-ctl {
-  display: inline-grid;
-  place-items: center;
-  width: 26px;
-  height: 26px;
-  padding: 0;
-  border: 0;
-  border-radius: 6px;
-  background: transparent;
-  color: var(--text-faint);
-  cursor: pointer;
-}
-
-.yanta-table-ctl:hover {
-  background: var(--bg-elev-2);
-  color: var(--text);
-}
-
-.yanta-table-add {
-  display: flex;
-  gap: 8px;
-  margin-top: 10px;
-}
-
-.yanta-table-foot {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  padding: 12px 14px;
-  border-top: 1px solid var(--border);
-}
-
-@media (max-width: 720px) {
-  .yanta-table-overlay { padding: 0; }
-  .yanta-table-card { width: 100%; height: 100%; max-height: none; border-radius: 0; border: 0; }
-  .yanta-table-grid input { min-width: 104px; font-size: 16px; }
-}
-`;
-  document.head.append(style);
-}
-
 async function menu(anchor, items) {
   const { showMenu } = await import('../tree.js');
   const r = anchor.getBoundingClientRect();
@@ -177,26 +39,22 @@ export function openTableEditor(view, pos) {
   const range = tableRangeAt(view.state, pos);
   if (!range) return;
 
-  ensureCss();
-
   // Where the table stands now; re-checked before writing back.
   const original = view.state.sliceDoc(range.from, range.to);
   let table = normalize(range.table);
   let focus = { row: -1, col: 0 };
 
-  const overlay = el('div', { class: 'yanta-table-overlay', role: 'dialog', 'aria-modal': 'true', 'aria-label': t('table.title') });
-
-  const close = () => {
-    window.removeEventListener('keydown', onKey, true);
-    overlay.remove();
-    release?.();
-    view.focus();
-  };
-
-  const release = openBoundOverlay('table-editor', {
-    close: () => close(),
-    isOpen: () => overlay.isConnected,
+  const dialog = openSurface({
+    kind: 'dialog',
+    title: t('table.title'),
+    width: 1000,
+    className: 'yte',
+    historyId: 'table-editor',
+    footer: true,
+    onClose: () => view.focus(),
   });
+
+  const close = () => dialog.close();
 
   const apply = () => {
     const current = tableRangeAt(view.state, Math.min(range.from, view.state.doc.length));
@@ -212,18 +70,12 @@ export function openTableEditor(view, pos) {
     close();
   };
 
-  const onKey = (e) => {
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      e.stopImmediatePropagation();
-      close();
-    } else if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+  dialog.root.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
       e.preventDefault();
       apply();
     }
-  };
-
-  window.addEventListener('keydown', onKey, true);
+  });
 
   const update = (next, nextFocus = focus) => {
     table = next;
@@ -309,7 +161,7 @@ export function openTableEditor(view, pos) {
   }
 
   function focusCell(row, col) {
-    overlay.querySelector(`input[data-row="${row}"][data-col="${col}"]`)?.focus();
+    dialog.body.querySelector(`input[data-row="${row}"][data-col="${col}"]`)?.focus();
   }
 
   function render() {
@@ -319,7 +171,7 @@ export function openTableEditor(view, pos) {
       el('tr', {},
         el('th', { class: 'ctl' }),
         ...table.headers.map((_, col) => {
-          const btn = el('button', { type: 'button', class: 'yanta-table-ctl', title: t('table.columnMenu'), 'aria-label': t('table.columnMenu') });
+          const btn = el('button', { type: 'button', class: 'yte-ctl', title: t('table.columnMenu'), 'aria-label': t('table.columnMenu') });
           btn.innerHTML = lucide('chevron-down', 14);
           btn.addEventListener('click', () => columnMenu(btn, col));
           return el('th', { class: 'ctl' }, btn);
@@ -333,7 +185,7 @@ export function openTableEditor(view, pos) {
 
     const tbody = el('tbody', {},
       ...table.rows.map((cells, row) => {
-        const btn = el('button', { type: 'button', class: 'yanta-table-ctl', title: t('table.rowMenu'), 'aria-label': t('table.rowMenu') });
+        const btn = el('button', { type: 'button', class: 'yte-ctl', title: t('table.rowMenu'), 'aria-label': t('table.rowMenu') });
         btn.innerHTML = lucide('grip-vertical', 14);
         btn.addEventListener('click', () => rowMenu(btn, row));
         return el('tr', {},
@@ -351,41 +203,20 @@ export function openTableEditor(view, pos) {
     addCol.innerHTML = `${lucide('plus', 14)} ${escapeHtml(t('table.addColumn'))}`;
     addCol.addEventListener('click', () => update(insertColumn(table, cols), { row: -1, col: cols }));
 
-    const closeBtn = el('button', { type: 'button', class: 'icon-btn', title: t('common.close'), 'aria-label': t('common.close') });
-    closeBtn.innerHTML = lucide('x', 18);
-    closeBtn.addEventListener('click', close);
-
-    const cancel = el('button', { type: 'button', class: 'btn' }, t('common.cancel'));
-    cancel.addEventListener('click', close);
-
-    const applyBtn = el('button', { type: 'button', class: 'btn primary', title: 'Ctrl+Enter' }, t('table.apply'));
-    applyBtn.addEventListener('click', apply);
-
-    const icon = el('span');
-    icon.innerHTML = lucide('table-2', 18);
-
-    overlay.replaceChildren(
-      el('section', { class: 'yanta-table-card' },
-        el('header', { class: 'yanta-table-head' },
-          icon,
-          el('strong', {}, t('table.title')),
-          closeBtn
-        ),
-        el('div', { class: 'yanta-table-scroll' },
-          el('table', { class: 'yanta-table-grid' }, thead, tbody),
-          el('div', { class: 'yanta-table-add' }, addRow, addCol)
-        ),
-        el('footer', { class: 'yanta-table-foot' }, cancel, applyBtn)
-      )
+    dialog.body.replaceChildren(
+      el('div', { class: 'yte-scroll' }, el('table', { class: 'yte-grid' }, thead, tbody)),
+      el('div', { class: 'yte-add' }, addRow, addCol)
     );
 
     requestAnimationFrame(() => focusCell(focus.row, focus.col));
   }
 
-  overlay.addEventListener('click', (e) => {
-    if (e.target === overlay) close();
-  });
+  const cancel = el('button', { type: 'button', class: 'btn' }, t('common.cancel'));
+  cancel.addEventListener('click', close);
 
-  document.body.append(overlay);
+  const applyBtn = el('button', { type: 'button', class: 'btn primary', title: 'Ctrl+Enter' }, t('table.apply'));
+  applyBtn.addEventListener('click', apply);
+
+  dialog.foot.append(el('span', { class: 'ys-grow' }), cancel, applyBtn);
   render();
 }

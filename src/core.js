@@ -1028,7 +1028,7 @@ export const state = {
   expandedFolders: new Set(),
   activeTagFilter: null,
   searchQuery: '',
-  view: 'split',
+  view: 'edit',
   surface: 'note',
   dashboardFolderId: null,
   calendarEvents: new Map(),

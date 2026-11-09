@@ -5,11 +5,14 @@
 // Shared by the chat (assistant-ui.js) and the Pulse Inbox: the coloured
 // [n] markers inside the text and the "3/3 citations verified" pill
 // with its fold-out of claims, quotes and sources. Styles are injected
-// on first use, so a surface can show a check without the chat loaded.
+// on first use, so a surface can show a check without the chat loaded;
+// the popover behind a marker is a surface (src/ui/surface.js), styled
+// in styles.css (.ycp-*).
 // ============================================================
 
 import { lucide, escapeHtml, toast } from '../core.js';
 import { t } from '../i18n/index.js';
+import { openSurface } from '../ui/surface.js';
 import { CITATION_PROBLEM_TYPES } from './citation-check.js';
 
 /*
@@ -197,14 +200,10 @@ function onCiteActivate(e) {
 
 // ---- The popover behind a citation mark ----
 
-let popover = null;
-let popoverCleanup = null;
+let popover = null; // { surface, sup }
 
 function closeCitePopover() {
-  popoverCleanup?.();
-  popoverCleanup = null;
-  popover?.remove();
-  popover = null;
+  popover?.surface.close();
 }
 
 function hostLabel(url) {
@@ -220,7 +219,7 @@ const KIND_ICON = { web: 'globe', note: 'file-text', rss: 'rss' };
 function actionButton(icon, label, onClick) {
   const btn = document.createElement('button');
   btn.type = 'button';
-  btn.className = 'yanta-cite-pop-action';
+  btn.className = 'ys-link';
   btn.innerHTML = `${lucide(icon, 13)}<span>${escapeHtml(label)}</span>`;
   btn.addEventListener('click', (e) => {
     e.preventDefault();
@@ -243,18 +242,33 @@ function revealInSources(group, display) {
   entry.classList.add('is-flash');
 }
 
-function openCitePopover(sup, { byN, byClaim, order, group }) {
-  const wasOpenFor = popover?.__for;
+function openCitePopover(sup, data) {
+  // The same mark again is a toggle; another mark replaces the popover.
+  const wasFor = popover?.sup;
   closeCitePopover();
-  if (wasOpenFor === sup) return;
+  if (wasFor === sup) return;
 
+  const { byN, byClaim, order, group } = data;
   const numbers = String(sup.dataset.citeNumbers || '').split(',').filter(Boolean).map(Number);
   const items = byClaim.get(sup.dataset.citeClaim) || [];
 
-  const pop = document.createElement('div');
-  pop.className = 'yanta-cite-pop';
-  pop.setAttribute('role', 'dialog');
-  pop.__for = sup;
+  const surface = openSurface({
+    kind: 'popover',
+    label: sup.getAttribute('aria-label') || sup.textContent,
+    anchor: sup,
+    width: 340,
+    className: 'ycp',
+    historyId: 'citation-popover',
+    onClose: () => {
+      if (popover?.surface === surface) popover = null;
+      window.removeEventListener('resize', onMove);
+      document.removeEventListener('scroll', onMove, true);
+    },
+  });
+  popover = { surface, sup };
+
+  // What closes first and then opens something else waits for the popstate.
+  const thenRun = (fn) => () => surface.closeThen(fn);
 
   for (const n of numbers) {
     const source = byN.get(n) || null;
@@ -262,16 +276,16 @@ function openCitePopover(sup, { byN, byClaim, order, group }) {
     const item = items.find((i) => Number(i.n) === n) || null;
 
     const section = document.createElement('section');
-    section.className = 'yanta-cite-pop-source';
+    section.className = 'ycp-source';
 
     const kind = source?.kind || 'web';
     const host = source?.url ? hostLabel(source.url) : '';
 
     section.innerHTML = `
-      <div class="yanta-cite-pop-head">
-        <b class="yanta-cite-pop-num">[${display}]</b>
+      <div class="ycp-head">
+        <b class="ycp-num">[${display}]</b>
         ${lucide(KIND_ICON[kind] || 'globe', 13)}
-        <div class="yanta-cite-pop-title">
+        <div class="ycp-title">
           <span>${escapeHtml(source?.title || t('ai.chat.cite.unknownSource'))}</span>
           ${source ? `<small>${escapeHtml(host || t(`ai.chat.cite.kind.${KIND_ICON[kind] ? kind : 'web'}`))}</small>` : ''}
         </div>
@@ -280,7 +294,7 @@ function openCitePopover(sup, { byN, byClaim, order, group }) {
 
     if (item) {
       const verdict = document.createElement('div');
-      verdict.className = `yanta-cite-pop-verdict ${item.ok ? 'ok' : 'bad'}`;
+      verdict.className = `ycp-verdict ${item.ok ? 'ok' : 'bad'}`;
       verdict.innerHTML = `${lucide(item.ok ? 'shield-check' : 'shield-alert', 13)}<span>${escapeHtml(
         item.ok ? t('ai.chat.cite.backed') : citationProblemsText(item) || t('ai.chat.cite.notConfirmed')
       )}</span>`;
@@ -294,14 +308,13 @@ function openCitePopover(sup, { byN, byClaim, order, group }) {
     }
 
     const actions = document.createElement('div');
-    actions.className = 'yanta-cite-pop-actions';
+    actions.className = 'ycp-actions';
 
     if (kind === 'note' && source?.id) {
-      actions.append(actionButton('file-text', t('ai.chat.cite.openNote'), async () => {
-        closeCitePopover();
+      actions.append(actionButton('file-text', t('ai.chat.cite.openNote'), thenRun(async () => {
         const { openNote } = await import('../notes.js');
         await openNote(source.id);
-      }));
+      })));
     } else if (source?.url) {
       actions.append(actionButton('external-link', t('ai.chat.cite.open'), () => {
         closeCitePopover();
@@ -318,11 +331,10 @@ function openCitePopover(sup, { byN, byClaim, order, group }) {
         closeCitePopover();
       }));
 
-      actions.append(actionButton('quote', t('ai.chat.cite.addCitation'), async () => {
-        closeCitePopover();
+      actions.append(actionButton('quote', t('ai.chat.cite.addCitation'), thenRun(async () => {
         const { openCitationManager } = await import('../citations.js');
         openCitationManager(source.url);
-      }));
+      })));
     }
 
     // Only when there is a list to show it in.
@@ -335,70 +347,34 @@ function openCitePopover(sup, { byN, byClaim, order, group }) {
 
     if (!source) {
       const missing = document.createElement('p');
-      missing.className = 'yanta-cite-pop-missing';
+      missing.className = 'ys-dim';
       missing.textContent = t('ai.chat.cite.sourceMissing');
       section.append(missing);
     }
 
     if (actions.childElementCount) section.append(actions);
-    pop.append(section);
+    surface.body.append(section);
   }
 
   const foot = document.createElement('a');
-  foot.className = 'yanta-cite-pop-foot';
+  foot.className = 'ycp-foot';
   foot.href = VERIQUOTE_URL;
   foot.target = '_blank';
   foot.rel = EXTERNAL_REL;
   foot.innerHTML = `${lucide('shield', 11)}<span>${escapeHtml(t('ai.chat.cite.checkedWith'))}</span>`;
-  pop.append(foot);
+  surface.body.append(foot);
 
-  document.body.append(pop);
-  popover = pop;
-  placePopover(pop, sup);
-
-  const onDown = (e) => {
-    if (!pop.contains(e.target) && e.target !== sup) closeCitePopover();
-  };
-  const onKey = (e) => {
-    if (e.key !== 'Escape') return;
-    // Only the popover closes, not the chat panel behind it.
-    e.stopPropagation();
-    closeCitePopover();
-    sup.focus?.();
-  };
-  const onMove = () => closeCitePopover();
-
-  document.addEventListener('pointerdown', onDown, true);
-  document.addEventListener('keydown', onKey, true);
+  /*
+    A popover sits next to its mark; when the answer scrolls (or the
+    window changes) the mark moves away, so the popover goes. Scrolling
+    inside it, or a sheet on a phone, is not that.
+  */
+  function onMove(e) {
+    if (surface.shape !== 'popover' || surface.surface.contains(e?.target)) return;
+    surface.close();
+  }
   window.addEventListener('resize', onMove);
   document.addEventListener('scroll', onMove, true);
-
-  popoverCleanup = () => {
-    document.removeEventListener('pointerdown', onDown, true);
-    document.removeEventListener('keydown', onKey, true);
-    window.removeEventListener('resize', onMove);
-    document.removeEventListener('scroll', onMove, true);
-  };
-
-  pop.querySelector('button')?.focus({ preventScroll: true });
-}
-
-function placePopover(pop, anchor) {
-  const r = anchor.getBoundingClientRect();
-  const margin = 8;
-  const width = Math.min(340, window.innerWidth - margin * 2);
-
-  pop.style.width = `${width}px`;
-  const height = pop.offsetHeight;
-
-  const left = Math.max(margin, Math.min(r.left + r.width / 2 - width / 2, window.innerWidth - width - margin));
-  const below = r.bottom + 6;
-  const top = below + height > window.innerHeight - margin && r.top - height - 6 > margin
-    ? r.top - height - 6
-    : Math.min(below, window.innerHeight - height - margin);
-
-  pop.style.left = `${Math.round(left)}px`;
-  pop.style.top = `${Math.round(Math.max(margin, top))}px`;
 }
 
 /**
@@ -698,140 +674,6 @@ function injectCitationStyles() {
 
 .yanta-ai-source-claim.bad .yanta-ai-citecheck-claim svg { color: var(--yellow, #d29922); }
 .yanta-ai-source-claim.ok .yanta-ai-citecheck-claim svg { color: var(--green, #3fb950); }
-
-/* Popover behind a citation mark */
-.yanta-cite-pop {
-  position: fixed;
-  z-index: 10050;
-  display: grid;
-  gap: 10px;
-  padding: 12px;
-  border-radius: 12px;
-  border: 1px solid var(--border-strong, var(--border));
-  background: var(--bg-elev, var(--bg));
-  color: var(--text);
-  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.22);
-  font-size: 13px;
-  line-height: 1.45;
-}
-
-.yanta-cite-pop-source + .yanta-cite-pop-source {
-  padding-top: 10px;
-  border-top: 1px solid var(--border);
-}
-
-.yanta-cite-pop-head {
-  display: flex;
-  align-items: flex-start;
-  gap: 7px;
-}
-
-.yanta-cite-pop-head > svg {
-  flex: none;
-  margin-top: 3px;
-  color: var(--text-faint);
-}
-
-.yanta-cite-pop-num {
-  flex: none;
-  color: var(--accent);
-  font-variant-numeric: tabular-nums;
-}
-
-.yanta-cite-pop-title {
-  display: grid;
-  min-width: 0;
-}
-
-.yanta-cite-pop-title > span {
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  font-weight: 600;
-}
-
-.yanta-cite-pop-title > small {
-  color: var(--text-faint);
-  font-size: 11.5px;
-}
-
-.yanta-cite-pop-verdict {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 8px;
-  font-size: 12px;
-  font-weight: 550;
-}
-
-.yanta-cite-pop-verdict.ok { color: var(--green, #3fb950); }
-.yanta-cite-pop-verdict.bad { color: var(--yellow, #d29922); }
-
-.yanta-cite-pop blockquote {
-  display: -webkit-box;
-  overflow: hidden;
-  -webkit-line-clamp: 4;
-  -webkit-box-orient: vertical;
-  margin: 6px 0 0;
-  padding-left: 9px;
-  border-left: 2px solid var(--border);
-  color: var(--text-dim);
-  font-style: italic;
-  font-size: 12.5px;
-}
-
-.yanta-cite-pop-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  margin-top: 10px;
-}
-
-.yanta-cite-pop-action {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 5px 9px;
-  border-radius: 7px;
-  border: 1px solid var(--border);
-  background: var(--bg-elev-2, transparent);
-  color: var(--text);
-  font: inherit;
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.yanta-cite-pop-action:hover,
-.yanta-cite-pop-action:focus-visible {
-  border-color: var(--border-strong, var(--border));
-  background: var(--bg-elev-3, var(--bg-elev-2));
-}
-
-.yanta-cite-pop-action svg {
-  color: var(--text-dim);
-}
-
-.yanta-cite-pop-missing {
-  margin: 8px 0 0;
-  color: var(--text-dim);
-  font-size: 12px;
-}
-
-.yanta-cite-pop-foot {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  justify-self: end;
-  color: var(--text-faint);
-  font-size: 11px;
-  text-decoration: none;
-}
-
-.yanta-cite-pop-foot:hover {
-  color: var(--text-dim);
-  text-decoration: underline;
-}
 
 `;
   document.head.append(style);

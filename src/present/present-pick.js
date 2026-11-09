@@ -11,9 +11,8 @@
 import { escapeHtml, lucide, state, toast } from '../core.js';
 import { t } from '../i18n/index.js';
 import { getNoteDoc, isNoteDocLoaded, listDrawingsForNote } from '../yjs.js';
-import { openBoundOverlay } from '../overlay-history.js';
+import { openSurface } from '../ui/surface.js';
 import { presentationSlidesFor } from '../slides/slides-model.js';
-import { injectPresentCss } from './present-styles.js';
 
 /** Notes that may hold drawings: their text mentions draw://, or their doc is loaded. */
 async function drawingsInVault() {
@@ -52,61 +51,30 @@ async function drawingsInVault() {
 }
 
 export async function openPresentPicker({ screenKey = '' } = {}) {
-  injectPresentCss();
-
-  const backdrop = document.createElement('div');
-  backdrop.className = 'yanta-pc-backdrop';
-  backdrop.innerHTML = `
-    <div class="yanta-pc" role="dialog" aria-modal="true">
-      <div class="yanta-pc-head">
-        ${lucide('cast', 18)}
-        <h3>${escapeHtml(screenKey ? t('present.pick.titleScreen') : t('present.pick.title'))}</h3>
-        <button type="button" class="icon-btn" data-close aria-label="${escapeHtml(t('common.close'))}">${lucide('x', 18)}</button>
-      </div>
-      <div class="yanta-pc-body">
-        <div class="yanta-pc-devices" data-list>
-          <div class="yanta-pc-empty">${escapeHtml(t('present.pick.loading'))}</div>
-        </div>
-      </div>
-    </div>
-  `;
-
-  document.body.append(backdrop);
-
-  let release = null;
-
-  const close = ({ fromHistory = false } = {}) => {
-    if (!backdrop.isConnected) return;
-
-    backdrop.remove();
-    if (!fromHistory) release?.();
-  };
-
-  release = openBoundOverlay('present-pick', {
-    close: ({ fromHistory } = {}) => close({ fromHistory }),
-    isOpen: () => backdrop.isConnected,
+  const picker = openSurface({
+    kind: 'dialog',
+    title: screenKey ? t('present.pick.titleScreen') : t('present.pick.title'),
+    width: 480,
+    className: 'ypc',
+    historyId: 'present-pick',
   });
 
-  backdrop.addEventListener('click', (e) => {
-    if (e.target === backdrop) close();
-  });
+  picker.body.innerHTML = `<div class="ypc-list" data-list><p class="ys-dim">${escapeHtml(t('present.pick.loading'))}</p></div>`;
 
-  backdrop.querySelector('[data-close]').addEventListener('click', () => close());
-
-  const list = backdrop.querySelector('[data-list]');
+  const list = picker.body.querySelector('[data-list]');
   const drawings = await drawingsInVault();
 
-  if (!backdrop.isConnected) return;
+  if (picker.closed) return;
 
   if (!drawings.length) {
-    list.innerHTML = `<div class="yanta-pc-empty">${escapeHtml(t('present.pick.none'))}</div>`;
+    list.innerHTML = `<p class="ys-dim">${escapeHtml(t('present.pick.none'))}</p>`;
     return;
   }
 
   list.innerHTML = drawings.map((d, i) => `
-    <button type="button" class="yanta-pc-device" data-pick="${i}" style="all:unset;box-sizing:border-box;display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:12px;background:var(--bg-elev-2);cursor:pointer">
+    <button type="button" class="ypc-row" data-pick="${i}">
       ${lucide('presentation', 18)}
-      <span class="yanta-pc-device-name">
+      <span class="ypc-name">
         ${escapeHtml(d.title)}
         <small>${escapeHtml([d.noteTitle, d.slideCount ? t('present.pick.slides', { count: d.slideCount }) : t('present.pick.board')].filter(Boolean).join(' · '))}</small>
       </span>
@@ -114,33 +82,20 @@ export async function openPresentPicker({ screenKey = '' } = {}) {
     </button>
   `).join('');
 
-  list.querySelectorAll('[data-pick]').forEach((btn) => {
-    btn.addEventListener('click', async () => {
-      const picked = drawings[Number(btn.dataset.pick)];
+  list.addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-pick]');
+    if (!btn || picker.closed) return;
+    const picked = drawings[Number(btn.dataset.pick)];
 
-      // Closing goes through history.back(); the drawing then pushes its own
-      // entry. Doing both in one tick lets the late popstate close the
-      // drawing again (see overlay-history.js) — wait for it to land.
-      const settled = new Promise((resolve) => {
-        const done = () => {
-          window.removeEventListener('popstate', done);
-          setTimeout(resolve, 0);
-        };
+    // The drawing pushes its own history entry: only after ours is gone.
+    await picker.closeThen();
 
-        window.addEventListener('popstate', done);
-        setTimeout(done, 400);
-      });
-
-      close();
-      await settled;
-
-      try {
-        const { presentDrawingOnScreen } = await import('../slides/slides-ui.js');
-        await presentDrawingOnScreen({ ...picked, screenKey });
-      } catch (err) {
-        console.error('[YANTA Present] could not present', err);
-        toast(t('present.connect.noScreen'), 'error');
-      }
-    });
+    try {
+      const { presentDrawingOnScreen } = await import('../slides/slides-ui.js');
+      await presentDrawingOnScreen({ ...picked, screenKey });
+    } catch (err) {
+      console.error('[YANTA Present] could not present', err);
+      toast(t('present.connect.noScreen'), 'error');
+    }
   });
 }

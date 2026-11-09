@@ -204,7 +204,7 @@ export function swapOverlay(id, { from, to } = {}) {
  * router closed the overlay and when something was stacked on top —
  * so a single line inside `close` keeps every dismiss path in sync.
  */
-export function openBoundOverlay(id, { close, isOpen }) {
+export function openBoundOverlay(id, { close, isOpen, push = true }) {
   if (typeof close !== 'function') throw new Error('openBoundOverlay: close required');
 
   registerOverlayRoute(id, {
@@ -217,7 +217,8 @@ export function openBoundOverlay(id, { close, isOpen }) {
     isOpen: isOpen || null,
   });
 
-  pushOverlayState(id);
+  // push: false when swapOverlay already rewrote the entry for this id.
+  if (push) pushOverlayState(id);
 
   return function releaseOverlayEntry() {
     if (overlayIdFromState() === id) history.back();

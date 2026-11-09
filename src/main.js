@@ -42,7 +42,7 @@ import { renderBacklinks, renderOutline, setupWikilinkHover, handleWikilinkClick
 import { openPalette, closePalette, buildCommandList, paletteMove, paletteAccept, paletteFilter } from './palette/palette.js';
 import { openImageModal, closeImageModal, setupImage, pickImageFile, cleanupUnusedImages, insertImageAsRef } from './image.js';
 import { openIconInsertPicker, openIconPicker } from './icon-picker.js';
-import { focusEditorEnd, getView, ensureEditor } from './editor.js';
+import { focusEditorEnd, getView, ensureEditor, refreshEditorTitle } from './editor.js';
 import { setupFormatToolbar } from './format-menu.js';
 import { exportAsZip, exportNoteAsMd, exportBundle, exportEveryNoteMd, openExportMenu, importFiles, importItems, walkEntry } from './io.js';
 import { syncRestore, syncConnect, syncDisconnect, syncFull, openSyncSetup, closeSyncSetup, syncMenu } from './sync.js';
@@ -2257,7 +2257,9 @@ async function init() {
     store.folders.all(),
     store.images.allMeta(),
     store.settings.get('expandedFolders', []),
-    store.settings.get('view', 'split'),
+    // One writing view by default: Markdown shows only on the line being
+    // written (editor/live-preview.js); side-by-side preview on request.
+    store.settings.get('view', 'edit'),
     store.settings.get('viewMobile', null),
     store.settings.get('sidebarCollapsed', false),
   ]);
@@ -3334,7 +3336,11 @@ function bindEvents() {
 
   $('noteTitle')?.addEventListener('blur', () => {
     flushCurrentNoteTitleSave()
-      .then(() => renderTree())
+      .then(() => {
+        renderTree();
+        // A first line repeating the title hides (or shows) by the new title.
+        refreshEditorTitle();
+      })
       .catch((err) => {
         console.warn('[YANTA] title blur save failed', err);
       });

@@ -1498,6 +1498,7 @@ export default {
       codeBlock: 'Codeblock',
       toggleTaskDone: 'Aufgabe abhaken',
     },
+    placeholder: 'Einfach losschreiben … / für Befehle, [[ verlinkt eine Notiz',
   },
 
   lock: {
@@ -1746,6 +1747,8 @@ export default {
       fontHumanist: 'Humanistisch',
       fontRounded: 'Abgerundet',
       fontSystemMono: 'System (Monospace)',
+      showMarkdown: 'Markdown-Zeichen immer zeigen',
+      showMarkdownHint: 'Sonst erscheinen #, ** und Ähnliches nur in der Zeile, in der du schreibst; überall sonst liest sich die Notiz als formatierter Text.',
     },
 
     colors: {

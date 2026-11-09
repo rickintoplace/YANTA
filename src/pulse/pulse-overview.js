@@ -19,12 +19,8 @@ import {
 import { t } from '../i18n/index.js';
 import { openNote } from '../notes.js';
 
-import {
-  pushOverlayState,
-  closeTopOverlay,
-  registerOverlayRoute,
-  swapOverlay,
-} from '../overlay-history.js';
+import { swapOverlay } from '../overlay-history.js';
+import { openSurface } from '../ui/surface.js';
 
 import {
   listRoutines,
@@ -55,327 +51,9 @@ import {
 import { getPulseSettings } from './pulse-config.js';
 import { injectPulseCss } from './pulse-styles.js';
 
-const CSS_ID = 'yanta-pulse-overview-css';
-
-let modal = null;
-let registered = false;
+let dialog = null; // the open overview, a surface (src/ui/surface.js)
 let activeTab = 'routines';
-
-function injectCss() {
-  injectPulseCss();
-
-  if (document.getElementById(CSS_ID)) return;
-
-  const style = document.createElement('style');
-  style.id = CSS_ID;
-  style.textContent = `
-/*
-  Built on the app's .modal / .modal-card so the backdrop, fade-in,
-  z-index and [hidden] behaviour match Settings exactly.
-
-  The card's height is fixed rather than content-driven: the tabs hold
-  very different amounts of content, and a panel that resizes under the
-  pointer on every tab switch feels broken. The body scrolls instead.
-*/
-.yanta-pulse-ov-card {
-  width: min(760px, 92vw);
-  height: min(660px, 86vh);
-
-  display: flex;
-  flex-direction: column;
-  background: var(--bg);
-}
-
-.yanta-pulse-ov-head {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-
-  flex: 0 0 auto;
-  padding: 15px 18px 13px;
-  border-bottom: 1px solid var(--border);
-}
-
-.yanta-pulse-ov-head > svg { color: var(--accent); }
-
-.yanta-pulse-ov-head h2 {
-  flex: 1;
-  min-width: 0;
-  margin: 0;
-
-  color: var(--text);
-  font-size: 15px;
-  font-weight: 600;
-}
-
-.yanta-pulse-ov-sub {
-  flex: 0 0 auto;
-  padding: 12px 18px 0;
-
-  color: var(--text-dim);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.yanta-pulse-ov-tabs {
-  flex: 0 0 auto;
-
-  display: flex;
-  gap: 3px;
-
-  margin: 12px 18px 0;
-  padding: 3px;
-
-  border-radius: 10px;
-  background: var(--bg-elev-2, var(--bg-elev));
-}
-
-.yanta-pulse-ov-tab {
-  flex: 1;
-
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-
-  padding: 7px 10px;
-
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-
-  color: var(--text-dim);
-  font-size: 12.5px;
-  font-weight: 500;
-  cursor: pointer;
-
-  transition: background .14s ease, color .14s ease;
-}
-
-.yanta-pulse-ov-tab > svg { flex: 0 0 auto; opacity: .8; }
-.yanta-pulse-ov-tab.active > svg { opacity: 1; color: var(--accent); }
-
-.yanta-pulse-ov-tab:hover { color: var(--text); }
-
-.yanta-pulse-ov-tab.active {
-  background: var(--bg-elev-3, var(--bg));
-  color: var(--text);
-  font-weight: 600;
-}
-
-.yanta-pulse-ov-body {
-  flex: 1;
-  min-height: 0;
-
-  display: flex;
-  flex-direction: column;
-
-  padding: 14px 18px 20px;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-
-/* A fixed-height panel leaves real space when a tab has little to show.
-   Empty states take the middle of it rather than clinging to the top,
-   which is what makes the height read as deliberate instead of broken. */
-.yanta-pulse-ov-empty {
-  margin: auto 0;
-  padding: 24px 14px;
-
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 10px;
-
-  text-align: center;
-}
-
-/* Lists keep their natural height at the top of the flex column. */
-.yanta-pulse-ov-body > .yanta-pulse-routines,
-.yanta-pulse-ov-body > .yanta-pulse-hist {
-  flex: 0 0 auto;
-}
-
-.yanta-pulse-ov-empty > svg {
-  color: var(--text-dim);
-  opacity: .5;
-}
-
-.yanta-pulse-ov-empty span {
-  max-width: 32ch;
-
-  color: var(--text-dim);
-  font-size: 12.5px;
-  line-height: 1.6;
-}
-
-/* Phones: a sheet that owns the screen, like Settings — not a window
-   floating on a backdrop nobody can reach around. */
-@media (max-width: 720px) {
-  .yanta-pulse-modal { padding: 0; }
-
-  .yanta-pulse-ov-card {
-    width: 100%;
-    height: 100dvh;
-    max-height: none;
-
-    border: 0;
-    border-radius: 0;
-  }
-
-  .yanta-pulse-ov-head {
-    padding-top: max(15px, env(safe-area-inset-top));
-  }
-
-  .yanta-pulse-ov-tab { font-size: 13.5px; padding: 9px 10px; }
-
-  .yanta-pulse-ov-body {
-    padding: 14px 16px calc(24px + env(safe-area-inset-bottom));
-  }
-
-}
-
-.yanta-pulse-hist {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.yanta-pulse-hist-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
-
-  padding: 9px 12px;
-
-  border-radius: 9px;
-  background: var(--bg-elev);
-}
-
-.yanta-pulse-hist-row > svg { flex: 0 0 auto; margin-top: 2px; color: var(--text-dim); }
-.yanta-pulse-hist-row.ok > svg { color: var(--accent); }
-.yanta-pulse-hist-row.err > svg { color: var(--red, #ef4444); }
-
-.yanta-pulse-hist-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-
-.yanta-pulse-hist-title {
-  color: var(--text);
-  font-size: 12.5px;
-  font-weight: 600;
-}
-
-.yanta-pulse-hist-line,
-.yanta-pulse-hist-tools {
-  color: var(--text-dim);
-  font-size: 11.5px;
-  line-height: 1.45;
-}
-
-.yanta-pulse-hist-tools code {
-  padding: 1px 5px;
-  margin-right: 4px;
-
-  border-radius: 5px;
-  background: var(--bg);
-  font-size: 11px;
-}
-
-.yanta-pulse-hist-when {
-  flex: 0 0 auto;
-  color: var(--text-dim);
-  font-size: 11px;
-  white-space: nowrap;
-}
-
-.yanta-pulse-ov-note {
-  display: flex;
-  align-items: flex-start;
-  gap: 9px;
-
-  margin-bottom: 10px;
-  padding: 10px 12px;
-
-  border-radius: 9px;
-  background: color-mix(in srgb, var(--yellow, #eab308) 14%, transparent);
-
-  color: var(--text);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.yanta-pulse-ov-note > svg { flex: 0 0 auto; margin-top: 2px; color: var(--yellow, #eab308); }
-.yanta-pulse-ov-note-body { flex: 1; min-width: 0; }
-
-.yanta-pulse-ov-soon {
-  margin-bottom: 12px;
-  color: var(--text-dim);
-  font-size: 12px;
-}
-
-.yanta-pulse-lib-grid {
-  flex: 0 0 auto;
-
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(216px, 1fr));
-  gap: 10px;
-}
-
-.yanta-pulse-lib-card {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 8px;
-
-  padding: 13px;
-
-  border: 1px solid var(--border);
-  border-radius: 11px;
-  background: var(--bg-elev);
-}
-
-.yanta-pulse-lib-card.is-installed { opacity: .6; }
-
-.yanta-pulse-lib-head {
-  display: flex;
-  align-items: center;
-  gap: 7px;
-}
-
-.yanta-pulse-lib-head > svg { flex: 0 0 auto; color: var(--accent); }
-
-.yanta-pulse-lib-head strong {
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 600;
-}
-
-.yanta-pulse-lib-card p {
-  flex: 1;
-  margin: 0;
-
-  color: var(--text-dim);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.yanta-pulse-mini.primary-ghost {
-  border-color: color-mix(in srgb, var(--accent) 50%, var(--border));
-  color: var(--accent);
-}
-
-.yanta-pulse-lib-paste {
-  flex: 0 0 auto;
-  margin-top: 18px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border);
-}
-
-.yanta-pulse-lib-paste .yanta-settings-input { flex: 1; min-width: 0; }
-
-`;
-
-  document.head.append(style);
-}
+let refresh = () => {};
 
 // ---------------- rendering ---------------------------------------
 
@@ -768,7 +446,7 @@ function catalogCard(item, onChange) {
 function pasteLinkRow(onChange) {
   const wrap = el('div', { class: 'yanta-pulse-lib-paste' });
 
-  wrap.append(el('div', { class: 'yanta-pulse-import-label' }, t('pulse.library.pasteLabel')));
+  wrap.append(el('h3', { class: 'ys-section-title' }, t('pulse.library.pasteLabel')));
 
   const row = el('div', { class: 'yanta-pulse-actions' });
 
@@ -808,45 +486,38 @@ function pasteLinkRow(onChange) {
 
 // ---------------- shell -------------------------------------------
 
-function ensureModal() {
-  if (modal) return modal;
+const CHANGE_EVENTS = [
+  'yanta-pulse-routines-changed',
+  'yanta-pulse-history-changed',
+  'yanta-pulse-inbox-changed',
+];
 
-  injectCss();
+/*
+  `adoptHistory`: Settings handed its history entry over (swapOverlay),
+  so the overview binds to that entry instead of pushing another — Back
+  then returns to where Settings was opened from.
+*/
+function openDialog({ adoptHistory = false } = {}) {
+  injectPulseCss();
 
-  /*
-    An HMR reload gives this module a second instance with its own
-    `modal` variable, while the previous instance's element is still in
-    the document. Two overlays then answer the same clicks. Claim the
-    DOM for the live instance rather than stacking ghosts on it.
-  */
-  for (const stale of document.querySelectorAll('.yanta-pulse-overview')) {
-    stale.remove();
-  }
+  const gearLabel = escapeHtml(t('pulse.openSettings'));
 
-  modal = el('div', {
-    class: 'modal yanta-pulse-modal yanta-pulse-overview',
-    role: 'dialog',
-    'aria-modal': 'true',
-    'aria-label': t('pulse.overviewTitle'),
+  dialog = openSurface({
+    kind: 'dialog',
+    title: t('pulse.overviewTitle'),
+    width: 760,
+    className: 'ypo',
+    historyId: 'pulse-overview',
+    adoptHistory,
+    headerExtra: `<button type="button" class="icon-btn" data-gear title="${gearLabel}" aria-label="${gearLabel}">${lucide('settings', 16)}</button>`,
+    onClose: () => {
+      dialog = null;
+      refresh = () => {};
+      for (const event of CHANGE_EVENTS) window.removeEventListener(event, onChange);
+    },
   });
 
-  modal.hidden = true;
-
-  const panel = el('div', { class: 'modal-card yanta-pulse-ov-card' });
-
-  const head = el('div', { class: 'yanta-pulse-ov-head' });
-  head.innerHTML = `${lucide('activity', 16)}<h2>${escapeHtml(t('pulse.overviewTitle'))}</h2>`;
-
-  const gear = el('button', {
-    type: 'button',
-    class: 'yanta-pulse-icon-btn',
-    title: t('pulse.openSettings'),
-    'aria-label': t('pulse.openSettings'),
-  });
-
-  gear.innerHTML = lucide('settings', 15);
-
-  gear.addEventListener('click', async () => {
+  dialog.root.querySelector('[data-gear]').addEventListener('click', async () => {
     const { openSettings } = await import('../settings.js');
 
     swapOverlay('settings', {
@@ -855,22 +526,12 @@ function ensureModal() {
     });
   });
 
-  const close = el('button', {
-    type: 'button',
-    class: 'yanta-pulse-icon-btn',
-    title: t('pulse.close'),
-    'aria-label': t('pulse.close'),
-  });
+  // Subtitle and tabs stay put above the scrolling body.
+  const top = el('div', { class: 'ypo-top' });
+  top.append(el('p', { class: 'ys-dim' }, t('pulse.overviewSubtitle')));
 
-  close.innerHTML = lucide('x', 16);
-  close.addEventListener('click', () => closePulseOverview());
-
-  head.append(gear, close);
-
-  const sub = el('div', { class: 'yanta-pulse-ov-sub' }, t('pulse.overviewSubtitle'));
-
-  const tabs = el('div', { class: 'yanta-pulse-ov-tabs' });
-  const body = el('div', { class: 'yanta-pulse-ov-body' });
+  const tabs = el('div', { class: 'ypo-tabs', role: 'tablist' });
+  const body = dialog.body;
 
   /*
     Renders are async and clear the body before they fill it, so two
@@ -881,7 +542,20 @@ function ensureModal() {
   let rendering = false;
   let dirty = false;
 
-  const refresh = () => {
+  const render = async () => {
+    for (const button of tabs.querySelectorAll('.ypo-tab')) {
+      const on = button.dataset.tab === activeTab;
+      button.classList.toggle('active', on);
+      button.setAttribute('aria-selected', String(on));
+    }
+
+    if (activeTab === 'history') return renderHistoryTab(body, refresh);
+    if (activeTab === 'library') return renderLibraryTab(body, refresh);
+
+    return renderRoutinesTab(body, refresh);
+  };
+
+  refresh = () => {
     if (rendering) {
       dirty = true;
       return;
@@ -901,17 +575,6 @@ function ensureModal() {
       });
   };
 
-  const render = async () => {
-    for (const button of tabs.querySelectorAll('.yanta-pulse-ov-tab')) {
-      button.classList.toggle('active', button.dataset.tab === activeTab);
-    }
-
-    if (activeTab === 'history') return renderHistoryTab(body, refresh);
-    if (activeTab === 'library') return renderLibraryTab(body, refresh);
-
-    return renderRoutinesTab(body, refresh);
-  };
-
   for (const [id, key, icon] of [
     ['routines', 'pulse.tabs.routines', 'activity'],
     ['history', 'pulse.tabs.history', 'history'],
@@ -919,7 +582,8 @@ function ensureModal() {
   ]) {
     const button = el('button', {
       type: 'button',
-      class: 'yanta-pulse-ov-tab',
+      class: 'ypo-tab',
+      role: 'tab',
       dataset: { tab: id },
     });
 
@@ -934,72 +598,33 @@ function ensureModal() {
     tabs.append(button);
   }
 
-  panel.append(head, sub, tabs, body);
-  modal.append(panel);
+  top.append(tabs);
+  dialog.surface.insertBefore(top, body);
 
-  // Backdrop click closes; clicks inside must not.
-  modal.addEventListener('click', (event) => {
-    if (event.target === modal) closePulseOverview();
-  });
+  for (const event of CHANGE_EVENTS) window.addEventListener(event, onChange);
+}
 
-  document.body.append(modal);
-
-  modal._refresh = refresh;
-
-  for (const event of [
-    'yanta-pulse-routines-changed',
-    'yanta-pulse-history-changed',
-    'yanta-pulse-inbox-changed',
-  ]) {
-    window.addEventListener(event, () => {
-      if (modal.hidden === false) refresh();
-    });
-  }
-
-  return modal;
+function onChange() {
+  refresh();
 }
 
 export function pulseOverviewIsOpen() {
-  return !!modal && modal.hidden === false;
-}
-
-function registerRoute() {
-  if (registered) return;
-  registered = true;
-
-  registerOverlayRoute('pulse-overview', {
-    open: () => openPulseOverview({ fromHistory: true }),
-    close: () => closePulseOverview({ fromHistory: true }),
-    isOpen: pulseOverviewIsOpen,
-  });
+  return !!dialog && !dialog.closed;
 }
 
 export function openPulseOverview({
   fromHistory = false,
   tab = '',
 } = {}) {
-  ensureModal();
-  registerRoute();
-
   if (tab) activeTab = tab;
 
-  const wasClosed = modal.hidden !== false;
+  if (!pulseOverviewIsOpen()) openDialog({ adoptHistory: fromHistory });
 
-  modal.hidden = false;
-  modal._refresh();
-
-  if (!fromHistory && wasClosed) pushOverlayState('pulse-overview');
+  refresh();
 }
 
 export function closePulseOverview({ fromHistory = false } = {}) {
-  if (!modal || modal.hidden !== false) return;
-
-  if (!fromHistory) {
-    closeTopOverlay(() => closePulseOverview({ fromHistory: true }));
-    return;
-  }
-
-  modal.hidden = true;
+  dialog?.close({ fromHistory });
 }
 
 /** Plan-paused routines, for the "you should know" surfaces. */

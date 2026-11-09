@@ -2364,3 +2364,79 @@ color-mix(in srgb, var(--accent) 36%, transparent);
     font-size: 10px;
   }
 }
+
+/* ============================================================
+   Pulse overview + routine import (src/pulse/) — the frames are
+   surfaces (src/ui/surface.js); this is what goes inside them.
+   ============================================================ */
+
+/* The tabs hold very different amounts; a window that resizes under the
+   pointer on every tab switch feels broken, so the height is fixed and
+   the body scrolls. */
+.ypo.ys-dialog .ys-surface { height: min(660px, calc(100vh - 48px)); }
+.ypo.ys-sheet .ys-surface { height: 92vh; }
+.ypo-top { flex: none; padding: 0 var(--space-6) var(--space-1); }
+.ypo-tabs { display: flex; gap: 3px; margin-top: var(--space-3); padding: 3px; border-radius: 10px; background: var(--bg-elev-2); }
+.ypo-tab {
+  flex: 1; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 7px 10px; border: 0; border-radius: var(--radius-control); background: transparent;
+  color: var(--text-dim); font: inherit; font-size: var(--text-sm); font-weight: 500; cursor: pointer;
+  transition: background .14s ease, color .14s ease;
+}
+.ypo-tab:hover { color: var(--text); }
+.ypo-tab.active { background: var(--bg-elev); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgba(0, 0, 0, .08); }
+.ypo-tab.active > svg { color: var(--accent); }
+.ypo .ys-body { display: flex; flex-direction: column; padding-top: var(--space-4); }
+
+/* Rows, not cards: the surface is the only box. */
+.ypo .yanta-pulse-routines { flex: none; gap: 0; }
+.ypo .yanta-pulse-routine { padding: var(--space-3) 0; border: 0; border-radius: 0; background: none; }
+.ypo .yanta-pulse-routine + .yanta-pulse-routine { border-top: 1px solid var(--border); }
+
+/* A short tab leaves real space in the fixed height: the empty state
+   takes its middle rather than clinging to the top. */
+.yanta-pulse-ov-empty { margin: auto 0; padding: var(--space-6) var(--space-4); display: flex; flex-direction: column; align-items: center; gap: 10px; text-align: center; }
+.yanta-pulse-ov-empty > svg { color: var(--text-dim); opacity: .5; }
+.yanta-pulse-ov-empty span { max-width: 32ch; font-size: var(--text-sm); line-height: 1.6; color: var(--text-dim); }
+
+.yanta-pulse-ov-note { display: flex; align-items: flex-start; gap: 9px; margin-bottom: var(--space-4); font-size: var(--text-sm); line-height: 1.5; }
+.yanta-pulse-ov-note > svg { flex: none; margin-top: 3px; color: var(--yellow, #eab308); }
+.yanta-pulse-ov-note-body { flex: 1; min-width: 0; }
+.yanta-pulse-ov-note-body > div { margin-top: var(--space-2); }
+.yanta-pulse-ov-soon { margin-bottom: var(--space-2); font-size: var(--text-sm); color: var(--text-dim); }
+
+.yanta-pulse-hist { flex: none; display: flex; flex-direction: column; }
+.yanta-pulse-hist-row { display: flex; align-items: flex-start; gap: 10px; padding: var(--space-3) 0; }
+.yanta-pulse-hist-row + .yanta-pulse-hist-row { border-top: 1px solid var(--border); }
+.yanta-pulse-hist-row > svg { flex: none; margin-top: 2px; color: var(--text-dim); }
+.yanta-pulse-hist-row.ok > svg { color: var(--accent); }
+.yanta-pulse-hist-row.err > svg { color: var(--red, #ef4444); }
+.yanta-pulse-hist-meta { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.yanta-pulse-hist-title { font-size: var(--text-sm); font-weight: 600; }
+.yanta-pulse-hist-line, .yanta-pulse-hist-tools { font-size: var(--text-xs); line-height: 1.45; color: var(--text-dim); }
+.yanta-pulse-hist-tools code { margin-right: 4px; padding: 1px 5px; border-radius: 5px; background: var(--bg-elev-2); font-size: 11px; }
+.yanta-pulse-hist-when { flex: none; font-size: 11px; color: var(--text-dim); white-space: nowrap; }
+
+.yanta-pulse-lib-grid { flex: none; display: grid; grid-template-columns: repeat(auto-fill, minmax(216px, 1fr)); gap: var(--space-5) var(--space-6); margin-top: var(--space-2); }
+.yanta-pulse-lib-card { display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2); }
+.yanta-pulse-lib-card.is-installed { opacity: .6; }
+.yanta-pulse-lib-head { display: flex; align-items: center; gap: 7px; }
+.yanta-pulse-lib-head > svg { flex: none; color: var(--accent); }
+.yanta-pulse-lib-head strong { font-size: var(--text-sm); font-weight: 600; }
+.yanta-pulse-lib-card p { flex: 1; margin: 0; font-size: var(--text-xs); line-height: 1.5; color: var(--text-dim); }
+.yanta-pulse-mini.primary-ghost { border-color: color-mix(in srgb, var(--accent) 50%, var(--border)); color: var(--accent); }
+.yanta-pulse-lib-paste { flex: none; margin-top: var(--space-6); padding-top: var(--space-4); border-top: 1px solid var(--border); }
+.yanta-pulse-lib-paste .yanta-pulse-actions { display: flex; gap: var(--space-2); }
+.yanta-pulse-lib-paste .yanta-settings-input { flex: 1; min-width: 0; }
+
+.ypi-name { font-size: var(--text-lg); font-weight: 600; }
+.ypi-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: var(--space-3); }
+.ypi-guards { display: grid; gap: var(--space-2); margin-top: var(--space-4); list-style: none; }
+.ypi-guards li { display: flex; align-items: flex-start; gap: var(--space-2); font-size: var(--text-sm); line-height: 1.5; color: var(--text-dim); }
+.ypi-guards li > svg { flex: none; margin-top: 2px; color: var(--accent); }
+.ypi .ys-section { margin-top: var(--space-5); }
+.ypi-source {
+  margin: 0; padding-left: var(--space-3); border-left: 2px solid var(--border);
+  font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--text-xs); line-height: 1.6; color: var(--text-dim);
+  white-space: pre-wrap; overflow-wrap: anywhere;
+}

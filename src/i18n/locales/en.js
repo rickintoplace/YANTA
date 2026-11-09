@@ -1507,6 +1507,7 @@ export default {
       codeBlock: 'Code block',
       toggleTaskDone: 'Toggle task done',
     },
+    placeholder: 'Start writing … type / for commands, [[ to link a note',
   },
 
   lock: {
@@ -1761,6 +1762,8 @@ export default {
       fontHumanist: 'Humanist',
       fontRounded: 'Rounded',
       fontSystemMono: 'System mono',
+      showMarkdown: 'Always show Markdown characters',
+      showMarkdownHint: 'Otherwise #, ** and the like appear only on the line you are writing; everywhere else the note reads as formatted text.',
     },
 
     colors: {

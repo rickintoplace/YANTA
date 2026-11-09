@@ -1498,6 +1498,7 @@ export default {
       codeBlock: 'Bloc de code',
       toggleTaskDone: 'Cocher la tâche',
     },
+    placeholder: 'Commencez à écrire … / pour les commandes, [[ pour lier une note',
   },
 
   lock: {
@@ -1746,6 +1747,8 @@ export default {
       fontHumanist: 'Humaniste',
       fontRounded: 'Arrondie',
       fontSystemMono: 'Système (chasse fixe)',
+      showMarkdown: 'Toujours afficher les caractères Markdown',
+      showMarkdownHint: 'Sinon, #, ** et autres n’apparaissent que sur la ligne que vous écrivez ; ailleurs, la note se lit comme du texte mis en forme.',
     },
 
     colors: {

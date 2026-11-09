@@ -1483,6 +1483,7 @@ export default {
       codeBlock: 'コードブロック',
       toggleTaskDone: 'タスクの完了を切り替え',
     },
+    placeholder: '書き始めましょう… / でコマンド、[[ でノートにリンク',
   },
 
   lock: {
@@ -1731,6 +1732,8 @@ export default {
       fontHumanist: 'ヒューマニスト',
       fontRounded: '丸ゴシック',
       fontSystemMono: 'システム（等幅）',
+      showMarkdown: 'Markdown記号を常に表示',
+      showMarkdownHint: 'オフの場合、# や ** などは入力中の行にだけ表示され、それ以外は書式付きのテキストとして表示されます。',
     },
 
     colors: {

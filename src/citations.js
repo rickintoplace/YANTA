@@ -30,11 +30,7 @@ import {
   listCitationsForNote,
 } from './yjs.js';
 
-import {
-  pushOverlayState,
-  closeTopOverlay,
-  registerOverlayRoute,
-} from './overlay-history.js';
+import { openSurface } from './ui/surface.js';
 
 import {
   resolveCitation,
@@ -51,8 +47,14 @@ import {
   normUrl,
 } from './citation-resolvers.js';
 
+/*
+  The form is built once and kept: what was typed into the fields is still
+  there when the manager opens again. `dialog` is the surface it sits in
+  while open (src/ui/surface.js).
+*/
 let modal = null;
-let citationOverlayRegistered = false;
+let footButtons = null;
+let dialog = null;
 let selectedStyle = 'apa';
 let currentModel = null;
 let currentKey = '';
@@ -62,29 +64,7 @@ let fetching = false;
 const STYLE_KEY = 'yanta.citations.style';
 
 function citationManagerIsOpen() {
-  return !!modal && modal.hidden === false;
-}
-
-function registerCitationOverlayRoute() {
-  if (citationOverlayRegistered) return;
-
-  citationOverlayRegistered = true;
-
-  registerOverlayRoute('citations', {
-    open: ({ data } = {}) => {
-      openCitationManager(data?.seed || '', {
-        fromHistory: true,
-      });
-    },
-
-    close: () => {
-      closeCitationManager({
-        fromHistory: true,
-      });
-    },
-
-    isOpen: citationManagerIsOpen,
-  });
+  return !!dialog && !dialog.closed;
 }
 
 function loadStylePref() {
@@ -338,7 +318,7 @@ function scheduleCitationPrune(noteId) {
     try {
       const removed = pruneUnusedCitationsForNote(noteId);
 
-      if (removed && modal && !modal.hidden) {
+      if (removed && citationManagerIsOpen()) {
         renderExistingCitations();
       }
     } catch (err) {
@@ -397,29 +377,14 @@ function copyRich(html) {
 }
 
 function ensureModal() {
-  registerCitationOverlayRoute();
-
   if (modal) return modal;
 
-  injectCitationCss();
-
   modal = document.createElement('div');
-  modal.className = 'yanta-cite-modal';
-  modal.hidden = true;
+  modal.className = 'ycm-form';
 
   modal.innerHTML = `
-    <div class="yanta-cite-card" role="dialog" aria-modal="true" aria-label="${escapeHtml(t('citations.insert'))}">
-      <header class="yanta-cite-head">
-        <div class="yanta-cite-title">
-          <span>${lucide('quote', 17)}</span>
-          <strong>${escapeHtml(t('citations.insert'))}</strong>
-        </div>
-        <button class="icon-btn" data-cite-close title="${escapeHtml(t('common.close'))}">${lucide('x', 16)}</button>
-      </header>
-
-      <div class="yanta-cite-body">
-        <section class="yanta-cite-panel yanta-cite-input-panel">
-          <div class="yanta-cite-input-row">
+        <section class="ys-section">
+          <div class="ycm-input-row">
             <label>
               DOI / PMID / PMCID / ISBN / URL
               <input data-cite-input class="text-input" placeholder="10.1038/... · PMID:123456 · PMC123456 · ISBN · https://..." spellcheck="false" />
@@ -427,13 +392,13 @@ function ensureModal() {
             <button class="btn primary" data-cite-fetch>${lucide('search', 14)} ${escapeHtml(t('citations.fetch'))}</button>
           </div>
 
-          <div class="yanta-cite-status" data-cite-status></div>
+          <div class="ycm-status" data-cite-status></div>
         </section>
 
-        <section class="yanta-cite-panel">
-          <div class="yanta-cite-panel-title">${escapeHtml(t('citations.metadata'))}</div>
+        <section class="ys-section">
+          <h3 class="ys-section-title">${escapeHtml(t('citations.metadata'))}</h3>
 
-          <div class="yanta-cite-grid">
+          <div class="ycm-grid">
             <label>
               ${escapeHtml(t('citations.field.type'))}
               <select data-cite-type class="text-input">
@@ -519,7 +484,7 @@ function ensureModal() {
             </label>
           </div>
 
-          <div class="yanta-cite-style-row">
+          <div class="ycm-style-row">
             <span>${escapeHtml(t('citations.style'))}</span>
             <button class="btn" data-cite-style="apa">APA 7</button>
             <button class="btn" data-cite-style="harvard">Harvard</button>
@@ -528,35 +493,25 @@ function ensureModal() {
           </div>
         </section>
 
-        <section class="yanta-cite-panel">
-          <div class="yanta-cite-panel-title">${escapeHtml(t('citations.preview'))}</div>
-          <div data-cite-preview class="yanta-cite-preview">${escapeHtml(t('citations.empty'))}</div>
-          <div data-cite-warning class="yanta-cite-warning" hidden></div>
+        <section class="ys-section">
+          <h3 class="ys-section-title">${escapeHtml(t('citations.preview'))}</h3>
+          <div data-cite-preview class="ycm-preview">${escapeHtml(t('citations.empty'))}</div>
+          <div data-cite-warning class="ycm-warning" hidden></div>
         </section>
 
-        <section class="yanta-cite-panel">
-          <div class="yanta-cite-panel-title">${escapeHtml(t('citations.inThisNote'))}</div>
-          <div data-cite-existing class="yanta-cite-existing"></div>
+        <section class="ys-section">
+          <h3 class="ys-section-title">${escapeHtml(t('citations.inThisNote'))}</h3>
+          <div data-cite-existing class="ycm-existing"></div>
         </section>
-      </div>
 
-      <footer class="yanta-cite-foot">
-        <button class="btn" data-cite-copy>${lucide('copy', 14)} ${escapeHtml(t('common.copy'))}</button>
-        <button class="btn" data-cite-export>${lucide('download', 14)} CSL JSON</button>
-        <span class="grow"></span>
-        <button class="btn" data-cite-insert-ref>${lucide('list-plus', 14)} ${escapeHtml(t('image.insertBibliography'))}</button>
-        <button class="btn primary" data-cite-insert>${lucide('quote', 14)} ${escapeHtml(t('citations.insert'))}</button>
-      </footer>
-    </div>
+        <div class="ycm-foot" data-cite-foot>
+          <button class="btn" data-cite-copy>${lucide('copy', 14)} ${escapeHtml(t('common.copy'))}</button>
+          <button class="btn" data-cite-export>${lucide('download', 14)} CSL JSON</button>
+          <span class="ys-grow"></span>
+          <button class="btn" data-cite-insert-ref>${lucide('list-plus', 14)} ${escapeHtml(t('image.insertBibliography'))}</button>
+          <button class="btn primary" data-cite-insert>${lucide('quote', 14)} ${escapeHtml(t('citations.insert'))}</button>
+        </div>
   `;
-
-  document.body.append(modal);
-
-  modal.addEventListener('mousedown', (e) => {
-    if (e.target === modal) closeCitationManager();
-  });
-
-  modal.querySelector('[data-cite-close]').addEventListener('click', closeCitationManager);
 
   modal.querySelector('[data-cite-fetch]').addEventListener('click', () => {
     const input = modal.querySelector('[data-cite-input]');
@@ -647,17 +602,9 @@ function ensureModal() {
     insertCurrentCitation({ mode: 'bibliography' });
   });
 
-  window.addEventListener('keydown', (e) => {
-    if (!modal || modal.hidden) return;
-    if (e.key === 'Escape') {
-      e.preventDefault();
-      closeCitationManager();
-    }
-    if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-      e.preventDefault();
-      insertCurrentCitation({ mode: 'footnote' });
-    }
-  });
+  // The buttons live in the surface's footer while it is open.
+  footButtons = modal.querySelector('[data-cite-foot]');
+  footButtons.remove();
 
   return modal;
 }
@@ -667,7 +614,7 @@ function setStatus(msg, type = '') {
   if (!el) return;
 
   el.textContent = msg || '';
-  el.className = 'yanta-cite-status' + (type ? ` ${type}` : '');
+  el.className = 'ycm-status' + (type ? ` ${type}` : '');
 }
 
 function setWarning(msg) {
@@ -805,7 +752,7 @@ function renderExistingCitations() {
   host.replaceChildren();
 
   if (!state.currentNoteId) {
-    host.innerHTML = `<div class="yanta-cite-empty">${escapeHtml(t('citations.openNoteFirst'))}</div>`;
+    host.innerHTML = `<p class="ys-dim">${escapeHtml(t('citations.openNoteFirst'))}</p>`;
     return;
   }
 
@@ -816,14 +763,14 @@ function renderExistingCitations() {
     .filter((c) => usedKeys.has(String(c.key || '')));
 
   if (!list.length) {
-    host.innerHTML = `<div class="yanta-cite-empty">${escapeHtml(t('citations.noneInNote'))}</div>`;
+    host.innerHTML = `<p class="ys-dim">${escapeHtml(t('citations.noneInNote'))}</p>`;
     return;
   }
 
   for (const c of list) {
     const row = document.createElement('button');
     row.type = 'button';
-    row.className = 'yanta-cite-existing-row';
+    row.className = 'ycm-existing-row';
 
     const title =
       c.csl?.title ||
@@ -909,24 +856,33 @@ function insertCurrentCitation({ mode = 'footnote' } = {}) {
   closeCitationManager();
 }
 
-export function openCitationManager(seed = '', {
-  fromHistory = false,
-} = {}) {
+export function openCitationManager(seed = '') {
   loadStylePref();
   ensureModal();
   updateStyleButtons();
 
   const autoSeed = seed || findCitationSeed();
 
-  const wasClosed = modal.hidden !== false;
+  if (!citationManagerIsOpen()) {
+    dialog = openSurface({
+      kind: 'dialog',
+      title: t('citations.insert'),
+      width: 920,
+      className: 'ycm',
+      historyId: 'citations',
+      footer: true,
+    });
+    dialog.body.append(modal);
+    dialog.foot.append(footButtons);
 
-  modal.hidden = false;
-
-  if (!fromHistory && wasClosed) {
-    pushOverlayState('citations', {
-      seed: seed || '',
+    dialog.root.addEventListener('keydown', (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+        e.preventDefault();
+        insertCurrentCitation({ mode: 'footnote' });
+      }
     });
   }
+
   modal.querySelector('[data-cite-input]').value = autoSeed || '';
   modal.querySelector('[data-cite-preview]').textContent = t('citations.empty');
   setStatus('');
@@ -950,24 +906,11 @@ export function openCitationManager(seed = '', {
 export function closeCitationManager({
   fromHistory = false,
 } = {}) {
-  if (!modal) return;
-
-  if (!fromHistory && modal.hidden === false) {
-    closeTopOverlay(() => {
-      closeCitationManager({
-        fromHistory: true,
-      });
-    });
-
-    return;
-  }
-
-  modal.hidden = true;
+  dialog?.close({ fromHistory });
 }
 
 export function setupCitations() {
   loadStylePref();
-  ensureModal();
 
   // After each preview render, prune stale citation metadata for the current note.
   // This covers manual deletion of [^key] from the editor.
@@ -1156,272 +1099,4 @@ export function insertSavedCitationIntoCurrentNote(citation, { mode = 'footnote'
   upsertFootnoteDefinition(noteId, key, formatted);
 
   toast(t('citations.inserted'), 'success');
-}
-
-function injectCitationCss() {
-  if (document.getElementById('yanta-citation-css')) return;
-
-  const style = document.createElement('style');
-  style.id = 'yanta-citation-css';
-  style.textContent = `
-.yanta-cite-modal {
-  position: fixed;
-  inset: 0;
-  z-index: 210;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 24px;
-  background: rgba(0,0,0,0.54);
-  backdrop-filter: blur(4px);
-  animation: fade-in 0.12s ease;
-}
-
-.yanta-cite-modal[hidden] {
-  display: none !important;
-}
-
-.yanta-cite-card {
-  width: min(920px, 96vw);
-  max-height: min(860px, 92vh);
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  background: var(--bg-elev);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  box-shadow: 0 24px 80px rgba(0,0,0,.45);
-}
-
-.yanta-cite-head,
-.yanta-cite-foot {
-  flex: 0 0 auto;
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 12px 14px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-elev-2);
-}
-
-.yanta-cite-foot {
-  border-top: 1px solid var(--border);
-  border-bottom: 0;
-}
-
-.yanta-cite-title {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.yanta-cite-title span {
-  display: inline-flex;
-  color: var(--accent);
-}
-
-.yanta-cite-title strong {
-  font-size: 14px;
-}
-
-.yanta-cite-body {
-  flex: 1 1 auto;
-  min-height: 0;
-  overflow: auto;
-  padding: 12px;
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-}
-
-.yanta-cite-panel {
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  padding: 12px;
-}
-
-.yanta-cite-panel-title {
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: .08em;
-  color: var(--text-faint);
-  font-weight: 700;
-  margin-bottom: 10px;
-}
-
-.yanta-cite-input-row {
-  display: grid;
-  grid-template-columns: 1fr auto;
-  gap: 10px;
-  align-items: end;
-}
-
-.yanta-cite-input-row label,
-.yanta-cite-grid label {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  font-size: 11px;
-  color: var(--text-dim);
-}
-
-.yanta-cite-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.yanta-cite-grid .wide {
-  grid-column: 1 / -1;
-}
-
-.yanta-cite-grid .hint {
-  color: var(--text-faint);
-  font-weight: 400;
-  text-transform: none;
-  letter-spacing: 0;
-}
-
-.yanta-cite-status {
-  min-height: 18px;
-  margin-top: 8px;
-  font-size: 12px;
-  color: var(--text-faint);
-}
-
-.yanta-cite-status.ok {
-  color: var(--green);
-}
-
-.yanta-cite-status.warn {
-  color: var(--yellow);
-}
-
-.yanta-cite-status.error {
-  color: var(--red);
-}
-
-.yanta-cite-style-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-wrap: wrap;
-  margin-top: 12px;
-  font-size: 12px;
-  color: var(--text-dim);
-}
-
-.yanta-cite-preview {
-  min-height: 58px;
-  padding: 12px;
-  border: 1px dashed var(--border);
-  border-radius: 8px;
-  background: var(--bg);
-  font-family: Georgia, "Times New Roman", serif;
-  font-size: 16px;
-  line-height: 1.55;
-  overflow-wrap: anywhere;
-}
-
-.yanta-cite-preview .muted {
-  color: var(--text-faint);
-  font-family: var(--font);
-  font-size: 13px;
-}
-
-.yanta-cite-warning {
-  margin-top: 8px;
-  padding: 8px 10px;
-  border: 1px solid color-mix(in srgb, var(--yellow) 45%, var(--border));
-  background: color-mix(in srgb, var(--yellow) 10%, transparent);
-  color: var(--yellow);
-  border-radius: 7px;
-  font-size: 12px;
-}
-
-.yanta-cite-existing {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.yanta-cite-existing-row {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  padding: 7px 9px;
-  background: transparent;
-  color: var(--text);
-  border: 0;
-  border-radius: 7px;
-  cursor: pointer;
-  text-align: left;
-}
-
-.yanta-cite-existing-row:hover {
-  background: var(--bg-elev-2);
-}
-
-.yanta-cite-existing-row .key {
-  color: var(--accent);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  flex: 0 0 auto;
-}
-
-.yanta-cite-existing-row .title {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  color: var(--text-dim);
-  font-size: 12px;
-}
-
-.yanta-cite-empty {
-  padding: 10px;
-  color: var(--text-faint);
-  font-size: 12px;
-  font-style: italic;
-}
-
-.yanta-cite-foot .grow {
-  flex: 1;
-}
-
-@media (max-width: 720px) {
-  .yanta-cite-modal {
-    padding: 8px;
-    align-items: stretch;
-  }
-
-  .yanta-cite-card {
-    width: 100%;
-    max-height: 96vh;
-  }
-
-  .yanta-cite-input-row {
-    grid-template-columns: 1fr;
-  }
-
-  .yanta-cite-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .yanta-cite-foot {
-    flex-wrap: wrap;
-  }
-
-  .yanta-cite-foot .grow {
-    display: none;
-  }
-}
-`;
-
-  document.head.append(style);
 }

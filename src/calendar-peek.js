@@ -65,19 +65,7 @@ export function openCalendarPeek(ev, anchor, { onCopy } = {}) {
 
   peek.body.addEventListener('click', (e) => {
     if (!e.target.closest('[data-copy]')) return;
-    /*
-      Closing goes back in history; opening the editor in the same tick
-      would be undone by that popstate. Open once it has happened.
-    */
-    let done = false;
-    const go = () => {
-      if (done) return;
-      done = true;
-      window.removeEventListener('popstate', go);
-      setTimeout(() => onCopy?.(ev), 0);
-    };
-    window.addEventListener('popstate', go);
-    setTimeout(go, 350);
-    peek?.close();
+    // The editor opens once the peek's history entry is gone.
+    peek?.closeThen(() => onCopy?.(ev));
   });
 }

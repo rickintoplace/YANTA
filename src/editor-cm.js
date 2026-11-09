@@ -27,6 +27,7 @@ import {
   editorShortcutsExtension,
 } from './editor/editor-shortcuts-cm.js';
 import { tableEditing } from './editor/table-cm.js';
+import { livePreview, refreshLiveTitle } from './editor/live-preview.js';
 
 let view = null;
 let currentNoteId = null;
@@ -35,6 +36,12 @@ let applyingYUpdate = false;
 
 const themeCompartment = new Compartment();
 const editableCompartment = new Compartment();
+// Markdown characters shown only on the cursor's line (editor/live-preview.js).
+const livePreviewCompartment = new Compartment();
+export const SHOW_MARKDOWN_KEY = 'yanta.editor.showMarkdown';
+let livePreviewOn = (() => {
+  try { return localStorage.getItem(SHOW_MARKDOWN_KEY) !== '1'; } catch { return true; }
+})();
 
 // ----- Custom highlight style (matches YANTA theme) ---------------------
 const yantaHighlight = HighlightStyle.define([
@@ -1622,7 +1629,8 @@ function collectMarkdownInlineRanges(text, lineFrom, ranges) {
   }
 
   // Italic with _..._
-  const italicUnderscoreRe = /(?<!_)_([^_\n]+)_(?!_)/g;
+  // Not inside words: snake_case_names are not emphasis.
+  const italicUnderscoreRe = /(?<![_\w])_([^_\n]+)_(?![_\w])/g;
   while ((m = italicUnderscoreRe.exec(text)) !== null) {
     const fullFrom = m.index;
     const fullTo = m.index + m[0].length;
@@ -2238,9 +2246,10 @@ export function mountEditor(host, { noteId, awarenessUser }) {
       { key: 'Tab', run: acceptCompletion },
       indentWithTab,
     ]),
-    placeholder('Start writing in Markdown… type / for commands, [[ for links'),
+    placeholder(i18n('editor.placeholder')),
     themeCompartment.of(yantaTheme),
     editableCompartment.of([]),
+    livePreviewCompartment.of(livePreviewOn ? livePreviewExtension() : []),
   ];
 
   // y-codemirror.next expects the initial editor doc to mirror the
@@ -2258,6 +2267,22 @@ export function mountEditor(host, { noteId, awarenessUser }) {
 }
 
 export function getView() { return view; }
+
+function livePreviewExtension() {
+  return livePreview({ getTitle: () => state.notes.get(currentNoteId)?.title || '' });
+}
+
+/** Writing view: Markdown characters only on the cursor's line (on), or everywhere (off). */
+export function setLivePreview(on) {
+  livePreviewOn = on !== false;
+  try { localStorage.setItem(SHOW_MARKDOWN_KEY, livePreviewOn ? '0' : '1'); } catch {}
+  view?.dispatch({ effects: livePreviewCompartment.reconfigure(livePreviewOn ? livePreviewExtension() : []) });
+}
+
+/** The title changed: a first line repeating it is hidden or shown again. */
+export function refreshEditorTitle() {
+  view?.dispatch({ effects: refreshLiveTitle.of(null) });
+}
 
 // Hard read-only for notes the user may not edit (e.g. mounted from a
 // shared space with a read role). Blocks both keyboard input and

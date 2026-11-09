@@ -12,16 +12,45 @@
 // the same: the tokens and `.ys-*` rules live in styles.css, not here.
 //
 //   const s = openSurface({ kind: 'dialog', title, label, className,
-//                           anchor, width, onClose, historyId });
+//                           anchor, width, onClose, historyId, footer });
 //   s.body.innerHTML = …;  s.setTitle('…');  s.close();
+//   s.closeThen(() => openSomethingElse());
 // ============================================================
 
 import { escapeAttr, escapeHtml, lucide } from '../core.js';
 import { t } from '../i18n/index.js';
-import { openBoundOverlay } from '../overlay-history.js';
+import { openBoundOverlay, overlayIdFromState } from '../overlay-history.js';
 
 const PHONE = '(max-width: 640px)';
 const open = new Set();
+
+/*
+  Closing a surface goes back in history, and that popstate lands a moment
+  later. Anything that pushes an entry before then is undone by it — the
+  overlay router sees "back to the page" and closes what just opened. So
+  a closing surface leaves `settling` behind until its popstate is in,
+  and the next surface (or closeThen) waits for it before touching history.
+*/
+let settling = null;
+
+function goBack(release, historyId) {
+  const ours = overlayIdFromState() === historyId;
+  release();
+  if (!ours) return;
+
+  const landed = new Promise((resolve) => {
+    const done = () => {
+      window.removeEventListener('popstate', done);
+      resolve();
+    };
+    window.addEventListener('popstate', done);
+    setTimeout(done, 350);
+  });
+  const mine = landed.then(() => {
+    if (settling === mine) settling = null;
+  });
+  settling = mine;
+}
 
 export function isPhoneLayout() {
   return window.matchMedia(PHONE).matches;
@@ -37,6 +66,10 @@ export function isPhoneLayout() {
  * @param historyId  overlay-history id (Back closes the surface)
  * @param onClose    called once, after the surface started closing
  * @param headerExtra HTML placed between title and close button
+ * @param footer     true: a row under the body that does not scroll away
+ *                   (`s.foot`), for the buttons that finish the task
+ * @param adoptHistory the history entry is already there (swapOverlay
+ *                   moved it over); bind to it instead of pushing one
  */
 export function openSurface({
   kind = 'dialog',
@@ -48,6 +81,8 @@ export function openSurface({
   historyId = 'surface',
   onClose = null,
   headerExtra = '',
+  footer = false,
+  adoptHistory = false,
 } = {}) {
   const phone = isPhoneLayout();
   const shape = phone || kind === 'sheet' ? 'sheet' : kind;
@@ -68,6 +103,7 @@ export function openSurface({
         <button type="button" class="icon-btn ys-x" data-ys-close aria-label="${escapeAttr(t('common.close'))}">${lucide('x', 16)}</button>
       </header>
       <div class="ys-body"></div>
+      ${footer ? '<footer class="ys-foot"></footer>' : ''}
     </div>`;
   document.body.append(root);
 
@@ -97,6 +133,7 @@ export function openSurface({
     root,
     body,
     surface,
+    foot: root.querySelector('.ys-foot'),
     shape,
     setTitle(text) {
       root.querySelector('.ys-title').textContent = text;
@@ -109,13 +146,24 @@ export function openSurface({
       open.delete(api);
       document.removeEventListener('keydown', onKey, true);
       document.removeEventListener('pointerdown', onOutside, true);
-      if (!fromHistory) release?.();
+      if (!fromHistory && release) goBack(release, historyId);
       release = null;
       root.classList.add('is-leaving');
       const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
       setTimeout(() => root.remove(), reduce ? 0 : 160);
       if (opener?.isConnected) opener.focus({ preventScroll: true });
       onClose?.();
+    },
+    /*
+      Close, then do what comes next once Back has landed: a note, a
+      route or anything else that writes history would otherwise be
+      undone by it.
+    */
+    closeThen(next) {
+      api.close();
+      return (settling || Promise.resolve())
+        .then(() => new Promise((resolve) => setTimeout(resolve, 0)))
+        .then(() => next?.());
     },
     get closed() {
       return closed;
@@ -129,10 +177,17 @@ export function openSurface({
   if (shape === 'popover') setTimeout(() => !closed && document.addEventListener('pointerdown', onOutside, true), 0);
 
   open.add(api);
-  release = openBoundOverlay(historyId, {
-    close: ({ fromHistory } = {}) => api.close({ fromHistory }),
-    isOpen: () => !closed,
-  });
+  const bind = () => {
+    if (closed) return;
+    release = openBoundOverlay(historyId, {
+      close: ({ fromHistory } = {}) => api.close({ fromHistory }),
+      isOpen: () => !closed,
+      push: !adoptHistory,
+    });
+  };
+  // The surface shows at once; its history entry follows a pending Back.
+  if (settling) settling.then(bind);
+  else bind();
 
   // Focus moves into the surface (for keyboards and screen readers)
   // without lighting up a button nobody chose.

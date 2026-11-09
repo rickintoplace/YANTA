@@ -74,3 +74,17 @@ export function currentMarkdown() {
 export function setEditorLineSpacers(extraByLine) {
   impl?.setEditorLineSpacers(extraByLine);
 }
+
+/** Markdown characters only on the cursor's line (true) or always (false). Remembered per device. */
+export async function setLivePreview(on) {
+  await ensureEditor();
+  impl.setLivePreview(on);
+}
+
+export function isLivePreviewOn() {
+  try { return localStorage.getItem('yanta.editor.showMarkdown') !== '1'; } catch { return true; }
+}
+
+export function refreshEditorTitle() {
+  impl?.refreshEditorTitle();
+}

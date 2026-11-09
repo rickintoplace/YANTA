@@ -74,9 +74,6 @@ async function seed(page) {
 
 const SCENES = [
   { name: 'dashboard', run: async () => {} },
-  { name: 'note', run: async (page) => {
-    await page.evaluate(async () => (await import('/src/notes.js')).createWelcomeNote({ open: true }));
-  } },
   { name: 'calendar-month', run: async (page) => {
     await page.evaluate(async () => (await import('/src/calendar.js')).openCalendar({ push: true }));
   } },
@@ -104,6 +101,11 @@ const SCENES = [
   } },
   { name: 'assistant', run: async (page) => {
     await page.evaluate(async () => (await import('/src/ai/assistant-ui.js')).openAssistant());
+  } },
+  // Last: opening a note opens its folder in the sidebar, and that is
+  // remembered — it would differ between runs for every scene after it.
+  { name: 'note', run: async (page) => {
+    await page.evaluate(async () => (await import('/src/notes.js')).createWelcomeNote({ open: true }));
   } },
 ];
 
@@ -173,6 +175,11 @@ async function shoot(browser, url, vpName, theme) {
   };
 
   await boot();
+  // A fresh vault gets its welcome notes a few seconds after the first
+  // start; wait for them, or some runs picture the start page before and
+  // others after.
+  await page.waitForFunction(() => /\bWelcome\b/.test(document.querySelector('#tree')?.textContent || ''), null, { timeout: 20000 }).catch(() => {});
+  await page.waitForTimeout(1500);
   const data = await seed(page);
   // Writes reach IndexedDB a little after put*() returns; a reload before
   // that would drop an event from some runs and not others.

@@ -8,6 +8,7 @@
 
 import { isChatEnabled } from './chat/chat-enabled.js';
 import { $, el, state, store, toast, lucide, escapeHtml, safeCssColor, cssColorToHex, fmtBytes, updateStorageMeter } from './core.js';
+import { setLivePreview, isLivePreviewOn } from './editor.js';
 import { LOCALES, getLocale, hasExplicitLocale, setLocale, clearLocale, t } from './i18n/index.js';
 import {
   getDashboardCardDisplayPrefs,
@@ -1970,6 +1971,16 @@ function renderTypographySection(host) {
   const a = getAppearance();
 
   host.append(sectionHeader(t('settings.sections.typography.title'), t('settings.sections.typography.subtitle')));
+
+  // How notes read while writing: as meant, or with every Markdown character.
+  const writingGroup = el('div', { class: 'yanta-settings-group' });
+  writingGroup.append(renderSettingsToggleRow({
+    checked: !isLivePreviewOn(),
+    label: t('settings.typography.showMarkdown'),
+    hint: t('settings.typography.showMarkdownHint'),
+    onChange: (checked) => setLivePreview(!checked),
+  }));
+  host.append(writingGroup);
 
   // Body font
   const fontGroup = el('div', { class: 'yanta-settings-group' });

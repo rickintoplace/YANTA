@@ -1248,6 +1248,13 @@ a.pv-doi { color: var(--accent-2); text-decoration: none; border-bottom: 1px dot
 .ys-title { flex: 1; min-width: 0; margin: 0; font-size: var(--text-lg); font-weight: 650; letter-spacing: -0.01em; overflow-wrap: anywhere; }
 .ys-body { overflow: auto; overscroll-behavior: contain; padding: var(--space-2) var(--space-6) var(--space-6); min-height: 0; }
 .ys-popover .ys-body { padding: var(--space-1) var(--space-4) var(--space-4); }
+/* The buttons that finish a task stay in reach while the body scrolls. */
+.ys-foot {
+  display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); flex: none;
+  padding: var(--space-3) var(--space-6) var(--space-4); border-top: 1px solid var(--border);
+}
+.ys-popover .ys-foot { padding: var(--space-2) var(--space-4) var(--space-3); }
+.ys-foot .ys-grow { flex: 1; }
 
 /* Shared pieces for what goes inside. */
 .ys-section + .ys-section { margin-top: var(--space-6); padding-top: var(--space-4); border-top: 1px solid var(--border); }
@@ -1263,6 +1270,144 @@ a.pv-doi { color: var(--accent-2); text-decoration: none; border-bottom: 1px dot
 
 @media (prefers-reduced-motion: reduce) {
   .ys *, .modal-card { animation: none !important; transition: none !important; }
+}
+
+/* ---------------- Citation popover (src/ai/citation-ui.js) ---------------- */
+.ycp .ys-body { display: grid; gap: var(--space-3); padding-top: var(--space-4); font-size: var(--text-sm); line-height: 1.45; }
+.ycp-source + .ycp-source { padding-top: var(--space-3); border-top: 1px solid var(--border); }
+.ycp-head { display: flex; align-items: flex-start; gap: 7px; }
+.ycp-head > svg { flex: none; margin-top: 3px; color: var(--text-dim); }
+.ycp-num { flex: none; color: var(--accent); font-variant-numeric: tabular-nums; }
+.ycp-title { display: grid; min-width: 0; }
+.ycp-title > span { display: -webkit-box; overflow: hidden; -webkit-line-clamp: 2; -webkit-box-orient: vertical; font-weight: 600; }
+.ycp-title > small { font-size: var(--text-xs); color: var(--text-dim); }
+.ycp-verdict { display: flex; align-items: center; gap: 6px; margin-top: var(--space-2); font-size: var(--text-xs); font-weight: 550; }
+.ycp-verdict.ok { color: var(--green, #3fb950); }
+.ycp-verdict.bad { color: var(--yellow, #d29922); }
+.ycp blockquote {
+  display: -webkit-box; overflow: hidden; -webkit-line-clamp: 4; -webkit-box-orient: vertical;
+  margin: 6px 0 0; padding-left: 9px; border-left: 2px solid var(--border);
+  color: var(--text-dim); font-style: italic; font-size: var(--text-sm);
+}
+.ycp-actions { display: flex; flex-wrap: wrap; gap: 0 var(--space-4); margin-top: var(--space-2); }
+.ycp-foot { display: inline-flex; align-items: center; gap: 5px; justify-self: end; font-size: 11px; color: var(--text-dim); text-decoration: none; }
+.ycp-foot:hover { text-decoration: underline; }
+
+/* ---------------- Citation manager (src/citations.js) ---------------- */
+.ycm-input-row { display: grid; grid-template-columns: 1fr auto; gap: var(--space-3); align-items: end; }
+.ycm-input-row label, .ycm-grid label { display: flex; flex-direction: column; gap: var(--space-1); font-size: var(--text-xs); color: var(--text-dim); }
+.ycm-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
+.ycm-grid .wide { grid-column: 1 / -1; }
+.ycm-grid .hint { color: var(--text-faint); }
+.ycm-status { min-height: 18px; margin-top: var(--space-2); font-size: var(--text-xs); color: var(--text-dim); }
+.ycm-status.ok { color: var(--green); }
+.ycm-status.warn { color: var(--yellow); }
+.ycm-status.error { color: var(--red); }
+.ycm-style-row { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; margin-top: var(--space-4); font-size: var(--text-xs); color: var(--text-dim); }
+/* The citation as it will read in the note: a serif, like the printed page. */
+.ycm-preview { min-height: 2em; font-family: Georgia, "Times New Roman", serif; font-size: var(--text-lg); line-height: 1.55; overflow-wrap: anywhere; }
+.ycm-preview .muted { font-family: var(--font); font-size: var(--text-sm); color: var(--text-dim); }
+.ycm-warning { margin-top: var(--space-2); font-size: var(--text-xs); color: var(--yellow); }
+.ycm-existing { display: grid; gap: 2px; }
+.ycm-existing-row {
+  display: flex; align-items: center; gap: 9px; width: calc(100% + 2 * var(--space-2)); margin: 0 calc(-1 * var(--space-2));
+  padding: 7px var(--space-2); border: 0; border-radius: var(--radius-control); background: none; color: var(--text); text-align: left; cursor: pointer;
+}
+.ycm-existing-row:hover { background: var(--bg-elev-2); }
+.ycm-existing-row .key { flex: none; font-family: var(--font-mono); font-size: 11px; color: var(--accent); }
+.ycm-existing-row .title { flex: 1; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: var(--text-xs); color: var(--text-dim); }
+.ycm-foot { display: flex; flex: 1; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+@media (max-width: 720px) {
+  .ycm-input-row, .ycm-grid { grid-template-columns: 1fr; }
+  .ycm-foot .ys-grow { display: none; }
+}
+
+/* ---------------- Table grid editor (src/editor/table-editor.js) ---------------- */
+.yte-scroll { overflow-x: auto; padding-bottom: 2px; }
+.yte-grid { border-collapse: separate; border-spacing: 0; }
+.yte-grid td, .yte-grid th { padding: 0; border-right: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+.yte-grid tr:first-child th { border-top: 1px solid var(--border); }
+.yte-grid th:first-child, .yte-grid td:first-child { border-left: 1px solid var(--border); }
+.yte-grid .ctl { border: 0 !important; background: transparent; text-align: center; }
+.yte-grid input {
+  display: block; width: 100%; min-width: 120px; padding: var(--space-2) 10px;
+  border: 0; background: var(--bg); color: var(--text); font: inherit; font-size: var(--text-md); outline: none;
+}
+.yte-grid thead input { font-weight: 650; background: var(--bg-elev-2); }
+.yte-grid input:focus { box-shadow: inset 0 0 0 2px var(--accent); }
+.yte-grid input:focus-visible { outline: none; }
+.yte-grid input[data-align="center"] { text-align: center; }
+.yte-grid input[data-align="right"] { text-align: right; }
+.yte-ctl {
+  display: inline-grid; place-items: center; width: 26px; height: 26px; padding: 0;
+  border: 0; border-radius: 6px; background: transparent; color: var(--text-faint); cursor: pointer;
+}
+.yte-ctl:hover { background: var(--bg-elev-2); color: var(--text); }
+.yte-add { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-3); }
+/* 16px keeps phones from zooming into a field on focus. */
+@media (max-width: 720px) { .yte-grid input { min-width: 104px; font-size: 16px; } }
+
+/* ---------------- Share router (src/share-target/share-router.js) ---------------- */
+.ysr-preview { display: flex; align-items: center; gap: 9px; margin: 0 0 var(--space-2); color: var(--text-dim); }
+.ysr-preview svg { flex: none; color: var(--accent); }
+.ysr-preview span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--text-sm); color: var(--text); }
+.ysr-search { display: flex; align-items: center; gap: var(--space-2); padding: 7px 11px; border: 1px solid var(--border); border-radius: var(--radius-control); color: var(--text-dim); }
+.ysr-search input { flex: 1; min-width: 0; border: 0; background: transparent; color: var(--text); font: inherit; }
+.ysr-search input:focus { outline: none; }
+.ysr-send { width: 100%; margin-top: var(--space-2); }
+.ysr-send[disabled] { opacity: .45; cursor: default; }
+.ysr-list { max-height: 40vh; overflow: auto; margin-top: var(--space-2); }
+/* Rows and targets share one shape: a full-width line that lights up on hover. */
+.ysr-row, .ysr-target {
+  display: flex; align-items: center; gap: 10px; width: calc(100% + 2 * var(--space-2)); margin: 0 calc(-1 * var(--space-2));
+  padding: 10px var(--space-2); border: 0; border-radius: var(--radius-control); background: none;
+  color: var(--text); font: inherit; text-align: left; cursor: pointer;
+}
+.ysr-row:hover, .ysr-target:hover { background: var(--bg-elev-2); }
+.ysr-row.is-selected { background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.ysr-avatar {
+  flex: none; display: inline-grid; place-items: center; width: 32px; height: 32px; border-radius: 50%;
+  background: color-mix(in srgb, var(--accent) 13%, transparent); color: var(--accent); font-size: var(--text-xs); font-weight: 800;
+}
+.ysr-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.ysr-check { display: inline-grid; place-items: center; color: var(--accent); }
+.ysr-target > svg { flex: none; color: var(--accent); }
+.ysr-target-text { display: grid; gap: 2px; min-width: 0; }
+.ysr-target-text b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.ysr-target-text small { font-size: var(--text-xs); color: var(--text-dim); }
+/* A recognised date is the likely reason for the share: it leads, a size up. */
+.ysr-target.is-wide { padding-block: var(--space-3); }
+.ysr-target.is-wide b { font-size: var(--text-lg); }
+
+/* ---------------- Present: connect panel + drawing picker (src/present/) ---------------- */
+.ypc-join { display: grid; grid-template-columns: auto 1fr; gap: var(--space-5); align-items: center; }
+.ypc-join .ys-dim { margin: 0 0 var(--space-2); }
+/* White behind the code whatever the theme: cameras need the contrast. */
+.ypc-qr { width: 168px; height: 168px; padding: var(--space-2); border-radius: 14px; background: #fff; display: grid; place-items: center; }
+.ypc-qr svg { width: 100%; height: 100%; }
+.ypc-code-row { display: flex; align-items: center; gap: 6px; }
+.ypc-code { font: 800 30px/1.1 var(--font-mono); letter-spacing: .08em; }
+.ypc-list { display: grid; }
+.ypc-row { display: flex; align-items: center; gap: 10px; min-height: 44px; padding: var(--space-2) 0; }
+.ypc-row > svg { flex: none; color: var(--text-dim); }
+.ypc-row.is-pending > svg { color: var(--accent); }
+.ypc-row.is-offline { opacity: .6; }
+button.ypc-row {
+  width: calc(100% + 2 * var(--space-2)); margin: 0 calc(-1 * var(--space-2)); padding: var(--space-2);
+  border: 0; border-radius: var(--radius-control); background: none; color: inherit; font: inherit; text-align: left; cursor: pointer;
+}
+button.ypc-row:hover { background: var(--bg-elev-2); }
+.ypc-name { flex: 1; min-width: 0; display: grid; gap: 2px; font-size: var(--text-md); font-weight: 600; }
+.ypc-name small { font-size: var(--text-xs); font-weight: 500; color: var(--text-dim); }
+.ypc-check { font: 800 16px/1 var(--font-mono); letter-spacing: .12em; color: var(--text); }
+.ypc-field { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: var(--space-2); }
+.ypc-field + .ys-dim { margin-top: var(--space-2); }
+.ypc-screen-code { text-transform: uppercase; letter-spacing: .12em; font-weight: 700; }
+.ypc-watch-create { margin-top: var(--space-2); }
+.ypc-status { display: inline-flex; align-items: center; gap: var(--space-2); font-size: var(--text-xs); color: var(--text-dim); }
+@media (max-width: 560px) {
+  .ypc-join { grid-template-columns: 1fr; justify-items: center; text-align: center; }
+  .ypc-code-row { justify-content: center; }
 }
 
 .img-source-tabs {
@@ -4058,33 +4203,6 @@ input.yanta-task-checkbox {
       max(14px, env(safe-area-inset-left));
   }
 
-  /* ---------- Citation manager fullscreen ---------- */
-
-  .yanta-cite-modal {
-    padding: 0;
-    align-items: stretch;
-  }
-
-  .yanta-cite-modal .yanta-cite-card {
-    width: 100vw;
-    height: 100dvh;
-    height: 100svh;
-    max-height: 100dvh;
-    max-height: 100svh;
-    border-radius: 0;
-  }
-
-  .yanta-cite-modal .yanta-cite-foot {
-    position: sticky;
-    bottom: 0;
-    z-index: 2;
-    padding-bottom: calc(12px + env(safe-area-inset-bottom));
-  }
-
-  .yanta-cite-modal .yanta-cite-foot .btn {
-    min-height: var(--mobile-touch);
-  }
-
   /* ---------- Drawings ---------- */
 
   .yanta-draw-inline-host {
@@ -6064,3 +6182,15 @@ html[data-store-app] a[href="/pricing"] {
   .yanta-dialog-modal { align-items: flex-end; padding: 0; }
   .yanta-dialog-modal .yanta-dialog-card { width: 100%; border-radius: 18px 18px 0 0; padding-bottom: env(safe-area-inset-bottom); }
 }
+
+/* ---------------- Writing view (src/editor/live-preview.js) ----------------
+   Away from the cursor's line, Markdown reads as what it means. */
+.yanta-live .yanta-live-bullet {
+  display: inline-block; min-width: 0.9em; color: var(--text-dim);
+}
+.yanta-live .yanta-live-rule {
+  display: inline-block; width: 100%; height: 1px; vertical-align: middle;
+  background: var(--border);
+}
+.yanta-live .cm-line.cm-md-hr { border-top: 0; }
+.yanta-live .cm-md-fence { color: color-mix(in srgb, var(--text-faint) 70%, transparent); }

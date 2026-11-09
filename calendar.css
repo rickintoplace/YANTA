@@ -4045,3 +4045,225 @@
   background: color-mix(in srgb, var(--accent) 86%, var(--text));
   color: var(--accent-contrast, #fff);
 }
+
+/* A look at a read-only entry (src/calendar-peek.js, on src/ui/surface.js). */
+.ypk-when { margin: var(--space-1) 0 0; font-size: var(--text-md); }
+.ypk-line { display: flex; align-items: center; gap: 7px; margin: var(--space-2) 0 0; font-size: var(--text-sm); color: var(--text-dim); }
+.ypk-desc { margin: 10px 0 0; font-size: var(--text-sm); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; max-height: 30vh; overflow: auto; color: var(--text-dim); }
+.ypk-desc a { color: var(--accent); }
+.ypk-cal { display: flex; align-items: center; gap: 7px; margin: var(--space-3) 0 0; font-size: var(--text-xs); color: var(--text-dim); }
+.ypk-dot { width: 8px; height: 8px; border-radius: 50%; flex: none; }
+.ypk-copy { margin-top: var(--space-3); }
+
+/* The cycle overview (src/cycle/cycle-panel.js, on src/ui/surface.js). */
+.ycy-hero { padding: 10px 0 4px; }
+.ycy-big { margin: 0; font-size: 30px; line-height: 1.1; font-weight: 700; letter-spacing: -0.025em; }
+.ycy-line { margin: 8px 0 0; font-size: 15px; line-height: 1.4; }
+.ycy-dim { margin: 4px 0 0; font-size: 13px; line-height: 1.45; color: var(--text-dim); }
+.ycy-note { margin-top: 8px; }
+
+.ycy-legend { display: flex; flex-wrap: wrap; gap: 4px 14px; margin-top: 10px; font-size: 12px; color: var(--text-dim); }
+.ycy-legend span { display: inline-flex; align-items: center; gap: 6px; }
+.ycy-legend i { width: 10px; height: 10px; border-radius: 50%; display: inline-block; box-sizing: border-box; }
+.ycy-legend i.is-period { background: var(--cyc-color, #d6336c); }
+.ycy-legend i.is-expected { border: 1.5px dashed var(--cyc-color, #d6336c); }
+.ycy-legend i.is-fertile { background: color-mix(in srgb, #3b9b8f 22%, var(--bg-elev)); }
+.ycy-legend i.is-ovulation { border: 1.5px solid #3b9b8f; }
+
+.ycy-month { margin: 22px 0 0; }
+.ycy-month-head { display: flex; align-items: center; gap: 4px; margin-bottom: 6px; }
+.ycy-month-head h3 { flex: 1; margin: 0; font-size: 14px; font-weight: 650; text-transform: capitalize; }
+.ycy-month-head .ycy-link { margin-right: 6px; }
+.ycy-weekdays, .ycy-days { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); }
+.ycy-weekdays span { text-align: center; font-size: 11px; color: var(--text-dim); padding: 2px 0 4px; }
+.ycy-days { row-gap: 4px; }
+.ycy-day {
+  --c: var(--cyc-color, #d6336c);
+  position: relative; display: grid; place-items: center; height: 38px; padding: 0;
+  border: 0; background: none; color: var(--text); font: inherit; font-size: 14px;
+  font-variant-numeric: tabular-nums; cursor: pointer;
+}
+.ycy-day.is-blank { cursor: default; }
+.ycy-day:disabled { cursor: default; color: var(--text-dim); }
+.ycy-day > span {
+  position: relative; z-index: 1; display: grid; place-items: center;
+  width: 34px; height: 34px; border-radius: 50%; box-sizing: border-box;
+  transition: background-color .12s ease, transform .12s ease;
+}
+/* Period days join into one band, like a run of days in a calendar. */
+.ycy-day.is-period::before, .ycy-day.is-expected::before {
+  content: ''; position: absolute; top: 2px; bottom: 2px; left: 0; right: 0;
+}
+.ycy-day.is-period::before { background: color-mix(in srgb, var(--c) 22%, transparent); }
+.ycy-day.is-period.run-start::before { left: 50%; }
+.ycy-day.is-period.run-end::before { right: 50%; }
+.ycy-day.is-period > span { background: var(--c); color: #fff; font-weight: 650; }
+.ycy-day.is-expected > span { border: 1.5px dashed var(--c); }
+.ycy-day.is-expected.is-maybe > span { border-color: color-mix(in srgb, var(--c) 45%, transparent); }
+.ycy-day.is-fertile > span { background: color-mix(in srgb, #3b9b8f 18%, transparent); }
+.ycy-day.is-ovulation > span { box-shadow: inset 0 0 0 1.5px #3b9b8f; }
+.ycy-day.is-ovulation-confirmed > span { box-shadow: inset 0 0 0 1.5px #3b9b8f; background: color-mix(in srgb, #3b9b8f 30%, transparent); }
+.ycy-day.is-today > span { font-weight: 750; }
+.ycy-day.is-today::after {
+  content: ''; position: absolute; bottom: 0; left: 50%; width: 4px; height: 4px; margin-left: -2px;
+  border-radius: 50%; background: var(--text);
+}
+.ycy-day[data-day]:hover > span { background: color-mix(in srgb, var(--text) 8%, transparent); }
+.ycy-day.is-period[data-day]:hover > span { background: color-mix(in srgb, var(--c) 85%, var(--text)); }
+.ycy-day[data-day]:active > span { transform: scale(.92); }
+.ycy-day:focus-visible { outline: none; }
+.ycy-day:focus-visible > span { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ycy-hint { margin-top: 8px; }
+
+.ycy-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 16px; margin: 20px 0 0; }
+.ycy-actions .btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; font-size: 14px; border-radius: 10px; }
+.ycy-link {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 4px 2px; border: 0; background: none;
+  color: var(--accent); font: inherit; font-weight: 600; font-size: 13px; cursor: pointer; border-radius: 6px;
+}
+.ycy-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+.ycy-link:focus-visible, .ycy-history button:focus-visible, .ycy-seg button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+.ycy-pick { display: flex; flex-wrap: wrap; align-items: end; gap: 10px 12px; margin: 14px 0 0; padding: 12px 0 2px; }
+.ycy-pick label { display: grid; gap: 4px; font-size: 12px; color: var(--text-dim); }
+.ycy-pick input[type="date"] { font: inherit; font-size: 14px; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px; }
+.ycy-pick .ycy-seg { flex-basis: 100%; }
+.ycy-pick .ycy-dim { flex-basis: 100%; margin: 0; }
+
+.ycy-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 26px 0 0; padding: 14px 0 0; border-top: 1px solid var(--border); }
+.ycy-facts div { min-width: 0; }
+.ycy-facts dt { font-size: 12px; color: var(--text-dim); }
+.ycy-facts dd { margin: 3px 0 0; font-size: 15px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.ycy-facts small { display: block; margin-top: 2px; font-size: 12px; font-weight: 400; color: var(--text-dim); }
+
+.ycy-body h4 { margin: 26px 0 6px; font-size: 13px; font-weight: 650; }
+.ycy-history { list-style: none; margin: 0; padding: 0; }
+.ycy-history li { padding: 2px 0; }
+.ycy-history li + li { border-top: 1px solid color-mix(in srgb, var(--border) 60%, transparent); }
+.ycy-history button {
+  width: 100%; display: grid; grid-template-columns: minmax(0, 1fr) auto 8.5em; gap: 12px; align-items: baseline;
+  padding: 7px 0; border: 0; background: none; color: var(--text); font: inherit; font-size: 14px; text-align: left; cursor: pointer; border-radius: 6px;
+}
+.ycy-history button:hover .ycy-h-date { text-decoration: underline; text-underline-offset: 3px; }
+.ycy-h-len, .ycy-h-cycle { font-size: 13px; color: var(--text-dim); font-variant-numeric: tabular-nums; text-align: right; }
+.ycy-flag { display: block; margin: -2px 0 6px; font-size: 12px; color: color-mix(in srgb, var(--yellow, #b7791f) 70%, var(--text)); }
+.ycy-flag .ycy-link { font-size: 12px; padding: 0 2px; }
+
+.ycy-toggle, .ycy-setting { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 0; font-size: 14px; }
+.ycy-toggle input { width: 18px; height: 18px; accent-color: var(--accent); }
+.ycy-toggle.is-disabled { color: var(--text-dim); }
+.ycy-setting { flex-wrap: wrap; }
+.ycy-seg { display: inline-flex; padding: 2px; border-radius: 9px; background: color-mix(in srgb, var(--text) 7%, transparent); }
+.ycy-seg button { border: 0; background: none; color: var(--text-dim); font: inherit; font-size: 13px; padding: 5px 10px; border-radius: 7px; cursor: pointer; white-space: nowrap; }
+.ycy-seg button[aria-checked="true"] { background: var(--bg-elev); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgba(0,0,0,.12); }
+.ycy-num { width: 5em; font: inherit; font-size: 14px; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 8px; padding: 6px 8px; text-align: right; }
+.ycy-more-actions { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 8px; }
+
+.ycy-disclaimer { margin: 26px 0 0; font-size: 12px; line-height: 1.45; color: var(--text-dim); }
+@media (prefers-reduced-motion: reduce) { .ycy * { animation: none !important; } }
+
+/* ------------------------------------------------------------
+   Event editor, flat. Groups are separated by space and a hairline,
+   not drawn as boxes inside the dialog box; the title reads like a
+   heading; the icon is a plain button, not a tinted tile.
+   ------------------------------------------------------------ */
+.yanta-calendar-event-card .yanta-calendar-when,
+.yanta-calendar-event-card .yanta-calendar-recurrence-box,
+.yanta-calendar-event-card .yanta-calendar-reminders-box,
+.yanta-calendar-event-card .yanta-calendar-note-link-box,
+.yanta-calendar-event-card .yanta-calendar-recurrence-end-box,
+.yanta-calendar-event-card .yanta-calendar-custom-repeat {
+  margin: var(--space-4) 0 0;
+  padding: var(--space-4) 0 0;
+  border: 0;
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+  background: none;
+  box-shadow: none;
+}
+.yanta-calendar-event-card .yanta-calendar-when { margin-top: var(--space-2); padding-top: 0; border-top: 0; }
+.yanta-calendar-event-card .yanta-calendar-recurrence-end-box,
+.yanta-calendar-event-card .yanta-calendar-custom-repeat { margin-top: var(--space-3); padding-top: var(--space-3); border-top-style: dashed; }
+
+.yanta-calendar-event-card .yanta-calendar-title-row { gap: var(--space-2); margin-bottom: var(--space-2); }
+.yanta-calendar-event-card .yanta-calendar-title-input.text-input {
+  height: 44px; padding: 0 var(--space-2);
+  border-color: transparent; background: transparent;
+  font-size: var(--text-xl); font-weight: 650; letter-spacing: -0.015em;
+}
+.yanta-calendar-event-card .yanta-calendar-title-input.text-input:hover { background: var(--bg-elev-2); }
+.yanta-calendar-event-card .yanta-calendar-title-input.text-input:focus { background: var(--bg-elev-2); border-color: var(--border); }
+.yanta-calendar-event-card .yanta-calendar-title-row .yanta-calendar-appearance-picker {
+  width: 40px; height: 40px; border: 0; border-radius: var(--radius-control);
+  background: transparent; color: var(--appearance-color, var(--accent));
+}
+.yanta-calendar-event-card .yanta-calendar-title-row .yanta-calendar-appearance-picker:hover { background: var(--bg-elev-2); }
+
+.yanta-calendar-event-card .yanta-calendar-section-head { font-size: var(--text-sm); font-weight: 650; }
+.yanta-calendar-event-card .yanta-calendar-section-head > span svg { color: var(--text-faint); }
+.yanta-calendar-event-card .yanta-calendar-event-actions.compress-actions { padding: var(--space-3) var(--space-6); }
+.yanta-calendar-event-card .modal-body { padding-top: var(--space-1); }
+.yanta-calendar-event-card .yanta-calendar-repeat-toggle { padding: 0; }
+/* Hints inside the editor are text, not boxes; a warning keeps its colour. */
+.yanta-calendar-event-card .yanta-calendar-native-notification-hint {
+  padding: 0; border: 0; border-radius: 0; background: none;
+}
+.yanta-calendar-event-card .yanta-calendar-native-notification-hint.warn > svg { color: var(--yellow); }
+
+/* The sharing panel (src/spaces/calendar-share-panel.js, on src/ui/surface.js). */
+.ycs-calendar { padding: 14px 0 18px; }
+.ycs-calendar + .ycs-calendar { border-top: 1px solid var(--border); }
+.ycs-calendar-head { display: flex; align-items: center; gap: 10px; }
+.ycs-calendar-head h3 { margin: 0; flex: 1; min-width: 0; font-size: 17px; font-weight: 650; letter-spacing: -0.015em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ycs-dot { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.ycs-dot.is-broken { background: var(--red, #d64545); }
+.ycs-role { font-size: 12px; color: var(--text-dim); }
+
+.ycs-status { display: flex; align-items: center; gap: 8px; margin: 6px 0 0; font-size: 13px; line-height: 1.45; color: var(--text-dim); }
+.ycs-status > svg { flex: none; }
+.ycs-status span { flex: 1; min-width: 0; }
+.ycs-status.is-ok > svg { color: var(--green, #2f9e5b); }
+.ycs-status.is-warn { color: color-mix(in srgb, var(--yellow, #b7791f) 70%, var(--text)); }
+.ycs-status.is-bad { color: color-mix(in srgb, var(--red, #d64545) 78%, var(--text)); }
+.ycs-status.is-busy > svg { animation: ycs-spin 0.9s linear infinite; color: var(--accent); }
+@keyframes ycs-spin { to { transform: rotate(360deg); } }
+
+.ycs-link {
+  display: inline-flex; align-items: center; gap: 6px; flex: none;
+  padding: 4px 2px; border: 0; background: none;
+  color: var(--accent); font: inherit; font-weight: 600; font-size: 13px;
+  cursor: pointer; border-radius: 6px;
+}
+.ycs-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+.ycs-link:focus-visible, .ycs-changes button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.ycs-calendar > .ycs-link { margin-top: 12px; }
+
+.ycs-people { list-style: none; margin: 16px 0 0; padding: 0; display: grid; gap: 10px; }
+.ycs-person { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 10px; font-size: 14px; }
+.ycs-avatar {
+  width: 28px; height: 28px; border-radius: 50%;
+  display: grid; place-items: center;
+  font-size: 11px; font-weight: 700; letter-spacing: .02em;
+  background: hsl(var(--h) 42% 88%); color: hsl(var(--h) 48% 26%);
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .ycs-avatar { background: hsl(var(--h) 28% 26%); color: hsl(var(--h) 60% 86%); } }
+:root[data-theme="dark"] .ycs-avatar { background: hsl(var(--h) 28% 26%); color: hsl(var(--h) 60% 86%); }
+.ycs-person-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ycs-person-meta { font-size: 12px; color: var(--text-dim); white-space: nowrap; }
+
+.ycs-calendar h4 { margin: 20px 0 4px; font-size: 13px; font-weight: 650; color: var(--text); }
+.ycs-changes { list-style: none; margin: 0; padding: 0; }
+.ycs-changes button {
+  width: 100%; display: flex; align-items: baseline; gap: 12px;
+  padding: 6px 0; border: 0; background: none; color: var(--text);
+  text-align: left; font: inherit; font-size: 13px; line-height: 1.4; cursor: pointer; border-radius: 6px;
+}
+.ycs-changes button span { flex: 1; min-width: 0; }
+.ycs-changes time { font-size: 12px; color: var(--text-dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.ycs-changes li.is-new span { font-weight: 600; }
+.ycs-changes button:hover span { text-decoration: underline; text-underline-offset: 3px; }
+.ycs-quiet { margin: 0; font-size: 13px; color: var(--text-dim); }
+.ycs-empty { padding: 16px 0 6px; display: grid; gap: 6px; font-size: 14px; }
+.ycs-empty p { margin: 0; max-width: 34ch; }
+@media (prefers-reduced-motion: reduce) { .ycs * { animation: none !important; } }

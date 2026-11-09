@@ -42,6 +42,26 @@
   --r: 8px;
   --r-lg: 12px;
 
+  /* One scale for space, corners, depth and type — every surface and
+     form uses these instead of its own numbers (src/ui/surface.js). */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --radius-control: 8px;
+  --radius-surface: 16px;
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-md: 14px;
+  --text-lg: 16px;
+  --text-xl: 20px;
+  --text-2xl: 28px;
+  --shadow-surface: 0 24px 64px -16px rgba(0, 0, 0, .32), 0 2px 6px rgba(0, 0, 0, .06);
+  --ease-out: cubic-bezier(.16, 1, .3, 1);
+
   --sidebar-w: 250px;
   --split: 50%;
 }
@@ -1176,18 +1196,74 @@ a.pv-doi { color: var(--accent-2); text-decoration: none; border-bottom: 1px dot
   z-index: 300; animation: fade-in 0.15s ease;
 }
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+/* The older modals take the surface look too: same corners, depth,
+   header and padding as src/ui/surface.js. */
 .modal-card {
-  background: var(--bg-elev); border: 1px solid var(--border);
-  border-radius: var(--r-lg); width: min(720px, 92vw); max-height: 88vh;
+  background: var(--bg-elev); border: 0;
+  border-radius: var(--radius-surface); width: min(720px, 92vw); max-height: 88vh;
   display: flex; flex-direction: column;
-  box-shadow: var(--shadow); overflow: hidden;
+  box-shadow: var(--shadow-surface); overflow: hidden;
+  animation: ys-pop .2s var(--ease-out);
 }
 .modal-head {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 14px 18px; border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
+  padding: var(--space-4) var(--space-3) var(--space-2) var(--space-6);
 }
-.modal-head h3 { font-size: 15px; font-weight: 600; }
-.modal-body { padding: 16px 18px; overflow-y: auto; }
+.modal-head h3 { font-size: var(--text-lg); font-weight: 650; letter-spacing: -0.01em; }
+.modal-body { padding: var(--space-2) var(--space-6) var(--space-6); overflow-y: auto; }
+
+/* ---------------- Surfaces (src/ui/surface.js) ---------------- */
+.ys { position: fixed; inset: 0; z-index: 1300; display: grid; }
+.ys-popover { pointer-events: none; }
+.ys-scrim { position: absolute; inset: 0; background: rgba(0, 0, 0, .36); animation: fade-in .18s ease-out; }
+.ys-surface {
+  position: relative; display: flex; flex-direction: column; min-height: 0;
+  background: var(--bg-elev); color: var(--text);
+  box-shadow: var(--shadow-surface);
+  pointer-events: auto;
+}
+.ys-dialog { place-items: center; padding: var(--space-6); }
+.ys-dialog .ys-surface {
+  width: min(var(--ys-w, 440px), 100%); max-height: min(780px, calc(100vh - 48px));
+  border-radius: var(--radius-surface); animation: ys-pop .2s var(--ease-out);
+}
+.ys-popover .ys-surface {
+  position: absolute; width: var(--ys-w, 320px); max-height: 70vh;
+  border-radius: 14px; animation: ys-drop .16s var(--ease-out);
+}
+.ys-sheet { align-items: end; }
+.ys-sheet .ys-surface {
+  max-height: 92vh; border-radius: 18px 18px 0 0;
+  padding-bottom: env(safe-area-inset-bottom);
+  animation: ys-rise .26s var(--ease-out);
+}
+.ys-grip { width: 36px; height: 4px; border-radius: 2px; background: var(--border-strong); margin: var(--space-2) auto 0; flex: none; }
+.ys.is-leaving .ys-surface, .ys.is-leaving .ys-scrim { opacity: 0; transition: opacity .14s ease-in; }
+@keyframes ys-pop { from { opacity: 0; transform: translateY(6px) scale(.985); } }
+@keyframes ys-drop { from { opacity: 0; transform: translateY(-4px); } }
+@keyframes ys-rise { from { transform: translateY(28px); opacity: .5; } }
+
+.ys-head { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-4) var(--space-3) var(--space-1) var(--space-6); flex: none; }
+.ys-popover .ys-head { padding: var(--space-3) var(--space-2) 0 var(--space-4); }
+.ys-title { flex: 1; min-width: 0; margin: 0; font-size: var(--text-lg); font-weight: 650; letter-spacing: -0.01em; overflow-wrap: anywhere; }
+.ys-body { overflow: auto; overscroll-behavior: contain; padding: var(--space-2) var(--space-6) var(--space-6); min-height: 0; }
+.ys-popover .ys-body { padding: var(--space-1) var(--space-4) var(--space-4); }
+
+/* Shared pieces for what goes inside. */
+.ys-section + .ys-section { margin-top: var(--space-6); padding-top: var(--space-4); border-top: 1px solid var(--border); }
+.ys-section-title { margin: 0 0 var(--space-2); font-size: var(--text-sm); font-weight: 650; }
+.ys-dim { margin: var(--space-1) 0 0; font-size: var(--text-sm); line-height: 1.45; color: var(--text-dim); }
+.ys-link {
+  display: inline-flex; align-items: center; gap: 6px; padding: var(--space-1) 2px;
+  border: 0; background: none; color: var(--accent); font: inherit; font-weight: 600; font-size: var(--text-sm);
+  cursor: pointer; border-radius: 6px;
+}
+.ys-link:hover { text-decoration: underline; text-underline-offset: 3px; }
+.ys :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .ys *, .modal-card { animation: none !important; transition: none !important; }
+}
 
 .img-source-tabs {
   display: flex; gap: 4px; padding: 4px;
@@ -5965,4 +6041,26 @@ html[data-store-app] [data-yanta-plus-manage],
 html[data-store-app] [data-branding-upgrade],
 html[data-store-app] a[href="/pricing"] {
   display: none !important;
+}
+.ys-surface:focus { outline: none; }
+
+/* Confirmations and choices (src/dialogs.js) take the surface look:
+   no tinted header bar, no icon tile, the same corners and depth. */
+.yanta-dialog-modal { background: rgba(0, 0, 0, .36); backdrop-filter: none; -webkit-backdrop-filter: none; }
+.yanta-dialog-modal .yanta-dialog-card,
+.yanta-dialog-modal .yanta-dialog-card.danger {
+  width: min(440px, 100%); border: 0;
+  border-radius: var(--radius-surface); box-shadow: var(--shadow-surface);
+}
+.yanta-dialog-modal .yanta-dialog-head { min-height: 0; padding: var(--space-5) var(--space-6) var(--space-1); border-bottom: 0; background: none; }
+.yanta-dialog-modal .yanta-dialog-icon { display: none; }
+.yanta-dialog-modal .yanta-dialog-title { font-size: var(--text-lg); font-weight: 650; letter-spacing: -0.01em; white-space: normal; }
+.yanta-dialog-modal .yanta-dialog-body { padding: var(--space-2) var(--space-6) var(--space-4); }
+.yanta-dialog-modal .yanta-dialog-message { font-size: var(--text-md); }
+.yanta-dialog-modal .yanta-dialog-actions { padding: var(--space-2) var(--space-6) var(--space-5); border-top: 0; background: none; }
+.yanta-dialog-modal .yanta-dialog-btn { border-radius: var(--radius-control); font-weight: 600; }
+@media (max-width: 640px) {
+  /* On a phone a confirmation rises from the bottom, like every sheet. */
+  .yanta-dialog-modal { align-items: flex-end; padding: 0; }
+  .yanta-dialog-modal .yanta-dialog-card { width: 100%; border-radius: 18px 18px 0 0; padding-bottom: env(safe-area-inset-bottom); }
 }

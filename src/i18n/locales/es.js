@@ -1740,8 +1740,8 @@ export default {
     },
 
     colors: {
-      tabDark: '🌙 Modo oscuro',
-      tabLight: '☀️ Modo claro',
+      tabDark: 'Modo oscuro',
+      tabLight: 'Modo claro',
       presets: 'Ajustes preestablecidos',
       presetsHint: 'Estos ajustes solo se aplican al {mode}. Tu otro modo permanece sin cambios.',
       presetApplied: 'Se aplicó «{name}» al {mode}',

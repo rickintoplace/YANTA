@@ -69,6 +69,8 @@ if [ "$SKIP_CHECKS" = "0" ]; then
   echo
   node "$REPO/scripts/check-worker-vars.mjs" --dir "$WORKER_DIR"
   echo
+  node "$REPO/scripts/check-d1-schema.mjs" --dir "$WORKER_DIR"
+  echo
 fi
 
 wrangler deploy

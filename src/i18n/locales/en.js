@@ -1755,8 +1755,8 @@ export default {
     },
 
     colors: {
-      tabDark: '🌙 Dark mode',
-      tabLight: '☀️ Light mode',
+      tabDark: 'Dark mode',
+      tabLight: 'Light mode',
       presets: 'Presets',
       presetsHint: 'These presets only apply to {mode}. Your other mode stays unchanged.',
       presetApplied: 'Applied “{name}” to {mode}',

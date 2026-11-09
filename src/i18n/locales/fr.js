@@ -1740,8 +1740,8 @@ export default {
     },
 
     colors: {
-      tabDark: '🌙 Mode sombre',
-      tabLight: '☀️ Mode clair',
+      tabDark: 'Mode sombre',
+      tabLight: 'Mode clair',
       presets: 'Préréglages',
       presetsHint: 'Ces préréglages ne s’appliquent qu’au {mode}. Votre autre mode reste inchangé.',
       presetApplied: '« {name} » appliqué au {mode}',

@@ -14,15 +14,13 @@
 
 import { state, escapeHtml, escapeAttr, lucide, toast } from '../core.js';
 import { t, getLocale } from '../i18n/index.js';
-import { openBoundOverlay } from '../overlay-history.js';
+import { openSurface } from '../ui/surface.js';
 import { calendarBridges } from './calendar-registry.js';
 import { calendarFeedFor, markCalendarFeedSeen, groupCalendarFeed, calendarChangeLine } from './calendar-feed.js';
 import { spaceParticipants } from './space-people.js';
 
-const PHONE = '(max-width: 640px)';
 
 let panel = null;
-let releaseOverlay = null;
 
 function relative(ts) {
   if (!ts) return '';
@@ -172,7 +170,7 @@ async function render() {
     renderPending = true;
     return;
   }
-  const body = panel.querySelector('.ycs-body');
+  const body = panel.body;
   const sections = await Promise.all(calendarBridges().map(sectionHtml));
   const html = sections.join('') + await brokenHtml();
   if (!panel) return;
@@ -190,26 +188,15 @@ async function render() {
     </div>`;
 }
 
-function onKey(e) {
-  if (e.key === 'Escape' && e.isTrusted) {
-    e.preventDefault();
-    e.stopPropagation();
-    close();
-  }
+function close() {
+  panel?.close();
 }
 
-function close({ fromHistory = false } = {}) {
-  if (!panel) return;
-  const el = panel;
+/** What has to stop when the surface goes, however it was closed. */
+function closed() {
   panel = null;
-  el.classList.add('is-leaving');
-  setTimeout(() => el.remove(), 160);
-  document.removeEventListener('keydown', onKey, true);
   window.removeEventListener('yanta-calendar-feed-updated', render);
   window.removeEventListener('yanta-space-changed', render);
-  const release = releaseOverlay;
-  releaseOverlay = null;
-  if (!fromHistory) release?.();
   Promise.all(calendarBridges().map((b) => markCalendarFeedSeen(b.spaceId).catch(() => {})))
     .then(() => window.dispatchEvent(new CustomEvent('yanta-calendar-feed-updated', { detail: {} })));
 }
@@ -280,50 +267,34 @@ export async function openCalendarSharePanel(anchor) {
     return;
   }
 
-  ensureCss();
   syncUi.clear();
   discardUi.clear();
   lastHtml = '';
   pointerDown = false;
   renderPending = false;
 
-  const phone = window.matchMedia(PHONE).matches;
-  panel = document.createElement('div');
-  panel.className = `ycs ${phone ? 'is-sheet' : 'is-popover'}`;
-  panel.setAttribute('role', 'dialog');
-  panel.setAttribute('aria-label', t('calendarShare.title'));
-  panel.innerHTML = `
-    ${phone ? '<div class="ycs-scrim" data-close></div>' : ''}
-    <div class="ycs-surface">
-      ${phone ? '<div class="ycs-grip" aria-hidden="true"></div>' : ''}
-      <header class="ycs-head">
-        <h2>${escapeHtml(t('calendarShare.title'))}</h2>
-        <button type="button" class="icon-btn" data-close aria-label="${escapeAttr(t('common.close'))}">${lucide('x', 16)}</button>
-      </header>
-      <div class="ycs-body"></div>
-    </div>`;
-  document.body.append(panel);
+  panel = openSurface({
+    kind: 'popover',
+    title: t('calendarShare.title'),
+    anchor,
+    width: 380,
+    className: 'ycs',
+    historyId: 'calendar-share-panel',
+    onClose: closed,
+  });
+  const root = panel.body;
 
-  if (!phone && anchor) {
-    const r = anchor.getBoundingClientRect();
-    const surface = panel.querySelector('.ycs-surface');
-    surface.style.top = `${Math.round(r.bottom + 8)}px`;
-    surface.style.left = `${Math.round(Math.max(12, Math.min(r.left, window.innerWidth - 392)))}px`;
-  }
-
-  panel.addEventListener('pointerdown', () => { pointerDown = true; });
+  root.addEventListener('pointerdown', () => { pointerDown = true; });
   const release = () => {
     if (!pointerDown) return;
     pointerDown = false;
     // After the click has been dispatched.
     if (renderPending) setTimeout(() => { renderPending = false; render(); }, 0);
   };
-  panel.addEventListener('pointerup', release);
-  panel.addEventListener('pointercancel', release);
+  root.addEventListener('pointerup', release);
+  root.addEventListener('pointercancel', release);
 
-  panel.addEventListener('click', async (e) => {
-    if (e.target.closest('[data-close]')) return close();
-
+  root.addEventListener('click', async (e) => {
     const space = e.target.closest('[data-space]')?.dataset.space;
     if (e.target.closest('[data-sync]') && space) return syncSpace(space);
     if (e.target.closest('[data-copy-link]') && space) return copyLink(space);
@@ -339,118 +310,8 @@ export async function openCalendarSharePanel(anchor) {
     }
   });
 
-  if (!phone) {
-    setTimeout(() => {
-      document.addEventListener('pointerdown', function outside(e) {
-        if (!panel) return document.removeEventListener('pointerdown', outside, true);
-        if (panel.contains(e.target) || anchor?.contains(e.target)) return;
-        document.removeEventListener('pointerdown', outside, true);
-        close();
-      }, true);
-    }, 0);
-  }
-
-  document.addEventListener('keydown', onKey, true);
   window.addEventListener('yanta-calendar-feed-updated', render);
   window.addEventListener('yanta-space-changed', render);
-  releaseOverlay = openBoundOverlay('calendar-share-panel', { close, isOpen: () => !!panel });
 
   await render();
-}
-
-function ensureCss() {
-  if (document.getElementById('ycs-css')) return;
-  const style = document.createElement('style');
-  style.id = 'ycs-css';
-  style.textContent = `
-.ycs { position: fixed; inset: 0; z-index: 1300; pointer-events: none; }
-.ycs-surface {
-  pointer-events: auto;
-  position: absolute;
-  display: flex; flex-direction: column;
-  background: var(--bg-elev);
-  color: var(--text);
-  box-shadow: 0 18px 48px -12px rgba(0,0,0,.32), 0 2px 6px rgba(0,0,0,.06);
-}
-.ycs.is-popover .ycs-surface {
-  width: 380px; max-height: min(620px, calc(100vh - 96px));
-  border-radius: 14px;
-  animation: ycs-pop .18s cubic-bezier(.16,1,.3,1);
-  transform-origin: top left;
-}
-.ycs.is-sheet { pointer-events: auto; }
-.ycs-scrim { position: absolute; inset: 0; background: rgba(0,0,0,.32); animation: ycs-fade .18s ease-out; }
-.ycs.is-sheet .ycs-surface {
-  left: 0; right: 0; bottom: 0; max-height: 86vh;
-  border-radius: 16px 16px 0 0;
-  padding-bottom: env(safe-area-inset-bottom);
-  animation: ycs-rise .26s cubic-bezier(.16,1,.3,1);
-}
-.ycs-grip { width: 36px; height: 4px; border-radius: 2px; background: var(--border-strong, var(--border)); margin: 8px auto 0; }
-.ycs.is-leaving .ycs-surface, .ycs.is-leaving .ycs-scrim { opacity: 0; transition: opacity .14s ease-in; }
-@keyframes ycs-pop { from { opacity: 0; transform: translateY(-4px) scale(.985); } }
-@keyframes ycs-rise { from { transform: translateY(28px); opacity: .5; } }
-@keyframes ycs-fade { from { opacity: 0; } }
-
-.ycs-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 12px 4px 20px; }
-.ycs-head h2 { margin: 0; font-size: 15px; font-weight: 650; letter-spacing: -0.01em; }
-.ycs-body { overflow: auto; overscroll-behavior: contain; padding: 0 20px 18px; }
-
-.ycs-calendar { padding: 14px 0 18px; }
-.ycs-calendar + .ycs-calendar { border-top: 1px solid var(--border); }
-.ycs-calendar-head { display: flex; align-items: center; gap: 10px; }
-.ycs-calendar-head h3 { margin: 0; flex: 1; min-width: 0; font-size: 17px; font-weight: 650; letter-spacing: -0.015em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ycs-dot { width: 10px; height: 10px; border-radius: 3px; flex: none; }
-.ycs-dot.is-broken { background: var(--red, #d64545); }
-.ycs-role { font-size: 12px; color: var(--text-dim); }
-
-.ycs-status { display: flex; align-items: center; gap: 8px; margin: 6px 0 0; font-size: 13px; line-height: 1.45; color: var(--text-dim); }
-.ycs-status > svg { flex: none; }
-.ycs-status span { flex: 1; min-width: 0; }
-.ycs-status.is-ok > svg { color: var(--green, #2f9e5b); }
-.ycs-status.is-warn { color: color-mix(in srgb, var(--yellow, #b7791f) 70%, var(--text)); }
-.ycs-status.is-bad { color: color-mix(in srgb, var(--red, #d64545) 78%, var(--text)); }
-.ycs-status.is-busy > svg { animation: ycs-spin 0.9s linear infinite; color: var(--accent); }
-@keyframes ycs-spin { to { transform: rotate(360deg); } }
-
-.ycs-link {
-  display: inline-flex; align-items: center; gap: 6px; flex: none;
-  padding: 4px 2px; border: 0; background: none;
-  color: var(--accent); font: inherit; font-weight: 600; font-size: 13px;
-  cursor: pointer; border-radius: 6px;
-}
-.ycs-link:hover { text-decoration: underline; text-underline-offset: 3px; }
-.ycs-link:focus-visible, .ycs-changes button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-.ycs-calendar > .ycs-link { margin-top: 12px; }
-
-.ycs-people { list-style: none; margin: 16px 0 0; padding: 0; display: grid; gap: 10px; }
-.ycs-person { display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; align-items: center; gap: 10px; font-size: 14px; }
-.ycs-avatar {
-  width: 28px; height: 28px; border-radius: 50%;
-  display: grid; place-items: center;
-  font-size: 11px; font-weight: 700; letter-spacing: .02em;
-  background: hsl(var(--h) 42% 88%); color: hsl(var(--h) 48% 26%);
-}
-@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .ycs-avatar { background: hsl(var(--h) 28% 26%); color: hsl(var(--h) 60% 86%); } }
-:root[data-theme="dark"] .ycs-avatar { background: hsl(var(--h) 28% 26%); color: hsl(var(--h) 60% 86%); }
-.ycs-person-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ycs-person-meta { font-size: 12px; color: var(--text-dim); white-space: nowrap; }
-
-.ycs-calendar h4 { margin: 20px 0 4px; font-size: 13px; font-weight: 650; color: var(--text); }
-.ycs-changes { list-style: none; margin: 0; padding: 0; }
-.ycs-changes button {
-  width: 100%; display: flex; align-items: baseline; gap: 12px;
-  padding: 6px 0; border: 0; background: none; color: var(--text);
-  text-align: left; font: inherit; font-size: 13px; line-height: 1.4; cursor: pointer; border-radius: 6px;
-}
-.ycs-changes button span { flex: 1; min-width: 0; }
-.ycs-changes time { font-size: 12px; color: var(--text-dim); white-space: nowrap; font-variant-numeric: tabular-nums; }
-.ycs-changes li.is-new span { font-weight: 600; }
-.ycs-changes button:hover span { text-decoration: underline; text-underline-offset: 3px; }
-.ycs-quiet { margin: 0; font-size: 13px; color: var(--text-dim); }
-.ycs-empty { padding: 16px 0 6px; display: grid; gap: 6px; font-size: 14px; }
-.ycs-empty p { margin: 0; max-width: 34ch; }
-@media (prefers-reduced-motion: reduce) { .ycs * { animation: none !important; } }
-`;
-  document.head.append(style);
 }

@@ -1740,8 +1740,8 @@ export default {
     },
 
     colors: {
-      tabDark: '🌙 Dunkelmodus',
-      tabLight: '☀️ Hellmodus',
+      tabDark: 'Dunkelmodus',
+      tabLight: 'Hellmodus',
       presets: 'Voreinstellungen',
       presetsHint: 'Diese Voreinstellungen gelten nur für den {mode}. Dein anderer Modus bleibt unverändert.',
       presetApplied: '„{name}“ auf den {mode} angewendet',

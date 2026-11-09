@@ -1725,8 +1725,8 @@ export default {
     },
 
     colors: {
-      tabDark: '🌙 ダークモード',
-      tabLight: '☀️ ライトモード',
+      tabDark: 'ダークモード',
+      tabLight: 'ライトモード',
       presets: 'プリセット',
       presetsHint: 'これらのプリセットは{mode}にのみ適用されます。もう一方のモードは変更されません。',
       presetApplied: '「{name}」を{mode}に適用しました',

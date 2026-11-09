@@ -114,6 +114,7 @@ export default {
       fertile: 'Fertile days',
       expected: 'Expected',
       ovulationShort: 'Ovulation',
+      fertileMaybe: 'Possibly fertile',
     },
     readOnly: 'You can view this cycle calendar but not add to it.',
     save: 'Save',
@@ -214,6 +215,7 @@ export default {
         other: 'period expected {count} days ago',
       },
       fertile: 'fertile days',
+      fertileMaybe: 'possibly fertile',
     },
     menu: {
       open: 'Cycle overview',

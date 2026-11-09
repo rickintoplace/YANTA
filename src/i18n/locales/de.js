@@ -107,6 +107,7 @@ export default {
       fertile: 'Fruchtbare Tage',
       expected: 'Erwartet',
       ovulationShort: 'Eisprung',
+      fertileMaybe: 'Möglicherweise fruchtbar',
     },
     readOnly: 'Diesen Zykluskalender kannst du ansehen, aber nichts eintragen.',
     save: 'Speichern',
@@ -207,6 +208,7 @@ export default {
         other: 'Periode seit {count} Tagen erwartet',
       },
       fertile: 'fruchtbare Tage',
+      fertileMaybe: 'möglicherweise fruchtbar',
     },
     menu: {
       open: 'Zyklus-Übersicht',

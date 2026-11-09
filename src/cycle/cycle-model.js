@@ -35,12 +35,19 @@ export const CYCLE_PRIOR = Object.freeze({
   cycle: 29, // days, population median
   spread: 4, // days, typical within-person SD (Apple Women's Health Study: 4–6)
   period: 5, // days of bleeding
-  // Days from ovulation to the next period. Measured, not the textbook 14:
-  // 12.4 (Bull et al. 2019, 612,613 BBT/LH-confirmed cycles,
-  // doi:10.1038/s41746-019-0152-7), 12.9 ± 1.7 (Waller et al. 1998,
-  // urine hormones, doi:10.1093/oxfordjournals.aje.a009401).
-  luteal: 12.5,
-  lutealSpread: 2,
+  /*
+    Days from the day of ovulation to the first day of the next period.
+    Studies report the luteal phase as the days *after* ovulation, so
+    this is that plus one: 12.4 + 1 (Bull et al. 2019, 612,613 cycles,
+    doi:10.1038/s41746-019-0152-7), 12.77 ± 1.86 + 1 (Soumpasis et al.
+    2020, 75,981 LH-tested cycles, doi:10.1093/hropen/hoaa011), 12.9 ±
+    1.7 + 1 (Waller et al. 1998, doi:10.1093/oxfordjournals.aje.a009401).
+    The mean of the three, 13.7, puts ovulation in a 28-day cycle on day
+    15, the most common day
+    measured (27 %, then 16 and 14; Soumpasis 2020) — not the textbook 14.
+  */
+  luteal: 13.7,
+  lutealSpread: 1.9,
   weight: 1, // the prior counts like one observed cycle
 });
 
@@ -51,6 +58,13 @@ export const CYCLE_LIMITS = Object.freeze({
   history: 12, // cycles that count
   halfLife: 6, // cycles until a cycle counts half
   maxPeriod: 12,
+  /*
+    A day counts as "possibly fertile" when the chance that it lies in the
+    six-day window is at least this. Wilcox et al. 2000 use the same line
+    for the population: on every day from 6 to 21 at least 10 %
+    (doi:10.1136/bmj.321.7271.1259).
+  */
+  possiblyFertile: 0.1,
 });
 
 // ---------------- days ----------------------------------------------
@@ -152,6 +166,13 @@ export function quantile(dist, q) {
     if (acc >= q - 1e-12) return dist.from + i;
   }
   return dist.from + dist.p.length - 1;
+}
+
+/** The most probable day (the earlier one on a tie). */
+function modeOf(dist) {
+  let best = 0;
+  for (let i = 1; i < dist.p.length; i++) if (dist.p[i] > dist.p[best] + 1e-12) best = i;
+  return dist.from + best;
 }
 
 function probAt(dist, day) {
@@ -456,7 +477,8 @@ export function analyzeCycle(entries, options = {}) {
     const ovDist = k === 1 && confirmedOvulation
       ? { from: confirmedOvulation.day, p: [1] }
       : convolve(startDist, reversedLuteal);
-    const ovLikely = quantile(ovDist, 0.5);
+    // The single most probable day, as the studies report it.
+    const ovLikely = modeOf(ovDist);
     /*
       The fertile window is the six days ending on ovulation day (Wilcox
       et al. 1995), drawn around the most likely ovulation. How unsure
@@ -470,6 +492,28 @@ export function analyzeCycle(entries, options = {}) {
       quantile(ovDist, 0.98),
     );
     if (ovLikely > prevStart + 5) {
+      // The safety margin around it: every day with at least a 10 %
+      // chance of being one of the six fertile days.
+      const P = (x) => windowProb(ovDist, x + 5, 6);
+      const lo = quantile(ovDist, 0.001) - 5;
+      const hi = quantile(ovDist, 0.999);
+      let mFrom = null;
+      let mTo = null;
+      for (let x = lo; x <= hi; x++) {
+        if (P(x) < CYCLE_LIMITS.possiblyFertile) continue;
+        if (mFrom == null) mFrom = x;
+        mTo = x;
+      }
+      if (mFrom != null && !(k === 1 && confirmedOvulation)) {
+        fc.push({
+          kind: 'fertile-possible',
+          cycle: k,
+          start: keyOf(Math.max(mFrom, prevStart + periodLength)),
+          end: keyOf(mTo),
+          likely: keyOf(ovLikely),
+          prob: CYCLE_LIMITS.possiblyFertile,
+        });
+      }
       fc.push({
         kind: 'fertile',
         cycle: k,

@@ -210,6 +210,8 @@ export function cycleForecastEvents(cat, analysis, view, rangeStart, rangeEnd, {
   const out = [];
 
   for (const f of analysis.forecasts) {
+    // The safety margin is for the calendar layer and the panel, not an entry.
+    if (f.kind === 'fertile-possible') continue;
     if (f.kind === 'fertile' && !view.showFertile) continue;
     if (f.kind === 'ovulation' && !view.showOvulation) continue;
     if (f.end < from || f.start > to) continue;
@@ -375,10 +377,15 @@ export function cycleDayMarks(analysis, view, { today = todayKey() } = {}) {
       }
     } else if (f.kind === 'fertile' && view?.showFertile) {
       for (let x = from; x <= to; x++) get(x).fertile = true;
+    } else if (f.kind === 'fertile-possible' && view?.showFertile) {
+      // Days around the window with a ≥ 10 % chance of being fertile.
+      for (let x = from; x <= to; x++) get(x).fertileMaybe = true;
     } else if (f.kind === 'ovulation' && view?.showOvulation) {
       get(dayOf(f.likely)).ovulation = true;
     }
   }
+
+  for (const m of marks.values()) if (m.fertile || m.period) delete m.fertileMaybe;
 
   // Where a run of period days begins and ends, for rounded ends.
   for (const m of marks.values()) {
@@ -410,8 +417,9 @@ export function cycleStatusLine(analysis, view, { today = todayKey() } = {}) {
     : until <= 0 ? t('cycle.line.today') : t('cycle.line.nextIn', { count: until });
 
   const T = dayOf(today);
-  const fertileNow = view?.showFertile && (analysis.forecasts || []).some((f) =>
-    f.kind === 'fertile' && dayOf(f.start) <= T && dayOf(f.end) >= T);
-  if (fertileNow) rest = `${t('cycle.line.fertile')} · ${rest}`;
+  const covers = (kind) => (analysis.forecasts || []).some((f) =>
+    f.kind === kind && dayOf(f.start) <= T && dayOf(f.end) >= T);
+  if (view?.showFertile && covers('fertile')) rest = `${t('cycle.line.fertile')} · ${rest}`;
+  else if (view?.showFertile && covers('fertile-possible')) rest = `${t('cycle.line.fertileMaybe')} · ${rest}`;
   return { lead, rest };
 }

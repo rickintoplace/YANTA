@@ -108,6 +108,7 @@ export default {
       fertile: '妊娠しやすい日',
       expected: '予測',
       ovulationShort: '排卵',
+      fertileMaybe: '妊娠の可能性あり',
     },
     readOnly: 'この生理周期カレンダーは閲覧のみで、記録はできません。',
     save: '保存',
@@ -206,6 +207,7 @@ export default {
         other: '予定日から{count}日経過',
       },
       fertile: '妊娠しやすい時期',
+      fertileMaybe: '妊娠の可能性あり',
     },
     menu: {
       open: '周期の概要',

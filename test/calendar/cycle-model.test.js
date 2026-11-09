@@ -35,8 +35,9 @@ describe('cycle arithmetic', () => {
     expect(span(next)).toBeLessThanOrEqual(9);
 
     const ov = a.forecasts.find((f) => f.kind === 'ovulation' && f.cycle === 1);
-    expect(dayOf(next.likely) - dayOf(ov.likely)).toBeGreaterThanOrEqual(11);
-    expect(dayOf(next.likely) - dayOf(ov.likely)).toBeLessThanOrEqual(13);
+    // Ovulation day to the next first day: the luteal phase plus the day itself (≈ 13.7).
+    expect(dayOf(next.likely) - dayOf(ov.likely)).toBeGreaterThanOrEqual(13);
+    expect(dayOf(next.likely) - dayOf(ov.likely)).toBeLessThanOrEqual(15);
 
     const fertile = a.forecasts.find((f) => f.kind === 'fertile' && f.cycle === 1);
     expect(dayOf(fertile.start)).toBeLessThan(dayOf(ov.likely));
@@ -176,12 +177,12 @@ describe('cycle arithmetic', () => {
   it('counts back from a confirmed ovulation', () => {
     const entries = history('2026-01-01', [30, 30, 30]);
     const last = entries.at(-1).start;
-    // LH peak late this cycle: the next period follows ~12 days later.
+    // LH peak late this cycle: the next period follows ~14 days later.
     entries.push({ id: 'lh', kind: 'ovulation', start: add(last, 22) });
     const a = analyzeCycle(entries, { today: add(last, 23) });
     expect(a.current.confirmedOvulation).toBe(add(last, 22));
     const next = a.forecasts.find((f) => f.kind === 'period' && f.cycle === 1);
-    expect(Math.abs(dayOf(next.likely) - dayOf(add(last, 34)))).toBeLessThanOrEqual(1);
+    expect(Math.abs(dayOf(next.likely) - dayOf(add(last, 36)))).toBeLessThanOrEqual(1);
     expect(a.forecasts.some((f) => f.kind === 'ovulation' && f.cycle === 1)).toBe(false);
   });
 
@@ -219,13 +220,31 @@ describe('what the forecasts look like', () => {
     }
   });
 
-  it('puts ovulation about 12–13 days before the next period, not on day 14', () => {
-    const entries = history('2026-03-01', [29, 30, 29, 30, 29, 30]);
-    const a = analyzeCycle(entries, { today: add(entries.at(-1).start, 5) });
+  it('puts ovulation in a 28-day cycle on day 15, the most common day measured', () => {
+    const entries = history('2026-03-01', [28, 28, 28, 28, 28, 28]);
+    const a = analyzeCycle(entries, { today: add(entries.at(-1).start, 3) });
     const ov = a.forecasts.find((f) => f.kind === 'ovulation' && f.cycle === 1);
-    const next = a.forecasts.find((f) => f.kind === 'period' && f.cycle === 1);
-    const gap = dayOf(next.likely) - dayOf(ov.likely);
-    expect(gap).toBeGreaterThanOrEqual(12);
-    expect(gap).toBeLessThanOrEqual(14);
+    expect(dayOf(ov.likely) - dayOf(a.current.start) + 1).toBe(15);
+  });
+
+  it('adds a safety margin of possibly fertile days, wider when less is known', () => {
+    const regular = analyzeCycle(history('2026-03-01', [28, 28, 28, 28, 28, 28]), { today: '2026-08-20' });
+    const one = analyzeCycle([{ id: 'a', kind: 'period', start: '2026-10-29', end: '2026-11-02' }], { today: '2026-11-02' });
+    const margin = (a) => {
+      const f = a.forecasts.find((x) => x.kind === 'fertile-possible' && x.cycle === 1);
+      const s = dayOf(a.current.start);
+      return [dayOf(f.start) - s + 1, dayOf(f.end) - s + 1];
+    };
+    // Regular 28-day cycles: about days 7–19 (the Standard Days Method uses 8–19).
+    const [rFrom, rTo] = margin(regular);
+    expect(rFrom).toBeGreaterThanOrEqual(6);
+    expect(rFrom).toBeLessThanOrEqual(8);
+    expect(rTo).toBeGreaterThanOrEqual(18);
+    expect(rTo).toBeLessThanOrEqual(20);
+    // One logged period: about days 6–21, as Wilcox 2000 found for women in general.
+    const [oFrom, oTo] = margin(one);
+    expect(oTo - oFrom).toBeGreaterThan(rTo - rFrom);
+    expect(oFrom).toBeLessThanOrEqual(7);
+    expect(oTo).toBeGreaterThanOrEqual(21);
   });
 });

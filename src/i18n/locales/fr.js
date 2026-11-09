@@ -107,6 +107,7 @@ export default {
       fertile: 'Jours fertiles',
       expected: 'Prévues',
       ovulationShort: 'Ovulation',
+      fertileMaybe: 'Peut-être fertile',
     },
     readOnly: 'Vous pouvez voir ce calendrier de cycle, mais pas y ajouter.',
     save: 'Enregistrer',
@@ -207,6 +208,7 @@ export default {
         other: 'règles attendues depuis {count} jours',
       },
       fertile: 'jours fertiles',
+      fertileMaybe: 'peut-être fertile',
     },
     menu: {
       open: 'Aperçu du cycle',

@@ -216,11 +216,13 @@ function monthHtml(a, cat) {
     if (mk.period && mk.runStart) cls.push('run-start');
     if (mk.period && mk.runEnd) cls.push('run-end');
     if (mk.fertile && !mk.period) cls.push('is-fertile');
+    if (mk.fertileMaybe) cls.push('is-fertile-maybe');
     if (mk.ovulation) cls.push(mk.ovulationConfirmed ? 'is-ovulation-confirmed' : 'is-ovulation');
     if (key === today) cls.push('is-today');
     const what = mk.period === 'logged' ? t('cycle.legend.period')
       : mk.period === 'expected' ? t('cycle.legend.expected')
-        : mk.fertile ? t('cycle.legend.fertile') : '';
+        : mk.fertile ? t('cycle.legend.fertile')
+          : mk.fertileMaybe ? t('cycle.legend.fertileMaybe') : '';
     const label = `${fmt(key, { weekday: 'long', day: 'numeric', month: 'long' })}${what ? `: ${what}` : ''}`;
     const tappable = canLog && !future;
     cells.push(`<button type="button" class="${cls.join(' ')}" ${tappable ? `data-day="${key}" aria-pressed="${mk.period === 'logged'}"` : 'disabled'} aria-label="${escapeAttr(label)}"><span>${d}</span></button>`);
@@ -232,6 +234,7 @@ function monthHtml(a, cat) {
     `<span><i class="is-period"></i>${escapeHtml(t('cycle.legend.period'))}</span>`,
     `<span><i class="is-expected"></i>${escapeHtml(t('cycle.legend.expected'))}</span>`,
     view.showFertile ? `<span><i class="is-fertile"></i>${escapeHtml(t('cycle.legend.fertile'))}</span>` : '',
+    view.showFertile ? `<span><i class="is-fertile-maybe"></i>${escapeHtml(t('cycle.legend.fertileMaybe'))}</span>` : '',
     view.showOvulation ? `<span><i class="is-ovulation"></i>${escapeHtml(t('cycle.legend.ovulationShort'))}</span>` : '',
   ].join('');
 

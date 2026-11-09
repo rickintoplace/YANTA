@@ -9478,7 +9478,7 @@ function computeCycleLayer() {
         for (const [key, m] of marks) {
           delete m.period;
           delete m.strength;
-          if (!m.fertile && !m.ovulation) marks.delete(key);
+          if (!m.fertile && !m.fertileMaybe && !m.ovulation) marks.delete(key);
         }
       }
       if (!layer) {
@@ -9510,6 +9510,7 @@ function cycleMarkTokens(m) {
   if (m.period && m.runStart) out.push('run-start');
   if (m.period && m.runEnd) out.push('run-end');
   if (m.fertile && !m.period) out.push('fertile');
+  if (m.fertileMaybe) out.push('fertile-maybe');
   if (m.ovulation) out.push(m.ovulationConfirmed ? 'ovulation-confirmed' : 'ovulation');
   return out.join(' ');
 }

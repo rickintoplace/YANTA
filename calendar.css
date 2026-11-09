@@ -4005,6 +4005,10 @@
 .fc [data-cyc~="maybe"] .fc-daygrid-day-frame::before { opacity: .4; }
 
 .fc [data-cyc~="fertile"] .fc-daygrid-day-frame::before { height: 2px; background: color-mix(in srgb, #3b9b8f 60%, transparent); }
+/* Possibly fertile (the safety margin): the same teal, dotted and faint. */
+.fc [data-cyc~="fertile-maybe"] .fc-daygrid-day-frame::before {
+  height: 2px; background: repeating-linear-gradient(90deg, color-mix(in srgb, #3b9b8f 55%, transparent) 0 3px, transparent 3px 6px);
+}
 
 .fc [data-cyc~="ovulation"] .fc-daygrid-day-top::after,
 .fc [data-cyc~="ovulation-confirmed"] .fc-daygrid-day-top::after {
@@ -4068,6 +4072,7 @@
 .ycy-legend i.is-period { background: var(--cyc-color, #d6336c); }
 .ycy-legend i.is-expected { border: 1.5px dashed var(--cyc-color, #d6336c); }
 .ycy-legend i.is-fertile { background: color-mix(in srgb, #3b9b8f 22%, var(--bg-elev)); }
+.ycy-legend i.is-fertile-maybe { background: color-mix(in srgb, #3b9b8f 9%, var(--bg-elev)); border: 1px dashed color-mix(in srgb, #3b9b8f 45%, transparent); }
 .ycy-legend i.is-ovulation { border: 1.5px solid #3b9b8f; }
 
 .ycy-month { margin: 22px 0 0; }
@@ -4101,6 +4106,7 @@
 .ycy-day.is-expected > span { border: 1.5px dashed var(--c); }
 .ycy-day.is-expected.is-maybe > span { border-color: color-mix(in srgb, var(--c) 45%, transparent); }
 .ycy-day.is-fertile > span { background: color-mix(in srgb, #3b9b8f 18%, transparent); }
+.ycy-day.is-fertile-maybe > span { background: color-mix(in srgb, #3b9b8f 7%, transparent); }
 .ycy-day.is-ovulation > span { box-shadow: inset 0 0 0 1.5px #3b9b8f; }
 .ycy-day.is-ovulation-confirmed > span { box-shadow: inset 0 0 0 1.5px #3b9b8f; background: color-mix(in srgb, #3b9b8f 30%, transparent); }
 .ycy-day.is-today > span { font-weight: 750; }

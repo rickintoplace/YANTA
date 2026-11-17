@@ -5985,7 +5985,10 @@ var DECISION_MODELS = {
   "perplexity/pplx-decider-flash-v1.2": { prompt: 0.01 },
   // Another vendor, so one retirement cannot take every decision down.
   // ZDR, same price, as exact as v1.2 on text → event (2026-11-07).
-  "liquid/d1.1": { prompt: 0.02 }
+  "liquid/d1.1": { prompt: 0.02 },
+  // Its successor (2026-11-16, ZDR): d1.1 will be retired like v1.1 was.
+  // On the VeriQuote citation pairs as good as the others (2026-11-17).
+  "liquid/d1.2": { prompt: 0.02 }
 };
 var DECISION_DEFAULT_MODEL = "perplexity/pplx-decider-v1.2";
 // Older clients ask for a retired checkpoint by name; they get the default.

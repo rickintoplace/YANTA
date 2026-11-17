@@ -9,12 +9,13 @@
 //   2. Judge: does the quote support the sentence that cites it? Catches
 //      a real quote under a wrong claim, which the matcher cannot see.
 //
-// The judge is a decision model (Perplexity Decider V1.1: open weights,
-// zero retention) — one typed question per citation, a fraction of a
-// cent each. On VeriQuote's ALCE benchmark (600 labelled pairs, run
-// 2026-10-08) it agreed with the human labels 81.3 % of the time,
-// κ 0.56, calling 15.6 % of unsupported citations supported — on par
-// with the best chat judges at about 1/100 of their cost.
+// The judge is a decision model (Perplexity Decider V1.2: open weights,
+// zero retention; the worker picks the next one if it loses its host) —
+// one typed question per citation, a fraction of a cent each. On
+// VeriQuote's ALCE benchmark (240 labelled pairs, 2026-11-17) it agreed
+// with the human labels 83.3 % of the time, κ 0.55, calling 12.5 % of
+// unsupported citations supported — on par with the best chat judges at
+// about 1/100 of their cost.
 //
 // "Passed" means supported by the cited source, not that it is true.
 // ============================================================

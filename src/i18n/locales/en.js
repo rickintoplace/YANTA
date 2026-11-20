@@ -888,8 +888,17 @@ export default {
     durability: {
       title: 'This all lives on this device only',
       body: 'Nothing here is uploaded, which is the point — but it also means that clearing your browser data, or losing this device, takes it with it. Sync keeps an encrypted copy that only you can read, and puts your notes on your other devices.',
+      bodyUnprotected: 'Nothing here is uploaded, which is the point — but it also means it lives in this device\'s storage only, and this device does not promise to keep it: the system may clear it to free space, and clearing data or losing the device takes it too. Sync keeps an encrypted copy that only you can read, and puts your notes on your other devices.',
       cta: 'Set up sync',
       dismiss: 'Not now',
+    },
+    restore: {
+      title: 'Your vault “{name}” is in YANTA Cloud',
+      bodyEmpty: 'Nothing of it is stored on this device — the system probably cleared its storage.',
+      bodyLocal: 'This device does not sync with it.',
+      lastSync: 'Last synced on {date}.',
+      key: 'To restore it here, you need your recovery key or the QR code from another device.',
+      cta: 'Restore here',
     },
   },
 

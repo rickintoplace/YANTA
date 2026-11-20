@@ -881,8 +881,17 @@ export default {
     durability: {
       title: 'Todo esto vive solo en este dispositivo',
       body: 'Nada de esto se sube a ningún sitio, y esa es la idea — pero también significa que borrar los datos del navegador, o perder este dispositivo, se lo lleva todo. La sincronización guarda una copia cifrada que solo tú puedes leer y lleva tus notas a tus demás dispositivos.',
+      bodyUnprotected: 'Nada de esto se sube, y esa es la idea; pero significa que solo está en el almacenamiento de este dispositivo, y ese almacenamiento no está protegido: el sistema puede vaciarlo para liberar espacio, y borrar los datos o perder el dispositivo también se lo lleva. La sincronización guarda una copia cifrada que solo tú puedes leer y lleva tus notas a tus otros dispositivos.',
       cta: 'Configurar sincronización',
       dismiss: 'Ahora no',
+    },
+    restore: {
+      title: 'Tu bóveda «{name}» está en YANTA Cloud',
+      bodyEmpty: 'En este dispositivo no hay nada guardado; probablemente el sistema vació su almacenamiento.',
+      bodyLocal: 'Este dispositivo no se sincroniza con ella.',
+      lastSync: 'Última sincronización: {date}.',
+      key: 'Para restaurarla aquí necesitas tu clave de recuperación o el código QR de otro dispositivo.',
+      cta: 'Restaurar aquí',
     },
   },
 

@@ -362,6 +362,11 @@ function ensureCss() {
   background: var(--bg-elev);
 }
 
+.yanta-cloud-section textarea.text-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
 .yanta-cloud-section h4 {
   margin: 0 0 8px;
   font-size: 14px;
@@ -889,6 +894,9 @@ function renderTurnstile(container) {
 export async function openYantaCloudSetup({
   fromHistory = false,
   focus = '',
+  // A vault id: go straight to connecting this device to it (the
+  // dashboard's restore offer after the system cleared this device).
+  restoreVault = '',
 } = {}) {
   lastPairingTextForHistory = '';
 
@@ -899,7 +907,9 @@ export async function openYantaCloudSetup({
   try {
     const me = await cloudMe();
 
-    if (me.authenticated) {
+    if (me.authenticated && restoreVault) {
+      connectThisDeviceToVault(restoreVault);
+    } else if (me.authenticated) {
       await renderCloudHome(me);
 
       // Deep link, e.g. Settings › Security › "Manage devices".

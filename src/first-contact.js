@@ -370,6 +370,109 @@ async function buildFirstSteps({ onSetUpSync, onCapture } = {}) {
   return card;
 }
 
+/*
+  Is this device's storage protected from the system clearing it?
+  A browser grants `persist()` only to sites it trusts (installed, used a
+  lot); the Android app's WebView never does, and Android empties it when
+  it wants the space — taking notes, settings and the sync connection
+  along, while the sign-in cookie survives (2026-11-20, a phone that had
+  been signed in for weeks).
+*/
+async function storageProtected() {
+  if (window.YantaAndroid) return false;
+  try {
+    return !!(await navigator.storage?.persisted?.());
+  } catch {
+    return false;
+  }
+}
+
+/*
+  Signed in to YANTA Cloud, a vault there, but this device does not sync
+  with it. After the system cleared the storage this is what is left:
+  the cookie. Without this card the app looked brand new — "nothing
+  here" — and the way back was three screens deep in Settings.
+
+  Asked once per page load (one /api/me and one /api/vaults); a device
+  that never signed in costs one cheap 401.
+*/
+let restoreCheck = null;
+
+function cloudVaultToRestore() {
+  restoreCheck ||= (async () => {
+    if (await store.settings.get('sync2.provider', null).catch(() => 'unknown')) return null;
+    const { cloudMe, cloudListVaults } = await import('./cloud/cloud-api.js');
+    const me = await cloudMe().catch(() => null);
+    if (!me?.authenticated) return null;
+    const { vaults = [] } = await cloudListVaults().catch(() => ({}));
+    if (!vaults.length) return null;
+    // The one written to last is the one with the user's latest state.
+    return [...vaults].sort((a, b) => Number(b.last_sync_at || 0) - Number(a.last_sync_at || 0))[0];
+  })().catch(() => null);
+  return restoreCheck;
+}
+
+function fmtDay(ts) {
+  try {
+    return new Intl.DateTimeFormat(document.documentElement.lang || undefined, { dateStyle: 'medium' }).format(new Date(Number(ts)));
+  } catch {
+    return '';
+  }
+}
+
+async function buildRestoreOffer() {
+  // Read every render: once this device connects, the card is done.
+  if (await store.settings.get('sync2.provider', null).catch(() => null)) return null;
+  const vault = await cloudVaultToRestore();
+  if (!vault) return null;
+
+  injectCss();
+
+  const card = el('div', { class: 'yanta-fc', dataset: { nudge: 'restore' } });
+  const icon = el('div', { class: 'yanta-fc-icon' });
+  icon.innerHTML = lucide('cloud-download', 19);
+
+  const name = vault.name || 'YANTA';
+  const when = vault.last_sync_at ? fmtDay(vault.last_sync_at) : '';
+  const empty = !workspaceHasContent();
+
+  const main = el('div', { class: 'yanta-fc-main' });
+  main.append(
+    el('div', { class: 'yanta-fc-title' }, t('firstContact.restore.title', { name })),
+    el('div', { class: 'yanta-fc-sub' }, [
+      empty ? t('firstContact.restore.bodyEmpty') : t('firstContact.restore.bodyLocal'),
+      when ? t('firstContact.restore.lastSync', { date: when }) : '',
+      t('firstContact.restore.key'),
+    ].filter(Boolean).join(' ')),
+  );
+
+  const cta = el('button', {
+    class: 'btn primary',
+    type: 'button',
+    onclick: async () => {
+      const { openYantaCloudSetup } = await import('./sync2/yanta-cloud-setup-ui.js');
+      openYantaCloudSetup({ restoreVault: vault.id });
+    },
+  }, t('firstContact.restore.cta'));
+
+  // "Not now" for this visit only: the offer is the way back to the user's
+  // data and must come back the next time the app opens.
+  const dismiss = el('button', {
+    class: 'yanta-fc-dismiss',
+    type: 'button',
+    title: t('firstContact.durability.dismiss'),
+    'aria-label': t('firstContact.durability.dismiss'),
+    onclick: () => {
+      restoreCheck = Promise.resolve(null);
+      dismissDashboardNudge(card, { snoozeMs: 0 });
+    },
+  });
+  dismiss.innerHTML = lucide('x', 16);
+
+  card.append(icon, main, el('div', { class: 'yanta-fc-actions' }, cta, dismiss));
+  return card;
+}
+
 /**
  * The honest durability notice: local-only data survives everything except
  * the user clearing it or losing the device.
@@ -387,15 +490,18 @@ async function buildDurabilityNotice({ onSetUpSync } = {}) {
 
   if (await syncSettled()) return null;
 
+  const isProtected = await storageProtected();
+
   injectCss();
 
   const card = el('div', { class: 'yanta-fc' });
 
   /*
-    Deliberately not "your data can vanish at any time". main.js already calls
-    navigator.storage.persist(), so the browser does not evict this on its own.
-    The real exposure is narrower — and overstating it would cost more trust
-    than the extra urgency is worth.
+    Worded by what is true here. With persistent storage granted only
+    clearing data or losing the device takes it; without it (the Android
+    app always, a browser that refused persist()) the system may also
+    clear it on its own — and then the notice must not go away for good
+    while there is no copy anywhere.
   */
   const icon = el('div', { class: 'yanta-fc-icon' });
   icon.innerHTML = lucide('hard-drive', 19);
@@ -404,7 +510,7 @@ async function buildDurabilityNotice({ onSetUpSync } = {}) {
 
   main.append(
     el('div', { class: 'yanta-fc-title' }, t('firstContact.durability.title')),
-    el('div', { class: 'yanta-fc-sub' }, t('firstContact.durability.body')),
+    el('div', { class: 'yanta-fc-sub' }, t(isProtected ? 'firstContact.durability.body' : 'firstContact.durability.bodyUnprotected')),
   );
 
   const cta = el('button', {
@@ -419,7 +525,7 @@ async function buildDurabilityNotice({ onSetUpSync } = {}) {
     title: t('firstContact.durability.dismiss'),
     'aria-label': t('firstContact.durability.dismiss'),
     onclick: () => {
-      writeFlag(DURABILITY_DISMISSED_KEY);
+      if (isProtected) writeFlag(DURABILITY_DISMISSED_KEY);
       dismissDashboardNudge(card);
     },
   });
@@ -437,6 +543,14 @@ async function buildDurabilityNotice({ onSetUpSync } = {}) {
   longer durability copy outranks the short nudge because it only becomes
   eligible once there is genuinely enough to lose.
 */
+// Above everything: it is the way back to the user's data.
+registerDashboardNudge({
+  id: 'restore',
+  order: 0,
+  urgent: true,
+  build: buildRestoreOffer,
+});
+
 registerDashboardNudge({
   id: 'first-steps',
   order: 10,

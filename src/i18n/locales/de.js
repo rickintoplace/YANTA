@@ -881,8 +881,17 @@ export default {
     durability: {
       title: 'Das alles liegt nur auf diesem Gerät',
       body: 'Nichts davon wird hochgeladen — genau das ist der Sinn. Es heißt aber auch: Wenn du deine Browserdaten löschst oder dieses Gerät verlierst, ist alles weg. Sync legt eine verschlüsselte Kopie ab, die nur du lesen kannst, und bringt deine Notizen auf deine anderen Geräte.',
+      bodyUnprotected: 'Nichts davon wird hochgeladen — genau das ist der Sinn. Es liegt aber nur im Speicher dieses Geräts, und der ist nicht geschützt: Das System kann ihn leeren, um Platz zu schaffen, und auch Daten löschen oder das Gerät verlieren nimmt alles mit. Sync legt eine verschlüsselte Kopie ab, die nur du lesen kannst, und bringt deine Notizen auf deine anderen Geräte.',
       cta: 'Sync einrichten',
       dismiss: 'Später',
+    },
+    restore: {
+      title: 'Dein Tresor „{name}“ liegt in YANTA Cloud',
+      bodyEmpty: 'Auf diesem Gerät ist nichts davon gespeichert — vermutlich hat das System den Speicher geleert.',
+      bodyLocal: 'Dieses Gerät synchronisiert nicht mit ihm.',
+      lastSync: 'Zuletzt synchronisiert am {date}.',
+      key: 'Zum Wiederherstellen brauchst du deinen Wiederherstellungsschlüssel oder den QR-Code eines anderen Geräts.',
+      cta: 'Hier wiederherstellen',
     },
   },
 

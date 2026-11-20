@@ -881,8 +881,17 @@ export default {
     durability: {
       title: 'Tout ceci ne vit que sur cet appareil',
       body: 'Rien n’est envoyé ailleurs, et c’est bien le but — mais cela veut aussi dire qu’effacer les données de votre navigateur, ou perdre cet appareil, emporte tout. La synchronisation conserve une copie chiffrée que vous seul pouvez lire et place vos notes sur vos autres appareils.',
+      bodyUnprotected: 'Rien n\'est envoyé, c\'est le principe ; mais cela veut dire que tout est seulement dans le stockage de cet appareil, et ce stockage n\'est pas protégé : le système peut le vider pour libérer de la place, et effacer les données ou perdre l\'appareil emporte tout aussi. La synchronisation garde une copie chiffrée que vous seul pouvez lire et met vos notes sur vos autres appareils.',
       cta: 'Configurer la synchronisation',
       dismiss: 'Plus tard',
+    },
+    restore: {
+      title: 'Votre coffre « {name} » est dans YANTA Cloud',
+      bodyEmpty: 'Rien n\'en est stocké sur cet appareil ; le système a probablement vidé son stockage.',
+      bodyLocal: 'Cet appareil ne se synchronise pas avec lui.',
+      lastSync: 'Dernière synchronisation le {date}.',
+      key: 'Pour le restaurer ici, il vous faut votre clé de récupération ou le code QR d\'un autre appareil.',
+      cta: 'Restaurer ici',
     },
   },
 

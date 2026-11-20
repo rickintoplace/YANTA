@@ -47,10 +47,10 @@ let activeId = null;
  * the whole eligibility contract, so a nudge cannot report "I apply"
  * and then render nothing.
  */
-export function registerDashboardNudge({ id, order = 100, build } = {}) {
+export function registerDashboardNudge({ id, order = 100, urgent = false, build } = {}) {
   if (!id || typeof build !== 'function') return;
-
-  nudges.set(id, { id, order, build });
+  // `urgent` ignores "not now" on the other cards (restoring lost data).
+  nudges.set(id, { id, order, urgent, build });
 }
 
 /** The nudge occupying the slot, or null. Synchronous, cached. */
@@ -90,7 +90,7 @@ export function snoozeDashboardNudges(ms = DEFAULT_SNOOZE_MS) {
  */
 export function dismissDashboardNudge(node, { snoozeMs = DEFAULT_SNOOZE_MS } = {}) {
   node?.remove();
-  snoozeDashboardNudges(snoozeMs);
+  if (snoozeMs > 0) snoozeDashboardNudges(snoozeMs);
   setActive(null);
 }
 
@@ -105,14 +105,12 @@ export function dismissDashboardNudge(node, { snoozeMs = DEFAULT_SNOOZE_MS } = {
 export async function renderTopNudgeInto(host, actions = {}) {
   if (!host) return;
 
-  if (snoozedUntil() > Date.now()) {
-    setActive(null);
-    return;
-  }
+  const snoozed = snoozedUntil() > Date.now();
 
   const ordered = [...nudges.values()].sort((a, b) => a.order - b.order);
 
   for (const def of ordered) {
+    if (snoozed && !def.urgent) continue;
     let node = null;
 
     try {

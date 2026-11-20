@@ -1310,6 +1310,12 @@
 
 
 /* Empty states */
+/* The restore offer says where the data is; "start something new" below it
+   would point the wrong way. */
+.yanta-dashboard-page:has([data-nudge="restore"]) .yanta-dashboard-empty {
+  display: none;
+}
+
 .yanta-dashboard-empty {
   min-height: 300px;
 
